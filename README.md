@@ -30,9 +30,16 @@ npm install github:jjforge/sandcastle-tdd
 ```
 
 Needs Docker, Node 22+, and `.sandcastle/.env` holding `CLAUDE_CODE_OAUTH_TOKEN`
-(from `claude setup-token`) or `ANTHROPIC_API_KEY`. Prefer the API key for
-automation: subscription OAuth tokens are meant for first-party surfaces, and
-the key also gives you per-run cost tracking.
+from `claude setup-token` — your Claude Code subscription, which is what these
+agents run on. The container runs the official `claude` CLI and reads that
+token exactly as Claude Code GitHub Actions does; nothing here handles your
+credential itself.
+
+`ANTHROPIC_API_KEY` works as a drop-in alternative, and is worth switching to
+when billing is the constraint rather than convenience: it gives per-run cost
+attribution and spend limits in the Console, and it doesn't consume the
+subscription rate windows that a parallel queue can exhaust. Neither choice
+changes how the loop behaves.
 
 Put everything project-specific in `sandcastle-tdd.config.mts` (or
 `.sandcastle/config.mts`) at your project root — nothing else needs editing:

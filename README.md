@@ -141,6 +141,44 @@ These were paid for in failed runs; they are not style preferences.
 | `parked` | list what is waiting and why |
 | `tg-test` | prove the Telegram round-trip |
 
+## Upgrading `@ai-hero/sandcastle`
+
+The dependency is pinned `^0.12.0` in this package's `package.json`. On a 0.x
+version npm's caret allows **patches only**, so a new upstream minor is never
+picked up silently — and upstream is pre-1.0, releasing minors where the
+behavioural contract can change. Upgrading is a deliberate act:
+
+```bash
+npm install @ai-hero/sandcastle@latest   # here; then in each consuming project
+npm run check-contract                   # ~1s, no Docker: is the surface intact?
+npx sandcastle-tdd baseline              # container + gate + exec still work
+npx sandcastle-tdd run <small task>      # agent + session + resume still work
+```
+
+The ladder matters because each rung sees what the one below cannot.
+`check-contract` catches a renamed export or a dropped option immediately —
+`tsc` alone will **not**, since the library's result objects carry optional
+members this orchestrator probes at runtime. `baseline` proves the container
+path. Only a real `run` exercises the agent, the gate→resume cycle, and
+session capture.
+
+Four behaviours no static check can see, worth re-reading against the upstream
+changelog on any minor bump — they are printed by `check-contract` too:
+
+1. **A sandbox command returns a non-zero exit code rather than throwing.** If
+   that ever inverts, every red gate would read as a pass — the one change that
+   would silently destroy the guarantee this tool exists to provide.
+2. **`resumeSession` stays incompatible with `maxIterations > 1`.**
+3. **An idle agent throws** a timeout error catchable into a park; were it to
+   become a returned result, blocked work would strand.
+4. **Session capture writes host-side JSONL, and re-creating a sandbox on an
+   existing branch reuses that worktree** — together, what make park→answer
+   survive a fresh process.
+
+Consuming projects pin the library too (it is a peer in practice, not just a
+transitive dep), so bump it there as well and re-run `baseline` in that project
+— its image and gates are what the upgrade has to keep working.
+
 ## Known limits
 
 - **Token accounting under-reports.** `IterationResult.usage` reflects the final

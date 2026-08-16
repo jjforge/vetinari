@@ -1,0 +1,11 @@
+export { defineConfig, loadConfig } from "./config.ts";
+export type { SandcastleTddConfig, ResolvedConfig, GateSpec, MountSpec } from "./config.ts";
+export { runLoop, answerPromptFor, DONE, BLOCKED } from "./loop.ts";
+export type { Outcome, ResumeEntry } from "./loop.ts";
+export { runGates } from "./gate.ts";
+export { makeSandbox, agentFor } from "./sandbox.ts";
+export { attend, baseline, dispatch, queue, tgTest } from "./modes.ts";
+export { listParked, readParked, hasParked, clearParked, park } from "./state.ts";
+export type { ParkedRecord, ParkReason } from "./state.ts";
+export { tgSend, tgWaitReply, tgConfigured } from "./telegram.ts";
+export { log, setLogFile } from "./log.ts";

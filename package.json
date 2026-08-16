@@ -1,0 +1,28 @@
+{
+  "name": "sandcastle-tdd",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Parallel TDD agent orchestrator on @ai-hero/sandcastle: the orchestrator owns the test gate, blocked agents park instead of guessing, and questions round-trip through Telegram.",
+  "license": "MIT",
+  "bin": {
+    "sandcastle-tdd": "./src/cli.mts"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./cli": "./src/cli.mts",
+    "./prompts/tdd.md": "./prompts/tdd.md"
+  },
+  "scripts": {
+    "sandcastle-tdd": "tsx ./src/cli.mts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-hero/sandcastle": "^0.12.0",
+    "tsx": "^4.23.10"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "@types/node": "^24.0.0"
+  }
+}

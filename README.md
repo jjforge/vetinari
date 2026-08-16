@@ -1,38 +1,41 @@
 # sandcastle-tdd
 
-Parallel TDD agents on [`@ai-hero/sandcastle`](https://github.com/mattpocock/sandcastle),
-with two properties the raw library leaves to you:
+Run your backlog as parallel coding agents that **cannot mark their own work
+done** and **ask you instead of guessing**. Each task gets a container, a
+branch, and a TDD loop the orchestrator drives; you get a Telegram message when
+one needs a decision, and commits on a branch when one succeeds.
 
-**The orchestrator owns the test gate.** An agent's "I'm done" is a claim, not
-evidence — it can be emitted over a red suite. Here every completion signal is
-followed by *your* test command, run on the host's terms inside the sandbox, and
-only a zero exit returns green. A red gate resumes the same agent session with
-the failure output rather than restarting it.
+**Green means your test command passed.** After every "I'm done" signal, the
+orchestrator runs the gates from your config inside the sandbox and reads the
+exit code; only zero returns green. A red gate resumes that same agent session
+with the failure output attached, so the agent keeps its context and fixes the
+actual failure instead of restarting. An agent's own claim of completion never
+decides anything — which matters because agents do emit it over red suites.
 
-**A blocked agent parks instead of guessing.** Sandcastle has no ask-a-human
-channel, so an agent that stops to think produces no output and dies on the idle
-timeout with its work stranded. Here a `BLOCKED` signal (or a budget exhaustion,
-or an idle timeout) writes the question and the session id to disk, tears the
-container down, frees the slot, and messages you on Telegram. Reply and the
-agent resumes with full context — in a new container, possibly days later, from
-a completely fresh process.
+**A blocked agent parks: question to you, slot back to the pool.** On a
+`BLOCKED` signal, an exhausted turn budget, or an idle stall, the question and
+the session id are written to disk, the container is torn down, and you get a
+Telegram message. Reply to it and that agent resumes with full context — new
+container, fresh process, days later if you like. Parking is terminal for the
+slot, never a held container, so one stuck task cannot starve the other nine.
 
-## Install
+**Parallelism is the default, not a mode.** One branch, worktree, and container
+per task means concurrent tasks cannot corrupt each other's state; a bounded
+pool keeps N slots full and a park frees its slot immediately.
+
+## Quickstart
 
 ```bash
-npm install file:../sandcastle-tdd    # or a git URL
+npm install github:jjforge/sandcastle-tdd
 ```
 
-Needs Docker, Node 22+, and a `.sandcastle/.env` holding
-`CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) or `ANTHROPIC_API_KEY`.
-An API key is the cleaner choice for automation: subscription OAuth tokens are
-intended for first-party surfaces, and the API key also gives you per-run cost
-tracking.
+Needs Docker, Node 22+, and `.sandcastle/.env` holding `CLAUDE_CODE_OAUTH_TOKEN`
+(from `claude setup-token`) or `ANTHROPIC_API_KEY`. Prefer the API key for
+automation: subscription OAuth tokens are meant for first-party surfaces, and
+the key also gives you per-run cost tracking.
 
-## Configure
-
-Create `sandcastle-tdd.config.mts` (or `.sandcastle/config.mts`) in your project
-root. Everything project-specific lives here; nothing else needs editing.
+Put everything project-specific in `sandcastle-tdd.config.mts` (or
+`.sandcastle/config.mts`) at your project root — nothing else needs editing:
 
 ```ts
 import { execFileSync } from "node:child_process";
@@ -40,11 +43,11 @@ import { defineConfig } from "sandcastle-tdd";
 
 export default defineConfig({
   project: "myapp",
-  image: "sandcastle-myapp",          // built from templates/Dockerfile + your toolchain
+  image: "sandcastle-myapp",          // templates/Dockerfile + your toolchain
   baseBranch: "main",
 
-  // What the ORCHESTRATOR runs to decide green. `when` scopes a gate to
-  // branches that touched matching files — explicit and logged, never silent.
+  // What decides green. `when` scopes a gate to branches that touched matching
+  // files — explicit and logged, never a silent skip.
   gates: [
     { cmd: "npm test" },
     { cmd: "npm run test:e2e", when: /^(src\/routes|e2e)\// },
@@ -55,78 +58,125 @@ export default defineConfig({
 });
 ```
 
-Then build the image and prove it before spending anything on an agent:
+Build the image, then prove it before spending anything on an agent:
 
 ```bash
 npx sandcastle docker build-image --dockerfile .sandcastle/Dockerfile --image-name sandcastle-myapp
 npx sandcastle-tdd baseline          # toolchain probe + every gate, no agent
 ```
 
-`baseline` failing is the cheapest possible failure. `baseline` passing means a
+A failing `baseline` is the cheapest failure available. A passing one means any
 red gate later is the agent's doing, not the image's.
 
 ## Run
 
 ```bash
-npx sandcastle-tdd run 436                    # one task, loop until green or parked
+npx sandcastle-tdd run 436                    # one task: loop until green or parked
 npx sandcastle-tdd queue 436 611 623 640      # bounded pool, QUEUE_SLOTS (default 3)
-npx sandcastle-tdd parked                     # what is waiting on you, and why
-npx sandcastle-tdd answer 436 "use approach B, and note why in the commit"
+npx sandcastle-tdd parked                     # what's waiting on you, and why
+npx sandcastle-tdd answer 436 "use approach B, and say why in the commit"
 ```
 
-Each task gets its own branch (`agent/<task>`), worktree, and container, so
-parallel tasks cannot corrupt each other. Commits land on the branch; merging
-stays yours.
+Commits land on `agent/<task>`. Merging stays yours.
 
-## Answer questions from your phone
+## Answer from your phone
 
-Set `WAVE_TELEGRAM_BOT_TOKEN` and `WAVE_TELEGRAM_CHAT_ID` **in the
-orchestrator's environment** — never in `.sandcastle/.env`, which is injected
+Set `WAVE_TELEGRAM_BOT_TOKEN` and `WAVE_TELEGRAM_CHAT_ID` in the
+**orchestrator's** environment — never in `.sandcastle/.env`, which is injected
 into agent containers and must not carry a bot credential.
 
 ```bash
 npx sandcastle-tdd tg-test           # prove the round-trip first
-npx sandcastle-tdd dispatch &        # the ONE poller, routes replies to tasks
+npx sandcastle-tdd dispatch &        # the ONE poller; routes replies to tasks
 npx sandcastle-tdd queue 436 611 623
 ```
 
 Every park sends its question as a message; **reply to that message** and the
-dispatcher resumes that specific task, spawning concurrent resumes as needed.
-Telegram permits exactly one consumer of a bot's updates, so run at most one
-poller (`dispatch`, `attend`, or `tg-test`) at a time — a second silently steals
-the first's messages. `attend <task>` is the single-task variant when you are
-not using a queue.
+dispatcher resumes that specific task, running concurrent resumes as needed.
+Run at most one poller (`dispatch`, `attend`, or `tg-test`): Telegram permits a
+single consumer of a bot's updates, so a second silently steals the first's
+replies. `attend <task>` is the single-task variant when you aren't queuing.
 
 ## Operating rules that are load-bearing
 
-These were paid for in failed runs; they are not style preferences.
+Each of these was paid for in a failed run. They are not style preferences.
 
-1. **Never two runs of the same task.** Git refuses one branch in two
-   worktrees, and the second run fails fast. The same applies to *you*: a
-   manual review worktree on `agent/<task>` blocks that task's resume, so
-   remove it when done.
-2. **Share caches, never build outputs.** Module/package caches are
-   concurrency-safe and give the biggest single win (a cold gate of 2571s
-   became 330s warm, measured). A shared build-output directory converts
-   parallelism back into lock contention — the exact thing containers fix.
-3. **Anything host-only goes in `hostEnv`, not `.env`.** `.env` reaches the
+1. **Never two runs of one task.** Git refuses one branch in two worktrees and
+   the second run fails fast. This binds you too: a manual review worktree on
+   `agent/<task>` blocks that task's resume until you remove it.
+2. **Share package caches; never share build outputs.** Module caches are
+   concurrency-safe and are the single biggest win — a cold gate of 2571s
+   became 330s warm, measured. A shared build-output directory converts your
+   parallelism back into lock contention, the exact thing containers fix.
+3. **Host-only environment goes in `hostEnv`, not `.env`.** `.env` reaches the
    container. `GIT_CONFIG_GLOBAL` is the classic trap: sandcastle needs it
    host-side for `safe.directory`, and inside a container it overrides the HOME
-   that a project's own git tests depend on.
-4. **Concurrency is bounded by your gates, not your patience.** A full test
-   suite per turn is CPU-bound; 2–3 slots is a realistic ceiling on one
-   workstation. Parallel agents also share your account's rate limits.
-5. **Pick tasks with disjoint files and no dependencies between them.**
-   Crossover surfaces as merge conflicts; a dependency does not surface at all
-   — task B builds green against the pre-A contract and merges clean.
+   a project's own git tests depend on.
+4. **Your gates set the concurrency ceiling.** A full suite per turn is
+   CPU-bound; 2–3 slots is realistic on one workstation, and parallel agents
+   also share your account's rate limits.
+5. **Batch tasks with disjoint files and no dependencies.** Crossover surfaces
+   as merge conflicts you can see; a dependency doesn't surface at all — task B
+   builds green against the pre-A contract and merges clean.
 
-## What lands where
+## Update this package
 
-| Path | Contents |
-| --- | --- |
-| `.sandcastle/parked/<task>.json` | pending question, session id, branch, Telegram message id |
-| `.sandcastle/logs/orchestrator.jsonl` | every event: sandbox, turn, gate, park, green |
-| `.sandcastle/logs/gate-<ts>.log` | full stdout/stderr of each gate run |
+**Installed from git** (`github:jjforge/sandcastle-tdd`) — npm copies the repo
+at a commit, so updates are explicit:
+
+```bash
+npm update sandcastle-tdd                          # move to the tip of main
+npm install github:jjforge/sandcastle-tdd#<sha>    # or pin to a commit
+```
+
+Then re-run `npx sandcastle-tdd baseline` in that project. Its image, gates, and
+config are what an update has to keep working, and `baseline` exercises all
+three without agent cost.
+
+**Installed from a local path** (`file:../sandcastle-tdd`) — npm creates a
+**symlink**, so the consuming project always runs your working tree and a `git
+pull` in the package directory takes effect immediately with no reinstall.
+Convenient while developing the orchestrator, and worth knowing when debugging:
+a consuming project has no pinned version to blame, because it has no pin.
+
+Config changes are the other update path. `defineConfig` is typed, so `npx tsc
+--noEmit` in the consuming project catches a renamed or dropped field.
+
+## Update `@ai-hero/sandcastle`
+
+Bumps never happen silently: the dependency is pinned `^0.12.0`, and on a 0.x
+version npm's caret allows patches only. That's deliberate — upstream is pre-1.0
+and ships behavioural changes in minors.
+
+```bash
+npm install @ai-hero/sandcastle@latest   # here, and in each consuming project
+npm run check-contract                   # ~1s, no Docker: is the surface intact?
+npx sandcastle-tdd baseline              # container + gate path still work
+npx sandcastle-tdd run <small task>      # agent + session + resume still work
+```
+
+Climb all four rungs, because each sees what the one below cannot.
+`check-contract` catches a renamed export or dropped option in about a second;
+`tsc` alone will **not**, since the library's result objects carry optional
+members this orchestrator probes at runtime. `baseline` proves the container
+path. Only a real `run` exercises the agent, the gate→resume cycle, and session
+capture.
+
+Four behaviours no static check can see — `check-contract` prints them, and
+they're worth reading against the upstream changelog on any minor bump:
+
+1. **A sandbox command returns a non-zero exit code rather than throwing.** If
+   that inverts, every red gate reads as a pass — the one change that would
+   silently destroy this tool's whole guarantee.
+2. **`resumeSession` stays incompatible with `maxIterations > 1`.**
+3. **An idle agent throws** a catchable timeout; a returned result instead would
+   strand blocked work.
+4. **Session capture writes host-side JSONL, and re-creating a sandbox on an
+   existing branch reuses that worktree** — together, what make park→answer
+   survive a fresh process.
+
+Consuming projects pin the library themselves (it's a peer in practice), so bump
+it there too and re-run that project's `baseline`.
 
 ## Modes
 
@@ -141,53 +191,24 @@ These were paid for in failed runs; they are not style preferences.
 | `parked` | list what is waiting and why |
 | `tg-test` | prove the Telegram round-trip |
 
-## Upgrading `@ai-hero/sandcastle`
+## What lands where
 
-The dependency is pinned `^0.12.0` in this package's `package.json`. On a 0.x
-version npm's caret allows **patches only**, so a new upstream minor is never
-picked up silently — and upstream is pre-1.0, releasing minors where the
-behavioural contract can change. Upgrading is a deliberate act:
-
-```bash
-npm install @ai-hero/sandcastle@latest   # here; then in each consuming project
-npm run check-contract                   # ~1s, no Docker: is the surface intact?
-npx sandcastle-tdd baseline              # container + gate + exec still work
-npx sandcastle-tdd run <small task>      # agent + session + resume still work
-```
-
-The ladder matters because each rung sees what the one below cannot.
-`check-contract` catches a renamed export or a dropped option immediately —
-`tsc` alone will **not**, since the library's result objects carry optional
-members this orchestrator probes at runtime. `baseline` proves the container
-path. Only a real `run` exercises the agent, the gate→resume cycle, and
-session capture.
-
-Four behaviours no static check can see, worth re-reading against the upstream
-changelog on any minor bump — they are printed by `check-contract` too:
-
-1. **A sandbox command returns a non-zero exit code rather than throwing.** If
-   that ever inverts, every red gate would read as a pass — the one change that
-   would silently destroy the guarantee this tool exists to provide.
-2. **`resumeSession` stays incompatible with `maxIterations > 1`.**
-3. **An idle agent throws** a timeout error catchable into a park; were it to
-   become a returned result, blocked work would strand.
-4. **Session capture writes host-side JSONL, and re-creating a sandbox on an
-   existing branch reuses that worktree** — together, what make park→answer
-   survive a fresh process.
-
-Consuming projects pin the library too (it is a peer in practice, not just a
-transitive dep), so bump it there as well and re-run `baseline` in that project
-— its image and gates are what the upgrade has to keep working.
+| Path | Contents |
+| --- | --- |
+| `.sandcastle/parked/<task>.json` | pending question, session id, branch, Telegram message id |
+| `.sandcastle/logs/orchestrator.jsonl` | every event: sandbox, turn, gate, park, green |
+| `.sandcastle/logs/gate-<ts>.log` | full stdout/stderr of each gate run |
 
 ## Known limits
 
 - **Token accounting under-reports.** `IterationResult.usage` reflects the final
-  message, not the session; for real cost, read the session JSONL.
-- **Dispatcher resumes are outside the queue's slot accounting**, so heavy
+  message, not the session; read the session JSONL for real cost.
+- **Dispatcher resumes sit outside the queue's slot accounting**, so heavy
   answering can briefly exceed `QUEUE_SLOTS` containers.
 - **Session capture is required.** Non-resumable providers (`cursor`,
-  `opencode`, `copilot`) cannot drive this loop; the run fails with a clear
-  message rather than silently degrading.
+  `opencode`, `copilot`) can't drive this loop; the run fails with a clear
+  message rather than degrading silently.
 
-See `examples/jjforge/` for a real config over a Go + Rust monorepo with
-GitHub-issue tasks.
+Built on [`@ai-hero/sandcastle`](https://github.com/mattpocock/sandcastle).
+`examples/jjforge/` is a real config over a Go + Rust monorepo with GitHub-issue
+tasks.

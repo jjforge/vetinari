@@ -147,7 +147,7 @@ export async function tgTest(cfg: ResolvedConfig) {
 
 export function requireTelegram(mode: string) {
   if (!tgConfigured()) {
-    console.error(`${mode} needs WAVE_TELEGRAM_BOT_TOKEN and WAVE_TELEGRAM_CHAT_ID in the orchestrator's environment`);
+    console.error(`${mode} needs SANDCASTLE_TELEGRAM_BOT_TOKEN and SANDCASTLE_TELEGRAM_CHAT_ID in the orchestrator's environment`);
     process.exit(1);
   }
 }

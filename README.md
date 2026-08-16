@@ -88,7 +88,7 @@ Commits land on `agent/<task>`. Merging stays yours.
 
 ## Answer from your phone
 
-Set `WAVE_TELEGRAM_BOT_TOKEN` and `WAVE_TELEGRAM_CHAT_ID` in the
+Set `SANDCASTLE_TELEGRAM_BOT_TOKEN` and `SANDCASTLE_TELEGRAM_CHAT_ID` in the
 **orchestrator's** environment — never in `.sandcastle/.env`, which is injected
 into agent containers and must not carry a bot credential.
 

@@ -4,9 +4,9 @@ import { log } from "./log.ts";
 // sandcastle .env file — that file is injected into agent containers, and a bot
 // token must not ride along. Unset means "not configured", which is a normal
 // state and not an error: every send becomes a no-op.
-const TOKEN = () => process.env.WAVE_TELEGRAM_BOT_TOKEN;
-const CHAT = () => process.env.WAVE_TELEGRAM_CHAT_ID;
-const THREAD = () => process.env.WAVE_TELEGRAM_THREAD_ID;
+const TOKEN = () => process.env.SANDCASTLE_TELEGRAM_BOT_TOKEN;
+const CHAT = () => process.env.SANDCASTLE_TELEGRAM_CHAT_ID;
+const THREAD = () => process.env.SANDCASTLE_TELEGRAM_THREAD_ID;
 const api = () => `https://api.telegram.org/bot${TOKEN()}`;
 
 export const tgConfigured = () => Boolean(TOKEN() && CHAT());

@@ -80,10 +80,18 @@ export async function runLoop(cfg: ResolvedConfig, taskId: string, entry?: Resum
           return "green";
         }
 
-        if (!r.resume) throw new Error("provider is not resumable — cannot drive the TDD loop");
-        r = await r.resume(
-          `The orchestrator ran the verification suite and it is red. Fix the implementation — do not weaken the tests.\n\n${report}\n\nWhen you believe it is fixed, emit ${DONE} again.`,
-        );
+        // Resume via resumeSession + inline prompt — the SAME path the park→answer
+        // resume uses (above). `r.resume()` inherits the turn-0 promptArgs, which the
+        // library rejects alongside an inline prompt ("promptArgs is only supported
+        // with promptFile"), so a red gate errored instead of resuming (#3).
+        const resumeSessionId = r.iterations.at(-1)?.sessionId;
+        if (!resumeSessionId) throw new Error("no session id to resume — cannot drive the TDD loop");
+        r = await sbx.run({
+          ...common,
+          maxIterations: 1,
+          resumeSession: resumeSessionId,
+          prompt: `The orchestrator ran the verification suite and it is red. Fix the implementation — do not weaken the tests.\n\n${report}\n\nWhen you believe it is fixed, emit ${DONE} again.`,
+        });
       }
 
       await park(cfg, { taskId, reason: "budget", sessionId: r.iterations.at(-1)?.sessionId, branch: sbx.branch, question: `Turn budget exhausted (${cfg.maxTurns} gate cycles).` });

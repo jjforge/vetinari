@@ -94,7 +94,7 @@ into agent containers and must not carry a bot credential.
 
 ```bash
 npx sandcastle-tdd tg-test           # prove the round-trip first
-npx sandcastle-tdd dispatch &        # the ONE poller; routes replies to tasks
+npx sandcastle-tdd dispatch &        # the ONE poller (quick try; prefer the service below)
 npx sandcastle-tdd queue 436 611 623
 ```
 
@@ -103,6 +103,46 @@ dispatcher resumes that specific task, running concurrent resumes as needed.
 Run at most one poller (`dispatch`, `attend`, or `tg-test`): Telegram permits a
 single consumer of a bot's updates, so a second silently steals the first's
 replies. `attend <task>` is the single-task variant when you aren't queuing.
+
+### Run the poller as a service (survives reboot)
+
+A backgrounded `dispatch &` dies with its shell, so a park raised after you close
+the terminal goes unanswered. Run it as a **systemd user service** instead — one
+always-on poller, restarted on crash, brought back at boot. This is the rebuild
+recipe; adjust `WorkingDirectory` to your project checkout.
+
+```ini
+# ~/.config/systemd/user/sandcastle-dispatch.service
+[Unit]
+Description=sandcastle-tdd Telegram dispatch poller
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/home/you/Code/your-project
+# dispatch sends too (the "dispatcher up" message), so it needs the bot creds in
+# its own env — source the host-only orchestrator env, never .sandcastle/.env.
+ExecStart=/usr/bin/env bash -lc 'set -a; source .sandcastle/orchestrator.env; set +a; exec ./.sandcastle/run dispatch'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+```
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now sandcastle-dispatch   # start now + at every login
+loginctl enable-linger "$USER"                       # ...and at boot, without a login session
+```
+
+`enable --now` alone brings the poller back only when you log in; **`enable-linger`
+is what makes it survive a headless reboot** — it tells systemd to start your user
+manager at boot. Operate it with `systemctl --user status|restart sandcastle-dispatch`
+(restart after editing `orchestrator.env`); poll detail is in the project's
+`.sandcastle/logs/orchestrator.jsonl`, not journald. The `run` wrapper resolves the
+package's own `tsx`, so the unit needs no global install. **This replaces the inline
+`dispatch &`** — do not run both, or the two pollers fight over the bot's updates.
 
 ## Operating rules that are load-bearing
 

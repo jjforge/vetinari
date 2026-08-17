@@ -1,9 +1,24 @@
+import { execFileSync } from "node:child_process";
 import type { ResolvedConfig } from "./config.ts";
 import { log } from "./log.ts";
 import { runGates } from "./gate.ts";
 import { agentFor, makeSandbox } from "./sandbox.ts";
 import { clearParked, park } from "./state.ts";
 import { tgSend } from "./telegram.ts";
+
+/**
+ * Commits on `branch` not reachable from `base`, in the host repo. Returns null
+ * if it cannot be determined (e.g. git errors) — callers must not treat null as
+ * zero, or a transient git failure would swallow a real green.
+ */
+function commitsAhead(base: string, branch: string): number | null {
+  try {
+    return Number(execFileSync("git", ["rev-list", "--count", `${base}..${branch}`], { encoding: "utf8" }).trim());
+  } catch (e: any) {
+    log("commits-ahead-failed", { base, branch, error: String(e?.message ?? e) });
+    return null;
+  }
+}
 
 export const DONE = "<promise>COMPLETE</promise>";
 export const BLOCKED = "<promise>BLOCKED</promise>";
@@ -73,6 +88,23 @@ export async function runLoop(cfg: ResolvedConfig, taskId: string, entry?: Resum
 
         const { green, report } = await runGates(cfg, sbx);
         if (green) {
+          // Empty-green guard (#1): a `when`-scoped gate does not fire on an
+          // empty diff, so a no-op agent that emits DONE gets a trivial green on
+          // a branch it never advanced. Green must mean "the gate passed on a
+          // real change" — require a commit beyond the base. null (git couldn't
+          // tell) is NOT zero, so a transient failure never falsely parks.
+          const ahead = commitsAhead(cfg.baseBranch, sbx.branch);
+          if (ahead === 0) {
+            log("empty-green", { taskId, branch: sbx.branch });
+            await park(cfg, {
+              taskId,
+              reason: "no-commit",
+              sessionId,
+              branch: sbx.branch,
+              question: `The gate passed but ${sbx.branch} has no commit beyond ${cfg.baseBranch} — the agent produced no change. Likely a no-op, or the task needs clarification before it can be done.`,
+            });
+            return "parked";
+          }
           log("green", { taskId, branch: sbx.branch, commits: (r.commits ?? []).map((c: any) => c.sha) });
           console.log(`\n*** GREEN — commits on ${sbx.branch}\n`);
           await tgSend(`✅ ${cfg.project} agent GREEN on ${taskId} — orchestrator-verified, commits on ${sbx.branch}`);

@@ -108,33 +108,24 @@ replies. `attend <task>` is the single-task variant when you aren't queuing.
 
 A backgrounded `dispatch &` dies with its shell, so a park raised after you close
 the terminal goes unanswered. Run it as a **systemd user service** instead — one
-always-on poller, restarted on crash, brought back at boot. This is the rebuild
-recipe; adjust `WorkingDirectory` to your project checkout.
-
-```ini
-# ~/.config/systemd/user/sandcastle-dispatch.service
-[Unit]
-Description=sandcastle-tdd Telegram dispatch poller
-After=docker.service network-online.target
-Wants=network-online.target
-
-[Service]
-WorkingDirectory=/home/you/Code/your-project
-# dispatch sends too (the "dispatcher up" message), so it needs the bot creds in
-# its own env — source the host-only orchestrator env, never .sandcastle/.env.
-ExecStart=/usr/bin/env bash -lc 'set -a; source .sandcastle/orchestrator.env; set +a; exec ./.sandcastle/run dispatch'
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-```
+always-on poller, restarted on crash, brought back at boot. The unit is tracked
+in this repo at [`systemd/sandcastle-dispatch.service`](systemd/sandcastle-dispatch.service);
+install it, editing `WorkingDirectory` to your project checkout:
 
 ```bash
+install -Dm644 systemd/sandcastle-dispatch.service \
+  ~/.config/systemd/user/sandcastle-dispatch.service
+$EDITOR ~/.config/systemd/user/sandcastle-dispatch.service   # set WorkingDirectory
+
 systemctl --user daemon-reload
 systemctl --user enable --now sandcastle-dispatch   # start now + at every login
 loginctl enable-linger "$USER"                       # ...and at boot, without a login session
 ```
+
+The unit sources the host-only `orchestrator.env` before `exec`ing the poller —
+`dispatch` sends too (the "dispatcher up" message), so it needs the bot creds in
+its own env; never point it at `.sandcastle/.env`, which is injected into agent
+containers.
 
 `enable --now` alone brings the poller back only when you log in; **`enable-linger`
 is what makes it survive a headless reboot** — it tells systemd to start your user

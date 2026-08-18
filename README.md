@@ -75,6 +75,31 @@ npx sandcastle-tdd baseline          # toolchain probe + every gate, no agent
 A failing `baseline` is the cheapest failure available. A passing one means any
 red gate later is the agent's doing, not the image's.
 
+## Skills in the agent container
+
+The template image mirrors the [`mattpocock-skills` plugin](https://github.com/mattpocock/skills)
+(v1.2.3) at **personal scope** (`/home/agent/.claude/skills/`). Sandcastle runs
+the plain `claude --print` CLI (not `--bare`, not the SDK) with `HOME=/home/agent`,
+so the CLI auto-discovers `~/.claude/skills/<name>/SKILL.md` with no flag,
+setting, or per-run cost — every task's agent gets them. Personal scope keeps
+them out of your repo and off every agent branch.
+
+The image has no plugin machinery, so rather than "install a plugin" it clones
+at the plugin's pinned commit (`SKILLS_REF`) and copies exactly the skills that
+version's `.claude-plugin/plugin.json` declares — the same curated set the
+plugin exposes on the host, flattened one level (discovery is not recursive into
+the repo's `engineering/`, `productivity/` … category dirs).
+
+Two things to know:
+
+- **Your loop still owns "done".** `prompts/tdd.md` tells the agent that the
+  signal contract and the orchestrator's gate outrank any skill — a skill's own
+  TDD loop or completion notion never ends a turn or decides green. Keep that
+  clause if you edit the prompt.
+- **Updating is a rebuild.** Bump `SKILLS_REF` in `templates/Dockerfile` to the
+  plugin's new commit (match it to your host install), rebuild, and re-run
+  `baseline`. Don't want them? Delete that `RUN` block.
+
 ## Run
 
 ```bash
@@ -84,7 +109,23 @@ npx sandcastle-tdd parked                     # what's waiting on you, and why
 npx sandcastle-tdd answer 436 "use approach B, and say why in the commit"
 ```
 
-Commits land on `agent/<task>`. Merging stays yours.
+Commits land on `agent/<task>`. Merging stays yours — or hand the whole
+merge→test→next-queue chain to `campaign`:
+
+```bash
+git checkout main                                     # the merges land on the checked-out base
+npx sandcastle-tdd campaign "436 611 623" "640 655"   # each quoted arg is one batch
+```
+
+`campaign` drains a batch, merges **only its green** branches into the base with
+`--no-ff`, runs the full gate on the *merged* base — the each-green-but-together-red
+case a per-task gate can't catch — then deletes those branches, prunes their
+worktrees, and starts the next batch on the now-advanced base. A merge conflict
+or a red merged base **halts the campaign**, rolls the base back to where that
+batch began, and leaves every branch intact — you get a Telegram message and no
+later batch runs on a broken base. Parked tasks are never merged or cleaned:
+their branch and preserved worktree stay answerable via `dispatch`. Pushing
+stays yours.
 
 ## Answer from your phone
 
@@ -223,6 +264,7 @@ it there too and re-run that project's `baseline`.
 | `baseline` | toolchain probe + all gates, no agent |
 | `run <task>` | the TDD loop; exit 0 green, 2 parked |
 | `queue <task…>` | bounded pool; a park frees its slot |
+| `campaign <batch…>` | drain each batch, merge its greens, gate the merged base, then start the next |
 | `answer <task> <text>` | resume a parked task with your answer |
 | `attend <task>` | one task, self-answering via Telegram |
 | `dispatch` | the single poller; routes replies to parked tasks |

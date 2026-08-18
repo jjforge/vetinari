@@ -39,6 +39,27 @@ USER ${AGENT_UID}:${AGENT_GID}
 RUN curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH="/home/agent/.local/bin:$PATH"
 
+# Matt Pocock's Claude Code skills, at PERSONAL scope so every task's agent
+# auto-discovers them — sandcastle runs the plain `claude --print` CLI (no
+# --bare) with HOME=/home/agent, and the CLI loads ~/.claude/skills/<name>/SKILL.md
+# with no flag or setting. Personal scope keeps them out of your repo and off
+# every agent branch.
+#
+# This mirrors the `mattpocock-skills` PLUGIN as installed on the host (v1.2.3):
+# SKILLS_REF is that version's commit, and the exact skill set is read from the
+# plugin's own `.claude-plugin/plugin.json` manifest — 25 curated skills, not
+# every dir in the repo. The CLI has no plugin machinery here, so the skills are
+# flattened to ~/.claude/skills/<name>/ (discovery is not recursive into the
+# repo's category dirs). Bump SKILLS_REF to the new plugin commit to update, then
+# rebuild and re-run `baseline`.
+ARG SKILLS_REF=84fdeffd12f2ee307994d1eb6feb48173b6e0502
+RUN git clone https://github.com/mattpocock/skills /tmp/mp-skills \
+ && git -C /tmp/mp-skills checkout "$SKILLS_REF" \
+ && mkdir -p /home/agent/.claude/skills \
+ && jq -r '.skills[]' /tmp/mp-skills/.claude-plugin/plugin.json \
+    | while read -r rel; do cp -a "/tmp/mp-skills/$rel" /home/agent/.claude/skills/; done \
+ && rm -rf /tmp/mp-skills
+
 WORKDIR /home/agent
 
 # Sandcastle bind-mounts the git worktree at /home/agent/workspace and sets it

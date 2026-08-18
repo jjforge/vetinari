@@ -4,6 +4,7 @@ import { log } from "./log.ts";
 import { runGates } from "./gate.ts";
 import { makeSandbox } from "./sandbox.ts";
 import { answerPromptFor, runLoop, type ResumeEntry } from "./loop.ts";
+import { currentBranch, integrateGreens } from "./merge.ts";
 import { clearParked, hasParked, listParked, readParked } from "./state.ts";
 import { tgConfigured, tgDrain, tgPoll, tgSend, tgWaitReply } from "./telegram.ts";
 
@@ -35,8 +36,12 @@ export async function baseline(cfg: ResolvedConfig) {
   }
 }
 
-/** Bounded pool: keeps `slots` runs alive; a park frees its slot immediately. */
-export async function queue(cfg: ResolvedConfig, taskIds: string[], slots: number) {
+/**
+ * Bounded pool: keeps `slots` runs alive; a park frees its slot immediately.
+ * Returns the per-task outcome map so a caller (campaign) can act on the greens
+ * without re-deriving them from the log.
+ */
+export async function queue(cfg: ResolvedConfig, taskIds: string[], slots: number): Promise<Record<string, string>> {
   const pending = [...taskIds];
   const outcomes: Record<string, string> = {};
   let running = 0;
@@ -65,6 +70,62 @@ export async function queue(cfg: ResolvedConfig, taskIds: string[], slots: numbe
   log("queue-done", { outcomes });
   await tgSend(`🏁 ${cfg.project} queue drained.\n${summary}\nParked tasks stay answerable via dispatch.`);
   console.log(`queue drained:\n${summary}`);
+  return outcomes;
+}
+
+/**
+ * Drain each batch, then merge its greens into the base, re-verify the merged
+ * base, clean up the merged branches/worktrees, and only then start the next
+ * batch — the manual merge→test→next-queue chain, automated.
+ *
+ * Green-only by design: a parked task's branch and preserved worktree are left
+ * untouched so it stays answerable via dispatch. A merge conflict or a red
+ * merged base halts the whole campaign with the base rolled back to where the
+ * batch began — no later batch runs on a broken or half-merged base.
+ */
+export async function campaign(cfg: ResolvedConfig, batches: string[][], slots: number) {
+  // Every green branch merges into whatever the main tree has checked out, and
+  // each batch's agents cut their branch from that same HEAD. If it is not the
+  // base branch the campaign would merge into, and build on, the wrong place.
+  const branch = currentBranch();
+  if (branch !== cfg.baseBranch) {
+    throw new Error(
+      `campaign merges into the checked-out branch, but the working tree is on "${branch}", not baseBranch "${cfg.baseBranch}". Run \`git checkout ${cfg.baseBranch}\` first (a clean tree — the merges land here).`,
+    );
+  }
+
+  log("campaign-start", { batches, slots });
+  await tgSend(`🎬 ${cfg.project} campaign: ${batches.length} batch(es) — ${batches.map((b) => b.join(",")).join(" | ")}`);
+
+  for (let i = 0; i < batches.length; i++) {
+    const tasks = batches[i];
+    log("campaign-batch", { index: i, tasks });
+    await tgSend(`▶️ ${cfg.project} campaign batch ${i + 1}/${batches.length}: ${tasks.join(", ")}`);
+
+    const outcomes = await queue(cfg, tasks, slots);
+    const greens = tasks.filter((t) => outcomes[t] === "green");
+    const held = tasks.filter((t) => outcomes[t] !== "green");
+
+    const { merged, halt } = await integrateGreens(cfg, greens);
+    if (halt) {
+      const where = halt.taskId ? ` on ${halt.taskId}` : "";
+      log("campaign-halt", { index: i, reason: halt.reason, taskId: halt.taskId });
+      await tgSend(
+        `🛑 ${cfg.project} campaign HALTED at batch ${i + 1} — ${halt.reason}${where}. Base rolled back; branches kept for you.\n\n${halt.detail}`,
+      );
+      console.log(`campaign halted (${halt.reason}${where}) — base rolled back, ${batches.length - i - 1} batch(es) not started.`);
+      return;
+    }
+
+    const note = held.length ? ` — left for dispatch: ${held.map((t) => `${t}(${outcomes[t]})`).join(", ")}` : "";
+    log("campaign-batch-done", { index: i, merged, held });
+    await tgSend(`✅ ${cfg.project} campaign batch ${i + 1} merged: ${merged.join(", ") || "nothing"}${note}`);
+    console.log(`batch ${i + 1}/${batches.length}: merged ${merged.join(", ") || "nothing"}${note}`);
+  }
+
+  log("campaign-done", { batches: batches.length });
+  await tgSend(`🏆 ${cfg.project} campaign complete — ${batches.length} batch(es) merged onto ${cfg.baseBranch}.`);
+  console.log("campaign complete.");
 }
 
 /**

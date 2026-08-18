@@ -2,7 +2,7 @@
 import { loadConfig } from "./config.ts";
 import { setLogFile } from "./log.ts";
 import { answerPromptFor, runLoop } from "./loop.ts";
-import { attend, baseline, dispatch, queue, requireTelegram, tgTest } from "./modes.ts";
+import { attend, baseline, campaign, dispatch, queue, requireTelegram, tgTest } from "./modes.ts";
 import { listParked, readParked } from "./state.ts";
 
 const USAGE = `sandcastle-tdd <mode> [args]
@@ -10,6 +10,7 @@ const USAGE = `sandcastle-tdd <mode> [args]
   baseline                 prove the image runs every gate green — no agent, no cost
   run <task>               the TDD loop: agent turn → gate → resume on red
   queue <task…>            bounded pool over several tasks (QUEUE_SLOTS, default 3)
+  campaign <batch…>        queue each batch, then merge greens → gate base → next batch
   answer <task> <text>     resume a parked task with a human answer
   attend <task>            one task, answering itself via Telegram replies
   dispatch                 the ONE Telegram poller; routes replies to parked tasks
@@ -46,6 +47,13 @@ switch (mode) {
   case "queue": {
     if (!rest.length) throw new Error("queue needs at least one task id");
     await queue(cfg, rest, Math.max(1, Number(process.env.QUEUE_SLOTS ?? 3)));
+    break;
+  }
+  case "campaign": {
+    // Each arg is one batch: `campaign "436 611 623" "640 655" "701"`.
+    const batches = rest.map((b) => b.split(/[\s,]+/).filter(Boolean)).filter((b) => b.length);
+    if (!batches.length) throw new Error('campaign needs at least one batch: campaign "436 611" "623 640"');
+    await campaign(cfg, batches, Math.max(1, Number(process.env.QUEUE_SLOTS ?? 3)));
     break;
   }
   case "answer": {

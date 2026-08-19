@@ -36,6 +36,26 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 COPY --from=golang:1.26-bookworm /usr/local/go /usr/local/go
 ENV PATH="/usr/local/go/bin:$PATH"
 
+# sccache — the shared rustc cache. Sandcastle bind-mounts SCCACHE_DIR from the
+# host, so every sandbox reuses dependencies compiled by earlier ones instead of
+# paying the cold Rust compile per turn. Unlike a shared cargo target/ this is
+# safe to share concurrently: sccache shares a cache, not a build lock.
+# A pinned release binary rather than `cargo install`, which would compile it
+# from source on every image build.
+ARG SCCACHE_VERSION=0.17.0
+RUN set -eux; \
+  case "$(dpkg --print-architecture)" in \
+  amd64) scc_arch=x86_64 ;; \
+  arm64) scc_arch=aarch64 ;; \
+  *) echo "sccache: unsupported architecture $(dpkg --print-architecture)" >&2; exit 1 ;; \
+  esac; \
+  scc_dir="sccache-v${SCCACHE_VERSION}-${scc_arch}-unknown-linux-musl"; \
+  curl -fsSL "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/${scc_dir}.tar.gz" \
+  | tar xz -C /tmp; \
+  install -m 0755 "/tmp/${scc_dir}/sccache" /usr/local/bin/sccache; \
+  rm -rf "/tmp/${scc_dir}"; \
+  sccache --version
+
 ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
@@ -50,6 +70,17 @@ RUN curl -fsSL https://claude.ai/install.sh | bash
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --component clippy --component rustfmt
 
 ENV PATH="/home/agent/.local/bin:/home/agent/.cargo/bin:/usr/local/go/bin:$PATH"
+
+# Route rustc through sccache. CARGO_INCREMENTAL=0 is required, not cosmetic:
+# sccache refuses to cache incremental compilations and cargo turns them on for
+# dev builds by default, so leaving it unset silently forfeits caching of the
+# workspace's own crates. Cache hits also depend on the build path matching
+# across sandboxes — sandcastle always mounts the worktree at
+# /home/agent/workspace, so they do.
+ENV RUSTC_WRAPPER=/usr/local/bin/sccache \
+  SCCACHE_DIR=/home/agent/.cache/sccache \
+  SCCACHE_CACHE_SIZE=20G \
+  CARGO_INCREMENTAL=0
 
 WORKDIR /home/agent
 

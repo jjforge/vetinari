@@ -24,17 +24,28 @@ export default defineConfig({
   // Go's module and build caches are concurrency-safe, so parallel sandboxes
   // share them: cold gate 2571s → warm 330s, measured. Cargo's target/ is
   // deliberately NOT shared — that is the build-lock contention containers are
-  // here to avoid; only the registry is.
+  // here to avoid.
+  //
+  // sccache is how the Rust half gets the same reuse without that lock: it
+  // shares a *cache*, so sandboxes hit each other's compiled dependencies and
+  // still build in parallel. Measured on the host: three concurrent containers
+  // against one warm cache, 100% hit rate, zero read/write errors. Requires the
+  // RUSTC_WRAPPER/SCCACHE_DIR/CARGO_INCREMENTAL env set in the image.
+  //
+  // Container-only by design: sccache keys include the build path, and the host
+  // builds this repo at a different path than the sandboxes' /home/agent/
+  // workspace, so a host-shared cache would never produce cross-hits anyway.
   mounts: [
     { hostPath: ".sandcastle/cache/gomod", sandboxPath: "/home/agent/go/pkg/mod" },
     { hostPath: ".sandcastle/cache/gocache", sandboxPath: "/home/agent/.cache/go-build" },
     { hostPath: ".sandcastle/cache/cargo-registry", sandboxPath: "/home/agent/.cargo/registry" },
+    { hostPath: ".sandcastle/cache/sccache", sandboxPath: "/home/agent/.cache/sccache" },
   ],
 
   fetchTask: (id) =>
     execFileSync("gh", ["issue", "view", id, "--repo", "jjforge/jjforge", "--json", "title,body,comments"], { encoding: "utf8" }),
 
-  toolchainProbe: "go version && cargo --version && claude --version && git --version",
+  toolchainProbe: "go version && cargo --version && sccache --version && claude --version && git --version",
 
   // Sandcastle writes safe.directory host-side and needs a writable global git
   // config; this machine's real one is a read-only nix store symlink. It must

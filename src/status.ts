@@ -234,7 +234,7 @@ export const renderStatusPage = (status: CampaignStatus) => `<!doctype html>
   .page-top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border-bottom: 1px solid var(--color-light-border); padding-bottom: 1rem; }
   .refresh { margin-left: auto; display: inline-flex; align-items: center; gap: .5rem; color: var(--color-text-light-2); }
   .refresh label { display: inline-flex; align-items: center; gap: .4rem; }
-  .refresh input[type="checkbox"] { width: 1rem; height: 1rem; accent-color: var(--color-primary); cursor: pointer; }
+  .refresh input[type="checkbox"] { width: 1.15rem; height: 1.15rem; margin: 0; accent-color: var(--color-primary); cursor: pointer; }
   .refresh input[type="number"] { width: 3ch; color: var(--color-text); background: var(--color-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); padding: .25rem; }
   .refresh-every:has(#refresh-seconds:disabled) { opacity: .45; }
   .wave, .card { background: var(--color-box-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: 1rem; margin: 1rem 0; box-shadow: 0 8px 22px #0004; }

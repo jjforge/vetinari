@@ -9,11 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Auto-refresh on/off checkbox on the status dashboard; both the toggle and the
-  interval persist across reloads, and the interval field disables when off.
+- `status [--port <port>] [--host <host>]` CLI command that serves a local
+  campaign/wave web dashboard (default `http://127.0.0.1:8765`). It shows each
+  wave, per-issue status chips, and parked-issue cards you can respond to inline;
+  `--host 0.0.0.0` exposes it over a tailnet. Documented in the README.
+- Campaign batches now clear the parked records of their non-green tasks once the
+  wave finishes (`clearParkedForTasks`), so stale questions from a completed wave
+  no longer bleed into the next wave's dashboard.
+- Auto-refresh on/off checkbox on the dashboard; both the toggle and the interval
+  persist across reloads, and the interval field disables when off.
 - The dashboard leads with parked issues, above the waves, whenever any are
   awaiting a response — with an "N awaiting you" badge and a yellow accent. When
   nothing is parked, the page leads with the waves as before.
+- Vendored the `mattpocock/skills` set under `.agents/skills/`, pinned by
+  `skills-lock.json` (each skill's source path and content hash).
 
 ### Changed
 
@@ -42,8 +51,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial parallel TDD agent orchestrator built on sandcastle.
 - Campaign mode with waves/batches, and mattpocock skills baked into the agent
   image.
-- Local campaign/wave status dashboard (`sandcastle-tdd status`) with parked-issue
-  review and inline responses.
 - Team walkthrough deck.
 
 [Unreleased]: https://github.com/jjforge/sandcastle-tdd/compare/v0.1.0...HEAD

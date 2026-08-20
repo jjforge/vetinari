@@ -242,12 +242,11 @@ test("renderStatusPage includes a configurable refresh interval control", () => 
   const html = renderStatusPage({ project: "demo", waves: [{ index: 0, status: "closed", issues: [] }], parked: [] });
 
   assert.match(html, /<summary class="completed-wave-chip">Wave 1<\/summary>/);
-  assert.match(html, /class="refresh" title="Seconds between refreshes; 0 disables auto-refresh"/);
+  assert.match(html, /class="refresh" title="Auto-refresh the page on an interval"/);
+  assert.match(html, /<input id="refresh-enabled" type="checkbox" checked \/> <span>Auto-refresh<\/span>/);
   assert.match(html, /id="refresh-seconds"/);
   assert.match(html, /max="999"/);
-  assert.match(html, /\.refresh input \{ width: 3ch;/);
-  assert.match(html, /<span>Refresh<\/span>/);
-  assert.doesNotMatch(html, /Refresh every/);
+  assert.match(html, /\.refresh input\[type="number"\] \{ width: 3ch;/);
   assert.match(html, /<div class="page-top"><h1>demo status<\/h1><div class="refresh"/);
   assert.match(html, /\.page-top \{ display: flex;/);
   assert.doesNotMatch(html, /\.refresh \{ position: (?:sticky|fixed);/);
@@ -255,6 +254,18 @@ test("renderStatusPage includes a configurable refresh interval control", () => 
   assert.match(html, /localStorage\.getItem\("sandcastle-status-refresh-seconds"\) \?\? "45"/);
   assert.match(html, /isComposing\(\) \? scheduleRefresh\(\) : location\.reload\(\)/);
   assert.match(html, /el === document\.activeElement \|\| el\.value\.trim\(\) !== ""/);
+});
+
+test("renderStatusPage auto-refresh checkbox gates and persists the timer", () => {
+  const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
+
+  // Checkbox toggles auto-refresh, defaults on unless previously disabled.
+  assert.match(html, /refreshEnabled\.checked = localStorage\.getItem\("sandcastle-status-refresh-enabled"\) !== "false"/);
+  assert.match(html, /localStorage\.setItem\("sandcastle-status-refresh-enabled", String\(refreshEnabled\.checked\)\)/);
+  // Timer only arms when the box is checked; the interval field disables when off.
+  assert.match(html, /refreshInput\.disabled = !refreshEnabled\.checked/);
+  assert.match(html, /if \(refreshEnabled\.checked && Number\.isFinite\(seconds\) && seconds > 0\)/);
+  assert.match(html, /refreshEnabled\.addEventListener\("change", scheduleRefresh\)/);
 });
 
 test("extractParkedDetails separates description from Options section", () => {

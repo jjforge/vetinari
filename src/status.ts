@@ -233,8 +233,11 @@ export const renderStatusPage = (status: CampaignStatus) => `<!doctype html>
   h2 { color: var(--color-text-light); }
   .page-top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border-bottom: 1px solid var(--color-light-border); padding-bottom: 1rem; }
   .refresh { margin-left: auto; width: max-content; background: var(--color-box-body); border: 1px solid var(--color-secondary); border-radius: 999px; padding: .45rem .75rem; }
+  .refresh { display: inline-flex; align-items: center; gap: .75rem; }
   .refresh label { display: inline-flex; align-items: center; gap: .4rem; }
-  .refresh input { width: 3ch; color: var(--color-text); background: var(--color-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); padding: .25rem; }
+  .refresh input[type="checkbox"] { width: 1rem; height: 1rem; accent-color: var(--color-primary); cursor: pointer; }
+  .refresh input[type="number"] { width: 3ch; color: var(--color-text); background: var(--color-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); padding: .25rem; }
+  .refresh-every:has(#refresh-seconds:disabled) { opacity: .45; }
   .wave, .card { background: var(--color-box-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: 1rem; margin: 1rem 0; box-shadow: 0 8px 22px #0004; }
   .wave { border-top: 3px solid var(--color-primary); }
   .completed-waves { display: flex; align-items: flex-start; flex-wrap: wrap; gap: .5rem; margin: 1rem 0; color: var(--color-text-light); }
@@ -264,7 +267,7 @@ export const renderStatusPage = (status: CampaignStatus) => `<!doctype html>
 </style>
 </head>
 <body>
-<div class="page-top"><h1>${escapeHtml(status.project)} status</h1><div class="refresh" title="Seconds between refreshes; 0 disables auto-refresh"><label><span>Refresh</span> <input id="refresh-seconds" type="number" min="0" max="999" step="1" value="45" /></label></div></div>
+<div class="page-top"><h1>${escapeHtml(status.project)} status</h1><div class="refresh" title="Auto-refresh the page on an interval"><label><input id="refresh-enabled" type="checkbox" checked /> <span>Auto-refresh</span></label><label class="refresh-every"><span>every</span> <input id="refresh-seconds" type="number" min="1" max="999" step="1" value="45" /> <span>s</span></label></div></div>
 ${
   status.waves.length
     ? `${
@@ -285,8 +288,9 @@ ${status.parked
   .join("") || "<p>Nothing parked.</p>"}
 <script>
   const refreshInput = document.getElementById("refresh-seconds");
-  const storedRefreshSeconds = localStorage.getItem("sandcastle-status-refresh-seconds") ?? "45";
-  refreshInput.value = storedRefreshSeconds;
+  const refreshEnabled = document.getElementById("refresh-enabled");
+  refreshInput.value = localStorage.getItem("sandcastle-status-refresh-seconds") ?? "45";
+  refreshEnabled.checked = localStorage.getItem("sandcastle-status-refresh-enabled") !== "false";
   let refreshTimer;
   const isComposing = () =>
     [...document.querySelectorAll("textarea")].some((el) => el === document.activeElement || el.value.trim() !== "");
@@ -294,10 +298,13 @@ ${status.parked
     clearTimeout(refreshTimer);
     const seconds = Number(refreshInput.value);
     localStorage.setItem("sandcastle-status-refresh-seconds", String(Number.isFinite(seconds) && seconds > 0 ? seconds : 0));
-    if (Number.isFinite(seconds) && seconds > 0)
+    localStorage.setItem("sandcastle-status-refresh-enabled", String(refreshEnabled.checked));
+    refreshInput.disabled = !refreshEnabled.checked;
+    if (refreshEnabled.checked && Number.isFinite(seconds) && seconds > 0)
       refreshTimer = setTimeout(() => (isComposing() ? scheduleRefresh() : location.reload()), seconds * 1000);
   };
   refreshInput.addEventListener("input", scheduleRefresh);
+  refreshEnabled.addEventListener("change", scheduleRefresh);
   scheduleRefresh();
   const issueDetail = document.getElementById("issue-detail");
   const issueDetailText = issueDetail.querySelector(".issue-detail-text");

@@ -252,6 +252,8 @@ test("renderStatusPage collapses closed waves into expandable completed wave chi
   assert.doesNotMatch(html, /Completed:/);
   assert.match(html, /<details class="completed-wave"><summary class="completed-wave-chip"><span class="check" aria-hidden="true">✓<\/span> Wave 1<\/summary>/);
   assert.match(html, /\.completed-wave-chip \.check \{ color: var\(--color-green\);/);
+  // Expanded summary is block-level (no inline line-box leading) and spaced from its chips.
+  assert.match(html, /\.completed-wave\[open\] > \.completed-wave-chip \{ display: flex; width: max-content; margin-bottom: \.6rem; \}/);
   assert.match(html, /<section class="wave"><h2>Wave 2 <span class="wave-status running">running<\/span><\/h2>/);
 });
 

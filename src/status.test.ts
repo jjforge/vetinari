@@ -225,9 +225,13 @@ test("renderStatusPage leads with parked issues above the waves when any are par
     parked: [{ issueNumber: "102", reason: "blocked", parkedAt: "now", branch: "agent/102", description: "Need a choice.", options: [] }],
   });
 
-  assert.match(html, /<section class="parked"><h2>Parked issues <span class="parked-count">1 awaiting you<\/span>/);
+  assert.match(html, /<section class="parked-issues"><h2>Parked issues <span class="parked-count">1 awaiting you<\/span>/);
   // Parked section comes before the first wave section.
-  assert.ok(html.indexOf('class="parked"') < html.indexOf('class="wave"'), "parked should render above the waves");
+  assert.ok(html.indexOf('class="parked-issues"') < html.indexOf('class="wave"'), "parked should render above the waves");
+  // The parked-dot color rule must stay background-only; the section styling must not
+  // bleed onto <span class="dot parked"> and inflate the chip height.
+  assert.match(html, /\.parked \{ background: var\(--color-yellow\); \}/);
+  assert.doesNotMatch(html, /\.parked \{[^}]*margin/);
 });
 
 test("renderStatusPage omits the parked section entirely when nothing is parked", () => {
@@ -235,7 +239,7 @@ test("renderStatusPage omits the parked section entirely when nothing is parked"
 
   assert.doesNotMatch(html, /Parked issues/);
   assert.doesNotMatch(html, /Nothing parked/);
-  assert.doesNotMatch(html, /class="parked"/);
+  assert.doesNotMatch(html, /class="parked-issues"/);
 });
 
 test("renderStatusPage collapses closed waves into expandable completed wave chips", () => {

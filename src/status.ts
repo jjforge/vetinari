@@ -264,17 +264,17 @@ export const renderStatusPage = (status: CampaignStatus) => `<!doctype html>
   .issue-detail-close:hover { color: var(--color-text); background: var(--color-secondary); }
   form button { padding: .5rem .8rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: #04110f; cursor: pointer; font-weight: 700; }
   pre { white-space: pre-wrap; }
-  .parked { margin: 1rem 0 2rem; }
-  .parked > h2 { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
+  .parked-issues { margin: 1rem 0 2rem; }
+  .parked-issues > h2 { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
   .parked-count { font-size: .78rem; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: var(--color-yellow); border: 1px solid var(--color-yellow); background: rgb(200 162 78 / 12%); border-radius: 999px; padding: .15rem .55rem; }
-  .parked .card { border-left: 3px solid var(--color-yellow); }
+  .parked-issues .card { border-left: 3px solid var(--color-yellow); }
 </style>
 </head>
 <body>
 <div class="page-top"><h1>${escapeHtml(status.project)} status</h1><div class="refresh" title="Auto-refresh the page every N seconds"><label><input id="refresh-enabled" type="checkbox" checked /> <span>Refresh</span></label><label class="refresh-every"><input id="refresh-seconds" type="number" min="1" max="999" step="1" value="45" /></label></div></div>
 ${
   status.parked.length
-    ? `<section class="parked"><h2>Parked issues <span class="parked-count">${status.parked.length} awaiting you</span></h2>${status.parked
+    ? `<section class="parked-issues"><h2>Parked issues <span class="parked-count">${status.parked.length} awaiting you</span></h2>${status.parked
         .map(
           (p) => `<section class="card"><h3>Issue #${escapeHtml(p.issueNumber)}</h3><p><strong>Parked on:</strong></p><pre>${escapeHtml(p.description)}</pre>${
             p.options.length ? `<p><strong>Options:</strong></p><ul>${p.options.map((o) => `<li>${escapeHtml(o)}</li>`).join("")}</ul>` : ""

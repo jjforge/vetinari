@@ -241,7 +241,7 @@ export const renderStatusPage = (status: CampaignStatus) => `<!doctype html>
   .wave { border-top: 3px solid var(--color-primary); }
   .completed-waves { display: flex; align-items: flex-start; flex-wrap: wrap; gap: .5rem; margin: 1rem 0; color: var(--color-text-light); }
   .completed-wave-chip .check { color: var(--color-green); font-weight: 700; }
-  .completed-wave-bar, .chips { display: flex; flex-wrap: wrap; gap: .5rem; }
+  .completed-wave-bar, .chips { display: flex; flex-wrap: wrap; align-items: flex-start; align-content: flex-start; gap: .5rem; }
   .completed-wave { display: inline-block; }
   .completed-wave[open] { display: block; flex-basis: 100%; border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: .75rem; background: var(--color-box-body); }
   .completed-wave[open] > .completed-wave-chip { display: flex; width: max-content; margin-bottom: .6rem; }

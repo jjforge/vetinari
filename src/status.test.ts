@@ -254,6 +254,8 @@ test("renderStatusPage collapses closed waves into expandable completed wave chi
   assert.match(html, /\.completed-wave-chip \.check \{ color: var\(--color-green\);/);
   // Expanded summary is block-level (no inline line-box leading) and spaced from its chips.
   assert.match(html, /\.completed-wave\[open\] > \.completed-wave-chip \{ display: flex; width: max-content; margin-bottom: \.6rem; \}/);
+  // Chip rows must not stretch: the first wrapped line was rendering taller in Safari.
+  assert.match(html, /\.completed-wave-bar, \.chips \{ display: flex; flex-wrap: wrap; align-items: flex-start; align-content: flex-start;/);
   assert.match(html, /<section class="wave"><h2>Wave 2 <span class="wave-status running">running<\/span><\/h2>/);
 });
 

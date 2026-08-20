@@ -254,7 +254,11 @@ export const renderStatusPage = (status: CampaignStatus) => `<!doctype html>
   .completed { background: var(--color-green); } .parked { background: var(--color-yellow); } .failure { background: var(--color-red); } .running { background: var(--color-blue); } .unstarted { background: var(--color-text-light-2); }
   textarea { width: 100%; min-height: 7rem; margin: .5rem 0; color: var(--color-text); background: var(--color-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: .75rem; }
   button.chip { cursor: pointer; color: inherit; font: inherit; }
-  .issue-detail { min-height: 1.5rem; color: var(--color-blue); margin: .5rem 0 1rem; }
+  .issue-detail { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; display: none; align-items: center; gap: .75rem; margin: 0; padding: .75rem 1rem calc(.75rem + env(safe-area-inset-bottom)); color: var(--color-blue); background: var(--color-box-header); border-top: 1px solid var(--color-primary); box-shadow: 0 -8px 22px #0006; }
+  .issue-detail.show { display: flex; }
+  .issue-detail-text { flex: 1; white-space: pre-line; }
+  .issue-detail-close { flex: none; background: none; border: 0; color: var(--color-text-light-2); font-size: 1.25rem; line-height: 1; cursor: pointer; padding: .1rem .35rem; border-radius: var(--border-radius); }
+  .issue-detail-close:hover { color: var(--color-text); background: var(--color-secondary); }
   form button { padding: .5rem .8rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: #04110f; cursor: pointer; font-weight: 700; }
   pre { white-space: pre-wrap; }
 </style>
@@ -270,7 +274,7 @@ ${
       }${status.waves.filter((wave) => wave.status !== "closed").map(renderOpenWave).join("")}`
     : "<p>No active campaign or queue found.</p>"
 }
-<p id="issue-detail" class="issue-detail" aria-live="polite"></p>
+<div id="issue-detail" class="issue-detail" aria-live="polite"><span class="issue-detail-text"></span><button type="button" id="issue-detail-close" class="issue-detail-close" aria-label="Dismiss">&times;</button></div>
 <h2>Parked issues</h2>
 ${status.parked
   .map(
@@ -296,9 +300,16 @@ ${status.parked
   refreshInput.addEventListener("input", scheduleRefresh);
   scheduleRefresh();
   const issueDetail = document.getElementById("issue-detail");
+  const issueDetailText = issueDetail.querySelector(".issue-detail-text");
+  const showDetail = (text) => {
+    issueDetailText.textContent = text;
+    issueDetail.classList.toggle("show", Boolean(text));
+  };
+  document.getElementById("issue-detail-close").addEventListener("click", () => showDetail(""));
   document.querySelectorAll(".chip[data-detail]").forEach((chip) => {
     chip.addEventListener("click", () => {
-      issueDetail.textContent = chip.getAttribute("data-detail") ?? "";
+      const text = chip.getAttribute("data-detail") ?? "";
+      showDetail(issueDetailText.textContent === text ? "" : text);
     });
   });
 </script>

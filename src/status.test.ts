@@ -205,6 +205,19 @@ test("renderStatusPage makes issue chips tap-friendly for touch devices", () => 
   assert.match(html, /chip\.addEventListener\("click"/);
 });
 
+test("renderStatusPage pins the tapped-issue detail to a dismissible bottom bar", () => {
+  const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
+
+  // Fixed to the bottom of the viewport and hidden until a chip is tapped.
+  assert.match(html, /\.issue-detail \{ position: fixed;[^}]*bottom: 0;/);
+  assert.match(html, /\.issue-detail \{[^}]*display: none;/);
+  assert.match(html, /\.issue-detail\.show \{ display: flex; \}/);
+  // Text lives in its own span so the close button can sit beside it.
+  assert.match(html, /<span class="issue-detail-text"><\/span><button type="button" id="issue-detail-close"/);
+  assert.match(html, /showDetail\(issueDetailText\.textContent === text \? "" : text\)/);
+  assert.match(html, /getElementById\("issue-detail-close"\)\.addEventListener\("click", \(\) => showDetail\(""\)\)/);
+});
+
 test("renderStatusPage collapses closed waves into expandable completed wave chips", () => {
   const html = renderStatusPage({
     project: "demo",

@@ -218,6 +218,26 @@ test("renderStatusPage pins the tapped-issue detail to a dismissible bottom bar"
   assert.match(html, /getElementById\("issue-detail-close"\)\.addEventListener\("click", \(\) => showDetail\(""\)\)/);
 });
 
+test("renderStatusPage leads with parked issues above the waves when any are parked", () => {
+  const html = renderStatusPage({
+    project: "demo",
+    waves: [{ index: 0, status: "running", issues: [{ issueNumber: "101", status: "running" }] }],
+    parked: [{ issueNumber: "102", reason: "blocked", parkedAt: "now", branch: "agent/102", description: "Need a choice.", options: [] }],
+  });
+
+  assert.match(html, /<section class="parked"><h2>Parked issues <span class="parked-count">1 awaiting you<\/span>/);
+  // Parked section comes before the first wave section.
+  assert.ok(html.indexOf('class="parked"') < html.indexOf('class="wave"'), "parked should render above the waves");
+});
+
+test("renderStatusPage omits the parked section entirely when nothing is parked", () => {
+  const html = renderStatusPage({ project: "demo", waves: [{ index: 0, status: "running", issues: [] }], parked: [] });
+
+  assert.doesNotMatch(html, /Parked issues/);
+  assert.doesNotMatch(html, /Nothing parked/);
+  assert.doesNotMatch(html, /class="parked"/);
+});
+
 test("renderStatusPage collapses closed waves into expandable completed wave chips", () => {
   const html = renderStatusPage({
     project: "demo",

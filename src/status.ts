@@ -218,7 +218,7 @@ const renderOpenWave = (wave: StatusWave) =>
   `<section class="wave"><h2>Wave ${wave.index + 1} <span class="wave-status ${wave.status}">${wave.status}</span></h2>${renderWaveContents(wave)}</section>`;
 
 const renderCompletedWave = (wave: StatusWave) =>
-  `<details class="completed-wave"><summary class="completed-wave-chip">Wave ${wave.index + 1}</summary>${renderWaveContents(wave)}</details>`;
+  `<details class="completed-wave"><summary class="completed-wave-chip"><span class="check" aria-hidden="true">✓</span> Wave ${wave.index + 1}</summary>${renderWaveContents(wave)}</details>`;
 
 export const renderStatusPage = (status: CampaignStatus) => `<!doctype html>
 <html lang="en">
@@ -241,7 +241,7 @@ export const renderStatusPage = (status: CampaignStatus) => `<!doctype html>
   .wave, .card { background: var(--color-box-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: 1rem; margin: 1rem 0; box-shadow: 0 8px 22px #0004; }
   .wave { border-top: 3px solid var(--color-primary); }
   .completed-waves { display: flex; align-items: flex-start; flex-wrap: wrap; gap: .5rem; margin: 1rem 0; color: var(--color-text-light); }
-  .completed-label { font-weight: 700; padding: .3rem 0; color: var(--color-text); }
+  .completed-wave-chip .check { color: var(--color-green); font-weight: 700; }
   .completed-wave-bar, .chips { display: flex; flex-wrap: wrap; gap: .5rem; }
   .completed-wave { display: inline-block; }
   .completed-wave[open] { display: block; flex-basis: 100%; border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: .75rem; background: var(--color-box-body); }
@@ -287,7 +287,7 @@ ${
   status.waves.length
     ? `${
         status.waves.some((wave) => wave.status === "closed")
-          ? `<div class="completed-waves"><span class="completed-label">Completed:</span><div class="completed-wave-bar">${status.waves.filter((wave) => wave.status === "closed").map(renderCompletedWave).join("")}</div></div>`
+          ? `<div class="completed-waves"><div class="completed-wave-bar">${status.waves.filter((wave) => wave.status === "closed").map(renderCompletedWave).join("")}</div></div>`
           : ""
       }${status.waves.filter((wave) => wave.status !== "closed").map(renderOpenWave).join("")}`
     : "<p>No active campaign or queue found.</p>"

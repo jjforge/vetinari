@@ -248,9 +248,10 @@ test("renderStatusPage collapses closed waves into expandable completed wave chi
     parked: [],
   });
 
-  assert.match(html, /<div class="completed-waves"><span class="completed-label">Completed:<\/span>/);
-  assert.match(html, /<details class="completed-wave"><summary class="completed-wave-chip">Wave 1<\/summary>/);
-  assert.doesNotMatch(html, /<section class="completed-waves"><h2>Completed waves<\/h2>/);
+  assert.match(html, /<div class="completed-waves"><div class="completed-wave-bar">/);
+  assert.doesNotMatch(html, /Completed:/);
+  assert.match(html, /<details class="completed-wave"><summary class="completed-wave-chip"><span class="check" aria-hidden="true">✓<\/span> Wave 1<\/summary>/);
+  assert.match(html, /\.completed-wave-chip \.check \{ color: var\(--color-green\);/);
   assert.match(html, /<section class="wave"><h2>Wave 2 <span class="wave-status running">running<\/span><\/h2>/);
 });
 
@@ -261,7 +262,7 @@ test("serveStatus can bind to a non-localhost host for tailnet access", () => {
 test("renderStatusPage includes a configurable refresh interval control", () => {
   const html = renderStatusPage({ project: "demo", waves: [{ index: 0, status: "closed", issues: [] }], parked: [] });
 
-  assert.match(html, /<summary class="completed-wave-chip">Wave 1<\/summary>/);
+  assert.match(html, /<summary class="completed-wave-chip"><span class="check" aria-hidden="true">✓<\/span> Wave 1<\/summary>/);
   assert.match(html, /class="refresh" title="Auto-refresh the page on an interval"/);
   assert.match(html, /<input id="refresh-enabled" type="checkbox" checked \/> <span>Auto-refresh<\/span>/);
   assert.match(html, /id="refresh-seconds"/);

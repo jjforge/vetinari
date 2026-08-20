@@ -263,8 +263,11 @@ test("renderStatusPage includes a configurable refresh interval control", () => 
   const html = renderStatusPage({ project: "demo", waves: [{ index: 0, status: "closed", issues: [] }], parked: [] });
 
   assert.match(html, /<summary class="completed-wave-chip"><span class="check" aria-hidden="true">✓<\/span> Wave 1<\/summary>/);
-  assert.match(html, /class="refresh" title="Auto-refresh the page on an interval"/);
-  assert.match(html, /<input id="refresh-enabled" type="checkbox" checked \/> <span>Auto-refresh<\/span>/);
+  assert.match(html, /class="refresh" title="Auto-refresh the page every N seconds"/);
+  assert.match(html, /<input id="refresh-enabled" type="checkbox" checked \/> <span>Refresh<\/span>/);
+  assert.doesNotMatch(html, /Auto-refresh<\/span>|>every<|>s<\/span>/);
+  // No pill/chip background around the control.
+  assert.doesNotMatch(html, /\.refresh \{[^}]*border-radius: 999px/);
   assert.match(html, /id="refresh-seconds"/);
   assert.match(html, /max="999"/);
   assert.match(html, /\.refresh input\[type="number"\] \{ width: 3ch;/);

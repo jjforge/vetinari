@@ -232,8 +232,7 @@ export const renderStatusPage = (status: CampaignStatus) => `<!doctype html>
   h1 { font-size: clamp(1.8rem, 4vw, 3rem); margin: 0; letter-spacing: -0.035em; color: var(--color-text); }
   h2 { color: var(--color-text-light); }
   .page-top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border-bottom: 1px solid var(--color-light-border); padding-bottom: 1rem; }
-  .refresh { margin-left: auto; width: max-content; background: var(--color-box-body); border: 1px solid var(--color-secondary); border-radius: 999px; padding: .45rem .75rem; }
-  .refresh { display: inline-flex; align-items: center; gap: .75rem; }
+  .refresh { margin-left: auto; display: inline-flex; align-items: center; gap: .5rem; color: var(--color-text-light-2); }
   .refresh label { display: inline-flex; align-items: center; gap: .4rem; }
   .refresh input[type="checkbox"] { width: 1rem; height: 1rem; accent-color: var(--color-primary); cursor: pointer; }
   .refresh input[type="number"] { width: 3ch; color: var(--color-text); background: var(--color-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); padding: .25rem; }
@@ -271,7 +270,7 @@ export const renderStatusPage = (status: CampaignStatus) => `<!doctype html>
 </style>
 </head>
 <body>
-<div class="page-top"><h1>${escapeHtml(status.project)} status</h1><div class="refresh" title="Auto-refresh the page on an interval"><label><input id="refresh-enabled" type="checkbox" checked /> <span>Auto-refresh</span></label><label class="refresh-every"><span>every</span> <input id="refresh-seconds" type="number" min="1" max="999" step="1" value="45" /> <span>s</span></label></div></div>
+<div class="page-top"><h1>${escapeHtml(status.project)} status</h1><div class="refresh" title="Auto-refresh the page every N seconds"><label><input id="refresh-enabled" type="checkbox" checked /> <span>Refresh</span></label><label class="refresh-every"><input id="refresh-seconds" type="number" min="1" max="999" step="1" value="45" /></label></div></div>
 ${
   status.parked.length
     ? `<section class="parked"><h2>Parked issues <span class="parked-count">${status.parked.length} awaiting you</span></h2>${status.parked

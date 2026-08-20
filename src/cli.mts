@@ -4,6 +4,7 @@ import { setLogFile } from "./log.ts";
 import { answerPromptFor, runLoop } from "./loop.ts";
 import { attend, baseline, campaign, dispatch, queue, requireTelegram, tgTest } from "./modes.ts";
 import { listParked, readParked } from "./state.ts";
+import { serveStatus } from "./status.ts";
 
 const USAGE = `sandcastle-tdd <mode> [args]
 
@@ -15,6 +16,8 @@ const USAGE = `sandcastle-tdd <mode> [args]
   attend <task>            one task, answering itself via Telegram replies
   dispatch                 the ONE Telegram poller; routes replies to parked tasks
   parked                   list parked tasks and their questions
+  status [--port <port>] [--host <host>]
+                           local web page for campaign/wave and parked status
   tg-test                  prove the Telegram round-trip
 
 Options: --config <path>   (default: sandcastle-tdd.config.mts in cwd)`;
@@ -78,6 +81,16 @@ switch (mode) {
     const recs = listParked(cfg);
     if (!recs.length) console.log("nothing parked");
     for (const r of recs) console.log(`\n=== ${r.taskId} (${r.reason}, ${r.parkedAt}) branch ${r.branch}\n${r.question}\n`);
+    break;
+  }
+  case "status": {
+    const portIdx = rest.indexOf("--port");
+    const hostIdx = rest.indexOf("--host");
+    const port = portIdx >= 0 ? Number(rest[portIdx + 1]) : Number(process.env.SANDCASTLE_STATUS_PORT ?? 8765);
+    const host = hostIdx >= 0 ? rest[hostIdx + 1] : process.env.SANDCASTLE_STATUS_HOST ?? "127.0.0.1";
+    if (!Number.isInteger(port) || port < 0) throw new Error("status --port needs a non-negative integer");
+    if (!host) throw new Error("status --host needs a host, e.g. 127.0.0.1 or 0.0.0.0");
+    await serveStatus(cfg, { port, host, configPath: cfgPath });
     break;
   }
   case "tg-test": {

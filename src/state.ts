@@ -42,6 +42,10 @@ export const hasParked = (cfg: ResolvedConfig, taskId: string) => existsSync(fil
 
 export const clearParked = (cfg: ResolvedConfig, taskId: string) => rmSync(file(cfg, taskId), { force: true });
 
+export function clearParkedForTasks(cfg: ResolvedConfig, taskIds: string[]) {
+  for (const taskId of taskIds) clearParked(cfg, taskId);
+}
+
 export function listParked(cfg: ResolvedConfig): ParkedRecord[] {
   mkdirSync(cfg.parkedDir, { recursive: true });
   return readdirSync(cfg.parkedDir)

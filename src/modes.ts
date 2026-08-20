@@ -5,7 +5,7 @@ import { runGates } from "./gate.ts";
 import { makeSandbox } from "./sandbox.ts";
 import { answerPromptFor, runLoop, type ResumeEntry } from "./loop.ts";
 import { currentBranch, integrateGreens } from "./merge.ts";
-import { clearParked, hasParked, listParked, readParked } from "./state.ts";
+import { clearParked, clearParkedForTasks, hasParked, listParked, readParked } from "./state.ts";
 import { tgConfigured, tgDrain, tgPoll, tgSend, tgWaitReply } from "./telegram.ts";
 
 /**
@@ -78,8 +78,9 @@ export async function queue(cfg: ResolvedConfig, taskIds: string[], slots: numbe
  * base, clean up the merged branches/worktrees, and only then start the next
  * batch — the manual merge→test→next-queue chain, automated.
  *
- * Green-only by design: a parked task's branch and preserved worktree are left
- * untouched so it stays answerable via dispatch. A merge conflict or a red
+ * Green-only by design: only green branches are merged. Once a wave is over,
+ * parked records for its non-green tasks are cleared so stale questions do not
+ * bleed into the next wave. A merge conflict or a red
  * merged base halts the whole campaign with the base rolled back to where the
  * batch began — no later batch runs on a broken or half-merged base.
  */
@@ -117,8 +118,9 @@ export async function campaign(cfg: ResolvedConfig, batches: string[][], slots: 
       return;
     }
 
-    const note = held.length ? ` — left for dispatch: ${held.map((t) => `${t}(${outcomes[t]})`).join(", ")}` : "";
-    log("campaign-batch-done", { index: i, merged, held });
+    if (held.length) clearParkedForTasks(cfg, held);
+    const note = held.length ? ` — cleared parked records for completed wave: ${held.map((t) => `${t}(${outcomes[t]})`).join(", ")}` : "";
+    log("campaign-batch-done", { index: i, merged, held, clearedParked: held });
     await tgSend(`✅ ${cfg.project} campaign batch ${i + 1} merged: ${merged.join(", ") || "nothing"}${note}`);
     console.log(`batch ${i + 1}/${batches.length}: merged ${merged.join(", ") || "nothing"}${note}`);
   }

@@ -106,6 +106,7 @@ Two things to know:
 npx sandcastle-tdd run 436                    # one task: loop until green or parked
 npx sandcastle-tdd queue 436 611 623 640      # bounded pool, QUEUE_SLOTS (default 3)
 npx sandcastle-tdd parked                     # what's waiting on you, and why
+npx sandcastle-tdd status                     # local campaign/wave dashboard at http://127.0.0.1:8765
 npx sandcastle-tdd answer 436 "use approach B, and say why in the commit"
 ```
 
@@ -123,9 +124,10 @@ case a per-task gate can't catch — then deletes those branches, prunes their
 worktrees, and starts the next batch on the now-advanced base. A merge conflict
 or a red merged base **halts the campaign**, rolls the base back to where that
 batch began, and leaves every branch intact — you get a Telegram message and no
-later batch runs on a broken base. Parked tasks are never merged or cleaned:
-their branch and preserved worktree stay answerable via `dispatch`. Pushing
-stays yours.
+later batch runs on a broken base. When a batch finishes, any parked records
+for non-green tasks in that completed wave are cleared from `.sandcastle/parked/`
+so stale questions do not bleed into the next wave's dashboard. Pushing stays
+yours.
 
 ## Answer from your phone
 
@@ -269,6 +271,7 @@ it there too and re-run that project's `baseline`.
 | `attend <task>` | one task, self-answering via Telegram |
 | `dispatch` | the single poller; routes replies to parked tasks |
 | `parked` | list what is waiting and why |
+| `status [--port <port>]` | local web page showing campaign waves, issue status chips, and parked-response cards |
 | `tg-test` | prove the Telegram round-trip |
 
 ## What lands where

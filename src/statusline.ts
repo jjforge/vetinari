@@ -1,3 +1,5 @@
+import { execFileSync } from "node:child_process";
+import { basename } from "node:path";
 import { loadConfig } from "./config.ts";
 import { buildStatus, type CampaignStatus, type IssueStatus } from "./status.ts";
 
@@ -10,10 +12,32 @@ const COUNT_EMOJI: Array<[IssueStatus, string]> = [
 ];
 
 /**
- * A single, compact line for the Claude Code status bar: the project, the wave
- * in flight, and a count per status across the whole campaign. Zero counts are
- * dropped so the line stays short. Pure and newline-free by contract — the
- * status bar shows one line.
+ * Drop a trailing context-window parenthetical from a model name — Claude Code
+ * reports the 1M-window model as "Opus 4.8 (1M context)", which is noise in a
+ * compact bar. Only context parentheticals go; anything else is left intact.
+ */
+export function trimModelName(name: string | undefined): string | undefined {
+  return name?.replace(/\s*\([^)]*context[^)]*\)\s*$/i, "").trim();
+}
+
+/**
+ * Line 1 — a compact version of Claude Code's own default status line: model
+ * (already trimmed), directory, git branch, context-used percent. Each part is
+ * dropped when absent, so the line degrades gracefully. Pure.
+ */
+export function formatContextLine(parts: { model?: string; dir?: string; branch?: string; contextPct?: number }): string {
+  const segs: string[] = [];
+  if (parts.model) segs.push(parts.model);
+  if (parts.dir) segs.push(parts.dir);
+  if (parts.branch) segs.push(parts.branch);
+  if (typeof parts.contextPct === "number") segs.push(`${Math.round(parts.contextPct)}%`);
+  return segs.join(" · ");
+}
+
+/**
+ * Line 2 — the sandcastle run: project, the wave in flight, and a count per
+ * status across the whole campaign. Zero counts are dropped so the line stays
+ * short. Pure and newline-free by contract.
  */
 export function formatStatusLine(status: CampaignStatus): string {
   const issues = status.waves.flatMap((wave) => wave.issues);
@@ -44,28 +68,50 @@ async function readStdinJson(): Promise<any> {
   }
 }
 
+/** Current branch of `dir`, or undefined (detached HEAD, not a repo, git error). */
+function gitBranch(dir: string): string | undefined {
+  try {
+    return execFileSync("git", ["-C", dir, "symbolic-ref", "--quiet", "--short", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
- * The `statusline` command: emit one compact sandcastle line for the Claude Code
- * status bar. Claude Code blanks the status line on a non-zero exit, so this
- * never throws — no config in this directory (or any other failure) just prints
- * nothing, leaving a clean line. Uses the synchronous log-derived status only:
- * no network, no issue-name fetch, so it stays fast enough to run on every
+ * The `statusline` command: two lines for the Claude Code status bar — line 1
+ * mirrors Claude Code's default (model, dir, branch, context%) with the model
+ * name trimmed; line 2 is the sandcastle run, shown only where a config lives.
+ * Claude Code blanks the status line on a non-zero exit, so this never throws:
+ * every field is optional and any failure just narrows what prints. Line 2 uses
+ * the synchronous log-derived status — no network — so it stays fast on every
  * refresh.
  */
 export async function runStatusLine(cfgPath?: string): Promise<void> {
-  try {
-    const input = await readStdinJson();
-    const dir = input?.workspace?.current_dir ?? input?.cwd;
-    if (typeof dir === "string" && dir && dir !== process.cwd()) {
-      try {
-        process.chdir(dir);
-      } catch {
-        // stay in the current directory if the reported one is unreachable
-      }
+  const input = await readStdinJson();
+  const dir: unknown = input?.workspace?.current_dir ?? input?.cwd;
+  if (typeof dir === "string" && dir && dir !== process.cwd()) {
+    try {
+      process.chdir(dir);
+    } catch {
+      // stay in the current directory if the reported one is unreachable
     }
-    const cfg = await loadConfig(cfgPath);
-    process.stdout.write(formatStatusLine(buildStatus(cfg)) + "\n");
-  } catch {
-    // No sandcastle config here, or a transient read error: show nothing.
   }
+
+  const line1 = formatContextLine({
+    model: trimModelName(input?.model?.display_name),
+    dir: typeof dir === "string" ? basename(dir) : undefined,
+    branch: gitBranch(typeof dir === "string" ? dir : "."),
+    contextPct: typeof input?.context_window?.used_percentage === "number" ? input.context_window.used_percentage : undefined,
+  });
+
+  let line2 = "";
+  try {
+    const cfg = await loadConfig(cfgPath);
+    line2 = formatStatusLine(buildStatus(cfg));
+  } catch {
+    // No sandcastle config here: line 1 alone still describes the session.
+  }
+
+  const out = [line1, line2].filter(Boolean).join("\n");
+  if (out) process.stdout.write(out + "\n");
 }

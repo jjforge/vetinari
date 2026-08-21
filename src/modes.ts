@@ -94,7 +94,7 @@ export async function queue(cfg: ResolvedConfig, taskIds: string[], slots: numbe
  * merged base halts the whole campaign with the base rolled back to where the
  * batch began — no later batch runs on a broken or half-merged base.
  */
-export async function campaign(cfg: ResolvedConfig, batches: string[][], slots: number) {
+export async function campaign(cfg: ResolvedConfig, batches: string[][], slots: number): Promise<boolean> {
   // Every green branch merges into whatever the main tree has checked out, and
   // each batch's agents cut their branch from that same HEAD. If it is not the
   // base branch the campaign would merge into, and build on, the wrong place.
@@ -125,7 +125,7 @@ export async function campaign(cfg: ResolvedConfig, batches: string[][], slots: 
         `🛑 ${cfg.project} campaign HALTED at batch ${i + 1} — ${halt.reason}${where}. Base rolled back; branches kept for you.\n\n${halt.detail}`,
       );
       console.log(`campaign halted (${halt.reason}${where}) — base rolled back, ${batches.length - i - 1} batch(es) not started.`);
-      return;
+      return false;
     }
 
     if (held.length) clearParkedForTasks(cfg, held);
@@ -138,6 +138,7 @@ export async function campaign(cfg: ResolvedConfig, batches: string[][], slots: 
   log("campaign-done", { batches: batches.length });
   await tgSend(`🏆 ${cfg.project} campaign complete — ${batches.length} batch(es) merged onto ${cfg.baseBranch}.`);
   console.log("campaign complete.");
+  return true;
 }
 
 /**

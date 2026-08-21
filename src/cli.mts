@@ -1,9 +1,10 @@
 #!/usr/bin/env -S npx tsx
 import { loadConfig } from "./config.ts";
-import { setLogFile } from "./log.ts";
+import { log, setLogFile } from "./log.ts";
 import { answerPromptFor, runLoop } from "./loop.ts";
 import { attend, baseline, campaign, dispatch, queue, requireTelegram, tgTest } from "./modes.ts";
 import { computeCarve } from "./carve.ts";
+import { archiveRun } from "./archive.ts";
 import { listParked, readParked } from "./state.ts";
 import { serveStatus } from "./status.ts";
 import { runStatusLine } from "./statusline.ts";
@@ -20,6 +21,9 @@ const USAGE = `sandcastle-tdd <mode> [args]
   attend <task>            one task, answering itself via Telegram replies
   dispatch                 the ONE Telegram poller; routes replies to parked tasks
   parked                   list parked tasks and their questions
+  clear                    archive the run log + clear parked, resetting the
+                           dashboard/status line to idle (automatic on clean
+                           campaign/queue completion; this forces it now)
   status [--port <port>] [--host <host>]
                            local web page for campaign/wave and parked status
   statusline               one compact line for the Claude Code status bar (reads
@@ -50,6 +54,16 @@ if (mode === "statusline") {
 const cfg = await loadConfig(cfgPath);
 setLogFile(cfg.logFile);
 
+// Reset the live state the dashboard and status line read once a run is truly
+// over, so a finished run stops showing as current. Skip while anything is still
+// parked — an unanswered question means the run is not finished.
+const archiveIfIdle = () => {
+  if (listParked(cfg).length) return;
+  const r = archiveRun(cfg);
+  log("archived", { archivedLog: r.archivedLog ?? null, clearedParked: r.clearedParked });
+  if (r.archivedLog) console.log(`archived run log → ${r.archivedLog}`);
+};
+
 switch (mode) {
   case "baseline": {
     process.exitCode = (await baseline(cfg)) ? 0 : 1;
@@ -64,13 +78,15 @@ switch (mode) {
   case "queue": {
     if (!rest.length) throw new Error("queue needs at least one task id");
     await queue(cfg, rest, Math.max(1, Number(process.env.QUEUE_SLOTS ?? 3)));
+    archiveIfIdle();
     break;
   }
   case "campaign": {
     // Each arg is one batch: `campaign "436 611 623" "640 655" "701"`.
     const batches = rest.map((b) => b.split(/[\s,]+/).filter(Boolean)).filter((b) => b.length);
     if (!batches.length) throw new Error('campaign needs at least one batch: campaign "436 611" "623 640"');
-    await campaign(cfg, batches, Math.max(1, Number(process.env.QUEUE_SLOTS ?? 3)));
+    // Archive only a clean run — a halt leaves state deliberately, to inspect.
+    if (await campaign(cfg, batches, Math.max(1, Number(process.env.QUEUE_SLOTS ?? 3)))) archiveIfIdle();
     break;
   }
   case "carve": {
@@ -117,6 +133,15 @@ switch (mode) {
     const recs = listParked(cfg);
     if (!recs.length) console.log("nothing parked");
     for (const r of recs) console.log(`\n=== ${r.taskId} (${r.reason}, ${r.parkedAt}) branch ${r.branch}\n${r.question}\n`);
+    break;
+  }
+  case "clear": {
+    // Force a reset now, even with questions still parked — the manual escape
+    // hatch, unlike the automatic archive that waits for an idle queue.
+    const r = archiveRun(cfg);
+    log("archived", { archivedLog: r.archivedLog ?? null, clearedParked: r.clearedParked });
+    console.log(r.archivedLog ? `archived run log → ${r.archivedLog}` : "no run log to archive");
+    console.log(`cleared ${r.clearedParked} parked record(s) — dashboard and status line now read idle`);
     break;
   }
   case "status": {

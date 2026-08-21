@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Run cleanup so a finished run stops showing as current in the dashboard and
+  status line. On clean completion of a `campaign` or `queue` (not on a halt, and
+  only when nothing is still parked) the orchestrator log is archived to
+  `.sandcastle/logs/archive/orchestrator-<ts>.jsonl` — moved aside, never deleted
+  — and a fresh empty log takes its place, so `buildStatus` reads idle. Parked
+  records are cleared as part of the reset. A new `clear` command forces the same
+  reset on demand, even with questions still parked. `archiveRun` is exported.
+
 - Incidental-findings harvest: with a `reportFinding` handler configured, a green
   run ends with one extra turn on the agent's live session asking for any defect
   it noticed but did not fix — context that otherwise dies with the container —
@@ -18,14 +26,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   finding and never turns a real green into an error. Absent the handler, no
   harvest turn runs. `parseFindings`/`reportFindings`/`githubFindingReporter` and
   the `Finding` types are exported from the entry point.
-- `statusline` command: prints one compact line — project, wave in flight, and a
-  count per status — for the Claude Code status bar, so a running campaign shows
-  without leaving the editor. Reads Claude Code's status JSON on stdin, resolves
-  the config from the workspace directory, and derives everything from the log
-  (no network) to stay fast on every refresh. Outside a sandcastle project it
-  prints nothing and always exits zero (a non-zero exit would blank the bar).
-  Wire it via `.claude/settings.json` `statusLine` with a `refreshInterval` so it
-  stays live during a run; documented in the README.
+- `statusline` command: prints two lines for the Claude Code status bar. Line 1
+  mirrors Claude Code's default — model, directory, git branch, context-used % —
+  with the model name trimmed of its `(1M context)` suffix; line 2 is the
+  sandcastle run (project, wave in flight, a count per status), shown only where a
+  config lives. Reads Claude Code's status JSON on stdin, resolves the config from
+  the workspace directory, and derives line 2 from the log (no network) to stay
+  fast on every refresh. Outside a sandcastle project line 2 is omitted; it always
+  exits zero (a non-zero exit would blank the bar). Wire it via
+  `.claude/settings.json` `statusLine` with a `refreshInterval` so it stays live
+  during a run; documented in the README.
 - `carve <issue> <batch…>` command: drops an issue and the transitive closure of
   everything blocked by it from a campaign, then runs the reduced campaign
   (`--dry-run` prints the plan instead). Removal cascades across every branch and

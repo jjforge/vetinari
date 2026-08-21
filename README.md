@@ -129,6 +129,14 @@ for non-green tasks in that completed wave are cleared from `.sandcastle/parked/
 so stale questions do not bleed into the next wave's dashboard. Pushing stays
 yours.
 
+On clean completion, a `campaign` or `queue` **archives the run** so a finished
+run stops lingering in the dashboard and status line: the orchestrator log is
+moved aside to `.sandcastle/logs/archive/orchestrator-<ts>.jsonl` (kept, never
+deleted) and replaced with an empty one, so the status reads idle. It only fires
+on a clean finish with nothing still parked — a halt or an open question leaves
+the state in place to inspect. Run `sandcastle-tdd clear` to force the same reset
+yourself.
+
 **Carve one issue out of a campaign.** When an issue turns out not to be ready,
 `carve` drops it *and everything that can't proceed without it* — the transitive
 closure of its dependents — then runs the rest:
@@ -150,30 +158,38 @@ conflict-free as you built it.
 
 ### In your Claude Code status bar
 
-`statusline` prints one compact line — project, the wave in flight, and a count
-per status — for the Claude Code status bar, so a running campaign is visible
-without leaving the editor:
+`statusline` prints two lines for the Claude Code status bar: line 1 mirrors
+Claude Code's own default (model, directory, git branch, context-used %) with the
+model name trimmed of its `(1M context)` suffix; line 2 is the sandcastle run —
+project, the wave in flight, and a count per status — so a running campaign is
+visible without leaving the editor:
 
 ```
+Opus 4.8 · jjforge · develop · 24%
 🏰 jjforge · wave 2/3 · ✅2 🔄1 ⏸1 ⚪1
 ```
 
-Wire it into the project's `.claude/settings.json` (so it only appears where the
-config lives):
+Wire it into the project's `.claude/settings.json` with the same command you
+already run sandcastle through, so the `sandcastle-tdd` import and the config
+both resolve:
 
 ```json
 {
-  "statusLine": { "type": "command", "command": "npx sandcastle-tdd statusline", "refreshInterval": 5 }
+  "statusLine": { "type": "command", "command": ".sandcastle/run statusline", "refreshInterval": 5 }
 }
 ```
 
-`refreshInterval` matters: Claude Code refreshes the status line on its own
-events, but nothing tells it when the orchestrator's log changes — polling every
-few seconds keeps the line live during a run. It reads Claude Code's JSON on
-stdin, resolves the config from the workspace directory, and derives everything
-from the log alone (no network), so it stays fast. Outside a sandcastle project
-it prints nothing and exits clean, leaving your normal status line untouched — a
-non-zero exit would blank the bar, so it never errors out.
+(Use whatever invokes the CLI in your project — an installed dep is
+`npx sandcastle-tdd statusline`.) `refreshInterval` matters: Claude Code
+refreshes the status line on its own events, but nothing tells it when the
+orchestrator's log changes — polling every few seconds keeps the line live
+during a run. It reads Claude Code's JSON on stdin, resolves the config from the
+workspace directory, and derives line 2 from the log alone (no network), so it
+stays fast. Line 1's fields come from Claude Code's own stdin JSON
+(`model.display_name`, `workspace.current_dir`, `context_window.used_percentage`)
+plus a `git` call for the branch. Outside a sandcastle project line 2 is simply
+omitted, leaving line 1 — a non-zero exit would blank the bar, so it never
+errors out.
 
 ### Capture what the agent notices in passing
 
@@ -348,6 +364,7 @@ it there too and re-run that project's `baseline`.
 | `attend <task>` | one task, self-answering via Telegram |
 | `dispatch` | the single poller; routes replies to parked tasks, and answers `/status` with a live summary |
 | `parked` | list what is waiting and why |
+| `clear` | archive the run log + clear parked, resetting the dashboard/status line to idle (automatic on clean campaign/queue completion) |
 | `status [--port <port>]` | local web page showing campaign waves, issue status chips, and parked-response cards |
 | `statusline` | one compact line for the Claude Code status bar; reads Claude Code's JSON on stdin |
 | `tg-test` | prove the Telegram round-trip |
@@ -359,6 +376,7 @@ it there too and re-run that project's `baseline`.
 | `.sandcastle/parked/<task>.json` | pending question, session id, branch, Telegram message id |
 | `.sandcastle/logs/orchestrator.jsonl` | every event: sandbox, turn, gate, park, green |
 | `.sandcastle/logs/gate-<ts>.log` | full stdout/stderr of each gate run |
+| `.sandcastle/logs/archive/orchestrator-<ts>.jsonl` | a finished run's log, moved aside on completion or `clear` |
 
 ## Known limits
 

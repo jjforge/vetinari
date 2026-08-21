@@ -2,7 +2,7 @@
 // a Rust sidecar, tasks sourced from GitHub issues.
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
-import { defineConfig } from "sandcastle-tdd";
+import { defineConfig, githubBlockedBy } from "sandcastle-tdd";
 
 export default defineConfig({
   project: "jjforge",
@@ -44,6 +44,10 @@ export default defineConfig({
 
   fetchTask: (id) =>
     execFileSync("gh", ["issue", "view", id, "--repo", "jjforge/jjforge", "--json", "title,body,comments"], { encoding: "utf8" }),
+
+  // Powers `carve`: native GitHub "blocked by" links tell it which issues fall
+  // when one is pulled from a campaign.
+  blockedBy: githubBlockedBy("jjforge/jjforge"),
 
   toolchainProbe: "go version && cargo --version && sccache --version && claude --version && git --version",
 

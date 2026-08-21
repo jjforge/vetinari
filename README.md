@@ -129,6 +129,25 @@ for non-green tasks in that completed wave are cleared from `.sandcastle/parked/
 so stale questions do not bleed into the next wave's dashboard. Pushing stays
 yours.
 
+**Carve one issue out of a campaign.** When an issue turns out not to be ready,
+`carve` drops it *and everything that can't proceed without it* — the transitive
+closure of its dependents — then runs the rest:
+
+```bash
+npx sandcastle-tdd carve 640 "611 640" "623 701"   # 701 is blocked by 640
+# carve #640 → removed #640, #701 (dependents: #701)
+# remaining campaign: "611" "623"   ← runs this
+```
+
+Dependents come from your tracker via the config's `blockedBy` resolver;
+`githubBlockedBy("owner/repo")` ships as a ready implementation over GitHub's
+native "blocked by" links. Removal is transitive across every branch and
+diamond (an issue falls if *any* of its blockers falls), and is computed over
+the campaign's own issues — a blocker outside the named campaign is out of
+scope. It runs the reduced campaign immediately; `--dry-run` only prints the
+plan. Because carve only *drops* issues, each remaining wave stays as
+conflict-free as you built it.
+
 ## Answer from your phone
 
 Set `SANDCASTLE_TELEGRAM_BOT_TOKEN` and `SANDCASTLE_TELEGRAM_CHAT_ID` in the
@@ -273,6 +292,7 @@ it there too and re-run that project's `baseline`.
 | `run <task>` | the TDD loop; exit 0 green, 2 parked |
 | `queue <task…>` | bounded pool; a park frees its slot |
 | `campaign <batch…>` | drain each batch, merge its greens, gate the merged base, then start the next |
+| `carve <issue> <batch…>` | drop the issue + its transitive dependents, then run the rest as a campaign (`--dry-run` to just print) |
 | `answer <task> <text>` | resume a parked task with your answer |
 | `attend <task>` | one task, self-answering via Telegram |
 | `dispatch` | the single poller; routes replies to parked tasks, and answers `/status` with a live summary |

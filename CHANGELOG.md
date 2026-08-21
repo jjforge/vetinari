@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `carve <issue> <batch…>` command: drops an issue and the transitive closure of
+  everything blocked by it from a campaign, then runs the reduced campaign
+  (`--dry-run` prints the plan instead). Removal cascades across every branch and
+  diamond — an issue falls if any of its blockers falls — and is computed over
+  the campaign's own issues, so a blocker outside the named campaign is out of
+  scope. Since carve only drops issues, each remaining wave stays as conflict-free
+  as it was built.
+- Config gains an optional `blockedBy(id)` resolver (the ids that block an id)
+  that `carve` reads. `githubBlockedBy("owner/repo")` ships as a ready
+  implementation over GitHub's native "blocked by" issue dependencies; both are
+  exported from the package entry point.
 - Inbound `/status` command over Telegram: while `dispatch` is running, sending
   `/status` (bare, or `/status@yourbot` in a group) replies in-chat with a live
   summary — each wave, its issue chips with status, and any parked issues

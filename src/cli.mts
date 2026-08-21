@@ -3,6 +3,7 @@ import { loadConfig } from "./config.ts";
 import { setLogFile } from "./log.ts";
 import { answerPromptFor, runLoop } from "./loop.ts";
 import { attend, baseline, campaign, dispatch, queue, requireTelegram, tgTest } from "./modes.ts";
+import { computeCarve } from "./carve.ts";
 import { listParked, readParked } from "./state.ts";
 import { serveStatus } from "./status.ts";
 
@@ -12,6 +13,8 @@ const USAGE = `sandcastle-tdd <mode> [args]
   run <task>               the TDD loop: agent turn → gate → resume on red
   queue <task…>            bounded pool over several tasks (QUEUE_SLOTS, default 3)
   campaign <batch…>        queue each batch, then merge greens → gate base → next batch
+  carve <issue> <batch…>   drop <issue> + everything blocked by it, then run the rest
+                           as a campaign (--dry-run to only print the reduced plan)
   answer <task> <text>     resume a parked task with a human answer
   attend <task>            one task, answering itself via Telegram replies
   dispatch                 the ONE Telegram poller; routes replies to parked tasks
@@ -57,6 +60,28 @@ switch (mode) {
     const batches = rest.map((b) => b.split(/[\s,]+/).filter(Boolean)).filter((b) => b.length);
     if (!batches.length) throw new Error('campaign needs at least one batch: campaign "436 611" "623 640"');
     await campaign(cfg, batches, Math.max(1, Number(process.env.QUEUE_SLOTS ?? 3)));
+    break;
+  }
+  case "carve": {
+    const dryRun = rest.includes("--dry-run");
+    const positional = rest.filter((a) => a !== "--dry-run");
+    const [target, ...batchArgs] = positional;
+    if (!target || !batchArgs.length) throw new Error('carve needs an issue and a campaign: carve 640 "611 640" "623 701"');
+    if (!cfg.blockedBy) throw new Error('carve needs a "blockedBy" resolver in your config — e.g. blockedBy: githubBlockedBy("owner/repo").');
+
+    const batches = batchArgs.map((b) => b.split(/[\s,]+/).filter(Boolean)).filter((b) => b.length);
+    const { removed, remaining } = await computeCarve(batches, target, cfg.blockedBy);
+
+    const dependents = removed.filter((id) => id !== target.replace(/^#/, "").trim());
+    console.log(`carve #${target.replace(/^#/, "")} → removed ${removed.map((i) => `#${i}`).join(", ")}` + (dependents.length ? ` (dependents: ${dependents.map((i) => `#${i}`).join(", ")})` : " (no dependents)"));
+    console.log(`remaining campaign: ${remaining.length ? remaining.map((w) => `"${w.join(" ")}"`).join(" ") : "(nothing left to run)"}`);
+
+    if (dryRun) break;
+    if (!remaining.length) {
+      console.log("nothing left to run after the carve — done.");
+      break;
+    }
+    await campaign(cfg, remaining, Math.max(1, Number(process.env.QUEUE_SLOTS ?? 3)));
     break;
   }
   case "answer": {

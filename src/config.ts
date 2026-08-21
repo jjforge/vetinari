@@ -46,6 +46,13 @@ export interface SandcastleTddConfig {
   mounts?: MountSpec[];
   /** Fetch the task text for an id — an issue body, a spec file, anything. */
   fetchTask: (id: string) => string | Promise<string>;
+  /**
+   * The ids that BLOCK a given id (its prerequisites). Only needed by the
+   * `carve` command, which removes an issue and everything transitively blocked
+   * by it from a campaign. Wire it to your tracker — `githubBlockedBy(repo)`
+   * ships as a ready GitHub implementation.
+   */
+  blockedBy?: (id: string) => string[] | Promise<string[]>;
   /** Override the bundled TDD prompt. Must keep the signal contract. */
   promptFile?: string;
   agent?: {

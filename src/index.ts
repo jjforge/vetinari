@@ -8,7 +8,9 @@ export { attend, baseline, campaign, dispatch, queue, tgTest } from "./modes.ts"
 export { computeCarve } from "./carve.ts";
 export { formatStatusLine, runStatusLine } from "./statusline.ts";
 export type { CarveResult, BlockedByOf } from "./carve.ts";
-export { githubBlockedBy } from "./github.ts";
+export { githubBlockedBy, githubFindingReporter } from "./github.ts";
+export { parseFindings, reportFindings } from "./findings.ts";
+export type { Finding, FindingReporter, FindingContext, FindingResult } from "./findings.ts";
 export { listParked, readParked, hasParked, clearParked, park } from "./state.ts";
 export type { ParkedRecord, ParkReason } from "./state.ts";
 export { tgSend, tgWaitReply, tgConfigured } from "./telegram.ts";

@@ -5,6 +5,7 @@ import { runGates } from "./gate.ts";
 import { agentFor, makeSandbox } from "./sandbox.ts";
 import { clearParked, park } from "./state.ts";
 import { tgSend } from "./telegram.ts";
+import { HARVEST_PROMPT, parseFindings, reportFindings } from "./findings.ts";
 
 /**
  * Commits on `branch` not reachable from `base`, in the host repo. Returns null
@@ -53,6 +54,33 @@ const usageOf = (r: any) =>
     },
     { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 },
   );
+
+/**
+ * A green run's last act, before the container is destroyed: ask the agent, on
+ * its own live session, for any defect it noticed but did not fix, and file each
+ * through the configured reporter. Self-contained and never throws — a failed
+ * harvest must not turn a real green into an error. No-op unless a reporter is
+ * configured.
+ */
+async function harvestFindings(cfg: ResolvedConfig, sbx: any, sessionId: string | undefined, common: any, taskId: string) {
+  if (!cfg.reportFinding || !sessionId) return;
+  try {
+    const hr = await sbx.run({ ...common, maxIterations: 1, resumeSession: sessionId, prompt: HARVEST_PROMPT });
+    const findings = parseFindings(hr.stdout ?? "");
+    log("findings", { taskId, count: findings.length });
+    if (!findings.length) return;
+
+    const results = await reportFindings(cfg.reportFinding, findings, { taskId, project: cfg.project });
+    for (const r of results) {
+      if (r.error) log("finding-report-failed", { taskId, summary: r.finding.summary, error: r.error });
+      else log("finding-filed", { taskId, summary: r.finding.summary, url: r.url });
+    }
+    const filed = results.filter((r) => !r.error).length;
+    if (filed) await tgSend(`🔎 ${cfg.project} ${taskId}: filed ${filed} incidental finding(s)${filed !== results.length ? ` (${results.length - filed} failed — see log)` : ""}.`);
+  } catch (e: any) {
+    log("harvest-failed", { taskId, error: String(e?.message ?? e) });
+  }
+}
 
 /**
  * One task, one container: agent turn → orchestrator gate → resume with the
@@ -109,6 +137,8 @@ export async function runLoop(cfg: ResolvedConfig, taskId: string, entry?: Resum
           console.log(`\n*** GREEN — commits on ${sbx.branch}\n`);
           await tgSend(`✅ ${cfg.project} agent GREEN on ${taskId} — orchestrator-verified, commits on ${sbx.branch}`);
           clearParked(cfg, taskId);
+          // Harvest incidental findings on the still-live session before teardown.
+          await harvestFindings(cfg, sbx, sessionId, common, taskId);
           return "green";
         }
 

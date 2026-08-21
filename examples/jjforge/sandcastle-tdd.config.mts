@@ -2,7 +2,7 @@
 // a Rust sidecar, tasks sourced from GitHub issues.
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
-import { defineConfig, githubBlockedBy } from "sandcastle-tdd";
+import { defineConfig, githubBlockedBy, githubFindingReporter } from "sandcastle-tdd";
 
 export default defineConfig({
   project: "jjforge",
@@ -48,6 +48,11 @@ export default defineConfig({
   // Powers `carve`: native GitHub "blocked by" links tell it which issues fall
   // when one is pulled from a campaign.
   blockedBy: githubBlockedBy("jjforge/jjforge"),
+
+  // After a green run, harvest defects the agent noticed but did not fix and file
+  // them as issues — otherwise that context dies with the container. Same label
+  // discipline the interactive /fix-issue command uses.
+  reportFinding: githubFindingReporter("jjforge/jjforge", { labels: ["P2", "bug", "needs-triage"] }),
 
   toolchainProbe: "go version && cargo --version && sccache --version && claude --version && git --version",
 

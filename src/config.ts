@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { existsSync } from "node:fs";
+import type { FindingReporter } from "./findings.ts";
 
 export interface GateSpec {
   /** Shell command run INSIDE the sandbox. Non-zero exit is red. */
@@ -53,6 +54,14 @@ export interface SandcastleTddConfig {
    * ships as a ready GitHub implementation.
    */
   blockedBy?: (id: string) => string[] | Promise<string[]>;
+  /**
+   * When set, a green run ends with a "harvest" turn asking the agent for any
+   * defect it noticed but did not fix — context that would otherwise vanish with
+   * the container — and this files each one somewhere durable.
+   * `githubFindingReporter(repo, { labels })` ships as a GitHub implementation.
+   * Absent, no harvest turn runs and no findings are collected.
+   */
+  reportFinding?: FindingReporter;
   /** Override the bundled TDD prompt. Must keep the signal contract. */
   promptFile?: string;
   agent?: {

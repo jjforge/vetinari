@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Incidental-findings harvest: with a `reportFinding` handler configured, a green
+  run ends with one extra turn on the agent's live session asking for any defect
+  it noticed but did not fix — context that otherwise dies with the container —
+  and files each somewhere durable. `githubFindingReporter("owner/repo", { labels })`
+  ships as a GitHub implementation that opens a labelled issue cross-referenced to
+  the task it was found on. Runs only on green; a failed filing is logged per
+  finding and never turns a real green into an error. Absent the handler, no
+  harvest turn runs. `parseFindings`/`reportFindings`/`githubFindingReporter` and
+  the `Finding` types are exported from the entry point.
 - `statusline` command: prints one compact line — project, wave in flight, and a
   count per status — for the Claude Code status bar, so a running campaign shows
   without leaving the editor. Reads Claude Code's status JSON on stdin, resolves

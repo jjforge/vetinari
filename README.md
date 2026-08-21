@@ -175,6 +175,30 @@ from the log alone (no network), so it stays fast. Outside a sandcastle project
 it prints nothing and exits clean, leaving your normal status line untouched — a
 non-zero exit would blank the bar, so it never errors out.
 
+### Capture what the agent notices in passing
+
+An agent fixing one task often spots a *different* defect it won't fix — and that
+knowledge dies with the container. Set a `reportFinding` handler and a green run
+ends with a **harvest turn**: on its own live session, the agent is asked for any
+unrelated defect it saw (summary, location, repro), and each is filed somewhere
+durable instead of evaporating.
+
+```ts
+import { githubFindingReporter } from "sandcastle-tdd";
+
+export default defineConfig({
+  // …
+  reportFinding: githubFindingReporter("owner/repo", { labels: ["P2", "bug", "needs-triage"] }),
+});
+```
+
+`githubFindingReporter` files each finding as a GitHub issue, labelled and
+cross-referenced to the task it was found on; write your own handler to send
+findings anywhere. The harvest is one extra turn and runs **only on green** (a
+task that never goes green is retried or abandoned, so nothing is filed for it),
+and a failed filing is logged per finding without ever turning a real green into
+an error. Absent `reportFinding`, no harvest turn runs.
+
 ## Answer from your phone
 
 Set `SANDCASTLE_TELEGRAM_BOT_TOKEN` and `SANDCASTLE_TELEGRAM_CHAT_ID` in the

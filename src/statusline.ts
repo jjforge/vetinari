@@ -35,25 +35,26 @@ export function formatContextLine(parts: { model?: string; dir?: string; branch?
 }
 
 /**
- * Line 2 — the sandcastle run: project, the wave in flight, and a count per
- * status across the whole campaign. Zero counts are dropped so the line stays
- * short. Pure and newline-free by contract.
+ * Line 2 — the sandcastle run: the wave in flight and a count per status across
+ * the whole campaign. The 🏰 marks it; the project name is omitted because line
+ * 1 already shows the directory, which is always this one. Zero counts are
+ * dropped so the line stays short. Pure and newline-free by contract.
  */
 export function formatStatusLine(status: CampaignStatus): string {
   const issues = status.waves.flatMap((wave) => wave.issues);
-  if (!issues.length) return `🏰 ${status.project} · idle`;
+  if (!issues.length) return "🏰 idle";
 
   const counts = new Map<IssueStatus, number>();
   for (const issue of issues) counts.set(issue.status, (counts.get(issue.status) ?? 0) + 1);
 
-  const parts = [`🏰 ${status.project}`];
+  const parts: string[] = [];
   const running = status.waves.find((wave) => wave.status === "running");
   if (running) parts.push(`wave ${running.index + 1}/${status.waves.length}`);
 
   const segs = COUNT_EMOJI.filter(([status]) => counts.get(status)).map(([status, emoji]) => `${emoji}${counts.get(status)}`);
   if (segs.length) parts.push(segs.join(" "));
 
-  return parts.join(" · ");
+  return parts.length ? `🏰 ${parts.join(" · ")}` : "🏰 idle";
 }
 
 /** Read Claude Code's status JSON from stdin — best effort, `{}` on anything odd. */

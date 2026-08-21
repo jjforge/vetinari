@@ -13,7 +13,7 @@ test("formatStatusLine summarizes the running wave and status counts on one line
     parked: [],
   });
 
-  assert.match(line, /jjforge/);
+  assert.doesNotMatch(line, /jjforge/); // project name is omitted — line 1 already shows the directory
   assert.match(line, /wave 2\/3/);
   assert.match(line, /✅2/);
   assert.match(line, /🔄1/);
@@ -37,8 +37,7 @@ test("formatStatusLine drops zero-count segments and omits the wave when none is
 
 test("formatStatusLine shows an idle marker when no run is active", () => {
   const line = formatStatusLine({ project: "demo", waves: [], parked: [] });
-  assert.match(line, /demo/);
-  assert.match(line, /idle/);
+  assert.equal(line, "🏰 idle");
 });
 
 test("formatContextLine joins model, dir, branch, and context% and rounds the percent", () => {

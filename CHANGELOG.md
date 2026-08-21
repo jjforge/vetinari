@@ -29,8 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `statusline` command: prints two lines for the Claude Code status bar. Line 1
   mirrors Claude Code's default — model, directory, git branch, context-used % —
   with the model name trimmed of its `(1M context)` suffix; line 2 is the
-  sandcastle run (project, wave in flight, a count per status), shown only where a
-  config lives. Reads Claude Code's status JSON on stdin, resolves the config from
+  sandcastle run (wave in flight, a count per status; no project name, since line
+  1 already shows the directory), shown only where a config lives. Reads Claude Code's status JSON on stdin, resolves the config from
   the workspace directory, and derives line 2 from the log (no network) to stay
   fast on every refresh. Outside a sandcastle project line 2 is omitted; it always
   exits zero (a non-zero exit would blank the bar). Wire it via

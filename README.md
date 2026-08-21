@@ -161,12 +161,13 @@ conflict-free as you built it.
 `statusline` prints two lines for the Claude Code status bar: line 1 mirrors
 Claude Code's own default (model, directory, git branch, context-used %) with the
 model name trimmed of its `(1M context)` suffix; line 2 is the sandcastle run —
-project, the wave in flight, and a count per status — so a running campaign is
-visible without leaving the editor:
+the wave in flight and a count per status (the 🏰 marks it; no project name,
+since line 1 already shows the directory) — so a running campaign is visible
+without leaving the editor:
 
 ```
 Opus 4.8 · jjforge · develop · 24%
-🏰 jjforge · wave 2/3 · ✅2 🔄1 ⏸1 ⚪1
+🏰 wave 2/3 · ✅2 🔄1 ⏸1 ⚪1
 ```
 
 Wire it into the project's `.claude/settings.json` with the same command you

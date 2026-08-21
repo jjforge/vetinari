@@ -11,20 +11,22 @@ host process that fronts them all.
 **`sandcastle/`**:
 The project's **committed** sandcastle configuration, versioned in the
 project's own repo. Holds the config module, the project's `Dockerfile`, and any
-prompt override. `sandcastle/` = shared.
+custom build things or prompt override. `sandcastle/` = shared.
 _Avoid_: config folder, config dir
 
 **`.sandcastle.local/`**:
-The project's **excluded** (gitignored) machine-local area. Holds the runtime
-pull, the per-project secrets (`.env`), and run state (`logs/`, `parked/`). Never
-committed; regenerable from `sandcastle/` plus secrets. The `.local` suffix
-carries the "yours, not shared" convention (`settings.local.json`, `.env.local`).
+The project's **excluded** (gitignored) machine-local area. Holds the project's
+credentials (`.env`), run logs, and run state (`parked/`). Never committed. The
+`.local` suffix carries the "yours, not shared" convention (`settings.local.json`,
+`.env.local`).
 _Avoid_: state dir, work dir, `.sandcastle/`
 
-**Runtime pull**:
-The version-pinned copy of the sandcastle-tdd runtime placed inside a project's
-`.sandcastle.local/`. Keeps the orchestrator out of the app's own `package.json`
-and dependency graph — the project depends on nothing.
+**Shared install**:
+The single machine-wide install of sandcastle-tdd, shared by every project on the
+host (ADR 0003). A project runs whatever version the machine has — it is never
+vendored a copy and never pins a version, and sandcastle-tdd never appears in the
+app's own `package.json`.
+_Avoid_: runtime pull, vendored runtime
 
 ### Shared host
 

@@ -16,11 +16,11 @@ task by reply-to-message id.
 
 Because the gateway is the sender, it resolves replies with a **send-time index**
 `(botToken, messageId) → (project, task, baseLocation)`, not by scanning every
-project's `parked/`. On a matching reply it resumes by shelling the project's
-vendored runtime `answer <task> "<text>"` in that base location. The old `attend`
-mode (a single task inline-polling its own answers) is retired: inline polling
-violates the single-consumer rule, and gateway-mediation now does its job for
-every project.
+project's `parked/`. On a matching reply it resumes by running `answer <task>
+"<text>"` for that project (the shared install, ADR 0003) in that base location.
+The old `attend` mode (a single task inline-polling its own answers) is retired:
+inline polling violates the single-consumer rule, and gateway-mediation now does
+its job for every project.
 
 ## Considered Options
 

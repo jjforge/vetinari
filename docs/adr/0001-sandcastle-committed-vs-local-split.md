@@ -27,11 +27,12 @@ candidate list; config now resolves only from the committed `sandcastle/`.
 
 ## Consequences
 
-The runtime lives in `.sandcastle.local/` as a pinned pull, so the app's
-`package.json` never references sandcastle-tdd. All secrets — including the
-project's Telegram bot token — stay in `.sandcastle.local/`; the gateway never
-duplicates them, it reads them from each project's registered base location (see
-ADR 0002).
+sandcastle-tdd is a shared machine install (ADR 0003), so the app's
+`package.json` never references it and nothing runtime-related lives under
+`.sandcastle.local/` — only credentials, run logs, and run state. All secrets —
+including the project's Telegram bot token — stay in `.sandcastle.local/`; the
+gateway never duplicates them, it reads them from each project's registered base
+location (see ADR 0002).
 
 **Migration.** An automated `sandcastle migrate` moves an existing project onto
 the new layout (config → `sandcastle/`, `.sandcastle/` → `.sandcastle.local/`,

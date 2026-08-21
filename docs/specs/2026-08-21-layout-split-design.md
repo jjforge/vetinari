@@ -1,6 +1,6 @@
 # E1: Layout split + config resolution + migrate
 
-Epic: [#12](https://github.com/jjforge/sandcastle-tdd/issues/12) · Source: [ADR 0001](../adr/0001-sandcastle-committed-vs-local-split.md), [ADR 0003](../adr/0003-thin-launcher-vendored-runtime-per-project.md) · Glossary: [CONTEXT.md](../../CONTEXT.md)
+Epic: [#12](https://github.com/jjforge/sandcastle-tdd/issues/12) · Source: [ADR 0001](../adr/0001-sandcastle-committed-vs-local-split.md), [ADR 0003](../adr/0003-shared-machine-install.md) · Glossary: [CONTEXT.md](../../CONTEXT.md)
 
 ## Problem Statement
 
@@ -21,9 +21,10 @@ Every consuming project gets two directories with opposite, unmistakable meaning
 - **`sandcastle/`** — committed. The project's versioned configuration: the config
   module, the project's `Dockerfile`, and any prompt override.
 - **`.sandcastle.local/`** — excluded (gitignored). This machine's moving parts:
-  the runtime pull, the per-project secrets (`.env`), and run state (`logs/`,
-  `parked/`). The `.local` suffix carries the "yours, not shared" convention I
-  already use (`settings.local.json`, `.env.local`).
+  the project's credentials (`.env`), run logs, and run state (`parked/`). The
+  `.local` suffix carries the "yours, not shared" convention I already use
+  (`settings.local.json`, `.env.local`). sandcastle-tdd itself is a shared machine
+  install (ADR 0003), so nothing runtime-related lives here.
 
 Config resolution stops accepting a config inside the excluded directory. The new
 canonical config location is `sandcastle/config.mts`; the old locations keep
@@ -38,7 +39,7 @@ step, so I never have to hand-shuffle directories or hand-edit `.gitignore`.
 1. As a maintainer, I want my project's sandcastle configuration to live in a
    committed `sandcastle/` directory, so that it is versioned and shared with
    everyone who checks out the repo.
-2. As a maintainer, I want all runtime, secrets, and state under a single excluded
+2. As a maintainer, I want all credentials, logs, and state under a single excluded
    `.sandcastle.local/` directory, so that nothing machine-local is ever committed.
 3. As a maintainer, I want the two directory names to be visibly different (not one
    dot apart), so that I never confuse the committed one with the excluded one in
@@ -151,9 +152,10 @@ step, so I never have to hand-shuffle directories or hand-edit `.gitignore`.
 
 ## Out of Scope
 
-- **The thin launcher, `init`, and vendoring the runtime** into `.sandcastle.local/` —
-  that is E2 (#13). E1 changes where config and state resolve and provides `migrate`; it
-  does not add the global `sandcastle` launcher or pull a runtime.
+- **The `sandcastle init` scaffold** for a new project — that is E2 (#13). E1 changes
+  where config and state resolve and provides `migrate`; it does not add `init`.
+  sandcastle-tdd is a shared machine install (ADR 0003) — there is no launcher or
+  vendored runtime in scope anywhere.
 - **The gateway**, registration, and the single Telegram consumer — E3 (#14). The
   `orchestrator.env` fold and systemd-unit rewrite parts of ADR 0001's migration ride
   with the gateway, not here.

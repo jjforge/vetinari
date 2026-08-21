@@ -4,7 +4,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { buildStatus, buildStatusWithIssueNames, extractParkedDetails, renderStatusPage, serveStatus } from "./status.ts";
+import { buildStatus, buildStatusWithIssueNames, extractParkedDetails, formatStatusText, renderStatusPage, serveStatus } from "./status.ts";
+import { isStatusCommand } from "./modes.ts";
 
 const cfgFor = (dir: string): ResolvedConfig =>
   ({
@@ -265,6 +266,54 @@ test("renderStatusPage collapses closed waves into expandable completed wave chi
 
 test("serveStatus can bind to a non-localhost host for tailnet access", () => {
   assert.match(String(serveStatus), /server\.listen\(opts\.port,\s*opts\.host,/);
+});
+
+test("formatStatusText summarizes waves, issue chips (with names), and the parked section", () => {
+  const text = formatStatusText({
+    project: "jjforge",
+    waves: [
+      { index: 0, status: "closed", issues: [{ issueNumber: "436", status: "completed", name: "Fix login redirect" }] },
+      {
+        index: 1,
+        status: "running",
+        issues: [
+          { issueNumber: "640", status: "running", name: "Add carve-out" },
+          { issueNumber: "655", status: "parked" },
+        ],
+      },
+    ],
+    parked: [{ issueNumber: "655", reason: "blocked", parkedAt: "now", branch: "agent/655", description: "?", options: [] }],
+  });
+
+  assert.match(text, /jjforge — status/);
+  assert.match(text, /Wave 1\/2 ✅ closed/);
+  assert.match(text, /✅ #436 Fix login redirect/);
+  assert.match(text, /Wave 2\/2 ▶️ running/);
+  assert.match(text, /🔄 #640 Add carve-out/);
+  // No name available → chip is just the status + number.
+  assert.match(text, /⏸ #655$/m);
+  assert.match(text, /1 awaiting your reply/);
+  assert.match(text, /#655 — blocked/);
+});
+
+test("formatStatusText reports when nothing is running", () => {
+  const text = formatStatusText({ project: "demo", waves: [], parked: [] });
+  assert.match(text, /demo — status/);
+  assert.match(text, /No active run/);
+});
+
+test("formatStatusText omits the parked section when nothing is parked", () => {
+  const text = formatStatusText({
+    project: "demo",
+    waves: [{ index: 0, status: "running", issues: [{ issueNumber: "1", status: "running" }] }],
+    parked: [],
+  });
+  assert.doesNotMatch(text, /awaiting your reply/);
+});
+
+test("isStatusCommand recognizes status queries and ignores answers", () => {
+  for (const t of ["/status", "status", "/status@my_bot", "  Status ", "STATUS"]) assert.equal(isStatusCommand(t), true, t);
+  for (const t of ["A", "use option B", "status of the world is fine", "", "s"]) assert.equal(isStatusCommand(t), false, t);
 });
 
 test("renderStatusPage includes a configurable refresh interval control", () => {

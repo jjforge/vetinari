@@ -6,7 +6,17 @@ import { makeSandbox } from "./sandbox.ts";
 import { answerPromptFor, runLoop, type ResumeEntry } from "./loop.ts";
 import { currentBranch, integrateGreens } from "./merge.ts";
 import { clearParked, clearParkedForTasks, hasParked, listParked, readParked } from "./state.ts";
+import { renderStatusText } from "./status.ts";
 import { tgConfigured, tgDrain, tgPoll, tgSend, tgWaitReply } from "./telegram.ts";
+
+/**
+ * A read-only status query, not an answer to a parked question. Recognized in
+ * the dispatch loop so `/status` (bare, or `/status@thebot` in a group) returns
+ * a summary instead of being routed to a parked task. Kept to whole-word,
+ * unambiguous tokens so it never swallows a real one-word answer.
+ */
+const STATUS_COMMANDS = new Set(["status", "/status"]);
+export const isStatusCommand = (text: string) => STATUS_COMMANDS.has(text.trim().toLowerCase().replace(/@\w+$/, ""));
 
 /**
  * Re-invoke this CLI as a child, preserving however it was launched (the tsx
@@ -153,9 +163,10 @@ export async function dispatch(cfg: ResolvedConfig) {
 
   const pending = available();
   await tgSend(
-    pending.length
+    (pending.length
       ? `📋 ${cfg.project} dispatcher up. Parked and waiting:\n${pending.map((p) => `${p.taskId} (${p.reason})`).join("\n")}\nReply to a question message to resume it.`
-      : `📋 ${cfg.project} dispatcher up. Nothing parked yet — questions will arrive here as runs block.`,
+      : `📋 ${cfg.project} dispatcher up. Nothing parked yet — questions will arrive here as runs block.`) +
+      "\n\nSend /status any time for a live summary.",
   );
 
   let offset = await tgDrain();
@@ -163,6 +174,13 @@ export async function dispatch(cfg: ResolvedConfig) {
     const r = await tgPoll(offset);
     offset = r.offset;
     for (const m of r.messages) {
+      if (isStatusCommand(m.text)) {
+        log("dispatch-status", {});
+        void renderStatusText(cfg)
+          .then((text) => tgSend(text))
+          .catch((e) => log("dispatch-status-failed", { error: String(e) }));
+        continue;
+      }
       const recs = available();
       const byReply = m.replyToId ? recs.find((p) => p.tgMessageId === m.replyToId) : undefined;
       const target = byReply ?? (!m.replyToId && recs.length === 1 ? recs[0] : undefined);

@@ -91,6 +91,57 @@ export function extractParkedDetails(question: string): { description: string; o
   return { description, options: optionLines };
 }
 
+const ISSUE_EMOJI: Record<IssueStatus, string> = {
+  completed: "✅",
+  running: "🔄",
+  parked: "⏸",
+  failure: "❌",
+  unstarted: "⚪",
+};
+
+const WAVE_EMOJI: Record<WaveStatus, string> = {
+  closed: "✅",
+  running: "▶️",
+  unstarted: "⚪",
+};
+
+/**
+ * Render a campaign status as a plain-text summary for a Telegram chat — the
+ * same model the web dashboard draws, flattened to lines that read on a phone.
+ * Kept pure (no I/O) so it is trivially testable; `renderStatusText` is the
+ * async wrapper that fetches issue names first.
+ */
+export function formatStatusText(status: CampaignStatus): string {
+  const lines: string[] = [`📊 ${status.project} — status`];
+
+  if (!status.waves.length) {
+    lines.push("", "No active run right now. Start a queue or campaign and it'll show up here.");
+    return lines.join("\n");
+  }
+
+  const total = status.waves.length;
+  for (const wave of status.waves) {
+    lines.push("", `Wave ${wave.index + 1}/${total} ${WAVE_EMOJI[wave.status]} ${wave.status}`);
+    for (const issue of wave.issues) {
+      const name = issue.name ? ` ${issue.name}` : "";
+      lines.push(`  ${ISSUE_EMOJI[issue.status]} #${issue.issueNumber}${name}`);
+    }
+  }
+
+  if (status.parked.length) {
+    lines.push("", `⏸ ${status.parked.length} awaiting your reply:`);
+    for (const p of status.parked) lines.push(`  #${p.issueNumber} — ${p.reason}`);
+    lines.push("", "Reply to a parked question message to answer and resume it.");
+  }
+
+  return lines.join("\n");
+}
+
+/** `formatStatusText` over the live campaign status, with issue names resolved. */
+export async function renderStatusText(cfg: ResolvedConfig): Promise<string> {
+  return formatStatusText(await buildStatusWithIssueNames(cfg));
+}
+
 export async function buildStatusWithIssueNames(cfg: ResolvedConfig): Promise<CampaignStatus> {
   const status = buildStatus(cfg);
   const issues = status.waves.flatMap((wave) => wave.issues);

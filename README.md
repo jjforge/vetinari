@@ -147,6 +147,12 @@ Run at most one poller (`dispatch`, `attend`, or `tg-test`): Telegram permits a
 single consumer of a bot's updates, so a second silently steals the first's
 replies. `attend <task>` is the single-task variant when you aren't queuing.
 
+While `dispatch` is up, send **`/status`** (bare, or `/status@yourbot` in a
+group) to get a live summary back in the chat — each wave, its issue chips with
+status, and any parked issues waiting on you. It is read-only and shares the web
+dashboard's model, so it never disturbs a run; questions are still answered by
+replying to their message.
+
 ### Run the poller as a service (survives reboot)
 
 A backgrounded `dispatch &` dies with its shell, so a park raised after you close
@@ -269,7 +275,7 @@ it there too and re-run that project's `baseline`.
 | `campaign <batch…>` | drain each batch, merge its greens, gate the merged base, then start the next |
 | `answer <task> <text>` | resume a parked task with your answer |
 | `attend <task>` | one task, self-answering via Telegram |
-| `dispatch` | the single poller; routes replies to parked tasks |
+| `dispatch` | the single poller; routes replies to parked tasks, and answers `/status` with a live summary |
 | `parked` | list what is waiting and why |
 | `status [--port <port>]` | local web page showing campaign waves, issue status chips, and parked-response cards |
 | `tg-test` | prove the Telegram round-trip |

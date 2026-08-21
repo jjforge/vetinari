@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Inbound `/status` command over Telegram: while `dispatch` is running, sending
+  `/status` (bare, or `/status@yourbot` in a group) replies in-chat with a live
+  summary — each wave, its issue chips with status, and any parked issues
+  awaiting you. Read-only and built on the same status model as the web
+  dashboard, so it never disturbs a run. Handled in the single `dispatch` poller
+  (Telegram permits only one consumer of a bot's updates), so it needs no extra
+  process. Documented in the README.
 - `status [--port <port>] [--host <host>]` CLI command that serves a local
   campaign/wave web dashboard (default `http://127.0.0.1:8765`). It shows each
   wave, per-issue status chips, and parked-issue cards you can respond to inline;

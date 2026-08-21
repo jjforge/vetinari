@@ -6,6 +6,7 @@ import { attend, baseline, campaign, dispatch, queue, requireTelegram, tgTest } 
 import { computeCarve } from "./carve.ts";
 import { listParked, readParked } from "./state.ts";
 import { serveStatus } from "./status.ts";
+import { runStatusLine } from "./statusline.ts";
 
 const USAGE = `sandcastle-tdd <mode> [args]
 
@@ -21,6 +22,8 @@ const USAGE = `sandcastle-tdd <mode> [args]
   parked                   list parked tasks and their questions
   status [--port <port>] [--host <host>]
                            local web page for campaign/wave and parked status
+  statusline               one compact line for the Claude Code status bar (reads
+                           Claude Code's JSON on stdin; wire into settings.json)
   tg-test                  prove the Telegram round-trip
 
 Options: --config <path>   (default: sandcastle-tdd.config.mts in cwd)`;
@@ -34,6 +37,14 @@ const [mode, ...rest] = argv;
 if (!mode) {
   console.log(USAGE);
   process.exit(1);
+}
+
+// The Claude Code status bar runs this on every refresh, in any directory, and
+// blanks the line on a non-zero exit — so it must stay lenient (no config here
+// is fine) and never fall through to the strict config load below.
+if (mode === "statusline") {
+  await runStatusLine(cfgPath);
+  process.exit(0);
 }
 
 const cfg = await loadConfig(cfgPath);

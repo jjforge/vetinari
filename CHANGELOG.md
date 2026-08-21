@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `statusline` command: prints one compact line — project, wave in flight, and a
+  count per status — for the Claude Code status bar, so a running campaign shows
+  without leaving the editor. Reads Claude Code's status JSON on stdin, resolves
+  the config from the workspace directory, and derives everything from the log
+  (no network) to stay fast on every refresh. Outside a sandcastle project it
+  prints nothing and always exits zero (a non-zero exit would blank the bar).
+  Wire it via `.claude/settings.json` `statusLine` with a `refreshInterval` so it
+  stays live during a run; documented in the README.
 - `carve <issue> <batch…>` command: drops an issue and the transitive closure of
   everything blocked by it from a campaign, then runs the reduced campaign
   (`--dry-run` prints the plan instead). Removal cascades across every branch and

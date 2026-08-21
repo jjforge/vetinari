@@ -148,6 +148,33 @@ scope. It runs the reduced campaign immediately; `--dry-run` only prints the
 plan. Because carve only *drops* issues, each remaining wave stays as
 conflict-free as you built it.
 
+### In your Claude Code status bar
+
+`statusline` prints one compact line — project, the wave in flight, and a count
+per status — for the Claude Code status bar, so a running campaign is visible
+without leaving the editor:
+
+```
+🏰 jjforge · wave 2/3 · ✅2 🔄1 ⏸1 ⚪1
+```
+
+Wire it into the project's `.claude/settings.json` (so it only appears where the
+config lives):
+
+```json
+{
+  "statusLine": { "type": "command", "command": "npx sandcastle-tdd statusline", "refreshInterval": 5 }
+}
+```
+
+`refreshInterval` matters: Claude Code refreshes the status line on its own
+events, but nothing tells it when the orchestrator's log changes — polling every
+few seconds keeps the line live during a run. It reads Claude Code's JSON on
+stdin, resolves the config from the workspace directory, and derives everything
+from the log alone (no network), so it stays fast. Outside a sandcastle project
+it prints nothing and exits clean, leaving your normal status line untouched — a
+non-zero exit would blank the bar, so it never errors out.
+
 ## Answer from your phone
 
 Set `SANDCASTLE_TELEGRAM_BOT_TOKEN` and `SANDCASTLE_TELEGRAM_CHAT_ID` in the
@@ -298,6 +325,7 @@ it there too and re-run that project's `baseline`.
 | `dispatch` | the single poller; routes replies to parked tasks, and answers `/status` with a live summary |
 | `parked` | list what is waiting and why |
 | `status [--port <port>]` | local web page showing campaign waves, issue status chips, and parked-response cards |
+| `statusline` | one compact line for the Claude Code status bar; reads Claude Code's JSON on stdin |
 | `tg-test` | prove the Telegram round-trip |
 
 ## What lands where

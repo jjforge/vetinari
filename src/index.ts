@@ -6,6 +6,7 @@ export { runGates } from "./gate.ts";
 export { makeSandbox, agentFor } from "./sandbox.ts";
 export { attend, baseline, campaign, dispatch, queue, tgTest } from "./modes.ts";
 export { computeCarve } from "./carve.ts";
+export { formatStatusLine, runStatusLine } from "./statusline.ts";
 export type { CarveResult, BlockedByOf } from "./carve.ts";
 export { githubBlockedBy } from "./github.ts";
 export { listParked, readParked, hasParked, clearParked, park } from "./state.ts";

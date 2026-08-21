@@ -81,6 +81,14 @@ _Avoid_: channel, target, route
 A project's declaration, in its `sandcastle/` config, of which message category
 goes to which destination. The gateway enforces it; the project owns it.
 
+**Outbound record** / **outbox**:
+A category-tagged message (`{category, event?, text}`) a run writes into its
+`.sandcastle.local/` instead of sending to Telegram itself. The gateway drains the
+outbox and routes each record per the notify map — so all outbound flows through
+the gateway (the sole sender), and a parked **question** is simply the interactive
+kind of outbound record that also feeds the reply index.
+_Avoid_: message queue, mailbox
+
 **Wave**:
 One batch of a campaign — the tasks run together before their greens are merged
 and the next batch starts. "Wave start" is a **progress** message.

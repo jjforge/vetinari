@@ -4,7 +4,7 @@ import { log } from "./log.ts";
 import { runGates } from "./gate.ts";
 import { agentFor, makeSandbox } from "./sandbox.ts";
 import { clearParked, park } from "./state.ts";
-import { tgSend } from "./telegram.ts";
+import { tgEnvConn, tgSend } from "./telegram.ts";
 import { HARVEST_PROMPT, parseFindings, reportFindings } from "./findings.ts";
 
 /**
@@ -76,7 +76,7 @@ async function harvestFindings(cfg: ResolvedConfig, sbx: any, sessionId: string 
       else log("finding-filed", { taskId, summary: r.finding.summary, url: r.url });
     }
     const filed = results.filter((r) => !r.error).length;
-    if (filed) await tgSend(`🔎 ${cfg.project} ${taskId}: filed ${filed} incidental finding(s)${filed !== results.length ? ` (${results.length - filed} failed — see log)` : ""}.`);
+    if (filed) await tgSend(tgEnvConn(), `🔎 ${cfg.project} ${taskId}: filed ${filed} incidental finding(s)${filed !== results.length ? ` (${results.length - filed} failed — see log)` : ""}.`);
   } catch (e: any) {
     log("harvest-failed", { taskId, error: String(e?.message ?? e) });
   }
@@ -135,7 +135,7 @@ export async function runLoop(cfg: ResolvedConfig, taskId: string, entry?: Resum
           }
           log("green", { taskId, branch: sbx.branch, commits: (r.commits ?? []).map((c: any) => c.sha) });
           console.log(`\n*** GREEN — commits on ${sbx.branch}\n`);
-          await tgSend(`✅ ${cfg.project} agent GREEN on ${taskId} — orchestrator-verified, commits on ${sbx.branch}`);
+          await tgSend(tgEnvConn(), `✅ ${cfg.project} agent GREEN on ${taskId} — orchestrator-verified, commits on ${sbx.branch}`);
           clearParked(cfg, taskId);
           // Harvest incidental findings on the still-live session before teardown.
           await harvestFindings(cfg, sbx, sessionId, common, taskId);

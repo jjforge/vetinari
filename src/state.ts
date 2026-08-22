@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import type { ResolvedConfig } from "./config.ts";
 import { log } from "./log.ts";
-import { tgSend } from "./telegram.ts";
+import { tgEnvConn, tgSend } from "./telegram.ts";
 
 export type ParkReason = "blocked" | "budget" | "idle-timeout";
 
@@ -24,6 +24,7 @@ const file = (cfg: ResolvedConfig, taskId: string) => `${cfg.parkedDir}/${taskId
  */
 export async function park(cfg: ResolvedConfig, rec: Omit<ParkedRecord, "parkedAt" | "tgMessageId">) {
   const tgMessageId = await tgSend(
+    tgEnvConn(),
     `⏸ ${cfg.project} agent PARKED (${rec.reason}) on ${rec.taskId}\n\n${rec.question}\n\nReply to this message to answer and resume.`,
   );
   mkdirSync(cfg.parkedDir, { recursive: true });

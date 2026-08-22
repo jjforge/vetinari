@@ -7,7 +7,7 @@ import { answerPromptFor, runLoop, type ResumeEntry } from "./loop.ts";
 import { currentBranch, integrateGreens } from "./merge.ts";
 import { clearParked, clearParkedForTasks, hasParked, listParked, readParked } from "./state.ts";
 import { renderStatusText } from "./status.ts";
-import { tgConfigured, tgDrain, tgPoll, tgSend, tgWaitReply } from "./telegram.ts";
+import { tgConfigured, tgDrain, tgEnvConn, tgPoll, tgSend, tgWaitReply } from "./telegram.ts";
 
 /**
  * A read-only status query, not an answer to a parked question. Recognized in
@@ -56,7 +56,7 @@ export async function queue(cfg: ResolvedConfig, taskIds: string[], slots: numbe
   const outcomes: Record<string, string> = {};
   let running = 0;
   log("queue-start", { taskIds, slots });
-  await tgSend(`🚦 ${cfg.project} queue started: ${taskIds.join(", ")} — ${slots} slots. Run \`dispatch\` to answer parked questions.`);
+  await tgSend(tgEnvConn(), `🚦 ${cfg.project} queue started: ${taskIds.join(", ")} — ${slots} slots. Run \`dispatch\` to answer parked questions.`);
 
   await new Promise<void>((done) => {
     const fill = () => {
@@ -78,7 +78,7 @@ export async function queue(cfg: ResolvedConfig, taskIds: string[], slots: numbe
 
   const summary = taskIds.map((i) => `${i}: ${outcomes[i] ?? "?"}`).join("\n");
   log("queue-done", { outcomes });
-  await tgSend(`🏁 ${cfg.project} queue drained.\n${summary}\nParked tasks stay answerable via dispatch.`);
+  await tgSend(tgEnvConn(), `🏁 ${cfg.project} queue drained.\n${summary}\nParked tasks stay answerable via dispatch.`);
   console.log(`queue drained:\n${summary}`);
   return outcomes;
 }
@@ -106,12 +106,12 @@ export async function campaign(cfg: ResolvedConfig, batches: string[][], slots: 
   }
 
   log("campaign-start", { batches, slots });
-  await tgSend(`🎬 ${cfg.project} campaign: ${batches.length} batch(es) — ${batches.map((b) => b.join(",")).join(" | ")}`);
+  await tgSend(tgEnvConn(), `🎬 ${cfg.project} campaign: ${batches.length} batch(es) — ${batches.map((b) => b.join(",")).join(" | ")}`);
 
   for (let i = 0; i < batches.length; i++) {
     const tasks = batches[i];
     log("campaign-batch", { index: i, tasks });
-    await tgSend(`▶️ ${cfg.project} campaign batch ${i + 1}/${batches.length}: ${tasks.join(", ")}`);
+    await tgSend(tgEnvConn(), `▶️ ${cfg.project} campaign batch ${i + 1}/${batches.length}: ${tasks.join(", ")}`);
 
     const outcomes = await queue(cfg, tasks, slots);
     const greens = tasks.filter((t) => outcomes[t] === "green");
@@ -122,6 +122,7 @@ export async function campaign(cfg: ResolvedConfig, batches: string[][], slots: 
       const where = halt.taskId ? ` on ${halt.taskId}` : "";
       log("campaign-halt", { index: i, reason: halt.reason, taskId: halt.taskId });
       await tgSend(
+        tgEnvConn(),
         `🛑 ${cfg.project} campaign HALTED at batch ${i + 1} — ${halt.reason}${where}. Base rolled back; branches kept for you.\n\n${halt.detail}`,
       );
       console.log(`campaign halted (${halt.reason}${where}) — base rolled back, ${batches.length - i - 1} batch(es) not started.`);
@@ -131,12 +132,12 @@ export async function campaign(cfg: ResolvedConfig, batches: string[][], slots: 
     if (held.length) clearParkedForTasks(cfg, held);
     const note = held.length ? ` — cleared parked records for completed wave: ${held.map((t) => `${t}(${outcomes[t]})`).join(", ")}` : "";
     log("campaign-batch-done", { index: i, merged, held, clearedParked: held });
-    await tgSend(`✅ ${cfg.project} campaign batch ${i + 1} merged: ${merged.join(", ") || "nothing"}${note}`);
+    await tgSend(tgEnvConn(), `✅ ${cfg.project} campaign batch ${i + 1} merged: ${merged.join(", ") || "nothing"}${note}`);
     console.log(`batch ${i + 1}/${batches.length}: merged ${merged.join(", ") || "nothing"}${note}`);
   }
 
   log("campaign-done", { batches: batches.length });
-  await tgSend(`🏆 ${cfg.project} campaign complete — ${batches.length} batch(es) merged onto ${cfg.baseBranch}.`);
+  await tgSend(tgEnvConn(), `🏆 ${cfg.project} campaign complete — ${batches.length} batch(es) merged onto ${cfg.baseBranch}.`);
   console.log("campaign complete.");
   return true;
 }
@@ -147,38 +148,41 @@ export async function campaign(cfg: ResolvedConfig, batches: string[][], slots: 
  * so several answered tasks proceed at once.
  */
 export async function dispatch(cfg: ResolvedConfig) {
+  // Guaranteed non-null: dispatch is only reachable behind requireTelegram.
+  const conn = tgEnvConn()!;
   const inFlight = new Set<string>();
   const available = () => listParked(cfg).filter((p) => !inFlight.has(p.taskId));
 
   const resume = (taskId: string, text: string) => {
     inFlight.add(taskId);
     log("dispatch", { taskId, chars: text.length });
-    void tgSend(`▶️ Resuming ${taskId} with your answer.`);
+    void tgSend(conn, `▶️ Resuming ${taskId} with your answer.`);
     selfSpawn(["answer", taskId, text]).on("exit", (code) => {
       inFlight.delete(taskId);
       log("dispatch-done", { taskId, code });
       // green / re-park messaging is the child's own job.
-      if (code !== 0 && code !== 2) void tgSend(`⚠️ Resume of ${taskId} exited with code ${code} — check the orchestrator logs.`);
+      if (code !== 0 && code !== 2) void tgSend(conn, `⚠️ Resume of ${taskId} exited with code ${code} — check the orchestrator logs.`);
     });
   };
 
   const pending = available();
   await tgSend(
+    conn,
     (pending.length
       ? `📋 ${cfg.project} dispatcher up. Parked and waiting:\n${pending.map((p) => `${p.taskId} (${p.reason})`).join("\n")}\nReply to a question message to resume it.`
       : `📋 ${cfg.project} dispatcher up. Nothing parked yet — questions will arrive here as runs block.`) +
       "\n\nSend /status any time for a live summary.",
   );
 
-  let offset = await tgDrain();
+  let offset = await tgDrain(conn);
   for (;;) {
-    const r = await tgPoll(offset);
+    const r = await tgPoll(conn, offset);
     offset = r.offset;
     for (const m of r.messages) {
       if (isStatusCommand(m.text)) {
         log("dispatch-status", {});
         void renderStatusText(cfg)
-          .then((text) => tgSend(text))
+          .then((text) => tgSend(conn, text))
           .catch((e) => log("dispatch-status-failed", { error: String(e) }));
         continue;
       }
@@ -186,24 +190,26 @@ export async function dispatch(cfg: ResolvedConfig) {
       const byReply = m.replyToId ? recs.find((p) => p.tgMessageId === m.replyToId) : undefined;
       const target = byReply ?? (!m.replyToId && recs.length === 1 ? recs[0] : undefined);
       if (target) resume(target.taskId, m.text);
-      else if (!recs.length) void tgSend(inFlight.size ? "Nothing parked; resumes in flight — hold on." : "Nothing is parked right now.");
-      else void tgSend(`Reply directly to one question message to route your answer. Parked: ${recs.map((p) => p.taskId).join(", ")}`);
+      else if (!recs.length) void tgSend(conn, inFlight.size ? "Nothing parked; resumes in flight — hold on." : "Nothing is parked right now.");
+      else void tgSend(conn, `Reply directly to one question message to route your answer. Parked: ${recs.map((p) => p.taskId).join(", ")}`);
     }
   }
 }
 
 /** Single task, self-answering via Telegram: run → park → reply → resume → … */
 export async function attend(cfg: ResolvedConfig, taskId: string) {
+  // Guaranteed non-null: attend is only reachable behind requireTelegram.
+  const conn = tgEnvConn()!;
   let entry: ResumeEntry | undefined;
 
   // A record already on disk is a pending question (possibly from a run that
   // parked with Telegram unconfigured): surface it rather than restarting.
   if (hasParked(cfg, taskId)) {
     const parked = readParked(cfg, taskId);
-    const msgId = await tgSend(`⏸ ${cfg.project} has a pending question (${parked.reason}) on ${taskId}\n\n${parked.question}\n\nReply to this message to answer and resume.`);
+    const msgId = await tgSend(conn, `⏸ ${cfg.project} has a pending question (${parked.reason}) on ${taskId}\n\n${parked.question}\n\nReply to this message to answer and resume.`);
     console.log(`[sctdd] existing parked state for ${taskId} — waiting for a Telegram reply…`);
-    entry = { resumeSessionId: parked.sessionId!, answerPrompt: answerPromptFor(await tgWaitReply(msgId)) };
-    await tgSend(`▶️ Resuming ${taskId} with your answer.`);
+    entry = { resumeSessionId: parked.sessionId!, answerPrompt: answerPromptFor(await tgWaitReply(conn, msgId)) };
+    await tgSend(conn, `▶️ Resuming ${taskId} with your answer.`);
   }
 
   for (;;) {
@@ -211,19 +217,21 @@ export async function attend(cfg: ResolvedConfig, taskId: string) {
     if (status !== "parked") break;
     const parked = readParked(cfg, taskId);
     console.log(`[sctdd] waiting for a Telegram reply to resume ${taskId}…`);
-    const reply = await tgWaitReply(parked.tgMessageId);
+    const reply = await tgWaitReply(conn, parked.tgMessageId);
     log("telegram-answer", { taskId, chars: reply.length });
-    await tgSend(`▶️ Resuming ${taskId} with your answer.`);
+    await tgSend(conn, `▶️ Resuming ${taskId} with your answer.`);
     entry = { resumeSessionId: parked.sessionId!, answerPrompt: answerPromptFor(reply) };
   }
 }
 
 export async function tgTest(cfg: ResolvedConfig) {
-  const msgId = await tgSend(`🔧 ${cfg.project} orchestrator test — reply to this message and I'll echo it back.`);
+  // Guaranteed non-null: tgTest is only reachable behind requireTelegram.
+  const conn = tgEnvConn()!;
+  const msgId = await tgSend(conn, `🔧 ${cfg.project} orchestrator test — reply to this message and I'll echo it back.`);
   if (msgId == null) throw new Error("sendMessage failed — token rejected or chat id wrong (see telegram-send-failed in the log)");
   console.log(`sent (message_id ${msgId}); waiting for your reply…`);
-  const reply = await tgWaitReply(msgId);
-  await tgSend(`✅ round-trip works — got: "${reply.slice(0, 200)}"`);
+  const reply = await tgWaitReply(conn, msgId);
+  await tgSend(conn, `✅ round-trip works — got: "${reply.slice(0, 200)}"`);
   console.log(`got reply: "${reply}" — round-trip verified`);
 }
 

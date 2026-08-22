@@ -3,6 +3,42 @@
 This file is always-on context, so it is read as *current truth*. Keep it
 number-free (see the no-numbers rule below) and keep it to rules, not state.
 
+## How to work
+
+These govern every change — yours interactively and every campaign agent's (the
+TDD prompt reads this file first and lets it override).
+
+**1. Think before coding.** Do not assume, hide confusion, or silently pick one
+reading of an ambiguous request. State your assumptions explicitly; when the
+ambiguity actually changes the outcome, lay out the interpretations instead of
+guessing; point out a simpler alternative and push back when you see one. *Where
+you would "ask":* interactively, ask. In a **headless campaign run** there is no
+one to ask, so the only "ask" is the `BLOCKED` signal (`prompts/tdd.md`) — used
+**only** for genuine ambiguity in the interface or intent, never as a routine gate;
+otherwise treat the acceptance criteria and the existing seams as the agreement and
+proceed.
+
+**2. Simplicity first.** Write the minimum code the request needs — nothing
+speculative. No unrequested features, no abstraction for one-time code, no
+hypothetical flexibility or configurability, no handling for impossible scenarios.
+If 200 lines could reasonably be 50, make it 50. The test: *would a senior engineer
+call this overcomplicated?*
+
+**3. Make surgical changes.** Touch only what the request requires, and clean up
+only the mess your own change makes. Do not "improve" neighbouring code, comments,
+or formatting; do no unrelated refactoring; match the repo's existing style. Remove
+an import, variable, or function only when your change made it obsolete; *mention*
+unrelated dead code rather than deleting it. Every changed line should trace back to
+the request. (Refactoring the code your slice **touches** is the TDD loop's refactor
+step and is fine — this bans the *drive-by* kind on code you were not sent to touch.)
+
+**4. Goal-driven execution.** Define the success criteria and continue until they
+are verified: "add validation" → failing invalid-input tests, then green; "fix the
+bug" → a failing test that reproduces it, then green; "refactor X" → passing tests
+before and after. Pair each step of multi-step work with an explicit check. For
+campaign work this *is* the `tdd` skill's loop — let it drive; this rule is the same
+discipline for interactive and non-TDD changes.
+
 ## Work tracking — GitHub issues are the single source of truth
 
 **GitHub issues on `jjforge/sandcastle-tdd` are the single source of truth for

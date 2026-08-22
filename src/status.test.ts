@@ -637,6 +637,57 @@ test("renderStatusPage pins the tapped-issue detail to a dismissible bottom bar"
   assert.match(html, /getElementById\("issue-detail-close"\)\.addEventListener\("click", \(\) => showDetail\(""\)\)/);
 });
 
+test("renderStatusPage hosts the carve affordance and inline confirm in the tap-detail panel", () => {
+  const html = renderStatusPage(
+    { project: "demo", waves: [{ index: 0, status: "unstarted", issues: [{ issueNumber: "301", status: "unstarted" }] }], parked: [] },
+    { carve: true },
+  );
+
+  // The panel — not the chip — carries a Carve button and a hidden inline confirm.
+  assert.match(html, /<button type="button" id="carve-start" class="carve-start">Carve<\/button>/);
+  assert.match(html, /<form method="post" action="\/carve" id="carve-confirm"[^>]*hidden>/);
+  assert.match(html, /<span class="carve-confirm-text"><\/span>/);
+  // The confirm POSTs the existing /carve with confirm=1, carrying taskId+project.
+  assert.match(html, /id="carve-confirm"[\s\S]*?name="taskId"[\s\S]*?name="project"[\s\S]*?name="confirm" value="1"/);
+  assert.match(html, /<button type="submit" class="carve-confirm-btn">Confirm<\/button>/);
+  assert.match(html, /<button type="button" id="carve-cancel" class="carve-cancel">Cancel<\/button>/);
+  // The script keys off the carve data: it fetches the JSON preview, discloses the
+  // removed list, POSTs the confirm, then shows a transient "carving…".
+  assert.match(html, /\/carve\?preview/);
+  assert.match(html, /carve-confirm-text/);
+  assert.match(html, /data-carvable/);
+  assert.match(html, /method: "POST"/);
+  assert.match(html, /carving/);
+});
+
+test("renderStatusPage falls back to a no-JS carve form per carvable issue", () => {
+  const html = renderStatusPage(
+    {
+      project: "demo",
+      waves: [
+        { index: 0, status: "running", issues: [{ issueNumber: "201", status: "running" }] },
+        { index: 1, status: "unstarted", issues: [{ issueNumber: "301", status: "unstarted" }, { issueNumber: "302", status: "parked" }] },
+      ],
+      parked: [],
+    },
+    { carve: true },
+  );
+
+  // Progressive enhancement: a plain server-side form per carvable issue, inside
+  // <noscript>, still reaches POST /carve → the preview page → confirm with no JS.
+  assert.match(html, /<noscript>[\s\S]*<form method="post" action="\/carve"[\s\S]*?name="taskId" value="301"[\s\S]*?name="project" value="demo"[\s\S]*<\/noscript>/);
+  assert.match(html, /<noscript>[\s\S]*name="taskId" value="302"[\s\S]*<\/noscript>/);
+  // Never a fallback form for a running (in-flight) issue.
+  assert.doesNotMatch(html, /name="taskId" value="201"/);
+});
+
+test("renderStatusPage omits the carve panel and no-JS fallback unless carve is opted in", () => {
+  const html = renderStatusPage({ project: "demo", waves: [{ index: 0, status: "unstarted", issues: [{ issueNumber: "301", status: "unstarted" }] }], parked: [] });
+
+  assert.doesNotMatch(html, /id="carve-start"/);
+  assert.doesNotMatch(html, /<noscript>/);
+});
+
 test("renderStatusPage leads with parked issues above the waves when any are parked", () => {
   const html = renderStatusPage({
     project: "demo",

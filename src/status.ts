@@ -471,10 +471,12 @@ export const renderStatusPage = (status: CampaignStatus, opts: StatusPageOptions
   .completed { background: var(--color-green); } .parked { background: var(--color-yellow); } .failure { background: var(--color-red); } .running { background: var(--color-blue); } .unstarted { background: var(--color-text-light-2); }
   textarea { width: 100%; min-height: 7rem; margin: .5rem 0; color: var(--color-text); background: var(--color-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: .75rem; }
   button.chip { cursor: pointer; color: inherit; font: inherit; }
-  .chip-group { display: inline-flex; align-items: center; gap: .25rem; }
-  .carve-form { margin: 0; display: inline-flex; }
-  .carve-btn { padding: .3rem .5rem; border: 1px solid var(--color-secondary); border-radius: 999px; background: var(--color-box-header); color: var(--color-text-light-2); font: inherit; line-height: 1; cursor: pointer; }
-  .carve-btn:hover { border-color: var(--color-red); color: var(--color-red); background: rgb(247 146 135 / 12%); }
+  .carve-panel { display: flex; align-items: center; gap: .5rem; }
+  .carve-start, .carve-confirm-btn, .carve-cancel { padding: .35rem .7rem; border: 1px solid var(--color-red); border-radius: 999px; background: rgb(247 146 135 / 12%); color: var(--color-red); font: inherit; line-height: 1; cursor: pointer; }
+  .carve-cancel { border-color: var(--color-secondary); background: none; color: var(--color-text-light-2); }
+  .carve-confirm { display: flex; align-items: center; gap: .5rem; margin: 0; }
+  .carve-confirm-text { color: var(--color-red); }
+  .carve-fallback form { display: inline; }
   .issue-detail { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; display: none; align-items: center; gap: .75rem; margin: 0; padding: .75rem 1rem calc(.75rem + env(safe-area-inset-bottom)); color: var(--color-blue); background: var(--color-box-header); border-top: 1px solid var(--color-primary); box-shadow: 0 -8px 22px #0006; }
   .issue-detail.show { display: flex; }
   .issue-detail-text { flex: 1; white-space: pre-line; }
@@ -512,7 +514,25 @@ ${
       }${status.waves.filter((wave) => wave.status !== "closed").map((wave) => renderOpenWave(wave, status.project, Boolean(opts.carve))).join("")}`
     : "<p>No active campaign or queue found.</p>"
 }
-<div id="issue-detail" class="issue-detail" aria-live="polite"><span class="issue-detail-text"></span><button type="button" id="issue-detail-close" class="issue-detail-close" aria-label="Dismiss">&times;</button></div>
+<div id="issue-detail" class="issue-detail" aria-live="polite"><span class="issue-detail-text"></span>${
+  opts.carve
+    ? `<div id="carve-panel" class="carve-panel" hidden><button type="button" id="carve-start" class="carve-start">Carve</button><form method="post" action="/carve" id="carve-confirm" class="carve-confirm" hidden><span class="carve-confirm-text"></span><input type="hidden" name="taskId" value="" /><input type="hidden" name="project" value="" /><input type="hidden" name="confirm" value="1" /><button type="submit" class="carve-confirm-btn">Confirm</button><button type="button" id="carve-cancel" class="carve-cancel">Cancel</button></form></div>`
+    : ""
+}<button type="button" id="issue-detail-close" class="issue-detail-close" aria-label="Dismiss">&times;</button></div>${
+  // No-JS fallback: a plain server-side form per carvable issue that reaches
+  // POST /carve → the preview page → confirm without any JavaScript. The inline
+  // panel above is the progressive enhancement layered over it.
+  opts.carve && status.waves.some((wave) => wave.issues.some(isCarvable))
+    ? `<noscript><section class="carve-fallback"><h2>Carve</h2>${status.waves
+        .flatMap((wave) => wave.issues)
+        .filter(isCarvable)
+        .map(
+          (issue) =>
+            `<form method="post" action="/carve"><input type="hidden" name="taskId" value="${escapeHtml(issue.issueNumber)}" /><input type="hidden" name="project" value="${escapeHtml(status.project)}" /><button type="submit">Carve #${escapeHtml(issue.issueNumber)}</button></form>`,
+        )
+        .join("")}</section></noscript>`
+    : ""
+}
 <script>
   const refreshInput = document.getElementById("refresh-seconds");
   const refreshEnabled = document.getElementById("refresh-enabled");
@@ -546,6 +566,61 @@ ${
       showDetail(issueDetailText.textContent === text ? "" : text);
     });
   });
+  const carvePanel = document.getElementById("carve-panel");
+  if (carvePanel) {
+    const carveStart = document.getElementById("carve-start");
+    const carveConfirm = document.getElementById("carve-confirm");
+    const carveConfirmText = carveConfirm.querySelector(".carve-confirm-text");
+    const carveTaskId = carveConfirm.querySelector('input[name="taskId"]');
+    const carveProject = carveConfirm.querySelector('input[name="project"]');
+    let carveTarget = null;
+    let carveProj = null;
+    const resetCarve = () => {
+      carveConfirm.hidden = true;
+      carveStart.hidden = false;
+    };
+    // The carve affordance tracks the tap-detail bar: it reveals for a carvable
+    // chip while the bar is showing, and hides when the bar is dismissed.
+    const syncCarve = (chip) => {
+      const carvable = issueDetail.classList.contains("show") && chip.dataset.carvable === "1";
+      carvePanel.hidden = !carvable;
+      if (carvable) {
+        carveTarget = chip.dataset.issue;
+        carveProj = chip.dataset.project;
+        resetCarve();
+      }
+    };
+    document.querySelectorAll(".chip[data-detail]").forEach((chip) => chip.addEventListener("click", () => syncCarve(chip)));
+    document.getElementById("issue-detail-close").addEventListener("click", () => (carvePanel.hidden = true));
+    carveStart.addEventListener("click", async () => {
+      try {
+        const res = await fetch("/carve?preview&taskId=" + encodeURIComponent(carveTarget) + "&project=" + encodeURIComponent(carveProj));
+        if (!res.ok) throw new Error(String(res.status));
+        const { target, removed } = await res.json();
+        const drops = removed.filter((id) => id !== target);
+        carveConfirmText.textContent = "Carve #" + target + (drops.length ? " — also drops " + drops.map((id) => "#" + id).join(", ") : " — no dependents");
+        carveTaskId.value = target;
+        carveProject.value = carveProj;
+      } catch {
+        carveConfirmText.textContent = "Couldn't preview this carve — is a campaign still running?";
+        carveTaskId.value = "";
+      }
+      carveStart.hidden = true;
+      carveConfirm.hidden = false;
+    });
+    document.getElementById("carve-cancel").addEventListener("click", resetCarve);
+    carveConfirm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (!carveTaskId.value) return;
+      await fetch("/carve", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ taskId: carveTaskId.value, project: carveProject.value, confirm: "1" }),
+      });
+      carvePanel.hidden = true;
+      showDetail("carving… #" + carveTaskId.value + " will drop from the plan on the next refresh");
+    });
+  }
 </script>
 </body>
 </html>`;

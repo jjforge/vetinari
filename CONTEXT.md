@@ -93,3 +93,25 @@ _Avoid_: message queue, mailbox
 One batch of a campaign — the tasks run together before their greens are merged
 and the next batch starts. "Wave start" is a **progress** message.
 _Avoid_: batch (in user-facing comms), round
+
+### Campaign planning
+
+**Campaign plan** (the `campaign-plan` tool):
+A generic sandcastle-tdd tool that turns a selected set of ticket ids into the
+dependency-ordered, file-disjoint wave arguments `campaign` consumes. It plans; it
+never runs sandcastle or pushes. A peer of `carve`, sharing its DAG foundation.
+_Avoid_: campaign builder, batcher
+
+**File-set resolver**:
+A project-provided config function, `fileSet(ticket) → { files, confident }`, that
+names the files a ticket will touch (by basename) so co-wave tickets can be kept
+file-disjoint. A config seam like [[base-location]]'s `blockedBy`/`fetchTask`;
+sandcastle-tdd ships a generic cites-from-body default.
+_Avoid_: file matcher, crossover detector
+
+**Under-specified ticket**:
+A ticket whose file-set resolves with `confident: false` (cites nothing, or cites
+what the tree lacks). `campaign-plan` never plans around it silently — it halts and
+asks the requestor to either carve it (and its dependents) out and proceed, or stop
+and put the data on the issue.
+_Avoid_: unresolved ticket, ambiguous ticket

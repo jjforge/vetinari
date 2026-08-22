@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { computeCarve } from "./carve.ts";
+import { computeCarve, restrictBlockers } from "./carve.ts";
 
 // A fake "blocked by" resolver from a plain edge map: id -> the ids that block it.
 const blockedByFrom = (edges: Record<string, string[]>) => (id: string) => edges[id] ?? [];
@@ -78,4 +78,18 @@ test("computeCarve ignores blockers that live outside the named campaign", async
 
   assert.deepEqual(res.removed, ["640", "701"]);
   assert.deepEqual(res.remaining, []);
+});
+
+test("restrictBlockers keeps only the edges that stay inside the selected set", async () => {
+  // 701 is blocked by 640 (in the set) and 555 (outside it); 611 has no blocker.
+  const { inSet, external } = await restrictBlockers(
+    ["611", "640", "701"],
+    blockedByFrom({ "701": ["#640", "555"], "640": ["611"] }),
+  );
+
+  assert.deepEqual([...inSet.get("701")!], ["640"], "external blocker 555 is not an in-set edge");
+  assert.deepEqual([...external.get("701")!], ["555"], "555 is recorded as external");
+  assert.deepEqual([...inSet.get("640")!], ["611"]);
+  assert.deepEqual([...inSet.get("611")!], []);
+  assert.deepEqual([...external.get("640")!], []);
 });

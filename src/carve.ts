@@ -14,10 +14,44 @@
  * lives at the edge and this stays trivially testable.
  */
 
-const normalize = (id: string) => id.replace(/^#/, "").trim();
+export const normalize = (id: string) => id.replace(/^#/, "").trim();
 
-/** id -> the ids that block it (its prerequisites). */
+/**
+ * id -> the ids of its OPEN blockers (its prerequisites still in flight). Closed
+ * blockers are filtered at the edge — an already-merged prerequisite does not
+ * gate — so every id this returns names a blocker that is genuinely pending.
+ */
 export type BlockedByOf = (id: string) => string[] | Promise<string[]>;
+
+/**
+ * Each id's open blockers, split by whether they fall inside a selected set of
+ * ids or outside it. This is the shared DAG step under both `carve` and
+ * `campaign-plan`: the edges that matter to a run are the ones that stay inside
+ * the set you named. `inSet` edges are the real graph; `external` names the
+ * out-of-set blockers that make a dependent unreachable.
+ *
+ * Pure: `blockedByOf` is injected so the tracker call lives at the edge.
+ */
+export interface RestrictedBlockers {
+  /** id -> its open blockers that are inside the selected set (real edges). */
+  inSet: Map<string, Set<string>>;
+  /** id -> its open blockers that fall outside the set (unreachability roots). */
+  external: Map<string, Set<string>>;
+}
+
+export async function restrictBlockers(ids: string[], blockedByOf: BlockedByOf): Promise<RestrictedBlockers> {
+  const set = new Set(ids.map(normalize));
+  const inSet = new Map<string, Set<string>>();
+  const external = new Map<string, Set<string>>();
+  await Promise.all(
+    [...set].map(async (id) => {
+      const raw = (await blockedByOf(id)).map(normalize);
+      inSet.set(id, new Set(raw.filter((b) => set.has(b))));
+      external.set(id, new Set(raw.filter((b) => !set.has(b))));
+    }),
+  );
+  return { inSet, external };
+}
 
 export interface CarveResult {
   target: string;
@@ -39,13 +73,7 @@ export async function computeCarve(waves: string[][], target: string, blockedByO
 
   // Each issue's blockers, restricted to the campaign — edges to issues we are
   // not running here are irrelevant to what this campaign can and cannot do.
-  const blockers = new Map<string, Set<string>>();
-  await Promise.all(
-    [...campaign].map(async (id) => {
-      const raw = await blockedByOf(id);
-      blockers.set(id, new Set(raw.map(normalize).filter((b) => campaign.has(b))));
-    }),
-  );
+  const { inSet: blockers } = await restrictBlockers([...campaign], blockedByOf);
 
   // Fixpoint: drop the target, then anything with a dropped blocker, until stable.
   const removed = new Set<string>([tgt]);

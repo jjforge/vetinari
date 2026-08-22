@@ -99,8 +99,18 @@ _Avoid_: batch (in user-facing comms), round
 **Campaign plan** (the `campaign-plan` tool):
 A generic sandcastle-tdd tool that turns a selected set of ticket ids into the
 dependency-ordered, file-disjoint wave arguments `campaign` consumes. It plans; it
-never runs sandcastle or pushes. A peer of `carve`, sharing its DAG foundation.
+never runs sandcastle or pushes. A peer of [[carve]], sharing its DAG foundation.
 _Avoid_: campaign builder, batcher
+
+**Carve**:
+Dropping an issue and its transitive dependents from a **running** campaign. It
+**prunes the unfinished remainder without discarding banked work**: of the removed
+closure, anything already merged or mergeable is kept, only parked/not-yet-started
+issues leave the plan. Against a running campaign it appends a **carve event** the
+loop honors at the next wave boundary (the in-flight wave finishes; future waves
+shrink) — distinct from the from-scratch `carve <issue> <batch…>` form, which
+launches a reduced campaign from a plan you supply.
+_Avoid_: prune, remove, cancel, drop (as the noun)
 
 **File-set resolver**:
 A project-provided config function, `fileSet(ticket) → { files, confident }`, that

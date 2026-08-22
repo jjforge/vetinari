@@ -203,6 +203,33 @@ export function partitionWaves(plan: WavePlan, basenamesOf: Map<string, Set<stri
 }
 
 /**
+ * The area labels a run's name is suggested from — the fixed set the tracker tags
+ * issues with. This order is the order a suggestion lists them in, so the same set
+ * of areas always yields the same name regardless of the input issue order.
+ */
+export const AREA_LABELS = ["orchestrator", "gateway", "comms", "dashboard", "layout", "launcher"] as const;
+
+/** id -> the labels on it. Injected so the name suggestion is exercised without a
+ * live tracker; the CLI builds a real one over `fetchTask`. */
+export type LabelsOf = (id: string) => string[] | Promise<string[]>;
+
+/**
+ * Suggest a campaign `--name` from the distinct area labels the selected issues
+ * span, in `AREA_LABELS` order and joined with " + " (e.g. "gateway + comms +
+ * dashboard") — a paste-or-edit starting point, never stored. Labels outside the
+ * area set are ignored; returns undefined when the set spans no area (nothing to
+ * suggest). Pure over the injected resolver.
+ */
+export async function suggestCampaignName(ids: string[], labelsOf: LabelsOf): Promise<string | undefined> {
+  const spanned = new Set<string>();
+  await Promise.all(uniqueOrder(ids).map(async (id) => {
+    for (const label of await labelsOf(id)) spanned.add(label);
+  }));
+  const areas = AREA_LABELS.filter((area) => spanned.has(area));
+  return areas.length ? areas.join(" + ") : undefined;
+}
+
+/**
  * The bare quoted wave arguments, ready to paste straight after `campaign`:
  * one quoted, space-joined group per wave (e.g. `"611 623" "640" "701"`).
  * Empty when nothing is schedulable.

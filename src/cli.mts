@@ -6,7 +6,7 @@ import { answerPromptFor, runLoop } from "./loop.ts";
 import { baseline, campaign, queue, requireTelegram, tgTest } from "./modes.ts";
 import { gateway } from "./gateway.ts";
 import { applyCarve, computeCarve, normalize } from "./carve.ts";
-import { describePlan, planCampaign, underspecifiedPromptFor, waveArgs, type UnderspecifiedDecision } from "./plan.ts";
+import { describePlan, planCampaign, suggestCampaignName, underspecifiedPromptFor, waveArgs, type UnderspecifiedDecision } from "./plan.ts";
 import { defaultFileSet } from "./fileset.ts";
 import { applyLayoutMigration, computeLayoutMigration, describeMigration, scanLayout } from "./migrate.ts";
 import { applyInit, computeInit, describeInit, scanInit } from "./init.ts";
@@ -21,7 +21,9 @@ const USAGE = `sandcastle-tdd <mode> [args]
   baseline                 prove the image runs every gate green — no agent, no cost
   run <task>               the TDD loop: agent turn → gate → resume on red
   queue <task…>            bounded pool over several tasks (QUEUE_SLOTS, default 3)
-  campaign <batch…>        queue each batch, then merge greens → gate base → next batch
+  campaign [--name "…"] <batch…>
+                           queue each batch, then merge greens → gate base → next batch.
+                           --name labels the run in the dashboard + archived-runs list
   carve <issue>            prune <issue> + everything blocked by it from the RUNNING
                            campaign: appends a carve event the loop honors at the next
                            wave boundary (the in-flight wave finishes; only future waves
@@ -33,8 +35,9 @@ const USAGE = `sandcastle-tdd <mode> [args]
                            (--dry-run to only print the reduced plan)
   campaign-plan <ids…>     layer a selected set into dependency-ordered, file-
                            disjoint wave args (paste after \`campaign\`) + a
-                           provenance report. Plans only — never runs campaign,
-                           never pushes. A ticket whose file-set can't be resolved
+                           provenance report, and a suggested \`--name\` from the
+                           area labels the selected issues span. Plans only — never
+                           runs campaign, never pushes. A ticket whose file-set can't be resolved
                            confidently halts and asks; --on-underspecified=drop|fail
                            pre-decides for non-interactive runs (no flag, no
                            terminal defaults to fail).
@@ -100,6 +103,22 @@ async function askUnderspecified(underspecified: string[]): Promise<Underspecifi
     rl.close();
   }
 }
+
+/**
+ * The label names on a fetched task, read from the tracker JSON `fetchTask`
+ * returns (GitHub's `--json labels` yields `{ labels: [{ name }] }`). Best-effort:
+ * anything that does not parse as labelled JSON has no labels. `suggestCampaignName`
+ * filters these down to the known area set.
+ */
+const labelsFromTask = (task: string): string[] => {
+  try {
+    const parsed = JSON.parse(task) as { labels?: unknown };
+    const labels = Array.isArray(parsed?.labels) ? parsed.labels : [];
+    return labels.map((l) => (typeof l === "string" ? l : (l as { name?: unknown })?.name)).filter((n): n is string => typeof n === "string");
+  } catch {
+    return [];
+  }
+};
 
 const argv = process.argv.slice(2);
 const cfgIdx = argv.indexOf("--config");
@@ -226,11 +245,20 @@ switch (mode) {
     break;
   }
   case "campaign": {
-    // Each arg is one batch: `campaign "436 611 623" "640 655" "701"`.
-    const batches = rest.map((b) => b.split(/[\s,]+/).filter(Boolean)).filter((b) => b.length);
+    // Each positional arg is one batch: `campaign "436 611 623" "640 655" "701"`;
+    // an optional `--name "…"` labels the run in the dashboard and archive.
+    let name: string | undefined;
+    const positional: string[] = [];
+    for (let i = 0; i < rest.length; i++) {
+      const a = rest[i];
+      if (a.startsWith("--name=")) name = a.slice("--name=".length);
+      else if (a === "--name") name = rest[++i];
+      else positional.push(a);
+    }
+    const batches = positional.map((b) => b.split(/[\s,]+/).filter(Boolean)).filter((b) => b.length);
     if (!batches.length) throw new Error('campaign needs at least one batch: campaign "436 611" "623 640"');
     // Archive only a clean run — a halt leaves state deliberately, to inspect.
-    if (await campaign(cfg, batches, Math.max(1, Number(process.env.QUEUE_SLOTS ?? 3)))) archiveIfIdle();
+    if (await campaign(cfg, batches, Math.max(1, Number(process.env.QUEUE_SLOTS ?? 3)), name)) archiveIfIdle();
     break;
   }
   case "carve": {
@@ -342,6 +370,12 @@ switch (mode) {
     console.log(waveArgs(plan) || "(nothing schedulable — every ticket is unreachable)");
     console.log("");
     console.log(describePlan(plan));
+
+    // A suggested --name from the area labels the selected issues span — printed to
+    // paste or edit, never stored. The label resolver reads each issue's labels off
+    // the same fetchTask the plan uses.
+    const suggestedName = await suggestCampaignName(ids, async (id) => labelsFromTask(String(await cfg.fetchTask(id))));
+    if (suggestedName) console.log(`\nsuggested name: --name "${suggestedName}"`);
     break;
   }
   case "answer": {

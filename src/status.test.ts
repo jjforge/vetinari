@@ -314,8 +314,9 @@ test("serveAllStatus lists a project's archived runs and renders one read-only w
     // the live run (201) still renders at the top.
     assert.match(root, /#201 <small>/);
     assert.match(root, /<section class="archived-runs">/);
-    assert.match(root, /run=2026-02-01T00-00-00-000Z"[^>]*>campaign · 1 issue · halted<\/a>/);
-    assert.match(root, /run=2026-01-01T00-00-00-000Z"[^>]*>campaign · 2 issues · complete<\/a>/);
+    // Unnamed runs → the timestamp token is the primary label, the summary secondary.
+    assert.match(root, /run=2026-02-01T00-00-00-000Z"[^>]*>2026-02-01T00-00-00-000Z<\/a> <span class="run-summary">campaign · 1 issue · halted<\/span>/);
+    assert.match(root, /run=2026-01-01T00-00-00-000Z"[^>]*>2026-01-01T00-00-00-000Z<\/a> <span class="run-summary">campaign · 2 issues · complete<\/span>/);
     assert.ok(root.indexOf("2026-02-01") < root.indexOf("2026-01-01"), "newest-first");
     // The malformed run is skipped, never listed.
     assert.doesNotMatch(root, /2026-03-01/);
@@ -396,6 +397,23 @@ test("reduceCampaign reconstructs a fresh campaign's waves with no wave running 
   assert.deepEqual([...reduced.closedWaves], []);
   // No queue-start/green/etc. yet, so no issue has a reconstructed outcome.
   assert.deepEqual([...reduced.outcomes.entries()], []);
+});
+
+test("reduceCampaign reads an optional campaign name off the campaign-start event", () => {
+  // A named run carries its name on the start event; an unnamed one leaves it undefined.
+  assert.equal(
+    reduceCampaign([{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"]], name: "gateway work" }]).name,
+    "gateway work",
+  );
+  assert.equal(reduceCampaign([{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"]] }]).name, undefined);
+  // The latest campaign-start wins, name and all.
+  assert.equal(
+    reduceCampaign([
+      { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["1"]], name: "first" },
+      { ts: "2025-01-01T00:10:00.000Z", event: "campaign-start", batches: [["101"]], name: "second" },
+    ]).name,
+    "second",
+  );
 });
 
 test("reduceCampaign reports one completed wave closed and the next wave current mid-campaign", () => {
@@ -530,6 +548,17 @@ test("buildStatus shows campaign waves with issue chips and statuses", () => {
   );
   assert.equal(status.parked[0].issueNumber, "102");
   assert.deepEqual(status.parked[0].options, ["A: do the simple thing", "B: do the robust thing"]);
+});
+
+test("buildStatus surfaces the campaign name from the start event", () => {
+  const dir = join(tmpdir(), `sctdd-status-name-${Date.now()}`);
+  mkdirSync(join(dir, "logs"), { recursive: true });
+  mkdirSync(join(dir, "parked"), { recursive: true });
+  writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
+    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"]], name: "gateway work" },
+  ]);
+
+  assert.equal(buildStatus(cfgFor(dir)).name, "gateway work");
 });
 
 test("buildStatus marks completed waves as closed", () => {
@@ -702,9 +731,11 @@ test("renderStatusPage lists archived runs and renders a selected one read-only 
   );
 
   // An archived-runs list, newest-first, each a link carrying project + run token.
+  // These runs are unnamed, so the primary label falls back to the timestamp token,
+  // with the mode·issues·outcome summary as a secondary label beside it.
   assert.match(html, /<section class="archived-runs"><h2>Archived runs<\/h2>/);
-  assert.match(html, /<a href="\/\?project=beta&amp;run=2026-02-01T00-00-00-000Z"[^>]*>campaign · 2 issues · complete<\/a>/);
-  assert.match(html, /<a href="\/\?project=beta&amp;run=2026-01-01T00-00-00-000Z"[^>]*>queue · 1 issue · halted<\/a>/);
+  assert.match(html, /<a href="\/\?project=beta&amp;run=2026-02-01T00-00-00-000Z"[^>]*>2026-02-01T00-00-00-000Z<\/a> <span class="run-summary">campaign · 2 issues · complete<\/span>/);
+  assert.match(html, /<a href="\/\?project=beta&amp;run=2026-01-01T00-00-00-000Z"[^>]*>2026-01-01T00-00-00-000Z<\/a> <span class="run-summary">queue · 1 issue · halted<\/span>/);
   assert.ok(
     html.indexOf(">campaign · 2 issues · complete<") < html.indexOf(">queue · 1 issue · halted<"),
     "archived runs list newest-first",
@@ -722,6 +753,51 @@ test("renderStatusPage lists archived runs and renders a selected one read-only 
   assert.match(html, /data-issue="201"[^>]*data-carvable="1"/);
   // …but the archived render is read-only: its 301 chip gets no carve data at all.
   assert.doesNotMatch(html, /data-issue="301"/);
+});
+
+test("renderStatusPage shows the run name in the live header, and names vs timestamps in the archive", () => {
+  const html = renderStatusPage(
+    {
+      project: "beta",
+      name: "gateway work",
+      waves: [{ index: 0, status: "running", issues: [{ issueNumber: "201", status: "running" }] }],
+      parked: [],
+    },
+    {
+      selected: "beta",
+      archivedRuns: [
+        // A named run: its name is the primary label, the summary stays secondary.
+        { run: "2026-02-01T00-00-00-000Z", summary: "campaign · 2 issues · complete", name: "comms + dashboard" },
+        // An unnamed run: it falls back to its timestamp token as the primary label.
+        { run: "2026-01-01T00-00-00-000Z", summary: "queue · 1 issue · halted" },
+      ],
+      archivedRun: "2026-02-01T00-00-00-000Z",
+      archived: {
+        project: "beta",
+        name: "comms + dashboard",
+        waves: [{ index: 0, status: "unstarted", issues: [{ issueNumber: "301", status: "unstarted" }] }],
+        parked: [],
+      },
+    },
+  );
+
+  // Live header shows the campaign's name.
+  assert.match(html, /class="run-name">gateway work</);
+
+  // Named run: the link text is the NAME, and the mode·issues·outcome summary is a secondary label.
+  assert.match(html, /run=2026-02-01T00-00-00-000Z"[^>]*>comms \+ dashboard<\/a>/);
+  assert.match(html, /<span class="run-summary">campaign · 2 issues · complete<\/span>/);
+  // Unnamed run: the link text falls back to the timestamp token.
+  assert.match(html, /run=2026-01-01T00-00-00-000Z"[^>]*>2026-01-01T00-00-00-000Z<\/a>/);
+  assert.match(html, /<span class="run-summary">queue · 1 issue · halted<\/span>/);
+
+  // The archived-run view carries the run's name beside its token.
+  assert.match(html, /<section class="archived-run"><h2>Archived run[^<]*comms \+ dashboard/);
+});
+
+test("renderStatusPage omits the run-name header for an unnamed run", () => {
+  const html = renderStatusPage({ project: "beta", waves: [{ index: 0, status: "running", issues: [] }], parked: [] });
+  assert.doesNotMatch(html, /class="run-name"/);
 });
 
 test("renderStatusPage renders no archived-runs section when a project has none", () => {
@@ -1034,8 +1110,24 @@ test("listArchivedRuns lists a project's archived runs newest-first with summari
   assert.deepEqual(runs.map((r) => r.run), ["2026-02-01T00-00-00-000Z", "2026-01-01T00-00-00-000Z"]);
   assert.equal(runs[0].summary, "campaign · 2 issues · complete");
   assert.equal(runs[1].summary, "campaign · 1 issue · complete");
+  // Neither archived run was named, so each carries no name (the list falls back to its token).
+  assert.equal(runs[0].name, undefined);
+  assert.equal(runs[1].name, undefined);
   // The file path is resolved from the listing, never joined from request input.
   assert.ok(runs[0].file.endsWith("orchestrator-2026-02-01T00-00-00-000Z.jsonl"));
+});
+
+test("listArchivedRuns carries a named run's --name for the list's primary label", () => {
+  const dir = join(tmpdir(), `sctdd-archive-named-${Date.now()}`);
+  const archiveDir = join(dir, "logs", "archive");
+  mkdirSync(archiveDir, { recursive: true });
+  writeJsonl(join(archiveDir, "orchestrator-2026-04-01T00-00-00-000Z.jsonl"), [
+    { event: "campaign-start", batches: [["101"]], name: "gateway + comms" },
+    { event: "campaign-done", batches: 1 },
+  ]);
+
+  const runs = listArchivedRuns(dir);
+  assert.equal(runs[0].name, "gateway + comms");
 });
 
 test("listArchivedRuns returns nothing when a project has no archive directory", () => {

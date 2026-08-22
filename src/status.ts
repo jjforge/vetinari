@@ -37,6 +37,8 @@ export interface ParkedIssue {
 
 export interface CampaignStatus {
   project: string;
+  /** the run's optional `--name`, shown as the header label; absent when unnamed. */
+  name?: string;
   waves: StatusWave[];
   parked: ParkedIssue[];
 }
@@ -173,6 +175,9 @@ export async function buildStatusWithIssueNames(cfg: ResolvedConfig): Promise<Ca
  */
 export interface ReducedCampaign {
   waves: string[][];
+  /** the optional human name the campaign was launched with (`--name`), read off
+   * the latest `campaign-start` event; undefined for an unnamed run. */
+  name?: string;
   outcomes: Map<string, IssueStatus>;
   details: Map<string, string>;
   closedWaves: Set<number>;
@@ -191,6 +196,7 @@ export function reduceCampaign(events: any[]): ReducedCampaign {
   const relevant = latestCampaignIndex >= 0 ? events.slice(latestCampaignIndex) : events;
 
   let waves: string[][] = [];
+  let name: string | undefined;
   const outcomes = new Map<string, IssueStatus>();
   const details = new Map<string, string>();
   const closedWaves = new Set<number>();
@@ -199,6 +205,7 @@ export function reduceCampaign(events: any[]): ReducedCampaign {
   for (const e of relevant) {
     if (e.event === "campaign-start" && Array.isArray(e.batches)) {
       waves = e.batches.map((batch: unknown[]) => batch.map(String).map(normalizeIssue));
+      name = typeof e.name === "string" && e.name.trim() ? e.name : undefined;
       currentWave = -1;
     } else if (e.event === "campaign-batch" && Number.isInteger(e.index)) {
       currentWave = e.index;
@@ -247,7 +254,7 @@ export function reduceCampaign(events: any[]): ReducedCampaign {
     }
   }
 
-  return { waves, outcomes, details, closedWaves, currentWave };
+  return { waves, name, outcomes, details, closedWaves, currentWave };
 }
 
 /**
@@ -270,6 +277,9 @@ export interface ArchivedRun {
   run: string;
   file: string;
   summary: string;
+  /** the run's `--name`, when it was launched with one — the list's primary label
+   * (it falls back to the `run` timestamp token when absent). */
+  name?: string;
 }
 
 /** The directory a project's finished-run logs are archived into (mirrors
@@ -293,11 +303,12 @@ export function listArchivedRuns(baseLocation: string): ArchivedRun[] {
     if (!match) continue;
     const file = join(dir, name);
     const events = readEvents({ logFile: file });
-    if (!reduceCampaign(events).waves.length) {
+    const { waves, name: runName } = reduceCampaign(events);
+    if (!waves.length) {
       log("status-archive-skipped", { file });
       continue;
     }
-    runs.push({ run: match[1], file, summary: summarizeRun(events) });
+    runs.push({ run: match[1], file, summary: summarizeRun(events), name: runName });
   }
   return runs.sort((a, b) => (a.run < b.run ? 1 : a.run > b.run ? -1 : 0));
 }
@@ -318,7 +329,7 @@ export function summarizeRun(events: any[]): string {
 }
 
 export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
-  const { waves, outcomes, details, closedWaves, currentWave } = reduceCampaign(readEvents(cfg));
+  const { waves, name, outcomes, details, closedWaves, currentWave } = reduceCampaign(readEvents(cfg));
 
   const activeIssueNumbers = new Set(waves.flat());
   const closedIssueNumbers = new Set([...closedWaves].flatMap((index) => waves[index] ?? []));
@@ -334,6 +345,7 @@ export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
 
   return {
     project: cfg.project,
+    name,
     waves: waves.map((wave, index) => ({
       index,
       status: closedWaves.has(index) ? "closed" : currentWave === index ? "running" : "unstarted",
@@ -471,8 +483,10 @@ export interface StatusPageOptions {
    */
   carve?: boolean;
   /** The selected project's archived runs, newest-first, for the "Archived runs"
-   * list under the live run. Each links back to `GET /?project=…&run=<token>`. */
-  archivedRuns?: { run: string; summary: string }[];
+   * list under the live run. Each links back to `GET /?project=…&run=<token>`; the
+   * run's `--name` (when it had one) is the primary label, the timestamp token the
+   * fallback, and `summary` the secondary label. */
+  archivedRuns?: { run: string; summary: string; name?: string }[];
   /** The archived run's reconstructed status to render read-only below the list,
    * when a `run` token selected one. */
   archived?: CampaignStatus;
@@ -532,6 +546,7 @@ export const renderStatusPage = (status: CampaignStatus, opts: StatusPageOptions
   body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 2rem; background: var(--color-body); color: var(--color-text); }
   h1 { font-size: clamp(1.8rem, 4vw, 3rem); margin: 0; letter-spacing: -0.035em; color: var(--color-text); }
   h2 { color: var(--color-text-light); }
+  .run-name { margin: .75rem 0 0; font-size: 1.15rem; font-weight: 600; color: var(--color-primary); letter-spacing: -0.01em; }
   .page-top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border-bottom: 1px solid var(--color-light-border); padding-bottom: 1rem; }
   .project-picker { margin: 0; }
   .project-picker select { color: var(--color-text); background: var(--color-box-header); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); padding: .35rem .6rem; font: inherit; cursor: pointer; }
@@ -578,12 +593,14 @@ export const renderStatusPage = (status: CampaignStatus, opts: StatusPageOptions
   .parked-issues > h2 { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
   .parked-count { font-size: .78rem; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: var(--color-yellow); border: 1px solid var(--color-yellow); background: rgb(200 162 78 / 12%); border-radius: 999px; padding: .15rem .55rem; }
   .parked-issues .card { border-left: 3px solid var(--color-yellow); }
+  .run-summary { color: var(--color-text-light-2); font-size: .85rem; font-weight: 400; }
 </style>
 </head>
 <body>
 <div class="page-top"><h1>${escapeHtml(status.project)} status</h1>${
   opts.projects?.length ? renderProjectPicker(opts.projects, opts.selected ?? status.project) : ""
 }<div class="refresh" title="Auto-refresh the page every N seconds"><label><input id="refresh-enabled" type="checkbox" checked /> <span>Refresh</span></label><label class="refresh-every"><input id="refresh-seconds" type="number" min="1" max="999" step="1" value="45" /></label></div></div>
+${status.name ? `<p class="run-name">${escapeHtml(status.name)}</p>` : ""}
 ${
   status.parked.length
     ? `<section class="parked-issues"><h2>Parked issues <span class="parked-count">${status.parked.length} awaiting you</span></h2>${status.parked
@@ -603,7 +620,7 @@ ${
           (run) =>
             `<li><a href="/?project=${encodeURIComponent(opts.selected ?? status.project)}&amp;run=${encodeURIComponent(run.run)}"${
               run.run === opts.archivedRun ? ` aria-current="true"` : ""
-            }>${escapeHtml(run.summary)}</a> <a href="/archive/log?project=${encodeURIComponent(opts.selected ?? status.project)}&amp;run=${encodeURIComponent(run.run)}">raw log</a></li>`,
+            }>${escapeHtml(run.name ?? run.run)}</a> <span class="run-summary">${escapeHtml(run.summary)}</span> <a href="/archive/log?project=${encodeURIComponent(opts.selected ?? status.project)}&amp;run=${encodeURIComponent(run.run)}">raw log</a></li>`,
         )
         .join("")}</ul></section>`
     : ""
@@ -613,7 +630,9 @@ ${
   // false` so its chips carry no carve affordance, and no parked/answer form (a
   // finished run has nothing to act on). Additive — the live run stays above.
   opts.archived
-    ? `<section class="archived-run"><h2>Archived run ${escapeHtml(opts.archivedRun ?? "")}</h2>${renderWaves(opts.archived, false)}</section>`
+    ? `<section class="archived-run"><h2>Archived run ${
+        opts.archived.name ? `${escapeHtml(opts.archived.name)} <small class="run-summary">${escapeHtml(opts.archivedRun ?? "")}</small>` : escapeHtml(opts.archivedRun ?? "")
+      }</h2>${renderWaves(opts.archived, false)}</section>`
     : ""
 }
 <div id="issue-detail" class="issue-detail" aria-live="polite"><span class="issue-detail-text"></span>${
@@ -964,7 +983,7 @@ export async function serveAllStatus(
             projects: statuses.map((s) => s.project),
             selected: selected.project,
             carve: true,
-            archivedRuns: archivedRuns.map((r) => ({ run: r.run, summary: r.summary })),
+            archivedRuns: archivedRuns.map((r) => ({ run: r.run, summary: r.summary, name: r.name })),
             archived,
             archivedRun: match?.run,
           }),

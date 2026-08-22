@@ -16,6 +16,9 @@
  * without disturbing what already exists.
  */
 
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+
 const CANONICAL_DIR = "sandcastle";
 const LOCAL_DIR = ".sandcastle.local";
 const CONFIG_DEST = `${CANONICAL_DIR}/config.mts`;
@@ -95,4 +98,106 @@ export function computeInit(scan: InitScan): InitPlan {
   const gitignore = planGitignore(scan.gitignore);
 
   return { creates, dirs, gitignore, refused };
+}
+
+/**
+ * A human-facing summary of a plan, printed for both `--dry-run` (the plan) and a
+ * real run (what it did). An empty plan reads as "nothing to do"; a plan that laid
+ * down the committed scaffold ends with the maintainer's next steps. Pure.
+ */
+export function describeInit(plan: InitPlan): string {
+  const nothing = !plan.creates.length && !plan.dirs.length && plan.gitignore === undefined;
+  if (nothing) {
+    return "Nothing to do — this project is already initialized onto the sandcastle/ + .sandcastle.local/ layout.";
+  }
+
+  const lines: string[] = [];
+  if (plan.refused) {
+    lines.push(`Left ${CONFIG_DEST} untouched — it already exists (init never overwrites an existing config).`);
+    lines.push("Filling in the still-missing pieces:");
+  } else {
+    lines.push("Scaffolding this project onto the sandcastle/ + .sandcastle.local/ layout:");
+  }
+
+  for (const c of plan.creates) lines.push(`  + ${c.path}`);
+  for (const d of plan.dirs) lines.push(`  + ${d}/ (excluded machine-local dir)`);
+  if (plan.gitignore !== undefined) lines.push(`  ~ .gitignore — exclude ${LOCAL_DIR}/`);
+
+  // Next steps only apply when the committed scaffold was actually laid down.
+  if (plan.creates.length) {
+    lines.push("");
+    lines.push("Next steps:");
+    lines.push(`  1. Add your toolchain to ${DOCKERFILE_DEST} and your gates to ${CONFIG_DEST}.`);
+    lines.push("  2. Build the image, then run `sandcastle-tdd baseline` to prove every gate green.");
+  }
+
+  return lines.join("\n");
+}
+
+export interface ApplyInitResult {
+  /** Relative paths of the scaffold files written. */
+  created: string[];
+  /** Relative paths of the directories created. */
+  dirsCreated: string[];
+  /** Whether `.gitignore` was written. */
+  gitignoreUpdated: boolean;
+}
+
+/**
+ * Perform a plan against `baseDir`: write the committed scaffold files, create the
+ * excluded dir, and write the `.gitignore` edit. Each scaffold write re-checks its
+ * destination against the live disk first and refuses rather than clobber — a last
+ * guard against a stale scan (the planner already withholds a write whose target
+ * existed at scan time). Directory creation is `recursive`, so re-creating an
+ * existing excluded dir is a no-op.
+ */
+export function applyInit(baseDir: string, plan: InitPlan): ApplyInitResult {
+  const created: string[] = [];
+  for (const { path, content } of plan.creates) {
+    const dest = resolve(baseDir, path);
+    if (existsSync(dest)) throw new Error(`init refused: ${path} already exists — not overwriting it. Nothing was changed to it.`);
+    mkdirSync(dirname(dest), { recursive: true });
+    writeFileSync(dest, content);
+    created.push(path);
+  }
+
+  const dirsCreated: string[] = [];
+  for (const d of plan.dirs) {
+    mkdirSync(resolve(baseDir, d), { recursive: true });
+    dirsCreated.push(d);
+  }
+
+  const gitignoreUpdated = plan.gitignore !== undefined;
+  if (gitignoreUpdated) writeFileSync(resolve(baseDir, ".gitignore"), plan.gitignore!);
+
+  return { created, dirsCreated, gitignoreUpdated };
+}
+
+/** Read a file, or undefined when it is absent — the edge's "optional input" idiom. */
+const readOrUndef = (path: string): string | undefined => {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return undefined;
+  }
+};
+
+/** Absolute path to a template shipped with the install (sibling of `src/`). */
+const templatePath = (name: string) => new URL(`../templates/${name}`, import.meta.url).pathname;
+
+/**
+ * Probe `baseDir` into an `InitScan` — the filesystem read that lives at the edge
+ * so the planner stays pure. A canonical `sandcastle/config.{mts,ts}` counts as an
+ * existing config (the refusal trigger); the deprecated locations do not, since
+ * init is for a greenfield project (a legacy layout is `migrate`'s job). The
+ * config skeleton and Dockerfile templates are read from the shared install.
+ */
+export function scanInit(baseDir: string): InitScan {
+  return {
+    hasConfig: existsSync(resolve(baseDir, CONFIG_DEST)) || existsSync(resolve(baseDir, `${CANONICAL_DIR}/config.ts`)),
+    hasLocalDir: existsSync(resolve(baseDir, LOCAL_DIR)),
+    gitignore: readOrUndef(resolve(baseDir, ".gitignore")),
+    configTemplate: readFileSync(templatePath("config.mts"), "utf8"),
+    dockerfileTemplate: readFileSync(templatePath("Dockerfile"), "utf8"),
+  };
 }

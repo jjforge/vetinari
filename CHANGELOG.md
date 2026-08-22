@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Wave headers now read as their work (#43). Each dashboard wave label is derived
+  at render from the issue titles the dashboard already resolves — no storage, no
+  event change: a single-issue wave reads as that issue's title, a many-issue wave
+  as its lead issue's title + "+N" for the rest (e.g. `Wave 2 — config resolution +3`).
+  The bare `Wave N` index still leads, the chips still carry every issue's title on
+  hover/tap, and a wave whose lead title has not resolved yet keeps the plain index.
+
 ### Added
 
 - Optional campaign name (#42). `campaign --name "…"` records `name` on the

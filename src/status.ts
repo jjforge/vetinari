@@ -591,6 +591,42 @@ export function shellCarvePreview(projectRoot: string, taskId: string): Promise<
   });
 }
 
+/** The carve closure — the target plus its transitive dependents — that the
+ * inline panel discloses before a carve. */
+export interface CarveClosure {
+  target: string;
+  removed: string[];
+}
+
+/**
+ * Pull the closure out of the project's own `carve <issue> --dry-run` text: its
+ * target and every issue the dry-run reports it would drop or keep-banked (both
+ * are members of the closure `computeCarve` produced). Pure so the brittle bit —
+ * coupling to the CLI's human output — is isolated and unit-tested; the live
+ * shell (`shellCarveClosure`) is the only caller.
+ */
+export function parseCarveClosure(taskId: string, previewText: string): CarveClosure {
+  const target = taskId.replace(/^#/, "").trim();
+  // The closure is named on the "carve #x → …" line; the "remaining campaign"
+  // line lists what stays, so it is deliberately excluded.
+  const arrowLine = previewText.split("\n").find((line) => line.includes("→")) ?? "";
+  const after = arrowLine.split("→")[1] ?? "";
+  const mentioned = [...after.matchAll(/#(\d+)/g)].map((m) => m[1]);
+  const removed = [target, ...mentioned.filter((id) => id !== target)].filter((id, i, all) => all.indexOf(id) === i);
+  return { target, removed };
+}
+
+/**
+ * The default `carveClosure`: shell the selected project's own `carve --dry-run`
+ * (the same dumb-router routing `shellCarvePreview` uses) and parse the closure
+ * out of it. Returns null when the child fails (e.g. no campaign running), which
+ * the route surfaces as a 502 for the panel to report.
+ */
+export async function shellCarveClosure(projectRoot: string, taskId: string): Promise<CarveClosure | null> {
+  const previewText = await shellCarvePreview(projectRoot, taskId);
+  return previewText == null ? null : parseCarveClosure(taskId, previewText);
+}
+
 export async function serveAllStatus(
   configDir: string,
   opts: {
@@ -598,10 +634,12 @@ export async function serveAllStatus(
     host: string;
     spawn?: (command: string, args: string[], options: { cwd: string; stdio: readonly (string | number)[] }) => unknown;
     carvePreview?: (projectRoot: string, taskId: string) => Promise<string | null>;
+    carveClosure?: (projectRoot: string, taskId: string) => Promise<CarveClosure | null>;
   },
 ) {
   const spawnCmd = opts.spawn ?? spawn;
   const carvePreview = opts.carvePreview ?? shellCarvePreview;
+  const carveClosure = opts.carveClosure ?? shellCarveClosure;
   const server = createServer((req, res) => {
     void (async () => {
       const url = new URL(req.url ?? "/", "http://localhost");
@@ -609,6 +647,30 @@ export async function serveAllStatus(
       if (req.method === "GET" && url.pathname === "/api/status") {
         res.setHeader("content-type", "application/json");
         res.end(JSON.stringify(buildAllStatus(pointers())));
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/carve" && url.searchParams.has("preview")) {
+        // Lightweight closure preview for the inline panel: the panel fetches this
+        // when Carve is tapped, then discloses the removed list before any POST.
+        // Routed to the selected project's own install (dumb router, ADR 0002).
+        const taskId = url.searchParams.get("taskId");
+        const project = url.searchParams.get("project");
+        if (!taskId || !project) {
+          res.writeHead(400).end("taskId and project are required");
+          return;
+        }
+        const pointer = pointers().find((p) => p.project === project);
+        if (!pointer) {
+          res.writeHead(404).end(`unknown project: ${project}`);
+          return;
+        }
+        const closure = await carveClosure(pointer.projectRoot, taskId);
+        if (closure == null) {
+          res.writeHead(502).end(`Couldn't preview carve #${taskId} for ${project} — is a campaign still running?`);
+          return;
+        }
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify(closure));
         return;
       }
       if (req.method === "POST" && url.pathname === "/answer") {

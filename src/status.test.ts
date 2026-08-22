@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { buildAllStatus, buildStatus, buildStatusWithIssueNames, campaignRunning, extractParkedDetails, formatStatusText, reduceCampaign, renderStatusPage, selectStatus, serveAllStatus } from "./status.ts";
+import { buildAllStatus, buildStatus, buildStatusWithIssueNames, campaignRunning, extractParkedDetails, formatStatusText, parseCarveClosure, reduceCampaign, renderStatusPage, selectStatus, serveAllStatus } from "./status.ts";
 import type { CampaignStatus } from "./status.ts";
 import type { AddressInfo } from "node:net";
 import { register, type ProjectPointer } from "./registry.ts";
@@ -154,6 +154,65 @@ test("serveAllStatus POST /carve on confirm shells carve in the selected project
     assert.equal(spawned.length, 1);
     assert.deepEqual(spawned[0].args.slice(-2), ["carve", "401"]);
     assert.equal(spawned[0].cwd, join(configDir, "beta-root"));
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serveAllStatus GET /carve?preview returns the selected project's closure as JSON", async () => {
+  const configDir = join(tmpdir(), `sctdd-agg-carve-json-${Date.now()}`);
+  const alphaDir = join(configDir, "state-alpha");
+  const betaDir = join(configDir, "state-beta");
+  seedState(alphaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"], ["301"]] }]);
+  seedState(betaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["201"], ["401"]] }]);
+  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
+  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+
+  const closures: { projectRoot: string; taskId: string }[] = [];
+  const spawned: unknown[] = [];
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+    spawn: (...a) => spawned.push(a),
+    // The dumb router routes the closure to the selected project's own install,
+    // which computes it against that project's real blockedBy graph.
+    carveClosure: (projectRoot, taskId) => {
+      closures.push({ projectRoot, taskId });
+      return Promise.resolve({ target: taskId, removed: [taskId, "401"] });
+    },
+  });
+  const { port } = server.address() as AddressInfo;
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/carve?preview&taskId=201&project=beta`);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get("content-type") ?? "", /application\/json/);
+    assert.deepEqual(await res.json(), { target: "201", removed: ["201", "401"] });
+    // The closure came from the selected project's install (beta's root), not alpha's.
+    assert.deepEqual(closures, [{ projectRoot: join(configDir, "beta-root"), taskId: "201" }]);
+    // A preview computes nothing destructive — no carve is spawned.
+    assert.equal(spawned.length, 0);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serveAllStatus GET /carve?preview validates params and the project", async () => {
+  const configDir = join(tmpdir(), `sctdd-agg-carve-json-guard-${Date.now()}`);
+  const betaDir = join(configDir, "state-beta");
+  seedState(betaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["201"]] }]);
+  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+    carveClosure: () => Promise.resolve({ target: "201", removed: ["201"] }),
+  });
+  const { port } = server.address() as AddressInfo;
+  try {
+    // Missing taskId/project → 400.
+    assert.equal((await fetch(`http://127.0.0.1:${port}/carve?preview&project=beta`)).status, 400);
+    // Unknown project → 404.
+    assert.equal((await fetch(`http://127.0.0.1:${port}/carve?preview&taskId=201&project=ghost`)).status, 404);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -745,6 +804,22 @@ test("renderStatusPage omits the carve control unless the page opts into it", ()
   });
 
   assert.doesNotMatch(html, /action="\/carve"/);
+});
+
+test("parseCarveClosure reads the target and closure from carve --dry-run text", () => {
+  // A running-campaign dry-run names the target, its dropped dependents, and any
+  // banked members kept — all three are closure members and belong in `removed`.
+  assert.deepEqual(
+    parseCarveClosure("201", "carve #201 → dropping #201, #401 (keeping banked #301)\nremaining campaign: (nothing left to run)"),
+    { target: "201", removed: ["201", "401", "301"] },
+  );
+  // A target that drops nothing is just itself.
+  assert.deepEqual(parseCarveClosure("#201", "carve #201 → nothing to drop\nremaining campaign: \"301\""), { target: "201", removed: ["201"] });
+  // The "remaining campaign" line names what stays, so it never leaks in.
+  assert.deepEqual(parseCarveClosure("640", "carve #640 → dropping #640, #655\nremaining campaign: \"701 702\""), {
+    target: "640",
+    removed: ["640", "655"],
+  });
 });
 
 test("extractParkedDetails separates description from Options section", () => {

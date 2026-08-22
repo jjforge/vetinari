@@ -11,6 +11,7 @@ import {
   formatGatewayStatus,
   isStatusCommand,
   loadGatewayProjects,
+  newPendingConfirms,
   newReplyIndex,
   parseGatewayCommand,
   pendingAnnouncements,
@@ -22,6 +23,7 @@ import {
   resolveReply,
   routeReply,
   type GatewayProject,
+  type PendingConfirm,
   type SendRef,
 } from "./gateway.ts";
 
@@ -394,6 +396,46 @@ test("resolveCarveTarget with an explicit project that has no running campaign r
   );
 
   assert.equal(res.kind, "none");
+});
+
+const pendingConfirm = (over: Partial<PendingConfirm> = {}): PendingConfirm => ({
+  project: "jjforge",
+  projectRoot: "/home/me/code/jjforge",
+  baseLocation: "/home/me/code/jjforge/.sandcastle.local",
+  issue: "640",
+  ...over,
+});
+
+test("pendingConfirms records a preview and resolves a reply to it", () => {
+  const store = newPendingConfirms(() => 0);
+  store.record("botA", 100, pendingConfirm({ issue: "640" }));
+
+  assert.deepEqual(store.resolve("botA", 100), pendingConfirm({ issue: "640" }));
+});
+
+test("pendingConfirms returns null for a yes with nothing pending", () => {
+  const store = newPendingConfirms(() => 0);
+  store.record("botA", 100, pendingConfirm());
+
+  assert.equal(store.resolve("botA", 999), null, "a reply to a message with no pending confirm is ignored");
+  assert.equal(store.resolve("otherBot", 100), null, "another bot's message id does not match");
+});
+
+test("pendingConfirms is one-shot — a confirm resolves at most once", () => {
+  const store = newPendingConfirms(() => 0);
+  store.record("botA", 100, pendingConfirm());
+
+  assert.ok(store.resolve("botA", 100), "first yes resolves");
+  assert.equal(store.resolve("botA", 100), null, "a second yes to the same preview is ignored");
+});
+
+test("pendingConfirms drops a confirmation older than its TTL", () => {
+  let clock = 0;
+  const store = newPendingConfirms(() => clock, 60_000);
+  store.record("botA", 100, pendingConfirm());
+
+  clock = 60_001; // past the TTL
+  assert.equal(store.resolve("botA", 100), null, "an expired confirmation is not honored");
 });
 
 // --- Outbox drain-and-route (E4). Records live in a real tmp outbox so the drain

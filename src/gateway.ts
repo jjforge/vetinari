@@ -219,6 +219,52 @@ const isAnnounced = (index: ReplyIndex, project: string, task: string, parkedAt:
   index.announced.has(announceKey(project, task, parkedAt));
 
 /**
+ * A carve awaiting its confirming `yes`: the resolved project and the issue to
+ * carve. Recorded when the gateway previews a carve and read back to execute it
+ * on a reply to the preview. Carries only pointers — the project-side `carve`
+ * recomputes the closure against the project's own graph (ADR 0002/0003).
+ */
+export interface PendingConfirm {
+  project: string;
+  projectRoot: string;
+  baseLocation: string;
+  issue: string;
+}
+
+/**
+ * The in-memory store of pending carve confirmations, keyed to the preview
+ * message a `yes` must reply to (spec §"`pendingConfirms` store"). Deliberately
+ * non-durable — a gateway restart drops it and re-sending `carve 640` is the
+ * recovery (ADR 0002). The clock is injected so expiry is testable without real
+ * time; `resolve` is one-shot (a confirm fires at most once) and drops an entry
+ * older than the TTL, so a stray or stale `yes` resolves to nothing.
+ */
+export interface PendingConfirms {
+  record(token: string, messageId: number, confirm: PendingConfirm): void;
+  resolve(token: string, messageId: number): PendingConfirm | null;
+}
+
+// A short TTL: long enough to read the preview and reply, short enough that a
+// much later `yes` cannot trigger a carve the maintainer has forgotten about.
+const CONFIRM_TTL_MS = 5 * 60 * 1000;
+
+export function newPendingConfirms(now: () => number, ttlMs: number = CONFIRM_TTL_MS): PendingConfirms {
+  const entries = new Map<string, { confirm: PendingConfirm; expiresAt: number }>();
+  return {
+    record(token, messageId, confirm) {
+      entries.set(messageKey(token, messageId), { confirm, expiresAt: now() + ttlMs });
+    },
+    resolve(token, messageId) {
+      const key = messageKey(token, messageId);
+      const entry = entries.get(key);
+      if (!entry) return null;
+      entries.delete(key); // one-shot: consumed whether or not it is still live
+      return entry.expiresAt > now() ? entry.confirm : null;
+    },
+  };
+}
+
+/**
  * A parked question the gateway must still announce: the project's destination
  * and the record to send. The daemon sends each, writes the returned message id
  * back into the record, and records it in the index.

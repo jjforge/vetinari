@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import { archiveRun } from "./archive.ts";
+import { enqueueOutbound, listOutbox, markOutboundSent, outboxDirOf } from "./state.ts";
 
 let counter = 0;
 const cfgFor = (): ResolvedConfig => {
@@ -29,6 +30,23 @@ test("archiveRun moves the log aside, resets it, and clears parked records", () 
   // Parked records are cleared.
   assert.equal(result.clearedParked, 1);
   assert.equal(readdirSync(cfg.parkedDir).filter((f) => f.endsWith(".json")).length, 0);
+});
+
+test("archiveRun clears sent outbound records but leaves unsent ones for the gateway", () => {
+  const cfg = cfgFor();
+  enqueueOutbound(cfg, { category: "success", event: "green", text: "GREEN" });
+  enqueueOutbound(cfg, { category: "progress", event: "campaign-complete", text: "done" });
+  const [first] = listOutbox(cfg);
+  markOutboundSent(outboxDirOf(cfg.stateDir), first.id); // one already routed
+
+  const result = archiveRun(cfg);
+
+  // The routed record is cleared; the still-unsent one survives so a message
+  // emitted while the gateway was down is not dropped (user story 14).
+  assert.equal(result.clearedOutbound, 1);
+  const left = listOutbox(cfg);
+  assert.equal(left.length, 1);
+  assert.equal(left[0].sentAt, undefined);
 });
 
 test("archiveRun handles a missing or empty log without creating an archive", () => {

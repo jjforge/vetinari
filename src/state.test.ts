@@ -4,7 +4,18 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ResolvedConfig } from "./config.ts";
-import { clearParkedForTasks, listParked, listParkedIn, park, setParkedMessageId } from "./state.ts";
+import {
+  clearParkedForTasks,
+  enqueueOutbound,
+  listOutbox,
+  listOutboxIn,
+  listParked,
+  listParkedIn,
+  markOutboundSent,
+  outboxDirOf,
+  park,
+  setParkedMessageId,
+} from "./state.ts";
 
 const cfgFor = (dir: string): ResolvedConfig =>
   ({
@@ -90,4 +101,65 @@ test("setParkedMessageId leaves an already-cleared record alone", () => {
   setParkedMessageId(join(dir, "parked"), "999", 7);
 
   assert.deepEqual(listParkedIn(join(dir, "parked")), []);
+});
+
+let outboxCounter = 0;
+const outboxDir = () => join(tmpdir(), `sctdd-outbox-${Date.now()}-${outboxCounter++}`);
+
+test("enqueueOutbound writes a category-tagged outbound record the gateway can drain", () => {
+  const dir = outboxDir();
+
+  enqueueOutbound(cfgFor(dir), { category: "progress", event: "wave-start", text: "batch 1 started" });
+
+  const recs = listOutboxIn(outboxDirOf(dir));
+  assert.equal(recs.length, 1);
+  assert.equal(recs[0].category, "progress");
+  assert.equal(recs[0].event, "wave-start");
+  assert.equal(recs[0].text, "batch 1 started");
+  assert.equal(recs[0].sentAt, undefined, "a fresh record is unsent");
+  assert.ok(recs[0].id, "every record carries an id");
+});
+
+test("enqueueOutbound records an eventless category and keeps event undefined", () => {
+  const dir = outboxDir();
+
+  enqueueOutbound(cfgFor(dir), { category: "finding", text: "filed 2 findings" });
+
+  const recs = listOutbox(cfgFor(dir));
+  assert.equal(recs.length, 1);
+  assert.equal(recs[0].category, "finding");
+  assert.equal(recs[0].event, undefined);
+});
+
+test("enqueueOutbound keeps concurrent records distinct — no id collision within a tick", () => {
+  const dir = outboxDir();
+
+  for (let i = 0; i < 5; i++) enqueueOutbound(cfgFor(dir), { category: "progress", text: `msg ${i}` });
+
+  const recs = listOutboxIn(outboxDirOf(dir));
+  assert.equal(recs.length, 5, "five enqueues leave five records");
+  assert.equal(new Set(recs.map((r) => r.id)).size, 5, "ids are unique");
+});
+
+test("markOutboundSent stamps a record sent-in-place so it is never routed twice", () => {
+  const dir = outboxDir();
+  enqueueOutbound(cfgFor(dir), { category: "success", event: "green", text: "GREEN on 26" });
+  const [rec] = listOutboxIn(outboxDirOf(dir));
+
+  markOutboundSent(outboxDirOf(dir), rec.id, "ops");
+
+  const [after] = listOutboxIn(outboxDirOf(dir));
+  assert.equal(after.id, rec.id);
+  assert.ok(after.sentAt, "sentAt is stamped");
+  assert.equal(after.destination, "ops", "the resolved destination is recorded");
+});
+
+test("markOutboundSent leaves an already-cleared record alone", () => {
+  const dir = outboxDir();
+  mkdirSync(outboxDirOf(dir), { recursive: true });
+
+  // No throw for a record cleared (archived) before the mark landed.
+  markOutboundSent(outboxDirOf(dir), "gone", "ops");
+
+  assert.deepEqual(listOutboxIn(outboxDirOf(dir)), []);
 });

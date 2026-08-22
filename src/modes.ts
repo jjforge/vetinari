@@ -4,7 +4,7 @@ import { log } from "./log.ts";
 import { runGates } from "./gate.ts";
 import { makeSandbox } from "./sandbox.ts";
 import { currentBranch, integrateGreens } from "./merge.ts";
-import { clearParked, clearParkedForTasks, listParked } from "./state.ts";
+import { clearParked, clearParkedForTasks, enqueueOutbound, listParked } from "./state.ts";
 import { tgConfigured, tgEnvConn, tgSend, tgWaitReply } from "./telegram.ts";
 
 /**
@@ -45,7 +45,11 @@ export async function queue(cfg: ResolvedConfig, taskIds: string[], slots: numbe
   const outcomes: Record<string, string> = {};
   let running = 0;
   log("queue-start", { taskIds, slots });
-  await tgSend(tgEnvConn(), `🚦 ${cfg.project} queue started: ${taskIds.join(", ")} — ${slots} slots. The gateway announces parked questions; reply to resume.`);
+  enqueueOutbound(cfg, {
+    category: "progress",
+    event: "queue-start",
+    text: `🚦 ${cfg.project} queue started: ${taskIds.join(", ")} — ${slots} slots. The gateway announces parked questions; reply to resume.`,
+  });
 
   await new Promise<void>((done) => {
     const fill = () => {
@@ -67,7 +71,11 @@ export async function queue(cfg: ResolvedConfig, taskIds: string[], slots: numbe
 
   const summary = taskIds.map((i) => `${i}: ${outcomes[i] ?? "?"}`).join("\n");
   log("queue-done", { outcomes });
-  await tgSend(tgEnvConn(), `🏁 ${cfg.project} queue drained.\n${summary}\nParked tasks stay answerable — the gateway routes your replies.`);
+  enqueueOutbound(cfg, {
+    category: "progress",
+    event: "queue-done",
+    text: `🏁 ${cfg.project} queue drained.\n${summary}\nParked tasks stay answerable — the gateway routes your replies.`,
+  });
   console.log(`queue drained:\n${summary}`);
   return outcomes;
 }
@@ -95,12 +103,20 @@ export async function campaign(cfg: ResolvedConfig, batches: string[][], slots: 
   }
 
   log("campaign-start", { batches, slots });
-  await tgSend(tgEnvConn(), `🎬 ${cfg.project} campaign: ${batches.length} batch(es) — ${batches.map((b) => b.join(",")).join(" | ")}`);
+  enqueueOutbound(cfg, {
+    category: "progress",
+    event: "campaign-start",
+    text: `🎬 ${cfg.project} campaign: ${batches.length} batch(es) — ${batches.map((b) => b.join(",")).join(" | ")}`,
+  });
 
   for (let i = 0; i < batches.length; i++) {
     const tasks = batches[i];
     log("campaign-batch", { index: i, tasks });
-    await tgSend(tgEnvConn(), `▶️ ${cfg.project} campaign batch ${i + 1}/${batches.length}: ${tasks.join(", ")}`);
+    enqueueOutbound(cfg, {
+      category: "progress",
+      event: "wave-start",
+      text: `▶️ ${cfg.project} campaign batch ${i + 1}/${batches.length}: ${tasks.join(", ")}`,
+    });
 
     const outcomes = await queue(cfg, tasks, slots);
     const greens = tasks.filter((t) => outcomes[t] === "green");
@@ -110,10 +126,11 @@ export async function campaign(cfg: ResolvedConfig, batches: string[][], slots: 
     if (halt) {
       const where = halt.taskId ? ` on ${halt.taskId}` : "";
       log("campaign-halt", { index: i, reason: halt.reason, taskId: halt.taskId });
-      await tgSend(
-        tgEnvConn(),
-        `🛑 ${cfg.project} campaign HALTED at batch ${i + 1} — ${halt.reason}${where}. Base rolled back; branches kept for you.\n\n${halt.detail}`,
-      );
+      enqueueOutbound(cfg, {
+        category: "failure",
+        event: "halt",
+        text: `🛑 ${cfg.project} campaign HALTED at batch ${i + 1} — ${halt.reason}${where}. Base rolled back; branches kept for you.\n\n${halt.detail}`,
+      });
       console.log(`campaign halted (${halt.reason}${where}) — base rolled back, ${batches.length - i - 1} batch(es) not started.`);
       return false;
     }
@@ -121,12 +138,20 @@ export async function campaign(cfg: ResolvedConfig, batches: string[][], slots: 
     if (held.length) clearParkedForTasks(cfg, held);
     const note = held.length ? ` — cleared parked records for completed wave: ${held.map((t) => `${t}(${outcomes[t]})`).join(", ")}` : "";
     log("campaign-batch-done", { index: i, merged, held, clearedParked: held });
-    await tgSend(tgEnvConn(), `✅ ${cfg.project} campaign batch ${i + 1} merged: ${merged.join(", ") || "nothing"}${note}`);
+    enqueueOutbound(cfg, {
+      category: "success",
+      event: "wave-merged",
+      text: `✅ ${cfg.project} campaign batch ${i + 1} merged: ${merged.join(", ") || "nothing"}${note}`,
+    });
     console.log(`batch ${i + 1}/${batches.length}: merged ${merged.join(", ") || "nothing"}${note}`);
   }
 
   log("campaign-done", { batches: batches.length });
-  await tgSend(tgEnvConn(), `🏆 ${cfg.project} campaign complete — ${batches.length} batch(es) merged onto ${cfg.baseBranch}.`);
+  enqueueOutbound(cfg, {
+    category: "success",
+    event: "campaign-complete",
+    text: `🏆 ${cfg.project} campaign complete — ${batches.length} batch(es) merged onto ${cfg.baseBranch}.`,
+  });
   console.log("campaign complete.");
   return true;
 }

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { log } from "./log.ts";
-import type { ResolvedConfig } from "./config.ts";
+import type { Destination, NotifyMap, ResolvedConfig } from "./config.ts";
 import type { TgConn } from "./telegram.ts";
 
 /**
@@ -36,9 +36,13 @@ export function gatewayConfigDir(): string {
  * a re-run just refreshes the pointer. Best-effort: a registry write that fails
  * is logged, never fatal to the run.
  */
-export function autoRegister(cfg: Pick<ResolvedConfig, "project" | "stateDir">, projectRoot: string = process.cwd()): void {
+export function autoRegister(cfg: Pick<ResolvedConfig, "project" | "stateDir" | "notify" | "destinations">, projectRoot: string = process.cwd()): void {
   try {
-    register(gatewayConfigDir(), pointerFor(cfg, projectRoot));
+    const pointer = pointerFor(cfg, projectRoot);
+    register(gatewayConfigDir(), pointer);
+    // Materialize the project's routing into its base location so the gateway —
+    // which holds no project config (ADR 0002) — can route the outbox by it live.
+    writeRouting(pointer.baseLocation, { notify: cfg.notify, destinations: cfg.destinations });
   } catch (e) {
     log("registry-register-failed", { project: cfg.project, error: String(e) });
   }
@@ -81,6 +85,41 @@ export interface ReadProject {
   pointer: ProjectPointer;
   /** The project's Telegram connection, or undefined when it configures none. */
   conn?: TgConn;
+  /** The project's notify map, materialized into its base location; undefined when it configures none. */
+  notify?: NotifyMap;
+  /** The project's named destinations, materialized into its base location. */
+  destinations?: Record<string, Destination>;
+}
+
+/**
+ * The project's routing, materialized as plain JSON in its base location. The
+ * committed `sandcastle/` config owns it; the run copies it down here at
+ * registration so the gateway can read it live without importing the project's
+ * TS config (ADR 0002: a dumb router reads everything from the base location).
+ */
+const ROUTING_FILE = "routing.json";
+
+interface Routing {
+  notify?: NotifyMap;
+  destinations?: Record<string, Destination>;
+}
+
+/** Write the project's routing into its base location for the gateway to read live. Idempotent — a re-run just refreshes it. */
+export function writeRouting(baseLocation: string, routing: Routing): void {
+  mkdirSync(baseLocation, { recursive: true });
+  writeFileSync(join(baseLocation, ROUTING_FILE), JSON.stringify(routing, null, 2));
+}
+
+/** Read a project's materialized routing, or an empty routing when it configured none. */
+function readRouting(baseLocation: string): Routing {
+  const path = join(baseLocation, ROUTING_FILE);
+  if (!existsSync(path)) return {};
+  try {
+    return JSON.parse(readFileSync(path, "utf8")) as Routing;
+  } catch (e) {
+    log("registry-routing-unreadable", { baseLocation, error: String(e) });
+    return {};
+  }
 }
 
 /**
@@ -133,7 +172,8 @@ export function readProject(pointer: ProjectPointer): ReadProject | undefined {
   }
   const secretsPath = join(pointer.baseLocation, SECRETS_FILE);
   const env = existsSync(secretsPath) ? parseEnvFile(readFileSync(secretsPath, "utf8")) : {};
-  return { pointer, conn: tgConnFromEnv(env) };
+  const { notify, destinations } = readRouting(pointer.baseLocation);
+  return { pointer, conn: tgConnFromEnv(env), notify, destinations };
 }
 
 /**

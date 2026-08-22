@@ -10,7 +10,7 @@ import { describePlan, planCampaign, underspecifiedPromptFor, waveArgs, type Und
 import { defaultFileSet } from "./fileset.ts";
 import { applyLayoutMigration, computeLayoutMigration, describeMigration, scanLayout } from "./migrate.ts";
 import { archiveRun } from "./archive.ts";
-import { listParked, readParked } from "./state.ts";
+import { enqueueOutbound, listParked, readParked } from "./state.ts";
 import { autoRegister } from "./registry.ts";
 import { serveStatus } from "./status.ts";
 import { runStatusLine } from "./statusline.ts";
@@ -144,7 +144,7 @@ autoRegister(cfg);
 const archiveIfIdle = () => {
   if (listParked(cfg).length) return;
   const r = archiveRun(cfg);
-  log("archived", { archivedLog: r.archivedLog ?? null, clearedParked: r.clearedParked });
+  log("archived", { archivedLog: r.archivedLog ?? null, clearedParked: r.clearedParked, clearedOutbound: r.clearedOutbound });
   if (r.archivedLog) console.log(`archived run log → ${r.archivedLog}`);
 };
 
@@ -183,11 +183,24 @@ switch (mode) {
     const batches = batchArgs.map((b) => b.split(/[\s,]+/).filter(Boolean)).filter((b) => b.length);
     const { removed, remaining } = await computeCarve(batches, target, cfg.blockedBy);
 
-    const dependents = removed.filter((id) => id !== target.replace(/^#/, "").trim());
-    console.log(`carve #${target.replace(/^#/, "")} → removed ${removed.map((i) => `#${i}`).join(", ")}` + (dependents.length ? ` (dependents: ${dependents.map((i) => `#${i}`).join(", ")})` : " (no dependents)"));
+    const tgt = target.replace(/^#/, "").trim();
+    const dependents = removed.filter((id) => id !== tgt);
+    console.log(`carve #${tgt} → removed ${removed.map((i) => `#${i}`).join(", ")}` + (dependents.length ? ` (dependents: ${dependents.map((i) => `#${i}`).join(", ")})` : " (no dependents)"));
     console.log(`remaining campaign: ${remaining.length ? remaining.map((w) => `"${w.join(" ")}"`).join(" ") : "(nothing left to run)"}`);
 
     if (dryRun) break;
+
+    // A carve had no notification before E4 — emit a progress:carve record so it
+    // is announced and routable like any other outbound message (ADR 0002).
+    enqueueOutbound(cfg, {
+      category: "progress",
+      event: "carve",
+      text:
+        `✂️ ${cfg.project} carved #${tgt} — dropped ${removed.map((i) => `#${i}`).join(", ")}` +
+        (dependents.length ? ` (dependents: ${dependents.map((i) => `#${i}`).join(", ")})` : "") +
+        `. Remaining: ${remaining.length ? remaining.map((w) => `"${w.join(" ")}"`).join(" ") : "nothing left to run"}.`,
+    });
+
     if (!remaining.length) {
       console.log("nothing left to run after the carve — done.");
       break;
@@ -242,7 +255,7 @@ switch (mode) {
     // Force a reset now, even with questions still parked — the manual escape
     // hatch, unlike the automatic archive that waits for an idle queue.
     const r = archiveRun(cfg);
-    log("archived", { archivedLog: r.archivedLog ?? null, clearedParked: r.clearedParked });
+    log("archived", { archivedLog: r.archivedLog ?? null, clearedParked: r.clearedParked, clearedOutbound: r.clearedOutbound });
     console.log(r.archivedLog ? `archived run log → ${r.archivedLog}` : "no run log to archive");
     console.log(`cleared ${r.clearedParked} parked record(s) — dashboard and status line now read idle`);
     break;

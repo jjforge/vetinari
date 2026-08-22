@@ -1,6 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ResolvedConfig } from "./config.ts";
+import type { MessageCategory, ResolvedConfig } from "./config.ts";
 import { log } from "./log.ts";
 
 export type ParkReason = "blocked" | "budget" | "idle-timeout";
@@ -76,4 +77,76 @@ export function listParked(cfg: ResolvedConfig): ParkedRecord[] {
   return readdirSync(cfg.parkedDir)
     .filter((f) => f.endsWith(".json"))
     .map((f) => JSON.parse(readFileSync(`${cfg.parkedDir}/${f}`, "utf8")));
+}
+
+/**
+ * One outbound message a run wrote instead of sending to Telegram: its category
+ * (and event where relevant), the text, and a `sentAt` marker the gateway stamps
+ * once it has routed it. The run is never the sender — it drops a record; the
+ * gateway drains the outbox and routes each per the project's notify map (E4).
+ */
+export interface OutboundRecord {
+  id: string;
+  category: MessageCategory;
+  event?: string;
+  text: string;
+  enqueuedAt: string;
+  /** ISO timestamp the gateway routed it, absent until then — the idempotence marker. */
+  sentAt?: string;
+  /** The destination name the notify map resolved it to, stamped alongside `sentAt`. */
+  destination?: string;
+}
+
+/** A project's outbox under a base location (its `.sandcastle.local/`). */
+export const outboxDirOf = (baseLocation: string) => join(baseLocation, "outbox");
+
+/**
+ * Drop a category-tagged outbound record into the project's outbox instead of
+ * sending it (ADR 0002: the gateway is the sole sender). One file per record,
+ * keyed by a fresh id so records written within the same tick never collide.
+ * Silent by design — the gateway drains and routes it per the notify map.
+ */
+export function enqueueOutbound(cfg: Pick<ResolvedConfig, "stateDir">, msg: Omit<OutboundRecord, "id" | "enqueuedAt" | "sentAt" | "destination">): void {
+  const dir = outboxDirOf(cfg.stateDir);
+  mkdirSync(dir, { recursive: true });
+  const rec: OutboundRecord = { id: randomUUID(), enqueuedAt: new Date().toISOString(), ...msg };
+  writeFileSync(join(dir, `${rec.id}.json`), JSON.stringify(rec, null, 2));
+  log("outbound-enqueued", { id: rec.id, category: rec.category, event: rec.event });
+}
+
+/** Every outbound record under an explicit outbox directory, oldest first — the gateway drains a project's live. */
+export function listOutboxIn(outboxDir: string): OutboundRecord[] {
+  if (!existsSync(outboxDir)) return [];
+  return readdirSync(outboxDir)
+    .filter((f) => f.endsWith(".json"))
+    .map((f) => JSON.parse(readFileSync(join(outboxDir, f), "utf8")) as OutboundRecord)
+    .sort((a, b) => a.enqueuedAt.localeCompare(b.enqueuedAt));
+}
+
+/** A run's own outbox (for tests and archival), resolved from its state dir. */
+export const listOutbox = (cfg: Pick<ResolvedConfig, "stateDir">) => listOutboxIn(outboxDirOf(cfg.stateDir));
+
+/**
+ * Stamp an outbound record sent once the gateway has routed it: the `sentAt`
+ * marker persists so a gateway restart neither re-sends it nor drops an
+ * unrouted one (idempotent drain). A record that has since vanished (archived)
+ * is left alone, mirroring `setParkedMessageId`.
+ */
+export function markOutboundSent(outboxDir: string, id: string, destination?: string): void {
+  const path = join(outboxDir, `${id}.json`);
+  if (!existsSync(path)) return;
+  const rec = JSON.parse(readFileSync(path, "utf8")) as OutboundRecord;
+  writeFileSync(path, JSON.stringify({ ...rec, sentAt: new Date().toISOString(), destination }, null, 2));
+}
+
+/**
+ * Remove only the already-routed records from a run's outbox (archival tidy-up),
+ * returning how many were cleared. Unsent records are deliberately kept — a
+ * message emitted while the gateway was down must still be sent when it returns.
+ */
+export function clearSentOutbound(cfg: Pick<ResolvedConfig, "stateDir">): number {
+  const dir = outboxDirOf(cfg.stateDir);
+  const sent = listOutboxIn(dir).filter((r) => r.sentAt != null);
+  for (const rec of sent) rmSync(join(dir, `${rec.id}.json`), { force: true });
+  return sent.length;
 }

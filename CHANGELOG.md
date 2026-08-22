@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Raw event log of an archived run (#41). `GET /archive/log?project=…&run=<timestamp>`
+  on the aggregated status site serves that run's archived
+  `logs/archive/orchestrator-<timestamp>.jsonl` as `text/plain`, as-is (no
+  pretty-printing). The run is resolved by matching the project's archive listing
+  — the same guard as the archived-run render — so an unlisted or crafted `run`
+  token is a 404, never a path joined from request input. Each entry in the
+  dashboard's "Archived runs" list now carries a "raw log" link to it.
 - Archived runs in the dashboard (#40). Under the selected project's live run, the
   aggregated status site now lists that project's finished runs from
   `logs/archive/orchestrator-*.jsonl`, newest-first, each with a one-line summary

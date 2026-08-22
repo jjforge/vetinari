@@ -340,6 +340,39 @@ test("serveAllStatus lists a project's archived runs and renders one read-only w
   }
 });
 
+test("serveAllStatus GET /archive/log serves a listed run's raw JSONL as text/plain, and 404s an unlisted run", async () => {
+  const configDir = join(tmpdir(), `sctdd-archive-log-${Date.now()}`);
+  const betaDir = join(configDir, "state-beta");
+  seedState(betaDir, [{ event: "campaign-start", batches: [["201"]] }]);
+  const archiveDir = join(betaDir, "logs", "archive");
+  mkdirSync(archiveDir, { recursive: true });
+  const raw = [{ event: "campaign-start", batches: [["101"], ["102"]] }, { event: "campaign-done", batches: 2 }].map((e) => JSON.stringify(e)).join("\n") + "\n";
+  writeFileSync(join(archiveDir, "orchestrator-2026-01-01T00-00-00-000Z.jsonl"), raw);
+  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const { port } = server.address() as AddressInfo;
+  try {
+    // A listed run returns its log verbatim, as plain text.
+    const ok = await fetch(`http://127.0.0.1:${port}/archive/log?project=beta&run=2026-01-01T00-00-00-000Z`);
+    assert.equal(ok.status, 200);
+    assert.match(ok.headers.get("content-type") ?? "", /^text\/plain/);
+    assert.equal(await ok.text(), raw);
+
+    // A run not in the listing is a 404, never a path to traverse.
+    const missing = await fetch(`http://127.0.0.1:${port}/archive/log?project=beta&run=2026-09-09T00-00-00-000Z`);
+    assert.equal(missing.status, 404);
+    const traversal = await fetch(`http://127.0.0.1:${port}/archive/log?project=beta&run=..%2F..%2Forchestrator`);
+    assert.equal(traversal.status, 404);
+
+    // Params are required, and an unknown project 404s.
+    assert.equal((await fetch(`http://127.0.0.1:${port}/archive/log?run=2026-01-01T00-00-00-000Z`)).status, 400);
+    assert.equal((await fetch(`http://127.0.0.1:${port}/archive/log?project=nope&run=2026-01-01T00-00-00-000Z`)).status, 404);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
 test("selectStatus picks the requested project, defaulting to the first otherwise", () => {
   const statuses: CampaignStatus[] = [
     { project: "alpha", waves: [], parked: [] },
@@ -676,6 +709,10 @@ test("renderStatusPage lists archived runs and renders a selected one read-only 
     html.indexOf(">campaign · 2 issues · complete<") < html.indexOf(">queue · 1 issue · halted<"),
     "archived runs list newest-first",
   );
+
+  // Each run also links to its raw event log.
+  assert.match(html, /<a href="\/archive\/log\?project=beta&amp;run=2026-02-01T00-00-00-000Z">raw log<\/a>/);
+  assert.match(html, /<a href="\/archive\/log\?project=beta&amp;run=2026-01-01T00-00-00-000Z">raw log<\/a>/);
 
   // The selected run's own wave/issue view renders in its own section.
   assert.match(html, /<section class="archived-run">/);

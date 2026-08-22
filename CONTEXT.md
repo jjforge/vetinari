@@ -110,6 +110,20 @@ run stops reading as current. The event log is the run's durable, per-run artifa
 `gate-*` logs are **live-only scratch**: overwritten across runs and not archived.
 _Avoid_: past run, old log
 
+**Campaign name**:
+An optional human label for a run, passed as `campaign --name` and recorded on the
+`campaign-start` event, so the dashboard and the [[archived-run]] list say what a
+run was for at a glance. `campaign-plan` suggests one from the area labels the
+selected issues span. Absent, a run falls back to its timestamp.
+_Avoid_: run title
+
+**Wave name**:
+A wave's human label, **derived at render** from the titles of the issues it holds
+(one issue → its title; several → the lead title + "+N") — never stored, and never
+an epic: a [[wave]] is a file-disjoint layer that crosses epics, so its issues,
+not an epic, name it.
+_Avoid_: batch name
+
 ### Campaign planning
 
 **Campaign plan** (the `campaign-plan` tool):

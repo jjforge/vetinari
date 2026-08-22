@@ -13,6 +13,9 @@
  * epic (E3, #14); the plan warns about them rather than attempting them.
  */
 
+import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+
 const CANONICAL_DIR = "sandcastle";
 const LOCAL_DIR = ".sandcastle.local";
 const OLD_DIR = ".sandcastle";
@@ -102,4 +105,36 @@ export function computeLayoutMigration(scan: LayoutScan): LayoutMigrationPlan {
   const warnings = moves.length ? [DEFERRED_WARNING] : [];
 
   return { moves, gitignore, warnings, conflicts };
+}
+
+export interface ApplyResult {
+  moved: Move[];
+  gitignoreUpdated: boolean;
+}
+
+/**
+ * Perform a plan against `baseDir`: the moves and the `.gitignore` edit. Refuses
+ * the WHOLE migration if the plan carries conflicts, so a clobber never happens
+ * and the tree is never left half-migrated. Each move re-checks its destination
+ * against the live disk before renaming — a last guard against a stale scan.
+ */
+export function applyLayoutMigration(baseDir: string, plan: LayoutMigrationPlan): ApplyResult {
+  if (plan.conflicts.length) {
+    throw new Error(
+      `migrate refused: ${plan.conflicts.length} destination(s) already exist — ${plan.conflicts.join(", ")}. ` +
+        `Move or remove them, then re-run. Nothing was changed.`,
+    );
+  }
+
+  for (const { from, to } of plan.moves) {
+    const dest = resolve(baseDir, to);
+    if (existsSync(dest)) throw new Error(`migrate refused: destination ${to} already exists. Nothing was changed.`);
+    mkdirSync(dirname(dest), { recursive: true });
+    renameSync(resolve(baseDir, from), dest);
+  }
+
+  const gitignoreUpdated = plan.gitignore !== undefined;
+  if (gitignoreUpdated) writeFileSync(resolve(baseDir, ".gitignore"), plan.gitignore!);
+
+  return { moved: plan.moves, gitignoreUpdated };
 }

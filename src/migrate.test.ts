@@ -1,6 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { computeLayoutMigration } from "./migrate.ts";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { applyLayoutMigration, computeLayoutMigration } from "./migrate.ts";
+
+let counter = 0;
+const tmpProject = () => {
+  const dir = join(tmpdir(), `sctdd-migrate-${Date.now()}-${counter++}`);
+  mkdirSync(dir, { recursive: true });
+  return dir;
+};
 
 test("computeLayoutMigration moves a root-level legacy config into sandcastle/, keeping its extension", () => {
   const plan = computeLayoutMigration({
@@ -77,4 +87,56 @@ test("computeLayoutMigration plans the full move for a fresh legacy project", ()
   assert.deepEqual(plan.conflicts, []);
   // The deferred gateway work is called out, not attempted.
   assert.ok(plan.warnings.some((w) => /orchestrator secret|systemd/i.test(w) && /E3|#14/.test(w)));
+});
+
+test("applyLayoutMigration moves the files where the plan says and updates .gitignore", () => {
+  const dir = tmpProject();
+  mkdirSync(join(dir, ".sandcastle", "logs"), { recursive: true });
+  mkdirSync(join(dir, ".sandcastle", "parked"), { recursive: true });
+  writeFileSync(join(dir, ".sandcastle", "config.mts"), "export default {}\n");
+  writeFileSync(join(dir, ".sandcastle", ".env"), "SECRET=1\n");
+  writeFileSync(join(dir, ".sandcastle", "logs", "orchestrator.jsonl"), "{}\n");
+  writeFileSync(join(dir, ".gitignore"), "node_modules/\n.sandcastle/\n");
+
+  const plan = computeLayoutMigration({
+    legacyConfig: ".sandcastle/config.mts",
+    oldState: ["config.mts", "logs", "parked", ".env"],
+    gitignore: readFileSync(join(dir, ".gitignore"), "utf8"),
+  });
+  const result = applyLayoutMigration(dir, plan);
+
+  // Config is now the committed, canonical config.
+  assert.ok(existsSync(join(dir, "sandcastle", "config.mts")));
+  assert.ok(!existsSync(join(dir, ".sandcastle", "config.mts")));
+  // State and secrets, including nested files, are under the new excluded dir.
+  assert.equal(readFileSync(join(dir, ".sandcastle.local", "logs", "orchestrator.jsonl"), "utf8"), "{}\n");
+  assert.equal(readFileSync(join(dir, ".sandcastle.local", ".env"), "utf8"), "SECRET=1\n");
+  assert.ok(existsSync(join(dir, ".sandcastle.local", "parked")));
+
+  // .gitignore now excludes both dirs.
+  const gi = readFileSync(join(dir, ".gitignore"), "utf8");
+  assert.match(gi, /^\.sandcastle\.local\/$/m);
+  assert.match(gi, /^\.sandcastle\/$/m);
+
+  assert.equal(result.gitignoreUpdated, true);
+  assert.equal(result.moved.length, plan.moves.length);
+});
+
+test("applyLayoutMigration refuses a plan with conflicts and changes nothing", () => {
+  const dir = tmpProject();
+  mkdirSync(join(dir, ".sandcastle"), { recursive: true });
+  mkdirSync(join(dir, ".sandcastle.local"), { recursive: true });
+  writeFileSync(join(dir, ".sandcastle", "logs"), "old\n");
+  writeFileSync(join(dir, ".sandcastle.local", "logs"), "already here\n");
+
+  const plan = computeLayoutMigration({
+    oldState: ["logs"],
+    gitignore: ".sandcastle/\n",
+    existing: [".sandcastle.local/logs"],
+  });
+
+  assert.throws(() => applyLayoutMigration(dir, plan), /already exist/i);
+  // The pre-existing destination is untouched and the source is left in place.
+  assert.equal(readFileSync(join(dir, ".sandcastle.local", "logs"), "utf8"), "already here\n");
+  assert.equal(readFileSync(join(dir, ".sandcastle", "logs"), "utf8"), "old\n");
 });

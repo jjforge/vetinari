@@ -4,9 +4,10 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { register } from "./registry.ts";
-import type { ParkedRecord } from "./state.ts";
+import { enqueueOutbound, listOutboxIn, outboxDirOf, type ParkedRecord } from "./state.ts";
 import type { TgConn } from "./telegram.ts";
 import {
+  drainOutbox,
   formatGatewayStatus,
   isStatusCommand,
   loadGatewayProjects,
@@ -30,6 +31,7 @@ const project = (over: Partial<GatewayProject> = {}): GatewayProject => ({
   baseLocation: "/home/me/code/jjforge/.sandcastle.local",
   conn: { token: "botA", chat: "-100" },
   parked: [],
+  outbox: [],
   ...over,
 });
 
@@ -293,4 +295,109 @@ test("loadGatewayProjects skips a stale registration whose base location is gone
 test("isStatusCommand recognizes status queries and ignores answers", () => {
   for (const t of ["/status", "status", "/status@my_bot", "  Status ", "STATUS"]) assert.equal(isStatusCommand(t), true, t);
   for (const t of ["A", "use option B", "status of the world is fine", "", "s"]) assert.equal(isStatusCommand(t), false, t);
+});
+
+// --- Outbox drain-and-route (E4). Records live in a real tmp outbox so the drain
+// can mark them sent; the actual Telegram send is injected and recorded.
+
+let obCounter = 0;
+const outboxBase = () => join(tmpdir(), `sctdd-gw-outbox-${Date.now()}-${obCounter++}`, ".sandcastle.local");
+
+const routed = (base: string, over: Partial<GatewayProject> = {}): GatewayProject => ({
+  project: "jjforge",
+  projectRoot: "/home/me/code/jjforge",
+  baseLocation: base,
+  conn: { token: "tok", chat: "-1" },
+  destinations: { ops: { bot: "main", chat: "-100" }, alerts: { bot: "main", chat: "-200" } },
+  notify: { "*": "ops", failure: "alerts", "progress:carve": "alerts" },
+  parked: [],
+  outbox: listOutboxIn(outboxDirOf(base)),
+  ...over,
+});
+
+const recordingSend = () => {
+  const sends: Array<{ chat: string; text: string }> = [];
+  let id = 100;
+  const send = async (conn: TgConn, text: string) => {
+    sends.push({ chat: conn.chat, text });
+    return id++;
+  };
+  return { sends, send };
+};
+
+test("drainOutbox routes each record to the destination its category resolves and marks it sent once", async () => {
+  const base = outboxBase();
+  enqueueOutbound({ stateDir: base }, { category: "success", event: "green", text: "GREEN on 26" });
+  enqueueOutbound({ stateDir: base }, { category: "failure", event: "halt", text: "campaign HALTED" });
+  enqueueOutbound({ stateDir: base }, { category: "progress", event: "carve", text: "carved #640" });
+  enqueueOutbound({ stateDir: base }, { category: "progress", event: "wave-start", text: "batch 1" });
+
+  const { sends, send } = recordingSend();
+  await drainOutbox(routed(base), send);
+
+  // success:green → wildcard ops (-100); failure → alerts (-200);
+  // progress:carve → alerts (-200); progress:wave-start → wildcard ops (-100).
+  // Intra-tick order is unspecified, so assert each message's destination by text.
+  const chatOf = new Map(sends.map((s) => [s.text, s.chat]));
+  assert.equal(sends.length, 4, "every record is sent exactly once");
+  assert.equal(chatOf.get("GREEN on 26"), "-100");
+  assert.equal(chatOf.get("campaign HALTED"), "-200");
+  assert.equal(chatOf.get("carved #640"), "-200");
+  assert.equal(chatOf.get("batch 1"), "-100");
+
+  const after = listOutboxIn(outboxDirOf(base));
+  assert.equal(after.length, 4);
+  assert.ok(
+    after.every((r) => r.sentAt),
+    "every routed record is marked sent",
+  );
+});
+
+test("drainOutbox is idempotent — a second drain re-sends nothing", async () => {
+  const base = outboxBase();
+  enqueueOutbound({ stateDir: base }, { category: "success", event: "green", text: "GREEN" });
+
+  const first = recordingSend();
+  await drainOutbox(routed(base), first.send);
+  assert.equal(first.sends.length, 1);
+
+  // A gateway restart re-reads the (now-stamped) outbox and must not re-send.
+  const second = recordingSend();
+  await drainOutbox(routed(base), second.send);
+  assert.equal(second.sends.length, 0, "an already-sent record is skipped");
+});
+
+test("drainOutbox falls back to the project's default connection when no notify map routes it", async () => {
+  const base = outboxBase();
+  enqueueOutbound({ stateDir: base }, { category: "progress", event: "queue-start", text: "queue up" });
+
+  const { sends, send } = recordingSend();
+  await drainOutbox(routed(base, { notify: undefined, destinations: undefined }), send);
+
+  assert.deepEqual(
+    sends.map((s) => s.chat),
+    ["-1"],
+    "with no routing configured, everything goes to the project's default chat",
+  );
+});
+
+test("drainOutbox skips a project with no connection, leaving its records unsent for a later tick", async () => {
+  const base = outboxBase();
+  enqueueOutbound({ stateDir: base }, { category: "success", event: "green", text: "GREEN" });
+
+  const { sends, send } = recordingSend();
+  await drainOutbox(routed(base, { conn: undefined }), send);
+
+  assert.equal(sends.length, 0, "nothing is sent when the project has no bot");
+  assert.equal(listOutboxIn(outboxDirOf(base))[0].sentAt, undefined, "the record stays unsent");
+});
+
+test("drainOutbox leaves a record unsent when the send fails, so the next tick retries it", async () => {
+  const base = outboxBase();
+  enqueueOutbound({ stateDir: base }, { category: "success", event: "green", text: "GREEN" });
+
+  const failingSend = async () => undefined; // Telegram rejected — no message id
+  await drainOutbox(routed(base), failingSend);
+
+  assert.equal(listOutboxIn(outboxDirOf(base))[0].sentAt, undefined, "a failed send is not marked sent");
 });

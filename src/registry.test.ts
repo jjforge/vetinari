@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { autoRegister, gatewayConfigDir, listProjects, pointerFor, readProject, readProjects, register, type ProjectPointer } from "./registry.ts";
+import { autoRegister, gatewayConfigDir, listProjects, pointerFor, readProject, readProjects, register, writeRouting, type ProjectPointer } from "./registry.ts";
 
 let counter = 0;
 const tmpConfigDir = () => {
@@ -45,6 +45,30 @@ test("readProject loads the project's Telegram connection live from its base loc
   const read = readProject(pointer({ baseLocation }));
 
   assert.deepEqual(read?.conn, { token: "123:abc", chat: "-1001", thread: "42" });
+});
+
+test("readProject loads the project's notify map and destinations live from its base location", () => {
+  const base = join(tmpConfigDir(), ".sandcastle.local");
+  mkdirSync(base, { recursive: true });
+  writeFileSync(join(base, "orchestrator.env"), "SANDCASTLE_TELEGRAM_BOT_TOKEN=t\nSANDCASTLE_TELEGRAM_CHAT_ID=c\n");
+  writeRouting(base, {
+    notify: { "*": "ops", failure: "alerts" },
+    destinations: { ops: { bot: "main", chat: "-100" }, alerts: { bot: "main", chat: "-200" } },
+  });
+
+  const read = readProject(pointer({ baseLocation: base }));
+
+  assert.deepEqual(read?.notify, { "*": "ops", failure: "alerts" });
+  assert.deepEqual(read?.destinations, { ops: { bot: "main", chat: "-100" }, alerts: { bot: "main", chat: "-200" } });
+});
+
+test("readProject leaves notify/destinations undefined when the project materialized no routing", () => {
+  const baseLocation = baseLocationWith("SANDCASTLE_TELEGRAM_BOT_TOKEN=t\nSANDCASTLE_TELEGRAM_CHAT_ID=c\n");
+
+  const read = readProject(pointer({ baseLocation }));
+
+  assert.equal(read?.notify, undefined);
+  assert.equal(read?.destinations, undefined);
 });
 
 test("readProject returns undefined for a pointer whose base location is gone", () => {
@@ -111,6 +135,22 @@ test("autoRegister writes the current project's pointer and is idempotent on re-
   assert.deepEqual(listProjects(configDir), [
     { project: "jjforge", projectRoot: "/home/me/code/jjforge", baseLocation: "/home/me/code/jjforge/.sandcastle.local" },
   ]);
+});
+
+test("autoRegister materializes the project's routing so the gateway reads it live", () => {
+  const configDir = tmpConfigDir();
+  const projectRoot = join(tmpConfigDir(), "proj");
+  const cfg = {
+    project: "jjforge",
+    stateDir: join(projectRoot, ".sandcastle.local"),
+    notify: { "*": "ops" },
+    destinations: { ops: { bot: "main", chat: "-100" } },
+  } as unknown as ResolvedConfig;
+  withEnv({ SANDCASTLE_GATEWAY_HOME: configDir }, () => autoRegister(cfg, projectRoot));
+
+  const [read] = readProjects(configDir);
+  assert.deepEqual(read.notify, { "*": "ops" });
+  assert.deepEqual(read.destinations, { ops: { bot: "main", chat: "-100" } });
 });
 
 test("re-registering a project refreshes its pointer in place", () => {

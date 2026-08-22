@@ -9,6 +9,7 @@ import { applyCarve, computeCarve, normalize } from "./carve.ts";
 import { describePlan, planCampaign, underspecifiedPromptFor, waveArgs, type UnderspecifiedDecision } from "./plan.ts";
 import { defaultFileSet } from "./fileset.ts";
 import { applyLayoutMigration, computeLayoutMigration, describeMigration, scanLayout } from "./migrate.ts";
+import { applyInit, computeInit, describeInit, scanInit } from "./init.ts";
 import { archiveRun } from "./archive.ts";
 import { clearParkedForTasks, enqueueOutbound, listParked, readParked } from "./state.ts";
 import { autoRegister } from "./registry.ts";
@@ -37,6 +38,12 @@ const USAGE = `sandcastle-tdd <mode> [args]
                            confidently halts and asks; --on-underspecified=drop|fail
                            pre-decides for non-interactive runs (no flag, no
                            terminal defaults to fail).
+  init [--dry-run]         scaffold a NEW project onto the layout: create the committed
+                           sandcastle/ (a defineConfig skeleton + a Dockerfile template),
+                           the excluded .sandcastle.local/, and add .sandcastle.local/ to
+                           .gitignore. Idempotent and non-clobbering — an existing
+                           sandcastle/ config is never overwritten (--dry-run to print the
+                           plan and write nothing). Installs and vendors nothing
   migrate [--dry-run]      move this project onto the sandcastle/ + .sandcastle.local/
                            layout: config → sandcastle/, old .sandcastle/ state →
                            .sandcastle.local/, .gitignore updated, orchestrator.env
@@ -107,6 +114,26 @@ if (!mode) {
 // is fine) and never fall through to the strict config load below.
 if (mode === "statusline") {
   await runStatusLine(cfgPath);
+  process.exit(0);
+}
+
+// init scaffolds a project's layout onto cwd — it must run BEFORE the strict
+// config load, since a greenfield project has no config yet (init is what lays
+// the config down).
+if (mode === "init") {
+  const dryRun = rest.includes("--dry-run");
+  const plan = computeInit(scanInit(process.cwd()));
+  console.log(describeInit(plan));
+  if (dryRun) {
+    console.log("\n(dry run — nothing was written)");
+    process.exit(0);
+  }
+  const result = applyInit(process.cwd(), plan);
+  const did: string[] = [];
+  if (result.created.length) did.push(`created ${result.created.length} file(s)`);
+  if (result.dirsCreated.length) did.push(`created ${result.dirsCreated.length} dir(s)`);
+  if (result.gitignoreUpdated) did.push("updated .gitignore");
+  if (did.length) console.log(`\nDone: ${did.join(", ")}.`);
   process.exit(0);
 }
 

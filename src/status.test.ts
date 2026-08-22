@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import { buildStatus, buildStatusWithIssueNames, extractParkedDetails, formatStatusText, renderStatusPage, serveStatus } from "./status.ts";
-import { isStatusCommand } from "./modes.ts";
 
 const cfgFor = (dir: string): ResolvedConfig =>
   ({
@@ -309,11 +308,6 @@ test("formatStatusText omits the parked section when nothing is parked", () => {
     parked: [],
   });
   assert.doesNotMatch(text, /awaiting your reply/);
-});
-
-test("isStatusCommand recognizes status queries and ignores answers", () => {
-  for (const t of ["/status", "status", "/status@my_bot", "  Status ", "STATUS"]) assert.equal(isStatusCommand(t), true, t);
-  for (const t of ["A", "use option B", "status of the world is fine", "", "s"]) assert.equal(isStatusCommand(t), false, t);
 });
 
 test("renderStatusPage includes a configurable refresh interval control", () => {

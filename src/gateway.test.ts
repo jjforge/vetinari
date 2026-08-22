@@ -1,9 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { register } from "./registry.ts";
 import type { ParkedRecord } from "./state.ts";
 import type { TgConn } from "./telegram.ts";
 import {
   formatGatewayStatus,
+  isStatusCommand,
+  loadGatewayProjects,
   newReplyIndex,
   pendingAnnouncements,
   pollLoop,
@@ -15,6 +21,8 @@ import {
   type GatewayProject,
   type SendRef,
 } from "./gateway.ts";
+
+let gwCounter = 0;
 
 const project = (over: Partial<GatewayProject> = {}): GatewayProject => ({
   project: "jjforge",
@@ -251,4 +259,38 @@ test("formatGatewayStatus reports when no served project has anything parked", (
   const text = formatGatewayStatus([project({ project: "alpha", parked: [] })]);
 
   assert.match(text, /nothing parked/i);
+});
+
+test("loadGatewayProjects reads each live project's connection and parked records from its base location", () => {
+  const configDir = join(tmpdir(), `sctdd-gw-load-${Date.now()}-${gwCounter++}`);
+  const base = join(tmpdir(), `sctdd-gw-base-${Date.now()}-${gwCounter++}`, ".sandcastle.local");
+  mkdirSync(join(base, "parked"), { recursive: true });
+  writeFileSync(join(base, "orchestrator.env"), "SANDCASTLE_TELEGRAM_BOT_TOKEN=tok\nSANDCASTLE_TELEGRAM_CHAT_ID=chat\n");
+  writeFileSync(
+    join(base, "parked", "A1.json"),
+    JSON.stringify({ taskId: "A1", parkedAt: "t1", reason: "blocked", sessionId: "s", branch: "agent/A1", question: "?" }),
+  );
+  register(configDir, { project: "alpha", projectRoot: "/home/me/alpha", baseLocation: base });
+
+  const projects = loadGatewayProjects(configDir);
+
+  assert.equal(projects.length, 1);
+  assert.equal(projects[0].project, "alpha");
+  assert.deepEqual(projects[0].conn, { token: "tok", chat: "chat", thread: undefined });
+  assert.deepEqual(
+    projects[0].parked.map((p) => p.taskId),
+    ["A1"],
+  );
+});
+
+test("loadGatewayProjects skips a stale registration whose base location is gone", () => {
+  const configDir = join(tmpdir(), `sctdd-gw-stale-${Date.now()}-${gwCounter++}`);
+  register(configDir, { project: "ghost", projectRoot: "/gone", baseLocation: join(tmpdir(), `sctdd-gw-missing-${Date.now()}-${gwCounter++}`) });
+
+  assert.deepEqual(loadGatewayProjects(configDir), []);
+});
+
+test("isStatusCommand recognizes status queries and ignores answers", () => {
+  for (const t of ["/status", "status", "/status@my_bot", "  Status ", "STATUS"]) assert.equal(isStatusCommand(t), true, t);
+  for (const t of ["A", "use option B", "status of the world is fine", "", "s"]) assert.equal(isStatusCommand(t), false, t);
 });

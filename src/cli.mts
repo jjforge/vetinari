@@ -5,14 +5,14 @@ import { log, setLogFile } from "./log.ts";
 import { answerPromptFor, runLoop } from "./loop.ts";
 import { baseline, campaign, queue, requireTelegram, tgTest } from "./modes.ts";
 import { gateway } from "./gateway.ts";
-import { computeCarve } from "./carve.ts";
+import { applyCarve, computeCarve, normalize } from "./carve.ts";
 import { describePlan, planCampaign, underspecifiedPromptFor, waveArgs, type UnderspecifiedDecision } from "./plan.ts";
 import { defaultFileSet } from "./fileset.ts";
 import { applyLayoutMigration, computeLayoutMigration, describeMigration, scanLayout } from "./migrate.ts";
 import { archiveRun } from "./archive.ts";
-import { enqueueOutbound, listParked, readParked } from "./state.ts";
+import { clearParkedForTasks, enqueueOutbound, listParked, readParked } from "./state.ts";
 import { autoRegister } from "./registry.ts";
-import { serveStatus } from "./status.ts";
+import { campaignRunning, readEvents, reduceCampaign, serveStatus } from "./status.ts";
 import { runStatusLine } from "./statusline.ts";
 
 const USAGE = `sandcastle-tdd <mode> [args]
@@ -21,8 +21,15 @@ const USAGE = `sandcastle-tdd <mode> [args]
   run <task>               the TDD loop: agent turn → gate → resume on red
   queue <task…>            bounded pool over several tasks (QUEUE_SLOTS, default 3)
   campaign <batch…>        queue each batch, then merge greens → gate base → next batch
+  carve <issue>            prune <issue> + everything blocked by it from the RUNNING
+                           campaign: appends a carve event the loop honors at the next
+                           wave boundary (the in-flight wave finishes; only future waves
+                           shrink). Banked work stays — a merged/green member is kept,
+                           only parked/not-yet-started ones leave. Needs a running
+                           campaign (--dry-run to only preview the closure).
   carve <issue> <batch…>   drop <issue> + everything blocked by it, then run the rest
-                           as a campaign (--dry-run to only print the reduced plan)
+                           as a fresh reduced campaign from the plan you supply
+                           (--dry-run to only print the reduced plan)
   campaign-plan <ids…>     layer a selected set into dependency-ordered, file-
                            disjoint wave args (paste after \`campaign\`) + a
                            provenance report. Plans only — never runs campaign,
@@ -177,29 +184,75 @@ switch (mode) {
     const dryRun = rest.includes("--dry-run");
     const positional = rest.filter((a) => a !== "--dry-run");
     const [target, ...batchArgs] = positional;
-    if (!target || !batchArgs.length) throw new Error('carve needs an issue and a campaign: carve 640 "611 640" "623 701"');
+    if (!target) throw new Error('carve needs an issue: `carve 640` prunes the running campaign, `carve 640 "611 640" "623 701"` launches a reduced one.');
     if (!cfg.blockedBy) throw new Error('carve needs a "blockedBy" resolver in your config — e.g. blockedBy: githubBlockedBy("owner/repo").');
 
+    const tgt = normalize(target);
+    const describe = (removed: string[], remaining: string[][]) => {
+      const dependents = removed.filter((id) => id !== tgt);
+      console.log(`carve #${tgt} → removed ${removed.map((i) => `#${i}`).join(", ")}` + (dependents.length ? ` (dependents: ${dependents.map((i) => `#${i}`).join(", ")})` : " (no dependents)"));
+      console.log(`remaining campaign: ${remaining.length ? remaining.map((w) => `"${w.join(" ")}"`).join(" ") : "(nothing left to run)"}`);
+    };
+    const carveNote = (removed: string[], remaining: string[][]) => {
+      const dependents = removed.filter((id) => id !== tgt);
+      return (
+        `✂️ ${cfg.project} carved #${tgt} — dropped ${removed.map((i) => `#${i}`).join(", ")}` +
+        (dependents.length ? ` (dependents: ${dependents.map((i) => `#${i}`).join(", ")})` : "") +
+        `. Remaining: ${remaining.length ? remaining.map((w) => `"${w.join(" ")}"`).join(" ") : "nothing left to run"}.`
+      );
+    };
+
+    // No plan → prune the RUNNING campaign: reduce the log to its current plan,
+    // compute the closure, apply the keep-banked-work rule, then append a carve
+    // event the loop honors at its next wave boundary (ADR 0005).
+    if (!batchArgs.length) {
+      const events = readEvents(cfg);
+      if (!campaignRunning(events)) {
+        throw new Error(
+          "carve <issue> prunes a running campaign, but none is running. To launch a reduced campaign from a plan you supply, pass the waves: " +
+            'carve <issue> "611 640" "623 701".',
+        );
+      }
+      const reduced = reduceCampaign(events);
+      const { removed } = await computeCarve(reduced.waves, target, cfg.blockedBy);
+      const { remaining, dropped, parkedToClear } = applyCarve(reduced, removed);
+      const kept = removed.filter((id) => !dropped.includes(id));
+      console.log(
+        `carve #${tgt} → ${dropped.length ? `dropping ${dropped.map((i) => `#${i}`).join(", ")}` : "nothing to drop"}` +
+          (kept.length ? ` (keeping banked ${kept.map((i) => `#${i}`).join(", ")})` : ""),
+      );
+      console.log(`remaining campaign: ${remaining.length ? remaining.map((w) => `"${w.join(" ")}"`).join(" ") : "(nothing left to run)"}`);
+      if (dryRun) break;
+
+      // Clear the parked records of the dropped issues so the gateway stops
+      // asking about tasks we have just carved away.
+      if (parkedToClear.length) clearParkedForTasks(cfg, parkedToClear);
+      // Append the carve event — the running loop re-reads it at the next wave
+      // boundary; `removed` is the closure so the fold replays the same rule.
+      log("carve", { target: tgt, removed, dropped });
+      enqueueOutbound(cfg, {
+        category: "progress",
+        event: "carve",
+        text:
+          `✂️ ${cfg.project} carved #${tgt} from the running campaign — ` +
+          (dropped.length ? `dropped ${dropped.map((i) => `#${i}`).join(", ")}` : "nothing to drop") +
+          (kept.length ? ` (kept banked ${kept.map((i) => `#${i}`).join(", ")})` : "") +
+          `. Remaining: ${remaining.length ? remaining.map((w) => `"${w.join(" ")}"`).join(" ") : "nothing left to run"}.`,
+      });
+      console.log("carve event appended — the running campaign will prune future waves at the next wave boundary.");
+      break;
+    }
+
+    // Explicit plan → launch a fresh reduced campaign (unchanged behavior).
     const batches = batchArgs.map((b) => b.split(/[\s,]+/).filter(Boolean)).filter((b) => b.length);
     const { removed, remaining } = await computeCarve(batches, target, cfg.blockedBy);
-
-    const tgt = target.replace(/^#/, "").trim();
-    const dependents = removed.filter((id) => id !== tgt);
-    console.log(`carve #${tgt} → removed ${removed.map((i) => `#${i}`).join(", ")}` + (dependents.length ? ` (dependents: ${dependents.map((i) => `#${i}`).join(", ")})` : " (no dependents)"));
-    console.log(`remaining campaign: ${remaining.length ? remaining.map((w) => `"${w.join(" ")}"`).join(" ") : "(nothing left to run)"}`);
+    describe(removed, remaining);
 
     if (dryRun) break;
 
     // A carve had no notification before E4 — emit a progress:carve record so it
     // is announced and routable like any other outbound message (ADR 0002).
-    enqueueOutbound(cfg, {
-      category: "progress",
-      event: "carve",
-      text:
-        `✂️ ${cfg.project} carved #${tgt} — dropped ${removed.map((i) => `#${i}`).join(", ")}` +
-        (dependents.length ? ` (dependents: ${dependents.map((i) => `#${i}`).join(", ")})` : "") +
-        `. Remaining: ${remaining.length ? remaining.map((w) => `"${w.join(" ")}"`).join(" ") : "nothing left to run"}.`,
-    });
+    enqueueOutbound(cfg, { category: "progress", event: "carve", text: carveNote(removed, remaining) });
 
     if (!remaining.length) {
       console.log("nothing left to run after the carve — done.");

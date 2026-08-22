@@ -1,9 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { computeCarve, restrictBlockers } from "./carve.ts";
+import { applyCarve, computeCarve, restrictBlockers } from "./carve.ts";
 
 // A fake "blocked by" resolver from a plain edge map: id -> the ids that block it.
 const blockedByFrom = (edges: Record<string, string[]>) => (id: string) => edges[id] ?? [];
+
+// A reduced campaign's outcomes as a plain map: id -> its current status.
+const outcomesFrom = (o: Record<string, string>) => new Map(Object.entries(o));
 
 test("computeCarve removes a linear dependent chain and keeps unrelated issues", async () => {
   const res = await computeCarve(
@@ -78,6 +81,59 @@ test("computeCarve ignores blockers that live outside the named campaign", async
 
   assert.deepEqual(res.removed, ["640", "701"]);
   assert.deepEqual(res.remaining, []);
+});
+
+test("applyCarve keeps a merged member and drops an unstarted one", () => {
+  // 640 already merged, 701 not yet started; both are in the removed closure.
+  const res = applyCarve(
+    { waves: [["611", "640"], ["701"]], outcomes: outcomesFrom({ "640": "completed" }) },
+    ["640", "701"],
+  );
+
+  // Banked work stays; the unstarted dependent leaves the plan.
+  assert.deepEqual(res.dropped, ["701"]);
+  assert.deepEqual(res.parkedToClear, []);
+  assert.deepEqual(res.remaining, [["611", "640"]]); // 701's wave emptied and dropped
+});
+
+test("applyCarve drops a parked member and flags its record for clearing", () => {
+  // 701 is parked; carving it must both drop it and clear its parked record.
+  const res = applyCarve(
+    { waves: [["611"], ["701"]], outcomes: outcomesFrom({ "701": "parked" }) },
+    ["701"],
+  );
+
+  assert.deepEqual(res.dropped, ["701"]);
+  assert.deepEqual(res.parkedToClear, ["701"]);
+  assert.deepEqual(res.remaining, [["611"]]);
+});
+
+test("applyCarve keeps a green member so it still merges", () => {
+  // 640 is green (mergeable) but in the closure — banked work is never discarded.
+  const res = applyCarve(
+    { waves: [["640", "701"]], outcomes: outcomesFrom({ "640": "completed", "701": "unstarted" }) },
+    ["640", "701"],
+  );
+
+  assert.deepEqual(res.dropped, ["701"]);
+  assert.deepEqual(res.parkedToClear, []);
+  assert.deepEqual(res.remaining, [["640"]]);
+});
+
+test("applyCarve keeps a merged/green target but still drops its unfinished dependents", () => {
+  // The target 640 already merged; its dependents 701 (parked) and 712 (unstarted)
+  // are unfinished, so the deliberate subtree removal still drops them.
+  const res = applyCarve(
+    {
+      waves: [["640"], ["701", "712"]],
+      outcomes: outcomesFrom({ "640": "completed", "701": "parked" }),
+    },
+    ["640", "701", "712"],
+  );
+
+  assert.deepEqual(res.dropped, ["701", "712"]);
+  assert.deepEqual(res.parkedToClear, ["701"]);
+  assert.deepEqual(res.remaining, [["640"]]);
 });
 
 test("restrictBlockers keeps only the edges that stay inside the selected set", async () => {

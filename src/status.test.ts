@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { buildAllStatus, buildStatus, buildStatusWithIssueNames, extractParkedDetails, formatStatusText, reduceCampaign, renderStatusPage, selectStatus, serveAllStatus, serveStatus } from "./status.ts";
+import { buildAllStatus, buildStatus, buildStatusWithIssueNames, campaignRunning, extractParkedDetails, formatStatusText, reduceCampaign, renderStatusPage, selectStatus, serveAllStatus, serveStatus } from "./status.ts";
 import type { CampaignStatus } from "./status.ts";
 import type { AddressInfo } from "node:net";
 import { register, type ProjectPointer } from "./registry.ts";
@@ -147,6 +147,79 @@ test("reduceCampaign marks a halted issue as a failure", () => {
   // A halt does not close the wave — it stays the current one.
   assert.deepEqual([...reduced.closedWaves], []);
   assert.equal(reduced.currentWave, 0);
+});
+
+test("campaignRunning is true for a started campaign that has not finished or halted", () => {
+  assert.equal(
+    campaignRunning([
+      { event: "campaign-start", batches: [["101"], ["201"]] },
+      { event: "campaign-batch", index: 0, tasks: ["101"] },
+    ]),
+    true,
+  );
+});
+
+test("campaignRunning is false with no campaign, and once it completes or halts", () => {
+  assert.equal(campaignRunning([{ event: "queue-start", taskIds: ["101"] }]), false, "queue-only run is not a campaign");
+  assert.equal(
+    campaignRunning([
+      { event: "campaign-start", batches: [["101"]] },
+      { event: "campaign-done", batches: 1 },
+    ]),
+    false,
+    "a completed campaign is not running",
+  );
+  assert.equal(
+    campaignRunning([
+      { event: "campaign-start", batches: [["101"]] },
+      { event: "campaign-halt", taskId: "101", reason: "gate failed" },
+    ]),
+    false,
+    "a halted campaign is not running",
+  );
+});
+
+test("campaignRunning tracks the latest campaign only", () => {
+  // An earlier campaign finished; a fresh one started after it is what counts.
+  assert.equal(
+    campaignRunning([
+      { event: "campaign-start", batches: [["1"]] },
+      { event: "campaign-done", batches: 1 },
+      { event: "campaign-start", batches: [["101"], ["201"]] },
+    ]),
+    true,
+  );
+});
+
+test("reduceCampaign folds a carve event, pruning unfinished issues from future waves", () => {
+  const reduced = reduceCampaign([
+    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"], ["201", "202"], ["301"]] },
+    { ts: "2025-01-01T00:01:00.000Z", event: "campaign-batch", index: 0, tasks: ["101"] },
+    { ts: "2025-01-01T00:02:00.000Z", event: "campaign-batch-done", index: 0, merged: ["101"], held: [] },
+    { ts: "2025-01-01T00:03:00.000Z", event: "campaign-batch", index: 1, tasks: ["201", "202"] },
+    { ts: "2025-01-01T00:03:30.000Z", event: "queue-start", taskIds: ["201", "202"], slots: 3 },
+    // 202 carved mid-wave: it is running, so it stays; its unstarted dependent 301 goes.
+    { ts: "2025-01-01T00:04:00.000Z", event: "carve", target: "202", removed: ["202", "301"] },
+  ]);
+
+  // 101 (merged) and 202 (in-flight) stay; only the future, unstarted 301 is pruned.
+  assert.deepEqual(reduced.waves, [["101"], ["201", "202"]]);
+  // The in-flight wave is still current; wave 0 is still closed at its original index.
+  assert.deepEqual([...reduced.closedWaves], [0]);
+  assert.equal(reduced.currentWave, 1);
+});
+
+test("reduceCampaign's carve fold clears an emptied future wave and reindexes", () => {
+  const reduced = reduceCampaign([
+    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"], ["201"], ["301"]] },
+    { ts: "2025-01-01T00:01:00.000Z", event: "campaign-batch", index: 0, tasks: ["101"] },
+    { ts: "2025-01-01T00:02:00.000Z", event: "campaign-batch-done", index: 0, merged: ["101"], held: [] },
+    // Between waves: 201 not yet started, so carving it empties and drops its wave.
+    { ts: "2025-01-01T00:03:00.000Z", event: "carve", target: "201", removed: ["201"] },
+  ]);
+
+  assert.deepEqual(reduced.waves, [["101"], ["301"]]);
+  assert.deepEqual([...reduced.closedWaves], [0]);
 });
 
 test("buildStatus shows campaign waves with issue chips and statuses", () => {

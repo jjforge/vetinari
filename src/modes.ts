@@ -6,6 +6,7 @@ import { makeSandbox } from "./sandbox.ts";
 import { currentBranch, integrateGreens } from "./merge.ts";
 import { clearParked, clearParkedForTasks, enqueueOutbound, listParked } from "./state.ts";
 import { tgConfigured, tgEnvConn, tgSend, tgWaitReply } from "./telegram.ts";
+import { readEvents, reduceCampaign } from "./status.ts";
 
 /**
  * Re-invoke this CLI as a child, preserving however it was launched (the tsx
@@ -109,13 +110,21 @@ export async function campaign(cfg: ResolvedConfig, batches: string[][], slots: 
     text: `🎬 ${cfg.project} campaign: ${batches.length} batch(es) — ${batches.map((b) => b.join(",")).join(" | ")}`,
   });
 
-  for (let i = 0; i < batches.length; i++) {
-    const tasks = batches[i];
-    log("campaign-batch", { index: i, tasks });
+  // The plan is re-derived from the log at each wave boundary rather than
+  // iterated from the in-memory array: a `carve` event appended mid-campaign
+  // prunes future waves here, while the in-flight wave (already past this point)
+  // finishes as-is — the single-source-of-truth loop of ADR 0005.
+  let index = 0;
+  for (; ; index++) {
+    const waves = reduceCampaign(readEvents(cfg)).waves;
+    if (index >= waves.length) break;
+    const tasks = waves[index];
+    const total = waves.length;
+    log("campaign-batch", { index, tasks });
     enqueueOutbound(cfg, {
       category: "progress",
       event: "wave-start",
-      text: `▶️ ${cfg.project} campaign batch ${i + 1}/${batches.length}: ${tasks.join(", ")}`,
+      text: `▶️ ${cfg.project} campaign batch ${index + 1}/${total}: ${tasks.join(", ")}`,
     });
 
     const outcomes = await queue(cfg, tasks, slots);
@@ -125,32 +134,32 @@ export async function campaign(cfg: ResolvedConfig, batches: string[][], slots: 
     const { merged, halt } = await integrateGreens(cfg, greens);
     if (halt) {
       const where = halt.taskId ? ` on ${halt.taskId}` : "";
-      log("campaign-halt", { index: i, reason: halt.reason, taskId: halt.taskId });
+      log("campaign-halt", { index, reason: halt.reason, taskId: halt.taskId });
       enqueueOutbound(cfg, {
         category: "failure",
         event: "halt",
-        text: `🛑 ${cfg.project} campaign HALTED at batch ${i + 1} — ${halt.reason}${where}. Base rolled back; branches kept for you.\n\n${halt.detail}`,
+        text: `🛑 ${cfg.project} campaign HALTED at batch ${index + 1} — ${halt.reason}${where}. Base rolled back; branches kept for you.\n\n${halt.detail}`,
       });
-      console.log(`campaign halted (${halt.reason}${where}) — base rolled back, ${batches.length - i - 1} batch(es) not started.`);
+      console.log(`campaign halted (${halt.reason}${where}) — base rolled back, ${total - index - 1} batch(es) not started.`);
       return false;
     }
 
     if (held.length) clearParkedForTasks(cfg, held);
     const note = held.length ? ` — cleared parked records for completed wave: ${held.map((t) => `${t}(${outcomes[t]})`).join(", ")}` : "";
-    log("campaign-batch-done", { index: i, merged, held, clearedParked: held });
+    log("campaign-batch-done", { index, merged, held, clearedParked: held });
     enqueueOutbound(cfg, {
       category: "success",
       event: "wave-merged",
-      text: `✅ ${cfg.project} campaign batch ${i + 1} merged: ${merged.join(", ") || "nothing"}${note}`,
+      text: `✅ ${cfg.project} campaign batch ${index + 1} merged: ${merged.join(", ") || "nothing"}${note}`,
     });
-    console.log(`batch ${i + 1}/${batches.length}: merged ${merged.join(", ") || "nothing"}${note}`);
+    console.log(`batch ${index + 1}/${total}: merged ${merged.join(", ") || "nothing"}${note}`);
   }
 
-  log("campaign-done", { batches: batches.length });
+  log("campaign-done", { batches: index });
   enqueueOutbound(cfg, {
     category: "success",
     event: "campaign-complete",
-    text: `🏆 ${cfg.project} campaign complete — ${batches.length} batch(es) merged onto ${cfg.baseBranch}.`,
+    text: `🏆 ${cfg.project} campaign complete — ${index} batch(es) merged onto ${cfg.baseBranch}.`,
   });
   console.log("campaign complete.");
   return true;

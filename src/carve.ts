@@ -61,6 +61,51 @@ export interface CarveResult {
   remaining: string[][];
 }
 
+/**
+ * What actually happens to `computeCarve`'s closure once it meets the running
+ * campaign's current outcomes. Carve **prunes the unfinished remainder without
+ * discarding banked work** (ADR 0005): a merged/green member is kept (already
+ * banked or allowed to merge), and only the parked or not-yet-started members
+ * leave the plan. A merged/green *target* is kept too, but its unfinished
+ * dependents are still dropped — carve is a human's forward-looking "remove
+ * this subtree" decision, evaluated per member.
+ */
+export interface AppliedCarve {
+  /** the waves with `dropped` stripped and emptied waves removed. */
+  remaining: string[][];
+  /** the closure members that actually leave the plan (parked or unstarted). */
+  dropped: string[];
+  /** the subset of `dropped` that was parked — its parked record to clear. */
+  parkedToClear: string[];
+}
+
+/**
+ * Pure rule applying a carve to a running campaign. `outcomes` is a member's
+ * current status (as `reduceCampaign` reconstructs it); a member with no entry
+ * is treated as not-yet-started. Only `parked`/`unstarted` members are dropped —
+ * `completed` (merged or green) stays, and anything in-flight (`running`) or
+ * failed is left for the wave it is in to resolve.
+ */
+export function applyCarve(
+  campaign: { waves: string[][]; outcomes: Map<string, string> },
+  removed: string[],
+): AppliedCarve {
+  const dropped: string[] = [];
+  const parkedToClear: string[] = [];
+  for (const id of removed.map(normalize)) {
+    const status = campaign.outcomes.get(id) ?? "unstarted";
+    if (status === "unstarted" || status === "parked") {
+      dropped.push(id);
+      if (status === "parked") parkedToClear.push(id);
+    }
+  }
+  const drop = new Set(dropped);
+  const remaining = campaign.waves
+    .map((wave) => wave.map(normalize).filter((id) => !drop.has(id)))
+    .filter((wave) => wave.length);
+  return { remaining, dropped, parkedToClear };
+}
+
 export async function computeCarve(waves: string[][], target: string, blockedByOf: BlockedByOf): Promise<CarveResult> {
   const normWaves = waves.map((wave) => wave.map(normalize));
   const order = normWaves.flat();

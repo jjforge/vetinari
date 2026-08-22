@@ -13,7 +13,8 @@
  * This plans only: it computes waves, it never runs `campaign` and never pushes.
  * Pure over the injected `blockedByOf`, so it stays testable with no live tracker.
  */
-import { normalize, restrictBlockers, type BlockedByOf } from "./carve.ts";
+import { computeCarve, normalize, restrictBlockers, type BlockedByOf } from "./carve.ts";
+import type { FileSet } from "./fileset.ts";
 
 export interface Placement {
   id: string;
@@ -115,6 +116,39 @@ export async function layerWaves(ids: string[], blockedByOf: BlockedByOf): Promi
   return { waves, placements, unreachable };
 }
 
+/** What to do about a ticket whose file-set came back `confident: false`. */
+export type UnderspecifiedDecision = "drop" | "fail";
+
+/**
+ * Asked, when one or more selected tickets resolve to `confident: false`, whether
+ * to drop them (and their dependents) and plan the rest, or fail so the requestor
+ * can enrich the issues and re-run. Injected so the decision is exercised without
+ * a TTY: the CLI builds a real one via `underspecifiedPromptFor`.
+ */
+export type UnderspecifiedPrompt = (underspecified: string[]) => UnderspecifiedDecision | Promise<UnderspecifiedDecision>;
+
+/** The resolvers `planCampaign` reads the tracker and tree through. */
+export interface CampaignPlanDeps {
+  /** id -> its OPEN blockers (the same seam as `layerWaves`/`computeCarve`). */
+  blockedBy: BlockedByOf;
+  /**
+   * id -> its resolved file-set. Compose the project's `fileSet` resolver with
+   * `fetchTask` at the edge (`id => cfg.fileSet(await cfg.fetchTask(id))`) so this
+   * stays pure over one injected function.
+   */
+  fileSet: (id: string) => FileSet | Promise<FileSet>;
+  /** consulted when any scheduled ticket resolves to `confident: false`. */
+  onUnderspecified: UnderspecifiedPrompt;
+}
+
+/** A `WavePlan` plus the record of any under-specified halt that shaped it. */
+export interface CampaignPlan extends WavePlan {
+  /** the not-confident tickets that triggered the halt (empty when none did). */
+  underspecified: string[];
+  /** everything the drop decision removed: the under-specified roots + dependents. */
+  carved: string[];
+}
+
 const disjoint = (a: Set<string>, b: Set<string>) => {
   for (const x of b) if (a.has(x)) return false;
   return true;
@@ -180,12 +214,17 @@ export function waveArgs(plan: WavePlan): string {
 /**
  * A human-readable provenance report: each scheduled ticket with its wave and
  * why it is there, then every dropped ticket with the reason it cannot run
- * against this set. Plans only — this describes the plan, it does not run it.
+ * against this set — tickets carved for an under-specified file-set as well as
+ * tickets unreachable by dependency. Plans only — this describes the plan, it
+ * does not run it.
  */
-export function describePlan(plan: WavePlan): string {
+export function describePlan(plan: WavePlan & Partial<Pick<CampaignPlan, "carved" | "underspecified">>): string {
   const scheduled = plan.placements.length;
+  const carved = plan.carved ?? [];
   const lines: string[] = [
-    `campaign-plan: ${plan.waves.length} wave(s), ${scheduled} ticket(s) scheduled, ${plan.unreachable.length} unreachable.`,
+    `campaign-plan: ${plan.waves.length} wave(s), ${scheduled} ticket(s) scheduled, ${plan.unreachable.length} unreachable` +
+      (carved.length ? `, ${carved.length} carved` : "") +
+      ".",
     "",
   ];
 
@@ -207,5 +246,97 @@ export function describePlan(plan: WavePlan): string {
     }
   }
 
+  if (carved.length) {
+    const underspecified = new Set(plan.underspecified ?? []);
+    lines.push("", "Carved (dropped — under-specified file-set):");
+    for (const id of carved) {
+      lines.push(`  #${id}  — ${underspecified.has(id) ? "no confident file-set" : "depends on a carved under-specified ticket"}`);
+    }
+  }
+
   return lines.join("\n");
+}
+
+/**
+ * Plan a selected set end to end: layer it by dependency, resolve each scheduled
+ * ticket's file-set, and — when any comes back `confident: false` — halt to the
+ * requestor rather than guess. The injected `onUnderspecified` decides: `drop`
+ * carves the under-specified tickets AND their transitive dependents (reusing
+ * `computeCarve`) and plans the confident remainder; `fail` throws so the missing
+ * data is fixed on the issue and the plan re-run. Nothing is ever planned around a
+ * `confident: false` ticket silently.
+ *
+ * File-sets are resolved only for tickets that survive dependency layering — a
+ * ticket already dropped as unreachable is not one we could run anyway, so there
+ * is nothing to ask about it. Pure over the injected resolvers; the tree read and
+ * the interactive prompt live at the edge.
+ */
+export async function planCampaign(ids: string[], deps: CampaignPlanDeps): Promise<CampaignPlan> {
+  const layered = await layerWaves(ids, deps.blockedBy);
+  const scheduled = layered.placements.map((p) => p.id);
+
+  const sets = new Map<string, FileSet>();
+  await Promise.all(scheduled.map(async (id) => sets.set(id, await deps.fileSet(id))));
+
+  const underspecified = scheduled.filter((id) => !sets.get(id)!.confident);
+
+  let survivorPlan = layered;
+  let carved: string[] = [];
+  if (underspecified.length) {
+    const decision = await deps.onUnderspecified(underspecified);
+    if (decision === "fail") {
+      const list = underspecified.map((i) => `#${i}`).join(", ");
+      const [subj, obj] = underspecified.length === 1 ? ["has", "it"] : ["have", "them"];
+      throw new Error(
+        `campaign-plan: ${list} ${subj} no confident file-set. Add the file data to the issue(s) ` +
+          `and re-run, or pass --on-underspecified=drop to carve ${obj} and plan the rest.`,
+      );
+    }
+    // drop: carve each under-specified ticket and its dependent chain out of the
+    // layered waves, threading the shrinking remainder forward. A ticket already
+    // gone as another's dependent is skipped — `computeCarve` rejects an absent target.
+    let remaining = layered.waves;
+    const carvedSet = new Set<string>();
+    for (const target of underspecified) {
+      if (carvedSet.has(normalize(target))) continue;
+      const res = await computeCarve(remaining, target, deps.blockedBy);
+      for (const id of res.removed) carvedSet.add(id);
+      remaining = res.remaining;
+    }
+    carved = scheduled.filter((id) => carvedSet.has(id));
+    // Re-layer the confident survivors so the returned plan's placements/`after`
+    // reflect the reduced set; carving dependents keeps the DAG intact.
+    survivorPlan = await layerWaves(remaining.flat(), deps.blockedBy);
+  }
+
+  const basenames = new Map(survivorPlan.placements.map((p) => [p.id, new Set(sets.get(p.id)?.files ?? [])]));
+  const partitioned = partitionWaves(survivorPlan, basenames);
+
+  return {
+    ...partitioned,
+    // The unreachable list belongs to the original layering — re-layering the
+    // survivors alone would forget the dependency drops from the first pass.
+    unreachable: layered.unreachable,
+    underspecified,
+    carved,
+  };
+}
+
+/**
+ * Build the `onUnderspecified` prompt for a run. An explicit `--on-underspecified`
+ * flag pre-decides (`drop`/`fail`) for non-interactive runs; with no flag, an
+ * interactive terminal asks (`ask`) and a non-terminal defaults to `fail` — so
+ * missing file-set data is never planned around silently. `ask` is injected so the
+ * flag/terminal logic is tested without a real TTY.
+ */
+export function underspecifiedPromptFor(opts: { flag?: string; isTTY: boolean; ask: UnderspecifiedPrompt }): UnderspecifiedPrompt {
+  if (opts.flag !== undefined) {
+    if (opts.flag !== "drop" && opts.flag !== "fail") {
+      throw new Error(`--on-underspecified must be "drop" or "fail" (got "${opts.flag}").`);
+    }
+    const decided = opts.flag;
+    return () => decided;
+  }
+  if (opts.isTTY) return opts.ask;
+  return () => "fail";
 }

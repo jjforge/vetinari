@@ -24,7 +24,7 @@ import {
   type ParkedRecord,
 } from "./state.ts";
 import { gatewayConfigDir, readProjects } from "./registry.ts";
-import { campaignRunning, logFileOf, readEvents, serveAllStatus } from "./status.ts";
+import { campaignRunning, logFileOf, readEvents, serveAllStatus, shellCarvePreview } from "./status.ts";
 import { tgPoll, tgSend, type TgConn, type TgMsg } from "./telegram.ts";
 
 /**
@@ -611,27 +611,13 @@ function carveCandidates(configDir: string): CarveCandidate[] {
  * `blockedBy` graph and prints it, changing nothing (the CLI breaks before it
  * appends the event or writes any outbox record). Returns the printed closure, or
  * null when the child fails — e.g. the campaign ended between resolve and preview.
+ * Shares the shell-out with the aggregated dashboard's `POST /carve` preview
+ * (`shellCarvePreview`); the only extra here is the failure log line.
  */
-function carvePreview(target: PendingConfirm): Promise<string | null> {
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, [...process.execArgv, process.argv[1], "carve", target.issue, "--dry-run"], {
-      cwd: target.projectRoot,
-      stdio: ["ignore", "pipe", "inherit"],
-    });
-    let out = "";
-    child.stdout?.on("data", (chunk) => (out += chunk));
-    child.on("error", (err) => {
-      log("gateway-carve-preview-failed", { project: target.project, issue: target.issue, error: String(err) });
-      resolve(null);
-    });
-    child.on("exit", (code) => {
-      if (code === 0) resolve(out.trim() || null);
-      else {
-        log("gateway-carve-preview-failed", { project: target.project, issue: target.issue, code });
-        resolve(null);
-      }
-    });
-  });
+async function carvePreview(target: PendingConfirm): Promise<string | null> {
+  const text = await shellCarvePreview(target.projectRoot, target.issue);
+  if (text == null) log("gateway-carve-preview-failed", { project: target.project, issue: target.issue });
+  return text;
 }
 
 /**

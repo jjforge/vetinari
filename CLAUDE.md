@@ -31,6 +31,20 @@ truth, not using them: **cite issue numbers freely in commits, `CHANGELOG.md`
 bullets, issue comments, and what you report to the user** — those are dated
 records pinned to a moment, so a number in them stays accurate.
 
+## Changelog — log every user-facing change as part of landing it
+
+**Every change that adds or alters a command, flag, behaviour, config surface, or
+output gets a [`CHANGELOG.md`](CHANGELOG.md) `[Unreleased]` entry** (under
+`Added`/`Changed`/`Removed`/`Fixed`), citing the issue — in the same change that
+lands it, not a later pass. A purely internal refactor with no user-visible effect
+needs none. `CHANGELOG.md` is a dated record, so cite issue numbers in its bullets
+freely (the no-numbers rule above is about always-on *current-truth* docs only).
+
+This is enforced on the **implementing agent** via `prompts/tdd.md` (the TDD prompt
+every campaign run drives) — not in `to-tickets`/`/implement`, which are external
+skills we do not own, so the rule has to live where we control it: this file and
+the prompt.
+
 ## Conventions — type is a native issue type; every other axis is a label; the title is plain
 
 Titles are plain and descriptive, **with no bracketed prefix** — a prefix cannot

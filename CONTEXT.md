@@ -94,6 +94,22 @@ One batch of a campaign — the tasks run together before their greens are merge
 and the next batch starts. "Wave start" is a **progress** message.
 _Avoid_: batch (in user-facing comms), round
 
+### Runs
+
+**Run**:
+One invocation of `campaign` or `queue` — the unit whose event log the dashboard
+reads. A project has one **live run** at a time (its `orchestrator.jsonl`);
+finishing it archives that log (see [[archived-run]]).
+_Avoid_: session, job
+
+**Archived run**:
+A completed run whose event log `archiveRun` moved aside to
+`logs/archive/orchestrator-<timestamp>.jsonl` (kept, never deleted) so a finished
+run stops reading as current. The event log is the run's durable, per-run artifact
+— the dashboard reconstructs the whole wave/issue view from it. The `agent-*` and
+`gate-*` logs are **live-only scratch**: overwritten across runs and not archived.
+_Avoid_: past run, old log
+
 ### Campaign planning
 
 **Campaign plan** (the `campaign-plan` tool):

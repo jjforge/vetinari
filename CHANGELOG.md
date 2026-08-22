@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Archived runs in the dashboard (#40). Under the selected project's live run, the
+  aggregated status site now lists that project's finished runs from
+  `logs/archive/orchestrator-*.jsonl`, newest-first, each with a one-line summary
+  (mode · issue count · complete/halted) folded from the archived log via
+  `reduceCampaign`. Clicking one re-renders `GET /?project=…&run=<timestamp>`,
+  which reads that archived log through the existing `buildStatus`/`renderStatusPage`
+  and shows its wave/issue view read-only (no carve control, no answer form) below
+  the still-live run. A run is addressed by its timestamp token and resolved by
+  matching the archive listing (never by joining request input into a path); a
+  malformed archive is skipped with a log line. `listArchivedRuns` and
+  `summarizeRun` are exported.
 - Committed `sandcastle/` + excluded `.sandcastle.local/` layout. Config now
   resolves from a committed `sandcastle/config.mts` (canonical), with the legacy
   `sandcastle-tdd.config.*` and `.sandcastle/config.mts` locations kept as

@@ -135,7 +135,9 @@ moved aside to `.sandcastle/logs/archive/orchestrator-<ts>.jsonl` (kept, never
 deleted) and replaced with an empty one, so the status reads idle. It only fires
 on a clean finish with nothing still parked — a halt or an open question leaves
 the state in place to inspect. Run `sandcastle-tdd clear` to force the same reset
-yourself.
+yourself. Archived runs stay browsable: the dashboard lists each project's past
+runs (newest-first, with a one-line summary) under its live run, and clicking one
+renders its wave/issue view read-only.
 
 **Carve one issue out of a campaign.** When an issue turns out not to be ready,
 `carve` drops it *and everything that can't proceed without it* — the transitive
@@ -394,7 +396,7 @@ it there too and re-run that project's `baseline`.
 | `dispatch` | the single poller; routes replies to parked tasks, and answers `/status` with a live summary |
 | `parked` | list what is waiting and why |
 | `clear` | archive the run log + clear parked, resetting the dashboard/status line to idle (automatic on clean campaign/queue completion) |
-| `status [--port <port>]` | one dashboard over the host registry: campaign waves, issue status chips, and parked-response cards for every registered project, with a dropdown to switch (a single project is one entry). No gateway daemon required |
+| `status [--port <port>]` | one dashboard over the host registry: campaign waves, issue status chips, and parked-response cards for every registered project, with a dropdown to switch (a single project is one entry), plus a read-only list of each project's archived runs. No gateway daemon required |
 | `statusline` | one compact line for the Claude Code status bar; reads Claude Code's JSON on stdin |
 | `tg-test` | prove the Telegram round-trip |
 

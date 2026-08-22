@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { describePlan, layerWaves, waveArgs } from "./plan.ts";
+import { describePlan, layerWaves, partitionWaves, waveArgs } from "./plan.ts";
 
 // A fake OPEN-blocked-by resolver from a plain edge map: id -> its open blockers.
 // (Closed blockers never reach the resolver — they are filtered at the edge — so
@@ -60,6 +60,109 @@ test("layerWaves carries unreachability down the dependent chain", async () => {
   ]);
 });
 
+// id -> the basenames it touches, for the file-disjoint partition.
+const basenamesFrom = (files: Record<string, string[]>) =>
+  new Map(Object.entries(files).map(([id, names]) => [id, new Set(names)]));
+
+test("partitionWaves spills a basename-colliding ticket into a later sub-wave", async () => {
+  // One dependency layer of three; 'a' and 'c' both touch x, so they cannot share
+  // a wave. Greedy first-fit packs a+b (disjoint), then spills c past them.
+  const layered = await layerWaves(["a", "b", "c"], openBlockedByFrom({}));
+  const plan = partitionWaves(layered, basenamesFrom({ a: ["x"], b: ["y"], c: ["x"] }));
+
+  assert.deepEqual(plan.waves, [["a", "b"], ["c"]]);
+  // c is placed in wave 1 and records the collision that spilled it.
+  const c = plan.placements.find((p) => p.id === "c")!;
+  assert.equal(c.wave, 1);
+  assert.deepEqual(c.sharesFilesWith, ["a"]);
+});
+
+// Regression: the 2026-08-19 campaign (~41 issues). The spec fixes the invariant,
+// not the raw graph, so this reconstructs its shape: #461 has NO blockedBy edge yet
+// shares `stack_strip.tmpl` with #378/#688/#400, so a pure-DAG planner drops all
+// four into wave 0 and collides. The file partition must spill #461 clear of them.
+// Around that cluster sit a dependency chain, a diamond, a second wave-0 file pair,
+// a deeper-layer file pair, and unique-file filler to reach campaign scale.
+type Issue = { id: string; blockedBy?: string[]; files: string[] };
+const FIXTURE_2026_08_19: Issue[] = [
+  // The template-crossover cluster — all on the frontier, all touching stack_strip.tmpl.
+  { id: "378", files: ["stack_strip.tmpl", "view_378.rs"] },
+  { id: "688", files: ["stack_strip.tmpl", "view_688.rs"] },
+  { id: "400", files: ["stack_strip.tmpl", "view_400.rs"] },
+  { id: "461", files: ["stack_strip.tmpl", "view_461.rs"] }, // no blockedBy edge
+  // A linear dependency chain.
+  { id: "611", files: ["a.ts"] },
+  { id: "640", blockedBy: ["611"], files: ["b.ts"] },
+  { id: "701", blockedBy: ["640"], files: ["c.ts"] },
+  { id: "712", blockedBy: ["701"], files: ["d.ts"] },
+  { id: "730", blockedBy: ["712"], files: ["e.ts"] },
+  // A diamond.
+  { id: "500", files: ["f.ts"] },
+  { id: "501", blockedBy: ["500"], files: ["g.ts"] },
+  { id: "502", blockedBy: ["500"], files: ["h.ts"] },
+  { id: "503", blockedBy: ["501", "502"], files: ["i.ts"] },
+  // A second frontier file pair — both touch shared_db.rs, so one must spill.
+  { id: "900", files: ["shared_db.rs"] },
+  { id: "901", files: ["shared_db.rs"] },
+  // A file collision one layer deep: both enter layer 1 behind 910 and share a file.
+  { id: "910", files: ["x1.ts"] },
+  { id: "911", blockedBy: ["910"], files: ["dup_layer.tmpl"] },
+  { id: "912", blockedBy: ["910"], files: ["dup_layer.tmpl"] },
+  // Unique-file filler, to campaign scale.
+  ...Array.from({ length: 23 }, (_, i) => ({ id: `${100 + i}`, files: [`u${i}.ts`] })),
+];
+
+test("2026-08-19 fixture: the partition is DAG-consistent and crossover-safe", async () => {
+  const ids = FIXTURE_2026_08_19.map((i) => i.id);
+  const edges = Object.fromEntries(FIXTURE_2026_08_19.map((i) => [i.id, i.blockedBy ?? []]));
+  const files = new Map(FIXTURE_2026_08_19.map((i) => [i.id, new Set(i.files)]));
+
+  const layered = await layerWaves(ids, openBlockedByFrom(edges));
+  const plan = partitionWaves(layered, files);
+
+  assert.equal(ids.length, 41, "fixture is at campaign scale");
+  assert.deepEqual(plan.unreachable, [], "every blocker is in-set, so nothing is dropped");
+
+  // Crossover-safe: no basename appears twice within any wave.
+  for (const [w, wave] of plan.waves.entries()) {
+    const names = wave.flatMap((id) => [...files.get(id)!]);
+    assert.equal(new Set(names).size, names.length, `wave ${w} shares a file: ${wave.join(", ")}`);
+  }
+
+  // DAG-consistent: every in-set blocker sits in a strictly earlier wave.
+  const waveOf = new Map(plan.placements.map((p) => [p.id, p.wave]));
+  for (const issue of FIXTURE_2026_08_19) {
+    for (const b of issue.blockedBy ?? []) {
+      assert.ok(waveOf.get(b)! < waveOf.get(issue.id)!, `#${issue.id} must run after its blocker #${b}`);
+    }
+  }
+
+  // The named regression: #461 must not share a wave with any template sibling —
+  // and since all four touch the file, the partition puts them in four waves.
+  const cluster = ["378", "688", "400", "461"];
+  assert.equal(new Set(cluster.map((id) => waveOf.get(id))).size, 4, "the four stack_strip.tmpl tickets are all separated");
+
+  // The pure-DAG planner (layering alone) really does collide: all four share the
+  // one dependency layer that the partition then has to break apart.
+  const layerOf = new Map(layered.placements.map((p) => [p.id, p.wave]));
+  assert.equal(new Set(cluster.map((id) => layerOf.get(id))).size, 1, "pre-partition, all four sit in one layer and collide");
+
+  // Spilling works past the frontier too: the deeper-layer pair is separated.
+  assert.notEqual(waveOf.get("911"), waveOf.get("912"), "the layer-1 dup_layer.tmpl pair is separated");
+});
+
+test("partitionWaves only blames earlier sub-waves — a frontier ticket is never marked spilled", async () => {
+  // a,b,c all touch x so they fan out across three sub-waves; c also touches z.
+  // d touches only z: it collides with c, but c was itself spilled to a later
+  // sub-wave, so d still fits the frontier and must NOT be reported as spilled.
+  const layered = await layerWaves(["a", "b", "c", "d"], openBlockedByFrom({}));
+  const plan = partitionWaves(layered, basenamesFrom({ a: ["x"], b: ["x"], c: ["x", "z"], d: ["z"] }));
+
+  const d = plan.placements.find((p) => p.id === "d")!;
+  assert.equal(d.wave, 0, "d shares nothing with sub-wave 0, so it stays on the frontier");
+  assert.deepEqual(d.sharesFilesWith, [], "the collider c sits in a later sub-wave, so it is not a spill reason");
+});
+
 test("waveArgs emits the bare quoted wave args, ready to paste after `campaign`", async () => {
   const plan = await layerWaves(
     ["611", "623", "640", "701"],
@@ -84,4 +187,13 @@ test("describePlan explains each ticket's wave and lists what was dropped", asyn
   assert.match(report, /#712.*701/); // dropped as a dependent of 701
   // A dropped ticket is never presented as scheduled.
   assert.doesNotMatch(report, /wave \d+\s+#701/);
+});
+
+test("describePlan explains why a ticket was spilled to a later sub-wave", async () => {
+  const layered = await layerWaves(["a", "b", "c"], openBlockedByFrom({}));
+  const plan = partitionWaves(layered, basenamesFrom({ a: ["x"], b: ["y"], c: ["x"] }));
+  const report = describePlan(plan);
+
+  // c spilled because it shares a file with a — the report must say so.
+  assert.match(report, /wave 1\s+#c.*spill.*#a/i);
 });

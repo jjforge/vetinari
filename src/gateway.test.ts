@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 import type { ParkedRecord } from "./state.ts";
 import type { TgConn } from "./telegram.ts";
 import {
+  formatGatewayStatus,
   newReplyIndex,
   pendingAnnouncements,
+  pollLoop,
   pollTargets,
   rebuildIndex,
   recordSend,
@@ -171,4 +173,82 @@ test("routeReply leaves a plain (non-reply) message unrouted — a shared bot ne
   const action = routeReply(index, conn, { text: "yes" });
 
   assert.equal(action.kind, "unrouted");
+});
+
+test("pollLoop drives exactly one resume of the right task from one fake reply", async () => {
+  const index = newReplyIndex();
+  recordSend(index, "botA", 100, { project: "alpha", task: "A1", projectRoot: "/r", baseLocation: "/b", parkedAt: "t1" });
+  recordSend(index, "botA", 200, { project: "alpha", task: "A2", projectRoot: "/r", baseLocation: "/b", parkedAt: "t2" });
+
+  const resumes: Array<{ task: string; text: string }> = [];
+  // The injected poller yields one reply (to A1's question), then signals stop.
+  let served = false;
+  const poll = async () => {
+    if (served) return null;
+    served = true;
+    return { offset: 1, messages: [{ text: "go with B", replyToId: 100 }] };
+  };
+
+  await pollLoop(conn, index, { poll, resume: (ref, text) => resumes.push({ task: ref.task, text }) });
+
+  assert.deepEqual(resumes, [{ task: "A1", text: "go with B" }]);
+});
+
+test("pollLoop hands a /status message to the injected status handler, not resume", async () => {
+  let statusCalls = 0;
+  let resumeCalls = 0;
+  let served = false;
+  const poll = async () => {
+    if (served) return null;
+    served = true;
+    return { offset: 1, messages: [{ text: "/status" }] };
+  };
+
+  await pollLoop(conn, newReplyIndex(), {
+    poll,
+    resume: () => resumeCalls++,
+    onStatus: () => {
+      statusCalls++;
+    },
+  });
+
+  assert.equal(statusCalls, 1);
+  assert.equal(resumeCalls, 0);
+});
+
+test("pollLoop advances the offset it passes to the poller across cycles", async () => {
+  const offsets: number[] = [];
+  const results = [
+    { offset: 5, messages: [] },
+    { offset: 9, messages: [] },
+  ];
+  const poll = async (_c: TgConn, offset: number) => {
+    offsets.push(offset);
+    return results.shift() ?? null;
+  };
+
+  await pollLoop(conn, newReplyIndex(), { poll, resume: () => {} }, 2);
+
+  assert.deepEqual(offsets, [2, 5, 9]);
+});
+
+test("formatGatewayStatus summarizes each served project and its parked questions", () => {
+  const text = formatGatewayStatus([
+    project({ project: "alpha", parked: [parked({ taskId: "A1", reason: "blocked" }), parked({ taskId: "A2", reason: "budget" })] }),
+    project({ project: "beta", parked: [] }),
+  ]);
+
+  assert.match(text, /alpha/);
+  assert.match(text, /A1/);
+  assert.match(text, /blocked/);
+  assert.match(text, /A2/);
+  assert.match(text, /beta/);
+  // beta has nothing parked — it still appears, marked as having no questions.
+  assert.match(text, /beta[\s\S]*nothing parked/i);
+});
+
+test("formatGatewayStatus reports when no served project has anything parked", () => {
+  const text = formatGatewayStatus([project({ project: "alpha", parked: [] })]);
+
+  assert.match(text, /nothing parked/i);
 });

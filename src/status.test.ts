@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { buildAllStatus, buildStatus, buildStatusWithIssueNames, extractParkedDetails, formatStatusText, renderStatusPage, selectStatus, serveAllStatus, serveStatus } from "./status.ts";
+import { buildAllStatus, buildStatus, buildStatusWithIssueNames, extractParkedDetails, formatStatusText, reduceCampaign, renderStatusPage, selectStatus, serveAllStatus, serveStatus } from "./status.ts";
 import type { CampaignStatus } from "./status.ts";
 import type { AddressInfo } from "node:net";
 import { register, type ProjectPointer } from "./registry.ts";
@@ -105,6 +105,48 @@ test("selectStatus picks the requested project, defaulting to the first otherwis
   assert.equal(selectStatus(statuses, undefined).project, "alpha");
   // An unknown or stale selection falls back to the first, never undefined.
   assert.equal(selectStatus(statuses, "ghost").project, "alpha");
+});
+
+test("reduceCampaign reconstructs a fresh campaign's waves with no wave running yet", () => {
+  const reduced = reduceCampaign([
+    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101", "102"], ["201"]] },
+  ]);
+
+  assert.deepEqual(reduced.waves, [["101", "102"], ["201"]]);
+  // Nothing has started: no wave is current and none is closed.
+  assert.equal(reduced.currentWave, -1);
+  assert.deepEqual([...reduced.closedWaves], []);
+  // No queue-start/green/etc. yet, so no issue has a reconstructed outcome.
+  assert.deepEqual([...reduced.outcomes.entries()], []);
+});
+
+test("reduceCampaign reports one completed wave closed and the next wave current mid-campaign", () => {
+  const reduced = reduceCampaign([
+    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"], ["201"]] },
+    { ts: "2025-01-01T00:01:00.000Z", event: "campaign-batch", index: 0, tasks: ["101"] },
+    { ts: "2025-01-01T00:02:00.000Z", event: "campaign-batch-done", index: 0, merged: ["101"], held: [] },
+    { ts: "2025-01-01T00:03:00.000Z", event: "campaign-batch", index: 1, tasks: ["201"] },
+  ]);
+
+  assert.deepEqual(reduced.waves, [["101"], ["201"]]);
+  // Wave 0 closed and banked its merged issue; wave 1 is now the running one.
+  assert.deepEqual([...reduced.closedWaves], [0]);
+  assert.equal(reduced.currentWave, 1);
+  assert.equal(reduced.outcomes.get("101"), "completed");
+});
+
+test("reduceCampaign marks a halted issue as a failure", () => {
+  const reduced = reduceCampaign([
+    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101", "102"]] },
+    { ts: "2025-01-01T00:01:00.000Z", event: "campaign-batch", index: 0, tasks: ["101", "102"] },
+    { ts: "2025-01-01T00:02:00.000Z", event: "campaign-halt", taskId: "101", reason: "gate failed" },
+  ]);
+
+  assert.equal(reduced.outcomes.get("101"), "failure");
+  assert.equal(reduced.details.get("101"), "Campaign halted: gate failed");
+  // A halt does not close the wave — it stays the current one.
+  assert.deepEqual([...reduced.closedWaves], []);
+  assert.equal(reduced.currentWave, 0);
 });
 
 test("buildStatus shows campaign waves with issue chips and statuses", () => {

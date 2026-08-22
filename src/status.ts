@@ -164,8 +164,28 @@ export async function buildStatusWithIssueNames(cfg: ResolvedConfig): Promise<Ca
   return status;
 }
 
-export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
-  const events = readEvents(cfg);
+/**
+ * The reconstructed plan of the campaign an event log describes: its waves, the
+ * per-issue outcome and hover detail, which waves have closed, and which wave is
+ * current (-1 when none is in flight). It is the fold both the dashboard and the
+ * `campaign` loop reduce so they agree on "the plan" by construction (ADR 0005).
+ */
+export interface ReducedCampaign {
+  waves: string[][];
+  outcomes: Map<string, IssueStatus>;
+  details: Map<string, string>;
+  closedWaves: Set<number>;
+  currentWave: number;
+}
+
+/**
+ * Reduce a project's event log to its current campaign's plan — pure, no I/O.
+ * Only the latest `campaign-start` and everything after it is folded (a fresh
+ * campaign supersedes an earlier one in the same log); a queue-only run with no
+ * campaign frames it as a single wave. This is the load-bearing seam of ADR
+ * 0005: `buildStatus` renders it and the `campaign` loop re-reads it each wave.
+ */
+export function reduceCampaign(events: any[]): ReducedCampaign {
   const latestCampaignIndex = events.findLastIndex((e) => e.event === "campaign-start" && Array.isArray(e.batches));
   const relevant = latestCampaignIndex >= 0 ? events.slice(latestCampaignIndex) : events;
 
@@ -219,6 +239,12 @@ export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
       details.set(taskId, `Campaign halted: ${e.reason ?? "failure"}`);
     }
   }
+
+  return { waves, outcomes, details, closedWaves, currentWave };
+}
+
+export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
+  const { waves, outcomes, details, closedWaves, currentWave } = reduceCampaign(readEvents(cfg));
 
   const activeIssueNumbers = new Set(waves.flat());
   const closedIssueNumbers = new Set([...closedWaves].flatMap((index) => waves[index] ?? []));

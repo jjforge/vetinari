@@ -603,7 +603,7 @@ ${
           (run) =>
             `<li><a href="/?project=${encodeURIComponent(opts.selected ?? status.project)}&amp;run=${encodeURIComponent(run.run)}"${
               run.run === opts.archivedRun ? ` aria-current="true"` : ""
-            }>${escapeHtml(run.summary)}</a></li>`,
+            }>${escapeHtml(run.summary)}</a> <a href="/archive/log?project=${encodeURIComponent(opts.selected ?? status.project)}&amp;run=${encodeURIComponent(run.run)}">raw log</a></li>`,
         )
         .join("")}</ul></section>`
     : ""
@@ -912,6 +912,31 @@ export async function serveAllStatus(
         }
         res.setHeader("content-type", "text/html; charset=utf-8");
         res.end(renderAggregatedCarvePreview(project, taskId, previewText));
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/archive/log") {
+        // The raw event log of one archived run, served as-is. The `run` token is
+        // resolved by matching the project's archive listing — the same guard the
+        // archived-run render uses — so an unlisted or crafted token is a 404, never
+        // a path joined from request input.
+        const project = url.searchParams.get("project");
+        const run = url.searchParams.get("run");
+        if (!project || !run) {
+          res.writeHead(400).end("project and run are required");
+          return;
+        }
+        const pointer = pointers().find((p) => p.project === project);
+        if (!pointer) {
+          res.writeHead(404).end(`unknown project: ${project}`);
+          return;
+        }
+        const match = listArchivedRuns(pointer.baseLocation).find((r) => r.run === run);
+        if (!match) {
+          res.writeHead(404).end(`unknown run: ${run}`);
+          return;
+        }
+        res.setHeader("content-type", "text/plain; charset=utf-8");
+        res.end(readFileSync(match.file, "utf8"));
         return;
       }
       if (req.method === "GET" && (url.pathname === "/" || req.url === undefined)) {

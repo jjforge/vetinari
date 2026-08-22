@@ -7,6 +7,7 @@ import type { ResolvedConfig } from "./config.ts";
 import { log } from "./log.ts";
 import { listProjects, type ProjectPointer } from "./registry.ts";
 import { listParked, parkedDirOf, type ParkedRecord } from "./state.ts";
+import { applyCarve } from "./carve.ts";
 
 export type IssueStatus = "completed" | "parked" | "failure" | "running" | "unstarted";
 
@@ -47,7 +48,7 @@ const statusForOutcome = (outcome: string | undefined): IssueStatus => {
   return "unstarted";
 };
 
-const readEvents = (cfg: ResolvedConfig): any[] => {
+export const readEvents = (cfg: Pick<ResolvedConfig, "logFile">): any[] => {
   if (!existsSync(cfg.logFile)) return [];
   return readFileSync(cfg.logFile, "utf8")
     .split("\n")
@@ -237,10 +238,28 @@ export function reduceCampaign(events: any[]): ReducedCampaign {
       const taskId = normalizeIssue(String(e.taskId));
       outcomes.set(taskId, "failure");
       details.set(taskId, `Campaign halted: ${e.reason ?? "failure"}`);
+    } else if (e.event === "carve" && Array.isArray(e.removed)) {
+      // Prune the running campaign at the point the carve was issued: banked and
+      // in-flight members stay, only parked/unstarted ones leave (ADR 0005).
+      // Folding it in log order means `outcomes` already reflects the state the
+      // carve saw, so the same rule replays deterministically.
+      waves = applyCarve({ waves, outcomes }, e.removed.map(String)).remaining;
     }
   }
 
   return { waves, outcomes, details, closedWaves, currentWave };
+}
+
+/**
+ * Is a campaign currently running over this event log? True iff the latest
+ * `campaign-start` has no `campaign-done` or `campaign-halt` after it — the
+ * condition the no-plan `carve <issue>` needs before it can prune (ADR 0005).
+ * A queue-only run with no campaign frame is not a campaign and returns false.
+ */
+export function campaignRunning(events: any[]): boolean {
+  const start = events.findLastIndex((e) => e.event === "campaign-start" && Array.isArray(e.batches));
+  if (start < 0) return false;
+  return !events.slice(start).some((e) => e.event === "campaign-done" || e.event === "campaign-halt");
 }
 
 export function buildStatus(cfg: ResolvedConfig): CampaignStatus {

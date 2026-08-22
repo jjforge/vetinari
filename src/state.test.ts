@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ResolvedConfig } from "./config.ts";
-import { clearParkedForTasks, listParked, park } from "./state.ts";
+import { clearParkedForTasks, listParked, listParkedIn, park, setParkedMessageId } from "./state.ts";
 
 const cfgFor = (dir: string): ResolvedConfig =>
   ({
@@ -69,4 +69,25 @@ test("park writes its record silently — the gateway is the only sender, so par
   const rec = listParked(cfgFor(dir)).find((p) => p.taskId === "301");
   assert.ok(rec, "the record is written");
   assert.equal(rec!.tgMessageId, undefined, "no message id yet — the gateway announces and fills it in");
+});
+
+test("setParkedMessageId stamps the announced message id into an existing parked record", async () => {
+  const dir = join(tmpdir(), `sctdd-stamp-${Date.now()}`);
+  mkdirSync(join(dir, "parked"), { recursive: true });
+  await park(cfgFor(dir), { taskId: "410", reason: "blocked", sessionId: "s", branch: "agent/410", question: "?" });
+
+  setParkedMessageId(join(dir, "parked"), "410", 4242);
+
+  const rec = listParkedIn(join(dir, "parked")).find((p) => p.taskId === "410");
+  assert.equal(rec?.tgMessageId, 4242);
+});
+
+test("setParkedMessageId leaves an already-cleared record alone", () => {
+  const dir = join(tmpdir(), `sctdd-stamp-gone-${Date.now()}`);
+  mkdirSync(join(dir, "parked"), { recursive: true });
+
+  // No throw for a record that was answered and cleared before the stamp landed.
+  setParkedMessageId(join(dir, "parked"), "999", 7);
+
+  assert.deepEqual(listParkedIn(join(dir, "parked")), []);
 });

@@ -394,7 +394,7 @@ it there too and re-run that project's `baseline`.
 | `dispatch` | the single poller; routes replies to parked tasks, and answers `/status` with a live summary |
 | `parked` | list what is waiting and why |
 | `clear` | archive the run log + clear parked, resetting the dashboard/status line to idle (automatic on clean campaign/queue completion) |
-| `status [--port <port>]` | local web page showing campaign waves, issue status chips, and parked-response cards |
+| `status [--port <port>]` | one dashboard over the host registry: campaign waves, issue status chips, and parked-response cards for every registered project, with a dropdown to switch (a single project is one entry). No gateway daemon required |
 | `statusline` | one compact line for the Claude Code status bar; reads Claude Code's JSON on stdin |
 | `tg-test` | prove the Telegram round-trip |
 

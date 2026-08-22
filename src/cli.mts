@@ -12,8 +12,8 @@ import { applyLayoutMigration, computeLayoutMigration, describeMigration, scanLa
 import { applyInit, computeInit, describeInit, scanInit } from "./init.ts";
 import { archiveRun } from "./archive.ts";
 import { clearParkedForTasks, enqueueOutbound, listParked, readParked } from "./state.ts";
-import { autoRegister } from "./registry.ts";
-import { campaignRunning, readEvents, reduceCampaign, serveStatus } from "./status.ts";
+import { autoRegister, gatewayConfigDir } from "./registry.ts";
+import { campaignRunning, readEvents, reduceCampaign, serveAllStatus } from "./status.ts";
 import { runStatusLine } from "./statusline.ts";
 
 const USAGE = `sandcastle-tdd <mode> [args]
@@ -64,7 +64,10 @@ const USAGE = `sandcastle-tdd <mode> [args]
                            dashboard/status line to idle (automatic on clean
                            campaign/queue completion; this forces it now)
   status [--port <port>] [--host <host>]
-                           local web page for campaign/wave and parked status
+                           one dashboard over the host registry: campaign/wave and
+                           parked status for every registered project, a dropdown to
+                           switch between them (a single project is one entry). Reads
+                           the registry, so no gateway daemon is required
   statusline               one compact line for the Claude Code status bar (reads
                            Claude Code's JSON on stdin; wire into settings.json)
   tg-test                  prove the Telegram round-trip
@@ -165,6 +168,22 @@ if (mode === "migrate") {
 // own directory need not satisfy).
 if (mode === "gateway") {
   await gateway();
+  process.exit(0);
+}
+
+// status is one dashboard over the host registry, not a per-project mode (ADR
+// 0006): auto-register always populates the registry, so `serveAllStatus` fronts
+// every registered project — a single, no-gateway project is just a one-entry
+// dropdown. Like the gateway, it reads the host registry live and must run BEFORE
+// the strict cwd config load (no project config in cwd is fine).
+if (mode === "status") {
+  const portIdx = rest.indexOf("--port");
+  const hostIdx = rest.indexOf("--host");
+  const port = portIdx >= 0 ? Number(rest[portIdx + 1]) : Number(process.env.SANDCASTLE_STATUS_PORT ?? 8765);
+  const host = hostIdx >= 0 ? rest[hostIdx + 1] : process.env.SANDCASTLE_STATUS_HOST ?? "127.0.0.1";
+  if (!Number.isInteger(port) || port < 0) throw new Error("status --port needs a non-negative integer");
+  if (!host) throw new Error("status --host needs a host, e.g. 127.0.0.1 or 0.0.0.0");
+  await serveAllStatus(gatewayConfigDir(), { port, host });
   process.exit(0);
 }
 
@@ -342,16 +361,6 @@ switch (mode) {
     log("archived", { archivedLog: r.archivedLog ?? null, clearedParked: r.clearedParked, clearedOutbound: r.clearedOutbound });
     console.log(r.archivedLog ? `archived run log → ${r.archivedLog}` : "no run log to archive");
     console.log(`cleared ${r.clearedParked} parked record(s) — dashboard and status line now read idle`);
-    break;
-  }
-  case "status": {
-    const portIdx = rest.indexOf("--port");
-    const hostIdx = rest.indexOf("--host");
-    const port = portIdx >= 0 ? Number(rest[portIdx + 1]) : Number(process.env.SANDCASTLE_STATUS_PORT ?? 8765);
-    const host = hostIdx >= 0 ? rest[hostIdx + 1] : process.env.SANDCASTLE_STATUS_HOST ?? "127.0.0.1";
-    if (!Number.isInteger(port) || port < 0) throw new Error("status --port needs a non-negative integer");
-    if (!host) throw new Error("status --host needs a host, e.g. 127.0.0.1 or 0.0.0.0");
-    await serveStatus(cfg, { port, host, configPath: cfgPath });
     break;
   }
   case "tg-test": {

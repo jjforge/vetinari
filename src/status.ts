@@ -1,9 +1,12 @@
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import type { ResolvedConfig } from "./config.ts";
-import { listParked, type ParkedRecord } from "./state.ts";
+import { log } from "./log.ts";
+import type { ProjectPointer } from "./registry.ts";
+import { listParked, parkedDirOf, type ParkedRecord } from "./state.ts";
 
 export type IssueStatus = "completed" | "parked" | "failure" | "running" | "unstarted";
 
@@ -238,6 +241,41 @@ export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
     })),
     parked: parkedRecords.map(toParkedIssue),
   };
+}
+
+/**
+ * The slice of a `ResolvedConfig` that `buildStatus` actually reads, synthesized
+ * from a registry pointer's base location. The gateway is a dumb router (ADR
+ * 0002): it never imports a project's TS config, it reads the same state files
+ * (`logs/`, `parked/`) the run wrote under the base location — the paths a full
+ * config's `loadConfig` would have derived from `stateDir`.
+ */
+const statusConfigFromPointer = (pointer: ProjectPointer): ResolvedConfig =>
+  ({
+    project: pointer.project,
+    stateDir: pointer.baseLocation,
+    parkedDir: parkedDirOf(pointer.baseLocation),
+    logFile: join(pointer.baseLocation, "logs", "orchestrator.jsonl"),
+  }) as ResolvedConfig;
+
+/**
+ * Build the campaign status for every registered project, reading each project's
+ * state live from its base location. A project whose base location is missing
+ * (moved or deleted since it registered) is skipped with a log line, never
+ * throwing — one stale registration must not take the whole dashboard down (ADR
+ * 0002). Uses the pure `buildStatus`, so issue names are not resolved here (that
+ * needs the project's own `fetchTask`); the aggregated view is names-free.
+ */
+export function buildAllStatus(pointers: ProjectPointer[]): CampaignStatus[] {
+  const statuses: CampaignStatus[] = [];
+  for (const pointer of pointers) {
+    if (!existsSync(pointer.baseLocation)) {
+      log("status-project-skipped", { project: pointer.project, baseLocation: pointer.baseLocation });
+      continue;
+    }
+    statuses.push(buildStatus(statusConfigFromPointer(pointer)));
+  }
+  return statuses;
 }
 
 const toParkedIssue = (rec: ParkedRecord): ParkedIssue => {

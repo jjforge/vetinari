@@ -4,7 +4,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { buildStatus, buildStatusWithIssueNames, extractParkedDetails, formatStatusText, renderStatusPage, serveStatus } from "./status.ts";
+import { buildAllStatus, buildStatus, buildStatusWithIssueNames, extractParkedDetails, formatStatusText, renderStatusPage, serveStatus } from "./status.ts";
+import type { ProjectPointer } from "./registry.ts";
 
 const cfgFor = (dir: string): ResolvedConfig =>
   ({
@@ -23,6 +24,42 @@ const cfgFor = (dir: string): ResolvedConfig =>
   }) as ResolvedConfig;
 
 const writeJsonl = (path: string, events: unknown[]) => writeFileSync(path, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
+
+const pointerFor = (project: string, dir: string): ProjectPointer => ({ project, projectRoot: join(dir, "root"), baseLocation: dir });
+
+const seedState = (dir: string, events: unknown[]) => {
+  mkdirSync(join(dir, "logs"), { recursive: true });
+  mkdirSync(join(dir, "parked"), { recursive: true });
+  writeJsonl(join(dir, "logs", "orchestrator.jsonl"), events);
+};
+
+test("buildAllStatus builds one status per live project and skips a stale one", () => {
+  const base = join(tmpdir(), `sctdd-all-status-${Date.now()}`);
+  const alphaDir = join(base, "alpha");
+  const betaDir = join(base, "beta");
+  seedState(alphaDir, [
+    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101", "102"]] },
+    { ts: "2025-01-01T00:01:00.000Z", event: "queue-done", outcomes: { "101": "green" } },
+  ]);
+  seedState(betaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["201"]] }]);
+
+  const statuses = buildAllStatus([
+    pointerFor("alpha", alphaDir),
+    pointerFor("beta", betaDir),
+    // A stale registration whose base location was moved/deleted — must be skipped, not throw.
+    pointerFor("ghost", join(base, "gone")),
+  ]);
+
+  assert.deepEqual(statuses.map((s) => s.project), ["alpha", "beta"]);
+  assert.deepEqual(
+    statuses[0].waves[0].issues.map((i) => [i.issueNumber, i.status]),
+    [
+      ["101", "completed"],
+      ["102", "unstarted"],
+    ],
+  );
+  assert.deepEqual(statuses[1].waves[0].issues.map((i) => i.issueNumber), ["201"]);
+});
 
 test("buildStatus shows campaign waves with issue chips and statuses", () => {
   const dir = join(tmpdir(), `sctdd-status-${Date.now()}`);

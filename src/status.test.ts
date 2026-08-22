@@ -4,8 +4,10 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { buildAllStatus, buildStatus, buildStatusWithIssueNames, extractParkedDetails, formatStatusText, renderStatusPage, serveStatus } from "./status.ts";
-import type { ProjectPointer } from "./registry.ts";
+import { buildAllStatus, buildStatus, buildStatusWithIssueNames, extractParkedDetails, formatStatusText, renderStatusPage, selectStatus, serveAllStatus, serveStatus } from "./status.ts";
+import type { CampaignStatus } from "./status.ts";
+import type { AddressInfo } from "node:net";
+import { register, type ProjectPointer } from "./registry.ts";
 
 const cfgFor = (dir: string): ResolvedConfig =>
   ({
@@ -59,6 +61,50 @@ test("buildAllStatus builds one status per live project and skips a stale one", 
     ],
   );
   assert.deepEqual(statuses[1].waves[0].issues.map((i) => i.issueNumber), ["201"]);
+});
+
+test("serveAllStatus serves the aggregated site, selecting the project from the query param", async () => {
+  const configDir = join(tmpdir(), `sctdd-serve-all-${Date.now()}`);
+  const alphaDir = join(configDir, "state-alpha");
+  const betaDir = join(configDir, "state-beta");
+  seedState(alphaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"]] }]);
+  seedState(betaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["201"]] }]);
+  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
+  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const { port } = server.address() as AddressInfo;
+  try {
+    const root = await (await fetch(`http://127.0.0.1:${port}/`)).text();
+    // The dropdown lists both projects, and the bare open defaults to the first registered one.
+    assert.match(root, /<option value="alpha"/);
+    assert.match(root, /<option value="beta"/);
+    const firstProject = buildAllStatus([
+      { project: "alpha", projectRoot: "", baseLocation: alphaDir },
+      { project: "beta", projectRoot: "", baseLocation: betaDir },
+    ])[0].project;
+    assert.match(root, new RegExp(`<option value="${firstProject}" selected>`));
+
+    const beta = await (await fetch(`http://127.0.0.1:${port}/?project=beta`)).text();
+    assert.match(beta, /<option value="beta" selected>/);
+    // Beta's own campaign (issue 201) renders in the body, not alpha's issue 101.
+    assert.match(beta, /#201 <small>/);
+    assert.doesNotMatch(beta, /#101 <small>/);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("selectStatus picks the requested project, defaulting to the first otherwise", () => {
+  const statuses: CampaignStatus[] = [
+    { project: "alpha", waves: [], parked: [] },
+    { project: "beta", waves: [], parked: [] },
+  ];
+
+  assert.equal(selectStatus(statuses, "beta").project, "beta");
+  assert.equal(selectStatus(statuses, undefined).project, "alpha");
+  // An unknown or stale selection falls back to the first, never undefined.
+  assert.equal(selectStatus(statuses, "ghost").project, "alpha");
 });
 
 test("buildStatus shows campaign waves with issue chips and statuses", () => {

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import type { ResolvedConfig } from "./config.ts";
 import { log } from "./log.ts";
-import type { ProjectPointer } from "./registry.ts";
+import { listProjects, type ProjectPointer } from "./registry.ts";
 import { listParked, parkedDirOf, type ParkedRecord } from "./state.ts";
 
 export type IssueStatus = "completed" | "parked" | "failure" | "running" | "unstarted";
@@ -476,6 +476,82 @@ export async function serveStatus(cfg: ResolvedConfig, opts: { port: number; hos
   const address = server.address() as AddressInfo;
   const shownHost = opts.host === "0.0.0.0" ? "<tailnet-or-host-ip>" : opts.host;
   console.log(`sandcastle-tdd status: http://${shownHost}:${address.port}`);
+}
+
+/**
+ * Which project the aggregated view shows: the one named in the request, or the
+ * first registered project when none is named (or the name is stale). Never
+ * undefined given at least one project — the page always shows something useful
+ * on a bare open. Callers guard the empty-registry case before calling.
+ */
+export function selectStatus(statuses: CampaignStatus[], requested?: string): CampaignStatus {
+  return statuses.find((s) => s.project === requested) ?? statuses[0];
+}
+
+/**
+ * The gateway's aggregated status site: one port fronting every registered
+ * project. It reads the registry live each request (so a newly run project shows
+ * up with no restart), builds each project's status from its base location, and
+ * renders the one the `project` query param selects — defaulting to the first.
+ * The parked-answer POST carries its project so the resume runs in that project's
+ * own root with its own config and gates (ADR 0003), mirroring the gateway's
+ * reply routing. The standalone `serveStatus` remains the no-gateway fallback.
+ */
+export async function serveAllStatus(configDir: string, opts: { port: number; host: string }) {
+  const server = createServer((req, res) => {
+    void (async () => {
+      const url = new URL(req.url ?? "/", "http://localhost");
+      const pointers = () => listProjects(configDir);
+      if (req.method === "GET" && url.pathname === "/api/status") {
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify(buildAllStatus(pointers())));
+        return;
+      }
+      if (req.method === "POST" && url.pathname === "/answer") {
+        const body = await readBody(req);
+        const form = new URLSearchParams(body);
+        const taskId = form.get("taskId");
+        const text = form.get("text");
+        const project = form.get("project");
+        if (!taskId || !text || !project) {
+          res.writeHead(400).end("taskId, text and project are required");
+          return;
+        }
+        const pointer = pointers().find((p) => p.project === project);
+        if (!pointer) {
+          res.writeHead(404).end(`unknown project: ${project}`);
+          return;
+        }
+        // Resume in the project's own root so `answer` loads that project's config
+        // and gates — the same shell-out the gateway's reply router uses.
+        spawn(process.execPath, [...process.execArgv, process.argv[1], "answer", taskId, text], {
+          cwd: pointer.projectRoot,
+          stdio: ["ignore", "inherit", "inherit"],
+        });
+        res.writeHead(303, { location: `/?project=${encodeURIComponent(project)}` }).end();
+        return;
+      }
+      if (req.method === "GET" && (url.pathname === "/" || req.url === undefined)) {
+        const statuses = buildAllStatus(pointers());
+        res.setHeader("content-type", "text/html; charset=utf-8");
+        if (!statuses.length) {
+          res.end(renderStatusPage({ project: "No projects registered", waves: [], parked: [] }));
+          return;
+        }
+        const selected = selectStatus(statuses, url.searchParams.get("project") ?? undefined);
+        res.end(renderStatusPage(selected, { projects: statuses.map((s) => s.project), selected: selected.project }));
+        return;
+      }
+      res.writeHead(404).end("not found");
+    })().catch((err) => {
+      res.writeHead(500).end(String(err?.stack ?? err));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(opts.port, opts.host, resolve));
+  const address = server.address() as AddressInfo;
+  const shownHost = opts.host === "0.0.0.0" ? "<tailnet-or-host-ip>" : opts.host;
+  console.log(`sandcastle-tdd gateway status: http://${shownHost}:${address.port}`);
+  return server;
 }
 
 const readBody = (req: NodeJS.ReadableStream) =>

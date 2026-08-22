@@ -58,7 +58,8 @@ GitHub **issue type**.
 | Priority | label, exactly one of `P0` (critical), `P1` (high — blocking), `P2` (medium), `P3` (low) — applies to **all** work (severity on a bug, priority on planned work) |
 | Readiness | label — `ready-for-agent` (fully specified, runnable unattended), `ready-for-human`, `needs-info`, and `needs-triage` (the default until you are certain it is `ready-for-agent`) |
 | Area | label — `orchestrator`, `gateway`, `comms`, `dashboard`, `layout`, `launcher` |
-| Lifecycle | labels `known-red` (a check already failing at baseline) and `pending-verify` (fixed on `main`, not yet verified end-to-end) |
+| Lifecycle | labels `known-red` (a check already failing at baseline) and `pending-verify` (merged on `main`, awaiting a local end-to-end validation — see Hierarchy below) |
+| Shape / decision | labels `duplicate` and `wontfix` (closed as a deliberate decision not to do it) |
 
 `known-red` and `pending-verify` are **label queries, never a list in a doc** — a
 doc list goes stale as issues are added and not: `gh issue list --label known-red`,
@@ -74,9 +75,16 @@ and any workaround in the body.
 - **Dependencies are native.** Use GitHub's `blocked_by` issue dependencies, not
   prose in a body — a ticket is grabbable once all its blockers are closed. Set one
   with `gh api -X POST repos/jjforge/sandcastle-tdd/issues/<n>/dependencies/blocked_by -F issue_id=<blocker-id>`.
-- **Close on merge.** A plain `git merge` does **not** auto-close the issue — close
-  it explicitly when its work lands (`gh issue close <n> -c "…"`). An epic closes
-  when its last child closes.
+- **Merge → `pending-verify` → close (a merge is not a close).** A plain `git
+  merge` never auto-closes the issue, and it should not be closed yet either: when
+  the work lands on `main`, label it **`pending-verify`**. Close it only after a
+  **local end-to-end validation** — driving the change on a local run/stack is
+  enough; it need not reach a remote or production. Then `gh issue close <n> -c
+  "…"` (the label drops with it). An epic closes when its last child closes.
+- **Wont-fix is a close, with a reason.** When we decide an issue will not be done,
+  close it with the **`wontfix`** label and a comment giving the reason — the
+  closed, labelled issue is the durable record of the decision, so the same thing
+  is not re-filed or re-argued later.
 
 ## Running a campaign (issues → waves)
 
@@ -96,5 +104,6 @@ Parallelize **across epics** — epics carry no inherent order, so a wave normal
 spans several; never serialize by epic. The campaign drains a wave, merges its
 greens, gates the **merged** base, then advances; it halts and rolls back on a
 conflict or red base, and it advances the base locally without pushing. The
-merged-base gate is integration, not live verification — verify a real run before
-closing.
+merged-base gate is integration, not live verification — so a merged ticket is
+`pending-verify` until a local run confirms it (see Hierarchy above), then it
+closes.

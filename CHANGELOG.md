@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Optional campaign name (#42). `campaign --name "…"` records `name` on the
+  `campaign-start` event (omitting it writes the exact same event as before), and
+  `reduceCampaign` reads it back. The dashboard surfaces it as a header label on
+  the live run and on a selected archived run, and the "Archived runs" list uses
+  the name as each entry's primary label — falling back to the run's timestamp
+  token when unnamed — with the mode·issues·outcome summary kept as a secondary
+  label. `campaign-plan` also prints a suggested `--name "…"` line joining the
+  distinct area labels (`orchestrator`/`gateway`/`comms`/`dashboard`/`layout`/`launcher`)
+  the selected issues span, in a stable order, to paste or edit (it suggests only —
+  nothing is stored). `suggestCampaignName` and `AREA_LABELS` are exported.
 - Raw event log of an archived run (#41). `GET /archive/log?project=…&run=<timestamp>`
   on the aggregated status site serves that run's archived
   `logs/archive/orchestrator-<timestamp>.jsonl` as `text/plain`, as-is (no

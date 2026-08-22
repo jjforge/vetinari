@@ -23,7 +23,7 @@ export default defineConfig({
   setup: ["npm ci"],
 
   fetchTask: (id) =>
-    execFileSync("gh", ["issue", "view", id, "--repo", "jjforge/sandcastle-tdd", "--json", "title,body,comments"], { encoding: "utf8" }),
+    execFileSync("gh", ["issue", "view", id, "--repo", "jjforge/sandcastle-tdd", "--json", "title,body,comments,labels"], { encoding: "utf8" }),
 
   // Powers carve/campaign: reads GitHub's native blocked_by edges — the ones set
   // on #31–#35.

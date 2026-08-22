@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { describePlan, layerWaves, partitionWaves, planCampaign, underspecifiedPromptFor, waveArgs } from "./plan.ts";
+import { describePlan, layerWaves, partitionWaves, planCampaign, suggestCampaignName, underspecifiedPromptFor, waveArgs } from "./plan.ts";
 import type { FileSet } from "./fileset.ts";
 
 // A fake OPEN-blocked-by resolver from a plain edge map: id -> its open blockers.
@@ -302,6 +302,37 @@ test("describePlan reports exactly what an under-specified drop carved", async (
   assert.match(report, /#701.*depend/i);
   // The confident survivor is still scheduled.
   assert.match(report, /wave 0.*#611/);
+});
+
+// id -> the labels on it, for the campaign-name suggestion.
+const labelsFrom = (labels: Record<string, string[]>) => (id: string) => labels[id] ?? [];
+
+test("suggestCampaignName joins the distinct area labels the selected issues span", async () => {
+  // Three issues span gateway, comms and dashboard; non-area labels (bug, P2) are
+  // ignored, and the repeated 'gateway' is not doubled.
+  const name = await suggestCampaignName(["22", "25", "27"], labelsFrom({
+    "22": ["gateway", "bug"],
+    "25": ["comms", "gateway"],
+    "27": ["dashboard", "P2"],
+  }));
+
+  assert.equal(name, "gateway + comms + dashboard");
+});
+
+test("suggestCampaignName lists areas in a stable order regardless of input order", async () => {
+  // Same three areas, encountered in a different order — the suggestion is stable.
+  const name = await suggestCampaignName(["27", "22", "25"], labelsFrom({
+    "22": ["gateway"],
+    "25": ["comms"],
+    "27": ["dashboard"],
+  }));
+
+  assert.equal(name, "gateway + comms + dashboard");
+});
+
+test("suggestCampaignName returns undefined when the set spans no area label", async () => {
+  const name = await suggestCampaignName(["22", "25"], labelsFrom({ "22": ["bug"], "25": [] }));
+  assert.equal(name, undefined);
 });
 
 test("waveArgs emits the bare quoted wave args, ready to paste after `campaign`", async () => {

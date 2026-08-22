@@ -92,7 +92,7 @@ export async function queue(cfg: ResolvedConfig, taskIds: string[], slots: numbe
  * merged base halts the whole campaign with the base rolled back to where the
  * batch began — no later batch runs on a broken or half-merged base.
  */
-export async function campaign(cfg: ResolvedConfig, batches: string[][], slots: number): Promise<boolean> {
+export async function campaign(cfg: ResolvedConfig, batches: string[][], slots: number, name?: string): Promise<boolean> {
   // Every green branch merges into whatever the main tree has checked out, and
   // each batch's agents cut their branch from that same HEAD. If it is not the
   // base branch the campaign would merge into, and build on, the wrong place.
@@ -103,11 +103,13 @@ export async function campaign(cfg: ResolvedConfig, batches: string[][], slots: 
     );
   }
 
-  log("campaign-start", { batches, slots });
+  // `name` is recorded only when given, so an unnamed `campaign …` writes the
+  // exact same start event it always did (reduceCampaign reads it back).
+  log("campaign-start", name ? { batches, slots, name } : { batches, slots });
   enqueueOutbound(cfg, {
     category: "progress",
     event: "campaign-start",
-    text: `🎬 ${cfg.project} campaign: ${batches.length} batch(es) — ${batches.map((b) => b.join(",")).join(" | ")}`,
+    text: `🎬 ${cfg.project} campaign${name ? ` “${name}”` : ""}: ${batches.length} batch(es) — ${batches.map((b) => b.join(",")).join(" | ")}`,
   });
 
   // The plan is re-derived from the log at each wave boundary rather than

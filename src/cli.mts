@@ -47,7 +47,11 @@ const USAGE = `sandcastle-tdd <mode> [args]
   gateway                  the host daemon fronting every registered project: the
                            sole Telegram consumer and sender — announces parked
                            questions, routes replies to the right project+task,
-                           and resumes them concurrently via the shared install
+                           and resumes them concurrently via the shared install.
+                           Also recognizes \`carve <issue>\` (and \`carve <project>
+                           <issue>\` when several campaigns run on one bot):
+                           previews the closure and carves the resolved project on
+                           a \`yes\` reply to the preview
   parked                   list parked tasks and their questions
   clear                    archive the run log + clear parked, resetting the
                            dashboard/status line to idle (automatic on clean

@@ -13,13 +13,31 @@ export {
   pendingAnnouncements,
   rebuildIndex,
   newReplyIndex,
+  newPendingConfirms,
   recordSend,
   resolveReply,
   routeReply,
   isStatusCommand,
+  parseGatewayCommand,
+  resolveCarveTarget,
+  handleCarveCommand,
+  formatCarveAmbiguity,
   formatGatewayStatus,
 } from "./gateway.ts";
-export type { GatewayProject, SendRef, ReplyIndex, Announcement, ReplyAction, PollDeps } from "./gateway.ts";
+export type {
+  GatewayProject,
+  SendRef,
+  ReplyIndex,
+  Announcement,
+  ReplyAction,
+  PollDeps,
+  GatewayCommand,
+  CarveCandidate,
+  CarveResolution,
+  PendingConfirm,
+  PendingConfirms,
+  CarveHandlerDeps,
+} from "./gateway.ts";
 export { computeCarve, restrictBlockers } from "./carve.ts";
 export { formatContextLine, formatStatusLine, runStatusLine, trimModelName } from "./statusline.ts";
 export type { CarveResult, BlockedByOf, RestrictedBlockers } from "./carve.ts";

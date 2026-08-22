@@ -353,13 +353,16 @@ const chipTitle = (issue: StatusIssue) => [issue.name, issue.detail].filter(Bool
  */
 export const isCarvable = (issue: StatusIssue) => issue.status === "unstarted" || issue.status === "parked";
 
-const renderCarveControl = (issue: StatusIssue, project: string) =>
-  `<form method="post" action="/carve" class="carve-form"><input type="hidden" name="taskId" value="${escapeHtml(issue.issueNumber)}" /><input type="hidden" name="project" value="${escapeHtml(project)}" /><button type="submit" class="carve-btn" title="Carve #${escapeHtml(issue.issueNumber)} and its dependents">✂️</button></form>`;
-
 const renderIssueChip = (issue: StatusIssue, project: string, carve: boolean) => {
   const detail = chipTitle(issue) || `#${issue.issueNumber}: ${issue.status}`;
-  const chip = `<button type="button" class="chip" title="${escapeTitle(detail)}" data-detail="${escapeTitle(detail)}"><span class="dot ${issue.status}"></span>#${escapeHtml(issue.issueNumber)} <small>${escapeHtml(issue.status)}</small></button>`;
-  return carve && isCarvable(issue) ? `<span class="chip-group">${chip}${renderCarveControl(issue, project)}</span>` : chip;
+  // When carve is enabled, every chip carries its issue and project so the
+  // tap-detail panel can route a carve; only a still-carvable chip is flagged
+  // `data-carvable`, so the panel offers Carve for exactly those (ADR 0005). No
+  // control is drawn on the chip itself — the affordance lives in the panel.
+  const carveData = carve
+    ? ` data-issue="${escapeHtml(issue.issueNumber)}" data-project="${escapeHtml(project)}"${isCarvable(issue) ? ` data-carvable="1"` : ""}`
+    : "";
+  return `<button type="button" class="chip" title="${escapeTitle(detail)}" data-detail="${escapeTitle(detail)}"${carveData}><span class="dot ${issue.status}"></span>#${escapeHtml(issue.issueNumber)} <small>${escapeHtml(issue.status)}</small></button>`;
 };
 
 const renderWaveContents = (wave: StatusWave, project: string, carve: boolean) => `<div class="chips">${wave.issues.map((issue) => renderIssueChip(issue, project, carve)).join("")}</div>`;
@@ -468,10 +471,12 @@ export const renderStatusPage = (status: CampaignStatus, opts: StatusPageOptions
   .completed { background: var(--color-green); } .parked { background: var(--color-yellow); } .failure { background: var(--color-red); } .running { background: var(--color-blue); } .unstarted { background: var(--color-text-light-2); }
   textarea { width: 100%; min-height: 7rem; margin: .5rem 0; color: var(--color-text); background: var(--color-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: .75rem; }
   button.chip { cursor: pointer; color: inherit; font: inherit; }
-  .chip-group { display: inline-flex; align-items: center; gap: .25rem; }
-  .carve-form { margin: 0; display: inline-flex; }
-  .carve-btn { padding: .3rem .5rem; border: 1px solid var(--color-secondary); border-radius: 999px; background: var(--color-box-header); color: var(--color-text-light-2); font: inherit; line-height: 1; cursor: pointer; }
-  .carve-btn:hover { border-color: var(--color-red); color: var(--color-red); background: rgb(247 146 135 / 12%); }
+  .carve-panel { display: flex; align-items: center; gap: .5rem; }
+  .carve-start, .carve-confirm-btn, .carve-cancel { padding: .35rem .7rem; border: 1px solid var(--color-red); border-radius: 999px; background: rgb(247 146 135 / 12%); color: var(--color-red); font: inherit; line-height: 1; cursor: pointer; }
+  .carve-cancel { border-color: var(--color-secondary); background: none; color: var(--color-text-light-2); }
+  .carve-confirm { display: flex; align-items: center; gap: .5rem; margin: 0; }
+  .carve-confirm-text { color: var(--color-red); }
+  .carve-fallback form { display: inline; }
   .issue-detail { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; display: none; align-items: center; gap: .75rem; margin: 0; padding: .75rem 1rem calc(.75rem + env(safe-area-inset-bottom)); color: var(--color-blue); background: var(--color-box-header); border-top: 1px solid var(--color-primary); box-shadow: 0 -8px 22px #0006; }
   .issue-detail.show { display: flex; }
   .issue-detail-text { flex: 1; white-space: pre-line; }
@@ -509,7 +514,25 @@ ${
       }${status.waves.filter((wave) => wave.status !== "closed").map((wave) => renderOpenWave(wave, status.project, Boolean(opts.carve))).join("")}`
     : "<p>No active campaign or queue found.</p>"
 }
-<div id="issue-detail" class="issue-detail" aria-live="polite"><span class="issue-detail-text"></span><button type="button" id="issue-detail-close" class="issue-detail-close" aria-label="Dismiss">&times;</button></div>
+<div id="issue-detail" class="issue-detail" aria-live="polite"><span class="issue-detail-text"></span>${
+  opts.carve
+    ? `<div id="carve-panel" class="carve-panel" hidden><button type="button" id="carve-start" class="carve-start">Carve</button><form method="post" action="/carve" id="carve-confirm" class="carve-confirm" hidden><span class="carve-confirm-text"></span><input type="hidden" name="taskId" value="" /><input type="hidden" name="project" value="" /><input type="hidden" name="confirm" value="1" /><button type="submit" class="carve-confirm-btn">Confirm</button><button type="button" id="carve-cancel" class="carve-cancel">Cancel</button></form></div>`
+    : ""
+}<button type="button" id="issue-detail-close" class="issue-detail-close" aria-label="Dismiss">&times;</button></div>${
+  // No-JS fallback: a plain server-side form per carvable issue that reaches
+  // POST /carve → the preview page → confirm without any JavaScript. The inline
+  // panel above is the progressive enhancement layered over it.
+  opts.carve && status.waves.some((wave) => wave.issues.some(isCarvable))
+    ? `<noscript><section class="carve-fallback"><h2>Carve</h2>${status.waves
+        .flatMap((wave) => wave.issues)
+        .filter(isCarvable)
+        .map(
+          (issue) =>
+            `<form method="post" action="/carve"><input type="hidden" name="taskId" value="${escapeHtml(issue.issueNumber)}" /><input type="hidden" name="project" value="${escapeHtml(status.project)}" /><button type="submit">Carve #${escapeHtml(issue.issueNumber)}</button></form>`,
+        )
+        .join("")}</section></noscript>`
+    : ""
+}
 <script>
   const refreshInput = document.getElementById("refresh-seconds");
   const refreshEnabled = document.getElementById("refresh-enabled");
@@ -543,6 +566,61 @@ ${
       showDetail(issueDetailText.textContent === text ? "" : text);
     });
   });
+  const carvePanel = document.getElementById("carve-panel");
+  if (carvePanel) {
+    const carveStart = document.getElementById("carve-start");
+    const carveConfirm = document.getElementById("carve-confirm");
+    const carveConfirmText = carveConfirm.querySelector(".carve-confirm-text");
+    const carveTaskId = carveConfirm.querySelector('input[name="taskId"]');
+    const carveProject = carveConfirm.querySelector('input[name="project"]');
+    let carveTarget = null;
+    let carveProj = null;
+    const resetCarve = () => {
+      carveConfirm.hidden = true;
+      carveStart.hidden = false;
+    };
+    // The carve affordance tracks the tap-detail bar: it reveals for a carvable
+    // chip while the bar is showing, and hides when the bar is dismissed.
+    const syncCarve = (chip) => {
+      const carvable = issueDetail.classList.contains("show") && chip.dataset.carvable === "1";
+      carvePanel.hidden = !carvable;
+      if (carvable) {
+        carveTarget = chip.dataset.issue;
+        carveProj = chip.dataset.project;
+        resetCarve();
+      }
+    };
+    document.querySelectorAll(".chip[data-detail]").forEach((chip) => chip.addEventListener("click", () => syncCarve(chip)));
+    document.getElementById("issue-detail-close").addEventListener("click", () => (carvePanel.hidden = true));
+    carveStart.addEventListener("click", async () => {
+      try {
+        const res = await fetch("/carve?preview&taskId=" + encodeURIComponent(carveTarget) + "&project=" + encodeURIComponent(carveProj));
+        if (!res.ok) throw new Error(String(res.status));
+        const { target, removed } = await res.json();
+        const drops = removed.filter((id) => id !== target);
+        carveConfirmText.textContent = "Carve #" + target + (drops.length ? " — also drops " + drops.map((id) => "#" + id).join(", ") : " — no dependents");
+        carveTaskId.value = target;
+        carveProject.value = carveProj;
+      } catch {
+        carveConfirmText.textContent = "Couldn't preview this carve — is a campaign still running?";
+        carveTaskId.value = "";
+      }
+      carveStart.hidden = true;
+      carveConfirm.hidden = false;
+    });
+    document.getElementById("carve-cancel").addEventListener("click", resetCarve);
+    carveConfirm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (!carveTaskId.value) return;
+      await fetch("/carve", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ taskId: carveTaskId.value, project: carveProject.value, confirm: "1" }),
+      });
+      carvePanel.hidden = true;
+      showDetail("carving… #" + carveTaskId.value + " will drop from the plan on the next refresh");
+    });
+  }
 </script>
 </body>
 </html>`;
@@ -588,6 +666,42 @@ export function shellCarvePreview(projectRoot: string, taskId: string): Promise<
   });
 }
 
+/** The carve closure — the target plus its transitive dependents — that the
+ * inline panel discloses before a carve. */
+export interface CarveClosure {
+  target: string;
+  removed: string[];
+}
+
+/**
+ * Pull the closure out of the project's own `carve <issue> --dry-run` text: its
+ * target and every issue the dry-run reports it would drop or keep-banked (both
+ * are members of the closure `computeCarve` produced). Pure so the brittle bit —
+ * coupling to the CLI's human output — is isolated and unit-tested; the live
+ * shell (`shellCarveClosure`) is the only caller.
+ */
+export function parseCarveClosure(taskId: string, previewText: string): CarveClosure {
+  const target = taskId.replace(/^#/, "").trim();
+  // The closure is named on the "carve #x → …" line; the "remaining campaign"
+  // line lists what stays, so it is deliberately excluded.
+  const arrowLine = previewText.split("\n").find((line) => line.includes("→")) ?? "";
+  const after = arrowLine.split("→")[1] ?? "";
+  const mentioned = [...after.matchAll(/#(\d+)/g)].map((m) => m[1]);
+  const removed = [target, ...mentioned.filter((id) => id !== target)].filter((id, i, all) => all.indexOf(id) === i);
+  return { target, removed };
+}
+
+/**
+ * The default `carveClosure`: shell the selected project's own `carve --dry-run`
+ * (the same dumb-router routing `shellCarvePreview` uses) and parse the closure
+ * out of it. Returns null when the child fails (e.g. no campaign running), which
+ * the route surfaces as a 502 for the panel to report.
+ */
+export async function shellCarveClosure(projectRoot: string, taskId: string): Promise<CarveClosure | null> {
+  const previewText = await shellCarvePreview(projectRoot, taskId);
+  return previewText == null ? null : parseCarveClosure(taskId, previewText);
+}
+
 export async function serveAllStatus(
   configDir: string,
   opts: {
@@ -595,10 +709,12 @@ export async function serveAllStatus(
     host: string;
     spawn?: (command: string, args: string[], options: { cwd: string; stdio: readonly (string | number)[] }) => unknown;
     carvePreview?: (projectRoot: string, taskId: string) => Promise<string | null>;
+    carveClosure?: (projectRoot: string, taskId: string) => Promise<CarveClosure | null>;
   },
 ) {
   const spawnCmd = opts.spawn ?? spawn;
   const carvePreview = opts.carvePreview ?? shellCarvePreview;
+  const carveClosure = opts.carveClosure ?? shellCarveClosure;
   const server = createServer((req, res) => {
     void (async () => {
       const url = new URL(req.url ?? "/", "http://localhost");
@@ -606,6 +722,30 @@ export async function serveAllStatus(
       if (req.method === "GET" && url.pathname === "/api/status") {
         res.setHeader("content-type", "application/json");
         res.end(JSON.stringify(buildAllStatus(pointers())));
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/carve" && url.searchParams.has("preview")) {
+        // Lightweight closure preview for the inline panel: the panel fetches this
+        // when Carve is tapped, then discloses the removed list before any POST.
+        // Routed to the selected project's own install (dumb router, ADR 0002).
+        const taskId = url.searchParams.get("taskId");
+        const project = url.searchParams.get("project");
+        if (!taskId || !project) {
+          res.writeHead(400).end("taskId and project are required");
+          return;
+        }
+        const pointer = pointers().find((p) => p.project === project);
+        if (!pointer) {
+          res.writeHead(404).end(`unknown project: ${project}`);
+          return;
+        }
+        const closure = await carveClosure(pointer.projectRoot, taskId);
+        if (closure == null) {
+          res.writeHead(502).end(`Couldn't preview carve #${taskId} for ${project} — is a campaign still running?`);
+          return;
+        }
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify(closure));
         return;
       }
       if (req.method === "POST" && url.pathname === "/answer") {

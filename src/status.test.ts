@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { buildAllStatus, buildStatus, buildStatusWithIssueNames, campaignRunning, extractParkedDetails, formatStatusText, reduceCampaign, renderStatusPage, selectStatus, serveAllStatus } from "./status.ts";
+import { buildAllStatus, buildStatus, buildStatusWithIssueNames, campaignRunning, extractParkedDetails, formatStatusText, parseCarveClosure, reduceCampaign, renderStatusPage, selectStatus, serveAllStatus } from "./status.ts";
 import type { CampaignStatus } from "./status.ts";
 import type { AddressInfo } from "node:net";
 import { register, type ProjectPointer } from "./registry.ts";
@@ -159,6 +159,65 @@ test("serveAllStatus POST /carve on confirm shells carve in the selected project
   }
 });
 
+test("serveAllStatus GET /carve?preview returns the selected project's closure as JSON", async () => {
+  const configDir = join(tmpdir(), `sctdd-agg-carve-json-${Date.now()}`);
+  const alphaDir = join(configDir, "state-alpha");
+  const betaDir = join(configDir, "state-beta");
+  seedState(alphaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"], ["301"]] }]);
+  seedState(betaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["201"], ["401"]] }]);
+  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
+  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+
+  const closures: { projectRoot: string; taskId: string }[] = [];
+  const spawned: unknown[] = [];
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+    spawn: (...a) => spawned.push(a),
+    // The dumb router routes the closure to the selected project's own install,
+    // which computes it against that project's real blockedBy graph.
+    carveClosure: (projectRoot, taskId) => {
+      closures.push({ projectRoot, taskId });
+      return Promise.resolve({ target: taskId, removed: [taskId, "401"] });
+    },
+  });
+  const { port } = server.address() as AddressInfo;
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/carve?preview&taskId=201&project=beta`);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get("content-type") ?? "", /application\/json/);
+    assert.deepEqual(await res.json(), { target: "201", removed: ["201", "401"] });
+    // The closure came from the selected project's install (beta's root), not alpha's.
+    assert.deepEqual(closures, [{ projectRoot: join(configDir, "beta-root"), taskId: "201" }]);
+    // A preview computes nothing destructive — no carve is spawned.
+    assert.equal(spawned.length, 0);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serveAllStatus GET /carve?preview validates params and the project", async () => {
+  const configDir = join(tmpdir(), `sctdd-agg-carve-json-guard-${Date.now()}`);
+  const betaDir = join(configDir, "state-beta");
+  seedState(betaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["201"]] }]);
+  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+    carveClosure: () => Promise.resolve({ target: "201", removed: ["201"] }),
+  });
+  const { port } = server.address() as AddressInfo;
+  try {
+    // Missing taskId/project → 400.
+    assert.equal((await fetch(`http://127.0.0.1:${port}/carve?preview&project=beta`)).status, 400);
+    // Unknown project → 404.
+    assert.equal((await fetch(`http://127.0.0.1:${port}/carve?preview&taskId=201&project=ghost`)).status, 404);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
 test("serveAllStatus POST /carve previews the selected project's closure without executing", async () => {
   const configDir = join(tmpdir(), `sctdd-agg-carve-preview-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
@@ -204,7 +263,7 @@ test("serveAllStatus POST /carve previews the selected project's closure without
   }
 });
 
-test("serveAllStatus renders a carve control on the selected project's carvable chips", async () => {
+test("serveAllStatus flags the selected project's carvable chips with its project", async () => {
   const configDir = join(tmpdir(), `sctdd-agg-carve-control-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
   // A running campaign whose future wave (401) is still carvable.
@@ -218,10 +277,11 @@ test("serveAllStatus renders a carve control on the selected project's carvable 
   const { port } = server.address() as AddressInfo;
   try {
     const html = await (await fetch(`http://127.0.0.1:${port}/?project=beta`)).text();
-    // A carve control on the unstarted future-wave issue, carrying the project so
-    // the aggregated /carve routes it to beta.
-    assert.match(html, /<form method="post" action="\/carve"[^>]*>[\s\S]*?name="taskId" value="401"/);
-    assert.match(html, /<form method="post" action="\/carve"[\s\S]*?name="project" value="beta"/);
+    // The unstarted future-wave chip is flagged carvable and carries beta, so the
+    // panel's Carve routes preview and confirm to beta's own install.
+    assert.match(html, /class="chip"[^>]*data-issue="401"[^>]*data-project="beta"[^>]*data-carvable="1"/);
+    // No inline carve control on the chip itself.
+    assert.doesNotMatch(html, /✂️/);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -577,6 +637,57 @@ test("renderStatusPage pins the tapped-issue detail to a dismissible bottom bar"
   assert.match(html, /getElementById\("issue-detail-close"\)\.addEventListener\("click", \(\) => showDetail\(""\)\)/);
 });
 
+test("renderStatusPage hosts the carve affordance and inline confirm in the tap-detail panel", () => {
+  const html = renderStatusPage(
+    { project: "demo", waves: [{ index: 0, status: "unstarted", issues: [{ issueNumber: "301", status: "unstarted" }] }], parked: [] },
+    { carve: true },
+  );
+
+  // The panel — not the chip — carries a Carve button and a hidden inline confirm.
+  assert.match(html, /<button type="button" id="carve-start" class="carve-start">Carve<\/button>/);
+  assert.match(html, /<form method="post" action="\/carve" id="carve-confirm"[^>]*hidden>/);
+  assert.match(html, /<span class="carve-confirm-text"><\/span>/);
+  // The confirm POSTs the existing /carve with confirm=1, carrying taskId+project.
+  assert.match(html, /id="carve-confirm"[\s\S]*?name="taskId"[\s\S]*?name="project"[\s\S]*?name="confirm" value="1"/);
+  assert.match(html, /<button type="submit" class="carve-confirm-btn">Confirm<\/button>/);
+  assert.match(html, /<button type="button" id="carve-cancel" class="carve-cancel">Cancel<\/button>/);
+  // The script keys off the carve data: it fetches the JSON preview, discloses the
+  // removed list, POSTs the confirm, then shows a transient "carving…".
+  assert.match(html, /\/carve\?preview/);
+  assert.match(html, /carve-confirm-text/);
+  assert.match(html, /data-carvable/);
+  assert.match(html, /method: "POST"/);
+  assert.match(html, /carving/);
+});
+
+test("renderStatusPage falls back to a no-JS carve form per carvable issue", () => {
+  const html = renderStatusPage(
+    {
+      project: "demo",
+      waves: [
+        { index: 0, status: "running", issues: [{ issueNumber: "201", status: "running" }] },
+        { index: 1, status: "unstarted", issues: [{ issueNumber: "301", status: "unstarted" }, { issueNumber: "302", status: "parked" }] },
+      ],
+      parked: [],
+    },
+    { carve: true },
+  );
+
+  // Progressive enhancement: a plain server-side form per carvable issue, inside
+  // <noscript>, still reaches POST /carve → the preview page → confirm with no JS.
+  assert.match(html, /<noscript>[\s\S]*<form method="post" action="\/carve"[\s\S]*?name="taskId" value="301"[\s\S]*?name="project" value="demo"[\s\S]*<\/noscript>/);
+  assert.match(html, /<noscript>[\s\S]*name="taskId" value="302"[\s\S]*<\/noscript>/);
+  // Never a fallback form for a running (in-flight) issue.
+  assert.doesNotMatch(html, /name="taskId" value="201"/);
+});
+
+test("renderStatusPage omits the carve panel and no-JS fallback unless carve is opted in", () => {
+  const html = renderStatusPage({ project: "demo", waves: [{ index: 0, status: "unstarted", issues: [{ issueNumber: "301", status: "unstarted" }] }], parked: [] });
+
+  assert.doesNotMatch(html, /id="carve-start"/);
+  assert.doesNotMatch(html, /<noscript>/);
+});
+
 test("renderStatusPage leads with parked issues above the waves when any are parked", () => {
   const html = renderStatusPage({
     project: "demo",
@@ -702,7 +813,7 @@ test("renderStatusPage auto-refresh checkbox gates and persists the timer", () =
   assert.match(html, /refreshEnabled\.addEventListener\("change", scheduleRefresh\)/);
 });
 
-test("renderStatusPage renders a carve control only on still-carvable chips", () => {
+test("renderStatusPage marks carvable chips with carve data and never puts a carve control on a chip", () => {
   const html = renderStatusPage({
     project: "demo",
     waves: [
@@ -720,16 +831,18 @@ test("renderStatusPage renders a carve control only on still-carvable chips", ()
     parked: [],
   }, { carve: true });
 
-  // A carve control on the unstarted future-wave issue and the parked one...
-  assert.match(html, /<form method="post" action="\/carve"[^>]*>[\s\S]*?name="taskId" value="301"/);
-  assert.match(html, /<form method="post" action="\/carve"[^>]*>[\s\S]*?name="taskId" value="302"/);
-  // ...carrying the project so the aggregated site can route it.
-  assert.match(html, /<form method="post" action="\/carve"[\s\S]*?name="project" value="demo"/);
-  // ...but never on the completed (banked) or the current-wave-in-flight (running) chip.
-  assert.doesNotMatch(html, /action="\/carve"[\s\S]*?name="taskId" value="101"/);
-  assert.doesNotMatch(html, /action="\/carve"[\s\S]*?name="taskId" value="201"/);
-  // The control is a compact chip-attached button, not the full-size form button.
-  assert.match(html, /\.carve-btn \{[^}]*border-radius: 999px/);
+  // Each chip carries its issue and project; only a still-carvable one is flagged
+  // carvable, so the tap-detail panel knows whether to offer a Carve button.
+  assert.match(html, /class="chip"[^>]*data-issue="301"[^>]*data-project="demo"[^>]*data-carvable="1"/);
+  assert.match(html, /class="chip"[^>]*data-issue="302"[^>]*data-project="demo"[^>]*data-carvable="1"/);
+  // The completed (banked) and current-wave-in-flight (running) chips are not carvable.
+  assert.doesNotMatch(html, /data-issue="101"[^>]*data-carvable/);
+  assert.doesNotMatch(html, /data-issue="201"[^>]*data-carvable/);
+  // Carve moved off the chips entirely: no inline ✂️ and no per-chip carve form.
+  assert.doesNotMatch(html, /✂️/);
+  assert.doesNotMatch(html, /class="carve-form"/);
+  assert.doesNotMatch(html, /class="chip-group"/);
+  assert.doesNotMatch(html, /class="carve-btn"/);
 });
 
 test("renderStatusPage omits the carve control unless the page opts into it", () => {
@@ -742,6 +855,22 @@ test("renderStatusPage omits the carve control unless the page opts into it", ()
   });
 
   assert.doesNotMatch(html, /action="\/carve"/);
+});
+
+test("parseCarveClosure reads the target and closure from carve --dry-run text", () => {
+  // A running-campaign dry-run names the target, its dropped dependents, and any
+  // banked members kept — all three are closure members and belong in `removed`.
+  assert.deepEqual(
+    parseCarveClosure("201", "carve #201 → dropping #201, #401 (keeping banked #301)\nremaining campaign: (nothing left to run)"),
+    { target: "201", removed: ["201", "401", "301"] },
+  );
+  // A target that drops nothing is just itself.
+  assert.deepEqual(parseCarveClosure("#201", "carve #201 → nothing to drop\nremaining campaign: \"301\""), { target: "201", removed: ["201"] });
+  // The "remaining campaign" line names what stays, so it never leaks in.
+  assert.deepEqual(parseCarveClosure("640", "carve #640 → dropping #640, #655\nremaining campaign: \"701 702\""), {
+    target: "640",
+    removed: ["640", "655"],
+  });
 });
 
 test("extractParkedDetails separates description from Options section", () => {

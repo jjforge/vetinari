@@ -95,6 +95,110 @@ test("serveAllStatus serves the aggregated site, selecting the project from the 
   }
 });
 
+test("serveAllStatus POST /carve on confirm shells carve in the selected project's root", async () => {
+  const configDir = join(tmpdir(), `sctdd-agg-carve-confirm-${Date.now()}`);
+  const alphaDir = join(configDir, "state-alpha");
+  const betaDir = join(configDir, "state-beta");
+  seedState(alphaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"], ["301"]] }]);
+  seedState(betaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["201"], ["401"]] }]);
+  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
+  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+
+  const spawned: { args: string[]; cwd: string }[] = [];
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+    spawn: (_cmd, args, options) => spawned.push({ args, cwd: options.cwd }),
+  });
+  const { port } = server.address() as AddressInfo;
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/carve`, {
+      method: "POST",
+      redirect: "manual",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ taskId: "401", project: "beta", confirm: "1" }).toString(),
+    });
+    // Redirects back to the selected project's dashboard, like the answer control.
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get("location"), "/?project=beta");
+    // Executes the no-plan carve (ticket B) against the SELECTED project's own root
+    // — so the shared install loads beta's config and gates, not alpha's.
+    assert.equal(spawned.length, 1);
+    assert.deepEqual(spawned[0].args.slice(-2), ["carve", "401"]);
+    assert.equal(spawned[0].cwd, join(configDir, "beta-root"));
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serveAllStatus POST /carve previews the selected project's closure without executing", async () => {
+  const configDir = join(tmpdir(), `sctdd-agg-carve-preview-${Date.now()}`);
+  const alphaDir = join(configDir, "state-alpha");
+  const betaDir = join(configDir, "state-beta");
+  seedState(alphaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"], ["301"]] }]);
+  seedState(betaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["201"], ["401"]] }]);
+  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
+  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+
+  const previews: { projectRoot: string; taskId: string }[] = [];
+  const spawned: unknown[] = [];
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+    spawn: (...a) => spawned.push(a),
+    // The dumb router routes the preview to the selected project's own install,
+    // which computes the closure against that project's real blockedBy graph.
+    carvePreview: (projectRoot, taskId) => {
+      previews.push({ projectRoot, taskId });
+      return Promise.resolve(`carve #201 → dropping #201, #401\nremaining campaign: (nothing left to run)`);
+    },
+  });
+  const { port } = server.address() as AddressInfo;
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/carve`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ taskId: "201", project: "beta" }).toString(),
+    });
+    assert.equal(res.status, 200);
+    const html = await res.text();
+    // The preview came from the selected project's install (beta's root), not alpha's.
+    assert.deepEqual(previews, [{ projectRoot: join(configDir, "beta-root"), taskId: "201" }]);
+    // It shows the shelled closure and a confirm affordance carrying the project.
+    assert.match(html, /#401/);
+    assert.match(html, /<form method="post" action="\/carve"[\s\S]*?name="confirm"/);
+    assert.match(html, /name="project" value="beta"/);
+    assert.match(html, /name="taskId" value="201"/);
+    // Nothing has been carved yet — preview executes nothing.
+    assert.equal(spawned.length, 0);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serveAllStatus renders a carve control on the selected project's carvable chips", async () => {
+  const configDir = join(tmpdir(), `sctdd-agg-carve-control-${Date.now()}`);
+  const betaDir = join(configDir, "state-beta");
+  // A running campaign whose future wave (401) is still carvable.
+  seedState(betaDir, [
+    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["201"], ["401"]] },
+    { ts: "2025-01-01T00:01:00.000Z", event: "campaign-batch", index: 0, tasks: ["201"] },
+  ]);
+  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const { port } = server.address() as AddressInfo;
+  try {
+    const html = await (await fetch(`http://127.0.0.1:${port}/?project=beta`)).text();
+    // A carve control on the unstarted future-wave issue, carrying the project so
+    // the aggregated /carve routes it to beta.
+    assert.match(html, /<form method="post" action="\/carve"[^>]*>[\s\S]*?name="taskId" value="401"/);
+    assert.match(html, /<form method="post" action="\/carve"[\s\S]*?name="project" value="beta"/);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
 test("selectStatus picks the requested project, defaulting to the first otherwise", () => {
   const statuses: CampaignStatus[] = [
     { project: "alpha", waves: [], parked: [] },
@@ -659,8 +763,8 @@ test("renderStatusPage renders a carve control only on still-carvable chips", ()
 });
 
 test("renderStatusPage omits the carve control unless the page opts into it", () => {
-  // The aggregated site (a dumb router without the project's blockedBy resolver)
-  // must not offer a carve control it cannot preview (ADR 0002).
+  // The control is opt-in: both the standalone and the aggregated server pass
+  // `carve: true`, but a bare render (e.g. the empty-registry page) shows none.
   const html = renderStatusPage({
     project: "demo",
     waves: [{ index: 0, status: "unstarted", issues: [{ issueNumber: "301", status: "unstarted" }] }],

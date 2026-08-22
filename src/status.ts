@@ -379,11 +379,12 @@ export interface StatusPageOptions {
   projects?: string[];
   selected?: string;
   /**
-   * Render the per-chip carve control. Only the standalone `serveStatus` sets
-   * this: it holds the project's own `blockedBy` resolver and so can serve
-   * `POST /carve`'s preview. The aggregated `serveAllStatus` is a dumb router
-   * (ADR 0002) without that resolver, so it omits the control rather than offer
-   * one that cannot preview.
+   * Render the per-chip carve control. The standalone `serveStatus` serves its
+   * `POST /carve` preview in-process from the project's own `blockedBy` resolver;
+   * the aggregated `serveAllStatus` is a dumb router (ADR 0002) without that
+   * resolver, so it routes both preview and confirm to the selected project's own
+   * install (`carve … --dry-run` then `carve …`). Either way the control carries
+   * its `project` so the aggregated `/carve` targets the right one.
    */
   carve?: boolean;
 }
@@ -433,6 +434,42 @@ ${kept.length ? `<p><strong>Kept (banked work):</strong> ${list(kept)}</p>` : ""
 </body>
 </html>`;
 };
+
+/**
+ * The aggregated site's carve preview: it is a dumb router (ADR 0002) with no
+ * project's `blockedBy` resolver, so unlike the standalone `renderCarvePreview`
+ * it does not compute the closure itself — it shows the closure the selected
+ * project's own `carve <issue> --dry-run` printed, behind the same confirm form
+ * (preview-then-confirm parity, story 19/23). Confirming shells `carve` in that
+ * project's root.
+ */
+export const renderAggregatedCarvePreview = (project: string, target: string, previewText: string) => `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>${escapeHtml(project)} — carve #${escapeHtml(target)}</title>
+<style>
+  body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 2rem; background: #090c10; color: #e6edf3; }
+  h1 { letter-spacing: -0.035em; }
+  .card { background: #0b0e12; border: 1px solid #232b35; border-left: 3px solid #f79287; border-radius: 12px; padding: 1rem 1.25rem; margin: 1rem 0; }
+  pre { white-space: pre-wrap; margin: 0; }
+  .actions { display: flex; gap: .75rem; align-items: center; }
+  form { margin: 0; }
+  button { padding: .5rem .9rem; border: 0; border-radius: 9px; cursor: pointer; font-weight: 700; }
+  .confirm button { background: #f79287; color: #2a0a06; }
+  a.cancel { color: #8b98a5; text-decoration: none; padding: .5rem .9rem; }
+</style>
+</head>
+<body>
+<h1>Carve #${escapeHtml(target)} from ${escapeHtml(project)}?</h1>
+<section class="card"><pre>${escapeHtml(previewText)}</pre></section>
+<div class="actions">
+<form method="post" action="/carve" class="confirm"><input type="hidden" name="taskId" value="${escapeHtml(target)}" /><input type="hidden" name="project" value="${escapeHtml(project)}" /><input type="hidden" name="confirm" value="1" /><button type="submit">✂️ Confirm carve</button></form>
+<a class="cancel" href="/?project=${encodeURIComponent(project)}">Cancel</a>
+</div>
+</body>
+</html>`;
 
 export const renderStatusPage = (status: CampaignStatus, opts: StatusPageOptions = {}) => `<!doctype html>
 <html lang="en">
@@ -652,7 +689,37 @@ export function selectStatus(statuses: CampaignStatus[], requested?: string): Ca
  * own root with its own config and gates (ADR 0003), mirroring the gateway's
  * reply routing. The standalone `serveStatus` remains the no-gateway fallback.
  */
-export async function serveAllStatus(configDir: string, opts: { port: number; host: string }) {
+/**
+ * Preview a carve by shelling the project's own `carve <issue> --dry-run` via the
+ * shared install in its root (ADR 0003): it computes the closure against that
+ * project's real `blockedBy` graph and prints it, changing nothing. Returns the
+ * printed closure, or null when the child fails. Mirrors the Telegram gateway's
+ * `carvePreview` — the same dumb-router routing the aggregated dashboard uses.
+ */
+export function shellCarvePreview(projectRoot: string, taskId: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [...process.execArgv, process.argv[1], "carve", taskId, "--dry-run"], {
+      cwd: projectRoot,
+      stdio: ["ignore", "pipe", "inherit"],
+    });
+    let out = "";
+    child.stdout?.on("data", (chunk) => (out += chunk));
+    child.on("error", () => resolve(null));
+    child.on("exit", (code) => resolve(code === 0 ? out.trim() || null : null));
+  });
+}
+
+export async function serveAllStatus(
+  configDir: string,
+  opts: {
+    port: number;
+    host: string;
+    spawn?: (command: string, args: string[], options: { cwd: string; stdio: readonly (string | number)[] }) => unknown;
+    carvePreview?: (projectRoot: string, taskId: string) => Promise<string | null>;
+  },
+) {
+  const spawnCmd = opts.spawn ?? spawn;
+  const carvePreview = opts.carvePreview ?? shellCarvePreview;
   const server = createServer((req, res) => {
     void (async () => {
       const url = new URL(req.url ?? "/", "http://localhost");
@@ -679,11 +746,51 @@ export async function serveAllStatus(configDir: string, opts: { port: number; ho
         }
         // Resume in the project's own root so `answer` loads that project's config
         // and gates — the same shell-out the gateway's reply router uses.
-        spawn(process.execPath, [...process.execArgv, process.argv[1], "answer", taskId, text], {
+        spawnCmd(process.execPath, [...process.execArgv, process.argv[1], "answer", taskId, text], {
           cwd: pointer.projectRoot,
           stdio: ["ignore", "inherit", "inherit"],
         });
         res.writeHead(303, { location: `/?project=${encodeURIComponent(project)}` }).end();
+        return;
+      }
+      if (req.method === "POST" && url.pathname === "/carve") {
+        const body = await readBody(req);
+        const form = new URLSearchParams(body);
+        const taskId = form.get("taskId");
+        const project = form.get("project");
+        if (!taskId || !project) {
+          res.writeHead(400).end("taskId and project are required");
+          return;
+        }
+        const pointer = pointers().find((p) => p.project === project);
+        if (!pointer) {
+          res.writeHead(404).end(`unknown project: ${project}`);
+          return;
+        }
+        // Confirm step: the aggregated site is a dumb router (ADR 0002) — it holds
+        // no project's `blockedBy` resolver, so it routes the carve to the selected
+        // project's own install, shelling `carve <issue>` in that project's root
+        // exactly as the standalone dashboard and the Telegram gateway do. The
+        // no-plan form prunes the running campaign (ticket B).
+        if (form.get("confirm")) {
+          spawnCmd(process.execPath, [...process.execArgv, process.argv[1], "carve", taskId], {
+            cwd: pointer.projectRoot,
+            stdio: ["ignore", "inherit", "inherit"],
+          });
+          res.writeHead(303, { location: `/?project=${encodeURIComponent(project)}` }).end();
+          return;
+        }
+        // Preview step: route `carve <issue> --dry-run` to the selected project's
+        // install and show the closure it computed, gating the destructive act
+        // behind a confirm — the danger is that one issue drags a bigger subtree
+        // than you realized.
+        const previewText = await carvePreview(pointer.projectRoot, taskId);
+        if (previewText == null) {
+          res.writeHead(502).end(`Couldn't preview carve #${taskId} for ${project} — is a campaign still running?`);
+          return;
+        }
+        res.setHeader("content-type", "text/html; charset=utf-8");
+        res.end(renderAggregatedCarvePreview(project, taskId, previewText));
         return;
       }
       if (req.method === "GET" && (url.pathname === "/" || req.url === undefined)) {
@@ -694,7 +801,7 @@ export async function serveAllStatus(configDir: string, opts: { port: number; ho
           return;
         }
         const selected = selectStatus(statuses, url.searchParams.get("project") ?? undefined);
-        res.end(renderStatusPage(selected, { projects: statuses.map((s) => s.project), selected: selected.project }));
+        res.end(renderStatusPage(selected, { projects: statuses.map((s) => s.project), selected: selected.project, carve: true }));
         return;
       }
       res.writeHead(404).end("not found");

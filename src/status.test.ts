@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { buildAllStatus, buildStatus, buildStatusWithIssueNames, campaignRunning, extractParkedDetails, formatStatusText, parseCarveClosure, reduceCampaign, renderStatusPage, selectStatus, serveAllStatus } from "./status.ts";
+import { buildAllStatus, buildStatus, buildStatusWithIssueNames, campaignRunning, extractParkedDetails, formatStatusText, listArchivedRuns, parseCarveClosure, reduceCampaign, renderStatusPage, selectStatus, serveAllStatus, summarizeRun } from "./status.ts";
 import type { CampaignStatus } from "./status.ts";
 import type { AddressInfo } from "node:net";
 import { register, type ProjectPointer } from "./registry.ts";
@@ -282,6 +282,59 @@ test("serveAllStatus flags the selected project's carvable chips with its projec
     assert.match(html, /class="chip"[^>]*data-issue="401"[^>]*data-project="beta"[^>]*data-carvable="1"/);
     // No inline carve control on the chip itself.
     assert.doesNotMatch(html, /✂️/);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serveAllStatus lists a project's archived runs and renders one read-only when a run is selected", async () => {
+  const configDir = join(tmpdir(), `sctdd-agg-archive-${Date.now()}`);
+  const betaDir = join(configDir, "state-beta");
+  // A live run still in flight.
+  seedState(betaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["201"]] }]);
+  // Two archived runs plus a malformed one that must be skipped.
+  const archiveDir = join(betaDir, "logs", "archive");
+  mkdirSync(archiveDir, { recursive: true });
+  writeJsonl(join(archiveDir, "orchestrator-2026-01-01T00-00-00-000Z.jsonl"), [
+    { event: "campaign-start", batches: [["101"], ["102"]] },
+    { event: "campaign-done", batches: 2 },
+  ]);
+  writeJsonl(join(archiveDir, "orchestrator-2026-02-01T00-00-00-000Z.jsonl"), [
+    { event: "campaign-start", batches: [["111"]] },
+    { event: "campaign-halt", taskId: "111", reason: "gate failed" },
+  ]);
+  writeFileSync(join(archiveDir, "orchestrator-2026-03-01T00-00-00-000Z.jsonl"), "garbage\n{");
+  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const { port } = server.address() as AddressInfo;
+  try {
+    const root = await (await fetch(`http://127.0.0.1:${port}/?project=beta`)).text();
+    // The archived-runs list shows both good runs, newest-first, with summaries;
+    // the live run (201) still renders at the top.
+    assert.match(root, /#201 <small>/);
+    assert.match(root, /<section class="archived-runs">/);
+    assert.match(root, /run=2026-02-01T00-00-00-000Z"[^>]*>campaign · 1 issue · halted<\/a>/);
+    assert.match(root, /run=2026-01-01T00-00-00-000Z"[^>]*>campaign · 2 issues · complete<\/a>/);
+    assert.ok(root.indexOf("2026-02-01") < root.indexOf("2026-01-01"), "newest-first");
+    // The malformed run is skipped, never listed.
+    assert.doesNotMatch(root, /2026-03-01/);
+    // No run selected → no archived-run body yet.
+    assert.doesNotMatch(root, /class="archived-run"/);
+
+    // Selecting a run renders it read-only below the live run, additively.
+    const withRun = await (await fetch(`http://127.0.0.1:${port}/?project=beta&run=2026-01-01T00-00-00-000Z`)).text();
+    assert.match(withRun, /#201 <small>/); // live run still on top
+    assert.match(withRun, /<section class="archived-run"><h2>Archived run 2026-01-01T00-00-00-000Z<\/h2>/);
+    assert.match(withRun, /#101 <small>/); // the archived run's own issues
+    // Read-only: the archived run's chips carry no carve data and there is no
+    // answer form for it.
+    assert.doesNotMatch(withRun, /data-issue="101"/);
+
+    // A run not present in the archive listing is rejected — no traversal, no body.
+    const bogus = await fetch(`http://127.0.0.1:${port}/?project=beta&run=..%2F..%2Forchestrator`);
+    assert.equal(bogus.status, 200);
+    assert.doesNotMatch(await bogus.text(), /class="archived-run"/);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -591,6 +644,55 @@ test("renderStatusPage renders a project dropdown and the selected project's bod
   assert.match(html, /<input type="hidden" name="project" value="beta" \/>/);
 });
 
+test("renderStatusPage lists archived runs and renders a selected one read-only below the live run", () => {
+  const html = renderStatusPage(
+    {
+      project: "beta",
+      // A live run with a still-carvable (unstarted) chip: proves the live view keeps carve.
+      waves: [{ index: 0, status: "unstarted", issues: [{ issueNumber: "201", status: "unstarted" }] }],
+      parked: [],
+    },
+    {
+      carve: true,
+      selected: "beta",
+      archivedRuns: [
+        { run: "2026-02-01T00-00-00-000Z", summary: "campaign · 2 issues · complete" },
+        { run: "2026-01-01T00-00-00-000Z", summary: "queue · 1 issue · halted" },
+      ],
+      archivedRun: "2026-02-01T00-00-00-000Z",
+      archived: {
+        project: "beta",
+        waves: [{ index: 0, status: "unstarted", issues: [{ issueNumber: "301", status: "unstarted" }] }],
+        parked: [],
+      },
+    },
+  );
+
+  // An archived-runs list, newest-first, each a link carrying project + run token.
+  assert.match(html, /<section class="archived-runs"><h2>Archived runs<\/h2>/);
+  assert.match(html, /<a href="\/\?project=beta&amp;run=2026-02-01T00-00-00-000Z"[^>]*>campaign · 2 issues · complete<\/a>/);
+  assert.match(html, /<a href="\/\?project=beta&amp;run=2026-01-01T00-00-00-000Z"[^>]*>queue · 1 issue · halted<\/a>/);
+  assert.ok(
+    html.indexOf(">campaign · 2 issues · complete<") < html.indexOf(">queue · 1 issue · halted<"),
+    "archived runs list newest-first",
+  );
+
+  // The selected run's own wave/issue view renders in its own section.
+  assert.match(html, /<section class="archived-run">/);
+  assert.match(html, /#301 <small>/);
+
+  // The live run still carries carve (its unstarted 201 chip is carvable)…
+  assert.match(html, /data-issue="201"[^>]*data-carvable="1"/);
+  // …but the archived render is read-only: its 301 chip gets no carve data at all.
+  assert.doesNotMatch(html, /data-issue="301"/);
+});
+
+test("renderStatusPage renders no archived-runs section when a project has none", () => {
+  const html = renderStatusPage({ project: "demo", waves: [], parked: [] }, { selected: "demo" });
+  assert.doesNotMatch(html, /class="archived-runs"/);
+  assert.doesNotMatch(html, /class="archived-run"/);
+});
+
 test("renderStatusPage omits the project dropdown when no project list is given", () => {
   const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
 
@@ -871,6 +973,63 @@ test("parseCarveClosure reads the target and closure from carve --dry-run text",
     target: "640",
     removed: ["640", "655"],
   });
+});
+
+test("listArchivedRuns lists a project's archived runs newest-first with summaries, skipping a malformed file", () => {
+  const dir = join(tmpdir(), `sctdd-archive-list-${Date.now()}`);
+  const archiveDir = join(dir, "logs", "archive");
+  mkdirSync(archiveDir, { recursive: true });
+  writeJsonl(join(archiveDir, "orchestrator-2026-01-01T00-00-00-000Z.jsonl"), [
+    { event: "campaign-start", batches: [["101"]] },
+    { event: "campaign-done", batches: 1 },
+  ]);
+  writeJsonl(join(archiveDir, "orchestrator-2026-02-01T00-00-00-000Z.jsonl"), [
+    { event: "campaign-start", batches: [["201"], ["202"]] },
+    { event: "campaign-done", batches: 2 },
+  ]);
+  // A malformed archive (no reconstructable run) is skipped, not fatal — even
+  // though its timestamp is the newest.
+  writeFileSync(join(archiveDir, "orchestrator-2026-03-01T00-00-00-000Z.jsonl"), "not json at all\n{broken");
+
+  const runs = listArchivedRuns(dir);
+
+  // Newest-first by timestamp token; the malformed newest file is dropped.
+  assert.deepEqual(runs.map((r) => r.run), ["2026-02-01T00-00-00-000Z", "2026-01-01T00-00-00-000Z"]);
+  assert.equal(runs[0].summary, "campaign · 2 issues · complete");
+  assert.equal(runs[1].summary, "campaign · 1 issue · complete");
+  // The file path is resolved from the listing, never joined from request input.
+  assert.ok(runs[0].file.endsWith("orchestrator-2026-02-01T00-00-00-000Z.jsonl"));
+});
+
+test("listArchivedRuns returns nothing when a project has no archive directory", () => {
+  assert.deepEqual(listArchivedRuns(join(tmpdir(), `sctdd-archive-none-${Date.now()}`)), []);
+});
+
+test("summarizeRun folds an archived log into a one-line mode/issue-count/outcome summary", () => {
+  // A finished campaign of two waves (three issues total) that completed.
+  assert.equal(
+    summarizeRun([
+      { event: "campaign-start", batches: [["101", "102"], ["201"]] },
+      { event: "campaign-done", batches: 2 },
+    ]),
+    "campaign · 3 issues · complete",
+  );
+  // A campaign that halted on a failing issue — one issue, halted, singular noun.
+  assert.equal(
+    summarizeRun([
+      { event: "campaign-start", batches: [["101"]] },
+      { event: "campaign-halt", taskId: "101", reason: "gate failed" },
+    ]),
+    "campaign · 1 issue · halted",
+  );
+  // A queue-only run (no campaign frame) reads as a queue of its task ids.
+  assert.equal(
+    summarizeRun([
+      { event: "queue-start", taskIds: ["101", "102"] },
+      { event: "queue-done", outcomes: { "101": "green", "102": "green" } },
+    ]),
+    "queue · 2 issues · complete",
+  );
 });
 
 test("extractParkedDetails separates description from Options section", () => {

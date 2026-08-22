@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { AddressInfo } from "node:net";
 import type { ResolvedConfig } from "./config.ts";
 import { log } from "./log.ts";
@@ -262,6 +262,61 @@ export function campaignRunning(events: any[]): boolean {
   return !events.slice(start).some((e) => e.event === "campaign-done" || e.event === "campaign-halt");
 }
 
+/** An archived run addressable in the dashboard: its timestamp token (`run`), the
+ * resolved log path, and a one-line summary of what it did. The token is the only
+ * thing a request supplies; `file` is resolved from the listing, never joined from
+ * request input, so there is no path to traverse. */
+export interface ArchivedRun {
+  run: string;
+  file: string;
+  summary: string;
+}
+
+/** The directory a project's finished-run logs are archived into (mirrors
+ * `archiveRun`'s own `logs/archive` layout). */
+const archiveDirOf = (baseLocation: string) => join(baseLocation, "logs", "archive");
+
+/**
+ * List a project's archived runs newest-first, each with the one-line summary
+ * `summarizeRun` folds from its log. The timestamp token is read off the
+ * `orchestrator-<timestamp>.jsonl` filename `archiveRun` wrote, so it sorts
+ * lexicographically into newest-first (ISO stamps are zero-padded). A malformed
+ * archive — one no run can be reconstructed from — is skipped with a log line,
+ * never fatal: one bad file must not take the whole list down.
+ */
+export function listArchivedRuns(baseLocation: string): ArchivedRun[] {
+  const dir = archiveDirOf(baseLocation);
+  if (!existsSync(dir)) return [];
+  const runs: ArchivedRun[] = [];
+  for (const name of readdirSync(dir)) {
+    const match = name.match(/^orchestrator-(.+)\.jsonl$/);
+    if (!match) continue;
+    const file = join(dir, name);
+    const events = readEvents({ logFile: file });
+    if (!reduceCampaign(events).waves.length) {
+      log("status-archive-skipped", { file });
+      continue;
+    }
+    runs.push({ run: match[1], file, summary: summarizeRun(events) });
+  }
+  return runs.sort((a, b) => (a.run < b.run ? 1 : a.run > b.run ? -1 : 0));
+}
+
+/**
+ * Fold one run's event log into a one-line summary for the archived-runs list:
+ * its mode (a `campaign` frame vs a bare `queue` run), how many issues it spanned,
+ * and whether it finished clean or halted. Derived from the same `reduceCampaign`
+ * plan the dashboard renders, so the summary can never disagree with the run's
+ * reconstructed wave/issue view (ADR 0005).
+ */
+export function summarizeRun(events: any[]): string {
+  const { waves, outcomes } = reduceCampaign(events);
+  const mode = events.some((e) => e.event === "campaign-start") ? "campaign" : "queue";
+  const count = waves.flat().length;
+  const halted = events.some((e) => e.event === "campaign-halt") || [...outcomes.values()].includes("failure");
+  return `${mode} · ${count} issue${count === 1 ? "" : "s"} · ${halted ? "halted" : "complete"}`;
+}
+
 export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
   const { waves, outcomes, details, closedWaves, currentWave } = reduceCampaign(readEvents(cfg));
 
@@ -298,6 +353,20 @@ export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
 /** The orchestrator event log inside a project's base location — the file the
  * gateway reads to reconstruct a project's campaign without its TS config. */
 export const logFileOf = (baseLocation: string) => join(baseLocation, "logs", "orchestrator.jsonl");
+
+/**
+ * The `ResolvedConfig` slice `buildStatus` needs to render one archived run: its
+ * log is the archive file, and its `parkedDir` points at the archive directory —
+ * which holds only `orchestrator-*.jsonl`, never parked `*.json` — so `listParked`
+ * reads empty and the archived render carries no parked cards (read-only).
+ */
+const archiveStatusConfig = (project: string, archiveFile: string): ResolvedConfig =>
+  ({
+    project,
+    stateDir: dirname(archiveFile),
+    parkedDir: dirname(archiveFile),
+    logFile: archiveFile,
+  }) as ResolvedConfig;
 
 const statusConfigFromPointer = (pointer: ProjectPointer): ResolvedConfig =>
   ({
@@ -373,6 +442,18 @@ const renderOpenWave = (wave: StatusWave, project: string, carve: boolean) =>
 const renderCompletedWave = (wave: StatusWave, project: string, carve: boolean) =>
   `<details class="completed-wave"><summary class="completed-wave-chip"><span class="check" aria-hidden="true">✓</span> Wave ${wave.index + 1}</summary>${renderWaveContents(wave, project, carve)}</details>`;
 
+/** The wave/issue body a status renders — closed waves collapsed into chips, open
+ * waves expanded. Shared by the live run and a read-only archived run (which
+ * passes `carve: false`, so its chips carry no carve affordance). */
+const renderWaves = (status: CampaignStatus, carve: boolean) =>
+  status.waves.length
+    ? `${
+        status.waves.some((wave) => wave.status === "closed")
+          ? `<div class="completed-waves"><div class="completed-wave-bar">${status.waves.filter((wave) => wave.status === "closed").map((wave) => renderCompletedWave(wave, status.project, carve)).join("")}</div></div>`
+          : ""
+      }${status.waves.filter((wave) => wave.status !== "closed").map((wave) => renderOpenWave(wave, status.project, carve)).join("")}`
+    : "<p>No active campaign or queue found.</p>";
+
 /**
  * The multi-project chrome around a single project's status: the list of every
  * registered project for the dropdown and which one is selected. Omitted when no
@@ -389,6 +470,15 @@ export interface StatusPageOptions {
    * targets the right one.
    */
   carve?: boolean;
+  /** The selected project's archived runs, newest-first, for the "Archived runs"
+   * list under the live run. Each links back to `GET /?project=…&run=<token>`. */
+  archivedRuns?: { run: string; summary: string }[];
+  /** The archived run's reconstructed status to render read-only below the list,
+   * when a `run` token selected one. */
+  archived?: CampaignStatus;
+  /** The selected run token — marks its list entry current and titles the
+   * archived section. */
+  archivedRun?: string;
 }
 
 const renderProjectPicker = (projects: string[], selected: string | undefined) =>
@@ -505,14 +595,26 @@ ${
         .join("")}</section>`
     : ""
 }
+${renderWaves(status, Boolean(opts.carve))}
 ${
-  status.waves.length
-    ? `${
-        status.waves.some((wave) => wave.status === "closed")
-          ? `<div class="completed-waves"><div class="completed-wave-bar">${status.waves.filter((wave) => wave.status === "closed").map((wave) => renderCompletedWave(wave, status.project, Boolean(opts.carve))).join("")}</div></div>`
-          : ""
-      }${status.waves.filter((wave) => wave.status !== "closed").map((wave) => renderOpenWave(wave, status.project, Boolean(opts.carve))).join("")}`
-    : "<p>No active campaign or queue found.</p>"
+  opts.archivedRuns?.length
+    ? `<section class="archived-runs"><h2>Archived runs</h2><ul>${opts.archivedRuns
+        .map(
+          (run) =>
+            `<li><a href="/?project=${encodeURIComponent(opts.selected ?? status.project)}&amp;run=${encodeURIComponent(run.run)}"${
+              run.run === opts.archivedRun ? ` aria-current="true"` : ""
+            }>${escapeHtml(run.summary)}</a></li>`,
+        )
+        .join("")}</ul></section>`
+    : ""
+}
+${
+  // The selected archived run's own wave/issue view, rendered read-only: `carve:
+  // false` so its chips carry no carve affordance, and no parked/answer form (a
+  // finished run has nothing to act on). Additive — the live run stays above.
+  opts.archived
+    ? `<section class="archived-run"><h2>Archived run ${escapeHtml(opts.archivedRun ?? "")}</h2>${renderWaves(opts.archived, false)}</section>`
+    : ""
 }
 <div id="issue-detail" class="issue-detail" aria-live="polite"><span class="issue-detail-text"></span>${
   opts.carve
@@ -820,7 +922,28 @@ export async function serveAllStatus(
           return;
         }
         const selected = selectStatus(statuses, url.searchParams.get("project") ?? undefined);
-        res.end(renderStatusPage(selected, { projects: statuses.map((s) => s.project), selected: selected.project, carve: true }));
+        // The selected project's finished runs, listed under the live one. A run
+        // is addressed by its timestamp token and resolved by matching the listing
+        // — never by joining request input into a path — so an unknown token is
+        // simply rejected (no archived body), not a traversal.
+        const pointer = pointers().find((p) => p.project === selected.project);
+        const archivedRuns = pointer ? listArchivedRuns(pointer.baseLocation) : [];
+        const requestedRun = url.searchParams.get("run") ?? undefined;
+        const match = requestedRun ? archivedRuns.find((r) => r.run === requestedRun) : undefined;
+        // Read-only: point buildStatus at the archived log; its dir holds no parked
+        // records, so the reconstructed status carries none (a finished run has
+        // nothing to act on).
+        const archived = match ? buildStatus(archiveStatusConfig(selected.project, match.file)) : undefined;
+        res.end(
+          renderStatusPage(selected, {
+            projects: statuses.map((s) => s.project),
+            selected: selected.project,
+            carve: true,
+            archivedRuns: archivedRuns.map((r) => ({ run: r.run, summary: r.summary })),
+            archived,
+            archivedRun: match?.run,
+          }),
+        );
         return;
       }
       res.writeHead(404).end("not found");

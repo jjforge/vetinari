@@ -72,7 +72,7 @@ export interface SandcastleTddConfig {
   maxTurns?: number;
   /** Default 600. A stalled agent parks rather than dying unrecorded. */
   idleTimeoutSeconds?: number;
-  /** Where logs and parked records live. Default ".sandcastle". */
+  /** Where logs and parked records live. Default ".sandcastle.local". */
   stateDir?: string;
   /**
    * Env for the ORCHESTRATOR PROCESS ONLY. Use this for anything that must not
@@ -94,15 +94,63 @@ export function defineConfig(c: SandcastleTddConfig): SandcastleTddConfig {
   return c;
 }
 
-const CANDIDATES = ["sandcastle-tdd.config.mts", "sandcastle-tdd.config.ts", ".sandcastle/config.mts"];
+/**
+ * Config candidate locations, highest precedence first. The committed
+ * `sandcastle/` locations are canonical; the rest resolve only as deprecated
+ * fallbacks so a live setup keeps working for one minor after the layout split.
+ */
+const CANDIDATES: readonly { rel: string; deprecated: boolean }[] = [
+  { rel: "sandcastle/config.mts", deprecated: false },
+  { rel: "sandcastle/config.ts", deprecated: false },
+  { rel: "sandcastle-tdd.config.mts", deprecated: true },
+  { rel: "sandcastle-tdd.config.ts", deprecated: true },
+  { rel: ".sandcastle/config.mts", deprecated: true },
+];
+
+/** The canonical location a deprecation warning should point a project at. */
+export const CANONICAL_CONFIG = "sandcastle/config.mts";
+
+export interface ResolvedConfigPath {
+  /** Absolute path to the winning config candidate. */
+  path: string;
+  /**
+   * The legacy candidate name this resolved from, when the winner is a
+   * deprecated location. Undefined for the canonical `sandcastle/` locations.
+   */
+  deprecatedFrom?: string;
+}
+
+/**
+ * Pure candidate resolution: pick the highest-precedence config that exists
+ * under `baseDir`, reporting a legacy origin when the winner is deprecated.
+ * Existence checks only — no module import or execution.
+ */
+export function resolveConfigPath(baseDir: string): ResolvedConfigPath | undefined {
+  for (const { rel, deprecated } of CANDIDATES) {
+    const path = resolve(baseDir, rel);
+    if (existsSync(path)) return deprecated ? { path, deprecatedFrom: rel } : { path };
+  }
+  return undefined;
+}
 
 /** Load the consuming project's config from cwd (or an explicit path). */
 export async function loadConfig(explicitPath?: string): Promise<ResolvedConfig> {
-  const path = explicitPath ?? CANDIDATES.find((c) => existsSync(resolve(c)));
+  let path = explicitPath;
   if (!path) {
-    throw new Error(
-      `No config found. Create one of ${CANDIDATES.join(", ")} in the project root, or pass --config <path>. See the README for a template.`,
-    );
+    const resolved = resolveConfigPath(process.cwd());
+    if (!resolved) {
+      throw new Error(
+        `No config found. Create ${CANONICAL_CONFIG} in the project root (or pass --config <path>). ` +
+          `See the README for a template.`,
+      );
+    }
+    path = resolved.path;
+    if (resolved.deprecatedFrom) {
+      console.warn(
+        `[sctdd] ${resolved.deprecatedFrom} is a deprecated config location and will stop working in a future minor. ` +
+          `Move it to ${CANONICAL_CONFIG} (or run \`sandcastle migrate\`).`,
+      );
+    }
   }
   const mod = await import(resolve(path));
   const c: SandcastleTddConfig = mod.default ?? mod.config;
@@ -112,7 +160,7 @@ export async function loadConfig(explicitPath?: string): Promise<ResolvedConfig>
   }
   if (!c.gates.length) throw new Error(`${path}: "gates" is empty — the orchestrator would verify nothing`);
 
-  const stateDir = c.stateDir ?? ".sandcastle";
+  const stateDir = c.stateDir ?? ".sandcastle.local";
   // hostEnv is applied to THIS process only; it is never handed to a sandbox.
   for (const [k, v] of Object.entries(c.hostEnv ?? {})) process.env[k] = v;
 

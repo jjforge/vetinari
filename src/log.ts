@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
-let logFile = ".sandcastle/logs/orchestrator.jsonl";
+let logFile = ".sandcastle.local/logs/orchestrator.jsonl";
 
 export function setLogFile(path: string) {
   logFile = path;

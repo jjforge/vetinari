@@ -184,7 +184,10 @@ if (mode === "status") {
   if (!Number.isInteger(port) || port < 0) throw new Error("status --port needs a non-negative integer");
   if (!host) throw new Error("status --host needs a host, e.g. 127.0.0.1 or 0.0.0.0");
   await serveAllStatus(gatewayConfigDir(), { port, host });
-  process.exit(0);
+  // serveAllStatus resolves once it is listening; the process must then stay up
+  // to serve, so park here instead of exiting (an exit would kill the server the
+  // instant it bound). We never fall through to the strict cwd config load.
+  await new Promise<never>(() => {});
 }
 
 const cfg = await loadConfig(cfgPath);

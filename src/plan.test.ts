@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { describePlan, layerWaves, partitionWaves, waveArgs } from "./plan.ts";
+import { describePlan, layerWaves, partitionWaves, planCampaign, underspecifiedPromptFor, waveArgs } from "./plan.ts";
+import type { FileSet } from "./fileset.ts";
 
 // A fake OPEN-blocked-by resolver from a plain edge map: id -> its open blockers.
 // (Closed blockers never reach the resolver — they are filtered at the edge — so
@@ -161,6 +162,146 @@ test("partitionWaves only blames earlier sub-waves — a frontier ticket is neve
   const d = plan.placements.find((p) => p.id === "d")!;
   assert.equal(d.wave, 0, "d shares nothing with sub-wave 0, so it stays on the frontier");
   assert.deepEqual(d.sharesFilesWith, [], "the collider c sits in a later sub-wave, so it is not a spill reason");
+});
+
+// id -> its resolved file-set, for the under-specified halt tests. A missing id
+// is treated as under-specified so an unlisted ticket can never sneak past.
+const fileSetFrom = (sets: Record<string, FileSet>) => (id: string): FileSet => sets[id] ?? { files: [], confident: false };
+
+test("planCampaign plans a confident set without ever prompting", async () => {
+  // Every ticket has a confident file-set, so the requestor is never consulted.
+  const plan = await planCampaign(["611", "623", "640"], {
+    blockedBy: openBlockedByFrom({ "640": ["611"] }),
+    fileSet: fileSetFrom({
+      "611": { files: ["a.ts"], confident: true },
+      "623": { files: ["b.ts"], confident: true },
+      "640": { files: ["c.ts"], confident: true },
+    }),
+    onUnderspecified: () => {
+      throw new Error("must not prompt a confident set");
+    },
+  });
+
+  assert.deepEqual(plan.waves, [["611", "623"], ["640"]]);
+  assert.deepEqual(plan.underspecified, []);
+  assert.deepEqual(plan.carved, []);
+});
+
+test("planCampaign drops an under-specified ticket and its dependents, then plans the rest", async () => {
+  // 640's file-set is not confident; 701 is blocked by 640, so it falls with it.
+  // 611 and 623 are confident and unrelated — they must still be planned.
+  const asked: string[][] = [];
+  const plan = await planCampaign(["611", "623", "640", "701"], {
+    blockedBy: openBlockedByFrom({ "701": ["640"] }),
+    fileSet: fileSetFrom({
+      "611": { files: ["a.ts"], confident: true },
+      "623": { files: ["b.ts"], confident: true },
+      "640": { files: [], confident: false },
+      "701": { files: ["c.ts"], confident: true },
+    }),
+    onUnderspecified: (u) => {
+      asked.push(u);
+      return "drop";
+    },
+  });
+
+  assert.deepEqual(asked, [["640"]], "asked once, in bulk, about the under-specified ticket");
+  assert.deepEqual(plan.underspecified, ["640"]);
+  assert.deepEqual(plan.carved, ["640", "701"], "the ticket and its dependent are carved");
+  assert.deepEqual(plan.waves, [["611", "623"]], "the confident remainder is planned");
+});
+
+test("planCampaign errors when the decision is to fail, naming the under-specified ticket", async () => {
+  await assert.rejects(
+    () =>
+      planCampaign(["611", "640"], {
+        blockedBy: openBlockedByFrom({}),
+        fileSet: fileSetFrom({
+          "611": { files: ["a.ts"], confident: true },
+          "640": { files: [], confident: false },
+        }),
+        onUnderspecified: () => "fail",
+      }),
+    /#640.*confident/i,
+  );
+});
+
+test("planCampaign does not ask about a ticket that is already unreachable", async () => {
+  // 640's only open blocker 555 is outside the set, so 640 is dropped as
+  // unreachable before file-sets matter — its missing file-set never halts the plan.
+  const plan = await planCampaign(["611", "640"], {
+    blockedBy: openBlockedByFrom({ "640": ["555"] }),
+    fileSet: fileSetFrom({ "611": { files: ["a.ts"], confident: true } }),
+    onUnderspecified: () => {
+      throw new Error("must not ask about an already-unreachable ticket");
+    },
+  });
+
+  assert.deepEqual(plan.waves, [["611"]]);
+  assert.deepEqual(plan.underspecified, []);
+  assert.deepEqual(plan.unreachable, [{ id: "640", external: ["555"], via: [] }]);
+});
+
+test("underspecifiedPromptFor: --on-underspecified=drop pre-decides without asking", async () => {
+  const prompt = underspecifiedPromptFor({
+    flag: "drop",
+    isTTY: true,
+    ask: () => {
+      throw new Error("a flag must pre-decide, never ask");
+    },
+  });
+  assert.equal(await prompt(["640"]), "drop");
+});
+
+test("underspecifiedPromptFor: --on-underspecified=fail pre-decides without asking", async () => {
+  const prompt = underspecifiedPromptFor({
+    flag: "fail",
+    isTTY: false,
+    ask: () => {
+      throw new Error("a flag must pre-decide, never ask");
+    },
+  });
+  assert.equal(await prompt(["640"]), "fail");
+});
+
+test("underspecifiedPromptFor: no flag on a terminal asks the requestor", async () => {
+  const prompt = underspecifiedPromptFor({ flag: undefined, isTTY: true, ask: () => "drop" });
+  assert.equal(await prompt(["640"]), "drop");
+});
+
+test("underspecifiedPromptFor: no flag and no terminal defaults to fail, never asking", async () => {
+  const prompt = underspecifiedPromptFor({
+    flag: undefined,
+    isTTY: false,
+    ask: () => {
+      throw new Error("must not ask without a terminal");
+    },
+  });
+  assert.equal(await prompt(["640"]), "fail");
+});
+
+test("underspecifiedPromptFor: an unknown flag value is rejected", () => {
+  assert.throws(() => underspecifiedPromptFor({ flag: "maybe", isTTY: true, ask: () => "drop" }), /on-underspecified/i);
+});
+
+test("describePlan reports exactly what an under-specified drop carved", async () => {
+  const plan = await planCampaign(["611", "640", "701"], {
+    blockedBy: openBlockedByFrom({ "701": ["640"] }),
+    fileSet: fileSetFrom({
+      "611": { files: ["a.ts"], confident: true },
+      "640": { files: [], confident: false },
+      "701": { files: ["c.ts"], confident: true },
+    }),
+    onUnderspecified: () => "drop",
+  });
+  const report = describePlan(plan);
+
+  // The under-specified root and its carried-down dependent are both named, each
+  // with its reason — never silently omitted.
+  assert.match(report, /#640.*(under-specified|no confident file-set)/i);
+  assert.match(report, /#701.*depend/i);
+  // The confident survivor is still scheduled.
+  assert.match(report, /wave 0.*#611/);
 });
 
 test("waveArgs emits the bare quoted wave args, ready to paste after `campaign`", async () => {

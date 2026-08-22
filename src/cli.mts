@@ -1,10 +1,12 @@
 #!/usr/bin/env -S npx tsx
+import { createInterface } from "node:readline/promises";
 import { loadConfig } from "./config.ts";
 import { log, setLogFile } from "./log.ts";
 import { answerPromptFor, runLoop } from "./loop.ts";
 import { attend, baseline, campaign, dispatch, queue, requireTelegram, tgTest } from "./modes.ts";
 import { computeCarve } from "./carve.ts";
-import { describePlan, layerWaves, waveArgs } from "./plan.ts";
+import { describePlan, planCampaign, underspecifiedPromptFor, waveArgs, type UnderspecifiedDecision } from "./plan.ts";
+import { defaultFileSet } from "./fileset.ts";
 import { applyLayoutMigration, computeLayoutMigration, describeMigration, scanLayout } from "./migrate.ts";
 import { archiveRun } from "./archive.ts";
 import { listParked, readParked } from "./state.ts";
@@ -19,9 +21,13 @@ const USAGE = `sandcastle-tdd <mode> [args]
   campaign <batch…>        queue each batch, then merge greens → gate base → next batch
   carve <issue> <batch…>   drop <issue> + everything blocked by it, then run the rest
                            as a campaign (--dry-run to only print the reduced plan)
-  campaign-plan <ids…>     layer a selected set into dependency-ordered wave args
-                           (paste after \`campaign\`) + a provenance report. Plans
-                           only — never runs campaign, never pushes.
+  campaign-plan <ids…>     layer a selected set into dependency-ordered, file-
+                           disjoint wave args (paste after \`campaign\`) + a
+                           provenance report. Plans only — never runs campaign,
+                           never pushes. A ticket whose file-set can't be resolved
+                           confidently halts and asks; --on-underspecified=drop|fail
+                           pre-decides for non-interactive runs (no flag, no
+                           terminal defaults to fail).
   migrate [--dry-run]      move this project onto the sandcastle/ + .sandcastle.local/
                            layout: config → sandcastle/, old .sandcastle/ state →
                            .sandcastle.local/, .gitignore updated (--dry-run to print
@@ -40,6 +46,33 @@ const USAGE = `sandcastle-tdd <mode> [args]
   tg-test                  prove the Telegram round-trip
 
 Options: --config <path>   (default: sandcastle-tdd.config.mts in cwd)`;
+
+/**
+ * The interactive under-specified halt: shown only on a terminal (the flag/TTY
+ * gate lives in `underspecifiedPromptFor`). Offers the two choices from the spec —
+ * drop the under-specified tickets and their dependents and plan the rest, or stop
+ * so the requestor can put the file data on the issue and re-run.
+ */
+async function askUnderspecified(underspecified: string[]): Promise<UnderspecifiedDecision> {
+  const list = underspecified.map((i) => `#${i}`).join(", ");
+  const [subj, obj] = underspecified.length === 1 ? ["has", "it"] : ["have", "them"];
+  console.log(
+    `\ncampaign-plan: ${list} ${subj} no confident file-set.\n` +
+      `  [d] drop ${obj} and ${underspecified.length === 1 ? "its" : "their"} dependents, and plan the rest\n` +
+      `  [s] stop so you can add the file data to the issue(s) and re-run`,
+  );
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    for (;;) {
+      const answer = (await rl.question("drop or stop? [d/s] ")).trim().toLowerCase();
+      if (answer === "d" || answer === "drop") return "drop";
+      if (answer === "s" || answer === "stop") return "fail";
+      console.log('please answer "d" (drop) or "s" (stop).');
+    }
+  } finally {
+    rl.close();
+  }
+}
 
 const argv = process.argv.slice(2);
 const cfgIdx = argv.indexOf("--config");
@@ -141,11 +174,28 @@ switch (mode) {
   }
   case "campaign-plan": {
     // A flat selected set of ids: `campaign-plan 436 611 623 640 701`.
-    const ids = rest.flatMap((a) => a.split(/[\s,]+/)).filter(Boolean);
+    // `--on-underspecified=drop|fail` pre-decides the halt for non-interactive runs.
+    let onUnderspecified: string | undefined;
+    const positional: string[] = [];
+    for (let i = 0; i < rest.length; i++) {
+      const a = rest[i];
+      if (a.startsWith("--on-underspecified=")) onUnderspecified = a.slice("--on-underspecified=".length);
+      else if (a === "--on-underspecified") onUnderspecified = rest[++i];
+      else positional.push(a);
+    }
+    const ids = positional.flatMap((a) => a.split(/[\s,]+/)).filter(Boolean);
     if (!ids.length) throw new Error("campaign-plan needs at least one ticket id: campaign-plan 436 611 640");
     if (!cfg.blockedBy) throw new Error('campaign-plan needs a "blockedBy" resolver in your config — e.g. blockedBy: githubBlockedBy("owner/repo").');
 
-    const plan = await layerWaves(ids, cfg.blockedBy);
+    // Which files each ticket touches: the project's resolver, or the shipped
+    // cites-from-body default, validated against the current tree at plan time.
+    const resolveFileSet = cfg.fileSet ?? defaultFileSet();
+    const plan = await planCampaign(ids, {
+      blockedBy: cfg.blockedBy,
+      fileSet: async (id) => resolveFileSet(await cfg.fetchTask(id)),
+      onUnderspecified: underspecifiedPromptFor({ flag: onUnderspecified, isTTY: Boolean(process.stdin.isTTY), ask: askUnderspecified }),
+    });
+
     // The bare wave args, then the human-readable provenance report. Plans only.
     console.log(waveArgs(plan) || "(nothing schedulable — every ticket is unreachable)");
     console.log("");

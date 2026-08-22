@@ -18,6 +18,7 @@ import {
   pollTargets,
   rebuildIndex,
   recordSend,
+  resolveCarveTarget,
   resolveReply,
   routeReply,
   type GatewayProject,
@@ -313,6 +314,86 @@ test("parseGatewayCommand does not mistake a one-word answer for a command", () 
   for (const t of ["A", "640", "use option B", "carve", "carve foo", "carve a b c", "yeah", ""]) {
     assert.equal(parseGatewayCommand(t), null, t);
   }
+});
+
+const candidate = (over: Partial<GatewayProject> = {}, running = true) => ({
+  project: project(over),
+  running,
+});
+
+test("resolveCarveTarget targets the sole running campaign on the bot", () => {
+  const res = resolveCarveTarget(
+    [
+      candidate({ project: "alpha", conn: { token: "botA", chat: "-1" } }, true),
+      candidate({ project: "beta", conn: { token: "botA", chat: "-2" } }, false),
+    ],
+    { token: "botA", chat: "-1" },
+  );
+
+  assert.equal(res.kind, "target");
+  assert.equal(res.kind === "target" && res.project.project, "alpha");
+});
+
+test("resolveCarveTarget rejects as ambiguous when several campaigns run on the bot", () => {
+  const res = resolveCarveTarget(
+    [
+      candidate({ project: "alpha", conn: { token: "botA", chat: "-1" } }, true),
+      candidate({ project: "beta", conn: { token: "botA", chat: "-2" } }, true),
+    ],
+    { token: "botA", chat: "-1" },
+  );
+
+  assert.equal(res.kind, "ambiguous");
+  assert.deepEqual(res.kind === "ambiguous" && res.candidates.map((p) => p.project), ["alpha", "beta"]);
+});
+
+test("resolveCarveTarget rejects with none when nothing is running on the bot", () => {
+  const res = resolveCarveTarget(
+    [candidate({ project: "alpha", conn: { token: "botA", chat: "-1" } }, false)],
+    { token: "botA", chat: "-1" },
+  );
+
+  assert.equal(res.kind, "none");
+});
+
+test("resolveCarveTarget ignores projects served by a different bot", () => {
+  const res = resolveCarveTarget(
+    [
+      candidate({ project: "alpha", conn: { token: "botA", chat: "-1" } }, true),
+      candidate({ project: "other", conn: { token: "botB", chat: "-9" } }, true),
+    ],
+    { token: "botA", chat: "-1" },
+  );
+
+  assert.equal(res.kind, "target");
+  assert.equal(res.kind === "target" && res.project.project, "alpha");
+});
+
+test("resolveCarveTarget with an explicit project targets it past the ambiguity", () => {
+  const res = resolveCarveTarget(
+    [
+      candidate({ project: "alpha", conn: { token: "botA", chat: "-1" } }, true),
+      candidate({ project: "beta", conn: { token: "botA", chat: "-2" } }, true),
+    ],
+    { token: "botA", chat: "-1" },
+    "beta",
+  );
+
+  assert.equal(res.kind, "target");
+  assert.equal(res.kind === "target" && res.project.project, "beta");
+});
+
+test("resolveCarveTarget with an explicit project that has no running campaign rejects", () => {
+  const res = resolveCarveTarget(
+    [
+      candidate({ project: "alpha", conn: { token: "botA", chat: "-1" } }, true),
+      candidate({ project: "beta", conn: { token: "botA", chat: "-2" } }, false),
+    ],
+    { token: "botA", chat: "-1" },
+    "beta",
+  );
+
+  assert.equal(res.kind, "none");
 });
 
 // --- Outbox drain-and-route (E4). Records live in a real tmp outbox so the drain

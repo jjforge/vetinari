@@ -24,7 +24,7 @@ import {
   type ParkedRecord,
 } from "./state.ts";
 import { gatewayConfigDir, readProjects } from "./registry.ts";
-import { serveAllStatus } from "./status.ts";
+import { campaignRunning, logFileOf, readEvents, serveAllStatus } from "./status.ts";
 import { tgPoll, tgSend, type TgConn, type TgMsg } from "./telegram.ts";
 
 /**
@@ -360,15 +360,96 @@ export async function drainOutbox(project: GatewayProject, send: (conn: TgConn, 
 export type ReplyAction =
   | { kind: "resume"; ref: SendRef; text: string }
   | { kind: "status" }
+  | { kind: "carve"; command: { project?: string; issue: string } }
+  | { kind: "confirm"; confirm: PendingConfirm }
   | { kind: "unrouted" };
 
-export function routeReply(index: ReplyIndex, conn: TgConn, msg: TgMsg): ReplyAction {
-  if (isStatusCommand(msg.text)) return { kind: "status" };
+/**
+ * Route one message. A gateway command (`/status`, `carve …`) takes precedence
+ * over reply routing — it is a command, never an answer. A `yes` replying to a
+ * live carve preview resolves (and consumes) that pending confirmation; any
+ * other reply to a known question resumes its task, so a task genuinely answered
+ * with the word "yes" still resumes when no carve is pending. Everything else is
+ * unrouted.
+ */
+export function routeReply(index: ReplyIndex, pending: PendingConfirms, conn: TgConn, msg: TgMsg): ReplyAction {
+  const command = parseGatewayCommand(msg.text);
+  if (command?.kind === "status") return { kind: "status" };
+  if (command?.kind === "carve") {
+    const payload = command.project ? { project: command.project, issue: command.issue } : { issue: command.issue };
+    return { kind: "carve", command: payload };
+  }
   if (msg.replyToId != null) {
+    if (command?.kind === "confirm") {
+      const confirm = pending.resolve(conn.token, msg.replyToId);
+      if (confirm) return { kind: "confirm", confirm };
+    }
     const ref = resolveReply(index, conn.token, msg.replyToId);
     if (ref) return { kind: "resume", ref, text: msg.text };
   }
   return { kind: "unrouted" };
+}
+
+/**
+ * The reply when several projects on one bot have a running campaign: name them
+ * and show the disambiguating `carve <project> <issue>` form (user story 11).
+ */
+export function formatCarveAmbiguity(candidates: GatewayProject[], issue: string): string {
+  const names = candidates.map((c) => c.project);
+  return (
+    `Several projects on this bot have a running campaign: ${names.join(", ")}.\n` +
+    `Say which one — e.g. \`carve ${names[0]} ${issue}\`.`
+  );
+}
+
+/**
+ * The seams `handleCarveCommand` drives: the current carve candidates (each
+ * project paired with its running state), the closure preview (which shells the
+ * project's `carve <issue> --dry-run` and returns its text — or null on
+ * failure), and the Telegram send. All injected so the resolve→preview→record
+ * flow is testable without a bot or a spawned process.
+ */
+export interface CarveHandlerDeps {
+  candidates: () => CarveCandidate[];
+  preview: (target: PendingConfirm) => Promise<string | null>;
+  send: (conn: TgConn, text: string) => Promise<number | undefined>;
+}
+
+/**
+ * Handle a `carve` command end to end but for the execution: resolve the target
+ * from the bot it arrived on, and either reject (ambiguous → candidate list,
+ * none → nothing running) or preview the closure and record a pending
+ * confirmation keyed to the preview message. Records nothing on a rejection or a
+ * failed preview/send, so only a confirmed carve ever runs. The preview is a
+ * private interactive exchange — it writes no outbox record and broadcasts
+ * nothing (spec §"Preview then confirm"); only the executed carve emits
+ * `progress:carve`.
+ */
+export async function handleCarveCommand(
+  deps: CarveHandlerDeps,
+  pending: PendingConfirms,
+  conn: TgConn,
+  command: { project?: string; issue: string },
+): Promise<void> {
+  const resolution = resolveCarveTarget(deps.candidates(), conn, command.project);
+  if (resolution.kind === "none") {
+    await deps.send(conn, `No campaign is running on this bot — nothing to carve.`);
+    return;
+  }
+  if (resolution.kind === "ambiguous") {
+    await deps.send(conn, formatCarveAmbiguity(resolution.candidates, command.issue));
+    return;
+  }
+  const p = resolution.project;
+  const target: PendingConfirm = { project: p.project, projectRoot: p.projectRoot, baseLocation: p.baseLocation, issue: command.issue };
+  const previewText = await deps.preview(target);
+  if (previewText == null) {
+    await deps.send(conn, `Couldn't preview carve #${command.issue} for ${p.project} — is a campaign still running?`);
+    return;
+  }
+  const messageId = await deps.send(conn, `${previewText}\n\nReply "yes" to this message to carve.`);
+  if (messageId == null) return; // send failed — nothing to confirm against, drop it
+  pending.record(conn.token, messageId, target);
 }
 
 /**
@@ -400,6 +481,8 @@ export interface PollDeps {
   poll: (conn: TgConn, offset: number) => Promise<{ offset: number; messages: TgMsg[] } | null>;
   resume: (ref: SendRef, text: string) => void;
   onStatus?: (conn: TgConn) => void | Promise<void>;
+  onCarve?: (conn: TgConn, command: { project?: string; issue: string }) => void | Promise<void>;
+  onConfirm?: (confirm: PendingConfirm) => void | Promise<void>;
   onUnrouted?: (conn: TgConn, msg: TgMsg) => void | Promise<void>;
 }
 
@@ -410,15 +493,17 @@ export interface PollDeps {
  * each message through `routeReply` and hands the decision to the injected seams,
  * so several answered tasks resume concurrently through `resume`.
  */
-export async function pollLoop(conn: TgConn, index: ReplyIndex, deps: PollDeps, offset = 0): Promise<void> {
+export async function pollLoop(conn: TgConn, index: ReplyIndex, pending: PendingConfirms, deps: PollDeps, offset = 0): Promise<void> {
   for (;;) {
     const r = await deps.poll(conn, offset);
     if (!r) return;
     offset = r.offset;
     for (const msg of r.messages) {
-      const action = routeReply(index, conn, msg);
+      const action = routeReply(index, pending, conn, msg);
       if (action.kind === "resume") deps.resume(action.ref, action.text);
       else if (action.kind === "status") await deps.onStatus?.(conn);
+      else if (action.kind === "carve") await deps.onCarve?.(conn, action.command);
+      else if (action.kind === "confirm") await deps.onConfirm?.(action.confirm);
       else await deps.onUnrouted?.(conn, msg);
     }
   }
@@ -508,6 +593,66 @@ async function drainOutboxes(configDir: string): Promise<void> {
 }
 
 /**
+ * Every registered project paired with whether it currently has a running
+ * campaign, read fresh from each project's event log (`campaignRunning`). This
+ * is the state `resolveCarveTarget` resolves a carve against; read live so a
+ * campaign that started or ended since the last tick is reflected.
+ */
+function carveCandidates(configDir: string): CarveCandidate[] {
+  return loadGatewayProjects(configDir).map((project) => ({
+    project,
+    running: campaignRunning(readEvents({ logFile: logFileOf(project.baseLocation) })),
+  }));
+}
+
+/**
+ * Preview a carve by shelling the project's own `carve <issue> --dry-run` via the
+ * shared install in its root: it computes the closure against the project's real
+ * `blockedBy` graph and prints it, changing nothing (the CLI breaks before it
+ * appends the event or writes any outbox record). Returns the printed closure, or
+ * null when the child fails — e.g. the campaign ended between resolve and preview.
+ */
+function carvePreview(target: PendingConfirm): Promise<string | null> {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [...process.execArgv, process.argv[1], "carve", target.issue, "--dry-run"], {
+      cwd: target.projectRoot,
+      stdio: ["ignore", "pipe", "inherit"],
+    });
+    let out = "";
+    child.stdout?.on("data", (chunk) => (out += chunk));
+    child.on("error", (err) => {
+      log("gateway-carve-preview-failed", { project: target.project, issue: target.issue, error: String(err) });
+      resolve(null);
+    });
+    child.on("exit", (code) => {
+      if (code === 0) resolve(out.trim() || null);
+      else {
+        log("gateway-carve-preview-failed", { project: target.project, issue: target.issue, code });
+        resolve(null);
+      }
+    });
+  });
+}
+
+/**
+ * Execute a confirmed carve by shelling the project's own `carve <issue>` via the
+ * shared install in its root (ADR 0003), exactly as an answered question resumes
+ * with `answer`. The project-side carve computes the closure, appends the carve
+ * event, clears the dropped issues' parked records, and emits the one
+ * `progress:carve` — the gateway only routes the command and its confirmation.
+ * Fire-and-forget, like `spawnResume`.
+ */
+function spawnCarve(target: PendingConfirm): void {
+  log("gateway-carve", { project: target.project, issue: target.issue });
+  spawn(process.execPath, [...process.execArgv, process.argv[1], "carve", target.issue], {
+    cwd: target.projectRoot,
+    stdio: ["ignore", "inherit", "inherit"],
+  })
+    .on("exit", (code) => log("gateway-carve-done", { project: target.project, issue: target.issue, code }))
+    .on("error", (err) => log("gateway-carve-failed", { project: target.project, issue: target.issue, error: String(err) }));
+}
+
+/**
  * Resume an answered task via the shared install in that project's root, so it
  * runs with the project's own config and gates (ADR 0003). Fire-and-forget: the
  * child runs detached and several resumes proceed concurrently — one slow resume
@@ -544,6 +689,9 @@ function spawnResume(ref: SendRef, text: string): void {
  */
 export async function gateway(configDir: string = gatewayConfigDir()): Promise<void> {
   const index = rebuildIndex(loadGatewayProjects(configDir));
+  // Non-durable by design (ADR 0002): a restart drops pending carve
+  // confirmations, and re-sending `carve 640` is the recovery.
+  const pending = newPendingConfirms(() => Date.now());
   const targets = pollTargets(loadGatewayProjects(configDir));
   log("gateway-start", { configDir, bots: targets.length });
   if (!targets.length) console.log("gateway up — no project defines a Telegram bot yet; announcing silently.");
@@ -566,13 +714,16 @@ export async function gateway(configDir: string = gatewayConfigDir()): Promise<v
   })();
 
   const polling = targets.map((conn) =>
-    pollLoop(conn, index, {
+    pollLoop(conn, index, pending, {
       poll: (c, o) => tgPoll(c, o),
       resume: spawnResume,
       onStatus: async (c) => {
         const served = loadGatewayProjects(configDir).filter((p) => p.conn?.token === c.token);
         await tgSend(c, formatGatewayStatus(served));
       },
+      onCarve: (c, command) =>
+        handleCarveCommand({ candidates: () => carveCandidates(configDir), preview: carvePreview, send: tgSend }, pending, c, command),
+      onConfirm: spawnCarve,
       onUnrouted: async (c, msg) => {
         // Only answer a genuine misdirected reply; stay quiet for plain chatter.
         if (msg.replyToId != null) await tgSend(c, "That question isn't tracked anymore (already answered, or from before I started). Reply to a current question message.");

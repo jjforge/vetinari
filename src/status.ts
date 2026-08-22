@@ -295,12 +295,16 @@ export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
  * (`logs/`, `parked/`) the run wrote under the base location — the paths a full
  * config's `loadConfig` would have derived from `stateDir`.
  */
+/** The orchestrator event log inside a project's base location — the file the
+ * gateway reads to reconstruct a project's campaign without its TS config. */
+export const logFileOf = (baseLocation: string) => join(baseLocation, "logs", "orchestrator.jsonl");
+
 const statusConfigFromPointer = (pointer: ProjectPointer): ResolvedConfig =>
   ({
     project: pointer.project,
     stateDir: pointer.baseLocation,
     parkedDir: parkedDirOf(pointer.baseLocation),
-    logFile: join(pointer.baseLocation, "logs", "orchestrator.jsonl"),
+    logFile: logFileOf(pointer.baseLocation),
   }) as ResolvedConfig;
 
 /**

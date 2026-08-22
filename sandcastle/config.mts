@@ -29,6 +29,19 @@ export default defineConfig({
   // on #31–#35.
   blockedBy: githubBlockedBy("jjforge/sandcastle-tdd"),
 
+  // File-set for campaign-plan (axis 2 — keep co-wave tickets file-disjoint).
+  // The shipped cites-from-body default is all-or-nothing over EVERY
+  // filename-shaped token in the body, so one incidental token (an env file, a
+  // spec link) poisons confidence. Instead we read only the explicit
+  // "Touches (existing files): `a.ts`, `b.ts`" line each ticket body carries —
+  // the file data still lives on the ticket, just parsed deterministically.
+  fileSet: (ticket: string) => {
+    const i = ticket.indexOf("Touches (existing files):");
+    if (i === -1) return { files: [], confident: false };
+    const files = [...ticket.slice(i, i + 240).matchAll(/`([\w.\-]+\.[A-Za-z]\w*)`/g)].map((m) => m[1]);
+    return { files: [...new Set(files)], confident: files.length > 0 };
+  },
+
   toolchainProbe: "node --version && npm --version && claude --version && git --version",
 
   // safe.directory host-side write needs a writable global git config; the real

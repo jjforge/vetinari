@@ -12,6 +12,7 @@ import {
   isStatusCommand,
   loadGatewayProjects,
   newReplyIndex,
+  parseGatewayCommand,
   pendingAnnouncements,
   pollLoop,
   pollTargets,
@@ -295,6 +296,23 @@ test("loadGatewayProjects skips a stale registration whose base location is gone
 test("isStatusCommand recognizes status queries and ignores answers", () => {
   for (const t of ["/status", "status", "/status@my_bot", "  Status ", "STATUS"]) assert.equal(isStatusCommand(t), true, t);
   for (const t of ["A", "use option B", "status of the world is fine", "", "s"]) assert.equal(isStatusCommand(t), false, t);
+});
+
+test("parseGatewayCommand recognizes status, carve, and a confirming yes", () => {
+  assert.deepEqual(parseGatewayCommand("/status"), { kind: "status" });
+  assert.deepEqual(parseGatewayCommand("status"), { kind: "status" });
+  assert.deepEqual(parseGatewayCommand("carve 640"), { kind: "carve", issue: "640" });
+  assert.deepEqual(parseGatewayCommand("carve #640"), { kind: "carve", issue: "640" });
+  assert.deepEqual(parseGatewayCommand("  Carve 640 "), { kind: "carve", issue: "640" });
+  assert.deepEqual(parseGatewayCommand("carve jjforge 640"), { kind: "carve", project: "jjforge", issue: "640" });
+  assert.deepEqual(parseGatewayCommand("yes"), { kind: "confirm" });
+  assert.deepEqual(parseGatewayCommand("  YES "), { kind: "confirm" });
+});
+
+test("parseGatewayCommand does not mistake a one-word answer for a command", () => {
+  for (const t of ["A", "640", "use option B", "carve", "carve foo", "carve a b c", "yeah", ""]) {
+    assert.equal(parseGatewayCommand(t), null, t);
+  }
 });
 
 // --- Outbox drain-and-route (E4). Records live in a real tmp outbox so the drain

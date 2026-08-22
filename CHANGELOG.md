@@ -9,96 +9,118 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Committed `sandcastle/` + excluded `.sandcastle.local/` layout. Config now
+  resolves from a committed `sandcastle/config.mts` (canonical), with the legacy
+  `sandcastle-tdd.config.*` and `.sandcastle/config.mts` locations kept as
+  deprecated fallbacks that warn and point at the canonical path.
 - `migrate` command: moves an existing project from the old single-`.sandcastle/`
   layout onto the committed `sandcastle/` + excluded `.sandcastle.local/` split in
   one step — config → `sandcastle/`, old `.sandcastle/` state and secrets →
   `.sandcastle.local/`, and `.gitignore` gains `.sandcastle.local/` while keeping
   `.sandcastle/` ignored during the transition. `migrate --dry-run` prints the plan
-  and changes nothing. Idempotent (a re-run on an already-migrated project reports
-  "nothing to do") and non-clobbering (a move whose destination exists is refused,
-  never overwritten). Warns that folding host-only orchestrator secrets and
-  rewriting the systemd unit are deferred to the gateway epic (E3). The pure
-  `computeLayoutMigration` planner, `applyLayoutMigration`, `scanLayout`, and
-  `describeMigration` are exported.
-
-- Run cleanup so a finished run stops showing as current in the dashboard and
-  status line. On clean completion of a `campaign` or `queue` (not on a halt, and
-  only when nothing is still parked) the orchestrator log is archived to
-  `.sandcastle/logs/archive/orchestrator-<ts>.jsonl` — moved aside, never deleted
-  — and a fresh empty log takes its place, so `buildStatus` reads idle. Parked
-  records are cleared as part of the reset. A new `clear` command forces the same
-  reset on demand, even with questions still parked. `archiveRun` is exported.
-
+  and changes nothing. Idempotent and non-clobbering (a move whose destination
+  exists is refused, never overwritten). The `migrate` extension also folds a
+  project's `orchestrator.env` and rewrites its systemd unit into the host-level
+  gateway service. `computeLayoutMigration`, `applyLayoutMigration`, `scanLayout`,
+  and `describeMigration` are exported.
+- `init` command: scaffolds a new project onto the layout (a starter
+  `sandcastle/config.mts`, a Dockerfile, and the excluded `.sandcastle.local/`), so
+  a fresh project is ready to run with one command.
+- `campaign-plan <ids…>` command: turns a selected set of ticket ids into the
+  dependency-ordered, file-disjoint wave arguments `campaign` consumes. It layers
+  by the `blockedBy` DAG (`layerWaves`) and keeps co-wave tickets from touching the
+  same file (`partitionWaves`), the file-set coming from a
+  `fileSet(ticket) → { files, confident }` config seam with a shipped
+  cites-from-body default. An under-specified ticket (no confident file-set) halts
+  the plan rather than being scheduled around silently
+  (`--on-underspecified=drop|fail`). It plans only — it never runs sandcastle.
+- Host gateway + registry. A single host-level gateway daemon fronts every
+  registered project as the sole Telegram consumer: it dedupes shared bot tokens so
+  each bot is polled once, announces newly parked questions to each project's
+  destination, routes a reply back to the exact project + task it answers, and
+  resumes several answered tasks concurrently. Projects auto-register on run,
+  handing the gateway only a pointer to their base location (no config or secrets
+  copied). Telegram send/poll is parameterized by an explicit bot connection.
+- Comms taxonomy + notify map. A project declares named `destinations` (bot + chat,
+  optional thread) and a `notify` map routing each message category — `question`,
+  `success`, `failure`, `progress`, `finding` (or a specific `category:event`) — to
+  a destination, with a `*` wildcard default; `question` is validated to a single
+  destination at load. A run writes category-tagged outbound records into an outbox
+  that the gateway drains and routes, so the gateway is the sole sender.
+  `resolveDestination` is pure and tested.
+- Multi-project dashboard. The `status` server aggregates every registered project
+  behind a project dropdown (`buildAllStatus`), reading the host registry live and
+  skipping a project whose state is missing.
+- Carve a running campaign. `carve <issue>` (no plan) prunes a running campaign by
+  appending a carve event the loop honors at the next wave boundary — the in-flight
+  wave finishes, future waves shrink, and already-merged/mergeable work is kept
+  while only unfinished issues drop (their parked records cleared). Carve is
+  triggerable from the dashboard (in the tap-to-open issue-detail panel) and from
+  Telegram (a gateway command with preview-then-confirm), each routed to the right
+  project. `reduceCampaign` is extracted so the campaign loop and the dashboard
+  reconstruct the plan from the event log the same way. A confirmed carve emits a
+  `progress:carve` message.
+- Config gains an optional `blockedBy(id)` resolver (the ids that block an id) that
+  `carve` and `campaign-plan` read. `githubBlockedBy("owner/repo")` ships as a ready
+  implementation over GitHub's native "blocked by" issue dependencies.
 - Incidental-findings harvest: with a `reportFinding` handler configured, a green
-  run ends with one extra turn on the agent's live session asking for any defect
-  it noticed but did not fix — context that otherwise dies with the container —
-  and files each somewhere durable. `githubFindingReporter("owner/repo", { labels })`
-  ships as a GitHub implementation that opens a labelled issue cross-referenced to
-  the task it was found on. Runs only on green; a failed filing is logged per
-  finding and never turns a real green into an error. Absent the handler, no
-  harvest turn runs. `parseFindings`/`reportFindings`/`githubFindingReporter` and
-  the `Finding` types are exported from the entry point.
-- `statusline` command: prints two lines for the Claude Code status bar. Line 1
-  mirrors Claude Code's default — model, directory, git branch, context-used % —
-  with the model name trimmed of its `(1M context)` suffix; line 2 is the
-  sandcastle run (wave in flight, a count per status; no project name, since line
-  1 already shows the directory), shown only where a config lives. Reads Claude Code's status JSON on stdin, resolves the config from
-  the workspace directory, and derives line 2 from the log (no network) to stay
-  fast on every refresh. Outside a sandcastle project line 2 is omitted; it always
-  exits zero (a non-zero exit would blank the bar). Wire it via
-  `.claude/settings.json` `statusLine` with a `refreshInterval` so it stays live
-  during a run; documented in the README.
-- `carve <issue> <batch…>` command: drops an issue and the transitive closure of
-  everything blocked by it from a campaign, then runs the reduced campaign
-  (`--dry-run` prints the plan instead). Removal cascades across every branch and
-  diamond — an issue falls if any of its blockers falls — and is computed over
-  the campaign's own issues, so a blocker outside the named campaign is out of
-  scope. Since carve only drops issues, each remaining wave stays as conflict-free
-  as it was built.
-- Config gains an optional `blockedBy(id)` resolver (the ids that block an id)
-  that `carve` reads. `githubBlockedBy("owner/repo")` ships as a ready
-  implementation over GitHub's native "blocked by" issue dependencies; both are
-  exported from the package entry point.
-- Inbound `/status` command over Telegram: while `dispatch` is running, sending
-  `/status` (bare, or `/status@yourbot` in a group) replies in-chat with a live
-  summary — each wave, its issue chips with status, and any parked issues
-  awaiting you. Read-only and built on the same status model as the web
-  dashboard, so it never disturbs a run. Handled in the single `dispatch` poller
-  (Telegram permits only one consumer of a bot's updates), so it needs no extra
-  process. Documented in the README.
-- `status [--port <port>] [--host <host>]` CLI command that serves a local
-  campaign/wave web dashboard (default `http://127.0.0.1:8765`). It shows each
-  wave, per-issue status chips, and parked-issue cards you can respond to inline;
-  `--host 0.0.0.0` exposes it over a tailnet. Documented in the README.
-- Campaign batches now clear the parked records of their non-green tasks once the
-  wave finishes (`clearParkedForTasks`), so stale questions from a completed wave
-  no longer bleed into the next wave's dashboard.
-- Auto-refresh on/off checkbox on the dashboard; both the toggle and the interval
-  persist across reloads, and the interval field disables when off.
-- The dashboard leads with parked issues, above the waves, whenever any are
-  awaiting a response — with an "N awaiting you" badge and a yellow accent. When
-  nothing is parked, the page leads with the waves as before.
+  run ends with one extra turn asking the agent for any defect it noticed but did
+  not fix, and files each somewhere durable. `githubFindingReporter("owner/repo",
+  { labels })` ships as a GitHub implementation. Runs only on green; a failed filing
+  never turns a real green into an error.
+- `statusline` command: prints two lines for the Claude Code status bar — line 1
+  mirrors Claude Code's default (model, directory, git branch, context-used %), line
+  2 is the sandcastle run (wave in flight, a count per status), shown only where a
+  config lives. Reads Claude Code's status JSON on stdin, derives line 2 from the
+  log (no network), and always exits zero.
+- Campaign batches clear the parked records of their non-green tasks once the wave
+  finishes, so stale questions from a completed wave do not bleed into the next.
+- A `clear` command forces a status reset on demand (archiving the current log and
+  clearing parked records) even with questions still parked; finished `campaign`/
+  `queue` runs archive their log automatically so `buildStatus` reads idle.
 - Vendored the `mattpocock/skills` set under `.agents/skills/`, pinned by
-  `skills-lock.json` (each skill's source path and content hash).
+  `skills-lock.json`.
 
 ### Changed
 
-- Issue chips now surface the real issue title and current activity (on hover, or
-  tap on touch devices) instead of a static placeholder.
-- Simplified the refresh control to a compact "☑ Refresh (45)" and removed the
-  pill background around it; enlarged the checkbox to match the label text.
-- Closed waves collapse into chips marked with a green check instead of a
-  separate "Completed:" label, so the row describes itself.
+- Default state directory flipped from `.sandcastle/` to `.sandcastle.local/`, and
+  the committed config location is `sandcastle/config.mts`; `migrate` moves an
+  existing project across.
+- The status dashboard is one registry-backed aggregated server. `status` serves
+  the multi-project dropdown view (a single project is a one-entry dropdown); carve
+  moved off the chips into the tap-to-open issue-detail panel with an inline,
+  on-demand preview + confirm; `--host 0.0.0.0` still exposes it over a tailnet.
+- `carve` is context-aware: `carve <issue>` (no plan) prunes a running campaign,
+  while `carve <issue> <batch…>` keeps launching a reduced campaign from a supplied
+  plan.
+- Issue chips surface the real issue title and current activity (on hover, or tap on
+  touch devices) instead of a static placeholder.
+- Simplified the refresh control to a compact "☑ Refresh (45)" and removed the pill
+  background; enlarged the checkbox to match the label text.
+- Closed waves collapse into chips marked with a green check instead of a separate
+  "Completed:" label.
+
+### Removed
+
+- `dispatch` and `attend` retired — the gateway is now the single Telegram consumer
+  and the only path for Telegram round-trips (the `/status`-over-Telegram query is
+  answered by the gateway).
+- The standalone single-project status server (`serveStatus`) and its full-page
+  carve preview are removed, superseded by the aggregated dashboard; the aggregated
+  server-side preview remains as the no-JS carve fallback.
 
 ### Fixed
 
-- Auto-refresh no longer reloads (and discards) a reply you are in the middle of
-  typing to a parked issue.
-- Parked issue chips no longer render oversized — a `.parked` CSS rule for the
-  section was bleeding onto the chip status dot.
-- The first row of issue chips no longer stretches taller than the rest when a
-  wave wraps to multiple rows (Safari flex-wrap stretch).
-- The tapped-issue detail now appears in a dismissible bottom bar that stays in a
+- The `status` server no longer exits immediately after binding — a stray
+  `process.exit(0)` was killing the aggregated dashboard the instant it started
+  listening.
+- Auto-refresh no longer reloads (and discards) a reply you are mid-typing to a
+  parked issue.
+- Parked issue chips no longer render oversized (a `.parked` CSS rule was bleeding
+  onto the chip status dot).
+- The first row of issue chips no longer stretches taller than the rest when a wave
+  wraps to multiple rows (Safari flex-wrap stretch).
+- The tapped-issue detail appears in a dismissible bottom bar that stays in a
   consistent, reachable spot on mobile instead of mid-page.
 
 ## [0.1.0] - 2026-08-16

@@ -3,6 +3,65 @@ import { existsSync } from "node:fs";
 import type { FindingReporter } from "./findings.ts";
 import type { FileSetOf } from "./fileset.ts";
 
+/**
+ * The five fixed message categories a piece of outbound communication carries,
+ * used to route it. `question` is the only interactive one (it expects a reply).
+ * Adding categories is out of scope.
+ */
+export type MessageCategory = "question" | "success" | "failure" | "progress" | "finding";
+
+/**
+ * A named Telegram connection a project routes categories to. `bot` names a bot
+ * whose token is read by reference from `.sandcastle.local/` — a destination
+ * carries no secret. `thread` optionally targets a forum thread under the chat.
+ */
+export interface Destination {
+  bot: string;
+  chat: string;
+  thread?: string;
+}
+
+/**
+ * A project's routing rules. Each key is a bare `category` or a `category:event`,
+ * plus a `*` wildcard default; each value names a destination (a key of the
+ * config's `destinations`). `resolveDestination` reads this map.
+ */
+export type NotifyMap = Record<string, string>;
+
+/**
+ * Pure destination resolution for a message. An exact `category:event` entry wins
+ * over a bare `category` entry, which wins over the `*` wildcard. Returns the
+ * destination name, or `undefined` when the category is unmapped and there is no
+ * wildcard — an explicit "no destination" the caller must handle, never a silent
+ * drop.
+ */
+export function resolveDestination(notify: NotifyMap, category: MessageCategory, event?: string): string | undefined {
+  if (event !== undefined) {
+    const exact = notify[`${category}:${event}`];
+    if (exact !== undefined) return exact;
+  }
+  const byCategory = notify[category];
+  if (byCategory !== undefined) return byCategory;
+  return notify["*"];
+}
+
+/**
+ * The distinct destinations a `question` message could resolve to under a notify
+ * map, across every possible event: every explicit `question`/`question:event`
+ * target, plus the `*` wildcard when unlisted question events would fall to it
+ * (i.e. there is no bare `question` entry to catch them). `question` is the only
+ * interactive category — the gateway watches one place for the reply — so this
+ * set must be a singleton; more than one is a fan-out the config load rejects.
+ */
+export function questionDestinations(notify: NotifyMap): Set<string> {
+  const dests = new Set<string>();
+  for (const [key, dest] of Object.entries(notify)) {
+    if (key === "question" || key.startsWith("question:")) dests.add(dest);
+  }
+  if (notify["question"] === undefined && notify["*"] !== undefined) dests.add(notify["*"]);
+  return dests;
+}
+
 export interface GateSpec {
   /** Shell command run INSIDE the sandbox. Non-zero exit is red. */
   cmd: string;
@@ -75,6 +134,19 @@ export interface SandcastleTddConfig {
    * Absent, no harvest turn runs and no findings are collected.
    */
   reportFinding?: FindingReporter;
+  /**
+   * Named Telegram destinations this project routes categories to (name ->
+   * `{bot, chat, thread?}`). A destination names a bot by reference — its token is
+   * read from `.sandcastle.local/`, never inlined here. The `notify` map's values
+   * are keys of this map.
+   */
+  destinations?: Record<string, Destination>;
+  /**
+   * Routing rules: `category` or `category:event` -> destination name, plus a `*`
+   * wildcard default. `resolveDestination` reads it; config load rejects a map that
+   * would fan the interactive `question` category to more than one destination.
+   */
+  notify?: NotifyMap;
   /** Override the bundled TDD prompt. Must keep the signal contract. */
   promptFile?: string;
   agent?: {
@@ -172,6 +244,16 @@ export async function loadConfig(explicitPath?: string): Promise<ResolvedConfig>
     if (c[required] == null) throw new Error(`${path}: missing required field "${required}"`);
   }
   if (!c.gates.length) throw new Error(`${path}: "gates" is empty — the orchestrator would verify nothing`);
+  if (c.notify) {
+    const qDests = questionDestinations(c.notify);
+    if (qDests.size > 1) {
+      throw new Error(
+        `${path}: the notify map routes the interactive "question" category to more than one destination ` +
+          `(${[...qDests].join(", ")}). question expects a reply, so the gateway watches a single destination for it — ` +
+          `route "question" (and any "question:event") to exactly one place.`,
+      );
+    }
+  }
 
   const stateDir = c.stateDir ?? ".sandcastle.local";
   // hostEnv is applied to THIS process only; it is never handed to a sandbox.

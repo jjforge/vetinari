@@ -10,6 +10,7 @@ import { defaultFileSet } from "./fileset.ts";
 import { applyLayoutMigration, computeLayoutMigration, describeMigration, scanLayout } from "./migrate.ts";
 import { archiveRun } from "./archive.ts";
 import { listParked, readParked } from "./state.ts";
+import { autoRegister } from "./registry.ts";
 import { serveStatus } from "./status.ts";
 import { runStatusLine } from "./statusline.ts";
 
@@ -114,6 +115,11 @@ if (mode === "migrate") {
 
 const cfg = await loadConfig(cfgPath);
 setLogFile(cfg.logFile);
+
+// Enroll (or refresh) this project's pointer with the gateway at the start of
+// every run, so a project registers itself with no manual step (ADR 0002).
+// Pointer-only and best-effort — never fatal to the run.
+autoRegister(cfg);
 
 // Reset the live state the dashboard and status line read once a run is truly
 // over, so a finished run stops showing as current. Skip while anything is still

@@ -22,4 +22,6 @@ export type { Finding, FindingReporter, FindingContext, FindingResult } from "./
 export { listParked, readParked, hasParked, clearParked, park } from "./state.ts";
 export type { ParkedRecord, ParkReason } from "./state.ts";
 export { tgSend, tgWaitReply, tgConfigured } from "./telegram.ts";
+export { register, listProjects, readProject, readProjects, pointerFor, autoRegister, gatewayConfigDir } from "./registry.ts";
+export type { ProjectPointer, ReadProject } from "./registry.ts";
 export { log, setLogFile } from "./log.ts";

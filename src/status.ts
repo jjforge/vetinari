@@ -1,13 +1,13 @@
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import type { ResolvedConfig } from "./config.ts";
 import { log } from "./log.ts";
 import { listProjects, type ProjectPointer } from "./registry.ts";
 import { listParked, parkedDirOf, type ParkedRecord } from "./state.ts";
-import { applyCarve, computeCarve } from "./carve.ts";
+import { applyCarve } from "./carve.ts";
 
 export type IssueStatus = "completed" | "parked" | "failure" | "running" | "unstarted";
 
@@ -372,19 +372,18 @@ const renderCompletedWave = (wave: StatusWave, project: string, carve: boolean) 
 
 /**
  * The multi-project chrome around a single project's status: the list of every
- * registered project for the dropdown and which one is selected. Omitted for the
- * standalone per-project server, which renders exactly one project with no picker.
+ * registered project for the dropdown and which one is selected. Omitted when no
+ * project list is given (the empty-registry page renders no picker).
  */
 export interface StatusPageOptions {
   projects?: string[];
   selected?: string;
   /**
-   * Render the per-chip carve control. The standalone `serveStatus` serves its
-   * `POST /carve` preview in-process from the project's own `blockedBy` resolver;
-   * the aggregated `serveAllStatus` is a dumb router (ADR 0002) without that
-   * resolver, so it routes both preview and confirm to the selected project's own
-   * install (`carve … --dry-run` then `carve …`). Either way the control carries
-   * its `project` so the aggregated `/carve` targets the right one.
+   * Render the per-chip carve control. The aggregated `serveAllStatus` is a dumb
+   * router (ADR 0002) with no project's `blockedBy` resolver, so it routes both
+   * preview and confirm to the selected project's own install (`carve … --dry-run`
+   * then `carve …`); the control carries its `project` so the aggregated `/carve`
+   * targets the right one.
    */
   carve?: boolean;
 }
@@ -395,53 +394,11 @@ const renderProjectPicker = (projects: string[], selected: string | undefined) =
     .join("")}</select></form>`;
 
 /**
- * The carve preview page: the closure a carve would remove, split into the
- * unfinished issues that actually leave the plan (`dropped`) and the banked ones
- * that stay, behind a confirm form that shells the carve on submit. Mirrors the
- * Telegram preview-then-confirm so the dashboard is as safe (story 19).
- */
-export const renderCarvePreview = (project: string, target: string, removed: string[], dropped: string[]) => {
-  const kept = removed.filter((id) => !dropped.includes(id));
-  const list = (ids: string[]) => ids.map((id) => `#${escapeHtml(id)}`).join(", ");
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>${escapeHtml(project)} — carve #${escapeHtml(target)}</title>
-<style>
-  body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 2rem; background: #090c10; color: #e6edf3; }
-  h1 { letter-spacing: -0.035em; }
-  .card { background: #0b0e12; border: 1px solid #232b35; border-left: 3px solid #f79287; border-radius: 12px; padding: 1rem 1.25rem; margin: 1rem 0; }
-  .actions { display: flex; gap: .75rem; align-items: center; }
-  form { margin: 0; }
-  button { padding: .5rem .9rem; border: 0; border-radius: 9px; cursor: pointer; font-weight: 700; }
-  .confirm button { background: #f79287; color: #2a0a06; }
-  a.cancel { color: #8b98a5; text-decoration: none; padding: .5rem .9rem; }
-</style>
-</head>
-<body>
-<h1>Carve #${escapeHtml(target)} from ${escapeHtml(project)}?</h1>
-<section class="card">
-<p><strong>This will drop:</strong> ${dropped.length ? list(dropped) : "nothing — every issue in the closure is already banked"}</p>
-${kept.length ? `<p><strong>Kept (banked work):</strong> ${list(kept)}</p>` : ""}
-<p><strong>Whole closure:</strong> ${list(removed)}</p>
-</section>
-<div class="actions">
-<form method="post" action="/carve" class="confirm"><input type="hidden" name="taskId" value="${escapeHtml(target)}" /><input type="hidden" name="project" value="${escapeHtml(project)}" /><input type="hidden" name="confirm" value="1" /><button type="submit">✂️ Confirm carve</button></form>
-<a class="cancel" href="/">Cancel</a>
-</div>
-</body>
-</html>`;
-};
-
-/**
  * The aggregated site's carve preview: it is a dumb router (ADR 0002) with no
- * project's `blockedBy` resolver, so unlike the standalone `renderCarvePreview`
- * it does not compute the closure itself — it shows the closure the selected
- * project's own `carve <issue> --dry-run` printed, behind the same confirm form
- * (preview-then-confirm parity, story 19/23). Confirming shells `carve` in that
- * project's root.
+ * project's `blockedBy` resolver, so it does not compute the closure itself — it
+ * shows the closure the selected project's own `carve <issue> --dry-run` printed,
+ * behind a confirm form (preview-then-confirm parity, story 19/23). Confirming
+ * shells `carve` in that project's root. Serves as the no-JS carve fallback.
  */
 export const renderAggregatedCarvePreview = (project: string, target: string, previewText: string) => `<!doctype html>
 <html lang="en">
@@ -591,86 +548,6 @@ ${
 </html>`;
 
 /**
- * How the status server shells a follow-up CLI command (`answer`, `carve`). The
- * real one is `child_process.spawn`; tests inject a recorder so the handler's
- * routing is asserted without spawning a process. Only the shape the handlers
- * use is required.
- */
-export type SpawnFn = (command: string, args: string[], options: { stdio: readonly (string | number)[] }) => unknown;
-
-export async function serveStatus(cfg: ResolvedConfig, opts: { port: number; host: string; configPath?: string; spawn?: SpawnFn }) {
-  mkdirSync(cfg.stateDir, { recursive: true });
-  const spawnCmd = opts.spawn ?? spawn;
-  const server = createServer((req, res) => {
-    void (async () => {
-      if (req.method === "GET" && req.url === "/api/status") {
-        res.setHeader("content-type", "application/json");
-        res.end(JSON.stringify(await buildStatusWithIssueNames(cfg)));
-        return;
-      }
-      if (req.method === "POST" && req.url === "/answer") {
-        const body = await readBody(req);
-        const form = new URLSearchParams(body);
-        const taskId = form.get("taskId");
-        const text = form.get("text");
-        if (!taskId || !text) {
-          res.writeHead(400).end("taskId and text are required");
-          return;
-        }
-        const args = [...process.execArgv, process.argv[1], "answer", taskId, text, ...(opts.configPath ? ["--config", opts.configPath] : [])];
-        spawnCmd(process.execPath, args, { stdio: ["ignore", "inherit", "inherit"] });
-        res.writeHead(303, { location: "/" }).end();
-        return;
-      }
-      if (req.method === "POST" && req.url === "/carve") {
-        const body = await readBody(req);
-        const form = new URLSearchParams(body);
-        const taskId = form.get("taskId");
-        if (!taskId) {
-          res.writeHead(400).end("taskId is required");
-          return;
-        }
-        if (!cfg.blockedBy) {
-          res.writeHead(400).end('carve needs a "blockedBy" resolver in this project\'s config.');
-          return;
-        }
-        // Confirm step: shell the project's `carve <issue>`, which prunes the
-        // running campaign by appending a carve event (ADR 0005, ticket B). Same
-        // shell-out the CLI and gateway use, so all entry points share behavior.
-        if (form.get("confirm")) {
-          const args = [...process.execArgv, process.argv[1], "carve", taskId, ...(opts.configPath ? ["--config", opts.configPath] : [])];
-          spawnCmd(process.execPath, args, { stdio: ["ignore", "inherit", "inherit"] });
-          res.writeHead(303, { location: "/" }).end();
-          return;
-        }
-        // Preview step: compute the closure the carve would remove and show it,
-        // gating the destructive act behind a confirm — the danger is that one
-        // issue drags a bigger subtree than you realized.
-        const reduced = reduceCampaign(readEvents(cfg));
-        const { removed } = await computeCarve(reduced.waves, taskId, cfg.blockedBy);
-        const { dropped } = applyCarve(reduced, removed);
-        res.setHeader("content-type", "text/html; charset=utf-8");
-        res.end(renderCarvePreview(cfg.project, taskId, removed, dropped));
-        return;
-      }
-      if (req.method === "GET" && (req.url === "/" || req.url === undefined)) {
-        res.setHeader("content-type", "text/html; charset=utf-8");
-        res.end(renderStatusPage(await buildStatusWithIssueNames(cfg), { carve: true }));
-        return;
-      }
-      res.writeHead(404).end("not found");
-    })().catch((err) => {
-      res.writeHead(500).end(String(err?.stack ?? err));
-    });
-  });
-  await new Promise<void>((resolve) => server.listen(opts.port, opts.host, resolve));
-  const address = server.address() as AddressInfo;
-  const shownHost = opts.host === "0.0.0.0" ? "<tailnet-or-host-ip>" : opts.host;
-  console.log(`sandcastle-tdd status: http://${shownHost}:${address.port}`);
-  return server;
-}
-
-/**
  * Which project the aggregated view shows: the one named in the request, or the
  * first registered project when none is named (or the name is stale). Never
  * undefined given at least one project — the page always shows something useful
@@ -687,7 +564,9 @@ export function selectStatus(statuses: CampaignStatus[], requested?: string): Ca
  * renders the one the `project` query param selects — defaulting to the first.
  * The parked-answer POST carries its project so the resume runs in that project's
  * own root with its own config and gates (ADR 0003), mirroring the gateway's
- * reply routing. The standalone `serveStatus` remains the no-gateway fallback.
+ * reply routing. This is the one dashboard the `status` CLI mode serves; it reads
+ * only the registry, so it needs no gateway daemon — a single, no-gateway project
+ * is just a one-entry dropdown (ADR 0006).
  */
 /**
  * Preview a carve by shelling the project's own `carve <issue> --dry-run` via the
@@ -770,8 +649,8 @@ export async function serveAllStatus(
         // Confirm step: the aggregated site is a dumb router (ADR 0002) — it holds
         // no project's `blockedBy` resolver, so it routes the carve to the selected
         // project's own install, shelling `carve <issue>` in that project's root
-        // exactly as the standalone dashboard and the Telegram gateway do. The
-        // no-plan form prunes the running campaign (ticket B).
+        // exactly as the Telegram gateway does. The no-plan form prunes the
+        // running campaign (ticket B).
         if (form.get("confirm")) {
           spawnCmd(process.execPath, [...process.execArgv, process.argv[1], "carve", taskId], {
             cwd: pointer.projectRoot,
@@ -812,7 +691,7 @@ export async function serveAllStatus(
   await new Promise<void>((resolve) => server.listen(opts.port, opts.host, resolve));
   const address = server.address() as AddressInfo;
   const shownHost = opts.host === "0.0.0.0" ? "<tailnet-or-host-ip>" : opts.host;
-  console.log(`sandcastle-tdd gateway status: http://${shownHost}:${address.port}`);
+  console.log(`sandcastle-tdd status: http://${shownHost}:${address.port}`);
   return server;
 }
 

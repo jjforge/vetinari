@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { buildAllStatus, buildStatus, buildStatusWithIssueNames, campaignRunning, extractParkedDetails, formatStatusText, reduceCampaign, renderStatusPage, selectStatus, serveAllStatus, serveStatus } from "./status.ts";
+import { buildAllStatus, buildStatus, buildStatusWithIssueNames, campaignRunning, extractParkedDetails, formatStatusText, reduceCampaign, renderStatusPage, selectStatus, serveAllStatus } from "./status.ts";
 import type { CampaignStatus } from "./status.ts";
 import type { AddressInfo } from "node:net";
 import { register, type ProjectPointer } from "./registry.ts";
@@ -90,6 +90,34 @@ test("serveAllStatus serves the aggregated site, selecting the project from the 
     // Beta's own campaign (issue 201) renders in the body, not alpha's issue 101.
     assert.match(beta, /#201 <small>/);
     assert.doesNotMatch(beta, /#101 <small>/);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serveAllStatus renders a single registered project as a one-entry dropdown with campaign, wave and parked intact", async () => {
+  const configDir = join(tmpdir(), `sctdd-serve-solo-${Date.now()}`);
+  const soloDir = join(configDir, "state-solo");
+  seedState(soloDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"]] }]);
+  // A parked issue in the active campaign — the single-project view keeps its answer card.
+  writeFileSync(
+    join(soloDir, "parked", "101.json"),
+    JSON.stringify({ taskId: "101", parkedAt: "now", reason: "blocked", branch: "agent/101", sessionId: "s", question: "Need a choice." }),
+  );
+  register(configDir, { project: "solo", projectRoot: join(configDir, "solo-root"), baseLocation: soloDir });
+
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const { port } = server.address() as AddressInfo;
+  try {
+    const root = await (await fetch(`http://127.0.0.1:${port}/`)).text();
+    // A no-gateway, single-project user is just a one-entry dropdown on the aggregated view (ADR 0006).
+    assert.match(root, /<select name="project"/);
+    assert.deepEqual(root.match(/<option value="[^"]*"/g), ['<option value="solo"']);
+    assert.match(root, /<option value="solo" selected>/);
+    // Its own campaign wave and parked answer card render intact.
+    assert.match(root, /#101 <small>/);
+    assert.match(root, /Parked issues/);
+    assert.match(root, /<form method="post" action="\/answer"/);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -594,8 +622,8 @@ test("renderStatusPage collapses closed waves into expandable completed wave chi
   assert.match(html, /<section class="wave"><h2>Wave 2 <span class="wave-status running">running<\/span><\/h2>/);
 });
 
-test("serveStatus can bind to a non-localhost host for tailnet access", () => {
-  assert.match(String(serveStatus), /server\.listen\(opts\.port,\s*opts\.host,/);
+test("serveAllStatus can bind to a non-localhost host for tailnet access", () => {
+  assert.match(String(serveAllStatus), /server\.listen\(opts\.port,\s*opts\.host,/);
 });
 
 test("formatStatusText summarizes waves, issue chips (with names), and the parked section", () => {
@@ -672,64 +700,6 @@ test("renderStatusPage auto-refresh checkbox gates and persists the timer", () =
   assert.match(html, /refreshInput\.disabled = !refreshEnabled\.checked/);
   assert.match(html, /if \(refreshEnabled\.checked && Number\.isFinite\(seconds\) && seconds > 0\)/);
   assert.match(html, /refreshEnabled\.addEventListener\("change", scheduleRefresh\)/);
-});
-
-test("serveStatus POST /carve previews the removed closure without shelling anything", async () => {
-  const dir = join(tmpdir(), `sctdd-carve-preview-${Date.now()}`);
-  seedState(dir, [
-    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["201"], ["301"]] },
-  ]);
-  const cfg = { ...cfgFor(dir), blockedBy: (id: string) => (id === "301" ? ["201"] : []) } as ResolvedConfig;
-
-  const spawned: { args: string[] }[] = [];
-  const server = await serveStatus(cfg, { port: 0, host: "127.0.0.1", spawn: (_cmd, args) => spawned.push({ args }) });
-  const { port } = server.address() as AddressInfo;
-  try {
-    const res = await fetch(`http://127.0.0.1:${port}/carve`, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ taskId: "201", project: "demo" }).toString(),
-    });
-    assert.equal(res.status, 200);
-    const body = await res.text();
-    // The preview lists the whole closure — the target and its dependent.
-    assert.match(body, /#201/);
-    assert.match(body, /#301/);
-    // A confirm affordance that will actually execute the carve.
-    assert.match(body, /<form method="post" action="\/carve"[\s\S]*?name="confirm"/);
-    // Nothing has been carved yet — preview shells nothing.
-    assert.equal(spawned.length, 0);
-  } finally {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-  }
-});
-
-test("serveStatus POST /carve on confirm shells the running campaign's carve", async () => {
-  const dir = join(tmpdir(), `sctdd-carve-confirm-${Date.now()}`);
-  seedState(dir, [
-    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["201"], ["301"]] },
-  ]);
-  const cfg = { ...cfgFor(dir), blockedBy: (id: string) => (id === "301" ? ["201"] : []) } as ResolvedConfig;
-
-  const spawned: { command: string; args: string[] }[] = [];
-  const server = await serveStatus(cfg, { port: 0, host: "127.0.0.1", spawn: (command, args) => spawned.push({ command, args }) });
-  const { port } = server.address() as AddressInfo;
-  try {
-    const res = await fetch(`http://127.0.0.1:${port}/carve`, {
-      method: "POST",
-      redirect: "manual",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ taskId: "201", project: "demo", confirm: "1" }).toString(),
-    });
-    // Redirects back to the dashboard, exactly like the answer control.
-    assert.equal(res.status, 303);
-    assert.equal(res.headers.get("location"), "/");
-    // Executing routes to the running campaign's carve (the no-plan form, ticket B).
-    assert.equal(spawned.length, 1);
-    assert.deepEqual(spawned[0].args.slice(-2), ["carve", "201"]);
-  } finally {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-  }
 });
 
 test("renderStatusPage renders a carve control only on still-carvable chips", () => {

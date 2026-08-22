@@ -21,6 +21,12 @@ export interface Placement {
   wave: number;
   /** its in-set open blockers — all in earlier waves; empty in wave 0. */
   after: string[];
+  /**
+   * the earlier tickets in this ticket's dependency layer it shares a file with
+   * — the crossover that spilled it into a later sub-wave. Empty (or absent
+   * before `partitionWaves`) when no file collision moved it.
+   */
+  sharesFilesWith?: string[];
 }
 
 export interface UnreachableTicket {
@@ -109,6 +115,59 @@ export async function layerWaves(ids: string[], blockedByOf: BlockedByOf): Promi
   return { waves, placements, unreachable };
 }
 
+const disjoint = (a: Set<string>, b: Set<string>) => {
+  for (const x of b) if (a.has(x)) return false;
+  return true;
+};
+
+/**
+ * Split each dependency layer of a `layerWaves` plan into basename-disjoint
+ * sub-waves, so no two tickets in a wave touch the same file (user story 5).
+ * Cross-layer pairs are already serialized by the DAG, so crossover only has to
+ * be resolved *within* a layer.
+ *
+ * Greedy first-fit: walk the layer in order and drop each ticket into the
+ * earliest sub-wave that shares none of its basenames; if every existing sub-wave
+ * collides, it spills into a new one. Spilling can add a wave or two — the
+ * intended trade for a wave that never collides at integration. Collisions are
+ * judged by basename (`basenamesOf`), never by cited path.
+ *
+ * A ticket with no known basenames (empty set) collides with nothing and stays on
+ * the frontier of its layer. The DAG ordering is preserved: a ticket's blockers
+ * sit in strictly earlier layers, hence in strictly earlier sub-waves.
+ */
+export function partitionWaves(plan: WavePlan, basenamesOf: Map<string, Set<string>>): WavePlan {
+  const namesOf = (id: string) => basenamesOf.get(id) ?? new Set<string>();
+  const afterOf = new Map(plan.placements.map((p) => [p.id, p.after]));
+
+  const waves: string[][] = [];
+  const placements: Placement[] = [];
+  for (const layer of plan.waves) {
+    const subWaves: { ids: string[]; names: Set<string> }[] = [];
+    for (const id of layer) {
+      const names = namesOf(id);
+
+      let idx = subWaves.findIndex((sw) => disjoint(sw.names, names));
+      if (idx === -1) {
+        idx = subWaves.push({ ids: [], names: new Set() }) - 1;
+      }
+      const slot = subWaves[idx];
+      slot.ids.push(id);
+      for (const n of names) slot.names.add(n);
+
+      // Why it landed here and not earlier: the already-placed tickets in strictly
+      // earlier sub-waves it shares a file with. Empty when it stayed on the
+      // frontier — greedy first-fit means every earlier sub-wave holds a collider.
+      const sharesFilesWith = subWaves.slice(0, idx).flatMap((sw) => sw.ids).filter((prior) => !disjoint(namesOf(prior), names));
+
+      placements.push({ id, wave: waves.length + idx, after: afterOf.get(id) ?? [], sharesFilesWith });
+    }
+    for (const sw of subWaves) waves.push(sw.ids);
+  }
+
+  return { waves, placements, unreachable: plan.unreachable };
+}
+
 /**
  * The bare quoted wave arguments, ready to paste straight after `campaign`:
  * one quoted, space-joined group per wave (e.g. `"611 623" "640" "701"`).
@@ -131,8 +190,11 @@ export function describePlan(plan: WavePlan): string {
   ];
 
   for (const p of plan.placements) {
-    const why = p.after.length ? `after ${p.after.map((b) => `#${b}`).join(", ")}` : "no open blocker in the selected set";
-    lines.push(`  wave ${p.wave}  #${p.id}  — ${why}`);
+    const reasons = [p.after.length ? `after ${p.after.map((b) => `#${b}`).join(", ")}` : "no open blocker in the selected set"];
+    if (p.sharesFilesWith?.length) {
+      reasons.push(`spilled — shares a file with ${p.sharesFilesWith.map((b) => `#${b}`).join(", ")}`);
+    }
+    lines.push(`  wave ${p.wave}  #${p.id}  — ${reasons.join("; ")}`);
   }
 
   if (plan.unreachable.length) {

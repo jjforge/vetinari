@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { existsSync } from "node:fs";
 import type { FindingReporter } from "./findings.ts";
+import type { FileSetOf } from "./fileset.ts";
 
 export interface GateSpec {
   /** Shell command run INSIDE the sandbox. Non-zero exit is red. */
@@ -56,6 +57,16 @@ export interface SandcastleTddConfig {
    * ships as a ready GitHub implementation.
    */
   blockedBy?: (id: string) => string[] | Promise<string[]>;
+  /**
+   * Which files a ticket will touch, by basename, so `campaign-plan` can keep
+   * co-wave tickets file-disjoint (a wave that shares a file collides as a merge
+   * conflict at integration). `ticket` is the ticket's text; return
+   * `{ files, confident }` where `files` are basenames and `confident: false`
+   * means the file-set could not be pinned down (the planner then halts rather
+   * than guess). A config seam beside `blockedBy`/`fetchTask` — `defaultFileSet()`
+   * ships as a generic cites-from-body implementation you can use or wrap.
+   */
+  fileSet?: FileSetOf;
   /**
    * When set, a green run ends with a "harvest" turn asking the agent for any
    * defect it noticed but did not fix — context that would otherwise vanish with

@@ -8,9 +8,11 @@ export { attend, baseline, campaign, dispatch, queue, tgTest } from "./modes.ts"
 export { computeCarve, restrictBlockers } from "./carve.ts";
 export { formatContextLine, formatStatusLine, runStatusLine, trimModelName } from "./statusline.ts";
 export type { CarveResult, BlockedByOf, RestrictedBlockers } from "./carve.ts";
-export { layerWaves, waveArgs, describePlan } from "./plan.ts";
+export { layerWaves, partitionWaves, waveArgs, describePlan } from "./plan.ts";
 export type { WavePlan, Placement, UnreachableTicket } from "./plan.ts";
 export { githubBlockedBy, githubFindingReporter } from "./github.ts";
+export { defaultFileSet } from "./fileset.ts";
+export type { FileSet, FileSetOf } from "./fileset.ts";
 export { parseFindings, reportFindings } from "./findings.ts";
 export { archiveRun } from "./archive.ts";
 export type { ArchiveResult } from "./archive.ts";

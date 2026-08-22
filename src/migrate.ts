@@ -13,8 +13,9 @@
  * epic (E3, #14); the plan warns about them rather than attempting them.
  */
 
-import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { resolveConfigPath } from "./config.ts";
 
 const CANONICAL_DIR = "sandcastle";
 const LOCAL_DIR = ".sandcastle.local";
@@ -137,4 +138,66 @@ export function applyLayoutMigration(baseDir: string, plan: LayoutMigrationPlan)
   if (gitignoreUpdated) writeFileSync(resolve(baseDir, ".gitignore"), plan.gitignore!);
 
   return { moved: plan.moves, gitignoreUpdated };
+}
+
+/**
+ * Probe `baseDir` into a `LayoutScan` — the filesystem read that lives at the
+ * edge so the planner stays pure. The legacy config location comes from the same
+ * resolver `loadConfig` uses, so migrate and resolution never disagree on what
+ * counts as a deprecated config. `existing` lists everything already under the
+ * two destination dirs, so any would-be clobber surfaces as a conflict.
+ */
+export function scanLayout(baseDir: string): LayoutScan {
+  const listDir = (rel: string): string[] => {
+    try {
+      return readdirSync(resolve(baseDir, rel));
+    } catch {
+      return [];
+    }
+  };
+  let gitignore: string | undefined;
+  try {
+    gitignore = readFileSync(resolve(baseDir, ".gitignore"), "utf8");
+  } catch {
+    gitignore = undefined;
+  }
+  return {
+    legacyConfig: resolveConfigPath(baseDir)?.deprecatedFrom,
+    oldState: listDir(OLD_DIR),
+    gitignore,
+    existing: [
+      ...listDir(CANONICAL_DIR).map((e) => `${CANONICAL_DIR}/${e}`),
+      ...listDir(LOCAL_DIR).map((e) => `${LOCAL_DIR}/${e}`),
+    ],
+  };
+}
+
+/**
+ * A human-facing summary of a plan: the moves, the `.gitignore` edit, warnings,
+ * and — when the plan is refused — the conflicting destinations. Pure, so the
+ * CLI prints the same text for both `--dry-run` (the plan) and a real run (what
+ * it did). An empty plan reads as "nothing to do".
+ */
+export function describeMigration(plan: LayoutMigrationPlan): string {
+  const lines: string[] = [];
+
+  if (plan.conflicts.length) {
+    lines.push(`migrate REFUSED — ${plan.conflicts.length} destination(s) already exist:`);
+    for (const c of plan.conflicts) lines.push(`  ✗ ${c}`);
+    lines.push("Move or remove them, then re-run. Nothing will be changed until they are gone.");
+  }
+
+  const changesNothing = !plan.moves.length && plan.gitignore === undefined && !plan.conflicts.length;
+  if (changesNothing) {
+    return "Nothing to do — this project is already on the sandcastle/ + .sandcastle.local/ layout.";
+  }
+
+  if (plan.moves.length) {
+    lines.push(`Moves (${plan.moves.length}):`);
+    for (const m of plan.moves) lines.push(`  ${m.from} → ${m.to}`);
+  }
+  if (plan.gitignore !== undefined) lines.push("Update .gitignore to exclude .sandcastle.local/ (and keep .sandcastle/ ignored).");
+  for (const w of plan.warnings) lines.push(`⚠ ${w}`);
+
+  return lines.join("\n");
 }

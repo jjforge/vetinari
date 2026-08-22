@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { applyLayoutMigration, computeLayoutMigration } from "./migrate.ts";
+import { applyLayoutMigration, computeLayoutMigration, describeMigration, scanLayout } from "./migrate.ts";
 
 let counter = 0;
 const tmpProject = () => {
@@ -139,4 +139,60 @@ test("applyLayoutMigration refuses a plan with conflicts and changes nothing", (
   // The pre-existing destination is untouched and the source is left in place.
   assert.equal(readFileSync(join(dir, ".sandcastle.local", "logs"), "utf8"), "already here\n");
   assert.equal(readFileSync(join(dir, ".sandcastle", "logs"), "utf8"), "old\n");
+});
+
+test("scanLayout reads a legacy project off disk into a scan the planner can use", () => {
+  const dir = tmpProject();
+  mkdirSync(join(dir, ".sandcastle", "logs"), { recursive: true });
+  writeFileSync(join(dir, ".sandcastle", "config.mts"), "export default {}\n");
+  writeFileSync(join(dir, ".gitignore"), ".sandcastle/\n");
+
+  const scan = scanLayout(dir);
+
+  assert.equal(scan.legacyConfig, ".sandcastle/config.mts");
+  assert.deepEqual([...scan.oldState!].sort(), ["config.mts", "logs"]);
+  assert.equal(scan.gitignore, ".sandcastle/\n");
+
+  // Fed to the planner it produces the config + state moves.
+  const plan = computeLayoutMigration(scan);
+  assert.ok(plan.moves.some((m) => m.to === "sandcastle/config.mts"));
+  assert.ok(plan.moves.some((m) => m.to === ".sandcastle.local/logs"));
+});
+
+test("scanLayout flags an existing destination so the plan refuses it", () => {
+  const dir = tmpProject();
+  mkdirSync(join(dir, ".sandcastle"), { recursive: true });
+  mkdirSync(join(dir, ".sandcastle.local"), { recursive: true });
+  writeFileSync(join(dir, ".sandcastle", "logs"), "x\n");
+  writeFileSync(join(dir, ".sandcastle.local", "logs"), "y\n");
+
+  const plan = computeLayoutMigration(scanLayout(dir));
+  assert.deepEqual(plan.conflicts, [".sandcastle.local/logs"]);
+});
+
+test("describeMigration reports nothing to do for an empty plan", () => {
+  const text = describeMigration(computeLayoutMigration({ oldState: [], gitignore: ".sandcastle.local/\n.sandcastle/\n" }));
+  assert.match(text, /nothing to do/i);
+});
+
+test("describeMigration summarizes moves, the gitignore edit, and the deferred warning", () => {
+  const text = describeMigration(
+    computeLayoutMigration({
+      legacyConfig: ".sandcastle/config.mts",
+      oldState: ["config.mts", "logs"],
+      gitignore: ".sandcastle/\n",
+    }),
+  );
+  assert.match(text, /\.sandcastle\/config\.mts.*sandcastle\/config\.mts/);
+  assert.match(text, /\.sandcastle\/logs.*\.sandcastle\.local\/logs/);
+  assert.match(text, /\.gitignore/);
+  assert.match(text, /E3|#14/);
+});
+
+test("describeMigration leads with the conflicts when the plan is refused", () => {
+  const text = describeMigration(
+    computeLayoutMigration({ oldState: ["logs"], gitignore: ".sandcastle/\n", existing: [".sandcastle.local/logs"] }),
+  );
+  assert.match(text, /refus|conflict/i);
+  assert.match(text, /\.sandcastle\.local\/logs/);
 });

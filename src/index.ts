@@ -12,6 +12,8 @@ export { githubBlockedBy, githubFindingReporter } from "./github.ts";
 export { parseFindings, reportFindings } from "./findings.ts";
 export { archiveRun } from "./archive.ts";
 export type { ArchiveResult } from "./archive.ts";
+export { computeLayoutMigration, applyLayoutMigration, scanLayout, describeMigration } from "./migrate.ts";
+export type { LayoutScan, LayoutMigrationPlan, Move, ApplyResult } from "./migrate.ts";
 export type { Finding, FindingReporter, FindingContext, FindingResult } from "./findings.ts";
 export { listParked, readParked, hasParked, clearParked, park } from "./state.ts";
 export type { ParkedRecord, ParkReason } from "./state.ts";

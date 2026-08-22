@@ -361,6 +361,7 @@ it there too and re-run that project's `baseline`.
 | `queue <task…>` | bounded pool; a park frees its slot |
 | `campaign <batch…>` | drain each batch, merge its greens, gate the merged base, then start the next |
 | `carve <issue> <batch…>` | drop the issue + its transitive dependents, then run the rest as a campaign (`--dry-run` to just print) |
+| `migrate [--dry-run]` | move an existing project onto the `sandcastle/` + `.sandcastle.local/` layout: config → `sandcastle/`, old `.sandcastle/` state → `.sandcastle.local/`, `.gitignore` updated (`--dry-run` to just print the plan) |
 | `answer <task> <text>` | resume a parked task with your answer |
 | `attend <task>` | one task, self-answering via Telegram |
 | `dispatch` | the single poller; routes replies to parked tasks, and answers `/status` with a live summary |

@@ -32,6 +32,16 @@ test("githubBlockedBy handles an empty dependency list", () => {
   assert.deepEqual(githubBlockedBy("jjforge/jjforge", () => "[]")("782"), []);
 });
 
+test("githubBlockedBy drops closed blockers — only OPEN prerequisites gate", () => {
+  const run = () =>
+    JSON.stringify([
+      { number: 191, state: "open", repository: { full_name: "jjforge/jjforge" } },
+      { number: 200, state: "closed", repository: { full_name: "jjforge/jjforge" } },
+    ]);
+
+  assert.deepEqual(githubBlockedBy("jjforge/jjforge", run)("782"), ["191"]);
+});
+
 test("githubFindingReporter creates a labeled issue cross-referenced to the task", () => {
   let captured: string[] = [];
   const run = (args: string[]) => {

@@ -4,7 +4,22 @@ export { runLoop, answerPromptFor, DONE, BLOCKED } from "./loop.ts";
 export type { Outcome, ResumeEntry } from "./loop.ts";
 export { runGates } from "./gate.ts";
 export { makeSandbox, agentFor } from "./sandbox.ts";
-export { attend, baseline, campaign, dispatch, queue, tgTest } from "./modes.ts";
+export { baseline, campaign, queue, tgTest } from "./modes.ts";
+export {
+  gateway,
+  loadGatewayProjects,
+  pollTargets,
+  pollLoop,
+  pendingAnnouncements,
+  rebuildIndex,
+  newReplyIndex,
+  recordSend,
+  resolveReply,
+  routeReply,
+  isStatusCommand,
+  formatGatewayStatus,
+} from "./gateway.ts";
+export type { GatewayProject, SendRef, ReplyIndex, Announcement, ReplyAction, PollDeps } from "./gateway.ts";
 export { computeCarve, restrictBlockers } from "./carve.ts";
 export { formatContextLine, formatStatusLine, runStatusLine, trimModelName } from "./statusline.ts";
 export type { CarveResult, BlockedByOf, RestrictedBlockers } from "./carve.ts";

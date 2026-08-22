@@ -3,7 +3,8 @@ import { createInterface } from "node:readline/promises";
 import { loadConfig } from "./config.ts";
 import { log, setLogFile } from "./log.ts";
 import { answerPromptFor, runLoop } from "./loop.ts";
-import { attend, baseline, campaign, dispatch, queue, requireTelegram, tgTest } from "./modes.ts";
+import { baseline, campaign, queue, requireTelegram, tgTest } from "./modes.ts";
+import { gateway } from "./gateway.ts";
 import { computeCarve } from "./carve.ts";
 import { describePlan, planCampaign, underspecifiedPromptFor, waveArgs, type UnderspecifiedDecision } from "./plan.ts";
 import { defaultFileSet } from "./fileset.ts";
@@ -34,8 +35,10 @@ const USAGE = `sandcastle-tdd <mode> [args]
                            .sandcastle.local/, .gitignore updated (--dry-run to print
                            the plan and change nothing)
   answer <task> <text>     resume a parked task with a human answer
-  attend <task>            one task, answering itself via Telegram replies
-  dispatch                 the ONE Telegram poller; routes replies to parked tasks
+  gateway                  the host daemon fronting every registered project: the
+                           sole Telegram consumer and sender — announces parked
+                           questions, routes replies to the right project+task,
+                           and resumes them concurrently via the shared install
   parked                   list parked tasks and their questions
   clear                    archive the run log + clear parked, resetting the
                            dashboard/status line to idle (automatic on clean
@@ -110,6 +113,15 @@ if (mode === "migrate") {
   if (result.moved.length || result.gitignoreUpdated) {
     console.log(`\nMigrated: moved ${result.moved.length} path(s)${result.gitignoreUpdated ? ", updated .gitignore" : ""}.`);
   }
+  process.exit(0);
+}
+
+// The gateway is a HOST-level daemon fronting every registered project, not a
+// per-project mode — it reads each project's config and secrets live from the
+// registry, so it must run BEFORE the strict cwd config load (which the gateway's
+// own directory need not satisfy).
+if (mode === "gateway") {
+  await gateway();
   process.exit(0);
 }
 
@@ -213,17 +225,6 @@ switch (mode) {
     if (!taskId || !text.length) throw new Error('answer needs a task id and text: answer <task> "<answer>"');
     const parked = readParked(cfg, taskId);
     process.exitCode = (await runLoop(cfg, taskId, { resumeSessionId: parked.sessionId!, answerPrompt: answerPromptFor(text.join(" ")) })) === "green" ? 0 : 2;
-    break;
-  }
-  case "attend": {
-    if (!rest[0]) throw new Error("attend needs a task id");
-    requireTelegram("attend");
-    await attend(cfg, rest[0]);
-    break;
-  }
-  case "dispatch": {
-    requireTelegram("dispatch");
-    await dispatch(cfg);
     break;
   }
   case "parked": {

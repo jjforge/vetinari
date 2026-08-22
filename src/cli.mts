@@ -4,6 +4,7 @@ import { log, setLogFile } from "./log.ts";
 import { answerPromptFor, runLoop } from "./loop.ts";
 import { attend, baseline, campaign, dispatch, queue, requireTelegram, tgTest } from "./modes.ts";
 import { computeCarve } from "./carve.ts";
+import { describePlan, layerWaves, waveArgs } from "./plan.ts";
 import { applyLayoutMigration, computeLayoutMigration, describeMigration, scanLayout } from "./migrate.ts";
 import { archiveRun } from "./archive.ts";
 import { listParked, readParked } from "./state.ts";
@@ -18,6 +19,9 @@ const USAGE = `sandcastle-tdd <mode> [args]
   campaign <batch…>        queue each batch, then merge greens → gate base → next batch
   carve <issue> <batch…>   drop <issue> + everything blocked by it, then run the rest
                            as a campaign (--dry-run to only print the reduced plan)
+  campaign-plan <ids…>     layer a selected set into dependency-ordered wave args
+                           (paste after \`campaign\`) + a provenance report. Plans
+                           only — never runs campaign, never pushes.
   migrate [--dry-run]      move this project onto the sandcastle/ + .sandcastle.local/
                            layout: config → sandcastle/, old .sandcastle/ state →
                            .sandcastle.local/, .gitignore updated (--dry-run to print
@@ -133,6 +137,19 @@ switch (mode) {
       break;
     }
     await campaign(cfg, remaining, Math.max(1, Number(process.env.QUEUE_SLOTS ?? 3)));
+    break;
+  }
+  case "campaign-plan": {
+    // A flat selected set of ids: `campaign-plan 436 611 623 640 701`.
+    const ids = rest.flatMap((a) => a.split(/[\s,]+/)).filter(Boolean);
+    if (!ids.length) throw new Error("campaign-plan needs at least one ticket id: campaign-plan 436 611 640");
+    if (!cfg.blockedBy) throw new Error('campaign-plan needs a "blockedBy" resolver in your config — e.g. blockedBy: githubBlockedBy("owner/repo").');
+
+    const plan = await layerWaves(ids, cfg.blockedBy);
+    // The bare wave args, then the human-readable provenance report. Plans only.
+    console.log(waveArgs(plan) || "(nothing schedulable — every ticket is unreachable)");
+    console.log("");
+    console.log(describePlan(plan));
     break;
   }
   case "answer": {

@@ -156,6 +156,32 @@ scope. It runs the reduced campaign immediately; `--dry-run` only prints the
 plan. Because carve only *drops* issues, each remaining wave stays as
 conflict-free as you built it.
 
+**Plan the waves from a selected set.** Building the batch list by hand is where
+the dependency order gets encoded. `campaign-plan` does it for you: hand it the
+ids you selected and it layers them by the `blockedBy` graph *restricted to that
+set*, then prints the bare wave args (ready to paste after `campaign`) and a
+provenance report explaining each ticket's wave:
+
+```bash
+npx sandcastle-tdd campaign-plan 611 623 640 701   # 640←611, 701←640
+# "611 623" "640" "701"
+#
+# campaign-plan: 3 wave(s), 4 ticket(s) scheduled, 0 unreachable.
+#   wave 0  #611  — no open blocker in the selected set
+#   wave 0  #623  — no open blocker in the selected set
+#   wave 1  #640  — after #611
+#   wave 2  #701  — after #640
+```
+
+Wave 0 is the tickets with no *open* in-set blocker: a closed (already-merged)
+blocker does not hold a ticket back. A ticket whose only open blocker sits
+*outside* your selection cannot run against this set — it is reported as
+unreachable and dropped, along with everything that in turn depends on it, never
+scheduled silently. Blocker state comes from the same `blockedBy` resolver as
+`carve` (`githubBlockedBy` filters closed blockers at the edge). It **plans
+only** — it never runs `campaign` and never pushes; paste the wave args into
+`campaign` when you are ready.
+
 ### In your Claude Code status bar
 
 `statusline` prints two lines for the Claude Code status bar: line 1 mirrors
@@ -361,6 +387,7 @@ it there too and re-run that project's `baseline`.
 | `queue <task…>` | bounded pool; a park frees its slot |
 | `campaign <batch…>` | drain each batch, merge its greens, gate the merged base, then start the next |
 | `carve <issue> <batch…>` | drop the issue + its transitive dependents, then run the rest as a campaign (`--dry-run` to just print) |
+| `campaign-plan <ids…>` | layer a selected set into dependency-ordered wave args (paste after `campaign`) + a provenance report; plans only, never runs |
 | `migrate [--dry-run]` | move an existing project onto the `sandcastle/` + `.sandcastle.local/` layout: config → `sandcastle/`, old `.sandcastle/` state → `.sandcastle.local/`, `.gitignore` updated (`--dry-run` to just print the plan) |
 | `answer <task> <text>` | resume a parked task with your answer |
 | `attend <task>` | one task, self-answering via Telegram |

@@ -108,3 +108,42 @@ export async function layerWaves(ids: string[], blockedByOf: BlockedByOf): Promi
 
   return { waves, placements, unreachable };
 }
+
+/**
+ * The bare quoted wave arguments, ready to paste straight after `campaign`:
+ * one quoted, space-joined group per wave (e.g. `"611 623" "640" "701"`).
+ * Empty when nothing is schedulable.
+ */
+export function waveArgs(plan: WavePlan): string {
+  return plan.waves.map((wave) => `"${wave.join(" ")}"`).join(" ");
+}
+
+/**
+ * A human-readable provenance report: each scheduled ticket with its wave and
+ * why it is there, then every dropped ticket with the reason it cannot run
+ * against this set. Plans only — this describes the plan, it does not run it.
+ */
+export function describePlan(plan: WavePlan): string {
+  const scheduled = plan.placements.length;
+  const lines: string[] = [
+    `campaign-plan: ${plan.waves.length} wave(s), ${scheduled} ticket(s) scheduled, ${plan.unreachable.length} unreachable.`,
+    "",
+  ];
+
+  for (const p of plan.placements) {
+    const why = p.after.length ? `after ${p.after.map((b) => `#${b}`).join(", ")}` : "no open blocker in the selected set";
+    lines.push(`  wave ${p.wave}  #${p.id}  — ${why}`);
+  }
+
+  if (plan.unreachable.length) {
+    lines.push("", "Unreachable (dropped — cannot run against this set):");
+    for (const u of plan.unreachable) {
+      const reason = u.external.length
+        ? `open blocker ${u.external.map((b) => `#${b}`).join(", ")} is outside the selected set`
+        : `depends on dropped ${u.via.map((b) => `#${b}`).join(", ")}`;
+      lines.push(`  #${u.id}  — ${reason}`);
+    }
+  }
+
+  return lines.join("\n");
+}

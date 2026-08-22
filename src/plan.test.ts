@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { layerWaves } from "./plan.ts";
+import { describePlan, layerWaves, waveArgs } from "./plan.ts";
 
 // A fake OPEN-blocked-by resolver from a plain edge map: id -> its open blockers.
 // (Closed blockers never reach the resolver — they are filtered at the edge — so
@@ -58,4 +58,30 @@ test("layerWaves carries unreachability down the dependent chain", async () => {
     { id: "701", external: ["555"], via: [] },
     { id: "712", external: [], via: ["701"] },
   ]);
+});
+
+test("waveArgs emits the bare quoted wave args, ready to paste after `campaign`", async () => {
+  const plan = await layerWaves(
+    ["611", "623", "640", "701"],
+    openBlockedByFrom({ "701": ["640"], "640": ["611"] }),
+  );
+
+  assert.equal(waveArgs(plan), '"611 623" "640" "701"');
+});
+
+test("describePlan explains each ticket's wave and lists what was dropped", async () => {
+  const plan = await layerWaves(
+    ["611", "640", "701", "712"],
+    openBlockedByFrom({ "640": ["611"], "701": ["555"], "712": ["701"] }),
+  );
+  const report = describePlan(plan);
+
+  // Each scheduled ticket names its wave and why it is there.
+  assert.match(report, /wave 0.*#611/);
+  assert.match(report, /wave 1.*#640.*611/); // after its in-set blocker
+  // Dropped tickets are reported with their reason, never silently omitted.
+  assert.match(report, /#701.*555.*outside/i); // held by an out-of-set open blocker
+  assert.match(report, /#712.*701/); // dropped as a dependent of 701
+  // A dropped ticket is never presented as scheduled.
+  assert.doesNotMatch(report, /wave \d+\s+#701/);
 });

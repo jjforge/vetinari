@@ -48,9 +48,11 @@ export interface SandcastleTddConfig {
   /** Fetch the task text for an id — an issue body, a spec file, anything. */
   fetchTask: (id: string) => string | Promise<string>;
   /**
-   * The ids that BLOCK a given id (its prerequisites). Only needed by the
-   * `carve` command, which removes an issue and everything transitively blocked
-   * by it from a campaign. Wire it to your tracker — `githubBlockedBy(repo)`
+   * The ids of a given id's OPEN blockers (its prerequisites still in flight).
+   * Closed blockers must be filtered here at the edge — an already-merged
+   * prerequisite does not gate. Used by `carve` (removes an issue and everything
+   * transitively blocked by it) and `campaign-plan` (layers a selected set into
+   * dependency-ordered waves). Wire it to your tracker — `githubBlockedBy(repo)`
    * ships as a ready GitHub implementation.
    */
   blockedBy?: (id: string) => string[] | Promise<string[]>;

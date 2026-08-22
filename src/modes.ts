@@ -6,7 +6,30 @@ import { makeSandbox } from "./sandbox.ts";
 import { currentBranch, integrateGreens } from "./merge.ts";
 import { clearParked, clearParkedForTasks, enqueueOutbound, listParked } from "./state.ts";
 import { tgConfigured, tgEnvConn, tgSend, tgWaitReply } from "./telegram.ts";
-import { readEvents, reduceCampaign } from "./status.ts";
+import { issueNameFromTask, readEvents, reduceCampaign } from "./status.ts";
+
+/**
+ * Resolve each issue's title through the orchestrator's `fetchTask`, keyed by
+ * normalized id, so a run can record an id→title map on its start event for the
+ * dumb-router dashboard to read with no live lookup of its own (ADR 0002).
+ * Best-effort: an id whose task cannot be fetched or carries no structured title
+ * is simply absent from the map — its chip then falls back to `number:status` and
+ * its wave to the bare index, and the whole run still starts (no throw).
+ */
+export async function resolveTitles(cfg: Pick<ResolvedConfig, "fetchTask">, ids: string[]): Promise<Record<string, string>> {
+  const titles: Record<string, string> = {};
+  await Promise.all(
+    [...new Set(ids.map((id) => id.replace(/^#/, "")))].map(async (id) => {
+      try {
+        const title = issueNameFromTask(String(await cfg.fetchTask(id)));
+        if (title) titles[id] = title;
+      } catch {
+        // best-effort — a title we cannot fetch just isn't recorded
+      }
+    }),
+  );
+  return titles;
+}
 
 /**
  * Re-invoke this CLI as a child, preserving however it was launched (the tsx
@@ -41,11 +64,16 @@ export async function baseline(cfg: ResolvedConfig) {
  * Returns the per-task outcome map so a caller (campaign) can act on the greens
  * without re-deriving them from the log.
  */
-export async function queue(cfg: ResolvedConfig, taskIds: string[], slots: number): Promise<Record<string, string>> {
+export async function queue(cfg: ResolvedConfig, taskIds: string[], slots: number, titles?: Record<string, string>): Promise<Record<string, string>> {
   const pending = [...taskIds];
   const outcomes: Record<string, string> = {};
   let running = 0;
-  log("queue-start", { taskIds, slots });
+  // A standalone queue run records its own issue titles on the start event so the
+  // dashboard names them with no lookup (ADR 0002); inside a campaign the caller
+  // already wrote them onto `campaign-start` and passes them here, so we neither
+  // re-resolve nor re-log them.
+  const startTitles = titles === undefined ? await resolveTitles(cfg, taskIds) : undefined;
+  log("queue-start", startTitles && Object.keys(startTitles).length ? { taskIds, slots, titles: startTitles } : { taskIds, slots });
   enqueueOutbound(cfg, {
     category: "progress",
     event: "queue-start",
@@ -103,9 +131,16 @@ export async function campaign(cfg: ResolvedConfig, batches: string[][], slots: 
     );
   }
 
-  // `name` is recorded only when given, so an unnamed `campaign …` writes the
-  // exact same start event it always did (reduceCampaign reads it back).
-  log("campaign-start", name ? { batches, slots, name } : { batches, slots });
+  // Resolve the run's issue titles up front (the orchestrator has `fetchTask`) and
+  // record them on the start event, so the dumb-router dashboard names every wave
+  // and chip — live and archived — with no lookup of its own (ADR 0002). `name` is
+  // still recorded only when given; a run whose titles could not be resolved simply
+  // omits them and degrades to `number:status`.
+  const titles = await resolveTitles(cfg, batches.flat());
+  const startEvent: Record<string, unknown> = { batches, slots };
+  if (name) startEvent.name = name;
+  if (Object.keys(titles).length) startEvent.titles = titles;
+  log("campaign-start", startEvent);
   enqueueOutbound(cfg, {
     category: "progress",
     event: "campaign-start",
@@ -129,7 +164,7 @@ export async function campaign(cfg: ResolvedConfig, batches: string[][], slots: 
       text: `▶️ ${cfg.project} campaign batch ${index + 1}/${total}: ${tasks.join(", ")}`,
     });
 
-    const outcomes = await queue(cfg, tasks, slots);
+    const outcomes = await queue(cfg, tasks, slots, titles);
     const greens = tasks.filter((t) => outcomes[t] === "green");
     const held = tasks.filter((t) => outcomes[t] !== "green");
 

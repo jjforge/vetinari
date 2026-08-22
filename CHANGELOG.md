@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Dashboard issue titles, wave names, and chip hovers (#44). The aggregated web
+  dashboard is a dumb router with no per-project `fetchTask`, so since the
+  one-dashboard consolidation it resolved no issue titles — chip hovers showed only
+  `number:status` and wave names always fell back to the bare `Wave N`, live and
+  archived alike. The orchestrator (which has `fetchTask`) now resolves the run's
+  issue titles up front and records them as an id→title map on the start event —
+  `campaign` on `campaign-start`, a standalone `queue` on `queue-start`.
+  `reduceCampaign` folds those onto each `issue.name`, so the dashboard renders real
+  titles and wave names for both live and archived runs with no lookup of its own. A
+  run whose titles could not be fetched simply omits them and degrades to
+  `number:status` (no crash); an unnamed run without titles writes the same start
+  event it always did.
+
 ### Changed
 
 - Wave headers now read as their work (#43). Each dashboard wave label is derived

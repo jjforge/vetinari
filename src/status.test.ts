@@ -216,6 +216,35 @@ test("buildStatusWithIssueNames adds issue names from fetchTask when available",
   assert.equal(status.waves[0].issues[1].name, undefined);
 });
 
+test("renderStatusPage renders a project dropdown and the selected project's body", () => {
+  const html = renderStatusPage(
+    {
+      project: "beta",
+      waves: [{ index: 0, status: "running", issues: [{ issueNumber: "201", status: "running" }] }],
+      parked: [{ issueNumber: "201", reason: "blocked", parkedAt: "now", branch: "agent/201", description: "Need a choice.", options: [] }],
+    },
+    { projects: ["alpha", "beta", "gamma"], selected: "beta" },
+  );
+
+  // A dropdown of every registered project, auto-submitting the selection back as a GET param.
+  assert.match(html, /<form[^>]*method="get"[^>]*action="\/"[^>]*class="project-picker"/);
+  assert.match(html, /<select name="project" onchange="this\.form\.submit\(\)">/);
+  assert.match(html, /<option value="alpha">alpha<\/option>/);
+  assert.match(html, /<option value="beta" selected>beta<\/option>/);
+  assert.match(html, /<option value="gamma">gamma<\/option>/);
+  // The selected project's own body still renders exactly as the single-project view.
+  assert.match(html, /<section class="wave"><h2>Wave 1 <span class="wave-status running">running<\/span>/);
+  // The answer control carries the project so the gateway can route the reply to it.
+  assert.match(html, /<input type="hidden" name="project" value="beta" \/>/);
+});
+
+test("renderStatusPage omits the project dropdown when no project list is given", () => {
+  const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
+
+  assert.doesNotMatch(html, /class="project-picker"/);
+  assert.doesNotMatch(html, /<select name="project"/);
+});
+
 test("renderStatusPage uses the jjforge dark palette", () => {
   const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
 

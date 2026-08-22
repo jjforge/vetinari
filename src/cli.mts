@@ -32,8 +32,10 @@ const USAGE = `sandcastle-tdd <mode> [args]
                            terminal defaults to fail).
   migrate [--dry-run]      move this project onto the sandcastle/ + .sandcastle.local/
                            layout: config → sandcastle/, old .sandcastle/ state →
-                           .sandcastle.local/, .gitignore updated (--dry-run to print
-                           the plan and change nothing)
+                           .sandcastle.local/, .gitignore updated, orchestrator.env
+                           folded into the gateway host config, and the systemd unit
+                           rewritten into the host-level gateway service (--dry-run
+                           to print the plan and change nothing)
   answer <task> <text>     resume a parked task with a human answer
   gateway                  the host daemon fronting every registered project: the
                            sole Telegram consumer and sender — announces parked
@@ -110,9 +112,12 @@ if (mode === "migrate") {
     process.exit(0);
   }
   const result = applyLayoutMigration(process.cwd(), plan);
-  if (result.moved.length || result.gitignoreUpdated) {
-    console.log(`\nMigrated: moved ${result.moved.length} path(s)${result.gitignoreUpdated ? ", updated .gitignore" : ""}.`);
-  }
+  const did: string[] = [];
+  if (result.moved.length) did.push(`moved ${result.moved.length} path(s)`);
+  if (result.gitignoreUpdated) did.push("updated .gitignore");
+  if (result.hostConfigWritten) did.push("folded orchestrator.env into the gateway host config");
+  if (result.unitRewritten) did.push("rewrote the systemd unit into the gateway service");
+  if (did.length) console.log(`\nMigrated: ${did.join(", ")}.`);
   process.exit(0);
 }
 

@@ -570,6 +570,106 @@ test("renderStatusPage auto-refresh checkbox gates and persists the timer", () =
   assert.match(html, /refreshEnabled\.addEventListener\("change", scheduleRefresh\)/);
 });
 
+test("serveStatus POST /carve previews the removed closure without shelling anything", async () => {
+  const dir = join(tmpdir(), `sctdd-carve-preview-${Date.now()}`);
+  seedState(dir, [
+    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["201"], ["301"]] },
+  ]);
+  const cfg = { ...cfgFor(dir), blockedBy: (id: string) => (id === "301" ? ["201"] : []) } as ResolvedConfig;
+
+  const spawned: { args: string[] }[] = [];
+  const server = await serveStatus(cfg, { port: 0, host: "127.0.0.1", spawn: (_cmd, args) => spawned.push({ args }) });
+  const { port } = server.address() as AddressInfo;
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/carve`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ taskId: "201", project: "demo" }).toString(),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.text();
+    // The preview lists the whole closure — the target and its dependent.
+    assert.match(body, /#201/);
+    assert.match(body, /#301/);
+    // A confirm affordance that will actually execute the carve.
+    assert.match(body, /<form method="post" action="\/carve"[\s\S]*?name="confirm"/);
+    // Nothing has been carved yet — preview shells nothing.
+    assert.equal(spawned.length, 0);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serveStatus POST /carve on confirm shells the running campaign's carve", async () => {
+  const dir = join(tmpdir(), `sctdd-carve-confirm-${Date.now()}`);
+  seedState(dir, [
+    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["201"], ["301"]] },
+  ]);
+  const cfg = { ...cfgFor(dir), blockedBy: (id: string) => (id === "301" ? ["201"] : []) } as ResolvedConfig;
+
+  const spawned: { command: string; args: string[] }[] = [];
+  const server = await serveStatus(cfg, { port: 0, host: "127.0.0.1", spawn: (command, args) => spawned.push({ command, args }) });
+  const { port } = server.address() as AddressInfo;
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/carve`, {
+      method: "POST",
+      redirect: "manual",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ taskId: "201", project: "demo", confirm: "1" }).toString(),
+    });
+    // Redirects back to the dashboard, exactly like the answer control.
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get("location"), "/");
+    // Executing routes to the running campaign's carve (the no-plan form, ticket B).
+    assert.equal(spawned.length, 1);
+    assert.deepEqual(spawned[0].args.slice(-2), ["carve", "201"]);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("renderStatusPage renders a carve control only on still-carvable chips", () => {
+  const html = renderStatusPage({
+    project: "demo",
+    waves: [
+      { index: 0, status: "closed", issues: [{ issueNumber: "101", status: "completed" }] },
+      { index: 1, status: "running", issues: [{ issueNumber: "201", status: "running" }] },
+      {
+        index: 2,
+        status: "unstarted",
+        issues: [
+          { issueNumber: "301", status: "unstarted" },
+          { issueNumber: "302", status: "parked" },
+        ],
+      },
+    ],
+    parked: [],
+  }, { carve: true });
+
+  // A carve control on the unstarted future-wave issue and the parked one...
+  assert.match(html, /<form method="post" action="\/carve"[^>]*>[\s\S]*?name="taskId" value="301"/);
+  assert.match(html, /<form method="post" action="\/carve"[^>]*>[\s\S]*?name="taskId" value="302"/);
+  // ...carrying the project so the aggregated site can route it.
+  assert.match(html, /<form method="post" action="\/carve"[\s\S]*?name="project" value="demo"/);
+  // ...but never on the completed (banked) or the current-wave-in-flight (running) chip.
+  assert.doesNotMatch(html, /action="\/carve"[\s\S]*?name="taskId" value="101"/);
+  assert.doesNotMatch(html, /action="\/carve"[\s\S]*?name="taskId" value="201"/);
+  // The control is a compact chip-attached button, not the full-size form button.
+  assert.match(html, /\.carve-btn \{[^}]*border-radius: 999px/);
+});
+
+test("renderStatusPage omits the carve control unless the page opts into it", () => {
+  // The aggregated site (a dumb router without the project's blockedBy resolver)
+  // must not offer a carve control it cannot preview (ADR 0002).
+  const html = renderStatusPage({
+    project: "demo",
+    waves: [{ index: 0, status: "unstarted", issues: [{ issueNumber: "301", status: "unstarted" }] }],
+    parked: [],
+  });
+
+  assert.doesNotMatch(html, /action="\/carve"/);
+});
+
 test("extractParkedDetails separates description from Options section", () => {
   const details = extractParkedDetails("I am parked on the API choice.\n\nOptions:\n1. Return raw JSON\n2. Render HTML server-side\n\nWhat do you prefer?");
 

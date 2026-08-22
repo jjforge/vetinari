@@ -7,7 +7,7 @@ import type { ResolvedConfig } from "./config.ts";
 import { log } from "./log.ts";
 import { listProjects, type ProjectPointer } from "./registry.ts";
 import { listParked, parkedDirOf, type ParkedRecord } from "./state.ts";
-import { applyCarve } from "./carve.ts";
+import { applyCarve, computeCarve } from "./carve.ts";
 
 export type IssueStatus = "completed" | "parked" | "failure" | "running" | "unstarted";
 
@@ -341,18 +341,30 @@ const escapeTitle = (value: string) => escapeHtml(value).replaceAll("\n", "&#10;
 
 const chipTitle = (issue: StatusIssue) => [issue.name, issue.detail].filter(Boolean).join("\n");
 
-const renderIssueChip = (issue: StatusIssue) => {
+/**
+ * Is this issue still carvable? Only the unfinished remainder is — an unstarted
+ * (future-wave) or parked issue is exactly what a carve would actually drop
+ * (ADR 0005). A completed issue is banked and a running one is in flight, so
+ * carve would do nothing useful there and gets no control (story 20).
+ */
+export const isCarvable = (issue: StatusIssue) => issue.status === "unstarted" || issue.status === "parked";
+
+const renderCarveControl = (issue: StatusIssue, project: string) =>
+  `<form method="post" action="/carve" class="carve-form"><input type="hidden" name="taskId" value="${escapeHtml(issue.issueNumber)}" /><input type="hidden" name="project" value="${escapeHtml(project)}" /><button type="submit" class="carve-btn" title="Carve #${escapeHtml(issue.issueNumber)} and its dependents">✂️</button></form>`;
+
+const renderIssueChip = (issue: StatusIssue, project: string, carve: boolean) => {
   const detail = chipTitle(issue) || `#${issue.issueNumber}: ${issue.status}`;
-  return `<button type="button" class="chip" title="${escapeTitle(detail)}" data-detail="${escapeTitle(detail)}"><span class="dot ${issue.status}"></span>#${escapeHtml(issue.issueNumber)} <small>${escapeHtml(issue.status)}</small></button>`;
+  const chip = `<button type="button" class="chip" title="${escapeTitle(detail)}" data-detail="${escapeTitle(detail)}"><span class="dot ${issue.status}"></span>#${escapeHtml(issue.issueNumber)} <small>${escapeHtml(issue.status)}</small></button>`;
+  return carve && isCarvable(issue) ? `<span class="chip-group">${chip}${renderCarveControl(issue, project)}</span>` : chip;
 };
 
-const renderWaveContents = (wave: StatusWave) => `<div class="chips">${wave.issues.map(renderIssueChip).join("")}</div>`;
+const renderWaveContents = (wave: StatusWave, project: string, carve: boolean) => `<div class="chips">${wave.issues.map((issue) => renderIssueChip(issue, project, carve)).join("")}</div>`;
 
-const renderOpenWave = (wave: StatusWave) =>
-  `<section class="wave"><h2>Wave ${wave.index + 1} <span class="wave-status ${wave.status}">${wave.status}</span></h2>${renderWaveContents(wave)}</section>`;
+const renderOpenWave = (wave: StatusWave, project: string, carve: boolean) =>
+  `<section class="wave"><h2>Wave ${wave.index + 1} <span class="wave-status ${wave.status}">${wave.status}</span></h2>${renderWaveContents(wave, project, carve)}</section>`;
 
-const renderCompletedWave = (wave: StatusWave) =>
-  `<details class="completed-wave"><summary class="completed-wave-chip"><span class="check" aria-hidden="true">✓</span> Wave ${wave.index + 1}</summary>${renderWaveContents(wave)}</details>`;
+const renderCompletedWave = (wave: StatusWave, project: string, carve: boolean) =>
+  `<details class="completed-wave"><summary class="completed-wave-chip"><span class="check" aria-hidden="true">✓</span> Wave ${wave.index + 1}</summary>${renderWaveContents(wave, project, carve)}</details>`;
 
 /**
  * The multi-project chrome around a single project's status: the list of every
@@ -362,12 +374,61 @@ const renderCompletedWave = (wave: StatusWave) =>
 export interface StatusPageOptions {
   projects?: string[];
   selected?: string;
+  /**
+   * Render the per-chip carve control. Only the standalone `serveStatus` sets
+   * this: it holds the project's own `blockedBy` resolver and so can serve
+   * `POST /carve`'s preview. The aggregated `serveAllStatus` is a dumb router
+   * (ADR 0002) without that resolver, so it omits the control rather than offer
+   * one that cannot preview.
+   */
+  carve?: boolean;
 }
 
 const renderProjectPicker = (projects: string[], selected: string | undefined) =>
   `<form method="get" action="/" class="project-picker"><select name="project" onchange="this.form.submit()">${projects
     .map((p) => `<option value="${escapeHtml(p)}"${p === selected ? " selected" : ""}>${escapeHtml(p)}</option>`)
     .join("")}</select></form>`;
+
+/**
+ * The carve preview page: the closure a carve would remove, split into the
+ * unfinished issues that actually leave the plan (`dropped`) and the banked ones
+ * that stay, behind a confirm form that shells the carve on submit. Mirrors the
+ * Telegram preview-then-confirm so the dashboard is as safe (story 19).
+ */
+export const renderCarvePreview = (project: string, target: string, removed: string[], dropped: string[]) => {
+  const kept = removed.filter((id) => !dropped.includes(id));
+  const list = (ids: string[]) => ids.map((id) => `#${escapeHtml(id)}`).join(", ");
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>${escapeHtml(project)} — carve #${escapeHtml(target)}</title>
+<style>
+  body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 2rem; background: #090c10; color: #e6edf3; }
+  h1 { letter-spacing: -0.035em; }
+  .card { background: #0b0e12; border: 1px solid #232b35; border-left: 3px solid #f79287; border-radius: 12px; padding: 1rem 1.25rem; margin: 1rem 0; }
+  .actions { display: flex; gap: .75rem; align-items: center; }
+  form { margin: 0; }
+  button { padding: .5rem .9rem; border: 0; border-radius: 9px; cursor: pointer; font-weight: 700; }
+  .confirm button { background: #f79287; color: #2a0a06; }
+  a.cancel { color: #8b98a5; text-decoration: none; padding: .5rem .9rem; }
+</style>
+</head>
+<body>
+<h1>Carve #${escapeHtml(target)} from ${escapeHtml(project)}?</h1>
+<section class="card">
+<p><strong>This will drop:</strong> ${dropped.length ? list(dropped) : "nothing — every issue in the closure is already banked"}</p>
+${kept.length ? `<p><strong>Kept (banked work):</strong> ${list(kept)}</p>` : ""}
+<p><strong>Whole closure:</strong> ${list(removed)}</p>
+</section>
+<div class="actions">
+<form method="post" action="/carve" class="confirm"><input type="hidden" name="taskId" value="${escapeHtml(target)}" /><input type="hidden" name="project" value="${escapeHtml(project)}" /><input type="hidden" name="confirm" value="1" /><button type="submit">✂️ Confirm carve</button></form>
+<a class="cancel" href="/">Cancel</a>
+</div>
+</body>
+</html>`;
+};
 
 export const renderStatusPage = (status: CampaignStatus, opts: StatusPageOptions = {}) => `<!doctype html>
 <html lang="en">
@@ -409,6 +470,10 @@ export const renderStatusPage = (status: CampaignStatus, opts: StatusPageOptions
   .completed { background: var(--color-green); } .parked { background: var(--color-yellow); } .failure { background: var(--color-red); } .running { background: var(--color-blue); } .unstarted { background: var(--color-text-light-2); }
   textarea { width: 100%; min-height: 7rem; margin: .5rem 0; color: var(--color-text); background: var(--color-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: .75rem; }
   button.chip { cursor: pointer; color: inherit; font: inherit; }
+  .chip-group { display: inline-flex; align-items: center; gap: .25rem; }
+  .carve-form { margin: 0; display: inline-flex; }
+  .carve-btn { padding: .3rem .5rem; border: 1px solid var(--color-secondary); border-radius: 999px; background: var(--color-box-header); color: var(--color-text-light-2); font: inherit; line-height: 1; cursor: pointer; }
+  .carve-btn:hover { border-color: var(--color-red); color: var(--color-red); background: rgb(247 146 135 / 12%); }
   .issue-detail { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; display: none; align-items: center; gap: .75rem; margin: 0; padding: .75rem 1rem calc(.75rem + env(safe-area-inset-bottom)); color: var(--color-blue); background: var(--color-box-header); border-top: 1px solid var(--color-primary); box-shadow: 0 -8px 22px #0006; }
   .issue-detail.show { display: flex; }
   .issue-detail-text { flex: 1; white-space: pre-line; }
@@ -441,9 +506,9 @@ ${
   status.waves.length
     ? `${
         status.waves.some((wave) => wave.status === "closed")
-          ? `<div class="completed-waves"><div class="completed-wave-bar">${status.waves.filter((wave) => wave.status === "closed").map(renderCompletedWave).join("")}</div></div>`
+          ? `<div class="completed-waves"><div class="completed-wave-bar">${status.waves.filter((wave) => wave.status === "closed").map((wave) => renderCompletedWave(wave, status.project, Boolean(opts.carve))).join("")}</div></div>`
           : ""
-      }${status.waves.filter((wave) => wave.status !== "closed").map(renderOpenWave).join("")}`
+      }${status.waves.filter((wave) => wave.status !== "closed").map((wave) => renderOpenWave(wave, status.project, Boolean(opts.carve))).join("")}`
     : "<p>No active campaign or queue found.</p>"
 }
 <div id="issue-detail" class="issue-detail" aria-live="polite"><span class="issue-detail-text"></span><button type="button" id="issue-detail-close" class="issue-detail-close" aria-label="Dismiss">&times;</button></div>
@@ -484,8 +549,17 @@ ${
 </body>
 </html>`;
 
-export async function serveStatus(cfg: ResolvedConfig, opts: { port: number; host: string; configPath?: string }) {
+/**
+ * How the status server shells a follow-up CLI command (`answer`, `carve`). The
+ * real one is `child_process.spawn`; tests inject a recorder so the handler's
+ * routing is asserted without spawning a process. Only the shape the handlers
+ * use is required.
+ */
+export type SpawnFn = (command: string, args: string[], options: { stdio: readonly (string | number)[] }) => unknown;
+
+export async function serveStatus(cfg: ResolvedConfig, opts: { port: number; host: string; configPath?: string; spawn?: SpawnFn }) {
   mkdirSync(cfg.stateDir, { recursive: true });
+  const spawnCmd = opts.spawn ?? spawn;
   const server = createServer((req, res) => {
     void (async () => {
       if (req.method === "GET" && req.url === "/api/status") {
@@ -503,13 +577,44 @@ export async function serveStatus(cfg: ResolvedConfig, opts: { port: number; hos
           return;
         }
         const args = [...process.execArgv, process.argv[1], "answer", taskId, text, ...(opts.configPath ? ["--config", opts.configPath] : [])];
-        spawn(process.execPath, args, { stdio: ["ignore", "inherit", "inherit"] });
+        spawnCmd(process.execPath, args, { stdio: ["ignore", "inherit", "inherit"] });
         res.writeHead(303, { location: "/" }).end();
+        return;
+      }
+      if (req.method === "POST" && req.url === "/carve") {
+        const body = await readBody(req);
+        const form = new URLSearchParams(body);
+        const taskId = form.get("taskId");
+        if (!taskId) {
+          res.writeHead(400).end("taskId is required");
+          return;
+        }
+        if (!cfg.blockedBy) {
+          res.writeHead(400).end('carve needs a "blockedBy" resolver in this project\'s config.');
+          return;
+        }
+        // Confirm step: shell the project's `carve <issue>`, which prunes the
+        // running campaign by appending a carve event (ADR 0005, ticket B). Same
+        // shell-out the CLI and gateway use, so all entry points share behavior.
+        if (form.get("confirm")) {
+          const args = [...process.execArgv, process.argv[1], "carve", taskId, ...(opts.configPath ? ["--config", opts.configPath] : [])];
+          spawnCmd(process.execPath, args, { stdio: ["ignore", "inherit", "inherit"] });
+          res.writeHead(303, { location: "/" }).end();
+          return;
+        }
+        // Preview step: compute the closure the carve would remove and show it,
+        // gating the destructive act behind a confirm — the danger is that one
+        // issue drags a bigger subtree than you realized.
+        const reduced = reduceCampaign(readEvents(cfg));
+        const { removed } = await computeCarve(reduced.waves, taskId, cfg.blockedBy);
+        const { dropped } = applyCarve(reduced, removed);
+        res.setHeader("content-type", "text/html; charset=utf-8");
+        res.end(renderCarvePreview(cfg.project, taskId, removed, dropped));
         return;
       }
       if (req.method === "GET" && (req.url === "/" || req.url === undefined)) {
         res.setHeader("content-type", "text/html; charset=utf-8");
-        res.end(renderStatusPage(await buildStatusWithIssueNames(cfg)));
+        res.end(renderStatusPage(await buildStatusWithIssueNames(cfg), { carve: true }));
         return;
       }
       res.writeHead(404).end("not found");
@@ -521,6 +626,7 @@ export async function serveStatus(cfg: ResolvedConfig, opts: { port: number; hos
   const address = server.address() as AddressInfo;
   const shownHost = opts.host === "0.0.0.0" ? "<tailnet-or-host-ip>" : opts.host;
   console.log(`sandcastle-tdd status: http://${shownHost}:${address.port}`);
+  return server;
 }
 
 /**

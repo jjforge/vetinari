@@ -561,6 +561,46 @@ test("buildStatus surfaces the campaign name from the start event", () => {
   assert.equal(buildStatus(cfgFor(dir)).name, "gateway work");
 });
 
+test("buildStatus fills issue names from the log's titles, with no fetchTask", () => {
+  const dir = join(tmpdir(), `sctdd-status-log-titles-${Date.now()}`);
+  seedState(dir, [
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101", "102"]],
+      titles: { "101": "Add login flow", "102": "Rotate logs" },
+    },
+  ]);
+
+  // cfgFor's fetchTask echoes the id — so a name here can only have come from the
+  // log, never a live lookup (the dumb-router dashboard has no real fetchTask).
+  const status = buildStatus(cfgFor(dir));
+
+  assert.equal(status.waves[0].issues[0].name, "Add login flow");
+  assert.equal(status.waves[0].issues[1].name, "Rotate logs");
+});
+
+test("buildStatus fills issue names from a queue-only run's queue-start titles", () => {
+  const dir = join(tmpdir(), `sctdd-status-queue-titles-${Date.now()}`);
+  seedState(dir, [
+    // No campaign frame — a bare queue run frames its taskIds as a single wave,
+    // and carries their titles on queue-start.
+    { ts: "2025-01-01T00:00:00.000Z", event: "queue-start", taskIds: ["301", "302"], slots: 2, titles: { "301": "Fix parser", "302": "Tune cache" } },
+  ]);
+
+  const status = buildStatus(cfgFor(dir));
+
+  assert.equal(status.waves[0].issues[0].name, "Fix parser");
+  assert.equal(status.waves[0].issues[1].name, "Tune cache");
+});
+
+test("buildStatus leaves issue names unset when the log carries no titles", () => {
+  const dir = join(tmpdir(), `sctdd-status-no-titles-${Date.now()}`);
+  seedState(dir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"]] }]);
+
+  assert.equal(buildStatus(cfgFor(dir)).waves[0].issues[0].name, undefined);
+});
+
 test("buildStatus marks completed waves as closed", () => {
   const dir = join(tmpdir(), `sctdd-status-closed-wave-${Date.now()}`);
   mkdirSync(join(dir, "logs"), { recursive: true });
@@ -713,6 +753,36 @@ test("wave labels read from tmp-log issue titles, resolved through buildStatusWi
   assert.match(html, /<span class="check" aria-hidden="true">✓<\/span> Wave 1 — config resolution \+2<\/summary>/);
   // Single-issue wave (open): just that issue's title.
   assert.match(html, /<section class="wave"><h2>Wave 2 — cache eviction <span class="wave-status running">running<\/span>/);
+});
+
+test("wave labels and chip hovers render from the log's titles, with no fetchTask", () => {
+  const dir = join(tmpdir(), `sctdd-render-log-titles-${Date.now()}`);
+  seedState(dir, [
+    // Wave 0 (many issues) closes; wave 1 (one issue) is now running.
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101", "102", "103"], ["201"]],
+      titles: { "101": "config resolution", "102": "retry policy", "103": "log rotation", "201": "cache eviction" },
+    },
+    { ts: "2025-01-01T00:01:00.000Z", event: "campaign-batch", index: 0, tasks: ["101", "102", "103"] },
+    { ts: "2025-01-01T00:02:00.000Z", event: "campaign-batch-done", index: 0, merged: ["101", "102", "103"], held: [] },
+    { ts: "2025-01-01T00:03:00.000Z", event: "campaign-batch", index: 1, tasks: ["201"] },
+  ]);
+
+  // buildStatus over cfgFor's id-echoing fetchTask: the only source of titles is
+  // the log, exactly as the dumb-router dashboard reads them (ADR 0002).
+  const html = renderStatusPage(buildStatus(cfgFor(dir)));
+
+  // Many-issue wave (closed): lead title + "+N" on its collapsed chip.
+  assert.match(html, /<span class="check" aria-hidden="true">✓<\/span> Wave 1 — config resolution \+2<\/summary>/);
+  // Single-issue wave (open): just that issue's title.
+  assert.match(html, /<section class="wave"><h2>Wave 2 — cache eviction <span class="wave-status running">running<\/span>/);
+  // Every chip carries its own title on hover — 201 has no status detail yet, so
+  // its hover is exactly the resolved title.
+  assert.match(html, /<button[^>]*title="cache eviction"[^>]*>/);
+  // A chip whose issue also has a status detail carries the title alongside it.
+  assert.match(html, /title="config resolution&#10;Merged into base"/);
 });
 
 test("renderStatusPage renders a project dropdown and the selected project's body", () => {

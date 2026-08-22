@@ -70,7 +70,7 @@ const normalizeIssue = (id: string) => id.replace(/^#/, "");
 // lifetime; a rename won't surface until the status server restarts.
 const issueNameCache = new Map<string, string | undefined>();
 
-const issueNameFromTask = (task: string): string | undefined => {
+export const issueNameFromTask = (task: string): string | undefined => {
   try {
     const parsed = JSON.parse(task);
     return typeof parsed?.title === "string" && parsed.title.trim() ? parsed.title.trim() : undefined;
@@ -180,6 +180,10 @@ export interface ReducedCampaign {
   name?: string;
   outcomes: Map<string, IssueStatus>;
   details: Map<string, string>;
+  /** issue id → title, captured onto the run's start event at launch by the
+   * orchestrator (which has `fetchTask`) so the dumb-router dashboard renders
+   * names with no live lookup (ADR 0002). Empty when a run recorded no titles. */
+  titles: Map<string, string>;
   closedWaves: Set<number>;
   currentWave: number;
 }
@@ -199,10 +203,19 @@ export function reduceCampaign(events: any[]): ReducedCampaign {
   let name: string | undefined;
   const outcomes = new Map<string, IssueStatus>();
   const details = new Map<string, string>();
+  const titles = new Map<string, string>();
   const closedWaves = new Set<number>();
   let currentWave = -1;
 
   for (const e of relevant) {
+    // Any start event may carry an id→title map (`campaign` writes it on
+    // `campaign-start`, a standalone `queue` on `queue-start`); fold them all so
+    // the plan carries a name for every issue a title was resolved for.
+    if (e.titles && typeof e.titles === "object") {
+      for (const [id, title] of Object.entries(e.titles)) {
+        if (typeof title === "string" && title.trim()) titles.set(normalizeIssue(id), title.trim());
+      }
+    }
     if (e.event === "campaign-start" && Array.isArray(e.batches)) {
       waves = e.batches.map((batch: unknown[]) => batch.map(String).map(normalizeIssue));
       name = typeof e.name === "string" && e.name.trim() ? e.name : undefined;
@@ -254,7 +267,7 @@ export function reduceCampaign(events: any[]): ReducedCampaign {
     }
   }
 
-  return { waves, name, outcomes, details, closedWaves, currentWave };
+  return { waves, name, outcomes, details, titles, closedWaves, currentWave };
 }
 
 /**
@@ -329,7 +342,7 @@ export function summarizeRun(events: any[]): string {
 }
 
 export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
-  const { waves, name, outcomes, details, closedWaves, currentWave } = reduceCampaign(readEvents(cfg));
+  const { waves, name, outcomes, details, titles, closedWaves, currentWave } = reduceCampaign(readEvents(cfg));
 
   const activeIssueNumbers = new Set(waves.flat());
   const closedIssueNumbers = new Set([...closedWaves].flatMap((index) => waves[index] ?? []));
@@ -349,7 +362,7 @@ export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
     waves: waves.map((wave, index) => ({
       index,
       status: closedWaves.has(index) ? "closed" : currentWave === index ? "running" : "unstarted",
-      issues: wave.map((issueNumber) => ({ issueNumber, status: outcomes.get(issueNumber) ?? "unstarted", detail: details.get(issueNumber) })),
+      issues: wave.map((issueNumber) => ({ issueNumber, status: outcomes.get(issueNumber) ?? "unstarted", name: titles.get(issueNumber), detail: details.get(issueNumber) })),
     })),
     parked: parkedRecords.map(toParkedIssue),
   };

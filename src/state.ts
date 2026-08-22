@@ -138,3 +138,15 @@ export function markOutboundSent(outboxDir: string, id: string, destination?: st
   const rec = JSON.parse(readFileSync(path, "utf8")) as OutboundRecord;
   writeFileSync(path, JSON.stringify({ ...rec, sentAt: new Date().toISOString(), destination }, null, 2));
 }
+
+/**
+ * Remove only the already-routed records from a run's outbox (archival tidy-up),
+ * returning how many were cleared. Unsent records are deliberately kept — a
+ * message emitted while the gateway was down must still be sent when it returns.
+ */
+export function clearSentOutbound(cfg: Pick<ResolvedConfig, "stateDir">): number {
+  const dir = outboxDirOf(cfg.stateDir);
+  const sent = listOutboxIn(dir).filter((r) => r.sentAt != null);
+  for (const rec of sent) rmSync(join(dir, `${rec.id}.json`), { force: true });
+  return sent.length;
+}

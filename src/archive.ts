@@ -1,11 +1,13 @@
 import { existsSync, mkdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import type { ResolvedConfig } from "./config.ts";
-import { clearParked, listParked } from "./state.ts";
+import { clearParked, clearSentOutbound, listParked } from "./state.ts";
 
 export interface ArchiveResult {
   /** Path the run's log was moved to, or undefined when there was nothing to archive. */
   archivedLog?: string;
   clearedParked: number;
+  /** How many already-sent outbound records were cleared (unsent ones are kept). */
+  clearedOutbound: number;
 }
 
 /**
@@ -29,5 +31,7 @@ export function archiveRun(cfg: ResolvedConfig): ArchiveResult {
   const parked = listParked(cfg);
   for (const p of parked) clearParked(cfg, p.taskId);
 
-  return { archivedLog, clearedParked: parked.length };
+  const clearedOutbound = clearSentOutbound(cfg);
+
+  return { archivedLog, clearedParked: parked.length, clearedOutbound };
 }

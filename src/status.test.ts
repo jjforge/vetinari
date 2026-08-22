@@ -204,7 +204,7 @@ test("serveAllStatus POST /carve previews the selected project's closure without
   }
 });
 
-test("serveAllStatus renders a carve control on the selected project's carvable chips", async () => {
+test("serveAllStatus flags the selected project's carvable chips with its project", async () => {
   const configDir = join(tmpdir(), `sctdd-agg-carve-control-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
   // A running campaign whose future wave (401) is still carvable.
@@ -218,10 +218,11 @@ test("serveAllStatus renders a carve control on the selected project's carvable 
   const { port } = server.address() as AddressInfo;
   try {
     const html = await (await fetch(`http://127.0.0.1:${port}/?project=beta`)).text();
-    // A carve control on the unstarted future-wave issue, carrying the project so
-    // the aggregated /carve routes it to beta.
-    assert.match(html, /<form method="post" action="\/carve"[^>]*>[\s\S]*?name="taskId" value="401"/);
-    assert.match(html, /<form method="post" action="\/carve"[\s\S]*?name="project" value="beta"/);
+    // The unstarted future-wave chip is flagged carvable and carries beta, so the
+    // panel's Carve routes preview and confirm to beta's own install.
+    assert.match(html, /class="chip"[^>]*data-issue="401"[^>]*data-project="beta"[^>]*data-carvable="1"/);
+    // No inline carve control on the chip itself.
+    assert.doesNotMatch(html, /✂️/);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -702,7 +703,7 @@ test("renderStatusPage auto-refresh checkbox gates and persists the timer", () =
   assert.match(html, /refreshEnabled\.addEventListener\("change", scheduleRefresh\)/);
 });
 
-test("renderStatusPage renders a carve control only on still-carvable chips", () => {
+test("renderStatusPage marks carvable chips with carve data and never puts a carve control on a chip", () => {
   const html = renderStatusPage({
     project: "demo",
     waves: [
@@ -720,16 +721,18 @@ test("renderStatusPage renders a carve control only on still-carvable chips", ()
     parked: [],
   }, { carve: true });
 
-  // A carve control on the unstarted future-wave issue and the parked one...
-  assert.match(html, /<form method="post" action="\/carve"[^>]*>[\s\S]*?name="taskId" value="301"/);
-  assert.match(html, /<form method="post" action="\/carve"[^>]*>[\s\S]*?name="taskId" value="302"/);
-  // ...carrying the project so the aggregated site can route it.
-  assert.match(html, /<form method="post" action="\/carve"[\s\S]*?name="project" value="demo"/);
-  // ...but never on the completed (banked) or the current-wave-in-flight (running) chip.
-  assert.doesNotMatch(html, /action="\/carve"[\s\S]*?name="taskId" value="101"/);
-  assert.doesNotMatch(html, /action="\/carve"[\s\S]*?name="taskId" value="201"/);
-  // The control is a compact chip-attached button, not the full-size form button.
-  assert.match(html, /\.carve-btn \{[^}]*border-radius: 999px/);
+  // Each chip carries its issue and project; only a still-carvable one is flagged
+  // carvable, so the tap-detail panel knows whether to offer a Carve button.
+  assert.match(html, /class="chip"[^>]*data-issue="301"[^>]*data-project="demo"[^>]*data-carvable="1"/);
+  assert.match(html, /class="chip"[^>]*data-issue="302"[^>]*data-project="demo"[^>]*data-carvable="1"/);
+  // The completed (banked) and current-wave-in-flight (running) chips are not carvable.
+  assert.doesNotMatch(html, /data-issue="101"[^>]*data-carvable/);
+  assert.doesNotMatch(html, /data-issue="201"[^>]*data-carvable/);
+  // Carve moved off the chips entirely: no inline ✂️ and no per-chip carve form.
+  assert.doesNotMatch(html, /✂️/);
+  assert.doesNotMatch(html, /class="carve-form"/);
+  assert.doesNotMatch(html, /class="chip-group"/);
+  assert.doesNotMatch(html, /class="carve-btn"/);
 });
 
 test("renderStatusPage omits the carve control unless the page opts into it", () => {

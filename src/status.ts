@@ -353,13 +353,16 @@ const chipTitle = (issue: StatusIssue) => [issue.name, issue.detail].filter(Bool
  */
 export const isCarvable = (issue: StatusIssue) => issue.status === "unstarted" || issue.status === "parked";
 
-const renderCarveControl = (issue: StatusIssue, project: string) =>
-  `<form method="post" action="/carve" class="carve-form"><input type="hidden" name="taskId" value="${escapeHtml(issue.issueNumber)}" /><input type="hidden" name="project" value="${escapeHtml(project)}" /><button type="submit" class="carve-btn" title="Carve #${escapeHtml(issue.issueNumber)} and its dependents">✂️</button></form>`;
-
 const renderIssueChip = (issue: StatusIssue, project: string, carve: boolean) => {
   const detail = chipTitle(issue) || `#${issue.issueNumber}: ${issue.status}`;
-  const chip = `<button type="button" class="chip" title="${escapeTitle(detail)}" data-detail="${escapeTitle(detail)}"><span class="dot ${issue.status}"></span>#${escapeHtml(issue.issueNumber)} <small>${escapeHtml(issue.status)}</small></button>`;
-  return carve && isCarvable(issue) ? `<span class="chip-group">${chip}${renderCarveControl(issue, project)}</span>` : chip;
+  // When carve is enabled, every chip carries its issue and project so the
+  // tap-detail panel can route a carve; only a still-carvable chip is flagged
+  // `data-carvable`, so the panel offers Carve for exactly those (ADR 0005). No
+  // control is drawn on the chip itself — the affordance lives in the panel.
+  const carveData = carve
+    ? ` data-issue="${escapeHtml(issue.issueNumber)}" data-project="${escapeHtml(project)}"${isCarvable(issue) ? ` data-carvable="1"` : ""}`
+    : "";
+  return `<button type="button" class="chip" title="${escapeTitle(detail)}" data-detail="${escapeTitle(detail)}"${carveData}><span class="dot ${issue.status}"></span>#${escapeHtml(issue.issueNumber)} <small>${escapeHtml(issue.status)}</small></button>`;
 };
 
 const renderWaveContents = (wave: StatusWave, project: string, carve: boolean) => `<div class="chips">${wave.issues.map((issue) => renderIssueChip(issue, project, carve)).join("")}</div>`;

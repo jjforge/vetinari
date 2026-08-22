@@ -4,6 +4,7 @@ import { log, setLogFile } from "./log.ts";
 import { answerPromptFor, runLoop } from "./loop.ts";
 import { attend, baseline, campaign, dispatch, queue, requireTelegram, tgTest } from "./modes.ts";
 import { computeCarve } from "./carve.ts";
+import { applyLayoutMigration, computeLayoutMigration, describeMigration, scanLayout } from "./migrate.ts";
 import { archiveRun } from "./archive.ts";
 import { listParked, readParked } from "./state.ts";
 import { serveStatus } from "./status.ts";
@@ -17,6 +18,10 @@ const USAGE = `sandcastle-tdd <mode> [args]
   campaign <batch…>        queue each batch, then merge greens → gate base → next batch
   carve <issue> <batch…>   drop <issue> + everything blocked by it, then run the rest
                            as a campaign (--dry-run to only print the reduced plan)
+  migrate [--dry-run]      move this project onto the sandcastle/ + .sandcastle.local/
+                           layout: config → sandcastle/, old .sandcastle/ state →
+                           .sandcastle.local/, .gitignore updated (--dry-run to print
+                           the plan and change nothing)
   answer <task> <text>     resume a parked task with a human answer
   attend <task>            one task, answering itself via Telegram replies
   dispatch                 the ONE Telegram poller; routes replies to parked tasks
@@ -48,6 +53,25 @@ if (!mode) {
 // is fine) and never fall through to the strict config load below.
 if (mode === "statusline") {
   await runStatusLine(cfgPath);
+  process.exit(0);
+}
+
+// migrate operates purely on the filesystem layout of cwd — it must run BEFORE
+// the strict config load, since a not-yet-migrated project's config lives in a
+// deprecated location (or is what we are about to move into place).
+if (mode === "migrate") {
+  const dryRun = rest.includes("--dry-run");
+  const plan = computeLayoutMigration(scanLayout(process.cwd()));
+  console.log(describeMigration(plan));
+  if (plan.conflicts.length) process.exit(1);
+  if (dryRun) {
+    console.log("\n(dry run — nothing was changed)");
+    process.exit(0);
+  }
+  const result = applyLayoutMigration(process.cwd(), plan);
+  if (result.moved.length || result.gitignoreUpdated) {
+    console.log(`\nMigrated: moved ${result.moved.length} path(s)${result.gitignoreUpdated ? ", updated .gitignore" : ""}.`);
+  }
   process.exit(0);
 }
 

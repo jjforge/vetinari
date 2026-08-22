@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `migrate` command: moves an existing project from the old single-`.sandcastle/`
+  layout onto the committed `sandcastle/` + excluded `.sandcastle.local/` split in
+  one step — config → `sandcastle/`, old `.sandcastle/` state and secrets →
+  `.sandcastle.local/`, and `.gitignore` gains `.sandcastle.local/` while keeping
+  `.sandcastle/` ignored during the transition. `migrate --dry-run` prints the plan
+  and changes nothing. Idempotent (a re-run on an already-migrated project reports
+  "nothing to do") and non-clobbering (a move whose destination exists is refused,
+  never overwritten). Warns that folding host-only orchestrator secrets and
+  rewriting the systemd unit are deferred to the gateway epic (E3). The pure
+  `computeLayoutMigration` planner, `applyLayoutMigration`, `scanLayout`, and
+  `describeMigration` are exported.
+
 - Run cleanup so a finished run stops showing as current in the dashboard and
   status line. On clean completion of a `campaign` or `queue` (not on a halt, and
   only when nothing is still parked) the orchestrator log is archived to

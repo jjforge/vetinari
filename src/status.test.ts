@@ -684,6 +684,37 @@ test("buildStatusWithIssueNames adds issue names from fetchTask when available",
   assert.equal(status.waves[0].issues[1].name, undefined);
 });
 
+test("wave labels read from tmp-log issue titles, resolved through buildStatusWithIssueNames", async () => {
+  const dir = join(tmpdir(), `sctdd-status-wave-names-${Date.now()}`);
+  seedState(dir, [
+    // Wave 0 (many issues) closes; wave 1 (one issue) is now running.
+    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101", "102", "103"], ["201"]] },
+    { ts: "2025-01-01T00:01:00.000Z", event: "campaign-batch", index: 0, tasks: ["101", "102", "103"] },
+    { ts: "2025-01-01T00:02:00.000Z", event: "campaign-batch-done", index: 0, merged: ["101", "102", "103"], held: [] },
+    { ts: "2025-01-01T00:03:00.000Z", event: "campaign-batch", index: 1, tasks: ["201"] },
+  ]);
+  const titles: Record<string, string> = {
+    "101": "config resolution",
+    "102": "retry policy",
+    "103": "log rotation",
+    "201": "cache eviction",
+  };
+
+  const status = await buildStatusWithIssueNames({
+    ...cfgFor(dir),
+    // Unique project so the process-lifetime issue-name cache can't collide with
+    // another test's "demo:101".
+    project: "wave-names",
+    fetchTask: async (id: string) => JSON.stringify({ title: titles[id] }),
+  });
+  const html = renderStatusPage(status);
+
+  // Many-issue wave (closed): lead title + "+N" on its collapsed chip.
+  assert.match(html, /<span class="check" aria-hidden="true">✓<\/span> Wave 1 — config resolution \+2<\/summary>/);
+  // Single-issue wave (open): just that issue's title.
+  assert.match(html, /<section class="wave"><h2>Wave 2 — cache eviction <span class="wave-status running">running<\/span>/);
+});
+
 test("renderStatusPage renders a project dropdown and the selected project's body", () => {
   const html = renderStatusPage(
     {
@@ -946,6 +977,79 @@ test("renderStatusPage collapses closed waves into expandable completed wave chi
   // Chip rows must not stretch: the first wrapped line was rendering taller in Safari.
   assert.match(html, /\.completed-wave-bar, \.chips \{ display: flex; flex-wrap: wrap; align-items: flex-start; align-content: flex-start;/);
   assert.match(html, /<section class="wave"><h2>Wave 2 <span class="wave-status running">running<\/span><\/h2>/);
+});
+
+test("renderStatusPage labels a single-issue wave with that issue's resolved title, keeping the index", () => {
+  const html = renderStatusPage({
+    project: "demo",
+    waves: [{ index: 1, status: "running", issues: [{ issueNumber: "201", status: "running", name: "config resolution" }] }],
+    parked: [],
+  });
+
+  assert.match(html, /<section class="wave"><h2>Wave 2 — config resolution <span class="wave-status running">running<\/span>/);
+});
+
+test("renderStatusPage labels a multi-issue wave with its lead issue's title + the extra count", () => {
+  const html = renderStatusPage({
+    project: "demo",
+    waves: [
+      {
+        index: 1,
+        status: "running",
+        issues: [
+          { issueNumber: "201", status: "running", name: "config resolution" },
+          { issueNumber: "202", status: "unstarted", name: "retry policy" },
+          { issueNumber: "203", status: "unstarted", name: "log rotation" },
+          { issueNumber: "204", status: "unstarted", name: "cache eviction" },
+        ],
+      },
+    ],
+    parked: [],
+  });
+
+  // Lead title names the wave; the rest collapse to a "+N" (all four still carry
+  // their own titles on their chips).
+  assert.match(html, /<h2>Wave 2 — config resolution \+3 <span class="wave-status running">running<\/span>/);
+});
+
+test("renderStatusPage labels a closed wave's collapsed chip with its issue titles", () => {
+  const html = renderStatusPage({
+    project: "demo",
+    waves: [
+      {
+        index: 0,
+        status: "closed",
+        issues: [
+          { issueNumber: "101", status: "completed", name: "config resolution" },
+          { issueNumber: "102", status: "completed", name: "retry policy" },
+        ],
+      },
+      { index: 1, status: "running", issues: [{ issueNumber: "201", status: "running" }] },
+    ],
+    parked: [],
+  });
+
+  assert.match(html, /<summary class="completed-wave-chip"><span class="check" aria-hidden="true">✓<\/span> Wave 1 — config resolution \+1<\/summary>/);
+});
+
+test("renderStatusPage escapes a wave name derived from an issue title", () => {
+  const html = renderStatusPage({
+    project: "demo",
+    waves: [{ index: 0, status: "running", issues: [{ issueNumber: "101", status: "running", name: "fix <script> & things" }] }],
+    parked: [],
+  });
+
+  assert.match(html, /<h2>Wave 1 — fix &lt;script&gt; &amp; things </);
+});
+
+test("renderStatusPage keeps the bare wave index when no issue title is resolved yet", () => {
+  const html = renderStatusPage({
+    project: "demo",
+    waves: [{ index: 0, status: "running", issues: [{ issueNumber: "101", status: "running" }] }],
+    parked: [],
+  });
+
+  assert.match(html, /<h2>Wave 1 <span class="wave-status running">running<\/span>/);
 });
 
 test("serveAllStatus can bind to a non-localhost host for tailnet access", () => {

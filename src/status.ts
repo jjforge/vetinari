@@ -448,11 +448,29 @@ const renderIssueChip = (issue: StatusIssue, project: string, carve: boolean) =>
 
 const renderWaveContents = (wave: StatusWave, project: string, carve: boolean) => `<div class="chips">${wave.issues.map((issue) => renderIssueChip(issue, project, carve)).join("")}</div>`;
 
+/**
+ * A wave's human label, derived at render from the issue titles the dashboard
+ * already resolved — nothing is stored (story: wave names from issue titles). A
+ * wave is a file-disjoint layer that crosses epics, so its issues name it, never
+ * an epic: a single-issue wave reads as that issue's title, a many-issue wave as
+ * its lead issue's title + "+N" for the rest (every issue still carries its own
+ * title on its chip). The bare "Wave N" index always leads; the name is appended
+ * only once the lead issue's title has resolved, so an unresolved wave keeps the
+ * plain index.
+ */
+const renderWaveLabel = (wave: StatusWave) => {
+  const lead = wave.issues[0];
+  const index = `Wave ${wave.index + 1}`;
+  if (!lead?.name) return index;
+  const extra = wave.issues.length - 1;
+  return `${index} — ${escapeHtml(lead.name)}${extra > 0 ? ` +${extra}` : ""}`;
+};
+
 const renderOpenWave = (wave: StatusWave, project: string, carve: boolean) =>
-  `<section class="wave"><h2>Wave ${wave.index + 1} <span class="wave-status ${wave.status}">${wave.status}</span></h2>${renderWaveContents(wave, project, carve)}</section>`;
+  `<section class="wave"><h2>${renderWaveLabel(wave)} <span class="wave-status ${wave.status}">${wave.status}</span></h2>${renderWaveContents(wave, project, carve)}</section>`;
 
 const renderCompletedWave = (wave: StatusWave, project: string, carve: boolean) =>
-  `<details class="completed-wave"><summary class="completed-wave-chip"><span class="check" aria-hidden="true">✓</span> Wave ${wave.index + 1}</summary>${renderWaveContents(wave, project, carve)}</details>`;
+  `<details class="completed-wave"><summary class="completed-wave-chip"><span class="check" aria-hidden="true">✓</span> ${renderWaveLabel(wave)}</summary>${renderWaveContents(wave, project, carve)}</details>`;
 
 /** The wave/issue body a status renders — closed waves collapsed into chips, open
  * waves expanded. Shared by the live run and a read-only archived run (which

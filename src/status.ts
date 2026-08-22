@@ -1,9 +1,12 @@
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import type { ResolvedConfig } from "./config.ts";
-import { listParked, type ParkedRecord } from "./state.ts";
+import { log } from "./log.ts";
+import { listProjects, type ProjectPointer } from "./registry.ts";
+import { listParked, parkedDirOf, type ParkedRecord } from "./state.ts";
 
 export type IssueStatus = "completed" | "parked" | "failure" | "running" | "unstarted";
 
@@ -240,6 +243,41 @@ export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
   };
 }
 
+/**
+ * The slice of a `ResolvedConfig` that `buildStatus` actually reads, synthesized
+ * from a registry pointer's base location. The gateway is a dumb router (ADR
+ * 0002): it never imports a project's TS config, it reads the same state files
+ * (`logs/`, `parked/`) the run wrote under the base location — the paths a full
+ * config's `loadConfig` would have derived from `stateDir`.
+ */
+const statusConfigFromPointer = (pointer: ProjectPointer): ResolvedConfig =>
+  ({
+    project: pointer.project,
+    stateDir: pointer.baseLocation,
+    parkedDir: parkedDirOf(pointer.baseLocation),
+    logFile: join(pointer.baseLocation, "logs", "orchestrator.jsonl"),
+  }) as ResolvedConfig;
+
+/**
+ * Build the campaign status for every registered project, reading each project's
+ * state live from its base location. A project whose base location is missing
+ * (moved or deleted since it registered) is skipped with a log line, never
+ * throwing — one stale registration must not take the whole dashboard down (ADR
+ * 0002). Uses the pure `buildStatus`, so issue names are not resolved here (that
+ * needs the project's own `fetchTask`); the aggregated view is names-free.
+ */
+export function buildAllStatus(pointers: ProjectPointer[]): CampaignStatus[] {
+  const statuses: CampaignStatus[] = [];
+  for (const pointer of pointers) {
+    if (!existsSync(pointer.baseLocation)) {
+      log("status-project-skipped", { project: pointer.project, baseLocation: pointer.baseLocation });
+      continue;
+    }
+    statuses.push(buildStatus(statusConfigFromPointer(pointer)));
+  }
+  return statuses;
+}
+
 const toParkedIssue = (rec: ParkedRecord): ParkedIssue => {
   const details = extractParkedDetails(rec.question);
   return {
@@ -271,7 +309,22 @@ const renderOpenWave = (wave: StatusWave) =>
 const renderCompletedWave = (wave: StatusWave) =>
   `<details class="completed-wave"><summary class="completed-wave-chip"><span class="check" aria-hidden="true">✓</span> Wave ${wave.index + 1}</summary>${renderWaveContents(wave)}</details>`;
 
-export const renderStatusPage = (status: CampaignStatus) => `<!doctype html>
+/**
+ * The multi-project chrome around a single project's status: the list of every
+ * registered project for the dropdown and which one is selected. Omitted for the
+ * standalone per-project server, which renders exactly one project with no picker.
+ */
+export interface StatusPageOptions {
+  projects?: string[];
+  selected?: string;
+}
+
+const renderProjectPicker = (projects: string[], selected: string | undefined) =>
+  `<form method="get" action="/" class="project-picker"><select name="project" onchange="this.form.submit()">${projects
+    .map((p) => `<option value="${escapeHtml(p)}"${p === selected ? " selected" : ""}>${escapeHtml(p)}</option>`)
+    .join("")}</select></form>`;
+
+export const renderStatusPage = (status: CampaignStatus, opts: StatusPageOptions = {}) => `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -283,6 +336,9 @@ export const renderStatusPage = (status: CampaignStatus) => `<!doctype html>
   h1 { font-size: clamp(1.8rem, 4vw, 3rem); margin: 0; letter-spacing: -0.035em; color: var(--color-text); }
   h2 { color: var(--color-text-light); }
   .page-top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border-bottom: 1px solid var(--color-light-border); padding-bottom: 1rem; }
+  .project-picker { margin: 0; }
+  .project-picker select { color: var(--color-text); background: var(--color-box-header); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); padding: .35rem .6rem; font: inherit; cursor: pointer; }
+  .project-picker select:hover { border-color: var(--color-primary); }
   .refresh { margin-left: auto; display: inline-flex; align-items: center; gap: .5rem; color: var(--color-text-light-2); }
   .refresh label { display: inline-flex; align-items: center; gap: .4rem; }
   .refresh input[type="checkbox"] { width: 1.15rem; height: 1.15rem; margin: 0; accent-color: var(--color-primary); cursor: pointer; }
@@ -322,14 +378,16 @@ export const renderStatusPage = (status: CampaignStatus) => `<!doctype html>
 </style>
 </head>
 <body>
-<div class="page-top"><h1>${escapeHtml(status.project)} status</h1><div class="refresh" title="Auto-refresh the page every N seconds"><label><input id="refresh-enabled" type="checkbox" checked /> <span>Refresh</span></label><label class="refresh-every"><input id="refresh-seconds" type="number" min="1" max="999" step="1" value="45" /></label></div></div>
+<div class="page-top"><h1>${escapeHtml(status.project)} status</h1>${
+  opts.projects?.length ? renderProjectPicker(opts.projects, opts.selected ?? status.project) : ""
+}<div class="refresh" title="Auto-refresh the page every N seconds"><label><input id="refresh-enabled" type="checkbox" checked /> <span>Refresh</span></label><label class="refresh-every"><input id="refresh-seconds" type="number" min="1" max="999" step="1" value="45" /></label></div></div>
 ${
   status.parked.length
     ? `<section class="parked-issues"><h2>Parked issues <span class="parked-count">${status.parked.length} awaiting you</span></h2>${status.parked
         .map(
           (p) => `<section class="card"><h3>Issue #${escapeHtml(p.issueNumber)}</h3><p><strong>Parked on:</strong></p><pre>${escapeHtml(p.description)}</pre>${
             p.options.length ? `<p><strong>Options:</strong></p><ul>${p.options.map((o) => `<li>${escapeHtml(o)}</li>`).join("")}</ul>` : ""
-          }<form method="post" action="/answer"><input type="hidden" name="taskId" value="${escapeHtml(p.issueNumber)}" /><textarea name="text" placeholder="Type your response..."></textarea><button>Send response</button></form></section>`,
+          }<form method="post" action="/answer"><input type="hidden" name="taskId" value="${escapeHtml(p.issueNumber)}" /><input type="hidden" name="project" value="${escapeHtml(status.project)}" /><textarea name="text" placeholder="Type your response..."></textarea><button>Send response</button></form></section>`,
         )
         .join("")}</section>`
     : ""
@@ -418,6 +476,82 @@ export async function serveStatus(cfg: ResolvedConfig, opts: { port: number; hos
   const address = server.address() as AddressInfo;
   const shownHost = opts.host === "0.0.0.0" ? "<tailnet-or-host-ip>" : opts.host;
   console.log(`sandcastle-tdd status: http://${shownHost}:${address.port}`);
+}
+
+/**
+ * Which project the aggregated view shows: the one named in the request, or the
+ * first registered project when none is named (or the name is stale). Never
+ * undefined given at least one project — the page always shows something useful
+ * on a bare open. Callers guard the empty-registry case before calling.
+ */
+export function selectStatus(statuses: CampaignStatus[], requested?: string): CampaignStatus {
+  return statuses.find((s) => s.project === requested) ?? statuses[0];
+}
+
+/**
+ * The gateway's aggregated status site: one port fronting every registered
+ * project. It reads the registry live each request (so a newly run project shows
+ * up with no restart), builds each project's status from its base location, and
+ * renders the one the `project` query param selects — defaulting to the first.
+ * The parked-answer POST carries its project so the resume runs in that project's
+ * own root with its own config and gates (ADR 0003), mirroring the gateway's
+ * reply routing. The standalone `serveStatus` remains the no-gateway fallback.
+ */
+export async function serveAllStatus(configDir: string, opts: { port: number; host: string }) {
+  const server = createServer((req, res) => {
+    void (async () => {
+      const url = new URL(req.url ?? "/", "http://localhost");
+      const pointers = () => listProjects(configDir);
+      if (req.method === "GET" && url.pathname === "/api/status") {
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify(buildAllStatus(pointers())));
+        return;
+      }
+      if (req.method === "POST" && url.pathname === "/answer") {
+        const body = await readBody(req);
+        const form = new URLSearchParams(body);
+        const taskId = form.get("taskId");
+        const text = form.get("text");
+        const project = form.get("project");
+        if (!taskId || !text || !project) {
+          res.writeHead(400).end("taskId, text and project are required");
+          return;
+        }
+        const pointer = pointers().find((p) => p.project === project);
+        if (!pointer) {
+          res.writeHead(404).end(`unknown project: ${project}`);
+          return;
+        }
+        // Resume in the project's own root so `answer` loads that project's config
+        // and gates — the same shell-out the gateway's reply router uses.
+        spawn(process.execPath, [...process.execArgv, process.argv[1], "answer", taskId, text], {
+          cwd: pointer.projectRoot,
+          stdio: ["ignore", "inherit", "inherit"],
+        });
+        res.writeHead(303, { location: `/?project=${encodeURIComponent(project)}` }).end();
+        return;
+      }
+      if (req.method === "GET" && (url.pathname === "/" || req.url === undefined)) {
+        const statuses = buildAllStatus(pointers());
+        res.setHeader("content-type", "text/html; charset=utf-8");
+        if (!statuses.length) {
+          res.end(renderStatusPage({ project: "No projects registered", waves: [], parked: [] }));
+          return;
+        }
+        const selected = selectStatus(statuses, url.searchParams.get("project") ?? undefined);
+        res.end(renderStatusPage(selected, { projects: statuses.map((s) => s.project), selected: selected.project }));
+        return;
+      }
+      res.writeHead(404).end("not found");
+    })().catch((err) => {
+      res.writeHead(500).end(String(err?.stack ?? err));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(opts.port, opts.host, resolve));
+  const address = server.address() as AddressInfo;
+  const shownHost = opts.host === "0.0.0.0" ? "<tailnet-or-host-ip>" : opts.host;
+  console.log(`sandcastle-tdd gateway status: http://${shownHost}:${address.port}`);
+  return server;
 }
 
 const readBody = (req: NodeJS.ReadableStream) =>

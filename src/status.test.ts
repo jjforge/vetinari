@@ -4,7 +4,10 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { buildStatus, buildStatusWithIssueNames, extractParkedDetails, formatStatusText, renderStatusPage, serveStatus } from "./status.ts";
+import { buildAllStatus, buildStatus, buildStatusWithIssueNames, extractParkedDetails, formatStatusText, renderStatusPage, selectStatus, serveAllStatus, serveStatus } from "./status.ts";
+import type { CampaignStatus } from "./status.ts";
+import type { AddressInfo } from "node:net";
+import { register, type ProjectPointer } from "./registry.ts";
 
 const cfgFor = (dir: string): ResolvedConfig =>
   ({
@@ -23,6 +26,86 @@ const cfgFor = (dir: string): ResolvedConfig =>
   }) as ResolvedConfig;
 
 const writeJsonl = (path: string, events: unknown[]) => writeFileSync(path, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
+
+const pointerFor = (project: string, dir: string): ProjectPointer => ({ project, projectRoot: join(dir, "root"), baseLocation: dir });
+
+const seedState = (dir: string, events: unknown[]) => {
+  mkdirSync(join(dir, "logs"), { recursive: true });
+  mkdirSync(join(dir, "parked"), { recursive: true });
+  writeJsonl(join(dir, "logs", "orchestrator.jsonl"), events);
+};
+
+test("buildAllStatus builds one status per live project and skips a stale one", () => {
+  const base = join(tmpdir(), `sctdd-all-status-${Date.now()}`);
+  const alphaDir = join(base, "alpha");
+  const betaDir = join(base, "beta");
+  seedState(alphaDir, [
+    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101", "102"]] },
+    { ts: "2025-01-01T00:01:00.000Z", event: "queue-done", outcomes: { "101": "green" } },
+  ]);
+  seedState(betaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["201"]] }]);
+
+  const statuses = buildAllStatus([
+    pointerFor("alpha", alphaDir),
+    pointerFor("beta", betaDir),
+    // A stale registration whose base location was moved/deleted — must be skipped, not throw.
+    pointerFor("ghost", join(base, "gone")),
+  ]);
+
+  assert.deepEqual(statuses.map((s) => s.project), ["alpha", "beta"]);
+  assert.deepEqual(
+    statuses[0].waves[0].issues.map((i) => [i.issueNumber, i.status]),
+    [
+      ["101", "completed"],
+      ["102", "unstarted"],
+    ],
+  );
+  assert.deepEqual(statuses[1].waves[0].issues.map((i) => i.issueNumber), ["201"]);
+});
+
+test("serveAllStatus serves the aggregated site, selecting the project from the query param", async () => {
+  const configDir = join(tmpdir(), `sctdd-serve-all-${Date.now()}`);
+  const alphaDir = join(configDir, "state-alpha");
+  const betaDir = join(configDir, "state-beta");
+  seedState(alphaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"]] }]);
+  seedState(betaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["201"]] }]);
+  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
+  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const { port } = server.address() as AddressInfo;
+  try {
+    const root = await (await fetch(`http://127.0.0.1:${port}/`)).text();
+    // The dropdown lists both projects, and the bare open defaults to the first registered one.
+    assert.match(root, /<option value="alpha"/);
+    assert.match(root, /<option value="beta"/);
+    const firstProject = buildAllStatus([
+      { project: "alpha", projectRoot: "", baseLocation: alphaDir },
+      { project: "beta", projectRoot: "", baseLocation: betaDir },
+    ])[0].project;
+    assert.match(root, new RegExp(`<option value="${firstProject}" selected>`));
+
+    const beta = await (await fetch(`http://127.0.0.1:${port}/?project=beta`)).text();
+    assert.match(beta, /<option value="beta" selected>/);
+    // Beta's own campaign (issue 201) renders in the body, not alpha's issue 101.
+    assert.match(beta, /#201 <small>/);
+    assert.doesNotMatch(beta, /#101 <small>/);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("selectStatus picks the requested project, defaulting to the first otherwise", () => {
+  const statuses: CampaignStatus[] = [
+    { project: "alpha", waves: [], parked: [] },
+    { project: "beta", waves: [], parked: [] },
+  ];
+
+  assert.equal(selectStatus(statuses, "beta").project, "beta");
+  assert.equal(selectStatus(statuses, undefined).project, "alpha");
+  // An unknown or stale selection falls back to the first, never undefined.
+  assert.equal(selectStatus(statuses, "ghost").project, "alpha");
+});
 
 test("buildStatus shows campaign waves with issue chips and statuses", () => {
   const dir = join(tmpdir(), `sctdd-status-${Date.now()}`);
@@ -177,6 +260,35 @@ test("buildStatusWithIssueNames adds issue names from fetchTask when available",
 
   assert.equal(status.waves[0].issues[0].name, "Add login flow");
   assert.equal(status.waves[0].issues[1].name, undefined);
+});
+
+test("renderStatusPage renders a project dropdown and the selected project's body", () => {
+  const html = renderStatusPage(
+    {
+      project: "beta",
+      waves: [{ index: 0, status: "running", issues: [{ issueNumber: "201", status: "running" }] }],
+      parked: [{ issueNumber: "201", reason: "blocked", parkedAt: "now", branch: "agent/201", description: "Need a choice.", options: [] }],
+    },
+    { projects: ["alpha", "beta", "gamma"], selected: "beta" },
+  );
+
+  // A dropdown of every registered project, auto-submitting the selection back as a GET param.
+  assert.match(html, /<form[^>]*method="get"[^>]*action="\/"[^>]*class="project-picker"/);
+  assert.match(html, /<select name="project" onchange="this\.form\.submit\(\)">/);
+  assert.match(html, /<option value="alpha">alpha<\/option>/);
+  assert.match(html, /<option value="beta" selected>beta<\/option>/);
+  assert.match(html, /<option value="gamma">gamma<\/option>/);
+  // The selected project's own body still renders exactly as the single-project view.
+  assert.match(html, /<section class="wave"><h2>Wave 1 <span class="wave-status running">running<\/span>/);
+  // The answer control carries the project so the gateway can route the reply to it.
+  assert.match(html, /<input type="hidden" name="project" value="beta" \/>/);
+});
+
+test("renderStatusPage omits the project dropdown when no project list is given", () => {
+  const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
+
+  assert.doesNotMatch(html, /class="project-picker"/);
+  assert.doesNotMatch(html, /<select name="project"/);
 });
 
 test("renderStatusPage uses the jjforge dark palette", () => {

@@ -154,6 +154,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The dashboard now labels each project by its full **`owner/name`** rather than the
+  bare project key (#89), everywhere a project is named: the repo-dropdown trigger and
+  its rows, and the landing card headings. The `owner/name` is derived at landing-build
+  time from each project's `git remote get-url origin` (both the SSH
+  `git@github.com:owner/name.git` and HTTPS `https://github.com/owner/name(.git)` forms,
+  via a pure, unit-tested `ownerRepoFromRemote` helper); a project with no parseable
+  remote (e.g. the demo) falls back to its bare project name. Display-only — the
+  `project` registry key, `/?project=<key>` routing, and `data-project` attributes stay
+  the bare key.
+
 - The dashboard's native `<select>` project picker is replaced by a **custom repo
   dropdown** (#88) — the toolbar's page heading and the repo switcher in one control,
   shared by the landing and the repo page (#81). Its `.repo-trigger` states the

@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
@@ -5,6 +6,36 @@ import { log } from "./log.ts";
 import { type ProjectPointer } from "./registry.ts";
 import { listParked, parkedDirOf, type ParkedRecord } from "./state.ts";
 import { applyCarve } from "./carve.ts";
+
+/**
+ * Parse a git remote URL to its `owner/name`, handling both the SSH
+ * (`git@github.com:owner/name.git`) and HTTPS (`https://github.com/owner/name(.git)`)
+ * forms, stripping a `.git` suffix and any trailing slash. Pure and testable — the
+ * `git remote get-url` call is the impure edge (`repoForProject`), this is the parse.
+ * Anything it can't recognize as a remote is `undefined`, so a caller falls back to
+ * the bare project key rather than showing a broken label.
+ */
+export function ownerRepoFromRemote(url: string): string | undefined {
+  const match = url.trim().match(/(?:git@[^:]+:|https?:\/\/[^/]+\/)([^/]+)\/([^/]+?)(?:\.git)?\/?$/);
+  if (!match) return undefined;
+  const [, owner, name] = match;
+  return owner && name ? `${owner}/${name}` : undefined;
+}
+
+/**
+ * A project's `owner/name`, read live from its checkout's `origin` remote — the
+ * impure edge over the pure `ownerRepoFromRemote` parse. A root that is not a git
+ * repo, has no `origin`, or whose URL doesn't parse yields `undefined` (the git
+ * call is silenced and never throws), so the display falls back to the bare key.
+ */
+export function repoForProject(projectRoot: string): string | undefined {
+  try {
+    const url = execFileSync("git", ["-C", projectRoot, "remote", "get-url", "origin"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    return ownerRepoFromRemote(url);
+  } catch {
+    return undefined;
+  }
+}
 
 export type IssueStatus = "completed" | "parked" | "failure" | "running" | "unstarted";
 
@@ -683,6 +714,10 @@ export type RunState = "running" | "parked" | "failure" | "completed" | "idle";
  * (no live run) reads `idle` and carries its last campaign's name and summary. */
 export interface ProjectCard {
   project: string;
+  /** the project's `owner/name`, derived from its checkout's git remote — the label
+   * the card heading shows in place of the bare `project` key; omitted (so the
+   * display falls back to `project`) for a project with no parseable GitHub remote. */
+  repo?: string;
   runState: RunState;
   campaignName?: string;
   wave: { current: number; total: number } | null;
@@ -755,6 +790,9 @@ const latestArchivedEvents = (baseLocation: string): any[] => {
 };
 
 const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, events: any[]): ProjectCard => {
+  // The card heading shows owner/name, read live off the checkout's git remote;
+  // undefined for a project with none (the demo), so the display falls back to the key.
+  const repo = repoForProject(pointer.projectRoot);
   if (!status.waves.length) {
     const [latest] = listArchivedRuns(pointer.baseLocation);
     // An idle card's numbers come from the last archived run, not the emptied live
@@ -766,6 +804,7 @@ const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, event
     const merged = archived ? archivedIssues.filter((n) => archived.outcomes.get(n) === "completed").length : 0;
     return {
       project: status.project,
+      repo,
       runState: "idle",
       campaignName: latest?.name ?? latest?.run,
       wave: null,
@@ -787,6 +826,7 @@ const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, event
   const completed = issues.filter((i) => i.status === "completed").length;
   return {
     project: status.project,
+    repo,
     runState: projectRunState(status),
     campaignName: status.name,
     // "N of M": the wave in flight if one is, otherwise how many have closed.

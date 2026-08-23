@@ -294,6 +294,11 @@ const renderProjectPicker = (projects: string[], selected: string | undefined) =
  */
 export interface RepoOption {
   project: string;
+  /** the project's `owner/name`, derived from its git remote — the label the trigger
+   * and this repo's row show in place of the bare `project` key; omitted (so the label
+   * falls back to `project`) for a project with no parseable remote. Display-only:
+   * `data-project` and routing stay keyed on `project`. */
+  repo?: string;
   runState: RunState;
 }
 
@@ -312,13 +317,15 @@ const asRepoOption = (repo: string | RepoOption): RepoOption => (typeof repo ===
  */
 export const renderRepoDropdown = (repos: readonly (string | RepoOption)[], selected: string | undefined) => {
   const options = repos.map(asRepoOption);
-  const label = selected ?? "All repos";
+  // The heading and each row show owner/name (the option's `repo`), falling back to the
+  // bare `project` key for a repo without one; routing still keys on `project` below.
+  const label = selected ? (options.find((repo) => repo.project === selected)?.repo ?? selected) : "All repos";
   const count = `${options.length} repo${options.length === 1 ? "" : "s"}`;
   const row = (project: string, isSelected: boolean, dotClass: string, optLabel: string, note: string) =>
     `<li class="repo-option${isSelected ? " selected" : ""}" role="option" aria-selected="${isSelected}" data-project="${escapeHtml(project)}" tabindex="-1"><span class="repo-dot ${dotClass}" aria-hidden="true"></span><span class="repo-optlabel">${escapeHtml(optLabel)}</span><span class="repo-note">${escapeHtml(note)}</span></li>`;
   const rows = [
     row("", !selected, "all", "All repos", count),
-    ...options.map((repo) => row(repo.project, repo.project === selected, repo.runState, repo.project, repo.runState)),
+    ...options.map((repo) => row(repo.project, repo.project === selected, repo.runState, repo.repo ?? repo.project, repo.runState)),
   ].join("");
   return `<div class="repo-dropdown" data-repo-dropdown><button type="button" class="repo-trigger" id="repo-trigger" aria-haspopup="listbox" aria-expanded="false" aria-controls="repo-menu"><span class="repo-label">${escapeHtml(label)}</span><span class="repo-chevron" aria-hidden="true">▾</span></button><ul class="repo-menu" id="repo-menu" role="listbox" aria-label="Switch repo" tabindex="-1" hidden>${rows}</ul><noscript>${renderProjectPicker(options.map((repo) => repo.project), selected)}</noscript></div>`;
 };
@@ -958,7 +965,9 @@ ${REPO_DROPDOWN_SCRIPT}
       const card = el("a", "card " + p.runState);
       card.href = "/?project=" + encodeURIComponent(p.project);
       const top = el("div", "card-top");
-      top.append(el("span", "card-project", p.project), el("span", "run-state " + p.runState, p.runState));
+      // The heading shows owner/name (p.repo), falling back to the bare key; the card's
+      // href and data below stay keyed on p.project, so routing is unchanged (display-only).
+      top.append(el("span", "card-project", p.repo ?? p.project), el("span", "run-state " + p.runState, p.runState));
       card.append(top);
       if (p.campaignName) card.append(el("div", "card-campaign", p.campaignName));
       const meta = el("div", "card-meta");

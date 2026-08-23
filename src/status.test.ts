@@ -1,10 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { appendedEvents, buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, DASHBOARD_PALETTE_CSS, describeEvent, extractParkedDetails, formatFeedEvent, formatStatusText, ISSUE_DETAIL_SHEET_SCRIPT, ISSUE_DETAIL_SHEET_STYLES, issueDetailSheetMarkup, lastEventText, listArchivedRuns, parkedReplyFor, parseCarveClosure, reconstructIssueDetail, projectRunState, reduceCampaign, renderLandingShell, renderStatusPage, renderTopBar, REPO_DROPDOWN_SCRIPT, selectStatus, serveAllStatus, STATE_DOT_CSS, stateColor, summarizeRun, TOP_BAR_STYLES } from "./status.ts";
+import { appendedEvents, buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, DASHBOARD_PALETTE_CSS, describeEvent, extractParkedDetails, formatFeedEvent, formatStatusText, ISSUE_DETAIL_SHEET_SCRIPT, ISSUE_DETAIL_SHEET_STYLES, issueDetailSheetMarkup, lastEventText, listArchivedRuns, ownerRepoFromRemote, parkedReplyFor, parseCarveClosure, reconstructIssueDetail, projectRunState, reduceCampaign, renderLandingShell, renderStatusPage, renderTopBar, REPO_DROPDOWN_SCRIPT, selectStatus, serveAllStatus, STATE_DOT_CSS, stateColor, summarizeRun, TOP_BAR_STYLES } from "./status.ts";
 import type { CampaignStatus } from "./status.ts";
 import type { AddressInfo } from "node:net";
 import { register, type ProjectPointer } from "./registry.ts";
@@ -34,6 +35,41 @@ const seedState = (dir: string, events: unknown[]) => {
   mkdirSync(join(dir, "parked"), { recursive: true });
   writeJsonl(join(dir, "logs", "orchestrator.jsonl"), events);
 };
+
+test("ownerRepoFromRemote parses SSH and HTTPS GitHub remotes to owner/name, and rejects garbage", () => {
+  // SSH form, with the .git suffix stripped.
+  assert.equal(ownerRepoFromRemote("git@github.com:jjforge/sandcastle-tdd.git"), "jjforge/sandcastle-tdd");
+  // HTTPS form, with and without the .git suffix.
+  assert.equal(ownerRepoFromRemote("https://github.com/jjforge/sandcastle-tdd.git"), "jjforge/sandcastle-tdd");
+  assert.equal(ownerRepoFromRemote("https://github.com/acme/tidepool"), "acme/tidepool");
+  // Trailing whitespace (as `git remote get-url` prints a newline) and a trailing slash.
+  assert.equal(ownerRepoFromRemote("https://github.com/acme/tidepool/\n"), "acme/tidepool");
+  // Garbage — not a recognizable remote — is undefined so the caller falls back to the bare key.
+  assert.equal(ownerRepoFromRemote("not-a-remote"), undefined);
+  assert.equal(ownerRepoFromRemote(""), undefined);
+});
+
+test("buildLanding's card carries owner/name from the project's git remote, and omits it when there is none", () => {
+  const base = join(tmpdir(), `sctdd-landing-repo-${Date.now()}`);
+  // A project whose root is a git repo with a GitHub origin → the card carries owner/name.
+  const withRemote = join(base, "with-remote");
+  const root = join(withRemote, "root");
+  seedState(withRemote, [{ ts: "2025-01-02T08:00:00.000Z", event: "campaign-start", batches: [["101"]], name: "work" }]);
+  mkdirSync(root, { recursive: true });
+  const git = (args: string[]) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8" });
+  git(["init", "-q"]);
+  git(["remote", "add", "origin", "git@github.com:jjforge/sandcastle-tdd.git"]);
+  // A project with no git remote (the demo) → no repo, so the display falls back to the bare key.
+  const noRemote = join(base, "no-remote");
+  seedState(noRemote, [{ ts: "2025-01-02T08:00:00.000Z", event: "campaign-start", batches: [["102"]], name: "work" }]);
+
+  const { projects } = buildLanding([pointerFor("with-remote", withRemote), pointerFor("no-remote", noRemote)], new Date("2025-01-02T12:00:00.000Z"));
+  const [a, b] = projects;
+  assert.equal(a.repo, "jjforge/sandcastle-tdd");
+  // The bare project key is unchanged — repo is display-only.
+  assert.equal(a.project, "with-remote");
+  assert.equal(b.repo, undefined);
+});
 
 test("buildLanding builds a per-project card for a live campaign", () => {
   const base = join(tmpdir(), `sctdd-landing-card-${Date.now()}`);
@@ -276,6 +312,14 @@ test("serveAllStatus serves the aggregated site, selecting the project from the 
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+});
+
+test("renderLandingShell's card heading shows owner/name, but links and keys on the bare project", () => {
+  const html = renderLandingShell(["alpha"]);
+  // The card heading reads the card's owner/name, falling back to the bare key when absent.
+  assert.match(html, /"card-project", p\.repo \?\? p\.project/);
+  // Routing stays keyed on the bare project: the card href is the bare project key.
+  assert.match(html, /card\.href = "\/\?project=" \+ encodeURIComponent\(p\.project\)/);
 });
 
 test("renderLandingShell is single-column on mobile with 44px tap targets", () => {
@@ -1875,6 +1919,26 @@ test("renderStatusPage's repo dropdown states the current scope as the heading t
   assert.match(html, /<span class="repo-chevron" aria-hidden="true">▾<\/span>/);
   // The full owner/name is the label — never abbreviated to just the repo name.
   assert.doesNotMatch(html, /<span class="repo-label">tidepool<\/span>/);
+});
+
+test("the repo dropdown shows owner/name from repo while data-project stays the bare project key", () => {
+  const html = renderStatusPage(
+    { project: "sandcastle-tdd", waves: [{ index: 0, status: "running", issues: [] }], parked: [] },
+    {
+      projects: [
+        { project: "sandcastle-tdd", runState: "running", repo: "jjforge/sandcastle-tdd" },
+        { project: "acme-checkout", runState: "idle" },
+      ],
+      selected: "sandcastle-tdd",
+    },
+  );
+
+  // The trigger heading reads the selected repo's owner/name, not its bare key.
+  assert.match(html, /<span class="repo-label">jjforge\/sandcastle-tdd<\/span>/);
+  // Its row shows owner/name too, but routing stays keyed on the bare project key.
+  assert.match(html, /<li class="repo-option selected"[^>]*data-project="sandcastle-tdd"[^>]*><span class="repo-dot running"[^>]*><\/span><span class="repo-optlabel">jjforge\/sandcastle-tdd<\/span>/);
+  // A project with no remote falls back to its bare key for the label.
+  assert.match(html, /data-project="acme-checkout"[^>]*><span class="repo-dot idle"[^>]*><\/span><span class="repo-optlabel">acme-checkout<\/span>/);
 });
 
 test("renderLandingShell's repo dropdown is the All-repos heading, replacing the h1 + native select", () => {

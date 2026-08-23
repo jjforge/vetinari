@@ -377,6 +377,18 @@ test("cards and chips lift only their fill on hover, never recolouring their edg
   }
 });
 
+test("the issue-detail sheet carries the issue's state on its top edge only (§2, #83)", () => {
+  // The sheet is a stateful card, so its state reads on a 2px top border, derived
+  // from stateColor — the other three edges stay the neutral 1px.
+  assert.match(ISSUE_DETAIL_SHEET_STYLES, /\.issue-detail-sheet \{[^}]*border-top: 2px solid/);
+  assert.match(ISSUE_DETAIL_SHEET_STYLES, /\.issue-detail-sheet\.parked \{ border-top-color: var\(--color-yellow\); \}/);
+  assert.match(ISSUE_DETAIL_SHEET_STYLES, /\.issue-detail-sheet\.completed \{ border-top-color: var\(--color-green\); \}/);
+  assert.match(ISSUE_DETAIL_SHEET_STYLES, /\.issue-detail-sheet\.failure \{ border-top-color: var\(--color-failure\); \}/);
+  // The sheet's state class is set from the fetched issue status when the detail renders,
+  // and reset while a fresh issue is loading.
+  assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /"issue-detail-sheet " \+ d\.status/);
+});
+
 test("motion is a channel for running only: the live indicator pulses while streaming, still + dim when paused (§5, #83)", () => {
   for (const html of [renderLandingShell(["alpha"]), renderStatusPage({ project: "beta", waves: [], parked: [] })]) {
     // The live indicator dot pulses while streaming…

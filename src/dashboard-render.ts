@@ -323,7 +323,10 @@ export const ISSUE_DETAIL_SHEET_STYLES = `  .carve-panel { display: flex; align-
   .issue-detail { position: fixed; inset: 0; z-index: 10; display: none; align-items: center; justify-content: center; padding: 1rem; background: #0009; }
   .issue-detail.show { display: flex; }
   .issue-detail[hidden] { display: none; }
-  .issue-detail-sheet { display: flex; flex-direction: column; width: min(640px, 100%); max-height: 85vh; overflow: hidden; background: var(--color-box-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); box-shadow: 0 18px 48px #0009; }
+  /* A stateful card: the issue's state reads on the 2px top edge only (§2), derived
+     from stateColor; the other three edges stay the neutral 1px. */
+  .issue-detail-sheet { display: flex; flex-direction: column; width: min(640px, 100%); max-height: 85vh; overflow: hidden; background: var(--color-card); border: 1px solid var(--color-secondary); border-top: 2px solid var(--color-dim); border-radius: var(--border-radius-medium); box-shadow: 0 18px 48px #0009; }
+  ${["running", "parked", "failure", "completed", "unstarted", "carved"].map((s) => `.issue-detail-sheet.${s} { border-top-color: ${stateColor(s)}; }`).join(" ")}
   .issue-detail-header { position: sticky; top: 0; display: flex; align-items: flex-start; gap: .75rem; padding: 1rem 1.15rem; background: var(--color-box-header); border-bottom: 1px solid var(--color-light-border); }
   .issue-detail-head-main { flex: 1; min-width: 0; }
   .issue-detail-status { display: inline-flex; align-items: center; gap: .4rem; font-size: .85rem; text-transform: uppercase; letter-spacing: .03em; color: var(--color-text-light-2); }
@@ -366,6 +369,7 @@ export const ISSUE_DETAIL_SHEET_STYLES = `  .carve-panel { display: flex; align-
  * landing's parked-queue rows), which is what calls `openIssue`.
  */
 export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElementById("issue-detail");
+  const detailSheet = issueDetail.querySelector(".issue-detail-sheet");
   const detailNum = issueDetail.querySelector(".issue-detail-num");
   const detailStatusDot = issueDetail.querySelector(".issue-detail-status .dot");
   const detailStatusLabel = issueDetail.querySelector(".issue-detail-statuslabel");
@@ -437,6 +441,8 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
   const renderDetail = (d) => {
     renderReply(d);
     detailNum.textContent = "#" + d.issueNumber;
+    // The sheet's top edge reads the issue's state (§2), the dot its full-strength colour.
+    detailSheet.className = "issue-detail-sheet " + d.status;
     detailStatusDot.className = "dot " + d.status;
     detailStatusLabel.textContent = d.status;
     detailTitle.textContent = d.title || ("Issue #" + d.issueNumber);
@@ -470,6 +476,7 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
     issueDetail.hidden = false;
     issueDetail.classList.add("show");
     detailNum.textContent = "#" + issue;
+    detailSheet.className = "issue-detail-sheet";
     detailStatusDot.className = "dot";
     detailStatusLabel.textContent = "";
     detailTitle.textContent = "Loading…";

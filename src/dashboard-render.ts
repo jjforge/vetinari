@@ -3,6 +3,7 @@ import {
   buildStatusWithIssueNames,
   type CampaignStatus,
   type DisplayStatus,
+  type RunState,
   type StatusIssue,
   type StatusWave,
   type WaveStatus,
@@ -73,6 +74,13 @@ export const STATE_DOT_CSS =
  * are deliberately left out — they keep a neutral border (§7).
  */
 export const STATE_CHIP_BORDER_CSS = ["running", "parked", "failure", "completed", "unstarted", "carved"].map((s) => `.chip.${s} { border-color: ${stateBorderColor(s)}; }`).join(" ");
+
+/**
+ * The mono treatment for the repo dropdown's label (#88). The dashboard loads no
+ * web font, so this is a system-monospace stack — IBM Plex Mono (the POC's face) is
+ * deliberately not added. If a shared `--font-mono` token is later introduced, use that.
+ */
+const MONO_FONT = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
 
 const ISSUE_EMOJI: Record<DisplayStatus, string> = {
   completed: "✅",
@@ -249,7 +257,7 @@ const renderWaves = (status: CampaignStatus, carve: boolean, interactive: boolea
  * project list is given (the empty-registry page renders no picker).
  */
 export interface StatusPageOptions {
-  projects?: string[];
+  projects?: readonly (string | RepoOption)[];
   selected?: string;
   /**
    * Render the per-chip carve control. The aggregated `serveAllStatus` is a dumb
@@ -278,6 +286,44 @@ const renderProjectPicker = (projects: string[], selected: string | undefined) =
     .join("")}</select></form>`;
 
 /**
+ * One repo the dropdown can switch to: its full `owner/name` and its rolled-up run
+ * state (the landing's `runState`, ADR 0007), which colours the row's status dot and
+ * is its note. A page's caller derives these from the same `CampaignStatus` list the
+ * rest of the view reads; a bare name (a caller that has no run state to hand) reads
+ * as an idle repo.
+ */
+export interface RepoOption {
+  project: string;
+  runState: RunState;
+}
+
+const asRepoOption = (repo: string | RepoOption): RepoOption => (typeof repo === "string" ? { project: repo, runState: "idle" } : repo);
+
+/**
+ * The repo dropdown (#88): the toolbar's page heading and the repo switcher in one
+ * control, shared by the landing and the repo page so the two can never drift. The
+ * `.repo-trigger` states the current scope as the largest text in the toolbar —
+ * `All repos` for the aggregate (`selected` undefined) or the full `owner/name` for a
+ * repo — and toggles the `role="listbox"` menu below it. Each menu row is a status
+ * dot in the repo's run-state colour (`All repos` the teal accent, since the aggregate
+ * has no run state of its own), the full `owner/name` label, and a note (the run state,
+ * or the repo count for `All repos`); the current scope's row is filled. A `<noscript>`
+ * keeps the native `<select>` as the no-JS switch, so scope still changes without JS.
+ */
+export const renderRepoDropdown = (repos: readonly (string | RepoOption)[], selected: string | undefined) => {
+  const options = repos.map(asRepoOption);
+  const label = selected ?? "All repos";
+  const count = `${options.length} repo${options.length === 1 ? "" : "s"}`;
+  const row = (project: string, isSelected: boolean, dotClass: string, optLabel: string, note: string) =>
+    `<li class="repo-option${isSelected ? " selected" : ""}" role="option" aria-selected="${isSelected}" data-project="${escapeHtml(project)}" tabindex="-1"><span class="repo-dot ${dotClass}" aria-hidden="true"></span><span class="repo-optlabel">${escapeHtml(optLabel)}</span><span class="repo-note">${escapeHtml(note)}</span></li>`;
+  const rows = [
+    row("", !selected, "all", "All repos", count),
+    ...options.map((repo) => row(repo.project, repo.project === selected, repo.runState, repo.project, repo.runState)),
+  ].join("");
+  return `<div class="repo-dropdown" data-repo-dropdown><button type="button" class="repo-trigger" id="repo-trigger" aria-haspopup="listbox" aria-expanded="false" aria-controls="repo-menu"><span class="repo-label">${escapeHtml(label)}</span><span class="repo-chevron" aria-hidden="true">▾</span></button><ul class="repo-menu" id="repo-menu" role="listbox" aria-label="Switch repo" tabindex="-1" hidden>${rows}</ul><noscript>${renderProjectPicker(options.map((repo) => repo.project), selected)}</noscript></div>`;
+};
+
+/**
  * The top bar every page shares (#81): the heading/dropdown on the left and the
  * live-bar (live dot + "updated Ns ago" + pause) on the right, wrapped in the
  * `.page-top` flex row. One definition rendered by the landing, the repo page, and
@@ -301,6 +347,36 @@ export const TOP_BAR_STYLES = `  .page-top { display: flex; align-items: center;
   .project-picker { margin: 0; }
   .project-picker select { min-height: 44px; color: var(--color-text); background: var(--color-box-header); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); padding: .35rem .7rem; font: inherit; cursor: pointer; }
   .project-picker select:hover { border-color: var(--color-primary); }
+  /* The repo dropdown (#88): the trigger is the page heading and the switcher in one.
+     No border, no background, no padding — just the mono scope label and a chevron. */
+  .repo-dropdown { position: relative; margin: 0; min-width: 0; }
+  .repo-trigger { display: inline-flex; align-items: center; gap: .4rem; max-width: 100%; border: 0; background: none; padding: 0; color: var(--color-text); font: inherit; cursor: pointer; }
+  .repo-label { min-width: 0; font-family: ${MONO_FONT}; font-weight: 600; font-size: 17px; letter-spacing: -0.01em; color: var(--color-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Hover turns the label teal; the chevron rotates 180° over 180ms when the menu opens. */
+  .repo-trigger:hover .repo-label { color: var(--color-primary); }
+  .repo-chevron { flex: none; font-size: 13px; color: var(--color-text-light-2); transition: transform 180ms; }
+  .repo-trigger[aria-expanded="true"] .repo-chevron { transform: rotate(180deg); }
+  /* The trigger has no border to hang a ring on, so give it (and each option) an explicit one. */
+  .repo-trigger:focus-visible, .repo-option:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+  /* A popover listbox: 8px below the trigger, left-aligned, above the cards (z 5) but
+     below the issue sheet (z 10), which covers/closes it. 260px wide for a long owner/name. */
+  .repo-menu { position: absolute; top: calc(100% + 8px); left: 0; z-index: 5; min-width: 260px; margin: 0; padding: 5px; list-style: none; display: flex; flex-direction: column; gap: 1px; background: var(--color-box-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); box-shadow: 0 14px 40px #0009; }
+  .repo-menu[hidden] { display: none; }
+  .repo-option { display: flex; align-items: center; gap: .5rem; padding: 8px 10px; border-radius: var(--border-radius); cursor: pointer; }
+  /* Selected and hovered read the same fill — hovering the selected row is a no-op. No checkmark. */
+  .repo-option:hover, .repo-option.selected { background: var(--color-chip-hover); }
+  .repo-optlabel { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ${MONO_FONT}; font-size: 12.5px; color: var(--color-text-light); }
+  .repo-option.selected .repo-optlabel { color: var(--color-text); }
+  .repo-note { flex: none; font-size: 11px; color: var(--color-dim); white-space: nowrap; }
+  /* The 6px status dot: the repo's run-state colour, or the teal accent for All repos
+     (the aggregate has no run state of its own). Generated once from stateColor (§3). */
+  .repo-dot { width: 6px; height: 6px; border-radius: 999px; flex: none; background: var(--color-dim); }
+  .repo-dot.all { background: var(--color-primary); }
+  ${["running", "parked", "failure", "completed", "idle"].map((s) => `.repo-dot.${s} { background: ${stateColor(s)}; }`).join(" ")}
+  /* The mockup's density is desktop-tuned; touch rows grow to the 44px minimum, and the
+     label steps to 15px on a phone. */
+  @media (pointer: coarse) { .repo-option { min-height: 44px; } }
+  @media (max-width: 640px) { .repo-label { font-size: 15px; } }
   .live-bar { display: inline-flex; align-items: center; gap: .75rem; color: var(--color-text-light-2); font-size: .85rem; }
   .live-indicator { display: inline-flex; align-items: center; color: var(--color-green); }
   /* The live dot pulses while streaming; motion is a second channel for one thing
@@ -623,6 +699,57 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
   }`;
 
 /**
+ * The repo dropdown's client script (#88) — one definition included by both pages so
+ * the trigger + listbox behave identically. It toggles the menu off the trigger,
+ * moves a roving focus through the options with ↑↓/Home/End, traps Tab inside the open
+ * menu and restores focus to the trigger on Escape/close, and switches scope by
+ * navigating (`/?project=…`, or `/` for the aggregate) — a re-select of the current
+ * scope is a no-op that just closes. Click-outside is scoped to the dropdown's own
+ * subtree, so clicking another control never leaves the menu open. No-op when the page
+ * renders no dropdown (a single-project view with no repo list).
+ */
+export const REPO_DROPDOWN_SCRIPT = `  const repoRoot = document.querySelector("[data-repo-dropdown]");
+  if (repoRoot) {
+    const repoTrigger = repoRoot.querySelector(".repo-trigger");
+    const repoMenu = repoRoot.querySelector(".repo-menu");
+    const repoOptions = [...repoMenu.querySelectorAll(".repo-option")];
+    const repoSelected = Math.max(0, repoOptions.findIndex((o) => o.getAttribute("aria-selected") === "true"));
+    let repoActive = repoSelected;
+    const repoIsOpen = () => repoTrigger.getAttribute("aria-expanded") === "true";
+    const repoFocus = (i) => { repoActive = (i + repoOptions.length) % repoOptions.length; repoOptions[repoActive].focus(); };
+    const repoOpen = () => { repoTrigger.setAttribute("aria-expanded", "true"); repoMenu.hidden = false; repoFocus(repoSelected); };
+    // Escape/close restores focus to the trigger; a click-outside close passes restore=false
+    // so focus stays where the click landed.
+    const repoClose = (restore) => { repoTrigger.setAttribute("aria-expanded", "false"); repoMenu.hidden = true; if (restore !== false) repoTrigger.focus(); };
+    // Switching scope is a navigation — the page is server-rendered per repo, so the load
+    // resets everything (the open issue sheet, any expanded closed-waves) for free.
+    // Re-selecting the current scope changes nothing, so it just closes the menu.
+    const repoChoose = (option) => {
+      if (option.getAttribute("aria-selected") === "true") { repoClose(); return; }
+      const project = option.dataset.project;
+      location.href = project ? "/?project=" + encodeURIComponent(project) : "/";
+    };
+    // The button's native activation already handles Enter/Space (a click), which
+    // toggles the menu — so the trigger only adds ↑↓ to open, avoiding a Space
+    // keydown-open then keyup-click that would immediately close it.
+    repoTrigger.addEventListener("click", () => (repoIsOpen() ? repoClose() : repoOpen()));
+    repoTrigger.addEventListener("keydown", (event) => {
+      if ((event.key === "ArrowDown" || event.key === "ArrowUp") && !repoIsOpen()) { event.preventDefault(); repoOpen(); }
+    });
+    repoMenu.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") { event.preventDefault(); repoClose(); }
+      else if (event.key === "ArrowDown") { event.preventDefault(); repoFocus(repoActive + 1); }
+      else if (event.key === "ArrowUp") { event.preventDefault(); repoFocus(repoActive - 1); }
+      else if (event.key === "Home") { event.preventDefault(); repoFocus(0); }
+      else if (event.key === "End") { event.preventDefault(); repoFocus(repoOptions.length - 1); }
+      else if (event.key === "Enter" || event.key === " ") { event.preventDefault(); repoChoose(repoOptions[repoActive]); }
+      else if (event.key === "Tab") { event.preventDefault(); repoFocus(repoActive + (event.shiftKey ? -1 : 1)); }
+    });
+    for (const option of repoOptions) option.addEventListener("click", () => repoChoose(option));
+    document.addEventListener("click", (event) => { if (repoIsOpen() && !repoRoot.contains(event.target)) repoClose(false); });
+  }`;
+
+/**
  * The all-repos landing shell: a client-rendered (vanilla, no build step) page the
  * aggregated server serves at `GET /`, replacing the old server-rendered status
  * page. The server renders only the chrome — the title, the All-repos↔project
@@ -632,7 +759,7 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
  * dropdown navigates the same way, and "All repos" returns here. Statuses use the
  * ADR 0007 vocabulary. Single-column and touch-friendly on a phone (44px targets).
  */
-export const renderLandingShell = (projects: string[]) => `<!doctype html>
+export const renderLandingShell = (projects: readonly (string | RepoOption)[]) => `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -719,7 +846,7 @@ ${ISSUE_DETAIL_SHEET_STYLES}
 </style>
 </head>
 <body>
-${renderTopBar(`<h1>All repos</h1>${renderProjectPicker(projects, undefined)}`)}
+${renderTopBar(renderRepoDropdown(projects, undefined))}
 <section class="counters">
   <div class="counter" data-counter="working"><div class="counter-value">–</div><div class="counter-label">Agents working</div><div class="counter-sub" data-counter-sub="working"></div></div>
   <button type="button" class="counter counter-toggle" data-counter="parked" disabled aria-controls="parked-queue"><div class="counter-value">–</div><div class="counter-label">Parked</div><div class="counter-sub" data-counter-sub="parked"></div></button>
@@ -754,6 +881,7 @@ ${issueDetailSheetMarkup(true)}
     return "progress";
   };
 ${ISSUE_DETAIL_SHEET_SCRIPT}
+${REPO_DROPDOWN_SCRIPT}
   async function loadFeed() {
     const rows = document.getElementById("feed-rows");
     let feed;
@@ -976,7 +1104,7 @@ ${ISSUE_DETAIL_SHEET_STYLES}
 }
 </head>
 <body>
-${renderTopBar(opts.projects?.length ? renderProjectPicker(opts.projects, opts.selected ?? status.project) : `<h1>${escapeHtml(status.project)}</h1>`)}
+${renderTopBar(opts.projects?.length ? renderRepoDropdown(opts.projects, opts.selected ?? status.project) : `<h1>${escapeHtml(status.project)}</h1>`)}
 ${
   status.parked.length
     ? `<section class="parked-issues"><h2>Parked · <span class="parked-count">${status.parked.length}</span></h2>${status.parked
@@ -1084,6 +1212,7 @@ ${issueDetailSheetMarkup(Boolean(opts.carve))}${
   renderUpdated();
   setInterval(renderUpdated, 1000);
 ${ISSUE_DETAIL_SHEET_SCRIPT}
+${REPO_DROPDOWN_SCRIPT}
   // A live chip and a parked card both open the sheet, carrying their issue+project.
   // The parked card is an <a> with a no-JS href, so its click is prevented before the
   // sheet opens; a chip is a button, where preventDefault is harmless.

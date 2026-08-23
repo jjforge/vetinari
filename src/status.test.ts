@@ -4,7 +4,7 @@ import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { appendedEvents, buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, describeEvent, extractParkedDetails, formatFeedEvent, formatStatusText, lastEventText, listArchivedRuns, parkedReplyFor, parseCarveClosure, reconstructIssueDetail, reduceCampaign, renderLandingShell, renderStatusPage, selectStatus, serveAllStatus, summarizeRun } from "./status.ts";
+import { appendedEvents, buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, describeEvent, extractParkedDetails, formatFeedEvent, formatStatusText, ISSUE_DETAIL_SHEET_SCRIPT, ISSUE_DETAIL_SHEET_STYLES, issueDetailSheetMarkup, lastEventText, listArchivedRuns, parkedReplyFor, parseCarveClosure, reconstructIssueDetail, reduceCampaign, renderLandingShell, renderStatusPage, selectStatus, serveAllStatus, summarizeRun } from "./status.ts";
 import type { CampaignStatus } from "./status.ts";
 import type { AddressInfo } from "node:net";
 import { register, type ProjectPointer } from "./registry.ts";
@@ -341,6 +341,42 @@ test("renderLandingShell opens a parked-queue row's issue detail inline, not by 
   assert.match(html, /\.carve-panel\[hidden\] \{ display: none; \}/);
   // The status dot colours are scoped to .dot so they don't tint the run-state pills.
   assert.match(html, /\.dot\.parked \{ background: var\(--color-yellow\); \}/);
+});
+
+test("the issue-detail sheet markup, CSS, and script are defined once and shared by both pages (#76)", () => {
+  const landing = renderLandingShell(["alpha", "beta"]);
+  // The campaign page renders the sheet with its carve panel when carve is on and
+  // without it otherwise; the landing always hosts the carve-enabled sheet.
+  const campaignCarve = renderStatusPage({ project: "beta", waves: [], parked: [] }, { carve: true });
+  const campaignPlain = renderStatusPage({ project: "beta", waves: [], parked: [] });
+
+  // Markup: one helper, rendered verbatim by both pages. The landing and the
+  // carve-enabled campaign page share the carve-panel variant; a plain campaign
+  // page shares the no-carve variant.
+  assert.ok(landing.includes(issueDetailSheetMarkup(true)));
+  assert.ok(campaignCarve.includes(issueDetailSheetMarkup(true)));
+  assert.ok(campaignPlain.includes(issueDetailSheetMarkup(false)));
+  // The no-carve variant has no carve panel; the carve variant does.
+  assert.ok(!issueDetailSheetMarkup(false).includes("carve-panel"));
+  assert.ok(issueDetailSheetMarkup(true).includes('id="carve-panel"'));
+
+  // CSS: one definition of the sheet styles, included by both pages verbatim.
+  assert.ok(ISSUE_DETAIL_SHEET_STYLES.includes(".issue-detail-sheet {"));
+  assert.ok(ISSUE_DETAIL_SHEET_STYLES.includes(".turn-log {"));
+  assert.ok(ISSUE_DETAIL_SHEET_STYLES.includes(".sheet-actions {"));
+  assert.ok(landing.includes(ISSUE_DETAIL_SHEET_STYLES));
+  assert.ok(campaignCarve.includes(ISSUE_DETAIL_SHEET_STYLES));
+
+  // Script: one definition of the sheet behaviour (openIssue/renderDetail/
+  // renderReply/closeSheet/carve wiring), included by both pages verbatim.
+  assert.ok(ISSUE_DETAIL_SHEET_SCRIPT.includes("const openIssue = async (project, issue, carvable)"));
+  assert.ok(ISSUE_DETAIL_SHEET_SCRIPT.includes("const closeSheet = () =>"));
+  assert.ok(landing.includes(ISSUE_DETAIL_SHEET_SCRIPT));
+  assert.ok(campaignCarve.includes(ISSUE_DETAIL_SHEET_SCRIPT));
+
+  // The hand-sync note is gone now that the sheet has a single source.
+  assert.ok(!landing.includes("#76"));
+  assert.ok(!landing.includes("kept in sync"));
 });
 
 test("renderLandingShell colours each activity event kind by category (#78)", () => {

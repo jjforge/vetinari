@@ -633,8 +633,12 @@ ${DASHBOARD_PALETTE_CSS}
   .feed-text { color: var(--color-text-light); flex: 1; }
   .live-bar { display: inline-flex; align-items: center; gap: .75rem; color: var(--color-text-light-2); font-size: .85rem; }
   .live-indicator { display: inline-flex; align-items: center; gap: .4rem; font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--color-green); }
-  .live-indicator::before { content: ""; width: .55rem; height: .55rem; border-radius: 999px; background: currentColor; }
-  .live-indicator[data-live-state="paused"] { color: var(--color-yellow); }
+  /* The live dot pulses while streaming; motion is a second channel for one thing
+     only (§5). Paused, it goes still and dim — never amber, never animating. */
+  .live-indicator::before { content: ""; width: .55rem; height: .55rem; border-radius: 999px; background: currentColor; animation: chip-pulse 1.6s ease-in-out infinite; }
+  .live-indicator[data-live-state="paused"] { color: var(--color-dim); }
+  .live-indicator[data-live-state="paused"]::before { animation: none; }
+  @media (prefers-reduced-motion: reduce) { .live-indicator::before { animation: none; } }
   .pause { min-height: 44px; color: var(--color-text); background: var(--color-box-header); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); padding: .35rem .8rem; font: inherit; cursor: pointer; }
   .pause:hover { border-color: var(--color-primary); }
   /* The card's highlight (top border) tracks its run state (#75) — its only coloured edge (§2). */
@@ -853,8 +857,12 @@ ${DASHBOARD_PALETTE_CSS}
   .project-picker select:hover { border-color: var(--color-primary); }
   .live-bar { display: inline-flex; align-items: center; gap: .75rem; color: var(--color-text-light-2); font-size: .85rem; }
   .live-indicator { display: inline-flex; align-items: center; gap: .4rem; font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--color-green); }
-  .live-indicator::before { content: ""; width: .55rem; height: .55rem; border-radius: 999px; background: currentColor; }
-  .live-indicator[data-live-state="paused"] { color: var(--color-yellow); }
+  /* The live dot pulses while streaming; motion is a second channel for one thing
+     only (§5). Paused, it goes still and dim — never amber, never animating. */
+  .live-indicator::before { content: ""; width: .55rem; height: .55rem; border-radius: 999px; background: currentColor; animation: chip-pulse 1.6s ease-in-out infinite; }
+  .live-indicator[data-live-state="paused"] { color: var(--color-dim); }
+  .live-indicator[data-live-state="paused"]::before { animation: none; }
+  @media (prefers-reduced-motion: reduce) { .live-indicator::before { animation: none; } }
   .pause { min-height: 44px; color: var(--color-text); background: var(--color-box-header); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); padding: .35rem .8rem; font: inherit; cursor: pointer; }
   .pause:hover { border-color: var(--color-primary); }
   .waves-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 1rem; margin: 1rem 0; }

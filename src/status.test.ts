@@ -377,6 +377,18 @@ test("cards and chips lift only their fill on hover, never recolouring their edg
   }
 });
 
+test("motion is a channel for running only: the live indicator pulses while streaming, still + dim when paused (§5, #83)", () => {
+  for (const html of [renderLandingShell(["alpha"]), renderStatusPage({ project: "beta", waves: [], parked: [] })]) {
+    // The live indicator dot pulses while streaming…
+    assert.match(html, /\.live-indicator::before \{[^}]*animation: chip-pulse/);
+    // …and goes still + dim when paused — never amber, never animating.
+    assert.match(html, /\.live-indicator\[data-live-state="paused"\] \{ color: var\(--color-dim\); \}/);
+    assert.match(html, /\.live-indicator\[data-live-state="paused"\]::before \{ animation: none; \}/);
+    // The only colour-bearing animation anywhere is chip-pulse — nothing else animates (§5).
+    assert.deepEqual([...new Set([...html.matchAll(/@keyframes ([\w-]+)/g)].map((m) => m[1]))], ["chip-pulse"]);
+  }
+});
+
 test("projectRunState resolves a card's state by the §3 precedence: parked > failure > running > completed (#83)", () => {
   const wave = (issues: { issueNumber: string; status: string }[]) => [{ index: 0, status: "running" as const, issues: issues as any }];
   // The most human-blocking state wins. A parked question beats a failure and any
@@ -2327,7 +2339,8 @@ test("renderStatusPage renders the landing live-bar top-right, not the old refre
   // The live-bar replaces the fixed-interval Refresh widget: a live/paused indicator,
   // an "updated Ns ago" readout, and a Pause button — the same controls the landing has.
   assert.match(html, /<div class="live-bar"[^>]*><span class="live-indicator" data-live-state="live">Live<\/span><span class="updated" data-updated>[^<]*<\/span><button type="button" id="pause" class="pause">Pause<\/button><\/div>/);
-  assert.match(html, /\.live-indicator\[data-live-state="paused"\] \{ color: var\(--color-yellow\); \}/);
+  // Paused, the live indicator goes dim (not amber) and still (§5).
+  assert.match(html, /\.live-indicator\[data-live-state="paused"\] \{ color: var\(--color-dim\); \}/);
   // The old interval widget is gone entirely.
   assert.doesNotMatch(html, /id="refresh-seconds"/);
   assert.doesNotMatch(html, /id="refresh-enabled"/);

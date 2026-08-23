@@ -29,7 +29,7 @@ pool keeps N slots full and a park frees its slot immediately.
 npm install github:jjforge/sandcastle-tdd
 ```
 
-Needs Docker, Node 22+, and `.sandcastle/.env` holding `CLAUDE_CODE_OAUTH_TOKEN`
+Needs Docker, Node 22+, and `.sandcastle.local/.env` holding `CLAUDE_CODE_OAUTH_TOKEN`
 from `claude setup-token` — your Claude Code subscription, which is what these
 agents run on. The container runs the official `claude` CLI and reads that
 token exactly as Claude Code GitHub Actions does; nothing here handles your
@@ -41,8 +41,11 @@ attribution and spend limits in the Console, and it doesn't consume the
 subscription rate windows that a parallel queue can exhaust. Neither choice
 changes how the loop behaves.
 
-Put everything project-specific in `sandcastle-tdd.config.mts` (or
-`.sandcastle/config.mts`) at your project root — nothing else needs editing:
+Run `npx sandcastle-tdd init` to scaffold the layout: a committed
+`sandcastle/config.mts` (below) plus a `sandcastle/Dockerfile`, and the excluded
+`.sandcastle.local/` for machine-local state (logs, parked tasks, and the `.env`
+above), added to `.gitignore`. Put everything project-specific in
+`sandcastle/config.mts` — nothing else needs editing:
 
 ```ts
 import { execFileSync } from "node:child_process";
@@ -68,7 +71,7 @@ export default defineConfig({
 Build the image, then prove it before spending anything on an agent:
 
 ```bash
-npx sandcastle docker build-image --dockerfile .sandcastle/Dockerfile --image-name sandcastle-myapp
+npx sandcastle docker build-image --dockerfile sandcastle/Dockerfile --image-name sandcastle-myapp
 npx sandcastle-tdd baseline          # toolchain probe + every gate, no agent
 ```
 
@@ -106,7 +109,7 @@ Two things to know:
 npx sandcastle-tdd run 436                    # one task: loop until green or parked
 npx sandcastle-tdd queue 436 611 623 640      # bounded pool, QUEUE_SLOTS (default 3)
 npx sandcastle-tdd parked                     # what's waiting on you, and why
-npx sandcastle-tdd status                     # local campaign/wave dashboard at http://127.0.0.1:8765
+npx sandcastle-tdd status                     # all-repos landing dashboard at http://127.0.0.1:8765 (live)
 npx sandcastle-tdd answer 436 "use approach B, and say why in the commit"
 ```
 
@@ -125,19 +128,29 @@ worktrees, and starts the next batch on the now-advanced base. A merge conflict
 or a red merged base **halts the campaign**, rolls the base back to where that
 batch began, and leaves every branch intact — you get a Telegram message and no
 later batch runs on a broken base. When a batch finishes, any parked records
-for non-green tasks in that completed wave are cleared from `.sandcastle/parked/`
+for non-green tasks in that completed wave are cleared from `.sandcastle.local/parked/`
 so stale questions do not bleed into the next wave's dashboard. Pushing stays
 yours.
 
 On clean completion, a `campaign` or `queue` **archives the run** so a finished
 run stops lingering in the dashboard and status line: the orchestrator log is
-moved aside to `.sandcastle/logs/archive/orchestrator-<ts>.jsonl` (kept, never
+moved aside to `.sandcastle.local/logs/archive/orchestrator-<ts>.jsonl` (kept, never
 deleted) and replaced with an empty one, so the status reads idle. It only fires
 on a clean finish with nothing still parked — a halt or an open question leaves
 the state in place to inspect. Run `sandcastle-tdd clear` to force the same reset
-yourself. Archived runs stay browsable: the dashboard lists each project's past
-runs (newest-first, with a one-line summary) under its live run, and clicking one
-renders its wave/issue view read-only.
+yourself. Archived runs stay browsable: each project's past runs (newest-first,
+with a one-line summary) sit under its live run, and clicking one renders its
+wave/issue view read-only.
+
+`status` opens **one landing over every registered project on the host** — no
+per-project server, no dropdown to find the right one. The page leads with four
+counters and a card per repo (its wave and per-status counts), a cross-repo
+**activity feed** flattening every project's live events newest-first underneath,
+and it **updates live** over Server-Sent Events as runs advance — no reload.
+Tapping an issue opens a **detail sheet** (status, turns, elapsed, the full turn
+log) from which you can **carve** it out of the running campaign; the layout
+reflows for a phone, so it is the same view you reach from the Telegram message
+on your way past. It reads the host registry, so no gateway daemon is required.
 
 **Carve one issue out of a campaign.** When an issue turns out not to be ready,
 `carve` drops it *and everything that can't proceed without it* — the transitive
@@ -204,7 +217,7 @@ both resolve:
 
 ```json
 {
-  "statusLine": { "type": "command", "command": ".sandcastle/run statusline", "refreshInterval": 5 }
+  "statusLine": { "type": "command", "command": ".sandcastle.local/run statusline", "refreshInterval": 5 }
 }
 ```
 
@@ -246,58 +259,80 @@ an error. Absent `reportFinding`, no harvest turn runs.
 
 ## Answer from your phone
 
-Set `SANDCASTLE_TELEGRAM_BOT_TOKEN` and `SANDCASTLE_TELEGRAM_CHAT_ID` in the
-**orchestrator's** environment — never in `.sandcastle/.env`, which is injected
-into agent containers and must not carry a bot credential.
+One host-level daemon, the **`gateway`**, fronts every project on the machine: it
+is the **single Telegram consumer** (one poll per bot, so Telegram's
+one-consumer-per-bot rule is never violated) and the **sole sender** — a run never
+talks to Telegram itself. A run that parks or emits a notification writes a record
+into its own `.sandcastle.local/`; the gateway drains it and sends. Until the
+gateway is up, notifications silently do not fire. The full standing-up guide,
+end to end, is [`docs/gateway.md`](docs/gateway.md); the short path:
+
+Put each project's Telegram credentials in its **base location**, in
+`.sandcastle.local/orchestrator.env` (gitignored, host-only) — never in
+`.sandcastle.local/.env`, which is injected into agent containers and must not
+carry a bot credential:
 
 ```bash
-npx sandcastle-tdd tg-test           # prove the round-trip first
-npx sandcastle-tdd dispatch &        # the ONE poller (quick try; prefer the service below)
-npx sandcastle-tdd queue 436 611 623
+# <project>/.sandcastle.local/orchestrator.env
+SANDCASTLE_TELEGRAM_BOT_TOKEN=123456:ABC-your-bot-token
+SANDCASTLE_TELEGRAM_CHAT_ID=-1001234567890
 ```
 
-Every park sends its question as a message; **reply to that message** and the
-dispatcher resumes that specific task, running concurrent resumes as needed.
-Run at most one poller (`dispatch`, `attend`, or `tg-test`): Telegram permits a
-single consumer of a bot's updates, so a second silently steals the first's
-replies. `attend <task>` is the single-task variant when you aren't queuing.
+```bash
+set -a; source .sandcastle.local/orchestrator.env; set +a
+npx sandcastle-tdd tg-test            # prove the round-trip first
+npx sandcastle-tdd gateway            # the ONE daemon (quick try; prefer the service below)
+npx sandcastle-tdd queue 436 611 623  # in another shell; registers itself with the gateway
+```
 
-While `dispatch` is up, send **`/status`** (bare, or `/status@yourbot` in a
-group) to get a live summary back in the chat — each wave, its issue chips with
-status, and any parked issues waiting on you. It is read-only and shares the web
-dashboard's model, so it never disturbs a run; questions are still answered by
-replying to their message.
+Every run **registers itself** with the gateway automatically (it reads each
+project live from a host registry — nothing to enrol by hand), so a queue in one
+shell and the gateway in another find each other. Every park sends its question as
+a message; **reply to that message** and the gateway resumes that exact task,
+running concurrent resumes as needed. Send **`/status`** (bare, or `/status@yourbot`
+in a group) for a live summary back in the chat, and **`carve <issue>`** to preview
+a carve and, on a `yes` reply, drop it from the running campaign.
 
-### Run the poller as a service (survives reboot)
+**Where messages land** is declared in the committed `sandcastle/config.mts` with
+two maps: `destinations` (named `{ bot, chat, thread? }` targets) and `notify`
+(routing rules — a bare `category`, a `category:event`, or a `*` default → a
+destination name), so you can split failures onto an alerts bot or a thread. The
+five categories and the full routing model are in
+[`docs/gateway.md`](docs/gateway.md). With no `notify` map, every category falls
+back to the project's default chat.
 
-A backgrounded `dispatch &` dies with its shell, so a park raised after you close
+### Run the gateway as a service (survives reboot)
+
+A backgrounded `gateway &` dies with its shell, so a park raised after you close
 the terminal goes unanswered. Run it as a **systemd user service** instead — one
-always-on poller, restarted on crash, brought back at boot. The unit is tracked
-in this repo at [`systemd/sandcastle-dispatch.service`](systemd/sandcastle-dispatch.service);
-install it, editing `WorkingDirectory` to your project checkout:
+always-on daemon, restarted on crash, brought back at boot. The host-level unit is
+tracked in this repo at [`systemd/sandcastle-gateway.service`](systemd/sandcastle-gateway.service);
+it has **no `WorkingDirectory`** (the gateway fronts every project, not one) and
+sources the host-level `~/.config/sandcastle/gateway.env`:
 
 ```bash
-install -Dm644 systemd/sandcastle-dispatch.service \
-  ~/.config/systemd/user/sandcastle-dispatch.service
-$EDITOR ~/.config/systemd/user/sandcastle-dispatch.service   # set WorkingDirectory
+install -Dm644 systemd/sandcastle-gateway.service \
+  ~/.config/systemd/user/sandcastle-gateway.service
 
 systemctl --user daemon-reload
-systemctl --user enable --now sandcastle-dispatch   # start now + at every login
-loginctl enable-linger "$USER"                       # ...and at boot, without a login session
+systemctl --user enable --now sandcastle-gateway   # start now + at every login
+loginctl enable-linger "$USER"                      # ...and at boot, without a login session
 ```
 
-The unit sources the host-only `orchestrator.env` before `exec`ing the poller —
-`dispatch` sends too (the "dispatcher up" message), so it needs the bot creds in
-its own env; never point it at `.sandcastle/.env`, which is injected into agent
-containers.
+The gateway still reads each project's bot credentials live from that project's
+`.sandcastle.local/orchestrator.env` (above); `gateway.env` carries host-level env
+the daemon itself needs (e.g. `GIT_CONFIG_GLOBAL`), and `migrate` folds an existing
+project's `orchestrator.env` into it. Either way, keep bot creds out of
+`.sandcastle.local/.env`, which is injected into agent containers.
 
-`enable --now` alone brings the poller back only when you log in; **`enable-linger`
+`enable --now` alone brings the daemon back only when you log in; **`enable-linger`
 is what makes it survive a headless reboot** — it tells systemd to start your user
-manager at boot. Operate it with `systemctl --user status|restart sandcastle-dispatch`
-(restart after editing `orchestrator.env`); poll detail is in the project's
-`.sandcastle/logs/orchestrator.jsonl`, not journald. The `run` wrapper resolves the
-package's own `tsx`, so the unit needs no global install. **This replaces the inline
-`dispatch &`** — do not run both, or the two pollers fight over the bot's updates.
+manager at boot. Operate it with `systemctl --user status|restart sandcastle-gateway`;
+gateway detail goes to `journalctl --user -u sandcastle-gateway`. **This replaces
+the inline `gateway &`** — do not run both, or the two consumers fight over the
+bot's updates. Migrating from the retired per-project `dispatch` poller?
+`npx sandcastle-tdd migrate` rewrites your old unit into this one — see
+[`docs/gateway.md`](docs/gateway.md).
 
 ## Operating rules that are load-bearing
 
@@ -390,13 +425,13 @@ it there too and re-run that project's `baseline`.
 | `campaign <batch…>` | drain each batch, merge its greens, gate the merged base, then start the next |
 | `carve <issue> <batch…>` | drop the issue + its transitive dependents, then run the rest as a campaign (`--dry-run` to just print) |
 | `campaign-plan <ids…>` | layer a selected set into dependency-ordered wave args (paste after `campaign`) + a provenance report; plans only, never runs |
-| `migrate [--dry-run]` | move an existing project onto the `sandcastle/` + `.sandcastle.local/` layout: config → `sandcastle/`, old `.sandcastle/` state → `.sandcastle.local/`, `.gitignore` updated (`--dry-run` to just print the plan) |
+| `init [--dry-run]` | scaffold a **new** project onto the layout: committed `sandcastle/` (config skeleton + Dockerfile), excluded `.sandcastle.local/`, `.gitignore` updated (idempotent, never clobbers an existing config; `--dry-run` to just print the plan) |
+| `migrate [--dry-run]` | move an **existing** project onto the `sandcastle/` + `.sandcastle.local/` layout: config → `sandcastle/`, old `.sandcastle/` state → `.sandcastle.local/`, `.gitignore` updated, `orchestrator.env` folded into the gateway host config, and the systemd unit rewritten into the gateway service (`--dry-run` to just print the plan) |
 | `answer <task> <text>` | resume a parked task with your answer |
-| `attend <task>` | one task, self-answering via Telegram |
-| `dispatch` | the single poller; routes replies to parked tasks, and answers `/status` with a live summary |
+| `gateway` | the one host daemon fronting every registered project: sole Telegram consumer and sender — announces parked questions, routes replies (and `carve <issue>`) to the right project+task, resumes them concurrently, and hosts the status dashboard |
 | `parked` | list what is waiting and why |
 | `clear` | archive the run log + clear parked, resetting the dashboard/status line to idle (automatic on clean campaign/queue completion) |
-| `status [--port <port>]` | one dashboard over the host registry: campaign waves, issue status chips, and parked-response cards for every registered project, with a dropdown to switch (a single project is one entry), plus a read-only list of each project's archived runs. No gateway daemon required |
+| `status [--port <port>] [--host <host>]` | the all-repos landing over the host registry: counters, a card per registered project, a cross-repo activity feed, and each project's archived runs — live over SSE. Reads the registry, so no gateway daemon required |
 | `statusline` | one compact line for the Claude Code status bar; reads Claude Code's JSON on stdin |
 | `tg-test` | prove the Telegram round-trip |
 
@@ -404,16 +439,18 @@ it there too and re-run that project's `baseline`.
 
 | Path | Contents |
 | --- | --- |
-| `.sandcastle/parked/<task>.json` | pending question, session id, branch, Telegram message id |
-| `.sandcastle/logs/orchestrator.jsonl` | every event: sandbox, turn, gate, park, green |
-| `.sandcastle/logs/gate-<ts>.log` | full stdout/stderr of each gate run |
-| `.sandcastle/logs/archive/orchestrator-<ts>.jsonl` | a finished run's log, moved aside on completion or `clear` |
+| `.sandcastle.local/parked/<task>.json` | pending question, session id, branch, Telegram message id |
+| `.sandcastle.local/outbox/<id>.json` | a category-tagged record a run enqueues for the gateway to send |
+| `.sandcastle.local/routing.json` | this project's `destinations`/`notify` materialized for the gateway to read |
+| `.sandcastle.local/logs/orchestrator.jsonl` | every event: sandbox, turn, gate, park, green |
+| `.sandcastle.local/logs/gate-<ts>.log` | full stdout/stderr of each gate run |
+| `.sandcastle.local/logs/archive/orchestrator-<ts>.jsonl` | a finished run's log, moved aside on completion or `clear` |
 
 ## Known limits
 
 - **Token accounting under-reports.** `IterationResult.usage` reflects the final
   message, not the session; read the session JSONL for real cost.
-- **Dispatcher resumes sit outside the queue's slot accounting**, so heavy
+- **Gateway resumes sit outside the queue's slot accounting**, so heavy
   answering can briefly exceed `QUEUE_SLOTS` containers.
 - **Session capture is required.** Non-resumable providers (`cursor`,
   `opencode`, `copilot`) can't drive this loop; the run fails with a clear

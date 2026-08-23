@@ -140,6 +140,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `README.md` is brought back in line with the current CLI and layout (#86). The
+  Telegram sections now document the host-level `gateway` daemon (sole Telegram
+  consumer and sender) and its systemd user service in place of the retired
+  per-project `dispatch`/`attend` poller, and link the routing model
+  (`destinations`/`notify`) to `docs/gateway.md`. The Modes table matches
+  `sandcastle-tdd --help` — `init` and `gateway` added, `dispatch` and `attend`
+  dropped. Config/state paths reflect the committed `sandcastle/config.mts` +
+  excluded `.sandcastle.local/` layout (including the agent-credential `.env`, now
+  `.sandcastle.local/.env`, vs. the host-only bot creds in `orchestrator.env` /
+  `gateway.env`). The dashboard prose describes the reinvented all-repos landing —
+  counters, per-repo cards, a cross-repo activity feed, an issue-detail sheet with
+  carve, and live SSE updates.
+- The shipped systemd unit is now `systemd/sandcastle-gateway.service`, the
+  host-level gateway service (no `WorkingDirectory`, sourcing
+  `~/.config/sandcastle/gateway.env`), replacing the retired
+  `systemd/sandcastle-dispatch.service` (#86).
+
 - The repo/campaign page's closed waves now expand and collapse the way the design
   intends (#82), a frontend interaction + render change only. Each closed wave is a
   compact toggle chip (`✓ Wave N  M/M`) in a row under the campaign-meta line, with a

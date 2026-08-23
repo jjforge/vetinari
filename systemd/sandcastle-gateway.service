@@ -1,0 +1,12 @@
+[Unit]
+Description=sandcastle-tdd gateway (host Telegram router)
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/env bash -lc 'set -a; source %h/.config/sandcastle/gateway.env; set +a; exec sandcastle-tdd gateway'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

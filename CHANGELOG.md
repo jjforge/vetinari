@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A selected archived run now reconstructs its carved issues read-only, so an
+  operator browsing a finished run in the campaign view's "Archived runs" section
+  sees what it was carved down to (#55). The read-only archived render reduces the
+  archived log through the same `buildStatus`/`reduceCampaign` fold the live run
+  uses, so a `carve` event in the archive replays into a `carved` chip in the wave
+  it left (ADR 0007) — inert, in the shared wave/chip treatment that wraps on
+  mobile. Pinned by a test that drives the archived-run HTTP surface end to end.
 - Carve from the issue-detail sheet, routed through the structured closure (#55).
   The sheet's Carve action now confirms against the exact closure E2's dry-run emits
   (`carve-closure {json}`) rather than re-parsing the CLI's prose: the confirmation

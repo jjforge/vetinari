@@ -772,6 +772,41 @@ test("serveAllStatus lists a project's archived runs and renders one read-only w
   }
 });
 
+test("serveAllStatus reconstructs a carved issue in a selected archived run, read-only", async () => {
+  const configDir = join(tmpdir(), `sctdd-agg-archive-carved-${Date.now()}`);
+  const betaDir = join(configDir, "state-beta");
+  // A live run over an unrelated issue, so the only carved chip on the page is the
+  // archived run's.
+  seedState(betaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["900"]] }]);
+  // An archived run that carved an unstarted dependent (201) out of its plan: 101
+  // banked, 201 dropped by the carve, then the campaign finished.
+  const archiveDir = join(betaDir, "logs", "archive");
+  mkdirSync(archiveDir, { recursive: true });
+  writeJsonl(join(archiveDir, "orchestrator-2026-04-01T00-00-00-000Z.jsonl"), [
+    { ts: "2026-04-01T00:00:00.000Z", event: "campaign-start", batches: [["101"], ["201"]], name: "spring cleanup" },
+    { ts: "2026-04-01T00:01:00.000Z", event: "green", taskId: "101", branch: "agent/101" },
+    { ts: "2026-04-01T00:02:00.000Z", event: "carve", target: "201", removed: ["201"] },
+    { ts: "2026-04-01T00:03:00.000Z", event: "campaign-done", batches: 2 },
+  ]);
+  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const { port } = server.address() as AddressInfo;
+  try {
+    const html = await (await fetch(`http://127.0.0.1:${port}/?project=beta&run=2026-04-01T00-00-00-000Z`)).text();
+    // The archived run renders read-only under its --name, in the wave/chip treatment.
+    assert.match(html, /<section class="archived-run"><h2>Archived run spring cleanup /);
+    // The carved-out 201 is reconstructed as a carved chip in the wave it left, so an
+    // operator can see what the run was carved down to (ADR 0007).
+    assert.match(html, /<span class="dot carved"><\/span>#201 <small>carved<\/small>/);
+    // Read-only: the archived carved chip carries no carve/open data — it is inert.
+    assert.doesNotMatch(html, /data-issue="201"/);
+    assert.doesNotMatch(html, /data-carvable="1"[^>]*>[^<]*<span class="dot carved">/);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
 test("serveAllStatus GET /archive/log serves a listed run's raw JSONL as text/plain, and 404s an unlisted run", async () => {
   const configDir = join(tmpdir(), `sctdd-archive-log-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");

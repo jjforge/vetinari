@@ -1,5 +1,5 @@
 import { listProjects } from "./registry.ts";
-import { archiveStatusConfig, buildAllStatus, buildStatus, listArchivedRuns, projectRunState, selectStatus } from "./dashboard-model.ts";
+import { archiveStatusConfig, buildAllStatus, buildStatus, listArchivedRuns, projectRunState, repoForProject, selectStatus } from "./dashboard-model.ts";
 import { renderLandingShell, renderStatusPage } from "./dashboard-render.ts";
 import type { RouteHandler } from "./dashboard-http.ts";
 
@@ -16,10 +16,15 @@ import type { RouteHandler } from "./dashboard-http.ts";
 export const handlePage: RouteHandler = (req, res, url, deps) => {
   if (!(req.method === "GET" && (url.pathname === "/" || req.url === undefined))) return false;
   res.setHeader("content-type", "text/html; charset=utf-8");
-  const statuses = buildAllStatus(listProjects(deps.configDir));
+  const pointers = listProjects(deps.configDir);
+  const statuses = buildAllStatus(pointers);
   // The repo dropdown, on both pages, is one option per registered project carrying
-  // its rolled-up run state (ADR 0007) so each menu row can dot + note it.
-  const repos = statuses.map((s) => ({ project: s.project, runState: projectRunState(s) }));
+  // its rolled-up run state (ADR 0007) so each menu row can dot + note it, and its
+  // owner/name (from the git remote) so it reads that instead of the bare key.
+  const repos = statuses.map((s) => {
+    const pointer = pointers.find((p) => p.project === s.project);
+    return { project: s.project, runState: projectRunState(s), repo: pointer ? repoForProject(pointer.projectRoot) : undefined };
+  });
   // No project selected → the all-repos landing shell. Also the empty-registry
   // fallback, so a fresh host lands on the (empty) landing rather than a stub page.
   const project = url.searchParams.get("project");
@@ -28,7 +33,7 @@ export const handlePage: RouteHandler = (req, res, url, deps) => {
     return true;
   }
   const selected = selectStatus(statuses, project);
-  const pointer = listProjects(deps.configDir).find((p) => p.project === selected.project);
+  const pointer = pointers.find((p) => p.project === selected.project);
   const archivedRuns = pointer ? listArchivedRuns(pointer.baseLocation) : [];
   const requestedRun = url.searchParams.get("run") ?? undefined;
   const match = requestedRun ? archivedRuns.find((r) => r.run === requestedRun) : undefined;

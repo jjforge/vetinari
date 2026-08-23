@@ -8,6 +8,72 @@ import {
   type WaveStatus,
 } from "./dashboard-model.ts";
 
+/**
+ * The dashboard's single colour source (`docs/dashboard-color-rules.md`, #83): one
+ * `:root` palette emitted verbatim into every surface's `<style>` — the all-repos
+ * landing, the repo/campaign page, and the issue-detail sheet they share. No
+ * surface defines a colour locally, so a token can never be "defined in one root,
+ * missing in the other" (the #78 class of bug). Every colour that carries meaning
+ * is one of the six ADR-0007 states or the carve action (§1); the teal
+ * `--color-primary` is the product accent and is never a state.
+ */
+export const DASHBOARD_PALETTE_CSS = `  :root {
+    /* Neutral surfaces (§1) */
+    --color-body: #090c10; --color-box-body: #0b0e12; --color-box-header: #10151b;
+    --color-card: #10151b; --color-chip: #0b0e12; --color-card-hover: #131a21; --color-chip-hover: #151d24;
+    --color-secondary: #232b35; --color-light-border: #1b212a;
+    --color-text: #e6edf3; --color-text-light: #cdd6e0; --color-text-light-2: #8b98a5; --color-dim: #5f6b78;
+    /* Product accent — never a state (§1) */
+    --color-primary: #3fb9b0; --color-primary-alpha-20: rgb(63 185 176 / 20%);
+    /* State palette (§1): running · parked · failure · completed · unstarted(dim) · carved */
+    --color-blue: #6cb6ff; --color-yellow: #c8a24e; --color-failure: #f85149; --color-green: #3fb984; --color-carved: #a371f7;
+    /* State colours at 40% alpha — the muted chip borders (§4) */
+    --color-blue-40: rgb(108 182 255 / 40%); --color-yellow-40: rgb(200 162 78 / 40%); --color-failure-40: rgb(248 81 73 / 40%); --color-green-40: rgb(63 185 132 / 40%); --color-carved-40: rgb(163 113 247 / 40%); --color-dim-40: rgb(95 107 120 / 40%);
+    /* Carve action — a control, never a state; a different red from failure (§1) */
+    --color-red: #f79287;
+    --border-radius: 9px; --border-radius-medium: 12px;
+  }`;
+
+/**
+ * The one state→colour mapping every surface derives from (§3), never authoring a
+ * hex per instance. Maps each ADR-0007 status — plus the landing's `idle` roll-up
+ * and its `queued` tally bucket, both display aliases of `unstarted`'s dim grey —
+ * to its palette token. `stateColor` returns the full state colour (dots, borders,
+ * pills); `stateBorderColor` its 40%-alpha variant for muted chip borders (§4).
+ */
+const STATE_COLOR_TOKEN: Record<string, string> = {
+  running: "blue",
+  parked: "yellow",
+  failure: "failure",
+  completed: "green",
+  carved: "carved",
+  unstarted: "dim",
+  queued: "dim",
+  idle: "dim",
+};
+export const stateColor = (state: string): string => `var(--color-${STATE_COLOR_TOKEN[state] ?? "dim"})`;
+export const stateBorderColor = (state: string): string => `var(--color-${STATE_COLOR_TOKEN[state] ?? "dim"}-40)`;
+
+/**
+ * The status-dot colour rules, generated once from `stateColor` and shared by both
+ * pages (previously two hand-kept copies). Scoped to `.dot` so a state colour tints
+ * only the dot, never a whole card or list row (#81). Motion is a second channel for
+ * `running` alone (§5): its dot pulses, reduced-motion aware; nothing else animates.
+ */
+export const STATE_DOT_CSS =
+  `.dot { width: .75rem; height: .75rem; border-radius: 999px; display: inline-block; } ` +
+  ["running", "parked", "failure", "completed", "unstarted", "carved", "queued"].map((s) => `.dot.${s} { background: ${stateColor(s)}; }`).join(" ") +
+  ` @keyframes chip-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } } .dot.running { animation: chip-pulse 1.4s ease-in-out infinite; } @media (prefers-reduced-motion: reduce) { .dot.running { animation: none; } }`;
+
+/**
+ * An issue chip borders its own status at 40% alpha (§4) — muted so a wave of a
+ * dozen chips does not vibrate, while each chip's full-strength dot still lets you
+ * count states at a glance. Generated once from `stateBorderColor`; the campaign
+ * page's issue chips carry a matching status class. Tally chips (counts, not states)
+ * are deliberately left out — they keep a neutral border (§7).
+ */
+export const STATE_CHIP_BORDER_CSS = ["running", "parked", "failure", "completed", "unstarted", "carved"].map((s) => `.chip.${s} { border-color: ${stateBorderColor(s)}; }`).join(" ");
+
 const ISSUE_EMOJI: Record<DisplayStatus, string> = {
   completed: "✅",
   running: "🔄",
@@ -84,7 +150,9 @@ const renderIssueChip = (issue: StatusIssue, project: string, carve: boolean, in
   // Carve for exactly those (ADR 0005). No control is drawn on the chip itself.
   const openData = interactive || carve ? ` data-issue="${escapeHtml(issue.issueNumber)}" data-project="${escapeHtml(project)}"` : "";
   const carveData = carve && isCarvable(issue) ? ` data-carvable="1"` : "";
-  return `<button type="button" class="chip" title="${escapeTitle(detail)}"${openData}${carveData}><span class="dot ${issue.status}"></span>#${escapeHtml(issue.issueNumber)} <small>${escapeHtml(issue.status)}</small></button>`;
+  // The chip carries its status class so its border reads that status at 40% alpha
+  // (§4); the dot carries the same status at full strength.
+  return `<button type="button" class="chip ${issue.status}" title="${escapeTitle(detail)}"${openData}${carveData}><span class="dot ${issue.status}"></span>#${escapeHtml(issue.issueNumber)} <small>${escapeHtml(issue.status)}</small></button>`;
 };
 
 const renderWaveContents = (wave: StatusWave, project: string, carve: boolean, interactive: boolean) => `<div class="chips">${wave.issues.map((issue) => renderIssueChip(issue, project, carve, interactive)).join("")}</div>`;
@@ -255,7 +323,10 @@ export const ISSUE_DETAIL_SHEET_STYLES = `  .carve-panel { display: flex; align-
   .issue-detail { position: fixed; inset: 0; z-index: 10; display: none; align-items: center; justify-content: center; padding: 1rem; background: #0009; }
   .issue-detail.show { display: flex; }
   .issue-detail[hidden] { display: none; }
-  .issue-detail-sheet { display: flex; flex-direction: column; width: min(640px, 100%); max-height: 85vh; overflow: hidden; background: var(--color-box-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); box-shadow: 0 18px 48px #0009; }
+  /* A stateful card: the issue's state reads on the 2px top edge only (§2), derived
+     from stateColor; the other three edges stay the neutral 1px. */
+  .issue-detail-sheet { display: flex; flex-direction: column; width: min(640px, 100%); max-height: 85vh; overflow: hidden; background: var(--color-card); border: 1px solid var(--color-secondary); border-top: 2px solid var(--color-dim); border-radius: var(--border-radius-medium); box-shadow: 0 18px 48px #0009; }
+  ${["running", "parked", "failure", "completed", "unstarted", "carved"].map((s) => `.issue-detail-sheet.${s} { border-top-color: ${stateColor(s)}; }`).join(" ")}
   .issue-detail-header { position: sticky; top: 0; display: flex; align-items: flex-start; gap: .75rem; padding: 1rem 1.15rem; background: var(--color-box-header); border-bottom: 1px solid var(--color-light-border); }
   .issue-detail-head-main { flex: 1; min-width: 0; }
   .issue-detail-status { display: inline-flex; align-items: center; gap: .4rem; font-size: .85rem; text-transform: uppercase; letter-spacing: .03em; color: var(--color-text-light-2); }
@@ -271,12 +342,14 @@ export const ISSUE_DETAIL_SHEET_STYLES = `  .carve-panel { display: flex; align-
   .turn-entry { display: flex; gap: .6rem; padding: .55rem 0; border-bottom: 1px solid var(--color-light-border); }
   .turn-entry:last-child { border-bottom: 0; }
   .turn-num { flex: none; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .turn-num.completed { color: var(--color-green); } .turn-num.parked { color: var(--color-yellow); } .turn-num.failure { color: var(--color-red); } .turn-num.running { color: var(--color-blue); } .turn-num.unstarted { color: var(--color-text-light-2); } .turn-num.carved { color: var(--color-carved); }
+  ${["completed", "parked", "failure", "running", "unstarted", "carved"].map((s) => `.turn-num.${s} { color: ${stateColor(s)}; }`).join(" ")}
   .turn-summary { color: var(--color-text-light); }
   .turn-empty { color: var(--color-text-light-2); padding: .55rem 0; }
   /* Parked-reply block + the actions row pin to the sheet foot so Resume/Carve stay
      reachable one-handed while the turn log scrolls above. */
-  .issue-detail-reply { flex: none; padding: .9rem 1.15rem; border-top: 1px solid var(--color-light-border); background: var(--color-box-header); }
+  /* The reply block is the human-action queue inside the sheet, so it carries the
+     3px amber left edge (§2); it only ever shows for a parked issue. */
+  .issue-detail-reply { flex: none; padding: .9rem 1.15rem; border-top: 1px solid var(--color-light-border); border-left: 3px solid var(--color-yellow); background: var(--color-box-header); }
   .reply-heading { margin: 0 0 .5rem; font-size: .95rem; color: var(--color-text-light); }
   .reply-question { margin: 0 0 .6rem; color: var(--color-text-light); white-space: pre-wrap; max-height: 30vh; overflow-y: auto; }
   .reply-options { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .6rem; }
@@ -298,6 +371,7 @@ export const ISSUE_DETAIL_SHEET_STYLES = `  .carve-panel { display: flex; align-
  * landing's parked-queue rows), which is what calls `openIssue`.
  */
 export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElementById("issue-detail");
+  const detailSheet = issueDetail.querySelector(".issue-detail-sheet");
   const detailNum = issueDetail.querySelector(".issue-detail-num");
   const detailStatusDot = issueDetail.querySelector(".issue-detail-status .dot");
   const detailStatusLabel = issueDetail.querySelector(".issue-detail-statuslabel");
@@ -369,6 +443,8 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
   const renderDetail = (d) => {
     renderReply(d);
     detailNum.textContent = "#" + d.issueNumber;
+    // The sheet's top edge reads the issue's state (§2), the dot its full-strength colour.
+    detailSheet.className = "issue-detail-sheet " + d.status;
     detailStatusDot.className = "dot " + d.status;
     detailStatusLabel.textContent = d.status;
     detailTitle.textContent = d.title || ("Issue #" + d.issueNumber);
@@ -402,6 +478,7 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
     issueDetail.hidden = false;
     issueDetail.classList.add("show");
     detailNum.textContent = "#" + issue;
+    detailSheet.className = "issue-detail-sheet";
     detailStatusDot.className = "dot";
     detailStatusLabel.textContent = "";
     detailTitle.textContent = "Loading…";
@@ -502,7 +579,7 @@ export const renderLandingShell = (projects: string[]) => `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>All repos — sandcastle</title>
 <style>
-  :root { --color-body: #090c10; --color-box-body: #0b0e12; --color-box-header: #10151b; --color-primary: #3fb9b0; --color-primary-alpha-20: rgb(63 185 176 / 20%); --color-text: #e6edf3; --color-text-light: #cdd6e0; --color-text-light-2: #8b98a5; --color-secondary: #232b35; --color-light-border: #1b212a; --color-green: #3fb984; --color-yellow: #c8a24e; --color-red: #f79287; --color-blue: #6cb6ff; --border-radius: 9px; --border-radius-medium: 12px; }
+${DASHBOARD_PALETTE_CSS}
   * { box-sizing: border-box; }
   body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 0; padding: 1.5rem; background: var(--color-body); color: var(--color-text); }
   h1 { font-size: clamp(1.6rem, 4vw, 2.6rem); margin: 0; letter-spacing: -0.035em; }
@@ -513,7 +590,7 @@ export const renderLandingShell = (projects: string[]) => `<!doctype html>
   .counters { display: grid; grid-template-columns: repeat(4, 1fr); gap: .75rem; margin: 1.25rem 0; }
   .counter { background: var(--color-box-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: 1rem; }
   .counter-toggle { font: inherit; color: inherit; text-align: left; cursor: pointer; }
-  .counter-toggle:hover:not(:disabled) { border-color: var(--color-primary); }
+  .counter-toggle:hover:not(:disabled) { background: var(--color-card-hover); }
   .counter-toggle:disabled { cursor: default; }
   .counter-value { font-size: clamp(1.6rem, 5vw, 2.4rem); font-weight: 700; letter-spacing: -0.02em; }
   .counter-toggle:not(:disabled) .counter-value::after { content: " ▸"; color: var(--color-text-light-2); font-size: .9em; }
@@ -527,31 +604,32 @@ export const renderLandingShell = (projects: string[]) => `<!doctype html>
   .parked-queue { display: grid; gap: .5rem; margin: -0.5rem 0 1.25rem; }
   /* A grid display beats the UA [hidden] rule, so the collapse needs it back explicitly. */
   .parked-queue[hidden] { display: none; }
-  .parked-row { display: grid; grid-template-columns: auto auto 1fr auto; align-items: baseline; gap: .3rem .75rem; min-height: 44px; text-decoration: none; color: inherit; background: var(--color-box-body); border: 1px solid var(--color-secondary); border-left: 3px solid var(--color-yellow); border-radius: var(--border-radius-medium); padding: .7rem 1rem; }
-  .parked-row:hover { border-color: var(--color-primary); background: var(--color-primary-alpha-20); }
+  .parked-row { display: grid; grid-template-columns: auto auto 1fr auto; align-items: baseline; gap: .3rem .75rem; min-height: 44px; text-decoration: none; color: inherit; background: var(--color-card); border: 1px solid var(--color-secondary); border-left: 3px solid var(--color-yellow); border-radius: var(--border-radius-medium); padding: .7rem 1rem; }
+  .parked-row:hover { background: var(--color-card-hover); }
   .parked-issue { font-weight: 700; color: var(--color-yellow); }
   .parked-repo { color: var(--color-primary); font-weight: 600; }
   .parked-question { color: var(--color-text-light); min-width: 0; }
   .parked-waited { color: var(--color-text-light-2); font-size: .85rem; white-space: nowrap; }
   .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 1rem; }
-  .card { display: block; min-height: 44px; text-decoration: none; color: inherit; background: var(--color-box-body); border: 1px solid var(--color-secondary); border-top: 3px solid var(--color-primary); border-radius: var(--border-radius-medium); padding: 1rem 1.15rem; box-shadow: 0 8px 22px #0004; }
-  .card:hover { border-color: var(--color-primary); background: var(--color-primary-alpha-20); }
+  .card { display: block; min-height: 44px; text-decoration: none; color: inherit; background: var(--color-card); border: 1px solid var(--color-secondary); border-top: 3px solid var(--color-dim); border-radius: var(--border-radius-medium); padding: 1rem 1.15rem; box-shadow: 0 8px 22px #0004; }
+  /* Hover lifts the fill only; the state-coloured top edge never changes on hover (§6). */
+  .card:hover { background: var(--color-card-hover); }
   .card-top { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
   .card-project { font-size: 1.15rem; font-weight: 700; letter-spacing: -0.01em; }
-  .run-state { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; border-radius: 999px; padding: .2rem .6rem; border: 1px solid var(--color-text-light-2); color: var(--color-text-light-2); }
+  .run-state { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; border-radius: 999px; padding: .2rem .6rem; border: 1px solid var(--color-dim); color: var(--color-dim); }
   .run-state.running { border-color: var(--color-blue); color: var(--color-blue); }
   .run-state.parked { border-color: var(--color-yellow); color: var(--color-yellow); }
-  .run-state.failure { border-color: var(--color-red); color: var(--color-red); }
+  .run-state.failure { border-color: var(--color-failure); color: var(--color-failure); }
   .run-state.completed { border-color: var(--color-green); color: var(--color-green); }
   .card-campaign { color: var(--color-primary); font-weight: 600; margin: .5rem 0 .1rem; }
   .card-meta { color: var(--color-text-light); font-size: .9rem; display: flex; flex-wrap: wrap; gap: .3rem .9rem; margin: .35rem 0; }
   /* A percentMerged-width progress bar under the meta line, coloured by run state (#80). */
   .progress { height: .4rem; background: var(--color-secondary); border-radius: 999px; overflow: hidden; margin: .1rem 0 .55rem; }
-  .progress-fill { height: 100%; border-radius: 999px; background: var(--color-text-light-2); }
+  .progress-fill { height: 100%; border-radius: 999px; background: var(--color-dim); }
   .progress-fill.running { background: var(--color-blue); } .progress-fill.parked { background: var(--color-yellow); } .progress-fill.completed { background: var(--color-green); }
   /* The tally reads as status-dot pill chips, matching the campaign page's chips (#80). */
   .card-tally { display: flex; flex-wrap: wrap; gap: .4rem; color: var(--color-text-light); font-size: .8rem; }
-  .tally-chip { display: inline-flex; align-items: center; gap: .35rem; border: 1px solid var(--color-secondary); border-radius: 999px; padding: .15rem .5rem; background: var(--color-box-header); }
+  .tally-chip { display: inline-flex; align-items: center; gap: .35rem; border: 1px solid var(--color-secondary); border-radius: 999px; padding: .15rem .5rem; background: var(--color-chip); }
   .card-last { color: var(--color-text-light-2); font-size: .85rem; margin-top: .5rem; white-space: pre-line; }
   .empty { color: var(--color-text-light-2); }
   .feed { margin-top: 2rem; border-top: 1px solid var(--color-light-border); padding-top: 1rem; }
@@ -560,20 +638,23 @@ export const renderLandingShell = (projects: string[]) => `<!doctype html>
   .feed-time { color: var(--color-text-light-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
   .feed-kind { color: var(--color-primary); font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
   /* Each activity event reads in its comms-category colour (#78). */
-  .feed-kind.progress { color: var(--color-blue); } .feed-kind.success { color: var(--color-green); } .feed-kind.attention { color: var(--color-yellow); } .feed-kind.failure { color: var(--color-red); } .feed-kind.carved { color: var(--color-carved); }
+  .feed-kind.progress { color: var(--color-blue); } .feed-kind.success { color: var(--color-green); } .feed-kind.attention { color: var(--color-yellow); } .feed-kind.failure { color: var(--color-failure); } .feed-kind.carved { color: var(--color-carved); }
   .feed-text { color: var(--color-text-light); flex: 1; }
   .live-bar { display: inline-flex; align-items: center; gap: .75rem; color: var(--color-text-light-2); font-size: .85rem; }
   .live-indicator { display: inline-flex; align-items: center; gap: .4rem; font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--color-green); }
-  .live-indicator::before { content: ""; width: .55rem; height: .55rem; border-radius: 999px; background: currentColor; }
-  .live-indicator[data-live-state="paused"] { color: var(--color-yellow); }
+  /* The live dot pulses while streaming; motion is a second channel for one thing
+     only (§5). Paused, it goes still and dim — never amber, never animating. */
+  .live-indicator::before { content: ""; width: .55rem; height: .55rem; border-radius: 999px; background: currentColor; animation: chip-pulse 1.6s ease-in-out infinite; }
+  .live-indicator[data-live-state="paused"] { color: var(--color-dim); }
+  .live-indicator[data-live-state="paused"]::before { animation: none; }
+  @media (prefers-reduced-motion: reduce) { .live-indicator::before { animation: none; } }
   .pause { min-height: 44px; color: var(--color-text); background: var(--color-box-header); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); padding: .35rem .8rem; font: inherit; cursor: pointer; }
   .pause:hover { border-color: var(--color-primary); }
-  /* The card's highlight matches its run state (#75). */
-  .card.running { border-top-color: var(--color-blue); } .card.parked { border-top-color: var(--color-yellow); } .card.failure { border-top-color: var(--color-red); } .card.completed { border-top-color: var(--color-green); } .card.idle { border-top-color: var(--color-text-light-2); }
-  /* Status dot colours, scoped to .dot so they never tint the run-state pills — used
-     by the issue-detail sheet below, which the landing shares with the campaign page (#74). */
-  .dot { width: .75rem; height: .75rem; border-radius: 999px; display: inline-block; }
-  .dot.completed { background: var(--color-green); } .dot.parked { background: var(--color-yellow); } .dot.failure { background: var(--color-red); } .dot.running { background: var(--color-blue); } .dot.unstarted { background: var(--color-text-light-2); } .dot.queued { background: var(--color-text-light-2); } .dot.carved { background: var(--color-carved); }
+  /* The card's highlight (top border) tracks its run state (#75) — its only coloured edge (§2). */
+  .card.running { border-top-color: var(--color-blue); } .card.parked { border-top-color: var(--color-yellow); } .card.failure { border-top-color: var(--color-failure); } .card.completed { border-top-color: var(--color-green); } .card.idle { border-top-color: var(--color-dim); }
+  /* Status dot colours, generated once from stateColor and shared with the campaign
+     page (§3), scoped to .dot so a state never tints a run-state pill or a whole card. */
+  ${STATE_DOT_CSS}
   textarea { width: 100%; max-width: 100%; min-height: 7rem; margin: .5rem 0; color: var(--color-text); background: var(--color-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: .75rem; }
 ${ISSUE_DETAIL_SHEET_STYLES}
   @media (max-width: 640px) {
@@ -773,7 +854,7 @@ export const renderStatusPage = (status: CampaignStatus, opts: StatusPageOptions
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${escapeHtml(status.project)} status</title>
 <style>
-  :root { --color-body: #090c10; --color-box-body: #0b0e12; --color-box-header: #10151b; --color-card: #0b0e12; --color-primary: #3fb9b0; --color-primary-alpha-20: rgb(63 185 176 / 20%); --color-text: #e6edf3; --color-text-light: #cdd6e0; --color-text-light-2: #8b98a5; --color-secondary: #232b35; --color-light-border: #1b212a; --color-green: #3fb984; --color-yellow: #c8a24e; --color-red: #f79287; --color-blue: #6cb6ff; --color-carved: #a371f7; --border-radius: 9px; --border-radius-medium: 12px; }
+${DASHBOARD_PALETTE_CSS}
   body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 2rem; background: var(--color-body); color: var(--color-text); }
   h1 { font-size: clamp(1.8rem, 4vw, 3rem); margin: 0; letter-spacing: -0.035em; color: var(--color-text); }
   h2 { color: var(--color-text-light); }
@@ -785,12 +866,16 @@ export const renderStatusPage = (status: CampaignStatus, opts: StatusPageOptions
   .project-picker select:hover { border-color: var(--color-primary); }
   .live-bar { display: inline-flex; align-items: center; gap: .75rem; color: var(--color-text-light-2); font-size: .85rem; }
   .live-indicator { display: inline-flex; align-items: center; gap: .4rem; font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--color-green); }
-  .live-indicator::before { content: ""; width: .55rem; height: .55rem; border-radius: 999px; background: currentColor; }
-  .live-indicator[data-live-state="paused"] { color: var(--color-yellow); }
+  /* The live dot pulses while streaming; motion is a second channel for one thing
+     only (§5). Paused, it goes still and dim — never amber, never animating. */
+  .live-indicator::before { content: ""; width: .55rem; height: .55rem; border-radius: 999px; background: currentColor; animation: chip-pulse 1.6s ease-in-out infinite; }
+  .live-indicator[data-live-state="paused"] { color: var(--color-dim); }
+  .live-indicator[data-live-state="paused"]::before { animation: none; }
+  @media (prefers-reduced-motion: reduce) { .live-indicator::before { animation: none; } }
   .pause { min-height: 44px; color: var(--color-text); background: var(--color-box-header); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); padding: .35rem .8rem; font: inherit; cursor: pointer; }
   .pause:hover { border-color: var(--color-primary); }
   .waves-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 1rem; margin: 1rem 0; }
-  .wave { background: var(--color-box-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: 1rem; box-shadow: 0 8px 22px #0004; border-top: 3px solid var(--color-text-light-2); }
+  .wave { background: var(--color-card); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: 1rem; box-shadow: 0 8px 22px #0004; border-top: 3px solid var(--color-dim); }
   .wave.running { border-top-color: var(--color-blue); }
   .wave-head { display: flex; align-items: baseline; justify-content: space-between; gap: .5rem; }
   .wave-head h2 { margin: 0; font-size: 1.1rem; }
@@ -799,25 +884,27 @@ export const renderStatusPage = (status: CampaignStatus, opts: StatusPageOptions
   .completed-wave-chip .check { color: var(--color-green); font-weight: 700; }
   .completed-wave-bar, .chips { display: flex; flex-wrap: wrap; align-items: flex-start; align-content: flex-start; gap: .5rem; }
   .completed-wave { display: inline-block; }
-  .completed-wave[open] { display: block; flex-basis: 100%; border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: .75rem; background: var(--color-box-body); }
+  .completed-wave[open] { display: block; flex-basis: 100%; border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: .75rem; background: var(--color-card); }
   .completed-wave[open] > .completed-wave-chip { display: flex; width: max-content; margin-bottom: .6rem; }
   .completed-wave-chip { cursor: pointer; list-style: none; }
   .completed-wave-chip::-webkit-details-marker { display: none; }
-  .chip, .wave-status, .completed-wave-chip { display: inline-flex; align-items: center; gap: .4rem; border: 1px solid var(--color-secondary); border-radius: 999px; padding: .3rem .65rem; background: var(--color-box-header); color: var(--color-text); }
-  .chip:hover, .completed-wave-chip:hover { border-color: var(--color-primary); background: var(--color-primary-alpha-20); }
+  .chip, .wave-status, .completed-wave-chip { display: inline-flex; align-items: center; gap: .4rem; border: 1px solid var(--color-secondary); border-radius: 999px; padding: .3rem .65rem; background: var(--color-chip); color: var(--color-text); }
+  /* An issue chip borders its own status at 40% alpha (§4); the small status word is muted. */
+  ${STATE_CHIP_BORDER_CSS}
+  .chip small { color: var(--color-text-light-2); }
+  /* Hover lifts the chip fill only; its border is unchanged (§6). */
+  .chip:hover, .completed-wave-chip:hover { background: var(--color-chip-hover); }
   .wave-status { font-size: .85rem; margin-left: .5rem; text-transform: uppercase; letter-spacing: .03em; }
   .wave-status.closed { border-color: var(--color-green); color: var(--color-green); background: rgb(63 185 132 / 12%); }
   .wave-status.running { border-color: var(--color-blue); color: var(--color-blue); background: rgb(108 182 255 / 12%); }
-  .wave-status.unstarted { border-color: var(--color-text-light-2); color: var(--color-text-light-2); background: rgb(139 152 165 / 12%); }
+  .wave-status.unstarted { border-color: var(--color-dim); color: var(--color-dim); background: rgb(95 107 120 / 12%); }
   .wave-carved { font-size: .78rem; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: var(--color-carved); border: 1px solid var(--color-carved); background: rgb(163 113 247 / 12%); border-radius: 999px; padding: .1rem .5rem; }
   .wave-issues { list-style: none; margin: .7rem 0 0; padding: 0; }
   .wave-issue { color: var(--color-text-light); font-size: .9rem; padding: .15rem 0; }
   .wave-issue.carved { color: var(--color-text-light-2); text-decoration: line-through; }
-  .dot { width: .75rem; height: .75rem; border-radius: 999px; display: inline-block; }
-  .completed { background: var(--color-green); } .parked { background: var(--color-yellow); } .failure { background: var(--color-red); } .running { background: var(--color-blue); } .unstarted { background: var(--color-text-light-2); } .carved { background: var(--color-carved); }
-  @keyframes chip-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
-  .dot.running { animation: chip-pulse 1.4s ease-in-out infinite; }
-  @media (prefers-reduced-motion: reduce) { .dot.running { animation: none; } }
+  /* Status dot colours, generated once from stateColor and shared with the landing
+     (§3), scoped to .dot so a state never tints a whole chip, card, or list row (#81). */
+  ${STATE_DOT_CSS}
   textarea { width: 100%; max-width: 100%; min-height: 7rem; margin: .5rem 0; color: var(--color-text); background: var(--color-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: .75rem; }
   button.chip { cursor: pointer; color: inherit; font: inherit; }
 ${ISSUE_DETAIL_SHEET_STYLES}
@@ -826,8 +913,9 @@ ${ISSUE_DETAIL_SHEET_STYLES}
   .parked-issues { margin: 1rem 0 2rem; }
   .parked-issues > h2 { display: flex; align-items: baseline; flex-wrap: wrap; gap: .35rem; }
   .parked-count { color: var(--color-yellow); }
-  .parked-card { display: block; text-decoration: none; color: inherit; background: var(--color-box-body); border: 1px solid var(--color-secondary); border-left: 3px solid var(--color-yellow); border-radius: var(--border-radius-medium); padding: .8rem 1rem; margin: .5rem 0; box-shadow: 0 8px 22px #0004; }
-  .parked-card:hover { border-color: var(--color-primary); background: var(--color-primary-alpha-20); }
+  .parked-card { display: block; text-decoration: none; color: inherit; background: var(--color-card); border: 1px solid var(--color-secondary); border-left: 3px solid var(--color-yellow); border-radius: var(--border-radius-medium); padding: .8rem 1rem; margin: .5rem 0; box-shadow: 0 8px 22px #0004; }
+  /* Hover lifts the fill only; the amber left edge (the human-action queue, §2) stays. */
+  .parked-card:hover { background: var(--color-card-hover); }
   .parked-card-title { color: var(--color-text-light); }
   .parked-issue { font-weight: 700; color: var(--color-yellow); }
   .parked-card-meta { color: var(--color-text-light-2); font-size: .85rem; margin-top: .35rem; }

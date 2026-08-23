@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `docs/dashboard-color-rules.md`, the normative card/chip colour spec (#83): the
+  six-state palette (§1), the one-coloured-edge rule (§2), the state→colour
+  derivation and precedence (§3), the card/chip application (§4), the running-only
+  motion rule (§5), and the interactive-affordance rules (§6), each tied to the
+  shared implementation so it stays the reference.
+
 - `docs/gateway.md`, an operator how-to for standing up and running the aggregated
   gateway (#68): credentials in `.sandcastle.local/orchestrator.env` and how the
   sole-sender gateway reads them live from each project's base location (vs. the
@@ -133,6 +139,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the change simply carry no summary and reconstruct as before.
 
 ### Changed
+
+- The dashboard's colour is now one shared model across every surface (#83), a
+  frontend/visual change only. One `:root` palette is emitted once and consumed by
+  the landing, the repo/campaign page and the issue-detail sheet — no per-renderer
+  copy — so a token can no longer be defined on one page and missing on another
+  (#78: `--color-carved` was absent from the landing root, so carved rendered
+  uncoloured across the landing feed, status dots and turn log; it now resolves
+  everywhere). State→colour is derived through one helper (`stateColor` /
+  `projectRunState`). Concrete visual changes: `failure` renders its own red
+  `#f85149`, distinct from the carve action's `#f79287`; `unstarted`/`idle`/`queued`
+  render the dim grey `#5f6b78`; issue chips now border their own status at 40%
+  alpha with a full-strength dot; card/chip/parked-row hover lifts the fill only and
+  never recolours the edge to teal; the run-state precedence is now
+  `parked > failure > running` (a parked question outranks a failure); the campaign
+  page's status colours are scoped to `.dot` so a state no longer tints whole list
+  rows (#81); and the live indicator dot pulses while streaming, going still and dim
+  when paused. Pinned by `renderLandingShell`/`renderStatusPage` regression tests
+  (palette resolution, derivation + precedence, edge/chip application) and verified
+  headless against the served landing, repo page and issue sheet.
 
 - The per-project campaign page (`GET /?project=<repo>`) is restyled to the new
   visual design the all-repos landing already uses (#79). Its top-right now carries

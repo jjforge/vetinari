@@ -39,7 +39,7 @@ test("integration: a seeded live run populates the landing, campaign, issue deta
 
     // Campaign page — chips render every status, including the carved #208.
     const page = await (await fetch(`${base}/?project=${DEMO_PROJECT}`)).text();
-    assert.match(page, /class="chip"/);
+    assert.match(page, /class="chip [a-z]+"/);
     for (const status of ["completed", "running", "parked", "carved"]) {
       assert.match(page, new RegExp(status), `page renders a ${status} chip`);
     }

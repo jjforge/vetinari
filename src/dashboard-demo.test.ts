@@ -53,7 +53,10 @@ test("integration: a seeded live run populates the landing, campaign, issue deta
     assert.ok(d204.turnLog.every((t: { summary: string }) => t.summary.length > 0), "every turn carries a summary");
     assert.ok(d204.elapsedMs > 0, "elapsed spans the turns");
     assert.equal((await getJson(`/api/issue?project=${DEMO_PROJECT}&issue=208`)).status, "carved");
-    assert.equal((await getJson(`/api/issue?project=${DEMO_PROJECT}&issue=205`)).status, "parked");
+    const d205 = await getJson(`/api/issue?project=${DEMO_PROJECT}&issue=205`);
+    assert.equal(d205.status, "parked");
+    // The parked slot preserved a worktree; the sheet's WORKTREE tile reads this path (#90).
+    assert.equal(d205.worktree, ".sandcastle.local/wt/205");
 
     // Feed — repo-prefixed sentences.
     const feed = await getJson("/api/feed");

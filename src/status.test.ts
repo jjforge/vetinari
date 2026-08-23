@@ -1486,6 +1486,25 @@ test("reconstructIssueDetail folds an issue's turn log, count, elapsed and statu
       [0, "Wrote a failing test for the parser."],
     ],
   );
+  // No worktree-preserved event named this issue, so there is no worktree path.
+  assert.equal(detail.worktree, undefined);
+});
+
+test("reconstructIssueDetail surfaces the preserved worktree path for a parked issue", () => {
+  const detail = reconstructIssueDetail(
+    [
+      { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["102"]], name: "gateway work" },
+      { ts: "2025-01-01T00:01:00.000Z", event: "campaign-batch", index: 0, tasks: ["102"] },
+      { ts: "2025-01-01T00:02:00.000Z", event: "turn", taskId: "102", turn: 0, summary: "Asked which option to take." },
+      { ts: "2025-01-01T00:03:00.000Z", event: "parked", taskId: "102", reason: "blocked" },
+      { ts: "2025-01-01T00:03:01.000Z", event: "worktree-preserved", taskId: "102", path: ".sandcastle.local/wt/102" },
+    ],
+    "102",
+  );
+
+  // The real per-task worktree the loop logged when it preserved the parked slot —
+  // not a fabricated agent id (ADR/#55). Surfaced verbatim for the WORKTREE tile.
+  assert.equal(detail.worktree, ".sandcastle.local/wt/102");
 });
 
 test("buildStatus shows campaign waves with issue chips and statuses", () => {
@@ -2206,6 +2225,23 @@ test("renderStatusPage opens the issue-detail sheet from a chip, fetching /api/i
   assert.match(html, /getElementById\("issue-detail-close"\)\.addEventListener\("click"/);
 });
 
+test("renderStatusPage gives the sheet a WORKTREE tile and turns-with-duration meta (#90)", () => {
+  const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
+
+  // A third meta tile carrying the agent's real worktree path — hidden until a
+  // fetched detail carries one, so a run without a preserved worktree shows nothing.
+  assert.match(html, /<div class="meta-tile[^"]*" id="issue-detail-worktree-tile" hidden>/);
+  assert.match(html, /<span class="meta-label">Worktree<\/span>/);
+  assert.match(html, /id="issue-detail-worktree"/);
+  // A meta-tile is a flex box, so its display would defeat the UA [hidden] rule;
+  // restore the collapse so the worktree tile can hide when the path is absent.
+  assert.match(html, /\.meta-tile\[hidden\][^{]*\{ display: none;? \}/);
+  // The script reveals the tile only when the detail carries a worktree path…
+  assert.match(html, /d\.worktree/);
+  // …and presents turns with their working duration (N turns · Mm), not a bare count.
+  assert.match(html, /" turns · "/);
+});
+
 test("renderStatusPage renders the turn log newest-first with each turn number in its status colour", () => {
   const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
 
@@ -2284,6 +2320,11 @@ test("renderStatusPage places Resume beside Carve in one sheet-actions row, size
   // The carve panel is likewise a flex box whose display would defeat the UA
   // [hidden] rule; restore its collapse rule so a non-carvable issue can hide it (#72).
   assert.match(html, /\.carve-panel\[hidden\][^{]*\{ display: none;? \}/);
+  // …and the confirm form inside it: its own `display: flex` would defeat the UA
+  // [hidden] rule too, so Confirm/Cancel showed by default beside Resume+Carve —
+  // four buttons at once. Restore the collapse so they reveal only in the carve
+  // step and the default action row is Resume + Carve alone (#90).
+  assert.match(html, /\.carve-confirm\[hidden\][^{]*\{ display: none;? \}/);
 });
 
 test("renderStatusPage wires the parked reply block: shown when parked, options fill the field", () => {

@@ -413,6 +413,11 @@ export interface IssueDetail {
    * needs two points; the plan-only `campaign-start` never counts as the start. */
   elapsedMs: number;
   turnLog: IssueTurn[];
+  /** the agent's preserved worktree path, from the `worktree-preserved` event the
+   * loop logs when it parks a slot — the real per-task identity (ADR/#55 dropped
+   * the anonymous-pool agent id, so this is a path, never a fabricated `agent-N`).
+   * Undefined when no such event names the issue (e.g. an in-flight or merged run). */
+  worktree?: string;
 }
 
 /** Does this event name the given issue by an id it carries — its `taskId`, or a
@@ -446,14 +451,17 @@ export function reconstructIssueDetail(events: any[], issueNumber: string): Issu
 
   const turnLog: IssueTurn[] = [];
   const stamps: number[] = [];
+  let worktree: string | undefined;
   for (const e of relevant) {
     if (!eventNamesIssue(e, id)) continue;
     if (typeof e.ts === "string") stamps.push(Date.parse(e.ts));
     if (e.event === "turn") turnLog.push({ turn: Number(e.turn ?? 0), summary: String(e.summary ?? "").trim(), ts: String(e.ts ?? "") });
+    // The last preserved worktree wins — a re-park logs a fresh path over a stale one.
+    if (e.event === "worktree-preserved" && typeof e.path === "string" && e.path) worktree = e.path;
   }
   const elapsedMs = stamps.length > 1 ? Math.max(...stamps) - Math.min(...stamps) : 0;
 
-  return { issueNumber: id, status, title: titles.get(id), campaignName: name, turns: turnLog.length, elapsedMs, turnLog: turnLog.reverse() };
+  return { issueNumber: id, status, title: titles.get(id), campaignName: name, turns: turnLog.length, elapsedMs, turnLog: turnLog.reverse(), ...(worktree ? { worktree } : {}) };
 }
 
 /**

@@ -127,6 +127,37 @@ test("buildFeed merges every project's narratable events into one newest-first, 
   assert.equal(feed[0].project, "alpha");
 });
 
+test("buildLanding collects every parked question across repos, oldest first", () => {
+  const base = join(tmpdir(), `sctdd-landing-parked-${Date.now()}`);
+  const alphaDir = join(base, "alpha");
+  const betaDir = join(base, "beta");
+  seedState(alphaDir, [{ ts: "2025-06-15T08:00:00.000Z", event: "campaign-start", batches: [["101"]] }]);
+  seedState(betaDir, [{ ts: "2025-06-15T08:00:00.000Z", event: "campaign-start", batches: [["301"]] }]);
+  // Alpha's question was parked more recently than beta's — beta must sort first.
+  writeFileSync(
+    join(alphaDir, "parked", "101.json"),
+    JSON.stringify({ taskId: "101", parkedAt: "2025-06-15T09:00:00.000Z", reason: "blocked", branch: "agent/101", question: "Should the counter live-update?\n\nOptions:\n- A\n- B" }),
+  );
+  writeFileSync(
+    join(betaDir, "parked", "301.json"),
+    JSON.stringify({ taskId: "301", parkedAt: "2025-06-14T09:00:00.000Z", reason: "blocked", branch: "agent/301", question: "Which colour for the badge?" }),
+  );
+
+  const { parked } = buildLanding([pointerFor("alpha", alphaDir), pointerFor("beta", betaDir)], new Date("2025-06-15T12:00:00.000Z"));
+
+  // Oldest-first across repos: beta (yesterday) before alpha (this morning).
+  assert.deepEqual(
+    parked.map((p) => ({ project: p.project, issueNumber: p.issueNumber, parkedAt: p.parkedAt })),
+    [
+      { project: "beta", issueNumber: "301", parkedAt: "2025-06-14T09:00:00.000Z" },
+      { project: "alpha", issueNumber: "101", parkedAt: "2025-06-15T09:00:00.000Z" },
+    ],
+  );
+  // The full question travels with the row.
+  assert.equal(parked[0].question, "Which colour for the badge?");
+  assert.equal(parked[1].question, "Should the counter live-update?");
+});
+
 test("buildAllStatus builds one status per live project and skips a stale one", () => {
   const base = join(tmpdir(), `sctdd-all-status-${Date.now()}`);
   const alphaDir = join(base, "alpha");
@@ -201,6 +232,30 @@ test("renderLandingShell mounts the cross-project feed under the cards and hides
   assert.ok(html.indexOf('id="cards"') < html.indexOf('id="feed"'), "the feed renders after the cards");
   // The feed is cut on a phone.
   assert.match(html, /@media \(max-width: 640px\)[^}]*\{[\s\S]*\.feed \{ display: none; \}/);
+});
+
+test("renderLandingShell parked counter expands a cross-repo parked queue in place", () => {
+  const html = renderLandingShell(["alpha", "beta"]);
+  // The parked counter is an interactive toggle, unlike the other three counters —
+  // a button controlling the queue panel, inert (disabled) until the client learns
+  // there is at least one parked question.
+  assert.match(html, /<button[^>]*class="counter counter-toggle"[^>]*data-counter="parked"[^>]*disabled[^>]*aria-controls="parked-queue"/);
+  // The queue panel sits between the counters and the cards, so expanding it pushes
+  // the cards down while keeping them visible; it starts hidden.
+  assert.match(html, /<section id="parked-queue"[^>]*hidden/);
+  assert.ok(html.indexOf('id="parked-queue"') < html.indexOf('id="cards"'), "parked queue renders above the cards");
+  // The client renders one row per parked question, oldest first from data.parked,
+  // each opening that repo's issue detail, showing repo, issue number, the full
+  // question and how long it has waited.
+  assert.match(html, /data\.parked/);
+  assert.match(html, /\/\?project=/);
+  assert.match(html, /fmtWaited/);
+  // The counter is inert (disabled, no arrow/cursor) when there are no parked
+  // questions, and becomes a working toggle when there are.
+  assert.match(html, /\.counter-toggle:disabled/);
+  assert.match(html, /aria-expanded/);
+  // The parked rows collapse to a readable stack on a phone.
+  assert.match(html, /\.parked-row/);
 });
 
 test("serveAllStatus GET / serves the all-repos landing shell, not a server-rendered campaign", async () => {

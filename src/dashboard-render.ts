@@ -220,8 +220,20 @@ export const renderLandingShell = (projects: string[]) => `<!doctype html>
   .project-picker select:hover { border-color: var(--color-primary); }
   .counters { display: grid; grid-template-columns: repeat(4, 1fr); gap: .75rem; margin: 1.25rem 0; }
   .counter { background: var(--color-box-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: 1rem; }
+  .counter-toggle { font: inherit; color: inherit; text-align: left; cursor: pointer; }
+  .counter-toggle:hover:not(:disabled) { border-color: var(--color-primary); }
+  .counter-toggle:disabled { cursor: default; }
   .counter-value { font-size: clamp(1.6rem, 5vw, 2.4rem); font-weight: 700; letter-spacing: -0.02em; }
+  .counter-toggle:not(:disabled) .counter-value::after { content: " ▸"; color: var(--color-text-light-2); font-size: .9em; }
+  .counter-toggle[aria-expanded="true"] .counter-value::after { content: " ▾"; }
   .counter-label { color: var(--color-text-light-2); font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; margin-top: .25rem; }
+  .parked-queue { display: grid; gap: .5rem; margin: -0.5rem 0 1.25rem; }
+  .parked-row { display: grid; grid-template-columns: auto auto 1fr auto; align-items: baseline; gap: .3rem .75rem; min-height: 44px; text-decoration: none; color: inherit; background: var(--color-box-body); border: 1px solid var(--color-secondary); border-left: 3px solid var(--color-yellow); border-radius: var(--border-radius-medium); padding: .7rem 1rem; }
+  .parked-row:hover { border-color: var(--color-primary); background: var(--color-primary-alpha-20); }
+  .parked-issue { font-weight: 700; color: var(--color-yellow); }
+  .parked-repo { color: var(--color-primary); font-weight: 600; }
+  .parked-question { color: var(--color-text-light); min-width: 0; }
+  .parked-waited { color: var(--color-text-light-2); font-size: .85rem; white-space: nowrap; }
   .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 1rem; }
   .card { display: block; min-height: 44px; text-decoration: none; color: inherit; background: var(--color-box-body); border: 1px solid var(--color-secondary); border-top: 3px solid var(--color-primary); border-radius: var(--border-radius-medium); padding: 1rem 1.15rem; box-shadow: 0 8px 22px #0004; }
   .card:hover { border-color: var(--color-primary); background: var(--color-primary-alpha-20); }
@@ -248,6 +260,8 @@ export const renderLandingShell = (projects: string[]) => `<!doctype html>
     .counters { grid-template-columns: repeat(2, 1fr); }
     .cards { grid-template-columns: 1fr; }
     .feed { display: none; }
+    .parked-row { grid-template-columns: auto 1fr; }
+    .parked-question { grid-column: 1 / -1; }
   }
 </style>
 </head>
@@ -257,15 +271,25 @@ export const renderLandingShell = (projects: string[]) => `<!doctype html>
   .join("")}</select></form></div>
 <section class="counters">
   <div class="counter" data-counter="working"><div class="counter-value">–</div><div class="counter-label">Agents working</div></div>
-  <div class="counter" data-counter="parked"><div class="counter-value">–</div><div class="counter-label">Parked</div></div>
+  <button type="button" class="counter counter-toggle" data-counter="parked" disabled aria-controls="parked-queue"><div class="counter-value">–</div><div class="counter-label">Parked</div></button>
   <div class="counter" data-counter="queued"><div class="counter-value">–</div><div class="counter-label">Queued</div></div>
   <div class="counter" data-counter="mergedToday"><div class="counter-value">–</div><div class="counter-label">Merged today</div></div>
 </section>
+<section id="parked-queue" class="parked-queue" hidden aria-label="Parked questions across all repos"></section>
 <section id="cards" class="cards"><p class="empty">Loading…</p></section>
 <section id="feed" class="feed" aria-label="Recent activity across all repos"><h2>Recent activity</h2><div id="feed-rows"><p class="empty">Loading…</p></div></section>
 <script>
   const fmtWave = (w) => (w ? "Wave " + w.current + " of " + w.total : "idle");
   const fmtTime = (ts) => { const d = new Date(ts); return isNaN(d) ? ts : d.toLocaleString(); };
+  const fmtWaited = (iso) => {
+    const ms = Date.now() - new Date(iso).getTime();
+    if (!(ms > 0)) return "just now";
+    const mins = Math.floor(ms / 60000);
+    if (mins < 60) return mins + "m";
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return hrs + "h";
+    return Math.floor(hrs / 24) + "d";
+  };
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
   async function loadFeed() {
     const rows = document.getElementById("feed-rows");
@@ -284,6 +308,24 @@ export const renderLandingShell = (projects: string[]) => `<!doctype html>
       rows.append(row);
     }
   }
+  function renderParked(parked) {
+    const toggle = document.querySelector('[data-counter="parked"]');
+    const panel = document.getElementById("parked-queue");
+    if (!parked.length) { toggle.disabled = true; toggle.removeAttribute("aria-expanded"); panel.hidden = true; return; }
+    toggle.disabled = false;
+    toggle.setAttribute("aria-expanded", "false");
+    panel.replaceChildren(...parked.map((p) => {
+      const row = el("a", "parked-row");
+      row.href = "/?project=" + encodeURIComponent(p.project);
+      row.append(el("span", "parked-issue", "#" + p.issueNumber), el("span", "parked-repo", p.project), el("span", "parked-question", p.question), el("span", "parked-waited", "waited " + fmtWaited(p.parkedAt)));
+      return row;
+    }));
+    toggle.onclick = () => {
+      const open = toggle.getAttribute("aria-expanded") === "true";
+      toggle.setAttribute("aria-expanded", String(!open));
+      panel.hidden = open;
+    };
+  }
   async function load() {
     let data;
     try {
@@ -297,6 +339,7 @@ export const renderLandingShell = (projects: string[]) => `<!doctype html>
       const value = document.querySelector('[data-counter="' + key + '"] .counter-value');
       if (value) value.textContent = String(val);
     }
+    renderParked(data.parked || []);
     const cards = document.getElementById("cards");
     cards.replaceChildren();
     if (!data.projects.length) { cards.append(el("p", "empty", "No projects registered.")); return; }

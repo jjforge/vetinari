@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The all-repos landing's project cards and top counters finish their visual
+  design (#80), a frontend/visual change only — everything still derives from the
+  existing `/api/landing` payload, with no backend change. Each live card now
+  carries a `percentMerged`-width progress bar beneath its `wave · % merged` line,
+  filled in the run state's colour (running blue, parked yellow, completed green;
+  idle/other grey). The per-card tally reads as status-dot pill chips
+  (`● N running · ● N parked · ● N queued`) matching the campaign page's chip
+  treatment, the dots scoped to `.dot` so they never tint the pills. The four top
+  counters colour their values (working blue, parked yellow, merged-today green;
+  queued neutral) and each carries a client-derived sublabel — working `across N
+  repos` (repos with a running agent), parked `oldest <Nm>` (the oldest parked
+  question's wait), queued `in later waves`, merged-today `issues closed`; the
+  parked counter, the one actionable tile, gains a gold border while it holds
+  questions. Pinned by `renderLandingShell` regression tests and verified by
+  driving the served landing in a DOM against the live `/api/landing`.
+
 - A selected archived run now reconstructs its carved issues read-only, so an
   operator browsing a finished run in the campaign view's "Archived runs" section
   sees what it was carved down to (#55). The read-only archived render reduces the

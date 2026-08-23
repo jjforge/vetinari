@@ -70,6 +70,37 @@ export const readEvents = (cfg: Pick<ResolvedConfig, "logFile">): any[] => {
     });
 };
 
+/**
+ * The events appended to a jsonl event log past a character offset, and the
+ * offset to resume from next time. Pure — the tail-reading half of the live
+ * watcher (ADR 0008), split out so it can be unit-tested without a file or a
+ * running server: given the log's full text and where we last stopped, it returns
+ * only the newly-appended *complete* lines (parsed, bad lines skipped like
+ * `readEvents`) and the new offset — the length of text consumed up to and
+ * including the last newline. A partial trailing line (an append caught
+ * mid-write) is left unconsumed so it is read whole next time, and a `content`
+ * shorter than `offset` means the log was truncated or rotated, so it is re-read
+ * from the start.
+ */
+export function appendedEvents(content: string, offset: number): { events: any[]; offset: number } {
+  const from = offset >= 0 && offset <= content.length ? offset : 0;
+  const tail = content.slice(from);
+  const lastNewline = tail.lastIndexOf("\n");
+  if (lastNewline === -1) return { events: [], offset: from };
+  const complete = tail.slice(0, lastNewline + 1);
+  const events = complete
+    .split("\n")
+    .filter(Boolean)
+    .flatMap((line) => {
+      try {
+        return [JSON.parse(line)];
+      } catch {
+        return [];
+      }
+    });
+  return { events, offset: from + complete.length };
+}
+
 const normalizeIssue = (id: string) => id.replace(/^#/, "");
 
 const hash = (id: unknown) => `#${normalizeIssue(String(id))}`;

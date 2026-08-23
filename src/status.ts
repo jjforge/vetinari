@@ -7,6 +7,7 @@ import type { DashboardDeps, RouteHandler, SpawnDashboardChild } from "./dashboa
 import { handleApiStatus } from "./dashboard-route-api-status.ts";
 import { handleLanding } from "./dashboard-route-landing.ts";
 import { handleFeed } from "./dashboard-route-feed.ts";
+import { handleEvents } from "./dashboard-route-events.ts";
 import { handleAnswer } from "./dashboard-route-answer.ts";
 import { handleCarve, handleCarvePreview } from "./dashboard-route-carve.ts";
 import { handleArchiveLog } from "./dashboard-route-archive-log.ts";
@@ -23,7 +24,7 @@ export * from "./dashboard-carve.ts";
 // The dashboard surfaces, tried in order; each owns its own method+path match and
 // returns true once it has handled the request. A `/` request only ever matches
 // the page handler, so ordering never has to disambiguate two live routes.
-const routes: RouteHandler[] = [handleApiStatus, handleLanding, handleFeed, handleCarvePreview, handleAnswer, handleCarve, handleArchiveLog, handlePage];
+const routes: RouteHandler[] = [handleApiStatus, handleLanding, handleFeed, handleEvents, handleCarvePreview, handleAnswer, handleCarve, handleArchiveLog, handlePage];
 
 /**
  * The gateway's aggregated status site: one port fronting every registered

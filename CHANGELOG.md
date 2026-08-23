@@ -34,6 +34,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   overlay). Each open wave now lists its issues' titles under the chips, and a
   running chip pulses (reduced-motion aware). Waves stay stacked and full-width on a
   phone.
+- Live dashboard updates over SSE with a buffered pause (#55). The aggregated
+  server `fs.watch`es every registered project's live-run log and pushes the events
+  appended since each connection last read over a single server→client SSE stream
+  (`GET /api/events`, ADR 0008), carrying `{ project, events }` per frame. The
+  all-repos landing shell subscribes to it and re-reads `/api/landing` as events
+  land, with an "updated Ns ago" readout counting from the last refresh and a
+  live/paused indicator in the toolbar. Pause is a client-side presentation freeze:
+  the stream keeps flowing and events keep being collected while paused, and resume
+  re-reads once to flush the whole backlog. A moved or deleted project base location
+  is a watcher that never arms, tolerated like any stale registration (ADR 0002).
 - All-repos landing view for the dashboard (#55). The aggregated server now serves
   a client-rendered shell (vanilla, no build step) at `/`, replacing the old
   server-rendered status page as the thing you land on. Four counters run across the

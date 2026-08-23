@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, describeEvent, extractParkedDetails, formatFeedEvent, formatStatusText, lastEventText, listArchivedRuns, parseCarveClosure, reduceCampaign, renderLandingShell, renderStatusPage, selectStatus, serveAllStatus, summarizeRun } from "./status.ts";
+import { appendedEvents, buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, describeEvent, extractParkedDetails, formatFeedEvent, formatStatusText, lastEventText, listArchivedRuns, parseCarveClosure, reduceCampaign, renderLandingShell, renderStatusPage, selectStatus, serveAllStatus, summarizeRun } from "./status.ts";
 import type { CampaignStatus } from "./status.ts";
 import type { AddressInfo } from "node:net";
 import { register, type ProjectPointer } from "./registry.ts";
@@ -282,6 +282,19 @@ test("renderLandingShell parked counter expands a cross-repo parked queue in pla
   assert.match(html, /\.parked-row/);
 });
 
+test("renderLandingShell wires live SSE updates, an updated-ago readout, and a buffered pause", () => {
+  const html = renderLandingShell(["alpha", "beta"]);
+  // Subscribes to the one-way SSE stream and re-reads the landing as events land.
+  assert.match(html, /new EventSource\("\/api\/events"\)/);
+  // A live/paused indicator and an "updated Ns ago" readout live in the toolbar header.
+  assert.match(html, /data-live-state/);
+  assert.match(html, /data-updated/);
+  // A pause control that freezes presentation while still collecting, flushing on resume.
+  assert.match(html, /id="pause"/);
+  // Pause must not tear the stream down — it is a client-side presentation freeze (ADR 0008).
+  assert.match(html, /paused/);
+});
+
 test("serveAllStatus GET / serves the all-repos landing shell, not a server-rendered campaign", async () => {
   const configDir = join(tmpdir(), `sctdd-landing-shell-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
@@ -374,6 +387,56 @@ test("serveAllStatus GET /api/feed serves the cross-project event feed as JSON",
     );
     assert.equal(feed[0].kind, "green");
   } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serveAllStatus GET /api/events streams a project's log appends as SSE frames", async () => {
+  const configDir = join(tmpdir(), `sctdd-sse-${Date.now()}`);
+  const alphaDir = join(configDir, "state-alpha");
+  seedState(alphaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"]] }]);
+  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
+
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const { port } = server.address() as AddressInfo;
+  const res = await fetch(`http://127.0.0.1:${port}/api/events`);
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  // Read from the stream until a full SSE data frame (blank-line terminated) arrives, or time out.
+  const nextFrame = async (): Promise<string> => {
+    let buf = "";
+    while (!buf.includes("\n\n")) {
+      const chunk = await Promise.race([
+        reader.read(),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timed out waiting for SSE frame")), 4000)),
+      ]);
+      if (chunk.done) throw new Error("stream closed before a frame arrived");
+      buf += decoder.decode(chunk.value, { stream: true });
+    }
+    return buf;
+  };
+  try {
+    assert.match(res.headers.get("content-type") ?? "", /text\/event-stream/);
+    // The opening handshake frame flushes headers and, crucially, means the watcher is now armed.
+    await nextFrame();
+    // A fresh append to alpha's live log is pushed as a data frame carrying the project and the new event.
+    appendFileSync(join(alphaDir, "logs", "orchestrator.jsonl"), JSON.stringify({ event: "turn", taskId: "101" }) + "\n");
+    let frame = "";
+    let payload: { project?: string; events?: { event: string }[] } = {};
+    // fs.watch can coalesce or emit a bare change with no new bytes; keep reading data frames until one carries the append.
+    for (let i = 0; i < 5 && !payload.events?.length; i++) {
+      frame = await nextFrame();
+      const data = frame
+        .split("\n")
+        .filter((l) => l.startsWith("data:"))
+        .map((l) => l.slice("data:".length).trim())
+        .join("");
+      payload = data ? JSON.parse(data) : {};
+    }
+    assert.equal(payload.project, "alpha");
+    assert.deepEqual((payload.events ?? []).map((e) => e.event), ["turn"]);
+  } finally {
+    await reader.cancel();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
@@ -1768,4 +1831,63 @@ test("extractParkedDetails separates description from Options section", () => {
 
   assert.equal(details.description, "I am parked on the API choice.");
   assert.deepEqual(details.options, ["Return raw JSON", "Render HTML server-side"]);
+});
+
+test("appendedEvents returns the whole log and its end offset from a zero offset", () => {
+  const log = JSON.stringify({ event: "campaign-start" }) + "\n" + JSON.stringify({ event: "queue-start" }) + "\n";
+  const { events, offset } = appendedEvents(log, 0);
+  assert.deepEqual(
+    events.map((e) => e.event),
+    ["campaign-start", "queue-start"],
+  );
+  assert.equal(offset, log.length);
+});
+
+test("appendedEvents returns only the events appended past a prior offset", () => {
+  const first = JSON.stringify({ event: "campaign-start" }) + "\n";
+  const appended = JSON.stringify({ event: "turn", taskId: "101" }) + "\n";
+  const { offset } = appendedEvents(first, 0);
+  const next = appendedEvents(first + appended, offset);
+  assert.deepEqual(
+    next.events.map((e) => e.event),
+    ["turn"],
+  );
+  assert.equal(next.offset, first.length + appended.length);
+});
+
+test("appendedEvents leaves a partial trailing line unconsumed until it is complete", () => {
+  const complete = JSON.stringify({ event: "campaign-start" }) + "\n";
+  const partial = '{"event":"turn"';
+  const mid = appendedEvents(complete + partial, 0);
+  // Only the complete line is consumed; the offset stops before the partial line.
+  assert.deepEqual(
+    mid.events.map((e) => e.event),
+    ["campaign-start"],
+  );
+  assert.equal(mid.offset, complete.length);
+  // Once the line is finished, resuming from the same offset yields it whole.
+  const done = appendedEvents(complete + partial + ',"taskId":"101"}\n', mid.offset);
+  assert.deepEqual(
+    done.events.map((e) => e.event),
+    ["turn"],
+  );
+});
+
+test("appendedEvents re-reads from the start when the log is shorter than the offset (rotated/truncated)", () => {
+  const rotated = JSON.stringify({ event: "campaign-start" }) + "\n";
+  const { events, offset } = appendedEvents(rotated, 9999);
+  assert.deepEqual(
+    events.map((e) => e.event),
+    ["campaign-start"],
+  );
+  assert.equal(offset, rotated.length);
+});
+
+test("appendedEvents skips an unparseable line the way readEvents does", () => {
+  const log = "not json\n" + JSON.stringify({ event: "queue-start" }) + "\n";
+  const { events } = appendedEvents(log, 0);
+  assert.deepEqual(
+    events.map((e) => e.event),
+    ["queue-start"],
+  );
 });

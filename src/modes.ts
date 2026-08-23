@@ -7,6 +7,15 @@ import { currentBranch, integrateGreens } from "./merge.ts";
 import { clearParked, clearParkedForTasks, enqueueOutbound, listParked } from "./state.ts";
 import { tgConfigured, tgEnvConn, tgSend, tgWaitReply } from "./telegram.ts";
 import { issueNameFromTask, readEvents, reduceCampaign } from "./status.ts";
+import { acquireSlot, deregisterProject, registerProject, releaseSlot, type HostBudget } from "./host-slots.ts";
+
+/**
+ * How often a run blocked by the host budget re-checks for a freed slot. A run
+ * that cannot acquire right now (the host is full, or it is already at its share)
+ * has no event of its own to wake on — another project's container may free a slot
+ * at any time — so it polls until one does.
+ */
+const HOST_SLOT_POLL_MS = 1000;
 
 /**
  * Resolve each issue's title through the orchestrator's `fetchTask`, keyed by
@@ -64,7 +73,7 @@ export async function baseline(cfg: ResolvedConfig) {
  * Returns the per-task outcome map so a caller (campaign) can act on the greens
  * without re-deriving them from the log.
  */
-export async function queue(cfg: ResolvedConfig, taskIds: string[], slots: number, titles?: Record<string, string>): Promise<Record<string, string>> {
+export async function queue(cfg: ResolvedConfig, taskIds: string[], slots: number, titles?: Record<string, string>, host?: HostBudget): Promise<Record<string, string>> {
   const pending = [...taskIds];
   const outcomes: Record<string, string> = {};
   let running = 0;
@@ -73,30 +82,64 @@ export async function queue(cfg: ResolvedConfig, taskIds: string[], slots: numbe
   // already wrote them onto `campaign-start` and passes them here, so we neither
   // re-resolve nor re-log them.
   const startTitles = titles === undefined ? await resolveTitles(cfg, taskIds) : undefined;
-  log("queue-start", startTitles && Object.keys(startTitles).length ? { taskIds, slots, titles: startTitles } : { taskIds, slots });
+  const startLog: Record<string, unknown> = { taskIds, slots };
+  if (startTitles && Object.keys(startTitles).length) startLog.titles = startTitles;
+  if (host) startLog.hostBudget = host.budget;
+  log("queue-start", startLog);
   enqueueOutbound(cfg, {
     category: "progress",
     event: "queue-start",
     text: `🚦 ${cfg.project} queue started: ${taskIds.join(", ")} — ${slots} slots. The gateway announces parked questions; reply to resume.`,
   });
 
-  await new Promise<void>((done) => {
-    const fill = () => {
-      while (running < slots && pending.length) {
-        const next = pending.shift()!;
-        running++;
-        log("queue-spawn", { taskId: next, running, left: pending.length });
-        selfSpawn(["run", next]).on("exit", (code) => {
-          running--;
-          outcomes[next] = code === 0 ? "green" : code === 2 ? "parked" : `error(${code})`;
-          log("queue-slot-freed", { taskId: next, outcome: outcomes[next] });
-          if (pending.length) fill();
-          else if (running === 0) done();
-        });
-      }
-    };
-    fill();
-  });
+  // Under a host slot budget (ADR 0010) the run marks itself active so other
+  // projects drain toward their share, and every spawn is additionally gated on a
+  // cooperative lease so the sum of live containers across all projects stays
+  // within the host ceiling. With no budget set this whole block is inert.
+  if (host) registerProject(host.configDir, cfg.project, host.weight);
+  try {
+    await new Promise<void>((done) => {
+      let poll: ReturnType<typeof setInterval> | undefined;
+      const stopPoll = () => {
+        if (poll) {
+          clearInterval(poll);
+          poll = undefined;
+        }
+      };
+      const fill = () => {
+        while (running < slots && pending.length) {
+          // The host lease is an additional ceiling beyond QUEUE_SLOTS: stop
+          // spawning when this project is at its fair share or the host is full.
+          if (host && !acquireSlot(host.configDir, host.budget, cfg.project, host.weight, slots)) break;
+          const next = pending.shift()!;
+          running++;
+          log("queue-spawn", { taskId: next, running, left: pending.length });
+          selfSpawn(["run", next]).on("exit", (code) => {
+            running--;
+            if (host) releaseSlot(host.configDir);
+            outcomes[next] = code === 0 ? "green" : code === 2 ? "parked" : `error(${code})`;
+            log("queue-slot-freed", { taskId: next, outcome: outcomes[next] });
+            if (pending.length) fill();
+            else if (running === 0) {
+              stopPoll();
+              done();
+            }
+          });
+        }
+        // Blocked by the host budget with work still queued and local capacity to
+        // spare: poll for a slot another project frees (we have no event for that).
+        // Otherwise an exit callback re-drives fill, so no poll is needed.
+        if (host && pending.length && running < slots) {
+          if (!poll) poll = setInterval(fill, HOST_SLOT_POLL_MS);
+        } else {
+          stopPoll();
+        }
+      };
+      fill();
+    });
+  } finally {
+    if (host) deregisterProject(host.configDir);
+  }
 
   const summary = taskIds.map((i) => `${i}: ${outcomes[i] ?? "?"}`).join("\n");
   log("queue-done", { outcomes });
@@ -120,7 +163,7 @@ export async function queue(cfg: ResolvedConfig, taskIds: string[], slots: numbe
  * merged base halts the whole campaign with the base rolled back to where the
  * batch began — no later batch runs on a broken or half-merged base.
  */
-export async function campaign(cfg: ResolvedConfig, batches: string[][], slots: number, name?: string): Promise<boolean> {
+export async function campaign(cfg: ResolvedConfig, batches: string[][], slots: number, name?: string, host?: HostBudget): Promise<boolean> {
   // Every green branch merges into whatever the main tree has checked out, and
   // each batch's agents cut their branch from that same HEAD. If it is not the
   // base branch the campaign would merge into, and build on, the wrong place.
@@ -164,7 +207,7 @@ export async function campaign(cfg: ResolvedConfig, batches: string[][], slots: 
       text: `▶️ ${cfg.project} campaign batch ${index + 1}/${total}: ${tasks.join(", ")}`,
     });
 
-    const outcomes = await queue(cfg, tasks, slots, titles);
+    const outcomes = await queue(cfg, tasks, slots, titles, host);
     const greens = tasks.filter((t) => outcomes[t] === "green");
     const held = tasks.filter((t) => outcomes[t] !== "green");
 

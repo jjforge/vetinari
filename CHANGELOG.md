@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A **host slot budget** (#87, ADR 0010): an opt-in host-side ceiling on live
+  containers across every project, honoured by a cooperative filesystem lease each
+  `campaign`/`queue` run reads and writes directly under
+  `<gatewayConfigDir()>/slots/` — the gateway never allocates. Set it with the
+  `SANDCASTLE_HOST_SLOTS` env var or a `<gatewayConfigDir()>/host-slots` file;
+  **unset leaves today's behaviour untouched** (each run bounded only by its own
+  `QUEUE_SLOTS`, uncoordinated). A run takes a slot only when under both its
+  `QUEUE_SLOTS` and its current **fair share** — a floor of one slot per active
+  project plus a weight-proportional cut of the remainder — so a busy project
+  drains to its share as a new project becomes active, with no preemption, and a
+  crashed run's slots are reclaimed on contention so the budget is never wedged.
+  New optional `hostWeight` (default 1) in `sandcastle/config.mts` sets a project's
+  cut of the remainder when projects contend.
+
 - `docs/dashboard-color-rules.md`, the normative card/chip colour spec (#83): the
   six-state palette (§1), the one-coloured-edge rule (§2), the state→colour
   derivation and precedence (§3), the card/chip application (§4), the running-only

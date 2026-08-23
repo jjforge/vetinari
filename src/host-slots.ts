@@ -27,6 +27,17 @@ export interface LeaseOpts {
   isAlive?: (pid: number) => boolean;
 }
 
+/**
+ * A resolved, enabled host slot budget a run carries into `queue`/`campaign`:
+ * where the lease lives, the host ceiling, and this project's weight. Absent
+ * (undefined) means the budget is unset and the run coordinates with no one.
+ */
+export interface HostBudget {
+  configDir: string;
+  budget: number;
+  weight: number;
+}
+
 /** The host-level directory the lease files live in, under the gateway config dir. */
 export function slotsDir(configDir: string): string {
   return join(configDir, "slots");

@@ -107,6 +107,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Clicking a pending issue in the all-repos landing's cross-repo parked queue did a
+  full navigation to the campaign status page (the older view with the auto-refresh
+  control) instead of opening that issue's detail — and it didn't even target the
+  specific issue (#74). The landing now hosts the issue-detail sheet and a parked-queue
+  row opens it inline (turn log, the parked question with its options, Resume, and
+  Carve), with a plain `href` kept only as the no-JS fallback. (The sheet is currently
+  duplicated with the campaign page's; unifying them is tracked in #76.)
+
 - The parked-issue reply `<textarea>` overflowed its container, spilling past the
   right edge of the sheet and the parked card (most visible on a narrow phone
   column) (#73). Added `max-width: 100%` to the textarea rule so `width: 100%`
@@ -157,6 +165,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   event it always did.
 
 ### Changed
+
+- Each project card on the all-repos landing now tints its highlight (top border)
+  to its run state — running=blue, parked=yellow, failure=red, completed=green,
+  idle=grey — matching the run-state pill, instead of a fixed primary/teal for all
+  (#75).
 
 - Wave headers now read as their work (#43). Each dashboard wave label is derived
   at render from the issue titles the dashboard already resolves — no storage, no

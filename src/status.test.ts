@@ -326,6 +326,33 @@ test("renderLandingShell parked counter expands a cross-repo parked queue in pla
   assert.match(html, /\.parked-queue\[hidden\] \{ display: none;? \}/);
 });
 
+test("renderLandingShell opens a parked-queue row's issue detail inline, not by navigating (#74)", () => {
+  const html = renderLandingShell(["alpha"]);
+  // The landing now hosts the issue-detail sheet (the same one the campaign page has).
+  assert.match(html, /<div id="issue-detail" class="issue-detail"[^>]*hidden>/);
+  assert.match(html, /id="reply-resume"/);
+  assert.match(html, /id="carve-panel"/);
+  // openIssue is defined here, and a parked row opens it in place — the click is
+  // intercepted so the row never does the full navigation to the campaign page.
+  assert.match(html, /const openIssue = async \(project, issue, carvable\)/);
+  assert.match(html, /row\.addEventListener\("click", \(event\) => \{ event\.preventDefault\(\); openIssue\(p\.project, p\.issueNumber, true\); \}\)/);
+  // The sheet's collapse rules are present so a flex display can't defeat [hidden].
+  assert.match(html, /\.issue-detail\[hidden\] \{ display: none; \}/);
+  assert.match(html, /\.carve-panel\[hidden\] \{ display: none; \}/);
+  // The status dot colours are scoped to .dot so they don't tint the run-state pills.
+  assert.match(html, /\.dot\.parked \{ background: var\(--color-yellow\); \}/);
+});
+
+test("renderLandingShell colours each project card's highlight by run state (#75)", () => {
+  const html = renderLandingShell(["alpha"]);
+  // The card element carries its run-state class...
+  assert.match(html, /el\("a", "card " \+ p\.runState\)/);
+  // ...and per-state border-top-color rules tint the highlight to match the pill.
+  assert.match(html, /\.card\.parked \{ border-top-color: var\(--color-yellow\); \}/);
+  assert.match(html, /\.card\.running \{ border-top-color: var\(--color-blue\); \}/);
+  assert.match(html, /\.card\.idle \{ border-top-color: var\(--color-text-light-2\); \}/);
+});
+
 test("renderLandingShell wires live SSE updates, an updated-ago readout, and a buffered pause", () => {
   const html = renderLandingShell(["alpha", "beta"]);
   // Subscribes to the one-way SSE stream and re-reads the landing as events land.

@@ -672,9 +672,9 @@ export function selectStatus(statuses: CampaignStatus[], requested?: string): Ca
 }
 
 /** A project's run-state rolled up to one word for the landing card, from the
- * ADR 0007 vocabulary: `idle` when there is no live run, else the most demanding
- * state its issues are in (a failure to surface > a human needed > work in flight
- * > all done). */
+ * ADR 0007 vocabulary: `idle` when there is no live run, else the most
+ * human-blocking state its issues are in, by the §3 precedence (a human needed >
+ * a failure to surface > work in flight > all done). */
 export type RunState = "running" | "parked" | "failure" | "completed" | "idle";
 
 /** One project's row on the all-repos landing: its run state, the campaign it is
@@ -721,13 +721,20 @@ export interface LandingView {
   parked: ParkedQuestion[];
 }
 
-const projectRunState = (status: CampaignStatus): RunState => {
+/**
+ * The single state→run-state derivation for a project card (§3 precedence:
+ * `parked > failure > running > unstarted > completed`). The most human-blocking
+ * state wins — a repo with one parked question and four running agents reads
+ * `parked`, because the question is the thing that needs a person; `failure` ranks
+ * just below, since it also needs a human but a parked question is the more direct
+ * ask. Carved chips are display-only ghosts of issues that left the plan, so the
+ * roll-up reads the live plan (a run whose only unmerged work was carved still lands).
+ */
+export const projectRunState = (status: CampaignStatus): RunState => {
   if (!status.waves.length) return "idle";
-  // Carved chips are display-only ghosts of issues that left the plan — the roll-up
-  // reads the live plan, so a run whose only unmerged work was carved still lands.
   const issues = status.waves.flatMap((wave) => wave.issues).filter((i) => i.status !== "carved");
-  if (issues.some((i) => i.status === "failure")) return "failure";
   if (status.parked.length) return "parked";
+  if (issues.some((i) => i.status === "failure")) return "failure";
   if (issues.some((i) => i.status === "running")) return "running";
   if (issues.every((i) => i.status === "completed")) return "completed";
   return "running";

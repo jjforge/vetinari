@@ -4,7 +4,7 @@ import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { appendedEvents, buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, DASHBOARD_PALETTE_CSS, describeEvent, extractParkedDetails, formatFeedEvent, formatStatusText, ISSUE_DETAIL_SHEET_SCRIPT, ISSUE_DETAIL_SHEET_STYLES, issueDetailSheetMarkup, lastEventText, listArchivedRuns, parkedReplyFor, parseCarveClosure, reconstructIssueDetail, reduceCampaign, renderLandingShell, renderStatusPage, selectStatus, serveAllStatus, STATE_DOT_CSS, stateColor, summarizeRun } from "./status.ts";
+import { appendedEvents, buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, DASHBOARD_PALETTE_CSS, describeEvent, extractParkedDetails, formatFeedEvent, formatStatusText, ISSUE_DETAIL_SHEET_SCRIPT, ISSUE_DETAIL_SHEET_STYLES, issueDetailSheetMarkup, lastEventText, listArchivedRuns, parkedReplyFor, parseCarveClosure, reconstructIssueDetail, projectRunState, reduceCampaign, renderLandingShell, renderStatusPage, selectStatus, serveAllStatus, STATE_DOT_CSS, stateColor, summarizeRun } from "./status.ts";
 import type { CampaignStatus } from "./status.ts";
 import type { AddressInfo } from "node:net";
 import { register, type ProjectPointer } from "./registry.ts";
@@ -327,6 +327,72 @@ test("both the landing and the campaign page emit the one shared palette, and ev
   // The concrete #78 repro: carved is referenced on the landing (feed, dots, turn log) and resolves.
   assert.ok(referencedTokens(landing).has("--color-carved"), "landing references --color-carved");
   assert.ok(defined.has("--color-carved"), "--color-carved resolves");
+});
+
+// A running-wave campaign page with one issue chip and a parked card — enough
+// surface to assert the §4/§6 chip and card rules against.
+const chipCampaign = () =>
+  renderStatusPage(
+    {
+      project: "beta",
+      waves: [{ index: 0, status: "running", issues: [{ issueNumber: "1", status: "running" }] }],
+      parked: [{ issueNumber: "2", reason: "blocked", parkedAt: "2025-06-15T09:00:00.000Z", branch: "agent/2", description: "Need a choice.", options: [] }],
+    },
+    { carve: true },
+  );
+
+test("cards fill card-grey and chips fill the darker panel with a 40%-alpha state border (§4, #83)", () => {
+  const landing = renderLandingShell(["alpha"]);
+  const campaign = chipCampaign();
+  // The two fills are distinct: cards #10151b, chips the darker #0b0e12 (chips sit on cards).
+  assert.match(DASHBOARD_PALETTE_CSS, /--color-card: #10151b/);
+  assert.match(DASHBOARD_PALETTE_CSS, /--color-chip: #0b0e12/);
+  // Landing project cards and campaign wave cards take the card fill.
+  assert.match(landing, /\.card \{[^}]*background: var\(--color-card\)/);
+  assert.match(campaign, /\.wave \{[^}]*background: var\(--color-card\)/);
+  // Issue chips take the darker panel fill — never a coloured fill (§4).
+  assert.match(campaign, /\.chip, \.wave-status, \.completed-wave-chip \{[^}]*background: var\(--color-chip\)/);
+  // An issue chip carries its status class and borders that status at 40% alpha (§4).
+  assert.match(campaign, /class="chip running"/);
+  assert.match(campaign, /\.chip\.running \{ border-color: var\(--color-blue-40\); \}/);
+  assert.match(campaign, /\.chip\.parked \{ border-color: var\(--color-yellow-40\); \}/);
+  assert.match(campaign, /\.chip\.carved \{ border-color: var\(--color-carved-40\); \}/);
+});
+
+test("cards and chips lift only their fill on hover, never recolouring their edge; teal never colours an edge (§6, #83)", () => {
+  const landing = renderLandingShell(["alpha"]);
+  const campaign = chipCampaign();
+  // Card / chip / parked-row hover lifts the fill only — the coloured edge is unchanged.
+  assert.match(landing, /\.card:hover \{ background: var\(--color-card-hover\); \}/);
+  assert.match(campaign, /\.chip:hover[^{]*\{ background: var\(--color-chip-hover\); \}/);
+  assert.match(landing, /\.parked-row:hover \{ background: var\(--color-card-hover\); \}/);
+  assert.match(campaign, /\.parked-card:hover \{ background: var\(--color-card-hover\); \}/);
+  // No card/chip hover recolours a border — the accent must not creep onto an edge.
+  assert.doesNotMatch(landing, /\.card:hover \{[^}]*border-color/);
+  assert.doesNotMatch(campaign, /\.chip:hover[^}]*border-color/);
+  assert.doesNotMatch(landing, /\.parked-row:hover[^}]*border-color/);
+  // §2: a card carries state colour on exactly one edge — never a coloured bottom or right.
+  for (const page of [landing, campaign]) {
+    assert.doesNotMatch(page, /border-(bottom|right)-color: var\(--color-(blue|yellow|green|failure|carved|dim)\)/);
+  }
+});
+
+test("projectRunState resolves a card's state by the §3 precedence: parked > failure > running > completed (#83)", () => {
+  const wave = (issues: { issueNumber: string; status: string }[]) => [{ index: 0, status: "running" as const, issues: issues as any }];
+  // The most human-blocking state wins. A parked question beats a failure and any
+  // number of running agents — it is the most direct ask (a change from the old
+  // failure-first order).
+  assert.equal(
+    projectRunState({ project: "p", waves: wave([{ issueNumber: "1", status: "failure" }, { issueNumber: "2", status: "running" }]), parked: [{ issueNumber: "3" }] as any }),
+    "parked",
+  );
+  // With no parked question, failure ranks next — above work still in flight.
+  assert.equal(projectRunState({ project: "p", waves: wave([{ issueNumber: "1", status: "failure" }, { issueNumber: "2", status: "running" }]), parked: [] }), "failure");
+  // Then running, then all-done completed.
+  assert.equal(projectRunState({ project: "p", waves: wave([{ issueNumber: "1", status: "running" }]), parked: [] }), "running");
+  assert.equal(projectRunState({ project: "p", waves: wave([{ issueNumber: "1", status: "completed" }]), parked: [] }), "completed");
+  // No live run at all reads idle.
+  assert.equal(projectRunState({ project: "p", waves: [], parked: [] }), "idle");
 });
 
 test("stateColor is the single state→colour derivation, failure distinct from the carve action (#83)", () => {
@@ -973,7 +1039,7 @@ test("serveAllStatus flags the selected project's carvable chips with its projec
     const html = await (await fetch(`http://127.0.0.1:${port}/?project=beta`)).text();
     // The unstarted future-wave chip is flagged carvable and carries beta, so the
     // panel's Carve routes preview and confirm to beta's own install.
-    assert.match(html, /class="chip"[^>]*data-issue="401"[^>]*data-project="beta"[^>]*data-carvable="1"/);
+    assert.match(html, /class="chip [a-z]+"[^>]*data-issue="401"[^>]*data-project="beta"[^>]*data-carvable="1"/);
     // No inline carve control on the chip itself.
     assert.doesNotMatch(html, /✂️/);
   } finally {
@@ -1871,7 +1937,7 @@ test("renderStatusPage makes issue chips tap-friendly for touch devices", () => 
 
   // The chip keeps its hover title and now carries the ids the sheet fetches with.
   assert.match(html, /title="Add login flow&#10;Agent turn 2 finished; waiting for verification\/resume"/);
-  assert.match(html, /class="chip"[^>]*data-issue="101"[^>]*data-project="demo"/);
+  assert.match(html, /class="chip [a-z]+"[^>]*data-issue="101"[^>]*data-project="demo"/);
   assert.match(html, /id="issue-detail"/);
   assert.match(html, /el\.addEventListener\("click"/);
 });
@@ -2307,8 +2373,8 @@ test("renderStatusPage marks carvable chips with carve data and never puts a car
 
   // Each chip carries its issue and project; only a still-carvable one is flagged
   // carvable, so the tap-detail panel knows whether to offer a Carve button.
-  assert.match(html, /class="chip"[^>]*data-issue="301"[^>]*data-project="demo"[^>]*data-carvable="1"/);
-  assert.match(html, /class="chip"[^>]*data-issue="302"[^>]*data-project="demo"[^>]*data-carvable="1"/);
+  assert.match(html, /class="chip [a-z]+"[^>]*data-issue="301"[^>]*data-project="demo"[^>]*data-carvable="1"/);
+  assert.match(html, /class="chip [a-z]+"[^>]*data-issue="302"[^>]*data-project="demo"[^>]*data-carvable="1"/);
   // The completed (banked) and current-wave-in-flight (running) chips are not carvable.
   assert.doesNotMatch(html, /data-issue="101"[^>]*data-carvable/);
   assert.doesNotMatch(html, /data-issue="201"[^>]*data-carvable/);

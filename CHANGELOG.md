@@ -25,6 +25,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or click) when nothing is parked, and each row opens that repo's issue detail. The
   landing model (`GET /api/landing`) gains a `parked` array carrying those questions;
   the rows are touch-friendly on a phone.
+- Campaign view waves now render carved issues, list their titles, and pulse the
+  running chip (#55). A carve no longer makes an issue vanish from the campaign
+  view: the reconstruction remembers what a carve dropped and renders it as a
+  `carved` chip — the sixth ADR 0007 status, derived at render, in its own colour
+  and struck through in the wave it left — so a browsing operator sees what was
+  carved out (the agent loop and `IssueStatus` are untouched; carved is a view-only
+  overlay). Each open wave now lists its issues' titles under the chips, and a
+  running chip pulses (reduced-motion aware). Waves stay stacked and full-width on a
+  phone.
 - All-repos landing view for the dashboard (#55). The aggregated server now serves
   a client-rendered shell (vanilla, no build step) at `/`, replacing the old
   server-rendered status page as the thing you land on. Four counters run across the

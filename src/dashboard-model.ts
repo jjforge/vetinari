@@ -8,9 +8,18 @@ import { applyCarve } from "./carve.ts";
 
 export type IssueStatus = "completed" | "parked" | "failure" | "running" | "unstarted";
 
+/**
+ * A chip's status as the dashboard renders it: the orchestrator's own `IssueStatus`
+ * plus `carved`, the one state derived at render (from carve events) rather than
+ * carried as an enum value — the agent loop and `IssueStatus` stay untouched (ADR
+ * 0007). Only the view layer knows `carved`; `reduceCampaign`'s `outcomes` stay
+ * `IssueStatus`.
+ */
+export type DisplayStatus = IssueStatus | "carved";
+
 export interface StatusIssue {
   issueNumber: string;
-  status: IssueStatus;
+  status: DisplayStatus;
   name?: string;
   detail?: string;
 }
@@ -166,6 +175,15 @@ export function extractParkedDetails(question: string): { description: string; o
  */
 export interface ReducedCampaign {
   waves: string[][];
+  /** the original wave membership as the run was launched (or a queue run's single
+   * frame), before any carve pruned it — the layout the dashboard renders so a
+   * carved issue still shows as a chip in the wave it left. `waves` is the pruned,
+   * loop-facing plan; `layout` is display-facing and never loses a member. */
+  layout: string[][];
+  /** the issues a carve actually dropped from the plan (parked/unstarted members),
+   * in log order — rendered `carved` (ADR 0007). A superset key over `outcomes`,
+   * which stays `IssueStatus`; carved is a render overlay, not a stored status. */
+  carved: Set<string>;
   /** the optional human name the campaign was launched with (`--name`), read off
    * the latest `campaign-start` event; undefined for an unnamed run. */
   name?: string;
@@ -195,6 +213,8 @@ export function reduceCampaign(events: any[]): ReducedCampaign {
   const relevant = latestCampaignIndex >= 0 ? events.slice(latestCampaignIndex) : events;
 
   let waves: string[][] = [];
+  let layout: string[][] = [];
+  const carved = new Set<string>();
   let name: string | undefined;
   const outcomes = new Map<string, IssueStatus>();
   const details = new Map<string, string>();
@@ -214,6 +234,7 @@ export function reduceCampaign(events: any[]): ReducedCampaign {
     }
     if (e.event === "campaign-start" && Array.isArray(e.batches)) {
       waves = e.batches.map((batch: unknown[]) => batch.map(String).map(normalizeIssue));
+      layout = waves.map((wave) => [...wave]);
       name = typeof e.name === "string" && e.name.trim() ? e.name : undefined;
       currentWave = -1;
     } else if (e.event === "campaign-batch" && Number.isInteger(e.index)) {
@@ -222,6 +243,7 @@ export function reduceCampaign(events: any[]): ReducedCampaign {
       const taskIds = e.taskIds.map(String).map(normalizeIssue);
       if (!waves.length) {
         waves = [taskIds];
+        layout = [[...taskIds]];
         currentWave = 0;
       }
       for (const taskId of taskIds) {
@@ -264,12 +286,19 @@ export function reduceCampaign(events: any[]): ReducedCampaign {
       // Prune the running campaign at the point the carve was issued: banked and
       // in-flight members stay, only parked/unstarted ones leave (ADR 0005).
       // Folding it in log order means `outcomes` already reflects the state the
-      // carve saw, so the same rule replays deterministically.
-      waves = applyCarve({ waves, outcomes }, e.removed.map(String)).remaining;
+      // carve saw, so the same rule replays deterministically. The dropped members
+      // are remembered (not just removed) so the display can render them `carved`
+      // in the wave they left, while `waves` stays the pruned loop-facing plan.
+      const applied = applyCarve({ waves, outcomes }, e.removed.map(String));
+      for (const id of applied.dropped) {
+        carved.add(id);
+        details.set(id, "Carved out of the campaign");
+      }
+      waves = applied.remaining;
     }
   }
 
-  return { waves, name, outcomes, details, titles, mergedAt, closedWaves, currentWave };
+  return { waves, layout, carved, name, outcomes, details, titles, mergedAt, closedWaves, currentWave };
 }
 
 /**
@@ -344,7 +373,7 @@ export function summarizeRun(events: any[]): string {
 }
 
 export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
-  const { waves, name, outcomes, details, titles, closedWaves, currentWave } = reduceCampaign(readEvents(cfg));
+  const { waves, layout, carved, name, outcomes, details, titles, closedWaves, currentWave } = reduceCampaign(readEvents(cfg));
 
   const activeIssueNumbers = new Set(waves.flat());
   const closedIssueNumbers = new Set([...closedWaves].flatMap((index) => waves[index] ?? []));
@@ -358,14 +387,31 @@ export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
     details.set(taskId, `Parked: ${parked.reason}`);
   }
 
+  // Display waves render off `layout` (the pre-carve membership) so a carved issue
+  // still shows as a `carved` chip in the wave it left (ADR 0007). `closedWaves`
+  // and `currentWave` index the pruned `waves`, so each surviving layout wave maps
+  // to its pruned index by counting non-empty layout waves before it; a wholly
+  // carved-out wave keeps its slot as an unstarted wave of carved chips.
+  let prunedIndex = 0;
+  const displayWaves = layout.map((wave, index) => {
+    const survives = wave.some((issueNumber) => !carved.has(issueNumber));
+    const prunedWave = survives ? prunedIndex++ : -1;
+    return {
+      index,
+      status: (prunedWave >= 0 && closedWaves.has(prunedWave) ? "closed" : prunedWave >= 0 && currentWave === prunedWave ? "running" : "unstarted") as WaveStatus,
+      issues: wave.map((issueNumber) => ({
+        issueNumber,
+        status: (carved.has(issueNumber) ? "carved" : outcomes.get(issueNumber) ?? "unstarted") as DisplayStatus,
+        name: titles.get(issueNumber),
+        detail: details.get(issueNumber),
+      })),
+    };
+  });
+
   return {
     project: cfg.project,
     name,
-    waves: waves.map((wave, index) => ({
-      index,
-      status: closedWaves.has(index) ? "closed" : currentWave === index ? "running" : "unstarted",
-      issues: wave.map((issueNumber) => ({ issueNumber, status: outcomes.get(issueNumber) ?? "unstarted", name: titles.get(issueNumber), detail: details.get(issueNumber) })),
-    })),
+    waves: displayWaves,
     parked: parkedRecords.map(toParkedIssue),
   };
 }
@@ -549,7 +595,9 @@ export interface LandingView {
 
 const projectRunState = (status: CampaignStatus): RunState => {
   if (!status.waves.length) return "idle";
-  const issues = status.waves.flatMap((wave) => wave.issues);
+  // Carved chips are display-only ghosts of issues that left the plan — the roll-up
+  // reads the live plan, so a run whose only unmerged work was carved still lands.
+  const issues = status.waves.flatMap((wave) => wave.issues).filter((i) => i.status !== "carved");
   if (issues.some((i) => i.status === "failure")) return "failure";
   if (status.parked.length) return "parked";
   if (issues.some((i) => i.status === "running")) return "running";
@@ -575,17 +623,23 @@ const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, event
       lastEvent: latest ? `Last run: ${latest.summary}` : "No runs yet",
     };
   }
-  const issues = status.waves.flatMap((wave) => wave.issues);
-  const total = status.waves.length;
-  const closed = status.waves.filter((wave) => wave.status === "closed").length;
-  const runningWave = status.waves.find((wave) => wave.status === "running");
+  // The card reflects the live plan, not the display's carved ghosts: drop carved
+  // chips (and any wave left wholly carved) so wave counts and progress match what
+  // is actually still running (ADR 0007's carved is a campaign-view overlay only).
+  const liveWaves = status.waves
+    .map((wave) => ({ ...wave, issues: wave.issues.filter((i) => i.status !== "carved") }))
+    .filter((wave) => wave.issues.length);
+  const issues = liveWaves.flatMap((wave) => wave.issues);
+  const total = liveWaves.length;
+  const closed = liveWaves.filter((wave) => wave.status === "closed").length;
+  const runningWave = liveWaves.findIndex((wave) => wave.status === "running");
   const completed = issues.filter((i) => i.status === "completed").length;
   return {
     project: status.project,
     runState: projectRunState(status),
     campaignName: status.name,
     // "N of M": the wave in flight if one is, otherwise how many have closed.
-    wave: { current: runningWave ? runningWave.index + 1 : closed, total },
+    wave: { current: runningWave >= 0 ? runningWave + 1 : closed, total },
     percentMerged: issues.length ? Math.round((completed / issues.length) * 100) : 0,
     tally: {
       running: issues.filter((i) => i.status === "running").length,

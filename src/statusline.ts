@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { basename } from "node:path";
 import { loadConfig } from "./config.ts";
-import { buildStatus, type CampaignStatus, type IssueStatus } from "./status.ts";
+import { buildStatus, type CampaignStatus, type DisplayStatus, type IssueStatus } from "./status.ts";
 
 const COUNT_EMOJI: Array<[IssueStatus, string]> = [
   ["completed", "✅"],
@@ -44,7 +44,7 @@ export function formatStatusLine(status: CampaignStatus): string {
   const issues = status.waves.flatMap((wave) => wave.issues);
   if (!issues.length) return "🏰 idle";
 
-  const counts = new Map<IssueStatus, number>();
+  const counts = new Map<DisplayStatus, number>();
   for (const issue of issues) counts.set(issue.status, (counts.get(issue.status) ?? 0) + 1);
 
   const parts: string[] = [];

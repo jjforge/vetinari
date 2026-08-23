@@ -2,18 +2,19 @@ import type { ResolvedConfig } from "./config.ts";
 import {
   buildStatusWithIssueNames,
   type CampaignStatus,
-  type IssueStatus,
+  type DisplayStatus,
   type StatusIssue,
   type StatusWave,
   type WaveStatus,
 } from "./dashboard-model.ts";
 
-const ISSUE_EMOJI: Record<IssueStatus, string> = {
+const ISSUE_EMOJI: Record<DisplayStatus, string> = {
   completed: "✅",
   running: "🔄",
   parked: "⏸",
   failure: "❌",
   unstarted: "⚪",
+  carved: "✂️",
 };
 
 const WAVE_EMOJI: Record<WaveStatus, string> = {
@@ -89,6 +90,17 @@ const renderIssueChip = (issue: StatusIssue, project: string, carve: boolean) =>
 const renderWaveContents = (wave: StatusWave, project: string, carve: boolean) => `<div class="chips">${wave.issues.map((issue) => renderIssueChip(issue, project, carve)).join("")}</div>`;
 
 /**
+ * The open wave's issue titles, listed under its chips so the wave reads at a
+ * glance without hovering every chip. Each line is the resolved title (falling
+ * back to just the issue number when none has resolved yet), carrying its status
+ * class so a carved issue reads struck-through.
+ */
+const renderWaveTitles = (wave: StatusWave) =>
+  `<ul class="wave-issues">${wave.issues
+    .map((issue) => `<li class="wave-issue ${issue.status}">#${escapeHtml(issue.issueNumber)}${issue.name ? ` ${escapeHtml(issue.name)}` : ""}</li>`)
+    .join("")}</ul>`;
+
+/**
  * A wave's human label, derived at render from the issue titles the dashboard
  * already resolved — nothing is stored (story: wave names from issue titles). A
  * wave is a file-disjoint layer that crosses epics, so its issues name it, never
@@ -107,7 +119,7 @@ const renderWaveLabel = (wave: StatusWave) => {
 };
 
 const renderOpenWave = (wave: StatusWave, project: string, carve: boolean) =>
-  `<section class="wave"><h2>${renderWaveLabel(wave)} <span class="wave-status ${wave.status}">${wave.status}</span></h2>${renderWaveContents(wave, project, carve)}</section>`;
+  `<section class="wave"><h2>${renderWaveLabel(wave)} <span class="wave-status ${wave.status}">${wave.status}</span> <span class="wave-count">${wave.issues.length} issue${wave.issues.length === 1 ? "" : "s"}</span></h2>${renderWaveContents(wave, project, carve)}${renderWaveTitles(wave)}</section>`;
 
 const renderCompletedWave = (wave: StatusWave, project: string, carve: boolean) =>
   `<details class="completed-wave"><summary class="completed-wave-chip"><span class="check" aria-hidden="true">✓</span> ${renderWaveLabel(wave)}</summary>${renderWaveContents(wave, project, carve)}</details>`;
@@ -371,7 +383,7 @@ export const renderStatusPage = (status: CampaignStatus, opts: StatusPageOptions
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${escapeHtml(status.project)} status</title>
 <style>
-  :root { --color-body: #090c10; --color-box-body: #0b0e12; --color-box-header: #10151b; --color-card: #0b0e12; --color-primary: #3fb9b0; --color-primary-alpha-20: rgb(63 185 176 / 20%); --color-text: #e6edf3; --color-text-light: #cdd6e0; --color-text-light-2: #8b98a5; --color-secondary: #232b35; --color-light-border: #1b212a; --color-green: #3fb984; --color-yellow: #c8a24e; --color-red: #f79287; --color-blue: #6cb6ff; --border-radius: 9px; --border-radius-medium: 12px; }
+  :root { --color-body: #090c10; --color-box-body: #0b0e12; --color-box-header: #10151b; --color-card: #0b0e12; --color-primary: #3fb9b0; --color-primary-alpha-20: rgb(63 185 176 / 20%); --color-text: #e6edf3; --color-text-light: #cdd6e0; --color-text-light-2: #8b98a5; --color-secondary: #232b35; --color-light-border: #1b212a; --color-green: #3fb984; --color-yellow: #c8a24e; --color-red: #f79287; --color-blue: #6cb6ff; --color-carved: #a371f7; --border-radius: 9px; --border-radius-medium: 12px; }
   body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 2rem; background: var(--color-body); color: var(--color-text); }
   h1 { font-size: clamp(1.8rem, 4vw, 3rem); margin: 0; letter-spacing: -0.035em; color: var(--color-text); }
   h2 { color: var(--color-text-light); }
@@ -401,8 +413,15 @@ export const renderStatusPage = (status: CampaignStatus, opts: StatusPageOptions
   .wave-status.closed { border-color: var(--color-green); color: var(--color-green); background: rgb(63 185 132 / 12%); }
   .wave-status.running { border-color: var(--color-blue); color: var(--color-blue); background: rgb(108 182 255 / 12%); }
   .wave-status.unstarted { border-color: var(--color-text-light-2); color: var(--color-text-light-2); background: rgb(139 152 165 / 12%); }
+  .wave-count { font-size: .8rem; font-weight: 400; color: var(--color-text-light-2); }
+  .wave-issues { list-style: none; margin: .7rem 0 0; padding: 0; }
+  .wave-issue { color: var(--color-text-light); font-size: .9rem; padding: .15rem 0; }
+  .wave-issue.carved { color: var(--color-text-light-2); text-decoration: line-through; }
   .dot { width: .75rem; height: .75rem; border-radius: 999px; display: inline-block; }
-  .completed { background: var(--color-green); } .parked { background: var(--color-yellow); } .failure { background: var(--color-red); } .running { background: var(--color-blue); } .unstarted { background: var(--color-text-light-2); }
+  .completed { background: var(--color-green); } .parked { background: var(--color-yellow); } .failure { background: var(--color-red); } .running { background: var(--color-blue); } .unstarted { background: var(--color-text-light-2); } .carved { background: var(--color-carved); }
+  @keyframes chip-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+  .dot.running { animation: chip-pulse 1.4s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) { .dot.running { animation: none; } }
   textarea { width: 100%; min-height: 7rem; margin: .5rem 0; color: var(--color-text); background: var(--color-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: .75rem; }
   button.chip { cursor: pointer; color: inherit; font: inherit; }
   .carve-panel { display: flex; align-items: center; gap: .5rem; }

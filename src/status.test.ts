@@ -64,6 +64,30 @@ test("buildLanding builds a per-project card for a live campaign", () => {
   assert.equal(card.lastEvent, "Writing the failing test");
 });
 
+test("buildLanding's card counts the live plan, not carved chips", () => {
+  const base = join(tmpdir(), `sctdd-landing-carved-${Date.now()}`);
+  const dir = join(base, "demo");
+  seedState(dir, [
+    { ts: "2025-01-02T08:00:00.000Z", event: "campaign-start", batches: [["101"], ["201"], ["301"]], name: "gateway work" },
+    { ts: "2025-01-02T08:01:00.000Z", event: "campaign-batch", index: 0, tasks: ["101"] },
+    { ts: "2025-01-02T08:02:00.000Z", event: "green", taskId: "101" },
+    { ts: "2025-01-02T08:03:00.000Z", event: "campaign-batch-done", index: 0, merged: ["101"], held: [] },
+    { ts: "2025-01-02T08:04:00.000Z", event: "campaign-batch", index: 1, tasks: ["201"] },
+    { ts: "2025-01-02T08:05:00.000Z", event: "queue-start", taskIds: ["201"] },
+    // The future, unstarted wave 301 is carved out — a display ghost, not live work.
+    { ts: "2025-01-02T08:06:00.000Z", event: "carve", target: "301", removed: ["301"] },
+  ]);
+
+  const [card] = buildLanding([pointerFor("demo", dir)], new Date("2025-01-02T12:00:00.000Z")).projects;
+
+  // Two live waves remain (101 closed, 201 running); the carved-out 301 wave and its
+  // chip do not inflate the count, the "queued" tally, or drag down percent merged.
+  assert.deepEqual(card.wave, { current: 2, total: 2 });
+  assert.deepEqual(card.tally, { running: 1, parked: 0, queued: 0 });
+  assert.equal(card.percentMerged, 50);
+  assert.equal(card.runState, "running");
+});
+
 test("buildLanding sums the counters, reads an idle project's last campaign, and skips a stale one", () => {
   const base = join(tmpdir(), `sctdd-landing-agg-${Date.now()}`);
   const alphaDir = join(base, "alpha");
@@ -932,6 +956,29 @@ test("buildStatus marks completed waves as closed", () => {
   );
 });
 
+test("buildStatus renders a carved issue as a carved chip in the wave it left", () => {
+  const dir = join(tmpdir(), `sctdd-status-carved-${Date.now()}`);
+  seedState(dir, [
+    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"], ["201"]], titles: { "101": "seed the db", "201": "add the report" } },
+    { ts: "2025-01-01T00:01:00.000Z", event: "campaign-batch", index: 0, tasks: ["101"] },
+    { ts: "2025-01-01T00:02:00.000Z", event: "campaign-batch-done", index: 0, merged: ["101"], held: [] },
+    // 201 is a future, unstarted wave: carving it drops it from the running plan…
+    { ts: "2025-01-01T00:03:00.000Z", event: "carve", target: "201", removed: ["201"] },
+  ]);
+
+  const status = buildStatus(cfgFor(dir));
+
+  // …but it still renders as a carved chip in the wave it left (ADR 0007), so a
+  // browsing operator sees what was carved out — it is not silently gone.
+  assert.equal(status.waves.length, 2);
+  assert.deepEqual(
+    status.waves.map((w) => w.issues.map((i) => [i.issueNumber, i.status])),
+    [[["101", "completed"]], [["201", "carved"]]],
+  );
+  // The carved issue keeps its title on the chip.
+  assert.equal(status.waves[1].issues[0].name, "add the report");
+});
+
 test("buildStatus marks active wave issues as running before they finish", () => {
   const dir = join(tmpdir(), `sctdd-status-running-${Date.now()}`);
   mkdirSync(join(dir, "logs"), { recursive: true });
@@ -1092,6 +1139,76 @@ test("wave labels and chip hovers render from the log's titles, with no fetchTas
   assert.match(html, /<button[^>]*title="cache eviction"[^>]*>/);
   // A chip whose issue also has a status detail carries the title alongside it.
   assert.match(html, /title="config resolution&#10;Merged into base"/);
+});
+
+test("renderStatusPage shows an issue count on an open wave", () => {
+  const html = renderStatusPage({
+    project: "beta",
+    waves: [
+      { index: 0, status: "running", issues: [{ issueNumber: "201", status: "running" }] },
+      {
+        index: 1,
+        status: "unstarted",
+        issues: [
+          { issueNumber: "301", status: "unstarted" },
+          { issueNumber: "302", status: "unstarted" },
+        ],
+      },
+    ],
+    parked: [],
+  });
+
+  // Each open wave card carries a count of its issues, beside the wave status.
+  assert.match(html, /<span class="wave-status running">running<\/span> <span class="wave-count">1 issue<\/span>/);
+  assert.match(html, /<span class="wave-status unstarted">unstarted<\/span> <span class="wave-count">2 issues<\/span>/);
+});
+
+test("renderStatusPage lists the issue titles under each open wave", () => {
+  const html = renderStatusPage({
+    project: "beta",
+    waves: [
+      {
+        index: 0,
+        status: "running",
+        issues: [
+          { issueNumber: "201", status: "running", name: "wire up the parser" },
+          { issueNumber: "202", status: "unstarted" },
+        ],
+      },
+    ],
+    parked: [],
+  });
+
+  // Under the open wave's chips, each issue's title is listed (its number alone
+  // when it has no resolved title yet).
+  assert.match(html, /<ul class="wave-issues"><li[^>]*>#201 wire up the parser<\/li><li[^>]*>#202<\/li><\/ul>/);
+});
+
+test("renderStatusPage colours a carved chip and pulses a running one", () => {
+  const html = renderStatusPage({
+    project: "beta",
+    waves: [
+      {
+        index: 0,
+        status: "running",
+        issues: [
+          { issueNumber: "201", status: "running", name: "live one" },
+          { issueNumber: "202", status: "carved", name: "carved one" },
+        ],
+      },
+    ],
+    parked: [],
+  });
+
+  // A carved chip carries the carved status dot + label…
+  assert.match(html, /<span class="dot carved"><\/span>#202 <small>carved<\/small>/);
+  // …in a distinct carved colour defined in the stylesheet (ADR 0007's sixth state).
+  assert.match(html, /--color-carved:/);
+  assert.match(html, /\.carved \{ background: var\(--color-carved\); \}/);
+  // A running chip pulses — a keyframed animation on its dot, reduced-motion aware.
+  assert.match(html, /@keyframes chip-pulse/);
+  assert.match(html, /\.dot\.running \{ animation: chip-pulse/);
+  assert.match(html, /prefers-reduced-motion/);
 });
 
 test("renderStatusPage renders a project dropdown and the selected project's body", () => {
@@ -1357,7 +1474,7 @@ test("renderStatusPage collapses closed waves into expandable completed wave chi
   assert.match(html, /\.completed-wave\[open\] > \.completed-wave-chip \{ display: flex; width: max-content; margin-bottom: \.6rem; \}/);
   // Chip rows must not stretch: the first wrapped line was rendering taller in Safari.
   assert.match(html, /\.completed-wave-bar, \.chips \{ display: flex; flex-wrap: wrap; align-items: flex-start; align-content: flex-start;/);
-  assert.match(html, /<section class="wave"><h2>Wave 2 <span class="wave-status running">running<\/span><\/h2>/);
+  assert.match(html, /<section class="wave"><h2>Wave 2 <span class="wave-status running">running<\/span> <span class="wave-count">1 issue<\/span><\/h2>/);
 });
 
 test("renderStatusPage labels a single-issue wave with that issue's resolved title, keeping the index", () => {

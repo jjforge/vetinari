@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Cross-project event feed on the all-repos landing (#55). Under the repo cards
+  on desktop, a time-ordered activity log spanning every registered project — each
+  row showing the time, the event kind, and a one-sentence, repo-prefixed
+  description. It is built read-side off the same live-run logs the cards read: a
+  pure `formatFeedEvent` folds each event to `describeEvent`'s plain-words sentence
+  with the project name in front (machine-noise events carry no row), and `buildFeed`
+  merges every project's narratable events newest-first. Served as a new
+  `GET /api/feed` JSON endpoint the client shell fetches; the feed is cut on mobile.
 - All-repos landing view for the dashboard (#55). The aggregated server now serves
   a client-rendered shell (vanilla, no build step) at `/`, replacing the old
   server-rendered status page as the thing you land on. Four counters run across the

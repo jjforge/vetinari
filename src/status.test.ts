@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { buildAllStatus, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, describeEvent, extractParkedDetails, formatStatusText, lastEventText, listArchivedRuns, parseCarveClosure, reduceCampaign, renderLandingShell, renderStatusPage, selectStatus, serveAllStatus, summarizeRun } from "./status.ts";
+import { buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, describeEvent, extractParkedDetails, formatFeedEvent, formatStatusText, lastEventText, listArchivedRuns, parseCarveClosure, reduceCampaign, renderLandingShell, renderStatusPage, selectStatus, serveAllStatus, summarizeRun } from "./status.ts";
 import type { CampaignStatus } from "./status.ts";
 import type { AddressInfo } from "node:net";
 import { register, type ProjectPointer } from "./registry.ts";
@@ -102,6 +102,31 @@ test("buildLanding sums the counters, reads an idle project's last campaign, and
   assert.match(beta.lastEvent, /^Last run: campaign · 1 issue · complete$/);
 });
 
+test("buildFeed merges every project's narratable events into one newest-first, repo-prefixed feed", () => {
+  const base = join(tmpdir(), `sctdd-feed-${Date.now()}`);
+  const alphaDir = join(base, "alpha");
+  const betaDir = join(base, "beta");
+  seedState(alphaDir, [
+    { ts: "2025-03-01T08:00:00.000Z", event: "campaign-start", batches: [["101"]], name: "alpha work" },
+    // Machine noise carries no narration and must not surface as a feed row.
+    { ts: "2025-03-01T08:00:30.000Z", event: "sandbox", taskId: "101" },
+    { ts: "2025-03-01T08:02:00.000Z", event: "green", taskId: "101" },
+  ]);
+  seedState(betaDir, [{ ts: "2025-03-01T08:01:00.000Z", event: "parked", taskId: "201", reason: "needs a choice" }]);
+
+  const feed = buildFeed([pointerFor("alpha", alphaDir), pointerFor("beta", betaDir), pointerFor("ghost", join(base, "gone"))]);
+
+  // Newest-first across projects; the stale registration and the machine-noise event are both absent.
+  assert.deepEqual(
+    feed.map((f) => f.text),
+    ["alpha — #101 merged", "beta — #201 parked: needs a choice", "alpha — Campaign “alpha work” started"],
+  );
+  // Each row carries the time and the event kind alongside the sentence.
+  assert.equal(feed[0].ts, "2025-03-01T08:02:00.000Z");
+  assert.equal(feed[0].kind, "green");
+  assert.equal(feed[0].project, "alpha");
+});
+
 test("buildAllStatus builds one status per live project and skips a stale one", () => {
   const base = join(tmpdir(), `sctdd-all-status-${Date.now()}`);
   const alphaDir = join(base, "alpha");
@@ -168,6 +193,16 @@ test("renderLandingShell is single-column on mobile with 44px tap targets", () =
   assert.match(html, /\.card \{[^}]*min-height: 44px/);
 });
 
+test("renderLandingShell mounts the cross-project feed under the cards and hides it on mobile", () => {
+  const html = renderLandingShell(["alpha", "beta"]);
+  // The feed container sits after the cards and is client-rendered off /api/feed.
+  assert.match(html, /id="feed"/);
+  assert.match(html, /\/api\/feed/);
+  assert.ok(html.indexOf('id="cards"') < html.indexOf('id="feed"'), "the feed renders after the cards");
+  // The feed is cut on a phone.
+  assert.match(html, /@media \(max-width: 640px\)[^}]*\{[\s\S]*\.feed \{ display: none; \}/);
+});
+
 test("serveAllStatus GET / serves the all-repos landing shell, not a server-rendered campaign", async () => {
   const configDir = join(tmpdir(), `sctdd-landing-shell-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
@@ -229,6 +264,36 @@ test("serveAllStatus GET /api/landing serves the all-repos landing model as JSON
     // Alpha's issue 101 is running; alpha's 201 and beta's 301 are still queued — summed.
     assert.equal(landing.counters.working, 1);
     assert.equal(landing.counters.queued, 2);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serveAllStatus GET /api/feed serves the cross-project event feed as JSON", async () => {
+  const configDir = join(tmpdir(), `sctdd-feed-endpoint-${Date.now()}`);
+  const alphaDir = join(configDir, "state-alpha");
+  const betaDir = join(configDir, "state-beta");
+  seedState(alphaDir, [
+    { ts: "2025-04-01T08:00:00.000Z", event: "campaign-start", batches: [["101"]], name: "alpha work" },
+    { ts: "2025-04-01T08:02:00.000Z", event: "green", taskId: "101" },
+  ]);
+  seedState(betaDir, [{ ts: "2025-04-01T08:01:00.000Z", event: "parked", taskId: "201", reason: "needs a choice" }]);
+  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
+  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const { port } = server.address() as AddressInfo;
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/feed`);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get("content-type") ?? "", /application\/json/);
+    const feed = await res.json();
+    // The feed merges both projects newest-first, each row repo-prefixed.
+    assert.deepEqual(
+      feed.map((f: { text: string }) => f.text),
+      ["alpha — #101 merged", "beta — #201 parked: needs a choice", "alpha — Campaign “alpha work” started"],
+    );
+    assert.equal(feed[0].kind, "green");
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -538,6 +603,14 @@ test("describeEvent narrates the operator-facing events in plain words", () => {
   // A turn renders its agent-authored summary verbatim (ADR 0009), falling back when absent.
   assert.equal(describeEvent({ event: "turn", taskId: "101", turn: 3, summary: "Added a failing test for the counter" }), "Added a failing test for the counter");
   assert.equal(describeEvent({ event: "turn", taskId: "101", turn: 3 }), "#101 — turn 3");
+});
+
+test("formatFeedEvent prefixes an event's plain-words sentence with its repo, and drops machine noise", () => {
+  // A narratable event reads as one repo-prefixed sentence.
+  assert.equal(formatFeedEvent("alpha", { event: "green", taskId: "101" }), "alpha — #101 merged");
+  assert.equal(formatFeedEvent("beta", { event: "turn", taskId: "201", turn: 2, summary: "Wrote a failing test" }), "beta — Wrote a failing test");
+  // An event describeEvent can't narrate (machine noise) yields no feed line.
+  assert.equal(formatFeedEvent("alpha", { event: "sandbox", taskId: "102" }), "");
 });
 
 test("lastEventText picks the most recent operator-facing event, ignoring machine noise", () => {

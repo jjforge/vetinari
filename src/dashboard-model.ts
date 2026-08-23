@@ -102,6 +102,17 @@ export function describeEvent(e: any): string {
 }
 
 /**
+ * One event as a single repo-prefixed sentence for the cross-project feed:
+ * `describeEvent`'s plain-words line with the project name in front. Pure — an
+ * event `describeEvent` can't narrate (machine noise) returns "" so `buildFeed`
+ * can skip past it, exactly as `lastEventText` does.
+ */
+export function formatFeedEvent(project: string, e: any): string {
+  const sentence = describeEvent(e);
+  return sentence ? `${project} — ${sentence}` : "";
+}
+
+/**
  * The most recent operator-facing event in a log, in plain words — the landing
  * card's "last event" line. Scans newest-first and returns the first entry
  * `describeEvent` can narrate, so machine noise (gate/sandbox/queue-spawn) that
@@ -429,6 +440,40 @@ export function buildAllStatus(pointers: ProjectPointer[]): CampaignStatus[] {
     statuses.push(buildStatus(statusConfigFromPointer(pointer)));
   }
   return statuses;
+}
+
+/** One row of the cross-project event feed: which project it came from, when it
+ * happened (the event's ISO `ts`), the raw event kind, and the repo-prefixed
+ * plain-words sentence `formatFeedEvent` folds it to. */
+export interface FeedEntry {
+  project: string;
+  ts: string;
+  kind: string;
+  text: string;
+}
+
+/**
+ * The cross-project event feed: every registered project's live-run log flattened
+ * to its narratable events, repo-prefixed and sorted newest-first. Reads each
+ * project's log live off the registry, exactly as `buildLanding`/`buildAllStatus`
+ * do, skipping a project whose base location is gone with a log line rather than
+ * throwing (ADR 0002). Machine-noise events `describeEvent` can't narrate carry no
+ * row (`formatFeedEvent` returns ""), so the feed reads as an operator log, not a
+ * raw event dump.
+ */
+export function buildFeed(pointers: ProjectPointer[]): FeedEntry[] {
+  const entries: FeedEntry[] = [];
+  for (const pointer of pointers) {
+    if (!existsSync(pointer.baseLocation)) {
+      log("status-project-skipped", { project: pointer.project, baseLocation: pointer.baseLocation });
+      continue;
+    }
+    for (const e of readEvents(statusConfigFromPointer(pointer))) {
+      const text = formatFeedEvent(pointer.project, e);
+      if (text) entries.push({ project: pointer.project, ts: String(e.ts ?? ""), kind: String(e.event ?? ""), text });
+    }
+  }
+  return entries.sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0));
 }
 
 const toParkedIssue = (rec: ParkedRecord): ParkedIssue => {

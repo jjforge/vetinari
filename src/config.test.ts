@@ -68,6 +68,23 @@ test("loadConfig defaults state under .sandcastle.local, with parkedDir and logF
   assert.equal(cfg.logFile, ".sandcastle.local/logs/orchestrator.jsonl");
 });
 
+test("loadConfig defaults hostWeight to 1, and honors an explicit weight", async () => {
+  const dflt = await loadConfig(writeConfig(scratch(), "sandcastle/config.mts"));
+  assert.equal(dflt.hostWeight, 1);
+
+  const weighted = `export default {
+  project: "demo",
+  image: "img",
+  baseBranch: "main",
+  gates: [{ cmd: "true" }],
+  fetchTask: (id) => id,
+  hostWeight: 3,
+};
+`;
+  const cfg = await loadConfig(writeConfig(scratch(), "sandcastle/config.mts", weighted));
+  assert.equal(cfg.hostWeight, 3);
+});
+
 test("loadConfig's not-found error leads with the canonical path and mentions --config", async () => {
   const cwd = process.cwd();
   process.chdir(scratch());

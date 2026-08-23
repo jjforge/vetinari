@@ -13,6 +13,7 @@ import { applyInit, computeInit, describeInit, scanInit } from "./init.ts";
 import { archiveRun } from "./archive.ts";
 import { clearParkedForTasks, enqueueOutbound, listParked, readParked } from "./state.ts";
 import { autoRegister, gatewayConfigDir } from "./registry.ts";
+import { readHostBudget, type HostBudget } from "./host-slots.ts";
 import { campaignRunning, readEvents, reduceCampaign, serveAllStatus } from "./status.ts";
 import { runStatusLine } from "./statusline.ts";
 
@@ -75,7 +76,13 @@ const USAGE = `sandcastle-tdd <mode> [args]
                            Claude Code's JSON on stdin; wire into settings.json)
   tg-test                  prove the Telegram round-trip
 
-Options: --config <path>   (default: sandcastle-tdd.config.mts in cwd)`;
+Options: --config <path>   (default: sandcastle-tdd.config.mts in cwd)
+
+Host slot budget (optional): set SANDCASTLE_HOST_SLOTS (or a host-slots file in the
+gateway config dir) to cap live containers across ALL projects; every queue/campaign
+cooperates through a filesystem lease to stay within it. Unset = uncoordinated, each
+run bounded only by QUEUE_SLOTS. A project's cut when projects contend is its
+\`hostWeight\` (default 1). See ADR 0010.`;
 
 /**
  * The interactive under-specified halt: shown only on a terminal (the flag/TTY
@@ -217,6 +224,13 @@ setLogFile(cfg.logFile);
 // Pointer-only and best-effort — never fatal to the run.
 autoRegister(cfg);
 
+// Resolve the host slot budget once (ADR 0010): unset leaves every run bounded
+// only by its own QUEUE_SLOTS, uncoordinated, exactly as before; set, the run
+// carries it into queue/campaign to cooperate through the filesystem lease.
+const resolvedHostSlots = readHostBudget(gatewayConfigDir());
+const hostBudget: HostBudget | undefined =
+  resolvedHostSlots === undefined ? undefined : { configDir: gatewayConfigDir(), budget: resolvedHostSlots, weight: cfg.hostWeight };
+
 // Reset the live state the dashboard and status line read once a run is truly
 // over, so a finished run stops showing as current. Skip while anything is still
 // parked — an unanswered question means the run is not finished.
@@ -240,7 +254,7 @@ switch (mode) {
   }
   case "queue": {
     if (!rest.length) throw new Error("queue needs at least one task id");
-    await queue(cfg, rest, Math.max(1, Number(process.env.QUEUE_SLOTS ?? 3)));
+    await queue(cfg, rest, Math.max(1, Number(process.env.QUEUE_SLOTS ?? 3)), undefined, hostBudget);
     archiveIfIdle();
     break;
   }
@@ -258,7 +272,7 @@ switch (mode) {
     const batches = positional.map((b) => b.split(/[\s,]+/).filter(Boolean)).filter((b) => b.length);
     if (!batches.length) throw new Error('campaign needs at least one batch: campaign "436 611" "623 640"');
     // Archive only a clean run — a halt leaves state deliberately, to inspect.
-    if (await campaign(cfg, batches, Math.max(1, Number(process.env.QUEUE_SLOTS ?? 3)), name)) archiveIfIdle();
+    if (await campaign(cfg, batches, Math.max(1, Number(process.env.QUEUE_SLOTS ?? 3)), name, hostBudget)) archiveIfIdle();
     break;
   }
   case "carve": {
@@ -346,7 +360,7 @@ switch (mode) {
       console.log("nothing left to run after the carve — done.");
       break;
     }
-    await campaign(cfg, remaining, Math.max(1, Number(process.env.QUEUE_SLOTS ?? 3)));
+    await campaign(cfg, remaining, Math.max(1, Number(process.env.QUEUE_SLOTS ?? 3)), undefined, hostBudget);
     break;
   }
   case "campaign-plan": {

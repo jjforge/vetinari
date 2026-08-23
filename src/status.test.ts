@@ -4,7 +4,7 @@ import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { appendedEvents, buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, DASHBOARD_PALETTE_CSS, describeEvent, extractParkedDetails, formatFeedEvent, formatStatusText, ISSUE_DETAIL_SHEET_SCRIPT, ISSUE_DETAIL_SHEET_STYLES, issueDetailSheetMarkup, lastEventText, listArchivedRuns, parkedReplyFor, parseCarveClosure, reconstructIssueDetail, projectRunState, reduceCampaign, renderLandingShell, renderStatusPage, selectStatus, serveAllStatus, STATE_DOT_CSS, stateColor, summarizeRun } from "./status.ts";
+import { appendedEvents, buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, DASHBOARD_PALETTE_CSS, describeEvent, extractParkedDetails, formatFeedEvent, formatStatusText, ISSUE_DETAIL_SHEET_SCRIPT, ISSUE_DETAIL_SHEET_STYLES, issueDetailSheetMarkup, lastEventText, listArchivedRuns, parkedReplyFor, parseCarveClosure, reconstructIssueDetail, projectRunState, reduceCampaign, renderLandingShell, renderStatusPage, renderTopBar, selectStatus, serveAllStatus, STATE_DOT_CSS, stateColor, summarizeRun, TOP_BAR_STYLES } from "./status.ts";
 import type { CampaignStatus } from "./status.ts";
 import type { AddressInfo } from "node:net";
 import { register, type ProjectPointer } from "./registry.ts";
@@ -2160,6 +2160,20 @@ test("renderStatusPage omits the parked section entirely when nothing is parked"
   assert.doesNotMatch(html, /class="parked-issues"/);
 });
 
+test("renderStatusPage orders the top of the page: Parked → campaign-meta → waves (#81)", () => {
+  const html = renderStatusPage({
+    project: "demo",
+    name: "gateway work",
+    waves: [{ index: 0, status: "running", issues: [{ issueNumber: "101", status: "running" }] }],
+    parked: [{ issueNumber: "102", reason: "blocked", parkedAt: "now", branch: "agent/102", description: "Need a choice.", options: [] }],
+  });
+
+  // Top→bottom order per the design (#81): the Parked section leads, then the
+  // campaign-meta line, then the waves — the meta line no longer sits above Parked.
+  assert.ok(html.indexOf('class="parked-issues"') < html.indexOf('class="campaign-meta"'), "Parked should render above the campaign-meta line");
+  assert.ok(html.indexOf('class="campaign-meta"') < html.indexOf('class="waves-grid"'), "campaign-meta should render above the waves");
+});
+
 test("renderStatusPage collapses closed waves into expandable completed wave chips", () => {
   const html = renderStatusPage({
     project: "demo",
@@ -2362,9 +2376,11 @@ test("formatStatusText omits the parked section when nothing is parked", () => {
 test("renderStatusPage renders the landing live-bar top-right, not the old refresh widget (#79)", () => {
   const html = renderStatusPage({ project: "demo", waves: [{ index: 0, status: "closed", issues: [] }], parked: [] });
 
-  // The live-bar replaces the fixed-interval Refresh widget: a live/paused indicator,
-  // an "updated Ns ago" readout, and a Pause button — the same controls the landing has.
-  assert.match(html, /<div class="live-bar"[^>]*><span class="live-indicator" data-live-state="live">Live<\/span><span class="updated" data-updated>[^<]*<\/span><button type="button" id="pause" class="pause">Pause<\/button><\/div>/);
+  // The live-bar replaces the fixed-interval Refresh widget: a dot-only live/paused
+  // indicator, an "updated Ns ago" readout, and an icon Pause button — the same shared
+  // control the landing renders (#81). The indicator shows no visible "Live" text (its
+  // state is an accessible label); the pause control carries no "Pause" text word.
+  assert.match(html, /<div class="live-bar"[^>]*><span class="live-indicator" data-live-state="live" aria-label="Live"><\/span><span class="updated" data-updated>[^<]*<\/span><button type="button" id="pause" class="pause" data-paused="false" aria-label="Pause"><\/button><\/div>/);
   // Paused, the live indicator goes dim (not amber) and still (§5).
   assert.match(html, /\.live-indicator\[data-live-state="paused"\] \{ color: var\(--color-dim\); \}/);
   // The old interval widget is gone entirely.
@@ -2375,6 +2391,32 @@ test("renderStatusPage renders the landing live-bar top-right, not the old refre
   // The h1 drops the " status" wording; with no dropdown it is just the project name.
   assert.match(html, /<div class="page-top"><h1>demo<\/h1><div class="live-bar"/);
   assert.match(html, /\.page-top \{ display: flex;/);
+});
+
+test("both pages render one shared top-bar control: a dot-only live indicator and an icon pause (#81)", () => {
+  const landing = renderLandingShell(["alpha", "beta"]);
+  const campaign = renderStatusPage({ project: "beta", waves: [], parked: [] }, { projects: ["alpha", "beta"], selected: "beta" });
+
+  // The live-bar is one shared definition, emitted verbatim by every page so the two
+  // can no longer drift (the "Live"-word vs LIVE, pause-word vs icon divergence).
+  const liveBar = renderTopBar("").match(/<div class="live-bar".*<\/div>/s)?.[0];
+  assert.ok(liveBar, "renderTopBar emits a live-bar");
+  for (const page of [landing, campaign]) assert.ok(page.includes(liveBar), "every page includes the shared live-bar");
+
+  // The indicator is a dot only — no visible "Live"/"Paused" word; its state is an
+  // accessible label instead. The pause control is an icon button with no "Pause" word.
+  for (const page of [landing, campaign]) {
+    assert.doesNotMatch(page, /<span class="live-indicator"[^>]*>Live<\/span>/);
+    assert.doesNotMatch(page, /<button[^>]*class="pause"[^>]*>Pause<\/button>/);
+    assert.match(page, /<span class="live-indicator" data-live-state="live" aria-label="Live"><\/span>/);
+    assert.match(page, /<button type="button" id="pause" class="pause" data-paused="false" aria-label="Pause"><\/button>/);
+  }
+
+  // The pause icon lives in the shared CSS, flipped by a data attribute, so the two
+  // pages' scripts never re-author the glyph: ⏸ while live, ▶ once paused.
+  assert.match(TOP_BAR_STYLES, /\.pause::before \{ content: "⏸"; \}/);
+  assert.match(TOP_BAR_STYLES, /\.pause\[data-paused="true"\]::before \{ content: "▶"; \}/);
+  for (const page of [landing, campaign]) assert.ok(page.includes(TOP_BAR_STYLES), "every page includes the shared top-bar styles");
 });
 
 test("renderStatusPage updates live off /api/events, reloading on a ping unless composing (#79)", () => {

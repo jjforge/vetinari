@@ -140,6 +140,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The repo/campaign page's header row and section order now match the design, and
+  the top bar is one shared control across every page (#81), a frontend-only
+  change. The live indicator is a dot only — its "Live"/"Paused" state is an
+  accessible label rather than a visible word — and pause is an icon control (⏸/▶,
+  the glyph carried in CSS and flipped by a `data-paused` attribute) instead of the
+  "Pause" text button. The top→bottom order on the repo page is now top bar →
+  Parked → campaign-meta line → closed waves → open waves (the meta line no longer
+  sits above Parked), and the campaign name reads as plain bold text, not the teal
+  product accent. The landing and the repo page previously each hand-built their own
+  top bar (project dropdown/heading + live-bar), which is how the "Live"-word and
+  pause-word survived on the repo page; both now render one shared `renderTopBar` /
+  `TOP_BAR_STYLES`, so they cannot drift again. Pinned by `renderStatusPage` /
+  `renderLandingShell` regression tests. (The status-colour scoping to `.dot`, this
+  issue's other half, landed with the shared colour model in #83.)
+
 - The dashboard's colour is now one shared model across every surface (#83), a
   frontend/visual change only. One `:root` palette is emitted once and consumed by
   the landing, the repo/campaign page and the issue-detail sheet — no per-renderer

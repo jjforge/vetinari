@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `docs/gateway.md`, an operator how-to for standing up and running the aggregated
+  gateway (#68): credentials in `.sandcastle.local/orchestrator.env` and how the
+  sole-sender gateway reads them live from each project's base location (vs. the
+  retired per-project `dispatch`), declaring `destinations`/`notify` in
+  `sandcastle/config.mts` and how `autoRegister` materializes them into
+  `routing.json`, `autoRegister`-on-run + the `gateway` daemon, the
+  dispatch→gateway `migrate`, and verification via `tg-test` and a draining outbox.
+  Cross-links ADR 0002 and ADR 0006. Notes the `routing.json = {}` case truthfully:
+  an empty routing map falls back to the default chat (delivery is not silenced) —
+  the real silent no-delivery is missing credentials — which corrects the "`{}` =
+  no delivery" wording in the issue.
 - The all-repos landing's project cards and top counters finish their visual
   design (#80), a frontend/visual change only — everything still derives from the
   existing `/api/landing` payload, with no backend change. Each live card now

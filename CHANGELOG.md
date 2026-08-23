@@ -208,6 +208,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The all-repos landing's recent-activity feed rendered the progress/blue
+  event-kind labels (`CAMPAIGN-BATCH`, `QUEUE-START`, `TURN`, …) illegibly — the
+  mid-tone `--color-blue` on tiny bold uppercase text over near-black read as a
+  strikethrough through the glyphs (#85). Each feed kind now reads its comms
+  category as a full-strength leading dot with the label at `--color-text`,
+  legible and consistent across every category (matching the shared dot colour
+  model, #83).
+
 - `defaultFileSet` was all-or-nothing over a ticket's whole body, so one
   incidental filename-shaped token — an env file, a config name, a spec/ADR link
   whose basename the tree lacks — flipped `confident` to `false` even when the

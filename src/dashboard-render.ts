@@ -194,32 +194,53 @@ const campaignIssueCount = (status: CampaignStatus) => status.waves.reduce((tota
  * shown on the right of an open wave card's head and on a closed wave's chip. */
 const waveMerged = (wave: StatusWave) => wave.issues.filter((issue) => issue.status === "completed").length;
 
-const renderOpenWave = (wave: StatusWave, project: string, carve: boolean, interactive: boolean) => {
+/**
+ * One wave card — the single card component both an open (running/queued) wave and
+ * an expanded closed wave render as (they must not fork): its label + status pill on
+ * the left, its merged/total on the right, its issue chips, then the title list. The
+ * section carries the wave status so a running wave gets the blue top accent, a
+ * closed one the green, and an unstarted one a neutral edge. `extraAttrs` lets a
+ * closed card carry the id + `hidden` its toggle chip drives.
+ */
+const renderWaveCard = (wave: StatusWave, project: string, carve: boolean, interactive: boolean, extraAttrs = "") => {
   // A carved tally beside the merged count, so a wave a carve pruned reads at a
   // glance — the carved chips are a display overlay (ADR 0007), and this counts them.
   const carved = wave.issues.filter((issue) => issue.status === "carved").length;
   const tally = carved ? ` <span class="wave-carved">${carved} carved</span>` : "";
-  // A wave card: its label + status pill on the left, its merged/total on the right,
-  // its issue chips, then the title list. The section carries the wave status so a
-  // running wave gets the blue top accent and an unstarted wave a neutral one.
-  return `<section class="wave ${wave.status}"><div class="wave-head"><h2>${renderWaveLabel(wave)} <span class="wave-status ${wave.status}">${wave.status}</span></h2><span class="wave-tally">${waveMerged(wave)}/${wave.issues.length}</span>${tally}</div>${renderWaveContents(wave, project, carve, interactive)}${renderWaveTitles(wave)}</section>`;
+  return `<section class="wave ${wave.status}"${extraAttrs}><div class="wave-head"><h2>${renderWaveLabel(wave)} <span class="wave-status ${wave.status}">${wave.status}</span></h2><span class="wave-tally">${waveMerged(wave)}/${wave.issues.length}</span>${tally}</div>${renderWaveContents(wave, project, carve, interactive)}${renderWaveTitles(wave)}</section>`;
 };
 
-const renderCompletedWave = (wave: StatusWave, project: string, carve: boolean, interactive: boolean) =>
-  `<details class="completed-wave"><summary class="completed-wave-chip"><span class="check" aria-hidden="true">✓</span> ${renderWaveLabel(wave)} <span class="completed-wave-tally">${waveMerged(wave)}/${wave.issues.length}</span></summary>${renderWaveContents(wave, project, carve, interactive)}</details>`;
+/** A closed wave's compact toggle chip — the affordance that reveals its full card in
+ * the grid. `aria-controls`/`aria-expanded` (+ the client script) make it keyboard-
+ * operable and expose its state; the chevron and green accent are CSS keyed off
+ * `aria-expanded`. Only the compact "Wave N" + merged tally rides the chip; the lead
+ * title and issue list live on the card it opens. */
+const renderClosedWaveChip = (wave: StatusWave) =>
+  `<button type="button" class="completed-wave-chip" aria-expanded="false" aria-controls="closed-wave-${wave.index}" data-wave="${wave.index}"><span class="check" aria-hidden="true">✓</span> Wave ${wave.index + 1} <span class="completed-wave-tally">${waveMerged(wave)}/${wave.issues.length}</span></button>`;
 
-/** The wave/issue body a status renders — closed waves collapsed into chips, open
- * waves expanded. Shared by the live run and a read-only archived run: the live run
- * renders `interactive` (its chips open the detail sheet and, under carve, route a
- * carve); the archived run passes `interactive: false`, so its chips are inert. */
-const renderWaves = (status: CampaignStatus, carve: boolean, interactive: boolean) => {
+/** The wave/issue body a status renders. On the live run (`collapsible`), closed waves
+ * show as a compact toggle row of chips directly above the wave grid; each chip reveals
+ * that wave's full card — the same card an open wave renders — in the grid, before the
+ * open waves and in wave order (the client script drives which are open, persisted
+ * across a live reload). The read-only archived run passes `collapsible: false`: it has
+ * no live toggle script (and would collide on the `closed-wave-N` ids), so it renders
+ * every wave as a full card, expanded. `interactive` (the live run) makes chips open the
+ * detail sheet and, under carve, route a carve; the archived run passes it `false`. */
+const renderWaves = (status: CampaignStatus, carve: boolean, interactive: boolean, collapsible = true) => {
   if (!status.waves.length) return "<p>No active campaign or queue found.</p>";
+  if (!collapsible) return `<div class="waves-grid">${status.waves.map((wave) => renderWaveCard(wave, status.project, carve, interactive)).join("")}</div>`;
+  const closedWaves = status.waves.filter((wave) => wave.status === "closed");
   const openWaves = status.waves.filter((wave) => wave.status !== "closed");
-  return `${
-    status.waves.some((wave) => wave.status === "closed")
-      ? `<div class="completed-waves"><div class="completed-wave-bar">${status.waves.filter((wave) => wave.status === "closed").map((wave) => renderCompletedWave(wave, status.project, carve, interactive)).join("")}</div></div>`
-      : ""
-  }${openWaves.length ? `<div class="waves-grid">${openWaves.map((wave) => renderOpenWave(wave, status.project, carve, interactive)).join("")}</div>` : ""}`;
+  const toggleRow = closedWaves.length
+    ? `<div class="completed-waves"><div class="completed-wave-bar" data-project="${escapeHtml(status.project)}">${closedWaves.map(renderClosedWaveChip).join("")}</div></div>`
+    : "";
+  // The grid holds every closed card (hidden until its chip toggles it open) before
+  // the open ones, in wave order; it renders whenever there is any wave to show.
+  const cards = [
+    ...closedWaves.map((wave) => renderWaveCard(wave, status.project, carve, interactive, ` id="closed-wave-${wave.index}" hidden`)),
+    ...openWaves.map((wave) => renderWaveCard(wave, status.project, carve, interactive)),
+  ];
+  return `${toggleRow}${cards.length ? `<div class="waves-grid">${cards.join("")}</div>` : ""}`;
 };
 
 /**
@@ -891,17 +912,23 @@ ${TOP_BAR_STYLES}
   .waves-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 1rem; margin: 1rem 0; }
   .wave { background: var(--color-card); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: 1rem; box-shadow: 0 8px 22px #0004; border-top: 3px solid var(--color-dim); }
   .wave.running { border-top-color: var(--color-blue); }
+  /* A closed wave's card carries the green top edge its CLOSED state reads (§2). */
+  .wave.closed { border-top-color: var(--color-green); }
+  /* A flex-grid item beats the UA [hidden] rule, so a collapsed closed card needs it back explicitly. */
+  .wave.closed[hidden] { display: none; }
   .wave-head { display: flex; align-items: baseline; justify-content: space-between; gap: .5rem; }
   .wave-head h2 { margin: 0; font-size: 1.1rem; }
   .wave-tally { color: var(--color-text-light-2); font-variant-numeric: tabular-nums; font-size: .9rem; white-space: nowrap; }
   .completed-waves { display: flex; align-items: flex-start; flex-wrap: wrap; gap: .5rem; margin: 1rem 0; color: var(--color-text-light); }
   .completed-wave-chip .check { color: var(--color-green); font-weight: 700; }
   .completed-wave-bar, .chips { display: flex; flex-wrap: wrap; align-items: flex-start; align-content: flex-start; gap: .5rem; }
-  .completed-wave { display: inline-block; }
-  .completed-wave[open] { display: block; flex-basis: 100%; border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: .75rem; background: var(--color-card); }
-  .completed-wave[open] > .completed-wave-chip { display: flex; width: max-content; margin-bottom: .6rem; }
-  .completed-wave-chip { cursor: pointer; list-style: none; }
-  .completed-wave-chip::-webkit-details-marker { display: none; }
+  .completed-wave-chip { cursor: pointer; font: inherit; }
+  /* The chevron is CSS keyed off aria-expanded — collapsed › flips to expanded ⌄ — so
+     the client script only flips the attribute, never re-authors the glyph. */
+  .completed-wave-chip::after { content: "›"; color: var(--color-text-light-2); }
+  .completed-wave-chip[aria-expanded="true"]::after { content: "⌄"; }
+  /* An expanded chip takes a green accent (its card is open); collapsed chips stay neutral (§6). */
+  .completed-wave-chip[aria-expanded="true"] { border-color: var(--color-green); }
   .chip, .wave-status, .completed-wave-chip { display: inline-flex; align-items: center; gap: .4rem; border: 1px solid var(--color-secondary); border-radius: 999px; padding: .3rem .65rem; background: var(--color-chip); color: var(--color-text); }
   /* An issue chip borders its own status at 40% alpha (§4); the small status word is muted. */
   ${STATE_CHIP_BORDER_CSS}
@@ -935,7 +962,15 @@ ${ISSUE_DETAIL_SHEET_STYLES}
   .parked-card-meta { color: var(--color-text-light-2); font-size: .85rem; margin-top: .35rem; }
   .parked-waited { white-space: nowrap; }
   .run-summary { color: var(--color-text-light-2); font-size: .85rem; font-weight: 400; }
-</style>
+</style>${
+  // No-JS fallback for the closed-wave toggles: the cards are hidden and the chips
+  // inert without JS, so reveal every closed card in the grid and hide the toggle bar,
+  // keeping the content reachable (the old <details> degraded the same way). Emitted
+  // only when there are closed waves to fall back for.
+  status.waves.some((wave) => wave.status === "closed")
+    ? `\n<noscript><style>.completed-wave-bar { display: none; } .wave.closed[hidden] { display: block; }</style></noscript>`
+    : ""
+}
 </head>
 <body>
 ${renderTopBar(opts.projects?.length ? renderProjectPicker(opts.projects, opts.selected ?? status.project) : `<h1>${escapeHtml(status.project)}</h1>`)}
@@ -977,7 +1012,7 @@ ${
   opts.archived
     ? `<section class="archived-run"><h2>Archived run ${
         opts.archived.name ? `${escapeHtml(opts.archived.name)} <small class="run-summary">${escapeHtml(opts.archivedRun ?? "")}</small>` : escapeHtml(opts.archivedRun ?? "")
-      }</h2>${renderWaves(opts.archived, false, false)}</section>`
+      }</h2>${renderWaves(opts.archived, false, false, false)}</section>`
     : ""
 }
 ${issueDetailSheetMarkup(Boolean(opts.carve))}${
@@ -1051,6 +1086,29 @@ ${ISSUE_DETAIL_SHEET_SCRIPT}
   // sheet opens; a chip is a button, where preventDefault is harmless.
   document.querySelectorAll(".chip[data-issue], .parked-card[data-issue]").forEach((el) =>
     el.addEventListener("click", (event) => { event.preventDefault(); openIssue(el.dataset.project, el.dataset.issue, el.dataset.carvable === "1"); }));
+  // Closed-wave toggles: each chip reveals/hides its own wave card in the grid. The set
+  // of open waves is persisted per project so a live /api/events reload — which reloads
+  // the whole page — does not silently collapse everything the operator opened.
+  const waveBar = document.querySelector(".completed-wave-bar");
+  if (waveBar) {
+    const storeKey = "sctdd:closed-waves:" + waveBar.dataset.project;
+    const readOpen = () => { try { return new Set(JSON.parse(sessionStorage.getItem(storeKey) || "[]")); } catch { return new Set(); } };
+    const open = readOpen();
+    const setOpen = (chip, isOpen) => {
+      chip.setAttribute("aria-expanded", String(isOpen));
+      const card = document.getElementById(chip.getAttribute("aria-controls"));
+      if (card) card.hidden = !isOpen;
+    };
+    for (const chip of waveBar.querySelectorAll(".completed-wave-chip")) {
+      if (open.has(chip.dataset.wave)) setOpen(chip, true);
+      chip.addEventListener("click", () => {
+        const isOpen = chip.getAttribute("aria-expanded") !== "true";
+        setOpen(chip, isOpen);
+        if (isOpen) open.add(chip.dataset.wave); else open.delete(chip.dataset.wave);
+        try { sessionStorage.setItem(storeKey, JSON.stringify([...open])); } catch {}
+      });
+    }
+  }
 </script>
 </body>
 </html>`;

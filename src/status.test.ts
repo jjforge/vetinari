@@ -1685,8 +1685,10 @@ test("wave labels read from tmp-log issue titles, resolved through buildStatusWi
   });
   const html = renderStatusPage(status);
 
-  // Many-issue wave (closed): lead title + "+N" on its collapsed chip, with a merged tally.
-  assert.match(html, /<span class="check" aria-hidden="true">✓<\/span> Wave 1 — config resolution \+2 <span class="completed-wave-tally">3\/3<\/span><\/summary>/);
+  // Many-issue wave (closed): a compact "Wave N" toggle chip with its merged tally; the
+  // lead title + "+N" now reads on the full card the chip reveals in the grid.
+  assert.match(html, /<span class="check" aria-hidden="true">✓<\/span> Wave 1 <span class="completed-wave-tally">3\/3<\/span><\/button>/);
+  assert.match(html, /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2>Wave 1 — config resolution \+2 <span class="wave-status closed">closed<\/span>/);
   // Single-issue wave (open): just that issue's title, in a wave card.
   assert.match(html, /<section class="wave running"><div class="wave-head"><h2>Wave 2 — cache eviction <span class="wave-status running">running<\/span>/);
 });
@@ -1710,8 +1712,10 @@ test("wave labels and chip hovers render from the log's titles, with no fetchTas
   // the log, exactly as the dumb-router dashboard reads them (ADR 0002).
   const html = renderStatusPage(buildStatus(cfgFor(dir)));
 
-  // Many-issue wave (closed): lead title + "+N" on its collapsed chip, with a merged tally.
-  assert.match(html, /<span class="check" aria-hidden="true">✓<\/span> Wave 1 — config resolution \+2 <span class="completed-wave-tally">3\/3<\/span><\/summary>/);
+  // Many-issue wave (closed): a compact "Wave N" toggle chip with its merged tally; the
+  // lead title + "+N" now reads on the full card the chip reveals in the grid.
+  assert.match(html, /<span class="check" aria-hidden="true">✓<\/span> Wave 1 <span class="completed-wave-tally">3\/3<\/span><\/button>/);
+  assert.match(html, /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2>Wave 1 — config resolution \+2 <span class="wave-status closed">closed<\/span>/);
   // Single-issue wave (open): just that issue's title, in a wave card.
   assert.match(html, /<section class="wave running"><div class="wave-head"><h2>Wave 2 — cache eviction <span class="wave-status running">running<\/span>/);
   // Every chip carries its own title on hover — 201 has no status detail yet, so
@@ -2184,14 +2188,14 @@ test("renderStatusPage collapses closed waves into expandable completed wave chi
     parked: [],
   });
 
-  assert.match(html, /<div class="completed-waves"><div class="completed-wave-bar">/);
+  assert.match(html, /<div class="completed-waves"><div class="completed-wave-bar" data-project="demo">/);
   assert.doesNotMatch(html, /Completed:/);
-  assert.match(html, /<details class="completed-wave"><summary class="completed-wave-chip"><span class="check" aria-hidden="true">✓<\/span> Wave 1 <span class="completed-wave-tally">1\/1<\/span><\/summary>/);
+  // The chip is a toggle button, not a native <details>/<summary>.
+  assert.match(html, /<button type="button" class="completed-wave-chip" aria-expanded="false" aria-controls="closed-wave-0" data-wave="0"><span class="check" aria-hidden="true">✓<\/span> Wave 1 <span class="completed-wave-tally">1\/1<\/span><\/button>/);
   assert.match(html, /\.completed-wave-chip \.check \{ color: var\(--color-green\);/);
-  // Expanded summary is block-level (no inline line-box leading) and spaced from its chips.
-  assert.match(html, /\.completed-wave\[open\] > \.completed-wave-chip \{ display: flex; width: max-content; margin-bottom: \.6rem; \}/);
   // Chip rows must not stretch: the first wrapped line was rendering taller in Safari.
   assert.match(html, /\.completed-wave-bar, \.chips \{ display: flex; flex-wrap: wrap; align-items: flex-start; align-content: flex-start;/);
+  // The open wave still renders its own card in the grid.
   assert.match(html, /<section class="wave running"><div class="wave-head"><h2>Wave 2 <span class="wave-status running">running<\/span><\/h2><span class="wave-tally">0\/1<\/span><\/div>/);
 });
 
@@ -2228,7 +2232,7 @@ test("renderStatusPage labels a multi-issue wave with its lead issue's title + t
   assert.match(html, /<h2>Wave 2 — config resolution \+3 <span class="wave-status running">running<\/span>/);
 });
 
-test("renderStatusPage labels a closed wave's collapsed chip with its issue titles", () => {
+test("renderStatusPage keeps a closed wave's chip compact and puts the issue titles on its card", () => {
   const html = renderStatusPage({
     project: "demo",
     waves: [
@@ -2245,7 +2249,10 @@ test("renderStatusPage labels a closed wave's collapsed chip with its issue titl
     parked: [],
   });
 
-  assert.match(html, /<summary class="completed-wave-chip"><span class="check" aria-hidden="true">✓<\/span> Wave 1 — config resolution \+1 <span class="completed-wave-tally">2\/2<\/span><\/summary>/);
+  // The compact chip carries only "Wave N" + the merged tally — no lead title.
+  assert.match(html, /<button type="button" class="completed-wave-chip" aria-expanded="false" aria-controls="closed-wave-0" data-wave="0"><span class="check" aria-hidden="true">✓<\/span> Wave 1 <span class="completed-wave-tally">2\/2<\/span><\/button>/);
+  // The lead title + "+N" reads on the full card the chip reveals in the grid.
+  assert.match(html, /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2>Wave 1 — config resolution \+1 <span class="wave-status closed">closed<\/span>/);
 });
 
 test("renderStatusPage escapes a wave name derived from an issue title", () => {
@@ -2678,4 +2685,121 @@ test("appendedEvents skips an unparseable line the way readEvents does", () => {
     events.map((e) => e.event),
     ["queue-start"],
   );
+});
+
+test("renderStatusPage renders closed waves as a compact toggle row of chip buttons", () => {
+  const html = renderStatusPage({
+    project: "beta",
+    waves: [
+      { index: 0, status: "closed", issues: [{ issueNumber: "101", status: "completed" }, { issueNumber: "102", status: "completed" }] },
+      { index: 1, status: "running", issues: [{ issueNumber: "201", status: "running" }] },
+    ],
+    parked: [],
+  });
+
+  // The closed wave is a toggle button (no native <details>/<summary>), carrying the
+  // compact "Wave N" label + its merged/total tally + a chevron affordance, wired to
+  // its card via aria-controls and defaulting to collapsed (aria-expanded="false").
+  assert.doesNotMatch(html, /<details class="completed-wave"/);
+  assert.doesNotMatch(html, /<summary/);
+  assert.match(
+    html,
+    /<button type="button" class="completed-wave-chip" aria-expanded="false" aria-controls="closed-wave-0" data-wave="0"><span class="check" aria-hidden="true">✓<\/span> Wave 1 <span class="completed-wave-tally">2\/2<\/span><\/button>/,
+  );
+});
+
+test("renderStatusPage renders each expanded closed wave's full card in the grid before the open waves", () => {
+  const html = renderStatusPage({
+    project: "beta",
+    waves: [
+      { index: 0, status: "closed", issues: [{ issueNumber: "101", status: "completed", name: "cart persists" }] },
+      { index: 1, status: "running", issues: [{ issueNumber: "201", status: "running" }] },
+    ],
+    parked: [],
+  });
+
+  // The closed wave gets the SAME wave-card treatment as an open wave — a CLOSED pill,
+  // its merged/total, the merged issue chips and the #num title list — living in the
+  // waves-grid under a stable id, hidden until its chip toggles it open.
+  assert.match(
+    html,
+    /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2>Wave 1 — cart persists <span class="wave-status closed">closed<\/span><\/h2><span class="wave-tally">1\/1<\/span><\/div>/,
+  );
+  // The closed card renders inside the same grid, positioned before the open running wave.
+  const grid = html.match(/<div class="waves-grid">([\s\S]*?)<\/div>\s*(?:<section class="archived|<div id="issue-detail"|<noscript|<script)/);
+  assert.ok(grid, "expected a waves-grid");
+  assert.ok(grid[1].indexOf('id="closed-wave-0"') < grid[1].indexOf('Wave 2'), "closed card should precede the open wave");
+});
+
+test("renderStatusPage gives the closed-wave chip a chevron and a green accent when expanded", () => {
+  const html = renderStatusPage({
+    project: "beta",
+    waves: [{ index: 0, status: "closed", issues: [{ issueNumber: "101", status: "completed" }] }],
+    parked: [],
+  });
+
+  // The chevron is CSS keyed off aria-expanded (collapsed › → expanded ⌄), and an
+  // expanded chip takes a green accent border.
+  assert.match(html, /\.completed-wave-chip::after \{[^}]*content: "›"/);
+  assert.match(html, /\.completed-wave-chip\[aria-expanded="true"\]::after \{[^}]*content: "⌄"/);
+  assert.match(html, /\.completed-wave-chip\[aria-expanded="true"\] \{[^}]*border-color: var\(--color-green\)/);
+});
+
+test("renderStatusPage persists the expanded closed-wave set across a live reload", () => {
+  const html = renderStatusPage({
+    project: "beta",
+    waves: [{ index: 0, status: "closed", issues: [{ issueNumber: "101", status: "completed" }] }],
+    parked: [],
+  });
+
+  // The toggle row carries its project so the client can key the persisted open-set
+  // per repo, and the script reads/writes it through storage so a /api/events reload
+  // does not silently collapse everything the user opened.
+  assert.match(html, /<div class="completed-wave-bar" data-project="beta">/);
+  assert.match(html, /sessionStorage/);
+  assert.match(html, /completed-wave-chip/);
+});
+
+test("renderStatusPage degrades the closed-wave toggle without JS", () => {
+  const html = renderStatusPage({
+    project: "beta",
+    waves: [{ index: 0, status: "closed", issues: [{ issueNumber: "101", status: "completed" }] }],
+    parked: [],
+  });
+
+  // Without JS the cards can never be toggled open, so a <noscript> reveals every
+  // closed card in the grid and hides the inert toggle bar — the content stays reachable.
+  assert.match(html, /<noscript><style>[^<]*\.completed-wave-bar \{ display: none;[^<]*\.wave\.closed\[hidden\] \{ display: block;/);
+});
+
+test("renderStatusPage renders an archived run's closed waves as full cards, not colliding toggle ids", () => {
+  const html = renderStatusPage(
+    {
+      project: "beta",
+      waves: [{ index: 0, status: "closed", issues: [{ issueNumber: "201", status: "completed" }] }],
+      parked: [],
+    },
+    {
+      selected: "beta",
+      archivedRun: "2026-02-01T00-00-00-000Z",
+      archived: {
+        project: "beta",
+        // A finished run — every wave is closed.
+        waves: [{ index: 0, status: "closed", issues: [{ issueNumber: "101", status: "completed", name: "old work" }] }],
+        parked: [],
+      },
+    },
+  );
+
+  // The live run's closed wave still uses the toggle (chip + hidden card, id closed-wave-0).
+  assert.match(html, /aria-controls="closed-wave-0"/);
+  // The archived section renders its closed wave as a full, always-expanded card — no
+  // second toggle bar and no duplicated id="closed-wave-0" that would hijack the live card.
+  const archivedStart = html.indexOf('class="archived-run"');
+  const archived = html.slice(archivedStart, html.indexOf('<div id="issue-detail"', archivedStart));
+  assert.doesNotMatch(archived, /completed-wave-bar/);
+  assert.doesNotMatch(archived, /id="closed-wave-0"/);
+  assert.match(archived, /<section class="wave closed"><div class="wave-head"><h2>Wave 1 — old work <span class="wave-status closed">closed<\/span>/);
+  // Exactly one element carries the toggle id across the whole page (no duplicate ids).
+  assert.equal(html.split('id="closed-wave-0"').length - 1, 1);
 });

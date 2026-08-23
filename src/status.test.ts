@@ -4,7 +4,7 @@ import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { appendedEvents, buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, describeEvent, extractParkedDetails, formatFeedEvent, formatStatusText, ISSUE_DETAIL_SHEET_SCRIPT, ISSUE_DETAIL_SHEET_STYLES, issueDetailSheetMarkup, lastEventText, listArchivedRuns, parkedReplyFor, parseCarveClosure, reconstructIssueDetail, reduceCampaign, renderLandingShell, renderStatusPage, selectStatus, serveAllStatus, summarizeRun } from "./status.ts";
+import { appendedEvents, buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, DASHBOARD_PALETTE_CSS, describeEvent, extractParkedDetails, formatFeedEvent, formatStatusText, ISSUE_DETAIL_SHEET_SCRIPT, ISSUE_DETAIL_SHEET_STYLES, issueDetailSheetMarkup, lastEventText, listArchivedRuns, parkedReplyFor, parseCarveClosure, reconstructIssueDetail, reduceCampaign, renderLandingShell, renderStatusPage, selectStatus, serveAllStatus, stateColor, summarizeRun } from "./status.ts";
 import type { CampaignStatus } from "./status.ts";
 import type { AddressInfo } from "node:net";
 import { register, type ProjectPointer } from "./registry.ts";
@@ -286,6 +286,47 @@ test("renderLandingShell is single-column on mobile with 44px tap targets", () =
   // The two tappable controls — the project dropdown and each card — are at least 44px.
   assert.match(html, /\.project-picker select \{[^}]*min-height: 44px/);
   assert.match(html, /\.card \{[^}]*min-height: 44px/);
+});
+
+// The set of palette tokens defined by a `:root { … }` block, and the set of
+// `var(--token)` references anywhere in a page — the two must agree, or a surface
+// references a colour that never resolves (the #78 class of bug).
+const definedTokens = (css: string) => new Set([...css.matchAll(/(--[a-z0-9-]+):/g)].map((m) => m[1]));
+const referencedTokens = (html: string) => new Set([...html.matchAll(/var\((--[a-z0-9-]+)\)/g)].map((m) => m[1]));
+
+test("the dashboard palette is one shared source defining every state token at its spec hex (#83)", () => {
+  // §1: the six ADR-0007 states plus the carve action, each at its exact hex.
+  assert.match(DASHBOARD_PALETTE_CSS, /--color-blue: #6cb6ff/); // running
+  assert.match(DASHBOARD_PALETTE_CSS, /--color-yellow: #c8a24e/); // parked
+  assert.match(DASHBOARD_PALETTE_CSS, /--color-failure: #f85149/); // failure — distinct red
+  assert.match(DASHBOARD_PALETTE_CSS, /--color-dim: #5f6b78/); // unstarted / idle grey
+  assert.match(DASHBOARD_PALETTE_CSS, /--color-green: #3fb984/); // completed
+  assert.match(DASHBOARD_PALETTE_CSS, /--color-carved: #a371f7/); // carved
+  assert.match(DASHBOARD_PALETTE_CSS, /--color-red: #f79287/); // carve action — a control, never a state
+  // The carve action and the failure state are deliberately different reds.
+  assert.notEqual("#f85149", "#f79287");
+  // The teal product accent is present but is not a state colour.
+  assert.match(DASHBOARD_PALETTE_CSS, /--color-primary: #3fb9b0/);
+});
+
+test("both the landing and the campaign page emit the one shared palette, and every colour they reference resolves (#78, #83)", () => {
+  const landing = renderLandingShell(["alpha", "beta"]);
+  const campaign = renderStatusPage({ project: "beta", waves: [], parked: [] }, { carve: true });
+  // The palette is included verbatim by both surfaces — one source, not a per-renderer copy.
+  assert.ok(landing.includes(DASHBOARD_PALETTE_CSS), "landing includes the shared palette");
+  assert.ok(campaign.includes(DASHBOARD_PALETTE_CSS), "campaign page includes the shared palette");
+  // Every colour token either page references is actually defined — so `--color-carved`
+  // (and every other token) resolves identically on `/` and `/?project=…`, not merely
+  // referenced (the blind spot #78's original rule-string test had).
+  const defined = definedTokens(DASHBOARD_PALETTE_CSS);
+  for (const page of [landing, campaign]) {
+    for (const token of referencedTokens(page)) {
+      assert.ok(defined.has(token), `${token} is referenced but never defined in the shared palette`);
+    }
+  }
+  // The concrete #78 repro: carved is referenced on the landing (feed, dots, turn log) and resolves.
+  assert.ok(referencedTokens(landing).has("--color-carved"), "landing references --color-carved");
+  assert.ok(defined.has("--color-carved"), "--color-carved resolves");
 });
 
 test("renderLandingShell mounts the cross-project feed under the cards and hides it on mobile", () => {

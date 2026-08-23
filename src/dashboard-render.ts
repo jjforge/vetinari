@@ -8,6 +8,63 @@ import {
   type WaveStatus,
 } from "./dashboard-model.ts";
 
+/**
+ * The dashboard's single colour source (`docs/dashboard-color-rules.md`, #83): one
+ * `:root` palette emitted verbatim into every surface's `<style>` — the all-repos
+ * landing, the repo/campaign page, and the issue-detail sheet they share. No
+ * surface defines a colour locally, so a token can never be "defined in one root,
+ * missing in the other" (the #78 class of bug). Every colour that carries meaning
+ * is one of the six ADR-0007 states or the carve action (§1); the teal
+ * `--color-primary` is the product accent and is never a state.
+ */
+export const DASHBOARD_PALETTE_CSS = `  :root {
+    /* Neutral surfaces (§1) */
+    --color-body: #090c10; --color-box-body: #0b0e12; --color-box-header: #10151b;
+    --color-card: #10151b; --color-chip: #0b0e12; --color-card-hover: #131a21; --color-chip-hover: #151d24;
+    --color-secondary: #232b35; --color-light-border: #1b212a;
+    --color-text: #e6edf3; --color-text-light: #cdd6e0; --color-text-light-2: #8b98a5; --color-dim: #5f6b78;
+    /* Product accent — never a state (§1) */
+    --color-primary: #3fb9b0; --color-primary-alpha-20: rgb(63 185 176 / 20%);
+    /* State palette (§1): running · parked · failure · completed · unstarted(dim) · carved */
+    --color-blue: #6cb6ff; --color-yellow: #c8a24e; --color-failure: #f85149; --color-green: #3fb984; --color-carved: #a371f7;
+    /* State colours at 40% alpha — the muted chip borders (§4) */
+    --color-blue-40: rgb(108 182 255 / 40%); --color-yellow-40: rgb(200 162 78 / 40%); --color-failure-40: rgb(248 81 73 / 40%); --color-green-40: rgb(63 185 132 / 40%); --color-carved-40: rgb(163 113 247 / 40%); --color-dim-40: rgb(95 107 120 / 40%);
+    /* Carve action — a control, never a state; a different red from failure (§1) */
+    --color-red: #f79287;
+    --border-radius: 9px; --border-radius-medium: 12px;
+  }`;
+
+/**
+ * The one state→colour mapping every surface derives from (§3), never authoring a
+ * hex per instance. Maps each ADR-0007 status — plus the landing's `idle` roll-up
+ * and its `queued` tally bucket, both display aliases of `unstarted`'s dim grey —
+ * to its palette token. `stateColor` returns the full state colour (dots, borders,
+ * pills); `stateBorderColor` its 40%-alpha variant for muted chip borders (§4).
+ */
+const STATE_COLOR_TOKEN: Record<string, string> = {
+  running: "blue",
+  parked: "yellow",
+  failure: "failure",
+  completed: "green",
+  carved: "carved",
+  unstarted: "dim",
+  queued: "dim",
+  idle: "dim",
+};
+export const stateColor = (state: string): string => `var(--color-${STATE_COLOR_TOKEN[state] ?? "dim"})`;
+export const stateBorderColor = (state: string): string => `var(--color-${STATE_COLOR_TOKEN[state] ?? "dim"}-40)`;
+
+/**
+ * The status-dot colour rules, generated once from `stateColor` and shared by both
+ * pages (previously two hand-kept copies). Scoped to `.dot` so a state colour tints
+ * only the dot, never a whole card or list row (#81). Motion is a second channel for
+ * `running` alone (§5): its dot pulses, reduced-motion aware; nothing else animates.
+ */
+export const STATE_DOT_CSS =
+  `.dot { width: .75rem; height: .75rem; border-radius: 999px; display: inline-block; } ` +
+  ["running", "parked", "failure", "completed", "unstarted", "carved", "queued"].map((s) => `.dot.${s} { background: ${stateColor(s)}; }`).join(" ") +
+  ` @keyframes chip-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } } .dot.running { animation: chip-pulse 1.4s ease-in-out infinite; } @media (prefers-reduced-motion: reduce) { .dot.running { animation: none; } }`;
+
 const ISSUE_EMOJI: Record<DisplayStatus, string> = {
   completed: "✅",
   running: "🔄",
@@ -502,7 +559,7 @@ export const renderLandingShell = (projects: string[]) => `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>All repos — sandcastle</title>
 <style>
-  :root { --color-body: #090c10; --color-box-body: #0b0e12; --color-box-header: #10151b; --color-primary: #3fb9b0; --color-primary-alpha-20: rgb(63 185 176 / 20%); --color-text: #e6edf3; --color-text-light: #cdd6e0; --color-text-light-2: #8b98a5; --color-secondary: #232b35; --color-light-border: #1b212a; --color-green: #3fb984; --color-yellow: #c8a24e; --color-red: #f79287; --color-blue: #6cb6ff; --border-radius: 9px; --border-radius-medium: 12px; }
+${DASHBOARD_PALETTE_CSS}
   * { box-sizing: border-box; }
   body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 0; padding: 1.5rem; background: var(--color-body); color: var(--color-text); }
   h1 { font-size: clamp(1.6rem, 4vw, 2.6rem); margin: 0; letter-spacing: -0.035em; }
@@ -773,7 +830,7 @@ export const renderStatusPage = (status: CampaignStatus, opts: StatusPageOptions
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${escapeHtml(status.project)} status</title>
 <style>
-  :root { --color-body: #090c10; --color-box-body: #0b0e12; --color-box-header: #10151b; --color-card: #0b0e12; --color-primary: #3fb9b0; --color-primary-alpha-20: rgb(63 185 176 / 20%); --color-text: #e6edf3; --color-text-light: #cdd6e0; --color-text-light-2: #8b98a5; --color-secondary: #232b35; --color-light-border: #1b212a; --color-green: #3fb984; --color-yellow: #c8a24e; --color-red: #f79287; --color-blue: #6cb6ff; --color-carved: #a371f7; --border-radius: 9px; --border-radius-medium: 12px; }
+${DASHBOARD_PALETTE_CSS}
   body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 2rem; background: var(--color-body); color: var(--color-text); }
   h1 { font-size: clamp(1.8rem, 4vw, 3rem); margin: 0; letter-spacing: -0.035em; color: var(--color-text); }
   h2 { color: var(--color-text-light); }

@@ -66,6 +66,19 @@ still commit to this branch and never merge to `{{TARGET_BRANCH}}`; and the
 orchestrator, not a skill, runs verification and decides green. If a skill's
 instructions conflict with this prompt, this prompt wins.
 
+## Every turn ends with a summary
+
+Every turn — before your signal — emit a single, human-readable line saying what
+you did this turn and why, in your own words:
+
+<turn-summary>One sentence: what you tried this turn, what changed, and why.</turn-summary>
+
+This is your own account of the turn; the dashboard's turn log shows it verbatim
+so the operator can decide whether to answer, carve, or leave a parked issue
+alone. It is required on every turn, whichever signal you end on. Keep it to one
+line and distinct from the `<summary>` inside a `<question>` — that is the
+question's headline, this is the turn's.
+
 ## Signals
 
 When you believe the work is complete and tests pass, emit exactly:

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Each `turn` event now carries an agent-authored one-line summary (#55). The
+  agent's signal contract requires a `<turn-summary>` line every turn — its own
+  account of what it did and why — which the orchestrator extracts (a pure helper,
+  mirroring the `<question>` extractor) and records on the `turn` event, so the
+  dashboard can render a per-turn log in the agent's own words. Events predating
+  the change simply carry no summary and reconstruct as before.
+
 ### Fixed
 
 - Dashboard issue titles, wave names, and chip hovers (#44). The aggregated web

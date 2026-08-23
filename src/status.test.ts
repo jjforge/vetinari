@@ -1,11 +1,50 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { appendedEvents, buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, DASHBOARD_PALETTE_CSS, describeEvent, extractParkedDetails, formatFeedEvent, formatStatusText, ISSUE_DETAIL_SHEET_SCRIPT, ISSUE_DETAIL_SHEET_STYLES, issueDetailSheetMarkup, lastEventText, listArchivedRuns, ownerRepoFromRemote, parkedReplyFor, parseCarveClosure, reconstructIssueDetail, projectRunState, reduceCampaign, renderLandingShell, renderStatusPage, renderTopBar, REPO_DROPDOWN_SCRIPT, selectStatus, serveAllStatus, STATE_DOT_CSS, stateColor, summarizeRun, TOP_BAR_STYLES } from "./status.ts";
+import {
+  appendedEvents,
+  buildAllStatus,
+  buildFeed,
+  buildLanding,
+  buildStatus,
+  buildStatusWithIssueNames,
+  campaignRunning,
+  DASHBOARD_PALETTE_CSS,
+  describeEvent,
+  extractParkedDetails,
+  formatFeedEvent,
+  formatStatusText,
+  ISSUE_DETAIL_SHEET_SCRIPT,
+  ISSUE_DETAIL_SHEET_STYLES,
+  issueDetailSheetMarkup,
+  lastEventText,
+  listArchivedRuns,
+  ownerRepoFromRemote,
+  parkedReplyFor,
+  parseCarveClosure,
+  reconstructIssueDetail,
+  projectRunState,
+  reduceCampaign,
+  renderLandingShell,
+  renderStatusPage,
+  renderTopBar,
+  REPO_DROPDOWN_SCRIPT,
+  selectStatus,
+  serveAllStatus,
+  STATE_DOT_CSS,
+  stateColor,
+  summarizeRun,
+  TOP_BAR_STYLES,
+} from "./status.ts";
 import type { CampaignStatus } from "./status.ts";
 import type { AddressInfo } from "node:net";
 import { register, type ProjectPointer } from "./registry.ts";
@@ -26,9 +65,14 @@ const cfgFor = (dir: string): ResolvedConfig =>
     fetchTask: (id: string) => id,
   }) as ResolvedConfig;
 
-const writeJsonl = (path: string, events: unknown[]) => writeFileSync(path, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
+const writeJsonl = (path: string, events: unknown[]) =>
+  writeFileSync(path, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
 
-const pointerFor = (project: string, dir: string): ProjectPointer => ({ project, projectRoot: join(dir, "root"), baseLocation: dir });
+const pointerFor = (project: string, dir: string): ProjectPointer => ({
+  project,
+  projectRoot: join(dir, "root"),
+  baseLocation: dir,
+});
 
 const seedState = (dir: string, events: unknown[]) => {
   mkdirSync(join(dir, "logs"), { recursive: true });
@@ -38,12 +82,24 @@ const seedState = (dir: string, events: unknown[]) => {
 
 test("ownerRepoFromRemote parses SSH and HTTPS GitHub remotes to owner/name, and rejects garbage", () => {
   // SSH form, with the .git suffix stripped.
-  assert.equal(ownerRepoFromRemote("git@github.com:jjforge/sandcastle-tdd.git"), "jjforge/sandcastle-tdd");
+  assert.equal(
+    ownerRepoFromRemote("git@github.com:jjforge/sandcastle-tdd.git"),
+    "jjforge/sandcastle-tdd",
+  );
   // HTTPS form, with and without the .git suffix.
-  assert.equal(ownerRepoFromRemote("https://github.com/jjforge/sandcastle-tdd.git"), "jjforge/sandcastle-tdd");
-  assert.equal(ownerRepoFromRemote("https://github.com/acme/tidepool"), "acme/tidepool");
+  assert.equal(
+    ownerRepoFromRemote("https://github.com/jjforge/sandcastle-tdd.git"),
+    "jjforge/sandcastle-tdd",
+  );
+  assert.equal(
+    ownerRepoFromRemote("https://github.com/acme/tidepool"),
+    "acme/tidepool",
+  );
   // Trailing whitespace (as `git remote get-url` prints a newline) and a trailing slash.
-  assert.equal(ownerRepoFromRemote("https://github.com/acme/tidepool/\n"), "acme/tidepool");
+  assert.equal(
+    ownerRepoFromRemote("https://github.com/acme/tidepool/\n"),
+    "acme/tidepool",
+  );
   // Garbage — not a recognizable remote — is undefined so the caller falls back to the bare key.
   assert.equal(ownerRepoFromRemote("not-a-remote"), undefined);
   assert.equal(ownerRepoFromRemote(""), undefined);
@@ -54,16 +110,34 @@ test("buildLanding's card carries owner/name from the project's git remote, and 
   // A project whose root is a git repo with a GitHub origin → the card carries owner/name.
   const withRemote = join(base, "with-remote");
   const root = join(withRemote, "root");
-  seedState(withRemote, [{ ts: "2025-01-02T08:00:00.000Z", event: "campaign-start", batches: [["101"]], name: "work" }]);
+  seedState(withRemote, [
+    {
+      ts: "2025-01-02T08:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101"]],
+      name: "work",
+    },
+  ]);
   mkdirSync(root, { recursive: true });
-  const git = (args: string[]) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8" });
+  const git = (args: string[]) =>
+    execFileSync("git", ["-C", root, ...args], { encoding: "utf8" });
   git(["init", "-q"]);
   git(["remote", "add", "origin", "git@github.com:jjforge/sandcastle-tdd.git"]);
   // A project with no git remote (the demo) → no repo, so the display falls back to the bare key.
   const noRemote = join(base, "no-remote");
-  seedState(noRemote, [{ ts: "2025-01-02T08:00:00.000Z", event: "campaign-start", batches: [["102"]], name: "work" }]);
+  seedState(noRemote, [
+    {
+      ts: "2025-01-02T08:00:00.000Z",
+      event: "campaign-start",
+      batches: [["102"]],
+      name: "work",
+    },
+  ]);
 
-  const { projects } = buildLanding([pointerFor("with-remote", withRemote), pointerFor("no-remote", noRemote)], new Date("2025-01-02T12:00:00.000Z"));
+  const { projects } = buildLanding(
+    [pointerFor("with-remote", withRemote), pointerFor("no-remote", noRemote)],
+    new Date("2025-01-02T12:00:00.000Z"),
+  );
   const [a, b] = projects;
   assert.equal(a.repo, "jjforge/sandcastle-tdd");
   // The bare project key is unchanged — repo is display-only.
@@ -75,16 +149,46 @@ test("buildLanding builds a per-project card for a live campaign", () => {
   const base = join(tmpdir(), `sctdd-landing-card-${Date.now()}`);
   const dir = join(base, "demo");
   seedState(dir, [
-    { ts: "2025-01-02T08:00:00.000Z", event: "campaign-start", batches: [["101"], ["201"], ["301"]], name: "gateway work" },
-    { ts: "2025-01-02T08:01:00.000Z", event: "campaign-batch", index: 0, tasks: ["101"] },
+    {
+      ts: "2025-01-02T08:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101"], ["201"], ["301"]],
+      name: "gateway work",
+    },
+    {
+      ts: "2025-01-02T08:01:00.000Z",
+      event: "campaign-batch",
+      index: 0,
+      tasks: ["101"],
+    },
     { ts: "2025-01-02T08:02:00.000Z", event: "green", taskId: "101" },
-    { ts: "2025-01-02T08:03:00.000Z", event: "campaign-batch-done", index: 0, merged: ["101"], held: [] },
-    { ts: "2025-01-02T08:04:00.000Z", event: "campaign-batch", index: 1, tasks: ["201"] },
+    {
+      ts: "2025-01-02T08:03:00.000Z",
+      event: "campaign-batch-done",
+      index: 0,
+      merged: ["101"],
+      held: [],
+    },
+    {
+      ts: "2025-01-02T08:04:00.000Z",
+      event: "campaign-batch",
+      index: 1,
+      tasks: ["201"],
+    },
     { ts: "2025-01-02T08:05:00.000Z", event: "queue-start", taskIds: ["201"] },
-    { ts: "2025-01-02T08:06:00.000Z", event: "turn", taskId: "201", turn: 2, summary: "Writing the failing test" },
+    {
+      ts: "2025-01-02T08:06:00.000Z",
+      event: "turn",
+      taskId: "201",
+      turn: 2,
+      summary: "Writing the failing test",
+    },
   ]);
 
-  const { projects } = buildLanding([pointerFor("demo", dir)], new Date("2025-01-02T12:00:00.000Z"));
+  const { projects } = buildLanding(
+    [pointerFor("demo", dir)],
+    new Date("2025-01-02T12:00:00.000Z"),
+  );
   assert.equal(projects.length, 1);
   const card = projects[0];
   assert.equal(card.project, "demo");
@@ -104,17 +208,46 @@ test("buildLanding's card counts the live plan, not carved chips", () => {
   const base = join(tmpdir(), `sctdd-landing-carved-${Date.now()}`);
   const dir = join(base, "demo");
   seedState(dir, [
-    { ts: "2025-01-02T08:00:00.000Z", event: "campaign-start", batches: [["101"], ["201"], ["301"]], name: "gateway work" },
-    { ts: "2025-01-02T08:01:00.000Z", event: "campaign-batch", index: 0, tasks: ["101"] },
+    {
+      ts: "2025-01-02T08:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101"], ["201"], ["301"]],
+      name: "gateway work",
+    },
+    {
+      ts: "2025-01-02T08:01:00.000Z",
+      event: "campaign-batch",
+      index: 0,
+      tasks: ["101"],
+    },
     { ts: "2025-01-02T08:02:00.000Z", event: "green", taskId: "101" },
-    { ts: "2025-01-02T08:03:00.000Z", event: "campaign-batch-done", index: 0, merged: ["101"], held: [] },
-    { ts: "2025-01-02T08:04:00.000Z", event: "campaign-batch", index: 1, tasks: ["201"] },
+    {
+      ts: "2025-01-02T08:03:00.000Z",
+      event: "campaign-batch-done",
+      index: 0,
+      merged: ["101"],
+      held: [],
+    },
+    {
+      ts: "2025-01-02T08:04:00.000Z",
+      event: "campaign-batch",
+      index: 1,
+      tasks: ["201"],
+    },
     { ts: "2025-01-02T08:05:00.000Z", event: "queue-start", taskIds: ["201"] },
     // The future, unstarted wave 301 is carved out — a display ghost, not live work.
-    { ts: "2025-01-02T08:06:00.000Z", event: "carve", target: "301", removed: ["301"] },
+    {
+      ts: "2025-01-02T08:06:00.000Z",
+      event: "carve",
+      target: "301",
+      removed: ["301"],
+    },
   ]);
 
-  const [card] = buildLanding([pointerFor("demo", dir)], new Date("2025-01-02T12:00:00.000Z")).projects;
+  const [card] = buildLanding(
+    [pointerFor("demo", dir)],
+    new Date("2025-01-02T12:00:00.000Z"),
+  ).projects;
 
   // Two live waves remain (101 closed, 201 running); the carved-out 301 wave and its
   // chip do not inflate the count, the "queued" tally, or drag down percent merged.
@@ -129,31 +262,72 @@ test("buildLanding sums the counters, reads an idle project's last campaign, and
   const alphaDir = join(base, "alpha");
   const betaDir = join(base, "beta");
   seedState(alphaDir, [
-    { ts: "2025-06-15T08:00:00.000Z", event: "campaign-start", batches: [["101", "102"], ["201"], ["301"]] },
+    {
+      ts: "2025-06-15T08:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101", "102"], ["201"], ["301"]],
+    },
     { ts: "2025-06-14T09:00:00.000Z", event: "green", taskId: "102" },
     { ts: "2025-06-15T09:00:00.000Z", event: "green", taskId: "101" },
-    { ts: "2025-06-15T09:05:00.000Z", event: "campaign-batch-done", index: 0, merged: ["101", "102"], held: [] },
-    { ts: "2025-06-15T09:06:00.000Z", event: "campaign-batch", index: 1, tasks: ["201"] },
+    {
+      ts: "2025-06-15T09:05:00.000Z",
+      event: "campaign-batch-done",
+      index: 0,
+      merged: ["101", "102"],
+      held: [],
+    },
+    {
+      ts: "2025-06-15T09:06:00.000Z",
+      event: "campaign-batch",
+      index: 1,
+      tasks: ["201"],
+    },
     { ts: "2025-06-15T09:07:00.000Z", event: "queue-start", taskIds: ["201"] },
   ]);
   // Beta has no live run, only an archived campaign — it must read idle with that campaign.
   seedState(betaDir, []);
   mkdirSync(join(betaDir, "logs", "archive"), { recursive: true });
-  writeJsonl(join(betaDir, "logs", "archive", "orchestrator-2025-06-10T00-00-00.jsonl"), [
-    { ts: "2025-06-10T00:00:00.000Z", event: "campaign-start", batches: [["501"]], name: "old work" },
-    { ts: "2025-06-10T00:05:00.000Z", event: "campaign-batch-done", index: 0, merged: ["501"], held: [] },
-    { ts: "2025-06-10T00:06:00.000Z", event: "campaign-done", batches: 1 },
-  ]);
+  writeJsonl(
+    join(betaDir, "logs", "archive", "orchestrator-2025-06-10T00-00-00.jsonl"),
+    [
+      {
+        ts: "2025-06-10T00:00:00.000Z",
+        event: "campaign-start",
+        batches: [["501"]],
+        name: "old work",
+      },
+      {
+        ts: "2025-06-10T00:05:00.000Z",
+        event: "campaign-batch-done",
+        index: 0,
+        merged: ["501"],
+        held: [],
+      },
+      { ts: "2025-06-10T00:06:00.000Z", event: "campaign-done", batches: 1 },
+    ],
+  );
 
   const { counters, projects } = buildLanding(
-    [pointerFor("alpha", alphaDir), pointerFor("beta", betaDir), pointerFor("ghost", join(base, "gone"))],
+    [
+      pointerFor("alpha", alphaDir),
+      pointerFor("beta", betaDir),
+      pointerFor("ghost", join(base, "gone")),
+    ],
     new Date("2025-06-15T12:00:00.000Z"),
   );
 
   // The stale registration is skipped, never fatal.
-  assert.deepEqual(projects.map((p) => p.project), ["alpha", "beta"]);
+  assert.deepEqual(
+    projects.map((p) => p.project),
+    ["alpha", "beta"],
+  );
   // Counters sum across live projects; merged-today counts only 101 (102 merged yesterday).
-  assert.deepEqual(counters, { working: 1, parked: 0, queued: 1, mergedToday: 1 });
+  assert.deepEqual(counters, {
+    working: 1,
+    parked: 0,
+    queued: 1,
+    mergedToday: 1,
+  });
 
   const beta = projects[1];
   assert.equal(beta.runState, "idle");
@@ -169,14 +343,35 @@ test("an idle project's merged % and merged-today read its latest archived run, 
   seedState(dir, []);
   mkdirSync(join(dir, "logs", "archive"), { recursive: true });
   // A completed run that merged both its issues today.
-  writeJsonl(join(dir, "logs", "archive", "orchestrator-2026-06-15T00-00-00-000Z.jsonl"), [
-    { ts: "2026-06-15T09:00:00.000Z", event: "campaign-start", batches: [["501"], ["502"]], name: "shipped" },
-    { ts: "2026-06-15T09:05:00.000Z", event: "campaign-batch-done", index: 0, merged: ["501"] },
-    { ts: "2026-06-15T09:10:00.000Z", event: "campaign-batch-done", index: 1, merged: ["502"] },
-    { ts: "2026-06-15T09:11:00.000Z", event: "campaign-done", batches: 2 },
-  ]);
+  writeJsonl(
+    join(dir, "logs", "archive", "orchestrator-2026-06-15T00-00-00-000Z.jsonl"),
+    [
+      {
+        ts: "2026-06-15T09:00:00.000Z",
+        event: "campaign-start",
+        batches: [["501"], ["502"]],
+        name: "shipped",
+      },
+      {
+        ts: "2026-06-15T09:05:00.000Z",
+        event: "campaign-batch-done",
+        index: 0,
+        merged: ["501"],
+      },
+      {
+        ts: "2026-06-15T09:10:00.000Z",
+        event: "campaign-batch-done",
+        index: 1,
+        merged: ["502"],
+      },
+      { ts: "2026-06-15T09:11:00.000Z", event: "campaign-done", batches: 2 },
+    ],
+  );
 
-  const { counters, projects } = buildLanding([pointerFor("beta", dir)], new Date("2026-06-15T12:00:00.000Z"));
+  const { counters, projects } = buildLanding(
+    [pointerFor("beta", dir)],
+    new Date("2026-06-15T12:00:00.000Z"),
+  );
   const [card] = projects;
   assert.equal(card.runState, "idle");
   // Both issues merged, so the idle card reads 100% — not the hardcoded 0%.
@@ -190,13 +385,29 @@ test("an idle project whose latest archived run merged on an earlier day counts 
   const dir = join(base, "beta");
   seedState(dir, []);
   mkdirSync(join(dir, "logs", "archive"), { recursive: true });
-  writeJsonl(join(dir, "logs", "archive", "orchestrator-2026-06-10T00-00-00-000Z.jsonl"), [
-    { ts: "2026-06-10T09:00:00.000Z", event: "campaign-start", batches: [["501"]], name: "older" },
-    { ts: "2026-06-10T09:05:00.000Z", event: "campaign-batch-done", index: 0, merged: ["501"] },
-    { ts: "2026-06-10T09:06:00.000Z", event: "campaign-done", batches: 1 },
-  ]);
+  writeJsonl(
+    join(dir, "logs", "archive", "orchestrator-2026-06-10T00-00-00-000Z.jsonl"),
+    [
+      {
+        ts: "2026-06-10T09:00:00.000Z",
+        event: "campaign-start",
+        batches: [["501"]],
+        name: "older",
+      },
+      {
+        ts: "2026-06-10T09:05:00.000Z",
+        event: "campaign-batch-done",
+        index: 0,
+        merged: ["501"],
+      },
+      { ts: "2026-06-10T09:06:00.000Z", event: "campaign-done", batches: 1 },
+    ],
+  );
 
-  const { counters, projects } = buildLanding([pointerFor("beta", dir)], new Date("2026-06-15T12:00:00.000Z"));
+  const { counters, projects } = buildLanding(
+    [pointerFor("beta", dir)],
+    new Date("2026-06-15T12:00:00.000Z"),
+  );
   // Fully merged run → 100% on the card, but merged five days ago → nothing today.
   assert.equal(projects[0].percentMerged, 100);
   assert.equal(counters.mergedToday, 0);
@@ -207,19 +418,39 @@ test("buildFeed merges every project's narratable events into one newest-first, 
   const alphaDir = join(base, "alpha");
   const betaDir = join(base, "beta");
   seedState(alphaDir, [
-    { ts: "2025-03-01T08:00:00.000Z", event: "campaign-start", batches: [["101"]], name: "alpha work" },
+    {
+      ts: "2025-03-01T08:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101"]],
+      name: "alpha work",
+    },
     // Machine noise carries no narration and must not surface as a feed row.
     { ts: "2025-03-01T08:00:30.000Z", event: "sandbox", taskId: "101" },
     { ts: "2025-03-01T08:02:00.000Z", event: "green", taskId: "101" },
   ]);
-  seedState(betaDir, [{ ts: "2025-03-01T08:01:00.000Z", event: "parked", taskId: "201", reason: "needs a choice" }]);
+  seedState(betaDir, [
+    {
+      ts: "2025-03-01T08:01:00.000Z",
+      event: "parked",
+      taskId: "201",
+      reason: "needs a choice",
+    },
+  ]);
 
-  const feed = buildFeed([pointerFor("alpha", alphaDir), pointerFor("beta", betaDir), pointerFor("ghost", join(base, "gone"))]);
+  const feed = buildFeed([
+    pointerFor("alpha", alphaDir),
+    pointerFor("beta", betaDir),
+    pointerFor("ghost", join(base, "gone")),
+  ]);
 
   // Newest-first across projects; the stale registration and the machine-noise event are both absent.
   assert.deepEqual(
     feed.map((f) => f.text),
-    ["alpha — #101 merged", "beta — #201 parked: needs a choice", "alpha — Campaign “alpha work” started"],
+    [
+      "alpha — #101 merged",
+      "beta — #201 parked: needs a choice",
+      "alpha — Campaign “alpha work” started",
+    ],
   );
   // Each row carries the time and the event kind alongside the sentence.
   assert.equal(feed[0].ts, "2025-03-01T08:02:00.000Z");
@@ -231,26 +462,65 @@ test("buildLanding collects every parked question across repos, oldest first", (
   const base = join(tmpdir(), `sctdd-landing-parked-${Date.now()}`);
   const alphaDir = join(base, "alpha");
   const betaDir = join(base, "beta");
-  seedState(alphaDir, [{ ts: "2025-06-15T08:00:00.000Z", event: "campaign-start", batches: [["101"]] }]);
-  seedState(betaDir, [{ ts: "2025-06-15T08:00:00.000Z", event: "campaign-start", batches: [["301"]] }]);
+  seedState(alphaDir, [
+    {
+      ts: "2025-06-15T08:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101"]],
+    },
+  ]);
+  seedState(betaDir, [
+    {
+      ts: "2025-06-15T08:00:00.000Z",
+      event: "campaign-start",
+      batches: [["301"]],
+    },
+  ]);
   // Alpha's question was parked more recently than beta's — beta must sort first.
   writeFileSync(
     join(alphaDir, "parked", "101.json"),
-    JSON.stringify({ taskId: "101", parkedAt: "2025-06-15T09:00:00.000Z", reason: "blocked", branch: "agent/101", question: "Should the counter live-update?\n\nOptions:\n- A\n- B" }),
+    JSON.stringify({
+      taskId: "101",
+      parkedAt: "2025-06-15T09:00:00.000Z",
+      reason: "blocked",
+      branch: "agent/101",
+      question: "Should the counter live-update?\n\nOptions:\n- A\n- B",
+    }),
   );
   writeFileSync(
     join(betaDir, "parked", "301.json"),
-    JSON.stringify({ taskId: "301", parkedAt: "2025-06-14T09:00:00.000Z", reason: "blocked", branch: "agent/301", question: "Which colour for the badge?" }),
+    JSON.stringify({
+      taskId: "301",
+      parkedAt: "2025-06-14T09:00:00.000Z",
+      reason: "blocked",
+      branch: "agent/301",
+      question: "Which colour for the badge?",
+    }),
   );
 
-  const { parked } = buildLanding([pointerFor("alpha", alphaDir), pointerFor("beta", betaDir)], new Date("2025-06-15T12:00:00.000Z"));
+  const { parked } = buildLanding(
+    [pointerFor("alpha", alphaDir), pointerFor("beta", betaDir)],
+    new Date("2025-06-15T12:00:00.000Z"),
+  );
 
   // Oldest-first across repos: beta (yesterday) before alpha (this morning).
   assert.deepEqual(
-    parked.map((p) => ({ project: p.project, issueNumber: p.issueNumber, parkedAt: p.parkedAt })),
+    parked.map((p) => ({
+      project: p.project,
+      issueNumber: p.issueNumber,
+      parkedAt: p.parkedAt,
+    })),
     [
-      { project: "beta", issueNumber: "301", parkedAt: "2025-06-14T09:00:00.000Z" },
-      { project: "alpha", issueNumber: "101", parkedAt: "2025-06-15T09:00:00.000Z" },
+      {
+        project: "beta",
+        issueNumber: "301",
+        parkedAt: "2025-06-14T09:00:00.000Z",
+      },
+      {
+        project: "alpha",
+        issueNumber: "101",
+        parkedAt: "2025-06-15T09:00:00.000Z",
+      },
     ],
   );
   // The full question travels with the row.
@@ -263,10 +533,24 @@ test("buildAllStatus builds one status per live project and skips a stale one", 
   const alphaDir = join(base, "alpha");
   const betaDir = join(base, "beta");
   seedState(alphaDir, [
-    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101", "102"]] },
-    { ts: "2025-01-01T00:01:00.000Z", event: "queue-done", outcomes: { "101": "green" } },
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101", "102"]],
+    },
+    {
+      ts: "2025-01-01T00:01:00.000Z",
+      event: "queue-done",
+      outcomes: { "101": "green" },
+    },
   ]);
-  seedState(betaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["201"]] }]);
+  seedState(betaDir, [
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["201"]],
+    },
+  ]);
 
   const statuses = buildAllStatus([
     pointerFor("alpha", alphaDir),
@@ -275,7 +559,10 @@ test("buildAllStatus builds one status per live project and skips a stale one", 
     pointerFor("ghost", join(base, "gone")),
   ]);
 
-  assert.deepEqual(statuses.map((s) => s.project), ["alpha", "beta"]);
+  assert.deepEqual(
+    statuses.map((s) => s.project),
+    ["alpha", "beta"],
+  );
   assert.deepEqual(
     statuses[0].waves[0].issues.map((i) => [i.issueNumber, i.status]),
     [
@@ -283,19 +570,45 @@ test("buildAllStatus builds one status per live project and skips a stale one", 
       ["102", "unstarted"],
     ],
   );
-  assert.deepEqual(statuses[1].waves[0].issues.map((i) => i.issueNumber), ["201"]);
+  assert.deepEqual(
+    statuses[1].waves[0].issues.map((i) => i.issueNumber),
+    ["201"],
+  );
 });
 
 test("serveAllStatus serves the aggregated site, selecting the project from the query param", async () => {
   const configDir = join(tmpdir(), `sctdd-serve-all-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
-  seedState(alphaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"]] }]);
-  seedState(betaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["201"]] }]);
-  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
-  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+  seedState(alphaDir, [
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101"]],
+    },
+  ]);
+  seedState(betaDir, [
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["201"]],
+    },
+  ]);
+  register(configDir, {
+    project: "alpha",
+    projectRoot: join(configDir, "alpha-root"),
+    baseLocation: alphaDir,
+  });
+  register(configDir, {
+    project: "beta",
+    projectRoot: join(configDir, "beta-root"),
+    baseLocation: betaDir,
+  });
 
-  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+  });
   const { port } = server.address() as AddressInfo;
   try {
     const root = await (await fetch(`http://127.0.0.1:${port}/`)).text();
@@ -304,7 +617,9 @@ test("serveAllStatus serves the aggregated site, selecting the project from the 
     assert.match(root, /<option value="alpha">/);
     assert.match(root, /<option value="beta">/);
 
-    const beta = await (await fetch(`http://127.0.0.1:${port}/?project=beta`)).text();
+    const beta = await (
+      await fetch(`http://127.0.0.1:${port}/?project=beta`)
+    ).text();
     assert.match(beta, /<option value="beta" selected>/);
     // Beta's own campaign (issue 201) renders in the body, not alpha's issue 101.
     assert.match(beta, /#201 <small>/);
@@ -319,7 +634,10 @@ test("renderLandingShell's card heading shows owner/name, but links and keys on 
   // The card heading reads the card's owner/name, falling back to the bare key when absent.
   assert.match(html, /"card-project", p\.repo \?\? p\.project/);
   // Routing stays keyed on the bare project: the card href is the bare project key.
-  assert.match(html, /card\.href = "\/\?project=" \+ encodeURIComponent\(p\.project\)/);
+  assert.match(
+    html,
+    /card\.href = "\/\?project=" \+ encodeURIComponent\(p\.project\)/,
+  );
 });
 
 test("renderLandingShell is single-column on mobile with 44px tap targets", () => {
@@ -335,18 +653,36 @@ test("renderLandingShell is single-column on mobile with 44px tap targets", () =
 // The set of palette tokens defined by a `:root { … }` block, and the set of
 // `var(--token)` references anywhere in a page — the two must agree, or a surface
 // references a colour that never resolves (the #78 class of bug).
-const definedTokens = (css: string) => new Set([...css.matchAll(/(--[a-z0-9-]+):/g)].map((m) => m[1]));
-const referencedTokens = (html: string) => new Set([...html.matchAll(/var\((--[a-z0-9-]+)\)/g)].map((m) => m[1]));
+const definedTokens = (css: string) =>
+  new Set([...css.matchAll(/(--[a-z0-9-]+):/g)].map((m) => m[1]));
+const referencedTokens = (html: string) =>
+  new Set([...html.matchAll(/var\((--[a-z0-9-]+)\)/g)].map((m) => m[1]));
 
 test("the card/chip colour rules are landed as a normative doc that pins the palette (#83)", () => {
-  const doc = readFileSync(join(import.meta.dirname, "..", "docs", "dashboard-color-rules.md"), "utf8");
+  const doc = readFileSync(
+    join(import.meta.dirname, "..", "docs", "dashboard-color-rules.md"),
+    "utf8",
+  );
   // The doc is the reference: it carries the §1 palette at the exact hexes the code uses.
-  for (const hex of ["#6cb6ff", "#c8a24e", "#f85149", "#5f6b78", "#3fb984", "#a371f7", "#f79287", "#10151b", "#0b0e12"]) {
+  for (const hex of [
+    "#6cb6ff",
+    "#c8a24e",
+    "#f85149",
+    "#5f6b78",
+    "#3fb984",
+    "#a371f7",
+    "#f79287",
+    "#10151b",
+    "#0b0e12",
+  ]) {
     assert.ok(doc.includes(hex), `the colour-rules doc pins ${hex}`);
   }
   // And it states the derivation precedence and the teal-is-not-a-state rule.
   assert.match(doc, /parked > failure > running > unstarted > completed/);
-  assert.match(doc, /never appear on a status chip or a card edge|never a state/);
+  assert.match(
+    doc,
+    /never appear on a status chip or a card edge|never a state/,
+  );
 });
 
 test("the dashboard palette is one shared source defining every state token at its spec hex (#83)", () => {
@@ -366,21 +702,36 @@ test("the dashboard palette is one shared source defining every state token at i
 
 test("both the landing and the campaign page emit the one shared palette, and every colour they reference resolves (#78, #83)", () => {
   const landing = renderLandingShell(["alpha", "beta"]);
-  const campaign = renderStatusPage({ project: "beta", waves: [], parked: [] }, { carve: true });
+  const campaign = renderStatusPage(
+    { project: "beta", waves: [], parked: [] },
+    { carve: true },
+  );
   // The palette is included verbatim by both surfaces — one source, not a per-renderer copy.
-  assert.ok(landing.includes(DASHBOARD_PALETTE_CSS), "landing includes the shared palette");
-  assert.ok(campaign.includes(DASHBOARD_PALETTE_CSS), "campaign page includes the shared palette");
+  assert.ok(
+    landing.includes(DASHBOARD_PALETTE_CSS),
+    "landing includes the shared palette",
+  );
+  assert.ok(
+    campaign.includes(DASHBOARD_PALETTE_CSS),
+    "campaign page includes the shared palette",
+  );
   // Every colour token either page references is actually defined — so `--color-carved`
   // (and every other token) resolves identically on `/` and `/?project=…`, not merely
   // referenced (the blind spot #78's original rule-string test had).
   const defined = definedTokens(DASHBOARD_PALETTE_CSS);
   for (const page of [landing, campaign]) {
     for (const token of referencedTokens(page)) {
-      assert.ok(defined.has(token), `${token} is referenced but never defined in the shared palette`);
+      assert.ok(
+        defined.has(token),
+        `${token} is referenced but never defined in the shared palette`,
+      );
     }
   }
   // The concrete #78 repro: carved is referenced on the landing (feed, dots, turn log) and resolves.
-  assert.ok(referencedTokens(landing).has("--color-carved"), "landing references --color-carved");
+  assert.ok(
+    referencedTokens(landing).has("--color-carved"),
+    "landing references --color-carved",
+  );
   assert.ok(defined.has("--color-carved"), "--color-carved resolves");
 });
 
@@ -390,8 +741,23 @@ const chipCampaign = () =>
   renderStatusPage(
     {
       project: "beta",
-      waves: [{ index: 0, status: "running", issues: [{ issueNumber: "1", status: "running" }] }],
-      parked: [{ issueNumber: "2", reason: "blocked", parkedAt: "2025-06-15T09:00:00.000Z", branch: "agent/2", description: "Need a choice.", options: [] }],
+      waves: [
+        {
+          index: 0,
+          status: "running",
+          issues: [{ issueNumber: "1", status: "running" }],
+        },
+      ],
+      parked: [
+        {
+          issueNumber: "2",
+          reason: "blocked",
+          parkedAt: "2025-06-15T09:00:00.000Z",
+          branch: "agent/2",
+          description: "Need a choice.",
+          options: [],
+        },
+      ],
     },
     { carve: true },
   );
@@ -406,75 +772,165 @@ test("cards fill card-grey and chips fill the darker panel with a 40%-alpha stat
   assert.match(landing, /\.card \{[^}]*background: var\(--color-card\)/);
   assert.match(campaign, /\.wave \{[^}]*background: var\(--color-card\)/);
   // Issue chips take the darker panel fill — never a coloured fill (§4).
-  assert.match(campaign, /\.chip, \.wave-status, \.completed-wave-chip \{[^}]*background: var\(--color-chip\)/);
+  assert.match(
+    campaign,
+    /\.chip, \.wave-status, \.completed-wave-chip \{[^}]*background: var\(--color-chip\)/,
+  );
   // An issue chip carries its status class and borders that status at 40% alpha (§4).
   assert.match(campaign, /class="chip running"/);
-  assert.match(campaign, /\.chip\.running \{ border-color: var\(--color-blue-40\); \}/);
-  assert.match(campaign, /\.chip\.parked \{ border-color: var\(--color-yellow-40\); \}/);
-  assert.match(campaign, /\.chip\.carved \{ border-color: var\(--color-carved-40\); \}/);
+  assert.match(
+    campaign,
+    /\.chip\.running \{ border-color: var\(--color-blue-40\); \}/,
+  );
+  assert.match(
+    campaign,
+    /\.chip\.parked \{ border-color: var\(--color-yellow-40\); \}/,
+  );
+  assert.match(
+    campaign,
+    /\.chip\.carved \{ border-color: var\(--color-carved-40\); \}/,
+  );
 });
 
 test("cards and chips lift only their fill on hover, never recolouring their edge; teal never colours an edge (§6, #83)", () => {
   const landing = renderLandingShell(["alpha"]);
   const campaign = chipCampaign();
   // Card / chip / parked-row hover lifts the fill only — the coloured edge is unchanged.
-  assert.match(landing, /\.card:hover \{ background: var\(--color-card-hover\); \}/);
-  assert.match(campaign, /\.chip:hover[^{]*\{ background: var\(--color-chip-hover\); \}/);
-  assert.match(landing, /\.parked-row:hover \{ background: var\(--color-card-hover\); \}/);
-  assert.match(campaign, /\.parked-card:hover \{ background: var\(--color-card-hover\); \}/);
+  assert.match(
+    landing,
+    /\.card:hover \{ background: var\(--color-card-hover\); \}/,
+  );
+  assert.match(
+    campaign,
+    /\.chip:hover[^{]*\{ background: var\(--color-chip-hover\); \}/,
+  );
+  assert.match(
+    landing,
+    /\.parked-row:hover \{ background: var\(--color-card-hover\); \}/,
+  );
+  assert.match(
+    campaign,
+    /\.parked-card:hover \{ background: var\(--color-card-hover\); \}/,
+  );
   // No card/chip hover recolours a border — the accent must not creep onto an edge.
   assert.doesNotMatch(landing, /\.card:hover \{[^}]*border-color/);
   assert.doesNotMatch(campaign, /\.chip:hover[^}]*border-color/);
   assert.doesNotMatch(landing, /\.parked-row:hover[^}]*border-color/);
   // §2: a card carries state colour on exactly one edge — never a coloured bottom or right.
   for (const page of [landing, campaign]) {
-    assert.doesNotMatch(page, /border-(bottom|right)-color: var\(--color-(blue|yellow|green|failure|carved|dim)\)/);
+    assert.doesNotMatch(
+      page,
+      /border-(bottom|right)-color: var\(--color-(blue|yellow|green|failure|carved|dim)\)/,
+    );
   }
 });
 
 test("the issue-detail sheet carries the issue's state on its top edge only (§2, #83)", () => {
   // The sheet is a stateful card, so its state reads on a 2px top border, derived
   // from stateColor — the other three edges stay the neutral 1px.
-  assert.match(ISSUE_DETAIL_SHEET_STYLES, /\.issue-detail-sheet \{[^}]*border-top: 2px solid/);
-  assert.match(ISSUE_DETAIL_SHEET_STYLES, /\.issue-detail-sheet\.parked \{ border-top-color: var\(--color-yellow\); \}/);
-  assert.match(ISSUE_DETAIL_SHEET_STYLES, /\.issue-detail-sheet\.completed \{ border-top-color: var\(--color-green\); \}/);
-  assert.match(ISSUE_DETAIL_SHEET_STYLES, /\.issue-detail-sheet\.failure \{ border-top-color: var\(--color-failure\); \}/);
+  assert.match(
+    ISSUE_DETAIL_SHEET_STYLES,
+    /\.issue-detail-sheet \{[^}]*border-top: 2px solid/,
+  );
+  assert.match(
+    ISSUE_DETAIL_SHEET_STYLES,
+    /\.issue-detail-sheet\.parked \{ border-top-color: var\(--color-yellow\); \}/,
+  );
+  assert.match(
+    ISSUE_DETAIL_SHEET_STYLES,
+    /\.issue-detail-sheet\.completed \{ border-top-color: var\(--color-green\); \}/,
+  );
+  assert.match(
+    ISSUE_DETAIL_SHEET_STYLES,
+    /\.issue-detail-sheet\.failure \{ border-top-color: var\(--color-failure\); \}/,
+  );
   // The sheet's state class is set from the fetched issue status when the detail renders,
   // and reset while a fresh issue is loading.
   assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /"issue-detail-sheet " \+ d\.status/);
   // The parked-question / reply block is part of the human-action queue, so it carries
   // the 3px amber left edge (§2) — the block only shows for a parked issue.
-  assert.match(ISSUE_DETAIL_SHEET_STYLES, /\.issue-detail-reply \{[^}]*border-left: 3px solid var\(--color-yellow\)/);
+  assert.match(
+    ISSUE_DETAIL_SHEET_STYLES,
+    /\.issue-detail-reply \{[^}]*border-left: 3px solid var\(--color-yellow\)/,
+  );
 });
 
 test("motion is a channel for running only: the live indicator pulses while streaming, still + dim when paused (§5, #83)", () => {
-  for (const html of [renderLandingShell(["alpha"]), renderStatusPage({ project: "beta", waves: [], parked: [] })]) {
+  for (const html of [
+    renderLandingShell(["alpha"]),
+    renderStatusPage({ project: "beta", waves: [], parked: [] }),
+  ]) {
     // The live indicator dot pulses while streaming…
     assert.match(html, /\.live-indicator::before \{[^}]*animation: chip-pulse/);
     // …and goes still + dim when paused — never amber, never animating.
-    assert.match(html, /\.live-indicator\[data-live-state="paused"\] \{ color: var\(--color-dim\); \}/);
-    assert.match(html, /\.live-indicator\[data-live-state="paused"\]::before \{ animation: none; \}/);
+    assert.match(
+      html,
+      /\.live-indicator\[data-live-state="paused"\] \{ color: var\(--color-dim\); \}/,
+    );
+    assert.match(
+      html,
+      /\.live-indicator\[data-live-state="paused"\]::before \{ animation: none; \}/,
+    );
     // The only colour-bearing animation anywhere is chip-pulse — nothing else animates (§5).
-    assert.deepEqual([...new Set([...html.matchAll(/@keyframes ([\w-]+)/g)].map((m) => m[1]))], ["chip-pulse"]);
+    assert.deepEqual(
+      [...new Set([...html.matchAll(/@keyframes ([\w-]+)/g)].map((m) => m[1]))],
+      ["chip-pulse"],
+    );
   }
 });
 
 test("projectRunState resolves a card's state by the §3 precedence: parked > failure > running > completed (#83)", () => {
-  const wave = (issues: { issueNumber: string; status: string }[]) => [{ index: 0, status: "running" as const, issues: issues as any }];
+  const wave = (issues: { issueNumber: string; status: string }[]) => [
+    { index: 0, status: "running" as const, issues: issues as any },
+  ];
   // The most human-blocking state wins. A parked question beats a failure and any
   // number of running agents — it is the most direct ask (a change from the old
   // failure-first order).
   assert.equal(
-    projectRunState({ project: "p", waves: wave([{ issueNumber: "1", status: "failure" }, { issueNumber: "2", status: "running" }]), parked: [{ issueNumber: "3" }] as any }),
+    projectRunState({
+      project: "p",
+      waves: wave([
+        { issueNumber: "1", status: "failure" },
+        { issueNumber: "2", status: "running" },
+      ]),
+      parked: [{ issueNumber: "3" }] as any,
+    }),
     "parked",
   );
   // With no parked question, failure ranks next — above work still in flight.
-  assert.equal(projectRunState({ project: "p", waves: wave([{ issueNumber: "1", status: "failure" }, { issueNumber: "2", status: "running" }]), parked: [] }), "failure");
+  assert.equal(
+    projectRunState({
+      project: "p",
+      waves: wave([
+        { issueNumber: "1", status: "failure" },
+        { issueNumber: "2", status: "running" },
+      ]),
+      parked: [],
+    }),
+    "failure",
+  );
   // Then running, then all-done completed.
-  assert.equal(projectRunState({ project: "p", waves: wave([{ issueNumber: "1", status: "running" }]), parked: [] }), "running");
-  assert.equal(projectRunState({ project: "p", waves: wave([{ issueNumber: "1", status: "completed" }]), parked: [] }), "completed");
+  assert.equal(
+    projectRunState({
+      project: "p",
+      waves: wave([{ issueNumber: "1", status: "running" }]),
+      parked: [],
+    }),
+    "running",
+  );
+  assert.equal(
+    projectRunState({
+      project: "p",
+      waves: wave([{ issueNumber: "1", status: "completed" }]),
+      parked: [],
+    }),
+    "completed",
+  );
   // No live run at all reads idle.
-  assert.equal(projectRunState({ project: "p", waves: [], parked: [] }), "idle");
+  assert.equal(
+    projectRunState({ project: "p", waves: [], parked: [] }),
+    "idle",
+  );
 });
 
 test("stateColor is the single state→colour derivation, failure distinct from the carve action (#83)", () => {
@@ -495,16 +951,35 @@ test("stateColor is the single state→colour derivation, failure distinct from 
 test("both pages share one set of status-dot rules, scoped to .dot so a state never tints a whole card or row (#81, #83)", () => {
   const landing = renderLandingShell(["alpha"]);
   const campaign = renderStatusPage(
-    { project: "beta", waves: [{ index: 0, status: "running", issues: [{ issueNumber: "1", status: "carved" }] }], parked: [] },
+    {
+      project: "beta",
+      waves: [
+        {
+          index: 0,
+          status: "running",
+          issues: [{ issueNumber: "1", status: "carved" }],
+        },
+      ],
+      parked: [],
+    },
     { carve: true },
   );
   // The dot rules are one generated source, included verbatim by both surfaces.
-  assert.ok(landing.includes(STATE_DOT_CSS), "landing includes the shared dot rules");
-  assert.ok(campaign.includes(STATE_DOT_CSS), "campaign page includes the shared dot rules");
+  assert.ok(
+    landing.includes(STATE_DOT_CSS),
+    "landing includes the shared dot rules",
+  );
+  assert.ok(
+    campaign.includes(STATE_DOT_CSS),
+    "campaign page includes the shared dot rules",
+  );
   // Every status colour is scoped to `.dot` — the campaign page no longer emits the
   // bare `.completed {…}` / `.carved {…}` rules that leaked colour onto struck-through
   // list rows and other elements sharing the class name (#81).
-  assert.match(campaign, /\.dot\.carved \{ background: var\(--color-carved\); \}/);
+  assert.match(
+    campaign,
+    /\.dot\.carved \{ background: var\(--color-carved\); \}/,
+  );
   // A bare status-class rule sits at a selector boundary (start of a line, after
   // whitespace) — the shared dot rules are all `.dot.<state>`, never bare. So none of
   // these leak-prone bare rules should appear on the campaign page any more.
@@ -515,16 +990,36 @@ test("both pages share one set of status-dot rules, scoped to .dot so a state ne
 
 test("failure renders in its own red on every surface, never the carve action's red (#83)", () => {
   const landing = renderLandingShell(["alpha"]);
-  const campaign = renderStatusPage({ project: "beta", waves: [], parked: [] }, { carve: true });
+  const campaign = renderStatusPage(
+    { project: "beta", waves: [], parked: [] },
+    { carve: true },
+  );
   // The activity feed, the card highlight, and the run-state pill all read failure
   // in --color-failure; the carve controls keep --color-red.
-  assert.match(landing, /\.feed-kind\.failure::before \{ background: var\(--color-failure\); \}/);
-  assert.match(landing, /\.card\.failure \{ border-top-color: var\(--color-failure\); \}/);
-  assert.match(landing, /\.run-state\.failure \{ border-color: var\(--color-failure\); color: var\(--color-failure\); \}/);
+  assert.match(
+    landing,
+    /\.feed-kind\.failure::before \{ background: var\(--color-failure\); \}/,
+  );
+  assert.match(
+    landing,
+    /\.card\.failure \{ border-top-color: var\(--color-failure\); \}/,
+  );
+  assert.match(
+    landing,
+    /\.run-state\.failure \{ border-color: var\(--color-failure\); color: var\(--color-failure\); \}/,
+  );
   // The shared turn-log failure number reads --color-failure; carve controls stay --color-red.
-  assert.match(ISSUE_DETAIL_SHEET_STYLES, /\.turn-num\.failure \{ color: var\(--color-failure\); \}/);
-  assert.match(ISSUE_DETAIL_SHEET_STYLES, /\.carve-start[^{]*\{[^}]*var\(--color-red\)/);
-  assert.ok(campaign.includes(".turn-num.failure { color: var(--color-failure); }"));
+  assert.match(
+    ISSUE_DETAIL_SHEET_STYLES,
+    /\.turn-num\.failure \{ color: var\(--color-failure\); \}/,
+  );
+  assert.match(
+    ISSUE_DETAIL_SHEET_STYLES,
+    /\.carve-start[^{]*\{[^}]*var\(--color-red\)/,
+  );
+  assert.ok(
+    campaign.includes(".turn-num.failure { color: var(--color-failure); }"),
+  );
 });
 
 test("renderLandingShell mounts the cross-project feed under the cards and hides it on mobile", () => {
@@ -532,9 +1027,15 @@ test("renderLandingShell mounts the cross-project feed under the cards and hides
   // The feed container sits after the cards and is client-rendered off /api/feed.
   assert.match(html, /id="feed"/);
   assert.match(html, /\/api\/feed/);
-  assert.ok(html.indexOf('id="cards"') < html.indexOf('id="feed"'), "the feed renders after the cards");
+  assert.ok(
+    html.indexOf('id="cards"') < html.indexOf('id="feed"'),
+    "the feed renders after the cards",
+  );
   // The feed is cut on a phone.
-  assert.match(html, /@media \(max-width: 640px\)[^}]*\{[\s\S]*\.feed \{ display: none; \}/);
+  assert.match(
+    html,
+    /@media \(max-width: 640px\)[^}]*\{[\s\S]*\.feed \{ display: none; \}/,
+  );
 });
 
 test("renderLandingShell parked counter expands a cross-repo parked queue in place", () => {
@@ -542,11 +1043,17 @@ test("renderLandingShell parked counter expands a cross-repo parked queue in pla
   // The parked counter is an interactive toggle, unlike the other three counters —
   // a button controlling the queue panel, inert (disabled) until the client learns
   // there is at least one parked question.
-  assert.match(html, /<button[^>]*class="counter counter-toggle"[^>]*data-counter="parked"[^>]*disabled[^>]*aria-controls="parked-queue"/);
+  assert.match(
+    html,
+    /<button[^>]*class="counter counter-toggle"[^>]*data-counter="parked"[^>]*disabled[^>]*aria-controls="parked-queue"/,
+  );
   // The queue panel sits between the counters and the cards, so expanding it pushes
   // the cards down while keeping them visible; it starts hidden.
   assert.match(html, /<section id="parked-queue"[^>]*hidden/);
-  assert.ok(html.indexOf('id="parked-queue"') < html.indexOf('id="cards"'), "parked queue renders above the cards");
+  assert.ok(
+    html.indexOf('id="parked-queue"') < html.indexOf('id="cards"'),
+    "parked queue renders above the cards",
+  );
   // The client renders one row per parked question, oldest first from data.parked,
   // each opening that repo's issue detail, showing repo, issue number, the full
   // question and how long it has waited.
@@ -574,7 +1081,10 @@ test("renderLandingShell opens a parked-queue row's issue detail inline, not by 
   // openIssue is defined here, and a parked row opens it in place — the click is
   // intercepted so the row never does the full navigation to the campaign page.
   assert.match(html, /const openIssue = async \(project, issue, carvable\)/);
-  assert.match(html, /row\.addEventListener\("click", \(event\) => \{ event\.preventDefault\(\); openIssue\(p\.project, p\.issueNumber, true\); \}\)/);
+  assert.match(
+    html,
+    /row\.addEventListener\("click", \(event\) => \{ event\.preventDefault\(\); openIssue\(p\.project, p\.issueNumber, true\); \}\)/,
+  );
   // The sheet's collapse rules are present so a flex display can't defeat [hidden].
   assert.match(html, /\.issue-detail\[hidden\] \{ display: none; \}/);
   assert.match(html, /\.carve-panel\[hidden\] \{ display: none; \}/);
@@ -586,8 +1096,15 @@ test("the issue-detail sheet markup, CSS, and script are defined once and shared
   const landing = renderLandingShell(["alpha", "beta"]);
   // The campaign page renders the sheet with its carve panel when carve is on and
   // without it otherwise; the landing always hosts the carve-enabled sheet.
-  const campaignCarve = renderStatusPage({ project: "beta", waves: [], parked: [] }, { carve: true });
-  const campaignPlain = renderStatusPage({ project: "beta", waves: [], parked: [] });
+  const campaignCarve = renderStatusPage(
+    { project: "beta", waves: [], parked: [] },
+    { carve: true },
+  );
+  const campaignPlain = renderStatusPage({
+    project: "beta",
+    waves: [],
+    parked: [],
+  });
 
   // Markup: one helper, rendered verbatim by both pages. The landing and the
   // carve-enabled campaign page share the carve-panel variant; a plain campaign
@@ -608,7 +1125,11 @@ test("the issue-detail sheet markup, CSS, and script are defined once and shared
 
   // Script: one definition of the sheet behaviour (openIssue/renderDetail/
   // renderReply/closeSheet/carve wiring), included by both pages verbatim.
-  assert.ok(ISSUE_DETAIL_SHEET_SCRIPT.includes("const openIssue = async (project, issue, carvable)"));
+  assert.ok(
+    ISSUE_DETAIL_SHEET_SCRIPT.includes(
+      "const openIssue = async (project, issue, carvable)",
+    ),
+  );
   assert.ok(ISSUE_DETAIL_SHEET_SCRIPT.includes("const closeSheet = () =>"));
   assert.ok(landing.includes(ISSUE_DETAIL_SHEET_SCRIPT));
   assert.ok(campaignCarve.includes(ISSUE_DETAIL_SHEET_SCRIPT));
@@ -628,12 +1149,30 @@ test("renderLandingShell reads each event kind's category as a leading dot, labe
   // near-black (which struck out the blue progress kind, #85).
   assert.match(html, /\.feed-kind \{ color: var\(--color-text\);/);
   // The category colour renders full-strength on the small leading-dot surface.
-  assert.match(html, /\.feed-kind::before \{[^}]*background: var\(--color-dim\);/);
-  assert.match(html, /\.feed-kind\.success::before \{ background: var\(--color-green\); \}/);
-  assert.match(html, /\.feed-kind\.attention::before \{ background: var\(--color-yellow\); \}/);
-  assert.match(html, /\.feed-kind\.progress::before \{ background: var\(--color-blue\); \}/);
-  assert.match(html, /\.feed-kind\.failure::before \{ background: var\(--color-failure\); \}/);
-  assert.match(html, /\.feed-kind\.carved::before \{ background: var\(--color-carved\); \}/);
+  assert.match(
+    html,
+    /\.feed-kind::before \{[^}]*background: var\(--color-dim\);/,
+  );
+  assert.match(
+    html,
+    /\.feed-kind\.success::before \{ background: var\(--color-green\); \}/,
+  );
+  assert.match(
+    html,
+    /\.feed-kind\.attention::before \{ background: var\(--color-yellow\); \}/,
+  );
+  assert.match(
+    html,
+    /\.feed-kind\.progress::before \{ background: var\(--color-blue\); \}/,
+  );
+  assert.match(
+    html,
+    /\.feed-kind\.failure::before \{ background: var\(--color-failure\); \}/,
+  );
+  assert.match(
+    html,
+    /\.feed-kind\.carved::before \{ background: var\(--color-carved\); \}/,
+  );
 });
 
 test("the card progress-bar selector is scoped so it never boxes the feed's progress kind label (#85)", () => {
@@ -644,14 +1183,75 @@ test("the card progress-bar selector is scoped so it never boxes the feed's prog
   assert.doesNotMatch(html, /(?<![-\w])\.progress \{/);
 });
 
+test("no status/category word is ever a bare top-level CSS class, so a component base can't inherit a modifier's layout (#91)", () => {
+  // The convention (docs/dashboard-color-rules.md §8): a status word (ADR 0007's
+  // running/parked/failure/completed/unstarted/carved, plus the landing's queued/idle
+  // aliases and a wave's closed) and a feed comms category (feedKindClass's
+  // success/attention/failure/carved/progress) only ever appear *scoped* — `.dot.running`,
+  // `.card.parked`, `.feed-kind.progress` — never as a bare `.running {`/`.progress {`
+  // rule. A bare one is a component base (the `.progress` bar, #85) that any element
+  // carrying the same word as a modifier would then inherit, boxing/tinting it.
+  const words = [
+    "running",
+    "parked",
+    "failure",
+    "completed",
+    "unstarted",
+    "carved",
+    "queued",
+    "idle",
+    "closed",
+    "success",
+    "attention",
+    "progress",
+  ];
+  const pages = {
+    landing: renderLandingShell(["alpha"]),
+    campaign: renderStatusPage(
+      {
+        project: "beta",
+        waves: [
+          {
+            index: 0,
+            status: "running",
+            issues: [{ issueNumber: "1", status: "carved" }],
+          },
+        ],
+        parked: [],
+      },
+      { carve: true },
+    ),
+  };
+  for (const [name, html] of Object.entries(pages)) {
+    for (const word of words) {
+      // A bare rule is `.word {` at a selector boundary — not preceded by a word char or
+      // hyphen, so scoped compounds (`.dot.running`, `.progress-fill.running`) don't match.
+      assert.doesNotMatch(
+        html,
+        new RegExp(String.raw`(?<![-\w])\.${word}\s*\{`),
+        `${name} emits a bare .${word} { rule — scope it (.dot/.feed-kind/component-prefix)`,
+      );
+    }
+  }
+});
+
 test("renderLandingShell colours each project card's highlight by run state (#75)", () => {
   const html = renderLandingShell(["alpha"]);
   // The card element carries its run-state class...
   assert.match(html, /el\("a", "card " \+ p\.runState\)/);
   // ...and per-state border-top-color rules tint the highlight to match the pill.
-  assert.match(html, /\.card\.parked \{ border-top-color: var\(--color-yellow\); \}/);
-  assert.match(html, /\.card\.running \{ border-top-color: var\(--color-blue\); \}/);
-  assert.match(html, /\.card\.idle \{ border-top-color: var\(--color-dim\); \}/);
+  assert.match(
+    html,
+    /\.card\.parked \{ border-top-color: var\(--color-yellow\); \}/,
+  );
+  assert.match(
+    html,
+    /\.card\.running \{ border-top-color: var\(--color-blue\); \}/,
+  );
+  assert.match(
+    html,
+    /\.card\.idle \{ border-top-color: var\(--color-dim\); \}/,
+  );
 });
 
 test("renderLandingShell draws each card a run-state-coloured progress bar sized by percent merged (#80)", () => {
@@ -661,9 +1261,18 @@ test("renderLandingShell draws each card a run-state-coloured progress bar sized
   assert.match(html, /el\("div", "progress-fill " \+ p\.runState\)/);
   assert.match(html, /\.style\.width = p\.percentMerged \+ "%"/);
   // The fill is coloured by run state: running blue, parked yellow, completed green; idle stays grey.
-  assert.match(html, /\.progress-fill\.running \{ background: var\(--color-blue\); \}/);
-  assert.match(html, /\.progress-fill\.parked \{ background: var\(--color-yellow\); \}/);
-  assert.match(html, /\.progress-fill\.completed \{ background: var\(--color-green\); \}/);
+  assert.match(
+    html,
+    /\.progress-fill\.running \{ background: var\(--color-blue\); \}/,
+  );
+  assert.match(
+    html,
+    /\.progress-fill\.parked \{ background: var\(--color-yellow\); \}/,
+  );
+  assert.match(
+    html,
+    /\.progress-fill\.completed \{ background: var\(--color-green\); \}/,
+  );
 });
 
 test("renderLandingShell renders the card tally as status-dot chips, not plain text (#80)", () => {
@@ -682,11 +1291,23 @@ test("renderLandingShell renders the card tally as status-dot chips, not plain t
 test("renderLandingShell colours the counter values and highlights the parked counter when it has questions (#80)", () => {
   const html = renderLandingShell(["alpha"]);
   // Each counter value reads in its status colour: working blue, parked yellow, merged-today green; queued stays neutral.
-  assert.match(html, /\[data-counter="working"\] \.counter-value \{ color: var\(--color-blue\); \}/);
-  assert.match(html, /\[data-counter="parked"\] \.counter-value \{ color: var\(--color-yellow\); \}/);
-  assert.match(html, /\[data-counter="mergedToday"\] \.counter-value \{ color: var\(--color-green\); \}/);
+  assert.match(
+    html,
+    /\[data-counter="working"\] \.counter-value \{ color: var\(--color-blue\); \}/,
+  );
+  assert.match(
+    html,
+    /\[data-counter="parked"\] \.counter-value \{ color: var\(--color-yellow\); \}/,
+  );
+  assert.match(
+    html,
+    /\[data-counter="mergedToday"\] \.counter-value \{ color: var\(--color-green\); \}/,
+  );
   // The parked counter carries a gold border only while it is actionable — enabled, i.e. parked > 0.
-  assert.match(html, /\.counter-toggle\[data-counter="parked"\]:not\(:disabled\) \{[^}]*border-color: var\(--color-yellow\)/);
+  assert.match(
+    html,
+    /\.counter-toggle\[data-counter="parked"\]:not\(:disabled\) \{[^}]*border-color: var\(--color-yellow\)/,
+  );
 });
 
 test("renderLandingShell gives each counter a payload-derived sublabel (#80)", () => {
@@ -721,12 +1342,35 @@ test("serveAllStatus GET / serves the all-repos landing shell, not a server-rend
   const configDir = join(tmpdir(), `sctdd-landing-shell-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
-  seedState(alphaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"]] }]);
-  seedState(betaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["201"]] }]);
-  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
-  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+  seedState(alphaDir, [
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101"]],
+    },
+  ]);
+  seedState(betaDir, [
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["201"]],
+    },
+  ]);
+  register(configDir, {
+    project: "alpha",
+    projectRoot: join(configDir, "alpha-root"),
+    baseLocation: alphaDir,
+  });
+  register(configDir, {
+    project: "beta",
+    projectRoot: join(configDir, "beta-root"),
+    baseLocation: betaDir,
+  });
 
-  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+  });
   const { port } = server.address() as AddressInfo;
   try {
     const res = await fetch(`http://127.0.0.1:${port}/`);
@@ -744,7 +1388,9 @@ test("serveAllStatus GET / serves the all-repos landing shell, not a server-rend
     assert.doesNotMatch(root, /#201 <small>/);
 
     // Selecting a project opens that project's campaign view (server-rendered for now).
-    const alpha = await (await fetch(`http://127.0.0.1:${port}/?project=alpha`)).text();
+    const alpha = await (
+      await fetch(`http://127.0.0.1:${port}/?project=alpha`)
+    ).text();
     assert.match(alpha, /#101 <small>/);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -756,14 +1402,36 @@ test("serveAllStatus GET /api/landing serves the all-repos landing model as JSON
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
   seedState(alphaDir, [
-    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"], ["201"]], name: "alpha work" },
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101"], ["201"]],
+      name: "alpha work",
+    },
     { ts: "2025-01-01T00:01:00.000Z", event: "queue-start", taskIds: ["101"] },
   ]);
-  seedState(betaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["301"]] }]);
-  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
-  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+  seedState(betaDir, [
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["301"]],
+    },
+  ]);
+  register(configDir, {
+    project: "alpha",
+    projectRoot: join(configDir, "alpha-root"),
+    baseLocation: alphaDir,
+  });
+  register(configDir, {
+    project: "beta",
+    projectRoot: join(configDir, "beta-root"),
+    baseLocation: betaDir,
+  });
 
-  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+  });
   const { port } = server.address() as AddressInfo;
   try {
     const res = await fetch(`http://127.0.0.1:${port}/api/landing`);
@@ -771,10 +1439,18 @@ test("serveAllStatus GET /api/landing serves the all-repos landing model as JSON
     assert.match(res.headers.get("content-type") ?? "", /application\/json/);
     const landing = await res.json();
     // One card per registered project, read live off the registry, with the counters summed.
-    assert.deepEqual(landing.projects.map((p: { project: string }) => p.project), ["alpha", "beta"]);
+    assert.deepEqual(
+      landing.projects.map((p: { project: string }) => p.project),
+      ["alpha", "beta"],
+    );
     assert.equal(landing.projects[0].campaignName, "alpha work");
     assert.equal(landing.projects[0].runState, "running");
-    assert.deepEqual(Object.keys(landing.counters).sort(), ["mergedToday", "parked", "queued", "working"]);
+    assert.deepEqual(Object.keys(landing.counters).sort(), [
+      "mergedToday",
+      "parked",
+      "queued",
+      "working",
+    ]);
     // Alpha's issue 101 is running; alpha's 201 and beta's 301 are still queued — summed.
     assert.equal(landing.counters.working, 1);
     assert.equal(landing.counters.queued, 2);
@@ -788,14 +1464,37 @@ test("serveAllStatus GET /api/feed serves the cross-project event feed as JSON",
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
   seedState(alphaDir, [
-    { ts: "2025-04-01T08:00:00.000Z", event: "campaign-start", batches: [["101"]], name: "alpha work" },
+    {
+      ts: "2025-04-01T08:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101"]],
+      name: "alpha work",
+    },
     { ts: "2025-04-01T08:02:00.000Z", event: "green", taskId: "101" },
   ]);
-  seedState(betaDir, [{ ts: "2025-04-01T08:01:00.000Z", event: "parked", taskId: "201", reason: "needs a choice" }]);
-  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
-  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+  seedState(betaDir, [
+    {
+      ts: "2025-04-01T08:01:00.000Z",
+      event: "parked",
+      taskId: "201",
+      reason: "needs a choice",
+    },
+  ]);
+  register(configDir, {
+    project: "alpha",
+    projectRoot: join(configDir, "alpha-root"),
+    baseLocation: alphaDir,
+  });
+  register(configDir, {
+    project: "beta",
+    projectRoot: join(configDir, "beta-root"),
+    baseLocation: betaDir,
+  });
 
-  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+  });
   const { port } = server.address() as AddressInfo;
   try {
     const res = await fetch(`http://127.0.0.1:${port}/api/feed`);
@@ -805,7 +1504,11 @@ test("serveAllStatus GET /api/feed serves the cross-project event feed as JSON",
     // The feed merges both projects newest-first, each row repo-prefixed.
     assert.deepEqual(
       feed.map((f: { text: string }) => f.text),
-      ["alpha — #101 merged", "beta — #201 parked: needs a choice", "alpha — Campaign “alpha work” started"],
+      [
+        "alpha — #101 merged",
+        "beta — #201 parked: needs a choice",
+        "alpha — Campaign “alpha work” started",
+      ],
     );
     assert.equal(feed[0].kind, "green");
   } finally {
@@ -817,16 +1520,42 @@ test("serveAllStatus GET /api/issue serves one issue's reconstructed detail as J
   const configDir = join(tmpdir(), `sctdd-issue-endpoint-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   seedState(alphaDir, [
-    { ts: "2025-05-01T08:00:00.000Z", event: "campaign-start", batches: [["101"]], titles: { "101": "Wire the parser" }, name: "parser work" },
-    { ts: "2025-05-01T08:01:00.000Z", event: "turn", taskId: "101", turn: 0, summary: "Sketched the grammar and a red test." },
-    { ts: "2025-05-01T08:06:00.000Z", event: "parked", taskId: "101", reason: "needs a decision" },
+    {
+      ts: "2025-05-01T08:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101"]],
+      titles: { "101": "Wire the parser" },
+      name: "parser work",
+    },
+    {
+      ts: "2025-05-01T08:01:00.000Z",
+      event: "turn",
+      taskId: "101",
+      turn: 0,
+      summary: "Sketched the grammar and a red test.",
+    },
+    {
+      ts: "2025-05-01T08:06:00.000Z",
+      event: "parked",
+      taskId: "101",
+      reason: "needs a decision",
+    },
   ]);
-  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
+  register(configDir, {
+    project: "alpha",
+    projectRoot: join(configDir, "alpha-root"),
+    baseLocation: alphaDir,
+  });
 
-  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+  });
   const { port } = server.address() as AddressInfo;
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/api/issue?project=alpha&issue=101`);
+    const res = await fetch(
+      `http://127.0.0.1:${port}/api/issue?project=alpha&issue=101`,
+    );
     assert.equal(res.status, 200);
     assert.match(res.headers.get("content-type") ?? "", /application\/json/);
     const detail = await res.json();
@@ -838,11 +1567,21 @@ test("serveAllStatus GET /api/issue serves one issue's reconstructed detail as J
     assert.equal(detail.turns, 1);
     assert.equal(detail.elapsedMs, 5 * 60 * 1000);
     assert.deepEqual(
-      detail.turnLog.map((t: { turn: number; summary: string }) => [t.turn, t.summary]),
+      detail.turnLog.map((t: { turn: number; summary: string }) => [
+        t.turn,
+        t.summary,
+      ]),
       [[0, "Sketched the grammar and a red test."]],
     );
     // An unknown project is a 404, never a path joined from request input.
-    assert.equal((await fetch(`http://127.0.0.1:${port}/api/issue?project=ghost&issue=101`)).status, 404);
+    assert.equal(
+      (
+        await fetch(
+          `http://127.0.0.1:${port}/api/issue?project=ghost&issue=101`,
+        )
+      ).status,
+      404,
+    );
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -852,23 +1591,59 @@ test("serveAllStatus GET /api/issue carries the parked question and options for 
   const configDir = join(tmpdir(), `sctdd-issue-parked-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   seedState(alphaDir, [
-    { ts: "2025-05-01T08:00:00.000Z", event: "campaign-start", batches: [["101"]], titles: { "101": "Wire the parser" } },
-    { ts: "2025-05-01T08:01:00.000Z", event: "turn", taskId: "101", turn: 0, summary: "Sketched the grammar." },
-    { ts: "2025-05-01T08:06:00.000Z", event: "parked", taskId: "101", reason: "needs a decision" },
+    {
+      ts: "2025-05-01T08:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101"]],
+      titles: { "101": "Wire the parser" },
+    },
+    {
+      ts: "2025-05-01T08:01:00.000Z",
+      event: "turn",
+      taskId: "101",
+      turn: 0,
+      summary: "Sketched the grammar.",
+    },
+    {
+      ts: "2025-05-01T08:06:00.000Z",
+      event: "parked",
+      taskId: "101",
+      reason: "needs a decision",
+    },
   ]);
   writeFileSync(
     join(alphaDir, "parked", "101.json"),
-    JSON.stringify({ taskId: "101", parkedAt: "now", reason: "blocked", branch: "agent/101", sessionId: "s", question: "Which parser?\n\nOptions:\n- Recursive descent\n- Parser combinator" }),
+    JSON.stringify({
+      taskId: "101",
+      parkedAt: "now",
+      reason: "blocked",
+      branch: "agent/101",
+      sessionId: "s",
+      question:
+        "Which parser?\n\nOptions:\n- Recursive descent\n- Parser combinator",
+    }),
   );
-  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
+  register(configDir, {
+    project: "alpha",
+    projectRoot: join(configDir, "alpha-root"),
+    baseLocation: alphaDir,
+  });
 
-  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+  });
   const { port } = server.address() as AddressInfo;
   try {
-    const detail = await (await fetch(`http://127.0.0.1:${port}/api/issue?project=alpha&issue=101`)).json();
+    const detail = await (
+      await fetch(`http://127.0.0.1:${port}/api/issue?project=alpha&issue=101`)
+    ).json();
     assert.equal(detail.status, "parked");
     // The sheet's reply block reads the question (its Options tail split off) and the parsed options.
-    assert.deepEqual(detail.parked, { question: "Which parser?", options: ["Recursive descent", "Parser combinator"] });
+    assert.deepEqual(detail.parked, {
+      question: "Which parser?",
+      options: ["Recursive descent", "Parser combinator"],
+    });
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -878,15 +1653,33 @@ test("serveAllStatus GET /api/issue omits parked reply data for a non-parked iss
   const configDir = join(tmpdir(), `sctdd-issue-unparked-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   seedState(alphaDir, [
-    { ts: "2025-05-01T08:00:00.000Z", event: "campaign-start", batches: [["101"]] },
-    { ts: "2025-05-01T08:02:00.000Z", event: "green", taskId: "101", branch: "agent/101" },
+    {
+      ts: "2025-05-01T08:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101"]],
+    },
+    {
+      ts: "2025-05-01T08:02:00.000Z",
+      event: "green",
+      taskId: "101",
+      branch: "agent/101",
+    },
   ]);
-  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
+  register(configDir, {
+    project: "alpha",
+    projectRoot: join(configDir, "alpha-root"),
+    baseLocation: alphaDir,
+  });
 
-  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+  });
   const { port } = server.address() as AddressInfo;
   try {
-    const detail = await (await fetch(`http://127.0.0.1:${port}/api/issue?project=alpha&issue=101`)).json();
+    const detail = await (
+      await fetch(`http://127.0.0.1:${port}/api/issue?project=alpha&issue=101`)
+    ).json();
     assert.equal(detail.status, "completed");
     assert.equal(detail.parked, undefined);
   } finally {
@@ -897,10 +1690,23 @@ test("serveAllStatus GET /api/issue omits parked reply data for a non-parked iss
 test("serveAllStatus GET /api/events streams a project's log appends as SSE frames", async () => {
   const configDir = join(tmpdir(), `sctdd-sse-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
-  seedState(alphaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"]] }]);
-  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
+  seedState(alphaDir, [
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101"]],
+    },
+  ]);
+  register(configDir, {
+    project: "alpha",
+    projectRoot: join(configDir, "alpha-root"),
+    baseLocation: alphaDir,
+  });
 
-  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+  });
   const { port } = server.address() as AddressInfo;
   const res = await fetch(`http://127.0.0.1:${port}/api/events`);
   const reader = res.body!.getReader();
@@ -911,7 +1717,12 @@ test("serveAllStatus GET /api/events streams a project's log appends as SSE fram
     while (!buf.includes("\n\n")) {
       const chunk = await Promise.race([
         reader.read(),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timed out waiting for SSE frame")), 4000)),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error("timed out waiting for SSE frame")),
+            4000,
+          ),
+        ),
       ]);
       if (chunk.done) throw new Error("stream closed before a frame arrived");
       buf += decoder.decode(chunk.value, { stream: true });
@@ -923,7 +1734,10 @@ test("serveAllStatus GET /api/events streams a project's log appends as SSE fram
     // The opening handshake frame flushes headers and, crucially, means the watcher is now armed.
     await nextFrame();
     // A fresh append to alpha's live log is pushed as a data frame carrying the project and the new event.
-    appendFileSync(join(alphaDir, "logs", "orchestrator.jsonl"), JSON.stringify({ event: "turn", taskId: "101" }) + "\n");
+    appendFileSync(
+      join(alphaDir, "logs", "orchestrator.jsonl"),
+      JSON.stringify({ event: "turn", taskId: "101" }) + "\n",
+    );
     let frame = "";
     let payload: { project?: string; events?: { event: string }[] } = {};
     // fs.watch can coalesce or emit a bare change with no new bytes; keep reading data frames until one carries the append.
@@ -937,7 +1751,10 @@ test("serveAllStatus GET /api/events streams a project's log appends as SSE fram
       payload = data ? JSON.parse(data) : {};
     }
     assert.equal(payload.project, "alpha");
-    assert.deepEqual((payload.events ?? []).map((e) => e.event), ["turn"]);
+    assert.deepEqual(
+      (payload.events ?? []).map((e) => e.event),
+      ["turn"],
+    );
   } finally {
     await reader.cancel();
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -947,27 +1764,55 @@ test("serveAllStatus GET /api/events streams a project's log appends as SSE fram
 test("serveAllStatus renders a single registered project as a one-entry dropdown with campaign, wave and parked intact", async () => {
   const configDir = join(tmpdir(), `sctdd-serve-solo-${Date.now()}`);
   const soloDir = join(configDir, "state-solo");
-  seedState(soloDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"]] }]);
+  seedState(soloDir, [
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101"]],
+    },
+  ]);
   // A parked issue in the active campaign — the single-project view keeps its parked card.
   writeFileSync(
     join(soloDir, "parked", "101.json"),
-    JSON.stringify({ taskId: "101", parkedAt: "now", reason: "blocked", branch: "agent/101", sessionId: "s", question: "Need a choice." }),
+    JSON.stringify({
+      taskId: "101",
+      parkedAt: "now",
+      reason: "blocked",
+      branch: "agent/101",
+      sessionId: "s",
+      question: "Need a choice.",
+    }),
   );
-  register(configDir, { project: "solo", projectRoot: join(configDir, "solo-root"), baseLocation: soloDir });
+  register(configDir, {
+    project: "solo",
+    projectRoot: join(configDir, "solo-root"),
+    baseLocation: soloDir,
+  });
 
-  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+  });
   const { port } = server.address() as AddressInfo;
   try {
     // A no-gateway, single-project user opens that project's campaign view (ADR 0006).
-    const solo = await (await fetch(`http://127.0.0.1:${port}/?project=solo`)).text();
+    const solo = await (
+      await fetch(`http://127.0.0.1:${port}/?project=solo`)
+    ).text();
     assert.match(solo, /<select name="project"/);
     assert.match(solo, /<option value="solo" selected>/);
     // Its own campaign wave and parked card render intact; the reply happens in the
     // sheet, whose /answer form is present.
     assert.match(solo, /#101 <small>/);
     assert.match(solo, /Parked · <span class="parked-count">1<\/span>/);
-    assert.match(solo, /<a class="parked-card"[^>]*data-issue="101" data-project="solo"/);
-    assert.match(solo, /<form method="post" action="\/answer" id="reply-form">/);
+    assert.match(
+      solo,
+      /<a class="parked-card"[^>]*data-issue="101" data-project="solo"/,
+    );
+    assert.match(
+      solo,
+      /<form method="post" action="\/answer" id="reply-form">/,
+    );
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -977,10 +1822,30 @@ test("serveAllStatus POST /carve on confirm shells carve in the selected project
   const configDir = join(tmpdir(), `sctdd-agg-carve-confirm-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
-  seedState(alphaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"], ["301"]] }]);
-  seedState(betaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["201"], ["401"]] }]);
-  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
-  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+  seedState(alphaDir, [
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101"], ["301"]],
+    },
+  ]);
+  seedState(betaDir, [
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["201"], ["401"]],
+    },
+  ]);
+  register(configDir, {
+    project: "alpha",
+    projectRoot: join(configDir, "alpha-root"),
+    baseLocation: alphaDir,
+  });
+  register(configDir, {
+    project: "beta",
+    projectRoot: join(configDir, "beta-root"),
+    baseLocation: betaDir,
+  });
 
   const spawned: { args: string[]; cwd: string }[] = [];
   const server = await serveAllStatus(configDir, {
@@ -994,7 +1859,11 @@ test("serveAllStatus POST /carve on confirm shells carve in the selected project
       method: "POST",
       redirect: "manual",
       headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ taskId: "401", project: "beta", confirm: "1" }).toString(),
+      body: new URLSearchParams({
+        taskId: "401",
+        project: "beta",
+        confirm: "1",
+      }).toString(),
     });
     // Redirects back to the selected project's dashboard, like the answer control.
     assert.equal(res.status, 303);
@@ -1013,16 +1882,41 @@ test("serveAllStatus GET /carve?preview returns the selected project's structure
   const configDir = join(tmpdir(), `sctdd-agg-carve-json-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
-  seedState(alphaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"], ["301"]] }]);
-  seedState(betaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["201"], ["401"]] }]);
-  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
-  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+  seedState(alphaDir, [
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101"], ["301"]],
+    },
+  ]);
+  seedState(betaDir, [
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["201"], ["401"]],
+    },
+  ]);
+  register(configDir, {
+    project: "alpha",
+    projectRoot: join(configDir, "alpha-root"),
+    baseLocation: alphaDir,
+  });
+  register(configDir, {
+    project: "beta",
+    projectRoot: join(configDir, "beta-root"),
+    baseLocation: betaDir,
+  });
 
   const closures: { projectRoot: string; taskId: string }[] = [];
   const spawned: unknown[] = [];
   // The structured closure (E2) the confirmation renders: the target and dropped
   // dependents that would leave, the banked work kept, and the remaining waves.
-  const structured = { target: "201", dropped: ["201", "401"], keptBanked: ["301"], remaining: [] as string[][] };
+  const structured = {
+    target: "201",
+    dropped: ["201", "401"],
+    keptBanked: ["301"],
+    remaining: [] as string[][],
+  };
   const server = await serveAllStatus(configDir, {
     port: 0,
     host: "127.0.0.1",
@@ -1036,14 +1930,18 @@ test("serveAllStatus GET /carve?preview returns the selected project's structure
   });
   const { port } = server.address() as AddressInfo;
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/carve?preview&taskId=201&project=beta`);
+    const res = await fetch(
+      `http://127.0.0.1:${port}/carve?preview&taskId=201&project=beta`,
+    );
     assert.equal(res.status, 200);
     assert.match(res.headers.get("content-type") ?? "", /application\/json/);
     // The endpoint returns the full structured closure the panel discloses —
     // dropped, kept-banked, and remaining all reach the client verbatim.
     assert.deepEqual(await res.json(), structured);
     // The closure came from the selected project's install (beta's root), not alpha's.
-    assert.deepEqual(closures, [{ projectRoot: join(configDir, "beta-root"), taskId: "201" }]);
+    assert.deepEqual(closures, [
+      { projectRoot: join(configDir, "beta-root"), taskId: "201" },
+    ]);
     // A preview computes nothing destructive — no carve is spawned.
     assert.equal(spawned.length, 0);
   } finally {
@@ -1054,20 +1952,47 @@ test("serveAllStatus GET /carve?preview returns the selected project's structure
 test("serveAllStatus GET /carve?preview validates params and the project", async () => {
   const configDir = join(tmpdir(), `sctdd-agg-carve-json-guard-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
-  seedState(betaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["201"]] }]);
-  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+  seedState(betaDir, [
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["201"]],
+    },
+  ]);
+  register(configDir, {
+    project: "beta",
+    projectRoot: join(configDir, "beta-root"),
+    baseLocation: betaDir,
+  });
 
   const server = await serveAllStatus(configDir, {
     port: 0,
     host: "127.0.0.1",
-    carveClosure: () => Promise.resolve({ target: "201", dropped: ["201"], keptBanked: [], remaining: [] }),
+    carveClosure: () =>
+      Promise.resolve({
+        target: "201",
+        dropped: ["201"],
+        keptBanked: [],
+        remaining: [],
+      }),
   });
   const { port } = server.address() as AddressInfo;
   try {
     // Missing taskId/project → 400.
-    assert.equal((await fetch(`http://127.0.0.1:${port}/carve?preview&project=beta`)).status, 400);
+    assert.equal(
+      (await fetch(`http://127.0.0.1:${port}/carve?preview&project=beta`))
+        .status,
+      400,
+    );
     // Unknown project → 404.
-    assert.equal((await fetch(`http://127.0.0.1:${port}/carve?preview&taskId=201&project=ghost`)).status, 404);
+    assert.equal(
+      (
+        await fetch(
+          `http://127.0.0.1:${port}/carve?preview&taskId=201&project=ghost`,
+        )
+      ).status,
+      404,
+    );
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -1077,10 +2002,30 @@ test("serveAllStatus POST /carve previews the selected project's closure without
   const configDir = join(tmpdir(), `sctdd-agg-carve-preview-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
-  seedState(alphaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"], ["301"]] }]);
-  seedState(betaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["201"], ["401"]] }]);
-  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
-  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+  seedState(alphaDir, [
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101"], ["301"]],
+    },
+  ]);
+  seedState(betaDir, [
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["201"], ["401"]],
+    },
+  ]);
+  register(configDir, {
+    project: "alpha",
+    projectRoot: join(configDir, "alpha-root"),
+    baseLocation: alphaDir,
+  });
+  register(configDir, {
+    project: "beta",
+    projectRoot: join(configDir, "beta-root"),
+    baseLocation: betaDir,
+  });
 
   const previews: { projectRoot: string; taskId: string }[] = [];
   const spawned: unknown[] = [];
@@ -1092,7 +2037,9 @@ test("serveAllStatus POST /carve previews the selected project's closure without
     // which computes the closure against that project's real blockedBy graph.
     carvePreview: (projectRoot, taskId) => {
       previews.push({ projectRoot, taskId });
-      return Promise.resolve(`carve #201 → dropping #201, #401\nremaining campaign: (nothing left to run)`);
+      return Promise.resolve(
+        `carve #201 → dropping #201, #401\nremaining campaign: (nothing left to run)`,
+      );
     },
   });
   const { port } = server.address() as AddressInfo;
@@ -1105,10 +2052,15 @@ test("serveAllStatus POST /carve previews the selected project's closure without
     assert.equal(res.status, 200);
     const html = await res.text();
     // The preview came from the selected project's install (beta's root), not alpha's.
-    assert.deepEqual(previews, [{ projectRoot: join(configDir, "beta-root"), taskId: "201" }]);
+    assert.deepEqual(previews, [
+      { projectRoot: join(configDir, "beta-root"), taskId: "201" },
+    ]);
     // It shows the shelled closure and a confirm affordance carrying the project.
     assert.match(html, /#401/);
-    assert.match(html, /<form method="post" action="\/carve"[\s\S]*?name="confirm"/);
+    assert.match(
+      html,
+      /<form method="post" action="\/carve"[\s\S]*?name="confirm"/,
+    );
     assert.match(html, /name="project" value="beta"/);
     assert.match(html, /name="taskId" value="201"/);
     // Nothing has been carved yet — preview executes nothing.
@@ -1123,18 +2075,39 @@ test("serveAllStatus flags the selected project's carvable chips with its projec
   const betaDir = join(configDir, "state-beta");
   // A running campaign whose future wave (401) is still carvable.
   seedState(betaDir, [
-    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["201"], ["401"]] },
-    { ts: "2025-01-01T00:01:00.000Z", event: "campaign-batch", index: 0, tasks: ["201"] },
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["201"], ["401"]],
+    },
+    {
+      ts: "2025-01-01T00:01:00.000Z",
+      event: "campaign-batch",
+      index: 0,
+      tasks: ["201"],
+    },
   ]);
-  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+  register(configDir, {
+    project: "beta",
+    projectRoot: join(configDir, "beta-root"),
+    baseLocation: betaDir,
+  });
 
-  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+  });
   const { port } = server.address() as AddressInfo;
   try {
-    const html = await (await fetch(`http://127.0.0.1:${port}/?project=beta`)).text();
+    const html = await (
+      await fetch(`http://127.0.0.1:${port}/?project=beta`)
+    ).text();
     // The unstarted future-wave chip is flagged carvable and carries beta, so the
     // panel's Carve routes preview and confirm to beta's own install.
-    assert.match(html, /class="chip [a-z]+"[^>]*data-issue="401"[^>]*data-project="beta"[^>]*data-carvable="1"/);
+    assert.match(
+      html,
+      /class="chip [a-z]+"[^>]*data-issue="401"[^>]*data-project="beta"[^>]*data-carvable="1"/,
+    );
     // No inline carve control on the chip itself.
     assert.doesNotMatch(html, /✂️/);
   } finally {
@@ -1146,7 +2119,13 @@ test("serveAllStatus lists a project's archived runs and renders one read-only w
   const configDir = join(tmpdir(), `sctdd-agg-archive-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
   // A live run still in flight.
-  seedState(betaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["201"]] }]);
+  seedState(betaDir, [
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["201"]],
+    },
+  ]);
   // Two archived runs plus a malformed one that must be skipped.
   const archiveDir = join(betaDir, "logs", "archive");
   mkdirSync(archiveDir, { recursive: true });
@@ -1158,37 +2137,67 @@ test("serveAllStatus lists a project's archived runs and renders one read-only w
     { event: "campaign-start", batches: [["111"]] },
     { event: "campaign-halt", taskId: "111", reason: "gate failed" },
   ]);
-  writeFileSync(join(archiveDir, "orchestrator-2026-03-01T00-00-00-000Z.jsonl"), "garbage\n{");
-  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+  writeFileSync(
+    join(archiveDir, "orchestrator-2026-03-01T00-00-00-000Z.jsonl"),
+    "garbage\n{",
+  );
+  register(configDir, {
+    project: "beta",
+    projectRoot: join(configDir, "beta-root"),
+    baseLocation: betaDir,
+  });
 
-  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+  });
   const { port } = server.address() as AddressInfo;
   try {
-    const root = await (await fetch(`http://127.0.0.1:${port}/?project=beta`)).text();
+    const root = await (
+      await fetch(`http://127.0.0.1:${port}/?project=beta`)
+    ).text();
     // The archived-runs list shows both good runs, newest-first, with summaries;
     // the live run (201) still renders at the top.
     assert.match(root, /#201 <small>/);
     assert.match(root, /<section class="archived-runs">/);
     // Unnamed runs → the timestamp token is the primary label, the summary secondary.
-    assert.match(root, /run=2026-02-01T00-00-00-000Z"[^>]*>2026-02-01T00-00-00-000Z<\/a> <span class="run-summary">campaign · 1 issue · halted<\/span>/);
-    assert.match(root, /run=2026-01-01T00-00-00-000Z"[^>]*>2026-01-01T00-00-00-000Z<\/a> <span class="run-summary">campaign · 2 issues · complete<\/span>/);
-    assert.ok(root.indexOf("2026-02-01") < root.indexOf("2026-01-01"), "newest-first");
+    assert.match(
+      root,
+      /run=2026-02-01T00-00-00-000Z"[^>]*>2026-02-01T00-00-00-000Z<\/a> <span class="run-summary">campaign · 1 issue · halted<\/span>/,
+    );
+    assert.match(
+      root,
+      /run=2026-01-01T00-00-00-000Z"[^>]*>2026-01-01T00-00-00-000Z<\/a> <span class="run-summary">campaign · 2 issues · complete<\/span>/,
+    );
+    assert.ok(
+      root.indexOf("2026-02-01") < root.indexOf("2026-01-01"),
+      "newest-first",
+    );
     // The malformed run is skipped, never listed.
     assert.doesNotMatch(root, /2026-03-01/);
     // No run selected → no archived-run body yet.
     assert.doesNotMatch(root, /class="archived-run"/);
 
     // Selecting a run renders it read-only below the live run, additively.
-    const withRun = await (await fetch(`http://127.0.0.1:${port}/?project=beta&run=2026-01-01T00-00-00-000Z`)).text();
+    const withRun = await (
+      await fetch(
+        `http://127.0.0.1:${port}/?project=beta&run=2026-01-01T00-00-00-000Z`,
+      )
+    ).text();
     assert.match(withRun, /#201 <small>/); // live run still on top
-    assert.match(withRun, /<section class="archived-run"><h2>Archived run 2026-01-01T00-00-00-000Z<\/h2>/);
+    assert.match(
+      withRun,
+      /<section class="archived-run"><h2>Archived run 2026-01-01T00-00-00-000Z<\/h2>/,
+    );
     assert.match(withRun, /#101 <small>/); // the archived run's own issues
     // Read-only: the archived run's chips carry no carve data and there is no
     // answer form for it.
     assert.doesNotMatch(withRun, /data-issue="101"/);
 
     // A run not present in the archive listing is rejected — no traversal, no body.
-    const bogus = await fetch(`http://127.0.0.1:${port}/?project=beta&run=..%2F..%2Forchestrator`);
+    const bogus = await fetch(
+      `http://127.0.0.1:${port}/?project=beta&run=..%2F..%2Forchestrator`,
+    );
     assert.equal(bogus.status, 200);
     assert.doesNotMatch(await bogus.text(), /class="archived-run"/);
   } finally {
@@ -1201,31 +2210,72 @@ test("serveAllStatus reconstructs a carved issue in a selected archived run, rea
   const betaDir = join(configDir, "state-beta");
   // A live run over an unrelated issue, so the only carved chip on the page is the
   // archived run's.
-  seedState(betaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["900"]] }]);
+  seedState(betaDir, [
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["900"]],
+    },
+  ]);
   // An archived run that carved an unstarted dependent (201) out of its plan: 101
   // banked, 201 dropped by the carve, then the campaign finished.
   const archiveDir = join(betaDir, "logs", "archive");
   mkdirSync(archiveDir, { recursive: true });
   writeJsonl(join(archiveDir, "orchestrator-2026-04-01T00-00-00-000Z.jsonl"), [
-    { ts: "2026-04-01T00:00:00.000Z", event: "campaign-start", batches: [["101"], ["201"]], name: "spring cleanup" },
-    { ts: "2026-04-01T00:01:00.000Z", event: "green", taskId: "101", branch: "agent/101" },
-    { ts: "2026-04-01T00:02:00.000Z", event: "carve", target: "201", removed: ["201"] },
+    {
+      ts: "2026-04-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101"], ["201"]],
+      name: "spring cleanup",
+    },
+    {
+      ts: "2026-04-01T00:01:00.000Z",
+      event: "green",
+      taskId: "101",
+      branch: "agent/101",
+    },
+    {
+      ts: "2026-04-01T00:02:00.000Z",
+      event: "carve",
+      target: "201",
+      removed: ["201"],
+    },
     { ts: "2026-04-01T00:03:00.000Z", event: "campaign-done", batches: 2 },
   ]);
-  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+  register(configDir, {
+    project: "beta",
+    projectRoot: join(configDir, "beta-root"),
+    baseLocation: betaDir,
+  });
 
-  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+  });
   const { port } = server.address() as AddressInfo;
   try {
-    const html = await (await fetch(`http://127.0.0.1:${port}/?project=beta&run=2026-04-01T00-00-00-000Z`)).text();
+    const html = await (
+      await fetch(
+        `http://127.0.0.1:${port}/?project=beta&run=2026-04-01T00-00-00-000Z`,
+      )
+    ).text();
     // The archived run renders read-only under its --name, in the wave/chip treatment.
-    assert.match(html, /<section class="archived-run"><h2>Archived run spring cleanup /);
+    assert.match(
+      html,
+      /<section class="archived-run"><h2>Archived run spring cleanup /,
+    );
     // The carved-out 201 is reconstructed as a carved chip in the wave it left, so an
     // operator can see what the run was carved down to (ADR 0007).
-    assert.match(html, /<span class="dot carved"><\/span>#201 <small>carved<\/small>/);
+    assert.match(
+      html,
+      /<span class="dot carved"><\/span>#201 <small>carved<\/small>/,
+    );
     // Read-only: the archived carved chip carries no carve/open data — it is inert.
     assert.doesNotMatch(html, /data-issue="201"/);
-    assert.doesNotMatch(html, /data-carvable="1"[^>]*>[^<]*<span class="dot carved">/);
+    assert.doesNotMatch(
+      html,
+      /data-carvable="1"[^>]*>[^<]*<span class="dot carved">/,
+    );
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -1237,28 +2287,64 @@ test("serveAllStatus GET /archive/log serves a listed run's raw JSONL as text/pl
   seedState(betaDir, [{ event: "campaign-start", batches: [["201"]] }]);
   const archiveDir = join(betaDir, "logs", "archive");
   mkdirSync(archiveDir, { recursive: true });
-  const raw = [{ event: "campaign-start", batches: [["101"], ["102"]] }, { event: "campaign-done", batches: 2 }].map((e) => JSON.stringify(e)).join("\n") + "\n";
-  writeFileSync(join(archiveDir, "orchestrator-2026-01-01T00-00-00-000Z.jsonl"), raw);
-  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+  const raw =
+    [
+      { event: "campaign-start", batches: [["101"], ["102"]] },
+      { event: "campaign-done", batches: 2 },
+    ]
+      .map((e) => JSON.stringify(e))
+      .join("\n") + "\n";
+  writeFileSync(
+    join(archiveDir, "orchestrator-2026-01-01T00-00-00-000Z.jsonl"),
+    raw,
+  );
+  register(configDir, {
+    project: "beta",
+    projectRoot: join(configDir, "beta-root"),
+    baseLocation: betaDir,
+  });
 
-  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+  });
   const { port } = server.address() as AddressInfo;
   try {
     // A listed run returns its log verbatim, as plain text.
-    const ok = await fetch(`http://127.0.0.1:${port}/archive/log?project=beta&run=2026-01-01T00-00-00-000Z`);
+    const ok = await fetch(
+      `http://127.0.0.1:${port}/archive/log?project=beta&run=2026-01-01T00-00-00-000Z`,
+    );
     assert.equal(ok.status, 200);
     assert.match(ok.headers.get("content-type") ?? "", /^text\/plain/);
     assert.equal(await ok.text(), raw);
 
     // A run not in the listing is a 404, never a path to traverse.
-    const missing = await fetch(`http://127.0.0.1:${port}/archive/log?project=beta&run=2026-09-09T00-00-00-000Z`);
+    const missing = await fetch(
+      `http://127.0.0.1:${port}/archive/log?project=beta&run=2026-09-09T00-00-00-000Z`,
+    );
     assert.equal(missing.status, 404);
-    const traversal = await fetch(`http://127.0.0.1:${port}/archive/log?project=beta&run=..%2F..%2Forchestrator`);
+    const traversal = await fetch(
+      `http://127.0.0.1:${port}/archive/log?project=beta&run=..%2F..%2Forchestrator`,
+    );
     assert.equal(traversal.status, 404);
 
     // Params are required, and an unknown project 404s.
-    assert.equal((await fetch(`http://127.0.0.1:${port}/archive/log?run=2026-01-01T00-00-00-000Z`)).status, 400);
-    assert.equal((await fetch(`http://127.0.0.1:${port}/archive/log?project=nope&run=2026-01-01T00-00-00-000Z`)).status, 404);
+    assert.equal(
+      (
+        await fetch(
+          `http://127.0.0.1:${port}/archive/log?run=2026-01-01T00-00-00-000Z`,
+        )
+      ).status,
+      400,
+    );
+    assert.equal(
+      (
+        await fetch(
+          `http://127.0.0.1:${port}/archive/log?project=nope&run=2026-01-01T00-00-00-000Z`,
+        )
+      ).status,
+      404,
+    );
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -1277,35 +2363,97 @@ test("selectStatus picks the requested project, defaulting to the first otherwis
 });
 
 test("describeEvent narrates the operator-facing events in plain words", () => {
-  assert.equal(describeEvent({ event: "campaign-start", name: "gateway work" }), "Campaign “gateway work” started");
+  assert.equal(
+    describeEvent({ event: "campaign-start", name: "gateway work" }),
+    "Campaign “gateway work” started",
+  );
   assert.equal(describeEvent({ event: "campaign-start" }), "Campaign started");
-  assert.equal(describeEvent({ event: "campaign-batch", index: 1 }), "Wave 2 started");
-  assert.equal(describeEvent({ event: "campaign-batch-done", index: 0, merged: ["101", "102"] }), "Wave 1 merged #101, #102");
-  assert.equal(describeEvent({ event: "campaign-batch-done", index: 2, merged: [] }), "Wave 3 merged nothing");
+  assert.equal(
+    describeEvent({ event: "campaign-batch", index: 1 }),
+    "Wave 2 started",
+  );
+  assert.equal(
+    describeEvent({
+      event: "campaign-batch-done",
+      index: 0,
+      merged: ["101", "102"],
+    }),
+    "Wave 1 merged #101, #102",
+  );
+  assert.equal(
+    describeEvent({ event: "campaign-batch-done", index: 2, merged: [] }),
+    "Wave 3 merged nothing",
+  );
   assert.equal(describeEvent({ event: "campaign-done" }), "Campaign complete");
-  assert.equal(describeEvent({ event: "campaign-halt", reason: "merge conflict" }), "Campaign halted: merge conflict");
-  assert.equal(describeEvent({ event: "green", taskId: "#101" }), "#101 merged");
-  assert.equal(describeEvent({ event: "parked", taskId: "202", reason: "needs a choice" }), "#202 parked: needs a choice");
-  assert.equal(describeEvent({ event: "carve", removed: ["303", "304"] }), "Carved #303, #304");
+  assert.equal(
+    describeEvent({ event: "campaign-halt", reason: "merge conflict" }),
+    "Campaign halted: merge conflict",
+  );
+  assert.equal(
+    describeEvent({ event: "green", taskId: "#101" }),
+    "#101 merged",
+  );
+  assert.equal(
+    describeEvent({ event: "parked", taskId: "202", reason: "needs a choice" }),
+    "#202 parked: needs a choice",
+  );
+  assert.equal(
+    describeEvent({ event: "carve", removed: ["303", "304"] }),
+    "Carved #303, #304",
+  );
   // A turn renders its agent-authored summary verbatim (ADR 0009), falling back when absent.
-  assert.equal(describeEvent({ event: "turn", taskId: "101", turn: 3, summary: "Added a failing test for the counter" }), "Added a failing test for the counter");
-  assert.equal(describeEvent({ event: "turn", taskId: "101", turn: 3 }), "#101 — turn 3");
+  assert.equal(
+    describeEvent({
+      event: "turn",
+      taskId: "101",
+      turn: 3,
+      summary: "Added a failing test for the counter",
+    }),
+    "Added a failing test for the counter",
+  );
+  assert.equal(
+    describeEvent({ event: "turn", taskId: "101", turn: 3 }),
+    "#101 — turn 3",
+  );
 });
 
 test("formatFeedEvent prefixes an event's plain-words sentence with its repo, and drops machine noise", () => {
   // A narratable event reads as one repo-prefixed sentence.
-  assert.equal(formatFeedEvent("alpha", { event: "green", taskId: "101" }), "alpha — #101 merged");
-  assert.equal(formatFeedEvent("beta", { event: "turn", taskId: "201", turn: 2, summary: "Wrote a failing test" }), "beta — Wrote a failing test");
+  assert.equal(
+    formatFeedEvent("alpha", { event: "green", taskId: "101" }),
+    "alpha — #101 merged",
+  );
+  assert.equal(
+    formatFeedEvent("beta", {
+      event: "turn",
+      taskId: "201",
+      turn: 2,
+      summary: "Wrote a failing test",
+    }),
+    "beta — Wrote a failing test",
+  );
   // An event describeEvent can't narrate (machine noise) yields no feed line.
-  assert.equal(formatFeedEvent("alpha", { event: "sandbox", taskId: "102" }), "");
+  assert.equal(
+    formatFeedEvent("alpha", { event: "sandbox", taskId: "102" }),
+    "",
+  );
 });
 
 test("lastEventText picks the most recent operator-facing event, ignoring machine noise", () => {
   const events = [
-    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"]] },
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101"]],
+    },
     { ts: "2025-01-01T00:01:00.000Z", event: "green", taskId: "101" },
     // Machine noise after the meaningful event must not become the "last event".
-    { ts: "2025-01-01T00:02:00.000Z", event: "sandbox", taskId: "102", branch: "agent/102" },
+    {
+      ts: "2025-01-01T00:02:00.000Z",
+      event: "sandbox",
+      taskId: "102",
+      branch: "agent/102",
+    },
     { ts: "2025-01-01T00:03:00.000Z", event: "gate", cmds: ["npm test"] },
   ];
   assert.equal(lastEventText(events), "#101 merged");
@@ -1314,7 +2462,11 @@ test("lastEventText picks the most recent operator-facing event, ignoring machin
 
 test("reduceCampaign reconstructs a fresh campaign's waves with no wave running yet", () => {
   const reduced = reduceCampaign([
-    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101", "102"], ["201"]] },
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101", "102"], ["201"]],
+    },
   ]);
 
   assert.deepEqual(reduced.waves, [["101", "102"], ["201"]]);
@@ -1328,15 +2480,41 @@ test("reduceCampaign reconstructs a fresh campaign's waves with no wave running 
 test("reduceCampaign reads an optional campaign name off the campaign-start event", () => {
   // A named run carries its name on the start event; an unnamed one leaves it undefined.
   assert.equal(
-    reduceCampaign([{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"]], name: "gateway work" }]).name,
+    reduceCampaign([
+      {
+        ts: "2025-01-01T00:00:00.000Z",
+        event: "campaign-start",
+        batches: [["101"]],
+        name: "gateway work",
+      },
+    ]).name,
     "gateway work",
   );
-  assert.equal(reduceCampaign([{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"]] }]).name, undefined);
+  assert.equal(
+    reduceCampaign([
+      {
+        ts: "2025-01-01T00:00:00.000Z",
+        event: "campaign-start",
+        batches: [["101"]],
+      },
+    ]).name,
+    undefined,
+  );
   // The latest campaign-start wins, name and all.
   assert.equal(
     reduceCampaign([
-      { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["1"]], name: "first" },
-      { ts: "2025-01-01T00:10:00.000Z", event: "campaign-start", batches: [["101"]], name: "second" },
+      {
+        ts: "2025-01-01T00:00:00.000Z",
+        event: "campaign-start",
+        batches: [["1"]],
+        name: "first",
+      },
+      {
+        ts: "2025-01-01T00:10:00.000Z",
+        event: "campaign-start",
+        batches: [["101"]],
+        name: "second",
+      },
     ]).name,
     "second",
   );
@@ -1344,10 +2522,30 @@ test("reduceCampaign reads an optional campaign name off the campaign-start even
 
 test("reduceCampaign reports one completed wave closed and the next wave current mid-campaign", () => {
   const reduced = reduceCampaign([
-    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"], ["201"]] },
-    { ts: "2025-01-01T00:01:00.000Z", event: "campaign-batch", index: 0, tasks: ["101"] },
-    { ts: "2025-01-01T00:02:00.000Z", event: "campaign-batch-done", index: 0, merged: ["101"], held: [] },
-    { ts: "2025-01-01T00:03:00.000Z", event: "campaign-batch", index: 1, tasks: ["201"] },
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101"], ["201"]],
+    },
+    {
+      ts: "2025-01-01T00:01:00.000Z",
+      event: "campaign-batch",
+      index: 0,
+      tasks: ["101"],
+    },
+    {
+      ts: "2025-01-01T00:02:00.000Z",
+      event: "campaign-batch-done",
+      index: 0,
+      merged: ["101"],
+      held: [],
+    },
+    {
+      ts: "2025-01-01T00:03:00.000Z",
+      event: "campaign-batch",
+      index: 1,
+      tasks: ["201"],
+    },
   ]);
 
   assert.deepEqual(reduced.waves, [["101"], ["201"]]);
@@ -1359,10 +2557,24 @@ test("reduceCampaign reports one completed wave closed and the next wave current
 
 test("reduceCampaign records when each issue merged, from batch-done, green and queue-done", () => {
   const reduced = reduceCampaign([
-    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"], ["201", "202"]] },
-    { ts: "2025-01-01T00:02:00.000Z", event: "campaign-batch-done", index: 0, merged: ["101"], held: [] },
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101"], ["201", "202"]],
+    },
+    {
+      ts: "2025-01-01T00:02:00.000Z",
+      event: "campaign-batch-done",
+      index: 0,
+      merged: ["101"],
+      held: [],
+    },
     { ts: "2025-01-02T09:00:00.000Z", event: "green", taskId: "201" },
-    { ts: "2025-01-02T10:00:00.000Z", event: "queue-done", outcomes: { "202": "green", "201": "green" } },
+    {
+      ts: "2025-01-02T10:00:00.000Z",
+      event: "queue-done",
+      outcomes: { "202": "green", "201": "green" },
+    },
   ]);
 
   // A merge stamp is recorded from every path an issue reaches "completed" by — the
@@ -1374,9 +2586,23 @@ test("reduceCampaign records when each issue merged, from batch-done, green and 
 
 test("reduceCampaign marks a halted issue as a failure", () => {
   const reduced = reduceCampaign([
-    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101", "102"]] },
-    { ts: "2025-01-01T00:01:00.000Z", event: "campaign-batch", index: 0, tasks: ["101", "102"] },
-    { ts: "2025-01-01T00:02:00.000Z", event: "campaign-halt", taskId: "101", reason: "gate failed" },
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101", "102"]],
+    },
+    {
+      ts: "2025-01-01T00:01:00.000Z",
+      event: "campaign-batch",
+      index: 0,
+      tasks: ["101", "102"],
+    },
+    {
+      ts: "2025-01-01T00:02:00.000Z",
+      event: "campaign-halt",
+      taskId: "101",
+      reason: "gate failed",
+    },
   ]);
 
   assert.equal(reduced.outcomes.get("101"), "failure");
@@ -1397,7 +2623,11 @@ test("campaignRunning is true for a started campaign that has not finished or ha
 });
 
 test("campaignRunning is false with no campaign, and once it completes or halts", () => {
-  assert.equal(campaignRunning([{ event: "queue-start", taskIds: ["101"] }]), false, "queue-only run is not a campaign");
+  assert.equal(
+    campaignRunning([{ event: "queue-start", taskIds: ["101"] }]),
+    false,
+    "queue-only run is not a campaign",
+  );
   assert.equal(
     campaignRunning([
       { event: "campaign-start", batches: [["101"]] },
@@ -1430,13 +2660,43 @@ test("campaignRunning tracks the latest campaign only", () => {
 
 test("reduceCampaign folds a carve event, pruning unfinished issues from future waves", () => {
   const reduced = reduceCampaign([
-    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"], ["201", "202"], ["301"]] },
-    { ts: "2025-01-01T00:01:00.000Z", event: "campaign-batch", index: 0, tasks: ["101"] },
-    { ts: "2025-01-01T00:02:00.000Z", event: "campaign-batch-done", index: 0, merged: ["101"], held: [] },
-    { ts: "2025-01-01T00:03:00.000Z", event: "campaign-batch", index: 1, tasks: ["201", "202"] },
-    { ts: "2025-01-01T00:03:30.000Z", event: "queue-start", taskIds: ["201", "202"], slots: 3 },
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101"], ["201", "202"], ["301"]],
+    },
+    {
+      ts: "2025-01-01T00:01:00.000Z",
+      event: "campaign-batch",
+      index: 0,
+      tasks: ["101"],
+    },
+    {
+      ts: "2025-01-01T00:02:00.000Z",
+      event: "campaign-batch-done",
+      index: 0,
+      merged: ["101"],
+      held: [],
+    },
+    {
+      ts: "2025-01-01T00:03:00.000Z",
+      event: "campaign-batch",
+      index: 1,
+      tasks: ["201", "202"],
+    },
+    {
+      ts: "2025-01-01T00:03:30.000Z",
+      event: "queue-start",
+      taskIds: ["201", "202"],
+      slots: 3,
+    },
     // 202 carved mid-wave: it is running, so it stays; its unstarted dependent 301 goes.
-    { ts: "2025-01-01T00:04:00.000Z", event: "carve", target: "202", removed: ["202", "301"] },
+    {
+      ts: "2025-01-01T00:04:00.000Z",
+      event: "carve",
+      target: "202",
+      removed: ["202", "301"],
+    },
   ]);
 
   // 101 (merged) and 202 (in-flight) stay; only the future, unstarted 301 is pruned.
@@ -1448,11 +2708,31 @@ test("reduceCampaign folds a carve event, pruning unfinished issues from future 
 
 test("reduceCampaign's carve fold clears an emptied future wave and reindexes", () => {
   const reduced = reduceCampaign([
-    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"], ["201"], ["301"]] },
-    { ts: "2025-01-01T00:01:00.000Z", event: "campaign-batch", index: 0, tasks: ["101"] },
-    { ts: "2025-01-01T00:02:00.000Z", event: "campaign-batch-done", index: 0, merged: ["101"], held: [] },
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101"], ["201"], ["301"]],
+    },
+    {
+      ts: "2025-01-01T00:01:00.000Z",
+      event: "campaign-batch",
+      index: 0,
+      tasks: ["101"],
+    },
+    {
+      ts: "2025-01-01T00:02:00.000Z",
+      event: "campaign-batch-done",
+      index: 0,
+      merged: ["101"],
+      held: [],
+    },
     // Between waves: 201 not yet started, so carving it empties and drops its wave.
-    { ts: "2025-01-01T00:03:00.000Z", event: "carve", target: "201", removed: ["201"] },
+    {
+      ts: "2025-01-01T00:03:00.000Z",
+      event: "carve",
+      target: "201",
+      removed: ["201"],
+    },
   ]);
 
   assert.deepEqual(reduced.waves, [["101"], ["301"]]);
@@ -1462,11 +2742,41 @@ test("reduceCampaign's carve fold clears an emptied future wave and reindexes", 
 test("reconstructIssueDetail folds an issue's turn log, count, elapsed and status from the log", () => {
   const detail = reconstructIssueDetail(
     [
-      { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"], ["201"]], titles: { "101": "Do the thing" }, name: "gateway work" },
-      { ts: "2025-01-01T00:01:00.000Z", event: "campaign-batch", index: 0, tasks: ["101"] },
-      { ts: "2025-01-01T00:02:00.000Z", event: "turn", taskId: "101", turn: 0, signal: undefined, summary: "Wrote a failing test for the parser." },
-      { ts: "2025-01-01T00:07:00.000Z", event: "turn", taskId: "101", turn: 1, signal: "done", summary: "Made it green and tidied up." },
-      { ts: "2025-01-01T00:12:00.000Z", event: "green", taskId: "101", branch: "agent/101" },
+      {
+        ts: "2025-01-01T00:00:00.000Z",
+        event: "campaign-start",
+        batches: [["101"], ["201"]],
+        titles: { "101": "Do the thing" },
+        name: "gateway work",
+      },
+      {
+        ts: "2025-01-01T00:01:00.000Z",
+        event: "campaign-batch",
+        index: 0,
+        tasks: ["101"],
+      },
+      {
+        ts: "2025-01-01T00:02:00.000Z",
+        event: "turn",
+        taskId: "101",
+        turn: 0,
+        signal: undefined,
+        summary: "Wrote a failing test for the parser.",
+      },
+      {
+        ts: "2025-01-01T00:07:00.000Z",
+        event: "turn",
+        taskId: "101",
+        turn: 1,
+        signal: "done",
+        summary: "Made it green and tidied up.",
+      },
+      {
+        ts: "2025-01-01T00:12:00.000Z",
+        event: "green",
+        taskId: "101",
+        branch: "agent/101",
+      },
     ],
     "101",
   );
@@ -1493,11 +2803,37 @@ test("reconstructIssueDetail folds an issue's turn log, count, elapsed and statu
 test("reconstructIssueDetail surfaces the preserved worktree path for a parked issue", () => {
   const detail = reconstructIssueDetail(
     [
-      { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["102"]], name: "gateway work" },
-      { ts: "2025-01-01T00:01:00.000Z", event: "campaign-batch", index: 0, tasks: ["102"] },
-      { ts: "2025-01-01T00:02:00.000Z", event: "turn", taskId: "102", turn: 0, summary: "Asked which option to take." },
-      { ts: "2025-01-01T00:03:00.000Z", event: "parked", taskId: "102", reason: "blocked" },
-      { ts: "2025-01-01T00:03:01.000Z", event: "worktree-preserved", taskId: "102", path: ".sandcastle.local/wt/102" },
+      {
+        ts: "2025-01-01T00:00:00.000Z",
+        event: "campaign-start",
+        batches: [["102"]],
+        name: "gateway work",
+      },
+      {
+        ts: "2025-01-01T00:01:00.000Z",
+        event: "campaign-batch",
+        index: 0,
+        tasks: ["102"],
+      },
+      {
+        ts: "2025-01-01T00:02:00.000Z",
+        event: "turn",
+        taskId: "102",
+        turn: 0,
+        summary: "Asked which option to take.",
+      },
+      {
+        ts: "2025-01-01T00:03:00.000Z",
+        event: "parked",
+        taskId: "102",
+        reason: "blocked",
+      },
+      {
+        ts: "2025-01-01T00:03:01.000Z",
+        event: "worktree-preserved",
+        taskId: "102",
+        path: ".sandcastle.local/wt/102",
+      },
     ],
     "102",
   );
@@ -1512,13 +2848,34 @@ test("buildStatus shows campaign waves with issue chips and statuses", () => {
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
   writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
-    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101", "102"], ["201"]] },
-    { ts: "2025-01-01T00:01:00.000Z", event: "campaign-batch", index: 0, tasks: ["101", "102"] },
-    { ts: "2025-01-01T00:02:00.000Z", event: "queue-done", outcomes: { "101": "green", "102": "parked" } },
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101", "102"], ["201"]],
+    },
+    {
+      ts: "2025-01-01T00:01:00.000Z",
+      event: "campaign-batch",
+      index: 0,
+      tasks: ["101", "102"],
+    },
+    {
+      ts: "2025-01-01T00:02:00.000Z",
+      event: "queue-done",
+      outcomes: { "101": "green", "102": "parked" },
+    },
   ]);
   writeFileSync(
     join(dir, "parked", "102.json"),
-    JSON.stringify({ taskId: "102", parkedAt: "now", reason: "blocked", branch: "agent/102", sessionId: "s", question: "Need a choice.\n\nOptions:\n- A: do the simple thing\n- B: do the robust thing" }),
+    JSON.stringify({
+      taskId: "102",
+      parkedAt: "now",
+      reason: "blocked",
+      branch: "agent/102",
+      sessionId: "s",
+      question:
+        "Need a choice.\n\nOptions:\n- A: do the simple thing\n- B: do the robust thing",
+    }),
   );
 
   const status = buildStatus(cfgFor(dir));
@@ -1536,7 +2893,10 @@ test("buildStatus shows campaign waves with issue chips and statuses", () => {
     ],
   );
   assert.equal(status.parked[0].issueNumber, "102");
-  assert.deepEqual(status.parked[0].options, ["A: do the simple thing", "B: do the robust thing"]);
+  assert.deepEqual(status.parked[0].options, [
+    "A: do the simple thing",
+    "B: do the robust thing",
+  ]);
 });
 
 test("buildStatus surfaces the campaign name from the start event", () => {
@@ -1544,7 +2904,12 @@ test("buildStatus surfaces the campaign name from the start event", () => {
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
   writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
-    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"]], name: "gateway work" },
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101"]],
+      name: "gateway work",
+    },
   ]);
 
   assert.equal(buildStatus(cfgFor(dir)).name, "gateway work");
@@ -1574,7 +2939,13 @@ test("buildStatus fills issue names from a queue-only run's queue-start titles",
   seedState(dir, [
     // No campaign frame — a bare queue run frames its taskIds as a single wave,
     // and carries their titles on queue-start.
-    { ts: "2025-01-01T00:00:00.000Z", event: "queue-start", taskIds: ["301", "302"], slots: 2, titles: { "301": "Fix parser", "302": "Tune cache" } },
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "queue-start",
+      taskIds: ["301", "302"],
+      slots: 2,
+      titles: { "301": "Fix parser", "302": "Tune cache" },
+    },
   ]);
 
   const status = buildStatus(cfgFor(dir));
@@ -1585,7 +2956,13 @@ test("buildStatus fills issue names from a queue-only run's queue-start titles",
 
 test("buildStatus leaves issue names unset when the log carries no titles", () => {
   const dir = join(tmpdir(), `sctdd-status-no-titles-${Date.now()}`);
-  seedState(dir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"]] }]);
+  seedState(dir, [
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101"]],
+    },
+  ]);
 
   assert.equal(buildStatus(cfgFor(dir)).waves[0].issues[0].name, undefined);
 });
@@ -1595,10 +2972,30 @@ test("buildStatus marks completed waves as closed", () => {
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
   writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
-    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"], ["201"]] },
-    { ts: "2025-01-01T00:01:00.000Z", event: "campaign-batch", index: 0, tasks: ["101"] },
-    { ts: "2025-01-01T00:02:00.000Z", event: "campaign-batch-done", index: 0, merged: ["101"], held: [] },
-    { ts: "2025-01-01T00:03:00.000Z", event: "campaign-batch", index: 1, tasks: ["201"] },
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101"], ["201"]],
+    },
+    {
+      ts: "2025-01-01T00:01:00.000Z",
+      event: "campaign-batch",
+      index: 0,
+      tasks: ["101"],
+    },
+    {
+      ts: "2025-01-01T00:02:00.000Z",
+      event: "campaign-batch-done",
+      index: 0,
+      merged: ["101"],
+      held: [],
+    },
+    {
+      ts: "2025-01-01T00:03:00.000Z",
+      event: "campaign-batch",
+      index: 1,
+      tasks: ["201"],
+    },
   ]);
 
   const status = buildStatus(cfgFor(dir));
@@ -1615,11 +3012,32 @@ test("buildStatus marks completed waves as closed", () => {
 test("buildStatus renders a carved issue as a carved chip in the wave it left", () => {
   const dir = join(tmpdir(), `sctdd-status-carved-${Date.now()}`);
   seedState(dir, [
-    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"], ["201"]], titles: { "101": "seed the db", "201": "add the report" } },
-    { ts: "2025-01-01T00:01:00.000Z", event: "campaign-batch", index: 0, tasks: ["101"] },
-    { ts: "2025-01-01T00:02:00.000Z", event: "campaign-batch-done", index: 0, merged: ["101"], held: [] },
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101"], ["201"]],
+      titles: { "101": "seed the db", "201": "add the report" },
+    },
+    {
+      ts: "2025-01-01T00:01:00.000Z",
+      event: "campaign-batch",
+      index: 0,
+      tasks: ["101"],
+    },
+    {
+      ts: "2025-01-01T00:02:00.000Z",
+      event: "campaign-batch-done",
+      index: 0,
+      merged: ["101"],
+      held: [],
+    },
     // 201 is a future, unstarted wave: carving it drops it from the running plan…
-    { ts: "2025-01-01T00:03:00.000Z", event: "carve", target: "201", removed: ["201"] },
+    {
+      ts: "2025-01-01T00:03:00.000Z",
+      event: "carve",
+      target: "201",
+      removed: ["201"],
+    },
   ]);
 
   const status = buildStatus(cfgFor(dir));
@@ -1640,9 +3058,23 @@ test("buildStatus marks active wave issues as running before they finish", () =>
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
   writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
-    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101", "102"]] },
-    { ts: "2025-01-01T00:01:00.000Z", event: "campaign-batch", index: 0, tasks: ["101", "102"] },
-    { ts: "2025-01-01T00:02:00.000Z", event: "queue-start", taskIds: ["101", "102"], slots: 2 },
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101", "102"]],
+    },
+    {
+      ts: "2025-01-01T00:01:00.000Z",
+      event: "campaign-batch",
+      index: 0,
+      tasks: ["101", "102"],
+    },
+    {
+      ts: "2025-01-01T00:02:00.000Z",
+      event: "queue-start",
+      taskIds: ["101", "102"],
+      slots: 2,
+    },
     { ts: "2025-01-01T00:03:00.000Z", event: "green", taskId: "101" },
   ]);
 
@@ -1662,38 +3094,84 @@ test("buildStatus does not show parked interaction cards for closed wave issues"
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
   writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
-    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"], ["201"]] },
-    { ts: "2025-01-01T00:01:00.000Z", event: "campaign-batch", index: 0, tasks: ["101"] },
-    { ts: "2025-01-01T00:02:00.000Z", event: "campaign-batch-done", index: 0, merged: [], held: ["101"] },
-    { ts: "2025-01-01T00:03:00.000Z", event: "campaign-batch", index: 1, tasks: ["201"] },
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101"], ["201"]],
+    },
+    {
+      ts: "2025-01-01T00:01:00.000Z",
+      event: "campaign-batch",
+      index: 0,
+      tasks: ["101"],
+    },
+    {
+      ts: "2025-01-01T00:02:00.000Z",
+      event: "campaign-batch-done",
+      index: 0,
+      merged: [],
+      held: ["101"],
+    },
+    {
+      ts: "2025-01-01T00:03:00.000Z",
+      event: "campaign-batch",
+      index: 1,
+      tasks: ["201"],
+    },
   ]);
   for (const taskId of ["101", "201"]) {
     writeFileSync(
       join(dir, "parked", `${taskId}.json`),
-      JSON.stringify({ taskId, parkedAt: "now", reason: "blocked", branch: `agent/${taskId}`, sessionId: "s", question: "Need a choice." }),
+      JSON.stringify({
+        taskId,
+        parkedAt: "now",
+        reason: "blocked",
+        branch: `agent/${taskId}`,
+        sessionId: "s",
+        question: "Need a choice.",
+      }),
     );
   }
 
   const status = buildStatus(cfgFor(dir));
 
-  assert.deepEqual(status.parked.map((p) => p.issueNumber), ["201"]);
+  assert.deepEqual(
+    status.parked.map((p) => p.issueNumber),
+    ["201"],
+  );
 });
 
 test("buildStatus only shows parked cards for issues in the active campaign", () => {
   const dir = join(tmpdir(), `sctdd-status-filter-${Date.now()}`);
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
-  writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["243"]] }]);
+  writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["243"]],
+    },
+  ]);
   for (const taskId of ["243", "999"]) {
     writeFileSync(
       join(dir, "parked", `${taskId}.json`),
-      JSON.stringify({ taskId, parkedAt: "now", reason: "blocked", branch: `agent/${taskId}`, sessionId: "s", question: "Need a choice." }),
+      JSON.stringify({
+        taskId,
+        parkedAt: "now",
+        reason: "blocked",
+        branch: `agent/${taskId}`,
+        sessionId: "s",
+        question: "Need a choice.",
+      }),
     );
   }
 
   const status = buildStatus(cfgFor(dir));
 
-  assert.deepEqual(status.parked.map((p) => p.issueNumber), ["243"]);
+  assert.deepEqual(
+    status.parked.map((p) => p.issueNumber),
+    ["243"],
+  );
 });
 
 test("buildStatus adds rough activity details for issue hover", () => {
@@ -1701,12 +3179,43 @@ test("buildStatus adds rough activity details for issue hover", () => {
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
   writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
-    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101", "102", "103"]] },
-    { ts: "2025-01-01T00:01:00.000Z", event: "queue-start", taskIds: ["101", "102", "103"], slots: 3 },
-    { ts: "2025-01-01T00:02:00.000Z", event: "queue-spawn", taskId: "101", running: 1, left: 2 },
-    { ts: "2025-01-01T00:03:00.000Z", event: "turn", taskId: "101", turn: 2, signal: "<promise>COMPLETE</promise>" },
-    { ts: "2025-01-01T00:04:00.000Z", event: "green", taskId: "102", branch: "agent/102" },
-    { ts: "2025-01-01T00:05:00.000Z", event: "parked", taskId: "103", reason: "blocked" },
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101", "102", "103"]],
+    },
+    {
+      ts: "2025-01-01T00:01:00.000Z",
+      event: "queue-start",
+      taskIds: ["101", "102", "103"],
+      slots: 3,
+    },
+    {
+      ts: "2025-01-01T00:02:00.000Z",
+      event: "queue-spawn",
+      taskId: "101",
+      running: 1,
+      left: 2,
+    },
+    {
+      ts: "2025-01-01T00:03:00.000Z",
+      event: "turn",
+      taskId: "101",
+      turn: 2,
+      signal: "<promise>COMPLETE</promise>",
+    },
+    {
+      ts: "2025-01-01T00:04:00.000Z",
+      event: "green",
+      taskId: "102",
+      branch: "agent/102",
+    },
+    {
+      ts: "2025-01-01T00:05:00.000Z",
+      event: "parked",
+      taskId: "103",
+      reason: "blocked",
+    },
   ]);
 
   const status = buildStatus(cfgFor(dir));
@@ -1725,11 +3234,20 @@ test("buildStatusWithIssueNames adds issue names from fetchTask when available",
   const dir = join(tmpdir(), `sctdd-status-issue-names-${Date.now()}`);
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
-  writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101", "102"]] }]);
+  writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101", "102"]],
+    },
+  ]);
 
   const status = await buildStatusWithIssueNames({
     ...cfgFor(dir),
-    fetchTask: async (id: string) => (id === "101" ? JSON.stringify({ title: "Add login flow" }) : "no structured title"),
+    fetchTask: async (id: string) =>
+      id === "101"
+        ? JSON.stringify({ title: "Add login flow" })
+        : "no structured title",
   });
 
   assert.equal(status.waves[0].issues[0].name, "Add login flow");
@@ -1740,10 +3258,30 @@ test("wave labels read from tmp-log issue titles, resolved through buildStatusWi
   const dir = join(tmpdir(), `sctdd-status-wave-names-${Date.now()}`);
   seedState(dir, [
     // Wave 0 (many issues) closes; wave 1 (one issue) is now running.
-    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101", "102", "103"], ["201"]] },
-    { ts: "2025-01-01T00:01:00.000Z", event: "campaign-batch", index: 0, tasks: ["101", "102", "103"] },
-    { ts: "2025-01-01T00:02:00.000Z", event: "campaign-batch-done", index: 0, merged: ["101", "102", "103"], held: [] },
-    { ts: "2025-01-01T00:03:00.000Z", event: "campaign-batch", index: 1, tasks: ["201"] },
+    {
+      ts: "2025-01-01T00:00:00.000Z",
+      event: "campaign-start",
+      batches: [["101", "102", "103"], ["201"]],
+    },
+    {
+      ts: "2025-01-01T00:01:00.000Z",
+      event: "campaign-batch",
+      index: 0,
+      tasks: ["101", "102", "103"],
+    },
+    {
+      ts: "2025-01-01T00:02:00.000Z",
+      event: "campaign-batch-done",
+      index: 0,
+      merged: ["101", "102", "103"],
+      held: [],
+    },
+    {
+      ts: "2025-01-01T00:03:00.000Z",
+      event: "campaign-batch",
+      index: 1,
+      tasks: ["201"],
+    },
   ]);
   const titles: Record<string, string> = {
     "101": "config resolution",
@@ -1763,10 +3301,19 @@ test("wave labels read from tmp-log issue titles, resolved through buildStatusWi
 
   // Many-issue wave (closed): a compact "Wave N" toggle chip with its merged tally; the
   // lead title + "+N" now reads on the full card the chip reveals in the grid.
-  assert.match(html, /<span class="check" aria-hidden="true">✓<\/span> Wave 1 <span class="completed-wave-tally">3\/3<\/span><\/button>/);
-  assert.match(html, /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2>Wave 1 — config resolution \+2 <span class="wave-status closed">closed<\/span>/);
+  assert.match(
+    html,
+    /<span class="check" aria-hidden="true">✓<\/span> Wave 1 <span class="completed-wave-tally">3\/3<\/span><\/button>/,
+  );
+  assert.match(
+    html,
+    /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2>Wave 1 — config resolution \+2 <span class="wave-status closed">closed<\/span>/,
+  );
   // Single-issue wave (open): just that issue's title, in a wave card.
-  assert.match(html, /<section class="wave running"><div class="wave-head"><h2>Wave 2 — cache eviction <span class="wave-status running">running<\/span>/);
+  assert.match(
+    html,
+    /<section class="wave running"><div class="wave-head"><h2>Wave 2 — cache eviction <span class="wave-status running">running<\/span>/,
+  );
 });
 
 test("wave labels and chip hovers render from the log's titles, with no fetchTask", () => {
@@ -1777,11 +3324,32 @@ test("wave labels and chip hovers render from the log's titles, with no fetchTas
       ts: "2025-01-01T00:00:00.000Z",
       event: "campaign-start",
       batches: [["101", "102", "103"], ["201"]],
-      titles: { "101": "config resolution", "102": "retry policy", "103": "log rotation", "201": "cache eviction" },
+      titles: {
+        "101": "config resolution",
+        "102": "retry policy",
+        "103": "log rotation",
+        "201": "cache eviction",
+      },
     },
-    { ts: "2025-01-01T00:01:00.000Z", event: "campaign-batch", index: 0, tasks: ["101", "102", "103"] },
-    { ts: "2025-01-01T00:02:00.000Z", event: "campaign-batch-done", index: 0, merged: ["101", "102", "103"], held: [] },
-    { ts: "2025-01-01T00:03:00.000Z", event: "campaign-batch", index: 1, tasks: ["201"] },
+    {
+      ts: "2025-01-01T00:01:00.000Z",
+      event: "campaign-batch",
+      index: 0,
+      tasks: ["101", "102", "103"],
+    },
+    {
+      ts: "2025-01-01T00:02:00.000Z",
+      event: "campaign-batch-done",
+      index: 0,
+      merged: ["101", "102", "103"],
+      held: [],
+    },
+    {
+      ts: "2025-01-01T00:03:00.000Z",
+      event: "campaign-batch",
+      index: 1,
+      tasks: ["201"],
+    },
   ]);
 
   // buildStatus over cfgFor's id-echoing fetchTask: the only source of titles is
@@ -1790,10 +3358,19 @@ test("wave labels and chip hovers render from the log's titles, with no fetchTas
 
   // Many-issue wave (closed): a compact "Wave N" toggle chip with its merged tally; the
   // lead title + "+N" now reads on the full card the chip reveals in the grid.
-  assert.match(html, /<span class="check" aria-hidden="true">✓<\/span> Wave 1 <span class="completed-wave-tally">3\/3<\/span><\/button>/);
-  assert.match(html, /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2>Wave 1 — config resolution \+2 <span class="wave-status closed">closed<\/span>/);
+  assert.match(
+    html,
+    /<span class="check" aria-hidden="true">✓<\/span> Wave 1 <span class="completed-wave-tally">3\/3<\/span><\/button>/,
+  );
+  assert.match(
+    html,
+    /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2>Wave 1 — config resolution \+2 <span class="wave-status closed">closed<\/span>/,
+  );
   // Single-issue wave (open): just that issue's title, in a wave card.
-  assert.match(html, /<section class="wave running"><div class="wave-head"><h2>Wave 2 — cache eviction <span class="wave-status running">running<\/span>/);
+  assert.match(
+    html,
+    /<section class="wave running"><div class="wave-head"><h2>Wave 2 — cache eviction <span class="wave-status running">running<\/span>/,
+  );
   // Every chip carries its own title on hover — 201 has no status detail yet, so
   // its hover is exactly the resolved title.
   assert.match(html, /<button[^>]*title="cache eviction"[^>]*>/);
@@ -1827,8 +3404,14 @@ test("renderStatusPage shows a merged/total tally on an open wave card", () => {
 
   // Each open wave card's head carries its merged/total on the right — one of two
   // done in the running wave, none in the unstarted one.
-  assert.match(html, /<span class="wave-status running">running<\/span><\/h2><span class="wave-tally">1\/2<\/span>/);
-  assert.match(html, /<span class="wave-status unstarted">unstarted<\/span><\/h2><span class="wave-tally">0\/2<\/span>/);
+  assert.match(
+    html,
+    /<span class="wave-status running">running<\/span><\/h2><span class="wave-tally">1\/2<\/span>/,
+  );
+  assert.match(
+    html,
+    /<span class="wave-status unstarted">unstarted<\/span><\/h2><span class="wave-tally">0\/2<\/span>/,
+  );
 });
 
 test("renderStatusPage lists the issue titles under each open wave", () => {
@@ -1849,7 +3432,10 @@ test("renderStatusPage lists the issue titles under each open wave", () => {
 
   // Under the open wave's chips, each issue's title is listed (its number alone
   // when it has no resolved title yet).
-  assert.match(html, /<ul class="wave-issues"><li[^>]*>#201 wire up the parser<\/li><li[^>]*>#202<\/li><\/ul>/);
+  assert.match(
+    html,
+    /<ul class="wave-issues"><li[^>]*>#201 wire up the parser<\/li><li[^>]*>#202<\/li><\/ul>/,
+  );
 });
 
 test("renderStatusPage colours a carved chip and pulses a running one", () => {
@@ -1869,7 +3455,10 @@ test("renderStatusPage colours a carved chip and pulses a running one", () => {
   });
 
   // A carved chip carries the carved status dot + label…
-  assert.match(html, /<span class="dot carved"><\/span>#202 <small>carved<\/small>/);
+  assert.match(
+    html,
+    /<span class="dot carved"><\/span>#202 <small>carved<\/small>/,
+  );
   // …and the wave it left gains a carved tally in its header, so the carve reads
   // at a glance without counting struck-through chips (one of two issues carved).
   assert.match(html, /<span class="wave-carved">1 carved<\/span>/);
@@ -1885,7 +3474,17 @@ test("renderStatusPage colours a carved chip and pulses a running one", () => {
 
 test("renderStatusPage's carve panel discloses kept-banked work and carries a standalone explainer", () => {
   const html = renderStatusPage(
-    { project: "beta", waves: [{ index: 0, status: "unstarted", issues: [{ issueNumber: "401", status: "unstarted" }] }], parked: [] },
+    {
+      project: "beta",
+      waves: [
+        {
+          index: 0,
+          status: "unstarted",
+          issues: [{ issueNumber: "401", status: "unstarted" }],
+        },
+      ],
+      parked: [],
+    },
     { carve: true },
   );
   // The confirmation is built from the structured closure the endpoint returns:
@@ -1903,37 +3502,83 @@ test("renderStatusPage renders the repo dropdown (with a no-JS select fallback) 
   const html = renderStatusPage(
     {
       project: "beta",
-      waves: [{ index: 0, status: "running", issues: [{ issueNumber: "201", status: "running" }] }],
-      parked: [{ issueNumber: "201", reason: "blocked", parkedAt: "now", branch: "agent/201", description: "Need a choice.", options: [] }],
+      waves: [
+        {
+          index: 0,
+          status: "running",
+          issues: [{ issueNumber: "201", status: "running" }],
+        },
+      ],
+      parked: [
+        {
+          issueNumber: "201",
+          reason: "blocked",
+          parkedAt: "now",
+          branch: "agent/201",
+          description: "Need a choice.",
+          options: [],
+        },
+      ],
     },
     { projects: ["alpha", "beta", "gamma"], selected: "beta" },
   );
 
   // The primary control is the repo dropdown trigger stating the current scope.
-  assert.match(html, /<button type="button" class="repo-trigger"[^>]*aria-haspopup="listbox"/);
+  assert.match(
+    html,
+    /<button type="button" class="repo-trigger"[^>]*aria-haspopup="listbox"/,
+  );
   assert.match(html, /<span class="repo-label">beta<\/span>/);
   // The native <select> lives on inside <noscript> as the no-JS switch (posts back to GET /).
-  assert.match(html, /<noscript><form[^>]*method="get"[^>]*action="\/"[^>]*class="project-picker">/);
-  assert.match(html, /<select name="project" onchange="this\.form\.submit\(\)">/);
+  assert.match(
+    html,
+    /<noscript><form[^>]*method="get"[^>]*action="\/"[^>]*class="project-picker">/,
+  );
+  assert.match(
+    html,
+    /<select name="project" onchange="this\.form\.submit\(\)">/,
+  );
   assert.match(html, /<option value="">All repos<\/option>/);
   assert.match(html, /<option value="beta" selected>beta<\/option>/);
   assert.match(html, /<option value="gamma">gamma<\/option>/);
   // The selected project's own body still renders exactly as the single-project view.
-  assert.match(html, /<section class="wave running"><div class="wave-head"><h2>Wave 1 <span class="wave-status running">running<\/span>/);
+  assert.match(
+    html,
+    /<section class="wave running"><div class="wave-head"><h2>Wave 1 <span class="wave-status running">running<\/span>/,
+  );
   // The parked card carries the project so the sheet routes its reply/carve to it.
   assert.match(html, /<a class="parked-card"[^>]*data-project="beta"/);
 });
 
 test("renderStatusPage's repo dropdown states the current scope as the heading trigger, not a native select", () => {
   const html = renderStatusPage(
-    { project: "acme/tidepool", waves: [{ index: 0, status: "running", issues: [{ issueNumber: "201", status: "running" }] }], parked: [] },
-    { projects: [{ project: "jjforge/tidepool", runState: "parked" }, { project: "acme/tidepool", runState: "running" }], selected: "acme/tidepool" },
+    {
+      project: "acme/tidepool",
+      waves: [
+        {
+          index: 0,
+          status: "running",
+          issues: [{ issueNumber: "201", status: "running" }],
+        },
+      ],
+      parked: [],
+    },
+    {
+      projects: [
+        { project: "jjforge/tidepool", runState: "parked" },
+        { project: "acme/tidepool", runState: "running" },
+      ],
+      selected: "acme/tidepool",
+    },
   );
 
   // The trigger is the page heading and the switcher in one control: a button, not a
   // native <select>, carrying the full owner/name scope as its label plus a chevron.
   assert.match(html, /<div class="repo-dropdown" data-repo-dropdown>/);
-  assert.match(html, /<button type="button" class="repo-trigger" id="repo-trigger" aria-haspopup="listbox" aria-expanded="false" aria-controls="repo-menu">/);
+  assert.match(
+    html,
+    /<button type="button" class="repo-trigger" id="repo-trigger" aria-haspopup="listbox" aria-expanded="false" aria-controls="repo-menu">/,
+  );
   assert.match(html, /<span class="repo-label">acme\/tidepool<\/span>/);
   assert.match(html, /<span class="repo-chevron" aria-hidden="true">▾<\/span>/);
   // The full owner/name is the label — never abbreviated to just the repo name.
@@ -1942,10 +3587,18 @@ test("renderStatusPage's repo dropdown states the current scope as the heading t
 
 test("the repo dropdown shows owner/name from repo while data-project stays the bare project key", () => {
   const html = renderStatusPage(
-    { project: "sandcastle-tdd", waves: [{ index: 0, status: "running", issues: [] }], parked: [] },
+    {
+      project: "sandcastle-tdd",
+      waves: [{ index: 0, status: "running", issues: [] }],
+      parked: [],
+    },
     {
       projects: [
-        { project: "sandcastle-tdd", runState: "running", repo: "jjforge/sandcastle-tdd" },
+        {
+          project: "sandcastle-tdd",
+          runState: "running",
+          repo: "jjforge/sandcastle-tdd",
+        },
         { project: "acme-checkout", runState: "idle" },
       ],
       selected: "sandcastle-tdd",
@@ -1953,114 +3606,245 @@ test("the repo dropdown shows owner/name from repo while data-project stays the 
   );
 
   // The trigger heading reads the selected repo's owner/name, not its bare key.
-  assert.match(html, /<span class="repo-label">jjforge\/sandcastle-tdd<\/span>/);
+  assert.match(
+    html,
+    /<span class="repo-label">jjforge\/sandcastle-tdd<\/span>/,
+  );
   // Its row shows owner/name too, but routing stays keyed on the bare project key.
-  assert.match(html, /<li class="repo-option selected"[^>]*data-project="sandcastle-tdd"[^>]*><span class="repo-dot running"[^>]*><\/span><span class="repo-optlabel">jjforge\/sandcastle-tdd<\/span>/);
+  assert.match(
+    html,
+    /<li class="repo-option selected"[^>]*data-project="sandcastle-tdd"[^>]*><span class="repo-dot running"[^>]*><\/span><span class="repo-optlabel">jjforge\/sandcastle-tdd<\/span>/,
+  );
   // A project with no remote falls back to its bare key for the label.
-  assert.match(html, /data-project="acme-checkout"[^>]*><span class="repo-dot idle"[^>]*><\/span><span class="repo-optlabel">acme-checkout<\/span>/);
+  assert.match(
+    html,
+    /data-project="acme-checkout"[^>]*><span class="repo-dot idle"[^>]*><\/span><span class="repo-optlabel">acme-checkout<\/span>/,
+  );
 });
 
 test("renderLandingShell's repo dropdown is the All-repos heading, replacing the h1 + native select", () => {
-  const html = renderLandingShell([{ project: "jjforge/tidepool", runState: "running" }, { project: "acme/tidepool", runState: "idle" }]);
+  const html = renderLandingShell([
+    { project: "jjforge/tidepool", runState: "running" },
+    { project: "acme/tidepool", runState: "idle" },
+  ]);
 
   // The aggregate scope reads "All repos" as the trigger label — the heading itself.
   assert.match(html, /<span class="repo-label">All repos<\/span>/);
-  assert.match(html, /<button type="button" class="repo-trigger"[^>]*aria-haspopup="listbox"/);
+  assert.match(
+    html,
+    /<button type="button" class="repo-trigger"[^>]*aria-haspopup="listbox"/,
+  );
   // The old separate <h1>All repos</h1> title is gone — the trigger is the heading now.
   assert.doesNotMatch(html, /<h1>All repos<\/h1>/);
 });
 
 test("the repo dropdown menu rows carry a run-state dot, the owner/name label, and a note", () => {
   const html = renderStatusPage(
-    { project: "acme/tidepool", waves: [{ index: 0, status: "running", issues: [] }], parked: [] },
-    { projects: [{ project: "jjforge/tidepool", runState: "parked" }, { project: "acme/tidepool", runState: "running" }], selected: "acme/tidepool" },
+    {
+      project: "acme/tidepool",
+      waves: [{ index: 0, status: "running", issues: [] }],
+      parked: [],
+    },
+    {
+      projects: [
+        { project: "jjforge/tidepool", runState: "parked" },
+        { project: "acme/tidepool", runState: "running" },
+      ],
+      selected: "acme/tidepool",
+    },
   );
 
   // The menu is a listbox; each repo is an option with a dot in its run-state colour,
   // the full owner/name label, and its run state as the note.
-  assert.match(html, /<ul class="repo-menu" id="repo-menu" role="listbox" aria-label="Switch repo" tabindex="-1" hidden>/);
-  assert.match(html, /<li class="repo-option" role="option" aria-selected="false" data-project="jjforge\/tidepool" tabindex="-1"><span class="repo-dot parked" aria-hidden="true"><\/span><span class="repo-optlabel">jjforge\/tidepool<\/span><span class="repo-note">parked<\/span><\/li>/);
+  assert.match(
+    html,
+    /<ul class="repo-menu" id="repo-menu" role="listbox" aria-label="Switch repo" tabindex="-1" hidden>/,
+  );
+  assert.match(
+    html,
+    /<li class="repo-option" role="option" aria-selected="false" data-project="jjforge\/tidepool" tabindex="-1"><span class="repo-dot parked" aria-hidden="true"><\/span><span class="repo-optlabel">jjforge\/tidepool<\/span><span class="repo-note">parked<\/span><\/li>/,
+  );
   // The current scope's row is filled (aria-selected + a .selected class), no checkmark.
   // The current scope's row is the fill (a .selected class + aria-selected), with no
   // checkmark glyph inside the row — the fill alone marks it.
-  assert.match(html, /<li class="repo-option selected" role="option" aria-selected="true" data-project="acme\/tidepool" tabindex="-1"><span class="repo-dot running"[^>]*><\/span><span class="repo-optlabel">acme\/tidepool<\/span><span class="repo-note">running<\/span><\/li>/);
+  assert.match(
+    html,
+    /<li class="repo-option selected" role="option" aria-selected="true" data-project="acme\/tidepool" tabindex="-1"><span class="repo-dot running"[^>]*><\/span><span class="repo-optlabel">acme\/tidepool<\/span><span class="repo-note">running<\/span><\/li>/,
+  );
 });
 
 test("the repo dropdown's All-repos row uses the teal accent dot and the repo count as its note", () => {
-  const landing = renderLandingShell([{ project: "jjforge/tidepool", runState: "running" }, { project: "acme/tidepool", runState: "idle" }]);
+  const landing = renderLandingShell([
+    { project: "jjforge/tidepool", runState: "running" },
+    { project: "acme/tidepool", runState: "idle" },
+  ]);
 
   // The aggregate has no run state of its own: its dot is the teal accent (`all`), its
   // note the repo count, and on the landing it is the selected (current) scope.
-  assert.match(landing, /<li class="repo-option selected" role="option" aria-selected="true" data-project="" tabindex="-1"><span class="repo-dot all" aria-hidden="true"><\/span><span class="repo-optlabel">All repos<\/span><span class="repo-note">2 repos<\/span><\/li>/);
+  assert.match(
+    landing,
+    /<li class="repo-option selected" role="option" aria-selected="true" data-project="" tabindex="-1"><span class="repo-dot all" aria-hidden="true"><\/span><span class="repo-optlabel">All repos<\/span><span class="repo-note">2 repos<\/span><\/li>/,
+  );
   // The teal accent is the product accent, so the `all` dot reads --color-primary.
-  assert.match(landing, /\.repo-dot\.all \{ background: var\(--color-primary\); \}/);
+  assert.match(
+    landing,
+    /\.repo-dot\.all \{ background: var\(--color-primary\); \}/,
+  );
 });
 
 test("the repo dropdown's CSS matches the spec: mono heading, borderless trigger, popover menu, touch rows", () => {
   // The CSS is shared by both pages via TOP_BAR_STYLES, so assert it there once.
   const css = TOP_BAR_STYLES;
   // Trigger: no border, no background, no padding — just text + chevron.
-  assert.match(css, /\.repo-trigger \{[^}]*border: 0;[^}]*background: none;[^}]*padding: 0;/);
+  assert.match(
+    css,
+    /\.repo-trigger \{[^}]*border: 0;[^}]*background: none;[^}]*padding: 0;/,
+  );
   // Label: system-monospace stack (no web font), 600, 17px, tight tracking, truncates, never wraps.
-  assert.match(css, /\.repo-label \{[^}]*font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;[^}]*font-weight: 600;[^}]*font-size: 17px;[^}]*letter-spacing: -0.01em;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/);
+  assert.match(
+    css,
+    /\.repo-label \{[^}]*font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;[^}]*font-weight: 600;[^}]*font-size: 17px;[^}]*letter-spacing: -0.01em;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/,
+  );
   // No IBM Plex Mono (the POC face) is added or referenced anywhere.
   assert.doesNotMatch(css, /Plex Mono/i);
   // Hover turns the label teal; the chevron is 13px, muted, and rotates 180° over 180ms when open.
-  assert.match(css, /\.repo-trigger:hover \.repo-label \{ color: var\(--color-primary\); \}/);
-  assert.match(css, /\.repo-chevron \{[^}]*font-size: 13px;[^}]*color: var\(--color-text-light-2\);[^}]*transition: transform 180ms;/);
-  assert.match(css, /\.repo-trigger\[aria-expanded="true"\] \.repo-chevron \{ transform: rotate\(180deg\); \}/);
+  assert.match(
+    css,
+    /\.repo-trigger:hover \.repo-label \{ color: var\(--color-primary\); \}/,
+  );
+  assert.match(
+    css,
+    /\.repo-chevron \{[^}]*font-size: 13px;[^}]*color: var\(--color-text-light-2\);[^}]*transition: transform 180ms;/,
+  );
+  assert.match(
+    css,
+    /\.repo-trigger\[aria-expanded="true"\] \.repo-chevron \{ transform: rotate\(180deg\); \}/,
+  );
   // A visible focus ring — the trigger has no border to hang one on.
-  assert.match(css, /\.repo-trigger:focus-visible, \.repo-option:focus-visible \{ outline: 2px solid var\(--color-primary\);/);
+  assert.match(
+    css,
+    /\.repo-trigger:focus-visible, \.repo-option:focus-visible \{ outline: 2px solid var\(--color-primary\);/,
+  );
   // The menu is a popover: 8px below the trigger, 260px min, layered above cards (z 5)
   // but below the issue sheet (z 10), on the box surface with the spec border/radius/shadow.
-  assert.match(css, /\.repo-menu \{[^}]*top: calc\(100% \+ 8px\);[^}]*z-index: 5;[^}]*min-width: 260px;[^}]*background: var\(--color-box-body\);[^}]*border: 1px solid var\(--color-secondary\);[^}]*border-radius: var\(--border-radius-medium\);[^}]*box-shadow: 0 14px 40px #0009;/);
+  assert.match(
+    css,
+    /\.repo-menu \{[^}]*top: calc\(100% \+ 8px\);[^}]*z-index: 5;[^}]*min-width: 260px;[^}]*background: var\(--color-box-body\);[^}]*border: 1px solid var\(--color-secondary\);[^}]*border-radius: var\(--border-radius-medium\);[^}]*box-shadow: 0 14px 40px #0009;/,
+  );
   // Never z-index 30, and never above the sheet's z-index 10 (the sheet must cover the menu).
   assert.doesNotMatch(css, /\.repo-menu \{[^}]*z-index: 30/);
   assert.match(ISSUE_DETAIL_SHEET_STYLES, /\.issue-detail \{[^}]*z-index: 10/);
   // Rows: flex, selected and hovered share the fill; the note is muted, the label mono.
   assert.match(css, /\.repo-option \{[^}]*display: flex;/);
-  assert.match(css, /\.repo-option:hover, \.repo-option\.selected \{ background: var\(--color-chip-hover\); \}/);
-  assert.match(css, /\.repo-note \{[^}]*font-size: 11px;[^}]*color: var\(--color-dim\);/);
+  assert.match(
+    css,
+    /\.repo-option:hover, \.repo-option\.selected \{ background: var\(--color-chip-hover\); \}/,
+  );
+  assert.match(
+    css,
+    /\.repo-note \{[^}]*font-size: 11px;[^}]*color: var\(--color-dim\);/,
+  );
   // Touch rows are ≥44px; the label steps to 15px on a phone.
-  assert.match(css, /@media \(pointer: coarse\) \{ \.repo-option \{ min-height: 44px; \} \}/);
-  assert.match(css, /@media \(max-width: 640px\) \{ \.repo-label \{ font-size: 15px; \} \}/);
+  assert.match(
+    css,
+    /@media \(pointer: coarse\) \{ \.repo-option \{ min-height: 44px; \} \}/,
+  );
+  assert.match(
+    css,
+    /@media \(max-width: 640px\) \{ \.repo-label \{ font-size: 15px; \} \}/,
+  );
 });
 
 test("both pages wire the repo dropdown's keyboard, scope-switch, and scoped click-outside behavior (#88)", () => {
-  const landing = renderLandingShell([{ project: "jjforge/tidepool", runState: "running" }]);
-  const campaign = renderStatusPage({ project: "beta", waves: [], parked: [] }, { projects: [{ project: "alpha", runState: "idle" }, { project: "beta", runState: "running" }], selected: "beta" });
+  const landing = renderLandingShell([
+    { project: "jjforge/tidepool", runState: "running" },
+  ]);
+  const campaign = renderStatusPage(
+    { project: "beta", waves: [], parked: [] },
+    {
+      projects: [
+        { project: "alpha", runState: "idle" },
+        { project: "beta", runState: "running" },
+      ],
+      selected: "beta",
+    },
+  );
   // One shared script, emitted by both pages so they can't drift.
-  for (const page of [landing, campaign]) assert.ok(page.includes(REPO_DROPDOWN_SCRIPT), "every page includes the shared repo-dropdown script");
+  for (const page of [landing, campaign])
+    assert.ok(
+      page.includes(REPO_DROPDOWN_SCRIPT),
+      "every page includes the shared repo-dropdown script",
+    );
 
   const js = REPO_DROPDOWN_SCRIPT;
   // Trigger toggles the menu (aria-expanded + hidden).
-  assert.match(js, /repoTrigger\.addEventListener\("click", \(\) => \(repoIsOpen\(\) \? repoClose\(\) : repoOpen\(\)\)\)/);
-  assert.match(js, /setAttribute\("aria-expanded", "true"\); repoMenu\.hidden = false;/);
+  assert.match(
+    js,
+    /repoTrigger\.addEventListener\("click", \(\) => \(repoIsOpen\(\) \? repoClose\(\) : repoOpen\(\)\)\)/,
+  );
+  assert.match(
+    js,
+    /setAttribute\("aria-expanded", "true"\); repoMenu\.hidden = false;/,
+  );
   // Choosing a different scope navigates (the switch); the current scope is a no-op that just closes.
-  assert.match(js, /if \(option\.getAttribute\("aria-selected"\) === "true"\) \{ repoClose\(\); return; \}/);
-  assert.match(js, /location\.href = project \? "\/\?project=" \+ encodeURIComponent\(project\) : "\/";/);
+  assert.match(
+    js,
+    /if \(option\.getAttribute\("aria-selected"\) === "true"\) \{ repoClose\(\); return; \}/,
+  );
+  assert.match(
+    js,
+    /location\.href = project \? "\/\?project=" \+ encodeURIComponent\(project\) : "\/";/,
+  );
   // Keyboard: Enter/Space/↑↓ open+move, Enter selects, Escape closes and restores focus to the trigger, Tab is trapped.
   assert.match(js, /event\.key === "Escape".*repoClose\(\);/);
   assert.match(js, /event\.key === "ArrowDown".*repoFocus\(repoActive \+ 1\)/);
   assert.match(js, /event\.key === "ArrowUp".*repoFocus\(repoActive - 1\)/);
-  assert.match(js, /event\.key === "Tab".*repoFocus\(repoActive \+ \(event\.shiftKey \? -1 : 1\)\)/);
+  assert.match(
+    js,
+    /event\.key === "Tab".*repoFocus\(repoActive \+ \(event\.shiftKey \? -1 : 1\)\)/,
+  );
   assert.match(js, /if \(restore !== false\) repoTrigger\.focus\(\);/);
   // Click-outside closes, scoped to the dropdown's own subtree — not "any non-button".
-  assert.match(js, /if \(repoIsOpen\(\) && !repoRoot\.contains\(event\.target\)\) repoClose\(false\);/);
+  assert.match(
+    js,
+    /if \(repoIsOpen\(\) && !repoRoot\.contains\(event\.target\)\) repoClose\(false\);/,
+  );
 });
 
 test("switching scope resets the view: it navigates (fresh sheet) and closed-wave state is per-repo", () => {
   const html = renderStatusPage(
-    { project: "beta", waves: [{ index: 0, status: "closed", issues: [{ issueNumber: "201", status: "completed" }] }], parked: [] },
-    { projects: [{ project: "alpha", runState: "idle" }, { project: "beta", runState: "running" }], selected: "beta" },
+    {
+      project: "beta",
+      waves: [
+        {
+          index: 0,
+          status: "closed",
+          issues: [{ issueNumber: "201", status: "completed" }],
+        },
+      ],
+      parked: [],
+    },
+    {
+      projects: [
+        { project: "alpha", runState: "idle" },
+        { project: "beta", runState: "running" },
+      ],
+      selected: "beta",
+    },
   );
   // A scope switch is a navigation, so the target page loads fresh — the issue sheet
   // starts hidden and nothing is pre-opened.
-  assert.match(REPO_DROPDOWN_SCRIPT, /location\.href = project \? "\/\?project=" \+ encodeURIComponent\(project\) : "\/";/);
+  assert.match(
+    REPO_DROPDOWN_SCRIPT,
+    /location\.href = project \? "\/\?project=" \+ encodeURIComponent\(project\) : "\/";/,
+  );
   assert.match(html, /<div id="issue-detail" class="issue-detail"[^>]*hidden>/);
   // Expanded closed-waves are persisted per-repo, so a different scope reads its own
   // (collapsed) set — wave labels aren't unique across repos, so this can't expand the wrong wave.
-  assert.match(html, /const storeKey = "sctdd:closed-waves:" \+ waveBar\.dataset\.project;/);
+  assert.match(
+    html,
+    /const storeKey = "sctdd:closed-waves:" \+ waveBar\.dataset\.project;/,
+  );
 });
 
 test("renderStatusPage lists archived runs and renders a selected one read-only below the live run", () => {
@@ -2068,20 +3852,38 @@ test("renderStatusPage lists archived runs and renders a selected one read-only 
     {
       project: "beta",
       // A live run with a still-carvable (unstarted) chip: proves the live view keeps carve.
-      waves: [{ index: 0, status: "unstarted", issues: [{ issueNumber: "201", status: "unstarted" }] }],
+      waves: [
+        {
+          index: 0,
+          status: "unstarted",
+          issues: [{ issueNumber: "201", status: "unstarted" }],
+        },
+      ],
       parked: [],
     },
     {
       carve: true,
       selected: "beta",
       archivedRuns: [
-        { run: "2026-02-01T00-00-00-000Z", summary: "campaign · 2 issues · complete" },
-        { run: "2026-01-01T00-00-00-000Z", summary: "queue · 1 issue · halted" },
+        {
+          run: "2026-02-01T00-00-00-000Z",
+          summary: "campaign · 2 issues · complete",
+        },
+        {
+          run: "2026-01-01T00-00-00-000Z",
+          summary: "queue · 1 issue · halted",
+        },
       ],
       archivedRun: "2026-02-01T00-00-00-000Z",
       archived: {
         project: "beta",
-        waves: [{ index: 0, status: "unstarted", issues: [{ issueNumber: "301", status: "unstarted" }] }],
+        waves: [
+          {
+            index: 0,
+            status: "unstarted",
+            issues: [{ issueNumber: "301", status: "unstarted" }],
+          },
+        ],
         parked: [],
       },
     },
@@ -2091,16 +3893,29 @@ test("renderStatusPage lists archived runs and renders a selected one read-only 
   // These runs are unnamed, so the primary label falls back to the timestamp token,
   // with the mode·issues·outcome summary as a secondary label beside it.
   assert.match(html, /<section class="archived-runs"><h2>Archived runs<\/h2>/);
-  assert.match(html, /<a href="\/\?project=beta&amp;run=2026-02-01T00-00-00-000Z"[^>]*>2026-02-01T00-00-00-000Z<\/a> <span class="run-summary">campaign · 2 issues · complete<\/span>/);
-  assert.match(html, /<a href="\/\?project=beta&amp;run=2026-01-01T00-00-00-000Z"[^>]*>2026-01-01T00-00-00-000Z<\/a> <span class="run-summary">queue · 1 issue · halted<\/span>/);
+  assert.match(
+    html,
+    /<a href="\/\?project=beta&amp;run=2026-02-01T00-00-00-000Z"[^>]*>2026-02-01T00-00-00-000Z<\/a> <span class="run-summary">campaign · 2 issues · complete<\/span>/,
+  );
+  assert.match(
+    html,
+    /<a href="\/\?project=beta&amp;run=2026-01-01T00-00-00-000Z"[^>]*>2026-01-01T00-00-00-000Z<\/a> <span class="run-summary">queue · 1 issue · halted<\/span>/,
+  );
   assert.ok(
-    html.indexOf(">campaign · 2 issues · complete<") < html.indexOf(">queue · 1 issue · halted<"),
+    html.indexOf(">campaign · 2 issues · complete<") <
+      html.indexOf(">queue · 1 issue · halted<"),
     "archived runs list newest-first",
   );
 
   // Each run also links to its raw event log.
-  assert.match(html, /<a href="\/archive\/log\?project=beta&amp;run=2026-02-01T00-00-00-000Z">raw log<\/a>/);
-  assert.match(html, /<a href="\/archive\/log\?project=beta&amp;run=2026-01-01T00-00-00-000Z">raw log<\/a>/);
+  assert.match(
+    html,
+    /<a href="\/archive\/log\?project=beta&amp;run=2026-02-01T00-00-00-000Z">raw log<\/a>/,
+  );
+  assert.match(
+    html,
+    /<a href="\/archive\/log\?project=beta&amp;run=2026-01-01T00-00-00-000Z">raw log<\/a>/,
+  );
 
   // The selected run's own wave/issue view renders in its own section.
   assert.match(html, /<section class="archived-run">/);
@@ -2117,43 +3932,84 @@ test("renderStatusPage shows the run name in the live header, and names vs times
     {
       project: "beta",
       name: "gateway work",
-      waves: [{ index: 0, status: "running", issues: [{ issueNumber: "201", status: "running" }] }],
+      waves: [
+        {
+          index: 0,
+          status: "running",
+          issues: [{ issueNumber: "201", status: "running" }],
+        },
+      ],
       parked: [],
     },
     {
       selected: "beta",
       archivedRuns: [
         // A named run: its name is the primary label, the summary stays secondary.
-        { run: "2026-02-01T00-00-00-000Z", summary: "campaign · 2 issues · complete", name: "comms + dashboard" },
+        {
+          run: "2026-02-01T00-00-00-000Z",
+          summary: "campaign · 2 issues · complete",
+          name: "comms + dashboard",
+        },
         // An unnamed run: it falls back to its timestamp token as the primary label.
-        { run: "2026-01-01T00-00-00-000Z", summary: "queue · 1 issue · halted" },
+        {
+          run: "2026-01-01T00-00-00-000Z",
+          summary: "queue · 1 issue · halted",
+        },
       ],
       archivedRun: "2026-02-01T00-00-00-000Z",
       archived: {
         project: "beta",
         name: "comms + dashboard",
-        waves: [{ index: 0, status: "unstarted", issues: [{ issueNumber: "301", status: "unstarted" }] }],
+        waves: [
+          {
+            index: 0,
+            status: "unstarted",
+            issues: [{ issueNumber: "301", status: "unstarted" }],
+          },
+        ],
         parked: [],
       },
     },
   );
 
   // The campaign meta line shows the campaign's name with its issue/wave counts.
-  assert.match(html, /<p class="campaign-meta"><span class="campaign-name">gateway work<\/span> · 1 issue · 1 wave<\/p>/);
+  assert.match(
+    html,
+    /<p class="campaign-meta"><span class="campaign-name">gateway work<\/span> · 1 issue · 1 wave<\/p>/,
+  );
 
   // Named run: the link text is the NAME, and the mode·issues·outcome summary is a secondary label.
-  assert.match(html, /run=2026-02-01T00-00-00-000Z"[^>]*>comms \+ dashboard<\/a>/);
-  assert.match(html, /<span class="run-summary">campaign · 2 issues · complete<\/span>/);
+  assert.match(
+    html,
+    /run=2026-02-01T00-00-00-000Z"[^>]*>comms \+ dashboard<\/a>/,
+  );
+  assert.match(
+    html,
+    /<span class="run-summary">campaign · 2 issues · complete<\/span>/,
+  );
   // Unnamed run: the link text falls back to the timestamp token.
-  assert.match(html, /run=2026-01-01T00-00-00-000Z"[^>]*>2026-01-01T00-00-00-000Z<\/a>/);
-  assert.match(html, /<span class="run-summary">queue · 1 issue · halted<\/span>/);
+  assert.match(
+    html,
+    /run=2026-01-01T00-00-00-000Z"[^>]*>2026-01-01T00-00-00-000Z<\/a>/,
+  );
+  assert.match(
+    html,
+    /<span class="run-summary">queue · 1 issue · halted<\/span>/,
+  );
 
   // The archived-run view carries the run's name beside its token.
-  assert.match(html, /<section class="archived-run"><h2>Archived run[^<]*comms \+ dashboard/);
+  assert.match(
+    html,
+    /<section class="archived-run"><h2>Archived run[^<]*comms \+ dashboard/,
+  );
 });
 
 test("renderStatusPage omits the campaign name from the meta line for an unnamed run", () => {
-  const html = renderStatusPage({ project: "beta", waves: [{ index: 0, status: "running", issues: [] }], parked: [] });
+  const html = renderStatusPage({
+    project: "beta",
+    waves: [{ index: 0, status: "running", issues: [] }],
+    parked: [],
+  });
   assert.doesNotMatch(html, /class="run-name"/);
   assert.doesNotMatch(html, /class="campaign-name"/);
   // The counts still render — an unnamed campaign is still a campaign.
@@ -2161,7 +4017,10 @@ test("renderStatusPage omits the campaign name from the meta line for an unnamed
 });
 
 test("renderStatusPage renders no archived-runs section when a project has none", () => {
-  const html = renderStatusPage({ project: "demo", waves: [], parked: [] }, { selected: "demo" });
+  const html = renderStatusPage(
+    { project: "demo", waves: [], parked: [] },
+    { selected: "demo" },
+  );
   assert.doesNotMatch(html, /class="archived-runs"/);
   assert.doesNotMatch(html, /class="archived-run"/);
 });
@@ -2194,17 +4053,52 @@ test("renderStatusPage does not render the color legend under the heading", () =
 });
 
 test("renderStatusPage makes issue chips tap-friendly for touch devices", () => {
-  const html = renderStatusPage({ project: "demo", waves: [{ index: 0, status: "running", issues: [{ issueNumber: "101", status: "running", name: "Add login flow", detail: "Agent turn 2 finished; waiting for verification/resume" }] }], parked: [] });
+  const html = renderStatusPage({
+    project: "demo",
+    waves: [
+      {
+        index: 0,
+        status: "running",
+        issues: [
+          {
+            issueNumber: "101",
+            status: "running",
+            name: "Add login flow",
+            detail: "Agent turn 2 finished; waiting for verification/resume",
+          },
+        ],
+      },
+    ],
+    parked: [],
+  });
 
   // The chip keeps its hover title and now carries the ids the sheet fetches with.
-  assert.match(html, /title="Add login flow&#10;Agent turn 2 finished; waiting for verification\/resume"/);
-  assert.match(html, /class="chip [a-z]+"[^>]*data-issue="101"[^>]*data-project="demo"/);
+  assert.match(
+    html,
+    /title="Add login flow&#10;Agent turn 2 finished; waiting for verification\/resume"/,
+  );
+  assert.match(
+    html,
+    /class="chip [a-z]+"[^>]*data-issue="101"[^>]*data-project="demo"/,
+  );
   assert.match(html, /id="issue-detail"/);
   assert.match(html, /el\.addEventListener\("click"/);
 });
 
 test("renderStatusPage opens the issue-detail sheet from a chip, fetching /api/issue", () => {
-  const html = renderStatusPage({ project: "demo", waves: [{ index: 0, status: "running", issues: [{ issueNumber: "101", status: "running", name: "Add login flow" }] }], parked: [] });
+  const html = renderStatusPage({
+    project: "demo",
+    waves: [
+      {
+        index: 0,
+        status: "running",
+        issues: [
+          { issueNumber: "101", status: "running", name: "Add login flow" },
+        ],
+      },
+    ],
+    parked: [],
+  });
 
   // A dismissible sheet, hidden until an issue is opened.
   assert.match(html, /<div id="issue-detail" class="issue-detail"[^>]*hidden>/);
@@ -2222,7 +4116,10 @@ test("renderStatusPage opens the issue-detail sheet from a chip, fetching /api/i
   assert.match(html, /fetch\("\/api\/issue\?project="/);
   // Dismissible, and reveal keys off a `show` class over the hidden default.
   assert.match(html, /\.issue-detail\.show \{ display: flex; \}/);
-  assert.match(html, /getElementById\("issue-detail-close"\)\.addEventListener\("click"/);
+  assert.match(
+    html,
+    /getElementById\("issue-detail-close"\)\.addEventListener\("click"/,
+  );
 });
 
 test("renderStatusPage gives the sheet a WORKTREE tile and turns-with-duration meta (#90)", () => {
@@ -2230,7 +4127,10 @@ test("renderStatusPage gives the sheet a WORKTREE tile and turns-with-duration m
 
   // A third meta tile carrying the agent's real worktree path — hidden until a
   // fetched detail carries one, so a run without a preserved worktree shows nothing.
-  assert.match(html, /<div class="meta-tile[^"]*" id="issue-detail-worktree-tile" hidden>/);
+  assert.match(
+    html,
+    /<div class="meta-tile[^"]*" id="issue-detail-worktree-tile" hidden>/,
+  );
   assert.match(html, /<span class="meta-label">Worktree<\/span>/);
   assert.match(html, /id="issue-detail-worktree"/);
   // A meta-tile is a flex box, so its display would defeat the UA [hidden] rule;
@@ -2251,31 +4151,62 @@ test("renderStatusPage renders the turn log newest-first with each turn number i
   assert.match(html, /id="issue-detail-turnlog"/);
   assert.match(html, /turnLog/);
   // The status dot palette is shared, so a turn number reuses the same status colours.
-  assert.match(html, /\.turn-num\.completed \{ color: var\(--color-green\); \}/);
+  assert.match(
+    html,
+    /\.turn-num\.completed \{ color: var\(--color-green\); \}/,
+  );
 });
 
 test("renderStatusPage makes the issue-detail sheet a full-width bottom sheet on mobile", () => {
   const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
 
   // Desktop: a centred sheet. Mobile: pinned full-width to the bottom.
-  assert.match(html, /@media \(max-width: [^)]+\) \{[^}]*\.issue-detail-sheet \{[^}]*width: 100%;/);
+  assert.match(
+    html,
+    /@media \(max-width: [^)]+\) \{[^}]*\.issue-detail-sheet \{[^}]*width: 100%;/,
+  );
   assert.match(html, /\.issue-detail-sheet/);
 });
 
 test("renderStatusPage hosts the carve affordance and inline confirm in the tap-detail panel", () => {
   const html = renderStatusPage(
-    { project: "demo", waves: [{ index: 0, status: "unstarted", issues: [{ issueNumber: "301", status: "unstarted" }] }], parked: [] },
+    {
+      project: "demo",
+      waves: [
+        {
+          index: 0,
+          status: "unstarted",
+          issues: [{ issueNumber: "301", status: "unstarted" }],
+        },
+      ],
+      parked: [],
+    },
     { carve: true },
   );
 
   // The panel — not the chip — carries a Carve button and a hidden inline confirm.
-  assert.match(html, /<button type="button" id="carve-start" class="carve-start">Carve<\/button>/);
-  assert.match(html, /<form method="post" action="\/carve" id="carve-confirm"[^>]*hidden>/);
+  assert.match(
+    html,
+    /<button type="button" id="carve-start" class="carve-start">Carve<\/button>/,
+  );
+  assert.match(
+    html,
+    /<form method="post" action="\/carve" id="carve-confirm"[^>]*hidden>/,
+  );
   assert.match(html, /<span class="carve-confirm-text"><\/span>/);
   // The confirm POSTs the existing /carve with confirm=1, carrying taskId+project.
-  assert.match(html, /id="carve-confirm"[\s\S]*?name="taskId"[\s\S]*?name="project"[\s\S]*?name="confirm" value="1"/);
-  assert.match(html, /<button type="submit" class="carve-confirm-btn">Confirm<\/button>/);
-  assert.match(html, /<button type="button" id="carve-cancel" class="carve-cancel">Cancel<\/button>/);
+  assert.match(
+    html,
+    /id="carve-confirm"[\s\S]*?name="taskId"[\s\S]*?name="project"[\s\S]*?name="confirm" value="1"/,
+  );
+  assert.match(
+    html,
+    /<button type="submit" class="carve-confirm-btn">Confirm<\/button>/,
+  );
+  assert.match(
+    html,
+    /<button type="button" id="carve-cancel" class="carve-cancel">Cancel<\/button>/,
+  );
   // The script keys off the carve data: it fetches the JSON preview, discloses the
   // removed list, POSTs the confirm, then shows a transient "carving…".
   assert.match(html, /\/carve\?preview/);
@@ -2289,14 +4220,23 @@ test("renderStatusPage hosts a parked reply block with a Resume button in the ta
   const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
 
   // The sheet carries a reply block, hidden until the opened issue is parked.
-  assert.match(html, /<div id="issue-detail-reply" class="issue-detail-reply" hidden>/);
+  assert.match(
+    html,
+    /<div id="issue-detail-reply" class="issue-detail-reply" hidden>/,
+  );
   assert.match(html, /id="reply-question"/);
   assert.match(html, /id="reply-options"/);
   // A free-text reply field posts through the existing /answer path, carrying taskId+project.
   assert.match(html, /<form method="post" action="\/answer" id="reply-form">/);
-  assert.match(html, /id="reply-form"[\s\S]*?name="taskId"[\s\S]*?name="project"[\s\S]*?<textarea name="text"/);
+  assert.match(
+    html,
+    /id="reply-form"[\s\S]*?name="taskId"[\s\S]*?name="project"[\s\S]*?<textarea name="text"/,
+  );
   // Resume submits that form; it is associated by `form=` so it can sit outside the form, beside Carve.
-  assert.match(html, /<button type="submit" form="reply-form" id="reply-resume" class="reply-resume" hidden>Resume<\/button>/);
+  assert.match(
+    html,
+    /<button type="submit" form="reply-form" id="reply-resume" class="reply-resume" hidden>Resume<\/button>/,
+  );
 });
 
 test("renderStatusPage caps the reply textarea so it stays within the sheet/card (#73)", () => {
@@ -2308,10 +4248,16 @@ test("renderStatusPage caps the reply textarea so it stays within the sheet/card
 });
 
 test("renderStatusPage places Resume beside Carve in one sheet-actions row, sized for touch", () => {
-  const html = renderStatusPage({ project: "demo", waves: [], parked: [] }, { carve: true });
+  const html = renderStatusPage(
+    { project: "demo", waves: [], parked: [] },
+    { carve: true },
+  );
 
   // Both controls live in the same actions row so they are reachable one-handed together.
-  assert.match(html, /<div class="sheet-actions"><button type="submit" form="reply-form" id="reply-resume"[^>]*>Resume<\/button><div id="carve-panel"/);
+  assert.match(
+    html,
+    /<div class="sheet-actions"><button type="submit" form="reply-form" id="reply-resume"[^>]*>Resume<\/button><div id="carve-panel"/,
+  );
   // A 44px tap target for the primary Resume action on a phone.
   assert.match(html, /\.reply-resume \{[^}]*min-height: 44px;/);
   // The actions row is a flex box, so it needs [hidden] restored explicitly or an
@@ -2343,8 +4289,19 @@ test("renderStatusPage falls back to a no-JS carve form per carvable issue", () 
     {
       project: "demo",
       waves: [
-        { index: 0, status: "running", issues: [{ issueNumber: "201", status: "running" }] },
-        { index: 1, status: "unstarted", issues: [{ issueNumber: "301", status: "unstarted" }, { issueNumber: "302", status: "parked" }] },
+        {
+          index: 0,
+          status: "running",
+          issues: [{ issueNumber: "201", status: "running" }],
+        },
+        {
+          index: 1,
+          status: "unstarted",
+          issues: [
+            { issueNumber: "301", status: "unstarted" },
+            { issueNumber: "302", status: "parked" },
+          ],
+        },
       ],
       parked: [],
     },
@@ -2353,14 +4310,30 @@ test("renderStatusPage falls back to a no-JS carve form per carvable issue", () 
 
   // Progressive enhancement: a plain server-side form per carvable issue, inside
   // <noscript>, still reaches POST /carve → the preview page → confirm with no JS.
-  assert.match(html, /<noscript>[\s\S]*<form method="post" action="\/carve"[\s\S]*?name="taskId" value="301"[\s\S]*?name="project" value="demo"[\s\S]*<\/noscript>/);
-  assert.match(html, /<noscript>[\s\S]*name="taskId" value="302"[\s\S]*<\/noscript>/);
+  assert.match(
+    html,
+    /<noscript>[\s\S]*<form method="post" action="\/carve"[\s\S]*?name="taskId" value="301"[\s\S]*?name="project" value="demo"[\s\S]*<\/noscript>/,
+  );
+  assert.match(
+    html,
+    /<noscript>[\s\S]*name="taskId" value="302"[\s\S]*<\/noscript>/,
+  );
   // Never a fallback form for a running (in-flight) issue.
   assert.doesNotMatch(html, /name="taskId" value="201"/);
 });
 
 test("renderStatusPage omits the carve panel and no-JS fallback unless carve is opted in", () => {
-  const html = renderStatusPage({ project: "demo", waves: [{ index: 0, status: "unstarted", issues: [{ issueNumber: "301", status: "unstarted" }] }], parked: [] });
+  const html = renderStatusPage({
+    project: "demo",
+    waves: [
+      {
+        index: 0,
+        status: "unstarted",
+        issues: [{ issueNumber: "301", status: "unstarted" }],
+      },
+    ],
+    parked: [],
+  });
 
   assert.doesNotMatch(html, /id="carve-start"/);
   assert.doesNotMatch(html, /<noscript>/);
@@ -2369,13 +4342,34 @@ test("renderStatusPage omits the carve panel and no-JS fallback unless carve is 
 test("renderStatusPage leads with parked issues above the waves when any are parked", () => {
   const html = renderStatusPage({
     project: "demo",
-    waves: [{ index: 0, status: "running", issues: [{ issueNumber: "101", status: "running" }] }],
-    parked: [{ issueNumber: "102", reason: "blocked", parkedAt: "now", branch: "agent/102", description: "Need a choice.", options: [] }],
+    waves: [
+      {
+        index: 0,
+        status: "running",
+        issues: [{ issueNumber: "101", status: "running" }],
+      },
+    ],
+    parked: [
+      {
+        issueNumber: "102",
+        reason: "blocked",
+        parkedAt: "now",
+        branch: "agent/102",
+        description: "Need a choice.",
+        options: [],
+      },
+    ],
   });
 
-  assert.match(html, /<section class="parked-issues"><h2>Parked · <span class="parked-count">1<\/span><\/h2>/);
+  assert.match(
+    html,
+    /<section class="parked-issues"><h2>Parked · <span class="parked-count">1<\/span><\/h2>/,
+  );
   // Parked section comes before the wave grid.
-  assert.ok(html.indexOf('class="parked-issues"') < html.indexOf('class="waves-grid"'), "parked should render above the waves");
+  assert.ok(
+    html.indexOf('class="parked-issues"') < html.indexOf('class="waves-grid"'),
+    "parked should render above the waves",
+  );
   // The parked-dot color rule must stay background-only; the section styling must not
   // bleed onto <span class="dot parked"> and inflate the chip height.
   assert.match(html, /\.parked \{ background: var\(--color-yellow\); \}/);
@@ -2386,19 +4380,38 @@ test("renderStatusPage opens the issue-detail sheet from a parked row too", () =
   const html = renderStatusPage({
     project: "demo",
     waves: [],
-    parked: [{ issueNumber: "102", reason: "blocked", parkedAt: "now", branch: "agent/102", description: "Need a choice.", options: [] }],
+    parked: [
+      {
+        issueNumber: "102",
+        reason: "blocked",
+        parkedAt: "now",
+        branch: "agent/102",
+        description: "Need a choice.",
+        options: [],
+      },
+    ],
   });
 
   // The whole parked card is a clickable question card carrying the ids the sheet
   // fetches with; its href is the no-JS fallback, and the same wiring opens the sheet
   // from a chip or a parked card (the anchor's default click is prevented).
-  assert.match(html, /<a class="parked-card" href="\/\?project=demo" data-issue="102" data-project="demo"><div class="parked-card-title"><span class="parked-issue">#102<\/span> Need a choice\.<\/div>/);
-  assert.match(html, /querySelectorAll\("\.chip\[data-issue\], \.parked-card\[data-issue\]"\)/);
+  assert.match(
+    html,
+    /<a class="parked-card" href="\/\?project=demo" data-issue="102" data-project="demo"><div class="parked-card-title"><span class="parked-issue">#102<\/span> Need a choice\.<\/div>/,
+  );
+  assert.match(
+    html,
+    /querySelectorAll\("\.chip\[data-issue\], \.parked-card\[data-issue\]"\)/,
+  );
   assert.match(html, /event\.preventDefault\(\); openIssue\(/);
 });
 
 test("renderStatusPage omits the parked section entirely when nothing is parked", () => {
-  const html = renderStatusPage({ project: "demo", waves: [{ index: 0, status: "running", issues: [] }], parked: [] });
+  const html = renderStatusPage({
+    project: "demo",
+    waves: [{ index: 0, status: "running", issues: [] }],
+    parked: [],
+  });
 
   assert.doesNotMatch(html, /Parked issues/);
   assert.doesNotMatch(html, /Nothing parked/);
@@ -2409,45 +4422,101 @@ test("renderStatusPage orders the top of the page: Parked → campaign-meta → 
   const html = renderStatusPage({
     project: "demo",
     name: "gateway work",
-    waves: [{ index: 0, status: "running", issues: [{ issueNumber: "101", status: "running" }] }],
-    parked: [{ issueNumber: "102", reason: "blocked", parkedAt: "now", branch: "agent/102", description: "Need a choice.", options: [] }],
+    waves: [
+      {
+        index: 0,
+        status: "running",
+        issues: [{ issueNumber: "101", status: "running" }],
+      },
+    ],
+    parked: [
+      {
+        issueNumber: "102",
+        reason: "blocked",
+        parkedAt: "now",
+        branch: "agent/102",
+        description: "Need a choice.",
+        options: [],
+      },
+    ],
   });
 
   // Top→bottom order per the design (#81): the Parked section leads, then the
   // campaign-meta line, then the waves — the meta line no longer sits above Parked.
-  assert.ok(html.indexOf('class="parked-issues"') < html.indexOf('class="campaign-meta"'), "Parked should render above the campaign-meta line");
-  assert.ok(html.indexOf('class="campaign-meta"') < html.indexOf('class="waves-grid"'), "campaign-meta should render above the waves");
+  assert.ok(
+    html.indexOf('class="parked-issues"') <
+      html.indexOf('class="campaign-meta"'),
+    "Parked should render above the campaign-meta line",
+  );
+  assert.ok(
+    html.indexOf('class="campaign-meta"') < html.indexOf('class="waves-grid"'),
+    "campaign-meta should render above the waves",
+  );
 });
 
 test("renderStatusPage collapses closed waves into expandable completed wave chips", () => {
   const html = renderStatusPage({
     project: "demo",
     waves: [
-      { index: 0, status: "closed", issues: [{ issueNumber: "101", status: "completed" }] },
-      { index: 1, status: "running", issues: [{ issueNumber: "201", status: "running" }] },
+      {
+        index: 0,
+        status: "closed",
+        issues: [{ issueNumber: "101", status: "completed" }],
+      },
+      {
+        index: 1,
+        status: "running",
+        issues: [{ issueNumber: "201", status: "running" }],
+      },
     ],
     parked: [],
   });
 
-  assert.match(html, /<div class="completed-waves"><div class="completed-wave-bar" data-project="demo">/);
+  assert.match(
+    html,
+    /<div class="completed-waves"><div class="completed-wave-bar" data-project="demo">/,
+  );
   assert.doesNotMatch(html, /Completed:/);
   // The chip is a toggle button, not a native <details>/<summary>.
-  assert.match(html, /<button type="button" class="completed-wave-chip" aria-expanded="false" aria-controls="closed-wave-0" data-wave="0"><span class="check" aria-hidden="true">✓<\/span> Wave 1 <span class="completed-wave-tally">1\/1<\/span><\/button>/);
-  assert.match(html, /\.completed-wave-chip \.check \{ color: var\(--color-green\);/);
+  assert.match(
+    html,
+    /<button type="button" class="completed-wave-chip" aria-expanded="false" aria-controls="closed-wave-0" data-wave="0"><span class="check" aria-hidden="true">✓<\/span> Wave 1 <span class="completed-wave-tally">1\/1<\/span><\/button>/,
+  );
+  assert.match(
+    html,
+    /\.completed-wave-chip \.check \{ color: var\(--color-green\);/,
+  );
   // Chip rows must not stretch: the first wrapped line was rendering taller in Safari.
-  assert.match(html, /\.completed-wave-bar, \.chips \{ display: flex; flex-wrap: wrap; align-items: flex-start; align-content: flex-start;/);
+  assert.match(
+    html,
+    /\.completed-wave-bar, \.chips \{ display: flex; flex-wrap: wrap; align-items: flex-start; align-content: flex-start;/,
+  );
   // The open wave still renders its own card in the grid.
-  assert.match(html, /<section class="wave running"><div class="wave-head"><h2>Wave 2 <span class="wave-status running">running<\/span><\/h2><span class="wave-tally">0\/1<\/span><\/div>/);
+  assert.match(
+    html,
+    /<section class="wave running"><div class="wave-head"><h2>Wave 2 <span class="wave-status running">running<\/span><\/h2><span class="wave-tally">0\/1<\/span><\/div>/,
+  );
 });
 
 test("renderStatusPage labels a single-issue wave with that issue's resolved title, keeping the index", () => {
   const html = renderStatusPage({
     project: "demo",
-    waves: [{ index: 1, status: "running", issues: [{ issueNumber: "201", status: "running", name: "config resolution" }] }],
+    waves: [
+      {
+        index: 1,
+        status: "running",
+        issues: [
+          { issueNumber: "201", status: "running", name: "config resolution" },
+        ],
+      },
+    ],
     parked: [],
   });
 
-  assert.match(html, /<section class="wave running"><div class="wave-head"><h2>Wave 2 — config resolution <span class="wave-status running">running<\/span>/);
+  assert.match(
+    html,
+    /<section class="wave running"><div class="wave-head"><h2>Wave 2 — config resolution <span class="wave-status running">running<\/span>/,
+  );
 });
 
 test("renderStatusPage labels a multi-issue wave with its lead issue's title + the extra count", () => {
@@ -2470,7 +4539,10 @@ test("renderStatusPage labels a multi-issue wave with its lead issue's title + t
 
   // Lead title names the wave; the rest collapse to a "+N" (all four still carry
   // their own titles on their chips).
-  assert.match(html, /<h2>Wave 2 — config resolution \+3 <span class="wave-status running">running<\/span>/);
+  assert.match(
+    html,
+    /<h2>Wave 2 — config resolution \+3 <span class="wave-status running">running<\/span>/,
+  );
 });
 
 test("renderStatusPage keeps a closed wave's chip compact and puts the issue titles on its card", () => {
@@ -2481,25 +4553,51 @@ test("renderStatusPage keeps a closed wave's chip compact and puts the issue tit
         index: 0,
         status: "closed",
         issues: [
-          { issueNumber: "101", status: "completed", name: "config resolution" },
+          {
+            issueNumber: "101",
+            status: "completed",
+            name: "config resolution",
+          },
           { issueNumber: "102", status: "completed", name: "retry policy" },
         ],
       },
-      { index: 1, status: "running", issues: [{ issueNumber: "201", status: "running" }] },
+      {
+        index: 1,
+        status: "running",
+        issues: [{ issueNumber: "201", status: "running" }],
+      },
     ],
     parked: [],
   });
 
   // The compact chip carries only "Wave N" + the merged tally — no lead title.
-  assert.match(html, /<button type="button" class="completed-wave-chip" aria-expanded="false" aria-controls="closed-wave-0" data-wave="0"><span class="check" aria-hidden="true">✓<\/span> Wave 1 <span class="completed-wave-tally">2\/2<\/span><\/button>/);
+  assert.match(
+    html,
+    /<button type="button" class="completed-wave-chip" aria-expanded="false" aria-controls="closed-wave-0" data-wave="0"><span class="check" aria-hidden="true">✓<\/span> Wave 1 <span class="completed-wave-tally">2\/2<\/span><\/button>/,
+  );
   // The lead title + "+N" reads on the full card the chip reveals in the grid.
-  assert.match(html, /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2>Wave 1 — config resolution \+1 <span class="wave-status closed">closed<\/span>/);
+  assert.match(
+    html,
+    /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2>Wave 1 — config resolution \+1 <span class="wave-status closed">closed<\/span>/,
+  );
 });
 
 test("renderStatusPage escapes a wave name derived from an issue title", () => {
   const html = renderStatusPage({
     project: "demo",
-    waves: [{ index: 0, status: "running", issues: [{ issueNumber: "101", status: "running", name: "fix <script> & things" }] }],
+    waves: [
+      {
+        index: 0,
+        status: "running",
+        issues: [
+          {
+            issueNumber: "101",
+            status: "running",
+            name: "fix <script> & things",
+          },
+        ],
+      },
+    ],
     parked: [],
   });
 
@@ -2509,11 +4607,20 @@ test("renderStatusPage escapes a wave name derived from an issue title", () => {
 test("renderStatusPage keeps the bare wave index when no issue title is resolved yet", () => {
   const html = renderStatusPage({
     project: "demo",
-    waves: [{ index: 0, status: "running", issues: [{ issueNumber: "101", status: "running" }] }],
+    waves: [
+      {
+        index: 0,
+        status: "running",
+        issues: [{ issueNumber: "101", status: "running" }],
+      },
+    ],
     parked: [],
   });
 
-  assert.match(html, /<h2>Wave 1 <span class="wave-status running">running<\/span>/);
+  assert.match(
+    html,
+    /<h2>Wave 1 <span class="wave-status running">running<\/span>/,
+  );
 });
 
 test("renderStatusPage renders a campaign meta line of name · issues · waves, omitted with no campaign (#79)", () => {
@@ -2521,7 +4628,11 @@ test("renderStatusPage renders a campaign meta line of name · issues · waves, 
     project: "demo",
     name: "gateway work",
     waves: [
-      { index: 0, status: "closed", issues: [{ issueNumber: "101", status: "completed" }] },
+      {
+        index: 0,
+        status: "closed",
+        issues: [{ issueNumber: "101", status: "completed" }],
+      },
       {
         index: 1,
         status: "running",
@@ -2534,7 +4645,10 @@ test("renderStatusPage renders a campaign meta line of name · issues · waves, 
     parked: [],
   });
   // Three issues across two waves, under the named campaign.
-  assert.match(html, /<p class="campaign-meta"><span class="campaign-name">gateway work<\/span> · 3 issues · 2 waves<\/p>/);
+  assert.match(
+    html,
+    /<p class="campaign-meta"><span class="campaign-name">gateway work<\/span> · 3 issues · 2 waves<\/p>/,
+  );
 
   // With no campaign at all (no waves), the meta line is omitted entirely.
   const empty = renderStatusPage({ project: "demo", waves: [], parked: [] });
@@ -2545,17 +4659,31 @@ test("renderStatusPage lays open waves out in a grid, accenting the running wave
   const html = renderStatusPage({
     project: "demo",
     waves: [
-      { index: 0, status: "running", issues: [{ issueNumber: "201", status: "running" }] },
-      { index: 1, status: "unstarted", issues: [{ issueNumber: "301", status: "unstarted" }] },
+      {
+        index: 0,
+        status: "running",
+        issues: [{ issueNumber: "201", status: "running" }],
+      },
+      {
+        index: 1,
+        status: "unstarted",
+        issues: [{ issueNumber: "301", status: "unstarted" }],
+      },
     ],
     parked: [],
   });
   // Open wave cards sit in a responsive grid.
   assert.match(html, /<div class="waves-grid"><section class="wave running">/);
-  assert.match(html, /\.waves-grid \{ display: grid; grid-template-columns: repeat\(auto-fill, minmax\(20rem, 1fr\)\);/);
+  assert.match(
+    html,
+    /\.waves-grid \{ display: grid; grid-template-columns: repeat\(auto-fill, minmax\(20rem, 1fr\)\);/,
+  );
   // A running wave carries the status-coloured (blue) top accent; an unstarted one the dim default (§3).
   assert.match(html, /\.wave \{[^}]*border-top: 3px solid var\(--color-dim\);/);
-  assert.match(html, /\.wave\.running \{ border-top-color: var\(--color-blue\); \}/);
+  assert.match(
+    html,
+    /\.wave\.running \{ border-top-color: var\(--color-blue\); \}/,
+  );
   assert.match(html, /<section class="wave unstarted">/);
 });
 
@@ -2563,26 +4691,54 @@ test("renderStatusPage's parked card carries no inline reply form — the reply 
   const html = renderStatusPage({
     project: "demo",
     waves: [],
-    parked: [{ issueNumber: "102", reason: "blocked", parkedAt: "2025-06-15T09:00:00.000Z", branch: "agent/102", description: "Need a choice.", options: ["A", "B"] }],
+    parked: [
+      {
+        issueNumber: "102",
+        reason: "blocked",
+        parkedAt: "2025-06-15T09:00:00.000Z",
+        branch: "agent/102",
+        description: "Need a choice.",
+        options: ["A", "B"],
+      },
+    ],
   });
   // The card is a single clickable anchor with a meta line — no <form>, no <textarea>,
   // no per-issue "Send response" button. The only /answer form on the page is the sheet's.
-  const card = html.slice(html.indexOf('class="parked-card"'), html.indexOf("</a>", html.indexOf('class="parked-card"')));
+  const card = html.slice(
+    html.indexOf('class="parked-card"'),
+    html.indexOf("</a>", html.indexOf('class="parked-card"')),
+  );
   assert.doesNotMatch(card, /<form|<textarea|Send response/);
-  assert.match(html, /waiting <span class="parked-waited" data-parked-at="2025-06-15T09:00:00.000Z">…<\/span> · blocked/);
+  assert.match(
+    html,
+    /waiting <span class="parked-waited" data-parked-at="2025-06-15T09:00:00.000Z">…<\/span> · blocked/,
+  );
   // Exactly one /answer form remains — the sheet's reply-form.
   assert.equal(html.match(/action="\/answer"/g)?.length, 1);
 });
 
 test("serveAllStatus can bind to a non-localhost host for tailnet access", () => {
-  assert.match(String(serveAllStatus), /server\.listen\(opts\.port,\s*opts\.host,/);
+  assert.match(
+    String(serveAllStatus),
+    /server\.listen\(opts\.port,\s*opts\.host,/,
+  );
 });
 
 test("formatStatusText summarizes waves, issue chips (with names), and the parked section", () => {
   const text = formatStatusText({
     project: "jjforge",
     waves: [
-      { index: 0, status: "closed", issues: [{ issueNumber: "436", status: "completed", name: "Fix login redirect" }] },
+      {
+        index: 0,
+        status: "closed",
+        issues: [
+          {
+            issueNumber: "436",
+            status: "completed",
+            name: "Fix login redirect",
+          },
+        ],
+      },
       {
         index: 1,
         status: "running",
@@ -2592,7 +4748,16 @@ test("formatStatusText summarizes waves, issue chips (with names), and the parke
         ],
       },
     ],
-    parked: [{ issueNumber: "655", reason: "blocked", parkedAt: "now", branch: "agent/655", description: "?", options: [] }],
+    parked: [
+      {
+        issueNumber: "655",
+        reason: "blocked",
+        parkedAt: "now",
+        branch: "agent/655",
+        description: "?",
+        options: [],
+      },
+    ],
   });
 
   assert.match(text, /jjforge — status/);
@@ -2615,56 +4780,97 @@ test("formatStatusText reports when nothing is running", () => {
 test("formatStatusText omits the parked section when nothing is parked", () => {
   const text = formatStatusText({
     project: "demo",
-    waves: [{ index: 0, status: "running", issues: [{ issueNumber: "1", status: "running" }] }],
+    waves: [
+      {
+        index: 0,
+        status: "running",
+        issues: [{ issueNumber: "1", status: "running" }],
+      },
+    ],
     parked: [],
   });
   assert.doesNotMatch(text, /awaiting your reply/);
 });
 
 test("renderStatusPage renders the landing live-bar top-right, not the old refresh widget (#79)", () => {
-  const html = renderStatusPage({ project: "demo", waves: [{ index: 0, status: "closed", issues: [] }], parked: [] });
+  const html = renderStatusPage({
+    project: "demo",
+    waves: [{ index: 0, status: "closed", issues: [] }],
+    parked: [],
+  });
 
   // The live-bar replaces the fixed-interval Refresh widget: a dot-only live/paused
   // indicator, an "updated Ns ago" readout, and an icon Pause button — the same shared
   // control the landing renders (#81). The indicator shows no visible "Live" text (its
   // state is an accessible label); the pause control carries no "Pause" text word.
-  assert.match(html, /<div class="live-bar"[^>]*><span class="live-indicator" data-live-state="live" aria-label="Live"><\/span><span class="updated" data-updated>[^<]*<\/span><button type="button" id="pause" class="pause" data-paused="false" aria-label="Pause"><\/button><\/div>/);
+  assert.match(
+    html,
+    /<div class="live-bar"[^>]*><span class="live-indicator" data-live-state="live" aria-label="Live"><\/span><span class="updated" data-updated>[^<]*<\/span><button type="button" id="pause" class="pause" data-paused="false" aria-label="Pause"><\/button><\/div>/,
+  );
   // Paused, the live indicator goes dim (not amber) and still (§5).
-  assert.match(html, /\.live-indicator\[data-live-state="paused"\] \{ color: var\(--color-dim\); \}/);
+  assert.match(
+    html,
+    /\.live-indicator\[data-live-state="paused"\] \{ color: var\(--color-dim\); \}/,
+  );
   // The old interval widget is gone entirely.
   assert.doesNotMatch(html, /id="refresh-seconds"/);
   assert.doesNotMatch(html, /id="refresh-enabled"/);
   assert.doesNotMatch(html, /class="refresh"/);
   assert.doesNotMatch(html, /sandcastle-status-refresh/);
   // The h1 drops the " status" wording; with no dropdown it is just the project name.
-  assert.match(html, /<div class="page-top"><h1>demo<\/h1><div class="live-bar"/);
+  assert.match(
+    html,
+    /<div class="page-top"><h1>demo<\/h1><div class="live-bar"/,
+  );
   assert.match(html, /\.page-top \{ display: flex;/);
 });
 
 test("both pages render one shared top-bar control: a dot-only live indicator and an icon pause (#81)", () => {
   const landing = renderLandingShell(["alpha", "beta"]);
-  const campaign = renderStatusPage({ project: "beta", waves: [], parked: [] }, { projects: ["alpha", "beta"], selected: "beta" });
+  const campaign = renderStatusPage(
+    { project: "beta", waves: [], parked: [] },
+    { projects: ["alpha", "beta"], selected: "beta" },
+  );
 
   // The live-bar is one shared definition, emitted verbatim by every page so the two
   // can no longer drift (the "Live"-word vs LIVE, pause-word vs icon divergence).
-  const liveBar = renderTopBar("").match(/<div class="live-bar".*<\/div>/s)?.[0];
+  const liveBar = renderTopBar("").match(
+    /<div class="live-bar".*<\/div>/s,
+  )?.[0];
   assert.ok(liveBar, "renderTopBar emits a live-bar");
-  for (const page of [landing, campaign]) assert.ok(page.includes(liveBar), "every page includes the shared live-bar");
+  for (const page of [landing, campaign])
+    assert.ok(
+      page.includes(liveBar),
+      "every page includes the shared live-bar",
+    );
 
   // The indicator is a dot only — no visible "Live"/"Paused" word; its state is an
   // accessible label instead. The pause control is an icon button with no "Pause" word.
   for (const page of [landing, campaign]) {
     assert.doesNotMatch(page, /<span class="live-indicator"[^>]*>Live<\/span>/);
     assert.doesNotMatch(page, /<button[^>]*class="pause"[^>]*>Pause<\/button>/);
-    assert.match(page, /<span class="live-indicator" data-live-state="live" aria-label="Live"><\/span>/);
-    assert.match(page, /<button type="button" id="pause" class="pause" data-paused="false" aria-label="Pause"><\/button>/);
+    assert.match(
+      page,
+      /<span class="live-indicator" data-live-state="live" aria-label="Live"><\/span>/,
+    );
+    assert.match(
+      page,
+      /<button type="button" id="pause" class="pause" data-paused="false" aria-label="Pause"><\/button>/,
+    );
   }
 
   // The pause icon lives in the shared CSS, flipped by a data attribute, so the two
   // pages' scripts never re-author the glyph: ⏸ while live, ▶ once paused.
   assert.match(TOP_BAR_STYLES, /\.pause::before \{ content: "⏸"; \}/);
-  assert.match(TOP_BAR_STYLES, /\.pause\[data-paused="true"\]::before \{ content: "▶"; \}/);
-  for (const page of [landing, campaign]) assert.ok(page.includes(TOP_BAR_STYLES), "every page includes the shared top-bar styles");
+  assert.match(
+    TOP_BAR_STYLES,
+    /\.pause\[data-paused="true"\]::before \{ content: "▶"; \}/,
+  );
+  for (const page of [landing, campaign])
+    assert.ok(
+      page.includes(TOP_BAR_STYLES),
+      "every page includes the shared top-bar styles",
+    );
 });
 
 test("renderStatusPage updates live off /api/events, reloading on a ping unless composing (#79)", () => {
@@ -2675,35 +4881,58 @@ test("renderStatusPage updates live off /api/events, reloading on a ping unless 
   assert.match(html, /location\.reload\(\)/);
   // Guarded: a reply being composed in any textarea freezes the reload so it is never lost.
   assert.match(html, /const isComposing = \(\) =>/);
-  assert.match(html, /el === document\.activeElement \|\| el\.value\.trim\(\) !== ""/);
+  assert.match(
+    html,
+    /el === document\.activeElement \|\| el\.value\.trim\(\) !== ""/,
+  );
   assert.match(html, /if \(paused \|\| isComposing\(\)\) \{ buffered\+\+;/);
   // Pause is a presentation freeze that flushes on resume, exactly as the landing's is.
   assert.match(html, /pauseBtn\.addEventListener\("click"/);
-  assert.match(html, /"updated " \+ Math\.round\(\(Date\.now\(\) - lastUpdate\) \/ 1000\) \+ "s ago"/);
+  assert.match(
+    html,
+    /"updated " \+ Math\.round\(\(Date\.now\(\) - lastUpdate\) \/ 1000\) \+ "s ago"/,
+  );
 });
 
 test("renderStatusPage marks carvable chips with carve data and never puts a carve control on a chip", () => {
-  const html = renderStatusPage({
-    project: "demo",
-    waves: [
-      { index: 0, status: "closed", issues: [{ issueNumber: "101", status: "completed" }] },
-      { index: 1, status: "running", issues: [{ issueNumber: "201", status: "running" }] },
-      {
-        index: 2,
-        status: "unstarted",
-        issues: [
-          { issueNumber: "301", status: "unstarted" },
-          { issueNumber: "302", status: "parked" },
-        ],
-      },
-    ],
-    parked: [],
-  }, { carve: true });
+  const html = renderStatusPage(
+    {
+      project: "demo",
+      waves: [
+        {
+          index: 0,
+          status: "closed",
+          issues: [{ issueNumber: "101", status: "completed" }],
+        },
+        {
+          index: 1,
+          status: "running",
+          issues: [{ issueNumber: "201", status: "running" }],
+        },
+        {
+          index: 2,
+          status: "unstarted",
+          issues: [
+            { issueNumber: "301", status: "unstarted" },
+            { issueNumber: "302", status: "parked" },
+          ],
+        },
+      ],
+      parked: [],
+    },
+    { carve: true },
+  );
 
   // Each chip carries its issue and project; only a still-carvable one is flagged
   // carvable, so the tap-detail panel knows whether to offer a Carve button.
-  assert.match(html, /class="chip [a-z]+"[^>]*data-issue="301"[^>]*data-project="demo"[^>]*data-carvable="1"/);
-  assert.match(html, /class="chip [a-z]+"[^>]*data-issue="302"[^>]*data-project="demo"[^>]*data-carvable="1"/);
+  assert.match(
+    html,
+    /class="chip [a-z]+"[^>]*data-issue="301"[^>]*data-project="demo"[^>]*data-carvable="1"/,
+  );
+  assert.match(
+    html,
+    /class="chip [a-z]+"[^>]*data-issue="302"[^>]*data-project="demo"[^>]*data-carvable="1"/,
+  );
   // The completed (banked) and current-wave-in-flight (running) chips are not carvable.
   assert.doesNotMatch(html, /data-issue="101"[^>]*data-carvable/);
   assert.doesNotMatch(html, /data-issue="201"[^>]*data-carvable/);
@@ -2719,7 +4948,13 @@ test("renderStatusPage omits the carve control unless the page opts into it", ()
   // `carve: true`, but a bare render (e.g. the empty-registry page) shows none.
   const html = renderStatusPage({
     project: "demo",
-    waves: [{ index: 0, status: "unstarted", issues: [{ issueNumber: "301", status: "unstarted" }] }],
+    waves: [
+      {
+        index: 0,
+        status: "unstarted",
+        issues: [{ issueNumber: "301", status: "unstarted" }],
+      },
+    ],
     parked: [],
   });
 
@@ -2730,7 +4965,12 @@ test("parseCarveClosure reads the structured closure line the dry-run prints", (
   // The dry-run prints a `carve-closure {json}` line (E2) carrying the exact
   // closure — target, the dependents that would leave, the banked work kept, and
   // the remaining waves — so the panel names each without re-parsing the prose.
-  const structured = { target: "201", dropped: ["201", "401"], keptBanked: ["301"], remaining: [["501"]] };
+  const structured = {
+    target: "201",
+    dropped: ["201", "401"],
+    keptBanked: ["301"],
+    remaining: [["501"]],
+  };
   assert.deepEqual(
     parseCarveClosure(
       `carve #201 → dropping #201, #401 (keeping banked #301)\nremaining campaign: "501"\ncarve-closure ${JSON.stringify(structured)}`,
@@ -2739,7 +4979,12 @@ test("parseCarveClosure reads the structured closure line the dry-run prints", (
   );
   // No structured line (e.g. an install predating E2) → null, so the route can 502
   // rather than half-render a closure it cannot vouch for.
-  assert.equal(parseCarveClosure("carve #201 → nothing to drop\nremaining campaign: (nothing left to run)"), null);
+  assert.equal(
+    parseCarveClosure(
+      "carve #201 → nothing to drop\nremaining campaign: (nothing left to run)",
+    ),
+    null,
+  );
 });
 
 test("listArchivedRuns lists a project's archived runs newest-first with summaries, skipping a malformed file", () => {
@@ -2756,19 +5001,27 @@ test("listArchivedRuns lists a project's archived runs newest-first with summari
   ]);
   // A malformed archive (no reconstructable run) is skipped, not fatal — even
   // though its timestamp is the newest.
-  writeFileSync(join(archiveDir, "orchestrator-2026-03-01T00-00-00-000Z.jsonl"), "not json at all\n{broken");
+  writeFileSync(
+    join(archiveDir, "orchestrator-2026-03-01T00-00-00-000Z.jsonl"),
+    "not json at all\n{broken",
+  );
 
   const runs = listArchivedRuns(dir);
 
   // Newest-first by timestamp token; the malformed newest file is dropped.
-  assert.deepEqual(runs.map((r) => r.run), ["2026-02-01T00-00-00-000Z", "2026-01-01T00-00-00-000Z"]);
+  assert.deepEqual(
+    runs.map((r) => r.run),
+    ["2026-02-01T00-00-00-000Z", "2026-01-01T00-00-00-000Z"],
+  );
   assert.equal(runs[0].summary, "campaign · 2 issues · complete");
   assert.equal(runs[1].summary, "campaign · 1 issue · complete");
   // Neither archived run was named, so each carries no name (the list falls back to its token).
   assert.equal(runs[0].name, undefined);
   assert.equal(runs[1].name, undefined);
   // The file path is resolved from the listing, never joined from request input.
-  assert.ok(runs[0].file.endsWith("orchestrator-2026-02-01T00-00-00-000Z.jsonl"));
+  assert.ok(
+    runs[0].file.endsWith("orchestrator-2026-02-01T00-00-00-000Z.jsonl"),
+  );
 });
 
 test("listArchivedRuns carries a named run's --name for the list's primary label", () => {
@@ -2785,7 +5038,10 @@ test("listArchivedRuns carries a named run's --name for the list's primary label
 });
 
 test("listArchivedRuns returns nothing when a project has no archive directory", () => {
-  assert.deepEqual(listArchivedRuns(join(tmpdir(), `sctdd-archive-none-${Date.now()}`)), []);
+  assert.deepEqual(
+    listArchivedRuns(join(tmpdir(), `sctdd-archive-none-${Date.now()}`)),
+    [],
+  );
 });
 
 test("summarizeRun folds an archived log into a one-line mode/issue-count/outcome summary", () => {
@@ -2825,7 +5081,11 @@ test("summarizeRun describes only the last run in a multi-run archive (#69)", ()
   const events = [
     { event: "campaign-start", batches: [["56", "57"], ["61"]], name: "first" },
     { event: "campaign-halt", taskId: "61", reason: "merge conflict" },
-    { event: "campaign-start", batches: [["63"], ["64"], ["65"], ["67"]], name: "second" },
+    {
+      event: "campaign-start",
+      batches: [["63"], ["64"], ["65"], ["67"]],
+      name: "second",
+    },
     { event: "campaign-batch-done", index: 0, merged: ["63"] },
     { event: "campaign-batch-done", index: 1, merged: ["64"] },
     { event: "campaign-batch-done", index: 2, merged: ["65"] },
@@ -2849,28 +5109,55 @@ test("summarizeRun still reports halted when the last run halted after an earlie
 });
 
 test("extractParkedDetails separates description from Options section", () => {
-  const details = extractParkedDetails("I am parked on the API choice.\n\nOptions:\n1. Return raw JSON\n2. Render HTML server-side\n\nWhat do you prefer?");
+  const details = extractParkedDetails(
+    "I am parked on the API choice.\n\nOptions:\n1. Return raw JSON\n2. Render HTML server-side\n\nWhat do you prefer?",
+  );
 
   assert.equal(details.description, "I am parked on the API choice.");
-  assert.deepEqual(details.options, ["Return raw JSON", "Render HTML server-side"]);
+  assert.deepEqual(details.options, [
+    "Return raw JSON",
+    "Render HTML server-side",
+  ]);
 });
 
 test("parkedReplyFor returns the matching record's question and parsed options for the issue-detail sheet", () => {
   const records = [
-    { taskId: "#102", parkedAt: "now", reason: "blocked", branch: "agent/102", question: "Which store?\n\nOptions:\n- Postgres\n- SQLite" },
-    { taskId: "201", parkedAt: "now", reason: "blocked", branch: "agent/201", question: "No options here." },
+    {
+      taskId: "#102",
+      parkedAt: "now",
+      reason: "blocked",
+      branch: "agent/102",
+      question: "Which store?\n\nOptions:\n- Postgres\n- SQLite",
+    },
+    {
+      taskId: "201",
+      parkedAt: "now",
+      reason: "blocked",
+      branch: "agent/201",
+      question: "No options here.",
+    },
   ];
 
   // Matched by normalized issue number (the "#" prefix is irrelevant).
-  assert.deepEqual(parkedReplyFor(records, "102"), { question: "Which store?", options: ["Postgres", "SQLite"] });
+  assert.deepEqual(parkedReplyFor(records, "102"), {
+    question: "Which store?",
+    options: ["Postgres", "SQLite"],
+  });
   // A record with no Options section yields the whole question and no options.
-  assert.deepEqual(parkedReplyFor(records, "201"), { question: "No options here.", options: [] });
+  assert.deepEqual(parkedReplyFor(records, "201"), {
+    question: "No options here.",
+    options: [],
+  });
   // No record names the issue → undefined, so the sheet shows only the free-text field.
   assert.equal(parkedReplyFor(records, "999"), undefined);
 });
 
 test("appendedEvents returns the whole log and its end offset from a zero offset", () => {
-  const log = JSON.stringify({ event: "campaign-start" }) + "\n" + JSON.stringify({ event: "queue-start" }) + "\n";
+  const log =
+    JSON.stringify({ event: "campaign-start" }) +
+    "\n" +
+    JSON.stringify({ event: "queue-start" }) +
+    "\n";
   const { events, offset } = appendedEvents(log, 0);
   assert.deepEqual(
     events.map((e) => e.event),
@@ -2902,7 +5189,10 @@ test("appendedEvents leaves a partial trailing line unconsumed until it is compl
   );
   assert.equal(mid.offset, complete.length);
   // Once the line is finished, resuming from the same offset yields it whole.
-  const done = appendedEvents(complete + partial + ',"taskId":"101"}\n', mid.offset);
+  const done = appendedEvents(
+    complete + partial + ',"taskId":"101"}\n',
+    mid.offset,
+  );
   assert.deepEqual(
     done.events.map((e) => e.event),
     ["turn"],
@@ -2932,8 +5222,19 @@ test("renderStatusPage renders closed waves as a compact toggle row of chip butt
   const html = renderStatusPage({
     project: "beta",
     waves: [
-      { index: 0, status: "closed", issues: [{ issueNumber: "101", status: "completed" }, { issueNumber: "102", status: "completed" }] },
-      { index: 1, status: "running", issues: [{ issueNumber: "201", status: "running" }] },
+      {
+        index: 0,
+        status: "closed",
+        issues: [
+          { issueNumber: "101", status: "completed" },
+          { issueNumber: "102", status: "completed" },
+        ],
+      },
+      {
+        index: 1,
+        status: "running",
+        issues: [{ issueNumber: "201", status: "running" }],
+      },
     ],
     parked: [],
   });
@@ -2953,8 +5254,18 @@ test("renderStatusPage renders each expanded closed wave's full card in the grid
   const html = renderStatusPage({
     project: "beta",
     waves: [
-      { index: 0, status: "closed", issues: [{ issueNumber: "101", status: "completed", name: "cart persists" }] },
-      { index: 1, status: "running", issues: [{ issueNumber: "201", status: "running" }] },
+      {
+        index: 0,
+        status: "closed",
+        issues: [
+          { issueNumber: "101", status: "completed", name: "cart persists" },
+        ],
+      },
+      {
+        index: 1,
+        status: "running",
+        issues: [{ issueNumber: "201", status: "running" }],
+      },
     ],
     parked: [],
   });
@@ -2967,29 +5278,52 @@ test("renderStatusPage renders each expanded closed wave's full card in the grid
     /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2>Wave 1 — cart persists <span class="wave-status closed">closed<\/span><\/h2><span class="wave-tally">1\/1<\/span><\/div>/,
   );
   // The closed card renders inside the same grid, positioned before the open running wave.
-  const grid = html.match(/<div class="waves-grid">([\s\S]*?)<\/div>\s*(?:<section class="archived|<div id="issue-detail"|<noscript|<script)/);
+  const grid = html.match(
+    /<div class="waves-grid">([\s\S]*?)<\/div>\s*(?:<section class="archived|<div id="issue-detail"|<noscript|<script)/,
+  );
   assert.ok(grid, "expected a waves-grid");
-  assert.ok(grid[1].indexOf('id="closed-wave-0"') < grid[1].indexOf('Wave 2'), "closed card should precede the open wave");
+  assert.ok(
+    grid[1].indexOf('id="closed-wave-0"') < grid[1].indexOf("Wave 2"),
+    "closed card should precede the open wave",
+  );
 });
 
 test("renderStatusPage gives the closed-wave chip a chevron and a green accent when expanded", () => {
   const html = renderStatusPage({
     project: "beta",
-    waves: [{ index: 0, status: "closed", issues: [{ issueNumber: "101", status: "completed" }] }],
+    waves: [
+      {
+        index: 0,
+        status: "closed",
+        issues: [{ issueNumber: "101", status: "completed" }],
+      },
+    ],
     parked: [],
   });
 
   // The chevron is CSS keyed off aria-expanded (collapsed › → expanded ⌄), and an
   // expanded chip takes a green accent border.
   assert.match(html, /\.completed-wave-chip::after \{[^}]*content: "›"/);
-  assert.match(html, /\.completed-wave-chip\[aria-expanded="true"\]::after \{[^}]*content: "⌄"/);
-  assert.match(html, /\.completed-wave-chip\[aria-expanded="true"\] \{[^}]*border-color: var\(--color-green\)/);
+  assert.match(
+    html,
+    /\.completed-wave-chip\[aria-expanded="true"\]::after \{[^}]*content: "⌄"/,
+  );
+  assert.match(
+    html,
+    /\.completed-wave-chip\[aria-expanded="true"\] \{[^}]*border-color: var\(--color-green\)/,
+  );
 });
 
 test("renderStatusPage persists the expanded closed-wave set across a live reload", () => {
   const html = renderStatusPage({
     project: "beta",
-    waves: [{ index: 0, status: "closed", issues: [{ issueNumber: "101", status: "completed" }] }],
+    waves: [
+      {
+        index: 0,
+        status: "closed",
+        issues: [{ issueNumber: "101", status: "completed" }],
+      },
+    ],
     parked: [],
   });
 
@@ -3004,20 +5338,35 @@ test("renderStatusPage persists the expanded closed-wave set across a live reloa
 test("renderStatusPage degrades the closed-wave toggle without JS", () => {
   const html = renderStatusPage({
     project: "beta",
-    waves: [{ index: 0, status: "closed", issues: [{ issueNumber: "101", status: "completed" }] }],
+    waves: [
+      {
+        index: 0,
+        status: "closed",
+        issues: [{ issueNumber: "101", status: "completed" }],
+      },
+    ],
     parked: [],
   });
 
   // Without JS the cards can never be toggled open, so a <noscript> reveals every
   // closed card in the grid and hides the inert toggle bar — the content stays reachable.
-  assert.match(html, /<noscript><style>[^<]*\.completed-wave-bar \{ display: none;[^<]*\.wave\.closed\[hidden\] \{ display: block;/);
+  assert.match(
+    html,
+    /<noscript><style>[^<]*\.completed-wave-bar \{ display: none;[^<]*\.wave\.closed\[hidden\] \{ display: block;/,
+  );
 });
 
 test("renderStatusPage renders an archived run's closed waves as full cards, not colliding toggle ids", () => {
   const html = renderStatusPage(
     {
       project: "beta",
-      waves: [{ index: 0, status: "closed", issues: [{ issueNumber: "201", status: "completed" }] }],
+      waves: [
+        {
+          index: 0,
+          status: "closed",
+          issues: [{ issueNumber: "201", status: "completed" }],
+        },
+      ],
       parked: [],
     },
     {
@@ -3026,7 +5375,15 @@ test("renderStatusPage renders an archived run's closed waves as full cards, not
       archived: {
         project: "beta",
         // A finished run — every wave is closed.
-        waves: [{ index: 0, status: "closed", issues: [{ issueNumber: "101", status: "completed", name: "old work" }] }],
+        waves: [
+          {
+            index: 0,
+            status: "closed",
+            issues: [
+              { issueNumber: "101", status: "completed", name: "old work" },
+            ],
+          },
+        ],
         parked: [],
       },
     },
@@ -3037,10 +5394,16 @@ test("renderStatusPage renders an archived run's closed waves as full cards, not
   // The archived section renders its closed wave as a full, always-expanded card — no
   // second toggle bar and no duplicated id="closed-wave-0" that would hijack the live card.
   const archivedStart = html.indexOf('class="archived-run"');
-  const archived = html.slice(archivedStart, html.indexOf('<div id="issue-detail"', archivedStart));
+  const archived = html.slice(
+    archivedStart,
+    html.indexOf('<div id="issue-detail"', archivedStart),
+  );
   assert.doesNotMatch(archived, /completed-wave-bar/);
   assert.doesNotMatch(archived, /id="closed-wave-0"/);
-  assert.match(archived, /<section class="wave closed"><div class="wave-head"><h2>Wave 1 — old work <span class="wave-status closed">closed<\/span>/);
+  assert.match(
+    archived,
+    /<section class="wave closed"><div class="wave-head"><h2>Wave 1 — old work <span class="wave-status closed">closed<\/span>/,
+  );
   // Exactly one element carries the toggle id across the whole page (no duplicate ids).
   assert.equal(html.split('id="closed-wave-0"').length - 1, 1);
 });

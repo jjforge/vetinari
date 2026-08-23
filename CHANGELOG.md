@@ -58,7 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   treatment, the dots scoped to `.dot` so they never tint the pills. The four top
   counters colour their values (working blue, parked yellow, merged-today green;
   queued neutral) and each carries a client-derived sublabel — working `across N
-  repos` (repos with a running agent), parked `oldest <Nm>` (the oldest parked
+repos` (repos with a running agent), parked `oldest <Nm>` (the oldest parked
   question's wait), queued `in later waves`, merged-today `issues closed`; the
   parked counter, the one actionable tile, gains a gold border while it holds
   questions. Pinned by `renderLandingShell` regression tests and verified by
@@ -162,6 +162,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Codified the dashboard CSS convention that a **status/category word only ever
+  appears in a scoped selector** — `.dot.running`, `.feed-kind.progress`,
+  `.card.parked` — never as a bare `.running {`/`.progress {` top-level rule (#91,
+  `docs/dashboard-color-rules.md` §8). An audit of every bare single-word class in
+  `renderStatusPage`/`renderLandingShell` found no remaining collision after #85
+  (the last dual-use word, `.progress`, was scoped to `.progress-track`); the
+  surviving bare single-word classes are legitimate component bases (`.card`,
+  `.feed`, `.counter`, `.wave`, `.chip`, `.dot`) whose word is never used as a
+  modifier. A regression now asserts neither page emits a bare top-level rule for
+  any status/category word, so the whole class of collision (#81/#83's status-word
+  leak, #85's progress-bar squish) fails the suite if re-introduced.
+
 - The dashboard now labels each project by its full **`owner/name`** rather than the
   bare project key (#89), everywhere a project is named: the repo-dropdown trigger and
   its rows, and the landing card headings. The `owner/name` is derived at landing-build
@@ -208,11 +220,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   intends (#82), a frontend interaction + render change only. Each closed wave is a
   compact toggle chip (`✓ Wave N  M/M`) in a row under the campaign-meta line, with a
   chevron that flips `›`⇄`⌄` and a green accent while its wave is open; clicking a
-  chip reveals that wave's *full* card — the same component an open wave renders (a
+  chip reveals that wave's _full_ card — the same component an open wave renders (a
   `CLOSED` status pill, its merged issue chips and the `#num title` list) — in the
   shared `waves-grid`, before the open waves and in wave order. Any subset can be open
   at once and each chip toggles only its own card. Previously a closed wave was a
-  native `<details>` whose summary dropped a full-width block of *just the issue chips*
+  native `<details>` whose summary dropped a full-width block of _just the issue chips_
   into the chip row. The open set is persisted per repo so a live `/api/events` reload
   no longer silently collapses everything the operator opened; the toggle is keyboard-
   operable with `aria-expanded`, and a `<noscript>` fallback reveals every closed card
@@ -262,7 +274,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (the project dropdown serves as the heading, falling back to a bare `<h1>` when no
   dropdown), and a `<name> · N issues · M waves` meta line summarises the campaign.
   Parked issues now render as clickable question cards (yellow left-border, `#num
-  question` + a `waiting Nm · reason` meta line) that open the existing issue-detail
+question` + a `waiting Nm · reason` meta line) that open the existing issue-detail
   sheet — the reply happens there, so the old inline `/answer` form is gone from the
   campaign page. Closed waves read as `✓ Wave N merged/total` chips, and open waves
   lay out as a responsive grid of wave cards, each with its `Wave N` label, status
@@ -488,7 +500,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Incidental-findings harvest: with a `reportFinding` handler configured, a green
   run ends with one extra turn asking the agent for any defect it noticed but did
   not fix, and files each somewhere durable. `githubFindingReporter("owner/repo",
-  { labels })` ships as a GitHub implementation. Runs only on green; a failed filing
+{ labels })` ships as a GitHub implementation. Runs only on green; a failed filing
   never turns a real green into an error.
 - `statusline` command: prints two lines for the Claude Code status bar — line 1
   mirrors Claude Code's default (model, directory, git branch, context-used %), line

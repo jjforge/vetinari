@@ -24,15 +24,15 @@ differ.
 Every colour that carries meaning comes from this table. There are six states and
 one action.
 
-| State | Hex | Used for |
-| --- | --- | --- |
-| `running` | `#6cb6ff` | an agent is working it now |
-| `parked` | `#c8a24e` | agent asked a question, waiting on a human |
-| `failure` | `#f85149` | a run errored out without parking |
-| `unstarted` | `#5f6b78` | in a later wave, no agent assigned |
-| `completed` | `#3fb984` | landed on the base |
-| `carved` | `#a371f7` | removed from the running campaign |
-| *carve action* | `#f79287` | the carve control and its confirmation only — never a state |
+| State          | Hex       | Used for                                                    |
+| -------------- | --------- | ----------------------------------------------------------- |
+| `running`      | `#6cb6ff` | an agent is working it now                                  |
+| `parked`       | `#c8a24e` | agent asked a question, waiting on a human                  |
+| `failure`      | `#f85149` | a run errored out without parking                           |
+| `unstarted`    | `#5f6b78` | in a later wave, no agent assigned                          |
+| `completed`    | `#3fb984` | landed on the base                                          |
+| `carved`       | `#a371f7` | removed from the running campaign                           |
+| _carve action_ | `#f79287` | the carve control and its confirmation only — never a state |
 
 `unstarted` is the grey `#5f6b78` — planned but not being worked, needs nothing from
 you. `carved` keeps its own purple `#a371f7`, so an issue removed from the campaign
@@ -47,16 +47,16 @@ a state and must never appear on a status chip or a card edge.
 
 Neutral surfaces, shared by everything:
 
-| Token | Hex | Role |
-| --- | --- | --- |
-| page | `#090c10` | app background |
-| panel / chip | `#0b0e12` | toolbar, sheet foot, chip fill |
-| card | `#10151b` | every card fill |
-| border | `#232b35` | default 1px card edge |
-| hairline | `#1b212a` | in-card dividers, list rows |
-| text | `#e6edf3` | primary |
-| muted | `#8b98a5` | secondary, labels |
-| dim | `#5f6b78` | tertiary, counts, timestamps, `unstarted`/`idle` |
+| Token        | Hex       | Role                                             |
+| ------------ | --------- | ------------------------------------------------ |
+| page         | `#090c10` | app background                                   |
+| panel / chip | `#0b0e12` | toolbar, sheet foot, chip fill                   |
+| card         | `#10151b` | every card fill                                  |
+| border       | `#232b35` | default 1px card edge                            |
+| hairline     | `#1b212a` | in-card dividers, list rows                      |
+| text         | `#e6edf3` | primary                                          |
+| muted        | `#8b98a5` | secondary, labels                                |
+| dim          | `#5f6b78` | tertiary, counts, timestamps, `unstarted`/`idle` |
 
 ## 2. Which edge gets the colour
 
@@ -112,13 +112,13 @@ needs a human, but a parked question is the more direct ask.
 Chips (status pills, issue chips) and cards use the same palette and the same
 derivation, and differ only in how the colour is applied:
 
-| | Card | Chip |
-| --- | --- | --- |
-| Fill | `#10151b` | `#0b0e12` (darker — chips sit *on* cards) |
-| Colour placement | one edge (§2) | full 1px border at 40% alpha (`stateBorderColor`) |
-| Radius | 12px | 999px |
-| Text | full-strength `#e6edf3` | number `#e6edf3`, status word `#8b98a5` |
-| Dot | none | 8px, full state colour |
+|                  | Card                    | Chip                                              |
+| ---------------- | ----------------------- | ------------------------------------------------- |
+| Fill             | `#10151b`               | `#0b0e12` (darker — chips sit _on_ cards)         |
+| Colour placement | one edge (§2)           | full 1px border at 40% alpha (`stateBorderColor`) |
+| Radius           | 12px                    | 999px                                             |
+| Text             | full-strength `#e6edf3` | number `#e6edf3`, status word `#8b98a5`           |
+| Dot              | none                    | 8px, full state colour                            |
 
 The chip's dot is the only element that renders a state colour at full strength on a
 small surface. Chip borders are muted to 40% so a wave of a dozen chips does not
@@ -176,3 +176,27 @@ Sheet top border `#c8a24e`. Status dot `#c8a24e`. Question block left border 3px
 **Issue sheet, completed**
 Sheet top border `#3fb984`. No carve control at all — carving something already
 landed is not an action, and offering it would contradict the explainer text.
+
+## 8. Status and category words are only ever scoped selectors
+
+A status word (§1: `running` · `parked` · `failure` · `completed` · `unstarted` ·
+`carved`, plus the landing's `queued`/`idle` aliases and a wave's `closed`) and a
+feed comms category (`feedKindClass`: `success` · `attention` · `failure` ·
+`carved` · `progress`) are **modifiers**, applied to an element that already has a
+component base class — `<a class="card running">`, `<span class="feed-kind
+progress">`, `<span class="dot parked">`. So they only ever appear in **compound**
+selectors: `.card.running`, `.feed-kind.progress`, `.dot.parked`. **Never write a
+bare `.running { … }` or `.progress { … }` top-level rule.**
+
+The hazard is a _dual-use_ word — one used both as a component base and as a
+modifier. A bare `.progress { height; background; overflow }` for the card's
+progress bar also matched the feed's `feed-kind progress` category label and boxed
+it (#85, twin of the #81/#83 status-word leak that filled whole wave rows). The
+fix each time is to scope: the bar became `.progress-track`; the status words moved
+to `.dot.<word>`. A component base class _may_ be a bare single word (`.card`,
+`.feed`, `.counter`, `.wave`, `.chip`, `.dot`) — that is legitimate — **provided
+its word is not also a status/category modifier**. Prefix or `.dot`-style-scope the
+moment those two uses would share a word.
+
+This is guarded: a test asserts neither page emits a bare top-level rule for any
+status/category word, so a re-introduced collision fails the suite.

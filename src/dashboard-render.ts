@@ -75,19 +75,19 @@ const chipTitle = (issue: StatusIssue) => [issue.name, issue.detail].filter(Bool
  */
 export const isCarvable = (issue: StatusIssue) => issue.status === "unstarted" || issue.status === "parked";
 
-const renderIssueChip = (issue: StatusIssue, project: string, carve: boolean) => {
+const renderIssueChip = (issue: StatusIssue, project: string, carve: boolean, interactive: boolean) => {
   const detail = chipTitle(issue) || `#${issue.issueNumber}: ${issue.status}`;
-  // When carve is enabled, every chip carries its issue and project so the
-  // tap-detail panel can route a carve; only a still-carvable chip is flagged
-  // `data-carvable`, so the panel offers Carve for exactly those (ADR 0005). No
-  // control is drawn on the chip itself — the affordance lives in the panel.
-  const carveData = carve
-    ? ` data-issue="${escapeHtml(issue.issueNumber)}" data-project="${escapeHtml(project)}"${isCarvable(issue) ? ` data-carvable="1"` : ""}`
-    : "";
-  return `<button type="button" class="chip" title="${escapeTitle(detail)}" data-detail="${escapeTitle(detail)}"${carveData}><span class="dot ${issue.status}"></span>#${escapeHtml(issue.issueNumber)} <small>${escapeHtml(issue.status)}</small></button>`;
+  // A live (interactive) chip carries its issue and project so a tap opens the
+  // detail sheet — and, under carve, so the panel can route a carve; an archived
+  // chip is inert (its turn log lives in a different log than /api/issue reads).
+  // Only a still-carvable chip is flagged `data-carvable`, so the panel offers
+  // Carve for exactly those (ADR 0005). No control is drawn on the chip itself.
+  const openData = interactive || carve ? ` data-issue="${escapeHtml(issue.issueNumber)}" data-project="${escapeHtml(project)}"` : "";
+  const carveData = carve && isCarvable(issue) ? ` data-carvable="1"` : "";
+  return `<button type="button" class="chip" title="${escapeTitle(detail)}"${openData}${carveData}><span class="dot ${issue.status}"></span>#${escapeHtml(issue.issueNumber)} <small>${escapeHtml(issue.status)}</small></button>`;
 };
 
-const renderWaveContents = (wave: StatusWave, project: string, carve: boolean) => `<div class="chips">${wave.issues.map((issue) => renderIssueChip(issue, project, carve)).join("")}</div>`;
+const renderWaveContents = (wave: StatusWave, project: string, carve: boolean, interactive: boolean) => `<div class="chips">${wave.issues.map((issue) => renderIssueChip(issue, project, carve, interactive)).join("")}</div>`;
 
 /**
  * The open wave's issue titles, listed under its chips so the wave reads at a
@@ -118,22 +118,23 @@ const renderWaveLabel = (wave: StatusWave) => {
   return `${index} — ${escapeHtml(lead.name)}${extra > 0 ? ` +${extra}` : ""}`;
 };
 
-const renderOpenWave = (wave: StatusWave, project: string, carve: boolean) =>
-  `<section class="wave"><h2>${renderWaveLabel(wave)} <span class="wave-status ${wave.status}">${wave.status}</span> <span class="wave-count">${wave.issues.length} issue${wave.issues.length === 1 ? "" : "s"}</span></h2>${renderWaveContents(wave, project, carve)}${renderWaveTitles(wave)}</section>`;
+const renderOpenWave = (wave: StatusWave, project: string, carve: boolean, interactive: boolean) =>
+  `<section class="wave"><h2>${renderWaveLabel(wave)} <span class="wave-status ${wave.status}">${wave.status}</span> <span class="wave-count">${wave.issues.length} issue${wave.issues.length === 1 ? "" : "s"}</span></h2>${renderWaveContents(wave, project, carve, interactive)}${renderWaveTitles(wave)}</section>`;
 
-const renderCompletedWave = (wave: StatusWave, project: string, carve: boolean) =>
-  `<details class="completed-wave"><summary class="completed-wave-chip"><span class="check" aria-hidden="true">✓</span> ${renderWaveLabel(wave)}</summary>${renderWaveContents(wave, project, carve)}</details>`;
+const renderCompletedWave = (wave: StatusWave, project: string, carve: boolean, interactive: boolean) =>
+  `<details class="completed-wave"><summary class="completed-wave-chip"><span class="check" aria-hidden="true">✓</span> ${renderWaveLabel(wave)}</summary>${renderWaveContents(wave, project, carve, interactive)}</details>`;
 
 /** The wave/issue body a status renders — closed waves collapsed into chips, open
- * waves expanded. Shared by the live run and a read-only archived run (which
- * passes `carve: false`, so its chips carry no carve affordance). */
-const renderWaves = (status: CampaignStatus, carve: boolean) =>
+ * waves expanded. Shared by the live run and a read-only archived run: the live run
+ * renders `interactive` (its chips open the detail sheet and, under carve, route a
+ * carve); the archived run passes `interactive: false`, so its chips are inert. */
+const renderWaves = (status: CampaignStatus, carve: boolean, interactive: boolean) =>
   status.waves.length
     ? `${
         status.waves.some((wave) => wave.status === "closed")
-          ? `<div class="completed-waves"><div class="completed-wave-bar">${status.waves.filter((wave) => wave.status === "closed").map((wave) => renderCompletedWave(wave, status.project, carve)).join("")}</div></div>`
+          ? `<div class="completed-waves"><div class="completed-wave-bar">${status.waves.filter((wave) => wave.status === "closed").map((wave) => renderCompletedWave(wave, status.project, carve, interactive)).join("")}</div></div>`
           : ""
-      }${status.waves.filter((wave) => wave.status !== "closed").map((wave) => renderOpenWave(wave, status.project, carve)).join("")}`
+      }${status.waves.filter((wave) => wave.status !== "closed").map((wave) => renderOpenWave(wave, status.project, carve, interactive)).join("")}`
     : "<p>No active campaign or queue found.</p>";
 
 /**
@@ -471,11 +472,32 @@ export const renderStatusPage = (status: CampaignStatus, opts: StatusPageOptions
   .carve-confirm { display: flex; align-items: center; gap: .5rem; margin: 0; }
   .carve-confirm-text { color: var(--color-red); }
   .carve-fallback form { display: inline; }
-  .issue-detail { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; display: none; align-items: center; gap: .75rem; margin: 0; padding: .75rem 1rem calc(.75rem + env(safe-area-inset-bottom)); color: var(--color-blue); background: var(--color-box-header); border-top: 1px solid var(--color-primary); box-shadow: 0 -8px 22px #0006; }
+  .carve-note { color: var(--color-blue); font-size: .85rem; }
+  .issue-open { font: inherit; font-size: .72rem; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; vertical-align: middle; margin-left: .5rem; padding: .2rem .6rem; color: var(--color-primary); background: var(--color-box-header); border: 1px solid var(--color-secondary); border-radius: 999px; cursor: pointer; }
+  .issue-open:hover { border-color: var(--color-primary); background: var(--color-primary-alpha-20); }
+  .issue-detail { position: fixed; inset: 0; z-index: 10; display: none; align-items: center; justify-content: center; padding: 1rem; background: #0009; }
   .issue-detail.show { display: flex; }
-  .issue-detail-text { flex: 1; white-space: pre-line; }
-  .issue-detail-close { flex: none; background: none; border: 0; color: var(--color-text-light-2); font-size: 1.25rem; line-height: 1; cursor: pointer; padding: .1rem .35rem; border-radius: var(--border-radius); }
+  .issue-detail[hidden] { display: none; }
+  .issue-detail-sheet { display: flex; flex-direction: column; width: min(640px, 100%); max-height: 85vh; overflow: hidden; background: var(--color-box-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); box-shadow: 0 18px 48px #0009; }
+  .issue-detail-header { position: sticky; top: 0; display: flex; align-items: flex-start; gap: .75rem; padding: 1rem 1.15rem; background: var(--color-box-header); border-bottom: 1px solid var(--color-light-border); }
+  .issue-detail-head-main { flex: 1; min-width: 0; }
+  .issue-detail-status { display: inline-flex; align-items: center; gap: .4rem; font-size: .85rem; text-transform: uppercase; letter-spacing: .03em; color: var(--color-text-light-2); }
+  .issue-detail-title { margin: .35rem 0 .15rem; font-size: 1.15rem; letter-spacing: -0.01em; color: var(--color-text); }
+  .issue-detail-context { margin: 0; font-size: .82rem; color: var(--color-text-light-2); }
+  .issue-detail-close { flex: none; background: none; border: 0; color: var(--color-text-light-2); font-size: 1.4rem; line-height: 1; cursor: pointer; padding: .1rem .4rem; border-radius: var(--border-radius); }
   .issue-detail-close:hover { color: var(--color-text); background: var(--color-secondary); }
+  .issue-detail-meta { display: flex; gap: .75rem; padding: .9rem 1.15rem; border-bottom: 1px solid var(--color-light-border); }
+  .meta-tile { flex: 1; display: flex; flex-direction: column; gap: .2rem; padding: .6rem .75rem; background: var(--color-box-header); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); }
+  .meta-label { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--color-text-light-2); }
+  .meta-value { font-size: 1.25rem; font-weight: 600; color: var(--color-text); }
+  .turn-log { list-style: none; margin: 0; padding: .5rem 1.15rem 1.15rem; overflow-y: auto; }
+  .turn-entry { display: flex; gap: .6rem; padding: .55rem 0; border-bottom: 1px solid var(--color-light-border); }
+  .turn-entry:last-child { border-bottom: 0; }
+  .turn-num { flex: none; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .turn-num.completed { color: var(--color-green); } .turn-num.parked { color: var(--color-yellow); } .turn-num.failure { color: var(--color-red); } .turn-num.running { color: var(--color-blue); } .turn-num.unstarted { color: var(--color-text-light-2); } .turn-num.carved { color: var(--color-carved); }
+  .turn-summary { color: var(--color-text-light); }
+  .turn-empty { color: var(--color-text-light-2); padding: .55rem 0; }
+  @media (max-width: 640px) { .issue-detail-sheet { width: 100%; max-height: 88vh; border-radius: var(--border-radius-medium) var(--border-radius-medium) 0 0; padding-bottom: env(safe-area-inset-bottom); } .issue-detail { align-items: flex-end; padding: 0; } }
   form button { padding: .5rem .8rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: #04110f; cursor: pointer; font-weight: 700; }
   pre { white-space: pre-wrap; }
   .parked-issues { margin: 1rem 0 2rem; }
@@ -494,14 +516,14 @@ ${
   status.parked.length
     ? `<section class="parked-issues"><h2>Parked issues <span class="parked-count">${status.parked.length} awaiting you</span></h2>${status.parked
         .map(
-          (p) => `<section class="card"><h3>Issue #${escapeHtml(p.issueNumber)}</h3><p><strong>Parked on:</strong></p><pre>${escapeHtml(p.description)}</pre>${
+          (p) => `<section class="card"><h3>Issue #${escapeHtml(p.issueNumber)} <button type="button" class="issue-open" data-issue="${escapeHtml(p.issueNumber)}" data-project="${escapeHtml(status.project)}"${opts.carve ? ` data-carvable="1"` : ""}>Turn log</button></h3><p><strong>Parked on:</strong></p><pre>${escapeHtml(p.description)}</pre>${
             p.options.length ? `<p><strong>Options:</strong></p><ul>${p.options.map((o) => `<li>${escapeHtml(o)}</li>`).join("")}</ul>` : ""
           }<form method="post" action="/answer"><input type="hidden" name="taskId" value="${escapeHtml(p.issueNumber)}" /><input type="hidden" name="project" value="${escapeHtml(status.project)}" /><textarea name="text" placeholder="Type your response..."></textarea><button>Send response</button></form></section>`,
         )
         .join("")}</section>`
     : ""
 }
-${renderWaves(status, Boolean(opts.carve))}
+${renderWaves(status, Boolean(opts.carve), true)}
 ${
   opts.archivedRuns?.length
     ? `<section class="archived-runs"><h2>Archived runs</h2><ul>${opts.archivedRuns
@@ -521,14 +543,14 @@ ${
   opts.archived
     ? `<section class="archived-run"><h2>Archived run ${
         opts.archived.name ? `${escapeHtml(opts.archived.name)} <small class="run-summary">${escapeHtml(opts.archivedRun ?? "")}</small>` : escapeHtml(opts.archivedRun ?? "")
-      }</h2>${renderWaves(opts.archived, false)}</section>`
+      }</h2>${renderWaves(opts.archived, false, false)}</section>`
     : ""
 }
-<div id="issue-detail" class="issue-detail" aria-live="polite"><span class="issue-detail-text"></span>${
+<div id="issue-detail" class="issue-detail" role="dialog" aria-modal="true" aria-live="polite" hidden><div class="issue-detail-sheet"><header class="issue-detail-header"><div class="issue-detail-head-main"><span class="issue-detail-status"><span class="dot"></span><span class="issue-detail-num"></span> <span class="issue-detail-statuslabel"></span></span><h2 class="issue-detail-title"></h2><p class="issue-detail-context"></p></div><button type="button" id="issue-detail-close" class="issue-detail-close" aria-label="Dismiss">&times;</button></header><div class="issue-detail-meta"><div class="meta-tile"><span class="meta-label">Turns</span><span class="meta-value" id="issue-detail-turns"></span></div><div class="meta-tile"><span class="meta-label">Elapsed</span><span class="meta-value" id="issue-detail-elapsed"></span></div></div><ol class="turn-log" id="issue-detail-turnlog"></ol>${
   opts.carve
-    ? `<div id="carve-panel" class="carve-panel" hidden><button type="button" id="carve-start" class="carve-start">Carve</button><form method="post" action="/carve" id="carve-confirm" class="carve-confirm" hidden><span class="carve-confirm-text"></span><input type="hidden" name="taskId" value="" /><input type="hidden" name="project" value="" /><input type="hidden" name="confirm" value="1" /><button type="submit" class="carve-confirm-btn">Confirm</button><button type="button" id="carve-cancel" class="carve-cancel">Cancel</button></form></div>`
+    ? `<div id="carve-panel" class="carve-panel" hidden><button type="button" id="carve-start" class="carve-start">Carve</button><form method="post" action="/carve" id="carve-confirm" class="carve-confirm" hidden><span class="carve-confirm-text"></span><input type="hidden" name="taskId" value="" /><input type="hidden" name="project" value="" /><input type="hidden" name="confirm" value="1" /><button type="submit" class="carve-confirm-btn">Confirm</button><button type="button" id="carve-cancel" class="carve-cancel">Cancel</button></form><span id="carve-note" class="carve-note"></span></div>`
     : ""
-}<button type="button" id="issue-detail-close" class="issue-detail-close" aria-label="Dismiss">&times;</button></div>${
+}</div></div>${
   // No-JS fallback: a plain server-side form per carvable issue that reaches
   // POST /carve → the preview page → confirm without any JavaScript. The inline
   // panel above is the progressive enhancement layered over it.
@@ -564,18 +586,82 @@ ${
   refreshEnabled.addEventListener("change", scheduleRefresh);
   scheduleRefresh();
   const issueDetail = document.getElementById("issue-detail");
-  const issueDetailText = issueDetail.querySelector(".issue-detail-text");
-  const showDetail = (text) => {
-    issueDetailText.textContent = text;
-    issueDetail.classList.toggle("show", Boolean(text));
+  const detailNum = issueDetail.querySelector(".issue-detail-num");
+  const detailStatusDot = issueDetail.querySelector(".issue-detail-status .dot");
+  const detailStatusLabel = issueDetail.querySelector(".issue-detail-statuslabel");
+  const detailTitle = issueDetail.querySelector(".issue-detail-title");
+  const detailContext = issueDetail.querySelector(".issue-detail-context");
+  const detailTurns = document.getElementById("issue-detail-turns");
+  const detailElapsed = document.getElementById("issue-detail-elapsed");
+  const detailTurnLog = document.getElementById("issue-detail-turnlog");
+  // Elapsed is a working span in ms; show it as coarse minutes/hours.
+  const fmtElapsed = (ms) => {
+    const mins = Math.max(0, Math.round((ms || 0) / 60000));
+    if (mins < 60) return mins + "m";
+    const h = Math.floor(mins / 60), m = mins % 60;
+    return m ? h + "h " + m + "m" : h + "h";
   };
-  document.getElementById("issue-detail-close").addEventListener("click", () => showDetail(""));
-  document.querySelectorAll(".chip[data-detail]").forEach((chip) => {
-    chip.addEventListener("click", () => {
-      const text = chip.getAttribute("data-detail") ?? "";
-      showDetail(issueDetailText.textContent === text ? "" : text);
-    });
-  });
+  const closeSheet = () => { issueDetail.classList.remove("show"); issueDetail.hidden = true; };
+  document.getElementById("issue-detail-close").addEventListener("click", closeSheet);
+  // Tap the backdrop (outside the sheet) to dismiss.
+  issueDetail.addEventListener("click", (event) => { if (event.target === issueDetail) closeSheet(); });
+  // Reassigned by the carve block when carve is enabled; a no-op otherwise.
+  let onOpenIssue = () => {};
+  const renderDetail = (d) => {
+    detailNum.textContent = "#" + d.issueNumber;
+    detailStatusDot.className = "dot " + d.status;
+    detailStatusLabel.textContent = d.status;
+    detailTitle.textContent = d.title || ("Issue #" + d.issueNumber);
+    detailContext.textContent = [d.project, d.campaignName].filter(Boolean).join(" · ");
+    detailTurns.textContent = String(d.turns);
+    detailElapsed.textContent = fmtElapsed(d.elapsedMs);
+    detailTurnLog.textContent = "";
+    if (!d.turnLog || !d.turnLog.length) {
+      const li = document.createElement("li");
+      li.className = "turn-empty";
+      li.textContent = "No turns recorded yet.";
+      detailTurnLog.appendChild(li);
+      return;
+    }
+    // Newest first, as reconstructed; the turn number reads in the issue's status colour.
+    for (const t of d.turnLog) {
+      const li = document.createElement("li");
+      li.className = "turn-entry";
+      const n = document.createElement("span");
+      n.className = "turn-num " + d.status;
+      n.textContent = "Turn " + ((t.turn ?? 0) + 1);
+      const s = document.createElement("span");
+      s.className = "turn-summary";
+      s.textContent = t.summary || "(no summary this turn)";
+      li.appendChild(n);
+      li.appendChild(s);
+      detailTurnLog.appendChild(li);
+    }
+  };
+  const openIssue = async (project, issue, carvable) => {
+    issueDetail.hidden = false;
+    issueDetail.classList.add("show");
+    detailNum.textContent = "#" + issue;
+    detailStatusDot.className = "dot";
+    detailStatusLabel.textContent = "";
+    detailTitle.textContent = "Loading…";
+    detailContext.textContent = project;
+    detailTurns.textContent = "…";
+    detailElapsed.textContent = "…";
+    detailTurnLog.textContent = "";
+    onOpenIssue(carvable, project, issue);
+    try {
+      const res = await fetch("/api/issue?project=" + encodeURIComponent(project) + "&issue=" + encodeURIComponent(issue));
+      if (!res.ok) throw new Error(String(res.status));
+      renderDetail(await res.json());
+    } catch {
+      detailTitle.textContent = "Couldn't load issue #" + issue;
+      detailContext.textContent = project;
+    }
+  };
+  // A live chip and a parked row both open the sheet, carrying their issue+project.
+  document.querySelectorAll(".chip[data-issue], .issue-open[data-issue]").forEach((chip) =>
+    chip.addEventListener("click", () => openIssue(chip.dataset.project, chip.dataset.issue, chip.dataset.carvable === "1")));
   const carvePanel = document.getElementById("carve-panel");
   if (carvePanel) {
     const carveStart = document.getElementById("carve-start");
@@ -589,19 +675,16 @@ ${
       carveConfirm.hidden = true;
       carveStart.hidden = false;
     };
-    // The carve affordance tracks the tap-detail bar: it reveals for a carvable
-    // chip while the bar is showing, and hides when the bar is dismissed.
-    const syncCarve = (chip) => {
-      const carvable = issueDetail.classList.contains("show") && chip.dataset.carvable === "1";
+    // The carve affordance reveals inside the sheet for a carvable issue, keyed off
+    // the issue the sheet just opened (ADR 0005); a non-carvable issue hides it.
+    onOpenIssue = (carvable, project, issue) => {
       carvePanel.hidden = !carvable;
       if (carvable) {
-        carveTarget = chip.dataset.issue;
-        carveProj = chip.dataset.project;
+        carveTarget = issue;
+        carveProj = project;
         resetCarve();
       }
     };
-    document.querySelectorAll(".chip[data-detail]").forEach((chip) => chip.addEventListener("click", () => syncCarve(chip)));
-    document.getElementById("issue-detail-close").addEventListener("click", () => (carvePanel.hidden = true));
     carveStart.addEventListener("click", async () => {
       try {
         const res = await fetch("/carve?preview&taskId=" + encodeURIComponent(carveTarget) + "&project=" + encodeURIComponent(carveProj));
@@ -628,7 +711,7 @@ ${
         body: new URLSearchParams({ taskId: carveTaskId.value, project: carveProject.value, confirm: "1" }),
       });
       carvePanel.hidden = true;
-      showDetail("carving… #" + carveTaskId.value + " will drop from the plan on the next refresh");
+      document.getElementById("carve-note").textContent = "carving… #" + carveTaskId.value + " will drop from the plan on the next refresh";
     });
   }
 </script>

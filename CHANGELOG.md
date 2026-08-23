@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Issue-detail sheet with the agent turn log (#55). Opening an issue — from a live
+  wave chip or a parked row — now raises a detail sheet (centred on desktop, a
+  full-width bottom sheet on mobile) with a sticky header (issue number, status,
+  title, repo · campaign), meta tiles for the turn count and elapsed working time,
+  and the turn log: each turn's number in its status colour and the agent's own
+  one-sentence summary of that turn, newest first (ADR 0009) — the sheet's reason to
+  exist. The data is reconstructed from the event log by a pure `reconstructIssueDetail`
+  (turn log, count, elapsed span, status and title, the last reusing `reduceCampaign`
+  so the sheet can't disagree with the chip that opened it) and served at a new
+  `GET /api/issue?project=&issue=` JSON endpoint the sheet fetches. Archived-run
+  chips stay inert (their turns live in a different log).
 - Cross-project event feed on the all-repos landing (#55). Under the repo cards
   on desktop, a time-ordered activity log spanning every registered project — each
   row showing the time, the event kind, and a one-sentence, repo-prefixed

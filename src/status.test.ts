@@ -4,7 +4,7 @@ import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { appendedEvents, buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, describeEvent, extractParkedDetails, formatFeedEvent, formatStatusText, lastEventText, listArchivedRuns, parseCarveClosure, reduceCampaign, renderLandingShell, renderStatusPage, selectStatus, serveAllStatus, summarizeRun } from "./status.ts";
+import { appendedEvents, buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, describeEvent, extractParkedDetails, formatFeedEvent, formatStatusText, lastEventText, listArchivedRuns, parseCarveClosure, reconstructIssueDetail, reduceCampaign, renderLandingShell, renderStatusPage, selectStatus, serveAllStatus, summarizeRun } from "./status.ts";
 import type { CampaignStatus } from "./status.ts";
 import type { AddressInfo } from "node:net";
 import { register, type ProjectPointer } from "./registry.ts";
@@ -386,6 +386,41 @@ test("serveAllStatus GET /api/feed serves the cross-project event feed as JSON",
       ["alpha — #101 merged", "beta — #201 parked: needs a choice", "alpha — Campaign “alpha work” started"],
     );
     assert.equal(feed[0].kind, "green");
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serveAllStatus GET /api/issue serves one issue's reconstructed detail as JSON", async () => {
+  const configDir = join(tmpdir(), `sctdd-issue-endpoint-${Date.now()}`);
+  const alphaDir = join(configDir, "state-alpha");
+  seedState(alphaDir, [
+    { ts: "2025-05-01T08:00:00.000Z", event: "campaign-start", batches: [["101"]], titles: { "101": "Wire the parser" }, name: "parser work" },
+    { ts: "2025-05-01T08:01:00.000Z", event: "turn", taskId: "101", turn: 0, summary: "Sketched the grammar and a red test." },
+    { ts: "2025-05-01T08:06:00.000Z", event: "parked", taskId: "101", reason: "needs a decision" },
+  ]);
+  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
+
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const { port } = server.address() as AddressInfo;
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/issue?project=alpha&issue=101`);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get("content-type") ?? "", /application\/json/);
+    const detail = await res.json();
+    assert.equal(detail.project, "alpha");
+    assert.equal(detail.issueNumber, "101");
+    assert.equal(detail.status, "parked");
+    assert.equal(detail.title, "Wire the parser");
+    assert.equal(detail.campaignName, "parser work");
+    assert.equal(detail.turns, 1);
+    assert.equal(detail.elapsedMs, 5 * 60 * 1000);
+    assert.deepEqual(
+      detail.turnLog.map((t: { turn: number; summary: string }) => [t.turn, t.summary]),
+      [[0, "Sketched the grammar and a red test."]],
+    );
+    // An unknown project is a 404, never a path joined from request input.
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/issue?project=ghost&issue=101`)).status, 404);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -914,6 +949,35 @@ test("reduceCampaign's carve fold clears an emptied future wave and reindexes", 
   assert.deepEqual([...reduced.closedWaves], [0]);
 });
 
+test("reconstructIssueDetail folds an issue's turn log, count, elapsed and status from the log", () => {
+  const detail = reconstructIssueDetail(
+    [
+      { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"], ["201"]], titles: { "101": "Do the thing" }, name: "gateway work" },
+      { ts: "2025-01-01T00:01:00.000Z", event: "campaign-batch", index: 0, tasks: ["101"] },
+      { ts: "2025-01-01T00:02:00.000Z", event: "turn", taskId: "101", turn: 0, signal: undefined, summary: "Wrote a failing test for the parser." },
+      { ts: "2025-01-01T00:07:00.000Z", event: "turn", taskId: "101", turn: 1, signal: "done", summary: "Made it green and tidied up." },
+      { ts: "2025-01-01T00:12:00.000Z", event: "green", taskId: "101", branch: "agent/101" },
+    ],
+    "101",
+  );
+
+  assert.equal(detail.issueNumber, "101");
+  assert.equal(detail.status, "completed");
+  assert.equal(detail.title, "Do the thing");
+  assert.equal(detail.campaignName, "gateway work");
+  assert.equal(detail.turns, 2);
+  // Working span: first turn (00:02) to the green (00:12) — the plan-only campaign-start is excluded.
+  assert.equal(detail.elapsedMs, 10 * 60 * 1000);
+  // Newest first, each carrying the agent's own summary verbatim (ADR 0009).
+  assert.deepEqual(
+    detail.turnLog.map((t) => [t.turn, t.summary]),
+    [
+      [1, "Made it green and tidied up."],
+      [0, "Wrote a failing test for the parser."],
+    ],
+  );
+});
+
 test("buildStatus shows campaign waves with issue chips and statuses", () => {
   const dir = join(tmpdir(), `sctdd-status-${Date.now()}`);
   mkdirSync(join(dir, "logs"), { recursive: true });
@@ -1425,23 +1489,53 @@ test("renderStatusPage does not render the color legend under the heading", () =
 test("renderStatusPage makes issue chips tap-friendly for touch devices", () => {
   const html = renderStatusPage({ project: "demo", waves: [{ index: 0, status: "running", issues: [{ issueNumber: "101", status: "running", name: "Add login flow", detail: "Agent turn 2 finished; waiting for verification/resume" }] }], parked: [] });
 
-  assert.match(html, /data-detail="Add login flow&#10;Agent turn 2 finished; waiting for verification\/resume"/);
+  // The chip keeps its hover title and now carries the ids the sheet fetches with.
   assert.match(html, /title="Add login flow&#10;Agent turn 2 finished; waiting for verification\/resume"/);
+  assert.match(html, /class="chip"[^>]*data-issue="101"[^>]*data-project="demo"/);
   assert.match(html, /id="issue-detail"/);
   assert.match(html, /chip\.addEventListener\("click"/);
 });
 
-test("renderStatusPage pins the tapped-issue detail to a dismissible bottom bar", () => {
+test("renderStatusPage opens the issue-detail sheet from a chip, fetching /api/issue", () => {
+  const html = renderStatusPage({ project: "demo", waves: [{ index: 0, status: "running", issues: [{ issueNumber: "101", status: "running", name: "Add login flow" }] }], parked: [] });
+
+  // A dismissible sheet, hidden until an issue is opened.
+  assert.match(html, /<div id="issue-detail" class="issue-detail"[^>]*hidden>/);
+  assert.match(html, /id="issue-detail-close"/);
+  // A sticky header (number, status, title, repo · campaign), meta tiles, and the turn log.
+  assert.match(html, /class="issue-detail-header"/);
+  assert.match(html, /\.issue-detail-header \{[^}]*position: sticky;/);
+  assert.match(html, /class="issue-detail-title"/);
+  assert.match(html, /class="issue-detail-context"/);
+  assert.match(html, /id="issue-detail-turns"/);
+  assert.match(html, /id="issue-detail-elapsed"/);
+  assert.match(html, /id="issue-detail-turnlog"/);
+  // Chips open the sheet, which fetches the reconstructed detail.
+  assert.match(html, /openIssue\(/);
+  assert.match(html, /fetch\("\/api\/issue\?project="/);
+  // Dismissible, and reveal keys off a `show` class over the hidden default.
+  assert.match(html, /\.issue-detail\.show \{ display: flex; \}/);
+  assert.match(html, /getElementById\("issue-detail-close"\)\.addEventListener\("click"/);
+});
+
+test("renderStatusPage renders the turn log newest-first with each turn number in its status colour", () => {
   const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
 
-  // Fixed to the bottom of the viewport and hidden until a chip is tapped.
-  assert.match(html, /\.issue-detail \{ position: fixed;[^}]*bottom: 0;/);
-  assert.match(html, /\.issue-detail \{[^}]*display: none;/);
-  assert.match(html, /\.issue-detail\.show \{ display: flex; \}/);
-  // Text lives in its own span so the close button can sit beside it.
-  assert.match(html, /<span class="issue-detail-text"><\/span><button type="button" id="issue-detail-close"/);
-  assert.match(html, /showDetail\(issueDetailText\.textContent === text \? "" : text\)/);
-  assert.match(html, /getElementById\("issue-detail-close"\)\.addEventListener\("click", \(\) => showDetail\(""\)\)/);
+  // Each turn's number carries the issue's status class, so it reads in the status colour.
+  assert.match(html, /"turn-num " \+ .*\bstatus\b/);
+  // The turn log region is an ordered list the script fills from the fetched turnLog.
+  assert.match(html, /id="issue-detail-turnlog"/);
+  assert.match(html, /turnLog/);
+  // The status dot palette is shared, so a turn number reuses the same status colours.
+  assert.match(html, /\.turn-num\.completed \{ color: var\(--color-green\); \}/);
+});
+
+test("renderStatusPage makes the issue-detail sheet a full-width bottom sheet on mobile", () => {
+  const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
+
+  // Desktop: a centred sheet. Mobile: pinned full-width to the bottom.
+  assert.match(html, /@media \(max-width: [^)]+\) \{[^}]*\.issue-detail-sheet \{[^}]*width: 100%;/);
+  assert.match(html, /\.issue-detail-sheet/);
 });
 
 test("renderStatusPage hosts the carve affordance and inline confirm in the tap-detail panel", () => {
@@ -1509,6 +1603,19 @@ test("renderStatusPage leads with parked issues above the waves when any are par
   // bleed onto <span class="dot parked"> and inflate the chip height.
   assert.match(html, /\.parked \{ background: var\(--color-yellow\); \}/);
   assert.doesNotMatch(html, /\.parked \{[^}]*margin/);
+});
+
+test("renderStatusPage opens the issue-detail sheet from a parked row too", () => {
+  const html = renderStatusPage({
+    project: "demo",
+    waves: [],
+    parked: [{ issueNumber: "102", reason: "blocked", parkedAt: "now", branch: "agent/102", description: "Need a choice.", options: [] }],
+  });
+
+  // A parked card carries an open affordance with the ids the sheet fetches with,
+  // and the same wiring opens the sheet from a chip or a parked row.
+  assert.match(html, /<button type="button" class="issue-open" data-issue="102" data-project="demo">Turn log<\/button>/);
+  assert.match(html, /querySelectorAll\("\.chip\[data-issue\], \.issue-open\[data-issue\]"\)/);
 });
 
 test("renderStatusPage omits the parked section entirely when nothing is parked", () => {

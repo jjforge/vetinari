@@ -199,6 +199,30 @@ test("renderLandingShell is single-column on mobile with 44px tap targets", () =
   assert.match(html, /\.card \{[^}]*min-height: 44px/);
 });
 
+test("renderLandingShell parked counter expands a cross-repo parked queue in place", () => {
+  const html = renderLandingShell(["alpha", "beta"]);
+  // The parked counter is an interactive toggle, unlike the other three counters —
+  // a button controlling the queue panel, inert (disabled) until the client learns
+  // there is at least one parked question.
+  assert.match(html, /<button[^>]*class="counter counter-toggle"[^>]*data-counter="parked"[^>]*disabled[^>]*aria-controls="parked-queue"/);
+  // The queue panel sits between the counters and the cards, so expanding it pushes
+  // the cards down while keeping them visible; it starts hidden.
+  assert.match(html, /<section id="parked-queue"[^>]*hidden/);
+  assert.ok(html.indexOf('id="parked-queue"') < html.indexOf('id="cards"'), "parked queue renders above the cards");
+  // The client renders one row per parked question, oldest first from data.parked,
+  // each opening that repo's issue detail, showing repo, issue number, the full
+  // question and how long it has waited.
+  assert.match(html, /data\.parked/);
+  assert.match(html, /\/\?project=/);
+  assert.match(html, /fmtWaited/);
+  // The counter is inert (disabled, no arrow/cursor) when there are no parked
+  // questions, and becomes a working toggle when there are.
+  assert.match(html, /\.counter-toggle:disabled/);
+  assert.match(html, /aria-expanded/);
+  // The parked rows collapse to a readable stack on a phone.
+  assert.match(html, /\.parked-row/);
+});
+
 test("serveAllStatus GET / serves the all-repos landing shell, not a server-rendered campaign", async () => {
   const configDir = join(tmpdir(), `sctdd-landing-shell-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");

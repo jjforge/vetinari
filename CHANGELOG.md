@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The all-repos landing's parked counter expands in place into a cross-repo parked
+  queue (#55). Clicking the counter drops a list of every parked question across all
+  repos — issue number, repo, the full question, and how long it has waited, oldest
+  first — between the counters and the cards, pushing the cards down while keeping
+  them visible; clicking again collapses it. The counter is inert (no arrow, cursor,
+  or click) when nothing is parked, and each row opens that repo's issue detail. The
+  landing model (`GET /api/landing`) gains a `parked` array carrying those questions;
+  the rows are touch-friendly on a phone.
 - All-repos landing view for the dashboard (#55). The aggregated server now serves
   a client-rendered shell (vanilla, no build step) at `/`, replacing the old
   server-rendered status page as the thing you land on. Four counters run across the

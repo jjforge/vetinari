@@ -343,6 +343,19 @@ test("renderLandingShell opens a parked-queue row's issue detail inline, not by 
   assert.match(html, /\.dot\.parked \{ background: var\(--color-yellow\); \}/);
 });
 
+test("renderLandingShell colours each activity event kind by category (#78)", () => {
+  const html = renderLandingShell(["alpha"]);
+  // Each feed row's kind carries a category class so it reads in its colour.
+  assert.match(html, /"feed-kind " \+ feedKindClass\(e\.kind\)/);
+  // The classifier maps the orchestrator's event kinds to comms categories.
+  assert.match(html, /const feedKindClass = /);
+  assert.match(html, /\.feed-kind\.success \{ color: var\(--color-green\); \}/);
+  assert.match(html, /\.feed-kind\.attention \{ color: var\(--color-yellow\); \}/);
+  assert.match(html, /\.feed-kind\.progress \{ color: var\(--color-blue\); \}/);
+  assert.match(html, /\.feed-kind\.failure \{ color: var\(--color-red\); \}/);
+  assert.match(html, /\.feed-kind\.carved \{ color: var\(--color-carved\); \}/);
+});
+
 test("renderLandingShell colours each project card's highlight by run state (#75)", () => {
   const html = renderLandingShell(["alpha"]);
   // The card element carries its run-state class...

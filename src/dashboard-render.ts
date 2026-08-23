@@ -274,6 +274,8 @@ export const renderLandingShell = (projects: string[]) => `<!doctype html>
   .feed-row { display: flex; align-items: baseline; gap: .6rem .9rem; flex-wrap: wrap; padding: .5rem 0; border-bottom: 1px solid var(--color-light-border); font-size: .9rem; }
   .feed-time { color: var(--color-text-light-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
   .feed-kind { color: var(--color-primary); font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+  /* Each activity event reads in its comms-category colour (#78). */
+  .feed-kind.progress { color: var(--color-blue); } .feed-kind.success { color: var(--color-green); } .feed-kind.attention { color: var(--color-yellow); } .feed-kind.failure { color: var(--color-red); } .feed-kind.carved { color: var(--color-carved); }
   .feed-text { color: var(--color-text-light); flex: 1; }
   .live-bar { display: inline-flex; align-items: center; gap: .75rem; color: var(--color-text-light-2); font-size: .85rem; }
   .live-indicator { display: inline-flex; align-items: center; gap: .4rem; font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--color-green); }
@@ -369,6 +371,16 @@ export const renderLandingShell = (projects: string[]) => `<!doctype html>
     return Math.floor(hrs / 24) + "d";
   };
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+  // Map an event kind to its comms category so the activity feed reads in colour
+  // (#78): merges/dones green, a parked question yellow, a halt red, a carve purple,
+  // everything else (starts, waves, turns) the in-flight blue.
+  const feedKindClass = (kind) => {
+    if (["green", "campaign-done", "campaign-complete", "campaign-batch-done", "queue-done"].includes(kind)) return "success";
+    if (kind === "parked") return "attention";
+    if (kind === "campaign-halt") return "failure";
+    if (kind === "carve") return "carved";
+    return "progress";
+  };
   // Issue-detail sheet, opened inline from a parked-queue row so a pending issue
   // shows its detail here instead of bouncing to the campaign refresh view (#74).
   // Same behaviour as the campaign page's sheet (kept in sync by hand — #76).
@@ -553,7 +565,7 @@ export const renderLandingShell = (projects: string[]) => `<!doctype html>
     if (!feed.length) { rows.append(el("p", "empty", "No activity yet.")); return; }
     for (const e of feed) {
       const row = el("div", "feed-row");
-      row.append(el("span", "feed-time", fmtTime(e.ts)), el("span", "feed-kind", e.kind), el("span", "feed-text", e.text));
+      row.append(el("span", "feed-time", fmtTime(e.ts)), el("span", "feed-kind " + feedKindClass(e.kind), e.kind), el("span", "feed-text", e.text));
       rows.append(row);
     }
   }

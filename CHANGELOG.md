@@ -180,6 +180,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   idle=grey — matching the run-state pill, instead of a fixed primary/teal for all
   (#75).
 
+- The all-repos landing's activity feed now colours each event kind by its comms
+  category (#78) — merges/dones green, a parked question yellow, a halt red, a carve
+  purple, in-flight events (starts, waves, turns) blue — instead of one flat teal, so
+  the feed scans at a glance.
+
 - Wave headers now read as their work (#43). Each dashboard wave label is derived
   at render from the issue titles the dashboard already resolves — no storage, no
   event change: a single-issue wave reads as that issue's title, a many-issue wave

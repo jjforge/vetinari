@@ -4,7 +4,7 @@ import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { appendedEvents, buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, DASHBOARD_PALETTE_CSS, describeEvent, extractParkedDetails, formatFeedEvent, formatStatusText, ISSUE_DETAIL_SHEET_SCRIPT, ISSUE_DETAIL_SHEET_STYLES, issueDetailSheetMarkup, lastEventText, listArchivedRuns, parkedReplyFor, parseCarveClosure, reconstructIssueDetail, reduceCampaign, renderLandingShell, renderStatusPage, selectStatus, serveAllStatus, stateColor, summarizeRun } from "./status.ts";
+import { appendedEvents, buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, DASHBOARD_PALETTE_CSS, describeEvent, extractParkedDetails, formatFeedEvent, formatStatusText, ISSUE_DETAIL_SHEET_SCRIPT, ISSUE_DETAIL_SHEET_STYLES, issueDetailSheetMarkup, lastEventText, listArchivedRuns, parkedReplyFor, parseCarveClosure, reconstructIssueDetail, reduceCampaign, renderLandingShell, renderStatusPage, selectStatus, serveAllStatus, STATE_DOT_CSS, stateColor, summarizeRun } from "./status.ts";
 import type { CampaignStatus } from "./status.ts";
 import type { AddressInfo } from "node:net";
 import { register, type ProjectPointer } from "./registry.ts";
@@ -329,6 +329,56 @@ test("both the landing and the campaign page emit the one shared palette, and ev
   assert.ok(defined.has("--color-carved"), "--color-carved resolves");
 });
 
+test("stateColor is the single state→colour derivation, failure distinct from the carve action (#83)", () => {
+  // §3: every state derives its colour here, never a per-instance hex.
+  assert.equal(stateColor("running"), "var(--color-blue)");
+  assert.equal(stateColor("parked"), "var(--color-yellow)");
+  assert.equal(stateColor("completed"), "var(--color-green)");
+  assert.equal(stateColor("carved"), "var(--color-carved)");
+  // unstarted (and its landing display aliases) are the dim grey, not the muted one.
+  assert.equal(stateColor("unstarted"), "var(--color-dim)");
+  assert.equal(stateColor("queued"), "var(--color-dim)");
+  assert.equal(stateColor("idle"), "var(--color-dim)");
+  // failure has its own token, distinct from the carve action's --color-red (§1).
+  assert.equal(stateColor("failure"), "var(--color-failure)");
+  assert.notEqual(stateColor("failure"), "var(--color-red)");
+});
+
+test("both pages share one set of status-dot rules, scoped to .dot so a state never tints a whole card or row (#81, #83)", () => {
+  const landing = renderLandingShell(["alpha"]);
+  const campaign = renderStatusPage(
+    { project: "beta", waves: [{ index: 0, status: "running", issues: [{ issueNumber: "1", status: "carved" }] }], parked: [] },
+    { carve: true },
+  );
+  // The dot rules are one generated source, included verbatim by both surfaces.
+  assert.ok(landing.includes(STATE_DOT_CSS), "landing includes the shared dot rules");
+  assert.ok(campaign.includes(STATE_DOT_CSS), "campaign page includes the shared dot rules");
+  // Every status colour is scoped to `.dot` — the campaign page no longer emits the
+  // bare `.completed {…}` / `.carved {…}` rules that leaked colour onto struck-through
+  // list rows and other elements sharing the class name (#81).
+  assert.match(campaign, /\.dot\.carved \{ background: var\(--color-carved\); \}/);
+  // A bare status-class rule sits at a selector boundary (start of a line, after
+  // whitespace) — the shared dot rules are all `.dot.<state>`, never bare. So none of
+  // these leak-prone bare rules should appear on the campaign page any more.
+  assert.doesNotMatch(campaign, /\n\s*\.carved \{ background/);
+  assert.doesNotMatch(campaign, /\n\s*\.completed \{ background/);
+  assert.doesNotMatch(campaign, /\n\s*\.parked \{ background/);
+});
+
+test("failure renders in its own red on every surface, never the carve action's red (#83)", () => {
+  const landing = renderLandingShell(["alpha"]);
+  const campaign = renderStatusPage({ project: "beta", waves: [], parked: [] }, { carve: true });
+  // The activity feed, the card highlight, and the run-state pill all read failure
+  // in --color-failure; the carve controls keep --color-red.
+  assert.match(landing, /\.feed-kind\.failure \{ color: var\(--color-failure\); \}/);
+  assert.match(landing, /\.card\.failure \{ border-top-color: var\(--color-failure\); \}/);
+  assert.match(landing, /\.run-state\.failure \{ border-color: var\(--color-failure\); color: var\(--color-failure\); \}/);
+  // The shared turn-log failure number reads --color-failure; carve controls stay --color-red.
+  assert.match(ISSUE_DETAIL_SHEET_STYLES, /\.turn-num\.failure \{ color: var\(--color-failure\); \}/);
+  assert.match(ISSUE_DETAIL_SHEET_STYLES, /\.carve-start[^{]*\{[^}]*var\(--color-red\)/);
+  assert.ok(campaign.includes(".turn-num.failure { color: var(--color-failure); }"));
+});
+
 test("renderLandingShell mounts the cross-project feed under the cards and hides it on mobile", () => {
   const html = renderLandingShell(["alpha", "beta"]);
   // The feed container sits after the cards and is client-rendered off /api/feed.
@@ -429,7 +479,7 @@ test("renderLandingShell colours each activity event kind by category (#78)", ()
   assert.match(html, /\.feed-kind\.success \{ color: var\(--color-green\); \}/);
   assert.match(html, /\.feed-kind\.attention \{ color: var\(--color-yellow\); \}/);
   assert.match(html, /\.feed-kind\.progress \{ color: var\(--color-blue\); \}/);
-  assert.match(html, /\.feed-kind\.failure \{ color: var\(--color-red\); \}/);
+  assert.match(html, /\.feed-kind\.failure \{ color: var\(--color-failure\); \}/);
   assert.match(html, /\.feed-kind\.carved \{ color: var\(--color-carved\); \}/);
 });
 
@@ -440,7 +490,7 @@ test("renderLandingShell colours each project card's highlight by run state (#75
   // ...and per-state border-top-color rules tint the highlight to match the pill.
   assert.match(html, /\.card\.parked \{ border-top-color: var\(--color-yellow\); \}/);
   assert.match(html, /\.card\.running \{ border-top-color: var\(--color-blue\); \}/);
-  assert.match(html, /\.card\.idle \{ border-top-color: var\(--color-text-light-2\); \}/);
+  assert.match(html, /\.card\.idle \{ border-top-color: var\(--color-dim\); \}/);
 });
 
 test("renderLandingShell draws each card a run-state-coloured progress bar sized by percent merged (#80)", () => {
@@ -462,8 +512,8 @@ test("renderLandingShell renders the card tally as status-dot chips, not plain t
   assert.match(html, /el\("span", "dot " \+ /);
   // The chip treatment matches the campaign page's chips — a bordered pill.
   assert.match(html, /\.tally-chip \{[^}]*border-radius: 999px/);
-  // The queued dot is neutral grey; running/parked reuse the shared .dot colours.
-  assert.match(html, /\.dot\.queued \{ background: var\(--color-text-light-2\); \}/);
+  // The queued dot is the dim unstarted grey; running/parked reuse the shared .dot colours.
+  assert.match(html, /\.dot\.queued \{ background: var\(--color-dim\); \}/);
   // The old plain-text tally string is gone.
   assert.doesNotMatch(html, /" running · " \+ p\.tally\.parked/);
 });
@@ -1639,9 +1689,10 @@ test("renderStatusPage colours a carved chip and pulses a running one", () => {
   // …and the wave it left gains a carved tally in its header, so the carve reads
   // at a glance without counting struck-through chips (one of two issues carved).
   assert.match(html, /<span class="wave-carved">1 carved<\/span>/);
-  // …in a distinct carved colour defined in the stylesheet (ADR 0007's sixth state).
+  // …in a distinct carved colour defined in the stylesheet (ADR 0007's sixth state),
+  // scoped to .dot so it tints only the dot, never the whole struck-through chip (#81).
   assert.match(html, /--color-carved:/);
-  assert.match(html, /\.carved \{ background: var\(--color-carved\); \}/);
+  assert.match(html, /\.dot\.carved \{ background: var\(--color-carved\); \}/);
   // A running chip pulses — a keyframed animation on its dot, reduced-motion aware.
   assert.match(html, /@keyframes chip-pulse/);
   assert.match(html, /\.dot\.running \{ animation: chip-pulse/);
@@ -2136,8 +2187,8 @@ test("renderStatusPage lays open waves out in a grid, accenting the running wave
   // Open wave cards sit in a responsive grid.
   assert.match(html, /<div class="waves-grid"><section class="wave running">/);
   assert.match(html, /\.waves-grid \{ display: grid; grid-template-columns: repeat\(auto-fill, minmax\(20rem, 1fr\)\);/);
-  // A running wave carries the status-coloured (blue) top accent; an unstarted one the neutral default.
-  assert.match(html, /\.wave \{[^}]*border-top: 3px solid var\(--color-text-light-2\);/);
+  // A running wave carries the status-coloured (blue) top accent; an unstarted one the dim default (§3).
+  assert.match(html, /\.wave \{[^}]*border-top: 3px solid var\(--color-dim\);/);
   assert.match(html, /\.wave\.running \{ border-top-color: var\(--color-blue\); \}/);
   assert.match(html, /<section class="wave unstarted">/);
 });

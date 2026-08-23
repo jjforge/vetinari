@@ -4109,7 +4109,6 @@ test("renderStatusPage opens the issue-detail sheet from a chip, fetching /api/i
   assert.match(html, /class="issue-detail-title"/);
   assert.match(html, /class="issue-detail-context"/);
   assert.match(html, /id="issue-detail-turns"/);
-  assert.match(html, /id="issue-detail-elapsed"/);
   assert.match(html, /id="issue-detail-turnlog"/);
   // Chips open the sheet, which fetches the reconstructed detail.
   assert.match(html, /openIssue\(/);
@@ -4139,7 +4138,7 @@ test("renderStatusPage gives the sheet a WORKTREE tile and turns-with-duration m
   // The script reveals the tile only when the detail carries a worktree path…
   assert.match(html, /d\.worktree/);
   // …and presents turns with their working duration (N turns · Mm), not a bare count.
-  assert.match(html, /" turns · "/);
+  assert.match(html, /" turn" \+ \(.*\? "" : "s"\) \+ " · "/);
 });
 
 test("renderStatusPage renders the turn log newest-first with each turn number in its status colour", () => {
@@ -4282,6 +4281,50 @@ test("renderStatusPage wires the parked reply block: shown when parked, options 
   // Options render as buttons that fill the reply field without submitting it.
   assert.match(html, /"reply-option"/);
   assert.match(html, /replyText\.value = /);
+});
+
+test("renderStatusPage gives the parked block a directive heading and labels the turn log (#92)", () => {
+  const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
+
+  // The parked block leads with a directive heading, not the flat "Reply & resume".
+  assert.match(html, /class="reply-heading">PARKED — NEEDS YOUR ANSWER</);
+  assert.doesNotMatch(html, /Reply &amp; resume/);
+  // The turn log is its own labeled section ("Agent turns"), distinct from the meta tiles.
+  assert.match(html, /class="turn-log-heading">Agent turns</);
+});
+
+test("renderStatusPage shows the duration once and pluralizes the turn count (#92)", () => {
+  const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
+
+  // TURNS now carries the working duration (N turns · Mm), so the separate ELAPSED
+  // tile is redundant and gone — no tile, no script ref, no formatter output for it.
+  assert.doesNotMatch(html, /id="issue-detail-elapsed"/);
+  assert.doesNotMatch(html, /<span class="meta-label">Elapsed<\/span>/);
+  assert.doesNotMatch(html, /detailElapsed/);
+  // The count pluralizes: "1 turn", "N turns" — never the "1 turns" the POC flags.
+  assert.match(html, /" turn" \+ \(.*=== 1 \? "" : "s"\)/);
+  assert.match(html, /" · "/);
+});
+
+test("renderStatusPage renders reply options as full-width lettered rows (#92)", () => {
+  const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
+
+  // The options stack one per line as full-width rows, not inline wrapping pills.
+  assert.match(
+    html,
+    /\.reply-options \{[^}]*flex-direction: column;/,
+  );
+  // Each row is a flex row: a fixed letter margin on the left, the label filling the rest.
+  assert.match(html, /\.reply-option \{[^}]*display: flex;/);
+  assert.match(html, /\.reply-option-letter \{/);
+  // An "A:"/"B)"-style marker in the option is pulled into the letter margin; an
+  // option with no marker falls back to a positional A/B/C letter from the index.
+  assert.match(html, /option\.match\(\/\^\(\[A-Za-z\]\)\[\.\):\]/);
+  assert.match(html, /String\.fromCharCode\(65 \+ /);
+  assert.match(html, /"reply-option-letter"/);
+  assert.match(html, /"reply-option-label"/);
+  // Clicking a row still fills the reply field with the full original option text.
+  assert.match(html, /replyText\.value = option/);
 });
 
 test("renderStatusPage falls back to a no-JS carve form per carvable issue", () => {

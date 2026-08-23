@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Carve from the issue-detail sheet, routed through the structured closure (#55).
+  The sheet's Carve action now confirms against the exact closure E2's dry-run emits
+  (`carve-closure {json}`) rather than re-parsing the CLI's prose: the confirmation
+  names the dependents that would leave and, separately, states the banked (merged
+  or mergeable) work that is kept — so a confirm never implies banked work is
+  discarded. `GET /carve?preview` returns that full structured closure
+  (`{ target, dropped, keptBanked, remaining }`); `parseCarveClosure` reads the
+  machine-readable line instead of the prose. A standalone Carve (offered on an
+  unstarted/future-wave issue, with no Resume beside it) carries a plain-words
+  explainer of what a carve does; a parked issue's Resume gives the context instead.
+  Carve still never executes on first tap — a Cancel path collapses the confirm with
+  no change — and confirming routes to the project's own install (ADR 0002),
+  appending the carve event the loop honours at the next wave boundary (ADR 0005).
+  Each wave a carve pruned now shows a carved tally in its header beside the issue
+  count, so the carve reads at a glance next to the carved chips (ADR 0007).
 - Parked-question reply and Resume in the issue-detail sheet (#55). When the opened
   issue is parked, the sheet now shows a reply block — the full question, the options
   the agent offered rendered as buttons that fill (not submit) the free-text reply

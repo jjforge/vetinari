@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import type { StructuredCarveClosure } from "./carve.ts";
 
 /**
  * Preview a carve by shelling the project's own `carve <issue> --dry-run` via the
@@ -20,38 +21,43 @@ export function shellCarvePreview(projectRoot: string, taskId: string): Promise<
   });
 }
 
-/** The carve closure — the target plus its transitive dependents — that the
- * inline panel discloses before a carve. */
-export interface CarveClosure {
-  target: string;
-  removed: string[];
-}
+/**
+ * The carve closure the inline panel discloses before a carve — the target, the
+ * dependents that would leave, the banked (merged/mergeable) work kept, and the
+ * remaining waves. It is exactly the `StructuredCarveClosure` the CLI's dry-run
+ * emits (E2), so the panel names each member and its fate without re-deriving
+ * anything the project's own install already computed.
+ */
+export type CarveClosure = StructuredCarveClosure;
+
+const CLOSURE_PREFIX = "carve-closure ";
 
 /**
- * Pull the closure out of the project's own `carve <issue> --dry-run` text: its
- * target and every issue the dry-run reports it would drop or keep-banked (both
- * are members of the closure `computeCarve` produced). Pure so the brittle bit —
- * coupling to the CLI's human output — is isolated and unit-tested; the live
- * shell (`shellCarveClosure`) is the only caller.
+ * Pull the structured closure out of the project's own `carve <issue> --dry-run`
+ * output: it prints a machine-readable `carve-closure {json}` line (E2) alongside
+ * the human prose, so this just finds that line and parses it — no coupling to
+ * the prose's wording. Returns null when the line is absent (an install predating
+ * E2) or unparseable, which the route surfaces as a 502. Pure so it is unit-tested
+ * at the seam; the live shell (`shellCarveClosure`) is the only caller.
  */
-export function parseCarveClosure(taskId: string, previewText: string): CarveClosure {
-  const target = taskId.replace(/^#/, "").trim();
-  // The closure is named on the "carve #x → …" line; the "remaining campaign"
-  // line lists what stays, so it is deliberately excluded.
-  const arrowLine = previewText.split("\n").find((line) => line.includes("→")) ?? "";
-  const after = arrowLine.split("→")[1] ?? "";
-  const mentioned = [...after.matchAll(/#(\d+)/g)].map((m) => m[1]);
-  const removed = [target, ...mentioned.filter((id) => id !== target)].filter((id, i, all) => all.indexOf(id) === i);
-  return { target, removed };
+export function parseCarveClosure(previewText: string): CarveClosure | null {
+  const line = previewText.split("\n").find((l) => l.startsWith(CLOSURE_PREFIX));
+  if (!line) return null;
+  try {
+    return JSON.parse(line.slice(CLOSURE_PREFIX.length)) as CarveClosure;
+  } catch {
+    return null;
+  }
 }
 
 /**
  * The default `carveClosure`: shell the selected project's own `carve --dry-run`
- * (the same dumb-router routing `shellCarvePreview` uses) and parse the closure
- * out of it. Returns null when the child fails (e.g. no campaign running), which
- * the route surfaces as a 502 for the panel to report.
+ * (the same dumb-router routing `shellCarvePreview` uses) and parse the structured
+ * closure out of it. Returns null when the child fails (e.g. no campaign running)
+ * or emits no closure line, which the route surfaces as a 502 for the panel to
+ * report.
  */
 export async function shellCarveClosure(projectRoot: string, taskId: string): Promise<CarveClosure | null> {
   const previewText = await shellCarvePreview(projectRoot, taskId);
-  return previewText == null ? null : parseCarveClosure(taskId, previewText);
+  return previewText == null ? null : parseCarveClosure(previewText);
 }

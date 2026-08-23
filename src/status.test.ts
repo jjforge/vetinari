@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
@@ -293,6 +293,17 @@ test("renderLandingShell is single-column on mobile with 44px tap targets", () =
 // references a colour that never resolves (the #78 class of bug).
 const definedTokens = (css: string) => new Set([...css.matchAll(/(--[a-z0-9-]+):/g)].map((m) => m[1]));
 const referencedTokens = (html: string) => new Set([...html.matchAll(/var\((--[a-z0-9-]+)\)/g)].map((m) => m[1]));
+
+test("the card/chip colour rules are landed as a normative doc that pins the palette (#83)", () => {
+  const doc = readFileSync(join(import.meta.dirname, "..", "docs", "dashboard-color-rules.md"), "utf8");
+  // The doc is the reference: it carries the §1 palette at the exact hexes the code uses.
+  for (const hex of ["#6cb6ff", "#c8a24e", "#f85149", "#5f6b78", "#3fb984", "#a371f7", "#f79287", "#10151b", "#0b0e12"]) {
+    assert.ok(doc.includes(hex), `the colour-rules doc pins ${hex}`);
+  }
+  // And it states the derivation precedence and the teal-is-not-a-state rule.
+  assert.match(doc, /parked > failure > running > unstarted > completed/);
+  assert.match(doc, /never appear on a status chip or a card edge|never a state/);
+});
 
 test("the dashboard palette is one shared source defining every state token at its spec hex (#83)", () => {
   // §1: the six ADR-0007 states plus the carve action, each at its exact hex.

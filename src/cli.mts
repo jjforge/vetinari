@@ -5,7 +5,7 @@ import { log, setLogFile } from "./log.ts";
 import { answerPromptFor, runLoop } from "./loop.ts";
 import { baseline, campaign, queue, requireTelegram, tgTest } from "./modes.ts";
 import { gateway } from "./gateway.ts";
-import { applyCarve, computeCarve, normalize } from "./carve.ts";
+import { applyCarve, carveClosure, computeCarve, normalize } from "./carve.ts";
 import { describePlan, planCampaign, suggestCampaignName, underspecifiedPromptFor, waveArgs, type UnderspecifiedDecision } from "./plan.ts";
 import { defaultFileSet } from "./fileset.ts";
 import { applyLayoutMigration, computeLayoutMigration, describeMigration, scanLayout } from "./migrate.ts";
@@ -296,14 +296,21 @@ switch (mode) {
       }
       const reduced = reduceCampaign(events);
       const { removed } = await computeCarve(reduced.waves, target, cfg.blockedBy);
-      const { remaining, dropped, parkedToClear } = applyCarve(reduced, removed);
+      const applied = applyCarve(reduced, removed);
+      const { remaining, dropped, parkedToClear } = applied;
       const kept = removed.filter((id) => !dropped.includes(id));
       console.log(
         `carve #${tgt} → ${dropped.length ? `dropping ${dropped.map((i) => `#${i}`).join(", ")}` : "nothing to drop"}` +
           (kept.length ? ` (keeping banked ${kept.map((i) => `#${i}`).join(", ")})` : ""),
       );
       console.log(`remaining campaign: ${remaining.length ? remaining.map((w) => `"${w.join(" ")}"`).join(" ") : "(nothing left to run)"}`);
-      if (dryRun) break;
+      if (dryRun) {
+        // Structured closure alongside the human text, so a consumer (the
+        // aggregated dashboard's carve preview) can name the exact closure
+        // without re-parsing the prose above.
+        console.log(`carve-closure ${JSON.stringify(carveClosure(target, removed, applied))}`);
+        break;
+      }
 
       // Clear the parked records of the dropped issues so the gateway stops
       // asking about tasks we have just carved away.

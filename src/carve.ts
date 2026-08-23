@@ -106,6 +106,39 @@ export function applyCarve(
   return { remaining, dropped, parkedToClear };
 }
 
+/**
+ * A carve dry-run's closure in structured form: the target, the dependent issues
+ * that would be dropped, the banked (merged/mergeable) work kept, and the waves
+ * that remain. Lets a consumer name the exact closure without re-parsing the
+ * CLI's human text.
+ */
+export interface StructuredCarveClosure {
+  /** the carved issue itself. */
+  target: string;
+  /** the closure members that leave the plan (parked or unstarted). */
+  dropped: string[];
+  /** the closure members kept because they are already merged or mergeable. */
+  keptBanked: string[];
+  /** the waves with `dropped` stripped and emptied waves removed. */
+  remaining: string[][];
+}
+
+/**
+ * Assemble the structured closure from `computeCarve`'s `removed` closure and the
+ * `applyCarve` result it was run through: kept-banked is the closure minus what
+ * was dropped, in campaign order. Pure so the CLI's structured dry-run output is
+ * unit-tested at the seam rather than by re-parsing its own prose.
+ */
+export function carveClosure(target: string, removed: string[], applied: AppliedCarve): StructuredCarveClosure {
+  const dropped = new Set(applied.dropped);
+  return {
+    target: normalize(target),
+    dropped: applied.dropped,
+    keptBanked: removed.map(normalize).filter((id) => !dropped.has(id)),
+    remaining: applied.remaining,
+  };
+}
+
 export async function computeCarve(waves: string[][], target: string, blockedByOf: BlockedByOf): Promise<CarveResult> {
   const normWaves = waves.map((wave) => wave.map(normalize));
   const order = normWaves.flat();

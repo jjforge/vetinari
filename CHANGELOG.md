@@ -42,6 +42,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Structured carve closure from `carve --dry-run` (#55). Previewing a carve of the
+  running campaign (`carve <issue> --dry-run`) now prints a machine-readable
+  `carve-closure {…}` line after its human text — the target, the dependent issues
+  it would drop, the banked (merged/mergeable) work it keeps, and the remaining
+  waves. The human dry-run output is unchanged, so a consumer (the aggregated
+  dashboard's carve preview) can name the exact closure without re-parsing the CLI's
+  prose.
+
 - Optional campaign name (#42). `campaign --name "…"` records `name` on the
   `campaign-start` event (omitting it writes the exact same event as before), and
   `reduceCampaign` reads it back. The dashboard surfaces it as a header label on

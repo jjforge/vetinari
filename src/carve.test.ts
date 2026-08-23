@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyCarve, computeCarve, restrictBlockers } from "./carve.ts";
+import { applyCarve, carveClosure, computeCarve, restrictBlockers } from "./carve.ts";
 
 // A fake "blocked by" resolver from a plain edge map: id -> the ids that block it.
 const blockedByFrom = (edges: Record<string, string[]>) => (id: string) => edges[id] ?? [];
@@ -134,6 +134,36 @@ test("applyCarve keeps a merged/green target but still drops its unfinished depe
   assert.deepEqual(res.dropped, ["701", "712"]);
   assert.deepEqual(res.parkedToClear, ["701"]);
   assert.deepEqual(res.remaining, [["640"]]);
+});
+
+test("carveClosure names the target, dropped dependents, kept-banked work, and remaining waves", () => {
+  // 640 already merged (banked), its dependent 701 unstarted: the closure is
+  // {640, 701}, but only 701 leaves the plan — 640 stays banked.
+  const removed = ["640", "701"];
+  const applied = applyCarve(
+    { waves: [["611", "640"], ["701"]], outcomes: outcomesFrom({ "640": "completed" }) },
+    removed,
+  );
+
+  assert.deepEqual(carveClosure("640", removed, applied), {
+    target: "640",
+    dropped: ["701"],
+    keptBanked: ["640"],
+    remaining: [["611", "640"]],
+  });
+});
+
+test("carveClosure normalizes a leading # target and keeps closure order for kept-banked", () => {
+  // Nothing merged: every closure member is dropped, so kept-banked is empty.
+  const removed = ["640", "701", "712"];
+  const applied = applyCarve({ waves: [["640"], ["701", "712"]], outcomes: outcomesFrom({}) }, removed);
+
+  assert.deepEqual(carveClosure("#640", removed, applied), {
+    target: "640",
+    dropped: ["640", "701", "712"],
+    keptBanked: [],
+    remaining: [],
+  });
 });
 
 test("restrictBlockers keeps only the edges that stay inside the selected set", async () => {

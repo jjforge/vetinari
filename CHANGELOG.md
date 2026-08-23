@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- All-repos landing view for the dashboard (#55). The aggregated server now serves
+  a client-rendered shell (vanilla, no build step) at `/`, replacing the old
+  server-rendered status page as the thing you land on. Four counters run across the
+  top — agents working, parked, queued, and merged today (the last derived from the
+  reconstruction's per-issue merge timestamps) — over one card per registered
+  project showing its run state, campaign name, wave N of M, percent merged, a
+  running/parked/queued tally, and the last event in plain words; a project with no
+  live run reads idle with its last campaign. A single dropdown switches All repos ↔
+  a project and a card opens that project's campaign view. The landing model is a
+  new `GET /api/landing` JSON endpoint. Uses the ADR 0007 status vocabulary, and is
+  single-column and touch-friendly (44px tap targets) on a phone.
 - Each `turn` event now carries an agent-authored one-line summary (#55). The
   agent's signal contract requires a `<turn-summary>` line every turn — its own
   account of what it did and why — which the orchestrator extracts (a pure helper,

@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { buildAllStatus, buildStatus, buildStatusWithIssueNames, campaignRunning, extractParkedDetails, formatStatusText, listArchivedRuns, parseCarveClosure, reduceCampaign, renderStatusPage, selectStatus, serveAllStatus, summarizeRun } from "./status.ts";
+import { buildAllStatus, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, describeEvent, extractParkedDetails, formatStatusText, lastEventText, listArchivedRuns, parseCarveClosure, reduceCampaign, renderLandingShell, renderStatusPage, selectStatus, serveAllStatus, summarizeRun } from "./status.ts";
 import type { CampaignStatus } from "./status.ts";
 import type { AddressInfo } from "node:net";
 import { register, type ProjectPointer } from "./registry.ts";
@@ -34,6 +34,73 @@ const seedState = (dir: string, events: unknown[]) => {
   mkdirSync(join(dir, "parked"), { recursive: true });
   writeJsonl(join(dir, "logs", "orchestrator.jsonl"), events);
 };
+
+test("buildLanding builds a per-project card for a live campaign", () => {
+  const base = join(tmpdir(), `sctdd-landing-card-${Date.now()}`);
+  const dir = join(base, "demo");
+  seedState(dir, [
+    { ts: "2025-01-02T08:00:00.000Z", event: "campaign-start", batches: [["101"], ["201"], ["301"]], name: "gateway work" },
+    { ts: "2025-01-02T08:01:00.000Z", event: "campaign-batch", index: 0, tasks: ["101"] },
+    { ts: "2025-01-02T08:02:00.000Z", event: "green", taskId: "101" },
+    { ts: "2025-01-02T08:03:00.000Z", event: "campaign-batch-done", index: 0, merged: ["101"], held: [] },
+    { ts: "2025-01-02T08:04:00.000Z", event: "campaign-batch", index: 1, tasks: ["201"] },
+    { ts: "2025-01-02T08:05:00.000Z", event: "queue-start", taskIds: ["201"] },
+    { ts: "2025-01-02T08:06:00.000Z", event: "turn", taskId: "201", turn: 2, summary: "Writing the failing test" },
+  ]);
+
+  const { projects } = buildLanding([pointerFor("demo", dir)], new Date("2025-01-02T12:00:00.000Z"));
+  assert.equal(projects.length, 1);
+  const card = projects[0];
+  assert.equal(card.project, "demo");
+  assert.equal(card.runState, "running");
+  assert.equal(card.campaignName, "gateway work");
+  // Wave 1 is closed and banked; wave 2 is the one in flight — "2 of 3".
+  assert.deepEqual(card.wave, { current: 2, total: 3 });
+  // One of three issues has merged.
+  assert.equal(card.percentMerged, 33);
+  // 201 is in the running wave; 301 is a future-wave issue still queued; 101 is banked.
+  assert.deepEqual(card.tally, { running: 1, parked: 0, queued: 1 });
+  // The last operator-facing line is the agent's own turn summary (ADR 0009).
+  assert.equal(card.lastEvent, "Writing the failing test");
+});
+
+test("buildLanding sums the counters, reads an idle project's last campaign, and skips a stale one", () => {
+  const base = join(tmpdir(), `sctdd-landing-agg-${Date.now()}`);
+  const alphaDir = join(base, "alpha");
+  const betaDir = join(base, "beta");
+  seedState(alphaDir, [
+    { ts: "2025-06-15T08:00:00.000Z", event: "campaign-start", batches: [["101", "102"], ["201"], ["301"]] },
+    { ts: "2025-06-14T09:00:00.000Z", event: "green", taskId: "102" },
+    { ts: "2025-06-15T09:00:00.000Z", event: "green", taskId: "101" },
+    { ts: "2025-06-15T09:05:00.000Z", event: "campaign-batch-done", index: 0, merged: ["101", "102"], held: [] },
+    { ts: "2025-06-15T09:06:00.000Z", event: "campaign-batch", index: 1, tasks: ["201"] },
+    { ts: "2025-06-15T09:07:00.000Z", event: "queue-start", taskIds: ["201"] },
+  ]);
+  // Beta has no live run, only an archived campaign — it must read idle with that campaign.
+  seedState(betaDir, []);
+  mkdirSync(join(betaDir, "logs", "archive"), { recursive: true });
+  writeJsonl(join(betaDir, "logs", "archive", "orchestrator-2025-06-10T00-00-00.jsonl"), [
+    { ts: "2025-06-10T00:00:00.000Z", event: "campaign-start", batches: [["501"]], name: "old work" },
+    { ts: "2025-06-10T00:05:00.000Z", event: "campaign-batch-done", index: 0, merged: ["501"], held: [] },
+    { ts: "2025-06-10T00:06:00.000Z", event: "campaign-done", batches: 1 },
+  ]);
+
+  const { counters, projects } = buildLanding(
+    [pointerFor("alpha", alphaDir), pointerFor("beta", betaDir), pointerFor("ghost", join(base, "gone"))],
+    new Date("2025-06-15T12:00:00.000Z"),
+  );
+
+  // The stale registration is skipped, never fatal.
+  assert.deepEqual(projects.map((p) => p.project), ["alpha", "beta"]);
+  // Counters sum across live projects; merged-today counts only 101 (102 merged yesterday).
+  assert.deepEqual(counters, { working: 1, parked: 0, queued: 1, mergedToday: 1 });
+
+  const beta = projects[1];
+  assert.equal(beta.runState, "idle");
+  assert.equal(beta.campaignName, "old work");
+  assert.equal(beta.wave, null);
+  assert.match(beta.lastEvent, /^Last run: campaign · 1 issue · complete$/);
+});
 
 test("buildAllStatus builds one status per live project and skips a stale one", () => {
   const base = join(tmpdir(), `sctdd-all-status-${Date.now()}`);
@@ -76,20 +143,92 @@ test("serveAllStatus serves the aggregated site, selecting the project from the 
   const { port } = server.address() as AddressInfo;
   try {
     const root = await (await fetch(`http://127.0.0.1:${port}/`)).text();
-    // The dropdown lists both projects, and the bare open defaults to the first registered one.
-    assert.match(root, /<option value="alpha"/);
-    assert.match(root, /<option value="beta"/);
-    const firstProject = buildAllStatus([
-      { project: "alpha", projectRoot: "", baseLocation: alphaDir },
-      { project: "beta", projectRoot: "", baseLocation: betaDir },
-    ])[0].project;
-    assert.match(root, new RegExp(`<option value="${firstProject}" selected>`));
+    // A bare open lands on the all-repos shell; its dropdown lists both projects with All repos current.
+    assert.match(root, /<option value="" selected>All repos<\/option>/);
+    assert.match(root, /<option value="alpha">/);
+    assert.match(root, /<option value="beta">/);
 
     const beta = await (await fetch(`http://127.0.0.1:${port}/?project=beta`)).text();
     assert.match(beta, /<option value="beta" selected>/);
     // Beta's own campaign (issue 201) renders in the body, not alpha's issue 101.
     assert.match(beta, /#201 <small>/);
     assert.doesNotMatch(beta, /#101 <small>/);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("renderLandingShell is single-column on mobile with 44px tap targets", () => {
+  const html = renderLandingShell(["alpha", "beta"]);
+  // The cards collapse to one column on a phone.
+  assert.match(html, /@media \(max-width: 640px\)/);
+  assert.match(html, /\.cards \{ grid-template-columns: 1fr; \}/);
+  // The two tappable controls — the project dropdown and each card — are at least 44px.
+  assert.match(html, /\.project-picker select \{[^}]*min-height: 44px/);
+  assert.match(html, /\.card \{[^}]*min-height: 44px/);
+});
+
+test("serveAllStatus GET / serves the all-repos landing shell, not a server-rendered campaign", async () => {
+  const configDir = join(tmpdir(), `sctdd-landing-shell-${Date.now()}`);
+  const alphaDir = join(configDir, "state-alpha");
+  const betaDir = join(configDir, "state-beta");
+  seedState(alphaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"]] }]);
+  seedState(betaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["201"]] }]);
+  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
+  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const { port } = server.address() as AddressInfo;
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/`);
+    assert.match(res.headers.get("content-type") ?? "", /text\/html/);
+    const root = await res.text();
+    // The dropdown switches All repos ↔ a project; All repos is the landing selection.
+    assert.match(root, /<option value="" selected>All repos<\/option>/);
+    assert.match(root, /<option value="alpha">/);
+    assert.match(root, /<option value="beta">/);
+    // The shell is client-rendered: it fetches the landing model and mounts the cards client-side.
+    assert.match(root, /\/api\/landing/);
+    assert.match(root, /id="cards"/);
+    // The old server-rendered campaign body is retired from the landing — no issue chips here.
+    assert.doesNotMatch(root, /#101 <small>/);
+    assert.doesNotMatch(root, /#201 <small>/);
+
+    // Selecting a project opens that project's campaign view (server-rendered for now).
+    const alpha = await (await fetch(`http://127.0.0.1:${port}/?project=alpha`)).text();
+    assert.match(alpha, /#101 <small>/);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serveAllStatus GET /api/landing serves the all-repos landing model as JSON", async () => {
+  const configDir = join(tmpdir(), `sctdd-landing-endpoint-${Date.now()}`);
+  const alphaDir = join(configDir, "state-alpha");
+  const betaDir = join(configDir, "state-beta");
+  seedState(alphaDir, [
+    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"], ["201"]], name: "alpha work" },
+    { ts: "2025-01-01T00:01:00.000Z", event: "queue-start", taskIds: ["101"] },
+  ]);
+  seedState(betaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["301"]] }]);
+  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
+  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const { port } = server.address() as AddressInfo;
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/landing`);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get("content-type") ?? "", /application\/json/);
+    const landing = await res.json();
+    // One card per registered project, read live off the registry, with the counters summed.
+    assert.deepEqual(landing.projects.map((p: { project: string }) => p.project), ["alpha", "beta"]);
+    assert.equal(landing.projects[0].campaignName, "alpha work");
+    assert.equal(landing.projects[0].runState, "running");
+    assert.deepEqual(Object.keys(landing.counters).sort(), ["mergedToday", "parked", "queued", "working"]);
+    // Alpha's issue 101 is running; alpha's 201 and beta's 301 are still queued — summed.
+    assert.equal(landing.counters.working, 1);
+    assert.equal(landing.counters.queued, 2);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -109,15 +248,14 @@ test("serveAllStatus renders a single registered project as a one-entry dropdown
   const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
   const { port } = server.address() as AddressInfo;
   try {
-    const root = await (await fetch(`http://127.0.0.1:${port}/`)).text();
-    // A no-gateway, single-project user is just a one-entry dropdown on the aggregated view (ADR 0006).
-    assert.match(root, /<select name="project"/);
-    assert.deepEqual(root.match(/<option value="[^"]*"/g), ['<option value="solo"']);
-    assert.match(root, /<option value="solo" selected>/);
+    // A no-gateway, single-project user opens that project's campaign view (ADR 0006).
+    const solo = await (await fetch(`http://127.0.0.1:${port}/?project=solo`)).text();
+    assert.match(solo, /<select name="project"/);
+    assert.match(solo, /<option value="solo" selected>/);
     // Its own campaign wave and parked answer card render intact.
-    assert.match(root, /#101 <small>/);
-    assert.match(root, /Parked issues/);
-    assert.match(root, /<form method="post" action="\/answer"/);
+    assert.match(solo, /#101 <small>/);
+    assert.match(solo, /Parked issues/);
+    assert.match(solo, /<form method="post" action="\/answer"/);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -386,6 +524,34 @@ test("selectStatus picks the requested project, defaulting to the first otherwis
   assert.equal(selectStatus(statuses, "ghost").project, "alpha");
 });
 
+test("describeEvent narrates the operator-facing events in plain words", () => {
+  assert.equal(describeEvent({ event: "campaign-start", name: "gateway work" }), "Campaign “gateway work” started");
+  assert.equal(describeEvent({ event: "campaign-start" }), "Campaign started");
+  assert.equal(describeEvent({ event: "campaign-batch", index: 1 }), "Wave 2 started");
+  assert.equal(describeEvent({ event: "campaign-batch-done", index: 0, merged: ["101", "102"] }), "Wave 1 merged #101, #102");
+  assert.equal(describeEvent({ event: "campaign-batch-done", index: 2, merged: [] }), "Wave 3 merged nothing");
+  assert.equal(describeEvent({ event: "campaign-done" }), "Campaign complete");
+  assert.equal(describeEvent({ event: "campaign-halt", reason: "merge conflict" }), "Campaign halted: merge conflict");
+  assert.equal(describeEvent({ event: "green", taskId: "#101" }), "#101 merged");
+  assert.equal(describeEvent({ event: "parked", taskId: "202", reason: "needs a choice" }), "#202 parked: needs a choice");
+  assert.equal(describeEvent({ event: "carve", removed: ["303", "304"] }), "Carved #303, #304");
+  // A turn renders its agent-authored summary verbatim (ADR 0009), falling back when absent.
+  assert.equal(describeEvent({ event: "turn", taskId: "101", turn: 3, summary: "Added a failing test for the counter" }), "Added a failing test for the counter");
+  assert.equal(describeEvent({ event: "turn", taskId: "101", turn: 3 }), "#101 — turn 3");
+});
+
+test("lastEventText picks the most recent operator-facing event, ignoring machine noise", () => {
+  const events = [
+    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"]] },
+    { ts: "2025-01-01T00:01:00.000Z", event: "green", taskId: "101" },
+    // Machine noise after the meaningful event must not become the "last event".
+    { ts: "2025-01-01T00:02:00.000Z", event: "sandbox", taskId: "102", branch: "agent/102" },
+    { ts: "2025-01-01T00:03:00.000Z", event: "gate", cmds: ["npm test"] },
+  ];
+  assert.equal(lastEventText(events), "#101 merged");
+  assert.equal(lastEventText([]), "No activity yet");
+});
+
 test("reduceCampaign reconstructs a fresh campaign's waves with no wave running yet", () => {
   const reduced = reduceCampaign([
     { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101", "102"], ["201"]] },
@@ -429,6 +595,21 @@ test("reduceCampaign reports one completed wave closed and the next wave current
   assert.deepEqual([...reduced.closedWaves], [0]);
   assert.equal(reduced.currentWave, 1);
   assert.equal(reduced.outcomes.get("101"), "completed");
+});
+
+test("reduceCampaign records when each issue merged, from batch-done, green and queue-done", () => {
+  const reduced = reduceCampaign([
+    { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"], ["201", "202"]] },
+    { ts: "2025-01-01T00:02:00.000Z", event: "campaign-batch-done", index: 0, merged: ["101"], held: [] },
+    { ts: "2025-01-02T09:00:00.000Z", event: "green", taskId: "201" },
+    { ts: "2025-01-02T10:00:00.000Z", event: "queue-done", outcomes: { "202": "green", "201": "green" } },
+  ]);
+
+  // A merge stamp is recorded from every path an issue reaches "completed" by — the
+  // batch merge, a bare green, and a queue-done green — so merged-today can count them.
+  assert.equal(reduced.mergedAt.get("101"), "2025-01-01T00:02:00.000Z");
+  assert.equal(reduced.mergedAt.get("201"), "2025-01-02T09:00:00.000Z");
+  assert.equal(reduced.mergedAt.get("202"), "2025-01-02T10:00:00.000Z");
 });
 
 test("reduceCampaign marks a halted issue as a failure", () => {
@@ -798,6 +979,8 @@ test("renderStatusPage renders a project dropdown and the selected project's bod
   // A dropdown of every registered project, auto-submitting the selection back as a GET param.
   assert.match(html, /<form[^>]*method="get"[^>]*action="\/"[^>]*class="project-picker"/);
   assert.match(html, /<select name="project" onchange="this\.form\.submit\(\)">/);
+  // The single dropdown also switches back to the all-repos landing (submits an empty project).
+  assert.match(html, /<option value="">All repos<\/option>/);
   assert.match(html, /<option value="alpha">alpha<\/option>/);
   assert.match(html, /<option value="beta" selected>beta<\/option>/);
   assert.match(html, /<option value="gamma">gamma<\/option>/);

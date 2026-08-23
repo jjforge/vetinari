@@ -1489,23 +1489,53 @@ test("renderStatusPage does not render the color legend under the heading", () =
 test("renderStatusPage makes issue chips tap-friendly for touch devices", () => {
   const html = renderStatusPage({ project: "demo", waves: [{ index: 0, status: "running", issues: [{ issueNumber: "101", status: "running", name: "Add login flow", detail: "Agent turn 2 finished; waiting for verification/resume" }] }], parked: [] });
 
-  assert.match(html, /data-detail="Add login flow&#10;Agent turn 2 finished; waiting for verification\/resume"/);
+  // The chip keeps its hover title and now carries the ids the sheet fetches with.
   assert.match(html, /title="Add login flow&#10;Agent turn 2 finished; waiting for verification\/resume"/);
+  assert.match(html, /class="chip"[^>]*data-issue="101"[^>]*data-project="demo"/);
   assert.match(html, /id="issue-detail"/);
   assert.match(html, /chip\.addEventListener\("click"/);
 });
 
-test("renderStatusPage pins the tapped-issue detail to a dismissible bottom bar", () => {
+test("renderStatusPage opens the issue-detail sheet from a chip, fetching /api/issue", () => {
+  const html = renderStatusPage({ project: "demo", waves: [{ index: 0, status: "running", issues: [{ issueNumber: "101", status: "running", name: "Add login flow" }] }], parked: [] });
+
+  // A dismissible sheet, hidden until an issue is opened.
+  assert.match(html, /<div id="issue-detail" class="issue-detail"[^>]*hidden>/);
+  assert.match(html, /id="issue-detail-close"/);
+  // A sticky header (number, status, title, repo · campaign), meta tiles, and the turn log.
+  assert.match(html, /class="issue-detail-header"/);
+  assert.match(html, /\.issue-detail-header \{[^}]*position: sticky;/);
+  assert.match(html, /class="issue-detail-title"/);
+  assert.match(html, /class="issue-detail-context"/);
+  assert.match(html, /id="issue-detail-turns"/);
+  assert.match(html, /id="issue-detail-elapsed"/);
+  assert.match(html, /id="issue-detail-turnlog"/);
+  // Chips open the sheet, which fetches the reconstructed detail.
+  assert.match(html, /openIssue\(/);
+  assert.match(html, /fetch\("\/api\/issue\?project="/);
+  // Dismissible, and reveal keys off a `show` class over the hidden default.
+  assert.match(html, /\.issue-detail\.show \{ display: flex; \}/);
+  assert.match(html, /getElementById\("issue-detail-close"\)\.addEventListener\("click"/);
+});
+
+test("renderStatusPage renders the turn log newest-first with each turn number in its status colour", () => {
   const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
 
-  // Fixed to the bottom of the viewport and hidden until a chip is tapped.
-  assert.match(html, /\.issue-detail \{ position: fixed;[^}]*bottom: 0;/);
-  assert.match(html, /\.issue-detail \{[^}]*display: none;/);
-  assert.match(html, /\.issue-detail\.show \{ display: flex; \}/);
-  // Text lives in its own span so the close button can sit beside it.
-  assert.match(html, /<span class="issue-detail-text"><\/span><button type="button" id="issue-detail-close"/);
-  assert.match(html, /showDetail\(issueDetailText\.textContent === text \? "" : text\)/);
-  assert.match(html, /getElementById\("issue-detail-close"\)\.addEventListener\("click", \(\) => showDetail\(""\)\)/);
+  // Each turn's number carries the issue's status class, so it reads in the status colour.
+  assert.match(html, /"turn-num " \+ .*\bstatus\b/);
+  // The turn log region is an ordered list the script fills from the fetched turnLog.
+  assert.match(html, /id="issue-detail-turnlog"/);
+  assert.match(html, /turnLog/);
+  // The status dot palette is shared, so a turn number reuses the same status colours.
+  assert.match(html, /\.turn-num\.completed \{ color: var\(--color-green\); \}/);
+});
+
+test("renderStatusPage makes the issue-detail sheet a full-width bottom sheet on mobile", () => {
+  const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
+
+  // Desktop: a centred sheet. Mobile: pinned full-width to the bottom.
+  assert.match(html, /@media \(max-width: [^)]+\) \{[^}]*\.issue-detail-sheet \{[^}]*width: 100%;/);
+  assert.match(html, /\.issue-detail-sheet/);
 });
 
 test("renderStatusPage hosts the carve affordance and inline confirm in the tap-detail panel", () => {
@@ -1573,6 +1603,19 @@ test("renderStatusPage leads with parked issues above the waves when any are par
   // bleed onto <span class="dot parked"> and inflate the chip height.
   assert.match(html, /\.parked \{ background: var\(--color-yellow\); \}/);
   assert.doesNotMatch(html, /\.parked \{[^}]*margin/);
+});
+
+test("renderStatusPage opens the issue-detail sheet from a parked row too", () => {
+  const html = renderStatusPage({
+    project: "demo",
+    waves: [],
+    parked: [{ issueNumber: "102", reason: "blocked", parkedAt: "now", branch: "agent/102", description: "Need a choice.", options: [] }],
+  });
+
+  // A parked card carries an open affordance with the ids the sheet fetches with,
+  // and the same wiring opens the sheet from a chip or a parked row.
+  assert.match(html, /<button type="button" class="issue-open" data-issue="102" data-project="demo">Turn log<\/button>/);
+  assert.match(html, /querySelectorAll\("\.chip\[data-issue\], \.issue-open\[data-issue\]"\)/);
 });
 
 test("renderStatusPage omits the parked section entirely when nothing is parked", () => {

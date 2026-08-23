@@ -585,7 +585,7 @@ test("serveAllStatus POST /carve on confirm shells carve in the selected project
   }
 });
 
-test("serveAllStatus GET /carve?preview returns the selected project's closure as JSON", async () => {
+test("serveAllStatus GET /carve?preview returns the selected project's structured closure as JSON", async () => {
   const configDir = join(tmpdir(), `sctdd-agg-carve-json-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
@@ -596,6 +596,9 @@ test("serveAllStatus GET /carve?preview returns the selected project's closure a
 
   const closures: { projectRoot: string; taskId: string }[] = [];
   const spawned: unknown[] = [];
+  // The structured closure (E2) the confirmation renders: the target and dropped
+  // dependents that would leave, the banked work kept, and the remaining waves.
+  const structured = { target: "201", dropped: ["201", "401"], keptBanked: ["301"], remaining: [] as string[][] };
   const server = await serveAllStatus(configDir, {
     port: 0,
     host: "127.0.0.1",
@@ -604,7 +607,7 @@ test("serveAllStatus GET /carve?preview returns the selected project's closure a
     // which computes it against that project's real blockedBy graph.
     carveClosure: (projectRoot, taskId) => {
       closures.push({ projectRoot, taskId });
-      return Promise.resolve({ target: taskId, removed: [taskId, "401"] });
+      return Promise.resolve(structured);
     },
   });
   const { port } = server.address() as AddressInfo;
@@ -612,7 +615,9 @@ test("serveAllStatus GET /carve?preview returns the selected project's closure a
     const res = await fetch(`http://127.0.0.1:${port}/carve?preview&taskId=201&project=beta`);
     assert.equal(res.status, 200);
     assert.match(res.headers.get("content-type") ?? "", /application\/json/);
-    assert.deepEqual(await res.json(), { target: "201", removed: ["201", "401"] });
+    // The endpoint returns the full structured closure the panel discloses —
+    // dropped, kept-banked, and remaining all reach the client verbatim.
+    assert.deepEqual(await res.json(), structured);
     // The closure came from the selected project's install (beta's root), not alpha's.
     assert.deepEqual(closures, [{ projectRoot: join(configDir, "beta-root"), taskId: "201" }]);
     // A preview computes nothing destructive — no carve is spawned.
@@ -631,7 +636,7 @@ test("serveAllStatus GET /carve?preview validates params and the project", async
   const server = await serveAllStatus(configDir, {
     port: 0,
     host: "127.0.0.1",
-    carveClosure: () => Promise.resolve({ target: "201", removed: ["201"] }),
+    carveClosure: () => Promise.resolve({ target: "201", dropped: ["201"], keptBanked: [], remaining: [] }),
   });
   const { port } = server.address() as AddressInfo;
   try {
@@ -1375,6 +1380,9 @@ test("renderStatusPage colours a carved chip and pulses a running one", () => {
 
   // A carved chip carries the carved status dot + label…
   assert.match(html, /<span class="dot carved"><\/span>#202 <small>carved<\/small>/);
+  // …and the wave it left gains a carved tally in its header, so the carve reads
+  // at a glance without counting struck-through chips (one of two issues carved).
+  assert.match(html, /<span class="wave-carved">1 carved<\/span>/);
   // …in a distinct carved colour defined in the stylesheet (ADR 0007's sixth state).
   assert.match(html, /--color-carved:/);
   assert.match(html, /\.carved \{ background: var\(--color-carved\); \}/);
@@ -1382,6 +1390,22 @@ test("renderStatusPage colours a carved chip and pulses a running one", () => {
   assert.match(html, /@keyframes chip-pulse/);
   assert.match(html, /\.dot\.running \{ animation: chip-pulse/);
   assert.match(html, /prefers-reduced-motion/);
+});
+
+test("renderStatusPage's carve panel discloses kept-banked work and carries a standalone explainer", () => {
+  const html = renderStatusPage(
+    { project: "beta", waves: [{ index: 0, status: "unstarted", issues: [{ issueNumber: "401", status: "unstarted" }] }], parked: [] },
+    { carve: true },
+  );
+  // The confirmation is built from the structured closure the endpoint returns:
+  // it names the dropped dependents and, separately, states the banked (merged or
+  // mergeable) work that is kept — so a confirm never implies banked work leaves.
+  assert.match(html, /also drops/);
+  assert.match(html, /Keeps banked \(merged or mergeable\)/);
+  // A standalone Carve (no Resume beside it) carries a plain-words explainer of
+  // what a carve does, keyed to show only when the issue is carvable and unparked.
+  assert.match(html, /id="carve-explainer"/);
+  assert.match(html, /everything blocked by it/);
 });
 
 test("renderStatusPage renders a project dropdown and the selected project's body", () => {
@@ -1927,20 +1951,20 @@ test("renderStatusPage omits the carve control unless the page opts into it", ()
   assert.doesNotMatch(html, /action="\/carve"/);
 });
 
-test("parseCarveClosure reads the target and closure from carve --dry-run text", () => {
-  // A running-campaign dry-run names the target, its dropped dependents, and any
-  // banked members kept — all three are closure members and belong in `removed`.
+test("parseCarveClosure reads the structured closure line the dry-run prints", () => {
+  // The dry-run prints a `carve-closure {json}` line (E2) carrying the exact
+  // closure — target, the dependents that would leave, the banked work kept, and
+  // the remaining waves — so the panel names each without re-parsing the prose.
+  const structured = { target: "201", dropped: ["201", "401"], keptBanked: ["301"], remaining: [["501"]] };
   assert.deepEqual(
-    parseCarveClosure("201", "carve #201 → dropping #201, #401 (keeping banked #301)\nremaining campaign: (nothing left to run)"),
-    { target: "201", removed: ["201", "401", "301"] },
+    parseCarveClosure(
+      `carve #201 → dropping #201, #401 (keeping banked #301)\nremaining campaign: "501"\ncarve-closure ${JSON.stringify(structured)}`,
+    ),
+    structured,
   );
-  // A target that drops nothing is just itself.
-  assert.deepEqual(parseCarveClosure("#201", "carve #201 → nothing to drop\nremaining campaign: \"301\""), { target: "201", removed: ["201"] });
-  // The "remaining campaign" line names what stays, so it never leaks in.
-  assert.deepEqual(parseCarveClosure("640", "carve #640 → dropping #640, #655\nremaining campaign: \"701 702\""), {
-    target: "640",
-    removed: ["640", "655"],
-  });
+  // No structured line (e.g. an install predating E2) → null, so the route can 502
+  // rather than half-render a closure it cannot vouch for.
+  assert.equal(parseCarveClosure("carve #201 → nothing to drop\nremaining campaign: (nothing left to run)"), null);
 });
 
 test("listArchivedRuns lists a project's archived runs newest-first with summaries, skipping a malformed file", () => {

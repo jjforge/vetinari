@@ -118,8 +118,13 @@ const renderWaveLabel = (wave: StatusWave) => {
   return `${index} — ${escapeHtml(lead.name)}${extra > 0 ? ` +${extra}` : ""}`;
 };
 
-const renderOpenWave = (wave: StatusWave, project: string, carve: boolean, interactive: boolean) =>
-  `<section class="wave"><h2>${renderWaveLabel(wave)} <span class="wave-status ${wave.status}">${wave.status}</span> <span class="wave-count">${wave.issues.length} issue${wave.issues.length === 1 ? "" : "s"}</span></h2>${renderWaveContents(wave, project, carve, interactive)}${renderWaveTitles(wave)}</section>`;
+const renderOpenWave = (wave: StatusWave, project: string, carve: boolean, interactive: boolean) => {
+  // A carved tally beside the issue count, so a wave a carve pruned reads at a
+  // glance — the carved chips are a display overlay (ADR 0007), and this counts them.
+  const carved = wave.issues.filter((issue) => issue.status === "carved").length;
+  const tally = carved ? ` <span class="wave-carved">${carved} carved</span>` : "";
+  return `<section class="wave"><h2>${renderWaveLabel(wave)} <span class="wave-status ${wave.status}">${wave.status}</span> <span class="wave-count">${wave.issues.length} issue${wave.issues.length === 1 ? "" : "s"}</span>${tally}</h2>${renderWaveContents(wave, project, carve, interactive)}${renderWaveTitles(wave)}</section>`;
+};
 
 const renderCompletedWave = (wave: StatusWave, project: string, carve: boolean, interactive: boolean) =>
   `<details class="completed-wave"><summary class="completed-wave-chip"><span class="check" aria-hidden="true">✓</span> ${renderWaveLabel(wave)}</summary>${renderWaveContents(wave, project, carve, interactive)}</details>`;
@@ -456,6 +461,7 @@ export const renderStatusPage = (status: CampaignStatus, opts: StatusPageOptions
   .wave-status.running { border-color: var(--color-blue); color: var(--color-blue); background: rgb(108 182 255 / 12%); }
   .wave-status.unstarted { border-color: var(--color-text-light-2); color: var(--color-text-light-2); background: rgb(139 152 165 / 12%); }
   .wave-count { font-size: .8rem; font-weight: 400; color: var(--color-text-light-2); }
+  .wave-carved { font-size: .78rem; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: var(--color-carved); border: 1px solid var(--color-carved); background: rgb(163 113 247 / 12%); border-radius: 999px; padding: .1rem .5rem; }
   .wave-issues { list-style: none; margin: .7rem 0 0; padding: 0; }
   .wave-issue { color: var(--color-text-light); font-size: .9rem; padding: .15rem 0; }
   .wave-issue.carved { color: var(--color-text-light-2); text-decoration: line-through; }
@@ -473,6 +479,7 @@ export const renderStatusPage = (status: CampaignStatus, opts: StatusPageOptions
   .carve-confirm-text { color: var(--color-red); }
   .carve-fallback form { display: inline; }
   .carve-note { color: var(--color-blue); font-size: .85rem; }
+  .carve-explainer { color: var(--color-text-light-2); font-size: .85rem; }
   .issue-open { font: inherit; font-size: .72rem; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; vertical-align: middle; margin-left: .5rem; padding: .2rem .6rem; color: var(--color-primary); background: var(--color-box-header); border: 1px solid var(--color-secondary); border-radius: 999px; cursor: pointer; }
   .issue-open:hover { border-color: var(--color-primary); background: var(--color-primary-alpha-20); }
   .issue-detail { position: fixed; inset: 0; z-index: 10; display: none; align-items: center; justify-content: center; padding: 1rem; background: #0009; }
@@ -561,7 +568,7 @@ ${
 }
 <div id="issue-detail" class="issue-detail" role="dialog" aria-modal="true" aria-live="polite" hidden><div class="issue-detail-sheet"><header class="issue-detail-header"><div class="issue-detail-head-main"><span class="issue-detail-status"><span class="dot"></span><span class="issue-detail-num"></span> <span class="issue-detail-statuslabel"></span></span><h2 class="issue-detail-title"></h2><p class="issue-detail-context"></p></div><button type="button" id="issue-detail-close" class="issue-detail-close" aria-label="Dismiss">&times;</button></header><div class="issue-detail-meta"><div class="meta-tile"><span class="meta-label">Turns</span><span class="meta-value" id="issue-detail-turns"></span></div><div class="meta-tile"><span class="meta-label">Elapsed</span><span class="meta-value" id="issue-detail-elapsed"></span></div></div><ol class="turn-log" id="issue-detail-turnlog"></ol><div id="issue-detail-reply" class="issue-detail-reply" hidden><h3 class="reply-heading">Reply &amp; resume</h3><p class="reply-question" id="reply-question"></p><div class="reply-options" id="reply-options"></div><form method="post" action="/answer" id="reply-form"><input type="hidden" name="taskId" value="" /><input type="hidden" name="project" value="" /><textarea name="text" id="reply-text" placeholder="Type your reply…"></textarea></form></div><div class="sheet-actions"><button type="submit" form="reply-form" id="reply-resume" class="reply-resume" hidden>Resume</button>${
   opts.carve
-    ? `<div id="carve-panel" class="carve-panel" hidden><button type="button" id="carve-start" class="carve-start">Carve</button><form method="post" action="/carve" id="carve-confirm" class="carve-confirm" hidden><span class="carve-confirm-text"></span><input type="hidden" name="taskId" value="" /><input type="hidden" name="project" value="" /><input type="hidden" name="confirm" value="1" /><button type="submit" class="carve-confirm-btn">Confirm</button><button type="button" id="carve-cancel" class="carve-cancel">Cancel</button></form><span id="carve-note" class="carve-note"></span></div>`
+    ? `<div id="carve-panel" class="carve-panel" hidden><button type="button" id="carve-start" class="carve-start">Carve</button><span id="carve-explainer" class="carve-explainer" hidden>Removes this issue and everything blocked by it from the running campaign; merged and mergeable work is kept.</span><form method="post" action="/carve" id="carve-confirm" class="carve-confirm" hidden><span class="carve-confirm-text"></span><input type="hidden" name="taskId" value="" /><input type="hidden" name="project" value="" /><input type="hidden" name="confirm" value="1" /><button type="submit" class="carve-confirm-btn">Confirm</button><button type="button" id="carve-cancel" class="carve-cancel">Cancel</button></form><span id="carve-note" class="carve-note"></span></div>`
     : ""
 }</div></div></div>${
   // No-JS fallback: a plain server-side form per carvable issue that reaches
@@ -618,7 +625,14 @@ ${
   // reply to send or a carve to offer — so a plain issue's sheet grows no empty bar.
   const updateFoot = () => {
     const carve = document.getElementById("carve-panel");
-    sheetActions.hidden = replyResume.hidden && !(carve && !carve.hidden);
+    const carveShown = Boolean(carve && !carve.hidden);
+    sheetActions.hidden = replyResume.hidden && !carveShown;
+    // A standalone Carve — offered, not beside a parked issue's Resume, and not yet
+    // in its confirm step — gets a plain-words explainer of what a carve does; a
+    // parked issue's Resume gives the context instead, so the explainer stays hidden.
+    const explainer = document.getElementById("carve-explainer");
+    const start = document.getElementById("carve-start");
+    if (explainer) explainer.hidden = !carveShown || !replyResume.hidden || (start ? start.hidden : true);
   };
   // Elapsed is a working span in ms; show it as coarse minutes/hours.
   const fmtElapsed = (ms) => {
@@ -732,6 +746,7 @@ ${
     const resetCarve = () => {
       carveConfirm.hidden = true;
       carveStart.hidden = false;
+      updateFoot();
     };
     // The carve affordance reveals inside the sheet for a carvable issue, keyed off
     // the issue the sheet just opened (ADR 0005); a non-carvable issue hides it.
@@ -747,9 +762,16 @@ ${
       try {
         const res = await fetch("/carve?preview&taskId=" + encodeURIComponent(carveTarget) + "&project=" + encodeURIComponent(carveProj));
         if (!res.ok) throw new Error(String(res.status));
-        const { target, removed } = await res.json();
-        const drops = removed.filter((id) => id !== target);
-        carveConfirmText.textContent = "Carve #" + target + (drops.length ? " — also drops " + drops.map((id) => "#" + id).join(", ") : " — no dependents");
+        // The structured closure (E2): the dependents that would leave (dropped)
+        // and the banked work kept (keptBanked). Name each so a confirm discloses
+        // the exact closure and never implies merged/mergeable work is discarded.
+        const { target, dropped, keptBanked } = await res.json();
+        const drops = (dropped || []).filter((id) => id !== target);
+        const kept = keptBanked || [];
+        carveConfirmText.textContent =
+          "Carve #" + target +
+          (drops.length ? " — also drops " + drops.map((id) => "#" + id).join(", ") : " — no dependents") +
+          (kept.length ? ". Keeps banked (merged or mergeable) " + kept.map((id) => "#" + id).join(", ") : "");
         carveTaskId.value = target;
         carveProject.value = carveProj;
       } catch {
@@ -758,6 +780,7 @@ ${
       }
       carveStart.hidden = true;
       carveConfirm.hidden = false;
+      updateFoot();
     });
     document.getElementById("carve-cancel").addEventListener("click", resetCarve);
     carveConfirm.addEventListener("submit", async (event) => {

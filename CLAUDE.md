@@ -14,6 +14,8 @@ These govern every change — yours interactively and every campaign agent's (th
 
 **4. Goal-driven execution.** Define the success criteria and drive to them: a failing test that pins the target ("fix the bug" → a test that reproduces it; "add validation" → invalid-input tests), then green — and pair each step of multi-step work with an explicit check. For campaign work this _is_ the `tdd` skill's loop; let it drive.
 
+**5. Defined vocabulary wins over mockups.** A POC, prototype, mockup, or design handoff may use the wrong word for a thing we have already named — our defined vocabulary (the ADRs, the domain model) is the correct one, so translate the artifact's words into ours rather than adopting the artifact's. A word that conflicts with a defined term is not a naming decision, it is a translation; only a genuinely _net-new_ concept our vocabulary has no word for is a decision — and there you **ask** (rule 1's `BLOCKED` in a headless run). This keeps the UI, the logs, and the code speaking one language rather than drifting toward whatever the last handoff called things.
+
 ## Work tracking — GitHub issues are the single source of truth
 
 **GitHub issues on `jjforge/sandcastle-tdd` are the single source of truth for all work** — bugs, features, follow-ups, deferred items. Every loose end gets an issue; there is **no backlog file** (no `NEXT-STEPS.md`, no `ROADMAP.md` — do not create one). "What's next" is the highest-priority open `ready-for-agent` issue whose blockers are all closed — read it from the tracker.

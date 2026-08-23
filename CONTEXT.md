@@ -55,6 +55,42 @@ committed `sandcastle/` and an excluded `.sandcastle.local/`; the gateway serves
 many of them simultaneously.
 _Avoid_: client, target repo
 
+### Host concurrency
+
+**Host slot budget**:
+The total number of agent containers the **machine** allows across every project at
+once — a property of the host, set host-side, not in any project's config. Unset
+means no host ceiling: each [[run]] is bounded only by its own `QUEUE_SLOTS`,
+uncoordinated, as before. When set, every run cooperates to keep the sum of live
+containers within it (ADR 0010).
+_Avoid_: max containers, global slots, concurrency cap
+
+**Project weight**:
+A number a project declares in its `sandcastle/` config (default one) that sets its
+cut of the [[host-slot-budget]] when projects contend. Higher weight → more slots;
+it only bites while more than one project is active.
+_Avoid_: priority, rank
+
+**Fair share**:
+A project's currently-allowed slot count under the [[host-slot-budget]]: a **floor
+of one** slot per active project, plus a [[project-weight]]-proportional cut of the
+remainder, computed over the *currently active* projects — so a project alone gets
+the whole budget and each active project always gets something. Not a reservation:
+it is the ceiling a run checks before taking its next slot.
+_Avoid_: quota, allocation
+
+**Slot lease**:
+The host-level **filesystem** primitive the `campaign`/`queue` processes cooperate
+through to honor the [[host-slot-budget]] — each records the slots it holds and its
+[[project-weight]] there, and a dead holder's slots are reclaimed on contention. It
+is **not** the [[gateway]] (which stays a dumb router and never allocates); it is a
+shared file every run reads and writes directly, so it needs no daemon. A run takes
+a slot only when under both its own `QUEUE_SLOTS` and its current [[fair-share]],
+and releases on park or finish — so when a new project becomes active a busy one
+stops re-acquiring above its now-smaller share and **drains to it** as turns finish,
+never preempting a running container.
+_Avoid_: semaphore, lock, allocator
+
 ### Communications
 
 **Message category**:

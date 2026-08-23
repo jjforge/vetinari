@@ -398,6 +398,9 @@ test("the issue-detail sheet carries the issue's state on its top edge only (§2
   // The sheet's state class is set from the fetched issue status when the detail renders,
   // and reset while a fresh issue is loading.
   assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /"issue-detail-sheet " \+ d\.status/);
+  // The parked-question / reply block is part of the human-action queue, so it carries
+  // the 3px amber left edge (§2) — the block only shows for a parked issue.
+  assert.match(ISSUE_DETAIL_SHEET_STYLES, /\.issue-detail-reply \{[^}]*border-left: 3px solid var\(--color-yellow\)/);
 });
 
 test("motion is a channel for running only: the live indicator pulses while streaming, still + dim when paused (§5, #83)", () => {

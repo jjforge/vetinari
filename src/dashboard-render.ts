@@ -347,7 +347,9 @@ export const ISSUE_DETAIL_SHEET_STYLES = `  .carve-panel { display: flex; align-
   .turn-empty { color: var(--color-text-light-2); padding: .55rem 0; }
   /* Parked-reply block + the actions row pin to the sheet foot so Resume/Carve stay
      reachable one-handed while the turn log scrolls above. */
-  .issue-detail-reply { flex: none; padding: .9rem 1.15rem; border-top: 1px solid var(--color-light-border); background: var(--color-box-header); }
+  /* The reply block is the human-action queue inside the sheet, so it carries the
+     3px amber left edge (§2); it only ever shows for a parked issue. */
+  .issue-detail-reply { flex: none; padding: .9rem 1.15rem; border-top: 1px solid var(--color-light-border); border-left: 3px solid var(--color-yellow); background: var(--color-box-header); }
   .reply-heading { margin: 0 0 .5rem; font-size: .95rem; color: var(--color-text-light); }
   .reply-question { margin: 0 0 .6rem; color: var(--color-text-light); white-space: pre-wrap; max-height: 30vh; overflow-y: auto; }
   .reply-options { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .6rem; }

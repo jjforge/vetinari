@@ -102,6 +102,37 @@ test("buildLanding sums the counters, reads an idle project's last campaign, and
   assert.match(beta.lastEvent, /^Last run: campaign · 1 issue · complete$/);
 });
 
+test("buildLanding collects every parked question across repos, oldest first", () => {
+  const base = join(tmpdir(), `sctdd-landing-parked-${Date.now()}`);
+  const alphaDir = join(base, "alpha");
+  const betaDir = join(base, "beta");
+  seedState(alphaDir, [{ ts: "2025-06-15T08:00:00.000Z", event: "campaign-start", batches: [["101"]] }]);
+  seedState(betaDir, [{ ts: "2025-06-15T08:00:00.000Z", event: "campaign-start", batches: [["301"]] }]);
+  // Alpha's question was parked more recently than beta's — beta must sort first.
+  writeFileSync(
+    join(alphaDir, "parked", "101.json"),
+    JSON.stringify({ taskId: "101", parkedAt: "2025-06-15T09:00:00.000Z", reason: "blocked", branch: "agent/101", question: "Should the counter live-update?\n\nOptions:\n- A\n- B" }),
+  );
+  writeFileSync(
+    join(betaDir, "parked", "301.json"),
+    JSON.stringify({ taskId: "301", parkedAt: "2025-06-14T09:00:00.000Z", reason: "blocked", branch: "agent/301", question: "Which colour for the badge?" }),
+  );
+
+  const { parked } = buildLanding([pointerFor("alpha", alphaDir), pointerFor("beta", betaDir)], new Date("2025-06-15T12:00:00.000Z"));
+
+  // Oldest-first across repos: beta (yesterday) before alpha (this morning).
+  assert.deepEqual(
+    parked.map((p) => ({ project: p.project, issueNumber: p.issueNumber, parkedAt: p.parkedAt })),
+    [
+      { project: "beta", issueNumber: "301", parkedAt: "2025-06-14T09:00:00.000Z" },
+      { project: "alpha", issueNumber: "101", parkedAt: "2025-06-15T09:00:00.000Z" },
+    ],
+  );
+  // The full question travels with the row.
+  assert.equal(parked[0].question, "Which colour for the badge?");
+  assert.equal(parked[1].question, "Should the counter live-update?");
+});
+
 test("buildAllStatus builds one status per live project and skips a stale one", () => {
   const base = join(tmpdir(), `sctdd-all-status-${Date.now()}`);
   const alphaDir = join(base, "alpha");

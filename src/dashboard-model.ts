@@ -482,12 +482,24 @@ export interface LandingCounters {
   mergedToday: number;
 }
 
-/** The all-repos landing model: the four counters plus one card per registered
- * project. The client shell renders this; it is reconstructed live off the
- * registry each request, exactly as `buildAllStatus` is (ADR 0006). */
+/** One parked question in the cross-repo queue the landing's parked counter
+ * expands into: which issue, which repo, the full question, and when it was
+ * parked (the client derives the waited duration from `parkedAt`). */
+export interface ParkedQuestion {
+  issueNumber: string;
+  project: string;
+  question: string;
+  parkedAt: string;
+}
+
+/** The all-repos landing model: the four counters, one card per registered
+ * project, and the cross-repo parked queue (oldest first). The client shell
+ * renders this; it is reconstructed live off the registry each request, exactly
+ * as `buildAllStatus` is (ADR 0006). */
 export interface LandingView {
   counters: LandingCounters;
   projects: ProjectCard[];
+  parked: ParkedQuestion[];
 }
 
 const projectRunState = (status: CampaignStatus): RunState => {
@@ -549,6 +561,7 @@ const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, event
  */
 export function buildLanding(pointers: ProjectPointer[], now: Date = new Date()): LandingView {
   const projects: ProjectCard[] = [];
+  const parked: ParkedQuestion[] = [];
   let mergedToday = 0;
   for (const pointer of pointers) {
     if (!existsSync(pointer.baseLocation)) {
@@ -561,8 +574,16 @@ export function buildLanding(pointers: ProjectPointer[], now: Date = new Date())
     for (const [issueNumber, ts] of mergedAt) {
       if (outcomes.get(issueNumber) === "completed" && sameUtcDay(ts, now)) mergedToday++;
     }
-    projects.push(buildProjectCard(pointer, buildStatus(cfg), events));
+    const status = buildStatus(cfg);
+    // The same active parked records the project's campaign view shows, tagged
+    // with their repo so the landing can list them cross-repo.
+    for (const p of status.parked) {
+      parked.push({ issueNumber: p.issueNumber, project: status.project, question: p.description, parkedAt: p.parkedAt });
+    }
+    projects.push(buildProjectCard(pointer, status, events));
   }
+  // Oldest first — the question that has waited longest surfaces at the top.
+  parked.sort((a, b) => a.parkedAt.localeCompare(b.parkedAt));
   const sum = (pick: (card: ProjectCard) => number) => projects.reduce((total, card) => total + pick(card), 0);
   return {
     counters: {
@@ -572,5 +593,6 @@ export function buildLanding(pointers: ProjectPointer[], now: Date = new Date())
       mergedToday,
     },
     projects,
+    parked,
   };
 }

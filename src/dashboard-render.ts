@@ -237,15 +237,22 @@ export const renderLandingShell = (projects: string[]) => `<!doctype html>
   .card-tally { color: var(--color-text-light-2); font-size: .85rem; }
   .card-last { color: var(--color-text-light-2); font-size: .85rem; margin-top: .5rem; white-space: pre-line; }
   .empty { color: var(--color-text-light-2); }
+  .live-bar { display: inline-flex; align-items: center; gap: .75rem; color: var(--color-text-light-2); font-size: .85rem; }
+  .live-indicator { display: inline-flex; align-items: center; gap: .4rem; font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--color-green); }
+  .live-indicator::before { content: ""; width: .55rem; height: .55rem; border-radius: 999px; background: currentColor; }
+  .live-indicator[data-live-state="paused"] { color: var(--color-yellow); }
+  .pause { min-height: 44px; color: var(--color-text); background: var(--color-box-header); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); padding: .35rem .8rem; font: inherit; cursor: pointer; }
+  .pause:hover { border-color: var(--color-primary); }
   @media (max-width: 640px) {
     body { padding: 1rem; }
     .counters { grid-template-columns: repeat(2, 1fr); }
     .cards { grid-template-columns: 1fr; }
+    .live-bar { width: 100%; justify-content: space-between; }
   }
 </style>
 </head>
 <body>
-<div class="page-top"><h1>All repos</h1><form method="get" action="/" class="project-picker"><select onchange="location = this.value ? '/?project=' + encodeURIComponent(this.value) : '/'"><option value="" selected>All repos</option>${projects
+<div class="page-top"><h1>All repos</h1><div class="live-bar" title="Live updates over SSE; pause to freeze the view while it keeps collecting"><span class="live-indicator" data-live-state="live">Live</span><span class="updated" data-updated>waiting for updates</span><button type="button" id="pause" class="pause">Pause</button></div><form method="get" action="/" class="project-picker"><select onchange="location = this.value ? '/?project=' + encodeURIComponent(this.value) : '/'"><option value="" selected>All repos</option>${projects
   .map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`)
   .join("")}</select></form></div>
 <section class="counters">
@@ -289,7 +296,40 @@ export const renderLandingShell = (projects: string[]) => `<!doctype html>
       cards.append(card);
     }
   }
-  load();
+  // Live updates (ADR 0008): one SSE stream feeds re-reads of the landing as
+  // events land. Pause is a client-side presentation freeze — the stream keeps
+  // flowing and events keep being collected; resuming re-reads once to flush the
+  // whole backlog that arrived while paused. "updated Ns ago" counts from the last
+  // time the view actually refreshed, so it visibly ages while paused.
+  const indicator = document.querySelector("[data-live-state]");
+  const updatedEl = document.querySelector("[data-updated]");
+  const pauseBtn = document.getElementById("pause");
+  let paused = false;
+  let buffered = 0;
+  let lastUpdate = null;
+  const renderUpdated = () => {
+    updatedEl.textContent = lastUpdate == null ? "waiting for updates" : "updated " + Math.round((Date.now() - lastUpdate) / 1000) + "s ago";
+  };
+  const renderState = () => {
+    indicator.dataset.liveState = paused ? "paused" : "live";
+    indicator.textContent = paused ? "Paused" + (buffered ? " · " + buffered + " buffered" : "") : "Live";
+  };
+  const refresh = async () => { await load(); lastUpdate = Date.now(); renderUpdated(); };
+  const events = new EventSource("/api/events");
+  events.onmessage = () => {
+    // Freeze presentation while paused, but keep counting what lands so resume can flush it.
+    if (paused) { buffered++; renderState(); return; }
+    refresh();
+  };
+  pauseBtn.addEventListener("click", () => {
+    paused = !paused;
+    pauseBtn.textContent = paused ? "Resume" : "Pause";
+    if (!paused && buffered) { buffered = 0; refresh(); }
+    renderState();
+  });
+  renderState();
+  setInterval(renderUpdated, 1000);
+  refresh();
 </script>
 </body>
 </html>`;

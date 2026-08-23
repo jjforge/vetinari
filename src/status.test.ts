@@ -168,6 +168,19 @@ test("renderLandingShell is single-column on mobile with 44px tap targets", () =
   assert.match(html, /\.card \{[^}]*min-height: 44px/);
 });
 
+test("renderLandingShell wires live SSE updates, an updated-ago readout, and a buffered pause", () => {
+  const html = renderLandingShell(["alpha", "beta"]);
+  // Subscribes to the one-way SSE stream and re-reads the landing as events land.
+  assert.match(html, /new EventSource\("\/api\/events"\)/);
+  // A live/paused indicator and an "updated Ns ago" readout live in the toolbar header.
+  assert.match(html, /data-live-state/);
+  assert.match(html, /data-updated/);
+  // A pause control that freezes presentation while still collecting, flushing on resume.
+  assert.match(html, /id="pause"/);
+  // Pause must not tear the stream down — it is a client-side presentation freeze (ADR 0008).
+  assert.match(html, /paused/);
+});
+
 test("serveAllStatus GET / serves the all-repos landing shell, not a server-rendered campaign", async () => {
   const configDir = join(tmpdir(), `sctdd-landing-shell-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");

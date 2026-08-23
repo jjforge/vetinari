@@ -107,6 +107,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The gateway never delivered a project's Telegram messages when its
+  `orchestrator.env` annotated the credentials with inline comments (the shipped
+  template's own style: `SANDCASTLE_TELEGRAM_BOT_TOKEN=<token>  # from @BotFather`)
+  (#77). `parseEnvFile` stripped surrounding quotes but not inline `#` comments, so
+  the bot token carried the comment and Telegram returned 404. It now matches shell
+  `source` semantics — an unquoted whitespace-then-`#` starts a comment; a quoted
+  value keeps a literal `#` — so the same file the old `dispatch` poller sourced now
+  parses identically for the gateway.
+
 - Clicking a pending issue in the all-repos landing's cross-repo parked queue did a
   full navigation to the campaign status page (the older view with the auto-refresh
   control) instead of opening that issue's detail — and it didn't even target the

@@ -142,8 +142,16 @@ function parseEnvFile(text: string): Record<string, string> {
     const m = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);
     if (!m) continue;
     let value = m[2].trim();
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
+    if (value.startsWith('"') || value.startsWith("'")) {
+      // A quoted value keeps its contents verbatim (a literal '#' included);
+      // anything after the closing quote (e.g. an inline comment) is dropped.
+      const quote = value[0];
+      const close = value.indexOf(quote, 1);
+      value = close >= 0 ? value.slice(1, close) : value.slice(1);
+    } else {
+      // An unquoted value ends at an inline comment, matching shell `source`:
+      // whitespace followed by '#' starts a comment (a bare '#' mid-token is literal).
+      value = value.replace(/\s+#.*$/, "").trim();
     }
     env[m[1]] = value;
   }

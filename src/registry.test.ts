@@ -47,6 +47,20 @@ test("readProject loads the project's Telegram connection live from its base loc
   assert.deepEqual(read?.conn, { token: "123:abc", chat: "-1001", thread: "42" });
 });
 
+test("readProject strips inline comments from orchestrator.env values (shell semantics)", () => {
+  // A human-authored orchestrator.env annotates its secrets with trailing comments;
+  // shell `source` honours them, so the parser must too or the token carries the
+  // comment and Telegram rejects it. A quoted value keeps a literal '#'.
+  const baseLocation = baseLocationWith(
+    "export SANDCASTLE_TELEGRAM_BOT_TOKEN=123:abc  # from @BotFather /newbot\n" +
+      "SANDCASTLE_TELEGRAM_CHAT_ID=-1001   # your numeric chat id (getUpdates)\n" +
+      'SANDCASTLE_TELEGRAM_THREAD_ID="42 # not a comment"\n',
+  );
+  const read = readProject(pointer({ baseLocation }));
+
+  assert.deepEqual(read?.conn, { token: "123:abc", chat: "-1001", thread: "42 # not a comment" });
+});
+
 test("readProject loads the project's notify map and destinations live from its base location", () => {
   const base = join(tmpConfigDir(), ".sandcastle.local");
   mkdirSync(base, { recursive: true });

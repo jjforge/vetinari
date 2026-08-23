@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
@@ -230,6 +230,56 @@ test("serveAllStatus GET /api/landing serves the all-repos landing model as JSON
     assert.equal(landing.counters.working, 1);
     assert.equal(landing.counters.queued, 2);
   } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serveAllStatus GET /api/events streams a project's log appends as SSE frames", async () => {
+  const configDir = join(tmpdir(), `sctdd-sse-${Date.now()}`);
+  const alphaDir = join(configDir, "state-alpha");
+  seedState(alphaDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"]] }]);
+  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
+
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const { port } = server.address() as AddressInfo;
+  const res = await fetch(`http://127.0.0.1:${port}/api/events`);
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  // Read from the stream until a full SSE data frame (blank-line terminated) arrives, or time out.
+  const nextFrame = async (): Promise<string> => {
+    let buf = "";
+    while (!buf.includes("\n\n")) {
+      const chunk = await Promise.race([
+        reader.read(),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timed out waiting for SSE frame")), 4000)),
+      ]);
+      if (chunk.done) throw new Error("stream closed before a frame arrived");
+      buf += decoder.decode(chunk.value, { stream: true });
+    }
+    return buf;
+  };
+  try {
+    assert.match(res.headers.get("content-type") ?? "", /text\/event-stream/);
+    // The opening handshake frame flushes headers and, crucially, means the watcher is now armed.
+    await nextFrame();
+    // A fresh append to alpha's live log is pushed as a data frame carrying the project and the new event.
+    appendFileSync(join(alphaDir, "logs", "orchestrator.jsonl"), JSON.stringify({ event: "turn", taskId: "101" }) + "\n");
+    let frame = "";
+    let payload: { project?: string; events?: { event: string }[] } = {};
+    // fs.watch can coalesce or emit a bare change with no new bytes; keep reading data frames until one carries the append.
+    for (let i = 0; i < 5 && !payload.events?.length; i++) {
+      frame = await nextFrame();
+      const data = frame
+        .split("\n")
+        .filter((l) => l.startsWith("data:"))
+        .map((l) => l.slice("data:".length).trim())
+        .join("");
+      payload = data ? JSON.parse(data) : {};
+    }
+    assert.equal(payload.project, "alpha");
+    assert.deepEqual((payload.events ?? []).map((e) => e.event), ["turn"]);
+  } finally {
+    await reader.cancel();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });

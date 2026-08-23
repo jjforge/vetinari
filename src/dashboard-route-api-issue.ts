@@ -1,5 +1,6 @@
 import { listProjects } from "./registry.ts";
-import { logFileOf, readEvents, reconstructIssueDetail } from "./dashboard-model.ts";
+import { logFileOf, parkedReplyFor, readEvents, reconstructIssueDetail } from "./dashboard-model.ts";
+import { listParkedIn, parkedDirOf } from "./state.ts";
 import type { RouteHandler } from "./dashboard-http.ts";
 
 /**
@@ -21,7 +22,11 @@ export const handleApiIssue: RouteHandler = (req, res, url, deps) => {
     return true;
   }
   const detail = reconstructIssueDetail(readEvents({ logFile: logFileOf(pointer.baseLocation) }), issue);
+  // A parked issue also carries its reply payload — the full question and the
+  // agent's offered options — so the sheet can draw its reply block (story:
+  // parked-question reply). Read live from the project's own parked records.
+  const parked = detail.status === "parked" ? parkedReplyFor(listParkedIn(parkedDirOf(pointer.baseLocation)), issue) : undefined;
   res.setHeader("content-type", "application/json");
-  res.end(JSON.stringify({ project: pointer.project, ...detail }));
+  res.end(JSON.stringify({ project: pointer.project, ...detail, ...(parked ? { parked } : {}) }));
   return true;
 };

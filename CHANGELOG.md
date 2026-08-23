@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Parked-question reply and Resume in the issue-detail sheet (#55). When the opened
+  issue is parked, the sheet now shows a reply block — the full question, the options
+  the agent offered rendered as buttons that fill (not submit) the free-text reply
+  field, and the field itself — pinned to the sheet foot beside Carve so both are
+  reachable one-handed on a phone. `Resume` submits the reply through the existing
+  `POST /answer` path, resuming the parked task in that project's own install (ADR
+  0002); the redirect reload reflects the resumed state. Options are best-effort
+  parsed; when absent, only the free-text field shows. `GET /api/issue` carries the
+  parked reply payload (`parked: { question, options }`, from the pure `parkedReplyFor`)
+  for a parked issue and omits it otherwise.
 - Issue-detail sheet with the agent turn log (#55). Opening an issue — from a live
   wave chip or a parked row — now raises a detail sheet (centred on desktop, a
   full-width bottom sheet on mobile) with a sticky header (issue number, status,

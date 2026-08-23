@@ -4,7 +4,7 @@ import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { appendedEvents, buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, describeEvent, extractParkedDetails, formatFeedEvent, formatStatusText, lastEventText, listArchivedRuns, parseCarveClosure, reduceCampaign, renderLandingShell, renderStatusPage, selectStatus, serveAllStatus, summarizeRun } from "./status.ts";
+import { appendedEvents, buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, describeEvent, extractParkedDetails, formatFeedEvent, formatStatusText, lastEventText, listArchivedRuns, parseCarveClosure, reconstructIssueDetail, reduceCampaign, renderLandingShell, renderStatusPage, selectStatus, serveAllStatus, summarizeRun } from "./status.ts";
 import type { CampaignStatus } from "./status.ts";
 import type { AddressInfo } from "node:net";
 import { register, type ProjectPointer } from "./registry.ts";
@@ -386,6 +386,41 @@ test("serveAllStatus GET /api/feed serves the cross-project event feed as JSON",
       ["alpha — #101 merged", "beta — #201 parked: needs a choice", "alpha — Campaign “alpha work” started"],
     );
     assert.equal(feed[0].kind, "green");
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serveAllStatus GET /api/issue serves one issue's reconstructed detail as JSON", async () => {
+  const configDir = join(tmpdir(), `sctdd-issue-endpoint-${Date.now()}`);
+  const alphaDir = join(configDir, "state-alpha");
+  seedState(alphaDir, [
+    { ts: "2025-05-01T08:00:00.000Z", event: "campaign-start", batches: [["101"]], titles: { "101": "Wire the parser" }, name: "parser work" },
+    { ts: "2025-05-01T08:01:00.000Z", event: "turn", taskId: "101", turn: 0, summary: "Sketched the grammar and a red test." },
+    { ts: "2025-05-01T08:06:00.000Z", event: "parked", taskId: "101", reason: "needs a decision" },
+  ]);
+  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
+
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const { port } = server.address() as AddressInfo;
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/issue?project=alpha&issue=101`);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get("content-type") ?? "", /application\/json/);
+    const detail = await res.json();
+    assert.equal(detail.project, "alpha");
+    assert.equal(detail.issueNumber, "101");
+    assert.equal(detail.status, "parked");
+    assert.equal(detail.title, "Wire the parser");
+    assert.equal(detail.campaignName, "parser work");
+    assert.equal(detail.turns, 1);
+    assert.equal(detail.elapsedMs, 5 * 60 * 1000);
+    assert.deepEqual(
+      detail.turnLog.map((t: { turn: number; summary: string }) => [t.turn, t.summary]),
+      [[0, "Sketched the grammar and a red test."]],
+    );
+    // An unknown project is a 404, never a path joined from request input.
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/issue?project=ghost&issue=101`)).status, 404);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -912,6 +947,35 @@ test("reduceCampaign's carve fold clears an emptied future wave and reindexes", 
 
   assert.deepEqual(reduced.waves, [["101"], ["301"]]);
   assert.deepEqual([...reduced.closedWaves], [0]);
+});
+
+test("reconstructIssueDetail folds an issue's turn log, count, elapsed and status from the log", () => {
+  const detail = reconstructIssueDetail(
+    [
+      { ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"], ["201"]], titles: { "101": "Do the thing" }, name: "gateway work" },
+      { ts: "2025-01-01T00:01:00.000Z", event: "campaign-batch", index: 0, tasks: ["101"] },
+      { ts: "2025-01-01T00:02:00.000Z", event: "turn", taskId: "101", turn: 0, signal: undefined, summary: "Wrote a failing test for the parser." },
+      { ts: "2025-01-01T00:07:00.000Z", event: "turn", taskId: "101", turn: 1, signal: "done", summary: "Made it green and tidied up." },
+      { ts: "2025-01-01T00:12:00.000Z", event: "green", taskId: "101", branch: "agent/101" },
+    ],
+    "101",
+  );
+
+  assert.equal(detail.issueNumber, "101");
+  assert.equal(detail.status, "completed");
+  assert.equal(detail.title, "Do the thing");
+  assert.equal(detail.campaignName, "gateway work");
+  assert.equal(detail.turns, 2);
+  // Working span: first turn (00:02) to the green (00:12) — the plan-only campaign-start is excluded.
+  assert.equal(detail.elapsedMs, 10 * 60 * 1000);
+  // Newest first, each carrying the agent's own summary verbatim (ADR 0009).
+  assert.deepEqual(
+    detail.turnLog.map((t) => [t.turn, t.summary]),
+    [
+      [1, "Made it green and tidied up."],
+      [0, "Wrote a failing test for the parser."],
+    ],
+  );
 });
 
 test("buildStatus shows campaign waves with issue chips and statuses", () => {

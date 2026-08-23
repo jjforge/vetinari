@@ -332,6 +332,76 @@ export function reduceCampaign(events: any[]): ReducedCampaign {
   return { waves, layout, carved, name, outcomes, details, titles, mergedAt, closedWaves, currentWave };
 }
 
+/** One entry in an issue's turn log (ADR 0009): the turn's number as logged
+ * (0-indexed; the display adds one), the agent's own one-sentence account of that
+ * turn verbatim, and the ISO timestamp it was logged. */
+export interface IssueTurn {
+  turn: number;
+  summary: string;
+  ts: string;
+}
+
+/**
+ * The issue-detail sheet's reconstructed data (story: issue detail sheet): the
+ * issue's status and title, its run's campaign name (the header's "repo · campaign"),
+ * how many turns the agent took and how long it worked, and the turn log itself —
+ * one agent-authored sentence per turn, newest first (ADR 0009). The turn log is
+ * the sheet's reason to exist.
+ */
+export interface IssueDetail {
+  issueNumber: string;
+  status: DisplayStatus;
+  title?: string;
+  campaignName?: string;
+  turns: number;
+  /** the working span in ms: the last event that names this issue minus the first,
+   * from the event timestamps. Zero when a single event names it, since a span
+   * needs two points; the plan-only `campaign-start` never counts as the start. */
+  elapsedMs: number;
+  turnLog: IssueTurn[];
+}
+
+/** Does this event name the given issue by an id it carries — its `taskId`, or a
+ * membership in one of the id-bearing arrays/maps (`taskIds`, `merged`, `removed`,
+ * `queue-done` outcomes)? The plan-only `campaign-start` `batches` are excluded so
+ * the working span starts when work does, not at campaign launch. */
+const eventNamesIssue = (e: any, id: string): boolean => {
+  if (e?.taskId != null && normalizeIssue(String(e.taskId)) === id) return true;
+  const inArray = (a: unknown) => Array.isArray(a) && a.map(String).map(normalizeIssue).includes(id);
+  if (inArray(e?.taskIds) || inArray(e?.merged) || inArray(e?.removed)) return true;
+  if (e?.outcomes && typeof e.outcomes === "object" && Object.keys(e.outcomes).map(normalizeIssue).includes(id)) return true;
+  return false;
+};
+
+/**
+ * Reconstruct one issue's detail sheet from an event log — pure, no I/O. Status
+ * and title come from the same `reduceCampaign` fold the campaign view renders, so
+ * the sheet can never disagree with the chip that opened it; the turn log, count
+ * and elapsed span are folded from the events themselves. Only the latest campaign
+ * (from its `campaign-start`) is considered, mirroring `reduceCampaign`, so an
+ * issue re-run in a fresh campaign shows that run's turns — a queue-only log with
+ * no campaign frame is folded whole.
+ */
+export function reconstructIssueDetail(events: any[], issueNumber: string): IssueDetail {
+  const id = normalizeIssue(issueNumber);
+  const { outcomes, carved, titles, name } = reduceCampaign(events);
+  const status: DisplayStatus = carved.has(id) ? "carved" : outcomes.get(id) ?? "unstarted";
+
+  const latestCampaignIndex = events.findLastIndex((e) => e.event === "campaign-start" && Array.isArray(e.batches));
+  const relevant = latestCampaignIndex >= 0 ? events.slice(latestCampaignIndex) : events;
+
+  const turnLog: IssueTurn[] = [];
+  const stamps: number[] = [];
+  for (const e of relevant) {
+    if (!eventNamesIssue(e, id)) continue;
+    if (typeof e.ts === "string") stamps.push(Date.parse(e.ts));
+    if (e.event === "turn") turnLog.push({ turn: Number(e.turn ?? 0), summary: String(e.summary ?? "").trim(), ts: String(e.ts ?? "") });
+  }
+  const elapsedMs = stamps.length > 1 ? Math.max(...stamps) - Math.min(...stamps) : 0;
+
+  return { issueNumber: id, status, title: titles.get(id), campaignName: name, turns: turnLog.length, elapsedMs, turnLog: turnLog.reverse() };
+}
+
 /**
  * Is a campaign currently running over this event log? True iff the latest
  * `campaign-start` has no `campaign-done` or `campaign-halt` after it — the

@@ -1,25 +1,30 @@
 import { listProjects } from "./registry.ts";
 import { archiveStatusConfig, buildAllStatus, buildStatus, listArchivedRuns, selectStatus } from "./dashboard-model.ts";
-import { renderStatusPage } from "./dashboard-render.ts";
+import { renderLandingShell, renderStatusPage } from "./dashboard-render.ts";
 import type { RouteHandler } from "./dashboard-http.ts";
 
 /**
- * `GET /` — the dashboard page. Builds every project's status live off the
- * registry, renders the one the `project` query param selects (defaulting to the
- * first), and lists the selected project's archived runs beneath the live one. A
- * `run` token renders that archived run read-only below the list. Both the archived
- * body and the raw-log link resolve the token by matching the listing — never by
- * joining request input into a path — so an unknown token is simply rejected.
+ * `GET /` — the dashboard page. With no `project` query param it serves the
+ * all-repos landing shell (client-rendered off `/api/landing`), which replaces the
+ * old server-rendered status page as the thing you land on. With a project
+ * selected it serves that project's campaign view: its status built live off the
+ * registry, its archived runs listed beneath the live one, and — when a `run`
+ * token is given — that archived run rendered read-only below the list. Both the
+ * archived body and the raw-log link resolve the token by matching the listing,
+ * never by joining request input into a path, so an unknown token is rejected.
  */
 export const handlePage: RouteHandler = (req, res, url, deps) => {
   if (!(req.method === "GET" && (url.pathname === "/" || req.url === undefined))) return false;
-  const statuses = buildAllStatus(listProjects(deps.configDir));
   res.setHeader("content-type", "text/html; charset=utf-8");
-  if (!statuses.length) {
-    res.end(renderStatusPage({ project: "No projects registered", waves: [], parked: [] }));
+  const statuses = buildAllStatus(listProjects(deps.configDir));
+  // No project selected → the all-repos landing shell. Also the empty-registry
+  // fallback, so a fresh host lands on the (empty) landing rather than a stub page.
+  const project = url.searchParams.get("project");
+  if (!project || !statuses.length) {
+    res.end(renderLandingShell(statuses.map((s) => s.project)));
     return true;
   }
-  const selected = selectStatus(statuses, url.searchParams.get("project") ?? undefined);
+  const selected = selectStatus(statuses, project);
   const pointer = listProjects(deps.configDir).find((p) => p.project === selected.project);
   const archivedRuns = pointer ? listArchivedRuns(pointer.baseLocation) : [];
   const requestedRun = url.searchParams.get("run") ?? undefined;

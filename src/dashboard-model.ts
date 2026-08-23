@@ -63,6 +63,59 @@ export const readEvents = (cfg: Pick<ResolvedConfig, "logFile">): any[] => {
 
 const normalizeIssue = (id: string) => id.replace(/^#/, "");
 
+const hash = (id: unknown) => `#${normalizeIssue(String(id))}`;
+
+/**
+ * Narrate one event log entry as the single plain-words line the landing card
+ * shows for "the last event". A `turn` renders its agent-authored summary verbatim
+ * (ADR 0009) — the whole reason that field exists — falling back to a mechanical
+ * line only when a pre-summary run has none. Events with no operator-facing
+ * narration return "" so `lastEventText` can skip past machine noise.
+ */
+export function describeEvent(e: any): string {
+  switch (e?.event) {
+    case "campaign-start":
+      return e.name ? `Campaign “${e.name}” started` : "Campaign started";
+    case "campaign-batch":
+      return `Wave ${(e.index ?? 0) + 1} started`;
+    case "campaign-batch-done":
+      return `Wave ${(e.index ?? 0) + 1} merged ${(e.merged ?? []).length ? (e.merged as unknown[]).map(hash).join(", ") : "nothing"}`;
+    case "campaign-done":
+      return "Campaign complete";
+    case "campaign-halt":
+      return `Campaign halted: ${e.reason ?? "failure"}`;
+    case "queue-start":
+      return "Queue started";
+    case "queue-done":
+      return "Queue drained";
+    case "green":
+      return `${hash(e.taskId)} merged`;
+    case "parked":
+      return `${hash(e.taskId)} parked${e.reason ? `: ${e.reason}` : ""}`;
+    case "carve":
+      return `Carved ${(e.removed ?? []).map(hash).join(", ")}`;
+    case "turn":
+      return e.summary?.trim() ? String(e.summary).trim() : `${hash(e.taskId)} — turn ${e.turn ?? "?"}`;
+    default:
+      return "";
+  }
+}
+
+/**
+ * The most recent operator-facing event in a log, in plain words — the landing
+ * card's "last event" line. Scans newest-first and returns the first entry
+ * `describeEvent` can narrate, so machine noise (gate/sandbox/queue-spawn) that
+ * lands after a meaningful event never becomes the headline. Empty logs read
+ * "No activity yet".
+ */
+export function lastEventText(events: any[]): string {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const text = describeEvent(events[i]);
+    if (text) return text;
+  }
+  return "No activity yet";
+}
+
 // Issue titles rarely change during a campaign, so we cache them for the process
 // lifetime; a rename won't surface until the status server restarts.
 const issueNameCache = new Map<string, string | undefined>();
@@ -111,6 +164,10 @@ export interface ReducedCampaign {
    * orchestrator (which has `fetchTask`) so the dumb-router dashboard renders
    * names with no live lookup (ADR 0002). Empty when a run recorded no titles. */
   titles: Map<string, string>;
+  /** issue id → ISO timestamp it most recently reached "completed" (a batch merge,
+   * a bare green, or a queue-done green). The source the landing's merged-today
+   * counter reads: an issue whose stamp falls on the current day merged today. */
+  mergedAt: Map<string, string>;
   closedWaves: Set<number>;
   currentWave: number;
 }
@@ -131,6 +188,7 @@ export function reduceCampaign(events: any[]): ReducedCampaign {
   const outcomes = new Map<string, IssueStatus>();
   const details = new Map<string, string>();
   const titles = new Map<string, string>();
+  const mergedAt = new Map<string, string>();
   const closedWaves = new Set<number>();
   let currentWave = -1;
 
@@ -164,11 +222,16 @@ export function reduceCampaign(events: any[]): ReducedCampaign {
     } else if (e.event === "turn" && e.taskId) {
       details.set(normalizeIssue(String(e.taskId)), `Agent turn ${e.turn ?? "?"} finished; waiting for verification/resume`);
     } else if (e.event === "queue-done" && e.outcomes && typeof e.outcomes === "object") {
-      for (const [taskId, outcome] of Object.entries(e.outcomes)) outcomes.set(normalizeIssue(taskId), statusForOutcome(String(outcome)));
+      for (const [taskId, outcome] of Object.entries(e.outcomes)) {
+        const status = statusForOutcome(String(outcome));
+        outcomes.set(normalizeIssue(taskId), status);
+        if (status === "completed" && e.ts && !mergedAt.has(normalizeIssue(taskId))) mergedAt.set(normalizeIssue(taskId), String(e.ts));
+      }
     } else if (e.event === "green" && e.taskId) {
       const taskId = normalizeIssue(String(e.taskId));
       outcomes.set(taskId, "completed");
       details.set(taskId, e.branch ? `Completed on ${e.branch}` : "Completed");
+      if (e.ts && !mergedAt.has(taskId)) mergedAt.set(taskId, String(e.ts));
     } else if (e.event === "parked" && e.taskId) {
       const taskId = normalizeIssue(String(e.taskId));
       outcomes.set(taskId, "parked");
@@ -180,6 +243,7 @@ export function reduceCampaign(events: any[]): ReducedCampaign {
         const issueNumber = normalizeIssue(String(taskId));
         outcomes.set(issueNumber, "completed");
         if (!details.has(issueNumber)) details.set(issueNumber, "Merged into base");
+        if (e.ts && !mergedAt.has(issueNumber)) mergedAt.set(issueNumber, String(e.ts));
       }
     } else if (e.event === "campaign-halt" && e.taskId) {
       const taskId = normalizeIssue(String(e.taskId));
@@ -194,7 +258,7 @@ export function reduceCampaign(events: any[]): ReducedCampaign {
     }
   }
 
-  return { waves, name, outcomes, details, titles, closedWaves, currentWave };
+  return { waves, name, outcomes, details, titles, mergedAt, closedWaves, currentWave };
 }
 
 /**
@@ -386,4 +450,127 @@ const toParkedIssue = (rec: ParkedRecord): ParkedIssue => {
  */
 export function selectStatus(statuses: CampaignStatus[], requested?: string): CampaignStatus {
   return statuses.find((s) => s.project === requested) ?? statuses[0];
+}
+
+/** A project's run-state rolled up to one word for the landing card, from the
+ * ADR 0007 vocabulary: `idle` when there is no live run, else the most demanding
+ * state its issues are in (a failure to surface > a human needed > work in flight
+ * > all done). */
+export type RunState = "running" | "parked" | "failure" | "completed" | "idle";
+
+/** One project's row on the all-repos landing: its run state, the campaign it is
+ * (or last) running, how far through the waves it is, how much has merged, a
+ * running/parked/queued tally, and the last event in plain words. An idle project
+ * (no live run) reads `idle` and carries its last campaign's name and summary. */
+export interface ProjectCard {
+  project: string;
+  runState: RunState;
+  campaignName?: string;
+  wave: { current: number; total: number } | null;
+  percentMerged: number;
+  tally: { running: number; parked: number; queued: number };
+  lastEvent: string;
+}
+
+/** The four numbers across the top of the landing, summed across every live
+ * project: agents working (running issues), issues awaiting a human (parked),
+ * issues still queued (unstarted), and issues merged on the current day. */
+export interface LandingCounters {
+  working: number;
+  parked: number;
+  queued: number;
+  mergedToday: number;
+}
+
+/** The all-repos landing model: the four counters plus one card per registered
+ * project. The client shell renders this; it is reconstructed live off the
+ * registry each request, exactly as `buildAllStatus` is (ADR 0006). */
+export interface LandingView {
+  counters: LandingCounters;
+  projects: ProjectCard[];
+}
+
+const projectRunState = (status: CampaignStatus): RunState => {
+  if (!status.waves.length) return "idle";
+  const issues = status.waves.flatMap((wave) => wave.issues);
+  if (issues.some((i) => i.status === "failure")) return "failure";
+  if (status.parked.length) return "parked";
+  if (issues.some((i) => i.status === "running")) return "running";
+  if (issues.every((i) => i.status === "completed")) return "completed";
+  return "running";
+};
+
+/** Same UTC calendar day — the basis for "merged today". Deterministic (no local
+ * timezone), so a run's merge timestamps and the passed-in "now" compare the same
+ * way in tests and in the server. */
+const sameUtcDay = (iso: string, day: Date) => iso.slice(0, 10) === day.toISOString().slice(0, 10);
+
+const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, events: any[]): ProjectCard => {
+  if (!status.waves.length) {
+    const [latest] = listArchivedRuns(pointer.baseLocation);
+    return {
+      project: status.project,
+      runState: "idle",
+      campaignName: latest?.name ?? latest?.run,
+      wave: null,
+      percentMerged: 0,
+      tally: { running: 0, parked: 0, queued: 0 },
+      lastEvent: latest ? `Last run: ${latest.summary}` : "No runs yet",
+    };
+  }
+  const issues = status.waves.flatMap((wave) => wave.issues);
+  const total = status.waves.length;
+  const closed = status.waves.filter((wave) => wave.status === "closed").length;
+  const runningWave = status.waves.find((wave) => wave.status === "running");
+  const completed = issues.filter((i) => i.status === "completed").length;
+  return {
+    project: status.project,
+    runState: projectRunState(status),
+    campaignName: status.name,
+    // "N of M": the wave in flight if one is, otherwise how many have closed.
+    wave: { current: runningWave ? runningWave.index + 1 : closed, total },
+    percentMerged: issues.length ? Math.round((completed / issues.length) * 100) : 0,
+    tally: {
+      running: issues.filter((i) => i.status === "running").length,
+      parked: issues.filter((i) => i.status === "parked").length,
+      queued: issues.filter((i) => i.status === "unstarted").length,
+    },
+    lastEvent: lastEventText(events),
+  };
+};
+
+/**
+ * Reconstruct the all-repos landing model live off the registry: one card per
+ * project and the four summed counters. A project whose base location is gone is
+ * skipped with a log line, never throwing — one stale registration must not take
+ * the landing down (ADR 0002), the same tolerance `buildAllStatus` has.
+ * merged-today counts each project's issues whose reconstructed merge stamp
+ * (`reduceCampaign`'s `mergedAt`) falls on `now`'s UTC day.
+ */
+export function buildLanding(pointers: ProjectPointer[], now: Date = new Date()): LandingView {
+  const projects: ProjectCard[] = [];
+  let mergedToday = 0;
+  for (const pointer of pointers) {
+    if (!existsSync(pointer.baseLocation)) {
+      log("status-project-skipped", { project: pointer.project, baseLocation: pointer.baseLocation });
+      continue;
+    }
+    const cfg = statusConfigFromPointer(pointer);
+    const events = readEvents(cfg);
+    const { mergedAt, outcomes } = reduceCampaign(events);
+    for (const [issueNumber, ts] of mergedAt) {
+      if (outcomes.get(issueNumber) === "completed" && sameUtcDay(ts, now)) mergedToday++;
+    }
+    projects.push(buildProjectCard(pointer, buildStatus(cfg), events));
+  }
+  const sum = (pick: (card: ProjectCard) => number) => projects.reduce((total, card) => total + pick(card), 0);
+  return {
+    counters: {
+      working: sum((c) => c.tally.running),
+      parked: sum((c) => c.tally.parked),
+      queued: sum((c) => c.tally.queued),
+      mergedToday,
+    },
+    projects,
+  };
 }

@@ -154,7 +154,7 @@ export interface StatusPageOptions {
 }
 
 const renderProjectPicker = (projects: string[], selected: string | undefined) =>
-  `<form method="get" action="/" class="project-picker"><select name="project" onchange="this.form.submit()">${projects
+  `<form method="get" action="/" class="project-picker"><select name="project" onchange="this.form.submit()"><option value="">All repos</option>${projects
     .map((p) => `<option value="${escapeHtml(p)}"${p === selected ? " selected" : ""}>${escapeHtml(p)}</option>`)
     .join("")}</select></form>`;
 
@@ -190,6 +190,107 @@ export const renderAggregatedCarvePreview = (project: string, target: string, pr
 <form method="post" action="/carve" class="confirm"><input type="hidden" name="taskId" value="${escapeHtml(target)}" /><input type="hidden" name="project" value="${escapeHtml(project)}" /><input type="hidden" name="confirm" value="1" /><button type="submit">✂️ Confirm carve</button></form>
 <a class="cancel" href="/?project=${encodeURIComponent(project)}">Cancel</a>
 </div>
+</body>
+</html>`;
+
+/**
+ * The all-repos landing shell: a client-rendered (vanilla, no build step) page the
+ * aggregated server serves at `GET /`, replacing the old server-rendered status
+ * page. The server renders only the chrome — the title, the All-repos↔project
+ * dropdown, and four empty counter tiles — then the inline script fetches
+ * `/api/landing` and mounts the four counters and one card per project. Each card
+ * links to that project's campaign view (`/?project=…`); picking a project in the
+ * dropdown navigates the same way, and "All repos" returns here. Statuses use the
+ * ADR 0007 vocabulary. Single-column and touch-friendly on a phone (44px targets).
+ */
+export const renderLandingShell = (projects: string[]) => `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>All repos — sandcastle</title>
+<style>
+  :root { --color-body: #090c10; --color-box-body: #0b0e12; --color-box-header: #10151b; --color-primary: #3fb9b0; --color-primary-alpha-20: rgb(63 185 176 / 20%); --color-text: #e6edf3; --color-text-light: #cdd6e0; --color-text-light-2: #8b98a5; --color-secondary: #232b35; --color-light-border: #1b212a; --color-green: #3fb984; --color-yellow: #c8a24e; --color-red: #f79287; --color-blue: #6cb6ff; --border-radius: 9px; --border-radius-medium: 12px; }
+  * { box-sizing: border-box; }
+  body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 0; padding: 1.5rem; background: var(--color-body); color: var(--color-text); }
+  h1 { font-size: clamp(1.6rem, 4vw, 2.6rem); margin: 0; letter-spacing: -0.035em; }
+  .page-top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; border-bottom: 1px solid var(--color-light-border); padding-bottom: 1rem; }
+  .project-picker { margin: 0; }
+  .project-picker select { min-height: 44px; color: var(--color-text); background: var(--color-box-header); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); padding: .35rem .7rem; font: inherit; cursor: pointer; }
+  .project-picker select:hover { border-color: var(--color-primary); }
+  .counters { display: grid; grid-template-columns: repeat(4, 1fr); gap: .75rem; margin: 1.25rem 0; }
+  .counter { background: var(--color-box-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: 1rem; }
+  .counter-value { font-size: clamp(1.6rem, 5vw, 2.4rem); font-weight: 700; letter-spacing: -0.02em; }
+  .counter-label { color: var(--color-text-light-2); font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; margin-top: .25rem; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 1rem; }
+  .card { display: block; min-height: 44px; text-decoration: none; color: inherit; background: var(--color-box-body); border: 1px solid var(--color-secondary); border-top: 3px solid var(--color-primary); border-radius: var(--border-radius-medium); padding: 1rem 1.15rem; box-shadow: 0 8px 22px #0004; }
+  .card:hover { border-color: var(--color-primary); background: var(--color-primary-alpha-20); }
+  .card-top { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+  .card-project { font-size: 1.15rem; font-weight: 700; letter-spacing: -0.01em; }
+  .run-state { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; border-radius: 999px; padding: .2rem .6rem; border: 1px solid var(--color-text-light-2); color: var(--color-text-light-2); }
+  .run-state.running { border-color: var(--color-blue); color: var(--color-blue); }
+  .run-state.parked { border-color: var(--color-yellow); color: var(--color-yellow); }
+  .run-state.failure { border-color: var(--color-red); color: var(--color-red); }
+  .run-state.completed { border-color: var(--color-green); color: var(--color-green); }
+  .card-campaign { color: var(--color-primary); font-weight: 600; margin: .5rem 0 .1rem; }
+  .card-meta { color: var(--color-text-light); font-size: .9rem; display: flex; flex-wrap: wrap; gap: .3rem .9rem; margin: .35rem 0; }
+  .card-tally { color: var(--color-text-light-2); font-size: .85rem; }
+  .card-last { color: var(--color-text-light-2); font-size: .85rem; margin-top: .5rem; white-space: pre-line; }
+  .empty { color: var(--color-text-light-2); }
+  @media (max-width: 640px) {
+    body { padding: 1rem; }
+    .counters { grid-template-columns: repeat(2, 1fr); }
+    .cards { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="page-top"><h1>All repos</h1><form method="get" action="/" class="project-picker"><select onchange="location = this.value ? '/?project=' + encodeURIComponent(this.value) : '/'"><option value="" selected>All repos</option>${projects
+  .map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`)
+  .join("")}</select></form></div>
+<section class="counters">
+  <div class="counter" data-counter="working"><div class="counter-value">–</div><div class="counter-label">Agents working</div></div>
+  <div class="counter" data-counter="parked"><div class="counter-value">–</div><div class="counter-label">Parked</div></div>
+  <div class="counter" data-counter="queued"><div class="counter-value">–</div><div class="counter-label">Queued</div></div>
+  <div class="counter" data-counter="mergedToday"><div class="counter-value">–</div><div class="counter-label">Merged today</div></div>
+</section>
+<section id="cards" class="cards"><p class="empty">Loading…</p></section>
+<script>
+  const fmtWave = (w) => (w ? "Wave " + w.current + " of " + w.total : "idle");
+  const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+  async function load() {
+    let data;
+    try {
+      const res = await fetch("/api/landing");
+      data = await res.json();
+    } catch {
+      document.getElementById("cards").replaceChildren(el("p", "empty", "Couldn't load the landing — is the server still up?"));
+      return;
+    }
+    for (const [key, val] of Object.entries(data.counters)) {
+      const value = document.querySelector('[data-counter="' + key + '"] .counter-value');
+      if (value) value.textContent = String(val);
+    }
+    const cards = document.getElementById("cards");
+    cards.replaceChildren();
+    if (!data.projects.length) { cards.append(el("p", "empty", "No projects registered.")); return; }
+    for (const p of data.projects) {
+      const card = el("a", "card");
+      card.href = "/?project=" + encodeURIComponent(p.project);
+      const top = el("div", "card-top");
+      top.append(el("span", "card-project", p.project), el("span", "run-state " + p.runState, p.runState));
+      card.append(top);
+      if (p.campaignName) card.append(el("div", "card-campaign", p.campaignName));
+      const meta = el("div", "card-meta");
+      meta.append(el("span", null, fmtWave(p.wave)), el("span", null, p.percentMerged + "% merged"));
+      card.append(meta);
+      card.append(el("div", "card-tally", p.tally.running + " running · " + p.tally.parked + " parked · " + p.tally.queued + " queued"));
+      card.append(el("div", "card-last", p.lastEvent));
+      cards.append(card);
+    }
+  }
+  load();
+</script>
 </body>
 </html>`;
 

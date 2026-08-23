@@ -91,6 +91,13 @@ export interface SandcastleTddConfig {
   /** Agent branches are `${branchPrefix}${taskId}`. Default "agent/". */
   branchPrefix?: string;
   /**
+   * This project's weight in the host slot budget (ADR 0010): its cut of the
+   * remainder when projects contend for the host's shared container ceiling.
+   * Default 1; it only bites while more than one project is active, and only when
+   * a host budget is set at all.
+   */
+  hostWeight?: number;
+  /**
    * Verification the ORCHESTRATOR runs after every COMPLETE signal. The agent
    * never self-certifies; only a zero exit here returns green.
    */
@@ -171,7 +178,7 @@ export interface SandcastleTddConfig {
 }
 
 export type ResolvedConfig = Required<
-  Pick<SandcastleTddConfig, "project" | "image" | "baseBranch" | "branchPrefix" | "gates" | "maxTurns" | "idleTimeoutSeconds" | "stateDir" | "fetchTask">
+  Pick<SandcastleTddConfig, "project" | "image" | "baseBranch" | "branchPrefix" | "hostWeight" | "gates" | "maxTurns" | "idleTimeoutSeconds" | "stateDir" | "fetchTask">
 > &
   SandcastleTddConfig & { promptFile: string; parkedDir: string; logFile: string };
 
@@ -261,6 +268,7 @@ export async function loadConfig(explicitPath?: string): Promise<ResolvedConfig>
 
   return {
     branchPrefix: "agent/",
+    hostWeight: 1,
     maxTurns: 6,
     idleTimeoutSeconds: 600,
     ...c,

@@ -592,6 +592,14 @@ test("renderLandingShell reads each event kind's category as a leading dot, labe
   assert.match(html, /\.feed-kind\.carved::before \{ background: var\(--color-carved\); \}/);
 });
 
+test("the card progress-bar selector is scoped so it never boxes the feed's progress kind label (#85)", () => {
+  const html = renderLandingShell(["alpha"]);
+  // The feed label renders <span class="feed-kind progress">; a bare `.progress {` rule
+  // (the card progress bar) would also match it, applying height/background/overflow and
+  // squishing it inside a dark box. Scope the bar's selector so no bare `.progress {` exists.
+  assert.doesNotMatch(html, /(?<![-\w])\.progress \{/);
+});
+
 test("renderLandingShell colours each project card's highlight by run state (#75)", () => {
   const html = renderLandingShell(["alpha"]);
   // The card element carries its run-state class...

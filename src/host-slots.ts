@@ -266,7 +266,7 @@ export function fairShare(budget: number, activeWeights: Record<string, number>,
   const totalWeight = projects.reduce((s, p) => s + activeWeights[p], 0) || 1;
   const ideal = (p: string) => (remainder * activeWeights[p]) / totalWeight;
   const base = (p: string) => Math.floor(ideal(p));
-  let leftover = remainder - projects.reduce((s, p) => s + base(p), 0);
+  const leftover = remainder - projects.reduce((s, p) => s + base(p), 0);
   const byFraction = [...projects].sort((x, y) => {
     const fx = ideal(x) - base(x);
     const fy = ideal(y) - base(y);

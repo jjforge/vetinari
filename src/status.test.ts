@@ -610,7 +610,7 @@ test("serveAllStatus renders a single registered project as a one-entry dropdown
   const configDir = join(tmpdir(), `sctdd-serve-solo-${Date.now()}`);
   const soloDir = join(configDir, "state-solo");
   seedState(soloDir, [{ ts: "2025-01-01T00:00:00.000Z", event: "campaign-start", batches: [["101"]] }]);
-  // A parked issue in the active campaign — the single-project view keeps its answer card.
+  // A parked issue in the active campaign — the single-project view keeps its parked card.
   writeFileSync(
     join(soloDir, "parked", "101.json"),
     JSON.stringify({ taskId: "101", parkedAt: "now", reason: "blocked", branch: "agent/101", sessionId: "s", question: "Need a choice." }),
@@ -624,10 +624,12 @@ test("serveAllStatus renders a single registered project as a one-entry dropdown
     const solo = await (await fetch(`http://127.0.0.1:${port}/?project=solo`)).text();
     assert.match(solo, /<select name="project"/);
     assert.match(solo, /<option value="solo" selected>/);
-    // Its own campaign wave and parked answer card render intact.
+    // Its own campaign wave and parked card render intact; the reply happens in the
+    // sheet, whose /answer form is present.
     assert.match(solo, /#101 <small>/);
-    assert.match(solo, /Parked issues/);
-    assert.match(solo, /<form method="post" action="\/answer"/);
+    assert.match(solo, /Parked · <span class="parked-count">1<\/span>/);
+    assert.match(solo, /<a class="parked-card"[^>]*data-issue="101" data-project="solo"/);
+    assert.match(solo, /<form method="post" action="\/answer" id="reply-form">/);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -1402,10 +1404,10 @@ test("wave labels read from tmp-log issue titles, resolved through buildStatusWi
   });
   const html = renderStatusPage(status);
 
-  // Many-issue wave (closed): lead title + "+N" on its collapsed chip.
-  assert.match(html, /<span class="check" aria-hidden="true">✓<\/span> Wave 1 — config resolution \+2<\/summary>/);
-  // Single-issue wave (open): just that issue's title.
-  assert.match(html, /<section class="wave"><h2>Wave 2 — cache eviction <span class="wave-status running">running<\/span>/);
+  // Many-issue wave (closed): lead title + "+N" on its collapsed chip, with a merged tally.
+  assert.match(html, /<span class="check" aria-hidden="true">✓<\/span> Wave 1 — config resolution \+2 <span class="completed-wave-tally">3\/3<\/span><\/summary>/);
+  // Single-issue wave (open): just that issue's title, in a wave card.
+  assert.match(html, /<section class="wave running"><div class="wave-head"><h2>Wave 2 — cache eviction <span class="wave-status running">running<\/span>/);
 });
 
 test("wave labels and chip hovers render from the log's titles, with no fetchTask", () => {
@@ -1427,10 +1429,10 @@ test("wave labels and chip hovers render from the log's titles, with no fetchTas
   // the log, exactly as the dumb-router dashboard reads them (ADR 0002).
   const html = renderStatusPage(buildStatus(cfgFor(dir)));
 
-  // Many-issue wave (closed): lead title + "+N" on its collapsed chip.
-  assert.match(html, /<span class="check" aria-hidden="true">✓<\/span> Wave 1 — config resolution \+2<\/summary>/);
-  // Single-issue wave (open): just that issue's title.
-  assert.match(html, /<section class="wave"><h2>Wave 2 — cache eviction <span class="wave-status running">running<\/span>/);
+  // Many-issue wave (closed): lead title + "+N" on its collapsed chip, with a merged tally.
+  assert.match(html, /<span class="check" aria-hidden="true">✓<\/span> Wave 1 — config resolution \+2 <span class="completed-wave-tally">3\/3<\/span><\/summary>/);
+  // Single-issue wave (open): just that issue's title, in a wave card.
+  assert.match(html, /<section class="wave running"><div class="wave-head"><h2>Wave 2 — cache eviction <span class="wave-status running">running<\/span>/);
   // Every chip carries its own title on hover — 201 has no status detail yet, so
   // its hover is exactly the resolved title.
   assert.match(html, /<button[^>]*title="cache eviction"[^>]*>/);
@@ -1438,11 +1440,18 @@ test("wave labels and chip hovers render from the log's titles, with no fetchTas
   assert.match(html, /title="config resolution&#10;Merged into base"/);
 });
 
-test("renderStatusPage shows an issue count on an open wave", () => {
+test("renderStatusPage shows a merged/total tally on an open wave card", () => {
   const html = renderStatusPage({
     project: "beta",
     waves: [
-      { index: 0, status: "running", issues: [{ issueNumber: "201", status: "running" }] },
+      {
+        index: 0,
+        status: "running",
+        issues: [
+          { issueNumber: "201", status: "completed" },
+          { issueNumber: "202", status: "running" },
+        ],
+      },
       {
         index: 1,
         status: "unstarted",
@@ -1455,9 +1464,10 @@ test("renderStatusPage shows an issue count on an open wave", () => {
     parked: [],
   });
 
-  // Each open wave card carries a count of its issues, beside the wave status.
-  assert.match(html, /<span class="wave-status running">running<\/span> <span class="wave-count">1 issue<\/span>/);
-  assert.match(html, /<span class="wave-status unstarted">unstarted<\/span> <span class="wave-count">2 issues<\/span>/);
+  // Each open wave card's head carries its merged/total on the right — one of two
+  // done in the running wave, none in the unstarted one.
+  assert.match(html, /<span class="wave-status running">running<\/span><\/h2><span class="wave-tally">1\/2<\/span>/);
+  assert.match(html, /<span class="wave-status unstarted">unstarted<\/span><\/h2><span class="wave-tally">0\/2<\/span>/);
 });
 
 test("renderStatusPage lists the issue titles under each open wave", () => {
@@ -1546,9 +1556,9 @@ test("renderStatusPage renders a project dropdown and the selected project's bod
   assert.match(html, /<option value="beta" selected>beta<\/option>/);
   assert.match(html, /<option value="gamma">gamma<\/option>/);
   // The selected project's own body still renders exactly as the single-project view.
-  assert.match(html, /<section class="wave"><h2>Wave 1 <span class="wave-status running">running<\/span>/);
-  // The answer control carries the project so the gateway can route the reply to it.
-  assert.match(html, /<input type="hidden" name="project" value="beta" \/>/);
+  assert.match(html, /<section class="wave running"><div class="wave-head"><h2>Wave 1 <span class="wave-status running">running<\/span>/);
+  // The parked card carries the project so the sheet routes its reply/carve to it.
+  assert.match(html, /<a class="parked-card"[^>]*data-project="beta"/);
 });
 
 test("renderStatusPage lists archived runs and renders a selected one read-only below the live run", () => {
@@ -1626,8 +1636,8 @@ test("renderStatusPage shows the run name in the live header, and names vs times
     },
   );
 
-  // Live header shows the campaign's name.
-  assert.match(html, /class="run-name">gateway work</);
+  // The campaign meta line shows the campaign's name with its issue/wave counts.
+  assert.match(html, /<p class="campaign-meta"><span class="campaign-name">gateway work<\/span> · 1 issue · 1 wave<\/p>/);
 
   // Named run: the link text is the NAME, and the mode·issues·outcome summary is a secondary label.
   assert.match(html, /run=2026-02-01T00-00-00-000Z"[^>]*>comms \+ dashboard<\/a>/);
@@ -1640,9 +1650,12 @@ test("renderStatusPage shows the run name in the live header, and names vs times
   assert.match(html, /<section class="archived-run"><h2>Archived run[^<]*comms \+ dashboard/);
 });
 
-test("renderStatusPage omits the run-name header for an unnamed run", () => {
+test("renderStatusPage omits the campaign name from the meta line for an unnamed run", () => {
   const html = renderStatusPage({ project: "beta", waves: [{ index: 0, status: "running", issues: [] }], parked: [] });
   assert.doesNotMatch(html, /class="run-name"/);
+  assert.doesNotMatch(html, /class="campaign-name"/);
+  // The counts still render — an unnamed campaign is still a campaign.
+  assert.match(html, /<p class="campaign-meta">0 issues · 1 wave<\/p>/);
 });
 
 test("renderStatusPage renders no archived-runs section when a project has none", () => {
@@ -1682,7 +1695,7 @@ test("renderStatusPage makes issue chips tap-friendly for touch devices", () => 
   assert.match(html, /title="Add login flow&#10;Agent turn 2 finished; waiting for verification\/resume"/);
   assert.match(html, /class="chip"[^>]*data-issue="101"[^>]*data-project="demo"/);
   assert.match(html, /id="issue-detail"/);
-  assert.match(html, /chip\.addEventListener\("click"/);
+  assert.match(html, /el\.addEventListener\("click"/);
 });
 
 test("renderStatusPage opens the issue-detail sheet from a chip, fetching /api/issue", () => {
@@ -1833,9 +1846,9 @@ test("renderStatusPage leads with parked issues above the waves when any are par
     parked: [{ issueNumber: "102", reason: "blocked", parkedAt: "now", branch: "agent/102", description: "Need a choice.", options: [] }],
   });
 
-  assert.match(html, /<section class="parked-issues"><h2>Parked issues <span class="parked-count">1 awaiting you<\/span>/);
-  // Parked section comes before the first wave section.
-  assert.ok(html.indexOf('class="parked-issues"') < html.indexOf('class="wave"'), "parked should render above the waves");
+  assert.match(html, /<section class="parked-issues"><h2>Parked · <span class="parked-count">1<\/span><\/h2>/);
+  // Parked section comes before the wave grid.
+  assert.ok(html.indexOf('class="parked-issues"') < html.indexOf('class="waves-grid"'), "parked should render above the waves");
   // The parked-dot color rule must stay background-only; the section styling must not
   // bleed onto <span class="dot parked"> and inflate the chip height.
   assert.match(html, /\.parked \{ background: var\(--color-yellow\); \}/);
@@ -1849,10 +1862,12 @@ test("renderStatusPage opens the issue-detail sheet from a parked row too", () =
     parked: [{ issueNumber: "102", reason: "blocked", parkedAt: "now", branch: "agent/102", description: "Need a choice.", options: [] }],
   });
 
-  // A parked card carries an open affordance with the ids the sheet fetches with,
-  // and the same wiring opens the sheet from a chip or a parked row.
-  assert.match(html, /<button type="button" class="issue-open" data-issue="102" data-project="demo">Turn log<\/button>/);
-  assert.match(html, /querySelectorAll\("\.chip\[data-issue\], \.issue-open\[data-issue\]"\)/);
+  // The whole parked card is a clickable question card carrying the ids the sheet
+  // fetches with; its href is the no-JS fallback, and the same wiring opens the sheet
+  // from a chip or a parked card (the anchor's default click is prevented).
+  assert.match(html, /<a class="parked-card" href="\/\?project=demo" data-issue="102" data-project="demo"><div class="parked-card-title"><span class="parked-issue">#102<\/span> Need a choice\.<\/div>/);
+  assert.match(html, /querySelectorAll\("\.chip\[data-issue\], \.parked-card\[data-issue\]"\)/);
+  assert.match(html, /event\.preventDefault\(\); openIssue\(/);
 });
 
 test("renderStatusPage omits the parked section entirely when nothing is parked", () => {
@@ -1875,13 +1890,13 @@ test("renderStatusPage collapses closed waves into expandable completed wave chi
 
   assert.match(html, /<div class="completed-waves"><div class="completed-wave-bar">/);
   assert.doesNotMatch(html, /Completed:/);
-  assert.match(html, /<details class="completed-wave"><summary class="completed-wave-chip"><span class="check" aria-hidden="true">✓<\/span> Wave 1<\/summary>/);
+  assert.match(html, /<details class="completed-wave"><summary class="completed-wave-chip"><span class="check" aria-hidden="true">✓<\/span> Wave 1 <span class="completed-wave-tally">1\/1<\/span><\/summary>/);
   assert.match(html, /\.completed-wave-chip \.check \{ color: var\(--color-green\);/);
   // Expanded summary is block-level (no inline line-box leading) and spaced from its chips.
   assert.match(html, /\.completed-wave\[open\] > \.completed-wave-chip \{ display: flex; width: max-content; margin-bottom: \.6rem; \}/);
   // Chip rows must not stretch: the first wrapped line was rendering taller in Safari.
   assert.match(html, /\.completed-wave-bar, \.chips \{ display: flex; flex-wrap: wrap; align-items: flex-start; align-content: flex-start;/);
-  assert.match(html, /<section class="wave"><h2>Wave 2 <span class="wave-status running">running<\/span> <span class="wave-count">1 issue<\/span><\/h2>/);
+  assert.match(html, /<section class="wave running"><div class="wave-head"><h2>Wave 2 <span class="wave-status running">running<\/span><\/h2><span class="wave-tally">0\/1<\/span><\/div>/);
 });
 
 test("renderStatusPage labels a single-issue wave with that issue's resolved title, keeping the index", () => {
@@ -1891,7 +1906,7 @@ test("renderStatusPage labels a single-issue wave with that issue's resolved tit
     parked: [],
   });
 
-  assert.match(html, /<section class="wave"><h2>Wave 2 — config resolution <span class="wave-status running">running<\/span>/);
+  assert.match(html, /<section class="wave running"><div class="wave-head"><h2>Wave 2 — config resolution <span class="wave-status running">running<\/span>/);
 });
 
 test("renderStatusPage labels a multi-issue wave with its lead issue's title + the extra count", () => {
@@ -1934,7 +1949,7 @@ test("renderStatusPage labels a closed wave's collapsed chip with its issue titl
     parked: [],
   });
 
-  assert.match(html, /<summary class="completed-wave-chip"><span class="check" aria-hidden="true">✓<\/span> Wave 1 — config resolution \+1<\/summary>/);
+  assert.match(html, /<summary class="completed-wave-chip"><span class="check" aria-hidden="true">✓<\/span> Wave 1 — config resolution \+1 <span class="completed-wave-tally">2\/2<\/span><\/summary>/);
 });
 
 test("renderStatusPage escapes a wave name derived from an issue title", () => {
@@ -1955,6 +1970,64 @@ test("renderStatusPage keeps the bare wave index when no issue title is resolved
   });
 
   assert.match(html, /<h2>Wave 1 <span class="wave-status running">running<\/span>/);
+});
+
+test("renderStatusPage renders a campaign meta line of name · issues · waves, omitted with no campaign (#79)", () => {
+  const html = renderStatusPage({
+    project: "demo",
+    name: "gateway work",
+    waves: [
+      { index: 0, status: "closed", issues: [{ issueNumber: "101", status: "completed" }] },
+      {
+        index: 1,
+        status: "running",
+        issues: [
+          { issueNumber: "201", status: "running" },
+          { issueNumber: "202", status: "unstarted" },
+        ],
+      },
+    ],
+    parked: [],
+  });
+  // Three issues across two waves, under the named campaign.
+  assert.match(html, /<p class="campaign-meta"><span class="campaign-name">gateway work<\/span> · 3 issues · 2 waves<\/p>/);
+
+  // With no campaign at all (no waves), the meta line is omitted entirely.
+  const empty = renderStatusPage({ project: "demo", waves: [], parked: [] });
+  assert.doesNotMatch(empty, /class="campaign-meta"/);
+});
+
+test("renderStatusPage lays open waves out in a grid, accenting the running wave (#79)", () => {
+  const html = renderStatusPage({
+    project: "demo",
+    waves: [
+      { index: 0, status: "running", issues: [{ issueNumber: "201", status: "running" }] },
+      { index: 1, status: "unstarted", issues: [{ issueNumber: "301", status: "unstarted" }] },
+    ],
+    parked: [],
+  });
+  // Open wave cards sit in a responsive grid.
+  assert.match(html, /<div class="waves-grid"><section class="wave running">/);
+  assert.match(html, /\.waves-grid \{ display: grid; grid-template-columns: repeat\(auto-fill, minmax\(20rem, 1fr\)\);/);
+  // A running wave carries the status-coloured (blue) top accent; an unstarted one the neutral default.
+  assert.match(html, /\.wave \{[^}]*border-top: 3px solid var\(--color-text-light-2\);/);
+  assert.match(html, /\.wave\.running \{ border-top-color: var\(--color-blue\); \}/);
+  assert.match(html, /<section class="wave unstarted">/);
+});
+
+test("renderStatusPage's parked card carries no inline reply form — the reply is in the sheet (#79)", () => {
+  const html = renderStatusPage({
+    project: "demo",
+    waves: [],
+    parked: [{ issueNumber: "102", reason: "blocked", parkedAt: "2025-06-15T09:00:00.000Z", branch: "agent/102", description: "Need a choice.", options: ["A", "B"] }],
+  });
+  // The card is a single clickable anchor with a meta line — no <form>, no <textarea>,
+  // no per-issue "Send response" button. The only /answer form on the page is the sheet's.
+  const card = html.slice(html.indexOf('class="parked-card"'), html.indexOf("</a>", html.indexOf('class="parked-card"')));
+  assert.doesNotMatch(card, /<form|<textarea|Send response/);
+  assert.match(html, /waiting <span class="parked-waited" data-parked-at="2025-06-15T09:00:00.000Z">…<\/span> · blocked/);
+  // Exactly one /answer form remains — the sheet's reply-form.
+  assert.equal(html.match(/action="\/answer"/g)?.length, 1);
 });
 
 test("serveAllStatus can bind to a non-localhost host for tailnet access", () => {
@@ -2004,37 +2077,36 @@ test("formatStatusText omits the parked section when nothing is parked", () => {
   assert.doesNotMatch(text, /awaiting your reply/);
 });
 
-test("renderStatusPage includes a configurable refresh interval control", () => {
+test("renderStatusPage renders the landing live-bar top-right, not the old refresh widget (#79)", () => {
   const html = renderStatusPage({ project: "demo", waves: [{ index: 0, status: "closed", issues: [] }], parked: [] });
 
-  assert.match(html, /<summary class="completed-wave-chip"><span class="check" aria-hidden="true">✓<\/span> Wave 1<\/summary>/);
-  assert.match(html, /class="refresh" title="Auto-refresh the page every N seconds"/);
-  assert.match(html, /<input id="refresh-enabled" type="checkbox" checked \/> <span>Refresh<\/span>/);
-  assert.doesNotMatch(html, /Auto-refresh<\/span>|>every<|>s<\/span>/);
-  // No pill/chip background around the control.
-  assert.doesNotMatch(html, /\.refresh \{[^}]*border-radius: 999px/);
-  assert.match(html, /id="refresh-seconds"/);
-  assert.match(html, /max="999"/);
-  assert.match(html, /\.refresh input\[type="number"\] \{ width: 3ch;/);
-  assert.match(html, /<div class="page-top"><h1>demo status<\/h1><div class="refresh"/);
+  // The live-bar replaces the fixed-interval Refresh widget: a live/paused indicator,
+  // an "updated Ns ago" readout, and a Pause button — the same controls the landing has.
+  assert.match(html, /<div class="live-bar"[^>]*><span class="live-indicator" data-live-state="live">Live<\/span><span class="updated" data-updated>[^<]*<\/span><button type="button" id="pause" class="pause">Pause<\/button><\/div>/);
+  assert.match(html, /\.live-indicator\[data-live-state="paused"\] \{ color: var\(--color-yellow\); \}/);
+  // The old interval widget is gone entirely.
+  assert.doesNotMatch(html, /id="refresh-seconds"/);
+  assert.doesNotMatch(html, /id="refresh-enabled"/);
+  assert.doesNotMatch(html, /class="refresh"/);
+  assert.doesNotMatch(html, /sandcastle-status-refresh/);
+  // The h1 drops the " status" wording; with no dropdown it is just the project name.
+  assert.match(html, /<div class="page-top"><h1>demo<\/h1><div class="live-bar"/);
   assert.match(html, /\.page-top \{ display: flex;/);
-  assert.doesNotMatch(html, /\.refresh \{ position: (?:sticky|fixed);/);
-  assert.match(html, /\.running \{ background: var\(--color-blue\); \}/);
-  assert.match(html, /localStorage\.getItem\("sandcastle-status-refresh-seconds"\) \?\? "45"/);
-  assert.match(html, /isComposing\(\) \? scheduleRefresh\(\) : location\.reload\(\)/);
-  assert.match(html, /el === document\.activeElement \|\| el\.value\.trim\(\) !== ""/);
 });
 
-test("renderStatusPage auto-refresh checkbox gates and persists the timer", () => {
+test("renderStatusPage updates live off /api/events, reloading on a ping unless composing (#79)", () => {
   const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
 
-  // Checkbox toggles auto-refresh, defaults on unless previously disabled.
-  assert.match(html, /refreshEnabled\.checked = localStorage\.getItem\("sandcastle-status-refresh-enabled"\) !== "false"/);
-  assert.match(html, /localStorage\.setItem\("sandcastle-status-refresh-enabled", String\(refreshEnabled\.checked\)\)/);
-  // Timer only arms when the box is checked; the interval field disables when off.
-  assert.match(html, /refreshInput\.disabled = !refreshEnabled\.checked/);
-  assert.match(html, /if \(refreshEnabled\.checked && Number\.isFinite\(seconds\) && seconds > 0\)/);
-  assert.match(html, /refreshEnabled\.addEventListener\("change", scheduleRefresh\)/);
+  // One SSE stream drives a full-page reload as events land (the page is server-rendered).
+  assert.match(html, /new EventSource\("\/api\/events"\)/);
+  assert.match(html, /location\.reload\(\)/);
+  // Guarded: a reply being composed in any textarea freezes the reload so it is never lost.
+  assert.match(html, /const isComposing = \(\) =>/);
+  assert.match(html, /el === document\.activeElement \|\| el\.value\.trim\(\) !== ""/);
+  assert.match(html, /if \(paused \|\| isComposing\(\)\) \{ buffered\+\+;/);
+  // Pause is a presentation freeze that flushes on resume, exactly as the landing's is.
+  assert.match(html, /pauseBtn\.addEventListener\("click"/);
+  assert.match(html, /"updated " \+ Math\.round\(\(Date\.now\(\) - lastUpdate\) \/ 1000\) \+ "s ago"/);
 });
 
 test("renderStatusPage marks carvable chips with carve data and never puts a carve control on a chip", () => {

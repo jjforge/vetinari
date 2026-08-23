@@ -118,29 +118,41 @@ const renderWaveLabel = (wave: StatusWave) => {
   return `${index} — ${escapeHtml(lead.name)}${extra > 0 ? ` +${extra}` : ""}`;
 };
 
+/** How many issues the campaign spans, across every wave — the count in the
+ * `<name> · N issues · M waves` meta line. */
+const campaignIssueCount = (status: CampaignStatus) => status.waves.reduce((total, wave) => total + wave.issues.length, 0);
+
+/** A wave's merged tally — how many of its issues have completed, out of its total —
+ * shown on the right of an open wave card's head and on a closed wave's chip. */
+const waveMerged = (wave: StatusWave) => wave.issues.filter((issue) => issue.status === "completed").length;
+
 const renderOpenWave = (wave: StatusWave, project: string, carve: boolean, interactive: boolean) => {
-  // A carved tally beside the issue count, so a wave a carve pruned reads at a
+  // A carved tally beside the merged count, so a wave a carve pruned reads at a
   // glance — the carved chips are a display overlay (ADR 0007), and this counts them.
   const carved = wave.issues.filter((issue) => issue.status === "carved").length;
   const tally = carved ? ` <span class="wave-carved">${carved} carved</span>` : "";
-  return `<section class="wave"><h2>${renderWaveLabel(wave)} <span class="wave-status ${wave.status}">${wave.status}</span> <span class="wave-count">${wave.issues.length} issue${wave.issues.length === 1 ? "" : "s"}</span>${tally}</h2>${renderWaveContents(wave, project, carve, interactive)}${renderWaveTitles(wave)}</section>`;
+  // A wave card: its label + status pill on the left, its merged/total on the right,
+  // its issue chips, then the title list. The section carries the wave status so a
+  // running wave gets the blue top accent and an unstarted wave a neutral one.
+  return `<section class="wave ${wave.status}"><div class="wave-head"><h2>${renderWaveLabel(wave)} <span class="wave-status ${wave.status}">${wave.status}</span></h2><span class="wave-tally">${waveMerged(wave)}/${wave.issues.length}</span>${tally}</div>${renderWaveContents(wave, project, carve, interactive)}${renderWaveTitles(wave)}</section>`;
 };
 
 const renderCompletedWave = (wave: StatusWave, project: string, carve: boolean, interactive: boolean) =>
-  `<details class="completed-wave"><summary class="completed-wave-chip"><span class="check" aria-hidden="true">✓</span> ${renderWaveLabel(wave)}</summary>${renderWaveContents(wave, project, carve, interactive)}</details>`;
+  `<details class="completed-wave"><summary class="completed-wave-chip"><span class="check" aria-hidden="true">✓</span> ${renderWaveLabel(wave)} <span class="completed-wave-tally">${waveMerged(wave)}/${wave.issues.length}</span></summary>${renderWaveContents(wave, project, carve, interactive)}</details>`;
 
 /** The wave/issue body a status renders — closed waves collapsed into chips, open
  * waves expanded. Shared by the live run and a read-only archived run: the live run
  * renders `interactive` (its chips open the detail sheet and, under carve, route a
  * carve); the archived run passes `interactive: false`, so its chips are inert. */
-const renderWaves = (status: CampaignStatus, carve: boolean, interactive: boolean) =>
-  status.waves.length
-    ? `${
-        status.waves.some((wave) => wave.status === "closed")
-          ? `<div class="completed-waves"><div class="completed-wave-bar">${status.waves.filter((wave) => wave.status === "closed").map((wave) => renderCompletedWave(wave, status.project, carve, interactive)).join("")}</div></div>`
-          : ""
-      }${status.waves.filter((wave) => wave.status !== "closed").map((wave) => renderOpenWave(wave, status.project, carve, interactive)).join("")}`
-    : "<p>No active campaign or queue found.</p>";
+const renderWaves = (status: CampaignStatus, carve: boolean, interactive: boolean) => {
+  if (!status.waves.length) return "<p>No active campaign or queue found.</p>";
+  const openWaves = status.waves.filter((wave) => wave.status !== "closed");
+  return `${
+    status.waves.some((wave) => wave.status === "closed")
+      ? `<div class="completed-waves"><div class="completed-wave-bar">${status.waves.filter((wave) => wave.status === "closed").map((wave) => renderCompletedWave(wave, status.project, carve, interactive)).join("")}</div></div>`
+      : ""
+  }${openWaves.length ? `<div class="waves-grid">${openWaves.map((wave) => renderOpenWave(wave, status.project, carve, interactive)).join("")}</div>` : ""}`;
+};
 
 /**
  * The multi-project chrome around a single project's status: the list of every
@@ -675,18 +687,24 @@ export const renderStatusPage = (status: CampaignStatus, opts: StatusPageOptions
   body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 2rem; background: var(--color-body); color: var(--color-text); }
   h1 { font-size: clamp(1.8rem, 4vw, 3rem); margin: 0; letter-spacing: -0.035em; color: var(--color-text); }
   h2 { color: var(--color-text-light); }
-  .run-name { margin: .75rem 0 0; font-size: 1.15rem; font-weight: 600; color: var(--color-primary); letter-spacing: -0.01em; }
-  .page-top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border-bottom: 1px solid var(--color-light-border); padding-bottom: 1rem; }
+  .campaign-meta { margin: .75rem 0 0; color: var(--color-text-light-2); font-size: .95rem; }
+  .campaign-name { color: var(--color-primary); font-weight: 600; letter-spacing: -0.01em; }
+  .page-top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; border-bottom: 1px solid var(--color-light-border); padding-bottom: 1rem; }
   .project-picker { margin: 0; }
   .project-picker select { color: var(--color-text); background: var(--color-box-header); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); padding: .35rem .6rem; font: inherit; cursor: pointer; }
   .project-picker select:hover { border-color: var(--color-primary); }
-  .refresh { margin-left: auto; display: inline-flex; align-items: center; gap: .5rem; color: var(--color-text-light-2); }
-  .refresh label { display: inline-flex; align-items: center; gap: .4rem; }
-  .refresh input[type="checkbox"] { width: 1.15rem; height: 1.15rem; margin: 0; accent-color: var(--color-primary); cursor: pointer; }
-  .refresh input[type="number"] { width: 3ch; color: var(--color-text); background: var(--color-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); padding: .25rem; }
-  .refresh-every:has(#refresh-seconds:disabled) { opacity: .45; }
-  .wave, .card { background: var(--color-box-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: 1rem; margin: 1rem 0; box-shadow: 0 8px 22px #0004; }
-  .wave { border-top: 3px solid var(--color-primary); }
+  .live-bar { display: inline-flex; align-items: center; gap: .75rem; color: var(--color-text-light-2); font-size: .85rem; }
+  .live-indicator { display: inline-flex; align-items: center; gap: .4rem; font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--color-green); }
+  .live-indicator::before { content: ""; width: .55rem; height: .55rem; border-radius: 999px; background: currentColor; }
+  .live-indicator[data-live-state="paused"] { color: var(--color-yellow); }
+  .pause { min-height: 44px; color: var(--color-text); background: var(--color-box-header); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); padding: .35rem .8rem; font: inherit; cursor: pointer; }
+  .pause:hover { border-color: var(--color-primary); }
+  .waves-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 1rem; margin: 1rem 0; }
+  .wave { background: var(--color-box-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: 1rem; box-shadow: 0 8px 22px #0004; border-top: 3px solid var(--color-text-light-2); }
+  .wave.running { border-top-color: var(--color-blue); }
+  .wave-head { display: flex; align-items: baseline; justify-content: space-between; gap: .5rem; }
+  .wave-head h2 { margin: 0; font-size: 1.1rem; }
+  .wave-tally { color: var(--color-text-light-2); font-variant-numeric: tabular-nums; font-size: .9rem; white-space: nowrap; }
   .completed-waves { display: flex; align-items: flex-start; flex-wrap: wrap; gap: .5rem; margin: 1rem 0; color: var(--color-text-light); }
   .completed-wave-chip .check { color: var(--color-green); font-weight: 700; }
   .completed-wave-bar, .chips { display: flex; flex-wrap: wrap; align-items: flex-start; align-content: flex-start; gap: .5rem; }
@@ -701,7 +719,6 @@ export const renderStatusPage = (status: CampaignStatus, opts: StatusPageOptions
   .wave-status.closed { border-color: var(--color-green); color: var(--color-green); background: rgb(63 185 132 / 12%); }
   .wave-status.running { border-color: var(--color-blue); color: var(--color-blue); background: rgb(108 182 255 / 12%); }
   .wave-status.unstarted { border-color: var(--color-text-light-2); color: var(--color-text-light-2); background: rgb(139 152 165 / 12%); }
-  .wave-count { font-size: .8rem; font-weight: 400; color: var(--color-text-light-2); }
   .wave-carved { font-size: .78rem; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: var(--color-carved); border: 1px solid var(--color-carved); background: rgb(163 113 247 / 12%); border-radius: 999px; padding: .1rem .5rem; }
   .wave-issues { list-style: none; margin: .7rem 0 0; padding: 0; }
   .wave-issue { color: var(--color-text-light); font-size: .9rem; padding: .15rem 0; }
@@ -723,8 +740,6 @@ export const renderStatusPage = (status: CampaignStatus, opts: StatusPageOptions
   .carve-fallback form { display: inline; }
   .carve-note { color: var(--color-blue); font-size: .85rem; }
   .carve-explainer { color: var(--color-text-light-2); font-size: .85rem; }
-  .issue-open { font: inherit; font-size: .72rem; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; vertical-align: middle; margin-left: .5rem; padding: .2rem .6rem; color: var(--color-primary); background: var(--color-box-header); border: 1px solid var(--color-secondary); border-radius: 999px; cursor: pointer; }
-  .issue-open:hover { border-color: var(--color-primary); background: var(--color-primary-alpha-20); }
   .issue-detail { position: fixed; inset: 0; z-index: 10; display: none; align-items: center; justify-content: center; padding: 1rem; background: #0009; }
   .issue-detail.show { display: flex; }
   .issue-detail[hidden] { display: none; }
@@ -762,26 +777,36 @@ export const renderStatusPage = (status: CampaignStatus, opts: StatusPageOptions
   .reply-resume { min-height: 44px; padding: .5rem 1rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: #04110f; font: inherit; font-weight: 700; cursor: pointer; }
   @media (max-width: 640px) { .issue-detail-sheet { width: 100%; max-height: 88vh; border-radius: var(--border-radius-medium) var(--border-radius-medium) 0 0; padding-bottom: env(safe-area-inset-bottom); } .issue-detail { align-items: flex-end; padding: 0; } }
   form button { padding: .5rem .8rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: #04110f; cursor: pointer; font-weight: 700; }
-  pre { white-space: pre-wrap; }
   .parked-issues { margin: 1rem 0 2rem; }
-  .parked-issues > h2 { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
-  .parked-count { font-size: .78rem; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: var(--color-yellow); border: 1px solid var(--color-yellow); background: rgb(200 162 78 / 12%); border-radius: 999px; padding: .15rem .55rem; }
-  .parked-issues .card { border-left: 3px solid var(--color-yellow); }
+  .parked-issues > h2 { display: flex; align-items: baseline; flex-wrap: wrap; gap: .35rem; }
+  .parked-count { color: var(--color-yellow); }
+  .parked-card { display: block; text-decoration: none; color: inherit; background: var(--color-box-body); border: 1px solid var(--color-secondary); border-left: 3px solid var(--color-yellow); border-radius: var(--border-radius-medium); padding: .8rem 1rem; margin: .5rem 0; box-shadow: 0 8px 22px #0004; }
+  .parked-card:hover { border-color: var(--color-primary); background: var(--color-primary-alpha-20); }
+  .parked-card-title { color: var(--color-text-light); }
+  .parked-issue { font-weight: 700; color: var(--color-yellow); }
+  .parked-card-meta { color: var(--color-text-light-2); font-size: .85rem; margin-top: .35rem; }
+  .parked-waited { white-space: nowrap; }
   .run-summary { color: var(--color-text-light-2); font-size: .85rem; font-weight: 400; }
 </style>
 </head>
 <body>
-<div class="page-top"><h1>${escapeHtml(status.project)} status</h1>${
-  opts.projects?.length ? renderProjectPicker(opts.projects, opts.selected ?? status.project) : ""
-}<div class="refresh" title="Auto-refresh the page every N seconds"><label><input id="refresh-enabled" type="checkbox" checked /> <span>Refresh</span></label><label class="refresh-every"><input id="refresh-seconds" type="number" min="1" max="999" step="1" value="45" /></label></div></div>
-${status.name ? `<p class="run-name">${escapeHtml(status.name)}</p>` : ""}
+<div class="page-top">${
+  opts.projects?.length ? renderProjectPicker(opts.projects, opts.selected ?? status.project) : `<h1>${escapeHtml(status.project)}</h1>`
+}<div class="live-bar" title="Live updates over SSE; pause to freeze the view while it keeps collecting"><span class="live-indicator" data-live-state="live">Live</span><span class="updated" data-updated>waiting for updates</span><button type="button" id="pause" class="pause">Pause</button></div></div>
+${
+  status.waves.length
+    ? `<p class="campaign-meta">${status.name ? `<span class="campaign-name">${escapeHtml(status.name)}</span> · ` : ""}${campaignIssueCount(status)} issue${campaignIssueCount(status) === 1 ? "" : "s"} · ${status.waves.length} wave${status.waves.length === 1 ? "" : "s"}</p>`
+    : ""
+}
 ${
   status.parked.length
-    ? `<section class="parked-issues"><h2>Parked issues <span class="parked-count">${status.parked.length} awaiting you</span></h2>${status.parked
+    ? `<section class="parked-issues"><h2>Parked · <span class="parked-count">${status.parked.length}</span></h2>${status.parked
         .map(
-          (p) => `<section class="card"><h3>Issue #${escapeHtml(p.issueNumber)} <button type="button" class="issue-open" data-issue="${escapeHtml(p.issueNumber)}" data-project="${escapeHtml(status.project)}"${opts.carve ? ` data-carvable="1"` : ""}>Turn log</button></h3><p><strong>Parked on:</strong></p><pre>${escapeHtml(p.description)}</pre>${
-            p.options.length ? `<p><strong>Options:</strong></p><ul>${p.options.map((o) => `<li>${escapeHtml(o)}</li>`).join("")}</ul>` : ""
-          }<form method="post" action="/answer"><input type="hidden" name="taskId" value="${escapeHtml(p.issueNumber)}" /><input type="hidden" name="project" value="${escapeHtml(status.project)}" /><textarea name="text" placeholder="Type your response..."></textarea><button>Send response</button></form></section>`,
+          // A clickable question card that opens the issue-detail sheet (the reply now
+          // happens there — no inline /answer form). The href to the campaign view is
+          // the no-JS fallback; parked issues are always carvable, so under carve the
+          // card carries data-carvable so the sheet offers Carve (ADR 0005).
+          (p) => `<a class="parked-card" href="/?project=${encodeURIComponent(status.project)}" data-issue="${escapeHtml(p.issueNumber)}" data-project="${escapeHtml(status.project)}"${opts.carve ? ` data-carvable="1"` : ""}><div class="parked-card-title"><span class="parked-issue">#${escapeHtml(p.issueNumber)}</span> ${escapeHtml(p.description)}</div><div class="parked-card-meta">waiting <span class="parked-waited" data-parked-at="${escapeHtml(p.parkedAt)}">…</span> · ${escapeHtml(p.reason)}</div></a>`,
         )
         .join("")}</section>`
     : ""
@@ -829,25 +854,52 @@ ${
     : ""
 }
 <script>
-  const refreshInput = document.getElementById("refresh-seconds");
-  const refreshEnabled = document.getElementById("refresh-enabled");
-  refreshInput.value = localStorage.getItem("sandcastle-status-refresh-seconds") ?? "45";
-  refreshEnabled.checked = localStorage.getItem("sandcastle-status-refresh-enabled") !== "false";
-  let refreshTimer;
+  // A parked card's "waiting Nm" ages off its parkedAt, filled client-side so the
+  // server render stays pure (mirrors the landing's fmtWaited).
+  const fmtWaited = (iso) => {
+    const ms = Date.now() - new Date(iso).getTime();
+    if (!(ms > 0)) return "just now";
+    const mins = Math.floor(ms / 60000);
+    if (mins < 60) return mins + "m";
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return hrs + "h";
+    return Math.floor(hrs / 24) + "d";
+  };
+  for (const waited of document.querySelectorAll(".parked-waited[data-parked-at]")) waited.textContent = fmtWaited(waited.dataset.parkedAt);
+  // A reply being composed anywhere (a parked card's sheet reply) must never be lost
+  // to a live reload; this guards the reload the way the old fixed-interval one did.
   const isComposing = () =>
     [...document.querySelectorAll("textarea")].some((el) => el === document.activeElement || el.value.trim() !== "");
-  const scheduleRefresh = () => {
-    clearTimeout(refreshTimer);
-    const seconds = Number(refreshInput.value);
-    localStorage.setItem("sandcastle-status-refresh-seconds", String(Number.isFinite(seconds) && seconds > 0 ? seconds : 0));
-    localStorage.setItem("sandcastle-status-refresh-enabled", String(refreshEnabled.checked));
-    refreshInput.disabled = !refreshEnabled.checked;
-    if (refreshEnabled.checked && Number.isFinite(seconds) && seconds > 0)
-      refreshTimer = setTimeout(() => (isComposing() ? scheduleRefresh() : location.reload()), seconds * 1000);
+  // Live updates (ADR 0008): this page is server-rendered, so a live event reloads the
+  // whole page rather than re-fetching a model. The reload is guarded (never while a
+  // reply is being composed) and pausable — a client-side presentation freeze that
+  // keeps counting what lands and flushes on resume, the landing's live-bar behaviour.
+  const indicator = document.querySelector("[data-live-state]");
+  const updatedEl = document.querySelector("[data-updated]");
+  const pauseBtn = document.getElementById("pause");
+  let paused = false;
+  let buffered = 0;
+  const lastUpdate = Date.now();
+  const renderUpdated = () => { updatedEl.textContent = "updated " + Math.round((Date.now() - lastUpdate) / 1000) + "s ago"; };
+  const renderState = () => {
+    indicator.dataset.liveState = paused ? "paused" : "live";
+    indicator.textContent = paused ? "Paused" + (buffered ? " · " + buffered + " buffered" : "") : "Live";
   };
-  refreshInput.addEventListener("input", scheduleRefresh);
-  refreshEnabled.addEventListener("change", scheduleRefresh);
-  scheduleRefresh();
+  const events = new EventSource("/api/events");
+  events.onmessage = () => {
+    // Freeze while paused or mid-compose; count what lands so a resume can flush it.
+    if (paused || isComposing()) { buffered++; renderState(); return; }
+    location.reload();
+  };
+  pauseBtn.addEventListener("click", () => {
+    paused = !paused;
+    pauseBtn.textContent = paused ? "Resume" : "Pause";
+    if (!paused && buffered && !isComposing()) location.reload();
+    renderState();
+  });
+  renderState();
+  renderUpdated();
+  setInterval(renderUpdated, 1000);
   const issueDetail = document.getElementById("issue-detail");
   const detailNum = issueDetail.querySelector(".issue-detail-num");
   const detailStatusDot = issueDetail.querySelector(".issue-detail-status .dot");
@@ -974,9 +1026,11 @@ ${
       detailContext.textContent = project;
     }
   };
-  // A live chip and a parked row both open the sheet, carrying their issue+project.
-  document.querySelectorAll(".chip[data-issue], .issue-open[data-issue]").forEach((chip) =>
-    chip.addEventListener("click", () => openIssue(chip.dataset.project, chip.dataset.issue, chip.dataset.carvable === "1")));
+  // A live chip and a parked card both open the sheet, carrying their issue+project.
+  // The parked card is an <a> with a no-JS href, so its click is prevented before the
+  // sheet opens; a chip is a button, where preventDefault is harmless.
+  document.querySelectorAll(".chip[data-issue], .parked-card[data-issue]").forEach((el) =>
+    el.addEventListener("click", (event) => { event.preventDefault(); openIssue(el.dataset.project, el.dataset.issue, el.dataset.carvable === "1"); }));
   const carvePanel = document.getElementById("carve-panel");
   if (carvePanel) {
     const carveStart = document.getElementById("carve-start");

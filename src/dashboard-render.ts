@@ -252,9 +252,48 @@ export interface StatusPageOptions {
 }
 
 const renderProjectPicker = (projects: string[], selected: string | undefined) =>
-  `<form method="get" action="/" class="project-picker"><select name="project" onchange="this.form.submit()"><option value="">All repos</option>${projects
+  `<form method="get" action="/" class="project-picker"><select name="project" onchange="this.form.submit()"><option value=""${selected ? "" : " selected"}>All repos</option>${projects
     .map((p) => `<option value="${escapeHtml(p)}"${p === selected ? " selected" : ""}>${escapeHtml(p)}</option>`)
     .join("")}</select></form>`;
+
+/**
+ * The top bar every page shares (#81): the heading/dropdown on the left and the
+ * live-bar (live dot + "updated Ns ago" + pause) on the right, wrapped in the
+ * `.page-top` flex row. One definition rendered by the landing, the repo page, and
+ * any archived view, so the two can no longer drift — which is what let the "Live"
+ * word survive on one and the pause word on the other. The live indicator is a dot
+ * only: its "Live"/"Paused" state is an accessible label (`aria-label`), never
+ * visible text, keeping motion the one running-only channel (§5). Pause is an icon
+ * control — its ⏸/▶ glyph lives in `TOP_BAR_STYLES`, flipped by `data-paused`, so a
+ * page's script only toggles the attribute and never re-authors the glyph.
+ */
+export const renderTopBar = (left: string) =>
+  `<div class="page-top">${left}<div class="live-bar" title="Live updates over SSE; pause to freeze the view while it keeps collecting"><span class="live-indicator" data-live-state="live" aria-label="Live"></span><span class="updated" data-updated>waiting for updates</span><button type="button" id="pause" class="pause" data-paused="false" aria-label="Pause"></button></div></div>`;
+
+/**
+ * The top bar's CSS, shared by every page's `<style>` alongside `renderTopBar` so the
+ * markup and its presentation move together (#81). Covers `.page-top`, the
+ * `.project-picker`, the `.live-bar`/`.live-indicator` (dot + §5 running-only pulse,
+ * dim-and-still when paused, reduced-motion aware), and the icon `.pause` control.
+ */
+export const TOP_BAR_STYLES = `  .page-top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; border-bottom: 1px solid var(--color-light-border); padding-bottom: 1rem; }
+  .project-picker { margin: 0; }
+  .project-picker select { min-height: 44px; color: var(--color-text); background: var(--color-box-header); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); padding: .35rem .7rem; font: inherit; cursor: pointer; }
+  .project-picker select:hover { border-color: var(--color-primary); }
+  .live-bar { display: inline-flex; align-items: center; gap: .75rem; color: var(--color-text-light-2); font-size: .85rem; }
+  .live-indicator { display: inline-flex; align-items: center; color: var(--color-green); }
+  /* The live dot pulses while streaming; motion is a second channel for one thing
+     only (§5). Paused, it goes still and dim — never amber, never animating. */
+  .live-indicator::before { content: ""; width: .55rem; height: .55rem; border-radius: 999px; background: currentColor; animation: chip-pulse 1.6s ease-in-out infinite; }
+  .live-indicator[data-live-state="paused"] { color: var(--color-dim); }
+  .live-indicator[data-live-state="paused"]::before { animation: none; }
+  @media (prefers-reduced-motion: reduce) { .live-indicator::before { animation: none; } }
+  .pause { min-height: 44px; color: var(--color-text); background: var(--color-box-header); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); padding: .35rem .8rem; font: inherit; cursor: pointer; }
+  /* Pause is an icon, not a word: ⏸ while live, ▶ once paused. The glyph is CSS so the
+     two pages' scripts only flip data-paused, never re-author the icon. */
+  .pause::before { content: "⏸"; }
+  .pause[data-paused="true"]::before { content: "▶"; }
+  .pause:hover { border-color: var(--color-primary); }`;
 
 /**
  * The aggregated site's carve preview: it is a dumb router (ADR 0002) with no
@@ -583,10 +622,7 @@ ${DASHBOARD_PALETTE_CSS}
   * { box-sizing: border-box; }
   body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 0; padding: 1.5rem; background: var(--color-body); color: var(--color-text); }
   h1 { font-size: clamp(1.6rem, 4vw, 2.6rem); margin: 0; letter-spacing: -0.035em; }
-  .page-top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; border-bottom: 1px solid var(--color-light-border); padding-bottom: 1rem; }
-  .project-picker { margin: 0; }
-  .project-picker select { min-height: 44px; color: var(--color-text); background: var(--color-box-header); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); padding: .35rem .7rem; font: inherit; cursor: pointer; }
-  .project-picker select:hover { border-color: var(--color-primary); }
+${TOP_BAR_STYLES}
   .counters { display: grid; grid-template-columns: repeat(4, 1fr); gap: .75rem; margin: 1.25rem 0; }
   .counter { background: var(--color-box-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: 1rem; }
   .counter-toggle { font: inherit; color: inherit; text-align: left; cursor: pointer; }
@@ -640,16 +676,6 @@ ${DASHBOARD_PALETTE_CSS}
   /* Each activity event reads in its comms-category colour (#78). */
   .feed-kind.progress { color: var(--color-blue); } .feed-kind.success { color: var(--color-green); } .feed-kind.attention { color: var(--color-yellow); } .feed-kind.failure { color: var(--color-failure); } .feed-kind.carved { color: var(--color-carved); }
   .feed-text { color: var(--color-text-light); flex: 1; }
-  .live-bar { display: inline-flex; align-items: center; gap: .75rem; color: var(--color-text-light-2); font-size: .85rem; }
-  .live-indicator { display: inline-flex; align-items: center; gap: .4rem; font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--color-green); }
-  /* The live dot pulses while streaming; motion is a second channel for one thing
-     only (§5). Paused, it goes still and dim — never amber, never animating. */
-  .live-indicator::before { content: ""; width: .55rem; height: .55rem; border-radius: 999px; background: currentColor; animation: chip-pulse 1.6s ease-in-out infinite; }
-  .live-indicator[data-live-state="paused"] { color: var(--color-dim); }
-  .live-indicator[data-live-state="paused"]::before { animation: none; }
-  @media (prefers-reduced-motion: reduce) { .live-indicator::before { animation: none; } }
-  .pause { min-height: 44px; color: var(--color-text); background: var(--color-box-header); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); padding: .35rem .8rem; font: inherit; cursor: pointer; }
-  .pause:hover { border-color: var(--color-primary); }
   /* The card's highlight (top border) tracks its run state (#75) — its only coloured edge (§2). */
   .card.running { border-top-color: var(--color-blue); } .card.parked { border-top-color: var(--color-yellow); } .card.failure { border-top-color: var(--color-failure); } .card.completed { border-top-color: var(--color-green); } .card.idle { border-top-color: var(--color-dim); }
   /* Status dot colours, generated once from stateColor and shared with the campaign
@@ -669,9 +695,7 @@ ${ISSUE_DETAIL_SHEET_STYLES}
 </style>
 </head>
 <body>
-<div class="page-top"><h1>All repos</h1><div class="live-bar" title="Live updates over SSE; pause to freeze the view while it keeps collecting"><span class="live-indicator" data-live-state="live">Live</span><span class="updated" data-updated>waiting for updates</span><button type="button" id="pause" class="pause">Pause</button></div><form method="get" action="/" class="project-picker"><select onchange="location = this.value ? '/?project=' + encodeURIComponent(this.value) : '/'"><option value="" selected>All repos</option>${projects
-  .map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`)
-  .join("")}</select></form></div>
+${renderTopBar(`<h1>All repos</h1>${renderProjectPicker(projects, undefined)}`)}
 <section class="counters">
   <div class="counter" data-counter="working"><div class="counter-value">–</div><div class="counter-label">Agents working</div><div class="counter-sub" data-counter-sub="working"></div></div>
   <button type="button" class="counter counter-toggle" data-counter="parked" disabled aria-controls="parked-queue"><div class="counter-value">–</div><div class="counter-label">Parked</div><div class="counter-sub" data-counter-sub="parked"></div></button>
@@ -821,9 +845,13 @@ ${ISSUE_DETAIL_SHEET_SCRIPT}
   const renderUpdated = () => {
     updatedEl.textContent = lastUpdate == null ? "waiting for updates" : "updated " + Math.round((Date.now() - lastUpdate) / 1000) + "s ago";
   };
+  // The indicator is a dot only: its state is an accessible label, never visible text.
+  // Pause is an icon flipped by data-paused (the ⏸/▶ glyph lives in CSS).
   const renderState = () => {
     indicator.dataset.liveState = paused ? "paused" : "live";
-    indicator.textContent = paused ? "Paused" + (buffered ? " · " + buffered + " buffered" : "") : "Live";
+    indicator.setAttribute("aria-label", paused ? "Paused" + (buffered ? " · " + buffered + " buffered" : "") : "Live");
+    pauseBtn.dataset.paused = String(paused);
+    pauseBtn.setAttribute("aria-label", paused ? "Resume" : "Pause");
   };
   // Refresh both the landing and the cross-project feed on every live tick, so the
   // feed (#55) stays current alongside the cards.
@@ -836,7 +864,6 @@ ${ISSUE_DETAIL_SHEET_SCRIPT}
   };
   pauseBtn.addEventListener("click", () => {
     paused = !paused;
-    pauseBtn.textContent = paused ? "Resume" : "Pause";
     if (!paused && buffered) { buffered = 0; refresh(); }
     renderState();
   });
@@ -859,21 +886,8 @@ ${DASHBOARD_PALETTE_CSS}
   h1 { font-size: clamp(1.8rem, 4vw, 3rem); margin: 0; letter-spacing: -0.035em; color: var(--color-text); }
   h2 { color: var(--color-text-light); }
   .campaign-meta { margin: .75rem 0 0; color: var(--color-text-light-2); font-size: .95rem; }
-  .campaign-name { color: var(--color-primary); font-weight: 600; letter-spacing: -0.01em; }
-  .page-top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; border-bottom: 1px solid var(--color-light-border); padding-bottom: 1rem; }
-  .project-picker { margin: 0; }
-  .project-picker select { color: var(--color-text); background: var(--color-box-header); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); padding: .35rem .6rem; font: inherit; cursor: pointer; }
-  .project-picker select:hover { border-color: var(--color-primary); }
-  .live-bar { display: inline-flex; align-items: center; gap: .75rem; color: var(--color-text-light-2); font-size: .85rem; }
-  .live-indicator { display: inline-flex; align-items: center; gap: .4rem; font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--color-green); }
-  /* The live dot pulses while streaming; motion is a second channel for one thing
-     only (§5). Paused, it goes still and dim — never amber, never animating. */
-  .live-indicator::before { content: ""; width: .55rem; height: .55rem; border-radius: 999px; background: currentColor; animation: chip-pulse 1.6s ease-in-out infinite; }
-  .live-indicator[data-live-state="paused"] { color: var(--color-dim); }
-  .live-indicator[data-live-state="paused"]::before { animation: none; }
-  @media (prefers-reduced-motion: reduce) { .live-indicator::before { animation: none; } }
-  .pause { min-height: 44px; color: var(--color-text); background: var(--color-box-header); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); padding: .35rem .8rem; font: inherit; cursor: pointer; }
-  .pause:hover { border-color: var(--color-primary); }
+  .campaign-name { font-weight: 600; letter-spacing: -0.01em; }
+${TOP_BAR_STYLES}
   .waves-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 1rem; margin: 1rem 0; }
   .wave { background: var(--color-card); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: 1rem; box-shadow: 0 8px 22px #0004; border-top: 3px solid var(--color-dim); }
   .wave.running { border-top-color: var(--color-blue); }
@@ -924,14 +938,7 @@ ${ISSUE_DETAIL_SHEET_STYLES}
 </style>
 </head>
 <body>
-<div class="page-top">${
-  opts.projects?.length ? renderProjectPicker(opts.projects, opts.selected ?? status.project) : `<h1>${escapeHtml(status.project)}</h1>`
-}<div class="live-bar" title="Live updates over SSE; pause to freeze the view while it keeps collecting"><span class="live-indicator" data-live-state="live">Live</span><span class="updated" data-updated>waiting for updates</span><button type="button" id="pause" class="pause">Pause</button></div></div>
-${
-  status.waves.length
-    ? `<p class="campaign-meta">${status.name ? `<span class="campaign-name">${escapeHtml(status.name)}</span> · ` : ""}${campaignIssueCount(status)} issue${campaignIssueCount(status) === 1 ? "" : "s"} · ${status.waves.length} wave${status.waves.length === 1 ? "" : "s"}</p>`
-    : ""
-}
+${renderTopBar(opts.projects?.length ? renderProjectPicker(opts.projects, opts.selected ?? status.project) : `<h1>${escapeHtml(status.project)}</h1>`)}
 ${
   status.parked.length
     ? `<section class="parked-issues"><h2>Parked · <span class="parked-count">${status.parked.length}</span></h2>${status.parked
@@ -943,6 +950,11 @@ ${
           (p) => `<a class="parked-card" href="/?project=${encodeURIComponent(status.project)}" data-issue="${escapeHtml(p.issueNumber)}" data-project="${escapeHtml(status.project)}"${opts.carve ? ` data-carvable="1"` : ""}><div class="parked-card-title"><span class="parked-issue">#${escapeHtml(p.issueNumber)}</span> ${escapeHtml(p.description)}</div><div class="parked-card-meta">waiting <span class="parked-waited" data-parked-at="${escapeHtml(p.parkedAt)}">…</span> · ${escapeHtml(p.reason)}</div></a>`,
         )
         .join("")}</section>`
+    : ""
+}
+${
+  status.waves.length
+    ? `<p class="campaign-meta">${status.name ? `<span class="campaign-name">${escapeHtml(status.name)}</span> · ` : ""}${campaignIssueCount(status)} issue${campaignIssueCount(status) === 1 ? "" : "s"} · ${status.waves.length} wave${status.waves.length === 1 ? "" : "s"}</p>`
     : ""
 }
 ${renderWaves(status, Boolean(opts.carve), true)}
@@ -1011,9 +1023,13 @@ ${issueDetailSheetMarkup(Boolean(opts.carve))}${
   let buffered = 0;
   const lastUpdate = Date.now();
   const renderUpdated = () => { updatedEl.textContent = "updated " + Math.round((Date.now() - lastUpdate) / 1000) + "s ago"; };
+  // The indicator is a dot only: its state is an accessible label, never visible text.
+  // Pause is an icon flipped by data-paused (the ⏸/▶ glyph lives in CSS).
   const renderState = () => {
     indicator.dataset.liveState = paused ? "paused" : "live";
-    indicator.textContent = paused ? "Paused" + (buffered ? " · " + buffered + " buffered" : "") : "Live";
+    indicator.setAttribute("aria-label", paused ? "Paused" + (buffered ? " · " + buffered + " buffered" : "") : "Live");
+    pauseBtn.dataset.paused = String(paused);
+    pauseBtn.setAttribute("aria-label", paused ? "Resume" : "Pause");
   };
   const events = new EventSource("/api/events");
   events.onmessage = () => {
@@ -1023,7 +1039,6 @@ ${issueDetailSheetMarkup(Boolean(opts.carve))}${
   };
   pauseBtn.addEventListener("click", () => {
     paused = !paused;
-    pauseBtn.textContent = paused ? "Resume" : "Pause";
     if (!paused && buffered && !isComposing()) location.reload();
     renderState();
   });

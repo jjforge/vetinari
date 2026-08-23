@@ -237,10 +237,17 @@ export const renderLandingShell = (projects: string[]) => `<!doctype html>
   .card-tally { color: var(--color-text-light-2); font-size: .85rem; }
   .card-last { color: var(--color-text-light-2); font-size: .85rem; margin-top: .5rem; white-space: pre-line; }
   .empty { color: var(--color-text-light-2); }
+  .feed { margin-top: 2rem; border-top: 1px solid var(--color-light-border); padding-top: 1rem; }
+  .feed h2 { color: var(--color-text-light); font-size: 1.1rem; margin: 0 0 .75rem; }
+  .feed-row { display: flex; align-items: baseline; gap: .6rem .9rem; flex-wrap: wrap; padding: .5rem 0; border-bottom: 1px solid var(--color-light-border); font-size: .9rem; }
+  .feed-time { color: var(--color-text-light-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .feed-kind { color: var(--color-primary); font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+  .feed-text { color: var(--color-text-light); flex: 1; }
   @media (max-width: 640px) {
     body { padding: 1rem; }
     .counters { grid-template-columns: repeat(2, 1fr); }
     .cards { grid-template-columns: 1fr; }
+    .feed { display: none; }
   }
 </style>
 </head>
@@ -255,9 +262,28 @@ export const renderLandingShell = (projects: string[]) => `<!doctype html>
   <div class="counter" data-counter="mergedToday"><div class="counter-value">–</div><div class="counter-label">Merged today</div></div>
 </section>
 <section id="cards" class="cards"><p class="empty">Loading…</p></section>
+<section id="feed" class="feed" aria-label="Recent activity across all repos"><h2>Recent activity</h2><div id="feed-rows"><p class="empty">Loading…</p></div></section>
 <script>
   const fmtWave = (w) => (w ? "Wave " + w.current + " of " + w.total : "idle");
+  const fmtTime = (ts) => { const d = new Date(ts); return isNaN(d) ? ts : d.toLocaleString(); };
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+  async function loadFeed() {
+    const rows = document.getElementById("feed-rows");
+    let feed;
+    try {
+      feed = await (await fetch("/api/feed")).json();
+    } catch {
+      rows.replaceChildren(el("p", "empty", "Couldn't load the activity feed."));
+      return;
+    }
+    rows.replaceChildren();
+    if (!feed.length) { rows.append(el("p", "empty", "No activity yet.")); return; }
+    for (const e of feed) {
+      const row = el("div", "feed-row");
+      row.append(el("span", "feed-time", fmtTime(e.ts)), el("span", "feed-kind", e.kind), el("span", "feed-text", e.text));
+      rows.append(row);
+    }
+  }
   async function load() {
     let data;
     try {
@@ -290,6 +316,7 @@ export const renderLandingShell = (projects: string[]) => `<!doctype html>
     }
   }
   load();
+  loadFeed();
 </script>
 </body>
 </html>`;

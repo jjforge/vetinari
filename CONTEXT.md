@@ -124,6 +124,41 @@ an epic: a [[wave]] is a file-disjoint layer that crosses epics, so its issues,
 not an epic, name it.
 _Avoid_: batch name
 
+### Issue status
+
+The dashboard shows the orchestrator's own `IssueStatus` vocabulary, plus one
+render-derived state (`carved`) — not the UX handoff's friendlier labels (ADR 0007).
+
+**running**:
+An agent is on the issue in the active [[wave]] — whether executing or waiting for
+a slot. The active-wave slot-wait is not a separate status; it is still running.
+_Avoid_: working, in progress
+
+**parked**:
+The agent asked a question and stopped; the issue waits on a human answer. The one
+[[interactive]] state and the reason to open an issue's detail.
+
+**failure**:
+The run errored out **without** parking. The dashboard shows it — the orchestrator
+really does emit this, so hiding it would make the UI and the event log disagree on
+which states exist. The turn log tells the story of why.
+_Avoid_: failed, errored, broken
+
+**completed**:
+The issue's work landed on the base.
+_Avoid_: merged, done
+
+**unstarted**:
+In the plan, not yet begun — a later [[wave]] with no agent assigned.
+_Avoid_: queued, pending
+
+**carved**:
+A [[carve]] left the issue out of the campaign with its unstarted dependents.
+**Derived at render** from the carve event (not a stored status), so it shows in
+both the live run and an [[archived-run]] — a browsing operator can see what was
+carved out of a finished run.
+_Avoid_: removed, dropped, pruned
+
 ### Campaign planning
 
 **Campaign plan** (the `campaign-plan` tool):

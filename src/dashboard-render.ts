@@ -693,9 +693,12 @@ ${TOP_BAR_STYLES}
   .feed h2 { color: var(--color-text-light); font-size: 1.1rem; margin: 0 0 .75rem; }
   .feed-row { display: flex; align-items: baseline; gap: .6rem .9rem; flex-wrap: wrap; padding: .5rem 0; border-bottom: 1px solid var(--color-light-border); font-size: .9rem; }
   .feed-time { color: var(--color-text-light-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .feed-kind { color: var(--color-primary); font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
-  /* Each activity event reads in its comms-category colour (#78). */
-  .feed-kind.progress { color: var(--color-blue); } .feed-kind.success { color: var(--color-green); } .feed-kind.attention { color: var(--color-yellow); } .feed-kind.failure { color: var(--color-failure); } .feed-kind.carved { color: var(--color-carved); }
+  .feed-kind { color: var(--color-text); font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; display: inline-flex; align-items: center; gap: .4rem; }
+  /* Each activity event reads its comms category as a full-strength leading dot,
+     keeping the label at --color-text — a mid-tone tint on tiny near-black text
+     struck out the blue progress kind (#85, matching the shared dot model #83). */
+  .feed-kind::before { content: ""; width: .5rem; height: .5rem; border-radius: 999px; background: var(--color-dim); flex: none; }
+  .feed-kind.progress::before { background: var(--color-blue); } .feed-kind.success::before { background: var(--color-green); } .feed-kind.attention::before { background: var(--color-yellow); } .feed-kind.failure::before { background: var(--color-failure); } .feed-kind.carved::before { background: var(--color-carved); }
   .feed-text { color: var(--color-text-light); flex: 1; }
   /* The card's highlight (top border) tracks its run state (#75) — its only coloured edge (§2). */
   .card.running { border-top-color: var(--color-blue); } .card.parked { border-top-color: var(--color-yellow); } .card.failure { border-top-color: var(--color-failure); } .card.completed { border-top-color: var(--color-green); } .card.idle { border-top-color: var(--color-dim); }

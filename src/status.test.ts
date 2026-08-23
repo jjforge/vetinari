@@ -474,7 +474,7 @@ test("failure renders in its own red on every surface, never the carve action's 
   const campaign = renderStatusPage({ project: "beta", waves: [], parked: [] }, { carve: true });
   // The activity feed, the card highlight, and the run-state pill all read failure
   // in --color-failure; the carve controls keep --color-red.
-  assert.match(landing, /\.feed-kind\.failure \{ color: var\(--color-failure\); \}/);
+  assert.match(landing, /\.feed-kind\.failure::before \{ background: var\(--color-failure\); \}/);
   assert.match(landing, /\.card\.failure \{ border-top-color: var\(--color-failure\); \}/);
   assert.match(landing, /\.run-state\.failure \{ border-color: var\(--color-failure\); color: var\(--color-failure\); \}/);
   // The shared turn-log failure number reads --color-failure; carve controls stay --color-red.
@@ -574,17 +574,22 @@ test("the issue-detail sheet markup, CSS, and script are defined once and shared
   assert.ok(!landing.includes("kept in sync"));
 });
 
-test("renderLandingShell colours each activity event kind by category (#78)", () => {
+test("renderLandingShell reads each event kind's category as a leading dot, label at full strength (#85)", () => {
   const html = renderLandingShell(["alpha"]);
-  // Each feed row's kind carries a category class so it reads in its colour.
+  // Each feed row's kind carries a category class so its dot reads in that colour.
   assert.match(html, /"feed-kind " \+ feedKindClass\(e\.kind\)/);
   // The classifier maps the orchestrator's event kinds to comms categories.
   assert.match(html, /const feedKindClass = /);
-  assert.match(html, /\.feed-kind\.success \{ color: var\(--color-green\); \}/);
-  assert.match(html, /\.feed-kind\.attention \{ color: var\(--color-yellow\); \}/);
-  assert.match(html, /\.feed-kind\.progress \{ color: var\(--color-blue\); \}/);
-  assert.match(html, /\.feed-kind\.failure \{ color: var\(--color-failure\); \}/);
-  assert.match(html, /\.feed-kind\.carved \{ color: var\(--color-carved\); \}/);
+  // The label text stays full-strength --color-text — never a mid-tone tint on
+  // near-black (which struck out the blue progress kind, #85).
+  assert.match(html, /\.feed-kind \{ color: var\(--color-text\);/);
+  // The category colour renders full-strength on the small leading-dot surface.
+  assert.match(html, /\.feed-kind::before \{[^}]*background: var\(--color-dim\);/);
+  assert.match(html, /\.feed-kind\.success::before \{ background: var\(--color-green\); \}/);
+  assert.match(html, /\.feed-kind\.attention::before \{ background: var\(--color-yellow\); \}/);
+  assert.match(html, /\.feed-kind\.progress::before \{ background: var\(--color-blue\); \}/);
+  assert.match(html, /\.feed-kind\.failure::before \{ background: var\(--color-failure\); \}/);
+  assert.match(html, /\.feed-kind\.carved::before \{ background: var\(--color-carved\); \}/);
 });
 
 test("renderLandingShell colours each project card's highlight by run state (#75)", () => {

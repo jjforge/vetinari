@@ -24,6 +24,16 @@ Type is set via the **API**, not a label: `gh api --method PATCH repos/jjforge/s
 - **Epic → issue.** An epic is typed `Epic` (or holds native sub-issues), owns no work of its own, and closes when its children do. A large childless issue is not an epic however big it is — it is _unspecced_ work; give it `needs-triage` and let `/grill-with-docs → /to-spec → /to-tickets` produce the children.
 - **Dependencies are native.** Use GitHub's `blocked_by` dependencies, not prose in a body — a ticket is grabbable once all its blockers are closed: `gh api -X POST repos/jjforge/sandcastle-tdd/issues/<n>/dependencies/blocked_by -F issue_id=<blocker-id>`.
 
+## Declaring a ticket's file-set
+
+`campaign-plan` keeps co-wave tickets file-disjoint so a wave never collides at integration ([`campaigns.md`](campaigns.md)), and it reads which files a ticket touches from the body. Give every `ready-for-agent` ticket an explicit marker **line** — start a line with `Touches:` or `Files:` and list the files it touches, each in backticks:
+
+```
+Touches (existing files): `fileset.ts`, `src/cli.mts`
+```
+
+Only that line is read, so naming other filenames in the prose (an env file, a config, a spec link) is harmless. Paths reduce to their basename, so cite a file however you like. A ticket with no marker line falls back to a whole-body scan and is far likelier to resolve as under-specified — so `campaign-plan` halts on it; the marker line is what makes a ticket schedulable unattended.
+
 ## Closing — merge → `pending-verify` → close
 
 A merge is **not** a close (and a plain `git merge` never auto-closes anyway). When work lands on a branch, label it **`pending-verify`**; close it only after a **local end-to-end validation** — driving the change on a local run/stack is enough, it need not reach a remote or production. Then `gh issue close <n> -c "…"` and the label drops with it. An epic closes when its last child closes.

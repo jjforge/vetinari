@@ -12,11 +12,22 @@ plans; it never runs sandcastle or pushes), then hand the waves to `campaign`.
    blocker's wave (waves are the DAG's topological layers).
 2. **No two tickets in one wave edit the same file** — crossover is not in the DAG,
    so each layer is partitioned into **file-disjoint** sub-waves, collision judged by
-   **basename**. Each ticket body carries a line the file-set resolver reads:
+   **basename**. Each ticket declares its file-set with an explicit marker **line**
+   the file-set resolver reads — start a line with `Touches:` or `Files:` and list
+   the files it touches in backticks:
 
    ```
-   Touches (existing files): `a.ts`, `b.ts`
+   Touches (existing files): `a.ts`, `b/c.ts`
    ```
+
+   Only the marker line is read, so incidental filenames elsewhere in the body — an
+   env file, a config name, a spec link — do not affect the result; paths are
+   normalized to their basename, so `b/c.ts` and a bare `c.ts` collide as one file.
+   A ticket that cites a file the tree does not have, or (with no marker line) any
+   incidental token that isn't a real file, resolves `confident: false` and
+   `campaign-plan` halts rather than guess — so give every ticket a marker line.
+   See [`issue-conventions.md`](issue-conventions.md#declaring-a-tickets-file-set)
+   for the authoring convention.
 
 Parallelize **across epics** — epics carry no inherent order, so a wave normally
 spans several; never serialize by epic.

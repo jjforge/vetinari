@@ -107,6 +107,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The parked-issue reply `<textarea>` overflowed its container, spilling past the
+  right edge of the sheet and the parked card (most visible on a narrow phone
+  column) (#73). Added `max-width: 100%` to the textarea rule so `width: 100%`
+  resolves against its padded content box and introduces no horizontal scroll.
+
+- Hardened the issue-detail sheet's carve panel against the same `[hidden]`-defeat
+  bug as the parked queue (#72): `.carve-panel { display: flex }` would override the
+  UA `[hidden]` rule, so a non-carvable issue could not hide it. Added
+  `.carve-panel[hidden] { display: none }`. (The reported "no Carve on a parked
+  issue" symptom did not reproduce on this build — the sheet reveals Carve beside
+  Resume for a parked issue — and was traced to a stale deployment predating the
+  carve-from-the-sheet feature; this rule is defensive hardening.)
+
+- The cross-repo parked queue on the all-repos landing never collapsed (#71).
+  `.parked-queue { display: grid }` overrode the `[hidden]` attribute's UA
+  `display: none`, so toggling the parked counter flipped the caret but left the
+  panel open. Added the companion `.parked-queue[hidden] { display: none }` rule
+  (the same guard the sheet's flex panels already carry).
+
+- An idle project's landing card showed 0% merged and contributed nothing to
+  "merged today" even when its last run merged every issue today (#70). Both numbers
+  were read from the cleared live log: `buildProjectCard`'s idle branch hardcoded
+  `percentMerged: 0`, and `buildLanding`'s merged-today summed only the live log. The
+  idle card now reconstructs its latest archived run for a real merged %, and
+  merged-today reads that archived run when no live run is in flight — so a completed
+  run's merges still surface. Live-run cards are unchanged.
+
+- An idle project's "Last run" summary read `halted` on a run that actually
+  completed (#69). `summarizeRun` scanned the whole archived log for a
+  `campaign-halt`, so an archive whose live log had accumulated more than one run
+  before being archived would fold a stale halt from a superseded earlier run into
+  a completed run's summary (and count the wrong run's issues). The run's terminal
+  state now derives from `reduceCampaign`'s new run-scoped `halted` flag — everything
+  the summary reports is the latest `campaign-start` onward — so a completed run
+  reads `complete` and a genuinely halted one still reads `halted`.
+
 - Dashboard issue titles, wave names, and chip hovers (#44). The aggregated web
   dashboard is a dumb router with no per-project `fetchTask`, so since the
   one-dashboard consolidation it resolved no issue titles — chip hovers showed only

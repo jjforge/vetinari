@@ -244,6 +244,11 @@ export interface ReducedCampaign {
    * a bare green, or a queue-done green). The source the landing's merged-today
    * counter reads: an issue whose stamp falls on the current day merged today. */
   mergedAt: Map<string, string>;
+  /** did the run this fold describes halt? True when its slice holds a
+   * `campaign-halt` event — scoped to the latest `campaign-start` like everything
+   * else here, so a stale halt from a superseded earlier run in the same (archived)
+   * log never bleeds into this run's outcome. */
+  halted: boolean;
   closedWaves: Set<number>;
   currentWave: number;
 }
@@ -269,8 +274,10 @@ export function reduceCampaign(events: any[]): ReducedCampaign {
   const mergedAt = new Map<string, string>();
   const closedWaves = new Set<number>();
   let currentWave = -1;
+  let halted = false;
 
   for (const e of relevant) {
+    if (e.event === "campaign-halt") halted = true;
     // Any start event may carry an id→title map (`campaign` writes it on
     // `campaign-start`, a standalone `queue` on `queue-start`); fold them all so
     // the plan carries a name for every issue a title was resolved for.
@@ -345,7 +352,7 @@ export function reduceCampaign(events: any[]): ReducedCampaign {
     }
   }
 
-  return { waves, layout, carved, name, outcomes, details, titles, mergedAt, closedWaves, currentWave };
+  return { waves, layout, carved, name, outcomes, details, titles, mergedAt, halted, closedWaves, currentWave };
 }
 
 /** One entry in an issue's turn log (ADR 0009): the turn's number as logged
@@ -482,11 +489,15 @@ export function listArchivedRuns(baseLocation: string): ArchivedRun[] {
  * reconstructed wave/issue view (ADR 0005).
  */
 export function summarizeRun(events: any[]): string {
-  const { waves, outcomes } = reduceCampaign(events);
+  // Everything derives from the run `reduceCampaign` reconstructs (the latest
+  // `campaign-start` onward), so a multi-run archive summarizes its terminal run —
+  // a stale `campaign-halt` from a superseded earlier run in the same log no longer
+  // reads a completed run as "halted" (#69).
+  const { waves, outcomes, halted } = reduceCampaign(events);
   const mode = events.some((e) => e.event === "campaign-start") ? "campaign" : "queue";
   const count = waves.flat().length;
-  const halted = events.some((e) => e.event === "campaign-halt") || [...outcomes.values()].includes("failure");
-  return `${mode} · ${count} issue${count === 1 ? "" : "s"} · ${halted ? "halted" : "complete"}`;
+  const ended = halted || [...outcomes.values()].includes("failure");
+  return `${mode} · ${count} issue${count === 1 ? "" : "s"} · ${ended ? "halted" : "complete"}`;
 }
 
 export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
@@ -727,15 +738,31 @@ const projectRunState = (status: CampaignStatus): RunState => {
  * way in tests and in the server. */
 const sameUtcDay = (iso: string, day: Date) => iso.slice(0, 10) === day.toISOString().slice(0, 10);
 
+/** The events of a project's most recent archived run (newest by archive
+ * filename), or an empty list when it has none — the run an idle project's card and
+ * the landing's merged-today counter read from, since a completed run's merges live
+ * in its archive, not the cleared live log (#70). */
+const latestArchivedEvents = (baseLocation: string): any[] => {
+  const [latest] = listArchivedRuns(baseLocation);
+  return latest ? readEvents({ logFile: latest.file }) : [];
+};
+
 const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, events: any[]): ProjectCard => {
   if (!status.waves.length) {
     const [latest] = listArchivedRuns(pointer.baseLocation);
+    // An idle card's numbers come from the last archived run, not the emptied live
+    // log: reconstruct it and read its real merged % so a completed run no longer
+    // reads 0% (#70). `waves` is already the pruned plan (carved issues dropped), so
+    // the ratio matches the live card's carved-aware count.
+    const archived = latest ? reduceCampaign(readEvents({ logFile: latest.file })) : undefined;
+    const archivedIssues = archived ? archived.waves.flat() : [];
+    const merged = archived ? archivedIssues.filter((n) => archived.outcomes.get(n) === "completed").length : 0;
     return {
       project: status.project,
       runState: "idle",
       campaignName: latest?.name ?? latest?.run,
       wave: null,
-      percentMerged: 0,
+      percentMerged: archivedIssues.length ? Math.round((merged / archivedIssues.length) * 100) : 0,
       tally: { running: 0, parked: 0, queued: 0 },
       lastEvent: latest ? `Last run: ${latest.summary}` : "No runs yet",
     };
@@ -786,11 +813,15 @@ export function buildLanding(pointers: ProjectPointer[], now: Date = new Date())
     }
     const cfg = statusConfigFromPointer(pointer);
     const events = readEvents(cfg);
-    const { mergedAt, outcomes } = reduceCampaign(events);
+    const status = buildStatus(cfg);
+    // merged-today reads the run the card shows: the live run when one is in flight,
+    // else the latest archived run — a completed run's merges live in its archive,
+    // not the cleared live log, so an idle-but-merged-today project still counts (#70).
+    const mergeEvents = status.waves.length ? events : latestArchivedEvents(pointer.baseLocation);
+    const { mergedAt, outcomes } = reduceCampaign(mergeEvents);
     for (const [issueNumber, ts] of mergedAt) {
       if (outcomes.get(issueNumber) === "completed" && sameUtcDay(ts, now)) mergedToday++;
     }
-    const status = buildStatus(cfg);
     // The same active parked records the project's campaign view shows, tagged
     // with their repo so the landing can list them cross-repo.
     for (const p of status.parked) {

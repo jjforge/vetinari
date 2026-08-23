@@ -246,6 +246,8 @@ export const renderLandingShell = (projects: string[]) => `<!doctype html>
   .counter-toggle[aria-expanded="true"] .counter-value::after { content: " ▾"; }
   .counter-label { color: var(--color-text-light-2); font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; margin-top: .25rem; }
   .parked-queue { display: grid; gap: .5rem; margin: -0.5rem 0 1.25rem; }
+  /* A grid display beats the UA [hidden] rule, so the collapse needs it back explicitly. */
+  .parked-queue[hidden] { display: none; }
   .parked-row { display: grid; grid-template-columns: auto auto 1fr auto; align-items: baseline; gap: .3rem .75rem; min-height: 44px; text-decoration: none; color: inherit; background: var(--color-box-body); border: 1px solid var(--color-secondary); border-left: 3px solid var(--color-yellow); border-radius: var(--border-radius-medium); padding: .7rem 1rem; }
   .parked-row:hover { border-color: var(--color-primary); background: var(--color-primary-alpha-20); }
   .parked-issue { font-weight: 700; color: var(--color-yellow); }
@@ -470,9 +472,11 @@ export const renderStatusPage = (status: CampaignStatus, opts: StatusPageOptions
   @keyframes chip-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
   .dot.running { animation: chip-pulse 1.4s ease-in-out infinite; }
   @media (prefers-reduced-motion: reduce) { .dot.running { animation: none; } }
-  textarea { width: 100%; min-height: 7rem; margin: .5rem 0; color: var(--color-text); background: var(--color-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: .75rem; }
+  textarea { width: 100%; max-width: 100%; min-height: 7rem; margin: .5rem 0; color: var(--color-text); background: var(--color-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: .75rem; }
   button.chip { cursor: pointer; color: inherit; font: inherit; }
   .carve-panel { display: flex; align-items: center; gap: .5rem; }
+  /* A flex display beats the UA [hidden] rule, so the carve panel needs it back explicitly. */
+  .carve-panel[hidden] { display: none; }
   .carve-start, .carve-confirm-btn, .carve-cancel { padding: .35rem .7rem; border: 1px solid var(--color-red); border-radius: 999px; background: rgb(247 146 135 / 12%); color: var(--color-red); font: inherit; line-height: 1; cursor: pointer; }
   .carve-cancel { border-color: var(--color-secondary); background: none; color: var(--color-text-light-2); }
   .carve-confirm { display: flex; align-items: center; gap: .5rem; margin: 0; }

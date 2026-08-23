@@ -126,6 +126,46 @@ test("buildLanding sums the counters, reads an idle project's last campaign, and
   assert.match(beta.lastEvent, /^Last run: campaign · 1 issue · complete$/);
 });
 
+test("an idle project's merged % and merged-today read its latest archived run, not the cleared live log (#70)", () => {
+  const base = join(tmpdir(), `sctdd-landing-idle-archive-${Date.now()}`);
+  const dir = join(base, "beta");
+  // Idle: the run finished, so its live log is empty and its work is in the archive.
+  seedState(dir, []);
+  mkdirSync(join(dir, "logs", "archive"), { recursive: true });
+  // A completed run that merged both its issues today.
+  writeJsonl(join(dir, "logs", "archive", "orchestrator-2026-06-15T00-00-00-000Z.jsonl"), [
+    { ts: "2026-06-15T09:00:00.000Z", event: "campaign-start", batches: [["501"], ["502"]], name: "shipped" },
+    { ts: "2026-06-15T09:05:00.000Z", event: "campaign-batch-done", index: 0, merged: ["501"] },
+    { ts: "2026-06-15T09:10:00.000Z", event: "campaign-batch-done", index: 1, merged: ["502"] },
+    { ts: "2026-06-15T09:11:00.000Z", event: "campaign-done", batches: 2 },
+  ]);
+
+  const { counters, projects } = buildLanding([pointerFor("beta", dir)], new Date("2026-06-15T12:00:00.000Z"));
+  const [card] = projects;
+  assert.equal(card.runState, "idle");
+  // Both issues merged, so the idle card reads 100% — not the hardcoded 0%.
+  assert.equal(card.percentMerged, 100);
+  // And both merges count toward "merged today", read from the archived run.
+  assert.equal(counters.mergedToday, 2);
+});
+
+test("an idle project whose latest archived run merged on an earlier day counts 0 toward merged-today (#70)", () => {
+  const base = join(tmpdir(), `sctdd-landing-idle-archive-old-${Date.now()}`);
+  const dir = join(base, "beta");
+  seedState(dir, []);
+  mkdirSync(join(dir, "logs", "archive"), { recursive: true });
+  writeJsonl(join(dir, "logs", "archive", "orchestrator-2026-06-10T00-00-00-000Z.jsonl"), [
+    { ts: "2026-06-10T09:00:00.000Z", event: "campaign-start", batches: [["501"]], name: "older" },
+    { ts: "2026-06-10T09:05:00.000Z", event: "campaign-batch-done", index: 0, merged: ["501"] },
+    { ts: "2026-06-10T09:06:00.000Z", event: "campaign-done", batches: 1 },
+  ]);
+
+  const { counters, projects } = buildLanding([pointerFor("beta", dir)], new Date("2026-06-15T12:00:00.000Z"));
+  // Fully merged run → 100% on the card, but merged five days ago → nothing today.
+  assert.equal(projects[0].percentMerged, 100);
+  assert.equal(counters.mergedToday, 0);
+});
+
 test("buildFeed merges every project's narratable events into one newest-first, repo-prefixed feed", () => {
   const base = join(tmpdir(), `sctdd-feed-${Date.now()}`);
   const alphaDir = join(base, "alpha");
@@ -280,6 +320,10 @@ test("renderLandingShell parked counter expands a cross-repo parked queue in pla
   assert.match(html, /aria-expanded/);
   // The parked rows collapse to a readable stack on a phone.
   assert.match(html, /\.parked-row/);
+  // `.parked-queue { display: grid }` otherwise defeats the UA `[hidden]` rule, so
+  // the collapse rule must be restored explicitly or clicking the counter flips the
+  // caret but never hides the panel (#71).
+  assert.match(html, /\.parked-queue\[hidden\] \{ display: none;? \}/);
 });
 
 test("renderLandingShell wires live SSE updates, an updated-ago readout, and a buffered pause", () => {
@@ -1680,6 +1724,14 @@ test("renderStatusPage hosts a parked reply block with a Resume button in the ta
   assert.match(html, /<button type="submit" form="reply-form" id="reply-resume" class="reply-resume" hidden>Resume<\/button>/);
 });
 
+test("renderStatusPage caps the reply textarea so it stays within the sheet/card (#73)", () => {
+  const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
+  // A width:100% textarea with padding still spilled past the right edge of the sheet
+  // and the parked card; max-width:100% caps it against its padded content box so it
+  // never overflows and introduces no horizontal scroll on the sheet.
+  assert.match(html, /\btextarea \{[^}]*max-width: 100%/);
+});
+
 test("renderStatusPage places Resume beside Carve in one sheet-actions row, sized for touch", () => {
   const html = renderStatusPage({ project: "demo", waves: [], parked: [] }, { carve: true });
 
@@ -1690,6 +1742,9 @@ test("renderStatusPage places Resume beside Carve in one sheet-actions row, size
   // The actions row is a flex box, so it needs [hidden] restored explicitly or an
   // empty foot (no reply, no carve) would always show its border and padding.
   assert.match(html, /\.sheet-actions\[hidden\][^{]*\{ display: none; \}/);
+  // The carve panel is likewise a flex box whose display would defeat the UA
+  // [hidden] rule; restore its collapse rule so a non-carvable issue can hide it (#72).
+  assert.match(html, /\.carve-panel\[hidden\][^{]*\{ display: none;? \}/);
 });
 
 test("renderStatusPage wires the parked reply block: shown when parked, options fill the field", () => {
@@ -2073,6 +2128,39 @@ test("summarizeRun folds an archived log into a one-line mode/issue-count/outcom
     ]),
     "queue · 2 issues · complete",
   );
+});
+
+test("summarizeRun describes only the last run in a multi-run archive (#69)", () => {
+  // An archive whose live log accumulated two campaigns before it was archived: an
+  // earlier run halted on #61, then a fresh campaign ran the remainder to completion
+  // (this is the shape of the real sandcastle-tdd archive that read as "halted").
+  // The summary must reflect the terminal run — complete, four issues — not fold the
+  // stale campaign-halt from the superseded earlier run into a false "halted", and
+  // its count must be the last run's, not the whole file's.
+  const events = [
+    { event: "campaign-start", batches: [["56", "57"], ["61"]], name: "first" },
+    { event: "campaign-halt", taskId: "61", reason: "merge conflict" },
+    { event: "campaign-start", batches: [["63"], ["64"], ["65"], ["67"]], name: "second" },
+    { event: "campaign-batch-done", index: 0, merged: ["63"] },
+    { event: "campaign-batch-done", index: 1, merged: ["64"] },
+    { event: "campaign-batch-done", index: 2, merged: ["65"] },
+    { event: "campaign-batch-done", index: 3, merged: ["67"] },
+    { event: "campaign-done", batches: 4 },
+  ];
+  assert.equal(summarizeRun(events), "campaign · 4 issues · complete");
+});
+
+test("summarizeRun still reports halted when the last run halted after an earlier one completed (#69)", () => {
+  // The mirror case: an earlier run completed, then a fresh campaign halted. The
+  // terminal run halted, so the summary must say halted — the scoping must not swing
+  // the other way and hide a genuine halt behind an earlier clean run.
+  const events = [
+    { event: "campaign-start", batches: [["101"]], name: "first" },
+    { event: "campaign-done", batches: 1 },
+    { event: "campaign-start", batches: [["201"], ["202"]], name: "second" },
+    { event: "campaign-halt", taskId: "201", reason: "gate failed" },
+  ];
+  assert.equal(summarizeRun(events), "campaign · 2 issues · halted");
 });
 
 test("extractParkedDetails separates description from Options section", () => {

@@ -4,7 +4,7 @@ import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { appendedEvents, buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, DASHBOARD_PALETTE_CSS, describeEvent, extractParkedDetails, formatFeedEvent, formatStatusText, ISSUE_DETAIL_SHEET_SCRIPT, ISSUE_DETAIL_SHEET_STYLES, issueDetailSheetMarkup, lastEventText, listArchivedRuns, parkedReplyFor, parseCarveClosure, reconstructIssueDetail, projectRunState, reduceCampaign, renderLandingShell, renderStatusPage, renderTopBar, selectStatus, serveAllStatus, STATE_DOT_CSS, stateColor, summarizeRun, TOP_BAR_STYLES } from "./status.ts";
+import { appendedEvents, buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, DASHBOARD_PALETTE_CSS, describeEvent, extractParkedDetails, formatFeedEvent, formatStatusText, ISSUE_DETAIL_SHEET_SCRIPT, ISSUE_DETAIL_SHEET_STYLES, issueDetailSheetMarkup, lastEventText, listArchivedRuns, parkedReplyFor, parseCarveClosure, reconstructIssueDetail, projectRunState, reduceCampaign, renderLandingShell, renderStatusPage, renderTopBar, REPO_DROPDOWN_SCRIPT, selectStatus, serveAllStatus, STATE_DOT_CSS, stateColor, summarizeRun, TOP_BAR_STYLES } from "./status.ts";
 import type { CampaignStatus } from "./status.ts";
 import type { AddressInfo } from "node:net";
 import { register, type ProjectPointer } from "./registry.ts";
@@ -1828,7 +1828,7 @@ test("renderStatusPage's carve panel discloses kept-banked work and carries a st
   assert.match(html, /everything blocked by it/);
 });
 
-test("renderStatusPage renders a project dropdown and the selected project's body", () => {
+test("renderStatusPage renders the repo dropdown (with a no-JS select fallback) and the selected project's body", () => {
   const html = renderStatusPage(
     {
       project: "beta",
@@ -1838,18 +1838,138 @@ test("renderStatusPage renders a project dropdown and the selected project's bod
     { projects: ["alpha", "beta", "gamma"], selected: "beta" },
   );
 
-  // A dropdown of every registered project, auto-submitting the selection back as a GET param.
-  assert.match(html, /<form[^>]*method="get"[^>]*action="\/"[^>]*class="project-picker"/);
+  // The primary control is the repo dropdown trigger stating the current scope.
+  assert.match(html, /<button type="button" class="repo-trigger"[^>]*aria-haspopup="listbox"/);
+  assert.match(html, /<span class="repo-label">beta<\/span>/);
+  // The native <select> lives on inside <noscript> as the no-JS switch (posts back to GET /).
+  assert.match(html, /<noscript><form[^>]*method="get"[^>]*action="\/"[^>]*class="project-picker">/);
   assert.match(html, /<select name="project" onchange="this\.form\.submit\(\)">/);
-  // The single dropdown also switches back to the all-repos landing (submits an empty project).
   assert.match(html, /<option value="">All repos<\/option>/);
-  assert.match(html, /<option value="alpha">alpha<\/option>/);
   assert.match(html, /<option value="beta" selected>beta<\/option>/);
   assert.match(html, /<option value="gamma">gamma<\/option>/);
   // The selected project's own body still renders exactly as the single-project view.
   assert.match(html, /<section class="wave running"><div class="wave-head"><h2>Wave 1 <span class="wave-status running">running<\/span>/);
   // The parked card carries the project so the sheet routes its reply/carve to it.
   assert.match(html, /<a class="parked-card"[^>]*data-project="beta"/);
+});
+
+test("renderStatusPage's repo dropdown states the current scope as the heading trigger, not a native select", () => {
+  const html = renderStatusPage(
+    { project: "acme/tidepool", waves: [{ index: 0, status: "running", issues: [{ issueNumber: "201", status: "running" }] }], parked: [] },
+    { projects: [{ project: "jjforge/tidepool", runState: "parked" }, { project: "acme/tidepool", runState: "running" }], selected: "acme/tidepool" },
+  );
+
+  // The trigger is the page heading and the switcher in one control: a button, not a
+  // native <select>, carrying the full owner/name scope as its label plus a chevron.
+  assert.match(html, /<div class="repo-dropdown" data-repo-dropdown>/);
+  assert.match(html, /<button type="button" class="repo-trigger" id="repo-trigger" aria-haspopup="listbox" aria-expanded="false" aria-controls="repo-menu">/);
+  assert.match(html, /<span class="repo-label">acme\/tidepool<\/span>/);
+  assert.match(html, /<span class="repo-chevron" aria-hidden="true">▾<\/span>/);
+  // The full owner/name is the label — never abbreviated to just the repo name.
+  assert.doesNotMatch(html, /<span class="repo-label">tidepool<\/span>/);
+});
+
+test("renderLandingShell's repo dropdown is the All-repos heading, replacing the h1 + native select", () => {
+  const html = renderLandingShell([{ project: "jjforge/tidepool", runState: "running" }, { project: "acme/tidepool", runState: "idle" }]);
+
+  // The aggregate scope reads "All repos" as the trigger label — the heading itself.
+  assert.match(html, /<span class="repo-label">All repos<\/span>/);
+  assert.match(html, /<button type="button" class="repo-trigger"[^>]*aria-haspopup="listbox"/);
+  // The old separate <h1>All repos</h1> title is gone — the trigger is the heading now.
+  assert.doesNotMatch(html, /<h1>All repos<\/h1>/);
+});
+
+test("the repo dropdown menu rows carry a run-state dot, the owner/name label, and a note", () => {
+  const html = renderStatusPage(
+    { project: "acme/tidepool", waves: [{ index: 0, status: "running", issues: [] }], parked: [] },
+    { projects: [{ project: "jjforge/tidepool", runState: "parked" }, { project: "acme/tidepool", runState: "running" }], selected: "acme/tidepool" },
+  );
+
+  // The menu is a listbox; each repo is an option with a dot in its run-state colour,
+  // the full owner/name label, and its run state as the note.
+  assert.match(html, /<ul class="repo-menu" id="repo-menu" role="listbox" aria-label="Switch repo" tabindex="-1" hidden>/);
+  assert.match(html, /<li class="repo-option" role="option" aria-selected="false" data-project="jjforge\/tidepool" tabindex="-1"><span class="repo-dot parked" aria-hidden="true"><\/span><span class="repo-optlabel">jjforge\/tidepool<\/span><span class="repo-note">parked<\/span><\/li>/);
+  // The current scope's row is filled (aria-selected + a .selected class), no checkmark.
+  // The current scope's row is the fill (a .selected class + aria-selected), with no
+  // checkmark glyph inside the row — the fill alone marks it.
+  assert.match(html, /<li class="repo-option selected" role="option" aria-selected="true" data-project="acme\/tidepool" tabindex="-1"><span class="repo-dot running"[^>]*><\/span><span class="repo-optlabel">acme\/tidepool<\/span><span class="repo-note">running<\/span><\/li>/);
+});
+
+test("the repo dropdown's All-repos row uses the teal accent dot and the repo count as its note", () => {
+  const landing = renderLandingShell([{ project: "jjforge/tidepool", runState: "running" }, { project: "acme/tidepool", runState: "idle" }]);
+
+  // The aggregate has no run state of its own: its dot is the teal accent (`all`), its
+  // note the repo count, and on the landing it is the selected (current) scope.
+  assert.match(landing, /<li class="repo-option selected" role="option" aria-selected="true" data-project="" tabindex="-1"><span class="repo-dot all" aria-hidden="true"><\/span><span class="repo-optlabel">All repos<\/span><span class="repo-note">2 repos<\/span><\/li>/);
+  // The teal accent is the product accent, so the `all` dot reads --color-primary.
+  assert.match(landing, /\.repo-dot\.all \{ background: var\(--color-primary\); \}/);
+});
+
+test("the repo dropdown's CSS matches the spec: mono heading, borderless trigger, popover menu, touch rows", () => {
+  // The CSS is shared by both pages via TOP_BAR_STYLES, so assert it there once.
+  const css = TOP_BAR_STYLES;
+  // Trigger: no border, no background, no padding — just text + chevron.
+  assert.match(css, /\.repo-trigger \{[^}]*border: 0;[^}]*background: none;[^}]*padding: 0;/);
+  // Label: system-monospace stack (no web font), 600, 17px, tight tracking, truncates, never wraps.
+  assert.match(css, /\.repo-label \{[^}]*font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;[^}]*font-weight: 600;[^}]*font-size: 17px;[^}]*letter-spacing: -0.01em;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/);
+  // No IBM Plex Mono (the POC face) is added or referenced anywhere.
+  assert.doesNotMatch(css, /Plex Mono/i);
+  // Hover turns the label teal; the chevron is 13px, muted, and rotates 180° over 180ms when open.
+  assert.match(css, /\.repo-trigger:hover \.repo-label \{ color: var\(--color-primary\); \}/);
+  assert.match(css, /\.repo-chevron \{[^}]*font-size: 13px;[^}]*color: var\(--color-text-light-2\);[^}]*transition: transform 180ms;/);
+  assert.match(css, /\.repo-trigger\[aria-expanded="true"\] \.repo-chevron \{ transform: rotate\(180deg\); \}/);
+  // A visible focus ring — the trigger has no border to hang one on.
+  assert.match(css, /\.repo-trigger:focus-visible, \.repo-option:focus-visible \{ outline: 2px solid var\(--color-primary\);/);
+  // The menu is a popover: 8px below the trigger, 260px min, layered above cards (z 5)
+  // but below the issue sheet (z 10), on the box surface with the spec border/radius/shadow.
+  assert.match(css, /\.repo-menu \{[^}]*top: calc\(100% \+ 8px\);[^}]*z-index: 5;[^}]*min-width: 260px;[^}]*background: var\(--color-box-body\);[^}]*border: 1px solid var\(--color-secondary\);[^}]*border-radius: var\(--border-radius-medium\);[^}]*box-shadow: 0 14px 40px #0009;/);
+  // Never z-index 30, and never above the sheet's z-index 10 (the sheet must cover the menu).
+  assert.doesNotMatch(css, /\.repo-menu \{[^}]*z-index: 30/);
+  assert.match(ISSUE_DETAIL_SHEET_STYLES, /\.issue-detail \{[^}]*z-index: 10/);
+  // Rows: flex, selected and hovered share the fill; the note is muted, the label mono.
+  assert.match(css, /\.repo-option \{[^}]*display: flex;/);
+  assert.match(css, /\.repo-option:hover, \.repo-option\.selected \{ background: var\(--color-chip-hover\); \}/);
+  assert.match(css, /\.repo-note \{[^}]*font-size: 11px;[^}]*color: var\(--color-dim\);/);
+  // Touch rows are ≥44px; the label steps to 15px on a phone.
+  assert.match(css, /@media \(pointer: coarse\) \{ \.repo-option \{ min-height: 44px; \} \}/);
+  assert.match(css, /@media \(max-width: 640px\) \{ \.repo-label \{ font-size: 15px; \} \}/);
+});
+
+test("both pages wire the repo dropdown's keyboard, scope-switch, and scoped click-outside behavior (#88)", () => {
+  const landing = renderLandingShell([{ project: "jjforge/tidepool", runState: "running" }]);
+  const campaign = renderStatusPage({ project: "beta", waves: [], parked: [] }, { projects: [{ project: "alpha", runState: "idle" }, { project: "beta", runState: "running" }], selected: "beta" });
+  // One shared script, emitted by both pages so they can't drift.
+  for (const page of [landing, campaign]) assert.ok(page.includes(REPO_DROPDOWN_SCRIPT), "every page includes the shared repo-dropdown script");
+
+  const js = REPO_DROPDOWN_SCRIPT;
+  // Trigger toggles the menu (aria-expanded + hidden).
+  assert.match(js, /repoTrigger\.addEventListener\("click", \(\) => \(repoIsOpen\(\) \? repoClose\(\) : repoOpen\(\)\)\)/);
+  assert.match(js, /setAttribute\("aria-expanded", "true"\); repoMenu\.hidden = false;/);
+  // Choosing a different scope navigates (the switch); the current scope is a no-op that just closes.
+  assert.match(js, /if \(option\.getAttribute\("aria-selected"\) === "true"\) \{ repoClose\(\); return; \}/);
+  assert.match(js, /location\.href = project \? "\/\?project=" \+ encodeURIComponent\(project\) : "\/";/);
+  // Keyboard: Enter/Space/↑↓ open+move, Enter selects, Escape closes and restores focus to the trigger, Tab is trapped.
+  assert.match(js, /event\.key === "Escape".*repoClose\(\);/);
+  assert.match(js, /event\.key === "ArrowDown".*repoFocus\(repoActive \+ 1\)/);
+  assert.match(js, /event\.key === "ArrowUp".*repoFocus\(repoActive - 1\)/);
+  assert.match(js, /event\.key === "Tab".*repoFocus\(repoActive \+ \(event\.shiftKey \? -1 : 1\)\)/);
+  assert.match(js, /if \(restore !== false\) repoTrigger\.focus\(\);/);
+  // Click-outside closes, scoped to the dropdown's own subtree — not "any non-button".
+  assert.match(js, /if \(repoIsOpen\(\) && !repoRoot\.contains\(event\.target\)\) repoClose\(false\);/);
+});
+
+test("switching scope resets the view: it navigates (fresh sheet) and closed-wave state is per-repo", () => {
+  const html = renderStatusPage(
+    { project: "beta", waves: [{ index: 0, status: "closed", issues: [{ issueNumber: "201", status: "completed" }] }], parked: [] },
+    { projects: [{ project: "alpha", runState: "idle" }, { project: "beta", runState: "running" }], selected: "beta" },
+  );
+  // A scope switch is a navigation, so the target page loads fresh — the issue sheet
+  // starts hidden and nothing is pre-opened.
+  assert.match(REPO_DROPDOWN_SCRIPT, /location\.href = project \? "\/\?project=" \+ encodeURIComponent\(project\) : "\/";/);
+  assert.match(html, /<div id="issue-detail" class="issue-detail"[^>]*hidden>/);
+  // Expanded closed-waves are persisted per-repo, so a different scope reads its own
+  // (collapsed) set — wave labels aren't unique across repos, so this can't expand the wrong wave.
+  assert.match(html, /const storeKey = "sctdd:closed-waves:" \+ waveBar\.dataset\.project;/);
 });
 
 test("renderStatusPage lists archived runs and renders a selected one read-only below the live run", () => {
@@ -1958,8 +2078,11 @@ test("renderStatusPage renders no archived-runs section when a project has none"
 test("renderStatusPage omits the project dropdown when no project list is given", () => {
   const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
 
+  assert.doesNotMatch(html, /class="repo-dropdown"/);
   assert.doesNotMatch(html, /class="project-picker"/);
   assert.doesNotMatch(html, /<select name="project"/);
+  // A single-project view with no repo list falls back to a plain <h1> heading.
+  assert.match(html, /<h1>demo<\/h1>/);
 });
 
 test("renderStatusPage uses the jjforge dark palette", () => {

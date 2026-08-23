@@ -154,6 +154,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The dashboard's native `<select>` project picker is replaced by a **custom repo
+  dropdown** (#88) — the toolbar's page heading and the repo switcher in one control,
+  shared by the landing and the repo page (#81). Its `.repo-trigger` states the
+  current scope as the largest text in the toolbar (`All repos` for the aggregate, the
+  full `owner/name` for a repo; mono/600/17px, 15px on mobile, hover teal) and toggles
+  a `role="listbox"` popover whose rows carry a run-state status dot (from the shared
+  palette #83; `All repos` the teal accent), the `owner/name` label, and a note (the
+  repo's run state, or the repo count for `All repos`); the current scope's row is
+  filled. Full keyboard/ARIA support (`aria-haspopup`/`aria-expanded`/`aria-controls`,
+  Enter/Space/↑↓/Enter/Escape, focus trapped while open and restored on close, a
+  visible focus ring), 44px touch rows, and a menu layered above the cards but below
+  the issue sheet (so opening the sheet or switching scope closes it). Switching scope
+  navigates (resetting the open sheet and per-repo closed-wave state); a `<noscript>`
+  keeps the native `<select>` as the no-JS switch.
+
 - `README.md` is brought back in line with the current CLI and layout (#86). The
   Telegram sections now document the host-level `gateway` daemon (sole Telegram
   consumer and sender) and its systemd user service in place of the retired

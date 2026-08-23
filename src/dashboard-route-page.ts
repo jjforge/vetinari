@@ -1,5 +1,5 @@
 import { listProjects } from "./registry.ts";
-import { archiveStatusConfig, buildAllStatus, buildStatus, listArchivedRuns, selectStatus } from "./dashboard-model.ts";
+import { archiveStatusConfig, buildAllStatus, buildStatus, listArchivedRuns, projectRunState, selectStatus } from "./dashboard-model.ts";
 import { renderLandingShell, renderStatusPage } from "./dashboard-render.ts";
 import type { RouteHandler } from "./dashboard-http.ts";
 
@@ -17,11 +17,14 @@ export const handlePage: RouteHandler = (req, res, url, deps) => {
   if (!(req.method === "GET" && (url.pathname === "/" || req.url === undefined))) return false;
   res.setHeader("content-type", "text/html; charset=utf-8");
   const statuses = buildAllStatus(listProjects(deps.configDir));
+  // The repo dropdown, on both pages, is one option per registered project carrying
+  // its rolled-up run state (ADR 0007) so each menu row can dot + note it.
+  const repos = statuses.map((s) => ({ project: s.project, runState: projectRunState(s) }));
   // No project selected → the all-repos landing shell. Also the empty-registry
   // fallback, so a fresh host lands on the (empty) landing rather than a stub page.
   const project = url.searchParams.get("project");
   if (!project || !statuses.length) {
-    res.end(renderLandingShell(statuses.map((s) => s.project)));
+    res.end(renderLandingShell(repos));
     return true;
   }
   const selected = selectStatus(statuses, project);
@@ -35,7 +38,7 @@ export const handlePage: RouteHandler = (req, res, url, deps) => {
   const archived = match ? buildStatus(archiveStatusConfig(selected.project, match.file)) : undefined;
   res.end(
     renderStatusPage(selected, {
-      projects: statuses.map((s) => s.project),
+      projects: repos,
       selected: selected.project,
       carve: true,
       archivedRuns: archivedRuns.map((r) => ({ run: r.run, summary: r.summary, name: r.name })),

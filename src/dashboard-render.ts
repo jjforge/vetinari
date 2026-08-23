@@ -257,6 +257,11 @@ export const renderLandingShell = (projects: string[]) => `<!doctype html>
   .counter-toggle:not(:disabled) .counter-value::after { content: " ▸"; color: var(--color-text-light-2); font-size: .9em; }
   .counter-toggle[aria-expanded="true"] .counter-value::after { content: " ▾"; }
   .counter-label { color: var(--color-text-light-2); font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; margin-top: .25rem; }
+  /* Each counter value reads in its status colour; queued stays neutral (#80). */
+  [data-counter="working"] .counter-value { color: var(--color-blue); } [data-counter="parked"] .counter-value { color: var(--color-yellow); } [data-counter="mergedToday"] .counter-value { color: var(--color-green); }
+  /* Parked is the one actionable counter — gold border while it holds questions (enabled) (#80). */
+  .counter-toggle[data-counter="parked"]:not(:disabled) { border-color: var(--color-yellow); }
+  .counter-sub { color: var(--color-text-light-2); font-size: .75rem; margin-top: .2rem; }
   .parked-queue { display: grid; gap: .5rem; margin: -0.5rem 0 1.25rem; }
   /* A grid display beats the UA [hidden] rule, so the collapse needs it back explicitly. */
   .parked-queue[hidden] { display: none; }
@@ -278,7 +283,13 @@ export const renderLandingShell = (projects: string[]) => `<!doctype html>
   .run-state.completed { border-color: var(--color-green); color: var(--color-green); }
   .card-campaign { color: var(--color-primary); font-weight: 600; margin: .5rem 0 .1rem; }
   .card-meta { color: var(--color-text-light); font-size: .9rem; display: flex; flex-wrap: wrap; gap: .3rem .9rem; margin: .35rem 0; }
-  .card-tally { color: var(--color-text-light-2); font-size: .85rem; }
+  /* A percentMerged-width progress bar under the meta line, coloured by run state (#80). */
+  .progress { height: .4rem; background: var(--color-secondary); border-radius: 999px; overflow: hidden; margin: .1rem 0 .55rem; }
+  .progress-fill { height: 100%; border-radius: 999px; background: var(--color-text-light-2); }
+  .progress-fill.running { background: var(--color-blue); } .progress-fill.parked { background: var(--color-yellow); } .progress-fill.completed { background: var(--color-green); }
+  /* The tally reads as status-dot pill chips, matching the campaign page's chips (#80). */
+  .card-tally { display: flex; flex-wrap: wrap; gap: .4rem; color: var(--color-text-light); font-size: .8rem; }
+  .tally-chip { display: inline-flex; align-items: center; gap: .35rem; border: 1px solid var(--color-secondary); border-radius: 999px; padding: .15rem .5rem; background: var(--color-box-header); }
   .card-last { color: var(--color-text-light-2); font-size: .85rem; margin-top: .5rem; white-space: pre-line; }
   .empty { color: var(--color-text-light-2); }
   .feed { margin-top: 2rem; border-top: 1px solid var(--color-light-border); padding-top: 1rem; }
@@ -302,7 +313,7 @@ export const renderLandingShell = (projects: string[]) => `<!doctype html>
      campaign refresh view (#74). Dot colours are scoped to .dot so they never tint
      the run-state pills. (Kept in sync with renderStatusPage by hand for now — #76.) */
   .dot { width: .75rem; height: .75rem; border-radius: 999px; display: inline-block; }
-  .dot.completed { background: var(--color-green); } .dot.parked { background: var(--color-yellow); } .dot.failure { background: var(--color-red); } .dot.running { background: var(--color-blue); } .dot.unstarted { background: var(--color-text-light-2); } .dot.carved { background: var(--color-carved); }
+  .dot.completed { background: var(--color-green); } .dot.parked { background: var(--color-yellow); } .dot.failure { background: var(--color-red); } .dot.running { background: var(--color-blue); } .dot.unstarted { background: var(--color-text-light-2); } .dot.queued { background: var(--color-text-light-2); } .dot.carved { background: var(--color-carved); }
   textarea { width: 100%; max-width: 100%; min-height: 7rem; margin: .5rem 0; color: var(--color-text); background: var(--color-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: .75rem; }
   .carve-panel { display: flex; align-items: center; gap: .5rem; }
   .carve-panel[hidden] { display: none; }
@@ -361,10 +372,10 @@ export const renderLandingShell = (projects: string[]) => `<!doctype html>
   .map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`)
   .join("")}</select></form></div>
 <section class="counters">
-  <div class="counter" data-counter="working"><div class="counter-value">–</div><div class="counter-label">Agents working</div></div>
-  <button type="button" class="counter counter-toggle" data-counter="parked" disabled aria-controls="parked-queue"><div class="counter-value">–</div><div class="counter-label">Parked</div></button>
-  <div class="counter" data-counter="queued"><div class="counter-value">–</div><div class="counter-label">Queued</div></div>
-  <div class="counter" data-counter="mergedToday"><div class="counter-value">–</div><div class="counter-label">Merged today</div></div>
+  <div class="counter" data-counter="working"><div class="counter-value">–</div><div class="counter-label">Agents working</div><div class="counter-sub" data-counter-sub="working"></div></div>
+  <button type="button" class="counter counter-toggle" data-counter="parked" disabled aria-controls="parked-queue"><div class="counter-value">–</div><div class="counter-label">Parked</div><div class="counter-sub" data-counter-sub="parked"></div></button>
+  <div class="counter" data-counter="queued"><div class="counter-value">–</div><div class="counter-label">Queued</div><div class="counter-sub" data-counter-sub="queued"></div></div>
+  <div class="counter" data-counter="mergedToday"><div class="counter-value">–</div><div class="counter-label">Merged today</div><div class="counter-sub" data-counter-sub="mergedToday"></div></div>
 </section>
 <section id="parked-queue" class="parked-queue" hidden aria-label="Parked questions across all repos"></section>
 <section id="cards" class="cards"><p class="empty">Loading…</p></section>
@@ -616,6 +627,21 @@ export const renderLandingShell = (projects: string[]) => `<!doctype html>
       const value = document.querySelector('[data-counter="' + key + '"] .counter-value');
       if (value) value.textContent = String(val);
     }
+    // Each counter's sublabel, derived client-side from the same payload (#80): working
+    // names how many repos have a running agent, parked how long the oldest question has
+    // waited (the queue is oldest-first), and the other two carry fixed context.
+    const repos = (data.projects || []).filter((p) => p.tally && p.tally.running > 0).length;
+    const oldestParked = (data.parked || [])[0];
+    const subs = {
+      working: "across " + repos + " repo" + (repos === 1 ? "" : "s"),
+      parked: oldestParked ? "oldest " + fmtWaited(oldestParked.parkedAt) : "",
+      queued: "in later waves",
+      mergedToday: "issues closed",
+    };
+    for (const [key, text] of Object.entries(subs)) {
+      const sub = document.querySelector('[data-counter-sub="' + key + '"]');
+      if (sub) sub.textContent = text;
+    }
     renderParked(data.parked || []);
     const cards = document.getElementById("cards");
     cards.replaceChildren();
@@ -631,7 +657,21 @@ export const renderLandingShell = (projects: string[]) => `<!doctype html>
       const meta = el("div", "card-meta");
       meta.append(el("span", null, fmtWave(p.wave)), el("span", null, p.percentMerged + "% merged"));
       card.append(meta);
-      card.append(el("div", "card-tally", p.tally.running + " running · " + p.tally.parked + " parked · " + p.tally.queued + " queued"));
+      // A percentMerged-width bar under the meta line, filled in the run state's colour (#80).
+      const progress = el("div", "progress");
+      const fill = el("div", "progress-fill " + p.runState);
+      fill.style.width = p.percentMerged + "%";
+      progress.append(fill);
+      card.append(progress);
+      // The tally reads as status-dot chips rather than plain text (#80): running blue,
+      // parked yellow, queued neutral — the dots scoped to .dot so they don't tint the pills.
+      const tally = el("div", "card-tally");
+      for (const [bucket, count] of [["running", p.tally.running], ["parked", p.tally.parked], ["queued", p.tally.queued]]) {
+        const chip = el("span", "tally-chip");
+        chip.append(el("span", "dot " + bucket), el("span", null, count + " " + bucket));
+        tally.append(chip);
+      }
+      card.append(tally);
       card.append(el("div", "card-last", p.lastEvent));
       cards.append(card);
     }

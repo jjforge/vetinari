@@ -366,6 +366,56 @@ test("renderLandingShell colours each project card's highlight by run state (#75
   assert.match(html, /\.card\.idle \{ border-top-color: var\(--color-text-light-2\); \}/);
 });
 
+test("renderLandingShell draws each card a run-state-coloured progress bar sized by percent merged (#80)", () => {
+  const html = renderLandingShell(["alpha"]);
+  // The card renders a progress track with a fill sized to percentMerged and classed by run state,
+  // sitting beneath the wave/percent meta line.
+  assert.match(html, /el\("div", "progress-fill " \+ p\.runState\)/);
+  assert.match(html, /\.style\.width = p\.percentMerged \+ "%"/);
+  // The fill is coloured by run state: running blue, parked yellow, completed green; idle stays grey.
+  assert.match(html, /\.progress-fill\.running \{ background: var\(--color-blue\); \}/);
+  assert.match(html, /\.progress-fill\.parked \{ background: var\(--color-yellow\); \}/);
+  assert.match(html, /\.progress-fill\.completed \{ background: var\(--color-green\); \}/);
+});
+
+test("renderLandingShell renders the card tally as status-dot chips, not plain text (#80)", () => {
+  const html = renderLandingShell(["alpha"]);
+  // The tally builds one pill chip per bucket, each with a status dot scoped to .dot.
+  assert.match(html, /el\("span", "tally-chip"\)/);
+  assert.match(html, /el\("span", "dot " \+ /);
+  // The chip treatment matches the campaign page's chips — a bordered pill.
+  assert.match(html, /\.tally-chip \{[^}]*border-radius: 999px/);
+  // The queued dot is neutral grey; running/parked reuse the shared .dot colours.
+  assert.match(html, /\.dot\.queued \{ background: var\(--color-text-light-2\); \}/);
+  // The old plain-text tally string is gone.
+  assert.doesNotMatch(html, /" running · " \+ p\.tally\.parked/);
+});
+
+test("renderLandingShell colours the counter values and highlights the parked counter when it has questions (#80)", () => {
+  const html = renderLandingShell(["alpha"]);
+  // Each counter value reads in its status colour: working blue, parked yellow, merged-today green; queued stays neutral.
+  assert.match(html, /\[data-counter="working"\] \.counter-value \{ color: var\(--color-blue\); \}/);
+  assert.match(html, /\[data-counter="parked"\] \.counter-value \{ color: var\(--color-yellow\); \}/);
+  assert.match(html, /\[data-counter="mergedToday"\] \.counter-value \{ color: var\(--color-green\); \}/);
+  // The parked counter carries a gold border only while it is actionable — enabled, i.e. parked > 0.
+  assert.match(html, /\.counter-toggle\[data-counter="parked"\]:not\(:disabled\) \{[^}]*border-color: var\(--color-yellow\)/);
+});
+
+test("renderLandingShell gives each counter a payload-derived sublabel (#80)", () => {
+  const html = renderLandingShell(["alpha"]);
+  // Each counter carries a sublabel element the client fills from the payload.
+  assert.match(html, /data-counter-sub="working"/);
+  assert.match(html, /data-counter-sub="parked"/);
+  assert.match(html, /data-counter-sub="queued"/);
+  assert.match(html, /data-counter-sub="mergedToday"/);
+  // working counts repos with a running agent; parked reads the oldest parked question's wait;
+  // queued and merged-today are fixed context lines.
+  assert.match(html, /across " \+ /);
+  assert.match(html, /oldest " \+ fmtWaited/);
+  assert.match(html, /in later waves/);
+  assert.match(html, /issues closed/);
+});
+
 test("renderLandingShell wires live SSE updates, an updated-ago readout, and a buffered pause", () => {
   const html = renderLandingShell(["alpha", "beta"]);
   // Subscribes to the one-way SSE stream and re-reads the landing as events land.

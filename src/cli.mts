@@ -7,7 +7,7 @@ import { baseline, campaign, queue, requireTelegram, tgTest } from "./modes.ts";
 import { gateway } from "./gateway.ts";
 import { applyCarve, carveClosure, computeCarve, normalize } from "./carve.ts";
 import { describePlan, planCampaign, suggestCampaignName, underspecifiedPromptFor, waveArgs, type UnderspecifiedDecision } from "./plan.ts";
-import { defaultFileSet } from "./fileset.ts";
+import { defaultFileSet, ticketProse } from "./fileset.ts";
 import { applyLayoutMigration, computeLayoutMigration, describeMigration, scanLayout } from "./migrate.ts";
 import { applyInit, computeInit, describeInit, scanInit } from "./init.ts";
 import { archiveRun } from "./archive.ts";
@@ -366,10 +366,12 @@ switch (mode) {
 
     // Which files each ticket touches: the project's resolver, or the shipped
     // cites-from-body default, validated against the current tree at plan time.
+    // `ticketProse` narrows what the resolver scans to the author's title+body,
+    // so a stray filename-shaped token in any comment cannot poison confidence.
     const resolveFileSet = cfg.fileSet ?? defaultFileSet();
     const plan = await planCampaign(ids, {
       blockedBy: cfg.blockedBy,
-      fileSet: async (id) => resolveFileSet(await cfg.fetchTask(id)),
+      fileSet: async (id) => resolveFileSet(ticketProse(await cfg.fetchTask(id))),
       onUnderspecified: underspecifiedPromptFor({ flag: onUnderspecified, isTTY: Boolean(process.stdin.isTTY), ask: askUnderspecified }),
     });
 

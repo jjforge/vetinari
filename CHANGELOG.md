@@ -143,6 +143,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `defaultFileSet` was all-or-nothing over a ticket's whole body, so one
+  incidental filename-shaped token — an env file, a config name, a spec/ADR link
+  whose basename the tree lacks — flipped `confident` to `false` even when the
+  ticket plainly cited its real files, and `campaign-plan` could schedule nothing
+  (#37). It now reads an explicit `Touches:` / `Files:` marker line first (only
+  that line's cites count, so incidental prose no longer poisons confidence),
+  anchored at a line start (an inline mention of the phrase is not the marker) with
+  the last marker line winning; it falls back to the whole-body scan when no marker
+  is present. `campaign-plan` also now feeds the resolver the ticket's title+body
+  only (via `ticketProse`), so a stray token in any comment can no longer poison
+  confidence. The strict confidence contract is unchanged — a cited basename the
+  tree lacks still yields `confident: false`, preserving the under-specified halt.
+  This repo's own `sandcastle/config.mts` drops its bespoke `fileSet` override in
+  favour of the reworked default, so there is one resolver rather than two that
+  drift.
+
 - The gateway never delivered a project's Telegram messages when its
   `orchestrator.env` annotated the credentials with inline comments (the shipped
   template's own style: `SANDCASTLE_TELEGRAM_BOT_TOKEN=<token>  # from @BotFather`)

@@ -53,6 +53,49 @@ function citedBasenames(body: string): string[] {
   return [...seen];
 }
 
+/**
+ * An explicit file-set marker LINE, e.g. `Touches (existing files): \`a.ts\`, b/c.ts`.
+ * Anchored at the start of a line (`m` flag) so an inline mention of the phrase in
+ * prose — "reads the `Touches:` marker" — is not mistaken for the marker itself.
+ * A leading list bullet and surrounding bold markers are tolerated; group 1 is the
+ * tail after the colon, from which the cites are read.
+ */
+const MARKER_RE = /^[ \t]*(?:[-*+]\s+)?\**(?:Touches|Files)\b[^:\n]*:(.*)$/gim;
+
+/**
+ * The cites on a body's marker line, or null when the body carries no marker line.
+ * When several qualify, the LAST wins — a later, corrected marker line supersedes
+ * an earlier one. An empty result (`[]`) means a marker line is present but cites
+ * nothing; the caller keeps that distinct from "no marker line" (null).
+ */
+function markerCites(body: string): string[] | null {
+  let tail: string | null = null;
+  for (const m of body.matchAll(MARKER_RE)) tail = m[1];
+  return tail === null ? null : citedBasenames(tail);
+}
+
+/**
+ * The ticket text the resolver should scan, given whatever `fetchTask` returned.
+ * A GitHub `fetchTask` yields `{ title, body, comments, labels }` JSON; the file-set
+ * lives in the author's own title+body, so comments are dropped — a stray
+ * filename-shaped token in any comment must not poison confidence (the original
+ * whole-body scan counted them). Non-JSON (or JSON without a body/title) passes
+ * through unchanged, so a plain-string tracker still works. Kept beside the
+ * resolver so "what feeds the file-set scan" is one concern; the resolver itself
+ * stays pure over the string this returns.
+ */
+export function ticketProse(task: string): string {
+  try {
+    const parsed = JSON.parse(task) as { title?: unknown; body?: unknown };
+    if (parsed && typeof parsed === "object" && (typeof parsed.body === "string" || typeof parsed.title === "string")) {
+      return [parsed.title, parsed.body].filter((s): s is string => typeof s === "string").join("\n\n");
+    }
+  } catch {
+    // not JSON — fall through and scan the raw text
+  }
+  return task;
+}
+
 /** Every basename present anywhere in the tree, skipping `.git`/`node_modules`. */
 function treeBasenames(root: string): Set<string> {
   const names = new Set<string>();
@@ -68,19 +111,32 @@ function treeBasenames(root: string): Set<string> {
 }
 
 /**
- * The shipped generic `fileSet` resolver: parse a ticket body's cited paths,
- * normalize each to its basename, and validate against the tree at `root` (the
- * cwd by default — the tree the campaign will actually run on). The tree is
- * snapshotted once, when the resolver is built. `confident` is false when the
- * ticket cites nothing, or cites a basename the tree does not have — a stale or
- * missing note the planner must not guess past. Exported alongside
- * `githubBlockedBy` as a ready implementation a project can use or wrap.
+ * The shipped generic `fileSet` resolver, normalizing each cite to its basename
+ * and validating against the tree at `root` (the cwd by default — the tree the
+ * campaign will actually run on, snapshotted once when the resolver is built).
+ *
+ * Two signals, in order:
+ *   - **Marker line (primary).** When the ticket carries an explicit
+ *     `Touches:` / `Files:` marker line, only *its* cites count. This is what
+ *     lets a ticket that names its real files alongside incidental non-file prose
+ *     — an env file, a config name, a spec link — still resolve confidently: the
+ *     prose is off the marker line, so it is ignored.
+ *   - **Whole-body scan (fallback).** With no marker line, every cited path in the
+ *     text is taken (the original behaviour). This stays all-or-nothing, so an
+ *     incidental token in an unmarked body still forbids confidence — add a marker
+ *     line to pin such a ticket down.
+ *
+ * `confident` is false when nothing is cited, or when a cited basename is absent
+ * from the tree — a stale or wrong note the planner must not guess past (this
+ * contract is deliberately strict; leniency would silently drop a moved/mistyped
+ * real file and schedule a colliding wave). Exported alongside `githubBlockedBy`
+ * as a ready implementation a project can use or wrap.
  */
 export const defaultFileSet =
   (root: string = process.cwd()): ((ticket: string) => FileSet) =>
   (ticket: string): FileSet => {
     const present = treeBasenames(root);
-    const cited = citedBasenames(ticket);
+    const cited = markerCites(ticket) ?? citedBasenames(ticket);
     const files = cited.filter((name) => present.has(name));
     const confident = cited.length > 0 && files.length === cited.length;
     return { files, confident };

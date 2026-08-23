@@ -45,6 +45,9 @@ export const handleEvents: RouteHandler = (req, res, url, deps) => {
   };
 
   const push = (project: string, logFile: string) => {
+    // A watch callback can fire in the gap between the client disconnecting and the
+    // watchers closing; never write to an already-ended response.
+    if (res.writableEnded) return;
     const { events, offset } = appendedEvents(readLog(logFile), offsets.get(project) ?? 0);
     offsets.set(project, offset);
     if (events.length) res.write(`data: ${JSON.stringify({ project, events })}\n\n`);

@@ -808,7 +808,7 @@ ${TOP_BAR_STYLES}
   .card-campaign { color: var(--color-primary); font-weight: 600; margin: .5rem 0 .1rem; }
   .card-meta { color: var(--color-text-light); font-size: .9rem; display: flex; flex-wrap: wrap; gap: .3rem .9rem; margin: .35rem 0; }
   /* A percentMerged-width progress bar under the meta line, coloured by run state (#80). */
-  .progress { height: .4rem; background: var(--color-secondary); border-radius: 999px; overflow: hidden; margin: .1rem 0 .55rem; }
+  .progress-track { height: .4rem; background: var(--color-secondary); border-radius: 999px; overflow: hidden; margin: .1rem 0 .55rem; }
   .progress-fill { height: 100%; border-radius: 999px; background: var(--color-dim); }
   .progress-fill.running { background: var(--color-blue); } .progress-fill.parked { background: var(--color-yellow); } .progress-fill.completed { background: var(--color-green); }
   /* The tally reads as status-dot pill chips, matching the campaign page's chips (#80). */
@@ -965,7 +965,7 @@ ${REPO_DROPDOWN_SCRIPT}
       meta.append(el("span", null, fmtWave(p.wave)), el("span", null, p.percentMerged + "% merged"));
       card.append(meta);
       // A percentMerged-width bar under the meta line, filled in the run state's colour (#80).
-      const progress = el("div", "progress");
+      const progress = el("div", "progress-track");
       const fill = el("div", "progress-fill " + p.runState);
       fill.style.width = p.percentMerged + "%";
       progress.append(fill);

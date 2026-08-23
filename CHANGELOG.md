@@ -260,7 +260,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   strikethrough through the glyphs (#85). Each feed kind now reads its comms
   category as a full-strength leading dot with the label at `--color-text`,
   legible and consistent across every category (matching the shared dot colour
-  model, #83).
+  model, #83). A follow-up removed the remaining squish: the card progress bar's
+  bare `.progress` selector (#80) also matched the feed's `feed-kind progress`
+  label, boxing and clipping it inside a `.4rem`-tall `--color-secondary`
+  background. The bar's selector is now scoped to `.progress-track`, so it no
+  longer collides with the feed category class `progress` (#85).
 
 - `defaultFileSet` was all-or-nothing over a ticket's whole body, so one
   incidental filename-shaped token — an env file, a config name, a spec/ADR link

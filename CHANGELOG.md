@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per-task identity (ADR/#55 dropped the anonymous-pool agent id, so no fabricated
   `agent-N` is re-introduced) — and stays hidden when no such path exists. The
   Turns tile now reads `N turns · Mm` (its working duration) rather than a bare
-  count; the Elapsed tile is unchanged.
+  count.
 
 - A **host slot budget** (#87, ADR 0010): an opt-in host-side ceiling on live
   containers across every project, honoured by a cooperative filesystem lease each
@@ -161,6 +161,18 @@ repos` (repos with a running agent), parked `oldest <Nm>` (the oldest parked
   the change simply carry no summary and reconstruct as before.
 
 ### Changed
+
+- The issue-detail sheet's parked treatment now matches the POC's hierarchy (#92).
+  Reply options render as **full-width lettered rows** — the `A:`/`B)` marker pulled
+  into a left margin (positional `A/B/C` fallback when the option carries none), the
+  label filling the rest, stacked one per line rather than inline wrapping pills;
+  clicking a row still fills the reply field with the full original option. The
+  redundant **Elapsed** meta tile is **removed** — the Turns tile already carries the
+  one duration signal (`N turns · Mm`), which now **pluralizes** (`1 turn`, `2 turns`,
+  no more `1 turns`). The parked block leads with the directive heading **"PARKED —
+  NEEDS YOUR ANSWER"** (was "Reply & resume"), and the turn log is its own labeled
+  **"Agent turns"** section, distinct from the meta tiles. No agent identity is shown
+  (the AGENT tile stays omitted, ADR/#55).
 
 - Codified the dashboard CSS convention that a **status/category word only ever
   appears in a scoped selector** — `.dot.running`, `.feed-kind.progress`,

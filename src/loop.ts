@@ -31,7 +31,19 @@ export interface ResumeEntry {
 }
 
 export const answerPromptFor = (text: string) =>
-  `Answer from the human to your question:\n\n${text}\n\nContinue the work. The signal contract is unchanged: ${DONE} when done, ${BLOCKED} if blocked again.`;
+  `Answer from the human to your question:\n\n${text}\n\nContinue the work. The signal contract is unchanged: ${DONE} when done, ${BLOCKED} if blocked again — and end this turn with a <turn-summary> line as before.`;
+
+/**
+ * The one-line, agent-authored account of what happened this turn, pulled from
+ * its own `<turn-summary>` tag (ADR 0009). Distinct from the `<summary>` nested
+ * inside a `<question>` — that is the question's headline, not the turn's. Old
+ * logs predating the contract carry no tag and yield undefined, so their `turn`
+ * events reconstruct with no summary rather than an invented one.
+ */
+export const extractTurnSummary = (stdout: string): string | undefined => {
+  const m = stdout.match(/<turn-summary>([\s\S]*?)<\/turn-summary>/);
+  return m ? m[1].trim() : undefined;
+};
 
 const extractQuestion = (stdout: string) => {
   const m = stdout.match(/<question>([\s\S]*?)<\/question>/);
@@ -110,7 +122,7 @@ export async function runLoop(cfg: ResolvedConfig, taskId: string, entry?: Resum
 
       for (let turn = 0; turn < cfg.maxTurns; turn++) {
         const sessionId = r.iterations.at(-1)?.sessionId;
-        log("turn", { taskId, turn, signal: r.completionSignal, sessionId, usage: usageOf(r), commits: r.commits?.length ?? 0 });
+        log("turn", { taskId, turn, signal: r.completionSignal, sessionId, usage: usageOf(r), commits: r.commits?.length ?? 0, summary: extractTurnSummary(r.stdout ?? "") });
 
         if (r.completionSignal === BLOCKED) {
           await park(cfg, { taskId, reason: "blocked", sessionId, branch: sbx.branch, question: extractQuestion(r.stdout ?? "") });
@@ -159,7 +171,7 @@ export async function runLoop(cfg: ResolvedConfig, taskId: string, entry?: Resum
           ...common,
           maxIterations: 1,
           resumeSession: resumeSessionId,
-          prompt: `The orchestrator ran the verification suite and it is red. Fix the implementation — do not weaken the tests.\n\n${report}\n\nWhen you believe it is fixed, emit ${DONE} again.`,
+          prompt: `The orchestrator ran the verification suite and it is red. Fix the implementation — do not weaken the tests.\n\n${report}\n\nWhen you believe it is fixed, emit ${DONE} again, and end this turn with a <turn-summary> line as before.`,
         });
       }
 

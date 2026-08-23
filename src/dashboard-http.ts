@@ -1,0 +1,47 @@
+import type { IncomingMessage, ServerResponse } from "node:http";
+import type { CarveClosure } from "./dashboard-carve.ts";
+
+/** How the dumb-router shells a project's own CLI (`answer`, `carve`) in its
+ * root — the injectable seam every route that spawns a child shares, so tests can
+ * capture the spawn instead of running it. */
+export type SpawnDashboardChild = (
+  command: string,
+  args: string[],
+  options: { cwd: string; stdio: readonly (string | number)[] },
+) => unknown;
+
+/**
+ * The shared dependencies every dashboard route handler is wired with by the
+ * composer (`serveAllStatus`): the host config dir the registry lives in, and the
+ * dumb-router seams for spawning a project's CLI and computing a carve closure or
+ * preview against its own install (ADR 0002). The composer resolves the defaults
+ * once and passes this to each handler.
+ */
+export interface DashboardDeps {
+  configDir: string;
+  spawn: SpawnDashboardChild;
+  carvePreview: (projectRoot: string, taskId: string) => Promise<string | null>;
+  carveClosure: (projectRoot: string, taskId: string) => Promise<CarveClosure | null>;
+}
+
+/**
+ * A single dashboard surface's handler: it inspects the request and, if it owns
+ * that method+path, writes the response and returns true; otherwise it returns
+ * false untouched so the composer can try the next one. Keeping the match inside
+ * each handler is what lets the composer stay a thin, order-only router.
+ */
+export type RouteHandler = (
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+  deps: DashboardDeps,
+) => boolean | Promise<boolean>;
+
+export const readBody = (req: NodeJS.ReadableStream) =>
+  new Promise<string>((resolve, reject) => {
+    let body = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => resolve(body));
+    req.on("error", reject);
+  });

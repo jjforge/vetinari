@@ -140,6 +140,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The repo/campaign page's closed waves now expand and collapse the way the design
+  intends (#82), a frontend interaction + render change only. Each closed wave is a
+  compact toggle chip (`✓ Wave N  M/M`) in a row under the campaign-meta line, with a
+  chevron that flips `›`⇄`⌄` and a green accent while its wave is open; clicking a
+  chip reveals that wave's *full* card — the same component an open wave renders (a
+  `CLOSED` status pill, its merged issue chips and the `#num title` list) — in the
+  shared `waves-grid`, before the open waves and in wave order. Any subset can be open
+  at once and each chip toggles only its own card. Previously a closed wave was a
+  native `<details>` whose summary dropped a full-width block of *just the issue chips*
+  into the chip row. The open set is persisted per repo so a live `/api/events` reload
+  no longer silently collapses everything the operator opened; the toggle is keyboard-
+  operable with `aria-expanded`, and a `<noscript>` fallback reveals every closed card
+  when JS is off. Pinned by `renderStatusPage` regression tests.
+
 - The repo/campaign page's header row and section order now match the design, and
   the top bar is one shared control across every page (#81), a frontend-only
   change. The live indicator is a dot only — its "Live"/"Paused" state is an

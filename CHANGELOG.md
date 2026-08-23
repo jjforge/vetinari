@@ -105,6 +105,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dashboard can render a per-turn log in the agent's own words. Events predating
   the change simply carry no summary and reconstruct as before.
 
+### Changed
+
+- The per-project campaign page (`GET /?project=<repo>`) is restyled to the new
+  visual design the all-repos landing already uses (#79). Its top-right now carries
+  the landing's live-bar (`● Live · updated Ns ago · Pause`) instead of the old
+  fixed-interval `Refresh ☑ [45]` widget: it updates live off the `/api/events`
+  stream (ADR 0008), reloading the server-rendered page on a ping — guarded so it
+  never reloads while a reply is being composed, and pausable as a client-side
+  freeze that flushes on resume. The heading drops the "<project> status" wording
+  (the project dropdown serves as the heading, falling back to a bare `<h1>` when no
+  dropdown), and a `<name> · N issues · M waves` meta line summarises the campaign.
+  Parked issues now render as clickable question cards (yellow left-border, `#num
+  question` + a `waiting Nm · reason` meta line) that open the existing issue-detail
+  sheet — the reply happens there, so the old inline `/answer` form is gone from the
+  campaign page. Closed waves read as `✓ Wave N merged/total` chips, and open waves
+  lay out as a responsive grid of wave cards, each with its `Wave N` label, status
+  pill, and `merged/total`, plus a status-coloured top accent (blue for the running
+  wave, neutral otherwise). State words keep the ADR 0007 vocabulary (`unstarted`,
+  not "queued"). The all-repos landing render is unchanged.
+
 ### Fixed
 
 - The gateway never delivered a project's Telegram messages when its

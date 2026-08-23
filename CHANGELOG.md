@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The issue-detail sheet gained a **Worktree** meta tile and turns-with-duration
+  (#90). The tile surfaces the agent's real preserved worktree path — sourced from
+  the `worktree-preserved` event the loop logs when it parks a slot, the genuine
+  per-task identity (ADR/#55 dropped the anonymous-pool agent id, so no fabricated
+  `agent-N` is re-introduced) — and stays hidden when no such path exists. The
+  Turns tile now reads `N turns · Mm` (its working duration) rather than a bare
+  count; the Elapsed tile is unchanged.
+
 - A **host slot budget** (#87, ADR 0010): an opt-in host-side ceiling on live
   containers across every project, honoured by a cooperative filesystem lease each
   `campaign`/`queue` run reads and writes directly under
@@ -263,6 +271,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not "queued"). The all-repos landing render is unchanged.
 
 ### Fixed
+
+- The parked-issue detail sheet's action row showed **four** buttons at once —
+  Resume · Carve · Confirm · Cancel — because the carve-confirm form's own
+  `display: flex` defeated its `hidden` attribute, so the confirm/cancel controls
+  sat permanently beside the primary actions instead of appearing only in the
+  carve-confirmation step (#90). The confirm form now collapses when hidden
+  (`.carve-confirm[hidden]`), so the default row is **Resume + Carve** alone and
+  Confirm/Cancel reveal only after Carve is clicked — matching the POC.
 
 - The all-repos landing's recent-activity feed rendered the progress/blue
   event-kind labels (`CAMPAIGN-BATCH`, `QUEUE-START`, `TURN`, …) illegibly — the

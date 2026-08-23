@@ -441,7 +441,7 @@ export const renderAggregatedCarvePreview = (project: string, target: string, pr
  * carvable), and on the campaign page only when its carve controls are enabled.
  */
 export const issueDetailSheetMarkup = (carve: boolean) =>
-  `<div id="issue-detail" class="issue-detail" role="dialog" aria-modal="true" aria-live="polite" hidden><div class="issue-detail-sheet"><header class="issue-detail-header"><div class="issue-detail-head-main"><span class="issue-detail-status"><span class="dot"></span><span class="issue-detail-num"></span> <span class="issue-detail-statuslabel"></span></span><h2 class="issue-detail-title"></h2><p class="issue-detail-context"></p></div><button type="button" id="issue-detail-close" class="issue-detail-close" aria-label="Dismiss">&times;</button></header><div class="issue-detail-meta"><div class="meta-tile"><span class="meta-label">Turns</span><span class="meta-value" id="issue-detail-turns"></span></div><div class="meta-tile"><span class="meta-label">Elapsed</span><span class="meta-value" id="issue-detail-elapsed"></span></div></div><ol class="turn-log" id="issue-detail-turnlog"></ol><div id="issue-detail-reply" class="issue-detail-reply" hidden><h3 class="reply-heading">Reply &amp; resume</h3><p class="reply-question" id="reply-question"></p><div class="reply-options" id="reply-options"></div><form method="post" action="/answer" id="reply-form"><input type="hidden" name="taskId" value="" /><input type="hidden" name="project" value="" /><textarea name="text" id="reply-text" placeholder="Type your reply…"></textarea></form></div><div class="sheet-actions"><button type="submit" form="reply-form" id="reply-resume" class="reply-resume" hidden>Resume</button>${
+  `<div id="issue-detail" class="issue-detail" role="dialog" aria-modal="true" aria-live="polite" hidden><div class="issue-detail-sheet"><header class="issue-detail-header"><div class="issue-detail-head-main"><span class="issue-detail-status"><span class="dot"></span><span class="issue-detail-num"></span> <span class="issue-detail-statuslabel"></span></span><h2 class="issue-detail-title"></h2><p class="issue-detail-context"></p></div><button type="button" id="issue-detail-close" class="issue-detail-close" aria-label="Dismiss">&times;</button></header><div class="issue-detail-meta"><div class="meta-tile"><span class="meta-label">Turns</span><span class="meta-value" id="issue-detail-turns"></span></div><div class="meta-tile"><span class="meta-label">Elapsed</span><span class="meta-value" id="issue-detail-elapsed"></span></div><div class="meta-tile meta-tile-path" id="issue-detail-worktree-tile" hidden><span class="meta-label">Worktree</span><span class="meta-value meta-value-path" id="issue-detail-worktree"></span></div></div><ol class="turn-log" id="issue-detail-turnlog"></ol><div id="issue-detail-reply" class="issue-detail-reply" hidden><h3 class="reply-heading">Reply &amp; resume</h3><p class="reply-question" id="reply-question"></p><div class="reply-options" id="reply-options"></div><form method="post" action="/answer" id="reply-form"><input type="hidden" name="taskId" value="" /><input type="hidden" name="project" value="" /><textarea name="text" id="reply-text" placeholder="Type your reply…"></textarea></form></div><div class="sheet-actions"><button type="submit" form="reply-form" id="reply-resume" class="reply-resume" hidden>Resume</button>${
     carve
       ? `<div id="carve-panel" class="carve-panel" hidden><button type="button" id="carve-start" class="carve-start">Carve</button><span id="carve-explainer" class="carve-explainer" hidden>Removes this issue and everything blocked by it from the running campaign; merged and mergeable work is kept.</span><form method="post" action="/carve" id="carve-confirm" class="carve-confirm" hidden><span class="carve-confirm-text"></span><input type="hidden" name="taskId" value="" /><input type="hidden" name="project" value="" /><input type="hidden" name="confirm" value="1" /><button type="submit" class="carve-confirm-btn">Confirm</button><button type="button" id="carve-cancel" class="carve-cancel">Cancel</button></form><span id="carve-note" class="carve-note"></span></div>`
       : ""
@@ -460,6 +460,9 @@ export const ISSUE_DETAIL_SHEET_STYLES = `  .carve-panel { display: flex; align-
   .carve-start, .carve-confirm-btn, .carve-cancel { padding: .35rem .7rem; border: 1px solid var(--color-red); border-radius: 999px; background: rgb(247 146 135 / 12%); color: var(--color-red); font: inherit; line-height: 1; cursor: pointer; }
   .carve-cancel { border-color: var(--color-secondary); background: none; color: var(--color-text-light-2); }
   .carve-confirm { display: flex; align-items: center; gap: .5rem; margin: 0; }
+  /* A flex display beats the UA [hidden] rule, so the confirm form needs it back
+     explicitly — otherwise Confirm/Cancel show by default, four buttons at once. */
+  .carve-confirm[hidden] { display: none; }
   .carve-confirm-text { color: var(--color-red); }
   .carve-note { color: var(--color-blue); font-size: .85rem; }
   .carve-explainer { color: var(--color-text-light-2); font-size: .85rem; }
@@ -479,8 +482,14 @@ export const ISSUE_DETAIL_SHEET_STYLES = `  .carve-panel { display: flex; align-
   .issue-detail-close:hover { color: var(--color-text); background: var(--color-secondary); }
   .issue-detail-meta { display: flex; gap: .75rem; padding: .9rem 1.15rem; border-bottom: 1px solid var(--color-light-border); }
   .meta-tile { flex: 1; display: flex; flex-direction: column; gap: .2rem; padding: .6rem .75rem; background: var(--color-box-header); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); }
+  /* A flex display beats the UA [hidden] rule, so a tile with no value to show (the
+     worktree tile on a run with no preserved worktree) needs its collapse back. */
+  .meta-tile[hidden] { display: none; }
   .meta-label { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--color-text-light-2); }
   .meta-value { font-size: 1.25rem; font-weight: 600; color: var(--color-text); }
+  /* A worktree path is long and not a headline number, so it reads as small wrapping monospace. */
+  .meta-tile-path { flex: 2; min-width: 0; }
+  .meta-value-path { font-size: .82rem; font-weight: 500; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
   .turn-log { list-style: none; margin: 0; padding: .5rem 1.15rem 1.15rem; overflow-y: auto; flex: 1 1 auto; min-height: 0; }
   .turn-entry { display: flex; gap: .6rem; padding: .55rem 0; border-bottom: 1px solid var(--color-light-border); }
   .turn-entry:last-child { border-bottom: 0; }
@@ -522,6 +531,8 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
   const detailContext = issueDetail.querySelector(".issue-detail-context");
   const detailTurns = document.getElementById("issue-detail-turns");
   const detailElapsed = document.getElementById("issue-detail-elapsed");
+  const detailWorktree = document.getElementById("issue-detail-worktree");
+  const detailWorktreeTile = document.getElementById("issue-detail-worktree-tile");
   const detailTurnLog = document.getElementById("issue-detail-turnlog");
   const detailReply = document.getElementById("issue-detail-reply");
   const replyResume = document.getElementById("reply-resume");
@@ -592,8 +603,13 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
     detailStatusLabel.textContent = d.status;
     detailTitle.textContent = d.title || ("Issue #" + d.issueNumber);
     detailContext.textContent = [d.project, d.campaignName].filter(Boolean).join(" · ");
-    detailTurns.textContent = String(d.turns);
+    // Turns carry their working duration (POC: "11 turns · 26m"), not a bare count.
+    detailTurns.textContent = d.turns + " turns · " + fmtElapsed(d.elapsedMs);
     detailElapsed.textContent = fmtElapsed(d.elapsedMs);
+    // The worktree tile is the agent's real per-task identity (ADR/#55 dropped the
+    // fabricated agent id); show it only when the reconstruction carried a path.
+    detailWorktree.textContent = d.worktree || "";
+    detailWorktreeTile.hidden = !d.worktree;
     detailTurnLog.textContent = "";
     if (!d.turnLog || !d.turnLog.length) {
       const li = document.createElement("li");
@@ -628,6 +644,7 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
     detailContext.textContent = project;
     detailTurns.textContent = "…";
     detailElapsed.textContent = "…";
+    detailWorktreeTile.hidden = true;
     detailTurnLog.textContent = "";
     // Hide the reply block until the fetched status confirms the issue is parked.
     detailReply.hidden = true;

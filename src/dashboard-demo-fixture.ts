@@ -56,6 +56,8 @@ export function demoEvents(now: Date = new Date()): object[] {
     { ts: at(12), event: "turn", taskId: "204", turn: 2, summary: "Fixed the two callers to mount the middleware; full suite green, tidying names before I signal." },
     { ts: at(8), event: "turn", taskId: "205", turn: 0, summary: "Provider-selection test in place; blocked on which providers to offer at launch." },
     { ts: at(11), event: "parked", taskId: "205", reason: "blocked" },
+    // Parking a slot preserves its worktree; the loop logs the path so the sheet can show it.
+    { ts: at(11), event: "worktree-preserved", taskId: "205", path: ".sandcastle.local/wt/205" },
     // A carve drops the promo-code work (unstarted) from the plan.
     { ts: at(13), event: "carve", target: "208", removed: ["208"] },
     // Wave 2 (206, 207) is left unstarted — queued.

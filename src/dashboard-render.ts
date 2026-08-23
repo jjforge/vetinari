@@ -490,13 +490,26 @@ export const renderStatusPage = (status: CampaignStatus, opts: StatusPageOptions
   .meta-tile { flex: 1; display: flex; flex-direction: column; gap: .2rem; padding: .6rem .75rem; background: var(--color-box-header); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); }
   .meta-label { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--color-text-light-2); }
   .meta-value { font-size: 1.25rem; font-weight: 600; color: var(--color-text); }
-  .turn-log { list-style: none; margin: 0; padding: .5rem 1.15rem 1.15rem; overflow-y: auto; }
+  .turn-log { list-style: none; margin: 0; padding: .5rem 1.15rem 1.15rem; overflow-y: auto; flex: 1 1 auto; min-height: 0; }
   .turn-entry { display: flex; gap: .6rem; padding: .55rem 0; border-bottom: 1px solid var(--color-light-border); }
   .turn-entry:last-child { border-bottom: 0; }
   .turn-num { flex: none; font-weight: 700; font-variant-numeric: tabular-nums; }
   .turn-num.completed { color: var(--color-green); } .turn-num.parked { color: var(--color-yellow); } .turn-num.failure { color: var(--color-red); } .turn-num.running { color: var(--color-blue); } .turn-num.unstarted { color: var(--color-text-light-2); } .turn-num.carved { color: var(--color-carved); }
   .turn-summary { color: var(--color-text-light); }
   .turn-empty { color: var(--color-text-light-2); padding: .55rem 0; }
+  /* Parked-reply block + the actions row pin to the sheet foot so Resume/Carve stay
+     reachable one-handed while the turn log scrolls above. */
+  .issue-detail-reply { flex: none; padding: .9rem 1.15rem; border-top: 1px solid var(--color-light-border); background: var(--color-box-header); }
+  .reply-heading { margin: 0 0 .5rem; font-size: .95rem; color: var(--color-text-light); }
+  .reply-question { margin: 0 0 .6rem; color: var(--color-text-light); white-space: pre-wrap; max-height: 30vh; overflow-y: auto; }
+  .reply-options { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .6rem; }
+  .reply-option { min-height: 44px; text-align: left; padding: .4rem .7rem; color: var(--color-text); background: var(--color-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); font: inherit; cursor: pointer; }
+  .reply-option:hover { border-color: var(--color-primary); background: var(--color-primary-alpha-20); }
+  .issue-detail-reply textarea { min-height: 5rem; margin: 0; }
+  .sheet-actions { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; padding: .9rem 1.15rem; border-top: 1px solid var(--color-light-border); }
+  /* A flex display beats the UA [hidden] rule, so these need it back explicitly. */
+  .sheet-actions[hidden], .reply-options[hidden] { display: none; }
+  .reply-resume { min-height: 44px; padding: .5rem 1rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: #04110f; font: inherit; font-weight: 700; cursor: pointer; }
   @media (max-width: 640px) { .issue-detail-sheet { width: 100%; max-height: 88vh; border-radius: var(--border-radius-medium) var(--border-radius-medium) 0 0; padding-bottom: env(safe-area-inset-bottom); } .issue-detail { align-items: flex-end; padding: 0; } }
   form button { padding: .5rem .8rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: #04110f; cursor: pointer; font-weight: 700; }
   pre { white-space: pre-wrap; }
@@ -546,11 +559,11 @@ ${
       }</h2>${renderWaves(opts.archived, false, false)}</section>`
     : ""
 }
-<div id="issue-detail" class="issue-detail" role="dialog" aria-modal="true" aria-live="polite" hidden><div class="issue-detail-sheet"><header class="issue-detail-header"><div class="issue-detail-head-main"><span class="issue-detail-status"><span class="dot"></span><span class="issue-detail-num"></span> <span class="issue-detail-statuslabel"></span></span><h2 class="issue-detail-title"></h2><p class="issue-detail-context"></p></div><button type="button" id="issue-detail-close" class="issue-detail-close" aria-label="Dismiss">&times;</button></header><div class="issue-detail-meta"><div class="meta-tile"><span class="meta-label">Turns</span><span class="meta-value" id="issue-detail-turns"></span></div><div class="meta-tile"><span class="meta-label">Elapsed</span><span class="meta-value" id="issue-detail-elapsed"></span></div></div><ol class="turn-log" id="issue-detail-turnlog"></ol>${
+<div id="issue-detail" class="issue-detail" role="dialog" aria-modal="true" aria-live="polite" hidden><div class="issue-detail-sheet"><header class="issue-detail-header"><div class="issue-detail-head-main"><span class="issue-detail-status"><span class="dot"></span><span class="issue-detail-num"></span> <span class="issue-detail-statuslabel"></span></span><h2 class="issue-detail-title"></h2><p class="issue-detail-context"></p></div><button type="button" id="issue-detail-close" class="issue-detail-close" aria-label="Dismiss">&times;</button></header><div class="issue-detail-meta"><div class="meta-tile"><span class="meta-label">Turns</span><span class="meta-value" id="issue-detail-turns"></span></div><div class="meta-tile"><span class="meta-label">Elapsed</span><span class="meta-value" id="issue-detail-elapsed"></span></div></div><ol class="turn-log" id="issue-detail-turnlog"></ol><div id="issue-detail-reply" class="issue-detail-reply" hidden><h3 class="reply-heading">Reply &amp; resume</h3><p class="reply-question" id="reply-question"></p><div class="reply-options" id="reply-options"></div><form method="post" action="/answer" id="reply-form"><input type="hidden" name="taskId" value="" /><input type="hidden" name="project" value="" /><textarea name="text" id="reply-text" placeholder="Type your reply…"></textarea></form></div><div class="sheet-actions"><button type="submit" form="reply-form" id="reply-resume" class="reply-resume" hidden>Resume</button>${
   opts.carve
     ? `<div id="carve-panel" class="carve-panel" hidden><button type="button" id="carve-start" class="carve-start">Carve</button><form method="post" action="/carve" id="carve-confirm" class="carve-confirm" hidden><span class="carve-confirm-text"></span><input type="hidden" name="taskId" value="" /><input type="hidden" name="project" value="" /><input type="hidden" name="confirm" value="1" /><button type="submit" class="carve-confirm-btn">Confirm</button><button type="button" id="carve-cancel" class="carve-cancel">Cancel</button></form><span id="carve-note" class="carve-note"></span></div>`
     : ""
-}</div></div>${
+}</div></div></div>${
   // No-JS fallback: a plain server-side form per carvable issue that reaches
   // POST /carve → the preview page → confirm without any JavaScript. The inline
   // panel above is the progressive enhancement layered over it.
@@ -594,6 +607,19 @@ ${
   const detailTurns = document.getElementById("issue-detail-turns");
   const detailElapsed = document.getElementById("issue-detail-elapsed");
   const detailTurnLog = document.getElementById("issue-detail-turnlog");
+  const detailReply = document.getElementById("issue-detail-reply");
+  const replyResume = document.getElementById("reply-resume");
+  const replyQuestion = document.getElementById("reply-question");
+  const replyOptions = document.getElementById("reply-options");
+  const replyText = document.getElementById("reply-text");
+  const replyForm = document.getElementById("reply-form");
+  const sheetActions = document.querySelector(".sheet-actions");
+  // The foot (reply + actions) shows only while it holds a live control — a parked
+  // reply to send or a carve to offer — so a plain issue's sheet grows no empty bar.
+  const updateFoot = () => {
+    const carve = document.getElementById("carve-panel");
+    sheetActions.hidden = replyResume.hidden && !(carve && !carve.hidden);
+  };
   // Elapsed is a working span in ms; show it as coarse minutes/hours.
   const fmtElapsed = (ms) => {
     const mins = Math.max(0, Math.round((ms || 0) / 60000));
@@ -607,7 +633,35 @@ ${
   issueDetail.addEventListener("click", (event) => { if (event.target === issueDetail) closeSheet(); });
   // Reassigned by the carve block when carve is enabled; a no-op otherwise.
   let onOpenIssue = () => {};
+  // A parked issue's reply block: the full question, the offered options as buttons
+  // that fill the field (never submit), and the free-text field itself; Resume posts
+  // it through /answer to resume the parked task. Options are best-effort — absent,
+  // only the free-text field shows. Any other status hides the whole block.
+  const renderReply = (d) => {
+    const parked = d.status === "parked";
+    detailReply.hidden = !parked;
+    replyResume.hidden = !parked;
+    if (parked) {
+      replyForm.querySelector('input[name="taskId"]').value = d.issueNumber;
+      replyForm.querySelector('input[name="project"]').value = d.project;
+      const question = d.parked && d.parked.question;
+      replyQuestion.textContent = question || "";
+      replyQuestion.hidden = !question;
+      const options = (d.parked && d.parked.options) || [];
+      replyOptions.replaceChildren(...options.map((option) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "reply-option";
+        button.textContent = option;
+        button.addEventListener("click", () => { replyText.value = option; replyText.focus(); });
+        return button;
+      }));
+      replyOptions.hidden = !options.length;
+    }
+    updateFoot();
+  };
   const renderDetail = (d) => {
+    renderReply(d);
     detailNum.textContent = "#" + d.issueNumber;
     detailStatusDot.className = "dot " + d.status;
     detailStatusLabel.textContent = d.status;
@@ -649,7 +703,11 @@ ${
     detailTurns.textContent = "…";
     detailElapsed.textContent = "…";
     detailTurnLog.textContent = "";
+    // Hide the reply block until the fetched status confirms the issue is parked.
+    detailReply.hidden = true;
+    replyResume.hidden = true;
     onOpenIssue(carvable, project, issue);
+    updateFoot();
     try {
       const res = await fetch("/api/issue?project=" + encodeURIComponent(project) + "&issue=" + encodeURIComponent(issue));
       if (!res.ok) throw new Error(String(res.status));

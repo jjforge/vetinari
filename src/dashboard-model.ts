@@ -180,6 +180,22 @@ export const issueNameFromTask = (task: string): string | undefined => {
   }
 };
 
+/**
+ * The parked-reply payload the issue-detail sheet needs for a parked issue: the
+ * question with any trailing Options section split off, and those options parsed
+ * as fill-the-field choices (story: parked-question reply). Reads the matching
+ * parked record (by normalized issue number); returns undefined when none names
+ * the issue — a log-only parked state — so the sheet falls back to just the
+ * free-text field.
+ */
+export function parkedReplyFor(records: ParkedRecord[], issueNumber: string): { question: string; options: string[] } | undefined {
+  const id = normalizeIssue(issueNumber);
+  const rec = records.find((r) => normalizeIssue(r.taskId) === id);
+  if (!rec) return undefined;
+  const { description, options } = extractParkedDetails(rec.question);
+  return { question: description, options };
+}
+
 export function extractParkedDetails(question: string): { description: string; options: string[] } {
   const match = question.match(/(?:^|\n)\s*options?\s*:\s*\n([\s\S]*)/i);
   if (!match) return { description: question.trim(), options: [] };

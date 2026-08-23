@@ -4,7 +4,7 @@ import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { appendedEvents, buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, describeEvent, extractParkedDetails, formatFeedEvent, formatStatusText, lastEventText, listArchivedRuns, parseCarveClosure, reconstructIssueDetail, reduceCampaign, renderLandingShell, renderStatusPage, selectStatus, serveAllStatus, summarizeRun } from "./status.ts";
+import { appendedEvents, buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, describeEvent, extractParkedDetails, formatFeedEvent, formatStatusText, lastEventText, listArchivedRuns, parkedReplyFor, parseCarveClosure, reconstructIssueDetail, reduceCampaign, renderLandingShell, renderStatusPage, selectStatus, serveAllStatus, summarizeRun } from "./status.ts";
 import type { CampaignStatus } from "./status.ts";
 import type { AddressInfo } from "node:net";
 import { register, type ProjectPointer } from "./registry.ts";
@@ -421,6 +421,52 @@ test("serveAllStatus GET /api/issue serves one issue's reconstructed detail as J
     );
     // An unknown project is a 404, never a path joined from request input.
     assert.equal((await fetch(`http://127.0.0.1:${port}/api/issue?project=ghost&issue=101`)).status, 404);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serveAllStatus GET /api/issue carries the parked question and options for a parked issue", async () => {
+  const configDir = join(tmpdir(), `sctdd-issue-parked-${Date.now()}`);
+  const alphaDir = join(configDir, "state-alpha");
+  seedState(alphaDir, [
+    { ts: "2025-05-01T08:00:00.000Z", event: "campaign-start", batches: [["101"]], titles: { "101": "Wire the parser" } },
+    { ts: "2025-05-01T08:01:00.000Z", event: "turn", taskId: "101", turn: 0, summary: "Sketched the grammar." },
+    { ts: "2025-05-01T08:06:00.000Z", event: "parked", taskId: "101", reason: "needs a decision" },
+  ]);
+  writeFileSync(
+    join(alphaDir, "parked", "101.json"),
+    JSON.stringify({ taskId: "101", parkedAt: "now", reason: "blocked", branch: "agent/101", sessionId: "s", question: "Which parser?\n\nOptions:\n- Recursive descent\n- Parser combinator" }),
+  );
+  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
+
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const { port } = server.address() as AddressInfo;
+  try {
+    const detail = await (await fetch(`http://127.0.0.1:${port}/api/issue?project=alpha&issue=101`)).json();
+    assert.equal(detail.status, "parked");
+    // The sheet's reply block reads the question (its Options tail split off) and the parsed options.
+    assert.deepEqual(detail.parked, { question: "Which parser?", options: ["Recursive descent", "Parser combinator"] });
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serveAllStatus GET /api/issue omits parked reply data for a non-parked issue", async () => {
+  const configDir = join(tmpdir(), `sctdd-issue-unparked-${Date.now()}`);
+  const alphaDir = join(configDir, "state-alpha");
+  seedState(alphaDir, [
+    { ts: "2025-05-01T08:00:00.000Z", event: "campaign-start", batches: [["101"]] },
+    { ts: "2025-05-01T08:02:00.000Z", event: "green", taskId: "101", branch: "agent/101" },
+  ]);
+  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
+
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const { port } = server.address() as AddressInfo;
+  try {
+    const detail = await (await fetch(`http://127.0.0.1:${port}/api/issue?project=alpha&issue=101`)).json();
+    assert.equal(detail.status, "completed");
+    assert.equal(detail.parked, undefined);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -1561,6 +1607,43 @@ test("renderStatusPage hosts the carve affordance and inline confirm in the tap-
   assert.match(html, /carving/);
 });
 
+test("renderStatusPage hosts a parked reply block with a Resume button in the tap-detail sheet", () => {
+  const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
+
+  // The sheet carries a reply block, hidden until the opened issue is parked.
+  assert.match(html, /<div id="issue-detail-reply" class="issue-detail-reply" hidden>/);
+  assert.match(html, /id="reply-question"/);
+  assert.match(html, /id="reply-options"/);
+  // A free-text reply field posts through the existing /answer path, carrying taskId+project.
+  assert.match(html, /<form method="post" action="\/answer" id="reply-form">/);
+  assert.match(html, /id="reply-form"[\s\S]*?name="taskId"[\s\S]*?name="project"[\s\S]*?<textarea name="text"/);
+  // Resume submits that form; it is associated by `form=` so it can sit outside the form, beside Carve.
+  assert.match(html, /<button type="submit" form="reply-form" id="reply-resume" class="reply-resume" hidden>Resume<\/button>/);
+});
+
+test("renderStatusPage places Resume beside Carve in one sheet-actions row, sized for touch", () => {
+  const html = renderStatusPage({ project: "demo", waves: [], parked: [] }, { carve: true });
+
+  // Both controls live in the same actions row so they are reachable one-handed together.
+  assert.match(html, /<div class="sheet-actions"><button type="submit" form="reply-form" id="reply-resume"[^>]*>Resume<\/button><div id="carve-panel"/);
+  // A 44px tap target for the primary Resume action on a phone.
+  assert.match(html, /\.reply-resume \{[^}]*min-height: 44px;/);
+  // The actions row is a flex box, so it needs [hidden] restored explicitly or an
+  // empty foot (no reply, no carve) would always show its border and padding.
+  assert.match(html, /\.sheet-actions\[hidden\][^{]*\{ display: none; \}/);
+});
+
+test("renderStatusPage wires the parked reply block: shown when parked, options fill the field", () => {
+  const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
+
+  // The reply block reveals only for a parked issue, carrying its ids for /answer.
+  assert.match(html, /d\.status === "parked"/);
+  assert.match(html, /d\.parked/);
+  // Options render as buttons that fill the reply field without submitting it.
+  assert.match(html, /"reply-option"/);
+  assert.match(html, /replyText\.value = /);
+});
+
 test("renderStatusPage falls back to a no-JS carve form per carvable issue", () => {
   const html = renderStatusPage(
     {
@@ -1938,6 +2021,20 @@ test("extractParkedDetails separates description from Options section", () => {
 
   assert.equal(details.description, "I am parked on the API choice.");
   assert.deepEqual(details.options, ["Return raw JSON", "Render HTML server-side"]);
+});
+
+test("parkedReplyFor returns the matching record's question and parsed options for the issue-detail sheet", () => {
+  const records = [
+    { taskId: "#102", parkedAt: "now", reason: "blocked", branch: "agent/102", question: "Which store?\n\nOptions:\n- Postgres\n- SQLite" },
+    { taskId: "201", parkedAt: "now", reason: "blocked", branch: "agent/201", question: "No options here." },
+  ];
+
+  // Matched by normalized issue number (the "#" prefix is irrelevant).
+  assert.deepEqual(parkedReplyFor(records, "102"), { question: "Which store?", options: ["Postgres", "SQLite"] });
+  // A record with no Options section yields the whole question and no options.
+  assert.deepEqual(parkedReplyFor(records, "201"), { question: "No options here.", options: [] });
+  // No record names the issue → undefined, so the sheet shows only the free-text field.
+  assert.equal(parkedReplyFor(records, "999"), undefined);
 });
 
 test("appendedEvents returns the whole log and its end offset from a zero offset", () => {

@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { buildAllStatus, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, describeEvent, extractParkedDetails, formatStatusText, lastEventText, listArchivedRuns, parseCarveClosure, reduceCampaign, renderLandingShell, renderStatusPage, selectStatus, serveAllStatus, summarizeRun } from "./status.ts";
+import { appendedEvents, buildAllStatus, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, describeEvent, extractParkedDetails, formatStatusText, lastEventText, listArchivedRuns, parseCarveClosure, reduceCampaign, renderLandingShell, renderStatusPage, selectStatus, serveAllStatus, summarizeRun } from "./status.ts";
 import type { CampaignStatus } from "./status.ts";
 import type { AddressInfo } from "node:net";
 import { register, type ProjectPointer } from "./registry.ts";
@@ -1523,4 +1523,63 @@ test("extractParkedDetails separates description from Options section", () => {
 
   assert.equal(details.description, "I am parked on the API choice.");
   assert.deepEqual(details.options, ["Return raw JSON", "Render HTML server-side"]);
+});
+
+test("appendedEvents returns the whole log and its end offset from a zero offset", () => {
+  const log = JSON.stringify({ event: "campaign-start" }) + "\n" + JSON.stringify({ event: "queue-start" }) + "\n";
+  const { events, offset } = appendedEvents(log, 0);
+  assert.deepEqual(
+    events.map((e) => e.event),
+    ["campaign-start", "queue-start"],
+  );
+  assert.equal(offset, log.length);
+});
+
+test("appendedEvents returns only the events appended past a prior offset", () => {
+  const first = JSON.stringify({ event: "campaign-start" }) + "\n";
+  const appended = JSON.stringify({ event: "turn", taskId: "101" }) + "\n";
+  const { offset } = appendedEvents(first, 0);
+  const next = appendedEvents(first + appended, offset);
+  assert.deepEqual(
+    next.events.map((e) => e.event),
+    ["turn"],
+  );
+  assert.equal(next.offset, first.length + appended.length);
+});
+
+test("appendedEvents leaves a partial trailing line unconsumed until it is complete", () => {
+  const complete = JSON.stringify({ event: "campaign-start" }) + "\n";
+  const partial = '{"event":"turn"';
+  const mid = appendedEvents(complete + partial, 0);
+  // Only the complete line is consumed; the offset stops before the partial line.
+  assert.deepEqual(
+    mid.events.map((e) => e.event),
+    ["campaign-start"],
+  );
+  assert.equal(mid.offset, complete.length);
+  // Once the line is finished, resuming from the same offset yields it whole.
+  const done = appendedEvents(complete + partial + ',"taskId":"101"}\n', mid.offset);
+  assert.deepEqual(
+    done.events.map((e) => e.event),
+    ["turn"],
+  );
+});
+
+test("appendedEvents re-reads from the start when the log is shorter than the offset (rotated/truncated)", () => {
+  const rotated = JSON.stringify({ event: "campaign-start" }) + "\n";
+  const { events, offset } = appendedEvents(rotated, 9999);
+  assert.deepEqual(
+    events.map((e) => e.event),
+    ["campaign-start"],
+  );
+  assert.equal(offset, rotated.length);
+});
+
+test("appendedEvents skips an unparseable line the way readEvents does", () => {
+  const log = "not json\n" + JSON.stringify({ event: "queue-start" }) + "\n";
+  const { events } = appendedEvents(log, 0);
+  assert.deepEqual(
+    events.map((e) => e.event),
+    ["queue-start"],
+  );
 });

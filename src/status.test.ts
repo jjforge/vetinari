@@ -1191,6 +1191,59 @@ test("renderLandingShell reads each event kind's category as a leading dot, labe
   );
 });
 
+test("renderLandingShell's feed reads as an event log: 'Event log · all repos' header with a live dot (#95)", () => {
+  const html = renderLandingShell(["alpha"]);
+  // The feed header takes the POC's event-log treatment: the "Event log · all repos"
+  // label carrying a live indicator, replacing the old "Recent activity" heading.
+  assert.match(html, /<h2[^>]*>[\s\S]*?Event log · all repos[\s\S]*?<\/h2>/);
+  assert.ok(!html.includes("Recent activity"), "the old heading is gone");
+  // The live indicator (the shared pulsing dot) rides in the feed header.
+  assert.match(html, /<h2[^>]*>[\s\S]*?class="live-indicator"[\s\S]*?<\/h2>/);
+});
+
+test("renderLandingShell's feed timestamps are compact HH:MM, weekday/date for older entries (#95)", () => {
+  const html = renderLandingShell(["alpha"]);
+  // fmtTime drops the old full `M/D/YYYY, h:mm:ss AM` (toLocaleString) treatment for
+  // the POC's compact time: HH:MM for a same-day event, a weekday label for older.
+  assert.ok(!html.includes("toLocaleString()"), "the full date-time is gone");
+  // A same-day event reads as a 24h HH:MM slice of the time.
+  assert.match(html, /toTimeString\(\)\.slice\(0, 5\)/);
+  // An older event falls back to a short weekday label (POC's `Tue`).
+  assert.match(html, /weekday: "short"/);
+});
+
+test("renderLandingShell's feed relabels the real event kinds as clean lowercase namespace.verb (#95)", () => {
+  const html = renderLandingShell(["alpha"]);
+  // The row's kind text is the remapped label, not the raw kind; its category class
+  // still keys off the real kind so the leading-dot colour (#85) is unchanged.
+  assert.match(html, /feedKindLabel\(e\.kind\)/);
+  assert.match(html, /"feed-kind " \+ feedKindClass\(e\.kind\)/);
+  assert.match(html, /const feedKindLabel = /);
+  // The mapping covers only real orchestrator event kinds (dashboard-model's
+  // describeEvent) — no fabricated `pr.opened`, no `agent-N` identity (rule 5, #55).
+  for (const pair of [
+    ["green", "issue.merged"],
+    ["parked", "issue.parked"],
+    ["carve", "issue.carved"],
+    ["campaign-batch", "wave.started"],
+    ["campaign-batch-done", "wave.closed"],
+    ["campaign-start", "campaign.started"],
+    ["queue-start", "campaign.started"],
+    ["campaign-done", "campaign.closed"],
+    ["queue-done", "campaign.closed"],
+    ["campaign-halt", "campaign.halted"],
+    ["turn", "agent.turn"],
+  ]) {
+    assert.ok(
+      html.includes(`"${pair[0]}": "${pair[1]}"`) || html.includes(`${pair[0]}: "${pair[1]}"`),
+      `feed relabels ${pair[0]} → ${pair[1]}`,
+    );
+  }
+  assert.ok(!html.includes("pr.opened"), "no fabricated pr.opened kind");
+  // The label reads as clean lowercase code, so the feed-kind is no longer uppercased.
+  assert.doesNotMatch(html, /\.feed-kind \{[^}]*text-transform: uppercase/);
+});
+
 test("the card progress-bar selector is scoped so it never boxes the feed's progress kind label (#85)", () => {
   const html = renderLandingShell(["alpha"]);
   // The feed label renders <span class="feed-kind progress">; a bare `.progress {` rule

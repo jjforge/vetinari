@@ -860,10 +860,14 @@ ${TOP_BAR_STYLES}
   .card-last { color: var(--color-text-light-2); font-size: .85rem; margin-top: .5rem; white-space: pre-line; }
   .empty { color: var(--color-text-light-2); }
   .feed { margin-top: 2rem; border-top: 1px solid var(--color-light-border); padding-top: 1rem; }
-  .feed h2 { color: var(--color-text-light); font-size: 1.1rem; margin: 0 0 .75rem; }
+  /* The event-log header (#95): the POC's live-dot + label treatment. Small uppercase
+     mono so it reads as a log heading, the live dot leading it. */
+  .feed h2 { display: flex; align-items: center; gap: .5rem; color: var(--color-text-light-2); font-family: ${MONO_FONT}; font-size: .78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; margin: 0 0 .75rem; }
   .feed-row { display: flex; align-items: baseline; gap: .6rem .9rem; flex-wrap: wrap; padding: .5rem 0; border-bottom: 1px solid var(--color-light-border); font-size: .9rem; }
   .feed-time { color: var(--color-text-light-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .feed-kind { color: var(--color-text); font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; display: inline-flex; align-items: center; gap: .4rem; }
+  /* The kind reads as a clean lowercase namespace.verb code label (#95), so it is mono
+     and no longer uppercased; its category still reads on the full-strength leading dot. */
+  .feed-kind { color: var(--color-text); font-family: ${MONO_FONT}; font-size: .72rem; font-weight: 600; letter-spacing: 0; display: inline-flex; align-items: center; gap: .4rem; }
   /* Each activity event reads its comms category as a full-strength leading dot,
      keeping the label at --color-text — a mid-tone tint on tiny near-black text
      struck out the blue progress kind (#85, matching the shared dot model #83). */
@@ -898,11 +902,22 @@ ${renderTopBar(renderRepoDropdown(projects, undefined))}
 </section>
 <section id="parked-queue" class="parked-queue" hidden aria-label="Parked questions across all repos"></section>
 <section id="cards" class="cards"><p class="empty">Loading…</p></section>
-<section id="feed" class="feed" aria-label="Recent activity across all repos"><h2>Recent activity</h2><div id="feed-rows"><p class="empty">Loading…</p></div></section>
+<section id="feed" class="feed" aria-label="Event log across all repos"><h2><span class="live-indicator" aria-hidden="true"></span>Event log · all repos</h2><div id="feed-rows"><p class="empty">Loading…</p></div></section>
 ${issueDetailSheetMarkup(true)}
 <script>
   const fmtWave = (w) => (w ? "Wave " + w.current + " of " + w.total : "idle");
-  const fmtTime = (ts) => { const d = new Date(ts); return isNaN(d) ? ts : d.toLocaleString(); };
+  // The event log's compact time (#95): a same-day event reads as a 24h HH:MM; an
+  // older one falls back to a short weekday (POC's "Tue"), then to a M/D date once it
+  // is more than a week back so distant weekdays don't collide.
+  const fmtTime = (ts) => {
+    const d = new Date(ts);
+    if (isNaN(d)) return ts;
+    const now = new Date();
+    const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+    if (sameDay) return d.toTimeString().slice(0, 5);
+    if (now - d < 7 * 86400000) return d.toLocaleDateString(undefined, { weekday: "short" });
+    return d.toLocaleDateString(undefined, { month: "numeric", day: "numeric" });
+  };
   const fmtWaited = (iso) => {
     const ms = Date.now() - new Date(iso).getTime();
     if (!(ms > 0)) return "just now";
@@ -923,6 +938,25 @@ ${issueDetailSheetMarkup(true)}
     if (kind === "carve") return "carved";
     return "progress";
   };
+  // Relabel the orchestrator's raw event kinds (dashboard-model's describeEvent set)
+  // as the POC's clean lowercase namespace.verb (#95) — a feed-label remap of real
+  // events, not a status-vocab change (ADR 0007). Only kinds that actually exist are
+  // mapped: no invented PR-opened kind (the local-merge flow opens none), and the
+  // turn stays the anonymous agent.turn — no agent-N identity (rule 5, #55).
+  // An unmapped kind falls through to its raw text rather than vanishing.
+  const feedKindLabel = (kind) => ({
+    "green": "issue.merged",
+    "parked": "issue.parked",
+    "carve": "issue.carved",
+    "campaign-batch": "wave.started",
+    "campaign-batch-done": "wave.closed",
+    "campaign-start": "campaign.started",
+    "queue-start": "campaign.started",
+    "campaign-done": "campaign.closed",
+    "queue-done": "campaign.closed",
+    "campaign-halt": "campaign.halted",
+    "turn": "agent.turn",
+  }[kind] ?? kind);
 ${ISSUE_DETAIL_SHEET_SCRIPT}
 ${REPO_DROPDOWN_SCRIPT}
   async function loadFeed() {
@@ -938,7 +972,7 @@ ${REPO_DROPDOWN_SCRIPT}
     if (!feed.length) { rows.append(el("p", "empty", "No activity yet.")); return; }
     for (const e of feed) {
       const row = el("div", "feed-row");
-      row.append(el("span", "feed-time", fmtTime(e.ts)), el("span", "feed-kind " + feedKindClass(e.kind), e.kind), el("span", "feed-text", e.text));
+      row.append(el("span", "feed-time", fmtTime(e.ts)), el("span", "feed-kind " + feedKindClass(e.kind), feedKindLabel(e.kind)), el("span", "feed-text", e.text));
       rows.append(row);
     }
   }

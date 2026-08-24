@@ -9,7 +9,7 @@ const TEMPLATES = { configTemplate: "CONFIG SKELETON\n", dockerfileTemplate: "FR
 
 let counter = 0;
 const tmpProject = () => {
-  const dir = join(tmpdir(), `sctdd-init-${Date.now()}-${counter++}`);
+  const dir = join(tmpdir(), `vetinari-init-${Date.now()}-${counter++}`);
   mkdirSync(dir, { recursive: true });
   return dir;
 };
@@ -19,19 +19,19 @@ test("computeInit plans the full scaffold for a fresh directory", () => {
 
   // Not a refusal — greenfield project, so the committed scaffold is laid down.
   assert.equal(plan.refused, false);
-  // The committed sandcastle/ scaffold: a defineConfig skeleton and a Dockerfile.
+  // The committed vetinari/ scaffold: a defineConfig skeleton and a Dockerfile.
   assert.deepEqual(
-    plan.creates.find((c) => c.path === "sandcastle/config.mts"),
-    { path: "sandcastle/config.mts", content: "CONFIG SKELETON\n" },
+    plan.creates.find((c) => c.path === "vetinari/config.mts"),
+    { path: "vetinari/config.mts", content: "CONFIG SKELETON\n" },
   );
   assert.deepEqual(
-    plan.creates.find((c) => c.path === "sandcastle/Dockerfile"),
-    { path: "sandcastle/Dockerfile", content: "FROM node:22-bookworm\n" },
+    plan.creates.find((c) => c.path === "vetinari/Dockerfile"),
+    { path: "vetinari/Dockerfile", content: "FROM node:22-bookworm\n" },
   );
   // The excluded machine-local dir is created...
-  assert.ok(plan.dirs.includes(".sandcastle.local"));
+  assert.ok(plan.dirs.includes(".vetinari.local"));
   // ...and .gitignore gains its entry (the file was absent, so it is created).
-  assert.match(plan.gitignore!, /^\.sandcastle\.local\/$/m);
+  assert.match(plan.gitignore!, /^\.vetinari\.local\/$/m);
 });
 
 test("computeInit yields an empty plan for an already-initialized directory", () => {
@@ -39,7 +39,7 @@ test("computeInit yields an empty plan for an already-initialized directory", ()
     // Config present, local dir present, and .gitignore already excludes it.
     hasConfig: true,
     hasLocalDir: true,
-    gitignore: "node_modules/\n.sandcastle.local/\n*.log\n",
+    gitignore: "node_modules/\n.vetinari.local/\n*.log\n",
     ...TEMPLATES,
   });
 
@@ -62,8 +62,8 @@ test("computeInit refuses to overwrite an existing config but still fills missin
   assert.equal(plan.refused, true);
   assert.equal(plan.creates.length, 0);
   // The missing machine-local pieces are still planned, without disturbing config.
-  assert.ok(plan.dirs.includes(".sandcastle.local"));
-  assert.match(plan.gitignore!, /^\.sandcastle\.local\/$/m);
+  assert.ok(plan.dirs.includes(".vetinari.local"));
+  assert.match(plan.gitignore!, /^\.vetinari\.local\/$/m);
 });
 
 test("computeInit plans only the gitignore edit when that is the sole missing piece", () => {
@@ -78,12 +78,12 @@ test("computeInit plans only the gitignore edit when that is the sole missing pi
   assert.deepEqual(plan.creates, []);
   assert.deepEqual(plan.dirs, []);
   // The excluded dir is appended; the pre-existing lines survive.
-  assert.match(plan.gitignore!, /^\.sandcastle\.local\/$/m);
+  assert.match(plan.gitignore!, /^\.vetinari\.local\/$/m);
   assert.match(plan.gitignore!, /^node_modules\/$/m);
 });
 
 test("computeInit adds nothing to a .gitignore that already lists the entry without a trailing slash", () => {
-  const plan = computeInit({ hasConfig: true, hasLocalDir: true, gitignore: ".sandcastle.local\n", ...TEMPLATES });
+  const plan = computeInit({ hasConfig: true, hasLocalDir: true, gitignore: ".vetinari.local\n", ...TEMPLATES });
   assert.equal(plan.gitignore, undefined);
 });
 
@@ -100,29 +100,29 @@ test("applyInit lays the scaffold down where the plan says, against a tmp dir", 
   const result = applyInit(dir, plan);
 
   // Committed scaffold files land with the template content.
-  assert.equal(readFileSync(join(dir, "sandcastle", "config.mts"), "utf8"), "CONFIG SKELETON\n");
-  assert.equal(readFileSync(join(dir, "sandcastle", "Dockerfile"), "utf8"), "FROM node:22-bookworm\n");
+  assert.equal(readFileSync(join(dir, "vetinari", "config.mts"), "utf8"), "CONFIG SKELETON\n");
+  assert.equal(readFileSync(join(dir, "vetinari", "Dockerfile"), "utf8"), "FROM node:22-bookworm\n");
   // The excluded machine-local dir exists.
-  assert.ok(statSync(join(dir, ".sandcastle.local")).isDirectory());
+  assert.ok(statSync(join(dir, ".vetinari.local")).isDirectory());
   // .gitignore now excludes it, keeping the pre-existing entry.
   const gi = readFileSync(join(dir, ".gitignore"), "utf8");
-  assert.match(gi, /^\.sandcastle\.local\/$/m);
+  assert.match(gi, /^\.vetinari\.local\/$/m);
   assert.match(gi, /^node_modules\/$/m);
 
-  assert.deepEqual(result.created.sort(), ["sandcastle/Dockerfile", "sandcastle/config.mts"]);
-  assert.deepEqual(result.dirsCreated, [".sandcastle.local"]);
+  assert.deepEqual(result.created.sort(), ["vetinari/Dockerfile", "vetinari/config.mts"]);
+  assert.deepEqual(result.dirsCreated, [".vetinari.local"]);
   assert.equal(result.gitignoreUpdated, true);
 });
 
 test("applyInit refuses to clobber a committed scaffold file that appeared since the scan", () => {
   const dir = tmpProject();
-  mkdirSync(join(dir, "sandcastle"), { recursive: true });
-  writeFileSync(join(dir, "sandcastle", "config.mts"), "MINE — do not touch\n");
+  mkdirSync(join(dir, "vetinari"), { recursive: true });
+  writeFileSync(join(dir, "vetinari", "config.mts"), "MINE — do not touch\n");
 
   // A stale plan (scanned when the config was absent) must not overwrite it.
   const stalePlan = computeInit({ hasConfig: false, hasLocalDir: false, gitignore: undefined, ...TEMPLATES });
   assert.throws(() => applyInit(dir, stalePlan), /already exists/i);
-  assert.equal(readFileSync(join(dir, "sandcastle", "config.mts"), "utf8"), "MINE — do not touch\n");
+  assert.equal(readFileSync(join(dir, "vetinari", "config.mts"), "utf8"), "MINE — do not touch\n");
 });
 
 test("applyInit fills only the gitignore when that is all the plan carries", () => {
@@ -135,20 +135,20 @@ test("applyInit fills only the gitignore when that is all the plan carries", () 
   assert.deepEqual(result.created, []);
   assert.deepEqual(result.dirsCreated, []);
   assert.equal(result.gitignoreUpdated, true);
-  assert.match(readFileSync(join(dir, ".gitignore"), "utf8"), /^\.sandcastle\.local\/$/m);
+  assert.match(readFileSync(join(dir, ".gitignore"), "utf8"), /^\.vetinari\.local\/$/m);
 });
 
 test("describeInit reports nothing to do for an empty plan", () => {
-  const text = describeInit(computeInit({ hasConfig: true, hasLocalDir: true, gitignore: ".sandcastle.local/\n", ...TEMPLATES }));
+  const text = describeInit(computeInit({ hasConfig: true, hasLocalDir: true, gitignore: ".vetinari.local/\n", ...TEMPLATES }));
   assert.match(text, /nothing to do/i);
 });
 
 test("describeInit summarizes the full scaffold and the next steps", () => {
   const text = describeInit(computeInit({ hasConfig: false, hasLocalDir: false, gitignore: undefined, ...TEMPLATES }));
 
-  assert.match(text, /sandcastle\/config\.mts/);
-  assert.match(text, /sandcastle\/Dockerfile/);
-  assert.match(text, /\.sandcastle\.local/);
+  assert.match(text, /vetinari\/config\.mts/);
+  assert.match(text, /vetinari\/Dockerfile/);
+  assert.match(text, /\.vetinari\.local/);
   assert.match(text, /\.gitignore/);
   // The next steps: fill Dockerfile/gates, build the image, run baseline.
   assert.match(text, /baseline/);
@@ -159,10 +159,10 @@ test("describeInit leads with a clear refusal when a config already exists", () 
   const text = describeInit(computeInit({ hasConfig: true, hasLocalDir: false, gitignore: "node_modules/\n", ...TEMPLATES }));
 
   // The config is called out as untouched...
-  assert.match(text, /sandcastle\/config\.mts/);
+  assert.match(text, /vetinari\/config\.mts/);
   assert.match(text, /already exists|untouched/i);
   // ...and the still-missing pieces it filled are listed.
-  assert.match(text, /\.sandcastle\.local/);
+  assert.match(text, /\.vetinari\.local/);
 });
 
 test("scanInit reads a fresh directory and the install templates into a scan the planner can use", () => {
@@ -180,14 +180,14 @@ test("scanInit reads a fresh directory and the install templates into a scan the
   // Fed to the planner it produces the full scaffold.
   const plan = computeInit(scan);
   assert.equal(plan.refused, false);
-  assert.ok(plan.creates.some((c) => c.path === "sandcastle/config.mts"));
+  assert.ok(plan.creates.some((c) => c.path === "vetinari/config.mts"));
 });
 
 test("scanInit detects an existing canonical config and the excluded dir off disk", () => {
   const dir = tmpProject();
-  mkdirSync(join(dir, "sandcastle"), { recursive: true });
-  writeFileSync(join(dir, "sandcastle", "config.mts"), "export default {}\n");
-  mkdirSync(join(dir, ".sandcastle.local"), { recursive: true });
+  mkdirSync(join(dir, "vetinari"), { recursive: true });
+  writeFileSync(join(dir, "vetinari", "config.mts"), "export default {}\n");
+  mkdirSync(join(dir, ".vetinari.local"), { recursive: true });
   writeFileSync(join(dir, ".gitignore"), "node_modules/\n");
 
   const scan = scanInit(dir);
@@ -199,5 +199,5 @@ test("scanInit detects an existing canonical config and the excluded dir off dis
   // The planner refuses the committed scaffold but plans the gitignore entry.
   const plan = computeInit(scan);
   assert.equal(plan.refused, true);
-  assert.match(plan.gitignore!, /^\.sandcastle\.local\/$/m);
+  assert.match(plan.gitignore!, /^\.vetinari\.local\/$/m);
 });

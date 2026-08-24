@@ -12,7 +12,7 @@ import { seedDemoRun, DEMO_PROJECT, DEMO_CAMPAIGN } from "./dashboard-demo-fixtu
 // live run + a parked record), serve it, and drive every dashboard surface at
 // once — landing, campaign page, issue detail, feed, and the parked queue.
 test("integration: a seeded live run populates the landing, campaign, issue detail, feed and parked queue", async () => {
-  const configDir = mkdtempSync(join(tmpdir(), "sctdd-demo-"));
+  const configDir = mkdtempSync(join(tmpdir(), "vetinari-demo-"));
   const baseLocation = join(configDir, "base");
   seedDemoRun(baseLocation, new Date("2026-08-22T09:00:00.000Z"));
   register(configDir, { project: DEMO_PROJECT, projectRoot: join(configDir, "root"), baseLocation });
@@ -56,7 +56,7 @@ test("integration: a seeded live run populates the landing, campaign, issue deta
     const d205 = await getJson(`/api/issue?project=${DEMO_PROJECT}&issue=205`);
     assert.equal(d205.status, "parked");
     // The parked slot preserved a worktree; the sheet's WORKTREE tile reads this path (#90).
-    assert.equal(d205.worktree, ".sandcastle.local/wt/205");
+    assert.equal(d205.worktree, ".vetinari.local/wt/205");
 
     // Feed — repo-prefixed sentences.
     const feed = await getJson("/api/feed");

@@ -35,7 +35,7 @@ export function formatContextLine(parts: { model?: string; dir?: string; branch?
 }
 
 /**
- * Line 2 — the sandcastle run: the wave in flight and a count per status across
+ * Line 2 — the Vetinari run: the wave in flight and a count per status across
  * the whole campaign. The 🏰 marks it; the project name is omitted because line
  * 1 already shows the directory, which is always this one. Zero counts are
  * dropped so the line stays short. Pure and newline-free by contract.
@@ -81,7 +81,7 @@ function gitBranch(dir: string): string | undefined {
 /**
  * The `statusline` command: two lines for the Claude Code status bar — line 1
  * mirrors Claude Code's default (model, dir, branch, context%) with the model
- * name trimmed; line 2 is the sandcastle run, shown only where a config lives.
+ * name trimmed; line 2 is the Vetinari run, shown only where a config lives.
  * Claude Code blanks the status line on a non-zero exit, so this never throws:
  * every field is optional and any failure just narrows what prints. Line 2 uses
  * the synchronous log-derived status — no network — so it stays fast on every
@@ -110,7 +110,7 @@ export async function runStatusLine(cfgPath?: string): Promise<void> {
     const cfg = await loadConfig(cfgPath);
     line2 = formatStatusLine(buildStatus(cfg));
   } catch {
-    // No sandcastle config here: line 1 alone still describes the session.
+    // No Vetinari config here: line 1 alone still describes the session.
   }
 
   const out = [line1, line2].filter(Boolean).join("\n");

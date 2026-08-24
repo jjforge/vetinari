@@ -12,7 +12,7 @@ export type MessageCategory = "question" | "success" | "failure" | "progress" | 
 
 /**
  * A named Telegram connection a project routes categories to. `bot` names a bot
- * whose token is read by reference from `.sandcastle.local/` — a destination
+ * whose token is read by reference from `.vetinari.local/` — a destination
  * carries no secret. `thread` optionally targets a forum thread under the chat.
  */
 export interface Destination {
@@ -81,7 +81,7 @@ export interface MountSpec {
   readonly?: boolean;
 }
 
-export interface SandcastleTddConfig {
+export interface VetinariConfig {
   /** Name used in notifications, e.g. "jjforge". */
   project: string;
   /** Docker image carrying your toolchain AND the claude CLI. */
@@ -144,7 +144,7 @@ export interface SandcastleTddConfig {
   /**
    * Named Telegram destinations this project routes categories to (name ->
    * `{bot, chat, thread?}`). A destination names a bot by reference — its token is
-   * read from `.sandcastle.local/`, never inlined here. The `notify` map's values
+   * read from `.vetinari.local/`, never inlined here. The `notify` map's values
    * are keys of this map.
    */
   destinations?: Record<string, Destination>;
@@ -164,7 +164,7 @@ export interface SandcastleTddConfig {
   maxTurns?: number;
   /** Default 600. A stalled agent parks rather than dying unrecorded. */
   idleTimeoutSeconds?: number;
-  /** Where logs and parked records live. Default ".sandcastle.local". */
+  /** Where logs and parked records live. Default ".vetinari.local". */
   stateDir?: string;
   /**
    * Env for the ORCHESTRATOR PROCESS ONLY. Use this for anything that must not
@@ -178,36 +178,34 @@ export interface SandcastleTddConfig {
 }
 
 export type ResolvedConfig = Required<
-  Pick<SandcastleTddConfig, "project" | "image" | "baseBranch" | "branchPrefix" | "hostWeight" | "gates" | "maxTurns" | "idleTimeoutSeconds" | "stateDir" | "fetchTask">
+  Pick<VetinariConfig, "project" | "image" | "baseBranch" | "branchPrefix" | "hostWeight" | "gates" | "maxTurns" | "idleTimeoutSeconds" | "stateDir" | "fetchTask">
 > &
-  SandcastleTddConfig & { promptFile: string; parkedDir: string; logFile: string };
+  VetinariConfig & { promptFile: string; parkedDir: string; logFile: string };
 
-export function defineConfig(c: SandcastleTddConfig): SandcastleTddConfig {
+export function defineConfig(c: VetinariConfig): VetinariConfig {
   return c;
 }
 
 /**
  * Config candidate locations, highest precedence first. The committed
- * `sandcastle/` locations are canonical; the rest resolve only as deprecated
+ * `vetinari/` locations are canonical; the rest resolve only as deprecated
  * fallbacks so a live setup keeps working for one minor after the layout split.
  */
 const CANDIDATES: readonly { rel: string; deprecated: boolean }[] = [
-  { rel: "sandcastle/config.mts", deprecated: false },
-  { rel: "sandcastle/config.ts", deprecated: false },
-  { rel: "sandcastle-tdd.config.mts", deprecated: true },
-  { rel: "sandcastle-tdd.config.ts", deprecated: true },
+  { rel: "vetinari/config.mts", deprecated: false },
+  { rel: "vetinari/config.ts", deprecated: false },
   { rel: ".sandcastle/config.mts", deprecated: true },
 ];
 
 /** The canonical location a deprecation warning should point a project at. */
-export const CANONICAL_CONFIG = "sandcastle/config.mts";
+export const CANONICAL_CONFIG = "vetinari/config.mts";
 
 export interface ResolvedConfigPath {
   /** Absolute path to the winning config candidate. */
   path: string;
   /**
    * The legacy candidate name this resolved from, when the winner is a
-   * deprecated location. Undefined for the canonical `sandcastle/` locations.
+   * deprecated location. Undefined for the canonical `vetinari/` locations.
    */
   deprecatedFrom?: string;
 }
@@ -239,13 +237,13 @@ export async function loadConfig(explicitPath?: string): Promise<ResolvedConfig>
     path = resolved.path;
     if (resolved.deprecatedFrom) {
       console.warn(
-        `[sctdd] ${resolved.deprecatedFrom} is a deprecated config location and will stop working in a future minor. ` +
-          `Move it to ${CANONICAL_CONFIG} (or run \`sandcastle migrate\`).`,
+        `[vetinari] ${resolved.deprecatedFrom} is a deprecated config location and will stop working in a future minor. ` +
+          `Move it to ${CANONICAL_CONFIG} (or run \`vetinari migrate\`).`,
       );
     }
   }
   const mod = await import(resolve(path));
-  const c: SandcastleTddConfig = mod.default ?? mod.config;
+  const c: VetinariConfig = mod.default ?? mod.config;
   if (!c) throw new Error(`${path} has no default export`);
   for (const required of ["project", "image", "baseBranch", "gates", "fetchTask"] as const) {
     if (c[required] == null) throw new Error(`${path}: missing required field "${required}"`);
@@ -262,7 +260,7 @@ export async function loadConfig(explicitPath?: string): Promise<ResolvedConfig>
     }
   }
 
-  const stateDir = c.stateDir ?? ".sandcastle.local";
+  const stateDir = c.stateDir ?? ".vetinari.local";
   // hostEnv is applied to THIS process only; it is never handed to a sandbox.
   for (const [k, v] of Object.entries(c.hostEnv ?? {})) process.env[k] = v;
 

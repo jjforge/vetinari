@@ -46,7 +46,7 @@ export function slotsDir(configDir: string): string {
 /**
  * The host slot budget setting, or `undefined` when it is unset — the opt-in
  * signal that leaves today's uncoordinated behavior untouched (each run bounded
- * only by its own `QUEUE_SLOTS`). `SANDCASTLE_HOST_SLOTS` wins over the
+ * only by its own `QUEUE_SLOTS`). `VETINARI_HOST_SLOTS` wins over the
  * `<configDir>/host-slots` file; a missing, non-numeric, or non-positive value is
  * treated as unset.
  */
@@ -56,7 +56,7 @@ export function readHostBudget(configDir: string): number | undefined {
     const n = Number(raw.trim());
     return Number.isInteger(n) && n > 0 ? n : undefined;
   };
-  const fromEnv = parse(process.env.SANDCASTLE_HOST_SLOTS);
+  const fromEnv = parse(process.env.VETINARI_HOST_SLOTS);
   if (fromEnv !== undefined) return fromEnv;
   const file = join(configDir, "host-slots");
   if (!existsSync(file)) return undefined;

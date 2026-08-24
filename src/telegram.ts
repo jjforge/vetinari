@@ -18,9 +18,9 @@ export interface TgConn {
 // callers pass the resulting (possibly undefined) connection and every send
 // becomes a no-op.
 export const tgEnvConn = (): TgConn | undefined => {
-  const token = process.env.SANDCASTLE_TELEGRAM_BOT_TOKEN;
-  const chat = process.env.SANDCASTLE_TELEGRAM_CHAT_ID;
-  return token && chat ? { token, chat, thread: process.env.SANDCASTLE_TELEGRAM_THREAD_ID } : undefined;
+  const token = process.env.VETINARI_TELEGRAM_BOT_TOKEN;
+  const chat = process.env.VETINARI_TELEGRAM_CHAT_ID;
+  return token && chat ? { token, chat, thread: process.env.VETINARI_TELEGRAM_THREAD_ID } : undefined;
 };
 
 const api = (conn: TgConn) => `https://api.telegram.org/bot${conn.token}`;

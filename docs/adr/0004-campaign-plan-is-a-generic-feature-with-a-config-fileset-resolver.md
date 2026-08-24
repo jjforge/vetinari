@@ -2,10 +2,10 @@
 
 The campaign wave-planner (`campaign-plan`) — which turns a selected set of ticket
 ids into the dependency-ordered, file-disjoint wave arguments `campaign` consumes —
-is a **generic sandcastle-tdd feature**, a peer of `carve`, not a project-owned tool.
+is a **generic vetinari feature**, a peer of `carve`, not a project-owned tool.
 It was first drafted as a jjforge-owned script on the argument that "the resolver is
 jjforge-specific (it knows `templates/repo/`, the locale append-target, our tracker)."
-That argument does not hold: sandcastle-tdd already absorbs project-specific knowledge
+That argument does not hold: vetinari already absorbs project-specific knowledge
 through **config seams** (`blockedBy`, `fetchTask`, `reportFinding`), and the file-set
 resolution is one more of the same.
 
@@ -13,7 +13,7 @@ Decisions:
 
 - **File-set resolution is a config seam.** A project supplies a `fileSet(ticket) →
   { files, confident }` resolver in its config, beside `blockedBy`/`fetchTask`. The
-  tool never hard-codes any project's paths. sandcastle-tdd **ships a generic default**
+  tool never hard-codes any project's paths. vetinari **ships a generic default**
   (parse cited paths → basename → validate against the tree; `confident: false` when a
   ticket cites nothing or cites what the tree does not have), the same way it ships
   `githubBlockedBy`. A project can use the default or wrap it with its own
@@ -42,8 +42,8 @@ Decisions:
 ## Consequences
 
 Cross-repo: jjforge supplies its own `fileSet` resolver in its config; nothing
-jjforge-specific enters sandcastle-tdd. The deferred "(c)" idea — agents emit their
+jjforge-specific enters vetinari. The deferred "(c)" idea — agents emit their
 actual touched file-set on completion for post-hoc validation — is a separate future
-sandcastle-tdd feedback loop, tracked on its own. The output is not a pure function of
+vetinari feedback loop, tracked on its own. The output is not a pure function of
 the ids (it reads the tree and may prompt), which is accepted: the tree is the ground
 truth the campaign runs against, and the prompt is the point.

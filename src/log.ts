@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { OrchestratorEvent } from "./event-log.ts";
 
-let logFile = ".sandcastle.local/logs/orchestrator.jsonl";
+let logFile = ".vetinari.local/logs/orchestrator.jsonl";
 
 export function setLogFile(path: string) {
   logFile = path;
@@ -27,7 +27,7 @@ export function log<K extends NarrowedKind>(event: K, data: Fields<K>): void;
 export function log<E extends string>(event: E extends NarrowedKind ? never : E, data?: Record<string, unknown>): void;
 export function log(event: string, data: Record<string, unknown> = {}) {
   const line = JSON.stringify({ ts: new Date().toISOString(), event, ...data });
-  console.log(`[sctdd] ${event}`, data);
+  console.log(`[vetinari] ${event}`, data);
   try {
     appendFileSync(logFile, line + "\n");
   } catch {

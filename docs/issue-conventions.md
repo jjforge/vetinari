@@ -1,6 +1,6 @@
 # Issue conventions
 
-Reference for filing, labeling, structuring, and closing issues on `jjforge/sandcastle-tdd`. The always-true rules — issues are the single source of truth, file freely, no numbers in current-truth docs — live in [`CLAUDE.md`](../CLAUDE.md); this is the vocabulary and the commands.
+Reference for filing, labeling, structuring, and closing issues on `jjforge/vetinari`. The always-true rules — issues are the single source of truth, file freely, no numbers in current-truth docs — live in [`CLAUDE.md`](../CLAUDE.md); this is the vocabulary and the commands.
 
 ## Axes — type is a native issue type; every other axis is a label; the title is plain
 
@@ -17,12 +17,12 @@ Titles are plain and descriptive, with **no bracketed prefix** — a prefix cann
 
 `known-red` and `pending-verify` are **label queries, never a list in a doc** (a doc list goes stale): `gh issue list --label known-red`, `gh issue list --label pending-verify`. Bugs additionally carry reproduction steps and any workaround in the body.
 
-Type is set via the **API**, not a label: `gh api --method PATCH repos/jjforge/sandcastle-tdd/issues/<n> -f type=Bug`.
+Type is set via the **API**, not a label: `gh api --method PATCH repos/jjforge/vetinari/issues/<n> -f type=Bug`.
 
 ## Hierarchy & dependencies
 
 - **Epic → issue.** An epic is typed `Epic` (or holds native sub-issues), owns no work of its own, and closes when its children do. A large childless issue is not an epic however big it is — it is _unspecced_ work; give it `needs-triage` and let `/grill-with-docs → /to-spec → /to-tickets` produce the children.
-- **Dependencies are native.** Use GitHub's `blocked_by` dependencies, not prose in a body — a ticket is grabbable once all its blockers are closed: `gh api -X POST repos/jjforge/sandcastle-tdd/issues/<n>/dependencies/blocked_by -F issue_id=<blocker-id>`.
+- **Dependencies are native.** Use GitHub's `blocked_by` dependencies, not prose in a body — a ticket is grabbable once all its blockers are closed: `gh api -X POST repos/jjforge/vetinari/issues/<n>/dependencies/blocked_by -F issue_id=<blocker-id>`.
 
 ## Declaring a ticket's file-set
 

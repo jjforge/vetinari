@@ -1,13 +1,13 @@
-// Dogfood config: run sandcastle-tdd against its OWN GitHub backlog.
+// Dogfood config: run vetinari against its OWN GitHub backlog.
 // The package name self-resolves to this repo (package.json "exports"), so the
 // same import a consuming project uses works here too.
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
-import { defineConfig, githubBlockedBy } from "sandcastle-tdd";
+import { defineConfig, githubBlockedBy } from "vetinari";
 
 export default defineConfig({
-  project: "sandcastle-tdd",
-  image: "sandcastle-sandcastle-tdd",
+  project: "vetinari",
+  image: "vetinari",
   baseBranch: "main",
 
   // The gate. Both proven green on main before wiring them here: tsc --noEmit,
@@ -23,11 +23,11 @@ export default defineConfig({
   setup: ["npm ci"],
 
   fetchTask: (id) =>
-    execFileSync("gh", ["issue", "view", id, "--repo", "jjforge/sandcastle-tdd", "--json", "title,body,comments,labels"], { encoding: "utf8" }),
+    execFileSync("gh", ["issue", "view", id, "--repo", "jjforge/vetinari", "--json", "title,body,comments,labels"], { encoding: "utf8" }),
 
   // Powers carve/campaign: reads GitHub's native blocked_by edges — the ones set
   // on #31–#35.
-  blockedBy: githubBlockedBy("jjforge/sandcastle-tdd"),
+  blockedBy: githubBlockedBy("jjforge/vetinari"),
 
   // No `fileSet` override: the shipped `defaultFileSet` reads the explicit
   // "Touches (existing files): `a.ts`, `b.ts`" marker line each ticket body
@@ -40,5 +40,5 @@ export default defineConfig({
   // safe.directory host-side write needs a writable global git config; the real
   // one is a read-only nix symlink. Kept OUT of .env (which is injected into the
   // container). Mirrors jjforge's setup.
-  hostEnv: { GIT_CONFIG_GLOBAL: resolve(".sandcastle.local/gitconfig") },
+  hostEnv: { GIT_CONFIG_GLOBAL: resolve(".vetinari.local/gitconfig") },
 });

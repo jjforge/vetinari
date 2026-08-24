@@ -1,12 +1,12 @@
 {
-  "name": "sandcastle-tdd",
+  "name": "vetinari",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "Parallel TDD agent orchestrator on @ai-hero/sandcastle: the orchestrator owns the test gate, blocked agents park instead of guessing, and questions round-trip through Telegram.",
   "license": "MIT",
   "bin": {
-    "sandcastle-tdd": "./src/cli.mts"
+    "vetinari": "./src/cli.mts"
   },
   "exports": {
     ".": "./src/index.ts",
@@ -14,7 +14,7 @@
     "./prompts/tdd.md": "./prompts/tdd.md"
   },
   "scripts": {
-    "sandcastle-tdd": "tsx ./src/cli.mts",
+    "vetinari": "tsx ./src/cli.mts",
     "typecheck": "tsc --noEmit",
     "check-contract": "tsx ./src/check-contract.mts"
   },

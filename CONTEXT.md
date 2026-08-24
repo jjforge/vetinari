@@ -1,6 +1,6 @@
-# Sandcastle-TDD
+# Vetinari
 
-The boundary model for running the sandcastle-tdd orchestrator across multiple
+The boundary model for running the vetinari orchestrator across multiple
 projects at once: what each project commits, what it excludes, and the shared
 host process that fronts them all.
 
@@ -8,13 +8,13 @@ host process that fronts them all.
 
 ### Per-project layout
 
-**`sandcastle/`**:
-The project's **committed** sandcastle configuration, versioned in the
+**`vetinari/`**:
+The project's **committed** Vetinari configuration, versioned in the
 project's own repo. Holds the config module, the project's `Dockerfile`, and any
-custom build things or prompt override. `sandcastle/` = shared.
+custom build things or prompt override. `vetinari/` = shared.
 _Avoid_: config folder, config dir
 
-**`.sandcastle.local/`**:
+**`.vetinari.local/`**:
 The project's **excluded** (gitignored) machine-local area. Holds the project's
 credentials (`.env`), run logs, and run state (`parked/`). Never committed. The
 `.local` suffix carries the "yours, not shared" convention (`settings.local.json`,
@@ -22,9 +22,9 @@ credentials (`.env`), run logs, and run state (`parked/`). Never committed. The
 _Avoid_: state dir, work dir, `.sandcastle/`
 
 **Shared install**:
-The single machine-wide install of sandcastle-tdd, shared by every project on the
+The single machine-wide install of vetinari, shared by every project on the
 host (ADR 0003). A project runs whatever version the machine has — it is never
-vendored a copy and never pins a version, and sandcastle-tdd never appears in the
+vendored a copy and never pins a version, and vetinari never appears in the
 app's own `package.json`.
 _Avoid_: runtime pull, vendored runtime
 
@@ -46,12 +46,12 @@ never copying them.
 _Avoid_: enrollment, subscribe
 
 **Base location**:
-The `.sandcastle.local/` path a project registers with the gateway — the single
+The `.vetinari.local/` path a project registers with the gateway — the single
 place its config and secrets are read from, so a secret is never duplicated.
 
 **Consuming project**:
-Any software project that runs sandcastle-tdd against its own backlog. Has a
-committed `sandcastle/` and an excluded `.sandcastle.local/`; the gateway serves
+Any software project that runs vetinari against its own backlog. Has a
+committed `vetinari/` and an excluded `.vetinari.local/`; the gateway serves
 many of them simultaneously.
 _Avoid_: client, target repo
 
@@ -66,7 +66,7 @@ containers within it (ADR 0010).
 _Avoid_: max containers, global slots, concurrency cap
 
 **Project weight**:
-A number a project declares in its `sandcastle/` config (default one) that sets its
+A number a project declares in its `vetinari/` config (default one) that sets its
 cut of the [[host-slot-budget]] when projects contend. Higher weight → more slots;
 it only bites while more than one project is active.
 _Avoid_: priority, rank
@@ -114,12 +114,12 @@ routes categories to. "All → bot A, failures → bot B" is two destinations.
 _Avoid_: channel, target, route
 
 **Routing rule** / **notify map**:
-A project's declaration, in its `sandcastle/` config, of which message category
+A project's declaration, in its `vetinari/` config, of which message category
 goes to which destination. The gateway enforces it; the project owns it.
 
 **Outbound record** / **outbox**:
 A category-tagged message (`{category, event?, text}`) a run writes into its
-`.sandcastle.local/` instead of sending to Telegram itself. The gateway drains the
+`.vetinari.local/` instead of sending to Telegram itself. The gateway drains the
 outbox and routes each record per the notify map — so all outbound flows through
 the gateway (the sole sender), and a parked **question** is simply the interactive
 kind of outbound record that also feeds the reply index.
@@ -205,9 +205,9 @@ _Avoid_: removed, dropped, pruned
 ### Campaign planning
 
 **Campaign plan** (the `campaign-plan` tool):
-A generic sandcastle-tdd tool that turns a selected set of ticket ids into the
+A generic vetinari tool that turns a selected set of ticket ids into the
 dependency-ordered, file-disjoint wave arguments `campaign` consumes. It plans; it
-never runs sandcastle or pushes. A peer of [[carve]], sharing its DAG foundation.
+never runs Vetinari or pushes. A peer of [[carve]], sharing its DAG foundation.
 _Avoid_: campaign builder, batcher
 
 **Carve**:
@@ -224,7 +224,7 @@ _Avoid_: prune, remove, cancel, drop (as the noun)
 A project-provided config function, `fileSet(ticket) → { files, confident }`, that
 names the files a ticket will touch (by basename) so co-wave tickets can be kept
 file-disjoint. A config seam like [[base-location]]'s `blockedBy`/`fetchTask`;
-sandcastle-tdd ships a generic cites-from-body default.
+vetinari ships a generic cites-from-body default.
 _Avoid_: file matcher, crossover detector
 
 **Under-specified ticket**:

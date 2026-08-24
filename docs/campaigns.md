@@ -1,8 +1,8 @@
 # Running a campaign (issues → waves)
 
-sandcastle-tdd runs `ready-for-agent` tickets through its own `campaign` mode in
+vetinari runs `ready-for-agent` tickets through its own `campaign` mode in
 dependency-ordered waves. Build the wave list with **`campaign-plan <ids…>`** (it
-plans; it never runs sandcastle or pushes), then hand the waves to `campaign`.
+plans; it never runs Vetinari or pushes), then hand the waves to `campaign`.
 
 ## The two wave invariants
 

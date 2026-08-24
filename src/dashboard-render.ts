@@ -1037,7 +1037,7 @@ export const renderLandingShell = (projects: readonly (string | RepoOption)[]) =
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>All repos — sandcastle</title>
+<title>All repos — Vetinari</title>
 <style>
 ${DASHBOARD_PALETTE_CSS}
   * { box-sizing: border-box; }
@@ -1602,7 +1602,7 @@ ${ARCHIVE_LIST_SCRIPT}
   // the whole page — does not silently collapse everything the operator opened.
   const waveBar = document.querySelector(".completed-wave-bar");
   if (waveBar) {
-    const storeKey = "sctdd:closed-waves:" + waveBar.dataset.project;
+    const storeKey = "vetinari:closed-waves:" + waveBar.dataset.project;
     const readOpen = () => { try { return new Set(JSON.parse(sessionStorage.getItem(storeKey) || "[]")); } catch { return new Set(); } };
     const open = readOpen();
     const setOpen = (chip, isOpen) => {

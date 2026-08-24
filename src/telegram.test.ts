@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { tgEnvConn, tgSend, tgPoll } from "./telegram.ts";
 
-const TG_ENV = ["SANDCASTLE_TELEGRAM_BOT_TOKEN", "SANDCASTLE_TELEGRAM_CHAT_ID", "SANDCASTLE_TELEGRAM_THREAD_ID"];
+const TG_ENV = ["VETINARI_TELEGRAM_BOT_TOKEN", "VETINARI_TELEGRAM_CHAT_ID", "VETINARI_TELEGRAM_THREAD_ID"];
 
 /** Run `fn` with the given Telegram env, restoring whatever was there before. */
 const withEnv = (env: Record<string, string | undefined>, fn: () => void) => {
@@ -36,7 +36,7 @@ const withEnvAsync = async (env: Record<string, string | undefined>, fn: () => P
 
 test("tgEnvConn builds a connection from the orchestrator env", () => {
   withEnv(
-    { SANDCASTLE_TELEGRAM_BOT_TOKEN: "tok", SANDCASTLE_TELEGRAM_CHAT_ID: "chat", SANDCASTLE_TELEGRAM_THREAD_ID: "7" },
+    { VETINARI_TELEGRAM_BOT_TOKEN: "tok", VETINARI_TELEGRAM_CHAT_ID: "chat", VETINARI_TELEGRAM_THREAD_ID: "7" },
     () => {
       assert.deepEqual(tgEnvConn(), { token: "tok", chat: "chat", thread: "7" });
     },
@@ -44,14 +44,14 @@ test("tgEnvConn builds a connection from the orchestrator env", () => {
 });
 
 test("tgEnvConn omits the thread when unset", () => {
-  withEnv({ SANDCASTLE_TELEGRAM_BOT_TOKEN: "tok", SANDCASTLE_TELEGRAM_CHAT_ID: "chat" }, () => {
+  withEnv({ VETINARI_TELEGRAM_BOT_TOKEN: "tok", VETINARI_TELEGRAM_CHAT_ID: "chat" }, () => {
     assert.deepEqual(tgEnvConn(), { token: "tok", chat: "chat", thread: undefined });
   });
 });
 
 test("tgEnvConn is undefined when token or chat is missing", () => {
-  withEnv({ SANDCASTLE_TELEGRAM_BOT_TOKEN: "tok" }, () => assert.equal(tgEnvConn(), undefined));
-  withEnv({ SANDCASTLE_TELEGRAM_CHAT_ID: "chat" }, () => assert.equal(tgEnvConn(), undefined));
+  withEnv({ VETINARI_TELEGRAM_BOT_TOKEN: "tok" }, () => assert.equal(tgEnvConn(), undefined));
+  withEnv({ VETINARI_TELEGRAM_CHAT_ID: "chat" }, () => assert.equal(tgEnvConn(), undefined));
   withEnv({}, () => assert.equal(tgEnvConn(), undefined));
 });
 
@@ -90,7 +90,7 @@ test("tgSend addresses the explicit connection, not process env", async () => {
   }) as typeof fetch;
   // Conflicting env set for the whole send: the helper must ignore it entirely.
   await withEnvAsync(
-    { SANDCASTLE_TELEGRAM_BOT_TOKEN: "ENV_TOKEN", SANDCASTLE_TELEGRAM_CHAT_ID: "ENV_CHAT", SANDCASTLE_TELEGRAM_THREAD_ID: "999" },
+    { VETINARI_TELEGRAM_BOT_TOKEN: "ENV_TOKEN", VETINARI_TELEGRAM_CHAT_ID: "ENV_CHAT", VETINARI_TELEGRAM_THREAD_ID: "999" },
     () =>
       withFetch(record, async () => {
         const id = await tgSend({ token: "CONN_TOKEN", chat: "CONN_CHAT", thread: "3" }, "hello");

@@ -33,7 +33,7 @@ let gwCounter = 0;
 const project = (over: Partial<GatewayProject> = {}): GatewayProject => ({
   project: "jjforge",
   projectRoot: "/home/me/code/jjforge",
-  baseLocation: "/home/me/code/jjforge/.sandcastle.local",
+  baseLocation: "/home/me/code/jjforge/.vetinari.local",
   conn: { token: "botA", chat: "-100" },
   parked: [],
   outbox: [],
@@ -54,7 +54,7 @@ const ref = (over: Partial<SendRef> = {}): SendRef => ({
   project: "jjforge",
   task: "640",
   projectRoot: "/home/me/code/jjforge",
-  baseLocation: "/home/me/code/jjforge/.sandcastle.local",
+  baseLocation: "/home/me/code/jjforge/.vetinari.local",
   parkedAt: "2026-08-22T00:00:00.000Z",
   ...over,
 });
@@ -341,10 +341,10 @@ test("formatGatewayStatus reports when no served project has anything parked", (
 });
 
 test("loadGatewayProjects reads each live project's connection and parked records from its base location", () => {
-  const configDir = join(tmpdir(), `sctdd-gw-load-${Date.now()}-${gwCounter++}`);
-  const base = join(tmpdir(), `sctdd-gw-base-${Date.now()}-${gwCounter++}`, ".sandcastle.local");
+  const configDir = join(tmpdir(), `vetinari-gw-load-${Date.now()}-${gwCounter++}`);
+  const base = join(tmpdir(), `vetinari-gw-base-${Date.now()}-${gwCounter++}`, ".vetinari.local");
   mkdirSync(join(base, "parked"), { recursive: true });
-  writeFileSync(join(base, "orchestrator.env"), "SANDCASTLE_TELEGRAM_BOT_TOKEN=tok\nSANDCASTLE_TELEGRAM_CHAT_ID=chat\n");
+  writeFileSync(join(base, "orchestrator.env"), "VETINARI_TELEGRAM_BOT_TOKEN=tok\nVETINARI_TELEGRAM_CHAT_ID=chat\n");
   writeFileSync(
     join(base, "parked", "A1.json"),
     JSON.stringify({ taskId: "A1", parkedAt: "t1", reason: "blocked", sessionId: "s", branch: "agent/A1", question: "?" }),
@@ -363,8 +363,8 @@ test("loadGatewayProjects reads each live project's connection and parked record
 });
 
 test("loadGatewayProjects skips a stale registration whose base location is gone", () => {
-  const configDir = join(tmpdir(), `sctdd-gw-stale-${Date.now()}-${gwCounter++}`);
-  register(configDir, { project: "ghost", projectRoot: "/gone", baseLocation: join(tmpdir(), `sctdd-gw-missing-${Date.now()}-${gwCounter++}`) });
+  const configDir = join(tmpdir(), `vetinari-gw-stale-${Date.now()}-${gwCounter++}`);
+  register(configDir, { project: "ghost", projectRoot: "/gone", baseLocation: join(tmpdir(), `vetinari-gw-missing-${Date.now()}-${gwCounter++}`) });
 
   assert.deepEqual(loadGatewayProjects(configDir), []);
 });
@@ -474,7 +474,7 @@ test("resolveCarveTarget with an explicit project that has no running campaign r
 const pendingConfirm = (over: Partial<PendingConfirm> = {}): PendingConfirm => ({
   project: "jjforge",
   projectRoot: "/home/me/code/jjforge",
-  baseLocation: "/home/me/code/jjforge/.sandcastle.local",
+  baseLocation: "/home/me/code/jjforge/.vetinari.local",
   issue: "640",
   ...over,
 });
@@ -586,7 +586,7 @@ test("handleCarveCommand rejects when nothing is running and records nothing", a
 // can mark them sent; the actual Telegram send is injected and recorded.
 
 let obCounter = 0;
-const outboxBase = () => join(tmpdir(), `sctdd-gw-outbox-${Date.now()}-${obCounter++}`, ".sandcastle.local");
+const outboxBase = () => join(tmpdir(), `vetinari-gw-outbox-${Date.now()}-${obCounter++}`, ".vetinari.local");
 
 const routed = (base: string, over: Partial<GatewayProject> = {}): GatewayProject => ({
   project: "jjforge",

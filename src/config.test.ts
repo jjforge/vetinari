@@ -21,7 +21,7 @@ const writeConfig = (baseDir: string, rel: string, body = CONFIG_BODY) => {
   return full;
 };
 
-const scratch = () => mkdtempSync(join(tmpdir(), "sctdd-config-"));
+const scratch = () => mkdtempSync(join(tmpdir(), "vetinari-config-"));
 
 const touch = (baseDir: string, rel: string) => {
   const full = join(baseDir, rel);
@@ -30,19 +30,18 @@ const touch = (baseDir: string, rel: string) => {
   return full;
 };
 
-test("resolveConfigPath prefers committed sandcastle/config.mts over every legacy location", () => {
+test("resolveConfigPath prefers committed vetinari/config.mts over every legacy location", () => {
   const dir = scratch();
-  touch(dir, "sandcastle/config.mts");
-  touch(dir, "sandcastle-tdd.config.mts");
+  touch(dir, "vetinari/config.mts");
   touch(dir, ".sandcastle/config.mts");
 
   const res = resolveConfigPath(dir);
 
-  assert.equal(res?.path, join(dir, "sandcastle/config.mts"));
+  assert.equal(res?.path, join(dir, "vetinari/config.mts"));
   assert.equal(res?.deprecatedFrom, undefined);
 });
 
-for (const legacy of ["sandcastle-tdd.config.mts", "sandcastle-tdd.config.ts", ".sandcastle/config.mts"]) {
+for (const legacy of [".sandcastle/config.mts"]) {
   test(`resolveConfigPath reports ${legacy} as a deprecated origin when it is the only config`, () => {
     const dir = scratch();
     touch(dir, legacy);
@@ -58,18 +57,18 @@ test("resolveConfigPath returns undefined when no candidate exists", () => {
   assert.equal(resolveConfigPath(scratch()), undefined);
 });
 
-test("loadConfig defaults state under .sandcastle.local, with parkedDir and logFile following", async () => {
-  const cfgPath = writeConfig(scratch(), "sandcastle/config.mts");
+test("loadConfig defaults state under .vetinari.local, with parkedDir and logFile following", async () => {
+  const cfgPath = writeConfig(scratch(), "vetinari/config.mts");
 
   const cfg = await loadConfig(cfgPath);
 
-  assert.equal(cfg.stateDir, ".sandcastle.local");
-  assert.equal(cfg.parkedDir, ".sandcastle.local/parked");
-  assert.equal(cfg.logFile, ".sandcastle.local/logs/orchestrator.jsonl");
+  assert.equal(cfg.stateDir, ".vetinari.local");
+  assert.equal(cfg.parkedDir, ".vetinari.local/parked");
+  assert.equal(cfg.logFile, ".vetinari.local/logs/orchestrator.jsonl");
 });
 
 test("loadConfig defaults hostWeight to 1, and honors an explicit weight", async () => {
-  const dflt = await loadConfig(writeConfig(scratch(), "sandcastle/config.mts"));
+  const dflt = await loadConfig(writeConfig(scratch(), "vetinari/config.mts"));
   assert.equal(dflt.hostWeight, 1);
 
   const weighted = `export default {
@@ -81,7 +80,7 @@ test("loadConfig defaults hostWeight to 1, and honors an explicit weight", async
   hostWeight: 3,
 };
 `;
-  const cfg = await loadConfig(writeConfig(scratch(), "sandcastle/config.mts", weighted));
+  const cfg = await loadConfig(writeConfig(scratch(), "vetinari/config.mts", weighted));
   assert.equal(cfg.hostWeight, 3);
 });
 
@@ -92,11 +91,7 @@ test("loadConfig's not-found error leads with the canonical path and mentions --
     await assert.rejects(loadConfig(), (err: Error) => {
       const msg = err.message;
       assert.match(msg, /--config <path>/);
-      // The canonical location leads the message, before any legacy candidate.
-      const legacyAt = msg.indexOf("sandcastle-tdd.config");
-      const canonicalAt = msg.indexOf("sandcastle/config.mts");
-      assert.ok(canonicalAt >= 0, "canonical path is named");
-      assert.ok(legacyAt === -1 || canonicalAt < legacyAt, "canonical path leads any legacy mention");
+      assert.match(msg, /vetinari\/config\.mts/);
       return true;
     });
   } finally {
@@ -106,7 +101,7 @@ test("loadConfig's not-found error leads with the canonical path and mentions --
 
 test("loadConfig warns naming the canonical location when it resolves from a legacy config", async () => {
   const dir = scratch();
-  writeConfig(dir, "sandcastle-tdd.config.mts");
+  writeConfig(dir, ".sandcastle/config.mts");
   const cwd = process.cwd();
   const warnings: string[] = [];
   const origWarn = console.warn;
@@ -121,13 +116,13 @@ test("loadConfig warns naming the canonical location when it resolves from a leg
 
   const warning = warnings.join("\n");
   assert.match(warning, /deprecated/i);
-  assert.match(warning, /sandcastle-tdd\.config\.mts/);
-  assert.match(warning, /sandcastle\/config\.mts/);
+  assert.match(warning, /\.sandcastle\/config\.mts/);
+  assert.match(warning, /vetinari\/config\.mts/);
 });
 
 test("loadConfig does not warn when resolving from the canonical location", async () => {
   const dir = scratch();
-  writeConfig(dir, "sandcastle/config.mts");
+  writeConfig(dir, "vetinari/config.mts");
   const cwd = process.cwd();
   const warnings: string[] = [];
   const origWarn = console.warn;
@@ -171,7 +166,7 @@ const withNotify = (notify: string) =>
 test("loadConfig rejects a notify map that fans the interactive question category out to two destinations", async () => {
   const cfgPath = writeConfig(
     scratch(),
-    "sandcastle/config.mts",
+    "vetinari/config.mts",
     withNotify(`{ question: "alerts", "question:urgent": "ops" }`),
   );
 
@@ -187,7 +182,7 @@ test("loadConfig rejects question fan-out that comes via the wildcard catching u
   // `question:urgent` -> ops, but every other question event falls to `*` -> alerts.
   const cfgPath = writeConfig(
     scratch(),
-    "sandcastle/config.mts",
+    "vetinari/config.mts",
     withNotify(`{ "question:urgent": "ops", "*": "alerts" }`),
   );
 
@@ -197,7 +192,7 @@ test("loadConfig rejects question fan-out that comes via the wildcard catching u
 test("loadConfig accepts a notify map where question resolves to one destination while broadcasts fan freely", async () => {
   const cfgPath = writeConfig(
     scratch(),
-    "sandcastle/config.mts",
+    "vetinari/config.mts",
     withNotify(`{ "*": "ops", question: "alerts", "question:urgent": "alerts", failure: "pager", "progress:carve": "chatter" }`),
   );
 
@@ -209,7 +204,7 @@ test("loadConfig accepts a notify map where question resolves to one destination
 test("loadConfig honors an explicit stateDir over the flipped default", async () => {
   const cfgPath = writeConfig(
     scratch(),
-    "sandcastle/config.mts",
+    "vetinari/config.mts",
     CONFIG_BODY.replace("fetchTask:", 'stateDir: "custom-state",\n  fetchTask:'),
   );
 

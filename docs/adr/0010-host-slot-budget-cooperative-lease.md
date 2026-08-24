@@ -15,7 +15,7 @@ computed over the currently-active projects. Because a run only ever *checks its
 share before acquiring the next slot*, allocation self-corrects — when another
 project becomes active, a busy run stops re-acquiring above its now-smaller share and
 **drains to it as its turns finish**, with no preemption and no discarded work. A
-project declares its **weight** in its own `sandcastle/` config (default one); the
+project declares its **weight** in its own `vetinari/` config (default one); the
 host owns the total.
 
 Crucially, the lease is **not** the gateway. The gateway stays a dumb router

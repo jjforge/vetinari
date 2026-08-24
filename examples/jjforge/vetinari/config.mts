@@ -2,11 +2,11 @@
 // a Rust sidecar, tasks sourced from GitHub issues.
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
-import { defineConfig, githubBlockedBy, githubFindingReporter } from "sandcastle-tdd";
+import { defineConfig, githubBlockedBy, githubFindingReporter } from "vetinari";
 
 export default defineConfig({
   project: "jjforge",
-  image: "sandcastle-jjforge",
+  image: "vetinari-jjforge",
   baseBranch: "develop",
 
   // The gate. The Go suite always; the Rust suite only when the branch touched
@@ -36,10 +36,10 @@ export default defineConfig({
   // builds this repo at a different path than the sandboxes' /home/agent/
   // workspace, so a host-shared cache would never produce cross-hits anyway.
   mounts: [
-    { hostPath: ".sandcastle/cache/gomod", sandboxPath: "/home/agent/go/pkg/mod" },
-    { hostPath: ".sandcastle/cache/gocache", sandboxPath: "/home/agent/.cache/go-build" },
-    { hostPath: ".sandcastle/cache/cargo-registry", sandboxPath: "/home/agent/.cargo/registry" },
-    { hostPath: ".sandcastle/cache/sccache", sandboxPath: "/home/agent/.cache/sccache" },
+    { hostPath: ".vetinari.local/cache/gomod", sandboxPath: "/home/agent/go/pkg/mod" },
+    { hostPath: ".vetinari.local/cache/gocache", sandboxPath: "/home/agent/.cache/go-build" },
+    { hostPath: ".vetinari.local/cache/cargo-registry", sandboxPath: "/home/agent/.cargo/registry" },
+    { hostPath: ".vetinari.local/cache/sccache", sandboxPath: "/home/agent/.cache/sccache" },
   ],
 
   fetchTask: (id) =>
@@ -58,8 +58,8 @@ export default defineConfig({
 
   // Sandcastle writes safe.directory host-side and needs a writable global git
   // config; this machine's real one is a read-only nix store symlink. It must
-  // stay OUT of .sandcastle/.env — that file is injected into the container,
+  // stay OUT of .vetinari.local/.env — that file is injected into the container,
   // where any GIT_CONFIG_GLOBAL overrides the HOME the fork's own git tests
   // depend on, failing modules/git and models/asymkey.
-  hostEnv: { GIT_CONFIG_GLOBAL: resolve(".sandcastle/gitconfig") },
+  hostEnv: { GIT_CONFIG_GLOBAL: resolve(".vetinari.local/gitconfig") },
 });

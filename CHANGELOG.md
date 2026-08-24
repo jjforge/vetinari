@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Renamed the project, package, CLI, service, host configuration, environment
+  variables, logs, examples, documentation, committed config directory
+  (`vetinari/`), and local state directory (`.vetinari.local/`) from
+  `sandcastle-tdd` to `vetinari`. The old branded config and environment-variable
+  fallbacks were removed; the `.sandcastle/` layout remains migration input.
+
 - The issue-detail sheet gained a **Worktree** meta tile and turns-with-duration
   (#90). The tile surfaces the agent's real preserved worktree path — sourced from
   the `worktree-preserved` event the loop logs when it parks a slot, the genuine
@@ -21,14 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   containers across every project, honoured by a cooperative filesystem lease each
   `campaign`/`queue` run reads and writes directly under
   `<gatewayConfigDir()>/slots/` — the gateway never allocates. Set it with the
-  `SANDCASTLE_HOST_SLOTS` env var or a `<gatewayConfigDir()>/host-slots` file;
+  `VETINARI_HOST_SLOTS` env var or a `<gatewayConfigDir()>/host-slots` file;
   **unset leaves today's behaviour untouched** (each run bounded only by its own
   `QUEUE_SLOTS`, uncoordinated). A run takes a slot only when under both its
   `QUEUE_SLOTS` and its current **fair share** — a floor of one slot per active
   project plus a weight-proportional cut of the remainder — so a busy project
   drains to its share as a new project becomes active, with no preemption, and a
   crashed run's slots are reclaimed on contention so the budget is never wedged.
-  New optional `hostWeight` (default 1) in `sandcastle/config.mts` sets a project's
+  New optional `hostWeight` (default 1) in `vetinari/config.mts` sets a project's
   cut of the remainder when projects contend.
 
 - `docs/dashboard-color-rules.md`, the normative card/chip colour spec (#83): the
@@ -38,10 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shared implementation so it stays the reference.
 
 - `docs/gateway.md`, an operator how-to for standing up and running the aggregated
-  gateway (#68): credentials in `.sandcastle.local/orchestrator.env` and how the
+  gateway (#68): credentials in `.vetinari.local/orchestrator.env` and how the
   sole-sender gateway reads them live from each project's base location (vs. the
   retired per-project `dispatch`), declaring `destinations`/`notify` in
-  `sandcastle/config.mts` and how `autoRegister` materializes them into
+  `vetinari/config.mts` and how `autoRegister` materializes them into
   `routing.json`, `autoRegister`-on-run + the `gateway` daemon, the
   dispatch→gateway `migrate`, and verification via `tg-test` and a draining outbox.
   Cross-links ADR 0002 and ADR 0006. Notes the `routing.json = {}` case truthfully:
@@ -276,16 +282,16 @@ repos` (repos with a running agent), parked `oldest <Nm>` (the oldest parked
   consumer and sender) and its systemd user service in place of the retired
   per-project `dispatch`/`attend` poller, and link the routing model
   (`destinations`/`notify`) to `docs/gateway.md`. The Modes table matches
-  `sandcastle-tdd --help` — `init` and `gateway` added, `dispatch` and `attend`
-  dropped. Config/state paths reflect the committed `sandcastle/config.mts` +
-  excluded `.sandcastle.local/` layout (including the agent-credential `.env`, now
-  `.sandcastle.local/.env`, vs. the host-only bot creds in `orchestrator.env` /
+  `vetinari --help` — `init` and `gateway` added, `dispatch` and `attend`
+  dropped. Config/state paths reflect the committed `vetinari/config.mts` +
+  excluded `.vetinari.local/` layout (including the agent-credential `.env`, now
+  `.vetinari.local/.env`, vs. the host-only bot creds in `orchestrator.env` /
   `gateway.env`). The dashboard prose describes the reinvented all-repos landing —
   counters, per-repo cards, a cross-repo activity feed, an issue-detail sheet with
   carve, and live SSE updates.
-- The shipped systemd unit is now `systemd/sandcastle-gateway.service`, the
+- The shipped systemd unit is now `systemd/vetinari-gateway.service`, the
   host-level gateway service (no `WorkingDirectory`, sourcing
-  `~/.config/sandcastle/gateway.env`), replacing the retired
+  `~/.config/vetinari/gateway.env`), replacing the retired
   `systemd/sandcastle-dispatch.service` (#86).
 
 - The repo/campaign page's closed waves now expand and collapse the way the design
@@ -460,13 +466,13 @@ question` + a `waiting Nm · reason` meta line) that open the existing issue-det
   only (via `ticketProse`), so a stray token in any comment can no longer poison
   confidence. The strict confidence contract is unchanged — a cited basename the
   tree lacks still yields `confident: false`, preserving the under-specified halt.
-  This repo's own `sandcastle/config.mts` drops its bespoke `fileSet` override in
+  This repo's own `vetinari/config.mts` drops its bespoke `fileSet` override in
   favour of the reworked default, so there is one resolver rather than two that
   drift.
 
 - The gateway never delivered a project's Telegram messages when its
   `orchestrator.env` annotated the credentials with inline comments (the shipped
-  template's own style: `SANDCASTLE_TELEGRAM_BOT_TOKEN=<token>  # from @BotFather`)
+  template's own style: `VETINARI_TELEGRAM_BOT_TOKEN=<token>  # from @BotFather`)
   (#77). `parseEnvFile` stripped surrounding quotes but not inline `#` comments, so
   the bot token carried the comment and Telegram returned 404. It now matches shell
   `source` semantics — an unquoted whitespace-then-`#` starts a comment; a quoted
@@ -587,14 +593,13 @@ question` + a `waiting Nm · reason` meta line) that open the existing issue-det
   matching the archive listing (never by joining request input into a path); a
   malformed archive is skipped with a log line. `listArchivedRuns` and
   `summarizeRun` are exported.
-- Committed `sandcastle/` + excluded `.sandcastle.local/` layout. Config now
-  resolves from a committed `sandcastle/config.mts` (canonical), with the legacy
-  `sandcastle-tdd.config.*` and `.sandcastle/config.mts` locations kept as
-  deprecated fallbacks that warn and point at the canonical path.
+- Committed `vetinari/` + excluded `.vetinari.local/` layout. Config now
+  resolves from a committed `vetinari/config.mts` (canonical), with the legacy
+  `.sandcastle/config.mts` location retained as migration input.
 - `migrate` command: moves an existing project from the old single-`.sandcastle/`
-  layout onto the committed `sandcastle/` + excluded `.sandcastle.local/` split in
-  one step — config → `sandcastle/`, old `.sandcastle/` state and secrets →
-  `.sandcastle.local/`, and `.gitignore` gains `.sandcastle.local/` while keeping
+  layout onto the committed `vetinari/` + excluded `.vetinari.local/` split in
+  one step — config → `vetinari/`, old `.sandcastle/` state and secrets →
+  `.vetinari.local/`, and `.gitignore` gains `.vetinari.local/` while keeping
   `.sandcastle/` ignored during the transition. `migrate --dry-run` prints the plan
   and changes nothing. Idempotent and non-clobbering (a move whose destination
   exists is refused, never overwritten). The `migrate` extension also folds a
@@ -602,7 +607,7 @@ question` + a `waiting Nm · reason` meta line) that open the existing issue-det
   gateway service. `computeLayoutMigration`, `applyLayoutMigration`, `scanLayout`,
   and `describeMigration` are exported.
 - `init` command: scaffolds a new project onto the layout (a starter
-  `sandcastle/config.mts`, a Dockerfile, and the excluded `.sandcastle.local/`), so
+  `vetinari/config.mts`, a Dockerfile, and the excluded `.vetinari.local/`), so
   a fresh project is ready to run with one command.
 - `campaign-plan <ids…>` command: turns a selected set of ticket ids into the
   dependency-ordered, file-disjoint wave arguments `campaign` consumes. It layers
@@ -611,7 +616,7 @@ question` + a `waiting Nm · reason` meta line) that open the existing issue-det
   `fileSet(ticket) → { files, confident }` config seam with a shipped
   cites-from-body default. An under-specified ticket (no confident file-set) halts
   the plan rather than being scheduled around silently
-  (`--on-underspecified=drop|fail`). It plans only — it never runs sandcastle.
+  (`--on-underspecified=drop|fail`). It plans only — it never runs Vetinari.
 - Host gateway + registry. A single host-level gateway daemon fronts every
   registered project as the sole Telegram consumer: it dedupes shared bot tokens so
   each bot is polled once, announces newly parked questions to each project's
@@ -648,7 +653,7 @@ question` + a `waiting Nm · reason` meta line) that open the existing issue-det
   never turns a real green into an error.
 - `statusline` command: prints two lines for the Claude Code status bar — line 1
   mirrors Claude Code's default (model, directory, git branch, context-used %), line
-  2 is the sandcastle run (wave in flight, a count per status), shown only where a
+  2 is the Vetinari run (wave in flight, a count per status), shown only where a
   config lives. Reads Claude Code's status JSON on stdin, derives line 2 from the
   log (no network), and always exits zero.
 - Campaign batches clear the parked records of their non-green tasks once the wave
@@ -661,8 +666,8 @@ question` + a `waiting Nm · reason` meta line) that open the existing issue-det
 
 ### Changed
 
-- Default state directory flipped from `.sandcastle/` to `.sandcastle.local/`, and
-  the committed config location is `sandcastle/config.mts`; `migrate` moves an
+- Default state directory flipped from `.sandcastle/` to `.vetinari.local/`, and
+  the committed config location is `vetinari/config.mts`; `migrate` moves an
   existing project across.
 - The status dashboard is one registry-backed aggregated server. `status` serves
   the multi-project dropdown view (a single project is a one-entry dropdown); carve
@@ -710,5 +715,5 @@ question` + a `waiting Nm · reason` meta line) that open the existing issue-det
   image.
 - Team walkthrough deck.
 
-[Unreleased]: https://github.com/jjforge/sandcastle-tdd/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/jjforge/sandcastle-tdd/releases/tag/v0.1.0
+[Unreleased]: https://github.com/jjforge/vetinari/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/jjforge/vetinari/releases/tag/v0.1.0

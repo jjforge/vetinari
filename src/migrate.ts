@@ -1,6 +1,6 @@
 /**
  * Move a project from the old single-`.sandcastle/` layout onto the committed
- * `sandcastle/` + excluded `.sandcastle.local/` split (ADR 0001).
+ * `vetinari/` + excluded `.vetinari.local/` split (ADR 0001).
  *
  * Split into a pure planner and an apply step, mirroring `carve` (a pure planner
  * over plain data) and `archive` (filesystem work that reports what it did):
@@ -9,8 +9,8 @@
  * rewrite — touching nothing; `applyLayoutMigration` performs that plan against a
  * real directory.
  *
- * The plan covers the whole migration: the LAYOUT MOVE (config → `sandcastle/`,
- * old `.sandcastle/` state → `.sandcastle.local/`, `.gitignore`) plus the
+ * The plan covers the whole migration: the LAYOUT MOVE (config → `vetinari/`,
+ * old `.sandcastle/` state → `.vetinari.local/`, `.gitignore`) plus the
  * gateway-coupled parts E1 deferred to E3 (#14) — folding a project's host-only
  * `orchestrator.env` (Telegram token, `GIT_CONFIG_GLOBAL`) up into the gateway's
  * host-level config, and rewriting the systemd unit from a per-project `dispatch`
@@ -25,8 +25,8 @@ import { dirname, join, resolve } from "node:path";
 import { resolveConfigPath } from "./config.ts";
 import { gatewayConfigDir } from "./registry.ts";
 
-const CANONICAL_DIR = "sandcastle";
-const LOCAL_DIR = ".sandcastle.local";
+const CANONICAL_DIR = "vetinari";
+const LOCAL_DIR = ".vetinari.local";
 const OLD_DIR = ".sandcastle";
 
 /** The gateway's host-level env file, folded from each project's `orchestrator.env`. */
@@ -42,7 +42,7 @@ export interface Move {
 export interface LayoutScan {
   /**
    * The deprecated config location that exists, relative to the root (e.g.
-   * ".sandcastle/config.mts" or "sandcastle-tdd.config.mts"). Undefined when the
+   * ".sandcastle/config.mts"). Undefined when the
    * config is already canonical or absent.
    */
   legacyConfig?: string;
@@ -104,7 +104,7 @@ export interface LayoutMigrationPlan {
   unit?: UnitRewrite;
 }
 
-/** Destination for a config move: `sandcastle/config` keeps the source extension. */
+/** Destination for a config move: `vetinari/config` keeps the source extension. */
 const configDest = (legacyConfig: string) => `${CANONICAL_DIR}/config${legacyConfig.endsWith(".mts") ? ".mts" : ".ts"}`;
 
 /**
@@ -193,12 +193,12 @@ function computeHostConfigFold(scan: LayoutScan): { fold?: HostConfigFold; confl
 function gatewayUnit(gatewayEnvPath: string): string {
   return [
     "[Unit]",
-    "Description=sandcastle-tdd gateway (host Telegram router)",
+    "Description=vetinari gateway (host Telegram router)",
     "After=docker.service network-online.target",
     "Wants=network-online.target",
     "",
     "[Service]",
-    `ExecStart=/usr/bin/env bash -lc 'set -a; source ${gatewayEnvPath}; set +a; exec sandcastle-tdd gateway'`,
+    `ExecStart=/usr/bin/env bash -lc 'set -a; source ${gatewayEnvPath}; set +a; exec vetinari gateway'`,
     "Restart=always",
     "RestartSec=5",
     "",
@@ -226,7 +226,7 @@ export function computeLayoutMigration(scan: LayoutScan): LayoutMigrationPlan {
   const conflicts: string[] = [];
   const addMove = (from: string, to: string) => (existing.has(to) ? conflicts.push(to) : moves.push({ from, to }));
 
-  // Config → committed `sandcastle/`. When it lived inside `.sandcastle/`, it is
+  // Config → committed `vetinari/`. When it lived inside `.sandcastle/`, it is
   // pulled out here so the state sweep below does not also move it.
   let configBasename: string | undefined;
   if (scan.legacyConfig) {
@@ -234,7 +234,7 @@ export function computeLayoutMigration(scan: LayoutScan): LayoutMigrationPlan {
     addMove(scan.legacyConfig, configDest(scan.legacyConfig));
   }
 
-  // Everything else under `.sandcastle/` (state + secrets) → excluded `.sandcastle.local/`.
+  // Everything else under `.sandcastle/` (state + secrets) → excluded `.vetinari.local/`.
   for (const entry of scan.oldState ?? []) {
     if (entry === configBasename) continue;
     addMove(`${OLD_DIR}/${entry}`, `${LOCAL_DIR}/${entry}`);
@@ -307,16 +307,16 @@ const readOrUndef = (path: string): string | undefined => {
 };
 
 /**
- * Where the host-level dispatch systemd unit lives. `SANDCASTLE_SYSTEMD_UNIT`
+ * Where the host-level dispatch systemd unit lives. `VETINARI_SYSTEMD_UNIT`
  * overrides it (the seam tests point at a tmp file); otherwise it follows the
  * systemd user-unit convention, `$XDG_CONFIG_HOME/systemd/user` or
  * `~/.config/systemd/user`, mirroring the README's install path.
  */
 export function systemdUnitPath(): string {
-  const override = process.env.SANDCASTLE_SYSTEMD_UNIT;
+  const override = process.env.VETINARI_SYSTEMD_UNIT;
   if (override) return override;
   const xdg = process.env.XDG_CONFIG_HOME;
-  return join(xdg || join(homedir(), ".config"), "systemd", "user", "sandcastle-dispatch.service");
+  return join(xdg || join(homedir(), ".config"), "systemd", "user", "vetinari-gateway.service");
 }
 
 /**
@@ -375,14 +375,14 @@ export function describeMigration(plan: LayoutMigrationPlan): string {
   const changesNothing =
     !plan.moves.length && plan.gitignore === undefined && !plan.conflicts.length && !plan.hostConfig && !plan.unit;
   if (changesNothing) {
-    return "Nothing to do — this project is already on the sandcastle/ + .sandcastle.local/ layout.";
+    return "Nothing to do — this project is already on the vetinari/ + .vetinari.local/ layout.";
   }
 
   if (plan.moves.length) {
     lines.push(`Moves (${plan.moves.length}):`);
     for (const m of plan.moves) lines.push(`  ${m.from} → ${m.to}`);
   }
-  if (plan.gitignore !== undefined) lines.push("Update .gitignore to exclude .sandcastle.local/ (and keep .sandcastle/ ignored).");
+  if (plan.gitignore !== undefined) lines.push("Update .gitignore to exclude .vetinari.local/ (and keep .sandcastle/ ignored).");
   if (plan.hostConfig) {
     lines.push(`Fold orchestrator.env into the gateway host config (${plan.hostConfig.path}):`);
     for (const k of plan.hostConfig.folded) lines.push(`  + ${k}`);

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { acquireSlot, deregisterProject, fairShare, readHostBudget, readLeases, registerProject, releaseSlot } from "./host-slots.ts";
 
-const freshDir = () => mkdtempSync(join(tmpdir(), "sctdd-slots-"));
+const freshDir = () => mkdtempSync(join(tmpdir(), "vetinari-slots-"));
 const alive = () => true;
 
 test("a project running alone gets the whole budget", () => {
@@ -112,27 +112,27 @@ test("over-subscribed, only the heaviest projects seat a slot; the rest are deni
 
 test("readHostBudget: with no env and no file the host budget is disabled (undefined)", () => {
   const dir = freshDir();
-  const saved = process.env.SANDCASTLE_HOST_SLOTS;
-  delete process.env.SANDCASTLE_HOST_SLOTS;
+  const saved = process.env.VETINARI_HOST_SLOTS;
+  delete process.env.VETINARI_HOST_SLOTS;
   try {
     assert.equal(readHostBudget(dir), undefined);
   } finally {
-    if (saved !== undefined) process.env.SANDCASTLE_HOST_SLOTS = saved;
+    if (saved !== undefined) process.env.VETINARI_HOST_SLOTS = saved;
   }
 });
 
 test("readHostBudget: reads the host-slots file, and the env overrides it", () => {
   const dir = freshDir();
   writeFileSync(join(dir, "host-slots"), "6\n");
-  const saved = process.env.SANDCASTLE_HOST_SLOTS;
-  delete process.env.SANDCASTLE_HOST_SLOTS;
+  const saved = process.env.VETINARI_HOST_SLOTS;
+  delete process.env.VETINARI_HOST_SLOTS;
   try {
     assert.equal(readHostBudget(dir), 6);
-    process.env.SANDCASTLE_HOST_SLOTS = "9";
+    process.env.VETINARI_HOST_SLOTS = "9";
     assert.equal(readHostBudget(dir), 9);
   } finally {
-    if (saved === undefined) delete process.env.SANDCASTLE_HOST_SLOTS;
-    else process.env.SANDCASTLE_HOST_SLOTS = saved;
+    if (saved === undefined) delete process.env.VETINARI_HOST_SLOTS;
+    else process.env.VETINARI_HOST_SLOTS = saved;
   }
 });
 

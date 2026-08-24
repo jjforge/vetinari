@@ -4,7 +4,7 @@
  * `campaign-plan` keeps co-wave tickets file-disjoint so a wave never collides as
  * a merge conflict at integration. Which files a ticket will touch is a project
  * concern, so it is a config seam — `fileSet(ticket) -> { files, confident }`,
- * beside `blockedBy`/`fetchTask` — and sandcastle-tdd ships a generic default.
+ * beside `blockedBy`/`fetchTask` — and vetinari ships a generic default.
  *
  * Collisions are judged by basename (user story 6): the same file cited by
  * different paths across tickets must still be caught, so `files` is always a set

@@ -8,7 +8,7 @@ import { defaultFileSet, ticketProse } from "./fileset.ts";
 let counter = 0;
 /** A throwaway tree with the given repo-relative files (each created empty). */
 const treeWith = (...files: string[]): string => {
-  const root = join(tmpdir(), `sctdd-fileset-${Date.now()}-${counter++}`);
+  const root = join(tmpdir(), `vetinari-fileset-${Date.now()}-${counter++}`);
   for (const rel of files) {
     const path = join(root, rel);
     mkdirSync(join(path, ".."), { recursive: true });
@@ -141,7 +141,7 @@ test("defaultFileSet reads only the marker line's cites, ignoring incidental pro
   // The prose names an env file and a config that are not source files; a
   // whole-body scan would flip confidence to false. The marker line pins it down.
   const res = fileSet(
-    "The resolver reads `orchestrator.env` and a `.sandcastle.local` mention in prose.\n" +
+    "The resolver reads `orchestrator.env` and a `.vetinari.local` mention in prose.\n" +
       "\n" +
       "Touches (existing files): `fileset.ts`, `cli.mts`\n",
   );

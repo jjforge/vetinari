@@ -40,7 +40,7 @@ const parkFixture = (dir: string, taskId: string) =>
   );
 
 test("clearParkedForTasks removes only parked records for completed wave tasks", () => {
-  const dir = join(tmpdir(), `sctdd-clear-parked-${Date.now()}`);
+  const dir = join(tmpdir(), `vetinari-clear-parked-${Date.now()}`);
   mkdirSync(join(dir, "parked"), { recursive: true });
   parkFixture(dir, "101");
   parkFixture(dir, "102");
@@ -55,14 +55,14 @@ test("clearParkedForTasks removes only parked records for completed wave tasks",
 });
 
 test("park writes its record silently — the gateway is the only sender, so park never calls Telegram", async () => {
-  const dir = join(tmpdir(), `sctdd-park-silent-${Date.now()}`);
+  const dir = join(tmpdir(), `vetinari-park-silent-${Date.now()}`);
   mkdirSync(join(dir, "parked"), { recursive: true });
 
   // Telegram fully configured in the orchestrator env: park must STILL not send.
   const savedFetch = globalThis.fetch;
   const savedEnv = { ...process.env };
-  process.env.SANDCASTLE_TELEGRAM_BOT_TOKEN = "tok";
-  process.env.SANDCASTLE_TELEGRAM_CHAT_ID = "chat";
+  process.env.VETINARI_TELEGRAM_BOT_TOKEN = "tok";
+  process.env.VETINARI_TELEGRAM_CHAT_ID = "chat";
   let fetchCalls = 0;
   globalThis.fetch = (async () => {
     fetchCalls++;
@@ -83,7 +83,7 @@ test("park writes its record silently — the gateway is the only sender, so par
 });
 
 test("setParkedMessageId stamps the announced message id into an existing parked record", async () => {
-  const dir = join(tmpdir(), `sctdd-stamp-${Date.now()}`);
+  const dir = join(tmpdir(), `vetinari-stamp-${Date.now()}`);
   mkdirSync(join(dir, "parked"), { recursive: true });
   await park(cfgFor(dir), { taskId: "410", reason: "blocked", sessionId: "s", branch: "agent/410", question: "?" });
 
@@ -94,7 +94,7 @@ test("setParkedMessageId stamps the announced message id into an existing parked
 });
 
 test("setParkedMessageId leaves an already-cleared record alone", () => {
-  const dir = join(tmpdir(), `sctdd-stamp-gone-${Date.now()}`);
+  const dir = join(tmpdir(), `vetinari-stamp-gone-${Date.now()}`);
   mkdirSync(join(dir, "parked"), { recursive: true });
 
   // No throw for a record that was answered and cleared before the stamp landed.
@@ -104,7 +104,7 @@ test("setParkedMessageId leaves an already-cleared record alone", () => {
 });
 
 let outboxCounter = 0;
-const outboxDir = () => join(tmpdir(), `sctdd-outbox-${Date.now()}-${outboxCounter++}`);
+const outboxDir = () => join(tmpdir(), `vetinari-outbox-${Date.now()}-${outboxCounter++}`);
 
 test("enqueueOutbound writes a category-tagged outbound record the gateway can drain", () => {
   const dir = outboxDir();

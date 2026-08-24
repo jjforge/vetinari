@@ -1,10 +1,10 @@
 # The gateway is a dumb router; projects own their comms and register a pointer
 
 The host-level gateway holds no project config and no secrets. Each project owns
-its full Telegram configuration in its committed `sandcastle/` (destinations, and
+its full Telegram configuration in its committed `vetinari/` (destinations, and
 which message category goes where) with tokens in its excluded
-`.sandcastle.local/`. A project **registers** with the gateway by handing it a
-**base location** (the `.sandcastle.local/` path); the gateway reads everything it
+`.vetinari.local/`. A project **registers** with the gateway by handing it a
+**base location** (the `.vetinari.local/` path); the gateway reads everything it
 needs from there and never copies it. This keeps the gateway's own config trivial
 and means a secret lives in exactly one place.
 

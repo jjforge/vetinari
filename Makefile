@@ -7,12 +7,12 @@
 demo-create:
 	npx tsx scripts/seed-demo-dashboard.mts
 
-# Unregister + delete it (removes ~/.cache/sctdd-demo and its registry pointer).
+# Unregister + delete it (removes ~/.cache/vetinari-demo and its registry pointer).
 demo-clean:
 	npx tsx scripts/seed-demo-dashboard.mts --clear
 
 # Restart the host gateway systemd user service so it serves the current code
 # (tsx compiles at startup, so a restart is how merged changes go live).
 gateway-restart:
-	systemctl --user restart sandcastle-gateway.service
-	@systemctl --user is-active sandcastle-gateway.service
+	systemctl --user restart vetinari-gateway.service
+	@systemctl --user is-active vetinari-gateway.service

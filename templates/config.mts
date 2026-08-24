@@ -1,23 +1,23 @@
-// sandcastle-tdd project config — committed to your repo, versioned here.
+// vetinari project config — committed to your repo, versioned here.
 //
-// This is a skeleton: fill in your toolchain (in sandcastle/Dockerfile) and the
+// This is a skeleton: fill in your toolchain (in vetinari/Dockerfile) and the
 // gates below, then prove the image runs them green:
-//   sandcastle-tdd baseline
+//   vetinari baseline
 //
-// Machine-local state (logs, parked tasks, secrets) lives in .sandcastle.local/,
+// Machine-local state (logs, parked tasks, secrets) lives in .vetinari.local/,
 // which is gitignored — never committed. `stateDir` below points run state there.
-import { defineConfig } from "sandcastle-tdd";
+import { defineConfig } from "vetinari";
 
 export default defineConfig({
   // Name shown in notifications.
   project: "my-project",
   // Docker image carrying your toolchain AND the Claude Code CLI.
-  image: "sandcastle-my-project",
+  image: "vetinari-my-project",
   // Branch work is cut from and merged into.
   baseBranch: "main",
 
   // Run state, logs, and parked tasks — kept in the excluded machine-local dir.
-  stateDir: ".sandcastle.local",
+  stateDir: ".vetinari.local",
 
   // The gate the orchestrator runs after every agent turn. REPLACE these with
   // your project's real build/test commands; each must exit non-zero on failure.
@@ -33,6 +33,6 @@ export default defineConfig({
   fetchTask: (id) => `TODO: fetch the task text for ${id}`,
 
   // Optional: wire your tracker's blocked-by edges to enable carve / campaign-plan.
-  // import { githubBlockedBy } from "sandcastle-tdd";
+  // import { githubBlockedBy } from "vetinari";
   // blockedBy: githubBlockedBy("owner/repo"),
 });

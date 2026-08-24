@@ -92,13 +92,13 @@ const noise = (row: Record<string, unknown> & { event: string }): OrchestratorEv
 test("ownerRepoFromRemote parses SSH and HTTPS GitHub remotes to owner/name, and rejects garbage", () => {
   // SSH form, with the .git suffix stripped.
   assert.equal(
-    ownerRepoFromRemote("git@github.com:jjforge/sandcastle-tdd.git"),
-    "jjforge/sandcastle-tdd",
+    ownerRepoFromRemote("git@github.com:jjforge/vetinari.git"),
+    "jjforge/vetinari",
   );
   // HTTPS form, with and without the .git suffix.
   assert.equal(
-    ownerRepoFromRemote("https://github.com/jjforge/sandcastle-tdd.git"),
-    "jjforge/sandcastle-tdd",
+    ownerRepoFromRemote("https://github.com/jjforge/vetinari.git"),
+    "jjforge/vetinari",
   );
   assert.equal(
     ownerRepoFromRemote("https://github.com/acme/tidepool"),
@@ -115,7 +115,7 @@ test("ownerRepoFromRemote parses SSH and HTTPS GitHub remotes to owner/name, and
 });
 
 test("buildLanding's card carries owner/name from the project's git remote, and omits it when there is none", () => {
-  const base = join(tmpdir(), `sctdd-landing-repo-${Date.now()}`);
+  const base = join(tmpdir(), `vetinari-landing-repo-${Date.now()}`);
   // A project whose root is a git repo with a GitHub origin → the card carries owner/name.
   const withRemote = join(base, "with-remote");
   const root = join(withRemote, "root");
@@ -131,7 +131,7 @@ test("buildLanding's card carries owner/name from the project's git remote, and 
   const git = (args: string[]) =>
     execFileSync("git", ["-C", root, ...args], { encoding: "utf8" });
   git(["init", "-q"]);
-  git(["remote", "add", "origin", "git@github.com:jjforge/sandcastle-tdd.git"]);
+  git(["remote", "add", "origin", "git@github.com:jjforge/vetinari.git"]);
   // A project with no git remote (the demo) → no repo, so the display falls back to the bare key.
   const noRemote = join(base, "no-remote");
   seedState(noRemote, [
@@ -148,14 +148,14 @@ test("buildLanding's card carries owner/name from the project's git remote, and 
     new Date("2025-01-02T12:00:00.000Z"),
   );
   const [a, b] = projects;
-  assert.equal(a.repo, "jjforge/sandcastle-tdd");
+  assert.equal(a.repo, "jjforge/vetinari");
   // The bare project key is unchanged — repo is display-only.
   assert.equal(a.project, "with-remote");
   assert.equal(b.repo, undefined);
 });
 
 test("buildLanding builds a per-project card for a live campaign", () => {
-  const base = join(tmpdir(), `sctdd-landing-card-${Date.now()}`);
+  const base = join(tmpdir(), `vetinari-landing-card-${Date.now()}`);
   const dir = join(base, "demo");
   seedState(dir, [
     event("campaign-start", {
@@ -211,7 +211,7 @@ test("buildLanding builds a per-project card for a live campaign", () => {
 });
 
 test("buildLanding's card counts the live plan, not carved chips", () => {
-  const base = join(tmpdir(), `sctdd-landing-carved-${Date.now()}`);
+  const base = join(tmpdir(), `vetinari-landing-carved-${Date.now()}`);
   const dir = join(base, "demo");
   seedState(dir, [
     event("campaign-start", {
@@ -262,7 +262,7 @@ test("buildLanding's card counts the live plan, not carved chips", () => {
 });
 
 test("buildLanding sums the counters, reads an idle project's last campaign, and skips a stale one", () => {
-  const base = join(tmpdir(), `sctdd-landing-agg-${Date.now()}`);
+  const base = join(tmpdir(), `vetinari-landing-agg-${Date.now()}`);
   const alphaDir = join(base, "alpha");
   const betaDir = join(base, "beta");
   seedState(alphaDir, [
@@ -340,7 +340,7 @@ test("buildLanding sums the counters, reads an idle project's last campaign, and
 });
 
 test("an idle project's merged % and merged-today read its latest archived run, not the cleared live log (#70)", () => {
-  const base = join(tmpdir(), `sctdd-landing-idle-archive-${Date.now()}`);
+  const base = join(tmpdir(), `vetinari-landing-idle-archive-${Date.now()}`);
   const dir = join(base, "beta");
   // Idle: the run finished, so its live log is empty and its work is in the archive.
   seedState(dir, []);
@@ -386,7 +386,7 @@ test("an idle project's merged % and merged-today read its latest archived run, 
 });
 
 test("an idle project whose latest archived run merged on an earlier day counts 0 toward merged-today (#70)", () => {
-  const base = join(tmpdir(), `sctdd-landing-idle-archive-old-${Date.now()}`);
+  const base = join(tmpdir(), `vetinari-landing-idle-archive-old-${Date.now()}`);
   const dir = join(base, "beta");
   seedState(dir, []);
   mkdirSync(join(dir, "logs", "archive"), { recursive: true });
@@ -420,7 +420,7 @@ test("an idle project whose latest archived run merged on an earlier day counts 
 });
 
 test("merged-today sums every archived run merged today, not just the latest (#97)", () => {
-  const base = join(tmpdir(), `sctdd-landing-merged-many-${Date.now()}`);
+  const base = join(tmpdir(), `vetinari-landing-merged-many-${Date.now()}`);
   const dir = join(base, "beta");
   // Idle: two campaigns ran and completed today, so both live in the archive.
   seedState(dir, []);
@@ -475,7 +475,7 @@ test("merged-today sums every archived run merged today, not just the latest (#9
 });
 
 test("merged-today combines the live run's merges with the archives' (#97)", () => {
-  const base = join(tmpdir(), `sctdd-landing-merged-live-arch-${Date.now()}`);
+  const base = join(tmpdir(), `vetinari-landing-merged-live-arch-${Date.now()}`);
   const dir = join(base, "beta");
   // A live campaign in flight that has already merged 601 today (602 still running).
   seedState(dir, [
@@ -526,7 +526,7 @@ test("merged-today combines the live run's merges with the archives' (#97)", () 
 });
 
 test("merged-today counts an issue merged in more than one run only once (#97)", () => {
-  const base = join(tmpdir(), `sctdd-landing-merged-dedupe-${Date.now()}`);
+  const base = join(tmpdir(), `vetinari-landing-merged-dedupe-${Date.now()}`);
   const dir = join(base, "beta");
   // 801 merged in the live run today...
   seedState(dir, [
@@ -583,7 +583,7 @@ test("merged-today counts against the operator's LOCAL day, not the UTC day (#97
   const origTZ = process.env.TZ;
   process.env.TZ = "America/Los_Angeles";
   try {
-    const base = join(tmpdir(), `sctdd-landing-merged-localday-${Date.now()}`);
+    const base = join(tmpdir(), `vetinari-landing-merged-localday-${Date.now()}`);
     const dir = join(base, "beta");
     seedState(dir, [
       event("campaign-start", {
@@ -616,7 +616,7 @@ test("merged-today counts against the operator's LOCAL day, not the UTC day (#97
 });
 
 test("buildFeed merges every project's narratable events into one newest-first, repo-prefixed feed", () => {
-  const base = join(tmpdir(), `sctdd-feed-${Date.now()}`);
+  const base = join(tmpdir(), `vetinari-feed-${Date.now()}`);
   const alphaDir = join(base, "alpha");
   const betaDir = join(base, "beta");
   seedState(alphaDir, [
@@ -668,7 +668,7 @@ test("a merged event that names its issue only through its branch still renders 
   // recover it there so the row reads "#<issue> merged", not "#undefined merged".
   assert.equal(describeEvent(event("green", { taskId: "", branch: "agent/639", commits: [] })), "#639 merged");
 
-  const base = join(tmpdir(), `sctdd-feed-branch-${Date.now()}`);
+  const base = join(tmpdir(), `vetinari-feed-branch-${Date.now()}`);
   const dir = join(base, "acme");
   seedState(dir, [event("green", { ts: "2025-03-01T08:02:00.000Z", branch: "agent/639", taskId: "", commits: [] })]);
 
@@ -679,7 +679,7 @@ test("a merged event that names its issue only through its branch still renders 
 });
 
 test("buildFeed surfaces an idle project's recently-archived run, and drops one archived more than 48h ago (#101)", () => {
-  const base = join(tmpdir(), `sctdd-feed-archive-${Date.now()}`);
+  const base = join(tmpdir(), `vetinari-feed-archive-${Date.now()}`);
   const dir = join(base, "acme");
   // Idle: the live run archived, so its live log is empty and its work is in the archive.
   seedState(dir, []);
@@ -703,7 +703,7 @@ test("buildFeed surfaces an idle project's recently-archived run, and drops one 
 });
 
 test("buildFeed cuts individual events by ts even inside an in-window archive (#101)", () => {
-  const base = join(tmpdir(), `sctdd-feed-tscut-${Date.now()}`);
+  const base = join(tmpdir(), `vetinari-feed-tscut-${Date.now()}`);
   const dir = join(base, "acme");
   seedState(dir, []);
   mkdirSync(join(dir, "logs", "archive"), { recursive: true });
@@ -724,7 +724,7 @@ test("buildFeed cuts individual events by ts even inside an in-window archive (#
 });
 
 test("buildLanding collects every parked question across repos, oldest first", () => {
-  const base = join(tmpdir(), `sctdd-landing-parked-${Date.now()}`);
+  const base = join(tmpdir(), `vetinari-landing-parked-${Date.now()}`);
   const alphaDir = join(base, "alpha");
   const betaDir = join(base, "beta");
   seedState(alphaDir, [
@@ -794,7 +794,7 @@ test("buildLanding collects every parked question across repos, oldest first", (
 });
 
 test("buildAllStatus builds one status per live project and skips a stale one", () => {
-  const base = join(tmpdir(), `sctdd-all-status-${Date.now()}`);
+  const base = join(tmpdir(), `vetinari-all-status-${Date.now()}`);
   const alphaDir = join(base, "alpha");
   const betaDir = join(base, "beta");
   seedState(alphaDir, [
@@ -841,7 +841,7 @@ test("buildAllStatus builds one status per live project and skips a stale one", 
 });
 
 test("serveAllStatus serves the aggregated site, selecting the project from the query param", async () => {
-  const configDir = join(tmpdir(), `sctdd-serve-all-${Date.now()}`);
+  const configDir = join(tmpdir(), `vetinari-serve-all-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
   seedState(alphaDir, [
@@ -1765,7 +1765,7 @@ test("renderLandingShell wires live SSE updates, an updated-ago readout, and a b
 });
 
 test("serveAllStatus GET / serves the all-repos landing shell, not a server-rendered campaign", async () => {
-  const configDir = join(tmpdir(), `sctdd-landing-shell-${Date.now()}`);
+  const configDir = join(tmpdir(), `vetinari-landing-shell-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
   seedState(alphaDir, [
@@ -1824,7 +1824,7 @@ test("serveAllStatus GET / serves the all-repos landing shell, not a server-rend
 });
 
 test("serveAllStatus GET /api/landing serves the all-repos landing model as JSON", async () => {
-  const configDir = join(tmpdir(), `sctdd-landing-endpoint-${Date.now()}`);
+  const configDir = join(tmpdir(), `vetinari-landing-endpoint-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
   seedState(alphaDir, [
@@ -1886,7 +1886,7 @@ test("serveAllStatus GET /api/landing serves the all-repos landing model as JSON
 });
 
 test("serveAllStatus GET /api/feed serves the cross-project event feed as JSON", async () => {
-  const configDir = join(tmpdir(), `sctdd-feed-endpoint-${Date.now()}`);
+  const configDir = join(tmpdir(), `vetinari-feed-endpoint-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
   // The live route reads the feed with a default `now`, so seed within the 48h
@@ -1945,7 +1945,7 @@ test("serveAllStatus GET /api/feed serves the cross-project event feed as JSON",
 });
 
 test("serveAllStatus GET /api/issue serves one issue's reconstructed detail as JSON", async () => {
-  const configDir = join(tmpdir(), `sctdd-issue-endpoint-${Date.now()}`);
+  const configDir = join(tmpdir(), `vetinari-issue-endpoint-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   seedState(alphaDir, [
     event("campaign-start", {
@@ -2014,7 +2014,7 @@ test("serveAllStatus GET /api/issue serves one issue's reconstructed detail as J
 });
 
 test("serveAllStatus GET /api/issue carries the parked question and options for a parked issue", async () => {
-  const configDir = join(tmpdir(), `sctdd-issue-parked-${Date.now()}`);
+  const configDir = join(tmpdir(), `vetinari-issue-parked-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   seedState(alphaDir, [
     event("campaign-start", {
@@ -2074,7 +2074,7 @@ test("serveAllStatus GET /api/issue carries the parked question and options for 
 });
 
 test("serveAllStatus GET /api/issue omits parked reply data for a non-parked issue", async () => {
-  const configDir = join(tmpdir(), `sctdd-issue-unparked-${Date.now()}`);
+  const configDir = join(tmpdir(), `vetinari-issue-unparked-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   seedState(alphaDir, [
     event("campaign-start", {
@@ -2112,7 +2112,7 @@ test("serveAllStatus GET /api/issue omits parked reply data for a non-parked iss
 });
 
 test("serveAllStatus GET /api/events streams a project's log appends as SSE frames", async () => {
-  const configDir = join(tmpdir(), `sctdd-sse-${Date.now()}`);
+  const configDir = join(tmpdir(), `vetinari-sse-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   seedState(alphaDir, [
     event("campaign-start", {
@@ -2186,7 +2186,7 @@ test("serveAllStatus GET /api/events streams a project's log appends as SSE fram
 });
 
 test("serveAllStatus renders a single registered project as a one-entry dropdown with campaign, wave and parked intact", async () => {
-  const configDir = join(tmpdir(), `sctdd-serve-solo-${Date.now()}`);
+  const configDir = join(tmpdir(), `vetinari-serve-solo-${Date.now()}`);
   const soloDir = join(configDir, "state-solo");
   seedState(soloDir, [
     event("campaign-start", {
@@ -2243,7 +2243,7 @@ test("serveAllStatus renders a single registered project as a one-entry dropdown
 });
 
 test("serveAllStatus POST /carve on confirm shells carve in the selected project's root", async () => {
-  const configDir = join(tmpdir(), `sctdd-agg-carve-confirm-${Date.now()}`);
+  const configDir = join(tmpdir(), `vetinari-agg-carve-confirm-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
   seedState(alphaDir, [
@@ -2303,7 +2303,7 @@ test("serveAllStatus POST /carve on confirm shells carve in the selected project
 });
 
 test("serveAllStatus GET /carve?preview returns the selected project's structured closure as JSON", async () => {
-  const configDir = join(tmpdir(), `sctdd-agg-carve-json-${Date.now()}`);
+  const configDir = join(tmpdir(), `vetinari-agg-carve-json-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
   seedState(alphaDir, [
@@ -2374,7 +2374,7 @@ test("serveAllStatus GET /carve?preview returns the selected project's structure
 });
 
 test("serveAllStatus GET /carve?preview validates params and the project", async () => {
-  const configDir = join(tmpdir(), `sctdd-agg-carve-json-guard-${Date.now()}`);
+  const configDir = join(tmpdir(), `vetinari-agg-carve-json-guard-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
   seedState(betaDir, [
     event("campaign-start", {
@@ -2423,7 +2423,7 @@ test("serveAllStatus GET /carve?preview validates params and the project", async
 });
 
 test("serveAllStatus POST /carve previews the selected project's closure without executing", async () => {
-  const configDir = join(tmpdir(), `sctdd-agg-carve-preview-${Date.now()}`);
+  const configDir = join(tmpdir(), `vetinari-agg-carve-preview-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
   seedState(alphaDir, [
@@ -2495,7 +2495,7 @@ test("serveAllStatus POST /carve previews the selected project's closure without
 });
 
 test("serveAllStatus flags the selected project's carvable chips with its project", async () => {
-  const configDir = join(tmpdir(), `sctdd-agg-carve-control-${Date.now()}`);
+  const configDir = join(tmpdir(), `vetinari-agg-carve-control-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
   // A running campaign whose future wave (401) is still carvable.
   seedState(betaDir, [
@@ -2539,7 +2539,7 @@ test("serveAllStatus flags the selected project's carvable chips with its projec
 });
 
 test("serveAllStatus lists a project's archived runs and renders one read-only when a run is selected", async () => {
-  const configDir = join(tmpdir(), `sctdd-agg-archive-${Date.now()}`);
+  const configDir = join(tmpdir(), `vetinari-agg-archive-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
   // A live run still in flight.
   seedState(betaDir, [
@@ -2637,7 +2637,7 @@ test("serveAllStatus lists a project's archived runs and renders one read-only w
 });
 
 test("serveAllStatus reconstructs a carved issue in a selected archived run, read-only", async () => {
-  const configDir = join(tmpdir(), `sctdd-agg-archive-carved-${Date.now()}`);
+  const configDir = join(tmpdir(), `vetinari-agg-archive-carved-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
   // A live run over an unrelated issue, so the only carved chip on the page is the
   // archived run's.
@@ -2706,7 +2706,7 @@ test("serveAllStatus reconstructs a carved issue in a selected archived run, rea
 });
 
 test("serveAllStatus GET /api/issue reads an archived run's own log when a run token is given", async () => {
-  const configDir = join(tmpdir(), `sctdd-api-issue-archive-${Date.now()}`);
+  const configDir = join(tmpdir(), `vetinari-api-issue-archive-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
   // The live log names 101 nowhere — its detail lives only in the archived run.
   seedState(betaDir, [event("campaign-start", { batches: [["900"]], slots: 1 })]);
@@ -2767,7 +2767,7 @@ test("serveAllStatus GET /api/issue reads an archived run's own log when a run t
 });
 
 test("serveAllStatus GET /archive/log serves a listed run's raw JSONL as text/plain, and 404s an unlisted run", async () => {
-  const configDir = join(tmpdir(), `sctdd-archive-log-${Date.now()}`);
+  const configDir = join(tmpdir(), `vetinari-archive-log-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
   seedState(betaDir, [event("campaign-start", { batches: [["201"]], slots: 1 })]);
   const archiveDir = join(betaDir, "logs", "archive");
@@ -3289,7 +3289,7 @@ test("reconstructIssueDetail surfaces the preserved worktree path for a parked i
       event("worktree-preserved", {
         ts: "2025-01-01T00:03:01.000Z",
         taskId: "102",
-        path: ".sandcastle.local/wt/102",
+        path: ".vetinari.local/wt/102",
       }),
     ],
     "102",
@@ -3297,11 +3297,11 @@ test("reconstructIssueDetail surfaces the preserved worktree path for a parked i
 
   // The real per-task worktree the loop logged when it preserved the parked slot —
   // not a fabricated agent id (ADR/#55). Surfaced verbatim for the WORKTREE tile.
-  assert.equal(detail.worktree, ".sandcastle.local/wt/102");
+  assert.equal(detail.worktree, ".vetinari.local/wt/102");
 });
 
 test("buildStatus shows campaign waves with issue chips and statuses", () => {
-  const dir = join(tmpdir(), `sctdd-status-${Date.now()}`);
+  const dir = join(tmpdir(), `vetinari-status-${Date.now()}`);
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
   writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
@@ -3355,7 +3355,7 @@ test("buildStatus shows campaign waves with issue chips and statuses", () => {
 });
 
 test("buildStatus surfaces the campaign name from the start event", () => {
-  const dir = join(tmpdir(), `sctdd-status-name-${Date.now()}`);
+  const dir = join(tmpdir(), `vetinari-status-name-${Date.now()}`);
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
   writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
@@ -3371,7 +3371,7 @@ test("buildStatus surfaces the campaign name from the start event", () => {
 });
 
 test("buildStatus fills issue names from the log's titles, with no fetchTask", () => {
-  const dir = join(tmpdir(), `sctdd-status-log-titles-${Date.now()}`);
+  const dir = join(tmpdir(), `vetinari-status-log-titles-${Date.now()}`);
   seedState(dir, [
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
@@ -3390,7 +3390,7 @@ test("buildStatus fills issue names from the log's titles, with no fetchTask", (
 });
 
 test("buildStatus fills issue names from a queue-only run's queue-start titles", () => {
-  const dir = join(tmpdir(), `sctdd-status-queue-titles-${Date.now()}`);
+  const dir = join(tmpdir(), `vetinari-status-queue-titles-${Date.now()}`);
   seedState(dir, [
     // No campaign frame — a bare queue run frames its taskIds as a single wave,
     // and carries their titles on queue-start.
@@ -3409,7 +3409,7 @@ test("buildStatus fills issue names from a queue-only run's queue-start titles",
 });
 
 test("buildStatus leaves issue names unset when the log carries no titles", () => {
-  const dir = join(tmpdir(), `sctdd-status-no-titles-${Date.now()}`);
+  const dir = join(tmpdir(), `vetinari-status-no-titles-${Date.now()}`);
   seedState(dir, [
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
@@ -3422,7 +3422,7 @@ test("buildStatus leaves issue names unset when the log carries no titles", () =
 });
 
 test("buildStatus marks completed waves as closed", () => {
-  const dir = join(tmpdir(), `sctdd-status-closed-wave-${Date.now()}`);
+  const dir = join(tmpdir(), `vetinari-status-closed-wave-${Date.now()}`);
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
   writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
@@ -3462,7 +3462,7 @@ test("buildStatus marks completed waves as closed", () => {
 });
 
 test("buildStatus renders a carved issue as a carved chip in the wave it left", () => {
-  const dir = join(tmpdir(), `sctdd-status-carved-${Date.now()}`);
+  const dir = join(tmpdir(), `vetinari-status-carved-${Date.now()}`);
   seedState(dir, [
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
@@ -3505,7 +3505,7 @@ test("buildStatus renders a carved issue as a carved chip in the wave it left", 
 });
 
 test("buildStatus marks active wave issues as running before they finish", () => {
-  const dir = join(tmpdir(), `sctdd-status-running-${Date.now()}`);
+  const dir = join(tmpdir(), `vetinari-status-running-${Date.now()}`);
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
   writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
@@ -3539,7 +3539,7 @@ test("buildStatus marks active wave issues as running before they finish", () =>
 });
 
 test("buildStatus does not show parked interaction cards for closed wave issues", () => {
-  const dir = join(tmpdir(), `sctdd-status-closed-parked-${Date.now()}`);
+  const dir = join(tmpdir(), `vetinari-status-closed-parked-${Date.now()}`);
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
   writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
@@ -3589,7 +3589,7 @@ test("buildStatus does not show parked interaction cards for closed wave issues"
 });
 
 test("buildStatus only shows parked cards for issues in the active campaign", () => {
-  const dir = join(tmpdir(), `sctdd-status-filter-${Date.now()}`);
+  const dir = join(tmpdir(), `vetinari-status-filter-${Date.now()}`);
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
   writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
@@ -3622,7 +3622,7 @@ test("buildStatus only shows parked cards for issues in the active campaign", ()
 });
 
 test("buildStatus adds rough activity details for issue hover", () => {
-  const dir = join(tmpdir(), `sctdd-status-activity-${Date.now()}`);
+  const dir = join(tmpdir(), `vetinari-status-activity-${Date.now()}`);
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
   writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
@@ -3675,7 +3675,7 @@ test("buildStatus adds rough activity details for issue hover", () => {
 });
 
 test("buildStatusWithIssueNames adds issue names from fetchTask when available", async () => {
-  const dir = join(tmpdir(), `sctdd-status-issue-names-${Date.now()}`);
+  const dir = join(tmpdir(), `vetinari-status-issue-names-${Date.now()}`);
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
   writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
@@ -3699,7 +3699,7 @@ test("buildStatusWithIssueNames adds issue names from fetchTask when available",
 });
 
 test("wave labels read from tmp-log issue titles, resolved through buildStatusWithIssueNames", async () => {
-  const dir = join(tmpdir(), `sctdd-status-wave-names-${Date.now()}`);
+  const dir = join(tmpdir(), `vetinari-status-wave-names-${Date.now()}`);
   seedState(dir, [
     // Wave 0 (many issues) closes; wave 1 (one issue) is now running.
     event("campaign-start", {
@@ -3759,7 +3759,7 @@ test("wave labels read from tmp-log issue titles, resolved through buildStatusWi
 });
 
 test("wave labels and chip hovers render from the log's titles, with no fetchTask", () => {
-  const dir = join(tmpdir(), `sctdd-render-log-titles-${Date.now()}`);
+  const dir = join(tmpdir(), `vetinari-render-log-titles-${Date.now()}`);
   seedState(dir, [
     // Wave 0 (many issues) closes; wave 1 (one issue) is now running.
     event("campaign-start", {
@@ -4091,32 +4091,32 @@ test("renderStatusPage's repo dropdown states the current scope as the heading t
 test("the repo dropdown shows owner/name from repo while data-project stays the bare project key", () => {
   const html = renderStatusPage(
     {
-      project: "sandcastle-tdd",
+      project: "vetinari",
       waves: [{ index: 0, status: "running", issues: [] }],
       parked: [],
     },
     {
       projects: [
         {
-          project: "sandcastle-tdd",
+          project: "vetinari",
           runState: "running",
-          repo: "jjforge/sandcastle-tdd",
+          repo: "jjforge/vetinari",
         },
         { project: "acme-checkout", runState: "idle" },
       ],
-      selected: "sandcastle-tdd",
+      selected: "vetinari",
     },
   );
 
   // The trigger heading reads the selected repo's owner/name, not its bare key.
   assert.match(
     html,
-    /<span class="repo-label">jjforge\/sandcastle-tdd<\/span>/,
+    /<span class="repo-label">jjforge\/vetinari<\/span>/,
   );
   // Its row shows owner/name too, but routing stays keyed on the bare project key.
   assert.match(
     html,
-    /<li class="repo-option selected"[^>]*data-project="sandcastle-tdd"[^>]*><span class="repo-dot running"[^>]*><\/span><span class="repo-optlabel">jjforge\/sandcastle-tdd<\/span>/,
+    /<li class="repo-option selected"[^>]*data-project="vetinari"[^>]*><span class="repo-dot running"[^>]*><\/span><span class="repo-optlabel">jjforge\/vetinari<\/span>/,
   );
   // A project with no remote falls back to its bare key for the label.
   assert.match(
@@ -4346,7 +4346,7 @@ test("switching scope resets the view: it navigates (fresh sheet) and closed-wav
   // (collapsed) set — wave labels aren't unique across repos, so this can't expand the wrong wave.
   assert.match(
     html,
-    /const storeKey = "sctdd:closed-waves:" \+ waveBar\.dataset\.project;/,
+    /const storeKey = "vetinari:closed-waves:" \+ waveBar\.dataset\.project;/,
   );
 });
 
@@ -5755,7 +5755,7 @@ test("parseCarveClosure reads the structured closure line the dry-run prints", (
 });
 
 test("listArchivedRuns lists a project's archived runs newest-first with summaries, skipping a malformed file", () => {
-  const dir = join(tmpdir(), `sctdd-archive-list-${Date.now()}`);
+  const dir = join(tmpdir(), `vetinari-archive-list-${Date.now()}`);
   const archiveDir = join(dir, "logs", "archive");
   mkdirSync(archiveDir, { recursive: true });
   writeJsonl(join(archiveDir, "orchestrator-2026-01-01T00-00-00-000Z.jsonl"), [
@@ -5792,7 +5792,7 @@ test("listArchivedRuns lists a project's archived runs newest-first with summari
 });
 
 test("listArchivedRuns carries a named run's --name for the list's primary label", () => {
-  const dir = join(tmpdir(), `sctdd-archive-named-${Date.now()}`);
+  const dir = join(tmpdir(), `vetinari-archive-named-${Date.now()}`);
   const archiveDir = join(dir, "logs", "archive");
   mkdirSync(archiveDir, { recursive: true });
   writeJsonl(join(archiveDir, "orchestrator-2026-04-01T00-00-00-000Z.jsonl"), [
@@ -5806,7 +5806,7 @@ test("listArchivedRuns carries a named run's --name for the list's primary label
 
 test("listArchivedRuns returns nothing when a project has no archive directory", () => {
   assert.deepEqual(
-    listArchivedRuns(join(tmpdir(), `sctdd-archive-none-${Date.now()}`)),
+    listArchivedRuns(join(tmpdir(), `vetinari-archive-none-${Date.now()}`)),
     [],
   );
 });
@@ -5847,7 +5847,7 @@ test("parseRunTimestamp reverses an archive run token to an ISO timestamp, toler
 });
 
 test("listArchivedRuns carries each run's state, startedAt and issue count, derived from the log", () => {
-  const dir = join(tmpdir(), `sctdd-archive-fields-${Date.now()}`);
+  const dir = join(tmpdir(), `vetinari-archive-fields-${Date.now()}`);
   const archiveDir = join(dir, "logs", "archive");
   mkdirSync(archiveDir, { recursive: true });
   // A clean run that reached campaign-done: complete, three issues.
@@ -5911,7 +5911,7 @@ test("summarizeRun folds an archived log into a one-line mode/issue-count/outcom
 test("summarizeRun describes only the last run in a multi-run archive (#69)", () => {
   // An archive whose live log accumulated two campaigns before it was archived: an
   // earlier run halted on #61, then a fresh campaign ran the remainder to completion
-  // (this is the shape of the real sandcastle-tdd archive that read as "halted").
+  // (this is the shape of the real vetinari archive that read as "halted").
   // The summary must reflect the terminal run — complete, four issues — not fold the
   // stale campaign-halt from the superseded earlier run into a false "halted", and
   // its count must be the last run's, not the whole file's.

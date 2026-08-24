@@ -1,4 +1,4 @@
 node_modules/
 .sandcastle/
 *.log
-.sandcastle.local/
+.vetinari.local/

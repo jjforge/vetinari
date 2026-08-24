@@ -17,7 +17,7 @@ import { readHostBudget, type HostBudget } from "./host-slots.ts";
 import { campaignRunning, readEventLog, reduceCampaign, serveAllStatus } from "./status.ts";
 import { runStatusLine } from "./statusline.ts";
 
-const USAGE = `sandcastle-tdd <mode> [args]
+const USAGE = `vetinari <mode> [args]
 
   baseline                 prove the image runs every gate green — no agent, no cost
   run <task>               the TDD loop: agent turn → gate → resume on red
@@ -43,14 +43,14 @@ const USAGE = `sandcastle-tdd <mode> [args]
                            pre-decides for non-interactive runs (no flag, no
                            terminal defaults to fail).
   init [--dry-run]         scaffold a NEW project onto the layout: create the committed
-                           sandcastle/ (a defineConfig skeleton + a Dockerfile template),
-                           the excluded .sandcastle.local/, and add .sandcastle.local/ to
+                           vetinari/ (a defineConfig skeleton + a Dockerfile template),
+                           the excluded .vetinari.local/, and add .vetinari.local/ to
                            .gitignore. Idempotent and non-clobbering — an existing
-                           sandcastle/ config is never overwritten (--dry-run to print the
+                           vetinari/ config is never overwritten (--dry-run to print the
                            plan and write nothing). Installs and vendors nothing
-  migrate [--dry-run]      move this project onto the sandcastle/ + .sandcastle.local/
-                           layout: config → sandcastle/, old .sandcastle/ state →
-                           .sandcastle.local/, .gitignore updated, orchestrator.env
+  migrate [--dry-run]      move this project onto the vetinari/ + .vetinari.local/
+                           layout: config → vetinari/, old .sandcastle/ state →
+                           .vetinari.local/, .gitignore updated, orchestrator.env
                            folded into the gateway host config, and the systemd unit
                            rewritten into the host-level gateway service (--dry-run
                            to print the plan and change nothing)
@@ -76,9 +76,9 @@ const USAGE = `sandcastle-tdd <mode> [args]
                            Claude Code's JSON on stdin; wire into settings.json)
   tg-test                  prove the Telegram round-trip
 
-Options: --config <path>   (default: sandcastle-tdd.config.mts in cwd)
+Options: --config <path>   (default: vetinari/config.mts in cwd)
 
-Host slot budget (optional): set SANDCASTLE_HOST_SLOTS (or a host-slots file in the
+Host slot budget (optional): set VETINARI_HOST_SLOTS (or a host-slots file in the
 gateway config dir) to cap live containers across ALL projects; every queue/campaign
 cooperates through a filesystem lease to stay within it. Unset = uncoordinated, each
 run bounded only by QUEUE_SLOTS. A project's cut when projects contend is its
@@ -205,8 +205,8 @@ if (mode === "gateway") {
 if (mode === "status") {
   const portIdx = rest.indexOf("--port");
   const hostIdx = rest.indexOf("--host");
-  const port = portIdx >= 0 ? Number(rest[portIdx + 1]) : Number(process.env.SANDCASTLE_STATUS_PORT ?? 8765);
-  const host = hostIdx >= 0 ? rest[hostIdx + 1] : process.env.SANDCASTLE_STATUS_HOST ?? "127.0.0.1";
+  const port = portIdx >= 0 ? Number(rest[portIdx + 1]) : Number(process.env.VETINARI_STATUS_PORT ?? 8765);
+  const host = hostIdx >= 0 ? rest[hostIdx + 1] : process.env.VETINARI_STATUS_HOST ?? "127.0.0.1";
   if (!Number.isInteger(port) || port < 0) throw new Error("status --port needs a non-negative integer");
   if (!host) throw new Error("status --host needs a host, e.g. 127.0.0.1 or 0.0.0.0");
   await serveAllStatus(gatewayConfigDir(), { port, host });

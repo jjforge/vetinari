@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { gatewayConfigDir, register } from "../src/registry.ts";
 import { seedDemoRun, DEMO_PROJECT } from "../src/dashboard-demo-fixture.ts";
 
-const baseLocation = process.env.SCTDD_DEMO_DIR ?? join(homedir(), ".cache", "sctdd-demo");
+const baseLocation = process.env.VETINARI_DEMO_DIR ?? join(homedir(), ".cache", "vetinari-demo");
 const configDir = gatewayConfigDir();
 const pointerFile = join(configDir, "registry", `${DEMO_PROJECT}.json`);
 

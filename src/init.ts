@@ -1,16 +1,16 @@
 /**
- * Scaffold a NEW project onto the committed `sandcastle/` + excluded
- * `.sandcastle.local/` layout (ADR 0001, ADR 0003).
+ * Scaffold a NEW project onto the committed `vetinari/` + excluded
+ * `.vetinari.local/` layout (ADR 0001, ADR 0003).
  *
  * Sibling of `migrate` and built on the same planner+apply shape: `migrate` moves
  * an existing project off the old layout, `init` stands a greenfield one up.
  * `computeInit` turns a described target directory into a plan — the files/dirs to
  * create and the `.gitignore` edit — touching nothing; `applyInit` performs that
- * plan against a real directory. sandcastle-tdd is a shared machine install, so
+ * plan against a real directory. vetinari is a shared machine install, so
  * `init` lays down files only: it installs and vendors nothing.
  *
  * Idempotent and non-clobbering: re-running yields an empty plan and a "nothing to
- * do" report, and an existing `sandcastle/` config is never overwritten — the
+ * do" report, and an existing `vetinari/` config is never overwritten — the
  * committed scaffold is refused with a clear message while the still-missing
  * machine-local pieces (the excluded dir, the `.gitignore` entry) are filled in
  * without disturbing what already exists.
@@ -19,8 +19,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-const CANONICAL_DIR = "sandcastle";
-const LOCAL_DIR = ".sandcastle.local";
+const CANONICAL_DIR = "vetinari";
+const LOCAL_DIR = ".vetinari.local";
 const CONFIG_DEST = `${CANONICAL_DIR}/config.mts`;
 const DOCKERFILE_DEST = `${CANONICAL_DIR}/Dockerfile`;
 
@@ -36,9 +36,9 @@ export interface FileCreate {
  * that the committed scaffold is made of.
  */
 export interface InitScan {
-  /** Whether a canonical `sandcastle/` config already exists (→ scaffold refused). */
+  /** Whether a canonical `vetinari/` config already exists (→ scaffold refused). */
   hasConfig: boolean;
-  /** Whether the excluded `.sandcastle.local/` dir already exists. */
+  /** Whether the excluded `.vetinari.local/` dir already exists. */
   hasLocalDir: boolean;
   /** Current `.gitignore` content, or undefined when there is no `.gitignore`. */
   gitignore?: string;
@@ -51,12 +51,12 @@ export interface InitScan {
 export interface InitPlan {
   /** Committed scaffold files to write (the config skeleton and the Dockerfile). */
   creates: FileCreate[];
-  /** Directories to create (the excluded `.sandcastle.local/`). */
+  /** Directories to create (the excluded `.vetinari.local/`). */
   dirs: string[];
   /** The full new `.gitignore` content to write, or undefined when unchanged. */
   gitignore?: string;
   /**
-   * True when a `sandcastle/` config already existed, so the committed scaffold
+   * True when a `vetinari/` config already existed, so the committed scaffold
    * (config + Dockerfile) was withheld rather than overwritten. The machine-local
    * pieces are still filled in.
    */
@@ -108,7 +108,7 @@ export function computeInit(scan: InitScan): InitPlan {
 export function describeInit(plan: InitPlan): string {
   const nothing = !plan.creates.length && !plan.dirs.length && plan.gitignore === undefined;
   if (nothing) {
-    return "Nothing to do — this project is already initialized onto the sandcastle/ + .sandcastle.local/ layout.";
+    return "Nothing to do — this project is already initialized onto the vetinari/ + .vetinari.local/ layout.";
   }
 
   const lines: string[] = [];
@@ -116,7 +116,7 @@ export function describeInit(plan: InitPlan): string {
     lines.push(`Left ${CONFIG_DEST} untouched — it already exists (init never overwrites an existing config).`);
     lines.push("Filling in the still-missing pieces:");
   } else {
-    lines.push("Scaffolding this project onto the sandcastle/ + .sandcastle.local/ layout:");
+    lines.push("Scaffolding this project onto the vetinari/ + .vetinari.local/ layout:");
   }
 
   for (const c of plan.creates) lines.push(`  + ${c.path}`);
@@ -128,7 +128,7 @@ export function describeInit(plan: InitPlan): string {
     lines.push("");
     lines.push("Next steps:");
     lines.push(`  1. Add your toolchain to ${DOCKERFILE_DEST} and your gates to ${CONFIG_DEST}.`);
-    lines.push("  2. Build the image, then run `sandcastle-tdd baseline` to prove every gate green.");
+    lines.push("  2. Build the image, then run `vetinari baseline` to prove every gate green.");
   }
 
   return lines.join("\n");
@@ -187,7 +187,7 @@ const templatePath = (name: string) => new URL(`../templates/${name}`, import.me
 
 /**
  * Probe `baseDir` into an `InitScan` — the filesystem read that lives at the edge
- * so the planner stays pure. A canonical `sandcastle/config.{mts,ts}` counts as an
+ * so the planner stays pure. A canonical `vetinari/config.{mts,ts}` counts as an
  * existing config (the refusal trigger); the deprecated locations do not, since
  * init is for a greenfield project (a legacy layout is `migrate`'s job). The
  * config skeleton and Dockerfile templates are read from the shared install.

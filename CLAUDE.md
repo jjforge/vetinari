@@ -1,4 +1,4 @@
-# sandcastle-tdd — working agreement
+# vetinari — working agreement
 
 This file is always-on context, so it is read as _current truth_. Keep it number-free (see the no-numbers rule) and keep it to rules, not state.
 
@@ -18,7 +18,7 @@ These govern every change — yours interactively and every campaign agent's (th
 
 ## Work tracking — GitHub issues are the single source of truth
 
-**GitHub issues on `jjforge/sandcastle-tdd` are the single source of truth for all work** — bugs, features, follow-ups, deferred items. Every loose end gets an issue; there is **no backlog file** (no `NEXT-STEPS.md`, no `ROADMAP.md` — do not create one). "What's next" is the highest-priority open `ready-for-agent` issue whose blockers are all closed — read it from the tracker.
+**GitHub issues on `jjforge/vetinari` are the single source of truth for all work** — bugs, features, follow-ups, deferred items. Every loose end gets an issue; there is **no backlog file** (no `NEXT-STEPS.md`, no `ROADMAP.md` — do not create one). "What's next" is the highest-priority open `ready-for-agent` issue whose blockers are all closed — read it from the tracker.
 
 **File one the moment you find it — no permission needed.** An issue changes no code and ships nothing, so it is not an outward action that needs a confirm; a finding you carry to the end of a turn instead of filing is lost. Say what you saw and where, label it, and **file it separately** — do not fold the finding into the change you are making.
 

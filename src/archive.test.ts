@@ -9,7 +9,7 @@ import { enqueueOutbound, listOutbox, markOutboundSent, outboxDirOf } from "./st
 
 let counter = 0;
 const cfgFor = (): ResolvedConfig => {
-  const dir = join(tmpdir(), `sctdd-archive-${Date.now()}-${counter++}`);
+  const dir = join(tmpdir(), `vetinari-archive-${Date.now()}-${counter++}`);
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
   return { project: "demo", stateDir: dir, logFile: join(dir, "logs", "orchestrator.jsonl"), parkedDir: join(dir, "parked") } as ResolvedConfig;

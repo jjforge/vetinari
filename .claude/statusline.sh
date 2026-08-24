@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# sandcastle-tdd status line: two lines for the Claude Code status bar (matches
+# vetinari status line: two lines for the Claude Code status bar (matches
 # jjforge's setup).
 #   line 1 — the user's default status line (model · dir · branch · context%),
 #            i.e. ~/.claude/statusline.sh.
-#   line 2 — the sandcastle campaign line (🏰 …), so this repo keeps its
+#   line 2 — the Vetinari campaign line (🏰 …), so this repo keeps its
 #            wave/ticket status under the richer first line.
 # Claude Code feeds one JSON blob on stdin and blanks the bar on a non-zero
 # exit, so this reads stdin once, feeds it to both, and never fails hard: a
@@ -19,9 +19,9 @@ if [ -x "$default_sl" ]; then
   line1=$(printf '%s' "$input" | "$default_sl" 2>/dev/null)
 fi
 
-# Sandcastle emits its own model·dir·branch line then the 🏰 campaign line.
+# Vetinari emits its own model·dir·branch line then the 🏰 campaign line.
 # Keep the campaign line; fall back to its first line only if the default
-# status line above produced nothing. This repo IS sandcastle-tdd, so invoke
+# status line above produced nothing. This repo IS vetinari, so invoke
 # its CLI through the package's own tsx (no npm layer — fast enough for a 5s
 # refresh); stderr carries a deprecation notice, so drop it.
 sc_out=""

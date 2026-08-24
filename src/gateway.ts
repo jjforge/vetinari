@@ -538,15 +538,15 @@ export function rebuildIndex(projects: GatewayProject[]): ReplyIndex {
 // the shared install. Telegram send/poll and the resume shell-out are the only
 // side effects here; everything they decide comes from the pure functions.
 
-const ANNOUNCE_INTERVAL_MS = Math.max(1000, Number(process.env.SANDCASTLE_GATEWAY_ANNOUNCE_MS ?? 5000));
+const ANNOUNCE_INTERVAL_MS = Math.max(1000, Number(process.env.VETINARI_GATEWAY_ANNOUNCE_MS ?? 5000));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // The aggregated status site the gateway hosts (E5): one port fronting every
 // registered project, a dropdown to pick between them. Defaults to the same
 // 8765 the standalone per-project server uses (they don't run together on one
 // host — the gateway supersedes running one project standalone).
-const STATUS_PORT = Number(process.env.SANDCASTLE_GATEWAY_STATUS_PORT ?? 8765);
-const STATUS_HOST = process.env.SANDCASTLE_GATEWAY_STATUS_HOST ?? "127.0.0.1";
+const STATUS_PORT = Number(process.env.VETINARI_GATEWAY_STATUS_PORT ?? 8765);
+const STATUS_HOST = process.env.VETINARI_GATEWAY_STATUS_HOST ?? "127.0.0.1";
 
 const announceText = (a: Announcement) =>
   `⏸ ${a.project} agent PARKED (${a.record.reason}) on ${a.record.taskId}\n\n${a.record.question}\n\nReply to this message to answer and resume.`;

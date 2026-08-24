@@ -1,6 +1,6 @@
 # E3: Gateway — registration, single Telegram consumer, reply routing
 
-Epic: [#14](https://github.com/jjforge/sandcastle-tdd/issues/14) · Source: [ADR 0002](../adr/0002-gateway-is-a-dumb-router-projects-own-comms.md), [ADR 0001](../adr/0001-sandcastle-committed-vs-local-split.md), [ADR 0003](../adr/0003-shared-machine-install.md) · Glossary: [CONTEXT.md](../../CONTEXT.md)
+Epic: [#14](https://github.com/jjforge/vetinari/issues/14) · Source: [ADR 0002](../adr/0002-gateway-is-a-dumb-router-projects-own-comms.md), [ADR 0001](../adr/0001-vetinari-committed-vs-local-split.md), [ADR 0003](../adr/0003-shared-machine-install.md) · Glossary: [CONTEXT.md](../../CONTEXT.md)
 
 ## Problem Statement
 
@@ -17,7 +17,7 @@ projects at once" is not real.
 ## Solution
 
 One host-level **gateway** daemon fronts every project. Projects **register** with it
-by handing over their **base location** (their `.sandcastle.local/` path); the gateway
+by handing over their **base location** (their `.vetinari.local/` path); the gateway
 reads each project's Telegram connection and secrets from there and never copies them.
 The gateway is the **sole Telegram consumer** — it polls each distinct bot exactly
 once, deduping projects that share a bot — and the **sole sender**: when a run parks,
@@ -37,7 +37,7 @@ left behind.
 3. As a maintainer, I want a run to register its project automatically when it starts,
    so that I never have to enroll a project by hand.
 4. As a maintainer, I want registration to be a pointer only (`project`, project root,
-   base location), so that editing my `sandcastle/` config needs no re-register — the
+   base location), so that editing my `vetinari/` config needs no re-register — the
    gateway always reads live from the base location.
 5. As a maintainer, I want the gateway to poll each distinct bot token exactly once
    even when several projects share it, so that Telegram's one-consumer-per-bot rule is

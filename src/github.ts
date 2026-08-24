@@ -37,7 +37,7 @@ export const githubFindingReporter =
     const body = [
       finding.repro ? `**Repro:** ${finding.repro}` : "",
       finding.location ? `**Location:** ${finding.location}` : "",
-      `Discovered by a sandcastle agent while working on #${ctx.taskId}.`,
+      `Discovered by a Vetinari agent while working on #${ctx.taskId}.`,
     ]
       .filter(Boolean)
       .join("\n\n");

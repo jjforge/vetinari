@@ -1,6 +1,6 @@
 # campaign-plan: waves from the selected set, not the graph
 
-Epic: [#10](https://github.com/jjforge/sandcastle-tdd/issues/10) · Source: [ADR 0004](../adr/0004-campaign-plan-is-a-generic-feature-with-a-config-fileset-resolver.md) · Glossary: [CONTEXT.md](../../CONTEXT.md) · Supersedes: jjforge `docs/specs/2026-08-20-campaign-builder-design.md`
+Epic: [#10](https://github.com/jjforge/vetinari/issues/10) · Source: [ADR 0004](../adr/0004-campaign-plan-is-a-generic-feature-with-a-config-fileset-resolver.md) · Glossary: [CONTEXT.md](../../CONTEXT.md) · Supersedes: jjforge `docs/specs/2026-08-20-campaign-builder-design.md`
 
 ## Problem Statement
 
@@ -22,7 +22,7 @@ A `campaign-plan <ticket-ids…>` command that takes the selected set and emits 
 dependency-ordered, file-disjoint **wave** arguments ready to paste into `campaign`.
 It layers the selected tickets by their `blockedBy` graph, then splits each layer so
 no two tickets in a wave touch the same file. Each ticket's file-set comes from a
-project-provided **file-set resolver** (sandcastle-tdd ships a generic default). When
+project-provided **file-set resolver** (vetinari ships a generic default). When
 a ticket's file-set can't be determined confidently, the tool does not guess — it
 **stops and asks me** whether to drop that ticket (and its dependents) and plan the
 rest, or halt so I can put the missing data on the issue. It plans only; it never
@@ -73,12 +73,12 @@ runs `campaign` or pushes.
 17. As a maintainer, I want the tool to only plan — never run `campaign`, never push —
     so that I stay in control of when work actually starts.
 18. As a maintainer of any project (not just jjforge), I want this to be a generic
-    sandcastle-tdd feature, so that every project I run campaigns in gets it.
+    vetinari feature, so that every project I run campaigns in gets it.
 
 ## Implementation Decisions
 
 - **Generic feature, peer of `carve` (ADR 0004).** `campaign-plan` lives in
-  sandcastle-tdd. No project-specific paths are hard-coded.
+  vetinari. No project-specific paths are hard-coded.
 - **Shared DAG foundation with `carve`.** The step that builds each ticket's blockers
   restricted to the selected set (which `carve` does inline today) is factored into a
   shared helper both use. `campaign-plan` then topologically **layers** the restricted
@@ -89,7 +89,7 @@ runs `campaign` or pushes.
   blocker outside the set makes its dependent **unreachable** (reported and dropped).
   The injected blocker resolver therefore provides open blockers, not merely ids.
 - **File-set resolver is a config seam.** A project supplies `fileSet(ticket) →
-  { files, confident }`. sandcastle-tdd ships a generic default that parses a ticket's
+  { files, confident }`. vetinari ships a generic default that parses a ticket's
   cited paths, normalizes to basename, and validates against the tree, marking
   `confident: false` when a ticket cites nothing or cites what the tree lacks. Exported
   alongside `githubBlockedBy`. A project may use it or wrap it.

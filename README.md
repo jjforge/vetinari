@@ -1,4 +1,4 @@
-# sandcastle-tdd
+# Vetinari
 
 Run your backlog as parallel coding agents that **cannot mark their own work
 done** and **ask you instead of guessing**. Each task gets a container, a
@@ -26,10 +26,10 @@ pool keeps N slots full and a park frees its slot immediately.
 ## Quickstart
 
 ```bash
-npm install github:jjforge/sandcastle-tdd
+npm install github:jjforge/vetinari
 ```
 
-Needs Docker, Node 22+, and `.sandcastle.local/.env` holding `CLAUDE_CODE_OAUTH_TOKEN`
+Needs Docker, Node 22+, and `.vetinari.local/.env` holding `CLAUDE_CODE_OAUTH_TOKEN`
 from `claude setup-token` — your Claude Code subscription, which is what these
 agents run on. The container runs the official `claude` CLI and reads that
 token exactly as Claude Code GitHub Actions does; nothing here handles your
@@ -41,19 +41,19 @@ attribution and spend limits in the Console, and it doesn't consume the
 subscription rate windows that a parallel queue can exhaust. Neither choice
 changes how the loop behaves.
 
-Run `npx sandcastle-tdd init` to scaffold the layout: a committed
-`sandcastle/config.mts` (below) plus a `sandcastle/Dockerfile`, and the excluded
-`.sandcastle.local/` for machine-local state (logs, parked tasks, and the `.env`
+Run `npx vetinari init` to scaffold the layout: a committed
+`vetinari/config.mts` (below) plus a `vetinari/Dockerfile`, and the excluded
+`.vetinari.local/` for machine-local state (logs, parked tasks, and the `.env`
 above), added to `.gitignore`. Put everything project-specific in
-`sandcastle/config.mts` — nothing else needs editing:
+`vetinari/config.mts` — nothing else needs editing:
 
 ```ts
 import { execFileSync } from "node:child_process";
-import { defineConfig } from "sandcastle-tdd";
+import { defineConfig } from "vetinari";
 
 export default defineConfig({
   project: "myapp",
-  image: "sandcastle-myapp",          // templates/Dockerfile + your toolchain
+  image: "vetinari-myapp",          // templates/Dockerfile + your toolchain
   baseBranch: "main",
 
   // What decides green. `when` scopes a gate to branches that touched matching
@@ -71,8 +71,8 @@ export default defineConfig({
 Build the image, then prove it before spending anything on an agent:
 
 ```bash
-npx sandcastle docker build-image --dockerfile sandcastle/Dockerfile --image-name sandcastle-myapp
-npx sandcastle-tdd baseline          # toolchain probe + every gate, no agent
+npx sandcastle docker build-image --dockerfile vetinari/Dockerfile --image-name vetinari-myapp
+npx vetinari baseline          # toolchain probe + every gate, no agent
 ```
 
 A failing `baseline` is the cheapest failure available. A passing one means any
@@ -106,11 +106,11 @@ Two things to know:
 ## Run
 
 ```bash
-npx sandcastle-tdd run 436                    # one task: loop until green or parked
-npx sandcastle-tdd queue 436 611 623 640      # bounded pool, QUEUE_SLOTS (default 3)
-npx sandcastle-tdd parked                     # what's waiting on you, and why
-npx sandcastle-tdd status                     # all-repos landing dashboard at http://127.0.0.1:8765 (live)
-npx sandcastle-tdd answer 436 "use approach B, and say why in the commit"
+npx vetinari run 436                    # one task: loop until green or parked
+npx vetinari queue 436 611 623 640      # bounded pool, QUEUE_SLOTS (default 3)
+npx vetinari parked                     # what's waiting on you, and why
+npx vetinari status                     # all-repos landing dashboard at http://127.0.0.1:8765 (live)
+npx vetinari answer 436 "use approach B, and say why in the commit"
 ```
 
 Commits land on `agent/<task>`. Merging stays yours — or hand the whole
@@ -118,7 +118,7 @@ merge→test→next-queue chain to `campaign`:
 
 ```bash
 git checkout main                                     # the merges land on the checked-out base
-npx sandcastle-tdd campaign "436 611 623" "640 655"   # each quoted arg is one batch
+npx vetinari campaign "436 611 623" "640 655"   # each quoted arg is one batch
 ```
 
 `campaign` drains a batch, merges **only its green** branches into the base with
@@ -128,16 +128,16 @@ worktrees, and starts the next batch on the now-advanced base. A merge conflict
 or a red merged base **halts the campaign**, rolls the base back to where that
 batch began, and leaves every branch intact — you get a Telegram message and no
 later batch runs on a broken base. When a batch finishes, any parked records
-for non-green tasks in that completed wave are cleared from `.sandcastle.local/parked/`
+for non-green tasks in that completed wave are cleared from `.vetinari.local/parked/`
 so stale questions do not bleed into the next wave's dashboard. Pushing stays
 yours.
 
 On clean completion, a `campaign` or `queue` **archives the run** so a finished
 run stops lingering in the dashboard and status line: the orchestrator log is
-moved aside to `.sandcastle.local/logs/archive/orchestrator-<ts>.jsonl` (kept, never
+moved aside to `.vetinari.local/logs/archive/orchestrator-<ts>.jsonl` (kept, never
 deleted) and replaced with an empty one, so the status reads idle. It only fires
 on a clean finish with nothing still parked — a halt or an open question leaves
-the state in place to inspect. Run `sandcastle-tdd clear` to force the same reset
+the state in place to inspect. Run `vetinari clear` to force the same reset
 yourself. Archived runs stay browsable: each project's past runs (newest-first,
 with a one-line summary) sit under its live run, and clicking one renders its
 wave/issue view read-only.
@@ -157,7 +157,7 @@ on your way past. It reads the host registry, so no gateway daemon is required.
 closure of its dependents — then runs the rest:
 
 ```bash
-npx sandcastle-tdd carve 640 "611 640" "623 701"   # 701 is blocked by 640
+npx vetinari carve 640 "611 640" "623 701"   # 701 is blocked by 640
 # carve #640 → removed #640, #701 (dependents: #701)
 # remaining campaign: "611" "623"   ← runs this
 ```
@@ -178,7 +178,7 @@ set*, then prints the bare wave args (ready to paste after `campaign`) and a
 provenance report explaining each ticket's wave:
 
 ```bash
-npx sandcastle-tdd campaign-plan 611 623 640 701   # 640←611, 701←640
+npx vetinari campaign-plan 611 623 640 701   # 640←611, 701←640
 # "611 623" "640" "701"
 #
 # campaign-plan: 3 wave(s), 4 ticket(s) scheduled, 0 unreachable.
@@ -201,7 +201,7 @@ only** — it never runs `campaign` and never pushes; paste the wave args into
 
 `statusline` prints two lines for the Claude Code status bar: line 1 mirrors
 Claude Code's own default (model, directory, git branch, context-used %) with the
-model name trimmed of its `(1M context)` suffix; line 2 is the sandcastle run —
+model name trimmed of its `(1M context)` suffix; line 2 is the Vetinari run —
 the wave in flight and a count per status (the 🏰 marks it; no project name,
 since line 1 already shows the directory) — so a running campaign is visible
 without leaving the editor:
@@ -212,24 +212,24 @@ Opus 4.8 · jjforge · develop · 24%
 ```
 
 Wire it into the project's `.claude/settings.json` with the same command you
-already run sandcastle through, so the `sandcastle-tdd` import and the config
+already run Vetinari through, so the `vetinari` import and the config
 both resolve:
 
 ```json
 {
-  "statusLine": { "type": "command", "command": ".sandcastle.local/run statusline", "refreshInterval": 5 }
+  "statusLine": { "type": "command", "command": ".vetinari.local/run statusline", "refreshInterval": 5 }
 }
 ```
 
 (Use whatever invokes the CLI in your project — an installed dep is
-`npx sandcastle-tdd statusline`.) `refreshInterval` matters: Claude Code
+`npx vetinari statusline`.) `refreshInterval` matters: Claude Code
 refreshes the status line on its own events, but nothing tells it when the
 orchestrator's log changes — polling every few seconds keeps the line live
 during a run. It reads Claude Code's JSON on stdin, resolves the config from the
 workspace directory, and derives line 2 from the log alone (no network), so it
 stays fast. Line 1's fields come from Claude Code's own stdin JSON
 (`model.display_name`, `workspace.current_dir`, `context_window.used_percentage`)
-plus a `git` call for the branch. Outside a sandcastle project line 2 is simply
+plus a `git` call for the branch. Outside a Vetinari project line 2 is simply
 omitted, leaving line 1 — a non-zero exit would blank the bar, so it never
 errors out.
 
@@ -242,7 +242,7 @@ unrelated defect it saw (summary, location, repro), and each is filed somewhere
 durable instead of evaporating.
 
 ```ts
-import { githubFindingReporter } from "sandcastle-tdd";
+import { githubFindingReporter } from "vetinari";
 
 export default defineConfig({
   // …
@@ -263,26 +263,26 @@ One host-level daemon, the **`gateway`**, fronts every project on the machine: i
 is the **single Telegram consumer** (one poll per bot, so Telegram's
 one-consumer-per-bot rule is never violated) and the **sole sender** — a run never
 talks to Telegram itself. A run that parks or emits a notification writes a record
-into its own `.sandcastle.local/`; the gateway drains it and sends. Until the
+into its own `.vetinari.local/`; the gateway drains it and sends. Until the
 gateway is up, notifications silently do not fire. The full standing-up guide,
 end to end, is [`docs/gateway.md`](docs/gateway.md); the short path:
 
 Put each project's Telegram credentials in its **base location**, in
-`.sandcastle.local/orchestrator.env` (gitignored, host-only) — never in
-`.sandcastle.local/.env`, which is injected into agent containers and must not
+`.vetinari.local/orchestrator.env` (gitignored, host-only) — never in
+`.vetinari.local/.env`, which is injected into agent containers and must not
 carry a bot credential:
 
 ```bash
-# <project>/.sandcastle.local/orchestrator.env
-SANDCASTLE_TELEGRAM_BOT_TOKEN=123456:ABC-your-bot-token
-SANDCASTLE_TELEGRAM_CHAT_ID=-1001234567890
+# <project>/.vetinari.local/orchestrator.env
+VETINARI_TELEGRAM_BOT_TOKEN=123456:ABC-your-bot-token
+VETINARI_TELEGRAM_CHAT_ID=-1001234567890
 ```
 
 ```bash
-set -a; source .sandcastle.local/orchestrator.env; set +a
-npx sandcastle-tdd tg-test            # prove the round-trip first
-npx sandcastle-tdd gateway            # the ONE daemon (quick try; prefer the service below)
-npx sandcastle-tdd queue 436 611 623  # in another shell; registers itself with the gateway
+set -a; source .vetinari.local/orchestrator.env; set +a
+npx vetinari tg-test            # prove the round-trip first
+npx vetinari gateway            # the ONE daemon (quick try; prefer the service below)
+npx vetinari queue 436 611 623  # in another shell; registers itself with the gateway
 ```
 
 Every run **registers itself** with the gateway automatically (it reads each
@@ -293,7 +293,7 @@ running concurrent resumes as needed. Send **`/status`** (bare, or `/status@your
 in a group) for a live summary back in the chat, and **`carve <issue>`** to preview
 a carve and, on a `yes` reply, drop it from the running campaign.
 
-**Where messages land** is declared in the committed `sandcastle/config.mts` with
+**Where messages land** is declared in the committed `vetinari/config.mts` with
 two maps: `destinations` (named `{ bot, chat, thread? }` targets) and `notify`
 (routing rules — a bare `category`, a `category:event`, or a `*` default → a
 destination name), so you can split failures onto an alerts bot or a thread. The
@@ -306,32 +306,32 @@ back to the project's default chat.
 A backgrounded `gateway &` dies with its shell, so a park raised after you close
 the terminal goes unanswered. Run it as a **systemd user service** instead — one
 always-on daemon, restarted on crash, brought back at boot. The host-level unit is
-tracked in this repo at [`systemd/sandcastle-gateway.service`](systemd/sandcastle-gateway.service);
+tracked in this repo at [`systemd/vetinari-gateway.service`](systemd/vetinari-gateway.service);
 it has **no `WorkingDirectory`** (the gateway fronts every project, not one) and
-sources the host-level `~/.config/sandcastle/gateway.env`:
+sources the host-level `~/.config/vetinari/gateway.env`:
 
 ```bash
-install -Dm644 systemd/sandcastle-gateway.service \
-  ~/.config/systemd/user/sandcastle-gateway.service
+install -Dm644 systemd/vetinari-gateway.service \
+  ~/.config/systemd/user/vetinari-gateway.service
 
 systemctl --user daemon-reload
-systemctl --user enable --now sandcastle-gateway   # start now + at every login
+systemctl --user enable --now vetinari-gateway   # start now + at every login
 loginctl enable-linger "$USER"                      # ...and at boot, without a login session
 ```
 
 The gateway still reads each project's bot credentials live from that project's
-`.sandcastle.local/orchestrator.env` (above); `gateway.env` carries host-level env
+`.vetinari.local/orchestrator.env` (above); `gateway.env` carries host-level env
 the daemon itself needs (e.g. `GIT_CONFIG_GLOBAL`), and `migrate` folds an existing
 project's `orchestrator.env` into it. Either way, keep bot creds out of
-`.sandcastle.local/.env`, which is injected into agent containers.
+`.vetinari.local/.env`, which is injected into agent containers.
 
 `enable --now` alone brings the daemon back only when you log in; **`enable-linger`
 is what makes it survive a headless reboot** — it tells systemd to start your user
-manager at boot. Operate it with `systemctl --user status|restart sandcastle-gateway`;
-gateway detail goes to `journalctl --user -u sandcastle-gateway`. **This replaces
+manager at boot. Operate it with `systemctl --user status|restart vetinari-gateway`;
+gateway detail goes to `journalctl --user -u vetinari-gateway`. **This replaces
 the inline `gateway &`** — do not run both, or the two consumers fight over the
 bot's updates. Migrating from the retired per-project `dispatch` poller?
-`npx sandcastle-tdd migrate` rewrites your old unit into this one — see
+`npx vetinari migrate` rewrites your old unit into this one — see
 [`docs/gateway.md`](docs/gateway.md).
 
 ## Operating rules that are load-bearing
@@ -358,19 +358,19 @@ Each of these was paid for in a failed run. They are not style preferences.
 
 ## Update this package
 
-**Installed from git** (`github:jjforge/sandcastle-tdd`) — npm copies the repo
+**Installed from git** (`github:jjforge/vetinari`) — npm copies the repo
 at a commit, so updates are explicit:
 
 ```bash
-npm update sandcastle-tdd                          # move to the tip of main
-npm install github:jjforge/sandcastle-tdd#<sha>    # or pin to a commit
+npm update vetinari                          # move to the tip of main
+npm install github:jjforge/vetinari#<sha>           # or pin to a commit
 ```
 
-Then re-run `npx sandcastle-tdd baseline` in that project. Its image, gates, and
+Then re-run `npx vetinari baseline` in that project. Its image, gates, and
 config are what an update has to keep working, and `baseline` exercises all
 three without agent cost.
 
-**Installed from a local path** (`file:../sandcastle-tdd`) — npm creates a
+**Installed from a local path** (`file:../vetinari`) — npm creates a
 **symlink**, so the consuming project always runs your working tree and a `git
 pull` in the package directory takes effect immediately with no reinstall.
 Convenient while developing the orchestrator, and worth knowing when debugging:
@@ -388,8 +388,8 @@ and ships behavioural changes in minors.
 ```bash
 npm install @ai-hero/sandcastle@latest   # here, and in each consuming project
 npm run check-contract                   # ~1s, no Docker: is the surface intact?
-npx sandcastle-tdd baseline              # container + gate path still work
-npx sandcastle-tdd run <small task>      # agent + session + resume still work
+npx vetinari baseline              # container + gate path still work
+npx vetinari run <small task>      # agent + session + resume still work
 ```
 
 Climb all four rungs, because each sees what the one below cannot.
@@ -425,8 +425,8 @@ it there too and re-run that project's `baseline`.
 | `campaign <batch…>` | drain each batch, merge its greens, gate the merged base, then start the next |
 | `carve <issue> <batch…>` | drop the issue + its transitive dependents, then run the rest as a campaign (`--dry-run` to just print) |
 | `campaign-plan <ids…>` | layer a selected set into dependency-ordered wave args (paste after `campaign`) + a provenance report; plans only, never runs |
-| `init [--dry-run]` | scaffold a **new** project onto the layout: committed `sandcastle/` (config skeleton + Dockerfile), excluded `.sandcastle.local/`, `.gitignore` updated (idempotent, never clobbers an existing config; `--dry-run` to just print the plan) |
-| `migrate [--dry-run]` | move an **existing** project onto the `sandcastle/` + `.sandcastle.local/` layout: config → `sandcastle/`, old `.sandcastle/` state → `.sandcastle.local/`, `.gitignore` updated, `orchestrator.env` folded into the gateway host config, and the systemd unit rewritten into the gateway service (`--dry-run` to just print the plan) |
+| `init [--dry-run]` | scaffold a **new** project onto the layout: committed `vetinari/` (config skeleton + Dockerfile), excluded `.vetinari.local/`, `.gitignore` updated (idempotent, never clobbers an existing config; `--dry-run` to just print the plan) |
+| `migrate [--dry-run]` | move an **existing** project onto the `vetinari/` + `.vetinari.local/` layout: config → `vetinari/`, old `.sandcastle/` state → `.vetinari.local/`, `.gitignore` updated, `orchestrator.env` folded into the gateway host config, and the systemd unit rewritten into the gateway service (`--dry-run` to just print the plan) |
 | `answer <task> <text>` | resume a parked task with your answer |
 | `gateway` | the one host daemon fronting every registered project: sole Telegram consumer and sender — announces parked questions, routes replies (and `carve <issue>`) to the right project+task, resumes them concurrently, and hosts the status dashboard |
 | `parked` | list what is waiting and why |
@@ -439,12 +439,12 @@ it there too and re-run that project's `baseline`.
 
 | Path | Contents |
 | --- | --- |
-| `.sandcastle.local/parked/<task>.json` | pending question, session id, branch, Telegram message id |
-| `.sandcastle.local/outbox/<id>.json` | a category-tagged record a run enqueues for the gateway to send |
-| `.sandcastle.local/routing.json` | this project's `destinations`/`notify` materialized for the gateway to read |
-| `.sandcastle.local/logs/orchestrator.jsonl` | every event: sandbox, turn, gate, park, green |
-| `.sandcastle.local/logs/gate-<ts>.log` | full stdout/stderr of each gate run |
-| `.sandcastle.local/logs/archive/orchestrator-<ts>.jsonl` | a finished run's log, moved aside on completion or `clear` |
+| `.vetinari.local/parked/<task>.json` | pending question, session id, branch, Telegram message id |
+| `.vetinari.local/outbox/<id>.json` | a category-tagged record a run enqueues for the gateway to send |
+| `.vetinari.local/routing.json` | this project's `destinations`/`notify` materialized for the gateway to read |
+| `.vetinari.local/logs/orchestrator.jsonl` | every event: sandbox, turn, gate, park, green |
+| `.vetinari.local/logs/gate-<ts>.log` | full stdout/stderr of each gate run |
+| `.vetinari.local/logs/archive/orchestrator-<ts>.jsonl` | a finished run's log, moved aside on completion or `clear` |
 
 ## Known limits
 

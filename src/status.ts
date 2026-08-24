@@ -69,6 +69,6 @@ export async function serveAllStatus(
   await new Promise<void>((resolve) => server.listen(opts.port, opts.host, resolve));
   const address = server.address() as AddressInfo;
   const shownHost = opts.host === "0.0.0.0" ? "<tailnet-or-host-ip>" : opts.host;
-  console.log(`sandcastle-tdd status: http://${shownHost}:${address.port}`);
+  console.log(`vetinari status: http://${shownHost}:${address.port}`);
   return server;
 }

@@ -31,10 +31,10 @@ export async function park(cfg: ResolvedConfig, rec: Omit<ParkedRecord, "parkedA
   mkdirSync(cfg.parkedDir, { recursive: true });
   writeFileSync(file(cfg, rec.taskId), JSON.stringify({ parkedAt: new Date().toISOString(), ...rec }, null, 2));
   log("parked", { taskId: rec.taskId, reason: rec.reason });
-  console.log(`\n*** PARKED (${rec.reason}) — the gateway will announce this question; or answer directly with:\n    sandcastle-tdd answer ${rec.taskId} "<answer>"\n`);
+  console.log(`\n*** PARKED (${rec.reason}) — the gateway will announce this question; or answer directly with:\n    vetinari answer ${rec.taskId} "<answer>"\n`);
 }
 
-/** A project's parked directory under a base location (its `.sandcastle.local/`). */
+/** A project's parked directory under a base location (its `.vetinari.local/`). */
 export const parkedDirOf = (baseLocation: string) => join(baseLocation, "parked");
 
 /** Every parked record under an explicit parked directory — the gateway reads a project's live. */
@@ -97,7 +97,7 @@ export interface OutboundRecord {
   destination?: string;
 }
 
-/** A project's outbox under a base location (its `.sandcastle.local/`). */
+/** A project's outbox under a base location (its `.vetinari.local/`). */
 export const outboxDirOf = (baseLocation: string) => join(baseLocation, "outbox");
 
 /**

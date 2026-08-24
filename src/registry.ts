@@ -7,9 +7,9 @@ import type { TgConn } from "./telegram.ts";
 
 /**
  * A registration is a POINTER only: which project, where its root is, and its
- * base location (the `.sandcastle.local/` path). No config or secrets are copied
+ * base location (the `.vetinari.local/` path). No config or secrets are copied
  * into the registry — the gateway reads those live from the base location
- * (ADR 0002). Editing a project's `sandcastle/` config needs no re-register.
+ * (ADR 0002). Editing a project's `vetinari/` config needs no re-register.
  */
 export interface ProjectPointer {
   project: string;
@@ -19,15 +19,15 @@ export interface ProjectPointer {
 
 /**
  * The gateway's host-level config directory — the one place the registry lives,
- * shared by every project on the machine (ADR 0003). `SANDCASTLE_GATEWAY_HOME`
+ * shared by every project on the machine (ADR 0003). `VETINARI_GATEWAY_HOME`
  * overrides it (and is the seam tests point at a tmp dir); otherwise it follows
- * the XDG convention, `$XDG_CONFIG_HOME/sandcastle` or `~/.config/sandcastle`.
+ * the XDG convention, `$XDG_CONFIG_HOME/vetinari` or `~/.config/vetinari`.
  */
 export function gatewayConfigDir(): string {
-  const override = process.env.SANDCASTLE_GATEWAY_HOME;
+  const override = process.env.VETINARI_GATEWAY_HOME;
   if (override) return override;
   const xdg = process.env.XDG_CONFIG_HOME;
-  return join(xdg || join(homedir(), ".config"), "sandcastle");
+  return join(xdg || join(homedir(), ".config"), "vetinari");
 }
 
 /**
@@ -93,7 +93,7 @@ export interface ReadProject {
 
 /**
  * The project's routing, materialized as plain JSON in its base location. The
- * committed `sandcastle/` config owns it; the run copies it down here at
+ * committed `vetinari/` config owns it; the run copies it down here at
  * registration so the gateway can read it live without importing the project's
  * TS config (ADR 0002: a dumb router reads everything from the base location).
  */
@@ -161,9 +161,9 @@ function parseEnvFile(text: string): Record<string, string> {
 // The Telegram env var names, mirroring telegram.ts's `tgEnvConn`. The token is
 // the secret; it lives only in the base location, never in the registry.
 const tgConnFromEnv = (env: Record<string, string>): TgConn | undefined => {
-  const token = env.SANDCASTLE_TELEGRAM_BOT_TOKEN;
-  const chat = env.SANDCASTLE_TELEGRAM_CHAT_ID;
-  return token && chat ? { token, chat, thread: env.SANDCASTLE_TELEGRAM_THREAD_ID } : undefined;
+  const token = env.VETINARI_TELEGRAM_BOT_TOKEN;
+  const chat = env.VETINARI_TELEGRAM_CHAT_ID;
+  return token && chat ? { token, chat, thread: env.VETINARI_TELEGRAM_THREAD_ID } : undefined;
 };
 
 /**

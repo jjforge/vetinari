@@ -1,5 +1,5 @@
 export { defineConfig, loadConfig, resolveDestination, questionDestinations } from "./config.ts";
-export type { SandcastleTddConfig, ResolvedConfig, GateSpec, MountSpec, Destination, NotifyMap, MessageCategory } from "./config.ts";
+export type { VetinariConfig, ResolvedConfig, GateSpec, MountSpec, Destination, NotifyMap, MessageCategory } from "./config.ts";
 export { runLoop, answerPromptFor, DONE, BLOCKED } from "./loop.ts";
 export type { Outcome, ResumeEntry } from "./loop.ts";
 export { runGates } from "./gate.ts";

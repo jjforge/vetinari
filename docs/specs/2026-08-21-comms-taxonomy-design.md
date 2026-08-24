@@ -1,6 +1,6 @@
 # E4: Comms taxonomy + notify map
 
-Epic: [#15](https://github.com/jjforge/sandcastle-tdd/issues/15) · Source: [ADR 0002](../adr/0002-gateway-is-a-dumb-router-projects-own-comms.md) · Glossary: [CONTEXT.md](../../CONTEXT.md)
+Epic: [#15](https://github.com/jjforge/vetinari/issues/15) · Source: [ADR 0002](../adr/0002-gateway-is-a-dumb-router-projects-own-comms.md) · Glossary: [CONTEXT.md](../../CONTEXT.md)
 
 ## Problem Statement
 
@@ -16,12 +16,12 @@ need a path from the run to the gateway at all.
 
 ## Solution
 
-Each project declares, in its committed `sandcastle/` config, a set of named
+Each project declares, in its committed `vetinari/` config, a set of named
 **destinations** (a bot + chat, optionally a thread) and a **notify map** that
 routes each **message category** to a destination — with a wildcard default and the
 option to target a specific event under a category. A run no longer talks to
 Telegram directly: it writes a category-tagged **outbound record** into its
-`.sandcastle.local/`, and the gateway drains that outbox and routes each record to
+`.vetinari.local/`, and the gateway drains that outbox and routes each record to
 the destination the project's notify map resolves. The `question` category is the
 only interactive one, so it must resolve to a single destination the gateway can
 watch for the reply. The result: "all → ops bot, failures → alerts bot, wave-start
@@ -73,9 +73,9 @@ watch for the reply. The result: "all → ops bot, failures → alerts bot, wave
 
 ## Implementation Decisions
 
-- **Destinations + notify map in config.** A project's `sandcastle/` config gains a
+- **Destinations + notify map in config.** A project's `vetinari/` config gains a
   `destinations` map (name → `{bot, chat, thread?}`, tokens read by reference from
-  `.sandcastle.local/`) and a `notify` map (category or `category:event` →
+  `.vetinari.local/`) and a `notify` map (category or `category:event` →
   destination name), with a `*` wildcard entry as the default.
 - **Pure `resolveDestination(notifyMap, category, event?)`.** Returns the destination
   name for a message: an exact `category:event` entry wins over a bare `category`
@@ -85,7 +85,7 @@ watch for the reply. The result: "all → ops bot, failures → alerts bot, wave
   the wildcard) to more than one destination, loading fails with a clear error. Only
   `question` carries this rule; broadcast categories may fan anywhere.
 - **Outbox (chosen mechanism).** A run writes a category-tagged **outbound record**
-  (`{category, event?, text}`) into its `.sandcastle.local/` outbox instead of calling
+  (`{category, event?, text}`) into its `.vetinari.local/` outbox instead of calling
   Telegram. The gateway drains the outbox across registered projects and routes each
   record via `resolveDestination` against that project's notify map. This unifies all
   outbound through the gateway (E3's sole-sender stance) and reuses the base-location

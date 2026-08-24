@@ -162,6 +162,13 @@ repos` (repos with a running agent), parked `oldest <Nm>` (the oldest parked
 
 ### Changed
 
+- The landing **Merged today** counter's sublabel now reads **"All repos"** (was
+  "issues merged") (#104). The title already carries the metric, so a sublabel
+  repeating "merged" was redundant; "All repos" instead states the counter's
+  **scope** — this is the all-repos aggregate — matching the **Agents working →
+  "across N repos"** sibling (title = metric, sublabel = scope). The count itself
+  is unchanged (still the local-day, all-repos aggregate from #97).
+
 - **Campaign wave cards were decluttered** (#99). Each wave used to render its issues
   twice — a wrapping row of status chips *and* a separate title list below — reading
   as two competing hierarchies. Those two blocks are now one **member list**: one

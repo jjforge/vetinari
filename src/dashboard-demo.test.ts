@@ -37,11 +37,11 @@ test("integration: a seeded live run populates the landing, campaign, issue deta
     assert.ok(parked, "the parked queue lists #205");
     assert.match(parked.question, /payment providers/i);
 
-    // Campaign page — chips render every status, including the carved #208.
+    // Campaign page — member rows render every status, including the carved #208.
     const page = await (await fetch(`${base}/?project=${DEMO_PROJECT}`)).text();
-    assert.match(page, /class="chip [a-z]+"/);
+    assert.match(page, /class="wave-member [a-z]+"/);
     for (const status of ["completed", "running", "parked", "carved"]) {
-      assert.match(page, new RegExp(status), `page renders a ${status} chip`);
+      assert.match(page, new RegExp(status), `page renders a ${status} member row`);
     }
 
     // Issue detail — #204's turn log is three agent-authored turns, newest first.

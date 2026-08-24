@@ -940,38 +940,38 @@ test("cards fill card-grey and chips fill the darker panel with a 40%-alpha stat
   // Landing project cards and campaign wave cards take the card fill.
   assert.match(landing, /\.card \{[^}]*background: var\(--color-card\)/);
   assert.match(campaign, /\.wave \{[^}]*background: var\(--color-card\)/);
-  // Issue chips take the darker panel fill — never a coloured fill (§4).
+  // The state pill and closed-wave chip take the darker panel fill — never a coloured fill (§4).
   assert.match(
     campaign,
-    /\.chip, \.wave-status, \.completed-wave-chip \{[^}]*background: var\(--color-chip\)/,
+    /\.wave-status, \.completed-wave-chip \{[^}]*background: var\(--color-chip\)/,
   );
-  // An issue chip carries its status class and borders that status at 40% alpha (§4).
-  assert.match(campaign, /class="chip running"/);
+  // A member row carries its status class and borders that status at 40% alpha (§4).
+  assert.match(campaign, /class="wave-member running"/);
   assert.match(
     campaign,
-    /\.chip\.running \{ border-color: var\(--color-blue-40\); \}/,
-  );
-  assert.match(
-    campaign,
-    /\.chip\.parked \{ border-color: var\(--color-yellow-40\); \}/,
+    /\.wave-member\.running \{ border-color: var\(--color-blue-40\); \}/,
   );
   assert.match(
     campaign,
-    /\.chip\.carved \{ border-color: var\(--color-carved-40\); \}/,
+    /\.wave-member\.parked \{ border-color: var\(--color-yellow-40\); \}/,
+  );
+  assert.match(
+    campaign,
+    /\.wave-member\.carved \{ border-color: var\(--color-carved-40\); \}/,
   );
 });
 
 test("cards and chips lift only their fill on hover, never recolouring their edge; teal never colours an edge (§6, #83)", () => {
   const landing = renderLandingShell(["alpha"]);
   const campaign = chipCampaign();
-  // Card / chip / parked-row hover lifts the fill only — the coloured edge is unchanged.
+  // Card / member row / parked-row hover lifts the fill only — the coloured edge is unchanged.
   assert.match(
     landing,
     /\.card:hover \{ background: var\(--color-card-hover\); \}/,
   );
   assert.match(
     campaign,
-    /\.chip:hover[^{]*\{ background: var\(--color-chip-hover\); \}/,
+    /\.wave-member:hover[^{]*\{ background: var\(--color-chip-hover\); \}/,
   );
   assert.match(
     landing,
@@ -981,9 +981,9 @@ test("cards and chips lift only their fill on hover, never recolouring their edg
     campaign,
     /\.parked-card:hover \{ background: var\(--color-card-hover\); \}/,
   );
-  // No card/chip hover recolours a border — the accent must not creep onto an edge.
+  // No card/row hover recolours a border — the accent must not creep onto an edge.
   assert.doesNotMatch(landing, /\.card:hover \{[^}]*border-color/);
-  assert.doesNotMatch(campaign, /\.chip:hover[^}]*border-color/);
+  assert.doesNotMatch(campaign, /\.wave-member:hover[^}]*border-color/);
   assert.doesNotMatch(landing, /\.parked-row:hover[^}]*border-color/);
   // §2: a card carries state colour on exactly one edge — never a coloured bottom or right.
   for (const page of [landing, campaign]) {
@@ -2352,13 +2352,13 @@ test("serveAllStatus flags the selected project's carvable chips with its projec
     const html = await (
       await fetch(`http://127.0.0.1:${port}/?project=beta`)
     ).text();
-    // The unstarted future-wave chip is flagged carvable and carries beta, so the
+    // The unstarted future-wave row is flagged carvable and carries beta, so the
     // panel's Carve routes preview and confirm to beta's own install.
     assert.match(
       html,
-      /class="chip [a-z]+"[^>]*data-issue="401"[^>]*data-project="beta"[^>]*data-carvable="1"/,
+      /class="wave-member [a-z]+"[^>]*data-issue="401"[^>]*data-project="beta"[^>]*data-carvable="1"/,
     );
-    // No inline carve control on the chip itself.
+    // No inline carve control on the row itself.
     assert.doesNotMatch(html, /✂️/);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -3727,28 +3727,50 @@ test("renderStatusPage shows a merged/total tally on an open wave card", () => {
   );
 });
 
-test("renderStatusPage lists the issue titles under each open wave", () => {
-  const html = renderStatusPage({
-    project: "beta",
-    waves: [
-      {
-        index: 0,
-        status: "running",
-        issues: [
-          { issueNumber: "201", status: "running", name: "wire up the parser" },
-          { issueNumber: "202", status: "unstarted" },
-        ],
-      },
-    ],
-    parked: [],
-  });
+test("renderStatusPage renders one interactive member row per issue, merging the old chip + title blocks", () => {
+  const html = renderStatusPage(
+    {
+      project: "beta",
+      waves: [
+        {
+          index: 0,
+          status: "running",
+          issues: [
+            {
+              issueNumber: "201",
+              status: "running",
+              name: "wire up the parser",
+            },
+            { issueNumber: "202", status: "unstarted" },
+          ],
+        },
+      ],
+      parked: [],
+    },
+    { carve: true },
+  );
 
-  // Under the open wave's chips, each issue's title is listed (its number alone
-  // when it has no resolved title yet).
+  // One member list, one interactive row per issue: status dot + #NNN + resolved
+  // title + status word — no separate chip row and no separate title list.
   assert.match(
     html,
-    /<ul class="wave-issues"><li[^>]*>#201 wire up the parser<\/li><li[^>]*>#202<\/li><\/ul>/,
+    /<ul class="wave-members"><li><button type="button" class="wave-member running"[^>]*><span class="dot running"><\/span>#201 <span class="wave-member-title">wire up the parser<\/span><small>running<\/small><\/button><\/li>/,
   );
+  // An unresolved title falls back to just #NNN (no title span).
+  assert.match(
+    html,
+    /<li><button type="button" class="wave-member unstarted"[^>]*><span class="dot unstarted"><\/span>#202 <small>unstarted<\/small><\/button><\/li>/,
+  );
+  // The row carries its issue+project so a tap opens the detail sheet, and is flagged
+  // carvable when carvable (202 is an unstarted future-wave remainder).
+  assert.match(
+    html,
+    /class="wave-member unstarted" title="[^"]*" data-issue="202" data-project="beta" data-carvable="1"/,
+  );
+  // The old dual blocks are retired — no chip row (`.chips`/`.chip`) and no title list.
+  assert.doesNotMatch(html, /class="chips"/);
+  assert.doesNotMatch(html, /class="wave-issues"/);
+  assert.doesNotMatch(html, /class="chip /);
 });
 
 test("renderStatusPage colours a carved chip and pulses a running one", () => {
@@ -3767,10 +3789,15 @@ test("renderStatusPage colours a carved chip and pulses a running one", () => {
     parked: [],
   });
 
-  // A carved chip carries the carved status dot + label…
+  // A carved member row carries the carved status dot + title + status word, and its
+  // `.wave-member.carved` class reads struck-through…
   assert.match(
     html,
-    /<span class="dot carved"><\/span>#202 <small>carved<\/small>/,
+    /<button type="button" class="wave-member carved"[^>]*><span class="dot carved"><\/span>#202 <span class="wave-member-title">carved one<\/span><small>carved<\/small><\/button>/,
+  );
+  assert.match(
+    html,
+    /\.wave-member\.carved \{ color: var\(--color-text-light-2\); text-decoration: line-through; \}/,
   );
   // …and the wave it left gains a carved tally in its header, so the carve reads
   // at a glance without counting struck-through chips (one of two issues carved).
@@ -4559,7 +4586,7 @@ test("renderStatusPage makes issue chips tap-friendly for touch devices", () => 
   );
   assert.match(
     html,
-    /class="chip [a-z]+"[^>]*data-issue="101"[^>]*data-project="demo"/,
+    /class="wave-member [a-z]+"[^>]*data-issue="101"[^>]*data-project="demo"/,
   );
   assert.match(html, /id="issue-detail"/);
   assert.match(html, /el\.addEventListener\("click"/);
@@ -4917,14 +4944,14 @@ test("renderStatusPage opens the issue-detail sheet from a parked row too", () =
 
   // The whole parked card is a clickable question card carrying the ids the sheet
   // fetches with; its href is the no-JS fallback, and the same wiring opens the sheet
-  // from a chip or a parked card (the anchor's default click is prevented).
+  // from a member row or a parked card (the anchor's default click is prevented).
   assert.match(
     html,
     /<a class="parked-card" href="\/\?project=demo" data-issue="102" data-project="demo"><div class="parked-card-title"><span class="parked-issue">#102<\/span> Need a choice\.<\/div>/,
   );
   assert.match(
     html,
-    /querySelectorAll\("\.chip\[data-issue\], \.parked-card\[data-issue\]"\)/,
+    /querySelectorAll\("\.wave-member\[data-issue\], \.parked-card\[data-issue\]"\)/,
   );
   assert.match(html, /event\.preventDefault\(\); openIssue\(/);
 });
@@ -5009,10 +5036,11 @@ test("renderStatusPage collapses closed waves into expandable completed wave chi
     html,
     /\.completed-wave-chip \.check \{ color: var\(--color-green\);/,
   );
-  // Chip rows must not stretch: the first wrapped line was rendering taller in Safari.
+  // The closed-wave toggle bar must not stretch: the first wrapped line was rendering
+  // taller in Safari.
   assert.match(
     html,
-    /\.completed-wave-bar, \.chips \{ display: flex; flex-wrap: wrap; align-items: flex-start; align-content: flex-start;/,
+    /\.completed-wave-bar \{ display: flex; flex-wrap: wrap; align-items: flex-start; align-content: flex-start;/,
   );
   // The open wave still renders its own card in the grid.
   assert.match(
@@ -5452,20 +5480,20 @@ test("renderStatusPage marks carvable chips with carve data and never puts a car
     { carve: true },
   );
 
-  // Each chip carries its issue and project; only a still-carvable one is flagged
+  // Each member row carries its issue and project; only a still-carvable one is flagged
   // carvable, so the tap-detail panel knows whether to offer a Carve button.
   assert.match(
     html,
-    /class="chip [a-z]+"[^>]*data-issue="301"[^>]*data-project="demo"[^>]*data-carvable="1"/,
+    /class="wave-member [a-z]+"[^>]*data-issue="301"[^>]*data-project="demo"[^>]*data-carvable="1"/,
   );
   assert.match(
     html,
-    /class="chip [a-z]+"[^>]*data-issue="302"[^>]*data-project="demo"[^>]*data-carvable="1"/,
+    /class="wave-member [a-z]+"[^>]*data-issue="302"[^>]*data-project="demo"[^>]*data-carvable="1"/,
   );
-  // The completed (banked) and current-wave-in-flight (running) chips are not carvable.
+  // The completed (banked) and current-wave-in-flight (running) rows are not carvable.
   assert.doesNotMatch(html, /data-issue="101"[^>]*data-carvable/);
   assert.doesNotMatch(html, /data-issue="201"[^>]*data-carvable/);
-  // Carve moved off the chips entirely: no inline ✂️ and no per-chip carve form.
+  // Carve moved off the rows entirely: no inline ✂️ and no per-row carve form.
   assert.doesNotMatch(html, /✂️/);
   assert.doesNotMatch(html, /class="carve-form"/);
   assert.doesNotMatch(html, /class="chip-group"/);

@@ -1249,7 +1249,7 @@ test("renderLandingShell opens a parked-queue row's issue detail inline, not by 
   assert.match(html, /id="carve-panel"/);
   // openIssue is defined here, and a parked row opens it in place — the click is
   // intercepted so the row never does the full navigation to the campaign page.
-  assert.match(html, /const openIssue = async \(project, issue, carvable\)/);
+  assert.match(html, /const openIssue = async \(project, issue, carvable, run\)/);
   assert.match(
     html,
     /row\.addEventListener\("click", \(event\) => \{ event\.preventDefault\(\); openIssue\(p\.project, p\.issueNumber, true\); \}\)/,
@@ -1296,7 +1296,7 @@ test("the issue-detail sheet markup, CSS, and script are defined once and shared
   // renderReply/closeSheet/carve wiring), included by both pages verbatim.
   assert.ok(
     ISSUE_DETAIL_SHEET_SCRIPT.includes(
-      "const openIssue = async (project, issue, carvable)",
+      "const openIssue = async (project, issue, carvable, run)",
     ),
   );
   assert.ok(ISSUE_DETAIL_SHEET_SCRIPT.includes("const closeSheet = () =>"));
@@ -2527,6 +2527,68 @@ test("serveAllStatus reconstructs a carved issue in a selected archived run, rea
     );
     // Read-only: the archived carved chip is never carvable.
     assert.doesNotMatch(html, /data-carvable="1"[^>]*<span class="dot carved">/);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serveAllStatus GET /api/issue reads an archived run's own log when a run token is given", async () => {
+  const configDir = join(tmpdir(), `sctdd-api-issue-archive-${Date.now()}`);
+  const betaDir = join(configDir, "state-beta");
+  // The live log names 101 nowhere — its detail lives only in the archived run.
+  seedState(betaDir, [{ event: "campaign-start", batches: [["900"]] }]);
+  const archiveDir = join(betaDir, "logs", "archive");
+  mkdirSync(archiveDir, { recursive: true });
+  writeJsonl(join(archiveDir, "orchestrator-2026-01-01T00-00-00-000Z.jsonl"), [
+    { event: "campaign-start", batches: [["101"]], titles: { "101": "old work" } },
+    {
+      ts: "2026-01-01T00:01:00.000Z",
+      event: "turn",
+      taskId: "101",
+      turn: 0,
+      summary: "did the thing",
+    },
+    { ts: "2026-01-01T00:02:00.000Z", event: "green", taskId: "101", branch: "agent/101" },
+    { event: "campaign-done", batches: 1 },
+  ]);
+  register(configDir, {
+    project: "beta",
+    projectRoot: join(configDir, "beta-root"),
+    baseLocation: betaDir,
+  });
+
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const { port } = server.address() as AddressInfo;
+  try {
+    // With the run token, the detail is reconstructed from the archived log: its
+    // title, completed status, and the archived turn appear, flagged read-only.
+    const withRun = await (
+      await fetch(
+        `http://127.0.0.1:${port}/api/issue?project=beta&issue=101&run=2026-01-01T00-00-00-000Z`,
+      )
+    ).json();
+    assert.equal(withRun.status, "completed");
+    assert.equal(withRun.title, "old work");
+    assert.equal(withRun.archived, true);
+    assert.equal(withRun.turnLog.length, 1);
+    assert.equal(withRun.turnLog[0].summary, "did the thing");
+
+    // Without a run token it reads the live log, where 101 is unknown → unstarted.
+    const live = await (
+      await fetch(`http://127.0.0.1:${port}/api/issue?project=beta&issue=101`)
+    ).json();
+    assert.equal(live.status, "unstarted");
+    assert.equal(live.turnLog.length, 0);
+
+    // An unlisted run token is rejected, never a path to traverse.
+    assert.equal(
+      (
+        await fetch(
+          `http://127.0.0.1:${port}/api/issue?project=beta&issue=101&run=..%2F..%2Forchestrator`,
+        )
+      ).status,
+      404,
+    );
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -4297,6 +4359,47 @@ test("renderStatusPage ships the archived-list client wiring: toggle, mode switc
   assert.match(
     ARCHIVE_LIST_SCRIPT,
     /showOlder\.addEventListener\("click", \(\) => \{ for \(const row of archiveRows\) row\.hidden = false;/,
+  );
+});
+
+test("renderStatusPage makes archived campaign chips open the issue sheet against the archived run, read-only", () => {
+  const html = renderStatusPage(
+    { project: "beta", waves: [], parked: [] },
+    {
+      selected: "beta",
+      archivedRuns: [
+        {
+          run: "2026-02-01T00-00-00-000Z",
+          startedAt: "2026-02-01T00:00:00.000Z",
+          state: "complete",
+          issues: 1,
+          status: {
+            project: "beta",
+            waves: [
+              {
+                index: 0,
+                status: "closed",
+                issues: [{ issueNumber: "101", status: "completed" }],
+              },
+            ],
+            parked: [],
+          },
+        },
+      ],
+    },
+  );
+  // The chip carries its issue, project and the run token, so the shared sheet reads
+  // the archived run's own log (its turn log lives there, not in the live log).
+  assert.match(
+    html,
+    /data-issue="101" data-project="beta" data-run="2026-02-01T00-00-00-000Z"/,
+  );
+  // Read-only: an archived chip is never carvable (a finished run has nothing to carve).
+  assert.doesNotMatch(html, /data-issue="101"[^>]*data-carvable/);
+  // The shared sheet forwards a run token to /api/issue so it can read the archive.
+  assert.match(
+    ISSUE_DETAIL_SHEET_SCRIPT,
+    /run \? "&run=" \+ encodeURIComponent\(run\) : ""/,
   );
 });
 

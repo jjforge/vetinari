@@ -150,21 +150,22 @@ const chipTitle = (issue: StatusIssue) => [issue.name, issue.detail].filter(Bool
  */
 export const isCarvable = (issue: StatusIssue) => issue.status === "unstarted" || issue.status === "parked";
 
-const renderIssueChip = (issue: StatusIssue, project: string, carve: boolean, interactive: boolean) => {
+const renderIssueChip = (issue: StatusIssue, project: string, carve: boolean, interactive: boolean, run?: string) => {
   const detail = chipTitle(issue) || `#${issue.issueNumber}: ${issue.status}`;
   // A live (interactive) chip carries its issue and project so a tap opens the
-  // detail sheet — and, under carve, so the panel can route a carve; an archived
-  // chip is inert (its turn log lives in a different log than /api/issue reads).
-  // Only a still-carvable chip is flagged `data-carvable`, so the panel offers
-  // Carve for exactly those (ADR 0005). No control is drawn on the chip itself.
-  const openData = interactive || carve ? ` data-issue="${escapeHtml(issue.issueNumber)}" data-project="${escapeHtml(project)}"` : "";
+  // detail sheet — and, under carve, so the panel can route a carve. An archived
+  // chip is interactive too and additionally carries its `run` token, so the shared
+  // sheet reads that run's own log (its turn log lives there, not in the live log);
+  // it is never carvable, so the read-only archive offers no Carve (ADR 0005). Only
+  // a still-carvable chip is flagged `data-carvable`. No control is drawn on the chip.
+  const openData = interactive || carve ? ` data-issue="${escapeHtml(issue.issueNumber)}" data-project="${escapeHtml(project)}"${run ? ` data-run="${escapeHtml(run)}"` : ""}` : "";
   const carveData = carve && isCarvable(issue) ? ` data-carvable="1"` : "";
   // The chip carries its status class so its border reads that status at 40% alpha
   // (§4); the dot carries the same status at full strength.
   return `<button type="button" class="chip ${issue.status}" title="${escapeTitle(detail)}"${openData}${carveData}><span class="dot ${issue.status}"></span>#${escapeHtml(issue.issueNumber)} <small>${escapeHtml(issue.status)}</small></button>`;
 };
 
-const renderWaveContents = (wave: StatusWave, project: string, carve: boolean, interactive: boolean) => `<div class="chips">${wave.issues.map((issue) => renderIssueChip(issue, project, carve, interactive)).join("")}</div>`;
+const renderWaveContents = (wave: StatusWave, project: string, carve: boolean, interactive: boolean, run?: string) => `<div class="chips">${wave.issues.map((issue) => renderIssueChip(issue, project, carve, interactive, run)).join("")}</div>`;
 
 /**
  * The open wave's issue titles, listed under its chips so the wave reads at a
@@ -211,12 +212,12 @@ const waveMerged = (wave: StatusWave) => wave.issues.filter((issue) => issue.sta
  * closed one the green, and an unstarted one a neutral edge. `extraAttrs` lets a
  * closed card carry the id + `hidden` its toggle chip drives.
  */
-const renderWaveCard = (wave: StatusWave, project: string, carve: boolean, interactive: boolean, extraAttrs = "") => {
+const renderWaveCard = (wave: StatusWave, project: string, carve: boolean, interactive: boolean, extraAttrs = "", run?: string) => {
   // A carved tally beside the merged count, so a wave a carve pruned reads at a
   // glance — the carved chips are a display overlay (ADR 0007), and this counts them.
   const carved = wave.issues.filter((issue) => issue.status === "carved").length;
   const tally = carved ? ` <span class="wave-carved">${carved} carved</span>` : "";
-  return `<section class="wave ${wave.status}"${extraAttrs}><div class="wave-head"><h2>${renderWaveLabel(wave)} <span class="wave-status ${wave.status}">${wave.status}</span></h2><span class="wave-tally">${waveMerged(wave)}/${wave.issues.length}</span>${tally}</div>${renderWaveContents(wave, project, carve, interactive)}${renderWaveTitles(wave)}</section>`;
+  return `<section class="wave ${wave.status}"${extraAttrs}><div class="wave-head"><h2>${renderWaveLabel(wave)} <span class="wave-status ${wave.status}">${wave.status}</span></h2><span class="wave-tally">${waveMerged(wave)}/${wave.issues.length}</span>${tally}</div>${renderWaveContents(wave, project, carve, interactive, run)}${renderWaveTitles(wave)}</section>`;
 };
 
 /** A closed wave's compact toggle chip — the affordance that reveals its full card in
@@ -235,9 +236,9 @@ const renderClosedWaveChip = (wave: StatusWave) =>
  * no live toggle script (and would collide on the `closed-wave-N` ids), so it renders
  * every wave as a full card, expanded. `interactive` (the live run) makes chips open the
  * detail sheet and, under carve, route a carve; the archived run passes it `false`. */
-const renderWaves = (status: CampaignStatus, carve: boolean, interactive: boolean, collapsible = true) => {
+const renderWaves = (status: CampaignStatus, carve: boolean, interactive: boolean, collapsible = true, run?: string) => {
   if (!status.waves.length) return "<p>No active campaign or queue found.</p>";
-  if (!collapsible) return `<div class="waves-grid">${status.waves.map((wave) => renderWaveCard(wave, status.project, carve, interactive)).join("")}</div>`;
+  if (!collapsible) return `<div class="waves-grid">${status.waves.map((wave) => renderWaveCard(wave, status.project, carve, interactive, "", run)).join("")}</div>`;
   const closedWaves = status.waves.filter((wave) => wave.status === "closed");
   const openWaves = status.waves.filter((wave) => wave.status !== "closed");
   const toggleRow = closedWaves.length
@@ -316,7 +317,10 @@ const renderArchiveRow = (project: string, run: ArchivedRunView, open: boolean, 
   const count = `${run.issues} issue${run.issues === 1 ? "" : "s"}`;
   const modeBtn = (m: "campaign" | "raw", text: string, active: boolean) =>
     `<button type="button" class="archive-mode${active ? " active" : ""}" data-mode="${m}" aria-pressed="${active}">${text}</button>`;
-  const campaignPane = `<div class="archive-pane archive-campaign" data-pane="campaign"${rawActive ? " hidden" : ""}>${renderWaves(run.status, false, false, false)}</div>`;
+  // Interactive (chips open the shared sheet) but carve-off, and carrying the run
+  // token so the sheet reads this archived run's own log — reuse is the point, no
+  // second campaign renderer.
+  const campaignPane = `<div class="archive-pane archive-campaign" data-pane="campaign"${rawActive ? " hidden" : ""}>${renderWaves(run.status, false, true, false, run.run)}</div>`;
   const rawPane =
     `<div class="archive-pane archive-raw" data-pane="raw" data-project="${escapeHtml(project)}" data-run="${escapeHtml(run.run)}"${rawActive ? "" : " hidden"}>` +
     `<div class="archive-raw-header">orchestrator-${escapeHtml(run.run)}.jsonl</div>` +
@@ -701,7 +705,9 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
   // it through /answer to resume the parked task. Options are best-effort — absent,
   // only the free-text field shows. Any other status hides the whole block.
   const renderReply = (d) => {
-    const parked = d.status === "parked";
+    // An archived issue is read-only: it never offers a reply/resume, even if its
+    // reconstructed status is parked (an interrupted run's unanswered question).
+    const parked = d.status === "parked" && !d.archived;
     detailReply.hidden = !parked;
     replyResume.hidden = !parked;
     if (parked) {
@@ -774,7 +780,7 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
       detailTurnLog.appendChild(li);
     }
   };
-  const openIssue = async (project, issue, carvable) => {
+  const openIssue = async (project, issue, carvable, run) => {
     issueDetail.hidden = false;
     issueDetail.classList.add("show");
     detailNum.textContent = "#" + issue;
@@ -792,7 +798,8 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
     onOpenIssue(carvable, project, issue);
     updateFoot();
     try {
-      const res = await fetch("/api/issue?project=" + encodeURIComponent(project) + "&issue=" + encodeURIComponent(issue));
+      // An archived chip carries its run token so the sheet reads that run's own log.
+      const res = await fetch("/api/issue?project=" + encodeURIComponent(project) + "&issue=" + encodeURIComponent(issue) + (run ? "&run=" + encodeURIComponent(run) : ""));
       if (!res.ok) throw new Error(String(res.status));
       renderDetail(await res.json());
     } catch {
@@ -1536,7 +1543,7 @@ ${ARCHIVE_LIST_SCRIPT}
   // The parked card is an <a> with a no-JS href, so its click is prevented before the
   // sheet opens; a chip is a button, where preventDefault is harmless.
   document.querySelectorAll(".chip[data-issue], .parked-card[data-issue]").forEach((el) =>
-    el.addEventListener("click", (event) => { event.preventDefault(); openIssue(el.dataset.project, el.dataset.issue, el.dataset.carvable === "1"); }));
+    el.addEventListener("click", (event) => { event.preventDefault(); openIssue(el.dataset.project, el.dataset.issue, el.dataset.carvable === "1", el.dataset.run); }));
   // Closed-wave toggles: each chip reveals/hides its own wave card in the grid. The set
   // of open waves is persisted per project so a live /api/events reload — which reloads
   // the whole page — does not silently collapse everything the operator opened.

@@ -349,6 +349,15 @@ question` + a `waiting Nm · reason` meta line) that open the existing issue-det
 
 ### Fixed
 
+- Archived-run **when-times** now render in the operator's **local** timezone
+  instead of UTC, and the hardcoded ` UTC` suffix is dropped (#102). An archived
+  row that read `Aug 24, 2026 · 02:13:05 UTC` for an operator whose local clock was
+  `Aug 23 · 19:13` now reads the local time. `formatRunWhen` switched from the
+  `getUTC*` accessors to their local equivalents; the gateway runs in the operator's
+  timezone, so this is the human-facing time. The **raw log** pane (`.archive-raw-code`,
+  the JSONL source data) keeps its UTC stamps verbatim — only the display chrome
+  localizes. The feed's relative dates already rendered local and are unchanged.
+
 - The landing **EVENT LOG** feed now reads across each project's live run **and its
   recently-archived runs**, over a rolling **48-hour** window by event `ts` (#101).
   It previously read only each project's live-run log, so completing a run (which

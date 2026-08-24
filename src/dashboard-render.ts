@@ -338,8 +338,8 @@ export const renderRepoDropdown = (repos: readonly (string | RepoOption)[], sele
  * word survive on one and the pause word on the other. The live indicator is a dot
  * only: its "Live"/"Paused" state is an accessible label (`aria-label`), never
  * visible text, keeping motion the one running-only channel (§5). Pause is an icon
- * control — its ⏸/▶ glyph lives in `TOP_BAR_STYLES`, flipped by `data-paused`, so a
- * page's script only toggles the attribute and never re-authors the glyph.
+ * control — its CSS-drawn bars/triangle live in `TOP_BAR_STYLES`, flipped by
+ * `data-paused`, so a page's script only toggles the attribute and never re-authors it.
  */
 export const renderTopBar = (left: string) =>
   `<div class="page-top">${left}<div class="live-bar" title="Live updates over SSE; pause to freeze the view while it keeps collecting"><span class="live-indicator" data-live-state="live" aria-label="Live"></span><span class="updated" data-updated>waiting for updates</span><button type="button" id="pause" class="pause" data-paused="false" aria-label="Pause"></button></div></div>`;
@@ -392,11 +392,15 @@ export const TOP_BAR_STYLES = `  .page-top { display: flex; align-items: center;
   .live-indicator[data-live-state="paused"] { color: var(--color-dim); }
   .live-indicator[data-live-state="paused"]::before { animation: none; }
   @media (prefers-reduced-motion: reduce) { .live-indicator::before { animation: none; } }
-  .pause { min-height: 44px; color: var(--color-text); background: var(--color-box-header); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); padding: .35rem .8rem; font: inherit; cursor: pointer; }
-  /* Pause is an icon, not a word: ⏸ while live, ▶ once paused. The glyph is CSS so the
-     two pages' scripts only flip data-paused, never re-author the icon. */
-  .pause::before { content: "⏸"; }
-  .pause[data-paused="true"]::before { content: "▶"; }
+  .pause { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: .22rem; color: var(--color-text); background: var(--color-box-header); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); padding: .35rem .8rem; font: inherit; cursor: pointer; }
+  /* Pause is an icon, not a word — two bars while live, a triangle once paused. It is
+     drawn in CSS with currentColor, never an emoji codepoint: the pause/play glyphs
+     default to colourful emoji presentation on Apple platforms, so a glyph would paint
+     a blue gradient. The two pages' scripts only flip data-paused; the shape lives here. */
+  .pause::before, .pause::after { content: ""; width: .22rem; height: .9rem; background: currentColor; border-radius: 1px; }
+  .pause[data-paused="true"] { gap: 0; }
+  .pause[data-paused="true"]::after { display: none; }
+  .pause[data-paused="true"]::before { width: 0; height: 0; background: transparent; border-radius: 0; border-style: solid; border-width: .45rem 0 .45rem .75rem; border-color: transparent transparent transparent currentColor; }
   .pause:hover { border-color: var(--color-primary); }`;
 
 /**
@@ -1077,7 +1081,7 @@ ${REPO_DROPDOWN_SCRIPT}
     updatedEl.textContent = lastUpdate == null ? "waiting for updates" : "updated " + Math.round((Date.now() - lastUpdate) / 1000) + "s ago";
   };
   // The indicator is a dot only: its state is an accessible label, never visible text.
-  // Pause is an icon flipped by data-paused (the ⏸/▶ glyph lives in CSS).
+  // Pause is an icon flipped by data-paused (the CSS-drawn bars/triangle live in CSS).
   const renderState = () => {
     indicator.dataset.liveState = paused ? "paused" : "live";
     indicator.setAttribute("aria-label", paused ? "Paused" + (buffered ? " · " + buffered + " buffered" : "") : "Live");
@@ -1269,7 +1273,7 @@ ${issueDetailSheetMarkup(Boolean(opts.carve))}${
   const lastUpdate = Date.now();
   const renderUpdated = () => { updatedEl.textContent = "updated " + Math.round((Date.now() - lastUpdate) / 1000) + "s ago"; };
   // The indicator is a dot only: its state is an accessible label, never visible text.
-  // Pause is an icon flipped by data-paused (the ⏸/▶ glyph lives in CSS).
+  // Pause is an icon flipped by data-paused (the CSS-drawn bars/triangle live in CSS).
   const renderState = () => {
     indicator.dataset.liveState = paused ? "paused" : "live";
     indicator.setAttribute("aria-label", paused ? "Paused" + (buffered ? " · " + buffered + " buffered" : "") : "Live");

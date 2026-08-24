@@ -12,6 +12,7 @@ import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import {
   appendedEvents,
+  ARCHIVE_LIST_SCRIPT,
   buildAllStatus,
   buildFeed,
   buildLanding,
@@ -23,6 +24,7 @@ import {
   extractParkedDetails,
   formatFeedEvent,
   formatStatusText,
+  highlightJsonLine,
   ISSUE_DETAIL_SHEET_SCRIPT,
   ISSUE_DETAIL_SHEET_STYLES,
   issueDetailSheetMarkup,
@@ -4253,6 +4255,51 @@ test("renderStatusPage opens the archived row named by archivedRun, in the reque
   );
 });
 
+test("renderStatusPage ships the archived-list client wiring: toggle, mode switch, raw fetch, filter, deep-link, show-older", () => {
+  const html = renderStatusPage(
+    { project: "beta", waves: [], parked: [] },
+    {
+      selected: "beta",
+      archivedRuns: [
+        {
+          run: "2026-02-01T00-00-00-000Z",
+          startedAt: "2026-02-01T00:00:00.000Z",
+          state: "complete",
+          issues: 1,
+          status: archStatus("101"),
+        },
+      ],
+    },
+  );
+  // The page embeds the archived-list script…
+  assert.ok(html.includes(ARCHIVE_LIST_SCRIPT), "page includes ARCHIVE_LIST_SCRIPT");
+  // …one row open at a time (opening closes the others)…
+  assert.match(
+    ARCHIVE_LIST_SCRIPT,
+    /for \(const other of archiveRows\) if \(other !== row && other\.classList\.contains\("open"\)\) closeRow\(other\);/,
+  );
+  // …raw mode fetches the existing /archive/log endpoint, no second endpoint…
+  assert.match(
+    ARCHIVE_LIST_SCRIPT,
+    /fetch\("\/archive\/log\?project=" \+ encodeURIComponent\(pane\.dataset\.project\) \+ "&run=" \+ encodeURIComponent\(pane\.dataset\.run\)\)/,
+  );
+  // …renders one line per row with a #L<n> anchor that the browser puts in the URL…
+  assert.match(ARCHIVE_LIST_SCRIPT, /a\.href = "#L" \+ n;/);
+  assert.match(ARCHIVE_LIST_SCRIPT, /el\.id = "L" \+ n;/);
+  // …colours each line through the shared, tested highlighter…
+  assert.match(ARCHIVE_LIST_SCRIPT, /code\.innerHTML = highlightJsonLine\(line\);/);
+  // …filters on the raw line text and reports <shown> of <total> lines…
+  assert.match(ARCHIVE_LIST_SCRIPT, /line\.toLowerCase\(\)\.indexOf\(needle\) === -1/);
+  assert.match(ARCHIVE_LIST_SCRIPT, /footer\.textContent = shown \+ " of " \+ lines\.length \+ " lines";/);
+  // …shows an empty-result state rather than a blank pane…
+  assert.match(ARCHIVE_LIST_SCRIPT, /archive-raw-empty/);
+  // …and reveals the older rows behind the cap on demand.
+  assert.match(
+    ARCHIVE_LIST_SCRIPT,
+    /showOlder\.addEventListener\("click", \(\) => \{ for \(const row of archiveRows\) row\.hidden = false;/,
+  );
+});
+
 test("renderStatusPage caps the archived-runs list at 20 with a show-older control", () => {
   const runs = Array.from({ length: 22 }, (_, i) => {
     const day = String(22 - i).padStart(2, "0");
@@ -5372,6 +5419,26 @@ test("listArchivedRuns returns nothing when a project has no archive directory",
     listArchivedRuns(join(tmpdir(), `sctdd-archive-none-${Date.now()}`)),
     [],
   );
+});
+
+test("highlightJsonLine colours JSON keys, strings, numbers and literals distinctly, escaping content", () => {
+  const html = highlightJsonLine(
+    '{"event":"green","turn":3,"ok":true,"x":null}',
+  );
+  // A key (string followed by a colon) reads distinct from a plain string value;
+  // the quote characters are HTML-escaped in the source.
+  assert.match(html, /<span class="jkey">&quot;event&quot;<\/span>:/);
+  assert.match(html, /<span class="jstr">&quot;green&quot;<\/span>/);
+  assert.match(html, /<span class="jnum">3<\/span>/);
+  assert.match(html, /<span class="jbool">true<\/span>/);
+  assert.match(html, /<span class="jnull">null<\/span>/);
+  // HTML inside string content is escaped, never injected as live markup.
+  const esc = highlightJsonLine('{"t":"<b>&x</b>"}');
+  assert.match(
+    esc,
+    /<span class="jstr">&quot;&lt;b&gt;&amp;x&lt;\/b&gt;&quot;<\/span>/,
+  );
+  assert.doesNotMatch(esc, /<b>/);
 });
 
 test("parseRunTimestamp reverses an archive run token to an ISO timestamp, tolerating older tokens", () => {

@@ -252,6 +252,38 @@ const renderWaves = (status: CampaignStatus, carve: boolean, interactive: boolea
   return `${toggleRow}${cards.length ? `<div class="waves-grid">${cards.join("")}</div>` : ""}`;
 };
 
+/**
+ * Colour one JSON line's tokens for the raw-log view — keys, string values, numbers
+ * and the literals `true`/`false`/`null` each get their own span class
+ * (`jkey`/`jstr`/`jnum`/`jbool`/`jnull`). A string immediately followed by a colon is
+ * a key, otherwise a value. Pure and self-contained (it does its own escaping) so it
+ * is unit-tested here *and* shipped verbatim into the client via `.toString()` — one
+ * source of truth. Every token's text is HTML-escaped, so nothing in a log line can
+ * inject markup; the gaps between tokens are escaped too.
+ */
+export function highlightJsonLine(line: string): string {
+  const esc = (s: string) => s.replace(/[&<>"']/g, (c) => (c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#039;"));
+  const span = (cls: string, inner: string) => `<span class="${cls}">${inner}</span>`;
+  const re = /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g;
+  let out = "";
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(line))) {
+    out += esc(line.slice(last, m.index));
+    if (m[1] !== undefined) {
+      out += span(m[2] ? "jkey" : "jstr", esc(m[1]));
+      if (m[2]) out += esc(m[2]);
+    } else if (m[3] !== undefined) {
+      out += span(m[3] === "null" ? "jnull" : "jbool", m[3]);
+    } else {
+      out += span("jnum", m[4]);
+    }
+    last = m.index + m[0].length;
+  }
+  out += esc(line.slice(last));
+  return out;
+}
+
 const ARCHIVE_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const pad2 = (n: number) => String(n).padStart(2, "0");
 
@@ -882,6 +914,97 @@ export const REPO_DROPDOWN_SCRIPT = `  const repoRoot = document.querySelector("
   }`;
 
 /**
+ * The archived-runs list's client script (#98): expand/collapse rows (one open at a
+ * time, the open row tinted), switch a row between campaign and raw-log mode without
+ * collapsing, reveal older rows past the cap, and render the raw log — fetched once
+ * from `GET /archive/log`, one JSONL line per row with a `#L<n>` line-number anchor
+ * (which the browser adds to the URL natively, so a line is shareable), JSON syntax
+ * colouring, a substring filter, and a `<shown> of <total> lines` footer. The open
+ * row + mode are mirrored into the URL (`?run=…&mode=…`) so the view is shareable
+ * without a navigation. No-op when the page has no archived list.
+ *
+ * `highlightJsonLine` is shipped verbatim from its tested server-side source via
+ * `.toString()`; the one-line `__name` shim satisfies the `keepNames` wrapper esbuild
+ * leaves on the transpiled function, so there is a single source of truth for the
+ * colouring rather than a hand-mirrored copy that could drift.
+ */
+export const ARCHIVE_LIST_SCRIPT = `  const archiveList = document.querySelector(".archive-list");
+  if (archiveList) {
+    const __name = (fn) => fn;
+    ${highlightJsonLine.toString()}
+    const archiveRows = [...archiveList.querySelectorAll(".archive-row")];
+    const rowMode = (row) => { const p = row.querySelector('.archive-mode[aria-pressed="true"]'); return p ? p.dataset.mode : "campaign"; };
+    const syncUrl = (row) => { try { history.replaceState(null, "", "?project=" + encodeURIComponent(archiveList.dataset.project) + "&run=" + encodeURIComponent(row.dataset.run) + (rowMode(row) === "raw" ? "&mode=raw" : "") + location.hash); } catch (e) {} };
+    const scrollToLine = () => { if (/^#L\\d+$/.test(location.hash)) { const t = document.getElementById(location.hash.slice(1)); if (t) t.scrollIntoView({ block: "center" }); } };
+    // Fetch a row's log once, then (re)draw its filtered line rows. Redraw is cheap
+    // and keeps only the open row's L-ids in the DOM, so a shared #L anchor is unambiguous.
+    const drawRaw = (pane) => {
+      const linesEl = pane.querySelector(".archive-raw-lines");
+      const footer = pane.querySelector(".archive-raw-footer");
+      const filter = pane.querySelector(".archive-raw-filter");
+      const lines = pane._lines || [];
+      const needle = filter.value.trim().toLowerCase();
+      linesEl.textContent = "";
+      let shown = 0;
+      lines.forEach((line, i) => {
+        if (needle && line.toLowerCase().indexOf(needle) === -1) return;
+        shown++;
+        const n = i + 1;
+        const el = document.createElement("div");
+        el.className = "archive-raw-line"; el.id = "L" + n;
+        const a = document.createElement("a");
+        a.className = "archive-lineno"; a.href = "#L" + n; a.textContent = String(n);
+        const code = document.createElement("code");
+        code.className = "archive-raw-code"; code.innerHTML = highlightJsonLine(line);
+        el.append(a, code); linesEl.append(el);
+      });
+      if (!shown) { const e = document.createElement("div"); e.className = "archive-raw-empty"; e.textContent = needle ? "No lines match “" + filter.value.trim() + "”." : "This log has no lines."; linesEl.append(e); }
+      footer.textContent = shown + " of " + lines.length + " lines";
+    };
+    const loadRaw = (row) => {
+      const pane = row.querySelector(".archive-raw");
+      const filter = pane.querySelector(".archive-raw-filter");
+      if (!pane._wired) { pane._wired = true; filter.addEventListener("input", () => drawRaw(pane)); }
+      if (pane._lines) { drawRaw(pane); scrollToLine(); return; }
+      fetch("/archive/log?project=" + encodeURIComponent(pane.dataset.project) + "&run=" + encodeURIComponent(pane.dataset.run))
+        .then((res) => { if (!res.ok) throw new Error(String(res.status)); return res.text(); })
+        .then((text) => { pane._lines = text.split("\\n").filter((l) => l.length); drawRaw(pane); scrollToLine(); })
+        .catch(() => { const linesEl = pane.querySelector(".archive-raw-lines"); linesEl.textContent = ""; const e = document.createElement("div"); e.className = "archive-raw-empty"; e.textContent = "Couldn’t load this log."; linesEl.append(e); pane.querySelector(".archive-raw-footer").textContent = ""; });
+    };
+    const setMode = (row, mode) => {
+      for (const btn of row.querySelectorAll(".archive-mode")) { const on = btn.dataset.mode === mode; btn.classList.toggle("active", on); btn.setAttribute("aria-pressed", String(on)); }
+      for (const pane of row.querySelectorAll(".archive-pane")) pane.hidden = pane.dataset.pane !== mode;
+      if (mode === "raw") loadRaw(row);
+    };
+    const closeRow = (row) => {
+      row.classList.remove("open");
+      row.querySelector(".archive-toggle").setAttribute("aria-expanded", "false");
+      row.querySelector(".archive-body").hidden = true;
+      // Drop the raw lines so a closed row leaves no duplicate L-ids behind (its text is cached).
+      const linesEl = row.querySelector(".archive-raw-lines");
+      if (linesEl) linesEl.textContent = "";
+    };
+    const openRow = (row, mode) => {
+      for (const other of archiveRows) if (other !== row && other.classList.contains("open")) closeRow(other);
+      row.classList.add("open");
+      row.querySelector(".archive-toggle").setAttribute("aria-expanded", "true");
+      row.querySelector(".archive-body").hidden = false;
+      setMode(row, mode);
+      syncUrl(row);
+    };
+    for (const row of archiveRows) {
+      row.querySelector(".archive-toggle").addEventListener("click", () => { if (row.classList.contains("open")) closeRow(row); else openRow(row, rowMode(row)); });
+      for (const btn of row.querySelectorAll(".archive-mode")) btn.addEventListener("click", () => { if (!row.classList.contains("open")) openRow(row, btn.dataset.mode); else { setMode(row, btn.dataset.mode); syncUrl(row); } });
+    }
+    const showOlder = archiveList.querySelector(".archive-show-older");
+    if (showOlder) showOlder.addEventListener("click", () => { for (const row of archiveRows) row.hidden = false; showOlder.closest(".archive-older-row").hidden = true; });
+    // Honour a server-opened row (a ?run= deep-link): reveal it if it is past the cap,
+    // then render its starting mode (raw fetches; #L hash scrolls once the log lands).
+    const opened = archiveRows.find((r) => r.classList.contains("open"));
+    if (opened) { if (opened.hidden) { for (const r of archiveRows) r.hidden = false; const older = archiveList.querySelector(".archive-older-row"); if (older) older.hidden = true; } setMode(opened, rowMode(opened)); }
+  }`;
+
+/**
  * The all-repos landing shell: a client-rendered (vanilla, no build step) page the
  * aggregated server serves at `GET /`, replacing the old server-rendered status
  * page. The server renders only the chrome — the title, the All-repos↔project
@@ -1408,6 +1531,7 @@ ${issueDetailSheetMarkup(Boolean(opts.carve))}${
   setInterval(renderUpdated, 1000);
 ${ISSUE_DETAIL_SHEET_SCRIPT}
 ${REPO_DROPDOWN_SCRIPT}
+${ARCHIVE_LIST_SCRIPT}
   // A live chip and a parked card both open the sheet, carrying their issue+project.
   // The parked card is an <a> with a no-JS href, so its click is prevented before the
   // sheet opens; a chip is a button, where preventDefault is harmless.

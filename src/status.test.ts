@@ -5000,11 +5000,17 @@ test("both pages render one shared top-bar control: a dot-only live indicator an
   }
 
   // The pause icon lives in the shared CSS, flipped by a data attribute, so the two
-  // pages' scripts never re-author the glyph: ⏸ while live, ▶ once paused.
-  assert.match(TOP_BAR_STYLES, /\.pause::before \{ content: "⏸"; \}/);
+  // pages' scripts never re-author it: two bars while live, a triangle once paused.
+  // It is drawn in CSS with currentColor — never an emoji codepoint (⏸/▶ render as a
+  // colourful gradient glyph on Apple platforms), so it stays monotone (#96).
+  assert.doesNotMatch(TOP_BAR_STYLES, /⏸|▶/);
   assert.match(
     TOP_BAR_STYLES,
-    /\.pause\[data-paused="true"\]::before \{ content: "▶"; \}/,
+    /\.pause::before, \.pause::after \{ content: ""; [^}]*background: currentColor;[^}]*\}/,
+  );
+  assert.match(
+    TOP_BAR_STYLES,
+    /\.pause\[data-paused="true"\]::before \{[^}]*border-color: transparent transparent transparent currentColor;[^}]*\}/,
   );
   for (const page of [landing, campaign])
     assert.ok(

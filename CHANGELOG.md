@@ -315,6 +315,14 @@ question` + a `waiting Nm · reason` meta line) that open the existing issue-det
 
 ### Fixed
 
+- The live-bar **play/pause control** rendered as a colourful gradient emoji on
+  Apple platforms — the pause/play glyphs were CSS `content` emoji codepoints that
+  default to emoji presentation on iOS/macOS (#96). The control is now a monotone
+  icon **drawn in CSS with `currentColor`** (two bars while live, a triangle once
+  paused), carrying no emoji codepoint, so it matches the toolbar text colour on
+  every platform. It still toggles pause↔play via `data-paused` with no change to
+  how the two pages' scripts author it.
+
 - The all-repos landing **activity feed** rendered `#undefined merged` for merge
   events that named their issue only through the branch (`agent/<id>`) rather than
   an explicit `taskId` — the campaign wave-merge / per-issue green path (#93). The

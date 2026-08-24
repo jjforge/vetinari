@@ -162,6 +162,19 @@ repos` (repos with a running agent), parked `oldest <Nm>` (the oldest parked
 
 ### Changed
 
+- The all-repos landing's activity feed now reads as the POC's **event log** (#95).
+  The header is **"Event log · all repos"** with a live dot (was "Recent activity");
+  each row's timestamp is compact **HH:MM** for a same-day event, falling back to a
+  short **weekday** (then a `M/D` date past a week) rather than the full
+  `M/D/YYYY, h:mm:ss AM`; and the event kind renders as a clean lowercase
+  `namespace.verb` label — `green → issue.merged`, `campaign-batch-done → wave.closed`,
+  `parked → issue.parked`, `queue-done`/`campaign-done → campaign.closed`,
+  `queue-start`/`campaign-start → campaign.started`, `turn → agent.turn`, and the
+  rest — instead of the raw uppercase kind. This is a feed-label remap of the **real**
+  orchestrator events (ADR 0007 status vocabulary is untouched): no fabricated
+  PR-opened kind, no `agent-N` identity (rule 5, #55). The category leading-dot
+  colouring (#85) is unchanged.
+
 - The all-repos landing's four counters now match the POC layout (#94): the
   uppercase **label sits on top**, with the **value and sublabel inline on one
   row** below it, rather than value → label → sublabel stacked. Counter value

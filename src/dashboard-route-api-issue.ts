@@ -1,5 +1,6 @@
 import { listProjects } from "./registry.ts";
-import { listArchivedRuns, logFileOf, parkedReplyFor, readEvents, reconstructIssueDetail } from "./dashboard-model.ts";
+import { listArchivedRuns, logFileOf, parkedReplyFor, reconstructIssueDetail } from "./dashboard-model.ts";
+import { readEventLog } from "./event-log.ts";
 import { listParkedIn, parkedDirOf } from "./state.ts";
 import type { RouteHandler } from "./dashboard-http.ts";
 
@@ -35,12 +36,12 @@ export const handleApiIssue: RouteHandler = (req, res, url, deps) => {
       return true;
     }
     // Read-only from the archived log: a finished run has no parked reply to offer.
-    const detail = reconstructIssueDetail(readEvents({ logFile: match.file }), issue);
+    const detail = reconstructIssueDetail(readEventLog({ logFile: match.file }), issue);
     res.setHeader("content-type", "application/json");
     res.end(JSON.stringify({ project: pointer.project, ...detail, archived: true }));
     return true;
   }
-  const detail = reconstructIssueDetail(readEvents({ logFile: logFileOf(pointer.baseLocation) }), issue);
+  const detail = reconstructIssueDetail(readEventLog({ logFile: logFileOf(pointer.baseLocation) }), issue);
   // A parked issue also carries its reply payload — the full question and the
   // agent's offered options — so the sheet can draw its reply block (story:
   // parked-question reply). Read live from the project's own parked records.

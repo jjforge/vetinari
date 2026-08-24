@@ -14,7 +14,7 @@ import { archiveRun } from "./archive.ts";
 import { clearParkedForTasks, enqueueOutbound, listParked, readParked } from "./state.ts";
 import { autoRegister, gatewayConfigDir } from "./registry.ts";
 import { readHostBudget, type HostBudget } from "./host-slots.ts";
-import { campaignRunning, readEvents, reduceCampaign, serveAllStatus } from "./status.ts";
+import { campaignRunning, readEventLog, reduceCampaign, serveAllStatus } from "./status.ts";
 import { runStatusLine } from "./statusline.ts";
 
 const USAGE = `sandcastle-tdd <mode> [args]
@@ -301,7 +301,7 @@ switch (mode) {
     // compute the closure, apply the keep-banked-work rule, then append a carve
     // event the loop honors at its next wave boundary (ADR 0005).
     if (!batchArgs.length) {
-      const events = readEvents(cfg);
+      const events = readEventLog(cfg);
       if (!campaignRunning(events)) {
         throw new Error(
           "carve <issue> prunes a running campaign, but none is running. To launch a reduced campaign from a plan you supply, pass the waves: " +

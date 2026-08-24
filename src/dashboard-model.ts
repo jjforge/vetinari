@@ -1,11 +1,12 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import { log } from "./log.ts";
 import { type ProjectPointer } from "./registry.ts";
 import { listParked, parkedDirOf, type ParkedRecord } from "./state.ts";
 import { applyCarve } from "./carve.ts";
+import { readEventLog, type GreenEvent, type OrchestratorEvent } from "./event-log.ts";
 
 /**
  * Parse a git remote URL to its `owner/name`, handling both the SSH
@@ -87,33 +88,19 @@ const statusForOutcome = (outcome: string | undefined): IssueStatus => {
   return "unstarted";
 };
 
-export const readEvents = (cfg: Pick<ResolvedConfig, "logFile">): any[] => {
-  if (!existsSync(cfg.logFile)) return [];
-  return readFileSync(cfg.logFile, "utf8")
-    .split("\n")
-    .filter(Boolean)
-    .flatMap((line) => {
-      try {
-        return [JSON.parse(line)];
-      } catch {
-        return [];
-      }
-    });
-};
-
 /**
  * The events appended to a jsonl event log past a character offset, and the
  * offset to resume from next time. Pure — the tail-reading half of the live
  * watcher (ADR 0008), split out so it can be unit-tested without a file or a
  * running server: given the log's full text and where we last stopped, it returns
  * only the newly-appended *complete* lines (parsed, bad lines skipped like
- * `readEvents`) and the new offset — the length of text consumed up to and
+ * `readEventLog`) and the new offset — the length of text consumed up to and
  * including the last newline. A partial trailing line (an append caught
  * mid-write) is left unconsumed so it is read whole next time, and a `content`
  * shorter than `offset` means the log was truncated or rotated, so it is re-read
  * from the start.
  */
-export function appendedEvents(content: string, offset: number): { events: any[]; offset: number } {
+export function appendedEvents(content: string, offset: number): { events: OrchestratorEvent[]; offset: number } {
   const from = offset >= 0 && offset <= content.length ? offset : 0;
   const tail = content.slice(from);
   const lastNewline = tail.lastIndexOf("\n");
@@ -122,12 +109,15 @@ export function appendedEvents(content: string, offset: number): { events: any[]
   const events = complete
     .split("\n")
     .filter(Boolean)
-    .flatMap((line) => {
+    .flatMap((line): OrchestratorEvent[] => {
+      let parsed: unknown;
       try {
-        return [JSON.parse(line)];
+        parsed = JSON.parse(line);
       } catch {
         return [];
       }
+      if (!parsed || typeof parsed !== "object" || typeof (parsed as { event?: unknown }).event !== "string") return [];
+      return [parsed as OrchestratorEvent];
     });
   return { events, offset: from + complete.length };
 }
@@ -140,7 +130,7 @@ const hash = (id: unknown) => `#${normalizeIssue(String(id))}`;
  * for a merge that names its issue only through the branch (`agent/<id>`, the
  * campaign wave-merge / per-issue green path) — the id embedded in that branch.
  * Keeps the feed from rendering `#undefined` when only the branch carries it. */
-const mergedIssue = (e: any): string | undefined => {
+const mergedIssue = (e: GreenEvent): string | undefined => {
   if (e?.taskId != null && String(e.taskId) !== "") return normalizeIssue(String(e.taskId));
   const tail = e?.branch != null ? String(e.branch).split("/").pop() : "";
   return tail ? normalizeIssue(tail) : undefined;
@@ -153,8 +143,8 @@ const mergedIssue = (e: any): string | undefined => {
  * line only when a pre-summary run has none. Events with no operator-facing
  * narration return "" so `lastEventText` can skip past machine noise.
  */
-export function describeEvent(e: any): string {
-  switch (e?.event) {
+export function describeEvent(e: OrchestratorEvent): string {
+  switch (e.event) {
     case "campaign-start":
       return e.name ? `Campaign “${e.name}” started` : "Campaign started";
     case "campaign-batch":
@@ -190,7 +180,7 @@ export function describeEvent(e: any): string {
  * event `describeEvent` can't narrate (machine noise) returns "" so `buildFeed`
  * can skip past it, exactly as `lastEventText` does.
  */
-export function formatFeedEvent(project: string, e: any): string {
+export function formatFeedEvent(project: string, e: OrchestratorEvent): string {
   const sentence = describeEvent(e);
   return sentence ? `${project} — ${sentence}` : "";
 }
@@ -202,7 +192,7 @@ export function formatFeedEvent(project: string, e: any): string {
  * lands after a meaningful event never becomes the headline. Empty logs read
  * "No activity yet".
  */
-export function lastEventText(events: any[]): string {
+export function lastEventText(events: OrchestratorEvent[]): string {
   for (let i = events.length - 1; i >= 0; i--) {
     const text = describeEvent(events[i]);
     if (text) return text;
@@ -303,7 +293,7 @@ export interface ReducedCampaign {
  * campaign frames it as a single wave. This is the load-bearing seam of ADR
  * 0005: `buildStatus` renders it and the `campaign` loop re-reads it each wave.
  */
-export function reduceCampaign(events: any[]): ReducedCampaign {
+export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
   const latestCampaignIndex = events.findLastIndex((e) => e.event === "campaign-start" && Array.isArray(e.batches));
   const relevant = latestCampaignIndex >= 0 ? events.slice(latestCampaignIndex) : events;
 
@@ -324,7 +314,7 @@ export function reduceCampaign(events: any[]): ReducedCampaign {
     // Any start event may carry an id→title map (`campaign` writes it on
     // `campaign-start`, a standalone `queue` on `queue-start`); fold them all so
     // the plan carries a name for every issue a title was resolved for.
-    if (e.titles && typeof e.titles === "object") {
+    if ("titles" in e && e.titles && typeof e.titles === "object") {
       for (const [id, title] of Object.entries(e.titles)) {
         if (typeof title === "string" && title.trim()) titles.set(normalizeIssue(id), title.trim());
       }
@@ -436,11 +426,11 @@ export interface IssueDetail {
  * membership in one of the id-bearing arrays/maps (`taskIds`, `merged`, `removed`,
  * `queue-done` outcomes)? The plan-only `campaign-start` `batches` are excluded so
  * the working span starts when work does, not at campaign launch. */
-const eventNamesIssue = (e: any, id: string): boolean => {
-  if (e?.taskId != null && normalizeIssue(String(e.taskId)) === id) return true;
+const eventNamesIssue = (e: OrchestratorEvent, id: string): boolean => {
+  if ("taskId" in e && e.taskId != null && normalizeIssue(String(e.taskId)) === id) return true;
   const inArray = (a: unknown) => Array.isArray(a) && a.map(String).map(normalizeIssue).includes(id);
-  if (inArray(e?.taskIds) || inArray(e?.merged) || inArray(e?.removed)) return true;
-  if (e?.outcomes && typeof e.outcomes === "object" && Object.keys(e.outcomes).map(normalizeIssue).includes(id)) return true;
+  if (("taskIds" in e && inArray(e.taskIds)) || ("merged" in e && inArray(e.merged)) || ("removed" in e && inArray(e.removed))) return true;
+  if ("outcomes" in e && e.outcomes && typeof e.outcomes === "object" && Object.keys(e.outcomes).map(normalizeIssue).includes(id)) return true;
   return false;
 };
 
@@ -453,7 +443,7 @@ const eventNamesIssue = (e: any, id: string): boolean => {
  * issue re-run in a fresh campaign shows that run's turns — a queue-only log with
  * no campaign frame is folded whole.
  */
-export function reconstructIssueDetail(events: any[], issueNumber: string): IssueDetail {
+export function reconstructIssueDetail(events: OrchestratorEvent[], issueNumber: string): IssueDetail {
   const id = normalizeIssue(issueNumber);
   const { outcomes, carved, titles, name } = reduceCampaign(events);
   const status: DisplayStatus = carved.has(id) ? "carved" : outcomes.get(id) ?? "unstarted";
@@ -482,7 +472,7 @@ export function reconstructIssueDetail(events: any[], issueNumber: string): Issu
  * condition the no-plan `carve <issue>` needs before it can prune (ADR 0005).
  * A queue-only run with no campaign frame is not a campaign and returns false.
  */
-export function campaignRunning(events: any[]): boolean {
+export function campaignRunning(events: OrchestratorEvent[]): boolean {
   const start = events.findLastIndex((e) => e.event === "campaign-start" && Array.isArray(e.batches));
   if (start < 0) return false;
   return !events.slice(start).some((e) => e.event === "campaign-done" || e.event === "campaign-halt");
@@ -501,7 +491,7 @@ export type ArchivedRunState = "complete" | "interrupted";
  * rest of the reducer (#69) so a superseded earlier run never decides it — a
  * queue-only run (no campaign frame) is folded whole and reads its `queue-done`.
  */
-export function archivedRunState(events: any[]): ArchivedRunState {
+export function archivedRunState(events: OrchestratorEvent[]): ArchivedRunState {
   const start = events.findLastIndex((e) => e.event === "campaign-start" && Array.isArray(e.batches));
   const relevant = start >= 0 ? events.slice(start) : events;
   return relevant.some((e) => e.event === "campaign-done" || e.event === "queue-done") ? "complete" : "interrupted";
@@ -564,7 +554,7 @@ export function listArchivedRuns(baseLocation: string): ArchivedRun[] {
     const match = name.match(/^orchestrator-(.+)\.jsonl$/);
     if (!match) continue;
     const file = join(dir, name);
-    const events = readEvents({ logFile: file });
+    const events = readEventLog({ logFile: file });
     const { waves, layout, name: runName } = reduceCampaign(events);
     if (!waves.length) {
       log("status-archive-skipped", { file });
@@ -590,7 +580,7 @@ export function listArchivedRuns(baseLocation: string): ArchivedRun[] {
  * plan the dashboard renders, so the summary can never disagree with the run's
  * reconstructed wave/issue view (ADR 0005).
  */
-export function summarizeRun(events: any[]): string {
+export function summarizeRun(events: OrchestratorEvent[]): string {
   // Everything derives from the run `reduceCampaign` reconstructs (the latest
   // `campaign-start` onward), so a multi-run archive summarizes its terminal run —
   // a stale `campaign-halt` from a superseded earlier run in the same log no longer
@@ -603,7 +593,7 @@ export function summarizeRun(events: any[]): string {
 }
 
 export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
-  const { waves, layout, carved, name, outcomes, details, titles, closedWaves, currentWave } = reduceCampaign(readEvents(cfg));
+  const { waves, layout, carved, name, outcomes, details, titles, closedWaves, currentWave } = reduceCampaign(readEventLog(cfg));
 
   const activeIssueNumbers = new Set(waves.flat());
   const closedIssueNumbers = new Set([...closedWaves].flatMap((index) => waves[index] ?? []));
@@ -768,12 +758,12 @@ export function buildFeed(pointers: ProjectPointer[], now: Date = new Date()): F
     }
     // The runs whose events might fall in the window: the live log, plus each
     // archived run whose start is recent enough to still carry in-window events.
-    const runs: any[][] = [readEvents(statusConfigFromPointer(pointer))];
+    const runs: OrchestratorEvent[][] = [readEventLog(statusConfigFromPointer(pointer))];
     for (const run of listArchivedRuns(pointer.baseLocation)) {
       const startedMs = run.startedAt ? Date.parse(run.startedAt) : NaN;
       if (Number.isNaN(startedMs) || startedMs < archiveFloorMs) continue;
       try {
-        runs.push(readEvents({ logFile: run.file }));
+        runs.push(readEventLog({ logFile: run.file }));
       } catch (error) {
         log("status-feed-archive-skipped", { file: run.file, error: String(error) });
       }
@@ -909,9 +899,9 @@ const sameLocalDay = (iso: string, day: Date) => {
  * local day (see `sameLocalDay`), so a merge just past midnight UTC still counts
  * for the local day the operator is actually in (#97).
  */
-const mergedTodayForProject = (baseLocation: string, liveEvents: any[], now: Date): number => {
+const mergedTodayForProject = (baseLocation: string, liveEvents: OrchestratorEvent[], now: Date): number => {
   const merged = new Set<string>();
-  const runs = [liveEvents, ...listArchivedRuns(baseLocation).map((r) => readEvents({ logFile: r.file }))];
+  const runs = [liveEvents, ...listArchivedRuns(baseLocation).map((r) => readEventLog({ logFile: r.file }))];
   for (const runEvents of runs) {
     try {
       const { mergedAt, outcomes } = reduceCampaign(runEvents);
@@ -925,7 +915,7 @@ const mergedTodayForProject = (baseLocation: string, liveEvents: any[], now: Dat
   return merged.size;
 };
 
-const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, events: any[]): ProjectCard => {
+const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, events: OrchestratorEvent[]): ProjectCard => {
   // The card heading shows owner/name, read live off the checkout's git remote;
   // undefined for a project with none (the demo), so the display falls back to the key.
   const repo = repoForProject(pointer.projectRoot);
@@ -935,7 +925,7 @@ const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, event
     // log: reconstruct it and read its real merged % so a completed run no longer
     // reads 0% (#70). `waves` is already the pruned plan (carved issues dropped), so
     // the ratio matches the live card's carved-aware count.
-    const archived = latest ? reduceCampaign(readEvents({ logFile: latest.file })) : undefined;
+    const archived = latest ? reduceCampaign(readEventLog({ logFile: latest.file })) : undefined;
     const archivedIssues = archived ? archived.waves.flat() : [];
     const merged = archived ? archivedIssues.filter((n) => archived.outcomes.get(n) === "completed").length : 0;
     return {
@@ -995,7 +985,7 @@ export function buildLanding(pointers: ProjectPointer[], now: Date = new Date())
       continue;
     }
     const cfg = statusConfigFromPointer(pointer);
-    const events = readEvents(cfg);
+    const events = readEventLog(cfg);
     const status = buildStatus(cfg);
     // merged-today counts every issue merged today across all of the project's runs
     // — the live run plus every archived run, deduped per issue — so a project that

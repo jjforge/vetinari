@@ -24,7 +24,7 @@ import {
   type ParkedRecord,
 } from "./state.ts";
 import { gatewayConfigDir, readProjects } from "./registry.ts";
-import { campaignRunning, logFileOf, readEvents, serveAllStatus, shellCarvePreview } from "./status.ts";
+import { campaignRunning, logFileOf, readEventLog, serveAllStatus, shellCarvePreview } from "./status.ts";
 import { tgPoll, tgSend, type TgConn, type TgMsg } from "./telegram.ts";
 
 /**
@@ -601,7 +601,7 @@ async function drainOutboxes(configDir: string): Promise<void> {
 function carveCandidates(configDir: string): CarveCandidate[] {
   return loadGatewayProjects(configDir).map((project) => ({
     project,
-    running: campaignRunning(readEvents({ logFile: logFileOf(project.baseLocation) })),
+    running: campaignRunning(readEventLog({ logFile: logFileOf(project.baseLocation) })),
   }));
 }
 

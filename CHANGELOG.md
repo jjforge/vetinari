@@ -315,6 +315,16 @@ question` + a `waiting Nm · reason` meta line) that open the existing issue-det
 
 ### Fixed
 
+- The all-repos landing's **MERGED TODAY** counter under-counted a project that
+  ran several campaigns in one day: it read only one run per project — the live
+  run if one was in flight, else the single most-recent archived run — so every
+  earlier campaign's merges (in older archive files) were ignored (#97). It now
+  sums every issue merged (completed) today across the project's live run **and
+  all** archived runs (`listArchivedRuns`), deduped per issue so a re-run can't
+  double-count. Still read-only over the logs (ADR 0002); a malformed archive is
+  skipped with a log line, never fatal. "Today" remains the UTC day, so near
+  midnight it can still disagree with the operator's local day.
+
 - The live-bar **play/pause control** rendered as a colourful gradient emoji on
   Apple platforms — the pause/play glyphs were CSS `content` emoji codepoints that
   default to emoji presentation on iOS/macOS (#96). The control is now a monotone

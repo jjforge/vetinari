@@ -413,6 +413,156 @@ test("an idle project whose latest archived run merged on an earlier day counts 
   assert.equal(counters.mergedToday, 0);
 });
 
+test("merged-today sums every archived run merged today, not just the latest (#97)", () => {
+  const base = join(tmpdir(), `sctdd-landing-merged-many-${Date.now()}`);
+  const dir = join(base, "beta");
+  // Idle: two campaigns ran and completed today, so both live in the archive.
+  seedState(dir, []);
+  mkdirSync(join(dir, "logs", "archive"), { recursive: true });
+  // Earlier run today merged 501.
+  writeJsonl(
+    join(dir, "logs", "archive", "orchestrator-2026-06-15T08-00-00-000Z.jsonl"),
+    [
+      {
+        ts: "2026-06-15T08:00:00.000Z",
+        event: "campaign-start",
+        batches: [["501"]],
+        name: "morning",
+      },
+      {
+        ts: "2026-06-15T08:05:00.000Z",
+        event: "campaign-batch-done",
+        index: 0,
+        merged: ["501"],
+      },
+      { ts: "2026-06-15T08:06:00.000Z", event: "campaign-done", batches: 1 },
+    ],
+  );
+  // Later run today (the latest archive) merged 502.
+  writeJsonl(
+    join(dir, "logs", "archive", "orchestrator-2026-06-15T10-00-00-000Z.jsonl"),
+    [
+      {
+        ts: "2026-06-15T10:00:00.000Z",
+        event: "campaign-start",
+        batches: [["502"]],
+        name: "afternoon",
+      },
+      {
+        ts: "2026-06-15T10:05:00.000Z",
+        event: "campaign-batch-done",
+        index: 0,
+        merged: ["502"],
+      },
+      { ts: "2026-06-15T10:06:00.000Z", event: "campaign-done", batches: 1 },
+    ],
+  );
+
+  const { counters } = buildLanding(
+    [pointerFor("beta", dir)],
+    new Date("2026-06-15T12:00:00.000Z"),
+  );
+  // Both runs merged today — the earlier archive is no longer ignored.
+  assert.equal(counters.mergedToday, 2);
+});
+
+test("merged-today combines the live run's merges with the archives' (#97)", () => {
+  const base = join(tmpdir(), `sctdd-landing-merged-live-arch-${Date.now()}`);
+  const dir = join(base, "beta");
+  // A live campaign in flight that has already merged 601 today (602 still running).
+  seedState(dir, [
+    {
+      ts: "2026-06-15T11:00:00.000Z",
+      event: "campaign-start",
+      batches: [["601"], ["602"]],
+      name: "live",
+    },
+    {
+      ts: "2026-06-15T11:05:00.000Z",
+      event: "campaign-batch-done",
+      index: 0,
+      merged: ["601"],
+    },
+    { ts: "2026-06-15T11:06:00.000Z", event: "campaign-batch", index: 1 },
+    { ts: "2026-06-15T11:07:00.000Z", event: "queue-start", taskIds: ["602"] },
+  ]);
+  // An earlier completed run today, archived, merged 701.
+  mkdirSync(join(dir, "logs", "archive"), { recursive: true });
+  writeJsonl(
+    join(dir, "logs", "archive", "orchestrator-2026-06-15T08-00-00-000Z.jsonl"),
+    [
+      {
+        ts: "2026-06-15T08:00:00.000Z",
+        event: "campaign-start",
+        batches: [["701"]],
+        name: "earlier",
+      },
+      {
+        ts: "2026-06-15T08:05:00.000Z",
+        event: "campaign-batch-done",
+        index: 0,
+        merged: ["701"],
+      },
+      { ts: "2026-06-15T08:06:00.000Z", event: "campaign-done", batches: 1 },
+    ],
+  );
+
+  const { counters } = buildLanding(
+    [pointerFor("beta", dir)],
+    new Date("2026-06-15T12:00:00.000Z"),
+  );
+  // The live run's 601 and the archive's 701 both count.
+  assert.equal(counters.mergedToday, 2);
+});
+
+test("merged-today counts an issue merged in more than one run only once (#97)", () => {
+  const base = join(tmpdir(), `sctdd-landing-merged-dedupe-${Date.now()}`);
+  const dir = join(base, "beta");
+  // 801 merged in the live run today...
+  seedState(dir, [
+    {
+      ts: "2026-06-15T11:00:00.000Z",
+      event: "campaign-start",
+      batches: [["801"]],
+      name: "re-run",
+    },
+    {
+      ts: "2026-06-15T11:05:00.000Z",
+      event: "campaign-batch-done",
+      index: 0,
+      merged: ["801"],
+    },
+    { ts: "2026-06-15T11:06:00.000Z", event: "campaign-done", batches: 1 },
+  ]);
+  // ...and the same 801 was already merged in an earlier archived run today.
+  mkdirSync(join(dir, "logs", "archive"), { recursive: true });
+  writeJsonl(
+    join(dir, "logs", "archive", "orchestrator-2026-06-15T08-00-00-000Z.jsonl"),
+    [
+      {
+        ts: "2026-06-15T08:00:00.000Z",
+        event: "campaign-start",
+        batches: [["801"]],
+        name: "earlier",
+      },
+      {
+        ts: "2026-06-15T08:05:00.000Z",
+        event: "campaign-batch-done",
+        index: 0,
+        merged: ["801"],
+      },
+      { ts: "2026-06-15T08:06:00.000Z", event: "campaign-done", batches: 1 },
+    ],
+  );
+
+  const { counters } = buildLanding(
+    [pointerFor("beta", dir)],
+    new Date("2026-06-15T12:00:00.000Z"),
+  );
+  // One issue, two runs — counted once.
+  assert.equal(counters.mergedToday, 1);
+});
+
 test("buildFeed merges every project's narratable events into one newest-first, repo-prefixed feed", () => {
   const base = join(tmpdir(), `sctdd-feed-${Date.now()}`);
   const alphaDir = join(base, "alpha");

@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import type { ResolvedConfig } from "./config.ts";
+import type { CampaignStartEvent, QueueStartEvent } from "./event-log.ts";
 import { log } from "./log.ts";
 import { runGates } from "./gate.ts";
 import { makeSandbox } from "./sandbox.ts";
@@ -82,7 +83,7 @@ export async function queue(cfg: ResolvedConfig, taskIds: string[], slots: numbe
   // already wrote them onto `campaign-start` and passes them here, so we neither
   // re-resolve nor re-log them.
   const startTitles = titles === undefined ? await resolveTitles(cfg, taskIds) : undefined;
-  const startLog: Record<string, unknown> = { taskIds, slots };
+  const startLog: Omit<QueueStartEvent, "ts" | "event"> = { taskIds, slots };
   if (startTitles && Object.keys(startTitles).length) startLog.titles = startTitles;
   if (host) startLog.hostBudget = host.budget;
   log("queue-start", startLog);
@@ -180,7 +181,7 @@ export async function campaign(cfg: ResolvedConfig, batches: string[][], slots: 
   // still recorded only when given; a run whose titles could not be resolved simply
   // omits them and degrades to `number:status`.
   const titles = await resolveTitles(cfg, batches.flat());
-  const startEvent: Record<string, unknown> = { batches, slots };
+  const startEvent: Omit<CampaignStartEvent, "ts" | "event"> = { batches, slots };
   if (name) startEvent.name = name;
   if (Object.keys(titles).length) startEvent.titles = titles;
   log("campaign-start", startEvent);

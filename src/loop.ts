@@ -122,7 +122,7 @@ export async function runLoop(cfg: ResolvedConfig, taskId: string, entry?: Resum
 
       for (let turn = 0; turn < cfg.maxTurns; turn++) {
         const sessionId = r.iterations.at(-1)?.sessionId;
-        log("turn", { taskId, turn, signal: r.completionSignal, sessionId, usage: usageOf(r), commits: r.commits?.length ?? 0, summary: extractTurnSummary(r.stdout ?? "") });
+        log("turn", { taskId, turn, signal: r.completionSignal, sessionId, usage: usageOf(r), commits: r.commits?.length ?? 0, summary: extractTurnSummary(r.stdout ?? "") ?? "" });
 
         if (r.completionSignal === BLOCKED) {
           await park(cfg, { taskId, reason: "blocked", sessionId, branch: sbx.branch, question: extractQuestion(r.stdout ?? "") });

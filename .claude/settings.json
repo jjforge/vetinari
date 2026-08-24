@@ -1,5 +1,11 @@
 {
+  "statusLine": {
+    "type": "command",
+    "command": "\"${CLAUDE_PROJECT_DIR:-.}/.claude/statusline.sh\"",
+    "refreshInterval": 5
+  },
   "enabledPlugins": {
-    "mattpocock-skills@mattpocock": true
+    "mattpocock-skills@mattpocock": true,
+    "ponytail@ponytail": true
   }
 }

@@ -1111,21 +1111,28 @@ test("the issue-detail sheet carries the issue's state on its top edge only (§2
   );
 });
 
-test("motion is a channel for running only: the live indicator pulses while streaming, still + dim when paused (§5, #83)", () => {
+test("motion is a running/stream channel only: green live dots pulse while live, a single root paused flag freezes every pulse (§5, #100)", () => {
   for (const html of [
     renderLandingShell(["alpha"]),
     renderStatusPage({ project: "beta", waves: [], parked: [] }),
   ]) {
-    // The live indicator dot pulses while streaming…
+    // The green live dots pulse whenever live — they track the stream, so there is no
+    // per-element running-gate or live-state rule on the live-indicator any more.
     assert.match(html, /\.live-indicator::before \{[^}]*animation: chip-pulse/);
-    // …and goes still + dim when paused — never amber, never animating.
+    assert.doesNotMatch(html, /data-running/);
+    assert.doesNotMatch(html, /\.live-indicator\[data-live-state="paused"\]/);
+    assert.doesNotMatch(html, /\.live-bar:not\(\[data-running/);
+    // One root flag freezes every pulse at once — green live dots and blue running dots —
+    // so pause never has to reach each dot per-element (the reworked #100 design).
     assert.match(
       html,
-      /\.live-indicator\[data-live-state="paused"\] \{ color: var\(--color-dim\); \}/,
+      /\[data-paused="true"\] \.live-indicator::before, \[data-paused="true"\] \.dot\.running \{ animation: none; \}/,
     );
+    // The pause-bar dot also goes dim while paused, keyed off that same root flag (not a
+    // per-element live-state rule); the event-log dot just goes still.
     assert.match(
       html,
-      /\.live-indicator\[data-live-state="paused"\]::before \{ animation: none; \}/,
+      /\[data-paused="true"\] \.live-bar \.live-indicator \{ color: var\(--color-dim\); \}/,
     );
     // The only colour-bearing animation anywhere is chip-pulse — nothing else animates (§5).
     assert.deepEqual(
@@ -1135,35 +1142,40 @@ test("motion is a channel for running only: the live indicator pulses while stre
   }
 });
 
-test("the live dot pulses only while an agent is running, not merely while streaming (§5, #100)", () => {
-  // The pulse is gated in CSS: a live-bar that is not marked running suppresses the
-  // dot's animation, so an idle stream (0 running) is still — motion signals work.
-  assert.match(
-    TOP_BAR_STYLES,
-    /\.live-bar:not\(\[data-running="true"\]\) \.live-indicator::before \{ animation: none; \}/,
-  );
-  // The status page marks the live-bar running iff some issue is running (server-rendered,
-  // recomputed on every live reload).
+test("green live dots pulse when live even with zero running — they track the stream, not work (§5, #100)", () => {
+  // Regression guard for the misdirected first #100 attempt: it hung a running-gate on the
+  // green dot so an idle campaign (0 running) stopped pulsing. The green dots must stay live.
   const idle = renderStatusPage({
     project: "beta",
     waves: [{ index: 0, status: "running", issues: [{ issueNumber: "1", status: "completed" }] }],
     parked: [],
   });
-  assert.match(idle, /<div class="live-bar" data-running="false"/);
-  const busy = renderStatusPage({
-    project: "beta",
-    waves: [{ index: 0, status: "running", issues: [{ issueNumber: "1", status: "running" }] }],
-    parked: [],
-  });
-  assert.match(busy, /<div class="live-bar" data-running="true"/);
+  assert.doesNotMatch(idle, /data-running/);
+  assert.match(idle, /\.live-indicator::before \{[^}]*animation: chip-pulse[^}]*infinite/);
 });
 
-test("the landing live dot tracks the AGENTS WORKING count, flipping data-running on load (§5, #100)", () => {
+test("an idle running tally renders a solid blue dot with no pulse; genuinely-running dots still pulse (§5, #100)", () => {
   const html = renderLandingShell(["alpha"]);
-  // Nothing has loaded yet, so the live-bar starts idle (still, not pulsing).
-  assert.match(html, /<div class="live-bar" data-running="false"/);
-  // load() flips data-running from the same working count it mounts into AGENTS WORKING.
-  assert.match(html, /\.live-bar[^]*?dataset\.running = String\(data\.counters\.working > 0\)/);
+  // A card's blue running-dots track work: a "0 running" tally is idle, so its dot is
+  // solid blue but must not pulse (the pulse means active work). The client marks the
+  // zero-count tally dot idle so CSS stills it.
+  assert.match(html, /bucket === "running" && count === 0/);
+  // CSS: a .dot.running is blue and pulses by default; an idle (zero-count) one is stilled,
+  // keeping the blue but dropping the motion.
+  assert.match(html, /\.dot\.running \{ background: var\(--color-blue\); \}/);
+  assert.match(html, /\.dot\.running\.idle \{ animation: none; \}/);
+  // The base running dot still pulses — a wave member with real running work is unaffected.
+  assert.match(html, /\.dot\.running \{ animation: chip-pulse/);
+});
+
+test("both pages toggle a root paused flag on the body so one rule freezes every dot (§5, #100)", () => {
+  // The pause script owns the single control: it flips data-paused on the body, the common
+  // root above both the green live dots and the blue running dots. Nothing else per-element.
+  for (const html of [
+    renderLandingShell(["alpha"]),
+    renderStatusPage({ project: "beta", waves: [], parked: [] }),
+  ])
+    assert.match(html, /document\.body\.dataset\.paused = String\(paused\)/);
 });
 
 test("projectRunState resolves a card's state by the §3 precedence: parked > failure > running > completed (#83)", () => {
@@ -1633,7 +1645,7 @@ test("renderLandingShell renders the card tally as status-dot chips, not plain t
   const html = renderLandingShell(["alpha"]);
   // The tally builds one pill chip per bucket, each with a status dot scoped to .dot.
   assert.match(html, /el\("span", "tally-chip"\)/);
-  assert.match(html, /el\("span", "dot " \+ /);
+  assert.match(html, /"dot " \+ bucket/);
   // The chip treatment matches the campaign page's chips — a bordered pill.
   assert.match(html, /\.tally-chip \{[^}]*border-radius: 999px/);
   // The queued dot is the dim unstarted grey; running/parked reuse the shared .dot colours.
@@ -1708,6 +1720,20 @@ test("renderLandingShell stacks each counter label on top of an inline value + s
     html,
     /\.counter-line \{[^}]*display: flex[^}]*align-items: baseline/,
   );
+});
+
+test("the updated readout reads 'Paused' while paused and counts up otherwise, on both pages (§5, #100)", () => {
+  for (const html of [
+    renderLandingShell(["alpha"]),
+    renderStatusPage({ project: "beta", waves: [], parked: [] }),
+  ]) {
+    // While paused the "updated Ns ago" readout reads "Paused" instead of ageing a
+    // now-frozen count; it resumes counting on unpause.
+    assert.match(html, /updatedEl\.textContent = paused \? "Paused" :/);
+    // Toggling pause re-renders the readout immediately, so "Paused" appears on the click
+    // rather than up to a second later on the next interval tick.
+    assert.match(html, /renderState\(\);\s*renderUpdated\(\);/);
+  }
 });
 
 test("renderLandingShell wires live SSE updates, an updated-ago readout, and a buffered pause", () => {
@@ -5578,10 +5604,11 @@ test("renderStatusPage renders the landing live-bar top-right, not the old refre
     html,
     /<div class="live-bar"[^>]*><span class="live-indicator" data-live-state="live" aria-label="Live"><\/span><span class="updated" data-updated>[^<]*<\/span><button type="button" id="pause" class="pause" data-paused="false" aria-label="Pause"><\/button><\/div>/,
   );
-  // Paused, the live indicator goes dim (not amber) and still (§5).
+  // Paused, the pause-bar live indicator goes dim (not amber) and still — keyed off the
+  // root paused flag now, never a per-element live-state rule (§5, #100).
   assert.match(
     html,
-    /\.live-indicator\[data-live-state="paused"\] \{ color: var\(--color-dim\); \}/,
+    /\[data-paused="true"\] \.live-bar \.live-indicator \{ color: var\(--color-dim\); \}/,
   );
   // The old interval widget is gone entirely.
   assert.doesNotMatch(html, /id="refresh-seconds"/);

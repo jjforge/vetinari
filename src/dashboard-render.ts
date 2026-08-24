@@ -60,12 +60,15 @@ export const stateBorderColor = (state: string): string => `var(--color-${STATE_
  * The status-dot colour rules, generated once from `stateColor` and shared by both
  * pages (previously two hand-kept copies). Scoped to `.dot` so a state colour tints
  * only the dot, never a whole card or list row (#81). Motion is a second channel for
- * `running` alone (§5): its dot pulses, reduced-motion aware; nothing else animates.
+ * `running` alone (§5): a running dot pulses to signal active work, reduced-motion aware
+ * and frozen with every other pulse by the root paused flag; nothing else animates. A
+ * `.running.idle` dot (a zero-count "0 running" tally chip) keeps the blue but no pulse —
+ * motion means work in flight, and an idle tally has none.
  */
 export const STATE_DOT_CSS =
   `.dot { width: .75rem; height: .75rem; border-radius: 999px; display: inline-block; } ` +
   ["running", "parked", "failure", "completed", "unstarted", "carved", "queued"].map((s) => `.dot.${s} { background: ${stateColor(s)}; }`).join(" ") +
-  ` @keyframes chip-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } } .dot.running { animation: chip-pulse 1.4s ease-in-out infinite; } @media (prefers-reduced-motion: reduce) { .dot.running { animation: none; } }`;
+  ` @keyframes chip-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } } .dot.running { animation: chip-pulse 1.4s ease-in-out infinite; } .dot.running.idle { animation: none; } @media (prefers-reduced-motion: reduce) { .dot.running { animation: none; } }`;
 
 /**
  * A wave-member row carries its own status at 40% alpha on a left edge (§4) — muted
@@ -199,10 +202,6 @@ const renderWaveLabel = (wave: StatusWave) => {
 /** How many issues the campaign spans, across every wave — the count in the
  * `<name> · N issues · M waves` meta line. */
 const campaignIssueCount = (status: CampaignStatus) => status.waves.reduce((total, wave) => total + wave.issues.length, 0);
-
-/** Whether any issue in the campaign is running now — drives the live dot's §5 pulse
- * (motion signals active work, not merely a connected stream). */
-const campaignHasRunning = (status: CampaignStatus) => status.waves.some((wave) => wave.issues.some((issue) => issue.status === "running"));
 
 /** A wave's merged tally — how many of its issues have completed, out of its total —
  * shown on the right of an open wave card's head and on a closed wave's chip. */
@@ -470,14 +469,15 @@ export const renderRepoDropdown = (repos: readonly (string | RepoOption)[], sele
  * control — its CSS-drawn bars/triangle live in `TOP_BAR_STYLES`, flipped by
  * `data-paused`, so a page's script only toggles the attribute and never re-authors it.
  */
-export const renderTopBar = (left: string, running = false) =>
-  `<div class="page-top">${left}<div class="live-bar" data-running="${running}" title="Live updates over SSE; pause to freeze the view while it keeps collecting"><span class="live-indicator" data-live-state="live" aria-label="Live"></span><span class="updated" data-updated>waiting for updates</span><button type="button" id="pause" class="pause" data-paused="false" aria-label="Pause"></button></div></div>`;
+export const renderTopBar = (left: string) =>
+  `<div class="page-top">${left}<div class="live-bar" title="Live updates over SSE; pause to freeze the view while it keeps collecting"><span class="live-indicator" data-live-state="live" aria-label="Live"></span><span class="updated" data-updated>waiting for updates</span><button type="button" id="pause" class="pause" data-paused="false" aria-label="Pause"></button></div></div>`;
 
 /**
  * The top bar's CSS, shared by every page's `<style>` alongside `renderTopBar` so the
  * markup and its presentation move together (#81). Covers `.page-top`, the
- * `.project-picker`, the `.live-bar`/`.live-indicator` (dot + §5 running-only pulse,
- * dim-and-still when paused, reduced-motion aware), and the icon `.pause` control.
+ * `.project-picker`, the `.live-bar`/`.live-indicator` (green dot that pulses while live,
+ * frozen by the root `data-paused` flag, dim on the pause-bar dot when paused, reduced-motion
+ * aware), and the icon `.pause` control.
  */
 export const TOP_BAR_STYLES = `  .page-top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; border-bottom: 1px solid var(--color-light-border); padding-bottom: 1rem; }
   .project-picker { margin: 0; }
@@ -515,15 +515,16 @@ export const TOP_BAR_STYLES = `  .page-top { display: flex; align-items: center;
   @media (max-width: 640px) { .repo-label { font-size: 15px; } }
   .live-bar { display: inline-flex; align-items: center; gap: .75rem; color: var(--color-text-light-2); font-size: .85rem; }
   .live-indicator { display: inline-flex; align-items: center; color: var(--color-green); }
-  /* The live dot pulses only while an agent is running; motion is a second channel
-     for one thing only (§5), so an idle stream (0 running) is still. The pulse is the
-     base rule, switched off when the live-bar is not marked running — the client flips
-     data-running from the same count that drives AGENTS WORKING. Paused, it goes still
-     and dim — never amber, never animating. */
+  /* The green live dots (this one by the pause button, and the event-log header's) track
+     the live *stream*: they pulse whenever live, regardless of running count (§5 — the
+     green dots are the stream channel, distinct from the blue .dot.running that tracks
+     work). One root flag freezes every pulse — green and blue — at once when paused: the
+     single [data-paused="true"] rule below, so pause never reaches each dot per-element.
+     The pause-bar dot also goes dim while paused (keyed off that root flag); the feed dot
+     just goes still. */
   .live-indicator::before { content: ""; width: .55rem; height: .55rem; border-radius: 999px; background: currentColor; animation: chip-pulse 1.6s ease-in-out infinite; }
-  .live-bar:not([data-running="true"]) .live-indicator::before { animation: none; }
-  .live-indicator[data-live-state="paused"] { color: var(--color-dim); }
-  .live-indicator[data-live-state="paused"]::before { animation: none; }
+  [data-paused="true"] .live-indicator::before, [data-paused="true"] .dot.running { animation: none; }
+  [data-paused="true"] .live-bar .live-indicator { color: var(--color-dim); }
   @media (prefers-reduced-motion: reduce) { .live-indicator::before { animation: none; } }
   .pause { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: .22rem; color: var(--color-text); background: var(--color-box-header); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); padding: .35rem .8rem; font: inherit; cursor: pointer; }
   /* Pause is an icon, not a word — two bars while live, a triangle once paused. It is
@@ -1259,9 +1260,6 @@ ${REPO_DROPDOWN_SCRIPT}
       const value = document.querySelector('[data-counter="' + key + '"] .counter-value');
       if (value) value.textContent = String(val);
     }
-    // The live dot pulses only while an agent is working (§5): flip data-running from the
-    // same working count driving AGENTS WORKING, so 0 running leaves the dot still.
-    document.querySelector(".live-bar").dataset.running = String(data.counters.working > 0);
     // Each counter's sublabel, derived client-side from the same payload (#80): working
     // names how many repos have a running agent, parked how long the oldest question has
     // waited (the queue is oldest-first), and the other two carry fixed context.
@@ -1305,7 +1303,10 @@ ${REPO_DROPDOWN_SCRIPT}
       const tally = el("div", "card-tally");
       for (const [bucket, count] of [["running", p.tally.running], ["parked", p.tally.parked], ["queued", p.tally.queued]]) {
         const chip = el("span", "tally-chip");
-        chip.append(el("span", "dot " + bucket), el("span", null, count + " " + bucket));
+        // A "0 running" tally dot stays blue but is marked idle so it doesn't pulse — motion
+        // signals active work, and a zero tally has none (§5, #100).
+        const dotClass = "dot " + bucket + (bucket === "running" && count === 0 ? " idle" : "");
+        chip.append(el("span", dotClass), el("span", null, count + " " + bucket));
         tally.append(chip);
       }
       card.append(tally);
@@ -1325,11 +1326,16 @@ ${REPO_DROPDOWN_SCRIPT}
   let buffered = 0;
   let lastUpdate = null;
   const renderUpdated = () => {
-    updatedEl.textContent = lastUpdate == null ? "waiting for updates" : "updated " + Math.round((Date.now() - lastUpdate) / 1000) + "s ago";
+    // While paused the readout reads "Paused" rather than ageing a frozen count; it resumes
+    // "updated Ns ago" on unpause (§5, #100).
+    updatedEl.textContent = paused ? "Paused" : lastUpdate == null ? "waiting for updates" : "updated " + Math.round((Date.now() - lastUpdate) / 1000) + "s ago";
   };
   // The indicator is a dot only: its state is an accessible label, never visible text.
   // Pause is an icon flipped by data-paused (the CSS-drawn bars/triangle live in CSS).
   const renderState = () => {
+    // The single control for all pulsing (§5, #100): one root flag on the body freezes
+    // every dot — green live dots and blue running dots — at once via one CSS rule.
+    document.body.dataset.paused = String(paused);
     indicator.dataset.liveState = paused ? "paused" : "live";
     indicator.setAttribute("aria-label", paused ? "Paused" + (buffered ? " · " + buffered + " buffered" : "") : "Live");
     pauseBtn.dataset.paused = String(paused);
@@ -1348,6 +1354,7 @@ ${REPO_DROPDOWN_SCRIPT}
     paused = !paused;
     if (!paused && buffered) { buffered = 0; refresh(); }
     renderState();
+    renderUpdated();
   });
   renderState();
   setInterval(renderUpdated, 1000);
@@ -1485,7 +1492,7 @@ ${ISSUE_DETAIL_SHEET_STYLES}
 }
 </head>
 <body>
-${renderTopBar(opts.projects?.length ? renderRepoDropdown(opts.projects, opts.selected ?? status.project) : `<h1>${escapeHtml(status.project)}</h1>`, campaignHasRunning(status))}
+${renderTopBar(opts.projects?.length ? renderRepoDropdown(opts.projects, opts.selected ?? status.project) : `<h1>${escapeHtml(status.project)}</h1>`)}
 ${
   status.parked.length
     ? `<section class="parked-issues"><h2>Parked · <span class="parked-count">${status.parked.length}</span></h2>${status.parked
@@ -1548,10 +1555,15 @@ ${issueDetailSheetMarkup(Boolean(opts.carve))}${
   let paused = false;
   let buffered = 0;
   const lastUpdate = Date.now();
-  const renderUpdated = () => { updatedEl.textContent = "updated " + Math.round((Date.now() - lastUpdate) / 1000) + "s ago"; };
+  // While paused the readout reads "Paused" rather than ageing a frozen count; it resumes
+  // "updated Ns ago" on unpause (§5, #100).
+  const renderUpdated = () => { updatedEl.textContent = paused ? "Paused" : "updated " + Math.round((Date.now() - lastUpdate) / 1000) + "s ago"; };
   // The indicator is a dot only: its state is an accessible label, never visible text.
   // Pause is an icon flipped by data-paused (the CSS-drawn bars/triangle live in CSS).
   const renderState = () => {
+    // The single control for all pulsing (§5, #100): one root flag on the body freezes
+    // every dot — green live dots and blue running dots — at once via one CSS rule.
+    document.body.dataset.paused = String(paused);
     indicator.dataset.liveState = paused ? "paused" : "live";
     indicator.setAttribute("aria-label", paused ? "Paused" + (buffered ? " · " + buffered + " buffered" : "") : "Live");
     pauseBtn.dataset.paused = String(paused);
@@ -1567,6 +1579,7 @@ ${issueDetailSheetMarkup(Boolean(opts.carve))}${
     paused = !paused;
     if (!paused && buffered && !isComposing()) location.reload();
     renderState();
+    renderUpdated();
   });
   renderState();
   renderUpdated();

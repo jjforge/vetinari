@@ -129,12 +129,17 @@ on. Tally chips (counts, not states) keep a neutral `#232b35` border.
 
 ## 5. Motion tied to colour
 
-Motion is a second channel for one state only: `running`.
+Motion is a second channel tied to two things: the blue `running` dot signals
+active **work**, and the green live-indicator dot signals a live **stream**.
 
-- A running chip's dot pulses (`chip-pulse`).
-- The live indicator dot pulses only while an agent is running (motion signals
-  active work, not merely a connected stream): idle (0 running) is still, and it
-  goes still and `#5f6b78` when paused.
+- A running chip's dot pulses (`chip-pulse`) while it marks running work. A zero-count
+  "0 running" tally dot keeps the blue fill but stays still — motion means work in
+  flight, and an idle tally has none.
+- The green live-indicator dots (the pause-bar dot and the event-log header dot) pulse
+  whenever the stream is live, regardless of the running count.
+- A single root `data-paused` flag is the one control over all pulsing: pausing freezes
+  every dot at once — green and blue — through one rule, and the pause-bar's green dot
+  also goes `#5f6b78`.
 
 Nothing else animates its colour. No pulsing on parked — parked is urgent but
 static, and a blinking amber row across a long queue is unreadable. All motion is

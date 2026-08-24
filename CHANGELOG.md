@@ -349,6 +349,14 @@ question` + a `waiting Nm · reason` meta line) that open the existing issue-det
 
 ### Fixed
 
+- The live-bar dot now pulses **only while an agent is running and the view is not
+  paused** (#100). It previously pulsed whenever the stream was connected — motion
+  even with 0 agents working, and paused only dimmed the dot without stilling it. The
+  pulse is now gated on a `data-running` flag on the `.live-bar`: the landing flips it
+  from the same working count that drives **AGENTS WORKING**, the per-repo status page
+  sets it server-side from whether any issue is running, and an idle stream (0 running)
+  is still. Reduced-motion and the paused still-and-dim state are unchanged (§5).
+
 - The all-repos landing's **MERGED TODAY** counter under-counted a project that
   ran several campaigns in one day: it read only one run per project — the live
   run if one was in flight, else the single most-recent archived run — so every

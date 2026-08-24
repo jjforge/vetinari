@@ -1087,6 +1087,37 @@ test("motion is a channel for running only: the live indicator pulses while stre
   }
 });
 
+test("the live dot pulses only while an agent is running, not merely while streaming (§5, #100)", () => {
+  // The pulse is gated in CSS: a live-bar that is not marked running suppresses the
+  // dot's animation, so an idle stream (0 running) is still — motion signals work.
+  assert.match(
+    TOP_BAR_STYLES,
+    /\.live-bar:not\(\[data-running="true"\]\) \.live-indicator::before \{ animation: none; \}/,
+  );
+  // The status page marks the live-bar running iff some issue is running (server-rendered,
+  // recomputed on every live reload).
+  const idle = renderStatusPage({
+    project: "beta",
+    waves: [{ index: 0, status: "running", issues: [{ issueNumber: "1", status: "completed" }] }],
+    parked: [],
+  });
+  assert.match(idle, /<div class="live-bar" data-running="false"/);
+  const busy = renderStatusPage({
+    project: "beta",
+    waves: [{ index: 0, status: "running", issues: [{ issueNumber: "1", status: "running" }] }],
+    parked: [],
+  });
+  assert.match(busy, /<div class="live-bar" data-running="true"/);
+});
+
+test("the landing live dot tracks the AGENTS WORKING count, flipping data-running on load (§5, #100)", () => {
+  const html = renderLandingShell(["alpha"]);
+  // Nothing has loaded yet, so the live-bar starts idle (still, not pulsing).
+  assert.match(html, /<div class="live-bar" data-running="false"/);
+  // load() flips data-running from the same working count it mounts into AGENTS WORKING.
+  assert.match(html, /\.live-bar[^]*?dataset\.running = String\(data\.counters\.working > 0\)/);
+});
+
 test("projectRunState resolves a card's state by the §3 precedence: parked > failure > running > completed (#83)", () => {
   const wave = (issues: { issueNumber: string; status: string }[]) => [
     { index: 0, status: "running" as const, issues: issues as any },

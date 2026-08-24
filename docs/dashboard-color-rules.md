@@ -132,8 +132,9 @@ on. Tally chips (counts, not states) keep a neutral `#232b35` border.
 Motion is a second channel for one state only: `running`.
 
 - A running chip's dot pulses (`chip-pulse`).
-- The live indicator dot pulses when streaming, and goes still and `#5f6b78` when
-  paused.
+- The live indicator dot pulses only while an agent is running (motion signals
+  active work, not merely a connected stream): idle (0 running) is still, and it
+  goes still and `#5f6b78` when paused.
 
 Nothing else animates its colour. No pulsing on parked — parked is urgent but
 static, and a blinking amber row across a long queue is unreadable. All motion is

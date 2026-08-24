@@ -373,13 +373,19 @@ question` + a `waiting Nm · reason` meta line) that open the existing issue-det
   the archived-runs list, #98) that reveals the rest within the window, and an empty
   window now reads **"No activity in the last 48 hours."**
 
-- The live-bar dot now pulses **only while an agent is running and the view is not
-  paused** (#100). It previously pulsed whenever the stream was connected — motion
-  even with 0 agents working, and paused only dimmed the dot without stilling it. The
-  pulse is now gated on a `data-running` flag on the `.live-bar`: the landing flips it
-  from the same working count that drives **AGENTS WORKING**, the per-repo status page
-  sets it server-side from whether any issue is running, and an idle stream (0 running)
-  is still. Reduced-motion and the paused still-and-dim state are unchanged (§5).
+- Dashboard pulse motion is now governed by **one control** (#100). A single root
+  `data-paused` flag on the page body freezes every pulse at once — the green live dots
+  and the blue running dots — through one CSS rule, so **pausing stills all dots**
+  (previously the green live dot dimmed but kept pulsing, and the blue card dots and the
+  event-log header dot never learned about pause at all). The **green live dots** (the
+  pause-bar dot and the event-log header dot) track the live *stream*: they pulse whenever
+  live regardless of running count (correcting the earlier attempt that stopped the green
+  dot when idle), and the pause-bar dot goes still and dim when paused. The **blue running
+  dots** track *work*: a genuinely-running dot pulses, while an idle "0 running" tally dot
+  renders solid blue with no pulse. The **"updated Ns ago"** readout now reads **"Paused"**
+  while paused and resumes counting on unpause. Reduced-motion still disables all pulsing
+  (§5). This supersedes the first #100 attempt, which hung a per-element `data-running`
+  gate on the green live dot.
 
 - The all-repos landing's **MERGED TODAY** counter under-counted a project that
   ran several campaigns in one day: it read only one run per project — the live

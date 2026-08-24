@@ -4270,6 +4270,55 @@ test("renderStatusPage renders archived runs as a collapsible list with per-row 
   assert.doesNotMatch(html, /<button[^>]*class="archive-show-older"/);
 });
 
+test("renderStatusPage shows an interrupted run as interrupted and still expands it to its partial waves", () => {
+  const html = renderStatusPage(
+    { project: "beta", waves: [], parked: [] },
+    {
+      selected: "beta",
+      // A run cut short: wave 1 merged, wave 2 was in flight when it stopped.
+      archivedRun: "2026-05-01T00-00-00-000Z",
+      archivedRuns: [
+        {
+          run: "2026-05-01T00-00-00-000Z",
+          startedAt: "2026-05-01T00:00:00.000Z",
+          state: "interrupted",
+          issues: 2,
+          status: {
+            project: "beta",
+            waves: [
+              {
+                index: 0,
+                status: "closed",
+                issues: [{ issueNumber: "101", status: "completed" }],
+              },
+              {
+                index: 1,
+                status: "running",
+                issues: [{ issueNumber: "201", status: "running" }],
+              },
+            ],
+            parked: [],
+          },
+        },
+      ],
+    },
+  );
+
+  // The row reads interrupted…
+  assert.match(
+    html,
+    /<span class="archive-state interrupted"><span class="archive-dot interrupted"><\/span>interrupted · 2 issues<\/span>/,
+  );
+  // …and, opened, its campaign pane still shows the partial waves it did run.
+  const paneStart = html.indexOf('class="archive-pane archive-campaign"');
+  const pane = html.slice(
+    paneStart,
+    html.indexOf('class="archive-pane archive-raw"', paneStart),
+  );
+  assert.match(pane, /#101 <small>completed<\/small>/);
+  assert.match(pane, /#201 <small>running<\/small>/);
+});
+
 test("renderStatusPage opens the archived row named by archivedRun, in the requested mode", () => {
   const html = renderStatusPage(
     { project: "beta", waves: [], parked: [] },

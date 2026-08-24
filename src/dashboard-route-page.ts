@@ -37,18 +37,26 @@ export const handlePage: RouteHandler = (req, res, url, deps) => {
   const archivedRuns = pointer ? listArchivedRuns(pointer.baseLocation) : [];
   const requestedRun = url.searchParams.get("run") ?? undefined;
   const match = requestedRun ? archivedRuns.find((r) => r.run === requestedRun) : undefined;
-  // Read-only: point buildStatus at the archived log; its dir holds no parked
-  // records, so the reconstructed status carries none (a finished run has nothing
-  // to act on).
-  const archived = match ? buildStatus(archiveStatusConfig(selected.project, match.file)) : undefined;
+  const requestedMode = url.searchParams.get("mode") === "raw" ? "raw" : "campaign";
+  // Each row's campaign pane renders the run's reconstructed status read-only: point
+  // buildStatus at the archived log; its dir holds no parked records, so the status
+  // carries none (a finished run has nothing to act on).
+  const runs = archivedRuns.map((r) => ({
+    run: r.run,
+    name: r.name,
+    startedAt: r.startedAt,
+    state: r.state,
+    issues: r.issues,
+    status: buildStatus(archiveStatusConfig(selected.project, r.file)),
+  }));
   res.end(
     renderStatusPage(selected, {
       projects: repos,
       selected: selected.project,
       carve: true,
-      archivedRuns: archivedRuns.map((r) => ({ run: r.run, summary: r.summary, name: r.name })),
-      archived,
+      archivedRuns: runs,
       archivedRun: match?.run,
+      archivedMode: match ? requestedMode : undefined,
     }),
   );
   return true;

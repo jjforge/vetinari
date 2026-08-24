@@ -1,5 +1,6 @@
 import type { ResolvedConfig } from "./config.ts";
 import {
+  type ArchivedRunState,
   buildStatusWithIssueNames,
   type CampaignStatus,
   type DisplayStatus,
@@ -251,6 +252,77 @@ const renderWaves = (status: CampaignStatus, carve: boolean, interactive: boolea
   return `${toggleRow}${cards.length ? `<div class="waves-grid">${cards.join("")}</div>` : ""}`;
 };
 
+const ARCHIVE_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+/** A run's start time rendered as `Aug 23, 2026 · 22:22:36 UTC` from its ISO
+ * timestamp — always UTC (the runId is a UTC stamp), so it reads the same in every
+ * timezone and in tests. */
+const formatRunWhen = (iso: string) => {
+  const d = new Date(iso);
+  return `${ARCHIVE_MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()} · ${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())} UTC`;
+};
+
+/** How many rows the collapsible list shows before the "show older" control — the
+ * newest are visible, the rest render hidden and are revealed on demand (in v1). */
+const ARCHIVE_CAP = 20;
+
+/**
+ * One archived-run row: a collapsed head (chevron, name, `date · time UTC`, a state
+ * dot + `state · N issues`, and the joined campaign/raw-log control) over a hidden
+ * body holding both panes. The campaign pane reuses the live wave renderer read-only
+ * (`carve`/`interactive`/`collapsible` all off) so an archived run reads as its own
+ * wave cards; the raw pane is a scaffold the client fills from `GET /archive/log`.
+ * `open`/`mode` mark the row a `?run=` deep-link selected; `hidden` puts it past the
+ * cap behind "show older".
+ */
+const renderArchiveRow = (project: string, run: ArchivedRunView, open: boolean, mode: "campaign" | "raw", hidden: boolean) => {
+  const label = run.name ?? run.run;
+  const when = run.startedAt ? formatRunWhen(run.startedAt) : run.run;
+  const bodyId = `archive-body-${run.run}`;
+  const rawActive = open && mode === "raw";
+  const count = `${run.issues} issue${run.issues === 1 ? "" : "s"}`;
+  const modeBtn = (m: "campaign" | "raw", text: string, active: boolean) =>
+    `<button type="button" class="archive-mode${active ? " active" : ""}" data-mode="${m}" aria-pressed="${active}">${text}</button>`;
+  const campaignPane = `<div class="archive-pane archive-campaign" data-pane="campaign"${rawActive ? " hidden" : ""}>${renderWaves(run.status, false, false, false)}</div>`;
+  const rawPane =
+    `<div class="archive-pane archive-raw" data-pane="raw" data-project="${escapeHtml(project)}" data-run="${escapeHtml(run.run)}"${rawActive ? "" : " hidden"}>` +
+    `<div class="archive-raw-header">orchestrator-${escapeHtml(run.run)}.jsonl</div>` +
+    `<input type="text" class="archive-raw-filter" placeholder="Filter lines…" aria-label="Filter log lines" />` +
+    `<div class="archive-raw-lines"></div>` +
+    `<div class="archive-raw-footer"></div>` +
+    `</div>`;
+  return (
+    `<li class="archive-row${open ? " open" : ""}" data-run="${escapeHtml(run.run)}"${hidden ? " hidden" : ""}>` +
+    `<div class="archive-row-head">` +
+    `<button type="button" class="archive-toggle" aria-expanded="${open}" aria-controls="${bodyId}">` +
+    `<span class="archive-chevron" aria-hidden="true"></span>` +
+    `<span class="archive-name">${escapeHtml(label)}</span>` +
+    `<span class="archive-when">${escapeHtml(when)}</span>` +
+    `<span class="archive-state ${run.state}"><span class="archive-dot ${run.state}"></span>${run.state} · ${count}</span>` +
+    `</button>` +
+    `<span class="archive-modes" role="group" aria-label="View mode">${modeBtn("campaign", "campaign", !rawActive)}${modeBtn("raw", "raw log", rawActive)}</span>` +
+    `</div>` +
+    `<div class="archive-body" id="${bodyId}"${open ? "" : " hidden"}>${campaignPane}${rawPane}</div>` +
+    `</li>`
+  );
+};
+
+/**
+ * The collapsible archived-runs list — one row per run, newest-first (the order
+ * given), capped at the newest `ARCHIVE_CAP` with a "show older" control that
+ * reveals the rest (which render hidden in place). Empty when the project has no
+ * archived runs. `openRun`/`openMode` open one row on load from a `?run=` deep-link.
+ */
+const renderArchivedRuns = (project: string, runs: ArchivedRunView[], openRun?: string, openMode?: "campaign" | "raw") => {
+  if (!runs.length) return "";
+  const rows = runs.map((run, i) => renderArchiveRow(project, run, run.run === openRun, openMode ?? "campaign", i >= ARCHIVE_CAP));
+  const olderCount = runs.length - ARCHIVE_CAP;
+  const older = olderCount > 0 ? `<li class="archive-older-row"><button type="button" class="archive-show-older">Show ${olderCount} older run${olderCount === 1 ? "" : "s"}</button></li>` : "";
+  // The show-older control sits between the visible rows and the hidden older ones.
+  return `<section class="archived-runs"><h2>Archived runs</h2><ul class="archive-list" data-project="${escapeHtml(project)}">${rows.slice(0, ARCHIVE_CAP).join("")}${older}${rows.slice(ARCHIVE_CAP).join("")}</ul></section>`;
+};
+
 /**
  * The multi-project chrome around a single project's status: the list of every
  * registered project for the dropdown and which one is selected. Omitted when no
@@ -267,17 +339,32 @@ export interface StatusPageOptions {
    * targets the right one.
    */
   carve?: boolean;
-  /** The selected project's archived runs, newest-first, for the "Archived runs"
-   * list under the live run. Each links back to `GET /?project=…&run=<token>`; the
-   * run's `--name` (when it had one) is the primary label, the timestamp token the
-   * fallback, and `summary` the secondary label. */
-  archivedRuns?: { run: string; summary: string; name?: string }[];
-  /** The archived run's reconstructed status to render read-only below the list,
-   * when a `run` token selected one. */
-  archived?: CampaignStatus;
-  /** The selected run token — marks its list entry current and titles the
-   * archived section. */
+  /** The selected project's archived runs, newest-first, for the collapsible
+   * "Archived runs" list under the live run. Each row expands inline to either its
+   * campaign view (rendered read-only through the live wave renderer off `status`)
+   * or its raw JSONL log (fetched client-side). */
+  archivedRuns?: ArchivedRunView[];
+  /** The selected run token — the row to open on load (a `?run=` deep-link);
+   * absent leaves every row collapsed. */
   archivedRun?: string;
+  /** Which mode the opened row starts in — `campaign` (the default) or `raw`. */
+  archivedMode?: "campaign" | "raw";
+}
+
+/**
+ * One archived run as the collapsible list renders it: its timestamp token, its
+ * `--name` (falling back to the token), its start time (parsed from the token) and
+ * terminal state for the collapsed row, its issue count, and the reconstructed
+ * `CampaignStatus` its campaign pane renders read-only through the live wave
+ * renderer (reuse is the point — no second campaign renderer).
+ */
+export interface ArchivedRunView {
+  run: string;
+  name?: string;
+  startedAt?: string;
+  state: ArchivedRunState;
+  issues: number;
+  status: CampaignStatus;
 }
 
 const renderProjectPicker = (projects: string[], selected: string | undefined) =>
@@ -1175,7 +1262,53 @@ ${ISSUE_DETAIL_SHEET_STYLES}
   .parked-issue { font-weight: 700; color: var(--color-yellow); }
   .parked-card-meta { color: var(--color-text-light-2); font-size: .85rem; margin-top: .35rem; }
   .parked-waited { white-space: nowrap; }
-  .run-summary { color: var(--color-text-light-2); font-size: .85rem; font-weight: 400; }
+  /* The collapsible archived-runs list (#98): rows separated by hairlines, one open
+     at a time, the open row tinted. */
+  .archived-runs { margin: 1.5rem 0; }
+  .archive-list { list-style: none; margin: .75rem 0 0; padding: 0; border: 1px solid var(--color-light-border); border-radius: var(--border-radius-medium); overflow: hidden; }
+  .archive-row + .archive-row, .archive-older-row { border-top: 1px solid var(--color-light-border); }
+  .archive-row.open { background: var(--color-card); }
+  .archive-row[hidden] { display: none; }
+  .archive-row-head { display: flex; align-items: center; gap: .75rem; }
+  .archive-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: .75rem; text-align: left; padding: .7rem 1rem; background: none; border: 0; color: var(--color-text); font: inherit; cursor: pointer; }
+  .archive-toggle:hover { background: var(--color-card-hover); }
+  /* The chevron is CSS keyed off aria-expanded — the client only flips the attribute. */
+  .archive-chevron::before { content: "›"; display: inline-block; color: var(--color-text-light-2); transition: transform 150ms; }
+  .archive-toggle[aria-expanded="true"] .archive-chevron::before { transform: rotate(90deg); }
+  .archive-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .archive-when { color: var(--color-text-light-2); font-size: .85rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .archive-state { margin-left: auto; display: inline-flex; align-items: center; gap: .4rem; font-size: .82rem; color: var(--color-text-light); white-space: nowrap; }
+  /* The run-level state dot: complete reads green, interrupted the caution amber
+     (a run disposition, not one of the ADR-0007 issue states). */
+  .archive-dot { width: .6rem; height: .6rem; border-radius: 999px; flex: none; }
+  .archive-dot.complete { background: var(--color-green); }
+  .archive-dot.interrupted { background: var(--color-yellow); }
+  /* The joined mode control: two segments in one pill, the active side filled. */
+  .archive-modes { flex: none; display: inline-flex; margin-right: 1rem; border: 1px solid var(--color-secondary); border-radius: 999px; overflow: hidden; }
+  .archive-mode { padding: .25rem .6rem; background: none; border: 0; color: var(--color-text-light-2); font: inherit; font-size: .8rem; cursor: pointer; }
+  .archive-mode + .archive-mode { border-left: 1px solid var(--color-secondary); }
+  .archive-mode[aria-pressed="true"] { background: var(--color-primary); color: #04110f; }
+  .archive-show-older { width: 100%; padding: .6rem 1rem; text-align: left; background: none; border: 0; color: var(--color-primary); font: inherit; cursor: pointer; }
+  .archive-show-older:hover { background: var(--color-card-hover); }
+  .archive-body { padding: 0 1rem 1rem; }
+  .archive-body[hidden] { display: none; }
+  .archive-pane[hidden] { display: none; }
+  /* Raw-log pane (#98): one JSONL line per row with a line-number gutter, JSON
+     syntax colouring, and long lines wrapped rather than scrolled. */
+  .archive-raw-header { font-family: ${MONO_FONT}; font-size: .8rem; color: var(--color-text-light-2); padding: .3rem 0 .5rem; }
+  .archive-raw-filter { width: 100%; max-width: 100%; margin: 0 0 .6rem; padding: .45rem .6rem; color: var(--color-text); background: var(--color-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); font: inherit; }
+  .archive-raw-lines { font-family: ${MONO_FONT}; font-size: .8rem; }
+  .archive-raw-line { display: flex; gap: .75rem; padding: .05rem 0; }
+  .archive-raw-line:target { background: var(--color-primary-alpha-20); }
+  .archive-lineno { flex: none; width: 3ch; text-align: right; color: var(--color-dim); text-decoration: none; font-variant-numeric: tabular-nums; }
+  .archive-lineno:hover { color: var(--color-primary); }
+  .archive-raw-code { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; color: var(--color-text-light); }
+  .archive-raw-code .jkey { color: var(--color-blue); }
+  .archive-raw-code .jstr { color: var(--color-green); }
+  .archive-raw-code .jnum { color: var(--color-yellow); }
+  .archive-raw-code .jbool, .archive-raw-code .jnull { color: var(--color-carved); }
+  .archive-raw-footer { color: var(--color-text-light-2); font-size: .8rem; margin-top: .6rem; }
+  .archive-raw-empty { color: var(--color-text-light-2); padding: .5rem 0; }
 </style>${
   // No-JS fallback for the closed-wave toggles: the cards are hidden and the chips
   // inert without JS, so reveal every closed card in the grid and hide the toggle bar,
@@ -1207,28 +1340,7 @@ ${
     : ""
 }
 ${renderWaves(status, Boolean(opts.carve), true)}
-${
-  opts.archivedRuns?.length
-    ? `<section class="archived-runs"><h2>Archived runs</h2><ul>${opts.archivedRuns
-        .map(
-          (run) =>
-            `<li><a href="/?project=${encodeURIComponent(opts.selected ?? status.project)}&amp;run=${encodeURIComponent(run.run)}"${
-              run.run === opts.archivedRun ? ` aria-current="true"` : ""
-            }>${escapeHtml(run.name ?? run.run)}</a> <span class="run-summary">${escapeHtml(run.summary)}</span> <a href="/archive/log?project=${encodeURIComponent(opts.selected ?? status.project)}&amp;run=${encodeURIComponent(run.run)}">raw log</a></li>`,
-        )
-        .join("")}</ul></section>`
-    : ""
-}
-${
-  // The selected archived run's own wave/issue view, rendered read-only: `carve:
-  // false` so its chips carry no carve affordance, and no parked/answer form (a
-  // finished run has nothing to act on). Additive — the live run stays above.
-  opts.archived
-    ? `<section class="archived-run"><h2>Archived run ${
-        opts.archived.name ? `${escapeHtml(opts.archived.name)} <small class="run-summary">${escapeHtml(opts.archivedRun ?? "")}</small>` : escapeHtml(opts.archivedRun ?? "")
-      }</h2>${renderWaves(opts.archived, false, false, false)}</section>`
-    : ""
-}
+${opts.archivedRuns?.length ? renderArchivedRuns(opts.selected ?? status.project, opts.archivedRuns, opts.archivedRun, opts.archivedMode) : ""}
 ${issueDetailSheetMarkup(Boolean(opts.carve))}${
   // No-JS fallback: a plain server-side form per carvable issue that reaches
   // POST /carve → the preview page → confirm without any JavaScript. The inline

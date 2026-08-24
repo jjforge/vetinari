@@ -356,8 +356,12 @@ question` + a `waiting Nm · reason` meta line) that open the existing issue-det
   sums every issue merged (completed) today across the project's live run **and
   all** archived runs (`listArchivedRuns`), deduped per issue so a re-run can't
   double-count. Still read-only over the logs (ADR 0002); a malformed archive is
-  skipped with a log line, never fatal. "Today" remains the UTC day, so near
-  midnight it can still disagree with the operator's local day.
+  skipped with a log line, never fatal. "Today" is now the operator's **local**
+  calendar day, not the UTC day (#97): the gateway runs in the operator's timezone,
+  so a merge just past midnight UTC still counts for the local day they are actually
+  in — near midnight the two diverge and UTC-day under-counted. The counter's
+  sublabel now reads **"issues merged"** (was "issues closed") to agree with its
+  "Merged today" title — a merge is pending-verify, not a close.
 
 - The live-bar **play/pause control** rendered as a colourful gradient emoji on
   Apple platforms — the pause/play glyphs were CSS `content` emoji codepoints that

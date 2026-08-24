@@ -1243,7 +1243,7 @@ ${REPO_DROPDOWN_SCRIPT}
       working: "across " + repos + " repo" + (repos === 1 ? "" : "s"),
       parked: oldestParked ? "oldest " + fmtWaited(oldestParked.parkedAt) : "",
       queued: "in later waves",
-      mergedToday: "issues closed",
+      mergedToday: "issues merged",
     };
     for (const [key, text] of Object.entries(subs)) {
       const sub = document.querySelector('[data-counter-sub="' + key + '"]');

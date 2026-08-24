@@ -566,6 +566,45 @@ test("merged-today counts an issue merged in more than one run only once (#97)",
   assert.equal(counters.mergedToday, 1);
 });
 
+test("merged-today counts against the operator's LOCAL day, not the UTC day (#97)", () => {
+  // Divergent case: PDT (UTC−7). `now` is Sun Aug 23 19:24 local = Mon Aug 24
+  // 02:24 UTC — a different UTC day from a merge that happened earlier the same
+  // local afternoon (Sun Aug 23 13:00 PDT = 20:00 UTC on Aug 23). UTC-day counts
+  // it 0 (Aug-23-UTC ≠ Aug-24-UTC); the operator's local day counts it 1.
+  const origTZ = process.env.TZ;
+  process.env.TZ = "America/Los_Angeles";
+  try {
+    const base = join(tmpdir(), `sctdd-landing-merged-localday-${Date.now()}`);
+    const dir = join(base, "beta");
+    seedState(dir, [
+      {
+        ts: "2026-08-23T19:00:00.000Z",
+        event: "campaign-start",
+        batches: [["901"]],
+        name: "afternoon",
+      },
+      {
+        ts: "2026-08-23T20:00:00.000Z",
+        event: "campaign-batch-done",
+        index: 0,
+        merged: ["901"],
+      },
+      { ts: "2026-08-23T20:01:00.000Z", event: "campaign-done", batches: 1 },
+    ]);
+
+    const { counters } = buildLanding(
+      [pointerFor("beta", dir)],
+      new Date("2026-08-24T02:24:00.000Z"),
+    );
+    // Same local day (Aug 23 PDT) as `now`, so it counts — even though its UTC day
+    // (Aug 23) differs from `now`'s UTC day (Aug 24).
+    assert.equal(counters.mergedToday, 1);
+  } finally {
+    if (origTZ === undefined) delete process.env.TZ;
+    else process.env.TZ = origTZ;
+  }
+});
+
 test("buildFeed merges every project's narratable events into one newest-first, repo-prefixed feed", () => {
   const base = join(tmpdir(), `sctdd-feed-${Date.now()}`);
   const alphaDir = join(base, "alpha");
@@ -1544,7 +1583,10 @@ test("renderLandingShell gives each counter a payload-derived sublabel (#80)", (
   assert.match(html, /across " \+ /);
   assert.match(html, /oldest " \+ fmtWaited/);
   assert.match(html, /in later waves/);
-  assert.match(html, /issues closed/);
+  // The counter is titled "Merged today"; its sublabel must agree — a merge is not
+  // a close (a merge is pending-verify; close happens later) (#97).
+  assert.match(html, /issues merged/);
+  assert.doesNotMatch(html, /issues closed/);
 });
 
 test("renderLandingShell stacks each counter label on top of an inline value + sublabel row (#94)", () => {

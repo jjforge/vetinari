@@ -629,11 +629,14 @@ test("buildFeed merges every project's narratable events into one newest-first, 
     },
   ]);
 
-  const feed = buildFeed([
-    pointerFor("alpha", alphaDir),
-    pointerFor("beta", betaDir),
-    pointerFor("ghost", join(base, "gone")),
-  ]);
+  const feed = buildFeed(
+    [
+      pointerFor("alpha", alphaDir),
+      pointerFor("beta", betaDir),
+      pointerFor("ghost", join(base, "gone")),
+    ],
+    new Date("2025-03-01T09:00:00.000Z"),
+  );
 
   // Newest-first across projects; the stale registration and the machine-noise event are both absent.
   assert.deepEqual(
@@ -660,10 +663,55 @@ test("a merged event that names its issue only through its branch still renders 
   const dir = join(base, "acme");
   seedState(dir, [{ ts: "2025-03-01T08:02:00.000Z", event: "green", branch: "agent/639" }]);
 
-  const feed = buildFeed([pointerFor("acme", dir)]);
+  const feed = buildFeed([pointerFor("acme", dir)], new Date("2025-03-01T09:00:00.000Z"));
 
   assert.equal(feed[0].text, "acme — #639 merged");
   assert.ok(!feed.some((f) => f.text.includes("#undefined")));
+});
+
+test("buildFeed surfaces an idle project's recently-archived run, and drops one archived more than 48h ago (#101)", () => {
+  const base = join(tmpdir(), `sctdd-feed-archive-${Date.now()}`);
+  const dir = join(base, "acme");
+  // Idle: the live run archived, so its live log is empty and its work is in the archive.
+  seedState(dir, []);
+  mkdirSync(join(dir, "logs", "archive"), { recursive: true });
+  // A run that finished ~6h ago — inside the 48h feed window, so it still feeds.
+  writeJsonl(join(dir, "logs", "archive", "orchestrator-2026-08-24T06-00-00-000Z.jsonl"), [
+    { ts: "2026-08-24T06:00:00.000Z", event: "campaign-start", batches: [["101"]], name: "recent" },
+    { ts: "2026-08-24T06:05:00.000Z", event: "green", taskId: "101" },
+  ]);
+  // A run that finished ~4.5 days ago — past the window, so nothing from it feeds.
+  writeJsonl(join(dir, "logs", "archive", "orchestrator-2026-08-20T00-00-00-000Z.jsonl"), [
+    { ts: "2026-08-20T00:00:00.000Z", event: "campaign-start", batches: [["999"]], name: "ancient" },
+    { ts: "2026-08-20T00:05:00.000Z", event: "green", taskId: "999" },
+  ]);
+
+  const feed = buildFeed([pointerFor("acme", dir)], new Date("2026-08-24T12:00:00.000Z"));
+
+  const texts = feed.map((f) => f.text);
+  assert.ok(texts.includes("acme — #101 merged"), "the recently-archived merge feeds");
+  assert.ok(!texts.some((t) => t.includes("#999")), "the >48h-old run does not feed");
+});
+
+test("buildFeed cuts individual events by ts even inside an in-window archive (#101)", () => {
+  const base = join(tmpdir(), `sctdd-feed-tscut-${Date.now()}`);
+  const dir = join(base, "acme");
+  seedState(dir, []);
+  mkdirSync(join(dir, "logs", "archive"), { recursive: true });
+  // The run *started* ~49h ago — just before the 48h window, so it is read (its
+  // start falls within the archive margin) — but its opening event predates the
+  // window while its merge lands inside it.
+  writeJsonl(join(dir, "logs", "archive", "orchestrator-2026-08-22T11-00-00-000Z.jsonl"), [
+    { ts: "2026-08-22T11:00:00.000Z", event: "campaign-start", batches: [["777"]], name: "edge" },
+    { ts: "2026-08-22T13:00:00.000Z", event: "green", taskId: "777" },
+  ]);
+
+  const feed = buildFeed([pointerFor("acme", dir)], new Date("2026-08-24T12:00:00.000Z"));
+
+  const texts = feed.map((f) => f.text);
+  // The 47h-old merge is in-window; the 49h-old campaign-start is cut by its ts.
+  assert.ok(texts.includes("acme — #777 merged"), "the in-window merge feeds");
+  assert.ok(!texts.some((t) => t.includes("edge")), "the pre-window start is cut by ts");
 });
 
 test("buildLanding collects every parked question across repos, oldest first", () => {
@@ -1414,6 +1462,20 @@ test("renderLandingShell reads each event kind's category as a leading dot, labe
   );
 });
 
+test("renderLandingShell's feed caps at 20 rows behind a show-older control and reads the 48h empty state (#101)", () => {
+  const html = renderLandingShell(["alpha"]);
+  // The empty window reads the feed's own copy, not the live-only "No activity yet".
+  assert.match(html, /No activity in the last 48 hours\./);
+  assert.ok(!html.includes("No activity yet."), "the live-only empty state is gone from the feed");
+  // The newest 20 render; the rest render hidden behind a "show older" control that
+  // mirrors the archived-runs list (its `archive-show-older` affordance), revealing
+  // the remaining in-window rows in place.
+  assert.match(html, /const FEED_CAP = 20;/);
+  // The control reuses the archived-runs list's `archive-show-older` affordance.
+  assert.match(html, /el\("button", "archive-show-older"/);
+  assert.match(html, /older event/);
+});
+
 test("renderLandingShell's feed reads as an event log: 'Event log · all repos' header with a live dot (#95)", () => {
   const html = renderLandingShell(["alpha"]);
   // The feed header takes the POC's event-log treatment: the "Event log · all repos"
@@ -1786,18 +1848,21 @@ test("serveAllStatus GET /api/feed serves the cross-project event feed as JSON",
   const configDir = join(tmpdir(), `sctdd-feed-endpoint-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
+  // The live route reads the feed with a default `now`, so seed within the 48h
+  // window (#101): campaign-start oldest, parked next, the merge newest.
+  const hoursAgo = (h: number) => new Date(Date.now() - h * 60 * 60 * 1000).toISOString();
   seedState(alphaDir, [
     {
-      ts: "2025-04-01T08:00:00.000Z",
+      ts: hoursAgo(3),
       event: "campaign-start",
       batches: [["101"]],
       name: "alpha work",
     },
-    { ts: "2025-04-01T08:02:00.000Z", event: "green", taskId: "101" },
+    { ts: hoursAgo(1), event: "green", taskId: "101" },
   ]);
   seedState(betaDir, [
     {
-      ts: "2025-04-01T08:01:00.000Z",
+      ts: hoursAgo(2),
       event: "parked",
       taskId: "201",
       reason: "needs a choice",

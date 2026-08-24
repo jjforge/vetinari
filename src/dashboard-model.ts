@@ -728,25 +728,63 @@ export interface FeedEntry {
   text: string;
 }
 
+/** The feed's rolling window: an event feeds only when its `ts` is within this
+ * span of render time. 48h — deliberately a fixed rolling window, *not* the
+ * merged-today counters' operator-local calendar day (#97): the two surfaces
+ * answer different questions ("what has the fleet done lately" vs. "what merged
+ * on today's date"), so they carry different time bounds by design. */
+const FEED_WINDOW_MS = 48 * 60 * 60 * 1000;
+
+/** Margin added to the window when deciding which archived runs to read. An
+ * archive's runId (its filename timestamp) is when the run *started*; a run that
+ * began just before the window can still hold events inside it. A run's events
+ * cluster near its runId, so reading archives whose start falls within the window
+ * plus this small margin catches them without opening ancient archives — the
+ * per-event `ts` filter then makes the precise 48h cut. */
+const FEED_ARCHIVE_MARGIN_MS = 6 * 60 * 60 * 1000;
+
 /**
- * The cross-project event feed: every registered project's live-run log flattened
- * to its narratable events, repo-prefixed and sorted newest-first. Reads each
- * project's log live off the registry, exactly as `buildLanding`/`buildAllStatus`
- * do, skipping a project whose base location is gone with a log line rather than
+ * The cross-project event feed: every registered project's narratable events over
+ * a rolling 48h window (by event `ts`), repo-prefixed and sorted newest-first.
+ * Reads each project's live run **and** its recently-archived runs — an idle
+ * project's last run archived and reset its live log (`archiveRun`), so a live-only
+ * read would show "No activity" even when it merged issues hours ago (#101). Only
+ * archives whose runId falls within the window (plus a small margin) are opened;
+ * events are then filtered to the window by `ts`. Reads live off the registry,
+ * exactly as `buildLanding`/`buildAllStatus` do — a project whose base location is
+ * gone, or a single malformed archive, is skipped with a log line rather than
  * throwing (ADR 0002). Machine-noise events `describeEvent` can't narrate carry no
  * row (`formatFeedEvent` returns ""), so the feed reads as an operator log, not a
  * raw event dump.
  */
-export function buildFeed(pointers: ProjectPointer[]): FeedEntry[] {
+export function buildFeed(pointers: ProjectPointer[], now: Date = new Date()): FeedEntry[] {
+  const cutoffMs = now.getTime() - FEED_WINDOW_MS;
+  const archiveFloorMs = cutoffMs - FEED_ARCHIVE_MARGIN_MS;
   const entries: FeedEntry[] = [];
   for (const pointer of pointers) {
     if (!existsSync(pointer.baseLocation)) {
       log("status-project-skipped", { project: pointer.project, baseLocation: pointer.baseLocation });
       continue;
     }
-    for (const e of readEvents(statusConfigFromPointer(pointer))) {
-      const text = formatFeedEvent(pointer.project, e);
-      if (text) entries.push({ project: pointer.project, ts: String(e.ts ?? ""), kind: String(e.event ?? ""), text });
+    // The runs whose events might fall in the window: the live log, plus each
+    // archived run whose start is recent enough to still carry in-window events.
+    const runs: any[][] = [readEvents(statusConfigFromPointer(pointer))];
+    for (const run of listArchivedRuns(pointer.baseLocation)) {
+      const startedMs = run.startedAt ? Date.parse(run.startedAt) : NaN;
+      if (Number.isNaN(startedMs) || startedMs < archiveFloorMs) continue;
+      try {
+        runs.push(readEvents({ logFile: run.file }));
+      } catch (error) {
+        log("status-feed-archive-skipped", { file: run.file, error: String(error) });
+      }
+    }
+    for (const events of runs) {
+      for (const e of events) {
+        const tsMs = Date.parse(String(e.ts ?? ""));
+        if (Number.isNaN(tsMs) || tsMs < cutoffMs) continue;
+        const text = formatFeedEvent(pointer.project, e);
+        if (text) entries.push({ project: pointer.project, ts: String(e.ts), kind: String(e.event ?? ""), text });
+      }
     }
   }
   return entries.sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0));

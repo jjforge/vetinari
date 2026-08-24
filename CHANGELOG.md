@@ -349,6 +349,21 @@ question` + a `waiting Nm · reason` meta line) that open the existing issue-det
 
 ### Fixed
 
+- The landing **EVENT LOG** feed now reads across each project's live run **and its
+  recently-archived runs**, over a rolling **48-hour** window by event `ts` (#101).
+  It previously read only each project's live-run log, so completing a run (which
+  moves its log to `logs/archive/` and resets the live file) emptied the feed to
+  "No activity yet" even when issues had merged hours earlier — removing the one
+  live project blanked the whole feed. `buildFeed` now also opens each archived run
+  whose runId (its filename timestamp) falls within the window plus a small margin,
+  then filters individual events to the 48h window by `ts`. The window is a fixed
+  rolling span, deliberately distinct from **MERGED TODAY**'s operator-local
+  calendar day (#97) — the two surfaces answer different questions. Read-only over
+  the logs (ADR 0002); a malformed archive is skipped with a log line, never fatal.
+  The feed renders the newest **20** rows with a **"show older"** control (mirroring
+  the archived-runs list, #98) that reveals the rest within the window, and an empty
+  window now reads **"No activity in the last 48 hours."**
+
 - The live-bar dot now pulses **only while an agent is running and the view is not
   paused** (#100). It previously pulsed whenever the stream was connected — motion
   even with 0 agents working, and paused only dimmed the dot without stilling it. The

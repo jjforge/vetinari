@@ -1105,6 +1105,10 @@ ${TOP_BAR_STYLES}
   .feed-kind::before { content: ""; width: .5rem; height: .5rem; border-radius: 999px; background: var(--color-dim); flex: none; }
   .feed-kind.progress::before { background: var(--color-blue); } .feed-kind.success::before { background: var(--color-green); } .feed-kind.attention::before { background: var(--color-yellow); } .feed-kind.failure::before { background: var(--color-failure); } .feed-kind.carved::before { background: var(--color-carved); }
   .feed-text { color: var(--color-text-light); flex: 1; }
+  /* The feed's "show older" reveal (#101) mirrors the archived-runs list's control
+     (#98): the same full-width, primary-coloured affordance, here on the landing. */
+  .feed .archive-show-older { width: 100%; padding: .6rem 0; text-align: left; background: none; border: 0; color: var(--color-primary); font: inherit; cursor: pointer; }
+  .feed .archive-show-older:hover { color: var(--color-text); }
   /* The card's highlight (top border) tracks its run state (#75) — its only coloured edge (§2). */
   .card.running { border-top-color: var(--color-blue); } .card.parked { border-top-color: var(--color-yellow); } .card.failure { border-top-color: var(--color-failure); } .card.completed { border-top-color: var(--color-green); } .card.idle { border-top-color: var(--color-dim); }
   /* Status dot colours, generated once from stateColor and shared with the campaign
@@ -1190,6 +1194,11 @@ ${issueDetailSheetMarkup(true)}
   }[kind] ?? kind);
 ${ISSUE_DETAIL_SHEET_SCRIPT}
 ${REPO_DROPDOWN_SCRIPT}
+  // The newest events render; the rest of the 48h window hide behind "show older",
+  // mirroring the archived-runs list's cap (#101). "Older" here means further back
+  // within the same window — this never pages past 48h (deep history is the
+  // archived-runs list, #98).
+  const FEED_CAP = 20;
   async function loadFeed() {
     const rows = document.getElementById("feed-rows");
     let feed;
@@ -1200,11 +1209,19 @@ ${REPO_DROPDOWN_SCRIPT}
       return;
     }
     rows.replaceChildren();
-    if (!feed.length) { rows.append(el("p", "empty", "No activity yet.")); return; }
-    for (const e of feed) {
+    if (!feed.length) { rows.append(el("p", "empty", "No activity in the last 48 hours.")); return; }
+    feed.forEach((e, i) => {
       const row = el("div", "feed-row");
+      if (i >= FEED_CAP) row.hidden = true;
       row.append(el("span", "feed-time", fmtTime(e.ts)), el("span", "feed-kind " + feedKindClass(e.kind), feedKindLabel(e.kind)), el("span", "feed-text", e.text));
       rows.append(row);
+    });
+    if (feed.length > FEED_CAP) {
+      const older = feed.length - FEED_CAP;
+      const btn = el("button", "archive-show-older", "Show " + older + " older event" + (older === 1 ? "" : "s"));
+      btn.type = "button";
+      btn.addEventListener("click", () => { for (const r of rows.querySelectorAll(".feed-row")) r.hidden = false; btn.remove(); });
+      rows.append(btn);
     }
   }
   function renderParked(parked) {

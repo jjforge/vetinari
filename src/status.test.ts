@@ -4376,6 +4376,11 @@ const archStatus = (issue: string): CampaignStatus => ({
 });
 
 test("renderStatusPage renders archived runs as a collapsible list with per-row state, time and a joined mode control", () => {
+  // Pin the timezone so the local-rendered when-clock is deterministic here (the
+  // dedicated #102 test covers the divergent-tz case); UTC keeps `22:22:36`.
+  const origTZ = process.env.TZ;
+  process.env.TZ = "UTC";
+  try {
   const html = renderStatusPage(
     {
       project: "beta",
@@ -4421,7 +4426,7 @@ test("renderStatusPage renders archived runs as a collapsible list with per-row 
   assert.match(html, /<span class="archive-name">comms \+ dashboard<\/span>/);
   assert.match(
     html,
-    /<span class="archive-when">Feb 1, 2026 · 22:22:36 UTC<\/span>/,
+    /<span class="archive-when">Feb 1, 2026 · 22:22:36<\/span>/,
   );
   assert.match(
     html,
@@ -4469,6 +4474,44 @@ test("renderStatusPage renders archived runs as a collapsible list with per-row 
   );
   // A short list has no show-older control.
   assert.doesNotMatch(html, /<button[^>]*class="archive-show-older"/);
+  } finally {
+    if (origTZ === undefined) delete process.env.TZ;
+    else process.env.TZ = origTZ;
+  }
+});
+
+test("renderStatusPage renders an archived run's when-time in the operator's LOCAL timezone, no UTC suffix (#102)", () => {
+  // The gateway runs in the operator's timezone, so the displayed clock localizes.
+  // PST is UTC−8 in February: `2026-02-01T22:22:36.267Z` reads `14:22:36` local,
+  // and the hardcoded " UTC" suffix is gone (raw-log content, not this chrome, keeps UTC).
+  const origTZ = process.env.TZ;
+  process.env.TZ = "America/Los_Angeles";
+  try {
+    const html = renderStatusPage(
+      { project: "beta", waves: [], parked: [] },
+      {
+        selected: "beta",
+        archivedRuns: [
+          {
+            run: "2026-02-01T22-22-36-267Z",
+            name: "comms + dashboard",
+            startedAt: "2026-02-01T22:22:36.267Z",
+            state: "complete",
+            issues: 1,
+            status: archStatus("101"),
+          },
+        ],
+      },
+    );
+    assert.match(
+      html,
+      /<span class="archive-when">Feb 1, 2026 · 14:22:36<\/span>/,
+    );
+    assert.doesNotMatch(html, /archive-when">[^<]*UTC/);
+  } finally {
+    if (origTZ === undefined) delete process.env.TZ;
+    else process.env.TZ = origTZ;
+  }
 });
 
 test("renderStatusPage shows an interrupted run as interrupted and still expands it to its partial waves", () => {

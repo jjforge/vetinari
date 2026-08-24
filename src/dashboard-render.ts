@@ -294,12 +294,12 @@ export function highlightJsonLine(line: string): string {
 const ARCHIVE_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const pad2 = (n: number) => String(n).padStart(2, "0");
 
-/** A run's start time rendered as `Aug 23, 2026 · 22:22:36 UTC` from its ISO
- * timestamp — always UTC (the runId is a UTC stamp), so it reads the same in every
- * timezone and in tests. */
+/** A run's start time rendered as `Aug 23, 2026 · 15:22:36` from its ISO timestamp,
+ * in the operator's local timezone (the gateway runs in it) — the human-facing chrome
+ * localizes; the raw-log pane keeps the JSONL's UTC stamps verbatim (#102). */
 const formatRunWhen = (iso: string) => {
   const d = new Date(iso);
-  return `${ARCHIVE_MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()} · ${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())} UTC`;
+  return `${ARCHIVE_MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()} · ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
 };
 
 /** How many rows the collapsible list shows before the "show older" control — the
@@ -307,7 +307,7 @@ const formatRunWhen = (iso: string) => {
 const ARCHIVE_CAP = 20;
 
 /**
- * One archived-run row: a collapsed head (chevron, name, `date · time UTC`, a state
+ * One archived-run row: a collapsed head (chevron, name, `date · time` (local), a state
  * dot + `state · N issues`, and the joined campaign/raw-log control) over a hidden
  * body holding both panes. The campaign pane reuses the live wave renderer read-only
  * (`carve`/`interactive`/`collapsible` all off) so an archived run reads as its own

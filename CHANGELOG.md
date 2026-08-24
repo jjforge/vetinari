@@ -162,6 +162,12 @@ repos` (repos with a running agent), parked `oldest <Nm>` (the oldest parked
 
 ### Changed
 
+- The all-repos landing's four counters now match the POC layout (#94): the
+  uppercase **label sits on top**, with the **value and sublabel inline on one
+  row** below it, rather than value → label → sublabel stacked. Counter value
+  colours + sublabels and the parked-counter gold highlight/expand behaviour are
+  unchanged — this is layout only.
+
 - The issue-detail sheet's parked treatment now matches the POC's hierarchy (#92).
   Reply options render as **full-width lettered rows** — the `A:`/`B)` marker pulled
   into a left margin (positional `A/B/C` fallback when the option carries none), the

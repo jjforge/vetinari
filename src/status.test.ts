@@ -1341,6 +1341,34 @@ test("renderLandingShell gives each counter a payload-derived sublabel (#80)", (
   assert.match(html, /issues closed/);
 });
 
+test("renderLandingShell stacks each counter label on top of an inline value + sublabel row (#94)", () => {
+  const html = renderLandingShell(["alpha"]);
+  // POC layout: the uppercase label sits on top, then the value and sublabel share
+  // one inline row (a .counter-line), rather than value → label → sublabel stacked.
+  for (const key of ["working", "parked", "queued", "mergedToday"]) {
+    const counter = html.match(
+      new RegExp(`data-counter="${key}"[^>]*>(.*?)counter-sub`),
+    );
+    assert.ok(counter, `counter ${key} present`);
+    const body = counter[1];
+    // Label markup comes before the value markup for this counter.
+    assert.ok(
+      body.indexOf("counter-label") < body.indexOf("counter-value"),
+      `counter ${key} renders label above value`,
+    );
+    // The value and sublabel are wrapped together in the inline row.
+    assert.ok(
+      body.includes("counter-line"),
+      `counter ${key} wraps value + sub in an inline row`,
+    );
+  }
+  // The inline row lays value + sublabel out on one baseline-aligned line.
+  assert.match(
+    html,
+    /\.counter-line \{[^}]*display: flex[^}]*align-items: baseline/,
+  );
+});
+
 test("renderLandingShell wires live SSE updates, an updated-ago readout, and a buffered pause", () => {
   const html = renderLandingShell(["alpha", "beta"]);
   // Subscribes to the one-way SSE stream and re-reads the landing as events land.

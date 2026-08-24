@@ -820,12 +820,14 @@ ${TOP_BAR_STYLES}
   .counter-value { font-size: clamp(1.6rem, 5vw, 2.4rem); font-weight: 700; letter-spacing: -0.02em; }
   .counter-toggle:not(:disabled) .counter-value::after { content: " ▸"; color: var(--color-text-light-2); font-size: .9em; }
   .counter-toggle[aria-expanded="true"] .counter-value::after { content: " ▾"; }
-  .counter-label { color: var(--color-text-light-2); font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; margin-top: .25rem; }
+  .counter-label { color: var(--color-text-light-2); font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; margin-bottom: .35rem; }
+  /* Value + sublabel share one baseline-aligned row under the label, matching the POC (#94). */
+  .counter-line { display: flex; align-items: baseline; gap: .5rem; }
   /* Each counter value reads in its status colour; queued stays neutral (#80). */
   [data-counter="working"] .counter-value { color: var(--color-blue); } [data-counter="parked"] .counter-value { color: var(--color-yellow); } [data-counter="mergedToday"] .counter-value { color: var(--color-green); }
   /* Parked is the one actionable counter — gold border while it holds questions (enabled) (#80). */
   .counter-toggle[data-counter="parked"]:not(:disabled) { border-color: var(--color-yellow); }
-  .counter-sub { color: var(--color-text-light-2); font-size: .75rem; margin-top: .2rem; }
+  .counter-sub { color: var(--color-text-light-2); font-size: .75rem; }
   .parked-queue { display: grid; gap: .5rem; margin: -0.5rem 0 1.25rem; }
   /* A grid display beats the UA [hidden] rule, so the collapse needs it back explicitly. */
   .parked-queue[hidden] { display: none; }
@@ -889,10 +891,10 @@ ${ISSUE_DETAIL_SHEET_STYLES}
 <body>
 ${renderTopBar(renderRepoDropdown(projects, undefined))}
 <section class="counters">
-  <div class="counter" data-counter="working"><div class="counter-value">–</div><div class="counter-label">Agents working</div><div class="counter-sub" data-counter-sub="working"></div></div>
-  <button type="button" class="counter counter-toggle" data-counter="parked" disabled aria-controls="parked-queue"><div class="counter-value">–</div><div class="counter-label">Parked</div><div class="counter-sub" data-counter-sub="parked"></div></button>
-  <div class="counter" data-counter="queued"><div class="counter-value">–</div><div class="counter-label">Queued</div><div class="counter-sub" data-counter-sub="queued"></div></div>
-  <div class="counter" data-counter="mergedToday"><div class="counter-value">–</div><div class="counter-label">Merged today</div><div class="counter-sub" data-counter-sub="mergedToday"></div></div>
+  <div class="counter" data-counter="working"><div class="counter-label">Agents working</div><div class="counter-line"><div class="counter-value">–</div><div class="counter-sub" data-counter-sub="working"></div></div></div>
+  <button type="button" class="counter counter-toggle" data-counter="parked" disabled aria-controls="parked-queue"><div class="counter-label">Parked</div><div class="counter-line"><div class="counter-value">–</div><div class="counter-sub" data-counter-sub="parked"></div></div></button>
+  <div class="counter" data-counter="queued"><div class="counter-label">Queued</div><div class="counter-line"><div class="counter-value">–</div><div class="counter-sub" data-counter-sub="queued"></div></div></div>
+  <div class="counter" data-counter="mergedToday"><div class="counter-label">Merged today</div><div class="counter-line"><div class="counter-value">–</div><div class="counter-sub" data-counter-sub="mergedToday"></div></div></div>
 </section>
 <section id="parked-queue" class="parked-queue" hidden aria-label="Parked questions across all repos"></section>
 <section id="cards" class="cards"><p class="empty">Loading…</p></section>

@@ -146,6 +146,13 @@ run stops reading as current. The event log is the run's durable, per-run artifa
 `gate-*` logs are **live-only scratch**: overwritten across runs and not archived.
 _Avoid_: past run, old log
 
+**Event feed** (the landing's `EVENT LOG`):
+A rolling recent-history operator log of the narratable events across every
+project's live run and recently-[[archived-run]] logs, newest-first — what the fleet
+has been doing lately, at a glance. Bounded to a recent window; deeper per-run
+history lives in the [[archived-run]] list, not here.
+_Avoid_: ticker, live feed, activity stream
+
 **Campaign name**:
 An optional human label for a run, passed as `campaign --name` and recorded on the
 `campaign-start` event, so the dashboard and the [[archived-run]] list say what a

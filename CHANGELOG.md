@@ -296,6 +296,12 @@ question` + a `waiting Nm · reason` meta line) that open the existing issue-det
 
 ### Fixed
 
+- The all-repos landing **activity feed** rendered `#undefined merged` for merge
+  events that named their issue only through the branch (`agent/<id>`) rather than
+  an explicit `taskId` — the campaign wave-merge / per-issue green path (#93). The
+  feed formatter now recovers the issue number from the branch when `taskId` is
+  absent, so every merge row reads `#<issue> merged` with the real number.
+
 - The parked-issue detail sheet's action row showed **four** buttons at once —
   Resume · Carve · Confirm · Cancel — because the carve-confirm form's own
   `display: flex` defeated its `hidden` attribute, so the confirm/cancel controls

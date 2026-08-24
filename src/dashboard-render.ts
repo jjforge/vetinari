@@ -213,11 +213,13 @@ const waveMerged = (wave: StatusWave) => wave.issues.filter((issue) => issue.sta
  * closed card carry the id + `hidden` its toggle chip drives.
  */
 const renderWaveCard = (wave: StatusWave, project: string, carve: boolean, interactive: boolean, extraAttrs = "", run?: string) => {
-  // A carved tally beside the merged count, so a wave a carve pruned reads at a
-  // glance — the carved chips are a display overlay (ADR 0007), and this counts them.
+  // A carved tally folded into the head's meta group beside the merged count, so a wave
+  // a carve pruned reads at a glance — the carved rows are a display overlay (ADR 0007),
+  // and this counts them. The label sits in its own element so a long one wraps within
+  // itself without shoving the meta group (tally · state · carved) onto its own line.
   const carved = wave.issues.filter((issue) => issue.status === "carved").length;
-  const tally = carved ? ` <span class="wave-carved">${carved} carved</span>` : "";
-  return `<section class="wave ${wave.status}"${extraAttrs}><div class="wave-head"><h2>${renderWaveLabel(wave)} <span class="wave-status ${wave.status}">${wave.status}</span></h2><span class="wave-tally">${waveMerged(wave)}/${wave.issues.length}</span>${tally}</div>${renderWaveMembers(wave, project, carve, interactive, run)}</section>`;
+  const tally = carved ? `<span class="wave-carved">${carved} carved</span>` : "";
+  return `<section class="wave ${wave.status}"${extraAttrs}><div class="wave-head"><h2 class="wave-label">${renderWaveLabel(wave)}</h2><div class="wave-meta"><span class="wave-tally">${waveMerged(wave)}/${wave.issues.length}</span><span class="wave-status ${wave.status}">${wave.status}</span>${tally}</div></div>${renderWaveMembers(wave, project, carve, interactive, run)}</section>`;
 };
 
 /** A closed wave's compact toggle chip — the affordance that reveals its full card in
@@ -1347,8 +1349,12 @@ ${TOP_BAR_STYLES}
   .wave.closed { border-top-color: var(--color-green); }
   /* A flex-grid item beats the UA [hidden] rule, so a collapsed closed card needs it back explicitly. */
   .wave.closed[hidden] { display: none; }
-  .wave-head { display: flex; align-items: baseline; justify-content: space-between; gap: .5rem; }
-  .wave-head h2 { margin: 0; font-size: 1.1rem; }
+  /* One stable head row: the label takes the slack and wraps within itself, the meta
+     group (merged/total · state · carved) stays a nowrap unit on the right so the state
+     pill never drops onto its own line in one card while it stays inline in a neighbour. */
+  .wave-head { display: flex; align-items: baseline; justify-content: space-between; gap: .5rem .75rem; flex-wrap: wrap; }
+  .wave-label { margin: 0; font-size: 1.1rem; flex: 1 1 12rem; min-width: 0; }
+  .wave-meta { display: flex; align-items: baseline; gap: .5rem; flex: 0 0 auto; margin-left: auto; }
   .wave-tally { color: var(--color-text-light-2); font-variant-numeric: tabular-nums; font-size: .9rem; white-space: nowrap; }
   .completed-waves { display: flex; align-items: flex-start; flex-wrap: wrap; gap: .5rem; margin: 1rem 0; color: var(--color-text-light); }
   .completed-wave-chip .check { color: var(--color-green); font-weight: 700; }

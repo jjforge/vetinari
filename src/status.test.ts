@@ -3620,12 +3620,12 @@ test("wave labels read from tmp-log issue titles, resolved through buildStatusWi
   );
   assert.match(
     html,
-    /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2>Wave 1 — config resolution \+2 <span class="wave-status closed">closed<\/span>/,
+    /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2 class="wave-label">Wave 1 — config resolution \+2<\/h2><div class="wave-meta"><span class="wave-tally">3\/3<\/span><span class="wave-status closed">closed<\/span>/,
   );
   // Single-issue wave (open): just that issue's title, in a wave card.
   assert.match(
     html,
-    /<section class="wave running"><div class="wave-head"><h2>Wave 2 — cache eviction <span class="wave-status running">running<\/span>/,
+    /<section class="wave running"><div class="wave-head"><h2 class="wave-label">Wave 2 — cache eviction<\/h2><div class="wave-meta"><span class="wave-tally">0\/1<\/span><span class="wave-status running">running<\/span>/,
   );
 });
 
@@ -3677,12 +3677,12 @@ test("wave labels and chip hovers render from the log's titles, with no fetchTas
   );
   assert.match(
     html,
-    /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2>Wave 1 — config resolution \+2 <span class="wave-status closed">closed<\/span>/,
+    /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2 class="wave-label">Wave 1 — config resolution \+2<\/h2><div class="wave-meta"><span class="wave-tally">3\/3<\/span><span class="wave-status closed">closed<\/span>/,
   );
   // Single-issue wave (open): just that issue's title, in a wave card.
   assert.match(
     html,
-    /<section class="wave running"><div class="wave-head"><h2>Wave 2 — cache eviction <span class="wave-status running">running<\/span>/,
+    /<section class="wave running"><div class="wave-head"><h2 class="wave-label">Wave 2 — cache eviction<\/h2><div class="wave-meta"><span class="wave-tally">0\/1<\/span><span class="wave-status running">running<\/span>/,
   );
   // Every chip carries its own title on hover — 201 has no status detail yet, so
   // its hover is exactly the resolved title.
@@ -3715,15 +3715,51 @@ test("renderStatusPage shows a merged/total tally on an open wave card", () => {
     parked: [],
   });
 
-  // Each open wave card's head carries its merged/total on the right — one of two
-  // done in the running wave, none in the unstarted one.
+  // Each open wave card's head carries its merged/total — one of two done in the
+  // running wave, none in the unstarted one — ahead of its state pill in the meta group.
   assert.match(
     html,
-    /<span class="wave-status running">running<\/span><\/h2><span class="wave-tally">1\/2<\/span>/,
+    /<span class="wave-tally">1\/2<\/span><span class="wave-status running">running<\/span>/,
   );
   assert.match(
     html,
-    /<span class="wave-status unstarted">unstarted<\/span><\/h2><span class="wave-tally">0\/2<\/span>/,
+    /<span class="wave-tally">0\/2<\/span><span class="wave-status unstarted">unstarted<\/span>/,
+  );
+});
+
+test("renderStatusPage renders one stable wave-head row: label · merged/total · state · carved, with the pill outside the label", () => {
+  const html = renderStatusPage({
+    project: "beta",
+    waves: [
+      {
+        index: 1,
+        status: "running",
+        issues: [
+          {
+            issueNumber: "201",
+            status: "completed",
+            name: "Guest checkout entry point",
+          },
+          { issueNumber: "202", status: "running" },
+          { issueNumber: "203", status: "carved" },
+        ],
+      },
+    ],
+    parked: [],
+  });
+
+  // The head is one row: the label in its own element (so a long label can't shove the
+  // state pill onto its own line, the Wave 2 vs Wave 3 misalignment), then a meta group
+  // ordering merged/total · state pill · carved tally — the carved count folded into the
+  // row, not floating in the corner.
+  assert.match(
+    html,
+    /<div class="wave-head"><h2 class="wave-label">Wave 2 — Guest checkout entry point \+2<\/h2><div class="wave-meta"><span class="wave-tally">1\/3<\/span><span class="wave-status running">running<\/span><span class="wave-carved">1 carved<\/span><\/div><\/div>/,
+  );
+  // The state pill is no longer nested inside the <h2> label.
+  assert.doesNotMatch(
+    html,
+    /<span class="wave-status running">running<\/span><\/h2>/,
   );
 });
 
@@ -3884,7 +3920,7 @@ test("renderStatusPage renders the repo dropdown (with a no-JS select fallback) 
   // The selected project's own body still renders exactly as the single-project view.
   assert.match(
     html,
-    /<section class="wave running"><div class="wave-head"><h2>Wave 1 <span class="wave-status running">running<\/span>/,
+    /<section class="wave running"><div class="wave-head"><h2 class="wave-label">Wave 1<\/h2><div class="wave-meta"><span class="wave-tally">0\/1<\/span><span class="wave-status running">running<\/span>/,
   );
   // The parked card carries the project so the sheet routes its reply/carve to it.
   assert.match(html, /<a class="parked-card"[^>]*data-project="beta"/);
@@ -5045,7 +5081,7 @@ test("renderStatusPage collapses closed waves into expandable completed wave chi
   // The open wave still renders its own card in the grid.
   assert.match(
     html,
-    /<section class="wave running"><div class="wave-head"><h2>Wave 2 <span class="wave-status running">running<\/span><\/h2><span class="wave-tally">0\/1<\/span><\/div>/,
+    /<section class="wave running"><div class="wave-head"><h2 class="wave-label">Wave 2<\/h2><div class="wave-meta"><span class="wave-tally">0\/1<\/span><span class="wave-status running">running<\/span><\/div><\/div>/,
   );
 });
 
@@ -5066,7 +5102,7 @@ test("renderStatusPage labels a single-issue wave with that issue's resolved tit
 
   assert.match(
     html,
-    /<section class="wave running"><div class="wave-head"><h2>Wave 2 — config resolution <span class="wave-status running">running<\/span>/,
+    /<section class="wave running"><div class="wave-head"><h2 class="wave-label">Wave 2 — config resolution<\/h2><div class="wave-meta"><span class="wave-tally">0\/1<\/span><span class="wave-status running">running<\/span>/,
   );
 });
 
@@ -5092,7 +5128,7 @@ test("renderStatusPage labels a multi-issue wave with its lead issue's title + t
   // their own titles on their chips).
   assert.match(
     html,
-    /<h2>Wave 2 — config resolution \+3 <span class="wave-status running">running<\/span>/,
+    /<h2 class="wave-label">Wave 2 — config resolution \+3<\/h2><div class="wave-meta"><span class="wave-tally">0\/4<\/span><span class="wave-status running">running<\/span>/,
   );
 });
 
@@ -5129,7 +5165,7 @@ test("renderStatusPage keeps a closed wave's chip compact and puts the issue tit
   // The lead title + "+N" reads on the full card the chip reveals in the grid.
   assert.match(
     html,
-    /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2>Wave 1 — config resolution \+1 <span class="wave-status closed">closed<\/span>/,
+    /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2 class="wave-label">Wave 1 — config resolution \+1<\/h2><div class="wave-meta"><span class="wave-tally">2\/2<\/span><span class="wave-status closed">closed<\/span>/,
   );
 });
 
@@ -5152,7 +5188,10 @@ test("renderStatusPage escapes a wave name derived from an issue title", () => {
     parked: [],
   });
 
-  assert.match(html, /<h2>Wave 1 — fix &lt;script&gt; &amp; things </);
+  assert.match(
+    html,
+    /<h2 class="wave-label">Wave 1 — fix &lt;script&gt; &amp; things<\/h2>/,
+  );
 });
 
 test("renderStatusPage keeps the bare wave index when no issue title is resolved yet", () => {
@@ -5170,7 +5209,7 @@ test("renderStatusPage keeps the bare wave index when no issue title is resolved
 
   assert.match(
     html,
-    /<h2>Wave 1 <span class="wave-status running">running<\/span>/,
+    /<h2 class="wave-label">Wave 1<\/h2><div class="wave-meta"><span class="wave-tally">0\/1<\/span><span class="wave-status running">running<\/span>/,
   );
 });
 
@@ -5898,11 +5937,11 @@ test("renderStatusPage renders each expanded closed wave's full card in the grid
   });
 
   // The closed wave gets the SAME wave-card treatment as an open wave — a CLOSED pill,
-  // its merged/total, the merged issue chips and the #num title list — living in the
-  // waves-grid under a stable id, hidden until its chip toggles it open.
+  // its merged/total, and the merged member list — living in the waves-grid under a
+  // stable id, hidden until its chip toggles it open.
   assert.match(
     html,
-    /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2>Wave 1 — cart persists <span class="wave-status closed">closed<\/span><\/h2><span class="wave-tally">1\/1<\/span><\/div>/,
+    /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2 class="wave-label">Wave 1 — cart persists<\/h2><div class="wave-meta"><span class="wave-tally">1\/1<\/span><span class="wave-status closed">closed<\/span><\/div><\/div>/,
   );
   // The closed card renders inside the same grid, positioned before the open running wave.
   const grid = html.match(
@@ -6034,7 +6073,7 @@ test("renderStatusPage renders an archived run's closed waves as full cards, not
   assert.doesNotMatch(pane, /id="closed-wave-0"/);
   assert.match(
     pane,
-    /<section class="wave closed"><div class="wave-head"><h2>Wave 1 — old work <span class="wave-status closed">closed<\/span>/,
+    /<section class="wave closed"><div class="wave-head"><h2 class="wave-label">Wave 1 — old work<\/h2><div class="wave-meta"><span class="wave-tally">1\/1<\/span><span class="wave-status closed">closed<\/span>/,
   );
   // Exactly one element carries the toggle id across the whole page (no duplicate ids).
   assert.equal(html.split('id="closed-wave-0"').length - 1, 1);

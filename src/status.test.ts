@@ -940,38 +940,38 @@ test("cards fill card-grey and chips fill the darker panel with a 40%-alpha stat
   // Landing project cards and campaign wave cards take the card fill.
   assert.match(landing, /\.card \{[^}]*background: var\(--color-card\)/);
   assert.match(campaign, /\.wave \{[^}]*background: var\(--color-card\)/);
-  // Issue chips take the darker panel fill — never a coloured fill (§4).
+  // The state pill and closed-wave chip take the darker panel fill — never a coloured fill (§4).
   assert.match(
     campaign,
-    /\.chip, \.wave-status, \.completed-wave-chip \{[^}]*background: var\(--color-chip\)/,
+    /\.wave-status, \.completed-wave-chip \{[^}]*background: var\(--color-chip\)/,
   );
-  // An issue chip carries its status class and borders that status at 40% alpha (§4).
-  assert.match(campaign, /class="chip running"/);
+  // A member row carries its status class and borders that status at 40% alpha (§4).
+  assert.match(campaign, /class="wave-member running"/);
   assert.match(
     campaign,
-    /\.chip\.running \{ border-color: var\(--color-blue-40\); \}/,
-  );
-  assert.match(
-    campaign,
-    /\.chip\.parked \{ border-color: var\(--color-yellow-40\); \}/,
+    /\.wave-member\.running \{ border-color: var\(--color-blue-40\); \}/,
   );
   assert.match(
     campaign,
-    /\.chip\.carved \{ border-color: var\(--color-carved-40\); \}/,
+    /\.wave-member\.parked \{ border-color: var\(--color-yellow-40\); \}/,
+  );
+  assert.match(
+    campaign,
+    /\.wave-member\.carved \{ border-color: var\(--color-carved-40\); \}/,
   );
 });
 
 test("cards and chips lift only their fill on hover, never recolouring their edge; teal never colours an edge (§6, #83)", () => {
   const landing = renderLandingShell(["alpha"]);
   const campaign = chipCampaign();
-  // Card / chip / parked-row hover lifts the fill only — the coloured edge is unchanged.
+  // Card / member row / parked-row hover lifts the fill only — the coloured edge is unchanged.
   assert.match(
     landing,
     /\.card:hover \{ background: var\(--color-card-hover\); \}/,
   );
   assert.match(
     campaign,
-    /\.chip:hover[^{]*\{ background: var\(--color-chip-hover\); \}/,
+    /\.wave-member:hover[^{]*\{ background: var\(--color-chip-hover\); \}/,
   );
   assert.match(
     landing,
@@ -981,9 +981,9 @@ test("cards and chips lift only their fill on hover, never recolouring their edg
     campaign,
     /\.parked-card:hover \{ background: var\(--color-card-hover\); \}/,
   );
-  // No card/chip hover recolours a border — the accent must not creep onto an edge.
+  // No card/row hover recolours a border — the accent must not creep onto an edge.
   assert.doesNotMatch(landing, /\.card:hover \{[^}]*border-color/);
-  assert.doesNotMatch(campaign, /\.chip:hover[^}]*border-color/);
+  assert.doesNotMatch(campaign, /\.wave-member:hover[^}]*border-color/);
   assert.doesNotMatch(landing, /\.parked-row:hover[^}]*border-color/);
   // §2: a card carries state colour on exactly one edge — never a coloured bottom or right.
   for (const page of [landing, campaign]) {
@@ -2352,13 +2352,13 @@ test("serveAllStatus flags the selected project's carvable chips with its projec
     const html = await (
       await fetch(`http://127.0.0.1:${port}/?project=beta`)
     ).text();
-    // The unstarted future-wave chip is flagged carvable and carries beta, so the
+    // The unstarted future-wave row is flagged carvable and carries beta, so the
     // panel's Carve routes preview and confirm to beta's own install.
     assert.match(
       html,
-      /class="chip [a-z]+"[^>]*data-issue="401"[^>]*data-project="beta"[^>]*data-carvable="1"/,
+      /class="wave-member [a-z]+"[^>]*data-issue="401"[^>]*data-project="beta"[^>]*data-carvable="1"/,
     );
-    // No inline carve control on the chip itself.
+    // No inline carve control on the row itself.
     assert.doesNotMatch(html, /✂️/);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -3620,12 +3620,12 @@ test("wave labels read from tmp-log issue titles, resolved through buildStatusWi
   );
   assert.match(
     html,
-    /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2>Wave 1 — config resolution \+2 <span class="wave-status closed">closed<\/span>/,
+    /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2 class="wave-label">Wave 1 — config resolution \+2<\/h2><div class="wave-meta"><span class="wave-tally">3\/3<\/span><span class="wave-status closed">closed<\/span>/,
   );
   // Single-issue wave (open): just that issue's title, in a wave card.
   assert.match(
     html,
-    /<section class="wave running"><div class="wave-head"><h2>Wave 2 — cache eviction <span class="wave-status running">running<\/span>/,
+    /<section class="wave running"><div class="wave-head"><h2 class="wave-label">Wave 2 — cache eviction<\/h2><div class="wave-meta"><span class="wave-tally">0\/1<\/span><span class="wave-status running">running<\/span>/,
   );
 });
 
@@ -3677,12 +3677,12 @@ test("wave labels and chip hovers render from the log's titles, with no fetchTas
   );
   assert.match(
     html,
-    /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2>Wave 1 — config resolution \+2 <span class="wave-status closed">closed<\/span>/,
+    /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2 class="wave-label">Wave 1 — config resolution \+2<\/h2><div class="wave-meta"><span class="wave-tally">3\/3<\/span><span class="wave-status closed">closed<\/span>/,
   );
   // Single-issue wave (open): just that issue's title, in a wave card.
   assert.match(
     html,
-    /<section class="wave running"><div class="wave-head"><h2>Wave 2 — cache eviction <span class="wave-status running">running<\/span>/,
+    /<section class="wave running"><div class="wave-head"><h2 class="wave-label">Wave 2 — cache eviction<\/h2><div class="wave-meta"><span class="wave-tally">0\/1<\/span><span class="wave-status running">running<\/span>/,
   );
   // Every chip carries its own title on hover — 201 has no status detail yet, so
   // its hover is exactly the resolved title.
@@ -3715,40 +3715,98 @@ test("renderStatusPage shows a merged/total tally on an open wave card", () => {
     parked: [],
   });
 
-  // Each open wave card's head carries its merged/total on the right — one of two
-  // done in the running wave, none in the unstarted one.
+  // Each open wave card's head carries its merged/total — one of two done in the
+  // running wave, none in the unstarted one — ahead of its state pill in the meta group.
   assert.match(
     html,
-    /<span class="wave-status running">running<\/span><\/h2><span class="wave-tally">1\/2<\/span>/,
+    /<span class="wave-tally">1\/2<\/span><span class="wave-status running">running<\/span>/,
   );
   assert.match(
     html,
-    /<span class="wave-status unstarted">unstarted<\/span><\/h2><span class="wave-tally">0\/2<\/span>/,
+    /<span class="wave-tally">0\/2<\/span><span class="wave-status unstarted">unstarted<\/span>/,
   );
 });
 
-test("renderStatusPage lists the issue titles under each open wave", () => {
+test("renderStatusPage renders one stable wave-head row: label · merged/total · state · carved, with the pill outside the label", () => {
   const html = renderStatusPage({
     project: "beta",
     waves: [
       {
-        index: 0,
+        index: 1,
         status: "running",
         issues: [
-          { issueNumber: "201", status: "running", name: "wire up the parser" },
-          { issueNumber: "202", status: "unstarted" },
+          {
+            issueNumber: "201",
+            status: "completed",
+            name: "Guest checkout entry point",
+          },
+          { issueNumber: "202", status: "running" },
+          { issueNumber: "203", status: "carved" },
         ],
       },
     ],
     parked: [],
   });
 
-  // Under the open wave's chips, each issue's title is listed (its number alone
-  // when it has no resolved title yet).
+  // The head is one row: the label in its own element (so a long label can't shove the
+  // state pill onto its own line, the Wave 2 vs Wave 3 misalignment), then a meta group
+  // ordering merged/total · state pill · carved tally — the carved count folded into the
+  // row, not floating in the corner.
   assert.match(
     html,
-    /<ul class="wave-issues"><li[^>]*>#201 wire up the parser<\/li><li[^>]*>#202<\/li><\/ul>/,
+    /<div class="wave-head"><h2 class="wave-label">Wave 2 — Guest checkout entry point \+2<\/h2><div class="wave-meta"><span class="wave-tally">1\/3<\/span><span class="wave-status running">running<\/span><span class="wave-carved">1 carved<\/span><\/div><\/div>/,
   );
+  // The state pill is no longer nested inside the <h2> label.
+  assert.doesNotMatch(
+    html,
+    /<span class="wave-status running">running<\/span><\/h2>/,
+  );
+});
+
+test("renderStatusPage renders one interactive member row per issue, merging the old chip + title blocks", () => {
+  const html = renderStatusPage(
+    {
+      project: "beta",
+      waves: [
+        {
+          index: 0,
+          status: "running",
+          issues: [
+            {
+              issueNumber: "201",
+              status: "running",
+              name: "wire up the parser",
+            },
+            { issueNumber: "202", status: "unstarted" },
+          ],
+        },
+      ],
+      parked: [],
+    },
+    { carve: true },
+  );
+
+  // One member list, one interactive row per issue: status dot + #NNN + resolved
+  // title + status word — no separate chip row and no separate title list.
+  assert.match(
+    html,
+    /<ul class="wave-members"><li><button type="button" class="wave-member running"[^>]*><span class="dot running"><\/span>#201 <span class="wave-member-title">wire up the parser<\/span><small>running<\/small><\/button><\/li>/,
+  );
+  // An unresolved title falls back to just #NNN (no title span).
+  assert.match(
+    html,
+    /<li><button type="button" class="wave-member unstarted"[^>]*><span class="dot unstarted"><\/span>#202 <small>unstarted<\/small><\/button><\/li>/,
+  );
+  // The row carries its issue+project so a tap opens the detail sheet, and is flagged
+  // carvable when carvable (202 is an unstarted future-wave remainder).
+  assert.match(
+    html,
+    /class="wave-member unstarted" title="[^"]*" data-issue="202" data-project="beta" data-carvable="1"/,
+  );
+  // The old dual blocks are retired — no chip row (`.chips`/`.chip`) and no title list.
+  assert.doesNotMatch(html, /class="chips"/);
+  assert.doesNotMatch(html, /class="wave-issues"/);
+  assert.doesNotMatch(html, /class="chip /);
 });
 
 test("renderStatusPage colours a carved chip and pulses a running one", () => {
@@ -3767,10 +3825,15 @@ test("renderStatusPage colours a carved chip and pulses a running one", () => {
     parked: [],
   });
 
-  // A carved chip carries the carved status dot + label…
+  // A carved member row carries the carved status dot + title + status word, and its
+  // `.wave-member.carved` class reads struck-through…
   assert.match(
     html,
-    /<span class="dot carved"><\/span>#202 <small>carved<\/small>/,
+    /<button type="button" class="wave-member carved"[^>]*><span class="dot carved"><\/span>#202 <span class="wave-member-title">carved one<\/span><small>carved<\/small><\/button>/,
+  );
+  assert.match(
+    html,
+    /\.wave-member\.carved \{ color: var\(--color-text-light-2\); text-decoration: line-through; \}/,
   );
   // …and the wave it left gains a carved tally in its header, so the carve reads
   // at a glance without counting struck-through chips (one of two issues carved).
@@ -3857,7 +3920,7 @@ test("renderStatusPage renders the repo dropdown (with a no-JS select fallback) 
   // The selected project's own body still renders exactly as the single-project view.
   assert.match(
     html,
-    /<section class="wave running"><div class="wave-head"><h2>Wave 1 <span class="wave-status running">running<\/span>/,
+    /<section class="wave running"><div class="wave-head"><h2 class="wave-label">Wave 1<\/h2><div class="wave-meta"><span class="wave-tally">0\/1<\/span><span class="wave-status running">running<\/span>/,
   );
   // The parked card carries the project so the sheet routes its reply/carve to it.
   assert.match(html, /<a class="parked-card"[^>]*data-project="beta"/);
@@ -4559,7 +4622,7 @@ test("renderStatusPage makes issue chips tap-friendly for touch devices", () => 
   );
   assert.match(
     html,
-    /class="chip [a-z]+"[^>]*data-issue="101"[^>]*data-project="demo"/,
+    /class="wave-member [a-z]+"[^>]*data-issue="101"[^>]*data-project="demo"/,
   );
   assert.match(html, /id="issue-detail"/);
   assert.match(html, /el\.addEventListener\("click"/);
@@ -4917,14 +4980,14 @@ test("renderStatusPage opens the issue-detail sheet from a parked row too", () =
 
   // The whole parked card is a clickable question card carrying the ids the sheet
   // fetches with; its href is the no-JS fallback, and the same wiring opens the sheet
-  // from a chip or a parked card (the anchor's default click is prevented).
+  // from a member row or a parked card (the anchor's default click is prevented).
   assert.match(
     html,
     /<a class="parked-card" href="\/\?project=demo" data-issue="102" data-project="demo"><div class="parked-card-title"><span class="parked-issue">#102<\/span> Need a choice\.<\/div>/,
   );
   assert.match(
     html,
-    /querySelectorAll\("\.chip\[data-issue\], \.parked-card\[data-issue\]"\)/,
+    /querySelectorAll\("\.wave-member\[data-issue\], \.parked-card\[data-issue\]"\)/,
   );
   assert.match(html, /event\.preventDefault\(\); openIssue\(/);
 });
@@ -5009,15 +5072,16 @@ test("renderStatusPage collapses closed waves into expandable completed wave chi
     html,
     /\.completed-wave-chip \.check \{ color: var\(--color-green\);/,
   );
-  // Chip rows must not stretch: the first wrapped line was rendering taller in Safari.
+  // The closed-wave toggle bar must not stretch: the first wrapped line was rendering
+  // taller in Safari.
   assert.match(
     html,
-    /\.completed-wave-bar, \.chips \{ display: flex; flex-wrap: wrap; align-items: flex-start; align-content: flex-start;/,
+    /\.completed-wave-bar \{ display: flex; flex-wrap: wrap; align-items: flex-start; align-content: flex-start;/,
   );
   // The open wave still renders its own card in the grid.
   assert.match(
     html,
-    /<section class="wave running"><div class="wave-head"><h2>Wave 2 <span class="wave-status running">running<\/span><\/h2><span class="wave-tally">0\/1<\/span><\/div>/,
+    /<section class="wave running"><div class="wave-head"><h2 class="wave-label">Wave 2<\/h2><div class="wave-meta"><span class="wave-tally">0\/1<\/span><span class="wave-status running">running<\/span><\/div><\/div>/,
   );
 });
 
@@ -5038,7 +5102,7 @@ test("renderStatusPage labels a single-issue wave with that issue's resolved tit
 
   assert.match(
     html,
-    /<section class="wave running"><div class="wave-head"><h2>Wave 2 — config resolution <span class="wave-status running">running<\/span>/,
+    /<section class="wave running"><div class="wave-head"><h2 class="wave-label">Wave 2 — config resolution<\/h2><div class="wave-meta"><span class="wave-tally">0\/1<\/span><span class="wave-status running">running<\/span>/,
   );
 });
 
@@ -5064,7 +5128,7 @@ test("renderStatusPage labels a multi-issue wave with its lead issue's title + t
   // their own titles on their chips).
   assert.match(
     html,
-    /<h2>Wave 2 — config resolution \+3 <span class="wave-status running">running<\/span>/,
+    /<h2 class="wave-label">Wave 2 — config resolution \+3<\/h2><div class="wave-meta"><span class="wave-tally">0\/4<\/span><span class="wave-status running">running<\/span>/,
   );
 });
 
@@ -5101,7 +5165,7 @@ test("renderStatusPage keeps a closed wave's chip compact and puts the issue tit
   // The lead title + "+N" reads on the full card the chip reveals in the grid.
   assert.match(
     html,
-    /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2>Wave 1 — config resolution \+1 <span class="wave-status closed">closed<\/span>/,
+    /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2 class="wave-label">Wave 1 — config resolution \+1<\/h2><div class="wave-meta"><span class="wave-tally">2\/2<\/span><span class="wave-status closed">closed<\/span>/,
   );
 });
 
@@ -5124,7 +5188,10 @@ test("renderStatusPage escapes a wave name derived from an issue title", () => {
     parked: [],
   });
 
-  assert.match(html, /<h2>Wave 1 — fix &lt;script&gt; &amp; things </);
+  assert.match(
+    html,
+    /<h2 class="wave-label">Wave 1 — fix &lt;script&gt; &amp; things<\/h2>/,
+  );
 });
 
 test("renderStatusPage keeps the bare wave index when no issue title is resolved yet", () => {
@@ -5142,7 +5209,7 @@ test("renderStatusPage keeps the bare wave index when no issue title is resolved
 
   assert.match(
     html,
-    /<h2>Wave 1 <span class="wave-status running">running<\/span>/,
+    /<h2 class="wave-label">Wave 1<\/h2><div class="wave-meta"><span class="wave-tally">0\/1<\/span><span class="wave-status running">running<\/span>/,
   );
 });
 
@@ -5452,20 +5519,20 @@ test("renderStatusPage marks carvable chips with carve data and never puts a car
     { carve: true },
   );
 
-  // Each chip carries its issue and project; only a still-carvable one is flagged
+  // Each member row carries its issue and project; only a still-carvable one is flagged
   // carvable, so the tap-detail panel knows whether to offer a Carve button.
   assert.match(
     html,
-    /class="chip [a-z]+"[^>]*data-issue="301"[^>]*data-project="demo"[^>]*data-carvable="1"/,
+    /class="wave-member [a-z]+"[^>]*data-issue="301"[^>]*data-project="demo"[^>]*data-carvable="1"/,
   );
   assert.match(
     html,
-    /class="chip [a-z]+"[^>]*data-issue="302"[^>]*data-project="demo"[^>]*data-carvable="1"/,
+    /class="wave-member [a-z]+"[^>]*data-issue="302"[^>]*data-project="demo"[^>]*data-carvable="1"/,
   );
-  // The completed (banked) and current-wave-in-flight (running) chips are not carvable.
+  // The completed (banked) and current-wave-in-flight (running) rows are not carvable.
   assert.doesNotMatch(html, /data-issue="101"[^>]*data-carvable/);
   assert.doesNotMatch(html, /data-issue="201"[^>]*data-carvable/);
-  // Carve moved off the chips entirely: no inline ✂️ and no per-chip carve form.
+  // Carve moved off the rows entirely: no inline ✂️ and no per-row carve form.
   assert.doesNotMatch(html, /✂️/);
   assert.doesNotMatch(html, /class="carve-form"/);
   assert.doesNotMatch(html, /class="chip-group"/);
@@ -5870,11 +5937,11 @@ test("renderStatusPage renders each expanded closed wave's full card in the grid
   });
 
   // The closed wave gets the SAME wave-card treatment as an open wave — a CLOSED pill,
-  // its merged/total, the merged issue chips and the #num title list — living in the
-  // waves-grid under a stable id, hidden until its chip toggles it open.
+  // its merged/total, and the merged member list — living in the waves-grid under a
+  // stable id, hidden until its chip toggles it open.
   assert.match(
     html,
-    /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2>Wave 1 — cart persists <span class="wave-status closed">closed<\/span><\/h2><span class="wave-tally">1\/1<\/span><\/div>/,
+    /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2 class="wave-label">Wave 1 — cart persists<\/h2><div class="wave-meta"><span class="wave-tally">1\/1<\/span><span class="wave-status closed">closed<\/span><\/div><\/div>/,
   );
   // The closed card renders inside the same grid, positioned before the open running wave.
   const grid = html.match(
@@ -6006,7 +6073,7 @@ test("renderStatusPage renders an archived run's closed waves as full cards, not
   assert.doesNotMatch(pane, /id="closed-wave-0"/);
   assert.match(
     pane,
-    /<section class="wave closed"><div class="wave-head"><h2>Wave 1 — old work <span class="wave-status closed">closed<\/span>/,
+    /<section class="wave closed"><div class="wave-head"><h2 class="wave-label">Wave 1 — old work<\/h2><div class="wave-meta"><span class="wave-tally">1\/1<\/span><span class="wave-status closed">closed<\/span>/,
   );
   // Exactly one element carries the toggle id across the whole page (no duplicate ids).
   assert.equal(html.split('id="closed-wave-0"').length - 1, 1);

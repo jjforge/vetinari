@@ -162,6 +162,21 @@ repos` (repos with a running agent), parked `oldest <Nm>` (the oldest parked
 
 ### Changed
 
+- **Campaign wave cards were decluttered** (#99). Each wave used to render its issues
+  twice — a wrapping row of status chips *and* a separate title list below — reading
+  as two competing hierarchies. Those two blocks are now one **member list**: one
+  interactive row per issue (status dot · `#NNN` · resolved title, falling back to
+  just the number · status word, right-aligned). Each row keeps both behaviours the
+  old chip carried — it opens the issue-detail sheet and is carvable when carvable —
+  and a carved issue still reads struck-through; the vertical rows also retire the
+  uneven chip wrap. Applies uniformly to open, expanded-closed, and archived campaign
+  views (all render through `renderWaveCard`); the compact closed-wave toggle chip is
+  unchanged. The **wave header** is now one stable row — **label · `merged/total` ·
+  state pill · carved tally** — with the label in its own element (a long label wraps
+  within itself instead of shoving the state pill onto its own line, the Wave 2 vs
+  Wave 3 misalignment) and the carved count folded into the meta group rather than
+  floating in the top-right corner.
+
 - The repo page's **archived runs** are now a **collapsible list** instead of a bare
   list of links (#98). Each row shows the campaign name, the run's start time (parsed
   from its runId, rendered `Aug 23, 2026 · 22:22:36 UTC`), a state dot reading

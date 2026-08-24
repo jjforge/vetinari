@@ -68,13 +68,13 @@ export const STATE_DOT_CSS =
   ` @keyframes chip-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } } .dot.running { animation: chip-pulse 1.4s ease-in-out infinite; } @media (prefers-reduced-motion: reduce) { .dot.running { animation: none; } }`;
 
 /**
- * An issue chip borders its own status at 40% alpha (§4) — muted so a wave of a
- * dozen chips does not vibrate, while each chip's full-strength dot still lets you
- * count states at a glance. Generated once from `stateBorderColor`; the campaign
- * page's issue chips carry a matching status class. Tally chips (counts, not states)
- * are deliberately left out — they keep a neutral border (§7).
+ * A wave-member row carries its own status at 40% alpha on a left edge (§4) — muted
+ * so a wave of a dozen rows does not vibrate, while each row's full-strength dot
+ * still lets you count states at a glance. Generated once from `stateBorderColor`;
+ * each member row carries a matching status class. Tally counts (not states) are
+ * deliberately left out — they keep a neutral edge (§7).
  */
-export const STATE_CHIP_BORDER_CSS = ["running", "parked", "failure", "completed", "unstarted", "carved"].map((s) => `.chip.${s} { border-color: ${stateBorderColor(s)}; }`).join(" ");
+export const STATE_CHIP_BORDER_CSS = ["running", "parked", "failure", "completed", "unstarted", "carved"].map((s) => `.wave-member.${s} { border-color: ${stateBorderColor(s)}; }`).join(" ");
 
 /**
  * The mono treatment for the repo dropdown's label (#88). The dashboard loads no
@@ -150,33 +150,33 @@ const chipTitle = (issue: StatusIssue) => [issue.name, issue.detail].filter(Bool
  */
 export const isCarvable = (issue: StatusIssue) => issue.status === "unstarted" || issue.status === "parked";
 
-const renderIssueChip = (issue: StatusIssue, project: string, carve: boolean, interactive: boolean, run?: string) => {
+/**
+ * One issue's member row — the single line a wave card gives each of its issues,
+ * merging what used to be a status chip and a separate title line into one row:
+ * status dot + `#NNN` + resolved title (falling back to just the number until a
+ * title resolves) + the status word, right-aligned. The row is the interactive
+ * element: a live (interactive) row carries its issue and project so a tap opens
+ * the detail sheet — and, under carve, so the panel can route a carve. An archived
+ * row is interactive too and additionally carries its `run` token, so the shared
+ * sheet reads that run's own log (its turn log lives there, not in the live log);
+ * it is never carvable, so the read-only archive offers no Carve (ADR 0005). Only
+ * a still-carvable row is flagged `data-carvable`; a carved row reads struck-through
+ * off its status class. No control is drawn on the row.
+ */
+const renderWaveMember = (issue: StatusIssue, project: string, carve: boolean, interactive: boolean, run?: string) => {
   const detail = chipTitle(issue) || `#${issue.issueNumber}: ${issue.status}`;
-  // A live (interactive) chip carries its issue and project so a tap opens the
-  // detail sheet — and, under carve, so the panel can route a carve. An archived
-  // chip is interactive too and additionally carries its `run` token, so the shared
-  // sheet reads that run's own log (its turn log lives there, not in the live log);
-  // it is never carvable, so the read-only archive offers no Carve (ADR 0005). Only
-  // a still-carvable chip is flagged `data-carvable`. No control is drawn on the chip.
   const openData = interactive || carve ? ` data-issue="${escapeHtml(issue.issueNumber)}" data-project="${escapeHtml(project)}"${run ? ` data-run="${escapeHtml(run)}"` : ""}` : "";
   const carveData = carve && isCarvable(issue) ? ` data-carvable="1"` : "";
-  // The chip carries its status class so its border reads that status at 40% alpha
-  // (§4); the dot carries the same status at full strength.
-  return `<button type="button" class="chip ${issue.status}" title="${escapeTitle(detail)}"${openData}${carveData}><span class="dot ${issue.status}"></span>#${escapeHtml(issue.issueNumber)} <small>${escapeHtml(issue.status)}</small></button>`;
+  const title = issue.name ? `<span class="wave-member-title">${escapeHtml(issue.name)}</span>` : "";
+  // The row carries its status class so its state reads at 40% alpha on a left edge
+  // (§4); the dot carries the same status at full strength, the word spells it out.
+  return `<li><button type="button" class="wave-member ${issue.status}" title="${escapeTitle(detail)}"${openData}${carveData}><span class="dot ${issue.status}"></span>#${escapeHtml(issue.issueNumber)} ${title}<small>${escapeHtml(issue.status)}</small></button></li>`;
 };
 
-const renderWaveContents = (wave: StatusWave, project: string, carve: boolean, interactive: boolean, run?: string) => `<div class="chips">${wave.issues.map((issue) => renderIssueChip(issue, project, carve, interactive, run)).join("")}</div>`;
-
-/**
- * The open wave's issue titles, listed under its chips so the wave reads at a
- * glance without hovering every chip. Each line is the resolved title (falling
- * back to just the issue number when none has resolved yet), carrying its status
- * class so a carved issue reads struck-through.
- */
-const renderWaveTitles = (wave: StatusWave) =>
-  `<ul class="wave-issues">${wave.issues
-    .map((issue) => `<li class="wave-issue ${issue.status}">#${escapeHtml(issue.issueNumber)}${issue.name ? ` ${escapeHtml(issue.name)}` : ""}</li>`)
-    .join("")}</ul>`;
+/** A wave's member list — one interactive row per issue (see `renderWaveMember`),
+ * the single block that replaced the old chip row + title list. */
+const renderWaveMembers = (wave: StatusWave, project: string, carve: boolean, interactive: boolean, run?: string) =>
+  `<ul class="wave-members">${wave.issues.map((issue) => renderWaveMember(issue, project, carve, interactive, run)).join("")}</ul>`;
 
 /**
  * A wave's human label, derived at render from the issue titles the dashboard
@@ -207,17 +207,19 @@ const waveMerged = (wave: StatusWave) => wave.issues.filter((issue) => issue.sta
 /**
  * One wave card — the single card component both an open (running/queued) wave and
  * an expanded closed wave render as (they must not fork): its label + status pill on
- * the left, its merged/total on the right, its issue chips, then the title list. The
+ * the left, its merged/total on the right, then one member row per issue. The
  * section carries the wave status so a running wave gets the blue top accent, a
  * closed one the green, and an unstarted one a neutral edge. `extraAttrs` lets a
  * closed card carry the id + `hidden` its toggle chip drives.
  */
 const renderWaveCard = (wave: StatusWave, project: string, carve: boolean, interactive: boolean, extraAttrs = "", run?: string) => {
-  // A carved tally beside the merged count, so a wave a carve pruned reads at a
-  // glance — the carved chips are a display overlay (ADR 0007), and this counts them.
+  // A carved tally folded into the head's meta group beside the merged count, so a wave
+  // a carve pruned reads at a glance — the carved rows are a display overlay (ADR 0007),
+  // and this counts them. The label sits in its own element so a long one wraps within
+  // itself without shoving the meta group (tally · state · carved) onto its own line.
   const carved = wave.issues.filter((issue) => issue.status === "carved").length;
-  const tally = carved ? ` <span class="wave-carved">${carved} carved</span>` : "";
-  return `<section class="wave ${wave.status}"${extraAttrs}><div class="wave-head"><h2>${renderWaveLabel(wave)} <span class="wave-status ${wave.status}">${wave.status}</span></h2><span class="wave-tally">${waveMerged(wave)}/${wave.issues.length}</span>${tally}</div>${renderWaveContents(wave, project, carve, interactive, run)}${renderWaveTitles(wave)}</section>`;
+  const tally = carved ? `<span class="wave-carved">${carved} carved</span>` : "";
+  return `<section class="wave ${wave.status}"${extraAttrs}><div class="wave-head"><h2 class="wave-label">${renderWaveLabel(wave)}</h2><div class="wave-meta"><span class="wave-tally">${waveMerged(wave)}/${wave.issues.length}</span><span class="wave-status ${wave.status}">${wave.status}</span>${tally}</div></div>${renderWaveMembers(wave, project, carve, interactive, run)}</section>`;
 };
 
 /** A closed wave's compact toggle chip — the affordance that reveals its full card in
@@ -1347,12 +1349,16 @@ ${TOP_BAR_STYLES}
   .wave.closed { border-top-color: var(--color-green); }
   /* A flex-grid item beats the UA [hidden] rule, so a collapsed closed card needs it back explicitly. */
   .wave.closed[hidden] { display: none; }
-  .wave-head { display: flex; align-items: baseline; justify-content: space-between; gap: .5rem; }
-  .wave-head h2 { margin: 0; font-size: 1.1rem; }
+  /* One stable head row: the label takes the slack and wraps within itself, the meta
+     group (merged/total · state · carved) stays a nowrap unit on the right so the state
+     pill never drops onto its own line in one card while it stays inline in a neighbour. */
+  .wave-head { display: flex; align-items: baseline; justify-content: space-between; gap: .5rem .75rem; flex-wrap: wrap; }
+  .wave-label { margin: 0; font-size: 1.1rem; flex: 1 1 12rem; min-width: 0; }
+  .wave-meta { display: flex; align-items: baseline; gap: .5rem; flex: 0 0 auto; margin-left: auto; }
   .wave-tally { color: var(--color-text-light-2); font-variant-numeric: tabular-nums; font-size: .9rem; white-space: nowrap; }
   .completed-waves { display: flex; align-items: flex-start; flex-wrap: wrap; gap: .5rem; margin: 1rem 0; color: var(--color-text-light); }
   .completed-wave-chip .check { color: var(--color-green); font-weight: 700; }
-  .completed-wave-bar, .chips { display: flex; flex-wrap: wrap; align-items: flex-start; align-content: flex-start; gap: .5rem; }
+  .completed-wave-bar { display: flex; flex-wrap: wrap; align-items: flex-start; align-content: flex-start; gap: .5rem; }
   .completed-wave-chip { cursor: pointer; font: inherit; }
   /* The chevron is CSS keyed off aria-expanded — collapsed › flips to expanded ⌄ — so
      the client script only flips the attribute, never re-authors the glyph. */
@@ -1360,25 +1366,26 @@ ${TOP_BAR_STYLES}
   .completed-wave-chip[aria-expanded="true"]::after { content: "⌄"; }
   /* An expanded chip takes a green accent (its card is open); collapsed chips stay neutral (§6). */
   .completed-wave-chip[aria-expanded="true"] { border-color: var(--color-green); }
-  .chip, .wave-status, .completed-wave-chip { display: inline-flex; align-items: center; gap: .4rem; border: 1px solid var(--color-secondary); border-radius: 999px; padding: .3rem .65rem; background: var(--color-chip); color: var(--color-text); }
-  /* An issue chip borders its own status at 40% alpha (§4); the small status word is muted. */
+  .wave-status, .completed-wave-chip { display: inline-flex; align-items: center; gap: .4rem; border: 1px solid var(--color-secondary); border-radius: 999px; padding: .3rem .65rem; background: var(--color-chip); color: var(--color-text); }
+  /* Each member row is a full-width button — a flat list line, not a pill: dot · #NNN ·
+     title (truncating) · status word pushed to the right. Its status reads at 40% alpha
+     on a left edge (§4); hover lifts the fill only, the edge is unchanged (§6). */
+  .wave-members { list-style: none; margin: .7rem 0 0; padding: 0; }
+  .wave-member { display: flex; align-items: baseline; gap: .5rem; width: 100%; text-align: left; font: inherit; color: var(--color-text); background: none; border: 0; border-left: 2px solid transparent; border-radius: 0; padding: .2rem .5rem; cursor: pointer; }
   ${STATE_CHIP_BORDER_CSS}
-  .chip small { color: var(--color-text-light-2); }
-  /* Hover lifts the chip fill only; its border is unchanged (§6). */
-  .chip:hover, .completed-wave-chip:hover { background: var(--color-chip-hover); }
+  .wave-member-title { color: var(--color-text-light); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .wave-member small { margin-left: auto; color: var(--color-text-light-2); white-space: nowrap; }
+  .wave-member:hover, .completed-wave-chip:hover { background: var(--color-chip-hover); }
+  .wave-member.carved { color: var(--color-text-light-2); text-decoration: line-through; }
   .wave-status { font-size: .85rem; margin-left: .5rem; text-transform: uppercase; letter-spacing: .03em; }
   .wave-status.closed { border-color: var(--color-green); color: var(--color-green); background: rgb(63 185 132 / 12%); }
   .wave-status.running { border-color: var(--color-blue); color: var(--color-blue); background: rgb(108 182 255 / 12%); }
   .wave-status.unstarted { border-color: var(--color-dim); color: var(--color-dim); background: rgb(95 107 120 / 12%); }
   .wave-carved { font-size: .78rem; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: var(--color-carved); border: 1px solid var(--color-carved); background: rgb(163 113 247 / 12%); border-radius: 999px; padding: .1rem .5rem; }
-  .wave-issues { list-style: none; margin: .7rem 0 0; padding: 0; }
-  .wave-issue { color: var(--color-text-light); font-size: .9rem; padding: .15rem 0; }
-  .wave-issue.carved { color: var(--color-text-light-2); text-decoration: line-through; }
   /* Status dot colours, generated once from stateColor and shared with the landing
      (§3), scoped to .dot so a state never tints a whole chip, card, or list row (#81). */
   ${STATE_DOT_CSS}
   textarea { width: 100%; max-width: 100%; min-height: 7rem; margin: .5rem 0; color: var(--color-text); background: var(--color-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: .75rem; }
-  button.chip { cursor: pointer; color: inherit; font: inherit; }
 ${ISSUE_DETAIL_SHEET_STYLES}
   .carve-fallback form { display: inline; }
   form button { padding: .5rem .8rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: #04110f; cursor: pointer; font-weight: 700; }
@@ -1539,10 +1546,11 @@ ${issueDetailSheetMarkup(Boolean(opts.carve))}${
 ${ISSUE_DETAIL_SHEET_SCRIPT}
 ${REPO_DROPDOWN_SCRIPT}
 ${ARCHIVE_LIST_SCRIPT}
-  // A live chip and a parked card both open the sheet, carrying their issue+project.
-  // The parked card is an <a> with a no-JS href, so its click is prevented before the
-  // sheet opens; a chip is a button, where preventDefault is harmless.
-  document.querySelectorAll(".chip[data-issue], .parked-card[data-issue]").forEach((el) =>
+  // A live wave-member row and a parked card both open the sheet, carrying their
+  // issue+project. The parked card is an <a> with a no-JS href, so its click is
+  // prevented before the sheet opens; a member row is a button, where preventDefault
+  // is harmless.
+  document.querySelectorAll(".wave-member[data-issue], .parked-card[data-issue]").forEach((el) =>
     el.addEventListener("click", (event) => { event.preventDefault(); openIssue(el.dataset.project, el.dataset.issue, el.dataset.carvable === "1", el.dataset.run); }));
   // Closed-wave toggles: each chip reveals/hides its own wave card in the grid. The set
   // of open waves is persisted per project so a live /api/events reload — which reloads

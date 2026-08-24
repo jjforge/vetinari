@@ -800,13 +800,30 @@ export const projectRunState = (status: CampaignStatus): RunState => {
  * way in tests and in the server. */
 const sameUtcDay = (iso: string, day: Date) => iso.slice(0, 10) === day.toISOString().slice(0, 10);
 
-/** The events of a project's most recent archived run (newest by archive
- * filename), or an empty list when it has none — the run an idle project's card and
- * the landing's merged-today counter read from, since a completed run's merges live
- * in its archive, not the cleared live log (#70). */
-const latestArchivedEvents = (baseLocation: string): any[] => {
-  const [latest] = listArchivedRuns(baseLocation);
-  return latest ? readEvents({ logFile: latest.file }) : [];
+/**
+ * How many of a project's issues merged (completed) on `now`'s day, counted across
+ * *every* one of its runs — the live run plus every archived run
+ * (`listArchivedRuns`), not just the latest (#97). Each run is reduced
+ * independently and an issue that completed today in it is added to a per-project
+ * set, so an issue appearing in more than one run (a re-run) is counted once. Read-
+ * only over the logs (ADR 0002); a run whose reduce throws is skipped with a log
+ * line so one bad archive can never zero the count. "Today" is the UTC day (see
+ * `sameUtcDay`) — near midnight this can disagree with the operator's local day.
+ */
+const mergedTodayForProject = (baseLocation: string, liveEvents: any[], now: Date): number => {
+  const merged = new Set<string>();
+  const runs = [liveEvents, ...listArchivedRuns(baseLocation).map((r) => readEvents({ logFile: r.file }))];
+  for (const runEvents of runs) {
+    try {
+      const { mergedAt, outcomes } = reduceCampaign(runEvents);
+      for (const [issueNumber, ts] of mergedAt) {
+        if (outcomes.get(issueNumber) === "completed" && sameUtcDay(ts, now)) merged.add(issueNumber);
+      }
+    } catch (error) {
+      log("status-merged-today-skipped", { baseLocation, error: String(error) });
+    }
+  }
+  return merged.size;
 };
 
 const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, events: any[]): ProjectCard => {
@@ -881,14 +898,11 @@ export function buildLanding(pointers: ProjectPointer[], now: Date = new Date())
     const cfg = statusConfigFromPointer(pointer);
     const events = readEvents(cfg);
     const status = buildStatus(cfg);
-    // merged-today reads the run the card shows: the live run when one is in flight,
-    // else the latest archived run — a completed run's merges live in its archive,
-    // not the cleared live log, so an idle-but-merged-today project still counts (#70).
-    const mergeEvents = status.waves.length ? events : latestArchivedEvents(pointer.baseLocation);
-    const { mergedAt, outcomes } = reduceCampaign(mergeEvents);
-    for (const [issueNumber, ts] of mergedAt) {
-      if (outcomes.get(issueNumber) === "completed" && sameUtcDay(ts, now)) mergedToday++;
-    }
+    // merged-today counts every issue merged today across all of the project's runs
+    // — the live run plus every archived run, deduped per issue — so a project that
+    // ran several campaigns today counts them all, not just its latest run (#97).
+    // A completed run's merges live in its archive, not the cleared live log (#70).
+    mergedToday += mergedTodayForProject(pointer.baseLocation, events, now);
     // The same active parked records the project's campaign view shows, tagged
     // with their repo so the landing can list them cross-repo.
     for (const p of status.parked) {

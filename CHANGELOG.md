@@ -162,6 +162,25 @@ repos` (repos with a running agent), parked `oldest <Nm>` (the oldest parked
 
 ### Changed
 
+- The repo page's **archived runs** are now a **collapsible list** instead of a bare
+  list of links (#98). Each row shows the campaign name, the run's start time (parsed
+  from its runId, rendered `Aug 23, 2026 · 22:22:36 UTC`), a state dot reading
+  **`complete`** (the run reached its terminal `campaign-done`/`queue-done`) or
+  **`interrupted`** (it was cut short — killed mid-wave, or halted with later waves
+  never run), the issue count, and a joined **`campaign` / `raw log`** control.
+  Clicking a row expands it inline (campaign by default); the control switches mode
+  without collapsing; one row is open at a time and the open row is tinted. Campaign
+  mode reuses the **live wave renderer** read-only — its issue chips open the normal
+  issue-detail sheet against the archived run's own log (via `GET /api/issue?…&run=`),
+  so an archived issue reads exactly like a live one. Raw-log mode renders the log
+  verbatim client-side from the existing `GET /archive/log`: one JSONL line per row
+  with `#L<n>` line-number anchors (which update the URL, so a line is shareable),
+  JSON syntax colouring, wrapped long lines, a text filter over the raw line, a
+  `<shown> of <total> lines` footer, and an empty-result state. The list is capped at
+  the **20 newest** runs with a **"show older"** control. All of it is derived from
+  the archived logs — no new persistence, and correct for archives written before this
+  feature existed.
+
 - The all-repos landing's activity feed now reads as the POC's **event log** (#95).
   The header is **"Event log · all repos"** with a live dot (was "Recent activity");
   each row's timestamp is compact **HH:MM** for a same-day event, falling back to a

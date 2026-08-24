@@ -12,6 +12,7 @@ import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import {
   appendedEvents,
+  ARCHIVE_LIST_SCRIPT,
   buildAllStatus,
   buildFeed,
   buildLanding,
@@ -23,6 +24,7 @@ import {
   extractParkedDetails,
   formatFeedEvent,
   formatStatusText,
+  highlightJsonLine,
   ISSUE_DETAIL_SHEET_SCRIPT,
   ISSUE_DETAIL_SHEET_STYLES,
   issueDetailSheetMarkup,
@@ -31,6 +33,7 @@ import {
   ownerRepoFromRemote,
   parkedReplyFor,
   parseCarveClosure,
+  parseRunTimestamp,
   reconstructIssueDetail,
   projectRunState,
   reduceCampaign,
@@ -1246,7 +1249,7 @@ test("renderLandingShell opens a parked-queue row's issue detail inline, not by 
   assert.match(html, /id="carve-panel"/);
   // openIssue is defined here, and a parked row opens it in place — the click is
   // intercepted so the row never does the full navigation to the campaign page.
-  assert.match(html, /const openIssue = async \(project, issue, carvable\)/);
+  assert.match(html, /const openIssue = async \(project, issue, carvable, run\)/);
   assert.match(
     html,
     /row\.addEventListener\("click", \(event\) => \{ event\.preventDefault\(\); openIssue\(p\.project, p\.issueNumber, true\); \}\)/,
@@ -1293,7 +1296,7 @@ test("the issue-detail sheet markup, CSS, and script are defined once and shared
   // renderReply/closeSheet/carve wiring), included by both pages verbatim.
   assert.ok(
     ISSUE_DETAIL_SHEET_SCRIPT.includes(
-      "const openIssue = async (project, issue, carvable)",
+      "const openIssue = async (project, issue, carvable, run)",
     ),
   );
   assert.ok(ISSUE_DETAIL_SHEET_SCRIPT.includes("const closeSheet = () =>"));
@@ -2403,29 +2406,37 @@ test("serveAllStatus lists a project's archived runs and renders one read-only w
     const root = await (
       await fetch(`http://127.0.0.1:${port}/?project=beta`)
     ).text();
-    // The archived-runs list shows both good runs, newest-first, with summaries;
-    // the live run (201) still renders at the top.
+    // The collapsible archived-runs list shows both good runs, newest-first; the live
+    // run (201) still renders at the top.
     assert.match(root, /#201 <small>/);
     assert.match(root, /<section class="archived-runs">/);
-    // Unnamed runs → the timestamp token is the primary label, the summary secondary.
+    // Each row carries its token, state (a halted run reads interrupted — it stopped
+    // short) and issue count; unnamed runs fall back to the token as the label.
     assert.match(
       root,
-      /run=2026-02-01T00-00-00-000Z"[^>]*>2026-02-01T00-00-00-000Z<\/a> <span class="run-summary">campaign · 1 issue · halted<\/span>/,
+      /<li class="archive-row" data-run="2026-02-01T00-00-00-000Z">/,
     );
+    assert.match(root, /interrupted · 1 issue<\/span>/);
     assert.match(
       root,
-      /run=2026-01-01T00-00-00-000Z"[^>]*>2026-01-01T00-00-00-000Z<\/a> <span class="run-summary">campaign · 2 issues · complete<\/span>/,
+      /<li class="archive-row" data-run="2026-01-01T00-00-00-000Z">/,
     );
+    assert.match(root, /complete · 2 issues<\/span>/);
     assert.ok(
       root.indexOf("2026-02-01") < root.indexOf("2026-01-01"),
       "newest-first",
     );
     // The malformed run is skipped, never listed.
     assert.doesNotMatch(root, /2026-03-01/);
-    // No run selected → no archived-run body yet.
-    assert.doesNotMatch(root, /class="archived-run"/);
+    // No run selected → every row starts collapsed.
+    assert.doesNotMatch(root, /class="archive-row open"/);
+    // Each row also ships its raw-log pane, keyed to the run for the client fetch.
+    assert.match(
+      root,
+      /data-pane="raw" data-project="beta" data-run="2026-01-01T00-00-00-000Z"/,
+    );
 
-    // Selecting a run renders it read-only below the live run, additively.
+    // Selecting a run opens that row on load (a ?run= deep-link).
     const withRun = await (
       await fetch(
         `http://127.0.0.1:${port}/?project=beta&run=2026-01-01T00-00-00-000Z`,
@@ -2434,19 +2445,19 @@ test("serveAllStatus lists a project's archived runs and renders one read-only w
     assert.match(withRun, /#201 <small>/); // live run still on top
     assert.match(
       withRun,
-      /<section class="archived-run"><h2>Archived run 2026-01-01T00-00-00-000Z<\/h2>/,
+      /<li class="archive-row open" data-run="2026-01-01T00-00-00-000Z">/,
     );
-    assert.match(withRun, /#101 <small>/); // the archived run's own issues
-    // Read-only: the archived run's chips carry no carve data and there is no
-    // answer form for it.
-    assert.doesNotMatch(withRun, /data-issue="101"/);
+    assert.match(withRun, /#101 <small>/); // the archived run's own issues, in its pane
+    // Read-only: the archived run's chips are never carvable (a finished run has
+    // nothing to carve).
+    assert.doesNotMatch(withRun, /data-issue="101"[^>]*data-carvable/);
 
-    // A run not present in the archive listing is rejected — no traversal, no body.
+    // A run not present in the archive listing is rejected — no row opens.
     const bogus = await fetch(
       `http://127.0.0.1:${port}/?project=beta&run=..%2F..%2Forchestrator`,
     );
     assert.equal(bogus.status, 200);
-    assert.doesNotMatch(await bogus.text(), /class="archived-run"/);
+    assert.doesNotMatch(await bogus.text(), /class="archive-row open"/);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -2506,22 +2517,77 @@ test("serveAllStatus reconstructs a carved issue in a selected archived run, rea
         `http://127.0.0.1:${port}/?project=beta&run=2026-04-01T00-00-00-000Z`,
       )
     ).text();
-    // The archived run renders read-only under its --name, in the wave/chip treatment.
-    assert.match(
-      html,
-      /<section class="archived-run"><h2>Archived run spring cleanup /,
-    );
-    // The carved-out 201 is reconstructed as a carved chip in the wave it left, so an
-    // operator can see what the run was carved down to (ADR 0007).
+    // The archived run renders under its --name in the collapsible list…
+    assert.match(html, /<span class="archive-name">spring cleanup<\/span>/);
+    // …and its campaign pane reconstructs the carved-out 201 as a carved chip in the
+    // wave it left, so an operator can see what the run was carved down to (ADR 0007).
     assert.match(
       html,
       /<span class="dot carved"><\/span>#201 <small>carved<\/small>/,
     );
-    // Read-only: the archived carved chip carries no carve/open data — it is inert.
-    assert.doesNotMatch(html, /data-issue="201"/);
-    assert.doesNotMatch(
-      html,
-      /data-carvable="1"[^>]*>[^<]*<span class="dot carved">/,
+    // Read-only: the archived carved chip is never carvable.
+    assert.doesNotMatch(html, /data-carvable="1"[^>]*<span class="dot carved">/);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serveAllStatus GET /api/issue reads an archived run's own log when a run token is given", async () => {
+  const configDir = join(tmpdir(), `sctdd-api-issue-archive-${Date.now()}`);
+  const betaDir = join(configDir, "state-beta");
+  // The live log names 101 nowhere — its detail lives only in the archived run.
+  seedState(betaDir, [{ event: "campaign-start", batches: [["900"]] }]);
+  const archiveDir = join(betaDir, "logs", "archive");
+  mkdirSync(archiveDir, { recursive: true });
+  writeJsonl(join(archiveDir, "orchestrator-2026-01-01T00-00-00-000Z.jsonl"), [
+    { event: "campaign-start", batches: [["101"]], titles: { "101": "old work" } },
+    {
+      ts: "2026-01-01T00:01:00.000Z",
+      event: "turn",
+      taskId: "101",
+      turn: 0,
+      summary: "did the thing",
+    },
+    { ts: "2026-01-01T00:02:00.000Z", event: "green", taskId: "101", branch: "agent/101" },
+    { event: "campaign-done", batches: 1 },
+  ]);
+  register(configDir, {
+    project: "beta",
+    projectRoot: join(configDir, "beta-root"),
+    baseLocation: betaDir,
+  });
+
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const { port } = server.address() as AddressInfo;
+  try {
+    // With the run token, the detail is reconstructed from the archived log: its
+    // title, completed status, and the archived turn appear, flagged read-only.
+    const withRun = await (
+      await fetch(
+        `http://127.0.0.1:${port}/api/issue?project=beta&issue=101&run=2026-01-01T00-00-00-000Z`,
+      )
+    ).json();
+    assert.equal(withRun.status, "completed");
+    assert.equal(withRun.title, "old work");
+    assert.equal(withRun.archived, true);
+    assert.equal(withRun.turnLog.length, 1);
+    assert.equal(withRun.turnLog[0].summary, "did the thing");
+
+    // Without a run token it reads the live log, where 101 is unknown → unstarted.
+    const live = await (
+      await fetch(`http://127.0.0.1:${port}/api/issue?project=beta&issue=101`)
+    ).json();
+    assert.equal(live.status, "unstarted");
+    assert.equal(live.turnLog.length, 0);
+
+    // An unlisted run token is rejected, never a path to traverse.
+    assert.equal(
+      (
+        await fetch(
+          `http://127.0.0.1:${port}/api/issue?project=beta&issue=101&run=..%2F..%2Forchestrator`,
+        )
+      ).status,
+      404,
     );
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -4094,160 +4160,327 @@ test("switching scope resets the view: it navigates (fresh sheet) and closed-wav
   );
 });
 
-test("renderStatusPage lists archived runs and renders a selected one read-only below the live run", () => {
+// A minimal reconstructed run status for an archived row's campaign pane — a
+// single closed wave holding one completed issue chip.
+const archStatus = (issue: string): CampaignStatus => ({
+  project: "beta",
+  waves: [
+    {
+      index: 0,
+      status: "closed",
+      issues: [{ issueNumber: issue, status: "completed" }],
+    },
+  ],
+  parked: [],
+});
+
+test("renderStatusPage renders archived runs as a collapsible list with per-row state, time and a joined mode control", () => {
   const html = renderStatusPage(
     {
       project: "beta",
-      // A live run with a still-carvable (unstarted) chip: proves the live view keeps carve.
       waves: [
         {
           index: 0,
-          status: "unstarted",
+          status: "running",
           issues: [{ issueNumber: "201", status: "unstarted" }],
         },
       ],
       parked: [],
     },
     {
-      carve: true,
       selected: "beta",
       archivedRuns: [
         {
-          run: "2026-02-01T00-00-00-000Z",
-          summary: "campaign · 2 issues · complete",
+          run: "2026-02-01T22-22-36-267Z",
+          name: "comms + dashboard",
+          startedAt: "2026-02-01T22:22:36.267Z",
+          state: "complete",
+          issues: 3,
+          status: archStatus("101"),
         },
         {
           run: "2026-01-01T00-00-00-000Z",
-          summary: "queue · 1 issue · halted",
+          startedAt: "2026-01-01T00:00:00.000Z",
+          state: "interrupted",
+          issues: 1,
+          status: archStatus("111"),
         },
       ],
-      archivedRun: "2026-02-01T00-00-00-000Z",
-      archived: {
-        project: "beta",
-        waves: [
-          {
-            index: 0,
-            status: "unstarted",
-            issues: [{ issueNumber: "301", status: "unstarted" }],
-          },
-        ],
-        parked: [],
-      },
     },
   );
 
-  // An archived-runs list, newest-first, each a link carrying project + run token.
-  // These runs are unnamed, so the primary label falls back to the timestamp token,
-  // with the mode·issues·outcome summary as a secondary label beside it.
   assert.match(html, /<section class="archived-runs"><h2>Archived runs<\/h2>/);
+  assert.match(html, /<ul class="archive-list" data-project="beta">/);
+  // A collapsed row carries its run token, name label, the runId parsed to a UTC
+  // clock, and a state dot with `state · N issues`.
   assert.match(
     html,
-    /<a href="\/\?project=beta&amp;run=2026-02-01T00-00-00-000Z"[^>]*>2026-02-01T00-00-00-000Z<\/a> <span class="run-summary">campaign · 2 issues · complete<\/span>/,
+    /<li class="archive-row" data-run="2026-02-01T22-22-36-267Z">/,
+  );
+  assert.match(html, /<span class="archive-name">comms \+ dashboard<\/span>/);
+  assert.match(
+    html,
+    /<span class="archive-when">Feb 1, 2026 · 22:22:36 UTC<\/span>/,
   );
   assert.match(
     html,
-    /<a href="\/\?project=beta&amp;run=2026-01-01T00-00-00-000Z"[^>]*>2026-01-01T00-00-00-000Z<\/a> <span class="run-summary">queue · 1 issue · halted<\/span>/,
+    /<span class="archive-state complete"><span class="archive-dot complete"><\/span>complete · 3 issues<\/span>/,
+  );
+  // An unnamed run falls back to its token as the label; issue count pluralizes.
+  assert.match(html, /<span class="archive-name">2026-01-01T00-00-00-000Z<\/span>/);
+  assert.match(
+    html,
+    /<span class="archive-state interrupted"><span class="archive-dot interrupted"><\/span>interrupted · 1 issue<\/span>/,
+  );
+  // The joined campaign/raw-log control, campaign the active (pressed) side by default.
+  assert.match(
+    html,
+    /<button type="button" class="archive-mode active" data-mode="campaign" aria-pressed="true">campaign<\/button>/,
+  );
+  assert.match(
+    html,
+    /<button type="button" class="archive-mode" data-mode="raw" aria-pressed="false">raw log<\/button>/,
+  );
+  // Campaign mode reuses the live wave renderer — the run's own issue chip renders.
+  assert.match(
+    html,
+    /<div class="archive-pane archive-campaign" data-pane="campaign">[\s\S]*#101 <small>/,
+  );
+  // Raw mode ships a scaffold the client fills: filename header + a text filter.
+  assert.match(
+    html,
+    /<div class="archive-pane archive-raw" data-pane="raw" data-project="beta" data-run="2026-02-01T22-22-36-267Z" hidden>/,
+  );
+  assert.match(
+    html,
+    /<div class="archive-raw-header">orchestrator-2026-02-01T22-22-36-267Z\.jsonl<\/div>/,
+  );
+  assert.match(html, /<input type="text" class="archive-raw-filter"/);
+  // Bodies start collapsed (hidden) and rows render newest-first (order preserved).
+  assert.match(
+    html,
+    /<div class="archive-body" id="archive-body-2026-02-01T22-22-36-267Z" hidden>/,
   );
   assert.ok(
-    html.indexOf(">campaign · 2 issues · complete<") <
-      html.indexOf(">queue · 1 issue · halted<"),
-    "archived runs list newest-first",
+    html.indexOf("2026-02-01T22-22-36-267Z") <
+      html.indexOf("2026-01-01T00-00-00-000Z"),
+    "newest-first",
   );
-
-  // Each run also links to its raw event log.
-  assert.match(
-    html,
-    /<a href="\/archive\/log\?project=beta&amp;run=2026-02-01T00-00-00-000Z">raw log<\/a>/,
-  );
-  assert.match(
-    html,
-    /<a href="\/archive\/log\?project=beta&amp;run=2026-01-01T00-00-00-000Z">raw log<\/a>/,
-  );
-
-  // The selected run's own wave/issue view renders in its own section.
-  assert.match(html, /<section class="archived-run">/);
-  assert.match(html, /#301 <small>/);
-
-  // The live run still carries carve (its unstarted 201 chip is carvable)…
-  assert.match(html, /data-issue="201"[^>]*data-carvable="1"/);
-  // …but the archived render is read-only: its 301 chip gets no carve data at all.
-  assert.doesNotMatch(html, /data-issue="301"/);
+  // A short list has no show-older control.
+  assert.doesNotMatch(html, /<button[^>]*class="archive-show-older"/);
 });
 
-test("renderStatusPage shows the run name in the live header, and names vs timestamps in the archive", () => {
+test("renderStatusPage shows an interrupted run as interrupted and still expands it to its partial waves", () => {
   const html = renderStatusPage(
+    { project: "beta", waves: [], parked: [] },
     {
-      project: "beta",
-      name: "gateway work",
-      waves: [
+      selected: "beta",
+      // A run cut short: wave 1 merged, wave 2 was in flight when it stopped.
+      archivedRun: "2026-05-01T00-00-00-000Z",
+      archivedRuns: [
         {
-          index: 0,
-          status: "running",
-          issues: [{ issueNumber: "201", status: "running" }],
+          run: "2026-05-01T00-00-00-000Z",
+          startedAt: "2026-05-01T00:00:00.000Z",
+          state: "interrupted",
+          issues: 2,
+          status: {
+            project: "beta",
+            waves: [
+              {
+                index: 0,
+                status: "closed",
+                issues: [{ issueNumber: "101", status: "completed" }],
+              },
+              {
+                index: 1,
+                status: "running",
+                issues: [{ issueNumber: "201", status: "running" }],
+              },
+            ],
+            parked: [],
+          },
         },
       ],
-      parked: [],
     },
+  );
+
+  // The row reads interrupted…
+  assert.match(
+    html,
+    /<span class="archive-state interrupted"><span class="archive-dot interrupted"><\/span>interrupted · 2 issues<\/span>/,
+  );
+  // …and, opened, its campaign pane still shows the partial waves it did run.
+  const paneStart = html.indexOf('class="archive-pane archive-campaign"');
+  const pane = html.slice(
+    paneStart,
+    html.indexOf('class="archive-pane archive-raw"', paneStart),
+  );
+  assert.match(pane, /#101 <small>completed<\/small>/);
+  assert.match(pane, /#201 <small>running<\/small>/);
+});
+
+test("renderStatusPage opens the archived row named by archivedRun, in the requested mode", () => {
+  const html = renderStatusPage(
+    { project: "beta", waves: [], parked: [] },
+    {
+      selected: "beta",
+      archivedRun: "2026-02-01T00-00-00-000Z",
+      archivedMode: "raw",
+      archivedRuns: [
+        {
+          run: "2026-02-01T00-00-00-000Z",
+          startedAt: "2026-02-01T00:00:00.000Z",
+          state: "complete",
+          issues: 1,
+          status: archStatus("101"),
+        },
+      ],
+    },
+  );
+
+  // The named row opens: its toggle expanded, its body shown.
+  assert.match(
+    html,
+    /<li class="archive-row open" data-run="2026-02-01T00-00-00-000Z">/,
+  );
+  assert.match(
+    html,
+    /<button type="button" class="archive-toggle" aria-expanded="true"/,
+  );
+  assert.match(
+    html,
+    /<div class="archive-body" id="archive-body-2026-02-01T00-00-00-000Z">/,
+  );
+  // Raw is the pressed side; the raw pane shows and the campaign pane hides.
+  assert.match(
+    html,
+    /<button type="button" class="archive-mode active" data-mode="raw" aria-pressed="true">raw log<\/button>/,
+  );
+  assert.match(
+    html,
+    /<div class="archive-pane archive-campaign" data-pane="campaign" hidden>/,
+  );
+  assert.match(
+    html,
+    /<div class="archive-pane archive-raw" data-pane="raw" data-project="beta" data-run="2026-02-01T00-00-00-000Z">/,
+  );
+});
+
+test("renderStatusPage ships the archived-list client wiring: toggle, mode switch, raw fetch, filter, deep-link, show-older", () => {
+  const html = renderStatusPage(
+    { project: "beta", waves: [], parked: [] },
     {
       selected: "beta",
       archivedRuns: [
-        // A named run: its name is the primary label, the summary stays secondary.
         {
           run: "2026-02-01T00-00-00-000Z",
-          summary: "campaign · 2 issues · complete",
-          name: "comms + dashboard",
-        },
-        // An unnamed run: it falls back to its timestamp token as the primary label.
-        {
-          run: "2026-01-01T00-00-00-000Z",
-          summary: "queue · 1 issue · halted",
+          startedAt: "2026-02-01T00:00:00.000Z",
+          state: "complete",
+          issues: 1,
+          status: archStatus("101"),
         },
       ],
-      archivedRun: "2026-02-01T00-00-00-000Z",
-      archived: {
-        project: "beta",
-        name: "comms + dashboard",
-        waves: [
-          {
-            index: 0,
-            status: "unstarted",
-            issues: [{ issueNumber: "301", status: "unstarted" }],
-          },
-        ],
-        parked: [],
-      },
     },
   );
+  // The page embeds the archived-list script…
+  assert.ok(html.includes(ARCHIVE_LIST_SCRIPT), "page includes ARCHIVE_LIST_SCRIPT");
+  // …one row open at a time (opening closes the others)…
+  assert.match(
+    ARCHIVE_LIST_SCRIPT,
+    /for \(const other of archiveRows\) if \(other !== row && other\.classList\.contains\("open"\)\) closeRow\(other\);/,
+  );
+  // …raw mode fetches the existing /archive/log endpoint, no second endpoint…
+  assert.match(
+    ARCHIVE_LIST_SCRIPT,
+    /fetch\("\/archive\/log\?project=" \+ encodeURIComponent\(pane\.dataset\.project\) \+ "&run=" \+ encodeURIComponent\(pane\.dataset\.run\)\)/,
+  );
+  // …renders one line per row with a #L<n> anchor that the browser puts in the URL…
+  assert.match(ARCHIVE_LIST_SCRIPT, /a\.href = "#L" \+ n;/);
+  assert.match(ARCHIVE_LIST_SCRIPT, /el\.id = "L" \+ n;/);
+  // …colours each line through the shared, tested highlighter…
+  assert.match(ARCHIVE_LIST_SCRIPT, /code\.innerHTML = highlightJsonLine\(line\);/);
+  // …filters on the raw line text and reports <shown> of <total> lines…
+  assert.match(ARCHIVE_LIST_SCRIPT, /line\.toLowerCase\(\)\.indexOf\(needle\) === -1/);
+  assert.match(ARCHIVE_LIST_SCRIPT, /footer\.textContent = shown \+ " of " \+ lines\.length \+ " lines";/);
+  // …shows an empty-result state rather than a blank pane…
+  assert.match(ARCHIVE_LIST_SCRIPT, /archive-raw-empty/);
+  // …and reveals the older rows behind the cap on demand.
+  assert.match(
+    ARCHIVE_LIST_SCRIPT,
+    /showOlder\.addEventListener\("click", \(\) => \{ for \(const row of archiveRows\) row\.hidden = false;/,
+  );
+});
 
-  // The campaign meta line shows the campaign's name with its issue/wave counts.
+test("renderStatusPage makes archived campaign chips open the issue sheet against the archived run, read-only", () => {
+  const html = renderStatusPage(
+    { project: "beta", waves: [], parked: [] },
+    {
+      selected: "beta",
+      archivedRuns: [
+        {
+          run: "2026-02-01T00-00-00-000Z",
+          startedAt: "2026-02-01T00:00:00.000Z",
+          state: "complete",
+          issues: 1,
+          status: {
+            project: "beta",
+            waves: [
+              {
+                index: 0,
+                status: "closed",
+                issues: [{ issueNumber: "101", status: "completed" }],
+              },
+            ],
+            parked: [],
+          },
+        },
+      ],
+    },
+  );
+  // The chip carries its issue, project and the run token, so the shared sheet reads
+  // the archived run's own log (its turn log lives there, not in the live log).
   assert.match(
     html,
-    /<p class="campaign-meta"><span class="campaign-name">gateway work<\/span> · 1 issue · 1 wave<\/p>/,
+    /data-issue="101" data-project="beta" data-run="2026-02-01T00-00-00-000Z"/,
+  );
+  // Read-only: an archived chip is never carvable (a finished run has nothing to carve).
+  assert.doesNotMatch(html, /data-issue="101"[^>]*data-carvable/);
+  // The shared sheet forwards a run token to /api/issue so it can read the archive.
+  assert.match(
+    ISSUE_DETAIL_SHEET_SCRIPT,
+    /run \? "&run=" \+ encodeURIComponent\(run\) : ""/,
+  );
+});
+
+test("renderStatusPage caps the archived-runs list at 20 with a show-older control", () => {
+  const runs = Array.from({ length: 22 }, (_, i) => {
+    const day = String(22 - i).padStart(2, "0");
+    return {
+      run: `2026-01-${day}T00-00-00-000Z`,
+      startedAt: `2026-01-${day}T00:00:00.000Z`,
+      state: "complete" as const,
+      issues: 1,
+      status: archStatus(String(100 + i)),
+    };
+  });
+  const html = renderStatusPage(
+    { project: "beta", waves: [], parked: [] },
+    { selected: "beta", archivedRuns: runs },
   );
 
-  // Named run: the link text is the NAME, and the mode·issues·outcome summary is a secondary label.
-  assert.match(
-    html,
-    /run=2026-02-01T00-00-00-000Z"[^>]*>comms \+ dashboard<\/a>/,
+  // All 22 rows are in the DOM, but the two oldest render hidden behind the control.
+  assert.equal(
+    [...html.matchAll(/<li class="archive-row(?: open)?" data-run=/g)].length,
+    22,
+  );
+  assert.equal(
+    [...html.matchAll(/<li class="archive-row[^"]*" data-run="[^"]*" hidden>/g)]
+      .length,
+    2,
   );
   assert.match(
     html,
-    /<span class="run-summary">campaign · 2 issues · complete<\/span>/,
-  );
-  // Unnamed run: the link text falls back to the timestamp token.
-  assert.match(
-    html,
-    /run=2026-01-01T00-00-00-000Z"[^>]*>2026-01-01T00-00-00-000Z<\/a>/,
-  );
-  assert.match(
-    html,
-    /<span class="run-summary">queue · 1 issue · halted<\/span>/,
-  );
-
-  // The archived-run view carries the run's name beside its token.
-  assert.match(
-    html,
-    /<section class="archived-run"><h2>Archived run[^<]*comms \+ dashboard/,
+    /<button type="button" class="archive-show-older">Show 2 older runs<\/button>/,
   );
 });
 
@@ -5340,6 +5573,76 @@ test("listArchivedRuns returns nothing when a project has no archive directory",
   );
 });
 
+test("highlightJsonLine colours JSON keys, strings, numbers and literals distinctly, escaping content", () => {
+  const html = highlightJsonLine(
+    '{"event":"green","turn":3,"ok":true,"x":null}',
+  );
+  // A key (string followed by a colon) reads distinct from a plain string value;
+  // the quote characters are HTML-escaped in the source.
+  assert.match(html, /<span class="jkey">&quot;event&quot;<\/span>:/);
+  assert.match(html, /<span class="jstr">&quot;green&quot;<\/span>/);
+  assert.match(html, /<span class="jnum">3<\/span>/);
+  assert.match(html, /<span class="jbool">true<\/span>/);
+  assert.match(html, /<span class="jnull">null<\/span>/);
+  // HTML inside string content is escaped, never injected as live markup.
+  const esc = highlightJsonLine('{"t":"<b>&x</b>"}');
+  assert.match(
+    esc,
+    /<span class="jstr">&quot;&lt;b&gt;&amp;x&lt;\/b&gt;&quot;<\/span>/,
+  );
+  assert.doesNotMatch(esc, /<b>/);
+});
+
+test("parseRunTimestamp reverses an archive run token to an ISO timestamp, tolerating older tokens", () => {
+  // The token `archiveRun` writes: `toISOString().replace(/[:.]/g, "-")`.
+  assert.equal(
+    parseRunTimestamp("2026-08-23T22-22-36-267Z"),
+    "2026-08-23T22:22:36.267Z",
+  );
+  // Older archives were written without milliseconds and/or the trailing Z.
+  assert.equal(
+    parseRunTimestamp("2025-06-10T00-00-00"),
+    "2025-06-10T00:00:00.000Z",
+  );
+  // A token that isn't a timestamp yields undefined, so the row falls back to it verbatim.
+  assert.equal(parseRunTimestamp("not-a-stamp"), undefined);
+});
+
+test("listArchivedRuns carries each run's state, startedAt and issue count, derived from the log", () => {
+  const dir = join(tmpdir(), `sctdd-archive-fields-${Date.now()}`);
+  const archiveDir = join(dir, "logs", "archive");
+  mkdirSync(archiveDir, { recursive: true });
+  // A clean run that reached campaign-done: complete, three issues.
+  writeJsonl(join(archiveDir, "orchestrator-2026-01-01T00-00-00-000Z.jsonl"), [
+    { event: "campaign-start", batches: [["101", "102"], ["201"]] },
+    { event: "campaign-done", batches: 2 },
+  ]);
+  // A run whose log has a campaign-start but no terminal event — the process was
+  // killed mid-wave, so it reads interrupted and expands to its partial waves.
+  writeJsonl(join(archiveDir, "orchestrator-2026-02-01T00-00-00-000Z.jsonl"), [
+    { event: "campaign-start", batches: [["301"], ["302"]] },
+    { event: "campaign-batch", index: 0, tasks: ["301"] },
+  ]);
+  // A halted run stopped short — later waves never ran — so it too reads interrupted.
+  writeJsonl(join(archiveDir, "orchestrator-2026-03-01T00-00-00-000Z.jsonl"), [
+    { event: "campaign-start", batches: [["401"], ["402"]] },
+    { event: "campaign-halt", taskId: "401", reason: "gate failed" },
+  ]);
+
+  const runs = listArchivedRuns(dir);
+  const byRun = Object.fromEntries(runs.map((r) => [r.run, r]));
+
+  assert.equal(byRun["2026-01-01T00-00-00-000Z"].state, "complete");
+  assert.equal(byRun["2026-01-01T00-00-00-000Z"].issues, 3);
+  assert.equal(
+    byRun["2026-01-01T00-00-00-000Z"].startedAt,
+    "2026-01-01T00:00:00.000Z",
+  );
+  assert.equal(byRun["2026-02-01T00-00-00-000Z"].state, "interrupted");
+  assert.equal(byRun["2026-02-01T00-00-00-000Z"].issues, 2);
+  assert.equal(byRun["2026-03-01T00-00-00-000Z"].state, "interrupted");
+});
+
 test("summarizeRun folds an archived log into a one-line mode/issue-count/outcome summary", () => {
   // A finished campaign of two waves (three issues total) that completed.
   assert.equal(
@@ -5667,37 +5970,42 @@ test("renderStatusPage renders an archived run's closed waves as full cards, not
     },
     {
       selected: "beta",
-      archivedRun: "2026-02-01T00-00-00-000Z",
-      archived: {
-        project: "beta",
-        // A finished run — every wave is closed.
-        waves: [
-          {
-            index: 0,
-            status: "closed",
-            issues: [
-              { issueNumber: "101", status: "completed", name: "old work" },
+      archivedRuns: [
+        {
+          run: "2026-02-01T00-00-00-000Z",
+          startedAt: "2026-02-01T00:00:00.000Z",
+          state: "complete",
+          issues: 1,
+          // A finished run — every wave is closed.
+          status: {
+            project: "beta",
+            waves: [
+              {
+                index: 0,
+                status: "closed",
+                issues: [
+                  { issueNumber: "101", status: "completed", name: "old work" },
+                ],
+              },
             ],
+            parked: [],
           },
-        ],
-        parked: [],
-      },
+        },
+      ],
     },
   );
 
   // The live run's closed wave still uses the toggle (chip + hidden card, id closed-wave-0).
   assert.match(html, /aria-controls="closed-wave-0"/);
-  // The archived section renders its closed wave as a full, always-expanded card — no
-  // second toggle bar and no duplicated id="closed-wave-0" that would hijack the live card.
-  const archivedStart = html.indexOf('class="archived-run"');
-  const archived = html.slice(
-    archivedStart,
-    html.indexOf('<div id="issue-detail"', archivedStart),
-  );
-  assert.doesNotMatch(archived, /completed-wave-bar/);
-  assert.doesNotMatch(archived, /id="closed-wave-0"/);
+  // The archived row's campaign pane renders its closed wave as a full, always-expanded
+  // card — no second toggle bar and no duplicated id="closed-wave-0" that would hijack
+  // the live card.
+  const paneStart = html.indexOf('class="archive-pane archive-campaign"');
+  const pane = html.slice(paneStart, html.indexOf('class="archive-pane archive-raw"', paneStart));
+  assert.doesNotMatch(pane, /completed-wave-bar/);
+  assert.doesNotMatch(pane, /id="closed-wave-0"/);
   assert.match(
-    archived,
+    pane,
     /<section class="wave closed"><div class="wave-head"><h2>Wave 1 — old work <span class="wave-status closed">closed<\/span>/,
   );
   // Exactly one element carries the toggle id across the whole page (no duplicate ids).

@@ -1694,9 +1694,10 @@ test("renderLandingShell gives each counter a payload-derived sublabel (#80)", (
   assert.match(html, /across " \+ /);
   assert.match(html, /oldest " \+ fmtWaited/);
   assert.match(html, /in later waves/);
-  // The counter is titled "Merged today"; its sublabel must agree — a merge is not
-  // a close (a merge is pending-verify; close happens later) (#97).
-  assert.match(html, /issues merged/);
+  // The counter is titled "Merged today" (the metric); its sublabel states the
+  // scope — the all-repos aggregate — matching the "across N repos" sibling (#104).
+  assert.match(html, /All repos/);
+  assert.doesNotMatch(html, /issues merged/);
   assert.doesNotMatch(html, /issues closed/);
 });
 

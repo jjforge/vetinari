@@ -1486,6 +1486,12 @@ test("renderLandingShell's feed caps at 20 rows behind a show-older control and 
   // The control reuses the archived-runs list's `archive-show-older` affordance.
   assert.match(html, /el\("button", "archive-show-older"/);
   assert.match(html, /older event/);
+  // `.feed-row { display: flex }` is an author rule that beats the UA `[hidden]`
+  // rule, so a hidden row would still paint (the whole 48h window, ~64,000px tall)
+  // unless display is restored explicitly — the archived-runs list guards the same
+  // trap with `.archive-row[hidden] { display: none }`. Assert the computed hiding
+  // (the CSS rule), not merely that `r.hidden` is set (#101).
+  assert.match(html, /\.feed-row\[hidden\] \{ display: none;? \}/);
 });
 
 test("renderLandingShell's feed reads as an event log: 'Event log · all repos' header with a live dot (#95)", () => {

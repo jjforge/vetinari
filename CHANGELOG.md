@@ -373,6 +373,12 @@ question` + a `waiting Nm · reason` meta line) that open the existing issue-det
   the archived-runs list, #98) that reveals the rest within the window, and an empty
   window now reads **"No activity in the last 48 hours."**
 
+- The landing **EVENT LOG** feed's "show older" rows now actually stay hidden (#101).
+  `.feed-row { display: flex }` is an author rule that beat the UA `[hidden]` rule, so
+  every capped-off row still painted and the landing rendered the whole 48h window
+  (~64,000px tall) despite the newest-20 cap. Added `.feed-row[hidden] { display: none }`
+  — the same guard the archived-runs list already carries as `.archive-row[hidden]`.
+
 - Dashboard pulse motion is now governed by **one control** (#100). A single root
   `data-paused` flag on the page body freezes every pulse at once — the green live dots
   and the blue running dots — through one CSS rule, so **pausing stills all dots**

@@ -1096,6 +1096,10 @@ ${TOP_BAR_STYLES}
      mono so it reads as a log heading, the live dot leading it. */
   .feed h2 { display: flex; align-items: center; gap: .5rem; color: var(--color-text-light-2); font-family: ${MONO_FONT}; font-size: .78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; margin: 0 0 .75rem; }
   .feed-row { display: flex; align-items: baseline; gap: .6rem .9rem; flex-wrap: wrap; padding: .5rem 0; border-bottom: 1px solid var(--color-light-border); font-size: .9rem; }
+  /* A flex display beats the UA [hidden] rule, so a row hidden behind "show older"
+     needs it back explicitly — otherwise the whole 48h window paints (#101), the
+     same trap the archived-runs list guards with .archive-row[hidden]. */
+  .feed-row[hidden] { display: none; }
   .feed-time { color: var(--color-text-light-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
   /* The kind reads as a clean lowercase namespace.verb code label (#95), so it is mono
      and no longer uppercased; its category still reads on the full-strength leading dot. */

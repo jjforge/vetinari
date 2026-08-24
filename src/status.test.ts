@@ -21,6 +21,7 @@ import {
   campaignRunning,
   DASHBOARD_PALETTE_CSS,
   describeEvent,
+  event,
   extractParkedDetails,
   formatFeedEvent,
   formatStatusText,
@@ -48,7 +49,7 @@ import {
   summarizeRun,
   TOP_BAR_STYLES,
 } from "./status.ts";
-import type { CampaignStatus } from "./status.ts";
+import type { CampaignStatus, OrchestratorEvent } from "./status.ts";
 import type { AddressInfo } from "node:net";
 import { register, type ProjectPointer } from "./registry.ts";
 
@@ -82,6 +83,11 @@ const seedState = (dir: string, events: unknown[]) => {
   mkdirSync(join(dir, "parked"), { recursive: true });
   writeJsonl(join(dir, "logs", "orchestrator.jsonl"), events);
 };
+
+// A raw orchestrator-log row of a kind the dashboard does not narrate — the machine
+// noise `readEventLog` carries as a cast-and-trusted `OrchestratorEvent` (event-log.ts).
+// The narrators skip it (their `default`/unmatched branch); tests model it the same way.
+const noise = (row: Record<string, unknown> & { event: string }): OrchestratorEvent => row as unknown as OrchestratorEvent;
 
 test("ownerRepoFromRemote parses SSH and HTTPS GitHub remotes to owner/name, and rejects garbage", () => {
   // SSH form, with the .git suffix stripped.
@@ -657,7 +663,7 @@ test("a merged event that names its issue only through its branch still renders 
   // The campaign wave-merge / per-issue green path can carry the issue number in
   // its `branch` (agent/<id>) rather than a `taskId`. The feed formatter must
   // recover it there so the row reads "#<issue> merged", not "#undefined merged".
-  assert.equal(describeEvent({ event: "green", branch: "agent/639" }), "#639 merged");
+  assert.equal(describeEvent(event("green", { taskId: "", branch: "agent/639", commits: [] })), "#639 merged");
 
   const base = join(tmpdir(), `sctdd-feed-branch-${Date.now()}`);
   const dir = join(base, "acme");
@@ -2848,55 +2854,47 @@ test("selectStatus picks the requested project, defaulting to the first otherwis
 
 test("describeEvent narrates the operator-facing events in plain words", () => {
   assert.equal(
-    describeEvent({ event: "campaign-start", name: "gateway work" }),
+    describeEvent(event("campaign-start", { batches: [["101"]], slots: 1, name: "gateway work" })),
     "Campaign “gateway work” started",
   );
-  assert.equal(describeEvent({ event: "campaign-start" }), "Campaign started");
+  assert.equal(describeEvent(event("campaign-start", { batches: [["101"]], slots: 1 })), "Campaign started");
   assert.equal(
-    describeEvent({ event: "campaign-batch", index: 1 }),
+    describeEvent(event("campaign-batch", { index: 1, tasks: ["201"] })),
     "Wave 2 started",
   );
   assert.equal(
-    describeEvent({
-      event: "campaign-batch-done",
-      index: 0,
-      merged: ["101", "102"],
-    }),
+    describeEvent(event("campaign-batch-done", { index: 0, merged: ["101", "102"], held: [], clearedParked: [] })),
     "Wave 1 merged #101, #102",
   );
   assert.equal(
-    describeEvent({ event: "campaign-batch-done", index: 2, merged: [] }),
+    describeEvent(event("campaign-batch-done", { index: 2, merged: [], held: [], clearedParked: [] })),
     "Wave 3 merged nothing",
   );
-  assert.equal(describeEvent({ event: "campaign-done" }), "Campaign complete");
+  assert.equal(describeEvent(event("campaign-done", { batches: 1 })), "Campaign complete");
   assert.equal(
-    describeEvent({ event: "campaign-halt", reason: "merge conflict" }),
+    describeEvent(event("campaign-halt", { index: 0, reason: "merge conflict" })),
     "Campaign halted: merge conflict",
   );
   assert.equal(
-    describeEvent({ event: "green", taskId: "#101" }),
+    describeEvent(event("green", { taskId: "#101", branch: "agent/101", commits: [] })),
     "#101 merged",
   );
   assert.equal(
-    describeEvent({ event: "parked", taskId: "202", reason: "needs a choice" }),
+    describeEvent(event("parked", { taskId: "202", reason: "needs a choice" })),
     "#202 parked: needs a choice",
   );
   assert.equal(
-    describeEvent({ event: "carve", removed: ["303", "304"] }),
+    describeEvent(event("carve", { target: "303", removed: ["303", "304"], dropped: ["303", "304"] })),
     "Carved #303, #304",
   );
   // A turn renders its agent-authored summary verbatim (ADR 0009), falling back when absent.
   assert.equal(
-    describeEvent({
-      event: "turn",
-      taskId: "101",
-      turn: 3,
-      summary: "Added a failing test for the counter",
-    }),
+    describeEvent(event("turn", { taskId: "101", turn: 3, summary: "Added a failing test for the counter" })),
     "Added a failing test for the counter",
   );
+  // An empty summary is the pre-summary case: the mechanical fallback line stands in.
   assert.equal(
-    describeEvent({ event: "turn", taskId: "101", turn: 3 }),
+    describeEvent(event("turn", { taskId: "101", turn: 3, summary: "" })),
     "#101 — turn 3",
   );
 });
@@ -2904,41 +2902,37 @@ test("describeEvent narrates the operator-facing events in plain words", () => {
 test("formatFeedEvent prefixes an event's plain-words sentence with its repo, and drops machine noise", () => {
   // A narratable event reads as one repo-prefixed sentence.
   assert.equal(
-    formatFeedEvent("alpha", { event: "green", taskId: "101" }),
+    formatFeedEvent("alpha", event("green", { taskId: "101", branch: "agent/101", commits: [] })),
     "alpha — #101 merged",
   );
   assert.equal(
-    formatFeedEvent("beta", {
-      event: "turn",
-      taskId: "201",
-      turn: 2,
-      summary: "Wrote a failing test",
-    }),
+    formatFeedEvent("beta", event("turn", { taskId: "201", turn: 2, summary: "Wrote a failing test" })),
     "beta — Wrote a failing test",
   );
   // An event describeEvent can't narrate (machine noise) yields no feed line.
   assert.equal(
-    formatFeedEvent("alpha", { event: "sandbox", taskId: "102" }),
+    formatFeedEvent("alpha", noise({ event: "sandbox", taskId: "102" })),
     "",
   );
 });
 
 test("lastEventText picks the most recent operator-facing event, ignoring machine noise", () => {
-  const events = [
+  const events: OrchestratorEvent[] = [
     {
       ts: "2025-01-01T00:00:00.000Z",
       event: "campaign-start",
       batches: [["101"]],
+      slots: 1,
     },
-    { ts: "2025-01-01T00:01:00.000Z", event: "green", taskId: "101" },
+    { ts: "2025-01-01T00:01:00.000Z", event: "green", taskId: "101", branch: "agent/101", commits: [] },
     // Machine noise after the meaningful event must not become the "last event".
-    {
+    noise({
       ts: "2025-01-01T00:02:00.000Z",
       event: "sandbox",
       taskId: "102",
       branch: "agent/102",
-    },
-    { ts: "2025-01-01T00:03:00.000Z", event: "gate", cmds: ["npm test"] },
+    }),
+    noise({ ts: "2025-01-01T00:03:00.000Z", event: "gate", cmds: ["npm test"] }),
   ];
   assert.equal(lastEventText(events), "#101 merged");
   assert.equal(lastEventText([]), "No activity yet");
@@ -2950,6 +2944,7 @@ test("reduceCampaign reconstructs a fresh campaign's waves with no wave running 
       ts: "2025-01-01T00:00:00.000Z",
       event: "campaign-start",
       batches: [["101", "102"], ["201"]],
+      slots: 1,
     },
   ]);
 
@@ -2969,6 +2964,7 @@ test("reduceCampaign reads an optional campaign name off the campaign-start even
         ts: "2025-01-01T00:00:00.000Z",
         event: "campaign-start",
         batches: [["101"]],
+        slots: 1,
         name: "gateway work",
       },
     ]).name,
@@ -2980,6 +2976,7 @@ test("reduceCampaign reads an optional campaign name off the campaign-start even
         ts: "2025-01-01T00:00:00.000Z",
         event: "campaign-start",
         batches: [["101"]],
+        slots: 1,
       },
     ]).name,
     undefined,
@@ -2991,12 +2988,14 @@ test("reduceCampaign reads an optional campaign name off the campaign-start even
         ts: "2025-01-01T00:00:00.000Z",
         event: "campaign-start",
         batches: [["1"]],
+        slots: 1,
         name: "first",
       },
       {
         ts: "2025-01-01T00:10:00.000Z",
         event: "campaign-start",
         batches: [["101"]],
+        slots: 1,
         name: "second",
       },
     ]).name,
@@ -3010,6 +3009,7 @@ test("reduceCampaign reports one completed wave closed and the next wave current
       ts: "2025-01-01T00:00:00.000Z",
       event: "campaign-start",
       batches: [["101"], ["201"]],
+      slots: 1,
     },
     {
       ts: "2025-01-01T00:01:00.000Z",
@@ -3023,6 +3023,7 @@ test("reduceCampaign reports one completed wave closed and the next wave current
       index: 0,
       merged: ["101"],
       held: [],
+      clearedParked: [],
     },
     {
       ts: "2025-01-01T00:03:00.000Z",
@@ -3045,6 +3046,7 @@ test("reduceCampaign records when each issue merged, from batch-done, green and 
       ts: "2025-01-01T00:00:00.000Z",
       event: "campaign-start",
       batches: [["101"], ["201", "202"]],
+      slots: 1,
     },
     {
       ts: "2025-01-01T00:02:00.000Z",
@@ -3052,8 +3054,9 @@ test("reduceCampaign records when each issue merged, from batch-done, green and 
       index: 0,
       merged: ["101"],
       held: [],
+      clearedParked: [],
     },
-    { ts: "2025-01-02T09:00:00.000Z", event: "green", taskId: "201" },
+    { ts: "2025-01-02T09:00:00.000Z", event: "green", taskId: "201", branch: "agent/201", commits: [] },
     {
       ts: "2025-01-02T10:00:00.000Z",
       event: "queue-done",
@@ -3074,6 +3077,7 @@ test("reduceCampaign marks a halted issue as a failure", () => {
       ts: "2025-01-01T00:00:00.000Z",
       event: "campaign-start",
       batches: [["101", "102"]],
+      slots: 1,
     },
     {
       ts: "2025-01-01T00:01:00.000Z",
@@ -3084,6 +3088,7 @@ test("reduceCampaign marks a halted issue as a failure", () => {
     {
       ts: "2025-01-01T00:02:00.000Z",
       event: "campaign-halt",
+      index: 0,
       taskId: "101",
       reason: "gate failed",
     },
@@ -3099,8 +3104,8 @@ test("reduceCampaign marks a halted issue as a failure", () => {
 test("campaignRunning is true for a started campaign that has not finished or halted", () => {
   assert.equal(
     campaignRunning([
-      { event: "campaign-start", batches: [["101"], ["201"]] },
-      { event: "campaign-batch", index: 0, tasks: ["101"] },
+      event("campaign-start", { batches: [["101"], ["201"]], slots: 1 }),
+      event("campaign-batch", { index: 0, tasks: ["101"] }),
     ]),
     true,
   );
@@ -3108,22 +3113,22 @@ test("campaignRunning is true for a started campaign that has not finished or ha
 
 test("campaignRunning is false with no campaign, and once it completes or halts", () => {
   assert.equal(
-    campaignRunning([{ event: "queue-start", taskIds: ["101"] }]),
+    campaignRunning([event("queue-start", { taskIds: ["101"], slots: 1 })]),
     false,
     "queue-only run is not a campaign",
   );
   assert.equal(
     campaignRunning([
-      { event: "campaign-start", batches: [["101"]] },
-      { event: "campaign-done", batches: 1 },
+      event("campaign-start", { batches: [["101"]], slots: 1 }),
+      event("campaign-done", { batches: 1 }),
     ]),
     false,
     "a completed campaign is not running",
   );
   assert.equal(
     campaignRunning([
-      { event: "campaign-start", batches: [["101"]] },
-      { event: "campaign-halt", taskId: "101", reason: "gate failed" },
+      event("campaign-start", { batches: [["101"]], slots: 1 }),
+      event("campaign-halt", { index: 0, taskId: "101", reason: "gate failed" }),
     ]),
     false,
     "a halted campaign is not running",
@@ -3134,9 +3139,9 @@ test("campaignRunning tracks the latest campaign only", () => {
   // An earlier campaign finished; a fresh one started after it is what counts.
   assert.equal(
     campaignRunning([
-      { event: "campaign-start", batches: [["1"]] },
-      { event: "campaign-done", batches: 1 },
-      { event: "campaign-start", batches: [["101"], ["201"]] },
+      event("campaign-start", { batches: [["1"]], slots: 1 }),
+      event("campaign-done", { batches: 1 }),
+      event("campaign-start", { batches: [["101"], ["201"]], slots: 1 }),
     ]),
     true,
   );
@@ -3148,6 +3153,7 @@ test("reduceCampaign folds a carve event, pruning unfinished issues from future 
       ts: "2025-01-01T00:00:00.000Z",
       event: "campaign-start",
       batches: [["101"], ["201", "202"], ["301"]],
+      slots: 1,
     },
     {
       ts: "2025-01-01T00:01:00.000Z",
@@ -3161,6 +3167,7 @@ test("reduceCampaign folds a carve event, pruning unfinished issues from future 
       index: 0,
       merged: ["101"],
       held: [],
+      clearedParked: [],
     },
     {
       ts: "2025-01-01T00:03:00.000Z",
@@ -3180,6 +3187,7 @@ test("reduceCampaign folds a carve event, pruning unfinished issues from future 
       event: "carve",
       target: "202",
       removed: ["202", "301"],
+      dropped: ["301"],
     },
   ]);
 
@@ -3196,6 +3204,7 @@ test("reduceCampaign's carve fold clears an emptied future wave and reindexes", 
       ts: "2025-01-01T00:00:00.000Z",
       event: "campaign-start",
       batches: [["101"], ["201"], ["301"]],
+      slots: 1,
     },
     {
       ts: "2025-01-01T00:01:00.000Z",
@@ -3209,6 +3218,7 @@ test("reduceCampaign's carve fold clears an emptied future wave and reindexes", 
       index: 0,
       merged: ["101"],
       held: [],
+      clearedParked: [],
     },
     // Between waves: 201 not yet started, so carving it empties and drops its wave.
     {
@@ -3216,6 +3226,7 @@ test("reduceCampaign's carve fold clears an emptied future wave and reindexes", 
       event: "carve",
       target: "201",
       removed: ["201"],
+      dropped: ["201"],
     },
   ]);
 
@@ -3230,6 +3241,7 @@ test("reconstructIssueDetail folds an issue's turn log, count, elapsed and statu
         ts: "2025-01-01T00:00:00.000Z",
         event: "campaign-start",
         batches: [["101"], ["201"]],
+        slots: 1,
         titles: { "101": "Do the thing" },
         name: "gateway work",
       },
@@ -3260,6 +3272,7 @@ test("reconstructIssueDetail folds an issue's turn log, count, elapsed and statu
         event: "green",
         taskId: "101",
         branch: "agent/101",
+        commits: ["abc123"],
       },
     ],
     "101",
@@ -3291,6 +3304,7 @@ test("reconstructIssueDetail surfaces the preserved worktree path for a parked i
         ts: "2025-01-01T00:00:00.000Z",
         event: "campaign-start",
         batches: [["102"]],
+        slots: 1,
         name: "gateway work",
       },
       {
@@ -5929,24 +5943,24 @@ test("summarizeRun folds an archived log into a one-line mode/issue-count/outcom
   // A finished campaign of two waves (three issues total) that completed.
   assert.equal(
     summarizeRun([
-      { event: "campaign-start", batches: [["101", "102"], ["201"]] },
-      { event: "campaign-done", batches: 2 },
+      event("campaign-start", { batches: [["101", "102"], ["201"]], slots: 1 }),
+      event("campaign-done", { batches: 2 }),
     ]),
     "campaign · 3 issues · complete",
   );
   // A campaign that halted on a failing issue — one issue, halted, singular noun.
   assert.equal(
     summarizeRun([
-      { event: "campaign-start", batches: [["101"]] },
-      { event: "campaign-halt", taskId: "101", reason: "gate failed" },
+      event("campaign-start", { batches: [["101"]], slots: 1 }),
+      event("campaign-halt", { index: 0, taskId: "101", reason: "gate failed" }),
     ]),
     "campaign · 1 issue · halted",
   );
   // A queue-only run (no campaign frame) reads as a queue of its task ids.
   assert.equal(
     summarizeRun([
-      { event: "queue-start", taskIds: ["101", "102"] },
-      { event: "queue-done", outcomes: { "101": "green", "102": "green" } },
+      event("queue-start", { taskIds: ["101", "102"], slots: 1 }),
+      event("queue-done", { outcomes: { "101": "green", "102": "green" } }),
     ]),
     "queue · 2 issues · complete",
   );
@@ -5960,18 +5974,14 @@ test("summarizeRun describes only the last run in a multi-run archive (#69)", ()
   // stale campaign-halt from the superseded earlier run into a false "halted", and
   // its count must be the last run's, not the whole file's.
   const events = [
-    { event: "campaign-start", batches: [["56", "57"], ["61"]], name: "first" },
-    { event: "campaign-halt", taskId: "61", reason: "merge conflict" },
-    {
-      event: "campaign-start",
-      batches: [["63"], ["64"], ["65"], ["67"]],
-      name: "second",
-    },
-    { event: "campaign-batch-done", index: 0, merged: ["63"] },
-    { event: "campaign-batch-done", index: 1, merged: ["64"] },
-    { event: "campaign-batch-done", index: 2, merged: ["65"] },
-    { event: "campaign-batch-done", index: 3, merged: ["67"] },
-    { event: "campaign-done", batches: 4 },
+    event("campaign-start", { batches: [["56", "57"], ["61"]], slots: 1, name: "first" }),
+    event("campaign-halt", { index: 1, taskId: "61", reason: "merge conflict" }),
+    event("campaign-start", { batches: [["63"], ["64"], ["65"], ["67"]], slots: 1, name: "second" }),
+    event("campaign-batch-done", { index: 0, merged: ["63"], held: [], clearedParked: [] }),
+    event("campaign-batch-done", { index: 1, merged: ["64"], held: [], clearedParked: [] }),
+    event("campaign-batch-done", { index: 2, merged: ["65"], held: [], clearedParked: [] }),
+    event("campaign-batch-done", { index: 3, merged: ["67"], held: [], clearedParked: [] }),
+    event("campaign-done", { batches: 4 }),
   ];
   assert.equal(summarizeRun(events), "campaign · 4 issues · complete");
 });
@@ -5981,10 +5991,10 @@ test("summarizeRun still reports halted when the last run halted after an earlie
   // terminal run halted, so the summary must say halted — the scoping must not swing
   // the other way and hide a genuine halt behind an earlier clean run.
   const events = [
-    { event: "campaign-start", batches: [["101"]], name: "first" },
-    { event: "campaign-done", batches: 1 },
-    { event: "campaign-start", batches: [["201"], ["202"]], name: "second" },
-    { event: "campaign-halt", taskId: "201", reason: "gate failed" },
+    event("campaign-start", { batches: [["101"]], slots: 1, name: "first" }),
+    event("campaign-done", { batches: 1 }),
+    event("campaign-start", { batches: [["201"], ["202"]], slots: 1, name: "second" }),
+    event("campaign-halt", { index: 0, taskId: "201", reason: "gate failed" }),
   ];
   assert.equal(summarizeRun(events), "campaign · 2 issues · halted");
 });
@@ -6090,7 +6100,7 @@ test("appendedEvents re-reads from the start when the log is shorter than the of
   assert.equal(offset, rotated.length);
 });
 
-test("appendedEvents skips an unparseable line the way readEvents does", () => {
+test("appendedEvents skips an unparseable line the way readEventLog does", () => {
   const log = "not json\n" + JSON.stringify({ event: "queue-start" }) + "\n";
   const { events } = appendedEvents(log, 0);
   assert.deepEqual(

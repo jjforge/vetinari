@@ -6,7 +6,7 @@ import { makeSandbox } from "./sandbox.ts";
 import { currentBranch, integrateGreens } from "./merge.ts";
 import { clearParked, clearParkedForTasks, enqueueOutbound, listParked } from "./state.ts";
 import { tgConfigured, tgEnvConn, tgSend, tgWaitReply } from "./telegram.ts";
-import { issueNameFromTask, readEvents, reduceCampaign } from "./status.ts";
+import { issueNameFromTask, readEventLog, reduceCampaign } from "./status.ts";
 import { acquireSlot, deregisterProject, registerProject, releaseSlot, type HostBudget } from "./host-slots.ts";
 
 /**
@@ -196,7 +196,7 @@ export async function campaign(cfg: ResolvedConfig, batches: string[][], slots: 
   // finishes as-is — the single-source-of-truth loop of ADR 0005.
   let index = 0;
   for (; ; index++) {
-    const waves = reduceCampaign(readEvents(cfg)).waves;
+    const waves = reduceCampaign(readEventLog(cfg)).waves;
     if (index >= waves.length) break;
     const tasks = waves[index];
     const total = waves.length;

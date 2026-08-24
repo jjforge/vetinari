@@ -846,10 +846,19 @@ export const projectRunState = (status: CampaignStatus): RunState => {
   return "running";
 };
 
-/** Same UTC calendar day — the basis for "merged today". Deterministic (no local
- * timezone), so a run's merge timestamps and the passed-in "now" compare the same
- * way in tests and in the server. */
-const sameUtcDay = (iso: string, day: Date) => iso.slice(0, 10) === day.toISOString().slice(0, 10);
+/** Same *local* calendar day — the basis for "merged today". The gateway runs in
+ * the operator's timezone, so a merge is "today" when its local Y/M/D matches
+ * `now`'s local Y/M/D, not its UTC day (#97): near midnight the two diverge, and
+ * the operator means their own day. `new Date(iso)` parses the merge stamp and its
+ * getters read it in the process timezone, the same one `now` is read in. */
+const sameLocalDay = (iso: string, day: Date) => {
+  const merged = new Date(iso);
+  return (
+    merged.getFullYear() === day.getFullYear() &&
+    merged.getMonth() === day.getMonth() &&
+    merged.getDate() === day.getDate()
+  );
+};
 
 /**
  * How many of a project's issues merged (completed) on `now`'s day, counted across
@@ -858,8 +867,9 @@ const sameUtcDay = (iso: string, day: Date) => iso.slice(0, 10) === day.toISOStr
  * independently and an issue that completed today in it is added to a per-project
  * set, so an issue appearing in more than one run (a re-run) is counted once. Read-
  * only over the logs (ADR 0002); a run whose reduce throws is skipped with a log
- * line so one bad archive can never zero the count. "Today" is the UTC day (see
- * `sameUtcDay`) — near midnight this can disagree with the operator's local day.
+ * line so one bad archive can never zero the count. "Today" is the operator's
+ * local day (see `sameLocalDay`), so a merge just past midnight UTC still counts
+ * for the local day the operator is actually in (#97).
  */
 const mergedTodayForProject = (baseLocation: string, liveEvents: any[], now: Date): number => {
   const merged = new Set<string>();
@@ -868,7 +878,7 @@ const mergedTodayForProject = (baseLocation: string, liveEvents: any[], now: Dat
     try {
       const { mergedAt, outcomes } = reduceCampaign(runEvents);
       for (const [issueNumber, ts] of mergedAt) {
-        if (outcomes.get(issueNumber) === "completed" && sameUtcDay(ts, now)) merged.add(issueNumber);
+        if (outcomes.get(issueNumber) === "completed" && sameLocalDay(ts, now)) merged.add(issueNumber);
       }
     } catch (error) {
       log("status-merged-today-skipped", { baseLocation, error: String(error) });
@@ -935,7 +945,7 @@ const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, event
  * skipped with a log line, never throwing — one stale registration must not take
  * the landing down (ADR 0002), the same tolerance `buildAllStatus` has.
  * merged-today counts each project's issues whose reconstructed merge stamp
- * (`reduceCampaign`'s `mergedAt`) falls on `now`'s UTC day.
+ * (`reduceCampaign`'s `mergedAt`) falls on `now`'s local day.
  */
 export function buildLanding(pointers: ProjectPointer[], now: Date = new Date()): LandingView {
   const projects: ProjectCard[] = [];

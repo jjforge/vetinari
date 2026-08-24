@@ -458,6 +458,22 @@ test("buildFeed merges every project's narratable events into one newest-first, 
   assert.equal(feed[0].project, "alpha");
 });
 
+test("a merged event that names its issue only through its branch still renders the number, never #undefined", () => {
+  // The campaign wave-merge / per-issue green path can carry the issue number in
+  // its `branch` (agent/<id>) rather than a `taskId`. The feed formatter must
+  // recover it there so the row reads "#<issue> merged", not "#undefined merged".
+  assert.equal(describeEvent({ event: "green", branch: "agent/639" }), "#639 merged");
+
+  const base = join(tmpdir(), `sctdd-feed-branch-${Date.now()}`);
+  const dir = join(base, "acme");
+  seedState(dir, [{ ts: "2025-03-01T08:02:00.000Z", event: "green", branch: "agent/639" }]);
+
+  const feed = buildFeed([pointerFor("acme", dir)]);
+
+  assert.equal(feed[0].text, "acme — #639 merged");
+  assert.ok(!feed.some((f) => f.text.includes("#undefined")));
+});
+
 test("buildLanding collects every parked question across repos, oldest first", () => {
   const base = join(tmpdir(), `sctdd-landing-parked-${Date.now()}`);
   const alphaDir = join(base, "alpha");

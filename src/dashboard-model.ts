@@ -136,6 +136,16 @@ const normalizeIssue = (id: string) => id.replace(/^#/, "");
 
 const hash = (id: unknown) => `#${normalizeIssue(String(id))}`;
 
+/** The issue number a merge/green event is about: its explicit `taskId`, or —
+ * for a merge that names its issue only through the branch (`agent/<id>`, the
+ * campaign wave-merge / per-issue green path) — the id embedded in that branch.
+ * Keeps the feed from rendering `#undefined` when only the branch carries it. */
+const mergedIssue = (e: any): string | undefined => {
+  if (e?.taskId != null && String(e.taskId) !== "") return normalizeIssue(String(e.taskId));
+  const tail = e?.branch != null ? String(e.branch).split("/").pop() : "";
+  return tail ? normalizeIssue(tail) : undefined;
+};
+
 /**
  * Narrate one event log entry as the single plain-words line the landing card
  * shows for "the last event". A `turn` renders its agent-authored summary verbatim
@@ -159,8 +169,10 @@ export function describeEvent(e: any): string {
       return "Queue started";
     case "queue-done":
       return "Queue drained";
-    case "green":
-      return `${hash(e.taskId)} merged`;
+    case "green": {
+      const id = mergedIssue(e);
+      return id ? `#${id} merged` : "merged";
+    }
     case "parked":
       return `${hash(e.taskId)} parked${e.reason ? `: ${e.reason}` : ""}`;
     case "carve":

@@ -120,12 +120,12 @@ test("buildLanding's card carries owner/name from the project's git remote, and 
   const withRemote = join(base, "with-remote");
   const root = join(withRemote, "root");
   seedState(withRemote, [
-    {
+    event("campaign-start", {
       ts: "2025-01-02T08:00:00.000Z",
-      event: "campaign-start",
       batches: [["101"]],
       name: "work",
-    },
+      slots: 1,
+    }),
   ]);
   mkdirSync(root, { recursive: true });
   const git = (args: string[]) =>
@@ -135,12 +135,12 @@ test("buildLanding's card carries owner/name from the project's git remote, and 
   // A project with no git remote (the demo) → no repo, so the display falls back to the bare key.
   const noRemote = join(base, "no-remote");
   seedState(noRemote, [
-    {
+    event("campaign-start", {
       ts: "2025-01-02T08:00:00.000Z",
-      event: "campaign-start",
       batches: [["102"]],
       name: "work",
-    },
+      slots: 1,
+    }),
   ]);
 
   const { projects } = buildLanding(
@@ -158,40 +158,37 @@ test("buildLanding builds a per-project card for a live campaign", () => {
   const base = join(tmpdir(), `sctdd-landing-card-${Date.now()}`);
   const dir = join(base, "demo");
   seedState(dir, [
-    {
+    event("campaign-start", {
       ts: "2025-01-02T08:00:00.000Z",
-      event: "campaign-start",
       batches: [["101"], ["201"], ["301"]],
       name: "gateway work",
-    },
-    {
+      slots: 1,
+    }),
+    event("campaign-batch", {
       ts: "2025-01-02T08:01:00.000Z",
-      event: "campaign-batch",
       index: 0,
       tasks: ["101"],
-    },
-    { ts: "2025-01-02T08:02:00.000Z", event: "green", taskId: "101" },
-    {
+    }),
+    event("green", { ts: "2025-01-02T08:02:00.000Z", taskId: "101", branch: "agent/101", commits: [] }),
+    event("campaign-batch-done", {
       ts: "2025-01-02T08:03:00.000Z",
-      event: "campaign-batch-done",
       index: 0,
       merged: ["101"],
       held: [],
-    },
-    {
+      clearedParked: [],
+    }),
+    event("campaign-batch", {
       ts: "2025-01-02T08:04:00.000Z",
-      event: "campaign-batch",
       index: 1,
       tasks: ["201"],
-    },
-    { ts: "2025-01-02T08:05:00.000Z", event: "queue-start", taskIds: ["201"] },
-    {
+    }),
+    event("queue-start", { ts: "2025-01-02T08:05:00.000Z", taskIds: ["201"], slots: 1 }),
+    event("turn", {
       ts: "2025-01-02T08:06:00.000Z",
-      event: "turn",
       taskId: "201",
       turn: 2,
       summary: "Writing the failing test",
-    },
+    }),
   ]);
 
   const { projects } = buildLanding(
@@ -217,40 +214,38 @@ test("buildLanding's card counts the live plan, not carved chips", () => {
   const base = join(tmpdir(), `sctdd-landing-carved-${Date.now()}`);
   const dir = join(base, "demo");
   seedState(dir, [
-    {
+    event("campaign-start", {
       ts: "2025-01-02T08:00:00.000Z",
-      event: "campaign-start",
       batches: [["101"], ["201"], ["301"]],
       name: "gateway work",
-    },
-    {
+      slots: 1,
+    }),
+    event("campaign-batch", {
       ts: "2025-01-02T08:01:00.000Z",
-      event: "campaign-batch",
       index: 0,
       tasks: ["101"],
-    },
-    { ts: "2025-01-02T08:02:00.000Z", event: "green", taskId: "101" },
-    {
+    }),
+    event("green", { ts: "2025-01-02T08:02:00.000Z", taskId: "101", branch: "agent/101", commits: [] }),
+    event("campaign-batch-done", {
       ts: "2025-01-02T08:03:00.000Z",
-      event: "campaign-batch-done",
       index: 0,
       merged: ["101"],
       held: [],
-    },
-    {
+      clearedParked: [],
+    }),
+    event("campaign-batch", {
       ts: "2025-01-02T08:04:00.000Z",
-      event: "campaign-batch",
       index: 1,
       tasks: ["201"],
-    },
-    { ts: "2025-01-02T08:05:00.000Z", event: "queue-start", taskIds: ["201"] },
+    }),
+    event("queue-start", { ts: "2025-01-02T08:05:00.000Z", taskIds: ["201"], slots: 1 }),
     // The future, unstarted wave 301 is carved out — a display ghost, not live work.
-    {
+    event("carve", {
       ts: "2025-01-02T08:06:00.000Z",
-      event: "carve",
       target: "301",
       removed: ["301"],
-    },
+      dropped: [],
+    }),
   ]);
 
   const [card] = buildLanding(
@@ -271,27 +266,26 @@ test("buildLanding sums the counters, reads an idle project's last campaign, and
   const alphaDir = join(base, "alpha");
   const betaDir = join(base, "beta");
   seedState(alphaDir, [
-    {
+    event("campaign-start", {
       ts: "2025-06-15T08:00:00.000Z",
-      event: "campaign-start",
       batches: [["101", "102"], ["201"], ["301"]],
-    },
-    { ts: "2025-06-14T09:00:00.000Z", event: "green", taskId: "102" },
-    { ts: "2025-06-15T09:00:00.000Z", event: "green", taskId: "101" },
-    {
+      slots: 1,
+    }),
+    event("green", { ts: "2025-06-14T09:00:00.000Z", taskId: "102", branch: "agent/102", commits: [] }),
+    event("green", { ts: "2025-06-15T09:00:00.000Z", taskId: "101", branch: "agent/101", commits: [] }),
+    event("campaign-batch-done", {
       ts: "2025-06-15T09:05:00.000Z",
-      event: "campaign-batch-done",
       index: 0,
       merged: ["101", "102"],
       held: [],
-    },
-    {
+      clearedParked: [],
+    }),
+    event("campaign-batch", {
       ts: "2025-06-15T09:06:00.000Z",
-      event: "campaign-batch",
       index: 1,
       tasks: ["201"],
-    },
-    { ts: "2025-06-15T09:07:00.000Z", event: "queue-start", taskIds: ["201"] },
+    }),
+    event("queue-start", { ts: "2025-06-15T09:07:00.000Z", taskIds: ["201"], slots: 1 }),
   ]);
   // Beta has no live run, only an archived campaign — it must read idle with that campaign.
   seedState(betaDir, []);
@@ -299,20 +293,20 @@ test("buildLanding sums the counters, reads an idle project's last campaign, and
   writeJsonl(
     join(betaDir, "logs", "archive", "orchestrator-2025-06-10T00-00-00.jsonl"),
     [
-      {
+      event("campaign-start", {
         ts: "2025-06-10T00:00:00.000Z",
-        event: "campaign-start",
         batches: [["501"]],
         name: "old work",
-      },
-      {
+        slots: 1,
+      }),
+      event("campaign-batch-done", {
         ts: "2025-06-10T00:05:00.000Z",
-        event: "campaign-batch-done",
         index: 0,
         merged: ["501"],
         held: [],
-      },
-      { ts: "2025-06-10T00:06:00.000Z", event: "campaign-done", batches: 1 },
+        clearedParked: [],
+      }),
+      event("campaign-done", { ts: "2025-06-10T00:06:00.000Z", batches: 1 }),
     ],
   );
 
@@ -355,25 +349,27 @@ test("an idle project's merged % and merged-today read its latest archived run, 
   writeJsonl(
     join(dir, "logs", "archive", "orchestrator-2026-06-15T00-00-00-000Z.jsonl"),
     [
-      {
+      event("campaign-start", {
         ts: "2026-06-15T09:00:00.000Z",
-        event: "campaign-start",
         batches: [["501"], ["502"]],
         name: "shipped",
-      },
-      {
+        slots: 1,
+      }),
+      event("campaign-batch-done", {
         ts: "2026-06-15T09:05:00.000Z",
-        event: "campaign-batch-done",
         index: 0,
         merged: ["501"],
-      },
-      {
+        held: [],
+        clearedParked: [],
+      }),
+      event("campaign-batch-done", {
         ts: "2026-06-15T09:10:00.000Z",
-        event: "campaign-batch-done",
         index: 1,
         merged: ["502"],
-      },
-      { ts: "2026-06-15T09:11:00.000Z", event: "campaign-done", batches: 2 },
+        held: [],
+        clearedParked: [],
+      }),
+      event("campaign-done", { ts: "2026-06-15T09:11:00.000Z", batches: 2 }),
     ],
   );
 
@@ -397,19 +393,20 @@ test("an idle project whose latest archived run merged on an earlier day counts 
   writeJsonl(
     join(dir, "logs", "archive", "orchestrator-2026-06-10T00-00-00-000Z.jsonl"),
     [
-      {
+      event("campaign-start", {
         ts: "2026-06-10T09:00:00.000Z",
-        event: "campaign-start",
         batches: [["501"]],
         name: "older",
-      },
-      {
+        slots: 1,
+      }),
+      event("campaign-batch-done", {
         ts: "2026-06-10T09:05:00.000Z",
-        event: "campaign-batch-done",
         index: 0,
         merged: ["501"],
-      },
-      { ts: "2026-06-10T09:06:00.000Z", event: "campaign-done", batches: 1 },
+        held: [],
+        clearedParked: [],
+      }),
+      event("campaign-done", { ts: "2026-06-10T09:06:00.000Z", batches: 1 }),
     ],
   );
 
@@ -432,38 +429,40 @@ test("merged-today sums every archived run merged today, not just the latest (#9
   writeJsonl(
     join(dir, "logs", "archive", "orchestrator-2026-06-15T08-00-00-000Z.jsonl"),
     [
-      {
+      event("campaign-start", {
         ts: "2026-06-15T08:00:00.000Z",
-        event: "campaign-start",
         batches: [["501"]],
         name: "morning",
-      },
-      {
+        slots: 1,
+      }),
+      event("campaign-batch-done", {
         ts: "2026-06-15T08:05:00.000Z",
-        event: "campaign-batch-done",
         index: 0,
         merged: ["501"],
-      },
-      { ts: "2026-06-15T08:06:00.000Z", event: "campaign-done", batches: 1 },
+        held: [],
+        clearedParked: [],
+      }),
+      event("campaign-done", { ts: "2026-06-15T08:06:00.000Z", batches: 1 }),
     ],
   );
   // Later run today (the latest archive) merged 502.
   writeJsonl(
     join(dir, "logs", "archive", "orchestrator-2026-06-15T10-00-00-000Z.jsonl"),
     [
-      {
+      event("campaign-start", {
         ts: "2026-06-15T10:00:00.000Z",
-        event: "campaign-start",
         batches: [["502"]],
         name: "afternoon",
-      },
-      {
+        slots: 1,
+      }),
+      event("campaign-batch-done", {
         ts: "2026-06-15T10:05:00.000Z",
-        event: "campaign-batch-done",
         index: 0,
         merged: ["502"],
-      },
-      { ts: "2026-06-15T10:06:00.000Z", event: "campaign-done", batches: 1 },
+        held: [],
+        clearedParked: [],
+      }),
+      event("campaign-done", { ts: "2026-06-15T10:06:00.000Z", batches: 1 }),
     ],
   );
 
@@ -480,39 +479,41 @@ test("merged-today combines the live run's merges with the archives' (#97)", () 
   const dir = join(base, "beta");
   // A live campaign in flight that has already merged 601 today (602 still running).
   seedState(dir, [
-    {
+    event("campaign-start", {
       ts: "2026-06-15T11:00:00.000Z",
-      event: "campaign-start",
       batches: [["601"], ["602"]],
       name: "live",
-    },
-    {
+      slots: 1,
+    }),
+    event("campaign-batch-done", {
       ts: "2026-06-15T11:05:00.000Z",
-      event: "campaign-batch-done",
       index: 0,
       merged: ["601"],
-    },
-    { ts: "2026-06-15T11:06:00.000Z", event: "campaign-batch", index: 1 },
-    { ts: "2026-06-15T11:07:00.000Z", event: "queue-start", taskIds: ["602"] },
+      held: [],
+      clearedParked: [],
+    }),
+    event("campaign-batch", { ts: "2026-06-15T11:06:00.000Z", index: 1, tasks: [] }),
+    event("queue-start", { ts: "2026-06-15T11:07:00.000Z", taskIds: ["602"], slots: 1 }),
   ]);
   // An earlier completed run today, archived, merged 701.
   mkdirSync(join(dir, "logs", "archive"), { recursive: true });
   writeJsonl(
     join(dir, "logs", "archive", "orchestrator-2026-06-15T08-00-00-000Z.jsonl"),
     [
-      {
+      event("campaign-start", {
         ts: "2026-06-15T08:00:00.000Z",
-        event: "campaign-start",
         batches: [["701"]],
         name: "earlier",
-      },
-      {
+        slots: 1,
+      }),
+      event("campaign-batch-done", {
         ts: "2026-06-15T08:05:00.000Z",
-        event: "campaign-batch-done",
         index: 0,
         merged: ["701"],
-      },
-      { ts: "2026-06-15T08:06:00.000Z", event: "campaign-done", batches: 1 },
+        held: [],
+        clearedParked: [],
+      }),
+      event("campaign-done", { ts: "2026-06-15T08:06:00.000Z", batches: 1 }),
     ],
   );
 
@@ -529,38 +530,40 @@ test("merged-today counts an issue merged in more than one run only once (#97)",
   const dir = join(base, "beta");
   // 801 merged in the live run today...
   seedState(dir, [
-    {
+    event("campaign-start", {
       ts: "2026-06-15T11:00:00.000Z",
-      event: "campaign-start",
       batches: [["801"]],
       name: "re-run",
-    },
-    {
+      slots: 1,
+    }),
+    event("campaign-batch-done", {
       ts: "2026-06-15T11:05:00.000Z",
-      event: "campaign-batch-done",
       index: 0,
       merged: ["801"],
-    },
-    { ts: "2026-06-15T11:06:00.000Z", event: "campaign-done", batches: 1 },
+      held: [],
+      clearedParked: [],
+    }),
+    event("campaign-done", { ts: "2026-06-15T11:06:00.000Z", batches: 1 }),
   ]);
   // ...and the same 801 was already merged in an earlier archived run today.
   mkdirSync(join(dir, "logs", "archive"), { recursive: true });
   writeJsonl(
     join(dir, "logs", "archive", "orchestrator-2026-06-15T08-00-00-000Z.jsonl"),
     [
-      {
+      event("campaign-start", {
         ts: "2026-06-15T08:00:00.000Z",
-        event: "campaign-start",
         batches: [["801"]],
         name: "earlier",
-      },
-      {
+        slots: 1,
+      }),
+      event("campaign-batch-done", {
         ts: "2026-06-15T08:05:00.000Z",
-        event: "campaign-batch-done",
         index: 0,
         merged: ["801"],
-      },
-      { ts: "2026-06-15T08:06:00.000Z", event: "campaign-done", batches: 1 },
+        held: [],
+        clearedParked: [],
+      }),
+      event("campaign-done", { ts: "2026-06-15T08:06:00.000Z", batches: 1 }),
     ],
   );
 
@@ -583,19 +586,20 @@ test("merged-today counts against the operator's LOCAL day, not the UTC day (#97
     const base = join(tmpdir(), `sctdd-landing-merged-localday-${Date.now()}`);
     const dir = join(base, "beta");
     seedState(dir, [
-      {
+      event("campaign-start", {
         ts: "2026-08-23T19:00:00.000Z",
-        event: "campaign-start",
         batches: [["901"]],
         name: "afternoon",
-      },
-      {
+        slots: 1,
+      }),
+      event("campaign-batch-done", {
         ts: "2026-08-23T20:00:00.000Z",
-        event: "campaign-batch-done",
         index: 0,
         merged: ["901"],
-      },
-      { ts: "2026-08-23T20:01:00.000Z", event: "campaign-done", batches: 1 },
+        held: [],
+        clearedParked: [],
+      }),
+      event("campaign-done", { ts: "2026-08-23T20:01:00.000Z", batches: 1 }),
     ]);
 
     const { counters } = buildLanding(
@@ -616,23 +620,22 @@ test("buildFeed merges every project's narratable events into one newest-first, 
   const alphaDir = join(base, "alpha");
   const betaDir = join(base, "beta");
   seedState(alphaDir, [
-    {
+    event("campaign-start", {
       ts: "2025-03-01T08:00:00.000Z",
-      event: "campaign-start",
       batches: [["101"]],
       name: "alpha work",
-    },
+      slots: 1,
+    }),
     // Machine noise carries no narration and must not surface as a feed row.
     { ts: "2025-03-01T08:00:30.000Z", event: "sandbox", taskId: "101" },
-    { ts: "2025-03-01T08:02:00.000Z", event: "green", taskId: "101" },
+    event("green", { ts: "2025-03-01T08:02:00.000Z", taskId: "101", branch: "agent/101", commits: [] }),
   ]);
   seedState(betaDir, [
-    {
+    event("parked", {
       ts: "2025-03-01T08:01:00.000Z",
-      event: "parked",
       taskId: "201",
       reason: "needs a choice",
-    },
+    }),
   ]);
 
   const feed = buildFeed(
@@ -667,7 +670,7 @@ test("a merged event that names its issue only through its branch still renders 
 
   const base = join(tmpdir(), `sctdd-feed-branch-${Date.now()}`);
   const dir = join(base, "acme");
-  seedState(dir, [{ ts: "2025-03-01T08:02:00.000Z", event: "green", branch: "agent/639" }]);
+  seedState(dir, [event("green", { ts: "2025-03-01T08:02:00.000Z", branch: "agent/639", taskId: "", commits: [] })]);
 
   const feed = buildFeed([pointerFor("acme", dir)], new Date("2025-03-01T09:00:00.000Z"));
 
@@ -683,13 +686,13 @@ test("buildFeed surfaces an idle project's recently-archived run, and drops one 
   mkdirSync(join(dir, "logs", "archive"), { recursive: true });
   // A run that finished ~6h ago — inside the 48h feed window, so it still feeds.
   writeJsonl(join(dir, "logs", "archive", "orchestrator-2026-08-24T06-00-00-000Z.jsonl"), [
-    { ts: "2026-08-24T06:00:00.000Z", event: "campaign-start", batches: [["101"]], name: "recent" },
-    { ts: "2026-08-24T06:05:00.000Z", event: "green", taskId: "101" },
+    event("campaign-start", { ts: "2026-08-24T06:00:00.000Z", batches: [["101"]], name: "recent", slots: 1 }),
+    event("green", { ts: "2026-08-24T06:05:00.000Z", taskId: "101", branch: "agent/101", commits: [] }),
   ]);
   // A run that finished ~4.5 days ago — past the window, so nothing from it feeds.
   writeJsonl(join(dir, "logs", "archive", "orchestrator-2026-08-20T00-00-00-000Z.jsonl"), [
-    { ts: "2026-08-20T00:00:00.000Z", event: "campaign-start", batches: [["999"]], name: "ancient" },
-    { ts: "2026-08-20T00:05:00.000Z", event: "green", taskId: "999" },
+    event("campaign-start", { ts: "2026-08-20T00:00:00.000Z", batches: [["999"]], name: "ancient", slots: 1 }),
+    event("green", { ts: "2026-08-20T00:05:00.000Z", taskId: "999", branch: "agent/999", commits: [] }),
   ]);
 
   const feed = buildFeed([pointerFor("acme", dir)], new Date("2026-08-24T12:00:00.000Z"));
@@ -708,8 +711,8 @@ test("buildFeed cuts individual events by ts even inside an in-window archive (#
   // start falls within the archive margin) — but its opening event predates the
   // window while its merge lands inside it.
   writeJsonl(join(dir, "logs", "archive", "orchestrator-2026-08-22T11-00-00-000Z.jsonl"), [
-    { ts: "2026-08-22T11:00:00.000Z", event: "campaign-start", batches: [["777"]], name: "edge" },
-    { ts: "2026-08-22T13:00:00.000Z", event: "green", taskId: "777" },
+    event("campaign-start", { ts: "2026-08-22T11:00:00.000Z", batches: [["777"]], name: "edge", slots: 1 }),
+    event("green", { ts: "2026-08-22T13:00:00.000Z", taskId: "777", branch: "agent/777", commits: [] }),
   ]);
 
   const feed = buildFeed([pointerFor("acme", dir)], new Date("2026-08-24T12:00:00.000Z"));
@@ -725,18 +728,18 @@ test("buildLanding collects every parked question across repos, oldest first", (
   const alphaDir = join(base, "alpha");
   const betaDir = join(base, "beta");
   seedState(alphaDir, [
-    {
+    event("campaign-start", {
       ts: "2025-06-15T08:00:00.000Z",
-      event: "campaign-start",
       batches: [["101"]],
-    },
+      slots: 1,
+    }),
   ]);
   seedState(betaDir, [
-    {
+    event("campaign-start", {
       ts: "2025-06-15T08:00:00.000Z",
-      event: "campaign-start",
       batches: [["301"]],
-    },
+      slots: 1,
+    }),
   ]);
   // Alpha's question was parked more recently than beta's — beta must sort first.
   writeFileSync(
@@ -795,23 +798,22 @@ test("buildAllStatus builds one status per live project and skips a stale one", 
   const alphaDir = join(base, "alpha");
   const betaDir = join(base, "beta");
   seedState(alphaDir, [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["101", "102"]],
-    },
-    {
+      slots: 1,
+    }),
+    event("queue-done", {
       ts: "2025-01-01T00:01:00.000Z",
-      event: "queue-done",
       outcomes: { "101": "green" },
-    },
+    }),
   ]);
   seedState(betaDir, [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["201"]],
-    },
+      slots: 1,
+    }),
   ]);
 
   const statuses = buildAllStatus([
@@ -843,18 +845,18 @@ test("serveAllStatus serves the aggregated site, selecting the project from the 
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
   seedState(alphaDir, [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["101"]],
-    },
+      slots: 1,
+    }),
   ]);
   seedState(betaDir, [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["201"]],
-    },
+      slots: 1,
+    }),
   ]);
   register(configDir, {
     project: "alpha",
@@ -1767,18 +1769,18 @@ test("serveAllStatus GET / serves the all-repos landing shell, not a server-rend
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
   seedState(alphaDir, [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["101"]],
-    },
+      slots: 1,
+    }),
   ]);
   seedState(betaDir, [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["201"]],
-    },
+      slots: 1,
+    }),
   ]);
   register(configDir, {
     project: "alpha",
@@ -1826,20 +1828,20 @@ test("serveAllStatus GET /api/landing serves the all-repos landing model as JSON
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
   seedState(alphaDir, [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["101"], ["201"]],
       name: "alpha work",
-    },
-    { ts: "2025-01-01T00:01:00.000Z", event: "queue-start", taskIds: ["101"] },
+      slots: 1,
+    }),
+    event("queue-start", { ts: "2025-01-01T00:01:00.000Z", taskIds: ["101"], slots: 1 }),
   ]);
   seedState(betaDir, [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["301"]],
-    },
+      slots: 1,
+    }),
   ]);
   register(configDir, {
     project: "alpha",
@@ -1891,21 +1893,20 @@ test("serveAllStatus GET /api/feed serves the cross-project event feed as JSON",
   // window (#101): campaign-start oldest, parked next, the merge newest.
   const hoursAgo = (h: number) => new Date(Date.now() - h * 60 * 60 * 1000).toISOString();
   seedState(alphaDir, [
-    {
+    event("campaign-start", {
       ts: hoursAgo(3),
-      event: "campaign-start",
       batches: [["101"]],
       name: "alpha work",
-    },
-    { ts: hoursAgo(1), event: "green", taskId: "101" },
+      slots: 1,
+    }),
+    event("green", { ts: hoursAgo(1), taskId: "101", branch: "agent/101", commits: [] }),
   ]);
   seedState(betaDir, [
-    {
+    event("parked", {
       ts: hoursAgo(2),
-      event: "parked",
       taskId: "201",
       reason: "needs a choice",
-    },
+    }),
   ]);
   register(configDir, {
     project: "alpha",
@@ -1947,26 +1948,24 @@ test("serveAllStatus GET /api/issue serves one issue's reconstructed detail as J
   const configDir = join(tmpdir(), `sctdd-issue-endpoint-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   seedState(alphaDir, [
-    {
+    event("campaign-start", {
       ts: "2025-05-01T08:00:00.000Z",
-      event: "campaign-start",
       batches: [["101"]],
       titles: { "101": "Wire the parser" },
       name: "parser work",
-    },
-    {
+      slots: 1,
+    }),
+    event("turn", {
       ts: "2025-05-01T08:01:00.000Z",
-      event: "turn",
       taskId: "101",
       turn: 0,
       summary: "Sketched the grammar and a red test.",
-    },
-    {
+    }),
+    event("parked", {
       ts: "2025-05-01T08:06:00.000Z",
-      event: "parked",
       taskId: "101",
       reason: "needs a decision",
-    },
+    }),
   ]);
   register(configDir, {
     project: "alpha",
@@ -2018,25 +2017,23 @@ test("serveAllStatus GET /api/issue carries the parked question and options for 
   const configDir = join(tmpdir(), `sctdd-issue-parked-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   seedState(alphaDir, [
-    {
+    event("campaign-start", {
       ts: "2025-05-01T08:00:00.000Z",
-      event: "campaign-start",
       batches: [["101"]],
       titles: { "101": "Wire the parser" },
-    },
-    {
+      slots: 1,
+    }),
+    event("turn", {
       ts: "2025-05-01T08:01:00.000Z",
-      event: "turn",
       taskId: "101",
       turn: 0,
       summary: "Sketched the grammar.",
-    },
-    {
+    }),
+    event("parked", {
       ts: "2025-05-01T08:06:00.000Z",
-      event: "parked",
       taskId: "101",
       reason: "needs a decision",
-    },
+    }),
   ]);
   writeFileSync(
     join(alphaDir, "parked", "101.json"),
@@ -2080,17 +2077,17 @@ test("serveAllStatus GET /api/issue omits parked reply data for a non-parked iss
   const configDir = join(tmpdir(), `sctdd-issue-unparked-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   seedState(alphaDir, [
-    {
+    event("campaign-start", {
       ts: "2025-05-01T08:00:00.000Z",
-      event: "campaign-start",
       batches: [["101"]],
-    },
-    {
+      slots: 1,
+    }),
+    event("green", {
       ts: "2025-05-01T08:02:00.000Z",
-      event: "green",
       taskId: "101",
       branch: "agent/101",
-    },
+      commits: [],
+    }),
   ]);
   register(configDir, {
     project: "alpha",
@@ -2118,11 +2115,11 @@ test("serveAllStatus GET /api/events streams a project's log appends as SSE fram
   const configDir = join(tmpdir(), `sctdd-sse-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   seedState(alphaDir, [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["101"]],
-    },
+      slots: 1,
+    }),
   ]);
   register(configDir, {
     project: "alpha",
@@ -2163,7 +2160,7 @@ test("serveAllStatus GET /api/events streams a project's log appends as SSE fram
     // A fresh append to alpha's live log is pushed as a data frame carrying the project and the new event.
     appendFileSync(
       join(alphaDir, "logs", "orchestrator.jsonl"),
-      JSON.stringify({ event: "turn", taskId: "101" }) + "\n",
+      JSON.stringify(event("turn", { taskId: "101", turn: 0, summary: "" })) + "\n",
     );
     let frame = "";
     let payload: { project?: string; events?: { event: string }[] } = {};
@@ -2192,11 +2189,11 @@ test("serveAllStatus renders a single registered project as a one-entry dropdown
   const configDir = join(tmpdir(), `sctdd-serve-solo-${Date.now()}`);
   const soloDir = join(configDir, "state-solo");
   seedState(soloDir, [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["101"]],
-    },
+      slots: 1,
+    }),
   ]);
   // A parked issue in the active campaign — the single-project view keeps its parked card.
   writeFileSync(
@@ -2250,18 +2247,18 @@ test("serveAllStatus POST /carve on confirm shells carve in the selected project
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
   seedState(alphaDir, [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["101"], ["301"]],
-    },
+      slots: 1,
+    }),
   ]);
   seedState(betaDir, [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["201"], ["401"]],
-    },
+      slots: 1,
+    }),
   ]);
   register(configDir, {
     project: "alpha",
@@ -2310,18 +2307,18 @@ test("serveAllStatus GET /carve?preview returns the selected project's structure
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
   seedState(alphaDir, [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["101"], ["301"]],
-    },
+      slots: 1,
+    }),
   ]);
   seedState(betaDir, [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["201"], ["401"]],
-    },
+      slots: 1,
+    }),
   ]);
   register(configDir, {
     project: "alpha",
@@ -2380,11 +2377,11 @@ test("serveAllStatus GET /carve?preview validates params and the project", async
   const configDir = join(tmpdir(), `sctdd-agg-carve-json-guard-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
   seedState(betaDir, [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["201"]],
-    },
+      slots: 1,
+    }),
   ]);
   register(configDir, {
     project: "beta",
@@ -2430,18 +2427,18 @@ test("serveAllStatus POST /carve previews the selected project's closure without
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
   seedState(alphaDir, [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["101"], ["301"]],
-    },
+      slots: 1,
+    }),
   ]);
   seedState(betaDir, [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["201"], ["401"]],
-    },
+      slots: 1,
+    }),
   ]);
   register(configDir, {
     project: "alpha",
@@ -2502,17 +2499,16 @@ test("serveAllStatus flags the selected project's carvable chips with its projec
   const betaDir = join(configDir, "state-beta");
   // A running campaign whose future wave (401) is still carvable.
   seedState(betaDir, [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["201"], ["401"]],
-    },
-    {
+      slots: 1,
+    }),
+    event("campaign-batch", {
       ts: "2025-01-01T00:01:00.000Z",
-      event: "campaign-batch",
       index: 0,
       tasks: ["201"],
-    },
+    }),
   ]);
   register(configDir, {
     project: "beta",
@@ -2547,22 +2543,22 @@ test("serveAllStatus lists a project's archived runs and renders one read-only w
   const betaDir = join(configDir, "state-beta");
   // A live run still in flight.
   seedState(betaDir, [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["201"]],
-    },
+      slots: 1,
+    }),
   ]);
   // Two archived runs plus a malformed one that must be skipped.
   const archiveDir = join(betaDir, "logs", "archive");
   mkdirSync(archiveDir, { recursive: true });
   writeJsonl(join(archiveDir, "orchestrator-2026-01-01T00-00-00-000Z.jsonl"), [
-    { event: "campaign-start", batches: [["101"], ["102"]] },
-    { event: "campaign-done", batches: 2 },
+    event("campaign-start", { batches: [["101"], ["102"]], slots: 1 }),
+    event("campaign-done", { batches: 2 }),
   ]);
   writeJsonl(join(archiveDir, "orchestrator-2026-02-01T00-00-00-000Z.jsonl"), [
-    { event: "campaign-start", batches: [["111"]] },
-    { event: "campaign-halt", taskId: "111", reason: "gate failed" },
+    event("campaign-start", { batches: [["111"]], slots: 1 }),
+    event("campaign-halt", { taskId: "111", reason: "gate failed", index: 0 }),
   ]);
   writeFileSync(
     join(archiveDir, "orchestrator-2026-03-01T00-00-00-000Z.jsonl"),
@@ -2646,36 +2642,36 @@ test("serveAllStatus reconstructs a carved issue in a selected archived run, rea
   // A live run over an unrelated issue, so the only carved chip on the page is the
   // archived run's.
   seedState(betaDir, [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["900"]],
-    },
+      slots: 1,
+    }),
   ]);
   // An archived run that carved an unstarted dependent (201) out of its plan: 101
   // banked, 201 dropped by the carve, then the campaign finished.
   const archiveDir = join(betaDir, "logs", "archive");
   mkdirSync(archiveDir, { recursive: true });
   writeJsonl(join(archiveDir, "orchestrator-2026-04-01T00-00-00-000Z.jsonl"), [
-    {
+    event("campaign-start", {
       ts: "2026-04-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["101"], ["201"]],
       name: "spring cleanup",
-    },
-    {
+      slots: 1,
+    }),
+    event("green", {
       ts: "2026-04-01T00:01:00.000Z",
-      event: "green",
       taskId: "101",
       branch: "agent/101",
-    },
-    {
+      commits: [],
+    }),
+    event("carve", {
       ts: "2026-04-01T00:02:00.000Z",
-      event: "carve",
       target: "201",
       removed: ["201"],
-    },
-    { ts: "2026-04-01T00:03:00.000Z", event: "campaign-done", batches: 2 },
+      dropped: [],
+    }),
+    event("campaign-done", { ts: "2026-04-01T00:03:00.000Z", batches: 2 }),
   ]);
   register(configDir, {
     project: "beta",
@@ -2713,20 +2709,19 @@ test("serveAllStatus GET /api/issue reads an archived run's own log when a run t
   const configDir = join(tmpdir(), `sctdd-api-issue-archive-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
   // The live log names 101 nowhere — its detail lives only in the archived run.
-  seedState(betaDir, [{ event: "campaign-start", batches: [["900"]] }]);
+  seedState(betaDir, [event("campaign-start", { batches: [["900"]], slots: 1 })]);
   const archiveDir = join(betaDir, "logs", "archive");
   mkdirSync(archiveDir, { recursive: true });
   writeJsonl(join(archiveDir, "orchestrator-2026-01-01T00-00-00-000Z.jsonl"), [
-    { event: "campaign-start", batches: [["101"]], titles: { "101": "old work" } },
-    {
+    event("campaign-start", { batches: [["101"]], titles: { "101": "old work" }, slots: 1 }),
+    event("turn", {
       ts: "2026-01-01T00:01:00.000Z",
-      event: "turn",
       taskId: "101",
       turn: 0,
       summary: "did the thing",
-    },
-    { ts: "2026-01-01T00:02:00.000Z", event: "green", taskId: "101", branch: "agent/101" },
-    { event: "campaign-done", batches: 1 },
+    }),
+    event("green", { ts: "2026-01-01T00:02:00.000Z", taskId: "101", branch: "agent/101", commits: [] }),
+    event("campaign-done", { batches: 1 }),
   ]);
   register(configDir, {
     project: "beta",
@@ -2774,13 +2769,13 @@ test("serveAllStatus GET /api/issue reads an archived run's own log when a run t
 test("serveAllStatus GET /archive/log serves a listed run's raw JSONL as text/plain, and 404s an unlisted run", async () => {
   const configDir = join(tmpdir(), `sctdd-archive-log-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
-  seedState(betaDir, [{ event: "campaign-start", batches: [["201"]] }]);
+  seedState(betaDir, [event("campaign-start", { batches: [["201"]], slots: 1 })]);
   const archiveDir = join(betaDir, "logs", "archive");
   mkdirSync(archiveDir, { recursive: true });
   const raw =
     [
-      { event: "campaign-start", batches: [["101"], ["102"]] },
-      { event: "campaign-done", batches: 2 },
+      event("campaign-start", { batches: [["101"], ["102"]], slots: 1 }),
+      event("campaign-done", { batches: 2 }),
     ]
       .map((e) => JSON.stringify(e))
       .join("\n") + "\n";
@@ -2918,13 +2913,12 @@ test("formatFeedEvent prefixes an event's plain-words sentence with its repo, an
 
 test("lastEventText picks the most recent operator-facing event, ignoring machine noise", () => {
   const events: OrchestratorEvent[] = [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["101"]],
       slots: 1,
-    },
-    { ts: "2025-01-01T00:01:00.000Z", event: "green", taskId: "101", branch: "agent/101", commits: [] },
+    }),
+    event("green", { ts: "2025-01-01T00:01:00.000Z", taskId: "101", branch: "agent/101", commits: [] }),
     // Machine noise after the meaningful event must not become the "last event".
     noise({
       ts: "2025-01-01T00:02:00.000Z",
@@ -2940,12 +2934,11 @@ test("lastEventText picks the most recent operator-facing event, ignoring machin
 
 test("reduceCampaign reconstructs a fresh campaign's waves with no wave running yet", () => {
   const reduced = reduceCampaign([
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["101", "102"], ["201"]],
       slots: 1,
-    },
+    }),
   ]);
 
   assert.deepEqual(reduced.waves, [["101", "102"], ["201"]]);
@@ -2960,44 +2953,40 @@ test("reduceCampaign reads an optional campaign name off the campaign-start even
   // A named run carries its name on the start event; an unnamed one leaves it undefined.
   assert.equal(
     reduceCampaign([
-      {
+      event("campaign-start", {
         ts: "2025-01-01T00:00:00.000Z",
-        event: "campaign-start",
         batches: [["101"]],
         slots: 1,
         name: "gateway work",
-      },
+      }),
     ]).name,
     "gateway work",
   );
   assert.equal(
     reduceCampaign([
-      {
+      event("campaign-start", {
         ts: "2025-01-01T00:00:00.000Z",
-        event: "campaign-start",
         batches: [["101"]],
         slots: 1,
-      },
+      }),
     ]).name,
     undefined,
   );
   // The latest campaign-start wins, name and all.
   assert.equal(
     reduceCampaign([
-      {
+      event("campaign-start", {
         ts: "2025-01-01T00:00:00.000Z",
-        event: "campaign-start",
         batches: [["1"]],
         slots: 1,
         name: "first",
-      },
-      {
+      }),
+      event("campaign-start", {
         ts: "2025-01-01T00:10:00.000Z",
-        event: "campaign-start",
         batches: [["101"]],
         slots: 1,
         name: "second",
-      },
+      }),
     ]).name,
     "second",
   );
@@ -3005,32 +2994,28 @@ test("reduceCampaign reads an optional campaign name off the campaign-start even
 
 test("reduceCampaign reports one completed wave closed and the next wave current mid-campaign", () => {
   const reduced = reduceCampaign([
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["101"], ["201"]],
       slots: 1,
-    },
-    {
+    }),
+    event("campaign-batch", {
       ts: "2025-01-01T00:01:00.000Z",
-      event: "campaign-batch",
       index: 0,
       tasks: ["101"],
-    },
-    {
+    }),
+    event("campaign-batch-done", {
       ts: "2025-01-01T00:02:00.000Z",
-      event: "campaign-batch-done",
       index: 0,
       merged: ["101"],
       held: [],
       clearedParked: [],
-    },
-    {
+    }),
+    event("campaign-batch", {
       ts: "2025-01-01T00:03:00.000Z",
-      event: "campaign-batch",
       index: 1,
       tasks: ["201"],
-    },
+    }),
   ]);
 
   assert.deepEqual(reduced.waves, [["101"], ["201"]]);
@@ -3042,26 +3027,23 @@ test("reduceCampaign reports one completed wave closed and the next wave current
 
 test("reduceCampaign records when each issue merged, from batch-done, green and queue-done", () => {
   const reduced = reduceCampaign([
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["101"], ["201", "202"]],
       slots: 1,
-    },
-    {
+    }),
+    event("campaign-batch-done", {
       ts: "2025-01-01T00:02:00.000Z",
-      event: "campaign-batch-done",
       index: 0,
       merged: ["101"],
       held: [],
       clearedParked: [],
-    },
-    { ts: "2025-01-02T09:00:00.000Z", event: "green", taskId: "201", branch: "agent/201", commits: [] },
-    {
+    }),
+    event("green", { ts: "2025-01-02T09:00:00.000Z", taskId: "201", branch: "agent/201", commits: [] }),
+    event("queue-done", {
       ts: "2025-01-02T10:00:00.000Z",
-      event: "queue-done",
       outcomes: { "202": "green", "201": "green" },
-    },
+    }),
   ]);
 
   // A merge stamp is recorded from every path an issue reaches "completed" by — the
@@ -3073,25 +3055,22 @@ test("reduceCampaign records when each issue merged, from batch-done, green and 
 
 test("reduceCampaign marks a halted issue as a failure", () => {
   const reduced = reduceCampaign([
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["101", "102"]],
       slots: 1,
-    },
-    {
+    }),
+    event("campaign-batch", {
       ts: "2025-01-01T00:01:00.000Z",
-      event: "campaign-batch",
       index: 0,
       tasks: ["101", "102"],
-    },
-    {
+    }),
+    event("campaign-halt", {
       ts: "2025-01-01T00:02:00.000Z",
-      event: "campaign-halt",
       index: 0,
       taskId: "101",
       reason: "gate failed",
-    },
+    }),
   ]);
 
   assert.equal(reduced.outcomes.get("101"), "failure");
@@ -3149,46 +3128,40 @@ test("campaignRunning tracks the latest campaign only", () => {
 
 test("reduceCampaign folds a carve event, pruning unfinished issues from future waves", () => {
   const reduced = reduceCampaign([
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["101"], ["201", "202"], ["301"]],
       slots: 1,
-    },
-    {
+    }),
+    event("campaign-batch", {
       ts: "2025-01-01T00:01:00.000Z",
-      event: "campaign-batch",
       index: 0,
       tasks: ["101"],
-    },
-    {
+    }),
+    event("campaign-batch-done", {
       ts: "2025-01-01T00:02:00.000Z",
-      event: "campaign-batch-done",
       index: 0,
       merged: ["101"],
       held: [],
       clearedParked: [],
-    },
-    {
+    }),
+    event("campaign-batch", {
       ts: "2025-01-01T00:03:00.000Z",
-      event: "campaign-batch",
       index: 1,
       tasks: ["201", "202"],
-    },
-    {
+    }),
+    event("queue-start", {
       ts: "2025-01-01T00:03:30.000Z",
-      event: "queue-start",
       taskIds: ["201", "202"],
       slots: 3,
-    },
+    }),
     // 202 carved mid-wave: it is running, so it stays; its unstarted dependent 301 goes.
-    {
+    event("carve", {
       ts: "2025-01-01T00:04:00.000Z",
-      event: "carve",
       target: "202",
       removed: ["202", "301"],
       dropped: ["301"],
-    },
+    }),
   ]);
 
   // 101 (merged) and 202 (in-flight) stay; only the future, unstarted 301 is pruned.
@@ -3200,34 +3173,30 @@ test("reduceCampaign folds a carve event, pruning unfinished issues from future 
 
 test("reduceCampaign's carve fold clears an emptied future wave and reindexes", () => {
   const reduced = reduceCampaign([
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["101"], ["201"], ["301"]],
       slots: 1,
-    },
-    {
+    }),
+    event("campaign-batch", {
       ts: "2025-01-01T00:01:00.000Z",
-      event: "campaign-batch",
       index: 0,
       tasks: ["101"],
-    },
-    {
+    }),
+    event("campaign-batch-done", {
       ts: "2025-01-01T00:02:00.000Z",
-      event: "campaign-batch-done",
       index: 0,
       merged: ["101"],
       held: [],
       clearedParked: [],
-    },
+    }),
     // Between waves: 201 not yet started, so carving it empties and drops its wave.
-    {
+    event("carve", {
       ts: "2025-01-01T00:03:00.000Z",
-      event: "carve",
       target: "201",
       removed: ["201"],
       dropped: ["201"],
-    },
+    }),
   ]);
 
   assert.deepEqual(reduced.waves, [["101"], ["301"]]);
@@ -3237,43 +3206,38 @@ test("reduceCampaign's carve fold clears an emptied future wave and reindexes", 
 test("reconstructIssueDetail folds an issue's turn log, count, elapsed and status from the log", () => {
   const detail = reconstructIssueDetail(
     [
-      {
+      event("campaign-start", {
         ts: "2025-01-01T00:00:00.000Z",
-        event: "campaign-start",
         batches: [["101"], ["201"]],
         slots: 1,
         titles: { "101": "Do the thing" },
         name: "gateway work",
-      },
-      {
+      }),
+      event("campaign-batch", {
         ts: "2025-01-01T00:01:00.000Z",
-        event: "campaign-batch",
         index: 0,
         tasks: ["101"],
-      },
-      {
+      }),
+      event("turn", {
         ts: "2025-01-01T00:02:00.000Z",
-        event: "turn",
         taskId: "101",
         turn: 0,
         signal: undefined,
         summary: "Wrote a failing test for the parser.",
-      },
-      {
+      }),
+      event("turn", {
         ts: "2025-01-01T00:07:00.000Z",
-        event: "turn",
         taskId: "101",
         turn: 1,
         signal: "done",
         summary: "Made it green and tidied up.",
-      },
-      {
+      }),
+      event("green", {
         ts: "2025-01-01T00:12:00.000Z",
-        event: "green",
         taskId: "101",
         branch: "agent/101",
         commits: ["abc123"],
-      },
+      }),
     ],
     "101",
   );
@@ -3300,38 +3264,33 @@ test("reconstructIssueDetail folds an issue's turn log, count, elapsed and statu
 test("reconstructIssueDetail surfaces the preserved worktree path for a parked issue", () => {
   const detail = reconstructIssueDetail(
     [
-      {
+      event("campaign-start", {
         ts: "2025-01-01T00:00:00.000Z",
-        event: "campaign-start",
         batches: [["102"]],
         slots: 1,
         name: "gateway work",
-      },
-      {
+      }),
+      event("campaign-batch", {
         ts: "2025-01-01T00:01:00.000Z",
-        event: "campaign-batch",
         index: 0,
         tasks: ["102"],
-      },
-      {
+      }),
+      event("turn", {
         ts: "2025-01-01T00:02:00.000Z",
-        event: "turn",
         taskId: "102",
         turn: 0,
         summary: "Asked which option to take.",
-      },
-      {
+      }),
+      event("parked", {
         ts: "2025-01-01T00:03:00.000Z",
-        event: "parked",
         taskId: "102",
         reason: "blocked",
-      },
-      {
+      }),
+      event("worktree-preserved", {
         ts: "2025-01-01T00:03:01.000Z",
-        event: "worktree-preserved",
         taskId: "102",
         path: ".sandcastle.local/wt/102",
-      },
+      }),
     ],
     "102",
   );
@@ -3346,22 +3305,20 @@ test("buildStatus shows campaign waves with issue chips and statuses", () => {
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
   writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["101", "102"], ["201"]],
-    },
-    {
+      slots: 1,
+    }),
+    event("campaign-batch", {
       ts: "2025-01-01T00:01:00.000Z",
-      event: "campaign-batch",
       index: 0,
       tasks: ["101", "102"],
-    },
-    {
+    }),
+    event("queue-done", {
       ts: "2025-01-01T00:02:00.000Z",
-      event: "queue-done",
       outcomes: { "101": "green", "102": "parked" },
-    },
+    }),
   ]);
   writeFileSync(
     join(dir, "parked", "102.json"),
@@ -3402,12 +3359,12 @@ test("buildStatus surfaces the campaign name from the start event", () => {
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
   writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["101"]],
       name: "gateway work",
-    },
+      slots: 1,
+    }),
   ]);
 
   assert.equal(buildStatus(cfgFor(dir)).name, "gateway work");
@@ -3416,12 +3373,12 @@ test("buildStatus surfaces the campaign name from the start event", () => {
 test("buildStatus fills issue names from the log's titles, with no fetchTask", () => {
   const dir = join(tmpdir(), `sctdd-status-log-titles-${Date.now()}`);
   seedState(dir, [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["101", "102"]],
       titles: { "101": "Add login flow", "102": "Rotate logs" },
-    },
+      slots: 1,
+    }),
   ]);
 
   // cfgFor's fetchTask echoes the id — so a name here can only have come from the
@@ -3437,13 +3394,12 @@ test("buildStatus fills issue names from a queue-only run's queue-start titles",
   seedState(dir, [
     // No campaign frame — a bare queue run frames its taskIds as a single wave,
     // and carries their titles on queue-start.
-    {
+    event("queue-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "queue-start",
       taskIds: ["301", "302"],
       slots: 2,
       titles: { "301": "Fix parser", "302": "Tune cache" },
-    },
+    }),
   ]);
 
   const status = buildStatus(cfgFor(dir));
@@ -3455,11 +3411,11 @@ test("buildStatus fills issue names from a queue-only run's queue-start titles",
 test("buildStatus leaves issue names unset when the log carries no titles", () => {
   const dir = join(tmpdir(), `sctdd-status-no-titles-${Date.now()}`);
   seedState(dir, [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["101"]],
-    },
+      slots: 1,
+    }),
   ]);
 
   assert.equal(buildStatus(cfgFor(dir)).waves[0].issues[0].name, undefined);
@@ -3470,30 +3426,28 @@ test("buildStatus marks completed waves as closed", () => {
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
   writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["101"], ["201"]],
-    },
-    {
+      slots: 1,
+    }),
+    event("campaign-batch", {
       ts: "2025-01-01T00:01:00.000Z",
-      event: "campaign-batch",
       index: 0,
       tasks: ["101"],
-    },
-    {
+    }),
+    event("campaign-batch-done", {
       ts: "2025-01-01T00:02:00.000Z",
-      event: "campaign-batch-done",
       index: 0,
       merged: ["101"],
       held: [],
-    },
-    {
+      clearedParked: [],
+    }),
+    event("campaign-batch", {
       ts: "2025-01-01T00:03:00.000Z",
-      event: "campaign-batch",
       index: 1,
       tasks: ["201"],
-    },
+    }),
   ]);
 
   const status = buildStatus(cfgFor(dir));
@@ -3510,32 +3464,31 @@ test("buildStatus marks completed waves as closed", () => {
 test("buildStatus renders a carved issue as a carved chip in the wave it left", () => {
   const dir = join(tmpdir(), `sctdd-status-carved-${Date.now()}`);
   seedState(dir, [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["101"], ["201"]],
       titles: { "101": "seed the db", "201": "add the report" },
-    },
-    {
+      slots: 1,
+    }),
+    event("campaign-batch", {
       ts: "2025-01-01T00:01:00.000Z",
-      event: "campaign-batch",
       index: 0,
       tasks: ["101"],
-    },
-    {
+    }),
+    event("campaign-batch-done", {
       ts: "2025-01-01T00:02:00.000Z",
-      event: "campaign-batch-done",
       index: 0,
       merged: ["101"],
       held: [],
-    },
+      clearedParked: [],
+    }),
     // 201 is a future, unstarted wave: carving it drops it from the running plan…
-    {
+    event("carve", {
       ts: "2025-01-01T00:03:00.000Z",
-      event: "carve",
       target: "201",
       removed: ["201"],
-    },
+      dropped: [],
+    }),
   ]);
 
   const status = buildStatus(cfgFor(dir));
@@ -3556,24 +3509,22 @@ test("buildStatus marks active wave issues as running before they finish", () =>
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
   writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["101", "102"]],
-    },
-    {
+      slots: 1,
+    }),
+    event("campaign-batch", {
       ts: "2025-01-01T00:01:00.000Z",
-      event: "campaign-batch",
       index: 0,
       tasks: ["101", "102"],
-    },
-    {
+    }),
+    event("queue-start", {
       ts: "2025-01-01T00:02:00.000Z",
-      event: "queue-start",
       taskIds: ["101", "102"],
       slots: 2,
-    },
-    { ts: "2025-01-01T00:03:00.000Z", event: "green", taskId: "101" },
+    }),
+    event("green", { ts: "2025-01-01T00:03:00.000Z", taskId: "101", branch: "agent/101", commits: [] }),
   ]);
 
   const status = buildStatus(cfgFor(dir));
@@ -3592,30 +3543,28 @@ test("buildStatus does not show parked interaction cards for closed wave issues"
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
   writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["101"], ["201"]],
-    },
-    {
+      slots: 1,
+    }),
+    event("campaign-batch", {
       ts: "2025-01-01T00:01:00.000Z",
-      event: "campaign-batch",
       index: 0,
       tasks: ["101"],
-    },
-    {
+    }),
+    event("campaign-batch-done", {
       ts: "2025-01-01T00:02:00.000Z",
-      event: "campaign-batch-done",
       index: 0,
       merged: [],
       held: ["101"],
-    },
-    {
+      clearedParked: [],
+    }),
+    event("campaign-batch", {
       ts: "2025-01-01T00:03:00.000Z",
-      event: "campaign-batch",
       index: 1,
       tasks: ["201"],
-    },
+    }),
   ]);
   for (const taskId of ["101", "201"]) {
     writeFileSync(
@@ -3644,11 +3593,11 @@ test("buildStatus only shows parked cards for issues in the active campaign", ()
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
   writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["243"]],
-    },
+      slots: 1,
+    }),
   ]);
   for (const taskId of ["243", "999"]) {
     writeFileSync(
@@ -3677,43 +3626,40 @@ test("buildStatus adds rough activity details for issue hover", () => {
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
   writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["101", "102", "103"]],
-    },
-    {
+      slots: 1,
+    }),
+    event("queue-start", {
       ts: "2025-01-01T00:01:00.000Z",
-      event: "queue-start",
       taskIds: ["101", "102", "103"],
       slots: 3,
-    },
-    {
+    }),
+    event("queue-spawn", {
       ts: "2025-01-01T00:02:00.000Z",
-      event: "queue-spawn",
       taskId: "101",
       running: 1,
       left: 2,
-    },
-    {
+    }),
+    event("turn", {
       ts: "2025-01-01T00:03:00.000Z",
-      event: "turn",
       taskId: "101",
       turn: 2,
       signal: "<promise>COMPLETE</promise>",
-    },
-    {
+      summary: "",
+    }),
+    event("green", {
       ts: "2025-01-01T00:04:00.000Z",
-      event: "green",
       taskId: "102",
       branch: "agent/102",
-    },
-    {
+      commits: [],
+    }),
+    event("parked", {
       ts: "2025-01-01T00:05:00.000Z",
-      event: "parked",
       taskId: "103",
       reason: "blocked",
-    },
+    }),
   ]);
 
   const status = buildStatus(cfgFor(dir));
@@ -3733,11 +3679,11 @@ test("buildStatusWithIssueNames adds issue names from fetchTask when available",
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
   writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["101", "102"]],
-    },
+      slots: 1,
+    }),
   ]);
 
   const status = await buildStatusWithIssueNames({
@@ -3756,30 +3702,28 @@ test("wave labels read from tmp-log issue titles, resolved through buildStatusWi
   const dir = join(tmpdir(), `sctdd-status-wave-names-${Date.now()}`);
   seedState(dir, [
     // Wave 0 (many issues) closes; wave 1 (one issue) is now running.
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["101", "102", "103"], ["201"]],
-    },
-    {
+      slots: 1,
+    }),
+    event("campaign-batch", {
       ts: "2025-01-01T00:01:00.000Z",
-      event: "campaign-batch",
       index: 0,
       tasks: ["101", "102", "103"],
-    },
-    {
+    }),
+    event("campaign-batch-done", {
       ts: "2025-01-01T00:02:00.000Z",
-      event: "campaign-batch-done",
       index: 0,
       merged: ["101", "102", "103"],
       held: [],
-    },
-    {
+      clearedParked: [],
+    }),
+    event("campaign-batch", {
       ts: "2025-01-01T00:03:00.000Z",
-      event: "campaign-batch",
       index: 1,
       tasks: ["201"],
-    },
+    }),
   ]);
   const titles: Record<string, string> = {
     "101": "config resolution",
@@ -3818,9 +3762,8 @@ test("wave labels and chip hovers render from the log's titles, with no fetchTas
   const dir = join(tmpdir(), `sctdd-render-log-titles-${Date.now()}`);
   seedState(dir, [
     // Wave 0 (many issues) closes; wave 1 (one issue) is now running.
-    {
+    event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      event: "campaign-start",
       batches: [["101", "102", "103"], ["201"]],
       titles: {
         "101": "config resolution",
@@ -3828,26 +3771,25 @@ test("wave labels and chip hovers render from the log's titles, with no fetchTas
         "103": "log rotation",
         "201": "cache eviction",
       },
-    },
-    {
+      slots: 1,
+    }),
+    event("campaign-batch", {
       ts: "2025-01-01T00:01:00.000Z",
-      event: "campaign-batch",
       index: 0,
       tasks: ["101", "102", "103"],
-    },
-    {
+    }),
+    event("campaign-batch-done", {
       ts: "2025-01-01T00:02:00.000Z",
-      event: "campaign-batch-done",
       index: 0,
       merged: ["101", "102", "103"],
       held: [],
-    },
-    {
+      clearedParked: [],
+    }),
+    event("campaign-batch", {
       ts: "2025-01-01T00:03:00.000Z",
-      event: "campaign-batch",
       index: 1,
       tasks: ["201"],
-    },
+    }),
   ]);
 
   // buildStatus over cfgFor's id-echoing fetchTask: the only source of titles is
@@ -5817,12 +5759,12 @@ test("listArchivedRuns lists a project's archived runs newest-first with summari
   const archiveDir = join(dir, "logs", "archive");
   mkdirSync(archiveDir, { recursive: true });
   writeJsonl(join(archiveDir, "orchestrator-2026-01-01T00-00-00-000Z.jsonl"), [
-    { event: "campaign-start", batches: [["101"]] },
-    { event: "campaign-done", batches: 1 },
+    event("campaign-start", { batches: [["101"]], slots: 1 }),
+    event("campaign-done", { batches: 1 }),
   ]);
   writeJsonl(join(archiveDir, "orchestrator-2026-02-01T00-00-00-000Z.jsonl"), [
-    { event: "campaign-start", batches: [["201"], ["202"]] },
-    { event: "campaign-done", batches: 2 },
+    event("campaign-start", { batches: [["201"], ["202"]], slots: 1 }),
+    event("campaign-done", { batches: 2 }),
   ]);
   // A malformed archive (no reconstructable run) is skipped, not fatal — even
   // though its timestamp is the newest.
@@ -5854,8 +5796,8 @@ test("listArchivedRuns carries a named run's --name for the list's primary label
   const archiveDir = join(dir, "logs", "archive");
   mkdirSync(archiveDir, { recursive: true });
   writeJsonl(join(archiveDir, "orchestrator-2026-04-01T00-00-00-000Z.jsonl"), [
-    { event: "campaign-start", batches: [["101"]], name: "gateway + comms" },
-    { event: "campaign-done", batches: 1 },
+    event("campaign-start", { batches: [["101"]], name: "gateway + comms", slots: 1 }),
+    event("campaign-done", { batches: 1 }),
   ]);
 
   const runs = listArchivedRuns(dir);
@@ -5910,19 +5852,19 @@ test("listArchivedRuns carries each run's state, startedAt and issue count, deri
   mkdirSync(archiveDir, { recursive: true });
   // A clean run that reached campaign-done: complete, three issues.
   writeJsonl(join(archiveDir, "orchestrator-2026-01-01T00-00-00-000Z.jsonl"), [
-    { event: "campaign-start", batches: [["101", "102"], ["201"]] },
-    { event: "campaign-done", batches: 2 },
+    event("campaign-start", { batches: [["101", "102"], ["201"]], slots: 1 }),
+    event("campaign-done", { batches: 2 }),
   ]);
   // A run whose log has a campaign-start but no terminal event — the process was
   // killed mid-wave, so it reads interrupted and expands to its partial waves.
   writeJsonl(join(archiveDir, "orchestrator-2026-02-01T00-00-00-000Z.jsonl"), [
-    { event: "campaign-start", batches: [["301"], ["302"]] },
-    { event: "campaign-batch", index: 0, tasks: ["301"] },
+    event("campaign-start", { batches: [["301"], ["302"]], slots: 1 }),
+    event("campaign-batch", { index: 0, tasks: ["301"] }),
   ]);
   // A halted run stopped short — later waves never ran — so it too reads interrupted.
   writeJsonl(join(archiveDir, "orchestrator-2026-03-01T00-00-00-000Z.jsonl"), [
-    { event: "campaign-start", batches: [["401"], ["402"]] },
-    { event: "campaign-halt", taskId: "401", reason: "gate failed" },
+    event("campaign-start", { batches: [["401"], ["402"]], slots: 1 }),
+    event("campaign-halt", { taskId: "401", reason: "gate failed", index: 0 }),
   ]);
 
   const runs = listArchivedRuns(dir);
@@ -6045,9 +5987,9 @@ test("parkedReplyFor returns the matching record's question and parsed options f
 
 test("appendedEvents returns the whole log and its end offset from a zero offset", () => {
   const log =
-    JSON.stringify({ event: "campaign-start" }) +
+    JSON.stringify(event("campaign-start", { batches: [], slots: 1 })) +
     "\n" +
-    JSON.stringify({ event: "queue-start" }) +
+    JSON.stringify(event("queue-start", { taskIds: [], slots: 1 })) +
     "\n";
   const { events, offset } = appendedEvents(log, 0);
   assert.deepEqual(
@@ -6058,8 +6000,8 @@ test("appendedEvents returns the whole log and its end offset from a zero offset
 });
 
 test("appendedEvents returns only the events appended past a prior offset", () => {
-  const first = JSON.stringify({ event: "campaign-start" }) + "\n";
-  const appended = JSON.stringify({ event: "turn", taskId: "101" }) + "\n";
+  const first = JSON.stringify(event("campaign-start", { batches: [], slots: 1 })) + "\n";
+  const appended = JSON.stringify(event("turn", { taskId: "101", turn: 0, summary: "" })) + "\n";
   const { offset } = appendedEvents(first, 0);
   const next = appendedEvents(first + appended, offset);
   assert.deepEqual(
@@ -6070,7 +6012,7 @@ test("appendedEvents returns only the events appended past a prior offset", () =
 });
 
 test("appendedEvents leaves a partial trailing line unconsumed until it is complete", () => {
-  const complete = JSON.stringify({ event: "campaign-start" }) + "\n";
+  const complete = JSON.stringify(event("campaign-start", { batches: [], slots: 1 })) + "\n";
   const partial = '{"event":"turn"';
   const mid = appendedEvents(complete + partial, 0);
   // Only the complete line is consumed; the offset stops before the partial line.
@@ -6091,7 +6033,7 @@ test("appendedEvents leaves a partial trailing line unconsumed until it is compl
 });
 
 test("appendedEvents re-reads from the start when the log is shorter than the offset (rotated/truncated)", () => {
-  const rotated = JSON.stringify({ event: "campaign-start" }) + "\n";
+  const rotated = JSON.stringify(event("campaign-start", { batches: [], slots: 1 })) + "\n";
   const { events, offset } = appendedEvents(rotated, 9999);
   assert.deepEqual(
     events.map((e) => e.event),
@@ -6101,7 +6043,7 @@ test("appendedEvents re-reads from the start when the log is shorter than the of
 });
 
 test("appendedEvents skips an unparseable line the way readEventLog does", () => {
-  const log = "not json\n" + JSON.stringify({ event: "queue-start" }) + "\n";
+  const log = "not json\n" + JSON.stringify(event("queue-start", { taskIds: [], slots: 1 })) + "\n";
   const { events } = appendedEvents(log, 0);
   assert.deepEqual(
     events.map((e) => e.event),

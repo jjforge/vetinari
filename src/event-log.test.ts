@@ -14,11 +14,11 @@ const withLog = (lines: string[]): string => {
 
 test("readEventLog skips a non-JSON line and a line missing a string event, keeping the well-formed events around them", () => {
   const logFile = withLog([
-    JSON.stringify({ ts: "2026-08-24T00:00:00.000Z", event: "campaign-start", batches: [["1"]], slots: 1 }),
+    JSON.stringify(event("campaign-start", { ts: "2026-08-24T00:00:00.000Z", batches: [["1"]], slots: 1 })),
     "this is not json{",
     JSON.stringify({ ts: "2026-08-24T00:00:01.000Z", foo: "no event field" }),
     JSON.stringify({ ts: "2026-08-24T00:00:02.000Z", event: 42 }),
-    JSON.stringify({ ts: "2026-08-24T00:00:03.000Z", event: "campaign-done", batches: 1 }),
+    JSON.stringify(event("campaign-done", { ts: "2026-08-24T00:00:03.000Z", batches: 1 })),
   ]);
 
   const events = readEventLog({ logFile });

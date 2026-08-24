@@ -31,6 +31,7 @@ import {
   ownerRepoFromRemote,
   parkedReplyFor,
   parseCarveClosure,
+  parseRunTimestamp,
   reconstructIssueDetail,
   projectRunState,
   reduceCampaign,
@@ -5338,6 +5339,56 @@ test("listArchivedRuns returns nothing when a project has no archive directory",
     listArchivedRuns(join(tmpdir(), `sctdd-archive-none-${Date.now()}`)),
     [],
   );
+});
+
+test("parseRunTimestamp reverses an archive run token to an ISO timestamp, tolerating older tokens", () => {
+  // The token `archiveRun` writes: `toISOString().replace(/[:.]/g, "-")`.
+  assert.equal(
+    parseRunTimestamp("2026-08-23T22-22-36-267Z"),
+    "2026-08-23T22:22:36.267Z",
+  );
+  // Older archives were written without milliseconds and/or the trailing Z.
+  assert.equal(
+    parseRunTimestamp("2025-06-10T00-00-00"),
+    "2025-06-10T00:00:00.000Z",
+  );
+  // A token that isn't a timestamp yields undefined, so the row falls back to it verbatim.
+  assert.equal(parseRunTimestamp("not-a-stamp"), undefined);
+});
+
+test("listArchivedRuns carries each run's state, startedAt and issue count, derived from the log", () => {
+  const dir = join(tmpdir(), `sctdd-archive-fields-${Date.now()}`);
+  const archiveDir = join(dir, "logs", "archive");
+  mkdirSync(archiveDir, { recursive: true });
+  // A clean run that reached campaign-done: complete, three issues.
+  writeJsonl(join(archiveDir, "orchestrator-2026-01-01T00-00-00-000Z.jsonl"), [
+    { event: "campaign-start", batches: [["101", "102"], ["201"]] },
+    { event: "campaign-done", batches: 2 },
+  ]);
+  // A run whose log has a campaign-start but no terminal event — the process was
+  // killed mid-wave, so it reads interrupted and expands to its partial waves.
+  writeJsonl(join(archiveDir, "orchestrator-2026-02-01T00-00-00-000Z.jsonl"), [
+    { event: "campaign-start", batches: [["301"], ["302"]] },
+    { event: "campaign-batch", index: 0, tasks: ["301"] },
+  ]);
+  // A halted run stopped short — later waves never ran — so it too reads interrupted.
+  writeJsonl(join(archiveDir, "orchestrator-2026-03-01T00-00-00-000Z.jsonl"), [
+    { event: "campaign-start", batches: [["401"], ["402"]] },
+    { event: "campaign-halt", taskId: "401", reason: "gate failed" },
+  ]);
+
+  const runs = listArchivedRuns(dir);
+  const byRun = Object.fromEntries(runs.map((r) => [r.run, r]));
+
+  assert.equal(byRun["2026-01-01T00-00-00-000Z"].state, "complete");
+  assert.equal(byRun["2026-01-01T00-00-00-000Z"].issues, 3);
+  assert.equal(
+    byRun["2026-01-01T00-00-00-000Z"].startedAt,
+    "2026-01-01T00:00:00.000Z",
+  );
+  assert.equal(byRun["2026-02-01T00-00-00-000Z"].state, "interrupted");
+  assert.equal(byRun["2026-02-01T00-00-00-000Z"].issues, 2);
+  assert.equal(byRun["2026-03-01T00-00-00-000Z"].state, "interrupted");
 });
 
 test("summarizeRun folds an archived log into a one-line mode/issue-count/outcome summary", () => {

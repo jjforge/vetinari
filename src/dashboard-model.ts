@@ -488,6 +488,40 @@ export function campaignRunning(events: any[]): boolean {
   return !events.slice(start).some((e) => e.event === "campaign-done" || e.event === "campaign-halt");
 }
 
+/** An archived run's terminal disposition for the archived-runs list: `complete`
+ * when its latest campaign reached the terminal `campaign-done`/`queue-done` (a
+ * full, clean finish), else `interrupted` — the run was cut short and only its
+ * partial waves were recorded, whether killed mid-wave (no terminal event) or
+ * halted (base rolled back, later waves never run). Both read `interrupted` and
+ * still expand to the waves that did run. */
+export type ArchivedRunState = "complete" | "interrupted";
+
+/**
+ * A run's terminal disposition, scoped to the latest `campaign-start` like the
+ * rest of the reducer (#69) so a superseded earlier run never decides it — a
+ * queue-only run (no campaign frame) is folded whole and reads its `queue-done`.
+ */
+export function archivedRunState(events: any[]): ArchivedRunState {
+  const start = events.findLastIndex((e) => e.event === "campaign-start" && Array.isArray(e.batches));
+  const relevant = start >= 0 ? events.slice(start) : events;
+  return relevant.some((e) => e.event === "campaign-done" || e.event === "queue-done") ? "complete" : "interrupted";
+}
+
+/**
+ * The ISO timestamp a run token encodes, or undefined when it doesn't parse.
+ * `archiveRun` writes the token as `new Date().toISOString().replace(/[:.]/g, "-")`,
+ * so `2026-08-23T22-22-36-267Z` reverses to `2026-08-23T22:22:36.267Z` — only the
+ * time's `:`/`.` were flattened to `-`, the date keeps its own. An older token
+ * written without the milliseconds or the trailing `Z` still parses (ms → `.000`).
+ */
+export function parseRunTimestamp(run: string): string | undefined {
+  const m = run.match(/^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})(?:-(\d{3}))?Z?$/);
+  if (!m) return undefined;
+  const [, date, h, mi, s, ms] = m;
+  const iso = `${date}T${h}:${mi}:${s}.${ms ?? "000"}Z`;
+  return Number.isNaN(Date.parse(iso)) ? undefined : iso;
+}
+
 /** An archived run addressable in the dashboard: its timestamp token (`run`), the
  * resolved log path, and a one-line summary of what it did. The token is the only
  * thing a request supplies; `file` is resolved from the listing, never joined from
@@ -499,6 +533,15 @@ export interface ArchivedRun {
   /** the run's `--name`, when it was launched with one — the list's primary label
    * (it falls back to the `run` timestamp token when absent). */
   name?: string;
+  /** whether the run finished clean (`complete`) or was cut short (`interrupted`);
+   * an interrupted row still expands to the partial waves recorded before it stopped. */
+  state: ArchivedRunState;
+  /** the run's start time as an ISO timestamp, parsed from its `run` token; undefined
+   * for a token that doesn't parse (so the row falls back to the token verbatim). */
+  startedAt?: string;
+  /** how many issues the run's plan spanned (its full pre-carve membership, so a
+   * carved-out issue still counts — it renders as a chip in the expanded view). */
+  issues: number;
 }
 
 /** The directory a project's finished-run logs are archived into (mirrors
@@ -522,12 +565,20 @@ export function listArchivedRuns(baseLocation: string): ArchivedRun[] {
     if (!match) continue;
     const file = join(dir, name);
     const events = readEvents({ logFile: file });
-    const { waves, name: runName } = reduceCampaign(events);
+    const { waves, layout, name: runName } = reduceCampaign(events);
     if (!waves.length) {
       log("status-archive-skipped", { file });
       continue;
     }
-    runs.push({ run: match[1], file, summary: summarizeRun(events), name: runName });
+    runs.push({
+      run: match[1],
+      file,
+      summary: summarizeRun(events),
+      name: runName,
+      state: archivedRunState(events),
+      startedAt: parseRunTimestamp(match[1]),
+      issues: layout.flat().length,
+    });
   }
   return runs.sort((a, b) => (a.run < b.run ? 1 : a.run > b.run ? -1 : 0));
 }

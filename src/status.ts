@@ -21,6 +21,7 @@ import { handlePage } from "./dashboard-route-page.ts";
 export * from "./dashboard-model.ts";
 export * from "./dashboard-render.ts";
 export * from "./dashboard-carve.ts";
+export * from "./event-log.ts";
 
 // The dashboard surfaces, tried in order; each owns its own method+path match and
 // returns true once it has handled the request. A `/` request only ever matches

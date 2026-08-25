@@ -268,18 +268,18 @@ gateway is up, notifications silently do not fire. The full standing-up guide,
 end to end, is [`docs/gateway.md`](docs/gateway.md); the short path:
 
 Put each project's Telegram credentials in its **base location**, in
-`.vetinari.local/orchestrator.env` (gitignored, host-only) — never in
+`.vetinari.local/host.env` (gitignored, host-only) — never in
 `.vetinari.local/.env`, which is injected into agent containers and must not
 carry a bot credential:
 
 ```bash
-# <project>/.vetinari.local/orchestrator.env
+# <project>/.vetinari.local/host.env
 VETINARI_TELEGRAM_BOT_TOKEN=123456:ABC-your-bot-token
 VETINARI_TELEGRAM_CHAT_ID=-1001234567890
 ```
 
 ```bash
-set -a; source .vetinari.local/orchestrator.env; set +a
+set -a; source .vetinari.local/host.env; set +a
 npx vetinari tg-test            # prove the round-trip first
 npx vetinari gateway            # the ONE daemon (quick try; prefer the service below)
 npx vetinari queue 436 611 623  # in another shell; registers itself with the gateway
@@ -320,7 +320,7 @@ loginctl enable-linger "$USER"                      # ...and at boot, without a 
 ```
 
 The gateway reads each project's bot credentials live from that project's
-`.vetinari.local/orchestrator.env` (above) — it holds no credentials of its own, so
+`.vetinari.local/host.env` (above) — it holds no credentials of its own, so
 there is no host-level `gateway.env` to source (`migrate` deletes any stale one left
 by an older layout). Keep bot creds out of `.vetinari.local/.env`, which is injected
 into agent containers.
@@ -352,7 +352,7 @@ Each of these was paid for in a failed run. They are not style preferences.
    invariant**: the only file that crosses into the agent container is
    `.vetinari.local/.env`, so any host-only value — `GIT_CONFIG_GLOBAL`, and a
    Telegram bot credential — must live elsewhere (`hostEnv`, or the host-side
-   secrets file `.vetinari.local/orchestrator.env`), never in `.env`. See
+   secrets file `.vetinari.local/host.env`), never in `.env`. See
    [ADR 0011](docs/adr/0011-configuration-layers.md) for the full
    configuration-layers model (scope × secrecy × container-reach).
 4. **Your gates set the concurrency ceiling.** A full suite per turn is
@@ -432,7 +432,7 @@ it there too and re-run that project's `baseline`.
 | `carve <issue> <batch…>` | drop the issue + its transitive dependents, then run the rest as a campaign (`--dry-run` to just print) |
 | `campaign-plan <ids…>` | layer a selected set into dependency-ordered wave args (paste after `campaign`) + a provenance report; plans only, never runs |
 | `init [--dry-run]` | scaffold a **new** project onto the layout: committed `vetinari/` (config skeleton + Dockerfile), excluded `.vetinari.local/`, `.gitignore` updated (idempotent, never clobbers an existing config; `--dry-run` to just print the plan) |
-| `migrate [--dry-run]` | move an **existing** project onto the `vetinari/` + `.vetinari.local/` layout: config → `vetinari/`, old `.sandcastle/` state → `.vetinari.local/`, `.gitignore` updated, `orchestrator.env` folded into the gateway host config, and the systemd unit rewritten into the gateway service (`--dry-run` to just print the plan) |
+| `migrate [--dry-run]` | move an **existing** project onto the `vetinari/` + `.vetinari.local/` layout: config → `vetinari/`, old `.sandcastle/` state → `.vetinari.local/`, `.gitignore` updated, the host-side `orchestrator.env` renamed to `host.env`, a stale `gateway.env` deleted, and the systemd unit rewritten into the gateway service (`--dry-run` to just print the plan) |
 | `answer <task> <text>` | resume a parked task with your answer |
 | `gateway` | the one host daemon fronting every registered project: sole Telegram consumer and sender — announces parked questions, routes replies (and `carve <issue>`) to the right project+task, resumes them concurrently, and hosts the status dashboard |
 | `parked` | list what is waiting and why |

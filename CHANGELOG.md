@@ -178,6 +178,15 @@ repos` (repos with a running agent), parked `oldest <Nm>` (the oldest parked
 
 ### Changed
 
+- Renamed the host-side secrets file `.vetinari.local/orchestrator.env` →
+  `.vetinari.local/host.env` (#122, ADR 0011), naming it by container-reach: `host.env`
+  stays host-side (the Telegram bot token + chat, read by the orchestrator process and
+  live by the gateway), while `.env` is the container gate. The gateway and orchestrator
+  now read Telegram creds from `host.env`, and `migrate` renames an existing
+  `orchestrator.env` (whether still under `.sandcastle/` or already under
+  `.vetinari.local/`) to `host.env`. The container-secrets file keeps its
+  sandcastle-imposed name `.env`.
+
 - The orchestrator now passes its `stateDir` (default `.vetinari.local`) to
   sandcastle's `createSandbox`, so sandcastle's own gitignored runtime artifacts
   (worktrees/, `.env`, patches/, default logs/) land under the project's state

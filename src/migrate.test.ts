@@ -78,6 +78,48 @@ test("computeLayoutMigration plans the full move for a fresh legacy project", ()
   assert.deepEqual(plan.warnings, []);
 });
 
+test("computeLayoutMigration renames a legacy .sandcastle/orchestrator.env straight to .vetinari.local/host.env", () => {
+  const plan = computeLayoutMigration({
+    oldState: ["orchestrator.env", "logs"],
+    gitignore: ".sandcastle/\n",
+  });
+
+  // The host-side secrets file lands under its new name (ADR 0011), not carried
+  // across verbatim as orchestrator.env.
+  assert.deepEqual(
+    plan.moves.find((m) => m.from === ".sandcastle/orchestrator.env"),
+    { from: ".sandcastle/orchestrator.env", to: ".vetinari.local/host.env" },
+  );
+  assert.ok(!plan.moves.some((m) => m.to === ".vetinari.local/orchestrator.env"));
+});
+
+test("computeLayoutMigration renames an already-migrated .vetinari.local/orchestrator.env to host.env", () => {
+  const plan = computeLayoutMigration({
+    // Project already on the .vetinari.local/ layout, but its secrets file
+    // predates the host.env rename.
+    oldState: [],
+    localState: ["orchestrator.env", ".env", "parked"],
+    gitignore: ".vetinari.local/\n.sandcastle/\n",
+  });
+
+  assert.deepEqual(
+    plan.moves.find((m) => m.from === ".vetinari.local/orchestrator.env"),
+    { from: ".vetinari.local/orchestrator.env", to: ".vetinari.local/host.env" },
+  );
+  // The container gate (.env) keeps its sandcastle-imposed name, untouched.
+  assert.ok(!plan.moves.some((m) => m.from === ".vetinari.local/.env"));
+});
+
+test("computeLayoutMigration plans no host.env rename when the local secrets are already renamed", () => {
+  const plan = computeLayoutMigration({
+    oldState: [],
+    localState: ["host.env", ".env"],
+    gitignore: ".vetinari.local/\n.sandcastle/\n",
+  });
+
+  assert.deepEqual(plan.moves, []);
+});
+
 test("computeLayoutMigration plans to delete a stale gateway.env", () => {
   const plan = computeLayoutMigration({
     gatewayConfigDir: "/home/z/.config/vetinari",
@@ -223,6 +265,22 @@ test("applyLayoutMigration deletes the stale gateway.env and writes the rewritte
   assert.equal(result.unitRewritten, true);
 });
 
+test("applyLayoutMigration renames an already-migrated orchestrator.env to host.env on disk", () => {
+  const dir = tmpProject();
+  mkdirSync(join(dir, ".vetinari.local"), { recursive: true });
+  writeFileSync(join(dir, ".vetinari.local", "orchestrator.env"), "VETINARI_TELEGRAM_BOT_TOKEN=tok\n");
+  writeFileSync(join(dir, ".vetinari.local", ".env"), "MODEL_TOKEN=x\n");
+
+  const plan = computeLayoutMigration(scanLayout(dir));
+  applyLayoutMigration(dir, plan);
+
+  // The host-side secrets moved to host.env, contents intact...
+  assert.equal(readFileSync(join(dir, ".vetinari.local", "host.env"), "utf8"), "VETINARI_TELEGRAM_BOT_TOKEN=tok\n");
+  assert.ok(!existsSync(join(dir, ".vetinari.local", "orchestrator.env")));
+  // ...and the container gate .env is left exactly where it was.
+  assert.equal(readFileSync(join(dir, ".vetinari.local", ".env"), "utf8"), "MODEL_TOKEN=x\n");
+});
+
 test("applyLayoutMigration reports nothing deleted or rewritten when the plan carries neither", () => {
   const dir = tmpProject();
   const plan = computeLayoutMigration({ oldState: [], gitignore: ".vetinari.local/\n.sandcastle/\n" });
@@ -267,6 +325,20 @@ test("scanLayout reads a legacy project off disk into a scan the planner can use
   const plan = computeLayoutMigration(scan);
   assert.ok(plan.moves.some((m) => m.to === "vetinari/config.mts"));
   assert.ok(plan.moves.some((m) => m.to === ".vetinari.local/logs"));
+});
+
+test("scanLayout reads the .vetinari.local/ entries so the planner can rename the secrets file", () => {
+  const dir = tmpProject();
+  mkdirSync(join(dir, ".vetinari.local"), { recursive: true });
+  writeFileSync(join(dir, ".vetinari.local", "orchestrator.env"), "VETINARI_TELEGRAM_BOT_TOKEN=tok\n");
+  writeFileSync(join(dir, ".vetinari.local", ".env"), "MODEL_TOKEN=x\n");
+
+  const scan = scanLayout(dir);
+  assert.ok(scan.localState!.includes("orchestrator.env"));
+
+  // Fed to the planner it produces the host.env rename.
+  const plan = computeLayoutMigration(scan);
+  assert.ok(plan.moves.some((m) => m.from === ".vetinari.local/orchestrator.env" && m.to === ".vetinari.local/host.env"));
 });
 
 test("scanLayout reads the host-level gateway + systemd inputs off disk", () => {

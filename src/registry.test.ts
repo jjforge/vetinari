@@ -27,12 +27,12 @@ test("register then listProjects round-trips the pointer", () => {
   assert.deepEqual(listProjects(configDir), [pointer()]);
 });
 
-// A base location on disk with a `orchestrator.env` carrying the project's
+// A base location on disk with a `host.env` carrying the project's
 // Telegram secrets — the shape `readProject` reads live.
 const baseLocationWith = (env: string): string => {
   const base = join(tmpConfigDir(), ".vetinari.local");
   mkdirSync(base, { recursive: true });
-  writeFileSync(join(base, "orchestrator.env"), env);
+  writeFileSync(join(base, "host.env"), env);
   return base;
 };
 
@@ -47,8 +47,8 @@ test("readProject loads the project's Telegram connection live from its base loc
   assert.deepEqual(read?.conn, { token: "123:abc", chat: "-1001", thread: "42" });
 });
 
-test("readProject strips inline comments from orchestrator.env values (shell semantics)", () => {
-  // A human-authored orchestrator.env annotates its secrets with trailing comments;
+test("readProject strips inline comments from host.env values (shell semantics)", () => {
+  // A human-authored host.env annotates its secrets with trailing comments;
   // shell `source` honours them, so the parser must too or the token carries the
   // comment and Telegram rejects it. A quoted value keeps a literal '#'.
   const baseLocation = baseLocationWith(
@@ -64,7 +64,7 @@ test("readProject strips inline comments from orchestrator.env values (shell sem
 test("readProject loads the project's notify map and destinations live from its base location", () => {
   const base = join(tmpConfigDir(), ".vetinari.local");
   mkdirSync(base, { recursive: true });
-  writeFileSync(join(base, "orchestrator.env"), "VETINARI_TELEGRAM_BOT_TOKEN=t\nVETINARI_TELEGRAM_CHAT_ID=c\n");
+  writeFileSync(join(base, "host.env"), "VETINARI_TELEGRAM_BOT_TOKEN=t\nVETINARI_TELEGRAM_CHAT_ID=c\n");
   writeRouting(base, {
     notify: { "*": "ops", failure: "alerts" },
     destinations: { ops: { bot: "main", chat: "-100" }, alerts: { bot: "main", chat: "-200" } },

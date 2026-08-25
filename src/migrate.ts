@@ -31,6 +31,10 @@ const OLD_DIR = ".sandcastle";
 /** The gateway's retired host-level env file — deleted by migrate, never recreated. */
 const GATEWAY_ENV_FILE = "gateway.env";
 
+/** The host-side secrets file's former name and its current one (ADR 0011). */
+const OLD_SECRETS_FILE = "orchestrator.env";
+const SECRETS_FILE = "host.env";
+
 /** A single filesystem move, both paths relative to the project root. */
 export interface Move {
   from: string;
@@ -47,6 +51,12 @@ export interface LayoutScan {
   legacyConfig?: string;
   /** Top-level entry names directly under `.sandcastle/` (empty if none). */
   oldState?: string[];
+  /**
+   * Top-level entry names directly under `.vetinari.local/` (empty if none). A
+   * project already on the new layout still needs its host-side secrets file
+   * renamed `orchestrator.env` → `host.env` (ADR 0011).
+   */
+  localState?: string[];
   /** Current `.gitignore` content, or undefined when there is no `.gitignore`. */
   gitignore?: string;
   /**
@@ -165,9 +175,17 @@ export function computeLayoutMigration(scan: LayoutScan): LayoutMigrationPlan {
   }
 
   // Everything else under `.sandcastle/` (state + secrets) → excluded `.vetinari.local/`.
+  // The host-side secrets file lands under its new name in the same move (ADR 0011).
   for (const entry of scan.oldState ?? []) {
     if (entry === configBasename) continue;
-    addMove(`${OLD_DIR}/${entry}`, `${LOCAL_DIR}/${entry}`);
+    const destName = entry === OLD_SECRETS_FILE ? SECRETS_FILE : entry;
+    addMove(`${OLD_DIR}/${entry}`, `${LOCAL_DIR}/${destName}`);
+  }
+
+  // A project already on the new layout still carries the old secrets-file name;
+  // rename it in place `orchestrator.env` → `host.env` (ADR 0011).
+  if ((scan.localState ?? []).includes(OLD_SECRETS_FILE)) {
+    addMove(`${LOCAL_DIR}/${OLD_SECRETS_FILE}`, `${LOCAL_DIR}/${SECRETS_FILE}`);
   }
 
   const gitignore = planGitignore(scan.gitignore);
@@ -278,6 +296,7 @@ export function scanLayout(baseDir: string): LayoutScan {
   return {
     legacyConfig: resolveConfigPath(baseDir)?.deprecatedFrom,
     oldState: listDir(OLD_DIR),
+    localState: listDir(LOCAL_DIR),
     gitignore: readOrUndef(resolve(baseDir, ".gitignore")),
     existing: [
       ...listDir(CANONICAL_DIR).map((e) => `${CANONICAL_DIR}/${e}`),

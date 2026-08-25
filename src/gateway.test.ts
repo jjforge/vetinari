@@ -488,7 +488,7 @@ test("loadGatewayProjects reads each live project's connection and parked record
   const configDir = join(tmpdir(), `vetinari-gw-load-${Date.now()}-${gwCounter++}`);
   const base = join(tmpdir(), `vetinari-gw-base-${Date.now()}-${gwCounter++}`, ".vetinari.local");
   mkdirSync(join(base, "parked"), { recursive: true });
-  writeFileSync(join(base, "orchestrator.env"), "VETINARI_TELEGRAM_BOT_TOKEN=tok\nVETINARI_TELEGRAM_CHAT_ID=chat\n");
+  writeFileSync(join(base, "host.env"), "VETINARI_TELEGRAM_BOT_TOKEN=tok\nVETINARI_TELEGRAM_CHAT_ID=chat\n");
   writeFileSync(
     join(base, "parked", "A1.json"),
     JSON.stringify({ taskId: "A1", parkedAt: "t1", reason: "blocked", sessionId: "s", branch: "agent/A1", question: "?" }),

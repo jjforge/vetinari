@@ -426,6 +426,14 @@ question` + a `waiting Nm · reason` meta line) that open the existing issue-det
 
 ### Fixed
 
+- The live dashboard no longer refreshes on **every** appended log line (#131, ADR 0008).
+  `GET /api/events` now **filters then debounces** before pushing an SSE frame: appended
+  events are dropped through a fail-open denylist of machine-noise kinds (`telegram-send-failed`,
+  `outbound-enqueued`) that change no rendered view, and the survivors are coalesced per
+  project into one frame per ~300ms window. A burst of appends yields one refresh, not N;
+  a pure-noise append yields none; a real state change still reaches the client within a
+  window.
+
 - `migrate` now **strips `VETINARI_TELEGRAM_*` from the container gate `.vetinari.local/.env`**
   (#118, ADR 0011). Sandcastle injects every key of `.env` into every agent container, so a
   bot token declared there rode into each container — contradicting `src/telegram.ts`'s

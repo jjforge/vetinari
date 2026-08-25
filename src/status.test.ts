@@ -39,6 +39,7 @@ import {
   projectRunState,
   reduceCampaign,
   renderLandingShell,
+  viewRelevantEvents,
   renderStatusPage,
   renderTopBar,
   REPO_DROPDOWN_SCRIPT,
@@ -2179,6 +2180,105 @@ test("serveAllStatus GET /api/events streams a project's log appends as SSE fram
       (payload.events ?? []).map((e) => e.event),
       ["turn"],
     );
+  } finally {
+    await reader.cancel();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+// A live-stream harness for the filter/debounce tests: connects to /api/events, then
+// `collect(ms)` reads for a fixed span and returns every data frame's parsed payload
+// (comment/handshake frames carry no `data:` line and are skipped). Reading for a
+// fixed span — past the ~300ms debounce window — is how "exactly one frame" and "zero
+// frames" are asserted deterministically despite fs.watch's own coalescing.
+const openEventStream = async (port: number) => {
+  const res = await fetch(`http://127.0.0.1:${port}/api/events`);
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  const collect = async (ms: number): Promise<{ project?: string; events?: { event: string; turn?: number }[] }[]> => {
+    const payloads: { project?: string; events?: { event: string; turn?: number }[] }[] = [];
+    const deadline = Date.now() + ms;
+    for (;;) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      let chunk: ReadableStreamReadResult<Uint8Array>;
+      try {
+        chunk = await Promise.race([
+          reader.read(),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("done")), remaining)),
+        ]);
+      } catch {
+        break;
+      }
+      if (chunk.done) break;
+      buf += decoder.decode(chunk.value, { stream: true });
+      let idx: number;
+      while ((idx = buf.indexOf("\n\n")) !== -1) {
+        const frame = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        const data = frame
+          .split("\n")
+          .filter((l) => l.startsWith("data:"))
+          .map((l) => l.slice("data:".length).trim())
+          .join("");
+        if (data) payloads.push(JSON.parse(data));
+      }
+    }
+    return payloads;
+  };
+  return { reader, collect };
+};
+
+test("serveAllStatus GET /api/events debounces a burst of appends into one frame (#131)", async () => {
+  const configDir = join(tmpdir(), `vetinari-sse-debounce-${Date.now()}`);
+  const alphaDir = join(configDir, "state-alpha");
+  seedState(alphaDir, [event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["101"]], slots: 1 })]);
+  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const { port } = server.address() as AddressInfo;
+  const { reader, collect } = await openEventStream(port);
+  try {
+    const logPath = join(alphaDir, "logs", "orchestrator.jsonl");
+    // One continuous read; the burst is scheduled to land after the watcher has armed but
+    // well inside one debounce window (three separate appends, each a distinct fs.watch trigger).
+    setTimeout(async () => {
+      for (let i = 0; i < 3; i++) {
+        appendFileSync(logPath, JSON.stringify(event("turn", { taskId: "101", turn: i, summary: "" })) + "\n");
+        await new Promise((r) => setTimeout(r, 30));
+      }
+    }, 250);
+    // Read well past the burst + debounce window so a second frame, if one were emitted, would show.
+    const frames = (await collect(3000)).filter((p) => p.events?.length);
+    assert.equal(frames.length, 1, "a burst within the debounce window coalesces to a single frame");
+    assert.deepEqual((frames[0].events ?? []).map((e) => e.turn), [0, 1, 2], "the single frame carries every appended event, in order");
+  } finally {
+    await reader.cancel();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serveAllStatus GET /api/events emits no frame for a pure machine-noise append (#131)", async () => {
+  const configDir = join(tmpdir(), `vetinari-sse-noise-${Date.now()}`);
+  const alphaDir = join(configDir, "state-alpha");
+  seedState(alphaDir, [event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["101"]], slots: 1 })]);
+  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const { port } = server.address() as AddressInfo;
+  const { reader, collect } = await openEventStream(port);
+  try {
+    const logPath = join(alphaDir, "logs", "orchestrator.jsonl");
+    // A noise line then a real one in the same window: the read that the `green` guarantees
+    // also sees the noise line, so the surviving frame proves the noise was stripped — a
+    // deterministic check that doesn't hinge on whether fs.watch fired for the noise alone.
+    setTimeout(async () => {
+      appendFileSync(logPath, JSON.stringify(noise({ event: "telegram-send-failed", chatId: "42" })) + "\n");
+      await new Promise((r) => setTimeout(r, 30));
+      appendFileSync(logPath, JSON.stringify(event("green", { taskId: "101", branch: "agent/101", commits: [] })) + "\n");
+    }, 250);
+    const frames = (await collect(3000)).filter((p) => p.events?.length);
+    assert.equal(frames.length, 1, "only the view-relevant append surfaces a frame");
+    assert.deepEqual((frames[0].events ?? []).map((e) => e.event), ["green"], "the denylisted noise event never reaches the client");
   } finally {
     await reader.cancel();
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -6049,6 +6149,29 @@ test("appendedEvents skips an unparseable line the way readEventLog does", () =>
     events.map((e) => e.event),
     ["queue-start"],
   );
+});
+
+test("viewRelevantEvents drops known machine-noise the live view never shows, fail-open on the rest (#131)", () => {
+  const events: OrchestratorEvent[] = [
+    event("green", { taskId: "101", branch: "agent/101", commits: [] }),
+    noise({ event: "telegram-send-failed", chatId: "42" }),
+    event("turn", { taskId: "101", turn: 0, summary: "" }),
+    noise({ event: "outbound-enqueued", kind: "wave-start" }),
+    event("parked", { taskId: "202", reason: "needs a choice" }),
+  ];
+  // The two side-channel noise rows fall away; every view-relevant row survives, in order.
+  assert.deepEqual(
+    viewRelevantEvents(events).map((e) => e.event),
+    ["green", "turn", "parked"],
+  );
+  // Fail-open: an unknown/new event kind is kept, never dropped — an allowlist would
+  // silently swallow events the per-repo detail view needs (turn/gate detail).
+  assert.deepEqual(
+    viewRelevantEvents([noise({ event: "some-future-kind" })]).map((e) => e.event),
+    ["some-future-kind"],
+  );
+  // A batch of pure noise survives to nothing, so the SSE path can emit zero frames for it.
+  assert.deepEqual(viewRelevantEvents([noise({ event: "telegram-send-failed" }), noise({ event: "outbound-enqueued" })]), []);
 });
 
 test("renderStatusPage renders closed waves as a compact toggle row of chip buttons", () => {

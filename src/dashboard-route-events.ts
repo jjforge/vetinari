@@ -1,7 +1,8 @@
 import { existsSync, readFileSync, watch, type FSWatcher } from "node:fs";
 import { dirname } from "node:path";
 import { listProjects } from "./registry.ts";
-import { appendedEvents, logFileOf } from "./dashboard-model.ts";
+import { appendedEvents, logFileOf, viewRelevantEvents } from "./dashboard-model.ts";
+import type { OrchestratorEvent } from "./event-log.ts";
 import { log } from "./log.ts";
 import type { RouteHandler } from "./dashboard-http.ts";
 
@@ -18,7 +19,15 @@ import type { RouteHandler } from "./dashboard-http.ts";
  * from the page's own first fetch. A project whose base location has moved or been
  * deleted is simply a watcher that never arms, tolerated the same way the gateway
  * tolerates a stale registration (ADR 0002); it never takes the stream down.
+ *
+ * Two coalescing steps sit between the watch and the wire (#131), so a busy run no
+ * longer refreshes the client on every appended line: appended events are first
+ * filtered through `viewRelevantEvents` (a fail-open denylist — pure machine-noise
+ * like a failed Telegram send or an outbound-queue enqueue changes no rendered view,
+ * so it pushes nothing), then the survivors are debounced per project into a single
+ * frame per `DEBOUNCE_MS` window, so a burst of appends yields one refresh, not N.
  */
+const DEBOUNCE_MS = 300;
 export const handleEvents: RouteHandler = (req, res, url, deps) => {
   if (!(req.method === "GET" && url.pathname === "/api/events")) return false;
   res.writeHead(200, {
@@ -35,6 +44,10 @@ export const handleEvents: RouteHandler = (req, res, url, deps) => {
   const watchers: FSWatcher[] = [];
   // Per-project character offset into its live log — where this connection last read.
   const offsets = new Map<string, number>();
+  // The debounce buffers: the view-relevant events collected for a project since its last
+  // flush, and the pending timer that will flush them as one frame.
+  const pending = new Map<string, OrchestratorEvent[]>();
+  const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
   const readLog = (logFile: string): string => {
     try {
@@ -44,13 +57,30 @@ export const handleEvents: RouteHandler = (req, res, url, deps) => {
     }
   };
 
+  // Flush a project's debounced survivors as a single SSE frame. Emits nothing when the
+  // response has ended or nothing view-relevant accumulated (a window of pure noise).
+  const flush = (project: string) => {
+    timers.delete(project);
+    const events = pending.get(project) ?? [];
+    pending.delete(project);
+    if (res.writableEnded || !events.length) return;
+    res.write(`data: ${JSON.stringify({ project, events })}\n\n`);
+  };
+
   const push = (project: string, logFile: string) => {
     // A watch callback can fire in the gap between the client disconnecting and the
     // watchers closing; never write to an already-ended response.
     if (res.writableEnded) return;
     const { events, offset } = appendedEvents(readLog(logFile), offsets.get(project) ?? 0);
     offsets.set(project, offset);
-    if (events.length) res.write(`data: ${JSON.stringify({ project, events })}\n\n`);
+    const relevant = viewRelevantEvents(events);
+    if (!relevant.length) return;
+    // Buffer the survivors and arm a single debounce timer per project; a burst of
+    // appends within the window coalesces into the one frame `flush` writes.
+    const buffered = pending.get(project) ?? [];
+    buffered.push(...relevant);
+    pending.set(project, buffered);
+    if (!timers.has(project)) timers.set(project, setTimeout(() => flush(project), DEBOUNCE_MS));
   };
 
   for (const pointer of listProjects(deps.configDir)) {
@@ -71,6 +101,7 @@ export const handleEvents: RouteHandler = (req, res, url, deps) => {
 
   req.on("close", () => {
     for (const watcher of watchers) watcher.close();
+    for (const timer of timers.values()) clearTimeout(timer);
     res.end();
   });
   return true;

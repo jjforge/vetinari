@@ -14,7 +14,12 @@ import { seedDemoRun, DEMO_PROJECT, DEMO_CAMPAIGN } from "./dashboard-demo-fixtu
 test("integration: a seeded live run populates the landing, campaign, issue detail, feed and parked queue", async () => {
   const configDir = mkdtempSync(join(tmpdir(), "vetinari-demo-"));
   const baseLocation = join(configDir, "base");
-  seedDemoRun(baseLocation, new Date("2026-08-22T09:00:00.000Z"));
+  // Seed the run relative to the present so it stays a *live* run: the feed only
+  // carries events inside its 48h window (measured against the real `new Date()`
+  // the HTTP handlers use), so a fixed calendar date would silently empty the feed
+  // once the suite runs more than a window past it. Half an hour ago keeps every
+  // seeded event (offsets span ~0–13m) comfortably in the past and in-window.
+  seedDemoRun(baseLocation, new Date(Date.now() - 30 * 60 * 1000));
   register(configDir, { project: DEMO_PROJECT, projectRoot: join(configDir, "root"), baseLocation });
 
   const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });

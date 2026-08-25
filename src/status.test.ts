@@ -5740,13 +5740,21 @@ test("both pages render one shared top-bar control: a dot-only live indicator an
     );
 });
 
-test("renderStatusPage updates live off /api/events, reloading on a ping unless composing (#79)", () => {
+test("renderStatusPage updates live off /api/events, soft-refreshing on a ping unless composing (#79, #131)", () => {
   const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
 
-  // One SSE stream drives a full-page reload as events land (the page is server-rendered).
+  // One SSE stream drives updates as events land.
   assert.match(html, /new EventSource\("\/api\/events"\)/);
-  assert.match(html, /location\.reload\(\)/);
-  // Guarded: a reply being composed in any textarea freezes the reload so it is never lost.
+  // Soft-refresh, not a full reload (#131): a live tick re-fetches this page and swaps only
+  // the #live-region, so the issue sheet, its open compose, and scroll survive — worst over
+  // the tailnet, where a full reload blanked the page.
+  assert.doesNotMatch(html, /location\.reload\(\)/);
+  assert.match(html, /id="live-region"/);
+  assert.match(html, /fetch\(location\.href/);
+  assert.match(html, /DOMParser/);
+  assert.match(html, /getElementById\("live-region"\)/);
+  assert.match(html, /softRefresh\(\)/);
+  // Guarded: a reply being composed in any textarea freezes the refresh so it is never lost.
   assert.match(html, /const isComposing = \(\) =>/);
   assert.match(
     html,

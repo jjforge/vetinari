@@ -1497,7 +1497,7 @@ ${ISSUE_DETAIL_SHEET_STYLES}
 </head>
 <body>
 ${renderTopBar(opts.projects?.length ? renderRepoDropdown(opts.projects, opts.selected ?? status.project) : `<h1>${escapeHtml(status.project)}</h1>`)}
-${
+<div id="live-region">${
   status.parked.length
     ? `<section class="parked-issues"><h2>Parked · <span class="parked-count">${status.parked.length}</span></h2>${status.parked
         .map(
@@ -1515,7 +1515,7 @@ ${
     ? `<p class="campaign-meta">${status.name ? `<span class="campaign-name">${escapeHtml(status.name)}</span> · ` : ""}${campaignIssueCount(status)} issue${campaignIssueCount(status) === 1 ? "" : "s"} · ${status.waves.length} wave${status.waves.length === 1 ? "" : "s"}</p>`
     : ""
 }
-${renderWaves(status, Boolean(opts.carve), true)}
+${renderWaves(status, Boolean(opts.carve), true)}</div>
 ${opts.archivedRuns?.length ? renderArchivedRuns(opts.selected ?? status.project, opts.archivedRuns, opts.archivedRun, opts.archivedMode) : ""}
 ${issueDetailSheetMarkup(Boolean(opts.carve))}${
   // No-JS fallback: a plain server-side form per carvable issue that reaches
@@ -1544,21 +1544,16 @@ ${issueDetailSheetMarkup(Boolean(opts.carve))}${
     if (hrs < 24) return hrs + "h";
     return Math.floor(hrs / 24) + "d";
   };
-  for (const waited of document.querySelectorAll(".parked-waited[data-parked-at]")) waited.textContent = fmtWaited(waited.dataset.parkedAt);
   // A reply being composed anywhere (a parked card's sheet reply) must never be lost
-  // to a live reload; this guards the reload the way the old fixed-interval one did.
+  // to a live refresh; this guards it the way the old full-reload one did.
   const isComposing = () =>
     [...document.querySelectorAll("textarea")].some((el) => el === document.activeElement || el.value.trim() !== "");
-  // Live updates (ADR 0008): this page is server-rendered, so a live event reloads the
-  // whole page rather than re-fetching a model. The reload is guarded (never while a
-  // reply is being composed) and pausable — a client-side presentation freeze that
-  // keeps counting what lands and flushes on resume, the landing's live-bar behaviour.
   const indicator = document.querySelector("[data-live-state]");
   const updatedEl = document.querySelector("[data-updated]");
   const pauseBtn = document.getElementById("pause");
   let paused = false;
   let buffered = 0;
-  const lastUpdate = Date.now();
+  let lastUpdate = Date.now();
   // While paused the readout reads "Paused" rather than ageing a frozen count; it resumes
   // "updated Ns ago" on unpause (§5, #100).
   const renderUpdated = () => { updatedEl.textContent = paused ? "Paused" : "updated " + Math.round((Date.now() - lastUpdate) / 1000) + "s ago"; };
@@ -1573,15 +1568,36 @@ ${issueDetailSheetMarkup(Boolean(opts.carve))}${
     pauseBtn.dataset.paused = String(paused);
     pauseBtn.setAttribute("aria-label", paused ? "Resume" : "Pause");
   };
+  // Live updates (ADR 0008, #131): a live event soft-refreshes rather than reloading the
+  // whole page. It re-fetches this same page and swaps only #live-region (the parked cards,
+  // campaign meta and wave grid) — the issue sheet, its open reply/compose, the repo
+  // dropdown, the archived-runs list and the scroll position all live outside it and are
+  // left untouched. A full-page reload blanked the page and lost scroll/compose state,
+  // worst over the tailnet. Guarded (never mid-compose), pausable (buffered and
+  // flushed on resume), and single-flighted so overlapping ticks can't race.
+  let refreshing = false;
+  const softRefresh = async () => {
+    if (refreshing) return;
+    refreshing = true;
+    try {
+      const res = await fetch(location.href);
+      const next = new DOMParser().parseFromString(await res.text(), "text/html").getElementById("live-region");
+      const current = document.getElementById("live-region");
+      if (next && current) { current.replaceWith(next); wireLiveRegion(); }
+      lastUpdate = Date.now();
+      renderUpdated();
+    } catch (e) {}
+    refreshing = false;
+  };
   const events = new EventSource("/api/events");
   events.onmessage = () => {
     // Freeze while paused or mid-compose; count what lands so a resume can flush it.
     if (paused || isComposing()) { buffered++; renderState(); return; }
-    location.reload();
+    softRefresh();
   };
   pauseBtn.addEventListener("click", () => {
     paused = !paused;
-    if (!paused && buffered && !isComposing()) location.reload();
+    if (!paused && buffered && !isComposing()) { buffered = 0; softRefresh(); }
     renderState();
     renderUpdated();
   });
@@ -1591,35 +1607,43 @@ ${issueDetailSheetMarkup(Boolean(opts.carve))}${
 ${ISSUE_DETAIL_SHEET_SCRIPT}
 ${REPO_DROPDOWN_SCRIPT}
 ${ARCHIVE_LIST_SCRIPT}
-  // A live wave-member row and a parked card both open the sheet, carrying their
-  // issue+project. The parked card is an <a> with a no-JS href, so its click is
-  // prevented before the sheet opens; a member row is a button, where preventDefault
-  // is harmless.
-  document.querySelectorAll(".wave-member[data-issue], .parked-card[data-issue]").forEach((el) =>
-    el.addEventListener("click", (event) => { event.preventDefault(); openIssue(el.dataset.project, el.dataset.issue, el.dataset.carvable === "1", el.dataset.run); }));
-  // Closed-wave toggles: each chip reveals/hides its own wave card in the grid. The set
-  // of open waves is persisted per project so a live /api/events reload — which reloads
-  // the whole page — does not silently collapse everything the operator opened.
-  const waveBar = document.querySelector(".completed-wave-bar");
-  if (waveBar) {
-    const storeKey = "vetinari:closed-waves:" + waveBar.dataset.project;
-    const readOpen = () => { try { return new Set(JSON.parse(sessionStorage.getItem(storeKey) || "[]")); } catch { return new Set(); } };
-    const open = readOpen();
-    const setOpen = (chip, isOpen) => {
-      chip.setAttribute("aria-expanded", String(isOpen));
-      const card = document.getElementById(chip.getAttribute("aria-controls"));
-      if (card) card.hidden = !isOpen;
-    };
-    for (const chip of waveBar.querySelectorAll(".completed-wave-chip")) {
-      if (open.has(chip.dataset.wave)) setOpen(chip, true);
-      chip.addEventListener("click", () => {
-        const isOpen = chip.getAttribute("aria-expanded") !== "true";
-        setOpen(chip, isOpen);
-        if (isOpen) open.add(chip.dataset.wave); else open.delete(chip.dataset.wave);
-        try { sessionStorage.setItem(storeKey, JSON.stringify([...open])); } catch {}
-      });
+  // Wire the swappable #live-region: the parked-waited "waiting Nm" fill, the sheet-opening
+  // click on each wave-member/parked-card, and the closed-wave toggles. Re-run after every
+  // soft-refresh so the freshly-swapped nodes are live again (the old nodes' listeners went
+  // out with them). Idempotent by construction — each call rebinds only current nodes.
+  function wireLiveRegion() {
+    for (const waited of document.querySelectorAll(".parked-waited[data-parked-at]")) waited.textContent = fmtWaited(waited.dataset.parkedAt);
+    // A live wave-member row and a parked card both open the sheet, carrying their
+    // issue+project. The parked card is an <a> with a no-JS href, so its click is
+    // prevented before the sheet opens; a member row is a button, where preventDefault
+    // is harmless.
+    document.querySelectorAll(".wave-member[data-issue], .parked-card[data-issue]").forEach((el) =>
+      el.addEventListener("click", (event) => { event.preventDefault(); openIssue(el.dataset.project, el.dataset.issue, el.dataset.carvable === "1", el.dataset.run); }));
+    // Closed-wave toggles: each chip reveals/hides its own wave card in the grid. The set
+    // of open waves is persisted per project so a soft-refresh — which re-renders the grid
+    // collapsed — does not silently collapse everything the operator opened.
+    const waveBar = document.querySelector(".completed-wave-bar");
+    if (waveBar) {
+      const storeKey = "vetinari:closed-waves:" + waveBar.dataset.project;
+      const readOpen = () => { try { return new Set(JSON.parse(sessionStorage.getItem(storeKey) || "[]")); } catch { return new Set(); } };
+      const open = readOpen();
+      const setOpen = (chip, isOpen) => {
+        chip.setAttribute("aria-expanded", String(isOpen));
+        const card = document.getElementById(chip.getAttribute("aria-controls"));
+        if (card) card.hidden = !isOpen;
+      };
+      for (const chip of waveBar.querySelectorAll(".completed-wave-chip")) {
+        if (open.has(chip.dataset.wave)) setOpen(chip, true);
+        chip.addEventListener("click", () => {
+          const isOpen = chip.getAttribute("aria-expanded") !== "true";
+          setOpen(chip, isOpen);
+          if (isOpen) open.add(chip.dataset.wave); else open.delete(chip.dataset.wave);
+          try { sessionStorage.setItem(storeKey, JSON.stringify([...open])); } catch {}
+        });
+      }
     }
   }
+  wireLiveRegion();
 </script>
 </body>
 </html>`;

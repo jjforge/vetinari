@@ -432,7 +432,10 @@ question` + a `waiting Nm · reason` meta line) that open the existing issue-det
   `outbound-enqueued`) that change no rendered view, and the survivors are coalesced per
   project into one frame per ~300ms window. A burst of appends yields one refresh, not N;
   a pure-noise append yields none; a real state change still reaches the client within a
-  window.
+  window. The per-repo page also stopped doing a full `location.reload()` per frame — it
+  soft re-fetches its own HTML and swaps only its `#live-region` (parked cards, campaign
+  meta, wave grid), so a refresh no longer blanks the page or loses scroll/compose state,
+  leaving the issue sheet, repo dropdown and archived-runs list untouched.
 
 - `migrate` now **strips `VETINARI_TELEGRAM_*` from the container gate `.vetinari.local/.env`**
   (#118, ADR 0011). Sandcastle injects every key of `.env` into every agent container, so a

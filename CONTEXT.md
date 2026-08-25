@@ -28,6 +28,39 @@ vendored a copy and never pins a version, and vetinari never appears in the
 app's own `package.json`.
 _Avoid_: runtime pull, vendored runtime
 
+### Configuration layers
+
+**Configuration axes**:
+Where a config item lives is fixed by three orthogonal questions (ADR 0011): its
+**scope** (host / project / run), whether it is a **secret** (secret → the excluded
+`.vetinari.local/`, else the committed `vetinari/`), and its **container-reach** (does
+it cross into the agent container?). Answering the three names the file it belongs in.
+
+**Container boundary**:
+The single gate into the agent container: **only** the keys declared in
+`.vetinari.local/.env` cross in (the sandbox runtime injects them as container env).
+Everything else — Telegram credentials, `GIT_CONFIG_GLOBAL`, the
+[[max-concurrent-containers]] ceiling — stays host-side by construction. A secret that
+must not reach the agent must never appear in `.env`.
+_Avoid_: sandbox env, container config
+
+**`.env`** (container secrets):
+The project's excluded secrets the **in-container agent** needs — the model-harness
+token. The one file that crosses the [[container-boundary]]; it keeps the name `.env`
+because the sandbox runtime reads it by that name.
+_Avoid_: container.env
+
+**`host.env`** (host-side secrets):
+The project's excluded secrets the **host** process needs but the container must not
+get — the Telegram bot token and chat. Read into the orchestrator process and live
+per-project by the [[gateway]]; never injected into a sandbox.
+_Avoid_: orchestrator.env
+
+**hostEnv**:
+A committed, **non-secret** map in `vetinari/` applied to the orchestrator process only
+(never a sandbox) — e.g. `GIT_CONFIG_GLOBAL` pointing at a writable gitconfig path. A
+secret the host needs goes in [[host.env]], never as a literal here.
+
 ### Shared host
 
 **Gateway**:
@@ -57,38 +90,39 @@ _Avoid_: client, target repo
 
 ### Host concurrency
 
-**Host slot budget**:
-The total number of agent containers the **machine** allows across every project at
-once — a property of the host, set host-side, not in any project's config. Unset
-means no host ceiling: each [[run]] is bounded only by its own `QUEUE_SLOTS`,
-uncoordinated, as before. When set, every run cooperates to keep the sum of live
-containers within it (ADR 0010).
-_Avoid_: max containers, global slots, concurrency cap
+**Max concurrent containers** (`MAX_CONCURRENT_CONTAINERS`):
+The ceiling on agent containers the **machine** allows across every project at once —
+a property of the host, set host-side (env var or a file in the gateway config dir),
+never in a project's config. A project running alone consumes all of it; unset resolves
+to a machine-derived default rather than unbounded, so the host is never swamped. Every
+run cooperates to keep the sum of live containers within it (ADR 0010, ADR 0011).
+_Avoid_: host slot budget, QUEUE_SLOTS, global slots, concurrency cap
 
-**Project weight**:
-A number a project declares in its `vetinari/` config (default one) that sets its
-cut of the [[host-slot-budget]] when projects contend. Higher weight → more slots;
-it only bites while more than one project is active.
-_Avoid_: priority, rank
+**Container share** (`containerShare`):
+A named tier — `high`, `medium` (default), or `low` — a project declares in its
+`vetinari/` config, setting its cut of [[max-concurrent-containers]] when projects
+contend. A **weighted share with a floor of one, never preemptive and never starving**:
+a higher tier takes more of the remainder, not all of it, and it only bites while more
+than one project is active.
+_Avoid_: project weight, hostWeight, priority, rank
 
 **Fair share**:
-A project's currently-allowed slot count under the [[host-slot-budget]]: a **floor
-of one** slot per active project, plus a [[project-weight]]-proportional cut of the
-remainder, computed over the *currently active* projects — so a project alone gets
-the whole budget and each active project always gets something. Not a reservation:
-it is the ceiling a run checks before taking its next slot.
+A project's currently-allowed container count under [[max-concurrent-containers]]: a
+**floor of one** per active project, plus a [[container-share]]-weighted cut of the
+remainder, computed over the *currently active* projects — so a project alone gets the
+whole ceiling and each active project always gets something. Not a reservation: it is
+the ceiling a run checks before taking its next container.
 _Avoid_: quota, allocation
 
 **Slot lease**:
 The host-level **filesystem** primitive the `campaign`/`queue` processes cooperate
-through to honor the [[host-slot-budget]] — each records the slots it holds and its
-[[project-weight]] there, and a dead holder's slots are reclaimed on contention. It
-is **not** the [[gateway]] (which stays a dumb router and never allocates); it is a
-shared file every run reads and writes directly, so it needs no daemon. A run takes
-a slot only when under both its own `QUEUE_SLOTS` and its current [[fair-share]],
-and releases on park or finish — so when a new project becomes active a busy one
-stops re-acquiring above its now-smaller share and **drains to it** as turns finish,
-never preempting a running container.
+through to honor [[max-concurrent-containers]] — each records the containers it holds and
+its [[container-share]] there, and a dead holder's are reclaimed on contention. It is
+**not** the [[gateway]] (which stays a dumb router and never allocates); it is a shared
+file every run reads and writes directly, so it needs no daemon. A run takes a container
+only when under its current [[fair-share]], and releases on park or finish — so when a
+new project becomes active a busy one stops re-acquiring above its now-smaller share and
+**drains to it** as turns finish, never preempting a running container.
 _Avoid_: semaphore, lock, allocator
 
 ### Communications

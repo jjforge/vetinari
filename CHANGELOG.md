@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Recorded the **configuration-layers model** (ADR 0011): every config item is placed
+  by scope × secrecy × container-reach; the container gate is exactly
+  `.vetinari.local/.env`; and the gateway persists no secrets. Filed the drift/leak
+  follow-ups it exposed — the Telegram token leaking into agent containers via `.env`
+  (#118), the `orchestrator.env`→`gateway.env` fold that made the gateway require its
+  own Telegram credentials (#119), the inbound poll loop not reloading on token
+  rotation (#120), the concurrency-surface rework to `MAX_CONCURRENT_CONTAINERS` +
+  `containerShare` dropping the per-run cap (#121), and the `orchestrator.env`→
+  `host.env` rename (#122).
+
 - Renamed the project, package, CLI, service, host configuration, environment
   variables, logs, examples, documentation, committed config directory
   (`vetinari/`), and local state directory (`.vetinari.local/`) from

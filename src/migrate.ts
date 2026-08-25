@@ -35,6 +35,17 @@ const GATEWAY_ENV_FILE = "gateway.env";
 const OLD_SECRETS_FILE = "orchestrator.env";
 const SECRETS_FILE = "host.env";
 
+/** The container gate — the one file sandcastle injects into agent containers. */
+const CONTAINER_ENV_FILE = ".env";
+
+/**
+ * Key prefix for secrets that belong only host-side (the Telegram bot token, chat,
+ * thread). Sandcastle injects EVERY key of `.env` into the agent container, so any
+ * of these left there rides into every container — the leak this migration closes
+ * (ADR 0011; the container-boundary invariant of `src/telegram.ts`).
+ */
+const HOST_ONLY_ENV_PREFIX = "VETINARI_TELEGRAM_";
+
 /** A single filesystem move, both paths relative to the project root. */
 export interface Move {
   from: string;
@@ -72,6 +83,19 @@ export interface LayoutScan {
   systemdUnitPath?: string;
   /** Current systemd unit content, so an already-gateway unit is left untouched. */
   systemdUnit?: string;
+  /**
+   * Current container-gate `.env` content (from `.vetinari.local/` if present, else
+   * the legacy `.sandcastle/`), or undefined when absent. Host-side secrets found
+   * here are stripped so they stop riding into every agent container (ADR 0011).
+   */
+  containerEnv?: string;
+}
+
+/** The stripped rewrite of the container-gate `.env`: where it writes, its new content, and the keys removed. */
+export interface EnvRewrite {
+  path: string;
+  content: string;
+  stripped: string[];
 }
 
 /** The systemd-unit rewrite: where it writes and the new host-level gateway unit. */
@@ -99,6 +123,11 @@ export interface LayoutMigrationPlan {
    * there is no unit or it is already the gateway unit.
    */
   unit?: UnitRewrite;
+  /**
+   * The container-gate `.env` rewritten with its host-side secrets stripped, or
+   * undefined when the `.env` is absent or already carries none.
+   */
+  envRewrite?: EnvRewrite;
 }
 
 /** Destination for a config move: `vetinari/config` keeps the source extension. */
@@ -160,6 +189,27 @@ function computeUnitRewrite(scan: LayoutScan): UnitRewrite | undefined {
   return { path: scan.systemdUnitPath, content };
 }
 
+/**
+ * Strip every `VETINARI_TELEGRAM_*` assignment from a container-gate `.env`,
+ * leaving every other line (the agent's own token, blanks, comments) verbatim.
+ * Returns undefined when the `.env` is absent or carries none, so a re-run — where
+ * the leak is already closed — plans nothing.
+ */
+function computeEnvRewrite(containerEnv: string | undefined): EnvRewrite | undefined {
+  if (containerEnv === undefined) return undefined;
+  const stripped: string[] = [];
+  const kept = containerEnv.split("\n").filter((raw) => {
+    const m = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=/.exec(raw.trim());
+    if (m && m[1].startsWith(HOST_ONLY_ENV_PREFIX)) {
+      stripped.push(m[1]);
+      return false;
+    }
+    return true;
+  });
+  if (!stripped.length) return undefined;
+  return { path: `${LOCAL_DIR}/${CONTAINER_ENV_FILE}`, content: kept.join("\n"), stripped };
+}
+
 export function computeLayoutMigration(scan: LayoutScan): LayoutMigrationPlan {
   const existing = new Set(scan.existing ?? []);
   const moves: Move[] = [];
@@ -193,8 +243,17 @@ export function computeLayoutMigration(scan: LayoutScan): LayoutMigrationPlan {
   const gatewayEnvDelete =
     scan.gatewayConfigDir && scan.gatewayEnv !== undefined ? join(scan.gatewayConfigDir, GATEWAY_ENV_FILE) : undefined;
   const unit = computeUnitRewrite(scan);
+  const envRewrite = computeEnvRewrite(scan.containerEnv);
 
-  return { moves, gitignore, warnings: [], conflicts, gatewayEnvDelete, unit };
+  const warnings: string[] = [];
+  if (envRewrite) {
+    warnings.push(
+      `Stripped host-side secret(s) ${envRewrite.stripped.join(", ")} from the container gate .env — ` +
+        `they belong only in host.env, never in a container. Rotate any bot token that was exposed there.`,
+    );
+  }
+
+  return { moves, gitignore, warnings, conflicts, gatewayEnvDelete, unit, envRewrite };
 }
 
 export interface ApplyResult {
@@ -204,6 +263,8 @@ export interface ApplyResult {
   gatewayEnvDeleted: boolean;
   /** The systemd unit was rewritten into the gateway service. */
   unitRewritten: boolean;
+  /** The container-gate `.env` was rewritten with its host-side secrets stripped. */
+  envRewritten: boolean;
 }
 
 /**
@@ -246,7 +307,17 @@ export function applyLayoutMigration(baseDir: string, plan: LayoutMigrationPlan)
     unitRewritten = true;
   }
 
-  return { moved: plan.moves, gitignoreUpdated, gatewayEnvDeleted, unitRewritten };
+  // After the moves — so a legacy `.env` has already landed at its destination —
+  // overwrite the container gate with its host-side secrets stripped out.
+  let envRewritten = false;
+  if (plan.envRewrite) {
+    const dest = resolve(baseDir, plan.envRewrite.path);
+    mkdirSync(dirname(dest), { recursive: true });
+    writeFileSync(dest, plan.envRewrite.content);
+    envRewritten = true;
+  }
+
+  return { moved: plan.moves, gitignoreUpdated, gatewayEnvDeleted, unitRewritten, envRewritten };
 }
 
 /** Read a file, or undefined when it is absent — the edge's "optional input" idiom. */
@@ -306,6 +377,11 @@ export function scanLayout(baseDir: string): LayoutScan {
     gatewayEnv: readOrUndef(join(gwDir, GATEWAY_ENV_FILE)),
     systemdUnitPath: unitPath,
     systemdUnit: readOrUndef(unitPath),
+    // The container gate wherever it currently lives — already-migrated dir first,
+    // else the legacy one it is about to move out of.
+    containerEnv:
+      readOrUndef(resolve(baseDir, `${LOCAL_DIR}/${CONTAINER_ENV_FILE}`)) ??
+      readOrUndef(resolve(baseDir, `${OLD_DIR}/${CONTAINER_ENV_FILE}`)),
   };
 }
 
@@ -325,7 +401,12 @@ export function describeMigration(plan: LayoutMigrationPlan): string {
   }
 
   const changesNothing =
-    !plan.moves.length && plan.gitignore === undefined && !plan.conflicts.length && !plan.gatewayEnvDelete && !plan.unit;
+    !plan.moves.length &&
+    plan.gitignore === undefined &&
+    !plan.conflicts.length &&
+    !plan.gatewayEnvDelete &&
+    !plan.unit &&
+    !plan.envRewrite;
   if (changesNothing) {
     return "Nothing to do — this project is already on the vetinari/ + .vetinari.local/ layout.";
   }
@@ -337,6 +418,7 @@ export function describeMigration(plan: LayoutMigrationPlan): string {
   if (plan.gitignore !== undefined) lines.push("Update .gitignore to exclude .vetinari.local/ (and keep .sandcastle/ ignored).");
   if (plan.gatewayEnvDelete) lines.push(`Delete the stale gateway.env — the gateway holds no secrets of its own (${plan.gatewayEnvDelete}).`);
   if (plan.unit) lines.push(`Rewrite the systemd unit into the host-level gateway service (${plan.unit.path}).`);
+  if (plan.envRewrite) lines.push(`Strip host-side secret(s) from the container gate .env: ${plan.envRewrite.stripped.join(", ")}.`);
   for (const w of plan.warnings) lines.push(`⚠ ${w}`);
 
   return lines.join("\n");

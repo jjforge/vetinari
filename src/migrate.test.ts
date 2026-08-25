@@ -120,6 +120,40 @@ test("computeLayoutMigration plans no host.env rename when the local secrets are
   assert.deepEqual(plan.moves, []);
 });
 
+test("computeLayoutMigration plans to strip VETINARI_TELEGRAM_* from the container-gate .env, keeping agent secrets", () => {
+  const plan = computeLayoutMigration({
+    // A container gate .env that (wrongly) carries the host-side bot credentials
+    // alongside the model-harness token the in-container agent legitimately needs.
+    containerEnv:
+      "CLAUDE_CODE_OAUTH_TOKEN=keepme\n" +
+      "VETINARI_TELEGRAM_BOT_TOKEN=leaked\n" +
+      "VETINARI_TELEGRAM_CHAT_ID=123\n" +
+      "VETINARI_TELEGRAM_THREAD_ID=7\n",
+  });
+
+  assert.ok(plan.envRewrite, "expected an env rewrite");
+  assert.equal(plan.envRewrite!.path, ".vetinari.local/.env");
+  // The host-side secrets are gone from the container gate...
+  assert.doesNotMatch(plan.envRewrite!.content, /VETINARI_TELEGRAM_/);
+  // ...while the agent's own token survives.
+  assert.match(plan.envRewrite!.content, /^CLAUDE_CODE_OAUTH_TOKEN=keepme$/m);
+  assert.deepEqual(plan.envRewrite!.stripped, [
+    "VETINARI_TELEGRAM_BOT_TOKEN",
+    "VETINARI_TELEGRAM_CHAT_ID",
+    "VETINARI_TELEGRAM_THREAD_ID",
+  ]);
+  // A warning names what was stripped and calls for rotation of the exposed token.
+  assert.ok(plan.warnings.some((w) => /rotate/i.test(w) && /VETINARI_TELEGRAM/.test(w)));
+});
+
+test("computeLayoutMigration plans no env rewrite when the container .env carries no host secrets", () => {
+  const plan = computeLayoutMigration({
+    containerEnv: "CLAUDE_CODE_OAUTH_TOKEN=keepme\n",
+  });
+  assert.equal(plan.envRewrite, undefined);
+  assert.deepEqual(plan.warnings, []);
+});
+
 test("computeLayoutMigration plans to delete a stale gateway.env", () => {
   const plan = computeLayoutMigration({
     gatewayConfigDir: "/home/z/.config/vetinari",
@@ -263,6 +297,49 @@ test("applyLayoutMigration deletes the stale gateway.env and writes the rewritte
 
   assert.equal(result.gatewayEnvDeleted, true);
   assert.equal(result.unitRewritten, true);
+});
+
+test("applyLayoutMigration strips VETINARI_TELEGRAM_* from a legacy .env as it moves it, keeping agent secrets", () => {
+  const dir = tmpProject();
+  mkdirSync(join(dir, ".sandcastle"), { recursive: true });
+  writeFileSync(
+    join(dir, ".sandcastle", ".env"),
+    "CLAUDE_CODE_OAUTH_TOKEN=keepme\nVETINARI_TELEGRAM_BOT_TOKEN=leaked\nVETINARI_TELEGRAM_CHAT_ID=123\n",
+  );
+  writeFileSync(join(dir, ".gitignore"), ".sandcastle/\n");
+
+  const plan = computeLayoutMigration(scanLayout(dir));
+  const result = applyLayoutMigration(dir, plan);
+
+  // The container gate landed in the new excluded dir with its host secrets gone...
+  const env = readFileSync(join(dir, ".vetinari.local", ".env"), "utf8");
+  assert.doesNotMatch(env, /VETINARI_TELEGRAM_/);
+  // ...and the in-container agent's own token intact.
+  assert.match(env, /^CLAUDE_CODE_OAUTH_TOKEN=keepme$/m);
+  assert.equal(result.envRewritten, true);
+});
+
+test("the assembled container env for a run excludes VETINARI_TELEGRAM_* after migrate", () => {
+  const dir = tmpProject();
+  mkdirSync(join(dir, ".vetinari.local"), { recursive: true });
+  // The container gate as sandcastle would inject it: every key here rides into
+  // the agent container, so a leaked bot token would too.
+  writeFileSync(
+    join(dir, ".vetinari.local", ".env"),
+    "CLAUDE_CODE_OAUTH_TOKEN=keepme\nVETINARI_TELEGRAM_BOT_TOKEN=leaked\nVETINARI_TELEGRAM_CHAT_ID=123\nVETINARI_TELEGRAM_THREAD_ID=7\n",
+  );
+
+  applyLayoutMigration(dir, computeLayoutMigration(scanLayout(dir)));
+
+  // Model the assembled container env exactly as sandcastle does: every KEY=VALUE
+  // in .env becomes a container environment variable. None may be a Telegram secret.
+  const containerEnvKeys = readFileSync(join(dir, ".vetinari.local", ".env"), "utf8")
+    .split("\n")
+    .map((l) => /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(l.trim())?.[1])
+    .filter((k): k is string => Boolean(k));
+
+  assert.ok(!containerEnvKeys.some((k) => k.startsWith("VETINARI_TELEGRAM_")));
+  assert.ok(containerEnvKeys.includes("CLAUDE_CODE_OAUTH_TOKEN"));
 });
 
 test("applyLayoutMigration renames an already-migrated orchestrator.env to host.env on disk", () => {
@@ -415,6 +492,20 @@ test("describeMigration summarizes the gateway.env deletion and the unit rewrite
   assert.match(text, /[Dd]elete.*gateway\.env/);
   // The unit rewrite is called out with its path.
   assert.match(text, /vetinari-gateway\.service/);
+});
+
+test("describeMigration reports the .env strip (and does not read as nothing-to-do)", () => {
+  const text = describeMigration(
+    computeLayoutMigration({
+      // Already on the layout; the only thing left to do is close the .env leak.
+      oldState: [],
+      gitignore: ".vetinari.local/\n.sandcastle/\n",
+      containerEnv: "CLAUDE_CODE_OAUTH_TOKEN=keepme\nVETINARI_TELEGRAM_BOT_TOKEN=leaked\n",
+    }),
+  );
+  assert.doesNotMatch(text, /nothing to do/i);
+  assert.match(text, /VETINARI_TELEGRAM_BOT_TOKEN/);
+  assert.match(text, /rotate/i);
 });
 
 test("describeMigration leads with the conflicts when the plan is refused", () => {

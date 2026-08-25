@@ -168,6 +168,23 @@ export function pollTargets(projects: GatewayProject[]): TgConn[] {
 }
 
 /**
+ * Reconcile the running poll loops against the live poll targets, keyed by bot
+ * token: which tokens need a loop started (a newly-registered bot, or a token a
+ * project rotated *to*) and which running loops to tear down (a project
+ * deregistered, or a token a project rotated *away from*). A token present on both
+ * sides is left running — its loop keeps its update offset — so only the delta
+ * moves. Pure over the two token sets; the supervisor acts on the result.
+ */
+export function reconcilePollTargets(active: Iterable<string>, desired: TgConn[]): { start: TgConn[]; stop: string[] } {
+  const activeTokens = new Set(active);
+  const desiredTokens = new Set(desired.map((c) => c.token));
+  return {
+    start: desired.filter((c) => !activeTokens.has(c.token)),
+    stop: [...activeTokens].filter((token) => !desiredTokens.has(token)),
+  };
+}
+
+/**
  * Where a reply routes back to: the project and task whose question was answered,
  * plus the project root (the cwd the resume runs in, so `answer` loads that
  * project's own config) and its base location. `parkedAt` distinguishes one park
@@ -484,6 +501,8 @@ export interface PollDeps {
   onCarve?: (conn: TgConn, command: { project?: string; issue: string }) => void | Promise<void>;
   onConfirm?: (confirm: PendingConfirm) => void | Promise<void>;
   onUnrouted?: (conn: TgConn, msg: TgMsg) => void | Promise<void>;
+  /** Tears the loop down when it fires — the supervisor aborts a token that was rotated away or deregistered. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -495,6 +514,7 @@ export interface PollDeps {
  */
 export async function pollLoop(conn: TgConn, index: ReplyIndex, pending: PendingConfirms, deps: PollDeps, offset = 0): Promise<void> {
   for (;;) {
+    if (deps.signal?.aborted) return;
     const r = await deps.poll(conn, offset);
     if (!r) return;
     offset = r.offset;
@@ -507,6 +527,36 @@ export async function pollLoop(conn: TgConn, index: ReplyIndex, pending: Pending
       else await deps.onUnrouted?.(conn, msg);
     }
   }
+}
+
+/**
+ * Keep the running poll loops in sync with the live poll targets. Each pass reads
+ * the current targets, starts a loop (with its own abort signal) for every token
+ * not already running, and aborts the loop for every token that vanished — so a
+ * rotated or newly-registered bot is polled without a restart, and a token a
+ * project rotated away from or deregistered stops being polled. A token present
+ * across passes keeps its one loop, so its update offset is preserved. `targets`,
+ * `start`, and `tick` are injected; the real daemon reads targets live and `tick`
+ * sleeps one reconcile interval (never returning false, so it supervises forever).
+ */
+export async function supervisePolls(
+  targets: () => TgConn[],
+  start: (conn: TgConn, signal: AbortSignal) => void,
+  tick: () => Promise<boolean>,
+): Promise<void> {
+  const active = new Map<string, AbortController>();
+  do {
+    const { start: toStart, stop: toStop } = reconcilePollTargets(active.keys(), targets());
+    for (const token of toStop) {
+      active.get(token)?.abort();
+      active.delete(token);
+    }
+    for (const conn of toStart) {
+      const controller = new AbortController();
+      active.set(conn.token, controller);
+      start(conn, controller.signal);
+    }
+  } while (await tick());
 }
 
 /**
@@ -539,6 +589,10 @@ export function rebuildIndex(projects: GatewayProject[]): ReplyIndex {
 // side effects here; everything they decide comes from the pure functions.
 
 const ANNOUNCE_INTERVAL_MS = Math.max(1000, Number(process.env.VETINARI_GATEWAY_ANNOUNCE_MS ?? 5000));
+// How often the poll supervisor re-derives its targets from the live registry so
+// a rotated or newly-registered bot is picked up without a restart. Shares the
+// announce cadence — the same "read everything fresh each tick" beat.
+const POLL_RECONCILE_INTERVAL_MS = ANNOUNCE_INTERVAL_MS;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // The aggregated status site the gateway hosts (E5): one port fronting every
@@ -669,18 +723,22 @@ function spawnResume(ref: SendRef, text: string): void {
  * and routes it via the rebuilt index (a reply to an already-cleared question
  * resolves to nothing and is left unrouted).
  *
- * Poll targets are fixed at startup; a project that registers a brand-new bot
- * afterwards is served on the next restart. New parked questions and new projects
- * on already-polled bots are picked up live by the announce loop.
+ * Poll targets are re-derived live by the supervisor (`supervisePolls`), matching
+ * the outbound side: a project that rotates its bot token or registers a brand-new
+ * one begins being polled without a restart, and a token rotated away from or
+ * deregistered stops being polled — its loop torn down while a token that persists
+ * keeps its loop (and its update offset). New parked questions and new projects on
+ * already-polled bots are picked up live by the announce loop.
  */
 export async function gateway(configDir: string = gatewayConfigDir()): Promise<void> {
   const index = rebuildIndex(loadGatewayProjects(configDir));
   // Non-durable by design (ADR 0002): a restart drops pending carve
   // confirmations, and re-sending `carve 640` is the recovery.
   const pending = newPendingConfirms(() => Date.now());
-  const targets = pollTargets(loadGatewayProjects(configDir));
-  log("gateway-start", { configDir, bots: targets.length });
-  if (!targets.length) console.log("gateway up — no project defines a Telegram bot yet; announcing silently.");
+  // Just for the startup line — the supervisor below re-derives targets live.
+  const startupBots = pollTargets(loadGatewayProjects(configDir)).length;
+  log("gateway-start", { configDir, bots: startupBots });
+  if (!startupBots) console.log("gateway up — no project defines a Telegram bot yet; announcing silently.");
 
   // Host the one aggregated status site over every registered project (E5). The
   // server reads the registry live per request, so it needs no restart when a
@@ -699,7 +757,12 @@ export async function gateway(configDir: string = gatewayConfigDir()): Promise<v
     }
   })();
 
-  const polling = targets.map((conn) =>
+  // One poll loop per distinct bot, kept in sync with the live registry: the
+  // supervisor starts a loop for each newly-seen token and tears down one whose
+  // token vanished. Each loop reads its send connection fresh from the token the
+  // supervisor handed it, so a rotated token's replies and in-loop sends both ride
+  // the live connection rather than the one captured at startup.
+  const startPollLoop = (conn: TgConn, signal: AbortSignal) => {
     pollLoop(conn, index, pending, {
       poll: (c, o) => tgPoll(c, o),
       resume: spawnResume,
@@ -714,8 +777,18 @@ export async function gateway(configDir: string = gatewayConfigDir()): Promise<v
         // Only answer a genuine misdirected reply; stay quiet for plain chatter.
         if (msg.replyToId != null) await tgSend(c, "That question isn't tracked anymore (already answered, or from before I started). Reply to a current question message.");
       },
-    }),
+      signal,
+    }).catch((e) => log("gateway-poll-error", { token: conn.token, error: String(e) }));
+  };
+
+  const polling = supervisePolls(
+    () => pollTargets(loadGatewayProjects(configDir)),
+    startPollLoop,
+    async () => {
+      await sleep(POLL_RECONCILE_INTERVAL_MS);
+      return true;
+    },
   );
 
-  await Promise.all([announcing, ...polling]);
+  await Promise.all([announcing, polling]);
 }

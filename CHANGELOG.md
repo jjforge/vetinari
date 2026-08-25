@@ -391,6 +391,16 @@ question` + a `waiting Nm · reason` meta line) that open the existing issue-det
 
 ### Fixed
 
+- The gateway's **inbound poll loops are now re-derived live** instead of fixed at
+  startup (#120), matching the outbound side's per-tick live read (ADR 0011). A
+  supervisor reconciles the running loops against the current poll targets each
+  reconcile interval: a project that **rotates its bot token** starts being polled
+  on the new token (and the dead one is torn down) so inbound replies keep
+  arriving, and a project that **registers a brand-new bot** begins being polled —
+  both **without a gateway restart**, where before either stalled inbound replies
+  until the daemon was restarted. A token that persists keeps its one loop and its
+  update offset; sends triggered inside a loop ride the freshly-read connection.
+
 - Archived-run **when-times** now render in the operator's **local** timezone
   instead of UTC, and the hardcoded ` UTC` suffix is dropped (#102). An archived
   row that read `Aug 24, 2026 · 02:13:05 UTC` for an operator whose local clock was

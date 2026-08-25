@@ -19,7 +19,9 @@ import {
   pollLoop,
   pollTargets,
   rebuildIndex,
+  reconcilePollTargets,
   recordSend,
+  supervisePolls,
   resolveCarveTarget,
   resolveReply,
   routeReply,
@@ -107,6 +109,43 @@ test("pollTargets skips a project that configures no Telegram connection", () =>
     targets.map((t) => t.token),
     ["botA"],
   );
+});
+
+test("reconcilePollTargets starts a loop for a newly-appeared token and leaves a persisting one alone", () => {
+  const { start, stop } = reconcilePollTargets(
+    ["shared"],
+    [
+      { token: "shared", chat: "-1" },
+      { token: "fresh", chat: "-2" },
+    ],
+  );
+
+  assert.deepEqual(
+    start.map((c) => c.token),
+    ["fresh"],
+    "only the token not already polled is started",
+  );
+  assert.deepEqual(stop, [], "a token that persists is never torn down, so its offset is preserved");
+});
+
+test("reconcilePollTargets stops a loop whose token vanished (deregistered or rotated away)", () => {
+  const { start, stop } = reconcilePollTargets(["old", "kept"], [{ token: "kept", chat: "-1" }]);
+
+  assert.deepEqual(start, [], "nothing new to start");
+  assert.deepEqual(stop, ["old"], "the token no longer among the targets is torn down");
+});
+
+test("reconcilePollTargets both stops the rotated-away token and starts its replacement", () => {
+  // A project rotates its bot token: the old token disappears from the targets
+  // and its replacement appears — one tick tears the old loop down and starts one
+  // for the new token.
+  const { start, stop } = reconcilePollTargets(["old"], [{ token: "new", chat: "-1" }]);
+
+  assert.deepEqual(
+    start.map((c) => c.token),
+    ["new"],
+  );
+  assert.deepEqual(stop, ["old"]);
 });
 
 test("pendingAnnouncements returns parked records that carry no announced message id", () => {
@@ -303,6 +342,39 @@ test("pollLoop hands a carve command to onCarve and a confirming yes to onConfir
   assert.deepEqual(confirms, [pendingConfirm({ issue: "640" })]);
 });
 
+test("pollLoop stops when its abort signal fires, so a rotated-away token's loop tears down", async () => {
+  const ac = new AbortController();
+  let cycles = 0;
+  // The poller yields an empty cycle each time; the signal aborts after the first,
+  // so the loop must not poll a second time.
+  const poll = async () => {
+    cycles++;
+    ac.abort();
+    return { offset: cycles, messages: [] };
+  };
+
+  await pollLoop(conn, newReplyIndex(), noPending(), { poll, resume: () => {}, signal: ac.signal });
+
+  assert.equal(cycles, 1, "the loop exits after the abort rather than polling again");
+});
+
+test("pollLoop never polls when handed an already-aborted signal", async () => {
+  const ac = new AbortController();
+  ac.abort();
+  let polled = false;
+
+  await pollLoop(conn, newReplyIndex(), noPending(), {
+    poll: async () => {
+      polled = true;
+      return { offset: 1, messages: [] };
+    },
+    resume: () => {},
+    signal: ac.signal,
+  });
+
+  assert.equal(polled, false, "an already-torn-down target is never polled");
+});
+
 test("pollLoop advances the offset it passes to the poller across cycles", async () => {
   const offsets: number[] = [];
   const results = [
@@ -317,6 +389,78 @@ test("pollLoop advances the offset it passes to the poller across cycles", async
   await pollLoop(conn, newReplyIndex(), noPending(), { poll, resume: () => {} }, 2);
 
   assert.deepEqual(offsets, [2, 5, 9]);
+});
+
+// --- The poll supervisor: keeps the running poll loops in sync with the live
+// targets across ticks. `targets` (live compute), `start` (spin up a loop), and
+// `tick` (sleep one interval, or stop) are injected so the reconcile behaviour is
+// testable without real bots or timers.
+
+const scriptedTargets = (frames: TgConn[][]) => {
+  let i = 0;
+  return () => frames[Math.min(i++, frames.length - 1)];
+};
+
+// `tick` returns true `n` times then false, ending the supervisor after n+1 passes.
+const ticksThenStop = (n: number) => {
+  let left = n;
+  return async () => left-- > 0;
+};
+
+const recordingStart = () => {
+  const started: Array<{ token: string; signal: AbortSignal }> = [];
+  return { started, start: (conn: TgConn, signal: AbortSignal) => started.push({ token: conn.token, signal }) };
+};
+
+test("supervisePolls starts one loop per initial target", async () => {
+  const { started, start } = recordingStart();
+
+  await supervisePolls(
+    scriptedTargets([[{ token: "botA", chat: "-1" }, { token: "botB", chat: "-2" }]]),
+    start,
+    ticksThenStop(0),
+  );
+
+  assert.deepEqual(
+    started.map((s) => s.token),
+    ["botA", "botB"],
+  );
+});
+
+test("supervisePolls begins polling a newly-registered bot on a later tick without restarting the existing one", async () => {
+  const { started, start } = recordingStart();
+
+  await supervisePolls(
+    scriptedTargets([
+      [{ token: "botA", chat: "-1" }],
+      [{ token: "botA", chat: "-1" }, { token: "botB", chat: "-2" }],
+    ]),
+    start,
+    ticksThenStop(1),
+  );
+
+  assert.deepEqual(
+    started.map((s) => s.token),
+    ["botA", "botB"],
+    "botA is started once and left alone; botB begins on the tick it appears",
+  );
+});
+
+test("supervisePolls tears down a rotated-away token's loop and starts its replacement", async () => {
+  const { started, start } = recordingStart();
+
+  await supervisePolls(
+    scriptedTargets([[{ token: "old", chat: "-1" }], [{ token: "new", chat: "-1" }]]),
+    start,
+    ticksThenStop(1),
+  );
+
+  assert.deepEqual(
+    started.map((s) => s.token),
+    ["old", "new"],
+  );
+  assert.equal(started[0].signal.aborted, true, "the rotated-away loop's signal is aborted so it tears down");
+  assert.equal(started[1].signal.aborted, false, "the replacement loop keeps running");
 });
 
 test("formatGatewayStatus summarizes each served project and its parked questions", () => {

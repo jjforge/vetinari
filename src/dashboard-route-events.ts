@@ -6,6 +6,11 @@ import type { OrchestratorEvent } from "./event-log.ts";
 import { log } from "./log.ts";
 import type { RouteHandler } from "./dashboard-http.ts";
 
+/** The per-project SSE debounce window: view-relevant appends landing within it
+ * coalesce into a single frame (~300ms — long enough to swallow an append burst,
+ * short enough that a real state change still lands within a window). */
+const DEBOUNCE_MS = 300;
+
 /**
  * `GET /api/events` — the live update stream (ADR 0008). The server `fs.watch`es
  * every registered project's live-run log and, on a change, pushes the events
@@ -27,7 +32,6 @@ import type { RouteHandler } from "./dashboard-http.ts";
  * so it pushes nothing), then the survivors are debounced per project into a single
  * frame per `DEBOUNCE_MS` window, so a burst of appends yields one refresh, not N.
  */
-const DEBOUNCE_MS = 300;
 export const handleEvents: RouteHandler = (req, res, url, deps) => {
   if (!(req.method === "GET" && url.pathname === "/api/events")) return false;
   res.writeHead(200, {

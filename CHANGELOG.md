@@ -378,6 +378,17 @@ question` + a `waiting Nm · reason` meta line) that open the existing issue-det
   wave, neutral otherwise). State words keep the ADR 0007 vocabulary (`unstarted`,
   not "queued"). The all-repos landing render is unchanged.
 
+### Removed
+
+- Removed the `orchestrator.env`→`gateway.env` fold and the host-level `gateway.env`
+  itself (#119). The gateway holds no secrets of its own (ADR 0002) — it reads each
+  project's credentials live from the base location — so folding project tokens up
+  into one host-level file was wrong and blocked two projects with different bots
+  (it refused a second project's differing token as a "conflict"). `migrate` now
+  deletes any stale `gateway.env` and rewrites the systemd unit without the
+  `source …/gateway.env` line; the shipped `systemd/vetinari-gateway.service` no
+  longer sources it.
+
 ### Fixed
 
 - Archived-run **when-times** now render in the operator's **local** timezone

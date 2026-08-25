@@ -78,57 +78,34 @@ test("computeLayoutMigration plans the full move for a fresh legacy project", ()
   assert.deepEqual(plan.warnings, []);
 });
 
-test("computeLayoutMigration folds orchestrator.env into the gateway host-level config", () => {
+test("computeLayoutMigration plans to delete a stale gateway.env", () => {
   const plan = computeLayoutMigration({
-    orchestratorEnv: "VETINARI_TELEGRAM_BOT_TOKEN=abc\nGIT_CONFIG_GLOBAL=/home/z/.gitconfig\n",
     gatewayConfigDir: "/home/z/.config/vetinari",
-  });
-
-  assert.ok(plan.hostConfig, "expected a host-config fold");
-  assert.equal(plan.hostConfig!.path, "/home/z/.config/vetinari/gateway.env");
-  assert.match(plan.hostConfig!.content, /^VETINARI_TELEGRAM_BOT_TOKEN=abc$/m);
-  assert.match(plan.hostConfig!.content, /^GIT_CONFIG_GLOBAL=\/home\/z\/\.gitconfig$/m);
-  assert.deepEqual(plan.hostConfig!.folded.sort(), ["GIT_CONFIG_GLOBAL", "VETINARI_TELEGRAM_BOT_TOKEN"]);
-});
-
-test("computeLayoutMigration fold is idempotent — already-present keys with the same value add nothing", () => {
-  const plan = computeLayoutMigration({
-    orchestratorEnv: "VETINARI_TELEGRAM_BOT_TOKEN=abc\nGIT_CONFIG_GLOBAL=/home/z/.gitconfig\n",
-    gatewayConfigDir: "/home/z/.config/vetinari",
-    // The gateway already carries both keys, verbatim.
-    gatewayEnv: "GIT_CONFIG_GLOBAL=/home/z/.gitconfig\nVETINARI_TELEGRAM_BOT_TOKEN=abc\n",
-  });
-
-  assert.equal(plan.hostConfig, undefined);
-  assert.deepEqual(plan.conflicts, []);
-});
-
-test("computeLayoutMigration fold appends only the missing keys, preserving the existing gateway env", () => {
-  const plan = computeLayoutMigration({
-    orchestratorEnv: "VETINARI_TELEGRAM_BOT_TOKEN=abc\nGIT_CONFIG_GLOBAL=/home/z/.gitconfig\n",
-    gatewayConfigDir: "/home/z/.config/vetinari",
-    // Only the token is already there; GIT_CONFIG_GLOBAL is new.
+    // A gateway.env left behind by the retired fold — it holds nothing legitimate.
     gatewayEnv: "VETINARI_TELEGRAM_BOT_TOKEN=abc\n",
   });
 
-  assert.deepEqual(plan.hostConfig!.folded, ["GIT_CONFIG_GLOBAL"]);
-  // The pre-existing line survives and the new key is appended, not rewritten.
-  assert.match(plan.hostConfig!.content, /^VETINARI_TELEGRAM_BOT_TOKEN=abc$/m);
-  assert.match(plan.hostConfig!.content, /^GIT_CONFIG_GLOBAL=\/home\/z\/\.gitconfig$/m);
+  assert.equal(plan.gatewayEnvDelete, "/home/z/.config/vetinari/gateway.env");
+  // Removing a stale secrets file is never a conflict.
   assert.deepEqual(plan.conflicts, []);
 });
 
-test("computeLayoutMigration fold refuses a key whose gateway value differs, rather than clobbering it", () => {
-  const plan = computeLayoutMigration({
-    orchestratorEnv: "VETINARI_TELEGRAM_BOT_TOKEN=fromProject\n",
+test("computeLayoutMigration plans no gateway.env deletion when none exists", () => {
+  const plan = computeLayoutMigration({ gatewayConfigDir: "/home/z/.config/vetinari" });
+  assert.equal(plan.gatewayEnvDelete, undefined);
+});
+
+test("migrate no longer folds secrets — a second project with a different token never conflicts", () => {
+  // The first project migrated and left a gateway.env behind; the second project
+  // carries a DIFFERENT token. Because migrate no longer folds secrets up (ADR 0002),
+  // the second migration is not refused as a conflict — it just clears the stale file.
+  const second = computeLayoutMigration({
     gatewayConfigDir: "/home/z/.config/vetinari",
-    // The gateway already has a DIFFERENT token (another project got there first).
-    gatewayEnv: "VETINARI_TELEGRAM_BOT_TOKEN=alreadyHere\n",
+    gatewayEnv: "VETINARI_TELEGRAM_BOT_TOKEN=fromFirstProject\n",
   });
 
-  assert.ok(plan.conflicts.some((c) => /VETINARI_TELEGRAM_BOT_TOKEN/.test(c)));
-  // The conflicting key is not folded in.
-  assert.ok(!plan.hostConfig?.folded.includes("VETINARI_TELEGRAM_BOT_TOKEN"));
+  assert.deepEqual(second.conflicts, []);
+  assert.equal(second.gatewayEnvDelete, "/home/z/.config/vetinari/gateway.env");
 });
 
 const DISPATCH_UNIT = [
@@ -163,8 +140,10 @@ test("computeLayoutMigration rewrites the per-project dispatch unit into the hos
   // ...and it runs the gateway, not the retired dispatch poller.
   assert.match(plan.unit!.content, /exec vetinari gateway/);
   assert.doesNotMatch(plan.unit!.content, /run dispatch/);
-  // It sources the folded host-level env, not a project's orchestrator.env.
-  assert.match(plan.unit!.content, /source \/home\/z\/\.config\/vetinari\/gateway\.env/);
+  // The gateway holds no secrets of its own (ADR 0002), so the unit sources no
+  // gateway.env — it reads each project's credentials live from the base location.
+  assert.doesNotMatch(plan.unit!.content, /source/);
+  assert.doesNotMatch(plan.unit!.content, /gateway\.env/);
 });
 
 test("computeLayoutMigration leaves an already-gateway unit untouched (idempotent rewrite)", () => {
@@ -216,38 +195,40 @@ test("applyLayoutMigration moves the files where the plan says and updates .giti
   assert.equal(result.moved.length, plan.moves.length);
 });
 
-test("applyLayoutMigration writes the folded gateway env and the rewritten unit", () => {
+test("applyLayoutMigration deletes the stale gateway.env and writes the rewritten unit", () => {
   const dir = tmpProject();
   const gatewayDir = join(dir, "host-config", "sandcastle");
   const unitPath = join(dir, "host-config", "systemd", "vetinari-gateway.service");
+  mkdirSync(gatewayDir, { recursive: true });
+  writeFileSync(join(gatewayDir, "gateway.env"), "VETINARI_TELEGRAM_BOT_TOKEN=abc\n");
 
   const plan = computeLayoutMigration({
-    orchestratorEnv: "VETINARI_TELEGRAM_BOT_TOKEN=abc\nGIT_CONFIG_GLOBAL=/home/z/.gitconfig\n",
     gatewayConfigDir: gatewayDir,
+    gatewayEnv: readFileSync(join(gatewayDir, "gateway.env"), "utf8"),
     systemdUnitPath: unitPath,
     systemdUnit: "ExecStart=exec ./.sandcastle/run dispatch\n",
   });
-  // apply must create the (absent) host dirs and land both writes.
+  // apply must delete the stale env and create the (absent) unit dir before writing.
   const result = applyLayoutMigration(dir, plan);
 
-  const env = readFileSync(join(gatewayDir, "gateway.env"), "utf8");
-  assert.match(env, /^VETINARI_TELEGRAM_BOT_TOKEN=abc$/m);
-  assert.match(env, /^GIT_CONFIG_GLOBAL=\/home\/z\/\.gitconfig$/m);
+  // The stale gateway.env is gone — the gateway holds no secrets of its own.
+  assert.ok(!existsSync(join(gatewayDir, "gateway.env")));
 
   const unit = readFileSync(unitPath, "utf8");
   assert.match(unit, /exec vetinari gateway/);
   assert.doesNotMatch(unit, /run dispatch/);
+  assert.doesNotMatch(unit, /gateway\.env/);
 
-  assert.equal(result.hostConfigWritten, true);
+  assert.equal(result.gatewayEnvDeleted, true);
   assert.equal(result.unitRewritten, true);
 });
 
-test("applyLayoutMigration reports nothing folded or rewritten when the plan carries neither", () => {
+test("applyLayoutMigration reports nothing deleted or rewritten when the plan carries neither", () => {
   const dir = tmpProject();
   const plan = computeLayoutMigration({ oldState: [], gitignore: ".vetinari.local/\n.sandcastle/\n" });
   const result = applyLayoutMigration(dir, plan);
 
-  assert.equal(result.hostConfigWritten, false);
+  assert.equal(result.gatewayEnvDeleted, false);
   assert.equal(result.unitRewritten, false);
 });
 
@@ -288,12 +269,10 @@ test("scanLayout reads a legacy project off disk into a scan the planner can use
   assert.ok(plan.moves.some((m) => m.to === ".vetinari.local/logs"));
 });
 
-test("scanLayout reads orchestrator.env and the host-level gateway + systemd inputs off disk", () => {
+test("scanLayout reads the host-level gateway + systemd inputs off disk", () => {
   const dir = tmpProject();
   const gatewayHome = join(dir, "host", "sandcastle");
   const unitPath = join(dir, "host", "systemd", "vetinari-gateway.service");
-  mkdirSync(join(dir, ".sandcastle"), { recursive: true });
-  writeFileSync(join(dir, ".sandcastle", "orchestrator.env"), "VETINARI_TELEGRAM_BOT_TOKEN=abc\nGIT_CONFIG_GLOBAL=/g\n");
   mkdirSync(gatewayHome, { recursive: true });
   writeFileSync(join(gatewayHome, "gateway.env"), "OTHER=1\n");
   mkdirSync(join(dir, "host", "systemd"), { recursive: true });
@@ -305,15 +284,14 @@ test("scanLayout reads orchestrator.env and the host-level gateway + systemd inp
   process.env.VETINARI_SYSTEMD_UNIT = unitPath;
   try {
     const scan = scanLayout(dir);
-    assert.match(scan.orchestratorEnv!, /VETINARI_TELEGRAM_BOT_TOKEN=abc/);
     assert.equal(scan.gatewayConfigDir, gatewayHome);
     assert.equal(scan.gatewayEnv, "OTHER=1\n");
     assert.equal(scan.systemdUnitPath, unitPath);
     assert.match(scan.systemdUnit!, /run dispatch/);
 
-    // Fed to the planner it produces the fold and the unit rewrite.
+    // Fed to the planner it produces the gateway.env deletion and the unit rewrite.
     const plan = computeLayoutMigration(scan);
-    assert.deepEqual(plan.hostConfig!.folded.sort(), ["GIT_CONFIG_GLOBAL", "VETINARI_TELEGRAM_BOT_TOKEN"]);
+    assert.equal(plan.gatewayEnvDelete, join(gatewayHome, "gateway.env"));
     assert.ok(plan.unit);
   } finally {
     if (prevHome === undefined) delete process.env.VETINARI_GATEWAY_HOME;
@@ -352,19 +330,17 @@ test("describeMigration summarizes moves and the gitignore edit", () => {
   assert.match(text, /\.gitignore/);
 });
 
-test("describeMigration summarizes the orchestrator.env fold and the unit rewrite", () => {
+test("describeMigration summarizes the gateway.env deletion and the unit rewrite", () => {
   const text = describeMigration(
     computeLayoutMigration({
-      orchestratorEnv: "VETINARI_TELEGRAM_BOT_TOKEN=abc\nGIT_CONFIG_GLOBAL=/home/z/.gitconfig\n",
       gatewayConfigDir: "/home/z/.config/vetinari",
+      gatewayEnv: "VETINARI_TELEGRAM_BOT_TOKEN=abc\n",
       systemdUnitPath: "/home/z/.config/systemd/user/vetinari-gateway.service",
       systemdUnit: "ExecStart=exec ./.sandcastle/run dispatch\n",
     }),
   );
-  // The fold: which keys, into the gateway host config.
-  assert.match(text, /gateway\.env/);
-  assert.match(text, /VETINARI_TELEGRAM_BOT_TOKEN/);
-  assert.match(text, /GIT_CONFIG_GLOBAL/);
+  // The stale gateway.env is deleted, not folded into.
+  assert.match(text, /[Dd]elete.*gateway\.env/);
   // The unit rewrite is called out with its path.
   assert.match(text, /vetinari-gateway\.service/);
 });

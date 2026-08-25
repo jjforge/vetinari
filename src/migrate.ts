@@ -5,21 +5,20 @@
  * Split into a pure planner and an apply step, mirroring `carve` (a pure planner
  * over plain data) and `archive` (filesystem work that reports what it did):
  * `computeLayoutMigration` turns a described on-disk state into a plan — the
- * moves, the `.gitignore` edit, the gateway-config fold, and the systemd-unit
- * rewrite — touching nothing; `applyLayoutMigration` performs that plan against a
- * real directory.
+ * moves, the `.gitignore` edit, the deletion of a stale `gateway.env`, and the
+ * systemd-unit rewrite — touching nothing; `applyLayoutMigration` performs that
+ * plan against a real directory.
  *
  * The plan covers the whole migration: the LAYOUT MOVE (config → `vetinari/`,
  * old `.sandcastle/` state → `.vetinari.local/`, `.gitignore`) plus the
- * gateway-coupled parts E1 deferred to E3 (#14) — folding a project's host-only
- * `orchestrator.env` (Telegram token, `GIT_CONFIG_GLOBAL`) up into the gateway's
- * host-level config, and rewriting the systemd unit from a per-project `dispatch`
- * poller into the host-level gateway service. Every part is idempotent and
- * non-clobbering: a re-run changes nothing, and a value that would be overwritten
- * is refused as a conflict rather than clobbered.
+ * gateway-coupled parts — deleting any stale host-level `gateway.env` (the gateway
+ * holds no secrets of its own; it reads each project's credentials live from the
+ * base location, ADR 0002) and rewriting the systemd unit from a per-project
+ * `dispatch` poller into the host-level gateway service. Every part is idempotent:
+ * a re-run changes nothing.
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { resolveConfigPath } from "./config.ts";
@@ -29,7 +28,7 @@ const CANONICAL_DIR = "vetinari";
 const LOCAL_DIR = ".vetinari.local";
 const OLD_DIR = ".sandcastle";
 
-/** The gateway's host-level env file, folded from each project's `orchestrator.env`. */
+/** The gateway's retired host-level env file — deleted by migrate, never recreated. */
 const GATEWAY_ENV_FILE = "gateway.env";
 
 /** A single filesystem move, both paths relative to the project root. */
@@ -55,27 +54,14 @@ export interface LayoutScan {
    * is a conflict — refused rather than allowed to clobber.
    */
   existing?: string[];
-  /**
-   * The project's host-only `orchestrator.env` content (the old `.sandcastle/`
-   * poller env — Telegram token, `GIT_CONFIG_GLOBAL`), or undefined when absent.
-   * Its keys are folded up into the gateway's host-level config (E3, #14).
-   */
-  orchestratorEnv?: string;
-  /** The gateway's host-level config directory — where `orchestrator.env` folds to. */
+  /** The gateway's host-level config directory — where a stale `gateway.env` may live. */
   gatewayConfigDir?: string;
-  /** Current gateway host-env content, for a non-clobbering, idempotent fold. */
+  /** Current `gateway.env` content, or undefined when absent — a present one is deleted. */
   gatewayEnv?: string;
   /** Absolute path of the systemd unit to rewrite, or undefined when there is none. */
   systemdUnitPath?: string;
   /** Current systemd unit content, so an already-gateway unit is left untouched. */
   systemdUnit?: string;
-}
-
-/** The gateway host-env fold: where it writes, the merged content, and the keys added. */
-export interface HostConfigFold {
-  path: string;
-  content: string;
-  folded: string[];
 }
 
 /** The systemd-unit rewrite: where it writes and the new host-level gateway unit. */
@@ -93,10 +79,11 @@ export interface LayoutMigrationPlan {
   /** Destinations that already exist — the migration is refused while non-empty. */
   conflicts: string[];
   /**
-   * The `orchestrator.env` → gateway host-config fold, or undefined when there is
-   * nothing to fold (no `orchestrator.env`, or every key is already present).
+   * Absolute path of a stale `gateway.env` to delete, or undefined when none
+   * exists. The gateway holds no secrets of its own (ADR 0002), so a `gateway.env`
+   * left by the retired fold holds nothing legitimate and is removed.
    */
-  hostConfig?: HostConfigFold;
+  gatewayEnvDelete?: string;
   /**
    * The systemd-unit rewrite into the host-level gateway service, or undefined when
    * there is no unit or it is already the gateway unit.
@@ -126,71 +113,14 @@ function planGitignore(current: string | undefined): string | undefined {
 }
 
 /**
- * Read the simple `KEY=VALUE` assignments an env file carries into ordered pairs
- * (optional `export`, optional quotes, `#` comments skipped). Not a full shell —
- * just enough to fold an `orchestrator.env` up into the gateway config. Order is
- * preserved so the folded output is deterministic.
- */
-function parseEnvPairs(text: string): [string, string][] {
-  const pairs: [string, string][] = [];
-  for (const raw of text.split("\n")) {
-    const line = raw.trim();
-    if (!line || line.startsWith("#")) continue;
-    const m = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);
-    if (!m) continue;
-    let value = m[2].trim();
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
-    pairs.push([m[1], value]);
-  }
-  return pairs;
-}
-
-/**
- * Fold the project's `orchestrator.env` up into the gateway's host-level env,
- * merging by key: a key not yet in the gateway env is added; a key already there
- * with the SAME value is a no-op (so re-running migrate changes nothing); a key
- * there with a DIFFERENT value is a conflict — refused rather than clobbered, so a
- * second project's secret never silently overwrites the first's. Returns the merged
- * fold (undefined when nothing is added) and the conflicting keys.
- */
-function computeHostConfigFold(scan: LayoutScan): { fold?: HostConfigFold; conflicts: string[] } {
-  const conflicts: string[] = [];
-  if (!scan.orchestratorEnv || !scan.gatewayConfigDir) return { conflicts };
-
-  const path = join(scan.gatewayConfigDir, GATEWAY_ENV_FILE);
-  const current = scan.gatewayEnv ?? "";
-  const existing = new Map(parseEnvPairs(current));
-
-  const folded: string[] = [];
-  const additions: string[] = [];
-  for (const [key, value] of parseEnvPairs(scan.orchestratorEnv)) {
-    if (existing.has(key)) {
-      if (existing.get(key) !== value) conflicts.push(`${GATEWAY_ENV_FILE}:${key}`);
-      continue;
-    }
-    // Guard against the same key appearing twice in the source env.
-    if (folded.includes(key)) continue;
-    folded.push(key);
-    additions.push(`${key}=${value}`);
-  }
-
-  if (!additions.length) return { conflicts };
-  let content = current;
-  if (content.length && !content.endsWith("\n")) content += "\n";
-  content += additions.map((a) => `${a}\n`).join("");
-  return { fold: { path, content, folded }, conflicts };
-}
-
-/**
  * The host-level gateway systemd unit: no `WorkingDirectory` (it fronts every
- * project, not one), sourcing the folded host-level env, and `exec`ing the shared
- * install's `gateway` command (ADR 0003) in place of the retired per-project
- * `dispatch` poller. Deterministic in its one input — the gateway env path — so
+ * project, not one), and `exec`ing the shared install's `gateway` command (ADR
+ * 0003) in place of the retired per-project `dispatch` poller. It sources no
+ * env file — the gateway holds no secrets of its own (ADR 0002); it reads each
+ * project's credentials live from that project's base location. Constant, so
  * feeding a rewritten unit back in yields the same text (an idempotent rewrite).
  */
-function gatewayUnit(gatewayEnvPath: string): string {
+function gatewayUnit(): string {
   return [
     "[Unit]",
     "Description=vetinari gateway (host Telegram router)",
@@ -198,7 +128,7 @@ function gatewayUnit(gatewayEnvPath: string): string {
     "Wants=network-online.target",
     "",
     "[Service]",
-    `ExecStart=/usr/bin/env bash -lc 'set -a; source ${gatewayEnvPath}; set +a; exec vetinari gateway'`,
+    "ExecStart=/usr/bin/env bash -lc 'exec vetinari gateway'",
     "Restart=always",
     "RestartSec=5",
     "",
@@ -214,8 +144,8 @@ function gatewayUnit(gatewayEnvPath: string): string {
  * or it is already the gateway unit (so a re-run changes nothing).
  */
 function computeUnitRewrite(scan: LayoutScan): UnitRewrite | undefined {
-  if (scan.systemdUnit === undefined || !scan.systemdUnitPath || !scan.gatewayConfigDir) return undefined;
-  const content = gatewayUnit(join(scan.gatewayConfigDir, GATEWAY_ENV_FILE));
+  if (scan.systemdUnit === undefined || !scan.systemdUnitPath) return undefined;
+  const content = gatewayUnit();
   if (scan.systemdUnit === content) return undefined;
   return { path: scan.systemdUnitPath, content };
 }
@@ -242,30 +172,30 @@ export function computeLayoutMigration(scan: LayoutScan): LayoutMigrationPlan {
 
   const gitignore = planGitignore(scan.gitignore);
 
-  const { fold, conflicts: foldConflicts } = computeHostConfigFold(scan);
-  conflicts.push(...foldConflicts);
+  const gatewayEnvDelete =
+    scan.gatewayConfigDir && scan.gatewayEnv !== undefined ? join(scan.gatewayConfigDir, GATEWAY_ENV_FILE) : undefined;
   const unit = computeUnitRewrite(scan);
 
-  return { moves, gitignore, warnings: [], conflicts, hostConfig: fold, unit };
+  return { moves, gitignore, warnings: [], conflicts, gatewayEnvDelete, unit };
 }
 
 export interface ApplyResult {
   moved: Move[];
   gitignoreUpdated: boolean;
-  /** The gateway host-env fold was written. */
-  hostConfigWritten: boolean;
+  /** A stale gateway.env was deleted. */
+  gatewayEnvDeleted: boolean;
   /** The systemd unit was rewritten into the gateway service. */
   unitRewritten: boolean;
 }
 
 /**
- * Perform a plan against `baseDir`: the moves, the `.gitignore` edit, the
- * `orchestrator.env` → gateway host-config fold, and the systemd-unit rewrite.
- * Refuses the WHOLE migration if the plan carries conflicts, so a clobber never
- * happens and the tree is never left half-migrated. Each move re-checks its
- * destination against the live disk before renaming — a last guard against a stale
- * scan. The host-config and unit writes use the absolute host paths the plan
- * carries (outside `baseDir`), creating their parent directories as needed.
+ * Perform a plan against `baseDir`: the moves, the `.gitignore` edit, the deletion
+ * of a stale `gateway.env`, and the systemd-unit rewrite. Refuses the WHOLE
+ * migration if the plan carries conflicts, so a clobber never happens and the tree
+ * is never left half-migrated. Each move re-checks its destination against the live
+ * disk before renaming — a last guard against a stale scan. The gateway.env deletion
+ * and unit write use the absolute host paths the plan carries (outside `baseDir`),
+ * creating the unit's parent directory as needed.
  */
 export function applyLayoutMigration(baseDir: string, plan: LayoutMigrationPlan): ApplyResult {
   if (plan.conflicts.length) {
@@ -285,16 +215,20 @@ export function applyLayoutMigration(baseDir: string, plan: LayoutMigrationPlan)
   const gitignoreUpdated = plan.gitignore !== undefined;
   if (gitignoreUpdated) writeFileSync(resolve(baseDir, ".gitignore"), plan.gitignore!);
 
-  const writeHost = (target: { path: string; content: string } | undefined) => {
-    if (!target) return false;
-    mkdirSync(dirname(target.path), { recursive: true });
-    writeFileSync(target.path, target.content);
-    return true;
-  };
-  const hostConfigWritten = writeHost(plan.hostConfig);
-  const unitRewritten = writeHost(plan.unit);
+  let gatewayEnvDeleted = false;
+  if (plan.gatewayEnvDelete) {
+    rmSync(plan.gatewayEnvDelete, { force: true });
+    gatewayEnvDeleted = true;
+  }
 
-  return { moved: plan.moves, gitignoreUpdated, hostConfigWritten, unitRewritten };
+  let unitRewritten = false;
+  if (plan.unit) {
+    mkdirSync(dirname(plan.unit.path), { recursive: true });
+    writeFileSync(plan.unit.path, plan.unit.content);
+    unitRewritten = true;
+  }
+
+  return { moved: plan.moves, gitignoreUpdated, gatewayEnvDeleted, unitRewritten };
 }
 
 /** Read a file, or undefined when it is absent — the edge's "optional input" idiom. */
@@ -326,10 +260,10 @@ export function systemdUnitPath(): string {
  * counts as a deprecated config. `existing` lists everything already under the
  * two destination dirs, so any would-be clobber surfaces as a conflict.
  *
- * The gateway-coupled inputs are host-level, not under `baseDir`: the project's
- * old `.sandcastle/orchestrator.env` (the fold source), the gateway config dir
- * and its current `gateway.env` (for a non-clobbering fold), and the systemd unit
- * (for the rewrite). All read here so the planner stays a pure function of them.
+ * The gateway-coupled inputs are host-level, not under `baseDir`: the gateway
+ * config dir and its current `gateway.env` (so a stale one is deleted), and the
+ * systemd unit (for the rewrite). All read here so the planner stays a pure
+ * function of them.
  */
 export function scanLayout(baseDir: string): LayoutScan {
   const listDir = (rel: string): string[] => {
@@ -349,7 +283,6 @@ export function scanLayout(baseDir: string): LayoutScan {
       ...listDir(CANONICAL_DIR).map((e) => `${CANONICAL_DIR}/${e}`),
       ...listDir(LOCAL_DIR).map((e) => `${LOCAL_DIR}/${e}`),
     ],
-    orchestratorEnv: readOrUndef(resolve(baseDir, OLD_DIR, "orchestrator.env")),
     gatewayConfigDir: gwDir,
     gatewayEnv: readOrUndef(join(gwDir, GATEWAY_ENV_FILE)),
     systemdUnitPath: unitPath,
@@ -373,7 +306,7 @@ export function describeMigration(plan: LayoutMigrationPlan): string {
   }
 
   const changesNothing =
-    !plan.moves.length && plan.gitignore === undefined && !plan.conflicts.length && !plan.hostConfig && !plan.unit;
+    !plan.moves.length && plan.gitignore === undefined && !plan.conflicts.length && !plan.gatewayEnvDelete && !plan.unit;
   if (changesNothing) {
     return "Nothing to do — this project is already on the vetinari/ + .vetinari.local/ layout.";
   }
@@ -383,10 +316,7 @@ export function describeMigration(plan: LayoutMigrationPlan): string {
     for (const m of plan.moves) lines.push(`  ${m.from} → ${m.to}`);
   }
   if (plan.gitignore !== undefined) lines.push("Update .gitignore to exclude .vetinari.local/ (and keep .sandcastle/ ignored).");
-  if (plan.hostConfig) {
-    lines.push(`Fold orchestrator.env into the gateway host config (${plan.hostConfig.path}):`);
-    for (const k of plan.hostConfig.folded) lines.push(`  + ${k}`);
-  }
+  if (plan.gatewayEnvDelete) lines.push(`Delete the stale gateway.env — the gateway holds no secrets of its own (${plan.gatewayEnvDelete}).`);
   if (plan.unit) lines.push(`Rewrite the systemd unit into the host-level gateway service (${plan.unit.path}).`);
   for (const w of plan.warnings) lines.push(`⚠ ${w}`);
 

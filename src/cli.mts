@@ -3,7 +3,7 @@ import { createInterface } from "node:readline/promises";
 import { loadConfig } from "./config.ts";
 import { log, setLogFile } from "./log.ts";
 import { answerPromptFor, runLoop } from "./loop.ts";
-import { baseline, campaign, queue, requireTelegram, tgTest } from "./modes.ts";
+import { baseline, build, campaign, queue, requireTelegram, tgTest } from "./modes.ts";
 import { gateway } from "./gateway.ts";
 import { applyCarve, carveClosure, computeCarve, normalize } from "./carve.ts";
 import { describePlan, planCampaign, suggestCampaignName, underspecifiedPromptFor, waveArgs, type UnderspecifiedDecision } from "./plan.ts";
@@ -20,6 +20,10 @@ import { runStatusLine } from "./statusline.ts";
 
 const USAGE = `vetinari <mode> [args]
 
+  build [--no-baseline]    build the agent image (cfg.image from vetinari/Dockerfile,
+                           neither repeated on the CLI) via sandcastle, then run
+                           baseline on success. --no-baseline builds only. A build or
+                           baseline failure exits non-zero with sandcastle's output shown
   baseline                 prove the image runs every gate green — no agent, no cost
   run <task>               the TDD loop: agent turn → gate → resume on red
   queue <task…>            fair-share pool over several tasks (bounded by the host
@@ -256,6 +260,13 @@ const archiveIfIdle = () => {
 };
 
 switch (mode) {
+  case "build": {
+    // Default builds AND baselines; --no-baseline builds only. False (a build or
+    // baseline failure) maps to a non-zero exit; sandcastle's output was inherited.
+    const runBaseline = !rest.includes("--no-baseline");
+    process.exitCode = (await build(cfg, { baseline: runBaseline })) ? 0 : 1;
+    break;
+  }
   case "baseline": {
     process.exitCode = (await baseline(cfg)) ? 0 : 1;
     break;

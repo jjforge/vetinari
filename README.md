@@ -68,10 +68,25 @@ export default defineConfig({
 });
 ```
 
-Build the image, then prove it before spending anything on an agent:
+Build the image, then prove it before spending anything on an agent — `build`
+does both, reading the image name and Dockerfile from your config and layout so
+neither is repeated on the CLI:
 
 ```bash
-npx sandcastle docker build-image --dockerfile vetinari/Dockerfile --image-name vetinari-myapp
+npx vetinari build             # build cfg.image from vetinari/Dockerfile, then baseline
+npx vetinari build --no-baseline   # build only, skip the probe
+```
+
+`build` shells sandcastle's `docker build-image` and, on success, runs
+`baseline` (below); a build failure exits non-zero with sandcastle's output
+visible and skips the probe, and a red baseline exits non-zero too. It uses the
+same `cfg.image` the run/queue/campaign modes use, so "build" and "run" can
+never disagree on the image.
+
+`baseline` on its own proves an already-built image — toolchain probe + every
+gate, no agent:
+
+```bash
 npx vetinari baseline          # toolchain probe + every gate, no agent
 ```
 
@@ -431,6 +446,7 @@ it there too and re-run that project's `baseline`.
 
 | Mode | What it does |
 | --- | --- |
+| `build [--no-baseline]` | build `cfg.image` from `vetinari/Dockerfile` (neither repeated on the CLI) via sandcastle, then `baseline` on success; `--no-baseline` builds only. A build or baseline failure exits non-zero with sandcastle's output shown |
 | `baseline` | toolchain probe + all gates, no agent |
 | `run <task>` | the TDD loop; exit 0 green, 2 parked |
 | `queue <task…>` | bounded pool; a park frees its slot |

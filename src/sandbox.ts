@@ -4,6 +4,21 @@ import { mkdirSync } from "node:fs";
 import type { ResolvedConfig } from "./config.ts";
 import { log } from "./log.ts";
 
+// The pinned sandcastle build's `CreateSandboxOptions` does not model `stateDir`
+// yet; builds carrying ADR 0021 honor it and older builds ignore it at runtime, so
+// we pass it for forward-compat. Teach the compiler about the optional field rather
+// than casting the whole options object (which would drop all other type checks).
+declare module "@ai-hero/sandcastle" {
+  interface CreateSandboxOptions {
+    /**
+     * Host repo directory under which sandcastle writes its own gitignored
+     * artifacts (worktrees/, .env, patches/, default logs/) instead of a stray
+     * `.sandcastle/`. Honored by builds carrying ADR 0021; older builds ignore it.
+     */
+    readonly stateDir?: string;
+  }
+}
+
 /**
  * One container per task, on its own branch and worktree.
  *

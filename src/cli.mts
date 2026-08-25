@@ -182,7 +182,7 @@ if (mode === "migrate") {
   const did: string[] = [];
   if (result.moved.length) did.push(`moved ${result.moved.length} path(s)`);
   if (result.gitignoreUpdated) did.push("updated .gitignore");
-  if (result.hostConfigWritten) did.push("folded orchestrator.env into the gateway host config");
+  if (result.gatewayEnvDeleted) did.push("deleted the stale gateway.env");
   if (result.unitRewritten) did.push("rewrote the systemd unit into the gateway service");
   if (did.length) console.log(`\nMigrated: ${did.join(", ")}.`);
   process.exit(0);

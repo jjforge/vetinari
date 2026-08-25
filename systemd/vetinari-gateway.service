@@ -4,7 +4,7 @@ After=docker.service network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/usr/bin/env bash -lc 'set -a; source %h/.config/vetinari/gateway.env; set +a; exec vetinari gateway'
+ExecStart=/usr/bin/env bash -lc 'exec vetinari gateway'
 Restart=always
 RestartSec=5
 

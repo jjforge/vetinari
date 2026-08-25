@@ -308,7 +308,7 @@ the terminal goes unanswered. Run it as a **systemd user service** instead — o
 always-on daemon, restarted on crash, brought back at boot. The host-level unit is
 tracked in this repo at [`systemd/vetinari-gateway.service`](systemd/vetinari-gateway.service);
 it has **no `WorkingDirectory`** (the gateway fronts every project, not one) and
-sources the host-level `~/.config/vetinari/gateway.env`:
+sources no env file — the gateway holds no secrets of its own:
 
 ```bash
 install -Dm644 systemd/vetinari-gateway.service \
@@ -319,11 +319,11 @@ systemctl --user enable --now vetinari-gateway   # start now + at every login
 loginctl enable-linger "$USER"                      # ...and at boot, without a login session
 ```
 
-The gateway still reads each project's bot credentials live from that project's
-`.vetinari.local/orchestrator.env` (above); `gateway.env` carries host-level env
-the daemon itself needs (e.g. `GIT_CONFIG_GLOBAL`), and `migrate` folds an existing
-project's `orchestrator.env` into it. Either way, keep bot creds out of
-`.vetinari.local/.env`, which is injected into agent containers.
+The gateway reads each project's bot credentials live from that project's
+`.vetinari.local/orchestrator.env` (above) — it holds no credentials of its own, so
+there is no host-level `gateway.env` to source (`migrate` deletes any stale one left
+by an older layout). Keep bot creds out of `.vetinari.local/.env`, which is injected
+into agent containers.
 
 `enable --now` alone brings the daemon back only when you log in; **`enable-linger`
 is what makes it survive a headless reboot** — it tells systemd to start your user

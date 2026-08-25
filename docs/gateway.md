@@ -151,9 +151,10 @@ to preview and, on a `yes` reply, carve.
 A backgrounded `gateway &` dies with its shell, so run it as a **systemd user
 service** — one always-on daemon, restarted on crash, brought back at boot. If
 you are migrating from `dispatch`, the next section rewrites your existing unit for
-you. On a fresh host, install a unit whose `ExecStart` sources the host-level
-`~/.config/vetinari/gateway.env` and `exec`s `vetinari gateway` (no
-`WorkingDirectory` — the gateway fronts every project, not one), then:
+you. On a fresh host, install a unit whose `ExecStart` just `exec`s `vetinari
+gateway` (no `WorkingDirectory` — the gateway fronts every project, not one; and no
+env file to source — the gateway holds no secrets of its own, reading each
+project's credentials live from its base location), then:
 
 ```bash
 systemctl --user daemon-reload
@@ -177,18 +178,16 @@ npx vetinari migrate             # apply it
 Alongside the layout move (config → `vetinari/`, old `.sandcastle/` state →
 `.vetinari.local/`, `.gitignore`), `migrate` does the two gateway-coupled parts:
 
-- **Folds `orchestrator.env` into the gateway host config.** The host-only keys from
-  the project's old `orchestrator.env` — including `GIT_CONFIG_GLOBAL` — are merged
-  into `~/.config/vetinari/gateway.env`, the env the gateway service sources. The
-  fold is non-clobbering: a key already present with the **same** value is a no-op
-  (re-running `migrate` changes nothing), and a key present with a **different**
-  value is refused as a conflict rather than overwritten — so a second project's
-  secret never silently clobbers the first's.
+- **Deletes any stale `gateway.env`.** The gateway holds no secrets of its own
+  (ADR 0002) — it reads each project's credentials live from that project's base
+  location — so `~/.config/vetinari/gateway.env` holds nothing legitimate. `migrate`
+  removes it; per-project secrets stay where they belong, in each project's own
+  `.vetinari.local/orchestrator.env`.
 - **Rewrites the systemd unit into the host-level gateway service.** The unit at
   `~/.config/systemd/user/vetinari-gateway.service` is rewritten from a
   per-project `dispatch` poller (bound to one `WorkingDirectory`, running
-  `dispatch`) into the host-level gateway: no `WorkingDirectory`, sourcing
-  `gateway.env`, and `exec`ing `vetinari gateway`.
+  `dispatch`) into the host-level gateway: no `WorkingDirectory`, no env file to
+  source, just `exec`ing `vetinari gateway`.
 
 After applying, reload and restart:
 

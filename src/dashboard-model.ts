@@ -122,6 +122,29 @@ export function appendedEvents(content: string, offset: number): { events: Orche
   return { events, offset: from + complete.length };
 }
 
+/**
+ * The event kinds the live-update stream (ADR 0008) treats as machine-noise: rows
+ * that land in `orchestrator.jsonl` but never change any rendered dashboard view, so
+ * an SSE frame pushed for them refreshes the client for nothing. This is a **denylist,
+ * fail-open by design** — the per-repo page renders more than the cross-project feed
+ * (its issue-detail sheet folds turn/gate/worktree rows), so an allowlist keyed on
+ * `describeEvent` would drop events the detail view needs. Only kinds known to be pure
+ * side-channel noise (the outbound message queue, a failed Telegram send) are listed;
+ * anything unrecognized is kept.
+ */
+export const SSE_NOISE_EVENTS: ReadonlySet<string> = new Set(["telegram-send-failed", "outbound-enqueued"]);
+
+/**
+ * The view-relevant subset of a batch of appended events — everything except the
+ * `SSE_NOISE_EVENTS` denylist above. The live watcher (ADR 0008) filters through this
+ * before emitting, so a burst of pure machine-noise appends yields no SSE frame and no
+ * wasted client refresh; a frame is emitted only when at least one surviving event
+ * remains. Pure and order-preserving so it is unit-testable without a running server.
+ */
+export function viewRelevantEvents(events: OrchestratorEvent[]): OrchestratorEvent[] {
+  return events.filter((e) => !SSE_NOISE_EVENTS.has(e.event));
+}
+
 const normalizeIssue = (id: string) => id.replace(/^#/, "");
 
 const hash = (id: unknown) => `#${normalizeIssue(String(id))}`;

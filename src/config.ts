@@ -62,6 +62,23 @@ export function questionDestinations(notify: NotifyMap): Set<string> {
   return dests;
 }
 
+/**
+ * A project's declared cut of the host container ceiling when projects contend
+ * (ADR 0011): a named tier, not a raw number, so nobody has to reason about why a
+ * given container count is running. `medium` is the default.
+ */
+export type ContainerShare = "high" | "medium" | "low";
+
+/**
+ * The internal fair-share weight each `containerShare` tier maps to — the ratio
+ * roughly 7:2:1 (tunable here). Pure; feeds the existing `fairShare` computation
+ * unchanged, so the tier is the only surface a project sees. `high` takes a larger
+ * cut of the remainder, never all of it (the floor-of-one, no-starvation rule holds).
+ */
+export function containerShareWeight(share: ContainerShare): number {
+  return share === "high" ? 7 : share === "medium" ? 2 : 1;
+}
+
 export interface GateSpec {
   /** Shell command run INSIDE the sandbox. Non-zero exit is red. */
   cmd: string;
@@ -91,12 +108,12 @@ export interface VetinariConfig {
   /** Agent branches are `${branchPrefix}${taskId}`. Default "agent/". */
   branchPrefix?: string;
   /**
-   * This project's weight in the host slot budget (ADR 0010): its cut of the
-   * remainder when projects contend for the host's shared container ceiling.
-   * Default 1; it only bites while more than one project is active, and only when
-   * a host budget is set at all.
+   * This project's cut of the host container ceiling when projects contend
+   * (ADR 0011): a named tier `high | medium | low`, default `medium`. It only
+   * bites while more than one project is active; a project running alone fills
+   * the whole ceiling regardless of its tier.
    */
-  hostWeight?: number;
+  containerShare?: ContainerShare;
   /**
    * Verification the ORCHESTRATOR runs after every COMPLETE signal. The agent
    * never self-certifies; only a zero exit here returns green.
@@ -178,7 +195,7 @@ export interface VetinariConfig {
 }
 
 export type ResolvedConfig = Required<
-  Pick<VetinariConfig, "project" | "image" | "baseBranch" | "branchPrefix" | "hostWeight" | "gates" | "maxTurns" | "idleTimeoutSeconds" | "stateDir" | "fetchTask">
+  Pick<VetinariConfig, "project" | "image" | "baseBranch" | "branchPrefix" | "containerShare" | "gates" | "maxTurns" | "idleTimeoutSeconds" | "stateDir" | "fetchTask">
 > &
   VetinariConfig & { promptFile: string; parkedDir: string; logFile: string };
 
@@ -266,7 +283,7 @@ export async function loadConfig(explicitPath?: string): Promise<ResolvedConfig>
 
   return {
     branchPrefix: "agent/",
-    hostWeight: 1,
+    containerShare: "medium",
     maxTurns: 6,
     idleTimeoutSeconds: 600,
     ...c,

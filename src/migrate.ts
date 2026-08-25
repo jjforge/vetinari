@@ -14,19 +14,37 @@
  * gateway-coupled parts — deleting any stale host-level `gateway.env` (the gateway
  * holds no secrets of its own; it reads each project's credentials live from the
  * base location, ADR 0002) and rewriting the systemd unit from a per-project
- * `dispatch` poller into the host-level gateway service. Every part is idempotent:
- * a re-run changes nothing.
+ * `dispatch` poller into the host-level gateway service — and the concurrency-surface
+ * renames of ADR 0011: translating a numeric `hostWeight` into the nearest
+ * `containerShare` tier in the committed config, and renaming the host-ceiling file
+ * `host-slots` → `max-concurrent-containers`. Every part is idempotent: a re-run
+ * changes nothing.
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { resolveConfigPath } from "./config.ts";
+import { dirname, join, relative, resolve } from "node:path";
+import { resolveConfigPath, type ContainerShare } from "./config.ts";
 import { gatewayConfigDir } from "./registry.ts";
 
 const CANONICAL_DIR = "vetinari";
 const LOCAL_DIR = ".vetinari.local";
 const OLD_DIR = ".sandcastle";
+
+/** The host-ceiling file's former name and its current one (ADR 0011). */
+const OLD_CEILING_FILE = "host-slots";
+const CEILING_FILE = "max-concurrent-containers";
+
+/**
+ * Map an old numeric `hostWeight` to the nearest `containerShare` tier (ADR 0011).
+ * The tiers carry internal weights 1/2/7 (low/medium/high); a weight maps to the
+ * tier whose weight is nearest, with the midpoints (1.5 and 4.5) rounding up. Pure.
+ */
+export function numericWeightToTier(weight: number): ContainerShare {
+  if (weight >= 4.5) return "high";
+  if (weight >= 1.5) return "medium";
+  return "low";
+}
 
 /** The gateway's retired host-level env file — deleted by migrate, never recreated. */
 const GATEWAY_ENV_FILE = "gateway.env";
@@ -89,6 +107,20 @@ export interface LayoutScan {
    * here are stripped so they stop riding into every agent container (ADR 0011).
    */
   containerEnv?: string;
+  /**
+   * The winning config's path relative to `baseDir` (canonical or legacy), so the
+   * `hostWeight` → `containerShare` rewrite can target it. Undefined when there is
+   * no config.
+   */
+  configRel?: string;
+  /** The winning config's current content, scanned so the numeric-weight rewrite stays pure. */
+  configContent?: string;
+  /**
+   * Content of a legacy host-ceiling file (`<gatewayConfigDir>/host-slots`), or
+   * undefined when absent. A present one is renamed to `max-concurrent-containers`
+   * (ADR 0011), preserving the ceiling value.
+   */
+  hostCeilingLegacy?: string;
 }
 
 /** The stripped rewrite of the container-gate `.env`: where it writes, its new content, and the keys removed. */
@@ -102,6 +134,22 @@ export interface EnvRewrite {
 export interface UnitRewrite {
   path: string;
   content: string;
+}
+
+/** The config rewrite translating a numeric `hostWeight` into a `containerShare` tier (ADR 0011). */
+export interface ConfigRewrite {
+  /** Destination path (relative to the project root) — the config's post-move location. */
+  path: string;
+  content: string;
+  /** The numeric weight found, and the tier it mapped to (for the human summary). */
+  weight: number;
+  tier: ContainerShare;
+}
+
+/** The host-ceiling file rename `host-slots` → `max-concurrent-containers` (absolute paths). */
+export interface CeilingRename {
+  from: string;
+  to: string;
 }
 
 export interface LayoutMigrationPlan {
@@ -128,6 +176,17 @@ export interface LayoutMigrationPlan {
    * undefined when the `.env` is absent or already carries none.
    */
   envRewrite?: EnvRewrite;
+  /**
+   * The committed config rewritten with `hostWeight: N` translated to
+   * `containerShare: "tier"`, or undefined when the config carries no numeric
+   * `hostWeight` (ADR 0011).
+   */
+  configRewrite?: ConfigRewrite;
+  /**
+   * The host-ceiling file rename `host-slots` → `max-concurrent-containers`, or
+   * undefined when no legacy file exists (ADR 0011).
+   */
+  hostCeilingRename?: CeilingRename;
 }
 
 /** Destination for a config move: `vetinari/config` keeps the source extension. */
@@ -210,6 +269,35 @@ function computeEnvRewrite(containerEnv: string | undefined): EnvRewrite | undef
   return { path: `${LOCAL_DIR}/${CONTAINER_ENV_FILE}`, content: kept.join("\n"), stripped };
 }
 
+/** Matches a `hostWeight: <number>` property, capturing the spacing so the rewrite keeps the config's style. */
+const HOST_WEIGHT_RE = /hostWeight(\s*):(\s*)(\d+(?:\.\d+)?)/;
+
+/**
+ * Translate a numeric `hostWeight` in the config into the nearest `containerShare`
+ * tier (ADR 0011), targeting the config's post-move `dest` path. Returns undefined
+ * when the config is absent or carries no numeric `hostWeight`, so a re-run — or a
+ * project already on `containerShare` — plans nothing. When `hostWeight` is present
+ * but not a numeric literal it cannot be mapped safely; a warning is raised instead.
+ */
+function computeConfigRewrite(scan: LayoutScan, dest: string | undefined): { rewrite?: ConfigRewrite; warning?: string } {
+  if (scan.configContent === undefined || dest === undefined) return {};
+  const m = HOST_WEIGHT_RE.exec(scan.configContent);
+  if (!m) {
+    if (/hostWeight/.test(scan.configContent)) {
+      return {
+        warning:
+          "Config has a `hostWeight` that is not a numeric literal — could not translate it automatically. " +
+          'Replace it with `containerShare: "high" | "medium" | "low"` by hand (ADR 0011).',
+      };
+    }
+    return {};
+  }
+  const weight = Number(m[3]);
+  const tier = numericWeightToTier(weight);
+  const content = scan.configContent.replace(HOST_WEIGHT_RE, `containerShare$1:$2"${tier}"`);
+  return { rewrite: { path: dest, content, weight, tier } };
+}
+
 export function computeLayoutMigration(scan: LayoutScan): LayoutMigrationPlan {
   const existing = new Set(scan.existing ?? []);
   const moves: Move[] = [];
@@ -245,6 +333,16 @@ export function computeLayoutMigration(scan: LayoutScan): LayoutMigrationPlan {
   const unit = computeUnitRewrite(scan);
   const envRewrite = computeEnvRewrite(scan.containerEnv);
 
+  // The config's post-move location: its move destination when it is a legacy
+  // config, otherwise its current (already-canonical) path.
+  const configDestPath = scan.legacyConfig ? configDest(scan.legacyConfig) : scan.configRel;
+  const { rewrite: configRewrite, warning: configWarning } = computeConfigRewrite(scan, configDestPath);
+
+  const hostCeilingRename =
+    scan.gatewayConfigDir && scan.hostCeilingLegacy !== undefined
+      ? { from: join(scan.gatewayConfigDir, OLD_CEILING_FILE), to: join(scan.gatewayConfigDir, CEILING_FILE) }
+      : undefined;
+
   const warnings: string[] = [];
   if (envRewrite) {
     warnings.push(
@@ -252,8 +350,9 @@ export function computeLayoutMigration(scan: LayoutScan): LayoutMigrationPlan {
         `they belong only in host.env, never in a container. Rotate any bot token that was exposed there.`,
     );
   }
+  if (configWarning) warnings.push(configWarning);
 
-  return { moves, gitignore, warnings, conflicts, gatewayEnvDelete, unit, envRewrite };
+  return { moves, gitignore, warnings, conflicts, gatewayEnvDelete, unit, envRewrite, configRewrite, hostCeilingRename };
 }
 
 export interface ApplyResult {
@@ -265,6 +364,10 @@ export interface ApplyResult {
   unitRewritten: boolean;
   /** The container-gate `.env` was rewritten with its host-side secrets stripped. */
   envRewritten: boolean;
+  /** The config's numeric `hostWeight` was translated to a `containerShare` tier. */
+  configRewritten: boolean;
+  /** The host-ceiling file was renamed `host-slots` → `max-concurrent-containers`. */
+  hostCeilingRenamed: boolean;
 }
 
 /**
@@ -317,7 +420,25 @@ export function applyLayoutMigration(baseDir: string, plan: LayoutMigrationPlan)
     envRewritten = true;
   }
 
-  return { moved: plan.moves, gitignoreUpdated, gatewayEnvDeleted, unitRewritten, envRewritten };
+  // Also after the moves — so a legacy config has already landed at its canonical
+  // destination — rewrite it with `hostWeight` translated to `containerShare`.
+  let configRewritten = false;
+  if (plan.configRewrite) {
+    const dest = resolve(baseDir, plan.configRewrite.path);
+    mkdirSync(dirname(dest), { recursive: true });
+    writeFileSync(dest, plan.configRewrite.content);
+    configRewritten = true;
+  }
+
+  // Rename the host-ceiling file at its absolute host path (outside baseDir).
+  let hostCeilingRenamed = false;
+  if (plan.hostCeilingRename && existsSync(plan.hostCeilingRename.from)) {
+    mkdirSync(dirname(plan.hostCeilingRename.to), { recursive: true });
+    renameSync(plan.hostCeilingRename.from, plan.hostCeilingRename.to);
+    hostCeilingRenamed = true;
+  }
+
+  return { moved: plan.moves, gitignoreUpdated, gatewayEnvDeleted, unitRewritten, envRewritten, configRewritten, hostCeilingRenamed };
 }
 
 /** Read a file, or undefined when it is absent — the edge's "optional input" idiom. */
@@ -364,8 +485,13 @@ export function scanLayout(baseDir: string): LayoutScan {
   };
   const gwDir = gatewayConfigDir();
   const unitPath = systemdUnitPath();
+  const resolvedConfig = resolveConfigPath(baseDir);
+  const configRel = resolvedConfig ? relative(baseDir, resolvedConfig.path) : undefined;
   return {
-    legacyConfig: resolveConfigPath(baseDir)?.deprecatedFrom,
+    legacyConfig: resolvedConfig?.deprecatedFrom,
+    configRel,
+    configContent: resolvedConfig ? readOrUndef(resolvedConfig.path) : undefined,
+    hostCeilingLegacy: readOrUndef(join(gwDir, OLD_CEILING_FILE)),
     oldState: listDir(OLD_DIR),
     localState: listDir(LOCAL_DIR),
     gitignore: readOrUndef(resolve(baseDir, ".gitignore")),
@@ -406,7 +532,9 @@ export function describeMigration(plan: LayoutMigrationPlan): string {
     !plan.conflicts.length &&
     !plan.gatewayEnvDelete &&
     !plan.unit &&
-    !plan.envRewrite;
+    !plan.envRewrite &&
+    !plan.configRewrite &&
+    !plan.hostCeilingRename;
   if (changesNothing) {
     return "Nothing to do — this project is already on the vetinari/ + .vetinari.local/ layout.";
   }
@@ -419,6 +547,9 @@ export function describeMigration(plan: LayoutMigrationPlan): string {
   if (plan.gatewayEnvDelete) lines.push(`Delete the stale gateway.env — the gateway holds no secrets of its own (${plan.gatewayEnvDelete}).`);
   if (plan.unit) lines.push(`Rewrite the systemd unit into the host-level gateway service (${plan.unit.path}).`);
   if (plan.envRewrite) lines.push(`Strip host-side secret(s) from the container gate .env: ${plan.envRewrite.stripped.join(", ")}.`);
+  if (plan.configRewrite)
+    lines.push(`Translate hostWeight ${plan.configRewrite.weight} → containerShare "${plan.configRewrite.tier}" in ${plan.configRewrite.path}.`);
+  if (plan.hostCeilingRename) lines.push(`Rename the host-ceiling file ${plan.hostCeilingRename.from} → ${plan.hostCeilingRename.to}.`);
   for (const w of plan.warnings) lines.push(`⚠ ${w}`);
 
   return lines.join("\n");

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { loadConfig, resolveConfigPath, resolveDestination } from "./config.ts";
+import { containerShareWeight, loadConfig, resolveConfigPath, resolveDestination } from "./config.ts";
 
 const CONFIG_BODY = `export default {
   project: "demo",
@@ -67,21 +67,27 @@ test("loadConfig defaults state under .vetinari.local, with parkedDir and logFil
   assert.equal(cfg.logFile, ".vetinari.local/logs/orchestrator.jsonl");
 });
 
-test("loadConfig defaults hostWeight to 1, and honors an explicit weight", async () => {
-  const dflt = await loadConfig(writeConfig(scratch(), "vetinari/config.mts"));
-  assert.equal(dflt.hostWeight, 1);
+test("containerShareWeight maps the three tiers to internal fair-share weights (~7:2:1)", () => {
+  assert.equal(containerShareWeight("high"), 7);
+  assert.equal(containerShareWeight("medium"), 2);
+  assert.equal(containerShareWeight("low"), 1);
+});
 
-  const weighted = `export default {
+test("loadConfig defaults containerShare to medium, and honors an explicit tier", async () => {
+  const dflt = await loadConfig(writeConfig(scratch(), "vetinari/config.mts"));
+  assert.equal(dflt.containerShare, "medium");
+
+  const shared = `export default {
   project: "demo",
   image: "img",
   baseBranch: "main",
   gates: [{ cmd: "true" }],
   fetchTask: (id) => id,
-  hostWeight: 3,
+  containerShare: "high",
 };
 `;
-  const cfg = await loadConfig(writeConfig(scratch(), "vetinari/config.mts", weighted));
-  assert.equal(cfg.hostWeight, 3);
+  const cfg = await loadConfig(writeConfig(scratch(), "vetinari/config.mts", shared));
+  assert.equal(cfg.containerShare, "high");
 });
 
 test("loadConfig's not-found error leads with the canonical path and mentions --config", async () => {

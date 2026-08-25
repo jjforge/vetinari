@@ -52,9 +52,10 @@ const USAGE = `vetinari <mode> [args]
                            layout: config → vetinari/, old .sandcastle/ state →
                            .vetinari.local/, .gitignore updated, the host-side
                            orchestrator.env renamed to host.env, a stale gateway.env
-                           deleted, and the systemd unit rewritten into the host-level
-                           gateway service (--dry-run to print the plan and change
-                           nothing)
+                           deleted, the systemd unit rewritten into the host-level
+                           gateway service, and VETINARI_TELEGRAM_* stripped from the
+                           container gate .env (rotate any token exposed there)
+                           (--dry-run to print the plan and change nothing)
   answer <task> <text>     resume a parked task with a human answer
   gateway                  the host daemon fronting every registered project: the
                            sole Telegram consumer and sender — announces parked
@@ -185,6 +186,7 @@ if (mode === "migrate") {
   if (result.gitignoreUpdated) did.push("updated .gitignore");
   if (result.gatewayEnvDeleted) did.push("deleted the stale gateway.env");
   if (result.unitRewritten) did.push("rewrote the systemd unit into the gateway service");
+  if (result.envRewritten) did.push("stripped host-side secrets from the container gate .env");
   if (did.length) console.log(`\nMigrated: ${did.join(", ")}.`);
   process.exit(0);
 }

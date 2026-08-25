@@ -400,6 +400,17 @@ question` + a `waiting Nm · reason` meta line) that open the existing issue-det
 
 ### Fixed
 
+- `migrate` now **strips `VETINARI_TELEGRAM_*` from the container gate `.vetinari.local/.env`**
+  (#118, ADR 0011). Sandcastle injects every key of `.env` into every agent container, so a
+  bot token declared there rode into each container — contradicting `src/telegram.ts`'s
+  contract and the ADR 0011 container-boundary invariant. Whether the `.env` is still under
+  the legacy `.sandcastle/` (stripped as it moves) or already under `.vetinari.local/`
+  (stripped in place), the host-side Telegram secrets are removed while the in-container
+  agent's own token (`CLAUDE_CODE_OAUTH_TOKEN`) and everything else is left verbatim;
+  host-side sending is unaffected (creds are read from `host.env`). `migrate` warns which
+  keys it stripped and that **any exposed bot token should be rotated**. Idempotent — a
+  `.env` already free of them plans nothing.
+
 - The gateway's **inbound poll loops are now re-derived live** instead of fixed at
   startup (#120), matching the outbound side's per-tick live read (ADR 0011). A
   supervisor reconciles the running loops against the current poll targets each

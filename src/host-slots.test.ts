@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { cpus, tmpdir } from "node:os";
 import { join } from "node:path";
-import { acquireSlot, deregisterProject, fairShare, readHostBudget, readLeases, registerProject, releaseSlot } from "./host-slots.ts";
+import { acquireSlot, deregisterProject, fairShare, machineDefaultCeiling, readLeases, registerProject, releaseSlot, resolveHostCeiling } from "./host-slots.ts";
 
 const freshDir = () => mkdtempSync(join(tmpdir(), "vetinari-slots-"));
 const alive = () => true;
@@ -39,11 +39,11 @@ test("equal-weight projects each get a floor of one plus an even cut of the rema
 test("a lone project acquires up to the budget, then is denied — held is recorded", () => {
   const dir = freshDir();
   registerProject(dir, "solo", 1, { pid: 100, isAlive: alive });
-  // QUEUE_SLOTS is high (10) so only the host budget (3) bites.
-  assert.equal(acquireSlot(dir, 3, "solo", 1, 10, { pid: 100, isAlive: alive }), true);
-  assert.equal(acquireSlot(dir, 3, "solo", 1, 10, { pid: 100, isAlive: alive }), true);
-  assert.equal(acquireSlot(dir, 3, "solo", 1, 10, { pid: 100, isAlive: alive }), true);
-  assert.equal(acquireSlot(dir, 3, "solo", 1, 10, { pid: 100, isAlive: alive }), false);
+  // Alone, the project fills the whole ceiling (3) — only the host ceiling bites.
+  assert.equal(acquireSlot(dir, 3, "solo", 1, { pid: 100, isAlive: alive }), true);
+  assert.equal(acquireSlot(dir, 3, "solo", 1, { pid: 100, isAlive: alive }), true);
+  assert.equal(acquireSlot(dir, 3, "solo", 1, { pid: 100, isAlive: alive }), true);
+  assert.equal(acquireSlot(dir, 3, "solo", 1, { pid: 100, isAlive: alive }), false);
 
   const leases = readLeases(dir);
   assert.equal(leases.length, 1);
@@ -57,23 +57,23 @@ test("a busy project drains to its fair share as a new project becomes active �
   const B = { pid: 2, isAlive: alive };
   // A runs alone and fills the whole budget of 4.
   registerProject(dir, "A", 1, A);
-  for (let i = 0; i < 4; i++) assert.equal(acquireSlot(dir, 4, "A", 1, 10, A), true);
+  for (let i = 0; i < 4; i++) assert.equal(acquireSlot(dir, 4, "A", 1, A), true);
 
   // B arrives. The host is full, so neither can take a slot yet — A is never
   // preempted; it only stops re-acquiring above its now-smaller share.
   registerProject(dir, "B", 1, B);
-  assert.equal(acquireSlot(dir, 4, "A", 1, 10, A), false);
-  assert.equal(acquireSlot(dir, 4, "B", 1, 10, B), false);
+  assert.equal(acquireSlot(dir, 4, "A", 1, A), false);
+  assert.equal(acquireSlot(dir, 4, "B", 1, B), false);
 
   // As A's containers finish, B fills in first-come until each holds its share (2).
   releaseSlot(dir, A);
-  assert.equal(acquireSlot(dir, 4, "B", 1, 10, B), true);
+  assert.equal(acquireSlot(dir, 4, "B", 1, B), true);
   releaseSlot(dir, A);
-  assert.equal(acquireSlot(dir, 4, "B", 1, 10, B), true);
+  assert.equal(acquireSlot(dir, 4, "B", 1, B), true);
 
   // Steady state: 2 each, and neither can climb past its share.
-  assert.equal(acquireSlot(dir, 4, "A", 1, 10, A), false);
-  assert.equal(acquireSlot(dir, 4, "B", 1, 10, B), false);
+  assert.equal(acquireSlot(dir, 4, "A", 1, A), false);
+  assert.equal(acquireSlot(dir, 4, "B", 1, B), false);
   const held = Object.fromEntries(readLeases(dir).map((l) => [l.project, l.held]));
   assert.deepEqual(held, { A: 2, B: 2 });
 });
@@ -82,13 +82,13 @@ test("a crashed run's leases are reclaimed on contention — the budget is never
   const dir = freshDir();
   // A fills the whole budget of 2, then its process dies.
   registerProject(dir, "A", 1, { pid: 1, isAlive: alive });
-  assert.equal(acquireSlot(dir, 2, "A", 1, 10, { pid: 1, isAlive: alive }), true);
-  assert.equal(acquireSlot(dir, 2, "A", 1, 10, { pid: 1, isAlive: alive }), true);
+  assert.equal(acquireSlot(dir, 2, "A", 1, { pid: 1, isAlive: alive }), true);
+  assert.equal(acquireSlot(dir, 2, "A", 1, { pid: 1, isAlive: alive }), true);
 
   // B arrives and sees pid 1 as dead: A's slots are reclaimed, so B is not wedged.
   const bIsAlive = (pid: number) => pid !== 1;
   registerProject(dir, "B", 1, { pid: 2, isAlive: bIsAlive });
-  assert.equal(acquireSlot(dir, 2, "B", 1, 10, { pid: 2, isAlive: bIsAlive }), true);
+  assert.equal(acquireSlot(dir, 2, "B", 1, { pid: 2, isAlive: bIsAlive }), true);
 
   const held = Object.fromEntries(readLeases(dir).map((l) => [l.project, l.held]));
   assert.deepEqual(held, { B: 1 });
@@ -103,36 +103,59 @@ test("over-subscribed, only the heaviest projects seat a slot; the rest are deni
   registerProject(dir, "b", 2, b);
   registerProject(dir, "c", 1, c);
   // Budget 2, three active projects: a and b get their floor, c waits.
-  assert.equal(acquireSlot(dir, 2, "a", 3, 10, a), true);
-  assert.equal(acquireSlot(dir, 2, "b", 2, 10, b), true);
-  assert.equal(acquireSlot(dir, 2, "c", 1, 10, c), false);
+  assert.equal(acquireSlot(dir, 2, "a", 3, a), true);
+  assert.equal(acquireSlot(dir, 2, "b", 2, b), true);
+  assert.equal(acquireSlot(dir, 2, "c", 1, c), false);
   const held = Object.fromEntries(readLeases(dir).map((l) => [l.project, l.held]));
   assert.deepEqual(held, { a: 1, b: 1, c: 0 });
 });
 
-test("readHostBudget: with no env and no file the host budget is disabled (undefined)", () => {
+test("machineDefaultCeiling derives a bounded ceiling from the CPU count, never below one", () => {
+  // Leaves one core for the host/orchestrator so a lone project never swamps the machine.
+  assert.equal(machineDefaultCeiling(8), 7);
+  assert.equal(machineDefaultCeiling(2), 1);
+  // Degenerate CPU counts still seat at least one container.
+  assert.equal(machineDefaultCeiling(1), 1);
+  assert.equal(machineDefaultCeiling(0), 1);
+});
+
+test("resolveHostCeiling: with no env and no file it falls back to the machine-derived default", () => {
   const dir = freshDir();
-  const saved = process.env.VETINARI_HOST_SLOTS;
-  delete process.env.VETINARI_HOST_SLOTS;
+  const saved = process.env.MAX_CONCURRENT_CONTAINERS;
+  delete process.env.MAX_CONCURRENT_CONTAINERS;
   try {
-    assert.equal(readHostBudget(dir), undefined);
+    assert.equal(resolveHostCeiling(dir), machineDefaultCeiling(cpus().length));
   } finally {
-    if (saved !== undefined) process.env.VETINARI_HOST_SLOTS = saved;
+    if (saved !== undefined) process.env.MAX_CONCURRENT_CONTAINERS = saved;
   }
 });
 
-test("readHostBudget: reads the host-slots file, and the env overrides it", () => {
+test("resolveHostCeiling: reads the max-concurrent-containers file, and the env overrides it", () => {
   const dir = freshDir();
-  writeFileSync(join(dir, "host-slots"), "6\n");
-  const saved = process.env.VETINARI_HOST_SLOTS;
-  delete process.env.VETINARI_HOST_SLOTS;
+  writeFileSync(join(dir, "max-concurrent-containers"), "6\n");
+  const saved = process.env.MAX_CONCURRENT_CONTAINERS;
+  delete process.env.MAX_CONCURRENT_CONTAINERS;
   try {
-    assert.equal(readHostBudget(dir), 6);
-    process.env.VETINARI_HOST_SLOTS = "9";
-    assert.equal(readHostBudget(dir), 9);
+    assert.equal(resolveHostCeiling(dir), 6);
+    process.env.MAX_CONCURRENT_CONTAINERS = "9";
+    assert.equal(resolveHostCeiling(dir), 9);
   } finally {
-    if (saved === undefined) delete process.env.VETINARI_HOST_SLOTS;
-    else process.env.VETINARI_HOST_SLOTS = saved;
+    if (saved === undefined) delete process.env.MAX_CONCURRENT_CONTAINERS;
+    else process.env.MAX_CONCURRENT_CONTAINERS = saved;
+  }
+});
+
+test("resolveHostCeiling: a non-numeric or non-positive setting falls back to the machine default", () => {
+  const dir = freshDir();
+  const saved = process.env.MAX_CONCURRENT_CONTAINERS;
+  try {
+    process.env.MAX_CONCURRENT_CONTAINERS = "nonsense";
+    assert.equal(resolveHostCeiling(dir), machineDefaultCeiling(cpus().length));
+    process.env.MAX_CONCURRENT_CONTAINERS = "0";
+    assert.equal(resolveHostCeiling(dir), machineDefaultCeiling(cpus().length));
+  } finally {
+    if (saved === undefined) delete process.env.MAX_CONCURRENT_CONTAINERS;
+    else process.env.MAX_CONCURRENT_CONTAINERS = saved;
   }
 });
 
@@ -140,7 +163,7 @@ test("deregister removes a run's lease entirely, returning its slots to the budg
   const dir = freshDir();
   const A = { pid: 1, isAlive: alive };
   registerProject(dir, "A", 1, A);
-  assert.equal(acquireSlot(dir, 2, "A", 1, 10, A), true);
+  assert.equal(acquireSlot(dir, 2, "A", 1, A), true);
   deregisterProject(dir, A);
   assert.deepEqual(readLeases(dir), []);
 });

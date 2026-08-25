@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { applyLayoutMigration, computeLayoutMigration, describeMigration, scanLayout } from "./migrate.ts";
+import { applyLayoutMigration, computeLayoutMigration, describeMigration, numericWeightToTier, scanLayout } from "./migrate.ts";
 
 let counter = 0;
 const tmpProject = () => {
@@ -184,6 +184,69 @@ test("migrate no longer folds secrets — a second project with a different toke
   assert.equal(second.gatewayEnvDelete, "/home/z/.config/vetinari/gateway.env");
 });
 
+test("numericWeightToTier maps an old numeric hostWeight to the nearest containerShare tier", () => {
+  // Tiers map to internal weights 1/2/7; nearest by distance, midpoints 1.5 and 4.5.
+  assert.equal(numericWeightToTier(1), "low");
+  assert.equal(numericWeightToTier(0.5), "low");
+  assert.equal(numericWeightToTier(2), "medium");
+  assert.equal(numericWeightToTier(3), "medium");
+  assert.equal(numericWeightToTier(4), "medium");
+  assert.equal(numericWeightToTier(5), "high");
+  assert.equal(numericWeightToTier(7), "high");
+  assert.equal(numericWeightToTier(1.5), "medium");
+  assert.equal(numericWeightToTier(4.5), "high");
+});
+
+test("computeLayoutMigration rewrites a numeric hostWeight into a containerShare tier in an already-migrated config", () => {
+  const plan = computeLayoutMigration({
+    configRel: "vetinari/config.mts",
+    configContent: `export default {\n  project: "demo",\n  hostWeight: 3,\n  gates: [],\n};\n`,
+  });
+
+  assert.ok(plan.configRewrite);
+  assert.equal(plan.configRewrite!.path, "vetinari/config.mts");
+  assert.match(plan.configRewrite!.content, /containerShare: "medium"/);
+  assert.doesNotMatch(plan.configRewrite!.content, /hostWeight/);
+});
+
+test("computeLayoutMigration rewrites hostWeight at the config's DESTINATION when it is a legacy config being moved", () => {
+  const plan = computeLayoutMigration({
+    legacyConfig: ".sandcastle/config.mts",
+    configRel: ".sandcastle/config.mts",
+    configContent: `export default {\n  project: "demo",\n  hostWeight: 7,\n};\n`,
+    oldState: ["config.mts"],
+  });
+
+  // The rewrite lands on the moved-to canonical path, not the legacy one.
+  assert.equal(plan.configRewrite!.path, "vetinari/config.mts");
+  assert.match(plan.configRewrite!.content, /containerShare: "high"/);
+});
+
+test("computeLayoutMigration plans no config rewrite when the config carries no hostWeight", () => {
+  const plan = computeLayoutMigration({
+    configRel: "vetinari/config.mts",
+    configContent: `export default {\n  project: "demo",\n  containerShare: "low",\n};\n`,
+  });
+  assert.equal(plan.configRewrite, undefined);
+});
+
+test("computeLayoutMigration renames a legacy host-slots ceiling file to max-concurrent-containers", () => {
+  const plan = computeLayoutMigration({
+    gatewayConfigDir: "/home/z/.config/vetinari",
+    hostCeilingLegacy: "6\n",
+  });
+
+  assert.deepEqual(plan.hostCeilingRename, {
+    from: "/home/z/.config/vetinari/host-slots",
+    to: "/home/z/.config/vetinari/max-concurrent-containers",
+  });
+});
+
+test("computeLayoutMigration plans no ceiling-file rename when no legacy host-slots file exists", () => {
+  const plan = computeLayoutMigration({ gatewayConfigDir: "/home/z/.config/vetinari" });
+  assert.equal(plan.hostCeilingRename, undefined);
+});
+
 const DISPATCH_UNIT = [
   "[Unit]",
   "Description=vetinari Telegram dispatch poller (jjforge)",
@@ -356,6 +419,37 @@ test("applyLayoutMigration renames an already-migrated orchestrator.env to host.
   assert.ok(!existsSync(join(dir, ".vetinari.local", "orchestrator.env")));
   // ...and the container gate .env is left exactly where it was.
   assert.equal(readFileSync(join(dir, ".vetinari.local", ".env"), "utf8"), "MODEL_TOKEN=x\n");
+});
+
+test("applyLayoutMigration rewrites a numeric hostWeight into a containerShare tier on disk", () => {
+  const dir = tmpProject();
+  mkdirSync(join(dir, "vetinari"), { recursive: true });
+  writeFileSync(join(dir, "vetinari", "config.mts"), `export default {\n  project: "demo",\n  hostWeight: 5,\n  gates: [],\n};\n`);
+
+  const plan = computeLayoutMigration({
+    configRel: "vetinari/config.mts",
+    configContent: readFileSync(join(dir, "vetinari", "config.mts"), "utf8"),
+  });
+  const result = applyLayoutMigration(dir, plan);
+
+  const rewritten = readFileSync(join(dir, "vetinari", "config.mts"), "utf8");
+  assert.match(rewritten, /containerShare: "high"/);
+  assert.doesNotMatch(rewritten, /hostWeight/);
+  assert.equal(result.configRewritten, true);
+});
+
+test("applyLayoutMigration renames the host-ceiling file on disk, preserving its value", () => {
+  const dir = tmpProject();
+  const gatewayDir = join(dir, "host-config");
+  mkdirSync(gatewayDir, { recursive: true });
+  writeFileSync(join(gatewayDir, "host-slots"), "6\n");
+
+  const plan = computeLayoutMigration({ gatewayConfigDir: gatewayDir, hostCeilingLegacy: "6\n" });
+  const result = applyLayoutMigration(dir, plan);
+
+  assert.ok(!existsSync(join(gatewayDir, "host-slots")));
+  assert.equal(readFileSync(join(gatewayDir, "max-concurrent-containers"), "utf8"), "6\n");
+  assert.equal(result.hostCeilingRenamed, true);
 });
 
 test("applyLayoutMigration reports nothing deleted or rewritten when the plan carries neither", () => {

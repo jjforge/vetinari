@@ -107,7 +107,7 @@ Two things to know:
 
 ```bash
 npx vetinari run 436                    # one task: loop until green or parked
-npx vetinari queue 436 611 623 640      # bounded pool, QUEUE_SLOTS (default 3)
+npx vetinari queue 436 611 623 640      # fair-share pool, bounded by MAX_CONCURRENT_CONTAINERS + containerShare
 npx vetinari parked                     # what's waiting on you, and why
 npx vetinari status                     # all-repos landing dashboard at http://127.0.0.1:8765 (live)
 npx vetinari answer 436 "use approach B, and say why in the commit"
@@ -355,9 +355,15 @@ Each of these was paid for in a failed run. They are not style preferences.
    secrets file `.vetinari.local/host.env`), never in `.env`. See
    [ADR 0011](docs/adr/0011-configuration-layers.md) for the full
    configuration-layers model (scope × secrecy × container-reach).
-4. **Your gates set the concurrency ceiling.** A full suite per turn is
-   CPU-bound; 2–3 slots is realistic on one workstation, and parallel agents
-   also share your account's rate limits.
+4. **Cap live containers with `MAX_CONCURRENT_CONTAINERS`.** A full suite per
+   turn is CPU-bound, and parallel agents also share your account's rate limits.
+   Set `MAX_CONCURRENT_CONTAINERS` (env, or a `max-concurrent-containers` file in
+   the gateway config dir) to bound live containers across every project; unset,
+   it resolves to a machine-derived default (never unbounded). There is no
+   per-run cap — a lone project fills the ceiling. When projects contend, each
+   takes a cut by its `containerShare` (`high` | `medium` | `low`, default
+   `medium`), with a floor of one and no starvation. See
+   [ADR 0011](docs/adr/0011-configuration-layers.md).
 5. **Batch tasks with disjoint files and no dependencies.** Crossover surfaces
    as merge conflicts you can see; a dependency doesn't surface at all — task B
    builds green against the pre-A contract and merges clean.
@@ -457,7 +463,7 @@ it there too and re-run that project's `baseline`.
 - **Token accounting under-reports.** `IterationResult.usage` reflects the final
   message, not the session; read the session JSONL for real cost.
 - **Gateway resumes sit outside the queue's slot accounting**, so heavy
-  answering can briefly exceed `QUEUE_SLOTS` containers.
+  answering can briefly exceed a project's fair share of `MAX_CONCURRENT_CONTAINERS`.
 - **Session capture is required.** Non-resumable providers (`cursor`,
   `opencode`, `copilot`) can't drive this loop; the run fails with a clear
   message rather than degrading silently.

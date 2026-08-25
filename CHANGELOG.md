@@ -33,19 +33,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Turns tile now reads `N turns · Mm` (its working duration) rather than a bare
   count.
 
-- A **host slot budget** (#87, ADR 0010): an opt-in host-side ceiling on live
-  containers across every project, honoured by a cooperative filesystem lease each
-  `campaign`/`queue` run reads and writes directly under
+- A **host container ceiling** (#87, #121, ADR 0010 + ADR 0011): a host-side cap on
+  live containers across every project, honoured by a cooperative filesystem lease
+  each `campaign`/`queue` run reads and writes directly under
   `<gatewayConfigDir()>/slots/` — the gateway never allocates. Set it with the
-  `VETINARI_HOST_SLOTS` env var or a `<gatewayConfigDir()>/host-slots` file;
-  **unset leaves today's behaviour untouched** (each run bounded only by its own
-  `QUEUE_SLOTS`, uncoordinated). A run takes a slot only when under both its
-  `QUEUE_SLOTS` and its current **fair share** — a floor of one slot per active
-  project plus a weight-proportional cut of the remainder — so a busy project
-  drains to its share as a new project becomes active, with no preemption, and a
-  crashed run's slots are reclaimed on contention so the budget is never wedged.
-  New optional `hostWeight` (default 1) in `vetinari/config.mts` sets a project's
-  cut of the remainder when projects contend.
+  `MAX_CONCURRENT_CONTAINERS` env var or a `<gatewayConfigDir()>/max-concurrent-containers`
+  file; **unset, it resolves to a machine-derived default** (CPU count less one,
+  never below one) rather than "unbounded", so a lone project fills the ceiling
+  without swamping the host. A run takes a slot only when its project is under its
+  current **fair share** — a floor of one slot per active project plus a
+  weight-proportional cut of the remainder — so a busy project drains to its share
+  as a new project becomes active, with no preemption, and a crashed run's slots
+  are reclaimed on contention so the ceiling is never wedged. **There is no per-run
+  parallelism cap** (the old `QUEUE_SLOTS`): a run fills up to its fair share, and a
+  gateway-spawned `carve` child inherits no concurrency value from the host
+  environment. A project declares its cut with the named tier
+  `containerShare: "high" | "medium" | "low"` (default `"medium"`, mapping to
+  internal fair-share weights ~7:2:1) in `vetinari/config.mts`, replacing the raw
+  numeric `hostWeight`.
 
 - `docs/dashboard-color-rules.md`, the normative card/chip colour spec (#83): the
   six-state palette (§1), the one-coloured-edge rule (§2), the state→colour
@@ -186,6 +191,14 @@ repos` (repos with a running agent), parked `oldest <Nm>` (the oldest parked
   `orchestrator.env` (whether still under `.sandcastle/` or already under
   `.vetinari.local/`) to `host.env`. The container-secrets file keeps its
   sandcastle-imposed name `.env`.
+
+- Reworked the concurrency config surface into two named concepts (#121, ADR 0011):
+  the host ceiling is `MAX_CONCURRENT_CONTAINERS` (env or a `max-concurrent-containers`
+  file), replacing `VETINARI_HOST_SLOTS`/`host-slots`; a project's cut is the tier
+  `containerShare: "high" | "medium" | "low"` (default `"medium"`), replacing the raw
+  numeric `hostWeight`. `migrate` carries the renames: it translates a numeric
+  `hostWeight` to the nearest tier in `vetinari/config.mts`, and renames an existing
+  `host-slots` ceiling file to `max-concurrent-containers`.
 
 - The orchestrator now passes its `stateDir` (default `.vetinari.local`) to
   sandcastle's `createSandbox`, so sandcastle's own gitignored runtime artifacts
@@ -388,6 +401,13 @@ question` + a `waiting Nm · reason` meta line) that open the existing issue-det
   not "queued"). The all-repos landing render is unchanged.
 
 ### Removed
+
+- Removed the per-run parallelism cap `QUEUE_SLOTS` (#121, ADR 0011). Effective
+  concurrency is now the project's fair share of `MAX_CONCURRENT_CONTAINERS` alone —
+  a lone project fills the ceiling. This also removes the bug where a gateway-spawned
+  `carve` child inherited `QUEUE_SLOTS` from the host environment: `carve` is now just
+  another run, bounded only by the ceiling and its `containerShare`. `queue`/`campaign`
+  no longer read `QUEUE_SLOTS` from the environment.
 
 - Removed the `orchestrator.env`→`gateway.env` fold and the host-level `gateway.env`
   itself (#119). The gateway holds no secrets of its own (ADR 0002) — it reads each

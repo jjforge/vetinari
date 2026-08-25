@@ -13,7 +13,8 @@ import { applyInit, computeInit, describeInit, scanInit } from "./init.ts";
 import { archiveRun } from "./archive.ts";
 import { clearParkedForTasks, enqueueOutbound, listParked, readParked } from "./state.ts";
 import { autoRegister, gatewayConfigDir } from "./registry.ts";
-import { readHostBudget, type HostBudget } from "./host-slots.ts";
+import { resolveHostCeiling, type HostBudget } from "./host-slots.ts";
+import { containerShareWeight } from "./config.ts";
 import { campaignRunning, readEventLog, reduceCampaign, serveAllStatus } from "./status.ts";
 import { runStatusLine } from "./statusline.ts";
 
@@ -21,7 +22,8 @@ const USAGE = `vetinari <mode> [args]
 
   baseline                 prove the image runs every gate green — no agent, no cost
   run <task>               the TDD loop: agent turn → gate → resume on red
-  queue <task…>            bounded pool over several tasks (QUEUE_SLOTS, default 3)
+  queue <task…>            fair-share pool over several tasks (bounded by the host
+                           ceiling and this project's containerShare — no per-run cap)
   campaign [--name "…"] <batch…>
                            queue each batch, then merge greens → gate base → next batch.
                            --name labels the run in the dashboard + archived-runs list
@@ -53,8 +55,10 @@ const USAGE = `vetinari <mode> [args]
                            .vetinari.local/, .gitignore updated, the host-side
                            orchestrator.env renamed to host.env, a stale gateway.env
                            deleted, the systemd unit rewritten into the host-level
-                           gateway service, and VETINARI_TELEGRAM_* stripped from the
-                           container gate .env (rotate any token exposed there)
+                           gateway service, VETINARI_TELEGRAM_* stripped from the
+                           container gate .env (rotate any token exposed there), a
+                           numeric hostWeight translated to a containerShare tier, and
+                           the host-slots ceiling file renamed max-concurrent-containers
                            (--dry-run to print the plan and change nothing)
   answer <task> <text>     resume a parked task with a human answer
   gateway                  the host daemon fronting every registered project: the
@@ -80,11 +84,12 @@ const USAGE = `vetinari <mode> [args]
 
 Options: --config <path>   (default: vetinari/config.mts in cwd)
 
-Host slot budget (optional): set VETINARI_HOST_SLOTS (or a host-slots file in the
-gateway config dir) to cap live containers across ALL projects; every queue/campaign
-cooperates through a filesystem lease to stay within it. Unset = uncoordinated, each
-run bounded only by QUEUE_SLOTS. A project's cut when projects contend is its
-\`hostWeight\` (default 1). See ADR 0010.`;
+Host container ceiling: set MAX_CONCURRENT_CONTAINERS (or a max-concurrent-containers
+file in the gateway config dir) to cap live containers across ALL projects; every
+queue/campaign cooperates through a filesystem lease to stay within it. Unset resolves
+to a machine-derived default (never unbounded). There is no per-run cap: a lone project
+fills the ceiling. A project's cut when projects contend is its \`containerShare\`
+(high | medium | low, default medium). See ADR 0010 and ADR 0011.`;
 
 /**
  * The interactive under-specified halt: shown only on a terminal (the flag/TTY
@@ -187,6 +192,8 @@ if (mode === "migrate") {
   if (result.gatewayEnvDeleted) did.push("deleted the stale gateway.env");
   if (result.unitRewritten) did.push("rewrote the systemd unit into the gateway service");
   if (result.envRewritten) did.push("stripped host-side secrets from the container gate .env");
+  if (result.configRewritten) did.push("translated hostWeight → containerShare");
+  if (result.hostCeilingRenamed) did.push("renamed the host-ceiling file to max-concurrent-containers");
   if (did.length) console.log(`\nMigrated: ${did.join(", ")}.`);
   process.exit(0);
 }
@@ -227,12 +234,16 @@ setLogFile(cfg.logFile);
 // Pointer-only and best-effort — never fatal to the run.
 autoRegister(cfg);
 
-// Resolve the host slot budget once (ADR 0010): unset leaves every run bounded
-// only by its own QUEUE_SLOTS, uncoordinated, exactly as before; set, the run
-// carries it into queue/campaign to cooperate through the filesystem lease.
-const resolvedHostSlots = readHostBudget(gatewayConfigDir());
-const hostBudget: HostBudget | undefined =
-  resolvedHostSlots === undefined ? undefined : { configDir: gatewayConfigDir(), budget: resolvedHostSlots, weight: cfg.hostWeight };
+// Resolve the host container ceiling once (ADR 0011): always in effect —
+// MAX_CONCURRENT_CONTAINERS (or the max-concurrent-containers file) when set, else
+// a machine-derived default. Every queue/campaign carries it and this project's
+// containerShare-derived weight into the cooperative filesystem lease; there is no
+// per-run cap.
+const hostBudget: HostBudget = {
+  configDir: gatewayConfigDir(),
+  ceiling: resolveHostCeiling(gatewayConfigDir()),
+  weight: containerShareWeight(cfg.containerShare),
+};
 
 // Reset the live state the dashboard and status line read once a run is truly
 // over, so a finished run stops showing as current. Skip while anything is still
@@ -257,7 +268,7 @@ switch (mode) {
   }
   case "queue": {
     if (!rest.length) throw new Error("queue needs at least one task id");
-    await queue(cfg, rest, Math.max(1, Number(process.env.QUEUE_SLOTS ?? 3)), undefined, hostBudget);
+    await queue(cfg, rest, hostBudget);
     archiveIfIdle();
     break;
   }
@@ -275,7 +286,7 @@ switch (mode) {
     const batches = positional.map((b) => b.split(/[\s,]+/).filter(Boolean)).filter((b) => b.length);
     if (!batches.length) throw new Error('campaign needs at least one batch: campaign "436 611" "623 640"');
     // Archive only a clean run — a halt leaves state deliberately, to inspect.
-    if (await campaign(cfg, batches, Math.max(1, Number(process.env.QUEUE_SLOTS ?? 3)), name, hostBudget)) archiveIfIdle();
+    if (await campaign(cfg, batches, hostBudget, name)) archiveIfIdle();
     break;
   }
   case "carve": {
@@ -363,7 +374,7 @@ switch (mode) {
       console.log("nothing left to run after the carve — done.");
       break;
     }
-    await campaign(cfg, remaining, Math.max(1, Number(process.env.QUEUE_SLOTS ?? 3)), undefined, hostBudget);
+    await campaign(cfg, remaining, hostBudget);
     break;
   }
   case "campaign-plan": {

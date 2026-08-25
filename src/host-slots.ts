@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, openSync, closeSync, writeSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { cpus } from "node:os";
 import { join } from "node:path";
 
 /**
@@ -28,13 +29,14 @@ export interface LeaseOpts {
 }
 
 /**
- * A resolved, enabled host slot budget a run carries into `queue`/`campaign`:
- * where the lease lives, the host ceiling, and this project's weight. Absent
- * (undefined) means the budget is unset and the run coordinates with no one.
+ * The resolved host container ceiling a run carries into `queue`/`campaign`:
+ * where the lease lives, the host ceiling, and this project's fair-share weight
+ * (mapped from its `containerShare` tier). Always present — the ceiling is in
+ * effect for every run (ADR 0011), machine-derived when nothing is set.
  */
 export interface HostBudget {
   configDir: string;
-  budget: number;
+  ceiling: number;
   weight: number;
 }
 
@@ -43,28 +45,44 @@ export function slotsDir(configDir: string): string {
   return join(configDir, "slots");
 }
 
+/** The host-ceiling file's name under the gateway config dir (ADR 0011). */
+const CEILING_FILE = "max-concurrent-containers";
+
 /**
- * The host slot budget setting, or `undefined` when it is unset — the opt-in
- * signal that leaves today's uncoordinated behavior untouched (each run bounded
- * only by its own `QUEUE_SLOTS`). `VETINARI_HOST_SLOTS` wins over the
- * `<configDir>/host-slots` file; a missing, non-numeric, or non-positive value is
- * treated as unset.
+ * The machine-derived container ceiling used when nothing is set explicitly
+ * (ADR 0011): the CPU count less one core reserved for the host/orchestrator, so
+ * a lone project runs several containers without swamping the machine — never
+ * below one. Pure and tunable.
  */
-export function readHostBudget(configDir: string): number | undefined {
+export function machineDefaultCeiling(cpuCount: number): number {
+  return Math.max(1, cpuCount - 1);
+}
+
+/**
+ * The host's ceiling on live containers across every project (ADR 0011):
+ * `MAX_CONCURRENT_CONTAINERS` wins over the `<configDir>/max-concurrent-containers`
+ * file, and when neither is a positive integer it resolves to a machine-derived
+ * default rather than "unbounded" — so the ceiling is always in effect and a lone
+ * project fills it while the host is never swamped.
+ */
+export function resolveHostCeiling(configDir: string): number {
   const parse = (raw: string | undefined): number | undefined => {
     if (raw === undefined) return undefined;
     const n = Number(raw.trim());
     return Number.isInteger(n) && n > 0 ? n : undefined;
   };
-  const fromEnv = parse(process.env.VETINARI_HOST_SLOTS);
+  const fromEnv = parse(process.env.MAX_CONCURRENT_CONTAINERS);
   if (fromEnv !== undefined) return fromEnv;
-  const file = join(configDir, "host-slots");
-  if (!existsSync(file)) return undefined;
-  try {
-    return parse(readFileSync(file, "utf8"));
-  } catch {
-    return undefined;
+  const file = join(configDir, CEILING_FILE);
+  if (existsSync(file)) {
+    try {
+      const fromFile = parse(readFileSync(file, "utf8"));
+      if (fromFile !== undefined) return fromFile;
+    } catch {
+      // Unreadable file — fall through to the machine-derived default.
+    }
   }
+  return machineDefaultCeiling(cpus().length);
 }
 
 /** Is `pid` a live process? `kill(pid, 0)` throws ESRCH when it is gone. */
@@ -195,14 +213,15 @@ export function deregisterProject(configDir: string, opts: LeaseOpts = {}): void
 
 /**
  * Try to take one host slot for this run. Succeeds only when, over the currently
- * live leases (dead holders reclaimed first), the run is under its own
- * `QUEUE_SLOTS`, its project is under its current `fairShare`, and the host budget
- * is not already full. On success the run's held count is incremented on disk and
- * `true` is returned; otherwise nothing changes and `false` is returned. The whole
- * check-and-write happens under the host lock, so two runs cannot both take the
- * last slot.
+ * live leases (dead holders reclaimed first), the run's project is under its
+ * current `fairShare` and the host ceiling is not already full. There is no
+ * per-run cap (ADR 0011): a run fills up to its fair share, and a lone project
+ * fills the whole ceiling. On success the run's held count is incremented on disk
+ * and `true` is returned; otherwise nothing changes and `false` is returned. The
+ * whole check-and-write happens under the host lock, so two runs cannot both take
+ * the last slot.
  */
-export function acquireSlot(configDir: string, budget: number, project: string, weight: number, slots: number, opts: LeaseOpts = {}): boolean {
+export function acquireSlot(configDir: string, ceiling: number, project: string, weight: number, opts: LeaseOpts = {}): boolean {
   const pid = opts.pid ?? process.pid;
   const isAlive = opts.isAlive ?? pidAlive;
   return withLock(slotsDir(configDir), isAlive, () => {
@@ -214,9 +233,9 @@ export function acquireSlot(configDir: string, budget: number, project: string, 
     const mine = live.find((l) => l.pid === pid);
     const myRunHeld = mine?.held ?? 0;
     const myProjectHeld = live.filter((l) => l.project === project).reduce((s, l) => s + l.held, 0);
-    const share = fairShare(budget, activeWeights, project);
+    const share = fairShare(ceiling, activeWeights, project);
 
-    if (myRunHeld >= slots || myProjectHeld >= share || total >= budget) return false;
+    if (myProjectHeld >= share || total >= ceiling) return false;
 
     writeFileSync(leaseFile(configDir, pid), JSON.stringify({ project, weight, held: myRunHeld + 1, pid }));
     return true;
@@ -236,25 +255,25 @@ export function releaseSlot(configDir: string, opts: LeaseOpts = {}): void {
 }
 
 /**
- * A project's currently-allowed slot count under a `budget`, given the weights of
- * every currently-active project: a floor of one slot per active project plus a
- * weight-proportional cut of the remainder. Pure — no filesystem. A project alone
- * gets the whole budget; each active project always gets at least one while the
- * budget can seat them all.
+ * A project's currently-allowed slot count under a host `ceiling`, given the
+ * weights of every currently-active project: a floor of one slot per active
+ * project plus a weight-proportional cut of the remainder. Pure — no filesystem. A
+ * project alone gets the whole ceiling; each active project always gets at least
+ * one while the ceiling can seat them all.
  */
-export function fairShare(budget: number, activeWeights: Record<string, number>, project: string): number {
+export function fairShare(ceiling: number, activeWeights: Record<string, number>, project: string): number {
   const projects = Object.keys(activeWeights);
   const n = projects.length;
-  if (budget <= 0 || n === 0 || !(project in activeWeights)) return 0;
+  if (ceiling <= 0 || n === 0 || !(project in activeWeights)) return 0;
 
   // Over-subscription: the machine cannot seat one slot for every active project,
-  // so the floor is best-effort — the heaviest `budget` projects get their one
+  // so the floor is best-effort — the heaviest `ceiling` projects get their one
   // slot and the rest get none (they wait first-come for a freed slot). Ties
   // broken by name so every run agrees on who is seated.
-  if (budget < n) {
+  if (ceiling < n) {
     const seated = [...projects]
       .sort((x, y) => activeWeights[y] - activeWeights[x] || (x < y ? -1 : 1))
-      .slice(0, budget);
+      .slice(0, ceiling);
     return seated.includes(project) ? 1 : 0;
   }
 
@@ -262,7 +281,7 @@ export function fairShare(budget: number, activeWeights: Record<string, number>,
   // by the largest-remainder (Hamilton) method: each project's base is the floor
   // of its ideal cut, and the leftover slots go to the largest fractional parts,
   // ties broken by project name so every run computes the identical split.
-  const remainder = budget - n;
+  const remainder = ceiling - n;
   const totalWeight = projects.reduce((s, p) => s + activeWeights[p], 0) || 1;
   const ideal = (p: string) => (remainder * activeWeights[p]) / totalWeight;
   const base = (p: string) => Math.floor(ideal(p));

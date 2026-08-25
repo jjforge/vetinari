@@ -123,16 +123,18 @@ function readRouting(baseLocation: string): Routing {
 }
 
 /**
- * The secrets file inside a project's base location. Holds the orchestrator's
- * host-side env, including the Telegram bot token and chat — never copied into
- * the registry, always read live from here (ADR 0001/0002).
+ * The host-side secrets file inside a project's base location. Holds the
+ * Telegram bot token and chat — read by the orchestrator process and live by the
+ * gateway, never crossing into a container (`.env` is the container gate) and
+ * never copied into the registry (ADR 0011, 0002). Named by container-reach:
+ * `host.env` stays host-side.
  */
-const SECRETS_FILE = "orchestrator.env";
+const SECRETS_FILE = "host.env";
 
 /**
  * Parse a shell env file (`KEY=VALUE`, optional `export`, optional quotes, `#`
  * comments) into a plain record. Not a full shell — just enough to read the
- * simple assignments an `orchestrator.env` carries.
+ * simple assignments a `host.env` carries.
  */
 function parseEnvFile(text: string): Record<string, string> {
   const env: Record<string, string> = {};

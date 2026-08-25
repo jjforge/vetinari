@@ -50,10 +50,11 @@ const USAGE = `vetinari <mode> [args]
                            plan and write nothing). Installs and vendors nothing
   migrate [--dry-run]      move this project onto the vetinari/ + .vetinari.local/
                            layout: config → vetinari/, old .sandcastle/ state →
-                           .vetinari.local/, .gitignore updated, orchestrator.env
-                           folded into the gateway host config, and the systemd unit
-                           rewritten into the host-level gateway service (--dry-run
-                           to print the plan and change nothing)
+                           .vetinari.local/, .gitignore updated, the host-side
+                           orchestrator.env renamed to host.env, a stale gateway.env
+                           deleted, and the systemd unit rewritten into the host-level
+                           gateway service (--dry-run to print the plan and change
+                           nothing)
   answer <task> <text>     resume a parked task with a human answer
   gateway                  the host daemon fronting every registered project: the
                            sole Telegram consumer and sender — announces parked

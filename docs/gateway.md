@@ -38,11 +38,13 @@ re-registration.
 ## 1. Credentials
 
 A project's Telegram credentials live in its **base location**, in
-`.vetinari.local/orchestrator.env` — a plain `KEY=VALUE` shell file, gitignored
-and never committed:
+`.vetinari.local/host.env` — a plain `KEY=VALUE` shell file, gitignored
+and never committed. It is named by container-reach (ADR 0011): `host.env` stays
+host-side — read by the orchestrator process and live by the gateway, never
+crossing into a container — while `.env` is the container gate:
 
 ```bash
-# <project>/.vetinari.local/orchestrator.env
+# <project>/.vetinari.local/host.env
 VETINARI_TELEGRAM_BOT_TOKEN=123456:ABC-your-bot-token
 VETINARI_TELEGRAM_CHAT_ID=-1001234567890
 VETINARI_TELEGRAM_THREAD_ID=42          # optional — a forum thread under the chat
@@ -55,8 +57,9 @@ connection: the gateway skips it — its outbox never drains and its questions a
 never announced. `VETINARI_TELEGRAM_THREAD_ID` is optional.
 
 This is the change from the retired per-project **`dispatch`** poller. `dispatch`
-was one process per project; its systemd unit sourced that project's own
-`orchestrator.env` into its environment and read the token from there. Under the
+was one process per project; its systemd unit sourced that project's own host-side
+secrets file (then `orchestrator.env`, now `host.env`) into its environment and read
+the token from there. Under the
 gateway there is one process for the whole host, and it reads each project's
 credentials by reference from that project's base location instead of from its own
 environment. (Credentials still never go in `.sandcastle/.env` or any file injected
@@ -109,13 +112,13 @@ config).
 `destinations`/`notify` — then it is the empty object `{}`. An empty routing map
 does **not** by itself silence delivery: with credentials present, every category
 falls back to the project's **default** connection — the `VETINARI_TELEGRAM_CHAT_ID`
-in `orchestrator.env` — because the design chooses "fall back to the default" over
+in `host.env` — because the design chooses "fall back to the default" over
 "silently drop." What an empty `routing.json` costs you is *routing*: you cannot
 send failures to an alerts bot or split a thread; everything lands in the one
 default chat.
 
 The genuinely silent no-delivery is **missing credentials**, not an empty routing
-map. With no `orchestrator.env` (no token/chat) a project has no connection at all,
+map. With no `host.env` (no token/chat) a project has no connection at all,
 so the gateway skips it: the outbox fills and nothing is sent, with only a skip
 line in the gateway's log. That is why "a running campaign enqueues to
 `.vetinari.local/outbox/` and nothing sends." When notifications aren't firing,
@@ -182,7 +185,11 @@ Alongside the layout move (config → `vetinari/`, old `.sandcastle/` state →
   (ADR 0002) — it reads each project's credentials live from that project's base
   location — so `~/.config/vetinari/gateway.env` holds nothing legitimate. `migrate`
   removes it; per-project secrets stay where they belong, in each project's own
-  `.vetinari.local/orchestrator.env`.
+  `.vetinari.local/host.env`.
+- **Renames the host-side secrets file.** An existing `.vetinari.local/orchestrator.env`
+  is renamed to `.vetinari.local/host.env` (ADR 0011) — named by the axis that
+  distinguishes it from the container gate `.env`. The container-secrets file keeps
+  its sandcastle-imposed name `.env`.
 - **Rewrites the systemd unit into the host-level gateway service.** The unit at
   `~/.config/systemd/user/vetinari-gateway.service` is rewritten from a
   per-project `dispatch` poller (bound to one `WorkingDirectory`, running
@@ -203,12 +210,12 @@ its updates, and `dispatch` is retired.
 
 **Prove the credentials round-trip** with `tg-test`. It reads
 `VETINARI_TELEGRAM_BOT_TOKEN` / `VETINARI_TELEGRAM_CHAT_ID` from the
-orchestrator's **own** environment, so source the project's `orchestrator.env`
+orchestrator's **own** environment, so source the project's `host.env`
 first (the gateway itself reads them from the base location, but `tg-test` is a
 standalone check):
 
 ```bash
-set -a; source .vetinari.local/orchestrator.env; set +a
+set -a; source .vetinari.local/host.env; set +a
 npx vetinari tg-test
 ```
 

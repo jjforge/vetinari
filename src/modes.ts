@@ -49,6 +49,22 @@ const selfSpawn = (args: string[]) =>
   spawn(process.execPath, [...process.execArgv, process.argv[1], ...args], { stdio: ["ignore", "inherit", "inherit"] });
 
 /**
+ * The project's Dockerfile, fixed by the committed `vetinari/` layout (init
+ * writes it here). `build` reads it so the image name and Dockerfile never have
+ * to be repeated on the CLI.
+ */
+export const DOCKERFILE = "vetinari/Dockerfile";
+
+/**
+ * The sandcastle argv that builds `image` from `dockerfile` — `docker
+ * build-image` with both passed by flag. Pure, so the one place that names the
+ * image and the Dockerfile on the CLI is checkable without a Docker daemon.
+ */
+export function buildImageArgs(image: string, dockerfile: string): string[] {
+  return ["docker", "build-image", "--dockerfile", dockerfile, "--image-name", image];
+}
+
+/**
  * Prove the image can run the gates before trusting any agent result: a
  * toolchain probe, then every gate unconditionally. No agent, no cost.
  */
@@ -67,6 +83,49 @@ export async function baseline(cfg: ResolvedConfig) {
   } finally {
     await sbx.close();
   }
+}
+
+/**
+ * The two effects `build` orchestrates, injected so its wiring — build first,
+ * then baseline unless skipped, non-zero on either failure — is testable without
+ * a Docker daemon. `buildImage` resolves to sandcastle's exit code; `baseline`
+ * is the same probe the `baseline` mode runs.
+ */
+export interface BuildDeps {
+  buildImage: (image: string, dockerfile: string) => Promise<number>;
+  baseline: (cfg: ResolvedConfig) => Promise<boolean>;
+}
+
+/**
+ * Shell sandcastle's `docker build-image` for `image`/`dockerfile`, inheriting
+ * stdio so its progress and any error stay visible, and resolve to its exit code
+ * (a launch failure counts as non-zero). The real effect behind `BuildDeps`.
+ */
+const runBuildImage = (image: string, dockerfile: string): Promise<number> =>
+  new Promise((resolve) => {
+    const child = spawn("npx", ["sandcastle", ...buildImageArgs(image, dockerfile)], { stdio: ["ignore", "inherit", "inherit"] });
+    child.on("error", (err) => {
+      console.error(`build: could not launch sandcastle — ${err.message}`);
+      resolve(1);
+    });
+    child.on("exit", (code) => resolve(code ?? 1));
+  });
+
+const defaultBuildDeps: BuildDeps = { buildImage: runBuildImage, baseline };
+
+/**
+ * Build the agent image the same way the run modes name it — `cfg.image` from
+ * the project's Dockerfile, neither repeated on the CLI — then, unless
+ * `--no-baseline` was passed (`opts.baseline === false`), prove it with the
+ * baseline probe. Returns false on a build failure (baseline is skipped) or a
+ * red baseline; the CLI maps that to a non-zero exit.
+ */
+export async function build(cfg: ResolvedConfig, opts: { baseline: boolean }, deps: BuildDeps = defaultBuildDeps): Promise<boolean> {
+  const code = await deps.buildImage(cfg.image, DOCKERFILE);
+  log("build", { image: cfg.image, dockerfile: DOCKERFILE, exitCode: code });
+  if (code !== 0) return false;
+  if (!opts.baseline) return true;
+  return deps.baseline(cfg);
 }
 
 /**

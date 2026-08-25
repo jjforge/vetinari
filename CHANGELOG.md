@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A `vetinari build` mode (#126) that builds the agent image the run modes use —
+  `cfg.image` from `vetinari/Dockerfile`, neither repeated on the CLI — by shelling
+  sandcastle's `docker build-image`, then runs `baseline` on success. `--no-baseline`
+  builds only. A build failure exits non-zero with sandcastle's output visible and
+  skips the probe; a red baseline exits non-zero too.
+
 - Recorded the **configuration-layers model** (ADR 0011): every config item is placed
   by scope × secrecy × container-reach; the container gate is exactly
   `.vetinari.local/.env`; and the gateway persists no secrets. Filed the drift/leak

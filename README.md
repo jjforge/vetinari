@@ -348,7 +348,13 @@ Each of these was paid for in a failed run. They are not style preferences.
 3. **Host-only environment goes in `hostEnv`, not `.env`.** `.env` reaches the
    container. `GIT_CONFIG_GLOBAL` is the classic trap: sandcastle needs it
    host-side for `safe.directory`, and inside a container it overrides the HOME
-   a project's own git tests depend on.
+   a project's own git tests depend on. This is the **container-boundary
+   invariant**: the only file that crosses into the agent container is
+   `.vetinari.local/.env`, so any host-only value — `GIT_CONFIG_GLOBAL`, and a
+   Telegram bot credential — must live elsewhere (`hostEnv`, or the host-side
+   secrets file `.vetinari.local/orchestrator.env`), never in `.env`. See
+   [ADR 0011](docs/adr/0011-configuration-layers.md) for the full
+   configuration-layers model (scope × secrecy × container-reach).
 4. **Your gates set the concurrency ceiling.** A full suite per turn is
    CPU-bound; 2–3 slots is realistic on one workstation, and parallel agents
    also share your account's rate limits.

@@ -178,6 +178,14 @@ repos` (repos with a running agent), parked `oldest <Nm>` (the oldest parked
 
 ### Changed
 
+- The orchestrator now passes its `stateDir` (default `.vetinari.local`) to
+  sandcastle's `createSandbox`, so sandcastle's own gitignored runtime artifacts
+  (worktrees/, `.env`, patches/, default logs/) land under the project's state
+  dir instead of a stray `.sandcastle/`. This keeps all ephemeral state in one
+  gitignored place, segmented from the committed `vetinari/` config. Requires a
+  sandcastle build carrying the `stateDir` option (ADR 0021 in `@ai-hero/sandcastle`);
+  older builds ignore the option and keep writing `.sandcastle/`.
+
 - The landing **Merged today** counter's sublabel now reads **"All repos"** (was
   "issues merged") (#104). The title already carries the metric, so a sublabel
   repeating "merged" was redundant; "All repos" instead states the counter's

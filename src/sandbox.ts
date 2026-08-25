@@ -23,6 +23,11 @@ export async function makeSandbox(cfg: ResolvedConfig, taskId: string) {
 
   return sandcastle.createSandbox({
     branch,
+    // Route sandcastle's own gitignored artifacts (worktrees/, .env, patches/,
+    // default logs/) into the project's state dir instead of a stray
+    // `.sandcastle/`, so all ephemeral state lives under one place (default
+    // `.vetinari.local/`). Relative to the host repo (cwd), like the orchestrator's.
+    stateDir: cfg.stateDir,
     sandbox: docker({ imageName: cfg.image, mounts }),
     hooks: cfg.setup?.length
       ? { sandbox: { onSandboxReady: cfg.setup.map((command) => ({ command, timeoutMs: cfg.setupTimeoutMs ?? 300_000 })) } }

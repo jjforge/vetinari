@@ -329,9 +329,10 @@ export async function markMergedIssues(
  *
  * Green-only by design: only green branches are merged. Once a wave is over,
  * parked records for its non-green tasks are cleared so stale questions do not
- * bleed into the next wave. A merge conflict or a red
- * merged base halts the whole campaign with the base rolled back to where the
- * batch began — no later batch runs on a broken or half-merged base.
+ * bleed into the next wave. Integration is non-atomic (ADR 0013): a merge conflict
+ * quarantines just the conflicting green and the wave carries on with the rest,
+ * while a red merged base — with no single culprit — still halts the whole campaign
+ * with the base rolled back to where the batch began.
  */
 export async function campaign(
   cfg: ResolvedConfig,
@@ -393,17 +394,16 @@ export async function campaign(
     const greens = tasks.filter((t) => outcomes[t] === "green");
     const held = tasks.filter((t) => outcomes[t] !== "green");
 
-    const { merged, halt } = await integrateGreens(cfg, greens);
+    const { merged, quarantined, halt } = await integrateGreens(cfg, greens);
     if (halt) {
-      const where = halt.taskId ? ` on ${halt.taskId}` : "";
-      log("campaign-halt", { index, reason: halt.reason, taskId: halt.taskId });
+      log("campaign-halt", { index, reason: halt.reason });
       enqueueOutbound(cfg, {
         category: "failure",
         event: "halt",
-        text: `🛑 ${cfg.project} campaign HALTED at batch ${index + 1} — ${halt.reason}${where}. Base rolled back; branches kept for you.\n\n${halt.detail}`,
+        text: `🛑 ${cfg.project} campaign HALTED at batch ${index + 1} — ${halt.reason}. Base rolled back; branches kept for you.\n\n${halt.detail}`,
       });
       console.log(
-        `campaign halted (${halt.reason}${where}) — base rolled back, ${total - index - 1} batch(es) not started.`,
+        `campaign halted (${halt.reason}) — base rolled back, ${total - index - 1} batch(es) not started.`,
       );
       return false;
     }
@@ -429,14 +429,19 @@ export async function campaign(
     const note = held.length
       ? ` — cleared parked records for completed wave: ${held.map((t) => `${t}(${outcomes[t]})`).join(", ")}`
       : "";
-    log("campaign-batch-done", { index, merged, held, clearedParked: held });
+    // A merge conflict quarantined these greens (ADR 0013): their work is preserved
+    // and resumable, so — unlike `held` — their parked records are left untouched.
+    const qNote = quarantined.length
+      ? ` — quarantined on merge conflict (kept for you): ${quarantined.join(", ")}`
+      : "";
+    log("campaign-batch-done", { index, merged, held, clearedParked: held, quarantined });
     enqueueOutbound(cfg, {
       category: "success",
       event: "wave-merged",
-      text: `✅ ${cfg.project} campaign batch ${index + 1} merged: ${merged.join(", ") || "nothing"}${note}`,
+      text: `✅ ${cfg.project} campaign batch ${index + 1} merged: ${merged.join(", ") || "nothing"}${note}${qNote}`,
     });
     console.log(
-      `batch ${index + 1}/${total}: merged ${merged.join(", ") || "nothing"}${note}`,
+      `batch ${index + 1}/${total}: merged ${merged.join(", ") || "nothing"}${note}${qNote}`,
     );
   }
 

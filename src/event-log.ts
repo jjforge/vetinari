@@ -40,13 +40,15 @@ export interface CampaignBatchEvent extends BaseEvent {
 }
 
 /** `campaign-batch-done` — a wave closed: what merged into the base, what was held (non-green),
- * and the parked records cleared for the completed wave (modes.ts). */
+ * the parked records cleared for the completed wave, and any greens a merge conflict quarantined
+ * (branch/worktree/session preserved, ADR 0013) (modes.ts). */
 export interface CampaignBatchDoneEvent extends BaseEvent {
   event: "campaign-batch-done";
   index: number;
   merged: string[];
   held: string[];
   clearedParked: string[];
+  quarantined?: string[];
 }
 
 /** `campaign-done` — the whole campaign finished cleanly; carries the number of batches merged
@@ -123,6 +125,17 @@ export interface ParkedEvent extends BaseEvent {
   reason: string;
 }
 
+/** `quarantined` — integration hit a merge conflict on `agent/<id>` and pulled that one green
+ * from the wave: the task, its branch, and the tail of the conflict output. Attributable blame,
+ * so only this merge is aborted — the earlier greens stay merged and the wave continues; the
+ * issue's branch/worktree/session are left intact so it is resumable (merge.ts, ADR 0013). */
+export interface QuarantinedEvent extends BaseEvent {
+  event: "quarantined";
+  taskId: string;
+  branch: string;
+  detail: string;
+}
+
 /** `carve` — an issue (and its dependency closure) was carved out of a running campaign: the target
  * issue, the closure computed for removal, and the members actually dropped from the plan
  * (cli.mts, ADR 0005/0007). */
@@ -184,6 +197,7 @@ export type OrchestratorEvent =
   | TurnEvent
   | GreenEvent
   | ParkedEvent
+  | QuarantinedEvent
   | CarveEvent
   | WorktreePreservedEvent
   | TelegramUnconfiguredEvent

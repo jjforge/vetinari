@@ -22,57 +22,88 @@ export const currentBranch = () => git(["rev-parse", "--abbrev-ref", "HEAD"]);
 
 export interface IntegrateResult {
   merged: string[];
-  /** Set when the batch halted: a conflict on a branch, or a red merged-base gate. */
-  halt?: { reason: "conflict" | "gate-red"; taskId?: string; detail: string };
+  /**
+   * Greens a merge conflict pulled from this wave's integration (ADR 0013). A conflict
+   * is attributable — git blames one branch — so only that merge is aborted; the issue
+   * is quarantined with its branch, worktree, and agent session left intact so it is
+   * resumable, and the wave neither rolls back nor halts.
+   */
+  quarantined: string[];
+  /** Set when the wave halted on a red merged base — the emergent, unattributable
+   * failure (each green passed alone, together they are red) that still rolls the base
+   * back to where the wave began. */
+  halt?: { reason: "gate-red"; detail: string };
 }
 
 /**
- * Merge each green task's branch into the checked-out base, then prove the
- * COMBINED result with the full gate — the each-green-but-together-red case a
- * per-task gate cannot see. Any conflict, or a red merged base, rolls the base
- * back to where it started and halts: the agent branches are left intact for a
- * human, exactly as an unanswered park is.
- *
- * Assumes the main working tree is already on `cfg.baseBranch` (campaign ensures
- * it) so a merge advances HEAD in place and the next batch cuts from it.
+ * The merged-base gate, injected so `integrateGreens`'s merge/quarantine control flow
+ * is unit-testable without a Docker sandbox. The default runs the real gate.
  */
-export async function integrateGreens(cfg: ResolvedConfig, greens: string[]): Promise<IntegrateResult> {
+export interface IntegrateDeps {
+  gate: (cfg: ResolvedConfig) => Promise<{ green: boolean; report: string }>;
+}
+const defaultIntegrateDeps: IntegrateDeps = { gate: gateMergedBase };
+
+/**
+ * Merge each green task's branch into the checked-out base, then prove the COMBINED
+ * result with the full gate — the each-green-but-together-red case a per-task gate
+ * cannot see. Integration is non-atomic (ADR 0013): the two failures are handled by
+ * whether blame is attributable.
+ *
+ * A **merge conflict** is attributable to one branch, so `git merge --abort`s only that
+ * merge — never `reset --hard` to the wave start, which would un-merge the greens
+ * already banked — quarantines the issue (branch/worktree/session preserved, resumable)
+ * and continues integrating the rest of the wave.
+ *
+ * A **red merged base** has no single culprit, so it still rolls the base back to where
+ * the wave began and halts, leaving the agent branches intact for a human.
+ *
+ * Assumes the main working tree is already on `cfg.baseBranch` (campaign ensures it) so
+ * a merge advances HEAD in place and the next batch cuts from it.
+ */
+export async function integrateGreens(
+  cfg: ResolvedConfig,
+  greens: string[],
+  deps: IntegrateDeps = defaultIntegrateDeps,
+): Promise<IntegrateResult> {
   const preSha = git(["rev-parse", "HEAD"]);
-  const rollback = () => {
-    gitTry(["merge", "--abort"]);
-    gitTry(["reset", "--hard", preSha]);
-  };
 
   const merged: string[] = [];
+  const quarantined: string[] = [];
   for (const taskId of greens) {
     const branch = `${cfg.branchPrefix}${taskId}`;
     const r = gitTry(["merge", "--no-ff", branch, "-m", `campaign: merge ${branch}`]);
     if (r.code !== 0) {
+      // Attributable failure (ADR 0013): abort ONLY this merge — a `reset --hard preSha`
+      // here would discard the greens already merged this wave — quarantine the issue
+      // with its work preserved, and carry on with the rest of the wave.
       const detail = `${r.stdout}\n${r.stderr}`.trim().split("\n").slice(-12).join("\n");
-      log("campaign-merge-conflict", { taskId, branch, preSha });
-      rollback();
-      return { merged: [], halt: { reason: "conflict", taskId, detail } };
+      gitTry(["merge", "--abort"]);
+      log("quarantined", { taskId, branch, detail });
+      quarantined.push(taskId);
+      continue;
     }
     log("campaign-merged", { taskId, branch });
     merged.push(taskId);
   }
 
   if (merged.length) {
-    const { green, report } = await gateMergedBase(cfg);
+    const { green, report } = await deps.gate(cfg);
     if (!green) {
       log("campaign-merged-base-red", { merged, preSha });
-      rollback();
-      return { merged: [], halt: { reason: "gate-red", detail: report.split("\n").slice(-40).join("\n") } };
+      gitTry(["merge", "--abort"]);
+      gitTry(["reset", "--hard", preSha]);
+      return { merged: [], quarantined, halt: { reason: "gate-red", detail: report.split("\n").slice(-40).join("\n") } };
     }
   }
 
   // Only once the combined result is green: drop the merged branches and let git
-  // reclaim their (already-removed) worktree entries. Parked/non-green branches
-  // are never touched here — they stay answerable via dispatch.
+  // reclaim their (already-removed) worktree entries. Quarantined and parked/non-green
+  // branches are never touched here — they stay resumable.
   for (const taskId of merged) gitTry(["branch", "-D", `${cfg.branchPrefix}${taskId}`]);
   gitTry(["worktree", "prune"]);
   log("campaign-integrated", { merged, headSha: git(["rev-parse", "HEAD"]) });
-  return { merged };
+  return { merged, quarantined };
 }
 
 /**

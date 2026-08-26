@@ -11,8 +11,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import {
-  appendedEvents,
   ARCHIVE_LIST_SCRIPT,
+  DASHBOARD_PALETTE_CSS,
+  ISSUE_DETAIL_SHEET_SCRIPT,
+  ISSUE_DETAIL_SHEET_STYLES,
+  REPO_DROPDOWN_SCRIPT,
+  STATE_DOT_CSS,
+  stateColor,
+  TOP_BAR_STYLES,
+} from "./dashboard-assets.ts";
+import {
+  appendedEvents,
   buildAllStatus,
   buildFeed,
   buildLanding,
@@ -20,15 +29,12 @@ import {
   buildStatusWithIssueNames,
   campaignRunning,
   cappedRawRows,
-  DASHBOARD_PALETTE_CSS,
   describeEvent,
   event,
   extractParkedDetails,
   formatFeedEvent,
   formatStatusText,
   highlightJsonLine,
-  ISSUE_DETAIL_SHEET_SCRIPT,
-  ISSUE_DETAIL_SHEET_STYLES,
   issueDetailSheetMarkup,
   lastEventText,
   listArchivedRuns,
@@ -43,13 +49,9 @@ import {
   viewRelevantEvents,
   renderStatusPage,
   renderTopBar,
-  REPO_DROPDOWN_SCRIPT,
   selectStatus,
   serveAllStatus,
-  STATE_DOT_CSS,
-  stateColor,
   summarizeRun,
-  TOP_BAR_STYLES,
 } from "./status.ts";
 import type { CampaignStatus, OrchestratorEvent } from "./status.ts";
 import type { AddressInfo } from "node:net";

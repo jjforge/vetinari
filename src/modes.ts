@@ -4,7 +4,7 @@ import type { CampaignStartEvent, QueueStartEvent } from "./event-log.ts";
 import { log } from "./log.ts";
 import { runGates } from "./gate.ts";
 import { makeSandbox } from "./sandbox.ts";
-import { currentBranch, integrateGreens } from "./merge.ts";
+import { collectWaveChangelog, currentBranch, integrateGreens } from "./merge.ts";
 import { clearParked, clearParkedForTasks, enqueueOutbound, listParked } from "./state.ts";
 import { tgConfigured, tgEnvConn, tgSend, tgWaitReply } from "./telegram.ts";
 import { issueNameFromTask, readEventLog, reduceCampaign } from "./status.ts";
@@ -283,6 +283,14 @@ export async function campaign(cfg: ResolvedConfig, batches: string[][], host: H
       console.log(`campaign halted (${halt.reason}${where}) — base rolled back, ${total - index - 1} batch(es) not started.`);
       return false;
     }
+
+    // Green path only: fold this wave's merged changelog.d/ fragments into
+    // CHANGELOG.md and commit on the base in one commit (issue #123). Agents write
+    // per-task fragments instead of editing the shared changelog, so co-wave
+    // branches never conflict on it; the orchestrator collects at merge. A halted
+    // wave (handled above) rolls back and leaves its fragments for the retry.
+    const collected = collectWaveChangelog(index);
+    if (collected.committed) console.log(`batch ${index + 1}/${total}: collected changelog fragments — ${collected.collected.join(", ")}`);
 
     if (held.length) clearParkedForTasks(cfg, held);
     const note = held.length ? ` — cleared parked records for completed wave: ${held.map((t) => `${t}(${outcomes[t]})`).join(", ")}` : "";

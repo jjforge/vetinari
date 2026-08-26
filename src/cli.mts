@@ -1,6 +1,8 @@
 #!/usr/bin/env -S npx tsx
 import { createInterface } from "node:readline/promises";
+import { join } from "node:path";
 import { loadConfig } from "./config.ts";
+import { applyCollect, formatMilestoneDate, FRAGMENT_DIR } from "./changelog.ts";
 import { log, setLogFile } from "./log.ts";
 import { answerPromptFor, runLoop } from "./loop.ts";
 import { baseline, build, campaign, queue, requireTelegram, tgTest } from "./modes.ts";
@@ -65,6 +67,13 @@ const USAGE = `vetinari <mode> [args]
                            numeric hostWeight translated to a containerShare tier, and
                            the host-slots ceiling file renamed max-concurrent-containers
                            (--dry-run to print the plan and change nothing)
+  changelog collect [--title "…"]
+                           fold this repo's changelog.d/*.md fragments into
+                           CHANGELOG.md under today's milestone (append to the top
+                           milestone if it is dated today, else start one), then
+                           delete the consumed fragments. What the orchestrator runs
+                           per wave at merge; a human may run it directly. --title
+                           sets a fresh milestone's title (default: "Collected changes")
   answer <task> <text>     resume a parked task with a human answer
   gateway                  the host daemon fronting every registered project: the
                            sole Telegram consumer and sender — announces parked
@@ -218,6 +227,28 @@ if (mode === "init") {
   if (result.dirsCreated.length) did.push(`created ${result.dirsCreated.length} dir(s)`);
   if (result.gitignoreUpdated) did.push("updated .gitignore");
   if (did.length) console.log(`\nDone: ${did.join(", ")}.`);
+  process.exit(0);
+}
+
+// changelog collect folds this repo's changelog.d/ fragments into CHANGELOG.md.
+// It operates on cwd's files (like init/migrate) and needs no project config, so it
+// runs BEFORE the strict config load — the orchestrator calls the same edge
+// (applyCollect) directly per wave; this is the human-facing entry point.
+if (mode === "changelog") {
+  if (rest[0] !== "collect") {
+    console.error('changelog needs a subcommand: `vetinari changelog collect [--title "…"]`');
+    process.exit(1);
+  }
+  const titleIdx = rest.indexOf("--title");
+  const title = titleIdx >= 0 && rest[titleIdx + 1] ? rest[titleIdx + 1] : "Collected changes";
+  const dir = process.cwd();
+  const { collected } = applyCollect({
+    fragmentsDir: join(dir, FRAGMENT_DIR),
+    changelogPath: join(dir, "CHANGELOG.md"),
+    today: formatMilestoneDate(new Date()),
+    title,
+  });
+  console.log(collected.length ? `collected ${collected.length} fragment(s) into CHANGELOG.md: ${collected.join(", ")}` : `nothing to collect — ${FRAGMENT_DIR}/ has no fragments.`);
   process.exit(0);
 }
 

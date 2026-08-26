@@ -290,6 +290,39 @@ export function highlightJsonLine(line: string): string {
   return out;
 }
 
+/** One rendered raw-log row: the original line and its 1-based line number. */
+export interface RawRow {
+  line: string;
+  n: number;
+}
+
+/**
+ * Select the raw-log rows to render, bounded so a huge log can't build an
+ * unbounded DOM (#127): filter to the lines matching `needle` (a lowercased
+ * substring, empty = all), then keep the first `cap + expandedCount` matches.
+ * `total` is the number of matches (the filtered total when filtering, else the
+ * whole log); `hidden` is how many matches were left out — a positive value is
+ * what the "show more" control reveals. Line numbers (`n`) stay the original
+ * 1-based indices so `#L<n>` anchors keep pointing at the right line. Pure so it
+ * unit-tests without a DOM, and shipped verbatim into the client script.
+ */
+export function cappedRawRows(
+  lines: string[],
+  needle: string,
+  cap: number,
+  expandedCount: number,
+): { rows: RawRow[]; total: number; hidden: number } {
+  const limit = cap + (expandedCount > 0 ? expandedCount : 0);
+  const rows: RawRow[] = [];
+  let total = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (needle && lines[i].toLowerCase().indexOf(needle) === -1) continue;
+    total++;
+    if (rows.length < limit) rows.push({ line: lines[i], n: i + 1 });
+  }
+  return { rows, total, hidden: total - rows.length };
+}
+
 const ARCHIVE_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const pad2 = (n: number) => String(n).padStart(2, "0");
 
@@ -937,7 +970,9 @@ export const REPO_DROPDOWN_SCRIPT = `  const repoRoot = document.querySelector("
  * collapsing, reveal older rows past the cap, and render the raw log — fetched once
  * from `GET /archive/log`, one JSONL line per row with a `#L<n>` line-number anchor
  * (which the browser adds to the URL natively, so a line is shareable), JSON syntax
- * colouring, a substring filter, and a `<shown> of <total> lines` footer. The open
+ * colouring, a substring filter, and a `showing <shown> of <total> lines` footer.
+ * The render is capped (`RAW_CAP`) with a "show more" control so a many-thousand-line
+ * log keeps a bounded DOM rather than OOM-crashing a constrained tab (#127). The open
  * row + mode are mirrored into the URL (`?run=…&mode=…`) so the view is shareable
  * without a navigation. No-op when the page has no archived list.
  *
@@ -949,25 +984,37 @@ export const REPO_DROPDOWN_SCRIPT = `  const repoRoot = document.querySelector("
 export const ARCHIVE_LIST_SCRIPT = `  const archiveList = document.querySelector(".archive-list");
   if (archiveList) {
     const __name = (fn) => fn;
+    const RAW_CAP = 500;
     ${highlightJsonLine.toString()}
+    ${cappedRawRows.toString()}
     const archiveRows = [...archiveList.querySelectorAll(".archive-row")];
     const rowMode = (row) => { const p = row.querySelector('.archive-mode[aria-pressed="true"]'); return p ? p.dataset.mode : "campaign"; };
     const syncUrl = (row) => { try { history.replaceState(null, "", "?project=" + encodeURIComponent(archiveList.dataset.project) + "&run=" + encodeURIComponent(row.dataset.run) + (rowMode(row) === "raw" ? "&mode=raw" : "") + location.hash); } catch (e) {} };
-    const scrollToLine = () => { if (/^#L\\d+$/.test(location.hash)) { const t = document.getElementById(location.hash.slice(1)); if (t) t.scrollIntoView({ block: "center" }); } };
+    // A deep-linked line past the current cap isn't in the DOM, so raise the pane's
+    // cap enough to include it before scrolling (or leave the pane untouched if the
+    // target is already rendered / the hash points at nothing here).
+    const scrollToLine = (pane) => {
+      if (!/^#L\\d+$/.test(location.hash)) return;
+      const id = location.hash.slice(1);
+      if (pane && !document.getElementById(id)) {
+        const n = Number(id.slice(1));
+        if (n > RAW_CAP + (pane._expanded || 0)) { pane._expanded = n - RAW_CAP; drawRaw(pane); }
+      }
+      const t = document.getElementById(id);
+      if (t) t.scrollIntoView({ block: "center" });
+    };
     // Fetch a row's log once, then (re)draw its filtered line rows. Redraw is cheap
     // and keeps only the open row's L-ids in the DOM, so a shared #L anchor is unambiguous.
+    // The render is capped at RAW_CAP (+ any "show more" expansion) so a many-thousand-line
+    // log can't build an unbounded DOM and OOM-crash a memory-constrained tab (#127).
     const drawRaw = (pane) => {
       const linesEl = pane.querySelector(".archive-raw-lines");
       const footer = pane.querySelector(".archive-raw-footer");
       const filter = pane.querySelector(".archive-raw-filter");
-      const lines = pane._lines || [];
       const needle = filter.value.trim().toLowerCase();
+      const { rows, total, hidden } = cappedRawRows(pane._lines || [], needle, RAW_CAP, pane._expanded || 0);
       linesEl.textContent = "";
-      let shown = 0;
-      lines.forEach((line, i) => {
-        if (needle && line.toLowerCase().indexOf(needle) === -1) return;
-        shown++;
-        const n = i + 1;
+      for (const { line, n } of rows) {
         const el = document.createElement("div");
         el.className = "archive-raw-line"; el.id = "L" + n;
         const a = document.createElement("a");
@@ -975,18 +1022,19 @@ export const ARCHIVE_LIST_SCRIPT = `  const archiveList = document.querySelector
         const code = document.createElement("code");
         code.className = "archive-raw-code"; code.innerHTML = highlightJsonLine(line);
         el.append(a, code); linesEl.append(el);
-      });
-      if (!shown) { const e = document.createElement("div"); e.className = "archive-raw-empty"; e.textContent = needle ? "No lines match “" + filter.value.trim() + "”." : "This log has no lines."; linesEl.append(e); }
-      footer.textContent = shown + " of " + lines.length + " lines";
+      }
+      if (!rows.length) { const e = document.createElement("div"); e.className = "archive-raw-empty"; e.textContent = needle ? "No lines match “" + filter.value.trim() + "”." : "This log has no lines."; linesEl.append(e); }
+      if (hidden > 0) { const more = document.createElement("button"); more.type = "button"; more.className = "archive-raw-more"; more.textContent = "Show " + hidden + " more line" + (hidden === 1 ? "" : "s"); more.addEventListener("click", () => { pane._expanded = (pane._expanded || 0) + RAW_CAP; drawRaw(pane); }); linesEl.append(more); }
+      footer.textContent = "showing " + rows.length + " of " + total + " lines";
     };
     const loadRaw = (row) => {
       const pane = row.querySelector(".archive-raw");
       const filter = pane.querySelector(".archive-raw-filter");
       if (!pane._wired) { pane._wired = true; filter.addEventListener("input", () => drawRaw(pane)); }
-      if (pane._lines) { drawRaw(pane); scrollToLine(); return; }
+      if (pane._lines) { drawRaw(pane); scrollToLine(pane); return; }
       fetch("/archive/log?project=" + encodeURIComponent(pane.dataset.project) + "&run=" + encodeURIComponent(pane.dataset.run))
         .then((res) => { if (!res.ok) throw new Error(String(res.status)); return res.text(); })
-        .then((text) => { pane._lines = text.split("\\n").filter((l) => l.length); drawRaw(pane); scrollToLine(); })
+        .then((text) => { pane._lines = text.split("\\n").filter((l) => l.length); drawRaw(pane); scrollToLine(pane); })
         .catch(() => { const linesEl = pane.querySelector(".archive-raw-lines"); linesEl.textContent = ""; const e = document.createElement("div"); e.className = "archive-raw-empty"; e.textContent = "Couldn’t load this log."; linesEl.append(e); pane.querySelector(".archive-raw-footer").textContent = ""; });
     };
     const setMode = (row, mode) => {
@@ -1483,6 +1531,8 @@ ${ISSUE_DETAIL_SHEET_STYLES}
   .archive-raw-code .jstr { color: var(--color-green); }
   .archive-raw-code .jnum { color: var(--color-yellow); }
   .archive-raw-code .jbool, .archive-raw-code .jnull { color: var(--color-carved); }
+  .archive-raw-more { display: block; width: 100%; padding: .5rem 0; margin-top: .4rem; text-align: left; background: none; border: 0; color: var(--color-primary); font: inherit; cursor: pointer; }
+  .archive-raw-more:hover { color: var(--color-text); }
   .archive-raw-footer { color: var(--color-text-light-2); font-size: .8rem; margin-top: .6rem; }
   .archive-raw-empty { color: var(--color-text-light-2); padding: .5rem 0; }
 </style>${

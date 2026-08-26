@@ -19,6 +19,7 @@ import {
   buildStatus,
   buildStatusWithIssueNames,
   campaignRunning,
+  cappedRawRows,
   DASHBOARD_PALETTE_CSS,
   describeEvent,
   event,
@@ -4732,9 +4733,16 @@ test("renderStatusPage ships the archived-list client wiring: toggle, mode switc
   assert.match(ARCHIVE_LIST_SCRIPT, /el\.id = "L" \+ n;/);
   // …colours each line through the shared, tested highlighter…
   assert.match(ARCHIVE_LIST_SCRIPT, /code\.innerHTML = highlightJsonLine\(line\);/);
-  // …filters on the raw line text and reports <shown> of <total> lines…
-  assert.match(ARCHIVE_LIST_SCRIPT, /line\.toLowerCase\(\)\.indexOf\(needle\) === -1/);
-  assert.match(ARCHIVE_LIST_SCRIPT, /footer\.textContent = shown \+ " of " \+ lines\.length \+ " lines";/);
+  // …caps the render through the shared, tested cappedRawRows helper so a huge
+  // log can't build an unbounded DOM, with a "show more" control for the rest…
+  assert.match(ARCHIVE_LIST_SCRIPT, /const RAW_CAP = 500;/);
+  assert.match(ARCHIVE_LIST_SCRIPT, /cappedRawRows\(pane\._lines \|\| \[\], needle, RAW_CAP, pane\._expanded \|\| 0\)/);
+  assert.match(ARCHIVE_LIST_SCRIPT, /more\.className = "archive-raw-more"/);
+  assert.match(ARCHIVE_LIST_SCRIPT, /pane\._expanded = \(pane\._expanded \|\| 0\) \+ RAW_CAP/);
+  // …reports "showing X of Y lines" honestly (cap- and filter-aware)…
+  assert.match(ARCHIVE_LIST_SCRIPT, /footer\.textContent = "showing " \+ rows\.length \+ " of " \+ total \+ " lines";/);
+  // …expands the cap to include a deep-linked line past it before scrolling…
+  assert.match(ARCHIVE_LIST_SCRIPT, /pane\._expanded = n - RAW_CAP/);
   // …shows an empty-result state rather than a blank pane…
   assert.match(ARCHIVE_LIST_SCRIPT, /archive-raw-empty/);
   // …and reveals the older rows behind the cap on demand.
@@ -5937,6 +5945,36 @@ test("highlightJsonLine colours JSON keys, strings, numbers and literals distinc
     /<span class="jstr">&quot;&lt;b&gt;&amp;x&lt;\/b&gt;&quot;<\/span>/,
   );
   assert.doesNotMatch(esc, /<b>/);
+});
+
+test("cappedRawRows caps the rendered rows and reports the hidden remainder, keeping 1-based line numbers", () => {
+  const lines = Array.from({ length: 1200 }, (_, i) => `{"n":${i}}`);
+  const { rows, total, hidden } = cappedRawRows(lines, "", 500, 0);
+  assert.equal(rows.length, 500, "renders only the cap");
+  assert.equal(total, 1200, "total counts every line");
+  assert.equal(hidden, 700, "hidden is the un-rendered remainder");
+  // Line numbers are the original 1-based indices, in order.
+  assert.equal(rows[0].n, 1);
+  assert.equal(rows[0].line, '{"n":0}');
+  assert.equal(rows[499].n, 500);
+});
+
+test("cappedRawRows filters before the cap and lets expandedCount reveal more", () => {
+  // Every 10th line matches "gate"; the rest don't.
+  const lines = Array.from({ length: 1200 }, (_, i) =>
+    i % 10 === 0 ? `{"event":"gate","i":${i}}` : `{"event":"turn","i":${i}}`,
+  );
+  // Filter narrows to 120 matches — fewer than the cap, so all show, nothing hidden.
+  const filtered = cappedRawRows(lines, "gate", 500, 0);
+  assert.equal(filtered.total, 120, "total is the filtered match count");
+  assert.equal(filtered.rows.length, 120, "all matches render under the cap");
+  assert.equal(filtered.hidden, 0);
+  assert.equal(filtered.rows[0].n, 1, "first match keeps its original index");
+  assert.equal(filtered.rows[1].n, 11);
+  // Expanding raises the render count by the expanded amount.
+  const expanded = cappedRawRows(lines, "", 500, 300);
+  assert.equal(expanded.rows.length, 800, "cap + expandedCount rows render");
+  assert.equal(expanded.hidden, 400);
 });
 
 test("parseRunTimestamp reverses an archive run token to an ISO timestamp, tolerating older tokens", () => {

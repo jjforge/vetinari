@@ -253,10 +253,11 @@ vetinari statusline install --dry-run            # print the plan, write nothing
 vetinari statusline uninstall                    # restore what it wrapped
 ```
 
-Install **respects a status line you already have**: whatever is configured stays
-as line 1 and the 🏰 campaign line is added *under* it (never replaced), so a
-customized bar keeps working — Vetinari runs your original command for line 1 and
-falls back to its own only when yours produces nothing. It is idempotent, and
+Install **respects a status line you already have** — including one set at the user
+level in `~/.claude/settings.json`: whatever is configured stays as line 1, rendered
+exactly as it is (colours and all), and the 🏰 campaign line is added *under* it
+(never replaced), so a customized bar keeps working. Vetinari runs your original
+command for line 1 and falls back to its own only when yours produces nothing. It is idempotent, and
 `uninstall` restores your previous status line exactly (or removes `statusLine`
 when Vetinari wrapped nothing). Pass `--run-command` to match however you invoke the
 CLI in your project so the `vetinari` import and the config both resolve (default

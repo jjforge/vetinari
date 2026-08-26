@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `statusline install` no longer blanks the colours on line 1 when a status line is
+  configured at the user level (#135). It only inspected the project
+  `.claude/settings.json`; a status line in `~/.claude/settings.json` (which the
+  project write shadows) was replaced by Vetinari's plain, uncoloured line. Install now
+  wraps the inherited user-level line as line 1 when the project has none of its own,
+  so it renders as configured (colours and all) with the 🏰 line under it; uninstall
+  drops the project `statusLine` in that case, restoring the original inheritance.
+  (A `statusLine` in the higher-precedence `settings.local.json` is still not accounted
+  for — see #136.)
+
 ### Added
 
 - `vetinari statusline install` / `statusline uninstall` (#134) — wire the status

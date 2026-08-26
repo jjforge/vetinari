@@ -14,6 +14,7 @@
  */
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 
 /** The Claude Code `statusLine` block (only the fields we touch). */
@@ -71,7 +72,7 @@ const DEFAULT_REFRESH_INTERVAL = 5;
  * ours is already installed the plan is a no-op that reports the still-wrapped base.
  * Returns a fresh settings object — the input is never mutated. Pure.
  */
-export function computeInstall(settings: Settings, opts: { runCommand: string }): { settings: Settings; base?: string; alreadyInstalled: boolean } {
+export function computeInstall(settings: Settings, opts: { runCommand: string; inheritedBase?: string }): { settings: Settings; base?: string; alreadyInstalled: boolean } {
   const current = settings.statusLine;
   const alreadyOurs = current?.command ? parseInstalledCommand(current.command) : null;
 
@@ -80,8 +81,12 @@ export function computeInstall(settings: Settings, opts: { runCommand: string })
     return { settings, base: alreadyOurs.base, alreadyInstalled: true };
   }
 
-  // A user's own status line becomes the wrapped base; a bare/absent one has none.
-  const base = current?.command || undefined;
+  // The status line to wrap as line 1: the project's own if it has one, else the
+  // one it inherits from a lower-precedence layer (user settings) — which the
+  // project write would otherwise silently shadow, dropping its colours. Ours
+  // never becomes its own base.
+  const inherited = opts.inheritedBase && !parseInstalledCommand(opts.inheritedBase) ? opts.inheritedBase : undefined;
+  const base = current?.command || inherited || undefined;
   const refreshInterval = current?.refreshInterval ?? DEFAULT_REFRESH_INTERVAL;
   const statusLine: StatusLineBlock = { type: "command", command: buildInstalledCommand(opts.runCommand, base), refreshInterval };
   return { settings: { ...settings, statusLine }, base, alreadyInstalled: false };
@@ -94,12 +99,16 @@ export function computeInstall(settings: Settings, opts: { runCommand: string })
  * that is not ours is left untouched. Returns a fresh settings object — the input
  * is never mutated. Pure.
  */
-export function computeUninstall(settings: Settings): { settings: Settings; restored?: string; wasInstalled: boolean } {
+export function computeUninstall(settings: Settings, opts: { inheritedBase?: string } = {}): { settings: Settings; restored?: string; wasInstalled: boolean } {
   const ours = settings.statusLine?.command ? parseInstalledCommand(settings.statusLine.command) : null;
   if (!ours) return { settings, wasInstalled: false };
 
   const { statusLine, ...rest } = settings;
-  if (ours.base === undefined) return { settings: rest, wasInstalled: true };
+  // Drop the project statusLine entirely when there was nothing under it, or when
+  // what we wrapped was the inherited (user-level) line — writing it back into the
+  // project would shadow that very layer with a redundant copy; dropping restores
+  // the original inheritance instead. Otherwise restore the project's own line.
+  if (ours.base === undefined || ours.base === opts.inheritedBase) return { settings: rest, wasInstalled: true };
 
   const restored: StatusLineBlock = { ...statusLine, type: "command", command: ours.base };
   return { settings: { ...rest, statusLine: restored }, restored: ours.base, wasInstalled: true };
@@ -162,3 +171,21 @@ export function writeSettings(baseDir: string, settings: Settings): void {
 /** The committed project-level settings file, relative to the project root. */
 export const SETTINGS_REL = ".claude/settings.json";
 const settingsPath = (baseDir: string) => resolve(baseDir, SETTINGS_REL);
+
+/**
+ * The `statusLine.command` a project inherits from the user's `~/.claude/settings.json`
+ * — the line Claude Code renders when the project has none of its own, and the one a
+ * project-level install would otherwise shadow. Returned so install can wrap it as
+ * line 1 (keeping its colours). Best effort: undefined when there is no user settings
+ * file, no status line in it, or it fails to parse.
+ */
+export function readInheritedStatusLine(): string | undefined {
+  try {
+    const text = readFileSync(resolve(homedir(), SETTINGS_REL), "utf8");
+    const parsed = JSON.parse(text) as Settings;
+    const command = parsed.statusLine?.command;
+    return typeof command === "string" && command.trim() ? command : undefined;
+  } catch {
+    return undefined;
+  }
+}

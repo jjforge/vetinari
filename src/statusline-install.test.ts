@@ -140,3 +140,30 @@ test("describeUninstall distinguishes a restore, a plain removal, and a no-op", 
   assert.match(describeUninstall({ restored: undefined, wasInstalled: true }, ".claude/settings.json"), /Uninstalled|removed/i);
   assert.match(describeUninstall({ restored: undefined, wasInstalled: false }, ".claude/settings.json"), /No Vetinari status line|nothing/i);
 });
+
+test("computeInstall wraps a status line inherited from user settings when the project has none", () => {
+  // Reproduces the 'colors vanish on line 1' bug: the user's colored status line
+  // lives in ~/.claude/settings.json; installing at project level must wrap it
+  // (not shadow it with vetinari's plain line).
+  const { settings, base } = computeInstall({}, { runCommand: DEFAULT_RUN_COMMAND, inheritedBase: "bash '/home/me/.claude/statusline.sh'" });
+  assert.equal(base, "bash '/home/me/.claude/statusline.sh'");
+  assert.deepEqual(parseInstalledCommand(settings.statusLine!.command!), { runCommand: DEFAULT_RUN_COMMAND, base: "bash '/home/me/.claude/statusline.sh'" });
+});
+
+test("a project's own status line takes precedence over an inherited one as the base", () => {
+  const { base } = computeInstall({ statusLine: { type: "command", command: "proj-bar" } }, { runCommand: DEFAULT_RUN_COMMAND, inheritedBase: "user-bar" });
+  assert.equal(base, "proj-bar");
+});
+
+test("uninstall drops the project status line when it wrapped an inherited one (restores inheritance)", () => {
+  const installed = computeInstall({}, { runCommand: DEFAULT_RUN_COMMAND, inheritedBase: "user-bar" }).settings;
+  const { settings, wasInstalled } = computeUninstall(installed, { inheritedBase: "user-bar" });
+  assert.equal(wasInstalled, true);
+  assert.equal("statusLine" in settings, false); // dropped → the user-level line applies again
+});
+
+test("uninstall restores a project-owned wrapped line rather than dropping it", () => {
+  const installed = computeInstall({ statusLine: { type: "command", command: "proj-bar" } }, { runCommand: DEFAULT_RUN_COMMAND, inheritedBase: "user-bar" }).settings;
+  const { settings } = computeUninstall(installed, { inheritedBase: "user-bar" });
+  assert.equal(settings.statusLine?.command, "proj-bar");
+});

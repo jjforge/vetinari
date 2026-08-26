@@ -1,7 +1,8 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { basename } from "node:path";
 import { loadConfig } from "./config.ts";
 import { buildStatus, type CampaignStatus, type DisplayStatus, type IssueStatus } from "./status.ts";
+import { composeStatusLine } from "./statusline-install.ts";
 
 const COUNT_EMOJI: Array<[IssueStatus, string]> = [
   ["completed", "✅"],
@@ -57,15 +58,39 @@ export function formatStatusLine(status: CampaignStatus): string {
   return parts.length ? `🏰 ${parts.join(" · ")}` : "🏰 idle";
 }
 
-/** Read Claude Code's status JSON from stdin — best effort, `{}` on anything odd. */
-async function readStdinJson(): Promise<any> {
-  if (process.stdin.isTTY) return {};
+/** Read Claude Code's raw JSON blob from stdin once — `""` on a TTY or read error. */
+async function readStdinRaw(): Promise<string> {
+  if (process.stdin.isTTY) return "";
   try {
     const chunks: Buffer[] = [];
     for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
-    return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+    return Buffer.concat(chunks).toString("utf8");
+  } catch {
+    return "";
+  }
+}
+
+/** Parse the raw stdin blob into Claude Code's status object — `{}` on anything odd. */
+function parseStdinJson(raw: string): any {
+  try {
+    return JSON.parse(raw || "{}");
   } catch {
     return {};
+  }
+}
+
+/**
+ * Run a wrapped base status-line command, feeding it the same stdin blob Claude
+ * Code gave us, and return its stdout. Best effort: a spawn failure yields `""` so
+ * `composeStatusLine` falls back to vetinari's own line 1. The command runs through
+ * a shell because that is exactly how Claude Code runs a `statusLine.command`.
+ */
+function runBaseCommand(command: string, stdin: string): string {
+  try {
+    const r = spawnSync("sh", ["-c", command], { input: stdin, encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] });
+    return r.stdout ?? "";
+  } catch {
+    return "";
   }
 }
 
@@ -87,8 +112,9 @@ function gitBranch(dir: string): string | undefined {
  * the synchronous log-derived status — no network — so it stays fast on every
  * refresh.
  */
-export async function runStatusLine(cfgPath?: string): Promise<void> {
-  const input = await readStdinJson();
+export async function runStatusLine(cfgPath?: string, opts: { baseCommand?: string } = {}): Promise<void> {
+  const raw = await readStdinRaw();
+  const input = parseStdinJson(raw);
   const dir: unknown = input?.workspace?.current_dir ?? input?.cwd;
   if (typeof dir === "string" && dir && dir !== process.cwd()) {
     try {
@@ -113,6 +139,10 @@ export async function runStatusLine(cfgPath?: string): Promise<void> {
     // No Vetinari config here: line 1 alone still describes the session.
   }
 
-  const out = [line1, line2].filter(Boolean).join("\n");
+  // A wrapped base status line (a user's own, preserved on install) becomes line
+  // 1; ours stands in only when it produced nothing. The 🏰 campaign line goes
+  // under whichever won.
+  const baseOutput = opts.baseCommand ? runBaseCommand(opts.baseCommand, raw) : undefined;
+  const out = composeStatusLine(baseOutput, line1, line2);
   if (out) process.stdout.write(out + "\n");
 }

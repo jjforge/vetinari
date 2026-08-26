@@ -17,6 +17,7 @@ import { resolveHostCeiling, type HostBudget } from "./host-slots.ts";
 import { containerShareWeight } from "./config.ts";
 import { campaignRunning, readEventLog, reduceCampaign, serveAllStatus } from "./status.ts";
 import { runStatusLine } from "./statusline.ts";
+import { computeInstall, computeUninstall, DEFAULT_RUN_COMMAND, describeInstall, describeUninstall, readSettings, SETTINGS_REL, writeSettings } from "./statusline-install.ts";
 
 const USAGE = `vetinari <mode> [args]
 
@@ -84,6 +85,14 @@ const USAGE = `vetinari <mode> [args]
                            the registry, so no gateway daemon is required
   statusline               one compact line for the Claude Code status bar (reads
                            Claude Code's JSON on stdin; wire into settings.json)
+  statusline install [--run-command "<cmd>"] [--dry-run]
+                           wire the status line into the project's committed
+                           .claude/settings.json. A status line already configured
+                           there is kept as line 1 with the 🏰 campaign line added
+                           under it (never replaced). Idempotent. --run-command sets
+                           how the CLI is invoked (default: npx vetinari statusline)
+  statusline uninstall [--dry-run]
+                           remove it, restoring whatever status line it wrapped
   tg-test                  prove the Telegram round-trip
 
 Options: --config <path>   (default: vetinari/config.mts in cwd)
@@ -153,7 +162,38 @@ if (!mode) {
 // blanks the line on a non-zero exit — so it must stay lenient (no config here
 // is fine) and never fall through to the strict config load below.
 if (mode === "statusline") {
-  await runStatusLine(cfgPath);
+  const sub = rest[0];
+
+  // `statusline install|uninstall` edits the project's committed .claude/settings.json,
+  // wrapping (never replacing) any status line already configured there. Pure planner
+  // + edge IO, like init/migrate; runs before the strict config load (a project need
+  // not be a Vetinari project yet to wire the bar).
+  if (sub === "install" || sub === "uninstall") {
+    const dryRun = rest.includes("--dry-run");
+    const rcIdx = rest.indexOf("--run-command");
+    const runCommand = rcIdx >= 0 && rest[rcIdx + 1] ? rest[rcIdx + 1] : DEFAULT_RUN_COMMAND;
+    const dir = process.cwd();
+    const settings = readSettings(dir);
+    if (sub === "install") {
+      const plan = computeInstall(settings, { runCommand });
+      console.log(describeInstall(plan, SETTINGS_REL));
+      if (dryRun) console.log("\n(dry run — nothing was written)");
+      else if (!plan.alreadyInstalled) writeSettings(dir, plan.settings);
+    } else {
+      const plan = computeUninstall(settings);
+      console.log(describeUninstall(plan, SETTINGS_REL));
+      if (dryRun) console.log("\n(dry run — nothing was written)");
+      else if (plan.wasInstalled) writeSettings(dir, plan.settings);
+    }
+    process.exit(0);
+  }
+
+  // The status bar renderer. An optional `--base-b64` carries the wrapped base
+  // command (a status line that was already configured when we installed), which
+  // install encodes into the command string; we run it for line 1.
+  const bIdx = rest.indexOf("--base-b64");
+  const baseCommand = bIdx >= 0 && rest[bIdx + 1] ? Buffer.from(rest[bIdx + 1], "base64").toString("utf8") : undefined;
+  await runStatusLine(cfgPath, { baseCommand });
   process.exit(0);
 }
 

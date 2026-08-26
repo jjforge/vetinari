@@ -53,6 +53,20 @@ export { computeLayoutMigration, applyLayoutMigration, scanLayout, describeMigra
 export type { LayoutScan, LayoutMigrationPlan, Move, ApplyResult } from "./migrate.ts";
 export { computeInit, applyInit, scanInit, describeInit } from "./init.ts";
 export type { InitScan, InitPlan, FileCreate, ApplyInitResult } from "./init.ts";
+export {
+  buildInstalledCommand,
+  composeStatusLine,
+  computeInstall,
+  computeUninstall,
+  DEFAULT_RUN_COMMAND,
+  describeInstall,
+  describeUninstall,
+  parseInstalledCommand,
+  readSettings,
+  SETTINGS_REL,
+  writeSettings,
+} from "./statusline-install.ts";
+export type { Settings, StatusLineBlock } from "./statusline-install.ts";
 export type { Finding, FindingReporter, FindingContext, FindingResult } from "./findings.ts";
 export { listParked, readParked, hasParked, clearParked, park } from "./state.ts";
 export type { ParkedRecord, ParkReason } from "./state.ts";

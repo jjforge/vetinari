@@ -33,7 +33,7 @@ Within a milestone, bullets are grouped under bold section labels, in this order
 4. `**Bug fixes:**` — something that was broken now works.
 5. `**Documentation:**` — docs/ADR/README changes worth surfacing.
 
-A milestone uses only the labels it needs, and **each label appears at most once** per milestone — collect every bullet of a kind under the single block, never a second header for the same label.
+A milestone uses only the labels it needs, and **each label appears at most once** per milestone — collect every bullet of a kind under the single block, never a second header for the same label. This one is checked mechanically: `make check-changelog-sections` (script under `scripts/`, unit-tested by `scripts/check-changelog-sections.test.sh`) fails when any milestone repeats a bold label, and fails closed if the file has no milestone heading at all. Run it after editing the changelog.
 
 ## Issue numbers are welcome here
 

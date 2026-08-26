@@ -243,9 +243,26 @@ Opus 4.8 · jjforge · develop · 24%
 🏰 wave 2/3 · ✅2 🔄1 ⏸1 ⚪1
 ```
 
-Wire it into the project's `.claude/settings.json` with the same command you
-already run Vetinari through, so the `vetinari` import and the config
-both resolve:
+Wire it in with `vetinari statusline install`, which edits the project's committed
+`.claude/settings.json` for you:
+
+```
+vetinari statusline install                      # default: npx vetinari statusline
+vetinari statusline install --run-command ".vetinari.local/run statusline"
+vetinari statusline install --dry-run            # print the plan, write nothing
+vetinari statusline uninstall                    # restore what it wrapped
+```
+
+Install **respects a status line you already have**: whatever is configured stays
+as line 1 and the 🏰 campaign line is added *under* it (never replaced), so a
+customized bar keeps working — Vetinari runs your original command for line 1 and
+falls back to its own only when yours produces nothing. It is idempotent, and
+`uninstall` restores your previous status line exactly (or removes `statusLine`
+when Vetinari wrapped nothing). Pass `--run-command` to match however you invoke the
+CLI in your project so the `vetinari` import and the config both resolve (default
+`npx vetinari statusline`).
+
+Or wire it by hand — the installed entry is just:
 
 ```json
 {
@@ -253,8 +270,7 @@ both resolve:
 }
 ```
 
-(Use whatever invokes the CLI in your project: an installed dep is
-`npx vetinari statusline`.) `refreshInterval` matters: Claude Code
+ `refreshInterval` matters: Claude Code
 refreshes the status line on its own events, but nothing tells it when the
 orchestrator's log changes; polling every few seconds keeps the line live
 during a run. It reads Claude Code's JSON on stdin, resolves the config from the
@@ -491,6 +507,7 @@ it there too and re-run that project's `baseline`.
 | `clear` | archive the run log + clear parked, resetting the dashboard/status line to idle (automatic on clean campaign/queue completion) |
 | `status [--port <port>] [--host <host>]` | the all-repos landing over the host registry: counters, a card per registered project, a cross-repo activity feed, and each project's archived runs, live over SSE. Reads the registry, so no gateway daemon required |
 | `statusline` | one compact line for the Claude Code status bar; reads Claude Code's JSON on stdin |
+| `statusline install` / `statusline uninstall` | wire the status line into the project's `.claude/settings.json`, keeping any existing status line as line 1 with the 🏰 line under it (`--run-command`, `--dry-run`) |
 | `tg-test` | prove the Telegram round-trip |
 
 ## What lands where

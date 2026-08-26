@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `vetinari statusline install` / `statusline uninstall` (#134) — wire the status
+  line into the project's committed `.claude/settings.json` without clobbering one
+  already configured there. Install keeps an existing status line as line 1 and adds
+  the 🏰 campaign line under it (base64-encoding the wrapped command into a
+  `--base-b64` suffix that `vetinari statusline` runs for line 1, falling back to
+  Vetinari's own context line when it produces nothing); uninstall restores the
+  wrapped line exactly, or drops `statusLine` when Vetinari wrapped nothing. Idempotent
+  and non-mutating; `--run-command` sets how the CLI is invoked (default
+  `npx vetinari statusline`), `--dry-run` prints the plan and writes nothing.
+
 - A `vetinari build` mode (#126) that builds the agent image the run modes use —
   `cfg.image` from `vetinari/Dockerfile`, neither repeated on the CLI — by shelling
   sandcastle's `docker build-image`, then runs `baseline` on success. `--no-baseline`

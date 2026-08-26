@@ -3,7 +3,7 @@
 // same import a consuming project uses works here too.
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
-import { defineConfig, githubBlockedBy } from "vetinari";
+import { defineConfig, githubBlockedBy, githubMarkPendingVerify } from "vetinari";
 
 export default defineConfig({
   project: "vetinari",
@@ -28,6 +28,11 @@ export default defineConfig({
   // Powers carve/campaign: reads GitHub's native blocked_by edges — the ones set
   // on #31–#35.
   blockedBy: githubBlockedBy("jjforge/vetinari"),
+
+  // After a wave merges an issue's green and the merged-base gate passes, advance it
+  // to the first hop of merge→pending-verify→close: add `pending-verify`, drop
+  // `ready-for-agent`. Best-effort (a failed label write never fails the run).
+  onIssueMerged: githubMarkPendingVerify("jjforge/vetinari"),
 
   // No `fileSet` override: the shipped `defaultFileSet` reads the explicit
   // "Touches (existing files): `a.ts`, `b.ts`" marker line each ticket body

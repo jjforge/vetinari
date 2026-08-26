@@ -19,7 +19,7 @@ import { resolveHostCeiling, type HostBudget } from "./host-slots.ts";
 import { containerShareWeight } from "./config.ts";
 import { campaignRunning, readEventLog, reduceCampaign, serveAllStatus } from "./status.ts";
 import { runStatusLine } from "./statusline.ts";
-import { computeInstall, computeUninstall, DEFAULT_RUN_COMMAND, describeInstall, describeUninstall, readInheritedStatusLine, readSettings, SETTINGS_REL, writeSettings } from "./statusline-install.ts";
+import { computeInstall, computeUninstall, DEFAULT_RUN_COMMAND, describeInstall, describeUninstall, localStatusLineShadows, readInheritedStatusLine, readSettings, SETTINGS_REL, writeSettings } from "./statusline-install.ts";
 
 const USAGE = `vetinari <mode> [args]
 
@@ -187,13 +187,17 @@ if (mode === "statusline") {
     // when the project has none of its own, so installing does not shadow (and blank
     // the colours of) the user's configured status line.
     const inheritedBase = readInheritedStatusLine();
+    // A statusLine in the higher-precedence .claude/settings.local.json owns the
+    // rendered block, so writing here would be inert — the planner turns that into
+    // a warning-and-skip rather than a shadowed write (see docs/statusline.md).
+    const shadowedByLocal = localStatusLineShadows(dir);
     if (sub === "install") {
-      const plan = computeInstall(settings, { runCommand, inheritedBase });
+      const plan = computeInstall(settings, { runCommand, inheritedBase, shadowedByLocal });
       console.log(describeInstall(plan, SETTINGS_REL));
       if (dryRun) console.log("\n(dry run — nothing was written)");
-      else if (!plan.alreadyInstalled) writeSettings(dir, plan.settings);
+      else if (!plan.alreadyInstalled && !plan.shadowedByLocal) writeSettings(dir, plan.settings);
     } else {
-      const plan = computeUninstall(settings, { inheritedBase });
+      const plan = computeUninstall(settings, { inheritedBase, shadowedByLocal });
       console.log(describeUninstall(plan, SETTINGS_REL));
       if (dryRun) console.log("\n(dry run — nothing was written)");
       else if (plan.wasInstalled) writeSettings(dir, plan.settings);

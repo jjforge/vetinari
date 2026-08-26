@@ -72,13 +72,20 @@ const DEFAULT_REFRESH_INTERVAL = 5;
  * ours is already installed the plan is a no-op that reports the still-wrapped base.
  * Returns a fresh settings object — the input is never mutated. Pure.
  */
-export function computeInstall(settings: Settings, opts: { runCommand: string; inheritedBase?: string }): { settings: Settings; base?: string; alreadyInstalled: boolean } {
+export function computeInstall(settings: Settings, opts: { runCommand: string; inheritedBase?: string; shadowedByLocal?: boolean }): { settings: Settings; base?: string; alreadyInstalled: boolean; shadowedByLocal: boolean } {
+  // A statusLine in the higher-precedence `.claude/settings.local.json` owns the
+  // rendered block wholesale, so any write here would be inert. Skip it rather
+  // than leave a shadowed entry that has no effect (see docs/statusline.md).
+  if (opts.shadowedByLocal) {
+    return { settings, alreadyInstalled: false, shadowedByLocal: true };
+  }
+
   const current = settings.statusLine;
   const alreadyOurs = current?.command ? parseInstalledCommand(current.command) : null;
 
   // Already installed → keep it exactly as-is (never re-wrap our own command).
   if (alreadyOurs) {
-    return { settings, base: alreadyOurs.base, alreadyInstalled: true };
+    return { settings, base: alreadyOurs.base, alreadyInstalled: true, shadowedByLocal: false };
   }
 
   // The status line to wrap as line 1: the project's own if it has one, else the
@@ -89,7 +96,7 @@ export function computeInstall(settings: Settings, opts: { runCommand: string; i
   const base = current?.command || inherited || undefined;
   const refreshInterval = current?.refreshInterval ?? DEFAULT_REFRESH_INTERVAL;
   const statusLine: StatusLineBlock = { type: "command", command: buildInstalledCommand(opts.runCommand, base), refreshInterval };
-  return { settings: { ...settings, statusLine }, base, alreadyInstalled: false };
+  return { settings: { ...settings, statusLine }, base, alreadyInstalled: false, shadowedByLocal: false };
 }
 
 /**
@@ -99,19 +106,24 @@ export function computeInstall(settings: Settings, opts: { runCommand: string; i
  * that is not ours is left untouched. Returns a fresh settings object — the input
  * is never mutated. Pure.
  */
-export function computeUninstall(settings: Settings, opts: { inheritedBase?: string } = {}): { settings: Settings; restored?: string; wasInstalled: boolean } {
+export function computeUninstall(settings: Settings, opts: { inheritedBase?: string; shadowedByLocal?: boolean } = {}): { settings: Settings; restored?: string; wasInstalled: boolean; shadowedByLocal: boolean } {
+  // Symmetric to install: while `.claude/settings.local.json` owns a statusLine it
+  // renders that block, so removing ours here would not be visible. Report the
+  // shadow and change nothing.
+  if (opts.shadowedByLocal) return { settings, wasInstalled: false, shadowedByLocal: true };
+
   const ours = settings.statusLine?.command ? parseInstalledCommand(settings.statusLine.command) : null;
-  if (!ours) return { settings, wasInstalled: false };
+  if (!ours) return { settings, wasInstalled: false, shadowedByLocal: false };
 
   const { statusLine, ...rest } = settings;
   // Drop the project statusLine entirely when there was nothing under it, or when
   // what we wrapped was the inherited (user-level) line — writing it back into the
   // project would shadow that very layer with a redundant copy; dropping restores
   // the original inheritance instead. Otherwise restore the project's own line.
-  if (ours.base === undefined || ours.base === opts.inheritedBase) return { settings: rest, wasInstalled: true };
+  if (ours.base === undefined || ours.base === opts.inheritedBase) return { settings: rest, wasInstalled: true, shadowedByLocal: false };
 
   const restored: StatusLineBlock = { ...statusLine, type: "command", command: ours.base };
-  return { settings: { ...rest, statusLine: restored }, restored: ours.base, wasInstalled: true };
+  return { settings: { ...rest, statusLine: restored }, restored: ours.base, wasInstalled: true, shadowedByLocal: false };
 }
 
 /**
@@ -127,7 +139,10 @@ export function composeStatusLine(baseOutput: string | undefined, ownContextLine
 }
 
 /** Human-facing summary of an install plan, for both the report and a dry run. Pure. */
-export function describeInstall(result: { base?: string; alreadyInstalled: boolean }, path: string): string {
+export function describeInstall(result: { base?: string; alreadyInstalled: boolean; shadowedByLocal?: boolean }, path: string): string {
+  if (result.shadowedByLocal) {
+    return `A statusLine in ${LOCAL_SETTINGS_REL} takes precedence over ${path}, so a project-level install would be shadowed and never render. Skipped — nothing was written. Remove the statusLine from ${LOCAL_SETTINGS_REL} (or add the 🏰 line there yourself), since ${LOCAL_SETTINGS_REL} is the layer Claude Code renders.`;
+  }
   if (result.alreadyInstalled) {
     return `The Vetinari status line is already installed in ${path}${result.base ? ` (wrapping your existing status line).` : "."}`;
   }
@@ -138,7 +153,10 @@ export function describeInstall(result: { base?: string; alreadyInstalled: boole
 }
 
 /** Human-facing summary of an uninstall plan, for both the report and a dry run. Pure. */
-export function describeUninstall(result: { restored?: string; wasInstalled: boolean }, path: string): string {
+export function describeUninstall(result: { restored?: string; wasInstalled: boolean; shadowedByLocal?: boolean }, path: string): string {
+  if (result.shadowedByLocal) {
+    return `A statusLine in ${LOCAL_SETTINGS_REL} takes precedence over ${path}, so nothing in ${path} is rendered to uninstall. Edit ${LOCAL_SETTINGS_REL} directly to change the line Claude Code shows.`;
+  }
   if (!result.wasInstalled) return `No Vetinari status line to uninstall in ${path} — nothing changed.`;
   if (result.restored) return `Uninstalled the Vetinari status line from ${path}, restoring your previous status line.`;
   return `Uninstalled the Vetinari status line from ${path}.`;
@@ -171,6 +189,27 @@ export function writeSettings(baseDir: string, settings: Settings): void {
 /** The committed project-level settings file, relative to the project root. */
 export const SETTINGS_REL = ".claude/settings.json";
 const settingsPath = (baseDir: string) => resolve(baseDir, SETTINGS_REL);
+
+/** The uncommitted local settings file — higher precedence than `SETTINGS_REL`. */
+export const LOCAL_SETTINGS_REL = ".claude/settings.local.json";
+
+/**
+ * Whether `.claude/settings.local.json` under `baseDir` owns a `statusLine`. Claude
+ * Code renders the whole `statusLine` block from the highest-precedence layer, so a
+ * `statusLine` here shadows any write to `SETTINGS_REL` — install/uninstall use this
+ * to warn instead of writing an inert entry. Best effort: false when the file is
+ * missing, has no `statusLine`, or fails to parse (a malformed local file must not
+ * block wiring the committed layer).
+ */
+export function localStatusLineShadows(baseDir: string): boolean {
+  try {
+    const text = readFileSync(resolve(baseDir, LOCAL_SETTINGS_REL), "utf8");
+    if (!text.trim()) return false;
+    return (JSON.parse(text) as Settings).statusLine !== undefined;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * The `statusLine.command` a project inherits from the user's `~/.claude/settings.json`

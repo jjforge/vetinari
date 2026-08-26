@@ -20,6 +20,9 @@ Within a milestone each bold section label appears at most once.
 
 ### Changelog fragments hand authorship to the orchestrator — August 26, 2026
 
+**Breaking changes:**
+- [ops] The static `systemd/vetinari-gateway.service` file is removed — a committed unit could only carry the crash-looping `bash -lc 'exec vetinari gateway'` `ExecStart`, so `install -Dm644 systemd/vetinari-gateway.service …` no longer works. Use `vetinari gateway install` instead (#133).
+
 **New features:**
 - [user] Campaign agents write their changelog entry to `changelog.d/<task-id>.md`
   instead of editing the shared `CHANGELOG.md`, and a new `vetinari changelog collect`
@@ -34,14 +37,17 @@ Within a milestone each bold section label appears at most once.
   place for the retry.
 - [user] The orchestrator now labels each merged issue `pending-verify` (dropping `ready-for-agent`) the moment a campaign wave's local merge and merged-base gate pass, via a config-provided `onIssueMerged` seam (`githubMarkPendingVerify("owner/repo")` ships for GitHub). Best-effort and a no-op when unconfigured — the core names no labels (#103).
 - [user] Tickets can declare files they create with a `Creates:` marker line (peer of `Touches:`/`Files:`); its cites feed wave-disjointness but are exempt from the tree-presence check, so a new-file-only tracer-bullet ticket is now schedulable by `campaign-plan` (#114).
+- [ops] `vetinari gateway install [--dry-run]` writes the host-level systemd unit to `~/.config/systemd/user/vetinari-gateway.service` with a fully absolute `node` + tsx-loader + CLI `ExecStart` resolved for this host — no `bash -lc`, `env`, `npx`, or `PATH` dependency. Re-run after a node/tsx upgrade, which re-pins the baked paths (#133).
 
 **Improvements:**
 - [user] `vetinari init`'s next steps now name `.vetinari.local/.env` and the `CLAUDE_CODE_OAUTH_TOKEN` key, so a new project is told where the agent credential lives — the first real `run` no longer fails as the first mention of it (#138).
+- [user] The cross-project event log now shows on phone-width screens (≤640px, e.g. iOS Safari) — it renders under the cards instead of being hidden (#125).
 
 **Bug fixes:**
 - [ops] Gateway now logs and stamps `destination: "default"` for an outbound record delivered to a project's default chat with no notify mapping, instead of the misleading `destination: undefined` (#106).
 - [user] Dashboard raw-log pane now caps its render (500 rows) with a "show more" control and a "showing X of Y lines" footer, so a many-thousand-line orchestrator log keeps a bounded DOM instead of OOM-crashing a memory-constrained tab; deep links to a line past the cap still reach it (#127).
 - [user] `statusline install` no longer writes a shadowed entry when a `statusLine` is set in the higher-precedence `.claude/settings.local.json`; it warns (naming that layer) and skips the inert write, and `uninstall` warns symmetrically (#136).
+- [ops] The gateway systemd unit no longer crash-loops (`status=127`, `exec: vetinari: not found`) on hosts where a `.bashrc`-hooked node manager (nvm/fnm/mise/asdf) keeps node off systemd's clean `PATH`. Both `gateway install` and `migrate` now bake a PATH-independent absolute launch chain in place of the `bash -lc` `ExecStart` — a non-interactive login shell that never sources `~/.bashrc` (#133).
 
 ### The status line installs itself and wraps an existing one — August 25, 2026
 

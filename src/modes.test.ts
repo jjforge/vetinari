@@ -10,7 +10,10 @@ import {
   markMergedIssues,
   requireTelegram,
   resolveTitles,
+  warnIfTelegramUnconfigured,
 } from "./modes.ts";
+import { setLogFile } from "./log.ts";
+import { readEventLog } from "./event-log.ts";
 
 const cfgWith = (fetchTask: ResolvedConfig["fetchTask"]): ResolvedConfig =>
   ({ fetchTask }) as ResolvedConfig;
@@ -71,6 +74,69 @@ test("requireTelegram fails naming host.env and the base location when creds are
           `tg-test needs VETINARI_TELEGRAM_BOT_TOKEN and VETINARI_TELEGRAM_CHAT_ID in ${join(baseLocation, "host.env")}`,
       );
     },
+  );
+});
+
+// Capture what a body writes to stderr, restoring the real console.error after.
+const captureStderr = (fn: () => void): string => {
+  const lines: string[] = [];
+  const real = console.error;
+  console.error = (...args: unknown[]) => void lines.push(args.join(" "));
+  try {
+    fn();
+  } finally {
+    console.error = real;
+  }
+  return lines.join("\n");
+};
+
+// A cfg whose base location IS this stateDir (absolute, so it resolves to itself),
+// pointed at a fresh log file so the emitted event can be read back.
+const unnotifiableCfg = (baseLocation: string): ResolvedConfig => {
+  const logFile = join(baseLocation, "orchestrator.jsonl");
+  setLogFile(logFile);
+  return { project: "myapp", stateDir: baseLocation, logFile } as ResolvedConfig;
+};
+
+test("warnIfTelegramUnconfigured warns naming host.env and logs telegram-unconfigured when the base location resolves no conn", () => {
+  const baseLocation = baseLocationWith(); // no host.env → no conn
+  const cfg = unnotifiableCfg(baseLocation);
+
+  const stderr = captureStderr(() => warnIfTelegramUnconfigured(cfg));
+
+  // The operator is told, on stderr, that parks won't ping and which file to fix.
+  assert.match(stderr, /Telegram/);
+  assert.match(
+    stderr,
+    new RegExp(join(baseLocation, "host.env").replace(/[.\\/]/g, "\\$&")),
+  );
+
+  // …and the same fact is logged so the dashboard can narrate it.
+  const logged = readEventLog(cfg).filter(
+    (e) => e.event === "telegram-unconfigured",
+  );
+  assert.equal(logged.length, 1);
+  assert.deepEqual(
+    {
+      project: (logged[0] as any).project,
+      baseLocation: (logged[0] as any).baseLocation,
+    },
+    { project: "myapp", baseLocation },
+  );
+});
+
+test("warnIfTelegramUnconfigured is silent when the base location's host.env resolves a conn", () => {
+  const baseLocation = baseLocationWith(
+    "VETINARI_TELEGRAM_BOT_TOKEN=123:abc\nVETINARI_TELEGRAM_CHAT_ID=-1001\n",
+  );
+  const cfg = unnotifiableCfg(baseLocation);
+
+  const stderr = captureStderr(() => warnIfTelegramUnconfigured(cfg));
+
+  assert.equal(stderr, "");
+  assert.equal(
+    readEventLog(cfg).filter((e) => e.event === "telegram-unconfigured").length,
+    0,
   );
 });
 

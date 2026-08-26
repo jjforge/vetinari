@@ -29,7 +29,7 @@ test("readEventLog skips a non-JSON line and a line missing a string event, keep
   );
 });
 
-// A `switch (e.event)` narrows each of the 15 kinds to its member's fields with no `any` — this
+// A `switch (e.event)` narrows each of the 16 kinds to its member's fields with no `any` — this
 // only type-checks (the `test` gate's typecheck compiles it) if every case reaches a field that
 // exists solely on that member. It returns a string per kind so the runtime assertion below also
 // proves the narrowing runs, not just compiles.
@@ -61,13 +61,15 @@ const describe = (e: OrchestratorEvent): string => {
       return `carve ${e.target} dropped ${e.dropped.join(",")}`;
     case "worktree-preserved":
       return `worktree ${e.taskId} at ${e.path}`;
+    case "telegram-unconfigured":
+      return `unconfigured ${e.project} at ${e.baseLocation}`;
     case "wave-start":
     case "wave-merged":
       return e.text;
   }
 };
 
-test("a switch over the 15 narrowed kinds reads each member's fields", () => {
+test("a switch over the 16 narrowed kinds reads each member's fields", () => {
   assert.equal(describe(event("green", { taskId: "42", branch: "agent/42", commits: ["abc"] })), "green 42 on agent/42 (1)");
   assert.equal(describe(event("queue-spawn", { taskId: "7", running: 2, left: 3 })), "spawn 7 (2/3)");
   assert.equal(describe(event("wave-start", { text: "wave 1 started" })), "wave 1 started");

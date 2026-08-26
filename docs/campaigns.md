@@ -26,6 +26,10 @@ plans; it never runs Vetinari or pushes), then hand the waves to `campaign`.
    A ticket that cites a file the tree does not have, or (with no marker line) any
    incidental token that isn't a real file, resolves `confident: false` and
    `campaign-plan` halts rather than guess — so give every ticket a marker line.
+   Files a ticket *creates* go on a `Creates:` line instead: their absence from the
+   tree is expected, so they feed disjointness but are not tree-checked. This makes a
+   new-file-only tracer-bullet ticket — often the first slice of a seam — schedulable
+   without folding in an incidental edit to an existing file.
    See [`issue-conventions.md`](issue-conventions.md#declaring-a-tickets-file-set)
    for the authoring convention.
 

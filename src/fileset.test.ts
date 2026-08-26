@@ -22,7 +22,9 @@ test("defaultFileSet cites the body's paths, normalized to basename and validate
   const root = treeWith("src/plan.ts", "templates/repo/stack_strip.tmpl");
   const fileSet = defaultFileSet(root);
 
-  const res = fileSet("Touches `src/plan.ts` and templates/repo/stack_strip.tmpl for the strip.");
+  const res = fileSet(
+    "Touches `src/plan.ts` and templates/repo/stack_strip.tmpl for the strip.",
+  );
 
   assert.deepEqual(res.files.sort(), ["plan.ts", "stack_strip.tmpl"]);
   assert.equal(res.confident, true);
@@ -33,7 +35,9 @@ test("defaultFileSet judges collisions by basename: the same file via different 
   const fileSet = defaultFileSet(root);
 
   // Cited twice under two different paths — both normalize to the one basename.
-  const res = fileSet("Edits `src/plan.ts`, and also referenced as a/b/plan.ts elsewhere.");
+  const res = fileSet(
+    "Edits `src/plan.ts`, and also referenced as a/b/plan.ts elsewhere.",
+  );
 
   assert.deepEqual(res.files, ["plan.ts"]);
   assert.equal(res.confident, true);
@@ -42,7 +46,9 @@ test("defaultFileSet judges collisions by basename: the same file via different 
 test("defaultFileSet is not confident when the ticket cites no path at all", () => {
   const root = treeWith("src/plan.ts");
 
-  const res = defaultFileSet(root)("Refactor the planner for clarity. No file mentioned.");
+  const res = defaultFileSet(root)(
+    "Refactor the planner for clarity. No file mentioned.",
+  );
 
   assert.deepEqual(res.files, []);
   assert.equal(res.confident, false);
@@ -128,9 +134,51 @@ test("defaultFileSet is not confident when the marker line cites nothing", () =>
 
   // A marker line is present but empty — that is a genuine "cites nothing", so the
   // halt path is preserved even though `src/plan.ts` is named off the marker line.
-  const res = fileSet("Reworks `src/plan.ts` for clarity.\n\nTouches (existing files):\n");
+  const res = fileSet(
+    "Reworks `src/plan.ts` for clarity.\n\nTouches (existing files):\n",
+  );
 
   assert.deepEqual(res.files, []);
+  assert.equal(res.confident, false);
+});
+
+test("defaultFileSet is confident about a ticket that only creates new files, absent from the tree", () => {
+  const root = treeWith("src/plan.ts");
+  const fileSet = defaultFileSet(root);
+
+  // #108's shape: the ticket creates event-log.ts + its test, neither in the tree
+  // yet. A `Creates:` cite is legitimately absent, so absence must not read as a typo.
+  const res = fileSet(
+    "Creates (new files): `event-log.ts`, `event-log.test.ts`\n",
+  );
+
+  assert.deepEqual(res.files.sort(), ["event-log.test.ts", "event-log.ts"]);
+  assert.equal(res.confident, true);
+});
+
+test("defaultFileSet unions a Touches line (existing) with a Creates line (new)", () => {
+  const root = treeWith("src/status.ts");
+  const fileSet = defaultFileSet(root);
+
+  const res = fileSet(
+    "Touches: `status.ts`\nCreates (new files): `event-log.ts`\n",
+  );
+
+  assert.deepEqual(res.files.sort(), ["event-log.ts", "status.ts"]);
+  assert.equal(res.confident, true);
+});
+
+test("defaultFileSet keeps Touches strictness even alongside a Creates line", () => {
+  const root = treeWith("src/status.ts");
+  const fileSet = defaultFileSet(root);
+
+  // `ghost.ts` under Touches is absent from the tree — a stale existing-file note.
+  // A valid Creates line must not launder that miss into confidence.
+  const res = fileSet(
+    "Touches: `status.ts`, `ghost.ts`\nCreates: `event-log.ts`\n",
+  );
+
+  assert.deepEqual(res.files.sort(), ["event-log.ts", "status.ts"]);
   assert.equal(res.confident, false);
 });
 

@@ -44,8 +44,11 @@ conventions the surrounding code already shows.
   say so rather than changing working code.
 - **Log user-facing changes in the changelog, as part of the work.** When your
   change adds or alters a command, flag, behaviour, config surface, or output, add
-  a `CHANGELOG.md` `[Unreleased]` entry (under `Added`/`Changed`/`Removed`/`Fixed`)
-  in the same slice, and cite the issue you are implementing. A purely internal
+  a `CHANGELOG.md` entry in the same slice, and cite the issue you are implementing.
+  The format is dated milestones (newest first) with audience-tagged bullets
+  (`[user]`/`[ops]`/`[api]`/`[internal]`) under bold section labels — add to the top
+  milestone when it fits your theme+date, else start a new one at the top dated
+  today; the full convention is `docs/changelog-conventions.md`. A purely internal
   refactor with no user-visible effect needs none. Do not defer it to a later
   pass — an unlogged change is one nobody downstream can see landed.
 

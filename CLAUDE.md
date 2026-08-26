@@ -26,7 +26,7 @@ These govern every change — yours interactively and every campaign agent's (th
 
 ## Changelog — log every user-facing change as part of landing it
 
-**Every change that adds or alters a command, flag, behaviour, config surface, or output gets a [`CHANGELOG.md`](CHANGELOG.md) `[Unreleased]` entry** (under `Added`/`Changed`/`Removed`/`Fixed`), citing the issue — in the same change that lands it, not a later pass. A purely internal refactor with no user-visible effect needs none. This is enforced on the implementing agent via `prompts/tdd.md` (the TDD prompt every campaign drives), not in `to-tickets`/`/implement` — those are external skills we do not own, so the rule lives where we control it: this file and the prompt.
+**Every change that adds or alters a command, flag, behaviour, config surface, or output gets a [`CHANGELOG.md`](CHANGELOG.md) entry**, citing the issue — in the same change that lands it, not a later pass. A purely internal refactor with no user-visible effect needs none. The format is dated milestones, newest first, with audience-tagged bullets (`[user]`/`[ops]`/`[api]`/`[internal]`) under bold section labels — the full convention (tags, labels, which milestone to add to) is [`docs/changelog-conventions.md`](docs/changelog-conventions.md). This is enforced on the implementing agent via `prompts/tdd.md` (the TDD prompt every campaign drives), not in `to-tickets`/`/implement` — those are external skills we do not own, so the rule lives where we control it: this file and the prompt.
 
 ## Handling issues & running campaigns
 

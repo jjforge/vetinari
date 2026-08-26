@@ -1,8 +1,10 @@
 import { execFileSync } from "node:child_process";
+import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import { log } from "./log.ts";
 import { runGates } from "./gate.ts";
 import { makeSandbox } from "./sandbox.ts";
+import { applyCollect, formatMilestoneDate, FRAGMENT_DIR } from "./changelog.ts";
 
 /** Run git in the host project root, throwing its stderr on a non-zero exit. */
 const git = (args: string[]) => execFileSync("git", args, { encoding: "utf8" }).trim();
@@ -71,6 +73,36 @@ export async function integrateGreens(cfg: ResolvedConfig, greens: string[]): Pr
   gitTry(["worktree", "prune"]);
   log("campaign-integrated", { merged, headSha: git(["rev-parse", "HEAD"]) });
   return { merged };
+}
+
+/**
+ * Fold this wave's changelog fragments into `CHANGELOG.md` and commit the result on
+ * the base in one commit (issue #123). Campaign agents write `changelog.d/<task-id>.md`
+ * instead of editing the shared changelog, so co-wave branches never conflict on it;
+ * once a wave's greens are merged those fragments sit on the base, and this collects
+ * them. Called on the green path only — a halted wave rolls back and its fragments
+ * stay for the retry. A wave that produced no fragment makes no commit.
+ *
+ * `root` is the base tree (defaults to the process cwd, which `campaign` guarantees is
+ * on `baseBranch`); passing it explicitly is what makes this unit-testable against a
+ * throwaway repo.
+ */
+export function collectWaveChangelog(waveIndex: number, root: string = process.cwd()): { collected: string[]; committed: boolean } {
+  const { collected } = applyCollect({
+    fragmentsDir: join(root, FRAGMENT_DIR),
+    changelogPath: join(root, "CHANGELOG.md"),
+    today: formatMilestoneDate(new Date()),
+    title: "Collected changes",
+  });
+  if (!collected.length) {
+    log("campaign-changelog-empty", { wave: waveIndex });
+    return { collected, committed: false };
+  }
+  // `-A` stages both the CHANGELOG.md fold and the fragment deletions.
+  execFileSync("git", ["-C", root, "add", "-A"], { encoding: "utf8" });
+  execFileSync("git", ["-C", root, "commit", "-m", `campaign: collect changelog (wave ${waveIndex + 1})`], { encoding: "utf8" });
+  log("campaign-changelog-collected", { wave: waveIndex, collected });
+  return { collected, committed: true };
 }
 
 /**

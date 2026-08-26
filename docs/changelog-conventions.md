@@ -2,6 +2,21 @@
 
 Reference for how [`CHANGELOG.md`](../CHANGELOG.md) is written. The always-true rules — log every user-facing change as part of landing it, cite the issue, do it in the same slice — live in [`CLAUDE.md`](../CLAUDE.md) and are enforced on every campaign agent by [`prompts/tdd.md`](../prompts/tdd.md); this is the format and the vocabulary.
 
+## Fragments — how a campaign agent authors an entry
+
+Every ticket would otherwise touch `CHANGELOG.md`, so co-wave campaign branches all edit the same file and conflict on it at merge — halting the campaign. To keep authorship file-disjoint (the towncrier/changesets pattern), **a campaign agent does not edit `CHANGELOG.md`.** It writes a per-task fragment to `changelog.d/<task-id>.md` (committed, not gitignored), and the orchestrator folds a wave's fragments into `CHANGELOG.md` in one commit at merge — on the green path only, so a halted wave leaves its fragments for the retry.
+
+A fragment names its section label and carries one or more audience-tagged bullets:
+
+```
+section: Bug fixes
+- [user] <entry text> (#<issue>).
+```
+
+It uses the same section labels and audience tags as `CHANGELOG.md` (below), and may carry more than one `section:` block when a change spans sections. When the orchestrator collects, the bullets fold into the current dated milestone — appended to the top milestone if it is already dated today, else a new milestone dated today — grouped by section, one block per label, so `make check-changelog-sections` stays green.
+
+`vetinari changelog collect [--title "…"]` runs the same fold by hand: it reads this repo's `changelog.d/*.md`, folds them into `CHANGELOG.md`, and deletes the consumed fragments. Interactive work not racing a wave may instead edit `CHANGELOG.md` directly.
+
 The shape follows the sibling [`jjforge`](https://github.com/jjforge/jjforge) project's `docs/agents/changelog.md`: **dated milestones, newest first, each with audience-tagged bullets grouped under bold section labels.** It is deliberately *not* the Keep-a-Changelog `[Unreleased]` + `Added/Changed/Removed/Fixed` structure — that older shape is what this format replaced.
 
 ## Audience tags — every bullet opens with exactly one

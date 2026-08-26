@@ -4,11 +4,27 @@ import type { CampaignStartEvent, QueueStartEvent } from "./event-log.ts";
 import { log } from "./log.ts";
 import { runGates } from "./gate.ts";
 import { makeSandbox } from "./sandbox.ts";
-import { collectWaveChangelog, currentBranch, integrateGreens } from "./merge.ts";
-import { clearParked, clearParkedForTasks, enqueueOutbound, listParked } from "./state.ts";
-import { tgConfigured, tgEnvConn, tgSend, tgWaitReply } from "./telegram.ts";
+import {
+  collectWaveChangelog,
+  currentBranch,
+  integrateGreens,
+} from "./merge.ts";
+import {
+  clearParked,
+  clearParkedForTasks,
+  enqueueOutbound,
+  listParked,
+} from "./state.ts";
+import { tgSend, tgWaitReply, type TgConn } from "./telegram.ts";
+import { hostSecretsPath, tgConnForBaseLocation } from "./registry.ts";
 import { issueNameFromTask, readEventLog, reduceCampaign } from "./status.ts";
-import { acquireSlot, deregisterProject, registerProject, releaseSlot, type HostBudget } from "./host-slots.ts";
+import {
+  acquireSlot,
+  deregisterProject,
+  registerProject,
+  releaseSlot,
+  type HostBudget,
+} from "./host-slots.ts";
 
 /**
  * How often a run blocked by the host budget re-checks for a freed slot. A run
@@ -26,7 +42,10 @@ const HOST_SLOT_POLL_MS = 1000;
  * is simply absent from the map — its chip then falls back to `number:status` and
  * its wave to the bare index, and the whole run still starts (no throw).
  */
-export async function resolveTitles(cfg: Pick<ResolvedConfig, "fetchTask">, ids: string[]): Promise<Record<string, string>> {
+export async function resolveTitles(
+  cfg: Pick<ResolvedConfig, "fetchTask">,
+  ids: string[],
+): Promise<Record<string, string>> {
   const titles: Record<string, string> = {};
   await Promise.all(
     [...new Set(ids.map((id) => id.replace(/^#/, "")))].map(async (id) => {
@@ -46,7 +65,9 @@ export async function resolveTitles(cfg: Pick<ResolvedConfig, "fetchTask">, ids:
  * loader flags live in execArgv). Spawning a bare `node` would fail on TS.
  */
 const selfSpawn = (args: string[]) =>
-  spawn(process.execPath, [...process.execArgv, process.argv[1], ...args], { stdio: ["ignore", "inherit", "inherit"] });
+  spawn(process.execPath, [...process.execArgv, process.argv[1], ...args], {
+    stdio: ["ignore", "inherit", "inherit"],
+  });
 
 /**
  * The project's Dockerfile, fixed by the committed `vetinari/` layout (init
@@ -61,7 +82,14 @@ export const DOCKERFILE = "vetinari/Dockerfile";
  * image and the Dockerfile on the CLI is checkable without a Docker daemon.
  */
 export function buildImageArgs(image: string, dockerfile: string): string[] {
-  return ["docker", "build-image", "--dockerfile", dockerfile, "--image-name", image];
+  return [
+    "docker",
+    "build-image",
+    "--dockerfile",
+    dockerfile,
+    "--image-name",
+    image,
+  ];
 }
 
 /**
@@ -73,8 +101,12 @@ export async function baseline(cfg: ResolvedConfig) {
   try {
     if (cfg.toolchainProbe) {
       const probe = await sbx.exec(cfg.toolchainProbe);
-      log("toolchain", { exitCode: probe.exitCode, out: (probe.stdout ?? "").trim() });
-      if (probe.exitCode !== 0) throw new Error(`toolchain probe failed: ${probe.stderr}`);
+      log("toolchain", {
+        exitCode: probe.exitCode,
+        out: (probe.stdout ?? "").trim(),
+      });
+      if (probe.exitCode !== 0)
+        throw new Error(`toolchain probe failed: ${probe.stderr}`);
     }
     const { green, report } = await runGates(cfg, sbx, { all: true });
     log("baseline", { green });
@@ -103,7 +135,11 @@ export interface BuildDeps {
  */
 const runBuildImage = (image: string, dockerfile: string): Promise<number> =>
   new Promise((resolve) => {
-    const child = spawn("npx", ["sandcastle", ...buildImageArgs(image, dockerfile)], { stdio: ["ignore", "inherit", "inherit"] });
+    const child = spawn(
+      "npx",
+      ["sandcastle", ...buildImageArgs(image, dockerfile)],
+      { stdio: ["ignore", "inherit", "inherit"] },
+    );
     child.on("error", (err) => {
       console.error(`build: could not launch sandcastle — ${err.message}`);
       resolve(1);
@@ -120,7 +156,11 @@ const defaultBuildDeps: BuildDeps = { buildImage: runBuildImage, baseline };
  * baseline probe. Returns false on a build failure (baseline is skipped) or a
  * red baseline; the CLI maps that to a non-zero exit.
  */
-export async function build(cfg: ResolvedConfig, opts: { baseline: boolean }, deps: BuildDeps = defaultBuildDeps): Promise<boolean> {
+export async function build(
+  cfg: ResolvedConfig,
+  opts: { baseline: boolean },
+  deps: BuildDeps = defaultBuildDeps,
+): Promise<boolean> {
   const code = await deps.buildImage(cfg.image, DOCKERFILE);
   log("build", { image: cfg.image, dockerfile: DOCKERFILE, exitCode: code });
   if (code !== 0) return false;
@@ -135,7 +175,12 @@ export async function build(cfg: ResolvedConfig, opts: { baseline: boolean }, de
  * outcome map so a caller (campaign) can act on the greens without re-deriving
  * them from the log.
  */
-export async function queue(cfg: ResolvedConfig, taskIds: string[], host: HostBudget, titles?: Record<string, string>): Promise<Record<string, string>> {
+export async function queue(
+  cfg: ResolvedConfig,
+  taskIds: string[],
+  host: HostBudget,
+  titles?: Record<string, string>,
+): Promise<Record<string, string>> {
   const pending = [...taskIds];
   const outcomes: Record<string, string> = {};
   let running = 0;
@@ -143,9 +188,15 @@ export async function queue(cfg: ResolvedConfig, taskIds: string[], host: HostBu
   // dashboard names them with no lookup (ADR 0002); inside a campaign the caller
   // already wrote them onto `campaign-start` and passes them here, so we neither
   // re-resolve nor re-log them.
-  const startTitles = titles === undefined ? await resolveTitles(cfg, taskIds) : undefined;
-  const startLog: Omit<QueueStartEvent, "ts" | "event"> = { taskIds, slots: host.ceiling, hostBudget: host.ceiling };
-  if (startTitles && Object.keys(startTitles).length) startLog.titles = startTitles;
+  const startTitles =
+    titles === undefined ? await resolveTitles(cfg, taskIds) : undefined;
+  const startLog: Omit<QueueStartEvent, "ts" | "event"> = {
+    taskIds,
+    slots: host.ceiling,
+    hostBudget: host.ceiling,
+  };
+  if (startTitles && Object.keys(startTitles).length)
+    startLog.titles = startTitles;
   log("queue-start", startLog);
   enqueueOutbound(cfg, {
     category: "progress",
@@ -170,14 +221,18 @@ export async function queue(cfg: ResolvedConfig, taskIds: string[], host: HostBu
       const fill = () => {
         // No per-run cap: spawn as long as work remains and the cooperative lease
         // grants a slot — the fair share (and the ceiling) is the only bound.
-        while (pending.length && acquireSlot(host.configDir, host.ceiling, cfg.project, host.weight)) {
+        while (
+          pending.length &&
+          acquireSlot(host.configDir, host.ceiling, cfg.project, host.weight)
+        ) {
           const next = pending.shift()!;
           running++;
           log("queue-spawn", { taskId: next, running, left: pending.length });
           selfSpawn(["run", next]).on("exit", (code) => {
             running--;
             releaseSlot(host.configDir);
-            outcomes[next] = code === 0 ? "green" : code === 2 ? "parked" : `error(${code})`;
+            outcomes[next] =
+              code === 0 ? "green" : code === 2 ? "parked" : `error(${code})`;
             log("queue-slot-freed", { taskId: next, outcome: outcomes[next] });
             if (pending.length) fill();
             else if (running === 0) {
@@ -225,13 +280,19 @@ export async function queue(cfg: ResolvedConfig, taskIds: string[], host: HostBu
  * rest. Only the green `merged` set is passed in, so parked/carved/failed issues
  * are excluded by construction.
  */
-export async function markMergedIssues(cfg: Pick<ResolvedConfig, "onIssueMerged">, merged: string[]): Promise<void> {
+export async function markMergedIssues(
+  cfg: Pick<ResolvedConfig, "onIssueMerged">,
+  merged: string[],
+): Promise<void> {
   if (!cfg.onIssueMerged) return;
   for (const taskId of merged) {
     try {
       await cfg.onIssueMerged(taskId);
     } catch (error) {
-      log("issue-merged-hook-failed", { taskId, error: String((error as any)?.message ?? error) });
+      log("issue-merged-hook-failed", {
+        taskId,
+        error: String((error as any)?.message ?? error),
+      });
     }
   }
 }
@@ -247,7 +308,12 @@ export async function markMergedIssues(cfg: Pick<ResolvedConfig, "onIssueMerged"
  * merged base halts the whole campaign with the base rolled back to where the
  * batch began — no later batch runs on a broken or half-merged base.
  */
-export async function campaign(cfg: ResolvedConfig, batches: string[][], host: HostBudget, name?: string): Promise<boolean> {
+export async function campaign(
+  cfg: ResolvedConfig,
+  batches: string[][],
+  host: HostBudget,
+  name?: string,
+): Promise<boolean> {
   // Every green branch merges into whatever the main tree has checked out, and
   // each batch's agents cut their branch from that same HEAD. If it is not the
   // base branch the campaign would merge into, and build on, the wrong place.
@@ -264,7 +330,10 @@ export async function campaign(cfg: ResolvedConfig, batches: string[][], host: H
   // still recorded only when given; a run whose titles could not be resolved simply
   // omits them and degrades to `number:status`.
   const titles = await resolveTitles(cfg, batches.flat());
-  const startEvent: Omit<CampaignStartEvent, "ts" | "event"> = { batches, slots: host.ceiling };
+  const startEvent: Omit<CampaignStartEvent, "ts" | "event"> = {
+    batches,
+    slots: host.ceiling,
+  };
   if (name) startEvent.name = name;
   if (Object.keys(titles).length) startEvent.titles = titles;
   log("campaign-start", startEvent);
@@ -304,7 +373,9 @@ export async function campaign(cfg: ResolvedConfig, batches: string[][], host: H
         event: "halt",
         text: `🛑 ${cfg.project} campaign HALTED at batch ${index + 1} — ${halt.reason}${where}. Base rolled back; branches kept for you.\n\n${halt.detail}`,
       });
-      console.log(`campaign halted (${halt.reason}${where}) — base rolled back, ${total - index - 1} batch(es) not started.`);
+      console.log(
+        `campaign halted (${halt.reason}${where}) — base rolled back, ${total - index - 1} batch(es) not started.`,
+      );
       return false;
     }
 
@@ -314,7 +385,10 @@ export async function campaign(cfg: ResolvedConfig, batches: string[][], host: H
     // branches never conflict on it; the orchestrator collects at merge. A halted
     // wave (handled above) rolls back and leaves its fragments for the retry.
     const collected = collectWaveChangelog(index);
-    if (collected.committed) console.log(`batch ${index + 1}/${total}: collected changelog fragments — ${collected.collected.join(", ")}`);
+    if (collected.committed)
+      console.log(
+        `batch ${index + 1}/${total}: collected changelog fragments — ${collected.collected.join(", ")}`,
+      );
 
     // Green path only: advance each merged issue to `pending-verify` via the
     // configured `onIssueMerged` seam (issue #103). Best-effort — a failing write
@@ -323,14 +397,18 @@ export async function campaign(cfg: ResolvedConfig, batches: string[][], host: H
     await markMergedIssues(cfg, merged);
 
     if (held.length) clearParkedForTasks(cfg, held);
-    const note = held.length ? ` — cleared parked records for completed wave: ${held.map((t) => `${t}(${outcomes[t]})`).join(", ")}` : "";
+    const note = held.length
+      ? ` — cleared parked records for completed wave: ${held.map((t) => `${t}(${outcomes[t]})`).join(", ")}`
+      : "";
     log("campaign-batch-done", { index, merged, held, clearedParked: held });
     enqueueOutbound(cfg, {
       category: "success",
       event: "wave-merged",
       text: `✅ ${cfg.project} campaign batch ${index + 1} merged: ${merged.join(", ") || "nothing"}${note}`,
     });
-    console.log(`batch ${index + 1}/${total}: merged ${merged.join(", ") || "nothing"}${note}`);
+    console.log(
+      `batch ${index + 1}/${total}: merged ${merged.join(", ") || "nothing"}${note}`,
+    );
   }
 
   log("campaign-done", { batches: index });
@@ -343,22 +421,36 @@ export async function campaign(cfg: ResolvedConfig, batches: string[][], host: H
   return true;
 }
 
-export async function tgTest(cfg: ResolvedConfig) {
-  // Guaranteed non-null: tgTest is only reachable behind requireTelegram.
-  const conn = tgEnvConn()!;
-  const msgId = await tgSend(conn, `🔧 ${cfg.project} orchestrator test — reply to this message and I'll echo it back.`);
-  if (msgId == null) throw new Error("sendMessage failed — token rejected or chat id wrong (see telegram-send-failed in the log)");
+export async function tgTest(cfg: ResolvedConfig, conn: TgConn) {
+  const msgId = await tgSend(
+    conn,
+    `🔧 ${cfg.project} orchestrator test — reply to this message and I'll echo it back.`,
+  );
+  if (msgId == null)
+    throw new Error(
+      "sendMessage failed — token rejected or chat id wrong (see telegram-send-failed in the log)",
+    );
   console.log(`sent (message_id ${msgId}); waiting for your reply…`);
   const reply = await tgWaitReply(conn, msgId);
   await tgSend(conn, `✅ round-trip works — got: "${reply.slice(0, 200)}"`);
   console.log(`got reply: "${reply}" — round-trip verified`);
 }
 
-export function requireTelegram(mode: string) {
-  if (!tgConfigured()) {
-    console.error(`${mode} needs VETINARI_TELEGRAM_BOT_TOKEN and VETINARI_TELEGRAM_CHAT_ID in the orchestrator's environment`);
-    process.exit(1);
+/**
+ * Resolve this project's Telegram connection the way the gateway does — from the
+ * base location's `host.env`, never `process.env` — so a green `tg-test`
+ * guarantees the gateway can send (issue #117). The single guard in front of
+ * `tg-test`, the only mode that needs live creds. Throws (naming the file to
+ * fix) when they are absent; the caller lets that exit the process non-zero.
+ */
+export function requireTelegram(mode: string, baseLocation: string): TgConn {
+  const conn = tgConnForBaseLocation(baseLocation);
+  if (!conn) {
+    throw new Error(
+      `${mode} needs VETINARI_TELEGRAM_BOT_TOKEN and VETINARI_TELEGRAM_CHAT_ID in ${hostSecretsPath(baseLocation)}`,
+    );
   }
+  return conn;
 }
 
 export { clearParked, listParked };

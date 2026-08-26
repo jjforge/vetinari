@@ -1,4 +1,10 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { log } from "./log.ts";
@@ -36,13 +42,19 @@ export function gatewayConfigDir(): string {
  * a re-run just refreshes the pointer. Best-effort: a registry write that fails
  * is logged, never fatal to the run.
  */
-export function autoRegister(cfg: Pick<ResolvedConfig, "project" | "stateDir" | "notify" | "destinations">, projectRoot: string = process.cwd()): void {
+export function autoRegister(
+  cfg: Pick<ResolvedConfig, "project" | "stateDir" | "notify" | "destinations">,
+  projectRoot: string = process.cwd(),
+): void {
   try {
     const pointer = pointerFor(cfg, projectRoot);
     register(gatewayConfigDir(), pointer);
     // Materialize the project's routing into its base location so the gateway —
     // which holds no project config (ADR 0002) — can route the outbox by it live.
-    writeRouting(pointer.baseLocation, { notify: cfg.notify, destinations: cfg.destinations });
+    writeRouting(pointer.baseLocation, {
+      notify: cfg.notify,
+      destinations: cfg.destinations,
+    });
   } catch (e) {
     log("registry-register-failed", { project: cfg.project, error: String(e) });
   }
@@ -53,13 +65,21 @@ export function autoRegister(cfg: Pick<ResolvedConfig, "project" | "stateDir" | 
  * the state dir resolved to an absolute path under the root. Pure, so the run
  * entry point can hand it straight to `register`.
  */
-export function pointerFor(cfg: Pick<ResolvedConfig, "project" | "stateDir">, projectRoot: string): ProjectPointer {
-  return { project: cfg.project, projectRoot, baseLocation: resolve(projectRoot, cfg.stateDir) };
+export function pointerFor(
+  cfg: Pick<ResolvedConfig, "project" | "stateDir">,
+  projectRoot: string,
+): ProjectPointer {
+  return {
+    project: cfg.project,
+    projectRoot,
+    baseLocation: resolve(projectRoot, cfg.stateDir),
+  };
 }
 
 /** One pointer file per project, keyed by project name — like `parked/`. */
 const registryDir = (configDir: string) => join(configDir, "registry");
-const pointerFile = (configDir: string, project: string) => join(registryDir(configDir), `${project}.json`);
+const pointerFile = (configDir: string, project: string) =>
+  join(registryDir(configDir), `${project}.json`);
 
 /**
  * Upsert a project's pointer under the gateway's config directory. Idempotent: a
@@ -68,7 +88,10 @@ const pointerFile = (configDir: string, project: string) => join(registryDir(con
  */
 export function register(configDir: string, pointer: ProjectPointer): void {
   mkdirSync(registryDir(configDir), { recursive: true });
-  writeFileSync(pointerFile(configDir, pointer.project), JSON.stringify(pointer, null, 2));
+  writeFileSync(
+    pointerFile(configDir, pointer.project),
+    JSON.stringify(pointer, null, 2),
+  );
 }
 
 /** Every registered pointer. The gateway's source of truth for "what projects exist". */
@@ -77,7 +100,9 @@ export function listProjects(configDir: string): ProjectPointer[] {
   mkdirSync(dir, { recursive: true });
   return readdirSync(dir)
     .filter((f) => f.endsWith(".json"))
-    .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")) as ProjectPointer);
+    .map(
+      (f) => JSON.parse(readFileSync(join(dir, f), "utf8")) as ProjectPointer,
+    );
 }
 
 /** A project read live from its base location: its pointer plus its resolved comms. */
@@ -107,7 +132,10 @@ interface Routing {
 /** Write the project's routing into its base location for the gateway to read live. Idempotent — a re-run just refreshes it. */
 export function writeRouting(baseLocation: string, routing: Routing): void {
   mkdirSync(baseLocation, { recursive: true });
-  writeFileSync(join(baseLocation, ROUTING_FILE), JSON.stringify(routing, null, 2));
+  writeFileSync(
+    join(baseLocation, ROUTING_FILE),
+    JSON.stringify(routing, null, 2),
+  );
 }
 
 /** Read a project's materialized routing, or an empty routing when it configured none. */
@@ -130,6 +158,10 @@ function readRouting(baseLocation: string): Routing {
  * `host.env` stays host-side.
  */
 const SECRETS_FILE = "host.env";
+
+/** The absolute path to a base location's host-side secrets file. */
+export const hostSecretsPath = (baseLocation: string): string =>
+  join(baseLocation, SECRETS_FILE);
 
 /**
  * Parse a shell env file (`KEY=VALUE`, optional `export`, optional quotes, `#`
@@ -165,8 +197,27 @@ function parseEnvFile(text: string): Record<string, string> {
 const tgConnFromEnv = (env: Record<string, string>): TgConn | undefined => {
   const token = env.VETINARI_TELEGRAM_BOT_TOKEN;
   const chat = env.VETINARI_TELEGRAM_CHAT_ID;
-  return token && chat ? { token, chat, thread: env.VETINARI_TELEGRAM_THREAD_ID } : undefined;
+  return token && chat
+    ? { token, chat, thread: env.VETINARI_TELEGRAM_THREAD_ID }
+    : undefined;
 };
+
+/**
+ * Read a base location's `host.env` into a Telegram connection — the single
+ * reader of a project's live Telegram secrets, shared by the gateway
+ * (`readProject`) and `tg-test` so both exercise the exact same path (no
+ * divergence). `undefined` when the file or the required keys are absent. Reads
+ * only the file, never `process.env`.
+ */
+export function tgConnForBaseLocation(
+  baseLocation: string,
+): TgConn | undefined {
+  const secretsPath = hostSecretsPath(baseLocation);
+  const env = existsSync(secretsPath)
+    ? parseEnvFile(readFileSync(secretsPath, "utf8"))
+    : {};
+  return tgConnFromEnv(env);
+}
 
 /**
  * Load a project live from its base location: its Telegram connection and
@@ -177,13 +228,19 @@ const tgConnFromEnv = (env: Record<string, string>): TgConn | undefined => {
  */
 export function readProject(pointer: ProjectPointer): ReadProject | undefined {
   if (!existsSync(pointer.baseLocation)) {
-    log("registry-stale", { project: pointer.project, baseLocation: pointer.baseLocation });
+    log("registry-stale", {
+      project: pointer.project,
+      baseLocation: pointer.baseLocation,
+    });
     return undefined;
   }
-  const secretsPath = join(pointer.baseLocation, SECRETS_FILE);
-  const env = existsSync(secretsPath) ? parseEnvFile(readFileSync(secretsPath, "utf8")) : {};
   const { notify, destinations } = readRouting(pointer.baseLocation);
-  return { pointer, conn: tgConnFromEnv(env), notify, destinations };
+  return {
+    pointer,
+    conn: tgConnForBaseLocation(pointer.baseLocation),
+    notify,
+    destinations,
+  };
 }
 
 /**

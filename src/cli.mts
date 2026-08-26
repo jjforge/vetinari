@@ -1,25 +1,72 @@
 #!/usr/bin/env -S npx tsx
 import { createInterface } from "node:readline/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { loadConfig } from "./config.ts";
-import { applyCollect, formatMilestoneDate, FRAGMENT_DIR } from "./changelog.ts";
+import {
+  applyCollect,
+  formatMilestoneDate,
+  FRAGMENT_DIR,
+} from "./changelog.ts";
 import { log, setLogFile } from "./log.ts";
 import { answerPromptFor, runLoop } from "./loop.ts";
-import { baseline, build, campaign, queue, requireTelegram, tgTest } from "./modes.ts";
+import {
+  baseline,
+  build,
+  campaign,
+  queue,
+  requireTelegram,
+  tgTest,
+} from "./modes.ts";
 import { gateway } from "./gateway.ts";
 import { applyCarve, carveClosure, computeCarve, normalize } from "./carve.ts";
-import { describePlan, planCampaign, suggestCampaignName, underspecifiedPromptFor, waveArgs, type UnderspecifiedDecision } from "./plan.ts";
+import {
+  describePlan,
+  planCampaign,
+  suggestCampaignName,
+  underspecifiedPromptFor,
+  waveArgs,
+  type UnderspecifiedDecision,
+} from "./plan.ts";
 import { defaultFileSet, ticketProse } from "./fileset.ts";
-import { applyLayoutMigration, computeLayoutMigration, describeMigration, resolvedGatewayUnit, scanLayout, systemdUnitPath, writeGatewayUnit } from "./migrate.ts";
+import {
+  applyLayoutMigration,
+  computeLayoutMigration,
+  describeMigration,
+  resolvedGatewayUnit,
+  scanLayout,
+  systemdUnitPath,
+  writeGatewayUnit,
+} from "./migrate.ts";
 import { applyInit, computeInit, describeInit, scanInit } from "./init.ts";
 import { archiveRun } from "./archive.ts";
-import { clearParkedForTasks, enqueueOutbound, listParked, readParked } from "./state.ts";
+import {
+  clearParkedForTasks,
+  enqueueOutbound,
+  listParked,
+  readParked,
+} from "./state.ts";
 import { autoRegister, gatewayConfigDir } from "./registry.ts";
 import { resolveHostCeiling, type HostBudget } from "./host-slots.ts";
 import { containerShareWeight } from "./config.ts";
-import { campaignRunning, readEventLog, reduceCampaign, serveAllStatus } from "./status.ts";
+import {
+  campaignRunning,
+  readEventLog,
+  reduceCampaign,
+  serveAllStatus,
+} from "./status.ts";
 import { runStatusLine } from "./statusline.ts";
-import { computeInstall, computeUninstall, DEFAULT_RUN_COMMAND, describeInstall, describeUninstall, localStatusLineShadows, readInheritedStatusLine, readSettings, SETTINGS_REL, writeSettings } from "./statusline-install.ts";
+import {
+  computeInstall,
+  computeUninstall,
+  DEFAULT_RUN_COMMAND,
+  describeInstall,
+  describeUninstall,
+  localStatusLineShadows,
+  readInheritedStatusLine,
+  readSettings,
+  SETTINGS_REL,
+  writeSettings,
+} from "./statusline-install.ts";
 
 const USAGE = `vetinari <mode> [args]
 
@@ -127,9 +174,12 @@ fills the ceiling. A project's cut when projects contend is its \`containerShare
  * drop the under-specified tickets and their dependents and plan the rest, or stop
  * so the requestor can put the file data on the issue and re-run.
  */
-async function askUnderspecified(underspecified: string[]): Promise<UnderspecifiedDecision> {
+async function askUnderspecified(
+  underspecified: string[],
+): Promise<UnderspecifiedDecision> {
   const list = underspecified.map((i) => `#${i}`).join(", ");
-  const [subj, obj] = underspecified.length === 1 ? ["has", "it"] : ["have", "them"];
+  const [subj, obj] =
+    underspecified.length === 1 ? ["has", "it"] : ["have", "them"];
   console.log(
     `\ncampaign-plan: ${list} ${subj} no confident file-set.\n` +
       `  [d] drop ${obj} and ${underspecified.length === 1 ? "its" : "their"} dependents, and plan the rest\n` +
@@ -138,7 +188,9 @@ async function askUnderspecified(underspecified: string[]): Promise<Underspecifi
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     for (;;) {
-      const answer = (await rl.question("drop or stop? [d/s] ")).trim().toLowerCase();
+      const answer = (await rl.question("drop or stop? [d/s] "))
+        .trim()
+        .toLowerCase();
       if (answer === "d" || answer === "drop") return "drop";
       if (answer === "s" || answer === "stop") return "fail";
       console.log('please answer "d" (drop) or "s" (stop).');
@@ -158,7 +210,9 @@ const labelsFromTask = (task: string): string[] => {
   try {
     const parsed = JSON.parse(task) as { labels?: unknown };
     const labels = Array.isArray(parsed?.labels) ? parsed.labels : [];
-    return labels.map((l) => (typeof l === "string" ? l : (l as { name?: unknown })?.name)).filter((n): n is string => typeof n === "string");
+    return labels
+      .map((l) => (typeof l === "string" ? l : (l as { name?: unknown })?.name))
+      .filter((n): n is string => typeof n === "string");
   } catch {
     return [];
   }
@@ -188,7 +242,8 @@ if (mode === "statusline") {
   if (sub === "install" || sub === "uninstall") {
     const dryRun = rest.includes("--dry-run");
     const rcIdx = rest.indexOf("--run-command");
-    const runCommand = rcIdx >= 0 && rest[rcIdx + 1] ? rest[rcIdx + 1] : DEFAULT_RUN_COMMAND;
+    const runCommand =
+      rcIdx >= 0 && rest[rcIdx + 1] ? rest[rcIdx + 1] : DEFAULT_RUN_COMMAND;
     const dir = process.cwd();
     const settings = readSettings(dir);
     // The line the project inherits from ~/.claude/settings.json — wrapped as line 1
@@ -200,12 +255,20 @@ if (mode === "statusline") {
     // a warning-and-skip rather than a shadowed write (see docs/statusline.md).
     const shadowedByLocal = localStatusLineShadows(dir);
     if (sub === "install") {
-      const plan = computeInstall(settings, { runCommand, inheritedBase, shadowedByLocal });
+      const plan = computeInstall(settings, {
+        runCommand,
+        inheritedBase,
+        shadowedByLocal,
+      });
       console.log(describeInstall(plan, SETTINGS_REL));
       if (dryRun) console.log("\n(dry run — nothing was written)");
-      else if (!plan.alreadyInstalled && !plan.shadowedByLocal) writeSettings(dir, plan.settings);
+      else if (!plan.alreadyInstalled && !plan.shadowedByLocal)
+        writeSettings(dir, plan.settings);
     } else {
-      const plan = computeUninstall(settings, { inheritedBase, shadowedByLocal });
+      const plan = computeUninstall(settings, {
+        inheritedBase,
+        shadowedByLocal,
+      });
       console.log(describeUninstall(plan, SETTINGS_REL));
       if (dryRun) console.log("\n(dry run — nothing was written)");
       else if (plan.wasInstalled) writeSettings(dir, plan.settings);
@@ -217,7 +280,10 @@ if (mode === "statusline") {
   // command (a status line that was already configured when we installed), which
   // install encodes into the command string; we run it for line 1.
   const bIdx = rest.indexOf("--base-b64");
-  const baseCommand = bIdx >= 0 && rest[bIdx + 1] ? Buffer.from(rest[bIdx + 1], "base64").toString("utf8") : undefined;
+  const baseCommand =
+    bIdx >= 0 && rest[bIdx + 1]
+      ? Buffer.from(rest[bIdx + 1], "base64").toString("utf8")
+      : undefined;
   await runStatusLine(cfgPath, { baseCommand });
   process.exit(0);
 }
@@ -235,8 +301,10 @@ if (mode === "init") {
   }
   const result = applyInit(process.cwd(), plan);
   const did: string[] = [];
-  if (result.created.length) did.push(`created ${result.created.length} file(s)`);
-  if (result.dirsCreated.length) did.push(`created ${result.dirsCreated.length} dir(s)`);
+  if (result.created.length)
+    did.push(`created ${result.created.length} file(s)`);
+  if (result.dirsCreated.length)
+    did.push(`created ${result.dirsCreated.length} dir(s)`);
   if (result.gitignoreUpdated) did.push("updated .gitignore");
   if (did.length) console.log(`\nDone: ${did.join(", ")}.`);
   process.exit(0);
@@ -248,11 +316,16 @@ if (mode === "init") {
 // (applyCollect) directly per wave; this is the human-facing entry point.
 if (mode === "changelog") {
   if (rest[0] !== "collect") {
-    console.error('changelog needs a subcommand: `vetinari changelog collect [--title "…"]`');
+    console.error(
+      'changelog needs a subcommand: `vetinari changelog collect [--title "…"]`',
+    );
     process.exit(1);
   }
   const titleIdx = rest.indexOf("--title");
-  const title = titleIdx >= 0 && rest[titleIdx + 1] ? rest[titleIdx + 1] : "Collected changes";
+  const title =
+    titleIdx >= 0 && rest[titleIdx + 1]
+      ? rest[titleIdx + 1]
+      : "Collected changes";
   const dir = process.cwd();
   const { collected } = applyCollect({
     fragmentsDir: join(dir, FRAGMENT_DIR),
@@ -260,7 +333,11 @@ if (mode === "changelog") {
     today: formatMilestoneDate(new Date()),
     title,
   });
-  console.log(collected.length ? `collected ${collected.length} fragment(s) into CHANGELOG.md: ${collected.join(", ")}` : `nothing to collect — ${FRAGMENT_DIR}/ has no fragments.`);
+  console.log(
+    collected.length
+      ? `collected ${collected.length} fragment(s) into CHANGELOG.md: ${collected.join(", ")}`
+      : `nothing to collect — ${FRAGMENT_DIR}/ has no fragments.`,
+  );
   process.exit(0);
 }
 
@@ -281,10 +358,14 @@ if (mode === "migrate") {
   if (result.moved.length) did.push(`moved ${result.moved.length} path(s)`);
   if (result.gitignoreUpdated) did.push("updated .gitignore");
   if (result.gatewayEnvDeleted) did.push("deleted the stale gateway.env");
-  if (result.unitRewritten) did.push("rewrote the systemd unit into the gateway service");
-  if (result.envRewritten) did.push("stripped host-side secrets from the container gate .env");
-  if (result.configRewritten) did.push("translated hostWeight → containerShare");
-  if (result.hostCeilingRenamed) did.push("renamed the host-ceiling file to max-concurrent-containers");
+  if (result.unitRewritten)
+    did.push("rewrote the systemd unit into the gateway service");
+  if (result.envRewritten)
+    did.push("stripped host-side secrets from the container gate .env");
+  if (result.configRewritten)
+    did.push("translated hostWeight → containerShare");
+  if (result.hostCeilingRenamed)
+    did.push("renamed the host-ceiling file to max-concurrent-containers");
   if (did.length) console.log(`\nMigrated: ${did.join(", ")}.`);
   process.exit(0);
 }
@@ -329,10 +410,18 @@ if (mode === "gateway") {
 if (mode === "status") {
   const portIdx = rest.indexOf("--port");
   const hostIdx = rest.indexOf("--host");
-  const port = portIdx >= 0 ? Number(rest[portIdx + 1]) : Number(process.env.VETINARI_STATUS_PORT ?? 8765);
-  const host = hostIdx >= 0 ? rest[hostIdx + 1] : process.env.VETINARI_STATUS_HOST ?? "127.0.0.1";
-  if (!Number.isInteger(port) || port < 0) throw new Error("status --port needs a non-negative integer");
-  if (!host) throw new Error("status --host needs a host, e.g. 127.0.0.1 or 0.0.0.0");
+  const port =
+    portIdx >= 0
+      ? Number(rest[portIdx + 1])
+      : Number(process.env.VETINARI_STATUS_PORT ?? 8765);
+  const host =
+    hostIdx >= 0
+      ? rest[hostIdx + 1]
+      : (process.env.VETINARI_STATUS_HOST ?? "127.0.0.1");
+  if (!Number.isInteger(port) || port < 0)
+    throw new Error("status --port needs a non-negative integer");
+  if (!host)
+    throw new Error("status --host needs a host, e.g. 127.0.0.1 or 0.0.0.0");
   await serveAllStatus(gatewayConfigDir(), { port, host });
   // serveAllStatus resolves once it is listening; the process must then stay up
   // to serve, so park here instead of exiting (an exit would kill the server the
@@ -365,7 +454,11 @@ const hostBudget: HostBudget = {
 const archiveIfIdle = () => {
   if (listParked(cfg).length) return;
   const r = archiveRun(cfg);
-  log("archived", { archivedLog: r.archivedLog ?? null, clearedParked: r.clearedParked, clearedOutbound: r.clearedOutbound });
+  log("archived", {
+    archivedLog: r.archivedLog ?? null,
+    clearedParked: r.clearedParked,
+    clearedOutbound: r.clearedOutbound,
+  });
   if (r.archivedLog) console.log(`archived run log → ${r.archivedLog}`);
 };
 
@@ -404,8 +497,13 @@ switch (mode) {
       else if (a === "--name") name = rest[++i];
       else positional.push(a);
     }
-    const batches = positional.map((b) => b.split(/[\s,]+/).filter(Boolean)).filter((b) => b.length);
-    if (!batches.length) throw new Error('campaign needs at least one batch: campaign "436 611" "623 640"');
+    const batches = positional
+      .map((b) => b.split(/[\s,]+/).filter(Boolean))
+      .filter((b) => b.length);
+    if (!batches.length)
+      throw new Error(
+        'campaign needs at least one batch: campaign "436 611" "623 640"',
+      );
     // Archive only a clean run — a halt leaves state deliberately, to inspect.
     if (await campaign(cfg, batches, hostBudget, name)) archiveIfIdle();
     break;
@@ -414,20 +512,35 @@ switch (mode) {
     const dryRun = rest.includes("--dry-run");
     const positional = rest.filter((a) => a !== "--dry-run");
     const [target, ...batchArgs] = positional;
-    if (!target) throw new Error('carve needs an issue: `carve 640` prunes the running campaign, `carve 640 "611 640" "623 701"` launches a reduced one.');
-    if (!cfg.blockedBy) throw new Error('carve needs a "blockedBy" resolver in your config — e.g. blockedBy: githubBlockedBy("owner/repo").');
+    if (!target)
+      throw new Error(
+        'carve needs an issue: `carve 640` prunes the running campaign, `carve 640 "611 640" "623 701"` launches a reduced one.',
+      );
+    if (!cfg.blockedBy)
+      throw new Error(
+        'carve needs a "blockedBy" resolver in your config — e.g. blockedBy: githubBlockedBy("owner/repo").',
+      );
 
     const tgt = normalize(target);
     const describe = (removed: string[], remaining: string[][]) => {
       const dependents = removed.filter((id) => id !== tgt);
-      console.log(`carve #${tgt} → removed ${removed.map((i) => `#${i}`).join(", ")}` + (dependents.length ? ` (dependents: ${dependents.map((i) => `#${i}`).join(", ")})` : " (no dependents)"));
-      console.log(`remaining campaign: ${remaining.length ? remaining.map((w) => `"${w.join(" ")}"`).join(" ") : "(nothing left to run)"}`);
+      console.log(
+        `carve #${tgt} → removed ${removed.map((i) => `#${i}`).join(", ")}` +
+          (dependents.length
+            ? ` (dependents: ${dependents.map((i) => `#${i}`).join(", ")})`
+            : " (no dependents)"),
+      );
+      console.log(
+        `remaining campaign: ${remaining.length ? remaining.map((w) => `"${w.join(" ")}"`).join(" ") : "(nothing left to run)"}`,
+      );
     };
     const carveNote = (removed: string[], remaining: string[][]) => {
       const dependents = removed.filter((id) => id !== tgt);
       return (
         `✂️ ${cfg.project} carved #${tgt} — dropped ${removed.map((i) => `#${i}`).join(", ")}` +
-        (dependents.length ? ` (dependents: ${dependents.map((i) => `#${i}`).join(", ")})` : "") +
+        (dependents.length
+          ? ` (dependents: ${dependents.map((i) => `#${i}`).join(", ")})`
+          : "") +
         `. Remaining: ${remaining.length ? remaining.map((w) => `"${w.join(" ")}"`).join(" ") : "nothing left to run"}.`
       );
     };
@@ -444,20 +557,30 @@ switch (mode) {
         );
       }
       const reduced = reduceCampaign(events);
-      const { removed } = await computeCarve(reduced.waves, target, cfg.blockedBy);
+      const { removed } = await computeCarve(
+        reduced.waves,
+        target,
+        cfg.blockedBy,
+      );
       const applied = applyCarve(reduced, removed);
       const { remaining, dropped, parkedToClear } = applied;
       const kept = removed.filter((id) => !dropped.includes(id));
       console.log(
         `carve #${tgt} → ${dropped.length ? `dropping ${dropped.map((i) => `#${i}`).join(", ")}` : "nothing to drop"}` +
-          (kept.length ? ` (keeping banked ${kept.map((i) => `#${i}`).join(", ")})` : ""),
+          (kept.length
+            ? ` (keeping banked ${kept.map((i) => `#${i}`).join(", ")})`
+            : ""),
       );
-      console.log(`remaining campaign: ${remaining.length ? remaining.map((w) => `"${w.join(" ")}"`).join(" ") : "(nothing left to run)"}`);
+      console.log(
+        `remaining campaign: ${remaining.length ? remaining.map((w) => `"${w.join(" ")}"`).join(" ") : "(nothing left to run)"}`,
+      );
       if (dryRun) {
         // Structured closure alongside the human text, so a consumer (the
         // aggregated dashboard's carve preview) can name the exact closure
         // without re-parsing the prose above.
-        console.log(`carve-closure ${JSON.stringify(carveClosure(target, removed, applied))}`);
+        console.log(
+          `carve-closure ${JSON.stringify(carveClosure(target, removed, applied))}`,
+        );
         break;
       }
 
@@ -472,24 +595,40 @@ switch (mode) {
         event: "carve",
         text:
           `✂️ ${cfg.project} carved #${tgt} from the running campaign — ` +
-          (dropped.length ? `dropped ${dropped.map((i) => `#${i}`).join(", ")}` : "nothing to drop") +
-          (kept.length ? ` (kept banked ${kept.map((i) => `#${i}`).join(", ")})` : "") +
+          (dropped.length
+            ? `dropped ${dropped.map((i) => `#${i}`).join(", ")}`
+            : "nothing to drop") +
+          (kept.length
+            ? ` (kept banked ${kept.map((i) => `#${i}`).join(", ")})`
+            : "") +
           `. Remaining: ${remaining.length ? remaining.map((w) => `"${w.join(" ")}"`).join(" ") : "nothing left to run"}.`,
       });
-      console.log("carve event appended — the running campaign will prune future waves at the next wave boundary.");
+      console.log(
+        "carve event appended — the running campaign will prune future waves at the next wave boundary.",
+      );
       break;
     }
 
     // Explicit plan → launch a fresh reduced campaign (unchanged behavior).
-    const batches = batchArgs.map((b) => b.split(/[\s,]+/).filter(Boolean)).filter((b) => b.length);
-    const { removed, remaining } = await computeCarve(batches, target, cfg.blockedBy);
+    const batches = batchArgs
+      .map((b) => b.split(/[\s,]+/).filter(Boolean))
+      .filter((b) => b.length);
+    const { removed, remaining } = await computeCarve(
+      batches,
+      target,
+      cfg.blockedBy,
+    );
     describe(removed, remaining);
 
     if (dryRun) break;
 
     // A carve had no notification before E4 — emit a progress:carve record so it
     // is announced and routable like any other outbound message (ADR 0002).
-    enqueueOutbound(cfg, { category: "progress", event: "carve", text: carveNote(removed, remaining) });
+    enqueueOutbound(cfg, {
+      category: "progress",
+      event: "carve",
+      text: carveNote(removed, remaining),
+    });
 
     if (!remaining.length) {
       console.log("nothing left to run after the carve — done.");
@@ -505,13 +644,20 @@ switch (mode) {
     const positional: string[] = [];
     for (let i = 0; i < rest.length; i++) {
       const a = rest[i];
-      if (a.startsWith("--on-underspecified=")) onUnderspecified = a.slice("--on-underspecified=".length);
+      if (a.startsWith("--on-underspecified="))
+        onUnderspecified = a.slice("--on-underspecified=".length);
       else if (a === "--on-underspecified") onUnderspecified = rest[++i];
       else positional.push(a);
     }
     const ids = positional.flatMap((a) => a.split(/[\s,]+/)).filter(Boolean);
-    if (!ids.length) throw new Error("campaign-plan needs at least one ticket id: campaign-plan 436 611 640");
-    if (!cfg.blockedBy) throw new Error('campaign-plan needs a "blockedBy" resolver in your config — e.g. blockedBy: githubBlockedBy("owner/repo").');
+    if (!ids.length)
+      throw new Error(
+        "campaign-plan needs at least one ticket id: campaign-plan 436 611 640",
+      );
+    if (!cfg.blockedBy)
+      throw new Error(
+        'campaign-plan needs a "blockedBy" resolver in your config — e.g. blockedBy: githubBlockedBy("owner/repo").',
+      );
 
     // Which files each ticket touches: the project's resolver, or the shipped
     // cites-from-body default, validated against the current tree at plan time.
@@ -520,47 +666,85 @@ switch (mode) {
     const resolveFileSet = cfg.fileSet ?? defaultFileSet();
     const plan = await planCampaign(ids, {
       blockedBy: cfg.blockedBy,
-      fileSet: async (id) => resolveFileSet(ticketProse(await cfg.fetchTask(id))),
-      onUnderspecified: underspecifiedPromptFor({ flag: onUnderspecified, isTTY: Boolean(process.stdin.isTTY), ask: askUnderspecified }),
+      fileSet: async (id) =>
+        resolveFileSet(ticketProse(await cfg.fetchTask(id))),
+      onUnderspecified: underspecifiedPromptFor({
+        flag: onUnderspecified,
+        isTTY: Boolean(process.stdin.isTTY),
+        ask: askUnderspecified,
+      }),
     });
 
     // The bare wave args, then the human-readable provenance report. Plans only.
-    console.log(waveArgs(plan) || "(nothing schedulable — every ticket is unreachable)");
+    console.log(
+      waveArgs(plan) || "(nothing schedulable — every ticket is unreachable)",
+    );
     console.log("");
     console.log(describePlan(plan));
 
     // A suggested --name from the area labels the selected issues span — printed to
     // paste or edit, never stored. The label resolver reads each issue's labels off
     // the same fetchTask the plan uses.
-    const suggestedName = await suggestCampaignName(ids, async (id) => labelsFromTask(String(await cfg.fetchTask(id))));
-    if (suggestedName) console.log(`\nsuggested name: --name "${suggestedName}"`);
+    const suggestedName = await suggestCampaignName(ids, async (id) =>
+      labelsFromTask(String(await cfg.fetchTask(id))),
+    );
+    if (suggestedName)
+      console.log(`\nsuggested name: --name "${suggestedName}"`);
     break;
   }
   case "answer": {
     const [taskId, ...text] = rest;
-    if (!taskId || !text.length) throw new Error('answer needs a task id and text: answer <task> "<answer>"');
+    if (!taskId || !text.length)
+      throw new Error(
+        'answer needs a task id and text: answer <task> "<answer>"',
+      );
     const parked = readParked(cfg, taskId);
-    process.exitCode = (await runLoop(cfg, taskId, { resumeSessionId: parked.sessionId!, answerPrompt: answerPromptFor(text.join(" ")) })) === "green" ? 0 : 2;
+    process.exitCode =
+      (await runLoop(cfg, taskId, {
+        resumeSessionId: parked.sessionId!,
+        answerPrompt: answerPromptFor(text.join(" ")),
+      })) === "green"
+        ? 0
+        : 2;
     break;
   }
   case "parked": {
     const recs = listParked(cfg);
     if (!recs.length) console.log("nothing parked");
-    for (const r of recs) console.log(`\n=== ${r.taskId} (${r.reason}, ${r.parkedAt}) branch ${r.branch}\n${r.question}\n`);
+    for (const r of recs)
+      console.log(
+        `\n=== ${r.taskId} (${r.reason}, ${r.parkedAt}) branch ${r.branch}\n${r.question}\n`,
+      );
     break;
   }
   case "clear": {
     // Force a reset now, even with questions still parked — the manual escape
     // hatch, unlike the automatic archive that waits for an idle queue.
     const r = archiveRun(cfg);
-    log("archived", { archivedLog: r.archivedLog ?? null, clearedParked: r.clearedParked, clearedOutbound: r.clearedOutbound });
-    console.log(r.archivedLog ? `archived run log → ${r.archivedLog}` : "no run log to archive");
-    console.log(`cleared ${r.clearedParked} parked record(s) — dashboard and status line now read idle`);
+    log("archived", {
+      archivedLog: r.archivedLog ?? null,
+      clearedParked: r.clearedParked,
+      clearedOutbound: r.clearedOutbound,
+    });
+    console.log(
+      r.archivedLog
+        ? `archived run log → ${r.archivedLog}`
+        : "no run log to archive",
+    );
+    console.log(
+      `cleared ${r.clearedParked} parked record(s) — dashboard and status line now read idle`,
+    );
     break;
   }
   case "tg-test": {
-    requireTelegram("tg-test");
-    await tgTest(cfg);
+    // Resolve creds from this project's host.env the way the gateway does, so a
+    // green tg-test guarantees the gateway can send (issue #117) — not from the
+    // invoking shell's env, which the gateway never reads.
+    const conn = requireTelegram(
+      "tg-test",
+      resolve(process.cwd(), cfg.stateDir),
+    );
+    await tgTest(cfg, conn);
     break;
   }
   default:

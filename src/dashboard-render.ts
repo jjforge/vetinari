@@ -1173,7 +1173,6 @@ ${ISSUE_DETAIL_SHEET_STYLES}
     body { padding: 1rem; }
     .counters { grid-template-columns: repeat(2, 1fr); }
     .cards { grid-template-columns: 1fr; }
-    .feed { display: none; }
     .parked-row { grid-template-columns: auto 1fr; }
     .parked-question { grid-column: 1 / -1; }
     .live-bar { width: 100%; justify-content: space-between; }

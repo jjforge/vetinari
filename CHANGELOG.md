@@ -32,6 +32,16 @@ Within a milestone each bold section label appears at most once.
   `CHANGELOG.md` in one commit at merge, on the green path only — after the wave's greens
   are merged and the merged base is verified (#123). A halted wave leaves its fragments in
   place for the retry.
+- [user] The orchestrator now labels each merged issue `pending-verify` (dropping `ready-for-agent`) the moment a campaign wave's local merge and merged-base gate pass, via a config-provided `onIssueMerged` seam (`githubMarkPendingVerify("owner/repo")` ships for GitHub). Best-effort and a no-op when unconfigured — the core names no labels (#103).
+- [user] Tickets can declare files they create with a `Creates:` marker line (peer of `Touches:`/`Files:`); its cites feed wave-disjointness but are exempt from the tree-presence check, so a new-file-only tracer-bullet ticket is now schedulable by `campaign-plan` (#114).
+
+**Improvements:**
+- [user] `vetinari init`'s next steps now name `.vetinari.local/.env` and the `CLAUDE_CODE_OAUTH_TOKEN` key, so a new project is told where the agent credential lives — the first real `run` no longer fails as the first mention of it (#138).
+
+**Bug fixes:**
+- [ops] Gateway now logs and stamps `destination: "default"` for an outbound record delivered to a project's default chat with no notify mapping, instead of the misleading `destination: undefined` (#106).
+- [user] Dashboard raw-log pane now caps its render (500 rows) with a "show more" control and a "showing X of Y lines" footer, so a many-thousand-line orchestrator log keeps a bounded DOM instead of OOM-crashing a memory-constrained tab; deep links to a line past the cap still reach it (#127).
+- [user] `statusline install` no longer writes a shadowed entry when a `statusLine` is set in the higher-precedence `.claude/settings.local.json`; it warns (naming that layer) and skips the inert write, and `uninstall` warns symmetrically (#136).
 
 ### The status line installs itself and wraps an existing one — August 25, 2026
 

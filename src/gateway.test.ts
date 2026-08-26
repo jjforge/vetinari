@@ -810,6 +810,36 @@ test("drainOutbox falls back to the project's default connection when no notify 
   );
 });
 
+test("drainOutbox reports the default destination — never undefined — when no notify map routes a delivered record", async () => {
+  const base = outboxBase();
+  enqueueOutbound({ stateDir: base }, { category: "progress", event: "queue-start", text: "queue up" });
+
+  const { send } = recordingSend();
+  const results = await drainOutbox(routed(base, { notify: undefined, destinations: undefined }), send);
+
+  assert.deepEqual(
+    results.map((r) => r.destination),
+    ["default"],
+    "a default-chat delivery reports the default marker, not undefined",
+  );
+  assert.equal(
+    listOutboxIn(outboxDirOf(base))[0].destination,
+    "default",
+    "the stamped record carries the default marker so the dashboard/log never read undefined",
+  );
+});
+
+test("drainOutbox keeps the named destination on a record its notify map routes", async () => {
+  const base = outboxBase();
+  enqueueOutbound({ stateDir: base }, { category: "failure", event: "halt", text: "campaign HALTED" });
+
+  const { send } = recordingSend();
+  const results = await drainOutbox(routed(base), send); // notify maps failure → alerts
+
+  assert.deepEqual(results.map((r) => r.destination), ["alerts"], "a mapped record keeps its resolved destination name");
+  assert.equal(listOutboxIn(outboxDirOf(base))[0].destination, "alerts");
+});
+
 test("drainOutbox skips a project with no connection, leaving its records unsent for a later tick", async () => {
   const base = outboxBase();
   enqueueOutbound({ stateDir: base }, { category: "success", event: "green", text: "GREEN" });

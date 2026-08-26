@@ -11,12 +11,13 @@
 
 ---
 
-You don't want to babysit a coding agent, and you *really* don't want it quietly
-marking its own broken work as done. You want to hand over your backlog, walk away,
-and get back a green branch, or a straight question when it's genuinely stuck. That's
-vetinari: your issues run as parallel agents, each in its own container and branch,
-under an orchestrator that owns the one verdict that matters (is it done?) and never
-lets the agent cast that vote itself.
+Nobody wants to babysit a coding agent. What they want even less is one that quietly
+marks its own broken work as done and looks rather pleased about it. Vetinari offers
+the deal you actually wanted: hand over the backlog, walk away, and come back to a
+green branch or a straight question, with nothing in between and no cheerful fictions.
+Your issues run as parallel agents, each sealed in its own container and branch, under
+an orchestrator that keeps the one verdict that matters (is it done?) firmly to itself.
+The agents do the work. They do not get to grade it.
 
 ![The vetinari dashboard: one live landing over every project on the host, with per-repo cards, four fleet counters, and a cross-repo event log.](docs/dashboard.png)
 
@@ -24,19 +25,23 @@ lets the agent cast that vote itself.
 orchestrator runs the gates from your config inside the sandbox and reads the
 exit code; only zero returns green. A red gate resumes that same agent session
 with the failure output attached, so the agent keeps its context and fixes the
-actual failure instead of restarting. An agent's own claim of completion never
-decides anything, which matters because agents do emit it over red suites.
+actual failure instead of starting over. An agent announcing that it has finished
+carries exactly the authority you would grant a cat announcing that it is hungry:
+noted, and checked independently. This is not paranoia. Agents will declare
+victory over a red suite, and do.
 
 **A blocked agent parks: question to you, slot back to the pool.** On a
 `BLOCKED` signal, an exhausted turn budget, or an idle stall, the question and
 the session id are written to disk, the container is torn down, and you get a
 Telegram message. Reply to it and that agent resumes with full context: new
-container, fresh process, days later if you like. Parking is terminal for the
-slot, never a held container, so one stuck task cannot starve the other nine.
+container, fresh process, days later if you like. Parking frees the slot for
+good rather than holding a container open, so one stuck task waits quietly in a
+drawer instead of taking the other nine down with it.
 
 **Parallelism is the default, not a mode.** One branch, worktree, and container
-per task means concurrent tasks cannot corrupt each other's state; a bounded
-pool keeps N slots full and a park frees its slot immediately.
+per task, so concurrent tasks have no way to corrupt each other's state even when
+they try. A bounded pool keeps N slots full, and a park hands its slot straight to
+whatever is next in line.
 
 ## Quickstart
 
@@ -105,8 +110,9 @@ gate, no agent:
 npx vetinari baseline          # toolchain probe + every gate, no agent
 ```
 
-A failing `baseline` is the cheapest failure available. A passing one means any
-red gate later is the agent's doing, not the image's.
+A failing `baseline` is the cheapest failure you will ever buy: it costs no agent
+and takes no prisoners. A passing one earns you a useful certainty, that any red
+gate from here on is the agent's doing and not the image's.
 
 ## Skills in the agent container
 
@@ -284,9 +290,10 @@ errors out.
 
 ### Capture what the agent notices in passing
 
-An agent fixing one task often spots a *different* defect it won't fix, and that
-knowledge dies with the container. Set a `reportFinding` handler and a green run
-ends with a **harvest turn**: on its own live session, the agent is asked for any
+An agent fixing one task will often notice a *different* defect it has no
+intention of fixing, and by default that observation dies with the container,
+unmourned and unrecorded. Set a `reportFinding` handler and a green run ends with
+a **harvest turn**: on its own live session, the agent is asked for any
 unrelated defect it saw (summary, location, repro), and each is filed somewhere
 durable instead of evaporating.
 
@@ -313,8 +320,9 @@ is the **single Telegram consumer** (one poll per bot, so Telegram's
 one-consumer-per-bot rule is never violated) and the **sole sender**: a run never
 talks to Telegram itself. A run that parks or emits a notification writes a record
 into its own `.vetinari.local/`; the gateway drains it and sends. Until the
-gateway is up, notifications silently do not fire. The full standing-up guide,
-end to end, is [`docs/gateway.md`](docs/gateway.md); the short path:
+gateway is up, notifications go nowhere, quietly and without complaint, so bring
+it up. The full standing-up guide, end to end, is
+[`docs/gateway.md`](docs/gateway.md); the short path:
 
 Put each project's Telegram credentials in its **base location**, in
 `.vetinari.local/host.env` (gitignored, host-only), never in
@@ -385,11 +393,14 @@ bot's updates. Migrating from the retired per-project `dispatch` poller?
 
 ## Operating rules that are load-bearing
 
-Each of these was paid for in a failed run. They are not style preferences.
+Every one of these was paid for in a failed run, in full and up front. They are
+not style preferences, and the tidy-minded reader who ignores them will pay for
+each a second time.
 
-1. **Never two runs of one task.** Git refuses one branch in two worktrees and
-   the second run fails fast. This binds you too: a manual review worktree on
-   `agent/<task>` blocks that task's resume until you remove it.
+1. **Never two runs of one task.** Git flatly refuses to check one branch out
+   into two worktrees, so the second run fails fast and says why. The rule binds
+   you as well as the machine: a review worktree you left sitting on `agent/<task>`
+   will hold that task's resume hostage until you clear it away.
 2. **Share package caches; never share build outputs.** Module caches are
    concurrency-safe and are the single biggest win: a cold gate of 2571s
    became 330s warm, measured. A shared build-output directory converts your
@@ -524,8 +535,11 @@ it there too and re-run that project's `baseline`.
 
 ## Known limits
 
+Three things it does not pretend to do, stated here so you find them now rather
+than at an inconvenient moment later:
+
 - **Token accounting under-reports.** `IterationResult.usage` reflects the final
-  message, not the session; read the session JSONL for real cost.
+  message, not the session; read the session JSONL for the real cost.
 - **Gateway resumes sit outside the queue's slot accounting**, so heavy
   answering can briefly exceed a project's fair share of `MAX_CONCURRENT_CONTAINERS`.
 - **Session capture is required.** Non-resumable providers (`cursor`,

@@ -34,14 +34,16 @@ victory over a red suite, and do.
 `BLOCKED` signal, an exhausted turn budget, or an idle stall, the question and
 the session id are written to disk, the container is torn down, and you get a
 Telegram message. Reply to it and that agent resumes with full context: new
-container, fresh process, days later if you like. Parking frees the slot for
-good rather than holding a container open, so one stuck task waits quietly in a
-drawer instead of taking the other nine down with it.
+container, fresh process, days later if you like. Parking frees the slot
+immediately rather than holding a container open, so one stuck task waits quietly
+in a drawer instead of taking the other nine down with it.
 
 **Parallelism is the default, not a mode.** One branch, worktree, and container
-per task, so concurrent tasks have no way to corrupt each other's state even when
-they try. A bounded pool keeps N slots full, and a park hands its slot straight to
-whatever is next in line.
+per task isolates repository and process state, so concurrent tasks cannot trample
+one another's worktrees or build outputs. (What containers isolate they do not
+abolish: shared caches, external services, and your account's rate limits are
+still shared, which is what the operating rules below are for.) A bounded pool
+keeps N slots full, and a park hands its slot straight to whatever is next in line.
 
 ## Quickstart
 
@@ -51,9 +53,10 @@ npm install github:jjforge/vetinari
 
 Needs Docker, Node 22+, and `.vetinari.local/.env` holding `CLAUDE_CODE_OAUTH_TOKEN`
 from `claude setup-token`: your Claude Code subscription, which is what these
-agents run on. The container runs the official `claude` CLI and reads that
-token exactly as Claude Code GitHub Actions does; nothing here handles your
-credential itself.
+agents run on. The container runs the official `claude` CLI, which reads that
+token exactly as Claude Code GitHub Actions does. Vetinari does not mint or
+exchange credentials; it passes the token you supply straight through to that CLI
+inside the agent container.
 
 `ANTHROPIC_API_KEY` works as a drop-in alternative, and is worth switching to
 when billing is the constraint rather than convenience: it gives per-run cost
@@ -111,33 +114,10 @@ npx vetinari baseline          # toolchain probe + every gate, no agent
 ```
 
 A failing `baseline` is the cheapest failure you will ever buy: it costs no agent
-and takes no prisoners. A passing one earns you a useful certainty, that any red
-gate from here on is the agent's doing and not the image's.
-
-## Skills in the agent container
-
-The template image mirrors the [`mattpocock-skills` plugin](https://github.com/mattpocock/skills)
-(v1.2.3) at **personal scope** (`/home/agent/.claude/skills/`). Sandcastle runs
-the plain `claude --print` CLI (not `--bare`, not the SDK) with `HOME=/home/agent`,
-so the CLI auto-discovers `~/.claude/skills/<name>/SKILL.md` with no flag,
-setting, or per-run cost; every task's agent gets them. Personal scope keeps
-them out of your repo and off every agent branch.
-
-The image has no plugin machinery, so rather than "install a plugin" it clones
-at the plugin's pinned commit (`SKILLS_REF`) and copies exactly the skills that
-version's `.claude-plugin/plugin.json` declares: the same curated set the
-plugin exposes on the host, flattened one level (discovery is not recursive into
-the repo's `engineering/`, `productivity/`, and other category dirs).
-
-Two things to know:
-
-- **Your loop still owns "done".** `prompts/tdd.md` tells the agent that the
-  signal contract and the orchestrator's gate outrank any skill: a skill's own
-  TDD loop or completion notion never ends a turn or decides green. Keep that
-  clause if you edit the prompt.
-- **Updating is a rebuild.** Bump `SKILLS_REF` in `templates/Dockerfile` to the
-  plugin's new commit (match it to your host install), rebuild, and re-run
-  `baseline`. Don't want them? Delete that `RUN` block.
+and takes no prisoners. A passing baseline establishes a clean starting point:
+later failures are not inherited from an already-broken image or gate
+configuration (they can still arrive on their own, by way of a flaky test or a
+network fault, but you will know they are new).
 
 ## Run
 
@@ -320,9 +300,9 @@ is the **single Telegram consumer** (one poll per bot, so Telegram's
 one-consumer-per-bot rule is never violated) and the **sole sender**: a run never
 talks to Telegram itself. A run that parks or emits a notification writes a record
 into its own `.vetinari.local/`; the gateway drains it and sends. Until the
-gateway is up, notifications go nowhere, quietly and without complaint, so bring
-it up. The full standing-up guide, end to end, is
-[`docs/gateway.md`](docs/gateway.md); the short path:
+gateway is running, notifications remain queued locally and are delivered when it
+resumes, so an unanswered park is waiting, not lost. The full standing-up guide,
+end to end, is [`docs/gateway.md`](docs/gateway.md); the short path:
 
 Put each project's Telegram credentials in its **base location**, in
 `.vetinari.local/host.env` (gitignored, host-only), never in
@@ -365,7 +345,7 @@ the terminal goes unanswered. Run it as a **systemd user service** instead: one
 always-on daemon, restarted on crash, brought back at boot. The host-level unit is
 tracked in this repo at [`systemd/vetinari-gateway.service`](systemd/vetinari-gateway.service);
 it has **no `WorkingDirectory`** (the gateway fronts every project, not one) and
-sources no env file; the gateway holds no secrets of its own:
+sources no env file; the gateway stores no global credentials of its own:
 
 ```bash
 install -Dm644 systemd/vetinari-gateway.service \
@@ -376,10 +356,9 @@ systemctl --user enable --now vetinari-gateway   # start now + at every login
 loginctl enable-linger "$USER"                      # and at boot, without a login session
 ```
 
-The gateway reads each project's bot credentials live from that project's
-`.vetinari.local/host.env` (above); it holds no credentials of its own, so
-there is no host-level `gateway.env` to source (`migrate` deletes any stale one left
-by an older layout). Keep bot creds out of `.vetinari.local/.env`, which is injected
+The gateway loads each project's gitignored `.vetinari.local/host.env` (above)
+when it sends; it stores no global credentials, so there is no host-level
+`gateway.env` to source (`migrate` deletes any stale one left by an older layout). Keep bot creds out of `.vetinari.local/.env`, which is injected
 into agent containers.
 
 `enable --now` alone brings the daemon back only when you log in; **`enable-linger`
@@ -390,6 +369,31 @@ the inline `gateway &`**: do not run both, or the two consumers fight over the
 bot's updates. Migrating from the retired per-project `dispatch` poller?
 `npx vetinari migrate` rewrites your old unit into this one; see
 [`docs/gateway.md`](docs/gateway.md).
+
+## Skills in the agent container
+
+The template image mirrors the [`mattpocock-skills` plugin](https://github.com/mattpocock/skills)
+(v1.2.3) at **personal scope** (`/home/agent/.claude/skills/`). Sandcastle runs
+the plain `claude --print` CLI (not `--bare`, not the SDK) with `HOME=/home/agent`,
+so the CLI auto-discovers `~/.claude/skills/<name>/SKILL.md` with no flag,
+setting, or per-run cost; every task's agent gets them. Personal scope keeps
+them out of your repo and off every agent branch.
+
+The image has no plugin machinery, so rather than "install a plugin" it clones
+at the plugin's pinned commit (`SKILLS_REF`) and copies exactly the skills that
+version's `.claude-plugin/plugin.json` declares: the same curated set the
+plugin exposes on the host, flattened one level (discovery is not recursive into
+the repo's `engineering/`, `productivity/`, and other category dirs).
+
+Two things to know:
+
+- **Your loop still owns "done".** `prompts/tdd.md` tells the agent that the
+  signal contract and the orchestrator's gate outrank any skill: a skill's own
+  TDD loop or completion notion never ends a turn or decides green. Keep that
+  clause if you edit the prompt.
+- **Updating is a rebuild.** Bump `SKILLS_REF` in `templates/Dockerfile` to the
+  plugin's new commit (match it to your host install), rebuild, and re-run
+  `baseline`. Don't want them? Delete that `RUN` block.
 
 ## Operating rules that are load-bearing
 

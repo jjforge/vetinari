@@ -57,9 +57,14 @@ write would otherwise shadow, blanking its colours).
 project `statusLine` entirely when Vetinari wrapped nothing (or when what it
 wrapped was the inherited user-level line, so the inheritance applies again).
 
-> A `statusLine` set in the higher-precedence `.claude/settings.local.json` is
-> not yet accounted for; a project-level install is shadowed by it. Tracked
-> separately.
+A `statusLine` in the higher-precedence `.claude/settings.local.json` owns the
+whole block Claude Code renders, so an install into `.claude/settings.json` would
+be shadowed and never show. When `install` detects one there it **warns and skips
+the write** (exit 0) rather than leaving an inert entry, naming
+`.claude/settings.local.json` as the shadowing layer and telling you to remove
+its `statusLine` (or add the 🏰 line there yourself). `uninstall` warns
+symmetrically — with the local layer in charge there is nothing in
+`.claude/settings.json` to remove that would be visible.
 
 ## Wiring it by hand
 

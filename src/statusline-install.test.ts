@@ -135,10 +135,31 @@ test("describeInstall distinguishes a fresh install, a wrapping install, and a n
   assert.match(describeInstall({ base: "my-fancy-bar", alreadyInstalled: true }, ".claude/settings.json"), /already/i);
 });
 
+test("describeInstall warns and names settings.local.json when the local layer shadows", () => {
+  const msg = describeInstall({ base: undefined, alreadyInstalled: false, shadowedByLocal: true }, ".claude/settings.json");
+  assert.match(msg, /settings\.local\.json/); // names the shadowing layer
+  assert.doesNotMatch(msg, /^Installed/); // did not claim to install
+});
+
+test("describeUninstall warns and names settings.local.json when the local layer shadows", () => {
+  const msg = describeUninstall({ restored: undefined, wasInstalled: false, shadowedByLocal: true }, ".claude/settings.json");
+  assert.match(msg, /settings\.local\.json/);
+});
+
 test("describeUninstall distinguishes a restore, a plain removal, and a no-op", () => {
   assert.match(describeUninstall({ restored: "my-fancy-bar", wasInstalled: true }, ".claude/settings.json"), /restor/i);
   assert.match(describeUninstall({ restored: undefined, wasInstalled: true }, ".claude/settings.json"), /Uninstalled|removed/i);
   assert.match(describeUninstall({ restored: undefined, wasInstalled: false }, ".claude/settings.json"), /No Vetinari status line|nothing/i);
+});
+
+test("computeUninstall reports a shadow and changes nothing when settings.local.json owns a statusLine", () => {
+  // Uninstalling from settings.json is inert while the local layer shadows it, so
+  // report the shadow rather than a change that would not be visible.
+  const installed = computeInstall({}, { runCommand: DEFAULT_RUN_COMMAND }).settings;
+  const { settings, wasInstalled, shadowedByLocal } = computeUninstall(installed, { shadowedByLocal: true });
+  assert.equal(shadowedByLocal, true);
+  assert.equal(wasInstalled, false);
+  assert.deepEqual(settings, installed); // unchanged
 });
 
 test("computeInstall wraps a status line inherited from user settings when the project has none", () => {
@@ -153,6 +174,17 @@ test("computeInstall wraps a status line inherited from user settings when the p
 test("a project's own status line takes precedence over an inherited one as the base", () => {
   const { base } = computeInstall({ statusLine: { type: "command", command: "proj-bar" } }, { runCommand: DEFAULT_RUN_COMMAND, inheritedBase: "user-bar" });
   assert.equal(base, "proj-bar");
+});
+
+test("computeInstall does not write a shadowed line when settings.local.json owns a statusLine", () => {
+  // A statusLine in the higher-precedence settings.local.json makes any write to
+  // settings.json inert — Claude Code renders the local layer's whole block.
+  const before: Settings = { model: "opus" };
+  const { settings, shadowedByLocal, alreadyInstalled } = computeInstall(before, { runCommand: DEFAULT_RUN_COMMAND, shadowedByLocal: true });
+  assert.equal(shadowedByLocal, true);
+  assert.equal(alreadyInstalled, false);
+  assert.equal("statusLine" in settings, false); // no shadowed write planned
+  assert.deepEqual(settings, before);
 });
 
 test("uninstall drops the project status line when it wrapped an inherited one (restores inheritance)", () => {

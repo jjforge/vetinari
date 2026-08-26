@@ -49,6 +49,7 @@ Within a milestone each bold section label appears at most once.
 - [user] `statusline install` no longer writes a shadowed entry when a `statusLine` is set in the higher-precedence `.claude/settings.local.json`; it warns (naming that layer) and skips the inert write, and `uninstall` warns symmetrically (#136).
 - [ops] The gateway systemd unit no longer crash-loops (`status=127`, `exec: vetinari: not found`) on hosts where a `.bashrc`-hooked node manager (nvm/fnm/mise/asdf) keeps node off systemd's clean `PATH`. Both `gateway install` and `migrate` now bake a PATH-independent absolute launch chain in place of the `bash -lc` `ExecStart` — a non-interactive login shell that never sources `~/.bashrc` (#133).
 - [user] `tg-test` now resolves Telegram credentials from the project's `host.env` the same way the gateway does — never from the invoking shell's exported env — so a green `tg-test` guarantees the gateway can actually send. When the creds are missing, the error now names `<baseLocation>/host.env` instead of misdirecting to "the orchestrator's environment" (#117).
+- [user] Starting `campaign` or `queue` for a project whose `host.env` resolves no Telegram connection now warns on stderr (naming the `host.env` to fix) and records a `telegram-unconfigured` event the dashboard narrates, so an un-notifiable project — whose parked questions would otherwise wait forever with no ping — is visible instead of silent; the run continues (#116).
 
 ### The status line installs itself and wraps an existing one — August 25, 2026
 

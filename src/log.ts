@@ -26,7 +26,7 @@ type Fields<K extends NarrowedKind> = Omit<Extract<OrchestratorEvent, { event: K
 export function log<K extends NarrowedKind>(event: K, data: Fields<K>): void;
 export function log<E extends string>(event: E extends NarrowedKind ? never : E, data?: Record<string, unknown>): void;
 export function log(event: string, data: Record<string, unknown> = {}) {
-  const line = JSON.stringify({ ts: new Date().toISOString(), event, ...data });
+  const line = JSON.stringify({ ts: new Date().toISOString(), ...data, event });
   console.log(`[vetinari] ${event}`, data);
   try {
     appendFileSync(logFile, line + "\n");

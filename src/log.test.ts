@@ -39,3 +39,14 @@ test("log() appends the event as one JSON line carrying its data", () => {
   assert.deepEqual(rows[0].dropped, ["2"]);
   assert.equal(typeof rows[0].ts, "string");
 });
+
+test("log() kind is authoritative — a data.event key can't override it", () => {
+  const file = join(mkdtempSync(join(tmpdir(), "log-")), "orchestrator.jsonl");
+  setLogFile(file);
+  // enqueueOutbound passes `event: rec.event` (the outbound record's kind, e.g. "green")
+  // as payload; the persisted line's kind must stay the true `log()` kind, not the payload's.
+  log("outbound-enqueued", { id: "abc", category: "success", event: "green" });
+  const rows = readFileSync(file, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].event, "outbound-enqueued");
+});

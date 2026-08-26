@@ -213,6 +213,30 @@ export async function queue(cfg: ResolvedConfig, taskIds: string[], host: HostBu
 }
 
 /**
+ * Advance each merged issue to the first hop of the merge→`pending-verify`→close
+ * lifecycle by notifying the configured `onIssueMerged` seam — the state right
+ * after a local merge with a green merged-base gate. The core names no labels
+ * (the seam's handler does), so this is a no-op when `onIssueMerged` is
+ * unconfigured, keeping the core tracker-agnostic.
+ *
+ * Best-effort, like the outbox: the orchestrator runs locally and may be offline,
+ * so a failing write is logged and swallowed per issue — it never throws, never
+ * fails, and never rolls back the campaign, and one bad write never blocks the
+ * rest. Only the green `merged` set is passed in, so parked/carved/failed issues
+ * are excluded by construction.
+ */
+export async function markMergedIssues(cfg: Pick<ResolvedConfig, "onIssueMerged">, merged: string[]): Promise<void> {
+  if (!cfg.onIssueMerged) return;
+  for (const taskId of merged) {
+    try {
+      await cfg.onIssueMerged(taskId);
+    } catch (error) {
+      log("issue-merged-hook-failed", { taskId, error: String((error as any)?.message ?? error) });
+    }
+  }
+}
+
+/**
  * Drain each batch, then merge its greens into the base, re-verify the merged
  * base, clean up the merged branches/worktrees, and only then start the next
  * batch — the manual merge→test→next-queue chain, automated.
@@ -291,6 +315,12 @@ export async function campaign(cfg: ResolvedConfig, batches: string[][], host: H
     // wave (handled above) rolls back and leaves its fragments for the retry.
     const collected = collectWaveChangelog(index);
     if (collected.committed) console.log(`batch ${index + 1}/${total}: collected changelog fragments — ${collected.collected.join(", ")}`);
+
+    // Green path only: advance each merged issue to `pending-verify` via the
+    // configured `onIssueMerged` seam (issue #103). Best-effort — a failing write
+    // is logged and never touches the halt/rollback path, which already returned
+    // above on a red gate. Only the green `merged` set is passed.
+    await markMergedIssues(cfg, merged);
 
     if (held.length) clearParkedForTasks(cfg, held);
     const note = held.length ? ` — cleared parked records for completed wave: ${held.map((t) => `${t}(${outcomes[t]})`).join(", ")}` : "";

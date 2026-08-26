@@ -264,6 +264,31 @@ task that never goes green is retried or abandoned, so nothing is filed for it),
 and a failed filing is logged per finding without ever turning a real green into
 an error. Absent `reportFinding`, no harvest turn runs.
 
+### Advance merged issues to `pending-verify` automatically
+
+When a campaign wave merges an issue's green locally and the merged-base gate
+passes, that issue is in the `pending-verify` state — merged on a branch, awaiting
+a local end-to-end validation. Wire an `onIssueMerged` handler and the
+orchestrator applies that first label hop itself, the moment the merge lands,
+instead of leaving it as a manual step after every campaign.
+
+```ts
+import { githubMarkPendingVerify } from "vetinari";
+
+export default defineConfig({
+  // …
+  onIssueMerged: githubMarkPendingVerify("owner/repo"),
+});
+```
+
+`githubMarkPendingVerify` relabels each merged issue `ready-for-agent` →
+`pending-verify`; write your own handler to advance the state in any tracker. The
+core names no labels, so it stays tracker-agnostic and this is a **no-op when
+`onIssueMerged` is unconfigured**. It fires **only on the green path** for the
+merged issues (parked/carved/failed are never in the set), is idempotent, and is
+best-effort — a failing or offline write is logged and never fails or rolls back
+the campaign. Closing stays a separate, human/verify step.
+
 ## Answer from your phone
 
 One host-level daemon, the **`gateway`**, fronts every project on the machine: it

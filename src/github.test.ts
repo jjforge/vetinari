@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { githubBlockedBy, githubFindingReporter } from "./github.ts";
+import { githubBlockedBy, githubFindingReporter, githubMarkPendingVerify } from "./github.ts";
 
 test("githubBlockedBy queries the blocked_by endpoint and returns blocker numbers", () => {
   const calls: string[][] = [];
@@ -64,4 +64,18 @@ test("githubFindingReporter creates a labeled issue cross-referenced to the task
     captured.filter((_, i) => captured[i - 1] === "--label"),
     ["P2", "bug", "needs-triage"],
   );
+});
+
+test("githubMarkPendingVerify relabels ready-for-agent → pending-verify on the issue", () => {
+  const calls: string[][] = [];
+  const run = (args: string[]) => {
+    calls.push(args);
+    return "";
+  };
+
+  githubMarkPendingVerify("jjforge/jjforge", run)("#640");
+
+  assert.deepEqual(calls, [
+    ["issue", "edit", "640", "--repo", "jjforge/jjforge", "--add-label", "pending-verify", "--remove-label", "ready-for-agent"],
+  ]);
 });

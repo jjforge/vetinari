@@ -182,6 +182,8 @@ log) from which you can **carve** it out of the running campaign; the layout
 reflows for a phone, so it is the same view you reach from the Telegram message
 on your way past. It reads the host registry, so no gateway daemon is required.
 
+![A single project's view with an archived campaign expanded into its waves and per-issue status: the epic #107 run, all green.](docs/dashboard-campaign-107.png)
+
 **Carve one issue out of a campaign.** When an issue turns out not to be ready,
 `carve` drops it *and everything that can't proceed without it* (the transitive
 closure of its dependents), then runs the rest:

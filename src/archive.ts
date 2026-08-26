@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import type { ResolvedConfig } from "./config.ts";
+import { readEventLog } from "./event-log.ts";
 import { clearParked, clearSentOutbound, listParked } from "./state.ts";
 
 export interface ArchiveResult {
@@ -34,4 +35,18 @@ export function archiveRun(cfg: ResolvedConfig): ArchiveResult {
   const clearedOutbound = clearSentOutbound(cfg);
 
   return { archivedLog, clearedParked: parked.length, clearedOutbound };
+}
+
+/**
+ * Does the live log still hold a prior run that was never archived? True when it
+ * carries a run boundary (`campaign-start` or `queue-start`) — the mark of real
+ * run events, not the lone `archived` marker a clean end-of-run archive leaves
+ * behind. Lets a new run archive a leftover before it appends, so an interruption
+ * that bypassed the end-of-run archive (crash, kill) can never concatenate the
+ * prior run into the new run's log. A missing or empty log reads false.
+ */
+export function hasUnarchivedRun(cfg: Pick<ResolvedConfig, "logFile">): boolean {
+  return readEventLog(cfg).some(
+    (e) => e.event === "campaign-start" || e.event === "queue-start",
+  );
 }

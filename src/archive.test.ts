@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { archiveRun } from "./archive.ts";
+import { archiveRun, hasUnarchivedRun } from "./archive.ts";
 import { enqueueOutbound, listOutbox, markOutboundSent, outboxDirOf } from "./state.ts";
 
 let counter = 0;
@@ -47,6 +47,28 @@ test("archiveRun clears sent outbound records but leaves unsent ones for the gat
   const left = listOutbox(cfg);
   assert.equal(left.length, 1);
   assert.equal(left[0].sentAt, undefined);
+});
+
+test("hasUnarchivedRun is false for a missing, empty, or marker-only live log", () => {
+  const cfg = cfgFor();
+  // missing file
+  assert.equal(hasUnarchivedRun(cfg), false);
+  // empty file
+  writeFileSync(cfg.logFile, "");
+  assert.equal(hasUnarchivedRun(cfg), false);
+  // only the "archived" marker a clean end-of-run archive leaves behind — no run
+  writeFileSync(cfg.logFile, '{"event":"archived","archivedLog":"x"}\n');
+  assert.equal(hasUnarchivedRun(cfg), false);
+});
+
+test("hasUnarchivedRun is true when a prior campaign or queue run still sits in the live log", () => {
+  const campaignCfg = cfgFor();
+  writeFileSync(campaignCfg.logFile, '{"event":"archived"}\n{"event":"campaign-start","batches":[["101"]]}\n{"event":"campaign-halt","reason":"conflict","taskId":"101"}\n');
+  assert.equal(hasUnarchivedRun(campaignCfg), true);
+
+  const queueCfg = cfgFor();
+  writeFileSync(queueCfg.logFile, '{"event":"queue-start","taskIds":["101"]}\n');
+  assert.equal(hasUnarchivedRun(queueCfg), true);
 });
 
 test("archiveRun handles a missing or empty log without creating an archive", () => {

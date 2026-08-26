@@ -38,7 +38,7 @@ import {
   writeGatewayUnit,
 } from "./migrate.ts";
 import { applyInit, computeInit, describeInit, scanInit } from "./init.ts";
-import { archiveRun } from "./archive.ts";
+import { archiveRun, hasUnarchivedRun } from "./archive.ts";
 import {
   clearParkedForTasks,
   enqueueOutbound,
@@ -462,6 +462,16 @@ const archiveIfIdle = () => {
   if (r.archivedLog) console.log(`archived run log → ${r.archivedLog}`);
 };
 
+// Before a new run appends to the live log, archive any prior run still sitting in
+// it — an interruption that bypassed the end-of-run archive (crash, kill) would
+// otherwise concatenate the old run ahead of the new one, and the run-summary fold
+// would report only the terminal run, burying the earlier one. No-ops on a fresh or
+// marker-only log (nothing to archive) and, via archiveIfIdle, while anything is
+// parked (a parked run is being resumed, not superseded).
+const archiveLeftoverRun = () => {
+  if (hasUnarchivedRun(cfg)) archiveIfIdle();
+};
+
 switch (mode) {
   case "build": {
     // Default builds AND baselines; --no-baseline builds only. False (a build or
@@ -476,12 +486,14 @@ switch (mode) {
   }
   case "run": {
     if (!rest[0]) throw new Error("run needs a task id");
+    archiveLeftoverRun();
     // Exit code is the queue's slot signal: 0 green, 2 parked, other = error.
     process.exitCode = (await runLoop(cfg, rest[0])) === "green" ? 0 : 2;
     break;
   }
   case "queue": {
     if (!rest.length) throw new Error("queue needs at least one task id");
+    archiveLeftoverRun();
     await queue(cfg, rest, hostBudget);
     archiveIfIdle();
     break;
@@ -504,8 +516,12 @@ switch (mode) {
       throw new Error(
         'campaign needs at least one batch: campaign "436 611" "623 640"',
       );
-    // Archive only a clean run — a halt leaves state deliberately, to inspect.
-    if (await campaign(cfg, batches, hostBudget, name)) archiveIfIdle();
+    archiveLeftoverRun();
+    // Archive every completed run — failed/halted or clean — so a halt still enters
+    // the archived-runs list to inspect (#141). archiveIfIdle no-ops while parked,
+    // so a still-waiting run (not finished) stays live as before.
+    await campaign(cfg, batches, hostBudget, name);
+    archiveIfIdle();
     break;
   }
   case "carve": {

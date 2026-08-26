@@ -102,6 +102,13 @@ export interface LayoutScan {
   /** Current systemd unit content, so an already-gateway unit is left untouched. */
   systemdUnit?: string;
   /**
+   * The resolved, PATH-independent `ExecStart=` line for this host — an absolute node
+   * + tsx-loader + cli invocation (from `resolveGatewayExecStart`). The rewrite bakes
+   * it in place of the crash-looping `bash -lc 'exec vetinari …'`. Populated by
+   * `scanLayout` from `process.*` so the planner stays pure.
+   */
+  gatewayExecStart?: string;
+  /**
    * Current container-gate `.env` content (from `.vetinari.local/` if present, else
    * the legacy `.sandcastle/`), or undefined when absent. Host-side secrets found
    * here are stripped so they stop riding into every agent container (ADR 0011).
@@ -211,14 +218,55 @@ function planGitignore(current: string | undefined): string | undefined {
 }
 
 /**
- * The host-level gateway systemd unit: no `WorkingDirectory` (it fronts every
- * project, not one), and `exec`ing the shared install's `gateway` command (ADR
- * 0003) in place of the retired per-project `dispatch` poller. It sources no
- * env file — the gateway holds no secrets of its own (ADR 0002); it reads each
- * project's credentials live from that project's base location. Constant, so
- * feeding a rewritten unit back in yields the same text (an idempotent rewrite).
+ * How this CLI was launched: the absolute node binary, the loader flags it was
+ * started with (the tsx `--require`/`--import` pair, in production), and the CLI
+ * entrypoint. The three pieces `selfSpawn` (`src/modes.ts`) re-invokes with — kept
+ * as data so the ExecStart resolver stays a pure function of them.
  */
-function gatewayUnit(): string {
+export interface LaunchSelf {
+  execPath: string;
+  execArgv: string[];
+  argv1: string;
+}
+
+/** An argument systemd's ExecStart splitter reads verbatim: no whitespace or quoting metacharacters. */
+const SYSTEMD_SAFE_ARG = /^[A-Za-z0-9_@%+=:,./-]+$/;
+
+/**
+ * Quote one argument for a systemd `ExecStart` line. systemd splits the command on
+ * whitespace, so a path carrying a space (a home dir with one) must be quoted or it
+ * reads as two arguments; a clean path is returned untouched so the common line stays
+ * literal. Inside double quotes systemd honours C-style escapes, so `\` and `"` are
+ * backslash-escaped. Pure.
+ */
+export function systemdQuoteArg(arg: string): string {
+  if (SYSTEMD_SAFE_ARG.test(arg)) return arg;
+  return `"${arg.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+/**
+ * The fully-absolute, PATH-independent `ExecStart=` line that launches the gateway,
+ * mirroring `selfSpawn`: the absolute node binary, its tsx-loader `execArgv`, this
+ * CLI's entrypoint, then `gateway`. No shell, no `env`, no `npx`, no PATH lookup — so
+ * it starts under systemd's clean environment where a `.bashrc`-hooked toolchain
+ * manager's node bin never reaches PATH (the crash-loop this fixes). Pure in `launch`,
+ * so the same host re-resolves the same line (an idempotent rewrite).
+ */
+export function resolveGatewayExecStart(launch: LaunchSelf): string {
+  const argv = [launch.execPath, ...launch.execArgv, launch.argv1, "gateway"];
+  return `ExecStart=${argv.map(systemdQuoteArg).join(" ")}`;
+}
+
+/**
+ * The host-level gateway systemd unit: no `WorkingDirectory` (it fronts every
+ * project, not one), and launching the `gateway` command (ADR 0003) in place of the
+ * retired per-project `dispatch` poller via the resolved absolute `execStart`. It
+ * sources no env file — the gateway holds no secrets of its own (ADR 0002); it reads
+ * each project's credentials live from that project's base location. Deterministic in
+ * `execStart`, so feeding a rewritten unit back in yields the same text (an idempotent
+ * rewrite).
+ */
+function gatewayUnit(execStart: string): string {
   return [
     "[Unit]",
     "Description=vetinari gateway (host Telegram router)",
@@ -226,7 +274,7 @@ function gatewayUnit(): string {
     "Wants=network-online.target",
     "",
     "[Service]",
-    "ExecStart=/usr/bin/env bash -lc 'exec vetinari gateway'",
+    execStart,
     "Restart=always",
     "RestartSec=5",
     "",
@@ -236,14 +284,34 @@ function gatewayUnit(): string {
   ].join("\n");
 }
 
+/** Read how this process was launched — the edge IO behind the pure ExecStart resolver. */
+export function currentLaunchSelf(): LaunchSelf {
+  return { execPath: process.execPath, execArgv: process.execArgv, argv1: process.argv[1] };
+}
+
+/**
+ * The resolved host-level gateway unit for THIS install: an absolute node +
+ * tsx-loader + cli invocation, PATH-independent. Reads `process.*` at the edge; the
+ * same unit `migrate` writes when it rewrites a dispatch unit on this host.
+ */
+export function resolvedGatewayUnit(): string {
+  return gatewayUnit(resolveGatewayExecStart(currentLaunchSelf()));
+}
+
+/** Write a resolved gateway unit to `path`, creating its parent dir — the `gateway install` edge IO. */
+export function writeGatewayUnit(path: string, content: string): void {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, content);
+}
+
 /**
  * Rewrite the systemd unit from a per-project `dispatch` poller into the
  * host-level gateway service. Returns undefined when there is no unit to rewrite
  * or it is already the gateway unit (so a re-run changes nothing).
  */
 function computeUnitRewrite(scan: LayoutScan): UnitRewrite | undefined {
-  if (scan.systemdUnit === undefined || !scan.systemdUnitPath) return undefined;
-  const content = gatewayUnit();
+  if (scan.systemdUnit === undefined || !scan.systemdUnitPath || !scan.gatewayExecStart) return undefined;
+  const content = gatewayUnit(scan.gatewayExecStart);
   if (scan.systemdUnit === content) return undefined;
   return { path: scan.systemdUnitPath, content };
 }
@@ -503,6 +571,9 @@ export function scanLayout(baseDir: string): LayoutScan {
     gatewayEnv: readOrUndef(join(gwDir, GATEWAY_ENV_FILE)),
     systemdUnitPath: unitPath,
     systemdUnit: readOrUndef(unitPath),
+    // Resolved from this process so the rewrite bakes THIS host's absolute launch
+    // chain — the same one a fresh `gateway install` would write.
+    gatewayExecStart: resolveGatewayExecStart(currentLaunchSelf()),
     // The container gate wherever it currently lives — already-migrated dir first,
     // else the legacy one it is about to move out of.
     containerEnv:

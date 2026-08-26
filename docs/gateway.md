@@ -155,20 +155,27 @@ A backgrounded `gateway &` dies with its shell, so a park raised after you close
 the terminal goes unanswered. Run it as a **systemd user service** instead — one
 always-on daemon, restarted on crash, brought back at boot. If you are migrating
 from `dispatch`, the next section rewrites your existing unit for you. On a fresh
-host, install the host-level unit tracked in this repo at
-[`systemd/vetinari-gateway.service`](../systemd/vetinari-gateway.service): it has
-**no `WorkingDirectory`** (the gateway fronts every project, not one) and sources
-no env file (it stores no global credentials, reading each project's live from its
-base location):
+host, **write the unit for this install** with `gateway install`:
 
 ```bash
-install -Dm644 systemd/vetinari-gateway.service \
-  ~/.config/systemd/user/vetinari-gateway.service
+npx vetinari gateway install          # --dry-run to print the unit and write nothing
 
 systemctl --user daemon-reload
 systemctl --user enable --now vetinari-gateway   # start now + at every login
 loginctl enable-linger "$USER"                       # and at boot, without a login session
 ```
+
+`gateway install` writes `~/.config/systemd/user/vetinari-gateway.service` with an
+`ExecStart` resolved for **this host** — a fully absolute `node` + tsx-loader + CLI
+invocation, with **no `WorkingDirectory`** (the gateway fronts every project, not
+one), no env file to source (it stores no global credentials, reading each project's
+live from its base location), and — critically — **no `bash -lc`, `env`, `npx`, or
+`PATH` lookup**. That matters because systemd starts the unit with a clean
+environment: a `bash -lc 'exec vetinari …'` unit is a *non-interactive login* shell
+that never sources `~/.bashrc`, so a `.bashrc`-hooked toolchain manager (nvm, fnm,
+mise, asdf) never puts its node `bin` on `PATH` and the unit crash-loops with
+`status=127`. The absolute chain sidesteps `PATH` entirely. **Re-run `gateway
+install` after a node or tsx upgrade** — the baked paths pin their current location.
 
 `enable --now` alone brings the daemon back only when you log in; **`enable-linger`
 is what makes it survive a headless reboot**, telling systemd to start your user
@@ -202,7 +209,11 @@ Alongside the layout move (config → `vetinari/`, old `.sandcastle/` state →
   `~/.config/systemd/user/vetinari-gateway.service` is rewritten from a
   per-project `dispatch` poller (bound to one `WorkingDirectory`, running
   `dispatch`) into the host-level gateway: no `WorkingDirectory`, no env file to
-  source, just `exec`ing `vetinari gateway`.
+  source, and a fully absolute `node` + tsx-loader + CLI `ExecStart` resolved for
+  this host — no `bash -lc`, `env`, `npx`, or `PATH` lookup, so it starts under
+  systemd's clean environment (the same resolved unit `gateway install` writes on a
+  fresh host; §3). Re-run `migrate` (or `gateway install`) after a node/tsx upgrade
+  to re-resolve the baked paths.
 
 After applying, reload and restart:
 

@@ -19,11 +19,11 @@
     "check-contract": "tsx ./src/check-contract.mts"
   },
   "dependencies": {
-    "@ai-hero/sandcastle": "^0.12.0",
+    "@ai-hero/sandcastle": "git+https://github.com/zachthieme/sandcastle.git#76c8459e01ab5dcda750c98459e3d010bdcc0076",
     "tsx": "^4.23.10"
   },
   "devDependencies": {
-    "typescript": "^5.9.0",
-    "@types/node": "^24.0.0"
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
   }
 }

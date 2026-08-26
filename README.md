@@ -421,9 +421,18 @@ Config changes are the other update path. `defineConfig` is typed, so `npx tsc
 
 ## Update `@ai-hero/sandcastle`
 
-Bumps never happen silently: the dependency is pinned `^0.12.0`, and on a 0.x
-version npm's caret allows patches only. That's deliberate: upstream is pre-1.0
-and ships behavioural changes in minors.
+> **Temporary fork pin.** `@ai-hero/sandcastle` is currently pinned to a fork,
+> `git+https://github.com/zachthieme/sandcastle.git#<commit>`, for the `stateDir`
+> option vetinari needs (it routes sandcastle's own artifacts under
+> `.vetinari.local/` instead of a stray `.sandcastle/`). That fork commit ships a
+> prebuilt `dist/`, because npm 11 blocks a dependency's build-on-install scripts
+> by default and a git install could not otherwise build it. This is temporary:
+> drop the fork pin and return to a published `@ai-hero/sandcastle` (the flow
+> below) once `stateDir` lands in an upstream release.
+
+When on a published release, bumps never happen silently: the dependency is pinned
+`^0.12.0`, and on a 0.x version npm's caret allows patches only. That's deliberate:
+upstream is pre-1.0 and ships behavioural changes in minors.
 
 ```bash
 npm install @ai-hero/sandcastle@latest   # here, and in each consuming project

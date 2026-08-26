@@ -18,6 +18,21 @@ and each entry opens with a tag saying who it reaches:
 `**Breaking changes:**` sorts first in a milestone and names the contract it broke.
 Within a milestone each bold section label appears at most once.
 
+### Changelog fragments hand authorship to the orchestrator — August 26, 2026
+
+**New features:**
+- [user] Campaign agents write their changelog entry to `changelog.d/<task-id>.md`
+  instead of editing the shared `CHANGELOG.md`, and a new `vetinari changelog collect`
+  command folds a wave's fragments into `CHANGELOG.md` under today's milestone — grouped
+  by section, one block per label, newest milestone first — then deletes the consumed
+  fragments (#123). This decouples changelog authorship from the one file every co-wave
+  ticket used to touch, so their branches no longer conflict on it and halt the campaign.
+  `--title` names a fresh milestone (default "Collected changes").
+- [ops] The campaign orchestrator collects each wave's changelog fragments into
+  `CHANGELOG.md` in one commit at merge, on the green path only — after the wave's greens
+  are merged and the merged base is verified (#123). A halted wave leaves its fragments in
+  place for the retry.
+
 ### The status line installs itself and wraps an existing one — August 25, 2026
 
 **New features:**

@@ -53,6 +53,8 @@ export { computeLayoutMigration, applyLayoutMigration, scanLayout, describeMigra
 export type { LayoutScan, LayoutMigrationPlan, Move, ApplyResult } from "./migrate.ts";
 export { computeInit, applyInit, scanInit, describeInit } from "./init.ts";
 export type { InitScan, InitPlan, FileCreate, ApplyInitResult } from "./init.ts";
+export { parseFragment, collectFragments, scanFragments, applyCollect, formatMilestoneDate, FRAGMENT_DIR, SECTION_ORDER } from "./changelog.ts";
+export type { FragmentSection, Fragment, CollectOptions } from "./changelog.ts";
 export {
   buildInstalledCommand,
   composeStatusLine,

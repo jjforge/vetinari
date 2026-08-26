@@ -43,7 +43,7 @@ export { formatContextLine, formatStatusLine, runStatusLine, trimModelName } fro
 export type { CarveResult, BlockedByOf, RestrictedBlockers } from "./carve.ts";
 export { layerWaves, partitionWaves, waveArgs, describePlan, planCampaign, underspecifiedPromptFor } from "./plan.ts";
 export type { WavePlan, Placement, UnreachableTicket, CampaignPlan, CampaignPlanDeps, UnderspecifiedDecision, UnderspecifiedPrompt } from "./plan.ts";
-export { githubBlockedBy, githubFindingReporter } from "./github.ts";
+export { githubBlockedBy, githubFindingReporter, githubMarkPendingVerify } from "./github.ts";
 export { defaultFileSet } from "./fileset.ts";
 export type { FileSet, FileSetOf } from "./fileset.ts";
 export { parseFindings, reportFindings } from "./findings.ts";

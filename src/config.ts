@@ -159,6 +159,18 @@ export interface VetinariConfig {
    */
   reportFinding?: FindingReporter;
   /**
+   * Fires once per issue merged into the base with a GREEN merged-base gate — the
+   * first hop of the merge→`pending-verify`→close lifecycle
+   * (`docs/issue-conventions.md`). The core names no labels and stays
+   * tracker-agnostic; the handler decides what "merged" means for the tracker.
+   * `githubMarkPendingVerify(repo)` ships as a GitHub implementation that relabels
+   * `ready-for-agent` → `pending-verify`. Best-effort: a failing or offline write
+   * is logged and never fails or rolls back the campaign. Absent, nothing is
+   * labeled (a no-op). Only merged (green) issues are passed — parked/carved/failed
+   * are never in the set.
+   */
+  onIssueMerged?: (id: string) => void | Promise<void>;
+  /**
    * Named Telegram destinations this project routes categories to (name ->
    * `{bot, chat, thread?}`). A destination names a bot by reference — its token is
    * read from `.vetinari.local/`, never inlined here. The `notify` map's values

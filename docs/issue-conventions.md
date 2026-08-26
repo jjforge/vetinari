@@ -46,4 +46,6 @@ A tracer-bullet ticket whose whole job is to add a new module carries only a `Cr
 
 A merge is **not** a close (and a plain `git merge` never auto-closes anyway). When work lands on a branch, label it **`pending-verify`**; close it only after a **local end-to-end validation** — driving the change on a local run/stack is enough, it need not reach a remote or production. Then `gh issue close <n> -c "…"` and the label drops with it. An epic closes when its last child closes.
 
+The orchestrator applies the **first hop automatically** when the config wires an `onIssueMerged` handler (`githubMarkPendingVerify(repo)` ships for GitHub): once a campaign wave merges an issue's green locally and the merged-base gate passes, that issue is relabelled `ready-for-agent` → `pending-verify` — best-effort, so an offline write never fails the run. Closing stays the separate, human/verify step above. With no handler configured the orchestrator labels nothing and this stays a manual step.
+
 **Wont-fix is a close with a reason:** the `wont-fix` label plus a comment giving the rationale, so the decision is a durable record and is not re-filed or re-argued.

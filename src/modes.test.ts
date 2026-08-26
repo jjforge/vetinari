@@ -1,9 +1,35 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { ResolvedConfig } from "./config.ts";
-import { build, buildImageArgs, resolveTitles } from "./modes.ts";
+import { build, buildImageArgs, markMergedIssues, resolveTitles } from "./modes.ts";
 
 const cfgWith = (fetchTask: ResolvedConfig["fetchTask"]): ResolvedConfig => ({ fetchTask }) as ResolvedConfig;
+
+test("markMergedIssues calls the configured onIssueMerged seam with exactly the merged ids", async () => {
+  const seen: string[] = [];
+  await markMergedIssues({ onIssueMerged: (id) => void seen.push(id) }, ["101", "102", "103"]);
+  assert.deepEqual(seen, ["101", "102", "103"]);
+});
+
+test("markMergedIssues is a no-op when onIssueMerged is unconfigured — core names no labels", async () => {
+  // No throw, nothing to observe: the core stays tracker-agnostic.
+  await markMergedIssues({}, ["101"]);
+});
+
+test("markMergedIssues isolates a throwing hook — it is logged and the rest still run, no throw", async () => {
+  const seen: string[] = [];
+  await markMergedIssues(
+    {
+      onIssueMerged: (id) => {
+        seen.push(id);
+        if (id === "102") throw new Error("offline");
+      },
+    },
+    ["101", "102", "103"],
+  );
+  // 102 threw but 101 and 103 were still attempted, and the call itself did not throw.
+  assert.deepEqual(seen, ["101", "102", "103"]);
+});
 
 test("resolveTitles maps each id to its fetched title", async () => {
   const titles: Record<string, string> = { "101": "Add login flow", "102": "Rotate logs" };

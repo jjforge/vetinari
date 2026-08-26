@@ -26,6 +26,26 @@ export const githubBlockedBy =
   };
 
 /**
+ * A ready `onIssueMerged` handler that advances an issue to the first hop of the
+ * merge→`pending-verify`→close lifecycle (`docs/issue-conventions.md`): it adds
+ * `pending-verify` and drops `ready-for-agent`. Drop it into a config as
+ * `onIssueMerged: githubMarkPendingVerify("owner/repo")`.
+ *
+ * The orchestrator calls this per issue merged into the base with a green
+ * merged-base gate — "merged on branch, awaiting a local end-to-end validation",
+ * which is exactly `pending-verify`; closing stays a separate, human/verify step.
+ * Idempotent: re-adding `pending-verify`, or removing `ready-for-agent` from an
+ * issue that never carried it (a manual `campaign` batch), is harmless. `run` is
+ * injected only so the argument building can be tested without invoking `gh`.
+ */
+export const githubMarkPendingVerify =
+  (repo: string, run: (args: string[]) => string = gh) =>
+  (id: string): void => {
+    const num = id.replace(/^#/, "").trim();
+    run(["issue", "edit", num, "--repo", repo, "--add-label", "pending-verify", "--remove-label", "ready-for-agent"]);
+  };
+
+/**
  * A ready `reportFinding` handler that files each incidental finding as a GitHub
  * issue in `repo`, tagged with `labels` and cross-referenced to the task it was
  * found on. Returns the new issue URL that `gh issue create` prints. `run` is

@@ -1331,7 +1331,7 @@ test("failure renders in its own red on every surface, never the carve action's 
   );
 });
 
-test("renderLandingShell mounts the cross-project feed under the cards and hides it on mobile", () => {
+test("renderLandingShell mounts the cross-project feed under the cards on every width", () => {
   const html = renderLandingShell(["alpha", "beta"]);
   // The feed container sits after the cards and is client-rendered off /api/feed.
   assert.match(html, /id="feed"/);
@@ -1340,11 +1340,13 @@ test("renderLandingShell mounts the cross-project feed under the cards and hides
     html.indexOf('id="cards"') < html.indexOf('id="feed"'),
     "the feed renders after the cards",
   );
-  // The feed is cut on a phone.
-  assert.match(
-    html,
-    /@media \(max-width: 640px\)[^}]*\{[\s\S]*\.feed \{ display: none; \}/,
+  // The event log now shows on a phone too (#125): the mobile block no longer
+  // hides `.feed`, so iOS Safari at an iPhone width renders it under the cards.
+  const mobileBlock = html.match(
+    /@media \(max-width: 640px\) \{[\s\S]*?\n  \}/,
   );
+  assert.ok(mobileBlock, "the landing has a ≤640px mobile media block");
+  assert.doesNotMatch(mobileBlock[0], /\.feed \{ display: none; \}/);
 });
 
 test("renderLandingShell parked counter expands a cross-repo parked queue in place", () => {

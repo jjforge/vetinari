@@ -1169,9 +1169,12 @@ test("green live dots pulse when live even with zero running — they track the 
 test("an idle running tally renders a solid blue dot with no pulse; genuinely-running dots still pulse (§5, #100)", () => {
   const html = renderLandingShell(["alpha"]);
   // A card's blue running-dots track work: a "0 running" tally is idle, so its dot is
-  // solid blue but must not pulse (the pulse means active work). The client marks the
-  // zero-count tally dot idle so CSS stills it.
-  assert.match(html, /bucket === "running" && count === 0/);
+  // solid blue but must not pulse (the pulse means active work). The idle rule is the
+  // pure `tallyDotClass` (dashboard-visual-state.ts) — asserted directly there
+  // (count=0 ⇒ "running idle") — single-sourced into this page via `.toString()` and
+  // called on the tally dot, so the browser runs the very function the node test pins.
+  assert.match(html, /function tallyDotClass/);
+  assert.match(html, /"dot " \+ tallyDotClass\(\{ kind: bucket, count \}\)/);
   // CSS: a .dot.running is blue and pulses by default; an idle (zero-count) one is stilled,
   // keeping the blue but dropping the motion.
   assert.match(html, /\.dot\.running \{ background: var\(--color-blue\); \}/);
@@ -1183,11 +1186,14 @@ test("an idle running tally renders a solid blue dot with no pulse; genuinely-ru
 test("both pages toggle a root paused flag on the body so one rule freezes every dot (§5, #100)", () => {
   // The pause script owns the single control: it flips data-paused on the body, the common
   // root above both the green live dots and the blue running dots. Nothing else per-element.
+  // The single root flag is `freezeIntent(...).bodyPaused` (dashboard-visual-state.ts,
+  // asserted directly there: true⇒"true", false⇒"false"), which the glue writes onto the
+  // body — the one place pause reaches, never per-element.
   for (const html of [
     renderLandingShell(["alpha"]),
     renderStatusPage({ project: "beta", waves: [], parked: [] }),
   ])
-    assert.match(html, /document\.body\.dataset\.paused = String\(paused\)/);
+    assert.match(html, /document\.body\.dataset\.paused = intent\.bodyPaused/);
 });
 
 test("projectRunState resolves a card's state by the §3 precedence: parked > failure > running > completed (#83)", () => {
@@ -1663,9 +1669,10 @@ test("renderLandingShell draws each card a run-state-coloured progress bar sized
 
 test("renderLandingShell renders the card tally as status-dot chips, not plain text (#80)", () => {
   const html = renderLandingShell(["alpha"]);
-  // The tally builds one pill chip per bucket, each with a status dot scoped to .dot.
+  // The tally builds one pill chip per bucket, each with a status dot scoped to .dot,
+  // whose class comes from the shared `tallyDotClass` reducer (dashboard-visual-state.ts).
   assert.match(html, /el\("span", "tally-chip"\)/);
-  assert.match(html, /"dot " \+ bucket/);
+  assert.match(html, /"dot " \+ tallyDotClass\(\{ kind: bucket, count \}\)/);
   // The chip treatment matches the campaign page's chips — a bordered pill.
   assert.match(html, /\.tally-chip \{[^}]*border-radius: 999px/);
   // The queued dot is the dim unstarted grey; running/parked reuse the shared .dot colours.
@@ -1749,8 +1756,14 @@ test("the updated readout reads 'Paused' while paused and counts up otherwise, o
     renderStatusPage({ project: "beta", waves: [], parked: [] }),
   ]) {
     // While paused the "updated Ns ago" readout reads "Paused" instead of ageing a
-    // now-frozen count; it resumes counting on unpause.
-    assert.match(html, /updatedEl\.textContent = paused \? "Paused" :/);
+    // now-frozen count; it resumes counting on unpause. The mapping is `freezeIntent`'s
+    // `updatedText` (dashboard-visual-state.ts, asserted directly there: paused⇒"Paused",
+    // live⇒"updated Ns ago"), single-sourced into both pages and written onto the readout.
+    assert.match(html, /function freezeIntent/);
+    assert.match(
+      html,
+      /updatedEl\.textContent = freezeIntent\(\{ paused, buffered, lastUpdate, now: Date\.now\(\) \}\)\.updatedText/,
+    );
     // Toggling pause re-renders the readout immediately, so "Paused" appears on the click
     // rather than up to a second later on the next interval tick.
     assert.match(html, /renderState\(\);\s*renderUpdated\(\);/);
@@ -5775,9 +5788,12 @@ test("renderStatusPage updates live off /api/events, soft-refreshing on a ping u
   assert.match(html, /if \(paused \|\| isComposing\(\)\) \{ buffered\+\+;/);
   // Pause is a presentation freeze that flushes on resume, exactly as the landing's is.
   assert.match(html, /pauseBtn\.addEventListener\("click"/);
+  // The "updated Ns ago" readout is `freezeIntent`'s `updatedText` (dashboard-visual-state.ts,
+  // asserted directly there), single-sourced into this page and written onto the readout.
+  assert.match(html, /function freezeIntent/);
   assert.match(
     html,
-    /"updated " \+ Math\.round\(\(Date\.now\(\) - lastUpdate\) \/ 1000\) \+ "s ago"/,
+    /updatedEl\.textContent = freezeIntent\(\{ paused, buffered, lastUpdate, now: Date\.now\(\) \}\)\.updatedText/,
   );
 });
 

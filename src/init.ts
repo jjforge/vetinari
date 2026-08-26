@@ -128,7 +128,8 @@ export function describeInit(plan: InitPlan): string {
     lines.push("");
     lines.push("Next steps:");
     lines.push(`  1. Add your toolchain to ${DOCKERFILE_DEST} and your gates to ${CONFIG_DEST}.`);
-    lines.push("  2. Build the image, then run `vetinari baseline` to prove every gate green.");
+    lines.push(`  2. Put your agent credential in ${LOCAL_DIR}/.env as CLAUDE_CODE_OAUTH_TOKEN — the container reads it there, and the first real \`run\` is the first thing that needs it.`);
+    lines.push("  3. Build the image, then run `vetinari baseline` to prove every gate green.");
   }
 
   return lines.join("\n");

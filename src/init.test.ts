@@ -155,6 +155,14 @@ test("describeInit summarizes the full scaffold and the next steps", () => {
   assert.match(text, /build/i);
 });
 
+test("describeInit's next steps name the agent credential file and its key", () => {
+  const text = describeInit(computeInit({ hasConfig: false, hasLocalDir: false, gitignore: undefined, ...TEMPLATES }));
+
+  // The credential the first real `run` needs — named where a new project will look.
+  assert.match(text, /\.vetinari\.local\/\.env/);
+  assert.match(text, /CLAUDE_CODE_OAUTH_TOKEN/);
+});
+
 test("describeInit leads with a clear refusal when a config already exists", () => {
   const text = describeInit(computeInit({ hasConfig: true, hasLocalDir: false, gitignore: "node_modules/\n", ...TEMPLATES }));
 

@@ -322,12 +322,17 @@ export function pendingAnnouncements(projects: GatewayProject[], index: ReplyInd
  * drain's routing decision is testable without a send.
  */
 export function resolveRecordDestination(project: GatewayProject, record: OutboundRecord): { destination?: string; conn?: TgConn } {
-  const destination = resolveDestination(project.notify ?? {}, record.category, record.event);
-  if (!project.conn) return { destination };
-  const named = destination ? project.destinations?.[destination] : undefined;
+  const resolved = resolveDestination(project.notify ?? {}, record.category, record.event);
+  if (!project.conn) return { destination: resolved };
+  const named = resolved ? project.destinations?.[resolved] : undefined;
   // A named destination overrides the chat/thread but rides the project's bot
   // token; with no map (or an unlisted name) everything falls to the default conn.
   const conn = named ? { token: project.conn.token, chat: named.chat, thread: named.thread } : project.conn;
+  // Delivered on the default connection with nothing named: report "default"
+  // (the docs' "default chat") so the stamp and `gateway-routed` log read as a
+  // real destination, never `undefined`. Only when `conn` exists — a project
+  // with no bot is genuinely undeliverable and keeps its unresolved destination.
+  const destination = resolved ?? "default";
   return { destination, conn };
 }
 

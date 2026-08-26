@@ -96,11 +96,25 @@ test("applyCarve keeps a merged member and drops an unstarted one", () => {
   assert.deepEqual(res.remaining, [["611", "640"]]); // 701's wave emptied and dropped
 });
 
-test("applyCarve drops a parked member and flags its record for clearing", () => {
-  // 701 is parked; carving it must both drop it and clear its parked record.
+test("applyCarve drops a parked member but preserves its record by default (resumable)", () => {
+  // 701 is parked; carving it drops it from the plan but leaves its parked record
+  // intact so its branch/worktree/session can be investigated and resumed (ADR 0013).
   const res = applyCarve(
     { waves: [["611"], ["701"]], outcomes: outcomesFrom({ "701": "parked" }) },
     ["701"],
+  );
+
+  assert.deepEqual(res.dropped, ["701"]);
+  assert.deepEqual(res.parkedToClear, []); // preserved, not cleared
+  assert.deepEqual(res.remaining, [["611"]]);
+});
+
+test("applyCarve with purge drops a parked member and clears its record (the true drop)", () => {
+  // `--purge` is the rare true-drop: the parked record is cleared, reclaiming the work.
+  const res = applyCarve(
+    { waves: [["611"], ["701"]], outcomes: outcomesFrom({ "701": "parked" }) },
+    ["701"],
+    { purge: true },
   );
 
   assert.deepEqual(res.dropped, ["701"]);
@@ -132,7 +146,7 @@ test("applyCarve keeps a merged/green target but still drops its unfinished depe
   );
 
   assert.deepEqual(res.dropped, ["701", "712"]);
-  assert.deepEqual(res.parkedToClear, ["701"]);
+  assert.deepEqual(res.parkedToClear, []); // preserved by default
   assert.deepEqual(res.remaining, [["640"]]);
 });
 

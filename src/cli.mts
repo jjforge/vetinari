@@ -85,8 +85,10 @@ const USAGE = `vetinari <mode> [args]
                            campaign: appends a carve event the loop honors at the next
                            wave boundary (the in-flight wave finishes; only future waves
                            shrink). Banked work stays — a merged/green member is kept,
-                           only parked/not-yet-started ones leave. Needs a running
-                           campaign (--dry-run to only preview the closure).
+                           only parked/not-yet-started ones leave. A carved issue's
+                           parked record (branch/worktree/session) is preserved so it
+                           stays resumable; --purge is the rare true-drop that clears
+                           it. Needs a running campaign (--dry-run to only preview).
   carve <issue> <batch…>   drop <issue> + everything blocked by it, then run the rest
                            as a fresh reduced campaign from the plan you supply
                            (--dry-run to only print the reduced plan)
@@ -526,7 +528,10 @@ switch (mode) {
   }
   case "carve": {
     const dryRun = rest.includes("--dry-run");
-    const positional = rest.filter((a) => a !== "--dry-run");
+    // `--purge` is the rare true-drop: clear the carved issue's parked record too,
+    // discarding its resumable session. Default carve preserves it (ADR 0013).
+    const purge = rest.includes("--purge");
+    const positional = rest.filter((a) => a !== "--dry-run" && a !== "--purge");
     const [target, ...batchArgs] = positional;
     if (!target)
       throw new Error(
@@ -578,7 +583,7 @@ switch (mode) {
         target,
         cfg.blockedBy,
       );
-      const applied = applyCarve(reduced, removed);
+      const applied = applyCarve(reduced, removed, { purge });
       const { remaining, dropped, parkedToClear } = applied;
       const kept = removed.filter((id) => !dropped.includes(id));
       console.log(
@@ -590,6 +595,13 @@ switch (mode) {
       console.log(
         `remaining campaign: ${remaining.length ? remaining.map((w) => `"${w.join(" ")}"`).join(" ") : "(nothing left to run)"}`,
       );
+      const parkedDropped = dropped.filter((id) => reduced.outcomes.get(id) === "parked");
+      if (parkedDropped.length)
+        console.log(
+          purge
+            ? `purging parked ${parkedDropped.map((i) => `#${i}`).join(", ")} — clearing their records and resumable sessions.`
+            : `preserving parked ${parkedDropped.map((i) => `#${i}`).join(", ")} — branch/worktree/session kept, resumable (--purge to drop).`,
+        );
       if (dryRun) {
         // Structured closure alongside the human text, so a consumer (the
         // aggregated dashboard's carve preview) can name the exact closure
@@ -600,8 +612,10 @@ switch (mode) {
         break;
       }
 
-      // Clear the parked records of the dropped issues so the gateway stops
-      // asking about tasks we have just carved away.
+      // Preserve carved work by default: the dropped issue leaves the plan but its
+      // parked record (branch/worktree/session) stays so it can be investigated and
+      // resumed (ADR 0013). Only `--purge` clears it — the rare true-drop — and
+      // `applyCarve` reflects that in `parkedToClear`.
       if (parkedToClear.length) clearParkedForTasks(cfg, parkedToClear);
       // Append the carve event — the running loop re-reads it at the next wave
       // boundary; `removed` is the closure so the fold replays the same rule.

@@ -75,7 +75,7 @@ export interface AppliedCarve {
   remaining: string[][];
   /** the closure members that actually leave the plan (parked or unstarted). */
   dropped: string[];
-  /** the subset of `dropped` that was parked — its parked record to clear. */
+  /** parked members whose record to clear — empty unless `purge` was set (ADR 0013). */
   parkedToClear: string[];
 }
 
@@ -85,10 +85,15 @@ export interface AppliedCarve {
  * is treated as not-yet-started. Only `parked`/`unstarted` members are dropped —
  * `completed` (merged or green) stays, and anything in-flight (`running`) or
  * failed is left for the wave it is in to resolve.
+ *
+ * A dropped parked member leaves the plan either way, but its parked record is
+ * kept by default so its branch/worktree/session stay resumable (ADR 0013);
+ * `purge` is the rare true-drop that flags the record for clearing.
  */
 export function applyCarve(
   campaign: { waves: string[][]; outcomes: Map<string, string> },
   removed: string[],
+  opts: { purge?: boolean } = {},
 ): AppliedCarve {
   const dropped: string[] = [];
   const parkedToClear: string[] = [];
@@ -96,7 +101,7 @@ export function applyCarve(
     const status = campaign.outcomes.get(id) ?? "unstarted";
     if (status === "unstarted" || status === "parked") {
       dropped.push(id);
-      if (status === "parked") parkedToClear.push(id);
+      if (status === "parked" && opts.purge) parkedToClear.push(id);
     }
   }
   const drop = new Set(dropped);

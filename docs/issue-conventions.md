@@ -34,6 +34,14 @@ Touches (existing files): `fileset.ts`, `src/cli.mts`
 
 Only that line is read, so naming other filenames in the prose (an env file, a config, a spec link) is harmless. Paths reduce to their basename, so cite a file however you like. A ticket with no marker line falls back to a whole-body scan and is far likelier to resolve as under-specified — so `campaign-plan` halts on it; the marker line is what makes a ticket schedulable unattended.
 
+**Files the ticket _creates_ go on a `Creates:` line** — a peer of `Touches:`/`Files:` — because a new file is legitimately absent from the tree, and a `Touches:` cite that the tree lacks is treated as a stale or typo'd note (it forbids confidence). `Creates:` cites are counted for wave-disjointness like any other, but are exempt from that tree-presence check:
+
+```
+Creates (new files): `event-log.ts`, `event-log.test.ts`
+```
+
+A tracer-bullet ticket whose whole job is to add a new module carries only a `Creates:` line; a ticket that both edits existing files and adds new ones carries both a `Touches:` and a `Creates:` line. Without this, a new-file-only ticket cites basenames the tree does not have yet and resolves under-specified, so `campaign-plan` cannot schedule it.
+
 ## Closing — merge → `pending-verify` → close
 
 A merge is **not** a close (and a plain `git merge` never auto-closes anyway). When work lands on a branch, label it **`pending-verify`**; close it only after a **local end-to-end validation** — driving the change on a local run/stack is enough, it need not reach a remote or production. Then `gh issue close <n> -c "…"` and the label drops with it. An epic closes when its last child closes.

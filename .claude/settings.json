@@ -2,5 +2,10 @@
   "enabledPlugins": {
     "mattpocock-skills@mattpocock": true,
     "ponytail@ponytail": true
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "npx vetinari statusline --base-b64 YmFzaCAnL2hvbWUvemFjaC8uY2xhdWRlL3N0YXR1c2xpbmUuc2gn",
+    "refreshInterval": 5
   }
 }

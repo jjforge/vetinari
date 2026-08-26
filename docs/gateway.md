@@ -151,22 +151,30 @@ the gateway resumes that exact task; send `/status` for a text summary; send
 `carve <issue>` (or `carve <project> <issue>` when several campaigns share a bot)
 to preview and, on a `yes` reply, carve.
 
-A backgrounded `gateway &` dies with its shell, so run it as a **systemd user
-service** — one always-on daemon, restarted on crash, brought back at boot. If
-you are migrating from `dispatch`, the next section rewrites your existing unit for
-you. On a fresh host, install a unit whose `ExecStart` just `exec`s `vetinari
-gateway` (no `WorkingDirectory` — the gateway fronts every project, not one; and no
-env file to source — the gateway holds no secrets of its own, reading each
-project's credentials live from its base location), then:
+A backgrounded `gateway &` dies with its shell, so a park raised after you close
+the terminal goes unanswered. Run it as a **systemd user service** instead — one
+always-on daemon, restarted on crash, brought back at boot. If you are migrating
+from `dispatch`, the next section rewrites your existing unit for you. On a fresh
+host, install the host-level unit tracked in this repo at
+[`systemd/vetinari-gateway.service`](../systemd/vetinari-gateway.service): it has
+**no `WorkingDirectory`** (the gateway fronts every project, not one) and sources
+no env file (it stores no global credentials, reading each project's live from its
+base location):
 
 ```bash
+install -Dm644 systemd/vetinari-gateway.service \
+  ~/.config/systemd/user/vetinari-gateway.service
+
 systemctl --user daemon-reload
 systemctl --user enable --now vetinari-gateway   # start now + at every login
-loginctl enable-linger "$USER"                       # ...and at boot, without a login
+loginctl enable-linger "$USER"                       # and at boot, without a login session
 ```
 
-`enable-linger` is what makes it survive a headless reboot. Operate it with
-`systemctl --user status|restart vetinari-gateway`.
+`enable --now` alone brings the daemon back only when you log in; **`enable-linger`
+is what makes it survive a headless reboot**, telling systemd to start your user
+manager at boot. Operate it with `systemctl --user status|restart vetinari-gateway`;
+gateway detail goes to `journalctl --user -u vetinari-gateway`. Do not also run an
+inline `gateway &`, or the two consumers fight over the bot's updates.
 
 ## 4. Migrating off the per-project `dispatch` unit
 
@@ -181,9 +189,9 @@ npx vetinari migrate             # apply it
 Alongside the layout move (config → `vetinari/`, old `.sandcastle/` state →
 `.vetinari.local/`, `.gitignore`), `migrate` does the two gateway-coupled parts:
 
-- **Deletes any stale `gateway.env`.** The gateway holds no secrets of its own
-  (ADR 0002) — it reads each project's credentials live from that project's base
-  location — so `~/.config/vetinari/gateway.env` holds nothing legitimate. `migrate`
+- **Deletes any stale `gateway.env`.** The gateway stores no global credentials
+  (ADR 0002) — it reads each project's live from that project's base location — so
+  `~/.config/vetinari/gateway.env` holds nothing legitimate. `migrate`
   removes it; per-project secrets stay where they belong, in each project's own
   `.vetinari.local/host.env`.
 - **Renames the host-side secrets file.** An existing `.vetinari.local/orchestrator.env`

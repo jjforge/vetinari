@@ -218,55 +218,26 @@ only**: it never runs `campaign` and never pushes; paste the wave args into
 ### In your Claude Code status bar
 
 `statusline` prints two lines for the Claude Code status bar: line 1 mirrors
-Claude Code's own default (model, directory, git branch, context-used %) with the
-model name trimmed of its `(1M context)` suffix; line 2 is the Vetinari run:
-the wave in flight and a count per status (the 🏰 marks it; no project name,
-since line 1 already shows the directory), so a running campaign is visible
-without leaving the editor:
+Claude Code's own default (model, directory, git branch, context-used %), line 2
+is the Vetinari run (the wave in flight and a count per status, marked 🏰), so a
+running campaign is visible without leaving the editor:
 
 ```
 Opus 4.8 · jjforge · develop · 24%
 🏰 wave 2/3 · ✅2 🔄1 ⏸1 ⚪1
 ```
 
-Wire it in with `vetinari statusline install`, which edits the project's committed
+Wire it in with one command, which edits the project's committed
 `.claude/settings.json` for you:
 
-```
-vetinari statusline install                      # default: npx vetinari statusline
-vetinari statusline install --run-command ".vetinari.local/run statusline"
-vetinari statusline install --dry-run            # print the plan, write nothing
-vetinari statusline uninstall                    # restore what it wrapped
+```bash
+vetinari statusline install      # or: statusline uninstall
 ```
 
-Install **respects a status line you already have** — including one set at the user
-level in `~/.claude/settings.json`: whatever is configured stays as line 1, rendered
-exactly as it is (colours and all), and the 🏰 campaign line is added *under* it
-(never replaced), so a customized bar keeps working. Vetinari runs your original
-command for line 1 and falls back to its own only when yours produces nothing. It is idempotent, and
-`uninstall` restores your previous status line exactly (or removes `statusLine`
-when Vetinari wrapped nothing). Pass `--run-command` to match however you invoke the
-CLI in your project so the `vetinari` import and the config both resolve (default
-`npx vetinari statusline`).
-
-Or wire it by hand — the installed entry is just:
-
-```json
-{
-  "statusLine": { "type": "command", "command": ".vetinari.local/run statusline", "refreshInterval": 5 }
-}
-```
-
- `refreshInterval` matters: Claude Code
-refreshes the status line on its own events, but nothing tells it when the
-orchestrator's log changes; polling every few seconds keeps the line live
-during a run. It reads Claude Code's JSON on stdin, resolves the config from the
-workspace directory, and derives line 2 from the log alone (no network), so it
-stays fast. Line 1's fields come from Claude Code's own stdin JSON
-(`model.display_name`, `workspace.current_dir`, `context_window.used_percentage`)
-plus a `git` call for the branch. Outside a Vetinari project line 2 is simply
-omitted, leaving line 1; a non-zero exit would blank the bar, so it never
-errors out.
+Install keeps a status line you already have (including one set at the user level
+in `~/.claude/settings.json`) as line 1 and adds the 🏰 line under it, never
+replacing it. The flags (`--run-command`, `--dry-run`), the by-hand wiring, and
+how the wrapping works are in [`docs/statusline.md`](docs/statusline.md).
 
 ### Capture what the agent notices in passing
 
@@ -338,36 +309,11 @@ five categories and the full routing model are in
 [`docs/gateway.md`](docs/gateway.md). With no `notify` map, every category falls
 back to the project's default chat.
 
-### Run the gateway as a service (survives reboot)
-
-A backgrounded `gateway &` dies with its shell, so a park raised after you close
-the terminal goes unanswered. Run it as a **systemd user service** instead: one
-always-on daemon, restarted on crash, brought back at boot. The host-level unit is
-tracked in this repo at [`systemd/vetinari-gateway.service`](systemd/vetinari-gateway.service);
-it has **no `WorkingDirectory`** (the gateway fronts every project, not one) and
-sources no env file; the gateway stores no global credentials of its own:
-
-```bash
-install -Dm644 systemd/vetinari-gateway.service \
-  ~/.config/systemd/user/vetinari-gateway.service
-
-systemctl --user daemon-reload
-systemctl --user enable --now vetinari-gateway   # start now + at every login
-loginctl enable-linger "$USER"                      # and at boot, without a login session
-```
-
-The gateway loads each project's gitignored `.vetinari.local/host.env` (above)
-when it sends; it stores no global credentials, so there is no host-level
-`gateway.env` to source (`migrate` deletes any stale one left by an older layout). Keep bot creds out of `.vetinari.local/.env`, which is injected
-into agent containers.
-
-`enable --now` alone brings the daemon back only when you log in; **`enable-linger`
-is what makes it survive a headless reboot**: it tells systemd to start your user
-manager at boot. Operate it with `systemctl --user status|restart vetinari-gateway`;
-gateway detail goes to `journalctl --user -u vetinari-gateway`. **This replaces
-the inline `gateway &`**: do not run both, or the two consumers fight over the
-bot's updates. Migrating from the retired per-project `dispatch` poller?
-`npx vetinari migrate` rewrites your old unit into this one; see
+A backgrounded `gateway &` dies with its shell, so for anything past a quick try
+run it as a **systemd user service**: one always-on daemon, restarted on crash,
+and (with `enable-linger`) brought back at a headless reboot. The tracked unit at
+[`systemd/vetinari-gateway.service`](systemd/vetinari-gateway.service), the install
+steps, and the `dispatch`→gateway migration are all in
 [`docs/gateway.md`](docs/gateway.md).
 
 ## Skills in the agent container
@@ -432,77 +378,24 @@ each a second time.
    as merge conflicts you can see; a dependency doesn't surface at all: task B
    builds green against the pre-A contract and merges clean.
 
-## Update this package
+## Where to go deeper
 
-**Installed from git** (`github:jjforge/vetinari`): npm copies the repo
-at a commit, so updates are explicit:
+The README stops at the reader's first hour. The operational reference lives in
+`docs/`:
 
-```bash
-npm update vetinari                          # move to the tip of main
-npm install github:jjforge/vetinari#<sha>           # or pin to a commit
-```
-
-Then re-run `npx vetinari baseline` in that project. Its image, gates, and
-config are what an update has to keep working, and `baseline` exercises all
-three without agent cost.
-
-**Installed from a local path** (`file:../vetinari`): npm creates a
-**symlink**, so the consuming project always runs your working tree and a `git
-pull` in the package directory takes effect immediately with no reinstall.
-Convenient while developing the orchestrator, and worth knowing when debugging:
-a consuming project has no pinned version to blame, because it has no pin.
-
-Config changes are the other update path. `defineConfig` is typed, so `npx tsc
---noEmit` in the consuming project catches a renamed or dropped field.
-
-## Update `@ai-hero/sandcastle`
-
-> **Temporary fork pin.** `@ai-hero/sandcastle` is pinned to a fork,
-> `git+https://github.com/zachthieme/sandcastle.git`, at the `state-dir-prebuilt`
-> commit, for the `stateDir` option vetinari needs (it routes sandcastle's own
-> artifacts under `.vetinari.local/` instead of a stray `.sandcastle/`). That
-> branch carries a prebuilt `dist/`, because npm 11 blocks a dependency's
-> build-on-install scripts by default and a git install could not otherwise build
-> it. The change itself is upstream as
-> [mattpocock/sandcastle#961](https://github.com/mattpocock/sandcastle/pull/961);
-> this pin is temporary, to be dropped for a published `@ai-hero/sandcastle` (the
-> flow below) once that PR lands in a release. The clean feature branch
-> (`configurable-state-dir`, what the PR tracks) carries no `dist/`.
-
-When on a published release, the dependency is pinned `^0.12.0`, so npm's caret
-allows patches only. sandcastle is pre-1.0, so a minor can carry behavioural
-changes; pinning to patches lets us adopt a minor deliberately, after re-verifying
-the integration points below, rather than by surprise.
-
-```bash
-npm install @ai-hero/sandcastle@latest   # here, and in each consuming project
-npm run check-contract                   # ~1s, no Docker: is the surface intact?
-npx vetinari baseline              # container + gate path still work
-npx vetinari run <small task>      # agent + session + resume still work
-```
-
-Climb all four rungs, because each sees what the one below cannot.
-`check-contract` catches a renamed export or dropped option in about a second;
-`tsc` alone will **not**, because vetinari probes a few optional members of
-sandcastle's result objects at runtime. `baseline` proves the container path.
-Only a real `run` exercises the agent, the gate→resume cycle, and session capture.
-
-vetinari builds on four sandcastle behaviours that no static check can see. These
-are the integration points `check-contract` prints, and the ones we re-verify on
-any minor bump:
-
-1. **A sandbox command returns a non-zero exit code rather than throwing.** This
-   is what lets a red gate read as red, so it is the behaviour we depend on most
-   and the first we check on an upgrade.
-2. **`resumeSession` is used without `maxIterations > 1`.**
-3. **An idle agent throws a catchable timeout**, which is how a stall is detected
-   and parked.
-4. **Session capture writes host-side JSONL, and re-creating a sandbox on an
-   existing branch reuses that worktree**: together, what make park→answer
-   survive a fresh process.
-
-Consuming projects pin the library themselves (it's a peer in practice), so bump
-it there too and re-run that project's `baseline`.
+- **[`docs/gateway.md`](docs/gateway.md)** covers the Telegram gateway end to
+  end: credentials, the routing model, running it as a systemd service, and the
+  `dispatch`→gateway migration.
+- **[`docs/statusline.md`](docs/statusline.md)** has the status-line internals:
+  install flags, wiring it by hand, and how it wraps a status line you already
+  have.
+- **[`docs/upgrading.md`](docs/upgrading.md)** covers updating this package and
+  `@ai-hero/sandcastle` (the temporary fork pin, the `check-contract`→`baseline`→
+  `run` ladder, and the four integration points to re-verify on a minor bump).
+- **[`docs/campaigns.md`](docs/campaigns.md)** covers planning and running campaigns.
+- **[`docs/adr/`](docs/adr/)** holds the architecture decisions, including
+  [ADR 0011](docs/adr/0011-configuration-layers.md), the configuration-layers
+  model the operating rules above lean on.
 
 ## Modes
 

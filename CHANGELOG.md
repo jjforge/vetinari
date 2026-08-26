@@ -22,6 +22,7 @@ Within a milestone each bold section label appears at most once.
 
 **Breaking changes:**
 - [ops] The static `systemd/vetinari-gateway.service` file is removed — a committed unit could only carry the crash-looping `bash -lc 'exec vetinari gateway'` `ExecStart`, so `install -Dm644 systemd/vetinari-gateway.service …` no longer works. Use `vetinari gateway install` instead (#133).
+- [user] `carve <issue>` now **preserves** the carved issue's parked record (branch/worktree/session) instead of clearing it, so the work stays resumable; pass `--purge` for the old drop-everything behaviour (#145).
 
 **New features:**
 - [user] Campaign agents write their changelog entry to `changelog.d/<task-id>.md`
@@ -39,10 +40,13 @@ Within a milestone each bold section label appears at most once.
 - [user] Tickets can declare files they create with a `Creates:` marker line (peer of `Touches:`/`Files:`); its cites feed wave-disjointness but are exempt from the tree-presence check, so a new-file-only tracer-bullet ticket is now schedulable by `campaign-plan` (#114).
 - [ops] `vetinari gateway install [--dry-run]` writes the host-level systemd unit to `~/.config/systemd/user/vetinari-gateway.service` with a fully absolute `node` + tsx-loader + CLI `ExecStart` resolved for this host — no `bash -lc`, `env`, `npx`, or `PATH` dependency. Re-run after a node/tsx upgrade, which re-pins the baked paths (#133).
 - [ops] The dogfood config wires `onIssueMerged: githubMarkPendingVerify("jjforge/vetinari")`, so a campaign now auto-labels each merged issue `ready-for-agent` → `pending-verify` once the merged-base gate passes — the first hop of merge→pending-verify→close, previously a manual step (#103).
+- [user] `carve --purge <issue>` is the rare true-drop that clears the carved issue's parked record and its resumable session (#145).
 
 **Improvements:**
 - [user] `vetinari init`'s next steps now name `.vetinari.local/.env` and the `CLAUDE_CODE_OAUTH_TOKEN` key, so a new project is told where the agent credential lives — the first real `run` no longer fails as the first mention of it (#138).
 - [user] The cross-project event log now shows on phone-width screens (≤640px, e.g. iOS Safari) — it renders under the cards instead of being hidden (#125).
+- [ops] Campaign wave integration is now non-atomic on a merge conflict: the conflicting green is quarantined (its branch, worktree, and agent session kept intact so it is resumable) while the greens already merged this wave stay on the base and the wave continues — no more `reset --hard` un-merging the whole wave and halting the campaign (#142).
+- [internal] `integrateGreens` returns a `quarantined` set and aborts only the conflicting merge; a new `quarantined` event records the held issue and its branch (#142).
 
 **Bug fixes:**
 - [ops] Gateway now logs and stamps `destination: "default"` for an outbound record delivered to a project's default chat with no notify mapping, instead of the misleading `destination: undefined` (#106).

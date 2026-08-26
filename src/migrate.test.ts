@@ -3,7 +3,15 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { applyLayoutMigration, computeLayoutMigration, describeMigration, numericWeightToTier, scanLayout } from "./migrate.ts";
+import {
+  applyLayoutMigration,
+  computeLayoutMigration,
+  describeMigration,
+  numericWeightToTier,
+  resolveGatewayExecStart,
+  scanLayout,
+  systemdQuoteArg,
+} from "./migrate.ts";
 
 let counter = 0;
 const tmpProject = () => {
@@ -197,6 +205,51 @@ test("numericWeightToTier maps an old numeric hostWeight to the nearest containe
   assert.equal(numericWeightToTier(4.5), "high");
 });
 
+test("systemdQuoteArg leaves an ordinary absolute path unquoted", () => {
+  // No whitespace or metacharacters — a clean path needs no quoting, so the line
+  // reads exactly like the paths systemd will exec.
+  assert.equal(systemdQuoteArg("/opt/node/bin/node"), "/opt/node/bin/node");
+  assert.equal(systemdQuoteArg("file:///app/node_modules/tsx/dist/loader.mjs"), "file:///app/node_modules/tsx/dist/loader.mjs");
+});
+
+test("systemdQuoteArg double-quotes an argument with a space (a home dir with a space)", () => {
+  // systemd splits ExecStart on whitespace, so a path with a space must be quoted
+  // or it would be read as two arguments.
+  assert.equal(systemdQuoteArg("/home/z z/node"), '"/home/z z/node"');
+  // Embedded quotes and backslashes are escaped inside the double quotes.
+  assert.equal(systemdQuoteArg('a "b" c'), '"a \\"b\\" c"');
+  assert.equal(systemdQuoteArg("a\\b c"), '"a\\\\b c"');
+});
+
+test("resolveGatewayExecStart bakes an absolute node + tsx-loader + cli invocation, PATH-independent", () => {
+  const line = resolveGatewayExecStart({
+    execPath: "/opt/node/bin/node",
+    execArgv: ["--require", "/app/node_modules/tsx/dist/preflight.cjs", "--import", "file:///app/node_modules/tsx/dist/loader.mjs"],
+    argv1: "/app/src/cli.mts",
+  });
+
+  assert.equal(
+    line,
+    "ExecStart=/opt/node/bin/node --require /app/node_modules/tsx/dist/preflight.cjs " +
+      "--import file:///app/node_modules/tsx/dist/loader.mjs /app/src/cli.mts gateway",
+  );
+  // Absolute node, the gateway command last, and NONE of the PATH-dependent launchers.
+  assert.match(line, /^ExecStart=\/opt\/node\/bin\/node /);
+  assert.match(line, / gateway$/);
+  assert.doesNotMatch(line, /\bbash\b/);
+  assert.doesNotMatch(line, /\benv\b/);
+  assert.doesNotMatch(line, /\bnpx\b/);
+});
+
+test("resolveGatewayExecStart quotes a launch path that contains a space", () => {
+  const line = resolveGatewayExecStart({
+    execPath: "/home/z z/.nvm/node",
+    execArgv: [],
+    argv1: "/app/src/cli.mts",
+  });
+  assert.match(line, /ExecStart="\/home\/z z\/\.nvm\/node" \/app\/src\/cli\.mts gateway/);
+});
+
 test("computeLayoutMigration rewrites a numeric hostWeight into a containerShare tier in an already-migrated config", () => {
   const plan = computeLayoutMigration({
     configRel: "vetinari/config.mts",
@@ -264,11 +317,20 @@ const DISPATCH_UNIT = [
   "",
 ].join("\n");
 
+// A resolved, PATH-independent launch chain as `scanLayout` would hand the planner
+// on this host — absolute node + tsx loader flags + the cli entrypoint.
+const GATEWAY_EXEC_START = resolveGatewayExecStart({
+  execPath: "/opt/node/bin/node",
+  execArgv: ["--require", "/app/node_modules/tsx/dist/preflight.cjs", "--import", "file:///app/node_modules/tsx/dist/loader.mjs"],
+  argv1: "/app/src/cli.mts",
+});
+
 test("computeLayoutMigration rewrites the per-project dispatch unit into the host-level gateway service", () => {
   const plan = computeLayoutMigration({
     gatewayConfigDir: "/home/z/.config/vetinari",
     systemdUnitPath: "/home/z/.config/systemd/user/vetinari-gateway.service",
     systemdUnit: DISPATCH_UNIT,
+    gatewayExecStart: GATEWAY_EXEC_START,
   });
 
   assert.ok(plan.unit, "expected a unit rewrite");
@@ -276,9 +338,13 @@ test("computeLayoutMigration rewrites the per-project dispatch unit into the hos
   // No longer bound to one project's directory...
   assert.doesNotMatch(plan.unit!.content, /WorkingDirectory=/);
   assert.doesNotMatch(plan.unit!.content, /jjforge/);
-  // ...and it runs the gateway, not the retired dispatch poller.
-  assert.match(plan.unit!.content, /exec vetinari gateway/);
+  // ...and it launches the gateway via the resolved absolute chain, not the retired
+  // dispatch poller — and never through the crash-looping bash -lc / env / npx path.
+  assert.match(plan.unit!.content, new RegExp(GATEWAY_EXEC_START.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.doesNotMatch(plan.unit!.content, /run dispatch/);
+  assert.doesNotMatch(plan.unit!.content, /bash -lc/);
+  assert.doesNotMatch(plan.unit!.content, /\benv\b/);
+  assert.doesNotMatch(plan.unit!.content, /\bnpx\b/);
   // The gateway holds no secrets of its own (ADR 0002), so the unit sources no
   // gateway.env — it reads each project's credentials live from the base location.
   assert.doesNotMatch(plan.unit!.content, /source/);
@@ -290,12 +356,15 @@ test("computeLayoutMigration leaves an already-gateway unit untouched (idempoten
     gatewayConfigDir: "/home/z/.config/vetinari",
     systemdUnitPath: "/home/z/.config/systemd/user/vetinari-gateway.service",
     systemdUnit: DISPATCH_UNIT,
+    gatewayExecStart: GATEWAY_EXEC_START,
   });
-  // Feed the rewritten unit straight back in — a second migrate must change nothing.
+  // Feed the rewritten unit straight back in — a second migrate, resolving the same
+  // host's launch chain, must change nothing.
   const second = computeLayoutMigration({
     gatewayConfigDir: "/home/z/.config/vetinari",
     systemdUnitPath: "/home/z/.config/systemd/user/vetinari-gateway.service",
     systemdUnit: first.unit!.content,
+    gatewayExecStart: GATEWAY_EXEC_START,
   });
 
   assert.equal(second.unit, undefined);
@@ -346,6 +415,7 @@ test("applyLayoutMigration deletes the stale gateway.env and writes the rewritte
     gatewayEnv: readFileSync(join(gatewayDir, "gateway.env"), "utf8"),
     systemdUnitPath: unitPath,
     systemdUnit: "ExecStart=exec ./.sandcastle/run dispatch\n",
+    gatewayExecStart: GATEWAY_EXEC_START,
   });
   // apply must delete the stale env and create the (absent) unit dir before writing.
   const result = applyLayoutMigration(dir, plan);
@@ -354,7 +424,7 @@ test("applyLayoutMigration deletes the stale gateway.env and writes the rewritte
   assert.ok(!existsSync(join(gatewayDir, "gateway.env")));
 
   const unit = readFileSync(unitPath, "utf8");
-  assert.match(unit, /exec vetinari gateway/);
+  assert.match(unit, new RegExp(GATEWAY_EXEC_START.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.doesNotMatch(unit, /run dispatch/);
   assert.doesNotMatch(unit, /gateway\.env/);
 
@@ -531,6 +601,10 @@ test("scanLayout reads the host-level gateway + systemd inputs off disk", () => 
     assert.equal(scan.gatewayEnv, "OTHER=1\n");
     assert.equal(scan.systemdUnitPath, unitPath);
     assert.match(scan.systemdUnit!, /run dispatch/);
+    // The resolved launch chain is baked from this process — an absolute node, no
+    // PATH-dependent launcher — so the rewrite is immune to systemd's clean PATH.
+    assert.match(scan.gatewayExecStart!, /^ExecStart=\//);
+    assert.doesNotMatch(scan.gatewayExecStart!, /bash -lc|\benv\b|\bnpx\b/);
 
     // Fed to the planner it produces the gateway.env deletion and the unit rewrite.
     const plan = computeLayoutMigration(scan);
@@ -580,6 +654,7 @@ test("describeMigration summarizes the gateway.env deletion and the unit rewrite
       gatewayEnv: "VETINARI_TELEGRAM_BOT_TOKEN=abc\n",
       systemdUnitPath: "/home/z/.config/systemd/user/vetinari-gateway.service",
       systemdUnit: "ExecStart=exec ./.sandcastle/run dispatch\n",
+      gatewayExecStart: GATEWAY_EXEC_START,
     }),
   );
   // The stale gateway.env is deleted, not folded into.

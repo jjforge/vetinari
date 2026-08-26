@@ -10,7 +10,7 @@ import { gateway } from "./gateway.ts";
 import { applyCarve, carveClosure, computeCarve, normalize } from "./carve.ts";
 import { describePlan, planCampaign, suggestCampaignName, underspecifiedPromptFor, waveArgs, type UnderspecifiedDecision } from "./plan.ts";
 import { defaultFileSet, ticketProse } from "./fileset.ts";
-import { applyLayoutMigration, computeLayoutMigration, describeMigration, scanLayout } from "./migrate.ts";
+import { applyLayoutMigration, computeLayoutMigration, describeMigration, resolvedGatewayUnit, scanLayout, systemdUnitPath, writeGatewayUnit } from "./migrate.ts";
 import { applyInit, computeInit, describeInit, scanInit } from "./init.ts";
 import { archiveRun } from "./archive.ts";
 import { clearParkedForTasks, enqueueOutbound, listParked, readParked } from "./state.ts";
@@ -83,6 +83,14 @@ const USAGE = `vetinari <mode> [args]
                            <issue>\` when several campaigns run on one bot):
                            previews the closure and carves the resolved project on
                            a \`yes\` reply to the preview
+  gateway install [--dry-run]
+                           write the host-level systemd unit for THIS install to
+                           ~/.config/systemd/user/vetinari-gateway.service, with a
+                           fully absolute node + tsx-loader + cli ExecStart — no
+                           bash -lc, env, npx, or PATH dependency, so it starts under
+                           systemd's clean environment (fixes the nvm/fnm/mise/asdf
+                           crash-loop). Re-run after a node/tsx upgrade (--dry-run to
+                           print the unit and write nothing)
   parked                   list parked tasks and their questions
   clear                    archive the run log + clear parked, resetting the
                            dashboard/status line to idle (automatic on clean
@@ -286,6 +294,29 @@ if (mode === "migrate") {
 // registry, so it must run BEFORE the strict cwd config load (which the gateway's
 // own directory need not satisfy).
 if (mode === "gateway") {
+  // `gateway install` writes THIS host's resolved unit — a fully absolute node +
+  // tsx-loader + cli invocation — to systemdUnitPath(). The unit can't be a static
+  // committed file: the per-host absolute launch chain (and the crash-loop it fixes,
+  // #133) is what a static `bash -lc 'exec vetinari …'` unit could never carry.
+  if (rest[0] === "install") {
+    const dryRun = rest.includes("--dry-run");
+    const path = systemdUnitPath();
+    const content = resolvedGatewayUnit();
+    console.log(`vetinari gateway install → ${path}\n\n${content}`);
+    if (dryRun) {
+      console.log("(dry run — nothing was written)");
+    } else {
+      writeGatewayUnit(path, content);
+      console.log(
+        `Wrote ${path}. Reload and start it:\n` +
+          `  systemctl --user daemon-reload\n` +
+          `  systemctl --user enable --now vetinari-gateway   # start now + at every login\n` +
+          `  loginctl enable-linger "$USER"                       # and at boot\n` +
+          `Re-run \`vetinari gateway install\` after a node or tsx upgrade — the unit pins their absolute paths.`,
+      );
+    }
+    process.exit(0);
+  }
   await gateway();
   process.exit(0);
 }

@@ -336,10 +336,12 @@ back to the project's default chat.
 
 A backgrounded `gateway &` dies with its shell, so for anything past a quick try
 run it as a **systemd user service**: one always-on daemon, restarted on crash,
-and (with `enable-linger`) brought back at a headless reboot. The tracked unit at
-[`systemd/vetinari-gateway.service`](systemd/vetinari-gateway.service), the install
-steps, and the `dispatch`→gateway migration are all in
-[`docs/gateway.md`](docs/gateway.md).
+and (with `enable-linger`) brought back at a headless reboot. Write the unit for
+your host with `npx vetinari gateway install` — it bakes a fully absolute `node` +
+tsx-loader + CLI `ExecStart` (no `bash -lc`, `env`, `npx`, or `PATH` lookup) so it
+starts under systemd's clean environment instead of crash-looping when a
+`.bashrc`-hooked node manager (nvm/fnm/mise/asdf) is off `PATH`. The install steps
+and the `dispatch`→gateway migration are in [`docs/gateway.md`](docs/gateway.md).
 
 ## Skills in the agent container
 
@@ -437,6 +439,7 @@ The README stops at the reader's first hour. The operational reference lives in
 | `migrate [--dry-run]` | move an **existing** project onto the `vetinari/` + `.vetinari.local/` layout: config → `vetinari/`, old `.sandcastle/` state → `.vetinari.local/`, `.gitignore` updated, the host-side `orchestrator.env` renamed to `host.env`, a stale `gateway.env` deleted, and the systemd unit rewritten into the gateway service (`--dry-run` to just print the plan) |
 | `answer <task> <text>` | resume a parked task with your answer |
 | `gateway` | the one host daemon fronting every registered project: sole Telegram consumer and sender: announces parked questions, routes replies (and `carve <issue>`) to the right project+task, resumes them concurrently, and hosts the status dashboard |
+| `gateway install [--dry-run]` | write the host-level systemd unit for this install to `~/.config/systemd/user/vetinari-gateway.service`, with a fully absolute `node` + tsx-loader + CLI `ExecStart` (no `bash -lc`, `env`, `npx`, or `PATH` dependency, so it starts under systemd's clean environment). Re-run after a node/tsx upgrade |
 | `parked` | list what is waiting and why |
 | `clear` | archive the run log + clear parked, resetting the dashboard/status line to idle (automatic on clean campaign/queue completion) |
 | `status [--port <port>] [--host <host>]` | the all-repos landing over the host registry: counters, a card per registered project, a cross-repo activity feed, and each project's archived runs, live over SSE. Reads the registry, so no gateway daemon required |

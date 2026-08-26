@@ -201,6 +201,15 @@ an epic: a [[wave]] is a file-disjoint layer that crosses epics, so its issues,
 not an epic, name it.
 _Avoid_: batch name
 
+**Wave-parked**:
+A whole [[wave]] held because its **merged base failed the combined gate** — every
+issue went green alone, but the base is red together, so no single issue is at
+fault. Everything stays merged (the base sits red, never pushed), the campaign
+pauses, and a human resolves it: fix forward and resume, or carve a suspect and
+resume. A run-level counterpart to an issue's [[parked]] — the wave, not one agent,
+waits on a human. See [ADR 0013](../docs/adr/0013-wave-integration-is-non-atomic-quarantine-and-wave-park.md).
+_Avoid_: halted, rolled back, failed wave
+
 ### Issue status
 
 The dashboard shows the orchestrator's own `IssueStatus` vocabulary, plus one
@@ -214,6 +223,14 @@ _Avoid_: working, in progress
 **parked**:
 The agent asked a question and stopped; the issue waits on a human answer. The one
 [[interactive]] state and the reason to open an issue's detail.
+
+**quarantined**:
+A merge **conflict** pulled the issue out of integration; its branch, worktree, and
+agent session are preserved so it is resumable, never re-run from scratch. Distinct
+from [[parked]] (which asked a question) — a quarantine asks nothing, it holds a
+conflict for a human to resolve. The wave keeps its other greens merged and carries
+on. See [ADR 0013](../docs/adr/0013-wave-integration-is-non-atomic-quarantine-and-wave-park.md).
+_Avoid_: conflicted, skipped, rejected
 
 **failure**:
 The run errored out **without** parking. The dashboard shows it — the orchestrator

@@ -145,6 +145,18 @@ Within a milestone each bold section label appears at most once.
   meta, wave grid), so a refresh no longer blanks the page or loses scroll/compose state,
   leaving the issue sheet, repo dropdown and archived-runs list untouched.
 
+### The demo-dashboard feed test stops rotting on the clock — August 25, 2026
+
+**Bug fixes:**
+- [internal] The demo-dashboard integration test no longer fails once wall-clock time passes
+  48h from a hardcoded seed date (#115). The fixture seeded events at a fixed instant while
+  `/api/feed` filters to a rolling 48h window against the real `now`, so the seeded events
+  aged out and `src/dashboard-demo.test.ts` went red on a clock rather than a change — and
+  because that file is inside the gate, every agent's baseline was red through no fault of
+  its own. `seedDemoRun` is now anchored relative to `now` (30 minutes back, keeping the
+  ~13-minute run inside the window with margin), fixing both the test and the live
+  `make demo-create` feed in one place.
+
 ### The stack is renamed to Vetinari — August 24, 2026
 
 **Breaking changes:**

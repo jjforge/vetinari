@@ -20,6 +20,12 @@ import {
   STATE_DOT_CSS,
   TOP_BAR_STYLES,
 } from "./dashboard-assets.ts";
+import {
+  dotClass,
+  freezeIntent,
+  hiddenPastCap,
+  tallyDotClass,
+} from "./dashboard-visual-state.ts";
 
 const ISSUE_EMOJI: Record<DisplayStatus, string> = {
   completed: "✅",
@@ -108,7 +114,7 @@ const renderWaveMember = (issue: StatusIssue, project: string, carve: boolean, i
   const title = issue.name ? `<span class="wave-member-title">${escapeHtml(issue.name)}</span>` : "";
   // The row carries its status class so its state reads at 40% alpha on a left edge
   // (§4); the dot carries the same status at full strength, the word spells it out.
-  return `<li><button type="button" class="wave-member ${issue.status}" title="${escapeTitle(detail)}"${openData}${carveData}><span class="dot ${issue.status}"></span>#${escapeHtml(issue.issueNumber)} ${title}<small>${escapeHtml(issue.status)}</small></button></li>`;
+  return `<li><button type="button" class="wave-member ${issue.status}" title="${escapeTitle(detail)}"${openData}${carveData}><span class="dot ${dotClass(issue.status)}"></span>#${escapeHtml(issue.issueNumber)} ${title}<small>${escapeHtml(issue.status)}</small></button></li>`;
 };
 
 /** A wave's member list — one interactive row per issue (see `renderWaveMember`),
@@ -325,7 +331,7 @@ const renderArchiveRow = (project: string, run: ArchivedRunView, open: boolean, 
  */
 const renderArchivedRuns = (project: string, runs: ArchivedRunView[], openRun?: string, openMode?: "campaign" | "raw") => {
   if (!runs.length) return "";
-  const rows = runs.map((run, i) => renderArchiveRow(project, run, run.run === openRun, openMode ?? "campaign", i >= ARCHIVE_CAP));
+  const rows = runs.map((run, i) => renderArchiveRow(project, run, run.run === openRun, openMode ?? "campaign", hiddenPastCap(i, ARCHIVE_CAP)));
   const olderCount = runs.length - ARCHIVE_CAP;
   const older = olderCount > 0 ? `<li class="archive-older-row"><button type="button" class="archive-show-older">Show ${olderCount} older run${olderCount === 1 ? "" : "s"}</button></li>` : "";
   // The show-older control sits between the visible rows and the hidden older ones.
@@ -610,6 +616,15 @@ ${renderTopBar(renderRepoDropdown(projects, undefined))}
 <section id="feed" class="feed" aria-label="Event log across all repos"><h2><span class="live-indicator" aria-hidden="true"></span>Event log · all repos</h2><div id="feed-rows"><p class="empty">Loading…</p></div></section>
 ${issueDetailSheetMarkup(true)}
 <script>
+  // The state → visual-intent reducers (dashboard-visual-state.ts, ADR 0012), single-
+  // sourced into the browser via .toString() so the node test runs the very function
+  // this page ships. The __name shim satisfies the keepNames wrapper a bundling build
+  // could leave on a named function (a no-op when none is applied, matching the archive
+  // list's shipped colourer).
+  const __name = (fn) => fn;
+  ${dotClass.toString()}
+  ${tallyDotClass.toString()}
+  ${freezeIntent.toString()}
   const fmtWave = (w) => (w ? "Wave " + w.current + " of " + w.total : "idle");
   // The event log's compact time (#95): a same-day event reads as a 24h HH:MM; an
   // older one falls back to a short weekday (POC's "Tue"), then to a M/D date once it
@@ -773,9 +788,8 @@ ${REPO_DROPDOWN_SCRIPT}
       for (const [bucket, count] of [["running", p.tally.running], ["parked", p.tally.parked], ["queued", p.tally.queued]]) {
         const chip = el("span", "tally-chip");
         // A "0 running" tally dot stays blue but is marked idle so it doesn't pulse — motion
-        // signals active work, and a zero tally has none (§5, #100).
-        const dotClass = "dot " + bucket + (bucket === "running" && count === 0 ? " idle" : "");
-        chip.append(el("span", dotClass), el("span", null, count + " " + bucket));
+        // signals active work, and a zero tally has none (§5, #100). tallyDotClass owns that rule.
+        chip.append(el("span", "dot " + tallyDotClass({ kind: bucket, count })), el("span", null, count + " " + bucket));
         tally.append(chip);
       }
       card.append(tally);
@@ -794,20 +808,22 @@ ${REPO_DROPDOWN_SCRIPT}
   let paused = false;
   let buffered = 0;
   let lastUpdate = null;
+  // freezeIntent (dashboard-visual-state.ts) decides; the glue below only writes to the DOM.
   const renderUpdated = () => {
     // While paused the readout reads "Paused" rather than ageing a frozen count; it resumes
     // "updated Ns ago" on unpause (§5, #100).
-    updatedEl.textContent = paused ? "Paused" : lastUpdate == null ? "waiting for updates" : "updated " + Math.round((Date.now() - lastUpdate) / 1000) + "s ago";
+    updatedEl.textContent = freezeIntent({ paused, buffered, lastUpdate, now: Date.now() }).updatedText;
   };
   // The indicator is a dot only: its state is an accessible label, never visible text.
   // Pause is an icon flipped by data-paused (the CSS-drawn bars/triangle live in CSS).
   const renderState = () => {
     // The single control for all pulsing (§5, #100): one root flag on the body freezes
     // every dot — green live dots and blue running dots — at once via one CSS rule.
-    document.body.dataset.paused = String(paused);
-    indicator.dataset.liveState = paused ? "paused" : "live";
-    indicator.setAttribute("aria-label", paused ? "Paused" + (buffered ? " · " + buffered + " buffered" : "") : "Live");
-    pauseBtn.dataset.paused = String(paused);
+    const intent = freezeIntent({ paused, buffered, lastUpdate, now: Date.now() });
+    document.body.dataset.paused = intent.bodyPaused;
+    indicator.dataset.liveState = intent.liveState;
+    indicator.setAttribute("aria-label", intent.ariaLabel);
+    pauseBtn.dataset.paused = intent.bodyPaused;
     pauseBtn.setAttribute("aria-label", paused ? "Resume" : "Pause");
   };
   // Refresh both the landing and the cross-project feed on every live tick, so the
@@ -1000,6 +1016,12 @@ ${issueDetailSheetMarkup(Boolean(opts.carve))}${
     : ""
 }
 <script>
+  // The presentation-freeze reducer (dashboard-visual-state.ts, ADR 0012), single-sourced
+  // into the browser via .toString() so the node test runs the very function this page
+  // ships. The __name shim satisfies the keepNames wrapper a bundling build could leave on
+  // a named function (a no-op when none is applied).
+  const __name = (fn) => fn;
+  ${freezeIntent.toString()}
   // A parked card's "waiting Nm" ages off its parkedAt, filled client-side so the
   // server render stays pure (mirrors the landing's fmtWaited).
   const fmtWaited = (iso) => {
@@ -1021,18 +1043,20 @@ ${issueDetailSheetMarkup(Boolean(opts.carve))}${
   let paused = false;
   let buffered = 0;
   let lastUpdate = Date.now();
+  // freezeIntent (dashboard-visual-state.ts) decides; the glue below only writes to the DOM.
   // While paused the readout reads "Paused" rather than ageing a frozen count; it resumes
   // "updated Ns ago" on unpause (§5, #100).
-  const renderUpdated = () => { updatedEl.textContent = paused ? "Paused" : "updated " + Math.round((Date.now() - lastUpdate) / 1000) + "s ago"; };
+  const renderUpdated = () => { updatedEl.textContent = freezeIntent({ paused, buffered, lastUpdate, now: Date.now() }).updatedText; };
   // The indicator is a dot only: its state is an accessible label, never visible text.
   // Pause is an icon flipped by data-paused (the CSS-drawn bars/triangle live in CSS).
   const renderState = () => {
     // The single control for all pulsing (§5, #100): one root flag on the body freezes
     // every dot — green live dots and blue running dots — at once via one CSS rule.
-    document.body.dataset.paused = String(paused);
-    indicator.dataset.liveState = paused ? "paused" : "live";
-    indicator.setAttribute("aria-label", paused ? "Paused" + (buffered ? " · " + buffered + " buffered" : "") : "Live");
-    pauseBtn.dataset.paused = String(paused);
+    const intent = freezeIntent({ paused, buffered, lastUpdate, now: Date.now() });
+    document.body.dataset.paused = intent.bodyPaused;
+    indicator.dataset.liveState = intent.liveState;
+    indicator.setAttribute("aria-label", intent.ariaLabel);
+    pauseBtn.dataset.paused = intent.bodyPaused;
     pauseBtn.setAttribute("aria-label", paused ? "Resume" : "Pause");
   };
   // Live updates (ADR 0008, #131): a live event soft-refreshes rather than reloading the

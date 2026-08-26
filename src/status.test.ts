@@ -3010,6 +3010,13 @@ test("describeEvent narrates the operator-facing events in plain words", () => {
     describeEvent(event("turn", { taskId: "101", turn: 3, summary: "" })),
     "#101 — turn 3",
   );
+  // An un-notifiable project reads as a plain-words warning (issue #116), not machine noise.
+  assert.equal(
+    describeEvent(
+      event("telegram-unconfigured", { project: "myapp", baseLocation: "/x/.vetinari.local" }),
+    ),
+    "⚠ Telegram not configured — parked questions won't be announced",
+  );
 });
 
 test("formatFeedEvent prefixes an event's plain-words sentence with its repo, and drops machine noise", () => {

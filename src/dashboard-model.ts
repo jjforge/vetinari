@@ -190,6 +190,8 @@ export function describeEvent(e: OrchestratorEvent): string {
       return `${hash(e.taskId)} parked${e.reason ? `: ${e.reason}` : ""}`;
     case "carve":
       return `Carved ${(e.removed ?? []).map(hash).join(", ")}`;
+    case "telegram-unconfigured":
+      return "⚠ Telegram not configured — parked questions won't be announced";
     case "turn":
       return e.summary?.trim() ? String(e.summary).trim() : `${hash(e.taskId)} — turn ${e.turn ?? "?"}`;
     default:

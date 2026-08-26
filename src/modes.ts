@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { resolve } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import type { CampaignStartEvent, QueueStartEvent } from "./event-log.ts";
 import { log } from "./log.ts";
@@ -169,6 +170,27 @@ export async function build(
 }
 
 /**
+ * Surface an un-notifiable project at the moment work starts. Resolve this
+ * project's Telegram connection the way the gateway will — from its base location's
+ * `host.env`, never `process.env` (issue #117's resolver) — and when it resolves
+ * nothing, the project is registered-but-unreachable: a parked question persists to
+ * disk and is never announced, and nothing an operator would recognize is logged
+ * (issue #116). So log a `telegram-unconfigured` event (the dashboard narrates it)
+ * and warn on stderr, naming the file to fix. Warn and continue — the run is still
+ * useful; the operator is simply told parks won't ping.
+ */
+export function warnIfTelegramUnconfigured(
+  cfg: Pick<ResolvedConfig, "project" | "stateDir">,
+): void {
+  const baseLocation = resolve(process.cwd(), cfg.stateDir);
+  if (tgConnForBaseLocation(baseLocation)) return;
+  log("telegram-unconfigured", { project: cfg.project, baseLocation });
+  console.error(
+    `⚠ ${cfg.project} has no Telegram connection — parked questions will NOT be announced (no VETINARI_TELEGRAM_* in ${hostSecretsPath(baseLocation)})`,
+  );
+}
+
+/**
  * Fair-share pool: spawns runs up to this project's current fair share of the
  * host container ceiling (ADR 0011) — there is no per-run cap, so a lone project
  * fills the whole ceiling. A park frees its slot immediately. Returns the per-task
@@ -190,6 +212,9 @@ export async function queue(
   // re-resolve nor re-log them.
   const startTitles =
     titles === undefined ? await resolveTitles(cfg, taskIds) : undefined;
+  // Only a standalone queue warns here; inside a campaign the caller passes `titles`
+  // and has already warned once at campaign start, so we don't repeat it per wave.
+  if (titles === undefined) warnIfTelegramUnconfigured(cfg);
   const startLog: Omit<QueueStartEvent, "ts" | "event"> = {
     taskIds,
     slots: host.ceiling,
@@ -323,6 +348,10 @@ export async function campaign(
       `campaign merges into the checked-out branch, but the working tree is on "${branch}", not baseBranch "${cfg.baseBranch}". Run \`git checkout ${cfg.baseBranch}\` first (a clean tree — the merges land here).`,
     );
   }
+
+  // Surface an un-notifiable project once, at the start of the whole campaign — the
+  // per-wave `queue` calls below pass `titles` and so stay silent (no per-wave repeat).
+  warnIfTelegramUnconfigured(cfg);
 
   // Resolve the run's issue titles up front (the orchestrator has `fetchTask`) and
   // record them on the start event, so the dumb-router dashboard names every wave

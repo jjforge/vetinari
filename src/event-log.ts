@@ -141,6 +141,16 @@ export interface WorktreePreservedEvent extends BaseEvent {
   path: string;
 }
 
+/** `telegram-unconfigured` — a `campaign`/`queue` started for a project whose base location resolves
+ * no Telegram connection (no `VETINARI_TELEGRAM_*` in its `host.env`): the project name and its base
+ * location, so the dashboard can narrate an un-notifiable project whose parked questions won't ping
+ * (modes.ts, issue #116). */
+export interface TelegramUnconfiguredEvent extends BaseEvent {
+  event: "telegram-unconfigured";
+  project: string;
+  baseLocation: string;
+}
+
 /** `wave-start` — the operator-facing "wave N started" note. Emitted to the outbound message queue
  * (`enqueueOutbound`, modes.ts), not the event log, so it carries only its rendered `text`; typed
  * here so the seam covers the full wave vocabulary. */
@@ -176,6 +186,7 @@ export type OrchestratorEvent =
   | ParkedEvent
   | CarveEvent
   | WorktreePreservedEvent
+  | TelegramUnconfiguredEvent
   | WaveStartEvent
   | WaveMergedEvent;
 

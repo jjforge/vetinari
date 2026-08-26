@@ -51,6 +51,10 @@ Within a milestone each bold section label appears at most once.
 - [ops] The gateway systemd unit no longer crash-loops (`status=127`, `exec: vetinari: not found`) on hosts where a `.bashrc`-hooked node manager (nvm/fnm/mise/asdf) keeps node off systemd's clean `PATH`. Both `gateway install` and `migrate` now bake a PATH-independent absolute launch chain in place of the `bash -lc` `ExecStart` — a non-interactive login shell that never sources `~/.bashrc` (#133).
 - [user] `tg-test` now resolves Telegram credentials from the project's `host.env` the same way the gateway does — never from the invoking shell's exported env — so a green `tg-test` guarantees the gateway can actually send. When the creds are missing, the error now names `<baseLocation>/host.env` instead of misdirecting to "the orchestrator's environment" (#117).
 - [user] Starting `campaign` or `queue` for a project whose `host.env` resolves no Telegram connection now warns on stderr (naming the `host.env` to fix) and records a `telegram-unconfigured` event the dashboard narrates, so an un-notifiable project — whose parked questions would otherwise wait forever with no ping — is visible instead of silent; the run continues (#116).
+- [ops] The activity feed shows exactly one `issue.merged` row per merged issue again — outbound messages were being persisted as spurious `green` events because a payload `event` key clobbered the log kind (#140).
+- [internal] `log()` now stamps the event kind last, so a caller's `data.event` key can never override it (#140).
+- [ops] Every completed campaign run — halted/failed as well as clean — now enters the archived-runs list, each as its own run with its terminal state; archiving is no longer gated on a clean outcome, only a still-parked run stays live to inspect (#141).
+- [ops] Starting a new `campaign`/`queue`/`run` first archives any prior run left in the live log (from a crash or kill that bypassed the end-of-run archive), so it can never be concatenated ahead of the new run and buried by the summary fold (#141).
 
 ### The status line installs itself and wraps an existing one — August 25, 2026
 

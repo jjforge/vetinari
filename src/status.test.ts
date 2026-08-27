@@ -22,6 +22,7 @@ import {
 } from "./dashboard-assets.ts";
 import {
   appendedEvents,
+  archiveStatusConfig,
   buildAllStatus,
   buildFeed,
   buildLanding,
@@ -3017,6 +3018,17 @@ test("describeEvent narrates the operator-facing events in plain words", () => {
     ),
     "⚠ Telegram not configured — parked questions won't be announced",
   );
+  // A merge conflict quarantined one issue mid-wave; it reads as an attention line
+  // whose detail is the human's next move (ADR 0013).
+  assert.equal(
+    describeEvent(event("quarantined", { taskId: "640", branch: "agent/640", detail: "CONFLICT (content)" })),
+    "#640 quarantined — resolve the conflict",
+  );
+  // A red merged base parked the whole wave — a run-level held state, no single culprit (ADR 0013).
+  assert.equal(
+    describeEvent(event("wave-parked", { merged: ["611", "612"], detail: "npm test failed" })),
+    "Wave parked — merged base gated red",
+  );
 });
 
 test("formatFeedEvent prefixes an event's plain-words sentence with its repo, and drops machine noise", () => {
@@ -3661,6 +3673,84 @@ test("buildStatus marks active wave issues as running before they finish", () =>
       ["102", "running"],
     ],
   );
+});
+
+test("buildStatus marks a wave whose merged base gated red as wave-parked", () => {
+  const dir = join(tmpdir(), `vetinari-status-wave-parked-${Date.now()}`);
+  mkdirSync(join(dir, "logs"), { recursive: true });
+  mkdirSync(join(dir, "parked"), { recursive: true });
+  // Both greens merged, but the combined base gated red: the wave wave-parks with no
+  // batch-done to close it (ADR 0013). Wave 1 (unstarted) still reads as itself.
+  const events = [
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["611", "612"], ["701"]], slots: 1 }),
+    event("campaign-batch", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["611", "612"] }),
+    event("green", { ts: "2025-01-01T00:02:00.000Z", taskId: "611", branch: "agent/611", commits: [] }),
+    event("green", { ts: "2025-01-01T00:03:00.000Z", taskId: "612", branch: "agent/612", commits: [] }),
+    event("wave-parked", { ts: "2025-01-01T00:04:00.000Z", merged: ["611", "612"], detail: "npm test failed" }),
+  ];
+  writeJsonl(join(dir, "logs", "orchestrator.jsonl"), events);
+
+  const status = buildStatus(cfgFor(dir));
+  assert.deepEqual(
+    status.waves.map((w) => w.status),
+    ["wave-parked", "unstarted"],
+  );
+
+  // The same reducer drives an archived run's read (buildStatus at the archive file),
+  // so a wave-parked wave renders identically there.
+  const archive = join(dir, "logs", "archive", "orchestrator-2025-01-01T00-04-00-000Z.jsonl");
+  mkdirSync(join(dir, "logs", "archive"), { recursive: true });
+  writeJsonl(archive, events);
+  const archived = buildStatus(archiveStatusConfig("demo", archive));
+  assert.equal(archived.waves[0].status, "wave-parked");
+});
+
+test("buildStatus renders a merge-conflict-quarantined issue as quarantined", () => {
+  const dir = join(tmpdir(), `vetinari-status-quarantined-${Date.now()}`);
+  mkdirSync(join(dir, "logs"), { recursive: true });
+  mkdirSync(join(dir, "parked"), { recursive: true });
+  // 640 passed its own gate (green) but hit a merge conflict on integration and was
+  // quarantined; 611 merged clean. The batch closes with 640 held out of `merged`.
+  writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["611", "640"]], slots: 1 }),
+    event("campaign-batch", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["611", "640"] }),
+    event("green", { ts: "2025-01-01T00:02:00.000Z", taskId: "611", branch: "agent/611", commits: [] }),
+    event("green", { ts: "2025-01-01T00:03:00.000Z", taskId: "640", branch: "agent/640", commits: [] }),
+    event("quarantined", { ts: "2025-01-01T00:04:00.000Z", taskId: "640", branch: "agent/640", detail: "CONFLICT" }),
+    event("campaign-batch-done", { ts: "2025-01-01T00:05:00.000Z", index: 0, merged: ["611"], held: [], clearedParked: [], quarantined: ["640"] }),
+  ]);
+
+  const status = buildStatus(cfgFor(dir));
+
+  // The quarantine overlay wins over 640's green outcome; 611 stays completed.
+  assert.deepEqual(
+    status.waves[0].issues.map((i) => [i.issueNumber, i.status]),
+    [
+      ["611", "completed"],
+      ["640", "quarantined"],
+    ],
+  );
+  // Its detail names the human's next move.
+  assert.equal(
+    status.waves[0].issues.find((i) => i.issueNumber === "640")?.detail,
+    "Quarantined on a merge conflict — resolve the conflict",
+  );
+});
+
+test("buildStatus clears the quarantine once the issue merges on resume", () => {
+  const dir = join(tmpdir(), `vetinari-status-quarantine-cleared-${Date.now()}`);
+  mkdirSync(join(dir, "logs"), { recursive: true });
+  mkdirSync(join(dir, "parked"), { recursive: true });
+  // 640 was quarantined, then a resumed batch merged it clean: it reads completed, not quarantined.
+  writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["640"]], slots: 1 }),
+    event("campaign-batch", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["640"] }),
+    event("green", { ts: "2025-01-01T00:02:00.000Z", taskId: "640", branch: "agent/640", commits: [] }),
+    event("quarantined", { ts: "2025-01-01T00:03:00.000Z", taskId: "640", branch: "agent/640", detail: "CONFLICT" }),
+    event("campaign-batch-done", { ts: "2025-01-01T00:04:00.000Z", index: 0, merged: ["640"], held: [], clearedParked: [], quarantined: [] }),
+  ]);
+
+  assert.equal(buildStatus(cfgFor(dir)).waves[0].issues[0].status, "completed");
 });
 
 test("buildStatus does not show parked interaction cards for closed wave issues", () => {
@@ -5661,6 +5751,28 @@ test("formatStatusText summarizes waves, issue chips (with names), and the parke
   assert.match(text, /⏸ #655$/m);
   assert.match(text, /1 awaiting your reply/);
   assert.match(text, /#655 — blocked/);
+});
+
+test("formatStatusText labels a wave-parked wave and a quarantined issue (ADR 0013)", () => {
+  const text = formatStatusText({
+    project: "jjforge",
+    waves: [
+      {
+        index: 0,
+        status: "wave-parked",
+        issues: [
+          { issueNumber: "611", status: "completed", name: "Fix parser" },
+          { issueNumber: "640", status: "quarantined", name: "Add carve-out" },
+        ],
+      },
+    ],
+    parked: [],
+  });
+
+  // The held wave reads its own label, distinct from an issue parked.
+  assert.match(text, /Wave 1\/1 ⏸ wave-parked/);
+  // The quarantined issue carries its own emoji + status word.
+  assert.match(text, /🚧 #640 Add carve-out/);
 });
 
 test("formatStatusText reports when nothing is running", () => {

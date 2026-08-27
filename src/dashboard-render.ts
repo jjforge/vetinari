@@ -34,12 +34,14 @@ const ISSUE_EMOJI: Record<DisplayStatus, string> = {
   failure: "❌",
   unstarted: "⚪",
   carved: "✂️",
+  quarantined: "🚧",
 };
 
 const WAVE_EMOJI: Record<WaveStatus, string> = {
   closed: "✅",
   running: "▶️",
   unstarted: "⚪",
+  "wave-parked": "⏸",
 };
 
 /**
@@ -653,7 +655,9 @@ ${issueDetailSheetMarkup(true)}
   // everything else (starts, waves, turns) the in-flight blue.
   const feedKindClass = (kind) => {
     if (["green", "campaign-done", "campaign-complete", "campaign-batch-done", "queue-done"].includes(kind)) return "success";
-    if (kind === "parked") return "attention";
+    // A parked question, a quarantined issue, and a wave-parked wave are all attention
+    // states awaiting a human (ADR 0013), so they read in the same amber (#78).
+    if (kind === "parked" || kind === "quarantined" || kind === "wave-parked") return "attention";
     if (kind === "campaign-halt") return "failure";
     if (kind === "carve") return "carved";
     return "progress";
@@ -667,6 +671,8 @@ ${issueDetailSheetMarkup(true)}
   const feedKindLabel = (kind) => ({
     "green": "issue.merged",
     "parked": "issue.parked",
+    "quarantined": "issue.quarantined",
+    "wave-parked": "wave.parked",
     "carve": "issue.carved",
     "campaign-batch": "wave.started",
     "campaign-batch-done": "wave.closed",
@@ -867,6 +873,9 @@ ${TOP_BAR_STYLES}
   .wave.running { border-top-color: var(--color-blue); }
   /* A closed wave's card carries the green top edge its CLOSED state reads (§2). */
   .wave.closed { border-top-color: var(--color-green); }
+  /* A wave-parked wave — a red merged base holds it (ADR 0013) — carries the attention
+     amber top edge, the same amber an issue parked reads (§2). */
+  .wave.wave-parked { border-top-color: var(--color-yellow); }
   /* A flex-grid item beats the UA [hidden] rule, so a collapsed closed card needs it back explicitly. */
   .wave.closed[hidden] { display: none; }
   /* One stable head row: the label takes the slack and wraps within itself, the meta
@@ -901,6 +910,7 @@ ${TOP_BAR_STYLES}
   .wave-status.closed { border-color: var(--color-green); color: var(--color-green); background: rgb(63 185 132 / 12%); }
   .wave-status.running { border-color: var(--color-blue); color: var(--color-blue); background: rgb(108 182 255 / 12%); }
   .wave-status.unstarted { border-color: var(--color-dim); color: var(--color-dim); background: rgb(95 107 120 / 12%); }
+  .wave-status.wave-parked { border-color: var(--color-yellow); color: var(--color-yellow); background: rgb(200 162 78 / 12%); }
   .wave-carved { font-size: .78rem; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: var(--color-carved); border: 1px solid var(--color-carved); background: rgb(163 113 247 / 12%); border-radius: 999px; padding: .1rem .5rem; }
   /* Status dot colours, generated once from stateColor and shared with the landing
      (§3), scoped to .dot so a state never tints a whole chip, card, or list row (#81). */

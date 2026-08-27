@@ -144,6 +144,43 @@ export function carveClosure(target: string, removed: string[], applied: Applied
   };
 }
 
+/**
+ * What a single quarantined issue strands in the remaining campaign (ADR 0013). A
+ * merge conflict quarantines one issue mid-wave; its transitive dependents in the
+ * unstarted later waves cannot proceed without it. Each impact reuses `computeCarve`
+ * (the same graph `carve` walks) for the closure, then `applyCarve` to name the
+ * members a carve would actually drop now — the orphaned dependents (`dropped`). A
+ * quarantined issue that drops nothing orphans nothing; the campaign need not stop.
+ *
+ * Pure over the injected `blockedByOf`, so the campaign's pause-vs-`--auto-carve`
+ * decision is testable without a tracker or a running campaign. A quarantined id no
+ * longer in the plan (an earlier carve already took it) is skipped, not an error.
+ */
+export interface QuarantineImpact {
+  /** the quarantined issue. */
+  target: string;
+  /** its transitive dependent closure over the plan (the target plus its dependents). */
+  removed: string[];
+  /** the closure members a carve would drop now — the orphaned dependents. */
+  dropped: string[];
+}
+
+export async function quarantineImpacts(
+  campaign: { waves: string[][]; outcomes: Map<string, string> },
+  quarantined: string[],
+  blockedByOf: BlockedByOf,
+): Promise<QuarantineImpact[]> {
+  const inPlan = new Set(campaign.waves.flat().map(normalize));
+  const impacts: QuarantineImpact[] = [];
+  for (const target of quarantined.map(normalize)) {
+    if (!inPlan.has(target)) continue;
+    const { removed } = await computeCarve(campaign.waves, target, blockedByOf);
+    const { dropped } = applyCarve(campaign, removed);
+    impacts.push({ target, removed, dropped: dropped.filter((id) => id !== target) });
+  }
+  return impacts;
+}
+
 export async function computeCarve(waves: string[][], target: string, blockedByOf: BlockedByOf): Promise<CarveResult> {
   const normWaves = waves.map((wave) => wave.map(normalize));
   const order = normWaves.flat();

@@ -132,9 +132,10 @@ The kind of a piece of outbound communication, used to route it. The five:
 **question** (a parked task needs a human answer — the only *interactive* one),
 **success** (green, merged, campaign complete), **failure** (halt, resume error),
 **progress** (queue/campaign/wave/batch lifecycle, including a **carve** dropping
-an issue and its dependents), **finding** (an incidental defect was filed).
+an issue and its dependents and a **graft** adding issues to the running campaign),
+**finding** (an incidental defect was filed).
 A routing rule may target a whole category or a specific event under it
-(`progress:wave-start`, `progress:carve`).
+(`progress:wave-start`, `progress:carve`, `progress:graft`).
 _Avoid_: message type, event kind
 
 **Interactive** (of a message):
@@ -253,6 +254,13 @@ both the live run and an [[archived-run]] — a browsing operator can see what w
 carved out of a finished run.
 _Avoid_: removed, dropped, pruned
 
+**grafted**:
+A [[graft]] added the issue to the running campaign; it waits in a later [[wave]].
+**Derived at render** from the graft event (not a stored status), and **transient**
+— the additive mirror of [[carved]]: shown while the issue is `unstarted`, it
+becomes [[running]] on pickup. Answers "why did this wave grow?" at a glance.
+_Avoid_: added, appended, injected
+
 ### Campaign planning
 
 **Campaign plan** (the `campaign-plan` tool):
@@ -270,6 +278,15 @@ loop honors at the next wave boundary (the in-flight wave finishes; future waves
 shrink) — distinct from the from-scratch `carve <issue> <batch…>` form, which
 launches a reduced campaign from a plan you supply.
 _Avoid_: prune, remove, cancel, drop (as the noun)
+
+**Graft**:
+Adding issues to a **running** campaign — the additive counterpart of [[carve]]
+(ADR 0014). `graft <ids…>` appends a **graft event** the loop honors at the next
+wave boundary: the in-flight wave finishes untouched and the added issues are
+re-layered into future waves (dependency-ordered, basename-disjoint), leaving
+already-planned [[wave]]s stable. Unlike carve it is allowed against any run not yet
+done — live, or paused/[[wave-parked]] and honored on the next `--resume`.
+_Avoid_: extend, add (as the noun), append, inject
 
 **File-set resolver**:
 A project-provided config function, `fileSet(ticket) → { files, confident }`, that

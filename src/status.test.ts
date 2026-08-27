@@ -4892,6 +4892,37 @@ test("renderStatusPage opens the archived row named by archivedRun, in the reque
   );
 });
 
+test("renderStatusPage drops the raw-log pane and mode toggle on phone-width, showing only the campaign view (#153)", () => {
+  const html = renderStatusPage(
+    { project: "beta", waves: [], parked: [] },
+    {
+      selected: "beta",
+      // Deep-linked in raw mode: the campaign pane carries `hidden`, the raw pane
+      // does not — on a phone that must invert so the wave summary shows.
+      archivedRun: "2026-02-01T00-00-00-000Z",
+      archivedMode: "raw",
+      archivedRuns: [
+        {
+          run: "2026-02-01T00-00-00-000Z",
+          startedAt: "2026-02-01T00:00:00.000Z",
+          state: "complete",
+          issues: 1,
+          status: archStatus("101"),
+        },
+      ],
+    },
+  );
+
+  // A ≤640px media block on the campaign page hides the campaign/raw toggle, drops
+  // the raw pane, and forces the campaign (wave) pane even for a run deep-linked in
+  // raw mode (whose campaign pane carries `hidden`). The raw JSONL log is a
+  // desktop/debugging surface; a phone wants the wave summary.
+  assert.match(
+    html,
+    /@media \(max-width: 640px\) \{\s*\.archive-modes \{ display: none; \}\s*\.archive-pane\.archive-raw \{ display: none; \}\s*\.archive-pane\.archive-campaign\[hidden\] \{ display: block; \}\s*\}/,
+  );
+});
+
 test("renderStatusPage ships the archived-list client wiring: toggle, mode switch, raw fetch, filter, deep-link, show-older", () => {
   const html = renderStatusPage(
     { project: "beta", waves: [], parked: [] },

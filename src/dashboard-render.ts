@@ -984,6 +984,16 @@ ${ISSUE_DETAIL_SHEET_STYLES}
   .archive-raw-more:hover { color: var(--color-text); }
   .archive-raw-footer { color: var(--color-text-light-2); font-size: .8rem; margin-top: .6rem; }
   .archive-raw-empty { color: var(--color-text-light-2); padding: .5rem 0; }
+  /* On a phone the raw-log pane's wide JSONL lines don't fit and the head's mode
+     toggle crowds the row (#153), so drop the raw surface: hide the campaign/raw
+     toggle and force the campaign (wave) pane, even for a run deep-linked in raw
+     mode (its campaign pane carries the hidden attribute, its raw pane does not).
+     The raw log is a desktop/debugging surface; a phone wants the wave summary. */
+  @media (max-width: 640px) {
+    .archive-modes { display: none; }
+    .archive-pane.archive-raw { display: none; }
+    .archive-pane.archive-campaign[hidden] { display: block; }
+  }
 </style>${
   // No-JS fallback for the closed-wave toggles: the cards are hidden and the chips
   // inert without JS, so reveal every closed card in the grid and hide the toggle bar,

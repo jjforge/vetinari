@@ -173,6 +173,26 @@ const mergedIssue = (e: GreenEvent): string | undefined => {
 };
 
 /**
+ * A wave's human label — `Wave N`, plus ` — <lead title> +M` once the lead issue's
+ * title has resolved (bare index otherwise). The single derivation both the status-page
+ * wave cards (`renderWaveLabel`, dashboard-render.ts) and the event narration
+ * (`describeEvent`) call, so the two paths can't drift. Takes the already-extracted
+ * `(index, leadTitle, extra)` because its two callers feed it from different inputs — a
+ * resolved `StatusWave` vs. a raw event + its `titles` map — and the caller escapes the
+ * title first where the sink is HTML. `index` is zero-based; `extra` is the count beyond
+ * the lead.
+ */
+export function waveLabel(index: number, leadTitle: string | undefined, extra: number): string {
+  const base = `Wave ${index + 1}`;
+  if (!leadTitle) return base;
+  return `${base} — ${leadTitle}${extra > 0 ? ` +${extra}` : ""}`;
+}
+
+/** The `Campaign “X” — ` prefix a named campaign/wave event leads with, so an unnamed run
+ * (or an old log row) degrades to the nameless wording rather than rendering `Campaign “” —`. */
+const campaignPrefix = (name?: string) => (name ? `Campaign “${name}” — ` : "");
+
+/**
  * Narrate one event log entry as the single plain-words line the landing card
  * shows for "the last event". A `turn` renders its agent-authored summary verbatim
  * (ADR 0009) — the whole reason that field exists — falling back to a mechanical
@@ -183,18 +203,42 @@ export function describeEvent(e: OrchestratorEvent): string {
   switch (e.event) {
     case "campaign-start":
       return e.name ? `Campaign “${e.name}” started` : "Campaign started";
-    case "campaign-batch":
-      return `Wave ${(e.index ?? 0) + 1} started`;
-    case "campaign-batch-done":
-      return `Wave ${(e.index ?? 0) + 1} merged ${(e.merged ?? []).length ? (e.merged as unknown[]).map(hash).join(", ") : "nothing"}`;
-    case "campaign-done":
-      return "Campaign complete";
+    case "campaign-batch": {
+      const tasks = e.tasks ?? [];
+      const lead = tasks.length ? e.titles?.[normalizeIssue(String(tasks[0]))] : undefined;
+      return `${campaignPrefix(e.name)}${waveLabel(e.index ?? 0, lead, tasks.length - 1)} started`;
+    }
+    case "campaign-batch-done": {
+      // The event holds no plan-ordered task list, so the wave's membership is reconstructed
+      // from the outcomes it does carry (merged, then quarantined, then held) — the same "+M"
+      // the campaign-batch line showed, with the lead taken from the first of them.
+      const members = [...(e.merged ?? []), ...(e.quarantined ?? []), ...(e.held ?? [])];
+      const lead = members.length ? e.titles?.[normalizeIssue(String(members[0]))] : undefined;
+      const label = waveLabel(e.index ?? 0, lead, members.length - 1);
+      const hashes = (e.merged ?? []).length ? (e.merged as unknown[]).map(hash).join(", ") : "nothing";
+      return `${campaignPrefix(e.name)}${label} merged ${hashes}`;
+    }
+    case "campaign-done": {
+      const n = e.batches ?? 0;
+      return `${e.name ? `Campaign “${e.name}”` : "Campaign"} complete (${n} wave${n === 1 ? "" : "s"})`;
+    }
     case "campaign-halt":
-      return `Campaign halted: ${e.reason ?? "failure"}`;
-    case "queue-start":
-      return "Queue started";
-    case "queue-done":
-      return "Queue drained";
+      return `${e.name ? `Campaign “${e.name}”` : "Campaign"} halted at Wave ${(e.index ?? 0) + 1}: ${e.reason ?? "failure"}`;
+    case "queue-start": {
+      const n = (e.taskIds ?? []).length;
+      return n ? `Queue started — ${n} task${n === 1 ? "" : "s"}` : "Queue started";
+    }
+    case "queue-done": {
+      const vals = Object.values(e.outcomes ?? {}).map(String);
+      const merged = vals.filter((v) => v === "green").length;
+      const parked = vals.filter((v) => v === "parked").length;
+      const errored = vals.filter((v) => v.startsWith("error")).length;
+      const parts: string[] = [];
+      if (merged) parts.push(`${merged} merged`);
+      if (parked) parts.push(`${parked} parked`);
+      if (errored) parts.push(`${errored} errored`);
+      return parts.length ? `Queue drained — ${parts.join(", ")}` : "Queue drained";
+    }
     case "green": {
       const id = mergedIssue(e);
       return id ? `#${id} merged` : "merged";

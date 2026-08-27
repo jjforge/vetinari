@@ -2993,9 +2993,41 @@ test("describeEvent narrates the operator-facing events in plain words", () => {
     "Campaign “gateway work” started",
   );
   assert.equal(describeEvent(event("campaign-start", { batches: [["101"]], slots: 1 })), "Campaign started");
+  // A campaign-batch names its run and its wave: the lead issue's title (from `titles[tasks[0]]`)
+  // and a "+M" for the rest, matching the status-page wave-card vocabulary.
+  assert.equal(
+    describeEvent(
+      event("campaign-batch", {
+        index: 1,
+        tasks: ["201", "202"],
+        name: "gateway work",
+        titles: { "201": "cache eviction", "202": "warm the cache" },
+      }),
+    ),
+    "Campaign “gateway work” — Wave 2 — cache eviction +1 started",
+  );
+  // Name absent → nameless wording, never `Campaign “” —`; a resolved title still names the wave.
+  assert.equal(
+    describeEvent(event("campaign-batch", { index: 1, tasks: ["201"], titles: { "201": "cache eviction" } })),
+    "Wave 2 — cache eviction started",
+  );
+  // Neither name nor a resolved title → the bare index, as before.
   assert.equal(
     describeEvent(event("campaign-batch", { index: 1, tasks: ["201"] })),
     "Wave 2 started",
+  );
+  assert.equal(
+    describeEvent(
+      event("campaign-batch-done", {
+        index: 1,
+        merged: ["101"],
+        held: [],
+        clearedParked: [],
+        name: "gateway work",
+        titles: { "101": "cache eviction" },
+      }),
+    ),
+    "Campaign “gateway work” — Wave 2 — cache eviction merged #101",
   );
   assert.equal(
     describeEvent(event("campaign-batch-done", { index: 0, merged: ["101", "102"], held: [], clearedParked: [] })),
@@ -3005,10 +3037,27 @@ test("describeEvent narrates the operator-facing events in plain words", () => {
     describeEvent(event("campaign-batch-done", { index: 2, merged: [], held: [], clearedParked: [] })),
     "Wave 3 merged nothing",
   );
-  assert.equal(describeEvent(event("campaign-done", { batches: 1 })), "Campaign complete");
+  assert.equal(
+    describeEvent(event("campaign-done", { batches: 3, name: "gateway work" })),
+    "Campaign “gateway work” complete (3 waves)",
+  );
+  assert.equal(describeEvent(event("campaign-done", { batches: 1 })), "Campaign complete (1 wave)");
+  assert.equal(
+    describeEvent(event("campaign-halt", { index: 1, reason: "merge conflict", name: "gateway work" })),
+    "Campaign “gateway work” halted at Wave 2: merge conflict",
+  );
   assert.equal(
     describeEvent(event("campaign-halt", { index: 0, reason: "merge conflict" })),
-    "Campaign halted: merge conflict",
+    "Campaign halted at Wave 1: merge conflict",
+  );
+  // Queue lines render the counts they already hold — the task count on start, the outcome tally on done.
+  assert.equal(
+    describeEvent(event("queue-start", { taskIds: ["1", "2", "3", "4"], slots: 2 })),
+    "Queue started — 4 tasks",
+  );
+  assert.equal(
+    describeEvent(event("queue-done", { outcomes: { "1": "green", "2": "green", "3": "green", "4": "parked" } })),
+    "Queue drained — 3 merged, 1 parked",
   );
   assert.equal(
     describeEvent(event("green", { taskId: "#101", branch: "agent/101", commits: [] })),

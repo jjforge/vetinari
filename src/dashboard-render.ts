@@ -7,6 +7,7 @@ import {
   type RunState,
   type StatusIssue,
   type StatusWave,
+  waveLabel,
   type WaveStatus,
 } from "./dashboard-model.ts";
 import {
@@ -139,10 +140,8 @@ const renderWaveMembers = (wave: StatusWave, project: string, carve: boolean, in
  */
 const renderWaveLabel = (wave: StatusWave) => {
   const lead = wave.issues[0];
-  const index = `Wave ${wave.index + 1}`;
-  if (!lead?.name) return index;
-  const extra = wave.issues.length - 1;
-  return `${index} — ${escapeHtml(lead.name)}${extra > 0 ? ` +${extra}` : ""}`;
+  // The title is escaped before it reaches the shared `waveLabel`, whose output lands in HTML.
+  return waveLabel(wave.index, lead?.name ? escapeHtml(lead.name) : undefined, wave.issues.length - 1);
 };
 
 /** How many issues the campaign spans, across every wave — the count in the

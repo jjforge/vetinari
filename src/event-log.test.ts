@@ -84,6 +84,29 @@ test("a switch over the 19 narrowed kinds reads each member's fields", () => {
   assert.equal(describe(event("graft", { ids: ["305", "306"], blockedBy: {}, basenames: {} })), "graft 305,306");
 });
 
+test("the campaign events' name/titles round-trip through readEventLog", () => {
+  const titles = { "101": "cache eviction", "102": "warm the cache" };
+  const logFile = withLog([
+    JSON.stringify(event("campaign-batch", { ts: "2026-08-27T00:00:00.000Z", index: 1, tasks: ["101", "102"], name: "gateway work", titles })),
+    JSON.stringify(event("campaign-batch-done", { ts: "2026-08-27T00:00:01.000Z", index: 1, merged: ["101"], held: ["102"], clearedParked: [], name: "gateway work", titles })),
+    JSON.stringify(event("campaign-done", { ts: "2026-08-27T00:00:02.000Z", batches: 2, name: "gateway work" })),
+    JSON.stringify(event("campaign-halt", { ts: "2026-08-27T00:00:03.000Z", index: 1, reason: "merge conflict", name: "gateway work" })),
+  ]);
+
+  const events = readEventLog({ logFile });
+
+  const batch = events[0];
+  const batchDone = events[1];
+  const done = events[2];
+  const halt = events[3];
+  assert.equal(batch.event === "campaign-batch" && batch.name, "gateway work");
+  assert.deepEqual(batch.event === "campaign-batch" ? batch.titles : undefined, titles);
+  assert.equal(batchDone.event === "campaign-batch-done" && batchDone.name, "gateway work");
+  assert.deepEqual(batchDone.event === "campaign-batch-done" ? batchDone.titles : undefined, titles);
+  assert.equal(done.event === "campaign-done" && done.name, "gateway work");
+  assert.equal(halt.event === "campaign-halt" && halt.name, "gateway work");
+});
+
 test("event() builds well-formed rows assignable to OrchestratorEvent, stamping ts and keeping fields typed", () => {
   const green = event("green", { taskId: "42", branch: "agent/42", commits: ["abc", "def"] });
   const asEvent: OrchestratorEvent = green; // assignable

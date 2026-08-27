@@ -20,6 +20,9 @@ Within a milestone each bold section label appears at most once.
 
 ### Collected changes — August 27, 2026
 
+**Breaking changes:**
+- [api] Removed the process-global event-log target and the free `log()`: `src/log.ts` no longer exports `setLogFile`, `defaultLogFile`, `logFilePath`, or the module-global `log()`, and `index.ts` drops the `log`/`setLogFile` re-exports (exporting the `Logger` type and its `loggerForRun`/`hostLogger`/`hostLogTarget`/`memoryLogger` factories instead). Every event now emits through an injected `Logger` constructed with an explicit target — there is no default path and no way to emit without one, so the shared-global footgun class is structurally gone. The gateway daemon, the last global caller, now threads `hostLogger()` (#162).
+
 **New features:**
 - [user] `campaign --auto-carve` prunes a merge-conflict quarantine's stranded dependents and runs on; without it, a quarantine that orphans dependents in later waves pauses the campaign at the wave boundary for a human (ADR 0013) (#146).
 - [ops] A quarantine-pause and an auto-carve each announce over Telegram — the pause on the alert channel (quarantined issue → orphaned dependents, and the two recovery moves), the carve on the progress channel (what it pruned) (#146).

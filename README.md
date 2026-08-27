@@ -461,8 +461,9 @@ The README stops at the reader's first hour. The operational reference lives in
 | `gateway install [--dry-run]` | write the host-level systemd unit for this install to `~/.config/systemd/user/vetinari-gateway.service`, with a fully absolute `node` + tsx-loader + CLI `ExecStart` (no `bash -lc`, `env`, `npx`, or `PATH` dependency, so it starts under systemd's clean environment). Re-run after a node/tsx upgrade |
 | `parked` | list what is waiting and why |
 | `clear` | archive the run log + clear parked, resetting the dashboard/status line to idle (automatic on clean campaign/queue completion) |
-| `tidy [--apply] [--all]` | reconcile the drift a by-hand fix-forward or merge leaves (ADR 0013): fold orphaned `changelog.d/` fragments whose issue is merged, GC `agent/<id>` branches + worktrees **provably** reachable from the base, and clear parked records for issues now merged. Never touches an unmerged, quarantined, parked, or wave-parked branch. Dry-run by default; `--apply` acts, `--all` sweeps every registered project |
+| `tidy [--apply] [--all]` | reconcile the drift a by-hand fix-forward or merge leaves (ADR 0013): fold orphaned `changelog.d/` fragments whose issue is merged, GC `agent/<id>` branches + worktrees **provably** reachable from the base, clear parked records for issues now merged, and drop provably-dead **duplicate registry pointers** (two pointers resolving to one `projectRoot` → keep the canonical `<projectRoot>/.vetinari.local` one, remove the rest; ambiguous groups left for a human). Never touches an unmerged, quarantined, parked, or wave-parked branch. Dry-run by default; `--apply` acts, `--all` sweeps every registered project |
 | `status [--port <port>] [--host <host>]` | the all-repos landing over the host registry: counters, a card per registered project, a cross-repo activity feed, and each project's archived runs, live over SSE. Reads the registry, so no gateway daemon required |
+| `registry remove <name>` | remove one project's pointer from the host registry so the dashboard/`status` stops listing it — the explicit counterpart to the auto-registration every run performs (acts on the **registry pointer**, not container slots). A name that is not registered is a clean no-op |
 | `statusline` | one compact line for the Claude Code status bar; reads Claude Code's JSON on stdin |
 | `statusline install` / `statusline uninstall` | wire the status line into the project's `.claude/settings.json`, keeping any existing status line as line 1 with the 🏰 line under it (`--run-command`, `--dry-run`) |
 | `tg-test` | prove the Telegram round-trip |
@@ -477,6 +478,7 @@ The README stops at the reader's first hour. The operational reference lives in
 | `.vetinari.local/logs/orchestrator.jsonl` | every event: sandbox, turn, gate, park, green |
 | `.vetinari.local/logs/gate-<ts>.log` | full stdout/stderr of each gate run |
 | `.vetinari.local/logs/archive/orchestrator-<ts>.jsonl` | a finished run's log, moved aside on completion or `clear` |
+| `<gateway config dir>/logs/host.jsonl` | host-level: the `gateway`/`status` daemon's own diagnostics, appended across restarts (not per-project — lives beside the registry, e.g. `~/.config/vetinari/`) |
 
 ## Known limits
 

@@ -40,6 +40,7 @@ import {
   type UnderspecifiedDecision,
 } from "./plan.ts";
 import { defaultFileSet, ticketProse } from "./fileset.ts";
+import { renderUsage } from "./help.ts";
 import {
   applyLayoutMigration,
   computeLayoutMigration,
@@ -87,137 +88,7 @@ import {
   writeSettings,
 } from "./statusline-install.ts";
 
-const USAGE = `vetinari <mode> [args]
-
-  build [--no-baseline]    build the agent image (cfg.image from vetinari/Dockerfile,
-                           neither repeated on the CLI) via sandcastle, then run
-                           baseline on success. --no-baseline builds only. A build or
-                           baseline failure exits non-zero with sandcastle's output shown
-  baseline                 prove the image runs every gate green — no agent, no cost
-  run <task>               the TDD loop: agent turn → gate → resume on red
-  queue <task…>            fair-share pool over several tasks (bounded by the host
-                           ceiling and this project's containerShare — no per-run cap)
-  campaign [--name "…"] [--auto-carve] <batch…>
-                           queue each batch, then merge greens → gate base → next batch.
-                           --name labels the run in the dashboard + archived-runs list.
-                           If a merge-conflict quarantine strands dependents in later
-                           waves the campaign pauses for a human by default; --auto-carve
-                           prunes the stranded closure and runs on (ADR 0013)
-  campaign --resume        continue a PAUSED campaign on the current base (after a human
-                           fixed a wave-park forward, or carved a suspect): reconstructs
-                           the plan from the event log and runs the unrun waves, redoing
-                           no already-merged issue. Nothing left to run reports so and
-                           exits clean. Takes no batch args (ADR 0013)
-  carve <issue>            prune <issue> + everything blocked by it from the RUNNING
-                           campaign: appends a carve event the loop honors at the next
-                           wave boundary (the in-flight wave finishes; only future waves
-                           shrink). Banked work stays — a merged/green member is kept,
-                           only parked/not-yet-started ones leave. A carved issue's
-                           parked record (branch/worktree/session) is preserved so it
-                           stays resumable; --purge is the rare true-drop that clears
-                           it. Needs a running campaign (--dry-run to only preview).
-  carve <issue> <batch…>   drop <issue> + everything blocked by it, then run the rest
-                           as a fresh reduced campaign from the plan you supply
-                           (--dry-run to only print the reduced plan)
-  graft <ids…>             add issues to a RUNNING (or paused/wave-parked/resumable)
-                           campaign — the additive mirror of carve (ADR 0014): appends
-                           a graft event the loop honors at the next wave boundary. The
-                           in-flight wave finishes untouched; the added issues re-layer
-                           into future waves (after their blockers, basename-disjoint),
-                           leaving already-planned waves stable. Rejected whole — naming
-                           the offenders — if any id is unknown/closed or already in the
-                           campaign. Needs a campaign that has not finished (--dry-run to
-                           only print the resulting placement).
-  campaign-plan <ids…>     layer a selected set into dependency-ordered, file-
-                           disjoint wave args (paste after \`campaign\`) + a
-                           provenance report, and a suggested \`--name\` from the
-                           area labels the selected issues span. Plans only — never
-                           runs campaign, never pushes. A ticket whose file-set can't be resolved
-                           confidently halts and asks; --on-underspecified=drop|fail
-                           pre-decides for non-interactive runs (no flag, no
-                           terminal defaults to fail).
-  init [--dry-run]         scaffold a NEW project onto the layout: create the committed
-                           vetinari/ (a defineConfig skeleton + a Dockerfile template),
-                           the excluded .vetinari.local/, and add .vetinari.local/ to
-                           .gitignore. Idempotent and non-clobbering — an existing
-                           vetinari/ config is never overwritten (--dry-run to print the
-                           plan and write nothing). Installs and vendors nothing
-  migrate [--dry-run]      move this project onto the vetinari/ + .vetinari.local/
-                           layout: config → vetinari/, old .sandcastle/ state →
-                           .vetinari.local/, .gitignore updated, the host-side
-                           orchestrator.env renamed to host.env, a stale gateway.env
-                           deleted, the systemd unit rewritten into the host-level
-                           gateway service, VETINARI_TELEGRAM_* stripped from the
-                           container gate .env (rotate any token exposed there), a
-                           numeric hostWeight translated to a containerShare tier, and
-                           the host-slots ceiling file renamed max-concurrent-containers
-                           (--dry-run to print the plan and change nothing)
-  changelog collect [--title "…"]
-                           fold this repo's changelog.d/*.md fragments into
-                           CHANGELOG.md under today's milestone (append to the top
-                           milestone if it is dated today, else start one), then
-                           delete the consumed fragments. What the orchestrator runs
-                           per wave at merge; a human may run it directly. --title
-                           sets a fresh milestone's title (default: "Collected changes")
-  tidy [--apply] [--all]   reconcile the drift a by-hand fix-forward or merge leaks
-                           (ADR 0013): fold orphaned changelog.d/ fragments whose issue
-                           is merged, GC agent/<id> branches + worktrees that are
-                           PROVABLY reachable from the base, and clear parked records
-                           for issues now merged. Never touches an unmerged, quarantined,
-                           parked, or wave-parked branch. Dry-run by default (prints what
-                           it would do); --apply acts. --all sweeps every registered
-                           project, not just this one, and drops duplicate-projectRoot
-                           registry pointers (keeping the canonical .vetinari.local one)
-  answer <task> <text>     resume a parked task with a human answer
-  gateway                  the host daemon fronting every registered project: the
-                           sole Telegram consumer and sender — announces parked
-                           questions, routes replies to the right project+task,
-                           and resumes them concurrently via the shared install.
-                           Also recognizes \`carve <issue>\` (and \`carve <project>
-                           <issue>\` when several campaigns run on one bot):
-                           previews the closure and carves the resolved project on
-                           a \`yes\` reply to the preview
-  gateway install [--dry-run]
-                           write the host-level systemd unit for THIS install to
-                           ~/.config/systemd/user/vetinari-gateway.service, with a
-                           fully absolute node + tsx-loader + cli ExecStart — no
-                           bash -lc, env, npx, or PATH dependency, so it starts under
-                           systemd's clean environment (fixes the nvm/fnm/mise/asdf
-                           crash-loop). Re-run after a node/tsx upgrade (--dry-run to
-                           print the unit and write nothing)
-  parked                   list parked tasks and their questions
-  clear                    archive the run log + clear parked, resetting the
-                           dashboard/status line to idle (automatic on clean
-                           campaign/queue completion; this forces it now)
-  status [--port <port>] [--host <host>]
-                           one dashboard over the host registry: campaign/wave and
-                           parked status for every registered project, a dropdown to
-                           switch between them (a single project is one entry). Reads
-                           the registry, so no gateway daemon is required
-  registry remove <name>   remove one project's pointer from the host registry, so
-                           the dashboard stops listing it (the explicit counterpart to
-                           the auto-register every run performs — not container slots).
-                           A name that is not registered is a clean no-op
-  statusline               one compact line for the Claude Code status bar (reads
-                           Claude Code's JSON on stdin; wire into settings.json)
-  statusline install [--run-command "<cmd>"] [--dry-run]
-                           wire the status line into the project's committed
-                           .claude/settings.json. A status line already configured
-                           there is kept as line 1 with the 🏰 campaign line added
-                           under it (never replaced). Idempotent. --run-command sets
-                           how the CLI is invoked (default: npx vetinari statusline)
-  statusline uninstall [--dry-run]
-                           remove it, restoring whatever status line it wrapped
-  tg-test                  prove the Telegram round-trip
-
-Options: --config <path>   (default: vetinari/config.mts in cwd)
-
-Host container ceiling: set MAX_CONCURRENT_CONTAINERS (or a max-concurrent-containers
-file in the gateway config dir) to cap live containers across ALL projects; every
-queue/campaign cooperates through a filesystem lease to stay within it. Unset resolves
-to a machine-derived default (never unbounded). There is no per-run cap: a lone project
-fills the ceiling. A project's cut when projects contend is its \`containerShare\`
-(high | medium | low, default medium). See ADR 0010 and ADR 0011.`;
+const USAGE = renderUsage();
 
 /**
  * The interactive under-specified halt: shown only on a terminal (the flag/TTY

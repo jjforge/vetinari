@@ -36,16 +36,14 @@ import {
 import { gateway } from "./gateway.ts";
 import { applyCarve, carveClosure, computeCarve, normalize } from "./carve.ts";
 import {
-  applyGraft,
   describePlan,
   planCampaign,
   suggestCampaignName,
   underspecifiedPromptFor,
-  validateGraftTargets,
   waveArgs,
-  type GraftRejection,
   type UnderspecifiedDecision,
 } from "./plan.ts";
+import { runGraft } from "./graft.ts";
 import { defaultFileSet, ticketProse } from "./fileset.ts";
 import { renderUsage } from "./help.ts";
 import {
@@ -76,7 +74,6 @@ import { resolveHostCeiling, type HostBudget } from "./host-slots.ts";
 import { containerShareWeight } from "./config.ts";
 import {
   campaignRunning,
-  issueStateFromTask,
   readEventLog,
   reduceCampaign,
   serveAllStatus,
@@ -784,117 +781,25 @@ switch (mode) {
   }
   case "graft": {
     // `graft <ids…>` adds issues to a running (or resumable) campaign — the additive
-    // mirror of `carve` (ADR 0014). It appends a graft event carrying the resolved
-    // layering inputs (ADR 0012), which the wave-loop's per-boundary re-derive folds
-    // into future waves; the in-flight wave finishes untouched.
+    // mirror of `carve` (ADR 0014). The orchestration lives in `runGraft` (a testable
+    // seam, #176); the command only parses args and renders the console output.
     const dryRun = rest.includes("--dry-run");
     const ids = rest
       .filter((a) => a !== "--dry-run")
       .flatMap((a) => a.split(/[\s,]+/))
-      .filter(Boolean)
-      .map(normalize);
-    if (!ids.length)
-      throw new Error("graft needs at least one issue id: graft 640 655");
-    if (!cfg.blockedBy)
-      throw new Error(
-        'graft needs a "blockedBy" resolver in your config — e.g. blockedBy: githubBlockedBy("owner/repo").',
+      .filter(Boolean);
+    const result = await runGraft(cfg, ids, { dryRun });
+    console.log(
+      `graft ${result.ids.map((i) => `#${i}`).join(", ")} → ` +
+        result.placement.map((p) => `#${p.id} in wave ${p.wave}`).join(", "),
+    );
+    console.log(
+      `resulting campaign: ${result.remaining.map((w) => `"${w.join(" ")}"`).join(" ")}`,
+    );
+    if (result.applied)
+      console.log(
+        "graft event appended — the running campaign will add these issues to future waves at the next wave boundary.",
       );
-
-    const events = readEventLog(cfg);
-    if (!campaignRunning(events))
-      throw new Error(
-        "graft adds to a live-or-resumable campaign, but none is open (it has finished, or none has run). " +
-          "Launch one with `campaign <batch…>`, or resume a paused one with `campaign --resume`.",
-      );
-
-    const reduced = reduceCampaign(events);
-    // "Already in the campaign" = a member of the remaining plan or a completed one —
-    // exactly the ids the reduced `waves` still carry (closed waves stay in the plan).
-    const inCampaign = new Set(reduced.waves.flat());
-
-    // Resolve each candidate id's task text once, reused for its open/closed state and
-    // its file-set. A `fetchTask` that throws (no such issue) reads `unknown`.
-    const resolveFileSet = cfg.fileSet ?? defaultFileSet();
-    const taskText = new Map<string, string | undefined>();
-    await Promise.all(
-      ids.map(async (id) => {
-        try {
-          taskText.set(id, String(await cfg.fetchTask(id)));
-        } catch {
-          taskText.set(id, undefined);
-        }
-      }),
-    );
-    const stateOf = (id: string): "open" | "closed" | "unknown" => {
-      const text = taskText.get(id);
-      return text === undefined ? "unknown" : issueStateFromTask(text);
-    };
-
-    // All-or-nothing: reject the whole graft naming the offenders, never half-apply.
-    const rejections = validateGraftTargets(ids, { inCampaign, state: stateOf });
-    if (rejections.length) {
-      const group = (reason: GraftRejection["reason"], label: string) => {
-        const hit = rejections.filter((r) => r.reason === reason).map((r) => `#${r.id}`);
-        return hit.length ? `${label}: ${hit.join(", ")}` : "";
-      };
-      const parts = [
-        group("unknown", "unknown/missing"),
-        group("closed", "closed"),
-        group("already-in-campaign", "already in the campaign"),
-      ].filter(Boolean);
-      throw new Error(`graft rejected — nothing added (${parts.join("; ")}).`);
-    }
-
-    // The layering inputs the pure reducer folds with (ADR 0012): each grafted id's
-    // in-campaign (or co-grafted) open blockers, and the basenames of the grafted ids
-    // plus the campaign's still-unstarted members it places disjointly against.
-    const campaignPlusGrafted = new Set([...inCampaign, ...ids]);
-    const blockedBy: Record<string, string[]> = {};
-    await Promise.all(
-      ids.map(async (id) => {
-        const raw = (await cfg.blockedBy!(id)).map(normalize);
-        blockedBy[id] = raw.filter((b) => campaignPlusGrafted.has(b));
-      }),
-    );
-    const unstarted = reduced.waves.flat().filter((m) => !reduced.outcomes.has(m));
-    const basenames: Record<string, string[]> = {};
-    await Promise.all(
-      [...new Set([...ids, ...unstarted])].map(async (id) => {
-        const text = taskText.get(id) ?? String(await cfg.fetchTask(id));
-        basenames[id] = (await resolveFileSet(ticketProse(text))).files;
-      }),
-    );
-
-    // Preview the placement off the same pure fold the loop will run.
-    const applied = applyGraft(
-      { waves: reduced.waves, outcomes: reduced.outcomes, currentWave: reduced.currentWave },
-      { ids, blockedBy, basenames },
-    );
-    const placeOf = new Map<string, number>();
-    applied.remaining.forEach((wave, i) => wave.forEach((m) => placeOf.set(m, i)));
-    console.log(
-      `graft ${ids.map((i) => `#${i}`).join(", ")} → ` +
-        ids.map((id) => `#${id} in wave ${placeOf.get(id)! + 1}`).join(", "),
-    );
-    console.log(
-      `resulting campaign: ${applied.remaining.map((w) => `"${w.join(" ")}"`).join(" ")}`,
-    );
-
-    if (dryRun) break;
-
-    // Append the graft event — the running loop re-reads it at the next wave boundary
-    // and re-layers the added issues into future waves (ADR 0014).
-    cfg.log.log("graft", { ids, blockedBy, basenames });
-    enqueueOutbound(cfg, {
-      category: "progress",
-      event: "graft",
-      text:
-        `🌱 ${cfg.project} grafted ${ids.map((i) => `#${i}`).join(", ")} onto the running campaign — ` +
-        `landing in ${ids.map((id) => `#${id}→wave ${placeOf.get(id)! + 1}`).join(", ")}.`,
-    });
-    console.log(
-      "graft event appended — the running campaign will add these issues to future waves at the next wave boundary.",
-    );
     break;
   }
   case "campaign-plan": {

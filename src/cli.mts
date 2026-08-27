@@ -78,9 +78,12 @@ const USAGE = `vetinari <mode> [args]
   run <task>               the TDD loop: agent turn → gate → resume on red
   queue <task…>            fair-share pool over several tasks (bounded by the host
                            ceiling and this project's containerShare — no per-run cap)
-  campaign [--name "…"] <batch…>
+  campaign [--name "…"] [--auto-carve] <batch…>
                            queue each batch, then merge greens → gate base → next batch.
-                           --name labels the run in the dashboard + archived-runs list
+                           --name labels the run in the dashboard + archived-runs list.
+                           If a merge-conflict quarantine strands dependents in later
+                           waves the campaign pauses for a human by default; --auto-carve
+                           prunes the stranded closure and runs on (ADR 0013)
   carve <issue>            prune <issue> + everything blocked by it from the RUNNING
                            campaign: appends a carve event the loop honors at the next
                            wave boundary (the in-flight wave finishes; only future waves
@@ -507,11 +510,15 @@ switch (mode) {
     // Each positional arg is one batch: `campaign "436 611 623" "640 655" "701"`;
     // an optional `--name "…"` labels the run in the dashboard and archive.
     let name: string | undefined;
+    // `--auto-carve` opts into pruning a quarantine's stranded dependents and running
+    // on; the default pauses at the wave boundary for a human (ADR 0013).
+    let autoCarve = false;
     const positional: string[] = [];
     for (let i = 0; i < rest.length; i++) {
       const a = rest[i];
       if (a.startsWith("--name=")) name = a.slice("--name=".length);
       else if (a === "--name") name = rest[++i];
+      else if (a === "--auto-carve") autoCarve = true;
       else positional.push(a);
     }
     const batches = positional
@@ -525,7 +532,7 @@ switch (mode) {
     // Archive every completed run — failed/halted or clean — so a halt still enters
     // the archived-runs list to inspect (#141). archiveIfIdle no-ops while parked,
     // so a still-waiting run (not finished) stays live as before.
-    await campaign(cfg, batches, hostBudget, name);
+    await campaign(cfg, batches, hostBudget, name, { autoCarve });
     archiveIfIdle();
     break;
   }

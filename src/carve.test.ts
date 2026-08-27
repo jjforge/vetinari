@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyCarve, carveClosure, computeCarve, restrictBlockers } from "./carve.ts";
+import { applyCarve, carveClosure, computeCarve, quarantineImpacts, restrictBlockers } from "./carve.ts";
 
 // A fake "blocked by" resolver from a plain edge map: id -> the ids that block it.
 const blockedByFrom = (edges: Record<string, string[]>) => (id: string) => edges[id] ?? [];
@@ -178,6 +178,57 @@ test("carveClosure normalizes a leading # target and keeps closure order for kep
     keptBanked: [],
     remaining: [],
   });
+});
+
+test("quarantineImpacts reports a quarantined issue's orphaned later-wave dependents", async () => {
+  // Wave 0 ran; 640 quarantined on a merge conflict (green, so `completed`), 611 merged.
+  // 701 in the unstarted wave 1 is blocked by 640, so it is orphaned.
+  const impacts = await quarantineImpacts(
+    { waves: [["611", "640"], ["623", "701"]], outcomes: outcomesFrom({ "611": "completed", "640": "completed" }) },
+    ["640"],
+    blockedByFrom({ "701": ["640"] }),
+  );
+
+  assert.equal(impacts.length, 1);
+  assert.equal(impacts[0].target, "640");
+  assert.deepEqual(impacts[0].removed, ["640", "701"]);
+  // Only the unstarted dependent is orphaned; the quarantined target itself is kept.
+  assert.deepEqual(impacts[0].dropped, ["701"]);
+});
+
+test("quarantineImpacts reports an empty drop for a quarantine that orphans nothing", async () => {
+  // 611 quarantined but nothing depends on it — no later-wave work is stranded.
+  const impacts = await quarantineImpacts(
+    { waves: [["611", "640"], ["623", "701"]], outcomes: outcomesFrom({ "611": "completed", "640": "completed" }) },
+    ["611"],
+    blockedByFrom({ "701": ["640"] }),
+  );
+
+  assert.equal(impacts.length, 1);
+  assert.equal(impacts[0].target, "611");
+  assert.deepEqual(impacts[0].dropped, []);
+});
+
+test("quarantineImpacts follows the transitive closure across every quarantined issue", async () => {
+  // 640 quarantined; 701 (blocked by 640) and 712 (blocked by 701) are both orphaned.
+  const impacts = await quarantineImpacts(
+    { waves: [["640"], ["701"], ["712"]], outcomes: outcomesFrom({ "640": "completed" }) },
+    ["640"],
+    blockedByFrom({ "701": ["640"], "712": ["701"] }),
+  );
+
+  assert.equal(impacts.length, 1);
+  assert.deepEqual(impacts[0].dropped.sort(), ["701", "712"]);
+});
+
+test("quarantineImpacts skips a quarantined id no longer in the plan (an earlier carve took it)", async () => {
+  const impacts = await quarantineImpacts(
+    { waves: [["611"]], outcomes: outcomesFrom({ "611": "completed" }) },
+    ["999"],
+    blockedByFrom({}),
+  );
+
+  assert.deepEqual(impacts, []);
 });
 
 test("restrictBlockers keeps only the edges that stay inside the selected set", async () => {

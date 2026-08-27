@@ -5,10 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import {
+  autoCarveNotice,
   build,
   buildImageArgs,
   childSpawnEnv,
   markMergedIssues,
+  quarantinePauseNotice,
   requireTelegram,
   resolveTitles,
   warnIfTelegramUnconfigured,
@@ -165,6 +167,36 @@ test("waveParkedNotice draws attention to a paused campaign whose greens stay me
   assert.ok(/no attributable culprit/i.test(notice.text));
   // The gate report tail rides along so the human sees why it went red.
   assert.ok(notice.text.includes("GATE FAILED"));
+});
+
+test("quarantinePauseNotice draws a human to a campaign paused by a quarantine that orphaned later-wave dependents", () => {
+  const notice = quarantinePauseNotice(
+    "acme",
+    1,
+    [{ target: "640", removed: ["640", "701"], dropped: ["701"] }],
+    "main",
+  );
+  // Routed to the alerting channel — a paused campaign demands a human, like a wave-park.
+  assert.equal(notice.category, "failure");
+  assert.equal(notice.event, "quarantine-paused");
+  // Names the quarantined issue and the dependents it stranded.
+  assert.ok(notice.text.includes("640"));
+  assert.ok(notice.text.includes("701"));
+  assert.ok(/pause/i.test(notice.text));
+  // Points at both recovery paths: resolve/resume, or re-run with --auto-carve.
+  assert.ok(/--auto-carve/.test(notice.text));
+});
+
+test("autoCarveNotice reports the pruned dependents and that the campaign ran on", () => {
+  const notice = autoCarveNotice("acme", 1, [
+    { target: "640", removed: ["640", "701"], dropped: ["701"] },
+  ]);
+  // Informational — the campaign continued, so it rides the progress channel.
+  assert.equal(notice.category, "progress");
+  assert.equal(notice.event, "auto-carve");
+  assert.ok(notice.text.includes("640"));
+  assert.ok(notice.text.includes("701"));
+  assert.ok(/carve/i.test(notice.text));
 });
 
 test("markMergedIssues is a no-op when onIssueMerged is unconfigured — core names no labels", async () => {

@@ -13,6 +13,7 @@ import {
   readProject,
   readProjects,
   register,
+  removePointer,
   tgConnForBaseLocation,
   writeRouting,
   type ProjectPointer,
@@ -38,6 +39,33 @@ test("register then listProjects round-trips the pointer", () => {
   register(configDir, pointer());
 
   assert.deepEqual(listProjects(configDir), [pointer()]);
+});
+
+test("removePointer drops the named pointer and leaves live ones — a stale entry stops rendering", () => {
+  const configDir = tmpConfigDir();
+  register(configDir, pointer({ project: "live" }));
+  register(configDir, pointer({ project: "stale" }));
+
+  const removed = removePointer(configDir, "stale");
+
+  assert.equal(removed, true);
+  assert.deepEqual(
+    listProjects(configDir).map((p) => p.project),
+    ["live"],
+  );
+});
+
+test("removePointer is a no-op returning false for a name that was never registered", () => {
+  const configDir = tmpConfigDir();
+  register(configDir, pointer({ project: "live" }));
+
+  const removed = removePointer(configDir, "ghost");
+
+  assert.equal(removed, false);
+  assert.deepEqual(
+    listProjects(configDir).map((p) => p.project),
+    ["live"],
+  );
 });
 
 // A base location on disk with a `host.env` carrying the project's

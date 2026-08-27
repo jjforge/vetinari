@@ -3,6 +3,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -93,6 +94,20 @@ export function register(configDir: string, pointer: ProjectPointer): void {
     pointerFile(configDir, pointer.project),
     JSON.stringify(pointer, null, 2),
   );
+}
+
+/**
+ * Remove a single named pointer from the host registry — the explicit write-side
+ * counterpart to `listProjects`/`autoRegister` (there is no automatic prune; that
+ * is a separate design call). The dashboard reads the registry live, so a removed
+ * pointer stops rendering. Returns whether a pointer was actually removed, so a
+ * name that was never registered is a clean no-op (`false`), never a crash.
+ */
+export function removePointer(configDir: string, project: string): boolean {
+  const file = pointerFile(configDir, project);
+  if (!existsSync(file)) return false;
+  rmSync(file);
+  return true;
 }
 
 /** Every registered pointer. The gateway's source of truth for "what projects exist". */

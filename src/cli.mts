@@ -53,7 +53,12 @@ import {
   listParked,
   readParked,
 } from "./state.ts";
-import { autoRegister, gatewayConfigDir, listProjects } from "./registry.ts";
+import {
+  autoRegister,
+  gatewayConfigDir,
+  listProjects,
+  removePointer,
+} from "./registry.ts";
 import { resolveHostCeiling, type HostBudget } from "./host-slots.ts";
 import { containerShareWeight } from "./config.ts";
 import {
@@ -173,6 +178,10 @@ const USAGE = `vetinari <mode> [args]
                            parked status for every registered project, a dropdown to
                            switch between them (a single project is one entry). Reads
                            the registry, so no gateway daemon is required
+  registry remove <name>   remove one project's pointer from the host registry, so
+                           the dashboard stops listing it (the explicit counterpart to
+                           the auto-register every run performs — not container slots).
+                           A name that is not registered is a clean no-op
   statusline               one compact line for the Claude Code status bar (reads
                            Claude Code's JSON on stdin; wire into settings.json)
   statusline install [--run-command "<cmd>"] [--dry-run]
@@ -453,6 +462,28 @@ if (mode === "status") {
   // to serve, so park here instead of exiting (an exit would kill the server the
   // instant it bound). We never fall through to the strict cwd config load.
   await new Promise<never>(() => {});
+}
+
+// `registry remove <name>` deletes one project's pointer from the host registry —
+// the explicit counterpart to the auto-register every run performs. It acts on the
+// host registry (not this project's slots — that is host-slots' `deregisterProject`),
+// so like status/gateway it runs BEFORE the strict cwd config load (no project config
+// in cwd is required to prune a stale pointer).
+if (mode === "registry") {
+  if (rest[0] !== "remove" || !rest[1]) {
+    console.error(
+      "registry needs a subcommand: `vetinari registry remove <name>`",
+    );
+    process.exit(1);
+  }
+  const name = rest[1];
+  const removed = removePointer(gatewayConfigDir(), name);
+  console.log(
+    removed
+      ? `removed registry pointer for "${name}" — the dashboard will stop listing it.`
+      : `no registry pointer named "${name}" — nothing to remove.`,
+  );
+  process.exit(0);
 }
 
 // tidy reconciles drift a human-in-the-loop resolution leaks (ADR 0013). It reads

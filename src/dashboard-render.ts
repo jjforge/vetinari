@@ -15,6 +15,8 @@ import {
   DASHBOARD_PALETTE_CSS,
   ISSUE_DETAIL_SHEET_SCRIPT,
   ISSUE_DETAIL_SHEET_STYLES,
+  LIVE_TAIL_SCRIPT,
+  LIVE_TAIL_STYLES,
   MONO_FONT,
   REPO_DROPDOWN_SCRIPT,
   STATE_CHIP_BORDER_CSS,
@@ -1002,6 +1004,7 @@ ${DASHBOARD_PALETTE_CSS}
   .campaign-meta { margin: .75rem 0 0; color: var(--color-text-light-2); font-size: .95rem; }
   .campaign-name { font-weight: 600; letter-spacing: -0.01em; }
 ${TOP_BAR_STYLES}
+${LIVE_TAIL_STYLES}
   .waves-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 1rem; margin: 1rem 0; }
   .wave { background: var(--color-card); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: 1rem; box-shadow: 0 8px 22px #0004; border-top: 3px solid var(--color-dim); }
   .wave.running { border-top-color: var(--color-blue); }
@@ -1294,6 +1297,7 @@ ${ARCHIVE_LIST_SCRIPT}
     }
   }
   wireLiveRegion();
+${LIVE_TAIL_SCRIPT}
 </script>
 </body>
 </html>`;

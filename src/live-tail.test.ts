@@ -150,30 +150,47 @@ test("tailFresh treats a re-sent snapshot line as new only when its per-file ind
   assert.deepEqual(next.seen, { "1": 2, "2": 0 });
 });
 
-// Collect SSE frames (with their optional `event:` type) for a fixed span, past the route's
-// ~300ms debounce — the deterministic pattern the existing /api/events tests use.
-const collectSse = async (port: number, ms: number): Promise<Array<{ event: string; data: any }>> => {
+const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// Open an /api/events stream and continuously accumulate parsed frames (with their optional
+// `event:` type) into an array until closed — a continuous pump, so a frame that arrives at any
+// time is captured (racing read() against a timeout would drop a late frame mid-read).
+const openStream = async (port: number): Promise<{ frames: Array<{ event: string; data: any }>; close: () => Promise<void> }> => {
   const res = await fetch(`http://127.0.0.1:${port}/api/events`);
   const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
+  const dec = new TextDecoder();
   const frames: Array<{ event: string; data: any }> = [];
-  const deadline = Date.now() + ms;
-  while (Date.now() < deadline) {
-    const chunk = await Promise.race([reader.read(), new Promise<{ done: true; value: undefined }>((r) => setTimeout(() => r({ done: true, value: undefined }), deadline - Date.now()))]);
-    if (chunk.value) buf += decoder.decode(chunk.value, { stream: true });
-  }
-  await reader.cancel().catch(() => {});
-  for (const block of buf.split("\n\n")) {
-    let event = "message";
-    let data: string | undefined;
-    for (const line of block.split("\n")) {
-      if (line.startsWith("event:")) event = line.slice(6).trim();
-      else if (line.startsWith("data:")) data = line.slice(5).trim();
+  let buf = "";
+  const pump = (async () => {
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let idx: number;
+        while ((idx = buf.indexOf("\n\n")) >= 0) {
+          const block = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          let ev = "message";
+          let d: string | undefined;
+          for (const line of block.split("\n")) {
+            if (line.startsWith("event:")) ev = line.slice(6).trim();
+            else if (line.startsWith("data:")) d = line.slice(5).trim();
+          }
+          if (d !== undefined) frames.push({ event: ev, data: JSON.parse(d) });
+        }
+      }
+    } catch {
+      // reader cancelled at close
     }
-    if (data !== undefined) frames.push({ event, data: JSON.parse(data) });
-  }
-  return frames;
+  })();
+  return {
+    frames,
+    close: async () => {
+      await reader.cancel().catch(() => {});
+      await pump;
+    },
+  };
 };
 
 test("GET /api/events seeds a running agent's tail as a named `tail` SSE frame (#124)", async () => {
@@ -188,15 +205,45 @@ test("GET /api/events seeds a running agent's tail as a named `tail` SSE frame (
 
   const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
   const port = (server.address() as AddressInfo).port;
+  const stream = await openStream(port);
   try {
-    const frames = await collectSse(port, 700);
-    const tail = frames.find((f) => f.event === "tail");
+    await delay(500);
+    const tail = stream.frames.find((f) => f.event === "tail");
     assert.ok(tail, "a tail frame was seeded on connect");
     assert.equal(tail!.data.project, "acme");
     assert.deepEqual(tail!.data.tail.agents, [{ issue: "204", status: "running" }]);
     assert.equal(tail!.data.tail.lines.length, 1);
     assert.ok(tail!.data.tail.lines[0].raw.includes('"name":"Edit"'));
   } finally {
+    await stream.close();
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});
+
+test("GET /api/events pushes an updated tail frame when a running agent appends activity (#124)", async () => {
+  const configDir = tmp();
+  const projDir = tmp();
+  writeJsonl(join(projDir, "logs", "orchestrator.jsonl"), [event("queue-start", { taskIds: ["204"], slots: 1, ts: "2026-08-27T00:00:00.000Z" })]);
+  initActivityLog(projDir, "204");
+  appendActivity(projDir, "204", event("tool", { taskId: "204", name: "Read", ts: "2026-08-27T00:00:01.000Z" }));
+  register(configDir, { project: "acme", projectRoot: projDir, baseLocation: projDir });
+
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const port = (server.address() as AddressInfo).port;
+  const stream = await openStream(port);
+  try {
+    await delay(400);
+    assert.ok(
+      stream.frames.find((f) => f.event === "tail" && f.data.tail.lines.length === 1),
+      "the seed tail frame carries the one existing line",
+    );
+    // A fresh activity append must surface as a new tail frame with both lines.
+    appendActivity(projDir, "204", event("sandbox-exec", { taskId: "204", cmd: "npm test", ts: "2026-08-27T00:00:02.000Z" }));
+    await delay(800);
+    const updated = [...stream.frames].reverse().find((f) => f.event === "tail");
+    assert.ok(updated && updated.data.tail.lines.length === 2, "the appended line arrives in a new tail frame");
+  } finally {
+    await stream.close();
     await new Promise<void>((r) => server.close(() => r()));
   }
 });
@@ -244,4 +291,19 @@ test("renderStatusPage places the live tail between the wave grid and the archiv
   assert.ok(tailAt > -1, "tail is rendered");
   const regionOpen = html.indexOf('id="live-region"');
   assert.ok(regionOpen > -1 && tailAt > regionOpen, "tail comes after live-region opens");
+});
+
+test("renderStatusPage ships the tail styles and a client that reuses the archived-raw tokeniser over SSE", () => {
+  const html = renderStatusPage(statusWith([["204", "running"]]), {});
+  // The pane's styles are present (fixed 236px body, the shell card).
+  assert.match(html, /\.tail-body \{[^}]*height: 236px/);
+  assert.match(html, /\.live-tail \{/);
+  // The client single-sources the pure reducers and the archived-raw tokeniser, and listens
+  // for the named `tail` SSE frame — live updates without a whole-page refetch.
+  assert.match(html, /function tailView/);
+  assert.match(html, /function tailFresh/);
+  assert.match(html, /function tailAppend/);
+  assert.match(html, /function highlightJsonLine/);
+  assert.match(html, /addEventListener\("tail"/);
+  assert.match(html, /highlightJsonLine\(r\.raw\)/);
 });

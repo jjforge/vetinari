@@ -9,7 +9,8 @@ import { loggerForRun, type Logger } from "./log.ts";
  * used to route it. `question` is the only interactive one (it expects a reply).
  * Adding categories is out of scope.
  */
-export type MessageCategory = "question" | "success" | "failure" | "progress" | "finding";
+export type MessageCategory =
+  "question" | "success" | "failure" | "progress" | "finding";
 
 /**
  * A named Telegram connection a project routes categories to. `bot` names a bot
@@ -36,7 +37,11 @@ export type NotifyMap = Record<string, string>;
  * wildcard — an explicit "no destination" the caller must handle, never a silent
  * drop.
  */
-export function resolveDestination(notify: NotifyMap, category: MessageCategory, event?: string): string | undefined {
+export function resolveDestination(
+  notify: NotifyMap,
+  category: MessageCategory,
+  event?: string,
+): string | undefined {
   if (event !== undefined) {
     const exact = notify[`${category}:${event}`];
     if (exact !== undefined) return exact;
@@ -59,7 +64,8 @@ export function questionDestinations(notify: NotifyMap): Set<string> {
   for (const [key, dest] of Object.entries(notify)) {
     if (key === "question" || key.startsWith("question:")) dests.add(dest);
   }
-  if (notify["question"] === undefined && notify["*"] !== undefined) dests.add(notify["*"]);
+  if (notify["question"] === undefined && notify["*"] !== undefined)
+    dests.add(notify["*"]);
   return dests;
 }
 
@@ -130,7 +136,13 @@ export interface VetinariConfig {
    * which is the contention containers exist to avoid.
    */
   mounts?: MountSpec[];
-  /** Fetch the task text for an id — an issue body, a spec file, anything. */
+  /**
+   * Fetch the task text for an id — an issue body, a spec file, anything. When the
+   * text is JSON it should carry the issue's open/closed state (`state`, or
+   * `closed`/`closedAt`) so `graft` can reject a closed target (ADR 0014); a resolver
+   * that omits it reads as always-open. `githubFetchTask` fixes that field set for
+   * `gh`-backed configs — prefer it over a hand-rolled `--json` list.
+   */
   fetchTask: (id: string) => string | Promise<string>;
   /**
    * The ids of a given id's OPEN blockers (its prerequisites still in flight).
@@ -208,9 +220,26 @@ export interface VetinariConfig {
 }
 
 export type ResolvedConfig = Required<
-  Pick<VetinariConfig, "project" | "image" | "baseBranch" | "branchPrefix" | "containerShare" | "gates" | "maxTurns" | "idleTimeoutSeconds" | "stateDir" | "fetchTask">
+  Pick<
+    VetinariConfig,
+    | "project"
+    | "image"
+    | "baseBranch"
+    | "branchPrefix"
+    | "containerShare"
+    | "gates"
+    | "maxTurns"
+    | "idleTimeoutSeconds"
+    | "stateDir"
+    | "fetchTask"
+  >
 > &
-  VetinariConfig & { promptFile: string; parkedDir: string; logFile: string; log: Logger };
+  VetinariConfig & {
+    promptFile: string;
+    parkedDir: string;
+    logFile: string;
+    log: Logger;
+  };
 
 export function defineConfig(c: VetinariConfig): VetinariConfig {
   return c;
@@ -245,16 +274,21 @@ export interface ResolvedConfigPath {
  * under `baseDir`, reporting a legacy origin when the winner is deprecated.
  * Existence checks only — no module import or execution.
  */
-export function resolveConfigPath(baseDir: string): ResolvedConfigPath | undefined {
+export function resolveConfigPath(
+  baseDir: string,
+): ResolvedConfigPath | undefined {
   for (const { rel, deprecated } of CANDIDATES) {
     const path = resolve(baseDir, rel);
-    if (existsSync(path)) return deprecated ? { path, deprecatedFrom: rel } : { path };
+    if (existsSync(path))
+      return deprecated ? { path, deprecatedFrom: rel } : { path };
   }
   return undefined;
 }
 
 /** Load the consuming project's config from cwd (or an explicit path). */
-export async function loadConfig(explicitPath?: string): Promise<ResolvedConfig> {
+export async function loadConfig(
+  explicitPath?: string,
+): Promise<ResolvedConfig> {
   let path = explicitPath;
   if (!path) {
     const resolved = resolveConfigPath(process.cwd());
@@ -275,10 +309,20 @@ export async function loadConfig(explicitPath?: string): Promise<ResolvedConfig>
   const mod = await import(resolve(path));
   const c: VetinariConfig = mod.default ?? mod.config;
   if (!c) throw new Error(`${path} has no default export`);
-  for (const required of ["project", "image", "baseBranch", "gates", "fetchTask"] as const) {
-    if (c[required] == null) throw new Error(`${path}: missing required field "${required}"`);
+  for (const required of [
+    "project",
+    "image",
+    "baseBranch",
+    "gates",
+    "fetchTask",
+  ] as const) {
+    if (c[required] == null)
+      throw new Error(`${path}: missing required field "${required}"`);
   }
-  if (!c.gates.length) throw new Error(`${path}: "gates" is empty — the orchestrator would verify nothing`);
+  if (!c.gates.length)
+    throw new Error(
+      `${path}: "gates" is empty — the orchestrator would verify nothing`,
+    );
   if (c.notify) {
     const qDests = questionDestinations(c.notify);
     if (qDests.size > 1) {
@@ -302,7 +346,8 @@ export async function loadConfig(explicitPath?: string): Promise<ResolvedConfig>
     idleTimeoutSeconds: 600,
     ...c,
     stateDir,
-    promptFile: c.promptFile ?? new URL("../prompts/tdd.md", import.meta.url).pathname,
+    promptFile:
+      c.promptFile ?? new URL("../prompts/tdd.md", import.meta.url).pathname,
     parkedDir: `${stateDir}/parked`,
     logFile,
     log: loggerForRun({ logFile }),

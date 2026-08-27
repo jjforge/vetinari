@@ -18,11 +18,51 @@ export const githubBlockedBy =
   (repo: string, run: (args: string[]) => string = gh) =>
   (id: string): string[] => {
     const num = id.replace(/^#/, "").trim();
-    const out = run(["api", `repos/${repo}/issues/${num}/dependencies/blocked_by`]);
-    const rows: Array<{ number?: number; state?: string; repository?: { full_name?: string } }> = JSON.parse(out || "[]");
+    const out = run([
+      "api",
+      `repos/${repo}/issues/${num}/dependencies/blocked_by`,
+    ]);
+    const rows: Array<{
+      number?: number;
+      state?: string;
+      repository?: { full_name?: string };
+    }> = JSON.parse(out || "[]");
     return rows
-      .filter((r) => r.number != null && r.state !== "closed" && (!r.repository?.full_name || r.repository.full_name === repo))
+      .filter(
+        (r) =>
+          r.number != null &&
+          r.state !== "closed" &&
+          (!r.repository?.full_name || r.repository.full_name === repo),
+      )
       .map((r) => String(r.number));
+  };
+
+/**
+ * A ready `fetchTask` resolver over `gh issue view`: the fields the orchestrator
+ * reads off a task — `title`/`body`/`comments`/`labels` for the agent's prompt and
+ * ticket prose, plus `state`/`closedAt` so `issueStateFromTask` can tell an OPEN
+ * issue from a CLOSED one (the signal `graft` validates a candidate against, ADR
+ * 0014). Drop it into a config as `fetchTask: githubFetchTask("owner/repo")`.
+ *
+ * `state`/`closedAt` are the point of centralizing this: a field list that omits
+ * them parses as always-open, silently disabling graft's closed-id rejection. Fixing
+ * the set here means a project config cannot re-drop it by hand-rolling the `--json`
+ * list (#175). `run` is injected only so the argument building can be tested without
+ * invoking `gh`.
+ */
+export const githubFetchTask =
+  (repo: string, run: (args: string[]) => string = gh) =>
+  (id: string): string => {
+    const num = id.replace(/^#/, "").trim();
+    return run([
+      "issue",
+      "view",
+      num,
+      "--repo",
+      repo,
+      "--json",
+      "title,body,comments,labels,state,closedAt",
+    ]);
   };
 
 /**
@@ -42,7 +82,17 @@ export const githubMarkPendingVerify =
   (repo: string, run: (args: string[]) => string = gh) =>
   (id: string): void => {
     const num = id.replace(/^#/, "").trim();
-    run(["issue", "edit", num, "--repo", repo, "--add-label", "pending-verify", "--remove-label", "ready-for-agent"]);
+    run([
+      "issue",
+      "edit",
+      num,
+      "--repo",
+      repo,
+      "--add-label",
+      "pending-verify",
+      "--remove-label",
+      "ready-for-agent",
+    ]);
   };
 
 /**
@@ -52,7 +102,11 @@ export const githubMarkPendingVerify =
  * injected only so the argument building can be tested without invoking `gh`.
  */
 export const githubFindingReporter =
-  (repo: string, opts: { labels?: string[] } = {}, run: (args: string[]) => string = gh) =>
+  (
+    repo: string,
+    opts: { labels?: string[] } = {},
+    run: (args: string[]) => string = gh,
+  ) =>
   (finding: Finding, ctx: FindingContext): string => {
     const body = [
       finding.repro ? `**Repro:** ${finding.repro}` : "",
@@ -61,7 +115,16 @@ export const githubFindingReporter =
     ]
       .filter(Boolean)
       .join("\n\n");
-    const args = ["issue", "create", "--repo", repo, "--title", finding.summary, "--body", body];
+    const args = [
+      "issue",
+      "create",
+      "--repo",
+      repo,
+      "--title",
+      finding.summary,
+      "--body",
+      body,
+    ];
     for (const label of opts.labels ?? []) args.push("--label", label);
     return run(args).trim();
   };

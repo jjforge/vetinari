@@ -29,10 +29,14 @@ export interface IntegrateResult {
    * resumable, and the wave neither rolls back nor halts.
    */
   quarantined: string[];
-  /** Set when the wave halted on a red merged base — the emergent, unattributable
-   * failure (each green passed alone, together they are red) that still rolls the base
-   * back to where the wave began. */
-  halt?: { reason: "gate-red"; detail: string };
+  /**
+   * Set when the merged base gated red — the emergent, unattributable failure (each
+   * green passed alone, together they are red). No branch is to blame, so the wave is
+   * NOT rolled back: the greens stay merged on the base and the campaign wave-parks
+   * (a resumable pause) for a human to fix forward and resume, or carve a suspect
+   * (ADR 0013). `detail` is the tail of the gate report.
+   */
+  parked?: { reason: "gate-red"; detail: string };
 }
 
 /**
@@ -55,8 +59,10 @@ const defaultIntegrateDeps: IntegrateDeps = { gate: gateMergedBase };
  * already banked — quarantines the issue (branch/worktree/session preserved, resumable)
  * and continues integrating the rest of the wave.
  *
- * A **red merged base** has no single culprit, so it still rolls the base back to where
- * the wave began and halts, leaving the agent branches intact for a human.
+ * A **red merged base** has no single culprit, so it is NOT rolled back either: the
+ * greens stay merged, the branches are left intact, and the result carries `parked` so
+ * the caller wave-parks — a resumable pause for a human to fix forward or carve a
+ * suspect (never a machine-guessed culprit).
  *
  * Assumes the main working tree is already on `cfg.baseBranch` (campaign ensures it) so
  * a merge advances HEAD in place and the next batch cuts from it.
@@ -66,17 +72,15 @@ export async function integrateGreens(
   greens: string[],
   deps: IntegrateDeps = defaultIntegrateDeps,
 ): Promise<IntegrateResult> {
-  const preSha = git(["rev-parse", "HEAD"]);
-
   const merged: string[] = [];
   const quarantined: string[] = [];
   for (const taskId of greens) {
     const branch = `${cfg.branchPrefix}${taskId}`;
     const r = gitTry(["merge", "--no-ff", branch, "-m", `campaign: merge ${branch}`]);
     if (r.code !== 0) {
-      // Attributable failure (ADR 0013): abort ONLY this merge — a `reset --hard preSha`
-      // here would discard the greens already merged this wave — quarantine the issue
-      // with its work preserved, and carry on with the rest of the wave.
+      // Attributable failure (ADR 0013): abort ONLY this merge — a `reset --hard` to
+      // the wave start here would discard the greens already merged this wave —
+      // quarantine the issue with its work preserved, and carry on with the rest.
       const detail = `${r.stdout}\n${r.stderr}`.trim().split("\n").slice(-12).join("\n");
       gitTry(["merge", "--abort"]);
       log("quarantined", { taskId, branch, detail });
@@ -90,10 +94,15 @@ export async function integrateGreens(
   if (merged.length) {
     const { green, report } = await deps.gate(cfg);
     if (!green) {
-      log("campaign-merged-base-red", { merged, preSha });
-      gitTry(["merge", "--abort"]);
-      gitTry(["reset", "--hard", preSha]);
-      return { merged: [], quarantined, halt: { reason: "gate-red", detail: report.split("\n").slice(-40).join("\n") } };
+      // Emergent, unattributable failure (ADR 0013): every green passed alone, the
+      // combined base is red, so no branch is to blame. Do NOT `reset --hard` to the
+      // wave start — that would un-merge the greens — and do NOT drop the merged branches:
+      // leave everything merged on the base and wave-park. The caller pauses the
+      // campaign for a human to fix forward and resume, or carve a suspect. The base
+      // sits red but is never pushed and nothing builds on it while paused.
+      const detail = report.split("\n").slice(-40).join("\n");
+      log("wave-parked", { merged, detail });
+      return { merged, quarantined, parked: { reason: "gate-red", detail } };
     }
   }
 

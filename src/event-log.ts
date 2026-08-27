@@ -136,6 +136,17 @@ export interface QuarantinedEvent extends BaseEvent {
   detail: string;
 }
 
+/** `wave-parked` — a wave's merged base gated red (every green passed alone, the combined base is
+ * red): the emergent, unattributable failure. No branch is to blame, so nothing rolls back — the
+ * greens stay merged on the base and the campaign pauses (resumably) for a human to fix forward and
+ * resume, or carve a suspect. Carries the greens left merged and the tail of the gate report
+ * (merge.ts, ADR 0013). */
+export interface WaveParkedEvent extends BaseEvent {
+  event: "wave-parked";
+  merged: string[];
+  detail: string;
+}
+
 /** `carve` — an issue (and its dependency closure) was carved out of a running campaign: the target
  * issue, the closure computed for removal, and the members actually dropped from the plan
  * (cli.mts, ADR 0005/0007). */
@@ -198,6 +209,7 @@ export type OrchestratorEvent =
   | GreenEvent
   | ParkedEvent
   | QuarantinedEvent
+  | WaveParkedEvent
   | CarveEvent
   | WorktreePreservedEvent
   | TelegramUnconfiguredEvent

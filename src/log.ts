@@ -1,7 +1,7 @@
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { gatewayConfigDir } from "./registry.ts";
-import type { OrchestratorEvent } from "./event-log.ts";
+import { readEventLog, type BaseEvent, type OrchestratorEvent } from "./event-log.ts";
 import type { ResolvedConfig } from "./config.ts";
 
 /** The narrowed kinds the dashboard reads back (`event-log.ts`); their emit sites are typed. */
@@ -57,6 +57,45 @@ export const hostLogTarget = (): string => join(gatewayConfigDir(), "logs", "hos
 
 /** The host's logger: file-backed at `hostLogTarget()`, with the console echo. */
 export const hostLogger = (): Logger => fileLogger(hostLogTarget());
+
+/**
+ * Read the persistent host log's rows for a terminal reader (`host log`) — the reader half of
+ * the write-only `hostLogger` (#169). Reuses the event-log parse against `hostLogTarget()` (the
+ * host log is the same stamped JSONL shape as a project's `orchestrator.jsonl`), then returns the
+ * rows **newest-first**, bounded to the most recent `limit` when given. A missing `host.jsonl` —
+ * the host daemon never ran — reads empty, so the caller renders a clean "no host log yet" rather
+ * than erroring.
+ */
+export function readHostLog(limit?: number): OrchestratorEvent[] {
+  const rows = readEventLog({ logFile: hostLogTarget() });
+  const bounded = limit === undefined ? rows : rows.slice(-limit);
+  return bounded.slice().reverse();
+}
+
+/**
+ * The persistent host log's raw JSONL lines as on disk — verbatim, blank lines dropped, in
+ * file (oldest-first) order — bounded to the most recent `limit` when given. A missing
+ * `host.jsonl` reads empty. This is what `host log --json` passes through untouched, so the
+ * bytes stay faithful for `jq`/`grep` rather than being reparsed and re-serialised (#169).
+ */
+export function readHostLogLines(limit?: number): string[] {
+  const target = hostLogTarget();
+  if (!existsSync(target)) return [];
+  const lines = readFileSync(target, "utf8").split("\n").filter(Boolean);
+  return limit === undefined ? lines : lines.slice(-limit);
+}
+
+/**
+ * Render one stamped host-log row as a single human-readable line — timestamp, event kind, then
+ * its salient fields as compact JSON — in the spirit of the `[vetinari] <event> {data}` console
+ * echo. A pure function over a row so it is unit-testable without spawning the CLI (#169); a row
+ * carrying nothing beyond `ts`/`event` renders those two alone, with no trailing `{}`.
+ */
+export function renderHostEvent(row: BaseEvent): string {
+  const { ts, event, ...data } = row as BaseEvent & Record<string, unknown>;
+  const rest = Object.keys(data).length ? ` ${JSON.stringify(data)}` : "";
+  return `${ts} ${event}${rest}`;
+}
 
 /** A `Logger` whose captured rows are readable as typed events — see `memoryLogger`. */
 export interface MemoryLogger extends Logger {

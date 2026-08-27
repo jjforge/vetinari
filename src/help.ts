@@ -102,6 +102,11 @@ export const MODES: Mode[] = [
       "write the host-level systemd unit for THIS install to ~/.config/systemd/user/vetinari-gateway.service, with a fully absolute node + tsx-loader + cli ExecStart — no bash -lc, env, npx, or PATH dependency, so it starts under systemd's clean environment (fixes the nvm/fnm/mise/asdf crash-loop). Re-run after a node/tsx upgrade (--dry-run to print the unit and write nothing)",
   },
   {
+    signature: "host log [-n <count>] [--tail] [--json]",
+    blurb:
+      "read the persistent host log (<gatewayConfigDir>/logs/host.jsonl) at the terminal — the host/gateway diagnostics that land nowhere a per-project feed shows. Prints the most recent events newest-first, one human-readable line each; -n bounds the window (default 50). --json passes the raw JSONL through untouched (for jq/grep); --tail (or -f) follows live, printing new events as they append. Reads the file directly, so no daemon need be running — a missing host.jsonl prints \"no host log yet\" and exits clean",
+  },
+  {
     signature: "parked",
     blurb: "list parked tasks and their questions",
   },

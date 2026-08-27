@@ -1,4 +1,4 @@
-import { cappedRawRows, highlightJsonLine } from "./dashboard-render.ts";
+import { cappedRawRows, highlightJsonLine, tailAppend, tailFresh, tailView } from "./dashboard-render.ts";
 
 /**
  * The dashboard's inert browser payloads — the CSS and client-side JavaScript
@@ -608,4 +608,162 @@ export const ARCHIVE_LIST_SCRIPT = `  const archiveList = document.querySelector
     // then render its starting mode (raw fetches; #L hash scrolls once the log lands).
     const opened = archiveRows.find((r) => r.classList.contains("open"));
     if (opened) { if (opened.hidden) { for (const r of archiveRows) r.hidden = false; const older = archiveList.querySelector(".archive-older-row"); if (older) older.hidden = true; } setMode(opened, rowMode(opened)); }
+  }`;
+
+/**
+ * The live raw-log tailing pane's styles (#124). The shell colours come straight from
+ * the shared palette (§1, no local hexes): the `--color-card` card, the `--color-body`
+ * body, the `--color-secondary` hairline. The body is a fixed 236px scroll region (not
+ * resizable) of 10.5px system-mono lines wrapped never scrolled. Each line's gutter reads
+ * its issue's status colour (generated from `stateColor`, §3); the JSON tokens reuse the
+ * archived-raw span classes but this pane's own palette (keys blue, string values the teal
+ * accent, numbers/bool/null amber), scoped to `.tail-code` so it never restyles the archive
+ * viewer. The header dot pulses teal only while the pane is open and following (§5,
+ * reduced-motion aware). Play/pause is a 26×26 CSS-drawn icon flipped by `data-following`.
+ */
+export const LIVE_TAIL_STYLES = `  .live-tail { background: var(--color-card); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); overflow: hidden; margin: 1rem 0; }
+  .live-tail[hidden] { display: none; }
+  .tail-head { display: flex; align-items: center; gap: .5rem; padding: 10px 13px; }
+  .tail-dot { width: .6rem; height: .6rem; border-radius: 999px; background: var(--color-dim); flex: none; }
+  .tail-dot[data-state="live"] { background: var(--color-primary); animation: chip-pulse 2.4s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) { .tail-dot[data-state="live"] { animation: none; } }
+  .tail-title { display: inline-flex; align-items: center; gap: .4rem; border: 0; background: none; padding: 0; color: var(--color-text); font: inherit; font-weight: 600; cursor: pointer; }
+  .tail-caret::before { content: "▾"; color: var(--color-text-light-2); display: inline-block; transition: transform 150ms; }
+  .tail-title[aria-expanded="false"] .tail-caret::before { transform: rotate(-90deg); }
+  .tail-summary { color: var(--color-text-light-2); font-size: .85rem; white-space: nowrap; }
+  .tail-gap { flex: 1; }
+  .tail-controls { display: inline-flex; align-items: center; gap: .4rem; }
+  .tail-controls[hidden] { display: none; }
+  .tail-issue-dd { position: relative; }
+  .tail-issue-trigger { display: inline-flex; align-items: center; gap: .35rem; border: 1px solid var(--color-secondary); border-radius: 999px; background: var(--color-chip); color: var(--color-text); font: inherit; font-size: .8rem; padding: .25rem .6rem; cursor: pointer; }
+  .tail-issue-trigger:hover { border-color: var(--color-primary); }
+  .tail-issue-caret { color: var(--color-text-light-2); font-size: .7rem; }
+  .tail-issue-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 5; list-style: none; margin: 0; padding: .25rem; min-width: 9rem; background: var(--color-box-header); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); box-shadow: 0 8px 22px #0006; }
+  .tail-issue-menu[hidden] { display: none; }
+  .tail-issue-option { display: flex; align-items: center; gap: .4rem; padding: .3rem .5rem; border-radius: 6px; cursor: pointer; font-size: .8rem; color: var(--color-text); }
+  .tail-issue-option:hover { background: var(--color-card-hover); }
+  .dot.all { background: var(--color-primary); }
+  .tail-filter { width: 9rem; max-width: 32vw; padding: .3rem .5rem; color: var(--color-text); background: var(--color-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); font: inherit; font-size: .8rem; }
+  .tail-play { position: relative; width: 26px; height: 26px; flex: none; border: 1px solid var(--color-secondary); border-radius: 7px; background: var(--color-chip); cursor: pointer; padding: 0; }
+  .tail-play[data-following="true"] { border-color: var(--color-blue-40); }
+  .tail-play[data-following="true"]::before, .tail-play[data-following="true"]::after { content: ""; position: absolute; top: 7px; width: 3px; height: 12px; background: var(--color-text-light); }
+  .tail-play[data-following="true"]::before { left: 8px; }
+  .tail-play[data-following="true"]::after { right: 8px; }
+  .tail-play[data-following="false"]::before { content: ""; position: absolute; top: 6px; left: 9px; border-style: solid; border-width: 7px 0 7px 11px; border-color: transparent transparent transparent var(--color-text-light); }
+  .tail-save, .tail-clear { border: 1px solid var(--color-secondary); border-radius: var(--border-radius); background: var(--color-chip); color: var(--color-text-light); font: inherit; font-size: .78rem; padding: .3rem .55rem; cursor: pointer; }
+  .tail-save:hover, .tail-clear:hover { background: var(--color-card-hover); }
+  .tail-body { height: 236px; overflow-y: auto; overflow-x: hidden; background: var(--color-body); font-family: ${MONO_FONT}; font-size: 10.5px; line-height: 1.5; }
+  .tail-body[hidden] { display: none; }
+  .tail-line { display: grid; grid-template-columns: 44px 1fr; gap: .6rem; padding: .05rem .6rem .05rem 0; }
+  .tail-line:hover { background: var(--color-card); }
+  .tail-gutter { text-align: right; color: var(--color-dim); font-variant-numeric: tabular-nums; }
+  ${["running", "parked", "failure", "completed", "unstarted", "carved", "quarantined", "interrupted"].map((s) => `.tail-gutter.${s} { color: ${stateColor(s)}; }`).join(" ")}
+  .tail-code { min-width: 0; white-space: pre-wrap; word-break: break-word; color: var(--color-text-light); }
+  .tail-code .jkey { color: var(--color-blue); }
+  .tail-code .jstr { color: var(--color-primary); }
+  .tail-code .jnum, .tail-code .jbool, .tail-code .jnull { color: var(--color-yellow); }
+  .tail-empty { color: var(--color-text-light-2); padding: .5rem .6rem; }
+  .tail-backlog { display: block; width: 100%; border: 0; background: var(--color-blue); color: var(--color-body); font: inherit; font-size: .78rem; font-weight: 700; padding: .35rem; cursor: pointer; text-align: center; }
+  .tail-backlog[hidden] { display: none; }
+  .tail-footer { color: var(--color-text-light-2); font-size: .75rem; padding: .4rem 13px; border-top: 1px solid var(--color-light-border); }
+  .tail-footer[hidden] { display: none; }`;
+
+/**
+ * The live-tail pane's client script (#124), inlined into the repo page after its shared
+ * `EventSource` so it can subscribe to the named `tail` frames the SSE pushes. Everything
+ * pure is single-sourced from `dashboard-render.ts` via `.toString()` — `highlightJsonLine`
+ * (the archived-raw tokeniser, reused verbatim), `tailFresh` (snapshot dedup by per-file
+ * index), `tailAppend` (following-buffer cap / paused growth) and `tailView` (the
+ * follow/pause/filter view-model) — so the node tests exercise the very functions shipped.
+ *
+ * The DOM glue holds the mutable state (`open`, `live`, `mark`, `issue`, `query`, `buffer`,
+ * `seen`, `agents`), consumes each `tail` frame for its own project, and re-renders the body.
+ * The pane lives outside `#live-region`, so a soft-refresh never disturbs it and this wiring
+ * runs once. `tail` is a named SSE event, so it never fires the page's `onmessage`; the tail
+ * follows its own pause, independent of the page-level live/pause.
+ */
+export const LIVE_TAIL_SCRIPT = `  const tailEl = document.querySelector("[data-live-tail]");
+  if (tailEl && typeof events !== "undefined") {
+    const __name = (fn) => fn;
+    ${highlightJsonLine.toString()}
+    ${tailFresh.toString()}
+    ${tailAppend.toString()}
+    ${tailView.toString()}
+    const FOLLOW_CAP = 260, RENDER_CAP = 160;
+    const project = tailEl.dataset.project;
+    let agents = []; try { agents = JSON.parse(tailEl.dataset.agents || "[]"); } catch (e) {}
+    let open = true, live = true, mark = 0, issue = "", query = "", buffer = [], seen = {};
+    const statusOf = (id) => (agents.find((a) => a.issue === id) || {}).status || "running";
+    const q = (sel) => tailEl.querySelector(sel);
+    const dotEl = q("[data-tail-dot]"), toggle = q("[data-tail-toggle]"), summaryEl = q("[data-tail-summary]");
+    const controls = q("[data-tail-controls]"), body = q("[data-tail-body]"), footer = q("[data-tail-footer]");
+    const backlogEl = q("[data-tail-backlog]"), playBtn = q("[data-tail-play]"), filterEl = q("[data-tail-filter]");
+    const issueDd = q("[data-tail-issue-dd]"), issueTrigger = q("[data-tail-issue-trigger]"), issueMenu = q("[data-tail-issue-menu]");
+    const issueLabel = q("[data-tail-issue-label]"), issueDot = q("[data-tail-issue-dot]");
+    const saveBtn = q("[data-tail-save]"), clearBtn = q("[data-tail-clear]");
+    const mk = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+    function renderMenu() {
+      issueMenu.textContent = "";
+      const rows = [{ issue: "", status: "all", label: "all agents" }].concat(agents.map((a) => ({ issue: a.issue, status: a.status, label: "#" + a.issue })));
+      for (const r of rows) {
+        const li = mk("li", "tail-issue-option"); li.setAttribute("role", "option"); li.dataset.issue = r.issue;
+        li.append(mk("span", "dot " + r.status), mk("span", null, r.label));
+        li.addEventListener("click", () => { issue = r.issue; issueLabel.textContent = r.label; issueDot.className = "dot " + r.status; issueMenu.hidden = true; issueTrigger.setAttribute("aria-expanded", "false"); render(); });
+        issueMenu.append(li);
+      }
+      // If the selected agent finished (dropped from the running set), fall back to all agents.
+      if (issue && !agents.some((a) => a.issue === issue)) { issue = ""; issueLabel.textContent = "all agents"; issueDot.className = "dot all"; }
+    }
+    function renderSummary() { summaryEl.textContent = agents.length + " agent" + (agents.length === 1 ? "" : "s") + (open ? "" : " · paused"); }
+    function render() {
+      const view = tailView({ buffer, mark, live, issue, query, cap: RENDER_CAP });
+      body.textContent = "";
+      if (view.rows.length) {
+        for (const r of view.rows) {
+          const line = mk("div", "tail-line");
+          line.append(mk("span", "tail-gutter " + statusOf(r.issue), "#" + r.issue));
+          const code = mk("code", "tail-code"); code.innerHTML = highlightJsonLine(r.raw); line.append(code);
+          body.append(line);
+        }
+      } else {
+        body.append(mk("div", "tail-empty", issue || query.trim() ? "no lines match that filter" : ""));
+      }
+      footer.textContent = view.visible + " of " + view.total + " lines · " + (view.following ? "following" : "paused");
+      if (view.backlog > 0) { backlogEl.hidden = false; backlogEl.textContent = "↓ " + view.backlog + " new line" + (view.backlog === 1 ? "" : "s"); } else { backlogEl.hidden = true; }
+      playBtn.dataset.following = String(live); playBtn.setAttribute("aria-label", live ? "Pause" : "Resume");
+      dotEl.dataset.state = open && live ? "live" : "idle";
+      if (live) body.scrollTop = body.scrollHeight;
+    }
+    function ingest(tail) {
+      agents = (tail && tail.agents) || [];
+      tailEl.hidden = agents.length === 0;
+      renderMenu(); renderSummary();
+      const res = tailFresh((tail && tail.lines) || [], seen); seen = res.seen;
+      // Grow the buffer past the cap only while explicitly paused with the pane open (a backlog
+      // to reveal); following or collapsed keeps it bounded — reopening jumps to live anyway.
+      if (res.fresh.length) buffer = tailAppend(buffer, res.fresh, live || !open, FOLLOW_CAP);
+      render();
+    }
+    events.addEventListener("tail", (e) => { let m; try { m = JSON.parse(e.data); } catch (x) { return; } if (m && m.project === project) ingest(m.tail); });
+    toggle.addEventListener("click", () => {
+      open = !open; toggle.setAttribute("aria-expanded", String(open)); controls.hidden = !open; body.hidden = !open; footer.hidden = !open;
+      // Opening starts following; closing pauses (the tail's own state, not the campaign's).
+      live = open; mark = buffer.length; if (!open) backlogEl.hidden = true;
+      renderSummary(); render();
+    });
+    playBtn.addEventListener("click", () => { live = !live; mark = buffer.length; render(); });
+    backlogEl.addEventListener("click", () => { live = true; mark = buffer.length; render(); });
+    filterEl.addEventListener("input", () => { query = filterEl.value; render(); });
+    issueTrigger.addEventListener("click", (e) => { e.stopPropagation(); const willOpen = issueMenu.hidden; issueMenu.hidden = !willOpen; issueTrigger.setAttribute("aria-expanded", String(willOpen)); });
+    document.addEventListener("click", (e) => { if (!issueDd.contains(e.target)) { issueMenu.hidden = true; issueTrigger.setAttribute("aria-expanded", "false"); } });
+    saveBtn.addEventListener("click", () => {
+      // The currently visible (filtered) lines — uncapped by the render window — as a .jsonl download.
+      const view = tailView({ buffer, mark, live, issue, query, cap: Math.max(buffer.length, 1) });
+      const blob = new Blob([view.rows.map((r) => r.raw).join("\\n")], { type: "application/x-ndjson" });
+      const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "tail-" + project + ".jsonl"; a.click(); URL.revokeObjectURL(a.href);
+    });
+    // Clear drops only this repo's buffered lines; the seen-high-water map is kept so the
+    // server's still-held window isn't re-imported next frame (the clear sticks until new lines arrive).
+    clearBtn.addEventListener("click", () => { buffer = []; mark = 0; render(); });
+    renderMenu(); renderSummary(); render();
   }`;

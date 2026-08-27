@@ -15,6 +15,8 @@ import {
   DASHBOARD_PALETTE_CSS,
   ISSUE_DETAIL_SHEET_SCRIPT,
   ISSUE_DETAIL_SHEET_STYLES,
+  LIVE_TAIL_SCRIPT,
+  LIVE_TAIL_STYLES,
   MONO_FONT,
   REPO_DROPDOWN_SCRIPT,
   STATE_CHIP_BORDER_CSS,
@@ -266,6 +268,90 @@ export function cappedRawRows(
     if (rows.length < limit) rows.push({ line: lines[i], n: i + 1 });
   }
   return { rows, total, hidden: total - rows.length };
+}
+
+/**
+ * One line the live-tail pane buffers/renders (#124): the raw JSONL `raw`, the `issue`
+ * it came from (gutter number + colour), and its 0-based per-file index `n` (the stable
+ * id `tailFresh` dedups appends by). `status`/`ts` ride along for rendering; the reducers
+ * below only read `issue`, `n`, and `raw`. The client-side twin of `dashboard-model`'s
+ * `TailLine`, redeclared here so the shipped reducers stay self-contained.
+ */
+export interface TailRow {
+  issue: string;
+  n: number;
+  raw: string;
+  status?: string;
+  ts?: string;
+}
+
+/** The live tail's following-buffer cap: while following, the per-repo buffer keeps only
+ * the newest this-many lines, oldest discarded (#124). A paused buffer grows past it. */
+export const TAIL_FOLLOW_CAP = 260;
+/** How many matching lines the tail body renders — the newest this-many, so a long
+ * stream can't build an unbounded DOM (the pane's counterpart to `cappedRawRows`, #124). */
+export const TAIL_RENDER_CAP = 160;
+
+/**
+ * Fold a fresh server snapshot's lines into the client's dedup state (#124): a snapshot
+ * re-sends its whole window each push, so a line counts as *new* only when its per-file
+ * index `n` exceeds the highest `n` already seen for its issue (`seen[issue]`). Monotonic
+ * by construction, so it never re-appends a line the following buffer has since dropped,
+ * nor one a paused buffer already holds. Returns the genuinely-new lines and the advanced
+ * `seen` map (pure — the caller swaps its state for the returned one). Shipped to the
+ * browser via `.toString()`, so it is a self-contained `function` over plain values.
+ */
+export function tailFresh(
+  lines: TailRow[],
+  seen: Record<string, number>,
+): { fresh: TailRow[]; seen: Record<string, number> } {
+  const next: Record<string, number> = { ...seen };
+  const fresh: TailRow[] = [];
+  for (const line of lines) {
+    const high = next[line.issue];
+    if (high === undefined || line.n > high) {
+      fresh.push(line);
+      next[line.issue] = line.n;
+    }
+  }
+  return { fresh, seen: next };
+}
+
+/**
+ * Append fresh lines to the tail buffer (#124). While following, the buffer is capped at
+ * `cap` (oldest discarded) so it tracks a bounded newest-window; while paused it grows
+ * past the cap so a backlog that piles up survives to be revealed on resume. Pure and
+ * self-contained — shipped to the browser via `.toString()`.
+ */
+export function tailAppend(buffer: TailRow[], fresh: TailRow[], live: boolean, cap: number): TailRow[] {
+  const next = buffer.concat(fresh);
+  return live && next.length > cap ? next.slice(next.length - cap) : next;
+}
+
+/**
+ * The tail body's view-model (#124): from the buffer and the current controls, decide
+ * which lines render and the footer/backlog counts. Following reads the whole buffer;
+ * paused freezes the visible set at `mark` (the buffer length when pause was hit) and the
+ * lines past it become the backlog. The issue dropdown and the case-insensitive substring
+ * filter compose (both applied), then the newest `cap` matches render. `empty` is true when
+ * the filters match nothing (the body shows the empty-state text). Pure and self-contained,
+ * unit-tested in node and shipped to the browser via `.toString()` (ADR 0012).
+ */
+export function tailView(state: {
+  buffer: TailRow[];
+  mark: number;
+  live: boolean;
+  issue: string;
+  query: string;
+  cap: number;
+}): { rows: TailRow[]; visible: number; total: number; backlog: number; empty: boolean; following: boolean } {
+  const q = (state.query || "").trim().toLowerCase();
+  const match = (line: TailRow) => (!state.issue || line.issue === state.issue) && (!q || line.raw.toLowerCase().indexOf(q) !== -1);
+  const source = state.live ? state.buffer : state.buffer.slice(0, state.mark);
+  const filtered = source.filter(match);
+  const rows = filtered.slice(Math.max(0, filtered.length - state.cap));
+  const backlog = state.live ? 0 : state.buffer.slice(state.mark).filter(match).length;
+  return { rows, visible: rows.length, total: state.buffer.length, backlog, empty: filtered.length === 0, following: state.live };
 }
 
 const ARCHIVE_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -857,6 +943,53 @@ ${REPO_DROPDOWN_SCRIPT}
 </body>
 </html>`;
 
+/**
+ * The live raw-log tailing pane (#124): a collapsible card that merges the raw JSONL
+ * activity of every currently-running agent into one issue-keyed, following view. The
+ * server renders the shell — header (tail status dot, disclosure title, agent-count
+ * summary) and the open-only controls (issue dropdown seeded with the running issues,
+ * substring filter, play/pause, save, clear) — plus an empty body/footer the client
+ * fills from the `/api/events` SSE `tail` frames. It renders `hidden` when no agent is
+ * running (so the client can reveal it the moment one starts, since it lives outside the
+ * soft-refreshed `#live-region`) and visible otherwise. Status vocabulary is ours (ADR
+ * 0007): the gutter/dot colours key off each running issue's `IssueStatus`, never the
+ * mockup's `queued`. The body's JSON colouring and line accumulation are wired in the
+ * client script (`LIVE_TAIL_SCRIPT`), reusing `highlightJsonLine`.
+ */
+export const renderLiveTail = (status: CampaignStatus) => {
+  const running = status.waves.flatMap((wave) => wave.issues).filter((issue) => issue.status === "running");
+  const summary = `${running.length} agent${running.length === 1 ? "" : "s"}`;
+  const issueRow = (issue: string, dot: string, label: string) =>
+    `<li class="tail-issue-option" role="option" data-issue="${escapeHtml(issue)}"><span class="dot ${dot}"></span>${escapeHtml(label)}</li>`;
+  const options = [
+    issueRow("", "all", "all agents"),
+    ...running.map((issue) => issueRow(issue.issueNumber, dotClass(issue.status), `#${issue.issueNumber}`)),
+  ].join("");
+  // Each running issue and its status colour, so the client can colour a line's gutter by
+  // its issue and rebuild the dropdown as agents come and go over the SSE.
+  const agentsJson = escapeHtml(JSON.stringify(running.map((issue) => ({ issue: issue.issueNumber, status: issue.status }))));
+  return (
+    `<section class="live-tail" data-live-tail data-project="${escapeHtml(status.project)}" data-agents="${agentsJson}"${running.length ? "" : " hidden"}>` +
+    `<div class="tail-head">` +
+    `<span class="tail-dot" data-tail-dot aria-hidden="true"></span>` +
+    `<button type="button" class="tail-title" data-tail-toggle aria-expanded="true"><span class="tail-caret" aria-hidden="true"></span>Live tail · agent logs</button>` +
+    `<span class="tail-summary" data-tail-summary>${summary}</span>` +
+    `<span class="tail-gap"></span>` +
+    `<span class="tail-controls" data-tail-controls>` +
+    `<span class="tail-issue-dd" data-tail-issue-dd><button type="button" class="tail-issue-trigger" data-tail-issue-trigger aria-haspopup="listbox" aria-expanded="false"><span class="dot all" data-tail-issue-dot></span><span data-tail-issue-label>all agents</span><span class="tail-issue-caret" aria-hidden="true">▾</span></button><ul class="tail-issue-menu" role="listbox" aria-label="Filter by agent" data-tail-issue-menu hidden>${options}</ul></span>` +
+    `<input type="text" class="tail-filter" placeholder="filter lines…" aria-label="Filter tail lines" data-tail-filter />` +
+    `<button type="button" class="tail-play" data-tail-play data-following="true" aria-label="Pause"></button>` +
+    `<button type="button" class="tail-save" data-tail-save>Save</button>` +
+    `<button type="button" class="tail-clear" data-tail-clear>Clear</button>` +
+    `</span>` +
+    `</div>` +
+    `<div class="tail-body" data-tail-body></div>` +
+    `<button type="button" class="tail-backlog" data-tail-backlog hidden></button>` +
+    `<div class="tail-footer" data-tail-footer></div>` +
+    `</section>`
+  );
+};
+
 export const renderStatusPage = (status: CampaignStatus, opts: StatusPageOptions = {}) => `<!doctype html>
 <html lang="en">
 <head>
@@ -871,6 +1004,7 @@ ${DASHBOARD_PALETTE_CSS}
   .campaign-meta { margin: .75rem 0 0; color: var(--color-text-light-2); font-size: .95rem; }
   .campaign-name { font-weight: 600; letter-spacing: -0.01em; }
 ${TOP_BAR_STYLES}
+${LIVE_TAIL_STYLES}
   .waves-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 1rem; margin: 1rem 0; }
   .wave { background: var(--color-card); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: 1rem; box-shadow: 0 8px 22px #0004; border-top: 3px solid var(--color-dim); }
   .wave.running { border-top-color: var(--color-blue); }
@@ -1026,6 +1160,7 @@ ${
     : ""
 }
 ${renderWaves(status, Boolean(opts.carve), true)}</div>
+${renderLiveTail(status)}
 ${opts.archivedRuns?.length ? renderArchivedRuns(opts.selected ?? status.project, opts.archivedRuns, opts.archivedRun, opts.archivedMode) : ""}
 ${issueDetailSheetMarkup(Boolean(opts.carve))}${
   // No-JS fallback: a plain server-side form per carvable issue that reaches
@@ -1162,6 +1297,7 @@ ${ARCHIVE_LIST_SCRIPT}
     }
   }
   wireLiveRegion();
+${LIVE_TAIL_SCRIPT}
 </script>
 </body>
 </html>`;

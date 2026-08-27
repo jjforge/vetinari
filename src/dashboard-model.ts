@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import { hostLogger, type Logger } from "./log.ts";
@@ -8,6 +8,7 @@ import { listParked, parkedDirOf, type ParkedRecord } from "./state.ts";
 import { applyCarve } from "./carve.ts";
 import { applyGraft } from "./plan.ts";
 import { readEventLog, type GreenEvent, type OrchestratorEvent } from "./event-log.ts";
+import { activityLogPath } from "./activity.ts";
 
 /**
  * Parse a git remote URL to its `owner/name`, handling both the SSH
@@ -848,6 +849,88 @@ export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
   };
 }
 
+/**
+ * One line in the live tail (#124): the running issue it came from (the gutter
+ * number), that issue's status (the gutter colour), its ISO `ts`, its 0-based index
+ * within its own `activity-<issue>.jsonl` (`n` — a stable id the client dedups its
+ * appends by, immune to the snapshot window sliding), and the exact JSONL text (the
+ * client tokenises it with `highlightJsonLine` and substring-filters it whole).
+ */
+export interface TailLine {
+  issue: string;
+  status: IssueStatus;
+  ts: string;
+  n: number;
+  raw: string;
+}
+
+/** One running agent the live tail merges: its issue number and status (always
+ * `running` — the pane only tails agents in flight). */
+export interface TailAgent {
+  issue: string;
+  status: IssueStatus;
+}
+
+/** A project's live-tail snapshot: the running agents (for the issue dropdown) and
+ * their merged, newest-last activity lines (capped at `TAIL_SNAPSHOT_CAP`). */
+export interface LiveTail {
+  agents: TailAgent[];
+  lines: TailLine[];
+}
+
+/**
+ * The server-side merge window a tail snapshot carries — the newest lines across every
+ * running agent (#124). The client accumulates its own following buffer (capped smaller)
+ * from these snapshots; a generous server window keeps a *paused* client's growing
+ * backlog fed even across many appends.
+ */
+export const TAIL_SNAPSHOT_CAP = 500;
+
+/**
+ * The live-tail snapshot for a project (#124): every currently-running agent's raw
+ * `activity-<issue>.jsonl` merged into one issue-keyed, newest-last stream. Running
+ * agents are the issues `buildStatus` reads as `running`; each one's activity file
+ * (the live-only scratch the loop writes per tool-use, ADR 0015) is read whole, every
+ * line tagged with its issue, status, ISO `ts`, and 0-based file index, then all lines
+ * merged by `ts` and capped to the newest window. A running agent whose file does not
+ * exist yet (just spawned) still appears in `agents` so the dropdown lists it; it simply
+ * contributes no lines. Pure over the filesystem — no clock — so it is unit-testable.
+ */
+export function buildLiveTail(cfg: ResolvedConfig): LiveTail {
+  const status = buildStatus(cfg);
+  const agents: TailAgent[] = status.waves
+    .flatMap((wave) => wave.issues)
+    .filter((issue) => issue.status === "running")
+    .map((issue) => ({ issue: issue.issueNumber, status: "running" }));
+  const lines: TailLine[] = [];
+  for (const agent of agents) {
+    const file = activityLogPath(cfg.stateDir, agent.issue);
+    if (!existsSync(file)) continue;
+    let content: string;
+    try {
+      content = readFileSync(file, "utf8");
+    } catch {
+      continue;
+    }
+    content
+      .split("\n")
+      .filter(Boolean)
+      .forEach((text, n) => {
+        let ts = "";
+        try {
+          const parsed = JSON.parse(text) as { ts?: unknown };
+          if (typeof parsed?.ts === "string") ts = parsed.ts;
+        } catch {
+          // An unparseable line still renders in the raw tail; an empty `ts` sorts it first.
+        }
+        lines.push({ issue: agent.issue, status: "running", ts, n, raw: text });
+      });
+  }
+  // Stable sort merges the per-agent streams newest-last by `ts`; ties keep file order.
+  lines.sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+  return { agents, lines: lines.length > TAIL_SNAPSHOT_CAP ? lines.slice(lines.length - TAIL_SNAPSHOT_CAP) : lines };
+}
+
 export async function buildStatusWithIssueNames(cfg: ResolvedConfig): Promise<CampaignStatus> {
   const status = buildStatus(cfg);
   const issues = status.waves.flatMap((wave) => wave.issues);
@@ -892,7 +975,11 @@ export const archiveStatusConfig = (project: string, archiveFile: string): Resol
     logFile: archiveFile,
   }) as ResolvedConfig;
 
-const statusConfigFromPointer = (pointer: ProjectPointer): ResolvedConfig =>
+/** The `ResolvedConfig` slice a registry pointer resolves to — the paths a full config's
+ * `loadConfig` would derive from its base location (ADR 0002). Exported so the live-update
+ * route can build a project's `buildLiveTail`/`buildStatus` off its pointer without its TS
+ * config, exactly as `buildAllStatus` does internally. */
+export const statusConfigFromPointer = (pointer: ProjectPointer): ResolvedConfig =>
   ({
     project: pointer.project,
     stateDir: pointer.baseLocation,

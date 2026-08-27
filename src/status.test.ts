@@ -3021,6 +3021,10 @@ test("describeEvent narrates the operator-facing events in plain words", () => {
     describeEvent(event("carve", { target: "303", removed: ["303", "304"], dropped: ["303", "304"] })),
     "Carved #303, #304",
   );
+  assert.equal(
+    describeEvent(event("graft", { ids: ["305", "306"], blockedBy: {}, basenames: {} })),
+    "Grafted #305, #306",
+  );
   // A turn renders its agent-authored summary verbatim (ADR 0009), falling back when absent.
   assert.equal(
     describeEvent(event("turn", { taskId: "101", turn: 3, summary: "Added a failing test for the counter" })),
@@ -6661,4 +6665,74 @@ test("renderStatusPage renders an archived run's closed waves as full cards, not
   );
   // Exactly one element carries the toggle id across the whole page (no duplicate ids).
   assert.equal(html.split('id="closed-wave-0"').length - 1, 1);
+});
+
+test("reduceCampaign folds a graft event, extending future waves with the added issues (#166)", () => {
+  const reduced = reduceCampaign([
+    event("campaign-start", {
+      ts: "2025-01-01T00:00:00.000Z",
+      batches: [["101"], ["201"]],
+      slots: 1,
+    }),
+    event("campaign-batch", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["101"] }),
+    // Graft 301 (no deps) and 302 (blocked by 301) mid-wave-0. No tracker/filesystem
+    // access — the reducer folds the inputs the event carries.
+    event("graft", {
+      ts: "2025-01-01T00:02:00.000Z",
+      ids: ["301", "302"],
+      blockedBy: { "302": ["301"] },
+      basenames: {},
+    }),
+  ]);
+
+  // The in-flight wave (0) is untouched; 301 lands in the earliest later wave (1)
+  // and 302, blocked by 301, opens a new wave after it.
+  assert.deepEqual(reduced.waves, [["101"], ["201", "301"], ["302"]]);
+  // The grafted issues render as a chip in the wave they joined (layout carries them).
+  assert.deepEqual(reduced.layout, [["101"], ["201", "301"], ["302"]]);
+  // They are marked grafted (a transient render overlay) while still unstarted.
+  assert.deepEqual([...reduced.grafted].sort(), ["301", "302"]);
+});
+
+test("reduceCampaign drops a graft's grafted overlay once the issue is picked up (#166)", () => {
+  const reduced = reduceCampaign([
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["101"]], slots: 1 }),
+    event("campaign-batch", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["101"] }),
+    event("graft", { ts: "2025-01-01T00:02:00.000Z", ids: ["301"], blockedBy: {}, basenames: {} }),
+    // 301 is picked up in the next wave and merges — it is no longer "grafted".
+    event("green", { ts: "2025-01-01T00:03:00.000Z", taskId: "301", branch: "agent/301", commits: [] }),
+  ]);
+  assert.equal(reduced.outcomes.get("301"), "completed");
+  // The overlay is transient: it drops once the issue leaves the unstarted state.
+  assert.equal(reduced.grafted.has("301"), false);
+});
+
+test("buildStatus renders a grafted issue as `grafted` while unstarted, then running on pickup (#166)", () => {
+  const dir = join(tmpdir(), `vetinari-status-graft-${Date.now()}`);
+  seedState(dir, [
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["101"], ["201"]], slots: 1 }),
+    event("campaign-batch", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["101"] }),
+    event("graft", { ts: "2025-01-01T00:02:00.000Z", ids: ["301"], blockedBy: {}, basenames: {} }),
+  ]);
+
+  const status = buildStatus(cfgFor(dir));
+  // 301 joined wave 1 (index 1) and reads `grafted` while it waits there.
+  const graftedChip = status.waves.flatMap((w) => w.issues).find((i) => i.issueNumber === "301");
+  assert.equal(graftedChip?.status, "grafted");
+});
+
+test("buildStatus reads a grafted issue as running once its wave picks it up (#166)", () => {
+  const dir = join(tmpdir(), `vetinari-status-graft-run-${Date.now()}`);
+  seedState(dir, [
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["101"]], slots: 1 }),
+    event("campaign-batch", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["101"] }),
+    event("graft", { ts: "2025-01-01T00:02:00.000Z", ids: ["301"], blockedBy: {}, basenames: {} }),
+    event("campaign-batch", { ts: "2025-01-01T00:03:00.000Z", index: 1, tasks: ["301"] }),
+    event("queue-start", { ts: "2025-01-01T00:04:00.000Z", taskIds: ["301"], slots: 1 }),
+  ]);
+
+  const status = buildStatus(cfgFor(dir));
+  const chip = status.waves.flatMap((w) => w.issues).find((i) => i.issueNumber === "301");
+  // On pickup the transient `grafted` overlay drops — it now reads its live status.
+  assert.equal(chip?.status, "running");
 });

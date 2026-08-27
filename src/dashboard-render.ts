@@ -34,6 +34,7 @@ const ISSUE_EMOJI: Record<DisplayStatus, string> = {
   failure: "❌",
   unstarted: "⚪",
   carved: "✂️",
+  grafted: "🌱",
   quarantined: "🚧",
   interrupted: "⏹",
 };
@@ -676,6 +677,7 @@ ${issueDetailSheetMarkup(true)}
     "quarantined": "issue.quarantined",
     "wave-parked": "wave.parked",
     "carve": "issue.carved",
+    "graft": "issue.grafted",
     "campaign-batch": "wave.started",
     "campaign-batch-done": "wave.closed",
     "campaign-start": "campaign.started",

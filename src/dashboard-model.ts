@@ -6,6 +6,7 @@ import { hostLogger, type Logger } from "./log.ts";
 import { type ProjectPointer } from "./registry.ts";
 import { listParked, parkedDirOf, type ParkedRecord } from "./state.ts";
 import { applyCarve } from "./carve.ts";
+import { applyGraft } from "./plan.ts";
 import { readEventLog, type GreenEvent, type OrchestratorEvent } from "./event-log.ts";
 
 /**
@@ -49,7 +50,7 @@ export type IssueStatus = "completed" | "parked" | "failure" | "running" | "unst
  * it is resolved and re-merged. Only the view layer knows them; `reduceCampaign`'s
  * `outcomes` stay `IssueStatus`.
  */
-export type DisplayStatus = IssueStatus | "carved" | "quarantined" | "interrupted";
+export type DisplayStatus = IssueStatus | "carved" | "grafted" | "quarantined" | "interrupted";
 
 export interface StatusIssue {
   issueNumber: string;
@@ -206,6 +207,8 @@ export function describeEvent(e: OrchestratorEvent): string {
       return "Wave parked — merged base gated red";
     case "carve":
       return `Carved ${(e.removed ?? []).map(hash).join(", ")}`;
+    case "graft":
+      return `Grafted ${(e.ids ?? []).map(hash).join(", ")}`;
     case "telegram-unconfigured":
       return "⚠ Telegram not configured — parked questions won't be announced";
     case "turn":
@@ -305,6 +308,12 @@ export interface ReducedCampaign {
    * in log order — rendered `carved` (ADR 0007). A superset key over `outcomes`,
    * which stays `IssueStatus`; carved is a render overlay, not a stored status. */
   carved: Set<string>;
+  /** the issues a graft added to the running campaign that are still unstarted —
+   * rendered `grafted` (ADR 0014), the additive mirror of `carved`. A render overlay
+   * derived from graft events, **transient**: an id drops out of this set the moment it
+   * reaches a started outcome (`running`/`completed`/…), so it reads `grafted` only
+   * while waiting in a later wave. Both live and archived runs see it. */
+  grafted: Set<string>;
   /** the issues a merge conflict quarantined out of integration (ADR 0013), folded
    * from `quarantined` events in log order and cleared once the issue re-merges. A
    * render overlay like `carved`: it outranks the issue's `IssueStatus` outcome (a
@@ -352,6 +361,7 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
   let waves: string[][] = [];
   let layout: string[][] = [];
   const carved = new Set<string>();
+  const grafted = new Set<string>();
   const quarantined = new Set<string>();
   let name: string | undefined;
   const outcomes = new Map<string, IssueStatus>();
@@ -450,10 +460,41 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
         details.set(id, "Carved out of the campaign");
       }
       waves = applied.remaining;
+    } else if (e.event === "graft" && Array.isArray(e.ids)) {
+      // Extend the running campaign at the point the graft was issued: the in-flight
+      // and banked waves are pinned, the added issues stable-insert into later waves
+      // (ADR 0014). Folding in log order means `outcomes`/`currentWave` reflect the
+      // state the graft saw, so the same placement replays deterministically. Mirror
+      // the pruned `waves` change into the display `layout` so a grafted issue shows
+      // as a chip in the wave it joined, and mark it `grafted` while it stays unstarted.
+      const applied = applyGraft({ waves, outcomes, currentWave }, { ids: e.ids.map(String), blockedBy: e.blockedBy ?? {}, basenames: e.basenames ?? {} });
+      const placeOf = new Map<string, number>();
+      applied.remaining.forEach((wave, i) => wave.forEach((id) => placeOf.set(id, i)));
+      const survivors: number[] = [];
+      layout.forEach((wave, i) => {
+        if (wave.some((id) => !carved.has(id))) survivors.push(i);
+      });
+      const layoutOf = new Map<number, number>();
+      survivors.forEach((layoutIndex, prunedIndex) => layoutOf.set(prunedIndex, layoutIndex));
+      for (const id of applied.grafted) {
+        grafted.add(id);
+        details.set(id, "Grafted into the campaign");
+        const pruned = placeOf.get(id)!;
+        let target = layoutOf.get(pruned);
+        if (target === undefined) {
+          target = layout.push([]) - 1;
+          layoutOf.set(pruned, target);
+        }
+        layout[target].push(id);
+      }
+      waves = applied.remaining;
     }
   }
+  // `grafted` is transient (ADR 0014): an id reads `grafted` only while unstarted, and
+  // becomes `running` on pickup — so drop any grafted id that has since reached an outcome.
+  for (const id of [...grafted]) if (outcomes.has(id)) grafted.delete(id);
 
-  return { waves, layout, carved, quarantined, name, outcomes, details, titles, mergedAt, halted, closedWaves, currentWave, parkedWave };
+  return { waves, layout, carved, grafted, quarantined, name, outcomes, details, titles, mergedAt, halted, closedWaves, currentWave, parkedWave };
 }
 
 /** One entry in an issue's turn log (ADR 0009): the turn's number as logged
@@ -513,8 +554,8 @@ const eventNamesIssue = (e: OrchestratorEvent, id: string): boolean => {
  */
 export function reconstructIssueDetail(events: OrchestratorEvent[], issueNumber: string): IssueDetail {
   const id = normalizeIssue(issueNumber);
-  const { outcomes, carved, quarantined, titles, name } = reduceCampaign(events);
-  const status: DisplayStatus = carved.has(id) ? "carved" : quarantined.has(id) ? "quarantined" : outcomes.get(id) ?? "unstarted";
+  const { outcomes, carved, grafted, quarantined, titles, name } = reduceCampaign(events);
+  const status: DisplayStatus = carved.has(id) ? "carved" : quarantined.has(id) ? "quarantined" : grafted.has(id) ? "grafted" : outcomes.get(id) ?? "unstarted";
 
   const latestCampaignIndex = events.findLastIndex((e) => e.event === "campaign-start" && Array.isArray(e.batches));
   const relevant = latestCampaignIndex >= 0 ? events.slice(latestCampaignIndex) : events;
@@ -685,7 +726,7 @@ export function summarizeRun(events: OrchestratorEvent[]): string {
 }
 
 export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
-  const { waves, layout, carved, quarantined, name, outcomes, details, titles, closedWaves, currentWave, parkedWave } = reduceCampaign(readEventLog(cfg));
+  const { waves, layout, carved, grafted, quarantined, name, outcomes, details, titles, closedWaves, currentWave, parkedWave } = reduceCampaign(readEventLog(cfg));
 
   const activeIssueNumbers = new Set(waves.flat());
   const closedIssueNumbers = new Set([...closedWaves].flatMap((index) => waves[index] ?? []));
@@ -722,9 +763,10 @@ export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
             : "unstarted") as WaveStatus,
       issues: wave.map((issueNumber) => ({
         issueNumber,
-        // carved and quarantined are render overlays that outrank the stored outcome
-        // (ADR 0007/0013); carved wins over quarantined (a carve removes the issue).
-        status: (carved.has(issueNumber) ? "carved" : quarantined.has(issueNumber) ? "quarantined" : outcomes.get(issueNumber) ?? "unstarted") as DisplayStatus,
+        // carved/quarantined/grafted are render overlays that outrank the stored outcome
+        // (ADR 0007/0013/0014); carved wins over quarantined (a carve removes the issue).
+        // `grafted` is transient and already scoped to still-unstarted issues by the reducer.
+        status: (carved.has(issueNumber) ? "carved" : quarantined.has(issueNumber) ? "quarantined" : grafted.has(issueNumber) ? "grafted" : outcomes.get(issueNumber) ?? "unstarted") as DisplayStatus,
         name: titles.get(issueNumber),
         detail: details.get(issueNumber),
       })),

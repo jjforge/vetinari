@@ -50,6 +50,9 @@ Within a milestone each bold section label appears at most once.
 - [user] The dashboard's archived-run detail no longer overlaps on phone-width screens (#153): at ≤640px the campaign/raw toggle and the raw-log pane are dropped, so only the campaign (wave) view shows — a run deep-linked in raw mode falls back to it.
 - [ops] `migrate` now refuses to write a host gateway systemd unit whose `ExecStart` was resolved from a test-runner process (a `*.test.*` entrypoint or node `--test` flags), and the migrate tests sandbox the systemd-unit and gateway-config paths — so running the test suite can no longer clobber the real `~/.config/systemd/user/vetinari-gateway.service` and crash-loop the host gateway (#165).
 
+**Documentation:**
+- [user] The README **Modes** table and `vetinari --help` now derive their mode list from one shared source (`src/help.ts`), and a doc test fails the gate if the README table and the CLI's modes diverge — so the table an agent reads in its worktree can no longer drift behind `--help`. Re-synced the table in the process: added the missing `changelog collect` row, split the combined `statusline install`/`statusline uninstall` entry, and folded `--auto-carve` into the `campaign` signature (#167).
+
 ### Multi-wave campaigns run every wave again — August 26, 2026
 
 **Bug fixes:**

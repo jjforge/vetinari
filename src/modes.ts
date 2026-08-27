@@ -16,7 +16,7 @@ import {
   enqueueOutbound,
   listParked,
 } from "./state.ts";
-import { quarantineImpacts, type QuarantineImpact } from "./carve.ts";
+import { quarantineImpacts, resumeIndex, type QuarantineImpact } from "./carve.ts";
 import { tgSend, tgWaitReply, type TgConn } from "./telegram.ts";
 import { hostSecretsPath, tgConnForBaseLocation } from "./registry.ts";
 import { issueNameFromTask, readEventLog, reduceCampaign } from "./status.ts";
@@ -424,13 +424,21 @@ export function autoCarveNotice(
  * call for a human, so by default the campaign pauses at the wave boundary (ADR 0013);
  * `opts.autoCarve` opts into pruning the stranded closure and running on. A quarantine
  * that orphans nothing never stops the campaign.
+ *
+ * `opts.resume` continues a *paused* campaign on the current base rather than starting a
+ * fresh one (ADR 0013): it reconstructs the existing plan from the event log (no new
+ * `campaign-start`, no re-resolved titles), skips every wave that already banked work
+ * (`resumeIndex`), and runs the remainder — so a wave-park a human has fixed forward, or
+ * a carve they resolved, picks up where it left off without redoing a merged issue. The
+ * supplied `batches`/`name` are ignored under resume; the plan comes from the log. A
+ * resume with nothing left to run reports so and returns green.
  */
 export async function campaign(
   cfg: ResolvedConfig,
   batches: string[][],
   host: HostBudget,
   name?: string,
-  opts: { autoCarve?: boolean } = {},
+  opts: { autoCarve?: boolean; resume?: boolean } = {},
 ): Promise<boolean> {
   // Every green branch merges into whatever the main tree has checked out, and
   // each batch's agents cut their branch from that same HEAD. If it is not the
@@ -446,30 +454,64 @@ export async function campaign(
   // per-wave `queue` calls below pass `titles` and so stay silent (no per-wave repeat).
   warnIfTelegramUnconfigured(cfg);
 
-  // Resolve the run's issue titles up front (the orchestrator has `fetchTask`) and
-  // record them on the start event, so the dumb-router dashboard names every wave
-  // and chip — live and archived — with no lookup of its own (ADR 0002). `name` is
-  // still recorded only when given; a run whose titles could not be resolved simply
-  // omits them and degrades to `number:status`.
-  const titles = await resolveTitles(cfg, batches.flat());
-  const startEvent: Omit<CampaignStartEvent, "ts" | "event"> = {
-    batches,
-    slots: host.ceiling,
-  };
-  if (name) startEvent.name = name;
-  if (Object.keys(titles).length) startEvent.titles = titles;
-  log("campaign-start", startEvent);
-  enqueueOutbound(cfg, {
-    category: "progress",
-    event: "campaign-start",
-    text: `🎬 ${cfg.project} campaign${name ? ` “${name}”` : ""}: ${batches.length} batch(es) — ${batches.map((b) => b.join(",")).join(" | ")}`,
-  });
+  // Where the wave loop starts, and the id→title map the per-wave `queue` calls carry.
+  let index = 0;
+  let titles: Record<string, string>;
+
+  if (opts.resume) {
+    // Resume a paused campaign (ADR 0013): reconstruct the existing plan from the log —
+    // no new `campaign-start`, no re-resolved titles — and skip every wave that already
+    // banked work so no merged issue is redone. The supplied `batches`/`name` are ignored;
+    // the plan is whatever the running campaign's `campaign-start` (minus any carve) reduced to.
+    const reduced = reduceCampaign(readEventLog(cfg));
+    if (!reduced.waves.length)
+      throw new Error(
+        "campaign --resume: no campaign found in the event log to resume. Launch one with `campaign <batch…>`.",
+      );
+    titles = Object.fromEntries(reduced.titles);
+    index = resumeIndex(reduced);
+    if (index >= reduced.waves.length) {
+      log("campaign-resume", { fromIndex: index, waves: reduced.waves.length, nothingLeft: true });
+      enqueueOutbound(cfg, {
+        category: "progress",
+        event: "campaign-resume",
+        text: `↩️ ${cfg.project} campaign --resume: nothing left to run — all ${reduced.waves.length} wave(s) already merged.`,
+      });
+      console.log("campaign --resume: nothing left to run — all waves already merged.");
+      return true;
+    }
+    log("campaign-resume", { fromIndex: index, waves: reduced.waves.length });
+    enqueueOutbound(cfg, {
+      category: "progress",
+      event: "campaign-resume",
+      text: `↩️ ${cfg.project} campaign --resume from wave ${index + 1}/${reduced.waves.length} on ${cfg.baseBranch} — continuing the unrun waves.`,
+    });
+    console.log(`campaign --resume: continuing from wave ${index + 1}/${reduced.waves.length}.`);
+  } else {
+    // Resolve the run's issue titles up front (the orchestrator has `fetchTask`) and
+    // record them on the start event, so the dumb-router dashboard names every wave
+    // and chip — live and archived — with no lookup of its own (ADR 0002). `name` is
+    // still recorded only when given; a run whose titles could not be resolved simply
+    // omits them and degrades to `number:status`.
+    titles = await resolveTitles(cfg, batches.flat());
+    const startEvent: Omit<CampaignStartEvent, "ts" | "event"> = {
+      batches,
+      slots: host.ceiling,
+    };
+    if (name) startEvent.name = name;
+    if (Object.keys(titles).length) startEvent.titles = titles;
+    log("campaign-start", startEvent);
+    enqueueOutbound(cfg, {
+      category: "progress",
+      event: "campaign-start",
+      text: `🎬 ${cfg.project} campaign${name ? ` “${name}”` : ""}: ${batches.length} batch(es) — ${batches.map((b) => b.join(",")).join(" | ")}`,
+    });
+  }
 
   // The plan is re-derived from the log at each wave boundary rather than
   // iterated from the in-memory array: a `carve` event appended mid-campaign
   // prunes future waves here, while the in-flight wave (already past this point)
   // finishes as-is — the single-source-of-truth loop of ADR 0005.
-  let index = 0;
   for (; ; index++) {
     const waves = reduceCampaign(readEventLog(cfg)).waves;
     if (index >= waves.length) break;

@@ -84,6 +84,11 @@ const USAGE = `vetinari <mode> [args]
                            If a merge-conflict quarantine strands dependents in later
                            waves the campaign pauses for a human by default; --auto-carve
                            prunes the stranded closure and runs on (ADR 0013)
+  campaign --resume        continue a PAUSED campaign on the current base (after a human
+                           fixed a wave-park forward, or carved a suspect): reconstructs
+                           the plan from the event log and runs the unrun waves, redoing
+                           no already-merged issue. Nothing left to run reports so and
+                           exits clean. Takes no batch args (ADR 0013)
   carve <issue>            prune <issue> + everything blocked by it from the RUNNING
                            campaign: appends a carve event the loop honors at the next
                            wave boundary (the in-flight wave finishes; only future waves
@@ -513,26 +518,34 @@ switch (mode) {
     // `--auto-carve` opts into pruning a quarantine's stranded dependents and running
     // on; the default pauses at the wave boundary for a human (ADR 0013).
     let autoCarve = false;
+    // `--resume` continues the paused campaign already in the log (a wave-park a human
+    // fixed forward, or a carve they resolved) on the current base, from the plan the
+    // log reconstructs — no batch args needed (ADR 0013).
+    let resume = false;
     const positional: string[] = [];
     for (let i = 0; i < rest.length; i++) {
       const a = rest[i];
       if (a.startsWith("--name=")) name = a.slice("--name=".length);
       else if (a === "--name") name = rest[++i];
       else if (a === "--auto-carve") autoCarve = true;
+      else if (a === "--resume") resume = true;
       else positional.push(a);
     }
     const batches = positional
       .map((b) => b.split(/[\s,]+/).filter(Boolean))
       .filter((b) => b.length);
-    if (!batches.length)
+    if (!resume && !batches.length)
       throw new Error(
-        'campaign needs at least one batch: campaign "436 611" "623 640"',
+        'campaign needs at least one batch: campaign "436 611" "623 640" (or --resume to continue a paused campaign)',
       );
-    archiveLeftoverRun();
+    // A resume continues the campaign already in the live log — archiving it aside first
+    // would leave `reduceCampaign` no plan to reconstruct (a wave-park leaves no parked
+    // record to hold the leftover-archive off), so only a fresh run archives a leftover.
+    if (!resume) archiveLeftoverRun();
     // Archive every completed run — failed/halted or clean — so a halt still enters
     // the archived-runs list to inspect (#141). archiveIfIdle no-ops while parked,
     // so a still-waiting run (not finished) stays live as before.
-    await campaign(cfg, batches, hostBudget, name, { autoCarve });
+    await campaign(cfg, batches, hostBudget, name, { autoCarve, resume });
     archiveIfIdle();
     break;
   }

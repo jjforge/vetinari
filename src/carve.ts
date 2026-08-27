@@ -165,6 +165,27 @@ export interface QuarantineImpact {
   dropped: string[];
 }
 
+/**
+ * Where `campaign --resume` picks up: the index of the first wave that still has
+ * unrun work, given a reconstructed plan (ADR 0013). Resume continues a paused
+ * campaign on the fixed base, so it must skip every wave that already banked work —
+ * a closed wave merged its whole batch, a wave-park left its greens merged on the
+ * base — and never redo a merged issue. The resume point is therefore one past the
+ * last wave holding a `completed` member: a plan with no merged work resumes from
+ * the top, and an index at or past `waves.length` means nothing is left to run.
+ *
+ * Pure over the reduced plan (`waves` + `outcomes`, exactly the shape `applyCarve`
+ * takes), so the resume boundary is unit-testable without a running campaign — the
+ * same reconstruction `carve` reuses (ADR 0005).
+ */
+export function resumeIndex(campaign: { waves: string[][]; outcomes: Map<string, string> }): number {
+  let lastRun = -1;
+  campaign.waves.forEach((wave, i) => {
+    if (wave.some((id) => campaign.outcomes.get(normalize(id)) === "completed")) lastRun = i;
+  });
+  return lastRun + 1;
+}
+
 export async function quarantineImpacts(
   campaign: { waves: string[][]; outcomes: Map<string, string> },
   quarantined: string[],

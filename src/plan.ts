@@ -281,7 +281,8 @@ export function applyGraft(
       if (bw !== undefined) earliest = Math.max(earliest, bw + 1);
     }
     const names = namesOf(id);
-    let target = Math.max(earliest, 0);
+    // `earliest` is at least `firstFree` (>= 0), so it never indexes a pinned wave.
+    let target = earliest;
     while (target < result.length && !disjoint(waveNames[target], names)) target++;
     while (result.length <= target) {
       result.push([]);

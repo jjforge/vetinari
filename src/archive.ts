@@ -50,3 +50,19 @@ export function hasUnarchivedRun(cfg: Pick<ResolvedConfig, "logFile">): boolean 
     (e) => e.event === "campaign-start" || e.event === "queue-start",
   );
 }
+
+/**
+ * Should a starting run archive a leftover before it appends? Only a top-level,
+ * user-invoked run/queue/campaign should. A **child** `run` spawned by a
+ * queue/campaign (`selfSpawn`, marked `VETINARI_CHILD`) shares the project state
+ * dir and would otherwise see its own parent's live `campaign-start` as a leftover
+ * and archive the campaign's in-flight log mid-run — leaving `reduceCampaign` no
+ * plan to re-derive, so the campaign stops after wave 0 (#150). A child never
+ * archives; a top-level run archives a genuine leftover as before (#141).
+ */
+export function shouldArchiveLeftover(
+  cfg: Pick<ResolvedConfig, "logFile">,
+  opts: { isChild: boolean },
+): boolean {
+  return !opts.isChild && hasUnarchivedRun(cfg);
+}

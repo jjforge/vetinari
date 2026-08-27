@@ -38,7 +38,7 @@ import {
   writeGatewayUnit,
 } from "./migrate.ts";
 import { applyInit, computeInit, describeInit, scanInit } from "./init.ts";
-import { archiveRun, hasUnarchivedRun } from "./archive.ts";
+import { archiveRun, shouldArchiveLeftover } from "./archive.ts";
 import {
   clearParkedForTasks,
   enqueueOutbound,
@@ -469,9 +469,12 @@ const archiveIfIdle = () => {
 // otherwise concatenate the old run ahead of the new one, and the run-summary fold
 // would report only the terminal run, burying the earlier one. No-ops on a fresh or
 // marker-only log (nothing to archive) and, via archiveIfIdle, while anything is
-// parked (a parked run is being resumed, not superseded).
+// parked (a parked run is being resumed, not superseded). A child `run` spawned by a
+// queue/campaign (VETINARI_CHILD) never archives — the "leftover" it would see is its
+// own parent's in-flight log (#150).
 const archiveLeftoverRun = () => {
-  if (hasUnarchivedRun(cfg)) archiveIfIdle();
+  const isChild = !!process.env.VETINARI_CHILD;
+  if (shouldArchiveLeftover(cfg, { isChild })) archiveIfIdle();
 };
 
 switch (mode) {

@@ -18,6 +18,11 @@ and each entry opens with a tag saying who it reaches:
 `**Breaking changes:**` sorts first in a milestone and names the contract it broke.
 Within a milestone each bold section label appears at most once.
 
+### Multi-wave campaigns run every wave again — August 26, 2026
+
+**Bug fixes:**
+- [ops] A multi-wave `campaign` no longer stops after wave 0 and falsely reports complete. A child `run` spawned by a queue/campaign shares the project state dir, and its start-of-run leftover-archive (#141) was archiving the parent campaign's own in-flight log — so `reduceCampaign` re-derived an empty plan at the next wave boundary and the loop ended. Children are now marked (`VETINARI_CHILD`) and skip leftover-archiving; only a top-level run/queue/campaign archives a genuine leftover (#150).
+
 ### Changelog fragments hand authorship to the orchestrator — August 26, 2026
 
 **Breaking changes:**

@@ -7,6 +7,7 @@ import type { ResolvedConfig } from "./config.ts";
 import {
   build,
   buildImageArgs,
+  childSpawnEnv,
   markMergedIssues,
   requireTelegram,
   resolveTitles,
@@ -227,6 +228,15 @@ test("buildImageArgs shells sandcastle build-image with the image and dockerfile
     "--image-name",
     "vetinari-myapp",
   ]);
+});
+
+test("childSpawnEnv marks a spawned child so its `run` skips leftover-archiving, keeping the parent env (#150)", () => {
+  const child = childSpawnEnv({ PATH: "/usr/bin", HOME: "/home/x" });
+  // The marker a child `run` reads to know it must not archive the campaign log.
+  assert.equal(child.VETINARI_CHILD, "1");
+  // The rest of the environment crosses through unchanged.
+  assert.equal(child.PATH, "/usr/bin");
+  assert.equal(child.HOME, "/home/x");
 });
 
 const buildCfg = (): ResolvedConfig =>

@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { archiveRun, hasUnarchivedRun } from "./archive.ts";
+import { archiveRun, hasUnarchivedRun, shouldArchiveLeftover } from "./archive.ts";
 import { enqueueOutbound, listOutbox, markOutboundSent, outboxDirOf } from "./state.ts";
 
 let counter = 0;
@@ -69,6 +69,25 @@ test("hasUnarchivedRun is true when a prior campaign or queue run still sits in 
   const queueCfg = cfgFor();
   writeFileSync(queueCfg.logFile, '{"event":"queue-start","taskIds":["101"]}\n');
   assert.equal(hasUnarchivedRun(queueCfg), true);
+});
+
+test("shouldArchiveLeftover: a child run never archives, even with a genuine leftover in the log (#150)", () => {
+  const cfg = cfgFor();
+  // A parent campaign's in-flight log — hasUnarchivedRun would see this as a leftover.
+  writeFileSync(cfg.logFile, '{"event":"campaign-start","batches":[["101"]]}\n');
+  assert.equal(hasUnarchivedRun(cfg), true); // the leftover is real…
+  // …but a child `run` spawned by that campaign must leave it alone, or it would
+  // archive its own parent's plan mid-run and stop the campaign after wave 0.
+  assert.equal(shouldArchiveLeftover(cfg, { isChild: true }), false);
+});
+
+test("shouldArchiveLeftover: a top-level run still archives a genuine leftover (#141)", () => {
+  const cfg = cfgFor();
+  writeFileSync(cfg.logFile, '{"event":"campaign-start","batches":[["101"]]}\n');
+  assert.equal(shouldArchiveLeftover(cfg, { isChild: false }), true);
+  // No leftover → nothing to archive, child or not.
+  const fresh = cfgFor();
+  assert.equal(shouldArchiveLeftover(fresh, { isChild: false }), false);
 });
 
 test("archiveRun handles a missing or empty log without creating an archive", () => {

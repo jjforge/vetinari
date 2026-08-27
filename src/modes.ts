@@ -62,12 +62,22 @@ export async function resolveTitles(
 }
 
 /**
+ * The env a `selfSpawn`ed child gets: the parent's, plus `VETINARI_CHILD` so the
+ * child `run` knows it was spawned by a queue/campaign and must not archive the
+ * parent's in-flight log as if it were a leftover (`shouldArchiveLeftover`, #150).
+ */
+export function childSpawnEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return { ...env, VETINARI_CHILD: "1" };
+}
+
+/**
  * Re-invoke this CLI as a child, preserving however it was launched (the tsx
  * loader flags live in execArgv). Spawning a bare `node` would fail on TS.
  */
 const selfSpawn = (args: string[]) =>
   spawn(process.execPath, [...process.execArgv, process.argv[1], ...args], {
     stdio: ["ignore", "inherit", "inherit"],
+    env: childSpawnEnv(process.env),
   });
 
 /**

@@ -268,6 +268,90 @@ export function cappedRawRows(
   return { rows, total, hidden: total - rows.length };
 }
 
+/**
+ * One line the live-tail pane buffers/renders (#124): the raw JSONL `raw`, the `issue`
+ * it came from (gutter number + colour), and its 0-based per-file index `n` (the stable
+ * id `tailFresh` dedups appends by). `status`/`ts` ride along for rendering; the reducers
+ * below only read `issue`, `n`, and `raw`. The client-side twin of `dashboard-model`'s
+ * `TailLine`, redeclared here so the shipped reducers stay self-contained.
+ */
+export interface TailRow {
+  issue: string;
+  n: number;
+  raw: string;
+  status?: string;
+  ts?: string;
+}
+
+/** The live tail's following-buffer cap: while following, the per-repo buffer keeps only
+ * the newest this-many lines, oldest discarded (#124). A paused buffer grows past it. */
+export const TAIL_FOLLOW_CAP = 260;
+/** How many matching lines the tail body renders — the newest this-many, so a long
+ * stream can't build an unbounded DOM (the pane's counterpart to `cappedRawRows`, #124). */
+export const TAIL_RENDER_CAP = 160;
+
+/**
+ * Fold a fresh server snapshot's lines into the client's dedup state (#124): a snapshot
+ * re-sends its whole window each push, so a line counts as *new* only when its per-file
+ * index `n` exceeds the highest `n` already seen for its issue (`seen[issue]`). Monotonic
+ * by construction, so it never re-appends a line the following buffer has since dropped,
+ * nor one a paused buffer already holds. Returns the genuinely-new lines and the advanced
+ * `seen` map (pure — the caller swaps its state for the returned one). Shipped to the
+ * browser via `.toString()`, so it is a self-contained `function` over plain values.
+ */
+export function tailFresh(
+  lines: TailRow[],
+  seen: Record<string, number>,
+): { fresh: TailRow[]; seen: Record<string, number> } {
+  const next: Record<string, number> = { ...seen };
+  const fresh: TailRow[] = [];
+  for (const line of lines) {
+    const high = next[line.issue];
+    if (high === undefined || line.n > high) {
+      fresh.push(line);
+      next[line.issue] = line.n;
+    }
+  }
+  return { fresh, seen: next };
+}
+
+/**
+ * Append fresh lines to the tail buffer (#124). While following, the buffer is capped at
+ * `cap` (oldest discarded) so it tracks a bounded newest-window; while paused it grows
+ * past the cap so a backlog that piles up survives to be revealed on resume. Pure and
+ * self-contained — shipped to the browser via `.toString()`.
+ */
+export function tailAppend(buffer: TailRow[], fresh: TailRow[], live: boolean, cap: number): TailRow[] {
+  const next = buffer.concat(fresh);
+  return live && next.length > cap ? next.slice(next.length - cap) : next;
+}
+
+/**
+ * The tail body's view-model (#124): from the buffer and the current controls, decide
+ * which lines render and the footer/backlog counts. Following reads the whole buffer;
+ * paused freezes the visible set at `mark` (the buffer length when pause was hit) and the
+ * lines past it become the backlog. The issue dropdown and the case-insensitive substring
+ * filter compose (both applied), then the newest `cap` matches render. `empty` is true when
+ * the filters match nothing (the body shows the empty-state text). Pure and self-contained,
+ * unit-tested in node and shipped to the browser via `.toString()` (ADR 0012).
+ */
+export function tailView(state: {
+  buffer: TailRow[];
+  mark: number;
+  live: boolean;
+  issue: string;
+  query: string;
+  cap: number;
+}): { rows: TailRow[]; visible: number; total: number; backlog: number; empty: boolean; following: boolean } {
+  const q = (state.query || "").trim().toLowerCase();
+  const match = (line: TailRow) => (!state.issue || line.issue === state.issue) && (!q || line.raw.toLowerCase().indexOf(q) !== -1);
+  const source = state.live ? state.buffer : state.buffer.slice(0, state.mark);
+  const filtered = source.filter(match);
+  const rows = filtered.slice(Math.max(0, filtered.length - state.cap));
+  const backlog = state.live ? 0 : state.buffer.slice(state.mark).filter(match).length;
+  return { rows, visible: rows.length, total: state.buffer.length, backlog, empty: filtered.length === 0, following: state.live };
+}
+
 const ARCHIVE_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const pad2 = (n: number) => String(n).padStart(2, "0");
 

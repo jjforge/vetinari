@@ -81,6 +81,21 @@ const selfSpawn = (args: string[]) =>
   });
 
 /**
+ * How `queue` runs one task: spawn a child `run` and resolve to its exit code
+ * (`null` when the child was killed without one). Injected so the wave-loop can be
+ * driven Docker-free in a test with a fake child that never touches a container —
+ * the default spawns the real containerized `run` (#151). The exit-code contract is
+ * `run`'s: `0` green, `2` parked, anything else an error.
+ */
+export type RunSpawner = (taskId: string) => Promise<number | null>;
+
+/** The production spawner: a real child `run`, resolving on its exit. */
+const selfSpawnRun: RunSpawner = (taskId) =>
+  new Promise((resolve) => {
+    selfSpawn(["run", taskId]).on("exit", (code) => resolve(code));
+  });
+
+/**
  * The project's Dockerfile, fixed by the committed `vetinari/` layout (init
  * writes it here). `build` reads it so the image name and Dockerfile never have
  * to be repeated on the CLI.
@@ -212,6 +227,7 @@ export async function queue(
   taskIds: string[],
   host: HostBudget,
   titles?: Record<string, string>,
+  spawnRun: RunSpawner = selfSpawnRun,
 ): Promise<Record<string, string>> {
   const pending = [...taskIds];
   const outcomes: Record<string, string> = {};
@@ -263,7 +279,7 @@ export async function queue(
           const next = pending.shift()!;
           running++;
           cfg.log.log("queue-spawn", { taskId: next, running, left: pending.length });
-          selfSpawn(["run", next]).on("exit", (code) => {
+          spawnRun(next).then((code) => {
             running--;
             releaseSlot(host.configDir);
             outcomes[next] =
@@ -407,6 +423,28 @@ export function autoCarveNotice(
 }
 
 /**
+ * The container- and git-bound effects `campaign` orchestrates, injected so the
+ * wave-loop itself — the per-wave `reduceCampaign(readEventLog(cfg))` re-derive
+ * that is the ADR 0005 single-source-of-truth loop — is drivable end-to-end with
+ * no Docker and no real merges (#151). The defaults are the production effects, so
+ * the injected path never changes behaviour: `spawnRun` spawns a real child `run`,
+ * `integrate` runs the real merge+gate, `collectChangelog` folds the real
+ * fragments, and `currentBranch` reads the real checked-out branch.
+ */
+export interface CampaignDeps {
+  spawnRun: RunSpawner;
+  integrate: typeof integrateGreens;
+  collectChangelog: typeof collectWaveChangelog;
+  currentBranch: typeof currentBranch;
+}
+const defaultCampaignDeps: CampaignDeps = {
+  spawnRun: selfSpawnRun,
+  integrate: integrateGreens,
+  collectChangelog: collectWaveChangelog,
+  currentBranch,
+};
+
+/**
  * Drain each batch, then merge its greens into the base, re-verify the merged
  * base, clean up the merged branches/worktrees, and only then start the next
  * batch — the manual merge→test→next-queue chain, automated.
@@ -438,11 +476,12 @@ export async function campaign(
   host: HostBudget,
   name?: string,
   opts: { autoCarve?: boolean; resume?: boolean } = {},
+  deps: CampaignDeps = defaultCampaignDeps,
 ): Promise<boolean> {
   // Every green branch merges into whatever the main tree has checked out, and
   // each batch's agents cut their branch from that same HEAD. If it is not the
   // base branch the campaign would merge into, and build on, the wrong place.
-  const branch = currentBranch();
+  const branch = deps.currentBranch();
   if (branch !== cfg.baseBranch) {
     throw new Error(
       `campaign merges into the checked-out branch, but the working tree is on "${branch}", not baseBranch "${cfg.baseBranch}". Run \`git checkout ${cfg.baseBranch}\` first (a clean tree — the merges land here).`,
@@ -523,11 +562,11 @@ export async function campaign(
       text: `▶️ ${cfg.project} campaign batch ${index + 1}/${total}: ${tasks.join(", ")}`,
     });
 
-    const outcomes = await queue(cfg, tasks, host, titles);
+    const outcomes = await queue(cfg, tasks, host, titles, deps.spawnRun);
     const greens = tasks.filter((t) => outcomes[t] === "green");
     const held = tasks.filter((t) => outcomes[t] !== "green");
 
-    const { merged, quarantined, parked } = await integrateGreens(cfg, greens);
+    const { merged, quarantined, parked } = await deps.integrate(cfg, greens);
     if (parked) {
       // Wave-park (ADR 0013): the merged base gated red with no attributable culprit, so
       // `integrateGreens` left the greens merged (never a rollback) and logged the
@@ -546,7 +585,7 @@ export async function campaign(
     // per-task fragments instead of editing the shared changelog, so co-wave
     // branches never conflict on it; the orchestrator collects at merge. A halted
     // wave (handled above) rolls back and leaves its fragments for the retry.
-    const collected = collectWaveChangelog(index, cfg.log);
+    const collected = deps.collectChangelog(index, cfg.log);
     if (collected.committed)
       console.log(
         `batch ${index + 1}/${total}: collected changelog fragments — ${collected.collected.join(", ")}`,

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
@@ -8,6 +8,7 @@ import {
   autoCarveNotice,
   build,
   buildImageArgs,
+  campaign,
   childSpawnEnv,
   markMergedIssues,
   quarantinePauseNotice,
@@ -15,8 +16,12 @@ import {
   resolveTitles,
   warnIfTelegramUnconfigured,
   waveParkedNotice,
+  type CampaignDeps,
 } from "./modes.ts";
-import { memoryLogger, type MemoryLogger } from "./log.ts";
+import { loggerForRun, memoryLogger, type MemoryLogger } from "./log.ts";
+import { readEventLog, type CampaignBatchEvent } from "./event-log.ts";
+import { archiveRun, shouldArchiveLeftover } from "./archive.ts";
+import type { HostBudget } from "./host-slots.ts";
 
 const cfgWith = (fetchTask: ResolvedConfig["fetchTask"]): ResolvedConfig =>
   ({ fetchTask }) as ResolvedConfig;
@@ -363,4 +368,116 @@ test("build fails when the image builds but baseline is red", async () => {
     },
   );
   assert.equal(ok, false);
+});
+
+// A Docker-free harness for the campaign wave-loop (issue #151). A real on-disk
+// event log under a throwaway state dir is what the per-wave re-derive reads and
+// what a child `run` would archive — so the loop is exercised for real; only the
+// container-bound effects (the child spawn, the git merge, the changelog fold, the
+// branch guard) are injected.
+const harnessCfg = (dir: string): ResolvedConfig => {
+  const stateDir = join(dir, ".vetinari.local");
+  mkdirSync(stateDir, { recursive: true });
+  const logFile = join(stateDir, "orchestrator.jsonl");
+  return {
+    project: "harness",
+    stateDir,
+    parkedDir: join(stateDir, "parked"),
+    logFile,
+    baseBranch: "base",
+    branchPrefix: "agent/",
+    log: loggerForRun({ logFile }),
+    fetchTask: async () => "",
+  } as unknown as ResolvedConfig;
+};
+
+// Campaign/queue echo their progress to the console; silence it so the harness
+// tests read their result off the event log, not off a wall of run output.
+const silenceConsole = async <T>(fn: () => Promise<T>): Promise<T> => {
+  const realLog = console.log;
+  const realErr = console.error;
+  console.log = () => {};
+  console.error = () => {};
+  try {
+    return await fn();
+  } finally {
+    console.log = realLog;
+    console.error = realErr;
+  }
+};
+
+// The container-bound effects a campaign would otherwise run, stubbed git-free:
+// greens merge as-is, no changelog fold, and the base-branch guard passes. Only
+// `spawnRun` varies per test — it stands in for the spawned child `run`.
+const gitFreeDeps = (
+  cfg: ResolvedConfig,
+  spawnRun: CampaignDeps["spawnRun"],
+): CampaignDeps => ({
+  spawnRun,
+  integrate: async (_cfg, greens) => ({ merged: greens, quarantined: [] }),
+  collectChangelog: () => ({ collected: [], committed: false }),
+  currentBranch: () => cfg.baseBranch,
+});
+
+test("campaign drives every wave with no Docker — the per-wave re-derive survives a faithful child spawn (#151/#150)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+
+  // A faithful stand-in for a spawned child `run`: at startup it consults the real
+  // leftover-archive gate honoring the child marker (isChild:true), exactly as
+  // cli.mts does — the #150 surface — then reports green. Post-#150 the gate refuses
+  // to archive a child, so the campaign's in-flight log survives and the wave-loop
+  // re-derives every wave. Revert #150 and this child archives the log mid-wave-0,
+  // stranding the plan — the regression class this pins.
+  const childRun: CampaignDeps["spawnRun"] = async () => {
+    if (shouldArchiveLeftover(cfg, { isChild: true })) archiveRun(cfg);
+    return 0;
+  };
+
+  const ok = await silenceConsole(() =>
+    campaign(cfg, [["101"], ["102"], ["103"]], host, "harness", {}, gitFreeDeps(cfg, childRun)),
+  );
+
+  assert.equal(ok, true);
+  const events = readEventLog(cfg);
+  const batches = events.filter(
+    (e): e is CampaignBatchEvent => e.event === "campaign-batch",
+  );
+  // Every wave in the plan re-derived and ran, in order — the log was never stranded.
+  assert.deepEqual(
+    batches.map((b) => b.index),
+    [0, 1, 2],
+  );
+  assert.deepEqual(
+    batches.map((b) => b.tasks),
+    [["101"], ["102"], ["103"]],
+  );
+  assert.ok(events.some((e) => e.event === "campaign-done"));
+});
+
+test("the harness has teeth — a child that archives the parent log (the #150 bug) strands the plan after wave 0", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+
+  // The pre-#150 child: it archives the parent's live log (isChild:false through the
+  // same gate), exactly the bug #150 fixed. The archive wipes the campaign's in-flight
+  // log mid-wave-0, so the next wave's re-derive finds no plan and the loop stops.
+  const archivingChild: CampaignDeps["spawnRun"] = async () => {
+    if (shouldArchiveLeftover(cfg, { isChild: false })) archiveRun(cfg);
+    return 0;
+  };
+
+  await silenceConsole(() =>
+    campaign(cfg, [["101"], ["102"], ["103"]], host, "harness", {}, gitFreeDeps(cfg, archivingChild)),
+  );
+
+  // With the plan stranded, waves 1 and 2 never start — proof the harness would go
+  // red against pre-#150 code, so the faithful-child test above genuinely pins it.
+  const batches = readEventLog(cfg).filter((e) => e.event === "campaign-batch");
+  assert.ok(
+    batches.length < 3,
+    `expected the archive to strand the plan, but ${batches.length} waves ran`,
+  );
 });

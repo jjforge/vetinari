@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  applyGraft,
   describePlan,
   layerWaves,
   partitionWaves,
@@ -494,4 +495,66 @@ test("describePlan explains why a ticket was spilled to a later sub-wave", async
 
   // c spilled because it shares a file with a — the report must say so.
   assert.match(report, /wave 1\s+#c.*spill.*#a/i);
+});
+
+// A reduced campaign's outcomes as a plain map: id -> its current status.
+const graftOutcomes = (o: Record<string, string>) => new Map(Object.entries(o));
+
+test("applyGraft drops a no-dep issue into the earliest later wave, never the in-flight one", () => {
+  const res = applyGraft(
+    { waves: [["101"], ["201"]], outcomes: graftOutcomes({}), currentWave: 0 },
+    { ids: ["301"], blockedBy: {}, basenames: {} },
+  );
+  // 301 has no blocker, so it fills wave 1 (the earliest wave after the in-flight
+  // wave 0) rather than opening a new one.
+  assert.deepEqual(res.remaining, [["101"], ["201", "301"]]);
+  assert.deepEqual(res.grafted, ["301"]);
+});
+
+test("applyGraft layers a grafted issue after an unrun in-campaign blocker", () => {
+  const res = applyGraft(
+    { waves: [["101"], ["201"]], outcomes: graftOutcomes({}), currentWave: 0 },
+    { ids: ["301"], blockedBy: { "301": ["201"] }, basenames: {} },
+  );
+  // 301 is blocked by 201 (wave 1), so it cannot share 201's wave — it opens wave 2.
+  assert.deepEqual(res.remaining, [["101"], ["201"], ["301"]]);
+});
+
+test("applyGraft makes an issue blocked only by a merged issue eligible in the next wave", () => {
+  const res = applyGraft(
+    { waves: [["101"], ["201"]], outcomes: graftOutcomes({ "101": "completed" }), currentWave: 1 },
+    { ids: ["301"], blockedBy: { "301": ["101"] }, basenames: {} },
+  );
+  // 101 is merged (not in the remaining waves' unrun set); its wave is behind the
+  // firstFree boundary, so 301 is eligible in the next later wave (wave 2, since
+  // the in-flight wave is 1).
+  assert.deepEqual(res.remaining, [["101"], ["201"], ["301"]]);
+});
+
+test("applyGraft spills a basename-colliding graft into a new later wave", () => {
+  const res = applyGraft(
+    { waves: [["101"], ["201"]], outcomes: graftOutcomes({}), currentWave: 0 },
+    { ids: ["301"], blockedBy: {}, basenames: { "301": ["a.ts"], "201": ["a.ts"] } },
+  );
+  // 301 and 201 both touch a.ts, so 301 cannot join wave 1 — it spills to wave 2.
+  assert.deepEqual(res.remaining, [["101"], ["201"], ["301"]]);
+});
+
+test("applyGraft layers a grafted issue after another issue grafted in the same call", () => {
+  const res = applyGraft(
+    { waves: [["101"]], outcomes: graftOutcomes({}), currentWave: 0 },
+    { ids: ["301", "302"], blockedBy: { "302": ["301"] }, basenames: {} },
+  );
+  // 302 is blocked by 301 (also grafted), so it must land in a strictly later wave.
+  assert.deepEqual(res.remaining, [["101"], ["301"], ["302"]]);
+  assert.deepEqual(res.grafted, ["301", "302"]);
+});
+
+test("applyGraft packs file-disjoint grafts into the same later wave", () => {
+  const res = applyGraft(
+    { waves: [["101"]], outcomes: graftOutcomes({}), currentWave: 0 },
+    { ids: ["301", "302"], blockedBy: {}, basenames: { "301": ["a.ts"], "302": ["b.ts"] } },
+  );
+  // No deps and disjoint files, so both fill the same earliest later wave.
+  assert.deepEqual(res.remaining, [["101"], ["301", "302"]]);
 });

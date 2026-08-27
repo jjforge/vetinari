@@ -203,6 +203,100 @@ export function partitionWaves(plan: WavePlan, basenamesOf: Map<string, Set<stri
 }
 
 /**
+ * The precomputed layering inputs a `graft` event carries, resolved by the CLI at
+ * append time (ADR 0014) so the fold stays pure (ADR 0012): the added ids, each
+ * added id's in-campaign open blockers, and — for every id the placement may share
+ * a wave with (the added ids plus the campaign's still-unstarted members) — its
+ * basenames. With these `applyGraft` runs the same dependency + file-disjoint
+ * placement `campaign-plan` does, with no tracker or filesystem access.
+ */
+export interface GraftInputs {
+  /** the grafted issue ids, in the order given. */
+  ids: string[];
+  /** grafted id -> its OPEN blockers that are inside this campaign. */
+  blockedBy: Record<string, string[]>;
+  /** id -> its basenames, for the grafted ids and the still-unstarted members the
+   *  placement checks disjointness against. */
+  basenames: Record<string, string[]>;
+}
+
+/** The result of folding a graft into a running campaign's plan: the extended
+ * loop-facing waves, and the ids actually added (skipping any already present). */
+export interface AppliedGraft {
+  /** the waves with the grafted issues inserted into their placed later wave. */
+  remaining: string[][];
+  /** the ids that were added, in the order placed. */
+  grafted: string[];
+}
+
+/**
+ * Pure rule folding a graft into a running campaign — the additive mirror of
+ * `applyCarve` (ADR 0014). The in-flight and banked waves are pinned; each grafted
+ * issue is **stable-inserted** into the earliest *later* wave that satisfies its
+ * in-campaign `blockedBy` deps and stays basename-disjoint, appending a new wave
+ * only when none fits. Existing wave assignments are never reordered.
+ *
+ * `firstFree` is the first wave grafted work may enter: past the in-flight wave
+ * (`currentWave`) and past every wave that already banked a `completed` member, so
+ * a graft can only ever land in future waves. A grafted issue's `blockedBy` blocker
+ * still in the plan pushes it after that blocker's wave; a blocker no longer in the
+ * plan (already merged) sits behind `firstFree` and imposes no further constraint.
+ *
+ * Pure over the injected inputs (ADR 0012), so the fold is unit-testable without a
+ * tracker or a running campaign. An id already in the plan is skipped (validation
+ * lives at the CLI edge), never inserted twice.
+ */
+export function applyGraft(
+  campaign: { waves: string[][]; outcomes: Map<string, string>; currentWave: number },
+  graft: GraftInputs,
+): AppliedGraft {
+  const result = campaign.waves.map((wave) => wave.map(normalize));
+  const inPlan = new Set(result.flat());
+  const newIds = uniqueOrder(graft.ids).filter((id) => !inPlan.has(id));
+
+  const waveOf = new Map<string, number>();
+  result.forEach((wave, i) => wave.forEach((id) => waveOf.set(id, i)));
+
+  // The earliest wave grafted work may enter: after the in-flight wave and after
+  // every wave that already banked a merged issue.
+  let lastPinned = campaign.currentWave;
+  result.forEach((wave, i) => {
+    if (wave.some((id) => campaign.outcomes.get(id) === "completed")) lastPinned = Math.max(lastPinned, i);
+  });
+  const firstFree = lastPinned + 1;
+
+  const namesOf = (id: string) => new Set((graft.basenames[normalize(id)] ?? []).map(normalize));
+  // The basenames already committed to each wave, grown as grafts land.
+  const waveNames = result.map((wave) => {
+    const names = new Set<string>();
+    for (const id of wave) for (const n of namesOf(id)) names.add(n);
+    return names;
+  });
+
+  const grafted: string[] = [];
+  for (const id of newIds) {
+    let earliest = firstFree;
+    for (const b of (graft.blockedBy[id] ?? []).map(normalize)) {
+      const bw = waveOf.get(b);
+      if (bw !== undefined) earliest = Math.max(earliest, bw + 1);
+    }
+    const names = namesOf(id);
+    let target = Math.max(earliest, 0);
+    while (target < result.length && !disjoint(waveNames[target], names)) target++;
+    while (result.length <= target) {
+      result.push([]);
+      waveNames.push(new Set());
+    }
+    result[target].push(id);
+    for (const n of names) waveNames[target].add(n);
+    waveOf.set(id, target);
+    grafted.push(id);
+  }
+
+  return { remaining: result.filter((wave) => wave.length), grafted };
+}
+
+/**
  * The area labels a run's name is suggested from — the fixed set the tracker tags
  * issues with. This order is the order a suggestion lists them in, so the same set
  * of areas always yields the same name regardless of the input issue order.

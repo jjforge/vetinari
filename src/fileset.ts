@@ -83,26 +83,80 @@ function markerCites(body: string, marker: RegExp): string[] | null {
 }
 
 /**
+ * True when `text` carries at least one anchored `Touches:`/`Files:`/`Creates:`
+ * marker line. Reuses the same parser the resolver reads with, so "has a marker"
+ * here means exactly what the resolver would act on — not any looser notion.
+ */
+function hasMarkerLine(text: string): boolean {
+  return (
+    markerCites(text, TOUCHES_RE) !== null ||
+    markerCites(text, CREATES_RE) !== null
+  );
+}
+
+/**
+ * The anchored marker LINES a ticket's comments carry, folded into one synthetic
+ * `Touches:` and/or `Creates:` line so the resolver reads the *union* of the cites
+ * across every comment (a body/title marker, when present, wins outright and this is
+ * never consulted — so there is no ordering to honour, only a union). Only cites on a
+ * real marker line survive: a filename mentioned in ordinary comment prose is off the
+ * marker line and stays ignored, preserving the reason comments were dropped wholesale
+ * before. Returns "" when the comments carry no marker line at all.
+ */
+function commentMarkerLines(comments: unknown): string {
+  if (!Array.isArray(comments)) return "";
+  const text = comments
+    .map((c) =>
+      c && typeof c === "object" ? (c as { body?: unknown }).body : undefined,
+    )
+    .filter((b): b is string => typeof b === "string")
+    .join("\n\n");
+
+  const lines: string[] = [];
+  const gather = (marker: RegExp): string[] => {
+    const tails: string[] = [];
+    for (const m of text.matchAll(marker)) tails.push(m[1]);
+    return tails;
+  };
+  const touches = gather(TOUCHES_RE);
+  if (touches.length) lines.push(`Touches:${touches.join(",")}`);
+  const creates = gather(CREATES_RE);
+  if (creates.length) lines.push(`Creates:${creates.join(",")}`);
+  return lines.join("\n");
+}
+
+/**
  * The ticket text the resolver should scan, given whatever `fetchTask` returned.
- * A GitHub `fetchTask` yields `{ title, body, comments, labels }` JSON; the file-set
- * lives in the author's own title+body, so comments are dropped — a stray
- * filename-shaped token in any comment must not poison confidence (the original
- * whole-body scan counted them). Non-JSON (or JSON without a body/title) passes
- * through unchanged, so a plain-string tracker still works. Kept beside the
- * resolver so "what feeds the file-set scan" is one concern; the resolver itself
- * stays pure over the string this returns.
+ * A GitHub `fetchTask` yields `{ title, body, comments, labels }` JSON. The file-set
+ * lives in the author's own title+body, so that is the authoritative source: when it
+ * carries any marker line, comments are dropped entirely (a body/title marker wins,
+ * and a stray filename-shaped token in a comment must not poison confidence). Only
+ * when title+body carry NO marker line do we fall back to the anchored marker *lines*
+ * found in the comments — our own convention puts the agent brief, marker and all, in
+ * a comment — folding their cites in via {@link commentMarkerLines}. Comment *prose*
+ * is still never scanned; only explicit marker lines are. Non-JSON (or JSON without a
+ * body/title) passes through unchanged, so a plain-string tracker still works. Kept
+ * beside the resolver so "what feeds the file-set scan" is one concern; the resolver
+ * itself stays pure over the string this returns.
  */
 export function ticketProse(task: string): string {
   try {
-    const parsed = JSON.parse(task) as { title?: unknown; body?: unknown };
+    const parsed = JSON.parse(task) as {
+      title?: unknown;
+      body?: unknown;
+      comments?: unknown;
+    };
     if (
       parsed &&
       typeof parsed === "object" &&
       (typeof parsed.body === "string" || typeof parsed.title === "string")
     ) {
-      return [parsed.title, parsed.body]
+      const prose = [parsed.title, parsed.body]
         .filter((s): s is string => typeof s === "string")
         .join("\n\n");
+      if (hasMarkerLine(prose)) return prose;
+      const fromComments = commentMarkerLines(parsed.comments);
+      return fromComments ? `${prose}\n\n${fromComments}` : prose;
     }
   } catch {
     // not JSON — fall through and scan the raw text

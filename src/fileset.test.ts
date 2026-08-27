@@ -101,6 +101,87 @@ test("defaultFileSet over a task's prose ignores a filename token that lived onl
   assert.equal(res.confident, true);
 });
 
+test("ticketProse falls back to an anchored marker line found only in a comment", () => {
+  const root = treeWith("src/fileset.ts");
+  const fileSet = defaultFileSet(root);
+
+  // The body carries no marker line; the brief comment holds the real marker. The
+  // planner must resolve it exactly as if the marker had lived in the body.
+  const task = JSON.stringify({
+    title: "Fix the resolver",
+    body: "Reworks the resolver, per the brief below.",
+    comments: [
+      { body: "Agent brief.\n\nTouches (existing files): `fileset.ts`\n" },
+    ],
+  });
+
+  const res = fileSet(ticketProse(task));
+
+  assert.deepEqual(res.files, ["fileset.ts"]);
+  assert.equal(res.confident, true);
+});
+
+test("ticketProse reads a comment's marker line but ignores a filename in the comment's prose", () => {
+  const root = treeWith("src/fileset.ts");
+  const fileSet = defaultFileSet(root);
+
+  // Body has no marker, so comments are consulted. The comment names `ghost.ts`
+  // in passing prose and `fileset.ts` on a real marker line — only the latter counts.
+  const task = JSON.stringify({
+    title: "Fix",
+    body: "Reworks the resolver.",
+    comments: [
+      {
+        body: "See also `ghost.ts` in passing.\n\nTouches (existing files): `fileset.ts`\n",
+      },
+    ],
+  });
+
+  const res = fileSet(ticketProse(task));
+
+  assert.deepEqual(res.files, ["fileset.ts"]);
+  assert.equal(res.confident, true);
+});
+
+test("ticketProse lets a body marker win over a stale marker in a comment", () => {
+  const root = treeWith("src/fileset.ts");
+  const fileSet = defaultFileSet(root);
+
+  // The body's marker is authoritative; an old comment marker (naming an absent
+  // `ghost.ts`) must not override it or drag confidence down.
+  const task = JSON.stringify({
+    title: "Fix",
+    body: "Touches (existing files): `fileset.ts`",
+    comments: [{ body: "Touches (existing files): `ghost.ts`\n" }],
+  });
+
+  const res = fileSet(ticketProse(task));
+
+  assert.deepEqual(res.files, ["fileset.ts"]);
+  assert.equal(res.confident, true);
+});
+
+test("ticketProse unions marker lines across several comments when the body has none", () => {
+  const root = treeWith("src/fileset.ts", "src/plan.ts");
+  const fileSet = defaultFileSet(root);
+
+  // Two comments each carry a Touches marker; with no body marker their cites union
+  // (rather than the last one winning — comments have no "correction" ordering).
+  const task = JSON.stringify({
+    title: "Fix",
+    body: "No marker here.",
+    comments: [
+      { body: "Touches (existing files): `fileset.ts`\n" },
+      { body: "Touches (existing files): `plan.ts`\n" },
+    ],
+  });
+
+  const res = fileSet(ticketProse(task));
+
+  assert.deepEqual(res.files.sort(), ["fileset.ts", "plan.ts"]);
+  assert.equal(res.confident, true);
+});
+
 test("defaultFileSet anchors the marker at a line start — an inline prose mention is not the marker", () => {
   const root = treeWith("src/plan.ts");
   const fileSet = defaultFileSet(root);

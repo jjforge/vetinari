@@ -835,8 +835,9 @@ switch (mode) {
 
     // Which files each ticket touches: the project's resolver, or the shipped
     // cites-from-body default, validated against the current tree at plan time.
-    // `ticketProse` narrows what the resolver scans to the author's title+body,
-    // so a stray filename-shaped token in any comment cannot poison confidence.
+    // `ticketProse` scans the author's title+body, falling back to anchored marker
+    // *lines* in the comments only when title+body carry none — so a stray
+    // filename-shaped token in a comment's prose still cannot poison confidence.
     const resolveFileSet = cfg.fileSet ?? defaultFileSet();
     const plan = await planCampaign(ids, {
       blockedBy: cfg.blockedBy,

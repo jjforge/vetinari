@@ -2,6 +2,7 @@ import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import type { OrchestratorEvent } from "./event-log.ts";
+import type { ResolvedConfig } from "./config.ts";
 
 /**
  * The log target before an entrypoint sets a real one — an isolated per-process
@@ -50,6 +51,70 @@ export function log(event: string, data: Record<string, unknown> = {}) {
     mkdirSync(dirname(logFile), { recursive: true });
     appendFileSync(logFile, line + "\n");
   }
+}
+
+/**
+ * A logger value — the injected form of the free `log()` above. It carries the same narrowed-kind
+ * typed overload (a narrowed kind must be emitted with its `event-log.ts` field shape; every other
+ * kind stays one-line cheap through the untyped catch-all), so a caller threading a `Logger`
+ * through gets the identical compile-time guarantee the global gives today. Where a row goes — a
+ * file plus a console echo, or an in-memory array — is the adapter's choice, not the interface's.
+ */
+export interface Logger {
+  log<K extends NarrowedKind>(event: K, data: Fields<K>): void;
+  log<E extends string>(event: E extends NarrowedKind ? never : E, data?: Record<string, unknown>): void;
+}
+
+/** The stamped row `log()` and the adapters persist: `ts` first, the caller's data, then the
+ * authoritative `event` last so a stray `data.event` can't override the kind. */
+const stampRow = (event: string, data: Record<string, unknown>) => ({ ts: new Date().toISOString(), ...data, event });
+
+/** An adapter that appends stamped JSONL to `path` and echoes to the console, exactly as the
+ * global `log()` does — the shared backend of `loggerForRun` and `hostLogger`. */
+function fileLogger(path: string): Logger {
+  const write = (event: string, data: Record<string, unknown> = {}): void => {
+    const line = JSON.stringify(stampRow(event, data));
+    console.log(`[vetinari] ${event}`, data);
+    try {
+      appendFileSync(path, line + "\n");
+    } catch {
+      mkdirSync(dirname(path), { recursive: true });
+      appendFileSync(path, line + "\n");
+    }
+  };
+  return { log: write } as Logger;
+}
+
+/** A run's logger: the on-disk event log at `cfg.logFile`, with the console echo. */
+export const loggerForRun = (cfg: Pick<ResolvedConfig, "logFile">): Logger => fileLogger(cfg.logFile);
+
+/**
+ * The host's own log target — an explicit per-process temp path the host binds to when it isn't
+ * scoped to a single run's `cfg.logFile`. Named a *host* binding rather than the global's "unset"
+ * default (`defaultLogFile`): the host writing here is deliberate, not a fallback nobody configured.
+ */
+export const hostLogTarget = (): string => join(tmpdir(), `vetinari-host-${process.pid}`, "orchestrator.jsonl");
+
+/** The host's logger: file-backed at `hostLogTarget()`, with the console echo. */
+export const hostLogger = (): Logger => fileLogger(hostLogTarget());
+
+/** A `Logger` whose captured rows are readable as typed events — see `memoryLogger`. */
+export interface MemoryLogger extends Logger {
+  /** Every row emitted so far, in order, typed as the dashboard reads them back. */
+  readonly events: OrchestratorEvent[];
+}
+
+/**
+ * A silent, in-memory logger: it captures each stamped row into `.events` and writes nothing to
+ * disk and echoes nothing to the console (the console echo is a file-adapter property this adapter
+ * simply lacks). For tests and callers that want to assert on emitted events without a real log.
+ */
+export function memoryLogger(): MemoryLogger {
+  const events: OrchestratorEvent[] = [];
+  const write = (event: string, data: Record<string, unknown> = {}): void => {
+    events.push(stampRow(event, data) as OrchestratorEvent);
+  };
+  return { log: write, events } as MemoryLogger;
 }
 
 /** Persist a gate's full output; the event log carries only the path. */

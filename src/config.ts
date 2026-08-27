@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { existsSync } from "node:fs";
 import type { FindingReporter } from "./findings.ts";
 import type { FileSetOf } from "./fileset.ts";
+import { loggerForRun, type Logger } from "./log.ts";
 
 /**
  * The five fixed message categories a piece of outbound communication carries,
@@ -209,7 +210,7 @@ export interface VetinariConfig {
 export type ResolvedConfig = Required<
   Pick<VetinariConfig, "project" | "image" | "baseBranch" | "branchPrefix" | "containerShare" | "gates" | "maxTurns" | "idleTimeoutSeconds" | "stateDir" | "fetchTask">
 > &
-  VetinariConfig & { promptFile: string; parkedDir: string; logFile: string };
+  VetinariConfig & { promptFile: string; parkedDir: string; logFile: string; log: Logger };
 
 export function defineConfig(c: VetinariConfig): VetinariConfig {
   return c;
@@ -293,6 +294,7 @@ export async function loadConfig(explicitPath?: string): Promise<ResolvedConfig>
   // hostEnv is applied to THIS process only; it is never handed to a sandbox.
   for (const [k, v] of Object.entries(c.hostEnv ?? {})) process.env[k] = v;
 
+  const logFile = `${stateDir}/logs/orchestrator.jsonl`;
   return {
     branchPrefix: "agent/",
     containerShare: "medium",
@@ -302,6 +304,7 @@ export async function loadConfig(explicitPath?: string): Promise<ResolvedConfig>
     stateDir,
     promptFile: c.promptFile ?? new URL("../prompts/tdd.md", import.meta.url).pathname,
     parkedDir: `${stateDir}/parked`,
-    logFile: `${stateDir}/logs/orchestrator.jsonl`,
+    logFile,
+    log: loggerForRun({ logFile }),
   } as ResolvedConfig;
 }

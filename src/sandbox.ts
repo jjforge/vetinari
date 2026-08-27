@@ -2,7 +2,6 @@ import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { mkdirSync } from "node:fs";
 import type { ResolvedConfig } from "./config.ts";
-import { log } from "./log.ts";
 
 // The pinned sandcastle build's `CreateSandboxOptions` does not model `stateDir`
 // yet; builds carrying ADR 0021 honor it and older builds ignore it at runtime, so
@@ -34,7 +33,7 @@ export async function makeSandbox(cfg: ResolvedConfig, taskId: string) {
   for (const m of mounts) mkdirSync(m.hostPath, { recursive: true });
 
   const branch = `${cfg.branchPrefix}${taskId}`;
-  log("sandbox", { taskId, branch, mounts: mounts.map((m) => m.hostPath) });
+  cfg.log.log("sandbox", { taskId, branch, mounts: mounts.map((m) => m.hostPath) });
 
   return sandcastle.createSandbox({
     branch,

@@ -16,6 +16,7 @@ import {
   park,
   setParkedMessageId,
 } from "./state.ts";
+import { memoryLogger } from "./log.ts";
 
 const cfgFor = (dir: string): ResolvedConfig =>
   ({
@@ -31,7 +32,8 @@ const cfgFor = (dir: string): ResolvedConfig =>
     logFile: join(dir, "logs", "orchestrator.jsonl"),
     promptFile: "prompt.md",
     fetchTask: (id: string) => id,
-  }) as ResolvedConfig;
+    log: memoryLogger(),
+  }) as unknown as ResolvedConfig;
 
 const parkFixture = (dir: string, taskId: string) =>
   writeFileSync(

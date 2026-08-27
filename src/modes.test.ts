@@ -16,8 +16,7 @@ import {
   warnIfTelegramUnconfigured,
   waveParkedNotice,
 } from "./modes.ts";
-import { setLogFile } from "./log.ts";
-import { readEventLog } from "./event-log.ts";
+import { memoryLogger, type MemoryLogger } from "./log.ts";
 
 const cfgWith = (fetchTask: ResolvedConfig["fetchTask"]): ResolvedConfig =>
   ({ fetchTask }) as ResolvedConfig;
@@ -95,12 +94,13 @@ const captureStderr = (fn: () => void): string => {
 };
 
 // A cfg whose base location IS this stateDir (absolute, so it resolves to itself),
-// pointed at a fresh log file so the emitted event can be read back.
-const unnotifiableCfg = (baseLocation: string): ResolvedConfig => {
-  const logFile = join(baseLocation, "orchestrator.jsonl");
-  setLogFile(logFile);
-  return { project: "myapp", stateDir: baseLocation, logFile } as ResolvedConfig;
-};
+// carrying a silent in-memory logger so the emitted event can be read back off
+// `cfg.log.events` — no on-disk log target needed.
+const unnotifiableCfg = (baseLocation: string): ResolvedConfig =>
+  ({ project: "myapp", stateDir: baseLocation, log: memoryLogger() }) as unknown as ResolvedConfig;
+
+/** The `.events` a cfg's injected memory logger captured. */
+const eventsOf = (cfg: ResolvedConfig) => (cfg.log as MemoryLogger).events;
 
 test("warnIfTelegramUnconfigured warns naming host.env and logs telegram-unconfigured when the base location resolves no conn", () => {
   const baseLocation = baseLocationWith(); // no host.env → no conn
@@ -116,7 +116,7 @@ test("warnIfTelegramUnconfigured warns naming host.env and logs telegram-unconfi
   );
 
   // …and the same fact is logged so the dashboard can narrate it.
-  const logged = readEventLog(cfg).filter(
+  const logged = eventsOf(cfg).filter(
     (e) => e.event === "telegram-unconfigured",
   );
   assert.equal(logged.length, 1);
@@ -139,14 +139,14 @@ test("warnIfTelegramUnconfigured is silent when the base location's host.env res
 
   assert.equal(stderr, "");
   assert.equal(
-    readEventLog(cfg).filter((e) => e.event === "telegram-unconfigured").length,
+    eventsOf(cfg).filter((e) => e.event === "telegram-unconfigured").length,
     0,
   );
 });
 
 test("markMergedIssues calls the configured onIssueMerged seam with exactly the merged ids", async () => {
   const seen: string[] = [];
-  await markMergedIssues({ onIssueMerged: (id) => void seen.push(id) }, [
+  await markMergedIssues({ onIssueMerged: (id) => void seen.push(id), log: memoryLogger() }, [
     "101",
     "102",
     "103",
@@ -201,22 +201,28 @@ test("autoCarveNotice reports the pruned dependents and that the campaign ran on
 
 test("markMergedIssues is a no-op when onIssueMerged is unconfigured — core names no labels", async () => {
   // No throw, nothing to observe: the core stays tracker-agnostic.
-  await markMergedIssues({}, ["101"]);
+  await markMergedIssues({ log: memoryLogger() }, ["101"]);
 });
 
 test("markMergedIssues isolates a throwing hook — it is logged and the rest still run, no throw", async () => {
   const seen: string[] = [];
+  const log = memoryLogger();
   await markMergedIssues(
     {
       onIssueMerged: (id) => {
         seen.push(id);
         if (id === "102") throw new Error("offline");
       },
+      log,
     },
     ["101", "102", "103"],
   );
   // 102 threw but 101 and 103 were still attempted, and the call itself did not throw.
   assert.deepEqual(seen, ["101", "102", "103"]);
+  // The failure surfaced on the injected event log, naming the offending id.
+  const failed = log.events.filter((e) => (e as { event: string }).event === "issue-merged-hook-failed");
+  assert.equal(failed.length, 1);
+  assert.equal((failed[0] as any).taskId, "102");
 });
 
 test("resolveTitles maps each id to its fetched title", async () => {
@@ -288,7 +294,7 @@ test("childSpawnEnv marks a spawned child so its `run` skips leftover-archiving,
 });
 
 const buildCfg = (): ResolvedConfig =>
-  ({ image: "vetinari-myapp" }) as ResolvedConfig;
+  ({ image: "vetinari-myapp", log: memoryLogger() }) as unknown as ResolvedConfig;
 
 test("build builds the image, then runs baseline by default, returning its result", async () => {
   const calls: string[] = [];

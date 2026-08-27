@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { MessageCategory, ResolvedConfig } from "./config.ts";
-import { log } from "./log.ts";
 
 export type ParkReason = "blocked" | "budget" | "idle-timeout";
 
@@ -30,7 +29,7 @@ const file = (cfg: ResolvedConfig, taskId: string) => `${cfg.parkedDir}/${taskId
 export async function park(cfg: ResolvedConfig, rec: Omit<ParkedRecord, "parkedAt" | "tgMessageId">) {
   mkdirSync(cfg.parkedDir, { recursive: true });
   writeFileSync(file(cfg, rec.taskId), JSON.stringify({ parkedAt: new Date().toISOString(), ...rec }, null, 2));
-  log("parked", { taskId: rec.taskId, reason: rec.reason });
+  cfg.log.log("parked", { taskId: rec.taskId, reason: rec.reason });
   console.log(`\n*** PARKED (${rec.reason}) — the gateway will announce this question; or answer directly with:\n    vetinari answer ${rec.taskId} "<answer>"\n`);
 }
 
@@ -106,12 +105,12 @@ export const outboxDirOf = (baseLocation: string) => join(baseLocation, "outbox"
  * keyed by a fresh id so records written within the same tick never collide.
  * Silent by design — the gateway drains and routes it per the notify map.
  */
-export function enqueueOutbound(cfg: Pick<ResolvedConfig, "stateDir">, msg: Omit<OutboundRecord, "id" | "enqueuedAt" | "sentAt" | "destination">): void {
+export function enqueueOutbound(cfg: Pick<ResolvedConfig, "stateDir" | "log">, msg: Omit<OutboundRecord, "id" | "enqueuedAt" | "sentAt" | "destination">): void {
   const dir = outboxDirOf(cfg.stateDir);
   mkdirSync(dir, { recursive: true });
   const rec: OutboundRecord = { id: randomUUID(), enqueuedAt: new Date().toISOString(), ...msg };
   writeFileSync(join(dir, `${rec.id}.json`), JSON.stringify(rec, null, 2));
-  log("outbound-enqueued", { id: rec.id, category: rec.category, event: rec.event });
+  cfg.log.log("outbound-enqueued", { id: rec.id, category: rec.category, event: rec.event });
 }
 
 /** Every outbound record under an explicit outbox directory, oldest first — the gateway drains a project's live. */

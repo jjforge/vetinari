@@ -6,8 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import { applyTidy, collectWaveChangelog, computeTidy, integrateGreens, scanTidy, type TidySnapshot } from "./merge.ts";
-import { setLogFile } from "./log.ts";
-import { readEventLog } from "./event-log.ts";
+import { memoryLogger } from "./log.ts";
 
 /** A fresh git repo with a CHANGELOG.md committed, standing in for a campaign base. */
 function repoWithChangelog(changelog: string): string {
@@ -35,7 +34,7 @@ test("collectWaveChangelog folds the wave's fragments into CHANGELOG.md and comm
   execFileSync("git", ["-C", dir, "add", "-A"]);
   execFileSync("git", ["-C", dir, "commit", "-qm", "merge agent branches"]);
 
-  const result = collectWaveChangelog(1, dir);
+  const result = collectWaveChangelog(1, memoryLogger(), dir);
 
   assert.equal(result.committed, true);
   assert.deepEqual(result.collected.sort(), ["42.md", "7.md"]);
@@ -80,10 +79,10 @@ function repoWithConflictingGreens(): { dir: string; git: (args: string[]) => st
 
 test("integrateGreens quarantines a conflicting green, keeps the earlier green merged, and continues", async () => {
   const { dir, git } = repoWithConflictingGreens();
-  const cfg = { branchPrefix: "agent/", baseBranch: "main" } as ResolvedConfig;
+  const log = memoryLogger();
+  const cfg = { branchPrefix: "agent/", baseBranch: "main", log } as unknown as ResolvedConfig;
   const prevCwd = process.cwd();
   process.chdir(dir);
-  setLogFile(join(dir, "orchestrator.jsonl"));
   try {
     const result = await integrateGreens(cfg, ["A", "B"], {
       gate: async () => ({ green: true, report: "" }),
@@ -103,7 +102,7 @@ test("integrateGreens quarantines a conflicting green, keeps the earlier green m
   }
 
   // The conflict was recorded as a `quarantined` event naming B and its branch.
-  const q = readEventLog({ logFile: join(dir, "orchestrator.jsonl") }).filter((e) => e.event === "quarantined");
+  const q = log.events.filter((e) => e.event === "quarantined");
   assert.equal(q.length, 1);
   assert.deepEqual({ taskId: (q[0] as any).taskId, branch: (q[0] as any).branch }, { taskId: "B", branch: "agent/B" });
 });
@@ -138,10 +137,10 @@ function repoWithCleanGreens(): { dir: string; git: (args: string[]) => string }
 
 test("integrateGreens wave-parks a red merged base: leaves the greens merged, does not reset, preserves branches", async () => {
   const { dir, git } = repoWithCleanGreens();
-  const cfg = { branchPrefix: "agent/", baseBranch: "main" } as ResolvedConfig;
+  const log = memoryLogger();
+  const cfg = { branchPrefix: "agent/", baseBranch: "main", log } as unknown as ResolvedConfig;
   const prevCwd = process.cwd();
   process.chdir(dir);
-  setLogFile(join(dir, "orchestrator.jsonl"));
   const preSha = git(["rev-parse", "HEAD"]);
   try {
     const result = await integrateGreens(cfg, ["A", "B"], {
@@ -168,7 +167,7 @@ test("integrateGreens wave-parks a red merged base: leaves the greens merged, do
   }
 
   // AC2: a `wave-parked` event records the greens left merged and the tail of the gate report.
-  const parked = readEventLog({ logFile: join(dir, "orchestrator.jsonl") }).filter((e) => e.event === "wave-parked");
+  const parked = log.events.filter((e) => e.event === "wave-parked");
   assert.equal(parked.length, 1);
   assert.deepEqual((parked[0] as any).merged, ["A", "B"]);
   assert.ok((parked[0] as any).detail.includes("GATE FAILED here"));
@@ -176,10 +175,9 @@ test("integrateGreens wave-parks a red merged base: leaves the greens merged, do
 
 test("integrateGreens skips the merged-base gate when every green conflicts", async () => {
   const { dir } = repoWithConflictingGreens();
-  const cfg = { branchPrefix: "agent/", baseBranch: "main" } as ResolvedConfig;
+  const cfg = { branchPrefix: "agent/", baseBranch: "main", log: memoryLogger() } as unknown as ResolvedConfig;
   const prevCwd = process.cwd();
   process.chdir(dir);
-  setLogFile(join(dir, "orchestrator.jsonl"));
   let gateRan = false;
   try {
     // Put B's conflicting change on the base first so A also conflicts.
@@ -421,7 +419,7 @@ test("collectWaveChangelog makes no commit when the wave left no fragments", () 
   const dir = repoWithChangelog("# Changelog\n\n### Older — August 1, 2026\n\n**Bug fixes:**\n- [user] old (#1)\n");
   const before = headSha(dir);
 
-  const result = collectWaveChangelog(0, dir);
+  const result = collectWaveChangelog(0, memoryLogger(), dir);
 
   assert.equal(result.committed, false);
   assert.deepEqual(result.collected, []);

@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { log } from "./log.ts";
+import type { Logger } from "./log.ts";
 import { runGates } from "./gate.ts";
 import { makeSandbox } from "./sandbox.ts";
 import { applyCollect, foldFragments, formatMilestoneDate, FRAGMENT_DIR } from "./changelog.ts";
@@ -87,11 +87,11 @@ export async function integrateGreens(
       // quarantine the issue with its work preserved, and carry on with the rest.
       const detail = `${r.stdout}\n${r.stderr}`.trim().split("\n").slice(-12).join("\n");
       gitTry(["merge", "--abort"]);
-      log("quarantined", { taskId, branch, detail });
+      cfg.log.log("quarantined", { taskId, branch, detail });
       quarantined.push(taskId);
       continue;
     }
-    log("campaign-merged", { taskId, branch });
+    cfg.log.log("campaign-merged", { taskId, branch });
     merged.push(taskId);
   }
 
@@ -105,7 +105,7 @@ export async function integrateGreens(
       // campaign for a human to fix forward and resume, or carve a suspect. The base
       // sits red but is never pushed and nothing builds on it while paused.
       const detail = report.split("\n").slice(-40).join("\n");
-      log("wave-parked", { merged, detail });
+      cfg.log.log("wave-parked", { merged, detail });
       return { merged, quarantined, parked: { reason: "gate-red", detail } };
     }
   }
@@ -115,7 +115,7 @@ export async function integrateGreens(
   // branches are never touched here — they stay resumable.
   for (const taskId of merged) gitTry(["branch", "-D", `${cfg.branchPrefix}${taskId}`]);
   gitTry(["worktree", "prune"]);
-  log("campaign-integrated", { merged, headSha: git(["rev-parse", "HEAD"]) });
+  cfg.log.log("campaign-integrated", { merged, headSha: git(["rev-parse", "HEAD"]) });
   return { merged, quarantined };
 }
 
@@ -129,9 +129,10 @@ export async function integrateGreens(
  *
  * `root` is the base tree (defaults to the process cwd, which `campaign` guarantees is
  * on `baseBranch`); passing it explicitly is what makes this unit-testable against a
- * throwaway repo.
+ * throwaway repo. `log` is the run's injected logger — this is a host helper, not a
+ * `cfg` holder, so the logger is threaded in explicitly.
  */
-export function collectWaveChangelog(waveIndex: number, root: string = process.cwd()): { collected: string[]; committed: boolean } {
+export function collectWaveChangelog(waveIndex: number, log: Logger, root: string = process.cwd()): { collected: string[]; committed: boolean } {
   const { collected } = applyCollect({
     fragmentsDir: join(root, FRAGMENT_DIR),
     changelogPath: join(root, "CHANGELOG.md"),
@@ -139,13 +140,13 @@ export function collectWaveChangelog(waveIndex: number, root: string = process.c
     title: "Collected changes",
   });
   if (!collected.length) {
-    log("campaign-changelog-empty", { wave: waveIndex });
+    log.log("campaign-changelog-empty", { wave: waveIndex });
     return { collected, committed: false };
   }
   // `-A` stages both the CHANGELOG.md fold and the fragment deletions.
   execFileSync("git", ["-C", root, "add", "-A"], { encoding: "utf8" });
   execFileSync("git", ["-C", root, "commit", "-m", `campaign: collect changelog (wave ${waveIndex + 1})`], { encoding: "utf8" });
-  log("campaign-changelog-collected", { wave: waveIndex, collected });
+  log.log("campaign-changelog-collected", { wave: waveIndex, collected });
   return { collected, committed: true };
 }
 
@@ -158,7 +159,7 @@ async function gateMergedBase(cfg: ResolvedConfig): Promise<{ green: boolean; re
   const sbx = await makeSandbox(cfg, "campaign-integrate");
   try {
     const result = await runGates(cfg, sbx, { all: true });
-    log("campaign-merged-base-gate", { green: result.green });
+    cfg.log.log("campaign-merged-base-gate", { green: result.green });
     return result;
   } finally {
     await sbx.close();

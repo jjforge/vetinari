@@ -7,7 +7,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { log } from "./log.ts";
+import { hostLogger, type Logger } from "./log.ts";
 import type { Destination, NotifyMap, ResolvedConfig } from "./config.ts";
 import type { TgConn } from "./telegram.ts";
 
@@ -45,6 +45,7 @@ export function gatewayConfigDir(): string {
 export function autoRegister(
   cfg: Pick<ResolvedConfig, "project" | "stateDir" | "notify" | "destinations">,
   projectRoot: string = process.cwd(),
+  logger: Logger = hostLogger(),
 ): void {
   try {
     const pointer = pointerFor(cfg, projectRoot);
@@ -56,7 +57,7 @@ export function autoRegister(
       destinations: cfg.destinations,
     });
   } catch (e) {
-    log("registry-register-failed", { project: cfg.project, error: String(e) });
+    logger.log("registry-register-failed", { project: cfg.project, error: String(e) });
   }
 }
 
@@ -139,13 +140,13 @@ export function writeRouting(baseLocation: string, routing: Routing): void {
 }
 
 /** Read a project's materialized routing, or an empty routing when it configured none. */
-function readRouting(baseLocation: string): Routing {
+function readRouting(baseLocation: string, logger: Logger): Routing {
   const path = join(baseLocation, ROUTING_FILE);
   if (!existsSync(path)) return {};
   try {
     return JSON.parse(readFileSync(path, "utf8")) as Routing;
   } catch (e) {
-    log("registry-routing-unreadable", { baseLocation, error: String(e) });
+    logger.log("registry-routing-unreadable", { baseLocation, error: String(e) });
     return {};
   }
 }
@@ -226,15 +227,15 @@ export function tgConnForBaseLocation(
  * skipped (logged, `undefined` returned) rather than throwing — one stale
  * registration must never take the gateway down (ADR 0002).
  */
-export function readProject(pointer: ProjectPointer): ReadProject | undefined {
+export function readProject(pointer: ProjectPointer, logger: Logger = hostLogger()): ReadProject | undefined {
   if (!existsSync(pointer.baseLocation)) {
-    log("registry-stale", {
+    logger.log("registry-stale", {
       project: pointer.project,
       baseLocation: pointer.baseLocation,
     });
     return undefined;
   }
-  const { notify, destinations } = readRouting(pointer.baseLocation);
+  const { notify, destinations } = readRouting(pointer.baseLocation, logger);
   return {
     pointer,
     conn: tgConnForBaseLocation(pointer.baseLocation),
@@ -248,8 +249,8 @@ export function readProject(pointer: ProjectPointer): ReadProject | undefined {
  * Stale pointers (base location gone) are dropped, so a caller iterating the
  * registry gets only projects it can actually serve.
  */
-export function readProjects(configDir: string): ReadProject[] {
+export function readProjects(configDir: string, logger: Logger = hostLogger()): ReadProject[] {
   return listProjects(configDir)
-    .map(readProject)
+    .map((pointer) => readProject(pointer, logger))
     .filter((r): r is ReadProject => r !== undefined);
 }

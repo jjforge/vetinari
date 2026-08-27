@@ -9,6 +9,7 @@ import { applyCollect, foldFragments, formatMilestoneDate, FRAGMENT_DIR } from "
 import { listParkedIn } from "./state.ts";
 import { readEventLog } from "./event-log.ts";
 import { reduceCampaign } from "./dashboard-model.ts";
+import type { PointerDrop } from "./registry.ts";
 
 /** Run git in the host project root, throwing its stderr on a non-zero exit. */
 const git = (args: string[]) => execFileSync("git", args, { encoding: "utf8" }).trim();
@@ -365,6 +366,22 @@ export function applyTidy(target: TidyTarget, plan: TidyPlan): void {
   if (plan.deleteBranches.length) gitTry(["-C", target.root, "worktree", "prune"]);
 
   for (const id of plan.clearParked) rmSync(join(target.parkedDir, `${id}.json`), { force: true });
+}
+
+/**
+ * Render the registry dedup drops (issue #164) as the host-level section `tidy`
+ * folds into its summary — one line per duplicate `projectRoot` pointer being
+ * dropped, naming the canonical pointer kept in its place. Empty when there is
+ * nothing to drop, so the caller can skip printing a section for it.
+ */
+export function describeRegistryDedup(drops: PointerDrop[]): string {
+  if (!drops.length) return "";
+  return [
+    "tidy registry:",
+    ...drops.map(
+      (d) => `  registry: drop duplicate pointer '${d.drop}' — projectRoot ${d.projectRoot} also held by '${d.kept}'`,
+    ),
+  ].join("\n");
 }
 
 /** Remove a live worktree checked out on `branch`, so its branch ref can then be deleted. */

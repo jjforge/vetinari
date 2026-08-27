@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { applyTidy, collectWaveChangelog, computeTidy, integrateGreens, scanTidy, type TidySnapshot } from "./merge.ts";
+import { applyTidy, collectWaveChangelog, computeTidy, describeRegistryDedup, integrateGreens, scanTidy, type TidySnapshot } from "./merge.ts";
 import { memoryLogger } from "./log.ts";
 
 /** A fresh git repo with a CHANGELOG.md committed, standing in for a campaign base. */
@@ -413,6 +413,19 @@ test("scanTidy reads wave-parked issues from the event log so their reachable br
   assert.deepEqual(plan.deleteBranches, ["72"]);
   const kept = Object.fromEntries(plan.keep.map((k) => [k.id, k.reason]));
   assert.deepEqual(kept, { "70": "wave-parked", "71": "wave-parked" });
+});
+
+test("describeRegistryDedup renders one drop line per duplicate, or empty when none", () => {
+  assert.equal(describeRegistryDedup([]), "");
+
+  const report = describeRegistryDedup([
+    { drop: "verify150", kept: "vetinari", projectRoot: "/home/zach/Code/vetinari" },
+  ]);
+
+  assert.deepEqual(report.split("\n"), [
+    "tidy registry:",
+    "  registry: drop duplicate pointer 'verify150' — projectRoot /home/zach/Code/vetinari also held by 'vetinari'",
+  ]);
 });
 
 test("collectWaveChangelog makes no commit when the wave left no fragments", () => {

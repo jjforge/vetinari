@@ -1,14 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import {
   autoRegister,
+  computeRegistryDedup,
   gatewayConfigDir,
   hostSecretsPath,
   listProjects,
+  normalizeProjectRoot,
   pointerFor,
   readProject,
   readProjects,
@@ -252,6 +254,79 @@ test("pointerFor derives the base location as the state dir under the project ro
     projectRoot: "/home/me/code/jjforge",
     baseLocation: "/home/me/code/jjforge/.vetinari.local",
   });
+});
+
+// A pointer sharing a projectRoot with another but based somewhere else (a temp
+// dir, a moved checkout) — the non-canonical duplicate `tidy` may drop.
+const dupPointer = (over: Partial<ProjectPointer> = {}): ProjectPointer => ({
+  project: "verify150",
+  projectRoot: "/home/me/code/jjforge",
+  baseLocation: "/tmp/verify150/.vetinari.local",
+  ...over,
+});
+
+test("computeRegistryDedup drops the non-canonical duplicate, keeps the canonical base", () => {
+  // Two pointers resolve to one repo; only `jjforge` is based at <root>/.vetinari.local.
+  const drops = computeRegistryDedup([pointer(), dupPointer()]);
+
+  assert.deepEqual(drops, [
+    { drop: "verify150", kept: "jjforge", projectRoot: "/home/me/code/jjforge" },
+  ]);
+});
+
+test("computeRegistryDedup removes nothing when no member has the canonical base", () => {
+  // Both bases sit off-root — the winner is ambiguous, so leave the group for the human.
+  const drops = computeRegistryDedup([
+    dupPointer({ project: "a", baseLocation: "/tmp/a/.vetinari.local" }),
+    dupPointer({ project: "b", baseLocation: "/tmp/b/.vetinari.local" }),
+  ]);
+
+  assert.deepEqual(drops, []);
+});
+
+test("computeRegistryDedup removes nothing when two members share the canonical base", () => {
+  // Two canonical winners is ambiguous (can't happen on disk, but never guess) — leave both.
+  const drops = computeRegistryDedup([
+    pointer({ project: "a" }),
+    pointer({ project: "b" }),
+  ]);
+
+  assert.deepEqual(drops, []);
+});
+
+test("computeRegistryDedup leaves singletons and distinct-root pointers untouched", () => {
+  // A lone pointer whose root is gone from disk, and a lone temp-based pointer at a
+  // different root — neither is a duplicate, so neither is ever dropped.
+  const drops = computeRegistryDedup([
+    pointer(),
+    dupPointer({ project: "other", projectRoot: "/home/me/code/elsewhere", baseLocation: "/tmp/x/.vetinari.local" }),
+  ]);
+
+  assert.deepEqual(drops, []);
+});
+
+test("computeRegistryDedup groups by NORMALIZED root — a trailing slash is one group", () => {
+  const drops = computeRegistryDedup([
+    pointer(),
+    dupPointer({ projectRoot: "/home/me/code/jjforge/" }),
+  ]);
+
+  assert.deepEqual(drops, [
+    { drop: "verify150", kept: "jjforge", projectRoot: "/home/me/code/jjforge" },
+  ]);
+});
+
+test("normalizeProjectRoot strips a trailing slash", () => {
+  assert.equal(normalizeProjectRoot("/home/me/code/jjforge/"), "/home/me/code/jjforge");
+});
+
+test("normalizeProjectRoot realpath-resolves a symlinked root so path variants dedup", () => {
+  const real = join(tmpConfigDir(), "real-checkout");
+  mkdirSync(real, { recursive: true });
+  const link = join(tmpConfigDir(), "link-checkout");
+  symlinkSync(real, link);
+
+  assert.equal(normalizeProjectRoot(link), realpathSync(real));
 });
 
 const withEnv = (over: Record<string, string | undefined>, fn: () => void) => {

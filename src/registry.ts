@@ -3,11 +3,12 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { hostLogger, type Logger } from "./log.ts";
 import type { Destination, NotifyMap, ResolvedConfig } from "./config.ts";
 import type { TgConn } from "./telegram.ts";
@@ -108,6 +109,80 @@ export function removePointer(configDir: string, project: string): boolean {
   if (!existsSync(file)) return false;
   rmSync(file);
   return true;
+}
+
+/**
+ * The base-directory name a project's canonical base location carries —
+ * `<projectRoot>/.vetinari.local`, the default `stateDir` (config.ts). The dedup
+ * winner is the pointer based here; a pointer based elsewhere (a temp dir, a moved
+ * checkout) is the droppable duplicate.
+ */
+const CANONICAL_BASE_DIR = ".vetinari.local";
+
+/**
+ * Normalize a `projectRoot` for comparison: strip a trailing slash, then
+ * `realpath`-resolve so symlinked path-spellings of one checkout collapse to a
+ * single key. A path not on disk can't be realpath'd — fall back to a lexical
+ * `resolve` so a missing/duplicate root still groups deterministically (we never
+ * remove for root-gone anyway; the human owns that — issue #163).
+ */
+export function normalizeProjectRoot(root: string): string {
+  const stripped = root.replace(/\/+$/, "") || "/";
+  try {
+    return realpathSync(stripped);
+  } catch {
+    return resolve(stripped);
+  }
+}
+
+/** True when a pointer's base location is the canonical `<projectRoot>/.vetinari.local`. */
+function hasCanonicalBase(pointer: ProjectPointer, normalizedRoot: string): boolean {
+  const base = pointer.baseLocation.replace(/\/+$/, "");
+  return (
+    basename(base) === CANONICAL_BASE_DIR &&
+    normalizeProjectRoot(dirname(base)) === normalizedRoot
+  );
+}
+
+/** One duplicate-`projectRoot` pointer `tidy` would drop, naming the canonical pointer it kept. */
+export interface PointerDrop {
+  /** the project name of the removed (non-canonical duplicate) pointer. */
+  drop: string;
+  /** the project name of the canonical pointer kept in its place. */
+  kept: string;
+  /** the shared normalized `projectRoot` the two pointers resolve to. */
+  projectRoot: string;
+}
+
+/**
+ * The conservative registry GC decision (issue #164), pure over a pointer set: group
+ * by normalized `projectRoot` (they resolve to one repo/`origin`), and for a group of
+ * more than one keep the single pointer based at the canonical `<projectRoot>/.vetinari.local`,
+ * dropping the rest. If the canonical winner is ambiguous — zero canonical bases, or
+ * more than one — remove nothing in that group (leave it for the explicit `deregister`,
+ * issue #163). Singletons and distinct-root pointers are never touched, so a real
+ * project — even one whose root is gone or whose base is a temp dir — is never dropped.
+ */
+export function computeRegistryDedup(pointers: ProjectPointer[]): PointerDrop[] {
+  const groups = new Map<string, ProjectPointer[]>();
+  for (const p of pointers) {
+    const key = normalizeProjectRoot(p.projectRoot);
+    const group = groups.get(key);
+    if (group) group.push(p);
+    else groups.set(key, [p]);
+  }
+
+  const drops: PointerDrop[] = [];
+  for (const [normalizedRoot, group] of groups) {
+    if (group.length < 2) continue;
+    const canonical = group.filter((p) => hasCanonicalBase(p, normalizedRoot));
+    if (canonical.length !== 1) continue; // ambiguous winner → drop nothing here.
+    const kept = canonical[0];
+    for (const p of group) {
+      if (p !== kept) drops.push({ drop: p.project, kept: kept.project, projectRoot: normalizedRoot });
+    }
+  }
+  return drops;
 }
 
 /** Every registered pointer. The gateway's source of truth for "what projects exist". */

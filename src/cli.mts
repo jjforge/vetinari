@@ -1,13 +1,20 @@
 #!/usr/bin/env -S npx tsx
 import { createInterface } from "node:readline/promises";
-import { join, resolve } from "node:path";
+import { mkdirSync, watch } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { loadConfig, resolveConfigPath, type ResolvedConfig } from "./config.ts";
 import {
   applyCollect,
   formatMilestoneDate,
   FRAGMENT_DIR,
 } from "./changelog.ts";
-import { hostLogger } from "./log.ts";
+import {
+  hostLogger,
+  hostLogTarget,
+  readHostLog,
+  readHostLogLines,
+  renderHostEvent,
+} from "./log.ts";
 import { answerPromptFor, runLoop } from "./loop.ts";
 import {
   baseline,
@@ -322,6 +329,85 @@ if (mode === "gateway") {
   }
   await gateway();
   process.exit(0);
+}
+
+// `host log` is the reader surface for the persistent host log (`host.jsonl`) — the
+// host/gateway diagnostics `hostLogger` writes were write-only until now (#169). Like
+// gateway/status it is host-level, not per-project, and reads the file directly off
+// disk, so it must run BEFORE the strict cwd config load and needs no running daemon —
+// the whole point is to reach for it when a host daemon is the thing that's broken.
+if (mode === "host") {
+  if (rest[0] !== "log") {
+    console.error(
+      "host needs a subcommand: `vetinari host log [-n <count>] [--tail] [--json]`",
+    );
+    process.exit(1);
+  }
+  const opts = rest.slice(1);
+  const asJson = opts.includes("--json");
+  const follow = opts.includes("--tail") || opts.includes("-f");
+  const nIdx = opts.indexOf("-n");
+  const limit = nIdx >= 0 ? Number(opts[nIdx + 1]) : 50;
+  if (!Number.isInteger(limit) || limit < 0)
+    throw new Error("host log -n needs a non-negative integer count");
+
+  // Render a batch of raw JSONL lines to stdout: `--json` passes them through
+  // untouched (byte-faithful for jq/grep); otherwise each parses to a row and
+  // renders as one human line, a junk line skipped the way `readEventLog` skips it.
+  const emitLines = (lines: string[]): void => {
+    for (const line of lines) {
+      if (asJson) {
+        console.log(line);
+        continue;
+      }
+      let row: unknown;
+      try {
+        row = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (!row || typeof (row as { event?: unknown }).event !== "string")
+        continue;
+      console.log(renderHostEvent(row as { ts: string; event: string }));
+    }
+  };
+
+  if (!follow) {
+    // A one-shot dump: newest-first for the human render (the most recent event
+    // leads, matching the spec and the dashboard feeds); `--json` stays in on-disk
+    // (chronological) order, untouched. A missing/empty host log reads clean.
+    if (asJson) {
+      emitLines(readHostLogLines(limit));
+    } else {
+      const rows = readHostLog(limit);
+      if (!rows.length) console.log("no host log yet");
+      else for (const row of rows) console.log(renderHostEvent(row));
+    }
+    process.exit(0);
+  }
+
+  // `--tail` follows live like `tail -f`: print the recent window in chronological
+  // order, then append each newly-written event as it lands. Tracking the count of
+  // raw lines already emitted keeps append detection independent of parse skips; a
+  // shorter file (a rotation across a restart, #157) rebaselines rather than
+  // re-emitting. Watch the logs *directory* (created if absent) so a not-yet-written
+  // host.jsonl still arms the watcher — the same pattern the dashboard SSE uses.
+  const target = hostLogTarget();
+  const logsDir = dirname(target);
+  const backlog = readHostLogLines();
+  let seen = backlog.length;
+  emitLines(limit >= backlog.length ? backlog : backlog.slice(-limit));
+  mkdirSync(logsDir, { recursive: true });
+  watch(logsDir, () => {
+    const lines = readHostLogLines();
+    if (lines.length < seen) seen = 0; // rotated/truncated — rebaseline
+    if (lines.length <= seen) return;
+    const fresh = lines.slice(seen);
+    seen = lines.length;
+    emitLines(fresh);
+  });
+  // Follow forever; the process stays up until the operator interrupts it.
+  await new Promise<never>(() => {});
 }
 
 // status is one dashboard over the host registry, not a per-project mode (ADR

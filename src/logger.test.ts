@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { hostLogger, hostLogTarget, loggerForRun, memoryLogger, type Logger } from "./log.ts";
-import { readEventLog } from "./event-log.ts";
+import { hostLogger, hostLogTarget, loggerForRun, memoryLogger, readHostLog, readHostLogLines, renderHostEvent, type Logger } from "./log.ts";
+import { readEventLog, type BaseEvent } from "./event-log.ts";
 import { loadConfig } from "./config.ts";
 
 /**
@@ -70,6 +70,71 @@ test("hostLogTarget is a persistent host log under the gateway config dir, not a
     assert.ok(existsSync(target), "hostLogger must write to its host target");
     const events = readEventLog({ logFile: target });
     assert.ok(events.some((e) => e.event === "carve"));
+  } finally {
+    prev === undefined ? delete process.env.VETINARI_GATEWAY_HOME : (process.env.VETINARI_GATEWAY_HOME = prev);
+  }
+});
+
+test("renderHostEvent renders a stamped row as one line: timestamp, event, then the salient fields as JSON", () => {
+  const withData: BaseEvent & Record<string, unknown> = {
+    ts: "2026-08-27T14:20:35Z",
+    event: "tg-send",
+    ok: true,
+    project: "foo",
+  };
+  assert.equal(renderHostEvent(withData), '2026-08-27T14:20:35Z tg-send {"ok":true,"project":"foo"}');
+  // A row with nothing beyond ts/event renders those two alone — no trailing "{}".
+  assert.equal(
+    renderHostEvent({ ts: "2026-08-27T14:20:35Z", event: "gateway-start" }),
+    "2026-08-27T14:20:35Z gateway-start",
+  );
+});
+
+test("readHostLog returns the host log newest-first, bounded to the most recent window; a missing file reads empty", () => {
+  const gwDir = mkdtempSync(join(tmpdir(), "gw-home-"));
+  const prev = process.env.VETINARI_GATEWAY_HOME;
+  process.env.VETINARI_GATEWAY_HOME = gwDir;
+  try {
+    // No host.jsonl yet — the daemon never ran.
+    assert.deepEqual(readHostLog(), [], "a missing host log reads empty");
+
+    const logger = hostLogger();
+    for (let i = 0; i < 5; i++) logger.log("tick", { i });
+
+    // Newest-first: the last-written row leads.
+    const all = readHostLog();
+    assert.deepEqual(all.map((e) => (e as unknown as { i: number }).i), [4, 3, 2, 1, 0]);
+
+    // Bounded to the most recent `limit` — still newest-first.
+    const recent = readHostLog(2);
+    assert.deepEqual(recent.map((e) => (e as unknown as { i: number }).i), [4, 3]);
+  } finally {
+    prev === undefined ? delete process.env.VETINARI_GATEWAY_HOME : (process.env.VETINARI_GATEWAY_HOME = prev);
+  }
+});
+
+test("readHostLogLines returns the raw JSONL lines untouched, in file order, bounded to the most recent window", () => {
+  const gwDir = mkdtempSync(join(tmpdir(), "gw-home-"));
+  const prev = process.env.VETINARI_GATEWAY_HOME;
+  process.env.VETINARI_GATEWAY_HOME = gwDir;
+  try {
+    // A missing host log yields no lines — the --json surface stays silent, not an error.
+    assert.deepEqual(readHostLogLines(), [], "a missing host log reads empty");
+
+    const logger = hostLogger();
+    for (let i = 0; i < 4; i++) logger.log("tick", { i });
+
+    // Untouched: each line is verbatim what's on disk, and in on-disk (oldest-first) order —
+    // JSON.parse round-trips to the same object the reader would return.
+    const lines = readHostLogLines();
+    assert.equal(lines.length, 4);
+    assert.deepEqual(lines.map((l) => JSON.parse(l).i), [0, 1, 2, 3]);
+    // The raw file's exact lines, so `--json` is byte-faithful for jq/grep.
+    const onDisk = readFileSync(hostLogTarget(), "utf8").split("\n").filter(Boolean);
+    assert.deepEqual(lines, onDisk);
+
+    // Bounded to the last `limit`, still in file order.
+    assert.deepEqual(readHostLogLines(2).map((l) => JSON.parse(l).i), [2, 3]);
   } finally {
     prev === undefined ? delete process.env.VETINARI_GATEWAY_HOME : (process.env.VETINARI_GATEWAY_HOME = prev);
   }

@@ -140,13 +140,19 @@ npx vetinari campaign "436 611 623" "640 655"   # each quoted arg is one batch
 `campaign` drains a batch, merges **only its green** branches into the base with
 `--no-ff`, runs the full gate on the *merged* base (the each-green-but-together-red
 case a per-task gate can't catch), then deletes those branches, prunes their
-worktrees, and starts the next batch on the now-advanced base. A merge conflict
-or a red merged base **halts the campaign**, rolls the base back to where that
-batch began, and leaves every branch intact; you get a Telegram message and no
-later batch runs on a broken base. When a batch finishes, any parked records
-for non-green tasks in that completed wave are cleared from `.vetinari.local/parked/`
-so stale questions do not bleed into the next wave's dashboard. Pushing stays
-yours.
+worktrees, and starts the next batch on the now-advanced base. **Integration is
+non-atomic** (ADR 0013): the two ways a wave can fail get two different responses,
+by whether blame is attributable. A **merge conflict** is attributable to one
+branch, so that one issue is **quarantined** — its branch, worktree, and session
+preserved so it is resumable, never re-run from scratch — while every green that
+already merged this wave stays merged and the wave carries on integrating the rest.
+A **red merged base** has no single culprit (each branch was green on its own), so
+the wave **wave-parks**: everything stays merged, the base sits red (never pushed,
+nothing builds on it while paused), an attention notification fires, and the
+campaign pauses for a human to fix forward and `campaign --resume`, or carve a
+suspect and resume. When a batch finishes, any parked records for non-green tasks
+in that completed wave are cleared from `.vetinari.local/parked/` so stale
+questions do not bleed into the next wave's dashboard. Pushing stays yours.
 
 On clean completion, a `campaign` or `queue` **archives the run** so a finished
 run stops lingering in the dashboard and status line: the orchestrator log is
@@ -188,6 +194,16 @@ the campaign's own issues: a blocker outside the named campaign is out of
 scope. It runs the reduced campaign immediately; `--dry-run` only prints the
 plan. Because carve only *drops* issues, each remaining wave stays as
 conflict-free as you built it.
+
+That form launches a **fresh reduced campaign** from a plan you supply. There is
+also a **running-campaign** form, `carve <issue>` with no batch args — the same
+one the dashboard's detail sheet and the gateway's `carve <issue>` reply use — that
+prunes the campaign already in flight: it appends a carve event the loop honors at
+the **next wave boundary**, so the in-flight wave finishes and only future waves
+shrink. Carve **preserves banked work**: of the removed closure, anything already
+merged or green is kept, only parked/not-yet-started issues leave the plan, and a
+carved issue's parked record (branch, worktree, session) is kept by default so it
+stays resumable — `--purge` is the rare true-drop that clears it.
 
 **Plan the waves from a selected set.** Building the batch list by hand is where
 the dependency order gets encoded. `campaign-plan` does it for you: hand it the
@@ -432,8 +448,11 @@ The README stops at the reader's first hour. The operational reference lives in
 | `baseline` | toolchain probe + all gates, no agent |
 | `run <task>` | the TDD loop; exit 0 green, 2 parked |
 | `queue <task…>` | bounded pool; a park frees its slot |
-| `campaign <batch…>` | drain each batch, merge its greens, gate the merged base, then start the next |
-| `carve <issue> <batch…>` | drop the issue + its transitive dependents, then run the rest as a campaign (`--dry-run` to just print) |
+| `campaign [--name "…"] <batch…>` | drain each batch, merge its greens, gate the merged base, then start the next. Integration is **non-atomic** (ADR 0013): a merge conflict **quarantines** that one issue and the wave carries on (its already-merged greens stay merged); a red merged base **wave-parks** the wave and pauses for a human. `--name` labels the run in the dashboard/archive |
+| `campaign --auto-carve <batch…>` | as `campaign`, but when a quarantine strands dependents in later waves, prune that closure and run on instead of pausing (the default pauses at the wave boundary) |
+| `campaign --resume` | continue a **paused** campaign's unrun waves on the current base (after a human fixed a wave-park forward or carved a suspect); reconstructs the plan from the event log, redoes no already-merged issue, takes no batch args |
+| `carve <issue>` | prune `<issue>` + everything blocked by it from the **running** campaign at the next wave boundary (the in-flight wave finishes; only future waves shrink). Banked/merged work is kept; the carved issue's parked record (branch/worktree/session) is **preserved** so it stays resumable — `--purge` is the rare true-drop that clears it (`--dry-run` to preview) |
+| `carve <issue> <batch…>` | the from-scratch form: drop `<issue>` + its transitive dependents, then run the rest as a fresh reduced campaign from the plan you supply (`--dry-run` to just print) |
 | `campaign-plan <ids…>` | layer a selected set into dependency-ordered wave args (paste after `campaign`) + a provenance report; plans only, never runs |
 | `init [--dry-run]` | scaffold a **new** project onto the layout: committed `vetinari/` (config skeleton + Dockerfile), excluded `.vetinari.local/`, `.gitignore` updated (idempotent, never clobbers an existing config; `--dry-run` to just print the plan) |
 | `migrate [--dry-run]` | move an **existing** project onto the `vetinari/` + `.vetinari.local/` layout: config → `vetinari/`, old `.sandcastle/` state → `.vetinari.local/`, `.gitignore` updated, the host-side `orchestrator.env` renamed to `host.env`, a stale `gateway.env` deleted, and the systemd unit rewritten into the gateway service (`--dry-run` to just print the plan) |
@@ -442,6 +461,7 @@ The README stops at the reader's first hour. The operational reference lives in
 | `gateway install [--dry-run]` | write the host-level systemd unit for this install to `~/.config/systemd/user/vetinari-gateway.service`, with a fully absolute `node` + tsx-loader + CLI `ExecStart` (no `bash -lc`, `env`, `npx`, or `PATH` dependency, so it starts under systemd's clean environment). Re-run after a node/tsx upgrade |
 | `parked` | list what is waiting and why |
 | `clear` | archive the run log + clear parked, resetting the dashboard/status line to idle (automatic on clean campaign/queue completion) |
+| `tidy [--apply] [--all]` | reconcile the drift a by-hand fix-forward or merge leaves (ADR 0013): fold orphaned `changelog.d/` fragments whose issue is merged, GC `agent/<id>` branches + worktrees **provably** reachable from the base, and clear parked records for issues now merged. Never touches an unmerged, quarantined, parked, or wave-parked branch. Dry-run by default; `--apply` acts, `--all` sweeps every registered project |
 | `status [--port <port>] [--host <host>]` | the all-repos landing over the host registry: counters, a card per registered project, a cross-repo activity feed, and each project's archived runs, live over SSE. Reads the registry, so no gateway daemon required |
 | `statusline` | one compact line for the Claude Code status bar; reads Claude Code's JSON on stdin |
 | `statusline install` / `statusline uninstall` | wire the status line into the project's `.claude/settings.json`, keeping any existing status line as line 1 with the 🏰 line under it (`--run-command`, `--dry-run`) |

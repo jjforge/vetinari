@@ -50,6 +50,9 @@ const STATE_COLOR_TOKEN: Record<string, string> = {
   // (ADR 0013), so they read in the same amber as an issue `parked` (§1).
   quarantined: "yellow",
   "wave-parked": "yellow",
+  // An interrupted archived run's in-flight wave/issue (#152): it stopped without
+  // finishing, a caution the same amber reads on the run-level state dot.
+  interrupted: "yellow",
   failure: "failure",
   completed: "green",
   carved: "carved",
@@ -71,7 +74,7 @@ export const stateBorderColor = (state: string): string => `var(--color-${STATE_
  */
 export const STATE_DOT_CSS =
   `.dot { width: .75rem; height: .75rem; border-radius: 999px; display: inline-block; } ` +
-  ["running", "parked", "failure", "completed", "unstarted", "carved", "queued", "quarantined"].map((s) => `.dot.${s} { background: ${stateColor(s)}; }`).join(" ") +
+  ["running", "parked", "failure", "completed", "unstarted", "carved", "queued", "quarantined", "interrupted"].map((s) => `.dot.${s} { background: ${stateColor(s)}; }`).join(" ") +
   ` @keyframes chip-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } } .dot.running { animation: chip-pulse 1.4s ease-in-out infinite; } .dot.running.idle { animation: none; } @media (prefers-reduced-motion: reduce) { .dot.running { animation: none; } }`;
 
 /**
@@ -81,7 +84,7 @@ export const STATE_DOT_CSS =
  * each member row carries a matching status class. Tally counts (not states) are
  * deliberately left out — they keep a neutral edge (§7).
  */
-export const STATE_CHIP_BORDER_CSS = ["running", "parked", "failure", "completed", "unstarted", "carved", "quarantined"].map((s) => `.wave-member.${s} { border-color: ${stateBorderColor(s)}; }`).join(" ");
+export const STATE_CHIP_BORDER_CSS = ["running", "parked", "failure", "completed", "unstarted", "carved", "quarantined", "interrupted"].map((s) => `.wave-member.${s} { border-color: ${stateBorderColor(s)}; }`).join(" ");
 
 /**
  * The mono treatment for the repo dropdown's label (#88). The dashboard loads no
@@ -180,7 +183,7 @@ export const ISSUE_DETAIL_SHEET_STYLES = `  .carve-panel { display: flex; align-
   /* A stateful card: the issue's state reads on the 2px top edge only (§2), derived
      from stateColor; the other three edges stay the neutral 1px. */
   .issue-detail-sheet { display: flex; flex-direction: column; width: min(640px, 100%); max-height: 85vh; overflow: hidden; background: var(--color-card); border: 1px solid var(--color-secondary); border-top: 2px solid var(--color-dim); border-radius: var(--border-radius-medium); box-shadow: 0 18px 48px #0009; }
-  ${["running", "parked", "failure", "completed", "unstarted", "carved", "quarantined"].map((s) => `.issue-detail-sheet.${s} { border-top-color: ${stateColor(s)}; }`).join(" ")}
+  ${["running", "parked", "failure", "completed", "unstarted", "carved", "quarantined", "interrupted"].map((s) => `.issue-detail-sheet.${s} { border-top-color: ${stateColor(s)}; }`).join(" ")}
   .issue-detail-header { position: sticky; top: 0; display: flex; align-items: flex-start; gap: .75rem; padding: 1rem 1.15rem; background: var(--color-box-header); border-bottom: 1px solid var(--color-light-border); }
   .issue-detail-head-main { flex: 1; min-width: 0; }
   .issue-detail-status { display: inline-flex; align-items: center; gap: .4rem; font-size: .85rem; text-transform: uppercase; letter-spacing: .03em; color: var(--color-text-light-2); }

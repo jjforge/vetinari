@@ -1,5 +1,5 @@
 import { listProjects } from "./registry.ts";
-import { archiveStatusConfig, buildAllStatus, buildStatus, listArchivedRuns, projectRunState, repoForProject, selectStatus } from "./dashboard-model.ts";
+import { archiveStatusConfig, buildAllStatus, buildStatus, listArchivedRuns, projectRunState, reconcileArchivedStatus, repoForProject, selectStatus } from "./dashboard-model.ts";
 import { renderLandingShell, renderStatusPage } from "./dashboard-render.ts";
 import type { RouteHandler } from "./dashboard-http.ts";
 
@@ -40,14 +40,16 @@ export const handlePage: RouteHandler = (req, res, url, deps) => {
   const requestedMode = url.searchParams.get("mode") === "raw" ? "raw" : "campaign";
   // Each row's campaign pane renders the run's reconstructed status read-only: point
   // buildStatus at the archived log; its dir holds no parked records, so the status
-  // carries none (a finished run has nothing to act on).
+  // carries none (a finished run has nothing to act on). An interrupted run's log ends
+  // with no terminal event, so `reconcileArchivedStatus` folds its live `running`
+  // states to the terminal `interrupted` — an archived run must never read as live (#152).
   const runs = archivedRuns.map((r) => ({
     run: r.run,
     name: r.name,
     startedAt: r.startedAt,
     state: r.state,
     issues: r.issues,
-    status: buildStatus(archiveStatusConfig(selected.project, r.file)),
+    status: reconcileArchivedStatus(buildStatus(archiveStatusConfig(selected.project, r.file)), r.state),
   }));
   res.end(
     renderStatusPage(selected, {

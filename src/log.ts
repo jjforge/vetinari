@@ -1,13 +1,29 @@
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 import type { OrchestratorEvent } from "./event-log.ts";
 
-let logFile = ".vetinari.local/logs/orchestrator.jsonl";
+/**
+ * The log target before an entrypoint sets a real one — an isolated per-process
+ * temp file, NEVER a real project path. A relative `.vetinari.local/…` default was
+ * a footgun: any `log()` before `setLogFile` — every test that emits an event
+ * (e.g. `park()`) without redirecting first — appended to the real
+ * `.vetinari.local/logs/orchestrator.jsonl` of whatever cwd it ran in, polluting a
+ * developer's live dashboard with fixture events (#154). Production entrypoints
+ * (cli.mts) still call `setLogFile(cfg.logFile)` explicitly to point at the real log.
+ */
+export const defaultLogFile = (): string =>
+  join(tmpdir(), `vetinari-unset-${process.pid}`, "orchestrator.jsonl");
+
+let logFile = defaultLogFile();
 
 export function setLogFile(path: string) {
   logFile = path;
   mkdirSync(dirname(logFile), { recursive: true });
 }
+
+/** The current log target — for tests and introspection. */
+export const logFilePath = (): string => logFile;
 
 /** The narrowed kinds the dashboard reads back (`event-log.ts`); their emit sites are typed. */
 type NarrowedKind = OrchestratorEvent["event"];

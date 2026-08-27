@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { log, setLogFile } from "./log.ts";
+import { defaultLogFile, log, logFilePath, setLogFile } from "./log.ts";
 
 /**
  * Compile-time contract for `log()`'s producer overloads. These calls are never run — they exist
@@ -28,6 +28,19 @@ function _typeContract() {
   log("gate-result", { cmd: "x", exitCode: 1, seconds: 2, outFile: "y" });
 }
 void _typeContract;
+
+test("the default log target is an isolated temp path, never a project's real log (#154)", () => {
+  // The footgun: a relative `.vetinari.local/logs/orchestrator.jsonl` default meant
+  // any log()/park() before setLogFile — every test emitting an event without
+  // redirecting first — appended to the REAL project log of whatever cwd it ran in,
+  // polluting a developer's live dashboard with fixture events. The default must be
+  // isolated so an un-configured log() can never touch a real project log.
+  const def = defaultLogFile();
+  assert.ok(def.startsWith(tmpdir()), `default must be under tmpdir, got ${def}`);
+  assert.ok(!def.includes(".vetinari.local"), `default must not target a real project log, got ${def}`);
+  // Before any setLogFile in this process, the live target IS that safe default.
+  assert.equal(logFilePath(), def);
+});
 
 test("log() appends the event as one JSON line carrying its data", () => {
   const file = join(mkdtempSync(join(tmpdir(), "log-")), "orchestrator.jsonl");

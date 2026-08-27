@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import type { ResolvedConfig } from "./config.ts";
-import { log } from "./log.ts";
+import type { Logger } from "./log.ts";
 import { runGates } from "./gate.ts";
 import { agentFor, makeSandbox } from "./sandbox.ts";
 import { clearParked, enqueueOutbound, park } from "./state.ts";
@@ -11,11 +11,11 @@ import { HARVEST_PROMPT, parseFindings, reportFindings } from "./findings.ts";
  * if it cannot be determined (e.g. git errors) — callers must not treat null as
  * zero, or a transient git failure would swallow a real green.
  */
-function commitsAhead(base: string, branch: string): number | null {
+function commitsAhead(base: string, branch: string, log: Logger): number | null {
   try {
     return Number(execFileSync("git", ["rev-list", "--count", `${base}..${branch}`], { encoding: "utf8" }).trim());
   } catch (e: any) {
-    log("commits-ahead-failed", { base, branch, error: String(e?.message ?? e) });
+    log.log("commits-ahead-failed", { base, branch, error: String(e?.message ?? e) });
     return null;
   }
 }
@@ -78,13 +78,13 @@ async function harvestFindings(cfg: ResolvedConfig, sbx: any, sessionId: string 
   try {
     const hr = await sbx.run({ ...common, maxIterations: 1, resumeSession: sessionId, prompt: HARVEST_PROMPT });
     const findings = parseFindings(hr.stdout ?? "");
-    log("findings", { taskId, count: findings.length });
+    cfg.log.log("findings", { taskId, count: findings.length });
     if (!findings.length) return;
 
     const results = await reportFindings(cfg.reportFinding, findings, { taskId, project: cfg.project });
     for (const r of results) {
-      if (r.error) log("finding-report-failed", { taskId, summary: r.finding.summary, error: r.error });
-      else log("finding-filed", { taskId, summary: r.finding.summary, url: r.url });
+      if (r.error) cfg.log.log("finding-report-failed", { taskId, summary: r.finding.summary, error: r.error });
+      else cfg.log.log("finding-filed", { taskId, summary: r.finding.summary, url: r.url });
     }
     const filed = results.filter((r) => !r.error).length;
     if (filed)
@@ -93,7 +93,7 @@ async function harvestFindings(cfg: ResolvedConfig, sbx: any, sessionId: string 
         text: `🔎 ${cfg.project} ${taskId}: filed ${filed} incidental finding(s)${filed !== results.length ? ` (${results.length - filed} failed — see log)` : ""}.`,
       });
   } catch (e: any) {
-    log("harvest-failed", { taskId, error: String(e?.message ?? e) });
+    cfg.log.log("harvest-failed", { taskId, error: String(e?.message ?? e) });
   }
 }
 
@@ -122,7 +122,7 @@ export async function runLoop(cfg: ResolvedConfig, taskId: string, entry?: Resum
 
       for (let turn = 0; turn < cfg.maxTurns; turn++) {
         const sessionId = r.iterations.at(-1)?.sessionId;
-        log("turn", { taskId, turn, signal: r.completionSignal, sessionId, usage: usageOf(r), commits: r.commits?.length ?? 0, summary: extractTurnSummary(r.stdout ?? "") ?? "" });
+        cfg.log.log("turn", { taskId, turn, signal: r.completionSignal, sessionId, usage: usageOf(r), commits: r.commits?.length ?? 0, summary: extractTurnSummary(r.stdout ?? "") ?? "" });
 
         if (r.completionSignal === BLOCKED) {
           await park(cfg, { taskId, reason: "blocked", sessionId, branch: sbx.branch, question: extractQuestion(r.stdout ?? "") });
@@ -136,9 +136,9 @@ export async function runLoop(cfg: ResolvedConfig, taskId: string, entry?: Resum
           // a branch it never advanced. Green must mean "the gate passed on a
           // real change" — require a commit beyond the base. null (git couldn't
           // tell) is NOT zero, so a transient failure never falsely parks.
-          const ahead = commitsAhead(cfg.baseBranch, sbx.branch);
+          const ahead = commitsAhead(cfg.baseBranch, sbx.branch, cfg.log);
           if (ahead === 0) {
-            log("empty-green", { taskId, branch: sbx.branch });
+            cfg.log.log("empty-green", { taskId, branch: sbx.branch });
             await park(cfg, {
               taskId,
               reason: "no-commit",
@@ -148,7 +148,7 @@ export async function runLoop(cfg: ResolvedConfig, taskId: string, entry?: Resum
             });
             return "parked";
           }
-          log("green", { taskId, branch: sbx.branch, commits: (r.commits ?? []).map((c: any) => c.sha) });
+          cfg.log.log("green", { taskId, branch: sbx.branch, commits: (r.commits ?? []).map((c: any) => c.sha) });
           console.log(`\n*** GREEN — commits on ${sbx.branch}\n`);
           enqueueOutbound(cfg, {
             category: "success",
@@ -189,6 +189,6 @@ export async function runLoop(cfg: ResolvedConfig, taskId: string, entry?: Resum
     }
   } finally {
     const closed = await sbx.close();
-    if (closed?.preservedWorktreePath) log("worktree-preserved", { taskId, path: closed.preservedWorktreePath });
+    if (closed?.preservedWorktreePath) cfg.log.log("worktree-preserved", { taskId, path: closed.preservedWorktreePath });
   }
 }

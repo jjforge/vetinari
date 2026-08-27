@@ -6,13 +6,14 @@ import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import { archiveRun, hasUnarchivedRun, shouldArchiveLeftover } from "./archive.ts";
 import { enqueueOutbound, listOutbox, markOutboundSent, outboxDirOf } from "./state.ts";
+import { memoryLogger } from "./log.ts";
 
 let counter = 0;
 const cfgFor = (): ResolvedConfig => {
   const dir = join(tmpdir(), `vetinari-archive-${Date.now()}-${counter++}`);
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
-  return { project: "demo", stateDir: dir, logFile: join(dir, "logs", "orchestrator.jsonl"), parkedDir: join(dir, "parked") } as ResolvedConfig;
+  return { project: "demo", stateDir: dir, logFile: join(dir, "logs", "orchestrator.jsonl"), parkedDir: join(dir, "parked"), log: memoryLogger() } as unknown as ResolvedConfig;
 };
 
 test("archiveRun moves the log aside, resets it, and clears parked records", () => {

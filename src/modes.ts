@@ -2,7 +2,6 @@ import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import type { MessageCategory, ResolvedConfig } from "./config.ts";
 import type { CampaignStartEvent, QueueStartEvent } from "./event-log.ts";
-import { log } from "./log.ts";
 import { runGates } from "./gate.ts";
 import { makeSandbox } from "./sandbox.ts";
 import {
@@ -113,7 +112,7 @@ export async function baseline(cfg: ResolvedConfig) {
   try {
     if (cfg.toolchainProbe) {
       const probe = await sbx.exec(cfg.toolchainProbe);
-      log("toolchain", {
+      cfg.log.log("toolchain", {
         exitCode: probe.exitCode,
         out: (probe.stdout ?? "").trim(),
       });
@@ -121,7 +120,7 @@ export async function baseline(cfg: ResolvedConfig) {
         throw new Error(`toolchain probe failed: ${probe.stderr}`);
     }
     const { green, report } = await runGates(cfg, sbx, { all: true });
-    log("baseline", { green });
+    cfg.log.log("baseline", { green });
     if (!green) console.log(report);
     return green;
   } finally {
@@ -174,7 +173,7 @@ export async function build(
   deps: BuildDeps = defaultBuildDeps,
 ): Promise<boolean> {
   const code = await deps.buildImage(cfg.image, DOCKERFILE);
-  log("build", { image: cfg.image, dockerfile: DOCKERFILE, exitCode: code });
+  cfg.log.log("build", { image: cfg.image, dockerfile: DOCKERFILE, exitCode: code });
   if (code !== 0) return false;
   if (!opts.baseline) return true;
   return deps.baseline(cfg);
@@ -191,11 +190,11 @@ export async function build(
  * useful; the operator is simply told parks won't ping.
  */
 export function warnIfTelegramUnconfigured(
-  cfg: Pick<ResolvedConfig, "project" | "stateDir">,
+  cfg: Pick<ResolvedConfig, "project" | "stateDir" | "log">,
 ): void {
   const baseLocation = resolve(process.cwd(), cfg.stateDir);
   if (tgConnForBaseLocation(baseLocation)) return;
-  log("telegram-unconfigured", { project: cfg.project, baseLocation });
+  cfg.log.log("telegram-unconfigured", { project: cfg.project, baseLocation });
   console.error(
     `⚠ ${cfg.project} has no Telegram connection — parked questions will NOT be announced (no VETINARI_TELEGRAM_* in ${hostSecretsPath(baseLocation)})`,
   );
@@ -233,7 +232,7 @@ export async function queue(
   };
   if (startTitles && Object.keys(startTitles).length)
     startLog.titles = startTitles;
-  log("queue-start", startLog);
+  cfg.log.log("queue-start", startLog);
   enqueueOutbound(cfg, {
     category: "progress",
     event: "queue-start",
@@ -263,13 +262,13 @@ export async function queue(
         ) {
           const next = pending.shift()!;
           running++;
-          log("queue-spawn", { taskId: next, running, left: pending.length });
+          cfg.log.log("queue-spawn", { taskId: next, running, left: pending.length });
           selfSpawn(["run", next]).on("exit", (code) => {
             running--;
             releaseSlot(host.configDir);
             outcomes[next] =
               code === 0 ? "green" : code === 2 ? "parked" : `error(${code})`;
-            log("queue-slot-freed", { taskId: next, outcome: outcomes[next] });
+            cfg.log.log("queue-slot-freed", { taskId: next, outcome: outcomes[next] });
             if (pending.length) fill();
             else if (running === 0) {
               stopPoll();
@@ -293,7 +292,7 @@ export async function queue(
   }
 
   const summary = taskIds.map((i) => `${i}: ${outcomes[i] ?? "?"}`).join("\n");
-  log("queue-done", { outcomes });
+  cfg.log.log("queue-done", { outcomes });
   enqueueOutbound(cfg, {
     category: "progress",
     event: "queue-done",
@@ -317,7 +316,7 @@ export async function queue(
  * are excluded by construction.
  */
 export async function markMergedIssues(
-  cfg: Pick<ResolvedConfig, "onIssueMerged">,
+  cfg: Pick<ResolvedConfig, "onIssueMerged" | "log">,
   merged: string[],
 ): Promise<void> {
   if (!cfg.onIssueMerged) return;
@@ -325,7 +324,7 @@ export async function markMergedIssues(
     try {
       await cfg.onIssueMerged(taskId);
     } catch (error) {
-      log("issue-merged-hook-failed", {
+      cfg.log.log("issue-merged-hook-failed", {
         taskId,
         error: String((error as any)?.message ?? error),
       });
@@ -471,7 +470,7 @@ export async function campaign(
     titles = Object.fromEntries(reduced.titles);
     index = resumeIndex(reduced);
     if (index >= reduced.waves.length) {
-      log("campaign-resume", { fromIndex: index, waves: reduced.waves.length, nothingLeft: true });
+      cfg.log.log("campaign-resume", { fromIndex: index, waves: reduced.waves.length, nothingLeft: true });
       enqueueOutbound(cfg, {
         category: "progress",
         event: "campaign-resume",
@@ -480,7 +479,7 @@ export async function campaign(
       console.log("campaign --resume: nothing left to run — all waves already merged.");
       return true;
     }
-    log("campaign-resume", { fromIndex: index, waves: reduced.waves.length });
+    cfg.log.log("campaign-resume", { fromIndex: index, waves: reduced.waves.length });
     enqueueOutbound(cfg, {
       category: "progress",
       event: "campaign-resume",
@@ -500,7 +499,7 @@ export async function campaign(
     };
     if (name) startEvent.name = name;
     if (Object.keys(titles).length) startEvent.titles = titles;
-    log("campaign-start", startEvent);
+    cfg.log.log("campaign-start", startEvent);
     enqueueOutbound(cfg, {
       category: "progress",
       event: "campaign-start",
@@ -517,7 +516,7 @@ export async function campaign(
     if (index >= waves.length) break;
     const tasks = waves[index];
     const total = waves.length;
-    log("campaign-batch", { index, tasks });
+    cfg.log.log("campaign-batch", { index, tasks });
     enqueueOutbound(cfg, {
       category: "progress",
       event: "wave-start",
@@ -547,7 +546,7 @@ export async function campaign(
     // per-task fragments instead of editing the shared changelog, so co-wave
     // branches never conflict on it; the orchestrator collects at merge. A halted
     // wave (handled above) rolls back and leaves its fragments for the retry.
-    const collected = collectWaveChangelog(index);
+    const collected = collectWaveChangelog(index, cfg.log);
     if (collected.committed)
       console.log(
         `batch ${index + 1}/${total}: collected changelog fragments — ${collected.collected.join(", ")}`,
@@ -568,7 +567,7 @@ export async function campaign(
     const qNote = quarantined.length
       ? ` — quarantined on merge conflict (kept for you): ${quarantined.join(", ")}`
       : "";
-    log("campaign-batch-done", { index, merged, held, clearedParked: held, quarantined });
+    cfg.log.log("campaign-batch-done", { index, merged, held, clearedParked: held, quarantined });
     enqueueOutbound(cfg, {
       category: "success",
       event: "wave-merged",
@@ -595,7 +594,7 @@ export async function campaign(
           // run on. The quarantined issue itself (banked green) is kept; only its
           // unstarted dependents leave the plan.
           for (const impact of orphaning)
-            log("carve", { target: impact.target, removed: impact.removed, dropped: impact.dropped });
+            cfg.log.log("carve", { target: impact.target, removed: impact.removed, dropped: impact.dropped });
           enqueueOutbound(cfg, autoCarveNotice(cfg.project, index + 1, orphaning));
           console.log(
             `batch ${index + 1}/${total}: --auto-carve pruned ${orphaning.map((i) => `#${i.target}→${i.dropped.map((d) => `#${d}`).join(",")}`).join("; ")} and continued.`,
@@ -614,7 +613,7 @@ export async function campaign(
     }
   }
 
-  log("campaign-done", { batches: index });
+  cfg.log.log("campaign-done", { batches: index });
   enqueueOutbound(cfg, {
     category: "success",
     event: "campaign-complete",

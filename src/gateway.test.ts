@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { register } from "./registry.ts";
 import { enqueueOutbound, listOutboxIn, outboxDirOf, type ParkedRecord } from "./state.ts";
+import { memoryLogger } from "./log.ts";
 import type { TgConn } from "./telegram.ts";
 import {
   drainOutbox,
@@ -756,10 +757,10 @@ const recordingSend = () => {
 
 test("drainOutbox routes each record to the destination its category resolves and marks it sent once", async () => {
   const base = outboxBase();
-  enqueueOutbound({ stateDir: base }, { category: "success", event: "green", text: "GREEN on 26" });
-  enqueueOutbound({ stateDir: base }, { category: "failure", event: "halt", text: "campaign HALTED" });
-  enqueueOutbound({ stateDir: base }, { category: "progress", event: "carve", text: "carved #640" });
-  enqueueOutbound({ stateDir: base }, { category: "progress", event: "wave-start", text: "batch 1" });
+  enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "success", event: "green", text: "GREEN on 26" });
+  enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "failure", event: "halt", text: "campaign HALTED" });
+  enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "progress", event: "carve", text: "carved #640" });
+  enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "progress", event: "wave-start", text: "batch 1" });
 
   const { sends, send } = recordingSend();
   await drainOutbox(routed(base), send);
@@ -784,7 +785,7 @@ test("drainOutbox routes each record to the destination its category resolves an
 
 test("drainOutbox is idempotent — a second drain re-sends nothing", async () => {
   const base = outboxBase();
-  enqueueOutbound({ stateDir: base }, { category: "success", event: "green", text: "GREEN" });
+  enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "success", event: "green", text: "GREEN" });
 
   const first = recordingSend();
   await drainOutbox(routed(base), first.send);
@@ -798,7 +799,7 @@ test("drainOutbox is idempotent — a second drain re-sends nothing", async () =
 
 test("drainOutbox falls back to the project's default connection when no notify map routes it", async () => {
   const base = outboxBase();
-  enqueueOutbound({ stateDir: base }, { category: "progress", event: "queue-start", text: "queue up" });
+  enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "progress", event: "queue-start", text: "queue up" });
 
   const { sends, send } = recordingSend();
   await drainOutbox(routed(base, { notify: undefined, destinations: undefined }), send);
@@ -812,7 +813,7 @@ test("drainOutbox falls back to the project's default connection when no notify 
 
 test("drainOutbox reports the default destination — never undefined — when no notify map routes a delivered record", async () => {
   const base = outboxBase();
-  enqueueOutbound({ stateDir: base }, { category: "progress", event: "queue-start", text: "queue up" });
+  enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "progress", event: "queue-start", text: "queue up" });
 
   const { send } = recordingSend();
   const results = await drainOutbox(routed(base, { notify: undefined, destinations: undefined }), send);
@@ -831,7 +832,7 @@ test("drainOutbox reports the default destination — never undefined — when n
 
 test("drainOutbox keeps the named destination on a record its notify map routes", async () => {
   const base = outboxBase();
-  enqueueOutbound({ stateDir: base }, { category: "failure", event: "halt", text: "campaign HALTED" });
+  enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "failure", event: "halt", text: "campaign HALTED" });
 
   const { send } = recordingSend();
   const results = await drainOutbox(routed(base), send); // notify maps failure → alerts
@@ -842,7 +843,7 @@ test("drainOutbox keeps the named destination on a record its notify map routes"
 
 test("drainOutbox skips a project with no connection, leaving its records unsent for a later tick", async () => {
   const base = outboxBase();
-  enqueueOutbound({ stateDir: base }, { category: "success", event: "green", text: "GREEN" });
+  enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "success", event: "green", text: "GREEN" });
 
   const { sends, send } = recordingSend();
   await drainOutbox(routed(base, { conn: undefined }), send);
@@ -853,7 +854,7 @@ test("drainOutbox skips a project with no connection, leaving its records unsent
 
 test("drainOutbox leaves a record unsent when the send fails, so the next tick retries it", async () => {
   const base = outboxBase();
-  enqueueOutbound({ stateDir: base }, { category: "success", event: "green", text: "GREEN" });
+  enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "success", event: "green", text: "GREEN" });
 
   const failingSend = async () => undefined; // Telegram rejected — no message id
   await drainOutbox(routed(base), failingSend);

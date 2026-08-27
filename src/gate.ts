@@ -1,5 +1,5 @@
 import type { ResolvedConfig } from "./config.ts";
-import { log, tail, writeGateLog } from "./log.ts";
+import { tail, writeGateLog } from "./log.ts";
 
 /**
  * The verification the ORCHESTRATOR owns.
@@ -18,13 +18,13 @@ export async function runGates(cfg: ResolvedConfig, sbx: any, opts: { all?: bool
     const files = changed.stdout ?? "";
     selected = cfg.gates.filter((g) => !g.when || g.when.test(files));
   }
-  log("gate", { cmds: selected.map((g) => g.label ?? g.cmd), skipped: cfg.gates.length - selected.length });
+  cfg.log.log("gate", { cmds: selected.map((g) => g.label ?? g.cmd), skipped: cfg.gates.length - selected.length });
 
   for (const g of selected) {
     const t0 = Date.now();
     const res = await sbx.exec(g.cmd);
     const outFile = writeGateLog(cfg.stateDir, g.cmd, res);
-    log("gate-result", { cmd: g.cmd, exitCode: res.exitCode, seconds: Math.round((Date.now() - t0) / 1000), outFile });
+    cfg.log.log("gate-result", { cmd: g.cmd, exitCode: res.exitCode, seconds: Math.round((Date.now() - t0) / 1000), outFile });
     if (res.exitCode !== 0) {
       return { green: false, report: `$ ${g.cmd}\n${tail(res.stdout ?? "", 200)}\n${tail(res.stderr ?? "", 100)}` };
     }

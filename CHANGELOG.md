@@ -18,6 +18,12 @@ and each entry opens with a tag saying who it reaches:
 `**Breaking changes:**` sorts first in a milestone and names the contract it broke.
 Within a milestone each bold section label appears at most once.
 
+### Collected changes — August 27, 2026
+
+**Improvements:**
+- [ops] Campaign wave integration now wave-parks instead of halting when the merged base gates red (every issue green alone, the combined base red together): the wave's greens stay merged on the base — no more `reset --hard` un-merging the wave — an attention notification is sent, and the campaign pauses for a human to fix forward or carve a suspect. The machine names no culprit, because none is knowable. A red base folds no changelog fragments and applies no `pending-verify` labels for that wave — those wait until it is resolved green (#143).
+- [api] `integrateGreens` returns `parked` (replacing `halt`) on a red merged base, and a new `wave-parked` event records the greens left merged and the tail of the gate report (#143).
+
 ### Multi-wave campaigns run every wave again — August 26, 2026
 
 **Bug fixes:**

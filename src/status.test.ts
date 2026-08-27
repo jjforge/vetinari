@@ -59,6 +59,7 @@ import {
 import type { CampaignStatus, OrchestratorEvent } from "./status.ts";
 import type { AddressInfo } from "node:net";
 import { register, type ProjectPointer } from "./registry.ts";
+import { memoryLogger } from "./log.ts";
 
 const cfgFor = (dir: string): ResolvedConfig =>
   ({
@@ -844,6 +845,23 @@ test("buildAllStatus builds one status per live project and skips a stale one", 
   assert.deepEqual(
     statuses[1].waves[0].issues.map((i) => i.issueNumber),
     ["201"],
+  );
+});
+
+test("buildAllStatus routes a stale-registration skip to the injected logger, not the process-global", () => {
+  const base = join(tmpdir(), `vetinari-all-status-log-${Date.now()}`);
+  const logger = memoryLogger();
+
+  buildAllStatus(
+    [pointerFor("ghost", join(base, "gone"))],
+    logger,
+  );
+
+  // The skip diagnostic is captured by the host logger the reader was handed —
+  // it no longer writes to the process-global event log.
+  assert.deepEqual(
+    logger.events.map((e) => [e.event, (e as { project?: string }).project]),
+    [["status-project-skipped", "ghost"]],
   );
 });
 

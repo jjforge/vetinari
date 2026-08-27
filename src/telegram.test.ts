@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { tgEnvConn, tgSend, tgPoll } from "./telegram.ts";
+import { memoryLogger } from "./log.ts";
 
 const TG_ENV = ["VETINARI_TELEGRAM_BOT_TOKEN", "VETINARI_TELEGRAM_CHAT_ID", "VETINARI_TELEGRAM_THREAD_ID"];
 
@@ -100,6 +101,21 @@ test("tgSend addresses the explicit connection, not process env", async () => {
   assert.ok(url.includes("botCONN_TOKEN"), `url used conn token: ${url}`);
   assert.equal(body.chat_id, "CONN_CHAT");
   assert.equal(body.message_thread_id, 3);
+});
+
+test("tgSend routes a send failure to the injected logger, not the process-global", async () => {
+  const logger = memoryLogger();
+  // Telegram's not-ok envelope: the send fails and the diagnostic must be captured.
+  const failing = (async () =>
+    ({ json: async () => ({ ok: false }), status: 400 }) as unknown as Response) as typeof fetch;
+  await withFetch(failing, async () => {
+    const id = await tgSend({ token: "t", chat: "c" }, "hello", logger);
+    assert.equal(id, undefined);
+  });
+  assert.deepEqual(
+    logger.events.map((e) => [e.event, (e as { status?: unknown }).status]),
+    [["telegram-send-failed", 400]],
+  );
 });
 
 test("tgPoll keeps only messages from the connection's chat", async () => {

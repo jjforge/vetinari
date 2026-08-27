@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { log } from "./log.ts";
+import { hostLogger, type Logger } from "./log.ts";
 import { type ProjectPointer } from "./registry.ts";
 import { listParked, parkedDirOf, type ParkedRecord } from "./state.ts";
 import { applyCarve } from "./carve.ts";
@@ -638,7 +638,7 @@ const archiveDirOf = (baseLocation: string) => join(baseLocation, "logs", "archi
  * archive — one no run can be reconstructed from — is skipped with a log line,
  * never fatal: one bad file must not take the whole list down.
  */
-export function listArchivedRuns(baseLocation: string): ArchivedRun[] {
+export function listArchivedRuns(baseLocation: string, logger: Logger = hostLogger()): ArchivedRun[] {
   const dir = archiveDirOf(baseLocation);
   if (!existsSync(dir)) return [];
   const runs: ArchivedRun[] = [];
@@ -649,7 +649,7 @@ export function listArchivedRuns(baseLocation: string): ArchivedRun[] {
     const events = readEventLog({ logFile: file });
     const { waves, layout, name: runName } = reduceCampaign(events);
     if (!waves.length) {
-      log("status-archive-skipped", { file });
+      logger.log("status-archive-skipped", { file });
       continue;
     }
     runs.push({
@@ -799,11 +799,11 @@ const statusConfigFromPointer = (pointer: ProjectPointer): ResolvedConfig =>
  * 0002). Uses the pure `buildStatus`, so issue names are not resolved here (that
  * needs the project's own `fetchTask`); the aggregated view is names-free.
  */
-export function buildAllStatus(pointers: ProjectPointer[]): CampaignStatus[] {
+export function buildAllStatus(pointers: ProjectPointer[], logger: Logger = hostLogger()): CampaignStatus[] {
   const statuses: CampaignStatus[] = [];
   for (const pointer of pointers) {
     if (!existsSync(pointer.baseLocation)) {
-      log("status-project-skipped", { project: pointer.project, baseLocation: pointer.baseLocation });
+      logger.log("status-project-skipped", { project: pointer.project, baseLocation: pointer.baseLocation });
       continue;
     }
     statuses.push(buildStatus(statusConfigFromPointer(pointer)));
@@ -850,25 +850,25 @@ const FEED_ARCHIVE_MARGIN_MS = 6 * 60 * 60 * 1000;
  * row (`formatFeedEvent` returns ""), so the feed reads as an operator log, not a
  * raw event dump.
  */
-export function buildFeed(pointers: ProjectPointer[], now: Date = new Date()): FeedEntry[] {
+export function buildFeed(pointers: ProjectPointer[], now: Date = new Date(), logger: Logger = hostLogger()): FeedEntry[] {
   const cutoffMs = now.getTime() - FEED_WINDOW_MS;
   const archiveFloorMs = cutoffMs - FEED_ARCHIVE_MARGIN_MS;
   const entries: FeedEntry[] = [];
   for (const pointer of pointers) {
     if (!existsSync(pointer.baseLocation)) {
-      log("status-project-skipped", { project: pointer.project, baseLocation: pointer.baseLocation });
+      logger.log("status-project-skipped", { project: pointer.project, baseLocation: pointer.baseLocation });
       continue;
     }
     // The runs whose events might fall in the window: the live log, plus each
     // archived run whose start is recent enough to still carry in-window events.
     const runs: OrchestratorEvent[][] = [readEventLog(statusConfigFromPointer(pointer))];
-    for (const run of listArchivedRuns(pointer.baseLocation)) {
+    for (const run of listArchivedRuns(pointer.baseLocation, logger)) {
       const startedMs = run.startedAt ? Date.parse(run.startedAt) : NaN;
       if (Number.isNaN(startedMs) || startedMs < archiveFloorMs) continue;
       try {
         runs.push(readEventLog({ logFile: run.file }));
       } catch (error) {
-        log("status-feed-archive-skipped", { file: run.file, error: String(error) });
+        logger.log("status-feed-archive-skipped", { file: run.file, error: String(error) });
       }
     }
     for (const events of runs) {
@@ -1002,9 +1002,9 @@ const sameLocalDay = (iso: string, day: Date) => {
  * local day (see `sameLocalDay`), so a merge just past midnight UTC still counts
  * for the local day the operator is actually in (#97).
  */
-const mergedTodayForProject = (baseLocation: string, liveEvents: OrchestratorEvent[], now: Date): number => {
+const mergedTodayForProject = (baseLocation: string, liveEvents: OrchestratorEvent[], now: Date, logger: Logger): number => {
   const merged = new Set<string>();
-  const runs = [liveEvents, ...listArchivedRuns(baseLocation).map((r) => readEventLog({ logFile: r.file }))];
+  const runs = [liveEvents, ...listArchivedRuns(baseLocation, logger).map((r) => readEventLog({ logFile: r.file }))];
   for (const runEvents of runs) {
     try {
       const { mergedAt, outcomes } = reduceCampaign(runEvents);
@@ -1012,18 +1012,18 @@ const mergedTodayForProject = (baseLocation: string, liveEvents: OrchestratorEve
         if (outcomes.get(issueNumber) === "completed" && sameLocalDay(ts, now)) merged.add(issueNumber);
       }
     } catch (error) {
-      log("status-merged-today-skipped", { baseLocation, error: String(error) });
+      logger.log("status-merged-today-skipped", { baseLocation, error: String(error) });
     }
   }
   return merged.size;
 };
 
-const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, events: OrchestratorEvent[]): ProjectCard => {
+const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, events: OrchestratorEvent[], logger: Logger): ProjectCard => {
   // The card heading shows owner/name, read live off the checkout's git remote;
   // undefined for a project with none (the demo), so the display falls back to the key.
   const repo = repoForProject(pointer.projectRoot);
   if (!status.waves.length) {
-    const [latest] = listArchivedRuns(pointer.baseLocation);
+    const [latest] = listArchivedRuns(pointer.baseLocation, logger);
     // An idle card's numbers come from the last archived run, not the emptied live
     // log: reconstruct it and read its real merged % so a completed run no longer
     // reads 0% (#70). `waves` is already the pruned plan (carved issues dropped), so
@@ -1078,13 +1078,13 @@ const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, event
  * merged-today counts each project's issues whose reconstructed merge stamp
  * (`reduceCampaign`'s `mergedAt`) falls on `now`'s local day.
  */
-export function buildLanding(pointers: ProjectPointer[], now: Date = new Date()): LandingView {
+export function buildLanding(pointers: ProjectPointer[], now: Date = new Date(), logger: Logger = hostLogger()): LandingView {
   const projects: ProjectCard[] = [];
   const parked: ParkedQuestion[] = [];
   let mergedToday = 0;
   for (const pointer of pointers) {
     if (!existsSync(pointer.baseLocation)) {
-      log("status-project-skipped", { project: pointer.project, baseLocation: pointer.baseLocation });
+      logger.log("status-project-skipped", { project: pointer.project, baseLocation: pointer.baseLocation });
       continue;
     }
     const cfg = statusConfigFromPointer(pointer);
@@ -1094,13 +1094,13 @@ export function buildLanding(pointers: ProjectPointer[], now: Date = new Date())
     // — the live run plus every archived run, deduped per issue — so a project that
     // ran several campaigns today counts them all, not just its latest run (#97).
     // A completed run's merges live in its archive, not the cleared live log (#70).
-    mergedToday += mergedTodayForProject(pointer.baseLocation, events, now);
+    mergedToday += mergedTodayForProject(pointer.baseLocation, events, now, logger);
     // The same active parked records the project's campaign view shows, tagged
     // with their repo so the landing can list them cross-repo.
     for (const p of status.parked) {
       parked.push({ issueNumber: p.issueNumber, project: status.project, question: p.description, parkedAt: p.parkedAt });
     }
-    projects.push(buildProjectCard(pointer, status, events));
+    projects.push(buildProjectCard(pointer, status, events, logger));
   }
   // Oldest first — the question that has waited longest surfaces at the top.
   parked.sort((a, b) => a.parkedAt.localeCompare(b.parkedAt));

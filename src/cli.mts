@@ -7,7 +7,7 @@ import {
   formatMilestoneDate,
   FRAGMENT_DIR,
 } from "./changelog.ts";
-import { log, setLogFile } from "./log.ts";
+import { hostLogger } from "./log.ts";
 import { answerPromptFor, runLoop } from "./loop.ts";
 import {
   baseline,
@@ -513,12 +513,16 @@ if (mode === "tidy") {
 }
 
 const cfg = await loadConfig(cfgPath);
-setLogFile(cfg.logFile);
+
+// The host's own logger for the emitters that aren't scoped to this run — the
+// registry enrolment below and the host modes' readers. Run-family events go to
+// `cfg.log` (the project's real event log); the process-global is gone (ADR 0002).
+const hostLog = hostLogger();
 
 // Enroll (or refresh) this project's pointer with the gateway at the start of
 // every run, so a project registers itself with no manual step (ADR 0002).
 // Pointer-only and best-effort — never fatal to the run.
-autoRegister(cfg);
+autoRegister(cfg, process.cwd(), hostLog);
 
 // Resolve the host container ceiling once (ADR 0011): always in effect —
 // MAX_CONCURRENT_CONTAINERS (or the max-concurrent-containers file) when set, else
@@ -537,7 +541,7 @@ const hostBudget: HostBudget = {
 const archiveIfIdle = () => {
   if (listParked(cfg).length) return;
   const r = archiveRun(cfg);
-  log("archived", {
+  cfg.log.log("archived", {
     archivedLog: r.archivedLog ?? null,
     clearedParked: r.clearedParked,
     clearedOutbound: r.clearedOutbound,
@@ -715,7 +719,7 @@ switch (mode) {
       if (parkedToClear.length) clearParkedForTasks(cfg, parkedToClear);
       // Append the carve event — the running loop re-reads it at the next wave
       // boundary; `removed` is the closure so the fold replays the same rule.
-      log("carve", { target: tgt, removed, dropped });
+      cfg.log.log("carve", { target: tgt, removed, dropped });
       enqueueOutbound(cfg, {
         category: "progress",
         event: "carve",
@@ -847,7 +851,7 @@ switch (mode) {
     // Force a reset now, even with questions still parked — the manual escape
     // hatch, unlike the automatic archive that waits for an idle queue.
     const r = archiveRun(cfg);
-    log("archived", {
+    cfg.log.log("archived", {
       archivedLog: r.archivedLog ?? null,
       clearedParked: r.clearedParked,
       clearedOutbound: r.clearedOutbound,

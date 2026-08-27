@@ -3,13 +3,19 @@ import { dirname } from "node:path";
 import { listProjects } from "./registry.ts";
 import { appendedEvents, logFileOf, viewRelevantEvents } from "./dashboard-model.ts";
 import type { OrchestratorEvent } from "./event-log.ts";
-import { log } from "./log.ts";
+import { hostLogger } from "./log.ts";
 import type { RouteHandler } from "./dashboard-http.ts";
 
 /** The per-project SSE debounce window: view-relevant appends landing within it
  * coalesce into a single frame (~300ms — long enough to swallow an append burst,
  * short enough that a real state change still lands within a window). */
 const DEBOUNCE_MS = 300;
+
+/** This host route's own logger — a watcher failing to arm is a host-registry
+ * diagnostic (no per-project run scope), so it emits to the host log target, not
+ * the process-global. The `RouteHandler` signature is fixed, so it can't be
+ * handed one; it constructs its own, exactly as the other host readers default to. */
+const logger = hostLogger();
 
 /**
  * `GET /api/events` — the live update stream (ADR 0008). The server `fs.watch`es
@@ -99,7 +105,7 @@ export const handleEvents: RouteHandler = (req, res, url, deps) => {
     try {
       watchers.push(watch(logsDir, () => push(pointer.project, logFile)));
     } catch (e) {
-      log("dashboard-events-watch-failed", { project: pointer.project, error: String(e) });
+      logger.log("dashboard-events-watch-failed", { project: pointer.project, error: String(e) });
     }
   }
 

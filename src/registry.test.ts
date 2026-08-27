@@ -17,6 +17,7 @@ import {
   writeRouting,
   type ProjectPointer,
 } from "./registry.ts";
+import { memoryLogger } from "./log.ts";
 
 let counter = 0;
 const tmpConfigDir = () => {
@@ -195,6 +196,20 @@ test("readProjects skips a stale pointer and never throws on it", () => {
   assert.deepEqual(
     read.map((r) => r.pointer.project),
     ["live"],
+  );
+});
+
+test("readProjects routes a stale pointer's skip to the injected logger, not the process-global", () => {
+  const configDir = tmpConfigDir();
+  const logger = memoryLogger();
+  const staleBase = join(tmpdir(), `vetinari-gone-${Date.now()}-${counter++}`);
+  register(configDir, pointer({ project: "stale", baseLocation: staleBase }));
+
+  readProjects(configDir, logger);
+
+  assert.deepEqual(
+    logger.events.map((e) => [e.event, (e as { project?: string }).project]),
+    [["registry-stale", "stale"]],
   );
 });
 

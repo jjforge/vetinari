@@ -1,4 +1,4 @@
-import { log } from "./log.ts";
+import { hostLogger, type Logger } from "./log.ts";
 
 /**
  * An explicit bot connection: which bot to talk to, which chat, and (optionally)
@@ -28,7 +28,7 @@ const api = (conn: TgConn) => `https://api.telegram.org/bot${conn.token}`;
 export const tgConfigured = () => Boolean(tgEnvConn());
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export async function tgSend(conn: TgConn | undefined, text: string): Promise<number | undefined> {
+export async function tgSend(conn: TgConn | undefined, text: string, logger: Logger = hostLogger()): Promise<number | undefined> {
   if (!conn) return undefined;
   const body: Record<string, unknown> = { chat_id: conn.chat, text: text.slice(0, 3900) };
   if (conn.thread) body.message_thread_id = Number(conn.thread);
@@ -39,7 +39,7 @@ export async function tgSend(conn: TgConn | undefined, text: string): Promise<nu
   }).catch(() => null);
   const j: any = res ? await res.json().catch(() => null) : null;
   if (!j?.ok) {
-    log("telegram-send-failed", { status: res?.status ?? "network" });
+    logger.log("telegram-send-failed", { status: res?.status ?? "network" });
     return undefined;
   }
   return j.result.message_id as number;

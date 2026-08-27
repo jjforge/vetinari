@@ -1,10 +1,14 @@
 import { execFileSync } from "node:child_process";
+import { existsSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import { log } from "./log.ts";
 import { runGates } from "./gate.ts";
 import { makeSandbox } from "./sandbox.ts";
-import { applyCollect, formatMilestoneDate, FRAGMENT_DIR } from "./changelog.ts";
+import { applyCollect, foldFragments, formatMilestoneDate, FRAGMENT_DIR } from "./changelog.ts";
+import { listParkedIn } from "./state.ts";
+import { readEventLog } from "./event-log.ts";
+import { reduceCampaign } from "./dashboard-model.ts";
 
 /** Run git in the host project root, throwing its stderr on a non-zero exit. */
 const git = (args: string[]) => execFileSync("git", args, { encoding: "utf8" }).trim();
@@ -161,4 +165,219 @@ async function gateMergedBase(cfg: ResolvedConfig): Promise<{ green: boolean; re
     gitTry(["branch", "-D", `${cfg.branchPrefix}campaign-integrate`]);
     gitTry(["worktree", "prune"]);
   }
+}
+
+// ── tidy: reconcile drift that human-in-the-loop resolution leaks (ADR 0013) ──
+//
+// A manual fix-forward or by-hand merge is where the inline cleanup never runs:
+// changelog fragments for merged issues never fold, agent branches/worktrees never
+// GC, and parked records for now-resolved issues linger. `tidy` reconciles that,
+// dry-run by default. Its one load-bearing rule is that a branch dies only when it
+// is PROVABLY reachable from the base — never a branch with unmerged work, and never
+// a `quarantined`/`parked`/`wave-parked` issue (whose work must stay resumable).
+
+/** Strip a leading `#` so a logged/parked id (`#42`) matches a branch suffix (`42`). */
+const normalizeTidyId = (id: string) => id.replace(/^#/, "").trim();
+
+/** One agent branch present in the repo, with whether it is fully merged into the base. */
+export interface TidyBranch {
+  /** the task id — the `agent/<id>` branch's suffix after the prefix. */
+  id: string;
+  /** true when every commit on `agent/<id>` is already an ancestor of the base branch. */
+  reachable: boolean;
+}
+
+/**
+ * The reconcilable on-disk/tracker state of one project, gathered at the edge so
+ * `computeTidy` stays a pure decision. `parked`/`quarantined`/`waveParked` are the
+ * three states whose work must be preserved (ADR 0013).
+ */
+export interface TidySnapshot {
+  /** the `agent/<id>` branches present, each with its reachability from the base. */
+  branches: TidyBranch[];
+  /** the issue ids that still have a `changelog.d/<id>.md` fragment on disk. */
+  fragments: string[];
+  /** issue ids with a live parked record. */
+  parked: string[];
+  /** issue ids a merge conflict quarantined out of integration (event log). */
+  quarantined: string[];
+  /** issue ids whose wave a red merged base wave-parked (event log). */
+  waveParked: string[];
+}
+
+/** What `tidy` would fold, delete, and clear — the plan a dry-run prints and `--apply` acts on. */
+export interface TidyPlan {
+  /** issue ids whose orphaned fragment folds into `CHANGELOG.md` (merged, unprotected). */
+  fold: string[];
+  /** issue ids whose provably-merged, unprotected `agent/<id>` branch + worktree GC. */
+  deleteBranches: string[];
+  /** parked issue ids whose record is now stale (the issue merged) and is cleared. */
+  clearParked: string[];
+  /** merged issue ids being GC'd that carry no changelog fragment — warned, never invented. */
+  warnNoChangelog: string[];
+  /** present branches left untouched, each with why (unmerged / quarantined / parked / wave-parked). */
+  keep: { id: string; reason: "unmerged" | "quarantined" | "parked" | "wave-parked" }[];
+}
+
+/**
+ * Decide what to reconcile from a snapshot — pure, no I/O (the acceptance-critical
+ * seam). A branch is deleted ONLY when provably reachable from the base and not one
+ * of the preserved states; a fragment folds only when its issue is merged (branch
+ * reachable, or already gone) and unprotected; a parked record is cleared once its
+ * issue is merged, though its branch is still left for that run (a parked branch is
+ * never touched — a later run GCs it once the record is gone).
+ */
+export function computeTidy(snap: TidySnapshot): TidyPlan {
+  const present = new Set(snap.branches.map((b) => normalizeTidyId(b.id)));
+  const reachable = new Map(snap.branches.map((b) => [normalizeTidyId(b.id), b.reachable]));
+  const quarantined = new Set(snap.quarantined.map(normalizeTidyId));
+  const waveParked = new Set(snap.waveParked.map(normalizeTidyId));
+  const parked = new Set(snap.parked.map(normalizeTidyId));
+  const fragments = snap.fragments.map(normalizeTidyId);
+  const fragmentSet = new Set(fragments);
+  const protectedId = new Set([...quarantined, ...waveParked, ...parked]);
+
+  // Merged = the work is on the base: its branch is a reachable ancestor, or the
+  // branch is already gone (cleaned by hand) yet an artifact for it still lingers.
+  const isMerged = (id: string) => !present.has(id) || reachable.get(id) === true;
+
+  const deleteBranches = snap.branches
+    .map((b) => normalizeTidyId(b.id))
+    .filter((id) => reachable.get(id) === true && !protectedId.has(id));
+
+  const fold = fragments.filter((id) => isMerged(id) && !protectedId.has(id));
+  const clearParked = [...parked].filter(isMerged);
+  const warnNoChangelog = deleteBranches.filter((id) => !fragmentSet.has(id));
+
+  const deleteSet = new Set(deleteBranches);
+  const keep = snap.branches
+    .map((b) => normalizeTidyId(b.id))
+    .filter((id) => !deleteSet.has(id))
+    .map((id) => ({
+      id,
+      reason: quarantined.has(id)
+        ? ("quarantined" as const)
+        : waveParked.has(id)
+          ? ("wave-parked" as const)
+          : parked.has(id)
+            ? ("parked" as const)
+            : ("unmerged" as const),
+    }));
+
+  return { fold, deleteBranches, clearParked, warnNoChangelog, keep };
+}
+
+/** One project to reconcile — its root and the paths `scanTidy`/`applyTidy` read and write. */
+export interface TidyTarget {
+  /** the project name, for the report header. */
+  project: string;
+  /** the repo root git runs against (cwd for a single project, the pointer's root under `--all`). */
+  root: string;
+  /** the branch reachability is proven against. */
+  baseBranch: string;
+  /** the `agent/` prefix agent branches carry. */
+  branchPrefix: string;
+  /** absolute path to the project's parked-records directory. */
+  parkedDir: string;
+  /** absolute path to the project's orchestrator event log. */
+  logFile: string;
+  /** absolute path to the project's `changelog.d/` fragment directory. */
+  fragmentsDir: string;
+  /** absolute path to the project's `CHANGELOG.md`. */
+  changelogPath: string;
+}
+
+/** Every `agent/<id>` head present, paired with whether it is fully merged into the base. */
+function scanBranches(root: string, baseBranch: string, branchPrefix: string): TidyBranch[] {
+  const listed = gitTry(["-C", root, "for-each-ref", "--format=%(refname:short)", `refs/heads/${branchPrefix}*`]);
+  return listed.stdout
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((branch) => ({
+      id: branch.slice(branchPrefix.length),
+      // `merge-base --is-ancestor <branch> <base>` exits 0 iff every commit on the
+      // branch is already in the base — the provable-reachability rule (ADR 0013).
+      reachable: gitTry(["-C", root, "merge-base", "--is-ancestor", branch, baseBranch]).code === 0,
+    }));
+}
+
+/** Gather a project's reconcilable state — the edge that keeps `computeTidy` pure. */
+export function scanTidy(target: TidyTarget): TidySnapshot {
+  const reduced = reduceCampaign(readEventLog({ logFile: target.logFile }));
+  const waveParked = reduced.parkedWave >= 0 ? (reduced.waves[reduced.parkedWave] ?? []) : [];
+  return {
+    branches: scanBranches(target.root, target.baseBranch, target.branchPrefix),
+    fragments: existsSync(target.fragmentsDir)
+      ? readdirSync(target.fragmentsDir)
+          .filter((f) => f.endsWith(".md"))
+          .map((f) => f.slice(0, -".md".length))
+      : [],
+    parked: listParkedIn(target.parkedDir).map((r) => r.taskId),
+    quarantined: [...reduced.quarantined],
+    waveParked,
+  };
+}
+
+/** Whether a plan would change anything at all — the "nothing to do" gate. */
+export const tidyIsEmpty = (plan: TidyPlan): boolean =>
+  !plan.fold.length && !plan.deleteBranches.length && !plan.clearParked.length && !plan.warnNoChangelog.length;
+
+/** Render a plan as the human-readable report a dry-run prints and `--apply` echoes. */
+export function describeTidy(project: string, plan: TidyPlan): string {
+  if (tidyIsEmpty(plan) && !plan.keep.length) return `tidy ${project}: nothing to reconcile`;
+  const lines = [`tidy ${project}:`];
+  if (plan.fold.length) lines.push(`  fold changelog fragments: ${plan.fold.map((i) => `#${i}`).join(", ")}`);
+  if (plan.deleteBranches.length)
+    lines.push(`  delete merged branches (+ prune worktrees): ${plan.deleteBranches.map((i) => `agent/${i}`).join(", ")}`);
+  if (plan.clearParked.length) lines.push(`  clear stale parked records: ${plan.clearParked.map((i) => `#${i}`).join(", ")}`);
+  for (const id of plan.warnNoChangelog) lines.push(`  ⚠ #${id} merged with no changelog fragment — cannot invent one`);
+  for (const k of plan.keep) lines.push(`  keep agent/${k.id} (${k.reason})`);
+  return lines.join("\n");
+}
+
+/**
+ * Enact a plan against a real project: fold the chosen fragments into `CHANGELOG.md`,
+ * GC each provably-merged branch (removing its worktree first, then pruning), and
+ * clear the stale parked records. Only ever called on `--apply`; the changelog fold
+ * and fragment deletions are left uncommitted for the human to review, mirroring
+ * `changelog collect`.
+ */
+export function applyTidy(target: TidyTarget, plan: TidyPlan): void {
+  if (plan.fold.length) {
+    foldFragments(
+      {
+        fragmentsDir: target.fragmentsDir,
+        changelogPath: target.changelogPath,
+        today: formatMilestoneDate(new Date()),
+        title: "Collected changes",
+      },
+      plan.fold.map((id) => `${id}.md`),
+    );
+  }
+
+  for (const id of plan.deleteBranches) {
+    const branch = `${target.branchPrefix}${id}`;
+    removeWorktreeFor(target.root, branch);
+    gitTry(["-C", target.root, "branch", "-D", branch]);
+  }
+  if (plan.deleteBranches.length) gitTry(["-C", target.root, "worktree", "prune"]);
+
+  for (const id of plan.clearParked) rmSync(join(target.parkedDir, `${id}.json`), { force: true });
+}
+
+/** Remove a live worktree checked out on `branch`, so its branch ref can then be deleted. */
+function removeWorktreeFor(root: string, branch: string): void {
+  const porcelain = gitTry(["-C", root, "worktree", "list", "--porcelain"]).stdout;
+  // Blocks are separated by blank lines: `worktree <path>` … `branch refs/heads/<name>`.
+  let path: string | undefined;
+  for (const block of porcelain.split("\n\n")) {
+    const p = block.match(/^worktree (.+)$/m)?.[1];
+    const b = block.match(/^branch refs\/heads\/(.+)$/m)?.[1];
+    if (p && b === branch) {
+      path = p;
+      break;
+    }
+  }
+  if (path) gitTry(["-C", root, "worktree", "remove", "--force", path]);
 }

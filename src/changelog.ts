@@ -195,13 +195,16 @@ export interface CollectOptions {
 }
 
 /**
- * The CLI edge of `vetinari changelog collect`: read the wave's fragments, fold
- * them into `CHANGELOG.md`, write it, and delete the consumed fragments. A no-op
- * (empty `collected`, changelog untouched) when there are no fragments. Returns the
- * basenames it consumed.
+ * Fold a NAMED subset of the directory's fragments into `CHANGELOG.md`, write it,
+ * and delete only those consumed. `names` are fragment basenames (`147.md`); a name
+ * that matches no fragment is skipped. This is the selective core `tidy` folds
+ * with — it reconciles only the fragments whose issue is provably merged and leaves
+ * the rest (a still-parked/quarantined issue's fragment) on disk. A no-op (empty
+ * `collected`, changelog untouched) when nothing named matches.
  */
-export function applyCollect(opts: CollectOptions): { collected: string[] } {
-  const fragments = scanFragments(opts.fragmentsDir);
+export function foldFragments(opts: CollectOptions, names: string[]): { collected: string[] } {
+  const wanted = new Set(names);
+  const fragments = scanFragments(opts.fragmentsDir).filter((f) => wanted.has(f.name));
   if (!fragments.length) return { collected: [] };
 
   const sections = fragments.flatMap((f) => f.sections);
@@ -209,4 +212,15 @@ export function applyCollect(opts: CollectOptions): { collected: string[] } {
   writeFileSync(opts.changelogPath, updated);
   for (const f of fragments) unlinkSync(join(opts.fragmentsDir, f.name));
   return { collected: fragments.map((f) => f.name) };
+}
+
+/**
+ * The CLI edge of `vetinari changelog collect`: read the wave's fragments, fold
+ * them into `CHANGELOG.md`, write it, and delete the consumed fragments. A no-op
+ * (empty `collected`, changelog untouched) when there are no fragments. Returns the
+ * basenames it consumed. Folds every fragment present, unlike `foldFragments`'s
+ * selective reconcile.
+ */
+export function applyCollect(opts: CollectOptions): { collected: string[] } {
+  return foldFragments(opts, scanFragments(opts.fragmentsDir).map((f) => f.name));
 }

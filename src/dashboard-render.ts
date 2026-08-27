@@ -941,6 +941,53 @@ ${REPO_DROPDOWN_SCRIPT}
 </body>
 </html>`;
 
+/**
+ * The live raw-log tailing pane (#124): a collapsible card that merges the raw JSONL
+ * activity of every currently-running agent into one issue-keyed, following view. The
+ * server renders the shell — header (tail status dot, disclosure title, agent-count
+ * summary) and the open-only controls (issue dropdown seeded with the running issues,
+ * substring filter, play/pause, save, clear) — plus an empty body/footer the client
+ * fills from the `/api/events` SSE `tail` frames. It renders `hidden` when no agent is
+ * running (so the client can reveal it the moment one starts, since it lives outside the
+ * soft-refreshed `#live-region`) and visible otherwise. Status vocabulary is ours (ADR
+ * 0007): the gutter/dot colours key off each running issue's `IssueStatus`, never the
+ * mockup's `queued`. The body's JSON colouring and line accumulation are wired in the
+ * client script (`LIVE_TAIL_SCRIPT`), reusing `highlightJsonLine`.
+ */
+export const renderLiveTail = (status: CampaignStatus) => {
+  const running = status.waves.flatMap((wave) => wave.issues).filter((issue) => issue.status === "running");
+  const summary = `${running.length} agent${running.length === 1 ? "" : "s"}`;
+  const issueRow = (issue: string, dot: string, label: string) =>
+    `<li class="tail-issue-option" role="option" data-issue="${escapeHtml(issue)}"><span class="dot ${dot}"></span>${escapeHtml(label)}</li>`;
+  const options = [
+    issueRow("", "all", "all agents"),
+    ...running.map((issue) => issueRow(issue.issueNumber, dotClass(issue.status), `#${issue.issueNumber}`)),
+  ].join("");
+  // Each running issue and its status colour, so the client can colour a line's gutter by
+  // its issue and rebuild the dropdown as agents come and go over the SSE.
+  const agentsJson = escapeHtml(JSON.stringify(running.map((issue) => ({ issue: issue.issueNumber, status: issue.status }))));
+  return (
+    `<section class="live-tail" data-live-tail data-project="${escapeHtml(status.project)}" data-agents="${agentsJson}"${running.length ? "" : " hidden"}>` +
+    `<div class="tail-head">` +
+    `<span class="tail-dot" data-tail-dot aria-hidden="true"></span>` +
+    `<button type="button" class="tail-title" data-tail-toggle aria-expanded="true"><span class="tail-caret" aria-hidden="true"></span>Live tail · agent logs</button>` +
+    `<span class="tail-summary" data-tail-summary>${summary}</span>` +
+    `<span class="tail-gap"></span>` +
+    `<span class="tail-controls" data-tail-controls>` +
+    `<span class="tail-issue-dd" data-tail-issue-dd><button type="button" class="tail-issue-trigger" data-tail-issue-trigger aria-haspopup="listbox" aria-expanded="false"><span class="dot all" data-tail-issue-dot></span><span data-tail-issue-label>all agents</span><span class="tail-issue-caret" aria-hidden="true">▾</span></button><ul class="tail-issue-menu" role="listbox" aria-label="Filter by agent" data-tail-issue-menu hidden>${options}</ul></span>` +
+    `<input type="text" class="tail-filter" placeholder="filter lines…" aria-label="Filter tail lines" data-tail-filter />` +
+    `<button type="button" class="tail-play" data-tail-play data-following="true" aria-label="Pause"></button>` +
+    `<button type="button" class="tail-save" data-tail-save>Save</button>` +
+    `<button type="button" class="tail-clear" data-tail-clear>Clear</button>` +
+    `</span>` +
+    `</div>` +
+    `<div class="tail-body" data-tail-body></div>` +
+    `<button type="button" class="tail-backlog" data-tail-backlog hidden></button>` +
+    `<div class="tail-footer" data-tail-footer></div>` +
+    `</section>`
+  );
+};
+
 export const renderStatusPage = (status: CampaignStatus, opts: StatusPageOptions = {}) => `<!doctype html>
 <html lang="en">
 <head>
@@ -1110,6 +1157,7 @@ ${
     : ""
 }
 ${renderWaves(status, Boolean(opts.carve), true)}</div>
+${renderLiveTail(status)}
 ${opts.archivedRuns?.length ? renderArchivedRuns(opts.selected ?? status.project, opts.archivedRuns, opts.archivedRun, opts.archivedMode) : ""}
 ${issueDetailSheetMarkup(Boolean(opts.carve))}${
   // No-JS fallback: a plain server-side form per carvable issue that reaches

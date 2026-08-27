@@ -1,7 +1,8 @@
 import { existsSync, readFileSync, watch, type FSWatcher } from "node:fs";
 import { dirname } from "node:path";
 import { listProjects } from "./registry.ts";
-import { appendedEvents, logFileOf, viewRelevantEvents } from "./dashboard-model.ts";
+import { appendedEvents, buildLiveTail, logFileOf, statusConfigFromPointer, viewRelevantEvents } from "./dashboard-model.ts";
+import type { ProjectPointer } from "./registry.ts";
 import type { OrchestratorEvent } from "./event-log.ts";
 import { hostLogger } from "./log.ts";
 import type { RouteHandler } from "./dashboard-http.ts";
@@ -58,6 +59,14 @@ export const handleEvents: RouteHandler = (req, res, url, deps) => {
   // flush, and the pending timer that will flush them as one frame.
   const pending = new Map<string, OrchestratorEvent[]>();
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
+  // The live-tail arm (#124): the same watch fires on each running agent's
+  // `activity-<id>.jsonl` append (they share the watched logs dir), so alongside the
+  // orchestrator frame we recompute the project's merged tail snapshot and push it as a
+  // *named* `tail` SSE event. A named event never triggers the default `onmessage`, so the
+  // landing (which listens for the unnamed frame) ignores it; only the repo page's tail
+  // listener consumes it. Deduped by the last snapshot JSON so an unchanged tail is silent.
+  const tailTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const tailSent = new Map<string, string>();
 
   const readLog = (logFile: string): string => {
     try {
@@ -93,6 +102,31 @@ export const handleEvents: RouteHandler = (req, res, url, deps) => {
     if (!timers.has(project)) timers.set(project, setTimeout(() => flush(project), DEBOUNCE_MS));
   };
 
+  // Recompute a project's live-tail snapshot and push it as a named `tail` frame when it
+  // changed. Guarded so an idle project we've never announced stays silent (no empty-frame
+  // flood on connect), but a project whose agents drop to zero *does* get one last frame so
+  // the client hides the pane.
+  const flushTail = (project: string, pointer: ProjectPointer) => {
+    tailTimers.delete(project);
+    if (res.writableEnded) return;
+    let snapshot;
+    try {
+      snapshot = buildLiveTail(statusConfigFromPointer(pointer));
+    } catch {
+      return;
+    }
+    const json = JSON.stringify(snapshot);
+    if (tailSent.get(project) === json) return;
+    const firstMention = !tailSent.has(project);
+    tailSent.set(project, json);
+    if (firstMention && !snapshot.agents.length && !snapshot.lines.length) return;
+    res.write(`event: tail\ndata: ${JSON.stringify({ project, tail: snapshot })}\n\n`);
+  };
+  const pushTail = (project: string, pointer: ProjectPointer) => {
+    if (res.writableEnded) return;
+    if (!tailTimers.has(project)) tailTimers.set(project, setTimeout(() => flushTail(project, pointer), DEBOUNCE_MS));
+  };
+
   for (const pointer of listProjects(deps.configDir)) {
     const logFile = logFileOf(pointer.baseLocation);
     // Seed at the current end so the backlog isn't re-pushed on connect (the page
@@ -103,15 +137,24 @@ export const handleEvents: RouteHandler = (req, res, url, deps) => {
     const logsDir = dirname(logFile);
     if (!existsSync(logsDir)) continue;
     try {
-      watchers.push(watch(logsDir, () => push(pointer.project, logFile)));
+      watchers.push(
+        watch(logsDir, () => {
+          push(pointer.project, logFile);
+          pushTail(pointer.project, pointer);
+        }),
+      );
     } catch (e) {
       logger.log("dashboard-events-watch-failed", { project: pointer.project, error: String(e) });
     }
+    // Seed the pane with the project's current tail on connect (its lines are live-only and
+    // never came down with the page render), so it fills before the first append.
+    flushTail(pointer.project, pointer);
   }
 
   req.on("close", () => {
     for (const watcher of watchers) watcher.close();
     for (const timer of timers.values()) clearTimeout(timer);
+    for (const timer of tailTimers.values()) clearTimeout(timer);
     res.end();
   });
   return true;

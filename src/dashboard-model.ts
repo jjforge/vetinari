@@ -975,7 +975,11 @@ export const archiveStatusConfig = (project: string, archiveFile: string): Resol
     logFile: archiveFile,
   }) as ResolvedConfig;
 
-const statusConfigFromPointer = (pointer: ProjectPointer): ResolvedConfig =>
+/** The `ResolvedConfig` slice a registry pointer resolves to — the paths a full config's
+ * `loadConfig` would derive from its base location (ADR 0002). Exported so the live-update
+ * route can build a project's `buildLiveTail`/`buildStatus` off its pointer without its TS
+ * config, exactly as `buildAllStatus` does internally. */
+export const statusConfigFromPointer = (pointer: ProjectPointer): ResolvedConfig =>
   ({
     project: pointer.project,
     stateDir: pointer.baseLocation,

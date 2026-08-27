@@ -12,6 +12,7 @@ import {
   requireTelegram,
   resolveTitles,
   warnIfTelegramUnconfigured,
+  waveParkedNotice,
 } from "./modes.ts";
 import { setLogFile } from "./log.ts";
 import { readEventLog } from "./event-log.ts";
@@ -149,6 +150,21 @@ test("markMergedIssues calls the configured onIssueMerged seam with exactly the 
     "103",
   ]);
   assert.deepEqual(seen, ["101", "102", "103"]);
+});
+
+test("waveParkedNotice draws attention to a paused campaign whose greens stay merged, carrying the gate detail", () => {
+  const notice = waveParkedNotice("acme", 2, ["101", "102"], "main", "gate line\nGATE FAILED");
+  // Routed to the alerting channel — a wave-park demands a human, like the old halt did.
+  assert.equal(notice.category, "failure");
+  assert.equal(notice.event, "wave-parked");
+  // The operator is told which greens stay merged, on which base, and that it paused.
+  assert.ok(notice.text.includes("101, 102"));
+  assert.ok(notice.text.includes("main"));
+  assert.ok(/pause/i.test(notice.text));
+  // No machine-named culprit: the notice says the failure is unattributable.
+  assert.ok(/no attributable culprit/i.test(notice.text));
+  // The gate report tail rides along so the human sees why it went red.
+  assert.ok(notice.text.includes("GATE FAILED"));
 });
 
 test("markMergedIssues is a no-op when onIssueMerged is unconfigured — core names no labels", async () => {

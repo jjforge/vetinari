@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
-import type { ResolvedConfig } from "./config.ts";
+import type { MessageCategory, ResolvedConfig } from "./config.ts";
 import type { CampaignStartEvent, QueueStartEvent } from "./event-log.ts";
 import { log } from "./log.ts";
 import { runGates } from "./gate.ts";
@@ -333,6 +333,29 @@ export async function markMergedIssues(
 }
 
 /**
+ * The operator-facing notice a wave-park enqueues (ADR 0013). The merged base gated red
+ * with no attributable culprit — every issue passed alone — so the wave's greens stay
+ * merged on the base and the campaign pauses for a human to resolve: fix forward and
+ * resume, or carve a suspect. `category: "failure"` routes it to the same alert channel
+ * the old halt used, since a paused red base demands attention; the gate-report `detail`
+ * tail rides along so the human sees why it went red. Pure, so the wording and routing
+ * are checkable without running a campaign.
+ */
+export function waveParkedNotice(
+  project: string,
+  batchNumber: number,
+  merged: string[],
+  baseBranch: string,
+  detail: string,
+): { category: MessageCategory; event: string; text: string } {
+  return {
+    category: "failure",
+    event: "wave-parked",
+    text: `🅿️ ${project} campaign WAVE-PARKED at batch ${batchNumber} — the merged base gated red with no attributable culprit (every issue passed alone). The wave's greens (${merged.join(", ") || "none"}) stay merged on ${baseBranch}; the base sits red and the campaign is paused. Resolve it — fix forward and resume, or carve a suspect.\n\n${detail}`,
+  };
+}
+
+/**
  * Drain each batch, then merge its greens into the base, re-verify the merged
  * base, clean up the merged branches/worktrees, and only then start the next
  * batch — the manual merge→test→next-queue chain, automated.
@@ -341,8 +364,9 @@ export async function markMergedIssues(
  * parked records for its non-green tasks are cleared so stale questions do not
  * bleed into the next wave. Integration is non-atomic (ADR 0013): a merge conflict
  * quarantines just the conflicting green and the wave carries on with the rest,
- * while a red merged base — with no single culprit — still halts the whole campaign
- * with the base rolled back to where the batch began.
+ * while a red merged base — with no single culprit — wave-parks: the wave's greens
+ * stay merged on the base and the campaign pauses for a human, with no changelog fold
+ * and no `pending-verify` labels (a red base verifies nothing).
  */
 export async function campaign(
   cfg: ResolvedConfig,
@@ -404,16 +428,16 @@ export async function campaign(
     const greens = tasks.filter((t) => outcomes[t] === "green");
     const held = tasks.filter((t) => outcomes[t] !== "green");
 
-    const { merged, quarantined, halt } = await integrateGreens(cfg, greens);
-    if (halt) {
-      log("campaign-halt", { index, reason: halt.reason });
-      enqueueOutbound(cfg, {
-        category: "failure",
-        event: "halt",
-        text: `🛑 ${cfg.project} campaign HALTED at batch ${index + 1} — ${halt.reason}. Base rolled back; branches kept for you.\n\n${halt.detail}`,
-      });
+    const { merged, quarantined, parked } = await integrateGreens(cfg, greens);
+    if (parked) {
+      // Wave-park (ADR 0013): the merged base gated red with no attributable culprit, so
+      // `integrateGreens` left the greens merged (never a rollback) and logged the
+      // `wave-parked` event. Draw a human's attention and pause the campaign — no
+      // changelog fold and no `pending-verify` labels for this wave, since a red base
+      // verifies nothing; those wait for the human to resolve it green and resume.
+      enqueueOutbound(cfg, waveParkedNotice(cfg.project, index + 1, merged, cfg.baseBranch, parked.detail));
       console.log(
-        `campaign halted (${halt.reason}) — base rolled back, ${total - index - 1} batch(es) not started.`,
+        `campaign wave-parked (${parked.reason}) at batch ${index + 1}/${total} — greens left merged, base paused, ${total - index - 1} batch(es) not started.`,
       );
       return false;
     }

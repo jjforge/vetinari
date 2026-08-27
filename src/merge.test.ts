@@ -89,10 +89,10 @@ test("integrateGreens quarantines a conflicting green, keeps the earlier green m
       gate: async () => ({ green: true, report: "" }),
     });
 
-    // A stayed merged; only B was held — the wave neither rolled back nor halted.
+    // A stayed merged; only B was held — the wave neither rolled back nor parked.
     assert.deepEqual(result.merged, ["A"]);
     assert.deepEqual(result.quarantined, ["B"]);
-    assert.equal(result.halt, undefined);
+    assert.equal(result.parked, undefined);
     // No `reset --hard` to the wave start: A's change is on the base (not "base").
     assert.equal(readFileSync(join(dir, "f.txt"), "utf8"), "A\n");
     // B's branch is preserved (resumable); A's merged branch is reclaimed.
@@ -106,6 +106,72 @@ test("integrateGreens quarantines a conflicting green, keeps the earlier green m
   const q = readEventLog({ logFile: join(dir, "orchestrator.jsonl") }).filter((e) => e.event === "quarantined");
   assert.equal(q.length, 1);
   assert.deepEqual({ taskId: (q[0] as any).taskId, branch: (q[0] as any).branch }, { taskId: "B", branch: "agent/B" });
+});
+
+/**
+ * A fresh repo on `main` whose seed touches `a.txt`/`b.txt`. Two agent branches edit
+ * one file each off the seed, so both merge into the base clean — the setup for the
+ * emergent failure where every green passes alone but the combined base gates red.
+ */
+function repoWithCleanGreens(): { dir: string; git: (args: string[]) => string } {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-park-"));
+  const git = (args: string[]) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" }).trim();
+  execFileSync("git", ["-C", dir, "-c", "init.defaultBranch=main", "init", "-q"]);
+  git(["config", "user.email", "test@example.com"]);
+  git(["config", "user.name", "test"]);
+  writeFileSync(join(dir, "a.txt"), "base\n");
+  writeFileSync(join(dir, "b.txt"), "base\n");
+  git(["add", "-A"]);
+  git(["commit", "-qm", "seed"]);
+  git(["checkout", "-q", "-b", "agent/A"]);
+  writeFileSync(join(dir, "a.txt"), "A\n");
+  git(["add", "-A"]);
+  git(["commit", "-qm", "A"]);
+  git(["checkout", "-q", "main"]);
+  git(["checkout", "-q", "-b", "agent/B"]);
+  writeFileSync(join(dir, "b.txt"), "B\n");
+  git(["add", "-A"]);
+  git(["commit", "-qm", "B"]);
+  git(["checkout", "-q", "main"]);
+  return { dir, git };
+}
+
+test("integrateGreens wave-parks a red merged base: leaves the greens merged, does not reset, preserves branches", async () => {
+  const { dir, git } = repoWithCleanGreens();
+  const cfg = { branchPrefix: "agent/", baseBranch: "main" } as ResolvedConfig;
+  const prevCwd = process.cwd();
+  process.chdir(dir);
+  setLogFile(join(dir, "orchestrator.jsonl"));
+  const preSha = git(["rev-parse", "HEAD"]);
+  try {
+    const result = await integrateGreens(cfg, ["A", "B"], {
+      gate: async () => ({ green: false, report: "line1\nline2\nGATE FAILED here" }),
+    });
+
+    // AC1: both greens stay merged on the base — no rollback, no reset to the wave start.
+    assert.deepEqual(result.merged, ["A", "B"]);
+    assert.deepEqual(result.quarantined, []);
+    assert.equal(readFileSync(join(dir, "a.txt"), "utf8"), "A\n");
+    assert.equal(readFileSync(join(dir, "b.txt"), "utf8"), "B\n");
+    assert.notEqual(headSha(dir), preSha); // HEAD advanced past the wave start — merges are real
+
+    // AC2: the emergent, unattributable failure surfaces as a resumable park, not a halt.
+    assert.ok(result.parked);
+    assert.equal(result.parked!.reason, "gate-red");
+    assert.ok(result.parked!.detail.includes("GATE FAILED here"));
+
+    // Branches are preserved so a human can fix forward or carve a suspect and resume.
+    assert.equal(git(["branch", "--list", "agent/A"]).length > 0, true);
+    assert.equal(git(["branch", "--list", "agent/B"]).length > 0, true);
+  } finally {
+    process.chdir(prevCwd);
+  }
+
+  // AC2: a `wave-parked` event records the greens left merged and the tail of the gate report.
+  const parked = readEventLog({ logFile: join(dir, "orchestrator.jsonl") }).filter((e) => e.event === "wave-parked");
+  assert.equal(parked.length, 1);
+  assert.deepEqual((parked[0] as any).merged, ["A", "B"]);
+  assert.ok((parked[0] as any).detail.includes("GATE FAILED here"));
 });
 
 test("integrateGreens skips the merged-base gate when every green conflicts", async () => {
@@ -126,7 +192,7 @@ test("integrateGreens skips the merged-base gate when every green conflicts", as
     });
     assert.deepEqual(result.merged, []);
     assert.deepEqual(result.quarantined, ["A"]);
-    assert.equal(result.halt, undefined);
+    assert.equal(result.parked, undefined);
     assert.equal(gateRan, false); // nothing merged → nothing to gate
   } finally {
     process.chdir(prevCwd);

@@ -248,6 +248,29 @@ export function lastEventText(events: OrchestratorEvent[]): string {
 // lifetime; a rename won't surface until the status server restarts.
 const issueNameCache = new Map<string, string | undefined>();
 
+/**
+ * Whether a tracker's task text names an OPEN or CLOSED issue — the signal
+ * `graft` validates a candidate id against before adding it (ADR 0014). Parses the
+ * same JSON `fetchTask` returns (beside `issueNameFromTask`): a GitHub `state`
+ * (`OPEN`/`CLOSED`, case-insensitive), a boolean `closed`, or a truthy
+ * `closedAt`/`closed_at` reads `closed`; anything else — a task with no state
+ * signal, or plain non-JSON prose — reads `open`, so a tracker that does not
+ * surface state never spuriously rejects a graft. An unknown/missing issue is the
+ * CLI's concern (a throwing `fetchTask`), not this parse.
+ */
+export const issueStateFromTask = (task: string): "open" | "closed" => {
+  try {
+    const parsed = JSON.parse(task) as { state?: unknown; closed?: unknown; closedAt?: unknown; closed_at?: unknown };
+    if (parsed && typeof parsed === "object") {
+      if (typeof parsed.state === "string" && parsed.state.toLowerCase() === "closed") return "closed";
+      if (parsed.closed === true || parsed.closedAt || parsed.closed_at) return "closed";
+    }
+  } catch {
+    // not JSON — no state signal, treat as open
+  }
+  return "open";
+};
+
 export const issueNameFromTask = (task: string): string | undefined => {
   try {
     const parsed = JSON.parse(task);

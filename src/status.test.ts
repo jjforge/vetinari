@@ -35,6 +35,7 @@ import {
   event,
   extractParkedDetails,
   formatFeedEvent,
+  issueStateFromTask,
   formatStatusText,
   highlightJsonLine,
   issueDetailSheetMarkup,
@@ -6735,4 +6736,15 @@ test("buildStatus reads a grafted issue as running once its wave picks it up (#1
   const chip = status.waves.flatMap((w) => w.issues).find((i) => i.issueNumber === "301");
   // On pickup the transient `grafted` overlay drops — it now reads its live status.
   assert.equal(chip?.status, "running");
+});
+
+test("issueStateFromTask reads open/closed from a tracker's task JSON, defaulting to open (#166)", () => {
+  assert.equal(issueStateFromTask('{"state":"CLOSED"}'), "closed");
+  assert.equal(issueStateFromTask('{"state":"closed"}'), "closed");
+  assert.equal(issueStateFromTask('{"state":"OPEN"}'), "open");
+  assert.equal(issueStateFromTask('{"closed":true}'), "closed");
+  assert.equal(issueStateFromTask('{"closedAt":"2026-01-01T00:00:00Z"}'), "closed");
+  // No state signal (a title-only task, or plain non-JSON text) reads as open.
+  assert.equal(issueStateFromTask('{"title":"Add login"}'), "open");
+  assert.equal(issueStateFromTask("just some prose"), "open");
 });

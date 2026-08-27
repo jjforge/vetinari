@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   applyGraft,
+  validateGraftTargets,
   describePlan,
   layerWaves,
   partitionWaves,
@@ -557,4 +558,23 @@ test("applyGraft packs file-disjoint grafts into the same later wave", () => {
   );
   // No deps and disjoint files, so both fill the same earliest later wave.
   assert.deepEqual(res.remaining, [["101"], ["301", "302"]]);
+});
+
+test("validateGraftTargets rejects unknown, closed and already-in-campaign ids, in input order (#166)", () => {
+  const rejections = validateGraftTargets(["301", "302", "303", "101"], {
+    inCampaign: new Set(["101"]),
+    state: (id) => (id === "302" ? "closed" : id === "303" ? "unknown" : "open"),
+  });
+  assert.deepEqual(rejections, [
+    { id: "302", reason: "closed" },
+    { id: "303", reason: "unknown" },
+    { id: "101", reason: "already-in-campaign" },
+  ]);
+});
+
+test("validateGraftTargets returns nothing when every id is open and new (#166)", () => {
+  assert.deepEqual(
+    validateGraftTargets(["301", "302"], { inCampaign: new Set(["101"]), state: () => "open" }),
+    [],
+  );
 });

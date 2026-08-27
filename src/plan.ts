@@ -296,6 +296,39 @@ export function applyGraft(
   return { remaining: result.filter((wave) => wave.length), grafted };
 }
 
+/** Why a candidate graft id was rejected: it names no open issue (`unknown` /
+ * `closed`), or it is already part of this campaign (`already-in-campaign`). */
+export interface GraftRejection {
+  id: string;
+  reason: "unknown" | "closed" | "already-in-campaign";
+}
+
+/**
+ * Validate a graft's candidate ids all-or-nothing (ADR 0014): return every id that
+ * cannot be grafted — unknown or closed by the injected `state` resolver, or already
+ * in the campaign (`inCampaign`, its remaining ∪ completed members) — in input order,
+ * so the CLI can reject the whole graft naming the offenders rather than half-apply.
+ * An empty result means every id is a new, open issue. Pure over the injected inputs;
+ * the CLI builds `state` from `fetchTask` + `issueStateFromTask` at the edge.
+ */
+export function validateGraftTargets(
+  ids: string[],
+  opts: { inCampaign: Set<string>; state: (id: string) => "open" | "closed" | "unknown" },
+): GraftRejection[] {
+  const inCampaign = new Set([...opts.inCampaign].map(normalize));
+  const rejections: GraftRejection[] = [];
+  for (const raw of ids) {
+    const id = normalize(raw);
+    if (inCampaign.has(id)) {
+      rejections.push({ id, reason: "already-in-campaign" });
+      continue;
+    }
+    const state = opts.state(id);
+    if (state !== "open") rejections.push({ id, reason: state });
+  }
+  return rejections;
+}
+
 /**
  * The area labels a run's name is suggested from — the fixed set the tracker tags
  * issues with. This order is the order a suggestion lists them in, so the same set

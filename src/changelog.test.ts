@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { applyCollect, collectFragments, formatMilestoneDate, parseFragment } from "./changelog.ts";
+import { applyCollect, collectFragments, foldFragments, formatMilestoneDate, parseFragment } from "./changelog.ts";
 
 test("parseFragment reads a single section and its bullets", () => {
   const frag = ["section: Bug fixes", "- [user] a carve of a merged target dropped its dependents (#42)."].join("\n");
@@ -141,6 +141,48 @@ test("applyCollect folds changelog.d fragments into CHANGELOG.md and deletes the
   assert.equal(existsSync(join(fragDir, "42.md")), false);
   assert.equal(existsSync(join(fragDir, "7.md")), false);
   assert.equal(existsSync(fragDir), true);
+});
+
+test("foldFragments folds only the named fragments, leaving the rest on disk", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-fold-"));
+  const fragDir = join(dir, "changelog.d");
+  mkdirSync(fragDir);
+  const changelog = join(dir, "CHANGELOG.md");
+  writeFileSync(changelog, "# Changelog\n\n### Older — August 1, 2026\n\n**Bug fixes:**\n- [user] old (#1)\n");
+  writeFileSync(join(fragDir, "42.md"), "section: New features\n- [user] feature from 42 (#42).\n");
+  writeFileSync(join(fragDir, "7.md"), "section: Bug fixes\n- [user] fix from 7 (#7).\n");
+
+  const result = foldFragments(
+    { fragmentsDir: fragDir, changelogPath: changelog, today: "August 26, 2026", title: "Collected changes" },
+    ["42.md"],
+  );
+
+  assert.deepEqual(result.collected, ["42.md"]);
+  const written = readFileSync(changelog, "utf8");
+  assert.ok(written.includes("- [user] feature from 42 (#42).")); // 42 folded
+  assert.ok(!written.includes("fix from 7")); // 7 left untouched
+  // Only the named fragment is consumed; 7.md stays for its own resolution.
+  assert.equal(existsSync(join(fragDir, "42.md")), false);
+  assert.equal(existsSync(join(fragDir, "7.md")), true);
+});
+
+test("foldFragments is a no-op when the named set is empty or unmatched", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-fold-none-"));
+  const fragDir = join(dir, "changelog.d");
+  mkdirSync(fragDir);
+  const changelog = join(dir, "CHANGELOG.md");
+  writeFileSync(changelog, "# Changelog\n\n### Older — August 1, 2026\n\n**Bug fixes:**\n- [user] old (#1)\n");
+  writeFileSync(join(fragDir, "42.md"), "section: New features\n- [user] feature from 42 (#42).\n");
+  const before = readFileSync(changelog, "utf8");
+
+  const result = foldFragments(
+    { fragmentsDir: fragDir, changelogPath: changelog, today: "August 26, 2026", title: "Collected changes" },
+    ["999.md"],
+  );
+
+  assert.deepEqual(result.collected, []);
+  assert.equal(readFileSync(changelog, "utf8"), before); // untouched
+  assert.equal(existsSync(join(fragDir, "42.md")), true); // unnamed fragment stays
 });
 
 test("applyCollect is a no-op when there are no fragments", () => {

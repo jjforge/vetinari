@@ -1,7 +1,7 @@
 #!/usr/bin/env -S npx tsx
 import { createInterface } from "node:readline/promises";
 import { join, resolve } from "node:path";
-import { loadConfig } from "./config.ts";
+import { loadConfig, resolveConfigPath, type ResolvedConfig } from "./config.ts";
 import {
   applyCollect,
   formatMilestoneDate,
@@ -17,6 +17,14 @@ import {
   requireTelegram,
   tgTest,
 } from "./modes.ts";
+import {
+  applyTidy,
+  computeTidy,
+  describeTidy,
+  scanTidy,
+  tidyIsEmpty,
+  type TidyTarget,
+} from "./merge.ts";
 import { gateway } from "./gateway.ts";
 import { applyCarve, carveClosure, computeCarve, normalize } from "./carve.ts";
 import {
@@ -45,7 +53,7 @@ import {
   listParked,
   readParked,
 } from "./state.ts";
-import { autoRegister, gatewayConfigDir } from "./registry.ts";
+import { autoRegister, gatewayConfigDir, listProjects } from "./registry.ts";
 import { resolveHostCeiling, type HostBudget } from "./host-slots.ts";
 import { containerShareWeight } from "./config.ts";
 import {
@@ -131,6 +139,14 @@ const USAGE = `vetinari <mode> [args]
                            delete the consumed fragments. What the orchestrator runs
                            per wave at merge; a human may run it directly. --title
                            sets a fresh milestone's title (default: "Collected changes")
+  tidy [--apply] [--all]   reconcile the drift a by-hand fix-forward or merge leaks
+                           (ADR 0013): fold orphaned changelog.d/ fragments whose issue
+                           is merged, GC agent/<id> branches + worktrees that are
+                           PROVABLY reachable from the base, and clear parked records
+                           for issues now merged. Never touches an unmerged, quarantined,
+                           parked, or wave-parked branch. Dry-run by default (prints what
+                           it would do); --apply acts. --all sweeps every registered
+                           project, not just this one
   answer <task> <text>     resume a parked task with a human answer
   gateway                  the host daemon fronting every registered project: the
                            sole Telegram consumer and sender — announces parked
@@ -437,6 +453,63 @@ if (mode === "status") {
   // to serve, so park here instead of exiting (an exit would kill the server the
   // instant it bound). We never fall through to the strict cwd config load.
   await new Promise<never>(() => {});
+}
+
+// tidy reconciles drift a human-in-the-loop resolution leaks (ADR 0013). It reads
+// each project's git + parked records + event log and, by default, only PRINTS the
+// plan. `--all` sweeps the whole host registry, so — like status/gateway — it runs
+// BEFORE the strict cwd config load (no project config in cwd is fine for --all).
+if (mode === "tidy") {
+  const apply = rest.includes("--apply");
+  const all = rest.includes("--all");
+
+  // A TidyTarget carries the absolute paths git + the fragment/parked scans read,
+  // resolved against the project's own root (cwd for one project, the registered
+  // root under --all) so a config's relative stateDir lands in the right place.
+  const targetFor = (c: ResolvedConfig, root: string): TidyTarget => ({
+    project: c.project,
+    root,
+    baseBranch: c.baseBranch,
+    branchPrefix: c.branchPrefix,
+    parkedDir: resolve(root, c.parkedDir),
+    logFile: resolve(root, c.logFile),
+    fragmentsDir: resolve(root, FRAGMENT_DIR),
+    changelogPath: resolve(root, "CHANGELOG.md"),
+  });
+
+  const targets: TidyTarget[] = [];
+  if (all) {
+    for (const p of listProjects(gatewayConfigDir())) {
+      const resolved = resolveConfigPath(p.projectRoot);
+      if (!resolved) {
+        console.warn(`tidy --all: skipping ${p.project} — no vetinari config under ${p.projectRoot}`);
+        continue;
+      }
+      targets.push(targetFor(await loadConfig(resolved.path), p.projectRoot));
+    }
+    if (!targets.length) {
+      console.log("tidy --all: no registered projects to reconcile.");
+      process.exit(0);
+    }
+  } else {
+    const resolved = resolveConfigPath(process.cwd());
+    if (!resolved)
+      throw new Error(
+        "tidy needs a vetinari project — run it from a project root, or use `tidy --all` to sweep every registered project.",
+      );
+    targets.push(targetFor(await loadConfig(resolved.path), process.cwd()));
+  }
+
+  for (const target of targets) {
+    const plan = computeTidy(scanTidy(target));
+    console.log(describeTidy(target.project, plan));
+    if (apply && !tidyIsEmpty(plan)) {
+      applyTidy(target, plan);
+      console.log(plan.fold.length ? "  → applied — review the CHANGELOG.md fold and commit it." : "  → applied.");
+    }
+  }
+  if (!apply) console.log("\n(dry run — nothing changed; pass --apply to act)");
+  process.exit(0);
 }
 
 const cfg = await loadConfig(cfgPath);

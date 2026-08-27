@@ -54,17 +54,25 @@ test("memoryLogger captures typed events, writing nothing to disk and echoing no
   assert.deepEqual(echoed, [], "memoryLogger must not echo to console");
 });
 
-test("hostLogger targets hostLogTarget() — an explicit named host path, not the unset default", () => {
-  const target = hostLogTarget();
-  assert.ok(target.startsWith(tmpdir()), `host target must be under tmpdir, got ${target}`);
-  assert.ok(!target.includes("unset"), `host target must be a named binding, not the unset default, got ${target}`);
-  assert.ok(!target.includes(".vetinari.local"), `host target must not be a real project log, got ${target}`);
+test("hostLogTarget is a persistent host log under the gateway config dir, not a temp fallback", () => {
+  const gwDir = mkdtempSync(join(tmpdir(), "gw-home-"));
+  const prev = process.env.VETINARI_GATEWAY_HOME;
+  process.env.VETINARI_GATEWAY_HOME = gwDir;
+  try {
+    const target = hostLogTarget();
+    // Persistent, mirroring a project's logs/orchestrator.jsonl: <gatewayConfigDir>/logs/host.jsonl.
+    assert.equal(target, join(gwDir, "logs", "host.jsonl"), `host target must live under the gateway config dir, got ${target}`);
+    assert.ok(!target.includes("unset"), `host target must be a named binding, not the unset default, got ${target}`);
+    assert.ok(!target.includes(".vetinari.local"), `host target must not be a real project log, got ${target}`);
 
-  const logger = hostLogger();
-  logger.log("carve", { target: "1", removed: [], dropped: [] });
-  assert.ok(existsSync(target), "hostLogger must write to its host target");
-  const events = readEventLog({ logFile: target });
-  assert.ok(events.some((e) => e.event === "carve"));
+    const logger = hostLogger();
+    logger.log("carve", { target: "1", removed: [], dropped: [] });
+    assert.ok(existsSync(target), "hostLogger must write to its host target");
+    const events = readEventLog({ logFile: target });
+    assert.ok(events.some((e) => e.event === "carve"));
+  } finally {
+    prev === undefined ? delete process.env.VETINARI_GATEWAY_HOME : (process.env.VETINARI_GATEWAY_HOME = prev);
+  }
 });
 
 const configBody = (stateDir: string) => `export default {

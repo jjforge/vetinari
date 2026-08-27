@@ -1,6 +1,7 @@
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+import { gatewayConfigDir } from "./registry.ts";
 import type { OrchestratorEvent } from "./event-log.ts";
 import type { ResolvedConfig } from "./config.ts";
 
@@ -89,11 +90,14 @@ function fileLogger(path: string): Logger {
 export const loggerForRun = (cfg: Pick<ResolvedConfig, "logFile">): Logger => fileLogger(cfg.logFile);
 
 /**
- * The host's own log target — an explicit per-process temp path the host binds to when it isn't
- * scoped to a single run's `cfg.logFile`. Named a *host* binding rather than the global's "unset"
- * default (`defaultLogFile`): the host writing here is deliberate, not a fallback nobody configured.
+ * The host's own log target — a *persistent* host log under the gateway config dir,
+ * `<gatewayConfigDir()>/logs/host.jsonl`, mirroring a project's `logs/orchestrator.jsonl`. The
+ * host modes (`gateway`, `status`) span every project and have no per-run `cfg.logFile`, and the
+ * `status` daemon parks forever — so its diagnostics need a single rolling log that survives
+ * restarts, not the ephemeral per-pid temp path this used to fall back to (#157). No per-run
+ * archiving: the host daemon has no "runs", it just appends across restarts.
  */
-export const hostLogTarget = (): string => join(tmpdir(), `vetinari-host-${process.pid}`, "orchestrator.jsonl");
+export const hostLogTarget = (): string => join(gatewayConfigDir(), "logs", "host.jsonl");
 
 /** The host's logger: file-backed at `hostLogTarget()`, with the console echo. */
 export const hostLogger = (): Logger => fileLogger(hostLogTarget());

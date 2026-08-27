@@ -739,7 +739,9 @@ export const LIVE_TAIL_SCRIPT = `  const tailEl = document.querySelector("[data-
       tailEl.hidden = agents.length === 0;
       renderMenu(); renderSummary();
       const res = tailFresh((tail && tail.lines) || [], seen); seen = res.seen;
-      if (res.fresh.length) buffer = tailAppend(buffer, res.fresh, live, FOLLOW_CAP);
+      // Grow the buffer past the cap only while explicitly paused with the pane open (a backlog
+      // to reveal); following or collapsed keeps it bounded — reopening jumps to live anyway.
+      if (res.fresh.length) buffer = tailAppend(buffer, res.fresh, live || !open, FOLLOW_CAP);
       render();
     }
     events.addEventListener("tail", (e) => { let m; try { m = JSON.parse(e.data); } catch (x) { return; } if (m && m.project === project) ingest(m.tail); });

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyCarve, carveClosure, computeCarve, quarantineImpacts, restrictBlockers } from "./carve.ts";
+import { applyCarve, carveClosure, computeCarve, quarantineImpacts, restrictBlockers, resumeIndex } from "./carve.ts";
 
 // A fake "blocked by" resolver from a plain edge map: id -> the ids that block it.
 const blockedByFrom = (edges: Record<string, string[]>) => (id: string) => edges[id] ?? [];
@@ -229,6 +229,51 @@ test("quarantineImpacts skips a quarantined id no longer in the plan (an earlier
   );
 
   assert.deepEqual(impacts, []);
+});
+
+test("resumeIndex skips waves that already merged work and points at the first unrun wave", () => {
+  // Waves 0 and 1 fully merged, wave 2 never started: resume picks up at wave 2.
+  const index = resumeIndex({
+    waves: [["611", "640"], ["623"], ["701", "712"]],
+    outcomes: outcomesFrom({ "611": "completed", "640": "completed", "623": "completed" }),
+  });
+  assert.equal(index, 2);
+});
+
+test("resumeIndex skips a wave-parked wave whose greens are merged but never closed", () => {
+  // Wave 1 wave-parked: its greens merged (completed) though the wave never closed.
+  // Resume must not redo those merged issues, so it continues at the unstarted wave 2.
+  const index = resumeIndex({
+    waves: [["611"], ["640", "655"], ["701"]],
+    outcomes: outcomesFrom({ "611": "completed", "640": "completed", "655": "completed" }),
+  });
+  assert.equal(index, 2);
+});
+
+test("resumeIndex returns the wave count when every wave has merged — nothing left to run", () => {
+  const index = resumeIndex({
+    waves: [["611"], ["640"]],
+    outcomes: outcomesFrom({ "611": "completed", "640": "completed" }),
+  });
+  assert.equal(index, 2); // == waves.length: the caller reports nothing left
+});
+
+test("resumeIndex resumes from the top when no wave has banked any work", () => {
+  const index = resumeIndex({
+    waves: [["611"], ["640"]],
+    outcomes: outcomesFrom({ "611": "parked" }),
+  });
+  assert.equal(index, 0);
+});
+
+test("resumeIndex resumes past the last wave with any merged member, not just fully-merged waves", () => {
+  // Wave 1 has one merged (640) and one still parked (655): it banked work, so resume
+  // must not re-run it (that would redo 640). Continue at the next unrun wave.
+  const index = resumeIndex({
+    waves: [["611"], ["640", "655"], ["701"]],
+    outcomes: outcomesFrom({ "611": "completed", "640": "completed", "655": "parked" }),
+  });
+  assert.equal(index, 2);
 });
 
 test("restrictBlockers keeps only the edges that stay inside the selected set", async () => {

@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   applyLayoutMigration,
   computeLayoutMigration,
@@ -19,6 +19,16 @@ const tmpProject = () => {
   mkdirSync(dir, { recursive: true });
   return dir;
 };
+
+// scanLayout() reads host-level paths — the systemd unit via systemdUnitPath() and
+// the gateway config dir via gatewayConfigDir() — which fall back to the REAL host
+// (~/.config/systemd/user, ~/.config/vetinari) when their override envs are unset.
+// A test that scans/applies would then read (and applyLayoutMigration could clobber)
+// a real host gateway unit — the crash-loop footgun of #165. Point both overrides at
+// a throwaway temp dir for the whole suite so no scan/apply here can escape it.
+const hostSandbox = join(tmpdir(), `vetinari-migrate-host-${Date.now()}`);
+process.env.VETINARI_SYSTEMD_UNIT = join(hostSandbox, "systemd", "user", "vetinari-gateway.service");
+process.env.VETINARI_GATEWAY_HOME = join(hostSandbox, "vetinari");
 
 test("computeLayoutMigration yields an empty plan for an already-migrated project", () => {
   const plan = computeLayoutMigration({
@@ -430,6 +440,50 @@ test("applyLayoutMigration deletes the stale gateway.env and writes the rewritte
 
   assert.equal(result.gatewayEnvDeleted, true);
   assert.equal(result.unitRewritten, true);
+});
+
+test("scanLayout + applyLayoutMigration run from the test runner never clobbers the host gateway unit", () => {
+  // The real footgun, end to end: a real host unit exists at the (sandboxed) systemd
+  // path, and scanLayout resolves gatewayExecStart from THIS process — under the test
+  // runner that is a *.test.* entrypoint. applyLayoutMigration must leave it intact.
+  const dir = tmpProject();
+  const unitPath = process.env.VETINARI_SYSTEMD_UNIT!;
+  mkdirSync(dirname(unitPath), { recursive: true });
+  const realUnit = "[Unit]\nDescription=vetinari gateway\n[Service]\nExecStart=/usr/bin/node /opt/vetinari/src/cli.mts gateway\nRestart=always\n";
+  writeFileSync(unitPath, realUnit);
+  try {
+    const plan = computeLayoutMigration(scanLayout(dir));
+    // The scan baked a test-runner ExecStart, so the write is refused outright.
+    assert.throws(() => applyLayoutMigration(dir, plan), /test/i);
+    assert.equal(readFileSync(unitPath, "utf8"), realUnit);
+  } finally {
+    // Leave the shared sandbox unit path clean for the scanLayout tests below.
+    rmSync(unitPath, { force: true });
+  }
+});
+
+test("applyLayoutMigration refuses to write a gateway unit whose ExecStart is a test process, changing nothing", () => {
+  const dir = tmpProject();
+  const gatewayDir = join(dir, "host-config", "sandcastle");
+  const unitPath = join(dir, "host-config", "systemd", "vetinari-gateway.service");
+  mkdirSync(join(dir, "host-config", "systemd"), { recursive: true });
+  const realUnit = "[Unit]\nDescription=vetinari gateway\n[Service]\nExecStart=/usr/bin/node /opt/vetinari/src/cli.mts gateway\nRestart=always\n";
+  writeFileSync(unitPath, realUnit);
+
+  // The footgun: running the suite resolves the launch chain to a *.test.* entrypoint
+  // (and, under `node --test`, test-runner flags), so the planner forms a unit that
+  // would replace the real gateway with a test invocation.
+  const plan = computeLayoutMigration({
+    gatewayConfigDir: gatewayDir,
+    systemdUnitPath: unitPath,
+    systemdUnit: realUnit,
+    gatewayExecStart: "ExecStart=/usr/bin/node --test --test-isolation=process /opt/vetinari/src/migrate.test.ts gateway",
+  });
+  assert.ok(plan.unit, "the planner still forms a rewrite from the (bad) inputs");
+
+  assert.throws(() => applyLayoutMigration(dir, plan), /test/i);
+  // The real unit on disk is byte-intact — nothing was written.
+  assert.equal(readFileSync(unitPath, "utf8"), realUnit);
 });
 
 test("applyLayoutMigration strips VETINARI_TELEGRAM_* from a legacy .env as it moves it, keeping agent secrets", () => {

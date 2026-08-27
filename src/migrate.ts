@@ -305,6 +305,19 @@ export function writeGatewayUnit(path: string, content: string): void {
 }
 
 /**
+ * Markers of an `ExecStart` line built from a test-runner process — a `*.test.*`
+ * entrypoint (`tsx --test` bakes the test file into `argv[1]`) or a `--test…` node
+ * flag (`node --test` carries them in `execArgv`). Such a line launches a test file,
+ * never the real gateway, so a unit carrying it is illegitimate.
+ */
+const TEST_EXEC_START_RE = /\.test\.[cm]?[jt]sx?\b|\s--test\b/;
+
+/** Whether a resolved gateway `ExecStart=` line came from a test process (never legitimate). */
+export function isTestExecStart(execStart: string): boolean {
+  return TEST_EXEC_START_RE.test(execStart);
+}
+
+/**
  * Rewrite the systemd unit from a per-project `dispatch` poller into the
  * host-level gateway service. Returns undefined when there is no unit to rewrite
  * or it is already the gateway unit (so a re-run changes nothing).
@@ -452,6 +465,17 @@ export function applyLayoutMigration(baseDir: string, plan: LayoutMigrationPlan)
     throw new Error(
       `migrate refused: ${plan.conflicts.length} destination(s) already exist — ${plan.conflicts.join(", ")}. ` +
         `Move or remove them, then re-run. Nothing was changed.`,
+    );
+  }
+
+  // A gateway unit whose ExecStart runs a *.test.* file (or carries node's --test
+  // flags) was resolved from a test-runner process, never a real install — writing
+  // it would replace the host gateway with a test invocation and crash-loop it.
+  // Refuse the WHOLE migration before touching anything (defense-in-depth for #165).
+  if (plan.unit && isTestExecStart(plan.unit.content)) {
+    throw new Error(
+      `migrate refused: the gateway unit's ExecStart was resolved from a test process — ` +
+        `writing it to ${plan.unit.path} would replace the real gateway with a test invocation. Nothing was changed.`,
     );
   }
 

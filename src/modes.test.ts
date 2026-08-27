@@ -481,3 +481,34 @@ test("the harness has teeth — a child that archives the parent log (the #150 b
     `expected the archive to strand the plan, but ${batches.length} waves ran`,
   );
 });
+
+test("a graft appended mid-wave lands in a future wave; the loop re-derives and runs it (#166)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-graft-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+
+  const spawned: string[] = [];
+  // While wave 0 (task 101) runs, graft 301 onto the campaign. The wave-loop
+  // re-derives its plan from the log each boundary, so 301 must appear in a later
+  // wave — the in-flight wave 0 is never disturbed.
+  const childRun: CampaignDeps["spawnRun"] = async (taskId) => {
+    spawned.push(taskId);
+    if (taskId === "101") {
+      cfg.log.log("graft", { ids: ["301"], blockedBy: {}, basenames: {} });
+    }
+    return 0;
+  };
+
+  const ok = await silenceConsole(() =>
+    campaign(cfg, [["101"], ["201"]], host, "harness", {}, gitFreeDeps(cfg, childRun)),
+  );
+
+  assert.equal(ok, true);
+  const batches = readEventLog(cfg)
+    .filter((e): e is CampaignBatchEvent => e.event === "campaign-batch")
+    .map((b) => b.tasks);
+  // Wave 0 ran 101 alone (untouched by the graft); 301 landed in a later wave and ran.
+  assert.deepEqual(batches[0], ["101"]);
+  assert.ok(batches.slice(1).flat().includes("301"), "grafted 301 ran in a later wave");
+  assert.ok(spawned.includes("301"), "the loop actually spawned the grafted issue");
+});

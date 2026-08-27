@@ -129,6 +129,62 @@ export interface GreenEvent extends BaseEvent {
   commits: string[];
 }
 
+/** `gate` — the orchestrator gate selected a set of commands to run for a task: the labels/cmds it will
+ * run and how many `when`-scoped gates it skipped for the diff. Carries `taskId` when a per-task run
+ * drove it (loop.ts); the wave-merge gate (merge.ts/modes.ts) has no single task and omits it. Part of
+ * the shared union so the live-tail activity stream (ADR 0015) can render it (gate.ts). */
+export interface GateEvent extends BaseEvent {
+  event: "gate";
+  taskId?: string;
+  cmds: string[];
+  skipped: number;
+}
+
+/** `gate-result` — one gate command finished: its cmd, exit code, wall-clock seconds, and the captured
+ * output file. Carries `taskId` when a per-task run drove it (loop.ts); the wave-merge gate omits it.
+ * Part of the shared union for the live-tail activity stream (ADR 0015) (gate.ts). */
+export interface GateResultEvent extends BaseEvent {
+  event: "gate-result";
+  taskId?: string;
+  cmd: string;
+  exitCode: number;
+  seconds: number;
+  outFile: string;
+}
+
+/** `tool` — a file-operation tool-use the agent invoked, recovered by projecting the raw run stream
+ * (ADR 0015): the tool `name` (Read/Edit/Write/Grep/Glob), the `path` it targeted, and `size` — the
+ * byte count of content the op wrote (Write/Edit), absent for reads/searches that carry none. A
+ * live-only activity-stream row, never in the archived event log (activity.ts). */
+export interface ToolEvent extends BaseEvent {
+  event: "tool";
+  taskId: string;
+  name: string;
+  path?: string;
+  size?: number;
+}
+
+/** `sandbox-exec` — a `Bash` tool-use the agent ran, recovered by projecting the raw run stream
+ * (ADR 0015): the `cmd` it executed and, when known, the `pid`. A live-only activity-stream row
+ * (activity.ts). */
+export interface SandboxExecEvent extends BaseEvent {
+  event: "sandbox-exec";
+  taskId: string;
+  cmd: string;
+  pid?: number;
+}
+
+/** `commit` — one commit an agent landed on its branch: the `taskId`, the `branch`, the commit `sha`,
+ * and the `files` it touched. Net-new for the live-tail activity stream (ADR 0015) — commit shas are
+ * otherwise only carried in bulk on `green` (loop.ts). */
+export interface CommitEvent extends BaseEvent {
+  event: "commit";
+  taskId: string;
+  branch: string;
+  sha: string;
+  files: string[];
+}
+
 /** `parked` — a slot parked its task for a human: the task and why (blocked/budget/idle-timeout/…)
  * (state.ts). */
 export interface ParkedEvent extends BaseEvent {
@@ -231,6 +287,11 @@ export type OrchestratorEvent =
   | QueueSpawnEvent
   | TurnEvent
   | GreenEvent
+  | GateEvent
+  | GateResultEvent
+  | ToolEvent
+  | SandboxExecEvent
+  | CommitEvent
   | ParkedEvent
   | QuarantinedEvent
   | WaveParkedEvent

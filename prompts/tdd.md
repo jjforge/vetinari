@@ -4,6 +4,14 @@
 
 {{TASK}}
 
+**Read the entire ticket above before planning — title, full body, and every
+comment.** The `{{TASK}}` payload is the whole ticket, and its body and comments
+are **authoritative** for the acceptance criteria and design intent: valuable
+detail routinely lives lower down — a design captured as a comment, a
+clarification thread, edge cases spelled out in the body. The title is only a
+label; do not implement from it or the first few lines alone. An implementation
+that goes green against a thin reading of the title is still wrong-spec work.
+
 You are working on branch `{{SOURCE_BRANCH}}`, cut from `{{TARGET_BRANCH}}` in the
 **{{PROJECT}}** repository. Work on **this task only**. Do not merge to
 `{{TARGET_BRANCH}}` — the orchestrator owns integration.
@@ -22,7 +30,7 @@ root); it overrides anything here that conflicts. Absent one, follow the
 conventions the surrounding code already shows.
 
 - **Drive the loop with the `tdd` skill.** This container has Matt Pocock's
-  `tdd` skill installed — invoke it and let it govern *how* you work test-first:
+  `tdd` skill installed — invoke it and let it govern _how_ you work test-first:
   what a good test is, testing at seams, the anti-patterns, and the rules of the
   loop (red before green, one vertical slice at a time — never write all the
   tests up front). Its companions are installed too: reach for `codebase-design`

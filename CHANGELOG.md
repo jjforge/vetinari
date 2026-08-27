@@ -20,6 +20,10 @@ Within a milestone each bold section label appears at most once.
 
 ### Collected changes — August 27, 2026
 
+**New features:**
+- [user] `campaign --auto-carve` prunes a merge-conflict quarantine's stranded dependents and runs on; without it, a quarantine that orphans dependents in later waves pauses the campaign at the wave boundary for a human (ADR 0013) (#146).
+- [ops] A quarantine-pause and an auto-carve each announce over Telegram — the pause on the alert channel (quarantined issue → orphaned dependents, and the two recovery moves), the carve on the progress channel (what it pruned) (#146).
+
 **Improvements:**
 - [ops] Campaign wave integration now wave-parks instead of halting when the merged base gates red (every issue green alone, the combined base red together): the wave's greens stay merged on the base — no more `reset --hard` un-merging the wave — an attention notification is sent, and the campaign pauses for a human to fix forward or carve a suspect. The machine names no culprit, because none is knowable. A red base folds no changelog fragments and applies no `pending-verify` labels for that wave — those wait until it is resolved green (#143).
 - [api] `integrateGreens` returns `parked` (replacing `halt`) on a red merged base, and a new `wave-parked` event records the greens left merged and the tail of the gate report (#143).

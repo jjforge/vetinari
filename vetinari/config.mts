@@ -1,9 +1,13 @@
 // Dogfood config: run vetinari against its OWN GitHub backlog.
 // The package name self-resolves to this repo (package.json "exports"), so the
 // same import a consuming project uses works here too.
-import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
-import { defineConfig, githubBlockedBy, githubMarkPendingVerify } from "vetinari";
+import {
+  defineConfig,
+  githubBlockedBy,
+  githubFetchTask,
+  githubMarkPendingVerify,
+} from "vetinari";
 
 export default defineConfig({
   project: "vetinari",
@@ -22,8 +26,10 @@ export default defineConfig({
   // so both gates have their toolchain. Runs as an onSandboxReady hook.
   setup: ["npm ci"],
 
-  fetchTask: (id) =>
-    execFileSync("gh", ["issue", "view", id, "--repo", "jjforge/vetinari", "--json", "title,body,comments,labels"], { encoding: "utf8" }),
+  // Fetches title/body/comments/labels for the prompt AND state/closedAt so
+  // `issueStateFromTask` can reject a closed graft target (#175) — the shared helper
+  // fixes that field set once so this config can't silently re-drop `state`.
+  fetchTask: githubFetchTask("jjforge/vetinari"),
 
   // Powers carve/campaign: reads GitHub's native blocked_by edges — the ones set
   // on #31–#35.
@@ -40,7 +46,8 @@ export default defineConfig({
   // their basename, and validates them against the tree — so this repo runs on the
   // one shared resolver rather than a second one that can drift from it.
 
-  toolchainProbe: "node --version && npm --version && claude --version && git --version",
+  toolchainProbe:
+    "node --version && npm --version && claude --version && git --version",
 
   // safe.directory host-side write needs a writable global git config; the real
   // one is a read-only nix symlink. Kept OUT of .env (which is injected into the

@@ -29,6 +29,12 @@ Read the repository's own agent guide first (`CLAUDE.md` or `AGENTS.md` at the
 root); it overrides anything here that conflicts. Absent one, follow the
 conventions the surrounding code already shows.
 
+Before adding a command, flag, or capability, check it does not already exist and
+is not already named: the README's **Modes** table is the command reference and
+`CONTEXT.md` is the domain glossary. Reuse an existing seam or term rather than
+reinventing one under a new name — a new word that collides with a defined one is a
+translation error, not a naming choice.
+
 - **Drive the loop with the `tdd` skill.** This container has Matt Pocock's
   `tdd` skill installed — invoke it and let it govern _how_ you work test-first:
   what a good test is, testing at seams, the anti-patterns, and the rules of the

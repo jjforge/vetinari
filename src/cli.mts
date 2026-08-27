@@ -20,6 +20,7 @@ import {
 import {
   applyTidy,
   computeTidy,
+  describeRegistryDedup,
   describeTidy,
   scanTidy,
   tidyIsEmpty,
@@ -55,6 +56,7 @@ import {
 } from "./state.ts";
 import {
   autoRegister,
+  computeRegistryDedup,
   gatewayConfigDir,
   listProjects,
   removePointer,
@@ -151,7 +153,8 @@ const USAGE = `vetinari <mode> [args]
                            for issues now merged. Never touches an unmerged, quarantined,
                            parked, or wave-parked branch. Dry-run by default (prints what
                            it would do); --apply acts. --all sweeps every registered
-                           project, not just this one
+                           project, not just this one, and drops duplicate-projectRoot
+                           registry pointers (keeping the canonical .vetinari.local one)
   answer <task> <text>     resume a parked task with a human answer
   gateway                  the host daemon fronting every registered project: the
                            sole Telegram consumer and sender — announces parked
@@ -510,7 +513,18 @@ if (mode === "tidy") {
 
   const targets: TidyTarget[] = [];
   if (all) {
-    for (const p of listProjects(gatewayConfigDir())) {
+    const pointers = listProjects(gatewayConfigDir());
+    // Registry dedup is a whole-host-registry concern (issue #164): drop provably-dead
+    // duplicate-`projectRoot` pointers, then don't also per-project-tidy a pointer we're
+    // deregistering as a duplicate (its canonical twin covers that same repo).
+    const registryDrops = computeRegistryDedup(pointers);
+    if (registryDrops.length) {
+      console.log(describeRegistryDedup(registryDrops));
+      if (apply) for (const d of registryDrops) removePointer(gatewayConfigDir(), d.drop);
+    }
+    const dropped = new Set(registryDrops.map((d) => d.drop));
+    for (const p of pointers) {
+      if (dropped.has(p.project)) continue;
       const resolved = resolveConfigPath(p.projectRoot);
       if (!resolved) {
         console.warn(`tidy --all: skipping ${p.project} — no vetinari config under ${p.projectRoot}`);
@@ -518,7 +532,7 @@ if (mode === "tidy") {
       }
       targets.push(targetFor(await loadConfig(resolved.path), p.projectRoot));
     }
-    if (!targets.length) {
+    if (!targets.length && !registryDrops.length) {
       console.log("tidy --all: no registered projects to reconcile.");
       process.exit(0);
     }

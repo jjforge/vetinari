@@ -6748,3 +6748,22 @@ test("issueStateFromTask reads open/closed from a tracker's task JSON, defaultin
   assert.equal(issueStateFromTask('{"title":"Add login"}'), "open");
   assert.equal(issueStateFromTask("just some prose"), "open");
 });
+
+test("a graft into a wave-parked (resumable) campaign is folded and allowed (#166)", () => {
+  const log = [
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["101"], ["201"]], slots: 1 }),
+    event("campaign-batch", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["101"] }),
+    event("green", { ts: "2025-01-01T00:02:00.000Z", taskId: "101", branch: "agent/101", commits: [] }),
+    // The wave's merged base gated red — the campaign pauses, resumable (ADR 0013).
+    event("wave-parked", { ts: "2025-01-01T00:03:00.000Z", merged: ["101"], detail: "GATE FAILED" }),
+    // An operator grafts new work while it is parked, honored on the next --resume.
+    event("graft", { ts: "2025-01-01T00:04:00.000Z", ids: ["301"], blockedBy: {}, basenames: {} }),
+  ];
+  // A wave-parked run is not done/halted, so graft is allowed against it.
+  assert.equal(campaignRunning(log), true);
+  const reduced = reduceCampaign(log);
+  // 301 re-layers into a future wave; the parked wave 0 (101) is untouched.
+  assert.ok(reduced.waves.flat().includes("301"));
+  assert.deepEqual(reduced.waves[0], ["101"]);
+  assert.equal(reduced.grafted.has("301"), true);
+});

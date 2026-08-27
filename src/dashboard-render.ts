@@ -35,6 +35,7 @@ const ISSUE_EMOJI: Record<DisplayStatus, string> = {
   unstarted: "⚪",
   carved: "✂️",
   quarantined: "🚧",
+  interrupted: "⏹",
 };
 
 const WAVE_EMOJI: Record<WaveStatus, string> = {
@@ -42,6 +43,7 @@ const WAVE_EMOJI: Record<WaveStatus, string> = {
   running: "▶️",
   unstarted: "⚪",
   "wave-parked": "⏸",
+  interrupted: "⏹",
 };
 
 /**
@@ -876,6 +878,9 @@ ${TOP_BAR_STYLES}
   /* A wave-parked wave — a red merged base holds it (ADR 0013) — carries the attention
      amber top edge, the same amber an issue parked reads (§2). */
   .wave.wave-parked { border-top-color: var(--color-yellow); }
+  /* An interrupted archived run's in-flight wave (#152) reads the same caution amber
+     the run-level state dot does — it stopped without finishing. */
+  .wave.interrupted { border-top-color: var(--color-yellow); }
   /* A flex-grid item beats the UA [hidden] rule, so a collapsed closed card needs it back explicitly. */
   .wave.closed[hidden] { display: none; }
   /* One stable head row: the label takes the slack and wraps within itself, the meta
@@ -911,6 +916,7 @@ ${TOP_BAR_STYLES}
   .wave-status.running { border-color: var(--color-blue); color: var(--color-blue); background: rgb(108 182 255 / 12%); }
   .wave-status.unstarted { border-color: var(--color-dim); color: var(--color-dim); background: rgb(95 107 120 / 12%); }
   .wave-status.wave-parked { border-color: var(--color-yellow); color: var(--color-yellow); background: rgb(200 162 78 / 12%); }
+  .wave-status.interrupted { border-color: var(--color-yellow); color: var(--color-yellow); background: rgb(200 162 78 / 12%); }
   .wave-carved { font-size: .78rem; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: var(--color-carved); border: 1px solid var(--color-carved); background: rgb(163 113 247 / 12%); border-radius: 999px; padding: .1rem .5rem; }
   /* Status dot colours, generated once from stateColor and shared with the landing
      (§3), scoped to .dot so a state never tints a whole chip, card, or list row (#81). */

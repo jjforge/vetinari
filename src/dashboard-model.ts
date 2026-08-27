@@ -49,7 +49,7 @@ export type IssueStatus = "completed" | "parked" | "failure" | "running" | "unst
  * it is resolved and re-merged. Only the view layer knows them; `reduceCampaign`'s
  * `outcomes` stay `IssueStatus`.
  */
-export type DisplayStatus = IssueStatus | "carved" | "quarantined";
+export type DisplayStatus = IssueStatus | "carved" | "quarantined" | "interrupted";
 
 export interface StatusIssue {
   issueNumber: string;
@@ -64,8 +64,11 @@ export interface StatusIssue {
  * combined base gated red, so the wave's greens stay merged and the campaign pauses
  * for a human — distinct from an issue `parked`, which is one issue's slot awaiting
  * a reply. Derived at render from the `wave-parked` event, like `carved`/`quarantined`.
+ * `interrupted` is the archived-run reconciliation (#152): an interrupted run's log
+ * ends with no terminal event, so its in-flight `running` wave is folded to this
+ * terminal state — an archived run must never render a live status.
  */
-export type WaveStatus = "closed" | "running" | "unstarted" | "wave-parked";
+export type WaveStatus = "closed" | "running" | "unstarted" | "wave-parked" | "interrupted";
 
 export interface StatusWave {
   index: number;
@@ -560,6 +563,30 @@ export function archivedRunState(events: OrchestratorEvent[]): ArchivedRunState 
   const start = events.findLastIndex((e) => e.event === "campaign-start" && Array.isArray(e.batches));
   const relevant = start >= 0 ? events.slice(start) : events;
   return relevant.some((e) => e.event === "campaign-done" || e.event === "queue-done") ? "complete" : "interrupted";
+}
+
+/**
+ * Reconcile a status reconstructed from an **archived** run's log to a terminal
+ * display (#152). An archived run is finished by definition, but an interrupted one
+ * (a crash, a kill/OOM) leaves a log that ends with no terminal event, so the shared
+ * `reduceCampaign` fold — correct for the *live* log — leaves its in-flight wave and
+ * issues `running`, a live status an archived run must never present. Map every live
+ * `running` to the terminal `interrupted` (distinct from a clean `completed` or a
+ * halt's `failure`); an unstarted future wave is left as-is (not a live status). A
+ * `complete` run finished clean and has no `running` to touch, so it passes through
+ * unchanged — and the live path never calls this, so it keeps deriving `running` as
+ * today. Pure (no I/O), applied only on the archived read boundary.
+ */
+export function reconcileArchivedStatus(status: CampaignStatus, state: ArchivedRunState): CampaignStatus {
+  if (state === "complete") return status;
+  return {
+    ...status,
+    waves: status.waves.map((wave) => ({
+      ...wave,
+      status: wave.status === "running" ? "interrupted" : wave.status,
+      issues: wave.issues.map((issue) => (issue.status === "running" ? { ...issue, status: "interrupted" } : issue)),
+    })),
+  };
 }
 
 /**

@@ -23,6 +23,7 @@ import {
 import {
   appendedEvents,
   archiveStatusConfig,
+  archivedRunState,
   buildAllStatus,
   buildFeed,
   buildLanding,
@@ -43,6 +44,7 @@ import {
   parkedReplyFor,
   parseCarveClosure,
   parseRunTimestamp,
+  reconcileArchivedStatus,
   reconstructIssueDetail,
   projectRunState,
   reduceCampaign,
@@ -4740,9 +4742,11 @@ test("renderStatusPage shows an interrupted run as interrupted and still expands
                 issues: [{ issueNumber: "101", status: "completed" }],
               },
               {
+                // The route reconciles an interrupted run's in-flight wave to the
+                // terminal `interrupted` — an archived run never reads as live (#152).
                 index: 1,
-                status: "running",
-                issues: [{ issueNumber: "201", status: "running" }],
+                status: "interrupted",
+                issues: [{ issueNumber: "201", status: "interrupted" }],
               },
             ],
             parked: [],
@@ -4757,14 +4761,70 @@ test("renderStatusPage shows an interrupted run as interrupted and still expands
     html,
     /<span class="archive-state interrupted"><span class="archive-dot interrupted"><\/span>interrupted · 2 issues<\/span>/,
   );
-  // …and, opened, its campaign pane still shows the partial waves it did run.
+  // …and, opened, its campaign pane still shows the partial waves it did run — the
+  // in-flight wave/issue reconciled to the terminal `interrupted`, never `running`.
   const paneStart = html.indexOf('class="archive-pane archive-campaign"');
   const pane = html.slice(
     paneStart,
     html.indexOf('class="archive-pane archive-raw"', paneStart),
   );
   assert.match(pane, /#101 <small>completed<\/small>/);
-  assert.match(pane, /#201 <small>running<\/small>/);
+  assert.match(pane, /#201 <small>interrupted<\/small>/);
+  assert.doesNotMatch(pane, /<small>running<\/small>/);
+});
+
+test("reconcileArchivedStatus maps an interrupted run's live `running` statuses to terminal `interrupted`, leaving a complete run untouched (#152)", () => {
+  const live: CampaignStatus = {
+    project: "beta",
+    waves: [
+      { index: 0, status: "closed", issues: [{ issueNumber: "101", status: "completed" }] },
+      { index: 1, status: "running", issues: [{ issueNumber: "201", status: "running" }] },
+    ],
+    parked: [],
+  };
+  // A complete run finished clean — it has no in-flight status to reconcile, so it
+  // passes through unchanged.
+  assert.deepEqual(reconcileArchivedStatus(live, "complete"), live);
+  // An interrupted run's in-flight `running` wave and issue become the terminal
+  // `interrupted`; the banked closed wave and its completed issue are untouched.
+  const fixed = reconcileArchivedStatus(live, "interrupted");
+  assert.equal(fixed.waves[0].status, "closed");
+  assert.equal(fixed.waves[0].issues[0].status, "completed");
+  assert.equal(fixed.waves[1].status, "interrupted");
+  assert.equal(fixed.waves[1].issues[0].status, "interrupted");
+});
+
+test("an archived non-terminal log renders a terminal status, not `running`, while the live log still derives `running` (#152)", () => {
+  // The issue's self-contained reproducer: a campaign that logged its first wave's
+  // spawn and then stopped — no campaign-done / campaign-halt / queue-done.
+  const events = [
+    event("campaign-start", { ts: "2026-08-26T23:27:59.174Z", batches: [["101"], ["202"]], slots: 8, name: "interrupted run" }),
+    event("campaign-batch", { ts: "2026-08-26T23:28:00.000Z", index: 0, tasks: ["101"] }),
+    event("queue-start", { ts: "2026-08-26T23:28:01.000Z", taskIds: ["101"], slots: 8 }),
+    event("queue-spawn", { ts: "2026-08-26T23:28:02.000Z", taskId: "101", running: 1, left: 0 }),
+  ];
+  // The live-log path is unchanged: an in-flight issue with no terminal event reduces
+  // to `running`, exactly as today (no regression).
+  assert.equal(reduceCampaign(events).outcomes.get("101"), "running");
+
+  // The archived path reconciles. The log has no terminal event, so the run is
+  // interrupted; its rendered status must carry no `running` — the in-flight wave and
+  // issue read the terminal `interrupted` instead.
+  const dir = join(tmpdir(), `vetinari-status-152-${Date.now()}`);
+  const archiveDir = join(dir, "logs", "archive");
+  mkdirSync(archiveDir, { recursive: true });
+  const archive = join(archiveDir, "orchestrator-2026-08-26T23-27-59-684Z.jsonl");
+  writeJsonl(archive, events);
+
+  assert.equal(archivedRunState(events), "interrupted");
+  const status = reconcileArchivedStatus(buildStatus(archiveStatusConfig("demo", archive)), "interrupted");
+  const statuses = status.waves.flatMap((w) => [w.status as string, ...w.issues.map((i) => i.status as string)]);
+  assert.ok(!statuses.includes("running"), `an archived run must show no live status; got ${statuses.join(", ")}`);
+  assert.equal(status.waves[0].status, "interrupted");
+  assert.equal(status.waves[0].issues[0].status, "interrupted");
+  // The never-reached second wave stays honestly unstarted — that is not a live status.
+  assert.equal(status.waves[1].status, "unstarted");
+  assert.equal(status.waves[1].issues[0].status, "unstarted");
 });
 
 test("renderStatusPage opens the archived row named by archivedRun, in the requested mode", () => {

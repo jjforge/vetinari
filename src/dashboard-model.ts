@@ -42,12 +42,14 @@ export type IssueStatus = "completed" | "parked" | "failure" | "running" | "unst
 
 /**
  * A chip's status as the dashboard renders it: the orchestrator's own `IssueStatus`
- * plus `carved`, the one state derived at render (from carve events) rather than
- * carried as an enum value — the agent loop and `IssueStatus` stay untouched (ADR
- * 0007). Only the view layer knows `carved`; `reduceCampaign`'s `outcomes` stay
- * `IssueStatus`.
+ * plus two states derived at render rather than carried as enum values — the agent
+ * loop and `IssueStatus` stay untouched (ADR 0007). `carved` is folded from carve
+ * events; `quarantined` (ADR 0013) from the `quarantined` event a merge conflict
+ * logs, an attention-class state that outranks the issue's own green outcome until
+ * it is resolved and re-merged. Only the view layer knows them; `reduceCampaign`'s
+ * `outcomes` stay `IssueStatus`.
  */
-export type DisplayStatus = IssueStatus | "carved";
+export type DisplayStatus = IssueStatus | "carved" | "quarantined";
 
 export interface StatusIssue {
   issueNumber: string;
@@ -56,7 +58,14 @@ export interface StatusIssue {
   detail?: string;
 }
 
-export type WaveStatus = "closed" | "running" | "unstarted";
+/**
+ * A wave's status as the dashboard renders it. `wave-parked` (ADR 0013) is the
+ * run-level held state a red merged base leaves: every green passed alone, the
+ * combined base gated red, so the wave's greens stay merged and the campaign pauses
+ * for a human — distinct from an issue `parked`, which is one issue's slot awaiting
+ * a reply. Derived at render from the `wave-parked` event, like `carved`/`quarantined`.
+ */
+export type WaveStatus = "closed" | "running" | "unstarted" | "wave-parked";
 
 export interface StatusWave {
   index: number;
@@ -188,6 +197,10 @@ export function describeEvent(e: OrchestratorEvent): string {
     }
     case "parked":
       return `${hash(e.taskId)} parked${e.reason ? `: ${e.reason}` : ""}`;
+    case "quarantined":
+      return `${hash(e.taskId)} quarantined — resolve the conflict`;
+    case "wave-parked":
+      return "Wave parked — merged base gated red";
     case "carve":
       return `Carved ${(e.removed ?? []).map(hash).join(", ")}`;
     case "telegram-unconfigured":
@@ -289,6 +302,12 @@ export interface ReducedCampaign {
    * in log order — rendered `carved` (ADR 0007). A superset key over `outcomes`,
    * which stays `IssueStatus`; carved is a render overlay, not a stored status. */
   carved: Set<string>;
+  /** the issues a merge conflict quarantined out of integration (ADR 0013), folded
+   * from `quarantined` events in log order and cleared once the issue re-merges. A
+   * render overlay like `carved`: it outranks the issue's `IssueStatus` outcome (a
+   * quarantined issue passed its own gate, so `outcomes` holds `completed`) so the
+   * chip reads `quarantined` while the conflict is unresolved. */
+  quarantined: Set<string>;
   /** the optional human name the campaign was launched with (`--name`), read off
    * the latest `campaign-start` event; undefined for an unnamed run. */
   name?: string;
@@ -309,6 +328,11 @@ export interface ReducedCampaign {
   halted: boolean;
   closedWaves: Set<number>;
   currentWave: number;
+  /** the wave a red merged base wave-parked (ADR 0013), indexing the pruned `waves`
+   * like `currentWave`/`closedWaves`; -1 when none is parked. Set from the
+   * `wave-parked` event, which lands on the in-flight wave with no `campaign-batch-done`
+   * to close it, so this holds `currentWave` at the point the wave-park was logged. */
+  parkedWave: number;
 }
 
 /**
@@ -325,6 +349,7 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
   let waves: string[][] = [];
   let layout: string[][] = [];
   const carved = new Set<string>();
+  const quarantined = new Set<string>();
   let name: string | undefined;
   const outcomes = new Map<string, IssueStatus>();
   const details = new Map<string, string>();
@@ -332,6 +357,7 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
   const mergedAt = new Map<string, string>();
   const closedWaves = new Set<number>();
   let currentWave = -1;
+  let parkedWave = -1;
   let halted = false;
 
   for (const e of relevant) {
@@ -381,12 +407,26 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
       const taskId = normalizeIssue(String(e.taskId));
       outcomes.set(taskId, "parked");
       details.set(taskId, `Parked: ${e.reason ?? "needs attention"}`);
+    } else if (e.event === "quarantined" && e.taskId) {
+      // A merge conflict pulled this green from integration (ADR 0013). Overlay it
+      // like `carved` — the issue's own outcome is `completed` (it passed its gate),
+      // so the set is what makes the chip read `quarantined` until it re-merges.
+      const taskId = normalizeIssue(String(e.taskId));
+      quarantined.add(taskId);
+      details.set(taskId, "Quarantined on a merge conflict — resolve the conflict");
+    } else if (e.event === "wave-parked") {
+      // A red merged base parked the in-flight wave (ADR 0013). No `campaign-batch-done`
+      // follows to close it, so it stays `currentWave`; record that as the parked wave.
+      parkedWave = currentWave;
     } else if (e.event === "campaign-batch-done" && Number.isInteger(e.index)) {
       closedWaves.add(e.index);
       currentWave = -1;
       for (const taskId of e.merged ?? []) {
         const issueNumber = normalizeIssue(String(taskId));
         outcomes.set(issueNumber, "completed");
+        // A clean re-merge resolves an earlier quarantine, so the chip reads completed —
+        // and its stale "resolve the conflict" detail is replaced with the merge line.
+        if (quarantined.delete(issueNumber)) details.set(issueNumber, "Merged into base");
         if (!details.has(issueNumber)) details.set(issueNumber, "Merged into base");
         if (e.ts && !mergedAt.has(issueNumber)) mergedAt.set(issueNumber, String(e.ts));
       }
@@ -410,7 +450,7 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
     }
   }
 
-  return { waves, layout, carved, name, outcomes, details, titles, mergedAt, halted, closedWaves, currentWave };
+  return { waves, layout, carved, quarantined, name, outcomes, details, titles, mergedAt, halted, closedWaves, currentWave, parkedWave };
 }
 
 /** One entry in an issue's turn log (ADR 0009): the turn's number as logged
@@ -470,8 +510,8 @@ const eventNamesIssue = (e: OrchestratorEvent, id: string): boolean => {
  */
 export function reconstructIssueDetail(events: OrchestratorEvent[], issueNumber: string): IssueDetail {
   const id = normalizeIssue(issueNumber);
-  const { outcomes, carved, titles, name } = reduceCampaign(events);
-  const status: DisplayStatus = carved.has(id) ? "carved" : outcomes.get(id) ?? "unstarted";
+  const { outcomes, carved, quarantined, titles, name } = reduceCampaign(events);
+  const status: DisplayStatus = carved.has(id) ? "carved" : quarantined.has(id) ? "quarantined" : outcomes.get(id) ?? "unstarted";
 
   const latestCampaignIndex = events.findLastIndex((e) => e.event === "campaign-start" && Array.isArray(e.batches));
   const relevant = latestCampaignIndex >= 0 ? events.slice(latestCampaignIndex) : events;
@@ -618,7 +658,7 @@ export function summarizeRun(events: OrchestratorEvent[]): string {
 }
 
 export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
-  const { waves, layout, carved, name, outcomes, details, titles, closedWaves, currentWave } = reduceCampaign(readEventLog(cfg));
+  const { waves, layout, carved, quarantined, name, outcomes, details, titles, closedWaves, currentWave, parkedWave } = reduceCampaign(readEventLog(cfg));
 
   const activeIssueNumbers = new Set(waves.flat());
   const closedIssueNumbers = new Set([...closedWaves].flatMap((index) => waves[index] ?? []));
@@ -643,10 +683,21 @@ export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
     const prunedWave = survives ? prunedIndex++ : -1;
     return {
       index,
-      status: (prunedWave >= 0 && closedWaves.has(prunedWave) ? "closed" : prunedWave >= 0 && currentWave === prunedWave ? "running" : "unstarted") as WaveStatus,
+      // A wave-parked wave (ADR 0013) is not closed (no batch-done) and outranks the
+      // running read it would otherwise get (its `currentWave` never reset), so the
+      // wave-park check sits above running.
+      status: (prunedWave >= 0 && closedWaves.has(prunedWave)
+        ? "closed"
+        : prunedWave >= 0 && parkedWave === prunedWave
+          ? "wave-parked"
+          : prunedWave >= 0 && currentWave === prunedWave
+            ? "running"
+            : "unstarted") as WaveStatus,
       issues: wave.map((issueNumber) => ({
         issueNumber,
-        status: (carved.has(issueNumber) ? "carved" : outcomes.get(issueNumber) ?? "unstarted") as DisplayStatus,
+        // carved and quarantined are render overlays that outrank the stored outcome
+        // (ADR 0007/0013); carved wins over quarantined (a carve removes the issue).
+        status: (carved.has(issueNumber) ? "carved" : quarantined.has(issueNumber) ? "quarantined" : outcomes.get(issueNumber) ?? "unstarted") as DisplayStatus,
         name: titles.get(issueNumber),
         detail: details.get(issueNumber),
       })),

@@ -16,7 +16,7 @@ function _typeContract(l: Logger) {
   // @ts-expect-error `green` is missing `commits`.
   l.log("green", { taskId: "42", branch: "agent/42" });
   // A peripheral kind stays cheap via the untyped catch-all.
-  l.log("gate-result", { cmd: "x", exitCode: 1 });
+  l.log("sandbox", { taskId: "42", branch: "agent/42", mounts: [] });
 }
 void _typeContract;
 

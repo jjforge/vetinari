@@ -5,6 +5,24 @@ import { runGates } from "./gate.ts";
 import { agentFor, makeSandbox } from "./sandbox.ts";
 import { clearParked, enqueueOutbound, park } from "./state.ts";
 import { HARVEST_PROMPT, parseFindings, reportFindings } from "./findings.ts";
+import { activityLoggingSink, appendActivity, initActivityLog } from "./activity.ts";
+import { event } from "./event-log.ts";
+
+/**
+ * The files a single commit touched, from the host repo (the agent branch's objects share the host
+ * object store). Best-effort: a git failure yields `[]` and a diagnostic rather than aborting a real
+ * green over a `commit` event's file list.
+ */
+function filesInCommit(sha: string, log: Logger): string[] {
+  try {
+    return execFileSync("git", ["diff-tree", "--no-commit-id", "--name-only", "-r", sha], { encoding: "utf8" })
+      .split("\n")
+      .filter(Boolean);
+  } catch (e: any) {
+    log.log("commit-files-failed", { sha, error: String(e?.message ?? e) });
+    return [];
+  }
+}
 
 /**
  * Commits on `branch` not reachable from `base`, in the host repo. Returns null
@@ -108,11 +126,16 @@ async function harvestFindings(cfg: ResolvedConfig, sbx: any, sessionId: string 
 export async function runLoop(cfg: ResolvedConfig, taskId: string, entry?: ResumeEntry): Promise<Outcome> {
   const task = entry ? "" : await cfg.fetchTask(taskId);
   const sbx = await makeSandbox(cfg, taskId);
+  // Start the per-task activity stream fresh — live-only scratch, overwritten per run (ADR 0015).
+  initActivityLog(cfg.stateDir, taskId);
   try {
     const common = {
       agent: agentFor(cfg),
       completionSignal: [DONE, BLOCKED],
       idleTimeoutSeconds: cfg.idleTimeoutSeconds,
+      // Additive to the human-readable agent log: projects the raw run stream into
+      // activity-<taskId>.jsonl per tool-use, so the live-tail pane has a structured source (ADR 0015).
+      logging: activityLoggingSink(cfg.stateDir, taskId),
     };
     let r: any;
     try {
@@ -122,14 +145,20 @@ export async function runLoop(cfg: ResolvedConfig, taskId: string, entry?: Resum
 
       for (let turn = 0; turn < cfg.maxTurns; turn++) {
         const sessionId = r.iterations.at(-1)?.sessionId;
-        cfg.log.log("turn", { taskId, turn, signal: r.completionSignal, sessionId, usage: usageOf(r), commits: r.commits?.length ?? 0, summary: extractTurnSummary(r.stdout ?? "") ?? "" });
+        const turnFields = { taskId, turn, signal: r.completionSignal, sessionId, usage: usageOf(r), commits: r.commits?.length ?? 0, summary: extractTurnSummary(r.stdout ?? "") ?? "" };
+        cfg.log.log("turn", turnFields);
+        // Fold the loop's own events into the per-task activity stream so the pane tails one merged
+        // record (ADR 0015): the turn, then a per-`commit` line for each commit this turn landed.
+        appendActivity(cfg.stateDir, taskId, event("turn", turnFields));
+        for (const c of r.commits ?? [])
+          appendActivity(cfg.stateDir, taskId, event("commit", { taskId, branch: sbx.branch, sha: c.sha, files: filesInCommit(c.sha, cfg.log) }));
 
         if (r.completionSignal === BLOCKED) {
           await park(cfg, { taskId, reason: "blocked", sessionId, branch: sbx.branch, question: extractQuestion(r.stdout ?? "") });
           return "parked";
         }
 
-        const { green, report } = await runGates(cfg, sbx);
+        const { green, report } = await runGates(cfg, sbx, { taskId });
         if (green) {
           // Empty-green guard (#1): a `when`-scoped gate does not fire on an
           // empty diff, so a no-op agent that emits DONE gets a trivial green on

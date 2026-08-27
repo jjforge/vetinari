@@ -358,6 +358,65 @@ test("scanTidy reads reachability, fragments, and parked records; applyTidy fold
   assert.equal(existsSync(join(parkedDir, "50.json")), false);
 });
 
+test("scanTidy reads wave-parked issues from the event log so their reachable branches are protected", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-tidy-wp-"));
+  const git = (args: string[]) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" }).trim();
+  execFileSync("git", ["-C", dir, "-c", "init.defaultBranch=main", "init", "-q"]);
+  git(["config", "user.email", "test@example.com"]);
+  git(["config", "user.name", "test"]);
+  writeFileSync(join(dir, "seed.txt"), "base\n");
+  git(["add", "-A"]);
+  git(["commit", "-qm", "seed"]);
+
+  // A wave-parked wave: its greens #70/#71 are MERGED on the base (reachable) but the
+  // combined gate is red, so the wave is paused — their branches must be preserved.
+  for (const id of ["70", "71"]) {
+    git(["checkout", "-q", "-b", `agent/${id}`]);
+    writeFileSync(join(dir, `${id}.txt`), `${id}\n`);
+    git(["add", "-A"]);
+    git(["commit", "-qm", id]);
+    git(["checkout", "-q", "main"]);
+    git(["merge", "--no-ff", "-q", `agent/${id}`, "-m", `merge ${id}`]);
+  }
+  // #72 is an unrelated by-hand-merged branch — GC fodder.
+  git(["checkout", "-q", "-b", "agent/72"]);
+  writeFileSync(join(dir, "72.txt"), "72\n");
+  git(["add", "-A"]);
+  git(["commit", "-qm", "72"]);
+  git(["checkout", "-q", "main"]);
+  git(["merge", "--no-ff", "-q", "agent/72", "-m", "merge 72"]);
+
+  const logFile = join(dir, "orchestrator.jsonl");
+  writeFileSync(
+    logFile,
+    [
+      JSON.stringify({ event: "campaign-start", batches: [["70", "71"]] }),
+      JSON.stringify({ event: "campaign-batch", index: 0 }),
+      JSON.stringify({ event: "wave-parked", merged: ["70", "71"], detail: "gate red" }),
+    ].join("\n") + "\n",
+  );
+
+  const target = {
+    project: "demo",
+    root: dir,
+    baseBranch: "main",
+    branchPrefix: "agent/",
+    parkedDir: join(dir, "parked"),
+    logFile,
+    fragmentsDir: join(dir, "changelog.d"),
+    changelogPath: join(dir, "CHANGELOG.md"),
+  };
+
+  const snap = scanTidy(target);
+  assert.deepEqual(snap.waveParked.sort(), ["70", "71"]);
+
+  const plan = computeTidy(snap);
+  // Only the unrelated #72 is GC'd; the wave-parked greens are kept despite being reachable.
+  assert.deepEqual(plan.deleteBranches, ["72"]);
+  const kept = Object.fromEntries(plan.keep.map((k) => [k.id, k.reason]));
+  assert.deepEqual(kept, { "70": "wave-parked", "71": "wave-parked" });
+});
+
 test("collectWaveChangelog makes no commit when the wave left no fragments", () => {
   const dir = repoWithChangelog("# Changelog\n\n### Older — August 1, 2026\n\n**Bug fixes:**\n- [user] old (#1)\n");
   const before = headSha(dir);

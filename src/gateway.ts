@@ -12,7 +12,7 @@
 import { spawn } from "node:child_process";
 import { normalize } from "./carve.ts";
 import { resolveDestination, type Destination, type NotifyMap } from "./config.ts";
-import { log } from "./log.ts";
+import { hostLogger, type Logger } from "./log.ts";
 import {
   listOutboxIn,
   listParkedIn,
@@ -354,7 +354,11 @@ export interface DrainResult {
  * project with no connection is skipped whole (nowhere to send). The send is
  * injected so the routing is testable without a live bot.
  */
-export async function drainOutbox(project: GatewayProject, send: (conn: TgConn, text: string) => Promise<number | undefined>): Promise<DrainResult[]> {
+export async function drainOutbox(
+  project: GatewayProject,
+  send: (conn: TgConn, text: string) => Promise<number | undefined>,
+  logger: Logger = hostLogger(),
+): Promise<DrainResult[]> {
   const results: DrainResult[] = [];
   for (const record of project.outbox) {
     if (record.sentAt != null) continue;
@@ -362,12 +366,12 @@ export async function drainOutbox(project: GatewayProject, send: (conn: TgConn, 
     if (!conn) continue;
     const messageId = await send(conn, record.text);
     if (messageId == null) {
-      log("gateway-route-failed", { project: project.project, id: record.id, category: record.category, event: record.event });
+      logger.log("gateway-route-failed", { project: project.project, id: record.id, category: record.category, event: record.event });
       results.push({ record, destination, sent: false });
       continue;
     }
     markOutboundSent(outboxDirOf(project.baseLocation), record.id, destination);
-    log("gateway-routed", { project: project.project, id: record.id, category: record.category, event: record.event, destination });
+    logger.log("gateway-routed", { project: project.project, id: record.id, category: record.category, event: record.event, destination });
     results.push({ record, destination, sent: true });
   }
   return results;
@@ -617,11 +621,11 @@ const announceText = (a: Announcement) =>
  * reply). Reads projects fresh so questions parked since the last tick are picked
  * up. Idempotent: a record that already has a message id is never re-announced.
  */
-async function announcePending(configDir: string, index: ReplyIndex): Promise<void> {
+async function announcePending(configDir: string, index: ReplyIndex, logger: Logger = hostLogger()): Promise<void> {
   for (const a of pendingAnnouncements(loadGatewayProjects(configDir), index)) {
     const messageId = await tgSend(a.conn, announceText(a));
     if (messageId == null) {
-      log("gateway-announce-failed", { project: a.project, task: a.record.taskId });
+      logger.log("gateway-announce-failed", { project: a.project, task: a.record.taskId });
       continue;
     }
     setParkedMessageId(parkedDirOf(a.baseLocation), a.record.taskId, messageId);
@@ -632,7 +636,7 @@ async function announcePending(configDir: string, index: ReplyIndex): Promise<vo
       baseLocation: a.baseLocation,
       parkedAt: a.record.parkedAt,
     });
-    log("gateway-announced", { project: a.project, task: a.record.taskId, messageId });
+    logger.log("gateway-announced", { project: a.project, task: a.record.taskId, messageId });
   }
 }
 
@@ -644,10 +648,10 @@ async function announcePending(configDir: string, index: ReplyIndex): Promise<vo
  * the sole-sender path for broadcast messages — the announce loop above is the
  * same thing for the interactive `question` category.
  */
-async function drainOutboxes(configDir: string): Promise<void> {
+async function drainOutboxes(configDir: string, logger: Logger = hostLogger()): Promise<void> {
   for (const p of loadGatewayProjects(configDir)) {
     if (!p.outbox.some((r) => r.sentAt == null)) continue;
-    await drainOutbox(p, (conn, text) => tgSend(conn, text));
+    await drainOutbox(p, (conn, text) => tgSend(conn, text), logger);
   }
 }
 
@@ -673,9 +677,9 @@ function carveCandidates(configDir: string): CarveCandidate[] {
  * Shares the shell-out with the aggregated dashboard's `POST /carve` preview
  * (`shellCarvePreview`); the only extra here is the failure log line.
  */
-async function carvePreview(target: PendingConfirm): Promise<string | null> {
+async function carvePreview(target: PendingConfirm, logger: Logger = hostLogger()): Promise<string | null> {
   const text = await shellCarvePreview(target.projectRoot, target.issue);
-  if (text == null) log("gateway-carve-preview-failed", { project: target.project, issue: target.issue });
+  if (text == null) logger.log("gateway-carve-preview-failed", { project: target.project, issue: target.issue });
   return text;
 }
 
@@ -687,14 +691,14 @@ async function carvePreview(target: PendingConfirm): Promise<string | null> {
  * `progress:carve` — the gateway only routes the command and its confirmation.
  * Fire-and-forget, like `spawnResume`.
  */
-function spawnCarve(target: PendingConfirm): void {
-  log("gateway-carve", { project: target.project, issue: target.issue });
+function spawnCarve(target: PendingConfirm, logger: Logger = hostLogger()): void {
+  logger.log("gateway-carve", { project: target.project, issue: target.issue });
   spawn(process.execPath, [...process.execArgv, process.argv[1], "carve", target.issue], {
     cwd: target.projectRoot,
     stdio: ["ignore", "inherit", "inherit"],
   })
-    .on("exit", (code) => log("gateway-carve-done", { project: target.project, issue: target.issue, code }))
-    .on("error", (err) => log("gateway-carve-failed", { project: target.project, issue: target.issue, error: String(err) }));
+    .on("exit", (code) => logger.log("gateway-carve-done", { project: target.project, issue: target.issue, code }))
+    .on("error", (err) => logger.log("gateway-carve-failed", { project: target.project, issue: target.issue, error: String(err) }));
 }
 
 /**
@@ -703,16 +707,16 @@ function spawnCarve(target: PendingConfirm): void {
  * child runs detached and several resumes proceed concurrently — one slow resume
  * never holds up the others.
  */
-function spawnResume(ref: SendRef, text: string): void {
-  log("gateway-resume", { project: ref.project, task: ref.task, chars: text.length });
+function spawnResume(ref: SendRef, text: string, logger: Logger = hostLogger()): void {
+  logger.log("gateway-resume", { project: ref.project, task: ref.task, chars: text.length });
   spawn(process.execPath, [...process.execArgv, process.argv[1], "answer", ref.task, text], {
     cwd: ref.projectRoot,
     stdio: ["ignore", "inherit", "inherit"],
   })
-    .on("exit", (code) => log("gateway-resume-done", { project: ref.project, task: ref.task, code }))
+    .on("exit", (code) => logger.log("gateway-resume-done", { project: ref.project, task: ref.task, code }))
     // A stale projectRoot (moved/deleted since registration) surfaces here as an
     // 'error', not a throw — log it rather than let it crash the whole daemon.
-    .on("error", (err) => log("gateway-resume-failed", { project: ref.project, task: ref.task, error: String(err) }));
+    .on("error", (err) => logger.log("gateway-resume-failed", { project: ref.project, task: ref.task, error: String(err) }));
 }
 
 /**
@@ -736,13 +740,16 @@ function spawnResume(ref: SendRef, text: string): void {
  * already-polled bots are picked up live by the announce loop.
  */
 export async function gateway(configDir: string = gatewayConfigDir()): Promise<void> {
+  // The host daemon spans every project and has no per-run cfg.logFile, so it
+  // emits to the persistent host log (`hostLogTarget`), threaded through its helpers.
+  const log = hostLogger();
   const index = rebuildIndex(loadGatewayProjects(configDir));
   // Non-durable by design (ADR 0002): a restart drops pending carve
   // confirmations, and re-sending `carve 640` is the recovery.
   const pending = newPendingConfirms(() => Date.now());
   // Just for the startup line — the supervisor below re-derives targets live.
   const startupBots = pollTargets(loadGatewayProjects(configDir)).length;
-  log("gateway-start", { configDir, bots: startupBots });
+  log.log("gateway-start", { configDir, bots: startupBots });
   if (!startupBots) console.log("gateway up — no project defines a Telegram bot yet; announcing silently.");
 
   // Host the one aggregated status site over every registered project (E5). The
@@ -753,10 +760,10 @@ export async function gateway(configDir: string = gatewayConfigDir()): Promise<v
   const announcing = (async () => {
     for (;;) {
       try {
-        await announcePending(configDir, index);
-        await drainOutboxes(configDir);
+        await announcePending(configDir, index, log);
+        await drainOutboxes(configDir, log);
       } catch (e) {
-        log("gateway-announce-error", { error: String(e) });
+        log.log("gateway-announce-error", { error: String(e) });
       }
       await sleep(ANNOUNCE_INTERVAL_MS);
     }
@@ -770,20 +777,20 @@ export async function gateway(configDir: string = gatewayConfigDir()): Promise<v
   const startPollLoop = (conn: TgConn, signal: AbortSignal) => {
     pollLoop(conn, index, pending, {
       poll: (c, o) => tgPoll(c, o),
-      resume: spawnResume,
+      resume: (ref, text) => spawnResume(ref, text, log),
       onStatus: async (c) => {
         const served = loadGatewayProjects(configDir).filter((p) => p.conn?.token === c.token);
         await tgSend(c, formatGatewayStatus(served));
       },
       onCarve: (c, command) =>
-        handleCarveCommand({ candidates: () => carveCandidates(configDir), preview: carvePreview, send: tgSend }, pending, c, command),
-      onConfirm: spawnCarve,
+        handleCarveCommand({ candidates: () => carveCandidates(configDir), preview: (t) => carvePreview(t, log), send: tgSend }, pending, c, command),
+      onConfirm: (confirm) => spawnCarve(confirm, log),
       onUnrouted: async (c, msg) => {
         // Only answer a genuine misdirected reply; stay quiet for plain chatter.
         if (msg.replyToId != null) await tgSend(c, "That question isn't tracked anymore (already answered, or from before I started). Reply to a current question message.");
       },
       signal,
-    }).catch((e) => log("gateway-poll-error", { token: conn.token, error: String(e) }));
+    }).catch((e) => log.log("gateway-poll-error", { token: conn.token, error: String(e) }));
   };
 
   const polling = supervisePolls(

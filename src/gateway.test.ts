@@ -763,7 +763,7 @@ test("drainOutbox routes each record to the destination its category resolves an
   enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "progress", event: "wave-start", text: "batch 1" });
 
   const { sends, send } = recordingSend();
-  await drainOutbox(routed(base), send);
+  await drainOutbox(routed(base), send, memoryLogger());
 
   // success:green → wildcard ops (-100); failure → alerts (-200);
   // progress:carve → alerts (-200); progress:wave-start → wildcard ops (-100).
@@ -783,17 +783,31 @@ test("drainOutbox routes each record to the destination its category resolves an
   );
 });
 
+test("drainOutbox emits its routing events to the injected Logger, not a global", async () => {
+  const base = outboxBase();
+  enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "success", event: "green", text: "GREEN" });
+
+  const logger = memoryLogger();
+  const { send } = recordingSend();
+  await drainOutbox(routed(base), send, logger);
+
+  assert.ok(
+    logger.events.some((e) => (e.event as string) === "gateway-routed"),
+    "a routed record is logged to the injected logger",
+  );
+});
+
 test("drainOutbox is idempotent — a second drain re-sends nothing", async () => {
   const base = outboxBase();
   enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "success", event: "green", text: "GREEN" });
 
   const first = recordingSend();
-  await drainOutbox(routed(base), first.send);
+  await drainOutbox(routed(base), first.send, memoryLogger());
   assert.equal(first.sends.length, 1);
 
   // A gateway restart re-reads the (now-stamped) outbox and must not re-send.
   const second = recordingSend();
-  await drainOutbox(routed(base), second.send);
+  await drainOutbox(routed(base), second.send, memoryLogger());
   assert.equal(second.sends.length, 0, "an already-sent record is skipped");
 });
 
@@ -802,7 +816,7 @@ test("drainOutbox falls back to the project's default connection when no notify 
   enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "progress", event: "queue-start", text: "queue up" });
 
   const { sends, send } = recordingSend();
-  await drainOutbox(routed(base, { notify: undefined, destinations: undefined }), send);
+  await drainOutbox(routed(base, { notify: undefined, destinations: undefined }), send, memoryLogger());
 
   assert.deepEqual(
     sends.map((s) => s.chat),
@@ -816,7 +830,7 @@ test("drainOutbox reports the default destination — never undefined — when n
   enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "progress", event: "queue-start", text: "queue up" });
 
   const { send } = recordingSend();
-  const results = await drainOutbox(routed(base, { notify: undefined, destinations: undefined }), send);
+  const results = await drainOutbox(routed(base, { notify: undefined, destinations: undefined }), send, memoryLogger());
 
   assert.deepEqual(
     results.map((r) => r.destination),
@@ -835,7 +849,7 @@ test("drainOutbox keeps the named destination on a record its notify map routes"
   enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "failure", event: "halt", text: "campaign HALTED" });
 
   const { send } = recordingSend();
-  const results = await drainOutbox(routed(base), send); // notify maps failure → alerts
+  const results = await drainOutbox(routed(base), send, memoryLogger()); // notify maps failure → alerts
 
   assert.deepEqual(results.map((r) => r.destination), ["alerts"], "a mapped record keeps its resolved destination name");
   assert.equal(listOutboxIn(outboxDirOf(base))[0].destination, "alerts");
@@ -846,7 +860,7 @@ test("drainOutbox skips a project with no connection, leaving its records unsent
   enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "success", event: "green", text: "GREEN" });
 
   const { sends, send } = recordingSend();
-  await drainOutbox(routed(base, { conn: undefined }), send);
+  await drainOutbox(routed(base, { conn: undefined }), send, memoryLogger());
 
   assert.equal(sends.length, 0, "nothing is sent when the project has no bot");
   assert.equal(listOutboxIn(outboxDirOf(base))[0].sentAt, undefined, "the record stays unsent");
@@ -857,7 +871,7 @@ test("drainOutbox leaves a record unsent when the send fails, so the next tick r
   enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "success", event: "green", text: "GREEN" });
 
   const failingSend = async () => undefined; // Telegram rejected — no message id
-  await drainOutbox(routed(base), failingSend);
+  await drainOutbox(routed(base), failingSend, memoryLogger());
 
   assert.equal(listOutboxIn(outboxDirOf(base))[0].sentAt, undefined, "a failed send is not marked sent");
 });

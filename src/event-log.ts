@@ -32,11 +32,15 @@ export interface CampaignStartEvent extends BaseEvent {
   titles?: Record<string, string>;
 }
 
-/** `campaign-batch` — a wave started: its zero-based index and the tasks it drains (modes.ts). */
+/** `campaign-batch` — a wave started: its zero-based index and the tasks it drains, plus the
+ * campaign's optional `--name` and id→title map (carried so a single-event reader can name the
+ * run and its wave without re-reading the log) (modes.ts). */
 export interface CampaignBatchEvent extends BaseEvent {
   event: "campaign-batch";
   index: number;
   tasks: string[];
+  name?: string;
+  titles?: Record<string, string>;
 }
 
 /** `campaign-batch-done` — a wave closed: what merged into the base, what was held (non-green),
@@ -49,6 +53,10 @@ export interface CampaignBatchDoneEvent extends BaseEvent {
   held: string[];
   clearedParked: string[];
   quarantined?: string[];
+  /** the campaign's optional `--name` and id→title map, carried like `campaign-batch` so a
+   * single-event reader can name the run and its wave. */
+  name?: string;
+  titles?: Record<string, string>;
 }
 
 /** `campaign-done` — the whole campaign finished cleanly; carries the number of batches merged
@@ -56,6 +64,8 @@ export interface CampaignBatchDoneEvent extends BaseEvent {
 export interface CampaignDoneEvent extends BaseEvent {
   event: "campaign-done";
   batches: number;
+  /** the campaign's optional `--name`, carried so a single-event reader can name the run. */
+  name?: string;
 }
 
 /** `campaign-halt` — a wave hit a merge conflict or a red merged base, halting the campaign with
@@ -66,6 +76,8 @@ export interface CampaignHaltEvent extends BaseEvent {
   index: number;
   reason: string;
   taskId?: string;
+  /** the campaign's optional `--name`, carried so a single-event reader can name the run. */
+  name?: string;
 }
 
 /** `queue-start` — a bounded queue run started: its task ids and slot count, optionally the id→title

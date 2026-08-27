@@ -1,7 +1,13 @@
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import type { MessageCategory, ResolvedConfig } from "./config.ts";
-import type { CampaignStartEvent, QueueStartEvent } from "./event-log.ts";
+import type {
+  CampaignBatchDoneEvent,
+  CampaignBatchEvent,
+  CampaignDoneEvent,
+  CampaignStartEvent,
+  QueueStartEvent,
+} from "./event-log.ts";
 import { runGates } from "./gate.ts";
 import { makeSandbox } from "./sandbox.ts";
 import {
@@ -492,9 +498,13 @@ export async function campaign(
   // per-wave `queue` calls below pass `titles` and so stay silent (no per-wave repeat).
   warnIfTelegramUnconfigured(cfg);
 
-  // Where the wave loop starts, and the id→title map the per-wave `queue` calls carry.
+  // Where the wave loop starts, the id→title map the per-wave `queue` calls carry, and the run's
+  // human name — stamped onto every wave event and operator note so a resumed or mid-campaign run
+  // never renders nameless (#174). Under resume the `--name` param is ignored, so the name is read
+  // back from the log's `campaign-start` alongside the plan; otherwise it is the supplied param.
   let index = 0;
   let titles: Record<string, string>;
+  let campaignName: string | undefined;
 
   if (opts.resume) {
     // Resume a paused campaign (ADR 0013): reconstruct the existing plan from the log —
@@ -507,6 +517,7 @@ export async function campaign(
         "campaign --resume: no campaign found in the event log to resume. Launch one with `campaign <batch…>`.",
       );
     titles = Object.fromEntries(reduced.titles);
+    campaignName = reduced.name;
     index = resumeIndex(reduced);
     if (index >= reduced.waves.length) {
       cfg.log.log("campaign-resume", { fromIndex: index, waves: reduced.waves.length, nothingLeft: true });
@@ -532,6 +543,7 @@ export async function campaign(
     // still recorded only when given; a run whose titles could not be resolved simply
     // omits them and degrades to `number:status`.
     titles = await resolveTitles(cfg, batches.flat());
+    campaignName = name;
     const startEvent: Omit<CampaignStartEvent, "ts" | "event"> = {
       batches,
       slots: host.ceiling,
@@ -555,11 +567,14 @@ export async function campaign(
     if (index >= waves.length) break;
     const tasks = waves[index];
     const total = waves.length;
-    cfg.log.log("campaign-batch", { index, tasks });
+    const batchEvent: Omit<CampaignBatchEvent, "ts" | "event"> = { index, tasks };
+    if (campaignName) batchEvent.name = campaignName;
+    if (Object.keys(titles).length) batchEvent.titles = titles;
+    cfg.log.log("campaign-batch", batchEvent);
     enqueueOutbound(cfg, {
       category: "progress",
       event: "wave-start",
-      text: `▶️ ${cfg.project} campaign batch ${index + 1}/${total}: ${tasks.join(", ")}`,
+      text: `▶️ ${cfg.project} campaign${campaignName ? ` “${campaignName}”` : ""} batch ${index + 1}/${total}: ${tasks.join(", ")}`,
     });
 
     const outcomes = await queue(cfg, tasks, host, titles, deps.spawnRun);
@@ -606,11 +621,14 @@ export async function campaign(
     const qNote = quarantined.length
       ? ` — quarantined on merge conflict (kept for you): ${quarantined.join(", ")}`
       : "";
-    cfg.log.log("campaign-batch-done", { index, merged, held, clearedParked: held, quarantined });
+    const batchDoneEvent: Omit<CampaignBatchDoneEvent, "ts" | "event"> = { index, merged, held, clearedParked: held, quarantined };
+    if (campaignName) batchDoneEvent.name = campaignName;
+    if (Object.keys(titles).length) batchDoneEvent.titles = titles;
+    cfg.log.log("campaign-batch-done", batchDoneEvent);
     enqueueOutbound(cfg, {
       category: "success",
       event: "wave-merged",
-      text: `✅ ${cfg.project} campaign batch ${index + 1} merged: ${merged.join(", ") || "nothing"}${note}${qNote}`,
+      text: `✅ ${cfg.project} campaign${campaignName ? ` “${campaignName}”` : ""} batch ${index + 1} merged: ${merged.join(", ") || "nothing"}${note}${qNote}`,
     });
     console.log(
       `batch ${index + 1}/${total}: merged ${merged.join(", ") || "nothing"}${note}${qNote}`,
@@ -652,11 +670,13 @@ export async function campaign(
     }
   }
 
-  cfg.log.log("campaign-done", { batches: index });
+  const doneEvent: Omit<CampaignDoneEvent, "ts" | "event"> = { batches: index };
+  if (campaignName) doneEvent.name = campaignName;
+  cfg.log.log("campaign-done", doneEvent);
   enqueueOutbound(cfg, {
     category: "success",
     event: "campaign-complete",
-    text: `🏆 ${cfg.project} campaign complete — ${index} batch(es) merged onto ${cfg.baseBranch}.`,
+    text: `🏆 ${cfg.project} campaign${campaignName ? ` “${campaignName}”` : ""} complete — ${index} batch(es) merged onto ${cfg.baseBranch}.`,
   });
   console.log("campaign complete.");
   return true;

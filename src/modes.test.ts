@@ -19,7 +19,13 @@ import {
   type CampaignDeps,
 } from "./modes.ts";
 import { loggerForRun, memoryLogger, type MemoryLogger } from "./log.ts";
-import { readEventLog, type CampaignBatchEvent } from "./event-log.ts";
+import { listOutbox } from "./state.ts";
+import {
+  readEventLog,
+  type CampaignBatchDoneEvent,
+  type CampaignBatchEvent,
+  type CampaignDoneEvent,
+} from "./event-log.ts";
 import { archiveRun, shouldArchiveLeftover } from "./archive.ts";
 import type { HostBudget } from "./host-slots.ts";
 
@@ -480,6 +486,63 @@ test("the harness has teeth — a child that archives the parent log (the #150 b
     batches.length < 3,
     `expected the archive to strand the plan, but ${batches.length} waves ran`,
   );
+});
+
+test("campaign stamps its name and titles onto the wave events and operator notes (#174)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-named-"));
+  const cfg = harnessCfg(dir);
+  const titles: Record<string, string> = { "101": "cache eviction", "102": "warm the cache" };
+  cfg.fetchTask = async (id) => JSON.stringify({ title: titles[String(id).replace(/^#/, "")] ?? "" });
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+
+  const ok = await silenceConsole(() =>
+    campaign(cfg, [["101", "102"]], host, "gateway work", {}, gitFreeDeps(cfg, async () => 0)),
+  );
+  assert.equal(ok, true);
+
+  const events = readEventLog(cfg);
+  const batch = events.find((e): e is CampaignBatchEvent => e.event === "campaign-batch");
+  assert.equal(batch?.name, "gateway work");
+  assert.deepEqual(batch?.titles, titles);
+
+  const batchDone = events.find((e): e is CampaignBatchDoneEvent => e.event === "campaign-batch-done");
+  assert.equal(batchDone?.name, "gateway work");
+  assert.deepEqual(batchDone?.titles, titles);
+
+  const done = events.find((e): e is CampaignDoneEvent => e.event === "campaign-done");
+  assert.equal(done?.name, "gateway work");
+
+  // The operator notes name the run too, so the Telegram feed isn't anonymous mid-campaign.
+  const outbox = listOutbox(cfg);
+  assert.ok(outbox.find((m) => m.event === "wave-start")?.text.includes("gateway work"));
+  assert.ok(outbox.find((m) => m.event === "wave-merged")?.text.includes("gateway work"));
+});
+
+test("campaign --resume recovers the run's name from the log, not the ignored param (#174)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-resume-named-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+
+  // Seed a paused campaign: wave 0 (101) already banked green, wave 1 (102) still to run.
+  cfg.log.log("campaign-start", {
+    batches: [["101"], ["102"]],
+    slots: 4,
+    name: "seeded run",
+    titles: { "101": "cache eviction", "102": "warm the cache" },
+  });
+  cfg.log.log("green", { taskId: "101", branch: "agent/101", commits: ["abc"] });
+
+  const ok = await silenceConsole(() =>
+    campaign(cfg, [], host, "ignored param", { resume: true }, gitFreeDeps(cfg, async () => 0)),
+  );
+  assert.equal(ok, true);
+
+  // The resumed wave carries the seeded name (read back from campaign-start), never the param.
+  const resumed = readEventLog(cfg).find(
+    (e): e is CampaignBatchEvent => e.event === "campaign-batch" && e.index === 1,
+  );
+  assert.equal(resumed?.name, "seeded run");
+  assert.deepEqual(resumed?.tasks, ["102"]);
 });
 
 test("a graft appended mid-wave lands in a future wave; the loop re-derives and runs it (#166)", async () => {

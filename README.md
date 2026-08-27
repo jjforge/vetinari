@@ -205,6 +205,26 @@ merged or green is kept, only parked/not-yet-started issues leave the plan, and 
 carved issue's parked record (branch, worktree, session) is kept by default so it
 stays resumable — `--purge` is the rare true-drop that clears it.
 
+**Graft — add issues to a running campaign.** `graft <ids…>` is the additive
+mirror of `carve` (ADR 0014). Where carve prunes the unfinished remainder, graft
+**extends** it: it appends a graft event the loop honors at the **next wave
+boundary**, so the in-flight wave finishes untouched and the added issues re-layer
+into **future** waves — after their in-campaign blockers, kept basename-disjoint,
+and leaving the already-planned waves stable (a stable-insert, not a re-optimize).
+Unlike carve's running-only in-place form, graft is allowed against any campaign
+that has not finished — live, or paused/wave-parked/resumable and honored on the
+next `campaign --resume`. It takes explicit ids only, validates all-or-nothing
+(an unknown/closed id, or one already in the campaign, rejects the whole graft
+naming the offenders), and a grafted issue shows as `grafted` in the dashboard
+until its wave picks it up. `--dry-run` prints the resulting placement and appends
+nothing.
+
+```bash
+npx vetinari graft 655 701   # add to the campaign already in flight
+# graft #655, #701 → #655 in wave 3, #701 in wave 4
+# resulting campaign: "436 611" "623 640" "655" "701"
+```
+
 **Plan the waves from a selected set.** Building the batch list by hand is where
 the dependency order gets encoded. `campaign-plan` does it for you: hand it the
 ids you selected and it layers them by the `blockedBy` graph *restricted to that
@@ -453,6 +473,7 @@ The README stops at the reader's first hour. The operational reference lives in
 | `campaign --resume` | continue a **paused** campaign's unrun waves on the current base (after a human fixed a wave-park forward or carved a suspect); reconstructs the plan from the event log, redoes no already-merged issue, takes no batch args |
 | `carve <issue>` | prune `<issue>` + everything blocked by it from the **running** campaign at the next wave boundary (the in-flight wave finishes; only future waves shrink). Banked/merged work is kept; the carved issue's parked record (branch/worktree/session) is **preserved** so it stays resumable — `--purge` is the rare true-drop that clears it (`--dry-run` to preview) |
 | `carve <issue> <batch…>` | the from-scratch form: drop `<issue>` + its transitive dependents, then run the rest as a fresh reduced campaign from the plan you supply (`--dry-run` to just print) |
+| `graft <ids…>` | the additive mirror of `carve` (ADR 0014): add issues to a **running** (or paused/wave-parked/resumable) campaign at the next wave boundary. Appends a graft event the loop re-derives from; the in-flight wave finishes untouched and the added issues re-layer into **future** waves (after their blockers, basename-disjoint), leaving already-planned waves stable. Rejected whole — naming the offenders — if any id is unknown/closed or already in the campaign (`--dry-run` to preview the placement) |
 | `campaign-plan <ids…>` | layer a selected set into dependency-ordered wave args (paste after `campaign`) + a provenance report; plans only, never runs |
 | `init [--dry-run]` | scaffold a **new** project onto the layout: committed `vetinari/` (config skeleton + Dockerfile), excluded `.vetinari.local/`, `.gitignore` updated (idempotent, never clobbers an existing config; `--dry-run` to just print the plan) |
 | `migrate [--dry-run]` | move an **existing** project onto the `vetinari/` + `.vetinari.local/` layout: config → `vetinari/`, old `.sandcastle/` state → `.vetinari.local/`, `.gitignore` updated, the host-side `orchestrator.env` renamed to `host.env`, a stale `gateway.env` deleted, and the systemd unit rewritten into the gateway service (`--dry-run` to just print the plan) |

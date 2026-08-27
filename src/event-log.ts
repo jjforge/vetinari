@@ -157,6 +157,18 @@ export interface CarveEvent extends BaseEvent {
   dropped: string[];
 }
 
+/** `graft` — issues were added to a running (or resumable) campaign: the added ids and the
+ * precomputed layering inputs the pure reducer folds them with (each added id's in-campaign
+ * `blockedBy`, and the basenames of the added ids plus the still-unstarted members it places
+ * against) so `reduceCampaign` stays free of tracker/filesystem access (cli.mts, ADR 0014/0012).
+ * The additive mirror of `carve`. */
+export interface GraftEvent extends BaseEvent {
+  event: "graft";
+  ids: string[];
+  blockedBy: Record<string, string[]>;
+  basenames: Record<string, string[]>;
+}
+
 /** `worktree-preserved` — a parked slot left its worktree on the host: the task and the preserved
  * path, the genuine per-task identity the issue-detail sheet surfaces (loop.ts). */
 export interface WorktreePreservedEvent extends BaseEvent {
@@ -211,6 +223,7 @@ export type OrchestratorEvent =
   | QuarantinedEvent
   | WaveParkedEvent
   | CarveEvent
+  | GraftEvent
   | WorktreePreservedEvent
   | TelegramUnconfiguredEvent
   | WaveStartEvent

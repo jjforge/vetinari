@@ -9,9 +9,9 @@ import type { RouteHandler } from "./dashboard-http.ts";
  * old server-rendered status page as the thing you land on. With a project
  * selected it serves that project's campaign view: its status built live off the
  * registry, its archived runs listed beneath the live one, and — when a `run`
- * token is given — that archived run rendered read-only below the list. Both the
- * archived body and the raw-log link resolve the token by matching the listing,
- * never by joining request input into a path, so an unknown token is rejected.
+ * token is given — that archived run's wave cards rendered read-only below the list.
+ * The archived body resolves the token by matching the listing, never by joining
+ * request input into a path, so an unknown token is rejected.
  */
 export const handlePage: RouteHandler = (req, res, url, deps) => {
   if (!(req.method === "GET" && (url.pathname === "/" || req.url === undefined))) return false;
@@ -37,8 +37,7 @@ export const handlePage: RouteHandler = (req, res, url, deps) => {
   const archivedRuns = pointer ? listArchivedRuns(pointer.baseLocation) : [];
   const requestedRun = url.searchParams.get("run") ?? undefined;
   const match = requestedRun ? archivedRuns.find((r) => r.run === requestedRun) : undefined;
-  const requestedMode = url.searchParams.get("mode") === "raw" ? "raw" : "campaign";
-  // Each row's campaign pane renders the run's reconstructed status read-only: point
+  // Each row's body renders the run's reconstructed status read-only: point
   // buildStatus at the archived log; its dir holds no parked records, so the status
   // carries none (a finished run has nothing to act on). An interrupted run's log ends
   // with no terminal event, so `reconcileArchivedStatus` folds its live `running`
@@ -59,7 +58,6 @@ export const handlePage: RouteHandler = (req, res, url, deps) => {
       graft: true,
       archivedRuns: runs,
       archivedRun: match?.run,
-      archivedMode: match ? requestedMode : undefined,
       festive: festiveFromCookie(req.headers.cookie),
     }),
   );

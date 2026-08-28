@@ -3544,11 +3544,9 @@ test("serveAllStatus lists a project's archived runs and renders one read-only w
     assert.doesNotMatch(root, /2026-03-01/);
     // No run selected → every row starts collapsed.
     assert.doesNotMatch(root, /class="archive-row open"/);
-    // Each row also ships its raw-log pane, keyed to the run for the client fetch.
-    assert.match(
-      root,
-      /data-pane="raw" data-project="beta" data-run="2026-01-01T00-00-00-000Z"/,
-    );
+    // No run-level raw/log pane rides any row — the detail is the wave cards only (#222).
+    assert.doesNotMatch(root, /archive-raw/);
+    assert.doesNotMatch(root, /data-pane=/);
 
     // Selecting a run opens that row on load (a ?run= deep-link).
     const withRun = await (
@@ -3561,10 +3559,24 @@ test("serveAllStatus lists a project's archived runs and renders one read-only w
       withRun,
       /<li class="archive-row open" data-run="2026-01-01T00-00-00-000Z">/,
     );
-    assert.match(withRun, /#101 <small>/); // the archived run's own issues, in its pane
+    assert.match(withRun, /#101 <small>/); // the archived run's own issues, in its body
     // Read-only: the archived run's chips are never prunable (a finished run has
     // nothing to prune).
     assert.doesNotMatch(withRun, /data-issue="101"[^>]*data-prunable/);
+
+    // A stale ?mode=raw param no longer means anything — the run opens normally, no
+    // error and no raw pane (#222).
+    const staleMode = await fetch(
+      `http://127.0.0.1:${port}/?project=beta&run=2026-01-01T00-00-00-000Z&mode=raw`,
+    );
+    assert.equal(staleMode.status, 200);
+    const staleModeHtml = await staleMode.text();
+    assert.match(
+      staleModeHtml,
+      /<li class="archive-row open" data-run="2026-01-01T00-00-00-000Z">/,
+    );
+    assert.match(staleModeHtml, /#101 <small>/); // wave cards, as normal
+    assert.doesNotMatch(staleModeHtml, /archive-raw/);
 
     // A run not present in the archive listing is rejected — no row opens.
     const bogus = await fetch(
@@ -3707,7 +3719,7 @@ test("serveAllStatus GET /api/issue reads an archived run's own log when a run t
   }
 });
 
-test("serveAllStatus GET /archive/log serves a listed run's lines humanized alongside their raw NDJSON, and 404s an unlisted run", async () => {
+test("serveAllStatus no longer serves GET /archive/log — the route is removed (#222)", async () => {
   const configDir = join(tmpdir(), `vetinari-archive-log-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
   seedState(betaDir, [event("campaign-start", { batches: [["201"]], slots: 1 })]);
@@ -3736,54 +3748,12 @@ test("serveAllStatus GET /archive/log serves a listed run's lines humanized alon
   });
   const { port } = server.address() as AddressInfo;
   try {
-    // A listed run returns its lines as JSON: each carries its verbatim NDJSON (the Raw /
-    // Download-JSON source) and its server-computed humanized parts (the default view), so the
-    // client renders humanized without re-parsing run-level kinds it can't narrate.
-    const ok = await fetch(
+    // The archive raw pane was the endpoint's only consumer; with it gone the route is
+    // deleted, so even a listed run's log path is now an unhandled 404 (#222).
+    const gone = await fetch(
       `http://127.0.0.1:${port}/archive/log?project=beta&run=2026-01-01T00-00-00-000Z`,
     );
-    assert.equal(ok.status, 200);
-    assert.match(ok.headers.get("content-type") ?? "", /^application\/json/);
-    const body = (await ok.json()) as {
-      lines: { raw: string; humanized: { verb: string; spans: { text: string; kind: string }[]; dot: string } }[];
-    };
-    // The raw bytes round-trip verbatim (nothing dropped or reordered).
-    assert.equal(body.lines.map((l) => l.raw).join("\n") + "\n", raw);
-    // …and each line is humanized server-side through the full registry: the campaign-start
-    // narrates (as one plain span, no verb) as a running start, the campaign-done as a merged
-    // completion.
-    assert.deepEqual(body.lines[0].humanized.spans, [{ text: "Campaign started", kind: "plain" }]);
-    assert.equal(body.lines[0].humanized.dot, "running");
-    assert.deepEqual(body.lines[1].humanized.spans, [{ text: "Campaign complete (2 waves)", kind: "plain" }]);
-    assert.equal(body.lines[1].humanized.dot, "merged");
-
-    // A run not in the listing is a 404, never a path to traverse.
-    const missing = await fetch(
-      `http://127.0.0.1:${port}/archive/log?project=beta&run=2026-09-09T00-00-00-000Z`,
-    );
-    assert.equal(missing.status, 404);
-    const traversal = await fetch(
-      `http://127.0.0.1:${port}/archive/log?project=beta&run=..%2F..%2Forchestrator`,
-    );
-    assert.equal(traversal.status, 404);
-
-    // Params are required, and an unknown project 404s.
-    assert.equal(
-      (
-        await fetch(
-          `http://127.0.0.1:${port}/archive/log?run=2026-01-01T00-00-00-000Z`,
-        )
-      ).status,
-      400,
-    );
-    assert.equal(
-      (
-        await fetch(
-          `http://127.0.0.1:${port}/archive/log?project=nope&run=2026-01-01T00-00-00-000Z`,
-        )
-      ).status,
-      404,
-    );
+    assert.equal(gone.status, 404);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -5626,7 +5596,7 @@ const archStatus = (issue: string): CampaignStatus => ({
   parked: [],
 });
 
-test("renderStatusPage renders archived runs as a collapsible list with per-row state, time and a joined mode control", () => {
+test("renderStatusPage renders archived runs as a collapsible list of wave cards, with no mode control or raw pane (#222)", () => {
   // Pin the timezone so the local-rendered when-clock is deterministic here (the
   // dedicated #102 test covers the divergent-tz case); UTC keeps `22:22:36`.
   const origTZ = process.env.TZ;
@@ -5689,30 +5659,18 @@ test("renderStatusPage renders archived runs as a collapsible list with per-row 
     html,
     /<span class="archive-state interrupted"><span class="archive-dot interrupted"><\/span>interrupted · 1 issue<\/span>/,
   );
-  // The joined campaign/raw-log control, campaign the active (pressed) side by default.
+  // No mode control at all — an archived run is a single expandable line (#222).
+  assert.doesNotMatch(html, /class="archive-modes"/);
+  assert.doesNotMatch(html, /class="archive-mode/);
+  assert.doesNotMatch(html, /data-mode=/);
+  // …and no run-level raw/log pane — the expanded body is the wave-card grid only.
+  assert.doesNotMatch(html, /archive-raw/);
+  assert.doesNotMatch(html, /data-pane=/);
+  // The expanded body reuses the live wave renderer directly — the run's own chip renders.
   assert.match(
     html,
-    /<button type="button" class="archive-mode active" data-mode="campaign" aria-pressed="true">campaign<\/button>/,
+    /<div class="archive-body" id="archive-body-2026-02-01T22-22-36-267Z" hidden>[\s\S]*#101 <small>/,
   );
-  assert.match(
-    html,
-    /<button type="button" class="archive-mode" data-mode="raw" aria-pressed="false">raw log<\/button>/,
-  );
-  // Campaign mode reuses the live wave renderer — the run's own issue chip renders.
-  assert.match(
-    html,
-    /<div class="archive-pane archive-campaign" data-pane="campaign">[\s\S]*#101 <small>/,
-  );
-  // Raw mode ships a scaffold the client fills: filename header + a text filter.
-  assert.match(
-    html,
-    /<div class="archive-pane archive-raw" data-pane="raw" data-project="beta" data-run="2026-02-01T22-22-36-267Z" hidden>/,
-  );
-  assert.match(
-    html,
-    /<div class="archive-raw-header"><span class="tail-dot" data-state="idle"[^>]*><\/span>orchestrator-2026-02-01T22-22-36-267Z\.jsonl<\/div>/,
-  );
-  assert.match(html, /<input type="text" class="archive-raw-filter"/);
   // Bodies start collapsed (hidden) and rows render newest-first (order preserved).
   assert.match(
     html,
@@ -5729,37 +5687,6 @@ test("renderStatusPage renders archived runs as a collapsible list with per-row 
     if (origTZ === undefined) delete process.env.TZ;
     else process.env.TZ = origTZ;
   }
-});
-
-test("renderStatusPage's archived raw pane carries the shared log-view chrome: a static idle dot, a Humanized⇄Raw toggle (humanized default) and Download JSON, no follow/pause (#203)", () => {
-  const html = renderStatusPage(
-    { project: "beta", waves: [], parked: [] },
-    {
-      selected: "beta",
-      archivedRuns: [
-        {
-          run: "2026-02-01T22-22-36-267Z",
-          name: "comms + dashboard",
-          startedAt: "2026-02-01T22:22:36.267Z",
-          state: "complete",
-          issues: 1,
-          status: archStatus("101"),
-        },
-      ],
-    },
-  );
-  const paneStart = html.indexOf('class="archive-pane archive-raw"');
-  const pane = html.slice(paneStart, html.indexOf("</li>", paneStart));
-  // A static source: its header dot is seeded idle (dim + still), never the streaming live state.
-  assert.match(pane, /<span class="tail-dot" data-state="idle"[^>]*><\/span>orchestrator-/);
-  // The segmented Humanized ⇄ Raw toggle, humanized the pressed default.
-  assert.match(pane, /data-archive-raw-mode/);
-  assert.match(pane, /data-mode="humanized" aria-pressed="true">Humanized</);
-  assert.match(pane, /data-mode="raw" aria-pressed="false">Raw</);
-  // The Download JSON control is the mockup's ⤓ .lv-ico icon.
-  assert.match(pane, /class="lv-ico" data-archive-raw-save[^>]*aria-label="Download JSON"[^>]*>⤓</);
-  // A static archived log has no live stream to follow, so there is no play/pause control.
-  assert.doesNotMatch(pane, /data-tail-play|data-archive-raw-play/);
 });
 
 test("renderStatusPage renders an archived run's when-time in the operator's LOCAL timezone, no UTC suffix (#102)", () => {
@@ -5837,16 +5764,12 @@ test("renderStatusPage shows an interrupted run as interrupted and still expands
     html,
     /<span class="archive-state interrupted"><span class="archive-dot interrupted"><\/span>interrupted · 2 issues<\/span>/,
   );
-  // …and, opened, its campaign pane still shows the partial waves it did run — the
+  // …and, opened, its body still shows the partial waves it did run — the
   // in-flight wave/issue reconciled to the terminal `interrupted`, never `running`.
-  const paneStart = html.indexOf('class="archive-pane archive-campaign"');
-  const pane = html.slice(
-    paneStart,
-    html.indexOf('class="archive-pane archive-raw"', paneStart),
-  );
-  assert.match(pane, /#101 <small>completed<\/small>/);
-  assert.match(pane, /#201 <small>interrupted<\/small>/);
-  assert.doesNotMatch(pane, /<small>running<\/small>/);
+  // (The live campaign has no waves, so these chips are the archived run's own.)
+  assert.match(html, /#101 <small>completed<\/small>/);
+  assert.match(html, /#201 <small>interrupted<\/small>/);
+  assert.doesNotMatch(html, /<small>running<\/small>/);
 });
 
 test("reconcileArchivedStatus maps an interrupted run's live `running` statuses to terminal `interrupted`, leaving a complete run untouched (#152)", () => {
@@ -5903,13 +5826,12 @@ test("an archived non-terminal log renders a terminal status, not `running`, whi
   assert.equal(status.waves[1].issues[0].status, "unstarted");
 });
 
-test("renderStatusPage opens the archived row named by archivedRun, in the requested mode", () => {
+test("renderStatusPage opens the archived row named by archivedRun, showing its wave cards (#222)", () => {
   const html = renderStatusPage(
     { project: "beta", waves: [], parked: [] },
     {
       selected: "beta",
       archivedRun: "2026-02-01T00-00-00-000Z",
-      archivedMode: "raw",
       archivedRuns: [
         {
           run: "2026-02-01T00-00-00-000Z",
@@ -5931,34 +5853,22 @@ test("renderStatusPage opens the archived row named by archivedRun, in the reque
     html,
     /<button type="button" class="archive-toggle" aria-expanded="true"/,
   );
+  // The body shows and holds the wave-card grid directly — no mode toggle, no raw pane.
   assert.match(
     html,
-    /<div class="archive-body" id="archive-body-2026-02-01T00-00-00-000Z">/,
+    /<div class="archive-body" id="archive-body-2026-02-01T00-00-00-000Z">[\s\S]*#101 <small>/,
   );
-  // Raw is the pressed side; the raw pane shows and the campaign pane hides.
-  assert.match(
-    html,
-    /<button type="button" class="archive-mode active" data-mode="raw" aria-pressed="true">raw log<\/button>/,
-  );
-  assert.match(
-    html,
-    /<div class="archive-pane archive-campaign" data-pane="campaign" hidden>/,
-  );
-  assert.match(
-    html,
-    /<div class="archive-pane archive-raw" data-pane="raw" data-project="beta" data-run="2026-02-01T00-00-00-000Z">/,
-  );
+  assert.doesNotMatch(html, /archive-mode/);
+  assert.doesNotMatch(html, /archive-raw/);
+  assert.doesNotMatch(html, /data-pane=/);
 });
 
-test("renderStatusPage drops the raw-log pane and mode toggle on phone-width, showing only the campaign view (#153)", () => {
+test("renderStatusPage carries no raw-specific archive CSS on phone-width (#222)", () => {
   const html = renderStatusPage(
     { project: "beta", waves: [], parked: [] },
     {
       selected: "beta",
-      // Deep-linked in raw mode: the campaign pane carries `hidden`, the raw pane
-      // does not — on a phone that must invert so the wave summary shows.
       archivedRun: "2026-02-01T00-00-00-000Z",
-      archivedMode: "raw",
       archivedRuns: [
         {
           run: "2026-02-01T00-00-00-000Z",
@@ -5971,17 +5881,15 @@ test("renderStatusPage drops the raw-log pane and mode toggle on phone-width, sh
     },
   );
 
-  // A ≤640px media block on the campaign page hides the campaign/raw toggle, drops
-  // the raw pane, and forces the campaign (wave) pane even for a run deep-linked in
-  // raw mode (whose campaign pane carries `hidden`). The raw JSONL log is a
-  // desktop/debugging surface; a phone wants the wave summary.
-  assert.match(
-    html,
-    /@media \(max-width: 640px\) \{\s*\.archive-modes \{ display: none; \}\s*\.archive-pane\.archive-raw \{ display: none; \}\s*\.archive-pane\.archive-campaign\[hidden\] \{ display: block; \}\s*\}/,
-  );
+  // The raw-log pane and mode toggle are gone, so their ≤640px overrides are gone
+  // with them — no leftover .archive-raw / .archive-modes / .archive-pane rules.
+  assert.doesNotMatch(html, /\.archive-raw/);
+  assert.doesNotMatch(html, /\.archive-modes/);
+  assert.doesNotMatch(html, /\.archive-pane/);
+  assert.doesNotMatch(html, /\.archive-mode/);
 });
 
-test("renderStatusPage ships the archived-list client wiring: toggle, mode switch, raw fetch, filter, deep-link, show-older", () => {
+test("renderStatusPage ships the archived-list client wiring: expand/collapse (one open at a time) and show-older, and nothing raw/log (#222)", () => {
   const html = renderStatusPage(
     { project: "beta", waves: [], parked: [] },
     {
@@ -5999,60 +5907,28 @@ test("renderStatusPage ships the archived-list client wiring: toggle, mode switc
   );
   // The page embeds the archived-list script…
   assert.ok(html.includes(ARCHIVE_LIST_SCRIPT), "page includes ARCHIVE_LIST_SCRIPT");
+  // …a row toggles its body open/closed…
+  assert.match(ARCHIVE_LIST_SCRIPT, /\.archive-toggle/);
   // …one row open at a time (opening closes the others)…
   assert.match(
     ARCHIVE_LIST_SCRIPT,
     /for \(const other of archiveRows\) if \(other !== row && other\.classList\.contains\("open"\)\) closeRow\(other\);/,
   );
-  // …raw mode fetches the existing /archive/log endpoint, no second endpoint…
-  assert.match(
-    ARCHIVE_LIST_SCRIPT,
-    /fetch\("\/archive\/log\?project=" \+ encodeURIComponent\(pane\.dataset\.project\) \+ "&run=" \+ encodeURIComponent\(pane\.dataset\.run\)\)/,
-  );
-  // …renders one line per row with a #L<n> anchor that the browser puts in the URL…
-  assert.match(ARCHIVE_LIST_SCRIPT, /a\.href = "#L" \+ n;/);
-  assert.match(ARCHIVE_LIST_SCRIPT, /el\.id = "L" \+ n;/);
-  // …colours each line through the shared, tested highlighter…
-  assert.match(ARCHIVE_LIST_SCRIPT, /code\.innerHTML = highlightJsonLine\(line\);/);
-  // …caps the render through the shared, tested cappedRawRows helper so a huge
-  // log can't build an unbounded DOM, with a "show more" control for the rest…
-  assert.match(ARCHIVE_LIST_SCRIPT, /const RAW_CAP = 500;/);
-  assert.match(ARCHIVE_LIST_SCRIPT, /cappedRawRows\(pane\._lines \|\| \[\], needle, RAW_CAP, pane\._expanded \|\| 0\)/);
-  assert.match(ARCHIVE_LIST_SCRIPT, /more\.className = "archive-raw-more"/);
-  assert.match(ARCHIVE_LIST_SCRIPT, /pane\._expanded = \(pane\._expanded \|\| 0\) \+ RAW_CAP/);
-  // …reports "showing X of Y lines" honestly (cap- and filter-aware)…
-  assert.match(ARCHIVE_LIST_SCRIPT, /footer\.textContent = "showing " \+ rows\.length \+ " of " \+ total \+ " lines";/);
-  // …expands the cap to include a deep-linked line past it before scrolling…
-  assert.match(ARCHIVE_LIST_SCRIPT, /pane\._expanded = n - RAW_CAP/);
-  // …shows an empty-result state rather than a blank pane…
-  assert.match(ARCHIVE_LIST_SCRIPT, /archive-raw-empty/);
   // …and reveals the older rows behind the cap on demand.
   assert.match(
     ARCHIVE_LIST_SCRIPT,
     /showOlder\.addEventListener\("click", \(\) => \{ for \(const row of archiveRows\) row\.hidden = false;/,
   );
-});
-
-test("ARCHIVE_LIST_SCRIPT renders the archived log through the shared log-view: humanized default, Raw toggle, Download JSON (#203)", () => {
-  // Humanized is the default display mode, remembered client-side so a Raw preference sticks.
-  assert.match(ARCHIVE_LIST_SCRIPT, /let rawMode = "humanized";/);
-  assert.match(ARCHIVE_LIST_SCRIPT, /localStorage\.getItem\(MODE_KEY\)/);
-  // The parts are computed server-side and fetched as JSON: raw for the toggle/download, humanized
-  // for the default rows — the run-level kinds narrate through describeEvent the client can't ship.
-  assert.match(ARCHIVE_LIST_SCRIPT, /return res\.json\(\);/);
-  assert.match(ARCHIVE_LIST_SCRIPT, /pane\._lines = ls\.map\(\(l\) => l\.raw\)/);
-  assert.match(ARCHIVE_LIST_SCRIPT, /pane\._humanized = ls\.map\(\(l\) => l\.humanized\)/);
-  // Humanized rows are the shared .lv-row component, built from the humanized parts and
-  // tagged with the deep-link #L<n> id.
-  assert.match(ARCHIVE_LIST_SCRIPT, /const el = humanizedRow\(h, document\); el\.id = "L" \+ n/);
-  assert.match(ARCHIVE_LIST_SCRIPT, /function humanizedRow/);
-  // The multiline-collapse split (#217) ships alongside, since humanizedRow calls it client-side.
-  assert.match(ARCHIVE_LIST_SCRIPT, /function splitOverflow/);
-  // The mode toggle flips the shared mode, persists it, and redraws the pane.
-  assert.match(ARCHIVE_LIST_SCRIPT, /rawMode = btn\.dataset\.mode; try \{ localStorage\.setItem\(MODE_KEY, rawMode\); \}/);
-  // Download JSON emits the currently-filtered raw NDJSON, uncapped, as an .jsonl file.
-  assert.match(ARCHIVE_LIST_SCRIPT, /data-archive-raw-save/);
-  assert.match(ARCHIVE_LIST_SCRIPT, /a\.download = "orchestrator-" \+ pane\.dataset\.run \+ "\.jsonl"/);
+  // The raw/log surface is gone: no mode switch, no /archive/log fetch, no line-number
+  // deep-links, no filter, no Download JSON, no cap machinery.
+  assert.doesNotMatch(ARCHIVE_LIST_SCRIPT, /\/archive\/log/);
+  assert.doesNotMatch(ARCHIVE_LIST_SCRIPT, /archive-raw/);
+  assert.doesNotMatch(ARCHIVE_LIST_SCRIPT, /highlightJsonLine/);
+  assert.doesNotMatch(ARCHIVE_LIST_SCRIPT, /cappedRawRows/);
+  assert.doesNotMatch(ARCHIVE_LIST_SCRIPT, /humanizedRow/);
+  assert.doesNotMatch(ARCHIVE_LIST_SCRIPT, /rawMode|MODE_KEY|localStorage/);
+  assert.doesNotMatch(ARCHIVE_LIST_SCRIPT, /data-archive-raw-save|Download JSON/);
+  assert.doesNotMatch(ARCHIVE_LIST_SCRIPT, /#L|mode=raw/);
 });
 
 test("HOST_LOG_SCRIPT wires the host-log pane: gear show/hide, badge off isNotableHostEvent, filter, live host frames (#180)", () => {
@@ -7792,12 +7668,12 @@ test("renderStatusPage renders an archived run's closed waves as full cards, not
   // The archived row's campaign pane renders its closed wave as a full, always-expanded
   // card — no second toggle bar and no duplicated id="closed-wave-0" that would hijack
   // the live card.
-  const paneStart = html.indexOf('class="archive-pane archive-campaign"');
-  const pane = html.slice(paneStart, html.indexOf('class="archive-pane archive-raw"', paneStart));
-  assert.doesNotMatch(pane, /completed-wave-bar/);
-  assert.doesNotMatch(pane, /id="closed-wave-0"/);
+  const bodyStart = html.indexOf('class="archive-body"');
+  const body = html.slice(bodyStart, html.indexOf("</li>", bodyStart));
+  assert.doesNotMatch(body, /completed-wave-bar/);
+  assert.doesNotMatch(body, /id="closed-wave-0"/);
   assert.match(
-    pane,
+    body,
     /<section class="wave closed"><div class="wave-head"><h2 class="wave-label">Wave 1 — old work<\/h2><div class="wave-meta"><span class="wave-tally">1\/1<\/span><span class="wave-status closed">closed<\/span>/,
   );
   // Exactly one element carries the toggle id across the whole page (no duplicate ids).

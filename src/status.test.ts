@@ -721,6 +721,20 @@ test("buildFeed merges every project's narratable events into one newest-first, 
   assert.equal(feed[0].project, "alpha");
 });
 
+test("buildFeed carries each row's underlying event as raw NDJSON, alongside the humanized text (#203)", () => {
+  const base = join(tmpdir(), `vetinari-feed-raw-${Date.now()}`);
+  const dir = join(base, "acme");
+  const green = event("green", { ts: "2025-03-01T08:02:00.000Z", taskId: "101", branch: "agent/101", commits: [] });
+  seedState(dir, [green]);
+
+  const feed = buildFeed([pointerFor("acme", dir)], new Date("2025-03-01T09:00:00.000Z"));
+
+  // The row's `raw` is the underlying event serialized — the bytes the Raw toggle highlights and
+  // Download JSON emits (#203), distinct from the repo-prefixed humanized `text`.
+  assert.equal(feed[0].text, "acme — #101 merged");
+  assert.deepEqual(JSON.parse(feed[0].raw), green);
+});
+
 test("a merged event that names its issue only through its branch still renders the number, never #undefined", () => {
   // The campaign wave-merge / per-issue green path can carry the issue number in
   // its `branch` (agent/<id>) rather than a `taskId`. The feed formatter must
@@ -1852,6 +1866,36 @@ test("renderLandingShell's feed adopts the live-tail pane chrome via shared CSS 
   assert.doesNotMatch(html, /class="feed"[^>]*>\s*<h2/);
 });
 
+test("renderLandingShell's feed gains a Humanized ⇄ Raw toggle, humanized pressed by default (#203)", () => {
+  const html = renderLandingShell(["alpha"]);
+  // A segmented toggle in the feed control strip, reusing the shared log-view .tail-mode pill —
+  // humanized the pressed default (the feed's narrated rows), Raw the highlighted-NDJSON view.
+  assert.match(html, /<span class="tail-mode" data-feed-mode/);
+  assert.match(html, /data-mode="humanized" aria-pressed="true">Humanized</);
+  assert.match(html, /data-mode="raw" aria-pressed="false">Raw</);
+});
+
+test("renderLandingShell's feed Raw mode highlights the underlying NDJSON, remembered per view (#203)", () => {
+  const html = renderLandingShell(["alpha"]);
+  // The raw tokeniser is single-sourced from dashboard-render, shipped via .toString() (the same
+  // one the live tail and host-log ship), so the node test exercises the very function shipped.
+  assert.match(html, /function highlightJsonLine/);
+  // Raw mode highlights the row's underlying event NDJSON (e.raw); humanized stays the narrated row.
+  assert.match(html, /highlightJsonLine\(e\.raw\)/);
+  // The chosen mode sticks per view in localStorage, exactly as the tail and host-log remember it.
+  assert.match(html, /vetinari:feed-mode/);
+});
+
+test("renderLandingShell's feed Download JSON emits the filtered underlying NDJSON (#203)", () => {
+  const html = renderLandingShell(["alpha"]);
+  // Download JSON emits the currently-filtered rows' raw event NDJSON (e.raw joined by newlines) as
+  // a .jsonl blob — the raw bytes, uncapped by the render window — not the old narrated .txt export.
+  assert.match(html, /download = "event-log\.jsonl"/);
+  assert.match(html, /application\/x-ndjson/);
+  assert.match(html, /\.map\(\(e\) => e\.raw\)/);
+  assert.ok(!html.includes("event-log.txt"), "the old narrated-text export is gone");
+});
+
 test("renderLandingShell's feed carries the four live-tail controls wired to the shared view-model (#196)", () => {
   const html = renderLandingShell(["alpha"]);
   // The control strip: case-insensitive filter, follow/pause, save-visible, clear.
@@ -1869,7 +1913,7 @@ test("renderLandingShell's feed carries the four live-tail controls wired to the
   assert.match(html, /"↑ " \+ view\.backlog \+ " new event"/);
   // Filter drives feedRowMatches over the (kind, text) pair.
   assert.match(html, /feedRowMatches\(/);
-  // Save exports the visible rows as narrated text lines (one per line), not raw JSON.
+  // Download JSON exports the visible rows' underlying NDJSON (the Raw-toggle counterpart, #203).
   assert.match(html, /download = "event-log/);
   // Clear empties the view client-side only (the buffer), keeping the seen set so the server's
   // still-held window isn't re-imported — no events or logs are deleted.

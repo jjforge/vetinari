@@ -1091,13 +1091,16 @@ export function buildAllStatus(pointers: ProjectPointer[], logger: Logger = host
 }
 
 /** One row of the cross-project event feed: which project it came from, when it
- * happened (the event's ISO `ts`), the raw event kind, and the repo-prefixed
- * plain-words sentence `formatFeedEvent` folds it to. */
+ * happened (the event's ISO `ts`), the raw event kind, the repo-prefixed
+ * plain-words sentence `formatFeedEvent` folds it to, and `raw` — the underlying
+ * event serialized back to NDJSON, the bytes the feed's Raw toggle highlights and
+ * Download JSON emits (#203), so the humanized default has a faithful raw source. */
 export interface FeedEntry {
   project: string;
   ts: string;
   kind: string;
   text: string;
+  raw: string;
 }
 
 /** The feed's rolling window: an event feeds only when its `ts` is within this
@@ -1158,7 +1161,7 @@ export function buildFeed(pointers: ProjectPointer[], now: Date = new Date(), lo
         const tsMs = Date.parse(String(e.ts ?? ""));
         if (Number.isNaN(tsMs) || tsMs < cutoffMs) continue;
         const text = formatFeedEvent(pointer.project, e, festiveArg);
-        if (text) entries.push({ project: pointer.project, ts: String(e.ts), kind: String(e.event ?? ""), text });
+        if (text) entries.push({ project: pointer.project, ts: String(e.ts), kind: String(e.event ?? ""), text, raw: JSON.stringify(e) });
       }
     }
   }

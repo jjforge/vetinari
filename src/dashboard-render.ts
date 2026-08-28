@@ -989,6 +989,9 @@ ${LIVE_TAIL_STYLES}
   .feed-kind::before { content: ""; width: .5rem; height: .5rem; border-radius: 999px; background: var(--color-dim); flex: none; }
   .feed-kind.progress::before { background: var(--color-blue); } .feed-kind.success::before { background: var(--color-green); } .feed-kind.attention::before { background: var(--color-yellow); } .feed-kind.failure::before { background: var(--color-failure); } .feed-kind.carved::before { background: var(--color-carved); }
   .feed-text { color: var(--color-text-light); flex: 1; }
+  /* A Raw-mode row (#203): the underlying event as one highlighted NDJSON line, mono in the feed's
+     own prose scroll pane; the token colours come from the shared .tail-code palette (LIVE_TAIL_STYLES). */
+  .feed-raw { padding: .1rem 0; font-family: ${MONO_FONT}; font-size: .78rem; line-height: 1.5; }
   /* The feed body's loading/empty placeholder sits inside the padded scroll pane. */
   .feed-body .empty { padding: .6rem 0; }
   /* The card's highlight (top border) tracks its run state (#75) — its only coloured edge (§2). */
@@ -1018,7 +1021,7 @@ ${renderTopBar(renderRepoDropdown(projects, undefined), renderHostLog())}
 </section>
 <section id="parked-queue" class="parked-queue" hidden aria-label="Parked questions across all repos"></section>
 <section id="cards" class="cards"><p class="empty">Loading…</p></section>
-<section id="feed" class="live-tail feed" data-feed aria-label="Event log across all repos"><div class="tail-head"><span class="tail-dot" data-feed-dot aria-hidden="true"></span><span class="tail-title tail-title-static">Event log · all repos</span><span class="tail-summary" data-feed-summary></span><span class="tail-gap"></span><span class="tail-controls" data-feed-controls><input type="text" class="tail-filter" placeholder="filter events…" aria-label="Filter events" data-feed-filter /><button type="button" class="tail-play" data-feed-play data-following="true" aria-label="Pause"></button><button type="button" class="tail-save" data-feed-save>Save</button><button type="button" class="tail-clear" data-feed-clear>Clear</button></span></div><div class="feed-body" data-feed-body><p class="empty">Loading…</p></div><button type="button" class="tail-backlog" data-feed-backlog hidden></button><div class="tail-footer" data-feed-footer></div></section>
+<section id="feed" class="live-tail feed" data-feed aria-label="Event log across all repos"><div class="tail-head"><span class="tail-dot" data-feed-dot aria-hidden="true"></span><span class="tail-title tail-title-static">Event log · all repos</span><span class="tail-summary" data-feed-summary></span><span class="tail-gap"></span><span class="tail-controls" data-feed-controls><input type="text" class="tail-filter" placeholder="filter events…" aria-label="Filter events" data-feed-filter /><span class="tail-mode" data-feed-mode role="group" aria-label="Line format"><button type="button" class="tail-mode-btn" data-mode="humanized" aria-pressed="true">Humanized</button><button type="button" class="tail-mode-btn" data-mode="raw" aria-pressed="false">Raw</button></span><button type="button" class="tail-play" data-feed-play data-following="true" aria-label="Pause"></button><button type="button" class="tail-save" data-feed-save>Download JSON</button><button type="button" class="tail-clear" data-feed-clear>Clear</button></span></div><div class="feed-body" data-feed-body><p class="empty">Loading…</p></div><button type="button" class="tail-backlog" data-feed-backlog hidden></button><div class="tail-footer" data-feed-footer></div></section>
 ${issueDetailSheetMarkup(true)}
 <script>
   // The state → visual-intent reducers (dashboard-visual-state.ts, ADR 0012), single-
@@ -1065,6 +1068,7 @@ ${issueDetailSheetMarkup(true)}
   ${feedKindLabel.toString()}
   ${feedKindClass.toString()}
   ${feedRowMatches.toString()}
+  ${highlightJsonLine.toString()}
 ${ISSUE_DETAIL_SHEET_SCRIPT}
 ${REPO_DROPDOWN_SCRIPT}
   // The event-log feed (#196): a live-tail-style pane over the cross-project narrated feed. The
@@ -1079,9 +1083,12 @@ ${REPO_DROPDOWN_SCRIPT}
   const feedDot = fq("[data-feed-dot]"), feedSummary = fq("[data-feed-summary]"), feedBody = fq("[data-feed-body]");
   const feedFooter = fq("[data-feed-footer]"), feedBacklog = fq("[data-feed-backlog]"), feedPlay = fq("[data-feed-play]");
   const feedFilter = fq("[data-feed-filter]"), feedSave = fq("[data-feed-save]"), feedClear = fq("[data-feed-clear]");
+  const feedModeEl = fq("[data-feed-mode]");
   let feedBuffer = [], feedSeen = {}, feedLive = true, feedMark = 0, feedQuery = "", feedLoaded = false, feedError = false;
-  // One narrated text line per row for the save-visible export (the feed has no raw JSON).
-  const feedNarrate = (e) => fmtTime(e.ts) + "  " + feedKindLabel(e.kind) + " — " + e.text;
+  // The Humanized ⇄ Raw display mode (#203): humanized (the narrated rows) by default, remembered
+  // per view in localStorage so a Raw preference sticks across refreshes, exactly as the tail does.
+  const FEED_MODE_KEY = "vetinari:feed-mode";
+  let feedMode = "humanized"; try { const m = localStorage.getItem(FEED_MODE_KEY); if (m === "raw" || m === "humanized") feedMode = m; } catch (e) {}
   const feedMatch = (e) => feedRowMatches(e, feedQuery);
   function feedRender() {
     const view = followView({ buffer: feedBuffer, mark: feedMark, live: feedLive, cap: FEED_RENDER_CAP, match: feedMatch });
@@ -1090,9 +1097,18 @@ ${REPO_DROPDOWN_SCRIPT}
     else if (!feedLoaded) { feedBody.append(el("p", "empty", "Loading…")); }
     else if (view.rows.length) {
       for (const e of view.rows) {
-        const row = el("div", "feed-row");
-        row.append(el("span", "feed-time", fmtTime(e.ts)), el("span", "feed-kind " + feedKindClass(e.kind), feedKindLabel(e.kind)), el("span", "feed-text", e.text));
-        feedBody.append(row);
+        if (feedMode === "raw") {
+          // Raw: the underlying event as one highlighted NDJSON line (highlightJsonLine), mono in
+          // the feed's own scroll pane — the same tokeniser the tail and host-log raw views use.
+          const row = el("div", "feed-raw");
+          const code = el("code", "tail-code"); code.innerHTML = highlightJsonLine(e.raw); row.append(code);
+          feedBody.append(row);
+        } else {
+          // Humanized (default): the narrated dot·time·kind·prose row, unchanged (#196).
+          const row = el("div", "feed-row");
+          row.append(el("span", "feed-time", fmtTime(e.ts)), el("span", "feed-kind " + feedKindClass(e.kind), feedKindLabel(e.kind)), el("span", "feed-text", e.text));
+          feedBody.append(row);
+        }
       }
     } else {
       feedBody.append(el("p", "empty", feedQuery.trim() ? "No events match that filter." : "No activity in the last 48 hours."));
@@ -1122,12 +1138,17 @@ ${REPO_DROPDOWN_SCRIPT}
   feedPlay.addEventListener("click", () => { feedLive = !feedLive; feedMark = feedBuffer.length; feedRender(); });
   feedBacklog.addEventListener("click", () => { feedLive = true; feedMark = feedBuffer.length; feedRender(); });
   feedFilter.addEventListener("input", () => { feedQuery = feedFilter.value; feedRender(); });
+  // The Humanized ⇄ Raw toggle (#203): flip the body's row format, persist the choice, re-render.
+  // Seed the pressed state from the remembered mode so the buttons match on load.
+  const syncFeedModeBtns = () => { if (feedModeEl) for (const b of feedModeEl.querySelectorAll("[data-mode]")) b.setAttribute("aria-pressed", String(b.dataset.mode === feedMode)); };
+  if (feedModeEl) for (const btn of feedModeEl.querySelectorAll("[data-mode]")) btn.addEventListener("click", () => { feedMode = btn.dataset.mode; try { localStorage.setItem(FEED_MODE_KEY, feedMode); } catch (e) {} syncFeedModeBtns(); feedRender(); });
+  syncFeedModeBtns();
   feedSave.addEventListener("click", () => {
-    // The currently visible (filtered) rows — uncapped by the render window — as narrated text
-    // lines, one per row (there is no underlying raw JSON to emit).
+    // Download JSON (#203): the currently-filtered rows — uncapped by the render window — as their
+    // underlying event NDJSON (e.raw, one per line), so the raw bytes stay faithful in either mode.
     const view = followView({ buffer: feedBuffer, mark: feedMark, live: feedLive, cap: Math.max(feedBuffer.length, 1), match: feedMatch });
-    const blob = new Blob([view.rows.map(feedNarrate).join("\\n")], { type: "text/plain" });
-    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "event-log.txt"; a.click(); URL.revokeObjectURL(a.href);
+    const blob = new Blob([view.rows.map((e) => e.raw).join("\\n")], { type: "application/x-ndjson" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "event-log.jsonl"; a.click(); URL.revokeObjectURL(a.href);
   });
   // Clear drops only this view's buffered rows client-side; no events or logs are touched. The
   // seen set is kept so the server's still-held window isn't re-imported on the next fetch (the

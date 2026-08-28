@@ -30,6 +30,7 @@ import {
   deregisterProject,
   registerProject,
   releaseSlot,
+  reserveFestiveBlock,
   type HostBudget,
 } from "./host-slots.ts";
 
@@ -551,9 +552,15 @@ export async function campaign(
     // omits them and degrades to `number:status`.
     titles = await resolveTitles(cfg, batches.flat());
     campaignName = name;
+    // Reserve this campaign's festive-name block from the host cursor (#193): the plan's
+    // wave count is known now, so stamp the reserved offset onto `campaign-start` (read
+    // back on resume alongside the name) and let the cursor advance past it — concurrent
+    // campaigns draw disjoint blocks. The reservation is unconditional (a cheap integer):
+    // the "Festive Wave Names" toggle only decides whether the dashboard renders the names.
     const startEvent: Omit<CampaignStartEvent, "ts" | "event"> = {
       batches,
       slots: host.ceiling,
+      festiveOffset: reserveFestiveBlock(host.configDir, batches.length),
     };
     if (name) startEvent.name = name;
     if (Object.keys(titles).length) startEvent.titles = titles;

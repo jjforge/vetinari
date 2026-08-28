@@ -242,6 +242,33 @@ export function acquireSlot(configDir: string, ceiling: number, project: string,
   });
 }
 
+/** The host-level festive-name cursor file (#193): one integer, the next unreserved
+ * offset into the festive roster. Lives beside the ceiling file under the config dir. */
+const FESTIVE_CURSOR_FILE = "festive-cursor";
+
+/**
+ * Reserve a contiguous block of `count` festive-name offsets from the host cursor
+ * (#193), returning the block's start and advancing the persisted cursor by `count` —
+ * all under the host lock, so two campaigns starting at once get disjoint blocks and
+ * never share a name. The cursor is a single integer persisted across campaigns, so
+ * sequential runs keep walking the roster and a name does not recur until it wraps. A
+ * fresh host (or an unreadable/negative cursor) starts at zero; `count` of zero
+ * reserves nothing and leaves the cursor put.
+ */
+export function reserveFestiveBlock(configDir: string, count: number, opts: LeaseOpts = {}): number {
+  const isAlive = opts.isAlive ?? pidAlive;
+  return withLock(slotsDir(configDir), isAlive, () => {
+    const file = join(configDir, FESTIVE_CURSOR_FILE);
+    let cursor = 0;
+    if (existsSync(file)) {
+      const parsed = Number(readFileSync(file, "utf8").trim());
+      if (Number.isInteger(parsed) && parsed >= 0) cursor = parsed;
+    }
+    writeFileSync(file, String(cursor + Math.max(0, count)));
+    return cursor;
+  });
+}
+
 /** Give one held slot back — called when a container parks or finishes. Never drops below zero. */
 export function releaseSlot(configDir: string, opts: LeaseOpts = {}): void {
   const pid = opts.pid ?? process.pid;

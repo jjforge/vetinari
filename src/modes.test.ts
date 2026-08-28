@@ -27,6 +27,7 @@ import {
   type CampaignBatchDoneEvent,
   type CampaignBatchEvent,
   type CampaignDoneEvent,
+  type CampaignStartEvent,
   type QueueDoneEvent,
   type QueueSpawnEvent,
   type QueueStartEvent,
@@ -531,6 +532,25 @@ test("campaign stamps its name and titles onto the wave events and operator note
   const outbox = listOutbox(cfg);
   assert.ok(outbox.find((m) => m.event === "wave-start")?.text.includes("gateway work"));
   assert.ok(outbox.find((m) => m.event === "wave-merged")?.text.includes("gateway work"));
+});
+
+test("campaign reserves a festive-name block on the host cursor, stamped on campaign-start (#193)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-festive-"));
+  const cfg = harnessCfg(dir);
+  // One shared host cursor across both campaigns (same configDir).
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+
+  await silenceConsole(() => campaign(cfg, [["101"], ["102"], ["103"]], host, "first", {}, gitFreeDeps(cfg, async () => 0)));
+  const firstStart = readEventLog(cfg).find((e): e is CampaignStartEvent => e.event === "campaign-start");
+  // The first campaign reserves the block starting at the fresh host's zero.
+  assert.equal(firstStart?.festiveOffset, 0);
+
+  // A second campaign in the same project/host reserves a disjoint block past the first
+  // (three waves consumed → next offset is 3), so the two never share a name.
+  const cfg2 = harnessCfg(join(dir, "run2"));
+  await silenceConsole(() => campaign(cfg2, [["201"]], host, "second", {}, gitFreeDeps(cfg2, async () => 0)));
+  const secondStart = readEventLog(cfg2).find((e): e is CampaignStartEvent => e.event === "campaign-start");
+  assert.equal(secondStart?.festiveOffset, 3);
 });
 
 test("campaign --resume recovers the run's name from the log, not the ignored param (#174)", async () => {

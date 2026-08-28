@@ -18,6 +18,15 @@ and each entry opens with a tag saying who it reaches:
 `**Breaking changes:**` sorts first in a milestone and names the contract it broke.
 Within a milestone each bold section label appears at most once.
 
+### Collected changes — August 28, 2026
+
+**New features:**
+- [user] The all-repos landing/host view now has a **settings gear** that opens a live host-log pane — the fleet-level `host.jsonl` (gateway/registry/Telegram/SSE diagnostics across every project) rendered newest-first, bounded, and JSON-highlighted, with a case-insensitive substring filter. It reads with no daemon (`GET /api/host-log`) and updates live over the existing `/api/events` SSE via a named `host` frame; a missing host log reads a clean "no host log yet". The gear shows a red attention badge when the window holds a notable event (a `fail`/`error` kind, or a row carrying `error`/`ok: false`); opening the pane clears the badge until a newer notable event arrives (#180).
+
+**Improvements:**
+- [user] Campaign Telegram notices now follow one terse, labeled skeleton (`<emoji> <project> · <LABEL> · <context>`), leading with what happened and what to do and shedding low-value rationale (#194).
+- [ops] Pause notices — wave-park and quarantine-pause — now name the exact recovery command (`campaign --resume`, plus `carve <issue>` / `campaign --auto-carve`) on both the Telegram notice and the console line, so the guidance is self-contained (#194, #170).
+
 ### Collected changes — August 27, 2026
 
 **Breaking changes:**

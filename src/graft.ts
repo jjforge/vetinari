@@ -46,6 +46,24 @@ export interface GraftDeps {
 }
 export const defaultGraftDeps: GraftDeps = { readEventLog, enqueueOutbound };
 
+/**
+ * A graft dry-run's placement in structured form: the requested ids, where each
+ * accepted id lands, the resulting waves, and any whole-batch rejections naming the
+ * offenders and why. It is the additive mirror of `StructuredCarveClosure` — the CLI
+ * serializes it into a `graft-closure {json}` line under `--dry-run`, so the
+ * aggregated dashboard's preview names each id's fate without re-parsing the prose.
+ */
+export interface StructuredGraftClosure {
+  /** the requested ids, normalized, in input order. */
+  ids: string[];
+  /** each accepted id and the 1-based wave it lands in — empty on a rejected batch. */
+  placement: { id: string; wave: number }[];
+  /** the resulting loop-facing waves — the campaign unchanged on a rejected batch. */
+  remaining: string[][];
+  /** the offenders that made the graft reject whole (empty when every id is grafted). */
+  rejected: GraftRejection[];
+}
+
 export interface GraftResult {
   /** the grafted ids, normalized, in input order. */
   ids: string[];
@@ -53,12 +71,35 @@ export interface GraftResult {
   placement: { id: string; wave: number }[];
   /** the resulting loop-facing waves after the graft. */
   remaining: string[][];
-  /** the graft event payload (ADR 0012 layering inputs) — written unless `dryRun`. */
-  event: { ids: string[]; blockedBy: Record<string, string[]>; basenames: Record<string, string[]> };
-  /** the `progress:graft` outbound message — enqueued unless `dryRun`. */
-  outbound: { category: "progress"; event: "graft"; text: string };
+  /** the offenders on a `--dry-run` disclosed rejection (empty otherwise); a real
+   *  graft throws on rejection, so this is only ever populated under `dryRun`. */
+  rejected: GraftRejection[];
+  /** the graft event payload (ADR 0012 layering inputs) — written unless `dryRun`;
+   *  absent on a `--dry-run` that disclosed a rejection (nothing to append). */
+  event?: { ids: string[]; blockedBy: Record<string, string[]>; basenames: Record<string, string[]> };
+  /** the `progress:graft` outbound message — enqueued unless `dryRun`; absent on a
+   *  `--dry-run` that disclosed a rejection. */
+  outbound?: { category: "progress"; event: "graft"; text: string };
   /** false for a `--dry-run` (previewed, nothing written); true once appended. */
   applied: boolean;
+  /** the structured dry-run closure — present only on a `--dry-run`. */
+  closure?: StructuredGraftClosure;
+}
+
+/** Group a graft's rejections into the human clause both the throw message and the
+ *  `--dry-run` prose use — the offenders named per reason, in a stable order. */
+export function describeGraftRejections(rejections: GraftRejection[]): string {
+  const group = (reason: GraftRejection["reason"], label: string) => {
+    const hit = rejections.filter((r) => r.reason === reason).map((r) => `#${r.id}`);
+    return hit.length ? `${label}: ${hit.join(", ")}` : "";
+  };
+  return [
+    group("unknown", "unknown/missing"),
+    group("closed", "closed"),
+    group("already-in-campaign", "already in the campaign"),
+  ]
+    .filter(Boolean)
+    .join("; ");
 }
 
 /**
@@ -113,18 +154,21 @@ export async function runGraft(
   };
 
   // All-or-nothing: reject the whole graft naming the offenders, never half-apply.
+  // A `--dry-run` is a preview, so it discloses the rejection in its closure rather
+  // than throwing (the aggregated dashboard's preview names the offenders off it); a
+  // real graft still rejects whole, exactly as before.
   const rejections = validateGraftTargets(normalized, { inCampaign, state: stateOf });
   if (rejections.length) {
-    const group = (reason: GraftRejection["reason"], label: string) => {
-      const hit = rejections.filter((r) => r.reason === reason).map((r) => `#${r.id}`);
-      return hit.length ? `${label}: ${hit.join(", ")}` : "";
-    };
-    const parts = [
-      group("unknown", "unknown/missing"),
-      group("closed", "closed"),
-      group("already-in-campaign", "already in the campaign"),
-    ].filter(Boolean);
-    throw new Error(`graft rejected — nothing added (${parts.join("; ")}).`);
+    if (opts.dryRun)
+      return {
+        ids: normalized,
+        placement: [],
+        remaining: reduced.waves,
+        rejected: rejections,
+        applied: false,
+        closure: { ids: normalized, placement: [], remaining: reduced.waves, rejected: rejections },
+      };
+    throw new Error(`graft rejected — nothing added (${describeGraftRejections(rejections)}).`);
   }
 
   // The layering inputs the pure reducer folds with (ADR 0012): each grafted id's
@@ -169,9 +213,13 @@ export async function runGraft(
     ids: normalized,
     placement,
     remaining: applied.remaining,
+    rejected: [],
     event,
     outbound,
     applied: !opts.dryRun,
+    ...(opts.dryRun
+      ? { closure: { ids: normalized, placement, remaining: applied.remaining, rejected: [] } }
+      : {}),
   };
 
   if (opts.dryRun) return result;

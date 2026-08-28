@@ -13,6 +13,8 @@ import type { ResolvedConfig } from "./config.ts";
 import {
   ARCHIVE_LIST_SCRIPT,
   DASHBOARD_PALETTE_CSS,
+  HOST_LOG_SCRIPT,
+  HOST_LOG_STYLES,
   ISSUE_DETAIL_SHEET_SCRIPT,
   ISSUE_DETAIL_SHEET_STYLES,
   REPO_DROPDOWN_SCRIPT,
@@ -39,6 +41,7 @@ import {
   formatStatusText,
   highlightJsonLine,
   issueDetailSheetMarkup,
+  isNotableHostEvent,
   lastEventText,
   listArchivedRuns,
   ownerRepoFromRemote,
@@ -49,6 +52,7 @@ import {
   reconstructIssueDetail,
   projectRunState,
   reduceCampaign,
+  renderHostLog,
   renderLandingShell,
   viewRelevantEvents,
   renderStatusPage,
@@ -919,6 +923,43 @@ test("serveAllStatus serves the aggregated site, selecting the project from the 
   }
 });
 
+test("GET /api/host-log serves the host log newest-first as raw JSONL lines; a missing file reads empty (#180)", async () => {
+  const configDir = join(tmpdir(), `vetinari-hostlog-route-${Date.now()}`);
+  const gwHome = join(configDir, "gw-home");
+  const prev = process.env.VETINARI_GATEWAY_HOME;
+  process.env.VETINARI_GATEWAY_HOME = gwHome;
+  try {
+    // No host.jsonl yet → a clean empty window (the daemon never ran), never an error.
+    const server0 = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+    const port0 = (server0.address() as AddressInfo).port;
+    try {
+      const empty = await (await fetch(`http://127.0.0.1:${port0}/api/host-log`)).json();
+      assert.deepEqual(empty.lines, [], "a missing host log reads empty");
+    } finally {
+      await new Promise<void>((r) => server0.close(() => r()));
+    }
+    // Write three host rows oldest→newest; the endpoint returns them newest-first, verbatim.
+    mkdirSync(join(gwHome, "logs"), { recursive: true });
+    const rows = [
+      '{"ts":"2026-08-28T00:00:00.000Z","event":"gateway-routed"}',
+      '{"ts":"2026-08-28T00:00:01.000Z","event":"telegram-send","error":"429"}',
+      '{"ts":"2026-08-28T00:00:02.000Z","event":"registry-read"}',
+    ];
+    writeFileSync(join(gwHome, "logs", "host.jsonl"), rows.join("\n") + "\n");
+    const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+    const port = (server.address() as AddressInfo).port;
+    try {
+      const body = await (await fetch(`http://127.0.0.1:${port}/api/host-log`)).json();
+      // Newest-first: the last-written row leads; the bytes are verbatim (not reparsed).
+      assert.deepEqual(body.lines, [rows[2], rows[1], rows[0]]);
+    } finally {
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  } finally {
+    prev === undefined ? delete process.env.VETINARI_GATEWAY_HOME : (process.env.VETINARI_GATEWAY_HOME = prev);
+  }
+});
+
 test("renderLandingShell's card heading shows owner/name, but links and keys on the bare project", () => {
   const html = renderLandingShell(["alpha"]);
   // The card heading reads the card's owner/name, falling back to the bare key when absent.
@@ -1377,6 +1418,29 @@ test("renderLandingShell mounts the cross-project feed under the cards on every 
   );
   assert.ok(mobileBlock, "the landing has a ≤640px mobile media block");
   assert.doesNotMatch(mobileBlock[0], /\.feed \{ display: none; \}/);
+});
+
+test("renderHostLog renders a gear entry point, a hidden badge, and a hidden host-log pane with a filter (#180)", () => {
+  const html = renderHostLog();
+  // A gear button is the entry point, collapsed by default.
+  assert.match(html, /data-host-log-gear[^>]*aria-expanded="false"/);
+  // Its attention badge starts hidden — a routine-only log shows no badge.
+  assert.match(html, /data-host-log-badge[^>]*hidden/);
+  // The pane itself is hidden until the gear is clicked (not an always-visible section).
+  assert.match(html, /data-host-log-panel[^>]*hidden/);
+  // The one control is a substring filter over the raw lines.
+  assert.match(html, /data-host-log-filter/);
+  // A lines container the client fills from /api/host-log and the SSE host frames.
+  assert.match(html, /data-host-log-lines/);
+});
+
+test("renderLandingShell mounts the host-log gear + pane on the host view (#180)", () => {
+  const html = renderLandingShell(["alpha", "beta"]);
+  // The host-log surface lives on the all-repos landing/host view.
+  assert.match(html, /data-host-log-gear/);
+  assert.match(html, /data-host-log-panel/);
+  // Its initial rows come from the no-daemon host-log reader endpoint.
+  assert.match(html, /\/api\/host-log/);
 });
 
 test("renderLandingShell parked counter expands a cross-repo parked queue in place", () => {
@@ -5029,6 +5093,33 @@ test("renderStatusPage ships the archived-list client wiring: toggle, mode switc
   );
 });
 
+test("HOST_LOG_SCRIPT wires the host-log pane: gear show/hide, badge off isNotableHostEvent, filter, live host frames (#180)", () => {
+  const html = renderLandingShell(["alpha"]);
+  // The landing embeds the host-log script and its styles.
+  assert.ok(html.includes(HOST_LOG_SCRIPT), "landing includes HOST_LOG_SCRIPT");
+  assert.ok(html.includes(HOST_LOG_STYLES), "landing includes HOST_LOG_STYLES");
+  // Ships the shared, tested pure helpers via .toString(), not a hand-mirrored copy.
+  assert.match(HOST_LOG_SCRIPT, /function isNotableHostEvent/);
+  assert.match(HOST_LOG_SCRIPT, /function highlightJsonLine/);
+  assert.match(HOST_LOG_SCRIPT, /function cappedRawRows/);
+  // The gear is the show/hide of an otherwise-hidden pane.
+  assert.match(HOST_LOG_SCRIPT, /gear\.addEventListener\("click", \(\) => \(panel\.hidden \? openPanel\(\) : closePanel\(\)\)\);/);
+  // The badge keys off isNotableHostEvent and a last-viewed timestamp; opening marks the
+  // window's notable events seen so the badge clears until a newer one lands.
+  assert.match(HOST_LOG_SCRIPT, /if \(isNotableHostEvent\(ev\)/);
+  assert.match(HOST_LOG_SCRIPT, /badge\.hidden = !\(n && n > lastSeen\)/);
+  assert.match(HOST_LOG_SCRIPT, /lastSeen = newestNotableTs\(\) \|\| lastSeen/);
+  // Renders newest-first through the shared cap/highlight and narrows by a substring filter.
+  assert.match(HOST_LOG_SCRIPT, /cappedRawRows\(lines, needle, HOST_CAP, expanded\)/);
+  assert.match(HOST_LOG_SCRIPT, /code\.innerHTML = highlightJsonLine\(line\)/);
+  assert.match(HOST_LOG_SCRIPT, /filterEl\.addEventListener\("input"/);
+  // Live: the initial window is the no-daemon fetch; new rows arrive on the named host frame.
+  assert.match(HOST_LOG_SCRIPT, /fetch\("\/api\/host-log"\)/);
+  assert.match(HOST_LOG_SCRIPT, /events\.addEventListener\("host"/);
+  // A missing host log reads a clean empty state, not a blank pane.
+  assert.match(HOST_LOG_SCRIPT, /No host log yet/);
+});
+
 test("renderStatusPage makes archived campaign chips open the issue sheet against the archived run, read-only", () => {
   const html = renderStatusPage(
     { project: "beta", waves: [], parked: [] },
@@ -6277,6 +6368,21 @@ test("cappedRawRows filters before the cap and lets expandedCount reveal more", 
   const expanded = cappedRawRows(lines, "", 500, 300);
   assert.equal(expanded.rows.length, 800, "cap + expandedCount rows render");
   assert.equal(expanded.hidden, 400);
+});
+
+test("isNotableHostEvent flags a fail/error kind or a row carrying error/ok:false, and passes routine rows", () => {
+  // A kind matching /fail|error/i is notable — an SSE watch failure, a registry read error.
+  assert.equal(isNotableHostEvent({ ts: "t", event: "dashboard-events-watch-failed" }), true);
+  assert.equal(isNotableHostEvent({ ts: "t", event: "registry-read-error" }), true);
+  // Case-insensitive on the kind.
+  assert.equal(isNotableHostEvent({ ts: "t", event: "TelegramSendFailure" }), true);
+  // A row carrying an `error` field is notable even when its kind reads routine.
+  assert.equal(isNotableHostEvent({ ts: "t", event: "telegram-send", error: "429 Too Many Requests" }), true);
+  // An `ok: false` field is notable; `ok: true` is not, on its own.
+  assert.equal(isNotableHostEvent({ ts: "t", event: "gateway-routed", ok: false }), true);
+  assert.equal(isNotableHostEvent({ ts: "t", event: "gateway-routed", ok: true }), false);
+  // A routine host event with no error signal is not notable.
+  assert.equal(isNotableHostEvent({ ts: "t", event: "gateway-routed", project: "acme" }), false);
 });
 
 test("parseRunTimestamp reverses an archive run token to an ISO timestamp, tolerating older tokens", () => {

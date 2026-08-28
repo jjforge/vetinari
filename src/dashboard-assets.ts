@@ -1,4 +1,4 @@
-import { cappedRawRows, highlightJsonLine, tailAppend, tailFresh, tailView } from "./dashboard-render.ts";
+import { cappedRawRows, highlightJsonLine, isNotableHostEvent, tailAppend, tailFresh, tailView } from "./dashboard-render.ts";
 
 /**
  * The dashboard's inert browser payloads — the CSS and client-side JavaScript
@@ -766,4 +766,131 @@ export const LIVE_TAIL_SCRIPT = `  const tailEl = document.querySelector("[data-
     // server's still-held window isn't re-imported next frame (the clear sticks until new lines arrive).
     clearBtn.addEventListener("click", () => { buffer = []; mark = 0; render(); });
     renderMenu(); renderSummary(); render();
+  }`;
+
+/**
+ * The host-log surface's styles (#180): the gear + attention badge and the raw-JSONL
+ * pane it toggles. Colours come straight from the shared palette (§1, no local hexes) —
+ * the `--color-box-body` panel, the `--color-secondary` hairline, and the badge in the
+ * failure red (the one alert colour). The gear floats to the right under the top bar; the
+ * pane is an absolutely-positioned popover beneath it on desktop, and a bottom sheet on a
+ * phone. The JSON tokens reuse the archived-raw span classes but scope their palette to
+ * `.host-log-code` so they never restyle the archive viewer or the live tail.
+ */
+export const HOST_LOG_STYLES = `  .host-log { position: relative; display: flex; justify-content: flex-end; margin: .35rem 0 0; }
+  .host-log-gear { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; border: 1px solid var(--color-secondary); border-radius: 999px; background: var(--color-box-header); color: var(--color-text-light-2); font-size: 1.05rem; line-height: 1; cursor: pointer; }
+  .host-log-gear:hover { border-color: var(--color-primary); color: var(--color-text); }
+  .host-log-gear[aria-expanded="true"] { border-color: var(--color-primary); color: var(--color-primary); }
+  /* The attention badge: a small failure-red pip at the gear's corner, hidden until a
+     notable host event (isNotableHostEvent) newer than the last open is in the window. */
+  .host-log-badge { position: absolute; top: -3px; right: -3px; min-width: 15px; height: 15px; padding: 0 3px; display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; background: var(--color-failure); color: #fff; font-size: 10px; font-weight: 700; line-height: 1; }
+  .host-log-badge[hidden] { display: none; }
+  .host-log-panel { position: absolute; top: calc(100% + 8px); right: 0; z-index: 8; width: min(620px, 92vw); max-height: 70vh; display: flex; flex-direction: column; background: var(--color-box-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); box-shadow: 0 18px 48px #0009; overflow: hidden; }
+  .host-log-panel[hidden] { display: none; }
+  .host-log-head { display: flex; align-items: center; gap: .5rem; padding: .65rem .9rem; border-bottom: 1px solid var(--color-light-border); }
+  .host-log-title { font-family: ${MONO_FONT}; font-size: .8rem; color: var(--color-text-light-2); }
+  .host-log-gap { flex: 1; }
+  .host-log-close { background: none; border: 0; color: var(--color-text-light-2); font-size: 1.3rem; line-height: 1; cursor: pointer; padding: 0 .3rem; }
+  .host-log-close:hover { color: var(--color-text); }
+  .host-log-filter { margin: .7rem .9rem 0; padding: .4rem .6rem; color: var(--color-text); background: var(--color-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); font: inherit; font-size: .8rem; }
+  .host-log-lines { flex: 1; min-height: 0; overflow-y: auto; padding: .6rem .9rem; font-family: ${MONO_FONT}; font-size: .78rem; line-height: 1.5; }
+  .host-log-line { padding: .05rem 0; }
+  .host-log-code { min-width: 0; white-space: pre-wrap; word-break: break-word; color: var(--color-text-light); }
+  .host-log-code .jkey { color: var(--color-blue); }
+  .host-log-code .jstr { color: var(--color-green); }
+  .host-log-code .jnum, .host-log-code .jbool, .host-log-code .jnull { color: var(--color-yellow); }
+  .host-log-empty { color: var(--color-text-light-2); padding: .5rem 0; }
+  .host-log-more { display: block; width: 100%; padding: .5rem 0; margin-top: .4rem; text-align: left; background: none; border: 0; color: var(--color-primary); font: inherit; cursor: pointer; }
+  .host-log-more:hover { color: var(--color-text); }
+  .host-log-footer { color: var(--color-text-light-2); font-size: .75rem; padding: .5rem .9rem; border-top: 1px solid var(--color-light-border); }
+  @media (max-width: 640px) {
+    .host-log-panel { position: fixed; top: auto; bottom: 0; left: 0; right: 0; width: 100%; max-height: 80vh; border-radius: var(--border-radius-medium) var(--border-radius-medium) 0 0; }
+  }`;
+
+/**
+ * The host-log surface's client script (#180), inlined into the landing shell after its
+ * shared `EventSource` so it can subscribe to the named `host` SSE frames. Everything pure
+ * is single-sourced from `dashboard-render.ts` via `.toString()` — `highlightJsonLine` (the
+ * raw tokeniser), `cappedRawRows` (the filter + render cap) and `isNotableHostEvent` (the
+ * badge predicate) — so the node tests exercise the very functions the browser runs.
+ *
+ * The gear is the show/hide; opening the pane marks the window's notable events seen (a
+ * client-side last-viewed timestamp), clearing the badge until a newer notable event lands.
+ * The initial window is the no-daemon `GET /api/host-log` read (newest-first already); each
+ * `host` frame carries the rows appended since connect, folded into the newest-first buffer
+ * and re-evaluated for the badge. A missing `host.jsonl` reads empty — a clean "no host log
+ * yet" and no badge.
+ */
+export const HOST_LOG_SCRIPT = `  const hostLogRoot = document.querySelector("[data-host-log]");
+  if (hostLogRoot && typeof events !== "undefined") {
+    const __name = (fn) => fn;
+    ${highlightJsonLine.toString()}
+    ${cappedRawRows.toString()}
+    ${isNotableHostEvent.toString()}
+    const HOST_CAP = 500, HOST_WINDOW = 500;
+    const gear = hostLogRoot.querySelector("[data-host-log-gear]");
+    const badge = hostLogRoot.querySelector("[data-host-log-badge]");
+    const panel = hostLogRoot.querySelector("[data-host-log-panel]");
+    const closeBtn = hostLogRoot.querySelector("[data-host-log-close]");
+    const filterEl = hostLogRoot.querySelector("[data-host-log-filter]");
+    const linesEl = hostLogRoot.querySelector("[data-host-log-lines]");
+    const footer = hostLogRoot.querySelector("[data-host-log-footer]");
+    let lines = [], lastSeen = "", expanded = 0;
+    // The newest notable event's timestamp in the current window (isNotableHostEvent), or ""
+    // when the window holds none. ISO timestamps sort lexicographically, so a string compare
+    // orders them; a row that doesn't parse as JSON is skipped, never notable.
+    const newestNotableTs = () => {
+      let max = "";
+      for (const raw of lines) {
+        let ev; try { ev = JSON.parse(raw); } catch (e) { continue; }
+        if (isNotableHostEvent(ev) && ev && typeof ev.ts === "string" && ev.ts > max) max = ev.ts;
+      }
+      return max;
+    };
+    // The gear badges when the window holds a notable event newer than the operator's last open.
+    const updateBadge = () => { const n = newestNotableTs(); badge.hidden = !(n && n > lastSeen); };
+    const draw = () => {
+      const needle = filterEl.value.trim().toLowerCase();
+      const { rows, total, hidden } = cappedRawRows(lines, needle, HOST_CAP, expanded);
+      linesEl.textContent = "";
+      for (const { line } of rows) {
+        const row = document.createElement("div"); row.className = "host-log-line";
+        const code = document.createElement("code"); code.className = "host-log-code"; code.innerHTML = highlightJsonLine(line);
+        row.append(code); linesEl.append(row);
+      }
+      if (!rows.length) { const e = document.createElement("div"); e.className = "host-log-empty"; e.textContent = lines.length ? (needle ? "No lines match “" + filterEl.value.trim() + "”." : "No host log lines.") : "No host log yet."; linesEl.append(e); }
+      if (hidden > 0) { const more = document.createElement("button"); more.type = "button"; more.className = "host-log-more"; more.textContent = "Show " + hidden + " more line" + (hidden === 1 ? "" : "s"); more.addEventListener("click", () => { expanded += HOST_CAP; draw(); }); linesEl.append(more); }
+      footer.textContent = lines.length ? ("showing " + rows.length + " of " + total + " lines") : "";
+    };
+    const openPanel = () => {
+      panel.hidden = false; gear.setAttribute("aria-expanded", "true");
+      // Opening marks the current notable events seen, so the badge clears until a newer one lands.
+      lastSeen = newestNotableTs() || lastSeen; updateBadge();
+      expanded = 0; draw(); filterEl.focus();
+    };
+    const closePanel = () => { panel.hidden = true; gear.setAttribute("aria-expanded", "false"); };
+    gear.addEventListener("click", () => (panel.hidden ? openPanel() : closePanel()));
+    closeBtn.addEventListener("click", closePanel);
+    filterEl.addEventListener("input", () => { expanded = 0; draw(); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !panel.hidden) closePanel(); });
+    // Fold newly-appended host rows (the server sends them in file order, oldest→newest) into
+    // the newest-first buffer, bounded to a recent window; redraw if the pane is open and
+    // re-evaluate the badge either way (the gear signals even while the pane is closed).
+    const ingest = (appended) => {
+      if (!appended || !appended.length) return;
+      lines = appended.slice().reverse().concat(lines);
+      if (lines.length > HOST_WINDOW) lines = lines.slice(0, HOST_WINDOW);
+      if (!panel.hidden) draw();
+      updateBadge();
+    };
+    events.addEventListener("host", (e) => { let m; try { m = JSON.parse(e.data); } catch (x) { return; } ingest((m && m.lines) || []); });
+    // The initial window is the no-daemon host-log read (readHostLog), newest-first already.
+    // Append it behind any rows a live frame already delivered so a frame racing this fetch
+    // isn't clobbered; the fetch rows are the older backlog, so newest-first order holds.
+    fetch("/api/host-log").then((r) => (r.ok ? r.json() : { lines: [] })).then((d) => {
+      lines = lines.concat((d && d.lines) || []);
+      if (lines.length > HOST_WINDOW) lines = lines.slice(0, HOST_WINDOW);
+      if (!panel.hidden) draw();
+      updateBadge();
+    }).catch(() => {});
   }`;

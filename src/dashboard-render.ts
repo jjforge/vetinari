@@ -11,6 +11,7 @@ import {
   type WaveStatus,
 } from "./dashboard-model.ts";
 import { festiveWaveName } from "./festive-names.ts";
+import type { HumanizedRow } from "./log-view.ts";
 import type { StructuredGraftClosure } from "./graft.ts";
 import type { GraftRejection } from "./plan.ts";
 import {
@@ -334,6 +335,47 @@ export function highlightJsonLine(line: string): string {
   }
   out += esc(line.slice(last));
   return out;
+}
+
+/**
+ * Build the shared log-view row (#216, mockup 1a/1c) from a humanized row's structured parts.
+ * The `.lv-row` is the three-tier grid `time · dot · message`: `.lv-t` is the dimmest tier,
+ * the state `.lv-dot`, then `.lv-msg` — the brightest tier — carries the actor as a `.lv-lead`
+ * (option 1a: the actor *leads* the message, no fixed column), a dim `.lv-verb`, and each
+ * message span (`code` → `<code>`, `strong` → `<strong>`, plain → `<span>`). Every fragment is
+ * set via `textContent`, never innerHTML, so a path/summary/error can't inject markup. `d` is
+ * the document (the client passes `document`, a test passes a stub) so the builder is a pure
+ * factory, shipped verbatim into the three log surfaces' scripts via `.toString()`.
+ */
+export function humanizedRow(h: HumanizedRow, d: Document): HTMLElement {
+  const el = d.createElement("div");
+  el.className = "lv-row";
+  const t = d.createElement("span");
+  t.className = "lv-t";
+  t.textContent = h.time;
+  const dot = d.createElement("span");
+  dot.className = "lv-dot " + h.dot;
+  const msg = d.createElement("span");
+  msg.className = "lv-msg";
+  if (h.actor) {
+    const lead = d.createElement("span");
+    lead.className = "lv-lead";
+    lead.textContent = h.actor;
+    msg.append(lead);
+  }
+  if (h.verb) {
+    const verb = d.createElement("span");
+    verb.className = "lv-verb";
+    verb.textContent = h.verb;
+    msg.append(verb);
+  }
+  for (const s of h.spans || []) {
+    const node = d.createElement(s.kind === "code" ? "code" : s.kind === "strong" ? "strong" : "span");
+    node.textContent = s.text;
+    msg.append(node);
+  }
+  el.append(t, dot, msg);
+  return el;
 }
 
 /** One rendered raw-log row: the original line and its 1-based line number. */

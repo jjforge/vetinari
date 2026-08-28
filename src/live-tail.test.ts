@@ -71,7 +71,7 @@ test("buildLiveTail attaches each line's humanized parts for the log-view compon
 
   // The server humanizes each raw line once so the client renders pre-humanized rows and
   // keeps `raw` for the Raw toggle and the download.
-  assert.deepEqual(tail.lines[0].humanized, { time: "09:15:00", actor: "#204", message: "Edit src/x.ts", dot: "running" });
+  assert.deepEqual(tail.lines[0].humanized, { time: "09:15:00", actor: "#204", verb: "edited", spans: [{ text: "src/x.ts", kind: "code" }], dot: "running" });
 });
 
 test("buildLiveTail interleaves two running agents by ts and excludes finished ones", () => {
@@ -427,9 +427,11 @@ test("the tail client renders humanized-by-default and flips to raw NDJSON on th
   assert.match(html, /localStorage/);
   assert.match(html, /mode = [^;]*"humanized"/);
   // Humanized rows read the server-attached parts (time · actor · what happened) and a
-  // state-coloured dot; the raw branch keeps the highlighted NDJSON tokeniser.
+  // state-coloured dot, built by the shared .lv-row component; the raw branch keeps the
+  // highlighted NDJSON tokeniser.
   assert.match(html, /r\.humanized/);
-  assert.match(html, /log-dot/);
+  assert.match(html, /humanizedRow\(h, document\)/);
+  assert.match(html, /lv-dot/);
   assert.match(html, /highlightJsonLine\(r\.raw\)/);
   // The mode toggle is wired to re-render and persist.
   assert.match(html, /data-tail-mode/);

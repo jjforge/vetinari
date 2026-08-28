@@ -3789,15 +3789,16 @@ test("serveAllStatus GET /archive/log serves a listed run's lines humanized alon
     assert.equal(ok.status, 200);
     assert.match(ok.headers.get("content-type") ?? "", /^application\/json/);
     const body = (await ok.json()) as {
-      lines: { raw: string; humanized: { message: string; dot: string } }[];
+      lines: { raw: string; humanized: { verb: string; spans: { text: string; kind: string }[]; dot: string } }[];
     };
     // The raw bytes round-trip verbatim (nothing dropped or reordered).
     assert.equal(body.lines.map((l) => l.raw).join("\n") + "\n", raw);
     // …and each line is humanized server-side through the full registry: the campaign-start
-    // narrates as a running start, the campaign-done as a merged completion.
-    assert.equal(body.lines[0].humanized.message, "Campaign started");
+    // narrates (as one plain span, no verb) as a running start, the campaign-done as a merged
+    // completion.
+    assert.deepEqual(body.lines[0].humanized.spans, [{ text: "Campaign started", kind: "plain" }]);
     assert.equal(body.lines[0].humanized.dot, "running");
-    assert.equal(body.lines[1].humanized.message, "Campaign complete (2 waves)");
+    assert.deepEqual(body.lines[1].humanized.spans, [{ text: "Campaign complete (2 waves)", kind: "plain" }]);
     assert.equal(body.lines[1].humanized.dot, "merged");
 
     // A run not in the listing is a 404, never a path to traverse.
@@ -6085,10 +6086,10 @@ test("ARCHIVE_LIST_SCRIPT renders the archived log through the shared log-view: 
   assert.match(ARCHIVE_LIST_SCRIPT, /return res\.json\(\);/);
   assert.match(ARCHIVE_LIST_SCRIPT, /pane\._lines = ls\.map\(\(l\) => l\.raw\)/);
   assert.match(ARCHIVE_LIST_SCRIPT, /pane\._humanized = ls\.map\(\(l\) => l\.humanized\)/);
-  // Humanized rows are the shared .log-hrow: a state dot + time · actor · message.
-  assert.match(ARCHIVE_LIST_SCRIPT, /el\.className = "log-hrow"/);
-  assert.match(ARCHIVE_LIST_SCRIPT, /dot\.className = "log-dot " \+ h\.dot/);
-  assert.match(ARCHIVE_LIST_SCRIPT, /msg\.className = "log-msg"; msg\.textContent = h\.message/);
+  // Humanized rows are the shared .lv-row component, built from the humanized parts and
+  // tagged with the deep-link #L<n> id.
+  assert.match(ARCHIVE_LIST_SCRIPT, /const el = humanizedRow\(h, document\); el\.id = "L" \+ n/);
+  assert.match(ARCHIVE_LIST_SCRIPT, /function humanizedRow/);
   // The mode toggle flips the shared mode, persists it, and redraws the pane.
   assert.match(ARCHIVE_LIST_SCRIPT, /rawMode = btn\.dataset\.mode; try \{ localStorage\.setItem\(MODE_KEY, rawMode\); \}/);
   // Download JSON emits the currently-filtered raw NDJSON, uncapped, as an .jsonl file.
@@ -6129,10 +6130,9 @@ test("HOST_LOG_SCRIPT renders humanized by default with a Raw toggle and a Downl
   // Humanized is the default mode, remembered per view in localStorage so a Raw preference sticks.
   assert.match(HOST_LOG_SCRIPT, /let mode = "humanized"/);
   assert.match(HOST_LOG_SCRIPT, /localStorage/);
-  // The default (humanized) branch renders the shared log-view row from humanizeHostLine's parts.
-  assert.match(HOST_LOG_SCRIPT, /humanizeHostLine\(line\)/);
-  assert.match(HOST_LOG_SCRIPT, /"log-hrow"/);
-  assert.match(HOST_LOG_SCRIPT, /"log-dot "/);
+  // The default (humanized) branch renders the shared .lv-row component from humanizeHostLine's parts.
+  assert.match(HOST_LOG_SCRIPT, /humanizedRow\(humanizeHostLine\(line\), document\)/);
+  assert.match(HOST_LOG_SCRIPT, /function humanizedRow/);
   // The Humanized ⇄ Raw toggle flips the body format, persists the choice, and redraws.
   assert.match(HOST_LOG_SCRIPT, /data-host-log-mode/);
   assert.match(HOST_LOG_SCRIPT, /aria-pressed/);

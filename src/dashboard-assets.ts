@@ -1,4 +1,4 @@
-import { cappedRawRows, followView, highlightJsonLine, isNotableHostEvent, tailAppend, tailFresh, tailView } from "./dashboard-render.ts";
+import { cappedRawRows, followView, highlightJsonLine, humanizedRow, isNotableHostEvent, tailAppend, tailFresh, tailView } from "./dashboard-render.ts";
 import { paneActivity } from "./dashboard-visual-state.ts";
 import { humanizeHostLine, LOG_DOT_STATE_COLOR } from "./log-view.ts";
 
@@ -511,6 +511,7 @@ export const ARCHIVE_LIST_SCRIPT = `  const archiveList = document.querySelector
     const __name = (fn) => fn;
     const RAW_CAP = 500;
     ${highlightJsonLine.toString()}
+    ${humanizedRow.toString()}
     ${cappedRawRows.toString()}
     // The Humanized ⇄ Raw display mode (#203): humanized by default, remembered client-side so a
     // Raw preference sticks across reloads. The humanized parts are computed server-side (the
@@ -556,15 +557,12 @@ export const ARCHIVE_LIST_SCRIPT = `  const archiveList = document.querySelector
           code.className = "archive-raw-code"; code.innerHTML = highlightJsonLine(line);
           el.append(a, code); linesEl.append(el);
         } else {
-          // Humanized (default): time · actor · what happened, the dot coloured by the event's
-          // own state — the parts the server attached per line; an eventless line falls back to a
-          // raw dump. Keeps the #L<n> id so a deep-link still scrolls regardless of mode.
-          const h = (pane._humanized && pane._humanized[n - 1]) || { time: "", actor: "", message: line, dot: "neutral" };
-          const el = document.createElement("div"); el.className = "log-hrow"; el.id = "L" + n;
-          const dot = document.createElement("span"); dot.className = "log-dot " + h.dot; el.append(dot);
-          const t = document.createElement("span"); t.className = "log-time"; t.textContent = h.time; el.append(t);
-          const ac = document.createElement("span"); ac.className = "log-actor"; ac.textContent = h.actor; el.append(ac);
-          const msg = document.createElement("span"); msg.className = "log-msg"; msg.textContent = h.message; el.append(msg);
+          // Humanized (default): the shared .lv-row component — time · dot · actor-leads-message,
+          // the dot coloured by the event's own state (the parts the server attached per line); an
+          // eventless line falls back to a one-span raw dump. Keeps the #L<n> id so a deep-link
+          // still scrolls regardless of mode.
+          const h = (pane._humanized && pane._humanized[n - 1]) || { time: "", actor: "", verb: "", spans: [{ text: line, kind: "plain" }], dot: "neutral" };
+          const el = humanizedRow(h, document); el.id = "L" + n;
           linesEl.append(el);
         }
       }
@@ -691,15 +689,21 @@ export const LIVE_TAIL_STYLES = `  .live-tail { background: var(--color-card); b
   .tail-mode-btn { border: 0; background: var(--color-chip); color: var(--color-text-light-2); font: inherit; font-size: .78rem; padding: .28rem .6rem; cursor: pointer; }
   .tail-mode-btn:hover { color: var(--color-text); }
   .tail-mode-btn[aria-pressed="true"] { background: var(--color-blue); color: var(--color-body); font-weight: 700; }
-  /* A humanized row (#203): a state dot, the HH:MM:SS time, the #issue actor, then the message.
-     The dot reads the event's own state via the shared palette (§1, generated from stateColor). */
-  .log-hrow { display: grid; grid-template-columns: auto auto auto 1fr; align-items: baseline; gap: .5rem; padding: .1rem .6rem; }
-  .log-hrow:hover { background: var(--color-card); }
-  .log-dot { width: .6rem; height: .6rem; border-radius: 999px; align-self: center; flex: none; background: var(--color-dim); }
-  ${Object.entries(LOG_DOT_STATE_COLOR).map(([s, token]) => `.log-dot.${s} { background: ${stateColor(token)}; }`).join(" ")}
-  .log-time { color: var(--color-dim); font-variant-numeric: tabular-nums; }
-  .log-actor { color: var(--color-text-light-2); font-weight: 600; }
-  .log-msg { min-width: 0; white-space: pre-wrap; word-break: break-word; color: var(--color-text-light); }
+  /* The shared log-view row (#216, mockup 1a/1c): the three-tier grid time · dot · message.
+     Brightness climbs across the tiers — the time is dimmest, the actor leads the message at
+     mid brightness, and the message itself is brightest; the dim verb sits ahead of it, code
+     tokens read mono, and the strong key term is the brightest of all. The dot reads the
+     event's own state via the shared palette (§1, generated from stateColor). */
+  .lv-row { display: grid; grid-template-columns: auto auto 1fr; align-items: baseline; gap: .5rem; padding: .1rem .6rem; }
+  .lv-row:hover { background: var(--color-card); }
+  .lv-t { color: var(--color-dim); font-variant-numeric: tabular-nums; }
+  .lv-dot { width: .6rem; height: .6rem; border-radius: 999px; align-self: center; flex: none; background: var(--color-dim); }
+  ${Object.entries(LOG_DOT_STATE_COLOR).map(([s, token]) => `.lv-dot.${s} { background: ${stateColor(token)}; }`).join(" ")}
+  .lv-msg { min-width: 0; white-space: pre-wrap; word-break: break-word; color: var(--color-text); }
+  .lv-lead { color: var(--color-text-light-2); font-weight: 600; margin-right: .4rem; }
+  .lv-verb { color: var(--color-text-light-2); margin-right: .35rem; }
+  .lv-msg code { font-family: ${MONO_FONT}; font-size: .95em; color: var(--color-text-light); }
+  .lv-msg strong { color: var(--color-text); font-weight: 700; }
   .tail-empty { color: var(--color-text-light-2); padding: .5rem .6rem; }
   .tail-backlog { display: block; width: 100%; border: 0; background: var(--color-blue); color: var(--color-body); font: inherit; font-size: .78rem; font-weight: 700; padding: .35rem; cursor: pointer; text-align: center; }
   .tail-backlog[hidden] { display: none; }
@@ -724,6 +728,7 @@ export const LIVE_TAIL_SCRIPT = `  const tailEl = document.querySelector("[data-
   if (tailEl && typeof events !== "undefined") {
     const __name = (fn) => fn;
     ${highlightJsonLine.toString()}
+    ${humanizedRow.toString()}
     ${tailFresh.toString()}
     ${tailAppend.toString()}
     ${followView.toString()}
@@ -771,15 +776,11 @@ export const LIVE_TAIL_SCRIPT = `  const tailEl = document.querySelector("[data-
             const code = mk("code", "tail-code"); code.innerHTML = highlightJsonLine(r.raw); line.append(code);
             body.append(line);
           } else {
-            // Humanized (default): time · actor · what happened, the dot coloured by the event's
-            // own state (the server-attached parts); an eventless line falls back to a raw dump.
-            const h = r.humanized || { time: "", actor: "", message: r.raw, dot: "neutral" };
-            const line = mk("div", "log-hrow");
-            line.append(mk("span", "log-dot " + h.dot));
-            line.append(mk("span", "log-time", h.time));
-            line.append(mk("span", "log-actor", h.actor));
-            line.append(mk("span", "log-msg", h.message));
-            body.append(line);
+            // Humanized (default): the shared .lv-row component — time · dot · actor-leads-message,
+            // the dot coloured by the event's own state (the server-attached parts); an eventless
+            // line falls back to a one-span raw dump.
+            const h = r.humanized || { time: "", actor: "", verb: "", spans: [{ text: r.raw, kind: "plain" }], dot: "neutral" };
+            body.append(humanizedRow(h, document));
           }
         }
       } else {
@@ -899,6 +900,7 @@ export const HOST_LOG_SCRIPT = `  const hostLogRoot = document.querySelector("[d
   if (hostLogRoot && typeof events !== "undefined") {
     const __name = (fn) => fn;
     ${highlightJsonLine.toString()}
+    ${humanizedRow.toString()}
     ${cappedRawRows.toString()}
     ${isNotableHostEvent.toString()}
     ${humanizeHostLine.toString()}
@@ -942,15 +944,10 @@ export const HOST_LOG_SCRIPT = `  const hostLogRoot = document.querySelector("[d
           const code = document.createElement("code"); code.className = "host-log-code"; code.innerHTML = highlightJsonLine(line);
           row.append(code); linesEl.append(row);
         } else {
-          // Humanized (default): time · actor · what happened, the dot coloured by the host
-          // event's own state (failures red); an unknown kind falls back to a raw dump.
-          const h = humanizeHostLine(line);
-          const row = document.createElement("div"); row.className = "log-hrow";
-          const dot = document.createElement("span"); dot.className = "log-dot " + h.dot; row.append(dot);
-          const t = document.createElement("span"); t.className = "log-time"; t.textContent = h.time; row.append(t);
-          const a = document.createElement("span"); a.className = "log-actor"; a.textContent = h.actor; row.append(a);
-          const m = document.createElement("span"); m.className = "log-msg"; m.textContent = h.message; row.append(m);
-          linesEl.append(row);
+          // Humanized (default): the shared .lv-row component — time · dot · actor-leads-message,
+          // the dot coloured by the host event's own state (failures red); an unknown kind falls
+          // back to a one-span raw dump.
+          linesEl.append(humanizedRow(humanizeHostLine(line), document));
         }
       }
       if (!rows.length) { const e = document.createElement("div"); e.className = "host-log-empty"; e.textContent = lines.length ? (needle ? "No lines match “" + filterEl.value.trim() + "”." : "No host log lines.") : "No host log yet."; linesEl.append(e); }

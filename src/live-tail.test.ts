@@ -71,7 +71,7 @@ test("buildLiveTail attaches each line's humanized parts for the log-view compon
 
   // The server humanizes each raw line once so the client renders pre-humanized rows and
   // keeps `raw` for the Raw toggle and the download.
-  assert.deepEqual(tail.lines[0].humanized, { time: "09:15:00", actor: "#204", message: "Edit src/x.ts", dot: "running" });
+  assert.deepEqual(tail.lines[0].humanized, { time: "09:15:00", actor: "#204", verb: "edited", spans: [{ text: "src/x.ts", kind: "code" }], dot: "running" });
 });
 
 test("buildLiveTail interleaves two running agents by ts and excludes finished ones", () => {
@@ -358,15 +358,17 @@ test("renderLiveTail draws the pane only when a repo has a running agent, one dr
   assert.doesNotMatch(html, /class="live-tail"[^>]*\shidden/);
 });
 
-test("renderLiveTail carries the log-view chrome: a Humanized⇄Raw toggle (humanized default) and a Download JSON control (#203)", () => {
+test("renderLiveTail carries the log-view chrome: a Humanized⇄Raw toggle (humanized default) and a ⤓ Download JSON icon (#203, #216)", () => {
   const html = renderLiveTail(statusWith([["204", "running"]]));
   // The segmented Humanized ⇄ Raw toggle, humanized selected by default.
   assert.match(html, /data-tail-mode/);
   assert.match(html, /data-mode="humanized"[^>]*aria-pressed="true"[^>]*>Humanized/);
   assert.match(html, /data-mode="raw"[^>]*aria-pressed="false"[^>]*>Raw/);
-  // The Download-JSON control replaces the old bare "Save" label.
-  assert.match(html, /data-tail-save[^>]*>Download JSON</);
-  assert.ok(!/>Save</.test(html), "the old bare Save label is gone");
+  // The Download JSON control is the mockup's ⤓ .lv-ico icon (aria-labelled), not a text button.
+  assert.match(html, /class="lv-ico" data-tail-save[^>]*aria-label="Download JSON"[^>]*>⤓</);
+  assert.ok(!/>Save</.test(html) && !/>Download JSON</.test(html), "no old text Save/Download button label");
+  // The mockup's chrome drops the Clear control (the download preserves the data).
+  assert.ok(!/data-tail-clear/.test(html), "the old Clear control is gone");
 });
 
 test("renderLiveTail omits follow/pause and renders the dot idle for a static (non-streaming) source (#203)", () => {
@@ -427,9 +429,11 @@ test("the tail client renders humanized-by-default and flips to raw NDJSON on th
   assert.match(html, /localStorage/);
   assert.match(html, /mode = [^;]*"humanized"/);
   // Humanized rows read the server-attached parts (time · actor · what happened) and a
-  // state-coloured dot; the raw branch keeps the highlighted NDJSON tokeniser.
+  // state-coloured dot, built by the shared .lv-row component; the raw branch keeps the
+  // highlighted NDJSON tokeniser.
   assert.match(html, /r\.humanized/);
-  assert.match(html, /log-dot/);
+  assert.match(html, /humanizedRow\(h, document\)/);
+  assert.match(html, /lv-dot/);
   assert.match(html, /highlightJsonLine\(r\.raw\)/);
   // The mode toggle is wired to re-render and persist.
   assert.match(html, /data-tail-mode/);

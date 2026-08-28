@@ -11,6 +11,7 @@ import {
   type WaveStatus,
 } from "./dashboard-model.ts";
 import { festiveWaveName } from "./festive-names.ts";
+import type { HumanizedRow } from "./log-view.ts";
 import type { StructuredGraftClosure } from "./graft.ts";
 import type { GraftRejection } from "./plan.ts";
 import {
@@ -336,6 +337,47 @@ export function highlightJsonLine(line: string): string {
   return out;
 }
 
+/**
+ * Build the shared log-view row (#216, mockup 1a/1c) from a humanized row's structured parts.
+ * The `.lv-row` is the three-tier grid `time · dot · message`: `.lv-t` is the dimmest tier,
+ * the state `.lv-dot`, then `.lv-msg` — the brightest tier — carries the actor as a `.lv-lead`
+ * (option 1a: the actor *leads* the message, no fixed column), a dim `.lv-verb`, and each
+ * message span (`code` → `<code>`, `strong` → `<strong>`, plain → `<span>`). Every fragment is
+ * set via `textContent`, never innerHTML, so a path/summary/error can't inject markup. `d` is
+ * the document (the client passes `document`, a test passes a stub) so the builder is a pure
+ * factory, shipped verbatim into the three log surfaces' scripts via `.toString()`.
+ */
+export function humanizedRow(h: HumanizedRow, d: Document): HTMLElement {
+  const el = d.createElement("div");
+  el.className = "lv-row";
+  const t = d.createElement("span");
+  t.className = "lv-t";
+  t.textContent = h.time;
+  const dot = d.createElement("span");
+  dot.className = "lv-dot " + h.dot;
+  const msg = d.createElement("span");
+  msg.className = "lv-msg";
+  if (h.actor) {
+    const lead = d.createElement("span");
+    lead.className = "lv-lead";
+    lead.textContent = h.actor;
+    msg.append(lead);
+  }
+  if (h.verb) {
+    const verb = d.createElement("span");
+    verb.className = "lv-verb";
+    verb.textContent = h.verb;
+    msg.append(verb);
+  }
+  for (const s of h.spans || []) {
+    const node = d.createElement(s.kind === "code" ? "code" : s.kind === "strong" ? "strong" : "span");
+    node.textContent = s.text;
+    msg.append(node);
+  }
+  el.append(t, dot, msg);
+  return el;
+}
+
 /** One rendered raw-log row: the original line and its 1-based line number. */
 export interface RawRow {
   line: string;
@@ -453,19 +495,6 @@ export function feedKindLabel(kind: string): string {
       turn: "agent.turn",
     }[kind] ?? kind
   );
-}
-
-/**
- * Map an event kind to its comms category (#78) so the feed reads in colour: merges/dones green,
- * a parked/quarantined/wave-parked wave the attention amber (ADR 0013), a halt red, a prune
- * purple, everything else (starts, waves, turns) the in-flight blue. Pure; shipped via `.toString()`.
- */
-export function feedKindClass(kind: string): string {
-  if (["green", "campaign-done", "campaign-complete", "campaign-batch-done", "queue-done"].includes(kind)) return "success";
-  if (kind === "parked" || kind === "quarantined" || kind === "wave-parked") return "attention";
-  if (kind === "campaign-halt") return "failure";
-  if (kind === "prune") return "pruned";
-  return "progress";
 }
 
 /**
@@ -610,7 +639,7 @@ const renderArchiveRow = (project: string, run: ArchivedRunView, open: boolean, 
     `<button type="button" class="tail-mode-btn" data-mode="raw" aria-pressed="false">Raw</button>` +
     `</span>` +
     `<span class="archive-raw-gap"></span>` +
-    `<button type="button" class="tail-save" data-archive-raw-save>Download JSON</button>` +
+    `<button type="button" class="lv-ico" data-archive-raw-save aria-label="Download JSON" title="Download JSON">⤓</button>` +
     `</div>` +
     `<div class="archive-raw-lines"></div>` +
     `<div class="archive-raw-footer"></div>` +
@@ -902,7 +931,7 @@ export const renderHostLog = () =>
   `<button type="button" class="tail-mode-btn" data-mode="raw" aria-pressed="false">Raw</button>` +
   `</span>` +
   `<span class="host-log-gap"></span>` +
-  `<button type="button" class="tail-save" data-host-log-save>Download JSON</button>` +
+  `<button type="button" class="lv-ico" data-host-log-save aria-label="Download JSON" title="Download JSON">⤓</button>` +
   `</div>` +
   `<div class="host-log-lines" data-host-log-lines></div>` +
   `<div class="host-log-footer" data-host-log-footer></div>` +
@@ -982,24 +1011,13 @@ ${LIVE_TAIL_STYLES}
   .empty { color: var(--color-text-light-2); }
   /* The event-log feed reads as a sibling of the live tail (#196): it draws the shared pane
      chrome (.live-tail container, .tail-head header, .tail-controls strip, .tail-backlog,
-     .tail-footer) from LIVE_TAIL_STYLES; only its row anatomy (dot + prose, below) and the
-     prose scroll body differ from the tail's mono raw lines. */
+     .tail-footer) from LIVE_TAIL_STYLES; its humanized rows are the shared .lv-row component
+     (#216), so only the prose scroll body below differs from the tail's mono raw lines. */
   .feed { margin-top: 2rem; }
   /* The feed's own scroll body — the tail's .tail-body is mono/fixed-height for raw JSON, so
      the narrated feed keeps sans-serif prose in a bounded, scrollable pane of its own. */
   .feed-body { max-height: 22rem; overflow-y: auto; background: var(--color-body); padding: 0 .9rem; }
   .feed-body[hidden] { display: none; }
-  .feed-row { display: flex; align-items: baseline; gap: .6rem .9rem; flex-wrap: wrap; padding: .5rem 0; border-bottom: 1px solid var(--color-light-border); font-size: .9rem; }
-  .feed-time { color: var(--color-text-light-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
-  /* The kind reads as a clean lowercase namespace.verb code label (#95), so it is mono
-     and no longer uppercased; its category still reads on the full-strength leading dot. */
-  .feed-kind { color: var(--color-text); font-family: ${MONO_FONT}; font-size: .72rem; font-weight: 600; letter-spacing: 0; display: inline-flex; align-items: center; gap: .4rem; }
-  /* Each activity event reads its comms category as a full-strength leading dot,
-     keeping the label at --color-text — a mid-tone tint on tiny near-black text
-     struck out the blue progress kind (#85, matching the shared dot model #83). */
-  .feed-kind::before { content: ""; width: .5rem; height: .5rem; border-radius: 999px; background: var(--color-dim); flex: none; }
-  .feed-kind.progress::before { background: var(--color-blue); } .feed-kind.success::before { background: var(--color-green); } .feed-kind.attention::before { background: var(--color-yellow); } .feed-kind.failure::before { background: var(--color-failure); } .feed-kind.pruned::before { background: var(--color-pruned); }
-  .feed-text { color: var(--color-text-light); flex: 1; }
   /* A Raw-mode row (#203): the underlying event as one highlighted NDJSON line, mono in the feed's
      own prose scroll pane; the token colours come from the shared .tail-code palette (LIVE_TAIL_STYLES). */
   .feed-raw { padding: .1rem 0; font-family: ${MONO_FONT}; font-size: .78rem; line-height: 1.5; }
@@ -1032,7 +1050,7 @@ ${renderTopBar(renderRepoDropdown(projects, undefined), renderHostLog())}
 </section>
 <section id="parked-queue" class="parked-queue" hidden aria-label="Parked questions across all repos"></section>
 <section id="cards" class="cards"><p class="empty">Loading…</p></section>
-<section id="feed" class="live-tail feed" data-feed aria-label="Event log across all repos"><div class="tail-head"><span class="tail-dot" data-feed-dot aria-hidden="true"></span><span class="tail-title tail-title-static">Event log · all repos</span><span class="tail-summary" data-feed-summary></span><span class="tail-gap"></span><span class="tail-controls" data-feed-controls><input type="text" class="tail-filter" placeholder="filter events…" aria-label="Filter events" data-feed-filter /><span class="tail-mode" data-feed-mode role="group" aria-label="Line format"><button type="button" class="tail-mode-btn" data-mode="humanized" aria-pressed="true">Humanized</button><button type="button" class="tail-mode-btn" data-mode="raw" aria-pressed="false">Raw</button></span><button type="button" class="tail-play" data-feed-play data-following="true" aria-label="Pause"></button><button type="button" class="tail-save" data-feed-save>Download JSON</button><button type="button" class="tail-clear" data-feed-clear>Clear</button></span></div><div class="feed-body" data-feed-body><p class="empty">Loading…</p></div><button type="button" class="tail-backlog" data-feed-backlog hidden></button><div class="tail-footer" data-feed-footer></div></section>
+<section id="feed" class="live-tail feed" data-feed aria-label="Event log across all repos"><div class="tail-head"><span class="tail-dot" data-feed-dot aria-hidden="true"></span><span class="tail-title tail-title-static">Event log · all repos</span><span class="tail-summary" data-feed-summary></span><span class="tail-gap"></span><span class="tail-controls" data-feed-controls><input type="text" class="tail-filter" placeholder="filter events…" aria-label="Filter events" data-feed-filter /><span class="tail-mode" data-feed-mode role="group" aria-label="Line format"><button type="button" class="tail-mode-btn" data-mode="humanized" aria-pressed="true">Humanized</button><button type="button" class="tail-mode-btn" data-mode="raw" aria-pressed="false">Raw</button></span><button type="button" class="lv-ico lv-pause" data-feed-play data-following="true" aria-label="Pause"></button><button type="button" class="lv-ico" data-feed-save aria-label="Download JSON" title="Download JSON">⤓</button></span></div><div class="feed-body" data-feed-body><p class="empty">Loading…</p></div><button type="button" class="tail-backlog" data-feed-backlog hidden></button><div class="tail-footer" data-feed-footer></div></section>
 ${issueDetailSheetMarkup(true)}
 <script>
   // The state → visual-intent reducers (dashboard-visual-state.ts, ADR 0012), single-
@@ -1045,18 +1063,6 @@ ${issueDetailSheetMarkup(true)}
   ${tallyDotClass.toString()}
   ${freezeIntent.toString()}
   const fmtWave = (w) => (w ? "Wave " + w.current + " of " + w.total : "idle");
-  // The event log's compact time (#95): a same-day event reads as a 24h HH:MM; an
-  // older one falls back to a short weekday (POC's "Tue"), then to a M/D date once it
-  // is more than a week back so distant weekdays don't collide.
-  const fmtTime = (ts) => {
-    const d = new Date(ts);
-    if (isNaN(d)) return ts;
-    const now = new Date();
-    const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
-    if (sameDay) return d.toTimeString().slice(0, 5);
-    if (now - d < 7 * 86400000) return d.toLocaleDateString(undefined, { weekday: "short" });
-    return d.toLocaleDateString(undefined, { month: "numeric", day: "numeric" });
-  };
   const fmtWaited = (iso) => {
     const ms = Date.now() - new Date(iso).getTime();
     if (!(ms > 0)) return "just now";
@@ -1077,9 +1083,9 @@ ${issueDetailSheetMarkup(true)}
   ${feedKey.toString()}
   ${feedFresh.toString()}
   ${feedKindLabel.toString()}
-  ${feedKindClass.toString()}
   ${feedRowMatches.toString()}
   ${highlightJsonLine.toString()}
+  ${humanizedRow.toString()}
 ${ISSUE_DETAIL_SHEET_SCRIPT}
 ${REPO_DROPDOWN_SCRIPT}
   // The event-log feed (#196): a live-tail-style pane over the cross-project narrated feed. The
@@ -1093,7 +1099,7 @@ ${REPO_DROPDOWN_SCRIPT}
   const fq = (sel) => feedEl.querySelector(sel);
   const feedDot = fq("[data-feed-dot]"), feedSummary = fq("[data-feed-summary]"), feedBody = fq("[data-feed-body]");
   const feedFooter = fq("[data-feed-footer]"), feedBacklog = fq("[data-feed-backlog]"), feedPlay = fq("[data-feed-play]");
-  const feedFilter = fq("[data-feed-filter]"), feedSave = fq("[data-feed-save]"), feedClear = fq("[data-feed-clear]");
+  const feedFilter = fq("[data-feed-filter]"), feedSave = fq("[data-feed-save]");
   const feedModeEl = fq("[data-feed-mode]");
   let feedBuffer = [], feedSeen = {}, feedLive = true, feedMark = 0, feedQuery = "", feedLoaded = false, feedError = false;
   // The Humanized ⇄ Raw display mode (#203): humanized (the narrated rows) by default, remembered
@@ -1115,10 +1121,10 @@ ${REPO_DROPDOWN_SCRIPT}
           const code = el("code", "tail-code"); code.innerHTML = highlightJsonLine(e.raw); row.append(code);
           feedBody.append(row);
         } else {
-          // Humanized (default): the narrated dot·time·kind·prose row, unchanged (#196).
-          const row = el("div", "feed-row");
-          row.append(el("span", "feed-time", fmtTime(e.ts)), el("span", "feed-kind " + feedKindClass(e.kind), feedKindLabel(e.kind)), el("span", "feed-text", e.text));
-          feedBody.append(row);
+          // Humanized (default): the shared .lv-row component (#216) — time · dot · repo-leads-
+          // narration, the dot coloured by the event's state — so the feed reads as the same
+          // component as the tail, host log and archive, differing only by source.
+          feedBody.append(humanizedRow(e.humanized, document));
         }
       }
     } else {
@@ -1161,10 +1167,6 @@ ${REPO_DROPDOWN_SCRIPT}
     const blob = new Blob([view.rows.map((e) => e.raw).join("\\n")], { type: "application/x-ndjson" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "event-log.jsonl"; a.click(); URL.revokeObjectURL(a.href);
   });
-  // Clear drops only this view's buffered rows client-side; no events or logs are touched. The
-  // seen set is kept so the server's still-held window isn't re-imported on the next fetch (the
-  // clear sticks until genuinely-new events arrive).
-  feedClear.addEventListener("click", () => { feedBuffer = []; feedMark = 0; feedRender(); });
   function renderParked(parked) {
     const toggle = document.querySelector('[data-counter="parked"]');
     const panel = document.getElementById("parked-queue");
@@ -1309,7 +1311,7 @@ export const renderLiveTail = (status: CampaignStatus, streaming = true) => {
   const modeToggle = `<span class="tail-mode" data-tail-mode role="group" aria-label="Line format">${modeBtn("humanized", "Humanized")}${modeBtn("raw", "Raw")}</span>`;
   // A streaming source follows/pauses and its dot pulses live; a static (archived) source has no
   // stream to follow, so the play/pause control is omitted and the dot is seeded idle (#203).
-  const playBtn = streaming ? `<button type="button" class="tail-play" data-tail-play data-following="true" aria-label="Pause"></button>` : "";
+  const playBtn = streaming ? `<button type="button" class="lv-ico lv-pause" data-tail-play data-following="true" aria-label="Pause"></button>` : "";
   const dot = streaming ? `<span class="tail-dot" data-tail-dot aria-hidden="true"></span>` : `<span class="tail-dot" data-tail-dot data-state="idle" aria-hidden="true"></span>`;
   return (
     `<section class="live-tail" data-live-tail data-project="${escapeHtml(status.project)}" data-agents="${agentsJson}"${running.length ? "" : " hidden"}>` +
@@ -1323,8 +1325,7 @@ export const renderLiveTail = (status: CampaignStatus, streaming = true) => {
     `<input type="text" class="tail-filter" placeholder="filter lines…" aria-label="Filter tail lines" data-tail-filter />` +
     modeToggle +
     playBtn +
-    `<button type="button" class="tail-save" data-tail-save>Download JSON</button>` +
-    `<button type="button" class="tail-clear" data-tail-clear>Clear</button>` +
+    `<button type="button" class="lv-ico" data-tail-save aria-label="Download JSON" title="Download JSON">⤓</button>` +
     `</span>` +
     `</div>` +
     `<div class="tail-body" data-tail-body></div>` +

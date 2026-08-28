@@ -56,7 +56,6 @@ import {
   renderHostLog,
   renderLandingShell,
   feedFresh,
-  feedKindClass,
   feedKindLabel,
   feedRowMatches,
   followView,
@@ -845,6 +844,9 @@ test("buildFeed carries each row's underlying event as raw NDJSON, alongside the
   // Download JSON emits (#203), distinct from the repo-prefixed humanized `text`.
   assert.equal(feed[0].text, "acme — #101 merged");
   assert.deepEqual(JSON.parse(feed[0].raw), green);
+  // …and each row carries the shared log-view parts (#216): the repo leads the message as the
+  // actor, the narration is one plain span, and the dot reads the event's state (a merge → green).
+  assert.deepEqual(feed[0].humanized, { time: "08:02:00", actor: "acme", verb: "", spans: [{ text: "#101 merged", kind: "plain" }], dot: "merged" });
 });
 
 test("a merged event that names its issue only through its branch still renders the number, never #undefined", () => {
@@ -1691,7 +1693,7 @@ test("failure renders in its own red on every surface, never the prune action's 
   // in --color-failure; the prune controls keep --color-red.
   assert.match(
     landing,
-    /\.feed-kind\.failure::before \{ background: var\(--color-failure\); \}/,
+    /\.lv-dot\.failure \{ background: var\(--color-failure\); \}/,
   );
   assert.match(
     landing,
@@ -1757,8 +1759,8 @@ test("renderHostLog carries the Humanized ⇄ Raw toggle (humanized pressed) and
   assert.match(html, /data-host-log-mode/);
   assert.match(html, /data-mode="humanized" aria-pressed="true"/);
   assert.match(html, /data-mode="raw" aria-pressed="false"/);
-  // Download JSON always emits the raw NDJSON, mirroring the live tail's control.
-  assert.match(html, /data-host-log-save[^>]*>Download JSON</);
+  // Download JSON always emits the raw NDJSON, mirroring the live tail's ⤓ .lv-ico icon.
+  assert.match(html, /class="lv-ico" data-host-log-save[^>]*aria-label="Download JSON"[^>]*>⤓</);
 });
 
 test("renderLandingShell mounts the host-log gear + pane on the host view (#180)", () => {
@@ -1908,40 +1910,16 @@ test("the issue-detail sheet markup, CSS, and script are defined once and shared
   assert.ok(!landing.includes("kept in sync"));
 });
 
-test("renderLandingShell reads each event kind's category as a leading dot, label at full strength (#85)", () => {
+test("renderLandingShell's feed renders humanized rows in the shared .lv-row component, dot by event state (#216)", () => {
   const html = renderLandingShell(["alpha"]);
-  // Each feed row's kind carries a category class so its dot reads in that colour.
-  assert.match(html, /"feed-kind " \+ feedKindClass\(e\.kind\)/);
-  // The classifier is single-sourced from dashboard-render's feedKindClass, shipped via .toString().
-  assert.match(html, /function feedKindClass/);
-  // The label text stays full-strength --color-text — never a mid-tone tint on
-  // near-black (which struck out the blue progress kind, #85).
-  assert.match(html, /\.feed-kind \{ color: var\(--color-text\);/);
-  // The category colour renders full-strength on the small leading-dot surface.
-  assert.match(
-    html,
-    /\.feed-kind::before \{[^}]*background: var\(--color-dim\);/,
-  );
-  assert.match(
-    html,
-    /\.feed-kind\.success::before \{ background: var\(--color-green\); \}/,
-  );
-  assert.match(
-    html,
-    /\.feed-kind\.attention::before \{ background: var\(--color-yellow\); \}/,
-  );
-  assert.match(
-    html,
-    /\.feed-kind\.progress::before \{ background: var\(--color-blue\); \}/,
-  );
-  assert.match(
-    html,
-    /\.feed-kind\.failure::before \{ background: var\(--color-failure\); \}/,
-  );
-  assert.match(
-    html,
-    /\.feed-kind\.pruned::before \{ background: var\(--color-pruned\); \}/,
-  );
+  // The feed's humanized branch builds the shared .lv-row from each row's server-attached parts,
+  // so the feed reads as the same component as the tail/host/archive — no bespoke .feed-kind label.
+  assert.match(html, /humanizedRow\(e\.humanized, document\)/);
+  assert.match(html, /function humanizedRow/);
+  assert.ok(!html.includes("feed-kind") && !html.includes("feedKindClass"), "the old per-kind .feed-kind label is gone");
+  // The shared .lv-dot state palette (generated from LOG_DOT_STATE_COLOR) paints the row dots.
+  assert.match(html, /\.lv-dot\.merged \{ background:/);
+  assert.match(html, /\.lv-dot\.failure \{ background:/);
 });
 
 test("renderLandingShell's feed is a scrollable live-tail-style pane, not a show-older list (#196)", () => {
@@ -2006,10 +1984,11 @@ test("renderLandingShell's feed Download JSON emits the filtered underlying NDJS
   assert.ok(!html.includes("event-log.txt"), "the old narrated-text export is gone");
 });
 
-test("renderLandingShell's feed carries the four live-tail controls wired to the shared view-model (#196)", () => {
+test("renderLandingShell's feed carries the live-tail controls wired to the shared view-model (#196)", () => {
   const html = renderLandingShell(["alpha"]);
-  // The control strip: case-insensitive filter, follow/pause, save-visible, clear.
-  for (const hook of ["data-feed-filter", "data-feed-play", "data-feed-save", "data-feed-clear", "data-feed-backlog"]) {
+  // The control strip: case-insensitive filter, follow/pause, download-visible (the mockup 1a
+  // chrome drops the Clear control — the download preserves the data, #216).
+  for (const hook of ["data-feed-filter", "data-feed-play", "data-feed-save", "data-feed-backlog"]) {
     assert.ok(html.includes(hook), `feed control ${hook} is present`);
   }
   // The client drives follow/pause/backlog through the shared, tested view-model and dedups the
@@ -2025,50 +2004,15 @@ test("renderLandingShell's feed carries the four live-tail controls wired to the
   assert.match(html, /feedRowMatches\(/);
   // Download JSON exports the visible rows' underlying NDJSON (the Raw-toggle counterpart, #203).
   assert.match(html, /download = "event-log/);
-  // Clear empties the view client-side only (the buffer), keeping the seen set so the server's
-  // still-held window isn't re-imported — no events or logs are deleted.
-  assert.match(html, /feedBuffer = \[\];/);
 });
 
-test("renderLandingShell's feed timestamps are compact HH:MM, weekday/date for older entries (#95)", () => {
-  const html = renderLandingShell(["alpha"]);
-  // fmtTime drops the old full `M/D/YYYY, h:mm:ss AM` (toLocaleString) treatment for
-  // the POC's compact time: HH:MM for a same-day event, a weekday label for older.
-  assert.ok(!html.includes("toLocaleString()"), "the full date-time is gone");
-  // A same-day event reads as a 24h HH:MM slice of the time.
-  assert.match(html, /toTimeString\(\)\.slice\(0, 5\)/);
-  // An older event falls back to a short weekday label (POC's `Tue`).
-  assert.match(html, /weekday: "short"/);
-});
-
-test("renderLandingShell's feed relabels the real event kinds as clean lowercase namespace.verb (#95)", () => {
-  const html = renderLandingShell(["alpha"]);
-  // The row's kind text is the remapped label, not the raw kind; its category class
-  // still keys off the real kind so the leading-dot colour (#85) is unchanged.
-  assert.match(html, /feedKindLabel\(e\.kind\)/);
-  assert.match(html, /"feed-kind " \+ feedKindClass\(e\.kind\)/);
-  // The relabel map is single-sourced from dashboard-render's feedKindLabel, shipped via
-  // .toString(); the exact kind→label pairs are unit-tested against that function directly.
-  assert.match(html, /function feedKindLabel/);
-  assert.ok(!html.includes("pr.opened"), "no fabricated pr.opened kind");
-  // The label reads as clean lowercase code, so the feed-kind is no longer uppercased.
-  assert.doesNotMatch(html, /\.feed-kind \{[^}]*text-transform: uppercase/);
-});
-
-test("feedKindLabel/feedKindClass fold an orchestrator event kind to the feed's label and comms category (#196)", () => {
+test("feedKindLabel folds an orchestrator event kind to the feed's clean lowercase label — the term the filter still matches on (#196)", () => {
   // The label is the clean namespace.verb remap; an unmapped kind falls through to its raw value.
+  // The feed's humanized rows now render in the shared .lv-row (#216), so the label no longer
+  // shows as a per-row chip — it survives only as the term feedRowMatches lets the filter match.
   assert.equal(feedKindLabel("green"), "issue.merged");
   assert.equal(feedKindLabel("prune"), "issue.pruned");
   assert.equal(feedKindLabel("some-unmapped-kind"), "some-unmapped-kind");
-  // The category keys off the real kind: merges/dones green, parked amber, halt red, prune purple,
-  // everything else the in-flight blue.
-  assert.equal(feedKindClass("green"), "success");
-  assert.equal(feedKindClass("queue-done"), "success");
-  assert.equal(feedKindClass("parked"), "attention");
-  assert.equal(feedKindClass("quarantined"), "attention");
-  assert.equal(feedKindClass("campaign-halt"), "failure");
-  assert.equal(feedKindClass("prune"), "pruned");
-  assert.equal(feedKindClass("turn"), "progress");
 });
 
 test("feedRowMatches filters a feed row case-insensitively over its kind label + narrated text (#196)", () => {
@@ -2129,22 +2073,21 @@ test("the feed drives the shared followView with its (kind, text) filter — sam
   assert.equal(paused.following, false);
 });
 
-test("the card progress-bar selector is scoped so it never boxes the feed's progress kind label (#85)", () => {
+test("the card progress-bar selector is scoped so no bare `.progress {` rule can leak onto a status word (#85)", () => {
   const html = renderLandingShell(["alpha"]);
-  // The feed label renders <span class="feed-kind progress">; a bare `.progress {` rule
-  // (the card progress bar) would also match it, applying height/background/overflow and
-  // squishing it inside a dark box. Scope the bar's selector so no bare `.progress {` exists.
+  // A bare `.progress {` rule (the card progress bar) would match any element carrying the
+  // `progress` word as a modifier, applying height/background/overflow. Scope the bar's
+  // selector so no bare `.progress {` exists.
   assert.doesNotMatch(html, /(?<![-\w])\.progress \{/);
 });
 
 test("no status/category word is ever a bare top-level CSS class, so a component base can't inherit a modifier's layout (#91)", () => {
   // The convention (docs/dashboard-color-rules.md §8): a status word (ADR 0007's
   // running/parked/failure/completed/unstarted/pruned, plus the landing's queued/idle
-  // aliases and a wave's closed) and a feed comms category (feedKindClass's
-  // success/attention/failure/pruned/progress) only ever appear *scoped* — `.dot.running`,
-  // `.card.parked`, `.feed-kind.progress` — never as a bare `.running {`/`.progress {`
-  // rule. A bare one is a component base (the `.progress` bar, #85) that any element
-  // carrying the same word as a modifier would then inherit, boxing/tinting it.
+  // aliases and a wave's closed) and a comms category (success/attention/progress) only
+  // ever appear *scoped* — `.dot.running`, `.card.parked`, `.lv-dot.failure` — never as a
+  // bare `.running {`/`.progress {` rule. A bare one is a component base (the `.progress`
+  // bar, #85) that any element carrying the same word as a modifier would then inherit.
   const words = [
     "running",
     "parked",
@@ -3789,15 +3732,16 @@ test("serveAllStatus GET /archive/log serves a listed run's lines humanized alon
     assert.equal(ok.status, 200);
     assert.match(ok.headers.get("content-type") ?? "", /^application\/json/);
     const body = (await ok.json()) as {
-      lines: { raw: string; humanized: { message: string; dot: string } }[];
+      lines: { raw: string; humanized: { verb: string; spans: { text: string; kind: string }[]; dot: string } }[];
     };
     // The raw bytes round-trip verbatim (nothing dropped or reordered).
     assert.equal(body.lines.map((l) => l.raw).join("\n") + "\n", raw);
     // …and each line is humanized server-side through the full registry: the campaign-start
-    // narrates as a running start, the campaign-done as a merged completion.
-    assert.equal(body.lines[0].humanized.message, "Campaign started");
+    // narrates (as one plain span, no verb) as a running start, the campaign-done as a merged
+    // completion.
+    assert.deepEqual(body.lines[0].humanized.spans, [{ text: "Campaign started", kind: "plain" }]);
     assert.equal(body.lines[0].humanized.dot, "running");
-    assert.equal(body.lines[1].humanized.message, "Campaign complete (2 waves)");
+    assert.deepEqual(body.lines[1].humanized.spans, [{ text: "Campaign complete (2 waves)", kind: "plain" }]);
     assert.equal(body.lines[1].humanized.dot, "merged");
 
     // A run not in the listing is a 404, never a path to traverse.
@@ -5799,8 +5743,8 @@ test("renderStatusPage's archived raw pane carries the shared log-view chrome: a
   assert.match(pane, /data-archive-raw-mode/);
   assert.match(pane, /data-mode="humanized" aria-pressed="true">Humanized</);
   assert.match(pane, /data-mode="raw" aria-pressed="false">Raw</);
-  // The Download JSON control.
-  assert.match(pane, /data-archive-raw-save[^>]*>Download JSON</);
+  // The Download JSON control is the mockup's ⤓ .lv-ico icon.
+  assert.match(pane, /class="lv-ico" data-archive-raw-save[^>]*aria-label="Download JSON"[^>]*>⤓</);
   // A static archived log has no live stream to follow, so there is no play/pause control.
   assert.doesNotMatch(pane, /data-tail-play|data-archive-raw-play/);
 });
@@ -6085,10 +6029,10 @@ test("ARCHIVE_LIST_SCRIPT renders the archived log through the shared log-view: 
   assert.match(ARCHIVE_LIST_SCRIPT, /return res\.json\(\);/);
   assert.match(ARCHIVE_LIST_SCRIPT, /pane\._lines = ls\.map\(\(l\) => l\.raw\)/);
   assert.match(ARCHIVE_LIST_SCRIPT, /pane\._humanized = ls\.map\(\(l\) => l\.humanized\)/);
-  // Humanized rows are the shared .log-hrow: a state dot + time · actor · message.
-  assert.match(ARCHIVE_LIST_SCRIPT, /el\.className = "log-hrow"/);
-  assert.match(ARCHIVE_LIST_SCRIPT, /dot\.className = "log-dot " \+ h\.dot/);
-  assert.match(ARCHIVE_LIST_SCRIPT, /msg\.className = "log-msg"; msg\.textContent = h\.message/);
+  // Humanized rows are the shared .lv-row component, built from the humanized parts and
+  // tagged with the deep-link #L<n> id.
+  assert.match(ARCHIVE_LIST_SCRIPT, /const el = humanizedRow\(h, document\); el\.id = "L" \+ n/);
+  assert.match(ARCHIVE_LIST_SCRIPT, /function humanizedRow/);
   // The mode toggle flips the shared mode, persists it, and redraws the pane.
   assert.match(ARCHIVE_LIST_SCRIPT, /rawMode = btn\.dataset\.mode; try \{ localStorage\.setItem\(MODE_KEY, rawMode\); \}/);
   // Download JSON emits the currently-filtered raw NDJSON, uncapped, as an .jsonl file.
@@ -6129,10 +6073,9 @@ test("HOST_LOG_SCRIPT renders humanized by default with a Raw toggle and a Downl
   // Humanized is the default mode, remembered per view in localStorage so a Raw preference sticks.
   assert.match(HOST_LOG_SCRIPT, /let mode = "humanized"/);
   assert.match(HOST_LOG_SCRIPT, /localStorage/);
-  // The default (humanized) branch renders the shared log-view row from humanizeHostLine's parts.
-  assert.match(HOST_LOG_SCRIPT, /humanizeHostLine\(line\)/);
-  assert.match(HOST_LOG_SCRIPT, /"log-hrow"/);
-  assert.match(HOST_LOG_SCRIPT, /"log-dot "/);
+  // The default (humanized) branch renders the shared .lv-row component from humanizeHostLine's parts.
+  assert.match(HOST_LOG_SCRIPT, /humanizedRow\(humanizeHostLine\(line\), document\)/);
+  assert.match(HOST_LOG_SCRIPT, /function humanizedRow/);
   // The Humanized ⇄ Raw toggle flips the body format, persists the choice, and redraws.
   assert.match(HOST_LOG_SCRIPT, /data-host-log-mode/);
   assert.match(HOST_LOG_SCRIPT, /aria-pressed/);

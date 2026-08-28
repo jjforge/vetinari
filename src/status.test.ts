@@ -1398,6 +1398,25 @@ test("renderStatusPage shows a Resume control only for a wave-parked campaign (#
   assert.doesNotMatch(running, /action="\/resume"/);
 });
 
+test("renderStatusPage shows a Graft control for a running campaign, gated behind the graft page option (#168)", () => {
+  const runningCampaign = {
+    project: "beta",
+    waves: [{ index: 0, status: "running" as const, issues: [{ issueNumber: "201", status: "running" as const }] }],
+    parked: [],
+  };
+  // With graft on, the page offers a Graft action symmetric to carve: a form POSTing
+  // to /graft carrying the project and an ids field (graft is variadic — a set of ids,
+  // entered explicitly, not a chip selection). The POST returns the placement preview.
+  const withGraft = renderStatusPage(runningCampaign, { carve: true, graft: true });
+  assert.match(withGraft, /<form method="post" action="\/graft"[^>]*>/);
+  assert.match(withGraft, /name="project" value="beta"/);
+  assert.match(withGraft, /name="ids"/);
+
+  // Without the graft page option, no Graft control — the same gating carve rides.
+  const withoutGraft = renderStatusPage(runningCampaign, { carve: true });
+  assert.doesNotMatch(withoutGraft, /action="\/graft"/);
+});
+
 test("renderStatusPage shows an informational quarantine affordance with no action of its own (#171)", () => {
   const quarantined = renderStatusPage(
     {

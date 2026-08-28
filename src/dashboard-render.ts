@@ -238,6 +238,19 @@ const renderQuarantineNote = () =>
   `<section class="quarantine-note"><strong>Issue quarantined</strong> — a merge conflict held a passed green out of integration. Resolve the conflict, then resume the campaign (the Resume control above, or <code>campaign --resume</code> in the project root).</section>`;
 
 /**
+ * The Graft control (#168) — the additive counterpart to Carve. Where carve prunes
+ * an existing campaign issue (a per-chip control), graft *extends* the running
+ * campaign with new issues named by explicit id, so it is a small form the operator
+ * types the ids into. Submitting POSTs `/graft` for this project; the aggregated
+ * dumb router (ADR 0002) shells `graft <ids…> --dry-run` in the project's own root
+ * and returns the placement behind a confirm form (the two-phase gate carve uses).
+ * Emitted only on the interactive aggregated page (the `graft` page option) and only
+ * while there is a live-or-resumable campaign to extend.
+ */
+const renderGraftControl = (status: CampaignStatus) =>
+  `<section class="graft-banner"><div class="graft-banner-text"><strong>Extend the campaign</strong> — graft new issues onto the running campaign; they layer into future waves.</div><form method="post" action="/graft" class="graft-form"><input type="text" name="ids" class="graft-ids" placeholder="issue ids, e.g. 640 655" /><input type="hidden" name="project" value="${escapeHtml(status.project)}" /><button type="submit" class="graft-btn">🌱 Graft</button></form></section>`;
+
+/**
  * Is a host-log row one an operator should be alerted to (#180)? A pure, render-time
  * predicate over a parsed `host.jsonl` row — no new severity field on host emitters
  * (consistent with #169's "no severity" decision): a row is notable when its kind
@@ -494,6 +507,14 @@ export interface StatusPageOptions {
    * targets the right one.
    */
   carve?: boolean;
+  /**
+   * Render the graft control — the additive counterpart to `carve`. `graft` is
+   * variadic and adds *new* issues by explicit id (not a chip selection), so its
+   * control is a small form the operator types ids into; the aggregated dumb router
+   * routes its preview and confirm to the selected project's own install (`graft …
+   * --dry-run` then `graft …`). Gated by the same page option carve rides.
+   */
+  graft?: boolean;
   /** The selected project's archived runs, newest-first, for the collapsible
    * "Archived runs" list under the live run. Each row expands inline to either its
    * campaign view (rendered read-only through the live wave renderer off `status`)
@@ -1188,6 +1209,12 @@ ${ISSUE_DETAIL_SHEET_STYLES}
   /* The quarantine note (#171) is informational only — same amber edge, no action. */
   .quarantine-note { background: var(--color-card); border: 1px solid var(--color-secondary); border-left: 3px solid var(--color-yellow); border-radius: var(--border-radius-medium); padding: .8rem 1rem; margin: 1rem 0; color: var(--color-text-light); box-shadow: 0 8px 22px #0004; }
   .quarantine-note code { color: var(--color-text); }
+  /* The Graft control (#168) — additive, so a green edge, mirroring the amber Resume banner. */
+  .graft-banner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; background: var(--color-card); border: 1px solid var(--color-secondary); border-left: 3px solid var(--color-green); border-radius: var(--border-radius-medium); padding: .8rem 1rem; margin: 1rem 0; box-shadow: 0 8px 22px #0004; }
+  .graft-banner-text { color: var(--color-text-light); }
+  .graft-form { margin: 0; display: flex; gap: .5rem; align-items: center; }
+  .graft-ids { padding: .5rem .6rem; border: 1px solid var(--color-secondary); border-radius: var(--border-radius); background: var(--color-chip); color: var(--color-text); }
+  .graft-btn { padding: .5rem .8rem; border: 0; border-radius: var(--border-radius); background: var(--color-green); color: #04110f; cursor: pointer; font-weight: 700; }
   .parked-issues { margin: 1rem 0 2rem; }
   .parked-issues > h2 { display: flex; align-items: baseline; flex-wrap: wrap; gap: .35rem; }
   .parked-count { color: var(--color-yellow); }
@@ -1275,6 +1302,10 @@ ${renderTopBar(opts.projects?.length ? renderRepoDropdown(opts.projects, opts.se
   // gated on its attention state so it appears only when there is something to act on.
   opts.carve && isWaveParked(status) ? renderResumeControl(status) : ""
 }${opts.carve && hasQuarantined(status) ? renderQuarantineNote() : ""}${
+  // Graft extends a live-or-resumable campaign, so the control surfaces whenever the
+  // project has a campaign (any waves) — the additive mirror of the per-chip carve.
+  opts.graft && status.waves.length ? renderGraftControl(status) : ""
+}${
   status.parked.length
     ? `<section class="parked-issues"><h2>Parked · <span class="parked-count">${status.parked.length}</span></h2>${status.parked
         .map(

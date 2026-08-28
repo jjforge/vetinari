@@ -56,6 +56,7 @@ export const handlePage: RouteHandler = (req, res, url, deps) => {
       projects: repos,
       selected: selected.project,
       carve: true,
+      graft: true,
       archivedRuns: runs,
       archivedRun: match?.run,
       archivedMode: match ? requestedMode : undefined,

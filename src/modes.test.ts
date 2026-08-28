@@ -320,6 +320,19 @@ test("childSpawnEnv marks a spawned child so its `run` skips leftover-archiving,
   assert.equal(child.HOME, "/home/x");
 });
 
+test("childSpawnEnv threads the selected agent (VETINARI_AGENT) to a spawned child so every wave runs the chosen provider, not a silent claude (ADR 0016)", () => {
+  // The parent invocation stamped its `--agent` override onto process.env; the child
+  // `run` a queue/campaign spawns must inherit it, so `agentFor` reads back the same
+  // agent for every wave instead of falling to the config default.
+  const child = childSpawnEnv({
+    PATH: "/usr/bin",
+    VETINARI_AGENT: JSON.stringify({ provider: "pi", effort: "xhigh" }),
+  });
+  assert.equal(child.VETINARI_AGENT, JSON.stringify({ provider: "pi", effort: "xhigh" }));
+  // …and it is still marked a child (the two markers coexist).
+  assert.equal(child.VETINARI_CHILD, "1");
+});
+
 const buildCfg = (): ResolvedConfig =>
   ({ image: "vetinari-myapp", log: memoryLogger() }) as unknown as ResolvedConfig;
 

@@ -3,7 +3,18 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { containerShareWeight, loadConfig, resolveConfigPath, resolveDestination } from "./config.ts";
+import {
+  AGENT_PROVIDERS,
+  containerShareWeight,
+  encodeAgentOverride,
+  loadConfig,
+  parseAgentFlags,
+  missingCredentials,
+  parseAgentOverride,
+  resolveAgentSelection,
+  resolveConfigPath,
+  resolveDestination,
+} from "./config.ts";
 
 const CONFIG_BODY = `export default {
   project: "demo",
@@ -205,6 +216,152 @@ test("loadConfig accepts a notify map where question resolves to one destination
   const cfg = await loadConfig(cfgPath);
 
   assert.equal(cfg.notify?.question, "alerts");
+});
+
+test("resolveAgentSelection defaults to claude, its default model, and effort high when nothing is set (today's behavior)", () => {
+  assert.deepEqual(resolveAgentSelection(undefined), {
+    provider: "claude",
+    model: "claude-opus-4-8",
+    effort: "high",
+  });
+});
+
+test("resolveAgentSelection takes the provider default from cfg.agent, falling back to that provider's default model", () => {
+  assert.deepEqual(resolveAgentSelection({ provider: "codex" }), {
+    provider: "codex",
+    model: AGENT_PROVIDERS.codex.defaultModel,
+    effort: "high",
+  });
+});
+
+test("resolveAgentSelection honors an explicit model/effort on cfg.agent", () => {
+  assert.deepEqual(
+    resolveAgentSelection({ provider: "pi", model: "claude-sonnet-4-6", effort: "xhigh" }),
+    { provider: "pi", model: "claude-sonnet-4-6", effort: "xhigh" },
+  );
+});
+
+test("resolveAgentSelection lets a CLI override win over the cfg default (precedence: override > cfg > default)", () => {
+  assert.deepEqual(
+    resolveAgentSelection({ provider: "claude", effort: "low" }, { provider: "codex", effort: "high" }),
+    { provider: "codex", model: AGENT_PROVIDERS.codex.defaultModel, effort: "high" },
+  );
+});
+
+test("resolveAgentSelection does not leak the cfg's model/effort across a provider switch — they belonged to the other provider", () => {
+  // cfg is claude with a claude model + a claude-only effort; overriding to codex must
+  // fall to codex's own defaults, not carry the claude model or the (invalid-for-codex) effort.
+  assert.deepEqual(
+    resolveAgentSelection({ provider: "claude", model: "claude-opus-4-8", effort: "max" }, { provider: "codex" }),
+    { provider: "codex", model: AGENT_PROVIDERS.codex.defaultModel, effort: "high" },
+  );
+});
+
+test("resolveAgentSelection validates effort against the SELECTED provider's own vocabulary, failing fast with the valid set", () => {
+  // "max" is a claude effort but not a codex one.
+  assert.throws(
+    () => resolveAgentSelection({ provider: "codex", effort: "max" }),
+    (e: Error) => {
+      assert.match(e.message, /effort/);
+      assert.match(e.message, /codex/);
+      assert.match(e.message, /max/);
+      // lists the valid set for the provider
+      assert.match(e.message, /low.*xhigh|xhigh/);
+      return true;
+    },
+  );
+  // pi has its own richer set (off..xhigh) — "off" is valid for pi.
+  assert.equal(resolveAgentSelection({ provider: "pi", effort: "off" }).effort, "off");
+});
+
+test("resolveAgentSelection rejects a non-resumable provider with a clear message pointing at the follow-up", () => {
+  assert.throws(
+    () => resolveAgentSelection(undefined, { provider: "copilot" }),
+    (e: Error) => {
+      assert.match(e.message, /copilot/);
+      assert.match(e.message, /claude, pi, codex/);
+      assert.match(e.message, /#212/);
+      return true;
+    },
+  );
+});
+
+test("resolveAgentSelection rejects an unknown provider naming the supported set", () => {
+  assert.throws(
+    () => resolveAgentSelection(undefined, { provider: "gpt" }),
+    (e: Error) => {
+      assert.match(e.message, /gpt/);
+      assert.match(e.message, /claude, pi, codex/);
+      return true;
+    },
+  );
+});
+
+test("parseAgentFlags pulls --agent/--model/--effort out of the args, leaving the rest untouched and in order", () => {
+  const { override, rest } = parseAgentFlags([
+    "623",
+    "--agent",
+    "pi",
+    "--effort",
+    "xhigh",
+    "--model",
+    "claude-sonnet-4-6",
+  ]);
+  assert.deepEqual(override, { provider: "pi", effort: "xhigh", model: "claude-sonnet-4-6" });
+  assert.deepEqual(rest, ["623"]);
+});
+
+test("parseAgentFlags accepts the --flag=value form and preserves other flags/positionals", () => {
+  const { override, rest } = parseAgentFlags([
+    "--name",
+    "gateway work",
+    "--agent=codex",
+    "436 611",
+    "--auto-prune",
+  ]);
+  assert.deepEqual(override, { provider: "codex" });
+  assert.deepEqual(rest, ["--name", "gateway work", "436 611", "--auto-prune"]);
+});
+
+test("parseAgentFlags returns an empty override when no agent flags are present", () => {
+  const { override, rest } = parseAgentFlags(["623", "--resume"]);
+  assert.deepEqual(override, {});
+  assert.deepEqual(rest, ["623", "--resume"]);
+});
+
+test("encodeAgentOverride/parseAgentOverride round-trip a partial CLI override for child propagation", () => {
+  const over = { provider: "pi", effort: "xhigh" };
+  assert.deepEqual(parseAgentOverride(encodeAgentOverride(over)), over);
+});
+
+test("parseAgentOverride reads an unset or junk env var as an empty override (no crash)", () => {
+  assert.deepEqual(parseAgentOverride(undefined), {});
+  assert.deepEqual(parseAgentOverride(""), {});
+  assert.deepEqual(parseAgentOverride("not json"), {});
+});
+
+test("missingCredentials reports the provider's keys when none are present in the .env, and none when one is", () => {
+  const dir = scratch();
+  // No .env at all → claude's keys are all missing.
+  assert.deepEqual(missingCredentials("claude", join(dir, ".env")), AGENT_PROVIDERS.claude.credentialKeys);
+
+  // codex needs OPENAI_API_KEY.
+  const envPath = join(dir, ".env");
+  writeFileSync(envPath, "OPENAI_API_KEY=sk-abc\n");
+  assert.deepEqual(missingCredentials("codex", envPath), []);
+  // …but claude's keys are still absent from that same file.
+  assert.deepEqual(missingCredentials("claude", envPath), AGENT_PROVIDERS.claude.credentialKeys);
+
+  // Any one of claude's alternative keys present satisfies it (OAuth token OR API key).
+  writeFileSync(envPath, "ANTHROPIC_API_KEY=sk-ant\n");
+  assert.deepEqual(missingCredentials("claude", envPath), []);
+});
+
+test("missingCredentials treats a present-but-empty assignment as absent", () => {
+  const dir = scratch();
+  const envPath = join(dir, ".env");
+  writeFileSync(envPath, "OPENAI_API_KEY=\n");
+  assert.deepEqual(missingCredentials("codex", envPath), AGENT_PROVIDERS.codex.credentialKeys);
 });
 
 test("loadConfig honors an explicit stateDir over the flipped default", async () => {

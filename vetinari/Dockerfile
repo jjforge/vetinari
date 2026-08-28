@@ -1,6 +1,13 @@
-# Starting point for a vetinari task image: node + git + gh + the Claude
-# Code CLI, running as a non-root `agent` user whose UID/GID match the host's
-# (sandcastle passes AGENT_UID/AGENT_GID when it builds).
+# Starting point for a vetinari task image: node + git + gh + the resumable agent
+# CLIs vetinari can drive — Claude Code, pi, and Codex (selectable per run with
+# `--agent`, ADR 0016) — running as a non-root `agent` user whose UID/GID match the
+# host's (sandcastle passes AGENT_UID/AGENT_GID when it builds).
+#
+# Credentials stay per-provider and user-supplied in `.vetinari.local/.env`:
+#   claude → CLAUDE_CODE_OAUTH_TOKEN (or ANTHROPIC_API_KEY)
+#   pi     → ANTHROPIC_API_KEY
+#   codex  → OPENAI_API_KEY
+# A run whose selected provider has no credential fails a preflight before launch.
 #
 # ADD YOUR PROJECT'S TOOLCHAIN — compilers, package managers, system libraries.
 # The gates run inside this image, so anything your test command needs must be
@@ -24,6 +31,11 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
   | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
   && apt-get update && apt-get install -y gh \
   && rm -rf /var/lib/apt/lists/*
+
+# pi and Codex agent CLIs — installed globally as root, before the drop to the
+# non-root agent user (Claude Code is installed below, as that user, via its own
+# installer). Any of the three can drive a run; `--agent` selects which (ADR 0016).
+RUN npm install -g @mariozechner/pi-coding-agent @openai/codex
 
 # --- your toolchain goes here -------------------------------------------------
 # e.g. COPY --from=golang:1.26-bookworm /usr/local/go /usr/local/go

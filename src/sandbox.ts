@@ -1,8 +1,19 @@
 import * as sandcastle from "@ai-hero/sandcastle";
-import type { AgentProvider, LoggingOption } from "@ai-hero/sandcastle";
+import type {
+  AgentProvider,
+  ClaudeCodeOptions,
+  CodexOptions,
+  LoggingOption,
+  PiOptions,
+} from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { mkdirSync } from "node:fs";
-import type { ResolvedConfig } from "./config.ts";
+import {
+  AGENT_ENV_VAR,
+  parseAgentOverride,
+  resolveAgentSelection,
+  type ResolvedConfig,
+} from "./config.ts";
 
 /**
  * The token-usage snapshot the loop folds per iteration (a subset of sandcastle's
@@ -102,5 +113,23 @@ export async function makeSandbox(cfg: ResolvedConfig, taskId: string) {
   });
 }
 
-export const agentFor = (cfg: ResolvedConfig) =>
-  sandcastle.claudeCode(cfg.agent?.model ?? "claude-opus-4-8", { effort: cfg.agent?.effort ?? "high" });
+/**
+ * Construct the sandcastle `AgentProvider` for this run (ADR 0016). The provider,
+ * model and effort are resolved by `resolveAgentSelection` from the project default
+ * (`cfg.agent`) with any CLI override read back from `VETINARI_AGENT` layered on top —
+ * so a campaign/queue child `run` drives the same agent its parent was launched with,
+ * not a silent claude. Then dispatch on the provider name to the matching resumable
+ * factory, passing the (already-validated) effort in that provider's own vocabulary
+ * (claude/codex `effort`, pi `--thinking`).
+ */
+export const agentFor = (cfg: ResolvedConfig) => {
+  const sel = resolveAgentSelection(cfg.agent, parseAgentOverride(process.env[AGENT_ENV_VAR]));
+  switch (sel.provider) {
+    case "claude":
+      return sandcastle.claudeCode(sel.model, { effort: sel.effort as ClaudeCodeOptions["effort"] });
+    case "pi":
+      return sandcastle.pi(sel.model, { thinking: sel.effort as PiOptions["thinking"] });
+    case "codex":
+      return sandcastle.codex(sel.model, { effort: sel.effort as CodexOptions["effort"] });
+  }
+};

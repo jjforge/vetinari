@@ -784,12 +784,13 @@ export const LIVE_TAIL_SCRIPT = `  const tailEl = document.querySelector("[data-
  * The host-log surface's styles (#180): the gear + attention badge and the raw-JSONL
  * pane it toggles. Colours come straight from the shared palette (§1, no local hexes) —
  * the `--color-box-body` panel, the `--color-secondary` hairline, and the badge in the
- * failure red (the one alert colour). The gear floats to the right under the top bar; the
- * pane is an absolutely-positioned popover beneath it on desktop, and a bottom sheet on a
- * phone. The JSON tokens reuse the archived-raw span classes but scope their palette to
- * `.host-log-code` so they never restyle the archive viewer or the live tail.
+ * failure red (the one alert colour). The gear rides the top-right live-bar after the
+ * pause button (#201); the pane is an absolutely-positioned popover beneath it on
+ * desktop (right-aligned to the gear), and a bottom sheet on a phone. The JSON tokens
+ * reuse the archived-raw span classes but scope their palette to `.host-log-code` so
+ * they never restyle the archive viewer or the live tail.
  */
-export const HOST_LOG_STYLES = `  .host-log { position: relative; display: flex; justify-content: flex-end; margin: .35rem 0 0; }
+export const HOST_LOG_STYLES = `  .host-log { position: relative; display: inline-flex; align-items: center; }
   .host-log-gear { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; border: 1px solid var(--color-secondary); border-radius: 999px; background: var(--color-box-header); color: var(--color-text-light-2); font-size: 1.05rem; line-height: 1; cursor: pointer; }
   .host-log-gear:hover { border-color: var(--color-primary); color: var(--color-text); }
   .host-log-gear[aria-expanded="true"] { border-color: var(--color-primary); color: var(--color-primary); }

@@ -139,16 +139,28 @@ test("run-level dot colours: success→merged, halt→failure, wave-parked→par
   assert.equal(dot(event("prune", { target: "5", removed: ["5"], dropped: [], ts: "2026-08-28T00:00:00.000Z" })), "neutral");
 });
 
-// The fallback contract: an unknown kind, or an unparseable line, is never a blank row —
-// it dumps the raw source text as one plain span on a neutral dot, no verb, keeping its
-// time and any actor it named.
-test("an unknown event kind falls back to a one-line raw dump, never blank", () => {
+// The fallback contract (#221): an unknown kind never dumps raw JSON — it renders a readable
+// generic summary, the event kind (hyphens→spaces, the strong key term) followed by its salient
+// scalar fields in prose (`· key value`, the value a code token), on a neutral dot with no verb,
+// keeping its time and any actor it named.
+test("an unknown event kind renders a readable generic summary, never a raw JSON dump", () => {
   const line = raw({ event: "host-heartbeat", taskId: "204", detail: "ok", ts: "2026-08-28T12:00:00.000Z" });
   const row = humanizeLogLine(line);
   assert.equal(row.time, "12:00:00");
   assert.equal(row.actor, "#204");
   assert.equal(row.verb, "");
-  assert.deepEqual(row.spans, [{ text: line, kind: "plain" }]);
+  assert.deepEqual(row.spans, [strong("host heartbeat"), p(" · detail "), code("ok")]);
+  assert.equal(row.dot, "neutral");
+  // No rendered span is the raw JSON object.
+  assert.ok(!plainText(row).includes(line), "the raw JSON is never rendered");
+});
+
+test("a generic summary skips object/array fields and reads its scalar fields in prose", () => {
+  const row = humanizeLogLine(raw({ event: "status-archive-skipped", file: "/runs/x.jsonl", extras: { a: 1 }, ids: ["7"], ts: "2026-08-28T00:00:00.000Z" }));
+  assert.equal(row.verb, "");
+  // The kind leads as the strong term; only the scalar `file` field follows — the nested
+  // object and the array are dropped so the line stays readable, never a raw dump.
+  assert.deepEqual(row.spans, [strong("status archive skipped"), p(" · file "), code("/runs/x.jsonl")]);
   assert.equal(row.dot, "neutral");
 });
 
@@ -286,24 +298,27 @@ test("a registry-register-failed line reads red (failure dot) and names the erro
 });
 
 // The red rule tracks `isNotableHostEvent` (a fail/error kind, a non-null `error`, or
-// `ok:false`), so even a host kind with no purpose-built line still paints red — it dumps
-// the raw source on a failure dot rather than a neutral one, keeping failures visible.
-test("an unrecognized but notable host kind still paints red, dumping its raw source", () => {
+// `ok:false`), so even a host kind with no purpose-built line still paints red — it renders a
+// readable generic summary on a failure dot rather than a neutral one, keeping failures visible.
+test("an unrecognized but notable host kind still paints red, rendering a readable generic summary", () => {
   const line = raw({ event: "gateway-poll-error", token: "t", error: "boom", ts: "2026-08-28T12:00:00.000Z" });
   const kind = humanizeHostLine(line);
   assert.equal(kind.dot, "failure");
-  assert.deepEqual(kind.spans, [{ text: line, kind: "plain" }]);
+  assert.deepEqual(kind.spans, [strong("gateway poll error"), p(" · token "), code("t"), p(" · error "), code("boom")]);
+  assert.ok(!plainText(kind).includes(line), "the raw JSON is never rendered");
   const okFalse = humanizeHostLine(raw({ event: "gateway-thing", ok: false, ts: "2026-08-28T12:00:00.000Z" }));
   assert.equal(okFalse.dot, "failure");
 });
 
-// The fallback contract mirrors humanizeLogLine: an unknown, non-notable kind (or an
-// unparseable line) is never a blank row — it dumps the raw source on a neutral dot.
-test("an unknown, non-notable host kind falls back to a neutral raw dump", () => {
-  const line = raw({ event: "gateway-heartbeat", detail: "ok", ts: "2026-08-28T12:00:00.000Z" });
+// The fallback contract mirrors humanizeLogLine (#221): an unknown, non-notable kind renders a
+// readable generic summary (the kind + its salient fields in prose) on a neutral dot, never a
+// raw JSON dump and never a blank row. The `project` field leads as the actor, not a field.
+test("an unknown, non-notable host kind renders a readable generic summary, neutral dot", () => {
+  const line = raw({ event: "gateway-heartbeat", project: "alpha", detail: "ok", ts: "2026-08-28T12:00:00.000Z" });
   const row = humanizeHostLine(line);
   assert.equal(row.time, "12:00:00");
-  assert.deepEqual(row.spans, [{ text: line, kind: "plain" }]);
+  assert.equal(row.actor, "alpha");
+  assert.deepEqual(row.spans, [strong("gateway heartbeat"), p(" · detail "), code("ok")]);
   assert.equal(row.dot, "neutral");
 });
 

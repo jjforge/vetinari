@@ -69,8 +69,8 @@ export const stateBorderColor = (state: string): string => `var(--color-${STATE_
  * The status-dot colour rules, generated once from `stateColor` and shared by both
  * pages (previously two hand-kept copies). Scoped to `.dot` so a state colour tints
  * only the dot, never a whole card or list row (#81). Motion is a second channel for
- * `running` alone (§5): a running dot pulses to signal active work, reduced-motion aware
- * and frozen with every other pulse by the root paused flag; nothing else animates. A
+ * `running` alone (§5): a running dot pulses to signal active work, reduced-motion aware;
+ * nothing else animates. A
  * `.running.idle` dot (a zero-count "0 running" tally chip) keeps the blue but no pulse —
  * motion means work in flight, and an idle tally has none.
  */
@@ -98,9 +98,8 @@ export const MONO_FONT = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospa
 /**
  * The top bar's CSS, shared by every page's `<style>` alongside `renderTopBar` so the
  * markup and its presentation move together (#81). Covers `.page-top`, the
- * `.project-picker`, the `.live-bar`/`.live-indicator` (green dot that pulses while live,
- * frozen by the root `data-paused` flag, dim on the pause-bar dot when paused, reduced-motion
- * aware), and the icon `.pause` control.
+ * `.project-picker`, and the `.live-bar`/`.live-indicator` (green dot that pulses while
+ * live, reduced-motion aware).
  */
 export const TOP_BAR_STYLES = `  .page-top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; border-bottom: 1px solid var(--color-light-border); padding-bottom: 1rem; }
   .project-picker { margin: 0; }
@@ -138,27 +137,11 @@ export const TOP_BAR_STYLES = `  .page-top { display: flex; align-items: center;
   @media (max-width: 640px) { .repo-label { font-size: 15px; } }
   .live-bar { display: inline-flex; align-items: center; gap: .75rem; color: var(--color-text-light-2); font-size: .85rem; }
   .live-indicator { display: inline-flex; align-items: center; color: var(--color-green); }
-  /* The green live dots (this one by the pause button, and the event-log header's) track
-     the live *stream*: they pulse whenever live, regardless of running count (§5 — the
-     green dots are the stream channel, distinct from the blue .dot.running that tracks
-     work). One root flag freezes every pulse — green and blue — at once when paused: the
-     single [data-paused="true"] rule below, so pause never reaches each dot per-element.
-     The pause-bar dot also goes dim while paused (keyed off that root flag); the feed dot
-     just goes still. */
+  /* The green live dots (this one on the live-bar, and the event-log header's) track the
+     live *stream*: they pulse whenever live, regardless of running count (§5 — the green
+     dots are the stream channel, distinct from the blue .dot.running that tracks work). */
   .live-indicator::before { content: ""; width: .55rem; height: .55rem; border-radius: 999px; background: currentColor; animation: chip-pulse 1.6s ease-in-out infinite; }
-  [data-paused="true"] .live-indicator::before, [data-paused="true"] .dot.running { animation: none; }
-  [data-paused="true"] .live-bar .live-indicator { color: var(--color-dim); }
-  @media (prefers-reduced-motion: reduce) { .live-indicator::before { animation: none; } }
-  .pause { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: .22rem; color: var(--color-text); background: var(--color-box-header); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); padding: .35rem .8rem; font: inherit; cursor: pointer; }
-  /* Pause is an icon, not a word — two bars while live, a triangle once paused. It is
-     drawn in CSS with currentColor, never an emoji codepoint: the pause/play glyphs
-     default to colourful emoji presentation on Apple platforms, so a glyph would paint
-     a blue gradient. The two pages' scripts only flip data-paused; the shape lives here. */
-  .pause::before, .pause::after { content: ""; width: .22rem; height: .9rem; background: currentColor; border-radius: 1px; }
-  .pause[data-paused="true"] { gap: 0; }
-  .pause[data-paused="true"]::after { display: none; }
-  .pause[data-paused="true"]::before { width: 0; height: 0; background: transparent; border-radius: 0; border-style: solid; border-width: .45rem 0 .45rem .75rem; border-color: transparent transparent transparent currentColor; }
-  .pause:hover { border-color: var(--color-primary); }`;
+  @media (prefers-reduced-motion: reduce) { .live-indicator::before { animation: none; } }`;
 
 /**
  * The issue-detail sheet's CSS — one definition included by both pages' `<style>`
@@ -735,7 +718,7 @@ export const LIVE_TAIL_STYLES = `  .live-tail { background: var(--color-card); b
  * `seen`, `agents`), consumes each `tail` frame for its own project, and re-renders the body.
  * The pane lives outside `#live-region`, so a soft-refresh never disturbs it and this wiring
  * runs once. `tail` is a named SSE event, so it never fires the page's `onmessage`; the tail
- * follows its own pause, independent of the page-level live/pause.
+ * follows its own pause.
  */
 export const LIVE_TAIL_SCRIPT = `  const tailEl = document.querySelector("[data-live-tail]");
   if (tailEl && typeof events !== "undefined") {
@@ -819,8 +802,7 @@ export const LIVE_TAIL_SCRIPT = `  const tailEl = document.querySelector("[data-
       if (res.fresh.length) buffer = tailAppend(buffer, res.fresh, live || !open, FOLLOW_CAP);
       // A visible append (pane open + following, with new lines) is a live-surface update:
       // signal the live-bar to reset its "updated Ns ago" clock (#198). Buffered frames
-      // (collapsed, or the tail's own follow paused) present nothing new and stay silent;
-      // the page-level pause is gated by the live-bar's own listener.
+      // (collapsed, or the tail's own follow paused) present nothing new and stay silent.
       if (paneActivity({ appended: res.fresh.length, open, following: live })) window.dispatchEvent(new CustomEvent("vetinari:activity"));
       render();
     }
@@ -857,8 +839,8 @@ export const LIVE_TAIL_SCRIPT = `  const tailEl = document.querySelector("[data-
  * The host-log surface's styles (#180): the gear + attention badge and the raw-JSONL
  * pane it toggles. Colours come straight from the shared palette (§1, no local hexes) —
  * the `--color-box-body` panel, the `--color-secondary` hairline, and the badge in the
- * failure red (the one alert colour). The gear rides the top-right live-bar after the
- * pause button (#201); the pane is an absolutely-positioned popover beneath it on
+ * failure red (the one alert colour). The gear rides the end of the top-right live-bar,
+ * after the freshness readout (#201); the pane is an absolutely-positioned popover beneath it on
  * desktop (right-aligned to the gear), and a bottom sheet on a phone. The JSON tokens
  * reuse the archived-raw span classes but scope their palette to `.host-log-code` so
  * they never restyle the archive viewer or the live tail.
@@ -1023,7 +1005,7 @@ export const HOST_LOG_SCRIPT = `  const hostLogRoot = document.querySelector("[d
       // A visible append (the panel open) is a live-surface update: signal the live-bar to
       // reset its "updated Ns ago" clock (#198). The host-log always shows newest-first, so
       // there is no follow to pause — visibility is just the panel; a closed panel stays
-      // silent (the badge still signals). The page-level pause is gated by the live-bar.
+      // silent (the badge still signals).
       if (paneActivity({ appended: appended.length, open: !panel.hidden, following: true })) window.dispatchEvent(new CustomEvent("vetinari:activity"));
     };
     events.addEventListener("host", (e) => { let m; try { m = JSON.parse(e.data); } catch (x) { return; } ingest((m && m.lines) || []); });

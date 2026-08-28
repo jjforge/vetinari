@@ -8,8 +8,8 @@
  *
  * Two kinds live here. **Server-side** class decisions (`dotClass`, `tallyDotClass`,
  * `hiddenPastCap`) are called at render. The **client-side** presentation-freeze
- * (`freezeIntent`) also runs in the browser — it ticks each second and reacts to the
- * pause click — so it is single-sourced to the browser via `${freezeIntent.toString()}`
+ * (`freezeIntent`) also runs in the browser — it ticks each second — so it is
+ * single-sourced to the browser via `${freezeIntent.toString()}`
  * inlined into the page script: the node test imports the same function the payload
  * ships. Every function shipped this way (`dotClass`, `tallyDotClass`, `freezeIntent`)
  * is a self-contained `function` declaration — no imports, no closures over module
@@ -53,8 +53,7 @@ export function hiddenPastCap(index: number, cap: number): boolean {
  * update just like a wave/feed refresh. Only a *visible* append counts: no new lines
  * (`appended === 0`), a collapsed pane (`!open`), or a pane whose own follow is paused so
  * frames merely buffer (`!following`) all leave the clock untouched — presentation is
- * frozen there, so freshness is too. The page-level pause is gated separately by the
- * live-bar itself (a paused page keeps reading "Paused" regardless of this).
+ * frozen there, so freshness is too.
  *
  * Self-contained and browser-safe: single-sourced into the pane scripts via
  * `${paneActivity.toString()}`, so the node test asserts the very function they run.
@@ -72,36 +71,25 @@ export function paneActivity({
 }
 
 /**
- * The live-bar's presentation-freeze reducer (ADR 0008, §5/#100): maps the client's
- * pause state to the intent its thin DOM glue applies. `paused` freezes the readout at
- * "Paused" and the indicator at a paused label (disclosing any buffered count) rather
- * than ageing a frozen "updated Ns ago"; `bodyPaused` is the single root flag one CSS
- * rule keys off to freeze every dot at once. `lastUpdate` is null before the first
- * refresh (the landing opens "waiting for updates"; the campaign page seeds it to now).
+ * The live-bar's freshness readout (ADR 0008): maps the last-refresh time to the
+ * "updated Ns ago" text its thin DOM glue writes onto the readout. `lastUpdate` is null
+ * before the first refresh (the landing opens "waiting for updates"; the campaign page
+ * seeds it to now), and otherwise the readout ages second by second from `now`.
  *
  * Self-contained and browser-safe: it is single-sourced into both page scripts via
  * `${freezeIntent.toString()}`, so the node test asserts the very function the browser
- * runs. The glue keeps the DOM writes (`document.body.dataset.paused = intent.bodyPaused`
- * …) — this only decides.
+ * runs. The glue keeps the DOM write (`updatedEl.textContent = …`) — this only decides.
  */
 export function freezeIntent({
-  paused,
-  buffered,
   lastUpdate,
   now,
 }: {
-  paused: boolean;
-  buffered: number;
   lastUpdate: number | null;
   now: number;
-}): { bodyPaused: string; liveState: string; ariaLabel: string; updatedText: string } {
+}): { updatedText: string } {
   return {
-    bodyPaused: String(paused),
-    liveState: paused ? "paused" : "live",
-    ariaLabel: paused ? "Paused" + (buffered ? " · " + buffered + " buffered" : "") : "Live",
-    updatedText: paused
-      ? "Paused"
-      : lastUpdate == null
+    updatedText:
+      lastUpdate == null
         ? "waiting for updates"
         : "updated " + Math.round((now - lastUpdate) / 1000) + "s ago",
   };

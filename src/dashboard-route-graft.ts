@@ -1,6 +1,6 @@
 import { listProjects } from "./registry.ts";
 import { readBody, type RouteHandler } from "./dashboard-http.ts";
-import { renderAggregatedGraftPreview } from "./dashboard-render.ts";
+import { renderAggregatedGraftRejection } from "./dashboard-render.ts";
 
 /** `graft` is variadic, so both routes carry a *set* of ids rather than carve's
  *  single target — parsed off the same whitespace/comma split the CLI uses. */
@@ -37,12 +37,16 @@ export const handleGraftPreview: RouteHandler = async (req, res, url, deps) => {
 };
 
 /**
- * `POST /graft` — the graft surface's write. With `confirm` it shells the variadic
- * `graft <ids…>` in the selected project's own root, redirecting back to that
- * project's board; without it, it shells `graft <ids…> --dry-run` and shows the
- * placement behind a confirm form, gating the write. The aggregated site is a dumb
- * router (ADR 0002), so both route to the project's own install, exactly as carve
- * and the Telegram gateway do.
+ * `POST /graft` — the graft surface's write (option 1a). It acts *on submit*, with no
+ * preview/confirm form: it validates the batch against the selected project's own
+ * `graft <ids…> --dry-run` closure (ADR 0014 — whole-batch, all-or-nothing) and then
+ * either grafts directly or surfaces the rejection. A clean batch shells the variadic
+ * `graft <ids…>` in the project's own root and redirects to its board, where the new
+ * wave card appears on the next live refresh (the graft confirms on the wave). A batch
+ * with any offender grafts *nothing* and returns the per-id verdicts (422), so the
+ * summary-line input can show them inline and retain the typed ids. The aggregated site
+ * is a dumb router (ADR 0002), so it routes to the project's own install, exactly as
+ * carve and the Telegram gateway do.
  */
 export const handleGraft: RouteHandler = async (req, res, url, deps) => {
   if (!(req.method === "POST" && url.pathname === "/graft")) return false;
@@ -59,24 +63,25 @@ export const handleGraft: RouteHandler = async (req, res, url, deps) => {
     res.writeHead(404).end(`unknown project: ${project}`);
     return true;
   }
-  if (form.get("confirm")) {
-    deps.spawn(process.execPath, [...process.execArgv, process.argv[1], "graft", ...ids], {
-      cwd: pointer.projectRoot,
-      stdio: ["ignore", "inherit", "inherit"],
-    });
-    res.writeHead(303, { location: `/?project=${encodeURIComponent(project)}` }).end();
+  // Validate the batch against the project's own dry-run closure before acting — the
+  // same closure the summary-line input fetches on blur, so submit and blur agree.
+  const closure = await deps.graftClosure(pointer.projectRoot, ids);
+  if (closure == null) {
+    res.writeHead(502).end(`Couldn't graft ${ids.map((i) => `#${i}`).join(", ")} for ${project} — is a campaign still running?`);
     return true;
   }
-  // Preview step: route `graft <ids…> --dry-run` to the selected project's install
-  // and show the placement it computed, gating the write behind a confirm — the
-  // added issues land in future waves, and the whole batch rejects if any id is
-  // unknown/closed/already in the campaign.
-  const previewText = await deps.graftPreview(pointer.projectRoot, ids);
-  if (previewText == null) {
-    res.writeHead(502).end(`Couldn't preview graft ${ids.map((i) => `#${i}`).join(", ")} for ${project} — is a campaign still running?`);
+  if (closure.rejected.length) {
+    // Whole-batch rejection (any offender): graft nothing, surface the per-id verdicts
+    // inline — the operator keeps the typed ids and corrects them, no navigation away.
+    res.writeHead(422, { "content-type": "text/html; charset=utf-8" }).end(renderAggregatedGraftRejection(project, closure));
     return true;
   }
-  res.setHeader("content-type", "text/html; charset=utf-8");
-  res.end(renderAggregatedGraftPreview(project, ids, previewText));
+  // Clean batch: shell the variadic `graft <ids…>` against the selected project's own
+  // root and redirect to its board — the graft confirms on the wave, not a form.
+  deps.spawn(process.execPath, [...process.execArgv, process.argv[1], "graft", ...ids], {
+    cwd: pointer.projectRoot,
+    stdio: ["ignore", "inherit", "inherit"],
+  });
+  res.writeHead(303, { location: `/?project=${encodeURIComponent(project)}` }).end();
   return true;
 };

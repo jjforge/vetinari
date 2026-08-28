@@ -1444,23 +1444,99 @@ test("renderStatusPage shows a Resume control only for a wave-parked campaign (#
   assert.doesNotMatch(running, /action="\/resume"/);
 });
 
-test("renderStatusPage shows a Graft control for a running campaign, gated behind the graft page option (#168)", () => {
+test("renderStatusPage puts a quiet graft input on the summary line, greyed at rest (#202, #168)", () => {
   const runningCampaign = {
     project: "beta",
     waves: [{ index: 0, status: "running" as const, issues: [{ issueNumber: "201", status: "running" as const }] }],
     parked: [],
   };
-  // With graft on, the page offers a Graft action symmetric to carve: a form POSTing
-  // to /graft carrying the project and an ids field (graft is variadic — a set of ids,
-  // entered explicitly, not a chip selection). The POST returns the placement preview.
+  // Mockup 1a: the graft affordance rides the campaign summary line (project · N issues ·
+  // M waves), not a banner. A form POSTing to /graft carries the project and a quiet ids
+  // input; the button is greyed/disabled at rest and only activates once ids are typed.
   const withGraft = renderStatusPage(runningCampaign, { carve: true, graft: true });
-  assert.match(withGraft, /<form method="post" action="\/graft"[^>]*>/);
-  assert.match(withGraft, /name="project" value="beta"/);
-  assert.match(withGraft, /name="ids"/);
+  // The input lives inside the summary line, not a standalone banner.
+  assert.doesNotMatch(withGraft, /class="graft-banner"/);
+  const summary = withGraft.slice(withGraft.indexOf('class="campaign-summary"'), withGraft.indexOf('class="waves-grid"'));
+  assert.match(summary, /class="campaign-meta"/);
+  assert.match(summary, /<form method="post" action="\/graft"[^>]*>/);
+  assert.match(summary, /name="project" value="beta"/);
+  assert.match(summary, /name="ids"[^>]*placeholder="graft issue ids"/);
+  // The graft button is disabled at rest — it activates client-side once ids are entered.
+  assert.match(summary, /class="graft-btn"[^>]*disabled/);
 
-  // Without the graft page option, no Graft control — the same gating carve rides.
+  // Without the graft page option, no graft control — the same gating carve rides.
   const withoutGraft = renderStatusPage(runningCampaign, { carve: true });
   assert.doesNotMatch(withoutGraft, /action="\/graft"/);
+  assert.doesNotMatch(withoutGraft, /class="campaign-summary"/);
+});
+
+test("renderStatusPage disables the graft input with amber guidance when the campaign is finished (#202)", () => {
+  // Every wave closed → the campaign has reached its final wave; nothing is live-or-
+  // resumable to layer into (the graft engine refuses, ADR 0014). Rather than fail on
+  // submit, 1a renders the input structurally disabled with amber guidance and a
+  // start-campaign affordance.
+  const finished = {
+    project: "beta",
+    waves: [
+      { index: 0, status: "closed" as const, issues: [{ issueNumber: "101", status: "completed" as const }] },
+      { index: 1, status: "closed" as const, issues: [{ issueNumber: "201", status: "completed" as const }] },
+    ],
+    parked: [],
+  };
+  const html = renderStatusPage(finished, { carve: true, graft: true });
+  const summary = html.slice(html.indexOf('class="campaign-summary"'), html.indexOf('class="waves-grid"'));
+  // The refusal replaces the active form — no live POST target, a disabled input/button.
+  assert.match(summary, /graft-refused/);
+  assert.doesNotMatch(summary, /<form method="post" action="\/graft"/);
+  assert.match(summary, /class="graft-ids"[^>]*disabled/);
+  // Amber guidance naming the structural reason, plus a start-campaign affordance.
+  assert.match(summary, /final wave/i);
+  assert.match(summary, /new campaign starts/i);
+  assert.match(summary, /class="graft-refusal"/);
+  assert.match(summary, /vetinari campaign/);
+});
+
+test("renderStatusPage marks a freshly-grafted wave with a static teal edge, not motion (#202, §5)", () => {
+  const grafted = {
+    project: "beta",
+    waves: [
+      { index: 0, status: "running" as const, issues: [{ issueNumber: "201", status: "running" as const }] },
+      { index: 1, status: "unstarted" as const, issues: [{ issueNumber: "305", status: "grafted" as const }] },
+    ],
+    parked: [],
+  };
+  const html = renderStatusPage(grafted, { carve: true, graft: true });
+  // A wave carrying a grafted issue is marked, and takes the teal product accent on its
+  // edge so the new card reads at a glance when it arrives on the live refresh.
+  assert.match(html, /class="wave unstarted has-grafted"/);
+  assert.match(html, /\.wave\.has-grafted \{ border-top-color: var\(--color-primary\); \}/);
+  // §5 reserves motion for the work/stream channels — the mockup's teal pulse is
+  // translated to this static emphasis (CLAUDE.md rule 5). No new colour animation: the
+  // only @keyframes on the page stays chip-pulse (the §5 invariant test #100 also pins).
+  assert.deepEqual(
+    [...new Set([...html.matchAll(/@keyframes ([\w-]+)/g)].map((m) => m[1]))],
+    ["chip-pulse"],
+  );
+});
+
+test("renderStatusPage ships the graft input's client wiring, re-run on live refresh (#202)", () => {
+  const running = {
+    project: "beta",
+    waves: [{ index: 0, status: "running" as const, issues: [{ issueNumber: "201", status: "running" as const }] }],
+    parked: [],
+  };
+  const html = renderStatusPage(running, { carve: true, graft: true });
+  // The graft input is inside #live-region (swapped on every soft-refresh), so its wiring
+  // is a function re-run from wireLiveRegion, not a one-shot bind.
+  assert.match(html, /function wireGraft\(\)/);
+  assert.match(html, /wireGraft\(\);/);
+  // It POSTs directly on submit and surfaces a 422 whole-batch rejection inline in the
+  // error box (keeping the typed ids), rather than navigating away.
+  assert.match(html, /fetch\("\/graft"/);
+  assert.match(html, /422/);
+  assert.match(html, /data-graft-error/);
+  // It validates against the retained dry-run closure endpoint on blur.
+  assert.match(html, /\/graft\?preview/);
 });
 
 test("renderStatusPage shows an informational quarantine affordance with no action of its own (#171)", () => {
@@ -3014,8 +3090,8 @@ test("serveAllStatus POST /carve previews the selected project's closure without
   }
 });
 
-test("serveAllStatus POST /graft on confirm shells graft in the selected project's root", async () => {
-  const configDir = join(tmpdir(), `vetinari-agg-graft-confirm-${Date.now()}`);
+test("serveAllStatus POST /graft shells graft directly for a clean batch — no confirm gate (#202)", async () => {
+  const configDir = join(tmpdir(), `vetinari-agg-graft-direct-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
   seedState(alphaDir, [
@@ -3032,14 +3108,28 @@ test("serveAllStatus POST /graft on confirm shells graft in the selected project
     port: 0,
     host: "127.0.0.1",
     spawn: (_cmd, args, options) => spawned.push({ args, cwd: options.cwd }),
+    // Option 1a validates the batch against the project's dry-run closure and, when it
+    // is clean (no offenders), grafts directly — no preview/confirm form. A clean closure
+    // stands in for beta's install accepting both ids.
+    graftClosure: () =>
+      Promise.resolve({
+        ids: ["640", "655"],
+        placement: [
+          { id: "640", wave: 2 },
+          { id: "655", wave: 2 },
+        ],
+        remaining: [["201"], ["640", "655"]],
+        rejected: [],
+      }),
   });
   const { port } = server.address() as AddressInfo;
   try {
     const res = await fetch(`http://127.0.0.1:${port}/graft`, {
       method: "POST",
       redirect: "manual",
+      // No `confirm` field — 1a acts on submit, confirming on the wave, not via a form.
       headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ ids: "640 655", project: "beta", confirm: "1" }).toString(),
+      body: new URLSearchParams({ ids: "640 655", project: "beta" }).toString(),
     });
     // Redirects back to the selected project's board, like carve/resume/answer.
     assert.equal(res.status, 303);
@@ -3157,48 +3247,52 @@ test("serveAllStatus GET /graft?preview 502s when the project emits no closure l
   }
 });
 
-test("serveAllStatus POST /graft previews the selected project's closure without executing", async () => {
-  const configDir = join(tmpdir(), `vetinari-agg-graft-preview-${Date.now()}`);
-  const alphaDir = join(configDir, "state-alpha");
+test("serveAllStatus POST /graft rejects a whole batch with per-id verdicts and grafts nothing (#202)", async () => {
+  const configDir = join(tmpdir(), `vetinari-agg-graft-reject-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
-  seedState(alphaDir, [
-    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["101"]], slots: 1 }),
-  ]);
   seedState(betaDir, [
     event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["201"]], slots: 1 }),
   ]);
-  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
   register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
 
-  const previews: { projectRoot: string; taskIds: string[] }[] = [];
+  const closures: { projectRoot: string; taskIds: string[] }[] = [];
   const spawned: unknown[] = [];
   const server = await serveAllStatus(configDir, {
     port: 0,
     host: "127.0.0.1",
     spawn: (...a) => spawned.push(a),
-    graftPreview: (projectRoot, taskIds) => {
-      previews.push({ projectRoot, taskIds });
-      return Promise.resolve(`graft #640, #655 → #640 in wave 2, #655 in wave 2\nresulting campaign: "201" "640 655"`);
+    // beta's install rejects the whole batch: #202 is already in the campaign, so per
+    // ADR 0014 *nothing* grafts — #640 would have grafted, but the batch is all-or-nothing.
+    graftClosure: (projectRoot, taskIds) => {
+      closures.push({ projectRoot, taskIds });
+      return Promise.resolve({
+        ids: ["640", "202"],
+        placement: [],
+        remaining: [["201"]],
+        rejected: [{ id: "202", reason: "already-in-campaign" as const }],
+      });
     },
   });
   const { port } = server.address() as AddressInfo;
   try {
     const res = await fetch(`http://127.0.0.1:${port}/graft`, {
       method: "POST",
+      redirect: "manual",
       headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ ids: "640 655", project: "beta" }).toString(),
+      body: new URLSearchParams({ ids: "640 202", project: "beta" }).toString(),
     });
-    assert.equal(res.status, 200);
+    // A rejection is surfaced inline (422), never a redirect — the operator stays put.
+    assert.equal(res.status, 422);
     const html = await res.text();
-    // The preview came from the selected project's install (beta's root), carrying the
-    // full set of ids.
-    assert.deepEqual(previews, [{ projectRoot: join(configDir, "beta-root"), taskIds: ["640", "655"] }]);
-    // It shows the shelled placement and a confirm affordance carrying the project + ids.
-    assert.match(html, /#655/);
-    assert.match(html, /<form method="post" action="\/graft"[\s\S]*?name="confirm"/);
-    assert.match(html, /name="project" value="beta"/);
-    assert.match(html, /name="ids" value="640 655"/);
-    // Nothing has been grafted yet — preview executes nothing.
+    // The verdict came from the selected project's install (beta's root), carrying both ids.
+    assert.deepEqual(closures, [{ projectRoot: join(configDir, "beta-root"), taskIds: ["640", "202"] }]);
+    // Per-id verdicts under the "Nothing grafted" header — the clean id "would graft",
+    // the offender names its reason — and the typed ids are retained for correction.
+    assert.match(html, /Nothing grafted/i);
+    assert.match(html, /#640 — would graft/);
+    assert.match(html, /#202 — already in the campaign/);
+    assert.match(html, /data-graft-ids="640 202"/);
+    // Whole-batch rejection grafts nothing — no graft is spawned.
     assert.equal(spawned.length, 0);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));

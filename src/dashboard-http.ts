@@ -23,9 +23,9 @@ export interface DashboardDeps {
   spawn: SpawnDashboardChild;
   carvePreview: (projectRoot: string, taskId: string) => Promise<string | null>;
   carveClosure: (projectRoot: string, taskId: string) => Promise<CarveClosure | null>;
-  /** The graft counterparts — variadic (a set of ids), routed to the project's own
-   *  `graft <ids…> --dry-run` exactly as the carve seams route to `carve … --dry-run`. */
-  graftPreview: (projectRoot: string, taskIds: string[]) => Promise<string | null>;
+  /** The graft closure — variadic (a set of ids), routed to the project's own
+   *  `graft <ids…> --dry-run` exactly as `carveClosure` routes to `carve … --dry-run`;
+   *  the graft surface (option 1a) validates the batch against it before acting. */
   graftClosure: (projectRoot: string, taskIds: string[]) => Promise<GraftClosure | null>;
 }
 

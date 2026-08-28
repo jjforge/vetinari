@@ -11,9 +11,12 @@ import {
   type WaveStatus,
 } from "./dashboard-model.ts";
 import { festiveWaveName } from "./festive-names.ts";
+import type { StructuredGraftClosure } from "./graft.ts";
+import type { GraftRejection } from "./plan.ts";
 import {
   ARCHIVE_LIST_SCRIPT,
   DASHBOARD_PALETTE_CSS,
+  GRAFT_SCRIPT,
   HOST_LOG_SCRIPT,
   HOST_LOG_STYLES,
   ISSUE_DETAIL_SHEET_SCRIPT,
@@ -179,7 +182,10 @@ const renderWaveCard = (wave: StatusWave, project: string, carve: boolean, inter
   // itself without shoving the meta group (tally · state · carved) onto its own line.
   const carved = wave.issues.filter((issue) => issue.status === "carved").length;
   const tally = carved ? `<span class="wave-carved">${carved} carved</span>` : "";
-  return `<section class="wave ${wave.status}"${extraAttrs}><div class="wave-head"><h2 class="wave-label">${renderWaveLabel(wave, festiveName)}</h2><div class="wave-meta"><span class="wave-tally">${waveMerged(wave)}/${wave.issues.length}</span><span class="wave-status ${wave.status}">${wave.status}</span>${tally}</div></div>${renderWaveMembers(wave, project, carve, interactive, run)}</section>`;
+  // A wave holding a freshly-grafted issue (#202) is marked so its edge pulses the teal
+  // accent once when it appears — the graft confirming on the wave (option 1a).
+  const grafted = wave.issues.some((issue) => issue.status === "grafted") ? " has-grafted" : "";
+  return `<section class="wave ${wave.status}${grafted}"${extraAttrs}><div class="wave-head"><h2 class="wave-label">${renderWaveLabel(wave, festiveName)}</h2><div class="wave-meta"><span class="wave-tally">${waveMerged(wave)}/${wave.issues.length}</span><span class="wave-status ${wave.status}">${wave.status}</span>${tally}</div></div>${renderWaveMembers(wave, project, carve, interactive, run)}</section>`;
 };
 
 /** A closed wave's compact toggle chip — the affordance that reveals its full card in
@@ -246,17 +252,39 @@ const renderQuarantineNote = () =>
   `<section class="quarantine-note"><strong>Issue quarantined</strong> — a merge conflict held a passed green out of integration. Resolve the conflict, then resume the campaign (the Resume control above, or <code>campaign --resume</code> in the project root).</section>`;
 
 /**
- * The Graft control (#168) — the additive counterpart to Carve. Where carve prunes
- * an existing campaign issue (a per-chip control), graft *extends* the running
- * campaign with new issues named by explicit id, so it is a small form the operator
- * types the ids into. Submitting POSTs `/graft` for this project; the aggregated
- * dumb router (ADR 0002) shells `graft <ids…> --dry-run` in the project's own root
- * and returns the placement behind a confirm form (the two-phase gate carve uses).
- * Emitted only on the interactive aggregated page (the `graft` page option) and only
- * while there is a live-or-resumable campaign to extend.
+ * The Graft affordance (#168, reworked to mockup 1a in #202). Where carve prunes an
+ * existing campaign issue (a per-chip control), graft *extends* the running campaign
+ * with new issues named by explicit id. 1a places it as a quiet, always-visible input
+ * on the campaign summary line rather than a banner: at rest a dim `graft issue ids`
+ * placeholder and a greyed (disabled) button; the client enables the button once ids
+ * are typed and, on submit, POSTs `/graft` for this project directly — the graft
+ * confirms on the wave (the new wave card appears on the live refresh), with no
+ * preview/confirm form. `graft` is variadic, so the field carries a set of ids
+ * (whitespace/comma-split, matching the CLI). A whole-batch rejection and any per-id
+ * validation surface inline in `[data-graft-error]`, never navigating away.
+ *
+ * When the campaign is finished (no wave left open, so the graft engine has nothing
+ * live-or-resumable to layer into — ADR 0014), the affordance renders *structurally
+ * disabled* instead: a greyed input and amber guidance with a start-campaign hint,
+ * rather than an input that would only fail on submit. Amber marks a structural refusal,
+ * distinct from the teal success and the red bad-id/rejection (§1).
  */
-const renderGraftControl = (status: CampaignStatus) =>
-  `<section class="graft-banner"><div class="graft-banner-text"><strong>Extend the campaign</strong> — graft new issues onto the running campaign; they layer into future waves.</div><form method="post" action="/graft" class="graft-form"><input type="text" name="ids" class="graft-ids" placeholder="issue ids, e.g. 640 655" /><input type="hidden" name="project" value="${escapeHtml(status.project)}" /><button type="submit" class="graft-btn">🌱 Graft</button></form></section>`;
+const renderGraftInline = (status: CampaignStatus) =>
+  isGraftable(status)
+    ? `<form method="post" action="/graft" class="graft-inline" data-graft><input type="text" name="ids" class="graft-ids" placeholder="graft issue ids" autocomplete="off" aria-label="Graft issue ids" data-graft-ids /><input type="hidden" name="project" value="${escapeHtml(status.project)}" /><button type="submit" class="graft-btn" data-graft-submit disabled>graft</button><span class="graft-error" data-graft-error hidden></span></form>`
+    : `<div class="graft-inline graft-refused" data-graft-refused><input type="text" class="graft-ids" placeholder="graft issue ids" aria-label="Graft issue ids" disabled /><button type="button" class="graft-btn" disabled>graft</button><span class="graft-refusal">Campaign is on its final wave — nothing left to layer into. Grafting resumes when a new campaign starts (<code>vetinari campaign</code>).</span></div>`;
+
+/** Whether the campaign can still accept a graft: it is live-or-resumable while any wave
+ * is not yet closed. A wholly-closed campaign has reached its final wave — nothing left to
+ * layer into, which the graft engine refuses (ADR 0014) — so the input renders structurally
+ * disabled (amber) rather than failing on submit. */
+const isGraftable = (status: CampaignStatus) => status.waves.some((wave) => wave.status !== "closed");
+
+/** The `<name> · N issues · M waves` campaign summary line. Split out so the graft
+ * affordance (1a) can ride alongside it on the summary row without disturbing the exact
+ * `<p class="campaign-meta">` string every non-graft surface renders. */
+const renderCampaignMeta = (status: CampaignStatus) =>
+  `<p class="campaign-meta">${status.name ? `<span class="campaign-name">${escapeHtml(status.name)}</span> · ` : ""}${campaignIssueCount(status)} issue${campaignIssueCount(status) === 1 ? "" : "s"} · ${status.waves.length} wave${status.waves.length === 1 ? "" : "s"}</p>`;
 
 /**
  * Is a host-log row one an operator should be alerted to (#180)? A pure, render-time
@@ -760,42 +788,54 @@ export const renderAggregatedCarvePreview = (project: string, target: string, pr
 </body>
 </html>`;
 
+/** A graft rejection reason (ADR 0014) as the operator reads it in the verdict list —
+ * graft's own words, so the dashboard and the CLI name an offender the same way. */
+const GRAFT_REASON_TEXT: Record<GraftRejection["reason"], string> = {
+  unknown: "not found",
+  closed: "closed on GitHub",
+  "already-in-campaign": "already in the campaign",
+};
+
 /**
- * The aggregated site's graft preview — the additive mirror of
- * `renderAggregatedCarvePreview`. It is a dumb router (ADR 0002) with no project's
- * `blockedBy` resolver, so it does not compute the placement itself — it shows the
- * placement the selected project's own `graft <ids…> --dry-run` printed, behind a
- * confirm form. `graft` is variadic, so the hidden field carries the whole set of
- * ids (space-joined, matching the CLI); confirming shells `graft <ids…>` in that
- * project's root. Serves as the no-JS graft fallback.
+ * The aggregated site's graft rejection surface (option 1a): a whole-batch graft
+ * (ADR 0014 — all-or-nothing) that found any offender grafts *nothing* and lands
+ * here instead of navigating. It renders the batch as a per-id verdict list —
+ * "would graft" for the clean ids, the reason per offender — under a "Nothing
+ * grafted — fix these" header, carrying the typed ids so the summary-line input can
+ * retain them. The client lifts `[data-graft-verdicts]` to show it inline beside the
+ * input; served whole it is the no-JS fallback. Red edge — a rejection, distinct
+ * from the teal success and the amber structural refusal.
  */
-export const renderAggregatedGraftPreview = (project: string, ids: string[], previewText: string) => `<!doctype html>
+export const renderAggregatedGraftRejection = (project: string, closure: StructuredGraftClosure) => {
+  const verdicts = closure.ids
+    .map((id) => {
+      const rejection = closure.rejected.find((r) => r.id === id);
+      const verdict = rejection ? GRAFT_REASON_TEXT[rejection.reason] : "would graft";
+      return `<li class="graft-verdict ${rejection ? "bad" : "ok"}">#${escapeHtml(id)} — ${escapeHtml(verdict)}</li>`;
+    })
+    .join("");
+  return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>${escapeHtml(project)} — graft ${escapeHtml(ids.map((i) => `#${i}`).join(", "))}</title>
+<title>${escapeHtml(project)} — graft rejected</title>
 <style>
   body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 2rem; background: #090c10; color: #e6edf3; }
   h1 { letter-spacing: -0.035em; }
-  .card { background: #0b0e12; border: 1px solid #232b35; border-left: 3px solid #3fb950; border-radius: 12px; padding: 1rem 1.25rem; margin: 1rem 0; }
-  pre { white-space: pre-wrap; margin: 0; }
-  .actions { display: flex; gap: .75rem; align-items: center; }
-  form { margin: 0; }
-  button { padding: .5rem .9rem; border: 0; border-radius: 9px; cursor: pointer; font-weight: 700; }
-  .confirm button { background: #3fb950; color: #05230f; }
-  a.cancel { color: #8b98a5; text-decoration: none; padding: .5rem .9rem; }
+  .card { background: #0b0e12; border: 1px solid #232b35; border-left: 3px solid #f79287; border-radius: 12px; padding: 1rem 1.25rem; margin: 1rem 0; }
+  ul { margin: 0; padding-left: 1.2rem; }
+  .graft-verdict.bad { color: #f79287; }
+  a.cancel { color: #8b98a5; text-decoration: none; }
 </style>
 </head>
 <body>
-<h1>Graft ${escapeHtml(ids.map((i) => `#${i}`).join(", "))} onto ${escapeHtml(project)}?</h1>
-<section class="card"><pre>${escapeHtml(previewText)}</pre></section>
-<div class="actions">
-<form method="post" action="/graft" class="confirm"><input type="hidden" name="ids" value="${escapeHtml(ids.join(" "))}" /><input type="hidden" name="project" value="${escapeHtml(project)}" /><input type="hidden" name="confirm" value="1" /><button type="submit">🌱 Confirm graft</button></form>
-<a class="cancel" href="/?project=${encodeURIComponent(project)}">Cancel</a>
-</div>
+<h1>Nothing grafted — fix these</h1>
+<section class="card" data-graft-rejection data-graft-ids="${escapeHtml(closure.ids.join(" "))}"><ul data-graft-verdicts>${verdicts}</ul></section>
+<a class="cancel" href="/?project=${encodeURIComponent(project)}">Back to ${escapeHtml(project)}</a>
 </body>
 </html>`;
+};
 
 /**
  * The issue-detail sheet's markup — one definition rendered by both the campaign
@@ -1349,12 +1389,37 @@ ${ISSUE_DETAIL_SHEET_STYLES}
   /* The quarantine note (#171) is informational only — same amber edge, no action. */
   .quarantine-note { background: var(--color-card); border: 1px solid var(--color-secondary); border-left: 3px solid var(--color-yellow); border-radius: var(--border-radius-medium); padding: .8rem 1rem; margin: 1rem 0; color: var(--color-text-light); box-shadow: 0 8px 22px #0004; }
   .quarantine-note code { color: var(--color-text); }
-  /* The Graft control (#168) — additive, so a green edge, mirroring the amber Resume banner. */
-  .graft-banner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; background: var(--color-card); border: 1px solid var(--color-secondary); border-left: 3px solid var(--color-green); border-radius: var(--border-radius-medium); padding: .8rem 1rem; margin: 1rem 0; box-shadow: 0 8px 22px #0004; }
-  .graft-banner-text { color: var(--color-text-light); }
-  .graft-form { margin: 0; display: flex; gap: .5rem; align-items: center; }
-  .graft-ids { padding: .5rem .6rem; border: 1px solid var(--color-secondary); border-radius: var(--border-radius); background: var(--color-chip); color: var(--color-text); }
-  .graft-btn { padding: .5rem .8rem; border: 0; border-radius: var(--border-radius); background: var(--color-green); color: #04110f; cursor: pointer; font-weight: 700; }
+  /* The Graft affordance (1a, #202): a quiet input riding the campaign summary line,
+     pushed to the right so the meta text keeps the left. Unobtrusive at rest — a dim
+     placeholder and a greyed button — it wakes to the teal product accent once ids are
+     typed (the client flips [data-graft-active]); teal for success, never a state (§1). */
+  .campaign-summary { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin: .75rem 0 0; }
+  .campaign-summary .campaign-meta { margin: 0; }
+  .graft-inline { margin: 0; display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
+  .graft-ids { padding: .35rem .55rem; border: 1px solid var(--color-secondary); border-radius: var(--border-radius); background: var(--color-chip); color: var(--color-text); font: inherit; font-size: .85rem; caret-color: var(--color-primary); }
+  .graft-ids:disabled { color: var(--color-dim); }
+  .graft-inline[data-graft-active] .graft-ids { border-color: var(--color-primary); }
+  /* Greyed and inert at rest; teal outline once ids are entered, filling on hover. */
+  .graft-btn { padding: .35rem .7rem; border: 1px solid var(--color-secondary); border-radius: var(--border-radius); background: none; color: var(--color-text-light-2); cursor: pointer; font: inherit; font-size: .85rem; }
+  .graft-btn:disabled { color: var(--color-dim); cursor: default; }
+  .graft-inline[data-graft-active] .graft-btn { border-color: var(--color-primary); color: var(--color-primary); }
+  .graft-inline[data-graft-active] .graft-btn:hover { background: var(--color-primary); color: #04110f; }
+  /* A bad-id / whole-batch rejection surfaces inline beside the input — the rejection red
+     (a control's refusal, distinct from the failure state and the amber refusal, §1). */
+  .graft-error { color: var(--color-red); font-size: .82rem; }
+  .graft-error[hidden] { display: none; }
+  /* Structural refusal — a finished campaign has nothing to layer into. Amber guidance
+     (the caution channel, §1), distinct from the teal success and the red rejection. */
+  .graft-refusal { color: var(--color-yellow); font-size: .82rem; }
+  .graft-refusal code { color: var(--color-text-light); }
+  /* A graft confirms on the wave (#202): the wave holding the freshly-grafted issues
+     takes the teal product accent on its edge, so the new card reads at a glance when it
+     arrives on the live refresh. Static, not a pulse — §5 reserves motion for the work
+     (running dot) and stream (live dot) channels and nothing else animates its colour;
+     the mockup's teal pulse is translated to this motion-free emphasis (CLAUDE.md rule 5).
+     The grafted tags themselves already lift on pickup (the grafted overlay drops when a
+     wave picks the issue up, ADR 0007) — the "fade" is that lifecycle, not an animation. */
+  .wave.has-grafted { border-top-color: var(--color-primary); }
   .parked-issues { margin: 1rem 0 2rem; }
   .parked-issues > h2 { display: flex; align-items: baseline; flex-wrap: wrap; gap: .35rem; }
   .parked-count { color: var(--color-yellow); }
@@ -1442,10 +1507,6 @@ ${renderTopBar(opts.projects?.length ? renderRepoDropdown(opts.projects, opts.se
   // gated on its attention state so it appears only when there is something to act on.
   opts.carve && isWaveParked(status) ? renderResumeControl(status) : ""
 }${opts.carve && hasQuarantined(status) ? renderQuarantineNote() : ""}${
-  // Graft extends a live-or-resumable campaign, so the control surfaces whenever the
-  // project has a campaign (any waves) — the additive mirror of the per-chip carve.
-  opts.graft && status.waves.length ? renderGraftControl(status) : ""
-}${
   status.parked.length
     ? `<section class="parked-issues"><h2>Parked · <span class="parked-count">${status.parked.length}</span></h2>${status.parked
         .map(
@@ -1459,8 +1520,12 @@ ${renderTopBar(opts.projects?.length ? renderRepoDropdown(opts.projects, opts.se
     : ""
 }
 ${
+  // The summary line: the meta bare, or — under the graft page option — the meta paired
+  // with the quiet inline graft input (1a), the two laid out as one summary row.
   status.waves.length
-    ? `<p class="campaign-meta">${status.name ? `<span class="campaign-name">${escapeHtml(status.name)}</span> · ` : ""}${campaignIssueCount(status)} issue${campaignIssueCount(status) === 1 ? "" : "s"} · ${status.waves.length} wave${status.waves.length === 1 ? "" : "s"}</p>`
+    ? opts.graft
+      ? `<div class="campaign-summary">${renderCampaignMeta(status)}${renderGraftInline(status)}</div>`
+      : renderCampaignMeta(status)
     : ""
 }
 ${renderWaves(status, Boolean(opts.carve), true, true, undefined, Boolean(opts.festive))}</div>
@@ -1604,7 +1669,10 @@ ${ARCHIVE_LIST_SCRIPT}
         });
       }
     }
+    // The summary-line graft input is inside #live-region too, so rebind it each refresh.
+    wireGraft();
   }
+${GRAFT_SCRIPT}
   wireLiveRegion();
 ${LIVE_TAIL_SCRIPT}
 </script>

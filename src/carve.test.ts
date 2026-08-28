@@ -1,6 +1,22 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyCarve, carveClosure, computeCarve, quarantineImpacts, restrictBlockers, resumeIndex } from "./carve.ts";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { ResolvedConfig } from "./config.ts";
+import { loggerForRun } from "./log.ts";
+import { readEventLog } from "./event-log.ts";
+import { listOutbox } from "./state.ts";
+import {
+  applyCarve,
+  carveClosure,
+  computeCarve,
+  defaultCarveDeps,
+  quarantineImpacts,
+  restrictBlockers,
+  resumeIndex,
+  runCarve,
+} from "./carve.ts";
 
 // A fake "blocked by" resolver from a plain edge map: id -> the ids that block it.
 const blockedByFrom = (edges: Record<string, string[]>) => (id: string) => edges[id] ?? [];
@@ -288,4 +304,206 @@ test("restrictBlockers keeps only the edges that stay inside the selected set", 
   assert.deepEqual([...inSet.get("640")!], ["611"]);
   assert.deepEqual([...inSet.get("611")!], []);
   assert.deepEqual([...external.get("640")!], []);
+});
+
+// --- runCarve: the command's inline orchestration, driven at the seam ---
+//
+// A temp-dir `cfg` mirroring graft.test's `harnessCfg`: a real on-disk event log
+// under a throwaway state dir is what the prune path's `readEventLog`/`reduceCampaign`
+// re-derive reads and what `enqueueOutbound`/`cfg.log` write — so the seam is
+// exercised for real; only the tracker edge (`blockedBy`) is stubbed per test.
+const harnessCfg = (overrides: Partial<ResolvedConfig> = {}): ResolvedConfig => {
+  const stateDir = mkdtempSync(join(tmpdir(), "vetinari-carve-"));
+  const logFile = join(stateDir, "orchestrator.jsonl");
+  return {
+    project: "harness",
+    stateDir,
+    logFile,
+    baseBranch: "base",
+    branchPrefix: "agent/",
+    log: loggerForRun({ logFile }),
+    blockedBy: async () => [],
+    ...overrides,
+  } as unknown as ResolvedConfig;
+};
+
+// Seed a running campaign onto the temp log: `campaign-start` with wave batches
+// (no terminal event, so `campaignRunning` reads it as open) plus a `campaign-batch`
+// marking wave 0 in-flight.
+const launch = (cfg: ResolvedConfig, batches: string[][]) => {
+  cfg.log.log("campaign-start", { batches, slots: 4 });
+  cfg.log.log("campaign-batch", { index: 0, tasks: batches[0] });
+};
+
+test("runCarve rejects a missing target before any campaign lookup", async () => {
+  const cfg = harnessCfg();
+  await assert.rejects(() => runCarve(cfg, "", {}), /carve needs an issue/);
+});
+
+test("runCarve rejects a config with no blockedBy resolver", async () => {
+  const cfg = harnessCfg({ blockedBy: undefined });
+  await assert.rejects(
+    () => runCarve(cfg, "640", {}),
+    /carve needs a "blockedBy" resolver/,
+  );
+});
+
+test("runCarve rejects a prune when no campaign is running", async () => {
+  const cfg = harnessCfg();
+  await assert.rejects(
+    () => runCarve(cfg, "640", {}),
+    /prunes a running campaign, but none is running/,
+  );
+});
+
+test("runCarve --dry-run previews the prune but appends no event and enqueues nothing", async () => {
+  const cfg = harnessCfg();
+  launch(cfg, [["101"], ["640"]]);
+
+  const result = await runCarve(cfg, "640", { dryRun: true });
+
+  assert.equal(result.mode, "prune");
+  assert.equal(result.applied, false);
+  assert.deepEqual(result.remaining, [["101"]]);
+  // The structured closure rides along on a dry-run so the dashboard preview can
+  // name the exact closure without re-parsing prose.
+  assert.deepEqual(result.mode === "prune" && result.closure, {
+    target: "640",
+    dropped: ["640"],
+    keptBanked: [],
+    remaining: [["101"]],
+  });
+  // Nothing was written: no carve event on the log, no outbound record.
+  assert.equal(readEventLog(cfg).some((e) => e.event === "carve"), false);
+  assert.equal(listOutbox(cfg).length, 0);
+});
+
+test("runCarve appends the carve event with its closure and enqueues a progress:carve note", async () => {
+  // 701 is blocked by 640; carving 640 drops its dependent 701 too.
+  const cfg = harnessCfg({
+    blockedBy: async (id) => (String(id) === "701" ? ["640"] : []),
+  });
+  launch(cfg, [["101"], ["640", "701"]]);
+
+  const result = await runCarve(cfg, "640", {});
+
+  assert.equal(result.mode, "prune");
+  assert.equal(result.applied, true);
+  assert.deepEqual(result.removed, ["640", "701"]);
+  assert.deepEqual(result.dropped, ["640", "701"]);
+  assert.deepEqual(result.remaining, [["101"]]);
+
+  // The appended carve event carries target + closure + dropped, so the loop
+  // replays the same rule at its next wave boundary.
+  const ev = readEventLog(cfg).find((e) => e.event === "carve") as
+    | { target: string; removed: string[]; dropped: string[] }
+    | undefined;
+  assert.ok(ev, "expected a carve event on the log");
+  assert.equal(ev!.target, "640");
+  assert.deepEqual(ev!.removed, ["640", "701"]);
+  assert.deepEqual(ev!.dropped, ["640", "701"]);
+
+  // ...and a single routable progress:carve outbound record.
+  const outbox = listOutbox(cfg);
+  assert.equal(outbox.length, 1);
+  assert.equal(outbox[0].category, "progress");
+  assert.equal(outbox[0].event, "carve");
+  assert.match(outbox[0].text, /carved #640/);
+});
+
+test("runCarve preserves a dropped parked member's record by default", async () => {
+  const cfg = harnessCfg();
+  cfg.log.log("campaign-start", { batches: [["101"], ["701"]], slots: 4 });
+  cfg.log.log("campaign-batch", { index: 0, tasks: ["101"] });
+  cfg.log.log("parked", { taskId: "701", reason: "needs attention" });
+
+  const cleared: string[][] = [];
+  const result = await runCarve(cfg, "701", {}, {
+    ...defaultCarveDeps,
+    clearParkedForTasks: (_cfg, ids) => cleared.push(ids),
+  });
+
+  assert.equal(result.mode, "prune");
+  assert.deepEqual(result.mode === "prune" && result.dropped, ["701"]);
+  assert.deepEqual(result.mode === "prune" && result.parkedDropped, ["701"]);
+  // Preserved, not cleared (ADR 0013): the parked record stays resumable.
+  assert.deepEqual(cleared, []);
+});
+
+test("runCarve --purge clears a dropped parked member's record", async () => {
+  const cfg = harnessCfg();
+  cfg.log.log("campaign-start", { batches: [["101"], ["701"]], slots: 4 });
+  cfg.log.log("campaign-batch", { index: 0, tasks: ["101"] });
+  cfg.log.log("parked", { taskId: "701", reason: "needs attention" });
+
+  const cleared: string[][] = [];
+  const result = await runCarve(cfg, "701", { purge: true }, {
+    ...defaultCarveDeps,
+    clearParkedForTasks: (_cfg, ids) => cleared.push(ids),
+  });
+
+  assert.equal(result.mode, "prune");
+  assert.deepEqual(result.mode === "prune" && result.parkedDropped, ["701"]);
+  // The rare true-drop: the parked record is cleared, reclaiming the work.
+  assert.deepEqual(cleared, [["701"]]);
+});
+
+test("runCarve with an explicit plan launches a fresh reduced campaign", async () => {
+  // 701 is blocked by 640; carving 640 out of the supplied plan strips its dependent
+  // and launches the remainder.
+  const cfg = harnessCfg({
+    blockedBy: async (id) => (String(id) === "701" ? ["640"] : []),
+  });
+
+  const launched: string[][][] = [];
+  const result = await runCarve(
+    cfg,
+    "640",
+    { plan: [["611", "640"], ["623", "701"]] },
+    {
+      ...defaultCarveDeps,
+      launchCampaign: async (_cfg, batches) => {
+        launched.push(batches);
+        return true;
+      },
+    },
+  );
+
+  assert.equal(result.mode, "launch");
+  assert.equal(result.mode === "launch" && result.launched, true);
+  assert.deepEqual(result.removed, ["640", "701"]);
+  assert.deepEqual(result.remaining, [["611"], ["623"]]);
+  // The reduced remainder was handed to the campaign launcher.
+  assert.deepEqual(launched, [[["611"], ["623"]]]);
+  // ...and the fresh-launch path still announces a progress:carve note.
+  const outbox = listOutbox(cfg);
+  assert.equal(outbox.length, 1);
+  assert.equal(outbox[0].event, "carve");
+  assert.match(outbox[0].text, /carved #640/);
+});
+
+test("runCarve --dry-run on an explicit plan previews but launches nothing", async () => {
+  const cfg = harnessCfg({
+    blockedBy: async (id) => (String(id) === "701" ? ["640"] : []),
+  });
+
+  const launched: string[][][] = [];
+  const result = await runCarve(
+    cfg,
+    "640",
+    { dryRun: true, plan: [["611", "640"], ["623", "701"]] },
+    {
+      ...defaultCarveDeps,
+      launchCampaign: async (_cfg, batches) => {
+        launched.push(batches);
+        return true;
+      },
+    },
+  );
+
+  assert.equal(result.mode, "launch");
+  assert.equal(result.mode === "launch" && result.launched, false);
+  assert.deepEqual(result.remaining, [["611"], ["623"]]);
+  assert.deepEqual(launched, []);
+  assert.equal(listOutbox(cfg).length, 0);
 });

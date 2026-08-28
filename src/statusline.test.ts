@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { formatContextLine, formatStatusLine, trimModelName } from "./statusline.ts";
+import { countBucket, formatContextLine, formatStatusLine, trimModelName } from "./statusline.ts";
 
 test("formatStatusLine summarizes the running wave and status counts on one line", () => {
   const line = formatStatusLine({
@@ -20,6 +20,60 @@ test("formatStatusLine summarizes the running wave and status counts on one line
   assert.match(line, /⏸1/);
   assert.match(line, /⚪1/);
   assert.equal(line.includes("\n"), false, "must be a single line");
+});
+
+test("countBucket folds overlay statuses to a base bucket and excludes carved", () => {
+  // base statuses are unchanged
+  assert.equal(countBucket("completed"), "completed");
+  assert.equal(countBucket("running"), "running");
+  assert.equal(countBucket("parked"), "parked");
+  assert.equal(countBucket("failure"), "failure");
+  assert.equal(countBucket("unstarted"), "unstarted");
+  // overlays fold to their effective base bucket
+  assert.equal(countBucket("grafted"), "unstarted");
+  assert.equal(countBucket("interrupted"), "unstarted");
+  assert.equal(countBucket("quarantined"), "parked");
+  // carved is pruned out of the campaign — counted nowhere
+  assert.equal(countBucket("carved"), null);
+});
+
+test("formatStatusLine counts grafted issues as unstarted (⚪) — the reported graft case", () => {
+  const line = formatStatusLine({
+    project: "jjforge",
+    waves: [
+      { index: 0, status: "running", issues: [{ issueNumber: "186", status: "running" }, { issueNumber: "171", status: "running" }] },
+      { index: 1, status: "unstarted", issues: [{ issueNumber: "168", status: "unstarted" }, { issueNumber: "193", status: "unstarted" }] },
+      { index: 2, status: "unstarted", issues: [{ issueNumber: "195", status: "grafted" }, { issueNumber: "196", status: "grafted" }] },
+    ],
+    parked: [],
+  });
+
+  assert.match(line, /🔄2/);
+  assert.match(line, /⚪4/); // 2 unstarted + 2 grafted, not ⚪2
+});
+
+test("formatStatusLine folds interrupted→unstarted, quarantined→parked, and excludes carved", () => {
+  const line = formatStatusLine({
+    project: "demo",
+    waves: [
+      {
+        index: 0,
+        status: "running",
+        issues: [
+          { issueNumber: "1", status: "unstarted" },
+          { issueNumber: "2", status: "interrupted" },
+          { issueNumber: "3", status: "quarantined" },
+          { issueNumber: "4", status: "parked" },
+          { issueNumber: "5", status: "carved" },
+        ],
+      },
+    ],
+    parked: [],
+  });
+
+  assert.match(line, /⚪2/); // unstarted + interrupted
+  assert.match(line, /⏸2/); // parked + quarantined
+  assert.doesNotMatch(line, /❌/); // carved contributes to no bucket
 });
 
 test("formatStatusLine drops zero-count segments and omits the wave when none is running", () => {

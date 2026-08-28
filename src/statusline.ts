@@ -13,6 +13,29 @@ const COUNT_EMOJI: Array<[IssueStatus, string]> = [
 ];
 
 /**
+ * Fold a `DisplayStatus` to the base `IssueStatus` bucket it should count under
+ * in the compact bar, or `null` when it counts nowhere. Base statuses pass
+ * through unchanged; the overlay states (which `COUNT_EMOJI` has no glyph for)
+ * map to their effective base so no issue is silently dropped from the tally:
+ * `grafted`/`interrupted` are outstanding work → `unstarted`; `quarantined` is an
+ * attention state grouped with `parked`; `carved` is pruned out of the campaign,
+ * so it is excluded from every bucket. Pure.
+ */
+export function countBucket(status: DisplayStatus): IssueStatus | null {
+  switch (status) {
+    case "grafted":
+    case "interrupted":
+      return "unstarted";
+    case "quarantined":
+      return "parked";
+    case "carved":
+      return null; // pruned from the campaign — counted in no bucket
+    default:
+      return status;
+  }
+}
+
+/**
  * Drop a trailing context-window parenthetical from a model name — Claude Code
  * reports the 1M-window model as "Opus 4.8 (1M context)", which is noise in a
  * compact bar. Only context parentheticals go; anything else is left intact.
@@ -45,8 +68,11 @@ export function formatStatusLine(status: CampaignStatus): string {
   const issues = status.waves.flatMap((wave) => wave.issues);
   if (!issues.length) return "🏰 idle";
 
-  const counts = new Map<DisplayStatus, number>();
-  for (const issue of issues) counts.set(issue.status, (counts.get(issue.status) ?? 0) + 1);
+  const counts = new Map<IssueStatus, number>();
+  for (const issue of issues) {
+    const bucket = countBucket(issue.status);
+    if (bucket) counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
+  }
 
   const parts: string[] = [];
   const running = status.waves.find((wave) => wave.status === "running");

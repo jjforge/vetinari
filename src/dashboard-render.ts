@@ -652,7 +652,7 @@ const renderArchiveRow = (project: string, run: ArchivedRunView, open: boolean, 
     `<button type="button" class="tail-mode-btn" data-mode="raw" aria-pressed="false">Raw</button>` +
     `</span>` +
     `<span class="archive-raw-gap"></span>` +
-    `<button type="button" class="tail-save" data-archive-raw-save>Download JSON</button>` +
+    `<button type="button" class="lv-ico" data-archive-raw-save aria-label="Download JSON" title="Download JSON">⤓</button>` +
     `</div>` +
     `<div class="archive-raw-lines"></div>` +
     `<div class="archive-raw-footer"></div>` +
@@ -944,7 +944,7 @@ export const renderHostLog = () =>
   `<button type="button" class="tail-mode-btn" data-mode="raw" aria-pressed="false">Raw</button>` +
   `</span>` +
   `<span class="host-log-gap"></span>` +
-  `<button type="button" class="tail-save" data-host-log-save>Download JSON</button>` +
+  `<button type="button" class="lv-ico" data-host-log-save aria-label="Download JSON" title="Download JSON">⤓</button>` +
   `</div>` +
   `<div class="host-log-lines" data-host-log-lines></div>` +
   `<div class="host-log-footer" data-host-log-footer></div>` +
@@ -1351,7 +1351,7 @@ export const renderLiveTail = (status: CampaignStatus, streaming = true) => {
   const modeToggle = `<span class="tail-mode" data-tail-mode role="group" aria-label="Line format">${modeBtn("humanized", "Humanized")}${modeBtn("raw", "Raw")}</span>`;
   // A streaming source follows/pauses and its dot pulses live; a static (archived) source has no
   // stream to follow, so the play/pause control is omitted and the dot is seeded idle (#203).
-  const playBtn = streaming ? `<button type="button" class="tail-play" data-tail-play data-following="true" aria-label="Pause"></button>` : "";
+  const playBtn = streaming ? `<button type="button" class="lv-ico lv-pause" data-tail-play data-following="true" aria-label="Pause"></button>` : "";
   const dot = streaming ? `<span class="tail-dot" data-tail-dot aria-hidden="true"></span>` : `<span class="tail-dot" data-tail-dot data-state="idle" aria-hidden="true"></span>`;
   return (
     `<section class="live-tail" data-live-tail data-project="${escapeHtml(status.project)}" data-agents="${agentsJson}"${running.length ? "" : " hidden"}>` +
@@ -1365,8 +1365,7 @@ export const renderLiveTail = (status: CampaignStatus, streaming = true) => {
     `<input type="text" class="tail-filter" placeholder="filter lines…" aria-label="Filter tail lines" data-tail-filter />` +
     modeToggle +
     playBtn +
-    `<button type="button" class="tail-save" data-tail-save>Download JSON</button>` +
-    `<button type="button" class="tail-clear" data-tail-clear>Clear</button>` +
+    `<button type="button" class="lv-ico" data-tail-save aria-label="Download JSON" title="Download JSON">⤓</button>` +
     `</span>` +
     `</div>` +
     `<div class="tail-body" data-tail-body></div>` +

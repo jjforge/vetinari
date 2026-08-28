@@ -358,15 +358,17 @@ test("renderLiveTail draws the pane only when a repo has a running agent, one dr
   assert.doesNotMatch(html, /class="live-tail"[^>]*\shidden/);
 });
 
-test("renderLiveTail carries the log-view chrome: a Humanized⇄Raw toggle (humanized default) and a Download JSON control (#203)", () => {
+test("renderLiveTail carries the log-view chrome: a Humanized⇄Raw toggle (humanized default) and a ⤓ Download JSON icon (#203, #216)", () => {
   const html = renderLiveTail(statusWith([["204", "running"]]));
   // The segmented Humanized ⇄ Raw toggle, humanized selected by default.
   assert.match(html, /data-tail-mode/);
   assert.match(html, /data-mode="humanized"[^>]*aria-pressed="true"[^>]*>Humanized/);
   assert.match(html, /data-mode="raw"[^>]*aria-pressed="false"[^>]*>Raw/);
-  // The Download-JSON control replaces the old bare "Save" label.
-  assert.match(html, /data-tail-save[^>]*>Download JSON</);
-  assert.ok(!/>Save</.test(html), "the old bare Save label is gone");
+  // The Download JSON control is the mockup's ⤓ .lv-ico icon (aria-labelled), not a text button.
+  assert.match(html, /class="lv-ico" data-tail-save[^>]*aria-label="Download JSON"[^>]*>⤓</);
+  assert.ok(!/>Save</.test(html) && !/>Download JSON</.test(html), "no old text Save/Download button label");
+  // The mockup's chrome drops the Clear control (the download preserves the data).
+  assert.ok(!/data-tail-clear/.test(html), "the old Clear control is gone");
 });
 
 test("renderLiveTail omits follow/pause and renders the dot idle for a static (non-streaming) source (#203)", () => {

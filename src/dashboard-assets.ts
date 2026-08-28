@@ -674,6 +674,14 @@ export const LIVE_TAIL_STYLES = `  .live-tail { background: var(--color-card); b
   .tail-play[data-following="false"]::before { content: ""; position: absolute; top: 6px; left: 9px; border-style: solid; border-width: 7px 0 7px 11px; border-color: transparent transparent transparent var(--color-text-light); }
   .tail-save, .tail-clear { border: 1px solid var(--color-secondary); border-radius: var(--border-radius); background: var(--color-chip); color: var(--color-text-light); font: inherit; font-size: .78rem; padding: .3rem .55rem; cursor: pointer; }
   .tail-save:hover, .tail-clear:hover { background: var(--color-card-hover); }
+  /* The chrome icon buttons (#216, mockup 1a): square glyph tiles — ⤓ download JSON, ▮▮ pause
+     (▶ when paused). The download carries the ⤓ glyph as its text; the pause draws ▮▮/▶ from
+     its follow state so the existing follow/pause JS drives the glyph with no change. */
+  .lv-ico { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; flex: none; border: 1px solid var(--color-secondary); border-radius: 7px; background: var(--color-chip); color: var(--color-text-light); font: inherit; font-size: .9rem; line-height: 1; cursor: pointer; padding: 0; }
+  .lv-ico:hover { background: var(--color-card-hover); color: var(--color-text); }
+  .lv-pause[data-following="true"] { border-color: var(--color-blue-40); }
+  .lv-pause[data-following="true"]::before { content: "▮▮"; letter-spacing: -.12em; }
+  .lv-pause[data-following="false"]::before { content: "▶"; }
   .tail-body { height: 236px; overflow-y: auto; overflow-x: hidden; background: var(--color-body); font-family: ${MONO_FONT}; font-size: 10.5px; line-height: 1.5; }
   .tail-body[hidden] { display: none; }
   .tail-line { display: grid; grid-template-columns: 44px 1fr; gap: .6rem; padding: .05rem .6rem .05rem 0; }
@@ -749,7 +757,7 @@ export const LIVE_TAIL_SCRIPT = `  const tailEl = document.querySelector("[data-
     const backlogEl = q("[data-tail-backlog]"), playBtn = q("[data-tail-play]"), filterEl = q("[data-tail-filter]");
     const issueDd = q("[data-tail-issue-dd]"), issueTrigger = q("[data-tail-issue-trigger]"), issueMenu = q("[data-tail-issue-menu]");
     const issueLabel = q("[data-tail-issue-label]"), issueDot = q("[data-tail-issue-dot]");
-    const saveBtn = q("[data-tail-save]"), clearBtn = q("[data-tail-clear]"), modeEl = q("[data-tail-mode]");
+    const saveBtn = q("[data-tail-save]"), modeEl = q("[data-tail-mode]");
     const mk = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
     function renderMenu() {
       issueMenu.textContent = "";
@@ -830,9 +838,6 @@ export const LIVE_TAIL_SCRIPT = `  const tailEl = document.querySelector("[data-
       const blob = new Blob([view.rows.map((r) => r.raw).join("\\n")], { type: "application/x-ndjson" });
       const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "tail-" + project + ".jsonl"; a.click(); URL.revokeObjectURL(a.href);
     });
-    // Clear drops only this repo's buffered lines; the seen-high-water map is kept so the
-    // server's still-held window isn't re-imported next frame (the clear sticks until new lines arrive).
-    clearBtn.addEventListener("click", () => { buffer = []; mark = 0; render(); });
     renderMenu(); renderSummary(); render();
   }`;
 

@@ -1757,8 +1757,8 @@ test("renderHostLog carries the Humanized ⇄ Raw toggle (humanized pressed) and
   assert.match(html, /data-host-log-mode/);
   assert.match(html, /data-mode="humanized" aria-pressed="true"/);
   assert.match(html, /data-mode="raw" aria-pressed="false"/);
-  // Download JSON always emits the raw NDJSON, mirroring the live tail's control.
-  assert.match(html, /data-host-log-save[^>]*>Download JSON</);
+  // Download JSON always emits the raw NDJSON, mirroring the live tail's ⤓ .lv-ico icon.
+  assert.match(html, /class="lv-ico" data-host-log-save[^>]*aria-label="Download JSON"[^>]*>⤓</);
 });
 
 test("renderLandingShell mounts the host-log gear + pane on the host view (#180)", () => {
@@ -5800,8 +5800,8 @@ test("renderStatusPage's archived raw pane carries the shared log-view chrome: a
   assert.match(pane, /data-archive-raw-mode/);
   assert.match(pane, /data-mode="humanized" aria-pressed="true">Humanized</);
   assert.match(pane, /data-mode="raw" aria-pressed="false">Raw</);
-  // The Download JSON control.
-  assert.match(pane, /data-archive-raw-save[^>]*>Download JSON</);
+  // The Download JSON control is the mockup's ⤓ .lv-ico icon.
+  assert.match(pane, /class="lv-ico" data-archive-raw-save[^>]*aria-label="Download JSON"[^>]*>⤓</);
   // A static archived log has no live stream to follow, so there is no play/pause control.
   assert.doesNotMatch(pane, /data-tail-play|data-archive-raw-play/);
 });

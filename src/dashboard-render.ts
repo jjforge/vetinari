@@ -404,9 +404,10 @@ export function tailAppend(buffer: TailRow[], fresh: TailRow[], live: boolean, c
  * which lines render and the footer/backlog counts. Following reads the whole buffer;
  * paused freezes the visible set at `mark` (the buffer length when pause was hit) and the
  * lines past it become the backlog. The issue dropdown and the case-insensitive substring
- * filter compose (both applied), then the newest `cap` matches render. `empty` is true when
- * the filters match nothing (the body shows the empty-state text). Pure and self-contained,
- * unit-tested in node and shipped to the browser via `.toString()` (ADR 0012).
+ * filter compose (both applied), then the newest `cap` matches render — **newest-first**, so
+ * the latest line sits at the top of the pane (#195). `empty` is true when the filters match
+ * nothing (the body shows the empty-state text). Pure and self-contained, unit-tested in node
+ * and shipped to the browser via `.toString()` (ADR 0012).
  */
 export function tailView(state: {
   buffer: TailRow[];
@@ -420,7 +421,9 @@ export function tailView(state: {
   const match = (line: TailRow) => (!state.issue || line.issue === state.issue) && (!q || line.raw.toLowerCase().indexOf(q) !== -1);
   const source = state.live ? state.buffer : state.buffer.slice(0, state.mark);
   const filtered = source.filter(match);
-  const rows = filtered.slice(Math.max(0, filtered.length - state.cap));
+  // Keep the newest `cap` matches (the tail of the canonical oldest→newest array), then
+  // reverse so the newest renders first (#195): newest-on-top, older extending downward.
+  const rows = filtered.slice(Math.max(0, filtered.length - state.cap)).reverse();
   const backlog = state.live ? 0 : state.buffer.slice(state.mark).filter(match).length;
   return { rows, visible: rows.length, total: state.buffer.length, backlog, empty: filtered.length === 0, following: state.live };
 }

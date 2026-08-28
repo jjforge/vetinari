@@ -71,8 +71,7 @@ above), added to `.gitignore`. Put everything project-specific in
 `vetinari/config.mts`, nothing else needs editing:
 
 ```ts
-import { execFileSync } from "node:child_process";
-import { defineConfig } from "vetinari";
+import { defineConfig, githubFetchTask } from "vetinari";
 
 export default defineConfig({
   project: "myapp",
@@ -87,7 +86,11 @@ export default defineConfig({
   ],
 
   setup: ["npm ci"],                   // once per sandbox, before the agent starts
-  fetchTask: (id) => execFileSync("gh", ["issue", "view", id, "--json", "title,body,comments"], { encoding: "utf8" }),
+
+  // Fetches title/body/comments/labels for the prompt AND state/closedAt, so a
+  // closed issue can't slip past graft's closed-target guard. Prefer this helper
+  // over a hand-rolled `gh --json` list, which silently drops state/closedAt.
+  fetchTask: githubFetchTask("owner/repo"),
 });
 ```
 

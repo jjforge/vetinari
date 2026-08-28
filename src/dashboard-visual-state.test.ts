@@ -32,30 +32,14 @@ test("hiddenPastCap hides only rows at or past the cap, revealing the newest (#1
   assert.equal(hiddenPastCap(21, 20), true);
 });
 
-test("freezeIntent maps live state to the readout, ageing 'updated Ns ago' from now", () => {
-  const intent = freezeIntent({ paused: false, buffered: 0, lastUpdate: 1000, now: 6000 });
-  assert.equal(intent.bodyPaused, "false");
-  assert.equal(intent.liveState, "live");
-  assert.equal(intent.ariaLabel, "Live");
+test("freezeIntent ages the 'updated Ns ago' readout from now (#210)", () => {
+  const intent = freezeIntent({ lastUpdate: 1000, now: 6000 });
   assert.equal(intent.updatedText, "updated 5s ago");
-});
-
-test("freezeIntent freezes the readout at 'Paused' and never ages while paused (§5, #100)", () => {
-  const intent = freezeIntent({ paused: true, buffered: 0, lastUpdate: 1000, now: 999999 });
-  assert.equal(intent.bodyPaused, "true");
-  assert.equal(intent.liveState, "paused");
-  assert.equal(intent.ariaLabel, "Paused");
-  assert.equal(intent.updatedText, "Paused");
-});
-
-test("freezeIntent discloses the buffered count on the paused indicator label", () => {
-  const intent = freezeIntent({ paused: true, buffered: 3, lastUpdate: 1000, now: 2000 });
-  assert.equal(intent.ariaLabel, "Paused · 3 buffered");
 });
 
 test("freezeIntent reads 'waiting for updates' before the first refresh (null lastUpdate)", () => {
   // The landing opens with no lastUpdate; the campaign page seeds it to now instead.
-  const intent = freezeIntent({ paused: false, buffered: 0, lastUpdate: null, now: 5000 });
+  const intent = freezeIntent({ lastUpdate: null, now: 5000 });
   assert.equal(intent.updatedText, "waiting for updates");
 });
 

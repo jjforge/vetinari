@@ -135,11 +135,8 @@ active **work**, and the green live-indicator dot signals a live **stream**.
 - A running chip's dot pulses (`chip-pulse`) while it marks running work. A zero-count
   "0 running" tally dot keeps the blue fill but stays still — motion means work in
   flight, and an idle tally has none.
-- The green live-indicator dots (the pause-bar dot and the event-log header dot) pulse
+- The green live-indicator dots (the live-bar dot and the event-log header dot) pulse
   whenever the stream is live, regardless of the running count.
-- A single root `data-paused` flag is the one control over all pulsing: pausing freezes
-  every dot at once — green and blue — through one rule, and the pause-bar's green dot
-  also goes `#5f6b78`.
 
 Nothing else animates its colour. No pulsing on parked — parked is urgent but
 static, and a blinking amber row across a long queue is unreadable. All motion is

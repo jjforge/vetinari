@@ -754,20 +754,17 @@ export const renderRepoDropdown = (repos: readonly (string | RepoOption)[], sele
 
 /**
  * The top bar every page shares (#81): the heading/dropdown on the left and the
- * live-bar (live dot + "updated Ns ago" + pause) on the right, wrapped in the
- * `.page-top` flex row. One definition rendered by the landing, the repo page, and
- * any archived view, so the two can no longer drift — which is what let the "Live"
- * word survive on one and the pause word on the other. The live indicator is a dot
- * only: its "Live"/"Paused" state is an accessible label (`aria-label`), never
- * visible text, keeping motion the one running-only channel (§5). Pause is an icon
- * control — its CSS-drawn bars/triangle live in `TOP_BAR_STYLES`, flipped by
- * `data-paused`, so a page's script only toggles the attribute and never re-authors it.
- * `trailing` seats extra controls at the right end of the live-bar, after the pause
- * button — the host view passes its settings gear there (#201) so it reads as the last
- * of the live controls; pages with nothing to add leave the live-bar untouched.
+ * live-bar (live dot + "updated Ns ago") on the right, wrapped in the `.page-top` flex
+ * row. One definition rendered by the landing, the repo page, and any archived view, so
+ * the two can no longer drift — which is what let the "Live" word survive on one page.
+ * The live indicator is a dot only: its "Live" state is an accessible label
+ * (`aria-label`), never visible text, keeping motion the one running-only channel (§5).
+ * `trailing` seats extra controls at the right end of the live-bar — the host view passes
+ * its settings gear there (#201) so it reads as the last of the live controls; pages with
+ * nothing to add leave the live-bar untouched.
  */
 export const renderTopBar = (left: string, trailing = "") =>
-  `<div class="page-top">${left}<div class="live-bar" title="Live updates over SSE; pause to freeze the view while it keeps collecting"><span class="live-indicator" data-live-state="live" aria-label="Live"></span><span class="updated" data-updated>waiting for updates</span><button type="button" id="pause" class="pause" data-paused="false" aria-label="Pause"></button>${trailing}</div></div>`;
+  `<div class="page-top">${left}<div class="live-bar" title="Live updates over SSE"><span class="live-indicator" data-live-state="live" aria-label="Live"></span><span class="updated" data-updated>waiting for updates</span>${trailing}</div></div>`;
 
 /**
  * The aggregated site's prune preview: it is a dumb router (ADR 0002) with no
@@ -1255,56 +1252,23 @@ ${REPO_DROPDOWN_SCRIPT}
       cards.append(card);
     }
   }
-  // Live updates (ADR 0008): one SSE stream feeds re-reads of the landing as
-  // events land. Pause is a client-side presentation freeze — the stream keeps
-  // flowing and events keep being collected; resuming re-reads once to flush the
-  // whole backlog that arrived while paused. "updated Ns ago" counts from the last
-  // time the view actually refreshed, so it visibly ages while paused.
-  const indicator = document.querySelector("[data-live-state]");
+  // Live updates (ADR 0008): one SSE stream feeds re-reads of the landing as events
+  // land. "updated Ns ago" counts from the last time the view actually refreshed, so it
+  // visibly ages between ticks.
   const updatedEl = document.querySelector("[data-updated]");
-  const pauseBtn = document.getElementById("pause");
-  let paused = false;
-  let buffered = 0;
   let lastUpdate = null;
-  // freezeIntent (dashboard-visual-state.ts) decides; the glue below only writes to the DOM.
+  // freezeIntent (dashboard-visual-state.ts) decides the readout; the glue only writes it.
   const renderUpdated = () => {
-    // While paused the readout reads "Paused" rather than ageing a frozen count; it resumes
-    // "updated Ns ago" on unpause (§5, #100).
-    updatedEl.textContent = freezeIntent({ paused, buffered, lastUpdate, now: Date.now() }).updatedText;
-  };
-  // The indicator is a dot only: its state is an accessible label, never visible text.
-  // Pause is an icon flipped by data-paused (the CSS-drawn bars/triangle live in CSS).
-  const renderState = () => {
-    // The single control for all pulsing (§5, #100): one root flag on the body freezes
-    // every dot — green live dots and blue running dots — at once via one CSS rule.
-    const intent = freezeIntent({ paused, buffered, lastUpdate, now: Date.now() });
-    document.body.dataset.paused = intent.bodyPaused;
-    indicator.dataset.liveState = intent.liveState;
-    indicator.setAttribute("aria-label", intent.ariaLabel);
-    pauseBtn.dataset.paused = intent.bodyPaused;
-    pauseBtn.setAttribute("aria-label", paused ? "Resume" : "Pause");
+    updatedEl.textContent = freezeIntent({ lastUpdate, now: Date.now() }).updatedText;
   };
   // Refresh both the landing and the cross-project feed on every live tick, so the
   // feed (#55) stays current alongside the cards.
   const refresh = async () => { await Promise.all([load(), loadFeed()]); lastUpdate = Date.now(); renderUpdated(); };
   const events = new EventSource("/api/events");
-  events.onmessage = () => {
-    // Freeze presentation while paused, but keep counting what lands so resume can flush it.
-    if (paused) { buffered++; renderState(); return; }
-    refresh();
-  };
-  pauseBtn.addEventListener("click", () => {
-    paused = !paused;
-    if (!paused && buffered) { buffered = 0; refresh(); }
-    renderState();
-    renderUpdated();
-  });
+  events.onmessage = () => { refresh(); };
   // A live pane (the host-log) that visibly appends is a co-equal update (#198): reset the
   // freshness clock so "updated Ns ago" reflects any live surface, not just a feed refresh.
-  // A paused page keeps reading "Paused" (freezeIntent ignores the clock while paused), so
-  // background appends never advance a visible clock — normal behaviour returns on resume.
-  window.addEventListener("vetinari:activity", () => { if (!paused) { lastUpdate = Date.now(); renderUpdated(); } });
-  renderState();
+  window.addEventListener("vetinari:activity", () => { lastUpdate = Date.now(); renderUpdated(); });
   setInterval(renderUpdated, 1000);
   refresh();
 ${HOST_LOG_SCRIPT}
@@ -1632,35 +1596,17 @@ ${issueDetailSheetMarkup(Boolean(opts.prune))}${
   // to a live refresh; this guards it the way the old full-reload one did.
   const isComposing = () =>
     [...document.querySelectorAll("textarea")].some((el) => el === document.activeElement || el.value.trim() !== "");
-  const indicator = document.querySelector("[data-live-state]");
   const updatedEl = document.querySelector("[data-updated]");
-  const pauseBtn = document.getElementById("pause");
-  let paused = false;
-  let buffered = 0;
   let lastUpdate = Date.now();
-  // freezeIntent (dashboard-visual-state.ts) decides; the glue below only writes to the DOM.
-  // While paused the readout reads "Paused" rather than ageing a frozen count; it resumes
-  // "updated Ns ago" on unpause (§5, #100).
-  const renderUpdated = () => { updatedEl.textContent = freezeIntent({ paused, buffered, lastUpdate, now: Date.now() }).updatedText; };
-  // The indicator is a dot only: its state is an accessible label, never visible text.
-  // Pause is an icon flipped by data-paused (the CSS-drawn bars/triangle live in CSS).
-  const renderState = () => {
-    // The single control for all pulsing (§5, #100): one root flag on the body freezes
-    // every dot — green live dots and blue running dots — at once via one CSS rule.
-    const intent = freezeIntent({ paused, buffered, lastUpdate, now: Date.now() });
-    document.body.dataset.paused = intent.bodyPaused;
-    indicator.dataset.liveState = intent.liveState;
-    indicator.setAttribute("aria-label", intent.ariaLabel);
-    pauseBtn.dataset.paused = intent.bodyPaused;
-    pauseBtn.setAttribute("aria-label", paused ? "Resume" : "Pause");
-  };
+  // freezeIntent (dashboard-visual-state.ts) decides the readout; the glue only writes it.
+  const renderUpdated = () => { updatedEl.textContent = freezeIntent({ lastUpdate, now: Date.now() }).updatedText; };
   // Live updates (ADR 0008, #131): a live event soft-refreshes rather than reloading the
   // whole page. It re-fetches this same page and swaps only #live-region (the parked cards,
   // campaign meta and wave grid) — the issue sheet, its open reply/compose, the repo
   // dropdown, the archived-runs list and the scroll position all live outside it and are
   // left untouched. A full-page reload blanked the page and lost scroll/compose state,
-  // worst over the tailnet. Guarded (never mid-compose), pausable (buffered and
-  // flushed on resume), and single-flighted so overlapping ticks can't race.
+  // worst over the tailnet. Guarded (never mid-compose) and single-flighted so overlapping
+  // ticks can't race.
   let refreshing = false;
   const softRefresh = async () => {
     if (refreshing) return;
@@ -1677,22 +1623,13 @@ ${issueDetailSheetMarkup(Boolean(opts.prune))}${
   };
   const events = new EventSource("/api/events");
   events.onmessage = () => {
-    // Freeze while paused or mid-compose; count what lands so a resume can flush it.
-    if (paused || isComposing()) { buffered++; renderState(); return; }
+    // Skip while mid-compose so a reply-in-progress is never lost; the next event refreshes.
+    if (isComposing()) return;
     softRefresh();
   };
-  pauseBtn.addEventListener("click", () => {
-    paused = !paused;
-    if (!paused && buffered && !isComposing()) { buffered = 0; softRefresh(); }
-    renderState();
-    renderUpdated();
-  });
   // A live pane (the live-tail) that visibly appends is a co-equal update (#198): reset the
   // freshness clock so "updated Ns ago" reflects any live surface, not just a soft-refresh.
-  // A paused page keeps reading "Paused" (freezeIntent ignores the clock while paused), so
-  // background appends never advance a visible clock — normal behaviour returns on resume.
-  window.addEventListener("vetinari:activity", () => { if (!paused) { lastUpdate = Date.now(); renderUpdated(); } });
-  renderState();
+  window.addEventListener("vetinari:activity", () => { lastUpdate = Date.now(); renderUpdated(); });
   renderUpdated();
   setInterval(renderUpdated, 1000);
 ${ISSUE_DETAIL_SHEET_SCRIPT}

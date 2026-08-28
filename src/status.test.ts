@@ -1358,7 +1358,7 @@ test("the issue-detail sheet carries the issue's state on its top edge only (§2
   );
 });
 
-test("motion is a running/stream channel only: green live dots pulse while live, a single root paused flag freezes every pulse (§5, #100)", () => {
+test("motion is a running/stream channel only: green live dots always pulse while live (§5, #100)", () => {
   for (const html of [
     renderLandingShell(["alpha"]),
     renderStatusPage({ project: "beta", waves: [], parked: [] }),
@@ -1369,18 +1369,9 @@ test("motion is a running/stream channel only: green live dots pulse while live,
     assert.doesNotMatch(html, /data-running/);
     assert.doesNotMatch(html, /\.live-indicator\[data-live-state="paused"\]/);
     assert.doesNotMatch(html, /\.live-bar:not\(\[data-running/);
-    // One root flag freezes every pulse at once — green live dots and blue running dots —
-    // so pause never has to reach each dot per-element (the reworked #100 design).
-    assert.match(
-      html,
-      /\[data-paused="true"\] \.live-indicator::before, \[data-paused="true"\] \.dot\.running \{ animation: none; \}/,
-    );
-    // The pause-bar dot also goes dim while paused, keyed off that same root flag (not a
-    // per-element live-state rule); the event-log dot just goes still.
-    assert.match(
-      html,
-      /\[data-paused="true"\] \.live-bar \.live-indicator \{ color: var\(--color-dim\); \}/,
-    );
+    // With the page-level pause gone (#210), nothing freezes the pulse per-page: there is
+    // no root [data-paused] flag and the live dots pulse for as long as the page is open.
+    assert.doesNotMatch(html, /\[data-paused="true"\]/);
     // The only colour-bearing animation anywhere is chip-pulse — nothing else animates (§5).
     assert.deepEqual(
       [...new Set([...html.matchAll(/@keyframes ([\w-]+)/g)].map((m) => m[1]))],
@@ -1416,19 +1407,6 @@ test("an idle running tally renders a solid blue dot with no pulse; genuinely-ru
   assert.match(html, /\.dot\.running\.idle \{ animation: none; \}/);
   // The base running dot still pulses — a wave member with real running work is unaffected.
   assert.match(html, /\.dot\.running \{ animation: chip-pulse/);
-});
-
-test("both pages toggle a root paused flag on the body so one rule freezes every dot (§5, #100)", () => {
-  // The pause script owns the single control: it flips data-paused on the body, the common
-  // root above both the green live dots and the blue running dots. Nothing else per-element.
-  // The single root flag is `freezeIntent(...).bodyPaused` (dashboard-visual-state.ts,
-  // asserted directly there: true⇒"true", false⇒"false"), which the glue writes onto the
-  // body — the one place pause reaches, never per-element.
-  for (const html of [
-    renderLandingShell(["alpha"]),
-    renderStatusPage({ project: "beta", waves: [], parked: [] }),
-  ])
-    assert.match(html, /document\.body\.dataset\.paused = intent\.bodyPaused/);
 });
 
 test("projectRunState resolves a card's state by the §3 precedence: parked > failure > running > completed (#83)", () => {
@@ -1792,13 +1770,13 @@ test("renderLandingShell mounts the host-log gear + pane on the host view (#180)
   assert.match(html, /\/api\/host-log/);
 });
 
-test("renderLandingShell seats the host-log gear in the top-right live-bar, right of the pause button (#201)", () => {
+test("renderLandingShell seats the host-log gear at the end of the top-right live-bar, after the readout (#201)", () => {
   const html = renderLandingShell(["alpha", "beta"]);
-  // The gear now rides the live-bar immediately after the pause button: the bar reads
-  // live dot → "updated Ns ago" → pause → gear. Its pane travels with it (popover).
+  // The gear rides the end of the live-bar, immediately after the "updated Ns ago" readout:
+  // the bar reads live dot → "updated Ns ago" → gear. Its pane travels with it (popover).
   assert.match(
     html,
-    /<button type="button" id="pause"[^>]*><\/button><section class="host-log" data-host-log>/,
+    /<span class="updated" data-updated>[^<]*<\/span><section class="host-log" data-host-log>/,
   );
   // The gear no longer floats as a detached section under the top bar — the host-log
   // opens only from within the live-bar.
@@ -2314,37 +2292,36 @@ test("renderLandingShell stacks each counter label on top of an inline value + s
   );
 });
 
-test("the updated readout reads 'Paused' while paused and counts up otherwise, on both pages (§5, #100)", () => {
+test("the updated readout ages 'updated Ns ago' from the last refresh, on both pages (§5, #210)", () => {
   for (const html of [
     renderLandingShell(["alpha"]),
     renderStatusPage({ project: "beta", waves: [], parked: [] }),
   ]) {
-    // While paused the "updated Ns ago" readout reads "Paused" instead of ageing a
-    // now-frozen count; it resumes counting on unpause. The mapping is `freezeIntent`'s
-    // `updatedText` (dashboard-visual-state.ts, asserted directly there: paused⇒"Paused",
-    // live⇒"updated Ns ago"), single-sourced into both pages and written onto the readout.
+    // The "updated Ns ago" readout is `freezeIntent`'s `updatedText` (dashboard-visual-state.ts,
+    // asserted directly there: live⇒"updated Ns ago", null⇒"waiting for updates"),
+    // single-sourced into both pages and written onto the readout. With the page-level pause
+    // gone (#210) there is no "Paused" branch — the clock always ages.
     assert.match(html, /function freezeIntent/);
     assert.match(
       html,
-      /updatedEl\.textContent = freezeIntent\(\{ paused, buffered, lastUpdate, now: Date\.now\(\) \}\)\.updatedText/,
+      /updatedEl\.textContent = freezeIntent\(\{ lastUpdate, now: Date\.now\(\) \}\)\.updatedText/,
     );
-    // Toggling pause re-renders the readout immediately, so "Paused" appears on the click
-    // rather than up to a second later on the next interval tick.
-    assert.match(html, /renderState\(\);\s*renderUpdated\(\);/);
+    // No page-level pause machinery survives (#210): no pause button, no paused state.
+    assert.doesNotMatch(html, /id="pause"/);
+    assert.doesNotMatch(html, /let paused/);
   }
 });
 
-test("renderLandingShell wires live SSE updates, an updated-ago readout, and a buffered pause", () => {
+test("renderLandingShell wires live SSE updates and an updated-ago readout, no page-level pause (#210)", () => {
   const html = renderLandingShell(["alpha", "beta"]);
   // Subscribes to the one-way SSE stream and re-reads the landing as events land.
   assert.match(html, /new EventSource\("\/api\/events"\)/);
-  // A live/paused indicator and an "updated Ns ago" readout live in the toolbar header.
+  // A live indicator and an "updated Ns ago" readout live in the toolbar header.
   assert.match(html, /data-live-state/);
   assert.match(html, /data-updated/);
-  // A pause control that freezes presentation while still collecting, flushing on resume.
-  assert.match(html, /id="pause"/);
-  // Pause must not tear the stream down — it is a client-side presentation freeze (ADR 0008).
-  assert.match(html, /paused/);
+  // The page-level pause is gone (#210): no pause button, no paused-state page-level freeze.
+  assert.doesNotMatch(html, /id="pause"/);
+  assert.doesNotMatch(html, /let paused = false/);
 });
 
 test("serveAllStatus GET / serves the all-repos landing shell, not a server-rendered campaign", async () => {
@@ -7093,20 +7070,15 @@ test("renderStatusPage renders the landing live-bar top-right, not the old refre
     parked: [],
   });
 
-  // The live-bar replaces the fixed-interval Refresh widget: a dot-only live/paused
-  // indicator, an "updated Ns ago" readout, and an icon Pause button — the same shared
-  // control the landing renders (#81). The indicator shows no visible "Live" text (its
-  // state is an accessible label); the pause control carries no "Pause" text word.
+  // The live-bar replaces the fixed-interval Refresh widget: a dot-only live indicator and
+  // an "updated Ns ago" readout — the same shared control the landing renders (#81). The
+  // indicator shows no visible "Live" text (its state is an accessible label). The
+  // page-level pause is gone (#210), so the bar carries no pause button.
   assert.match(
     html,
-    /<div class="live-bar"[^>]*><span class="live-indicator" data-live-state="live" aria-label="Live"><\/span><span class="updated" data-updated>[^<]*<\/span><button type="button" id="pause" class="pause" data-paused="false" aria-label="Pause"><\/button><\/div>/,
+    /<div class="live-bar"[^>]*><span class="live-indicator" data-live-state="live" aria-label="Live"><\/span><span class="updated" data-updated>[^<]*<\/span><\/div>/,
   );
-  // Paused, the pause-bar live indicator goes dim (not amber) and still — keyed off the
-  // root paused flag now, never a per-element live-state rule (§5, #100).
-  assert.match(
-    html,
-    /\[data-paused="true"\] \.live-bar \.live-indicator \{ color: var\(--color-dim\); \}/,
-  );
+  assert.doesNotMatch(html, /id="pause"/);
   // The old interval widget is gone entirely.
   assert.doesNotMatch(html, /id="refresh-seconds"/);
   assert.doesNotMatch(html, /id="refresh-enabled"/);
@@ -7120,7 +7092,7 @@ test("renderStatusPage renders the landing live-bar top-right, not the old refre
   assert.match(html, /\.page-top \{ display: flex;/);
 });
 
-test("both pages render one shared top-bar control: a dot-only live indicator and an icon pause (#81)", () => {
+test("both pages render one shared top-bar control: a dot-only live indicator, no pause (#81, #210)", () => {
   const landing = renderLandingShell(["alpha", "beta"]);
   const campaign = renderStatusPage(
     { project: "beta", waves: [], parked: [] },
@@ -7128,12 +7100,12 @@ test("both pages render one shared top-bar control: a dot-only live indicator an
   );
 
   // The live-bar's controls are one shared definition, emitted verbatim by every page so
-  // the two can no longer drift (the "Live"-word vs LIVE, pause-word vs icon divergence).
-  // The host view seats its settings gear at the end of the bar (#201, renderTopBar's
-  // trailing slot), so the shared, drift-proof span runs from the bar open through the
-  // pause button; anything after it is a per-page trailing control.
+  // the two can no longer drift (the "Live"-word vs LIVE divergence). The host view seats
+  // its settings gear at the end of the bar (#201, renderTopBar's trailing slot), so the
+  // shared, drift-proof span runs from the bar open through the readout; anything after it
+  // is a per-page trailing control.
   const liveBarControls = renderTopBar("").match(
-    /<div class="live-bar".*aria-label="Pause"><\/button>/s,
+    /<div class="live-bar".*<span class="updated" data-updated>[^<]*<\/span>/s,
   )?.[0];
   assert.ok(liveBarControls, "renderTopBar emits the shared live-bar controls");
   for (const page of [landing, campaign])
@@ -7142,34 +7114,21 @@ test("both pages render one shared top-bar control: a dot-only live indicator an
       "every page includes the shared live-bar controls",
     );
 
-  // The indicator is a dot only — no visible "Live"/"Paused" word; its state is an
-  // accessible label instead. The pause control is an icon button with no "Pause" word.
+  // The indicator is a dot only — no visible "Live" word; its state is an accessible label
+  // instead. The page-level pause is gone (#210), so no page renders a pause button.
   for (const page of [landing, campaign]) {
     assert.doesNotMatch(page, /<span class="live-indicator"[^>]*>Live<\/span>/);
-    assert.doesNotMatch(page, /<button[^>]*class="pause"[^>]*>Pause<\/button>/);
+    assert.doesNotMatch(page, /id="pause"/);
+    assert.doesNotMatch(page, /class="pause"/);
     assert.match(
       page,
       /<span class="live-indicator" data-live-state="live" aria-label="Live"><\/span>/,
     );
-    assert.match(
-      page,
-      /<button type="button" id="pause" class="pause" data-paused="false" aria-label="Pause"><\/button>/,
-    );
   }
 
-  // The pause icon lives in the shared CSS, flipped by a data attribute, so the two
-  // pages' scripts never re-author it: two bars while live, a triangle once paused.
-  // It is drawn in CSS with currentColor — never an emoji codepoint (⏸/▶ render as a
-  // colourful gradient glyph on Apple platforms), so it stays monotone (#96).
-  assert.doesNotMatch(TOP_BAR_STYLES, /⏸|▶/);
-  assert.match(
-    TOP_BAR_STYLES,
-    /\.pause::before, \.pause::after \{ content: ""; [^}]*background: currentColor;[^}]*\}/,
-  );
-  assert.match(
-    TOP_BAR_STYLES,
-    /\.pause\[data-paused="true"\]::before \{[^}]*border-color: transparent transparent transparent currentColor;[^}]*\}/,
-  );
+  // The pause icon CSS is gone with the button (#210): no `.pause` rules remain.
+  assert.doesNotMatch(TOP_BAR_STYLES, /\.pause/);
+  assert.doesNotMatch(TOP_BAR_STYLES, /data-paused/);
   for (const page of [landing, campaign])
     assert.ok(
       page.includes(TOP_BAR_STYLES),
@@ -7197,15 +7156,17 @@ test("renderStatusPage updates live off /api/events, soft-refreshing on a ping u
     html,
     /el === document\.activeElement \|\| el\.value\.trim\(\) !== ""/,
   );
-  assert.match(html, /if \(paused \|\| isComposing\(\)\) \{ buffered\+\+;/);
-  // Pause is a presentation freeze that flushes on resume, exactly as the landing's is.
-  assert.match(html, /pauseBtn\.addEventListener\("click"/);
+  assert.match(html, /if \(isComposing\(\)\) return;/);
+  // The page-level pause is gone (#210): no pause button, no paused/buffered state — a live
+  // event always soft-refreshes unless composing.
+  assert.doesNotMatch(html, /pauseBtn/);
+  assert.doesNotMatch(html, /let paused/);
   // The "updated Ns ago" readout is `freezeIntent`'s `updatedText` (dashboard-visual-state.ts,
   // asserted directly there), single-sourced into this page and written onto the readout.
   assert.match(html, /function freezeIntent/);
   assert.match(
     html,
-    /updatedEl\.textContent = freezeIntent\(\{ paused, buffered, lastUpdate, now: Date\.now\(\) \}\)\.updatedText/,
+    /updatedEl\.textContent = freezeIntent\(\{ lastUpdate, now: Date\.now\(\) \}\)\.updatedText/,
   );
 });
 

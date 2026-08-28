@@ -12,15 +12,14 @@ not its *behaviour*: they pass whether or not the rule is correct.
 We model that mapping as **pure TS reducers in `dashboard-visual-state.ts`, unit-
 tested in node** with real assertions. The gate stays node-only (`npx tsx --test
 src/*.test.ts`) — no jsdom, no CDP, no browser. A reducer takes state and returns
-the visual intent (a class fragment, or a `{bodyPaused, liveState, ariaLabel,
-updatedText}` object); the render code and the browser glue call it and apply the
-result, but never re-decide. Today: `dotClass` and `tallyDotClass` (the dot/idle
-class decisions), `hiddenPastCap` (the show-older cap), and `freezeIntent` (the
-live-bar presentation-freeze).
+the visual intent (a class fragment, or an `{updatedText}` object); the render code
+and the browser glue call it and apply the result, but never re-decide. Today:
+`dotClass` and `tallyDotClass` (the dot/idle class decisions), `hiddenPastCap` (the
+show-older cap), and `freezeIntent` (the live-bar's "updated Ns ago" readout).
 
 **The client reducer is single-sourced to the browser via `.toString()`.** The
-freeze machine and the tally class run *in the browser* — they tick each second and
-react to the pause click — so they cannot simply be imported at render. Instead the
+freshness readout and the tally class run *in the browser* — they tick each second —
+so they cannot simply be imported at render. Instead the
 page script inlines `const freezeIntent = ${freezeIntent.toString()};` (and the
 `dotClass`/`tallyDotClass` it needs), so the node test imports the very function the
 payload ships. This reuses the pattern the archived-runs list already uses for

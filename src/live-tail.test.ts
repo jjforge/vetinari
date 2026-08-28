@@ -61,6 +61,19 @@ test("buildLiveTail merges a running agent's activity lines, tagged with its iss
   assert.ok(tail.lines[1].raw.includes('"cmd":"npm test"'));
 });
 
+test("buildLiveTail attaches each line's humanized parts for the log-view component (#203)", () => {
+  const dir = tmp();
+  writeJsonl(cfgFor(dir).logFile, [event("queue-start", { taskIds: ["204"], slots: 1, ts: "2026-08-27T00:00:00.000Z" })]);
+  initActivityLog(dir, "204");
+  appendActivity(dir, "204", event("tool", { taskId: "204", name: "Edit", path: "src/x.ts", ts: "2026-08-27T09:15:00.000Z" }));
+
+  const tail = buildLiveTail(cfgFor(dir));
+
+  // The server humanizes each raw line once so the client renders pre-humanized rows and
+  // keeps `raw` for the Raw toggle and the download.
+  assert.deepEqual(tail.lines[0].humanized, { time: "09:15:00", actor: "#204", message: "Edit src/x.ts", dot: "running" });
+});
+
 test("buildLiveTail interleaves two running agents by ts and excludes finished ones", () => {
   const dir = tmp();
   writeJsonl(cfgFor(dir).logFile, [

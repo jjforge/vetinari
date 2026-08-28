@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { humanizeLogLine, LOG_DOT_STATE_COLOR } from "./log-view.ts";
+import { humanizeHostLine, humanizeLogLine, LOG_DOT_STATE_COLOR } from "./log-view.ts";
 import { event } from "./event-log.ts";
 import { describeEvent } from "./dashboard-model.ts";
 
@@ -151,4 +151,91 @@ test("each dot state maps to a stateColor token so the chrome can paint all five
     parked: "parked",
     neutral: "unstarted",
   });
+});
+
+// The host-log's registry (#203): `humanizeHostLine` is the sibling of `humanizeLogLine`
+// for the host surface — the same `time · actor · what happened` parts, keyed on the
+// host-kind `event`. Self-contained (no `describeEvent`) so it ships into the host-log
+// client via `.toString()` and humanizes the fetched window and each live frame in-browser.
+
+test("a gateway-routed line reads `routed <category> → <destination>`, the project as actor, neutral dot", () => {
+  const row = humanizeHostLine(raw({ event: "gateway-routed", project: "alpha", id: "12", category: "question", destination: "telegram", ts: "2026-08-28T14:01:23.000Z" }));
+  assert.equal(row.time, "14:01:23");
+  assert.equal(row.actor, "alpha");
+  assert.equal(row.message, "routed question → telegram");
+  assert.equal(row.dot, "neutral");
+});
+
+test("a gateway-announced line reads `announced #<task>`, project actor, neutral dot", () => {
+  const row = humanizeHostLine(raw({ event: "gateway-announced", project: "beta", task: "204", messageId: 7, ts: "2026-08-28T09:15:00.000Z" }));
+  assert.equal(row.actor, "beta");
+  assert.equal(row.message, "announced #204");
+  assert.equal(row.dot, "neutral");
+});
+
+test("a gateway-start line reads `gateway up` with its bot count, host actor, neutral dot", () => {
+  const up = humanizeHostLine(raw({ event: "gateway-start", configDir: "/cfg", bots: 2, ts: "2026-08-28T00:00:00.000Z" }));
+  assert.equal(up.actor, "host");
+  assert.equal(up.message, "gateway up · 2 bots");
+  assert.equal(up.dot, "neutral");
+  // No bots yet: the count clause drops rather than reading "· 0 bots".
+  const silent = humanizeHostLine(raw({ event: "gateway-start", configDir: "/cfg", bots: 0, ts: "2026-08-28T00:00:00.000Z" }));
+  assert.equal(silent.message, "gateway up");
+});
+
+test("a telegram-unconfigured line reads a parked (amber) warning, project actor", () => {
+  const row = humanizeHostLine(raw({ event: "telegram-unconfigured", project: "alpha", baseLocation: "/a", ts: "2026-08-28T00:00:00.000Z" }));
+  assert.equal(row.actor, "alpha");
+  assert.equal(row.message, "⚠ Telegram not configured");
+  assert.equal(row.dot, "parked");
+});
+
+test("a registry-stale line reads a parked (amber) `stale registration`, project actor", () => {
+  const row = humanizeHostLine(raw({ event: "registry-stale", project: "gone", baseLocation: "/x", ts: "2026-08-28T00:00:00.000Z" }));
+  assert.equal(row.actor, "gone");
+  assert.equal(row.message, "stale registration");
+  assert.equal(row.dot, "parked");
+});
+
+test("a telegram-send-failed line reads red (failure dot) and names the status", () => {
+  const row = humanizeHostLine(raw({ event: "telegram-send-failed", status: 429, ts: "2026-08-28T00:00:00.000Z" }));
+  assert.equal(row.actor, "host");
+  assert.equal(row.message, "Telegram send failed (429)");
+  assert.equal(row.dot, "failure");
+});
+
+test("a registry-register-failed line reads red (failure dot) and names the error, project actor", () => {
+  const row = humanizeHostLine(raw({ event: "registry-register-failed", project: "alpha", error: "EACCES", ts: "2026-08-28T00:00:00.000Z" }));
+  assert.equal(row.actor, "alpha");
+  assert.equal(row.message, "registration failed: EACCES");
+  assert.equal(row.dot, "failure");
+});
+
+// The red rule tracks `isNotableHostEvent` (a fail/error kind, a non-null `error`, or
+// `ok:false`), so even a host kind with no purpose-built line still paints red — it dumps
+// the raw source on a failure dot rather than a neutral one, keeping failures visible.
+test("an unrecognized but notable host kind still paints red, dumping its raw source", () => {
+  const kind = humanizeHostLine(raw({ event: "gateway-poll-error", token: "t", error: "boom", ts: "2026-08-28T12:00:00.000Z" }));
+  assert.equal(kind.dot, "failure");
+  assert.equal(kind.message, raw({ event: "gateway-poll-error", token: "t", error: "boom", ts: "2026-08-28T12:00:00.000Z" }));
+  const okFalse = humanizeHostLine(raw({ event: "gateway-thing", ok: false, ts: "2026-08-28T12:00:00.000Z" }));
+  assert.equal(okFalse.dot, "failure");
+});
+
+// The fallback contract mirrors humanizeLogLine: an unknown, non-notable kind (or an
+// unparseable line) is never a blank row — it dumps the raw source on a neutral dot.
+test("an unknown, non-notable host kind falls back to a neutral raw dump", () => {
+  const line = raw({ event: "gateway-heartbeat", detail: "ok", ts: "2026-08-28T12:00:00.000Z" });
+  const row = humanizeHostLine(line);
+  assert.equal(row.time, "12:00:00");
+  assert.equal(row.message, line);
+  assert.equal(row.dot, "neutral");
+});
+
+test("an unparseable host line dumps its raw text on a neutral dot, no crash", () => {
+  const row = humanizeHostLine("}{ not json");
+  assert.equal(row.time, "");
+  assert.equal(row.actor, "");
+  assert.equal(row.message, "}{ not json");
+  assert.equal(row.dot, "neutral");
 });

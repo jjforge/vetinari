@@ -29,11 +29,15 @@ Within a milestone each bold section label appears at most once.
 - [user] A quarantined issue now shows an informational "resolve the conflict, then resume" affordance on the dashboard, pointing at the Resume action / `campaign --resume`; it adds no new action or CLI verb (#171).
 - [user] The status dashboard gains a `/graft` route mirroring `/carve` — a Graft control extends a running campaign with new issues by id, previewing where they would land (and any whole-batch rejection naming the offenders) behind a confirm gate before shelling the selected project's own `graft` CLI (#168).
 - [api] `graft <ids…> --dry-run` now emits a machine-readable `graft-closure {json}` line alongside its prose (mirroring `carve-closure`), and `GET /graft?preview` returns that structured closure as JSON, so the dashboard parses the placement rather than scraping the prose (#168).
+- [user] **Festive Wave Names** — a toggle in the dashboard gear (#193) that names each wave after a Discworld character (`Wave 2 · Granny Weatherwax`) instead of a bare `Wave N`. Default off; the setting rides a `festiveWaveNames` cookie (with an optional `festiveWaveNames` config default) so the server-rendered labels flip on reload. Names cool off across campaigns — a host cursor reserves a disjoint block per campaign, so concurrent campaigns never share a name and a name doesn't recur until the roster wraps.
 
 **Improvements:**
 - [user] Campaign Telegram notices now follow one terse, labeled skeleton (`<emoji> <project> · <LABEL> · <context>`), leading with what happened and what to do and shedding low-value rationale (#194).
 - [ops] Pause notices — wave-park and quarantine-pause — now name the exact recovery command (`campaign --resume`, plus `carve <issue>` / `campaign --auto-carve`) on both the Telegram notice and the console line, so the guidance is self-contained (#194, #170).
 - [user] The one-line wave narration (event feed / last-event) now lists every issue in a wave by title — `Wave N — first, second, third` — instead of naming the wave by its lead issue alone (`Wave N — first +M`); the status-page wave card keeps its lead-title-plus-count label (#179).
+
+**Bug fixes:**
+- [user] The Claude Code status line now counts grafted and other overlay-status issues in its per-status tally — grafted and interrupted issues count as unstarted (⚪), quarantined as parked (⏸), and carved issues are excluded — so the counts sum to the campaign's live issues instead of the wave total growing on a graft while the item count stays put (#199).
 
 ### Collected changes — August 27, 2026
 

@@ -33,6 +33,7 @@ import {
   type TidyTarget,
 } from "./merge.ts";
 import { gateway } from "./gateway.ts";
+import { defaultGatewayServiceIO, isGatewayServiceVerb, runGatewayService } from "./gateway-service.ts";
 import { runPrune } from "./prune.ts";
 import {
   describeFilesetCheck,
@@ -294,6 +295,14 @@ if (mode === "gateway") {
       );
     }
     process.exit(0);
+  }
+  // Service lifecycle: `status|start|stop|restart` wrap `systemctl --user <verb>
+  // vetinari-gateway` (the user unit `gateway install` writes), propagating its
+  // exit code so scripts can rely on it. Any other first token — including none —
+  // falls through to running the daemon in the FOREGROUND, which is what the
+  // systemd unit's ExecStart invokes; that path must stay unchanged.
+  if (isGatewayServiceVerb(rest[0])) {
+    process.exit(await runGatewayService(rest[0], defaultGatewayServiceIO()));
   }
   await gateway();
   process.exit(0);

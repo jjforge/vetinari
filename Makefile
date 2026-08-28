@@ -1,7 +1,7 @@
 # Convenience targets for the demo dashboard project (acme-checkout) — the
 # repeatable fixture used to click through the status UI. Both wrap
 # scripts/seed-demo-dashboard.mts; refresh the running dashboard afterwards.
-.PHONY: demo-create demo-clean gateway-restart check-changelog-sections check-changelog-sections-test
+.PHONY: demo-create demo-clean check-changelog-sections check-changelog-sections-test
 
 # Does any dated CHANGELOG.md milestone repeat a bold section label? A split
 # `**Improvements:**` (one block, then another below `**New features:**`) reads as
@@ -22,9 +22,3 @@ demo-create:
 # Unregister + delete it (removes ~/.cache/vetinari-demo and its registry pointer).
 demo-clean:
 	npx tsx scripts/seed-demo-dashboard.mts --clear
-
-# Restart the host gateway systemd user service so it serves the current code
-# (tsx compiles at startup, so a restart is how merged changes go live).
-gateway-restart:
-	systemctl --user restart vetinari-gateway.service
-	@systemctl --user is-active vetinari-gateway.service

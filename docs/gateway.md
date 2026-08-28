@@ -202,8 +202,9 @@ install` after a node or tsx upgrade** — the baked paths pin their current loc
 
 `enable --now` alone brings the daemon back only when you log in; **`enable-linger`
 is what makes it survive a headless reboot**, telling systemd to start your user
-manager at boot. Operate it with `systemctl --user status|restart vetinari-gateway`;
-gateway detail goes to `journalctl --user -u vetinari-gateway`. Do not also run an
+manager at boot. Operate it with `vetinari gateway status|start|stop|restart` (which
+wrap `systemctl --user … vetinari-gateway`); gateway detail goes to `journalctl
+--user -u vetinari-gateway`. Do not also run an
 inline `gateway &`, or the two consumers fight over the bot's updates.
 
 ## 4. Migrating off the per-project `dispatch` unit
@@ -241,8 +242,8 @@ Alongside the layout move (config → `vetinari/`, old `.sandcastle/` state →
 After applying, reload and restart:
 
 ```bash
-systemctl --user daemon-reload
-systemctl --user restart vetinari-gateway
+systemctl --user daemon-reload      # the unit file changed
+vetinari gateway restart            # wraps `systemctl --user restart vetinari-gateway`
 ```
 
 Do not run `dispatch` and the gateway at once — two consumers of one bot fight over

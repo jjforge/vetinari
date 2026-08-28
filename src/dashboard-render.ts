@@ -864,11 +864,12 @@ export const issueDetailSheetMarkup = (prune: boolean) =>
   }</div></div></div>`;
 
 /**
- * The host-log surface on the all-repos landing/host view (#180): a settings gear the
- * fleet-level `host.jsonl` (gateway/registry/Telegram/SSE diagnostics across every
- * project, #157) lives behind, plus its attention badge. The gear rides the top-right
- * live-bar after the pause button (#201) — `renderTopBar`'s `trailing` slot — and its
- * pane opens as a popover anchored under it. The gear is the show/hide —
+ * The shared settings surface (#180): a settings gear the fleet-level `host.jsonl`
+ * (gateway/registry/Telegram/SSE diagnostics across every project, #157) lives behind,
+ * plus its attention badge and the global Festive Wave Names toggle. The host log is a
+ * host-level view, so the gear rides the top-right live-bar — `renderTopBar`'s `trailing`
+ * slot (#201) — on every page, the all-repos landing and each campaign page alike (#215);
+ * its pane opens as a popover anchored under it. The gear is the show/hide —
  * the pane is `hidden` until it is clicked, deliberately *not* an always-visible section
  * and *not* folded into the narrated cross-repo event feed (that feed is per-project
  * narratable milestones; this is host diagnostics). The badge (`data-host-log-badge`)
@@ -1348,6 +1349,7 @@ ${DASHBOARD_PALETTE_CSS}
   .campaign-name { font-weight: 600; letter-spacing: -0.01em; }
 ${TOP_BAR_STYLES}
 ${LIVE_TAIL_STYLES}
+${HOST_LOG_STYLES}
   .waves-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 1rem; margin: 1rem 0; }
   .wave { background: var(--color-card); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: 1rem; box-shadow: 0 8px 22px #0004; border-top: 3px solid var(--color-dim); }
   .wave.running { border-top-color: var(--color-blue); }
@@ -1528,7 +1530,7 @@ ${ISSUE_DETAIL_SHEET_STYLES}
 }
 </head>
 <body>
-${renderTopBar(opts.projects?.length ? renderRepoDropdown(opts.projects, opts.selected ?? status.project) : `<h1>${escapeHtml(status.project)}</h1>`)}
+${renderTopBar(opts.projects?.length ? renderRepoDropdown(opts.projects, opts.selected ?? status.project) : `<h1>${escapeHtml(status.project)}</h1>`, renderHostLog())}
 <div id="live-region">${
   // The wave-park Resume control and the quarantine note are aggregated-page actions
   // (the same `prune` page option gates the interactive shell-out affordances), each
@@ -1676,6 +1678,7 @@ ${ARCHIVE_LIST_SCRIPT}
 ${GRAFT_SCRIPT}
   wireLiveRegion();
 ${LIVE_TAIL_SCRIPT}
+${HOST_LOG_SCRIPT}
 </script>
 </body>
 </html>`;

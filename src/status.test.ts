@@ -1781,10 +1781,30 @@ test("renderLandingShell seats the host-log gear at the end of the top-right liv
   // The gear no longer floats as a detached section under the top bar — the host-log
   // opens only from within the live-bar.
   assert.doesNotMatch(html, /<\/div>\s*<section class="host-log"/);
-  // The campaign page has no host-log wiring, so its live-bar carries no gear (#180 is
-  // a landing/host-view surface); the relocation stays landing-only.
+  // The gear now rides the campaign page's live-bar too, in the very same seat — after the
+  // "updated Ns ago" readout — so settings are one click away on every page (#215).
   const campaign = renderStatusPage({ project: "demo", waves: [], parked: [] });
-  assert.doesNotMatch(campaign, /data-host-log-gear/);
+  assert.match(
+    campaign,
+    /<span class="updated" data-updated>[^<]*<\/span><section class="host-log" data-host-log>/,
+  );
+});
+
+test("the settings gear rides the live-bar header on both the landing and the campaign page (#215)", () => {
+  const landing = renderLandingShell(["alpha", "beta"]);
+  const campaign = renderStatusPage({ project: "demo", waves: [], parked: [] });
+  // One shared header component on both pages: the gear, its pane, and the pane's full
+  // contents — the host-log options and the Festive Wave Names toggle — reachable from either.
+  for (const [label, html] of [
+    ["landing", landing],
+    ["campaign", campaign],
+  ] as const) {
+    assert.match(html, /data-host-log-gear/, label + " seats the settings gear");
+    assert.match(html, /data-host-log-panel/, label + " carries the settings pane");
+    assert.match(html, /data-festive-toggle/, label + " carries the festive toggle");
+    // The pane's client wiring fills its rows from the shared host-log endpoint.
+    assert.match(html, /\/api\/host-log/, label + " wires the host-log endpoint");
+  }
 });
 
 test("renderLandingShell parked counter expands a cross-repo parked queue in place", () => {
@@ -7073,10 +7093,11 @@ test("renderStatusPage renders the landing live-bar top-right, not the old refre
   // The live-bar replaces the fixed-interval Refresh widget: a dot-only live indicator and
   // an "updated Ns ago" readout — the same shared control the landing renders (#81). The
   // indicator shows no visible "Live" text (its state is an accessible label). The
-  // page-level pause is gone (#210), so the bar carries no pause button.
+  // page-level pause is gone (#210), so the bar carries no pause button; the settings gear
+  // now rides the end of the bar after the readout (#215), so the readout no longer closes it.
   assert.match(
     html,
-    /<div class="live-bar"[^>]*><span class="live-indicator" data-live-state="live" aria-label="Live"><\/span><span class="updated" data-updated>[^<]*<\/span><\/div>/,
+    /<div class="live-bar"[^>]*><span class="live-indicator" data-live-state="live" aria-label="Live"><\/span><span class="updated" data-updated>[^<]*<\/span>/,
   );
   assert.doesNotMatch(html, /id="pause"/);
   // The old interval widget is gone entirely.
@@ -7143,8 +7164,12 @@ test("renderStatusPage updates live off /api/events, soft-refreshing on a ping u
   assert.match(html, /new EventSource\("\/api\/events"\)/);
   // Soft-refresh, not a full reload (#131): a live tick re-fetches this page and swaps only
   // the #live-region, so the issue sheet, its open compose, and scroll survive — worst over
-  // the tailnet, where a full reload blanked the page.
-  assert.doesNotMatch(html, /location\.reload\(\)/);
+  // the tailnet, where a full reload blanked the page. The one deliberate reload on the page
+  // is the settings gear's festive toggle (#193, #215 — server-rendered labels re-render only
+  // on a reload); the live-event soft-refresh path itself never reloads.
+  const softRefreshFn = html.match(/const softRefresh = async \(\) => \{[\s\S]*?\n {2}\};/);
+  assert.ok(softRefreshFn, "the soft-refresh function is present");
+  assert.doesNotMatch(softRefreshFn[0], /location\.reload\(\)/);
   assert.match(html, /id="live-region"/);
   assert.match(html, /fetch\(location\.href/);
   assert.match(html, /DOMParser/);

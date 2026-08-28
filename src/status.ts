@@ -3,6 +3,8 @@ import { spawn } from "node:child_process";
 import type { AddressInfo } from "node:net";
 import type { CarveClosure } from "./dashboard-carve.ts";
 import { shellCarveClosure, shellCarvePreview } from "./dashboard-carve.ts";
+import type { GraftClosure } from "./dashboard-graft.ts";
+import { shellGraftClosure, shellGraftPreview } from "./dashboard-graft.ts";
 import type { DashboardDeps, RouteHandler, SpawnDashboardChild } from "./dashboard-http.ts";
 import { handleApiStatus } from "./dashboard-route-api-status.ts";
 import { handleApiIssue } from "./dashboard-route-api-issue.ts";
@@ -11,6 +13,7 @@ import { handleFeed } from "./dashboard-route-feed.ts";
 import { handleEvents } from "./dashboard-route-events.ts";
 import { handleAnswer } from "./dashboard-route-answer.ts";
 import { handleCarve, handleCarvePreview } from "./dashboard-route-carve.ts";
+import { handleGraft, handleGraftPreview } from "./dashboard-route-graft.ts";
 import { handleResume } from "./dashboard-route-resume.ts";
 import { handleArchiveLog } from "./dashboard-route-archive-log.ts";
 import { handleHostLog } from "./dashboard-route-host-log.ts";
@@ -23,12 +26,13 @@ import { handlePage } from "./dashboard-route-page.ts";
 export * from "./dashboard-model.ts";
 export * from "./dashboard-render.ts";
 export * from "./dashboard-carve.ts";
+export * from "./dashboard-graft.ts";
 export * from "./event-log.ts";
 
 // The dashboard surfaces, tried in order; each owns its own method+path match and
 // returns true once it has handled the request. A `/` request only ever matches
 // the page handler, so ordering never has to disambiguate two live routes.
-const routes: RouteHandler[] = [handleApiStatus, handleApiIssue, handleLanding, handleFeed, handleEvents, handleHostLog, handleCarvePreview, handleAnswer, handleCarve, handleResume, handleArchiveLog, handlePage];
+const routes: RouteHandler[] = [handleApiStatus, handleApiIssue, handleLanding, handleFeed, handleEvents, handleHostLog, handleCarvePreview, handleGraftPreview, handleAnswer, handleCarve, handleGraft, handleResume, handleArchiveLog, handlePage];
 
 /**
  * The gateway's aggregated status site: one port fronting every registered
@@ -49,6 +53,8 @@ export async function serveAllStatus(
     spawn?: (command: string, args: string[], options: { cwd: string; stdio: readonly (string | number)[] }) => unknown;
     carvePreview?: (projectRoot: string, taskId: string) => Promise<string | null>;
     carveClosure?: (projectRoot: string, taskId: string) => Promise<CarveClosure | null>;
+    graftPreview?: (projectRoot: string, taskIds: string[]) => Promise<string | null>;
+    graftClosure?: (projectRoot: string, taskIds: string[]) => Promise<GraftClosure | null>;
   },
 ) {
   const deps: DashboardDeps = {
@@ -56,6 +62,8 @@ export async function serveAllStatus(
     spawn: opts.spawn ?? (spawn as SpawnDashboardChild),
     carvePreview: opts.carvePreview ?? shellCarvePreview,
     carveClosure: opts.carveClosure ?? shellCarveClosure,
+    graftPreview: opts.graftPreview ?? shellGraftPreview,
+    graftClosure: opts.graftClosure ?? shellGraftClosure,
   };
   const server = createServer((req, res) => {
     void (async () => {

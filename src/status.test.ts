@@ -2863,6 +2863,197 @@ test("serveAllStatus POST /carve previews the selected project's closure without
   }
 });
 
+test("serveAllStatus POST /graft on confirm shells graft in the selected project's root", async () => {
+  const configDir = join(tmpdir(), `vetinari-agg-graft-confirm-${Date.now()}`);
+  const alphaDir = join(configDir, "state-alpha");
+  const betaDir = join(configDir, "state-beta");
+  seedState(alphaDir, [
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["101"]], slots: 1 }),
+  ]);
+  seedState(betaDir, [
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["201"]], slots: 1 }),
+  ]);
+  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
+  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+
+  const spawned: { args: string[]; cwd: string }[] = [];
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+    spawn: (_cmd, args, options) => spawned.push({ args, cwd: options.cwd }),
+  });
+  const { port } = server.address() as AddressInfo;
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/graft`, {
+      method: "POST",
+      redirect: "manual",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ ids: "640 655", project: "beta", confirm: "1" }).toString(),
+    });
+    // Redirects back to the selected project's board, like carve/resume/answer.
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get("location"), "/?project=beta");
+    // Shells the variadic `graft <ids…>` against the SELECTED project's own root — so
+    // the shared install loads beta's config and gates, and both ids round-trip.
+    assert.equal(spawned.length, 1);
+    assert.deepEqual(spawned[0].args.slice(-3), ["graft", "640", "655"]);
+    assert.equal(spawned[0].cwd, join(configDir, "beta-root"));
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serveAllStatus GET /graft?preview returns the selected project's structured closure as JSON", async () => {
+  const configDir = join(tmpdir(), `vetinari-agg-graft-json-${Date.now()}`);
+  const alphaDir = join(configDir, "state-alpha");
+  const betaDir = join(configDir, "state-beta");
+  seedState(alphaDir, [
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["101"]], slots: 1 }),
+  ]);
+  seedState(betaDir, [
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["201"]], slots: 1 }),
+  ]);
+  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
+  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+
+  const closures: { projectRoot: string; taskIds: string[] }[] = [];
+  const spawned: unknown[] = [];
+  // The structured closure the confirmation renders: the requested ids, where each
+  // lands, the resulting waves, and any rejection.
+  const structured = {
+    ids: ["640", "655"],
+    placement: [
+      { id: "640", wave: 2 },
+      { id: "655", wave: 2 },
+    ],
+    remaining: [["201"], ["640", "655"]],
+    rejected: [],
+  };
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+    spawn: (...a) => spawned.push(a),
+    graftClosure: (projectRoot, taskIds) => {
+      closures.push({ projectRoot, taskIds });
+      return Promise.resolve(structured);
+    },
+  });
+  const { port } = server.address() as AddressInfo;
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/graft?preview&ids=${encodeURIComponent("640 655")}&project=beta`);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get("content-type") ?? "", /application\/json/);
+    assert.deepEqual(await res.json(), structured);
+    // The closure came from the selected project's install (beta's root), carrying the
+    // full set of ids parsed off the query — not alpha's.
+    assert.deepEqual(closures, [{ projectRoot: join(configDir, "beta-root"), taskIds: ["640", "655"] }]);
+    // A preview computes nothing destructive — no graft is spawned.
+    assert.equal(spawned.length, 0);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serveAllStatus GET /graft?preview validates params and the project", async () => {
+  const configDir = join(tmpdir(), `vetinari-agg-graft-json-guard-${Date.now()}`);
+  const betaDir = join(configDir, "state-beta");
+  seedState(betaDir, [
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["201"]], slots: 1 }),
+  ]);
+  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+    graftClosure: () => Promise.resolve({ ids: ["640"], placement: [{ id: "640", wave: 2 }], remaining: [], rejected: [] }),
+  });
+  const { port } = server.address() as AddressInfo;
+  try {
+    // Missing ids/project → 400.
+    assert.equal((await fetch(`http://127.0.0.1:${port}/graft?preview&project=beta`)).status, 400);
+    // Unknown project → 404.
+    assert.equal(
+      (await fetch(`http://127.0.0.1:${port}/graft?preview&ids=640&project=ghost`)).status,
+      404,
+    );
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serveAllStatus GET /graft?preview 502s when the project emits no closure line", async () => {
+  const configDir = join(tmpdir(), `vetinari-agg-graft-502-${Date.now()}`);
+  const betaDir = join(configDir, "state-beta");
+  seedState(betaDir, [
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["201"]], slots: 1 }),
+  ]);
+  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+    // No campaign running / an install predating the closure → null → 502.
+    graftClosure: () => Promise.resolve(null),
+  });
+  const { port } = server.address() as AddressInfo;
+  try {
+    assert.equal(
+      (await fetch(`http://127.0.0.1:${port}/graft?preview&ids=640&project=beta`)).status,
+      502,
+    );
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serveAllStatus POST /graft previews the selected project's closure without executing", async () => {
+  const configDir = join(tmpdir(), `vetinari-agg-graft-preview-${Date.now()}`);
+  const alphaDir = join(configDir, "state-alpha");
+  const betaDir = join(configDir, "state-beta");
+  seedState(alphaDir, [
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["101"]], slots: 1 }),
+  ]);
+  seedState(betaDir, [
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["201"]], slots: 1 }),
+  ]);
+  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
+  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+
+  const previews: { projectRoot: string; taskIds: string[] }[] = [];
+  const spawned: unknown[] = [];
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+    spawn: (...a) => spawned.push(a),
+    graftPreview: (projectRoot, taskIds) => {
+      previews.push({ projectRoot, taskIds });
+      return Promise.resolve(`graft #640, #655 → #640 in wave 2, #655 in wave 2\nresulting campaign: "201" "640 655"`);
+    },
+  });
+  const { port } = server.address() as AddressInfo;
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/graft`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ ids: "640 655", project: "beta" }).toString(),
+    });
+    assert.equal(res.status, 200);
+    const html = await res.text();
+    // The preview came from the selected project's install (beta's root), carrying the
+    // full set of ids.
+    assert.deepEqual(previews, [{ projectRoot: join(configDir, "beta-root"), taskIds: ["640", "655"] }]);
+    // It shows the shelled placement and a confirm affordance carrying the project + ids.
+    assert.match(html, /#655/);
+    assert.match(html, /<form method="post" action="\/graft"[\s\S]*?name="confirm"/);
+    assert.match(html, /name="project" value="beta"/);
+    assert.match(html, /name="ids" value="640 655"/);
+    // Nothing has been grafted yet — preview executes nothing.
+    assert.equal(spawned.length, 0);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
 test("serveAllStatus flags the selected project's carvable chips with its project", async () => {
   const configDir = join(tmpdir(), `vetinari-agg-carve-control-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");

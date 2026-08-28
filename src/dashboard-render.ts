@@ -622,6 +622,43 @@ export const renderAggregatedCarvePreview = (project: string, target: string, pr
 </html>`;
 
 /**
+ * The aggregated site's graft preview — the additive mirror of
+ * `renderAggregatedCarvePreview`. It is a dumb router (ADR 0002) with no project's
+ * `blockedBy` resolver, so it does not compute the placement itself — it shows the
+ * placement the selected project's own `graft <ids…> --dry-run` printed, behind a
+ * confirm form. `graft` is variadic, so the hidden field carries the whole set of
+ * ids (space-joined, matching the CLI); confirming shells `graft <ids…>` in that
+ * project's root. Serves as the no-JS graft fallback.
+ */
+export const renderAggregatedGraftPreview = (project: string, ids: string[], previewText: string) => `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>${escapeHtml(project)} — graft ${escapeHtml(ids.map((i) => `#${i}`).join(", "))}</title>
+<style>
+  body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 2rem; background: #090c10; color: #e6edf3; }
+  h1 { letter-spacing: -0.035em; }
+  .card { background: #0b0e12; border: 1px solid #232b35; border-left: 3px solid #3fb950; border-radius: 12px; padding: 1rem 1.25rem; margin: 1rem 0; }
+  pre { white-space: pre-wrap; margin: 0; }
+  .actions { display: flex; gap: .75rem; align-items: center; }
+  form { margin: 0; }
+  button { padding: .5rem .9rem; border: 0; border-radius: 9px; cursor: pointer; font-weight: 700; }
+  .confirm button { background: #3fb950; color: #05230f; }
+  a.cancel { color: #8b98a5; text-decoration: none; padding: .5rem .9rem; }
+</style>
+</head>
+<body>
+<h1>Graft ${escapeHtml(ids.map((i) => `#${i}`).join(", "))} onto ${escapeHtml(project)}?</h1>
+<section class="card"><pre>${escapeHtml(previewText)}</pre></section>
+<div class="actions">
+<form method="post" action="/graft" class="confirm"><input type="hidden" name="ids" value="${escapeHtml(ids.join(" "))}" /><input type="hidden" name="project" value="${escapeHtml(project)}" /><input type="hidden" name="confirm" value="1" /><button type="submit">🌱 Confirm graft</button></form>
+<a class="cancel" href="/?project=${encodeURIComponent(project)}">Cancel</a>
+</div>
+</body>
+</html>`;
+
+/**
  * The issue-detail sheet's markup — one definition rendered by both the campaign
  * page and the all-repos landing (previously hand-synced copies, #76). `carve`
  * includes the in-sheet carve panel: always on the landing (every parked row is

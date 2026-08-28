@@ -39,6 +39,7 @@ import {
   formatStatusText,
   highlightJsonLine,
   issueDetailSheetMarkup,
+  isNotableHostEvent,
   lastEventText,
   listArchivedRuns,
   ownerRepoFromRemote,
@@ -6277,6 +6278,21 @@ test("cappedRawRows filters before the cap and lets expandedCount reveal more", 
   const expanded = cappedRawRows(lines, "", 500, 300);
   assert.equal(expanded.rows.length, 800, "cap + expandedCount rows render");
   assert.equal(expanded.hidden, 400);
+});
+
+test("isNotableHostEvent flags a fail/error kind or a row carrying error/ok:false, and passes routine rows", () => {
+  // A kind matching /fail|error/i is notable — an SSE watch failure, a registry read error.
+  assert.equal(isNotableHostEvent({ ts: "t", event: "dashboard-events-watch-failed" }), true);
+  assert.equal(isNotableHostEvent({ ts: "t", event: "registry-read-error" }), true);
+  // Case-insensitive on the kind.
+  assert.equal(isNotableHostEvent({ ts: "t", event: "TelegramSendFailure" }), true);
+  // A row carrying an `error` field is notable even when its kind reads routine.
+  assert.equal(isNotableHostEvent({ ts: "t", event: "telegram-send", error: "429 Too Many Requests" }), true);
+  // An `ok: false` field is notable; `ok: true` is not, on its own.
+  assert.equal(isNotableHostEvent({ ts: "t", event: "gateway-routed", ok: false }), true);
+  assert.equal(isNotableHostEvent({ ts: "t", event: "gateway-routed", ok: true }), false);
+  // A routine host event with no error signal is not notable.
+  assert.equal(isNotableHostEvent({ ts: "t", event: "gateway-routed", project: "acme" }), false);
 });
 
 test("parseRunTimestamp reverses an archive run token to an ISO timestamp, tolerating older tokens", () => {

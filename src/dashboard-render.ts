@@ -206,6 +206,24 @@ const renderWaves = (status: CampaignStatus, carve: boolean, interactive: boolea
 };
 
 /**
+ * Is a host-log row one an operator should be alerted to (#180)? A pure, render-time
+ * predicate over a parsed `host.jsonl` row — no new severity field on host emitters
+ * (consistent with #169's "no severity" decision): a row is notable when its kind
+ * matches `/fail|error/i`, or it carries a non-null `error` field, or an `ok: false`
+ * field. That catches Telegram send failures, SSE watch failures, and registry read
+ * errors without any emitter change. Both the gear's attention badge and any future
+ * host-log filtering key off this one predicate; it is unit-tested here and shipped
+ * verbatim into the client via `.toString()`, so the badge the browser computes is the
+ * same rule the node test exercises.
+ */
+export function isNotableHostEvent(event: { event?: string; error?: unknown; ok?: unknown }): boolean {
+  if (typeof event.event === "string" && /fail|error/i.test(event.event)) return true;
+  if (event.error !== undefined && event.error !== null) return true;
+  if (event.ok === false) return true;
+  return false;
+}
+
+/**
  * Colour one JSON line's tokens for the raw-log view — keys, string values, numbers
  * and the literals `true`/`false`/`null` each get their own span class
  * (`jkey`/`jstr`/`jnum`/`jbool`/`jnull`). A string immediately followed by a colon is

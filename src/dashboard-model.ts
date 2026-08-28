@@ -189,6 +189,19 @@ export function waveLabel(index: number, leadTitle: string | undefined, extra: n
   return `${base} — ${leadTitle}${extra > 0 ? ` +${extra}` : ""}`;
 }
 
+/**
+ * The one-line narration's wave label — `Wave N — t1, t2, …`, naming *every* member
+ * issue (issue #179), where the card's `waveLabel` collapses the rest to `+M`. The
+ * feed's line length is the accepted tradeoff for a complete description of a
+ * file-disjoint, multi-issue wave. Callers pass the already-resolved title list (an
+ * unresolved id shows as its `#id`); an empty list — a wave with no member ids — degrades
+ * to the bare `Wave N`, preserving the old empty-wave wording. `index` is zero-based.
+ */
+export function waveMembersLabel(index: number, titles: string[]): string {
+  const base = `Wave ${index + 1}`;
+  return titles.length ? `${base} — ${titles.join(", ")}` : base;
+}
+
 /** The `Campaign “X” — ` prefix a named campaign/wave event leads with, so an unnamed run
  * (or an old log row) degrades to the nameless wording rather than rendering `Campaign “” —`. */
 const campaignPrefix = (name?: string) => (name ? `Campaign “${name}” — ` : "");
@@ -206,16 +219,16 @@ export function describeEvent(e: OrchestratorEvent): string {
       return e.name ? `Campaign “${e.name}” started` : "Campaign started";
     case "campaign-batch": {
       const tasks = e.tasks ?? [];
-      const lead = tasks.length ? e.titles?.[normalizeIssue(String(tasks[0]))] : undefined;
-      return `${campaignPrefix(e.name)}${waveLabel(e.index ?? 0, lead, tasks.length - 1)} started`;
+      const titles = tasks.map((id) => e.titles?.[normalizeIssue(String(id))] ?? hash(id));
+      return `${campaignPrefix(e.name)}${waveMembersLabel(e.index ?? 0, titles)} started`;
     }
     case "campaign-batch-done": {
       // The event holds no plan-ordered task list, so the wave's membership is reconstructed
-      // from the outcomes it does carry (merged, then quarantined, then held) — the same "+M"
-      // the campaign-batch line showed, with the lead taken from the first of them.
+      // from the outcomes it does carry (merged, then quarantined, then held) and each member
+      // is named by title (an unresolved id falls back to its `#id`), listing them all.
       const members = [...(e.merged ?? []), ...(e.quarantined ?? []), ...(e.held ?? [])];
-      const lead = members.length ? e.titles?.[normalizeIssue(String(members[0]))] : undefined;
-      const label = waveLabel(e.index ?? 0, lead, members.length - 1);
+      const titles = members.map((id) => e.titles?.[normalizeIssue(String(id))] ?? hash(id));
+      const label = waveMembersLabel(e.index ?? 0, titles);
       const hashes = (e.merged ?? []).length ? (e.merged as unknown[]).map(hash).join(", ") : "nothing";
       return `${campaignPrefix(e.name)}${label} merged ${hashes}`;
     }

@@ -4548,6 +4548,46 @@ test("wave labels read from tmp-log issue titles, resolved through buildStatusWi
   );
 });
 
+test("renderStatusPage names waves festively when the toggle is on (#193)", () => {
+  const dir = join(tmpdir(), `vetinari-festive-render-${Date.now()}`);
+  seedState(dir, [
+    event("campaign-start", {
+      ts: "2025-01-01T00:00:00.000Z",
+      batches: [["101", "102"], ["201"]],
+      titles: { "101": "config resolution", "102": "retry policy", "201": "cache eviction" },
+      slots: 1,
+      festiveOffset: 11, // pool[11] = Granny Weatherwax, pool[12] = Nanny Ogg
+    }),
+    event("campaign-batch", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["101", "102"] }),
+    event("campaign-batch-done", { ts: "2025-01-01T00:02:00.000Z", index: 0, merged: ["101", "102"], held: [], clearedParked: [] }),
+    event("campaign-batch", { ts: "2025-01-01T00:03:00.000Z", index: 1, tasks: ["201"] }),
+  ]);
+  const status = buildStatus(cfgFor(dir));
+
+  // Off (default) — labels are exactly today's `Wave N …`, no festive name.
+  const plain = renderStatusPage(status);
+  assert.match(plain, /<h2 class="wave-label">Wave 2 — cache eviction<\/h2>/);
+  assert.match(plain, /Wave 1 <span class="completed-wave-tally">/);
+  assert.doesNotMatch(plain, /Granny Weatherwax/);
+
+  // On — cards and the closed-wave chip carry `index · name`; the closed card drops the
+  // lead-title collapse (its member rows carry the titles).
+  const festive = renderStatusPage(status, { festive: true });
+  assert.match(festive, /<h2 class="wave-label">Wave 2 · Nanny Ogg<\/h2>/);
+  assert.match(festive, /<h2 class="wave-label">Wave 1 · Granny Weatherwax<\/h2>/);
+  assert.match(festive, /✓<\/span> Wave 1 · Granny Weatherwax <span class="completed-wave-tally">/);
+});
+
+test("renderStatusPage renders a nameless Wave N when festive is on but the run reserved no offset (#193)", () => {
+  const dir = join(tmpdir(), `vetinari-festive-nooffset-${Date.now()}`);
+  seedState(dir, [
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["201"]], slots: 1 }),
+    event("campaign-batch", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["201"] }),
+  ]);
+  const festive = renderStatusPage(buildStatus(cfgFor(dir)), { festive: true });
+  assert.match(festive, /<h2 class="wave-label">Wave 1<\/h2>/);
+});
+
 test("wave labels and chip hovers render from the log's titles, with no fetchTask", () => {
   const dir = join(tmpdir(), `vetinari-render-log-titles-${Date.now()}`);
   seedState(dir, [

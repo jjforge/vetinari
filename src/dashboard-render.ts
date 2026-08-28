@@ -10,6 +10,7 @@ import {
   waveLabel,
   type WaveStatus,
 } from "./dashboard-model.ts";
+import { festiveWaveName } from "./festive-names.ts";
 import {
   ARCHIVE_LIST_SCRIPT,
   DASHBOARD_PALETTE_CSS,
@@ -142,11 +143,18 @@ const renderWaveMembers = (wave: StatusWave, project: string, carve: boolean, in
  * only once the lead issue's title has resolved, so an unresolved wave keeps the
  * plain index.
  */
-const renderWaveLabel = (wave: StatusWave) => {
+const renderWaveLabel = (wave: StatusWave, festiveName?: string) => {
   const lead = wave.issues[0];
   // The title is escaped before it reaches the shared `waveLabel`, whose output lands in HTML.
-  return waveLabel(wave.index, lead?.name ? escapeHtml(lead.name) : undefined, wave.issues.length - 1);
+  // A resolved festive name (the gear toggle on) switches the label to `index · name`.
+  return waveLabel(wave.index, lead?.name ? escapeHtml(lead.name) : undefined, wave.issues.length - 1, festiveName ? { name: festiveName, surface: "card" } : undefined);
 };
+
+/** The festive name for a wave when the gear toggle is on and the run reserved an offset
+ * block (#193) — `festiveWaveName(offset, wave.index)`; undefined when festive is off or
+ * the run predates the feature (no offset), so the label degrades to the plain `Wave N`. */
+const festiveNameFor = (status: CampaignStatus, wave: StatusWave, festive: boolean): string | undefined =>
+  festive && status.festiveOffset !== undefined ? festiveWaveName(status.festiveOffset, wave.index) : undefined;
 
 /** How many issues the campaign spans, across every wave — the count in the
  * `<name> · N issues · M waves` meta line. */
@@ -164,14 +172,14 @@ const waveMerged = (wave: StatusWave) => wave.issues.filter((issue) => issue.sta
  * closed one the green, and an unstarted one a neutral edge. `extraAttrs` lets a
  * closed card carry the id + `hidden` its toggle chip drives.
  */
-const renderWaveCard = (wave: StatusWave, project: string, carve: boolean, interactive: boolean, extraAttrs = "", run?: string) => {
+const renderWaveCard = (wave: StatusWave, project: string, carve: boolean, interactive: boolean, extraAttrs = "", run?: string, festiveName?: string) => {
   // A carved tally folded into the head's meta group beside the merged count, so a wave
   // a carve pruned reads at a glance — the carved rows are a display overlay (ADR 0007),
   // and this counts them. The label sits in its own element so a long one wraps within
   // itself without shoving the meta group (tally · state · carved) onto its own line.
   const carved = wave.issues.filter((issue) => issue.status === "carved").length;
   const tally = carved ? `<span class="wave-carved">${carved} carved</span>` : "";
-  return `<section class="wave ${wave.status}"${extraAttrs}><div class="wave-head"><h2 class="wave-label">${renderWaveLabel(wave)}</h2><div class="wave-meta"><span class="wave-tally">${waveMerged(wave)}/${wave.issues.length}</span><span class="wave-status ${wave.status}">${wave.status}</span>${tally}</div></div>${renderWaveMembers(wave, project, carve, interactive, run)}</section>`;
+  return `<section class="wave ${wave.status}"${extraAttrs}><div class="wave-head"><h2 class="wave-label">${renderWaveLabel(wave, festiveName)}</h2><div class="wave-meta"><span class="wave-tally">${waveMerged(wave)}/${wave.issues.length}</span><span class="wave-status ${wave.status}">${wave.status}</span>${tally}</div></div>${renderWaveMembers(wave, project, carve, interactive, run)}</section>`;
 };
 
 /** A closed wave's compact toggle chip — the affordance that reveals its full card in
@@ -179,8 +187,8 @@ const renderWaveCard = (wave: StatusWave, project: string, carve: boolean, inter
  * operable and expose its state; the chevron and green accent are CSS keyed off
  * `aria-expanded`. Only the compact "Wave N" + merged tally rides the chip; the lead
  * title and issue list live on the card it opens. */
-const renderClosedWaveChip = (wave: StatusWave) =>
-  `<button type="button" class="completed-wave-chip" aria-expanded="false" aria-controls="closed-wave-${wave.index}" data-wave="${wave.index}"><span class="check" aria-hidden="true">✓</span> Wave ${wave.index + 1} <span class="completed-wave-tally">${waveMerged(wave)}/${wave.issues.length}</span></button>`;
+const renderClosedWaveChip = (wave: StatusWave, festiveName?: string) =>
+  `<button type="button" class="completed-wave-chip" aria-expanded="false" aria-controls="closed-wave-${wave.index}" data-wave="${wave.index}"><span class="check" aria-hidden="true">✓</span> ${waveLabel(wave.index, undefined, 0, festiveName ? { name: festiveName, surface: "card" } : undefined)} <span class="completed-wave-tally">${waveMerged(wave)}/${wave.issues.length}</span></button>`;
 
 /** The wave/issue body a status renders. On the live run (`collapsible`), closed waves
  * show as a compact toggle row of chips directly above the wave grid; each chip reveals
@@ -190,19 +198,19 @@ const renderClosedWaveChip = (wave: StatusWave) =>
  * no live toggle script (and would collide on the `closed-wave-N` ids), so it renders
  * every wave as a full card, expanded. `interactive` (the live run) makes chips open the
  * detail sheet and, under carve, route a carve; the archived run passes it `false`. */
-const renderWaves = (status: CampaignStatus, carve: boolean, interactive: boolean, collapsible = true, run?: string) => {
+const renderWaves = (status: CampaignStatus, carve: boolean, interactive: boolean, collapsible = true, run?: string, festive = false) => {
   if (!status.waves.length) return "<p>No active campaign or queue found.</p>";
-  if (!collapsible) return `<div class="waves-grid">${status.waves.map((wave) => renderWaveCard(wave, status.project, carve, interactive, "", run)).join("")}</div>`;
+  if (!collapsible) return `<div class="waves-grid">${status.waves.map((wave) => renderWaveCard(wave, status.project, carve, interactive, "", run, festiveNameFor(status, wave, festive))).join("")}</div>`;
   const closedWaves = status.waves.filter((wave) => wave.status === "closed");
   const openWaves = status.waves.filter((wave) => wave.status !== "closed");
   const toggleRow = closedWaves.length
-    ? `<div class="completed-waves"><div class="completed-wave-bar" data-project="${escapeHtml(status.project)}">${closedWaves.map(renderClosedWaveChip).join("")}</div></div>`
+    ? `<div class="completed-waves"><div class="completed-wave-bar" data-project="${escapeHtml(status.project)}">${closedWaves.map((wave) => renderClosedWaveChip(wave, festiveNameFor(status, wave, festive))).join("")}</div></div>`
     : "";
   // The grid holds every closed card (hidden until its chip toggles it open) before
   // the open ones, in wave order; it renders whenever there is any wave to show.
   const cards = [
-    ...closedWaves.map((wave) => renderWaveCard(wave, status.project, carve, interactive, ` id="closed-wave-${wave.index}" hidden`)),
-    ...openWaves.map((wave) => renderWaveCard(wave, status.project, carve, interactive)),
+    ...closedWaves.map((wave) => renderWaveCard(wave, status.project, carve, interactive, ` id="closed-wave-${wave.index}" hidden`, undefined, festiveNameFor(status, wave, festive))),
+    ...openWaves.map((wave) => renderWaveCard(wave, status.project, carve, interactive, "", undefined, festiveNameFor(status, wave, festive))),
   ];
   return `${toggleRow}${cards.length ? `<div class="waves-grid">${cards.join("")}</div>` : ""}`;
 };
@@ -441,7 +449,7 @@ const ARCHIVE_CAP = 20;
  * `open`/`mode` mark the row a `?run=` deep-link selected; `hidden` puts it past the
  * cap behind "show older".
  */
-const renderArchiveRow = (project: string, run: ArchivedRunView, open: boolean, mode: "campaign" | "raw", hidden: boolean) => {
+const renderArchiveRow = (project: string, run: ArchivedRunView, open: boolean, mode: "campaign" | "raw", hidden: boolean, festive = false) => {
   const label = run.name ?? run.run;
   const when = run.startedAt ? formatRunWhen(run.startedAt) : run.run;
   const bodyId = `archive-body-${run.run}`;
@@ -452,7 +460,7 @@ const renderArchiveRow = (project: string, run: ArchivedRunView, open: boolean, 
   // Interactive (chips open the shared sheet) but carve-off, and carrying the run
   // token so the sheet reads this archived run's own log — reuse is the point, no
   // second campaign renderer.
-  const campaignPane = `<div class="archive-pane archive-campaign" data-pane="campaign"${rawActive ? " hidden" : ""}>${renderWaves(run.status, false, true, false, run.run)}</div>`;
+  const campaignPane = `<div class="archive-pane archive-campaign" data-pane="campaign"${rawActive ? " hidden" : ""}>${renderWaves(run.status, false, true, false, run.run, festive)}</div>`;
   const rawPane =
     `<div class="archive-pane archive-raw" data-pane="raw" data-project="${escapeHtml(project)}" data-run="${escapeHtml(run.run)}"${rawActive ? "" : " hidden"}>` +
     `<div class="archive-raw-header">orchestrator-${escapeHtml(run.run)}.jsonl</div>` +
@@ -482,9 +490,9 @@ const renderArchiveRow = (project: string, run: ArchivedRunView, open: boolean, 
  * reveals the rest (which render hidden in place). Empty when the project has no
  * archived runs. `openRun`/`openMode` open one row on load from a `?run=` deep-link.
  */
-const renderArchivedRuns = (project: string, runs: ArchivedRunView[], openRun?: string, openMode?: "campaign" | "raw") => {
+const renderArchivedRuns = (project: string, runs: ArchivedRunView[], openRun?: string, openMode?: "campaign" | "raw", festive = false) => {
   if (!runs.length) return "";
-  const rows = runs.map((run, i) => renderArchiveRow(project, run, run.run === openRun, openMode ?? "campaign", hiddenPastCap(i, ARCHIVE_CAP)));
+  const rows = runs.map((run, i) => renderArchiveRow(project, run, run.run === openRun, openMode ?? "campaign", hiddenPastCap(i, ARCHIVE_CAP), festive));
   const olderCount = runs.length - ARCHIVE_CAP;
   const older = olderCount > 0 ? `<li class="archive-older-row"><button type="button" class="archive-show-older">Show ${olderCount} older run${olderCount === 1 ? "" : "s"}</button></li>` : "";
   // The show-older control sits between the visible rows and the hidden older ones.
@@ -525,6 +533,10 @@ export interface StatusPageOptions {
   archivedRun?: string;
   /** Which mode the opened row starts in — `campaign` (the default) or `raw`. */
   archivedMode?: "campaign" | "raw";
+  /** "Festive Wave Names" — when on (the gear toggle, read server-side from the
+   * `festiveWaveNames` cookie), each wave is labelled `index · name` after a Discworld
+   * character instead of the plain `Wave N` (#193). Default off. */
+  festive?: boolean;
 }
 
 /**
@@ -1323,9 +1335,9 @@ ${
     ? `<p class="campaign-meta">${status.name ? `<span class="campaign-name">${escapeHtml(status.name)}</span> · ` : ""}${campaignIssueCount(status)} issue${campaignIssueCount(status) === 1 ? "" : "s"} · ${status.waves.length} wave${status.waves.length === 1 ? "" : "s"}</p>`
     : ""
 }
-${renderWaves(status, Boolean(opts.carve), true)}</div>
+${renderWaves(status, Boolean(opts.carve), true, true, undefined, Boolean(opts.festive))}</div>
 ${renderLiveTail(status)}
-${opts.archivedRuns?.length ? renderArchivedRuns(opts.selected ?? status.project, opts.archivedRuns, opts.archivedRun, opts.archivedMode) : ""}
+${opts.archivedRuns?.length ? renderArchivedRuns(opts.selected ?? status.project, opts.archivedRuns, opts.archivedRun, opts.archivedMode, Boolean(opts.festive)) : ""}
 ${issueDetailSheetMarkup(Boolean(opts.carve))}${
   // No-JS fallback: a plain server-side form per carvable issue that reaches
   // POST /carve → the preview page → confirm without any JavaScript. The inline

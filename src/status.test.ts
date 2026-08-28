@@ -1753,13 +1753,13 @@ test("renderHostLog renders a gear entry point, a hidden badge, and a hidden hos
   assert.match(html, /Festive [Ww]ave [Nn]ames/);
 });
 
-test("renderHostLog carries the Humanized ⇄ Raw toggle (humanized pressed) and a Download JSON control (#203)", () => {
+test("renderHostLog is humanized-only: no Humanized/Raw toggle, keeps a Download JSON control (#221)", () => {
   const html = renderHostLog();
-  // The shared log-view toggle: two buttons, humanized the pressed default, raw the alternate.
-  assert.match(html, /data-host-log-mode/);
-  assert.match(html, /data-mode="humanized" aria-pressed="true"/);
-  assert.match(html, /data-mode="raw" aria-pressed="false"/);
-  // Download JSON always emits the raw NDJSON, mirroring the live tail's ⤓ .lv-ico icon.
+  // #221: the host-log pane always renders humanized — the Humanized/Raw toggle is gone entirely.
+  assert.doesNotMatch(html, /data-host-log-mode/);
+  assert.doesNotMatch(html, />Humanized</);
+  assert.doesNotMatch(html, />Raw</);
+  // Download JSON stays and still emits the raw NDJSON, mirroring the live tail's ⤓ .lv-ico icon.
   assert.match(html, /class="lv-ico" data-host-log-save[^>]*aria-label="Download JSON"[^>]*>⤓</);
 });
 
@@ -1924,6 +1924,17 @@ test("renderLandingShell's feed renders humanized rows in the shared .lv-row com
   assert.match(html, /\.lv-dot\.failure \{ background:/);
 });
 
+test("the shared .lv-row paints the 2b least→most emphasis ramp: time muted · actor mono+subdued · message prominent (#221)", () => {
+  const html = renderLandingShell(["alpha"]);
+  // Least important — the time reads in the most muted grey (--color-dim).
+  assert.match(html, /\.lv-t \{[^}]*color: var\(--color-dim\)/);
+  // Mid — the actor is distinct but subdued: a mono handle at mid brightness (--color-text-light-2).
+  assert.match(html, /\.lv-lead \{[^}]*font-family: ui-monospace/);
+  assert.match(html, /\.lv-lead \{[^}]*color: var\(--color-text-light-2\)/);
+  // Most important — the message itself is the brightest, most readable element (--color-text).
+  assert.match(html, /\.lv-msg \{[^}]*color: var\(--color-text\)/);
+});
+
 test("the shared .lv-row styles the multiline-collapse chevron and overflow block (#217)", () => {
   const html = renderLandingShell(["alpha"]);
   // The bare chevron is a dim, clickable affordance that brightens on hover (palette tokens, §1).
@@ -1967,24 +1978,13 @@ test("renderLandingShell's feed adopts the live-tail pane chrome via shared CSS 
   assert.doesNotMatch(html, /class="feed"[^>]*>\s*<h2/);
 });
 
-test("renderLandingShell's feed gains a Humanized ⇄ Raw toggle, humanized pressed by default (#203)", () => {
+test("renderLandingShell's feed is humanized-only: no Humanized/Raw toggle, no raw tokeniser (#221)", () => {
   const html = renderLandingShell(["alpha"]);
-  // A segmented toggle in the feed control strip, reusing the shared log-view .tail-mode pill —
-  // humanized the pressed default (the feed's narrated rows), Raw the highlighted-NDJSON view.
-  assert.match(html, /<span class="tail-mode" data-feed-mode/);
-  assert.match(html, /data-mode="humanized" aria-pressed="true">Humanized</);
-  assert.match(html, /data-mode="raw" aria-pressed="false">Raw</);
-});
-
-test("renderLandingShell's feed Raw mode highlights the underlying NDJSON, remembered per view (#203)", () => {
-  const html = renderLandingShell(["alpha"]);
-  // The raw tokeniser is single-sourced from dashboard-render, shipped via .toString() (the same
-  // one the live tail and host-log ship), so the node test exercises the very function shipped.
-  assert.match(html, /function highlightJsonLine/);
-  // Raw mode highlights the row's underlying event NDJSON (e.raw); humanized stays the narrated row.
-  assert.match(html, /highlightJsonLine\(e\.raw\)/);
-  // The chosen mode sticks per view in localStorage, exactly as the tail and host-log remember it.
-  assert.match(html, /vetinari:feed-mode/);
+  // #221: the feed always renders its narrated rows — the Humanized/Raw toggle is gone entirely,
+  // and with it the per-view mode memory and the raw NDJSON tokeniser it used.
+  assert.doesNotMatch(html, /data-feed-mode/);
+  assert.doesNotMatch(html, /vetinari:feed-mode/);
+  assert.doesNotMatch(html, /highlightJsonLine\(e\.raw\)/);
 });
 
 test("renderLandingShell's feed Download JSON emits the filtered underlying NDJSON (#203)", () => {
@@ -6062,7 +6062,6 @@ test("HOST_LOG_SCRIPT wires the host-log pane: gear show/hide, badge off isNotab
   assert.ok(html.includes(HOST_LOG_STYLES), "landing includes HOST_LOG_STYLES");
   // Ships the shared, tested pure helpers via .toString(), not a hand-mirrored copy.
   assert.match(HOST_LOG_SCRIPT, /function isNotableHostEvent/);
-  assert.match(HOST_LOG_SCRIPT, /function highlightJsonLine/);
   assert.match(HOST_LOG_SCRIPT, /function cappedRawRows/);
   // The gear is the show/hide of an otherwise-hidden pane.
   assert.match(HOST_LOG_SCRIPT, /gear\.addEventListener\("click", \(\) => \(panel\.hidden \? openPanel\(\) : closePanel\(\)\)\);/);
@@ -6071,9 +6070,8 @@ test("HOST_LOG_SCRIPT wires the host-log pane: gear show/hide, badge off isNotab
   assert.match(HOST_LOG_SCRIPT, /if \(isNotableHostEvent\(ev\)/);
   assert.match(HOST_LOG_SCRIPT, /badge\.hidden = !\(n && n > lastSeen\)/);
   assert.match(HOST_LOG_SCRIPT, /lastSeen = newestNotableTs\(\) \|\| lastSeen/);
-  // Renders newest-first through the shared cap/highlight and narrows by a substring filter.
+  // Renders newest-first through the shared cap and narrows by a substring filter.
   assert.match(HOST_LOG_SCRIPT, /cappedRawRows\(lines, needle, HOST_CAP, expanded\)/);
-  assert.match(HOST_LOG_SCRIPT, /code\.innerHTML = highlightJsonLine\(line\)/);
   assert.match(HOST_LOG_SCRIPT, /filterEl\.addEventListener\("input"/);
   // Live: the initial window is the no-daemon fetch; new rows arrive on the named host frame.
   assert.match(HOST_LOG_SCRIPT, /fetch\("\/api\/host-log"\)/);
@@ -6082,21 +6080,19 @@ test("HOST_LOG_SCRIPT wires the host-log pane: gear show/hide, badge off isNotab
   assert.match(HOST_LOG_SCRIPT, /No host log yet/);
 });
 
-test("HOST_LOG_SCRIPT renders humanized by default with a Raw toggle and a Download JSON control (#203)", () => {
-  // Ships the host humanizer via .toString() (not a hand-mirrored copy), like the raw helpers.
+test("HOST_LOG_SCRIPT renders humanized-only rows, keeping the raw NDJSON Download JSON control (#221)", () => {
+  // Ships the host humanizer via .toString() (not a hand-mirrored copy).
   assert.match(HOST_LOG_SCRIPT, /function humanizeHostLine/);
-  // Humanized is the default mode, remembered per view in localStorage so a Raw preference sticks.
-  assert.match(HOST_LOG_SCRIPT, /let mode = "humanized"/);
-  assert.match(HOST_LOG_SCRIPT, /localStorage/);
-  // The default (humanized) branch renders the shared .lv-row component from humanizeHostLine's parts.
+  // Every row renders through the shared .lv-row component from humanizeHostLine's parts — there
+  // is no raw display mode and no per-view mode memory.
   assert.match(HOST_LOG_SCRIPT, /humanizedRow\(humanizeHostLine\(line\), document\)/);
   assert.match(HOST_LOG_SCRIPT, /function humanizedRow/);
   // The multiline-collapse split (#217) ships alongside, since humanizedRow calls it client-side.
   assert.match(HOST_LOG_SCRIPT, /function splitOverflow/);
-  // The Humanized ⇄ Raw toggle flips the body format, persists the choice, and redraws.
-  assert.match(HOST_LOG_SCRIPT, /data-host-log-mode/);
-  assert.match(HOST_LOG_SCRIPT, /aria-pressed/);
-  // Download JSON emits the currently-filtered raw NDJSON as a .jsonl blob.
+  // #221: no Humanized/Raw toggle and no remembered mode.
+  assert.doesNotMatch(HOST_LOG_SCRIPT, /data-host-log-mode/);
+  assert.doesNotMatch(HOST_LOG_SCRIPT, /host-log-mode/);
+  // Download JSON stays — the currently-filtered raw NDJSON as a .jsonl blob.
   assert.match(HOST_LOG_SCRIPT, /data-host-log-save/);
   assert.match(HOST_LOG_SCRIPT, /new Blob\(/);
   assert.match(HOST_LOG_SCRIPT, /\.jsonl/);

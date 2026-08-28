@@ -11,7 +11,8 @@
  * raw NDJSON for the toggle and the download. Running server-side lets the run-level kinds
  * narrate straight through the feed's `describeEvent` (`dashboard-model.ts`), so the two
  * surfaces say the same words with no duplicated vocabulary. A kind the registry does not
- * know renders a one-line raw dump, never a blank row.
+ * know renders a readable generic summary (the kind + its salient fields in prose), never a
+ * raw JSON dump and never a blank row (#221).
  */
 import { describeEvent } from "./dashboard-model.ts";
 import type { OrchestratorEvent } from "./event-log.ts";
@@ -109,9 +110,10 @@ const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit", "Updat
  * Humanize one raw JSONL log line into its structured parts (`time`, actor-leads-message,
  * dim `verb`, `code`/`strong` message `spans`, state dot). The registry, keyed on the parsed
  * row's `event` — the run-level kinds narrate through `describeEvent` as one plain span so
- * the wording can't drift from the feed. An unparseable line, a row with no string `event`,
- * or an unknown kind falls back to a one-line raw dump — the trimmed source text as a plain
- * span, a neutral dot — never a blank row.
+ * the wording can't drift from the feed. A row with no string `event` or an unknown kind
+ * renders a readable generic summary (the kind + its salient scalar fields in prose), never a
+ * raw JSON dump (#221); only a genuinely unparseable line dumps its trimmed source text. Both
+ * carry a neutral dot, and neither is ever a blank row.
  */
 export function humanizeLogLine(raw: string): HumanizedRow {
   let e: Record<string, unknown> | null = null;
@@ -129,8 +131,23 @@ export function humanizeLogLine(raw: string): HumanizedRow {
   const strong = (text: string): MessageSpan => ({ text, kind: "strong" });
   // A run-level kind narrated by `describeEvent`: one plain span, no actor, no verb.
   const narrated = (dot: LogDotState): HumanizedRow => ({ time, actor: "", verb: "", spans: [plain(describeEvent(e as unknown as OrchestratorEvent))], dot });
-  const fallback = (): HumanizedRow => ({ time, actor: e ? actorOf(e.taskId) : "", verb: "", spans: [plain(raw.trim())], dot: "neutral" });
-  if (!e || typeof e.event !== "string") return fallback();
+  // A generic-but-readable summary for a kind the registry does not narrate (#221): the event
+  // kind (hyphens/underscores → spaces) as the strong key term, then each salient scalar field as
+  // `· key value`. Object/array fields are dropped so the line stays prose, never a raw JSON dump.
+  const genericSummary = (dot: LogDotState): HumanizedRow => {
+    const label = (typeof e!.event === "string" ? e!.event : "").replace(/[-_]/g, " ");
+    const spans: MessageSpan[] = label ? [strong(label)] : [];
+    for (const [k, v] of Object.entries(e!)) {
+      if (k === "ts" || k === "event" || k === "taskId") continue;
+      if (v === null || v === undefined || typeof v === "object") continue;
+      spans.push(plain((spans.length ? " · " : "") + k + " "), code(String(v)));
+    }
+    if (!spans.length) spans.push(plain(raw.trim()));
+    return { time, actor: actorOf(e!.taskId), verb: "", spans, dot };
+  };
+  // An unparseable line is not a JSON object to prose-ify — dump its raw text, never a blank row.
+  if (!e) return { time, actor: "", verb: "", spans: [plain(raw.trim())], dot: "neutral" };
+  if (typeof e.event !== "string") return genericSummary("neutral");
   switch (e.event) {
     case "tool": {
       const name = String(e.name);
@@ -184,7 +201,7 @@ export function humanizeLogLine(raw: string): HumanizedRow {
     case "telegram-unconfigured":
       return narrated("neutral");
     default:
-      return fallback();
+      return genericSummary("neutral");
   }
 }
 
@@ -200,8 +217,9 @@ export function humanizeLogLine(raw: string): HumanizedRow {
  * purpose-built line; the `project` field is the actor (a host-global event reads `host`).
  * A failure — the `isNotableHostEvent` rule inlined: a `fail`/`error` kind, a non-null
  * `error`, or `ok:false` — always paints the failure (red) dot, so even a host kind with no
- * purpose-built line dumps its raw source in red rather than a silent neutral. An unknown,
- * non-notable kind (or an unparseable line) falls back to a one-line raw dump, never blank.
+ * purpose-built line reads red rather than a silent neutral. An unknown kind renders a readable
+ * generic summary (the kind + its salient scalar fields in prose), never a raw JSON dump (#221);
+ * only a genuinely unparseable line dumps its trimmed source text. Neither is ever blank.
  */
 export function humanizeHostLine(raw: string): HumanizedRow {
   let e: Record<string, unknown> | null = null;
@@ -216,11 +234,28 @@ export function humanizeHostLine(raw: string): HumanizedRow {
   const project = e && typeof e.project === "string" ? e.project : "";
   const plain = (text: string): MessageSpan => ({ text, kind: "plain" });
   const code = (text: string): MessageSpan => ({ text, kind: "code" });
+  const strong = (text: string): MessageSpan => ({ text, kind: "strong" });
   // The shared notable rule (isNotableHostEvent), inlined so this function stays shippable:
   // a fail/error kind, a non-null `error`, or `ok:false` is a failure the operator sees red.
   const failed = !!e && ((typeof e.event === "string" && /fail|error/i.test(e.event)) || (e.error !== undefined && e.error !== null) || e.ok === false);
-  const fallback = (): HumanizedRow => ({ time, actor: project, verb: "", spans: [plain(raw.trim())], dot: failed ? "failure" : "neutral" });
-  if (!e || typeof e.event !== "string") return fallback();
+  // A generic-but-readable summary for a kind with no purpose-built line (#221): the event kind
+  // (hyphens/underscores → spaces) as the strong key term, then each salient scalar field as
+  // `· key value`. Object/array fields are dropped so the line stays prose, never a raw JSON dump;
+  // `project` leads as the actor, so it isn't repeated as a field.
+  const genericSummary = (): HumanizedRow => {
+    const label = (typeof e!.event === "string" ? e!.event : "").replace(/[-_]/g, " ");
+    const spans: MessageSpan[] = label ? [strong(label)] : [];
+    for (const [k, v] of Object.entries(e!)) {
+      if (k === "ts" || k === "event" || k === "project") continue;
+      if (v === null || v === undefined || typeof v === "object") continue;
+      spans.push(plain((spans.length ? " · " : "") + k + " "), code(String(v)));
+    }
+    if (!spans.length) spans.push(plain(raw.trim()));
+    return { time, actor: project, verb: "", spans, dot: failed ? "failure" : "neutral" };
+  };
+  // An unparseable line is not a JSON object to prose-ify — dump its raw text, never a blank row.
+  if (!e) return { time, actor: project, verb: "", spans: [plain(raw.trim())], dot: failed ? "failure" : "neutral" };
+  if (typeof e.event !== "string") return genericSummary();
   switch (e.event) {
     // Routine gateway/registry lifecycle — a neutral dot, the project (or host) as actor.
     case "gateway-start": {
@@ -244,6 +279,6 @@ export function humanizeHostLine(raw: string): HumanizedRow {
     case "registry-routing-unreadable":
       return { time, actor: project, verb: "routing unreadable", spans: [plain(": "), code(String(e.error))], dot: "failure" };
     default:
-      return fallback();
+      return genericSummary();
   }
 }

@@ -946,15 +946,10 @@ export const renderHostLog = () =>
   // an unchecked-by-default checkbox the client syncs to the `festiveWaveNames` cookie.
   `<div class="host-log-settings"><label class="festive-toggle"><input type="checkbox" data-festive-toggle /> Festive wave names</label></div>` +
   `<input type="text" class="host-log-filter" data-host-log-filter placeholder="filter lines…" aria-label="Filter host log lines" />` +
-  // The shared log-view controls (#203): the Humanized ⇄ Raw segmented toggle (humanized the
-  // pressed default, seeded server-side; the client re-syncs from the remembered mode) and a
-  // Download JSON control that always emits the raw NDJSON. Reuses the live tail's .tail-mode /
-  // .tail-save classes (both style blocks ride the landing shell), so the two surfaces match.
+  // The shared log-view control (#203, humanized-only per #221): a Download JSON control that
+  // always emits the raw NDJSON. Reuses the live tail's .lv-ico class (both style blocks ride the
+  // landing shell), so the two surfaces match.
   `<div class="host-log-controls">` +
-  `<span class="tail-mode" data-host-log-mode role="group" aria-label="Line format">` +
-  `<button type="button" class="tail-mode-btn" data-mode="humanized" aria-pressed="true">Humanized</button>` +
-  `<button type="button" class="tail-mode-btn" data-mode="raw" aria-pressed="false">Raw</button>` +
-  `</span>` +
   `<span class="host-log-gap"></span>` +
   `<button type="button" class="lv-ico" data-host-log-save aria-label="Download JSON" title="Download JSON">⤓</button>` +
   `</div>` +
@@ -1075,7 +1070,7 @@ ${renderTopBar(renderRepoDropdown(projects, undefined), renderHostLog())}
 </section>
 <section id="parked-queue" class="parked-queue" hidden aria-label="Parked questions across all repos"></section>
 <section id="cards" class="cards"><p class="empty">Loading…</p></section>
-<section id="feed" class="live-tail feed" data-feed aria-label="Event log across all repos"><div class="tail-head"><span class="tail-dot" data-feed-dot aria-hidden="true"></span><span class="tail-title tail-title-static">Event log · all repos</span><span class="tail-summary" data-feed-summary></span><span class="tail-gap"></span><span class="tail-controls" data-feed-controls><input type="text" class="tail-filter" placeholder="filter events…" aria-label="Filter events" data-feed-filter /><span class="tail-mode" data-feed-mode role="group" aria-label="Line format"><button type="button" class="tail-mode-btn" data-mode="humanized" aria-pressed="true">Humanized</button><button type="button" class="tail-mode-btn" data-mode="raw" aria-pressed="false">Raw</button></span><button type="button" class="lv-ico lv-pause" data-feed-play data-following="true" aria-label="Pause"></button><button type="button" class="lv-ico" data-feed-save aria-label="Download JSON" title="Download JSON">⤓</button></span></div><div class="feed-body" data-feed-body><p class="empty">Loading…</p></div><button type="button" class="tail-backlog" data-feed-backlog hidden></button><div class="tail-footer" data-feed-footer></div></section>
+<section id="feed" class="live-tail feed" data-feed aria-label="Event log across all repos"><div class="tail-head"><span class="tail-dot" data-feed-dot aria-hidden="true"></span><span class="tail-title tail-title-static">Event log · all repos</span><span class="tail-summary" data-feed-summary></span><span class="tail-gap"></span><span class="tail-controls" data-feed-controls><input type="text" class="tail-filter" placeholder="filter events…" aria-label="Filter events" data-feed-filter /><button type="button" class="lv-ico lv-pause" data-feed-play data-following="true" aria-label="Pause"></button><button type="button" class="lv-ico" data-feed-save aria-label="Download JSON" title="Download JSON">⤓</button></span></div><div class="feed-body" data-feed-body><p class="empty">Loading…</p></div><button type="button" class="tail-backlog" data-feed-backlog hidden></button><div class="tail-footer" data-feed-footer></div></section>
 ${issueDetailSheetMarkup(true)}
 <script>
   // The state → visual-intent reducers (dashboard-visual-state.ts, ADR 0012), single-
@@ -1109,7 +1104,6 @@ ${issueDetailSheetMarkup(true)}
   ${feedFresh.toString()}
   ${feedKindLabel.toString()}
   ${feedRowMatches.toString()}
-  ${highlightJsonLine.toString()}
   ${splitOverflow.toString()}
   ${humanizedRow.toString()}
 ${ISSUE_DETAIL_SHEET_SCRIPT}
@@ -1126,12 +1120,7 @@ ${REPO_DROPDOWN_SCRIPT}
   const feedDot = fq("[data-feed-dot]"), feedSummary = fq("[data-feed-summary]"), feedBody = fq("[data-feed-body]");
   const feedFooter = fq("[data-feed-footer]"), feedBacklog = fq("[data-feed-backlog]"), feedPlay = fq("[data-feed-play]");
   const feedFilter = fq("[data-feed-filter]"), feedSave = fq("[data-feed-save]");
-  const feedModeEl = fq("[data-feed-mode]");
   let feedBuffer = [], feedSeen = {}, feedLive = true, feedMark = 0, feedQuery = "", feedLoaded = false, feedError = false;
-  // The Humanized ⇄ Raw display mode (#203): humanized (the narrated rows) by default, remembered
-  // per view in localStorage so a Raw preference sticks across refreshes, exactly as the tail does.
-  const FEED_MODE_KEY = "vetinari:feed-mode";
-  let feedMode = "humanized"; try { const m = localStorage.getItem(FEED_MODE_KEY); if (m === "raw" || m === "humanized") feedMode = m; } catch (e) {}
   const feedMatch = (e) => feedRowMatches(e, feedQuery);
   function feedRender() {
     const view = followView({ buffer: feedBuffer, mark: feedMark, live: feedLive, cap: FEED_RENDER_CAP, match: feedMatch });
@@ -1140,18 +1129,10 @@ ${REPO_DROPDOWN_SCRIPT}
     else if (!feedLoaded) { feedBody.append(el("p", "empty", "Loading…")); }
     else if (view.rows.length) {
       for (const e of view.rows) {
-        if (feedMode === "raw") {
-          // Raw: the underlying event as one highlighted NDJSON line (highlightJsonLine), mono in
-          // the feed's own scroll pane — the same tokeniser the tail and host-log raw views use.
-          const row = el("div", "feed-raw");
-          const code = el("code", "tail-code"); code.innerHTML = highlightJsonLine(e.raw); row.append(code);
-          feedBody.append(row);
-        } else {
-          // Humanized (default): the shared .lv-row component (#216) — time · dot · repo-leads-
-          // narration, the dot coloured by the event's state — so the feed reads as the same
-          // component as the tail, host log and archive, differing only by source.
-          feedBody.append(humanizedRow(e.humanized, document));
-        }
+        // Humanized-only (#221): the shared .lv-row component (#216) — time · dot · repo-leads-
+        // narration, the dot coloured by the event's state — so the feed reads as the same
+        // component as the tail, host log and archive, differing only by source.
+        feedBody.append(humanizedRow(e.humanized, document));
       }
     } else {
       feedBody.append(el("p", "empty", feedQuery.trim() ? "No events match that filter." : "No activity in the last 48 hours."));
@@ -1181,11 +1162,6 @@ ${REPO_DROPDOWN_SCRIPT}
   feedPlay.addEventListener("click", () => { feedLive = !feedLive; feedMark = feedBuffer.length; feedRender(); });
   feedBacklog.addEventListener("click", () => { feedLive = true; feedMark = feedBuffer.length; feedRender(); });
   feedFilter.addEventListener("input", () => { feedQuery = feedFilter.value; feedRender(); });
-  // The Humanized ⇄ Raw toggle (#203): flip the body's row format, persist the choice, re-render.
-  // Seed the pressed state from the remembered mode so the buttons match on load.
-  const syncFeedModeBtns = () => { if (feedModeEl) for (const b of feedModeEl.querySelectorAll("[data-mode]")) b.setAttribute("aria-pressed", String(b.dataset.mode === feedMode)); };
-  if (feedModeEl) for (const btn of feedModeEl.querySelectorAll("[data-mode]")) btn.addEventListener("click", () => { feedMode = btn.dataset.mode; try { localStorage.setItem(FEED_MODE_KEY, feedMode); } catch (e) {} syncFeedModeBtns(); feedRender(); });
-  syncFeedModeBtns();
   feedSave.addEventListener("click", () => {
     // Download JSON (#203): the currently-filtered rows — uncapped by the render window — as their
     // underlying event NDJSON (e.raw, one per line), so the raw bytes stay faithful in either mode.
@@ -1330,11 +1306,6 @@ export const renderLiveTail = (status: CampaignStatus, streaming = true) => {
   // Each running issue and its status colour, so the client can colour a line's gutter by
   // its issue and rebuild the dropdown as agents come and go over the SSE.
   const agentsJson = escapeHtml(JSON.stringify(running.map((issue) => ({ issue: issue.issueNumber, status: issue.status }))));
-  // The Humanized ⇄ Raw segmented toggle (#203): humanized rows by default, Raw flipping the body
-  // to highlighted NDJSON. Per-view and remembered client-side; the server seeds humanized active.
-  const modeBtn = (mode: "humanized" | "raw", label: string) =>
-    `<button type="button" class="tail-mode-btn" data-mode="${mode}" aria-pressed="${mode === "humanized"}">${label}</button>`;
-  const modeToggle = `<span class="tail-mode" data-tail-mode role="group" aria-label="Line format">${modeBtn("humanized", "Humanized")}${modeBtn("raw", "Raw")}</span>`;
   // A streaming source follows/pauses and its dot pulses live; a static (archived) source has no
   // stream to follow, so the play/pause control is omitted and the dot is seeded idle (#203).
   const playBtn = streaming ? `<button type="button" class="lv-ico lv-pause" data-tail-play data-following="true" aria-label="Pause"></button>` : "";
@@ -1349,7 +1320,6 @@ export const renderLiveTail = (status: CampaignStatus, streaming = true) => {
     `<span class="tail-controls" data-tail-controls>` +
     `<span class="tail-issue-dd" data-tail-issue-dd><button type="button" class="tail-issue-trigger" data-tail-issue-trigger aria-haspopup="listbox" aria-expanded="false"><span class="dot all" data-tail-issue-dot></span><span data-tail-issue-label>all agents</span><span class="tail-issue-caret" aria-hidden="true">▾</span></button><ul class="tail-issue-menu" role="listbox" aria-label="Filter by agent" data-tail-issue-menu hidden>${options}</ul></span>` +
     `<input type="text" class="tail-filter" placeholder="filter lines…" aria-label="Filter tail lines" data-tail-filter />` +
-    modeToggle +
     playBtn +
     `<button type="button" class="lv-ico" data-tail-save aria-label="Download JSON" title="Download JSON">⤓</button>` +
     `</span>` +

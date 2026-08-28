@@ -11,6 +11,8 @@ import {
   type WaveStatus,
 } from "./dashboard-model.ts";
 import { festiveWaveName } from "./festive-names.ts";
+import type { StructuredGraftClosure } from "./graft.ts";
+import type { GraftRejection } from "./plan.ts";
 import {
   ARCHIVE_LIST_SCRIPT,
   DASHBOARD_PALETTE_CSS,
@@ -760,42 +762,54 @@ export const renderAggregatedCarvePreview = (project: string, target: string, pr
 </body>
 </html>`;
 
+/** A graft rejection reason (ADR 0014) as the operator reads it in the verdict list —
+ * graft's own words, so the dashboard and the CLI name an offender the same way. */
+const GRAFT_REASON_TEXT: Record<GraftRejection["reason"], string> = {
+  unknown: "not found",
+  closed: "closed on GitHub",
+  "already-in-campaign": "already in the campaign",
+};
+
 /**
- * The aggregated site's graft preview — the additive mirror of
- * `renderAggregatedCarvePreview`. It is a dumb router (ADR 0002) with no project's
- * `blockedBy` resolver, so it does not compute the placement itself — it shows the
- * placement the selected project's own `graft <ids…> --dry-run` printed, behind a
- * confirm form. `graft` is variadic, so the hidden field carries the whole set of
- * ids (space-joined, matching the CLI); confirming shells `graft <ids…>` in that
- * project's root. Serves as the no-JS graft fallback.
+ * The aggregated site's graft rejection surface (option 1a): a whole-batch graft
+ * (ADR 0014 — all-or-nothing) that found any offender grafts *nothing* and lands
+ * here instead of navigating. It renders the batch as a per-id verdict list —
+ * "would graft" for the clean ids, the reason per offender — under a "Nothing
+ * grafted — fix these" header, carrying the typed ids so the summary-line input can
+ * retain them. The client lifts `[data-graft-verdicts]` to show it inline beside the
+ * input; served whole it is the no-JS fallback. Red edge — a rejection, distinct
+ * from the teal success and the amber structural refusal.
  */
-export const renderAggregatedGraftPreview = (project: string, ids: string[], previewText: string) => `<!doctype html>
+export const renderAggregatedGraftRejection = (project: string, closure: StructuredGraftClosure) => {
+  const verdicts = closure.ids
+    .map((id) => {
+      const rejection = closure.rejected.find((r) => r.id === id);
+      const verdict = rejection ? GRAFT_REASON_TEXT[rejection.reason] : "would graft";
+      return `<li class="graft-verdict ${rejection ? "bad" : "ok"}">#${escapeHtml(id)} — ${escapeHtml(verdict)}</li>`;
+    })
+    .join("");
+  return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>${escapeHtml(project)} — graft ${escapeHtml(ids.map((i) => `#${i}`).join(", "))}</title>
+<title>${escapeHtml(project)} — graft rejected</title>
 <style>
   body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 2rem; background: #090c10; color: #e6edf3; }
   h1 { letter-spacing: -0.035em; }
-  .card { background: #0b0e12; border: 1px solid #232b35; border-left: 3px solid #3fb950; border-radius: 12px; padding: 1rem 1.25rem; margin: 1rem 0; }
-  pre { white-space: pre-wrap; margin: 0; }
-  .actions { display: flex; gap: .75rem; align-items: center; }
-  form { margin: 0; }
-  button { padding: .5rem .9rem; border: 0; border-radius: 9px; cursor: pointer; font-weight: 700; }
-  .confirm button { background: #3fb950; color: #05230f; }
-  a.cancel { color: #8b98a5; text-decoration: none; padding: .5rem .9rem; }
+  .card { background: #0b0e12; border: 1px solid #232b35; border-left: 3px solid #f79287; border-radius: 12px; padding: 1rem 1.25rem; margin: 1rem 0; }
+  ul { margin: 0; padding-left: 1.2rem; }
+  .graft-verdict.bad { color: #f79287; }
+  a.cancel { color: #8b98a5; text-decoration: none; }
 </style>
 </head>
 <body>
-<h1>Graft ${escapeHtml(ids.map((i) => `#${i}`).join(", "))} onto ${escapeHtml(project)}?</h1>
-<section class="card"><pre>${escapeHtml(previewText)}</pre></section>
-<div class="actions">
-<form method="post" action="/graft" class="confirm"><input type="hidden" name="ids" value="${escapeHtml(ids.join(" "))}" /><input type="hidden" name="project" value="${escapeHtml(project)}" /><input type="hidden" name="confirm" value="1" /><button type="submit">🌱 Confirm graft</button></form>
-<a class="cancel" href="/?project=${encodeURIComponent(project)}">Cancel</a>
-</div>
+<h1>Nothing grafted — fix these</h1>
+<section class="card" data-graft-rejection data-graft-ids="${escapeHtml(closure.ids.join(" "))}"><ul data-graft-verdicts>${verdicts}</ul></section>
+<a class="cancel" href="/?project=${encodeURIComponent(project)}">Back to ${escapeHtml(project)}</a>
 </body>
 </html>`;
+};
 
 /**
  * The issue-detail sheet's markup — one definition rendered by both the campaign

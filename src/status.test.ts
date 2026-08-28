@@ -3014,8 +3014,8 @@ test("serveAllStatus POST /carve previews the selected project's closure without
   }
 });
 
-test("serveAllStatus POST /graft on confirm shells graft in the selected project's root", async () => {
-  const configDir = join(tmpdir(), `vetinari-agg-graft-confirm-${Date.now()}`);
+test("serveAllStatus POST /graft shells graft directly for a clean batch — no confirm gate (#202)", async () => {
+  const configDir = join(tmpdir(), `vetinari-agg-graft-direct-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
   seedState(alphaDir, [
@@ -3032,14 +3032,28 @@ test("serveAllStatus POST /graft on confirm shells graft in the selected project
     port: 0,
     host: "127.0.0.1",
     spawn: (_cmd, args, options) => spawned.push({ args, cwd: options.cwd }),
+    // Option 1a validates the batch against the project's dry-run closure and, when it
+    // is clean (no offenders), grafts directly — no preview/confirm form. A clean closure
+    // stands in for beta's install accepting both ids.
+    graftClosure: () =>
+      Promise.resolve({
+        ids: ["640", "655"],
+        placement: [
+          { id: "640", wave: 2 },
+          { id: "655", wave: 2 },
+        ],
+        remaining: [["201"], ["640", "655"]],
+        rejected: [],
+      }),
   });
   const { port } = server.address() as AddressInfo;
   try {
     const res = await fetch(`http://127.0.0.1:${port}/graft`, {
       method: "POST",
       redirect: "manual",
+      // No `confirm` field — 1a acts on submit, confirming on the wave, not via a form.
       headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ ids: "640 655", project: "beta", confirm: "1" }).toString(),
+      body: new URLSearchParams({ ids: "640 655", project: "beta" }).toString(),
     });
     // Redirects back to the selected project's board, like carve/resume/answer.
     assert.equal(res.status, 303);
@@ -3157,48 +3171,52 @@ test("serveAllStatus GET /graft?preview 502s when the project emits no closure l
   }
 });
 
-test("serveAllStatus POST /graft previews the selected project's closure without executing", async () => {
-  const configDir = join(tmpdir(), `vetinari-agg-graft-preview-${Date.now()}`);
-  const alphaDir = join(configDir, "state-alpha");
+test("serveAllStatus POST /graft rejects a whole batch with per-id verdicts and grafts nothing (#202)", async () => {
+  const configDir = join(tmpdir(), `vetinari-agg-graft-reject-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
-  seedState(alphaDir, [
-    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["101"]], slots: 1 }),
-  ]);
   seedState(betaDir, [
     event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["201"]], slots: 1 }),
   ]);
-  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
   register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
 
-  const previews: { projectRoot: string; taskIds: string[] }[] = [];
+  const closures: { projectRoot: string; taskIds: string[] }[] = [];
   const spawned: unknown[] = [];
   const server = await serveAllStatus(configDir, {
     port: 0,
     host: "127.0.0.1",
     spawn: (...a) => spawned.push(a),
-    graftPreview: (projectRoot, taskIds) => {
-      previews.push({ projectRoot, taskIds });
-      return Promise.resolve(`graft #640, #655 → #640 in wave 2, #655 in wave 2\nresulting campaign: "201" "640 655"`);
+    // beta's install rejects the whole batch: #202 is already in the campaign, so per
+    // ADR 0014 *nothing* grafts — #640 would have grafted, but the batch is all-or-nothing.
+    graftClosure: (projectRoot, taskIds) => {
+      closures.push({ projectRoot, taskIds });
+      return Promise.resolve({
+        ids: ["640", "202"],
+        placement: [],
+        remaining: [["201"]],
+        rejected: [{ id: "202", reason: "already-in-campaign" as const }],
+      });
     },
   });
   const { port } = server.address() as AddressInfo;
   try {
     const res = await fetch(`http://127.0.0.1:${port}/graft`, {
       method: "POST",
+      redirect: "manual",
       headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ ids: "640 655", project: "beta" }).toString(),
+      body: new URLSearchParams({ ids: "640 202", project: "beta" }).toString(),
     });
-    assert.equal(res.status, 200);
+    // A rejection is surfaced inline (422), never a redirect — the operator stays put.
+    assert.equal(res.status, 422);
     const html = await res.text();
-    // The preview came from the selected project's install (beta's root), carrying the
-    // full set of ids.
-    assert.deepEqual(previews, [{ projectRoot: join(configDir, "beta-root"), taskIds: ["640", "655"] }]);
-    // It shows the shelled placement and a confirm affordance carrying the project + ids.
-    assert.match(html, /#655/);
-    assert.match(html, /<form method="post" action="\/graft"[\s\S]*?name="confirm"/);
-    assert.match(html, /name="project" value="beta"/);
-    assert.match(html, /name="ids" value="640 655"/);
-    // Nothing has been grafted yet — preview executes nothing.
+    // The verdict came from the selected project's install (beta's root), carrying both ids.
+    assert.deepEqual(closures, [{ projectRoot: join(configDir, "beta-root"), taskIds: ["640", "202"] }]);
+    // Per-id verdicts under the "Nothing grafted" header — the clean id "would graft",
+    // the offender names its reason — and the typed ids are retained for correction.
+    assert.match(html, /Nothing grafted/i);
+    assert.match(html, /#640 — would graft/);
+    assert.match(html, /#202 — already in the campaign/);
+    assert.match(html, /data-graft-ids="640 202"/);
+    // Whole-batch rejection grafts nothing — no graft is spawned.
     assert.equal(spawned.length, 0);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));

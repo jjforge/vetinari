@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import type { CarveClosure } from "./dashboard-carve.ts";
 import { shellCarveClosure, shellCarvePreview } from "./dashboard-carve.ts";
 import type { GraftClosure } from "./dashboard-graft.ts";
-import { shellGraftClosure, shellGraftPreview } from "./dashboard-graft.ts";
+import { shellGraftClosure } from "./dashboard-graft.ts";
 import type { DashboardDeps, RouteHandler, SpawnDashboardChild } from "./dashboard-http.ts";
 import { handleApiStatus } from "./dashboard-route-api-status.ts";
 import { handleApiIssue } from "./dashboard-route-api-issue.ts";
@@ -53,7 +53,6 @@ export async function serveAllStatus(
     spawn?: (command: string, args: string[], options: { cwd: string; stdio: readonly (string | number)[] }) => unknown;
     carvePreview?: (projectRoot: string, taskId: string) => Promise<string | null>;
     carveClosure?: (projectRoot: string, taskId: string) => Promise<CarveClosure | null>;
-    graftPreview?: (projectRoot: string, taskIds: string[]) => Promise<string | null>;
     graftClosure?: (projectRoot: string, taskIds: string[]) => Promise<GraftClosure | null>;
   },
 ) {
@@ -62,7 +61,6 @@ export async function serveAllStatus(
     spawn: opts.spawn ?? (spawn as SpawnDashboardChild),
     carvePreview: opts.carvePreview ?? shellCarvePreview,
     carveClosure: opts.carveClosure ?? shellCarveClosure,
-    graftPreview: opts.graftPreview ?? shellGraftPreview,
     graftClosure: opts.graftClosure ?? shellGraftClosure,
   };
   const server = createServer((req, res) => {

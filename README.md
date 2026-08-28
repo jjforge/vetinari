@@ -106,7 +106,7 @@ npx vetinari build --no-baseline   # build only, skip the probe
 `build` shells sandcastle's `docker build-image` and, on success, runs
 `baseline` (below); a build failure exits non-zero with sandcastle's output
 visible and skips the probe, and a red baseline exits non-zero too. It uses the
-same `cfg.image` the run/queue/campaign modes use, so "build" and "run" can
+same `cfg.image` the run/campaign modes use, so "build" and "run" can
 never disagree on the image.
 
 `baseline` on its own proves an already-built image: toolchain probe + every
@@ -126,14 +126,13 @@ network fault, but you will know they are new).
 
 ```bash
 npx vetinari run 436                    # one task: loop until green or parked
-npx vetinari queue 436 611 623 640      # fair-share pool, bounded by MAX_CONCURRENT_CONTAINERS + containerShare
 npx vetinari parked                     # what's waiting on you, and why
 npx vetinari status                     # all-repos landing dashboard at http://127.0.0.1:8765 (live)
 npx vetinari answer 436 "use approach B, and say why in the commit"
 ```
 
 Commits land on `agent/<task>`. Merging stays yours, or hand the whole
-merge→test→next-queue chain to `campaign`:
+merge→test→next-batch chain to `campaign`:
 
 ```bash
 git checkout main                                     # the merges land on the checked-out base
@@ -157,7 +156,7 @@ suspect and resume. When a batch finishes, any parked records for non-green task
 in that completed wave are cleared from `.vetinari.local/parked/` so stale
 questions do not bleed into the next wave's dashboard. Pushing stays yours.
 
-On clean completion, a `campaign` or `queue` **archives the run** so a finished
+On clean completion, a `campaign` **archives the run** so a finished
 run stops lingering in the dashboard and status line: the orchestrator log is
 moved aside to `.vetinari.local/logs/archive/orchestrator-<ts>.jsonl` (kept, never
 deleted) and replaced with an empty one, so the status reads idle. It only fires
@@ -353,12 +352,12 @@ VETINARI_TELEGRAM_CHAT_ID=-1001234567890
 ```bash
 set -a; source .vetinari.local/host.env; set +a
 npx vetinari tg-test            # prove the round-trip first
-npx vetinari gateway            # the ONE daemon (quick try; prefer the service below)
-npx vetinari queue 436 611 623  # in another shell; registers itself with the gateway
+npx vetinari gateway               # the ONE daemon (quick try; prefer the service below)
+npx vetinari campaign "436 611 623"  # in another shell; registers itself with the gateway
 ```
 
 Every run **registers itself** with the gateway automatically (it reads each
-project live from a host registry, nothing to enrol by hand), so a queue in one
+project live from a host registry, nothing to enrol by hand), so a campaign in one
 shell and the gateway in another find each other. Every park sends its question as
 a message; **reply to that message** and the gateway resumes that exact task,
 running concurrent resumes as needed. Send **`/status`** (bare, or `/status@yourbot`
@@ -470,7 +469,6 @@ The README stops at the reader's first hour. The operational reference lives in
 | `build [--no-baseline]` | build `cfg.image` from `vetinari/Dockerfile` (neither repeated on the CLI) via sandcastle, then `baseline` on success; `--no-baseline` builds only. A build or baseline failure exits non-zero with sandcastle's output shown |
 | `baseline` | toolchain probe + all gates, no agent |
 | `run <task>` | the TDD loop; exit 0 green, 2 parked |
-| `queue <task…>` | bounded pool; a park frees its slot |
 | `campaign [--name "…"] [--auto-carve] <batch…>` | drain each batch, merge its greens, gate the merged base, then start the next. Integration is **non-atomic** (ADR 0013): a merge conflict **quarantines** that one issue and the wave carries on (its already-merged greens stay merged); a red merged base **wave-parks** the wave and pauses for a human. `--name` labels the run in the dashboard/archive. When a quarantine strands dependents in later waves the campaign pauses for a human by default; `--auto-carve` prunes that closure and runs on instead |
 | `campaign --resume` | continue a **paused** campaign's unrun waves on the current base (after a human fixed a wave-park forward or carved a suspect); reconstructs the plan from the event log, redoes no already-merged issue, takes no batch args |
 | `carve <issue>` | prune `<issue>` + everything blocked by it from the **running** campaign at the next wave boundary (the in-flight wave finishes; only future waves shrink). Banked/merged work is kept; the carved issue's parked record (branch/worktree/session) is **preserved** so it stays resumable — `--purge` is the rare true-drop that clears it (`--dry-run` to preview) |
@@ -485,7 +483,7 @@ The README stops at the reader's first hour. The operational reference lives in
 | `gateway install [--dry-run]` | write the host-level systemd unit for this install to `~/.config/systemd/user/vetinari-gateway.service`, with a fully absolute `node` + tsx-loader + CLI `ExecStart` (no `bash -lc`, `env`, `npx`, or `PATH` dependency, so it starts under systemd's clean environment). Re-run after a node/tsx upgrade |
 | `host log [-n <count>] [--tail] [--json]` | read the persistent **host log** (`<gatewayConfigDir>/logs/host.jsonl`) at the terminal — the host/gateway diagnostics (registry reads, `tgSend` routing, SSE watch failures) that no per-project event feed shows. Prints the most recent events **newest-first**, one human-readable line each; `-n` bounds the window (default 50). `--json` passes the raw JSONL through **untouched** (pipe to `jq`/`grep`); `--tail` (or `-f`) **follows** live, printing new events as they append. Reads the file directly off disk, so **no daemon need be running** — a missing `host.jsonl` prints "no host log yet" and exits clean |
 | `parked` | list what is waiting and why |
-| `clear` | archive the run log + clear parked, resetting the dashboard/status line to idle (automatic on clean campaign/queue completion) |
+| `clear` | archive the run log + clear parked, resetting the dashboard/status line to idle (automatic on clean campaign completion) |
 | `tidy [--apply] [--all]` | reconcile the drift a by-hand fix-forward or merge leaves (ADR 0013): fold orphaned `changelog.d/` fragments whose issue is merged, GC `agent/<id>` branches + worktrees **provably** reachable from the base, clear parked records for issues now merged, and drop provably-dead **duplicate registry pointers** (two pointers resolving to one `projectRoot` → keep the canonical `<projectRoot>/.vetinari.local` one, remove the rest; ambiguous groups left for a human). Never touches an unmerged, quarantined, parked, or wave-parked branch. Dry-run by default; `--apply` acts, `--all` sweeps every registered project |
 | `status [--port <port>] [--host <host>]` | the all-repos landing over the host registry: counters, a card per registered project, a cross-repo activity feed, and each project's archived runs, live over SSE. Reads the registry, so no gateway daemon required |
 | `registry remove <name>` | remove one project's pointer from the host registry so the dashboard/`status` stops listing it — the explicit counterpart to the auto-registration every run performs (acts on the **registry pointer**, not container slots). A name that is not registered is a clean no-op |

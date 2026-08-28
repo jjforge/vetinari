@@ -52,6 +52,14 @@ test("neither the README table nor the CLI mode list carries a duplicate signatu
   assert.equal(new Set(cli).size, cli.length, "duplicate mode in MODES");
 });
 
+test("the standalone `queue` command is no longer a public mode — only campaign's queue() engine remains (#186)", () => {
+  // `queue()` stays as campaign's per-wave concurrency core, but `vetinari queue`
+  // is gone: it must not appear in MODES, so --help and the README table drop it
+  // and `vetinari queue …` falls through to the unknown-mode/usage handling.
+  const queueModes = MODES.filter((m) => /^queue\b/.test(m.signature));
+  assert.deepEqual(queueModes, [], "MODES still lists a `queue` command");
+});
+
 test("renderUsage shows every mode's signature — --help is produced from MODES, never hand-kept", () => {
   const usage = renderUsage();
   for (const m of MODES)

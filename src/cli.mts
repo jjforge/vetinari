@@ -20,7 +20,6 @@ import {
   baseline,
   build,
   campaign,
-  queue,
   requireTelegram,
   tgTest,
 } from "./modes.ts";
@@ -561,13 +560,6 @@ switch (mode) {
     archiveLeftoverRun();
     // Exit code is the queue's slot signal: 0 green, 2 parked, other = error.
     process.exitCode = (await runLoop(cfg, rest[0])) === "green" ? 0 : 2;
-    break;
-  }
-  case "queue": {
-    if (!rest.length) throw new Error("queue needs at least one task id");
-    archiveLeftoverRun();
-    await queue(cfg, rest, hostBudget);
-    archiveIfIdle();
     break;
   }
   case "campaign": {

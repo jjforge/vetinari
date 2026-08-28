@@ -9,6 +9,8 @@ import {
   partitionWaves,
   planCampaign,
   runCampaignPlan,
+  runFilesetCheck,
+  describeFilesetCheck,
   suggestCampaignName,
   underspecifiedPromptFor,
   waveArgs,
@@ -714,6 +716,37 @@ test("runCampaignPlan suggests no name when the set spans no area label", async 
     { isTTY: false, ask: () => "fail" },
   );
   assert.equal(report.suggestedName, undefined);
+});
+
+test("runFilesetCheck runs the same resolver campaign-plan uses, reporting confident + basenames per id", async () => {
+  // The confident/not-confident verdict comes from the exact fetchTask→ticketProse→
+  // fileSet path runCampaignPlan composes, so the check and the planner agree by
+  // construction: 611 names a file on its marker, 640 names none.
+  const results = await runFilesetCheck(
+    cfgFrom({
+      "611": JSON.stringify({ body: "Touches: a.ts" }),
+      "640": JSON.stringify({ body: "no files named here" }),
+    }),
+    ["611", "640"],
+  );
+
+  assert.deepEqual(results, [
+    { id: "611", confident: true, files: ["a.ts"] },
+    { id: "640", confident: false, files: [] },
+  ]);
+});
+
+test("runFilesetCheck rejects an empty id set", async () => {
+  await assert.rejects(() => runFilesetCheck(cfgFrom({}), []), /at least one ticket id/);
+});
+
+test("describeFilesetCheck renders a confident line and a would-halt line per id", () => {
+  const out = describeFilesetCheck([
+    { id: "611", confident: true, files: ["a.ts"] },
+    { id: "640", confident: false, files: [] },
+  ]);
+  assert.match(out, /#611.*confident.*a\.ts/);
+  assert.match(out, /#640.*(not confident|halt)/i);
 });
 
 test("labelsFromTask reads GitHub label objects and is best-effort on non-JSON", () => {

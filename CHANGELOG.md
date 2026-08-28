@@ -22,6 +22,8 @@ Within a milestone each bold section label appears at most once.
 
 **Breaking changes:**
 - [user] The standalone `queue` CLI command is gone; `vetinari queue …` now falls through to the usage/help path like any unknown mode (#186). Run several tasks in parallel with `campaign` instead — it registers with the gateway the same way and adds merge + gate. The `queue()` engine that `campaign` runs per wave is unchanged.
+- [user] The running-campaign mutation verb is renamed **carve → prune** so it pairs with **graft** as a single-domain antonym (prune cuts a branch off, graft attaches one) (#177). `vetinari prune <issue>` (and the from-scratch `prune <issue> <batch…>`) replace `carve …`, the campaign flag `--auto-carve` becomes `--auto-prune`, the gateway `prune <issue>` reply replaces `carve <issue>`, the dashboard route `/carve` becomes `/prune`, and the render-derived issue status `carved` becomes `pruned`. `--purge` is unchanged.
+- [user] Archived run logs written before this rename (which recorded a `carve` event kind) render that event as inert/unknown in the dashboard — it no longer prunes on replay — but they still load without error. No migration; live/new runs use `prune` throughout.
 
 **New features:**
 - [user] The all-repos landing/host view now has a **settings gear** that opens a live host-log pane — the fleet-level `host.jsonl` (gateway/registry/Telegram/SSE diagnostics across every project) rendered newest-first, bounded, and JSON-highlighted, with a case-insensitive substring filter. It reads with no daemon (`GET /api/host-log`) and updates live over the existing `/api/events` SSE via a named `host` frame; a missing host log reads a clean "no host log yet". The gear shows a red attention badge when the window holds a notable event (a `fail`/`error` kind, or a row carrying `error`/`ok: false`); opening the pane clears the badge until a newer notable event arrives (#180).
@@ -49,6 +51,9 @@ Within a milestone each bold section label appears at most once.
 - [user] A grafted wave now renders its issue titles on the dashboard — the graft event stamps each grafted id's title, so the wave-card header shows `Wave N — <title> …` and each row shows `#num <title>` instead of a bare `Wave N` / bare `#num` (#197).
 - [user] The dashboard's "updated Ns ago" freshness readout now resets when the live-tail or host-log pane visibly appends a line, so it no longer reads as stale while a live surface is actively scrolling; a collapsed or follow-paused pane and a paused page still leave it untouched (#198).
 - [user] The all-repos landing "queued" counter (and each repo card's queued pill) now counts grafted issues waiting in later waves, instead of reading 0 while the single-repo view showed them (#200).
+
+**Documentation:**
+- [internal] ADR 0005 (retitled "Prune is an event that trims the running campaign"), ADR 0014, CONTEXT.md, the README Modes table + prose, and the surrounding ADRs/docs are rewritten to the prune vocabulary; CONTEXT.md's earlier `_Avoid_: prune` guidance is reversed (#177).
 
 ### Collected changes — August 27, 2026
 

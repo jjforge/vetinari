@@ -927,3 +927,86 @@ export const HOST_LOG_SCRIPT = `  const hostLogRoot = document.querySelector("[d
       updateBadge();
     }).catch(() => {});
   }`;
+
+/**
+ * The summary-line graft input's client behaviour (option 1a, #202). The input lives
+ * inside `#live-region`, which is swapped whole on every soft-refresh, so this is a
+ * function `wireLiveRegion` re-runs (a `graftWired` flag makes a re-bind on the same
+ * node idempotent). At rest the button is greyed; typing wakes it (the teal
+ * `data-graft-active`) and clears any error; blur validates the batch against the
+ * project's own dry-run closure (the retained `GET /graft?preview`) so a bad id greys
+ * the button before anything is sent; submit POSTs `/graft` directly — a clean batch
+ * confirms on the wave (the new card arrives via the live refresh), while a whole-batch
+ * rejection (422) surfaces its per-id verdicts inline and keeps the typed ids for
+ * correction. `graftVerdicts` renders those verdicts in graft's own words — the same the
+ * route's rejection page uses.
+ */
+export const GRAFT_SCRIPT = `  function graftVerdicts(closure) {
+    const reason = { unknown: "not found", closed: "closed on GitHub", "already-in-campaign": "already in the campaign" };
+    return closure.ids.map((id) => {
+      const bad = (closure.rejected || []).find((r) => r.id === id);
+      return "#" + id + " — " + (bad ? reason[bad.reason] : "would graft");
+    }).join("  ·  ");
+  }
+  function wireGraft() {
+    const form = document.querySelector("[data-graft]");
+    if (!form || form.dataset.graftWired) return;
+    form.dataset.graftWired = "1";
+    const ids = form.querySelector("[data-graft-ids]");
+    const submit = form.querySelector("[data-graft-submit]");
+    const errBox = form.querySelector("[data-graft-error]");
+    const project = form.querySelector("input[name=project]").value;
+    const typed = () => ids.value.trim();
+    const clearErr = () => { errBox.hidden = true; errBox.textContent = ""; };
+    const showErr = (text) => { errBox.textContent = text; errBox.hidden = false; };
+    let invalid = false;
+    // Empty → greyed and disabled; any ids → teal-active and enabled (unless a blur
+    // validation already flagged a bad id).
+    const sync = () => {
+      const has = typed().length > 0;
+      form.toggleAttribute("data-graft-active", has);
+      submit.disabled = !has || invalid;
+    };
+    ids.addEventListener("input", () => { invalid = false; clearErr(); sync(); });
+    // Validate on blur — a rejected batch greys the button and names the offenders
+    // inline; nothing is sent, so there is no state to undo.
+    ids.addEventListener("blur", async () => {
+      if (!typed()) return;
+      try {
+        const res = await fetch("/graft?preview&ids=" + encodeURIComponent(typed()) + "&project=" + encodeURIComponent(project));
+        if (!res.ok) return;
+        const closure = await res.json();
+        if (closure.rejected && closure.rejected.length) { invalid = true; showErr(graftVerdicts(closure)); }
+      } catch {}
+      sync();
+    });
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (!typed()) return;
+      clearErr();
+      submit.disabled = true;
+      try {
+        const res = await fetch("/graft", {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ ids: typed(), project }),
+        });
+        if (res.status === 422) {
+          // Whole-batch rejection — lift the per-id verdicts the route rendered and show
+          // them inline; keep the typed ids so the operator can correct or drop them.
+          const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+          const list = doc.querySelector("[data-graft-verdicts]");
+          invalid = true;
+          showErr(list ? [...list.querySelectorAll("li")].map((li) => li.textContent).join("  ·  ") : "Nothing grafted — fix these ids.");
+          sync();
+          return;
+        }
+        // Success — the graft confirms on the wave; clear the input back to rest.
+        ids.value = ""; invalid = false; sync();
+      } catch {
+        showErr("Couldn't reach graft — is a campaign still running?");
+        sync();
+      }
+    });
+    sync();
+  }`;

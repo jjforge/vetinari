@@ -16,6 +16,7 @@ import type { GraftRejection } from "./plan.ts";
 import {
   ARCHIVE_LIST_SCRIPT,
   DASHBOARD_PALETTE_CSS,
+  GRAFT_SCRIPT,
   HOST_LOG_SCRIPT,
   HOST_LOG_STYLES,
   ISSUE_DETAIL_SHEET_SCRIPT,
@@ -181,7 +182,10 @@ const renderWaveCard = (wave: StatusWave, project: string, carve: boolean, inter
   // itself without shoving the meta group (tally · state · carved) onto its own line.
   const carved = wave.issues.filter((issue) => issue.status === "carved").length;
   const tally = carved ? `<span class="wave-carved">${carved} carved</span>` : "";
-  return `<section class="wave ${wave.status}"${extraAttrs}><div class="wave-head"><h2 class="wave-label">${renderWaveLabel(wave, festiveName)}</h2><div class="wave-meta"><span class="wave-tally">${waveMerged(wave)}/${wave.issues.length}</span><span class="wave-status ${wave.status}">${wave.status}</span>${tally}</div></div>${renderWaveMembers(wave, project, carve, interactive, run)}</section>`;
+  // A wave holding a freshly-grafted issue (#202) is marked so its edge pulses the teal
+  // accent once when it appears — the graft confirming on the wave (option 1a).
+  const grafted = wave.issues.some((issue) => issue.status === "grafted") ? " has-grafted" : "";
+  return `<section class="wave ${wave.status}${grafted}"${extraAttrs}><div class="wave-head"><h2 class="wave-label">${renderWaveLabel(wave, festiveName)}</h2><div class="wave-meta"><span class="wave-tally">${waveMerged(wave)}/${wave.issues.length}</span><span class="wave-status ${wave.status}">${wave.status}</span>${tally}</div></div>${renderWaveMembers(wave, project, carve, interactive, run)}</section>`;
 };
 
 /** A closed wave's compact toggle chip — the affordance that reveals its full card in
@@ -1408,6 +1412,14 @@ ${ISSUE_DETAIL_SHEET_STYLES}
      (the caution channel, §1), distinct from the teal success and the red rejection. */
   .graft-refusal { color: var(--color-yellow); font-size: .82rem; }
   .graft-refusal code { color: var(--color-text-light); }
+  /* A graft confirms on the wave (#202): the wave holding the freshly-grafted issues
+     takes the teal product accent on its edge, so the new card reads at a glance when it
+     arrives on the live refresh. Static, not a pulse — §5 reserves motion for the work
+     (running dot) and stream (live dot) channels and nothing else animates its colour;
+     the mockup's teal pulse is translated to this motion-free emphasis (CLAUDE.md rule 5).
+     The grafted tags themselves already lift on pickup (the grafted overlay drops when a
+     wave picks the issue up, ADR 0007) — the "fade" is that lifecycle, not an animation. */
+  .wave.has-grafted { border-top-color: var(--color-primary); }
   .parked-issues { margin: 1rem 0 2rem; }
   .parked-issues > h2 { display: flex; align-items: baseline; flex-wrap: wrap; gap: .35rem; }
   .parked-count { color: var(--color-yellow); }
@@ -1657,7 +1669,10 @@ ${ARCHIVE_LIST_SCRIPT}
         });
       }
     }
+    // The summary-line graft input is inside #live-region too, so rebind it each refresh.
+    wireGraft();
   }
+${GRAFT_SCRIPT}
   wireLiveRegion();
 ${LIVE_TAIL_SCRIPT}
 </script>

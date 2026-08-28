@@ -1496,6 +1496,49 @@ test("renderStatusPage disables the graft input with amber guidance when the cam
   assert.match(summary, /vetinari campaign/);
 });
 
+test("renderStatusPage marks a freshly-grafted wave with a static teal edge, not motion (#202, §5)", () => {
+  const grafted = {
+    project: "beta",
+    waves: [
+      { index: 0, status: "running" as const, issues: [{ issueNumber: "201", status: "running" as const }] },
+      { index: 1, status: "unstarted" as const, issues: [{ issueNumber: "305", status: "grafted" as const }] },
+    ],
+    parked: [],
+  };
+  const html = renderStatusPage(grafted, { carve: true, graft: true });
+  // A wave carrying a grafted issue is marked, and takes the teal product accent on its
+  // edge so the new card reads at a glance when it arrives on the live refresh.
+  assert.match(html, /class="wave unstarted has-grafted"/);
+  assert.match(html, /\.wave\.has-grafted \{ border-top-color: var\(--color-primary\); \}/);
+  // §5 reserves motion for the work/stream channels — the mockup's teal pulse is
+  // translated to this static emphasis (CLAUDE.md rule 5). No new colour animation: the
+  // only @keyframes on the page stays chip-pulse (the §5 invariant test #100 also pins).
+  assert.deepEqual(
+    [...new Set([...html.matchAll(/@keyframes ([\w-]+)/g)].map((m) => m[1]))],
+    ["chip-pulse"],
+  );
+});
+
+test("renderStatusPage ships the graft input's client wiring, re-run on live refresh (#202)", () => {
+  const running = {
+    project: "beta",
+    waves: [{ index: 0, status: "running" as const, issues: [{ issueNumber: "201", status: "running" as const }] }],
+    parked: [],
+  };
+  const html = renderStatusPage(running, { carve: true, graft: true });
+  // The graft input is inside #live-region (swapped on every soft-refresh), so its wiring
+  // is a function re-run from wireLiveRegion, not a one-shot bind.
+  assert.match(html, /function wireGraft\(\)/);
+  assert.match(html, /wireGraft\(\);/);
+  // It POSTs directly on submit and surfaces a 422 whole-batch rejection inline in the
+  // error box (keeping the typed ids), rather than navigating away.
+  assert.match(html, /fetch\("\/graft"/);
+  assert.match(html, /422/);
+  assert.match(html, /data-graft-error/);
+  // It validates against the retained dry-run closure endpoint on blur.
+  assert.match(html, /\/graft\?preview/);
+});
+
 test("renderStatusPage shows an informational quarantine affordance with no action of its own (#171)", () => {
   const quarantined = renderStatusPage(
     {

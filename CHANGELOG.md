@@ -20,8 +20,13 @@ Within a milestone each bold section label appears at most once.
 
 ### Collected changes — August 28, 2026
 
+**Breaking changes:**
+- [user] The standalone `queue` CLI command is gone; `vetinari queue …` now falls through to the usage/help path like any unknown mode (#186). Run several tasks in parallel with `campaign` instead — it registers with the gateway the same way and adds merge + gate. The `queue()` engine that `campaign` runs per wave is unchanged.
+
 **New features:**
 - [user] The all-repos landing/host view now has a **settings gear** that opens a live host-log pane — the fleet-level `host.jsonl` (gateway/registry/Telegram/SSE diagnostics across every project) rendered newest-first, bounded, and JSON-highlighted, with a case-insensitive substring filter. It reads with no daemon (`GET /api/host-log`) and updates live over the existing `/api/events` SSE via a named `host` frame; a missing host log reads a clean "no host log yet". The gear shows a red attention badge when the window holds a notable event (a `fail`/`error` kind, or a row carrying `error`/`ok: false`); opening the pane clears the badge until a newer notable event arrives (#180).
+- [user] The dashboard now offers a **Resume** action on a wave-parked campaign — a red merged base paused it, so once you fix forward the control shells `campaign --resume` in that project's root and returns you to its board, instead of dropping to the CLI (#171).
+- [user] A quarantined issue now shows an informational "resolve the conflict, then resume" affordance on the dashboard, pointing at the Resume action / `campaign --resume`; it adds no new action or CLI verb (#171).
 
 **Improvements:**
 - [user] Campaign Telegram notices now follow one terse, labeled skeleton (`<emoji> <project> · <LABEL> · <context>`), leading with what happened and what to do and shedding low-value rationale (#194).

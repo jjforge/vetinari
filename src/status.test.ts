@@ -1368,6 +1368,74 @@ test("both pages share one set of status-dot rules, scoped to .dot so a state ne
   assert.doesNotMatch(campaign, /\n\s*\.parked \{ background/);
 });
 
+test("renderStatusPage shows a Resume control only for a wave-parked campaign (#171)", () => {
+  const waveParked = renderStatusPage(
+    {
+      project: "beta",
+      waves: [
+        { index: 0, status: "wave-parked", issues: [{ issueNumber: "201", status: "completed" }] },
+        { index: 1, status: "unstarted", issues: [{ issueNumber: "401", status: "unstarted" }] },
+      ],
+      parked: [],
+    },
+    { carve: true },
+  );
+  // A wave-parked campaign offers a Resume action that POSTs to /resume carrying only
+  // its project (resume is project-scoped — no taskId), mirroring the carve/answer forms.
+  assert.match(waveParked, /<form method="post" action="\/resume"[^>]*>/);
+  assert.match(waveParked, /name="project" value="beta"/);
+  assert.match(waveParked, /Resume/);
+
+  // A plain running campaign (no wave-parked wave) shows no Resume control at all.
+  const running = renderStatusPage(
+    {
+      project: "beta",
+      waves: [{ index: 0, status: "running", issues: [{ issueNumber: "201", status: "running" }] }],
+      parked: [],
+    },
+    { carve: true },
+  );
+  assert.doesNotMatch(running, /action="\/resume"/);
+});
+
+test("renderStatusPage shows an informational quarantine affordance with no action of its own (#171)", () => {
+  const quarantined = renderStatusPage(
+    {
+      project: "beta",
+      waves: [
+        {
+          index: 0,
+          status: "running",
+          issues: [
+            { issueNumber: "611", status: "completed" },
+            { issueNumber: "640", status: "quarantined" },
+          ],
+        },
+      ],
+      parked: [],
+    },
+    { carve: true },
+  );
+  // A quarantined issue surfaces a "resolve the conflict, then resume" note...
+  assert.match(quarantined, /class="quarantine-note"/);
+  assert.match(quarantined, /resolve the conflict/i);
+  // ...but the note is informational only — it introduces no action form/route of its own.
+  const note = quarantined.slice(quarantined.indexOf('class="quarantine-note"'));
+  const noteBlock = note.slice(0, note.indexOf("</section>"));
+  assert.doesNotMatch(noteBlock, /<form/);
+
+  // No quarantined issue → no note.
+  const clean = renderStatusPage(
+    {
+      project: "beta",
+      waves: [{ index: 0, status: "running", issues: [{ issueNumber: "611", status: "completed" }] }],
+      parked: [],
+    },
+    { carve: true },
+  );
+  assert.doesNotMatch(clean, /class="quarantine-note"/);
+});
+
 test("failure renders in its own red on every surface, never the carve action's red (#83)", () => {
   const landing = renderLandingShell(["alpha"]);
   const campaign = renderStatusPage(
@@ -2501,6 +2569,103 @@ test("serveAllStatus POST /carve on confirm shells carve in the selected project
     assert.equal(spawned.length, 1);
     assert.deepEqual(spawned[0].args.slice(-2), ["carve", "401"]);
     assert.equal(spawned[0].cwd, join(configDir, "beta-root"));
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serveAllStatus POST /resume shells campaign --resume in the selected project's root", async () => {
+  const configDir = join(tmpdir(), `vetinari-agg-resume-${Date.now()}`);
+  const alphaDir = join(configDir, "state-alpha");
+  const betaDir = join(configDir, "state-beta");
+  // Beta wave-parked (greens merged, base gated red, campaign paused) — the state the
+  // Resume control acts on. Alpha is a plain running campaign, untouched.
+  seedState(alphaDir, [
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["101"]], slots: 1 }),
+  ]);
+  seedState(betaDir, [
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["201", "202"], ["401"]], slots: 1 }),
+    event("campaign-batch", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["201", "202"] }),
+    event("green", { ts: "2025-01-01T00:02:00.000Z", taskId: "201", branch: "agent/201", commits: [] }),
+    event("green", { ts: "2025-01-01T00:03:00.000Z", taskId: "202", branch: "agent/202", commits: [] }),
+    event("wave-parked", { ts: "2025-01-01T00:04:00.000Z", merged: ["201", "202"], detail: "npm test failed" }),
+  ]);
+  register(configDir, {
+    project: "alpha",
+    projectRoot: join(configDir, "alpha-root"),
+    baseLocation: alphaDir,
+  });
+  register(configDir, {
+    project: "beta",
+    projectRoot: join(configDir, "beta-root"),
+    baseLocation: betaDir,
+  });
+
+  const spawned: { args: string[]; cwd: string }[] = [];
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+    spawn: (_cmd, args, options) => spawned.push({ args, cwd: options.cwd }),
+  });
+  const { port } = server.address() as AddressInfo;
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/resume`, {
+      method: "POST",
+      redirect: "manual",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ project: "beta" }).toString(),
+    });
+    // Redirects back to the selected project's board, like carve/answer.
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get("location"), "/?project=beta");
+    // Shells `campaign --resume` against the SELECTED project's own root (dumb router,
+    // ADR 0002), so the shared install continues beta's paused campaign in beta's log.
+    assert.equal(spawned.length, 1);
+    assert.deepEqual(spawned[0].args.slice(-2), ["campaign", "--resume"]);
+    assert.equal(spawned[0].cwd, join(configDir, "beta-root"));
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serveAllStatus POST /resume validates the project (400 missing, 404 unknown)", async () => {
+  const configDir = join(tmpdir(), `vetinari-agg-resume-guard-${Date.now()}`);
+  const betaDir = join(configDir, "state-beta");
+  seedState(betaDir, [
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["201"]], slots: 1 }),
+  ]);
+  register(configDir, {
+    project: "beta",
+    projectRoot: join(configDir, "beta-root"),
+    baseLocation: betaDir,
+  });
+
+  const spawned: unknown[] = [];
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+    spawn: (...a) => spawned.push(a),
+  });
+  const { port } = server.address() as AddressInfo;
+  try {
+    // Missing project → 400, matching the carve route's error contract.
+    const missing = await fetch(`http://127.0.0.1:${port}/resume`, {
+      method: "POST",
+      redirect: "manual",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({}).toString(),
+    });
+    assert.equal(missing.status, 400);
+    // Unknown project → 404.
+    const unknown = await fetch(`http://127.0.0.1:${port}/resume`, {
+      method: "POST",
+      redirect: "manual",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ project: "ghost" }).toString(),
+    });
+    assert.equal(unknown.status, 404);
+    // Neither validation failure shells anything.
+    assert.equal(spawned.length, 0);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

@@ -50,6 +50,7 @@ import {
   reconstructIssueDetail,
   projectRunState,
   reduceCampaign,
+  renderHostLog,
   renderLandingShell,
   viewRelevantEvents,
   renderStatusPage,
@@ -1378,6 +1379,29 @@ test("renderLandingShell mounts the cross-project feed under the cards on every 
   );
   assert.ok(mobileBlock, "the landing has a ≤640px mobile media block");
   assert.doesNotMatch(mobileBlock[0], /\.feed \{ display: none; \}/);
+});
+
+test("renderHostLog renders a gear entry point, a hidden badge, and a hidden host-log pane with a filter (#180)", () => {
+  const html = renderHostLog();
+  // A gear button is the entry point, collapsed by default.
+  assert.match(html, /data-host-log-gear[^>]*aria-expanded="false"/);
+  // Its attention badge starts hidden — a routine-only log shows no badge.
+  assert.match(html, /data-host-log-badge[^>]*hidden/);
+  // The pane itself is hidden until the gear is clicked (not an always-visible section).
+  assert.match(html, /data-host-log-panel[^>]*hidden/);
+  // The one control is a substring filter over the raw lines.
+  assert.match(html, /data-host-log-filter/);
+  // A lines container the client fills from /api/host-log and the SSE host frames.
+  assert.match(html, /data-host-log-lines/);
+});
+
+test("renderLandingShell mounts the host-log gear + pane on the host view (#180)", () => {
+  const html = renderLandingShell(["alpha", "beta"]);
+  // The host-log surface lives on the all-repos landing/host view.
+  assert.match(html, /data-host-log-gear/);
+  assert.match(html, /data-host-log-panel/);
+  // Its initial rows come from the no-daemon host-log reader endpoint.
+  assert.match(html, /\/api\/host-log/);
 });
 
 test("renderLandingShell parked counter expands a cross-repo parked queue in place", () => {

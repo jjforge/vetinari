@@ -13,6 +13,8 @@ import {
 import {
   ARCHIVE_LIST_SCRIPT,
   DASHBOARD_PALETTE_CSS,
+  HOST_LOG_SCRIPT,
+  HOST_LOG_STYLES,
   ISSUE_DETAIL_SHEET_SCRIPT,
   ISSUE_DETAIL_SHEET_STYLES,
   LIVE_TAIL_SCRIPT,
@@ -216,7 +218,7 @@ const renderWaves = (status: CampaignStatus, carve: boolean, interactive: boolea
  * verbatim into the client via `.toString()`, so the badge the browser computes is the
  * same rule the node test exercises.
  */
-export function isNotableHostEvent(event: { event?: string; error?: unknown; ok?: unknown }): boolean {
+export function isNotableHostEvent(event: { event?: string; error?: unknown; ok?: unknown; [key: string]: unknown }): boolean {
   if (typeof event.event === "string" && /fail|error/i.test(event.event)) return true;
   if (event.error !== undefined && event.error !== null) return true;
   if (event.ok === false) return true;
@@ -603,6 +605,34 @@ export const issueDetailSheetMarkup = (carve: boolean) =>
   }</div></div></div>`;
 
 /**
+ * The host-log surface on the all-repos landing/host view (#180): a settings gear the
+ * fleet-level `host.jsonl` (gateway/registry/Telegram/SSE diagnostics across every
+ * project, #157) lives behind, plus its attention badge. The gear is the show/hide —
+ * the pane is `hidden` until it is clicked, deliberately *not* an always-visible section
+ * and *not* folded into the narrated cross-repo event feed (that feed is per-project
+ * narratable milestones; this is host diagnostics). The badge (`data-host-log-badge`)
+ * reveals when the current window holds a notable event (`isNotableHostEvent`) newer than
+ * the operator last opened the pane. The pane is a raw-JSONL viewer — newest-first,
+ * bounded, JSON-highlighted (reusing `highlightJsonLine`) — with a single substring
+ * filter as its only control (no follow/pause/save/clear; that fuller surface is the agent
+ * live-tail's, #124). The server renders only this shell; the client fills the lines from
+ * `GET /api/host-log` on open and appends live over the `/api/events` `host` frame.
+ */
+export const renderHostLog = () =>
+  `<section class="host-log" data-host-log>` +
+  `<button type="button" class="host-log-gear" data-host-log-gear aria-expanded="false" aria-haspopup="dialog" aria-label="Host log" title="Host log — fleet-level diagnostics">` +
+  `<span class="host-log-gear-icon" aria-hidden="true">⚙</span>` +
+  `<span class="host-log-badge" data-host-log-badge hidden aria-hidden="true">!</span>` +
+  `</button>` +
+  `<div class="host-log-panel" data-host-log-panel hidden role="dialog" aria-label="Host log">` +
+  `<div class="host-log-head"><span class="host-log-title">host.jsonl</span><span class="host-log-gap"></span><button type="button" class="host-log-close" data-host-log-close aria-label="Close host log">&times;</button></div>` +
+  `<input type="text" class="host-log-filter" data-host-log-filter placeholder="filter lines…" aria-label="Filter host log lines" />` +
+  `<div class="host-log-lines" data-host-log-lines></div>` +
+  `<div class="host-log-footer" data-host-log-footer></div>` +
+  `</div>` +
+  `</section>`;
+
+/**
  * The all-repos landing shell: a client-rendered (vanilla, no build step) page the
  * aggregated server serves at `GET /`, replacing the old server-rendered status
  * page. The server renders only the chrome — the title, the All-repos↔project
@@ -624,6 +654,7 @@ ${DASHBOARD_PALETTE_CSS}
   body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 0; padding: 1.5rem; background: var(--color-body); color: var(--color-text); }
   h1 { font-size: clamp(1.6rem, 4vw, 2.6rem); margin: 0; letter-spacing: -0.035em; }
 ${TOP_BAR_STYLES}
+${HOST_LOG_STYLES}
   .counters { display: grid; grid-template-columns: repeat(4, 1fr); gap: .75rem; margin: 1.25rem 0; }
   .counter { background: var(--color-box-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: 1rem; }
   .counter-toggle { font: inherit; color: inherit; text-align: left; cursor: pointer; }
@@ -713,6 +744,7 @@ ${ISSUE_DETAIL_SHEET_STYLES}
 </head>
 <body>
 ${renderTopBar(renderRepoDropdown(projects, undefined))}
+${renderHostLog()}
 <section class="counters">
   <div class="counter" data-counter="working"><div class="counter-label">Agents working</div><div class="counter-line"><div class="counter-value">–</div><div class="counter-sub" data-counter-sub="working"></div></div></div>
   <button type="button" class="counter counter-toggle" data-counter="parked" disabled aria-controls="parked-queue"><div class="counter-label">Parked</div><div class="counter-line"><div class="counter-value">–</div><div class="counter-sub" data-counter-sub="parked"></div></div></button>
@@ -957,6 +989,7 @@ ${REPO_DROPDOWN_SCRIPT}
   renderState();
   setInterval(renderUpdated, 1000);
   refresh();
+${HOST_LOG_SCRIPT}
 </script>
 </body>
 </html>`;

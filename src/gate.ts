@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "./config.ts";
+import type { Sandbox } from "./sandbox.ts";
 import { tail, writeGateLog } from "./log.ts";
 import { appendActivity } from "./activity.ts";
 import { event } from "./event-log.ts";
@@ -15,7 +16,7 @@ import { event } from "./event-log.ts";
  */
 export async function runGates(
   cfg: ResolvedConfig,
-  sbx: any,
+  sbx: Sandbox,
   opts: { all?: boolean; taskId?: string } = {},
 ): Promise<{ green: boolean; report: string }> {
   const { taskId } = opts;

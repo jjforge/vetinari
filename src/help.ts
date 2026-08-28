@@ -33,29 +33,29 @@ export const MODES: Mode[] = [
     blurb: "the TDD loop: agent turn → gate → resume on red",
   },
   {
-    signature: 'campaign [--name "…"] [--auto-carve] <batch…>',
+    signature: 'campaign [--name "…"] [--auto-prune] <batch…>',
     blurb:
-      "queue each batch, then merge greens → gate base → next batch. --name labels the run in the dashboard + archived-runs list. If a merge-conflict quarantine strands dependents in later waves the campaign pauses for a human by default; --auto-carve prunes the stranded closure and runs on (ADR 0013)",
+      "queue each batch, then merge greens → gate base → next batch. --name labels the run in the dashboard + archived-runs list. If a merge-conflict quarantine strands dependents in later waves the campaign pauses for a human by default; --auto-prune prunes the stranded closure and runs on (ADR 0013)",
   },
   {
     signature: "campaign --resume",
     blurb:
-      "continue a PAUSED campaign on the current base (after a human fixed a wave-park forward, or carved a suspect): reconstructs the plan from the event log and runs the unrun waves, redoing no already-merged issue. Nothing left to run reports so and exits clean. Takes no batch args (ADR 0013)",
+      "continue a PAUSED campaign on the current base (after a human fixed a wave-park forward, or pruned a suspect): reconstructs the plan from the event log and runs the unrun waves, redoing no already-merged issue. Nothing left to run reports so and exits clean. Takes no batch args (ADR 0013)",
   },
   {
-    signature: "carve <issue>",
+    signature: "prune <issue>",
     blurb:
-      "prune <issue> + everything blocked by it from the RUNNING campaign: appends a carve event the loop honors at the next wave boundary (the in-flight wave finishes; only future waves shrink). Banked work stays — a merged/green member is kept, only parked/not-yet-started ones leave. A carved issue's parked record (branch/worktree/session) is preserved so it stays resumable; --purge is the rare true-drop that clears it. Needs a running campaign (--dry-run to only preview).",
+      "prune <issue> + everything blocked by it from the RUNNING campaign: appends a prune event the loop honors at the next wave boundary (the in-flight wave finishes; only future waves shrink). Banked work stays — a merged/green member is kept, only parked/not-yet-started ones leave. A pruned issue's parked record (branch/worktree/session) is preserved so it stays resumable; --purge is the rare true-drop that clears it. Needs a running campaign (--dry-run to only preview).",
   },
   {
-    signature: "carve <issue> <batch…>",
+    signature: "prune <issue> <batch…>",
     blurb:
       "drop <issue> + everything blocked by it, then run the rest as a fresh reduced campaign from the plan you supply (--dry-run to only print the reduced plan)",
   },
   {
     signature: "graft <ids…>",
     blurb:
-      "add issues to a RUNNING (or paused/wave-parked/resumable) campaign — the additive mirror of carve (ADR 0014): appends a graft event the loop honors at the next wave boundary. The in-flight wave finishes untouched; the added issues re-layer into future waves (after their blockers, basename-disjoint), leaving already-planned waves stable. Rejected whole — naming the offenders — if any id is unknown/closed or already in the campaign. Needs a campaign that has not finished (--dry-run to only print the resulting placement).",
+      "add issues to a RUNNING (or paused/wave-parked/resumable) campaign — the additive mirror of prune (ADR 0014): appends a graft event the loop honors at the next wave boundary. The in-flight wave finishes untouched; the added issues re-layer into future waves (after their blockers, basename-disjoint), leaving already-planned waves stable. Rejected whole — naming the offenders — if any id is unknown/closed or already in the campaign. Needs a campaign that has not finished (--dry-run to only print the resulting placement).",
   },
   {
     signature: "campaign-plan <ids…>",
@@ -89,7 +89,7 @@ export const MODES: Mode[] = [
   {
     signature: "gateway",
     blurb:
-      "the host daemon fronting every registered project: the sole Telegram consumer and sender — announces parked questions, routes replies to the right project+task, and resumes them concurrently via the shared install. Also recognizes `carve <issue>` (and `carve <project> <issue>` when several campaigns run on one bot): previews the closure and carves the resolved project on a `yes` reply to the preview",
+      "the host daemon fronting every registered project: the sole Telegram consumer and sender — announces parked questions, routes replies to the right project+task, and resumes them concurrently via the shared install. Also recognizes `prune <issue>` (and `prune <project> <issue>` when several campaigns run on one bot): previews the closure and prunes the resolved project on a `yes` reply to the preview",
   },
   {
     signature: "gateway install [--dry-run]",

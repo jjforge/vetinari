@@ -7,9 +7,9 @@ import { join } from "node:path";
 import { applyCollect, collectFragments, foldFragments, formatMilestoneDate, parseFragment } from "./changelog.ts";
 
 test("parseFragment reads a single section and its bullets", () => {
-  const frag = ["section: Bug fixes", "- [user] a carve of a merged target dropped its dependents (#42)."].join("\n");
+  const frag = ["section: Bug fixes", "- [user] a prune of a merged target dropped its dependents (#42)."].join("\n");
   assert.deepEqual(parseFragment(frag), [
-    { section: "Bug fixes", bullets: ["- [user] a carve of a merged target dropped its dependents (#42)."] },
+    { section: "Bug fixes", bullets: ["- [user] a prune of a merged target dropped its dependents (#42)."] },
   ]);
 });
 

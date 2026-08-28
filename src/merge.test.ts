@@ -159,7 +159,7 @@ test("integrateGreens wave-parks a red merged base: leaves the greens merged, do
     assert.equal(result.parked!.reason, "gate-red");
     assert.ok(result.parked!.detail.includes("GATE FAILED here"));
 
-    // Branches are preserved so a human can fix forward or carve a suspect and resume.
+    // Branches are preserved so a human can fix forward or prune a suspect and resume.
     assert.equal(git(["branch", "--list", "agent/A"]).length > 0, true);
     assert.equal(git(["branch", "--list", "agent/B"]).length > 0, true);
   } finally {

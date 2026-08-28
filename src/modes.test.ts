@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import {
-  autoCarveNotice,
+  autoPruneNotice,
   build,
   buildImageArgs,
   campaign,
@@ -186,7 +186,7 @@ test("waveParkedNotice draws attention to a paused campaign whose greens stay me
   assert.ok(/no attributable culprit/i.test(notice.text));
   // Self-contained recovery: it names the exact commands to type (folded from #170).
   assert.ok(notice.text.includes("campaign --resume"));
-  assert.ok(notice.text.includes("carve <issue>"));
+  assert.ok(notice.text.includes("prune <issue>"));
   // The gate report tail rides along so the human sees why it went red.
   assert.ok(notice.text.includes("GATE FAILED"));
 });
@@ -209,21 +209,21 @@ test("quarantinePauseNotice draws a human to a campaign paused by a quarantine t
   assert.ok(/pause/i.test(notice.text));
   // Points at both recovery paths, each by its exact command (folded from #170).
   assert.ok(notice.text.includes("campaign --resume"));
-  assert.ok(notice.text.includes("campaign --auto-carve"));
+  assert.ok(notice.text.includes("campaign --auto-prune"));
 });
 
-test("autoCarveNotice reports the pruned dependents and that the campaign ran on", () => {
-  const notice = autoCarveNotice("acme", 1, [
+test("autoPruneNotice reports the pruned dependents and that the campaign ran on", () => {
+  const notice = autoPruneNotice("acme", 1, [
     { target: "640", removed: ["640", "701"], dropped: ["701"] },
   ]);
   // Informational — the campaign continued, so it rides the progress channel.
   assert.equal(notice.category, "progress");
-  assert.equal(notice.event, "auto-carve");
+  assert.equal(notice.event, "auto-prune");
   // Header follows the labeled skeleton: emoji · project · LABEL · context.
-  assert.ok(notice.text.startsWith("✂️ acme · AUTO-CARVE · batch 1"));
+  assert.ok(notice.text.startsWith("✂️ acme · AUTO-PRUNE · batch 1"));
   assert.ok(notice.text.includes("640"));
   assert.ok(notice.text.includes("701"));
-  assert.ok(/carve/i.test(notice.text));
+  assert.ok(/prune/i.test(notice.text));
 });
 
 test("markMergedIssues is a no-op when onIssueMerged is unconfigured — core names no labels", async () => {

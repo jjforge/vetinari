@@ -5,7 +5,7 @@ import type { ResolvedConfig } from "./config.ts";
 import { hostLogger, type Logger } from "./log.ts";
 import { type ProjectPointer } from "./registry.ts";
 import { listParked, parkedDirOf, type ParkedRecord } from "./state.ts";
-import { applyCarve } from "./carve.ts";
+import { applyPrune } from "./prune.ts";
 import { applyGraft } from "./plan.ts";
 import { festiveWaveName } from "./festive-names.ts";
 import { readEventLog, type GreenEvent, type OrchestratorEvent } from "./event-log.ts";
@@ -47,13 +47,13 @@ export type IssueStatus = "completed" | "parked" | "failure" | "running" | "unst
 /**
  * A chip's status as the dashboard renders it: the orchestrator's own `IssueStatus`
  * plus two states derived at render rather than carried as enum values — the agent
- * loop and `IssueStatus` stay untouched (ADR 0007). `carved` is folded from carve
+ * loop and `IssueStatus` stay untouched (ADR 0007). `pruned` is folded from prune
  * events; `quarantined` (ADR 0013) from the `quarantined` event a merge conflict
  * logs, an attention-class state that outranks the issue's own green outcome until
  * it is resolved and re-merged. Only the view layer knows them; `reduceCampaign`'s
  * `outcomes` stay `IssueStatus`.
  */
-export type DisplayStatus = IssueStatus | "carved" | "grafted" | "quarantined" | "interrupted";
+export type DisplayStatus = IssueStatus | "pruned" | "grafted" | "quarantined" | "interrupted";
 
 export interface StatusIssue {
   issueNumber: string;
@@ -67,7 +67,7 @@ export interface StatusIssue {
  * run-level held state a red merged base leaves: every green passed alone, the
  * combined base gated red, so the wave's greens stay merged and the campaign pauses
  * for a human — distinct from an issue `parked`, which is one issue's slot awaiting
- * a reply. Derived at render from the `wave-parked` event, like `carved`/`quarantined`.
+ * a reply. Derived at render from the `wave-parked` event, like `pruned`/`quarantined`.
  * `interrupted` is the archived-run reconciliation (#152): an interrupted run's log
  * ends with no terminal event, so its in-flight `running` wave is folded to this
  * terminal state — an archived run must never render a live status.
@@ -310,8 +310,8 @@ export function describeEvent(e: OrchestratorEvent, festive?: { offset: number }
       return `${hash(e.taskId)} quarantined — resolve the conflict`;
     case "wave-parked":
       return "Wave parked — merged base gated red";
-    case "carve":
-      return `Carved ${(e.removed ?? []).map(hash).join(", ")}`;
+    case "prune":
+      return `Pruned ${(e.removed ?? []).map(hash).join(", ")}`;
     case "graft":
       return `Grafted ${(e.ids ?? []).map(hash).join(", ")}`;
     case "telegram-unconfigured":
@@ -441,23 +441,23 @@ export function extractParkedDetails(question: string): { description: string; o
 export interface ReducedCampaign {
   waves: string[][];
   /** the original wave membership as the run was launched (or a queue run's single
-   * frame), before any carve pruned it — the layout the dashboard renders so a
-   * carved issue still shows as a chip in the wave it left. `waves` is the pruned,
+   * frame), before any prune pruned it — the layout the dashboard renders so a
+   * pruned issue still shows as a chip in the wave it left. `waves` is the pruned,
    * loop-facing plan; `layout` is display-facing and never loses a member. */
   layout: string[][];
-  /** the issues a carve actually dropped from the plan (parked/unstarted members),
-   * in log order — rendered `carved` (ADR 0007). A superset key over `outcomes`,
-   * which stays `IssueStatus`; carved is a render overlay, not a stored status. */
-  carved: Set<string>;
+  /** the issues a prune actually dropped from the plan (parked/unstarted members),
+   * in log order — rendered `pruned` (ADR 0007). A superset key over `outcomes`,
+   * which stays `IssueStatus`; pruned is a render overlay, not a stored status. */
+  pruned: Set<string>;
   /** the issues a graft added to the running campaign that are still unstarted —
-   * rendered `grafted` (ADR 0014), the additive mirror of `carved`. A render overlay
+   * rendered `grafted` (ADR 0014), the additive mirror of `pruned`. A render overlay
    * derived from graft events, **transient**: an id drops out of this set the moment it
    * reaches a started outcome (`running`/`completed`/…), so it reads `grafted` only
    * while waiting in a later wave. Both live and archived runs see it. */
   grafted: Set<string>;
   /** the issues a merge conflict quarantined out of integration (ADR 0013), folded
    * from `quarantined` events in log order and cleared once the issue re-merges. A
-   * render overlay like `carved`: it outranks the issue's `IssueStatus` outcome (a
+   * render overlay like `pruned`: it outranks the issue's `IssueStatus` outcome (a
    * quarantined issue passed its own gate, so `outcomes` holds `completed`) so the
    * chip reads `quarantined` while the conflict is unresolved. */
   quarantined: Set<string>;
@@ -505,7 +505,7 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
 
   let waves: string[][] = [];
   let layout: string[][] = [];
-  const carved = new Set<string>();
+  const pruned = new Set<string>();
   const grafted = new Set<string>();
   const quarantined = new Set<string>();
   let name: string | undefined;
@@ -569,7 +569,7 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
       details.set(taskId, `Parked: ${e.reason ?? "needs attention"}`);
     } else if (e.event === "quarantined" && e.taskId) {
       // A merge conflict pulled this green from integration (ADR 0013). Overlay it
-      // like `carved` — the issue's own outcome is `completed` (it passed its gate),
+      // like `pruned` — the issue's own outcome is `completed` (it passed its gate),
       // so the set is what makes the chip read `quarantined` until it re-merges.
       const taskId = normalizeIssue(String(e.taskId));
       quarantined.add(taskId);
@@ -594,17 +594,17 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
       const taskId = normalizeIssue(String(e.taskId));
       outcomes.set(taskId, "failure");
       details.set(taskId, `Campaign halted: ${e.reason ?? "failure"}`);
-    } else if (e.event === "carve" && Array.isArray(e.removed)) {
-      // Prune the running campaign at the point the carve was issued: banked and
+    } else if (e.event === "prune" && Array.isArray(e.removed)) {
+      // Prune the running campaign at the point the prune was issued: banked and
       // in-flight members stay, only parked/unstarted ones leave (ADR 0005).
       // Folding it in log order means `outcomes` already reflects the state the
-      // carve saw, so the same rule replays deterministically. The dropped members
-      // are remembered (not just removed) so the display can render them `carved`
+      // prune saw, so the same rule replays deterministically. The dropped members
+      // are remembered (not just removed) so the display can render them `pruned`
       // in the wave they left, while `waves` stays the pruned loop-facing plan.
-      const applied = applyCarve({ waves, outcomes }, e.removed.map(String));
+      const applied = applyPrune({ waves, outcomes }, e.removed.map(String));
       for (const id of applied.dropped) {
-        carved.add(id);
-        details.set(id, "Carved out of the campaign");
+        pruned.add(id);
+        details.set(id, "Pruned out of the campaign");
       }
       waves = applied.remaining;
     } else if (e.event === "graft" && Array.isArray(e.ids)) {
@@ -619,7 +619,7 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
       applied.remaining.forEach((wave, i) => wave.forEach((id) => placeOf.set(id, i)));
       const survivors: number[] = [];
       layout.forEach((wave, i) => {
-        if (wave.some((id) => !carved.has(id))) survivors.push(i);
+        if (wave.some((id) => !pruned.has(id))) survivors.push(i);
       });
       const layoutOf = new Map<number, number>();
       survivors.forEach((layoutIndex, prunedIndex) => layoutOf.set(prunedIndex, layoutIndex));
@@ -641,7 +641,7 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
   // becomes `running` on pickup — so drop any grafted id that has since reached an outcome.
   for (const id of [...grafted]) if (outcomes.has(id)) grafted.delete(id);
 
-  return { waves, layout, carved, grafted, quarantined, name, festiveOffset, outcomes, details, titles, mergedAt, halted, closedWaves, currentWave, parkedWave };
+  return { waves, layout, pruned, grafted, quarantined, name, festiveOffset, outcomes, details, titles, mergedAt, halted, closedWaves, currentWave, parkedWave };
 }
 
 /** One entry in an issue's turn log (ADR 0009): the turn's number as logged
@@ -701,8 +701,8 @@ const eventNamesIssue = (e: OrchestratorEvent, id: string): boolean => {
  */
 export function reconstructIssueDetail(events: OrchestratorEvent[], issueNumber: string): IssueDetail {
   const id = normalizeIssue(issueNumber);
-  const { outcomes, carved, grafted, quarantined, titles, name } = reduceCampaign(events);
-  const status: DisplayStatus = carved.has(id) ? "carved" : quarantined.has(id) ? "quarantined" : grafted.has(id) ? "grafted" : outcomes.get(id) ?? "unstarted";
+  const { outcomes, pruned, grafted, quarantined, titles, name } = reduceCampaign(events);
+  const status: DisplayStatus = pruned.has(id) ? "pruned" : quarantined.has(id) ? "quarantined" : grafted.has(id) ? "grafted" : outcomes.get(id) ?? "unstarted";
 
   const latestCampaignIndex = events.findLastIndex((e) => e.event === "campaign-start" && Array.isArray(e.batches));
   const relevant = latestCampaignIndex >= 0 ? events.slice(latestCampaignIndex) : events;
@@ -725,7 +725,7 @@ export function reconstructIssueDetail(events: OrchestratorEvent[], issueNumber:
 /**
  * Is a campaign currently running over this event log? True iff the latest
  * `campaign-start` has no `campaign-done` or `campaign-halt` after it — the
- * condition the no-plan `carve <issue>` needs before it can prune (ADR 0005).
+ * condition the no-plan `prune <issue>` needs before it can prune (ADR 0005).
  * A queue-only run with no campaign frame is not a campaign and returns false.
  */
 export function campaignRunning(events: OrchestratorEvent[]): boolean {
@@ -809,8 +809,8 @@ export interface ArchivedRun {
   /** the run's start time as an ISO timestamp, parsed from its `run` token; undefined
    * for a token that doesn't parse (so the row falls back to the token verbatim). */
   startedAt?: string;
-  /** how many issues the run's plan spanned (its full pre-carve membership, so a
-   * carved-out issue still counts — it renders as a chip in the expanded view). */
+  /** how many issues the run's plan spanned (its full pre-prune membership, so a
+   * pruned-out issue still counts — it renders as a chip in the expanded view). */
   issues: number;
 }
 
@@ -873,7 +873,7 @@ export function summarizeRun(events: OrchestratorEvent[]): string {
 }
 
 export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
-  const { waves, layout, carved, grafted, quarantined, name, festiveOffset, outcomes, details, titles, closedWaves, currentWave, parkedWave } = reduceCampaign(readEventLog(cfg));
+  const { waves, layout, pruned, grafted, quarantined, name, festiveOffset, outcomes, details, titles, closedWaves, currentWave, parkedWave } = reduceCampaign(readEventLog(cfg));
 
   const activeIssueNumbers = new Set(waves.flat());
   const closedIssueNumbers = new Set([...closedWaves].flatMap((index) => waves[index] ?? []));
@@ -887,14 +887,14 @@ export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
     details.set(taskId, `Parked: ${parked.reason}`);
   }
 
-  // Display waves render off `layout` (the pre-carve membership) so a carved issue
-  // still shows as a `carved` chip in the wave it left (ADR 0007). `closedWaves`
+  // Display waves render off `layout` (the pre-prune membership) so a pruned issue
+  // still shows as a `pruned` chip in the wave it left (ADR 0007). `closedWaves`
   // and `currentWave` index the pruned `waves`, so each surviving layout wave maps
   // to its pruned index by counting non-empty layout waves before it; a wholly
-  // carved-out wave keeps its slot as an unstarted wave of carved chips.
+  // pruned-out wave keeps its slot as an unstarted wave of pruned chips.
   let prunedIndex = 0;
   const displayWaves = layout.map((wave, index) => {
-    const survives = wave.some((issueNumber) => !carved.has(issueNumber));
+    const survives = wave.some((issueNumber) => !pruned.has(issueNumber));
     const prunedWave = survives ? prunedIndex++ : -1;
     return {
       index,
@@ -910,10 +910,10 @@ export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
             : "unstarted") as WaveStatus,
       issues: wave.map((issueNumber) => ({
         issueNumber,
-        // carved/quarantined/grafted are render overlays that outrank the stored outcome
-        // (ADR 0007/0013/0014); carved wins over quarantined (a carve removes the issue).
+        // pruned/quarantined/grafted are render overlays that outrank the stored outcome
+        // (ADR 0007/0013/0014); pruned wins over quarantined (a prune removes the issue).
         // `grafted` is transient and already scoped to still-unstarted issues by the reducer.
-        status: (carved.has(issueNumber) ? "carved" : quarantined.has(issueNumber) ? "quarantined" : grafted.has(issueNumber) ? "grafted" : outcomes.get(issueNumber) ?? "unstarted") as DisplayStatus,
+        status: (pruned.has(issueNumber) ? "pruned" : quarantined.has(issueNumber) ? "quarantined" : grafted.has(issueNumber) ? "grafted" : outcomes.get(issueNumber) ?? "unstarted") as DisplayStatus,
         name: titles.get(issueNumber),
         detail: details.get(issueNumber),
       })),
@@ -1249,12 +1249,12 @@ export interface LandingView {
  * state wins — a repo with one parked question and four running agents reads
  * `parked`, because the question is the thing that needs a person; `failure` ranks
  * just below, since it also needs a human but a parked question is the more direct
- * ask. Carved chips are display-only ghosts of issues that left the plan, so the
- * roll-up reads the live plan (a run whose only unmerged work was carved still lands).
+ * ask. Pruned chips are display-only ghosts of issues that left the plan, so the
+ * roll-up reads the live plan (a run whose only unmerged work was pruned still lands).
  */
 export const projectRunState = (status: CampaignStatus): RunState => {
   if (!status.waves.length) return "idle";
-  const issues = status.waves.flatMap((wave) => wave.issues).filter((i) => i.status !== "carved");
+  const issues = status.waves.flatMap((wave) => wave.issues).filter((i) => i.status !== "pruned");
   if (status.parked.length) return "parked";
   if (issues.some((i) => i.status === "failure")) return "failure";
   if (issues.some((i) => i.status === "running")) return "running";
@@ -1309,7 +1309,7 @@ const mergedTodayForProject = (baseLocation: string, liveEvents: OrchestratorEve
  * through; the render overlays map to their effective base so no issue silently
  * leaks out of the count (#200): `grafted`/`interrupted` are outstanding work →
  * `unstarted`, `quarantined` is an attention state grouped with `parked`, and
- * `carved` is pruned from the campaign so it counts nowhere (ADR 0007/0013/0014).
+ * `pruned` is pruned from the campaign so it counts nowhere (ADR 0007/0013/0014).
  * Mirrors the statusline's own `countBucket` fold (#199) so the two count surfaces
  * agree by construction rather than drifting. Pure.
  */
@@ -1320,7 +1320,7 @@ export function effectiveStatus(status: DisplayStatus): IssueStatus | null {
       return "unstarted";
     case "quarantined":
       return "parked";
-    case "carved":
+    case "pruned":
       return null; // pruned from the campaign — counted in no bucket
     default:
       return status;
@@ -1335,8 +1335,8 @@ const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, event
     const [latest] = listArchivedRuns(pointer.baseLocation, logger);
     // An idle card's numbers come from the last archived run, not the emptied live
     // log: reconstruct it and read its real merged % so a completed run no longer
-    // reads 0% (#70). `waves` is already the pruned plan (carved issues dropped), so
-    // the ratio matches the live card's carved-aware count.
+    // reads 0% (#70). `waves` is already the pruned plan (pruned issues dropped), so
+    // the ratio matches the live card's pruned-aware count.
     const archived = latest ? reduceCampaign(readEventLog({ logFile: latest.file })) : undefined;
     const archivedIssues = archived ? archived.waves.flat() : [];
     const merged = archived ? archivedIssues.filter((n) => archived.outcomes.get(n) === "completed").length : 0;
@@ -1351,11 +1351,11 @@ const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, event
       lastEvent: latest ? `Last run: ${latest.summary}` : "No runs yet",
     };
   }
-  // The card reflects the live plan, not the display's carved ghosts: drop carved
-  // chips (and any wave left wholly carved) so wave counts and progress match what
-  // is actually still running (ADR 0007's carved is a campaign-view overlay only).
+  // The card reflects the live plan, not the display's pruned ghosts: drop pruned
+  // chips (and any wave left wholly pruned) so wave counts and progress match what
+  // is actually still running (ADR 0007's pruned is a campaign-view overlay only).
   const liveWaves = status.waves
-    .map((wave) => ({ ...wave, issues: wave.issues.filter((i) => i.status !== "carved") }))
+    .map((wave) => ({ ...wave, issues: wave.issues.filter((i) => i.status !== "pruned") }))
     .filter((wave) => wave.issues.length);
   const issues = liveWaves.flatMap((wave) => wave.issues);
   const total = liveWaves.length;

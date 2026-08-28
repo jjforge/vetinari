@@ -2,7 +2,7 @@ import { listProjects } from "./registry.ts";
 import { readBody, type RouteHandler } from "./dashboard-http.ts";
 import { renderAggregatedGraftRejection } from "./dashboard-render.ts";
 
-/** `graft` is variadic, so both routes carry a *set* of ids rather than carve's
+/** `graft` is variadic, so both routes carry a *set* of ids rather than prune's
  *  single target — parsed off the same whitespace/comma split the CLI uses. */
 const parseIds = (raw: string | null) => (raw ?? "").split(/[\s,]+/).filter(Boolean);
 
@@ -11,7 +11,7 @@ const parseIds = (raw: string | null) => (raw ?? "").split(/[\s,]+/).filter(Bool
  * before any POST, so it can disclose where the added issues would land (and any
  * whole-batch rejection) before committing. The closure is computed by the selected
  * project's own install (dumb router, ADR 0002), never here. The additive mirror of
- * `handleCarvePreview`, carrying a set of ids.
+ * `handlePrunePreview`, carrying a set of ids.
  */
 export const handleGraftPreview: RouteHandler = async (req, res, url, deps) => {
   if (!(req.method === "GET" && url.pathname === "/graft" && url.searchParams.has("preview"))) return false;
@@ -46,7 +46,7 @@ export const handleGraftPreview: RouteHandler = async (req, res, url, deps) => {
  * with any offender grafts *nothing* and returns the per-id verdicts (422), so the
  * summary-line input can show them inline and retain the typed ids. The aggregated site
  * is a dumb router (ADR 0002), so it routes to the project's own install, exactly as
- * carve and the Telegram gateway do.
+ * prune and the Telegram gateway do.
  */
 export const handleGraft: RouteHandler = async (req, res, url, deps) => {
   if (!(req.method === "POST" && url.pathname === "/graft")) return false;

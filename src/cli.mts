@@ -33,7 +33,7 @@ import {
   type TidyTarget,
 } from "./merge.ts";
 import { gateway } from "./gateway.ts";
-import { runCarve } from "./carve.ts";
+import { runPrune } from "./prune.ts";
 import {
   runCampaignPlan,
   type UnderspecifiedDecision,
@@ -566,11 +566,11 @@ switch (mode) {
     // Each positional arg is one batch: `campaign "436 611 623" "640 655" "701"`;
     // an optional `--name "…"` labels the run in the dashboard and archive.
     let name: string | undefined;
-    // `--auto-carve` opts into pruning a quarantine's stranded dependents and running
+    // `--auto-prune` opts into pruning a quarantine's stranded dependents and running
     // on; the default pauses at the wave boundary for a human (ADR 0013).
-    let autoCarve = false;
+    let autoPrune = false;
     // `--resume` continues the paused campaign already in the log (a wave-park a human
-    // fixed forward, or a carve they resolved) on the current base, from the plan the
+    // fixed forward, or a prune they resolved) on the current base, from the plan the
     // log reconstructs — no batch args needed (ADR 0013).
     let resume = false;
     const positional: string[] = [];
@@ -578,7 +578,7 @@ switch (mode) {
       const a = rest[i];
       if (a.startsWith("--name=")) name = a.slice("--name=".length);
       else if (a === "--name") name = rest[++i];
-      else if (a === "--auto-carve") autoCarve = true;
+      else if (a === "--auto-prune") autoPrune = true;
       else if (a === "--resume") resume = true;
       else positional.push(a);
     }
@@ -596,17 +596,17 @@ switch (mode) {
     // Archive every completed run — failed/halted or clean — so a halt still enters
     // the archived-runs list to inspect (#141). archiveIfIdle no-ops while parked,
     // so a still-waiting run (not finished) stays live as before.
-    await campaign(cfg, batches, hostBudget, name, { autoCarve, resume });
+    await campaign(cfg, batches, hostBudget, name, { autoPrune, resume });
     archiveIfIdle();
     break;
   }
-  case "carve": {
-    // `carve <issue>` prunes the running campaign; `carve <issue> "611 640" …`
-    // launches a reduced one. The orchestration lives in `runCarve` (a testable
+  case "prune": {
+    // `prune <issue>` prunes the running campaign; `prune <issue> "611 640" …`
+    // launches a reduced one. The orchestration lives in `runPrune` (a testable
     // seam mirroring `runGraft`); the command only parses args and renders output.
     const dryRun = rest.includes("--dry-run");
-    // `--purge` is the rare true-drop: clear the carved issue's parked record too,
-    // discarding its resumable session. Default carve preserves it (ADR 0013).
+    // `--purge` is the rare true-drop: clear the pruned issue's parked record too,
+    // discarding its resumable session. Default prune preserves it (ADR 0013).
     const purge = rest.includes("--purge");
     const positional = rest.filter((a) => a !== "--dry-run" && a !== "--purge");
     const [target, ...batchArgs] = positional;
@@ -615,13 +615,13 @@ switch (mode) {
       ? batchArgs.map((b) => b.split(/[\s,]+/).filter(Boolean)).filter((b) => b.length)
       : undefined;
 
-    const result = await runCarve(cfg, target, { dryRun, purge, plan, host: hostBudget });
+    const result = await runPrune(cfg, target, { dryRun, purge, plan, host: hostBudget });
     const tgt = result.target;
 
     if (result.mode === "launch") {
       const dependents = result.removed.filter((id) => id !== tgt);
       console.log(
-        `carve #${tgt} → removed ${result.removed.map((i) => `#${i}`).join(", ")}` +
+        `prune #${tgt} → removed ${result.removed.map((i) => `#${i}`).join(", ")}` +
           (dependents.length
             ? ` (dependents: ${dependents.map((i) => `#${i}`).join(", ")})`
             : " (no dependents)"),
@@ -630,12 +630,12 @@ switch (mode) {
         `remaining campaign: ${result.remaining.length ? result.remaining.map((w) => `"${w.join(" ")}"`).join(" ") : "(nothing left to run)"}`,
       );
       if (!dryRun && !result.remaining.length)
-        console.log("nothing left to run after the carve — done.");
+        console.log("nothing left to run after the prune — done.");
       break;
     }
 
     console.log(
-      `carve #${tgt} → ${result.dropped.length ? `dropping ${result.dropped.map((i) => `#${i}`).join(", ")}` : "nothing to drop"}` +
+      `prune #${tgt} → ${result.dropped.length ? `dropping ${result.dropped.map((i) => `#${i}`).join(", ")}` : "nothing to drop"}` +
         (result.kept.length
           ? ` (keeping banked ${result.kept.map((i) => `#${i}`).join(", ")})`
           : ""),
@@ -651,19 +651,19 @@ switch (mode) {
       );
     if (result.closure) {
       // Structured closure alongside the human text, so a consumer (the
-      // aggregated dashboard's carve preview) can name the exact closure
+      // aggregated dashboard's prune preview) can name the exact closure
       // without re-parsing the prose above.
-      console.log(`carve-closure ${JSON.stringify(result.closure)}`);
+      console.log(`prune-closure ${JSON.stringify(result.closure)}`);
       break;
     }
     console.log(
-      "carve event appended — the running campaign will prune future waves at the next wave boundary.",
+      "prune event appended — the running campaign will prune future waves at the next wave boundary.",
     );
     break;
   }
   case "graft": {
     // `graft <ids…>` adds issues to a running (or resumable) campaign — the additive
-    // mirror of `carve` (ADR 0014). The orchestration lives in `runGraft` (a testable
+    // mirror of `prune` (ADR 0014). The orchestration lives in `runGraft` (a testable
     // seam, #176); the command only parses args and renders the console output.
     const dryRun = rest.includes("--dry-run");
     const ids = rest
@@ -687,7 +687,7 @@ switch (mode) {
     if (result.closure) {
       // Structured closure alongside the human text, so the aggregated dashboard's
       // graft preview names the placement (and any rejection) without re-parsing the
-      // prose above — the additive mirror of `carve-closure` (E2).
+      // prose above — the additive mirror of `prune-closure` (E2).
       console.log(`graft-closure ${JSON.stringify(result.closure)}`);
       break;
     }

@@ -21,7 +21,7 @@ import {
   enqueueOutbound,
   listParked,
 } from "./state.ts";
-import { quarantineImpacts, resumeIndex, type QuarantineImpact } from "./carve.ts";
+import { quarantineImpacts, resumeIndex, type QuarantineImpact } from "./prune.ts";
 import { tgSend, tgWaitReply, type TgConn } from "./telegram.ts";
 import { hostSecretsPath, tgConnForBaseLocation } from "./registry.ts";
 import { issueNameFromTask, readEventLog, reduceCampaign } from "./status.ts";
@@ -342,7 +342,7 @@ export async function queue(
  * Best-effort, like the outbox: the orchestrator runs locally and may be offline,
  * so a failing write is logged and swallowed per issue — it never throws, never
  * fails, and never rolls back the campaign, and one bad write never blocks the
- * rest. Only the green `merged` set is passed in, so parked/carved/failed issues
+ * rest. Only the green `merged` set is passed in, so parked/pruned/failed issues
  * are excluded by construction.
  */
 export async function markMergedIssues(
@@ -366,7 +366,7 @@ export async function markMergedIssues(
  * The operator-facing notice a wave-park enqueues (ADR 0013). The merged base gated red
  * with no attributable culprit — every issue passed alone — so the wave's greens stay
  * merged on the base and the campaign pauses for a human to resolve: fix forward and
- * resume, or carve a suspect. `category: "failure"` routes it to the same alert channel
+ * resume, or prune a suspect. `category: "failure"` routes it to the same alert channel
  * the old halt used, since a paused red base demands attention; the gate-report `detail`
  * tail rides along so the human sees why it went red. Pure, so the wording and routing
  * are checkable without running a campaign.
@@ -381,14 +381,14 @@ export function waveParkedNotice(
   return {
     category: "failure",
     event: "wave-parked",
-    text: `🅿️ ${project} · WAVE-PARKED · batch ${batchNumber}\nBase gated red, no attributable culprit — greens (${merged.join(", ") || "none"}) kept on ${baseBranch}, campaign paused.\nRecover: \`campaign --resume\` (after fix-forward) or \`carve <issue>\`\n\n${detail}`,
+    text: `🅿️ ${project} · WAVE-PARKED · batch ${batchNumber}\nBase gated red, no attributable culprit — greens (${merged.join(", ") || "none"}) kept on ${baseBranch}, campaign paused.\nRecover: \`campaign --resume\` (after fix-forward) or \`prune <issue>\`\n\n${detail}`,
   };
 }
 
 /**
  * Render each quarantined issue and the dependents it stranded as `#640 → #701, #702`,
  * one per line — the shared body both quarantine notices show so a human reads the same
- * blast radius whether the campaign paused or carved on.
+ * blast radius whether the campaign paused or pruned on.
  */
 function describeQuarantineImpacts(impacts: QuarantineImpact[]): string {
   return impacts
@@ -402,7 +402,7 @@ function describeQuarantineImpacts(impacts: QuarantineImpact[]): string {
  * call that belongs to a human — so the campaign pauses at the wave boundary with the
  * greens already merged left in place. `category: "failure"` routes it to the alert
  * channel a wave-park uses. The human has two moves: resolve the quarantined issue's
- * conflict and resume, or re-run with `--auto-carve` to prune the stranded dependents
+ * conflict and resume, or re-run with `--auto-prune` to prune the stranded dependents
  * and continue. Pure, so the wording and routing are checkable without a campaign.
  */
 export function quarantinePauseNotice(
@@ -414,25 +414,25 @@ export function quarantinePauseNotice(
   return {
     category: "failure",
     event: "quarantine-paused",
-    text: `🅿️ ${project} · QUARANTINE-PAUSED · batch ${batchNumber}\nMerge-conflict quarantine stranded dependents in later waves — greens kept on ${baseBranch}, campaign paused.\nQuarantined → orphaned:\n${describeQuarantineImpacts(impacts)}\nRecover: \`campaign --resume\` (after resolving the conflict) or \`campaign --auto-carve\` to prune and continue`,
+    text: `🅿️ ${project} · QUARANTINE-PAUSED · batch ${batchNumber}\nMerge-conflict quarantine stranded dependents in later waves — greens kept on ${baseBranch}, campaign paused.\nQuarantined → orphaned:\n${describeQuarantineImpacts(impacts)}\nRecover: \`campaign --resume\` (after resolving the conflict) or \`campaign --auto-prune\` to prune and continue`,
   };
 }
 
 /**
- * The notice `campaign --auto-carve` enqueues when it prunes a quarantine's stranded
+ * The notice `campaign --auto-prune` enqueues when it prunes a quarantine's stranded
  * dependents and runs on (ADR 0013). Informational — the campaign continued — so it
  * rides the `progress` channel, naming each quarantined issue and the dependents its
- * carve pruned. Pure, checkable without a campaign.
+ * prune pruned. Pure, checkable without a campaign.
  */
-export function autoCarveNotice(
+export function autoPruneNotice(
   project: string,
   batchNumber: number,
   impacts: QuarantineImpact[],
 ): { category: MessageCategory; event: string; text: string } {
   return {
     category: "progress",
-    event: "auto-carve",
-    text: `✂️ ${project} · AUTO-CARVE · batch ${batchNumber}\nQuarantine stranded dependents — closure carved, campaign ran on.\nQuarantined → carved:\n${describeQuarantineImpacts(impacts)}`,
+    event: "auto-prune",
+    text: `✂️ ${project} · AUTO-PRUNE · batch ${batchNumber}\nQuarantine stranded dependents — closure pruned, campaign ran on.\nQuarantined → pruned:\n${describeQuarantineImpacts(impacts)}`,
   };
 }
 
@@ -473,14 +473,14 @@ const defaultCampaignDeps: CampaignDeps = {
  *
  * A quarantine that strands dependents in later, unstarted waves is a blast-radius
  * call for a human, so by default the campaign pauses at the wave boundary (ADR 0013);
- * `opts.autoCarve` opts into pruning the stranded closure and running on. A quarantine
+ * `opts.autoPrune` opts into pruning the stranded closure and running on. A quarantine
  * that orphans nothing never stops the campaign.
  *
  * `opts.resume` continues a *paused* campaign on the current base rather than starting a
  * fresh one (ADR 0013): it reconstructs the existing plan from the event log (no new
  * `campaign-start`, no re-resolved titles), skips every wave that already banked work
  * (`resumeIndex`), and runs the remainder — so a wave-park a human has fixed forward, or
- * a carve they resolved, picks up where it left off without redoing a merged issue. The
+ * a prune they resolved, picks up where it left off without redoing a merged issue. The
  * supplied `batches`/`name` are ignored under resume; the plan comes from the log. A
  * resume with nothing left to run reports so and returns green.
  */
@@ -489,7 +489,7 @@ export async function campaign(
   batches: string[][],
   host: HostBudget,
   name?: string,
-  opts: { autoCarve?: boolean; resume?: boolean } = {},
+  opts: { autoPrune?: boolean; resume?: boolean } = {},
   deps: CampaignDeps = defaultCampaignDeps,
 ): Promise<boolean> {
   // Every green branch merges into whatever the main tree has checked out, and
@@ -518,7 +518,7 @@ export async function campaign(
     // Resume a paused campaign (ADR 0013): reconstruct the existing plan from the log —
     // no new `campaign-start`, no re-resolved titles — and skip every wave that already
     // banked work so no merged issue is redone. The supplied `batches`/`name` are ignored;
-    // the plan is whatever the running campaign's `campaign-start` (minus any carve) reduced to.
+    // the plan is whatever the running campaign's `campaign-start` (minus any prune) reduced to.
     const reduced = reduceCampaign(readEventLog(cfg));
     if (!reduced.waves.length)
       throw new Error(
@@ -573,7 +573,7 @@ export async function campaign(
   }
 
   // The plan is re-derived from the log at each wave boundary rather than
-  // iterated from the in-memory array: a `carve` event appended mid-campaign
+  // iterated from the in-memory array: a `prune` event appended mid-campaign
   // prunes future waves here, while the in-flight wave (already past this point)
   // finishes as-is — the single-source-of-truth loop of ADR 0005.
   for (; ; index++) {
@@ -604,7 +604,7 @@ export async function campaign(
       // verifies nothing; those wait for the human to resolve it green and resume.
       enqueueOutbound(cfg, waveParkedNotice(cfg.project, index + 1, merged, cfg.baseBranch, parked.detail));
       console.log(
-        `campaign wave-parked (${parked.reason}) at batch ${index + 1}/${total} — greens left merged, base paused, ${total - index - 1} batch(es) not started. Fix forward and \`campaign --resume\`, or \`carve <issue>\`.`,
+        `campaign wave-parked (${parked.reason}) at batch ${index + 1}/${total} — greens left merged, base paused, ${total - index - 1} batch(es) not started. Fix forward and \`campaign --resume\`, or \`prune <issue>\`.`,
       );
       return false;
     }
@@ -650,7 +650,7 @@ export async function campaign(
 
     // Quarantine blast-radius (ADR 0013): a merge conflict pulled an issue from this
     // wave, so its transitive dependents in later, unstarted waves cannot proceed. We
-    // walk the same dependency graph `carve` uses (via `blockedBy`); without that
+    // walk the same dependency graph `prune` uses (via `blockedBy`); without that
     // resolver the campaign declares no dependencies, so nothing can be orphaned. Only
     // a quarantine that actually strands later-wave work forces the decision below.
     if (quarantined.length && cfg.blockedBy) {
@@ -659,24 +659,24 @@ export async function campaign(
         await quarantineImpacts(plan, quarantined, cfg.blockedBy)
       ).filter((i) => i.dropped.length);
       if (orphaning.length) {
-        if (opts.autoCarve) {
-          // Prune each stranded closure by appending a carve event the loop honors at
-          // the next wave boundary (ADR 0005), exactly as `carve <issue>` does, then
+        if (opts.autoPrune) {
+          // Prune each stranded closure by appending a prune event the loop honors at
+          // the next wave boundary (ADR 0005), exactly as `prune <issue>` does, then
           // run on. The quarantined issue itself (banked green) is kept; only its
           // unstarted dependents leave the plan.
           for (const impact of orphaning)
-            cfg.log.log("carve", { target: impact.target, removed: impact.removed, dropped: impact.dropped });
-          enqueueOutbound(cfg, autoCarveNotice(cfg.project, index + 1, orphaning));
+            cfg.log.log("prune", { target: impact.target, removed: impact.removed, dropped: impact.dropped });
+          enqueueOutbound(cfg, autoPruneNotice(cfg.project, index + 1, orphaning));
           console.log(
-            `batch ${index + 1}/${total}: --auto-carve pruned ${orphaning.map((i) => `#${i.target}→${i.dropped.map((d) => `#${d}`).join(",")}`).join("; ")} and continued.`,
+            `batch ${index + 1}/${total}: --auto-prune pruned ${orphaning.map((i) => `#${i.target}→${i.dropped.map((d) => `#${d}`).join(",")}`).join("; ")} and continued.`,
           );
         } else {
           // Default: the blast-radius call belongs to a human. Pause at the wave
           // boundary with the greens left merged; a human resolves the quarantine and
-          // resumes, or re-runs with --auto-carve to prune and continue.
+          // resumes, or re-runs with --auto-prune to prune and continue.
           enqueueOutbound(cfg, quarantinePauseNotice(cfg.project, index + 1, orphaning, cfg.baseBranch));
           console.log(
-            `campaign paused after batch ${index + 1}/${total} — quarantine stranded ${orphaning.flatMap((i) => i.dropped).map((d) => `#${d}`).join(", ")} in later waves; ${total - index - 1} batch(es) not started. Resolve and \`campaign --resume\`, or re-run with \`campaign --auto-carve\`.`,
+            `campaign paused after batch ${index + 1}/${total} — quarantine stranded ${orphaning.flatMap((i) => i.dropped).map((d) => `#${d}`).join(", ")} in later waves; ${total - index - 1} batch(es) not started. Resolve and \`campaign --resume\`, or re-run with \`campaign --auto-prune\`.`,
           );
           return false;
         }

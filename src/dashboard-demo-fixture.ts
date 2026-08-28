@@ -8,7 +8,7 @@ import { join } from "node:path";
  * populating a running dashboard to look at.
  *
  * The run is deliberately rich: a closed wave, a running wave holding a completed,
- * a running (multi-turn), and a parked issue, a carved issue in a later wave, and
+ * a running (multi-turn), and a parked issue, a pruned issue in a later wave, and
  * an agent-authored summary on every turn so the issue-detail turn log has real
  * content. It emits no `campaign-done`/`campaign-halt`, so the run reads live.
  */
@@ -58,8 +58,8 @@ export function demoEvents(now: Date = new Date()): object[] {
     { ts: at(11), event: "parked", taskId: "205", reason: "blocked" },
     // Parking a slot preserves its worktree; the loop logs the path so the sheet can show it.
     { ts: at(11), event: "worktree-preserved", taskId: "205", path: ".vetinari.local/wt/205" },
-    // A carve drops the promo-code work (unstarted) from the plan.
-    { ts: at(13), event: "carve", target: "208", removed: ["208"] },
+    // A prune drops the promo-code work (unstarted) from the plan.
+    { ts: at(13), event: "prune", target: "208", removed: ["208"] },
     // Wave 2 (206, 207) is left unstarted — queued.
   ];
 }

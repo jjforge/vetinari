@@ -8,15 +8,15 @@ import { loggerForRun } from "./log.ts";
 import { readEventLog } from "./event-log.ts";
 import { listOutbox } from "./state.ts";
 import {
-  applyCarve,
-  carveClosure,
-  computeCarve,
-  defaultCarveDeps,
+  applyPrune,
+  pruneClosure,
+  computePrune,
+  defaultPruneDeps,
   quarantineImpacts,
   restrictBlockers,
   resumeIndex,
-  runCarve,
-} from "./carve.ts";
+  runPrune,
+} from "./prune.ts";
 
 // A fake "blocked by" resolver from a plain edge map: id -> the ids that block it.
 const blockedByFrom = (edges: Record<string, string[]>) => (id: string) => edges[id] ?? [];
@@ -24,8 +24,8 @@ const blockedByFrom = (edges: Record<string, string[]>) => (id: string) => edges
 // A reduced campaign's outcomes as a plain map: id -> its current status.
 const outcomesFrom = (o: Record<string, string>) => new Map(Object.entries(o));
 
-test("computeCarve removes a linear dependent chain and keeps unrelated issues", async () => {
-  const res = await computeCarve(
+test("computePrune removes a linear dependent chain and keeps unrelated issues", async () => {
+  const res = await computePrune(
     [["611", "640"], ["623", "701"]],
     "640",
     blockedByFrom({ "701": ["640"] }), // 701 is blocked by 640
@@ -35,8 +35,8 @@ test("computeCarve removes a linear dependent chain and keeps unrelated issues",
   assert.deepEqual(res.remaining, [["611"], ["623"]]);
 });
 
-test("computeCarve follows every branch and sub-chain of dependents", async () => {
-  const res = await computeCarve(
+test("computePrune follows every branch and sub-chain of dependents", async () => {
+  const res = await computePrune(
     [["611", "640"], ["623", "701", "712", "720"], ["730"]],
     "640",
     blockedByFrom({ "701": ["640"], "712": ["701"], "720": ["701"], "730": ["720"], "623": ["611"] }),
@@ -47,19 +47,19 @@ test("computeCarve follows every branch and sub-chain of dependents", async () =
   assert.deepEqual(res.remaining, [["611"], ["623"]]);
 });
 
-test("computeCarve removes a diamond dependent even when it has another, kept blocker", async () => {
-  const res = await computeCarve(
+test("computePrune removes a diamond dependent even when it has another, kept blocker", async () => {
+  const res = await computePrune(
     [["623", "640"], ["750"]],
     "640",
     blockedByFrom({ "750": ["640", "623"] }), // 750 needs BOTH; 623 is kept
   );
 
-  assert.ok(res.removed.includes("750"), "750 depends on the carved 640 via one path, so it must go");
+  assert.ok(res.removed.includes("750"), "750 depends on the pruned 640 via one path, so it must go");
   assert.deepEqual(res.remaining, [["623"]]);
 });
 
-test("computeCarve removes only the target when nothing depends on it, dropping an emptied wave", async () => {
-  const res = await computeCarve(
+test("computePrune removes only the target when nothing depends on it, dropping an emptied wave", async () => {
+  const res = await computePrune(
     [["611", "623"], ["640"]],
     "640",
     blockedByFrom({}),
@@ -69,8 +69,8 @@ test("computeCarve removes only the target when nothing depends on it, dropping 
   assert.deepEqual(res.remaining, [["611", "623"]]); // the "640"-only wave is dropped
 });
 
-test("computeCarve normalizes leading # in the target, waves, and resolver output", async () => {
-  const res = await computeCarve(
+test("computePrune normalizes leading # in the target, waves, and resolver output", async () => {
+  const res = await computePrune(
     [["#611", "#640"], ["#701"]],
     "#640",
     blockedByFrom({ "701": ["#640"] }),
@@ -80,16 +80,16 @@ test("computeCarve normalizes leading # in the target, waves, and resolver outpu
   assert.deepEqual(res.remaining, [["611"]]);
 });
 
-test("computeCarve rejects a target that is not in the campaign", async () => {
+test("computePrune rejects a target that is not in the campaign", async () => {
   await assert.rejects(
-    () => computeCarve([["611", "640"]], "999", blockedByFrom({})),
+    () => computePrune([["611", "640"]], "999", blockedByFrom({})),
     /999.*not in the campaign/i,
   );
 });
 
-test("computeCarve ignores blockers that live outside the named campaign", async () => {
+test("computePrune ignores blockers that live outside the named campaign", async () => {
   // 701's blocker 555 is not part of this campaign; only the in-campaign edge to 640 matters.
-  const res = await computeCarve(
+  const res = await computePrune(
     [["640", "701"]],
     "640",
     blockedByFrom({ "701": ["640", "555"] }),
@@ -99,9 +99,9 @@ test("computeCarve ignores blockers that live outside the named campaign", async
   assert.deepEqual(res.remaining, []);
 });
 
-test("applyCarve keeps a merged member and drops an unstarted one", () => {
+test("applyPrune keeps a merged member and drops an unstarted one", () => {
   // 640 already merged, 701 not yet started; both are in the removed closure.
-  const res = applyCarve(
+  const res = applyPrune(
     { waves: [["611", "640"], ["701"]], outcomes: outcomesFrom({ "640": "completed" }) },
     ["640", "701"],
   );
@@ -112,10 +112,10 @@ test("applyCarve keeps a merged member and drops an unstarted one", () => {
   assert.deepEqual(res.remaining, [["611", "640"]]); // 701's wave emptied and dropped
 });
 
-test("applyCarve drops a parked member but preserves its record by default (resumable)", () => {
-  // 701 is parked; carving it drops it from the plan but leaves its parked record
+test("applyPrune drops a parked member but preserves its record by default (resumable)", () => {
+  // 701 is parked; pruning it drops it from the plan but leaves its parked record
   // intact so its branch/worktree/session can be investigated and resumed (ADR 0013).
-  const res = applyCarve(
+  const res = applyPrune(
     { waves: [["611"], ["701"]], outcomes: outcomesFrom({ "701": "parked" }) },
     ["701"],
   );
@@ -125,9 +125,9 @@ test("applyCarve drops a parked member but preserves its record by default (resu
   assert.deepEqual(res.remaining, [["611"]]);
 });
 
-test("applyCarve with purge drops a parked member and clears its record (the true drop)", () => {
+test("applyPrune with purge drops a parked member and clears its record (the true drop)", () => {
   // `--purge` is the rare true-drop: the parked record is cleared, reclaiming the work.
-  const res = applyCarve(
+  const res = applyPrune(
     { waves: [["611"], ["701"]], outcomes: outcomesFrom({ "701": "parked" }) },
     ["701"],
     { purge: true },
@@ -138,9 +138,9 @@ test("applyCarve with purge drops a parked member and clears its record (the tru
   assert.deepEqual(res.remaining, [["611"]]);
 });
 
-test("applyCarve keeps a green member so it still merges", () => {
+test("applyPrune keeps a green member so it still merges", () => {
   // 640 is green (mergeable) but in the closure — banked work is never discarded.
-  const res = applyCarve(
+  const res = applyPrune(
     { waves: [["640", "701"]], outcomes: outcomesFrom({ "640": "completed", "701": "unstarted" }) },
     ["640", "701"],
   );
@@ -150,10 +150,10 @@ test("applyCarve keeps a green member so it still merges", () => {
   assert.deepEqual(res.remaining, [["640"]]);
 });
 
-test("applyCarve keeps a merged/green target but still drops its unfinished dependents", () => {
+test("applyPrune keeps a merged/green target but still drops its unfinished dependents", () => {
   // The target 640 already merged; its dependents 701 (parked) and 712 (unstarted)
   // are unfinished, so the deliberate subtree removal still drops them.
-  const res = applyCarve(
+  const res = applyPrune(
     {
       waves: [["640"], ["701", "712"]],
       outcomes: outcomesFrom({ "640": "completed", "701": "parked" }),
@@ -166,16 +166,16 @@ test("applyCarve keeps a merged/green target but still drops its unfinished depe
   assert.deepEqual(res.remaining, [["640"]]);
 });
 
-test("carveClosure names the target, dropped dependents, kept-banked work, and remaining waves", () => {
+test("pruneClosure names the target, dropped dependents, kept-banked work, and remaining waves", () => {
   // 640 already merged (banked), its dependent 701 unstarted: the closure is
   // {640, 701}, but only 701 leaves the plan — 640 stays banked.
   const removed = ["640", "701"];
-  const applied = applyCarve(
+  const applied = applyPrune(
     { waves: [["611", "640"], ["701"]], outcomes: outcomesFrom({ "640": "completed" }) },
     removed,
   );
 
-  assert.deepEqual(carveClosure("640", removed, applied), {
+  assert.deepEqual(pruneClosure("640", removed, applied), {
     target: "640",
     dropped: ["701"],
     keptBanked: ["640"],
@@ -183,12 +183,12 @@ test("carveClosure names the target, dropped dependents, kept-banked work, and r
   });
 });
 
-test("carveClosure normalizes a leading # target and keeps closure order for kept-banked", () => {
+test("pruneClosure normalizes a leading # target and keeps closure order for kept-banked", () => {
   // Nothing merged: every closure member is dropped, so kept-banked is empty.
   const removed = ["640", "701", "712"];
-  const applied = applyCarve({ waves: [["640"], ["701", "712"]], outcomes: outcomesFrom({}) }, removed);
+  const applied = applyPrune({ waves: [["640"], ["701", "712"]], outcomes: outcomesFrom({}) }, removed);
 
-  assert.deepEqual(carveClosure("#640", removed, applied), {
+  assert.deepEqual(pruneClosure("#640", removed, applied), {
     target: "640",
     dropped: ["640", "701", "712"],
     keptBanked: [],
@@ -237,7 +237,7 @@ test("quarantineImpacts follows the transitive closure across every quarantined 
   assert.deepEqual(impacts[0].dropped.sort(), ["701", "712"]);
 });
 
-test("quarantineImpacts skips a quarantined id no longer in the plan (an earlier carve took it)", async () => {
+test("quarantineImpacts skips a quarantined id no longer in the plan (an earlier prune took it)", async () => {
   const impacts = await quarantineImpacts(
     { waves: [["611"]], outcomes: outcomesFrom({ "611": "completed" }) },
     ["999"],
@@ -306,14 +306,14 @@ test("restrictBlockers keeps only the edges that stay inside the selected set", 
   assert.deepEqual([...external.get("640")!], []);
 });
 
-// --- runCarve: the command's inline orchestration, driven at the seam ---
+// --- runPrune: the command's inline orchestration, driven at the seam ---
 //
 // A temp-dir `cfg` mirroring graft.test's `harnessCfg`: a real on-disk event log
 // under a throwaway state dir is what the prune path's `readEventLog`/`reduceCampaign`
 // re-derive reads and what `enqueueOutbound`/`cfg.log` write — so the seam is
 // exercised for real; only the tracker edge (`blockedBy`) is stubbed per test.
 const harnessCfg = (overrides: Partial<ResolvedConfig> = {}): ResolvedConfig => {
-  const stateDir = mkdtempSync(join(tmpdir(), "vetinari-carve-"));
+  const stateDir = mkdtempSync(join(tmpdir(), "vetinari-prune-"));
   const logFile = join(stateDir, "orchestrator.jsonl");
   return {
     project: "harness",
@@ -335,32 +335,32 @@ const launch = (cfg: ResolvedConfig, batches: string[][]) => {
   cfg.log.log("campaign-batch", { index: 0, tasks: batches[0] });
 };
 
-test("runCarve rejects a missing target before any campaign lookup", async () => {
+test("runPrune rejects a missing target before any campaign lookup", async () => {
   const cfg = harnessCfg();
-  await assert.rejects(() => runCarve(cfg, "", {}), /carve needs an issue/);
+  await assert.rejects(() => runPrune(cfg, "", {}), /prune needs an issue/);
 });
 
-test("runCarve rejects a config with no blockedBy resolver", async () => {
+test("runPrune rejects a config with no blockedBy resolver", async () => {
   const cfg = harnessCfg({ blockedBy: undefined });
   await assert.rejects(
-    () => runCarve(cfg, "640", {}),
-    /carve needs a "blockedBy" resolver/,
+    () => runPrune(cfg, "640", {}),
+    /prune needs a "blockedBy" resolver/,
   );
 });
 
-test("runCarve rejects a prune when no campaign is running", async () => {
+test("runPrune rejects a prune when no campaign is running", async () => {
   const cfg = harnessCfg();
   await assert.rejects(
-    () => runCarve(cfg, "640", {}),
+    () => runPrune(cfg, "640", {}),
     /prunes a running campaign, but none is running/,
   );
 });
 
-test("runCarve --dry-run previews the prune but appends no event and enqueues nothing", async () => {
+test("runPrune --dry-run previews the prune but appends no event and enqueues nothing", async () => {
   const cfg = harnessCfg();
   launch(cfg, [["101"], ["640"]]);
 
-  const result = await runCarve(cfg, "640", { dryRun: true });
+  const result = await runPrune(cfg, "640", { dryRun: true });
 
   assert.equal(result.mode, "prune");
   assert.equal(result.applied, false);
@@ -373,19 +373,19 @@ test("runCarve --dry-run previews the prune but appends no event and enqueues no
     keptBanked: [],
     remaining: [["101"]],
   });
-  // Nothing was written: no carve event on the log, no outbound record.
-  assert.equal(readEventLog(cfg).some((e) => e.event === "carve"), false);
+  // Nothing was written: no prune event on the log, no outbound record.
+  assert.equal(readEventLog(cfg).some((e) => e.event === "prune"), false);
   assert.equal(listOutbox(cfg).length, 0);
 });
 
-test("runCarve appends the carve event with its closure and enqueues a progress:carve note", async () => {
-  // 701 is blocked by 640; carving 640 drops its dependent 701 too.
+test("runPrune appends the prune event with its closure and enqueues a progress:prune note", async () => {
+  // 701 is blocked by 640; pruning 640 drops its dependent 701 too.
   const cfg = harnessCfg({
     blockedBy: async (id) => (String(id) === "701" ? ["640"] : []),
   });
   launch(cfg, [["101"], ["640", "701"]]);
 
-  const result = await runCarve(cfg, "640", {});
+  const result = await runPrune(cfg, "640", {});
 
   assert.equal(result.mode, "prune");
   assert.equal(result.applied, true);
@@ -393,33 +393,33 @@ test("runCarve appends the carve event with its closure and enqueues a progress:
   assert.deepEqual(result.dropped, ["640", "701"]);
   assert.deepEqual(result.remaining, [["101"]]);
 
-  // The appended carve event carries target + closure + dropped, so the loop
+  // The appended prune event carries target + closure + dropped, so the loop
   // replays the same rule at its next wave boundary.
-  const ev = readEventLog(cfg).find((e) => e.event === "carve") as
+  const ev = readEventLog(cfg).find((e) => e.event === "prune") as
     | { target: string; removed: string[]; dropped: string[] }
     | undefined;
-  assert.ok(ev, "expected a carve event on the log");
+  assert.ok(ev, "expected a prune event on the log");
   assert.equal(ev!.target, "640");
   assert.deepEqual(ev!.removed, ["640", "701"]);
   assert.deepEqual(ev!.dropped, ["640", "701"]);
 
-  // ...and a single routable progress:carve outbound record.
+  // ...and a single routable progress:prune outbound record.
   const outbox = listOutbox(cfg);
   assert.equal(outbox.length, 1);
   assert.equal(outbox[0].category, "progress");
-  assert.equal(outbox[0].event, "carve");
-  assert.match(outbox[0].text, /carved #640/);
+  assert.equal(outbox[0].event, "prune");
+  assert.match(outbox[0].text, /pruned #640/);
 });
 
-test("runCarve preserves a dropped parked member's record by default", async () => {
+test("runPrune preserves a dropped parked member's record by default", async () => {
   const cfg = harnessCfg();
   cfg.log.log("campaign-start", { batches: [["101"], ["701"]], slots: 4 });
   cfg.log.log("campaign-batch", { index: 0, tasks: ["101"] });
   cfg.log.log("parked", { taskId: "701", reason: "needs attention" });
 
   const cleared: string[][] = [];
-  const result = await runCarve(cfg, "701", {}, {
-    ...defaultCarveDeps,
+  const result = await runPrune(cfg, "701", {}, {
+    ...defaultPruneDeps,
     clearParkedForTasks: (_cfg, ids) => cleared.push(ids),
   });
 
@@ -430,15 +430,15 @@ test("runCarve preserves a dropped parked member's record by default", async () 
   assert.deepEqual(cleared, []);
 });
 
-test("runCarve --purge clears a dropped parked member's record", async () => {
+test("runPrune --purge clears a dropped parked member's record", async () => {
   const cfg = harnessCfg();
   cfg.log.log("campaign-start", { batches: [["101"], ["701"]], slots: 4 });
   cfg.log.log("campaign-batch", { index: 0, tasks: ["101"] });
   cfg.log.log("parked", { taskId: "701", reason: "needs attention" });
 
   const cleared: string[][] = [];
-  const result = await runCarve(cfg, "701", { purge: true }, {
-    ...defaultCarveDeps,
+  const result = await runPrune(cfg, "701", { purge: true }, {
+    ...defaultPruneDeps,
     clearParkedForTasks: (_cfg, ids) => cleared.push(ids),
   });
 
@@ -448,20 +448,20 @@ test("runCarve --purge clears a dropped parked member's record", async () => {
   assert.deepEqual(cleared, [["701"]]);
 });
 
-test("runCarve with an explicit plan launches a fresh reduced campaign", async () => {
-  // 701 is blocked by 640; carving 640 out of the supplied plan strips its dependent
+test("runPrune with an explicit plan launches a fresh reduced campaign", async () => {
+  // 701 is blocked by 640; pruning 640 out of the supplied plan strips its dependent
   // and launches the remainder.
   const cfg = harnessCfg({
     blockedBy: async (id) => (String(id) === "701" ? ["640"] : []),
   });
 
   const launched: string[][][] = [];
-  const result = await runCarve(
+  const result = await runPrune(
     cfg,
     "640",
     { plan: [["611", "640"], ["623", "701"]] },
     {
-      ...defaultCarveDeps,
+      ...defaultPruneDeps,
       launchCampaign: async (_cfg, batches) => {
         launched.push(batches);
         return true;
@@ -475,25 +475,25 @@ test("runCarve with an explicit plan launches a fresh reduced campaign", async (
   assert.deepEqual(result.remaining, [["611"], ["623"]]);
   // The reduced remainder was handed to the campaign launcher.
   assert.deepEqual(launched, [[["611"], ["623"]]]);
-  // ...and the fresh-launch path still announces a progress:carve note.
+  // ...and the fresh-launch path still announces a progress:prune note.
   const outbox = listOutbox(cfg);
   assert.equal(outbox.length, 1);
-  assert.equal(outbox[0].event, "carve");
-  assert.match(outbox[0].text, /carved #640/);
+  assert.equal(outbox[0].event, "prune");
+  assert.match(outbox[0].text, /pruned #640/);
 });
 
-test("runCarve --dry-run on an explicit plan previews but launches nothing", async () => {
+test("runPrune --dry-run on an explicit plan previews but launches nothing", async () => {
   const cfg = harnessCfg({
     blockedBy: async (id) => (String(id) === "701" ? ["640"] : []),
   });
 
   const launched: string[][][] = [];
-  const result = await runCarve(
+  const result = await runPrune(
     cfg,
     "640",
     { dryRun: true, plan: [["611", "640"], ["623", "701"]] },
     {
-      ...defaultCarveDeps,
+      ...defaultPruneDeps,
       launchCampaign: async (_cfg, batches) => {
         launched.push(batches);
         return true;

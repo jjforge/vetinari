@@ -38,7 +38,7 @@ export interface IntegrateResult {
    * Set when the merged base gated red — the emergent, unattributable failure (each
    * green passed alone, together they are red). No branch is to blame, so the wave is
    * NOT rolled back: the greens stay merged on the base and the campaign wave-parks
-   * (a resumable pause) for a human to fix forward and resume, or carve a suspect
+   * (a resumable pause) for a human to fix forward and resume, or prune a suspect
    * (ADR 0013). `detail` is the tail of the gate report.
    */
   parked?: { reason: "gate-red"; detail: string };
@@ -66,7 +66,7 @@ const defaultIntegrateDeps: IntegrateDeps = { gate: gateMergedBase };
  *
  * A **red merged base** has no single culprit, so it is NOT rolled back either: the
  * greens stay merged, the branches are left intact, and the result carries `parked` so
- * the caller wave-parks — a resumable pause for a human to fix forward or carve a
+ * the caller wave-parks — a resumable pause for a human to fix forward or prune a
  * suspect (never a machine-guessed culprit).
  *
  * Assumes the main working tree is already on `cfg.baseBranch` (campaign ensures it) so
@@ -103,7 +103,7 @@ export async function integrateGreens(
       // combined base is red, so no branch is to blame. Do NOT `reset --hard` to the
       // wave start — that would un-merge the greens — and do NOT drop the merged branches:
       // leave everything merged on the base and wave-park. The caller pauses the
-      // campaign for a human to fix forward and resume, or carve a suspect. The base
+      // campaign for a human to fix forward and resume, or prune a suspect. The base
       // sits red but is never pushed and nothing builds on it while paused.
       const detail = report.split("\n").slice(-40).join("\n");
       cfg.log.log("wave-parked", { merged, detail });

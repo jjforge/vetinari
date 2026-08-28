@@ -131,11 +131,11 @@ _Avoid_: semaphore, lock, allocator
 The kind of a piece of outbound communication, used to route it. The five:
 **question** (a parked task needs a human answer — the only *interactive* one),
 **success** (green, merged, campaign complete), **failure** (halt, resume error),
-**progress** (queue/campaign/wave/batch lifecycle, including a **carve** dropping
+**progress** (queue/campaign/wave/batch lifecycle, including a **prune** dropping
 an issue and its dependents and a **graft** adding issues to the running campaign),
 **finding** (an incidental defect was filed).
 A routing rule may target a whole category or a specific event under it
-(`progress:wave-start`, `progress:carve`, `progress:graft`).
+(`progress:wave-start`, `progress:prune`, `progress:graft`).
 _Avoid_: message type, event kind
 
 **Interactive** (of a message):
@@ -206,7 +206,7 @@ _Avoid_: batch name
 A whole [[wave]] held because its **merged base failed the combined gate** — every
 issue went green alone, but the base is red together, so no single issue is at
 fault. Everything stays merged (the base sits red, never pushed), the campaign
-pauses, and a human resolves it: fix forward and resume, or carve a suspect and
+pauses, and a human resolves it: fix forward and resume, or prune a suspect and
 resume. A run-level counterpart to an issue's [[parked]] — the wave, not one agent,
 waits on a human. See [ADR 0013](../docs/adr/0013-wave-integration-is-non-atomic-quarantine-and-wave-park.md).
 _Avoid_: halted, rolled back, failed wave
@@ -214,7 +214,7 @@ _Avoid_: halted, rolled back, failed wave
 ### Issue status
 
 The dashboard shows the orchestrator's own `IssueStatus` vocabulary, plus one
-render-derived state (`carved`) — not the UX handoff's friendlier labels (ADR 0007).
+render-derived state (`pruned`) — not the UX handoff's friendlier labels (ADR 0007).
 
 **running**:
 An agent is on the issue in the active [[wave]] — whether executing or waiting for
@@ -247,17 +247,17 @@ _Avoid_: merged, done
 In the plan, not yet begun — a later [[wave]] with no agent assigned.
 _Avoid_: queued, pending
 
-**carved**:
-A [[carve]] left the issue out of the campaign with its unstarted dependents.
-**Derived at render** from the carve event (not a stored status), so it shows in
+**pruned**:
+A [[prune]] left the issue out of the campaign with its unstarted dependents.
+**Derived at render** from the prune event (not a stored status), so it shows in
 both the live run and an [[archived-run]] — a browsing operator can see what was
-carved out of a finished run.
-_Avoid_: removed, dropped, pruned
+pruned out of a finished run.
+_Avoid_: removed, dropped, carved
 
 **grafted**:
 A [[graft]] added the issue to the running campaign; it waits in a later [[wave]].
 **Derived at render** from the graft event (not a stored status), and **transient**
-— the additive mirror of [[carved]]: shown while the issue is `unstarted`, it
+— the additive mirror of [[pruned]]: shown while the issue is `unstarted`, it
 becomes [[running]] on pickup. Answers "why did this wave grow?" at a glance.
 _Avoid_: added, appended, injected
 
@@ -266,25 +266,25 @@ _Avoid_: added, appended, injected
 **Campaign plan** (the `campaign-plan` tool):
 A generic vetinari tool that turns a selected set of ticket ids into the
 dependency-ordered, file-disjoint wave arguments `campaign` consumes. It plans; it
-never runs Vetinari or pushes. A peer of [[carve]], sharing its DAG foundation.
+never runs Vetinari or pushes. A peer of [[prune]], sharing its DAG foundation.
 _Avoid_: campaign builder, batcher
 
-**Carve**:
+**Prune**:
 Dropping an issue and its transitive dependents from a **running** campaign. It
 **prunes the unfinished remainder without discarding banked work**: of the removed
 closure, anything already merged or mergeable is kept, only parked/not-yet-started
-issues leave the plan. Against a running campaign it appends a **carve event** the
+issues leave the plan. Against a running campaign it appends a **prune event** the
 loop honors at the next wave boundary (the in-flight wave finishes; future waves
-shrink) — distinct from the from-scratch `carve <issue> <batch…>` form, which
+shrink) — distinct from the from-scratch `prune <issue> <batch…>` form, which
 launches a reduced campaign from a plan you supply.
-_Avoid_: prune, remove, cancel, drop (as the noun)
+_Avoid_: carve, remove, cancel, drop (as the noun)
 
 **Graft**:
-Adding issues to a **running** campaign — the additive counterpart of [[carve]]
+Adding issues to a **running** campaign — the additive counterpart of [[prune]]
 (ADR 0014). `graft <ids…>` appends a **graft event** the loop honors at the next
 wave boundary: the in-flight wave finishes untouched and the added issues are
 re-layered into future waves (dependency-ordered, basename-disjoint), leaving
-already-planned [[wave]]s stable. Unlike carve it is allowed against any run not yet
+already-planned [[wave]]s stable. Unlike prune it is allowed against any run not yet
 done — live, or paused/[[wave-parked]] and honored on the next `--resume`.
 _Avoid_: extend, add (as the noun), append, inject
 
@@ -298,6 +298,6 @@ _Avoid_: file matcher, crossover detector
 **Under-specified ticket**:
 A ticket whose file-set resolves with `confident: false` (cites nothing, or cites
 what the tree lacks). `campaign-plan` never plans around it silently — it halts and
-asks the requestor to either carve it (and its dependents) out and proceed, or stop
+asks the requestor to either prune it (and its dependents) out and proceed, or stop
 and put the data on the issue.
 _Avoid_: unresolved ticket, ambiguous ticket

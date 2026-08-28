@@ -199,13 +199,13 @@ test("defaultFileSet anchors the marker at a line start — an inline prose ment
 });
 
 test("defaultFileSet lets the last marker line win when several qualify", () => {
-  const root = treeWith("src/plan.ts", "src/carve.ts");
+  const root = treeWith("src/plan.ts", "src/prune.ts");
   const fileSet = defaultFileSet(root);
 
   // A first marker line, then a corrected one lower down — the correction wins.
-  const res = fileSet("Files: `src/plan.ts`\nFiles: `src/carve.ts`\n");
+  const res = fileSet("Files: `src/plan.ts`\nFiles: `src/prune.ts`\n");
 
-  assert.deepEqual(res.files, ["carve.ts"]);
+  assert.deepEqual(res.files, ["prune.ts"]);
   assert.equal(res.confident, true);
 });
 

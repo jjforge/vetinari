@@ -152,9 +152,9 @@ test("resolveDestination prefers a bare category entry over the wildcard default
 });
 
 test("resolveDestination lets an exact category:event entry win over the bare category and wildcard", () => {
-  const notify = { "*": "ops", progress: "chatter", "progress:carve": "alerts" };
+  const notify = { "*": "ops", progress: "chatter", "progress:prune": "alerts" };
 
-  assert.equal(resolveDestination(notify, "progress", "carve"), "alerts");
+  assert.equal(resolveDestination(notify, "progress", "prune"), "alerts");
   // An event with no exact entry falls back to the bare category, not the wildcard.
   assert.equal(resolveDestination(notify, "progress", "wave-start"), "chatter");
 });
@@ -163,7 +163,7 @@ test("resolveDestination returns undefined for an unmapped category with no wild
   const notify = { failure: "alerts" };
 
   assert.equal(resolveDestination(notify, "success"), undefined);
-  assert.equal(resolveDestination(notify, "progress", "carve"), undefined);
+  assert.equal(resolveDestination(notify, "progress", "prune"), undefined);
 });
 
 const withNotify = (notify: string) =>
@@ -199,7 +199,7 @@ test("loadConfig accepts a notify map where question resolves to one destination
   const cfgPath = writeConfig(
     scratch(),
     "vetinari/config.mts",
-    withNotify(`{ "*": "ops", question: "alerts", "question:urgent": "alerts", failure: "pager", "progress:carve": "chatter" }`),
+    withNotify(`{ "*": "ops", question: "alerts", "question:urgent": "alerts", failure: "pager", "progress:prune": "chatter" }`),
   );
 
   const cfg = await loadConfig(cfgPath);

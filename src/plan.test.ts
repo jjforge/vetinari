@@ -275,7 +275,7 @@ test("planCampaign plans a confident set without ever prompting", async () => {
 
   assert.deepEqual(plan.waves, [["611", "623"], ["640"]]);
   assert.deepEqual(plan.underspecified, []);
-  assert.deepEqual(plan.carved, []);
+  assert.deepEqual(plan.pruned, []);
 });
 
 test("planCampaign drops an under-specified ticket and its dependents, then plans the rest", async () => {
@@ -303,9 +303,9 @@ test("planCampaign drops an under-specified ticket and its dependents, then plan
   );
   assert.deepEqual(plan.underspecified, ["640"]);
   assert.deepEqual(
-    plan.carved,
+    plan.pruned,
     ["640", "701"],
-    "the ticket and its dependent are carved",
+    "the ticket and its dependent are pruned",
   );
   assert.deepEqual(
     plan.waves,
@@ -401,7 +401,7 @@ test("underspecifiedPromptFor: an unknown flag value is rejected", () => {
   );
 });
 
-test("describePlan reports exactly what an under-specified drop carved", async () => {
+test("describePlan reports exactly what an under-specified drop pruned", async () => {
   const plan = await planCampaign(["611", "640", "701"], {
     blockedBy: openBlockedByFrom({ "701": ["640"] }),
     fileSet: fileSetFrom({
@@ -616,9 +616,9 @@ test("runCampaignPlan composes fetchTask→ticketProse→fileSet and returns the
   assert.equal(report.suggestedName, "gateway + comms");
 });
 
-test("runCampaignPlan: --on-underspecified=drop carves the not-confident ticket and plans the rest", async () => {
+test("runCampaignPlan: --on-underspecified=drop prunes the not-confident ticket and plans the rest", async () => {
   // 640 cites no file (no marker), so the resolver reads it not-confident; the flag
-  // pre-decides drop, so it (and its dependent 701) is carved and the rest planned.
+  // pre-decides drop, so it (and its dependent 701) is pruned and the rest planned.
   const report = await runCampaignPlan(
     cfgFrom(
       {
@@ -664,7 +664,7 @@ test("runCampaignPlan: no flag on a non-terminal fails rather than plan around a
   );
 });
 
-test("runCampaignPlan: no flag on a terminal asks the requestor, whose drop carves the rest", async () => {
+test("runCampaignPlan: no flag on a terminal asks the requestor, whose drop prunes the rest", async () => {
   const asked: string[][] = [];
   const report = await runCampaignPlan(
     cfgFrom({

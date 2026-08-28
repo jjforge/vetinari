@@ -2,7 +2,7 @@
 
 An issue's detail view is built around a **turn log**: for each turn the agent
 took, one sentence saying what happened, newest first. It is the whole reason to
-open the detail sheet — it is how the operator decides whether to answer, carve, or
+open the detail sheet — it is how the operator decides whether to answer, prune, or
 leave a parked issue alone. That sentence does not exist today: the `turn` event
 (`src/loop.ts`) carries `turn`, `signal`, `commits`, and `usage` — machine fields,
 no prose. The only English narration per issue is a single overwritten `detail`

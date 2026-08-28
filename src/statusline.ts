@@ -18,7 +18,7 @@ const COUNT_EMOJI: Array<[IssueStatus, string]> = [
  * through unchanged; the overlay states (which `COUNT_EMOJI` has no glyph for)
  * map to their effective base so no issue is silently dropped from the tally:
  * `grafted`/`interrupted` are outstanding work → `unstarted`; `quarantined` is an
- * attention state grouped with `parked`; `carved` is pruned out of the campaign,
+ * attention state grouped with `parked`; `pruned` is pruned out of the campaign,
  * so it is excluded from every bucket. Pure.
  */
 export function countBucket(status: DisplayStatus): IssueStatus | null {
@@ -28,7 +28,7 @@ export function countBucket(status: DisplayStatus): IssueStatus | null {
       return "unstarted";
     case "quarantined":
       return "parked";
-    case "carved":
+    case "pruned":
       return null; // pruned from the campaign — counted in no bucket
     default:
       return status;

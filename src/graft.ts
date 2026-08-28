@@ -1,6 +1,6 @@
 /**
  * The `graft` command seam: add issues to a running (or resumable) campaign — the
- * additive mirror of `carve` (ADR 0014). Lifted out of `cli.mts`'s inline switch so
+ * additive mirror of `prune` (ADR 0014). Lifted out of `cli.mts`'s inline switch so
  * the orchestration (both guards, the `--dry-run` no-append, the event write, the
  * `progress:graft` enqueue, and the `fetchTask → issueStateFromTask` state chain) is
  * drivable with stubs, exactly as `campaign` is via `CampaignDeps` (#176). The pure
@@ -14,7 +14,7 @@
  * the observable effects without re-parsing prose.
  */
 import type { ResolvedConfig } from "./config.ts";
-import { normalize } from "./carve.ts";
+import { normalize } from "./prune.ts";
 import {
   applyGraft,
   validateGraftTargets,
@@ -50,7 +50,7 @@ export const defaultGraftDeps: GraftDeps = { readEventLog, enqueueOutbound };
 /**
  * A graft dry-run's placement in structured form: the requested ids, where each
  * accepted id lands, the resulting waves, and any whole-batch rejections naming the
- * offenders and why. It is the additive mirror of `StructuredCarveClosure` — the CLI
+ * offenders and why. It is the additive mirror of `StructuredPruneClosure` — the CLI
  * serializes it into a `graft-closure {json}` line under `--dry-run`, so the
  * aggregated dashboard's preview names each id's fate without re-parsing the prose.
  */

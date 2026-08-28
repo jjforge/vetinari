@@ -9,7 +9,7 @@ const gh = (args: string[]) => execFileSync("gh", args, { encoding: "utf8" });
  * into a config as `blockedBy: githubBlockedBy("owner/repo")`.
  *
  * Closed blockers are filtered here at the edge: an already-merged prerequisite
- * does not gate, so `carve` and `campaign-plan` only ever see the blockers still
+ * does not gate, so `prune` and `campaign-plan` only ever see the blockers still
  * in flight. Cross-repo blockers are dropped too: a campaign is a set of ids in
  * one repo, so a blocker in another repo could not be one of them anyway. `run`
  * is injected only so the JSON handling can be tested without invoking `gh`.

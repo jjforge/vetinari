@@ -1,8 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { CarveClosure } from "./dashboard-carve.ts";
+import type { PruneClosure } from "./dashboard-prune.ts";
 import type { GraftClosure } from "./dashboard-graft.ts";
 
-/** How the dumb-router shells a project's own CLI (`answer`, `carve`, `graft`) in its
+/** How the dumb-router shells a project's own CLI (`answer`, `prune`, `graft`) in its
  * root — the injectable seam every route that spawns a child shares, so tests can
  * capture the spawn instead of running it. */
 export type SpawnDashboardChild = (
@@ -14,17 +14,17 @@ export type SpawnDashboardChild = (
 /**
  * The shared dependencies every dashboard route handler is wired with by the
  * composer (`serveAllStatus`): the host config dir the registry lives in, and the
- * dumb-router seams for spawning a project's CLI and computing a carve closure or
+ * dumb-router seams for spawning a project's CLI and computing a prune closure or
  * preview against its own install (ADR 0002). The composer resolves the defaults
  * once and passes this to each handler.
  */
 export interface DashboardDeps {
   configDir: string;
   spawn: SpawnDashboardChild;
-  carvePreview: (projectRoot: string, taskId: string) => Promise<string | null>;
-  carveClosure: (projectRoot: string, taskId: string) => Promise<CarveClosure | null>;
+  prunePreview: (projectRoot: string, taskId: string) => Promise<string | null>;
+  pruneClosure: (projectRoot: string, taskId: string) => Promise<PruneClosure | null>;
   /** The graft closure — variadic (a set of ids), routed to the project's own
-   *  `graft <ids…> --dry-run` exactly as `carveClosure` routes to `carve … --dry-run`;
+   *  `graft <ids…> --dry-run` exactly as `pruneClosure` routes to `prune … --dry-run`;
    *  the graft surface (option 1a) validates the batch against it before acting. */
   graftClosure: (projectRoot: string, taskIds: string[]) => Promise<GraftClosure | null>;
 }

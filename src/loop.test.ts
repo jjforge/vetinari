@@ -114,13 +114,13 @@ test("extractTurnSummary returns undefined for output predating the contract", (
 test("extractTurnSummary does not mistake the <summary> nested in a <question> for the turn summary", () => {
   // A blocked turn's stdout carries a <summary> inside <question>. That is the
   // question's headline, not the turn's account — the turn summary is its own tag.
-  const stdout = `<turn-summary>Parked to ask which base branch the carve should target.</turn-summary>
+  const stdout = `<turn-summary>Parked to ask which base branch the prune should target.</turn-summary>
 <question>
   <summary>Which base branch?</summary>
   <detail>The task names two.</detail>
 </question>
 <promise>BLOCKED</promise>`;
-  assert.equal(extractTurnSummary(stdout), "Parked to ask which base branch the carve should target.");
+  assert.equal(extractTurnSummary(stdout), "Parked to ask which base branch the prune should target.");
 });
 
 test("runLoop parks (blocked) when a turn emits the BLOCKED signal", async () => {

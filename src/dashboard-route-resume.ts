@@ -8,8 +8,8 @@ import { readBody, type RouteHandler } from "./dashboard-http.ts";
  * (dumb router, ADR 0002) so the shared install continues that project's paused
  * campaign in its own log, then redirects back to that project's board. Resume is
  * non-destructive and project-scoped (one paused campaign per project), so it needs
- * only the `project` — no `taskId` target and, unlike carve, no preview/confirm gate.
- * Mirrors the `/carve` and `/answer` shell-the-CLI routes.
+ * only the `project` — no `taskId` target and, unlike prune, no preview/confirm gate.
+ * Mirrors the `/prune` and `/answer` shell-the-CLI routes.
  */
 export const handleResume: RouteHandler = async (req, res, url, deps) => {
   if (!(req.method === "POST" && url.pathname === "/resume")) return false;

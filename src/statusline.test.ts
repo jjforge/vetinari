@@ -22,7 +22,7 @@ test("formatStatusLine summarizes the running wave and status counts on one line
   assert.equal(line.includes("\n"), false, "must be a single line");
 });
 
-test("countBucket folds overlay statuses to a base bucket and excludes carved", () => {
+test("countBucket folds overlay statuses to a base bucket and excludes pruned", () => {
   // base statuses are unchanged
   assert.equal(countBucket("completed"), "completed");
   assert.equal(countBucket("running"), "running");
@@ -33,8 +33,8 @@ test("countBucket folds overlay statuses to a base bucket and excludes carved", 
   assert.equal(countBucket("grafted"), "unstarted");
   assert.equal(countBucket("interrupted"), "unstarted");
   assert.equal(countBucket("quarantined"), "parked");
-  // carved is pruned out of the campaign — counted nowhere
-  assert.equal(countBucket("carved"), null);
+  // pruned is pruned out of the campaign — counted nowhere
+  assert.equal(countBucket("pruned"), null);
 });
 
 test("formatStatusLine counts grafted issues as unstarted (⚪) — the reported graft case", () => {
@@ -52,7 +52,7 @@ test("formatStatusLine counts grafted issues as unstarted (⚪) — the reported
   assert.match(line, /⚪4/); // 2 unstarted + 2 grafted, not ⚪2
 });
 
-test("formatStatusLine folds interrupted→unstarted, quarantined→parked, and excludes carved", () => {
+test("formatStatusLine folds interrupted→unstarted, quarantined→parked, and excludes pruned", () => {
   const line = formatStatusLine({
     project: "demo",
     waves: [
@@ -64,7 +64,7 @@ test("formatStatusLine folds interrupted→unstarted, quarantined→parked, and 
           { issueNumber: "2", status: "interrupted" },
           { issueNumber: "3", status: "quarantined" },
           { issueNumber: "4", status: "parked" },
-          { issueNumber: "5", status: "carved" },
+          { issueNumber: "5", status: "pruned" },
         ],
       },
     ],
@@ -73,7 +73,7 @@ test("formatStatusLine folds interrupted→unstarted, quarantined→parked, and 
 
   assert.match(line, /⚪2/); // unstarted + interrupted
   assert.match(line, /⏸2/); // parked + quarantined
-  assert.doesNotMatch(line, /❌/); // carved contributes to no bucket
+  assert.doesNotMatch(line, /❌/); // pruned contributes to no bucket
 });
 
 test("formatStatusLine drops zero-count segments and omits the wave when none is running", () => {

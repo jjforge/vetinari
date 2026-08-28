@@ -71,8 +71,8 @@ const describe = (e: OrchestratorEvent): string => {
       return `quarantined ${e.taskId} on ${e.branch}`;
     case "wave-parked":
       return `wave-parked merged ${e.merged.join(",")}`;
-    case "carve":
-      return `carve ${e.target} dropped ${e.dropped.join(",")}`;
+    case "prune":
+      return `prune ${e.target} dropped ${e.dropped.join(",")}`;
     case "graft":
       return `graft ${e.ids.join(",")}`;
     case "worktree-preserved":

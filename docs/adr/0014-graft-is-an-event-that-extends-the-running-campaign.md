@@ -1,12 +1,12 @@
 # Graft is an event that extends the running campaign; the added issues are re-layered from the log
 
-Adding issues to a **running** campaign is the symmetric counterpart to carve
+Adding issues to a **running** campaign is the symmetric counterpart to prune
 (ADR 0005), and takes the same shape: `graft <ids…>` appends a **graft event** to
 the project's event log, and the `campaign` loop reconstructs its remaining waves
 *from that log* at each wave boundary — so the added issues land in future waves
 while the in-flight wave finishes untouched. There is still no separate mutable
 plan file; the event log stays the single source of truth (ADR 0002), and the
-running campaign and the dashboard agree by construction. Where carve prunes the
+running campaign and the dashboard agree by construction. Where prune trims the
 unfinished remainder, graft **extends** it: the added issues are layered into the
 plan alongside the not-yet-started work.
 
@@ -27,13 +27,13 @@ free: `blocked_by` an already-merged issue → eligible in the next wave;
 Graft is allowed against any run that is not yet `campaign-done` — live (honored at
 the next wave boundary) or paused/wave-parked/resumable (honored on the next
 `--resume`, which is that run's next boundary). This is a deliberate divergence
-from carve's running-only in-place form: a wave-parked campaign is exactly when an
+from prune's running-only in-place form: a wave-parked campaign is exactly when an
 operator often wants to add work.
 
 ## The event carries precomputed layering inputs, not just ids
 
 `reduceCampaign` is a pure reducer with no tracker or filesystem access (ADR 0012),
-so — exactly as the carve event stores its resolved closure — the **graft event
+so — exactly as the prune event stores its resolved closure — the **graft event
 stores the resolved layering inputs** (the added ids plus their `blockedBy` graph
 and basenames), computed by the CLI at append time via the same resolvers
 `campaign-plan` uses. The fold is then a pure `layerWaves`/`partitionWaves` call
@@ -55,7 +55,7 @@ over data already in the log.
 ## Consequences
 
 A grafted issue renders as the render-derived `grafted` state (transient: shown
-while `unstarted`, becoming `running` on pickup), the additive mirror of `carved`.
-A graft emits a `progress:graft` comms event, symmetric with `progress:carve`.
+while `unstarted`, becoming `running` on pickup), the additive mirror of `pruned`.
+A graft emits a `progress:graft` comms event, symmetric with `progress:prune`.
 `graft` validates all-or-nothing: an unknown/closed id, or an id already in the
 campaign, rejects the whole graft naming the offenders, rather than half-applying.

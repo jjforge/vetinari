@@ -1,5 +1,5 @@
 /**
- * "Carve out" an issue and its dependent chain from a campaign.
+ * "Prune out" an issue and its dependent chain from a campaign.
  *
  * Removing an issue means removing everything that cannot proceed without it:
  * the transitive closure of its DEPENDENTS (issues blocked by it), across every
@@ -19,8 +19,8 @@ import type { HostBudget } from "./host-slots.ts";
 import { campaignRunning, reduceCampaign } from "./dashboard-model.ts";
 import { readEventLog } from "./event-log.ts";
 import { clearParkedForTasks, enqueueOutbound } from "./state.ts";
-// `campaign` is referenced by type only and lazy-imported in `defaultCarveDeps`
-// (see below): a static value import would close the `modes → carve → modes`
+// `campaign` is referenced by type only and lazy-imported in `defaultPruneDeps`
+// (see below): a static value import would close the `modes → prune → modes`
 // cycle at module-eval time and hit `modes`'s `defaultCampaignDeps` before its
 // `currentBranch` const is initialized (a TDZ crash).
 type Campaign = typeof import("./modes.ts").campaign;
@@ -36,7 +36,7 @@ export type BlockedByOf = (id: string) => string[] | Promise<string[]>;
 
 /**
  * Each id's open blockers, split by whether they fall inside a selected set of
- * ids or outside it. This is the shared DAG step under both `carve` and
+ * ids or outside it. This is the shared DAG step under both `prune` and
  * `campaign-plan`: the edges that matter to a run are the ones that stay inside
  * the set you named. `inSet` edges are the real graph; `external` names the
  * out-of-set blockers that make a dependent unreachable.
@@ -64,7 +64,7 @@ export async function restrictBlockers(ids: string[], blockedByOf: BlockedByOf):
   return { inSet, external };
 }
 
-export interface CarveResult {
+export interface PruneResult {
   target: string;
   /** target plus its transitive dependents, in campaign order. */
   removed: string[];
@@ -73,15 +73,15 @@ export interface CarveResult {
 }
 
 /**
- * What actually happens to `computeCarve`'s closure once it meets the running
- * campaign's current outcomes. Carve **prunes the unfinished remainder without
+ * What actually happens to `computePrune`'s closure once it meets the running
+ * campaign's current outcomes. Prune **prunes the unfinished remainder without
  * discarding banked work** (ADR 0005): a merged/green member is kept (already
  * banked or allowed to merge), and only the parked or not-yet-started members
  * leave the plan. A merged/green *target* is kept too, but its unfinished
- * dependents are still dropped — carve is a human's forward-looking "remove
+ * dependents are still dropped — prune is a human's forward-looking "remove
  * this subtree" decision, evaluated per member.
  */
-export interface AppliedCarve {
+export interface AppliedPrune {
   /** the waves with `dropped` stripped and emptied waves removed. */
   remaining: string[][];
   /** the closure members that actually leave the plan (parked or unstarted). */
@@ -91,7 +91,7 @@ export interface AppliedCarve {
 }
 
 /**
- * Pure rule applying a carve to a running campaign. `outcomes` is a member's
+ * Pure rule applying a prune to a running campaign. `outcomes` is a member's
  * current status (as `reduceCampaign` reconstructs it); a member with no entry
  * is treated as not-yet-started. Only `parked`/`unstarted` members are dropped —
  * `completed` (merged or green) stays, and anything in-flight (`running`) or
@@ -101,11 +101,11 @@ export interface AppliedCarve {
  * kept by default so its branch/worktree/session stay resumable (ADR 0013);
  * `purge` is the rare true-drop that flags the record for clearing.
  */
-export function applyCarve(
+export function applyPrune(
   campaign: { waves: string[][]; outcomes: Map<string, string> },
   removed: string[],
   opts: { purge?: boolean } = {},
-): AppliedCarve {
+): AppliedPrune {
   const dropped: string[] = [];
   const parkedToClear: string[] = [];
   for (const id of removed.map(normalize)) {
@@ -123,13 +123,13 @@ export function applyCarve(
 }
 
 /**
- * A carve dry-run's closure in structured form: the target, the dependent issues
+ * A prune dry-run's closure in structured form: the target, the dependent issues
  * that would be dropped, the banked (merged/mergeable) work kept, and the waves
  * that remain. Lets a consumer name the exact closure without re-parsing the
  * CLI's human text.
  */
-export interface StructuredCarveClosure {
-  /** the carved issue itself. */
+export interface StructuredPruneClosure {
+  /** the pruned issue itself. */
   target: string;
   /** the closure members that leave the plan (parked or unstarted). */
   dropped: string[];
@@ -140,12 +140,12 @@ export interface StructuredCarveClosure {
 }
 
 /**
- * Assemble the structured closure from `computeCarve`'s `removed` closure and the
- * `applyCarve` result it was run through: kept-banked is the closure minus what
+ * Assemble the structured closure from `computePrune`'s `removed` closure and the
+ * `applyPrune` result it was run through: kept-banked is the closure minus what
  * was dropped, in campaign order. Pure so the CLI's structured dry-run output is
  * unit-tested at the seam rather than by re-parsing its own prose.
  */
-export function carveClosure(target: string, removed: string[], applied: AppliedCarve): StructuredCarveClosure {
+export function pruneClosure(target: string, removed: string[], applied: AppliedPrune): StructuredPruneClosure {
   const dropped = new Set(applied.dropped);
   return {
     target: normalize(target),
@@ -158,21 +158,21 @@ export function carveClosure(target: string, removed: string[], applied: Applied
 /**
  * What a single quarantined issue strands in the remaining campaign (ADR 0013). A
  * merge conflict quarantines one issue mid-wave; its transitive dependents in the
- * unstarted later waves cannot proceed without it. Each impact reuses `computeCarve`
- * (the same graph `carve` walks) for the closure, then `applyCarve` to name the
- * members a carve would actually drop now — the orphaned dependents (`dropped`). A
+ * unstarted later waves cannot proceed without it. Each impact reuses `computePrune`
+ * (the same graph `prune` walks) for the closure, then `applyPrune` to name the
+ * members a prune would actually drop now — the orphaned dependents (`dropped`). A
  * quarantined issue that drops nothing orphans nothing; the campaign need not stop.
  *
- * Pure over the injected `blockedByOf`, so the campaign's pause-vs-`--auto-carve`
+ * Pure over the injected `blockedByOf`, so the campaign's pause-vs-`--auto-prune`
  * decision is testable without a tracker or a running campaign. A quarantined id no
- * longer in the plan (an earlier carve already took it) is skipped, not an error.
+ * longer in the plan (an earlier prune already took it) is skipped, not an error.
  */
 export interface QuarantineImpact {
   /** the quarantined issue. */
   target: string;
   /** its transitive dependent closure over the plan (the target plus its dependents). */
   removed: string[];
-  /** the closure members a carve would drop now — the orphaned dependents. */
+  /** the closure members a prune would drop now — the orphaned dependents. */
   dropped: string[];
 }
 
@@ -185,9 +185,9 @@ export interface QuarantineImpact {
  * last wave holding a `completed` member: a plan with no merged work resumes from
  * the top, and an index at or past `waves.length` means nothing is left to run.
  *
- * Pure over the reduced plan (`waves` + `outcomes`, exactly the shape `applyCarve`
+ * Pure over the reduced plan (`waves` + `outcomes`, exactly the shape `applyPrune`
  * takes), so the resume boundary is unit-testable without a running campaign — the
- * same reconstruction `carve` reuses (ADR 0005).
+ * same reconstruction `prune` reuses (ADR 0005).
  */
 export function resumeIndex(campaign: { waves: string[][]; outcomes: Map<string, string> }): number {
   let lastRun = -1;
@@ -206,29 +206,29 @@ export async function quarantineImpacts(
   const impacts: QuarantineImpact[] = [];
   for (const target of quarantined.map(normalize)) {
     if (!inPlan.has(target)) continue;
-    const { removed } = await computeCarve(campaign.waves, target, blockedByOf);
-    const { dropped } = applyCarve(campaign, removed);
+    const { removed } = await computePrune(campaign.waves, target, blockedByOf);
+    const { dropped } = applyPrune(campaign, removed);
     impacts.push({ target, removed, dropped: dropped.filter((id) => id !== target) });
   }
   return impacts;
 }
 
 /**
- * The impure module edges `runCarve` leans on, injected so the running-campaign
+ * The impure module edges `runPrune` leans on, injected so the running-campaign
  * prune orchestration is drivable with stubs (mirroring `defaultGraftDeps` in
  * `graft.ts` and `defaultCampaignDeps` in `modes.ts`). The tracker edge —
  * `blockedBy` — stays on `cfg`, exactly as `runGraft` reads it off `cfg`. These
  * are the functions that touch the on-disk event log and outbox, clear a parked
  * record, and launch the fresh reduced campaign.
  */
-export interface CarveDeps {
+export interface PruneDeps {
   readEventLog: typeof readEventLog;
   enqueueOutbound: typeof enqueueOutbound;
   clearParkedForTasks: typeof clearParkedForTasks;
-  /** the fresh-launch path's campaign runner (`carve <issue> "611 640" …`). */
+  /** the fresh-launch path's campaign runner (`prune <issue> "611 640" …`). */
   launchCampaign: Campaign;
 }
-export const defaultCarveDeps: CarveDeps = {
+export const defaultPruneDeps: PruneDeps = {
   readEventLog,
   enqueueOutbound,
   clearParkedForTasks,
@@ -237,8 +237,8 @@ export const defaultCarveDeps: CarveDeps = {
     import("./modes.ts").then((m) => m.campaign(cfg, batches, host, name, opts)),
 };
 
-export interface CarveOptions {
-  /** preview the carve but change nothing — no event, no enqueue, no launch. */
+export interface PruneOptions {
+  /** preview the prune but change nothing — no event, no enqueue, no launch. */
   dryRun?: boolean;
   /** the rare true-drop: clear a dropped parked member's record too (ADR 0013). */
   purge?: boolean;
@@ -250,9 +250,9 @@ export interface CarveOptions {
 }
 
 /** Pruning the running campaign: the closure met the current outcomes (ADR 0005). */
-export interface PruneCarveResult {
+export interface RunningPruneResult {
   mode: "prune";
-  /** the carved issue. */
+  /** the pruned issue. */
   target: string;
   /** the target plus its transitive dependents, in campaign order. */
   removed: string[];
@@ -260,7 +260,7 @@ export interface PruneCarveResult {
   dropped: string[];
   /** the closure members kept because they are already merged or mergeable. */
   kept: string[];
-  /** the resulting loop-facing waves after the carve. */
+  /** the resulting loop-facing waves after the prune. */
   remaining: string[][];
   /** the dropped members that were parked (the ones the parked-message describes). */
   parkedDropped: string[];
@@ -269,13 +269,13 @@ export interface PruneCarveResult {
   /** false for a `--dry-run` (previewed, nothing written); true once appended. */
   applied: boolean;
   /** the structured dry-run closure — present only on a `--dry-run`. */
-  closure?: StructuredCarveClosure;
+  closure?: StructuredPruneClosure;
 }
 
 /** Launching a fresh reduced campaign from an explicit plan (unchanged behavior). */
-export interface LaunchCarveResult {
+export interface LaunchPruneResult {
   mode: "launch";
-  /** the carved issue. */
+  /** the pruned issue. */
   target: string;
   /** the target plus its transitive dependents, in plan order. */
   removed: string[];
@@ -285,53 +285,53 @@ export interface LaunchCarveResult {
   launched: boolean;
 }
 
-export type RunCarveResult = PruneCarveResult | LaunchCarveResult;
+export type RunPruneResult = RunningPruneResult | LaunchPruneResult;
 
 /**
- * The impure orchestration around `carve`, lifted out of `cli.mts`'s inline switch
+ * The impure orchestration around `prune`, lifted out of `cli.mts`'s inline switch
  * so it is drivable with stubs (the direct mirror of `runGraft`, #176). Two paths:
  *
  * - No `plan` → **prune the running campaign**: read the event log, guard that one
  *   is open, reduce it to its current plan, compute the dependent closure, apply the
  *   keep-banked-work rule (ADR 0005), clear any purged parked records (ADR 0013),
- *   append a `carve` event the loop honors at its next wave boundary, and enqueue a
- *   `progress:carve` note.
+ *   append a `prune` event the loop honors at its next wave boundary, and enqueue a
+ *   `progress:prune` note.
  * - A `plan` → **launch a fresh reduced campaign**: compute the closure over the
- *   supplied waves, enqueue a `progress:carve` note, and run `campaign()` on the
+ *   supplied waves, enqueue a `progress:prune` note, and run `campaign()` on the
  *   remainder.
  *
  * Returns a structured result so the CLI renders the console output and a test
  * asserts the observable effects without re-parsing prose. The pure
- * `computeCarve`/`applyCarve`/`carveClosure` core is untouched.
+ * `computePrune`/`applyPrune`/`pruneClosure` core is untouched.
  */
-export async function runCarve(
+export async function runPrune(
   cfg: ResolvedConfig,
   target: string,
-  opts: CarveOptions = {},
-  deps: CarveDeps = defaultCarveDeps,
-): Promise<RunCarveResult> {
+  opts: PruneOptions = {},
+  deps: PruneDeps = defaultPruneDeps,
+): Promise<RunPruneResult> {
   if (!target)
     throw new Error(
-      'carve needs an issue: `carve 640` prunes the running campaign, `carve 640 "611 640" "623 701"` launches a reduced one.',
+      'prune needs an issue: `prune 640` prunes the running campaign, `prune 640 "611 640" "623 701"` launches a reduced one.',
     );
   if (!cfg.blockedBy)
     throw new Error(
-      'carve needs a "blockedBy" resolver in your config — e.g. blockedBy: githubBlockedBy("owner/repo").',
+      'prune needs a "blockedBy" resolver in your config — e.g. blockedBy: githubBlockedBy("owner/repo").',
     );
   const blockedBy = cfg.blockedBy;
   const tgt = normalize(target);
 
   // Explicit plan → launch a fresh reduced campaign (unchanged behavior).
   if (opts.plan) {
-    const { removed, remaining } = await computeCarve(opts.plan, target, blockedBy);
+    const { removed, remaining } = await computePrune(opts.plan, target, blockedBy);
     if (opts.dryRun) return { mode: "launch", target: tgt, removed, remaining, launched: false };
 
-    // A carve had no notification before E4 — emit a progress:carve record so it
+    // A prune had no notification before E4 — emit a progress:prune record so it
     // is announced and routable like any other outbound message (ADR 0002).
     deps.enqueueOutbound(cfg, {
       category: "progress",
-      event: "carve",
-      text: carveLaunchNote(cfg.project, tgt, removed, remaining),
+      event: "prune",
+      text: pruneLaunchNote(cfg.project, tgt, removed, remaining),
     });
     if (!remaining.length) return { mode: "launch", target: tgt, removed, remaining, launched: false };
     await deps.launchCampaign(cfg, remaining, opts.host!);
@@ -339,17 +339,17 @@ export async function runCarve(
   }
 
   // No plan → prune the RUNNING campaign: reduce the log to its current plan,
-  // compute the closure, apply the keep-banked-work rule, then append a carve
+  // compute the closure, apply the keep-banked-work rule, then append a prune
   // event the loop honors at its next wave boundary (ADR 0005).
   const events = deps.readEventLog(cfg);
   if (!campaignRunning(events))
     throw new Error(
-      "carve <issue> prunes a running campaign, but none is running. To launch a reduced campaign from a plan you supply, pass the waves: " +
-        'carve <issue> "611 640" "623 701".',
+      "prune <issue> prunes a running campaign, but none is running. To launch a reduced campaign from a plan you supply, pass the waves: " +
+        'prune <issue> "611 640" "623 701".',
     );
   const reduced = reduceCampaign(events);
-  const { removed } = await computeCarve(reduced.waves, target, blockedBy);
-  const applied = applyCarve(reduced, removed, { purge: opts.purge });
+  const { removed } = await computePrune(reduced.waves, target, blockedBy);
+  const applied = applyPrune(reduced, removed, { purge: opts.purge });
   const { remaining, dropped, parkedToClear } = applied;
   const kept = removed.filter((id) => !dropped.includes(id));
   const parkedDropped = dropped.filter((id) => reduced.outcomes.get(id) === "parked");
@@ -365,22 +365,22 @@ export async function runCarve(
       parkedDropped,
       purge: !!opts.purge,
       applied: false,
-      closure: carveClosure(target, removed, applied),
+      closure: pruneClosure(target, removed, applied),
     };
   }
 
-  // Preserve carved work by default: the dropped issue leaves the plan but its
+  // Preserve pruned work by default: the dropped issue leaves the plan but its
   // parked record (branch/worktree/session) stays so it can be investigated and
   // resumed (ADR 0013). Only `--purge` clears it — the rare true-drop — and
-  // `applyCarve` reflects that in `parkedToClear`.
+  // `applyPrune` reflects that in `parkedToClear`.
   if (parkedToClear.length) deps.clearParkedForTasks(cfg, parkedToClear);
-  // Append the carve event — the running loop re-reads it at the next wave
+  // Append the prune event — the running loop re-reads it at the next wave
   // boundary; `removed` is the closure so the fold replays the same rule.
-  cfg.log.log("carve", { target: tgt, removed, dropped });
+  cfg.log.log("prune", { target: tgt, removed, dropped });
   deps.enqueueOutbound(cfg, {
     category: "progress",
-    event: "carve",
-    text: carvePruneNote(cfg.project, tgt, dropped, kept, remaining),
+    event: "prune",
+    text: pruneRunningNote(cfg.project, tgt, dropped, kept, remaining),
   });
   return {
     mode: "prune",
@@ -398,8 +398,8 @@ export async function runCarve(
 const renderWaves = (waves: string[][], empty: string) =>
   waves.length ? waves.map((w) => `"${w.join(" ")}"`).join(" ") : empty;
 
-/** The `progress:carve` note for the running-campaign prune path. */
-function carvePruneNote(
+/** The `progress:prune` note for the running-campaign prune path. */
+function pruneRunningNote(
   project: string,
   tgt: string,
   dropped: string[],
@@ -407,31 +407,31 @@ function carvePruneNote(
   remaining: string[][],
 ): string {
   return (
-    `✂️ ${project} carved #${tgt} from the running campaign — ` +
+    `✂️ ${project} pruned #${tgt} from the running campaign — ` +
     (dropped.length ? `dropped ${dropped.map((i) => `#${i}`).join(", ")}` : "nothing to drop") +
     (kept.length ? ` (kept banked ${kept.map((i) => `#${i}`).join(", ")})` : "") +
     `. Remaining: ${renderWaves(remaining, "nothing left to run")}.`
   );
 }
 
-/** The `progress:carve` note for the fresh-launch path. */
-function carveLaunchNote(project: string, tgt: string, removed: string[], remaining: string[][]): string {
+/** The `progress:prune` note for the fresh-launch path. */
+function pruneLaunchNote(project: string, tgt: string, removed: string[], remaining: string[][]): string {
   const dependents = removed.filter((id) => id !== tgt);
   return (
-    `✂️ ${project} carved #${tgt} — dropped ${removed.map((i) => `#${i}`).join(", ")}` +
+    `✂️ ${project} pruned #${tgt} — dropped ${removed.map((i) => `#${i}`).join(", ")}` +
     (dependents.length ? ` (dependents: ${dependents.map((i) => `#${i}`).join(", ")})` : "") +
     `. Remaining: ${renderWaves(remaining, "nothing left to run")}.`
   );
 }
 
-export async function computeCarve(waves: string[][], target: string, blockedByOf: BlockedByOf): Promise<CarveResult> {
+export async function computePrune(waves: string[][], target: string, blockedByOf: BlockedByOf): Promise<PruneResult> {
   const normWaves = waves.map((wave) => wave.map(normalize));
   const order = normWaves.flat();
   const campaign = new Set(order);
   const tgt = normalize(target);
 
   if (!campaign.has(tgt)) {
-    throw new Error(`carve target #${tgt} is not in the campaign (${[...campaign].map((i) => `#${i}`).join(", ")}).`);
+    throw new Error(`prune target #${tgt} is not in the campaign (${[...campaign].map((i) => `#${i}`).join(", ")}).`);
   }
 
   // Each issue's blockers, restricted to the campaign — edges to issues we are

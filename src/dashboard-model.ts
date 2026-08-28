@@ -7,6 +7,7 @@ import { type ProjectPointer } from "./registry.ts";
 import { listParked, parkedDirOf, type ParkedRecord } from "./state.ts";
 import { applyCarve } from "./carve.ts";
 import { applyGraft } from "./plan.ts";
+import { festiveWaveName } from "./festive-names.ts";
 import { readEventLog, type GreenEvent, type OrchestratorEvent } from "./event-log.ts";
 import { activityLogPath } from "./activity.ts";
 
@@ -174,17 +175,33 @@ const mergedIssue = (e: GreenEvent): string | undefined => {
 };
 
 /**
- * A wave's human label — `Wave N`, plus ` — <lead title> +M` once the lead issue's
- * title has resolved (bare index otherwise). The single derivation both the status-page
- * wave cards (`renderWaveLabel`, dashboard-render.ts) and the event narration
- * (`describeEvent`) call, so the two paths can't drift. Takes the already-extracted
- * `(index, leadTitle, extra)` because its two callers feed it from different inputs — a
- * resolved `StatusWave` vs. a raw event + its `titles` map — and the caller escapes the
- * title first where the sink is HTML. `index` is zero-based; `extra` is the count beyond
- * the lead.
+ * The "Festive Wave Names" input to `waveLabel` (#193): the resolved Discworld name
+ * plus which surface is rendering, since the festive form differs by surface. A
+ * `card` (or closed-wave chip) shows `index · name` — its member rows already carry
+ * the issue titles. A `line` (the one-line narration, which has no member rows) shows
+ * `index · name · #num, #num, …`, listing the wave's member issue numbers inline.
  */
-export function waveLabel(index: number, leadTitle: string | undefined, extra: number): string {
+export type FestiveWaveLabel = { name: string; surface: "card" } | { name: string; surface: "line"; numbers: string[] };
+
+/**
+ * A wave's human label — `Wave N`, plus ` — <lead title> +M` once the lead issue's
+ * title has resolved (bare index otherwise). The single derivation the status-page
+ * wave cards (`renderWaveLabel`, dashboard-render.ts), the closed-wave chip
+ * (`renderClosedWaveChip`) and the event narration (`describeEvent`) call, so the paths
+ * can't drift. Takes the already-extracted `(index, leadTitle, extra)` because its
+ * callers feed it from different inputs — a resolved `StatusWave` vs. a raw event + its
+ * `titles` map — and the caller escapes the title first where the sink is HTML. `index`
+ * is zero-based; `extra` is the count beyond the lead. When `festive` is supplied
+ * (the gear toggle is on), it replaces the plain wording with the surface-specific
+ * festive form and `leadTitle`/`extra` are ignored.
+ */
+export function waveLabel(index: number, leadTitle: string | undefined, extra: number, festive?: FestiveWaveLabel): string {
   const base = `Wave ${index + 1}`;
+  if (festive) {
+    const head = `${base} · ${festive.name}`;
+    if (festive.surface === "card" || !festive.numbers.length) return head;
+    return `${head} · ${festive.numbers.map((n) => hash(n)).join(", ")}`;
+  }
   if (!leadTitle) return base;
   return `${base} — ${leadTitle}${extra > 0 ? ` +${extra}` : ""}`;
 }
@@ -213,22 +230,33 @@ const campaignPrefix = (name?: string) => (name ? `Campaign “${name}” — ` 
  * line only when a pre-summary run has none. Events with no operator-facing
  * narration return "" so `lastEventText` can skip past machine noise.
  */
-export function describeEvent(e: OrchestratorEvent): string {
+export function describeEvent(e: OrchestratorEvent, festive?: { offset: number }): string {
+  // The one-line festive form of a wave — `Wave N · name · #num, #num, …` — through the
+  // shared `waveLabel` (surface `line`), so the narration can't drift from the card/chip.
+  const festiveLine = (index: number, members: string[]) =>
+    waveLabel(index, undefined, 0, {
+      name: festiveWaveName(festive!.offset, index),
+      surface: "line",
+      numbers: members.map((id) => normalizeIssue(String(id))),
+    });
   switch (e.event) {
     case "campaign-start":
       return e.name ? `Campaign “${e.name}” started` : "Campaign started";
     case "campaign-batch": {
       const tasks = e.tasks ?? [];
-      const titles = tasks.map((id) => e.titles?.[normalizeIssue(String(id))] ?? hash(id));
-      return `${campaignPrefix(e.name)}${waveMembersLabel(e.index ?? 0, titles)} started`;
+      const label = festive
+        ? festiveLine(e.index ?? 0, tasks.map(String))
+        : waveMembersLabel(e.index ?? 0, tasks.map((id) => e.titles?.[normalizeIssue(String(id))] ?? hash(id)));
+      return `${campaignPrefix(e.name)}${label} started`;
     }
     case "campaign-batch-done": {
       // The event holds no plan-ordered task list, so the wave's membership is reconstructed
       // from the outcomes it does carry (merged, then quarantined, then held) and each member
       // is named by title (an unresolved id falls back to its `#id`), listing them all.
       const members = [...(e.merged ?? []), ...(e.quarantined ?? []), ...(e.held ?? [])];
-      const titles = members.map((id) => e.titles?.[normalizeIssue(String(id))] ?? hash(id));
-      const label = waveMembersLabel(e.index ?? 0, titles);
+      const label = festive
+        ? festiveLine(e.index ?? 0, members.map(String))
+        : waveMembersLabel(e.index ?? 0, members.map((id) => e.titles?.[normalizeIssue(String(id))] ?? hash(id)));
       const hashes = (e.merged ?? []).length ? (e.merged as unknown[]).map(hash).join(", ") : "nothing";
       return `${campaignPrefix(e.name)}${label} merged ${hashes}`;
     }

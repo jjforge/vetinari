@@ -55,6 +55,7 @@ import {
   renderHostLog,
   renderLandingShell,
   viewRelevantEvents,
+  waveLabel,
   renderStatusPage,
   renderTopBar,
   selectStatus,
@@ -3424,6 +3425,46 @@ test("selectStatus picks the requested project, defaulting to the first otherwis
   assert.equal(selectStatus(statuses, undefined).project, "alpha");
   // An unknown or stale selection falls back to the first, never undefined.
   assert.equal(selectStatus(statuses, "ghost").project, "alpha");
+});
+
+test("waveLabel's festive input names the wave through the one derivation (#193)", () => {
+  // Off (no festive input) — exactly today's wording, card and bare.
+  assert.equal(waveLabel(1, undefined, 0), "Wave 2");
+  assert.equal(waveLabel(1, "cache eviction", 2), "Wave 2 — cache eviction +2");
+  // Card surface — `index · name`; the lead title + "+M" is dropped (the card's member
+  // rows already carry the titles), so only the index and the festive name show.
+  assert.equal(waveLabel(1, "cache eviction", 2, { name: "Granny Weatherwax", surface: "card" }), "Wave 2 · Granny Weatherwax");
+  // Line surface — `index · name · #num, #num, …`; the single-line narration has no member
+  // rows, so it lists the member issue numbers inline.
+  assert.equal(
+    waveLabel(1, undefined, 0, { name: "Granny Weatherwax", surface: "line", numbers: ["1234", "145", "234"] }),
+    "Wave 2 · Granny Weatherwax · #1234, #145, #234",
+  );
+  // A member-less wave degrades the line to just `index · name`.
+  assert.equal(waveLabel(1, undefined, 0, { name: "Death", surface: "line", numbers: [] }), "Wave 2 · Death");
+});
+
+test("describeEvent narrates festively when given a campaign's reserved offset (#193)", () => {
+  // festive offset 11 → wave 1 (index 0) draws pool[11] = "Granny Weatherwax". The one-line
+  // narration lists the member issue numbers inline (no member rows on a line).
+  assert.equal(
+    describeEvent(
+      event("campaign-batch", { index: 0, tasks: ["1234", "145", "234"], titles: { "1234": "a" }, name: "gateway work" }),
+      { offset: 11 },
+    ),
+    "Campaign “gateway work” — Wave 1 · Granny Weatherwax · #1234, #145, #234 started",
+  );
+  // campaign-batch-done reconstructs the members from merged/quarantined/held, still names
+  // the wave festively, and keeps the merged-hashes tail.
+  assert.equal(
+    describeEvent(event("campaign-batch-done", { index: 1, merged: ["101"], held: ["102"], clearedParked: [] }), { offset: 11 }),
+    "Wave 2 · Nanny Ogg · #101, #102 merged #101",
+  );
+  // Same event with no festive input → exactly today's plain-words narration.
+  assert.equal(
+    describeEvent(event("campaign-batch", { index: 0, tasks: ["1234"], titles: { "1234": "a" }, name: "gateway work" })),
+    "Campaign “gateway work” — Wave 1 — a started",
+  );
 });
 
 test("describeEvent narrates the operator-facing events in plain words", () => {

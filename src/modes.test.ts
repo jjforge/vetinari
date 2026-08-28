@@ -12,11 +12,13 @@ import {
   childSpawnEnv,
   markMergedIssues,
   quarantinePauseNotice,
+  queue,
   requireTelegram,
   resolveTitles,
   warnIfTelegramUnconfigured,
   waveParkedNotice,
   type CampaignDeps,
+  type RunSpawner,
 } from "./modes.ts";
 import { loggerForRun, memoryLogger, type MemoryLogger } from "./log.ts";
 import { listOutbox } from "./state.ts";
@@ -25,6 +27,9 @@ import {
   type CampaignBatchDoneEvent,
   type CampaignBatchEvent,
   type CampaignDoneEvent,
+  type QueueDoneEvent,
+  type QueueSpawnEvent,
+  type QueueStartEvent,
 } from "./event-log.ts";
 import { archiveRun, shouldArchiveLeftover } from "./archive.ts";
 import type { HostBudget } from "./host-slots.ts";
@@ -584,4 +589,73 @@ test("a graft appended mid-wave lands in a future wave; the loop re-derives and 
   assert.deepEqual(batches[0], ["101"]);
   assert.ok(batches.slice(1).flat().includes("301"), "grafted 301 ran in a later wave");
   assert.ok(spawned.includes("301"), "the loop actually spawned the grafted issue");
+});
+
+// One event-loop tick — lets the queue's synchronous `fill()` (and its microtask
+// chain) run so we can observe the deferred spawners it started before releasing them.
+const tick = () => new Promise<void>((r) => setImmediate(r));
+
+// A Docker-free harness for `queue()` (#190): the same on-disk log + injected-deps
+// pattern the campaign tests use, but driving `queue` directly. `spawnRun` is a
+// deferred/controllable child so the queue fills to the ceiling with every slot held —
+// the `queue-spawn` running count is then observable climbing to `host.ceiling` — and
+// each task's exit code is chosen per test to pin the outcome map.
+test("queue fills to the host ceiling, then writes queue-start/queue-spawn with climbing running counts (#190)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-queue-"));
+  const cfg = harnessCfg(dir);
+  const taskIds = ["101", "102", "103"];
+  // ceiling >= taskIds.length so a lone project gets the whole ceiling and never hits
+  // the 1 s re-drive poll — every task spawns in the first `fill()`.
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 3, weight: 1 };
+
+  const spawned: string[] = [];
+  const release: Array<(code: number) => void> = [];
+  // Held-open children: each spawn parks a resolver instead of returning, so all three
+  // slots stay leased and `running` climbs to the ceiling before any frees.
+  const spawnRun: RunSpawner = (taskId) => {
+    spawned.push(taskId);
+    return new Promise<number>((resolve) => release.push(resolve));
+  };
+
+  const draining = silenceConsole(() => queue(cfg, taskIds, host, undefined, spawnRun));
+
+  // Let the queue fill: all three tasks take a slot before any child resolves.
+  while (spawned.length < taskIds.length) await tick();
+  assert.deepEqual(spawned, taskIds, "each task spawned once, in order, up to the ceiling");
+
+  // Now let every child exit green and the drain complete.
+  release.forEach((r) => r(0));
+  await draining;
+
+  const events = readEventLog(cfg);
+  const start = events.find((e): e is QueueStartEvent => e.event === "queue-start");
+  assert.deepEqual(start?.taskIds, taskIds);
+  assert.equal(start?.slots, host.ceiling);
+  assert.equal(start?.hostBudget, host.ceiling);
+
+  // Each spawn reports the running count climbing to the ceiling and the queue draining.
+  const spawns = events.filter((e): e is QueueSpawnEvent => e.event === "queue-spawn");
+  assert.deepEqual(spawns.map((s) => s.taskId), taskIds);
+  assert.deepEqual(spawns.map((s) => s.running), [1, 2, 3]);
+  assert.deepEqual(spawns.map((s) => s.left), [2, 1, 0]);
+});
+
+test("queue returns and logs a per-task outcome map translating each child's exit code (#190)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-queue-outcomes-"));
+  const cfg = harnessCfg(dir);
+  const taskIds = ["101", "102", "103"];
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 3, weight: 1 };
+
+  // `run`'s exit-code contract: 0 → green, 2 → parked, anything else → error(n).
+  const codes: Record<string, number> = { "101": 0, "102": 2, "103": 7 };
+  const spawnRun: RunSpawner = async (taskId) => codes[taskId];
+
+  const outcomes = await silenceConsole(() => queue(cfg, taskIds, host, undefined, spawnRun));
+
+  const expected = { "101": "green", "102": "parked", "103": "error(7)" };
+  assert.deepEqual(outcomes, expected, "the returned map is the caller's greens without re-deriving from the log");
+
+  // The same map is logged on queue-done so the dashboard reduces it to statuses.
+  const done = readEventLog(cfg).find((e): e is QueueDoneEvent => e.event === "queue-done");
+  assert.deepEqual(done?.outcomes, expected);
 });

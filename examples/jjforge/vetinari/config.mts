@@ -1,8 +1,7 @@
 // Real config from the project this harness was extracted from — a Go fork plus
 // a Rust sidecar, tasks sourced from GitHub issues.
-import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
-import { defineConfig, githubBlockedBy, githubFindingReporter } from "vetinari";
+import { defineConfig, githubBlockedBy, githubFetchTask, githubFindingReporter } from "vetinari";
 
 export default defineConfig({
   project: "jjforge",
@@ -42,8 +41,10 @@ export default defineConfig({
     { hostPath: ".vetinari.local/cache/sccache", sandboxPath: "/home/agent/.cache/sccache" },
   ],
 
-  fetchTask: (id) =>
-    execFileSync("gh", ["issue", "view", id, "--repo", "jjforge/jjforge", "--json", "title,body,comments"], { encoding: "utf8" }),
+  // The shared helper fetches the full field set — title/body/comments/labels for
+  // the prompt, plus state/closedAt so `issueStateFromTask` can reject a closed graft
+  // target (#175). Hand-rolling the `--json` list here would silently re-drop those.
+  fetchTask: githubFetchTask("jjforge/jjforge"),
 
   // Powers `carve`: native GitHub "blocked by" links tell it which issues fall
   // when one is pulled from a campaign.

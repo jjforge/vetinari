@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { humanizeHostLine, humanizeLogLine, LOG_DOT_STATE_COLOR, plainText, type MessageSpan } from "./log-view.ts";
+import { humanizeHostLine, humanizeLogLine, LOG_DOT_STATE_COLOR, plainText, splitOverflow, type MessageSpan } from "./log-view.ts";
 import { event } from "./event-log.ts";
 import { describeEvent } from "./dashboard-model.ts";
 
@@ -169,6 +169,44 @@ test("plainText flattens verb + spans to a single readable string", () => {
   assert.equal(plainText(commit), "committed abcdef1 · 1 file");
   const edit = humanizeLogLine(raw(event("tool", { taskId: "204", name: "Edit", path: "src/x.ts", ts: "2026-08-28T00:00:00.000Z" })));
   assert.equal(plainText(edit), "edited src/x.ts");
+});
+
+// splitOverflow (#217) is the pure first-line/overflow split the collapsed log-view row keys
+// off: a message whose rendered content is more than one line shows only its first line, and
+// its remainder unfolds behind the expand chevron. The split happens on the structured spans
+// so the first line keeps its code/strong styling; the overflow is raw text (the mono block).
+
+test("splitOverflow leaves a single-line message untouched, with no overflow", () => {
+  const spans: MessageSpan[] = [code("npm test"), p(" (12s)")];
+  const out = splitOverflow(spans);
+  assert.deepEqual(out.spans, spans);
+  assert.equal(out.overflow, "");
+});
+
+test("splitOverflow keeps only the first line's spans and returns the remainder as raw overflow", () => {
+  const out = splitOverflow([strong("Boom: it broke"), p("\nline two\nline three")]);
+  // The first line is everything up to the first newline, spans and styling preserved.
+  assert.deepEqual(out.spans, [strong("Boom: it broke")]);
+  // The remainder (after that newline) is the raw mono overflow block, later lines intact.
+  assert.equal(out.overflow, "line two\nline three");
+});
+
+test("splitOverflow splits inside a span, keeping the head styled and the tail in overflow", () => {
+  const out = splitOverflow([strong("first line\nsecond line\nthird")]);
+  assert.deepEqual(out.spans, [strong("first line")]);
+  assert.equal(out.overflow, "second line\nthird");
+});
+
+test("splitOverflow concatenates every span after the break into the raw overflow", () => {
+  const out = splitOverflow([p("head\ntail-a "), code("path/x"), p(" done")]);
+  assert.deepEqual(out.spans, [p("head")]);
+  assert.equal(out.overflow, "tail-a path/x done");
+});
+
+test("splitOverflow treats a trailing newline with no content after it as single-line", () => {
+  const out = splitOverflow([p("only line\n")]);
+  assert.deepEqual(out.spans, [p("only line")]);
+  assert.equal(out.overflow, "");
 });
 
 test("each dot state maps to a stateColor token so the chrome can paint all five", () => {

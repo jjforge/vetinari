@@ -12,6 +12,7 @@ interface StubNode {
   tag: string;
   className: string;
   textContent: string;
+  hidden: boolean;
   children: StubNode[];
   append(...kids: StubNode[]): void;
 }
@@ -22,6 +23,7 @@ const stubDoc = () =>
         tag,
         className: "",
         textContent: "",
+        hidden: false,
         children: [],
         append(...kids: StubNode[]) {
           this.children.push(...kids);
@@ -81,4 +83,34 @@ test("a run-level row (no actor, no verb) is just the message spans — no empty
   // Exactly one span (the describeEvent narration); no .lv-lead and no .lv-verb.
   assert.equal(msg.children.length, 1);
   assert.ok(!msg.children.some((c) => c.className === "lv-lead" || c.className === "lv-verb"));
+});
+
+// Multiline collapse (#217): a row whose message is more than one line shows only its first
+// line, with a bare chevron ending the message and the remainder folded into a hidden
+// .lv-overflow block beneath it. A single-line row gets neither.
+
+test("a single-line row renders no chevron and no overflow block", () => {
+  const row = build(event("turn", { taskId: "204", turn: 3, summary: "one line only", ts: "2026-08-28T00:00:00.000Z" }));
+  const msg = row.children[2];
+  assert.ok(!msg.children.some((c) => c.className === "lv-chev"), "no chevron on a single-line row");
+  assert.ok(!row.children.some((c) => c.className === "lv-overflow"), "no overflow block on a single-line row");
+});
+
+test("a multiline row shows the first line + a bare chevron, the remainder in a hidden .lv-overflow", () => {
+  const row = build(event("turn", { taskId: "204", turn: 3, summary: "first line\nsecond line\nthird", ts: "2026-08-28T00:00:00.000Z" }));
+  const msg = row.children[2];
+  // The message keeps only the first line's spans, then ends with the bare chevron.
+  const chev = msg.children[msg.children.length - 1];
+  assert.equal(chev.className, "lv-chev");
+  assert.equal(chev.textContent, "⌄");
+  // The styled first line survives (the strong summary, now just its first line).
+  assert.deepEqual(
+    msg.children.filter((c) => c.className !== "lv-chev").map((c) => [c.tag, c.textContent]),
+    [["span", "#204"], ["span", "turn 3"], ["strong", "first line"]],
+  );
+  // The remainder is a sibling .lv-overflow block, hidden until the chevron is clicked.
+  const overflow = row.children.find((c) => c.className === "lv-overflow");
+  assert.ok(overflow, "the overflow block exists");
+  assert.equal(overflow.textContent, "second line\nthird");
+  assert.equal(overflow.hidden, true);
 });

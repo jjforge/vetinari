@@ -66,6 +66,28 @@ export interface HumanizedRow {
   dot: LogDotState;
 }
 
+/** Split a humanized message's spans into its first rendered line and the raw remainder (#217).
+ * A log entry whose content spans more than one line collapses to its first line in the log
+ * view, with the rest one click away; this is the pure, unit-tested split the collapsed `.lv-row`
+ * keys off. It scans the spans for the first newline: everything before it stays as styled spans
+ * (the partial span keeps its `kind`), and everything after — the tail of that span plus every
+ * following span's text — is concatenated into `overflow`, the raw mono block the expand control
+ * reveals. A message with no newline (or only a trailing one, i.e. no real second line) returns
+ * its spans unchanged and an empty `overflow`, so single-line rows render exactly as before. */
+export function splitOverflow(spans: MessageSpan[]): { spans: MessageSpan[]; overflow: string } {
+  for (let i = 0; i < spans.length; i++) {
+    const nl = spans[i].text.indexOf("\n");
+    if (nl === -1) continue;
+    const first = spans.slice(0, i);
+    const head = spans[i].text.slice(0, nl);
+    if (head) first.push({ text: head, kind: spans[i].kind });
+    const overflow = spans[i].text.slice(nl + 1) + spans.slice(i + 1).map((s) => s.text).join("");
+    if (!overflow) return { spans: first, overflow: "" };
+    return { spans: first, overflow };
+  }
+  return { spans, overflow: "" };
+}
+
 /** Flatten a structured row back to a single readable string — `verb` then each span's text,
  * space-joined only where the verb leads prose. The client's filter/title/accessibility
  * fallback (and the tests) read this when they need flat text; the rendered row uses the

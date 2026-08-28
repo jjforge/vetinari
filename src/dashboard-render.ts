@@ -11,7 +11,7 @@ import {
   type WaveStatus,
 } from "./dashboard-model.ts";
 import { festiveWaveName } from "./festive-names.ts";
-import type { HumanizedRow } from "./log-view.ts";
+import { splitOverflow, type HumanizedRow } from "./log-view.ts";
 import type { StructuredGraftClosure } from "./graft.ts";
 import type { GraftRejection } from "./plan.ts";
 import {
@@ -346,6 +346,14 @@ export function highlightJsonLine(line: string): string {
  * set via `textContent`, never innerHTML, so a path/summary/error can't inject markup. `d` is
  * the document (the client passes `document`, a test passes a stub) so the builder is a pure
  * factory, shipped verbatim into the three log surfaces' scripts via `.toString()`.
+ *
+ * Multiline collapse (#217): a message that is more than one rendered line collapses to its first
+ * line — `splitOverflow` keeps the styled first-line spans and hands back the raw remainder. When
+ * there is a remainder, a bare `.lv-chev` ends the message and a hidden `.lv-overflow` block (mono,
+ * raw, indented under the message column) holds it; clicking the chevron unfolds the block in place
+ * and flips `⌄`⇄`⌃`. A single-line row gets neither, so it renders exactly as before. The click
+ * wiring is attached only where `addEventListener` exists (the browser), so the test stub — which
+ * has none — still exercises the built structure.
  */
 export function humanizedRow(h: HumanizedRow, d: Document): HTMLElement {
   const el = d.createElement("div");
@@ -369,12 +377,29 @@ export function humanizedRow(h: HumanizedRow, d: Document): HTMLElement {
     verb.textContent = h.verb;
     msg.append(verb);
   }
-  for (const s of h.spans || []) {
+  const split = splitOverflow(h.spans || []);
+  for (const s of split.spans) {
     const node = d.createElement(s.kind === "code" ? "code" : s.kind === "strong" ? "strong" : "span");
     node.textContent = s.text;
     msg.append(node);
   }
   el.append(t, dot, msg);
+  if (split.overflow) {
+    const chev = d.createElement("span");
+    chev.className = "lv-chev";
+    chev.textContent = "⌄";
+    msg.append(chev);
+    const overflow = d.createElement("div");
+    overflow.className = "lv-overflow";
+    overflow.textContent = split.overflow;
+    overflow.hidden = true;
+    el.append(overflow);
+    const toggle = () => {
+      overflow.hidden = !overflow.hidden;
+      chev.textContent = overflow.hidden ? "⌄" : "⌃";
+    };
+    if (chev.addEventListener) chev.addEventListener("click", toggle);
+  }
   return el;
 }
 
@@ -1085,6 +1110,7 @@ ${issueDetailSheetMarkup(true)}
   ${feedKindLabel.toString()}
   ${feedRowMatches.toString()}
   ${highlightJsonLine.toString()}
+  ${splitOverflow.toString()}
   ${humanizedRow.toString()}
 ${ISSUE_DETAIL_SHEET_SCRIPT}
 ${REPO_DROPDOWN_SCRIPT}

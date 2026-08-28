@@ -1,6 +1,6 @@
 import { cappedRawRows, followView, highlightJsonLine, humanizedRow, isNotableHostEvent, tailAppend, tailFresh, tailView } from "./dashboard-render.ts";
 import { paneActivity } from "./dashboard-visual-state.ts";
-import { humanizeHostLine, LOG_DOT_STATE_COLOR } from "./log-view.ts";
+import { humanizeHostLine, LOG_DOT_STATE_COLOR, splitOverflow } from "./log-view.ts";
 
 /**
  * The dashboard's inert browser payloads — the CSS and client-side JavaScript
@@ -511,6 +511,7 @@ export const ARCHIVE_LIST_SCRIPT = `  const archiveList = document.querySelector
     const __name = (fn) => fn;
     const RAW_CAP = 500;
     ${highlightJsonLine.toString()}
+    ${splitOverflow.toString()}
     ${humanizedRow.toString()}
     ${cappedRawRows.toString()}
     // The Humanized ⇄ Raw display mode (#203): humanized by default, remembered client-side so a
@@ -704,6 +705,13 @@ export const LIVE_TAIL_STYLES = `  .live-tail { background: var(--color-card); b
   .lv-verb { color: var(--color-text-light-2); margin-right: .35rem; }
   .lv-msg code { font-family: ${MONO_FONT}; font-size: .95em; color: var(--color-text-light); }
   .lv-msg strong { color: var(--color-text); font-weight: 700; }
+  /* Multiline collapse (#217): a bare, dim chevron ends a collapsed row's first line and
+     brightens on hover; clicking it unfolds the .lv-overflow block — the raw remainder, mono
+     and copy-pasteable — in the message column (grid-column 3) beneath the first line. */
+  .lv-chev { margin-left: .35rem; color: var(--color-text-light-2); cursor: pointer; user-select: none; }
+  .lv-chev:hover { color: var(--color-text); }
+  .lv-overflow { grid-column: 3; margin-top: .15rem; white-space: pre-wrap; word-break: break-word; font-family: ${MONO_FONT}; font-size: .95em; color: var(--color-text-light); }
+  .lv-overflow[hidden] { display: none; }
   .tail-empty { color: var(--color-text-light-2); padding: .5rem .6rem; }
   .tail-backlog { display: block; width: 100%; border: 0; background: var(--color-blue); color: var(--color-body); font: inherit; font-size: .78rem; font-weight: 700; padding: .35rem; cursor: pointer; text-align: center; }
   .tail-backlog[hidden] { display: none; }
@@ -728,6 +736,7 @@ export const LIVE_TAIL_SCRIPT = `  const tailEl = document.querySelector("[data-
   if (tailEl && typeof events !== "undefined") {
     const __name = (fn) => fn;
     ${highlightJsonLine.toString()}
+    ${splitOverflow.toString()}
     ${humanizedRow.toString()}
     ${tailFresh.toString()}
     ${tailAppend.toString()}
@@ -897,6 +906,7 @@ export const HOST_LOG_SCRIPT = `  const hostLogRoot = document.querySelector("[d
   if (hostLogRoot && typeof events !== "undefined") {
     const __name = (fn) => fn;
     ${highlightJsonLine.toString()}
+    ${splitOverflow.toString()}
     ${humanizedRow.toString()}
     ${cappedRawRows.toString()}
     ${isNotableHostEvent.toString()}

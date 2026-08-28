@@ -13,6 +13,8 @@ import type { ResolvedConfig } from "./config.ts";
 import {
   ARCHIVE_LIST_SCRIPT,
   DASHBOARD_PALETTE_CSS,
+  HOST_LOG_SCRIPT,
+  HOST_LOG_STYLES,
   ISSUE_DETAIL_SHEET_SCRIPT,
   ISSUE_DETAIL_SHEET_STYLES,
   REPO_DROPDOWN_SCRIPT,
@@ -5089,6 +5091,33 @@ test("renderStatusPage ships the archived-list client wiring: toggle, mode switc
     ARCHIVE_LIST_SCRIPT,
     /showOlder\.addEventListener\("click", \(\) => \{ for \(const row of archiveRows\) row\.hidden = false;/,
   );
+});
+
+test("HOST_LOG_SCRIPT wires the host-log pane: gear show/hide, badge off isNotableHostEvent, filter, live host frames (#180)", () => {
+  const html = renderLandingShell(["alpha"]);
+  // The landing embeds the host-log script and its styles.
+  assert.ok(html.includes(HOST_LOG_SCRIPT), "landing includes HOST_LOG_SCRIPT");
+  assert.ok(html.includes(HOST_LOG_STYLES), "landing includes HOST_LOG_STYLES");
+  // Ships the shared, tested pure helpers via .toString(), not a hand-mirrored copy.
+  assert.match(HOST_LOG_SCRIPT, /function isNotableHostEvent/);
+  assert.match(HOST_LOG_SCRIPT, /function highlightJsonLine/);
+  assert.match(HOST_LOG_SCRIPT, /function cappedRawRows/);
+  // The gear is the show/hide of an otherwise-hidden pane.
+  assert.match(HOST_LOG_SCRIPT, /gear\.addEventListener\("click", \(\) => \(panel\.hidden \? openPanel\(\) : closePanel\(\)\)\);/);
+  // The badge keys off isNotableHostEvent and a last-viewed timestamp; opening marks the
+  // window's notable events seen so the badge clears until a newer one lands.
+  assert.match(HOST_LOG_SCRIPT, /if \(isNotableHostEvent\(ev\)/);
+  assert.match(HOST_LOG_SCRIPT, /badge\.hidden = !\(n && n > lastSeen\)/);
+  assert.match(HOST_LOG_SCRIPT, /lastSeen = newestNotableTs\(\) \|\| lastSeen/);
+  // Renders newest-first through the shared cap/highlight and narrows by a substring filter.
+  assert.match(HOST_LOG_SCRIPT, /cappedRawRows\(lines, needle, HOST_CAP, expanded\)/);
+  assert.match(HOST_LOG_SCRIPT, /code\.innerHTML = highlightJsonLine\(line\)/);
+  assert.match(HOST_LOG_SCRIPT, /filterEl\.addEventListener\("input"/);
+  // Live: the initial window is the no-daemon fetch; new rows arrive on the named host frame.
+  assert.match(HOST_LOG_SCRIPT, /fetch\("\/api\/host-log"\)/);
+  assert.match(HOST_LOG_SCRIPT, /events\.addEventListener\("host"/);
+  // A missing host log reads a clean empty state, not a blank pane.
+  assert.match(HOST_LOG_SCRIPT, /No host log yet/);
 });
 
 test("renderStatusPage makes archived campaign chips open the issue sheet against the archived run, read-only", () => {

@@ -1,5 +1,6 @@
 import { cappedRawRows, followView, highlightJsonLine, isNotableHostEvent, tailAppend, tailFresh, tailView } from "./dashboard-render.ts";
 import { paneActivity } from "./dashboard-visual-state.ts";
+import { LOG_DOT_STATE_COLOR } from "./log-view.ts";
 
 /**
  * The dashboard's inert browser payloads — the CSS and client-side JavaScript
@@ -666,6 +667,20 @@ export const LIVE_TAIL_STYLES = `  .live-tail { background: var(--color-card); b
   .tail-code .jkey { color: var(--color-blue); }
   .tail-code .jstr { color: var(--color-primary); }
   .tail-code .jnum, .tail-code .jbool, .tail-code .jnull { color: var(--color-yellow); }
+  /* The Humanized ⇄ Raw segmented toggle (#203): a two-button pill, the pressed side accented. */
+  .tail-mode { display: inline-flex; border: 1px solid var(--color-secondary); border-radius: 999px; overflow: hidden; }
+  .tail-mode-btn { border: 0; background: var(--color-chip); color: var(--color-text-light-2); font: inherit; font-size: .78rem; padding: .28rem .6rem; cursor: pointer; }
+  .tail-mode-btn:hover { color: var(--color-text); }
+  .tail-mode-btn[aria-pressed="true"] { background: var(--color-blue); color: var(--color-body); font-weight: 700; }
+  /* A humanized row (#203): a state dot, the HH:MM:SS time, the #issue actor, then the message.
+     The dot reads the event's own state via the shared palette (§1, generated from stateColor). */
+  .log-hrow { display: grid; grid-template-columns: auto auto auto 1fr; align-items: baseline; gap: .5rem; padding: .1rem .6rem; }
+  .log-hrow:hover { background: var(--color-card); }
+  .log-dot { width: .6rem; height: .6rem; border-radius: 999px; align-self: center; flex: none; background: var(--color-dim); }
+  ${Object.entries(LOG_DOT_STATE_COLOR).map(([s, token]) => `.log-dot.${s} { background: ${stateColor(token)}; }`).join(" ")}
+  .log-time { color: var(--color-dim); font-variant-numeric: tabular-nums; }
+  .log-actor { color: var(--color-text-light-2); font-weight: 600; }
+  .log-msg { min-width: 0; white-space: pre-wrap; word-break: break-word; color: var(--color-text-light); }
   .tail-empty { color: var(--color-text-light-2); padding: .5rem .6rem; }
   .tail-backlog { display: block; width: 100%; border: 0; background: var(--color-blue); color: var(--color-body); font: inherit; font-size: .78rem; font-weight: 700; padding: .35rem; cursor: pointer; text-align: center; }
   .tail-backlog[hidden] { display: none; }
@@ -698,6 +713,10 @@ export const LIVE_TAIL_SCRIPT = `  const tailEl = document.querySelector("[data-
     const FOLLOW_CAP = 260, RENDER_CAP = 160;
     const project = tailEl.dataset.project;
     let agents = []; try { agents = JSON.parse(tailEl.dataset.agents || "[]"); } catch (e) {}
+    // The Humanized ⇄ Raw display mode (#203): humanized by default, remembered per view in
+    // localStorage so a Raw preference sticks across refreshes and per repo.
+    const MODE_KEY = "vetinari:tail-mode:" + project;
+    let mode = "humanized"; try { const m = localStorage.getItem(MODE_KEY); if (m === "raw" || m === "humanized") mode = m; } catch (e) {}
     let open = true, live = true, mark = 0, issue = "", query = "", buffer = [], seen = {};
     const statusOf = (id) => (agents.find((a) => a.issue === id) || {}).status || "running";
     const q = (sel) => tailEl.querySelector(sel);
@@ -706,7 +725,7 @@ export const LIVE_TAIL_SCRIPT = `  const tailEl = document.querySelector("[data-
     const backlogEl = q("[data-tail-backlog]"), playBtn = q("[data-tail-play]"), filterEl = q("[data-tail-filter]");
     const issueDd = q("[data-tail-issue-dd]"), issueTrigger = q("[data-tail-issue-trigger]"), issueMenu = q("[data-tail-issue-menu]");
     const issueLabel = q("[data-tail-issue-label]"), issueDot = q("[data-tail-issue-dot]");
-    const saveBtn = q("[data-tail-save]"), clearBtn = q("[data-tail-clear]");
+    const saveBtn = q("[data-tail-save]"), clearBtn = q("[data-tail-clear]"), modeEl = q("[data-tail-mode]");
     const mk = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
     function renderMenu() {
       issueMenu.textContent = "";
@@ -726,10 +745,23 @@ export const LIVE_TAIL_SCRIPT = `  const tailEl = document.querySelector("[data-
       body.textContent = "";
       if (view.rows.length) {
         for (const r of view.rows) {
-          const line = mk("div", "tail-line");
-          line.append(mk("span", "tail-gutter " + statusOf(r.issue), "#" + r.issue));
-          const code = mk("code", "tail-code"); code.innerHTML = highlightJsonLine(r.raw); line.append(code);
-          body.append(line);
+          if (mode === "raw") {
+            // Raw: the highlighted NDJSON, gutter coloured by the issue's status (unchanged, #195).
+            const line = mk("div", "tail-line");
+            line.append(mk("span", "tail-gutter " + statusOf(r.issue), "#" + r.issue));
+            const code = mk("code", "tail-code"); code.innerHTML = highlightJsonLine(r.raw); line.append(code);
+            body.append(line);
+          } else {
+            // Humanized (default): time · actor · what happened, the dot coloured by the event's
+            // own state (the server-attached parts); an eventless line falls back to a raw dump.
+            const h = r.humanized || { time: "", actor: "", message: r.raw, dot: "neutral" };
+            const line = mk("div", "log-hrow");
+            line.append(mk("span", "log-dot " + h.dot));
+            line.append(mk("span", "log-time", h.time));
+            line.append(mk("span", "log-actor", h.actor));
+            line.append(mk("span", "log-msg", h.message));
+            body.append(line);
+          }
         }
       } else {
         body.append(mk("div", "tail-empty", issue || query.trim() ? "no lines match that filter" : ""));
@@ -766,6 +798,11 @@ export const LIVE_TAIL_SCRIPT = `  const tailEl = document.querySelector("[data-
     playBtn.addEventListener("click", () => { live = !live; mark = buffer.length; render(); });
     backlogEl.addEventListener("click", () => { live = true; mark = buffer.length; render(); });
     filterEl.addEventListener("input", () => { query = filterEl.value; render(); });
+    // The Humanized ⇄ Raw toggle (#203): flip the body's line format, persist the choice, and
+    // re-render. Seed the pressed state from the remembered mode so the buttons match on load.
+    const syncModeBtns = () => { if (modeEl) for (const b of modeEl.querySelectorAll("[data-mode]")) b.setAttribute("aria-pressed", String(b.dataset.mode === mode)); };
+    if (modeEl) for (const btn of modeEl.querySelectorAll("[data-mode]")) btn.addEventListener("click", () => { mode = btn.dataset.mode; try { localStorage.setItem(MODE_KEY, mode); } catch (e) {} syncModeBtns(); render(); });
+    syncModeBtns();
     issueTrigger.addEventListener("click", (e) => { e.stopPropagation(); const willOpen = issueMenu.hidden; issueMenu.hidden = !willOpen; issueTrigger.setAttribute("aria-expanded", String(willOpen)); });
     document.addEventListener("click", (e) => { if (!issueDd.contains(e.target)) { issueMenu.hidden = true; issueTrigger.setAttribute("aria-expanded", "false"); } });
     saveBtn.addEventListener("click", () => {

@@ -281,6 +281,45 @@ test("buildLanding's card counts the live plan, not carved chips", () => {
   assert.equal(card.runState, "running");
 });
 
+test("buildLanding counts grafted issues as queued but still excludes carved (#200)", () => {
+  const base = join(tmpdir(), `vetinari-landing-graft-${Date.now()}`);
+  const dir = join(base, "demo");
+  seedState(dir, [
+    event("campaign-start", {
+      ts: "2025-01-02T08:00:00.000Z",
+      batches: [["101"], ["201"], ["301"]],
+      name: "gateway work",
+      slots: 1,
+    }),
+    event("campaign-batch", { ts: "2025-01-02T08:01:00.000Z", index: 0, tasks: ["101"] }),
+    event("green", { ts: "2025-01-02T08:02:00.000Z", taskId: "101", branch: "agent/101", commits: [] }),
+    event("campaign-batch-done", {
+      ts: "2025-01-02T08:03:00.000Z",
+      index: 0,
+      merged: ["101"],
+      held: [],
+      clearedParked: [],
+    }),
+    event("campaign-batch", { ts: "2025-01-02T08:04:00.000Z", index: 1, tasks: ["201"] }),
+    event("queue-start", { ts: "2025-01-02T08:05:00.000Z", taskIds: ["201"], slots: 1 }),
+    // The future, unstarted wave 301 is carved out — a display ghost, not live work.
+    event("carve", { ts: "2025-01-02T08:06:00.000Z", target: "301", removed: ["301"], dropped: [] }),
+    // Two issues grafted into later, unstarted waves — pending work that reads `grafted`.
+    event("graft", { ts: "2025-01-02T08:07:00.000Z", ids: ["305", "306"], blockedBy: {}, basenames: {} }),
+  ]);
+
+  const { counters, projects } = buildLanding(
+    [pointerFor("demo", dir)],
+    new Date("2025-01-02T12:00:00.000Z"),
+  );
+  const [card] = projects;
+  // 101 banked, 201 running; the two grafted issues fold to unstarted → queued 2,
+  // not 0. The carved-out 301 stays excluded from every bucket.
+  assert.deepEqual(card.tally, { running: 1, parked: 0, queued: 2 });
+  // The aggregate "QUEUED · in later waves" counter inherits the corrected count.
+  assert.equal(counters.queued, 2);
+});
+
 test("buildLanding sums the counters, reads an idle project's last campaign, and skips a stale one", () => {
   const base = join(tmpdir(), `vetinari-landing-agg-${Date.now()}`);
   const alphaDir = join(base, "alpha");

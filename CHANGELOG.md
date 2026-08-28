@@ -26,6 +26,7 @@ Within a milestone each bold section label appears at most once.
 **Improvements:**
 - [user] Campaign Telegram notices now follow one terse, labeled skeleton (`<emoji> <project> · <LABEL> · <context>`), leading with what happened and what to do and shedding low-value rationale (#194).
 - [ops] Pause notices — wave-park and quarantine-pause — now name the exact recovery command (`campaign --resume`, plus `carve <issue>` / `campaign --auto-carve`) on both the Telegram notice and the console line, so the guidance is self-contained (#194, #170).
+- [user] The one-line wave narration (event feed / last-event) now lists every issue in a wave by title — `Wave N — first, second, third` — instead of naming the wave by its lead issue alone (`Wave N — first +M`); the status-page wave card keeps its lead-title-plus-count label (#179).
 
 ### Collected changes — August 27, 2026
 

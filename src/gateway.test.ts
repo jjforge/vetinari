@@ -10,7 +10,7 @@ import type { TgConn } from "./telegram.ts";
 import {
   drainOutbox,
   formatGatewayStatus,
-  handleCarveCommand,
+  handlePruneCommand,
   isStatusCommand,
   loadGatewayProjects,
   newPendingConfirms,
@@ -23,7 +23,7 @@ import {
   reconcilePollTargets,
   recordSend,
   supervisePolls,
-  resolveCarveTarget,
+  resolvePruneTarget,
   resolveReply,
   routeReply,
   type GatewayProject,
@@ -216,17 +216,17 @@ test("routeReply treats a /status message as a status query, not an answer", () 
   assert.equal(action.kind, "status");
 });
 
-test("routeReply routes a carve command to a carve action, not a resume", () => {
+test("routeReply routes a prune command to a prune action, not a resume", () => {
   const index = newReplyIndex();
   recordSend(index, "botA", 100, { project: "alpha", task: "A1", projectRoot: "/r", baseLocation: "/b", parkedAt: "t1" });
 
-  const action = routeReply(index, noPending(), conn, { text: "carve jjforge 640" });
+  const action = routeReply(index, noPending(), conn, { text: "prune jjforge 640" });
 
-  assert.equal(action.kind, "carve");
-  assert.deepEqual(action.kind === "carve" && action.command, { project: "jjforge", issue: "640" });
+  assert.equal(action.kind, "prune");
+  assert.deepEqual(action.kind === "prune" && action.command, { project: "jjforge", issue: "640" });
 });
 
-test("routeReply routes a yes replying to a live preview to a confirm of that carve", () => {
+test("routeReply routes a yes replying to a live preview to a confirm of that prune", () => {
   const pending = noPending();
   pending.record("botA", 500, pendingConfirm({ issue: "640" }));
 
@@ -242,7 +242,7 @@ test("routeReply leaves a stray yes with nothing pending unrouted", () => {
   assert.equal(action.kind, "unrouted");
 });
 
-test("routeReply resumes a task answered with the word yes when no carve is pending", () => {
+test("routeReply resumes a task answered with the word yes when no prune is pending", () => {
   const index = newReplyIndex();
   recordSend(index, "botA", 100, { project: "alpha", task: "A1", projectRoot: "/r", baseLocation: "/b", parkedAt: "t1" });
 
@@ -310,10 +310,10 @@ test("pollLoop hands a /status message to the injected status handler, not resum
   assert.equal(resumeCalls, 0);
 });
 
-test("pollLoop hands a carve command to onCarve and a confirming yes to onConfirm", async () => {
+test("pollLoop hands a prune command to onPrune and a confirming yes to onConfirm", async () => {
   const pending = noPending();
   pending.record("botA", 500, pendingConfirm({ issue: "640" }));
-  const carves: Array<{ project?: string; issue: string }> = [];
+  const prunes: Array<{ project?: string; issue: string }> = [];
   const confirms: PendingConfirm[] = [];
   let served = false;
   const poll = async () => {
@@ -322,7 +322,7 @@ test("pollLoop hands a carve command to onCarve and a confirming yes to onConfir
     return {
       offset: 1,
       messages: [
-        { text: "carve 641" },
+        { text: "prune 641" },
         { text: "yes", replyToId: 500 },
       ],
     };
@@ -331,15 +331,15 @@ test("pollLoop hands a carve command to onCarve and a confirming yes to onConfir
   await pollLoop(conn, newReplyIndex(), pending, {
     poll,
     resume: () => {},
-    onCarve: (_c, command) => {
-      carves.push(command);
+    onPrune: (_c, command) => {
+      prunes.push(command);
     },
     onConfirm: (confirm) => {
       confirms.push(confirm);
     },
   });
 
-  assert.deepEqual(carves, [{ issue: "641" }]);
+  assert.deepEqual(prunes, [{ issue: "641" }]);
   assert.deepEqual(confirms, [pendingConfirm({ issue: "640" })]);
 });
 
@@ -519,19 +519,19 @@ test("isStatusCommand recognizes status queries and ignores answers", () => {
   for (const t of ["A", "use option B", "status of the world is fine", "", "s"]) assert.equal(isStatusCommand(t), false, t);
 });
 
-test("parseGatewayCommand recognizes status, carve, and a confirming yes", () => {
+test("parseGatewayCommand recognizes status, prune, and a confirming yes", () => {
   assert.deepEqual(parseGatewayCommand("/status"), { kind: "status" });
   assert.deepEqual(parseGatewayCommand("status"), { kind: "status" });
-  assert.deepEqual(parseGatewayCommand("carve 640"), { kind: "carve", issue: "640" });
-  assert.deepEqual(parseGatewayCommand("carve #640"), { kind: "carve", issue: "640" });
-  assert.deepEqual(parseGatewayCommand("  Carve 640 "), { kind: "carve", issue: "640" });
-  assert.deepEqual(parseGatewayCommand("carve jjforge 640"), { kind: "carve", project: "jjforge", issue: "640" });
+  assert.deepEqual(parseGatewayCommand("prune 640"), { kind: "prune", issue: "640" });
+  assert.deepEqual(parseGatewayCommand("prune #640"), { kind: "prune", issue: "640" });
+  assert.deepEqual(parseGatewayCommand("  Prune 640 "), { kind: "prune", issue: "640" });
+  assert.deepEqual(parseGatewayCommand("prune jjforge 640"), { kind: "prune", project: "jjforge", issue: "640" });
   assert.deepEqual(parseGatewayCommand("yes"), { kind: "confirm" });
   assert.deepEqual(parseGatewayCommand("  YES "), { kind: "confirm" });
 });
 
 test("parseGatewayCommand does not mistake a one-word answer for a command", () => {
-  for (const t of ["A", "640", "use option B", "carve", "carve foo", "carve a b c", "yeah", ""]) {
+  for (const t of ["A", "640", "use option B", "prune", "prune foo", "prune a b c", "yeah", ""]) {
     assert.equal(parseGatewayCommand(t), null, t);
   }
 });
@@ -541,8 +541,8 @@ const candidate = (over: Partial<GatewayProject> = {}, running = true) => ({
   running,
 });
 
-test("resolveCarveTarget targets the sole running campaign on the bot", () => {
-  const res = resolveCarveTarget(
+test("resolvePruneTarget targets the sole running campaign on the bot", () => {
+  const res = resolvePruneTarget(
     [
       candidate({ project: "alpha", conn: { token: "botA", chat: "-1" } }, true),
       candidate({ project: "beta", conn: { token: "botA", chat: "-2" } }, false),
@@ -554,8 +554,8 @@ test("resolveCarveTarget targets the sole running campaign on the bot", () => {
   assert.equal(res.kind === "target" && res.project.project, "alpha");
 });
 
-test("resolveCarveTarget rejects as ambiguous when several campaigns run on the bot", () => {
-  const res = resolveCarveTarget(
+test("resolvePruneTarget rejects as ambiguous when several campaigns run on the bot", () => {
+  const res = resolvePruneTarget(
     [
       candidate({ project: "alpha", conn: { token: "botA", chat: "-1" } }, true),
       candidate({ project: "beta", conn: { token: "botA", chat: "-2" } }, true),
@@ -567,8 +567,8 @@ test("resolveCarveTarget rejects as ambiguous when several campaigns run on the 
   assert.deepEqual(res.kind === "ambiguous" && res.candidates.map((p) => p.project), ["alpha", "beta"]);
 });
 
-test("resolveCarveTarget rejects with none when nothing is running on the bot", () => {
-  const res = resolveCarveTarget(
+test("resolvePruneTarget rejects with none when nothing is running on the bot", () => {
+  const res = resolvePruneTarget(
     [candidate({ project: "alpha", conn: { token: "botA", chat: "-1" } }, false)],
     { token: "botA", chat: "-1" },
   );
@@ -576,8 +576,8 @@ test("resolveCarveTarget rejects with none when nothing is running on the bot", 
   assert.equal(res.kind, "none");
 });
 
-test("resolveCarveTarget ignores projects served by a different bot", () => {
-  const res = resolveCarveTarget(
+test("resolvePruneTarget ignores projects served by a different bot", () => {
+  const res = resolvePruneTarget(
     [
       candidate({ project: "alpha", conn: { token: "botA", chat: "-1" } }, true),
       candidate({ project: "other", conn: { token: "botB", chat: "-9" } }, true),
@@ -589,8 +589,8 @@ test("resolveCarveTarget ignores projects served by a different bot", () => {
   assert.equal(res.kind === "target" && res.project.project, "alpha");
 });
 
-test("resolveCarveTarget with an explicit project targets it past the ambiguity", () => {
-  const res = resolveCarveTarget(
+test("resolvePruneTarget with an explicit project targets it past the ambiguity", () => {
+  const res = resolvePruneTarget(
     [
       candidate({ project: "alpha", conn: { token: "botA", chat: "-1" } }, true),
       candidate({ project: "beta", conn: { token: "botA", chat: "-2" } }, true),
@@ -603,8 +603,8 @@ test("resolveCarveTarget with an explicit project targets it past the ambiguity"
   assert.equal(res.kind === "target" && res.project.project, "beta");
 });
 
-test("resolveCarveTarget with an explicit project that has no running campaign rejects", () => {
-  const res = resolveCarveTarget(
+test("resolvePruneTarget with an explicit project that has no running campaign rejects", () => {
+  const res = resolvePruneTarget(
     [
       candidate({ project: "alpha", conn: { token: "botA", chat: "-1" } }, true),
       candidate({ project: "beta", conn: { token: "botA", chat: "-2" } }, false),
@@ -656,11 +656,11 @@ test("pendingConfirms drops a confirmation older than its TTL", () => {
   assert.equal(store.resolve("botA", 100), null, "an expired confirmation is not honored");
 });
 
-// --- The carve-command handler: resolve → preview → record. The closure preview
-// (which shells `carve --dry-run`) and the Telegram send are injected, so the
+// --- The prune-command handler: resolve → preview → record. The closure preview
+// (which shells `prune --dry-run`) and the Telegram send are injected, so the
 // resolve/preview/record flow is testable without a bot or a spawned process.
 
-const carveHandlerDeps = (candidates: GatewayProject[], previewText: string | null = "would drop #640, #641") => {
+const pruneHandlerDeps = (candidates: GatewayProject[], previewText: string | null = "would drop #640, #641") => {
   const sends: Array<{ chat: string; text: string }> = [];
   const previews: PendingConfirm[] = [];
   let id = 500;
@@ -681,16 +681,16 @@ const carveHandlerDeps = (candidates: GatewayProject[], previewText: string | nu
   };
 };
 
-test("handleCarveCommand previews the closure and records a pending confirm keyed to it", async () => {
-  const { sends, previews, deps } = carveHandlerDeps([project({ project: "alpha", conn: { token: "botA", chat: "-1" } })]);
+test("handlePruneCommand previews the closure and records a pending confirm keyed to it", async () => {
+  const { sends, previews, deps } = pruneHandlerDeps([project({ project: "alpha", conn: { token: "botA", chat: "-1" } })]);
   const pending = newPendingConfirms(() => 0);
 
-  await handleCarveCommand(deps, pending, { token: "botA", chat: "-1" }, { issue: "640" });
+  await handlePruneCommand(deps, pending, { token: "botA", chat: "-1" }, { issue: "640" });
 
   assert.deepEqual(
     previews.map((p) => [p.project, p.issue]),
     [["alpha", "640"]],
-    "the resolved project's carve is previewed for the named issue",
+    "the resolved project's prune is previewed for the named issue",
   );
   assert.equal(sends.length, 1, "exactly the preview is sent");
   assert.match(sends[0].text, /would drop #640, #641/);
@@ -698,28 +698,28 @@ test("handleCarveCommand previews the closure and records a pending confirm keye
   assert.deepEqual(pending.resolve("botA", 500)?.issue, "640");
 });
 
-test("handleCarveCommand rejects an ambiguous carve with the candidate list and records nothing", async () => {
-  const { sends, previews, deps } = carveHandlerDeps([
+test("handlePruneCommand rejects an ambiguous prune with the candidate list and records nothing", async () => {
+  const { sends, previews, deps } = pruneHandlerDeps([
     project({ project: "alpha", conn: { token: "botA", chat: "-1" } }),
     project({ project: "beta", conn: { token: "botA", chat: "-1" } }),
   ]);
   const pending = newPendingConfirms(() => 0);
 
-  await handleCarveCommand(deps, pending, { token: "botA", chat: "-1" }, { issue: "640" });
+  await handlePruneCommand(deps, pending, { token: "botA", chat: "-1" }, { issue: "640" });
 
-  assert.equal(previews.length, 0, "an ambiguous carve is never previewed");
+  assert.equal(previews.length, 0, "an ambiguous prune is never previewed");
   assert.equal(sends.length, 1);
   assert.match(sends[0].text, /alpha/);
   assert.match(sends[0].text, /beta/);
-  assert.match(sends[0].text, /carve (alpha|beta) 640/, "tells the user how to disambiguate");
+  assert.match(sends[0].text, /prune (alpha|beta) 640/, "tells the user how to disambiguate");
   assert.equal(pending.resolve("botA", 500), null, "nothing is left pending");
 });
 
-test("handleCarveCommand rejects when nothing is running and records nothing", async () => {
-  const { sends, previews, deps } = carveHandlerDeps([]);
+test("handlePruneCommand rejects when nothing is running and records nothing", async () => {
+  const { sends, previews, deps } = pruneHandlerDeps([]);
   const pending = newPendingConfirms(() => 0);
 
-  await handleCarveCommand(deps, pending, { token: "botA", chat: "-1" }, { issue: "640" });
+  await handlePruneCommand(deps, pending, { token: "botA", chat: "-1" }, { issue: "640" });
 
   assert.equal(previews.length, 0);
   assert.equal(sends.length, 1);
@@ -739,7 +739,7 @@ const routed = (base: string, over: Partial<GatewayProject> = {}): GatewayProjec
   baseLocation: base,
   conn: { token: "tok", chat: "-1" },
   destinations: { ops: { bot: "main", chat: "-100" }, alerts: { bot: "main", chat: "-200" } },
-  notify: { "*": "ops", failure: "alerts", "progress:carve": "alerts" },
+  notify: { "*": "ops", failure: "alerts", "progress:prune": "alerts" },
   parked: [],
   outbox: listOutboxIn(outboxDirOf(base)),
   ...over,
@@ -759,20 +759,20 @@ test("drainOutbox routes each record to the destination its category resolves an
   const base = outboxBase();
   enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "success", event: "green", text: "GREEN on 26" });
   enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "failure", event: "halt", text: "campaign HALTED" });
-  enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "progress", event: "carve", text: "carved #640" });
+  enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "progress", event: "prune", text: "pruned #640" });
   enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "progress", event: "wave-start", text: "batch 1" });
 
   const { sends, send } = recordingSend();
   await drainOutbox(routed(base), send, memoryLogger());
 
   // success:green → wildcard ops (-100); failure → alerts (-200);
-  // progress:carve → alerts (-200); progress:wave-start → wildcard ops (-100).
+  // progress:prune → alerts (-200); progress:wave-start → wildcard ops (-100).
   // Intra-tick order is unspecified, so assert each message's destination by text.
   const chatOf = new Map(sends.map((s) => [s.text, s.chat]));
   assert.equal(sends.length, 4, "every record is sent exactly once");
   assert.equal(chatOf.get("GREEN on 26"), "-100");
   assert.equal(chatOf.get("campaign HALTED"), "-200");
-  assert.equal(chatOf.get("carved #640"), "-200");
+  assert.equal(chatOf.get("pruned #640"), "-200");
   assert.equal(chatOf.get("batch 1"), "-100");
 
   const after = listOutboxIn(outboxDirOf(base));

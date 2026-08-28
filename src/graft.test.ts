@@ -80,7 +80,7 @@ test("--dry-run surfaces a structured graft-closure for the aggregated dashboard
 
   const result = await runGraft(cfg, ["301", "302"], { dryRun: true });
 
-  // The machine-readable closure (mirroring carve's E2) the dashboard parses out of
+  // The machine-readable closure (mirroring prune's E2) the dashboard parses out of
   // the CLI's `--dry-run` output: the requested ids, where each lands, the resulting
   // waves, and no rejections when every id is a new open issue.
   assert.deepEqual(result.closure, {

@@ -42,7 +42,7 @@ const ISSUE_EMOJI: Record<DisplayStatus, string> = {
   parked: "⏸",
   failure: "❌",
   unstarted: "⚪",
-  carved: "✂️",
+  pruned: "✂️",
   grafted: "🌱",
   quarantined: "🚧",
   interrupted: "⏹",
@@ -101,12 +101,12 @@ const escapeTitle = (value: string) => escapeHtml(value).replaceAll("\n", "&#10;
 const chipTitle = (issue: StatusIssue) => [issue.name, issue.detail].filter(Boolean).join("\n");
 
 /**
- * Is this issue still carvable? Only the unfinished remainder is — an unstarted
- * (future-wave) or parked issue is exactly what a carve would actually drop
+ * Is this issue still prunable? Only the unfinished remainder is — an unstarted
+ * (future-wave) or parked issue is exactly what a prune would actually drop
  * (ADR 0005). A completed issue is banked and a running one is in flight, so
- * carve would do nothing useful there and gets no control (story 20).
+ * prune would do nothing useful there and gets no control (story 20).
  */
-export const isCarvable = (issue: StatusIssue) => issue.status === "unstarted" || issue.status === "parked";
+export const isPrunable = (issue: StatusIssue) => issue.status === "unstarted" || issue.status === "parked";
 
 /**
  * One issue's member row — the single line a wave card gives each of its issues,
@@ -114,27 +114,27 @@ export const isCarvable = (issue: StatusIssue) => issue.status === "unstarted" |
  * status dot + `#NNN` + resolved title (falling back to just the number until a
  * title resolves) + the status word, right-aligned. The row is the interactive
  * element: a live (interactive) row carries its issue and project so a tap opens
- * the detail sheet — and, under carve, so the panel can route a carve. An archived
+ * the detail sheet — and, under prune, so the panel can route a prune. An archived
  * row is interactive too and additionally carries its `run` token, so the shared
  * sheet reads that run's own log (its turn log lives there, not in the live log);
- * it is never carvable, so the read-only archive offers no Carve (ADR 0005). Only
- * a still-carvable row is flagged `data-carvable`; a carved row reads struck-through
+ * it is never prunable, so the read-only archive offers no Prune (ADR 0005). Only
+ * a still-prunable row is flagged `data-prunable`; a pruned row reads struck-through
  * off its status class. No control is drawn on the row.
  */
-const renderWaveMember = (issue: StatusIssue, project: string, carve: boolean, interactive: boolean, run?: string) => {
+const renderWaveMember = (issue: StatusIssue, project: string, prune: boolean, interactive: boolean, run?: string) => {
   const detail = chipTitle(issue) || `#${issue.issueNumber}: ${issue.status}`;
-  const openData = interactive || carve ? ` data-issue="${escapeHtml(issue.issueNumber)}" data-project="${escapeHtml(project)}"${run ? ` data-run="${escapeHtml(run)}"` : ""}` : "";
-  const carveData = carve && isCarvable(issue) ? ` data-carvable="1"` : "";
+  const openData = interactive || prune ? ` data-issue="${escapeHtml(issue.issueNumber)}" data-project="${escapeHtml(project)}"${run ? ` data-run="${escapeHtml(run)}"` : ""}` : "";
+  const pruneData = prune && isPrunable(issue) ? ` data-prunable="1"` : "";
   const title = issue.name ? `<span class="wave-member-title">${escapeHtml(issue.name)}</span>` : "";
   // The row carries its status class so its state reads at 40% alpha on a left edge
   // (§4); the dot carries the same status at full strength, the word spells it out.
-  return `<li><button type="button" class="wave-member ${issue.status}" title="${escapeTitle(detail)}"${openData}${carveData}><span class="dot ${dotClass(issue.status)}"></span>#${escapeHtml(issue.issueNumber)} ${title}<small>${escapeHtml(issue.status)}</small></button></li>`;
+  return `<li><button type="button" class="wave-member ${issue.status}" title="${escapeTitle(detail)}"${openData}${pruneData}><span class="dot ${dotClass(issue.status)}"></span>#${escapeHtml(issue.issueNumber)} ${title}<small>${escapeHtml(issue.status)}</small></button></li>`;
 };
 
 /** A wave's member list — one interactive row per issue (see `renderWaveMember`),
  * the single block that replaced the old chip row + title list. */
-const renderWaveMembers = (wave: StatusWave, project: string, carve: boolean, interactive: boolean, run?: string) =>
-  `<ul class="wave-members">${wave.issues.map((issue) => renderWaveMember(issue, project, carve, interactive, run)).join("")}</ul>`;
+const renderWaveMembers = (wave: StatusWave, project: string, prune: boolean, interactive: boolean, run?: string) =>
+  `<ul class="wave-members">${wave.issues.map((issue) => renderWaveMember(issue, project, prune, interactive, run)).join("")}</ul>`;
 
 /**
  * A wave's human label, derived at render from the issue titles the dashboard
@@ -175,17 +175,17 @@ const waveMerged = (wave: StatusWave) => wave.issues.filter((issue) => issue.sta
  * closed one the green, and an unstarted one a neutral edge. `extraAttrs` lets a
  * closed card carry the id + `hidden` its toggle chip drives.
  */
-const renderWaveCard = (wave: StatusWave, project: string, carve: boolean, interactive: boolean, extraAttrs = "", run?: string, festiveName?: string) => {
-  // A carved tally folded into the head's meta group beside the merged count, so a wave
-  // a carve pruned reads at a glance — the carved rows are a display overlay (ADR 0007),
+const renderWaveCard = (wave: StatusWave, project: string, prune: boolean, interactive: boolean, extraAttrs = "", run?: string, festiveName?: string) => {
+  // A pruned tally folded into the head's meta group beside the merged count, so a wave
+  // a prune pruned reads at a glance — the pruned rows are a display overlay (ADR 0007),
   // and this counts them. The label sits in its own element so a long one wraps within
-  // itself without shoving the meta group (tally · state · carved) onto its own line.
-  const carved = wave.issues.filter((issue) => issue.status === "carved").length;
-  const tally = carved ? `<span class="wave-carved">${carved} carved</span>` : "";
+  // itself without shoving the meta group (tally · state · pruned) onto its own line.
+  const pruned = wave.issues.filter((issue) => issue.status === "pruned").length;
+  const tally = pruned ? `<span class="wave-pruned">${pruned} pruned</span>` : "";
   // A wave holding a freshly-grafted issue (#202) is marked so its edge pulses the teal
   // accent once when it appears — the graft confirming on the wave (option 1a).
   const grafted = wave.issues.some((issue) => issue.status === "grafted") ? " has-grafted" : "";
-  return `<section class="wave ${wave.status}${grafted}"${extraAttrs}><div class="wave-head"><h2 class="wave-label">${renderWaveLabel(wave, festiveName)}</h2><div class="wave-meta"><span class="wave-tally">${waveMerged(wave)}/${wave.issues.length}</span><span class="wave-status ${wave.status}">${wave.status}</span>${tally}</div></div>${renderWaveMembers(wave, project, carve, interactive, run)}</section>`;
+  return `<section class="wave ${wave.status}${grafted}"${extraAttrs}><div class="wave-head"><h2 class="wave-label">${renderWaveLabel(wave, festiveName)}</h2><div class="wave-meta"><span class="wave-tally">${waveMerged(wave)}/${wave.issues.length}</span><span class="wave-status ${wave.status}">${wave.status}</span>${tally}</div></div>${renderWaveMembers(wave, project, prune, interactive, run)}</section>`;
 };
 
 /** A closed wave's compact toggle chip — the affordance that reveals its full card in
@@ -203,10 +203,10 @@ const renderClosedWaveChip = (wave: StatusWave, festiveName?: string) =>
  * across a live reload). The read-only archived run passes `collapsible: false`: it has
  * no live toggle script (and would collide on the `closed-wave-N` ids), so it renders
  * every wave as a full card, expanded. `interactive` (the live run) makes chips open the
- * detail sheet and, under carve, route a carve; the archived run passes it `false`. */
-const renderWaves = (status: CampaignStatus, carve: boolean, interactive: boolean, collapsible = true, run?: string, festive = false) => {
+ * detail sheet and, under prune, route a prune; the archived run passes it `false`. */
+const renderWaves = (status: CampaignStatus, prune: boolean, interactive: boolean, collapsible = true, run?: string, festive = false) => {
   if (!status.waves.length) return "<p>No active campaign or queue found.</p>";
-  if (!collapsible) return `<div class="waves-grid">${status.waves.map((wave) => renderWaveCard(wave, status.project, carve, interactive, "", run, festiveNameFor(status, wave, festive))).join("")}</div>`;
+  if (!collapsible) return `<div class="waves-grid">${status.waves.map((wave) => renderWaveCard(wave, status.project, prune, interactive, "", run, festiveNameFor(status, wave, festive))).join("")}</div>`;
   const closedWaves = status.waves.filter((wave) => wave.status === "closed");
   const openWaves = status.waves.filter((wave) => wave.status !== "closed");
   const toggleRow = closedWaves.length
@@ -215,8 +215,8 @@ const renderWaves = (status: CampaignStatus, carve: boolean, interactive: boolea
   // The grid holds every closed card (hidden until its chip toggles it open) before
   // the open ones, in wave order; it renders whenever there is any wave to show.
   const cards = [
-    ...closedWaves.map((wave) => renderWaveCard(wave, status.project, carve, interactive, ` id="closed-wave-${wave.index}" hidden`, undefined, festiveNameFor(status, wave, festive))),
-    ...openWaves.map((wave) => renderWaveCard(wave, status.project, carve, interactive, "", undefined, festiveNameFor(status, wave, festive))),
+    ...closedWaves.map((wave) => renderWaveCard(wave, status.project, prune, interactive, ` id="closed-wave-${wave.index}" hidden`, undefined, festiveNameFor(status, wave, festive))),
+    ...openWaves.map((wave) => renderWaveCard(wave, status.project, prune, interactive, "", undefined, festiveNameFor(status, wave, festive))),
   ];
   return `${toggleRow}${cards.length ? `<div class="waves-grid">${cards.join("")}</div>` : ""}`;
 };
@@ -235,9 +235,9 @@ const hasQuarantined = (status: CampaignStatus) => status.waves.some((wave) => w
  * The wave-park Resume control (#171): when a campaign is paused on a red merged base,
  * a human fixes forward and taps Resume, which POSTs `/resume` for this project — the
  * aggregated dumb router (ADR 0002) shells `campaign --resume` in the project's own
- * root. Resume is non-destructive and project-scoped, so — unlike carve — it needs no
+ * root. Resume is non-destructive and project-scoped, so — unlike prune — it needs no
  * preview/confirm gate: a single POST. Emitted only on the interactive aggregated page
- * (`carve`, the same page option carve rides) and only while wave-parked.
+ * (`prune`, the same page option prune rides) and only while wave-parked.
  */
 const renderResumeControl = (status: CampaignStatus) =>
   `<section class="resume-banner"><div class="resume-banner-text"><strong>Campaign paused</strong> — a wave's merged base gated red, so its greens were kept and the campaign paused for a human. Fix forward, then resume.</div><form method="post" action="/resume" class="resume-form"><input type="hidden" name="project" value="${escapeHtml(status.project)}" /><button type="submit" class="resume-btn">Resume campaign</button></form></section>`;
@@ -252,7 +252,7 @@ const renderQuarantineNote = () =>
   `<section class="quarantine-note"><strong>Issue quarantined</strong> — a merge conflict held a passed green out of integration. Resolve the conflict, then resume the campaign (the Resume control above, or <code>campaign --resume</code> in the project root).</section>`;
 
 /**
- * The Graft affordance (#168, reworked to mockup 1a in #202). Where carve prunes an
+ * The Graft affordance (#168, reworked to mockup 1a in #202). Where prune prunes an
  * existing campaign issue (a per-chip control), graft *extends* the running campaign
  * with new issues named by explicit id. 1a places it as a quiet, always-visible input
  * on the campaign summary line rather than a banner: at rest a dim `graft issue ids`
@@ -441,7 +441,7 @@ export function feedKindLabel(kind: string): string {
       parked: "issue.parked",
       quarantined: "issue.quarantined",
       "wave-parked": "wave.parked",
-      carve: "issue.carved",
+      prune: "issue.pruned",
       graft: "issue.grafted",
       "campaign-batch": "wave.started",
       "campaign-batch-done": "wave.closed",
@@ -457,14 +457,14 @@ export function feedKindLabel(kind: string): string {
 
 /**
  * Map an event kind to its comms category (#78) so the feed reads in colour: merges/dones green,
- * a parked/quarantined/wave-parked wave the attention amber (ADR 0013), a halt red, a carve
+ * a parked/quarantined/wave-parked wave the attention amber (ADR 0013), a halt red, a prune
  * purple, everything else (starts, waves, turns) the in-flight blue. Pure; shipped via `.toString()`.
  */
 export function feedKindClass(kind: string): string {
   if (["green", "campaign-done", "campaign-complete", "campaign-batch-done", "queue-done"].includes(kind)) return "success";
   if (kind === "parked" || kind === "quarantined" || kind === "wave-parked") return "attention";
   if (kind === "campaign-halt") return "failure";
-  if (kind === "carve") return "carved";
+  if (kind === "prune") return "pruned";
   return "progress";
 }
 
@@ -578,7 +578,7 @@ const ARCHIVE_CAP = 20;
  * One archived-run row: a collapsed head (chevron, name, `date · time` (local), a state
  * dot + `state · N issues`, and the joined campaign/raw-log control) over a hidden
  * body holding both panes. The campaign pane reuses the live wave renderer read-only
- * (`carve`/`interactive`/`collapsible` all off) so an archived run reads as its own
+ * (`prune`/`interactive`/`collapsible` all off) so an archived run reads as its own
  * wave cards; the raw pane is a scaffold the client fills from `GET /archive/log`.
  * `open`/`mode` mark the row a `?run=` deep-link selected; `hidden` puts it past the
  * cap behind "show older".
@@ -591,7 +591,7 @@ const renderArchiveRow = (project: string, run: ArchivedRunView, open: boolean, 
   const count = `${run.issues} issue${run.issues === 1 ? "" : "s"}`;
   const modeBtn = (m: "campaign" | "raw", text: string, active: boolean) =>
     `<button type="button" class="archive-mode${active ? " active" : ""}" data-mode="${m}" aria-pressed="${active}">${text}</button>`;
-  // Interactive (chips open the shared sheet) but carve-off, and carrying the run
+  // Interactive (chips open the shared sheet) but prune-off, and carrying the run
   // token so the sheet reads this archived run's own log — reuse is the point, no
   // second campaign renderer.
   const campaignPane = `<div class="archive-pane archive-campaign" data-pane="campaign"${rawActive ? " hidden" : ""}>${renderWaves(run.status, false, true, false, run.run, festive)}</div>`;
@@ -655,19 +655,19 @@ export interface StatusPageOptions {
   projects?: readonly (string | RepoOption)[];
   selected?: string;
   /**
-   * Render the per-chip carve control. The aggregated `serveAllStatus` is a dumb
+   * Render the per-chip prune control. The aggregated `serveAllStatus` is a dumb
    * router (ADR 0002) with no project's `blockedBy` resolver, so it routes both
-   * preview and confirm to the selected project's own install (`carve … --dry-run`
-   * then `carve …`); the control carries its `project` so the aggregated `/carve`
+   * preview and confirm to the selected project's own install (`prune … --dry-run`
+   * then `prune …`); the control carries its `project` so the aggregated `/prune`
    * targets the right one.
    */
-  carve?: boolean;
+  prune?: boolean;
   /**
-   * Render the graft control — the additive counterpart to `carve`. `graft` is
+   * Render the graft control — the additive counterpart to `prune`. `graft` is
    * variadic and adds *new* issues by explicit id (not a chip selection), so its
    * control is a small form the operator types ids into; the aggregated dumb router
    * routes its preview and confirm to the selected project's own install (`graft …
-   * --dry-run` then `graft …`). Gated by the same page option carve rides.
+   * --dry-run` then `graft …`). Gated by the same page option prune rides.
    */
   graft?: boolean;
   /** The selected project's archived runs, newest-first, for the collapsible
@@ -770,18 +770,18 @@ export const renderTopBar = (left: string, trailing = "") =>
   `<div class="page-top">${left}<div class="live-bar" title="Live updates over SSE; pause to freeze the view while it keeps collecting"><span class="live-indicator" data-live-state="live" aria-label="Live"></span><span class="updated" data-updated>waiting for updates</span><button type="button" id="pause" class="pause" data-paused="false" aria-label="Pause"></button>${trailing}</div></div>`;
 
 /**
- * The aggregated site's carve preview: it is a dumb router (ADR 0002) with no
+ * The aggregated site's prune preview: it is a dumb router (ADR 0002) with no
  * project's `blockedBy` resolver, so it does not compute the closure itself — it
- * shows the closure the selected project's own `carve <issue> --dry-run` printed,
+ * shows the closure the selected project's own `prune <issue> --dry-run` printed,
  * behind a confirm form (preview-then-confirm parity, story 19/23). Confirming
- * shells `carve` in that project's root. Serves as the no-JS carve fallback.
+ * shells `prune` in that project's root. Serves as the no-JS prune fallback.
  */
-export const renderAggregatedCarvePreview = (project: string, target: string, previewText: string) => `<!doctype html>
+export const renderAggregatedPrunePreview = (project: string, target: string, previewText: string) => `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>${escapeHtml(project)} — carve #${escapeHtml(target)}</title>
+<title>${escapeHtml(project)} — prune #${escapeHtml(target)}</title>
 <style>
   body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 2rem; background: #090c10; color: #e6edf3; }
   h1 { letter-spacing: -0.035em; }
@@ -795,10 +795,10 @@ export const renderAggregatedCarvePreview = (project: string, target: string, pr
 </style>
 </head>
 <body>
-<h1>Carve #${escapeHtml(target)} from ${escapeHtml(project)}?</h1>
+<h1>Prune #${escapeHtml(target)} from ${escapeHtml(project)}?</h1>
 <section class="card"><pre>${escapeHtml(previewText)}</pre></section>
 <div class="actions">
-<form method="post" action="/carve" class="confirm"><input type="hidden" name="taskId" value="${escapeHtml(target)}" /><input type="hidden" name="project" value="${escapeHtml(project)}" /><input type="hidden" name="confirm" value="1" /><button type="submit">✂️ Confirm carve</button></form>
+<form method="post" action="/prune" class="confirm"><input type="hidden" name="taskId" value="${escapeHtml(target)}" /><input type="hidden" name="project" value="${escapeHtml(project)}" /><input type="hidden" name="confirm" value="1" /><button type="submit">✂️ Confirm prune</button></form>
 <a class="cancel" href="/?project=${encodeURIComponent(project)}">Cancel</a>
 </div>
 </body>
@@ -855,14 +855,14 @@ export const renderAggregatedGraftRejection = (project: string, closure: Structu
 
 /**
  * The issue-detail sheet's markup — one definition rendered by both the campaign
- * page and the all-repos landing (previously hand-synced copies, #76). `carve`
- * includes the in-sheet carve panel: always on the landing (every parked row is
- * carvable), and on the campaign page only when its carve controls are enabled.
+ * page and the all-repos landing (previously hand-synced copies, #76). `prune`
+ * includes the in-sheet prune panel: always on the landing (every parked row is
+ * prunable), and on the campaign page only when its prune controls are enabled.
  */
-export const issueDetailSheetMarkup = (carve: boolean) =>
+export const issueDetailSheetMarkup = (prune: boolean) =>
   `<div id="issue-detail" class="issue-detail" role="dialog" aria-modal="true" aria-live="polite" hidden><div class="issue-detail-sheet"><header class="issue-detail-header"><div class="issue-detail-head-main"><span class="issue-detail-status"><span class="dot"></span><span class="issue-detail-num"></span> <span class="issue-detail-statuslabel"></span></span><h2 class="issue-detail-title"></h2><p class="issue-detail-context"></p></div><button type="button" id="issue-detail-close" class="issue-detail-close" aria-label="Dismiss">&times;</button></header><div class="issue-detail-meta"><div class="meta-tile"><span class="meta-label">Turns</span><span class="meta-value" id="issue-detail-turns"></span></div><div class="meta-tile meta-tile-path" id="issue-detail-worktree-tile" hidden><span class="meta-label">Worktree</span><span class="meta-value meta-value-path" id="issue-detail-worktree"></span></div></div><h3 class="turn-log-heading">Agent turns</h3><ol class="turn-log" id="issue-detail-turnlog"></ol><div id="issue-detail-reply" class="issue-detail-reply" hidden><h3 class="reply-heading">PARKED — NEEDS YOUR ANSWER</h3><p class="reply-question" id="reply-question"></p><div class="reply-options" id="reply-options"></div><form method="post" action="/answer" id="reply-form"><input type="hidden" name="taskId" value="" /><input type="hidden" name="project" value="" /><textarea name="text" id="reply-text" placeholder="Type your reply…"></textarea></form></div><div class="sheet-actions"><button type="submit" form="reply-form" id="reply-resume" class="reply-resume" hidden>Resume</button>${
-    carve
-      ? `<div id="carve-panel" class="carve-panel" hidden><button type="button" id="carve-start" class="carve-start">Carve</button><span id="carve-explainer" class="carve-explainer" hidden>Removes this issue and everything blocked by it from the running campaign; merged and mergeable work is kept.</span><form method="post" action="/carve" id="carve-confirm" class="carve-confirm" hidden><span class="carve-confirm-text"></span><input type="hidden" name="taskId" value="" /><input type="hidden" name="project" value="" /><input type="hidden" name="confirm" value="1" /><button type="submit" class="carve-confirm-btn">Confirm</button><button type="button" id="carve-cancel" class="carve-cancel">Cancel</button></form><span id="carve-note" class="carve-note"></span></div>`
+    prune
+      ? `<div id="prune-panel" class="prune-panel" hidden><button type="button" id="prune-start" class="prune-start">Prune</button><span id="prune-explainer" class="prune-explainer" hidden>Removes this issue and everything blocked by it from the running campaign; merged and mergeable work is kept.</span><form method="post" action="/prune" id="prune-confirm" class="prune-confirm" hidden><span class="prune-confirm-text"></span><input type="hidden" name="taskId" value="" /><input type="hidden" name="project" value="" /><input type="hidden" name="confirm" value="1" /><button type="submit" class="prune-confirm-btn">Confirm</button><button type="button" id="prune-cancel" class="prune-cancel">Cancel</button></form><span id="prune-note" class="prune-note"></span></div>`
       : ""
   }</div></div></div>`;
 
@@ -1000,7 +1000,7 @@ ${LIVE_TAIL_STYLES}
      keeping the label at --color-text — a mid-tone tint on tiny near-black text
      struck out the blue progress kind (#85, matching the shared dot model #83). */
   .feed-kind::before { content: ""; width: .5rem; height: .5rem; border-radius: 999px; background: var(--color-dim); flex: none; }
-  .feed-kind.progress::before { background: var(--color-blue); } .feed-kind.success::before { background: var(--color-green); } .feed-kind.attention::before { background: var(--color-yellow); } .feed-kind.failure::before { background: var(--color-failure); } .feed-kind.carved::before { background: var(--color-carved); }
+  .feed-kind.progress::before { background: var(--color-blue); } .feed-kind.success::before { background: var(--color-green); } .feed-kind.attention::before { background: var(--color-yellow); } .feed-kind.failure::before { background: var(--color-failure); } .feed-kind.pruned::before { background: var(--color-pruned); }
   .feed-text { color: var(--color-text-light); flex: 1; }
   /* A Raw-mode row (#203): the underlying event as one highlighted NDJSON line, mono in the feed's
      own prose scroll pane; the token colours come from the shared .tail-code palette (LIVE_TAIL_STYLES). */
@@ -1177,7 +1177,7 @@ ${REPO_DROPDOWN_SCRIPT}
       const row = el("a", "parked-row");
       // Keep an href as the no-JS fallback, but open the issue-detail sheet inline so
       // a pending issue shows its detail here instead of a full navigation to the
-      // campaign refresh view (#74). Parked issues are always carvable.
+      // campaign refresh view (#74). Parked issues are always prunable.
       row.href = "/?project=" + encodeURIComponent(p.project);
       row.addEventListener("click", (event) => { event.preventDefault(); openIssue(p.project, p.issueNumber, true); });
       row.append(el("span", "parked-issue", "#" + p.issueNumber), el("span", "parked-repo", p.project), el("span", "parked-question", p.question), el("span", "parked-waited", "waited " + fmtWaited(p.parkedAt)));
@@ -1398,7 +1398,7 @@ ${LIVE_TAIL_STYLES}
   /* A flex-grid item beats the UA [hidden] rule, so a collapsed closed card needs it back explicitly. */
   .wave.closed[hidden] { display: none; }
   /* One stable head row: the label takes the slack and wraps within itself, the meta
-     group (merged/total · state · carved) stays a nowrap unit on the right so the state
+     group (merged/total · state · pruned) stays a nowrap unit on the right so the state
      pill never drops onto its own line in one card while it stays inline in a neighbour. */
   .wave-head { display: flex; align-items: baseline; justify-content: space-between; gap: .5rem .75rem; flex-wrap: wrap; }
   .wave-label { margin: 0; font-size: 1.1rem; flex: 1 1 12rem; min-width: 0; }
@@ -1424,20 +1424,20 @@ ${LIVE_TAIL_STYLES}
   .wave-member-title { color: var(--color-text-light); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .wave-member small { margin-left: auto; color: var(--color-text-light-2); white-space: nowrap; }
   .wave-member:hover, .completed-wave-chip:hover { background: var(--color-chip-hover); }
-  .wave-member.carved { color: var(--color-text-light-2); text-decoration: line-through; }
+  .wave-member.pruned { color: var(--color-text-light-2); text-decoration: line-through; }
   .wave-status { font-size: .85rem; margin-left: .5rem; text-transform: uppercase; letter-spacing: .03em; }
   .wave-status.closed { border-color: var(--color-green); color: var(--color-green); background: rgb(63 185 132 / 12%); }
   .wave-status.running { border-color: var(--color-blue); color: var(--color-blue); background: rgb(108 182 255 / 12%); }
   .wave-status.unstarted { border-color: var(--color-dim); color: var(--color-dim); background: rgb(95 107 120 / 12%); }
   .wave-status.wave-parked { border-color: var(--color-yellow); color: var(--color-yellow); background: rgb(200 162 78 / 12%); }
   .wave-status.interrupted { border-color: var(--color-yellow); color: var(--color-yellow); background: rgb(200 162 78 / 12%); }
-  .wave-carved { font-size: .78rem; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: var(--color-carved); border: 1px solid var(--color-carved); background: rgb(163 113 247 / 12%); border-radius: 999px; padding: .1rem .5rem; }
+  .wave-pruned { font-size: .78rem; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: var(--color-pruned); border: 1px solid var(--color-pruned); background: rgb(163 113 247 / 12%); border-radius: 999px; padding: .1rem .5rem; }
   /* Status dot colours, generated once from stateColor and shared with the landing
      (§3), scoped to .dot so a state never tints a whole chip, card, or list row (#81). */
   ${STATE_DOT_CSS}
   textarea { width: 100%; max-width: 100%; min-height: 7rem; margin: .5rem 0; color: var(--color-text); background: var(--color-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: .75rem; }
 ${ISSUE_DETAIL_SHEET_STYLES}
-  .carve-fallback form { display: inline; }
+  .prune-fallback form { display: inline; }
   form button { padding: .5rem .8rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: #04110f; cursor: pointer; font-weight: 700; }
   /* The wave-park Resume banner (#171): an attention-amber left edge (the human-action
      queue, §2) with the Resume action pushed to the right. The button is a control, so it
@@ -1538,7 +1538,7 @@ ${ISSUE_DETAIL_SHEET_STYLES}
   .archive-raw-code .jkey { color: var(--color-blue); }
   .archive-raw-code .jstr { color: var(--color-green); }
   .archive-raw-code .jnum { color: var(--color-yellow); }
-  .archive-raw-code .jbool, .archive-raw-code .jnull { color: var(--color-carved); }
+  .archive-raw-code .jbool, .archive-raw-code .jnull { color: var(--color-pruned); }
   .archive-raw-more { display: block; width: 100%; padding: .5rem 0; margin-top: .4rem; text-align: left; background: none; border: 0; color: var(--color-primary); font: inherit; cursor: pointer; }
   .archive-raw-more:hover { color: var(--color-text); }
   .archive-raw-footer { color: var(--color-text-light-2); font-size: .8rem; margin-top: .6rem; }
@@ -1567,18 +1567,18 @@ ${ISSUE_DETAIL_SHEET_STYLES}
 ${renderTopBar(opts.projects?.length ? renderRepoDropdown(opts.projects, opts.selected ?? status.project) : `<h1>${escapeHtml(status.project)}</h1>`)}
 <div id="live-region">${
   // The wave-park Resume control and the quarantine note are aggregated-page actions
-  // (the same `carve` page option gates the interactive shell-out affordances), each
+  // (the same `prune` page option gates the interactive shell-out affordances), each
   // gated on its attention state so it appears only when there is something to act on.
-  opts.carve && isWaveParked(status) ? renderResumeControl(status) : ""
-}${opts.carve && hasQuarantined(status) ? renderQuarantineNote() : ""}${
+  opts.prune && isWaveParked(status) ? renderResumeControl(status) : ""
+}${opts.prune && hasQuarantined(status) ? renderQuarantineNote() : ""}${
   status.parked.length
     ? `<section class="parked-issues"><h2>Parked · <span class="parked-count">${status.parked.length}</span></h2>${status.parked
         .map(
           // A clickable question card that opens the issue-detail sheet (the reply now
           // happens there — no inline /answer form). The href to the campaign view is
-          // the no-JS fallback; parked issues are always carvable, so under carve the
-          // card carries data-carvable so the sheet offers Carve (ADR 0005).
-          (p) => `<a class="parked-card" href="/?project=${encodeURIComponent(status.project)}" data-issue="${escapeHtml(p.issueNumber)}" data-project="${escapeHtml(status.project)}"${opts.carve ? ` data-carvable="1"` : ""}><div class="parked-card-title"><span class="parked-issue">#${escapeHtml(p.issueNumber)}</span> ${escapeHtml(p.description)}</div><div class="parked-card-meta">waiting <span class="parked-waited" data-parked-at="${escapeHtml(p.parkedAt)}">…</span> · ${escapeHtml(p.reason)}</div></a>`,
+          // the no-JS fallback; parked issues are always prunable, so under prune the
+          // card carries data-prunable so the sheet offers Prune (ADR 0005).
+          (p) => `<a class="parked-card" href="/?project=${encodeURIComponent(status.project)}" data-issue="${escapeHtml(p.issueNumber)}" data-project="${escapeHtml(status.project)}"${opts.prune ? ` data-prunable="1"` : ""}><div class="parked-card-title"><span class="parked-issue">#${escapeHtml(p.issueNumber)}</span> ${escapeHtml(p.description)}</div><div class="parked-card-meta">waiting <span class="parked-waited" data-parked-at="${escapeHtml(p.parkedAt)}">…</span> · ${escapeHtml(p.reason)}</div></a>`,
         )
         .join("")}</section>`
     : ""
@@ -1592,20 +1592,20 @@ ${
       : renderCampaignMeta(status)
     : ""
 }
-${renderWaves(status, Boolean(opts.carve), true, true, undefined, Boolean(opts.festive))}</div>
+${renderWaves(status, Boolean(opts.prune), true, true, undefined, Boolean(opts.festive))}</div>
 ${renderLiveTail(status)}
 ${opts.archivedRuns?.length ? renderArchivedRuns(opts.selected ?? status.project, opts.archivedRuns, opts.archivedRun, opts.archivedMode, Boolean(opts.festive)) : ""}
-${issueDetailSheetMarkup(Boolean(opts.carve))}${
-  // No-JS fallback: a plain server-side form per carvable issue that reaches
-  // POST /carve → the preview page → confirm without any JavaScript. The inline
+${issueDetailSheetMarkup(Boolean(opts.prune))}${
+  // No-JS fallback: a plain server-side form per prunable issue that reaches
+  // POST /prune → the preview page → confirm without any JavaScript. The inline
   // panel above is the progressive enhancement layered over it.
-  opts.carve && status.waves.some((wave) => wave.issues.some(isCarvable))
-    ? `<noscript><section class="carve-fallback"><h2>Carve</h2>${status.waves
+  opts.prune && status.waves.some((wave) => wave.issues.some(isPrunable))
+    ? `<noscript><section class="prune-fallback"><h2>Prune</h2>${status.waves
         .flatMap((wave) => wave.issues)
-        .filter(isCarvable)
+        .filter(isPrunable)
         .map(
           (issue) =>
-            `<form method="post" action="/carve"><input type="hidden" name="taskId" value="${escapeHtml(issue.issueNumber)}" /><input type="hidden" name="project" value="${escapeHtml(status.project)}" /><button type="submit">Carve #${escapeHtml(issue.issueNumber)}</button></form>`,
+            `<form method="post" action="/prune"><input type="hidden" name="taskId" value="${escapeHtml(issue.issueNumber)}" /><input type="hidden" name="project" value="${escapeHtml(status.project)}" /><button type="submit">Prune #${escapeHtml(issue.issueNumber)}</button></form>`,
         )
         .join("")}</section></noscript>`
     : ""
@@ -1709,7 +1709,7 @@ ${ARCHIVE_LIST_SCRIPT}
     // prevented before the sheet opens; a member row is a button, where preventDefault
     // is harmless.
     document.querySelectorAll(".wave-member[data-issue], .parked-card[data-issue]").forEach((el) =>
-      el.addEventListener("click", (event) => { event.preventDefault(); openIssue(el.dataset.project, el.dataset.issue, el.dataset.carvable === "1", el.dataset.run); }));
+      el.addEventListener("click", (event) => { event.preventDefault(); openIssue(el.dataset.project, el.dataset.issue, el.dataset.prunable === "1", el.dataset.run); }));
     // Closed-wave toggles: each chip reveals/hides its own wave card in the grid. The set
     // of open waves is persisted per project so a soft-refresh — which re-renders the grid
     // collapsed — does not silently collapse everything the operator opened.

@@ -212,7 +212,7 @@ export interface QuarantinedEvent extends BaseEvent {
 /** `wave-parked` — a wave's merged base gated red (every green passed alone, the combined base is
  * red): the emergent, unattributable failure. No branch is to blame, so nothing rolls back — the
  * greens stay merged on the base and the campaign pauses (resumably) for a human to fix forward and
- * resume, or carve a suspect. Carries the greens left merged and the tail of the gate report
+ * resume, or prune a suspect. Carries the greens left merged and the tail of the gate report
  * (merge.ts, ADR 0013). */
 export interface WaveParkedEvent extends BaseEvent {
   event: "wave-parked";
@@ -220,11 +220,11 @@ export interface WaveParkedEvent extends BaseEvent {
   detail: string;
 }
 
-/** `carve` — an issue (and its dependency closure) was carved out of a running campaign: the target
+/** `prune` — an issue (and its dependency closure) was pruned out of a running campaign: the target
  * issue, the closure computed for removal, and the members actually dropped from the plan
  * (cli.mts, ADR 0005/0007). */
-export interface CarveEvent extends BaseEvent {
-  event: "carve";
+export interface PruneEvent extends BaseEvent {
+  event: "prune";
   target: string;
   removed: string[];
   dropped: string[];
@@ -234,7 +234,7 @@ export interface CarveEvent extends BaseEvent {
  * precomputed layering inputs the pure reducer folds them with (each added id's in-campaign
  * `blockedBy`, and the basenames of the added ids plus the still-unstarted members it places
  * against) so `reduceCampaign` stays free of tracker/filesystem access (cli.mts, ADR 0014/0012).
- * The additive mirror of `carve`. */
+ * The additive mirror of `prune`. */
 export interface GraftEvent extends BaseEvent {
   event: "graft";
   ids: string[];
@@ -304,7 +304,7 @@ export type OrchestratorEvent =
   | ParkedEvent
   | QuarantinedEvent
   | WaveParkedEvent
-  | CarveEvent
+  | PruneEvent
   | GraftEvent
   | WorktreePreservedEvent
   | TelegramUnconfiguredEvent

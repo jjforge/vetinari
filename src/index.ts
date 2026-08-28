@@ -32,9 +32,9 @@ export {
   routeReply,
   isStatusCommand,
   parseGatewayCommand,
-  resolveCarveTarget,
-  handleCarveCommand,
-  formatCarveAmbiguity,
+  resolvePruneTarget,
+  handlePruneCommand,
+  formatPruneAmbiguity,
   formatGatewayStatus,
 } from "./gateway.ts";
 export type {
@@ -45,20 +45,20 @@ export type {
   ReplyAction,
   PollDeps,
   GatewayCommand,
-  CarveCandidate,
-  CarveResolution,
+  PruneCandidate,
+  PruneResolution,
   PendingConfirm,
   PendingConfirms,
-  CarveHandlerDeps,
+  PruneHandlerDeps,
 } from "./gateway.ts";
-export { computeCarve, restrictBlockers } from "./carve.ts";
+export { computePrune, restrictBlockers } from "./prune.ts";
 export {
   formatContextLine,
   formatStatusLine,
   runStatusLine,
   trimModelName,
 } from "./statusline.ts";
-export type { CarveResult, BlockedByOf, RestrictedBlockers } from "./carve.ts";
+export type { PruneResult, BlockedByOf, RestrictedBlockers } from "./prune.ts";
 export {
   layerWaves,
   partitionWaves,

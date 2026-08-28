@@ -55,7 +55,7 @@ export const handlePage: RouteHandler = (req, res, url, deps) => {
     renderStatusPage(selected, {
       projects: repos,
       selected: selected.project,
-      carve: true,
+      prune: true,
       graft: true,
       archivedRuns: runs,
       archivedRun: match?.run,

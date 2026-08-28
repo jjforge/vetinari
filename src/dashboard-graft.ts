@@ -6,7 +6,7 @@ import type { StructuredGraftClosure } from "./graft.ts";
  * shared install in its root (ADR 0003): it computes the placement against that
  * project's real campaign + `blockedBy` graph and prints it, changing nothing.
  * Returns the printed placement, or null when the child fails. The additive mirror
- * of `shellCarvePreview` — the same dumb-router routing the aggregated dashboard
+ * of `shellPrunePreview` — the same dumb-router routing the aggregated dashboard
  * uses. `graft` is variadic, so this carries a *set* of ids, not a single target.
  */
 export function shellGraftPreview(projectRoot: string, taskIds: string[]): Promise<string | null> {

@@ -10,7 +10,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { normalize } from "./carve.ts";
+import { normalize } from "./prune.ts";
 import { resolveDestination, type Destination, type NotifyMap } from "./config.ts";
 import { hostLogger, type Logger } from "./log.ts";
 import {
@@ -24,7 +24,7 @@ import {
   type ParkedRecord,
 } from "./state.ts";
 import { gatewayConfigDir, readProjects } from "./registry.ts";
-import { campaignRunning, logFileOf, readEventLog, serveAllStatus, shellCarvePreview } from "./status.ts";
+import { campaignRunning, logFileOf, readEventLog, serveAllStatus, shellPrunePreview } from "./status.ts";
 import { tgPoll, tgSend, type TgConn, type TgMsg } from "./telegram.ts";
 
 /**
@@ -38,16 +38,16 @@ export const isStatusCommand = (text: string) => STATUS_COMMANDS.has(text.trim()
 
 /**
  * A gateway command parsed from an inbound message, or `null` when the text is
- * not one — a plain answer to a parked question. Carve joins `/status` in the
- * command family (spec §"Carve joins the gateway command family"): `carve 640`
- * targets the one running campaign on the bot, `carve <project> 640`
+ * not one — a plain answer to a parked question. Prune joins `/status` in the
+ * command family (spec §"Prune joins the gateway command family"): `prune 640`
+ * targets the one running campaign on the bot, `prune <project> 640`
  * disambiguates when several run there, and a bare `yes` confirms a pending
- * carve. Kept to whole, unambiguous tokens — an issue must be numeric — so a
+ * prune. Kept to whole, unambiguous tokens — an issue must be numeric — so a
  * one-word answer like "640" or "A" is never mistaken for a command.
  */
 export type GatewayCommand =
   | { kind: "status" }
-  | { kind: "carve"; project?: string; issue: string }
+  | { kind: "prune"; project?: string; issue: string }
   | { kind: "confirm" };
 
 const isIssueToken = (t: string) => /^#?\d+$/.test(t);
@@ -59,12 +59,12 @@ export function parseGatewayCommand(text: string): GatewayCommand | null {
   const tokens = trimmed.split(/\s+/).filter(Boolean);
   const head = tokens[0]?.toLowerCase();
   if (head === "yes" && tokens.length === 1) return { kind: "confirm" };
-  if (head === "carve") {
+  if (head === "prune") {
     const args = tokens.slice(1);
-    // `carve 640` — the sole running campaign on this bot; `carve proj 640` —
+    // `prune 640` — the sole running campaign on this bot; `prune proj 640` —
     // an explicit project when several run there. The issue is always numeric.
-    if (args.length === 1 && isIssueToken(args[0])) return { kind: "carve", issue: normalize(args[0]) };
-    if (args.length === 2 && isIssueToken(args[1])) return { kind: "carve", project: args[0], issue: normalize(args[1]) };
+    if (args.length === 1 && isIssueToken(args[0])) return { kind: "prune", issue: normalize(args[0]) };
+    if (args.length === 2 && isIssueToken(args[1])) return { kind: "prune", project: args[0], issue: normalize(args[1]) };
   }
   return null;
 }
@@ -111,35 +111,35 @@ export function loadGatewayProjects(configDir: string): GatewayProject[] {
 
 /**
  * A registered project paired with whether it currently has a running campaign —
- * the state `resolveCarveTarget` resolves a carve against. The daemon reads each
+ * the state `resolvePruneTarget` resolves a prune against. The daemon reads each
  * project's running/not-running state from its event log (`campaignRunning`); the
- * pairing keeps `resolveCarveTarget` pure over plain data.
+ * pairing keeps `resolvePruneTarget` pure over plain data.
  */
-export interface CarveCandidate {
+export interface PruneCandidate {
   project: GatewayProject;
   running: boolean;
 }
 
 /**
- * Which project a `carve` command targets, resolved from the bot it arrived on
+ * Which project a `prune` command targets, resolved from the bot it arrived on
  * (spec §"Project resolution from bot context"): exactly one running campaign on
  * that bot targets it; more than one is ambiguous and carries the candidate list
- * so the gateway can ask for `carve <project> 640`; none rejects. An explicit
+ * so the gateway can ask for `prune <project> 640`; none rejects. An explicit
  * project name resolves straight to that project when it is running on the bot.
  */
-export type CarveResolution =
+export type PruneResolution =
   | { kind: "target"; project: GatewayProject }
   | { kind: "ambiguous"; candidates: GatewayProject[] }
   | { kind: "none" };
 
 /**
- * Resolve a carve command to a project, pure over the candidates and the bot the
+ * Resolve a prune command to a project, pure over the candidates and the bot the
  * message arrived on. Only projects served by that bot (same token, mirroring
  * `onStatus`'s filter) with a running campaign are eligible. An explicit project
  * name selects it directly (past any ambiguity); with none named, a single
  * running campaign is the target, several are ambiguous, and zero rejects.
  */
-export function resolveCarveTarget(candidates: CarveCandidate[], conn: TgConn, project?: string): CarveResolution {
+export function resolvePruneTarget(candidates: PruneCandidate[], conn: TgConn, project?: string): PruneResolution {
   const running = candidates.filter((c) => c.running && c.project.conn?.token === conn.token);
   if (project) {
     const named = running.find((c) => c.project.project === project);
@@ -236,9 +236,9 @@ const isAnnounced = (index: ReplyIndex, project: string, task: string, parkedAt:
   index.announced.has(announceKey(project, task, parkedAt));
 
 /**
- * A carve awaiting its confirming `yes`: the resolved project and the issue to
- * carve. Recorded when the gateway previews a carve and read back to execute it
- * on a reply to the preview. Carries only pointers — the project-side `carve`
+ * A prune awaiting its confirming `yes`: the resolved project and the issue to
+ * prune. Recorded when the gateway previews a prune and read back to execute it
+ * on a reply to the preview. Carries only pointers — the project-side `prune`
  * recomputes the closure against the project's own graph (ADR 0002/0003).
  */
 export interface PendingConfirm {
@@ -249,9 +249,9 @@ export interface PendingConfirm {
 }
 
 /**
- * The in-memory store of pending carve confirmations, keyed to the preview
+ * The in-memory store of pending prune confirmations, keyed to the preview
  * message a `yes` must reply to (spec §"`pendingConfirms` store"). Deliberately
- * non-durable — a gateway restart drops it and re-sending `carve 640` is the
+ * non-durable — a gateway restart drops it and re-sending `prune 640` is the
  * recovery (ADR 0002). The clock is injected so expiry is testable without real
  * time; `resolve` is one-shot (a confirm fires at most once) and drops an entry
  * older than the TTL, so a stray or stale `yes` resolves to nothing.
@@ -262,7 +262,7 @@ export interface PendingConfirms {
 }
 
 // A short TTL: long enough to read the preview and reply, short enough that a
-// much later `yes` cannot trigger a carve the maintainer has forgotten about.
+// much later `yes` cannot trigger a prune the maintainer has forgotten about.
 const CONFIRM_TTL_MS = 5 * 60 * 1000;
 
 export function newPendingConfirms(now: () => number, ttlMs: number = CONFIRM_TTL_MS): PendingConfirms {
@@ -386,24 +386,24 @@ export async function drainOutbox(
 export type ReplyAction =
   | { kind: "resume"; ref: SendRef; text: string }
   | { kind: "status" }
-  | { kind: "carve"; command: { project?: string; issue: string } }
+  | { kind: "prune"; command: { project?: string; issue: string } }
   | { kind: "confirm"; confirm: PendingConfirm }
   | { kind: "unrouted" };
 
 /**
- * Route one message. A gateway command (`/status`, `carve …`) takes precedence
+ * Route one message. A gateway command (`/status`, `prune …`) takes precedence
  * over reply routing — it is a command, never an answer. A `yes` replying to a
- * live carve preview resolves (and consumes) that pending confirmation; any
+ * live prune preview resolves (and consumes) that pending confirmation; any
  * other reply to a known question resumes its task, so a task genuinely answered
- * with the word "yes" still resumes when no carve is pending. Everything else is
+ * with the word "yes" still resumes when no prune is pending. Everything else is
  * unrouted.
  */
 export function routeReply(index: ReplyIndex, pending: PendingConfirms, conn: TgConn, msg: TgMsg): ReplyAction {
   const command = parseGatewayCommand(msg.text);
   if (command?.kind === "status") return { kind: "status" };
-  if (command?.kind === "carve") {
+  if (command?.kind === "prune") {
     const payload = command.project ? { project: command.project, issue: command.issue } : { issue: command.issue };
-    return { kind: "carve", command: payload };
+    return { kind: "prune", command: payload };
   }
   if (msg.replyToId != null) {
     if (command?.kind === "confirm") {
@@ -418,62 +418,62 @@ export function routeReply(index: ReplyIndex, pending: PendingConfirms, conn: Tg
 
 /**
  * The reply when several projects on one bot have a running campaign: name them
- * and show the disambiguating `carve <project> <issue>` form (user story 11).
+ * and show the disambiguating `prune <project> <issue>` form (user story 11).
  */
-export function formatCarveAmbiguity(candidates: GatewayProject[], issue: string): string {
+export function formatPruneAmbiguity(candidates: GatewayProject[], issue: string): string {
   const names = candidates.map((c) => c.project);
   return (
     `Several projects on this bot have a running campaign: ${names.join(", ")}.\n` +
-    `Say which one — e.g. \`carve ${names[0]} ${issue}\`.`
+    `Say which one — e.g. \`prune ${names[0]} ${issue}\`.`
   );
 }
 
 /**
- * The seams `handleCarveCommand` drives: the current carve candidates (each
+ * The seams `handlePruneCommand` drives: the current prune candidates (each
  * project paired with its running state), the closure preview (which shells the
- * project's `carve <issue> --dry-run` and returns its text — or null on
+ * project's `prune <issue> --dry-run` and returns its text — or null on
  * failure), and the Telegram send. All injected so the resolve→preview→record
  * flow is testable without a bot or a spawned process.
  */
-export interface CarveHandlerDeps {
-  candidates: () => CarveCandidate[];
+export interface PruneHandlerDeps {
+  candidates: () => PruneCandidate[];
   preview: (target: PendingConfirm) => Promise<string | null>;
   send: (conn: TgConn, text: string) => Promise<number | undefined>;
 }
 
 /**
- * Handle a `carve` command end to end but for the execution: resolve the target
+ * Handle a `prune` command end to end but for the execution: resolve the target
  * from the bot it arrived on, and either reject (ambiguous → candidate list,
  * none → nothing running) or preview the closure and record a pending
  * confirmation keyed to the preview message. Records nothing on a rejection or a
- * failed preview/send, so only a confirmed carve ever runs. The preview is a
+ * failed preview/send, so only a confirmed prune ever runs. The preview is a
  * private interactive exchange — it writes no outbox record and broadcasts
- * nothing (spec §"Preview then confirm"); only the executed carve emits
- * `progress:carve`.
+ * nothing (spec §"Preview then confirm"); only the executed prune emits
+ * `progress:prune`.
  */
-export async function handleCarveCommand(
-  deps: CarveHandlerDeps,
+export async function handlePruneCommand(
+  deps: PruneHandlerDeps,
   pending: PendingConfirms,
   conn: TgConn,
   command: { project?: string; issue: string },
 ): Promise<void> {
-  const resolution = resolveCarveTarget(deps.candidates(), conn, command.project);
+  const resolution = resolvePruneTarget(deps.candidates(), conn, command.project);
   if (resolution.kind === "none") {
-    await deps.send(conn, `No campaign is running on this bot — nothing to carve.`);
+    await deps.send(conn, `No campaign is running on this bot — nothing to prune.`);
     return;
   }
   if (resolution.kind === "ambiguous") {
-    await deps.send(conn, formatCarveAmbiguity(resolution.candidates, command.issue));
+    await deps.send(conn, formatPruneAmbiguity(resolution.candidates, command.issue));
     return;
   }
   const p = resolution.project;
   const target: PendingConfirm = { project: p.project, projectRoot: p.projectRoot, baseLocation: p.baseLocation, issue: command.issue };
   const previewText = await deps.preview(target);
   if (previewText == null) {
-    await deps.send(conn, `Couldn't preview carve #${command.issue} for ${p.project} — is a campaign still running?`);
+    await deps.send(conn, `Couldn't preview prune #${command.issue} for ${p.project} — is a campaign still running?`);
     return;
   }
-  const messageId = await deps.send(conn, `${previewText}\n\nReply "yes" to this message to carve.`);
+  const messageId = await deps.send(conn, `${previewText}\n\nReply "yes" to this message to prune.`);
   if (messageId == null) return; // send failed — nothing to confirm against, drop it
   pending.record(conn.token, messageId, target);
 }
@@ -507,7 +507,7 @@ export interface PollDeps {
   poll: (conn: TgConn, offset: number) => Promise<{ offset: number; messages: TgMsg[] } | null>;
   resume: (ref: SendRef, text: string) => void;
   onStatus?: (conn: TgConn) => void | Promise<void>;
-  onCarve?: (conn: TgConn, command: { project?: string; issue: string }) => void | Promise<void>;
+  onPrune?: (conn: TgConn, command: { project?: string; issue: string }) => void | Promise<void>;
   onConfirm?: (confirm: PendingConfirm) => void | Promise<void>;
   onUnrouted?: (conn: TgConn, msg: TgMsg) => void | Promise<void>;
   /** Tears the loop down when it fires — the supervisor aborts a token that was rotated away or deregistered. */
@@ -531,7 +531,7 @@ export async function pollLoop(conn: TgConn, index: ReplyIndex, pending: Pending
       const action = routeReply(index, pending, conn, msg);
       if (action.kind === "resume") deps.resume(action.ref, action.text);
       else if (action.kind === "status") await deps.onStatus?.(conn);
-      else if (action.kind === "carve") await deps.onCarve?.(conn, action.command);
+      else if (action.kind === "prune") await deps.onPrune?.(conn, action.command);
       else if (action.kind === "confirm") await deps.onConfirm?.(action.confirm);
       else await deps.onUnrouted?.(conn, msg);
     }
@@ -658,10 +658,10 @@ async function drainOutboxes(configDir: string, logger: Logger = hostLogger()): 
 /**
  * Every registered project paired with whether it currently has a running
  * campaign, read fresh from each project's event log (`campaignRunning`). This
- * is the state `resolveCarveTarget` resolves a carve against; read live so a
+ * is the state `resolvePruneTarget` resolves a prune against; read live so a
  * campaign that started or ended since the last tick is reflected.
  */
-function carveCandidates(configDir: string): CarveCandidate[] {
+function pruneCandidates(configDir: string): PruneCandidate[] {
   return loadGatewayProjects(configDir).map((project) => ({
     project,
     running: campaignRunning(readEventLog({ logFile: logFileOf(project.baseLocation) })),
@@ -669,36 +669,36 @@ function carveCandidates(configDir: string): CarveCandidate[] {
 }
 
 /**
- * Preview a carve by shelling the project's own `carve <issue> --dry-run` via the
+ * Preview a prune by shelling the project's own `prune <issue> --dry-run` via the
  * shared install in its root: it computes the closure against the project's real
  * `blockedBy` graph and prints it, changing nothing (the CLI breaks before it
  * appends the event or writes any outbox record). Returns the printed closure, or
  * null when the child fails — e.g. the campaign ended between resolve and preview.
- * Shares the shell-out with the aggregated dashboard's `POST /carve` preview
- * (`shellCarvePreview`); the only extra here is the failure log line.
+ * Shares the shell-out with the aggregated dashboard's `POST /prune` preview
+ * (`shellPrunePreview`); the only extra here is the failure log line.
  */
-async function carvePreview(target: PendingConfirm, logger: Logger = hostLogger()): Promise<string | null> {
-  const text = await shellCarvePreview(target.projectRoot, target.issue);
-  if (text == null) logger.log("gateway-carve-preview-failed", { project: target.project, issue: target.issue });
+async function prunePreview(target: PendingConfirm, logger: Logger = hostLogger()): Promise<string | null> {
+  const text = await shellPrunePreview(target.projectRoot, target.issue);
+  if (text == null) logger.log("gateway-prune-preview-failed", { project: target.project, issue: target.issue });
   return text;
 }
 
 /**
- * Execute a confirmed carve by shelling the project's own `carve <issue>` via the
+ * Execute a confirmed prune by shelling the project's own `prune <issue>` via the
  * shared install in its root (ADR 0003), exactly as an answered question resumes
- * with `answer`. The project-side carve computes the closure, appends the carve
+ * with `answer`. The project-side prune computes the closure, appends the prune
  * event, clears the dropped issues' parked records, and emits the one
- * `progress:carve` — the gateway only routes the command and its confirmation.
+ * `progress:prune` — the gateway only routes the command and its confirmation.
  * Fire-and-forget, like `spawnResume`.
  */
-function spawnCarve(target: PendingConfirm, logger: Logger = hostLogger()): void {
-  logger.log("gateway-carve", { project: target.project, issue: target.issue });
-  spawn(process.execPath, [...process.execArgv, process.argv[1], "carve", target.issue], {
+function spawnPrune(target: PendingConfirm, logger: Logger = hostLogger()): void {
+  logger.log("gateway-prune", { project: target.project, issue: target.issue });
+  spawn(process.execPath, [...process.execArgv, process.argv[1], "prune", target.issue], {
     cwd: target.projectRoot,
     stdio: ["ignore", "inherit", "inherit"],
   })
-    .on("exit", (code) => logger.log("gateway-carve-done", { project: target.project, issue: target.issue, code }))
-    .on("error", (err) => logger.log("gateway-carve-failed", { project: target.project, issue: target.issue, error: String(err) }));
+    .on("exit", (code) => logger.log("gateway-prune-done", { project: target.project, issue: target.issue, code }))
+    .on("error", (err) => logger.log("gateway-prune-failed", { project: target.project, issue: target.issue, error: String(err) }));
 }
 
 /**
@@ -744,8 +744,8 @@ export async function gateway(configDir: string = gatewayConfigDir()): Promise<v
   // emits to the persistent host log (`hostLogTarget`), threaded through its helpers.
   const log = hostLogger();
   const index = rebuildIndex(loadGatewayProjects(configDir));
-  // Non-durable by design (ADR 0002): a restart drops pending carve
-  // confirmations, and re-sending `carve 640` is the recovery.
+  // Non-durable by design (ADR 0002): a restart drops pending prune
+  // confirmations, and re-sending `prune 640` is the recovery.
   const pending = newPendingConfirms(() => Date.now());
   // Just for the startup line — the supervisor below re-derives targets live.
   const startupBots = pollTargets(loadGatewayProjects(configDir)).length;
@@ -782,9 +782,9 @@ export async function gateway(configDir: string = gatewayConfigDir()): Promise<v
         const served = loadGatewayProjects(configDir).filter((p) => p.conn?.token === c.token);
         await tgSend(c, formatGatewayStatus(served));
       },
-      onCarve: (c, command) =>
-        handleCarveCommand({ candidates: () => carveCandidates(configDir), preview: (t) => carvePreview(t, log), send: tgSend }, pending, c, command),
-      onConfirm: (confirm) => spawnCarve(confirm, log),
+      onPrune: (c, command) =>
+        handlePruneCommand({ candidates: () => pruneCandidates(configDir), preview: (t) => prunePreview(t, log), send: tgSend }, pending, c, command),
+      onConfirm: (confirm) => spawnPrune(confirm, log),
       onUnrouted: async (c, msg) => {
         // Only answer a genuine misdirected reply; stay quiet for plain chatter.
         if (msg.replyToId != null) await tgSend(c, "That question isn't tracked anymore (already answered, or from before I started). Reply to a current question message.");

@@ -2,7 +2,7 @@
  * Move a project from the old single-`.sandcastle/` layout onto the committed
  * `vetinari/` + excluded `.vetinari.local/` split (ADR 0001).
  *
- * Split into a pure planner and an apply step, mirroring `carve` (a pure planner
+ * Split into a pure planner and an apply step, mirroring `prune` (a pure planner
  * over plain data) and `archive` (filesystem work that reports what it did):
  * `computeLayoutMigration` turns a described on-disk state into a plan — the
  * moves, the `.gitignore` edit, the deletion of a stale `gateway.env`, and the

@@ -151,7 +151,7 @@ already merged this wave stays merged and the wave carries on integrating the re
 A **red merged base** has no single culprit (each branch was green on its own), so
 the wave **wave-parks**: everything stays merged, the base sits red (never pushed,
 nothing builds on it while paused), an attention notification fires, and the
-campaign pauses for a human to fix forward and `campaign --resume`, or carve a
+campaign pauses for a human to fix forward and `campaign --resume`, or prune a
 suspect and resume. When a batch finishes, any parked records for non-green tasks
 in that completed wave are cleared from `.vetinari.local/parked/` so stale
 questions do not bleed into the next wave's dashboard. Pushing stays yours.
@@ -172,19 +172,19 @@ counters and a card per repo (its wave and per-status counts), a cross-repo
 **activity feed** flattening every project's live events newest-first underneath,
 and it **updates live** over Server-Sent Events as runs advance, no reload.
 Tapping an issue opens a **detail sheet** (status, turns, elapsed, the full turn
-log) from which you can **carve** it out of the running campaign; the layout
+log) from which you can **prune** it out of the running campaign; the layout
 reflows for a phone, so it is the same view you reach from the Telegram message
 on your way past. It reads the host registry, so no gateway daemon is required.
 
 ![A single project's view with an archived campaign expanded into its waves and per-issue status: the epic #107 run, all green.](docs/dashboard-campaign-107.png)
 
-**Carve one issue out of a campaign.** When an issue turns out not to be ready,
-`carve` drops it *and everything that can't proceed without it* (the transitive
+**Prune one issue out of a campaign.** When an issue turns out not to be ready,
+`prune` drops it *and everything that can't proceed without it* (the transitive
 closure of its dependents), then runs the rest:
 
 ```bash
-npx vetinari carve 640 "611 640" "623 701"   # 701 is blocked by 640
-# carve #640 → removed #640, #701 (dependents: #701)
+npx vetinari prune 640 "611 640" "623 701"   # 701 is blocked by 640
+# prune #640 → removed #640, #701 (dependents: #701)
 # remaining campaign: "611" "623"   ← runs this
 ```
 
@@ -194,26 +194,26 @@ native "blocked by" links. Removal is transitive across every branch and
 diamond (an issue falls if *any* of its blockers falls), and is computed over
 the campaign's own issues: a blocker outside the named campaign is out of
 scope. It runs the reduced campaign immediately; `--dry-run` only prints the
-plan. Because carve only *drops* issues, each remaining wave stays as
+plan. Because prune only *drops* issues, each remaining wave stays as
 conflict-free as you built it.
 
 That form launches a **fresh reduced campaign** from a plan you supply. There is
-also a **running-campaign** form, `carve <issue>` with no batch args — the same
-one the dashboard's detail sheet and the gateway's `carve <issue>` reply use — that
-prunes the campaign already in flight: it appends a carve event the loop honors at
+also a **running-campaign** form, `prune <issue>` with no batch args — the same
+one the dashboard's detail sheet and the gateway's `prune <issue>` reply use — that
+prunes the campaign already in flight: it appends a prune event the loop honors at
 the **next wave boundary**, so the in-flight wave finishes and only future waves
-shrink. Carve **preserves banked work**: of the removed closure, anything already
+shrink. Prune **preserves banked work**: of the removed closure, anything already
 merged or green is kept, only parked/not-yet-started issues leave the plan, and a
-carved issue's parked record (branch, worktree, session) is kept by default so it
+pruned issue's parked record (branch, worktree, session) is kept by default so it
 stays resumable — `--purge` is the rare true-drop that clears it.
 
 **Graft — add issues to a running campaign.** `graft <ids…>` is the additive
-mirror of `carve` (ADR 0014). Where carve prunes the unfinished remainder, graft
+mirror of `prune` (ADR 0014). Where prune prunes the unfinished remainder, graft
 **extends** it: it appends a graft event the loop honors at the **next wave
 boundary**, so the in-flight wave finishes untouched and the added issues re-layer
 into **future** waves — after their in-campaign blockers, kept basename-disjoint,
 and leaving the already-planned waves stable (a stable-insert, not a re-optimize).
-Unlike carve's running-only in-place form, graft is allowed against any campaign
+Unlike prune's running-only in-place form, graft is allowed against any campaign
 that has not finished — live, or paused/wave-parked/resumable and honored on the
 next `campaign --resume`. It takes explicit ids only, validates all-or-nothing
 (an unknown/closed id, or one already in the campaign, rejects the whole graft
@@ -249,7 +249,7 @@ blocker does not hold a ticket back. A ticket whose only open blocker sits
 *outside* your selection cannot run against this set; it is reported as
 unreachable and dropped, along with everything that in turn depends on it, never
 scheduled silently. Blocker state comes from the same `blockedBy` resolver as
-`carve` (`githubBlockedBy` filters closed blockers at the edge). It **plans
+`prune` (`githubBlockedBy` filters closed blockers at the edge). It **plans
 only**: it never runs `campaign` and never pushes; paste the wave args into
 `campaign` when you are ready.
 
@@ -323,7 +323,7 @@ export default defineConfig({
 `pending-verify`; write your own handler to advance the state in any tracker. The
 core names no labels, so it stays tracker-agnostic and this is a **no-op when
 `onIssueMerged` is unconfigured**. It fires **only on the green path** for the
-merged issues (parked/carved/failed are never in the set), is idempotent, and is
+merged issues (parked/pruned/failed are never in the set), is idempotent, and is
 best-effort — a failing or offline write is logged and never fails or rolls back
 the campaign. Closing stays a separate, human/verify step.
 
@@ -361,8 +361,8 @@ project live from a host registry, nothing to enrol by hand), so a campaign in o
 shell and the gateway in another find each other. Every park sends its question as
 a message; **reply to that message** and the gateway resumes that exact task,
 running concurrent resumes as needed. Send **`/status`** (bare, or `/status@yourbot`
-in a group) for a live summary back in the chat, and **`carve <issue>`** to preview
-a carve and, on a `yes` reply, drop it from the running campaign.
+in a group) for a live summary back in the chat, and **`prune <issue>`** to preview
+a prune and, on a `yes` reply, drop it from the running campaign.
 
 **Where messages land** is declared in the committed `vetinari/config.mts` with
 two maps: `destinations` (named `{ bot, chat, thread? }` targets) and `notify`
@@ -469,17 +469,17 @@ The README stops at the reader's first hour. The operational reference lives in
 | `build [--no-baseline]` | build `cfg.image` from `vetinari/Dockerfile` (neither repeated on the CLI) via sandcastle, then `baseline` on success; `--no-baseline` builds only. A build or baseline failure exits non-zero with sandcastle's output shown |
 | `baseline` | toolchain probe + all gates, no agent |
 | `run <task>` | the TDD loop; exit 0 green, 2 parked |
-| `campaign [--name "…"] [--auto-carve] <batch…>` | drain each batch, merge its greens, gate the merged base, then start the next. Integration is **non-atomic** (ADR 0013): a merge conflict **quarantines** that one issue and the wave carries on (its already-merged greens stay merged); a red merged base **wave-parks** the wave and pauses for a human. `--name` labels the run in the dashboard/archive. When a quarantine strands dependents in later waves the campaign pauses for a human by default; `--auto-carve` prunes that closure and runs on instead |
-| `campaign --resume` | continue a **paused** campaign's unrun waves on the current base (after a human fixed a wave-park forward or carved a suspect); reconstructs the plan from the event log, redoes no already-merged issue, takes no batch args |
-| `carve <issue>` | prune `<issue>` + everything blocked by it from the **running** campaign at the next wave boundary (the in-flight wave finishes; only future waves shrink). Banked/merged work is kept; the carved issue's parked record (branch/worktree/session) is **preserved** so it stays resumable — `--purge` is the rare true-drop that clears it (`--dry-run` to preview) |
-| `carve <issue> <batch…>` | the from-scratch form: drop `<issue>` + its transitive dependents, then run the rest as a fresh reduced campaign from the plan you supply (`--dry-run` to just print) |
-| `graft <ids…>` | the additive mirror of `carve` (ADR 0014): add issues to a **running** (or paused/wave-parked/resumable) campaign at the next wave boundary. Appends a graft event the loop re-derives from; the in-flight wave finishes untouched and the added issues re-layer into **future** waves (after their blockers, basename-disjoint), leaving already-planned waves stable. Rejected whole — naming the offenders — if any id is unknown/closed or already in the campaign (`--dry-run` to preview the placement) |
+| `campaign [--name "…"] [--auto-prune] <batch…>` | drain each batch, merge its greens, gate the merged base, then start the next. Integration is **non-atomic** (ADR 0013): a merge conflict **quarantines** that one issue and the wave carries on (its already-merged greens stay merged); a red merged base **wave-parks** the wave and pauses for a human. `--name` labels the run in the dashboard/archive. When a quarantine strands dependents in later waves the campaign pauses for a human by default; `--auto-prune` prunes that closure and runs on instead |
+| `campaign --resume` | continue a **paused** campaign's unrun waves on the current base (after a human fixed a wave-park forward or pruned a suspect); reconstructs the plan from the event log, redoes no already-merged issue, takes no batch args |
+| `prune <issue>` | prune `<issue>` + everything blocked by it from the **running** campaign at the next wave boundary (the in-flight wave finishes; only future waves shrink). Banked/merged work is kept; the pruned issue's parked record (branch/worktree/session) is **preserved** so it stays resumable — `--purge` is the rare true-drop that clears it (`--dry-run` to preview) |
+| `prune <issue> <batch…>` | the from-scratch form: drop `<issue>` + its transitive dependents, then run the rest as a fresh reduced campaign from the plan you supply (`--dry-run` to just print) |
+| `graft <ids…>` | the additive mirror of `prune` (ADR 0014): add issues to a **running** (or paused/wave-parked/resumable) campaign at the next wave boundary. Appends a graft event the loop re-derives from; the in-flight wave finishes untouched and the added issues re-layer into **future** waves (after their blockers, basename-disjoint), leaving already-planned waves stable. Rejected whole — naming the offenders — if any id is unknown/closed or already in the campaign (`--dry-run` to preview the placement) |
 | `campaign-plan <ids…>` | layer a selected set into dependency-ordered wave args (paste after `campaign`) + a provenance report; plans only, never runs |
 | `init [--dry-run]` | scaffold a **new** project onto the layout: committed `vetinari/` (config skeleton + Dockerfile), excluded `.vetinari.local/`, `.gitignore` updated (idempotent, never clobbers an existing config; `--dry-run` to just print the plan) |
 | `migrate [--dry-run]` | move an **existing** project onto the `vetinari/` + `.vetinari.local/` layout: config → `vetinari/`, old `.sandcastle/` state → `.vetinari.local/`, `.gitignore` updated, the host-side `orchestrator.env` renamed to `host.env`, a stale `gateway.env` deleted, and the systemd unit rewritten into the gateway service (`--dry-run` to just print the plan) |
 | `changelog collect [--title "…"]` | fold this repo's `changelog.d/*.md` fragments into `CHANGELOG.md` under today's milestone (append to the top milestone if it is dated today, else start one), then delete the consumed fragments. What the orchestrator runs per wave at merge; a human may run it directly. `--title` sets a fresh milestone's title (default: "Collected changes") |
 | `answer <task> <text>` | resume a parked task with your answer |
-| `gateway` | the one host daemon fronting every registered project: sole Telegram consumer and sender: announces parked questions, routes replies (and `carve <issue>`) to the right project+task, resumes them concurrently, and hosts the status dashboard |
+| `gateway` | the one host daemon fronting every registered project: sole Telegram consumer and sender: announces parked questions, routes replies (and `prune <issue>`) to the right project+task, resumes them concurrently, and hosts the status dashboard |
 | `gateway install [--dry-run]` | write the host-level systemd unit for this install to `~/.config/systemd/user/vetinari-gateway.service`, with a fully absolute `node` + tsx-loader + CLI `ExecStart` (no `bash -lc`, `env`, `npx`, or `PATH` dependency, so it starts under systemd's clean environment). Re-run after a node/tsx upgrade |
 | `host log [-n <count>] [--tail] [--json]` | read the persistent **host log** (`<gatewayConfigDir>/logs/host.jsonl`) at the terminal — the host/gateway diagnostics (registry reads, `tgSend` routing, SSE watch failures) that no per-project event feed shows. Prints the most recent events **newest-first**, one human-readable line each; `-n` bounds the window (default 50). `--json` passes the raw JSONL through **untouched** (pipe to `jq`/`grep`); `--tail` (or `-f`) **follows** live, printing new events as they append. Reads the file directly off disk, so **no daemon need be running** — a missing `host.jsonl` prints "no host log yet" and exits clean |
 | `parked` | list what is waiting and why |

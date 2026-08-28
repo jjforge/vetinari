@@ -46,7 +46,7 @@ import {
   listArchivedRuns,
   ownerRepoFromRemote,
   parkedReplyFor,
-  parseCarveClosure,
+  parsePruneClosure,
   parseRunTimestamp,
   reconcileArchivedStatus,
   reconstructIssueDetail,
@@ -230,8 +230,8 @@ test("buildLanding builds a per-project card for a live campaign", () => {
   assert.equal(card.lastEvent, "Writing the failing test");
 });
 
-test("buildLanding's card counts the live plan, not carved chips", () => {
-  const base = join(tmpdir(), `vetinari-landing-carved-${Date.now()}`);
+test("buildLanding's card counts the live plan, not pruned chips", () => {
+  const base = join(tmpdir(), `vetinari-landing-pruned-${Date.now()}`);
   const dir = join(base, "demo");
   seedState(dir, [
     event("campaign-start", {
@@ -259,8 +259,8 @@ test("buildLanding's card counts the live plan, not carved chips", () => {
       tasks: ["201"],
     }),
     event("queue-start", { ts: "2025-01-02T08:05:00.000Z", taskIds: ["201"], slots: 1 }),
-    // The future, unstarted wave 301 is carved out — a display ghost, not live work.
-    event("carve", {
+    // The future, unstarted wave 301 is pruned out — a display ghost, not live work.
+    event("prune", {
       ts: "2025-01-02T08:06:00.000Z",
       target: "301",
       removed: ["301"],
@@ -273,7 +273,7 @@ test("buildLanding's card counts the live plan, not carved chips", () => {
     new Date("2025-01-02T12:00:00.000Z"),
   ).projects;
 
-  // Two live waves remain (101 closed, 201 running); the carved-out 301 wave and its
+  // Two live waves remain (101 closed, 201 running); the pruned-out 301 wave and its
   // chip do not inflate the count, the "queued" tally, or drag down percent merged.
   assert.deepEqual(card.wave, { current: 2, total: 2 });
   assert.deepEqual(card.tally, { running: 1, parked: 0, queued: 0 });
@@ -281,7 +281,7 @@ test("buildLanding's card counts the live plan, not carved chips", () => {
   assert.equal(card.runState, "running");
 });
 
-test("buildLanding counts grafted issues as queued but still excludes carved (#200)", () => {
+test("buildLanding counts grafted issues as queued but still excludes pruned (#200)", () => {
   const base = join(tmpdir(), `vetinari-landing-graft-${Date.now()}`);
   const dir = join(base, "demo");
   seedState(dir, [
@@ -302,8 +302,8 @@ test("buildLanding counts grafted issues as queued but still excludes carved (#2
     }),
     event("campaign-batch", { ts: "2025-01-02T08:04:00.000Z", index: 1, tasks: ["201"] }),
     event("queue-start", { ts: "2025-01-02T08:05:00.000Z", taskIds: ["201"], slots: 1 }),
-    // The future, unstarted wave 301 is carved out — a display ghost, not live work.
-    event("carve", { ts: "2025-01-02T08:06:00.000Z", target: "301", removed: ["301"], dropped: [] }),
+    // The future, unstarted wave 301 is pruned out — a display ghost, not live work.
+    event("prune", { ts: "2025-01-02T08:06:00.000Z", target: "301", removed: ["301"], dropped: [] }),
     // Two issues grafted into later, unstarted waves — pending work that reads `grafted`.
     event("graft", { ts: "2025-01-02T08:07:00.000Z", ids: ["305", "306"], blockedBy: {}, basenames: {} }),
   ]);
@@ -314,7 +314,7 @@ test("buildLanding counts grafted issues as queued but still excludes carved (#2
   );
   const [card] = projects;
   // 101 banked, 201 running; the two grafted issues fold to unstarted → queued 2,
-  // not 0. The carved-out 301 stays excluded from every bucket.
+  // not 0. The pruned-out 301 stays excluded from every bucket.
   assert.deepEqual(card.tally, { running: 1, parked: 0, queued: 2 });
   // The aggregate "QUEUED · in later waves" counter inherits the corrected count.
   assert.equal(counters.queued, 2);
@@ -1077,15 +1077,15 @@ test("the card/chip colour rules are landed as a normative doc that pins the pal
 });
 
 test("the dashboard palette is one shared source defining every state token at its spec hex (#83)", () => {
-  // §1: the six ADR-0007 states plus the carve action, each at its exact hex.
+  // §1: the six ADR-0007 states plus the prune action, each at its exact hex.
   assert.match(DASHBOARD_PALETTE_CSS, /--color-blue: #6cb6ff/); // running
   assert.match(DASHBOARD_PALETTE_CSS, /--color-yellow: #c8a24e/); // parked
   assert.match(DASHBOARD_PALETTE_CSS, /--color-failure: #f85149/); // failure — distinct red
   assert.match(DASHBOARD_PALETTE_CSS, /--color-dim: #5f6b78/); // unstarted / idle grey
   assert.match(DASHBOARD_PALETTE_CSS, /--color-green: #3fb984/); // completed
-  assert.match(DASHBOARD_PALETTE_CSS, /--color-carved: #a371f7/); // carved
-  assert.match(DASHBOARD_PALETTE_CSS, /--color-red: #f79287/); // carve action — a control, never a state
-  // The carve action and the failure state are deliberately different reds.
+  assert.match(DASHBOARD_PALETTE_CSS, /--color-pruned: #a371f7/); // pruned
+  assert.match(DASHBOARD_PALETTE_CSS, /--color-red: #f79287/); // prune action — a control, never a state
+  // The prune action and the failure state are deliberately different reds.
   assert.notEqual("#f85149", "#f79287");
   // The teal product accent is present but is not a state colour.
   assert.match(DASHBOARD_PALETTE_CSS, /--color-primary: #3fb9b0/);
@@ -1095,7 +1095,7 @@ test("both the landing and the campaign page emit the one shared palette, and ev
   const landing = renderLandingShell(["alpha", "beta"]);
   const campaign = renderStatusPage(
     { project: "beta", waves: [], parked: [] },
-    { carve: true },
+    { prune: true },
   );
   // The palette is included verbatim by both surfaces — one source, not a per-renderer copy.
   assert.ok(
@@ -1106,7 +1106,7 @@ test("both the landing and the campaign page emit the one shared palette, and ev
     campaign.includes(DASHBOARD_PALETTE_CSS),
     "campaign page includes the shared palette",
   );
-  // Every colour token either page references is actually defined — so `--color-carved`
+  // Every colour token either page references is actually defined — so `--color-pruned`
   // (and every other token) resolves identically on `/` and `/?project=…`, not merely
   // referenced (the blind spot #78's original rule-string test had).
   const defined = definedTokens(DASHBOARD_PALETTE_CSS);
@@ -1118,12 +1118,12 @@ test("both the landing and the campaign page emit the one shared palette, and ev
       );
     }
   }
-  // The concrete #78 repro: carved is referenced on the landing (feed, dots, turn log) and resolves.
+  // The concrete #78 repro: pruned is referenced on the landing (feed, dots, turn log) and resolves.
   assert.ok(
-    referencedTokens(landing).has("--color-carved"),
-    "landing references --color-carved",
+    referencedTokens(landing).has("--color-pruned"),
+    "landing references --color-pruned",
   );
-  assert.ok(defined.has("--color-carved"), "--color-carved resolves");
+  assert.ok(defined.has("--color-pruned"), "--color-pruned resolves");
 });
 
 // A running-wave campaign page with one issue chip and a parked card — enough
@@ -1150,7 +1150,7 @@ const chipCampaign = () =>
         },
       ],
     },
-    { carve: true },
+    { prune: true },
   );
 
 test("cards fill card-grey and chips fill the darker panel with a 40%-alpha state border (§4, #83)", () => {
@@ -1179,7 +1179,7 @@ test("cards fill card-grey and chips fill the darker panel with a 40%-alpha stat
   );
   assert.match(
     campaign,
-    /\.wave-member\.carved \{ border-color: var\(--color-carved-40\); \}/,
+    /\.wave-member\.pruned \{ border-color: var\(--color-pruned-40\); \}/,
   );
 });
 
@@ -1211,7 +1211,7 @@ test("cards and chips lift only their fill on hover, never recolouring their edg
   for (const page of [landing, campaign]) {
     assert.doesNotMatch(
       page,
-      /border-(bottom|right)-color: var\(--color-(blue|yellow|green|failure|carved|dim)\)/,
+      /border-(bottom|right)-color: var\(--color-(blue|yellow|green|failure|pruned|dim)\)/,
     );
   }
 });
@@ -1373,17 +1373,17 @@ test("projectRunState resolves a card's state by the §3 precedence: parked > fa
   );
 });
 
-test("stateColor is the single state→colour derivation, failure distinct from the carve action (#83)", () => {
+test("stateColor is the single state→colour derivation, failure distinct from the prune action (#83)", () => {
   // §3: every state derives its colour here, never a per-instance hex.
   assert.equal(stateColor("running"), "var(--color-blue)");
   assert.equal(stateColor("parked"), "var(--color-yellow)");
   assert.equal(stateColor("completed"), "var(--color-green)");
-  assert.equal(stateColor("carved"), "var(--color-carved)");
+  assert.equal(stateColor("pruned"), "var(--color-pruned)");
   // unstarted (and its landing display aliases) are the dim grey, not the muted one.
   assert.equal(stateColor("unstarted"), "var(--color-dim)");
   assert.equal(stateColor("queued"), "var(--color-dim)");
   assert.equal(stateColor("idle"), "var(--color-dim)");
-  // failure has its own token, distinct from the carve action's --color-red (§1).
+  // failure has its own token, distinct from the prune action's --color-red (§1).
   assert.equal(stateColor("failure"), "var(--color-failure)");
   assert.notEqual(stateColor("failure"), "var(--color-red)");
 });
@@ -1397,12 +1397,12 @@ test("both pages share one set of status-dot rules, scoped to .dot so a state ne
         {
           index: 0,
           status: "running",
-          issues: [{ issueNumber: "1", status: "carved" }],
+          issues: [{ issueNumber: "1", status: "pruned" }],
         },
       ],
       parked: [],
     },
-    { carve: true },
+    { prune: true },
   );
   // The dot rules are one generated source, included verbatim by both surfaces.
   assert.ok(
@@ -1414,16 +1414,16 @@ test("both pages share one set of status-dot rules, scoped to .dot so a state ne
     "campaign page includes the shared dot rules",
   );
   // Every status colour is scoped to `.dot` — the campaign page no longer emits the
-  // bare `.completed {…}` / `.carved {…}` rules that leaked colour onto struck-through
+  // bare `.completed {…}` / `.pruned {…}` rules that leaked colour onto struck-through
   // list rows and other elements sharing the class name (#81).
   assert.match(
     campaign,
-    /\.dot\.carved \{ background: var\(--color-carved\); \}/,
+    /\.dot\.pruned \{ background: var\(--color-pruned\); \}/,
   );
   // A bare status-class rule sits at a selector boundary (start of a line, after
   // whitespace) — the shared dot rules are all `.dot.<state>`, never bare. So none of
   // these leak-prone bare rules should appear on the campaign page any more.
-  assert.doesNotMatch(campaign, /\n\s*\.carved \{ background/);
+  assert.doesNotMatch(campaign, /\n\s*\.pruned \{ background/);
   assert.doesNotMatch(campaign, /\n\s*\.completed \{ background/);
   assert.doesNotMatch(campaign, /\n\s*\.parked \{ background/);
 });
@@ -1438,10 +1438,10 @@ test("renderStatusPage shows a Resume control only for a wave-parked campaign (#
       ],
       parked: [],
     },
-    { carve: true },
+    { prune: true },
   );
   // A wave-parked campaign offers a Resume action that POSTs to /resume carrying only
-  // its project (resume is project-scoped — no taskId), mirroring the carve/answer forms.
+  // its project (resume is project-scoped — no taskId), mirroring the prune/answer forms.
   assert.match(waveParked, /<form method="post" action="\/resume"[^>]*>/);
   assert.match(waveParked, /name="project" value="beta"/);
   assert.match(waveParked, /Resume/);
@@ -1453,7 +1453,7 @@ test("renderStatusPage shows a Resume control only for a wave-parked campaign (#
       waves: [{ index: 0, status: "running", issues: [{ issueNumber: "201", status: "running" }] }],
       parked: [],
     },
-    { carve: true },
+    { prune: true },
   );
   assert.doesNotMatch(running, /action="\/resume"/);
 });
@@ -1467,7 +1467,7 @@ test("renderStatusPage puts a quiet graft input on the summary line, greyed at r
   // Mockup 1a: the graft affordance rides the campaign summary line (project · N issues ·
   // M waves), not a banner. A form POSTing to /graft carries the project and a quiet ids
   // input; the button is greyed/disabled at rest and only activates once ids are typed.
-  const withGraft = renderStatusPage(runningCampaign, { carve: true, graft: true });
+  const withGraft = renderStatusPage(runningCampaign, { prune: true, graft: true });
   // The input lives inside the summary line, not a standalone banner.
   assert.doesNotMatch(withGraft, /class="graft-banner"/);
   const summary = withGraft.slice(withGraft.indexOf('class="campaign-summary"'), withGraft.indexOf('class="waves-grid"'));
@@ -1478,8 +1478,8 @@ test("renderStatusPage puts a quiet graft input on the summary line, greyed at r
   // The graft button is disabled at rest — it activates client-side once ids are entered.
   assert.match(summary, /class="graft-btn"[^>]*disabled/);
 
-  // Without the graft page option, no graft control — the same gating carve rides.
-  const withoutGraft = renderStatusPage(runningCampaign, { carve: true });
+  // Without the graft page option, no graft control — the same gating prune rides.
+  const withoutGraft = renderStatusPage(runningCampaign, { prune: true });
   assert.doesNotMatch(withoutGraft, /action="\/graft"/);
   assert.doesNotMatch(withoutGraft, /class="campaign-summary"/);
 });
@@ -1497,7 +1497,7 @@ test("renderStatusPage disables the graft input with amber guidance when the cam
     ],
     parked: [],
   };
-  const html = renderStatusPage(finished, { carve: true, graft: true });
+  const html = renderStatusPage(finished, { prune: true, graft: true });
   const summary = html.slice(html.indexOf('class="campaign-summary"'), html.indexOf('class="waves-grid"'));
   // The refusal replaces the active form — no live POST target, a disabled input/button.
   assert.match(summary, /graft-refused/);
@@ -1519,7 +1519,7 @@ test("renderStatusPage marks a freshly-grafted wave with a static teal edge, not
     ],
     parked: [],
   };
-  const html = renderStatusPage(grafted, { carve: true, graft: true });
+  const html = renderStatusPage(grafted, { prune: true, graft: true });
   // A wave carrying a grafted issue is marked, and takes the teal product accent on its
   // edge so the new card reads at a glance when it arrives on the live refresh.
   assert.match(html, /class="wave unstarted has-grafted"/);
@@ -1539,7 +1539,7 @@ test("renderStatusPage ships the graft input's client wiring, re-run on live ref
     waves: [{ index: 0, status: "running" as const, issues: [{ issueNumber: "201", status: "running" as const }] }],
     parked: [],
   };
-  const html = renderStatusPage(running, { carve: true, graft: true });
+  const html = renderStatusPage(running, { prune: true, graft: true });
   // The graft input is inside #live-region (swapped on every soft-refresh), so its wiring
   // is a function re-run from wireLiveRegion, not a one-shot bind.
   assert.match(html, /function wireGraft\(\)/);
@@ -1569,7 +1569,7 @@ test("renderStatusPage shows an informational quarantine affordance with no acti
       ],
       parked: [],
     },
-    { carve: true },
+    { prune: true },
   );
   // A quarantined issue surfaces a "resolve the conflict, then resume" note...
   assert.match(quarantined, /class="quarantine-note"/);
@@ -1586,19 +1586,19 @@ test("renderStatusPage shows an informational quarantine affordance with no acti
       waves: [{ index: 0, status: "running", issues: [{ issueNumber: "611", status: "completed" }] }],
       parked: [],
     },
-    { carve: true },
+    { prune: true },
   );
   assert.doesNotMatch(clean, /class="quarantine-note"/);
 });
 
-test("failure renders in its own red on every surface, never the carve action's red (#83)", () => {
+test("failure renders in its own red on every surface, never the prune action's red (#83)", () => {
   const landing = renderLandingShell(["alpha"]);
   const campaign = renderStatusPage(
     { project: "beta", waves: [], parked: [] },
-    { carve: true },
+    { prune: true },
   );
   // The activity feed, the card highlight, and the run-state pill all read failure
-  // in --color-failure; the carve controls keep --color-red.
+  // in --color-failure; the prune controls keep --color-red.
   assert.match(
     landing,
     /\.feed-kind\.failure::before \{ background: var\(--color-failure\); \}/,
@@ -1611,14 +1611,14 @@ test("failure renders in its own red on every surface, never the carve action's 
     landing,
     /\.run-state\.failure \{ border-color: var\(--color-failure\); color: var\(--color-failure\); \}/,
   );
-  // The shared turn-log failure number reads --color-failure; carve controls stay --color-red.
+  // The shared turn-log failure number reads --color-failure; prune controls stay --color-red.
   assert.match(
     ISSUE_DETAIL_SHEET_STYLES,
     /\.turn-num\.failure \{ color: var\(--color-failure\); \}/,
   );
   assert.match(
     ISSUE_DETAIL_SHEET_STYLES,
-    /\.carve-start[^{]*\{[^}]*var\(--color-red\)/,
+    /\.prune-start[^{]*\{[^}]*var\(--color-red\)/,
   );
   assert.ok(
     campaign.includes(".turn-num.failure { color: var(--color-failure); }"),
@@ -1736,28 +1736,28 @@ test("renderLandingShell opens a parked-queue row's issue detail inline, not by 
   // The landing now hosts the issue-detail sheet (the same one the campaign page has).
   assert.match(html, /<div id="issue-detail" class="issue-detail"[^>]*hidden>/);
   assert.match(html, /id="reply-resume"/);
-  assert.match(html, /id="carve-panel"/);
+  assert.match(html, /id="prune-panel"/);
   // openIssue is defined here, and a parked row opens it in place — the click is
   // intercepted so the row never does the full navigation to the campaign page.
-  assert.match(html, /const openIssue = async \(project, issue, carvable, run\)/);
+  assert.match(html, /const openIssue = async \(project, issue, prunable, run\)/);
   assert.match(
     html,
     /row\.addEventListener\("click", \(event\) => \{ event\.preventDefault\(\); openIssue\(p\.project, p\.issueNumber, true\); \}\)/,
   );
   // The sheet's collapse rules are present so a flex display can't defeat [hidden].
   assert.match(html, /\.issue-detail\[hidden\] \{ display: none; \}/);
-  assert.match(html, /\.carve-panel\[hidden\] \{ display: none; \}/);
+  assert.match(html, /\.prune-panel\[hidden\] \{ display: none; \}/);
   // The status dot colours are scoped to .dot so they don't tint the run-state pills.
   assert.match(html, /\.dot\.parked \{ background: var\(--color-yellow\); \}/);
 });
 
 test("the issue-detail sheet markup, CSS, and script are defined once and shared by both pages (#76)", () => {
   const landing = renderLandingShell(["alpha", "beta"]);
-  // The campaign page renders the sheet with its carve panel when carve is on and
-  // without it otherwise; the landing always hosts the carve-enabled sheet.
-  const campaignCarve = renderStatusPage(
+  // The campaign page renders the sheet with its prune panel when prune is on and
+  // without it otherwise; the landing always hosts the prune-enabled sheet.
+  const campaignPrune = renderStatusPage(
     { project: "beta", waves: [], parked: [] },
-    { carve: true },
+    { prune: true },
   );
   const campaignPlain = renderStatusPage({
     project: "beta",
@@ -1766,32 +1766,32 @@ test("the issue-detail sheet markup, CSS, and script are defined once and shared
   });
 
   // Markup: one helper, rendered verbatim by both pages. The landing and the
-  // carve-enabled campaign page share the carve-panel variant; a plain campaign
-  // page shares the no-carve variant.
+  // prune-enabled campaign page share the prune-panel variant; a plain campaign
+  // page shares the no-prune variant.
   assert.ok(landing.includes(issueDetailSheetMarkup(true)));
-  assert.ok(campaignCarve.includes(issueDetailSheetMarkup(true)));
+  assert.ok(campaignPrune.includes(issueDetailSheetMarkup(true)));
   assert.ok(campaignPlain.includes(issueDetailSheetMarkup(false)));
-  // The no-carve variant has no carve panel; the carve variant does.
-  assert.ok(!issueDetailSheetMarkup(false).includes("carve-panel"));
-  assert.ok(issueDetailSheetMarkup(true).includes('id="carve-panel"'));
+  // The no-prune variant has no prune panel; the prune variant does.
+  assert.ok(!issueDetailSheetMarkup(false).includes("prune-panel"));
+  assert.ok(issueDetailSheetMarkup(true).includes('id="prune-panel"'));
 
   // CSS: one definition of the sheet styles, included by both pages verbatim.
   assert.ok(ISSUE_DETAIL_SHEET_STYLES.includes(".issue-detail-sheet {"));
   assert.ok(ISSUE_DETAIL_SHEET_STYLES.includes(".turn-log {"));
   assert.ok(ISSUE_DETAIL_SHEET_STYLES.includes(".sheet-actions {"));
   assert.ok(landing.includes(ISSUE_DETAIL_SHEET_STYLES));
-  assert.ok(campaignCarve.includes(ISSUE_DETAIL_SHEET_STYLES));
+  assert.ok(campaignPrune.includes(ISSUE_DETAIL_SHEET_STYLES));
 
   // Script: one definition of the sheet behaviour (openIssue/renderDetail/
-  // renderReply/closeSheet/carve wiring), included by both pages verbatim.
+  // renderReply/closeSheet/prune wiring), included by both pages verbatim.
   assert.ok(
     ISSUE_DETAIL_SHEET_SCRIPT.includes(
-      "const openIssue = async (project, issue, carvable, run)",
+      "const openIssue = async (project, issue, prunable, run)",
     ),
   );
   assert.ok(ISSUE_DETAIL_SHEET_SCRIPT.includes("const closeSheet = () =>"));
   assert.ok(landing.includes(ISSUE_DETAIL_SHEET_SCRIPT));
-  assert.ok(campaignCarve.includes(ISSUE_DETAIL_SHEET_SCRIPT));
+  assert.ok(campaignPrune.includes(ISSUE_DETAIL_SHEET_SCRIPT));
 
   // The hand-sync note is gone now that the sheet has a single source.
   assert.ok(!landing.includes("#76"));
@@ -1830,7 +1830,7 @@ test("renderLandingShell reads each event kind's category as a leading dot, labe
   );
   assert.match(
     html,
-    /\.feed-kind\.carved::before \{ background: var\(--color-carved\); \}/,
+    /\.feed-kind\.pruned::before \{ background: var\(--color-pruned\); \}/,
   );
 });
 
@@ -1948,16 +1948,16 @@ test("renderLandingShell's feed relabels the real event kinds as clean lowercase
 test("feedKindLabel/feedKindClass fold an orchestrator event kind to the feed's label and comms category (#196)", () => {
   // The label is the clean namespace.verb remap; an unmapped kind falls through to its raw value.
   assert.equal(feedKindLabel("green"), "issue.merged");
-  assert.equal(feedKindLabel("carve"), "issue.carved");
+  assert.equal(feedKindLabel("prune"), "issue.pruned");
   assert.equal(feedKindLabel("some-unmapped-kind"), "some-unmapped-kind");
-  // The category keys off the real kind: merges/dones green, parked amber, halt red, carve purple,
+  // The category keys off the real kind: merges/dones green, parked amber, halt red, prune purple,
   // everything else the in-flight blue.
   assert.equal(feedKindClass("green"), "success");
   assert.equal(feedKindClass("queue-done"), "success");
   assert.equal(feedKindClass("parked"), "attention");
   assert.equal(feedKindClass("quarantined"), "attention");
   assert.equal(feedKindClass("campaign-halt"), "failure");
-  assert.equal(feedKindClass("carve"), "carved");
+  assert.equal(feedKindClass("prune"), "pruned");
   assert.equal(feedKindClass("turn"), "progress");
 });
 
@@ -2029,9 +2029,9 @@ test("the card progress-bar selector is scoped so it never boxes the feed's prog
 
 test("no status/category word is ever a bare top-level CSS class, so a component base can't inherit a modifier's layout (#91)", () => {
   // The convention (docs/dashboard-color-rules.md §8): a status word (ADR 0007's
-  // running/parked/failure/completed/unstarted/carved, plus the landing's queued/idle
+  // running/parked/failure/completed/unstarted/pruned, plus the landing's queued/idle
   // aliases and a wave's closed) and a feed comms category (feedKindClass's
-  // success/attention/failure/carved/progress) only ever appear *scoped* — `.dot.running`,
+  // success/attention/failure/pruned/progress) only ever appear *scoped* — `.dot.running`,
   // `.card.parked`, `.feed-kind.progress` — never as a bare `.running {`/`.progress {`
   // rule. A bare one is a component base (the `.progress` bar, #85) that any element
   // carrying the same word as a modifier would then inherit, boxing/tinting it.
@@ -2041,7 +2041,7 @@ test("no status/category word is ever a bare top-level CSS class, so a component
     "failure",
     "completed",
     "unstarted",
-    "carved",
+    "pruned",
     "queued",
     "idle",
     "closed",
@@ -2058,12 +2058,12 @@ test("no status/category word is ever a bare top-level CSS class, so a component
           {
             index: 0,
             status: "running",
-            issues: [{ issueNumber: "1", status: "carved" }],
+            issues: [{ issueNumber: "1", status: "pruned" }],
           },
         ],
         parked: [],
       },
-      { carve: true },
+      { prune: true },
     ),
   };
   for (const [name, html] of Object.entries(pages)) {
@@ -2812,8 +2812,8 @@ test("serveAllStatus renders a single registered project as a one-entry dropdown
   }
 });
 
-test("serveAllStatus POST /carve on confirm shells carve in the selected project's root", async () => {
-  const configDir = join(tmpdir(), `vetinari-agg-carve-confirm-${Date.now()}`);
+test("serveAllStatus POST /prune on confirm shells prune in the selected project's root", async () => {
+  const configDir = join(tmpdir(), `vetinari-agg-prune-confirm-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
   seedState(alphaDir, [
@@ -2849,7 +2849,7 @@ test("serveAllStatus POST /carve on confirm shells carve in the selected project
   });
   const { port } = server.address() as AddressInfo;
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/carve`, {
+    const res = await fetch(`http://127.0.0.1:${port}/prune`, {
       method: "POST",
       redirect: "manual",
       headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -2862,10 +2862,10 @@ test("serveAllStatus POST /carve on confirm shells carve in the selected project
     // Redirects back to the selected project's dashboard, like the answer control.
     assert.equal(res.status, 303);
     assert.equal(res.headers.get("location"), "/?project=beta");
-    // Executes the no-plan carve (ticket B) against the SELECTED project's own root
+    // Executes the no-plan prune (ticket B) against the SELECTED project's own root
     // — so the shared install loads beta's config and gates, not alpha's.
     assert.equal(spawned.length, 1);
-    assert.deepEqual(spawned[0].args.slice(-2), ["carve", "401"]);
+    assert.deepEqual(spawned[0].args.slice(-2), ["prune", "401"]);
     assert.equal(spawned[0].cwd, join(configDir, "beta-root"));
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -2913,7 +2913,7 @@ test("serveAllStatus POST /resume shells campaign --resume in the selected proje
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ project: "beta" }).toString(),
     });
-    // Redirects back to the selected project's board, like carve/answer.
+    // Redirects back to the selected project's board, like prune/answer.
     assert.equal(res.status, 303);
     assert.equal(res.headers.get("location"), "/?project=beta");
     // Shells `campaign --resume` against the SELECTED project's own root (dumb router,
@@ -2946,7 +2946,7 @@ test("serveAllStatus POST /resume validates the project (400 missing, 404 unknow
   });
   const { port } = server.address() as AddressInfo;
   try {
-    // Missing project → 400, matching the carve route's error contract.
+    // Missing project → 400, matching the prune route's error contract.
     const missing = await fetch(`http://127.0.0.1:${port}/resume`, {
       method: "POST",
       redirect: "manual",
@@ -2969,8 +2969,8 @@ test("serveAllStatus POST /resume validates the project (400 missing, 404 unknow
   }
 });
 
-test("serveAllStatus GET /carve?preview returns the selected project's structured closure as JSON", async () => {
-  const configDir = join(tmpdir(), `vetinari-agg-carve-json-${Date.now()}`);
+test("serveAllStatus GET /prune?preview returns the selected project's structured closure as JSON", async () => {
+  const configDir = join(tmpdir(), `vetinari-agg-prune-json-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
   seedState(alphaDir, [
@@ -3014,7 +3014,7 @@ test("serveAllStatus GET /carve?preview returns the selected project's structure
     spawn: (...a) => spawned.push(a),
     // The dumb router routes the closure to the selected project's own install,
     // which computes it against that project's real blockedBy graph.
-    carveClosure: (projectRoot, taskId) => {
+    pruneClosure: (projectRoot, taskId) => {
       closures.push({ projectRoot, taskId });
       return Promise.resolve(structured);
     },
@@ -3022,7 +3022,7 @@ test("serveAllStatus GET /carve?preview returns the selected project's structure
   const { port } = server.address() as AddressInfo;
   try {
     const res = await fetch(
-      `http://127.0.0.1:${port}/carve?preview&taskId=201&project=beta`,
+      `http://127.0.0.1:${port}/prune?preview&taskId=201&project=beta`,
     );
     assert.equal(res.status, 200);
     assert.match(res.headers.get("content-type") ?? "", /application\/json/);
@@ -3033,15 +3033,15 @@ test("serveAllStatus GET /carve?preview returns the selected project's structure
     assert.deepEqual(closures, [
       { projectRoot: join(configDir, "beta-root"), taskId: "201" },
     ]);
-    // A preview computes nothing destructive — no carve is spawned.
+    // A preview computes nothing destructive — no prune is spawned.
     assert.equal(spawned.length, 0);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
 
-test("serveAllStatus GET /carve?preview validates params and the project", async () => {
-  const configDir = join(tmpdir(), `vetinari-agg-carve-json-guard-${Date.now()}`);
+test("serveAllStatus GET /prune?preview validates params and the project", async () => {
+  const configDir = join(tmpdir(), `vetinari-agg-prune-json-guard-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
   seedState(betaDir, [
     event("campaign-start", {
@@ -3059,7 +3059,7 @@ test("serveAllStatus GET /carve?preview validates params and the project", async
   const server = await serveAllStatus(configDir, {
     port: 0,
     host: "127.0.0.1",
-    carveClosure: () =>
+    pruneClosure: () =>
       Promise.resolve({
         target: "201",
         dropped: ["201"],
@@ -3071,7 +3071,7 @@ test("serveAllStatus GET /carve?preview validates params and the project", async
   try {
     // Missing taskId/project → 400.
     assert.equal(
-      (await fetch(`http://127.0.0.1:${port}/carve?preview&project=beta`))
+      (await fetch(`http://127.0.0.1:${port}/prune?preview&project=beta`))
         .status,
       400,
     );
@@ -3079,7 +3079,7 @@ test("serveAllStatus GET /carve?preview validates params and the project", async
     assert.equal(
       (
         await fetch(
-          `http://127.0.0.1:${port}/carve?preview&taskId=201&project=ghost`,
+          `http://127.0.0.1:${port}/prune?preview&taskId=201&project=ghost`,
         )
       ).status,
       404,
@@ -3089,8 +3089,8 @@ test("serveAllStatus GET /carve?preview validates params and the project", async
   }
 });
 
-test("serveAllStatus POST /carve previews the selected project's closure without executing", async () => {
-  const configDir = join(tmpdir(), `vetinari-agg-carve-preview-${Date.now()}`);
+test("serveAllStatus POST /prune previews the selected project's closure without executing", async () => {
+  const configDir = join(tmpdir(), `vetinari-agg-prune-preview-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
   seedState(alphaDir, [
@@ -3126,16 +3126,16 @@ test("serveAllStatus POST /carve previews the selected project's closure without
     spawn: (...a) => spawned.push(a),
     // The dumb router routes the preview to the selected project's own install,
     // which computes the closure against that project's real blockedBy graph.
-    carvePreview: (projectRoot, taskId) => {
+    prunePreview: (projectRoot, taskId) => {
       previews.push({ projectRoot, taskId });
       return Promise.resolve(
-        `carve #201 → dropping #201, #401\nremaining campaign: (nothing left to run)`,
+        `prune #201 → dropping #201, #401\nremaining campaign: (nothing left to run)`,
       );
     },
   });
   const { port } = server.address() as AddressInfo;
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/carve`, {
+    const res = await fetch(`http://127.0.0.1:${port}/prune`, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ taskId: "201", project: "beta" }).toString(),
@@ -3150,11 +3150,11 @@ test("serveAllStatus POST /carve previews the selected project's closure without
     assert.match(html, /#401/);
     assert.match(
       html,
-      /<form method="post" action="\/carve"[\s\S]*?name="confirm"/,
+      /<form method="post" action="\/prune"[\s\S]*?name="confirm"/,
     );
     assert.match(html, /name="project" value="beta"/);
     assert.match(html, /name="taskId" value="201"/);
-    // Nothing has been carved yet — preview executes nothing.
+    // Nothing has been pruned yet — preview executes nothing.
     assert.equal(spawned.length, 0);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -3202,7 +3202,7 @@ test("serveAllStatus POST /graft shells graft directly for a clean batch — no 
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ ids: "640 655", project: "beta" }).toString(),
     });
-    // Redirects back to the selected project's board, like carve/resume/answer.
+    // Redirects back to the selected project's board, like prune/resume/answer.
     assert.equal(res.status, 303);
     assert.equal(res.headers.get("location"), "/?project=beta");
     // Shells the variadic `graft <ids…>` against the SELECTED project's own root — so
@@ -3370,10 +3370,10 @@ test("serveAllStatus POST /graft rejects a whole batch with per-id verdicts and 
   }
 });
 
-test("serveAllStatus flags the selected project's carvable chips with its project", async () => {
-  const configDir = join(tmpdir(), `vetinari-agg-carve-control-${Date.now()}`);
+test("serveAllStatus flags the selected project's prunable chips with its project", async () => {
+  const configDir = join(tmpdir(), `vetinari-agg-prune-control-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
-  // A running campaign whose future wave (401) is still carvable.
+  // A running campaign whose future wave (401) is still prunable.
   seedState(betaDir, [
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
@@ -3401,13 +3401,13 @@ test("serveAllStatus flags the selected project's carvable chips with its projec
     const html = await (
       await fetch(`http://127.0.0.1:${port}/?project=beta`)
     ).text();
-    // The unstarted future-wave row is flagged carvable and carries beta, so the
-    // panel's Carve routes preview and confirm to beta's own install.
+    // The unstarted future-wave row is flagged prunable and carries beta, so the
+    // panel's Prune routes preview and confirm to beta's own install.
     assert.match(
       html,
-      /class="wave-member [a-z]+"[^>]*data-issue="401"[^>]*data-project="beta"[^>]*data-carvable="1"/,
+      /class="wave-member [a-z]+"[^>]*data-issue="401"[^>]*data-project="beta"[^>]*data-prunable="1"/,
     );
-    // No inline carve control on the row itself.
+    // No inline prune control on the row itself.
     assert.doesNotMatch(html, /✂️/);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -3497,9 +3497,9 @@ test("serveAllStatus lists a project's archived runs and renders one read-only w
       /<li class="archive-row open" data-run="2026-01-01T00-00-00-000Z">/,
     );
     assert.match(withRun, /#101 <small>/); // the archived run's own issues, in its pane
-    // Read-only: the archived run's chips are never carvable (a finished run has
-    // nothing to carve).
-    assert.doesNotMatch(withRun, /data-issue="101"[^>]*data-carvable/);
+    // Read-only: the archived run's chips are never prunable (a finished run has
+    // nothing to prune).
+    assert.doesNotMatch(withRun, /data-issue="101"[^>]*data-prunable/);
 
     // A run not present in the archive listing is rejected — no row opens.
     const bogus = await fetch(
@@ -3512,10 +3512,10 @@ test("serveAllStatus lists a project's archived runs and renders one read-only w
   }
 });
 
-test("serveAllStatus reconstructs a carved issue in a selected archived run, read-only", async () => {
-  const configDir = join(tmpdir(), `vetinari-agg-archive-carved-${Date.now()}`);
+test("serveAllStatus reconstructs a pruned issue in a selected archived run, read-only", async () => {
+  const configDir = join(tmpdir(), `vetinari-agg-archive-pruned-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
-  // A live run over an unrelated issue, so the only carved chip on the page is the
+  // A live run over an unrelated issue, so the only pruned chip on the page is the
   // archived run's.
   seedState(betaDir, [
     event("campaign-start", {
@@ -3524,8 +3524,8 @@ test("serveAllStatus reconstructs a carved issue in a selected archived run, rea
       slots: 1,
     }),
   ]);
-  // An archived run that carved an unstarted dependent (201) out of its plan: 101
-  // banked, 201 dropped by the carve, then the campaign finished.
+  // An archived run that pruned an unstarted dependent (201) out of its plan: 101
+  // banked, 201 dropped by the prune, then the campaign finished.
   const archiveDir = join(betaDir, "logs", "archive");
   mkdirSync(archiveDir, { recursive: true });
   writeJsonl(join(archiveDir, "orchestrator-2026-04-01T00-00-00-000Z.jsonl"), [
@@ -3541,7 +3541,7 @@ test("serveAllStatus reconstructs a carved issue in a selected archived run, rea
       branch: "agent/101",
       commits: [],
     }),
-    event("carve", {
+    event("prune", {
       ts: "2026-04-01T00:02:00.000Z",
       target: "201",
       removed: ["201"],
@@ -3568,14 +3568,14 @@ test("serveAllStatus reconstructs a carved issue in a selected archived run, rea
     ).text();
     // The archived run renders under its --name in the collapsible list…
     assert.match(html, /<span class="archive-name">spring cleanup<\/span>/);
-    // …and its campaign pane reconstructs the carved-out 201 as a carved chip in the
-    // wave it left, so an operator can see what the run was carved down to (ADR 0007).
+    // …and its campaign pane reconstructs the pruned-out 201 as a pruned chip in the
+    // wave it left, so an operator can see what the run was pruned down to (ADR 0007).
     assert.match(
       html,
-      /<span class="dot carved"><\/span>#201 <small>carved<\/small>/,
+      /<span class="dot pruned"><\/span>#201 <small>pruned<\/small>/,
     );
-    // Read-only: the archived carved chip is never carvable.
-    assert.doesNotMatch(html, /data-carvable="1"[^>]*<span class="dot carved">/);
+    // Read-only: the archived pruned chip is never prunable.
+    assert.doesNotMatch(html, /data-prunable="1"[^>]*<span class="dot pruned">/);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -3886,8 +3886,8 @@ test("describeEvent narrates the operator-facing events in plain words", () => {
     "#202 parked: needs a choice",
   );
   assert.equal(
-    describeEvent(event("carve", { target: "303", removed: ["303", "304"], dropped: ["303", "304"] })),
-    "Carved #303, #304",
+    describeEvent(event("prune", { target: "303", removed: ["303", "304"], dropped: ["303", "304"] })),
+    "Pruned #303, #304",
   );
   assert.equal(
     describeEvent(event("graft", { ids: ["305", "306"], blockedBy: {}, basenames: {} })),
@@ -4176,7 +4176,7 @@ test("campaignRunning tracks the latest campaign only", () => {
   );
 });
 
-test("reduceCampaign folds a carve event, pruning unfinished issues from future waves", () => {
+test("reduceCampaign folds a prune event, pruning unfinished issues from future waves", () => {
   const reduced = reduceCampaign([
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
@@ -4205,8 +4205,8 @@ test("reduceCampaign folds a carve event, pruning unfinished issues from future 
       taskIds: ["201", "202"],
       slots: 3,
     }),
-    // 202 carved mid-wave: it is running, so it stays; its unstarted dependent 301 goes.
-    event("carve", {
+    // 202 pruned mid-wave: it is running, so it stays; its unstarted dependent 301 goes.
+    event("prune", {
       ts: "2025-01-01T00:04:00.000Z",
       target: "202",
       removed: ["202", "301"],
@@ -4221,7 +4221,7 @@ test("reduceCampaign folds a carve event, pruning unfinished issues from future 
   assert.equal(reduced.currentWave, 1);
 });
 
-test("reduceCampaign's carve fold clears an emptied future wave and reindexes", () => {
+test("reduceCampaign's prune fold clears an emptied future wave and reindexes", () => {
   const reduced = reduceCampaign([
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
@@ -4240,8 +4240,8 @@ test("reduceCampaign's carve fold clears an emptied future wave and reindexes", 
       held: [],
       clearedParked: [],
     }),
-    // Between waves: 201 not yet started, so carving it empties and drops its wave.
-    event("carve", {
+    // Between waves: 201 not yet started, so pruning it empties and drops its wave.
+    event("prune", {
       ts: "2025-01-01T00:03:00.000Z",
       target: "201",
       removed: ["201"],
@@ -4511,8 +4511,8 @@ test("buildStatus marks completed waves as closed", () => {
   );
 });
 
-test("buildStatus renders a carved issue as a carved chip in the wave it left", () => {
-  const dir = join(tmpdir(), `vetinari-status-carved-${Date.now()}`);
+test("buildStatus renders a pruned issue as a pruned chip in the wave it left", () => {
+  const dir = join(tmpdir(), `vetinari-status-pruned-${Date.now()}`);
   seedState(dir, [
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
@@ -4532,8 +4532,8 @@ test("buildStatus renders a carved issue as a carved chip in the wave it left", 
       held: [],
       clearedParked: [],
     }),
-    // 201 is a future, unstarted wave: carving it drops it from the running plan…
-    event("carve", {
+    // 201 is a future, unstarted wave: pruning it drops it from the running plan…
+    event("prune", {
       ts: "2025-01-01T00:03:00.000Z",
       target: "201",
       removed: ["201"],
@@ -4543,14 +4543,14 @@ test("buildStatus renders a carved issue as a carved chip in the wave it left", 
 
   const status = buildStatus(cfgFor(dir));
 
-  // …but it still renders as a carved chip in the wave it left (ADR 0007), so a
-  // browsing operator sees what was carved out — it is not silently gone.
+  // …but it still renders as a pruned chip in the wave it left (ADR 0007), so a
+  // browsing operator sees what was pruned out — it is not silently gone.
   assert.equal(status.waves.length, 2);
   assert.deepEqual(
     status.waves.map((w) => w.issues.map((i) => [i.issueNumber, i.status])),
-    [[["101", "completed"]], [["201", "carved"]]],
+    [[["101", "completed"]], [["201", "pruned"]]],
   );
-  // The carved issue keeps its title on the chip.
+  // The pruned issue keeps its title on the chip.
   assert.equal(status.waves[1].issues[0].name, "add the report");
 });
 
@@ -5022,7 +5022,7 @@ test("renderStatusPage shows a merged/total tally on an open wave card", () => {
   );
 });
 
-test("renderStatusPage renders one stable wave-head row: label · merged/total · state · carved, with the pill outside the label", () => {
+test("renderStatusPage renders one stable wave-head row: label · merged/total · state · pruned, with the pill outside the label", () => {
   const html = renderStatusPage({
     project: "beta",
     waves: [
@@ -5036,7 +5036,7 @@ test("renderStatusPage renders one stable wave-head row: label · merged/total �
             name: "Guest checkout entry point",
           },
           { issueNumber: "202", status: "running" },
-          { issueNumber: "203", status: "carved" },
+          { issueNumber: "203", status: "pruned" },
         ],
       },
     ],
@@ -5045,11 +5045,11 @@ test("renderStatusPage renders one stable wave-head row: label · merged/total �
 
   // The head is one row: the label in its own element (so a long label can't shove the
   // state pill onto its own line, the Wave 2 vs Wave 3 misalignment), then a meta group
-  // ordering merged/total · state pill · carved tally — the carved count folded into the
+  // ordering merged/total · state pill · pruned tally — the pruned count folded into the
   // row, not floating in the corner.
   assert.match(
     html,
-    /<div class="wave-head"><h2 class="wave-label">Wave 2 — Guest checkout entry point \+2<\/h2><div class="wave-meta"><span class="wave-tally">1\/3<\/span><span class="wave-status running">running<\/span><span class="wave-carved">1 carved<\/span><\/div><\/div>/,
+    /<div class="wave-head"><h2 class="wave-label">Wave 2 — Guest checkout entry point \+2<\/h2><div class="wave-meta"><span class="wave-tally">1\/3<\/span><span class="wave-status running">running<\/span><span class="wave-pruned">1 pruned<\/span><\/div><\/div>/,
   );
   // The state pill is no longer nested inside the <h2> label.
   assert.doesNotMatch(
@@ -5078,7 +5078,7 @@ test("renderStatusPage renders one interactive member row per issue, merging the
       ],
       parked: [],
     },
-    { carve: true },
+    { prune: true },
   );
 
   // One member list, one interactive row per issue: status dot + #NNN + resolved
@@ -5093,10 +5093,10 @@ test("renderStatusPage renders one interactive member row per issue, merging the
     /<li><button type="button" class="wave-member unstarted"[^>]*><span class="dot unstarted"><\/span>#202 <small>unstarted<\/small><\/button><\/li>/,
   );
   // The row carries its issue+project so a tap opens the detail sheet, and is flagged
-  // carvable when carvable (202 is an unstarted future-wave remainder).
+  // prunable when prunable (202 is an unstarted future-wave remainder).
   assert.match(
     html,
-    /class="wave-member unstarted" title="[^"]*" data-issue="202" data-project="beta" data-carvable="1"/,
+    /class="wave-member unstarted" title="[^"]*" data-issue="202" data-project="beta" data-prunable="1"/,
   );
   // The old dual blocks are retired — no chip row (`.chips`/`.chip`) and no title list.
   assert.doesNotMatch(html, /class="chips"/);
@@ -5104,7 +5104,7 @@ test("renderStatusPage renders one interactive member row per issue, merging the
   assert.doesNotMatch(html, /class="chip /);
 });
 
-test("renderStatusPage colours a carved chip and pulses a running one", () => {
+test("renderStatusPage colours a pruned chip and pulses a running one", () => {
   const html = renderStatusPage({
     project: "beta",
     waves: [
@@ -5113,37 +5113,37 @@ test("renderStatusPage colours a carved chip and pulses a running one", () => {
         status: "running",
         issues: [
           { issueNumber: "201", status: "running", name: "live one" },
-          { issueNumber: "202", status: "carved", name: "carved one" },
+          { issueNumber: "202", status: "pruned", name: "pruned one" },
         ],
       },
     ],
     parked: [],
   });
 
-  // A carved member row carries the carved status dot + title + status word, and its
-  // `.wave-member.carved` class reads struck-through…
+  // A pruned member row carries the pruned status dot + title + status word, and its
+  // `.wave-member.pruned` class reads struck-through…
   assert.match(
     html,
-    /<button type="button" class="wave-member carved"[^>]*><span class="dot carved"><\/span>#202 <span class="wave-member-title">carved one<\/span><small>carved<\/small><\/button>/,
+    /<button type="button" class="wave-member pruned"[^>]*><span class="dot pruned"><\/span>#202 <span class="wave-member-title">pruned one<\/span><small>pruned<\/small><\/button>/,
   );
   assert.match(
     html,
-    /\.wave-member\.carved \{ color: var\(--color-text-light-2\); text-decoration: line-through; \}/,
+    /\.wave-member\.pruned \{ color: var\(--color-text-light-2\); text-decoration: line-through; \}/,
   );
-  // …and the wave it left gains a carved tally in its header, so the carve reads
-  // at a glance without counting struck-through chips (one of two issues carved).
-  assert.match(html, /<span class="wave-carved">1 carved<\/span>/);
-  // …in a distinct carved colour defined in the stylesheet (ADR 0007's sixth state),
+  // …and the wave it left gains a pruned tally in its header, so the prune reads
+  // at a glance without counting struck-through chips (one of two issues pruned).
+  assert.match(html, /<span class="wave-pruned">1 pruned<\/span>/);
+  // …in a distinct pruned colour defined in the stylesheet (ADR 0007's sixth state),
   // scoped to .dot so it tints only the dot, never the whole struck-through chip (#81).
-  assert.match(html, /--color-carved:/);
-  assert.match(html, /\.dot\.carved \{ background: var\(--color-carved\); \}/);
+  assert.match(html, /--color-pruned:/);
+  assert.match(html, /\.dot\.pruned \{ background: var\(--color-pruned\); \}/);
   // A running chip pulses — a keyframed animation on its dot, reduced-motion aware.
   assert.match(html, /@keyframes chip-pulse/);
   assert.match(html, /\.dot\.running \{ animation: chip-pulse/);
   assert.match(html, /prefers-reduced-motion/);
 });
 
-test("renderStatusPage's carve panel discloses kept-banked work and carries a standalone explainer", () => {
+test("renderStatusPage's prune panel discloses kept-banked work and carries a standalone explainer", () => {
   const html = renderStatusPage(
     {
       project: "beta",
@@ -5156,16 +5156,16 @@ test("renderStatusPage's carve panel discloses kept-banked work and carries a st
       ],
       parked: [],
     },
-    { carve: true },
+    { prune: true },
   );
   // The confirmation is built from the structured closure the endpoint returns:
   // it names the dropped dependents and, separately, states the banked (merged or
   // mergeable) work that is kept — so a confirm never implies banked work leaves.
   assert.match(html, /also drops/);
   assert.match(html, /Keeps banked \(merged or mergeable\)/);
-  // A standalone Carve (no Resume beside it) carries a plain-words explainer of
-  // what a carve does, keyed to show only when the issue is carvable and unparked.
-  assert.match(html, /id="carve-explainer"/);
+  // A standalone Prune (no Resume beside it) carries a plain-words explainer of
+  // what a prune does, keyed to show only when the issue is prunable and unparked.
+  assert.match(html, /id="prune-explainer"/);
   assert.match(html, /everything blocked by it/);
 });
 
@@ -5217,7 +5217,7 @@ test("renderStatusPage renders the repo dropdown (with a no-JS select fallback) 
     html,
     /<section class="wave running"><div class="wave-head"><h2 class="wave-label">Wave 1<\/h2><div class="wave-meta"><span class="wave-tally">0\/1<\/span><span class="wave-status running">running<\/span>/,
   );
-  // The parked card carries the project so the sheet routes its reply/carve to it.
+  // The parked card carries the project so the sheet routes its reply/prune to it.
   assert.match(html, /<a class="parked-card"[^>]*data-project="beta"/);
 });
 
@@ -6048,8 +6048,8 @@ test("renderStatusPage makes archived campaign chips open the issue sheet agains
     html,
     /data-issue="101" data-project="beta" data-run="2026-02-01T00-00-00-000Z"/,
   );
-  // Read-only: an archived chip is never carvable (a finished run has nothing to carve).
-  assert.doesNotMatch(html, /data-issue="101"[^>]*data-carvable/);
+  // Read-only: an archived chip is never prunable (a finished run has nothing to prune).
+  assert.doesNotMatch(html, /data-issue="101"[^>]*data-prunable/);
   // The shared sheet forwards a run token to /api/issue so it can read the archive.
   assert.match(
     ISSUE_DETAIL_SHEET_SCRIPT,
@@ -6252,7 +6252,7 @@ test("renderStatusPage makes the issue-detail sheet a full-width bottom sheet on
   assert.match(html, /\.issue-detail-sheet/);
 });
 
-test("renderStatusPage hosts the carve affordance and inline confirm in the tap-detail panel", () => {
+test("renderStatusPage hosts the prune affordance and inline confirm in the tap-detail panel", () => {
   const html = renderStatusPage(
     {
       project: "demo",
@@ -6265,39 +6265,39 @@ test("renderStatusPage hosts the carve affordance and inline confirm in the tap-
       ],
       parked: [],
     },
-    { carve: true },
+    { prune: true },
   );
 
-  // The panel — not the chip — carries a Carve button and a hidden inline confirm.
+  // The panel — not the chip — carries a Prune button and a hidden inline confirm.
   assert.match(
     html,
-    /<button type="button" id="carve-start" class="carve-start">Carve<\/button>/,
+    /<button type="button" id="prune-start" class="prune-start">Prune<\/button>/,
   );
   assert.match(
     html,
-    /<form method="post" action="\/carve" id="carve-confirm"[^>]*hidden>/,
+    /<form method="post" action="\/prune" id="prune-confirm"[^>]*hidden>/,
   );
-  assert.match(html, /<span class="carve-confirm-text"><\/span>/);
-  // The confirm POSTs the existing /carve with confirm=1, carrying taskId+project.
+  assert.match(html, /<span class="prune-confirm-text"><\/span>/);
+  // The confirm POSTs the existing /prune with confirm=1, carrying taskId+project.
   assert.match(
     html,
-    /id="carve-confirm"[\s\S]*?name="taskId"[\s\S]*?name="project"[\s\S]*?name="confirm" value="1"/,
-  );
-  assert.match(
-    html,
-    /<button type="submit" class="carve-confirm-btn">Confirm<\/button>/,
+    /id="prune-confirm"[\s\S]*?name="taskId"[\s\S]*?name="project"[\s\S]*?name="confirm" value="1"/,
   );
   assert.match(
     html,
-    /<button type="button" id="carve-cancel" class="carve-cancel">Cancel<\/button>/,
+    /<button type="submit" class="prune-confirm-btn">Confirm<\/button>/,
   );
-  // The script keys off the carve data: it fetches the JSON preview, discloses the
-  // removed list, POSTs the confirm, then shows a transient "carving…".
-  assert.match(html, /\/carve\?preview/);
-  assert.match(html, /carve-confirm-text/);
-  assert.match(html, /data-carvable/);
+  assert.match(
+    html,
+    /<button type="button" id="prune-cancel" class="prune-cancel">Cancel<\/button>/,
+  );
+  // The script keys off the prune data: it fetches the JSON preview, discloses the
+  // removed list, POSTs the confirm, then shows a transient "pruning…".
+  assert.match(html, /\/prune\?preview/);
+  assert.match(html, /prune-confirm-text/);
+  assert.match(html, /data-prunable/);
   assert.match(html, /method: "POST"/);
-  assert.match(html, /carving/);
+  assert.match(html, /pruning/);
 });
 
 test("renderStatusPage hosts a parked reply block with a Resume button in the tap-detail sheet", () => {
@@ -6316,7 +6316,7 @@ test("renderStatusPage hosts a parked reply block with a Resume button in the ta
     html,
     /id="reply-form"[\s\S]*?name="taskId"[\s\S]*?name="project"[\s\S]*?<textarea name="text"/,
   );
-  // Resume submits that form; it is associated by `form=` so it can sit outside the form, beside Carve.
+  // Resume submits that form; it is associated by `form=` so it can sit outside the form, beside Prune.
   assert.match(
     html,
     /<button type="submit" form="reply-form" id="reply-resume" class="reply-resume" hidden>Resume<\/button>/,
@@ -6331,30 +6331,30 @@ test("renderStatusPage caps the reply textarea so it stays within the sheet/card
   assert.match(html, /\btextarea \{[^}]*max-width: 100%/);
 });
 
-test("renderStatusPage places Resume beside Carve in one sheet-actions row, sized for touch", () => {
+test("renderStatusPage places Resume beside Prune in one sheet-actions row, sized for touch", () => {
   const html = renderStatusPage(
     { project: "demo", waves: [], parked: [] },
-    { carve: true },
+    { prune: true },
   );
 
   // Both controls live in the same actions row so they are reachable one-handed together.
   assert.match(
     html,
-    /<div class="sheet-actions"><button type="submit" form="reply-form" id="reply-resume"[^>]*>Resume<\/button><div id="carve-panel"/,
+    /<div class="sheet-actions"><button type="submit" form="reply-form" id="reply-resume"[^>]*>Resume<\/button><div id="prune-panel"/,
   );
   // A 44px tap target for the primary Resume action on a phone.
   assert.match(html, /\.reply-resume \{[^}]*min-height: 44px;/);
   // The actions row is a flex box, so it needs [hidden] restored explicitly or an
-  // empty foot (no reply, no carve) would always show its border and padding.
+  // empty foot (no reply, no prune) would always show its border and padding.
   assert.match(html, /\.sheet-actions\[hidden\][^{]*\{ display: none; \}/);
-  // The carve panel is likewise a flex box whose display would defeat the UA
-  // [hidden] rule; restore its collapse rule so a non-carvable issue can hide it (#72).
-  assert.match(html, /\.carve-panel\[hidden\][^{]*\{ display: none;? \}/);
+  // The prune panel is likewise a flex box whose display would defeat the UA
+  // [hidden] rule; restore its collapse rule so a non-prunable issue can hide it (#72).
+  assert.match(html, /\.prune-panel\[hidden\][^{]*\{ display: none;? \}/);
   // …and the confirm form inside it: its own `display: flex` would defeat the UA
-  // [hidden] rule too, so Confirm/Cancel showed by default beside Resume+Carve —
-  // four buttons at once. Restore the collapse so they reveal only in the carve
-  // step and the default action row is Resume + Carve alone (#90).
-  assert.match(html, /\.carve-confirm\[hidden\][^{]*\{ display: none;? \}/);
+  // [hidden] rule too, so Confirm/Cancel showed by default beside Resume+Prune —
+  // four buttons at once. Restore the collapse so they reveal only in the prune
+  // step and the default action row is Resume + Prune alone (#90).
+  assert.match(html, /\.prune-confirm\[hidden\][^{]*\{ display: none;? \}/);
 });
 
 test("renderStatusPage wires the parked reply block: shown when parked, options fill the field", () => {
@@ -6412,7 +6412,7 @@ test("renderStatusPage renders reply options as full-width lettered rows (#92)",
   assert.match(html, /replyText\.value = option/);
 });
 
-test("renderStatusPage falls back to a no-JS carve form per carvable issue", () => {
+test("renderStatusPage falls back to a no-JS prune form per prunable issue", () => {
   const html = renderStatusPage(
     {
       project: "demo",
@@ -6433,14 +6433,14 @@ test("renderStatusPage falls back to a no-JS carve form per carvable issue", () 
       ],
       parked: [],
     },
-    { carve: true },
+    { prune: true },
   );
 
-  // Progressive enhancement: a plain server-side form per carvable issue, inside
-  // <noscript>, still reaches POST /carve → the preview page → confirm with no JS.
+  // Progressive enhancement: a plain server-side form per prunable issue, inside
+  // <noscript>, still reaches POST /prune → the preview page → confirm with no JS.
   assert.match(
     html,
-    /<noscript>[\s\S]*<form method="post" action="\/carve"[\s\S]*?name="taskId" value="301"[\s\S]*?name="project" value="demo"[\s\S]*<\/noscript>/,
+    /<noscript>[\s\S]*<form method="post" action="\/prune"[\s\S]*?name="taskId" value="301"[\s\S]*?name="project" value="demo"[\s\S]*<\/noscript>/,
   );
   assert.match(
     html,
@@ -6450,7 +6450,7 @@ test("renderStatusPage falls back to a no-JS carve form per carvable issue", () 
   assert.doesNotMatch(html, /name="taskId" value="201"/);
 });
 
-test("renderStatusPage omits the carve panel and no-JS fallback unless carve is opted in", () => {
+test("renderStatusPage omits the prune panel and no-JS fallback unless prune is opted in", () => {
   const html = renderStatusPage({
     project: "demo",
     waves: [
@@ -6463,7 +6463,7 @@ test("renderStatusPage omits the carve panel and no-JS fallback unless carve is 
     parked: [],
   });
 
-  assert.doesNotMatch(html, /id="carve-start"/);
+  assert.doesNotMatch(html, /id="prune-start"/);
   assert.doesNotMatch(html, /<noscript>/);
 });
 
@@ -6875,7 +6875,7 @@ test("formatStatusText summarizes waves, issue chips (with names), and the parke
         index: 1,
         status: "running",
         issues: [
-          { issueNumber: "640", status: "running", name: "Add carve-out" },
+          { issueNumber: "640", status: "running", name: "Add prune-out" },
           { issueNumber: "655", status: "parked" },
         ],
       },
@@ -6896,7 +6896,7 @@ test("formatStatusText summarizes waves, issue chips (with names), and the parke
   assert.match(text, /Wave 1\/2 ✅ closed/);
   assert.match(text, /✅ #436 Fix login redirect/);
   assert.match(text, /Wave 2\/2 ▶️ running/);
-  assert.match(text, /🔄 #640 Add carve-out/);
+  assert.match(text, /🔄 #640 Add prune-out/);
   // No name available → chip is just the status + number.
   assert.match(text, /⏸ #655$/m);
   assert.match(text, /1 awaiting your reply/);
@@ -6912,7 +6912,7 @@ test("formatStatusText labels a wave-parked wave and a quarantined issue (ADR 00
         status: "wave-parked",
         issues: [
           { issueNumber: "611", status: "completed", name: "Fix parser" },
-          { issueNumber: "640", status: "quarantined", name: "Add carve-out" },
+          { issueNumber: "640", status: "quarantined", name: "Add prune-out" },
         ],
       },
     ],
@@ -6922,7 +6922,7 @@ test("formatStatusText labels a wave-parked wave and a quarantined issue (ADR 00
   // The held wave reads its own label, distinct from an issue parked.
   assert.match(text, /Wave 1\/1 ⏸ wave-parked/);
   // The quarantined issue carries its own emoji + status word.
-  assert.match(text, /🚧 #640 Add carve-out/);
+  assert.match(text, /🚧 #640 Add prune-out/);
 });
 
 test("formatStatusText reports when nothing is running", () => {
@@ -7069,7 +7069,7 @@ test("renderStatusPage updates live off /api/events, soft-refreshing on a ping u
   );
 });
 
-test("renderStatusPage marks carvable chips with carve data and never puts a carve control on a chip", () => {
+test("renderStatusPage marks prunable chips with prune data and never puts a prune control on a chip", () => {
   const html = renderStatusPage(
     {
       project: "demo",
@@ -7095,32 +7095,32 @@ test("renderStatusPage marks carvable chips with carve data and never puts a car
       ],
       parked: [],
     },
-    { carve: true },
+    { prune: true },
   );
 
-  // Each member row carries its issue and project; only a still-carvable one is flagged
-  // carvable, so the tap-detail panel knows whether to offer a Carve button.
+  // Each member row carries its issue and project; only a still-prunable one is flagged
+  // prunable, so the tap-detail panel knows whether to offer a Prune button.
   assert.match(
     html,
-    /class="wave-member [a-z]+"[^>]*data-issue="301"[^>]*data-project="demo"[^>]*data-carvable="1"/,
+    /class="wave-member [a-z]+"[^>]*data-issue="301"[^>]*data-project="demo"[^>]*data-prunable="1"/,
   );
   assert.match(
     html,
-    /class="wave-member [a-z]+"[^>]*data-issue="302"[^>]*data-project="demo"[^>]*data-carvable="1"/,
+    /class="wave-member [a-z]+"[^>]*data-issue="302"[^>]*data-project="demo"[^>]*data-prunable="1"/,
   );
-  // The completed (banked) and current-wave-in-flight (running) rows are not carvable.
-  assert.doesNotMatch(html, /data-issue="101"[^>]*data-carvable/);
-  assert.doesNotMatch(html, /data-issue="201"[^>]*data-carvable/);
-  // Carve moved off the rows entirely: no inline ✂️ and no per-row carve form.
+  // The completed (banked) and current-wave-in-flight (running) rows are not prunable.
+  assert.doesNotMatch(html, /data-issue="101"[^>]*data-prunable/);
+  assert.doesNotMatch(html, /data-issue="201"[^>]*data-prunable/);
+  // Prune moved off the rows entirely: no inline ✂️ and no per-row prune form.
   assert.doesNotMatch(html, /✂️/);
-  assert.doesNotMatch(html, /class="carve-form"/);
+  assert.doesNotMatch(html, /class="prune-form"/);
   assert.doesNotMatch(html, /class="chip-group"/);
-  assert.doesNotMatch(html, /class="carve-btn"/);
+  assert.doesNotMatch(html, /class="prune-btn"/);
 });
 
-test("renderStatusPage omits the carve control unless the page opts into it", () => {
+test("renderStatusPage omits the prune control unless the page opts into it", () => {
   // The control is opt-in: both the standalone and the aggregated server pass
-  // `carve: true`, but a bare render (e.g. the empty-registry page) shows none.
+  // `prune: true`, but a bare render (e.g. the empty-registry page) shows none.
   const html = renderStatusPage({
     project: "demo",
     waves: [
@@ -7133,11 +7133,11 @@ test("renderStatusPage omits the carve control unless the page opts into it", ()
     parked: [],
   });
 
-  assert.doesNotMatch(html, /action="\/carve"/);
+  assert.doesNotMatch(html, /action="\/prune"/);
 });
 
-test("parseCarveClosure reads the structured closure line the dry-run prints", () => {
-  // The dry-run prints a `carve-closure {json}` line (E2) carrying the exact
+test("parsePruneClosure reads the structured closure line the dry-run prints", () => {
+  // The dry-run prints a `prune-closure {json}` line (E2) carrying the exact
   // closure — target, the dependents that would leave, the banked work kept, and
   // the remaining waves — so the panel names each without re-parsing the prose.
   const structured = {
@@ -7147,16 +7147,16 @@ test("parseCarveClosure reads the structured closure line the dry-run prints", (
     remaining: [["501"]],
   };
   assert.deepEqual(
-    parseCarveClosure(
-      `carve #201 → dropping #201, #401 (keeping banked #301)\nremaining campaign: "501"\ncarve-closure ${JSON.stringify(structured)}`,
+    parsePruneClosure(
+      `prune #201 → dropping #201, #401 (keeping banked #301)\nremaining campaign: "501"\nprune-closure ${JSON.stringify(structured)}`,
     ),
     structured,
   );
   // No structured line (e.g. an install predating E2) → null, so the route can 502
   // rather than half-render a closure it cannot vouch for.
   assert.equal(
-    parseCarveClosure(
-      "carve #201 → nothing to drop\nremaining campaign: (nothing left to run)",
+    parsePruneClosure(
+      "prune #201 → nothing to drop\nremaining campaign: (nothing left to run)",
     ),
     null,
   );

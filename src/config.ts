@@ -147,7 +147,7 @@ export interface VetinariConfig {
   /**
    * The ids of a given id's OPEN blockers (its prerequisites still in flight).
    * Closed blockers must be filtered here at the edge — an already-merged
-   * prerequisite does not gate. Used by `carve` (removes an issue and everything
+   * prerequisite does not gate. Used by `prune` (removes an issue and everything
    * transitively blocked by it) and `campaign-plan` (layers a selected set into
    * dependency-ordered waves). Wire it to your tracker — `githubBlockedBy(repo)`
    * ships as a ready GitHub implementation.
@@ -179,7 +179,7 @@ export interface VetinariConfig {
    * `githubMarkPendingVerify(repo)` ships as a GitHub implementation that relabels
    * `ready-for-agent` → `pending-verify`. Best-effort: a failing or offline write
    * is logged and never fails or rolls back the campaign. Absent, nothing is
-   * labeled (a no-op). Only merged (green) issues are passed — parked/carved/failed
+   * labeled (a no-op). Only merged (green) issues are passed — parked/pruned/failed
    * are never in the set.
    */
   onIssueMerged?: (id: string) => void | Promise<void>;

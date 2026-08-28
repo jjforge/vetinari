@@ -12,7 +12,7 @@ import { loadConfig } from "./config.ts";
  * free `log()` has. These calls never run — `tsc --noEmit` is the real gate (tsx erases types).
  */
 function _typeContract(l: Logger) {
-  l.log("carve", { target: "1", removed: ["2"], dropped: ["2"] });
+  l.log("prune", { target: "1", removed: ["2"], dropped: ["2"] });
   // @ts-expect-error `green` is missing `commits`.
   l.log("green", { taskId: "42", branch: "agent/42" });
   // A peripheral kind stays cheap via the untyped catch-all.
@@ -26,13 +26,13 @@ test("loggerForRun writes a JSONL line readEventLog parses back (round-trip)", (
   const logFile = scratchFile();
   const logger = loggerForRun({ logFile });
 
-  logger.log("carve", { target: "1", removed: ["2", "3"], dropped: ["3"] });
+  logger.log("prune", { target: "1", removed: ["2", "3"], dropped: ["3"] });
 
   const events = readEventLog({ logFile });
   assert.equal(events.length, 1);
   const [row] = events;
-  assert.equal(row.event, "carve");
-  assert.deepEqual(row, { ts: row.ts, event: "carve", target: "1", removed: ["2", "3"], dropped: ["3"] });
+  assert.equal(row.event, "prune");
+  assert.deepEqual(row, { ts: row.ts, event: "prune", target: "1", removed: ["2", "3"], dropped: ["3"] });
   assert.equal(typeof row.ts, "string");
 });
 
@@ -66,10 +66,10 @@ test("hostLogTarget is a persistent host log under the gateway config dir, not a
     assert.ok(!target.includes(".vetinari.local"), `host target must not be a real project log, got ${target}`);
 
     const logger = hostLogger();
-    logger.log("carve", { target: "1", removed: [], dropped: [] });
+    logger.log("prune", { target: "1", removed: [], dropped: [] });
     assert.ok(existsSync(target), "hostLogger must write to its host target");
     const events = readEventLog({ logFile: target });
-    assert.ok(events.some((e) => e.event === "carve"));
+    assert.ok(events.some((e) => e.event === "prune"));
   } finally {
     prev === undefined ? delete process.env.VETINARI_GATEWAY_HOME : (process.env.VETINARI_GATEWAY_HOME = prev);
   }

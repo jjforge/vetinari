@@ -18,7 +18,7 @@ import { humanizeHostLine, LOG_DOT_STATE_COLOR } from "./log-view.ts";
  * landing, the repo/campaign page, and the issue-detail sheet they share. No
  * surface defines a colour locally, so a token can never be "defined in one root,
  * missing in the other" (the #78 class of bug). Every colour that carries meaning
- * is one of the six ADR-0007 states or the carve action (§1); the teal
+ * is one of the six ADR-0007 states or the prune action (§1); the teal
  * `--color-primary` is the product accent and is never a state.
  */
 export const DASHBOARD_PALETTE_CSS = `  :root {
@@ -29,11 +29,11 @@ export const DASHBOARD_PALETTE_CSS = `  :root {
     --color-text: #e6edf3; --color-text-light: #cdd6e0; --color-text-light-2: #8b98a5; --color-dim: #5f6b78;
     /* Product accent — never a state (§1) */
     --color-primary: #3fb9b0; --color-primary-alpha-20: rgb(63 185 176 / 20%);
-    /* State palette (§1): running · parked · failure · completed · unstarted(dim) · carved */
-    --color-blue: #6cb6ff; --color-yellow: #c8a24e; --color-failure: #f85149; --color-green: #3fb984; --color-carved: #a371f7;
+    /* State palette (§1): running · parked · failure · completed · unstarted(dim) · pruned */
+    --color-blue: #6cb6ff; --color-yellow: #c8a24e; --color-failure: #f85149; --color-green: #3fb984; --color-pruned: #a371f7;
     /* State colours at 40% alpha — the muted chip borders (§4) */
-    --color-blue-40: rgb(108 182 255 / 40%); --color-yellow-40: rgb(200 162 78 / 40%); --color-failure-40: rgb(248 81 73 / 40%); --color-green-40: rgb(63 185 132 / 40%); --color-carved-40: rgb(163 113 247 / 40%); --color-dim-40: rgb(95 107 120 / 40%);
-    /* Carve action — a control, never a state; a different red from failure (§1) */
+    --color-blue-40: rgb(108 182 255 / 40%); --color-yellow-40: rgb(200 162 78 / 40%); --color-failure-40: rgb(248 81 73 / 40%); --color-green-40: rgb(63 185 132 / 40%); --color-pruned-40: rgb(163 113 247 / 40%); --color-dim-40: rgb(95 107 120 / 40%);
+    /* Prune action — a control, never a state; a different red from failure (§1) */
     --color-red: #f79287;
     --border-radius: 9px; --border-radius-medium: 12px;
   }`;
@@ -57,7 +57,7 @@ const STATE_COLOR_TOKEN: Record<string, string> = {
   interrupted: "yellow",
   failure: "failure",
   completed: "green",
-  carved: "carved",
+  pruned: "pruned",
   unstarted: "dim",
   queued: "dim",
   idle: "dim",
@@ -76,7 +76,7 @@ export const stateBorderColor = (state: string): string => `var(--color-${STATE_
  */
 export const STATE_DOT_CSS =
   `.dot { width: .75rem; height: .75rem; border-radius: 999px; display: inline-block; } ` +
-  ["running", "parked", "failure", "completed", "unstarted", "carved", "queued", "quarantined", "interrupted"].map((s) => `.dot.${s} { background: ${stateColor(s)}; }`).join(" ") +
+  ["running", "parked", "failure", "completed", "unstarted", "pruned", "queued", "quarantined", "interrupted"].map((s) => `.dot.${s} { background: ${stateColor(s)}; }`).join(" ") +
   ` @keyframes chip-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } } .dot.running { animation: chip-pulse 1.4s ease-in-out infinite; } .dot.running.idle { animation: none; } @media (prefers-reduced-motion: reduce) { .dot.running { animation: none; } }`;
 
 /**
@@ -86,7 +86,7 @@ export const STATE_DOT_CSS =
  * each member row carries a matching status class. Tally counts (not states) are
  * deliberately left out — they keep a neutral edge (§7).
  */
-export const STATE_CHIP_BORDER_CSS = ["running", "parked", "failure", "completed", "unstarted", "carved", "quarantined", "interrupted"].map((s) => `.wave-member.${s} { border-color: ${stateBorderColor(s)}; }`).join(" ");
+export const STATE_CHIP_BORDER_CSS = ["running", "parked", "failure", "completed", "unstarted", "pruned", "quarantined", "interrupted"].map((s) => `.wave-member.${s} { border-color: ${stateBorderColor(s)}; }`).join(" ");
 
 /**
  * The mono treatment for the repo dropdown's label (#88). The dashboard loads no
@@ -163,29 +163,29 @@ export const TOP_BAR_STYLES = `  .page-top { display: flex; align-items: center;
 /**
  * The issue-detail sheet's CSS — one definition included by both pages' `<style>`
  * (previously hand-synced, #76). Covers `.issue-detail-*`, `.meta-*`, `.turn-*`,
- * `.reply-*`, `.sheet-actions`, and the `.carve-*` panel. The `.dot` status
- * colours and the campaign-only `.carve-fallback` noscript styling stay with each
+ * `.reply-*`, `.sheet-actions`, and the `.prune-*` panel. The `.dot` status
+ * colours and the campaign-only `.prune-fallback` noscript styling stay with each
  * page, since those differ between the two.
  */
-export const ISSUE_DETAIL_SHEET_STYLES = `  .carve-panel { display: flex; align-items: center; gap: .5rem; }
-  /* A flex display beats the UA [hidden] rule, so the carve panel needs it back explicitly. */
-  .carve-panel[hidden] { display: none; }
-  .carve-start, .carve-confirm-btn, .carve-cancel { padding: .35rem .7rem; border: 1px solid var(--color-red); border-radius: 999px; background: rgb(247 146 135 / 12%); color: var(--color-red); font: inherit; line-height: 1; cursor: pointer; }
-  .carve-cancel { border-color: var(--color-secondary); background: none; color: var(--color-text-light-2); }
-  .carve-confirm { display: flex; align-items: center; gap: .5rem; margin: 0; }
+export const ISSUE_DETAIL_SHEET_STYLES = `  .prune-panel { display: flex; align-items: center; gap: .5rem; }
+  /* A flex display beats the UA [hidden] rule, so the prune panel needs it back explicitly. */
+  .prune-panel[hidden] { display: none; }
+  .prune-start, .prune-confirm-btn, .prune-cancel { padding: .35rem .7rem; border: 1px solid var(--color-red); border-radius: 999px; background: rgb(247 146 135 / 12%); color: var(--color-red); font: inherit; line-height: 1; cursor: pointer; }
+  .prune-cancel { border-color: var(--color-secondary); background: none; color: var(--color-text-light-2); }
+  .prune-confirm { display: flex; align-items: center; gap: .5rem; margin: 0; }
   /* A flex display beats the UA [hidden] rule, so the confirm form needs it back
      explicitly — otherwise Confirm/Cancel show by default, four buttons at once. */
-  .carve-confirm[hidden] { display: none; }
-  .carve-confirm-text { color: var(--color-red); }
-  .carve-note { color: var(--color-blue); font-size: .85rem; }
-  .carve-explainer { color: var(--color-text-light-2); font-size: .85rem; }
+  .prune-confirm[hidden] { display: none; }
+  .prune-confirm-text { color: var(--color-red); }
+  .prune-note { color: var(--color-blue); font-size: .85rem; }
+  .prune-explainer { color: var(--color-text-light-2); font-size: .85rem; }
   .issue-detail { position: fixed; inset: 0; z-index: 10; display: none; align-items: center; justify-content: center; padding: 1rem; background: #0009; }
   .issue-detail.show { display: flex; }
   .issue-detail[hidden] { display: none; }
   /* A stateful card: the issue's state reads on the 2px top edge only (§2), derived
      from stateColor; the other three edges stay the neutral 1px. */
   .issue-detail-sheet { display: flex; flex-direction: column; width: min(640px, 100%); max-height: 85vh; overflow: hidden; background: var(--color-card); border: 1px solid var(--color-secondary); border-top: 2px solid var(--color-dim); border-radius: var(--border-radius-medium); box-shadow: 0 18px 48px #0009; }
-  ${["running", "parked", "failure", "completed", "unstarted", "carved", "quarantined", "interrupted"].map((s) => `.issue-detail-sheet.${s} { border-top-color: ${stateColor(s)}; }`).join(" ")}
+  ${["running", "parked", "failure", "completed", "unstarted", "pruned", "quarantined", "interrupted"].map((s) => `.issue-detail-sheet.${s} { border-top-color: ${stateColor(s)}; }`).join(" ")}
   .issue-detail-header { position: sticky; top: 0; display: flex; align-items: flex-start; gap: .75rem; padding: 1rem 1.15rem; background: var(--color-box-header); border-bottom: 1px solid var(--color-light-border); }
   .issue-detail-head-main { flex: 1; min-width: 0; }
   .issue-detail-status { display: inline-flex; align-items: center; gap: .4rem; font-size: .85rem; text-transform: uppercase; letter-spacing: .03em; color: var(--color-text-light-2); }
@@ -210,10 +210,10 @@ export const ISSUE_DETAIL_SHEET_STYLES = `  .carve-panel { display: flex; align-
   .turn-entry { display: flex; gap: .6rem; padding: .55rem 0; border-bottom: 1px solid var(--color-light-border); }
   .turn-entry:last-child { border-bottom: 0; }
   .turn-num { flex: none; font-weight: 700; font-variant-numeric: tabular-nums; }
-  ${["completed", "parked", "failure", "running", "unstarted", "carved", "quarantined"].map((s) => `.turn-num.${s} { color: ${stateColor(s)}; }`).join(" ")}
+  ${["completed", "parked", "failure", "running", "unstarted", "pruned", "quarantined"].map((s) => `.turn-num.${s} { color: ${stateColor(s)}; }`).join(" ")}
   .turn-summary { color: var(--color-text-light); }
   .turn-empty { color: var(--color-text-light-2); padding: .55rem 0; }
-  /* Parked-reply block + the actions row pin to the sheet foot so Resume/Carve stay
+  /* Parked-reply block + the actions row pin to the sheet foot so Resume/Prune stay
      reachable one-handed while the turn log scrolls above. */
   /* The reply block is the human-action queue inside the sheet, so it carries the
      3px amber left edge (§2); it only ever shows for a parked issue. */
@@ -237,8 +237,8 @@ export const ISSUE_DETAIL_SHEET_STYLES = `  .carve-panel { display: flex; align-
 /**
  * The issue-detail sheet's client script — one definition included by both pages
  * (previously hand-synced, #76). It wires the sheet itself: the element refs,
- * `openIssue`/`renderDetail`/`renderReply`, `closeSheet`, the foot's Resume/Carve
- * visibility, and the carve preview→confirm flow. Each page adds its own trigger
+ * `openIssue`/`renderDetail`/`renderReply`, `closeSheet`, the foot's Resume/Prune
+ * visibility, and the prune preview→confirm flow. Each page adds its own trigger
  * wiring around this (the campaign page's issue chips + parked cards; the
  * landing's parked-queue rows), which is what calls `openIssue`.
  */
@@ -261,17 +261,17 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
   const replyForm = document.getElementById("reply-form");
   const sheetActions = document.querySelector(".sheet-actions");
   // The foot (reply + actions) shows only while it holds a live control — a parked
-  // reply to send or a carve to offer — so a plain issue's sheet grows no empty bar.
+  // reply to send or a prune to offer — so a plain issue's sheet grows no empty bar.
   const updateFoot = () => {
-    const carve = document.getElementById("carve-panel");
-    const carveShown = Boolean(carve && !carve.hidden);
-    sheetActions.hidden = replyResume.hidden && !carveShown;
-    // A standalone Carve — offered, not beside a parked issue's Resume, and not yet
-    // in its confirm step — gets a plain-words explainer of what a carve does; a
+    const prune = document.getElementById("prune-panel");
+    const pruneShown = Boolean(prune && !prune.hidden);
+    sheetActions.hidden = replyResume.hidden && !pruneShown;
+    // A standalone Prune — offered, not beside a parked issue's Resume, and not yet
+    // in its confirm step — gets a plain-words explainer of what a prune does; a
     // parked issue's Resume gives the context instead, so the explainer stays hidden.
-    const explainer = document.getElementById("carve-explainer");
-    const start = document.getElementById("carve-start");
-    if (explainer) explainer.hidden = !carveShown || !replyResume.hidden || (start ? start.hidden : true);
+    const explainer = document.getElementById("prune-explainer");
+    const start = document.getElementById("prune-start");
+    if (explainer) explainer.hidden = !pruneShown || !replyResume.hidden || (start ? start.hidden : true);
   };
   // Elapsed is a working span in ms; show it as coarse minutes/hours.
   const fmtElapsed = (ms) => {
@@ -284,7 +284,7 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
   document.getElementById("issue-detail-close").addEventListener("click", closeSheet);
   // Tap the backdrop (outside the sheet) to dismiss.
   issueDetail.addEventListener("click", (event) => { if (event.target === issueDetail) closeSheet(); });
-  // Reassigned by the carve block when carve is enabled; a no-op otherwise.
+  // Reassigned by the prune block when prune is enabled; a no-op otherwise.
   let onOpenIssue = () => {};
   // A parked issue's reply block: the full question, the offered options as buttons
   // that fill the field (never submit), and the free-text field itself; Resume posts
@@ -366,7 +366,7 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
       detailTurnLog.appendChild(li);
     }
   };
-  const openIssue = async (project, issue, carvable, run) => {
+  const openIssue = async (project, issue, prunable, run) => {
     issueDetail.hidden = false;
     issueDetail.classList.add("show");
     detailNum.textContent = "#" + issue;
@@ -381,7 +381,7 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
     // Hide the reply block until the fetched status confirms the issue is parked.
     detailReply.hidden = true;
     replyResume.hidden = true;
-    onOpenIssue(carvable, project, issue);
+    onOpenIssue(prunable, project, issue);
     updateFoot();
     try {
       // An archived chip carries its run token so the sheet reads that run's own log.
@@ -393,33 +393,33 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
       detailContext.textContent = project;
     }
   };
-  const carvePanel = document.getElementById("carve-panel");
-  if (carvePanel) {
-    const carveStart = document.getElementById("carve-start");
-    const carveConfirm = document.getElementById("carve-confirm");
-    const carveConfirmText = carveConfirm.querySelector(".carve-confirm-text");
-    const carveTaskId = carveConfirm.querySelector('input[name="taskId"]');
-    const carveProject = carveConfirm.querySelector('input[name="project"]');
-    let carveTarget = null;
-    let carveProj = null;
-    const resetCarve = () => {
-      carveConfirm.hidden = true;
-      carveStart.hidden = false;
+  const prunePanel = document.getElementById("prune-panel");
+  if (prunePanel) {
+    const pruneStart = document.getElementById("prune-start");
+    const pruneConfirm = document.getElementById("prune-confirm");
+    const pruneConfirmText = pruneConfirm.querySelector(".prune-confirm-text");
+    const pruneTaskId = pruneConfirm.querySelector('input[name="taskId"]');
+    const pruneProject = pruneConfirm.querySelector('input[name="project"]');
+    let pruneTarget = null;
+    let pruneProj = null;
+    const resetPrune = () => {
+      pruneConfirm.hidden = true;
+      pruneStart.hidden = false;
       updateFoot();
     };
-    // The carve affordance reveals inside the sheet for a carvable issue, keyed off
-    // the issue the sheet just opened (ADR 0005); a non-carvable issue hides it.
-    onOpenIssue = (carvable, project, issue) => {
-      carvePanel.hidden = !carvable;
-      if (carvable) {
-        carveTarget = issue;
-        carveProj = project;
-        resetCarve();
+    // The prune affordance reveals inside the sheet for a prunable issue, keyed off
+    // the issue the sheet just opened (ADR 0005); a non-prunable issue hides it.
+    onOpenIssue = (prunable, project, issue) => {
+      prunePanel.hidden = !prunable;
+      if (prunable) {
+        pruneTarget = issue;
+        pruneProj = project;
+        resetPrune();
       }
     };
-    carveStart.addEventListener("click", async () => {
+    pruneStart.addEventListener("click", async () => {
       try {
-        const res = await fetch("/carve?preview&taskId=" + encodeURIComponent(carveTarget) + "&project=" + encodeURIComponent(carveProj));
+        const res = await fetch("/prune?preview&taskId=" + encodeURIComponent(pruneTarget) + "&project=" + encodeURIComponent(pruneProj));
         if (!res.ok) throw new Error(String(res.status));
         // The structured closure (E2): the dependents that would leave (dropped)
         // and the banked work kept (keptBanked). Name each so a confirm discloses
@@ -427,31 +427,31 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
         const { target, dropped, keptBanked } = await res.json();
         const drops = (dropped || []).filter((id) => id !== target);
         const kept = keptBanked || [];
-        carveConfirmText.textContent =
-          "Carve #" + target +
+        pruneConfirmText.textContent =
+          "Prune #" + target +
           (drops.length ? " — also drops " + drops.map((id) => "#" + id).join(", ") : " — no dependents") +
           (kept.length ? ". Keeps banked (merged or mergeable) " + kept.map((id) => "#" + id).join(", ") : "");
-        carveTaskId.value = target;
-        carveProject.value = carveProj;
+        pruneTaskId.value = target;
+        pruneProject.value = pruneProj;
       } catch {
-        carveConfirmText.textContent = "Couldn't preview this carve — is a campaign still running?";
-        carveTaskId.value = "";
+        pruneConfirmText.textContent = "Couldn't preview this prune — is a campaign still running?";
+        pruneTaskId.value = "";
       }
-      carveStart.hidden = true;
-      carveConfirm.hidden = false;
+      pruneStart.hidden = true;
+      pruneConfirm.hidden = false;
       updateFoot();
     });
-    document.getElementById("carve-cancel").addEventListener("click", resetCarve);
-    carveConfirm.addEventListener("submit", async (event) => {
+    document.getElementById("prune-cancel").addEventListener("click", resetPrune);
+    pruneConfirm.addEventListener("submit", async (event) => {
       event.preventDefault();
-      if (!carveTaskId.value) return;
-      await fetch("/carve", {
+      if (!pruneTaskId.value) return;
+      await fetch("/prune", {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ taskId: carveTaskId.value, project: carveProject.value, confirm: "1" }),
+        body: new URLSearchParams({ taskId: pruneTaskId.value, project: pruneProject.value, confirm: "1" }),
       });
-      carvePanel.hidden = true;
-      document.getElementById("carve-note").textContent = "carving… #" + carveTaskId.value + " will drop from the plan on the next refresh";
+      prunePanel.hidden = true;
+      document.getElementById("prune-note").textContent = "pruning… #" + pruneTaskId.value + " will drop from the plan on the next refresh";
     });
   }`;
 
@@ -698,7 +698,7 @@ export const LIVE_TAIL_STYLES = `  .live-tail { background: var(--color-card); b
   .tail-line { display: grid; grid-template-columns: 44px 1fr; gap: .6rem; padding: .05rem .6rem .05rem 0; }
   .tail-line:hover { background: var(--color-card); }
   .tail-gutter { text-align: right; color: var(--color-dim); font-variant-numeric: tabular-nums; }
-  ${["running", "parked", "failure", "completed", "unstarted", "carved", "quarantined", "interrupted"].map((s) => `.tail-gutter.${s} { color: ${stateColor(s)}; }`).join(" ")}
+  ${["running", "parked", "failure", "completed", "unstarted", "pruned", "quarantined", "interrupted"].map((s) => `.tail-gutter.${s} { color: ${stateColor(s)}; }`).join(" ")}
   .tail-code { min-width: 0; white-space: pre-wrap; word-break: break-word; color: var(--color-text-light); }
   .tail-code .jkey { color: var(--color-blue); }
   .tail-code .jstr { color: var(--color-primary); }

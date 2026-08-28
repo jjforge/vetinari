@@ -11,7 +11,7 @@ import {
 test("dotClass maps a status to its dot state-class fragment (verbatim today)", () => {
   assert.equal(dotClass("running"), "running");
   assert.equal(dotClass("parked"), "parked");
-  assert.equal(dotClass("carved"), "carved");
+  assert.equal(dotClass("pruned"), "pruned");
 });
 
 test("tallyDotClass stills a 0-running tally dot with idle but keeps the blue (§5, #100)", () => {

@@ -34,7 +34,7 @@ test("integration: a seeded live run populates the landing, campaign, issue deta
     assert.notEqual(card.runState, "idle");
     assert.equal(card.campaignName, DEMO_CAMPAIGN);
     assert.equal(card.tally.parked, 1); // #205
-    assert.equal(card.tally.queued, 2); // #206, #207 (#208 was carved out)
+    assert.equal(card.tally.queued, 2); // #206, #207 (#208 was pruned out)
     assert.ok(card.tally.running >= 1, "at least #204 is running");
     assert.equal(landing.counters.parked, 1);
     assert.equal(landing.counters.queued, 2);
@@ -42,10 +42,10 @@ test("integration: a seeded live run populates the landing, campaign, issue deta
     assert.ok(parked, "the parked queue lists #205");
     assert.match(parked.question, /payment providers/i);
 
-    // Campaign page — member rows render every status, including the carved #208.
+    // Campaign page — member rows render every status, including the pruned #208.
     const page = await (await fetch(`${base}/?project=${DEMO_PROJECT}`)).text();
     assert.match(page, /class="wave-member [a-z]+"/);
-    for (const status of ["completed", "running", "parked", "carved"]) {
+    for (const status of ["completed", "running", "parked", "pruned"]) {
       assert.match(page, new RegExp(status), `page renders a ${status} member row`);
     }
 
@@ -57,7 +57,7 @@ test("integration: a seeded live run populates the landing, campaign, issue deta
     assert.equal(d204.turnLog[0].turn, 2, "newest turn first");
     assert.ok(d204.turnLog.every((t: { summary: string }) => t.summary.length > 0), "every turn carries a summary");
     assert.ok(d204.elapsedMs > 0, "elapsed spans the turns");
-    assert.equal((await getJson(`/api/issue?project=${DEMO_PROJECT}&issue=208`)).status, "carved");
+    assert.equal((await getJson(`/api/issue?project=${DEMO_PROJECT}&issue=208`)).status, "pruned");
     const d205 = await getJson(`/api/issue?project=${DEMO_PROJECT}&issue=205`);
     assert.equal(d205.status, "parked");
     // The parked slot preserved a worktree; the sheet's WORKTREE tile reads this path (#90).

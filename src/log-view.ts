@@ -115,7 +115,7 @@ export function humanizeLogLine(raw: string): HumanizedRow {
     case "campaign-batch":
     case "queue-start":
       return { time, actor: "", message: describeEvent(e as unknown as OrchestratorEvent), dot: "running" };
-    case "carve":
+    case "prune":
     case "graft":
     case "telegram-unconfigured":
       return { time, actor: "", message: describeEvent(e as unknown as OrchestratorEvent), dot: "neutral" };

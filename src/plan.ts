@@ -3,7 +3,7 @@
  * wave arguments (ready to paste after `campaign`) plus a provenance report.
  *
  * Waves come from the `blockedBy` graph restricted to the selected set (the
- * shared `restrictBlockers` foundation `carve` also uses): wave 0 is the tickets
+ * shared `restrictBlockers` foundation `prune` also uses): wave 0 is the tickets
  * with no OPEN in-set blocker, and a ticket enters wave W once all its blockers
  * sit in earlier waves. A closed blocker never reaches the resolver, so it does
  * not gate. An OPEN blocker outside the selected set makes its dependent
@@ -13,7 +13,7 @@
  * This plans only: it computes waves, it never runs `campaign` and never pushes.
  * Pure over the injected `blockedByOf`, so it stays testable with no live tracker.
  */
-import { computeCarve, normalize, restrictBlockers, type BlockedByOf } from "./carve.ts";
+import { computePrune, normalize, restrictBlockers, type BlockedByOf } from "./prune.ts";
 import { defaultFileSet, ticketProse, type FileSet, type FileSetOf } from "./fileset.ts";
 
 export interface Placement {
@@ -67,7 +67,7 @@ export async function layerWaves(ids: string[], blockedByOf: BlockedByOf): Promi
 
   // Unreachable closure. Seed with any ticket held by an open blocker outside the
   // set, then drop anything whose in-set blocker was itself dropped, to a fixpoint
-  // — the same dependent-chain logic as carve: a ticket cannot run until every
+  // — the same dependent-chain logic as prune: a ticket cannot run until every
   // prerequisite can, so an unreachable prerequisite takes its dependents with it.
   const dropped = new Set<string>();
   for (const id of order) if (external.get(id)!.size) dropped.add(id);
@@ -129,7 +129,7 @@ export type UnderspecifiedPrompt = (underspecified: string[]) => UnderspecifiedD
 
 /** The resolvers `planCampaign` reads the tracker and tree through. */
 export interface CampaignPlanDeps {
-  /** id -> its OPEN blockers (the same seam as `layerWaves`/`computeCarve`). */
+  /** id -> its OPEN blockers (the same seam as `layerWaves`/`computePrune`). */
   blockedBy: BlockedByOf;
   /**
    * id -> its resolved file-set. Compose the project's `fileSet` resolver with
@@ -146,7 +146,7 @@ export interface CampaignPlan extends WavePlan {
   /** the not-confident tickets that triggered the halt (empty when none did). */
   underspecified: string[];
   /** everything the drop decision removed: the under-specified roots + dependents. */
-  carved: string[];
+  pruned: string[];
 }
 
 const disjoint = (a: Set<string>, b: Set<string>) => {
@@ -231,7 +231,7 @@ export interface AppliedGraft {
 
 /**
  * Pure rule folding a graft into a running campaign — the additive mirror of
- * `applyCarve` (ADR 0014). The in-flight and banked waves are pinned; each grafted
+ * `applyPrune` (ADR 0014). The in-flight and banked waves are pinned; each grafted
  * issue is **stable-inserted** into the earliest *later* wave that satisfies its
  * in-campaign `blockedBy` deps and stays basename-disjoint, appending a new wave
  * only when none fits. Existing wave assignments are never reordered.
@@ -369,16 +369,16 @@ export function waveArgs(plan: WavePlan): string {
 /**
  * A human-readable provenance report: each scheduled ticket with its wave and
  * why it is there, then every dropped ticket with the reason it cannot run
- * against this set — tickets carved for an under-specified file-set as well as
+ * against this set — tickets pruned for an under-specified file-set as well as
  * tickets unreachable by dependency. Plans only — this describes the plan, it
  * does not run it.
  */
-export function describePlan(plan: WavePlan & Partial<Pick<CampaignPlan, "carved" | "underspecified">>): string {
+export function describePlan(plan: WavePlan & Partial<Pick<CampaignPlan, "pruned" | "underspecified">>): string {
   const scheduled = plan.placements.length;
-  const carved = plan.carved ?? [];
+  const pruned = plan.pruned ?? [];
   const lines: string[] = [
     `campaign-plan: ${plan.waves.length} wave(s), ${scheduled} ticket(s) scheduled, ${plan.unreachable.length} unreachable` +
-      (carved.length ? `, ${carved.length} carved` : "") +
+      (pruned.length ? `, ${pruned.length} pruned` : "") +
       ".",
     "",
   ];
@@ -401,11 +401,11 @@ export function describePlan(plan: WavePlan & Partial<Pick<CampaignPlan, "carved
     }
   }
 
-  if (carved.length) {
+  if (pruned.length) {
     const underspecified = new Set(plan.underspecified ?? []);
-    lines.push("", "Carved (dropped — under-specified file-set):");
-    for (const id of carved) {
-      lines.push(`  #${id}  — ${underspecified.has(id) ? "no confident file-set" : "depends on a carved under-specified ticket"}`);
+    lines.push("", "Pruned (dropped — under-specified file-set):");
+    for (const id of pruned) {
+      lines.push(`  #${id}  — ${underspecified.has(id) ? "no confident file-set" : "depends on a pruned under-specified ticket"}`);
     }
   }
 
@@ -416,8 +416,8 @@ export function describePlan(plan: WavePlan & Partial<Pick<CampaignPlan, "carved
  * Plan a selected set end to end: layer it by dependency, resolve each scheduled
  * ticket's file-set, and — when any comes back `confident: false` — halt to the
  * requestor rather than guess. The injected `onUnderspecified` decides: `drop`
- * carves the under-specified tickets AND their transitive dependents (reusing
- * `computeCarve`) and plans the confident remainder; `fail` throws so the missing
+ * prunes the under-specified tickets AND their transitive dependents (reusing
+ * `computePrune`) and plans the confident remainder; `fail` throws so the missing
  * data is fixed on the issue and the plan re-run. Nothing is ever planned around a
  * `confident: false` ticket silently.
  *
@@ -436,7 +436,7 @@ export async function planCampaign(ids: string[], deps: CampaignPlanDeps): Promi
   const underspecified = scheduled.filter((id) => !sets.get(id)!.confident);
 
   let survivorPlan = layered;
-  let carved: string[] = [];
+  let pruned: string[] = [];
   if (underspecified.length) {
     const decision = await deps.onUnderspecified(underspecified);
     if (decision === "fail") {
@@ -444,23 +444,23 @@ export async function planCampaign(ids: string[], deps: CampaignPlanDeps): Promi
       const [subj, obj] = underspecified.length === 1 ? ["has", "it"] : ["have", "them"];
       throw new Error(
         `campaign-plan: ${list} ${subj} no confident file-set. Add the file data to the issue(s) ` +
-          `and re-run, or pass --on-underspecified=drop to carve ${obj} and plan the rest.`,
+          `and re-run, or pass --on-underspecified=drop to prune ${obj} and plan the rest.`,
       );
     }
-    // drop: carve each under-specified ticket and its dependent chain out of the
+    // drop: prune each under-specified ticket and its dependent chain out of the
     // layered waves, threading the shrinking remainder forward. A ticket already
-    // gone as another's dependent is skipped — `computeCarve` rejects an absent target.
+    // gone as another's dependent is skipped — `computePrune` rejects an absent target.
     let remaining = layered.waves;
-    const carvedSet = new Set<string>();
+    const prunedSet = new Set<string>();
     for (const target of underspecified) {
-      if (carvedSet.has(normalize(target))) continue;
-      const res = await computeCarve(remaining, target, deps.blockedBy);
-      for (const id of res.removed) carvedSet.add(id);
+      if (prunedSet.has(normalize(target))) continue;
+      const res = await computePrune(remaining, target, deps.blockedBy);
+      for (const id of res.removed) prunedSet.add(id);
       remaining = res.remaining;
     }
-    carved = scheduled.filter((id) => carvedSet.has(id));
+    pruned = scheduled.filter((id) => prunedSet.has(id));
     // Re-layer the confident survivors so the returned plan's placements/`after`
-    // reflect the reduced set; carving dependents keeps the DAG intact.
+    // reflect the reduced set; pruning dependents keeps the DAG intact.
     survivorPlan = await layerWaves(remaining.flat(), deps.blockedBy);
   }
 
@@ -473,7 +473,7 @@ export async function planCampaign(ids: string[], deps: CampaignPlanDeps): Promi
     // survivors alone would forget the dependency drops from the first pass.
     unreachable: layered.unreachable,
     underspecified,
-    carved,
+    pruned,
   };
 }
 

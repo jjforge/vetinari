@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
   appendFileSync,
+  existsSync,
   mkdirSync,
   readFileSync,
   writeFileSync,
@@ -442,6 +443,117 @@ test("an idle project's merged % and merged-today read its latest archived run, 
   assert.equal(card.percentMerged, 100);
   // And both merges count toward "merged today", read from the archived run.
   assert.equal(counters.mergedToday, 2);
+});
+
+test("buildLanding folds a finished campaign still in the live log to idle, display-only, keeping its summary (#208)", () => {
+  const base = join(tmpdir(), `vetinari-landing-done-live-${Date.now()}`);
+  const dir = join(base, "demo");
+  // A completed campaign that reached its clean terminal campaign-done but was never
+  // archived — the read-only dashboard cannot archive (ADR 0002), so it lingers live.
+  seedState(dir, [
+    event("campaign-start", {
+      ts: "2026-06-15T08:00:00.000Z",
+      batches: [["101"], ["201"]],
+      name: "gateway work",
+      slots: 1,
+    }),
+    event("campaign-batch-done", {
+      ts: "2026-06-15T08:03:00.000Z",
+      index: 0,
+      merged: ["101"],
+      held: [],
+      clearedParked: [],
+    }),
+    event("campaign-batch-done", {
+      ts: "2026-06-15T08:05:00.000Z",
+      index: 1,
+      merged: ["201"],
+      held: [],
+      clearedParked: [],
+    }),
+    event("campaign-done", { ts: "2026-06-15T08:06:00.000Z", batches: 2 }),
+  ]);
+  const logFile = join(dir, "logs", "orchestrator.jsonl");
+  const before = readFileSync(logFile);
+
+  const [card] = buildLanding(
+    [pointerFor("demo", dir)],
+    new Date("2026-06-15T12:00:00.000Z"),
+  ).projects;
+
+  // The finished run fades to idle rather than lingering green forever …
+  assert.equal(card.runState, "idle");
+  // … while still surfacing the finished run's name and summary ("Last run: …").
+  assert.equal(card.campaignName, "gateway work");
+  assert.equal(card.wave, null);
+  assert.equal(card.percentMerged, 100);
+  assert.match(card.lastEvent, /^Last run: campaign · 2 issues · complete$/);
+
+  // The fold is display-only: the live log's bytes are untouched and nothing was archived.
+  assert.deepEqual(readFileSync(logFile), before);
+  assert.equal(existsSync(join(dir, "logs", "archive")), false);
+});
+
+test("buildLanding folds a finished queue-done live log to idle too (#208)", () => {
+  const base = join(tmpdir(), `vetinari-landing-done-queue-${Date.now()}`);
+  const dir = join(base, "demo");
+  seedState(dir, [
+    event("queue-start", { ts: "2026-06-15T08:00:00.000Z", taskIds: ["101"], slots: 1 }),
+    event("green", { ts: "2026-06-15T08:01:00.000Z", taskId: "101", branch: "agent/101", commits: [] }),
+    event("queue-done", { ts: "2026-06-15T08:02:00.000Z", outcomes: { "101": "green" } }),
+  ]);
+
+  const [card] = buildLanding(
+    [pointerFor("demo", dir)],
+    new Date("2026-06-15T12:00:00.000Z"),
+  ).projects;
+  assert.equal(card.runState, "idle");
+  assert.match(card.lastEvent, /^Last run: queue · 1 issue · complete$/);
+});
+
+test("buildLanding does NOT fold a parked, halted, or in-flight live log to idle (#208)", () => {
+  const base = join(tmpdir(), `vetinari-landing-nofold-${Date.now()}`);
+  // A halted run (base rolled back) is an attention state, never idle.
+  const haltDir = join(base, "halt");
+  seedState(haltDir, [
+    event("campaign-start", { ts: "2026-06-15T08:00:00.000Z", batches: [["101"]], name: "halted", slots: 1 }),
+    event("campaign-halt", { ts: "2026-06-15T08:01:00.000Z", index: 0, taskId: "101", reason: "base rolled back" }),
+  ]);
+  // A parked question outranks "done and quiet": even a run whose log reached the
+  // terminal campaign-done keeps a lingering parked record (archiveIfIdle no-ops
+  // while anything is parked), so it must read parked, never fold to idle.
+  const parkedDir = join(base, "parked");
+  seedState(parkedDir, [
+    event("campaign-start", { ts: "2026-06-15T08:00:00.000Z", batches: [["201"], ["101"]], name: "parked", slots: 1 }),
+    event("campaign-batch-done", { ts: "2026-06-15T08:03:00.000Z", index: 0, merged: ["201"], held: [], clearedParked: [] }),
+    event("campaign-done", { ts: "2026-06-15T08:06:00.000Z", batches: 2 }),
+  ]);
+  writeFileSync(
+    join(parkedDir, "parked", "101.json"),
+    JSON.stringify({
+      taskId: "101",
+      parkedAt: "2026-06-15T08:01:00.000Z",
+      reason: "needs a decision",
+      branch: "agent/101",
+      question: "Which approach?",
+    }),
+  );
+  // An in-flight run (no terminal event) still reads running.
+  const runDir = join(base, "run");
+  seedState(runDir, [
+    event("campaign-start", { ts: "2026-06-15T08:00:00.000Z", batches: [["101"]], name: "running", slots: 1 }),
+    event("campaign-batch", { ts: "2026-06-15T08:01:00.000Z", index: 0, tasks: ["101"] }),
+    event("queue-start", { ts: "2026-06-15T08:02:00.000Z", taskIds: ["101"], slots: 1 }),
+  ]);
+
+  const { projects } = buildLanding(
+    [pointerFor("halt", haltDir), pointerFor("parked", parkedDir), pointerFor("run", runDir)],
+    new Date("2026-06-15T12:00:00.000Z"),
+  );
+  const byProject = Object.fromEntries(projects.map((p) => [p.project, p.runState]));
+  assert.equal(byProject.halt, "failure");
+  assert.equal(byProject.parked, "parked");
+  assert.equal(byProject.run, "running");
 });
 
 test("an idle project whose latest archived run merged on an earlier day counts 0 toward merged-today (#70)", () => {

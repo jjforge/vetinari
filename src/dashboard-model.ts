@@ -1351,6 +1351,31 @@ const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, event
       lastEvent: latest ? `Last run: ${latest.summary}` : "No runs yet",
     };
   }
+  // A finished run still lingering in the live log folds to idle at render time
+  // (#208): the read-only dashboard never archives (ADR 0002), so a campaign that
+  // reached its clean terminal `campaign-done`/`queue-done` — but whose log the CLI
+  // never emptied (a parked record kept `archiveIfIdle` a no-op, the process was
+  // killed before end-of-run, …) — otherwise reads `completed` forever. Fold only a
+  // run that is both cleanly terminal (`archivedRunState`) and would read `completed`:
+  // requiring `completed` keeps `parked` (parked wins), `failure` (a halt), and
+  // `running` off the fold, so an attention state never fades. The finished run's
+  // name + summary still show ("Last run: …"), read from the live log — which is left
+  // byte-for-byte untouched, this is display-only.
+  if (projectRunState(status) === "completed" && archivedRunState(events) === "complete") {
+    const { waves, outcomes } = reduceCampaign(events);
+    const finishedIssues = waves.flat();
+    const merged = finishedIssues.filter((n) => outcomes.get(n) === "completed").length;
+    return {
+      project: status.project,
+      repo,
+      runState: "idle",
+      campaignName: status.name,
+      wave: null,
+      percentMerged: finishedIssues.length ? Math.round((merged / finishedIssues.length) * 100) : 0,
+      tally: { running: 0, parked: 0, queued: 0 },
+      lastEvent: `Last run: ${summarizeRun(events)}`,
+    };
+  }
   // The card reflects the live plan, not the display's pruned ghosts: drop pruned
   // chips (and any wave left wholly pruned) so wave counts and progress match what
   // is actually still running (ADR 0007's pruned is a campaign-view overlay only).

@@ -1924,6 +1924,17 @@ test("renderLandingShell's feed renders humanized rows in the shared .lv-row com
   assert.match(html, /\.lv-dot\.failure \{ background:/);
 });
 
+test("the shared .lv-row paints the 2b least→most emphasis ramp: time muted · actor mono+subdued · message prominent (#221)", () => {
+  const html = renderLandingShell(["alpha"]);
+  // Least important — the time reads in the most muted grey (--color-dim).
+  assert.match(html, /\.lv-t \{[^}]*color: var\(--color-dim\)/);
+  // Mid — the actor is distinct but subdued: a mono handle at mid brightness (--color-text-light-2).
+  assert.match(html, /\.lv-lead \{[^}]*font-family: ui-monospace/);
+  assert.match(html, /\.lv-lead \{[^}]*color: var\(--color-text-light-2\)/);
+  // Most important — the message itself is the brightest, most readable element (--color-text).
+  assert.match(html, /\.lv-msg \{[^}]*color: var\(--color-text\)/);
+});
+
 test("the shared .lv-row styles the multiline-collapse chevron and overflow block (#217)", () => {
   const html = renderLandingShell(["alpha"]);
   // The bare chevron is a dim, clickable affordance that brightens on hover (palette tokens, §1).

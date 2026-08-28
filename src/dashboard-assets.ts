@@ -680,18 +680,19 @@ export const LIVE_TAIL_STYLES = `  .live-tail { background: var(--color-card); b
   .tail-mode-btn { border: 0; background: var(--color-chip); color: var(--color-text-light-2); font: inherit; font-size: .78rem; padding: .28rem .6rem; cursor: pointer; }
   .tail-mode-btn:hover { color: var(--color-text); }
   .tail-mode-btn[aria-pressed="true"] { background: var(--color-blue); color: var(--color-body); font-weight: 700; }
-  /* The shared log-view row (#216, mockup 1a/1c): the three-tier grid time · dot · message.
-     Brightness climbs across the tiers — the time is dimmest, the actor leads the message at
-     mid brightness, and the message itself is brightest; the dim verb sits ahead of it, code
-     tokens read mono, and the strong key term is the brightest of all. The dot reads the
-     event's own state via the shared palette (§1, generated from stateColor). */
+  /* The shared log-view row (#216, mockup 1a/2b): the three-tier grid time · dot · message,
+     painting the least→most emphasis ramp (#221). Left to right is least to most important — the
+     time is the most muted (dim), the actor is distinct-but-subdued (a mono handle at mid
+     brightness), and the message itself is the brightest, most readable element; the dim verb sits
+     ahead of it, code tokens read mono, and the strong key term is the brightest of all. The dot
+     reads the event's own state via the shared palette (§1, generated from stateColor). */
   .lv-row { display: grid; grid-template-columns: auto auto 1fr; align-items: baseline; gap: .5rem; padding: .1rem .6rem; }
   .lv-row:hover { background: var(--color-card); }
   .lv-t { color: var(--color-dim); font-variant-numeric: tabular-nums; }
   .lv-dot { width: .6rem; height: .6rem; border-radius: 999px; align-self: center; flex: none; background: var(--color-dim); }
   ${Object.entries(LOG_DOT_STATE_COLOR).map(([s, token]) => `.lv-dot.${s} { background: ${stateColor(token)}; }`).join(" ")}
   .lv-msg { min-width: 0; white-space: pre-wrap; word-break: break-word; color: var(--color-text); }
-  .lv-lead { color: var(--color-text-light-2); font-weight: 600; margin-right: .4rem; }
+  .lv-lead { font-family: ${MONO_FONT}; color: var(--color-text-light-2); font-weight: 600; margin-right: .4rem; }
   .lv-verb { color: var(--color-text-light-2); margin-right: .35rem; }
   .lv-msg code { font-family: ${MONO_FONT}; font-size: .95em; color: var(--color-text-light); }
   .lv-msg strong { color: var(--color-text); font-weight: 700; }

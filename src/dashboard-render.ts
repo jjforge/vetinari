@@ -400,14 +400,123 @@ export function tailAppend(buffer: TailRow[], fresh: TailRow[], live: boolean, c
 }
 
 /**
- * The tail body's view-model (#124): from the buffer and the current controls, decide
- * which lines render and the footer/backlog counts. Following reads the whole buffer;
- * paused freezes the visible set at `mark` (the buffer length when pause was hit) and the
- * lines past it become the backlog. The issue dropdown and the case-insensitive substring
- * filter compose (both applied), then the newest `cap` matches render — **newest-first**, so
- * the latest line sits at the top of the pane (#195). `empty` is true when the filters match
- * nothing (the body shows the empty-state text). Pure and self-contained, unit-tested in node
- * and shipped to the browser via `.toString()` (ADR 0012).
+ * Relabel an orchestrator event kind to the event-log feed's clean lowercase namespace.verb
+ * (#95): a feed-label remap of real events, not a status-vocab change (ADR 0007). Only kinds
+ * that actually exist are mapped (no invented `pr.opened`; the turn stays the anonymous
+ * `agent.turn`, rule 5); an unmapped kind falls through to its raw value rather than vanishing.
+ * Pure and shipped to the browser via `.toString()` so the feed client and its filter agree.
+ */
+export function feedKindLabel(kind: string): string {
+  return (
+    {
+      green: "issue.merged",
+      parked: "issue.parked",
+      quarantined: "issue.quarantined",
+      "wave-parked": "wave.parked",
+      carve: "issue.carved",
+      graft: "issue.grafted",
+      "campaign-batch": "wave.started",
+      "campaign-batch-done": "wave.closed",
+      "campaign-start": "campaign.started",
+      "queue-start": "campaign.started",
+      "campaign-done": "campaign.closed",
+      "queue-done": "campaign.closed",
+      "campaign-halt": "campaign.halted",
+      turn: "agent.turn",
+    }[kind] ?? kind
+  );
+}
+
+/**
+ * Map an event kind to its comms category (#78) so the feed reads in colour: merges/dones green,
+ * a parked/quarantined/wave-parked wave the attention amber (ADR 0013), a halt red, a carve
+ * purple, everything else (starts, waves, turns) the in-flight blue. Pure; shipped via `.toString()`.
+ */
+export function feedKindClass(kind: string): string {
+  if (["green", "campaign-done", "campaign-complete", "campaign-batch-done", "queue-done"].includes(kind)) return "success";
+  if (kind === "parked" || kind === "quarantined" || kind === "wave-parked") return "attention";
+  if (kind === "campaign-halt") return "failure";
+  if (kind === "carve") return "carved";
+  return "progress";
+}
+
+/**
+ * A stable identity for a feed row (#196): an event is immutable, so its project, ts, kind and
+ * text together key it. Used to dedup across re-fetches of the rolling window — the feed has no
+ * per-file index the tail keys on, so it keys on the row's own content. Pure; shipped via `.toString()`.
+ */
+export function feedKey(row: { project: string; ts: string; kind: string; text: string }): string {
+  return row.project + " " + row.ts + " " + row.kind + " " + row.text;
+}
+
+/**
+ * Which rows of a re-fetched feed window are new since last seen (#196) — the feed's analogue of
+ * `tailFresh`. The server returns the whole window newest-first each fetch; this walks it
+ * oldest-first and returns the unseen rows in that chronological order, so they append to the
+ * accumulating oldest→newest buffer (`tailAppend`) in order. `seen` is the running key set,
+ * carried forward so a re-sent row (or one kept across a Clear) isn't re-imported. Pure; shipped
+ * to the browser via `.toString()`.
+ */
+export function feedFresh(
+  entries: Array<{ project: string; ts: string; kind: string; text: string }>,
+  seen: Record<string, true>,
+): { fresh: Array<{ project: string; ts: string; kind: string; text: string }>; seen: Record<string, true> } {
+  const next: Record<string, true> = { ...seen };
+  const fresh: Array<{ project: string; ts: string; kind: string; text: string }> = [];
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const key = feedKey(entries[i]);
+    if (!next[key]) {
+      next[key] = true;
+      fresh.push(entries[i]);
+    }
+  }
+  return { fresh, seen: next };
+}
+
+/**
+ * The event-log filter contract (#196): a feed row matches a case-insensitive substring query
+ * over its kind label (`feedKindLabel`, what the operator actually reads) plus its narrated text
+ * — the feed has no raw JSON, so this mirrors the tail's line filter over the row's prose. An
+ * empty/blank query matches everything (the filter is cleared). Pure; shipped via `.toString()`.
+ */
+export function feedRowMatches(row: { kind: string; text: string }, query: string): boolean {
+  const q = (query || "").trim().toLowerCase();
+  if (!q) return true;
+  return (feedKindLabel(row.kind) + " " + row.text).toLowerCase().indexOf(q) !== -1;
+}
+
+/**
+ * The follow/pause/backlog view-model shared by the live tail (#124) and the event-log feed
+ * (#196): from an accumulating oldest→newest `buffer` and the current controls, decide which
+ * rows render and the footer/backlog counts. Following reads the whole buffer; paused freezes
+ * the visible set at `mark` (the buffer length when pause was hit) and the rows past it become
+ * the backlog. The caller supplies the row shape and its `match` predicate (the tail's
+ * issue+substring filter, the feed's kind+text filter), applied to both the visible set and
+ * the backlog count. The newest `cap` matches render — **newest-first**, so the latest row sits
+ * at the top of the pane (#195). `empty` is true when the predicate matches nothing (the body
+ * shows the empty-state text). Pure and self-contained, unit-tested in node and shipped to the
+ * browser via `.toString()` (ADR 0012).
+ */
+export function followView<T>(state: {
+  buffer: T[];
+  mark: number;
+  live: boolean;
+  cap: number;
+  match: (row: T) => boolean;
+}): { rows: T[]; visible: number; total: number; backlog: number; empty: boolean; following: boolean } {
+  const source = state.live ? state.buffer : state.buffer.slice(0, state.mark);
+  const filtered = source.filter(state.match);
+  // Keep the newest `cap` matches (the tail of the canonical oldest→newest array), then
+  // reverse so the newest renders first (#195): newest-on-top, older extending downward.
+  const rows = filtered.slice(Math.max(0, filtered.length - state.cap)).reverse();
+  const backlog = state.live ? 0 : state.buffer.slice(state.mark).filter(state.match).length;
+  return { rows, visible: rows.length, total: state.buffer.length, backlog, empty: filtered.length === 0, following: state.live };
+}
+
+/**
+ * The tail body's view-model (#124): builds the issue-dropdown + case-insensitive substring
+ * filter (both applied) over the raw JSONL line and drives the shared `followView` (#196).
+ * Pure and self-contained, unit-tested in node and shipped to the browser via `.toString()`.
  */
 export function tailView(state: {
   buffer: TailRow[];
@@ -419,13 +528,7 @@ export function tailView(state: {
 }): { rows: TailRow[]; visible: number; total: number; backlog: number; empty: boolean; following: boolean } {
   const q = (state.query || "").trim().toLowerCase();
   const match = (line: TailRow) => (!state.issue || line.issue === state.issue) && (!q || line.raw.toLowerCase().indexOf(q) !== -1);
-  const source = state.live ? state.buffer : state.buffer.slice(0, state.mark);
-  const filtered = source.filter(match);
-  // Keep the newest `cap` matches (the tail of the canonical oldest→newest array), then
-  // reverse so the newest renders first (#195): newest-on-top, older extending downward.
-  const rows = filtered.slice(Math.max(0, filtered.length - state.cap)).reverse();
-  const backlog = state.live ? 0 : state.buffer.slice(state.mark).filter(match).length;
-  return { rows, visible: rows.length, total: state.buffer.length, backlog, empty: filtered.length === 0, following: state.live };
+  return followView({ buffer: state.buffer, mark: state.mark, live: state.live, cap: state.cap, match });
 }
 
 const ARCHIVE_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -761,6 +864,7 @@ ${DASHBOARD_PALETTE_CSS}
   h1 { font-size: clamp(1.6rem, 4vw, 2.6rem); margin: 0; letter-spacing: -0.035em; }
 ${TOP_BAR_STYLES}
 ${HOST_LOG_STYLES}
+${LIVE_TAIL_STYLES}
   .counters { display: grid; grid-template-columns: repeat(4, 1fr); gap: .75rem; margin: 1.25rem 0; }
   .counter { background: var(--color-box-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: 1rem; }
   .counter-toggle { font: inherit; color: inherit; text-align: left; cursor: pointer; }
@@ -808,15 +912,16 @@ ${HOST_LOG_STYLES}
   .tally-chip { display: inline-flex; align-items: center; gap: .35rem; border: 1px solid var(--color-secondary); border-radius: 999px; padding: .15rem .5rem; background: var(--color-chip); }
   .card-last { color: var(--color-text-light-2); font-size: .85rem; margin-top: .5rem; white-space: pre-line; }
   .empty { color: var(--color-text-light-2); }
-  .feed { margin-top: 2rem; border-top: 1px solid var(--color-light-border); padding-top: 1rem; }
-  /* The event-log header (#95): the POC's live-dot + label treatment. Small uppercase
-     mono so it reads as a log heading, the live dot leading it. */
-  .feed h2 { display: flex; align-items: center; gap: .5rem; color: var(--color-text-light-2); font-family: ${MONO_FONT}; font-size: .78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; margin: 0 0 .75rem; }
+  /* The event-log feed reads as a sibling of the live tail (#196): it draws the shared pane
+     chrome (.live-tail container, .tail-head header, .tail-controls strip, .tail-backlog,
+     .tail-footer) from LIVE_TAIL_STYLES; only its row anatomy (dot + prose, below) and the
+     prose scroll body differ from the tail's mono raw lines. */
+  .feed { margin-top: 2rem; }
+  /* The feed's own scroll body — the tail's .tail-body is mono/fixed-height for raw JSON, so
+     the narrated feed keeps sans-serif prose in a bounded, scrollable pane of its own. */
+  .feed-body { max-height: 22rem; overflow-y: auto; background: var(--color-body); padding: 0 .9rem; }
+  .feed-body[hidden] { display: none; }
   .feed-row { display: flex; align-items: baseline; gap: .6rem .9rem; flex-wrap: wrap; padding: .5rem 0; border-bottom: 1px solid var(--color-light-border); font-size: .9rem; }
-  /* A flex display beats the UA [hidden] rule, so a row hidden behind "show older"
-     needs it back explicitly — otherwise the whole 48h window paints (#101), the
-     same trap the archived-runs list guards with .archive-row[hidden]. */
-  .feed-row[hidden] { display: none; }
   .feed-time { color: var(--color-text-light-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
   /* The kind reads as a clean lowercase namespace.verb code label (#95), so it is mono
      and no longer uppercased; its category still reads on the full-strength leading dot. */
@@ -827,10 +932,8 @@ ${HOST_LOG_STYLES}
   .feed-kind::before { content: ""; width: .5rem; height: .5rem; border-radius: 999px; background: var(--color-dim); flex: none; }
   .feed-kind.progress::before { background: var(--color-blue); } .feed-kind.success::before { background: var(--color-green); } .feed-kind.attention::before { background: var(--color-yellow); } .feed-kind.failure::before { background: var(--color-failure); } .feed-kind.carved::before { background: var(--color-carved); }
   .feed-text { color: var(--color-text-light); flex: 1; }
-  /* The feed's "show older" reveal (#101) mirrors the archived-runs list's control
-     (#98): the same full-width, primary-coloured affordance, here on the landing. */
-  .feed .archive-show-older { width: 100%; padding: .6rem 0; text-align: left; background: none; border: 0; color: var(--color-primary); font: inherit; cursor: pointer; }
-  .feed .archive-show-older:hover { color: var(--color-text); }
+  /* The feed body's loading/empty placeholder sits inside the padded scroll pane. */
+  .feed-body .empty { padding: .6rem 0; }
   /* The card's highlight (top border) tracks its run state (#75) — its only coloured edge (§2). */
   .card.running { border-top-color: var(--color-blue); } .card.parked { border-top-color: var(--color-yellow); } .card.failure { border-top-color: var(--color-failure); } .card.completed { border-top-color: var(--color-green); } .card.idle { border-top-color: var(--color-dim); }
   /* Status dot colours, generated once from stateColor and shared with the campaign
@@ -859,7 +962,7 @@ ${renderHostLog()}
 </section>
 <section id="parked-queue" class="parked-queue" hidden aria-label="Parked questions across all repos"></section>
 <section id="cards" class="cards"><p class="empty">Loading…</p></section>
-<section id="feed" class="feed" aria-label="Event log across all repos"><h2><span class="live-indicator" aria-hidden="true"></span>Event log · all repos</h2><div id="feed-rows"><p class="empty">Loading…</p></div></section>
+<section id="feed" class="live-tail feed" data-feed aria-label="Event log across all repos"><div class="tail-head"><span class="tail-dot" data-feed-dot aria-hidden="true"></span><span class="tail-title tail-title-static">Event log · all repos</span><span class="tail-summary" data-feed-summary></span><span class="tail-gap"></span><span class="tail-controls" data-feed-controls><input type="text" class="tail-filter" placeholder="filter events…" aria-label="Filter events" data-feed-filter /><button type="button" class="tail-play" data-feed-play data-following="true" aria-label="Pause"></button><button type="button" class="tail-save" data-feed-save>Save</button><button type="button" class="tail-clear" data-feed-clear>Clear</button></span></div><div class="feed-body" data-feed-body><p class="empty">Loading…</p></div><button type="button" class="tail-backlog" data-feed-backlog hidden></button><div class="tail-footer" data-feed-footer></div></section>
 ${issueDetailSheetMarkup(true)}
 <script>
   // The state → visual-intent reducers (dashboard-visual-state.ts, ADR 0012), single-
@@ -894,72 +997,86 @@ ${issueDetailSheetMarkup(true)}
     return Math.floor(hrs / 24) + "d";
   };
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
-  // Map an event kind to its comms category so the activity feed reads in colour
-  // (#78): merges/dones green, a parked question yellow, a halt red, a carve purple,
-  // everything else (starts, waves, turns) the in-flight blue.
-  const feedKindClass = (kind) => {
-    if (["green", "campaign-done", "campaign-complete", "campaign-batch-done", "queue-done"].includes(kind)) return "success";
-    // A parked question, a quarantined issue, and a wave-parked wave are all attention
-    // states awaiting a human (ADR 0013), so they read in the same amber (#78).
-    if (kind === "parked" || kind === "quarantined" || kind === "wave-parked") return "attention";
-    if (kind === "campaign-halt") return "failure";
-    if (kind === "carve") return "carved";
-    return "progress";
-  };
-  // Relabel the orchestrator's raw event kinds (dashboard-model's describeEvent set)
-  // as the POC's clean lowercase namespace.verb (#95) — a feed-label remap of real
-  // events, not a status-vocab change (ADR 0007). Only kinds that actually exist are
-  // mapped: no invented PR-opened kind (the local-merge flow opens none), and the
-  // turn stays the anonymous agent.turn — no agent-N identity (rule 5, #55).
-  // An unmapped kind falls through to its raw text rather than vanishing.
-  const feedKindLabel = (kind) => ({
-    "green": "issue.merged",
-    "parked": "issue.parked",
-    "quarantined": "issue.quarantined",
-    "wave-parked": "wave.parked",
-    "carve": "issue.carved",
-    "graft": "issue.grafted",
-    "campaign-batch": "wave.started",
-    "campaign-batch-done": "wave.closed",
-    "campaign-start": "campaign.started",
-    "queue-start": "campaign.started",
-    "campaign-done": "campaign.closed",
-    "queue-done": "campaign.closed",
-    "campaign-halt": "campaign.halted",
-    "turn": "agent.turn",
-  }[kind] ?? kind);
+  // The event-log feed's pure logic is single-sourced from dashboard-render via .toString()
+  // (ADR 0012): the shared follow/pause/backlog view-model (followView) and following-buffer
+  // append (tailAppend) the live tail also drives, plus the feed's dedup (feedFresh/feedKey),
+  // its kind→label/category maps and its (kind, text) filter — so the node tests exercise the
+  // very functions the browser runs and the two panes share one tested path (#196).
+  ${followView.toString()}
+  ${tailAppend.toString()}
+  ${feedKey.toString()}
+  ${feedFresh.toString()}
+  ${feedKindLabel.toString()}
+  ${feedKindClass.toString()}
+  ${feedRowMatches.toString()}
 ${ISSUE_DETAIL_SHEET_SCRIPT}
 ${REPO_DROPDOWN_SCRIPT}
-  // The newest events render; the rest of the 48h window hide behind "show older",
-  // mirroring the archived-runs list's cap (#101). "Older" here means further back
-  // within the same window — this never pages past 48h (deep history is the
-  // archived-runs list, #98).
-  const FEED_CAP = 20;
-  async function loadFeed() {
-    const rows = document.getElementById("feed-rows");
-    let feed;
-    try {
-      feed = await (await fetch("/api/feed")).json();
-    } catch {
-      rows.replaceChildren(el("p", "empty", "Couldn't load the activity feed."));
-      return;
+  // The event-log feed (#196): a live-tail-style pane over the cross-project narrated feed. The
+  // server returns the whole 48h window newest-first on each /api/feed fetch; the client folds
+  // the genuinely-new rows (feedFresh) into an oldest→newest buffer and drives the shared
+  // follow/pause/backlog view-model, so it reads as a sibling of the raw tail. Follow, filter,
+  // save and clear are the tail's affordances adapted to narrated rows; the old show-older cap
+  // folds into the scrolling pane + render cap.
+  const FEED_FOLLOW_CAP = 300, FEED_RENDER_CAP = 160;
+  const feedEl = document.querySelector("[data-feed]");
+  const fq = (sel) => feedEl.querySelector(sel);
+  const feedDot = fq("[data-feed-dot]"), feedSummary = fq("[data-feed-summary]"), feedBody = fq("[data-feed-body]");
+  const feedFooter = fq("[data-feed-footer]"), feedBacklog = fq("[data-feed-backlog]"), feedPlay = fq("[data-feed-play]");
+  const feedFilter = fq("[data-feed-filter]"), feedSave = fq("[data-feed-save]"), feedClear = fq("[data-feed-clear]");
+  let feedBuffer = [], feedSeen = {}, feedLive = true, feedMark = 0, feedQuery = "", feedLoaded = false, feedError = false;
+  // One narrated text line per row for the save-visible export (the feed has no raw JSON).
+  const feedNarrate = (e) => fmtTime(e.ts) + "  " + feedKindLabel(e.kind) + " — " + e.text;
+  const feedMatch = (e) => feedRowMatches(e, feedQuery);
+  function feedRender() {
+    const view = followView({ buffer: feedBuffer, mark: feedMark, live: feedLive, cap: FEED_RENDER_CAP, match: feedMatch });
+    feedBody.textContent = "";
+    if (feedError) { feedBody.append(el("p", "empty", "Couldn't load the activity feed.")); }
+    else if (!feedLoaded) { feedBody.append(el("p", "empty", "Loading…")); }
+    else if (view.rows.length) {
+      for (const e of view.rows) {
+        const row = el("div", "feed-row");
+        row.append(el("span", "feed-time", fmtTime(e.ts)), el("span", "feed-kind " + feedKindClass(e.kind), feedKindLabel(e.kind)), el("span", "feed-text", e.text));
+        feedBody.append(row);
+      }
+    } else {
+      feedBody.append(el("p", "empty", feedQuery.trim() ? "No events match that filter." : "No activity in the last 48 hours."));
     }
-    rows.replaceChildren();
-    if (!feed.length) { rows.append(el("p", "empty", "No activity in the last 48 hours.")); return; }
-    feed.forEach((e, i) => {
-      const row = el("div", "feed-row");
-      if (i >= FEED_CAP) row.hidden = true;
-      row.append(el("span", "feed-time", fmtTime(e.ts)), el("span", "feed-kind " + feedKindClass(e.kind), feedKindLabel(e.kind)), el("span", "feed-text", e.text));
-      rows.append(row);
-    });
-    if (feed.length > FEED_CAP) {
-      const older = feed.length - FEED_CAP;
-      const btn = el("button", "archive-show-older", "Show " + older + " older event" + (older === 1 ? "" : "s"));
-      btn.type = "button";
-      btn.addEventListener("click", () => { for (const r of rows.querySelectorAll(".feed-row")) r.hidden = false; btn.remove(); });
-      rows.append(btn);
-    }
+    feedFooter.textContent = feedLoaded && !feedError ? (view.visible + " of " + view.total + " event" + (view.total === 1 ? "" : "s") + " · " + (view.following ? "following" : "paused")) : "";
+    // Newest-on-top (#195), so the backlog affordance points up to the freshest events.
+    if (view.backlog > 0) { feedBacklog.hidden = false; feedBacklog.textContent = "↑ " + view.backlog + " new event" + (view.backlog === 1 ? "" : "s"); } else { feedBacklog.hidden = true; }
+    feedPlay.dataset.following = String(feedLive); feedPlay.setAttribute("aria-label", feedLive ? "Pause" : "Resume");
+    feedDot.dataset.state = feedLive ? "live" : "idle";
+    feedSummary.textContent = feedLoaded && !feedError ? (view.total + " event" + (view.total === 1 ? "" : "s")) : "";
+    if (feedLive) feedBody.scrollTop = 0;
   }
+  function feedIngest(entries) {
+    const res = feedFresh(entries, feedSeen); feedSeen = res.seen;
+    // Grow past the cap while paused so a piling backlog survives to be revealed on resume;
+    // following keeps the buffer bounded to a recent window.
+    if (res.fresh.length) feedBuffer = tailAppend(feedBuffer, res.fresh, feedLive, FEED_FOLLOW_CAP);
+    feedRender();
+  }
+  async function loadFeed() {
+    let feed;
+    try { feed = await (await fetch("/api/feed")).json(); }
+    catch { feedError = true; feedLoaded = true; feedRender(); return; }
+    feedError = false; feedLoaded = true;
+    feedIngest(feed);
+  }
+  feedPlay.addEventListener("click", () => { feedLive = !feedLive; feedMark = feedBuffer.length; feedRender(); });
+  feedBacklog.addEventListener("click", () => { feedLive = true; feedMark = feedBuffer.length; feedRender(); });
+  feedFilter.addEventListener("input", () => { feedQuery = feedFilter.value; feedRender(); });
+  feedSave.addEventListener("click", () => {
+    // The currently visible (filtered) rows — uncapped by the render window — as narrated text
+    // lines, one per row (there is no underlying raw JSON to emit).
+    const view = followView({ buffer: feedBuffer, mark: feedMark, live: feedLive, cap: Math.max(feedBuffer.length, 1), match: feedMatch });
+    const blob = new Blob([view.rows.map(feedNarrate).join("\\n")], { type: "text/plain" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "event-log.txt"; a.click(); URL.revokeObjectURL(a.href);
+  });
+  // Clear drops only this view's buffered rows client-side; no events or logs are touched. The
+  // seen set is kept so the server's still-held window isn't re-imported on the next fetch (the
+  // clear sticks until genuinely-new events arrive).
+  feedClear.addEventListener("click", () => { feedBuffer = []; feedMark = 0; feedRender(); });
   function renderParked(parked) {
     const toggle = document.querySelector('[data-counter="parked"]');
     const panel = document.getElementById("parked-queue");

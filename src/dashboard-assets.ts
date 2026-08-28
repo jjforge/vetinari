@@ -1,4 +1,4 @@
-import { cappedRawRows, highlightJsonLine, isNotableHostEvent, tailAppend, tailFresh, tailView } from "./dashboard-render.ts";
+import { cappedRawRows, followView, highlightJsonLine, isNotableHostEvent, tailAppend, tailFresh, tailView } from "./dashboard-render.ts";
 
 /**
  * The dashboard's inert browser payloads — the CSS and client-side JavaScript
@@ -630,6 +630,9 @@ export const LIVE_TAIL_STYLES = `  .live-tail { background: var(--color-card); b
   .tail-title { display: inline-flex; align-items: center; gap: .4rem; border: 0; background: none; padding: 0; color: var(--color-text); font: inherit; font-weight: 600; cursor: pointer; }
   .tail-caret::before { content: "▾"; color: var(--color-text-light-2); display: inline-block; transition: transform 150ms; }
   .tail-title[aria-expanded="false"] .tail-caret::before { transform: rotate(-90deg); }
+  /* A non-disclosing pane title (the event-log feed heads its own pane but has no collapse):
+     the same header type, minus the button affordance. */
+  .tail-title-static { cursor: default; }
   .tail-summary { color: var(--color-text-light-2); font-size: .85rem; white-space: nowrap; }
   .tail-gap { flex: 1; }
   .tail-controls { display: inline-flex; align-items: center; gap: .4rem; }
@@ -688,6 +691,7 @@ export const LIVE_TAIL_SCRIPT = `  const tailEl = document.querySelector("[data-
     ${highlightJsonLine.toString()}
     ${tailFresh.toString()}
     ${tailAppend.toString()}
+    ${followView.toString()}
     ${tailView.toString()}
     const FOLLOW_CAP = 260, RENDER_CAP = 160;
     const project = tailEl.dataset.project;

@@ -29,13 +29,14 @@ export const MODES: Mode[] = [
     blurb: "prove the image runs every gate green — no agent, no cost",
   },
   {
-    signature: "run <task>",
-    blurb: "the TDD loop: agent turn → gate → resume on red",
+    signature: "run <task> [--agent <name>] [--model <m>] [--effort <e>]",
+    blurb:
+      "the TDD loop: agent turn → gate → resume on red. --agent picks the provider (claude | pi | codex, default claude or cfg.agent.provider); --model/--effort override that provider's defaults, effort in the provider's own vocabulary. A bad provider/effort or missing provider credentials fails fast before the container (ADR 0016)",
   },
   {
-    signature: 'campaign [--name "…"] [--auto-prune] <batch…>',
+    signature: 'campaign [--name "…"] [--auto-prune] [--agent <name>] <batch…>',
     blurb:
-      "queue each batch, then merge greens → gate base → next batch. --name labels the run in the dashboard + archived-runs list. If a merge-conflict quarantine strands dependents in later waves the campaign pauses for a human by default; --auto-prune prunes the stranded closure and runs on (ADR 0013)",
+      "queue each batch, then merge greens → gate base → next batch. --name labels the run in the dashboard + archived-runs list. --agent (with optional --model/--effort) selects the provider for the whole campaign and every child wave (claude | pi | codex; ADR 0016). If a merge-conflict quarantine strands dependents in later waves the campaign pauses for a human by default; --auto-prune prunes the stranded closure and runs on (ADR 0013)",
   },
   {
     signature: "campaign --resume",

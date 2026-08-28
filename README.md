@@ -51,18 +51,32 @@ keeps N slots full, and a park hands its slot straight to whatever is next in li
 npm install github:jjforge/vetinari
 ```
 
-Needs Docker, Node 22+, and `.vetinari.local/.env` holding `CLAUDE_CODE_OAUTH_TOKEN`
-from `claude setup-token`: your Claude Code subscription, which is what these
-agents run on. The container runs the official `claude` CLI, which reads that
-token exactly as Claude Code GitHub Actions does. Vetinari does not mint or
-exchange credentials; it passes the token you supply straight through to that CLI
-inside the agent container.
+Needs Docker, Node 22+, and `.vetinari.local/.env` holding your agent
+provider's credentials. Vetinari is **provider-agnostic** (ADR 0016): a run or
+campaign can execute on **Claude Code, pi, or Codex** — the resumable providers —
+selected by `cfg.agent.provider` or a per-invocation `--agent` override.
+**Claude is the default**, so a project that names no provider runs exactly as
+before. Vetinari does not mint or exchange credentials; it passes the token you
+supply straight through to the selected CLI inside the agent container, and fails
+a preflight (before the container) if the selected provider's credential is
+missing.
 
-`ANTHROPIC_API_KEY` works as a drop-in alternative, and is worth switching to
-when billing is the constraint rather than convenience: it gives per-run cost
-attribution and spend limits in the Console, and it doesn't consume the
-subscription rate windows that a parallel queue can exhaust. Neither choice
-changes how the loop behaves.
+Each provider reads its own key from `.vetinari.local/.env`:
+
+| Provider | `--agent` | `.env` credential key(s) |
+| --- | --- | --- |
+| Claude Code (default) | `claude` | `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) — or `ANTHROPIC_API_KEY` |
+| pi | `pi` | `ANTHROPIC_API_KEY` |
+| Codex | `codex` | `OPENAI_API_KEY` |
+
+For Claude, the `CLAUDE_CODE_OAUTH_TOKEN` runs the loop on your Claude Code
+subscription (the container's `claude` CLI reads it exactly as Claude Code GitHub
+Actions does); `ANTHROPIC_API_KEY` works as a drop-in alternative worth switching
+to when billing is the constraint — it gives per-run cost attribution and spend
+limits in the Console and doesn't consume the subscription rate windows a parallel
+queue can exhaust. `--model`/`--effort` override the selected provider's defaults
+(effort in that provider's own vocabulary); none of these choices change how the
+loop behaves.
 
 Run `npx vetinari init` to scaffold the layout: a committed
 `vetinari/config.mts` (below) plus a `vetinari/Dockerfile`, and the excluded
@@ -468,8 +482,8 @@ The README stops at the reader's first hour. The operational reference lives in
 | --- | --- |
 | `build [--no-baseline]` | build `cfg.image` from `vetinari/Dockerfile` (neither repeated on the CLI) via sandcastle, then `baseline` on success; `--no-baseline` builds only. A build or baseline failure exits non-zero with sandcastle's output shown |
 | `baseline` | toolchain probe + all gates, no agent |
-| `run <task>` | the TDD loop; exit 0 green, 2 parked |
-| `campaign [--name "…"] [--auto-prune] <batch…>` | drain each batch, merge its greens, gate the merged base, then start the next. Integration is **non-atomic** (ADR 0013): a merge conflict **quarantines** that one issue and the wave carries on (its already-merged greens stay merged); a red merged base **wave-parks** the wave and pauses for a human. `--name` labels the run in the dashboard/archive. When a quarantine strands dependents in later waves the campaign pauses for a human by default; `--auto-prune` prunes that closure and runs on instead |
+| `run <task> [--agent <name>] [--model <m>] [--effort <e>]` | the TDD loop; exit 0 green, 2 parked. `--agent` selects the provider (`claude` \| `pi` \| `codex`, default `claude` or `cfg.agent.provider`); `--model`/`--effort` override that provider's defaults (effort in its **own** vocabulary). A bad provider/effort or a missing provider credential fails fast **before** the container (ADR 0016) |
+| `campaign [--name "…"] [--auto-prune] [--agent <name>] <batch…>` | drain each batch, merge its greens, gate the merged base, then start the next. Integration is **non-atomic** (ADR 0013): a merge conflict **quarantines** that one issue and the wave carries on (its already-merged greens stay merged); a red merged base **wave-parks** the wave and pauses for a human. `--name` labels the run in the dashboard/archive. `--agent` (with optional `--model`/`--effort`) picks the provider for the whole campaign and **every child wave** (`claude` \| `pi` \| `codex`; ADR 0016). When a quarantine strands dependents in later waves the campaign pauses for a human by default; `--auto-prune` prunes that closure and runs on instead |
 | `campaign --resume` | continue a **paused** campaign's unrun waves on the current base (after a human fixed a wave-park forward or pruned a suspect); reconstructs the plan from the event log, redoes no already-merged issue, takes no batch args |
 | `prune <issue>` | prune `<issue>` + everything blocked by it from the **running** campaign at the next wave boundary (the in-flight wave finishes; only future waves shrink). Banked/merged work is kept; the pruned issue's parked record (branch/worktree/session) is **preserved** so it stays resumable — `--purge` is the rare true-drop that clears it (`--dry-run` to preview) |
 | `prune <issue> <batch…>` | the from-scratch form: drop `<issue>` + its transitive dependents, then run the rest as a fresh reduced campaign from the plan you supply (`--dry-run` to just print) |

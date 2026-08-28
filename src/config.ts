@@ -299,7 +299,7 @@ export interface MountSpec {
 export interface VetinariConfig {
   /** Name used in notifications, e.g. "jjforge". */
   project: string;
-  /** Docker image carrying your toolchain AND the claude CLI. */
+  /** Docker image carrying your toolchain AND the agent CLI(s) — the reference image ships Claude Code, pi, and Codex (ADR 0016). */
   image: string;
   /** Branch work is cut from, and what gate scoping diffs against. */
   baseBranch: string;

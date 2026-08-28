@@ -45,9 +45,11 @@ must not reach the agent must never appear in `.env`.
 _Avoid_: sandbox env, container config
 
 **`.env`** (container secrets):
-The project's excluded secrets the **in-container agent** needs — the model-harness
-token. The one file that crosses the [[container-boundary]]; it keeps the name `.env`
-because the sandbox runtime reads it by that name.
+The project's excluded secrets the **in-container agent** needs — the selected agent
+provider's credential (ADR 0016: `claude` → `CLAUDE_CODE_OAUTH_TOKEN`/`ANTHROPIC_API_KEY`,
+`pi` → `ANTHROPIC_API_KEY`, `codex` → `OPENAI_API_KEY`). The one file that crosses the
+[[container-boundary]]; it keeps the name `.env` because the sandbox runtime reads it by
+that name. A run whose provider's key is absent here fails a preflight before launch.
 _Avoid_: container.env
 
 **`host.env`** (host-side secrets):

@@ -1,5 +1,5 @@
 import { listProjects } from "./registry.ts";
-import { buildFeed } from "./dashboard-model.ts";
+import { buildFeed, festiveFromCookie } from "./dashboard-model.ts";
 import type { RouteHandler } from "./dashboard-http.ts";
 
 /** `GET /api/feed` — the cross-project event feed as JSON: every registered
@@ -10,6 +10,7 @@ import type { RouteHandler } from "./dashboard-http.ts";
 export const handleFeed: RouteHandler = (req, res, url, deps) => {
   if (!(req.method === "GET" && url.pathname === "/api/feed")) return false;
   res.setHeader("content-type", "application/json");
-  res.end(JSON.stringify(buildFeed(listProjects(deps.configDir))));
+  const festive = festiveFromCookie(req.headers.cookie);
+  res.end(JSON.stringify(buildFeed(listProjects(deps.configDir), new Date(), undefined, festive)));
   return true;
 };

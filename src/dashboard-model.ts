@@ -7,6 +7,7 @@ import { type ProjectPointer } from "./registry.ts";
 import { listParked, parkedDirOf, type ParkedRecord } from "./state.ts";
 import { applyCarve } from "./carve.ts";
 import { applyGraft } from "./plan.ts";
+import { festiveWaveName } from "./festive-names.ts";
 import { readEventLog, type GreenEvent, type OrchestratorEvent } from "./event-log.ts";
 import { activityLogPath } from "./activity.ts";
 
@@ -91,6 +92,10 @@ export interface CampaignStatus {
   project: string;
   /** the run's optional `--name`, shown as the header label; absent when unnamed. */
   name?: string;
+  /** the festive-name block this campaign reserved at start (#193); wave `i` renders
+   * as `festiveWaveName(festiveOffset, i)` when festive wave names are on. Absent for a
+   * run started before the feature, which then renders nameless under festive. */
+  festiveOffset?: number;
   waves: StatusWave[];
   parked: ParkedIssue[];
 }
@@ -159,6 +164,20 @@ export function viewRelevantEvents(events: OrchestratorEvent[]): OrchestratorEve
   return events.filter((e) => !SSE_NOISE_EVENTS.has(e.event));
 }
 
+/**
+ * Whether "Festive Wave Names" is on for a request (#193). Wave labels are
+ * server-rendered, but the gear toggle is client-side, so it sets a `festiveWaveNames`
+ * cookie the server reads here: `=1` on, `=0` off, the cookie always winning. With no
+ * such cookie the `fallback` decides — the project's `festiveWaveNames` config default,
+ * or plain false at the host dashboard, which loads no per-project config (ADR 0002).
+ * Pure and header-parsing-only so it is unit-testable without a request.
+ */
+export function festiveFromCookie(cookieHeader: string | undefined, fallback = false): boolean {
+  const match = cookieHeader?.match(/(?:^|;\s*)festiveWaveNames=([^;]*)/);
+  if (!match) return fallback;
+  return match[1] === "1";
+}
+
 const normalizeIssue = (id: string) => id.replace(/^#/, "");
 
 const hash = (id: unknown) => `#${normalizeIssue(String(id))}`;
@@ -174,17 +193,33 @@ const mergedIssue = (e: GreenEvent): string | undefined => {
 };
 
 /**
- * A wave's human label — `Wave N`, plus ` — <lead title> +M` once the lead issue's
- * title has resolved (bare index otherwise). The single derivation both the status-page
- * wave cards (`renderWaveLabel`, dashboard-render.ts) and the event narration
- * (`describeEvent`) call, so the two paths can't drift. Takes the already-extracted
- * `(index, leadTitle, extra)` because its two callers feed it from different inputs — a
- * resolved `StatusWave` vs. a raw event + its `titles` map — and the caller escapes the
- * title first where the sink is HTML. `index` is zero-based; `extra` is the count beyond
- * the lead.
+ * The "Festive Wave Names" input to `waveLabel` (#193): the resolved Discworld name
+ * plus which surface is rendering, since the festive form differs by surface. A
+ * `card` (or closed-wave chip) shows `index · name` — its member rows already carry
+ * the issue titles. A `line` (the one-line narration, which has no member rows) shows
+ * `index · name · #num, #num, …`, listing the wave's member issue numbers inline.
  */
-export function waveLabel(index: number, leadTitle: string | undefined, extra: number): string {
+export type FestiveWaveLabel = { name: string; surface: "card" } | { name: string; surface: "line"; numbers: string[] };
+
+/**
+ * A wave's human label — `Wave N`, plus ` — <lead title> +M` once the lead issue's
+ * title has resolved (bare index otherwise). The single derivation the status-page
+ * wave cards (`renderWaveLabel`, dashboard-render.ts), the closed-wave chip
+ * (`renderClosedWaveChip`) and the event narration (`describeEvent`) call, so the paths
+ * can't drift. Takes the already-extracted `(index, leadTitle, extra)` because its
+ * callers feed it from different inputs — a resolved `StatusWave` vs. a raw event + its
+ * `titles` map — and the caller escapes the title first where the sink is HTML. `index`
+ * is zero-based; `extra` is the count beyond the lead. When `festive` is supplied
+ * (the gear toggle is on), it replaces the plain wording with the surface-specific
+ * festive form and `leadTitle`/`extra` are ignored.
+ */
+export function waveLabel(index: number, leadTitle: string | undefined, extra: number, festive?: FestiveWaveLabel): string {
   const base = `Wave ${index + 1}`;
+  if (festive) {
+    const head = `${base} · ${festive.name}`;
+    if (festive.surface === "card" || !festive.numbers.length) return head;
+    return `${head} · ${festive.numbers.map((n) => hash(n)).join(", ")}`;
+  }
   if (!leadTitle) return base;
   return `${base} — ${leadTitle}${extra > 0 ? ` +${extra}` : ""}`;
 }
@@ -213,22 +248,33 @@ const campaignPrefix = (name?: string) => (name ? `Campaign “${name}” — ` 
  * line only when a pre-summary run has none. Events with no operator-facing
  * narration return "" so `lastEventText` can skip past machine noise.
  */
-export function describeEvent(e: OrchestratorEvent): string {
+export function describeEvent(e: OrchestratorEvent, festive?: { offset: number }): string {
+  // The one-line festive form of a wave — `Wave N · name · #num, #num, …` — through the
+  // shared `waveLabel` (surface `line`), so the narration can't drift from the card/chip.
+  const festiveLine = (index: number, members: string[]) =>
+    waveLabel(index, undefined, 0, {
+      name: festiveWaveName(festive!.offset, index),
+      surface: "line",
+      numbers: members.map((id) => normalizeIssue(String(id))),
+    });
   switch (e.event) {
     case "campaign-start":
       return e.name ? `Campaign “${e.name}” started` : "Campaign started";
     case "campaign-batch": {
       const tasks = e.tasks ?? [];
-      const titles = tasks.map((id) => e.titles?.[normalizeIssue(String(id))] ?? hash(id));
-      return `${campaignPrefix(e.name)}${waveMembersLabel(e.index ?? 0, titles)} started`;
+      const label = festive
+        ? festiveLine(e.index ?? 0, tasks.map(String))
+        : waveMembersLabel(e.index ?? 0, tasks.map((id) => e.titles?.[normalizeIssue(String(id))] ?? hash(id)));
+      return `${campaignPrefix(e.name)}${label} started`;
     }
     case "campaign-batch-done": {
       // The event holds no plan-ordered task list, so the wave's membership is reconstructed
       // from the outcomes it does carry (merged, then quarantined, then held) and each member
       // is named by title (an unresolved id falls back to its `#id`), listing them all.
       const members = [...(e.merged ?? []), ...(e.quarantined ?? []), ...(e.held ?? [])];
-      const titles = members.map((id) => e.titles?.[normalizeIssue(String(id))] ?? hash(id));
-      const label = waveMembersLabel(e.index ?? 0, titles);
+      const label = festive
+        ? festiveLine(e.index ?? 0, members.map(String))
+        : waveMembersLabel(e.index ?? 0, members.map((id) => e.titles?.[normalizeIssue(String(id))] ?? hash(id)));
       const hashes = (e.merged ?? []).length ? (e.merged as unknown[]).map(hash).join(", ") : "nothing";
       return `${campaignPrefix(e.name)}${label} merged ${hashes}`;
     }
@@ -276,14 +322,25 @@ export function describeEvent(e: OrchestratorEvent): string {
   }
 }
 
+/** The festive descriptor `describeEvent` needs for a run's events (#193): the offset
+ * reserved by the run's latest `campaign-start`, wrapped so an offset of 0 stays a real
+ * reservation. Undefined when festive is off, or the run stamped no offset (pre-feature)
+ * — narration then stays plain even under the toggle. */
+const festiveFor = (events: OrchestratorEvent[], festive: boolean): { offset: number } | undefined => {
+  if (!festive) return undefined;
+  const start = events.findLast((e): e is OrchestratorEvent & { festiveOffset?: number } => e.event === "campaign-start");
+  return Number.isInteger(start?.festiveOffset) ? { offset: start!.festiveOffset as number } : undefined;
+};
+
 /**
  * One event as a single repo-prefixed sentence for the cross-project feed:
  * `describeEvent`'s plain-words line with the project name in front. Pure — an
  * event `describeEvent` can't narrate (machine noise) returns "" so `buildFeed`
- * can skip past it, exactly as `lastEventText` does.
+ * can skip past it, exactly as `lastEventText` does. `festive` (its run's reserved
+ * offset, resolved by the caller) names the wave after a character (#193).
  */
-export function formatFeedEvent(project: string, e: OrchestratorEvent): string {
-  const sentence = describeEvent(e);
+export function formatFeedEvent(project: string, e: OrchestratorEvent, festive?: { offset: number }): string {
+  const sentence = describeEvent(e, festive);
   return sentence ? `${project} — ${sentence}` : "";
 }
 
@@ -292,11 +349,13 @@ export function formatFeedEvent(project: string, e: OrchestratorEvent): string {
  * card's "last event" line. Scans newest-first and returns the first entry
  * `describeEvent` can narrate, so machine noise (gate/sandbox/queue-spawn) that
  * lands after a meaningful event never becomes the headline. Empty logs read
- * "No activity yet".
+ * "No activity yet". When `festive` is on, a wave event is narrated festively off
+ * the run's reserved offset (#193).
  */
-export function lastEventText(events: OrchestratorEvent[]): string {
+export function lastEventText(events: OrchestratorEvent[], festive = false): string {
+  const festiveArg = festiveFor(events, festive);
   for (let i = events.length - 1; i >= 0; i--) {
-    const text = describeEvent(events[i]);
+    const text = describeEvent(events[i], festiveArg);
     if (text) return text;
   }
   return "No activity yet";
@@ -404,6 +463,10 @@ export interface ReducedCampaign {
   /** the optional human name the campaign was launched with (`--name`), read off
    * the latest `campaign-start` event; undefined for an unnamed run. */
   name?: string;
+  /** the start of the festive-name block this campaign reserved (#193), read off the
+   * latest `campaign-start`; undefined for a run started before the feature. Wave `i`
+   * draws `festiveWaveName(festiveOffset, i)` when festive wave names are on. */
+  festiveOffset?: number;
   outcomes: Map<string, IssueStatus>;
   details: Map<string, string>;
   /** issue id → title, captured onto the run's start event at launch by the
@@ -445,6 +508,7 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
   const grafted = new Set<string>();
   const quarantined = new Set<string>();
   let name: string | undefined;
+  let festiveOffset: number | undefined;
   const outcomes = new Map<string, IssueStatus>();
   const details = new Map<string, string>();
   const titles = new Map<string, string>();
@@ -468,6 +532,7 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
       waves = e.batches.map((batch: unknown[]) => batch.map(String).map(normalizeIssue));
       layout = waves.map((wave) => [...wave]);
       name = typeof e.name === "string" && e.name.trim() ? e.name : undefined;
+      festiveOffset = Number.isInteger(e.festiveOffset) ? e.festiveOffset : undefined;
       currentWave = -1;
     } else if (e.event === "campaign-batch" && Number.isInteger(e.index)) {
       currentWave = e.index;
@@ -575,7 +640,7 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
   // becomes `running` on pickup — so drop any grafted id that has since reached an outcome.
   for (const id of [...grafted]) if (outcomes.has(id)) grafted.delete(id);
 
-  return { waves, layout, carved, grafted, quarantined, name, outcomes, details, titles, mergedAt, halted, closedWaves, currentWave, parkedWave };
+  return { waves, layout, carved, grafted, quarantined, name, festiveOffset, outcomes, details, titles, mergedAt, halted, closedWaves, currentWave, parkedWave };
 }
 
 /** One entry in an issue's turn log (ADR 0009): the turn's number as logged
@@ -807,7 +872,7 @@ export function summarizeRun(events: OrchestratorEvent[]): string {
 }
 
 export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
-  const { waves, layout, carved, grafted, quarantined, name, outcomes, details, titles, closedWaves, currentWave, parkedWave } = reduceCampaign(readEventLog(cfg));
+  const { waves, layout, carved, grafted, quarantined, name, festiveOffset, outcomes, details, titles, closedWaves, currentWave, parkedWave } = reduceCampaign(readEventLog(cfg));
 
   const activeIssueNumbers = new Set(waves.flat());
   const closedIssueNumbers = new Set([...closedWaves].flatMap((index) => waves[index] ?? []));
@@ -857,6 +922,7 @@ export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
   return {
     project: cfg.project,
     name,
+    festiveOffset,
     waves: displayWaves,
     parked: parkedRecords.map(toParkedIssue),
   };
@@ -1059,7 +1125,7 @@ const FEED_ARCHIVE_MARGIN_MS = 6 * 60 * 60 * 1000;
  * row (`formatFeedEvent` returns ""), so the feed reads as an operator log, not a
  * raw event dump.
  */
-export function buildFeed(pointers: ProjectPointer[], now: Date = new Date(), logger: Logger = hostLogger()): FeedEntry[] {
+export function buildFeed(pointers: ProjectPointer[], now: Date = new Date(), logger: Logger = hostLogger(), festive = false): FeedEntry[] {
   const cutoffMs = now.getTime() - FEED_WINDOW_MS;
   const archiveFloorMs = cutoffMs - FEED_ARCHIVE_MARGIN_MS;
   const entries: FeedEntry[] = [];
@@ -1081,10 +1147,13 @@ export function buildFeed(pointers: ProjectPointer[], now: Date = new Date(), lo
       }
     }
     for (const events of runs) {
+      // Each run carries its own reserved offset on its `campaign-start`, so resolve it
+      // once per run and narrate that run's wave events festively off it (#193).
+      const festiveArg = festiveFor(events, festive);
       for (const e of events) {
         const tsMs = Date.parse(String(e.ts ?? ""));
         if (Number.isNaN(tsMs) || tsMs < cutoffMs) continue;
-        const text = formatFeedEvent(pointer.project, e);
+        const text = formatFeedEvent(pointer.project, e, festiveArg);
         if (text) entries.push({ project: pointer.project, ts: String(e.ts), kind: String(e.event ?? ""), text });
       }
     }
@@ -1227,7 +1296,7 @@ const mergedTodayForProject = (baseLocation: string, liveEvents: OrchestratorEve
   return merged.size;
 };
 
-const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, events: OrchestratorEvent[], logger: Logger): ProjectCard => {
+const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, events: OrchestratorEvent[], logger: Logger, festive = false): ProjectCard => {
   // The card heading shows owner/name, read live off the checkout's git remote;
   // undefined for a project with none (the demo), so the display falls back to the key.
   const repo = repoForProject(pointer.projectRoot);
@@ -1275,7 +1344,7 @@ const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, event
       parked: issues.filter((i) => i.status === "parked").length,
       queued: issues.filter((i) => i.status === "unstarted").length,
     },
-    lastEvent: lastEventText(events),
+    lastEvent: lastEventText(events, festive),
   };
 };
 
@@ -1287,7 +1356,7 @@ const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, event
  * merged-today counts each project's issues whose reconstructed merge stamp
  * (`reduceCampaign`'s `mergedAt`) falls on `now`'s local day.
  */
-export function buildLanding(pointers: ProjectPointer[], now: Date = new Date(), logger: Logger = hostLogger()): LandingView {
+export function buildLanding(pointers: ProjectPointer[], now: Date = new Date(), logger: Logger = hostLogger(), festive = false): LandingView {
   const projects: ProjectCard[] = [];
   const parked: ParkedQuestion[] = [];
   let mergedToday = 0;
@@ -1309,7 +1378,7 @@ export function buildLanding(pointers: ProjectPointer[], now: Date = new Date(),
     for (const p of status.parked) {
       parked.push({ issueNumber: p.issueNumber, project: status.project, question: p.description, parkedAt: p.parkedAt });
     }
-    projects.push(buildProjectCard(pointer, status, events, logger));
+    projects.push(buildProjectCard(pointer, status, events, logger, festive));
   }
   // Oldest first — the question that has waited longest surfaces at the top.
   parked.sort((a, b) => a.parkedAt.localeCompare(b.parkedAt));

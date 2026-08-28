@@ -1,5 +1,5 @@
 import { listProjects } from "./registry.ts";
-import { archiveStatusConfig, buildAllStatus, buildStatus, listArchivedRuns, projectRunState, reconcileArchivedStatus, repoForProject, selectStatus } from "./dashboard-model.ts";
+import { archiveStatusConfig, buildAllStatus, buildStatus, festiveFromCookie, listArchivedRuns, projectRunState, reconcileArchivedStatus, repoForProject, selectStatus } from "./dashboard-model.ts";
 import { renderLandingShell, renderStatusPage } from "./dashboard-render.ts";
 import type { RouteHandler } from "./dashboard-http.ts";
 
@@ -60,6 +60,7 @@ export const handlePage: RouteHandler = (req, res, url, deps) => {
       archivedRuns: runs,
       archivedRun: match?.run,
       archivedMode: match ? requestedMode : undefined,
+      festive: festiveFromCookie(req.headers.cookie),
     }),
   );
   return true;

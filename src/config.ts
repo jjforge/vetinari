@@ -217,6 +217,14 @@ export interface VetinariConfig {
   hostEnv?: Record<string, string>;
   /** Probe `baseline` runs to prove the image has the toolchain. */
   toolchainProbe?: string;
+  /**
+   * "Festive Wave Names" — when true, the dashboard defaults to naming each wave
+   * after a Discworld character (`Wave 2 · Granny Weatherwax`) instead of a bare
+   * `Wave N` (#193). Default false. This is only the **default** the server falls
+   * back to when the browser carries no `festiveWaveNames` cookie; the gear toggle
+   * still lets an operator flip it per-browser, and that cookie wins.
+   */
+  festiveWaveNames?: boolean;
 }
 
 export type ResolvedConfig = Required<

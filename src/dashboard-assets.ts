@@ -792,6 +792,9 @@ export const HOST_LOG_STYLES = `  .host-log { position: relative; display: flex;
   .host-log-gap { flex: 1; }
   .host-log-close { background: none; border: 0; color: var(--color-text-light-2); font-size: 1.3rem; line-height: 1; cursor: pointer; padding: 0 .3rem; }
   .host-log-close:hover { color: var(--color-text); }
+  .host-log-settings { padding: .6rem .9rem; border-bottom: 1px solid var(--color-light-border); }
+  .festive-toggle { display: inline-flex; align-items: center; gap: .5rem; color: var(--color-text-light); font-size: .82rem; cursor: pointer; }
+  .festive-toggle input { cursor: pointer; }
   .host-log-filter { margin: .7rem .9rem 0; padding: .4rem .6rem; color: var(--color-text); background: var(--color-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); font: inherit; font-size: .8rem; }
   .host-log-lines { flex: 1; min-height: 0; overflow-y: auto; padding: .6rem .9rem; font-family: ${MONO_FONT}; font-size: .78rem; line-height: 1.5; }
   .host-log-line { padding: .05rem 0; }
@@ -871,6 +874,18 @@ export const HOST_LOG_SCRIPT = `  const hostLogRoot = document.querySelector("[d
     const closePanel = () => { panel.hidden = true; gear.setAttribute("aria-expanded", "false"); };
     gear.addEventListener("click", () => (panel.hidden ? openPanel() : closePanel()));
     closeBtn.addEventListener("click", closePanel);
+    // "Festive Wave Names" (#193): wave labels are server-rendered, so the toggle can't
+    // flip them in the client — it writes the festiveWaveNames cookie (=1 on / =0 off, a
+    // year TTL) the server reads when rendering labels, then reloads so the labels re-render.
+    // The checkbox reflects the current cookie on load so its state persists across reloads.
+    const festiveToggle = hostLogRoot.querySelector("[data-festive-toggle]");
+    if (festiveToggle) {
+      festiveToggle.checked = /(?:^|;\\s*)festiveWaveNames=1/.test(document.cookie);
+      festiveToggle.addEventListener("change", () => {
+        document.cookie = "festiveWaveNames=" + (festiveToggle.checked ? "1" : "0") + "; path=/; max-age=31536000";
+        location.reload();
+      });
+    }
     filterEl.addEventListener("input", () => { expanded = 0; draw(); });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !panel.hidden) closePanel(); });
     // Fold newly-appended host rows (the server sends them in file order, oldest→newest) into

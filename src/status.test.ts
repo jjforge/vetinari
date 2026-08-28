@@ -54,7 +54,9 @@ import {
   reduceCampaign,
   renderHostLog,
   renderLandingShell,
+  festiveFromCookie,
   viewRelevantEvents,
+  waveLabel,
   renderStatusPage,
   renderTopBar,
   selectStatus,
@@ -1519,6 +1521,10 @@ test("renderHostLog renders a gear entry point, a hidden badge, and a hidden hos
   assert.match(html, /data-host-log-filter/);
   // A lines container the client fills from /api/host-log and the SSE host frames.
   assert.match(html, /data-host-log-lines/);
+  // The gear also carries the "Festive Wave Names" settings toggle (#193): an
+  // unchecked-by-default checkbox the client syncs to the festiveWaveNames cookie.
+  assert.match(html, /data-festive-toggle/);
+  assert.match(html, /Festive [Ww]ave [Nn]ames/);
 });
 
 test("renderLandingShell mounts the host-log gear + pane on the host view (#180)", () => {
@@ -3426,6 +3432,76 @@ test("selectStatus picks the requested project, defaulting to the first otherwis
   assert.equal(selectStatus(statuses, "ghost").project, "alpha");
 });
 
+test("buildLanding's last-event line names the wave festively when the toggle is on (#193)", () => {
+  const dir = join(tmpdir(), `vetinari-landing-festive-${Date.now()}`);
+  seedState(dir, [
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["101"], ["201"]], slots: 1, festiveOffset: 11, name: "gateway work" }),
+    event("campaign-batch", { ts: "2025-01-01T00:03:00.000Z", index: 1, tasks: ["201", "202"], name: "gateway work" }),
+  ]);
+  const pointers = [pointerFor("demo", dir)];
+  // Off — today's plain narration lists the member titles/ids.
+  assert.equal(buildLanding(pointers, new Date("2025-01-02T00:00:00.000Z")).projects[0].lastEvent, "Campaign “gateway work” — Wave 2 — #201, #202 started");
+  // On — the wave draws pool[11+1] = "Nanny Ogg" and lists the member issue numbers.
+  assert.equal(
+    buildLanding(pointers, new Date("2025-01-02T00:00:00.000Z"), undefined, true).projects[0].lastEvent,
+    "Campaign “gateway work” — Wave 2 · Nanny Ogg · #201, #202 started",
+  );
+});
+
+test("festiveFromCookie reads the toggle out of the request's Cookie header (#193)", () => {
+  // Absent header → the fallback (the config default; false at the host dashboard).
+  assert.equal(festiveFromCookie(undefined, false), false);
+  assert.equal(festiveFromCookie("", false), false);
+  assert.equal(festiveFromCookie("theme=dark", false), false);
+  // `festiveWaveNames=1` turns it on; `=0` turns it off — the cookie wins over the fallback.
+  assert.equal(festiveFromCookie("festiveWaveNames=1", false), true);
+  assert.equal(festiveFromCookie("festiveWaveNames=0", true), false);
+  // Found among other cookies, with the usual "; " separators and stray whitespace.
+  assert.equal(festiveFromCookie("theme=dark; festiveWaveNames=1; tz=UTC", false), true);
+  // No cookie present → the fallback decides, so a config default of true still reads on.
+  assert.equal(festiveFromCookie("theme=dark", true), true);
+});
+
+test("waveLabel's festive input names the wave through the one derivation (#193)", () => {
+  // Off (no festive input) — exactly today's wording, card and bare.
+  assert.equal(waveLabel(1, undefined, 0), "Wave 2");
+  assert.equal(waveLabel(1, "cache eviction", 2), "Wave 2 — cache eviction +2");
+  // Card surface — `index · name`; the lead title + "+M" is dropped (the card's member
+  // rows already carry the titles), so only the index and the festive name show.
+  assert.equal(waveLabel(1, "cache eviction", 2, { name: "Granny Weatherwax", surface: "card" }), "Wave 2 · Granny Weatherwax");
+  // Line surface — `index · name · #num, #num, …`; the single-line narration has no member
+  // rows, so it lists the member issue numbers inline.
+  assert.equal(
+    waveLabel(1, undefined, 0, { name: "Granny Weatherwax", surface: "line", numbers: ["1234", "145", "234"] }),
+    "Wave 2 · Granny Weatherwax · #1234, #145, #234",
+  );
+  // A member-less wave degrades the line to just `index · name`.
+  assert.equal(waveLabel(1, undefined, 0, { name: "Death", surface: "line", numbers: [] }), "Wave 2 · Death");
+});
+
+test("describeEvent narrates festively when given a campaign's reserved offset (#193)", () => {
+  // festive offset 11 → wave 1 (index 0) draws pool[11] = "Granny Weatherwax". The one-line
+  // narration lists the member issue numbers inline (no member rows on a line).
+  assert.equal(
+    describeEvent(
+      event("campaign-batch", { index: 0, tasks: ["1234", "145", "234"], titles: { "1234": "a" }, name: "gateway work" }),
+      { offset: 11 },
+    ),
+    "Campaign “gateway work” — Wave 1 · Granny Weatherwax · #1234, #145, #234 started",
+  );
+  // campaign-batch-done reconstructs the members from merged/quarantined/held, still names
+  // the wave festively, and keeps the merged-hashes tail.
+  assert.equal(
+    describeEvent(event("campaign-batch-done", { index: 1, merged: ["101"], held: ["102"], clearedParked: [] }), { offset: 11 }),
+    "Wave 2 · Nanny Ogg · #101, #102 merged #101",
+  );
+  // Same event with no festive input → exactly today's plain-words narration.
+  assert.equal(
+    describeEvent(event("campaign-batch", { index: 0, tasks: ["1234"], titles: { "1234": "a" }, name: "gateway work" })),
+    "Campaign “gateway work” — Wave 1 — a started",
+  );
+});
+
 test("describeEvent narrates the operator-facing events in plain words", () => {
   assert.equal(
     describeEvent(event("campaign-start", { batches: [["101"]], slots: 1, name: "gateway work" })),
@@ -3639,6 +3715,27 @@ test("reduceCampaign reads an optional campaign name off the campaign-start even
       }),
     ]).name,
     "second",
+  );
+});
+
+test("reduceCampaign reads the reserved festiveOffset off the latest campaign-start (#193)", () => {
+  assert.equal(
+    reduceCampaign([
+      event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["101"]], slots: 1, festiveOffset: 11 }),
+    ]).festiveOffset,
+    11,
+  );
+  // An offset of 0 is a real reservation, not "absent" — it must survive the fold.
+  assert.equal(
+    reduceCampaign([
+      event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["101"]], slots: 1, festiveOffset: 0 }),
+    ]).festiveOffset,
+    0,
+  );
+  // A pre-feature run (no offset stamped) leaves it undefined.
+  assert.equal(
+    reduceCampaign([event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["101"]], slots: 1 })]).festiveOffset,
+    undefined,
   );
 });
 
@@ -4484,6 +4581,46 @@ test("wave labels read from tmp-log issue titles, resolved through buildStatusWi
     html,
     /<section class="wave running"><div class="wave-head"><h2 class="wave-label">Wave 2 — cache eviction<\/h2><div class="wave-meta"><span class="wave-tally">0\/1<\/span><span class="wave-status running">running<\/span>/,
   );
+});
+
+test("renderStatusPage names waves festively when the toggle is on (#193)", () => {
+  const dir = join(tmpdir(), `vetinari-festive-render-${Date.now()}`);
+  seedState(dir, [
+    event("campaign-start", {
+      ts: "2025-01-01T00:00:00.000Z",
+      batches: [["101", "102"], ["201"]],
+      titles: { "101": "config resolution", "102": "retry policy", "201": "cache eviction" },
+      slots: 1,
+      festiveOffset: 11, // pool[11] = Granny Weatherwax, pool[12] = Nanny Ogg
+    }),
+    event("campaign-batch", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["101", "102"] }),
+    event("campaign-batch-done", { ts: "2025-01-01T00:02:00.000Z", index: 0, merged: ["101", "102"], held: [], clearedParked: [] }),
+    event("campaign-batch", { ts: "2025-01-01T00:03:00.000Z", index: 1, tasks: ["201"] }),
+  ]);
+  const status = buildStatus(cfgFor(dir));
+
+  // Off (default) — labels are exactly today's `Wave N …`, no festive name.
+  const plain = renderStatusPage(status);
+  assert.match(plain, /<h2 class="wave-label">Wave 2 — cache eviction<\/h2>/);
+  assert.match(plain, /Wave 1 <span class="completed-wave-tally">/);
+  assert.doesNotMatch(plain, /Granny Weatherwax/);
+
+  // On — cards and the closed-wave chip carry `index · name`; the closed card drops the
+  // lead-title collapse (its member rows carry the titles).
+  const festive = renderStatusPage(status, { festive: true });
+  assert.match(festive, /<h2 class="wave-label">Wave 2 · Nanny Ogg<\/h2>/);
+  assert.match(festive, /<h2 class="wave-label">Wave 1 · Granny Weatherwax<\/h2>/);
+  assert.match(festive, /✓<\/span> Wave 1 · Granny Weatherwax <span class="completed-wave-tally">/);
+});
+
+test("renderStatusPage renders a nameless Wave N when festive is on but the run reserved no offset (#193)", () => {
+  const dir = join(tmpdir(), `vetinari-festive-nooffset-${Date.now()}`);
+  seedState(dir, [
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["201"]], slots: 1 }),
+    event("campaign-batch", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["201"] }),
+  ]);
+  const festive = renderStatusPage(buildStatus(cfgFor(dir)), { festive: true });
+  assert.match(festive, /<h2 class="wave-label">Wave 1<\/h2>/);
 });
 
 test("wave labels and chip hovers render from the log's titles, with no fetchTask", () => {
@@ -5493,6 +5630,17 @@ test("HOST_LOG_SCRIPT wires the host-log pane: gear show/hide, badge off isNotab
   assert.match(HOST_LOG_SCRIPT, /events\.addEventListener\("host"/);
   // A missing host log reads a clean empty state, not a blank pane.
   assert.match(HOST_LOG_SCRIPT, /No host log yet/);
+});
+
+test("HOST_LOG_SCRIPT wires the Festive Wave Names toggle to the cookie + reload (#193)", () => {
+  // The toggle reflects the current cookie on load, so its state persists across reloads.
+  assert.match(HOST_LOG_SCRIPT, /data-festive-toggle/);
+  assert.match(HOST_LOG_SCRIPT, /festiveWaveNames=1/);
+  // Flipping it sets the festiveWaveNames cookie (=1 on / =0 off) and reloads so the
+  // server re-renders the labels — a pure-client localStorage flip can't move a
+  // server-rendered string.
+  assert.match(HOST_LOG_SCRIPT, /document\.cookie = /);
+  assert.match(HOST_LOG_SCRIPT, /location\.reload\(\)/);
 });
 
 test("renderStatusPage makes archived campaign chips open the issue sheet against the archived run, read-only", () => {

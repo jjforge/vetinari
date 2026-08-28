@@ -1,6 +1,6 @@
 # Carve control — trigger a carve from Telegram or the dashboard
 
-Issue: [#11](https://github.com/jjforge/vetinari/issues/11) · Source: [ADR 0005](../adr/0005-carve-is-an-event-that-prunes-the-running-campaign.md), [ADR 0002](../adr/0002-gateway-is-a-dumb-router-projects-own-comms.md), [ADR 0001](../adr/0001-vetinari-committed-vs-local-split.md) · Glossary: [CONTEXT.md](../../CONTEXT.md)
+Issue: [#11](https://github.com/jjforge/vetinari/issues/11) · Source: [ADR 0005](../adr/0005-prune-is-an-event-that-trims-the-running-campaign.md), [ADR 0002](../adr/0002-gateway-is-a-dumb-router-projects-own-comms.md), [ADR 0001](../adr/0001-vetinari-committed-vs-local-split.md) · Glossary: [CONTEXT.md](../../CONTEXT.md)
 
 ## Problem Statement
 

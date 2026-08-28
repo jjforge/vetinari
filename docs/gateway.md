@@ -17,7 +17,7 @@ with the full design in [the gateway design spec](specs/2026-08-21-gateway-desig
 ## How a message flows
 
 ```
- a run (run / campaign / carve)
+ a run (run / campaign / prune)
    │  writes, never sends
    ▼
  <project>/.vetinari.local/outbox/<id>.json      ← a category-tagged record
@@ -86,7 +86,7 @@ export default defineConfig({
   notify: {
     "*": "ops",              // everything, by default, to ops
     failure: "alerts",       // halts and resume errors to alerts
-    "progress:carve": "alerts",
+    "progress:prune": "alerts",
     question: "ops",         // the interactive category — see below
   },
 });
@@ -117,7 +117,7 @@ Recover: `<command>` …                        ← where relevant: the exact co
 The voice is **terse and self-contained**: lead with what happened and what to do,
 shed low-value explanatory rationale, and where a message points at a recovery
 path, **name the exact command** — a pause notice says `` `campaign --resume` ``,
-`` `carve <issue>` ``, or `` `campaign --auto-carve` ``, never a bare "resume". Keep
+`` `prune <issue>` ``, or `` `campaign --auto-prune` ``, never a bare "resume". Keep
 the defined vocabulary (`wave-parked` / `quarantined`, per `CONTEXT.md`). The
 `console.log` stdout lines are a separate surface and keep their own format, but the
 two pause lines still name `` `campaign --resume` `` so the recovery command is never
@@ -150,7 +150,7 @@ check credentials and that the gateway is running first, and routing second.
 ## 3. Registration and running the daemon
 
 **Registration is automatic.** Every run entry point (`run`, `campaign`,
-`carve`) calls `autoRegister` at start: it upserts this project's pointer
+`prune`) calls `autoRegister` at start: it upserts this project's pointer
 (`project`, project root, base location) into the host registry under
 `~/.config/vetinari/registry/` and refreshes `routing.json`. It is idempotent and
 best-effort — a registry write that fails is logged, never fatal to the run — so you
@@ -171,8 +171,8 @@ timer, and runs one poll loop per distinct bot. It also hosts the aggregated sta
 dashboard (default `127.0.0.1:8765`; override with `VETINARI_GATEWAY_STATUS_PORT`
 / `VETINARI_GATEWAY_STATUS_HOST`). Reply to a question's message in Telegram and
 the gateway resumes that exact task; send `/status` for a text summary; send
-`carve <issue>` (or `carve <project> <issue>` when several campaigns share a bot)
-to preview and, on a `yes` reply, carve.
+`prune <issue>` (or `prune <project> <issue>` when several campaigns share a bot)
+to preview and, on a `yes` reply, prune.
 
 A backgrounded `gateway &` dies with its shell, so a park raised after you close
 the terminal goes unanswered. Run it as a **systemd user service** instead — one

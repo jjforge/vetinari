@@ -2,7 +2,7 @@
 
 The campaign wave-planner (`campaign-plan`) — which turns a selected set of ticket
 ids into the dependency-ordered, file-disjoint wave arguments `campaign` consumes —
-is a **generic vetinari feature**, a peer of `carve`, not a project-owned tool.
+is a **generic vetinari feature**, a peer of `prune`, not a project-owned tool.
 It was first drafted as a jjforge-owned script on the argument that "the resolver is
 jjforge-specific (it knows `templates/repo/`, the locale append-target, our tracker)."
 That argument does not hold: vetinari already absorbs project-specific knowledge
@@ -18,14 +18,14 @@ Decisions:
   ticket cites nothing or cites what the tree does not have), the same way it ships
   `githubBlockedBy`. A project can use the default or wrap it with its own
   symbol/route→file index.
-- **The DAG foundation is shared with `carve`.** Stage A/B (restrict `blockedBy` to the
-  selected set, then topologically layer) is factored beside `computeCarve`, which
+- **The DAG foundation is shared with `prune`.** Stage A/B (restrict `blockedBy` to the
+  selected set, then topologically layer) is factored beside `computePrune`, which
   already does the restriction. Stage D partitions each layer into file-disjoint
   sub-waves by basename.
 - **An under-specified ticket halts to the requestor — it is never planned around
   silently.** When the resolver returns `confident: false`, `campaign-plan` (a
   human-run planning tool) **prompts** the requestor with two choices: (A) **remove
-  that issue and its dependents** — `carve` semantics via `computeCarve` — and plan the
+  that issue and its dependents** — `prune` semantics via `computePrune` — and plan the
   rest, or (B) **stop** so the requestor puts the file-set data on the issue and
   re-runs. Non-interactive runs decide via `--on-underspecified=drop|fail`, defaulting
   to **fail**.

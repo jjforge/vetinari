@@ -14,7 +14,7 @@ and the issue-detail sheet they share. No surface defines a colour or re-derives
 state locally, so a token can never be "defined in one root, missing in the other".
 
 The status vocabulary is ADR 0007's: **running · parked · failure · completed ·
-unstarted · carved**. The landing's cross-repo aggregate counters keep their own
+unstarted · pruned**. The landing's cross-repo aggregate counters keep their own
 wording (`working` / `parked` / `queued` / `merged today`) because those are
 cross-repo counts, not per-issue statuses — the colours map the same, the labels
 differ.
@@ -31,15 +31,15 @@ one action.
 | `failure`      | `#f85149` | a run errored out without parking                           |
 | `unstarted`    | `#5f6b78` | in a later wave, no agent assigned                          |
 | `completed`    | `#3fb984` | landed on the base                                          |
-| `carved`       | `#a371f7` | removed from the running campaign                           |
-| _carve action_ | `#f79287` | the carve control and its confirmation only — never a state |
+| `pruned`       | `#a371f7` | removed from the running campaign                           |
+| _prune action_ | `#f79287` | the prune control and its confirmation only — never a state |
 
 `unstarted` is the grey `#5f6b78` — planned but not being worked, needs nothing from
-you. `carved` keeps its own purple `#a371f7`, so an issue removed from the campaign
+you. `pruned` keeps its own purple `#a371f7`, so an issue removed from the campaign
 reads distinctly from one merely not yet started.
 
 `failure` (`#f85149`, Primer `danger.fg`) is deliberately a **different red** from
-the carve action `#f79287` — the carve action is a control, never a state, so the two
+the prune action `#f79287` — the prune action is a control, never a state, so the two
 reds never mean the same thing and must not look identical.
 
 `#3fb9b0` (teal) is the product accent — primary buttons, links, focus. It is **not**
@@ -85,7 +85,7 @@ The whole outline takes the colour.
 
 - Status pills and issue chips (§4)
 - The parked counter when it is non-zero (`#c8a24e`)
-- The carve confirmation box (`#f79287`)
+- The prune confirmation box (`#f79287`)
 
 Never two coloured edges on one element. Never a coloured bottom or right border.
 
@@ -176,19 +176,19 @@ does. The parked card lifted to the top of the campaign is what surfaces it.
 
 **Issue sheet, parked**
 Sheet top border `#c8a24e`. Status dot `#c8a24e`. Question block left border 3px
-`#c8a24e`. `Resume` filled teal `#3fb9b0` (accent, not state). `Carve` outlined
+`#c8a24e`. `Resume` filled teal `#3fb9b0` (accent, not state). `Prune` outlined
 `#f79287` (action, not state). Three colours, three different jobs, no ambiguity.
 
 **Issue sheet, completed**
-Sheet top border `#3fb984`. No carve control at all — carving something already
+Sheet top border `#3fb984`. No prune control at all — pruning something already
 landed is not an action, and offering it would contradict the explainer text.
 
 ## 8. Status and category words are only ever scoped selectors
 
 A status word (§1: `running` · `parked` · `failure` · `completed` · `unstarted` ·
-`carved`, plus the landing's `queued`/`idle` aliases and a wave's `closed`) and a
+`pruned`, plus the landing's `queued`/`idle` aliases and a wave's `closed`) and a
 feed comms category (`feedKindClass`: `success` · `attention` · `failure` ·
-`carved` · `progress`) are **modifiers**, applied to an element that already has a
+`pruned` · `progress`) are **modifiers**, applied to an element that already has a
 component base class — `<a class="card running">`, `<span class="feed-kind
 progress">`, `<span class="dot parked">`. So they only ever appear in **compound**
 selectors: `.card.running`, `.feed-kind.progress`, `.dot.parked`. **Never write a

@@ -4253,6 +4253,34 @@ test("reduceCampaign's prune fold clears an emptied future wave and reindexes", 
   assert.deepEqual([...reduced.closedWaves], [0]);
 });
 
+test("reduceCampaign ignores an old archived `carve` event instead of crashing (#177)", () => {
+  // Pre-rename archived runs logged the mutation as a `carve` event kind. The verb
+  // is now `prune` and the reducer has no `carve` case, so an old log's `carve` reads
+  // as an inert/unknown row — ignored, never throwing — leaving the plan whole. This
+  // is the accepted consequence of hard-renaming with no read-time alias: a stale
+  // `carve` simply does not prune, but it must not break the load either.
+  const staleCarve = {
+    ts: "2025-01-01T00:03:00.000Z",
+    event: "carve",
+    target: "201",
+    removed: ["201", "301"],
+    dropped: ["201", "301"],
+  } as unknown as Parameters<typeof reduceCampaign>[0][number];
+
+  const reduced = reduceCampaign([
+    event("campaign-start", {
+      ts: "2025-01-01T00:00:00.000Z",
+      batches: [["101"], ["201"], ["301"]],
+      slots: 1,
+    }),
+    staleCarve,
+  ]);
+
+  // The stale carve did nothing: every planned wave survives and nothing reads pruned.
+  assert.deepEqual(reduced.waves, [["101"], ["201"], ["301"]]);
+  assert.deepEqual([...reduced.pruned], []);
+});
+
 test("reconstructIssueDetail folds an issue's turn log, count, elapsed and status from the log", () => {
   const detail = reconstructIssueDetail(
     [

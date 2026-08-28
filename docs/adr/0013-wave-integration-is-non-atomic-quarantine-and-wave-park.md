@@ -26,7 +26,7 @@ attributable.
 
 - **Red combined gate — emergent.** Leave everything merged on the base and
   **wave-park**: the base sits red, the campaign pauses, and a human decides — fix
-  forward and resume, or carve a suspect and resume. The machine never guesses a
+  forward and resume, or prune a suspect and resume. The machine never guesses a
   culprit, because none is knowable (every issue passed on its own).
 
 The base is where the merges live in both cases; a wave-parked base is a temporary
@@ -36,14 +36,14 @@ Around that core:
 
 - **Campaign flow.** A quarantine that orphans dependents in *later* waves pauses the
   campaign at the wave boundary — the blast-radius call belongs to a human. A
-  quarantine that orphans nothing does not stop anything. `campaign --auto-carve`
+  quarantine that orphans nothing does not stop anything. `campaign --auto-prune`
   opts into pruning the quarantined issue's dependent closure and running on.
-- **Carve preserves work.** Carve keeps the carved issue's branch + worktree +
+- **Prune preserves work.** Prune keeps the pruned issue's branch + worktree +
   session by default so it can be investigated and resumed; `--purge` is the rare
   true-drop.
 - **Persist and resume.** A paused campaign's plan and progress already live in the
-  event log (the reconstruction `carve` relies on — see
-  [ADR 0005](0005-carve-is-an-event-that-prunes-the-running-campaign.md)), so
+  event log (the reconstruction `prune` relies on — see
+  [ADR 0005](0005-prune-is-an-event-that-trims-the-running-campaign.md)), so
   `campaign --resume` continues the unrun waves on the fixed base rather than making
   the operator rebuild wave args.
 - **Changelog and label timing.** A green issue's `changelog.d/` fragment folds and
@@ -68,6 +68,6 @@ Around that core:
   that survives red is a base the combined gate has not blessed, and it survives
   **paused**, under a human, never advanced upon.
 - Recovery is a plain-git story on the base the operator is already on — fix forward
-  or carve, then `--resume` — not a parallel-branch reconciliation.
+  or prune, then `--resume` — not a parallel-branch reconciliation.
 - `tidy`'s one load-bearing rule: a branch dies only when it is provably merged. That
   is what makes it safe to trust and consistent with "never lose work."

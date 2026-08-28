@@ -50,7 +50,7 @@ being read — losing the events that landed during the pause would defeat the p
   either wastes reads when nothing changed or lags when something did. The log
   files give an exact change signal for free.
 - **WebSocket** — rejected: the dashboard is server→client only; the client issues
-  its two writes as ordinary POSTs (`/answer`, `/carve`). A duplex channel buys
+  its two writes as ordinary POSTs (`/answer`, `/prune`). A duplex channel buys
   nothing over SSE here and costs more to run behind the tailnet.
 
 ## Consequences

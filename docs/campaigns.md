@@ -54,11 +54,11 @@ two ways it can fail get two responses, by whether blame is attributable.
   scratch); every green already merged this wave stays merged and the wave carries on
   integrating the rest. A quarantine that strands dependents in *later* waves pauses
   the campaign at the wave boundary — the blast-radius call is a human's — unless you
-  ran `campaign --auto-carve`, which prunes the stranded closure and runs on.
+  ran `campaign --auto-prune`, which prunes the stranded closure and runs on.
 - **Red merged base** — emergent, no single culprit (each branch was green alone). The
   wave **wave-parks**: everything stays merged, the base sits red (never pushed,
   nothing builds on it while paused), and the campaign pauses. Resolve it — fix forward
-  and `campaign --resume`, or `carve <suspect>` and resume.
+  and `campaign --resume`, or `prune <suspect>` and resume.
 
 `campaign --resume` continues a paused campaign's unrun waves on the current base,
 reconstructing the plan from the event log and redoing no already-merged issue; it

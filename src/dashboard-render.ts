@@ -595,10 +595,23 @@ const renderArchiveRow = (project: string, run: ArchivedRunView, open: boolean, 
   // token so the sheet reads this archived run's own log — reuse is the point, no
   // second campaign renderer.
   const campaignPane = `<div class="archive-pane archive-campaign" data-pane="campaign"${rawActive ? " hidden" : ""}>${renderWaves(run.status, false, true, false, run.run, festive)}</div>`;
+  // The archived log adopts the shared log-view (#203): humanized-by-default rows with a Raw
+  // toggle and Download JSON, over the existing filter + "show more" cap. It is a static source —
+  // an archived run has no live stream to follow — so the head dot is seeded idle (dim + still)
+  // and there is no follow/pause control. The mode toggle and Download JSON reuse the live tail's
+  // .tail-mode / .tail-save classes (LIVE_TAIL_STYLES rides this page), so the surfaces match.
   const rawPane =
     `<div class="archive-pane archive-raw" data-pane="raw" data-project="${escapeHtml(project)}" data-run="${escapeHtml(run.run)}"${rawActive ? "" : " hidden"}>` +
-    `<div class="archive-raw-header">orchestrator-${escapeHtml(run.run)}.jsonl</div>` +
+    `<div class="archive-raw-header"><span class="tail-dot" data-state="idle" aria-hidden="true"></span>orchestrator-${escapeHtml(run.run)}.jsonl</div>` +
     `<input type="text" class="archive-raw-filter" placeholder="Filter lines…" aria-label="Filter log lines" />` +
+    `<div class="archive-raw-controls">` +
+    `<span class="tail-mode" data-archive-raw-mode role="group" aria-label="Line format">` +
+    `<button type="button" class="tail-mode-btn" data-mode="humanized" aria-pressed="true">Humanized</button>` +
+    `<button type="button" class="tail-mode-btn" data-mode="raw" aria-pressed="false">Raw</button>` +
+    `</span>` +
+    `<span class="archive-raw-gap"></span>` +
+    `<button type="button" class="tail-save" data-archive-raw-save>Download JSON</button>` +
+    `</div>` +
     `<div class="archive-raw-lines"></div>` +
     `<div class="archive-raw-footer"></div>` +
     `</div>`;
@@ -1510,8 +1523,12 @@ ${ISSUE_DETAIL_SHEET_STYLES}
   .archive-pane[hidden] { display: none; }
   /* Raw-log pane (#98): one JSONL line per row with a line-number gutter, JSON
      syntax colouring, and long lines wrapped rather than scrolled. */
-  .archive-raw-header { font-family: ${MONO_FONT}; font-size: .8rem; color: var(--color-text-light-2); padding: .3rem 0 .5rem; }
+  .archive-raw-header { display: flex; align-items: center; gap: .4rem; font-family: ${MONO_FONT}; font-size: .8rem; color: var(--color-text-light-2); padding: .3rem 0 .5rem; }
   .archive-raw-filter { width: 100%; max-width: 100%; margin: 0 0 .6rem; padding: .45rem .6rem; color: var(--color-text); background: var(--color-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); font: inherit; }
+  /* The shared log-view controls row (#203): the Humanized ⇄ Raw toggle on the left, Download
+     JSON pushed to the right; the buttons reuse the live tail's .tail-mode / .tail-save. */
+  .archive-raw-controls { display: flex; align-items: center; gap: .5rem; margin: 0 0 .6rem; }
+  .archive-raw-gap { flex: 1; }
   .archive-raw-lines { font-family: ${MONO_FONT}; font-size: .8rem; }
   .archive-raw-line { display: flex; gap: .75rem; padding: .05rem 0; }
   .archive-raw-line:target { background: var(--color-primary-alpha-20); }

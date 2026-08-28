@@ -3642,7 +3642,7 @@ test("serveAllStatus GET /api/issue reads an archived run's own log when a run t
   }
 });
 
-test("serveAllStatus GET /archive/log serves a listed run's raw JSONL as text/plain, and 404s an unlisted run", async () => {
+test("serveAllStatus GET /archive/log serves a listed run's lines humanized alongside their raw NDJSON, and 404s an unlisted run", async () => {
   const configDir = join(tmpdir(), `vetinari-archive-log-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
   seedState(betaDir, [event("campaign-start", { batches: [["201"]], slots: 1 })]);
@@ -3671,13 +3671,25 @@ test("serveAllStatus GET /archive/log serves a listed run's raw JSONL as text/pl
   });
   const { port } = server.address() as AddressInfo;
   try {
-    // A listed run returns its log verbatim, as plain text.
+    // A listed run returns its lines as JSON: each carries its verbatim NDJSON (the Raw /
+    // Download-JSON source) and its server-computed humanized parts (the default view), so the
+    // client renders humanized without re-parsing run-level kinds it can't narrate.
     const ok = await fetch(
       `http://127.0.0.1:${port}/archive/log?project=beta&run=2026-01-01T00-00-00-000Z`,
     );
     assert.equal(ok.status, 200);
-    assert.match(ok.headers.get("content-type") ?? "", /^text\/plain/);
-    assert.equal(await ok.text(), raw);
+    assert.match(ok.headers.get("content-type") ?? "", /^application\/json/);
+    const body = (await ok.json()) as {
+      lines: { raw: string; humanized: { message: string; dot: string } }[];
+    };
+    // The raw bytes round-trip verbatim (nothing dropped or reordered).
+    assert.equal(body.lines.map((l) => l.raw).join("\n") + "\n", raw);
+    // …and each line is humanized server-side through the full registry: the campaign-start
+    // narrates as a running start, the campaign-done as a merged completion.
+    assert.equal(body.lines[0].humanized.message, "Campaign started");
+    assert.equal(body.lines[0].humanized.dot, "running");
+    assert.equal(body.lines[1].humanized.message, "Campaign complete (2 waves)");
+    assert.equal(body.lines[1].humanized.dot, "merged");
 
     // A run not in the listing is a 404, never a path to traverse.
     const missing = await fetch(
@@ -5604,7 +5616,7 @@ test("renderStatusPage renders archived runs as a collapsible list with per-row 
   );
   assert.match(
     html,
-    /<div class="archive-raw-header">orchestrator-2026-02-01T22-22-36-267Z\.jsonl<\/div>/,
+    /<div class="archive-raw-header"><span class="tail-dot" data-state="idle"[^>]*><\/span>orchestrator-2026-02-01T22-22-36-267Z\.jsonl<\/div>/,
   );
   assert.match(html, /<input type="text" class="archive-raw-filter"/);
   // Bodies start collapsed (hidden) and rows render newest-first (order preserved).
@@ -5623,6 +5635,37 @@ test("renderStatusPage renders archived runs as a collapsible list with per-row 
     if (origTZ === undefined) delete process.env.TZ;
     else process.env.TZ = origTZ;
   }
+});
+
+test("renderStatusPage's archived raw pane carries the shared log-view chrome: a static idle dot, a Humanized⇄Raw toggle (humanized default) and Download JSON, no follow/pause (#203)", () => {
+  const html = renderStatusPage(
+    { project: "beta", waves: [], parked: [] },
+    {
+      selected: "beta",
+      archivedRuns: [
+        {
+          run: "2026-02-01T22-22-36-267Z",
+          name: "comms + dashboard",
+          startedAt: "2026-02-01T22:22:36.267Z",
+          state: "complete",
+          issues: 1,
+          status: archStatus("101"),
+        },
+      ],
+    },
+  );
+  const paneStart = html.indexOf('class="archive-pane archive-raw"');
+  const pane = html.slice(paneStart, html.indexOf("</li>", paneStart));
+  // A static source: its header dot is seeded idle (dim + still), never the streaming live state.
+  assert.match(pane, /<span class="tail-dot" data-state="idle"[^>]*><\/span>orchestrator-/);
+  // The segmented Humanized ⇄ Raw toggle, humanized the pressed default.
+  assert.match(pane, /data-archive-raw-mode/);
+  assert.match(pane, /data-mode="humanized" aria-pressed="true">Humanized</);
+  assert.match(pane, /data-mode="raw" aria-pressed="false">Raw</);
+  // The Download JSON control.
+  assert.match(pane, /data-archive-raw-save[^>]*>Download JSON</);
+  // A static archived log has no live stream to follow, so there is no play/pause control.
+  assert.doesNotMatch(pane, /data-tail-play|data-archive-raw-play/);
 });
 
 test("renderStatusPage renders an archived run's when-time in the operator's LOCAL timezone, no UTC suffix (#102)", () => {
@@ -5894,6 +5937,26 @@ test("renderStatusPage ships the archived-list client wiring: toggle, mode switc
     ARCHIVE_LIST_SCRIPT,
     /showOlder\.addEventListener\("click", \(\) => \{ for \(const row of archiveRows\) row\.hidden = false;/,
   );
+});
+
+test("ARCHIVE_LIST_SCRIPT renders the archived log through the shared log-view: humanized default, Raw toggle, Download JSON (#203)", () => {
+  // Humanized is the default display mode, remembered client-side so a Raw preference sticks.
+  assert.match(ARCHIVE_LIST_SCRIPT, /let rawMode = "humanized";/);
+  assert.match(ARCHIVE_LIST_SCRIPT, /localStorage\.getItem\(MODE_KEY\)/);
+  // The parts are computed server-side and fetched as JSON: raw for the toggle/download, humanized
+  // for the default rows — the run-level kinds narrate through describeEvent the client can't ship.
+  assert.match(ARCHIVE_LIST_SCRIPT, /return res\.json\(\);/);
+  assert.match(ARCHIVE_LIST_SCRIPT, /pane\._lines = ls\.map\(\(l\) => l\.raw\)/);
+  assert.match(ARCHIVE_LIST_SCRIPT, /pane\._humanized = ls\.map\(\(l\) => l\.humanized\)/);
+  // Humanized rows are the shared .log-hrow: a state dot + time · actor · message.
+  assert.match(ARCHIVE_LIST_SCRIPT, /el\.className = "log-hrow"/);
+  assert.match(ARCHIVE_LIST_SCRIPT, /dot\.className = "log-dot " \+ h\.dot/);
+  assert.match(ARCHIVE_LIST_SCRIPT, /msg\.className = "log-msg"; msg\.textContent = h\.message/);
+  // The mode toggle flips the shared mode, persists it, and redraws the pane.
+  assert.match(ARCHIVE_LIST_SCRIPT, /rawMode = btn\.dataset\.mode; try \{ localStorage\.setItem\(MODE_KEY, rawMode\); \}/);
+  // Download JSON emits the currently-filtered raw NDJSON, uncapped, as an .jsonl file.
+  assert.match(ARCHIVE_LIST_SCRIPT, /data-archive-raw-save/);
+  assert.match(ARCHIVE_LIST_SCRIPT, /a\.download = "orchestrator-" \+ pane\.dataset\.run \+ "\.jsonl"/);
 });
 
 test("HOST_LOG_SCRIPT wires the host-log pane: gear show/hide, badge off isNotableHostEvent, filter, live host frames (#180)", () => {

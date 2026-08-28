@@ -1,7 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { CarveClosure } from "./dashboard-carve.ts";
+import type { GraftClosure } from "./dashboard-graft.ts";
 
-/** How the dumb-router shells a project's own CLI (`answer`, `carve`) in its
+/** How the dumb-router shells a project's own CLI (`answer`, `carve`, `graft`) in its
  * root — the injectable seam every route that spawns a child shares, so tests can
  * capture the spawn instead of running it. */
 export type SpawnDashboardChild = (
@@ -22,6 +23,10 @@ export interface DashboardDeps {
   spawn: SpawnDashboardChild;
   carvePreview: (projectRoot: string, taskId: string) => Promise<string | null>;
   carveClosure: (projectRoot: string, taskId: string) => Promise<CarveClosure | null>;
+  /** The graft counterparts — variadic (a set of ids), routed to the project's own
+   *  `graft <ids…> --dry-run` exactly as the carve seams route to `carve … --dry-run`. */
+  graftPreview: (projectRoot: string, taskIds: string[]) => Promise<string | null>;
+  graftClosure: (projectRoot: string, taskIds: string[]) => Promise<GraftClosure | null>;
 }
 
 /**

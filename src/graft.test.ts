@@ -69,6 +69,49 @@ test("--dry-run previews the placement but appends no event and enqueues nothing
   assert.equal(listOutbox(cfg).length, 0);
 });
 
+test("--dry-run surfaces a structured graft-closure for the aggregated dashboard preview", async () => {
+  const cfg = harnessCfg();
+  launch(cfg, [["101"]]);
+
+  const result = await runGraft(cfg, ["301", "302"], { dryRun: true });
+
+  // The machine-readable closure (mirroring carve's E2) the dashboard parses out of
+  // the CLI's `--dry-run` output: the requested ids, where each lands, the resulting
+  // waves, and no rejections when every id is a new open issue.
+  assert.deepEqual(result.closure, {
+    ids: ["301", "302"],
+    placement: [
+      { id: "301", wave: 2 },
+      { id: "302", wave: 2 },
+    ],
+    remaining: [["101"], ["301", "302"]],
+    rejected: [],
+  });
+  assert.deepEqual(result.rejected, []);
+});
+
+test("--dry-run discloses a whole-batch rejection in the closure without throwing", async () => {
+  // 202 is already in the campaign; the dry-run must not throw (a real graft still
+  // does) — it discloses the offenders so the dashboard preview can name them.
+  const cfg = harnessCfg();
+  launch(cfg, [["101"], ["202"]]);
+
+  const result = await runGraft(cfg, ["202", "303"], { dryRun: true });
+
+  assert.deepEqual(result.rejected, [{ id: "202", reason: "already-in-campaign" }]);
+  assert.deepEqual(result.closure, {
+    ids: ["202", "303"],
+    placement: [],
+    // Nothing is added — the campaign's remaining waves are unchanged.
+    remaining: [["101"], ["202"]],
+    rejected: [{ id: "202", reason: "already-in-campaign" }],
+  });
+  assert.equal(result.applied, false);
+  // A dry-run rejection writes nothing either.
+  assert.equal(readEventLog(cfg).some((e) => e.event === "graft"), false);
+  assert.equal(listOutbox(cfg).length, 0);
+});
+
 test("a real graft appends the graft event and enqueues a progress:graft note", async () => {
   const cfg = harnessCfg({ blockedBy: async () => [] });
   launch(cfg, [["101"]]);
@@ -107,7 +150,7 @@ test("the graft event records only in-campaign/co-grafted blockers, and placemen
 
   const result = await runGraft(cfg, ["301", "302"], {});
 
-  assert.deepEqual(result.event.blockedBy, { "301": [], "302": ["301"] });
+  assert.deepEqual(result.event!.blockedBy, { "301": [], "302": ["301"] });
   assert.deepEqual(result.placement, [
     { id: "301", wave: 2 },
     { id: "302", wave: 3 },

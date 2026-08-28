@@ -238,6 +238,19 @@ const renderQuarantineNote = () =>
   `<section class="quarantine-note"><strong>Issue quarantined</strong> — a merge conflict held a passed green out of integration. Resolve the conflict, then resume the campaign (the Resume control above, or <code>campaign --resume</code> in the project root).</section>`;
 
 /**
+ * The Graft control (#168) — the additive counterpart to Carve. Where carve prunes
+ * an existing campaign issue (a per-chip control), graft *extends* the running
+ * campaign with new issues named by explicit id, so it is a small form the operator
+ * types the ids into. Submitting POSTs `/graft` for this project; the aggregated
+ * dumb router (ADR 0002) shells `graft <ids…> --dry-run` in the project's own root
+ * and returns the placement behind a confirm form (the two-phase gate carve uses).
+ * Emitted only on the interactive aggregated page (the `graft` page option) and only
+ * while there is a live-or-resumable campaign to extend.
+ */
+const renderGraftControl = (status: CampaignStatus) =>
+  `<section class="graft-banner"><div class="graft-banner-text"><strong>Extend the campaign</strong> — graft new issues onto the running campaign; they layer into future waves.</div><form method="post" action="/graft" class="graft-form"><input type="text" name="ids" class="graft-ids" placeholder="issue ids, e.g. 640 655" /><input type="hidden" name="project" value="${escapeHtml(status.project)}" /><button type="submit" class="graft-btn">🌱 Graft</button></form></section>`;
+
+/**
  * Is a host-log row one an operator should be alerted to (#180)? A pure, render-time
  * predicate over a parsed `host.jsonl` row — no new severity field on host emitters
  * (consistent with #169's "no severity" decision): a row is notable when its kind
@@ -494,6 +507,14 @@ export interface StatusPageOptions {
    * targets the right one.
    */
   carve?: boolean;
+  /**
+   * Render the graft control — the additive counterpart to `carve`. `graft` is
+   * variadic and adds *new* issues by explicit id (not a chip selection), so its
+   * control is a small form the operator types ids into; the aggregated dumb router
+   * routes its preview and confirm to the selected project's own install (`graft …
+   * --dry-run` then `graft …`). Gated by the same page option carve rides.
+   */
+  graft?: boolean;
   /** The selected project's archived runs, newest-first, for the collapsible
    * "Archived runs" list under the live run. Each row expands inline to either its
    * campaign view (rendered read-only through the live wave renderer off `status`)
@@ -616,6 +637,43 @@ export const renderAggregatedCarvePreview = (project: string, target: string, pr
 <section class="card"><pre>${escapeHtml(previewText)}</pre></section>
 <div class="actions">
 <form method="post" action="/carve" class="confirm"><input type="hidden" name="taskId" value="${escapeHtml(target)}" /><input type="hidden" name="project" value="${escapeHtml(project)}" /><input type="hidden" name="confirm" value="1" /><button type="submit">✂️ Confirm carve</button></form>
+<a class="cancel" href="/?project=${encodeURIComponent(project)}">Cancel</a>
+</div>
+</body>
+</html>`;
+
+/**
+ * The aggregated site's graft preview — the additive mirror of
+ * `renderAggregatedCarvePreview`. It is a dumb router (ADR 0002) with no project's
+ * `blockedBy` resolver, so it does not compute the placement itself — it shows the
+ * placement the selected project's own `graft <ids…> --dry-run` printed, behind a
+ * confirm form. `graft` is variadic, so the hidden field carries the whole set of
+ * ids (space-joined, matching the CLI); confirming shells `graft <ids…>` in that
+ * project's root. Serves as the no-JS graft fallback.
+ */
+export const renderAggregatedGraftPreview = (project: string, ids: string[], previewText: string) => `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>${escapeHtml(project)} — graft ${escapeHtml(ids.map((i) => `#${i}`).join(", "))}</title>
+<style>
+  body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 2rem; background: #090c10; color: #e6edf3; }
+  h1 { letter-spacing: -0.035em; }
+  .card { background: #0b0e12; border: 1px solid #232b35; border-left: 3px solid #3fb950; border-radius: 12px; padding: 1rem 1.25rem; margin: 1rem 0; }
+  pre { white-space: pre-wrap; margin: 0; }
+  .actions { display: flex; gap: .75rem; align-items: center; }
+  form { margin: 0; }
+  button { padding: .5rem .9rem; border: 0; border-radius: 9px; cursor: pointer; font-weight: 700; }
+  .confirm button { background: #3fb950; color: #05230f; }
+  a.cancel { color: #8b98a5; text-decoration: none; padding: .5rem .9rem; }
+</style>
+</head>
+<body>
+<h1>Graft ${escapeHtml(ids.map((i) => `#${i}`).join(", "))} onto ${escapeHtml(project)}?</h1>
+<section class="card"><pre>${escapeHtml(previewText)}</pre></section>
+<div class="actions">
+<form method="post" action="/graft" class="confirm"><input type="hidden" name="ids" value="${escapeHtml(ids.join(" "))}" /><input type="hidden" name="project" value="${escapeHtml(project)}" /><input type="hidden" name="confirm" value="1" /><button type="submit">🌱 Confirm graft</button></form>
 <a class="cancel" href="/?project=${encodeURIComponent(project)}">Cancel</a>
 </div>
 </body>
@@ -1151,6 +1209,12 @@ ${ISSUE_DETAIL_SHEET_STYLES}
   /* The quarantine note (#171) is informational only — same amber edge, no action. */
   .quarantine-note { background: var(--color-card); border: 1px solid var(--color-secondary); border-left: 3px solid var(--color-yellow); border-radius: var(--border-radius-medium); padding: .8rem 1rem; margin: 1rem 0; color: var(--color-text-light); box-shadow: 0 8px 22px #0004; }
   .quarantine-note code { color: var(--color-text); }
+  /* The Graft control (#168) — additive, so a green edge, mirroring the amber Resume banner. */
+  .graft-banner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; background: var(--color-card); border: 1px solid var(--color-secondary); border-left: 3px solid var(--color-green); border-radius: var(--border-radius-medium); padding: .8rem 1rem; margin: 1rem 0; box-shadow: 0 8px 22px #0004; }
+  .graft-banner-text { color: var(--color-text-light); }
+  .graft-form { margin: 0; display: flex; gap: .5rem; align-items: center; }
+  .graft-ids { padding: .5rem .6rem; border: 1px solid var(--color-secondary); border-radius: var(--border-radius); background: var(--color-chip); color: var(--color-text); }
+  .graft-btn { padding: .5rem .8rem; border: 0; border-radius: var(--border-radius); background: var(--color-green); color: #04110f; cursor: pointer; font-weight: 700; }
   .parked-issues { margin: 1rem 0 2rem; }
   .parked-issues > h2 { display: flex; align-items: baseline; flex-wrap: wrap; gap: .35rem; }
   .parked-count { color: var(--color-yellow); }
@@ -1238,6 +1302,10 @@ ${renderTopBar(opts.projects?.length ? renderRepoDropdown(opts.projects, opts.se
   // gated on its attention state so it appears only when there is something to act on.
   opts.carve && isWaveParked(status) ? renderResumeControl(status) : ""
 }${opts.carve && hasQuarantined(status) ? renderQuarantineNote() : ""}${
+  // Graft extends a live-or-resumable campaign, so the control surfaces whenever the
+  // project has a campaign (any waves) — the additive mirror of the per-chip carve.
+  opts.graft && status.waves.length ? renderGraftControl(status) : ""
+}${
   status.parked.length
     ? `<section class="parked-issues"><h2>Parked · <span class="parked-count">${status.parked.length}</span></h2>${status.parked
         .map(

@@ -38,7 +38,7 @@ import {
   runCampaignPlan,
   type UnderspecifiedDecision,
 } from "./plan.ts";
-import { runGraft } from "./graft.ts";
+import { runGraft, describeGraftRejections } from "./graft.ts";
 import { renderUsage } from "./help.ts";
 import {
   applyLayoutMigration,
@@ -671,13 +671,26 @@ switch (mode) {
       .flatMap((a) => a.split(/[\s,]+/))
       .filter(Boolean);
     const result = await runGraft(cfg, ids, { dryRun });
-    console.log(
-      `graft ${result.ids.map((i) => `#${i}`).join(", ")} → ` +
-        result.placement.map((p) => `#${p.id} in wave ${p.wave}`).join(", "),
-    );
-    console.log(
-      `resulting campaign: ${result.remaining.map((w) => `"${w.join(" ")}"`).join(" ")}`,
-    );
+    if (result.rejected.length) {
+      // A `--dry-run` discloses a whole-batch rejection instead of throwing, so the
+      // aggregated dashboard's preview can name the offenders off the closure line.
+      console.log(`graft rejected — nothing added (${describeGraftRejections(result.rejected)}).`);
+    } else {
+      console.log(
+        `graft ${result.ids.map((i) => `#${i}`).join(", ")} → ` +
+          result.placement.map((p) => `#${p.id} in wave ${p.wave}`).join(", "),
+      );
+      console.log(
+        `resulting campaign: ${result.remaining.map((w) => `"${w.join(" ")}"`).join(" ")}`,
+      );
+    }
+    if (result.closure) {
+      // Structured closure alongside the human text, so the aggregated dashboard's
+      // graft preview names the placement (and any rejection) without re-parsing the
+      // prose above — the additive mirror of `carve-closure` (E2).
+      console.log(`graft-closure ${JSON.stringify(result.closure)}`);
+      break;
+    }
     if (result.applied)
       console.log(
         "graft event appended — the running campaign will add these issues to future waves at the next wave boundary.",

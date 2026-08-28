@@ -1444,23 +1444,56 @@ test("renderStatusPage shows a Resume control only for a wave-parked campaign (#
   assert.doesNotMatch(running, /action="\/resume"/);
 });
 
-test("renderStatusPage shows a Graft control for a running campaign, gated behind the graft page option (#168)", () => {
+test("renderStatusPage puts a quiet graft input on the summary line, greyed at rest (#202, #168)", () => {
   const runningCampaign = {
     project: "beta",
     waves: [{ index: 0, status: "running" as const, issues: [{ issueNumber: "201", status: "running" as const }] }],
     parked: [],
   };
-  // With graft on, the page offers a Graft action symmetric to carve: a form POSTing
-  // to /graft carrying the project and an ids field (graft is variadic — a set of ids,
-  // entered explicitly, not a chip selection). The POST returns the placement preview.
+  // Mockup 1a: the graft affordance rides the campaign summary line (project · N issues ·
+  // M waves), not a banner. A form POSTing to /graft carries the project and a quiet ids
+  // input; the button is greyed/disabled at rest and only activates once ids are typed.
   const withGraft = renderStatusPage(runningCampaign, { carve: true, graft: true });
-  assert.match(withGraft, /<form method="post" action="\/graft"[^>]*>/);
-  assert.match(withGraft, /name="project" value="beta"/);
-  assert.match(withGraft, /name="ids"/);
+  // The input lives inside the summary line, not a standalone banner.
+  assert.doesNotMatch(withGraft, /class="graft-banner"/);
+  const summary = withGraft.slice(withGraft.indexOf('class="campaign-summary"'), withGraft.indexOf('class="waves-grid"'));
+  assert.match(summary, /class="campaign-meta"/);
+  assert.match(summary, /<form method="post" action="\/graft"[^>]*>/);
+  assert.match(summary, /name="project" value="beta"/);
+  assert.match(summary, /name="ids"[^>]*placeholder="graft issue ids"/);
+  // The graft button is disabled at rest — it activates client-side once ids are entered.
+  assert.match(summary, /class="graft-btn"[^>]*disabled/);
 
-  // Without the graft page option, no Graft control — the same gating carve rides.
+  // Without the graft page option, no graft control — the same gating carve rides.
   const withoutGraft = renderStatusPage(runningCampaign, { carve: true });
   assert.doesNotMatch(withoutGraft, /action="\/graft"/);
+  assert.doesNotMatch(withoutGraft, /class="campaign-summary"/);
+});
+
+test("renderStatusPage disables the graft input with amber guidance when the campaign is finished (#202)", () => {
+  // Every wave closed → the campaign has reached its final wave; nothing is live-or-
+  // resumable to layer into (the graft engine refuses, ADR 0014). Rather than fail on
+  // submit, 1a renders the input structurally disabled with amber guidance and a
+  // start-campaign affordance.
+  const finished = {
+    project: "beta",
+    waves: [
+      { index: 0, status: "closed" as const, issues: [{ issueNumber: "101", status: "completed" as const }] },
+      { index: 1, status: "closed" as const, issues: [{ issueNumber: "201", status: "completed" as const }] },
+    ],
+    parked: [],
+  };
+  const html = renderStatusPage(finished, { carve: true, graft: true });
+  const summary = html.slice(html.indexOf('class="campaign-summary"'), html.indexOf('class="waves-grid"'));
+  // The refusal replaces the active form — no live POST target, a disabled input/button.
+  assert.match(summary, /graft-refused/);
+  assert.doesNotMatch(summary, /<form method="post" action="\/graft"/);
+  assert.match(summary, /class="graft-ids"[^>]*disabled/);
+  // Amber guidance naming the structural reason, plus a start-campaign affordance.
+  assert.match(summary, /final wave/i);
+  assert.match(summary, /new campaign starts/i);
+  assert.match(summary, /class="graft-refusal"/);
+  assert.match(summary, /vetinari campaign/);
 });
 
 test("renderStatusPage shows an informational quarantine affordance with no action of its own (#171)", () => {

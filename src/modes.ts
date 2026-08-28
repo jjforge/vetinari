@@ -42,6 +42,13 @@ import {
 const HOST_SLOT_POLL_MS = 1000;
 
 /**
+ * The optional-name suffix a campaign notice header carries — ` “<name>”` when the
+ * campaign was named, empty otherwise. One place so every header renders the name
+ * identically (`docs/gateway.md`, the comms skeleton).
+ */
+const named = (name?: string): string => (name ? ` “${name}”` : "");
+
+/**
  * Resolve each issue's title through the orchestrator's `fetchTask`, keyed by
  * normalized id, so a run can record an id→title map on its start event for the
  * dumb-router dashboard to read with no live lookup of its own (ADR 0002).
@@ -258,7 +265,7 @@ export async function queue(
   enqueueOutbound(cfg, {
     category: "progress",
     event: "queue-start",
-    text: `🚦 ${cfg.project} queue started: ${taskIds.join(", ")} — up to ${host.ceiling} containers. The gateway announces parked questions; reply to resume.`,
+    text: `🚦 ${cfg.project} · QUEUE STARTED · ${taskIds.length} tasks, ≤${host.ceiling} containers\n${taskIds.join(", ")}\nReply to a parked question to resume it.`,
   });
 
   // The host container ceiling (ADR 0010/0011) is always in effect: the run marks
@@ -318,7 +325,7 @@ export async function queue(
   enqueueOutbound(cfg, {
     category: "progress",
     event: "queue-done",
-    text: `🏁 ${cfg.project} queue drained.\n${summary}\nParked tasks stay answerable — the gateway routes your replies.`,
+    text: `🏁 ${cfg.project} · QUEUE DRAINED\n${summary}\nParked tasks stay answerable.`,
   });
   console.log(`queue drained:\n${summary}`);
   return outcomes;
@@ -373,7 +380,7 @@ export function waveParkedNotice(
   return {
     category: "failure",
     event: "wave-parked",
-    text: `🅿️ ${project} campaign WAVE-PARKED at batch ${batchNumber} — the merged base gated red with no attributable culprit (every issue passed alone). The wave's greens (${merged.join(", ") || "none"}) stay merged on ${baseBranch}; the base sits red and the campaign is paused. Resolve it — fix forward and resume, or carve a suspect.\n\n${detail}`,
+    text: `🅿️ ${project} · WAVE-PARKED · batch ${batchNumber}\nBase gated red, no attributable culprit — greens (${merged.join(", ") || "none"}) kept on ${baseBranch}, campaign paused.\nRecover: \`campaign --resume\` (after fix-forward) or \`carve <issue>\`\n\n${detail}`,
   };
 }
 
@@ -406,7 +413,7 @@ export function quarantinePauseNotice(
   return {
     category: "failure",
     event: "quarantine-paused",
-    text: `🅿️ ${project} campaign PAUSED after batch ${batchNumber} — a merge-conflict quarantine stranded dependents in later waves, and the blast-radius call is yours. The wave's greens stay merged on ${baseBranch}; the campaign is paused. Quarantined issue → orphaned dependents:\n${describeQuarantineImpacts(impacts)}\n\nResolve the quarantined issue's conflict and resume, or re-run with --auto-carve to prune the stranded dependents and continue.`,
+    text: `🅿️ ${project} · QUARANTINE-PAUSED · batch ${batchNumber}\nMerge-conflict quarantine stranded dependents in later waves — greens kept on ${baseBranch}, campaign paused.\nQuarantined → orphaned:\n${describeQuarantineImpacts(impacts)}\nRecover: \`campaign --resume\` (after resolving the conflict) or \`campaign --auto-carve\` to prune and continue`,
   };
 }
 
@@ -424,7 +431,7 @@ export function autoCarveNotice(
   return {
     category: "progress",
     event: "auto-carve",
-    text: `✂️ ${project} campaign --auto-carve after batch ${batchNumber} — a merge-conflict quarantine stranded dependents, so their closure was carved and the campaign ran on. Quarantined issue → carved dependents:\n${describeQuarantineImpacts(impacts)}`,
+    text: `✂️ ${project} · AUTO-CARVE · batch ${batchNumber}\nQuarantine stranded dependents — closure carved, campaign ran on.\nQuarantined → carved:\n${describeQuarantineImpacts(impacts)}`,
   };
 }
 
@@ -524,7 +531,7 @@ export async function campaign(
       enqueueOutbound(cfg, {
         category: "progress",
         event: "campaign-resume",
-        text: `↩️ ${cfg.project} campaign --resume: nothing left to run — all ${reduced.waves.length} wave(s) already merged.`,
+        text: `↩️ ${cfg.project} · RESUME · nothing to run — all ${reduced.waves.length} waves already merged`,
       });
       console.log("campaign --resume: nothing left to run — all waves already merged.");
       return true;
@@ -533,7 +540,7 @@ export async function campaign(
     enqueueOutbound(cfg, {
       category: "progress",
       event: "campaign-resume",
-      text: `↩️ ${cfg.project} campaign --resume from wave ${index + 1}/${reduced.waves.length} on ${cfg.baseBranch} — continuing the unrun waves.`,
+      text: `↩️ ${cfg.project} · RESUME · wave ${index + 1}/${reduced.waves.length} on ${cfg.baseBranch} — continuing unrun waves`,
     });
     console.log(`campaign --resume: continuing from wave ${index + 1}/${reduced.waves.length}.`);
   } else {
@@ -554,7 +561,7 @@ export async function campaign(
     enqueueOutbound(cfg, {
       category: "progress",
       event: "campaign-start",
-      text: `🎬 ${cfg.project} campaign${name ? ` “${name}”` : ""}: ${batches.length} batch(es) — ${batches.map((b) => b.join(",")).join(" | ")}`,
+      text: `🎬 ${cfg.project} · CAMPAIGN${named(name)} · ${batches.length} batches\n${batches.map((b) => b.join(",")).join(" | ")}`,
     });
   }
 
@@ -574,7 +581,7 @@ export async function campaign(
     enqueueOutbound(cfg, {
       category: "progress",
       event: "wave-start",
-      text: `▶️ ${cfg.project} campaign${campaignName ? ` “${campaignName}”` : ""} batch ${index + 1}/${total}: ${tasks.join(", ")}`,
+      text: `▶️ ${cfg.project} · BATCH ${index + 1}/${total}${named(campaignName)}\n${tasks.join(", ")}`,
     });
 
     const outcomes = await queue(cfg, tasks, host, titles, deps.spawnRun);
@@ -590,7 +597,7 @@ export async function campaign(
       // verifies nothing; those wait for the human to resolve it green and resume.
       enqueueOutbound(cfg, waveParkedNotice(cfg.project, index + 1, merged, cfg.baseBranch, parked.detail));
       console.log(
-        `campaign wave-parked (${parked.reason}) at batch ${index + 1}/${total} — greens left merged, base paused, ${total - index - 1} batch(es) not started.`,
+        `campaign wave-parked (${parked.reason}) at batch ${index + 1}/${total} — greens left merged, base paused, ${total - index - 1} batch(es) not started. Fix forward and \`campaign --resume\`, or \`carve <issue>\`.`,
       );
       return false;
     }
@@ -628,7 +635,7 @@ export async function campaign(
     enqueueOutbound(cfg, {
       category: "success",
       event: "wave-merged",
-      text: `✅ ${cfg.project} campaign${campaignName ? ` “${campaignName}”` : ""} batch ${index + 1} merged: ${merged.join(", ") || "nothing"}${note}${qNote}`,
+      text: `✅ ${cfg.project} · BATCH ${index + 1} MERGED${named(campaignName)}\n${merged.join(", ") || "nothing"}${note}${qNote}`,
     });
     console.log(
       `batch ${index + 1}/${total}: merged ${merged.join(", ") || "nothing"}${note}${qNote}`,
@@ -662,7 +669,7 @@ export async function campaign(
           // resumes, or re-runs with --auto-carve to prune and continue.
           enqueueOutbound(cfg, quarantinePauseNotice(cfg.project, index + 1, orphaning, cfg.baseBranch));
           console.log(
-            `campaign paused after batch ${index + 1}/${total} — quarantine stranded ${orphaning.flatMap((i) => i.dropped).map((d) => `#${d}`).join(", ")} in later waves; ${total - index - 1} batch(es) not started. Resolve and resume, or re-run with --auto-carve.`,
+            `campaign paused after batch ${index + 1}/${total} — quarantine stranded ${orphaning.flatMap((i) => i.dropped).map((d) => `#${d}`).join(", ")} in later waves; ${total - index - 1} batch(es) not started. Resolve and \`campaign --resume\`, or re-run with \`campaign --auto-carve\`.`,
           );
           return false;
         }
@@ -676,7 +683,7 @@ export async function campaign(
   enqueueOutbound(cfg, {
     category: "success",
     event: "campaign-complete",
-    text: `🏆 ${cfg.project} campaign${campaignName ? ` “${campaignName}”` : ""} complete — ${index} batch(es) merged onto ${cfg.baseBranch}.`,
+    text: `🏆 ${cfg.project} · CAMPAIGN COMPLETE${named(campaignName)} · ${index} batches onto ${cfg.baseBranch}`,
   });
   console.log("campaign complete.");
   return true;

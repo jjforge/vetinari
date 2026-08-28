@@ -22,6 +22,7 @@ import {
 } from "./plan.ts";
 import {
   campaignRunning,
+  issueNameFromTask,
   issueStateFromTask,
   reduceCampaign,
 } from "./dashboard-model.ts";
@@ -76,7 +77,12 @@ export interface GraftResult {
   rejected: GraftRejection[];
   /** the graft event payload (ADR 0012 layering inputs) — written unless `dryRun`;
    *  absent on a `--dry-run` that disclosed a rejection (nothing to append). */
-  event?: { ids: string[]; blockedBy: Record<string, string[]>; basenames: Record<string, string[]> };
+  event?: {
+    ids: string[];
+    blockedBy: Record<string, string[]>;
+    basenames: Record<string, string[]>;
+    titles: Record<string, string>;
+  };
   /** the `progress:graft` outbound message — enqueued unless `dryRun`; absent on a
    *  `--dry-run` that disclosed a rejection. */
   outbound?: { category: "progress"; event: "graft"; text: string };
@@ -90,7 +96,9 @@ export interface GraftResult {
  *  `--dry-run` prose use — the offenders named per reason, in a stable order. */
 export function describeGraftRejections(rejections: GraftRejection[]): string {
   const group = (reason: GraftRejection["reason"], label: string) => {
-    const hit = rejections.filter((r) => r.reason === reason).map((r) => `#${r.id}`);
+    const hit = rejections
+      .filter((r) => r.reason === reason)
+      .map((r) => `#${r.id}`);
     return hit.length ? `${label}: ${hit.join(", ")}` : "";
   };
   return [
@@ -157,7 +165,10 @@ export async function runGraft(
   // A `--dry-run` is a preview, so it discloses the rejection in its closure rather
   // than throwing (the aggregated dashboard's preview names the offenders off it); a
   // real graft still rejects whole, exactly as before.
-  const rejections = validateGraftTargets(normalized, { inCampaign, state: stateOf });
+  const rejections = validateGraftTargets(normalized, {
+    inCampaign,
+    state: stateOf,
+  });
   if (rejections.length) {
     if (opts.dryRun)
       return {
@@ -166,9 +177,16 @@ export async function runGraft(
         remaining: reduced.waves,
         rejected: rejections,
         applied: false,
-        closure: { ids: normalized, placement: [], remaining: reduced.waves, rejected: rejections },
+        closure: {
+          ids: normalized,
+          placement: [],
+          remaining: reduced.waves,
+          rejected: rejections,
+        },
       };
-    throw new Error(`graft rejected — nothing added (${describeGraftRejections(rejections)}).`);
+    throw new Error(
+      `graft rejected — nothing added (${describeGraftRejections(rejections)}).`,
+    );
   }
 
   // The layering inputs the pure reducer folds with (ADR 0012): each grafted id's
@@ -182,7 +200,9 @@ export async function runGraft(
       blockedBy[id] = raw.filter((b) => campaignPlusGrafted.has(b));
     }),
   );
-  const unstarted = reduced.waves.flat().filter((m) => !reduced.outcomes.has(m));
+  const unstarted = reduced.waves
+    .flat()
+    .filter((m) => !reduced.outcomes.has(m));
   const basenames: Record<string, string[]> = {};
   await Promise.all(
     [...new Set([...normalized, ...unstarted])].map(async (id) => {
@@ -193,14 +213,33 @@ export async function runGraft(
 
   // Preview the placement off the same pure fold the loop will run.
   const applied = applyGraft(
-    { waves: reduced.waves, outcomes: reduced.outcomes, currentWave: reduced.currentWave },
+    {
+      waves: reduced.waves,
+      outcomes: reduced.outcomes,
+      currentWave: reduced.currentWave,
+    },
     { ids: normalized, blockedBy, basenames },
   );
   const placeOf = new Map<string, number>();
-  applied.remaining.forEach((wave, i) => wave.forEach((m) => placeOf.set(m, i)));
-  const placement = normalized.map((id) => ({ id, wave: placeOf.get(id)! + 1 }));
+  applied.remaining.forEach((wave, i) =>
+    wave.forEach((m) => placeOf.set(m, i)),
+  );
+  const placement = normalized.map((id) => ({
+    id,
+    wave: placeOf.get(id)! + 1,
+  }));
 
-  const event = { ids: normalized, blockedBy, basenames };
+  // Stamp each grafted id's title from the task text already fetched during validation
+  // (reusing the same parser the campaign path uses), so the reducer's title-folding
+  // gives the grafted wave a real header and its rows real titles (#197).
+  const titles: Record<string, string> = {};
+  for (const id of normalized) {
+    const text = taskText.get(id);
+    const title = text === undefined ? undefined : issueNameFromTask(text);
+    if (title) titles[id] = title;
+  }
+
+  const event = { ids: normalized, blockedBy, basenames, titles };
   const outbound = {
     category: "progress" as const,
     event: "graft" as const,
@@ -218,7 +257,14 @@ export async function runGraft(
     outbound,
     applied: !opts.dryRun,
     ...(opts.dryRun
-      ? { closure: { ids: normalized, placement, remaining: applied.remaining, rejected: [] } }
+      ? {
+          closure: {
+            ids: normalized,
+            placement,
+            remaining: applied.remaining,
+            rejected: [],
+          },
+        }
       : {}),
   };
 

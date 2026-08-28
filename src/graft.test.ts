@@ -14,7 +14,9 @@ import { runGraft } from "./graft.ts";
 // re-derive reads and what `enqueueOutbound`/`cfg.log` write — so the seam is
 // exercised for real; only the tracker edges (`fetchTask`/`blockedBy`/`fileSet`)
 // are stubbed per test.
-const harnessCfg = (overrides: Partial<ResolvedConfig> = {}): ResolvedConfig => {
+const harnessCfg = (
+  overrides: Partial<ResolvedConfig> = {},
+): ResolvedConfig => {
   const stateDir = mkdtempSync(join(tmpdir(), "vetinari-graft-"));
   const logFile = join(stateDir, "orchestrator.jsonl");
   return {
@@ -65,7 +67,10 @@ test("--dry-run previews the placement but appends no event and enqueues nothing
   assert.deepEqual(result.placement, [{ id: "301", wave: 2 }]);
   assert.deepEqual(result.remaining, [["101"], ["301"]]);
   // Nothing was written: no graft event on the log, no outbound record.
-  assert.equal(readEventLog(cfg).some((e) => e.event === "graft"), false);
+  assert.equal(
+    readEventLog(cfg).some((e) => e.event === "graft"),
+    false,
+  );
   assert.equal(listOutbox(cfg).length, 0);
 });
 
@@ -98,7 +103,9 @@ test("--dry-run discloses a whole-batch rejection in the closure without throwin
 
   const result = await runGraft(cfg, ["202", "303"], { dryRun: true });
 
-  assert.deepEqual(result.rejected, [{ id: "202", reason: "already-in-campaign" }]);
+  assert.deepEqual(result.rejected, [
+    { id: "202", reason: "already-in-campaign" },
+  ]);
   assert.deepEqual(result.closure, {
     ids: ["202", "303"],
     placement: [],
@@ -108,7 +115,10 @@ test("--dry-run discloses a whole-batch rejection in the closure without throwin
   });
   assert.equal(result.applied, false);
   // A dry-run rejection writes nothing either.
-  assert.equal(readEventLog(cfg).some((e) => e.event === "graft"), false);
+  assert.equal(
+    readEventLog(cfg).some((e) => e.event === "graft"),
+    false,
+  );
   assert.equal(listOutbox(cfg).length, 0);
 });
 
@@ -123,7 +133,11 @@ test("a real graft appends the graft event and enqueues a progress:graft note", 
 
   // The appended event carries the precomputed ADR-0012 layering inputs.
   const graftEvent = readEventLog(cfg).find((e) => e.event === "graft") as
-    | { ids: string[]; blockedBy: Record<string, string[]>; basenames: Record<string, string[]> }
+    | {
+        ids: string[];
+        blockedBy: Record<string, string[]>;
+        basenames: Record<string, string[]>;
+      }
     | undefined;
   assert.ok(graftEvent, "expected a graft event on the log");
   assert.deepEqual(graftEvent!.ids, ["301"]);
@@ -138,6 +152,24 @@ test("a real graft appends the graft event and enqueues a progress:graft note", 
   assert.equal(outbox[0].category, "progress");
   assert.equal(outbox[0].event, "graft");
   assert.match(outbox[0].text, /grafted #301/);
+});
+
+test("the graft event carries the grafted ids' titles so the dashboard renders them", async () => {
+  // Fetch resolves each candidate's task text (which graft already reads for state
+  // and file-set); the event stamps the parsed title so the reducer's title-folding
+  // gives the grafted wave a real header and its row a real title (#197).
+  const cfg = harnessCfg({
+    fetchTask: async (id: string) =>
+      JSON.stringify({ state: "OPEN", title: `Issue ${id} title` }),
+  });
+  launch(cfg, [["101"]]);
+
+  await runGraft(cfg, ["301"], {});
+
+  const graftEvent = readEventLog(cfg).find((e) => e.event === "graft") as
+    { titles?: Record<string, string> } | undefined;
+  assert.ok(graftEvent, "expected a graft event on the log");
+  assert.deepEqual(graftEvent!.titles, { "301": "Issue 301 title" });
 });
 
 test("the graft event records only in-campaign/co-grafted blockers, and placement respects them", async () => {
@@ -165,7 +197,10 @@ test("an id already in the campaign is rejected whole — nothing appended", asy
     () => runGraft(cfg, ["202"], {}),
     /graft rejected — nothing added \(already in the campaign: #202\)/,
   );
-  assert.equal(readEventLog(cfg).some((e) => e.event === "graft"), false);
+  assert.equal(
+    readEventLog(cfg).some((e) => e.event === "graft"),
+    false,
+  );
   assert.equal(listOutbox(cfg).length, 0);
 });
 
@@ -182,6 +217,9 @@ test("an unknown id (a throwing fetchTask) is rejected whole — nothing appende
     () => runGraft(cfg, ["999"], {}),
     /graft rejected — nothing added \(unknown\/missing: #999\)/,
   );
-  assert.equal(readEventLog(cfg).some((e) => e.event === "graft"), false);
+  assert.equal(
+    readEventLog(cfg).some((e) => e.event === "graft"),
+    false,
+  );
   assert.equal(listOutbox(cfg).length, 0);
 });

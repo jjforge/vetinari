@@ -240,6 +240,10 @@ export interface GraftEvent extends BaseEvent {
   ids: string[];
   blockedBy: Record<string, string[]>;
   basenames: Record<string, string[]>;
+  /** each grafted id's issue title (parsed from the task text graft already fetches),
+   * so the reducer's title-folding renders the grafted wave's header and rows with a
+   * real title instead of a bare `Wave N` / `#num` (#197). */
+  titles?: Record<string, string>;
 }
 
 /** `worktree-preserved` — a parked slot left its worktree on the host: the task and the preserved
@@ -314,7 +318,9 @@ export type OrchestratorEvent =
  * fails `JSON.parse`, or parses to something without a string `event`, is skipped rather than
  * crashing the read or emitting a junk row. A missing log file reads empty.
  */
-export function readEventLog(cfg: Pick<ResolvedConfig, "logFile">): OrchestratorEvent[] {
+export function readEventLog(
+  cfg: Pick<ResolvedConfig, "logFile">,
+): OrchestratorEvent[] {
   if (!existsSync(cfg.logFile)) return [];
   return readFileSync(cfg.logFile, "utf8")
     .split("\n")
@@ -326,7 +332,12 @@ export function readEventLog(cfg: Pick<ResolvedConfig, "logFile">): Orchestrator
       } catch {
         return [];
       }
-      if (!parsed || typeof parsed !== "object" || typeof (parsed as { event?: unknown }).event !== "string") return [];
+      if (
+        !parsed ||
+        typeof parsed !== "object" ||
+        typeof (parsed as { event?: unknown }).event !== "string"
+      )
+        return [];
       return [parsed as OrchestratorEvent];
     });
 }
@@ -338,7 +349,12 @@ export function readEventLog(cfg: Pick<ResolvedConfig, "logFile">): Orchestrator
  */
 export function event<K extends OrchestratorEvent["event"]>(
   kind: K,
-  fields: Omit<Extract<OrchestratorEvent, { event: K }>, "ts" | "event"> & { ts?: string },
+  fields: Omit<Extract<OrchestratorEvent, { event: K }>, "ts" | "event"> & {
+    ts?: string;
+  },
 ): Extract<OrchestratorEvent, { event: K }> {
-  return { ts: new Date().toISOString(), ...fields, event: kind } as Extract<OrchestratorEvent, { event: K }>;
+  return { ts: new Date().toISOString(), ...fields, event: kind } as Extract<
+    OrchestratorEvent,
+    { event: K }
+  >;
 }

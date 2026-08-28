@@ -4,9 +4,11 @@ import {
   applyGraft,
   validateGraftTargets,
   describePlan,
+  labelsFromTask,
   layerWaves,
   partitionWaves,
   planCampaign,
+  runCampaignPlan,
   suggestCampaignName,
   underspecifiedPromptFor,
   waveArgs,
@@ -577,4 +579,147 @@ test("validateGraftTargets returns nothing when every id is open and new (#166)"
     validateGraftTargets(["301", "302"], { inCampaign: new Set(["101"]), state: () => "open" }),
     [],
   );
+});
+
+// A fake config for `runCampaignPlan`: `fetchTask` yields per-id GitHub-style JSON,
+// and `fileSet` reads the `Touches:` marker off the *ticketProse'd* text — so a
+// resolver that got the wrong text (composition broken) would resolve differently.
+const cfgFrom = (tasks: Record<string, string>, blockers: Record<string, string[]> = {}) => ({
+  blockedBy: openBlockedByFrom(blockers),
+  fetchTask: (id: string) => tasks[id] ?? "",
+  fileSet: (ticket: string): FileSet => {
+    const m = ticket.match(/Touches: (\S+)/);
+    return { files: m ? [m[1]] : [], confident: Boolean(m) };
+  },
+});
+
+test("runCampaignPlan composes fetchTask→ticketProse→fileSet and returns the confident plan", async () => {
+  // 640 is blocked by 611; both cite a distinct file in their body marker, so the
+  // fileSet resolver — fed the ticketProse'd body — reads both as confident.
+  const report = await runCampaignPlan(
+    cfgFrom(
+      {
+        "611": JSON.stringify({ body: "Touches: a.ts", labels: [{ name: "gateway" }] }),
+        "640": JSON.stringify({ body: "Touches: b.ts", labels: [{ name: "comms" }] }),
+      },
+      { "640": ["611"] },
+    ),
+    ["611", "640"],
+    {},
+    { isTTY: false, ask: () => "fail" },
+  );
+
+  assert.equal(report.waveArgs, '"611" "640"');
+  assert.match(report.report, /wave 0.*#611/);
+  assert.match(report.report, /wave 1.*#640/);
+  // The suggested name pairs labelsFromTask with suggestCampaignName over the labels.
+  assert.equal(report.suggestedName, "gateway + comms");
+});
+
+test("runCampaignPlan: --on-underspecified=drop carves the not-confident ticket and plans the rest", async () => {
+  // 640 cites no file (no marker), so the resolver reads it not-confident; the flag
+  // pre-decides drop, so it (and its dependent 701) is carved and the rest planned.
+  const report = await runCampaignPlan(
+    cfgFrom(
+      {
+        "611": JSON.stringify({ body: "Touches: a.ts" }),
+        "640": JSON.stringify({ body: "no files named here" }),
+        "701": JSON.stringify({ body: "Touches: c.ts" }),
+      },
+      { "701": ["640"] },
+    ),
+    ["611", "640", "701"],
+    { onUnderspecified: "drop" },
+    {
+      isTTY: true,
+      ask: () => {
+        throw new Error("a flag must pre-decide, never ask");
+      },
+    },
+  );
+
+  assert.equal(report.waveArgs, '"611"');
+  assert.match(report.report, /#640.*(under-specified|no confident file-set)/i);
+  assert.match(report.report, /#701.*depend/i);
+});
+
+test("runCampaignPlan: no flag on a non-terminal fails rather than plan around a not-confident ticket", async () => {
+  await assert.rejects(
+    () =>
+      runCampaignPlan(
+        cfgFrom({
+          "611": JSON.stringify({ body: "Touches: a.ts" }),
+          "640": JSON.stringify({ body: "no files named here" }),
+        }),
+        ["611", "640"],
+        {},
+        {
+          isTTY: false,
+          ask: () => {
+            throw new Error("must not ask without a terminal");
+          },
+        },
+      ),
+    /#640.*confident/i,
+  );
+});
+
+test("runCampaignPlan: no flag on a terminal asks the requestor, whose drop carves the rest", async () => {
+  const asked: string[][] = [];
+  const report = await runCampaignPlan(
+    cfgFrom({
+      "611": JSON.stringify({ body: "Touches: a.ts" }),
+      "640": JSON.stringify({ body: "no files named here" }),
+    }),
+    ["611", "640"],
+    {},
+    {
+      isTTY: true,
+      ask: (u) => {
+        asked.push(u);
+        return "drop";
+      },
+    },
+  );
+
+  assert.deepEqual(asked, [["640"]]);
+  assert.equal(report.waveArgs, '"611"');
+});
+
+test("runCampaignPlan rejects an empty id set", async () => {
+  await assert.rejects(
+    () => runCampaignPlan(cfgFrom({}), [], {}, { isTTY: false, ask: () => "fail" }),
+    /at least one ticket id/,
+  );
+});
+
+test("runCampaignPlan requires a blockedBy resolver", async () => {
+  await assert.rejects(
+    () =>
+      runCampaignPlan(
+        { fetchTask: () => "" },
+        ["611"],
+        {},
+        { isTTY: false, ask: () => "fail" },
+      ),
+    /blockedBy/,
+  );
+});
+
+test("runCampaignPlan suggests no name when the set spans no area label", async () => {
+  const report = await runCampaignPlan(
+    cfgFrom({ "611": JSON.stringify({ body: "Touches: a.ts", labels: [{ name: "bug" }] }) }),
+    ["611"],
+    {},
+    { isTTY: false, ask: () => "fail" },
+  );
+  assert.equal(report.suggestedName, undefined);
+});
+
+test("labelsFromTask reads GitHub label objects and is best-effort on non-JSON", () => {
+  assert.deepEqual(
+    labelsFromTask(JSON.stringify({ labels: [{ name: "gateway" }, { name: "P2" }] })),
+    ["gateway", "P2"],
+  );
+  assert.deepEqual(labelsFromTask("not json at all"), []);
 });

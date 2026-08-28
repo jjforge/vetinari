@@ -4,6 +4,7 @@ import {
   dotClass,
   freezeIntent,
   hiddenPastCap,
+  paneActivity,
   tallyDotClass,
 } from "./dashboard-visual-state.ts";
 
@@ -56,4 +57,24 @@ test("freezeIntent reads 'waiting for updates' before the first refresh (null la
   // The landing opens with no lastUpdate; the campaign page seeds it to now instead.
   const intent = freezeIntent({ paused: false, buffered: 0, lastUpdate: null, now: 5000 });
   assert.equal(intent.updatedText, "waiting for updates");
+});
+
+test("paneActivity counts a visible append — new lines, pane open and following (#198)", () => {
+  // A live-tail/host-log frame that visibly adds lines is a co-equal update: it resets
+  // the live-bar's freshness clock, just like a wave/feed refresh.
+  assert.equal(paneActivity({ appended: 3, open: true, following: true }), true);
+  assert.equal(paneActivity({ appended: 1, open: true, following: true }), true);
+});
+
+test("paneActivity ignores a frame that adds no visible lines (#198)", () => {
+  // No fresh lines is not an update.
+  assert.equal(paneActivity({ appended: 0, open: true, following: true }), false);
+});
+
+test("paneActivity ignores appends the pane doesn't show — collapsed or follow-paused (#198)", () => {
+  // A collapsed pane, or one whose own follow is paused so frames only buffer, presents
+  // nothing new — presentation is frozen, so freshness is too.
+  assert.equal(paneActivity({ appended: 5, open: false, following: true }), false);
+  assert.equal(paneActivity({ appended: 5, open: true, following: false }), false);
+  assert.equal(paneActivity({ appended: 5, open: false, following: false }), false);
 });

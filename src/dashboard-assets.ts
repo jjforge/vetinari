@@ -1,4 +1,5 @@
 import { cappedRawRows, followView, highlightJsonLine, isNotableHostEvent, tailAppend, tailFresh, tailView } from "./dashboard-render.ts";
+import { paneActivity } from "./dashboard-visual-state.ts";
 
 /**
  * The dashboard's inert browser payloads — the CSS and client-side JavaScript
@@ -693,6 +694,7 @@ export const LIVE_TAIL_SCRIPT = `  const tailEl = document.querySelector("[data-
     ${tailAppend.toString()}
     ${followView.toString()}
     ${tailView.toString()}
+    ${paneActivity.toString()}
     const FOLLOW_CAP = 260, RENDER_CAP = 160;
     const project = tailEl.dataset.project;
     let agents = []; try { agents = JSON.parse(tailEl.dataset.agents || "[]"); } catch (e) {}
@@ -747,6 +749,11 @@ export const LIVE_TAIL_SCRIPT = `  const tailEl = document.querySelector("[data-
       // Grow the buffer past the cap only while explicitly paused with the pane open (a backlog
       // to reveal); following or collapsed keeps it bounded — reopening jumps to live anyway.
       if (res.fresh.length) buffer = tailAppend(buffer, res.fresh, live || !open, FOLLOW_CAP);
+      // A visible append (pane open + following, with new lines) is a live-surface update:
+      // signal the live-bar to reset its "updated Ns ago" clock (#198). Buffered frames
+      // (collapsed, or the tail's own follow paused) present nothing new and stay silent;
+      // the page-level pause is gated by the live-bar's own listener.
+      if (paneActivity({ appended: res.fresh.length, open, following: live })) window.dispatchEvent(new CustomEvent("vetinari:activity"));
       render();
     }
     events.addEventListener("tail", (e) => { let m; try { m = JSON.parse(e.data); } catch (x) { return; } if (m && m.project === project) ingest(m.tail); });
@@ -835,6 +842,7 @@ export const HOST_LOG_SCRIPT = `  const hostLogRoot = document.querySelector("[d
     ${highlightJsonLine.toString()}
     ${cappedRawRows.toString()}
     ${isNotableHostEvent.toString()}
+    ${paneActivity.toString()}
     const HOST_CAP = 500, HOST_WINDOW = 500;
     const gear = hostLogRoot.querySelector("[data-host-log-gear]");
     const badge = hostLogRoot.querySelector("[data-host-log-badge]");
@@ -902,6 +910,11 @@ export const HOST_LOG_SCRIPT = `  const hostLogRoot = document.querySelector("[d
       if (lines.length > HOST_WINDOW) lines = lines.slice(0, HOST_WINDOW);
       if (!panel.hidden) draw();
       updateBadge();
+      // A visible append (the panel open) is a live-surface update: signal the live-bar to
+      // reset its "updated Ns ago" clock (#198). The host-log always shows newest-first, so
+      // there is no follow to pause — visibility is just the panel; a closed panel stays
+      // silent (the badge still signals). The page-level pause is gated by the live-bar.
+      if (paneActivity({ appended: appended.length, open: !panel.hidden, following: true })) window.dispatchEvent(new CustomEvent("vetinari:activity"));
     };
     events.addEventListener("host", (e) => { let m; try { m = JSON.parse(e.data); } catch (x) { return; } ingest((m && m.lines) || []); });
     // The initial window is the no-daemon host-log read (readHostLog), newest-first already.

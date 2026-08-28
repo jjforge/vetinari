@@ -726,6 +726,9 @@ export const renderHostLog = () =>
   `</button>` +
   `<div class="host-log-panel" data-host-log-panel hidden role="dialog" aria-label="Host log">` +
   `<div class="host-log-head"><span class="host-log-title">host.jsonl</span><span class="host-log-gap"></span><button type="button" class="host-log-close" data-host-log-close aria-label="Close host log">&times;</button></div>` +
+  // The gear doubles as the fleet settings surface: the "Festive Wave Names" toggle (#193),
+  // an unchecked-by-default checkbox the client syncs to the `festiveWaveNames` cookie.
+  `<div class="host-log-settings"><label class="festive-toggle"><input type="checkbox" data-festive-toggle /> Festive wave names</label></div>` +
   `<input type="text" class="host-log-filter" data-host-log-filter placeholder="filter lines…" aria-label="Filter host log lines" />` +
   `<div class="host-log-lines" data-host-log-lines></div>` +
   `<div class="host-log-footer" data-host-log-footer></div>` +

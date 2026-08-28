@@ -1521,6 +1521,10 @@ test("renderHostLog renders a gear entry point, a hidden badge, and a hidden hos
   assert.match(html, /data-host-log-filter/);
   // A lines container the client fills from /api/host-log and the SSE host frames.
   assert.match(html, /data-host-log-lines/);
+  // The gear also carries the "Festive Wave Names" settings toggle (#193): an
+  // unchecked-by-default checkbox the client syncs to the festiveWaveNames cookie.
+  assert.match(html, /data-festive-toggle/);
+  assert.match(html, /Festive [Ww]ave [Nn]ames/);
 });
 
 test("renderLandingShell mounts the host-log gear + pane on the host view (#180)", () => {
@@ -5626,6 +5630,17 @@ test("HOST_LOG_SCRIPT wires the host-log pane: gear show/hide, badge off isNotab
   assert.match(HOST_LOG_SCRIPT, /events\.addEventListener\("host"/);
   // A missing host log reads a clean empty state, not a blank pane.
   assert.match(HOST_LOG_SCRIPT, /No host log yet/);
+});
+
+test("HOST_LOG_SCRIPT wires the Festive Wave Names toggle to the cookie + reload (#193)", () => {
+  // The toggle reflects the current cookie on load, so its state persists across reloads.
+  assert.match(HOST_LOG_SCRIPT, /data-festive-toggle/);
+  assert.match(HOST_LOG_SCRIPT, /festiveWaveNames=1/);
+  // Flipping it sets the festiveWaveNames cookie (=1 on / =0 off) and reloads so the
+  // server re-renders the labels — a pure-client localStorage flip can't move a
+  // server-rendered string.
+  assert.match(HOST_LOG_SCRIPT, /document\.cookie = /);
+  assert.match(HOST_LOG_SCRIPT, /location\.reload\(\)/);
 });
 
 test("renderStatusPage makes archived campaign chips open the issue sheet against the archived run, read-only", () => {

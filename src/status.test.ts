@@ -54,6 +54,7 @@ import {
   reduceCampaign,
   renderHostLog,
   renderLandingShell,
+  festiveFromCookie,
   viewRelevantEvents,
   waveLabel,
   renderStatusPage,
@@ -3425,6 +3426,36 @@ test("selectStatus picks the requested project, defaulting to the first otherwis
   assert.equal(selectStatus(statuses, undefined).project, "alpha");
   // An unknown or stale selection falls back to the first, never undefined.
   assert.equal(selectStatus(statuses, "ghost").project, "alpha");
+});
+
+test("buildLanding's last-event line names the wave festively when the toggle is on (#193)", () => {
+  const dir = join(tmpdir(), `vetinari-landing-festive-${Date.now()}`);
+  seedState(dir, [
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["101"], ["201"]], slots: 1, festiveOffset: 11, name: "gateway work" }),
+    event("campaign-batch", { ts: "2025-01-01T00:03:00.000Z", index: 1, tasks: ["201", "202"], name: "gateway work" }),
+  ]);
+  const pointers = [pointerFor("demo", dir)];
+  // Off — today's plain narration lists the member titles/ids.
+  assert.equal(buildLanding(pointers, new Date("2025-01-02T00:00:00.000Z")).projects[0].lastEvent, "Campaign “gateway work” — Wave 2 — #201, #202 started");
+  // On — the wave draws pool[11+1] = "Nanny Ogg" and lists the member issue numbers.
+  assert.equal(
+    buildLanding(pointers, new Date("2025-01-02T00:00:00.000Z"), undefined, true).projects[0].lastEvent,
+    "Campaign “gateway work” — Wave 2 · Nanny Ogg · #201, #202 started",
+  );
+});
+
+test("festiveFromCookie reads the toggle out of the request's Cookie header (#193)", () => {
+  // Absent header → the fallback (the config default; false at the host dashboard).
+  assert.equal(festiveFromCookie(undefined, false), false);
+  assert.equal(festiveFromCookie("", false), false);
+  assert.equal(festiveFromCookie("theme=dark", false), false);
+  // `festiveWaveNames=1` turns it on; `=0` turns it off — the cookie wins over the fallback.
+  assert.equal(festiveFromCookie("festiveWaveNames=1", false), true);
+  assert.equal(festiveFromCookie("festiveWaveNames=0", true), false);
+  // Found among other cookies, with the usual "; " separators and stray whitespace.
+  assert.equal(festiveFromCookie("theme=dark; festiveWaveNames=1; tz=UTC", false), true);
+  // No cookie present → the fallback decides, so a config default of true still reads on.
+  assert.equal(festiveFromCookie("theme=dark", true), true);
 });
 
 test("waveLabel's festive input names the wave through the one derivation (#193)", () => {

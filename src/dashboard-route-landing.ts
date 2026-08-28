@@ -1,5 +1,5 @@
 import { listProjects } from "./registry.ts";
-import { buildLanding } from "./dashboard-model.ts";
+import { buildLanding, festiveFromCookie } from "./dashboard-model.ts";
 import type { RouteHandler } from "./dashboard-http.ts";
 
 /** `GET /api/landing` — the all-repos landing model (four counters + one card per
@@ -9,6 +9,7 @@ import type { RouteHandler } from "./dashboard-http.ts";
 export const handleLanding: RouteHandler = (req, res, url, deps) => {
   if (!(req.method === "GET" && url.pathname === "/api/landing")) return false;
   res.setHeader("content-type", "application/json");
-  res.end(JSON.stringify(buildLanding(listProjects(deps.configDir))));
+  const festive = festiveFromCookie(req.headers.cookie);
+  res.end(JSON.stringify(buildLanding(listProjects(deps.configDir), new Date(), undefined, festive)));
   return true;
 };

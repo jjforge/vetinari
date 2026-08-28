@@ -164,6 +164,20 @@ export function viewRelevantEvents(events: OrchestratorEvent[]): OrchestratorEve
   return events.filter((e) => !SSE_NOISE_EVENTS.has(e.event));
 }
 
+/**
+ * Whether "Festive Wave Names" is on for a request (#193). Wave labels are
+ * server-rendered, but the gear toggle is client-side, so it sets a `festiveWaveNames`
+ * cookie the server reads here: `=1` on, `=0` off, the cookie always winning. With no
+ * such cookie the `fallback` decides — the project's `festiveWaveNames` config default,
+ * or plain false at the host dashboard, which loads no per-project config (ADR 0002).
+ * Pure and header-parsing-only so it is unit-testable without a request.
+ */
+export function festiveFromCookie(cookieHeader: string | undefined, fallback = false): boolean {
+  const match = cookieHeader?.match(/(?:^|;\s*)festiveWaveNames=([^;]*)/);
+  if (!match) return fallback;
+  return match[1] === "1";
+}
+
 const normalizeIssue = (id: string) => id.replace(/^#/, "");
 
 const hash = (id: unknown) => `#${normalizeIssue(String(id))}`;
@@ -308,14 +322,25 @@ export function describeEvent(e: OrchestratorEvent, festive?: { offset: number }
   }
 }
 
+/** The festive descriptor `describeEvent` needs for a run's events (#193): the offset
+ * reserved by the run's latest `campaign-start`, wrapped so an offset of 0 stays a real
+ * reservation. Undefined when festive is off, or the run stamped no offset (pre-feature)
+ * — narration then stays plain even under the toggle. */
+const festiveFor = (events: OrchestratorEvent[], festive: boolean): { offset: number } | undefined => {
+  if (!festive) return undefined;
+  const start = events.findLast((e): e is OrchestratorEvent & { festiveOffset?: number } => e.event === "campaign-start");
+  return Number.isInteger(start?.festiveOffset) ? { offset: start!.festiveOffset as number } : undefined;
+};
+
 /**
  * One event as a single repo-prefixed sentence for the cross-project feed:
  * `describeEvent`'s plain-words line with the project name in front. Pure — an
  * event `describeEvent` can't narrate (machine noise) returns "" so `buildFeed`
- * can skip past it, exactly as `lastEventText` does.
+ * can skip past it, exactly as `lastEventText` does. `festive` (its run's reserved
+ * offset, resolved by the caller) names the wave after a character (#193).
  */
-export function formatFeedEvent(project: string, e: OrchestratorEvent): string {
-  const sentence = describeEvent(e);
+export function formatFeedEvent(project: string, e: OrchestratorEvent, festive?: { offset: number }): string {
+  const sentence = describeEvent(e, festive);
   return sentence ? `${project} — ${sentence}` : "";
 }
 
@@ -324,11 +349,13 @@ export function formatFeedEvent(project: string, e: OrchestratorEvent): string {
  * card's "last event" line. Scans newest-first and returns the first entry
  * `describeEvent` can narrate, so machine noise (gate/sandbox/queue-spawn) that
  * lands after a meaningful event never becomes the headline. Empty logs read
- * "No activity yet".
+ * "No activity yet". When `festive` is on, a wave event is narrated festively off
+ * the run's reserved offset (#193).
  */
-export function lastEventText(events: OrchestratorEvent[]): string {
+export function lastEventText(events: OrchestratorEvent[], festive = false): string {
+  const festiveArg = festiveFor(events, festive);
   for (let i = events.length - 1; i >= 0; i--) {
-    const text = describeEvent(events[i]);
+    const text = describeEvent(events[i], festiveArg);
     if (text) return text;
   }
   return "No activity yet";
@@ -1098,7 +1125,7 @@ const FEED_ARCHIVE_MARGIN_MS = 6 * 60 * 60 * 1000;
  * row (`formatFeedEvent` returns ""), so the feed reads as an operator log, not a
  * raw event dump.
  */
-export function buildFeed(pointers: ProjectPointer[], now: Date = new Date(), logger: Logger = hostLogger()): FeedEntry[] {
+export function buildFeed(pointers: ProjectPointer[], now: Date = new Date(), logger: Logger = hostLogger(), festive = false): FeedEntry[] {
   const cutoffMs = now.getTime() - FEED_WINDOW_MS;
   const archiveFloorMs = cutoffMs - FEED_ARCHIVE_MARGIN_MS;
   const entries: FeedEntry[] = [];
@@ -1120,10 +1147,13 @@ export function buildFeed(pointers: ProjectPointer[], now: Date = new Date(), lo
       }
     }
     for (const events of runs) {
+      // Each run carries its own reserved offset on its `campaign-start`, so resolve it
+      // once per run and narrate that run's wave events festively off it (#193).
+      const festiveArg = festiveFor(events, festive);
       for (const e of events) {
         const tsMs = Date.parse(String(e.ts ?? ""));
         if (Number.isNaN(tsMs) || tsMs < cutoffMs) continue;
-        const text = formatFeedEvent(pointer.project, e);
+        const text = formatFeedEvent(pointer.project, e, festiveArg);
         if (text) entries.push({ project: pointer.project, ts: String(e.ts), kind: String(e.event ?? ""), text });
       }
     }
@@ -1266,7 +1296,7 @@ const mergedTodayForProject = (baseLocation: string, liveEvents: OrchestratorEve
   return merged.size;
 };
 
-const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, events: OrchestratorEvent[], logger: Logger): ProjectCard => {
+const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, events: OrchestratorEvent[], logger: Logger, festive = false): ProjectCard => {
   // The card heading shows owner/name, read live off the checkout's git remote;
   // undefined for a project with none (the demo), so the display falls back to the key.
   const repo = repoForProject(pointer.projectRoot);
@@ -1314,7 +1344,7 @@ const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, event
       parked: issues.filter((i) => i.status === "parked").length,
       queued: issues.filter((i) => i.status === "unstarted").length,
     },
-    lastEvent: lastEventText(events),
+    lastEvent: lastEventText(events, festive),
   };
 };
 
@@ -1326,7 +1356,7 @@ const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, event
  * merged-today counts each project's issues whose reconstructed merge stamp
  * (`reduceCampaign`'s `mergedAt`) falls on `now`'s local day.
  */
-export function buildLanding(pointers: ProjectPointer[], now: Date = new Date(), logger: Logger = hostLogger()): LandingView {
+export function buildLanding(pointers: ProjectPointer[], now: Date = new Date(), logger: Logger = hostLogger(), festive = false): LandingView {
   const projects: ProjectCard[] = [];
   const parked: ParkedQuestion[] = [];
   let mergedToday = 0;
@@ -1348,7 +1378,7 @@ export function buildLanding(pointers: ProjectPointer[], now: Date = new Date(),
     for (const p of status.parked) {
       parked.push({ issueNumber: p.issueNumber, project: status.project, question: p.description, parkedAt: p.parkedAt });
     }
-    projects.push(buildProjectCard(pointer, status, events, logger));
+    projects.push(buildProjectCard(pointer, status, events, logger, festive));
   }
   // Oldest first — the question that has waited longest surfaces at the top.
   parked.sort((a, b) => a.parkedAt.localeCompare(b.parkedAt));

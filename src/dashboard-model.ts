@@ -1296,6 +1296,30 @@ const mergedTodayForProject = (baseLocation: string, liveEvents: OrchestratorEve
   return merged.size;
 };
 
+/**
+ * Fold a `DisplayStatus` to the base `IssueStatus` bucket the landing card's tally
+ * should count it under, or `null` when it belongs in no bucket. Base statuses pass
+ * through; the render overlays map to their effective base so no issue silently
+ * leaks out of the count (#200): `grafted`/`interrupted` are outstanding work →
+ * `unstarted`, `quarantined` is an attention state grouped with `parked`, and
+ * `carved` is pruned from the campaign so it counts nowhere (ADR 0007/0013/0014).
+ * Mirrors the statusline's own `countBucket` fold (#199) so the two count surfaces
+ * agree by construction rather than drifting. Pure.
+ */
+export function effectiveStatus(status: DisplayStatus): IssueStatus | null {
+  switch (status) {
+    case "grafted":
+    case "interrupted":
+      return "unstarted";
+    case "quarantined":
+      return "parked";
+    case "carved":
+      return null; // pruned from the campaign — counted in no bucket
+    default:
+      return status;
+  }
+}
+
 const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, events: OrchestratorEvent[], logger: Logger, festive = false): ProjectCard => {
   // The card heading shows owner/name, read live off the checkout's git remote;
   // undefined for a project with none (the demo), so the display falls back to the key.
@@ -1339,10 +1363,13 @@ const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, event
     // "N of M": the wave in flight if one is, otherwise how many have closed.
     wave: { current: runningWave >= 0 ? runningWave + 1 : closed, total },
     percentMerged: issues.length ? Math.round((completed / issues.length) * 100) : 0,
+    // Count each issue under its *effective* status so a render overlay can't leak
+    // out of the tally: a grafted issue waiting in a later wave folds to `unstarted`
+    // and lands in `queued` (#200), matching the statusline's fold (#199).
     tally: {
-      running: issues.filter((i) => i.status === "running").length,
-      parked: issues.filter((i) => i.status === "parked").length,
-      queued: issues.filter((i) => i.status === "unstarted").length,
+      running: issues.filter((i) => effectiveStatus(i.status) === "running").length,
+      parked: issues.filter((i) => effectiveStatus(i.status) === "parked").length,
+      queued: issues.filter((i) => effectiveStatus(i.status) === "unstarted").length,
     },
     lastEvent: lastEventText(events, festive),
   };

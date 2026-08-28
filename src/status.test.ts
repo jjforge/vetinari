@@ -54,6 +54,11 @@ import {
   reduceCampaign,
   renderHostLog,
   renderLandingShell,
+  feedFresh,
+  feedKindClass,
+  feedKindLabel,
+  feedRowMatches,
+  followView,
   festiveFromCookie,
   viewRelevantEvents,
   waveLabel,
@@ -1641,8 +1646,8 @@ test("renderLandingShell reads each event kind's category as a leading dot, labe
   const html = renderLandingShell(["alpha"]);
   // Each feed row's kind carries a category class so its dot reads in that colour.
   assert.match(html, /"feed-kind " \+ feedKindClass\(e\.kind\)/);
-  // The classifier maps the orchestrator's event kinds to comms categories.
-  assert.match(html, /const feedKindClass = /);
+  // The classifier is single-sourced from dashboard-render's feedKindClass, shipped via .toString().
+  assert.match(html, /function feedKindClass/);
   // The label text stays full-strength --color-text — never a mid-tone tint on
   // near-black (which struck out the blue progress kind, #85).
   assert.match(html, /\.feed-kind \{ color: var\(--color-text\);/);
@@ -1673,34 +1678,60 @@ test("renderLandingShell reads each event kind's category as a leading dot, labe
   );
 });
 
-test("renderLandingShell's feed caps at 20 rows behind a show-older control and reads the 48h empty state (#101)", () => {
+test("renderLandingShell's feed is a scrollable live-tail-style pane, not a show-older list (#196)", () => {
   const html = renderLandingShell(["alpha"]);
   // The empty window reads the feed's own copy, not the live-only "No activity yet".
   assert.match(html, /No activity in the last 48 hours\./);
   assert.ok(!html.includes("No activity yet."), "the live-only empty state is gone from the feed");
-  // The newest 20 render; the rest render hidden behind a "show older" control that
-  // mirrors the archived-runs list (its `archive-show-older` affordance), revealing
-  // the remaining in-window rows in place.
-  assert.match(html, /const FEED_CAP = 20;/);
-  // The control reuses the archived-runs list's `archive-show-older` affordance.
-  assert.match(html, /el\("button", "archive-show-older"/);
-  assert.match(html, /older event/);
-  // `.feed-row { display: flex }` is an author rule that beats the UA `[hidden]`
-  // rule, so a hidden row would still paint (the whole 48h window, ~64,000px tall)
-  // unless display is restored explicitly — the archived-runs list guards the same
-  // trap with `.archive-row[hidden] { display: none }`. Assert the computed hiding
-  // (the CSS rule), not merely that `r.hidden` is set (#101).
-  assert.match(html, /\.feed-row\[hidden\] \{ display: none;? \}/);
+  // The old cap-and-reveal model is gone: the feed now renders into a scroll pane bounded by the
+  // shared follow/pause render cap, so there is no 20-row cap and no archive-show-older control.
+  assert.ok(!html.includes("const FEED_CAP = 20;"), "the show-older cap is gone from the feed");
+  assert.doesNotMatch(html, /"feed-rows"[^;]*archive-show-older/);
+  assert.ok(!html.includes("older event"), "the show-older-events control is gone");
+  // The feed body is its own scroll pane keeping prose typography (its rows differ from the
+  // tail's mono raw lines), styled alongside the shared chrome rather than reusing .tail-body.
+  assert.match(html, /\.feed-body \{[^}]*overflow-y: auto/);
 });
 
-test("renderLandingShell's feed reads as an event log: 'Event log · all repos' header with a live dot (#95)", () => {
+test("renderLandingShell's feed adopts the live-tail pane chrome via shared CSS (#196)", () => {
   const html = renderLandingShell(["alpha"]);
-  // The feed header takes the POC's event-log treatment: the "Event log · all repos"
-  // label carrying a live indicator, replacing the old "Recent activity" heading.
-  assert.match(html, /<h2[^>]*>[\s\S]*?Event log · all repos[\s\S]*?<\/h2>/);
+  // The event-log pane draws the live tail's shared chrome (container, header, control strip,
+  // backlog, footer) from LIVE_TAIL_STYLES rather than a second ad-hoc restyle.
+  assert.match(html, /\.live-tail \{/);
+  assert.match(html, /\.tail-head \{/);
+  assert.match(html, /\.tail-controls \{/);
+  // The feed section is a .live-tail card carrying its own hook, with the shared header chrome.
+  assert.match(html, /<section id="feed" class="live-tail feed" data-feed/);
+  assert.match(html, /class="tail-head"[\s\S]*?data-feed-dot/);
+  // The event-log title still reads "Event log · all repos"; the old "Recent activity" heading
+  // and the old bespoke <h2> feed header are gone.
+  assert.match(html, /Event log · all repos/);
   assert.ok(!html.includes("Recent activity"), "the old heading is gone");
-  // The live indicator (the shared pulsing dot) rides in the feed header.
-  assert.match(html, /<h2[^>]*>[\s\S]*?class="live-indicator"[\s\S]*?<\/h2>/);
+  assert.doesNotMatch(html, /class="feed"[^>]*>\s*<h2/);
+});
+
+test("renderLandingShell's feed carries the four live-tail controls wired to the shared view-model (#196)", () => {
+  const html = renderLandingShell(["alpha"]);
+  // The control strip: case-insensitive filter, follow/pause, save-visible, clear.
+  for (const hook of ["data-feed-filter", "data-feed-play", "data-feed-save", "data-feed-clear", "data-feed-backlog"]) {
+    assert.ok(html.includes(hook), `feed control ${hook} is present`);
+  }
+  // The client drives follow/pause/backlog through the shared, tested view-model and dedups the
+  // re-fetched window through feedFresh — the same tested logic as the tail, not a parallel copy.
+  assert.match(html, /function followView/);
+  assert.match(html, /function feedFresh/);
+  assert.match(html, /function feedRowMatches/);
+  assert.match(html, /function tailAppend/);
+  // Follow/pause reads through followView; the backlog points up (newest-on-top, #195).
+  assert.match(html, /followView\(\{ buffer: feedBuffer/);
+  assert.match(html, /"↑ " \+ view\.backlog \+ " new event"/);
+  // Filter drives feedRowMatches over the (kind, text) pair.
+  assert.match(html, /feedRowMatches\(/);
+  // Save exports the visible rows as narrated text lines (one per line), not raw JSON.
+  assert.match(html, /download = "event-log/);
+  // Clear empties the view client-side only (the buffer), keeping the seen set so the server's
+  // still-held window isn't re-imported — no events or logs are deleted.
+  assert.match(html, /feedBuffer = \[\];/);
 });
 
 test("renderLandingShell's feed timestamps are compact HH:MM, weekday/date for older entries (#95)", () => {
@@ -1720,30 +1751,86 @@ test("renderLandingShell's feed relabels the real event kinds as clean lowercase
   // still keys off the real kind so the leading-dot colour (#85) is unchanged.
   assert.match(html, /feedKindLabel\(e\.kind\)/);
   assert.match(html, /"feed-kind " \+ feedKindClass\(e\.kind\)/);
-  assert.match(html, /const feedKindLabel = /);
-  // The mapping covers only real orchestrator event kinds (dashboard-model's
-  // describeEvent) — no fabricated `pr.opened`, no `agent-N` identity (rule 5, #55).
-  for (const pair of [
-    ["green", "issue.merged"],
-    ["parked", "issue.parked"],
-    ["carve", "issue.carved"],
-    ["campaign-batch", "wave.started"],
-    ["campaign-batch-done", "wave.closed"],
-    ["campaign-start", "campaign.started"],
-    ["queue-start", "campaign.started"],
-    ["campaign-done", "campaign.closed"],
-    ["queue-done", "campaign.closed"],
-    ["campaign-halt", "campaign.halted"],
-    ["turn", "agent.turn"],
-  ]) {
-    assert.ok(
-      html.includes(`"${pair[0]}": "${pair[1]}"`) || html.includes(`${pair[0]}: "${pair[1]}"`),
-      `feed relabels ${pair[0]} → ${pair[1]}`,
-    );
-  }
+  // The relabel map is single-sourced from dashboard-render's feedKindLabel, shipped via
+  // .toString(); the exact kind→label pairs are unit-tested against that function directly.
+  assert.match(html, /function feedKindLabel/);
   assert.ok(!html.includes("pr.opened"), "no fabricated pr.opened kind");
   // The label reads as clean lowercase code, so the feed-kind is no longer uppercased.
   assert.doesNotMatch(html, /\.feed-kind \{[^}]*text-transform: uppercase/);
+});
+
+test("feedKindLabel/feedKindClass fold an orchestrator event kind to the feed's label and comms category (#196)", () => {
+  // The label is the clean namespace.verb remap; an unmapped kind falls through to its raw value.
+  assert.equal(feedKindLabel("green"), "issue.merged");
+  assert.equal(feedKindLabel("carve"), "issue.carved");
+  assert.equal(feedKindLabel("some-unmapped-kind"), "some-unmapped-kind");
+  // The category keys off the real kind: merges/dones green, parked amber, halt red, carve purple,
+  // everything else the in-flight blue.
+  assert.equal(feedKindClass("green"), "success");
+  assert.equal(feedKindClass("queue-done"), "success");
+  assert.equal(feedKindClass("parked"), "attention");
+  assert.equal(feedKindClass("quarantined"), "attention");
+  assert.equal(feedKindClass("campaign-halt"), "failure");
+  assert.equal(feedKindClass("carve"), "carved");
+  assert.equal(feedKindClass("turn"), "progress");
+});
+
+test("feedRowMatches filters a feed row case-insensitively over its kind label + narrated text (#196)", () => {
+  const row = { kind: "green", text: "acme — #101 merged" };
+  // An empty / whitespace query matches everything (the filter is cleared).
+  assert.equal(feedRowMatches(row, ""), true);
+  assert.equal(feedRowMatches(row, "   "), true);
+  // The prose text matches, case-insensitively.
+  assert.equal(feedRowMatches(row, "ACME"), true);
+  assert.equal(feedRowMatches(row, "#101"), true);
+  // The remapped kind label matches — the operator sees "issue.merged", not the raw "green".
+  assert.equal(feedRowMatches(row, "issue.merged"), true);
+  assert.equal(feedRowMatches(row, "merged"), true);
+  // A miss on both label and text hides the row.
+  assert.equal(feedRowMatches(row, "zzz"), false);
+});
+
+test("feedFresh dedups a re-fetched newest-first window, returning only genuinely new rows oldest-first (#196)", () => {
+  // The server returns the whole window newest-first each fetch; the client accumulates.
+  const fe = (ts: string, text: string) => ({ project: "acme", ts, kind: "green", text });
+  const window1 = [fe("2026-08-28T00:00:02Z", "c"), fe("2026-08-28T00:00:01Z", "b"), fe("2026-08-28T00:00:00Z", "a")];
+  const first = feedFresh(window1, {});
+  // Fresh is oldest-first so it appends to the oldest→newest buffer in chronological order.
+  assert.deepEqual(first.fresh.map((r) => r.text), ["a", "b", "c"]);
+
+  // Next fetch re-sends the window plus one newer row; only the new row is fresh.
+  const window2 = [fe("2026-08-28T00:00:03Z", "d"), ...window1];
+  const second = feedFresh(window2, first.seen);
+  assert.deepEqual(second.fresh.map((r) => r.text), ["d"]);
+
+  // Two rows with the same ts but different text are distinct events, both fresh.
+  const window3 = [fe("2026-08-28T00:00:03Z", "d2"), ...window2];
+  const third = feedFresh(window3, second.seen);
+  assert.deepEqual(third.fresh.map((r) => r.text), ["d2"]);
+});
+
+test("the feed drives the shared followView with its (kind, text) filter — same view-model as the tail (#196)", () => {
+  // The feed client accumulates an oldest→newest buffer and drives followView with feedRowMatches,
+  // exactly as the tail drives it with its own predicate. Rows shaped like feed entries.
+  const fe = (ts: string, kind: string, text: string) => ({ project: "acme", ts, kind, text });
+  const buffer = [fe("t0", "turn", "acme — #1 took a turn"), fe("t1", "green", "acme — #2 merged"), fe("t2", "parked", "acme — #3 parked")];
+
+  // Following, no filter: newest-first, backlog zero, following true.
+  const all = followView({ buffer, mark: 0, live: true, cap: 160, match: (e) => feedRowMatches(e, "") });
+  assert.deepEqual(all.rows.map((r) => r.text), ["acme — #3 parked", "acme — #2 merged", "acme — #1 took a turn"]);
+  assert.equal(all.backlog, 0);
+  assert.equal(all.following, true);
+
+  // The filter narrows to rows whose kind label or prose text matches — "merged" hits both the
+  // remapped label (issue.merged) and the prose of the green row.
+  const filtered = followView({ buffer, mark: 0, live: true, cap: 160, match: (e) => feedRowMatches(e, "merged") });
+  assert.deepEqual(filtered.rows.map((r) => r.text), ["acme — #2 merged"]);
+
+  // Paused at mark=2 freezes the first two; the parked row that arrived after counts as backlog.
+  const paused = followView({ buffer, mark: 2, live: false, cap: 160, match: (e) => feedRowMatches(e, "") });
+  assert.deepEqual(paused.rows.map((r) => r.text), ["acme — #2 merged", "acme — #1 took a turn"]);
+  assert.equal(paused.backlog, 1);
+  assert.equal(paused.following, false);
 });
 
 test("the card progress-bar selector is scoped so it never boxes the feed's progress kind label (#85)", () => {

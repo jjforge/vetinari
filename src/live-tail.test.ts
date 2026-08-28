@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import { buildLiveTail } from "./dashboard-model.ts";
 import type { AddressInfo } from "node:net";
-import { renderLiveTail, renderStatusPage, tailAppend, tailFresh, tailView } from "./dashboard-render.ts";
+import { followView, renderLiveTail, renderStatusPage, tailAppend, tailFresh, tailView } from "./dashboard-render.ts";
 import type { CampaignStatus } from "./dashboard-model.ts";
 import { serveAllStatus } from "./status.ts";
 import { register } from "./registry.ts";
@@ -148,6 +148,47 @@ test("tailFresh treats a re-sent snapshot line as new only when its per-file ind
   const next = tailFresh([ln("1", 1), ln("2", 0), ln("1", 2)], first.seen);
   assert.deepEqual(next.fresh.map((r) => [r.issue, r.n]), [["1", 2]]);
   assert.deepEqual(next.seen, { "1": 2, "2": 0 });
+});
+
+// The generalized follow/pause view-model (#196) — the tail's tailView delegates to it, and
+// the event-log feed drives it with its own row shape + match predicate. Exercised here over
+// plain string rows to prove it is generic: it only knows a buffer, a mark, live, a cap and a
+// match predicate.
+test("followView (following) shows the newest `cap` matches newest-first, backlog zero", () => {
+  const buffer = ["alpha", "beta", "gamma", "alpha-two"];
+  const match = (r: string) => r.indexOf("alpha") !== -1;
+  const all = followView({ buffer, mark: 0, live: true, cap: 2, match: () => true });
+  assert.deepEqual(all.rows, ["alpha-two", "gamma"]);
+  assert.equal(all.visible, 2);
+  assert.equal(all.total, 4);
+  assert.equal(all.backlog, 0);
+  assert.equal(all.following, true);
+  assert.equal(all.empty, false);
+
+  // The predicate composes: only the two alpha rows survive, still newest-first.
+  const filtered = followView({ buffer, mark: 0, live: true, cap: 10, match });
+  assert.deepEqual(filtered.rows, ["alpha-two", "alpha"]);
+  assert.equal(filtered.visible, 2);
+  assert.equal(filtered.total, 4);
+
+  // A predicate matching nothing is the empty state.
+  const none = followView({ buffer, mark: 0, live: true, cap: 10, match: (r) => r === "zzz" });
+  assert.equal(none.empty, true);
+  assert.equal(none.visible, 0);
+});
+
+test("followView (paused) freezes the visible set at the mark and counts matching newer rows as backlog", () => {
+  const buffer = ["a", "b", "c", "d"];
+  const paused = followView({ buffer, mark: 2, live: false, cap: 10, match: () => true });
+  // Frozen at the first two, rendered newest-first; the two newer rows are held as backlog.
+  assert.deepEqual(paused.rows, ["b", "a"]);
+  assert.equal(paused.backlog, 2);
+  assert.equal(paused.total, 4);
+  assert.equal(paused.following, false);
+
+  // The backlog respects the predicate — only newer rows that would show count.
+  const filtered = followView({ buffer, mark: 2, live: false, cap: 10, match: (r) => r === "d" });
+  assert.equal(filtered.backlog, 1);
 });
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));

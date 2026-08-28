@@ -1916,10 +1916,23 @@ test("renderLandingShell's feed renders humanized rows in the shared .lv-row com
   // so the feed reads as the same component as the tail/host/archive — no bespoke .feed-kind label.
   assert.match(html, /humanizedRow\(e\.humanized, document\)/);
   assert.match(html, /function humanizedRow/);
+  // The multiline-collapse split (#217) ships alongside, since humanizedRow calls it client-side.
+  assert.match(html, /function splitOverflow/);
   assert.ok(!html.includes("feed-kind") && !html.includes("feedKindClass"), "the old per-kind .feed-kind label is gone");
   // The shared .lv-dot state palette (generated from LOG_DOT_STATE_COLOR) paints the row dots.
   assert.match(html, /\.lv-dot\.merged \{ background:/);
   assert.match(html, /\.lv-dot\.failure \{ background:/);
+});
+
+test("the shared .lv-row styles the multiline-collapse chevron and overflow block (#217)", () => {
+  const html = renderLandingShell(["alpha"]);
+  // The bare chevron is a dim, clickable affordance that brightens on hover (palette tokens, §1).
+  assert.match(html, /\.lv-chev \{[^}]*cursor: pointer/);
+  assert.match(html, /\.lv-chev:hover \{[^}]*color:/);
+  // The overflow block sits in the message column (grid-column 3), mono/raw and copy-pasteable,
+  // and is display:none until the chevron toggles its [hidden] off.
+  assert.match(html, /\.lv-overflow \{[^}]*grid-column: 3/);
+  assert.match(html, /\.lv-overflow\[hidden\] \{ display: none; \}/);
 });
 
 test("renderLandingShell's feed is a scrollable live-tail-style pane, not a show-older list (#196)", () => {
@@ -6033,6 +6046,8 @@ test("ARCHIVE_LIST_SCRIPT renders the archived log through the shared log-view: 
   // tagged with the deep-link #L<n> id.
   assert.match(ARCHIVE_LIST_SCRIPT, /const el = humanizedRow\(h, document\); el\.id = "L" \+ n/);
   assert.match(ARCHIVE_LIST_SCRIPT, /function humanizedRow/);
+  // The multiline-collapse split (#217) ships alongside, since humanizedRow calls it client-side.
+  assert.match(ARCHIVE_LIST_SCRIPT, /function splitOverflow/);
   // The mode toggle flips the shared mode, persists it, and redraws the pane.
   assert.match(ARCHIVE_LIST_SCRIPT, /rawMode = btn\.dataset\.mode; try \{ localStorage\.setItem\(MODE_KEY, rawMode\); \}/);
   // Download JSON emits the currently-filtered raw NDJSON, uncapped, as an .jsonl file.
@@ -6076,6 +6091,8 @@ test("HOST_LOG_SCRIPT renders humanized by default with a Raw toggle and a Downl
   // The default (humanized) branch renders the shared .lv-row component from humanizeHostLine's parts.
   assert.match(HOST_LOG_SCRIPT, /humanizedRow\(humanizeHostLine\(line\), document\)/);
   assert.match(HOST_LOG_SCRIPT, /function humanizedRow/);
+  // The multiline-collapse split (#217) ships alongside, since humanizedRow calls it client-side.
+  assert.match(HOST_LOG_SCRIPT, /function splitOverflow/);
   // The Humanized ⇄ Raw toggle flips the body format, persists the choice, and redraws.
   assert.match(HOST_LOG_SCRIPT, /data-host-log-mode/);
   assert.match(HOST_LOG_SCRIPT, /aria-pressed/);

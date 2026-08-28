@@ -433,6 +433,8 @@ test("the tail client renders humanized-by-default and flips to raw NDJSON on th
   // highlighted NDJSON tokeniser.
   assert.match(html, /r\.humanized/);
   assert.match(html, /humanizedRow\(h, document\)/);
+  // The multiline-collapse split (#217) ships alongside, since humanizedRow calls it client-side.
+  assert.match(html, /function splitOverflow/);
   assert.match(html, /lv-dot/);
   assert.match(html, /highlightJsonLine\(r\.raw\)/);
   // The mode toggle is wired to re-render and persist.

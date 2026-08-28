@@ -30,6 +30,11 @@ export interface CampaignStartEvent extends BaseEvent {
   slots: number;
   name?: string;
   titles?: Record<string, string>;
+  /** the start of the contiguous festive-name block this campaign reserved from the
+   * host cursor (#193): wave `i` draws `pool[(festiveOffset + i) % pool.length]`, so
+   * concurrent campaigns get disjoint blocks and names cool off across campaigns.
+   * Absent on runs started before the feature (they render nameless when festive is on). */
+  festiveOffset?: number;
 }
 
 /** `campaign-batch` — a wave started: its zero-based index and the tasks it drains, plus the

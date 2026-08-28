@@ -92,6 +92,10 @@ export interface CampaignStatus {
   project: string;
   /** the run's optional `--name`, shown as the header label; absent when unnamed. */
   name?: string;
+  /** the festive-name block this campaign reserved at start (#193); wave `i` renders
+   * as `festiveWaveName(festiveOffset, i)` when festive wave names are on. Absent for a
+   * run started before the feature, which then renders nameless under festive. */
+  festiveOffset?: number;
   waves: StatusWave[];
   parked: ParkedIssue[];
 }
@@ -432,6 +436,10 @@ export interface ReducedCampaign {
   /** the optional human name the campaign was launched with (`--name`), read off
    * the latest `campaign-start` event; undefined for an unnamed run. */
   name?: string;
+  /** the start of the festive-name block this campaign reserved (#193), read off the
+   * latest `campaign-start`; undefined for a run started before the feature. Wave `i`
+   * draws `festiveWaveName(festiveOffset, i)` when festive wave names are on. */
+  festiveOffset?: number;
   outcomes: Map<string, IssueStatus>;
   details: Map<string, string>;
   /** issue id → title, captured onto the run's start event at launch by the
@@ -473,6 +481,7 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
   const grafted = new Set<string>();
   const quarantined = new Set<string>();
   let name: string | undefined;
+  let festiveOffset: number | undefined;
   const outcomes = new Map<string, IssueStatus>();
   const details = new Map<string, string>();
   const titles = new Map<string, string>();
@@ -496,6 +505,7 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
       waves = e.batches.map((batch: unknown[]) => batch.map(String).map(normalizeIssue));
       layout = waves.map((wave) => [...wave]);
       name = typeof e.name === "string" && e.name.trim() ? e.name : undefined;
+      festiveOffset = Number.isInteger(e.festiveOffset) ? e.festiveOffset : undefined;
       currentWave = -1;
     } else if (e.event === "campaign-batch" && Number.isInteger(e.index)) {
       currentWave = e.index;
@@ -603,7 +613,7 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
   // becomes `running` on pickup — so drop any grafted id that has since reached an outcome.
   for (const id of [...grafted]) if (outcomes.has(id)) grafted.delete(id);
 
-  return { waves, layout, carved, grafted, quarantined, name, outcomes, details, titles, mergedAt, halted, closedWaves, currentWave, parkedWave };
+  return { waves, layout, carved, grafted, quarantined, name, festiveOffset, outcomes, details, titles, mergedAt, halted, closedWaves, currentWave, parkedWave };
 }
 
 /** One entry in an issue's turn log (ADR 0009): the turn's number as logged
@@ -835,7 +845,7 @@ export function summarizeRun(events: OrchestratorEvent[]): string {
 }
 
 export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
-  const { waves, layout, carved, grafted, quarantined, name, outcomes, details, titles, closedWaves, currentWave, parkedWave } = reduceCampaign(readEventLog(cfg));
+  const { waves, layout, carved, grafted, quarantined, name, festiveOffset, outcomes, details, titles, closedWaves, currentWave, parkedWave } = reduceCampaign(readEventLog(cfg));
 
   const activeIssueNumbers = new Set(waves.flat());
   const closedIssueNumbers = new Set([...closedWaves].flatMap((index) => waves[index] ?? []));
@@ -885,6 +895,7 @@ export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
   return {
     project: cfg.project,
     name,
+    festiveOffset,
     waves: displayWaves,
     parked: parkedRecords.map(toParkedIssue),
   };

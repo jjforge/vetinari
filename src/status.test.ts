@@ -3683,6 +3683,27 @@ test("reduceCampaign reads an optional campaign name off the campaign-start even
   );
 });
 
+test("reduceCampaign reads the reserved festiveOffset off the latest campaign-start (#193)", () => {
+  assert.equal(
+    reduceCampaign([
+      event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["101"]], slots: 1, festiveOffset: 11 }),
+    ]).festiveOffset,
+    11,
+  );
+  // An offset of 0 is a real reservation, not "absent" — it must survive the fold.
+  assert.equal(
+    reduceCampaign([
+      event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["101"]], slots: 1, festiveOffset: 0 }),
+    ]).festiveOffset,
+    0,
+  );
+  // A pre-feature run (no offset stamped) leaves it undefined.
+  assert.equal(
+    reduceCampaign([event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["101"]], slots: 1 })]).festiveOffset,
+    undefined,
+  );
+});
+
 test("reduceCampaign reports one completed wave closed and the next wave current mid-campaign", () => {
   const reduced = reduceCampaign([
     event("campaign-start", {

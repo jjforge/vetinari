@@ -52,6 +52,14 @@ Within a milestone each bold section label appears at most once.
 - [user] The dashboard's global page-level pause button is gone: live SSE updates always soft-refresh the wave grid (still suppressed only while composing a reply), the freshness readout always ages, and running dots always pulse — per-pane follow/pause on the live-tail and log surfaces is unchanged (#210).
 - [ops] The reference Dockerfiles install the pi and Codex CLIs alongside Claude Code, and a run preflights the selected provider's credentials in `.vetinari.local/.env` (`claude` → `CLAUDE_CODE_OAUTH_TOKEN`/`ANTHROPIC_API_KEY`, `pi` → `ANTHROPIC_API_KEY`, `codex` → `OPENAI_API_KEY`), failing fast with a helpful message rather than dying inside the container. An unknown/non-resumable provider or an out-of-vocabulary effort also fails fast (#213).
 - [user] The dashboard settings gear now rides the top-right live-bar on every page — the all-repos landing as well as a campaign page — opening the same settings pane (host-log options + the Festive Wave Names toggle) from either, so settings are always one click away (#215).
+- [user] The dashboard's log surfaces — the live tail, the host log, the cross-repo event
+  feed, and archived-run logs — now render in one shared, humanized-by-default log-view
+  component (#203, #216): three-tier rows where the time is dimmest, the actor leads the
+  message, and the message is brightest, with a dim verb (`ran`, `edited`, `committed`,
+  `gate passed`…), `code`-styled ids/paths/shas, and the key term emphasised. The chrome
+  header carries `⤓` (download JSON) and `▮▮` (pause) icon buttons in place of the old text
+  Save/Clear buttons; the per-surface Clear control is gone (Download JSON preserves the raw
+  NDJSON, and the Raw toggle still shows the highlighted lines).
 
 **Bug fixes:**
 - [user] The Claude Code status line now counts grafted and other overlay-status issues in its per-status tally — grafted and interrupted issues count as unstarted (⚪), quarantined as parked (⏸), and carved issues are excluded — so the counts sum to the campaign's live issues instead of the wave total growing on a graft while the item count stays put (#199).

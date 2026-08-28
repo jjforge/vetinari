@@ -529,6 +529,12 @@ export const ARCHIVE_LIST_SCRIPT = `  const archiveList = document.querySelector
     const RAW_CAP = 500;
     ${highlightJsonLine.toString()}
     ${cappedRawRows.toString()}
+    // The Humanized ⇄ Raw display mode (#203): humanized by default, remembered client-side so a
+    // Raw preference sticks across reloads. The humanized parts are computed server-side (the
+    // run-level kinds narrate through describeEvent, not shippable) and ride each line down.
+    const MODE_KEY = "vetinari:archive-raw-mode";
+    let rawMode = "humanized"; try { const m = localStorage.getItem(MODE_KEY); if (m === "raw" || m === "humanized") rawMode = m; } catch (e) {}
+    const syncRawModeBtns = () => { for (const b of archiveList.querySelectorAll("[data-archive-raw-mode] [data-mode]")) b.setAttribute("aria-pressed", String(b.dataset.mode === rawMode)); };
     const archiveRows = [...archiveList.querySelectorAll(".archive-row")];
     const rowMode = (row) => { const p = row.querySelector('.archive-mode[aria-pressed="true"]'); return p ? p.dataset.mode : "campaign"; };
     const syncUrl = (row) => { try { history.replaceState(null, "", "?project=" + encodeURIComponent(archiveList.dataset.project) + "&run=" + encodeURIComponent(row.dataset.run) + (rowMode(row) === "raw" ? "&mode=raw" : "") + location.hash); } catch (e) {} };
@@ -557,26 +563,54 @@ export const ARCHIVE_LIST_SCRIPT = `  const archiveList = document.querySelector
       const { rows, total, hidden } = cappedRawRows(pane._lines || [], needle, RAW_CAP, pane._expanded || 0);
       linesEl.textContent = "";
       for (const { line, n } of rows) {
-        const el = document.createElement("div");
-        el.className = "archive-raw-line"; el.id = "L" + n;
-        const a = document.createElement("a");
-        a.className = "archive-lineno"; a.href = "#L" + n; a.textContent = String(n);
-        const code = document.createElement("code");
-        code.className = "archive-raw-code"; code.innerHTML = highlightJsonLine(line);
-        el.append(a, code); linesEl.append(el);
+        if (rawMode === "raw") {
+          // Raw: the highlighted NDJSON with its #L<n> line-number gutter (unchanged, #127).
+          const el = document.createElement("div");
+          el.className = "archive-raw-line"; el.id = "L" + n;
+          const a = document.createElement("a");
+          a.className = "archive-lineno"; a.href = "#L" + n; a.textContent = String(n);
+          const code = document.createElement("code");
+          code.className = "archive-raw-code"; code.innerHTML = highlightJsonLine(line);
+          el.append(a, code); linesEl.append(el);
+        } else {
+          // Humanized (default): time · actor · what happened, the dot coloured by the event's
+          // own state — the parts the server attached per line; an eventless line falls back to a
+          // raw dump. Keeps the #L<n> id so a deep-link still scrolls regardless of mode.
+          const h = (pane._humanized && pane._humanized[n - 1]) || { time: "", actor: "", message: line, dot: "neutral" };
+          const el = document.createElement("div"); el.className = "log-hrow"; el.id = "L" + n;
+          const dot = document.createElement("span"); dot.className = "log-dot " + h.dot; el.append(dot);
+          const t = document.createElement("span"); t.className = "log-time"; t.textContent = h.time; el.append(t);
+          const ac = document.createElement("span"); ac.className = "log-actor"; ac.textContent = h.actor; el.append(ac);
+          const msg = document.createElement("span"); msg.className = "log-msg"; msg.textContent = h.message; el.append(msg);
+          linesEl.append(el);
+        }
       }
       if (!rows.length) { const e = document.createElement("div"); e.className = "archive-raw-empty"; e.textContent = needle ? "No lines match “" + filter.value.trim() + "”." : "This log has no lines."; linesEl.append(e); }
       if (hidden > 0) { const more = document.createElement("button"); more.type = "button"; more.className = "archive-raw-more"; more.textContent = "Show " + hidden + " more line" + (hidden === 1 ? "" : "s"); more.addEventListener("click", () => { pane._expanded = (pane._expanded || 0) + RAW_CAP; drawRaw(pane); }); linesEl.append(more); }
       footer.textContent = "showing " + rows.length + " of " + total + " lines";
     };
+    // The Humanized ⇄ Raw toggle and Download JSON, wired once per pane. The toggle flips the
+    // shared display mode, persists it, re-syncs every row's buttons, and redraws this pane;
+    // Download JSON emits the currently-filtered raw NDJSON (uncapped) so the bytes stay faithful.
+    const wireRawControls = (pane) => {
+      const modeEl = pane.querySelector("[data-archive-raw-mode]");
+      if (modeEl) for (const btn of modeEl.querySelectorAll("[data-mode]")) btn.addEventListener("click", () => { rawMode = btn.dataset.mode; try { localStorage.setItem(MODE_KEY, rawMode); } catch (e) {} syncRawModeBtns(); drawRaw(pane); });
+      const saveBtn = pane.querySelector("[data-archive-raw-save]");
+      if (saveBtn) saveBtn.addEventListener("click", () => {
+        const needle = pane.querySelector(".archive-raw-filter").value.trim().toLowerCase();
+        const matching = needle ? (pane._lines || []).filter((l) => l.toLowerCase().indexOf(needle) !== -1) : (pane._lines || []);
+        const blob = new Blob([matching.join("\\n")], { type: "application/x-ndjson" });
+        const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "orchestrator-" + pane.dataset.run + ".jsonl"; a.click(); URL.revokeObjectURL(a.href);
+      });
+    };
     const loadRaw = (row) => {
       const pane = row.querySelector(".archive-raw");
       const filter = pane.querySelector(".archive-raw-filter");
-      if (!pane._wired) { pane._wired = true; filter.addEventListener("input", () => drawRaw(pane)); }
+      if (!pane._wired) { pane._wired = true; filter.addEventListener("input", () => drawRaw(pane)); wireRawControls(pane); }
       if (pane._lines) { drawRaw(pane); scrollToLine(pane); return; }
       fetch("/archive/log?project=" + encodeURIComponent(pane.dataset.project) + "&run=" + encodeURIComponent(pane.dataset.run))
-        .then((res) => { if (!res.ok) throw new Error(String(res.status)); return res.text(); })
-        .then((text) => { pane._lines = text.split("\\n").filter((l) => l.length); drawRaw(pane); scrollToLine(pane); })
+        .then((res) => { if (!res.ok) throw new Error(String(res.status)); return res.json(); })
+        .then((data) => { const ls = (data && data.lines) || []; pane._lines = ls.map((l) => l.raw); pane._humanized = ls.map((l) => l.humanized); drawRaw(pane); scrollToLine(pane); })
         .catch(() => { const linesEl = pane.querySelector(".archive-raw-lines"); linesEl.textContent = ""; const e = document.createElement("div"); e.className = "archive-raw-empty"; e.textContent = "Couldn’t load this log."; linesEl.append(e); pane.querySelector(".archive-raw-footer").textContent = ""; });
     };
     const setMode = (row, mode) => {
@@ -604,6 +638,8 @@ export const ARCHIVE_LIST_SCRIPT = `  const archiveList = document.querySelector
       row.querySelector(".archive-toggle").addEventListener("click", () => { if (row.classList.contains("open")) closeRow(row); else openRow(row, rowMode(row)); });
       for (const btn of row.querySelectorAll(".archive-mode")) btn.addEventListener("click", () => { if (!row.classList.contains("open")) openRow(row, btn.dataset.mode); else { setMode(row, btn.dataset.mode); syncUrl(row); } });
     }
+    // Seed every row's mode buttons from the remembered mode (the markup seeds humanized pressed).
+    syncRawModeBtns();
     const showOlder = archiveList.querySelector(".archive-show-older");
     if (showOlder) showOlder.addEventListener("click", () => { for (const row of archiveRows) row.hidden = false; showOlder.closest(".archive-older-row").hidden = true; });
     // Honour a server-opened row (a ?run= deep-link): reveal it if it is past the cap,

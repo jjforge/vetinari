@@ -729,10 +729,11 @@ export const LIVE_TAIL_SCRIPT = `  const tailEl = document.querySelector("[data-
         body.append(mk("div", "tail-empty", issue || query.trim() ? "no lines match that filter" : ""));
       }
       footer.textContent = view.visible + " of " + view.total + " lines · " + (view.following ? "following" : "paused");
-      if (view.backlog > 0) { backlogEl.hidden = false; backlogEl.textContent = "↓ " + view.backlog + " new line" + (view.backlog === 1 ? "" : "s"); } else { backlogEl.hidden = true; }
+      if (view.backlog > 0) { backlogEl.hidden = false; backlogEl.textContent = "↑ " + view.backlog + " new line" + (view.backlog === 1 ? "" : "s"); } else { backlogEl.hidden = true; }
       playBtn.dataset.following = String(live); playBtn.setAttribute("aria-label", live ? "Pause" : "Resume");
       dotEl.dataset.state = open && live ? "live" : "idle";
-      if (live) body.scrollTop = body.scrollHeight;
+      // Newest-on-top (#195): following pins the newest line to the top, not the bottom.
+      if (live) body.scrollTop = 0;
     }
     function ingest(tail) {
       agents = (tail && tail.agents) || [];

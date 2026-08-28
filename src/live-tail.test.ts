@@ -89,11 +89,11 @@ test("buildLiveTail interleaves two running agents by ts and excludes finished o
 // A small line factory for the pure client reducers (issue/raw are all they read).
 const ln = (issue: string, n: number, raw = `{"issue":"${issue}","n":${n}}`) => ({ issue, status: "running", ts: "", n, raw });
 
-test("tailView (following) shows the last `cap` lines after the issue+substring filters", () => {
+test("tailView (following) shows the newest `cap` lines, newest-first, after the issue+substring filters", () => {
   const buffer = [ln("1", 0, "alpha"), ln("2", 1, "beta"), ln("1", 2, "gamma"), ln("2", 3, "alpha-two")];
-  // No filter, cap 2 → the newest two of four, following.
+  // No filter, cap 2 → the newest two of four, following, newest at the head.
   const all = tailView({ buffer, mark: 0, live: true, issue: "", query: "", cap: 2 });
-  assert.deepEqual(all.rows.map((r) => r.raw), ["gamma", "alpha-two"]);
+  assert.deepEqual(all.rows.map((r) => r.raw), ["alpha-two", "gamma"]);
   assert.equal(all.visible, 2);
   assert.equal(all.total, 4);
   assert.equal(all.backlog, 0);
@@ -116,8 +116,8 @@ test("tailView (paused) freezes the visible set at the mark and counts the rest 
   // Four lines buffered; pause was hit at mark=2, so lines 2 and 3 arrived after.
   const buffer = [ln("1", 0, "a"), ln("1", 1, "b"), ln("1", 2, "c"), ln("2", 3, "d")];
   const paused = tailView({ buffer, mark: 2, live: false, issue: "", query: "", cap: 10 });
-  // Visible is frozen at the first two; the two newer lines are held as backlog.
-  assert.deepEqual(paused.rows.map((r) => r.raw), ["a", "b"]);
+  // Visible is frozen at the first two, rendered newest-first; the two newer lines are held as backlog.
+  assert.deepEqual(paused.rows.map((r) => r.raw), ["b", "a"]);
   assert.equal(paused.backlog, 2);
   assert.equal(paused.total, 4);
   assert.equal(paused.following, false);
@@ -338,4 +338,10 @@ test("renderStatusPage ships the tail styles and a client that reuses the archiv
   assert.match(html, /function highlightJsonLine/);
   assert.match(html, /addEventListener\("tail"/);
   assert.match(html, /highlightJsonLine\(r\.raw\)/);
+  // Newest-on-top (#195): following pins the newest line to the top of the pane (scrollTop 0,
+  // never the bottom via scrollHeight), and the backlog affordance points up.
+  assert.match(html, /body\.scrollTop = 0/);
+  assert.doesNotMatch(html, /scrollTop = body\.scrollHeight/);
+  assert.match(html, /"↑ " \+ view\.backlog/);
+  assert.doesNotMatch(html, /"↓ " \+ view\.backlog/);
 });

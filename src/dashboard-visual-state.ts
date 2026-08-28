@@ -47,6 +47,31 @@ export function hiddenPastCap(index: number, cap: number): boolean {
 }
 
 /**
+ * Whether a live-pane frame counts as *visible* freshness activity — the signal that
+ * resets the live-bar's "updated Ns ago" clock (#198). A pane (the live-tail, the
+ * host-log) is a co-equal live surface, so lines it visibly appends should read as an
+ * update just like a wave/feed refresh. Only a *visible* append counts: no new lines
+ * (`appended === 0`), a collapsed pane (`!open`), or a pane whose own follow is paused so
+ * frames merely buffer (`!following`) all leave the clock untouched — presentation is
+ * frozen there, so freshness is too. The page-level pause is gated separately by the
+ * live-bar itself (a paused page keeps reading "Paused" regardless of this).
+ *
+ * Self-contained and browser-safe: single-sourced into the pane scripts via
+ * `${paneActivity.toString()}`, so the node test asserts the very function they run.
+ */
+export function paneActivity({
+  appended,
+  open,
+  following,
+}: {
+  appended: number;
+  open: boolean;
+  following: boolean;
+}): boolean {
+  return appended > 0 && open && following;
+}
+
+/**
  * The live-bar's presentation-freeze reducer (ADR 0008, §5/#100): maps the client's
  * pause state to the intent its thin DOM glue applies. `paused` freezes the readout at
  * "Paused" and the indicator at a paused label (disclosing any buffered count) rather

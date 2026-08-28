@@ -1209,6 +1209,11 @@ ${REPO_DROPDOWN_SCRIPT}
     renderState();
     renderUpdated();
   });
+  // A live pane (the host-log) that visibly appends is a co-equal update (#198): reset the
+  // freshness clock so "updated Ns ago" reflects any live surface, not just a feed refresh.
+  // A paused page keeps reading "Paused" (freezeIntent ignores the clock while paused), so
+  // background appends never advance a visible clock — normal behaviour returns on resume.
+  window.addEventListener("vetinari:activity", () => { if (!paused) { lastUpdate = Date.now(); renderUpdated(); } });
   renderState();
   setInterval(renderUpdated, 1000);
   refresh();
@@ -1553,6 +1558,11 @@ ${issueDetailSheetMarkup(Boolean(opts.carve))}${
     renderState();
     renderUpdated();
   });
+  // A live pane (the live-tail) that visibly appends is a co-equal update (#198): reset the
+  // freshness clock so "updated Ns ago" reflects any live surface, not just a soft-refresh.
+  // A paused page keeps reading "Paused" (freezeIntent ignores the clock while paused), so
+  // background appends never advance a visible clock — normal behaviour returns on resume.
+  window.addEventListener("vetinari:activity", () => { if (!paused) { lastUpdate = Date.now(); renderUpdated(); } });
   renderState();
   renderUpdated();
   setInterval(renderUpdated, 1000);

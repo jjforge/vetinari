@@ -358,13 +358,13 @@ test("renderLiveTail draws the pane only when a repo has a running agent, one dr
   assert.doesNotMatch(html, /class="live-tail"[^>]*\shidden/);
 });
 
-test("renderLiveTail carries the log-view chrome: a Humanized⇄Raw toggle (humanized default) and a ⤓ Download JSON icon (#203, #216)", () => {
+test("renderLiveTail is humanized-only: no Humanized/Raw toggle, keeps the ⤓ Download JSON icon (#221)", () => {
   const html = renderLiveTail(statusWith([["204", "running"]]));
-  // The segmented Humanized ⇄ Raw toggle, humanized selected by default.
-  assert.match(html, /data-tail-mode/);
-  assert.match(html, /data-mode="humanized"[^>]*aria-pressed="true"[^>]*>Humanized/);
-  assert.match(html, /data-mode="raw"[^>]*aria-pressed="false"[^>]*>Raw/);
-  // The Download JSON control is the mockup's ⤓ .lv-ico icon (aria-labelled), not a text button.
+  // #221: the pane always renders humanized — the Humanized/Raw toggle is gone entirely.
+  assert.doesNotMatch(html, /data-tail-mode/);
+  assert.doesNotMatch(html, />Humanized</);
+  assert.doesNotMatch(html, />Raw</);
+  // Download JSON stays — the mockup's ⤓ .lv-ico icon (aria-labelled), still emitting raw NDJSON.
   assert.match(html, /class="lv-ico" data-tail-save[^>]*aria-label="Download JSON"[^>]*>⤓</);
   assert.ok(!/>Save</.test(html) && !/>Download JSON</.test(html), "no old text Save/Download button label");
   // The mockup's chrome drops the Clear control (the download preserves the data).
@@ -407,14 +407,12 @@ test("renderStatusPage ships the tail styles and a client that reuses the archiv
   // The pane's styles are present (fixed 236px body, the shell card).
   assert.match(html, /\.tail-body \{[^}]*height: 236px/);
   assert.match(html, /\.live-tail \{/);
-  // The client single-sources the pure reducers and the archived-raw tokeniser, and listens
-  // for the named `tail` SSE frame — live updates without a whole-page refetch.
+  // The client single-sources the pure reducers and listens for the named `tail` SSE frame —
+  // live updates without a whole-page refetch.
   assert.match(html, /function tailView/);
   assert.match(html, /function tailFresh/);
   assert.match(html, /function tailAppend/);
-  assert.match(html, /function highlightJsonLine/);
   assert.match(html, /addEventListener\("tail"/);
-  assert.match(html, /highlightJsonLine\(r\.raw\)/);
   // Newest-on-top (#195): following pins the newest line to the top of the pane (scrollTop 0,
   // never the bottom via scrollHeight), and the backlog affordance points up.
   assert.match(html, /body\.scrollTop = 0/);
@@ -423,23 +421,18 @@ test("renderStatusPage ships the tail styles and a client that reuses the archiv
   assert.doesNotMatch(html, /"↓ " \+ view\.backlog/);
 });
 
-test("the tail client renders humanized-by-default and flips to raw NDJSON on the toggle, remembered (#203)", () => {
+test("the tail client renders humanized-only rows in the shared .lv-row, keeping the raw NDJSON download (#221)", () => {
   const html = renderStatusPage(statusWith([["204", "running"]]), {});
-  // A remembered per-view mode, humanized the default; the toggle persists it.
-  assert.match(html, /localStorage/);
-  assert.match(html, /mode = [^;]*"humanized"/);
   // Humanized rows read the server-attached parts (time · actor · what happened) and a
-  // state-coloured dot, built by the shared .lv-row component; the raw branch keeps the
-  // highlighted NDJSON tokeniser.
+  // state-coloured dot, built by the shared .lv-row component — there is no raw display mode.
   assert.match(html, /r\.humanized/);
   assert.match(html, /humanizedRow\(h, document\)/);
   // The multiline-collapse split (#217) ships alongside, since humanizedRow calls it client-side.
   assert.match(html, /function splitOverflow/);
   assert.match(html, /lv-dot/);
-  assert.match(html, /highlightJsonLine\(r\.raw\)/);
-  // The mode toggle is wired to re-render and persist.
-  assert.match(html, /data-tail-mode/);
-  // Download JSON always emits raw NDJSON regardless of the display mode.
+  // #221: no Humanized/Raw toggle — the tail is humanized-only.
+  assert.doesNotMatch(html, /data-tail-mode/);
+  // Download JSON still emits the raw NDJSON.
   assert.match(html, /\.map\(\(r\) => r\.raw\)\.join/);
   assert.match(html, /application\/x-ndjson/);
 });

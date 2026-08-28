@@ -60,6 +60,7 @@ Within a milestone each bold section label appears at most once.
   header carries `⤓` (download JSON) and `▮▮` (pause) icon buttons in place of the old text
   Save/Clear buttons; the per-surface Clear control is gone (Download JSON preserves the raw
   NDJSON, and the Raw toggle still shows the highlighted lines).
+- [user] The unified log view (live tail, event feed, host log, archived runs) now collapses a multiline entry to its first line with a bare `⌄` chevron; clicking it unfolds the rest in place — mono and copy-pasteable — beneath the first line, keeping the stream one row per event. Single-line entries are unchanged, and Download still emits the full raw NDJSON regardless of collapse state (#217).
 
 **Bug fixes:**
 - [user] The Claude Code status line now counts grafted and other overlay-status issues in its per-status tally — grafted and interrupted issues count as unstarted (⚪), quarantined as parked (⏸), and carved issues are excluded — so the counts sum to the campaign's live issues instead of the wave total growing on a graft while the item count stays put (#199).

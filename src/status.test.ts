@@ -3057,8 +3057,8 @@ test("describeEvent narrates the operator-facing events in plain words", () => {
     "Campaign “gateway work” started",
   );
   assert.equal(describeEvent(event("campaign-start", { batches: [["101"]], slots: 1 })), "Campaign started");
-  // A campaign-batch names its run and its wave: the lead issue's title (from `titles[tasks[0]]`)
-  // and a "+M" for the rest, matching the status-page wave-card vocabulary.
+  // A campaign-batch names its run and its wave: unlike the card, the one-line narration
+  // lists *every* member issue by title (issue #179), not the lead title + "+M" collapse.
   assert.equal(
     describeEvent(
       event("campaign-batch", {
@@ -3068,17 +3068,17 @@ test("describeEvent narrates the operator-facing events in plain words", () => {
         titles: { "201": "cache eviction", "202": "warm the cache" },
       }),
     ),
-    "Campaign “gateway work” — Wave 2 — cache eviction +1 started",
+    "Campaign “gateway work” — Wave 2 — cache eviction, warm the cache started",
   );
   // Name absent → nameless wording, never `Campaign “” —`; a resolved title still names the wave.
   assert.equal(
     describeEvent(event("campaign-batch", { index: 1, tasks: ["201"], titles: { "201": "cache eviction" } })),
     "Wave 2 — cache eviction started",
   );
-  // Neither name nor a resolved title → the bare index, as before.
+  // An id whose title hasn't resolved still shows, as its `#id`, so every member appears.
   assert.equal(
     describeEvent(event("campaign-batch", { index: 1, tasks: ["201"] })),
-    "Wave 2 started",
+    "Wave 2 — #201 started",
   );
   assert.equal(
     describeEvent(
@@ -3095,7 +3095,7 @@ test("describeEvent narrates the operator-facing events in plain words", () => {
   );
   assert.equal(
     describeEvent(event("campaign-batch-done", { index: 0, merged: ["101", "102"], held: [], clearedParked: [] })),
-    "Wave 1 merged #101, #102",
+    "Wave 1 — #101, #102 merged #101, #102",
   );
   assert.equal(
     describeEvent(event("campaign-batch-done", { index: 2, merged: [], held: [], clearedParked: [] })),

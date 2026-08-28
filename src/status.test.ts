@@ -921,6 +921,43 @@ test("serveAllStatus serves the aggregated site, selecting the project from the 
   }
 });
 
+test("GET /api/host-log serves the host log newest-first as raw JSONL lines; a missing file reads empty (#180)", async () => {
+  const configDir = join(tmpdir(), `vetinari-hostlog-route-${Date.now()}`);
+  const gwHome = join(configDir, "gw-home");
+  const prev = process.env.VETINARI_GATEWAY_HOME;
+  process.env.VETINARI_GATEWAY_HOME = gwHome;
+  try {
+    // No host.jsonl yet → a clean empty window (the daemon never ran), never an error.
+    const server0 = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+    const port0 = (server0.address() as AddressInfo).port;
+    try {
+      const empty = await (await fetch(`http://127.0.0.1:${port0}/api/host-log`)).json();
+      assert.deepEqual(empty.lines, [], "a missing host log reads empty");
+    } finally {
+      await new Promise<void>((r) => server0.close(() => r()));
+    }
+    // Write three host rows oldest→newest; the endpoint returns them newest-first, verbatim.
+    mkdirSync(join(gwHome, "logs"), { recursive: true });
+    const rows = [
+      '{"ts":"2026-08-28T00:00:00.000Z","event":"gateway-routed"}',
+      '{"ts":"2026-08-28T00:00:01.000Z","event":"telegram-send","error":"429"}',
+      '{"ts":"2026-08-28T00:00:02.000Z","event":"registry-read"}',
+    ];
+    writeFileSync(join(gwHome, "logs", "host.jsonl"), rows.join("\n") + "\n");
+    const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+    const port = (server.address() as AddressInfo).port;
+    try {
+      const body = await (await fetch(`http://127.0.0.1:${port}/api/host-log`)).json();
+      // Newest-first: the last-written row leads; the bytes are verbatim (not reparsed).
+      assert.deepEqual(body.lines, [rows[2], rows[1], rows[0]]);
+    } finally {
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  } finally {
+    prev === undefined ? delete process.env.VETINARI_GATEWAY_HOME : (process.env.VETINARI_GATEWAY_HOME = prev);
+  }
+});
+
 test("renderLandingShell's card heading shows owner/name, but links and keys on the bare project", () => {
   const html = renderLandingShell(["alpha"]);
   // The card heading reads the card's owner/name, falling back to the bare key when absent.

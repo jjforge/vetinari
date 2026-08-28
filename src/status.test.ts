@@ -1656,6 +1656,23 @@ test("renderLandingShell mounts the host-log gear + pane on the host view (#180)
   assert.match(html, /\/api\/host-log/);
 });
 
+test("renderLandingShell seats the host-log gear in the top-right live-bar, right of the pause button (#201)", () => {
+  const html = renderLandingShell(["alpha", "beta"]);
+  // The gear now rides the live-bar immediately after the pause button: the bar reads
+  // live dot → "updated Ns ago" → pause → gear. Its pane travels with it (popover).
+  assert.match(
+    html,
+    /<button type="button" id="pause"[^>]*><\/button><section class="host-log" data-host-log>/,
+  );
+  // The gear no longer floats as a detached section under the top bar — the host-log
+  // opens only from within the live-bar.
+  assert.doesNotMatch(html, /<\/div>\s*<section class="host-log"/);
+  // The campaign page has no host-log wiring, so its live-bar carries no gear (#180 is
+  // a landing/host-view surface); the relocation stays landing-only.
+  const campaign = renderStatusPage({ project: "demo", waves: [], parked: [] });
+  assert.doesNotMatch(campaign, /data-host-log-gear/);
+});
+
 test("renderLandingShell parked counter expands a cross-repo parked queue in place", () => {
   const html = renderLandingShell(["alpha", "beta"]);
   // The parked counter is an interactive toggle, unlike the other three counters —
@@ -6834,16 +6851,19 @@ test("both pages render one shared top-bar control: a dot-only live indicator an
     { projects: ["alpha", "beta"], selected: "beta" },
   );
 
-  // The live-bar is one shared definition, emitted verbatim by every page so the two
-  // can no longer drift (the "Live"-word vs LIVE, pause-word vs icon divergence).
-  const liveBar = renderTopBar("").match(
-    /<div class="live-bar".*<\/div>/s,
+  // The live-bar's controls are one shared definition, emitted verbatim by every page so
+  // the two can no longer drift (the "Live"-word vs LIVE, pause-word vs icon divergence).
+  // The host view seats its settings gear at the end of the bar (#201, renderTopBar's
+  // trailing slot), so the shared, drift-proof span runs from the bar open through the
+  // pause button; anything after it is a per-page trailing control.
+  const liveBarControls = renderTopBar("").match(
+    /<div class="live-bar".*aria-label="Pause"><\/button>/s,
   )?.[0];
-  assert.ok(liveBar, "renderTopBar emits a live-bar");
+  assert.ok(liveBarControls, "renderTopBar emits the shared live-bar controls");
   for (const page of [landing, campaign])
     assert.ok(
-      page.includes(liveBar),
-      "every page includes the shared live-bar",
+      page.includes(liveBarControls),
+      "every page includes the shared live-bar controls",
     );
 
   // The indicator is a dot only — no visible "Live"/"Paused" word; its state is an

@@ -749,9 +749,12 @@ export const renderRepoDropdown = (repos: readonly (string | RepoOption)[], sele
  * visible text, keeping motion the one running-only channel (§5). Pause is an icon
  * control — its CSS-drawn bars/triangle live in `TOP_BAR_STYLES`, flipped by
  * `data-paused`, so a page's script only toggles the attribute and never re-authors it.
+ * `trailing` seats extra controls at the right end of the live-bar, after the pause
+ * button — the host view passes its settings gear there (#201) so it reads as the last
+ * of the live controls; pages with nothing to add leave the live-bar untouched.
  */
-export const renderTopBar = (left: string) =>
-  `<div class="page-top">${left}<div class="live-bar" title="Live updates over SSE; pause to freeze the view while it keeps collecting"><span class="live-indicator" data-live-state="live" aria-label="Live"></span><span class="updated" data-updated>waiting for updates</span><button type="button" id="pause" class="pause" data-paused="false" aria-label="Pause"></button></div></div>`;
+export const renderTopBar = (left: string, trailing = "") =>
+  `<div class="page-top">${left}<div class="live-bar" title="Live updates over SSE; pause to freeze the view while it keeps collecting"><span class="live-indicator" data-live-state="live" aria-label="Live"></span><span class="updated" data-updated>waiting for updates</span><button type="button" id="pause" class="pause" data-paused="false" aria-label="Pause"></button>${trailing}</div></div>`;
 
 /**
  * The aggregated site's carve preview: it is a dumb router (ADR 0002) with no
@@ -853,7 +856,9 @@ export const issueDetailSheetMarkup = (carve: boolean) =>
 /**
  * The host-log surface on the all-repos landing/host view (#180): a settings gear the
  * fleet-level `host.jsonl` (gateway/registry/Telegram/SSE diagnostics across every
- * project, #157) lives behind, plus its attention badge. The gear is the show/hide —
+ * project, #157) lives behind, plus its attention badge. The gear rides the top-right
+ * live-bar after the pause button (#201) — `renderTopBar`'s `trailing` slot — and its
+ * pane opens as a popover anchored under it. The gear is the show/hide —
  * the pane is `hidden` until it is clicked, deliberately *not* an always-visible section
  * and *not* folded into the narrated cross-repo event feed (that feed is per-project
  * narratable milestones; this is host diagnostics). The badge (`data-host-log-badge`)
@@ -992,8 +997,7 @@ ${ISSUE_DETAIL_SHEET_STYLES}
 </style>
 </head>
 <body>
-${renderTopBar(renderRepoDropdown(projects, undefined))}
-${renderHostLog()}
+${renderTopBar(renderRepoDropdown(projects, undefined), renderHostLog())}
 <section class="counters">
   <div class="counter" data-counter="working"><div class="counter-label">Agents working</div><div class="counter-line"><div class="counter-value">–</div><div class="counter-sub" data-counter-sub="working"></div></div></div>
   <button type="button" class="counter counter-toggle" data-counter="parked" disabled aria-controls="parked-queue"><div class="counter-label">Parked</div><div class="counter-line"><div class="counter-value">–</div><div class="counter-sub" data-counter-sub="parked"></div></div></button>

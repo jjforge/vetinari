@@ -208,6 +208,36 @@ const renderWaves = (status: CampaignStatus, carve: boolean, interactive: boolea
 };
 
 /**
+ * Whether the campaign is wave-parked — a red merged base paused it and it holds a
+ * `wave-parked` wave (ADR 0013). The Resume control below surfaces only in that state.
+ */
+const isWaveParked = (status: CampaignStatus) => status.waves.some((wave) => wave.status === "wave-parked");
+
+/** Whether any issue is quarantined — a merge conflict pulled a passed green out of
+ * integration (ADR 0013) and it awaits a manual resolve. Gates the informational note. */
+const hasQuarantined = (status: CampaignStatus) => status.waves.some((wave) => wave.issues.some((issue) => issue.status === "quarantined"));
+
+/**
+ * The wave-park Resume control (#171): when a campaign is paused on a red merged base,
+ * a human fixes forward and taps Resume, which POSTs `/resume` for this project — the
+ * aggregated dumb router (ADR 0002) shells `campaign --resume` in the project's own
+ * root. Resume is non-destructive and project-scoped, so — unlike carve — it needs no
+ * preview/confirm gate: a single POST. Emitted only on the interactive aggregated page
+ * (`carve`, the same page option carve rides) and only while wave-parked.
+ */
+const renderResumeControl = (status: CampaignStatus) =>
+  `<section class="resume-banner"><div class="resume-banner-text"><strong>Campaign paused</strong> — a wave's merged base gated red, so its greens were kept and the campaign paused for a human. Fix forward, then resume.</div><form method="post" action="/resume" class="resume-form"><input type="hidden" name="project" value="${escapeHtml(status.project)}" /><button type="submit" class="resume-btn">Resume campaign</button></form></section>`;
+
+/**
+ * The quarantine informational affordance (#171): a merge conflict quarantined a passed
+ * issue out of integration (ADR 0013). There is deliberately no un-quarantine CLI to
+ * shell, so this is a note only — it points the operator at resolve-then-resume, with no
+ * action route or button of its own.
+ */
+const renderQuarantineNote = () =>
+  `<section class="quarantine-note"><strong>Issue quarantined</strong> — a merge conflict held a passed green out of integration. Resolve the conflict, then resume the campaign (the Resume control above, or <code>campaign --resume</code> in the project root).</section>`;
+
+/**
  * Is a host-log row one an operator should be alerted to (#180)? A pure, render-time
  * predicate over a parsed `host.jsonl` row — no new severity field on host emitters
  * (consistent with #169's "no severity" decision): a row is notable when its kind
@@ -1111,6 +1141,16 @@ ${LIVE_TAIL_STYLES}
 ${ISSUE_DETAIL_SHEET_STYLES}
   .carve-fallback form { display: inline; }
   form button { padding: .5rem .8rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: #04110f; cursor: pointer; font-weight: 700; }
+  /* The wave-park Resume banner (#171): an attention-amber left edge (the human-action
+     queue, §2) with the Resume action pushed to the right. The button is a control, so it
+     takes the primary accent, never a state colour. */
+  .resume-banner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; background: var(--color-card); border: 1px solid var(--color-secondary); border-left: 3px solid var(--color-yellow); border-radius: var(--border-radius-medium); padding: .8rem 1rem; margin: 1rem 0; box-shadow: 0 8px 22px #0004; }
+  .resume-banner-text { color: var(--color-text-light); }
+  .resume-form { margin: 0; }
+  .resume-btn { padding: .5rem .8rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: #04110f; cursor: pointer; font-weight: 700; }
+  /* The quarantine note (#171) is informational only — same amber edge, no action. */
+  .quarantine-note { background: var(--color-card); border: 1px solid var(--color-secondary); border-left: 3px solid var(--color-yellow); border-radius: var(--border-radius-medium); padding: .8rem 1rem; margin: 1rem 0; color: var(--color-text-light); box-shadow: 0 8px 22px #0004; }
+  .quarantine-note code { color: var(--color-text); }
   .parked-issues { margin: 1rem 0 2rem; }
   .parked-issues > h2 { display: flex; align-items: baseline; flex-wrap: wrap; gap: .35rem; }
   .parked-count { color: var(--color-yellow); }
@@ -1193,6 +1233,11 @@ ${ISSUE_DETAIL_SHEET_STYLES}
 <body>
 ${renderTopBar(opts.projects?.length ? renderRepoDropdown(opts.projects, opts.selected ?? status.project) : `<h1>${escapeHtml(status.project)}</h1>`)}
 <div id="live-region">${
+  // The wave-park Resume control and the quarantine note are aggregated-page actions
+  // (the same `carve` page option gates the interactive shell-out affordances), each
+  // gated on its attention state so it appears only when there is something to act on.
+  opts.carve && isWaveParked(status) ? renderResumeControl(status) : ""
+}${opts.carve && hasQuarantined(status) ? renderQuarantineNote() : ""}${
   status.parked.length
     ? `<section class="parked-issues"><h2>Parked · <span class="parked-count">${status.parked.length}</span></h2>${status.parked
         .map(

@@ -40,6 +40,9 @@ Within a milestone each bold section label appears at most once.
 
 **Bug fixes:**
 - [user] The Claude Code status line now counts grafted and other overlay-status issues in its per-status tally — grafted and interrupted issues count as unstarted (⚪), quarantined as parked (⏸), and carved issues are excluded — so the counts sum to the campaign's live issues instead of the wave total growing on a graft while the item count stays put (#199).
+- [user] A grafted wave now renders its issue titles on the dashboard — the graft event stamps each grafted id's title, so the wave-card header shows `Wave N — <title> …` and each row shows `#num <title>` instead of a bare `Wave N` / bare `#num` (#197).
+- [user] The dashboard's "updated Ns ago" freshness readout now resets when the live-tail or host-log pane visibly appends a line, so it no longer reads as stale while a live surface is actively scrolling; a collapsed or follow-paused pane and a paused page still leave it untouched (#198).
+- [user] The all-repos landing "queued" counter (and each repo card's queued pill) now counts grafted issues waiting in later waves, instead of reading 0 while the single-repo view showed them (#200).
 
 ### Collected changes — August 27, 2026
 

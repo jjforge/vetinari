@@ -14,7 +14,7 @@
  * Pure over the injected `blockedByOf`, so it stays testable with no live tracker.
  */
 import { computeCarve, normalize, restrictBlockers, type BlockedByOf } from "./carve.ts";
-import type { FileSet } from "./fileset.ts";
+import { defaultFileSet, ticketProse, type FileSet, type FileSetOf } from "./fileset.ts";
 
 export interface Placement {
   id: string;
@@ -494,4 +494,105 @@ export function underspecifiedPromptFor(opts: { flag?: string; isTTY: boolean; a
   }
   if (opts.isTTY) return opts.ask;
   return () => "fail";
+}
+
+/**
+ * The label names on a fetched task, read from the tracker JSON `fetchTask` returns
+ * (GitHub's `--json labels` yields `{ labels: [{ name }] }`). Best-effort: anything
+ * that does not parse as labelled JSON has no labels. `suggestCampaignName` filters
+ * these down to the known area set.
+ */
+export const labelsFromTask = (task: string): string[] => {
+  try {
+    const parsed = JSON.parse(task) as { labels?: unknown };
+    const labels = Array.isArray(parsed?.labels) ? parsed.labels : [];
+    return labels
+      .map((l) => (typeof l === "string" ? l : (l as { name?: unknown })?.name))
+      .filter((n): n is string => typeof n === "string");
+  } catch {
+    return [];
+  }
+};
+
+/**
+ * The tracker/tree edges `runCampaignPlan` reads a selected set through — the same
+ * `fetchTask`/`blockedBy`/`fileSet` config seams `campaign` and `graft` use. A narrow
+ * structural view (not the full `ResolvedConfig`) so `plan.ts` stays pure over its
+ * injected resolvers.
+ */
+export interface CampaignPlanConfig {
+  fetchTask: (id: string) => string | Promise<string>;
+  blockedBy?: (id: string) => string[] | Promise<string[]>;
+  fileSet?: FileSetOf;
+}
+
+/** The parsed `--on-underspecified` flag, if the caller passed one. */
+export interface CampaignPlanOptions {
+  onUnderspecified?: string;
+}
+
+/**
+ * The two process globals the under-specified prompt branches on, injected so the
+ * flag/TTY/ask wiring is driven without a real terminal (mirroring how
+ * `underspecifiedPromptFor` takes `isTTY`/`ask` directly).
+ */
+export interface CampaignPlanRunDeps {
+  isTTY: boolean;
+  ask: UnderspecifiedPrompt;
+}
+
+/** The rendered-but-not-printed plan: the CLI case prints these three, in order. */
+export interface CampaignPlanReport {
+  /** the bare quoted wave args (`waveArgs`) — empty when nothing is schedulable. */
+  waveArgs: string;
+  /** the human-readable provenance report (`describePlan`). */
+  report: string;
+  /** the suggested `--name` value, or undefined when the set spans no area label. */
+  suggestedName?: string;
+}
+
+/**
+ * The `campaign-plan` command's read-only assembly, lifted out of `cli.mts`'s inline
+ * switch so the composition is drivable with stubs. It builds the file-set resolver
+ * (`cfg.fileSet ?? defaultFileSet()`, composed with `ticketProse ∘ fetchTask`), wires
+ * the under-specified prompt off the injected `isTTY`/`ask`, runs `planCampaign`, and
+ * renders the wave args, provenance report, and suggested `--name` — returning them
+ * for the thin CLI case to print. No side effects: it reads the tracker and computes
+ * strings; it never runs `campaign` and never writes.
+ */
+export async function runCampaignPlan(
+  cfg: CampaignPlanConfig,
+  ids: string[],
+  opts: CampaignPlanOptions,
+  deps: CampaignPlanRunDeps,
+): Promise<CampaignPlanReport> {
+  if (!ids.length)
+    throw new Error(
+      "campaign-plan needs at least one ticket id: campaign-plan 436 611 640",
+    );
+  if (!cfg.blockedBy)
+    throw new Error(
+      'campaign-plan needs a "blockedBy" resolver in your config — e.g. blockedBy: githubBlockedBy("owner/repo").',
+    );
+
+  // Which files each ticket touches: the project's resolver, or the shipped
+  // cites-from-body default, over the ticket's ticketProse'd text.
+  const resolveFileSet = cfg.fileSet ?? defaultFileSet();
+  const plan = await planCampaign(ids, {
+    blockedBy: cfg.blockedBy,
+    fileSet: async (id) => resolveFileSet(ticketProse(String(await cfg.fetchTask(id)))),
+    onUnderspecified: underspecifiedPromptFor({
+      flag: opts.onUnderspecified,
+      isTTY: deps.isTTY,
+      ask: deps.ask,
+    }),
+  });
+
+  // A suggested --name from the area labels the selected issues span — the same
+  // fetchTask the plan uses, read for its labels.
+  const suggestedName = await suggestCampaignName(ids, async (id) =>
+    labelsFromTask(String(await cfg.fetchTask(id))),
+  );
+
+  return { waveArgs: waveArgs(plan), report: describePlan(plan), suggestedName };
 }

@@ -36,15 +36,10 @@ import {
 import { gateway } from "./gateway.ts";
 import { applyCarve, carveClosure, computeCarve, normalize } from "./carve.ts";
 import {
-  describePlan,
-  planCampaign,
-  suggestCampaignName,
-  underspecifiedPromptFor,
-  waveArgs,
+  runCampaignPlan,
   type UnderspecifiedDecision,
 } from "./plan.ts";
 import { runGraft } from "./graft.ts";
-import { defaultFileSet, ticketProse } from "./fileset.ts";
 import { renderUsage } from "./help.ts";
 import {
   applyLayoutMigration,
@@ -125,24 +120,6 @@ async function askUnderspecified(
     rl.close();
   }
 }
-
-/**
- * The label names on a fetched task, read from the tracker JSON `fetchTask`
- * returns (GitHub's `--json labels` yields `{ labels: [{ name }] }`). Best-effort:
- * anything that does not parse as labelled JSON has no labels. `suggestCampaignName`
- * filters these down to the known area set.
- */
-const labelsFromTask = (task: string): string[] => {
-  try {
-    const parsed = JSON.parse(task) as { labels?: unknown };
-    const labels = Array.isArray(parsed?.labels) ? parsed.labels : [];
-    return labels
-      .map((l) => (typeof l === "string" ? l : (l as { name?: unknown })?.name))
-      .filter((n): n is string => typeof n === "string");
-  } catch {
-    return [];
-  }
-};
 
 const argv = process.argv.slice(2);
 const cfgIdx = argv.indexOf("--config");
@@ -815,47 +792,29 @@ switch (mode) {
       else positional.push(a);
     }
     const ids = positional.flatMap((a) => a.split(/[\s,]+/)).filter(Boolean);
-    if (!ids.length)
-      throw new Error(
-        "campaign-plan needs at least one ticket id: campaign-plan 436 611 640",
-      );
-    if (!cfg.blockedBy)
-      throw new Error(
-        'campaign-plan needs a "blockedBy" resolver in your config — e.g. blockedBy: githubBlockedBy("owner/repo").',
-      );
 
-    // Which files each ticket touches: the project's resolver, or the shipped
-    // cites-from-body default, validated against the current tree at plan time.
-    // `ticketProse` scans the author's title+body, falling back to anchored marker
-    // *lines* in the comments only when title+body carry none — so a stray
-    // filename-shaped token in a comment's prose still cannot poison confidence.
-    const resolveFileSet = cfg.fileSet ?? defaultFileSet();
-    const plan = await planCampaign(ids, {
-      blockedBy: cfg.blockedBy,
-      fileSet: async (id) =>
-        resolveFileSet(ticketProse(await cfg.fetchTask(id))),
-      onUnderspecified: underspecifiedPromptFor({
-        flag: onUnderspecified,
-        isTTY: Boolean(process.stdin.isTTY),
-        ask: askUnderspecified,
-      }),
-    });
+    // The read-only assembly (resolver composition, prompt wiring, name suggestion)
+    // lives in `runCampaignPlan` (#191); the command only parses args, injects the
+    // two process globals the prompt branches on, and prints what it returns.
+    const report = await runCampaignPlan(
+      cfg,
+      ids,
+      { onUnderspecified },
+      { isTTY: Boolean(process.stdin.isTTY), ask: askUnderspecified },
+    );
 
     // The bare wave args, then the human-readable provenance report. Plans only.
     console.log(
-      waveArgs(plan) || "(nothing schedulable — every ticket is unreachable)",
+      report.waveArgs ||
+        "(nothing schedulable — every ticket is unreachable)",
     );
     console.log("");
-    console.log(describePlan(plan));
+    console.log(report.report);
 
     // A suggested --name from the area labels the selected issues span — printed to
-    // paste or edit, never stored. The label resolver reads each issue's labels off
-    // the same fetchTask the plan uses.
-    const suggestedName = await suggestCampaignName(ids, async (id) =>
-      labelsFromTask(String(await cfg.fetchTask(id))),
-    );
-    if (suggestedName)
-      console.log(`\nsuggested name: --name "${suggestedName}"`);
+    // paste or edit, never stored.
+    if (report.suggestedName)
+      console.log(`\nsuggested name: --name "${report.suggestedName}"`);
     break;
   }
   case "answer": {

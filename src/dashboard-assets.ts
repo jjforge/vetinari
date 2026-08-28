@@ -666,14 +666,6 @@ export const LIVE_TAIL_STYLES = `  .live-tail { background: var(--color-card); b
   .tail-issue-option:hover { background: var(--color-card-hover); }
   .dot.all { background: var(--color-primary); }
   .tail-filter { width: 9rem; max-width: 32vw; padding: .3rem .5rem; color: var(--color-text); background: var(--color-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); font: inherit; font-size: .8rem; }
-  .tail-play { position: relative; width: 26px; height: 26px; flex: none; border: 1px solid var(--color-secondary); border-radius: 7px; background: var(--color-chip); cursor: pointer; padding: 0; }
-  .tail-play[data-following="true"] { border-color: var(--color-blue-40); }
-  .tail-play[data-following="true"]::before, .tail-play[data-following="true"]::after { content: ""; position: absolute; top: 7px; width: 3px; height: 12px; background: var(--color-text-light); }
-  .tail-play[data-following="true"]::before { left: 8px; }
-  .tail-play[data-following="true"]::after { right: 8px; }
-  .tail-play[data-following="false"]::before { content: ""; position: absolute; top: 6px; left: 9px; border-style: solid; border-width: 7px 0 7px 11px; border-color: transparent transparent transparent var(--color-text-light); }
-  .tail-save, .tail-clear { border: 1px solid var(--color-secondary); border-radius: var(--border-radius); background: var(--color-chip); color: var(--color-text-light); font: inherit; font-size: .78rem; padding: .3rem .55rem; cursor: pointer; }
-  .tail-save:hover, .tail-clear:hover { background: var(--color-card-hover); }
   /* The chrome icon buttons (#216, mockup 1a): square glyph tiles — ⤓ download JSON, ▮▮ pause
      (▶ when paused). The download carries the ⤓ glyph as its text; the pause draws ▮▮/▶ from
      its follow state so the existing follow/pause JS drives the glyph with no change. */

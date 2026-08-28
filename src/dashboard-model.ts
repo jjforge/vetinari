@@ -1101,6 +1101,10 @@ export interface FeedEntry {
   kind: string;
   text: string;
   raw: string;
+  /** the row's shared log-view parts (#216): the repo leads the message as the actor, the
+   * narration is one plain span, and the dot reads the event's state — so the feed renders in
+   * the same `.lv-row` component as the live tail, host log and archive. */
+  humanized: HumanizedRow;
 }
 
 /** The feed's rolling window: an event feeds only when its `ts` is within this
@@ -1160,8 +1164,14 @@ export function buildFeed(pointers: ProjectPointer[], now: Date = new Date(), lo
       for (const e of events) {
         const tsMs = Date.parse(String(e.ts ?? ""));
         if (Number.isNaN(tsMs) || tsMs < cutoffMs) continue;
-        const text = formatFeedEvent(pointer.project, e, festiveArg);
-        if (text) entries.push({ project: pointer.project, ts: String(e.ts), kind: String(e.event ?? ""), text, raw: JSON.stringify(e) });
+        const sentence = describeEvent(e, festiveArg);
+        if (!sentence) continue;
+        const raw = JSON.stringify(e);
+        // The feed is cross-repo, so the repo leads the message as the actor; the narration is
+        // one plain span and the dot borrows the event's state from the shared log-view registry.
+        const dot = humanizeLogLine(raw).dot;
+        const humanized: HumanizedRow = { time: /T(\d{2}:\d{2}:\d{2})/.exec(String(e.ts))?.[1] ?? "", actor: pointer.project, verb: "", spans: [{ text: sentence, kind: "plain" }], dot };
+        entries.push({ project: pointer.project, ts: String(e.ts), kind: String(e.event ?? ""), text: formatFeedEvent(pointer.project, e, festiveArg), raw, humanized });
       }
     }
   }

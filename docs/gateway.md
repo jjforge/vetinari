@@ -100,6 +100,29 @@ config load fails with a clear error if your notify map (via a `question` entry 
 the wildcard) would fan `question` to more than one place. Broadcast categories may
 fan anywhere.
 
+### The message skeleton
+
+Every outbound comms message a run enqueues (the notices built in `src/modes.ts`)
+follows one **labeled skeleton**, so a push notification reads the same whichever
+event fired:
+
+```
+<emoji> <project> · <LABEL> · <context>      ← header: LABEL is the state/action in CAPS;
+                                               context is `batch N/M`, `N tasks`, a name…
+<one terse signal line>                       ← what happened — no parenthetical rationale
+Recover: `<command>` …                        ← where relevant: the exact command to type
+<detail / impact block>                       ← rides below, as today
+```
+
+The voice is **terse and self-contained**: lead with what happened and what to do,
+shed low-value explanatory rationale, and where a message points at a recovery
+path, **name the exact command** — a pause notice says `` `campaign --resume` ``,
+`` `carve <issue>` ``, or `` `campaign --auto-carve` ``, never a bare "resume". Keep
+the defined vocabulary (`wave-parked` / `quarantined`, per `CONTEXT.md`). The
+`console.log` stdout lines are a separate surface and keep their own format, but the
+two pause lines still name `` `campaign --resume` `` so the recovery command is never
+only in Telegram.
+
 **How routing reaches the gateway.** On every run, `autoRegister` materializes your
 `destinations` + `notify` into the base location as
 `.vetinari.local/routing.json`, and the gateway reads that file live (ADR 0002 —

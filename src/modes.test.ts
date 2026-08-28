@@ -170,12 +170,17 @@ test("waveParkedNotice draws attention to a paused campaign whose greens stay me
   // Routed to the alerting channel — a wave-park demands a human, like the old halt did.
   assert.equal(notice.category, "failure");
   assert.equal(notice.event, "wave-parked");
+  // Header follows the labeled skeleton: emoji · project · LABEL · context.
+  assert.ok(notice.text.startsWith("🅿️ acme · WAVE-PARKED · batch 2"));
   // The operator is told which greens stay merged, on which base, and that it paused.
   assert.ok(notice.text.includes("101, 102"));
   assert.ok(notice.text.includes("main"));
   assert.ok(/pause/i.test(notice.text));
   // No machine-named culprit: the notice says the failure is unattributable.
   assert.ok(/no attributable culprit/i.test(notice.text));
+  // Self-contained recovery: it names the exact commands to type (folded from #170).
+  assert.ok(notice.text.includes("campaign --resume"));
+  assert.ok(notice.text.includes("carve <issue>"));
   // The gate report tail rides along so the human sees why it went red.
   assert.ok(notice.text.includes("GATE FAILED"));
 });
@@ -190,12 +195,15 @@ test("quarantinePauseNotice draws a human to a campaign paused by a quarantine t
   // Routed to the alerting channel — a paused campaign demands a human, like a wave-park.
   assert.equal(notice.category, "failure");
   assert.equal(notice.event, "quarantine-paused");
+  // Header follows the labeled skeleton: emoji · project · LABEL · context.
+  assert.ok(notice.text.startsWith("🅿️ acme · QUARANTINE-PAUSED · batch 1"));
   // Names the quarantined issue and the dependents it stranded.
   assert.ok(notice.text.includes("640"));
   assert.ok(notice.text.includes("701"));
   assert.ok(/pause/i.test(notice.text));
-  // Points at both recovery paths: resolve/resume, or re-run with --auto-carve.
-  assert.ok(/--auto-carve/.test(notice.text));
+  // Points at both recovery paths, each by its exact command (folded from #170).
+  assert.ok(notice.text.includes("campaign --resume"));
+  assert.ok(notice.text.includes("campaign --auto-carve"));
 });
 
 test("autoCarveNotice reports the pruned dependents and that the campaign ran on", () => {
@@ -205,6 +213,8 @@ test("autoCarveNotice reports the pruned dependents and that the campaign ran on
   // Informational — the campaign continued, so it rides the progress channel.
   assert.equal(notice.category, "progress");
   assert.equal(notice.event, "auto-carve");
+  // Header follows the labeled skeleton: emoji · project · LABEL · context.
+  assert.ok(notice.text.startsWith("✂️ acme · AUTO-CARVE · batch 1"));
   assert.ok(notice.text.includes("640"));
   assert.ok(notice.text.includes("701"));
   assert.ok(/carve/i.test(notice.text));

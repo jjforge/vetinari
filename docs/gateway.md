@@ -17,7 +17,7 @@ with the full design in [the gateway design spec](specs/2026-08-21-gateway-desig
 ## How a message flows
 
 ```
- a run (run / queue / campaign / carve)
+ a run (run / campaign / carve)
    │  writes, never sends
    ▼
  <project>/.vetinari.local/outbox/<id>.json      ← a category-tagged record
@@ -149,7 +149,7 @@ check credentials and that the gateway is running first, and routing second.
 
 ## 3. Registration and running the daemon
 
-**Registration is automatic.** Every run entry point (`run`, `queue`, `campaign`,
+**Registration is automatic.** Every run entry point (`run`, `campaign`,
 `carve`) calls `autoRegister` at start: it upserts this project's pointer
 (`project`, project root, base location) into the host registry under
 `~/.config/vetinari/registry/` and refreshes `routing.json`. It is idempotent and

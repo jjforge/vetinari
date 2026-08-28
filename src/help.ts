@@ -33,11 +33,6 @@ export const MODES: Mode[] = [
     blurb: "the TDD loop: agent turn → gate → resume on red",
   },
   {
-    signature: "queue <task…>",
-    blurb:
-      "fair-share pool over several tasks (bounded by the host ceiling and this project's containerShare — no per-run cap)",
-  },
-  {
     signature: 'campaign [--name "…"] [--auto-carve] <batch…>',
     blurb:
       "queue each batch, then merge greens → gate base → next batch. --name labels the run in the dashboard + archived-runs list. If a merge-conflict quarantine strands dependents in later waves the campaign pauses for a human by default; --auto-carve prunes the stranded closure and runs on (ADR 0013)",
@@ -113,7 +108,7 @@ export const MODES: Mode[] = [
   {
     signature: "clear",
     blurb:
-      "archive the run log + clear parked, resetting the dashboard/status line to idle (automatic on clean campaign/queue completion; this forces it now)",
+      "archive the run log + clear parked, resetting the dashboard/status line to idle (automatic on clean campaign completion; this forces it now)",
   },
   {
     signature: "status [--port <port>] [--host <host>]",
@@ -156,7 +151,7 @@ const FOOTER = `Options: --config <path>   (default: vetinari/config.mts in cwd)
 
 Host container ceiling: set MAX_CONCURRENT_CONTAINERS (or a max-concurrent-containers
 file in the gateway config dir) to cap live containers across ALL projects; every
-queue/campaign cooperates through a filesystem lease to stay within it. Unset resolves
+campaign cooperates through a filesystem lease to stay within it. Unset resolves
 to a machine-derived default (never unbounded). There is no per-run cap: a lone project
 fills the ceiling. A project's cut when projects contend is its \`containerShare\`
 (high | medium | low, default medium). See ADR 0010 and ADR 0011.`;

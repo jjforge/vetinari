@@ -596,3 +596,60 @@ export async function runCampaignPlan(
 
   return { waveArgs: waveArgs(plan), report: describePlan(plan), suggestedName };
 }
+
+/** One ticket's resolver verdict, as `fileset-check` reports it. */
+export interface FilesetCheckResult {
+  /** the ticket id (normalized, no leading #). */
+  id: string;
+  /** the resolver's `confident` verdict — false is exactly what `campaign-plan` halts on. */
+  confident: boolean;
+  /** the basenames the resolver pinned down (may be partial when not confident). */
+  files: string[];
+}
+
+/**
+ * Resolve each ticket's file-set through the **same** path `campaign-plan` uses —
+ * `cfg.fileSet ?? defaultFileSet()` over `ticketProse ∘ fetchTask` — and report the
+ * resolver's verdict per id. Because it calls the identical resolver rather than a
+ * restatement of it, `fileset-check` and the planner agree by construction: a ticket
+ * this reports `confident: false` is exactly one the planner would halt on. Used by
+ * the `/fileset` sweep to decide "already marked" (skip) only when the marker truly
+ * resolves. Pure over the injected `fetchTask`/`fileSet`; the tree read lives in the
+ * resolver.
+ */
+export async function runFilesetCheck(
+  cfg: CampaignPlanConfig,
+  ids: string[],
+): Promise<FilesetCheckResult[]> {
+  if (!ids.length)
+    throw new Error(
+      "fileset-check needs at least one ticket id: fileset-check 201 173",
+    );
+  const resolveFileSet = cfg.fileSet ?? defaultFileSet();
+  return Promise.all(
+    uniqueOrder(ids).map(async (id) => {
+      const { files, confident } = await resolveFileSet(
+        ticketProse(String(await cfg.fetchTask(id))),
+      );
+      return { id, confident, files };
+    }),
+  );
+}
+
+/**
+ * Render `runFilesetCheck`'s results one line per ticket: a confident ticket lists
+ * the basenames the resolver pinned down; a not-confident one says `campaign-plan`
+ * would halt on it (naming any partial cites resolved so far). Plain text for the
+ * terminal and for the `/fileset` sweep to read.
+ */
+export function describeFilesetCheck(results: FilesetCheckResult[]): string {
+  return results
+    .map((r) => {
+      const cites = r.files.map((f) => `\`${f}\``).join(", ");
+      return r.confident
+        ? `#${r.id}  confident — ${cites}`
+        : `#${r.id}  NOT confident — campaign-plan would halt` +
+            (r.files.length ? ` (resolved so far: ${cites})` : "");
+    })
+    .join("\n");
+}

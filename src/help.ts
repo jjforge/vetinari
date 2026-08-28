@@ -63,6 +63,11 @@ export const MODES: Mode[] = [
       "layer a selected set into dependency-ordered, file-disjoint wave args (paste after `campaign`) + a provenance report, and a suggested --name from the area labels the selected issues span. Plans only — never runs campaign, never pushes. A ticket whose file-set can't be resolved confidently halts and asks; --on-underspecified=drop|fail pre-decides for non-interactive runs (no flag, no terminal defaults to fail).",
   },
   {
+    signature: "fileset-check <ids…>",
+    blurb:
+      "report, per ticket id, whether campaign-plan's resolver finds a confident file-set and which basenames it resolves — the exact fetchTask→ticketProse→fileSet path the planner uses, so the two agree by construction. A NOT-confident line is exactly what campaign-plan would halt on; the /fileset sweep reads this to decide whether a marker truly resolves. Plans nothing, writes nothing",
+  },
+  {
     signature: "init [--dry-run]",
     blurb:
       "scaffold a NEW project onto the layout: create the committed vetinari/ (a defineConfig skeleton + a Dockerfile template), the excluded .vetinari.local/, and add .vetinari.local/ to .gitignore. Idempotent and non-clobbering — an existing vetinari/ config is never overwritten (--dry-run to print the plan and write nothing). Installs and vendors nothing",

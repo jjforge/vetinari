@@ -35,7 +35,9 @@ import {
 import { gateway } from "./gateway.ts";
 import { runPrune } from "./prune.ts";
 import {
+  describeFilesetCheck,
   runCampaignPlan,
+  runFilesetCheck,
   type UnderspecifiedDecision,
 } from "./plan.ts";
 import { runGraft, describeGraftRejections } from "./graft.ts";
@@ -733,6 +735,15 @@ switch (mode) {
     // paste or edit, never stored.
     if (report.suggestedName)
       console.log(`\nsuggested name: --name "${report.suggestedName}"`);
+    break;
+  }
+  case "fileset-check": {
+    // The resolver-backed pre-campaign check: run the SAME resolution campaign-plan
+    // uses over each id and print its verdict, so the /fileset sweep and the planner
+    // agree by construction. Read-only — plans nothing, writes nothing.
+    const ids = rest.flatMap((a) => a.split(/[\s,]+/)).filter(Boolean);
+    const results = await runFilesetCheck(cfg, ids);
+    console.log(describeFilesetCheck(results));
     break;
   }
   case "answer": {

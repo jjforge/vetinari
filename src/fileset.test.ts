@@ -182,6 +182,39 @@ test("ticketProse unions marker lines across several comments when the body has 
   assert.equal(res.confident, true);
 });
 
+test("defaultFileSet is not confident about a #201-shaped marker whose backtick cites are backslash-escaped", () => {
+  const root = treeWith("src/fileset.ts");
+
+  // #201's shape: `\`fileset.ts\`` — a backtick token wrapped in stray backslashes.
+  // The backtick group captures the trailing `\`, which fails FILENAME_RE, so no cite
+  // survives and the resolver rightly reports it cannot pin the file-set down.
+  const res = defaultFileSet(root)(
+    "Touches (existing files): \\`fileset.ts\\`\n",
+  );
+
+  assert.deepEqual(res.files, []);
+  assert.equal(res.confident, false);
+});
+
+test("ticketProse falls back to a comment marker when the body's only marker has unparseable cites (#201)", () => {
+  const root = treeWith("src/fileset.ts");
+  const fileSet = defaultFileSet(root);
+
+  // The body marker's cites are backslash-escaped backticks (#201) — the resolver
+  // extracts nothing from them, so this is not a marker the resolver would act on. It
+  // must not shadow the resolvable marker living in the comment.
+  const task = JSON.stringify({
+    title: "Fix",
+    body: "Touches (existing files): \\`fileset.ts\\`",
+    comments: [{ body: "Touches (existing files): `fileset.ts`\n" }],
+  });
+
+  const res = fileSet(ticketProse(task));
+
+  assert.deepEqual(res.files, ["fileset.ts"]);
+  assert.equal(res.confident, true);
+});
+
 test("defaultFileSet anchors the marker at a line start — an inline prose mention is not the marker", () => {
   const root = treeWith("src/plan.ts");
   const fileSet = defaultFileSet(root);

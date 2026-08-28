@@ -83,15 +83,17 @@ function markerCites(body: string, marker: RegExp): string[] | null {
 }
 
 /**
- * True when `text` carries at least one anchored `Touches:`/`Files:`/`Creates:`
- * marker line. Reuses the same parser the resolver reads with, so "has a marker"
- * here means exactly what the resolver would act on — not any looser notion.
+ * True when `text` carries an anchored `Touches:`/`Files:`/`Creates:` marker line
+ * from which the resolver would extract at least one cite. Reuses the same parser
+ * the resolver reads with, so "has a marker" here means exactly what the resolver
+ * would act on — an anchored line present but whose cites do not parse (escaped
+ * backticks, a bare non-path token — #201's shape) yields `[]`, not a real marker,
+ * so it does NOT shadow a resolvable marker the ticket carries in a comment.
  */
 function hasMarkerLine(text: string): boolean {
-  return (
-    markerCites(text, TOUCHES_RE) !== null ||
-    markerCites(text, CREATES_RE) !== null
-  );
+  const touches = markerCites(text, TOUCHES_RE);
+  const creates = markerCites(text, CREATES_RE);
+  return Boolean(touches?.length) || Boolean(creates?.length);
 }
 
 /**

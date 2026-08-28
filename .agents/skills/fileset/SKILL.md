@@ -14,22 +14,25 @@ You are inferring, and inference is fallible — so a human validates every mark
 
 ## What counts as a "valid marker"
 
-Reuse the resolver's own definition so this skill skips tickets that are already fine, rather than inventing a looser one. A valid marker is an **anchored marker line** — a line that, ignoring a leading list bullet (`-`/`*`/`+`) and surrounding `**bold**`, begins with `Touches:`, `Files:`, or `Creates:` (case-insensitive) and **names at least one cite** after the colon (a file in backticks, or a bare `dir/name.ext` path). A mid-sentence mention like "reads the `Touches:` marker" does **not** count — it isn't at line start.
+Reuse the resolver's own definition — don't restate it, **run it**. A ticket has a valid marker only when `vetinari fileset-check <id>` reports it **`confident`**: that command resolves the ticket's file-set through the exact `fetchTask`→`ticketProse`→`fileSet` path `campaign-plan` uses, so whatever it calls confident is exactly what the planner will accept, and whatever it calls `NOT confident` is exactly what the planner would **halt** on. Keying off it is what stops this skill from skipping a ticket the planner then stalls on.
 
-Since `src/fileset.ts` resolves markers from a ticket's **comments** as well as its title+body (a body/title marker wins; comments are the fallback), a ticket whose only marker lives in a comment is **already resolvable** — treat it as having a valid marker and skip it. This skill's write-back is the fallback for tickets with **no marker anywhere**.
+An anchored marker line — a line that, ignoring a leading list bullet (`-`/`*`/`+`) and surrounding `**bold**`, begins with `Touches:`, `Files:`, or `Creates:` (case-insensitive) — is **necessary but not sufficient**. The line's cites must actually **resolve**: a real backticked cite or a bare `dir/name.ext` path, and (for `Touches:`/`Files:`) a file the tree actually has. A line that is anchored but whose cites the resolver can't parse is **not** a valid marker — most notably **backslash-escaped backticks** (`` \`fileset.ts\` `` instead of `` `fileset.ts` ``, the #201 shape): the anchored line is present, but the resolver extracts nothing from it, so `fileset-check` reports `NOT confident` and the ticket must be **selected**, not skipped. The same goes for a bare non-path token (`Touches: fileset`) and a `Touches:` cite the tree lacks.
+
+Since the resolver reads markers from a ticket's **comments** as well as its title+body (a body/title marker wins; comments are the fallback), a ticket whose only *resolvable* marker lives in a comment is **already confident** — `fileset-check` reports it so, and this skill skips it. This skill's write-back is the fallback for tickets `fileset-check` reports `NOT confident`.
 
 ## Process
 
 ### 1. Select the tickets
 
-- **No args — sweep.** List open `ready-for-agent` issues and keep those with **no valid marker** in their title, body, *or any comment*:
+- **No args — sweep.** List open `ready-for-agent` issues, then run `fileset-check` over them and keep the ones it reports `NOT confident`:
 
   ```
   gh issue list --repo jjforge/vetinari --state open --label ready-for-agent --json number,title
+  vetinari fileset-check <n> <n> …        # one line per id: `confident` or `NOT confident`
   ```
 
-  For each, `gh issue view <n> --json title,body,comments` and check for a valid marker per the definition above. Drop the ones that already have one.
-- **Explicit ids** (`/fileset 173 176`) — operate only on those, in order. Still guard: if one already has a valid marker, skip it and say so.
+  Keep the `NOT confident` ids — those are exactly what `campaign-plan` would halt on, whether they carry no marker at all or an anchored marker whose cites don't resolve (escaped backticks, a bare non-path token, a tree-absent `Touches:` cite). Drop the `confident` ones — the planner already accepts them (including a ticket whose only resolvable marker lives in a comment).
+- **Explicit ids** (`/fileset 173 176`) — operate only on those, in order. Still guard: run `fileset-check` on each and skip the ones it reports `confident`, saying so.
 
 Report the selected set before doing any inference, so the operator sees what you are about to work on.
 
@@ -74,9 +77,9 @@ Creates (new files): `.agents/skills/fileset/SKILL.md`
 
 ### 4. Report
 
-Summarise what happened per ticket: **marked** (with the marker written), **skipped** (already had one), or **left unmarked** (no resolvable file-set — the operator now has a paste-ready starting point to fill in by hand). The unmarked ones are exactly what `campaign-plan` would still halt on, surfaced early.
+Summarise what happened per ticket: **marked** (with the marker written), **skipped** (`fileset-check` already reports it `confident`), or **left unmarked** (no resolvable file-set — the operator now has a paste-ready starting point to fill in by hand). The unmarked ones are exactly what `campaign-plan` would still halt on, surfaced early. Re-running `fileset-check` on a freshly marked ticket is the quickest confirmation the marker now resolves.
 
 ## Out of scope
 
 - Wiring this into `campaign-plan`'s halt branch — it stays a manual pre-campaign step.
-- Any change to `src/fileset.ts`, `src/github.ts`, or the external `to-tickets` / `to-spec` skills. This skill only reads tickets and writes markers back via `gh`.
+- Any change to `src/fileset.ts`, `src/github.ts`, or the external `to-tickets` / `to-spec` skills. This skill only reads tickets (via `gh` and the read-only `vetinari fileset-check`) and writes markers back via `gh`.

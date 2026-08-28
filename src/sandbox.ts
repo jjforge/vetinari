@@ -1,7 +1,60 @@
 import * as sandcastle from "@ai-hero/sandcastle";
+import type { AgentProvider, LoggingOption } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { mkdirSync } from "node:fs";
 import type { ResolvedConfig } from "./config.ts";
+
+/**
+ * The token-usage snapshot the loop folds per iteration (a subset of sandcastle's
+ * `IterationUsage`). Every field is optional here so a fake sandbox may omit the
+ * ones a given test does not exercise.
+ */
+export interface SandboxUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadInputTokens?: number;
+  cacheCreationInputTokens?: number;
+}
+
+/** One agent iteration: its resumable session id and token usage — the fields the loop reads. */
+export interface SandboxIteration {
+  sessionId?: string;
+  usage?: SandboxUsage;
+}
+
+/** The subset of a sandcastle run result the loop reads back after a turn. */
+export interface SandboxRunResult {
+  iterations: SandboxIteration[];
+  completionSignal?: string;
+  commits?: { sha: string }[];
+  stdout?: string;
+}
+
+/** The subset of `sbx.run(...)` options the loop passes. */
+export interface SandboxRunOptions {
+  agent: AgentProvider;
+  completionSignal: string[];
+  idleTimeoutSeconds: number;
+  logging: LoggingOption;
+  maxIterations?: number;
+  resumeSession?: string;
+  prompt?: string;
+  promptFile?: string;
+  promptArgs?: Record<string, string>;
+}
+
+/**
+ * The subset of sandcastle's `Sandbox` the loop and gate actually use, extracted so
+ * `runLoop`'s `LoopDeps.makeSandbox` can hand back a fake (a scriptable `run`/`exec`)
+ * in tests. The real `makeSandbox` return structurally satisfies this — it carries
+ * the same `run`/`exec`/`branch`/`close` surface plus more.
+ */
+export interface Sandbox {
+  run(opts: SandboxRunOptions): Promise<SandboxRunResult>;
+  exec(cmd: string): Promise<{ stdout?: string; stderr?: string; exitCode: number }>;
+  branch: string;
+  close(): Promise<{ preservedWorktreePath?: string } | undefined>;
+}
 
 // The pinned sandcastle build's `CreateSandboxOptions` does not model `stateDir`
 // yet; builds carrying ADR 0021 honor it and older builds ignore it at runtime, so

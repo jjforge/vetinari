@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import type { ResolvedConfig } from "./config.ts";
 import type { Logger } from "./log.ts";
 import { runGates } from "./gate.ts";
-import { agentFor, makeSandbox } from "./sandbox.ts";
+import { agentFor, makeSandbox, type Sandbox } from "./sandbox.ts";
 import { clearParked, enqueueOutbound, park } from "./state.ts";
 import { HARVEST_PROMPT, parseFindings, reportFindings } from "./findings.ts";
 import { activityLoggingSink, appendActivity, initActivityLog } from "./activity.ts";
@@ -48,6 +48,22 @@ export interface ResumeEntry {
   answerPrompt: string;
 }
 
+/**
+ * The effectful edges `runLoop` leans on that escape a temp-dir harness — the
+ * container factory and the two host-repo git reads — injected so the loop is
+ * drivable with a fake sandbox and stubbed git, mirroring `CampaignDeps`/`GraftDeps`.
+ * The defaults are the production effects, so the injected path never changes
+ * behaviour. `runGates`, `park`, `enqueueOutbound` and `cfg.log` are deliberately
+ * NOT here: they run for real against the temp-dir cfg and are asserted on disk,
+ * and the fake sandbox's `exec` already controls the gate's green/red.
+ */
+export interface LoopDeps {
+  makeSandbox: (cfg: ResolvedConfig, taskId: string) => Promise<Sandbox>;
+  commitsAhead: (base: string, branch: string, log: Logger) => number | null;
+  filesInCommit: (sha: string, log: Logger) => string[];
+}
+export const defaultLoopDeps: LoopDeps = { makeSandbox, commitsAhead, filesInCommit };
+
 export const answerPromptFor = (text: string) =>
   `Answer from the human to your question:\n\n${text}\n\nContinue the work. The signal contract is unchanged: ${DONE} when done, ${BLOCKED} if blocked again — and end this turn with a <turn-summary> line as before.`;
 
@@ -91,7 +107,7 @@ const usageOf = (r: any) =>
  * harvest must not turn a real green into an error. No-op unless a reporter is
  * configured.
  */
-async function harvestFindings(cfg: ResolvedConfig, sbx: any, sessionId: string | undefined, common: any, taskId: string) {
+async function harvestFindings(cfg: ResolvedConfig, sbx: Sandbox, sessionId: string | undefined, common: any, taskId: string) {
   if (!cfg.reportFinding || !sessionId) return;
   try {
     const hr = await sbx.run({ ...common, maxIterations: 1, resumeSession: sessionId, prompt: HARVEST_PROMPT });
@@ -123,9 +139,9 @@ async function harvestFindings(cfg: ResolvedConfig, sbx: any, sessionId: string 
  * `resumeSession` is incompatible with maxIterations > 1 (it throws before the
  * sandbox is created), so iterations are always driven from here.
  */
-export async function runLoop(cfg: ResolvedConfig, taskId: string, entry?: ResumeEntry): Promise<Outcome> {
+export async function runLoop(cfg: ResolvedConfig, taskId: string, entry?: ResumeEntry, deps: LoopDeps = defaultLoopDeps): Promise<Outcome> {
   const task = entry ? "" : await cfg.fetchTask(taskId);
-  const sbx = await makeSandbox(cfg, taskId);
+  const sbx = await deps.makeSandbox(cfg, taskId);
   // Start the per-task activity stream fresh — live-only scratch, overwritten per run (ADR 0015).
   initActivityLog(cfg.stateDir, taskId);
   try {
@@ -151,7 +167,7 @@ export async function runLoop(cfg: ResolvedConfig, taskId: string, entry?: Resum
         // record (ADR 0015): the turn, then a per-`commit` line for each commit this turn landed.
         appendActivity(cfg.stateDir, taskId, event("turn", turnFields));
         for (const c of r.commits ?? [])
-          appendActivity(cfg.stateDir, taskId, event("commit", { taskId, branch: sbx.branch, sha: c.sha, files: filesInCommit(c.sha, cfg.log) }));
+          appendActivity(cfg.stateDir, taskId, event("commit", { taskId, branch: sbx.branch, sha: c.sha, files: deps.filesInCommit(c.sha, cfg.log) }));
 
         if (r.completionSignal === BLOCKED) {
           await park(cfg, { taskId, reason: "blocked", sessionId, branch: sbx.branch, question: extractQuestion(r.stdout ?? "") });
@@ -165,7 +181,7 @@ export async function runLoop(cfg: ResolvedConfig, taskId: string, entry?: Resum
           // a branch it never advanced. Green must mean "the gate passed on a
           // real change" — require a commit beyond the base. null (git couldn't
           // tell) is NOT zero, so a transient failure never falsely parks.
-          const ahead = commitsAhead(cfg.baseBranch, sbx.branch, cfg.log);
+          const ahead = deps.commitsAhead(cfg.baseBranch, sbx.branch, cfg.log);
           if (ahead === 0) {
             cfg.log.log("empty-green", { taskId, branch: sbx.branch });
             await park(cfg, {

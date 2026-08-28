@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
@@ -245,6 +245,38 @@ test("GET /api/events pushes an updated tail frame when a running agent appends 
   } finally {
     await stream.close();
     await new Promise<void>((r) => server.close(() => r()));
+  }
+});
+
+test("GET /api/events pushes a named `host` frame when host.jsonl gains a row (#180)", async () => {
+  const configDir = tmp();
+  const gwHome = join(configDir, "gw-home");
+  const prev = process.env.VETINARI_GATEWAY_HOME;
+  process.env.VETINARI_GATEWAY_HOME = gwHome;
+  mkdirSync(join(gwHome, "logs"), { recursive: true });
+  const hostFile = join(gwHome, "logs", "host.jsonl");
+  writeFileSync(hostFile, '{"ts":"2026-08-28T00:00:00.000Z","event":"gateway-routed"}\n');
+  try {
+    const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+    const port = (server.address() as AddressInfo).port;
+    const stream = await openStream(port);
+    try {
+      await delay(300);
+      // The connect backlog is not re-pushed (the page's own /api/host-log fetch already has it);
+      // only rows appended after connect arrive as frames.
+      assert.ok(!stream.frames.some((f) => f.event === "host"), "no host frame for the connect backlog");
+      appendFileSync(hostFile, '{"ts":"2026-08-28T00:00:01.000Z","event":"telegram-send","error":"429"}\n');
+      await delay(800);
+      const host = [...stream.frames].reverse().find((f) => f.event === "host");
+      assert.ok(host, "the appended host row arrives as a named host frame");
+      assert.equal(host!.data.lines.length, 1);
+      assert.ok(host!.data.lines[0].includes('"error":"429"'), "the frame carries the raw appended line");
+    } finally {
+      await stream.close();
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  } finally {
+    prev === undefined ? delete process.env.VETINARI_GATEWAY_HOME : (process.env.VETINARI_GATEWAY_HOME = prev);
   }
 });
 

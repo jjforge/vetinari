@@ -4,7 +4,7 @@ import { listProjects } from "./registry.ts";
 import { appendedEvents, buildLiveTail, logFileOf, statusConfigFromPointer, viewRelevantEvents } from "./dashboard-model.ts";
 import type { ProjectPointer } from "./registry.ts";
 import type { OrchestratorEvent } from "./event-log.ts";
-import { hostLogger } from "./log.ts";
+import { hostLogger, hostLogTarget } from "./log.ts";
 import type { RouteHandler } from "./dashboard-http.ts";
 
 /** The per-project SSE debounce window: view-relevant appends landing within it
@@ -67,6 +67,15 @@ export const handleEvents: RouteHandler = (req, res, url, deps) => {
   // listener consumes it. Deduped by the last snapshot JSON so an unchanged tail is silent.
   const tailTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const tailSent = new Map<string, string>();
+  // The host-log arm (#180): the persistent `host.jsonl` (gateway/registry/Telegram/SSE
+  // diagnostics across every project, #157) is one more watched log under a synthetic key,
+  // its newly-appended raw lines pushed as a *named* `host` SSE frame. Like the tail frame, a
+  // named event never fires the landing's `onmessage`, so it drives only the host-log pane
+  // (its gear badge + rows), never a cards/feed refresh. Its own character offset and
+  // debounce buffer, separate from the per-project maps since it carries raw lines, not events.
+  let hostOffset = 0;
+  let hostPending: string[] = [];
+  let hostTimer: ReturnType<typeof setTimeout> | undefined;
 
   const readLog = (logFile: string): string => {
     try {
@@ -127,6 +136,27 @@ export const handleEvents: RouteHandler = (req, res, url, deps) => {
     if (!tailTimers.has(project)) tailTimers.set(project, setTimeout(() => flushTail(project, pointer), DEBOUNCE_MS));
   };
 
+  // Flush the host log's debounced newly-appended lines as one named `host` frame. Emits
+  // nothing when the response has ended or nothing landed (a rotation/no-op change event).
+  const flushHost = () => {
+    hostTimer = undefined;
+    const lines = hostPending;
+    hostPending = [];
+    if (res.writableEnded || !lines.length) return;
+    res.write(`event: host\ndata: ${JSON.stringify({ lines })}\n\n`);
+  };
+  const pushHost = (hostFile: string) => {
+    if (res.writableEnded) return;
+    const text = readLog(hostFile);
+    // A truncation/rotation resets the offset so we don't slice past the new, shorter file.
+    if (text.length < hostOffset) hostOffset = 0;
+    const appended = text.slice(hostOffset).split("\n").filter(Boolean);
+    hostOffset = text.length;
+    if (!appended.length) return;
+    hostPending.push(...appended);
+    if (!hostTimer) hostTimer = setTimeout(flushHost, DEBOUNCE_MS);
+  };
+
   for (const pointer of listProjects(deps.configDir)) {
     const logFile = logFileOf(pointer.baseLocation);
     // Seed at the current end so the backlog isn't re-pushed on connect (the page
@@ -151,10 +181,26 @@ export const handleEvents: RouteHandler = (req, res, url, deps) => {
     flushTail(pointer.project, pointer);
   }
 
+  // The host-log arm (#180): seed the offset at the log's current end so the connect
+  // backlog isn't re-pushed (the page's own `/api/host-log` fetch already has it), then
+  // watch the host logs dir — not the file — so a not-yet-created or rotated `host.jsonl`
+  // still registers. A missing dir is skipped, not fatal, exactly like a per-project arm.
+  const hostFile = hostLogTarget();
+  hostOffset = readLog(hostFile).length;
+  const hostDir = dirname(hostFile);
+  if (existsSync(hostDir)) {
+    try {
+      watchers.push(watch(hostDir, () => pushHost(hostFile)));
+    } catch (e) {
+      logger.log("dashboard-events-host-watch-failed", { error: String(e) });
+    }
+  }
+
   req.on("close", () => {
     for (const watcher of watchers) watcher.close();
     for (const timer of timers.values()) clearTimeout(timer);
     for (const timer of tailTimers.values()) clearTimeout(timer);
+    if (hostTimer) clearTimeout(hostTimer);
     res.end();
   });
   return true;

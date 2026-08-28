@@ -1,6 +1,6 @@
 import { cappedRawRows, followView, highlightJsonLine, isNotableHostEvent, tailAppend, tailFresh, tailView } from "./dashboard-render.ts";
 import { paneActivity } from "./dashboard-visual-state.ts";
-import { LOG_DOT_STATE_COLOR } from "./log-view.ts";
+import { humanizeHostLine, LOG_DOT_STATE_COLOR } from "./log-view.ts";
 
 /**
  * The dashboard's inert browser payloads — the CSS and client-side JavaScript
@@ -846,6 +846,9 @@ export const HOST_LOG_STYLES = `  .host-log { position: relative; display: inlin
   .festive-toggle { display: inline-flex; align-items: center; gap: .5rem; color: var(--color-text-light); font-size: .82rem; cursor: pointer; }
   .festive-toggle input { cursor: pointer; }
   .host-log-filter { margin: .7rem .9rem 0; padding: .4rem .6rem; color: var(--color-text); background: var(--color-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); font: inherit; font-size: .8rem; }
+  /* The shared log-view controls row (#203): the Humanized ⇄ Raw toggle and Download JSON,
+     laid out with the filter above them; the buttons reuse the live tail's .tail-mode / .tail-save. */
+  .host-log-controls { display: flex; align-items: center; gap: .5rem; margin: .5rem .9rem 0; }
   .host-log-lines { flex: 1; min-height: 0; overflow-y: auto; padding: .6rem .9rem; font-family: ${MONO_FONT}; font-size: .78rem; line-height: 1.5; }
   .host-log-line { padding: .05rem 0; }
   .host-log-code { min-width: 0; white-space: pre-wrap; word-break: break-word; color: var(--color-text-light); }
@@ -880,6 +883,7 @@ export const HOST_LOG_SCRIPT = `  const hostLogRoot = document.querySelector("[d
     ${highlightJsonLine.toString()}
     ${cappedRawRows.toString()}
     ${isNotableHostEvent.toString()}
+    ${humanizeHostLine.toString()}
     ${paneActivity.toString()}
     const HOST_CAP = 500, HOST_WINDOW = 500;
     const gear = hostLogRoot.querySelector("[data-host-log-gear]");
@@ -889,6 +893,12 @@ export const HOST_LOG_SCRIPT = `  const hostLogRoot = document.querySelector("[d
     const filterEl = hostLogRoot.querySelector("[data-host-log-filter]");
     const linesEl = hostLogRoot.querySelector("[data-host-log-lines]");
     const footer = hostLogRoot.querySelector("[data-host-log-footer]");
+    const modeEl = hostLogRoot.querySelector("[data-host-log-mode]");
+    const saveBtn = hostLogRoot.querySelector("[data-host-log-save]");
+    // The Humanized ⇄ Raw display mode (#203): humanized by default, remembered client-side so a
+    // Raw preference sticks across reloads. Humanized runs the shipped humanizeHostLine per line.
+    const MODE_KEY = "vetinari:host-log-mode";
+    let mode = "humanized"; try { const m = localStorage.getItem(MODE_KEY); if (m === "raw" || m === "humanized") mode = m; } catch (e) {}
     let lines = [], lastSeen = "", expanded = 0;
     // The newest notable event's timestamp in the current window (isNotableHostEvent), or ""
     // when the window holds none. ISO timestamps sort lexicographically, so a string compare
@@ -908,9 +918,22 @@ export const HOST_LOG_SCRIPT = `  const hostLogRoot = document.querySelector("[d
       const { rows, total, hidden } = cappedRawRows(lines, needle, HOST_CAP, expanded);
       linesEl.textContent = "";
       for (const { line } of rows) {
-        const row = document.createElement("div"); row.className = "host-log-line";
-        const code = document.createElement("code"); code.className = "host-log-code"; code.innerHTML = highlightJsonLine(line);
-        row.append(code); linesEl.append(row);
+        if (mode === "raw") {
+          // Raw: the highlighted NDJSON, one mono line (unchanged, #180).
+          const row = document.createElement("div"); row.className = "host-log-line";
+          const code = document.createElement("code"); code.className = "host-log-code"; code.innerHTML = highlightJsonLine(line);
+          row.append(code); linesEl.append(row);
+        } else {
+          // Humanized (default): time · actor · what happened, the dot coloured by the host
+          // event's own state (failures red); an unknown kind falls back to a raw dump.
+          const h = humanizeHostLine(line);
+          const row = document.createElement("div"); row.className = "log-hrow";
+          const dot = document.createElement("span"); dot.className = "log-dot " + h.dot; row.append(dot);
+          const t = document.createElement("span"); t.className = "log-time"; t.textContent = h.time; row.append(t);
+          const a = document.createElement("span"); a.className = "log-actor"; a.textContent = h.actor; row.append(a);
+          const m = document.createElement("span"); m.className = "log-msg"; m.textContent = h.message; row.append(m);
+          linesEl.append(row);
+        }
       }
       if (!rows.length) { const e = document.createElement("div"); e.className = "host-log-empty"; e.textContent = lines.length ? (needle ? "No lines match “" + filterEl.value.trim() + "”." : "No host log lines.") : "No host log yet."; linesEl.append(e); }
       if (hidden > 0) { const more = document.createElement("button"); more.type = "button"; more.className = "host-log-more"; more.textContent = "Show " + hidden + " more line" + (hidden === 1 ? "" : "s"); more.addEventListener("click", () => { expanded += HOST_CAP; draw(); }); linesEl.append(more); }
@@ -938,6 +961,19 @@ export const HOST_LOG_SCRIPT = `  const hostLogRoot = document.querySelector("[d
       });
     }
     filterEl.addEventListener("input", () => { expanded = 0; draw(); });
+    // The Humanized ⇄ Raw toggle (#203): flip the body format, persist the choice, redraw. Seed
+    // the pressed state from the remembered mode so the buttons match on load.
+    const syncModeBtns = () => { if (modeEl) for (const b of modeEl.querySelectorAll("[data-mode]")) b.setAttribute("aria-pressed", String(b.dataset.mode === mode)); };
+    if (modeEl) for (const btn of modeEl.querySelectorAll("[data-mode]")) btn.addEventListener("click", () => { mode = btn.dataset.mode; try { localStorage.setItem(MODE_KEY, mode); } catch (e) {} syncModeBtns(); draw(); });
+    syncModeBtns();
+    // Download JSON (#203): the currently-filtered raw NDJSON — uncapped by the render window —
+    // as a .jsonl download, so the raw bytes stay faithful regardless of the humanized view.
+    if (saveBtn) saveBtn.addEventListener("click", () => {
+      const needle = filterEl.value.trim().toLowerCase();
+      const matching = needle ? lines.filter((l) => l.toLowerCase().indexOf(needle) !== -1) : lines;
+      const blob = new Blob([matching.join("\\n")], { type: "application/x-ndjson" });
+      const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "host-log.jsonl"; a.click(); URL.revokeObjectURL(a.href);
+    });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !panel.hidden) closePanel(); });
     // Fold newly-appended host rows (the server sends them in file order, oldest→newest) into
     // the newest-first buffer, bounded to a recent window; redraw if the pane is open and

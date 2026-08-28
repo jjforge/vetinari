@@ -1647,6 +1647,16 @@ test("renderHostLog renders a gear entry point, a hidden badge, and a hidden hos
   assert.match(html, /Festive [Ww]ave [Nn]ames/);
 });
 
+test("renderHostLog carries the Humanized ⇄ Raw toggle (humanized pressed) and a Download JSON control (#203)", () => {
+  const html = renderHostLog();
+  // The shared log-view toggle: two buttons, humanized the pressed default, raw the alternate.
+  assert.match(html, /data-host-log-mode/);
+  assert.match(html, /data-mode="humanized" aria-pressed="true"/);
+  assert.match(html, /data-mode="raw" aria-pressed="false"/);
+  // Download JSON always emits the raw NDJSON, mirroring the live tail's control.
+  assert.match(html, /data-host-log-save[^>]*>Download JSON</);
+});
+
 test("renderLandingShell mounts the host-log gear + pane on the host view (#180)", () => {
   const html = renderLandingShell(["alpha", "beta"]);
   // The host-log surface lives on the all-repos landing/host view.
@@ -5867,6 +5877,25 @@ test("HOST_LOG_SCRIPT wires the host-log pane: gear show/hide, badge off isNotab
   assert.match(HOST_LOG_SCRIPT, /events\.addEventListener\("host"/);
   // A missing host log reads a clean empty state, not a blank pane.
   assert.match(HOST_LOG_SCRIPT, /No host log yet/);
+});
+
+test("HOST_LOG_SCRIPT renders humanized by default with a Raw toggle and a Download JSON control (#203)", () => {
+  // Ships the host humanizer via .toString() (not a hand-mirrored copy), like the raw helpers.
+  assert.match(HOST_LOG_SCRIPT, /function humanizeHostLine/);
+  // Humanized is the default mode, remembered per view in localStorage so a Raw preference sticks.
+  assert.match(HOST_LOG_SCRIPT, /let mode = "humanized"/);
+  assert.match(HOST_LOG_SCRIPT, /localStorage/);
+  // The default (humanized) branch renders the shared log-view row from humanizeHostLine's parts.
+  assert.match(HOST_LOG_SCRIPT, /humanizeHostLine\(line\)/);
+  assert.match(HOST_LOG_SCRIPT, /"log-hrow"/);
+  assert.match(HOST_LOG_SCRIPT, /"log-dot "/);
+  // The Humanized ⇄ Raw toggle flips the body format, persists the choice, and redraws.
+  assert.match(HOST_LOG_SCRIPT, /data-host-log-mode/);
+  assert.match(HOST_LOG_SCRIPT, /aria-pressed/);
+  // Download JSON emits the currently-filtered raw NDJSON as a .jsonl blob.
+  assert.match(HOST_LOG_SCRIPT, /data-host-log-save/);
+  assert.match(HOST_LOG_SCRIPT, /new Blob\(/);
+  assert.match(HOST_LOG_SCRIPT, /\.jsonl/);
 });
 
 test("HOST_LOG_SCRIPT wires the Festive Wave Names toggle to the cookie + reload (#193)", () => {

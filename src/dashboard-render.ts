@@ -881,6 +881,18 @@ export const renderHostLog = () =>
   // an unchecked-by-default checkbox the client syncs to the `festiveWaveNames` cookie.
   `<div class="host-log-settings"><label class="festive-toggle"><input type="checkbox" data-festive-toggle /> Festive wave names</label></div>` +
   `<input type="text" class="host-log-filter" data-host-log-filter placeholder="filter lines…" aria-label="Filter host log lines" />` +
+  // The shared log-view controls (#203): the Humanized ⇄ Raw segmented toggle (humanized the
+  // pressed default, seeded server-side; the client re-syncs from the remembered mode) and a
+  // Download JSON control that always emits the raw NDJSON. Reuses the live tail's .tail-mode /
+  // .tail-save classes (both style blocks ride the landing shell), so the two surfaces match.
+  `<div class="host-log-controls">` +
+  `<span class="tail-mode" data-host-log-mode role="group" aria-label="Line format">` +
+  `<button type="button" class="tail-mode-btn" data-mode="humanized" aria-pressed="true">Humanized</button>` +
+  `<button type="button" class="tail-mode-btn" data-mode="raw" aria-pressed="false">Raw</button>` +
+  `</span>` +
+  `<span class="host-log-gap"></span>` +
+  `<button type="button" class="tail-save" data-host-log-save>Download JSON</button>` +
+  `</div>` +
   `<div class="host-log-lines" data-host-log-lines></div>` +
   `<div class="host-log-footer" data-host-log-footer></div>` +
   `</div>` +

@@ -123,3 +123,61 @@ export function humanizeLogLine(raw: string): HumanizedRow {
       return fallback();
   }
 }
+
+/**
+ * Humanize one raw `host.jsonl` line into its `time · actor · what happened` parts — the
+ * host-log pane's registry, the sibling of `humanizeLogLine` for the host surface (#203).
+ * The host kinds (gateway routing, Telegram announcements, registry diagnostics) never route
+ * through `describeEvent`, so this function is fully self-contained and ships verbatim into
+ * the host-log client via `.toString()` — humanizing the fetched window and each live `host`
+ * frame in the browser, where the raw NDJSON of that surface's SSE arm arrives unchanged.
+ *
+ * Keyed on the row's `event`: the routine gateway/registry/Telegram shapes each render a
+ * purpose-built line; the `project` field is the actor (a host-global event reads `host`).
+ * A failure — the `isNotableHostEvent` rule inlined: a `fail`/`error` kind, a non-null
+ * `error`, or `ok:false` — always paints the failure (red) dot, so even a host kind with no
+ * purpose-built line dumps its raw source in red rather than a silent neutral. An unknown,
+ * non-notable kind (or an unparseable line) falls back to a one-line raw dump, never blank.
+ */
+export function humanizeHostLine(raw: string): HumanizedRow {
+  let e: Record<string, unknown> | null = null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") e = parsed as Record<string, unknown>;
+  } catch {
+    e = null;
+  }
+  const time = e && typeof e.ts === "string" ? (/T(\d{2}:\d{2}:\d{2})/.exec(e.ts)?.[1] ?? "") : "";
+  const hash = (id: unknown) => "#" + String(id).replace(/^#/, "");
+  const project = e && typeof e.project === "string" ? e.project : "";
+  // The shared notable rule (isNotableHostEvent), inlined so this function stays shippable:
+  // a fail/error kind, a non-null `error`, or `ok:false` is a failure the operator sees red.
+  const failed = !!e && ((typeof e.event === "string" && /fail|error/i.test(e.event)) || (e.error !== undefined && e.error !== null) || e.ok === false);
+  const fallback = (): HumanizedRow => ({ time, actor: project, message: raw.trim(), dot: failed ? "failure" : "neutral" });
+  if (!e || typeof e.event !== "string") return fallback();
+  switch (e.event) {
+    // Routine gateway/registry lifecycle — a neutral dot, the project (or host) as actor.
+    case "gateway-start": {
+      const bots = typeof e.bots === "number" ? e.bots : 0;
+      return { time, actor: "host", message: "gateway up" + (bots ? " · " + bots + " bot" + (bots === 1 ? "" : "s") : ""), dot: "neutral" };
+    }
+    case "gateway-routed":
+      return { time, actor: project, message: "routed " + String(e.category) + " → " + String(e.destination), dot: "neutral" };
+    case "gateway-announced":
+      return { time, actor: project, message: "announced " + hash(e.task), dot: "neutral" };
+    // Held-attention (amber) diagnostics — not a hard failure, but the operator should see them.
+    case "telegram-unconfigured":
+      return { time, actor: project, message: "⚠ Telegram not configured", dot: "parked" };
+    case "registry-stale":
+      return { time, actor: project, message: "stale registration", dot: "parked" };
+    // The named failure kinds — a red line naming what broke.
+    case "telegram-send-failed":
+      return { time, actor: "host", message: "Telegram send failed (" + String(e.status) + ")", dot: "failure" };
+    case "registry-register-failed":
+      return { time, actor: project, message: "registration failed: " + String(e.error), dot: "failure" };
+    case "registry-routing-unreadable":
+      return { time, actor: project, message: "routing unreadable: " + String(e.error), dot: "failure" };
+    default:
+      return fallback();
+  }
+}

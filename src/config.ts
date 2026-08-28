@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import type { FindingReporter } from "./findings.ts";
 import type { FileSetOf } from "./fileset.ts";
 import { loggerForRun, type Logger } from "./log.ts";
@@ -84,6 +84,197 @@ export type ContainerShare = "high" | "medium" | "low";
  */
 export function containerShareWeight(share: ContainerShare): number {
   return share === "high" ? 7 : share === "medium" ? 2 : 1;
+}
+
+/**
+ * The agent providers vetinari can drive (ADR 0016). The loop is resume-based —
+ * it resumes a session each turn — so only the sandcastle providers that expose
+ * durable session storage qualify: Claude Code, pi, Codex. The non-resumable ones
+ * (copilot/cursor/opencode) are rejected here; enabling them is a separate change (#212).
+ */
+export type AgentProviderName = "claude" | "pi" | "codex";
+
+/**
+ * A project's default agent (ADR 0016). A single object, not per-provider blocks:
+ * `provider` selects which resumable agent runs (omitted → claude), and
+ * `model`/`effort` are passed through in that provider's OWN vocabulary — each has
+ * a different effort enum, validated per-provider. Omitted `model`/`effort` fall to
+ * that provider's defaults (a per-provider default model; effort `high`). A
+ * `--agent`/`--model`/`--effort` CLI override on run/campaign wins over this.
+ */
+export interface AgentConfig {
+  provider?: AgentProviderName;
+  model?: string;
+  effort?: string;
+}
+
+/** Per-provider facts `agentFor` and the preflight read: the default model, the effort vocabulary to validate against, and the `.env` credential keys (any one present satisfies the preflight). */
+export const AGENT_PROVIDERS: Record<
+  AgentProviderName,
+  { defaultModel: string; efforts: readonly string[]; credentialKeys: readonly string[] }
+> = {
+  // claude: today's behavior, unchanged — opus by default, Claude's low..max effort scale.
+  claude: {
+    defaultModel: "claude-opus-4-8",
+    efforts: ["low", "medium", "high", "xhigh", "max"],
+    credentialKeys: ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"],
+  },
+  // pi drives Anthropic models; its effort maps to the CLI's --thinking (off..xhigh).
+  pi: {
+    defaultModel: "claude-sonnet-4-6",
+    efforts: ["off", "minimal", "low", "medium", "high", "xhigh"],
+    credentialKeys: ["ANTHROPIC_API_KEY"],
+  },
+  // codex → OpenAI; low..xhigh effort.
+  codex: {
+    defaultModel: "gpt-5.4",
+    efforts: ["low", "medium", "high", "xhigh"],
+    credentialKeys: ["OPENAI_API_KEY"],
+  },
+};
+
+/** The provider a run defaults to when neither the config nor the CLI names one. */
+export const DEFAULT_PROVIDER: AgentProviderName = "claude";
+/** The effort a run defaults to when neither the config nor the CLI names one. */
+export const DEFAULT_EFFORT = "high";
+
+/** The non-resumable sandcastle providers — rejected with a pointer at their follow-up. */
+const NON_RESUMABLE_PROVIDERS = ["copilot", "cursor", "opencode"];
+const SUPPORTED_LIST = "claude, pi, codex";
+
+/** The fully-resolved agent choice for one invocation, ready to hand to `agentFor`'s dispatch. */
+export interface AgentSelection {
+  provider: AgentProviderName;
+  model: string;
+  effort: string;
+}
+
+/**
+ * Resolve the agent for an invocation (ADR 0016): a CLI `override` wins over the
+ * project's `base` (`cfg.agent`) wins over per-provider defaults. `model`/`effort`
+ * are only inherited from `base` when the effective provider matches the base's —
+ * a claude model or a claude-only effort must not leak onto a `--agent codex` run —
+ * otherwise the selected provider's defaults apply. The resolved effort is validated
+ * against that provider's own vocabulary and fails fast (naming the valid set) rather
+ * than silently downgrading. A non-enabled/unknown provider is rejected here too.
+ */
+export function resolveAgentSelection(
+  base: AgentConfig | undefined,
+  override: { provider?: string; model?: string; effort?: string } = {},
+): AgentSelection {
+  const providerRaw = override.provider ?? base?.provider ?? DEFAULT_PROVIDER;
+  if (!(providerRaw in AGENT_PROVIDERS)) {
+    if (NON_RESUMABLE_PROVIDERS.includes(providerRaw))
+      throw new Error(
+        `agent provider "${providerRaw}" is not resumable, so vetinari's per-turn loop (which resumes a session each turn) cannot drive it. ` +
+          `Supported: ${SUPPORTED_LIST}. Non-resumable providers (${NON_RESUMABLE_PROVIDERS.join(", ")}) are tracked in #212.`,
+      );
+    throw new Error(`unknown agent provider "${providerRaw}". Supported: ${SUPPORTED_LIST}.`);
+  }
+  const provider = providerRaw as AgentProviderName;
+  const spec = AGENT_PROVIDERS[provider];
+
+  // The base's model/effort belong to the base's provider; only inherit them when the
+  // effective provider is unchanged, else fall to the selected provider's defaults.
+  const inheritsBase = provider === (base?.provider ?? DEFAULT_PROVIDER);
+  const model = override.model ?? (inheritsBase ? base?.model : undefined) ?? spec.defaultModel;
+  const effort = override.effort ?? (inheritsBase ? base?.effort : undefined) ?? DEFAULT_EFFORT;
+
+  if (!spec.efforts.includes(effort))
+    throw new Error(
+      `agent effort "${effort}" is not valid for provider "${provider}". Valid: ${spec.efforts.join(", ")}.`,
+    );
+
+  return { provider, model, effort };
+}
+
+/**
+ * The env var a `run`/`campaign` invocation stamps its CLI agent override onto, so
+ * campaign/queue CHILD `run`s (spawned via `childSpawnEnv`) drive the SAME agent as
+ * the parent instead of silently falling back to the config default (ADR 0016).
+ * `agentFor` reads it back and merges it over `cfg.agent`.
+ */
+export const AGENT_ENV_VAR = "VETINARI_AGENT";
+
+/**
+ * Pull the `--agent <name>` / `--model <m>` / `--effort <e>` override out of a
+ * mode's args (both `--flag value` and `--flag=value` forms), returning the parsed
+ * override and the remaining args in order. Only these three flags are consumed — a
+ * mode's own flags and positionals pass through untouched, so run/campaign strip the
+ * agent selection before their existing parsing runs (ADR 0016).
+ */
+export function parseAgentFlags(args: string[]): {
+  override: { provider?: string; model?: string; effort?: string };
+  rest: string[];
+} {
+  const override: { provider?: string; model?: string; effort?: string } = {};
+  const rest: string[] = [];
+  const flags: Record<string, "provider" | "model" | "effort"> = {
+    "--agent": "provider",
+    "--model": "model",
+    "--effort": "effort",
+  };
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    const eq = a.indexOf("=");
+    const name = eq >= 0 ? a.slice(0, eq) : a;
+    const key = flags[name];
+    if (!key) {
+      rest.push(a);
+      continue;
+    }
+    override[key] = eq >= 0 ? a.slice(eq + 1) : args[++i];
+  }
+  return { override, rest };
+}
+
+/** Encode a partial CLI agent override into the `VETINARI_AGENT` env string. */
+export function encodeAgentOverride(over: {
+  provider?: string;
+  model?: string;
+  effort?: string;
+}): string {
+  return JSON.stringify(over);
+}
+
+/** Read the `VETINARI_AGENT` env string back into a partial override; junk/unset → `{}`. */
+export function parseAgentOverride(raw: string | undefined): {
+  provider?: string;
+  model?: string;
+  effort?: string;
+} {
+  if (!raw) return {};
+  try {
+    const v = JSON.parse(raw);
+    return v && typeof v === "object" ? v : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * The preflight credential check (ADR 0016): the provider's `.env` credential keys
+ * that are absent (or present-but-empty) in `envPath`, or `[]` when at least one is
+ * satisfied. Reads only the simple `KEY=value` assignments a container `.env` carries.
+ * A non-empty result is what the CLI fails fast on, before any container launches.
+ */
+export function missingCredentials(provider: AgentProviderName, envPath: string): string[] {
+  const keys = AGENT_PROVIDERS[provider].credentialKeys;
+  const env = existsSync(envPath) ? parseEnvAssignments(readFileSync(envPath, "utf8")) : {};
+  const anyPresent = keys.some((k) => (env[k] ?? "").length > 0);
+  return anyPresent ? [] : [...keys];
+}
+
+/** Minimal `KEY=value` reader for a container `.env` — presence detection only, no shell semantics. */
+function parseEnvAssignments(text: string): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const m = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);
+    if (m) env[m[1]] = m[2].trim().replace(/^["']|["']$/g, "");
+  }
+  return env;
 }
 
 export interface GateSpec {
@@ -198,10 +389,12 @@ export interface VetinariConfig {
   notify?: NotifyMap;
   /** Override the bundled TDD prompt. Must keep the signal contract. */
   promptFile?: string;
-  agent?: {
-    model?: string;
-    effort?: "low" | "medium" | "high" | "xhigh" | "max";
-  };
+  /**
+   * The project's default agent provider + model/effort (ADR 0016). Omitted →
+   * claude with its default model at effort `high` (today's behavior). A
+   * `--agent`/`--model`/`--effort` override on run/campaign wins over this.
+   */
+  agent?: AgentConfig;
   /** Gate→resume cycles before parking with reason "budget". Default 6. */
   maxTurns?: number;
   /** Default 600. A stalled agent parks rather than dying unrecorded. */

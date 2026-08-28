@@ -2,7 +2,17 @@
 import { createInterface } from "node:readline/promises";
 import { mkdirSync, watch } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { loadConfig, resolveConfigPath, type ResolvedConfig } from "./config.ts";
+import {
+  AGENT_ENV_VAR,
+  encodeAgentOverride,
+  loadConfig,
+  missingCredentials,
+  parseAgentFlags,
+  parseAgentOverride,
+  resolveAgentSelection,
+  resolveConfigPath,
+  type ResolvedConfig,
+} from "./config.ts";
 import {
   applyCollect,
   formatMilestoneDate,
@@ -554,6 +564,33 @@ const archiveLeftoverRun = () => {
   if (shouldArchiveLeftover(cfg, { isChild })) archiveIfIdle();
 };
 
+/**
+ * Resolve and lock in the agent for a run/campaign invocation (ADR 0016). Merge any
+ * `--agent`/`--model`/`--effort` override on the CLI over one already inherited via
+ * `VETINARI_AGENT` (a campaign/queue child inherits its parent's), validate it (an
+ * unknown/non-resumable provider or an out-of-vocabulary effort fails fast HERE,
+ * before any container), and preflight the selected provider's credentials against the
+ * container `.env` so a missing key is a helpful message rather than a death inside the
+ * container. Re-stamp `VETINARI_AGENT` so every spawned child wave drives the same
+ * agent. Returns `rest` with the agent flags stripped for the mode's own parsing.
+ */
+function applyAgentSelection(cfg: ResolvedConfig, rest: string[]): string[] {
+  const inherited = parseAgentOverride(process.env[AGENT_ENV_VAR]);
+  const { override: cli, rest: remaining } = parseAgentFlags(rest);
+  const override = { ...inherited, ...cli };
+  const selection = resolveAgentSelection(cfg.agent, override); // throws on bad provider/effort
+  const envPath = resolve(process.cwd(), cfg.stateDir, ".env");
+  const missing = missingCredentials(selection.provider, envPath);
+  if (missing.length)
+    throw new Error(
+      `agent provider "${selection.provider}" has no credentials in ${envPath} — ` +
+        `set ${missing.join(" or ")} there before launching (preflight, ADR 0016).`,
+    );
+  if (Object.keys(override).length)
+    process.env[AGENT_ENV_VAR] = encodeAgentOverride(override);
+  return remaining;
+}
+
 switch (mode) {
   case "build": {
     // Default builds AND baselines; --no-baseline builds only. False (a build or
@@ -567,10 +604,13 @@ switch (mode) {
     break;
   }
   case "run": {
-    if (!rest[0]) throw new Error("run needs a task id");
+    // Strip + lock in the agent selection first (ADR 0016): validates it and
+    // preflights its credentials before the container, and stamps VETINARI_AGENT.
+    const runArgs = applyAgentSelection(cfg, rest);
+    if (!runArgs[0]) throw new Error("run needs a task id");
     archiveLeftoverRun();
     // Exit code is the queue's slot signal: 0 green, 2 parked, other = error.
-    process.exitCode = (await runLoop(cfg, rest[0])) === "green" ? 0 : 2;
+    process.exitCode = (await runLoop(cfg, runArgs[0])) === "green" ? 0 : 2;
     break;
   }
   case "campaign": {
@@ -584,11 +624,15 @@ switch (mode) {
     // fixed forward, or a prune they resolved) on the current base, from the plan the
     // log reconstructs — no batch args needed (ADR 0013).
     let resume = false;
+    // Strip + lock in the agent selection first (ADR 0016): validates it and
+    // preflights its credentials before any container, and stamps VETINARI_AGENT so
+    // every child wave `run` drives the chosen provider, not a silent claude.
+    const campaignArgs = applyAgentSelection(cfg, rest);
     const positional: string[] = [];
-    for (let i = 0; i < rest.length; i++) {
-      const a = rest[i];
+    for (let i = 0; i < campaignArgs.length; i++) {
+      const a = campaignArgs[i];
       if (a.startsWith("--name=")) name = a.slice("--name=".length);
-      else if (a === "--name") name = rest[++i];
+      else if (a === "--name") name = campaignArgs[++i];
       else if (a === "--auto-prune") autoPrune = true;
       else if (a === "--resume") resume = true;
       else positional.push(a);

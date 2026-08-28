@@ -10,6 +10,7 @@ import { applyGraft } from "./plan.ts";
 import { festiveWaveName } from "./festive-names.ts";
 import { readEventLog, type GreenEvent, type OrchestratorEvent } from "./event-log.ts";
 import { activityLogPath } from "./activity.ts";
+import { humanizeLogLine, type HumanizedRow } from "./log-view.ts";
 
 /**
  * Parse a git remote URL to its `owner/name`, handling both the SSH
@@ -941,6 +942,9 @@ export interface TailLine {
   ts: string;
   n: number;
   raw: string;
+  /** the line's humanized parts (#203) — `time · actor · what happened` + a state dot, so
+   * the log-view component renders humanized-by-default without re-parsing the raw client-side. */
+  humanized: HumanizedRow;
 }
 
 /** One running agent the live tail merges: its issue number and status (always
@@ -1002,7 +1006,7 @@ export function buildLiveTail(cfg: ResolvedConfig): LiveTail {
         } catch {
           // An unparseable line still renders in the raw tail; an empty `ts` sorts it first.
         }
-        lines.push({ issue: agent.issue, status: "running", ts, n, raw: text });
+        lines.push({ issue: agent.issue, status: "running", ts, n, raw: text, humanized: humanizeLogLine(text) });
       });
   }
   // Stable sort merges the per-agent streams newest-last by `ts`; ties keep file order.

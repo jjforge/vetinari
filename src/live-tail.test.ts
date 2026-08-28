@@ -61,6 +61,19 @@ test("buildLiveTail merges a running agent's activity lines, tagged with its iss
   assert.ok(tail.lines[1].raw.includes('"cmd":"npm test"'));
 });
 
+test("buildLiveTail attaches each line's humanized parts for the log-view component (#203)", () => {
+  const dir = tmp();
+  writeJsonl(cfgFor(dir).logFile, [event("queue-start", { taskIds: ["204"], slots: 1, ts: "2026-08-27T00:00:00.000Z" })]);
+  initActivityLog(dir, "204");
+  appendActivity(dir, "204", event("tool", { taskId: "204", name: "Edit", path: "src/x.ts", ts: "2026-08-27T09:15:00.000Z" }));
+
+  const tail = buildLiveTail(cfgFor(dir));
+
+  // The server humanizes each raw line once so the client renders pre-humanized rows and
+  // keeps `raw` for the Raw toggle and the download.
+  assert.deepEqual(tail.lines[0].humanized, { time: "09:15:00", actor: "#204", message: "Edit src/x.ts", dot: "running" });
+});
+
 test("buildLiveTail interleaves two running agents by ts and excludes finished ones", () => {
   const dir = tmp();
   writeJsonl(cfgFor(dir).logFile, [
@@ -345,6 +358,27 @@ test("renderLiveTail draws the pane only when a repo has a running agent, one dr
   assert.doesNotMatch(html, /class="live-tail"[^>]*\shidden/);
 });
 
+test("renderLiveTail carries the log-view chrome: a Humanized⇄Raw toggle (humanized default) and a Download JSON control (#203)", () => {
+  const html = renderLiveTail(statusWith([["204", "running"]]));
+  // The segmented Humanized ⇄ Raw toggle, humanized selected by default.
+  assert.match(html, /data-tail-mode/);
+  assert.match(html, /data-mode="humanized"[^>]*aria-pressed="true"[^>]*>Humanized/);
+  assert.match(html, /data-mode="raw"[^>]*aria-pressed="false"[^>]*>Raw/);
+  // The Download-JSON control replaces the old bare "Save" label.
+  assert.match(html, /data-tail-save[^>]*>Download JSON</);
+  assert.ok(!/>Save</.test(html), "the old bare Save label is gone");
+});
+
+test("renderLiveTail omits follow/pause and renders the dot idle for a static (non-streaming) source (#203)", () => {
+  const streaming = renderLiveTail(statusWith([["204", "running"]]), true);
+  assert.match(streaming, /data-tail-play/);
+  const stat = renderLiveTail(statusWith([["204", "running"]]), false);
+  // A static source has no live stream to follow, so the play/pause control is absent and the
+  // header dot is seeded idle (dim + still), never the streaming "live" state.
+  assert.doesNotMatch(stat, /data-tail-play/);
+  assert.match(stat, /data-tail-dot[^>]*data-state="idle"/);
+});
+
 test("renderLiveTail renders the pane hidden when no agent is running", () => {
   const html = renderLiveTail(statusWith([["203", "completed"], ["205", "parked"]]));
   // Still emitted (so the client can reveal it when an agent starts) but hidden, and the
@@ -385,4 +419,21 @@ test("renderStatusPage ships the tail styles and a client that reuses the archiv
   assert.doesNotMatch(html, /scrollTop = body\.scrollHeight/);
   assert.match(html, /"↑ " \+ view\.backlog/);
   assert.doesNotMatch(html, /"↓ " \+ view\.backlog/);
+});
+
+test("the tail client renders humanized-by-default and flips to raw NDJSON on the toggle, remembered (#203)", () => {
+  const html = renderStatusPage(statusWith([["204", "running"]]), {});
+  // A remembered per-view mode, humanized the default; the toggle persists it.
+  assert.match(html, /localStorage/);
+  assert.match(html, /mode = [^;]*"humanized"/);
+  // Humanized rows read the server-attached parts (time · actor · what happened) and a
+  // state-coloured dot; the raw branch keeps the highlighted NDJSON tokeniser.
+  assert.match(html, /r\.humanized/);
+  assert.match(html, /log-dot/);
+  assert.match(html, /highlightJsonLine\(r\.raw\)/);
+  // The mode toggle is wired to re-render and persist.
+  assert.match(html, /data-tail-mode/);
+  // Download JSON always emits raw NDJSON regardless of the display mode.
+  assert.match(html, /\.map\(\(r\) => r\.raw\)\.join/);
+  assert.match(html, /application\/x-ndjson/);
 });

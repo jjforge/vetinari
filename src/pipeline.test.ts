@@ -117,3 +117,33 @@ test("a green agent turn commits on its branch and the real gate runs via the lo
   assert.ok(gateResult, "expected a gate-result event");
   assert.equal(gateResult!.exitCode, 0);
 });
+
+test("a deliberately red gate yields a real non-zero exit via exec and parks — the gate genuinely runs, no stub reads it green", async () => {
+  const dir = seedRepo();
+  const cfg = repoCfg(dir, { maxTurns: 2 });
+
+  // The agent commits real work each turn but never writes the file the gate checks
+  // for, so `test -f marker.txt` exits non-zero for real, turn after turn.
+  let n = 0;
+  const redScript: LocalAgentScript = (turn) => {
+    n++;
+    turn.write(`attempt-${n}.txt`, "still working\n");
+    turn.commit(`attempt ${n}`);
+    return { signal: DONE, stdout: "<turn-summary>tried again</turn-summary>" };
+  };
+
+  const outcome = await inRepo(dir, () => runLoop(cfg, "T2", undefined, loopDepsFor(redScript)));
+
+  // A red gate parks (budget) — never a green over a red suite.
+  assert.equal(outcome, "parked");
+  const parked = listParked(cfg);
+  assert.equal(parked.length, 1);
+  assert.equal(parked[0].reason, "budget");
+
+  const events = readEventLog(cfg);
+  assert.equal(events.some((e) => e.event === "green"), false);
+  // The gate ran for real and its non-zero exit was seen — not a stubbed green read.
+  const reds = events.filter((e) => e.event === "gate-result") as { exitCode: number }[];
+  assert.ok(reds.length > 0, "expected gate-result events");
+  assert.ok(reds.every((r) => r.exitCode !== 0), "every gate run went red for real");
+});

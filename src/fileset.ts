@@ -44,7 +44,12 @@ const FILENAME_RE = /^[\w.\-]+\.[A-Za-z][\w-]*$/;
 /** The cited paths in a body, each reduced to its basename (deduped, in order). */
 function citedBasenames(body: string): string[] {
   const seen = new Set<string>();
-  for (const m of body.matchAll(CITE_RE)) {
+  // Authoring tools sometimes fence the marker's cites in backslash-escaped backticks
+  // (`\`src/foo.ts\``), which render as plain backticks but leave a stray `\` the
+  // tokenizer would otherwise capture into the basename (#249). Basenames never contain
+  // a backslash, so stripping the escape is unambiguous and recovers the real path.
+  const normalized = body.replace(/\\`/g, "`");
+  for (const m of normalized.matchAll(CITE_RE)) {
     const raw = (m[1] ?? m[2]).trim();
     // A backtick token counts only if it is path-shaped, not just any word.
     if (!raw.includes("/") && !FILENAME_RE.test(raw)) continue;
@@ -86,9 +91,10 @@ function markerCites(body: string, marker: RegExp): string[] | null {
  * True when `text` carries an anchored `Touches:`/`Files:`/`Creates:` marker line
  * from which the resolver would extract at least one cite. Reuses the same parser
  * the resolver reads with, so "has a marker" here means exactly what the resolver
- * would act on — an anchored line present but whose cites do not parse (escaped
- * backticks, a bare non-path token — #201's shape) yields `[]`, not a real marker,
- * so it does NOT shadow a resolvable marker the ticket carries in a comment.
+ * would act on — an anchored line present but whose cites do not parse (only non-path
+ * prose, e.g. a bare `campaign` word) yields `[]`, not a real marker, so it does NOT
+ * shadow a resolvable marker the ticket carries in a comment. (Escaped backticks are
+ * normalized away before tokenizing, so they now parse to a real cite — see #249.)
  */
 function hasMarkerLine(text: string): boolean {
   const touches = markerCites(text, TOUCHES_RE);

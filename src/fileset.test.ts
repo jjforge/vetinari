@@ -182,30 +182,84 @@ test("ticketProse unions marker lines across several comments when the body has 
   assert.equal(res.confident, true);
 });
 
-test("defaultFileSet is not confident about a #201-shaped marker whose backtick cites are backslash-escaped", () => {
+test("defaultFileSet recovers a slash-path cite fenced by backslash-escaped backticks (#249)", () => {
+  const root = treeWith("src/dashboard-render.ts");
+
+  // #249's shape: `\`src/dashboard-render.ts\`` — a slash path fenced by stray
+  // backslashes. The escape is a delimiter artifact orthogonal to tree-presence, so
+  // the resolver strips it and recovers the clean basename rather than halting.
+  const res = defaultFileSet(root)(
+    "Touches (existing files): \\`src/dashboard-render.ts\\`\n",
+  );
+
+  assert.deepEqual(res.files, ["dashboard-render.ts"]);
+  assert.equal(res.confident, true);
+});
+
+test("defaultFileSet resolves an escaped-backtick marker identically to a plain one", () => {
+  const root = treeWith("src/dashboard-render.ts");
+  const fileSet = defaultFileSet(root);
+
+  const escaped = fileSet("Touches (existing files): \\`src/dashboard-render.ts\\`\n");
+  const plain = fileSet("Touches (existing files): `src/dashboard-render.ts`\n");
+
+  assert.deepEqual(escaped, plain);
+  assert.equal(escaped.confident, true);
+});
+
+test("defaultFileSet recovers a #201-shaped bare-filename cite fenced by escaped backticks", () => {
   const root = treeWith("src/fileset.ts");
 
-  // #201's shape: `\`fileset.ts\`` — a backtick token wrapped in stray backslashes.
-  // The backtick group captures the trailing `\`, which fails FILENAME_RE, so no cite
-  // survives and the resolver rightly reports it cannot pin the file-set down.
+  // #201's shape: `\`fileset.ts\`` — a bare name wrapped in stray backslashes. The
+  // escape is stripped, so the bare name is recovered just like the slash path.
   const res = defaultFileSet(root)(
     "Touches (existing files): \\`fileset.ts\\`\n",
   );
 
-  assert.deepEqual(res.files, []);
-  assert.equal(res.confident, false);
+  assert.deepEqual(res.files, ["fileset.ts"]);
+  assert.equal(res.confident, true);
 });
 
-test("ticketProse falls back to a comment marker when the body's only marker has unparseable cites (#201)", () => {
+test("defaultFileSet counts an escaped-backtick Creates: cite for disjointness, tree-exempt (#249)", () => {
+  const root = treeWith("src/plan.ts");
+  const fileSet = defaultFileSet(root);
+
+  // A Creates: cite names a not-yet-existing file, so it is absent from the tree —
+  // escaped or not, it is recovered, counted, and exempt from the tree-presence check.
+  const res = fileSet("Creates (new files): \\`src/new-thing.ts\\`\n");
+
+  assert.deepEqual(res.files, ["new-thing.ts"]);
+  assert.equal(res.confident, true);
+});
+
+test("ticketProse resolves an escaped-backtick body marker directly, no comment fallback needed (#249)", () => {
   const root = treeWith("src/fileset.ts");
   const fileSet = defaultFileSet(root);
 
-  // The body marker's cites are backslash-escaped backticks (#201) — the resolver
-  // extracts nothing from them, so this is not a marker the resolver would act on. It
-  // must not shadow the resolvable marker living in the comment.
+  // The body marker's backticks are escaped (#201/#249) but it names a real file, so
+  // it is now resolvable on its own — the body marker wins and the comment is ignored.
   const task = JSON.stringify({
     title: "Fix",
-    body: "Touches (existing files): \\`fileset.ts\\`",
+    body: "Touches (existing files): \\`src/fileset.ts\\`",
+    comments: [{ body: "Touches (existing files): `plan.ts`\n" }],
+  });
+
+  const res = fileSet(ticketProse(task));
+
+  assert.deepEqual(res.files, ["fileset.ts"]);
+  assert.equal(res.confident, true);
+});
+
+test("ticketProse still falls back to a comment marker when the body's marker cites only prose", () => {
+  const root = treeWith("src/fileset.ts");
+  const fileSet = defaultFileSet(root);
+
+  // The body marker cites only a non-path word (`campaign`), which is not a cite even
+  // after normalization, so it is not a marker the resolver would act on and must not
+  // shadow the resolvable marker living in the comment.
+  const task = JSON.stringify({
+    title: "Fix",
+    body: "Touches (existing files): the `campaign` planner",
     comments: [{ body: "Touches (existing files): `fileset.ts`\n" }],
   });
 

@@ -33,7 +33,6 @@ import {
 import {
   dotClass,
   freezeIntent,
-  hiddenPastCap,
   tallyDotClass,
 } from "./dashboard-visual-state.ts";
 
@@ -568,6 +567,19 @@ export function feedRowMatches(row: { kind: string; text: string }, query: strin
 }
 
 /**
+ * The archived-runs filter contract (#256): a row matches a case-insensitive substring query
+ * over its visible summary text (the `.lv-row` head — run name + disposition). The same
+ * contract the feed/host-log filters carry (`feedRowMatches`), applied to this static list;
+ * an empty/blank query matches everything (the filter is cleared). Pure and self-contained,
+ * unit-tested in node and shipped to the browser via `.toString()` (ADR 0012).
+ */
+export function archiveRowMatches(text: string, query: string): boolean {
+  const q = (query || "").trim().toLowerCase();
+  if (!q) return true;
+  return (text || "").toLowerCase().indexOf(q) !== -1;
+}
+
+/**
  * The follow/pause/backlog view-model shared by the live tail (#124) and the event-log feed
  * (#196): from an accumulating oldest→newest `buffer` and the current controls, decide which
  * rows render and the footer/backlog counts. Following reads the whole buffer; paused freezes
@@ -663,10 +675,6 @@ const formatRunWhen = (iso: string) => {
   return `${ARCHIVE_MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()} · ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
 };
 
-/** How many rows the collapsible list shows before the "show older" control — the
- * newest are visible, the rest render hidden and are revealed on demand (in v1). */
-const ARCHIVE_CAP = 20;
-
 /**
  * An archived run's terminal disposition → the shared log-view dot state its `.lv-dot`
  * paints through (#248). The `.lv-dot` palette is keyed on `LogDotState` names, not the
@@ -690,10 +698,9 @@ const ARCHIVE_DOT_STATE: Record<ArchivedRunState, LogDotState> = {
  * is a campaign artifact, so its detail is the wave cards only — the body reuses the live
  * wave renderer read-only (`prune`/`collapsible` off, `interactive` on) so its member chips
  * open the shared issue-detail sheet scoped to this run. There is no run-level log pane.
- * `open` marks the row a `?run=` deep-link selected; `hidden` puts it past the cap behind
- * "show older".
+ * `open` marks the row a `?run=` deep-link selected.
  */
-const renderArchiveRow = (run: ArchivedRunView, open: boolean, hidden: boolean, festive = false) => {
+const renderArchiveRow = (run: ArchivedRunView, open: boolean, festive = false) => {
   const label = run.name ?? run.run;
   const when = run.startedAt ? formatRunWhen(run.startedAt) : run.run;
   const bodyId = `archive-body-${run.run}`;
@@ -703,7 +710,7 @@ const renderArchiveRow = (run: ArchivedRunView, open: boolean, hidden: boolean, 
   // second campaign renderer.
   const body = renderWaves(run.status, false, true, false, run.run, festive);
   return (
-    `<li${open ? ' class="open"' : ""} data-run="${escapeHtml(run.run)}"${hidden ? " hidden" : ""}>` +
+    `<li${open ? ' class="open"' : ""} data-run="${escapeHtml(run.run)}">` +
     `<button type="button" class="lv-row" aria-expanded="${open}" aria-controls="${bodyId}">` +
     `<span class="lv-t">${escapeHtml(when)}</span>` +
     `<span class="lv-dot ${ARCHIVE_DOT_STATE[run.state]}"></span>` +
@@ -715,18 +722,30 @@ const renderArchiveRow = (run: ArchivedRunView, open: boolean, hidden: boolean, 
 };
 
 /**
- * The collapsible archived-runs list — one row per run, newest-first (the order
- * given), capped at the newest `ARCHIVE_CAP` with a "show older" control that
- * reveals the rest (which render hidden in place). Empty when the project has no
- * archived runs. `openRun` opens one row on load from a `?run=` deep-link.
+ * The archived-runs list under the shared log-view chrome (#256): the same `.tail-head`
+ * control bar the live-tail / feed / host-log carry — an "Archived runs" static title and
+ * a substring filter (`data-archive-filter`) — over a scrollable pane of one `.lv-row`
+ * per run, newest-first (the order given). Every run renders (no show-older cap — the pane
+ * scrolls, like the feed), and the stream-only affordances are deliberately absent: an
+ * archived list is static and non-downloadable, so no follow/pause and no Download JSON
+ * `.lv-ico`. Empty when the project has no archived runs. `openRun` opens one row on load
+ * from a `?run=` deep-link.
  */
 const renderArchivedRuns = (project: string, runs: ArchivedRunView[], openRun?: string, festive = false) => {
   if (!runs.length) return "";
-  const rows = runs.map((run, i) => renderArchiveRow(run, run.run === openRun, hiddenPastCap(i, ARCHIVE_CAP), festive));
-  const olderCount = runs.length - ARCHIVE_CAP;
-  const older = olderCount > 0 ? `<li class="archive-older-row"><button type="button" class="archive-show-older">Show ${olderCount} older run${olderCount === 1 ? "" : "s"}</button></li>` : "";
-  // The show-older control sits between the visible rows and the hidden older ones.
-  return `<section class="archived-runs"><h2>Archived runs</h2><ul class="archive-list" data-project="${escapeHtml(project)}">${rows.slice(0, ARCHIVE_CAP).join("")}${older}${rows.slice(ARCHIVE_CAP).join("")}</ul></section>`;
+  const rows = runs.map((run) => renderArchiveRow(run, run.run === openRun, festive));
+  return (
+    `<section class="archived-runs">` +
+    `<div class="tail-head">` +
+    `<span class="tail-title tail-title-static">Archived runs</span>` +
+    `<span class="tail-gap"></span>` +
+    `<span class="tail-controls">` +
+    `<input type="text" class="tail-filter" placeholder="filter runs…" aria-label="Filter archived runs" data-archive-filter />` +
+    `</span>` +
+    `</div>` +
+    `<ul class="archive-list" data-project="${escapeHtml(project)}">${rows.join("")}</ul>` +
+    `</section>`
+  );
 };
 
 /**
@@ -1520,19 +1539,18 @@ ${ISSUE_DETAIL_SHEET_STYLES}
   .parked-issue { font-weight: 700; color: var(--color-yellow); }
   .parked-card-meta { color: var(--color-text-light-2); font-size: .85rem; margin-top: .35rem; }
   .parked-waited { white-space: nowrap; }
-  /* The collapsible archived-runs list (#98, #248): rows separated by hairlines, one
-     open at a time, the open row tinted. Each row's collapsed head is the shared lv-row
+  /* The archived-runs list under the shared log-view chrome (#98, #248, #256): the .tail-head
+     control bar (from LIVE_TAIL_STYLES) over a scrollable pane of rows separated by hairlines,
+     one open at a time, the open row tinted. Each row's collapsed head is the shared lv-row
      control emitted as a full-width toggle button — the reset below strips the button's own
      chrome so the shared grid/hierarchy/dot CSS paints it exactly as the other log surfaces. */
-  .archived-runs { margin: 1.5rem 0; }
-  .archive-list { list-style: none; margin: .75rem 0 0; padding: 0; border: 1px solid var(--color-light-border); border-radius: var(--border-radius-medium); overflow: hidden; }
+  .archived-runs { margin: 1.5rem 0; border: 1px solid var(--color-light-border); border-radius: var(--border-radius-medium); overflow: hidden; }
+  .archive-list { list-style: none; margin: 0; padding: 0; max-height: 22rem; overflow-y: auto; overflow-x: hidden; border-top: 1px solid var(--color-light-border); }
   .archive-list > li + li { border-top: 1px solid var(--color-light-border); }
   .archive-list > li.open { background: var(--color-card); }
   .archive-list > li[hidden] { display: none; }
   .archive-list .lv-row { width: 100%; text-align: left; background: none; border: 0; color: var(--color-text); font: inherit; cursor: pointer; }
   .archive-list .lv-row:hover { background: var(--color-card-hover); }
-  .archive-show-older { width: 100%; padding: .6rem 1rem; text-align: left; background: none; border: 0; color: var(--color-primary); font: inherit; cursor: pointer; }
-  .archive-show-older:hover { background: var(--color-card-hover); }
   .archive-body { padding: 0 1rem 1rem; }
   .archive-body[hidden] { display: none; }
 </style>${

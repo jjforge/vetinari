@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import { DASHBOARD_PALETTE_CSS, stateColor, stateBorderColor, counterColor, STATE_DOT_CSS, STATE_CHIP_BORDER_CSS, TOP_BAR_STYLES, ISSUE_DETAIL_SHEET_STYLES, ISSUE_DETAIL_SHEET_SCRIPT, REPO_DROPDOWN_SCRIPT, ARCHIVE_LIST_SCRIPT, LIVE_TAIL_STYLES, HOST_LOG_STYLES } from "./dashboard-assets.ts";
-import { buildStatus, buildStatusWithIssueNames, cappedRawRows, event, formatStatusText, highlightJsonLine, issueDetailSheetMarkup, isNotableHostEvent, renderHostLog, renderLandingShell, feedFresh, feedKindLabel, feedProjects, feedRowMatches, feedView, followView, renderStatusPage, renderTopBar, type CampaignStatus } from "./status.ts";
+import { archiveRowMatches, buildStatus, buildStatusWithIssueNames, cappedRawRows, event, formatStatusText, highlightJsonLine, issueDetailSheetMarkup, isNotableHostEvent, renderHostLog, renderLandingShell, feedFresh, feedKindLabel, feedProjects, feedRowMatches, feedView, followView, renderStatusPage, renderTopBar, type CampaignStatus } from "./status.ts";
 
 const cfgFor = (dir: string): ResolvedConfig =>
   ({
@@ -881,6 +881,20 @@ test("feedRowMatches filters a feed row case-insensitively over its kind label +
   assert.equal(feedRowMatches(row, "merged"), true);
   // A miss on both label and text hides the row.
   assert.equal(feedRowMatches(row, "zzz"), false);
+});
+
+test("archiveRowMatches filters an archived-run row case-insensitively over its visible summary text (#256)", () => {
+  const text = "Feb 1, 2026 · 22:22:36 comms + dashboard complete · 3 issues";
+  // An empty / whitespace query matches everything (the filter is cleared) —
+  // the same contract as the feed/host-log filter.
+  assert.equal(archiveRowMatches(text, ""), true);
+  assert.equal(archiveRowMatches(text, "   "), true);
+  // The run name matches, case-insensitively…
+  assert.equal(archiveRowMatches(text, "DASHBOARD"), true);
+  // …as does the disposition.
+  assert.equal(archiveRowMatches(text, "complete"), true);
+  // A miss on the row's visible text hides the row.
+  assert.equal(archiveRowMatches(text, "interrupted"), false);
 });
 
 test("feedFresh dedups a re-fetched newest-first window, returning only genuinely new rows oldest-first (#196)", () => {
@@ -1862,8 +1876,21 @@ test("renderStatusPage renders archived runs as a collapsible list of wave cards
     },
   );
 
-  assert.match(html, /<section class="archived-runs"><h2>Archived runs<\/h2>/);
+  // The shared log-view chrome header (#256) — the .tail-head control bar the
+  // live-tail/feed/host-log carry, an "Archived runs" static title and a filter
+  // input — replaces the bespoke <h2>Archived runs</h2>.
+  assert.doesNotMatch(html, /<h2>Archived runs<\/h2>/);
+  assert.match(
+    html,
+    /<section class="archived-runs"><div class="tail-head"><span class="tail-title tail-title-static">Archived runs<\/span><span class="tail-gap"><\/span><span class="tail-controls"><input type="text" class="tail-filter" placeholder="filter runs…" aria-label="Filter archived runs" data-archive-filter \/><\/span><\/div>/,
+  );
   assert.match(html, /<ul class="archive-list" data-project="beta">/);
+  // No download/pause .lv-ico buttons on this static, non-downloadable surface (#256).
+  const section = html.slice(
+    html.indexOf('<section class="archived-runs">'),
+    html.indexOf("</section>", html.indexOf('<section class="archived-runs">')),
+  );
+  assert.doesNotMatch(section, /lv-ico/);
   // A collapsed row renders through the shared `.lv-row` control (not bespoke
   // `.archive-*` chrome): the when-time in the dim `.lv-t` tier, a mapped `.lv-dot`
   // (complete → merged/green), the run name as the brightest `.lv-lead`, and the
@@ -2057,7 +2084,7 @@ test("renderStatusPage carries no raw-specific archive CSS on phone-width (#222)
   assert.doesNotMatch(html, /\.archive-mode/);
 });
 
-test("renderStatusPage ships the archived-list client wiring: expand/collapse (one open at a time) and show-older, and nothing raw/log (#222)", () => {
+test("renderStatusPage ships the archived-list client wiring: expand/collapse (one open at a time) and the filter, and nothing raw/log (#222, #256)", () => {
   const html = renderStatusPage(
     { project: "beta", waves: [], parked: [] },
     {
@@ -2083,11 +2110,15 @@ test("renderStatusPage ships the archived-list client wiring: expand/collapse (o
     ARCHIVE_LIST_SCRIPT,
     /for \(const other of archiveRows\) if \(other !== row && other\.classList\.contains\("open"\)\) closeRow\(other\);/,
   );
-  // …and reveals the older rows behind the cap on demand.
+  // …and typing in the shared filter hides the non-matching li[data-run] rows over
+  // their visible summary text (archiveRowMatches — the feed/host-log filter contract).
+  assert.match(ARCHIVE_LIST_SCRIPT, /function archiveRowMatches/);
   assert.match(
     ARCHIVE_LIST_SCRIPT,
-    /showOlder\.addEventListener\("click", \(\) => \{ for \(const row of archiveRows\) row\.hidden = false;/,
+    /filterEl\.addEventListener\("input", \(\) => \{[\s\S]*row\.hidden = !archiveRowMatches\(row\.querySelector\("\.lv-row"\)\.textContent, filterEl\.value\);/,
   );
+  // The dropped show-older cap leaves no show-older wiring behind.
+  assert.doesNotMatch(ARCHIVE_LIST_SCRIPT, /showOlder|archive-show-older|archive-older-row/);
   // The raw/log surface is gone: no mode switch, no /archive/log fetch, no line-number
   // deep-links, no filter, no Download JSON, no cap machinery.
   assert.doesNotMatch(ARCHIVE_LIST_SCRIPT, /\/archive\/log/);
@@ -2141,7 +2172,7 @@ test("renderStatusPage makes archived campaign chips open the issue sheet agains
   );
 });
 
-test("renderStatusPage caps the archived-runs list at 20 with a show-older control", () => {
+test("renderStatusPage renders every archived run in the scrollable pane, no show-older cap (#256)", () => {
   const runs = Array.from({ length: 22 }, (_, i) => {
     const day = String(22 - i).padStart(2, "0");
     return {
@@ -2157,19 +2188,16 @@ test("renderStatusPage caps the archived-runs list at 20 with a show-older contr
     { selected: "beta", archivedRuns: runs },
   );
 
-  // All 22 rows are in the DOM, but the two oldest render hidden behind the control.
+  // Every row renders — a list longer than the old cap is not truncated…
   assert.equal(
     [...html.matchAll(/<li(?: class="open")? data-run=/g)].length,
     22,
   );
-  assert.equal(
-    [...html.matchAll(/<li data-run="[^"]*" hidden>/g)].length,
-    2,
-  );
-  assert.match(
-    html,
-    /<button type="button" class="archive-show-older">Show 2 older runs<\/button>/,
-  );
+  // …none render hidden (the cap is gone; the pane scrolls instead)…
+  assert.doesNotMatch(html, /<li data-run="[^"]*" hidden>/);
+  // …and there is no show-older control or its row.
+  assert.doesNotMatch(html, /archive-show-older/);
+  assert.doesNotMatch(html, /archive-older-row/);
 });
 
 test("renderStatusPage omits the campaign name from the meta line for an unnamed run", () => {

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
@@ -31,6 +31,7 @@ import {
   type QueueDoneEvent,
   type QueueSpawnEvent,
   type QueueStartEvent,
+  type WaveParkedEvent,
 } from "./event-log.ts";
 import { archiveRun, shouldArchiveLeftover } from "./archive.ts";
 import type { HostBudget } from "./host-slots.ts";
@@ -622,6 +623,106 @@ test("a graft appended mid-wave lands in a future wave; the loop re-derives and 
   assert.deepEqual(batches[0], ["101"]);
   assert.ok(batches.slice(1).flat().includes("301"), "grafted 301 ran in a later wave");
   assert.ok(spawned.includes("301"), "the loop actually spawned the grafted issue");
+});
+
+test("Gate 1 (ADR 0017): a per-issue park drains its wave, merges the greens, then wave-parks — no next wave starts", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-park-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+
+  // Wave 0: 101 goes green, 102 parks (exit 2 → outcome "parked"). The wave drains —
+  // 101 still merges under Gate 2 — and then escalates to a wave-park.
+  const spawned: string[] = [];
+  const childRun: CampaignDeps["spawnRun"] = async (taskId) => {
+    spawned.push(taskId);
+    return taskId === "102" ? 2 : 0;
+  };
+
+  const ok = await silenceConsole(() =>
+    campaign(cfg, [["101", "102"], ["201"]], host, "harness", {}, gitFreeDeps(cfg, childRun)),
+  );
+
+  // The wave wave-parks, so the campaign returns false and never runs the next wave.
+  assert.equal(ok, false);
+  assert.ok(!spawned.includes("201"), "the succeeding wave's issue never spawned");
+
+  const events = readEventLog(cfg);
+  const batches = events.filter((e): e is CampaignBatchEvent => e.event === "campaign-batch");
+  assert.deepEqual(batches.map((b) => b.index), [0], "only wave 0 ran — no succeeding wave started");
+
+  // The green drained and merged: it reached the wave-park event's `merged` set…
+  const parked = events.filter((e): e is WaveParkedEvent => e.event === "wave-parked");
+  assert.equal(parked.length, 1, "exactly one wave-parked event — the existing state, reused");
+  assert.deepEqual(parked[0].merged, ["101"], "the green stayed merged on the base");
+
+  // …and the operator notice went out on the same wave-park channel.
+  const notice = listOutbox(cfg).find((r) => r.event === "wave-parked");
+  assert.ok(notice, "a waveParkedNotice was enqueued for the operator");
+  assert.equal(notice?.category, "failure");
+
+  // No batch-done closed the wave — it stays the in-flight parked wave, not a completed one.
+  assert.ok(
+    !events.some((e) => e.event === "campaign-batch-done"),
+    "the parked wave is not logged done",
+  );
+});
+
+test("Gate 1: the parked issue's record survives the wave-boundary held-clear (resumable, dashboard-visible, Telegram-answerable)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-park-rec-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+
+  // Seed the parked record a parking child would have written — the stubbed spawnRun
+  // only returns the exit code, so we place the record the held-clear would otherwise wipe.
+  const parkedRecord = join(cfg.parkedDir, "102.json");
+  mkdirSync(cfg.parkedDir, { recursive: true });
+  writeFileSync(parkedRecord, JSON.stringify({ taskId: "102", reason: "question", sessionId: "s1" }));
+
+  const childRun: CampaignDeps["spawnRun"] = async (taskId) => (taskId === "102" ? 2 : 0);
+
+  await silenceConsole(() =>
+    campaign(cfg, [["101", "102"]], host, "harness", {}, gitFreeDeps(cfg, childRun)),
+  );
+
+  assert.ok(existsSync(parkedRecord), "the parked record is spared the held-clear so the issue stays resumable");
+});
+
+test("Gate 2 unchanged: an all-green wave whose combined base gates red still wave-parks via the existing path — Gate 1 does not double-fire", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-gate2-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+
+  // Every issue passes alone (all green), but the merged base gates red with no
+  // attributable culprit — the Gate 2 wave-park. `integrateGreens` owns logging the
+  // `wave-parked` event; here the stub just reports the red base so we observe the
+  // loop's own response: enqueue the notice, stop, and (crucially) not escalate again.
+  const spawned: string[] = [];
+  const deps: CampaignDeps = {
+    ...gitFreeDeps(cfg, async (taskId) => {
+      spawned.push(taskId);
+      return 0;
+    }),
+    integrate: async (_cfg, greens) => ({
+      merged: greens,
+      quarantined: [],
+      parked: { reason: "gate-red", detail: "GATE FAILED" },
+    }),
+  };
+
+  const ok = await silenceConsole(() =>
+    campaign(cfg, [["101", "102"], ["201"]], host, "harness", {}, deps),
+  );
+
+  assert.equal(ok, false, "the red combined base wave-parks");
+  assert.ok(!spawned.includes("201"), "no succeeding wave starts on a red base");
+  const notice = listOutbox(cfg).find((r) => r.event === "wave-parked");
+  assert.ok(notice, "the existing waveParkedNotice still goes out");
+  // Gate 1 must not add a second wave-parked event on top of Gate 2's — no issue parked here.
+  assert.equal(
+    readEventLog(cfg).filter((e) => e.event === "wave-parked").length,
+    0,
+    "the loop logs no extra wave-parked event — Gate 2 owns it via integrateGreens",
+  );
 });
 
 // One event-loop tick — lets the queue's synchronous `fill()` (and its microtask

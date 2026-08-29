@@ -191,6 +191,27 @@ has been doing lately, at a glance. Bounded to a recent window; deeper per-run
 history lives in the [[archived-run]] list, not here.
 _Avoid_: ticker, live feed, activity stream
 
+**Repo switcher**:
+The top-bar `All repos ▾` control. Selecting a project **navigates** the dashboard
+to that project's single-project page; "All repos" returns to the landing. A
+navigation control, **not a filter** — it changes which page you are on, and owns
+the `?project=` URL param.
+_Avoid_: project filter, project dropdown (those name the [[event-feed-filter]])
+
+**Event-feed filter**:
+The [[event-feed]]'s in-place narrowing — a **project** dropdown ("all repos" by
+default) plus a free-text box — that scopes the rows you see without leaving the
+landing. The two criteria compose (both must match). Ephemeral: client-only, resets
+on reload, and independent of the [[repo-switcher]]. The project criterion mirrors
+the [[agent-filter]]'s model, swapping agent for project.
+_Avoid_: repo switcher (that navigates), search
+
+**Agent filter**:
+The single-project live-tail's `all agents ▾` dropdown, which narrows the tail to one
+agent (issue). The existing control the [[event-feed-filter]]'s project dropdown is
+modelled on.
+_Avoid_: issue picker
+
 **Campaign name**:
 An optional human label for a run, passed as `campaign --name` and recorded on the
 `campaign-start` event, so the dashboard and the [[archived-run]] list say what a

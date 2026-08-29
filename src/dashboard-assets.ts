@@ -728,9 +728,10 @@ export const HOST_LOG_STYLES = `  .host-log { position: relative; display: inlin
   .host-log-settings { padding: .6rem .9rem; border-bottom: 1px solid var(--color-light-border); }
   .festive-toggle { display: inline-flex; align-items: center; gap: .5rem; color: var(--color-text-light); font-size: .82rem; cursor: pointer; }
   .festive-toggle input { cursor: pointer; }
-  .host-log-filter { margin: .7rem .9rem 0; padding: .4rem .6rem; color: var(--color-text); background: var(--color-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); font: inherit; font-size: .8rem; }
-  /* The shared log-view control row (#203, humanized-only per #221): the Download JSON control,
-     laid out with the filter above it; the button reuses the live tail's .lv-ico. */
+  .host-log-filter { flex: 1; padding: .4rem .6rem; color: var(--color-text); background: var(--color-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); font: inherit; font-size: .8rem; }
+  /* The shared log-view control row (#203, humanized-only per #221): the filter and the Download
+     JSON control share one line — the filter flexes to fill it (#233), the button reuses the live
+     tail's .lv-ico beside it. The row's top margin is the single gutter below the settings toggle. */
   .host-log-controls { display: flex; align-items: center; gap: .5rem; margin: .5rem .9rem 0; }
   .host-log-lines { flex: 1; min-height: 0; overflow-y: auto; padding: .6rem .9rem; font-family: ${MONO_FONT}; font-size: .78rem; line-height: 1.5; }
   .host-log-empty { color: var(--color-text-light-2); padding: .5rem 0; }

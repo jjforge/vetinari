@@ -42,6 +42,7 @@ Within a milestone each bold section label appears at most once.
 - [user] A per-issue park no longer lets a campaign wave read "done" and roll on with an open question. The wave now drains (its in-flight siblings finish and their greens still merge), then escalates to a wave-park: the parked issue keeps its record — so it stays visible on the dashboard, answerable on Telegram, and resumable — and no succeeding wave starts until a human answers/resolves or prunes it and runs `campaign --resume` (#231).
 - [user] The landing dashboard's idle/archived card now surfaces a parked record that outlived its run's log (a killed process or out-of-band archive): the card reads `parked` with a non-zero parked tally and rolls up to the parked counter and cross-repo queue, instead of folding to a clean idle/complete while a question still waits (#232).
 - [user] Dashboard wave-card status dots now render as consistent circles — a shared base rule pins every status dot (`.dot`/`.repo-dot`/`.tail-dot`/`.lv-dot`) to `flex: none` so a row's blue dot no longer collapses into a pill or bar under the wave-member title's fill pressure (#234).
+- [user] Event-feed, live-tail, and host-log row times now render in the host's local timezone, matching the archived-run header — previously they showed UTC, disagreeing with the rest of the dashboard (#239).
 
 ### Collected changes — August 28, 2026
 

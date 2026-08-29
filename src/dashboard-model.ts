@@ -283,8 +283,6 @@ export function describeEvent(e: OrchestratorEvent, festive?: { offset: number }
       const n = e.batches ?? 0;
       return `${e.name ? `Campaign “${e.name}”` : "Campaign"} complete (${n} wave${n === 1 ? "" : "s"})`;
     }
-    case "campaign-halt":
-      return `${e.name ? `Campaign “${e.name}”` : "Campaign"} halted at Wave ${(e.index ?? 0) + 1}: ${e.reason ?? "failure"}`;
     case "queue-start": {
       const n = (e.taskIds ?? []).length;
       return n ? `Queue started — ${n} task${n === 1 ? "" : "s"}` : "Queue started";
@@ -478,11 +476,6 @@ export interface ReducedCampaign {
    * a bare green, or a queue-done green). The source the landing's merged-today
    * counter reads: an issue whose stamp falls on the current day merged today. */
   mergedAt: Map<string, string>;
-  /** did the run this fold describes halt? True when its slice holds a
-   * `campaign-halt` event — scoped to the latest `campaign-start` like everything
-   * else here, so a stale halt from a superseded earlier run in the same (archived)
-   * log never bleeds into this run's outcome. */
-  halted: boolean;
   closedWaves: Set<number>;
   currentWave: number;
   /** the wave a red merged base wave-parked (ADR 0013), indexing the pruned `waves`
@@ -517,10 +510,8 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
   const closedWaves = new Set<number>();
   let currentWave = -1;
   let parkedWave = -1;
-  let halted = false;
 
   for (const e of relevant) {
-    if (e.event === "campaign-halt") halted = true;
     // Any start event may carry an id→title map (`campaign` writes it on
     // `campaign-start`, a standalone `queue` on `queue-start`); fold them all so
     // the plan carries a name for every issue a title was resolved for.
@@ -590,10 +581,6 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
         if (!details.has(issueNumber)) details.set(issueNumber, "Merged into base");
         if (e.ts && !mergedAt.has(issueNumber)) mergedAt.set(issueNumber, String(e.ts));
       }
-    } else if (e.event === "campaign-halt" && e.taskId) {
-      const taskId = normalizeIssue(String(e.taskId));
-      outcomes.set(taskId, "failure");
-      details.set(taskId, `Campaign halted: ${e.reason ?? "failure"}`);
     } else if (e.event === "prune" && Array.isArray(e.removed)) {
       // Prune the running campaign at the point the prune was issued: banked and
       // in-flight members stay, only parked/unstarted ones leave (ADR 0005).
@@ -641,7 +628,7 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
   // becomes `running` on pickup — so drop any grafted id that has since reached an outcome.
   for (const id of [...grafted]) if (outcomes.has(id)) grafted.delete(id);
 
-  return { waves, layout, pruned, grafted, quarantined, name, festiveOffset, outcomes, details, titles, mergedAt, halted, closedWaves, currentWave, parkedWave };
+  return { waves, layout, pruned, grafted, quarantined, name, festiveOffset, outcomes, details, titles, mergedAt, closedWaves, currentWave, parkedWave };
 }
 
 /** One entry in an issue's turn log (ADR 0009): the turn's number as logged
@@ -724,22 +711,21 @@ export function reconstructIssueDetail(events: OrchestratorEvent[], issueNumber:
 
 /**
  * Is a campaign currently running over this event log? True iff the latest
- * `campaign-start` has no `campaign-done` or `campaign-halt` after it — the
- * condition the no-plan `prune <issue>` needs before it can prune (ADR 0005).
- * A queue-only run with no campaign frame is not a campaign and returns false.
+ * `campaign-start` has no `campaign-done` after it — the condition the no-plan
+ * `prune <issue>` needs before it can prune (ADR 0005). A queue-only run with no
+ * campaign frame is not a campaign and returns false.
  */
 export function campaignRunning(events: OrchestratorEvent[]): boolean {
   const start = events.findLastIndex((e) => e.event === "campaign-start" && Array.isArray(e.batches));
   if (start < 0) return false;
-  return !events.slice(start).some((e) => e.event === "campaign-done" || e.event === "campaign-halt");
+  return !events.slice(start).some((e) => e.event === "campaign-done");
 }
 
 /** An archived run's terminal disposition for the archived-runs list: `complete`
  * when its latest campaign reached the terminal `campaign-done`/`queue-done` (a
  * full, clean finish), else `interrupted` — the run was cut short and only its
- * partial waves were recorded, whether killed mid-wave (no terminal event) or
- * halted (base rolled back, later waves never run). Both read `interrupted` and
- * still expand to the waves that did run. */
+ * partial waves were recorded (killed mid-wave, no terminal event). An
+ * interrupted run still expands to the waves that did run. */
 export type ArchivedRunState = "complete" | "interrupted";
 
 /**
@@ -760,7 +746,7 @@ export function archivedRunState(events: OrchestratorEvent[]): ArchivedRunState 
  * `reduceCampaign` fold — correct for the *live* log — leaves its in-flight wave and
  * issues `running`, a live status an archived run must never present. Map every live
  * `running` to the terminal `interrupted` (distinct from a clean `completed` or a
- * halt's `failure`); an unstarted future wave is left as-is (not a live status). A
+ * failed issue's `failure`); an unstarted future wave is left as-is (not a live status). A
  * `complete` run finished clean and has no `running` to touch, so it passes through
  * unchanged — and the live path never calls this, so it keeps deriving `running` as
  * today. Pure (no I/O), applied only on the archived read boundary.
@@ -856,20 +842,21 @@ export function listArchivedRuns(baseLocation: string, logger: Logger = hostLogg
 /**
  * Fold one run's event log into a one-line summary for the archived-runs list:
  * its mode (a `campaign` frame vs a bare `queue` run), how many issues it spanned,
- * and whether it finished clean or halted. Derived from the same `reduceCampaign`
+ * and whether it finished clean or failed. Failure is derived from an issue reaching
+ * `failure` (the agent could not make it green, ADR 0019) — the same `reduceCampaign`
  * plan the dashboard renders, so the summary can never disagree with the run's
  * reconstructed wave/issue view (ADR 0005).
  */
 export function summarizeRun(events: OrchestratorEvent[]): string {
   // Everything derives from the run `reduceCampaign` reconstructs (the latest
   // `campaign-start` onward), so a multi-run archive summarizes its terminal run —
-  // a stale `campaign-halt` from a superseded earlier run in the same log no longer
-  // reads a completed run as "halted" (#69).
-  const { waves, outcomes, halted } = reduceCampaign(events);
+  // a failure in a superseded earlier run in the same log no longer reads a
+  // completed run as failed (#69).
+  const { waves, outcomes } = reduceCampaign(events);
   const mode = events.some((e) => e.event === "campaign-start") ? "campaign" : "queue";
   const count = waves.flat().length;
-  const ended = halted || [...outcomes.values()].includes("failure");
-  return `${mode} · ${count} issue${count === 1 ? "" : "s"} · ${ended ? "halted" : "complete"}`;
+  const failed = [...outcomes.values()].includes("failure");
+  return `${mode} · ${count} issue${count === 1 ? "" : "s"} · ${failed ? "failed" : "complete"}`;
 }
 
 export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
@@ -1372,7 +1359,7 @@ const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, event
   // never emptied (a parked record kept `archiveIfIdle` a no-op, the process was
   // killed before end-of-run, …) — otherwise reads `completed` forever. Fold only a
   // run that is both cleanly terminal (`archivedRunState`) and would read `completed`:
-  // requiring `completed` keeps `parked` (parked wins), `failure` (a halt), and
+  // requiring `completed` keeps `parked` (parked wins), `failure` (a failed issue), and
   // `running` off the fold, so an attention state never fades. The finished run's
   // name + summary still show ("Last run: …"), read from the live log — which is left
   // byte-for-byte untouched, this is display-only.

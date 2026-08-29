@@ -1311,7 +1311,7 @@ test("serveAllStatus lists a project's archived runs and renders one read-only w
   ]);
   writeJsonl(join(archiveDir, "orchestrator-2026-02-01T00-00-00-000Z.jsonl"), [
     event("campaign-start", { batches: [["111"]], slots: 1 }),
-    event("campaign-halt", { taskId: "111", reason: "gate failed", index: 0 }),
+    event("campaign-batch", { index: 0, tasks: ["111"] }),
   ]);
   writeFileSync(
     join(archiveDir, "orchestrator-2026-03-01T00-00-00-000Z.jsonl"),
@@ -1336,8 +1336,9 @@ test("serveAllStatus lists a project's archived runs and renders one read-only w
     // run (201) still renders at the top.
     assert.match(root, /#201 <small>/);
     assert.match(root, /<section class="archived-runs">/);
-    // Each row carries its token, state (a halted run reads interrupted — it stopped
-    // short) and issue count; unnamed runs fall back to the token as the label.
+    // Each row carries its token, state (an interrupted run stopped short — a
+    // campaign-start with no terminal event) and issue count; unnamed runs fall back
+    // to the token as the label.
     assert.match(
       root,
       /<li data-run="2026-02-01T00-00-00-000Z">/,

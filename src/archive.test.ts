@@ -64,7 +64,7 @@ test("hasUnarchivedRun is false for a missing, empty, or marker-only live log", 
 
 test("hasUnarchivedRun is true when a prior campaign or queue run still sits in the live log", () => {
   const campaignCfg = cfgFor();
-  writeFileSync(campaignCfg.logFile, '{"event":"archived"}\n{"event":"campaign-start","batches":[["101"]]}\n{"event":"campaign-halt","reason":"conflict","taskId":"101"}\n');
+  writeFileSync(campaignCfg.logFile, '{"event":"archived"}\n{"event":"campaign-start","batches":[["101"]]}\n{"event":"campaign-done","batches":1}\n');
   assert.equal(hasUnarchivedRun(campaignCfg), true);
 
   const queueCfg = cfgFor();

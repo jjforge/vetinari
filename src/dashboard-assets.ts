@@ -66,6 +66,21 @@ export const stateColor = (state: string): string => `var(--color-${STATE_COLOR_
 export const stateBorderColor = (state: string): string => `var(--color-${STATE_COLOR_TOKEN[state] ?? "dim"}-40)`;
 
 /**
+ * The landing counters' value→colour mapping (#80): the one state→colour surface with
+ * no reducer of its own. Only the three status-bearing counters carry a colour — working
+ * blue, parked amber, merged-today green; queued (and any other kind) stays the neutral
+ * dim, matching the render that emits no rule for it. The counter kind is the surface's
+ * own vocabulary (`working`/`parked`/`queued`/`mergedToday`), not an ADR-0007 status, so
+ * this maps kinds rather than states.
+ */
+const COUNTER_COLOR_TOKEN: Record<string, string> = {
+  working: "blue",
+  parked: "yellow",
+  mergedToday: "green",
+};
+export const counterColor = (kind: string): string => `var(--color-${COUNTER_COLOR_TOKEN[kind] ?? "dim"})`;
+
+/**
  * The status-dot colour rules, generated once from `stateColor` and shared by both
  * pages (previously two hand-kept copies). Scoped to `.dot` so a state colour tints
  * only the dot, never a whole card or list row (#81). The leading base rule carries the

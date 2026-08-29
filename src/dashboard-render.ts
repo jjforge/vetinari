@@ -1470,6 +1470,9 @@ ${ISSUE_DETAIL_SHEET_STYLES}
   .campaign-summary .campaign-meta { margin: 0; }
   .graft-inline { margin: 0; display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
   .graft-ids { padding: .35rem .55rem; border: 1px solid var(--color-secondary); border-radius: var(--border-radius); background: var(--color-chip); color: var(--color-text); font: inherit; font-size: .85rem; caret-color: var(--color-primary); }
+  /* The graft-issue-ids placeholder is a directive/example, not entered content — mute it
+     to the dim token so it reads as a hint, distinct from the full-text-colour typed ids. */
+  .graft-ids::placeholder { color: var(--color-dim); }
   .graft-ids:disabled { color: var(--color-dim); }
   .graft-inline[data-graft-active] .graft-ids { border-color: var(--color-primary); }
   /* Greyed and inert at rest; teal outline once ids are entered, filling on hover. */

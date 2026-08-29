@@ -234,8 +234,8 @@ together**, so no single issue is at fault (ADR 0013). **`question` (escalated
 park):** an issue in the wave [[parked]]; the wave **drains** (its other agents
 finish, their greens merge) and then parks, so no succeeding wave builds on an
 unresolved one (ADR 0017). Either way everything green stays merged (the base sits
-red, never pushed), the campaign pauses, and a human resolves it: fix forward and
-resume, or prune a suspect and resume.
+red, never pushed), the campaign pauses, and a human resolves it: fix forward, or
+prune a suspect, and [[redrive]].
 _Avoid_: halted, rolled back, failed wave
 
 ### Issue status
@@ -263,13 +263,16 @@ a status (ADR 0019). `question`: the agent asked something (answer it). `conflic
 merge conflict pulled a passed green out of integration, branch/worktree/session
 preserved (resolve the conflict — see [ADR 0013](../docs/adr/0013-wave-integration-is-non-atomic-quarantine-and-wave-park.md)).
 `red-base`: every issue passed alone but the merged base is red (fix forward).
-`crash`: the run stopped with no verdict (resume to continue).
+`crash`: the run stopped with no verdict ([[redrive]] to continue).
 _Avoid_: quarantined, interrupted (those were reasons masquerading as statuses)
 
 **failure**:
 The single **red terminal** — an issue the agent could not make green. Distinct from
 [[parked]] (amber, waiting) and it **outranks** it on roll-up: a level with any
-failure reads [[failed]], not parked (ADR 0019). The turn log tells the story of why.
+failure reads [[failed]], not parked (ADR 0019). Like a park it **holds its wave** —
+no succeeding wave starts — but where a park pauses for an answer, a failure **stops
+the run**: the recovery is a deliberate [[redrive]], not a continuation (ADR 0020).
+The turn log tells the story of why.
 _Avoid_: errored, broken
 
 **completed**:
@@ -301,8 +304,8 @@ Derived, one derivation per level, aggregating issue → [[wave]] → campaign �
 
 **failed**:
 A campaign or card roll-up carrying at least one [[failure]] issue — the red
-"something broke" state. Needs a human (prune, or fix and resume) and **outranks**
-[[parked]] on roll-up.
+"something broke" state. Needs a human — the recovery is a [[redrive]] (prune the
+broken work, or fix it and drive again) — and it **outranks** [[parked]] on roll-up.
 _Avoid_: halted, errored
 
 **idle**:
@@ -318,6 +321,17 @@ A generic vetinari tool that turns a selected set of ticket ids into the
 dependency-ordered, file-disjoint wave arguments `campaign` consumes. It plans; it
 never runs Vetinari or pushes. A peer of [[prune]], sharing its DAG foundation.
 _Avoid_: campaign builder, batcher
+
+**Redrive**:
+The umbrella act of picking an unfinished campaign back up: reconcile what the log
+says happened, then continue (ADR 0020). One word for every way a campaign regains
+forward motion — answering a [[parked]] question, a [[prune]] of the stuck work, a
+[[graft]] of its replacement, or fixing forward by hand — of which **resume is one
+path, not a synonym**. A redrive is **durable** (it reconstructs the campaign from
+the event log rather than depending on a process having stayed alive) and it **never
+re-actions banked work**: a merged member is skipped, a green-but-unmerged one is
+landed rather than re-run.
+_Avoid_: restart, recover, re-run, resume (as the umbrella)
 
 **Prune**:
 Dropping an issue and its transitive dependents from a **running** campaign. It

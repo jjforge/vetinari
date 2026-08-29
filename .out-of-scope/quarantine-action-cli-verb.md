@@ -13,15 +13,15 @@ and resume**, or pruning the stranded closure:
 
 - `campaign --resume` continues the paused campaign once the conflict is resolved
   on the base, and
-- `campaign --auto-carve` prunes a quarantine's stranded dependents and runs on.
+- `campaign --auto-prune` prunes a quarantine's stranded dependents and runs on.
 
 Adding an `un-quarantine` / `re-run-quarantined` verb would introduce a discrete
 "clear the quarantine flag and re-attempt integration" operation the model
 deliberately does not have. That contradicts the ADR-0013 framing where a
 quarantine is resolved by the human resolving the underlying conflict and the
-existing resume/carve verbs picking the work back up — not by a command that
+existing resume/prune verbs picking the work back up — not by a command that
 treats quarantine as a reversible, addressable state. The vocabulary already has
-the right verbs (`resume`, `carve`, `--auto-carve`); a quarantine-specific action
+the right verbs (`resume`, `prune`, `--auto-prune`); a quarantine-specific action
 verb is surface area that fights the design rather than serving it.
 
 A dashboard **action** for quarantine was also considered and set aside for the

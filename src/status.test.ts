@@ -446,6 +446,97 @@ test("an idle project's merged % and merged-today read its latest archived run, 
   assert.equal(counters.mergedToday, 2);
 });
 
+test("an archived run whose parked record survived reads parked, not idle — it still rolls up to the counter, queue, and card (#232)", () => {
+  const base = join(tmpdir(), `vetinari-landing-archived-parked-${Date.now()}`);
+  const dir = join(base, "beta");
+  // Idle path: the live log is empty (the run's log was archived — a process killed
+  // before end-of-run, or an out-of-band archive), yet a parked record survived on
+  // disk. The archived-card branch must consult the surviving park, not fold to idle.
+  seedState(dir, []);
+  mkdirSync(join(dir, "logs", "archive"), { recursive: true });
+  writeJsonl(
+    join(dir, "logs", "archive", "orchestrator-2026-06-15T00-00-00-000Z.jsonl"),
+    [
+      event("campaign-start", {
+        ts: "2026-06-15T09:00:00.000Z",
+        batches: [["501"], ["601"]],
+        name: "shipped",
+        slots: 1,
+      }),
+      event("campaign-batch-done", {
+        ts: "2026-06-15T09:05:00.000Z",
+        index: 0,
+        merged: ["501"],
+        held: [],
+        clearedParked: [],
+      }),
+    ],
+  );
+  writeFileSync(
+    join(dir, "parked", "601.json"),
+    JSON.stringify({
+      taskId: "601",
+      parkedAt: "2026-06-15T09:06:00.000Z",
+      reason: "needs a decision",
+      branch: "agent/601",
+      question: "Which approach?",
+    }),
+  );
+
+  const { counters, projects, parked } = buildLanding(
+    [pointerFor("beta", dir)],
+    new Date("2026-06-15T12:00:00.000Z"),
+  );
+  const [card] = projects;
+  // The card surfaces the outstanding park rather than reading a clean idle/complete.
+  assert.equal(card.runState, "parked");
+  assert.ok(card.tally.parked >= 1, `expected tally.parked >= 1, got ${card.tally.parked}`);
+  // …and it rolls up to the landing counter and the cross-repo parked queue.
+  assert.equal(counters.parked, 1);
+  assert.deepEqual(
+    parked.map((p) => [p.project, p.issueNumber]),
+    [["beta", "601"]],
+  );
+});
+
+test("a finished run lingering in the live log whose parked record survived reads parked, not folded-to-idle (#232)", () => {
+  const base = join(tmpdir(), `vetinari-landing-fold-parked-${Date.now()}`);
+  const dir = join(base, "demo");
+  // The live log reached its clean terminal campaign-done (101 merged, its wave closed),
+  // so `status.parked` filters the record out and the run would otherwise fold to idle
+  // (#208). But a parked record for 101 survived on disk (a crash before `clearParked`),
+  // so the fold branch must consult it and surface the outstanding park, not idle.
+  seedState(dir, [
+    event("campaign-start", { ts: "2026-06-15T08:00:00.000Z", batches: [["101"]], name: "gateway work", slots: 1 }),
+    event("campaign-batch-done", { ts: "2026-06-15T08:03:00.000Z", index: 0, merged: ["101"], held: [], clearedParked: [] }),
+    event("campaign-done", { ts: "2026-06-15T08:06:00.000Z", batches: 1 }),
+  ]);
+  writeFileSync(
+    join(dir, "parked", "101.json"),
+    JSON.stringify({
+      taskId: "101",
+      parkedAt: "2026-06-15T08:02:00.000Z",
+      reason: "needs a decision",
+      branch: "agent/101",
+      question: "Which approach?",
+    }),
+  );
+
+  const { counters, projects, parked } = buildLanding(
+    [pointerFor("demo", dir)],
+    new Date("2026-06-15T12:00:00.000Z"),
+  );
+  const [card] = projects;
+  assert.equal(card.runState, "parked");
+  assert.ok(card.tally.parked >= 1, `expected tally.parked >= 1, got ${card.tally.parked}`);
+  // Counter and queue stay consistent with the card — the surviving park is not filtered away.
+  assert.equal(counters.parked, 1);
+  assert.deepEqual(
+    parked.map((p) => [p.project, p.issueNumber]),
+    [["demo", "101"]],
+  );
+});
+
 test("buildLanding folds a finished campaign still in the live log to idle, display-only, keeping its summary (#208)", () => {
   const base = join(tmpdir(), `vetinari-landing-done-live-${Date.now()}`);
   const dir = join(base, "demo");

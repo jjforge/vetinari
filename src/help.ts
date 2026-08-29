@@ -145,6 +145,16 @@ export const MODES: Mode[] = [
       "remove one project's pointer from the host registry, so the dashboard stops listing it (the explicit counterpart to the auto-register every run performs — not container slots). A name that is not registered is a clean no-op",
   },
   {
+    signature: "demo create",
+    blurb:
+      "seed + register the demo dashboard fixture — one project per run-state (running, parked, failure, completed, idle) whose issues between them render every dashboard chip state — so you can click through the status UI. Seeds under $VETINARI_DEMO_DIR (default ~/.cache/vetinari-demo). Idempotent: a re-run clears and reseeds. Refresh the running dashboard to see them",
+  },
+  {
+    signature: "demo remove",
+    blurb:
+      "unregister + delete the demo dashboard fixture — removes the demo root and exactly the registry pointers whose base location sits under it (never a real project). A clean no-op when nothing is seeded",
+  },
+  {
     signature: "statusline",
     blurb:
       "one compact line for the Claude Code status bar (reads Claude Code's JSON on stdin; wire into settings.json)",

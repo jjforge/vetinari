@@ -539,13 +539,15 @@ test("buildLanding folds a finished queue-done live log to idle too (#208)", () 
   assert.match(card.lastEvent, /^Last run: queue · 1 issue · complete$/);
 });
 
-test("buildLanding does NOT fold a parked, halted, or in-flight live log to idle (#208)", () => {
+test("buildLanding does NOT fold a failed, parked, or in-flight live log to idle (#208)", () => {
   const base = join(tmpdir(), `vetinari-landing-nofold-${Date.now()}`);
-  // A halted run (base rolled back) is an attention state, never idle.
-  const haltDir = join(base, "halt");
-  seedState(haltDir, [
-    event("campaign-start", { ts: "2026-06-15T08:00:00.000Z", batches: [["101"]], name: "halted", slots: 1 }),
-    event("campaign-halt", { ts: "2026-06-15T08:01:00.000Z", index: 0, taskId: "101", reason: "base rolled back" }),
+  // A run with a failed issue (the agent could not make it green) is an attention state, never idle.
+  const failedDir = join(base, "failed");
+  seedState(failedDir, [
+    event("campaign-start", { ts: "2026-06-15T08:00:00.000Z", batches: [["101"]], name: "failed", slots: 1 }),
+    event("campaign-batch", { ts: "2026-06-15T08:01:00.000Z", index: 0, tasks: ["101"] }),
+    event("queue-start", { ts: "2026-06-15T08:02:00.000Z", taskIds: ["101"], slots: 1 }),
+    event("queue-done", { ts: "2026-06-15T08:03:00.000Z", outcomes: { "101": "error(3)" } }),
   ]);
   // A parked question outranks "done and quiet": even a run whose log reached the
   // terminal campaign-done keeps a lingering parked record (archiveIfIdle no-ops
@@ -575,11 +577,11 @@ test("buildLanding does NOT fold a parked, halted, or in-flight live log to idle
   ]);
 
   const { projects } = buildLanding(
-    [pointerFor("halt", haltDir), pointerFor("parked", parkedDir), pointerFor("run", runDir)],
+    [pointerFor("failed", failedDir), pointerFor("parked", parkedDir), pointerFor("run", runDir)],
     new Date("2026-06-15T12:00:00.000Z"),
   );
   const byProject = Object.fromEntries(projects.map((p) => [p.project, p.runState]));
-  assert.equal(byProject.halt, "failure");
+  assert.equal(byProject.failed, "failure");
   assert.equal(byProject.parked, "parked");
   assert.equal(byProject.run, "running");
 });
@@ -1273,14 +1275,6 @@ test("describeEvent narrates the operator-facing events in plain words", () => {
     "Campaign “gateway work” complete (3 waves)",
   );
   assert.equal(describeEvent(event("campaign-done", { batches: 1 })), "Campaign complete (1 wave)");
-  assert.equal(
-    describeEvent(event("campaign-halt", { index: 1, reason: "merge conflict", name: "gateway work" })),
-    "Campaign “gateway work” halted at Wave 2: merge conflict",
-  );
-  assert.equal(
-    describeEvent(event("campaign-halt", { index: 0, reason: "merge conflict" })),
-    "Campaign halted at Wave 1: merge conflict",
-  );
   // Queue lines render the counts they already hold — the task count on start, the outcome tally on done.
   assert.equal(
     describeEvent(event("queue-start", { taskIds: ["1", "2", "3", "4"], slots: 2 })),
@@ -1516,7 +1510,7 @@ test("reduceCampaign records when each issue merged, from batch-done, green and 
   assert.equal(reduced.mergedAt.get("202"), "2025-01-02T10:00:00.000Z");
 });
 
-test("reduceCampaign marks a halted issue as a failure", () => {
+test("reduceCampaign derives failure from an issue that errored, not a campaign-level event (ADR 0019)", () => {
   const reduced = reduceCampaign([
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
@@ -1528,22 +1522,18 @@ test("reduceCampaign marks a halted issue as a failure", () => {
       index: 0,
       tasks: ["101", "102"],
     }),
-    event("campaign-halt", {
+    event("queue-done", {
       ts: "2025-01-01T00:02:00.000Z",
-      index: 0,
-      taskId: "101",
-      reason: "gate failed",
+      outcomes: { "101": "error(3)", "102": "green" },
     }),
   ]);
 
+  // `failure` is the single red terminal — an issue the agent could not make green.
   assert.equal(reduced.outcomes.get("101"), "failure");
-  assert.equal(reduced.details.get("101"), "Campaign halted: gate failed");
-  // A halt does not close the wave — it stays the current one.
-  assert.deepEqual([...reduced.closedWaves], []);
-  assert.equal(reduced.currentWave, 0);
+  assert.equal(reduced.outcomes.get("102"), "completed");
 });
 
-test("campaignRunning is true for a started campaign that has not finished or halted", () => {
+test("campaignRunning is true for a started campaign that has not finished", () => {
   assert.equal(
     campaignRunning([
       event("campaign-start", { batches: [["101"], ["201"]], slots: 1 }),
@@ -1553,7 +1543,7 @@ test("campaignRunning is true for a started campaign that has not finished or ha
   );
 });
 
-test("campaignRunning is false with no campaign, and once it completes or halts", () => {
+test("campaignRunning is false with no campaign, and once it completes", () => {
   assert.equal(
     campaignRunning([event("queue-start", { taskIds: ["101"], slots: 1 })]),
     false,
@@ -1566,14 +1556,6 @@ test("campaignRunning is false with no campaign, and once it completes or halts"
     ]),
     false,
     "a completed campaign is not running",
-  );
-  assert.equal(
-    campaignRunning([
-      event("campaign-start", { batches: [["101"]], slots: 1 }),
-      event("campaign-halt", { index: 0, taskId: "101", reason: "gate failed" }),
-    ]),
-    false,
-    "a halted campaign is not running",
   );
 });
 
@@ -2290,7 +2272,7 @@ test("reconcileArchivedStatus maps an interrupted run's live `running` statuses 
 
 test("an archived non-terminal log renders a terminal status, not `running`, while the live log still derives `running` (#152)", () => {
   // The issue's self-contained reproducer: a campaign that logged its first wave's
-  // spawn and then stopped — no campaign-done / campaign-halt / queue-done.
+  // spawn and then stopped — no campaign-done / queue-done.
   const events = [
     event("campaign-start", { ts: "2026-08-26T23:27:59.174Z", batches: [["101"], ["202"]], slots: 8, name: "interrupted run" }),
     event("campaign-batch", { ts: "2026-08-26T23:28:00.000Z", index: 0, tasks: ["101"] }),
@@ -2434,12 +2416,6 @@ test("listArchivedRuns carries each run's state, startedAt and issue count, deri
     event("campaign-start", { batches: [["301"], ["302"]], slots: 1 }),
     event("campaign-batch", { index: 0, tasks: ["301"] }),
   ]);
-  // A halted run stopped short — later waves never ran — so it too reads interrupted.
-  writeJsonl(join(archiveDir, "orchestrator-2026-03-01T00-00-00-000Z.jsonl"), [
-    event("campaign-start", { batches: [["401"], ["402"]], slots: 1 }),
-    event("campaign-halt", { taskId: "401", reason: "gate failed", index: 0 }),
-  ]);
-
   const runs = listArchivedRuns(dir);
   const byRun = Object.fromEntries(runs.map((r) => [r.run, r]));
 
@@ -2451,7 +2427,6 @@ test("listArchivedRuns carries each run's state, startedAt and issue count, deri
   );
   assert.equal(byRun["2026-02-01T00-00-00-000Z"].state, "interrupted");
   assert.equal(byRun["2026-02-01T00-00-00-000Z"].issues, 2);
-  assert.equal(byRun["2026-03-01T00-00-00-000Z"].state, "interrupted");
 });
 
 test("summarizeRun folds an archived log into a one-line mode/issue-count/outcome summary", () => {
@@ -2463,13 +2438,13 @@ test("summarizeRun folds an archived log into a one-line mode/issue-count/outcom
     ]),
     "campaign · 3 issues · complete",
   );
-  // A campaign that halted on a failing issue — one issue, halted, singular noun.
+  // A campaign whose one issue failed (the agent could not make it green) — singular noun.
   assert.equal(
     summarizeRun([
       event("campaign-start", { batches: [["101"]], slots: 1 }),
-      event("campaign-halt", { index: 0, taskId: "101", reason: "gate failed" }),
+      event("queue-done", { outcomes: { "101": "error(3)" } }),
     ]),
-    "campaign · 1 issue · halted",
+    "campaign · 1 issue · failed",
   );
   // A queue-only run (no campaign frame) reads as a queue of its task ids.
   assert.equal(
@@ -2483,14 +2458,13 @@ test("summarizeRun folds an archived log into a one-line mode/issue-count/outcom
 
 test("summarizeRun describes only the last run in a multi-run archive (#69)", () => {
   // An archive whose live log accumulated two campaigns before it was archived: an
-  // earlier run halted on #61, then a fresh campaign ran the remainder to completion
-  // (this is the shape of the real vetinari archive that read as "halted").
+  // earlier run failed on #61, then a fresh campaign ran the remainder to completion.
   // The summary must reflect the terminal run — complete, four issues — not fold the
-  // stale campaign-halt from the superseded earlier run into a false "halted", and
-  // its count must be the last run's, not the whole file's.
+  // stale failure from the superseded earlier run into a false "failed", and its
+  // count must be the last run's, not the whole file's.
   const events = [
     event("campaign-start", { batches: [["56", "57"], ["61"]], slots: 1, name: "first" }),
-    event("campaign-halt", { index: 1, taskId: "61", reason: "merge conflict" }),
+    event("queue-done", { outcomes: { "61": "error(3)" } }),
     event("campaign-start", { batches: [["63"], ["64"], ["65"], ["67"]], slots: 1, name: "second" }),
     event("campaign-batch-done", { index: 0, merged: ["63"], held: [], clearedParked: [] }),
     event("campaign-batch-done", { index: 1, merged: ["64"], held: [], clearedParked: [] }),
@@ -2501,17 +2475,17 @@ test("summarizeRun describes only the last run in a multi-run archive (#69)", ()
   assert.equal(summarizeRun(events), "campaign · 4 issues · complete");
 });
 
-test("summarizeRun still reports halted when the last run halted after an earlier one completed (#69)", () => {
-  // The mirror case: an earlier run completed, then a fresh campaign halted. The
-  // terminal run halted, so the summary must say halted — the scoping must not swing
-  // the other way and hide a genuine halt behind an earlier clean run.
+test("summarizeRun still reports failed when the last run failed after an earlier one completed (#69)", () => {
+  // The mirror case: an earlier run completed, then a fresh campaign failed on an
+  // issue. The terminal run failed, so the summary must say failed — the scoping must
+  // not swing the other way and hide a genuine failure behind an earlier clean run.
   const events = [
     event("campaign-start", { batches: [["101"]], slots: 1, name: "first" }),
     event("campaign-done", { batches: 1 }),
     event("campaign-start", { batches: [["201"], ["202"]], slots: 1, name: "second" }),
-    event("campaign-halt", { index: 0, taskId: "201", reason: "gate failed" }),
+    event("queue-done", { outcomes: { "201": "error(3)" } }),
   ];
-  assert.equal(summarizeRun(events), "campaign · 2 issues · halted");
+  assert.equal(summarizeRun(events), "campaign · 2 issues · failed");
 });
 
 test("extractParkedDetails separates description from Options section", () => {
@@ -2738,7 +2712,7 @@ test("a graft into a wave-parked (resumable) campaign is folded and allowed (#16
     // An operator grafts new work while it is parked, honored on the next --resume.
     event("graft", { ts: "2025-01-01T00:04:00.000Z", ids: ["301"], blockedBy: {}, basenames: {} }),
   ];
-  // A wave-parked run is not done/halted, so graft is allowed against it.
+  // A wave-parked run is not done, so graft is allowed against it.
   assert.equal(campaignRunning(log), true);
   const reduced = reduceCampaign(log);
   // 301 re-layers into a future wave; the parked wave 0 (101) is untouched.

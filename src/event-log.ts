@@ -73,18 +73,6 @@ export interface CampaignDoneEvent extends BaseEvent {
   name?: string;
 }
 
-/** `campaign-halt` — a wave hit a merge conflict or a red merged base, halting the campaign with
- * the base rolled back: the wave index, the reason, and the task it halted on when there is one
- * (modes.ts). */
-export interface CampaignHaltEvent extends BaseEvent {
-  event: "campaign-halt";
-  index: number;
-  reason: string;
-  taskId?: string;
-  /** the campaign's optional `--name`, carried so a single-event reader can name the run. */
-  name?: string;
-}
-
 /** `queue-start` — a bounded queue run started: its task ids and slot count, optionally the id→title
  * map (a standalone queue records its own) and the host slot budget it ran under (modes.ts). */
 export interface QueueStartEvent extends BaseEvent {
@@ -290,7 +278,6 @@ export type OrchestratorEvent =
   | CampaignBatchEvent
   | CampaignBatchDoneEvent
   | CampaignDoneEvent
-  | CampaignHaltEvent
   | QueueStartEvent
   | QueueDoneEvent
   | QueueSpawnEvent

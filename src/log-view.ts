@@ -197,13 +197,11 @@ export function humanizeLogLine(raw: string): HumanizedRow {
       return { time, actor: actorOf(e.taskId), verb: "quarantined", spans: [plain("— resolve the conflict")], dot: "parked" };
     // Run-level campaign/wave kinds — no per-issue actor; the message is single-sourced from
     // `describeEvent` so the log view and the feed narrate them identically, and the dot reads
-    // the comms colour (a success green, a halt red, a wave-parked amber, a start blue).
+    // the comms colour (a success green, a wave-parked amber, a start blue).
     case "campaign-batch-done":
     case "campaign-done":
     case "queue-done":
       return narrated("merged");
-    case "campaign-halt":
-      return narrated("failure");
     case "wave-parked":
       return narrated("parked");
     case "campaign-start":

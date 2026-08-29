@@ -13,7 +13,7 @@ import type { DisplayStatus, RunState } from "./dashboard-model.ts";
  * `dashboard-demo.test.ts` (#225).
  *
  * There is one project per `RunState` — a live running wave, a parked/blocked
- * run, a failure (halted) run, an all-merged completed run, and an idle project
+ * run, a failure run, an all-merged completed run, and an idle project
  * whose only history is an interrupted archived run — and their issues distribute
  * the nine `DisplayStatus` members across their chips so the union covers them all.
  */
@@ -204,8 +204,9 @@ const DEMO_SPECS: DemoProjectSpec[] = [
     ],
   },
 
-  // ── RunState: failure ── an offline-mode run that halted on a red merged base in
-  // its second wave. Covers failure (and more completed chips from its first wave).
+  // ── RunState: failure ── an offline-mode run whose second-wave issue the agent
+  // could not make green (a `failure`, derived from the errored outcome, ADR 0019).
+  // Covers failure (and more completed chips from its first wave).
   {
     project: DEMO_FAILURE_PROJECT,
     live: (at) => [
@@ -220,8 +221,8 @@ const DEMO_SPECS: DemoProjectSpec[] = [
       { ts: at(5), event: "campaign-batch-done", index: 0, merged: ["401", "402"] },
       { ts: at(6), event: "campaign-batch", index: 1 },
       { ts: at(6), event: "queue-start", taskIds: ["403"] },
-      { ts: at(7), event: "turn", taskId: "403", turn: 0, summary: "Background sync worker green in isolation, but it flakes the whole suite on the merged base." },
-      { ts: at(9), event: "campaign-halt", index: 1, reason: "merged base gate red", taskId: "403" },
+      { ts: at(7), event: "turn", taskId: "403", turn: 0, summary: "Background sync worker never went green — the durability test keeps failing after every retry." },
+      { ts: at(9), event: "queue-done", outcomes: { "403": "error(3)" } },
     ],
   },
 

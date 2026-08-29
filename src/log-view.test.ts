@@ -121,7 +121,6 @@ test("run-level kinds narrate through describeEvent verbatim as one plain span, 
     event("campaign-batch", { index: 0, tasks: ["1", "2"], name: "Ship it", ts: "2026-08-28T00:00:00.000Z" }),
     event("campaign-batch-done", { index: 0, merged: ["1"], held: [], clearedParked: [], ts: "2026-08-28T00:00:00.000Z" }),
     event("campaign-done", { batches: 2, ts: "2026-08-28T00:00:00.000Z" }),
-    event("campaign-halt", { index: 1, reason: "gate red", ts: "2026-08-28T00:00:00.000Z" }),
     event("wave-parked", { merged: ["1"], detail: "red", ts: "2026-08-28T00:00:00.000Z" }),
     event("prune", { target: "5", removed: ["5", "6"], dropped: ["6"], ts: "2026-08-28T00:00:00.000Z" }),
     event("graft", { ids: ["9"], blockedBy: {}, basenames: {}, ts: "2026-08-28T00:00:00.000Z" }),
@@ -134,11 +133,10 @@ test("run-level kinds narrate through describeEvent verbatim as one plain span, 
   }
 });
 
-test("run-level dot colours: success→merged, halt→failure, wave-parked→parked, start→running, prune→neutral", () => {
+test("run-level dot colours: success→merged, wave-parked→parked, start→running, prune→neutral", () => {
   const dot = (e: object) => humanizeLogLine(raw(e)).dot;
   assert.equal(dot(event("campaign-batch-done", { index: 0, merged: ["1"], held: [], clearedParked: [], ts: "2026-08-28T00:00:00.000Z" })), "merged");
   assert.equal(dot(event("campaign-done", { batches: 1, ts: "2026-08-28T00:00:00.000Z" })), "merged");
-  assert.equal(dot(event("campaign-halt", { index: 0, reason: "x", ts: "2026-08-28T00:00:00.000Z" })), "failure");
   assert.equal(dot(event("wave-parked", { merged: [], detail: "d", ts: "2026-08-28T00:00:00.000Z" })), "parked");
   assert.equal(dot(event("campaign-start", { batches: [], slots: 1, ts: "2026-08-28T00:00:00.000Z" })), "running");
   assert.equal(dot(event("prune", { target: "5", removed: ["5"], dropped: [], ts: "2026-08-28T00:00:00.000Z" })), "neutral");

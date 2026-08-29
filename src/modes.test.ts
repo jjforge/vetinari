@@ -725,6 +725,37 @@ test("Gate 2 unchanged: an all-green wave whose combined base gates red still wa
   );
 });
 
+test("a quarantine that strands later-wave dependents wave-parks the campaign — an explicit terminal event, never a silent stop", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-strand-"));
+  const cfg = harnessCfg(dir);
+  // 701 in the later wave is blocked by 640, so quarantining 640 strands 701.
+  cfg.blockedBy = (id: string) => (id.replace(/^#/, "") === "701" ? ["640"] : []);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+
+  // Wave 0 drains green, but integration quarantines 640 on a merge conflict; wave 1's
+  // 701 depends on it, so the default (no --auto-prune) pauses the campaign.
+  const spawned: string[] = [];
+  const deps: CampaignDeps = {
+    ...gitFreeDeps(cfg, async (taskId) => {
+      spawned.push(taskId);
+      return 0;
+    }),
+    integrate: async (_cfg, _greens) => ({ merged: [], quarantined: ["640"] }),
+  };
+
+  const ok = await silenceConsole(() =>
+    campaign(cfg, [["640"], ["701"]], host, "harness", {}, deps),
+  );
+
+  assert.equal(ok, false, "the stranded quarantine pauses the campaign");
+  assert.ok(!spawned.includes("701"), "the stranded later wave never starts");
+
+  // The pause is an explicit wave-park, so the log is never indistinguishable from a crash.
+  const parked = readEventLog(cfg).filter((e): e is WaveParkedEvent => e.event === "wave-parked");
+  assert.equal(parked.length, 1, "exactly one wave-parked event marks the pause");
+  assert.match(parked[0].detail, /stranded|conflict/i, "the detail names the stranded-conflict reason");
+});
+
 // One event-loop tick — lets the queue's synchronous `fill()` (and its microtask
 // chain) run so we can observe the deferred spawners it started before releasing them.
 const tick = () => new Promise<void>((r) => setImmediate(r));

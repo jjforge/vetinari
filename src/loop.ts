@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import type { ResolvedConfig } from "./config.ts";
 import type { Logger } from "./log.ts";
 import { runGates } from "./gate.ts";
-import { agentFor, makeSandbox, type Sandbox } from "./sandbox.ts";
+import { agentFor, agentSelectionFor, makeSandbox, type Sandbox } from "./sandbox.ts";
 import { clearParked, enqueueOutbound, park } from "./state.ts";
 import { HARVEST_PROMPT, parseFindings, reportFindings } from "./findings.ts";
 import { activityLoggingSink, appendActivity, initActivityLog } from "./activity.ts";
@@ -63,6 +63,22 @@ export interface LoopDeps {
   filesInCommit: (sha: string, log: Logger) => string[];
 }
 export const defaultLoopDeps: LoopDeps = { makeSandbox, commitsAhead, filesInCommit };
+
+/**
+ * The verification/gate report the orchestrator hands a red turn. Its resumable
+ * form is an inline resume prompt on the live session; its non-resumable form is a
+ * block appended to the re-read issue text so a FRESH run picks up where the last
+ * left off — its own prior work already committed on the branch, plus the report and
+ * the most-recent turn summary (bounded: most-recent only, never the full history).
+ */
+const redResumePrompt = (report: string) =>
+  `The orchestrator ran the verification suite and it is red. Fix the implementation — do not weaken the tests.\n\n${report}\n\nWhen you believe it is fixed, emit ${DONE} again, and end this turn with a <turn-summary> line as before.`;
+
+const freshRedReentry = (report: string, priorSummary: string) =>
+  `---\n\n(Continuing earlier work on this task — a fresh run. Your prior turn's commits are already on this branch.)\n\n` +
+  `The orchestrator ran the verification suite and it is red. Fix the implementation — do not weaken the tests.` +
+  (priorSummary ? `\n\nYour most recent turn summary:\n${priorSummary}` : "") +
+  `\n\nVerification report:\n${report}`;
 
 export const answerPromptFor = (text: string) =>
   `Answer from the human to your question:\n\n${text}\n\nContinue the work. The signal contract is unchanged: ${DONE} when done, ${BLOCKED} if blocked again — and end this turn with a <turn-summary> line as before.`;
@@ -141,6 +157,9 @@ async function harvestFindings(cfg: ResolvedConfig, sbx: Sandbox, sessionId: str
  */
 export async function runLoop(cfg: ResolvedConfig, taskId: string, entry?: ResumeEntry, deps: LoopDeps = defaultLoopDeps): Promise<Outcome> {
   const task = entry ? "" : await cfg.fetchTask(taskId);
+  // Whether the loop resumes a session between turns (claude/pi/codex) or re-enters each
+  // turn as a fresh run (copilot/cursor/opencode carry no durable session) — ADR 0016 / #212.
+  const { resumable } = agentSelectionFor(cfg);
   const sbx = await deps.makeSandbox(cfg, taskId);
   // Start the per-task activity stream fresh — live-only scratch, overwritten per run (ADR 0015).
   initActivityLog(cfg.stateDir, taskId);
@@ -206,18 +225,28 @@ export async function runLoop(cfg: ResolvedConfig, taskId: string, entry?: Resum
           return "green";
         }
 
-        // Resume via resumeSession + inline prompt — the SAME path the park→answer
-        // resume uses (above). `r.resume()` inherits the turn-0 promptArgs, which the
-        // library rejects alongside an inline prompt ("promptArgs is only supported
-        // with promptFile"), so a red gate errored instead of resuming (#3).
-        const resumeSessionId = r.iterations.at(-1)?.sessionId;
-        if (!resumeSessionId) throw new Error("no session id to resume — cannot drive the TDD loop");
-        r = await sbx.run({
-          ...common,
-          maxIterations: 1,
-          resumeSession: resumeSessionId,
-          prompt: `The orchestrator ran the verification suite and it is red. Fix the implementation — do not weaken the tests.\n\n${report}\n\nWhen you believe it is fixed, emit ${DONE} again, and end this turn with a <turn-summary> line as before.`,
-        });
+        if (resumable) {
+          // Resume via resumeSession + inline prompt — the SAME path the park→answer
+          // resume uses (above). `r.resume()` inherits the turn-0 promptArgs, which the
+          // library rejects alongside an inline prompt ("promptArgs is only supported
+          // with promptFile"), so a red gate errored instead of resuming (#3).
+          const resumeSessionId = r.iterations.at(-1)?.sessionId;
+          if (!resumeSessionId) throw new Error("no session id to resume — cannot drive the TDD loop");
+          r = await sbx.run({ ...common, maxIterations: 1, resumeSession: resumeSessionId, prompt: redResumePrompt(report) });
+        } else {
+          // Non-resumable provider: there is no session to resume, so the next turn is a
+          // FRESH run through the same promptFile path turn 0 uses — re-reading the issue
+          // via fetchTask, its prior work visible as commits already on the branch, with the
+          // gate report + most-recent turn summary carried in the prompt (#212). Don't spin a
+          // fresh run on the final turn: it would never be gated. Fall through to the budget park.
+          if (turn + 1 >= cfg.maxTurns) break;
+          const freshTask = await cfg.fetchTask(taskId);
+          r = await sbx.run({
+            ...common,
+            promptFile: cfg.promptFile,
+            promptArgs: { TASK: `${freshTask}\n\n${freshRedReentry(report, turnFields.summary)}`, PROJECT: cfg.project },
+          });
+        }
       }
 
       await park(cfg, { taskId, reason: "budget", sessionId: r.iterations.at(-1)?.sessionId, branch: sbx.branch, question: `Turn budget exhausted (${cfg.maxTurns} gate cycles).` });

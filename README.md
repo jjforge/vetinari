@@ -53,13 +53,16 @@ npm install github:jjforge/vetinari
 
 Needs Docker, Node 22+, and `.vetinari.local/.env` holding your agent
 provider's credentials. Vetinari is **provider-agnostic** (ADR 0016): a run or
-campaign can execute on **Claude Code, pi, or Codex** — the resumable providers —
-selected by `cfg.agent.provider` or a per-invocation `--agent` override.
-**Claude is the default**, so a project that names no provider runs exactly as
-before. Vetinari does not mint or exchange credentials; it passes the token you
-supply straight through to the selected CLI inside the agent container, and fails
-a preflight (before the container) if the selected provider's credential is
-missing.
+campaign can execute on **Claude Code, pi, Codex, GitHub Copilot CLI, Cursor, or
+OpenCode**, selected by `cfg.agent.provider` or a per-invocation `--agent`
+override. The first three are **resumable** — the loop resumes their session each
+turn; the last three carry no durable session, so the loop drives them by
+re-entering each turn as a **fresh run** (its prior work already committed on the
+branch). **Claude is the default**, so a project that names no provider runs
+exactly as before. Vetinari does not mint or exchange credentials; it passes the
+token you supply straight through to the selected CLI inside the agent container,
+and fails a preflight (before the container) if the selected provider's credential
+is missing.
 
 Each provider reads its own key from `.vetinari.local/.env`:
 
@@ -68,6 +71,9 @@ Each provider reads its own key from `.vetinari.local/.env`:
 | Claude Code (default) | `claude` | `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) — or `ANTHROPIC_API_KEY` |
 | pi | `pi` | `ANTHROPIC_API_KEY` |
 | Codex | `codex` | `OPENAI_API_KEY` |
+| GitHub Copilot CLI | `copilot` | `COPILOT_GITHUB_TOKEN` — or `GH_TOKEN` / `GITHUB_TOKEN` |
+| Cursor | `cursor` | `CURSOR_API_KEY` |
+| OpenCode | `opencode` | `OPENCODE_API_KEY` |
 
 For Claude, the `CLAUDE_CODE_OAUTH_TOKEN` runs the loop on your Claude Code
 subscription (the container's `claude` CLI reads it exactly as Claude Code GitHub
@@ -532,9 +538,10 @@ than at an inconvenient moment later:
   message, not the session; read the session JSONL for the real cost.
 - **Gateway resumes sit outside the queue's slot accounting**, so heavy
   answering can briefly exceed a project's fair share of `MAX_CONCURRENT_CONTAINERS`.
-- **Session capture is required.** Non-resumable providers (`cursor`,
-  `opencode`, `copilot`) can't drive this loop; the run fails with a clear
-  message rather than degrading silently.
+- **Non-resumable providers park but can't yet be answered.** `cursor`,
+  `opencode`, and `copilot` drive the loop by fresh re-runs (#212), so a red turn
+  re-enters cleanly — but a `BLOCKED` park has no session to resume, so its
+  question can't be answered until the park→answer path lands (#212's follow-up).
 
 Built on [`@ai-hero/sandcastle`](https://github.com/mattpocock/sandcastle).
 `examples/jjforge/` is a real config over a Go + Rust monorepo with GitHub-issue

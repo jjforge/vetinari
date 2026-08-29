@@ -8,6 +8,32 @@ import { event, serveAllStatus, type OrchestratorEvent } from "./status.ts";
 import type { AddressInfo } from "node:net";
 import { register } from "./registry.ts";
 
+// The parsed payload the dashboard SSE stream carries in each `data:` frame.
+type EventPayload = { project?: string; events?: { event: string; turn?: number }[] };
+
+// Split every complete `\n\n`-terminated SSE frame out of `buf` and `JSON.parse`
+// each frame's `data:` payload *individually*, returning the parsed payloads and
+// the still-incomplete tail. One `reader.read()` can deliver two frames coalesced
+// (handshake + first data frame, or two data frames when fs.watch fires close
+// together); parsing per-frame is what stops their `data:` lines being joined into
+// `{…}{…}` and thrown at by JSON.parse (#272). Comment/handshake frames carry no
+// `data:` line and yield nothing.
+const drainFrames = (buf: string): { payloads: EventPayload[]; rest: string } => {
+  const payloads: EventPayload[] = [];
+  let idx: number;
+  while ((idx = buf.indexOf("\n\n")) !== -1) {
+    const frame = buf.slice(0, idx);
+    buf = buf.slice(idx + 2);
+    const data = frame
+      .split("\n")
+      .filter((l) => l.startsWith("data:"))
+      .map((l) => l.slice("data:".length).trim())
+      .join("");
+    if (data) payloads.push(JSON.parse(data));
+  }
+  return { payloads, rest: buf };
+};
+
 const writeJsonl = (path: string, events: unknown[]) =>
   writeFileSync(path, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
 
@@ -49,17 +75,9 @@ const openEventStream = async (port: number) => {
       }
       if (chunk.done) break;
       buf += decoder.decode(chunk.value, { stream: true });
-      let idx: number;
-      while ((idx = buf.indexOf("\n\n")) !== -1) {
-        const frame = buf.slice(0, idx);
-        buf = buf.slice(idx + 2);
-        const data = frame
-          .split("\n")
-          .filter((l) => l.startsWith("data:"))
-          .map((l) => l.slice("data:".length).trim())
-          .join("");
-        if (data) payloads.push(JSON.parse(data));
-      }
+      const drained = drainFrames(buf);
+      buf = drained.rest;
+      payloads.push(...drained.payloads);
     }
     return payloads;
   };
@@ -503,6 +521,37 @@ test("serveAllStatus GET /api/issue omits parked reply data for a non-parked iss
   }
 });
 
+test("drainFrames parses two coalesced SSE frames' data payloads individually (#272)", () => {
+  // A single reader.read() delivering two `\n\n`-terminated data frames at once —
+  // the coalescing that reds the merged-base gate. Each payload must be parsed on
+  // its own, not joined into `{…}{…}` and handed to JSON.parse as one string.
+  const frameA = `data: ${JSON.stringify({ project: "alpha", events: [{ event: "turn" }] })}\n\n`;
+  const frameB = `data: ${JSON.stringify({ project: "beta", events: [{ event: "green" }] })}\n\n`;
+  const { payloads, rest } = drainFrames(frameA + frameB);
+  assert.deepEqual(
+    payloads.map((p) => p.project),
+    ["alpha", "beta"],
+  );
+  assert.deepEqual(
+    payloads.flatMap((p) => (p.events ?? []).map((e) => e.event)),
+    ["turn", "green"],
+  );
+  assert.equal(rest, "");
+});
+
+test("drainFrames skips the comment handshake frame and returns an incomplete tail (#272)", () => {
+  // The product's opening frame is `retry: 3000\n: connected\n\n` (no `data:` line);
+  // a trailing partial frame must be held back as `rest`, not parsed.
+  const handshake = "retry: 3000\n: connected\n\n";
+  const dataFrame = `data: ${JSON.stringify({ project: "alpha", events: [{ event: "turn" }] })}\n\n`;
+  const { payloads, rest } = drainFrames(handshake + dataFrame + "data: {partial");
+  assert.deepEqual(
+    payloads.map((p) => p.project),
+    ["alpha"],
+  );
+  assert.equal(rest, "data: {partial");
+});
+
 test("serveAllStatus GET /api/events streams a project's log appends as SSE frames", async () => {
   const configDir = join(tmpdir(), `vetinari-sse-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
@@ -527,9 +576,12 @@ test("serveAllStatus GET /api/events streams a project's log appends as SSE fram
   const res = await fetch(`http://127.0.0.1:${port}/api/events`);
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
-  // Read from the stream until a full SSE data frame (blank-line terminated) arrives, or time out.
-  const nextFrame = async (): Promise<string> => {
-    let buf = "";
+  let buf = "";
+  // Read until at least one more complete SSE frame (blank-line terminated) is buffered,
+  // then return every complete frame's parsed `data:` payload (a comment/handshake-only
+  // frame yields []). Coalesced frames are drained individually via drainFrames, so a
+  // read that delivers two frames at once never mis-joins them into `{…}{…}` (#272).
+  const nextPayloads = async (): Promise<EventPayload[]> => {
     while (!buf.includes("\n\n")) {
       const chunk = await Promise.race([
         reader.read(),
@@ -543,28 +595,23 @@ test("serveAllStatus GET /api/events streams a project's log appends as SSE fram
       if (chunk.done) throw new Error("stream closed before a frame arrived");
       buf += decoder.decode(chunk.value, { stream: true });
     }
-    return buf;
+    const { payloads, rest } = drainFrames(buf);
+    buf = rest;
+    return payloads;
   };
   try {
     assert.match(res.headers.get("content-type") ?? "", /text\/event-stream/);
     // The opening handshake frame flushes headers and, crucially, means the watcher is now armed.
-    await nextFrame();
+    await nextPayloads();
     // A fresh append to alpha's live log is pushed as a data frame carrying the project and the new event.
     appendFileSync(
       join(alphaDir, "logs", "orchestrator.jsonl"),
       JSON.stringify(event("turn", { taskId: "101", turn: 0, summary: "" })) + "\n",
     );
-    let frame = "";
-    let payload: { project?: string; events?: { event: string }[] } = {};
+    let payload: EventPayload = {};
     // fs.watch can coalesce or emit a bare change with no new bytes; keep reading data frames until one carries the append.
     for (let i = 0; i < 5 && !payload.events?.length; i++) {
-      frame = await nextFrame();
-      const data = frame
-        .split("\n")
-        .filter((l) => l.startsWith("data:"))
-        .map((l) => l.slice("data:".length).trim())
-        .join("");
-      payload = data ? JSON.parse(data) : {};
+      payload = (await nextPayloads()).find((p) => p.events?.length) ?? payload;
     }
     assert.equal(payload.project, "alpha");
     assert.deepEqual(

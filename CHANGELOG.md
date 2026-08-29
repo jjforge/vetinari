@@ -22,18 +22,23 @@ Within a milestone each bold section label appears at most once.
 
 **Breaking changes:**
 - [ops] Retired the `make demo-create` / `make demo-clean` targets and `scripts/seed-demo-dashboard.mts`; seeding the demo dashboard is now `vetinari demo create` / `demo remove` (#225).
+- [user] Removed the `campaign-plan` command — invoking it now errors as unknown. Its plan-only behaviour moves onto `campaign --dry-run`, which prints the same wave plan, provenance, and suggested `--name` and runs nothing (#219).
 
 **New features:**
 - [user] The non-resumable agent providers `copilot`, `cursor`, and `opencode` can now drive the TDD loop: each is accepted by `--agent`/`cfg.agent.provider`, and the loop re-enters every red turn as a fresh run (re-reading the issue, its prior work already committed on the branch, the prompt carrying the gate report plus the most-recent turn summary) instead of resuming a session. `maxTurns`, host budget, and the green/empty-green/`BLOCKED`/budget-park outcomes are honored identically to a resumable run; `maxTurns 1` is a one-shot (#212).
 - [user] The landing's Event Log gains a project dropdown beside the free-text filter — "all repos" by default, one option per project present in the feed (labelled by its `owner/name`, matching the top-bar switcher). Selecting a project scopes the feed in place (it does not navigate) and composes with the text filter as AND; the Download JSON export honours it too. Client-only and ephemeral: it resets on reload and adds no URL param (#220).
 - [user] `vetinari demo create` / `demo remove` seed and tear down the demo dashboard fixture — one registered project per run-state (running, parked, failure, completed, idle) whose issues between them render every dashboard chip state, so you can click through the status UI (#225). Seeds under `$VETINARI_DEMO_DIR` (default `~/.cache/vetinari-demo`); `create` is idempotent (clear-then-reseed), and `remove` deletes only the demo root and the registry pointers under it, never a real project.
+- [user] `campaign` now selects issues, plans them into dependency-ordered file-disjoint waves, and runs them in one command. A numeric positional is an issue id; a non-numeric positional is a **label** expanded to the open issues carrying it via the new `listByLabel` config seam (`githubIssuesByLabel(repo)` ships as the GitHub implementation) — so `campaign ready-for-agent` runs every open labelled issue, and tokens mix (`campaign 436 ready-for-agent`). A label token with no `listByLabel` configured fails fast, naming the missing seam (#219).
+- [user] `campaign --override <waves…>` runs each positional as one hand-crafted wave with the planner skipped — the previous `campaign` semantics — and `--on-underspecified=drop|fail` moves onto `campaign`, applying whenever planning runs (default and `--dry-run`) (#219).
 
 **Improvements:**
 - [user] `vetinari gateway start|stop|restart` now print what they did and the gateway's resulting state — including the "already running" / "wasn't running" no-op cases and an honest "came up not active" line — instead of a blank line, each with a `journalctl` logs hint (#218).
 - [internal] A coverage guard reads the seeded demo back through the dashboard model and goes red — plus a compile-time exhaustiveness check on `DisplayStatus`/`RunState` — whenever a new dashboard state is not represented in the demo (#225).
+- [user] Host-log settings panel: the filter input and Download JSON button now share one control row — the filter flexes to fill the line instead of stacking above the button (#233).
 
 **Bug fixes:**
 - [user] A per-issue park no longer lets a campaign wave read "done" and roll on with an open question. The wave now drains (its in-flight siblings finish and their greens still merge), then escalates to a wave-park: the parked issue keeps its record — so it stays visible on the dashboard, answerable on Telegram, and resumable — and no succeeding wave starts until a human answers/resolves or prunes it and runs `campaign --resume` (#231).
+- [user] The landing dashboard's idle/archived card now surfaces a parked record that outlived its run's log (a killed process or out-of-band archive): the card reads `parked` with a non-zero parked tally and rolls up to the parked counter and cross-repo queue, instead of folding to a clean idle/complete while a question still waits (#232).
 
 ### Collected changes — August 28, 2026
 

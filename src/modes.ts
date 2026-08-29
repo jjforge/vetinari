@@ -626,7 +626,29 @@ export async function campaign(
     // above on a red gate. Only the green `merged` set is passed.
     await markMergedIssues(cfg, merged);
 
-    if (held.length) clearParkedForTasks(cfg, held);
+    // Gate 1 (ADR 0017): a per-issue park escalates to a wave-park. A parked issue is
+    // unfinished work awaiting a human, so — like a quarantined green (below) and unlike
+    // the rest of `held` — its record is spared the wave-boundary clear: clearing it would
+    // take the question dark (off the dashboard, unanswerable on Telegram) and leave the
+    // issue unresumable.
+    const parkedTasks = tasks.filter((t) => outcomes[t] === "parked");
+    const toClear = held.filter((t) => outcomes[t] !== "parked");
+    if (toClear.length) clearParkedForTasks(cfg, toClear);
+    if (parkedTasks.length) {
+      // The wave drained and its greens merged under Gate 2 above, but an issue parked, so
+      // the wave is not fully resolved. Escalate to the existing wave-park state — no new
+      // event — rather than folding the park into `held` and advancing: record it before any
+      // batch-done (so it reads as the in-flight parked wave, not a closed one), draw a
+      // human, and stop the campaign at the wave boundary so no succeeding wave builds on
+      // unresolved work. Recovery is answer/resolve or prune, then `campaign --resume`.
+      const detail = `parked, awaiting a human: ${parkedTasks.join(", ")}`;
+      cfg.log.log("wave-parked", { merged, detail });
+      enqueueOutbound(cfg, waveParkedNotice(cfg.project, index + 1, merged, cfg.baseBranch, detail));
+      console.log(
+        `campaign wave-parked (issue parked) at batch ${index + 1}/${total} — greens (${merged.join(", ") || "none"}) left merged, base paused, ${total - index - 1} batch(es) not started. Answer/resolve the park and \`campaign --resume\`, or \`prune <issue>\`.`,
+      );
+      return false;
+    }
     const note = held.length
       ? ` — cleared parked records for completed wave: ${held.map((t) => `${t}(${outcomes[t]})`).join(", ")}`
       : "";

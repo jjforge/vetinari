@@ -6,6 +6,7 @@ import {
   defineConfig,
   githubBlockedBy,
   githubFetchTask,
+  githubIssuesByLabel,
   githubMarkPendingVerify,
 } from "vetinari";
 
@@ -34,6 +35,10 @@ export default defineConfig({
   // Powers carve/campaign: reads GitHub's native blocked_by edges — the ones set
   // on #31–#35.
   blockedBy: githubBlockedBy("jjforge/vetinari"),
+
+  // Expands a label selector (`campaign ready-for-agent`) into its open issues, so
+  // a campaign can be launched by label rather than an explicit id list.
+  listByLabel: githubIssuesByLabel("jjforge/vetinari"),
 
   // After a wave merges an issue's green and the merged-base gate passes, advance it
   // to the first hop of merge→pending-verify→close: add `pending-verify`, drop

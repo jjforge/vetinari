@@ -1,75 +1,140 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
-import { register } from "./registry.ts";
+import { listProjects, register } from "./registry.ts";
 import { serveAllStatus } from "./status.ts";
-import { seedDemoRun, DEMO_PROJECT, DEMO_CAMPAIGN } from "./dashboard-demo-fixture.ts";
+import {
+  archiveStatusConfig,
+  buildStatus,
+  listArchivedRuns,
+  projectRunState,
+  reconcileArchivedStatus,
+  statusConfigFromPointer,
+  type DisplayStatus,
+  type RunState,
+} from "./dashboard-model.ts";
+import {
+  ALL_DISPLAY_STATUSES,
+  ALL_RUN_STATES,
+  createDemo,
+  DEMO_PARKED_PROJECT,
+  removeDemo,
+} from "./dashboard-demo-fixture.ts";
 
-// End-to-end over the real HTTP surface: seed the exact files the site reads (a
-// live run + a parked record), serve it, and drive every dashboard surface at
-// once — landing, campaign page, issue detail, feed, and the parked queue.
-test("integration: a seeded live run populates the landing, campaign, issue detail, feed and parked queue", async () => {
+/**
+ * Read every seeded demo project back through the SAME model the dashboard renders
+ * from, and collect which `DisplayStatus` chips and which `RunState` cards actually
+ * surface across all of them: the live status per project (`buildStatus` +
+ * `projectRunState`) plus each archived run reconciled to its terminal display
+ * (`reconcileArchivedStatus`, the interrupted read the page does). This is the
+ * coverage guard — it asserts the demo *renders* each state, not that the fixture
+ * literal names it.
+ */
+function coverageFromModel(configDir: string): { statuses: Set<DisplayStatus>; runStates: Set<RunState> } {
+  const statuses = new Set<DisplayStatus>();
+  const runStates = new Set<RunState>();
+  for (const pointer of listProjects(configDir)) {
+    const live = buildStatus(statusConfigFromPointer(pointer));
+    runStates.add(projectRunState(live));
+    for (const wave of live.waves) for (const issue of wave.issues) statuses.add(issue.status);
+    for (const run of listArchivedRuns(pointer.baseLocation)) {
+      const archived = reconcileArchivedStatus(buildStatus(archiveStatusConfig(pointer.project, run.file)), run.state);
+      for (const wave of archived.waves) for (const issue of wave.issues) statuses.add(issue.status);
+    }
+  }
+  return { statuses, runStates };
+}
+
+test("the demo covers every dashboard state — a new DisplayStatus/RunState goes red until the seed renders it (#225)", () => {
   const configDir = mkdtempSync(join(tmpdir(), "vetinari-demo-"));
-  const baseLocation = join(configDir, "base");
-  // Seed the run relative to the present so it stays a *live* run: the feed only
-  // carries events inside its 48h window (measured against the real `new Date()`
-  // the HTTP handlers use), so a fixed calendar date would silently empty the feed
-  // once the suite runs more than a window past it. Half an hour ago keeps every
-  // seeded event (offsets span ~0–13m) comfortably in the past and in-window.
-  seedDemoRun(baseLocation, new Date(Date.now() - 30 * 60 * 1000));
-  register(configDir, { project: DEMO_PROJECT, projectRoot: join(configDir, "root"), baseLocation });
+  const root = join(configDir, "demo");
+  try {
+    createDemo(configDir, root, new Date(Date.now() - 30 * 60 * 1000));
+    const { statuses, runStates } = coverageFromModel(configDir);
+
+    const missingStatuses = ALL_DISPLAY_STATUSES.filter((s) => !statuses.has(s));
+    const missingRunStates = ALL_RUN_STATES.filter((s) => !runStates.has(s));
+    // Name exactly which state is unrepresented, so a new union member tells the
+    // implementer what the seed must grow to cover rather than just "they differ".
+    assert.deepEqual(
+      { missingStatuses, missingRunStates },
+      { missingStatuses: [], missingRunStates: [] },
+    );
+  } finally {
+    rmSync(configDir, { recursive: true, force: true });
+  }
+});
+
+test("demo create is idempotent — re-running refreshes rather than duplicating or erroring (#225)", () => {
+  const configDir = mkdtempSync(join(tmpdir(), "vetinari-demo-"));
+  const root = join(configDir, "demo");
+  try {
+    const first = createDemo(configDir, root, new Date());
+    const again = createDemo(configDir, root, new Date());
+    assert.deepEqual(again.projects, first.projects, "same project set on re-run");
+    // One pointer per project — a re-run overwrote, it did not accumulate duplicates.
+    assert.equal(listProjects(configDir).length, first.projects.length);
+  } finally {
+    rmSync(configDir, { recursive: true, force: true });
+  }
+});
+
+test("demo remove unregisters exactly the demo projects and leaves a real one untouched; a no-op when nothing is seeded (#225)", () => {
+  const configDir = mkdtempSync(join(tmpdir(), "vetinari-demo-"));
+  const root = join(configDir, "demo");
+  const realBase = join(configDir, "real-project", ".vetinari.local");
+  try {
+    // A real project registered OUTSIDE the demo root — remove must never touch it.
+    register(configDir, { project: "real-project", projectRoot: join(configDir, "real-project"), baseLocation: realBase });
+
+    const { projects } = createDemo(configDir, root, new Date());
+    assert.ok(projects.length >= 5, "seeds one project per RunState");
+
+    const { removed } = removeDemo(configDir, root);
+    assert.deepEqual(removed.slice().sort(), projects.slice().sort(), "removed exactly the demo projects");
+    assert.equal(existsSync(root), false, "the demo root is gone");
+
+    const left = listProjects(configDir);
+    assert.deepEqual(left.map((p) => p.project), ["real-project"], "the real project survives");
+
+    // A second remove finds nothing under the (now absent) root — a clean no-op.
+    assert.deepEqual(removeDemo(configDir, root).removed, []);
+  } finally {
+    rmSync(configDir, { recursive: true, force: true });
+  }
+});
+
+test("integration: the parked demo project serves a live, populated campaign page and parked queue (#225)", async () => {
+  const configDir = mkdtempSync(join(tmpdir(), "vetinari-demo-"));
+  const root = join(configDir, "demo");
+  // Seed relative to the present so the run reads *live* and its events land inside
+  // the feed's 48h window (measured against the handlers' real clock).
+  createDemo(configDir, root, new Date(Date.now() - 30 * 60 * 1000));
 
   const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
   const { port } = server.address() as AddressInfo;
   const base = `http://127.0.0.1:${port}`;
   const getJson = async (path: string) => (await fetch(base + path)).json();
   try {
-    // Landing — the demo reads live, with the working/parked/queued tally and a cross-repo parked queue.
     const landing = await getJson("/api/landing");
-    const card = landing.projects.find((p: { project: string }) => p.project === DEMO_PROJECT);
-    assert.ok(card, "the demo project has a landing card");
-    assert.notEqual(card.runState, "idle");
-    assert.equal(card.campaignName, DEMO_CAMPAIGN);
-    assert.equal(card.tally.parked, 1); // #205
-    assert.equal(card.tally.queued, 2); // #206, #207 (#208 was pruned out)
-    assert.ok(card.tally.running >= 1, "at least #204 is running");
-    assert.equal(landing.counters.parked, 1);
-    assert.equal(landing.counters.queued, 2);
-    const parked = landing.parked.find((p: { issueNumber: string }) => p.issueNumber === "205");
-    assert.ok(parked, "the parked queue lists #205");
-    assert.match(parked.question, /payment providers/i);
+    const card = landing.projects.find((p: { project: string }) => p.project === DEMO_PARKED_PROJECT);
+    assert.ok(card, "the parked demo project has a landing card");
+    assert.equal(card.runState, "parked");
+    const parked = landing.parked.find((p: { project: string }) => p.project === DEMO_PARKED_PROJECT);
+    assert.ok(parked, "its parked question is in the cross-repo queue");
 
-    // Campaign page — member rows render every status, including the pruned #208.
-    const page = await (await fetch(`${base}/?project=${DEMO_PROJECT}`)).text();
+    // Its campaign page renders member rows across the states its issues cover.
+    const page = await (await fetch(`${base}/?project=${DEMO_PARKED_PROJECT}`)).text();
     assert.match(page, /class="wave-member [a-z]+"/);
     for (const status of ["completed", "running", "parked", "pruned"]) {
       assert.match(page, new RegExp(status), `page renders a ${status} member row`);
     }
 
-    // Issue detail — #204's turn log is three agent-authored turns, newest first.
-    const d204 = await getJson(`/api/issue?project=${DEMO_PROJECT}&issue=204`);
-    assert.equal(d204.status, "running");
-    assert.equal(d204.turns, 3);
-    assert.equal(d204.turnLog.length, 3);
-    assert.equal(d204.turnLog[0].turn, 2, "newest turn first");
-    assert.ok(d204.turnLog.every((t: { summary: string }) => t.summary.length > 0), "every turn carries a summary");
-    assert.ok(d204.elapsedMs > 0, "elapsed spans the turns");
-    assert.equal((await getJson(`/api/issue?project=${DEMO_PROJECT}&issue=208`)).status, "pruned");
-    const d205 = await getJson(`/api/issue?project=${DEMO_PROJECT}&issue=205`);
-    assert.equal(d205.status, "parked");
-    // The parked slot preserved a worktree; the sheet's WORKTREE tile reads this path (#90).
-    assert.equal(d205.worktree, ".vetinari.local/wt/205");
-
-    // Feed — repo-prefixed sentences.
     const feed = await getJson("/api/feed");
-    assert.ok(feed.length > 0, "the feed has rows");
-    assert.ok(
-      feed.every((r: { text: string }) => typeof r.text === "string" && r.text.startsWith(`${DEMO_PROJECT} —`)),
-      "every feed row is repo-prefixed",
-    );
+    assert.ok(feed.length > 0, "the feed has rows across the seeded projects");
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     rmSync(configDir, { recursive: true, force: true });

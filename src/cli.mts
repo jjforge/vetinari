@@ -78,6 +78,7 @@ import {
 import { resolveHostCeiling, type HostBudget } from "./host-slots.ts";
 import { containerShareWeight } from "./config.ts";
 import { serveAllStatus } from "./status.ts";
+import { createDemo, demoRoot, removeDemo } from "./dashboard-demo-fixture.ts";
 import { runStatusLine } from "./statusline.ts";
 import {
   computeInstall,
@@ -443,6 +444,40 @@ if (mode === "registry") {
       ? `removed registry pointer for "${name}" — the dashboard will stop listing it.`
       : `no registry pointer named "${name}" — nothing to remove.`,
   );
+  process.exit(0);
+}
+
+// `demo create|remove` seeds (or tears down) the demo dashboard fixture — a set of
+// registered projects that between them render every dashboard state, to click
+// through the status UI (#225). It acts on the host registry and a demo root under
+// $VETINARI_DEMO_DIR, exactly like status/registry, so it runs BEFORE the strict cwd
+// config load (no project config in cwd is required). `create` is idempotent
+// (clear-then-reseed); `remove` deletes only the demo root and the pointers under it.
+if (mode === "demo") {
+  const sub = rest[0];
+  if (sub !== "create" && sub !== "remove") {
+    console.error("demo needs a subcommand: `vetinari demo create | remove`");
+    process.exit(1);
+  }
+  const configDir = gatewayConfigDir();
+  const root = demoRoot();
+  if (sub === "create") {
+    // Idempotent: clear any prior demo first, so a re-run refreshes rather than
+    // duplicating or stacking stale state.
+    removeDemo(configDir, root);
+    const { projects } = createDemo(configDir, root);
+    console.log(
+      `seeded + registered ${projects.length} demo project(s) under ${root}: ${projects.join(", ")}\n` +
+        `registry: ${configDir} — refresh the running dashboard to see them.`,
+    );
+  } else {
+    const { removed } = removeDemo(configDir, root);
+    console.log(
+      removed.length
+        ? `removed ${removed.length} demo project(s) (${removed.join(", ")}) and deleted ${root}`
+        : `no demo projects registered under ${root} — nothing to remove.`,
+    );
+  }
   process.exit(0);
 }
 

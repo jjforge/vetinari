@@ -1,7 +1,4 @@
-# Convenience targets for the demo dashboard project (acme-checkout) — the
-# repeatable fixture used to click through the status UI. Both wrap
-# scripts/seed-demo-dashboard.mts; refresh the running dashboard afterwards.
-.PHONY: demo-create demo-clean check-changelog-sections check-changelog-sections-test
+.PHONY: check-changelog-sections check-changelog-sections-test
 
 # Does any dated CHANGELOG.md milestone repeat a bold section label? A split
 # `**Improvements:**` (one block, then another below `**New features:**`) reads as
@@ -14,11 +11,3 @@ check-changelog-sections:
 # Unit tests for the lint above (the pure decision functions + end-to-end fixtures).
 check-changelog-sections-test:
 	bash scripts/check-changelog-sections.test.sh
-
-# Seed + register the demo 'acme-checkout' project into the local dashboard.
-demo-create:
-	npx tsx scripts/seed-demo-dashboard.mts
-
-# Unregister + delete it (removes ~/.cache/vetinari-demo and its registry pointer).
-demo-clean:
-	npx tsx scripts/seed-demo-dashboard.mts --clear

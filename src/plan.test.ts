@@ -4,6 +4,7 @@ import {
   applyGraft,
   validateGraftTargets,
   describePlan,
+  expandSelection,
   labelsFromTask,
   layerWaves,
   partitionWaves,
@@ -26,6 +27,39 @@ import type { FileSet } from "./fileset.ts";
 // anything listed here is, by contract, an open prerequisite still in flight.)
 const openBlockedByFrom = (edges: Record<string, string[]>) => (id: string) =>
   edges[id] ?? [];
+
+test("expandSelection keeps numeric tokens as ids and normalizes a leading #", async () => {
+  assert.deepEqual(await expandSelection(["436", "#611", "640"]), [
+    "436",
+    "611",
+    "640",
+  ]);
+});
+
+test("expandSelection expands a label token to the open issues carrying it", async () => {
+  const listByLabel = async (label: string) =>
+    label === "ready-for-agent" ? ["436", "611", "640"] : [];
+  assert.deepEqual(await expandSelection(["ready-for-agent"], listByLabel), [
+    "436",
+    "611",
+    "640",
+  ]);
+});
+
+test("expandSelection unions mixed id and label tokens, de-duplicated in first-seen order", async () => {
+  const listByLabel = async () => ["611", "640"];
+  assert.deepEqual(
+    await expandSelection(["436", "ready-for-agent", "640"], listByLabel),
+    ["436", "611", "640"],
+  );
+});
+
+test("expandSelection fails naming the missing seam when a label is passed without listByLabel", async () => {
+  await assert.rejects(
+    () => expandSelection(["436", "ready-for-agent"]),
+    /listByLabel/,
+  );
+});
 
 test("layerWaves orders the set by its in-set blockedBy graph", async () => {
   // 701 is blocked by 640; 640 is blocked by 611; 623 is free.
@@ -612,6 +646,9 @@ test("runCampaignPlan composes fetchTask→ticketProse→fileSet and returns the
   );
 
   assert.equal(report.waveArgs, '"611" "640"');
+  // The actual planned waves ride alongside the rendered strings, so the default
+  // `campaign` path can plan-then-run without re-parsing waveArgs.
+  assert.deepEqual(report.waves, [["611"], ["640"]]);
   assert.match(report.report, /wave 0.*#611/);
   assert.match(report.report, /wave 1.*#640/);
   // The suggested name pairs labelsFromTask with suggestCampaignName over the labels.

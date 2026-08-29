@@ -61,6 +61,41 @@ const uniqueOrder = (ids: string[]) => {
   return order;
 };
 
+/** Whether a positional token is an issue id (all digits, optional leading `#`)
+ * rather than a label. A campaign token that is not an id is treated as a label. */
+export const isIssueId = (token: string): boolean => /^#?\d+$/.test(token);
+
+/**
+ * Expand a campaign's positional tokens into a flat, de-duplicated id set: a numeric
+ * token is an issue id (kept, `#` stripped); a non-numeric token is a **label**,
+ * expanded to the open issues carrying it via the `listByLabel` seam. Tokens may be
+ * mixed; the result is normalized and de-duplicated in first-seen order, so it feeds
+ * straight into the planner (or into an `--override` wave).
+ *
+ * A label token with no `listByLabel` resolver configured fails fast, naming the
+ * missing seam — a campaign cannot select by label without wiring the tracker in.
+ * Pure over the injected resolver; the CLI passes `cfg.listByLabel`.
+ */
+export async function expandSelection(
+  tokens: string[],
+  listByLabel?: (label: string) => string[] | Promise<string[]>,
+): Promise<string[]> {
+  const ids: string[] = [];
+  for (const token of tokens) {
+    if (isIssueId(token)) {
+      ids.push(token);
+      continue;
+    }
+    if (!listByLabel)
+      throw new Error(
+        `campaign: "${token}" is a label, but no "listByLabel" resolver is configured — ` +
+          `add e.g. listByLabel: githubIssuesByLabel("owner/repo") to your config to select issues by label.`,
+      );
+    ids.push(...(await listByLabel(token)));
+  }
+  return uniqueOrder(ids);
+}
+
 export async function layerWaves(ids: string[], blockedByOf: BlockedByOf): Promise<WavePlan> {
   const order = uniqueOrder(ids);
   const { inSet, external } = await restrictBlockers(order, blockedByOf);
@@ -543,6 +578,9 @@ export interface CampaignPlanRunDeps {
 
 /** The rendered-but-not-printed plan: the CLI case prints these three, in order. */
 export interface CampaignPlanReport {
+  /** the dependency-ordered, file-disjoint waves the set layered into — what the
+   *  default `campaign` path runs, and what `waveArgs` renders. */
+  waves: string[][];
   /** the bare quoted wave args (`waveArgs`) — empty when nothing is schedulable. */
   waveArgs: string;
   /** the human-readable provenance report (`describePlan`). */
@@ -594,7 +632,7 @@ export async function runCampaignPlan(
     labelsFromTask(String(await cfg.fetchTask(id))),
   );
 
-  return { waveArgs: waveArgs(plan), report: describePlan(plan), suggestedName };
+  return { waves: plan.waves, waveArgs: waveArgs(plan), report: describePlan(plan), suggestedName };
 }
 
 /** One ticket's resolver verdict, as `fileset-check` reports it. */

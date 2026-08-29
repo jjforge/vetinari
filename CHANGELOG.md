@@ -41,6 +41,8 @@ Within a milestone each bold section label appears at most once.
 - [user] Archived runs now render through the shared log-view control: each run is a collapsed `.lv-row` (dim when-time, status dot, run name, and `state · N issues`) that expands to reveal that run's wave cards, matching the live tail, feed, and host log instead of the bespoke archive chrome (#248).
 - [user] The dashboard's archived-runs list now wears the shared log-view chrome — the same header control bar as the live tail / event feed / host log, with a substring filter box that hides non-matching runs — and drops the "show older" cap so every run renders in one scrollable pane (#256).
 - [user] A quarantine that strands later-wave dependents now logs an explicit `wave-parked` event, so a paused campaign is never indistinguishable from a crash in the log (#268).
+- [user] The dashboard now models issue state as one tested state machine (ADR 0019): every level — issue, wave, campaign, and repo card — reads one held word, `parked`, with the specific situation (a question, a merge conflict, a red base, or a stall) shown in the detail and its recovery affordance, rather than the separate `quarantined` / `wave-parked` / `interrupted` words (#267).
+- [user] A pruned or grafted issue now renders as a membership badge alongside its own lifecycle dot/word, instead of replacing the lifecycle status (#267).
 
 **Bug fixes:**
 - [user] A per-issue park no longer lets a campaign wave read "done" and roll on with an open question. The wave now drains (its in-flight siblings finish and their greens still merge), then escalates to a wave-park: the parked issue keeps its record — so it stays visible on the dashboard, answerable on Telegram, and resumable — and no succeeding wave starts until a human answers/resolves or prunes it and runs `campaign --resume` (#231).
@@ -50,6 +52,9 @@ Within a milestone each bold section label appears at most once.
 - [user] Live-tail agent-log lines now render at a comfortable ~12.5px (.78rem), matching the sibling host-log pane, instead of the sub-readable 10.5px (#235).
 - [ops] File-set markers whose backticks are backslash-escaped (`\`src/foo.ts\``, as some authoring tools emit) now resolve to the real path instead of halting `campaign-plan` with "no confident file-set" — the stray escape is normalized away before the cite is read, for slash paths and bare names alike (#249).
 - [internal] The `/api/events` SSE test harness now parses each `\n\n`-terminated frame individually instead of joining `data:` lines across a whole (possibly multi-frame) read, so two coalesced frames no longer `JSON.parse` as `{…}{…}` and spuriously red the merged-base gate (#272).
+- [user] A repo card is never `idle` while any of its issues is parked or failed, and a wave with a failed member reads `failed`, never `running` (#258, #262, #267).
+- [user] The landing's parked counter now equals the cross-repo parked queue it expands into — a merge-conflict hold no longer over-counts the number against the list (#259, #267).
+- [user] `failed` now outranks `parked` on roll-up (a broken issue is a louder signal than a held one), reversing the earlier order (#267).
 
 ### Collected changes — August 28, 2026
 

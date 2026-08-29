@@ -19,7 +19,21 @@ import type { Sandbox, SandboxRunOptions, SandboxRunResult } from "./sandbox.ts"
 
 /** Run git in `dir`, returning trimmed stdout (throws its stderr on a non-zero exit). */
 const gitIn = (dir: string, args: string[]): string =>
-  execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" }).trim();
+  execFileSync("git", ["-C", dir, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+
+// A wave spawns its issues concurrently (the real `queue`), so several sandboxes add
+// and remove worktrees at the same instant. `git worktree add`/`remove` mutate the one
+// shared `.git/worktrees` admin area, so serialize just those two ops per process — the
+// per-worktree work (commits, `exec`, the read-only git reads) stays fully parallel.
+let repoOps: Promise<unknown> = Promise.resolve();
+function serialize<T>(op: () => T): Promise<T> {
+  const next = repoOps.then(op, op);
+  repoOps = next.then(
+    () => {},
+    () => {},
+  );
+  return next;
+}
 
 /**
  * The real checkout handed to an agent-script for one turn: the worktree it operates
@@ -76,7 +90,7 @@ export async function makeLocalSandbox(
   mkdirSync(dirname(worktreeDir), { recursive: true });
   // A fresh worktree on a new branch cut from the base — the prod sandbox's one
   // container per task, on its own branch and worktree.
-  gitIn(repoRoot, ["worktree", "add", "-b", branch, worktreeDir, cfg.baseBranch]);
+  await serialize(() => gitIn(repoRoot, ["worktree", "add", "-b", branch, worktreeDir, cfg.baseBranch]));
 
   let turn = -1;
   return {
@@ -135,7 +149,7 @@ export async function makeLocalSandbox(
     async close() {
       // Drop the worktree so the branch is no longer checked out (integration can then
       // merge and GC it); the branch and its commits stay in the shared repo.
-      gitIn(repoRoot, ["worktree", "remove", "--force", worktreeDir]);
+      await serialize(() => gitIn(repoRoot, ["worktree", "remove", "--force", worktreeDir]));
       return undefined;
     },
   };

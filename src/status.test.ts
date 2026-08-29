@@ -1718,6 +1718,20 @@ test("renderStatusPage marks a freshly-grafted wave with a static teal edge, not
   );
 });
 
+test("renderStatusPage mutes the graft input's placeholder so it reads as an example, not a value (#236)", () => {
+  const running = {
+    project: "beta",
+    waves: [{ index: 0, status: "running" as const, issues: [{ issueNumber: "201", status: "running" as const }] }],
+    parked: [],
+  };
+  const html = renderStatusPage(running, { prune: true, graft: true });
+  // The `graft issue ids` placeholder is a hint, not entered content — it renders muted
+  // (the dim token) so it reads as an example rather than a typed value, while real typed
+  // ids keep the full text colour on `.graft-ids` itself.
+  assert.match(html, /\.graft-ids::placeholder \{ color: var\(--color-dim\); \}/);
+  assert.match(html, /\.graft-ids \{[^}]*color: var\(--color-text\);/);
+});
+
 test("renderStatusPage ships the graft input's client wiring, re-run on live refresh (#202)", () => {
   const running = {
     project: "beta",

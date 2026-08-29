@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { countBucket, formatContextLine, formatStatusLine, trimModelName } from "./statusline.ts";
+import { formatContextLine, formatStatusLine, trimModelName } from "./statusline.ts";
 
 test("formatStatusLine summarizes the running wave and status counts on one line", () => {
   const line = formatStatusLine({
@@ -22,58 +22,47 @@ test("formatStatusLine summarizes the running wave and status counts on one line
   assert.equal(line.includes("\n"), false, "must be a single line");
 });
 
-test("countBucket folds overlay statuses to a base bucket and excludes pruned", () => {
-  // base statuses are unchanged
-  assert.equal(countBucket("completed"), "completed");
-  assert.equal(countBucket("running"), "running");
-  assert.equal(countBucket("parked"), "parked");
-  assert.equal(countBucket("failure"), "failure");
-  assert.equal(countBucket("unstarted"), "unstarted");
-  // overlays fold to their effective base bucket
-  assert.equal(countBucket("grafted"), "unstarted");
-  assert.equal(countBucket("interrupted"), "unstarted");
-  assert.equal(countBucket("quarantined"), "parked");
-  // pruned is pruned out of the campaign — counted nowhere
-  assert.equal(countBucket("pruned"), null);
-});
-
-test("formatStatusLine counts grafted issues as unstarted (⚪) — the reported graft case", () => {
+test("formatStatusLine counts a grafted issue by its lifecycle (unstarted ⚪) — the reported graft case", () => {
+  // A grafted issue is `unstarted` on the lifecycle axis with a `grafted` membership badge
+  // (ADR 0019), so the compact bar counts it as ⚪ queued work, not a separate glyph.
   const line = formatStatusLine({
     project: "jjforge",
     waves: [
       { index: 0, status: "running", issues: [{ issueNumber: "186", status: "running" }, { issueNumber: "171", status: "running" }] },
       { index: 1, status: "unstarted", issues: [{ issueNumber: "168", status: "unstarted" }, { issueNumber: "193", status: "unstarted" }] },
-      { index: 2, status: "unstarted", issues: [{ issueNumber: "195", status: "grafted" }, { issueNumber: "196", status: "grafted" }] },
+      { index: 2, status: "unstarted", issues: [{ issueNumber: "195", status: "unstarted", membership: "grafted" }, { issueNumber: "196", status: "unstarted", membership: "grafted" }] },
     ],
     parked: [],
   });
 
   assert.match(line, /🔄2/);
-  assert.match(line, /⚪4/); // 2 unstarted + 2 grafted, not ⚪2
+  assert.match(line, /⚪4/); // 2 unstarted + 2 grafted (both `unstarted` lifecycle), not ⚪2
 });
 
-test("formatStatusLine folds interrupted→unstarted, quarantined→parked, and excludes pruned", () => {
+test("formatStatusLine counts each chip by its clean lifecycle and excludes a pruned member (ADR 0019)", () => {
+  // With the two-axis split the status is already a clean bucket: a merge-conflict or a
+  // stalled hold reads `parked`, and a `pruned` member (its badge on the membership axis)
+  // counts in no bucket — so nothing needs an overlay→base fold any more.
   const line = formatStatusLine({
     project: "demo",
     waves: [
       {
         index: 0,
-        status: "running",
+        status: "parked",
         issues: [
           { issueNumber: "1", status: "unstarted" },
-          { issueNumber: "2", status: "interrupted" },
-          { issueNumber: "3", status: "quarantined" },
-          { issueNumber: "4", status: "parked" },
-          { issueNumber: "5", status: "pruned" },
+          { issueNumber: "2", status: "parked", reason: "stalled" },
+          { issueNumber: "3", status: "parked", reason: "conflict" },
+          { issueNumber: "5", status: "unstarted", membership: "pruned" },
         ],
       },
     ],
     parked: [],
   });
 
-  assert.match(line, /⚪2/); // unstarted + interrupted
-  assert.match(line, /⏸2/); // parked + quarantined
-  assert.doesNotMatch(line, /❌/); // pruned contributes to no bucket
+  assert.match(line, /⚪1/); // the one live unstarted; the pruned member is excluded
+  assert.match(line, /⏸2/); // the stalled + conflict holds both read parked
+  assert.doesNotMatch(line, /❌/); // no failure present
 });
 
 test("formatStatusLine drops zero-count segments and omits the wave when none is running", () => {

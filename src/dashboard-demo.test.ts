@@ -9,15 +9,16 @@ import { serveAllStatus } from "./status.ts";
 import {
   archiveStatusConfig,
   buildStatus,
+  cardState,
   listArchivedRuns,
-  projectRunState,
-  reconcileArchivedStatus,
   statusConfigFromPointer,
   type DisplayStatus,
+  type Membership,
   type RunState,
 } from "./dashboard-model.ts";
 import {
   ALL_DISPLAY_STATUSES,
+  ALL_MEMBERSHIPS,
   ALL_RUN_STATES,
   createDemo,
   DEMO_PARKED_PROJECT,
@@ -26,42 +27,49 @@ import {
 
 /**
  * Read every seeded demo project back through the SAME model the dashboard renders
- * from, and collect which `DisplayStatus` chips and which `RunState` cards actually
- * surface across all of them: the live status per project (`buildStatus` +
- * `projectRunState`) plus each archived run reconciled to its terminal display
- * (`reconcileArchivedStatus`, the interrupted read the page does). This is the
- * coverage guard — it asserts the demo *renders* each state, not that the fixture
- * literal names it.
+ * from, and collect which lifecycle `DisplayStatus` chips, which `Membership` badges,
+ * and which `RunState` cards actually surface across all of them: the live status per
+ * project (`buildStatus` + `cardState`) plus each archived run read back as a dead run
+ * (`buildStatus({ dead: true })`, the stalled read the page does, ADR 0019). This is the
+ * coverage guard — it asserts the demo *renders* each state, not that the fixture literal
+ * names it.
  */
-function coverageFromModel(configDir: string): { statuses: Set<DisplayStatus>; runStates: Set<RunState> } {
+function coverageFromModel(configDir: string): { statuses: Set<DisplayStatus>; memberships: Set<Membership>; runStates: Set<RunState> } {
   const statuses = new Set<DisplayStatus>();
+  const memberships = new Set<Membership>();
   const runStates = new Set<RunState>();
+  const collect = (waves: { issues: { status: DisplayStatus; membership?: Membership }[] }[]) => {
+    for (const wave of waves) for (const issue of wave.issues) {
+      statuses.add(issue.status);
+      memberships.add(issue.membership ?? "member");
+    }
+  };
   for (const pointer of listProjects(configDir)) {
     const live = buildStatus(statusConfigFromPointer(pointer));
-    runStates.add(projectRunState(live));
-    for (const wave of live.waves) for (const issue of wave.issues) statuses.add(issue.status);
+    runStates.add(cardState(live));
+    collect(live.waves);
     for (const run of listArchivedRuns(pointer.baseLocation)) {
-      const archived = reconcileArchivedStatus(buildStatus(archiveStatusConfig(pointer.project, run.file)), run.state);
-      for (const wave of archived.waves) for (const issue of wave.issues) statuses.add(issue.status);
+      collect(buildStatus(archiveStatusConfig(pointer.project, run.file), { dead: true }).waves);
     }
   }
-  return { statuses, runStates };
+  return { statuses, memberships, runStates };
 }
 
-test("the demo covers every dashboard state — a new DisplayStatus/RunState goes red until the seed renders it (#225)", () => {
+test("the demo covers every dashboard state — a new DisplayStatus/Membership/RunState goes red until the seed renders it (#225)", () => {
   const configDir = mkdtempSync(join(tmpdir(), "vetinari-demo-"));
   const root = join(configDir, "demo");
   try {
     createDemo(configDir, root, new Date(Date.now() - 30 * 60 * 1000));
-    const { statuses, runStates } = coverageFromModel(configDir);
+    const { statuses, memberships, runStates } = coverageFromModel(configDir);
 
     const missingStatuses = ALL_DISPLAY_STATUSES.filter((s) => !statuses.has(s));
+    const missingMemberships = ALL_MEMBERSHIPS.filter((s) => !memberships.has(s));
     const missingRunStates = ALL_RUN_STATES.filter((s) => !runStates.has(s));
     // Name exactly which state is unrepresented, so a new union member tells the
     // implementer what the seed must grow to cover rather than just "they differ".
     assert.deepEqual(
-      { missingStatuses, missingRunStates },
-      { missingStatuses: [], missingRunStates: [] },
+      { missingStatuses, missingMemberships, missingRunStates },
+      { missingStatuses: [], missingMemberships: [], missingRunStates: [] },
     );
   } finally {
     rmSync(configDir, { recursive: true, force: true });

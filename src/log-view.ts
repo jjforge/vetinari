@@ -193,8 +193,10 @@ export function humanizeLogLine(raw: string): HumanizedRow {
       return { time, actor: actorOf(e.taskId), verb: "merged", spans: [], dot: "merged" };
     case "parked":
       return { time, actor: actorOf(e.taskId), verb: "parked", spans: e.reason ? [plain(": "), strong(String(e.reason))] : [], dot: "parked" };
+    // A merge-conflict quarantine is a held (parked) state with reason `conflict` (ADR 0019);
+    // the log names the event as `parked — merge conflict`, never the retired status word.
     case "quarantined":
-      return { time, actor: actorOf(e.taskId), verb: "quarantined", spans: [plain("— resolve the conflict")], dot: "parked" };
+      return { time, actor: actorOf(e.taskId), verb: "parked", spans: [plain("— merge conflict, resolve it")], dot: "parked" };
     // Run-level campaign/wave kinds — no per-issue actor; the message is single-sourced from
     // `describeEvent` so the log view and the feed narrate them identically, and the dot reads
     // the comms colour (a success green, a wave-parked amber, a start blue).

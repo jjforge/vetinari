@@ -4,6 +4,7 @@ import {
   buildStatusWithIssueNames,
   type CampaignStatus,
   type DisplayStatus,
+  type Membership,
   type RunState,
   type StatusIssue,
   type StatusWave,
@@ -42,18 +43,21 @@ const ISSUE_EMOJI: Record<DisplayStatus, string> = {
   parked: "⏸",
   failure: "❌",
   unstarted: "⚪",
-  pruned: "✂️",
+};
+
+/** The membership badge glyph (ADR 0019) — the orthogonal axis to the lifecycle emoji:
+ * a `grafted` addition or a `pruned` drop. A plain `member` carries none. */
+const MEMBERSHIP_EMOJI: Record<Exclude<Membership, "member">, string> = {
   grafted: "🌱",
-  quarantined: "🚧",
-  interrupted: "⏹",
+  pruned: "✂️",
 };
 
 const WAVE_EMOJI: Record<WaveStatus, string> = {
   closed: "✅",
   running: "▶️",
   unstarted: "⚪",
-  "wave-parked": "⏸",
-  interrupted: "⏹",
+  parked: "⏸",
+  failed: "❌",
 };
 
 /**
@@ -75,7 +79,8 @@ export function formatStatusText(status: CampaignStatus): string {
     lines.push("", `Wave ${wave.index + 1}/${total} ${WAVE_EMOJI[wave.status]} ${wave.status}`);
     for (const issue of wave.issues) {
       const name = issue.name ? ` ${issue.name}` : "";
-      lines.push(`  ${ISSUE_EMOJI[issue.status]} #${issue.issueNumber}${name}`);
+      const badge = issue.membership && issue.membership !== "member" ? ` ${MEMBERSHIP_EMOJI[issue.membership]}` : "";
+      lines.push(`  ${ISSUE_EMOJI[issue.status]} #${issue.issueNumber}${name}${badge}`);
     }
   }
 
@@ -106,7 +111,7 @@ const chipTitle = (issue: StatusIssue) => [issue.name, issue.detail].filter(Bool
  * (ADR 0005). A completed issue is banked and a running one is in flight, so
  * prune would do nothing useful there and gets no control (story 20).
  */
-export const isPrunable = (issue: StatusIssue) => issue.status === "unstarted" || issue.status === "parked";
+export const isPrunable = (issue: StatusIssue) => issue.membership !== "pruned" && (issue.status === "unstarted" || issue.status === "parked");
 
 /**
  * One issue's member row — the single line a wave card gives each of its issues,
@@ -126,9 +131,13 @@ const renderWaveMember = (issue: StatusIssue, project: string, prune: boolean, i
   const openData = interactive || prune ? ` data-issue="${escapeHtml(issue.issueNumber)}" data-project="${escapeHtml(project)}"${run ? ` data-run="${escapeHtml(run)}"` : ""}` : "";
   const pruneData = prune && isPrunable(issue) ? ` data-prunable="1"` : "";
   const title = issue.name ? `<span class="wave-member-title">${escapeHtml(issue.name)}</span>` : "";
-  // The row carries its status class so its state reads at 40% alpha on a left edge
-  // (§4); the dot carries the same status at full strength, the word spells it out.
-  return `<li><button type="button" class="wave-member ${issue.status}" title="${escapeTitle(detail)}"${openData}${pruneData}><span class="dot ${dotClass(issue.status)}"></span>#${escapeHtml(issue.issueNumber)} ${title}<small>${escapeHtml(issue.status)}</small></button></li>`;
+  // Compose the two orthogonal axes (ADR 0019): the lifecycle class colours the left
+  // edge (§4) and its dot at full strength, and the word spells it out; the membership
+  // (a `grafted`/`pruned` chip) rides a separate class + badge, never a lifecycle word.
+  const membership = issue.membership ?? "member";
+  const memberClass = membership !== "member" ? ` ${membership}` : "";
+  const badge = membership !== "member" ? `<span class="member-badge ${membership}">${escapeHtml(membership)}</span>` : "";
+  return `<li><button type="button" class="wave-member ${issue.status}${memberClass}" title="${escapeTitle(detail)}"${openData}${pruneData}><span class="dot ${dotClass(issue.status)}"></span>#${escapeHtml(issue.issueNumber)} ${title}${badge}<small>${escapeHtml(issue.status)}</small></button></li>`;
 };
 
 /** A wave's member list — one interactive row per issue (see `renderWaveMember`),
@@ -180,11 +189,11 @@ const renderWaveCard = (wave: StatusWave, project: string, prune: boolean, inter
   // a prune pruned reads at a glance — the pruned rows are a display overlay (ADR 0007),
   // and this counts them. The label sits in its own element so a long one wraps within
   // itself without shoving the meta group (tally · state · pruned) onto its own line.
-  const pruned = wave.issues.filter((issue) => issue.status === "pruned").length;
+  const pruned = wave.issues.filter((issue) => issue.membership === "pruned").length;
   const tally = pruned ? `<span class="wave-pruned">${pruned} pruned</span>` : "";
   // A wave holding a freshly-grafted issue (#202) is marked so its edge pulses the teal
   // accent once when it appears — the graft confirming on the wave (option 1a).
-  const grafted = wave.issues.some((issue) => issue.status === "grafted") ? " has-grafted" : "";
+  const grafted = wave.issues.some((issue) => issue.membership === "grafted") ? " has-grafted" : "";
   return `<section class="wave ${wave.status}${grafted}"${extraAttrs}><div class="wave-head"><h2 class="wave-label">${renderWaveLabel(wave, festiveName)}</h2><div class="wave-meta"><span class="wave-tally">${waveMerged(wave)}/${wave.issues.length}</span><span class="wave-status ${wave.status}">${wave.status}</span>${tally}</div></div>${renderWaveMembers(wave, project, prune, interactive, run)}</section>`;
 };
 
@@ -222,14 +231,15 @@ const renderWaves = (status: CampaignStatus, prune: boolean, interactive: boolea
 };
 
 /**
- * Whether the campaign is wave-parked — a red merged base paused it and it holds a
- * `wave-parked` wave (ADR 0013). The Resume control below surfaces only in that state.
+ * Whether the campaign is wave-parked — a red merged base paused it, so a held issue
+ * carries the `red-base` park reason (ADR 0019). The Resume control below surfaces only
+ * in that state, keyed on the reason rather than a distinct wave word.
  */
-const isWaveParked = (status: CampaignStatus) => status.waves.some((wave) => wave.status === "wave-parked");
+const isWaveParked = (status: CampaignStatus) => status.waves.some((wave) => wave.issues.some((issue) => issue.reason === "red-base"));
 
-/** Whether any issue is quarantined — a merge conflict pulled a passed green out of
- * integration (ADR 0013) and it awaits a manual resolve. Gates the informational note. */
-const hasQuarantined = (status: CampaignStatus) => status.waves.some((wave) => wave.issues.some((issue) => issue.status === "quarantined"));
+/** Whether any issue is held on a merge conflict — the `conflict` park reason (ADR 0019),
+ * a passed green pulled out of integration awaiting a manual resolve. Gates the note. */
+const hasQuarantined = (status: CampaignStatus) => status.waves.some((wave) => wave.issues.some((issue) => issue.reason === "conflict"));
 
 /**
  * The wave-park Resume control (#171): when a campaign is paused on a red merged base,
@@ -249,7 +259,7 @@ const renderResumeControl = (status: CampaignStatus) =>
  * action route or button of its own.
  */
 const renderQuarantineNote = () =>
-  `<section class="quarantine-note"><strong>Issue quarantined</strong> — a merge conflict held a passed green out of integration. Resolve the conflict, then resume the campaign (the Resume control above, or <code>campaign --resume</code> in the project root).</section>`;
+  `<section class="quarantine-note"><strong>Issue held on a merge conflict</strong> — a passed green was kept out of integration. Resolve the conflict, then resume the campaign (the Resume control above, or <code>campaign --resume</code> in the project root).</section>`;
 
 /**
  * The Graft affordance (#168, reworked to mockup 1a in #202). Where prune prunes an
@@ -678,13 +688,13 @@ const formatRunWhen = (iso: string) => {
 /**
  * An archived run's terminal disposition → the shared log-view dot state its `.lv-dot`
  * paints through (#248). The `.lv-dot` palette is keyed on `LogDotState` names, not the
- * run's own `complete`/`interrupted`, so the row translates rather than minting new dot
- * variants: `complete` reads the success green (`merged`), `interrupted` the held-attention
+ * run's own `complete`/`stalled`, so the row translates rather than minting new dot
+ * variants: `complete` reads the success green (`merged`), `stalled` the held-attention
  * amber (`parked`) — the colours the bespoke `.archive-dot` carried before.
  */
 const ARCHIVE_DOT_STATE: Record<ArchivedRunState, LogDotState> = {
   complete: "merged",
-  interrupted: "parked",
+  stalled: "parked",
 };
 
 /**
@@ -1435,12 +1445,11 @@ ${HOST_LOG_STYLES}
   .wave.running { border-top-color: var(--color-blue); }
   /* A closed wave's card carries the green top edge its CLOSED state reads (§2). */
   .wave.closed { border-top-color: var(--color-green); }
-  /* A wave-parked wave — a red merged base holds it (ADR 0013) — carries the attention
-     amber top edge, the same amber an issue parked reads (§2). */
-  .wave.wave-parked { border-top-color: var(--color-yellow); }
-  /* An interrupted archived run's in-flight wave (#152) reads the same caution amber
-     the run-level state dot does — it stopped without finishing. */
-  .wave.interrupted { border-top-color: var(--color-yellow); }
+  /* A parked wave — a held member (a question, a conflict, or a red merged base) — carries
+     the attention amber top edge, the same amber an issue parked reads (§2, ADR 0019). */
+  .wave.parked { border-top-color: var(--color-yellow); }
+  /* A failed wave — a member the agent could not make green — reads the failure red (§2). */
+  .wave.failed { border-top-color: var(--color-failure); }
   /* A flex-grid item beats the UA [hidden] rule, so a collapsed closed card needs it back explicitly. */
   .wave.closed[hidden] { display: none; }
   /* One stable head row: the label takes the slack and wraps within itself, the meta
@@ -1470,13 +1479,19 @@ ${HOST_LOG_STYLES}
   .wave-member-title { color: var(--color-text-light); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .wave-member small { margin-left: auto; color: var(--color-text-light-2); white-space: nowrap; }
   .wave-member:hover, .completed-wave-chip:hover { background: var(--color-chip-hover); }
+  /* Membership badges (ADR 0019) — the axis orthogonal to the lifecycle word: a pruned
+     chip strikes through and dims, and each badge reads its own accent (pruned purple,
+     grafted the product teal), keyed on the membership class, never a lifecycle status. */
   .wave-member.pruned { color: var(--color-text-light-2); text-decoration: line-through; }
+  .member-badge { font-size: .68rem; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; border-radius: 999px; padding: .05rem .4rem; }
+  .member-badge.pruned { color: var(--color-pruned); border: 1px solid var(--color-pruned); background: rgb(163 113 247 / 12%); }
+  .member-badge.grafted { color: var(--color-primary); border: 1px solid var(--color-primary); background: var(--color-primary-alpha-20); }
   .wave-status { font-size: .85rem; margin-left: .5rem; text-transform: uppercase; letter-spacing: .03em; }
   .wave-status.closed { border-color: var(--color-green); color: var(--color-green); background: rgb(63 185 132 / 12%); }
   .wave-status.running { border-color: var(--color-blue); color: var(--color-blue); background: rgb(108 182 255 / 12%); }
   .wave-status.unstarted { border-color: var(--color-dim); color: var(--color-dim); background: rgb(95 107 120 / 12%); }
-  .wave-status.wave-parked { border-color: var(--color-yellow); color: var(--color-yellow); background: rgb(200 162 78 / 12%); }
-  .wave-status.interrupted { border-color: var(--color-yellow); color: var(--color-yellow); background: rgb(200 162 78 / 12%); }
+  .wave-status.parked { border-color: var(--color-yellow); color: var(--color-yellow); background: rgb(200 162 78 / 12%); }
+  .wave-status.failed { border-color: var(--color-failure); color: var(--color-failure); background: rgb(248 81 73 / 12%); }
   .wave-pruned { font-size: .78rem; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: var(--color-pruned); border: 1px solid var(--color-pruned); background: rgb(163 113 247 / 12%); border-radius: 999px; padding: .1rem .5rem; }
   /* Status dot colours, generated once from stateColor and shared with the landing
      (§3), scoped to .dot so a state never tints a whole chip, card, or list row (#81). */

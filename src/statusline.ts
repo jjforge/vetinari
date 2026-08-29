@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { basename } from "node:path";
 import { loadConfig } from "./config.ts";
-import { buildStatus, type CampaignStatus, type DisplayStatus, type IssueStatus } from "./status.ts";
+import { buildStatus, type CampaignStatus, type IssueStatus } from "./status.ts";
 import { composeStatusLine } from "./statusline-install.ts";
 
 const COUNT_EMOJI: Array<[IssueStatus, string]> = [
@@ -11,29 +11,6 @@ const COUNT_EMOJI: Array<[IssueStatus, string]> = [
   ["failure", "❌"],
   ["unstarted", "⚪"],
 ];
-
-/**
- * Fold a `DisplayStatus` to the base `IssueStatus` bucket it should count under
- * in the compact bar, or `null` when it counts nowhere. Base statuses pass
- * through unchanged; the overlay states (which `COUNT_EMOJI` has no glyph for)
- * map to their effective base so no issue is silently dropped from the tally:
- * `grafted`/`interrupted` are outstanding work → `unstarted`; `quarantined` is an
- * attention state grouped with `parked`; `pruned` is pruned out of the campaign,
- * so it is excluded from every bucket. Pure.
- */
-export function countBucket(status: DisplayStatus): IssueStatus | null {
-  switch (status) {
-    case "grafted":
-    case "interrupted":
-      return "unstarted";
-    case "quarantined":
-      return "parked";
-    case "pruned":
-      return null; // pruned from the campaign — counted in no bucket
-    default:
-      return status;
-  }
-}
 
 /**
  * Drop a trailing context-window parenthetical from a model name — Claude Code
@@ -68,10 +45,14 @@ export function formatStatusLine(status: CampaignStatus): string {
   const issues = status.waves.flatMap((wave) => wave.issues);
   if (!issues.length) return "🏰 idle";
 
+  // Count each chip by its lifecycle directly (ADR 0019): the two-axis split means the
+  // status is already a clean bucket (a grafted chip reads `unstarted` → ⚪, a conflict/
+  // stalled hold reads `parked` → ⏸); only a `pruned` member, which left the plan, counts
+  // nowhere.
   const counts = new Map<IssueStatus, number>();
   for (const issue of issues) {
-    const bucket = countBucket(issue.status);
-    if (bucket) counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
+    if (issue.membership === "pruned") continue;
+    counts.set(issue.status, (counts.get(issue.status) ?? 0) + 1);
   }
 
   const parts: string[] = [];

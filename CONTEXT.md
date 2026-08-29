@@ -227,14 +227,15 @@ not an epic, name it.
 _Avoid_: batch name
 
 **Wave-parked**:
-A whole [[wave]] held on a human, from either of two triggers. **Combined-gate:**
-every issue went green alone, but the **merged base is red together**, so no single
-issue is at fault (ADR 0013). **Escalated park:** an issue in the wave [[parked]];
-the wave **drains** (its other agents finish, their greens merge) and then parks, so
-no succeeding wave builds on an unresolved one (ADR 0017). Either way everything
-green stays merged (the base sits red, never pushed), the campaign pauses, and a
-human resolves it: fix forward and resume, or prune a suspect and resume. A run-level
-counterpart to an issue's [[parked]] — the wave, not one agent, waits on a human.
+The wave-level [[parked]] — the label a [[wave]] pill carries when the whole wave is
+held on a human (ADR 0019), from either of two [[park-reason]]s. **`red-base`
+(combined-gate):** every issue went green alone, but the **merged base is red
+together**, so no single issue is at fault (ADR 0013). **`question` (escalated
+park):** an issue in the wave [[parked]]; the wave **drains** (its other agents
+finish, their greens merge) and then parks, so no succeeding wave builds on an
+unresolved one (ADR 0017). Either way everything green stays merged (the base sits
+red, never pushed), the campaign pauses, and a human resolves it: fix forward and
+resume, or prune a suspect and resume.
 _Avoid_: halted, rolled back, failed wave
 
 ### Issue status
@@ -248,26 +249,28 @@ a slot. The active-wave slot-wait is not a separate status; it is still running.
 _Avoid_: working, in progress
 
 **parked**:
-The agent asked a question and stopped; the issue waits on a human answer. The one
-[[interactive]] state and the reason to open an issue's detail. A park **holds its
-wave** — the wave drains, then wave-parks, and no succeeding wave starts until it is
-resolved (ADR 0017). It is **durable**: always shown in the dashboard and always
-announced via Telegram until a human resolves it, never cleared out from under an
-open question.
+Held on a human, work preserved, resumable — the one word for every "needs-a-human"
+situation, at the issue, [[wave]], campaign, and card level alike (ADR 0019). What
+differs is the **[[park-reason]]** — which selects the recovery, not the status. A
+park **holds its wave** (the wave drains, then wave-parks; no succeeding wave starts
+until it is resolved — ADR 0017) and is **durable**: always shown and always
+announced via Telegram until a human resolves it.
+_Avoid_: blocked, waiting, quarantined, interrupted (all are `parked` + a reason)
 
-**quarantined**:
-A merge **conflict** pulled the issue out of integration; its branch, worktree, and
-agent session are preserved so it is resumable, never re-run from scratch. Distinct
-from [[parked]] (which asked a question) — a quarantine asks nothing, it holds a
-conflict for a human to resolve. The wave keeps its other greens merged and carries
-on. See [ADR 0013](../docs/adr/0013-wave-integration-is-non-atomic-quarantine-and-wave-park.md).
-_Avoid_: conflicted, skipped, rejected
+**Park reason**:
+Why a [[parked]] issue or wave is held, and which recovery it offers — metadata, not
+a status (ADR 0019). `question`: the agent asked something (answer it). `conflict`: a
+merge conflict pulled a passed green out of integration, branch/worktree/session
+preserved (resolve the conflict — see [ADR 0013](../docs/adr/0013-wave-integration-is-non-atomic-quarantine-and-wave-park.md)).
+`red-base`: every issue passed alone but the merged base is red (fix forward).
+`crash`: the run stopped with no verdict (resume to continue).
+_Avoid_: quarantined, interrupted (those were reasons masquerading as statuses)
 
 **failure**:
-The run errored out **without** parking. The dashboard shows it — the orchestrator
-really does emit this, so hiding it would make the UI and the event log disagree on
-which states exist. The turn log tells the story of why.
-_Avoid_: failed, errored, broken
+The single **red terminal** — an issue the agent could not make green. Distinct from
+[[parked]] (amber, waiting) and it **outranks** it on roll-up: a level with any
+failure reads [[failed]], not parked (ADR 0019). The turn log tells the story of why.
+_Avoid_: errored, broken
 
 **completed**:
 The issue's work landed on the base.
@@ -290,6 +293,23 @@ A [[graft]] added the issue to the running campaign; it waits in a later [[wave]
 — the additive mirror of [[pruned]]: shown while the issue is `unstarted`, it
 becomes [[running]] on pickup. Answers "why did this wave grow?" at a glance.
 _Avoid_: added, appended, injected
+
+### Campaign & card state
+
+Derived, one derivation per level, aggregating issue → [[wave]] → campaign → card
+(ADR 0019). A level is never stored; it is read from the level below.
+
+**failed**:
+A campaign or card roll-up carrying at least one [[failure]] issue — the red
+"something broke" state. Needs a human (prune, or fix and resume) and **outranks**
+[[parked]] on roll-up.
+_Avoid_: halted, errored
+
+**idle**:
+A card with **no** campaign that is running, [[parked]], or [[failed]] — either no
+plan at all or a cleanly [[completed]] run folded away. Never a held or failed
+campaign hidden behind it.
+_Avoid_: done, empty, inactive
 
 ### Campaign planning
 

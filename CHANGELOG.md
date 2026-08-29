@@ -18,6 +18,23 @@ and each entry opens with a tag saying who it reaches:
 `**Breaking changes:**` sorts first in a milestone and names the contract it broke.
 Within a milestone each bold section label appears at most once.
 
+### Collected changes — August 29, 2026
+
+**Breaking changes:**
+- [ops] Retired the `make demo-create` / `make demo-clean` targets and `scripts/seed-demo-dashboard.mts`; seeding the demo dashboard is now `vetinari demo create` / `demo remove` (#225).
+
+**New features:**
+- [user] The non-resumable agent providers `copilot`, `cursor`, and `opencode` can now drive the TDD loop: each is accepted by `--agent`/`cfg.agent.provider`, and the loop re-enters every red turn as a fresh run (re-reading the issue, its prior work already committed on the branch, the prompt carrying the gate report plus the most-recent turn summary) instead of resuming a session. `maxTurns`, host budget, and the green/empty-green/`BLOCKED`/budget-park outcomes are honored identically to a resumable run; `maxTurns 1` is a one-shot (#212).
+- [user] The landing's Event Log gains a project dropdown beside the free-text filter — "all repos" by default, one option per project present in the feed (labelled by its `owner/name`, matching the top-bar switcher). Selecting a project scopes the feed in place (it does not navigate) and composes with the text filter as AND; the Download JSON export honours it too. Client-only and ephemeral: it resets on reload and adds no URL param (#220).
+- [user] `vetinari demo create` / `demo remove` seed and tear down the demo dashboard fixture — one registered project per run-state (running, parked, failure, completed, idle) whose issues between them render every dashboard chip state, so you can click through the status UI (#225). Seeds under `$VETINARI_DEMO_DIR` (default `~/.cache/vetinari-demo`); `create` is idempotent (clear-then-reseed), and `remove` deletes only the demo root and the registry pointers under it, never a real project.
+
+**Improvements:**
+- [user] `vetinari gateway start|stop|restart` now print what they did and the gateway's resulting state — including the "already running" / "wasn't running" no-op cases and an honest "came up not active" line — instead of a blank line, each with a `journalctl` logs hint (#218).
+- [internal] A coverage guard reads the seeded demo back through the dashboard model and goes red — plus a compile-time exhaustiveness check on `DisplayStatus`/`RunState` — whenever a new dashboard state is not represented in the demo (#225).
+
+**Bug fixes:**
+- [user] A per-issue park no longer lets a campaign wave read "done" and roll on with an open question. The wave now drains (its in-flight siblings finish and their greens still merge), then escalates to a wave-park: the parked issue keeps its record — so it stays visible on the dashboard, answerable on Telegram, and resumable — and no succeeding wave starts until a human answers/resolves or prunes it and runs `campaign --resume` (#231).
+
 ### Collected changes — August 28, 2026
 
 **Breaking changes:**

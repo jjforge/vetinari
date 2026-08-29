@@ -47,16 +47,14 @@ export const DASHBOARD_PALETTE_CSS = `  :root {
  */
 const STATE_COLOR_TOKEN: Record<string, string> = {
   running: "blue",
+  // The single held state is `parked` — a question, a conflict, or a red base all read
+  // the same attention amber (ADR 0019); the specific reason lives in the detail, not a
+  // distinct colour. A failed `wave`/`failed` roll-up reads the failure red like an issue.
   parked: "yellow",
-  // A quarantined issue and a wave-parked wave are both attention-class held states
-  // (ADR 0013), so they read in the same amber as an issue `parked` (§1).
-  quarantined: "yellow",
-  "wave-parked": "yellow",
-  // An interrupted archived run's in-flight wave/issue (#152): it stopped without
-  // finishing, a caution the same amber reads on the run-level state dot.
-  interrupted: "yellow",
+  failed: "failure",
   failure: "failure",
   completed: "green",
+  // `pruned` is a membership badge colour (ADR 0019), not a lifecycle dot state.
   pruned: "pruned",
   unstarted: "dim",
   queued: "dim",
@@ -99,7 +97,7 @@ export const counterColor = (kind: string): string => `var(--color-${COUNTER_COL
 export const STATE_DOT_CSS =
   `.dot, .repo-dot, .tail-dot, .lv-dot { border-radius: 999px; flex: none; } ` +
   `.dot { width: .75rem; height: .75rem; display: inline-block; } ` +
-  ["running", "parked", "failure", "completed", "unstarted", "pruned", "queued", "quarantined", "interrupted"].map((s) => `.dot.${s} { background: ${stateColor(s)}; }`).join(" ") +
+  ["running", "parked", "failure", "completed", "unstarted", "queued"].map((s) => `.dot.${s} { background: ${stateColor(s)}; }`).join(" ") +
   ` @keyframes chip-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } } .dot.running { animation: chip-pulse 1.4s ease-in-out infinite; } .dot.running.idle { animation: none; } @media (prefers-reduced-motion: reduce) { .dot.running { animation: none; } }`;
 
 /**
@@ -109,7 +107,7 @@ export const STATE_DOT_CSS =
  * each member row carries a matching status class. Tally counts (not states) are
  * deliberately left out — they keep a neutral edge (§7).
  */
-export const STATE_CHIP_BORDER_CSS = ["running", "parked", "failure", "completed", "unstarted", "pruned", "quarantined", "interrupted"].map((s) => `.wave-member.${s} { border-color: ${stateBorderColor(s)}; }`).join(" ");
+export const STATE_CHIP_BORDER_CSS = ["running", "parked", "failure", "completed", "unstarted"].map((s) => `.wave-member.${s} { border-color: ${stateBorderColor(s)}; }`).join(" ");
 
 /**
  * The mono treatment for the repo dropdown's label (#88). The dashboard loads no
@@ -191,7 +189,7 @@ export const ISSUE_DETAIL_SHEET_STYLES = `  .prune-panel { display: flex; align-
   /* A stateful card: the issue's state reads on the 2px top edge only (§2), derived
      from stateColor; the other three edges stay the neutral 1px. */
   .issue-detail-sheet { display: flex; flex-direction: column; width: min(640px, 100%); max-height: 85vh; overflow: hidden; background: var(--color-card); border: 1px solid var(--color-secondary); border-top: 2px solid var(--color-dim); border-radius: var(--border-radius-medium); box-shadow: 0 18px 48px #0009; }
-  ${["running", "parked", "failure", "completed", "unstarted", "pruned", "quarantined", "interrupted"].map((s) => `.issue-detail-sheet.${s} { border-top-color: ${stateColor(s)}; }`).join(" ")}
+  ${["running", "parked", "failure", "completed", "unstarted"].map((s) => `.issue-detail-sheet.${s} { border-top-color: ${stateColor(s)}; }`).join(" ")}
   .issue-detail-header { position: sticky; top: 0; display: flex; align-items: flex-start; gap: .75rem; padding: 1rem 1.15rem; background: var(--color-box-header); border-bottom: 1px solid var(--color-light-border); }
   .issue-detail-head-main { flex: 1; min-width: 0; }
   .issue-detail-status { display: inline-flex; align-items: center; gap: .4rem; font-size: .85rem; text-transform: uppercase; letter-spacing: .03em; color: var(--color-text-light-2); }
@@ -216,7 +214,7 @@ export const ISSUE_DETAIL_SHEET_STYLES = `  .prune-panel { display: flex; align-
   .turn-entry { display: flex; gap: .6rem; padding: .55rem 0; border-bottom: 1px solid var(--color-light-border); }
   .turn-entry:last-child { border-bottom: 0; }
   .turn-num { flex: none; font-weight: 700; font-variant-numeric: tabular-nums; }
-  ${["completed", "parked", "failure", "running", "unstarted", "pruned", "quarantined"].map((s) => `.turn-num.${s} { color: ${stateColor(s)}; }`).join(" ")}
+  ${["completed", "parked", "failure", "running", "unstarted"].map((s) => `.turn-num.${s} { color: ${stateColor(s)}; }`).join(" ")}
   .turn-summary { color: var(--color-text-light); }
   .turn-empty { color: var(--color-text-light-2); padding: .55rem 0; }
   /* Parked-reply block + the actions row pin to the sheet foot so Resume/Prune stay
@@ -297,9 +295,11 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
   // it through /answer to resume the parked task. Options are best-effort — absent,
   // only the free-text field shows. Any other status hides the whole block.
   const renderReply = (d) => {
-    // An archived issue is read-only: it never offers a reply/resume, even if its
-    // reconstructed status is parked (an interrupted run's unanswered question).
-    const parked = d.status === "parked" && !d.archived;
+    // The reply/resume block is for a question park only (ADR 0019): a held issue reads
+    // parked whatever its reason, but a merge conflict, a red base, or a stall is resolved
+    // through the campaign-level affordance, not a per-issue answer. So gate on the reason
+    // (a legacy park with no reason still reads as a question). An archived issue is read-only.
+    const parked = d.status === "parked" && !d.archived && (!d.reason || d.reason === "question");
     detailReply.hidden = !parked;
     replyResume.hidden = !parked;
     if (parked) {

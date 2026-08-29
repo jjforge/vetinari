@@ -104,11 +104,11 @@ test("a parked event reads verb `parked` amber with its reason as the strong key
   assert.equal(row.dot, "parked");
 });
 
-test("a quarantined event reads verb `quarantined` amber", () => {
+test("a quarantined event reads as a parked (amber) merge-conflict hold, not the retired word (ADR 0019)", () => {
   const row = humanizeLogLine(raw(event("quarantined", { taskId: "204", branch: "agent/204", detail: "conflict", ts: "2026-08-28T00:00:00.000Z" })));
   assert.equal(row.actor, "#204");
-  assert.equal(row.verb, "quarantined");
-  assert.deepEqual(row.spans, [p("— resolve the conflict")]);
+  assert.equal(row.verb, "parked");
+  assert.deepEqual(row.spans, [p("— merge conflict, resolve it")]);
   assert.equal(row.dot, "parked");
 });
 

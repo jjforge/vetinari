@@ -132,10 +132,11 @@ test("both the landing and the campaign page emit the one shared palette, and ev
       );
     }
   }
-  // The concrete #78 repro: pruned is referenced on the landing (feed, dots, turn log) and resolves.
+  // The concrete #78 repro: pruned is referenced on the campaign page (the pruned membership
+  // badge + the wave-pruned tally, ADR 0019) and resolves.
   assert.ok(
-    referencedTokens(landing).has("--color-pruned"),
-    "landing references --color-pruned",
+    referencedTokens(campaign).has("--color-pruned"),
+    "campaign references --color-pruned",
   );
   assert.ok(defined.has("--color-pruned"), "--color-pruned resolves");
 });
@@ -164,7 +165,7 @@ test("cards fill card-grey and chips fill the darker panel with a 40%-alpha stat
   );
   assert.ok(
     STATE_CHIP_BORDER_CSS.includes(
-      ["running", "parked", "failure", "completed", "unstarted", "pruned", "quarantined", "interrupted"]
+      ["running", "parked", "failure", "completed", "unstarted"]
         .map((s) => `.wave-member.${s} { border-color: ${stateBorderColor(s)}; }`)
         .join(" "),
     ),
@@ -264,7 +265,7 @@ test("both pages share one set of status-dot rules, scoped to .dot so a state ne
         {
           index: 0,
           status: "running",
-          issues: [{ issueNumber: "1", status: "pruned" }],
+          issues: [{ issueNumber: "1", status: "unstarted", membership: "pruned" }],
         },
       ],
       parked: [],
@@ -280,12 +281,13 @@ test("both pages share one set of status-dot rules, scoped to .dot so a state ne
     campaign.includes(STATE_DOT_CSS),
     "campaign page includes the shared dot rules",
   );
-  // Every status colour is scoped to `.dot`, and each dot's colour is `stateColor` (asserted
+  // Every lifecycle colour is scoped to `.dot`, and each dot's colour is `stateColor` (asserted
   // by value there): the shared rules are generated from it, so one check proves the wiring for
-  // the whole family rather than re-pinning each state's background.
+  // the whole family. The dot reads the lifecycle only (ADR 0019) — the retired quarantined/
+  // interrupted overlays are gone, and pruned is a membership badge, not a dot state.
   assert.ok(
     STATE_DOT_CSS.includes(
-      ["running", "parked", "failure", "completed", "unstarted", "pruned", "queued", "quarantined", "interrupted"]
+      ["running", "parked", "failure", "completed", "unstarted", "queued"]
         .map((s) => `.dot.${s} { background: ${stateColor(s)}; }`)
         .join(" "),
     ),
@@ -336,14 +338,15 @@ test("renderStatusPage shows a Resume control only for a wave-parked campaign (#
     {
       project: "beta",
       waves: [
-        { index: 0, status: "wave-parked", issues: [{ issueNumber: "201", status: "completed" }] },
+        { index: 0, status: "parked", issues: [{ issueNumber: "201", status: "parked", reason: "red-base" }] },
         { index: 1, status: "unstarted", issues: [{ issueNumber: "401", status: "unstarted" }] },
       ],
       parked: [],
     },
     { prune: true },
   );
-  // A wave-parked campaign offers a Resume action that POSTs to /resume carrying only
+  // A wave-parked campaign (a held member with the red-base reason) offers a Resume action
+  // that POSTs to /resume carrying only
   // its project (resume is project-scoped — no taskId), mirroring the prune/answer forms.
   assert.match(waveParked, /<form method="post" action="\/resume"[^>]*>/);
   assert.match(waveParked, /name="project" value="beta"/);
@@ -418,13 +421,13 @@ test("renderStatusPage marks a freshly-grafted wave with a static teal edge, not
     project: "beta",
     waves: [
       { index: 0, status: "running" as const, issues: [{ issueNumber: "201", status: "running" as const }] },
-      { index: 1, status: "unstarted" as const, issues: [{ issueNumber: "305", status: "grafted" as const }] },
+      { index: 1, status: "unstarted" as const, issues: [{ issueNumber: "305", status: "unstarted" as const, membership: "grafted" as const }] },
     ],
     parked: [],
   };
   const html = renderStatusPage(grafted, { prune: true, graft: true });
-  // A wave carrying a grafted issue is marked, and takes the teal product accent on its
-  // edge so the new card reads at a glance when it arrives on the live refresh.
+  // A wave carrying a grafted issue (the membership axis) is marked, and takes the teal
+  // product accent on its edge so the new card reads at a glance on the live refresh.
   assert.match(html, /class="wave unstarted has-grafted"/);
   assert.match(html, /\.wave\.has-grafted \{ border-top-color: var\(--color-primary\); \}/);
   // §5 reserves motion for the work/stream channels — the mockup's teal pulse is
@@ -480,7 +483,7 @@ test("renderStatusPage shows an informational quarantine affordance with no acti
           status: "running",
           issues: [
             { issueNumber: "611", status: "completed" },
-            { issueNumber: "640", status: "quarantined" },
+            { issueNumber: "640", status: "parked", reason: "conflict" },
           ],
         },
       ],
@@ -488,7 +491,8 @@ test("renderStatusPage shows an informational quarantine affordance with no acti
     },
     { prune: true },
   );
-  // A quarantined issue surfaces a "resolve the conflict, then resume" note...
+  // A merge-conflict-held issue (the conflict park reason) surfaces a "resolve the conflict,
+  // then resume" note...
   assert.match(quarantined, /class="quarantine-note"/);
   assert.match(quarantined, /resolve the conflict/i);
   // ...but the note is informational only — it introduces no action form/route of its own.
@@ -747,6 +751,17 @@ test("the issue-detail sheet markup, CSS, and script are defined once and shared
   // The hand-sync note is gone now that the sheet has a single source.
   assert.ok(!landing.includes("#76"));
   assert.ok(!landing.includes("kept in sync"));
+});
+
+test("the issue-detail sheet offers a reply/resume only for a question park, not a conflict/red-base/stall (ADR 0019)", () => {
+  // A held issue reads `parked` whatever its reason, so the reply block must gate on the
+  // reason — a merge conflict / red base / stall is resolved through the campaign-level
+  // affordance, not a per-issue answer. The shipped sheet script keys the reply block off
+  // `d.reason` (a legacy park with no reason still reads as a question).
+  assert.match(
+    ISSUE_DETAIL_SHEET_SCRIPT,
+    /const parked = d\.status === "parked" && !d\.archived && \(!d\.reason \|\| d\.reason === "question"\)/,
+  );
 });
 
 test("renderLandingShell's feed renders humanized rows in the shared .lv-row component, dot by event state (#216)", () => {
@@ -1043,7 +1058,7 @@ test("no status/category word is ever a bare top-level CSS class, so a component
           {
             index: 0,
             status: "running",
-            issues: [{ issueNumber: "1", status: "pruned" }],
+            issues: [{ issueNumber: "1", status: "unstarted", membership: "pruned" }],
           },
         ],
         parked: [],
@@ -1231,6 +1246,9 @@ test("wave labels read from tmp-log issue titles, resolved through buildStatusWi
       index: 1,
       tasks: ["201"],
     }),
+    // The batch spawns its member: 201 goes running, so the wave folds to `running`
+    // (the wave status is a pure fold of its issues now, ADR 0019).
+    event("queue-start", { ts: "2025-01-01T00:03:30.000Z", taskIds: ["201"], slots: 1 }),
   ]);
   const titles: Record<string, string> = {
     "101": "config resolution",
@@ -1337,6 +1355,9 @@ test("wave labels and chip hovers render from the log's titles, with no fetchTas
       index: 1,
       tasks: ["201"],
     }),
+    // The batch spawns its member: 201 goes running, so the wave folds to `running`
+    // (the wave status is a pure fold of its issues now, ADR 0019).
+    event("queue-start", { ts: "2025-01-01T00:03:30.000Z", taskIds: ["201"], slots: 1 }),
   ]);
 
   // buildStatus over cfgFor's id-echoing fetchTask: the only source of titles is
@@ -1358,9 +1379,9 @@ test("wave labels and chip hovers render from the log's titles, with no fetchTas
     html,
     /<section class="wave running"><div class="wave-head"><h2 class="wave-label">Wave 2 — cache eviction<\/h2><div class="wave-meta"><span class="wave-tally">0\/1<\/span><span class="wave-status running">running<\/span>/,
   );
-  // Every chip carries its own title on hover — 201 has no status detail yet, so
-  // its hover is exactly the resolved title.
-  assert.match(html, /<button[^>]*title="cache eviction"[^>]*>/);
+  // Every chip carries its own title on hover, alongside its status detail — 201 is
+  // running (queued for this wave), so its hover is the title plus that detail.
+  assert.match(html, /title="cache eviction&#10;Queued for this wave"/);
   // A chip whose issue also has a status detail carries the title alongside it.
   assert.match(html, /title="config resolution&#10;Merged into base"/);
 });
@@ -1415,7 +1436,7 @@ test("renderStatusPage renders one stable wave-head row: label · merged/total �
             name: "Guest checkout entry point",
           },
           { issueNumber: "202", status: "running" },
-          { issueNumber: "203", status: "pruned" },
+          { issueNumber: "203", status: "unstarted", membership: "pruned" },
         ],
       },
     ],
@@ -1492,18 +1513,19 @@ test("renderStatusPage colours a pruned chip and pulses a running one", () => {
         status: "running",
         issues: [
           { issueNumber: "201", status: "running", name: "live one" },
-          { issueNumber: "202", status: "pruned", name: "pruned one" },
+          { issueNumber: "202", status: "unstarted", membership: "pruned", name: "pruned one" },
         ],
       },
     ],
     parked: [],
   });
 
-  // A pruned member row carries the pruned status dot + title + status word, and its
-  // `.wave-member.pruned` class reads struck-through…
+  // A pruned member row composes the two axes (ADR 0019): its lifecycle dot/word read
+  // `unstarted`, and a `pruned` membership badge rides alongside; the `.wave-member.pruned`
+  // class (the membership) reads struck-through…
   assert.match(
     html,
-    /<button type="button" class="wave-member pruned"[^>]*><span class="dot pruned"><\/span>#202 <span class="wave-member-title">pruned one<\/span><small>pruned<\/small><\/button>/,
+    /<button type="button" class="wave-member unstarted pruned"[^>]*><span class="dot unstarted"><\/span>#202 <span class="wave-member-title">pruned one<\/span><span class="member-badge pruned">pruned<\/span><small>unstarted<\/small><\/button>/,
   );
   assert.match(
     html,
@@ -1868,7 +1890,7 @@ test("renderStatusPage renders archived runs as a collapsible list of wave cards
         {
           run: "2026-01-01T00-00-00-000Z",
           startedAt: "2026-01-01T00:00:00.000Z",
-          state: "interrupted",
+          state: "stalled",
           issues: 1,
           status: archStatus("111"),
         },
@@ -1901,10 +1923,10 @@ test("renderStatusPage renders archived runs as a collapsible list of wave cards
     /<button type="button" class="lv-row" aria-expanded="false" aria-controls="archive-body-2026-02-01T22-22-36-267Z"><span class="lv-t">Feb 1, 2026 · 22:22:36<\/span><span class="lv-dot merged"><\/span><span class="lv-msg"><span class="lv-lead">comms \+ dashboard<\/span><span class="lv-verb">complete · 3 issues<\/span><\/span><\/button>/,
   );
   // An unnamed run falls back to its token as the label; issue count pluralizes;
-  // interrupted maps to the parked (amber) dot.
+  // stalled maps to the parked (amber) dot (ADR 0019).
   assert.match(
     html,
-    /<span class="lv-dot parked"><\/span><span class="lv-msg"><span class="lv-lead">2026-01-01T00-00-00-000Z<\/span><span class="lv-verb">interrupted · 1 issue<\/span><\/span>/,
+    /<span class="lv-dot parked"><\/span><span class="lv-msg"><span class="lv-lead">2026-01-01T00-00-00-000Z<\/span><span class="lv-verb">stalled · 1 issue<\/span><\/span>/,
   );
   // The bespoke `.archive-*` chrome is gone.
   assert.doesNotMatch(html, /archive-name|archive-when|archive-state|archive-dot|archive-toggle|archive-chevron/);
@@ -1972,7 +1994,7 @@ test("renderStatusPage renders an archived run's when-time in the operator's LOC
   }
 });
 
-test("renderStatusPage shows an interrupted run as interrupted and still expands it to its partial waves", () => {
+test("renderStatusPage shows a stalled run as stalled and still expands it to its partial waves", () => {
   const html = renderStatusPage(
     { project: "beta", waves: [], parked: [] },
     {
@@ -1983,7 +2005,7 @@ test("renderStatusPage shows an interrupted run as interrupted and still expands
         {
           run: "2026-05-01T00-00-00-000Z",
           startedAt: "2026-05-01T00:00:00.000Z",
-          state: "interrupted",
+          state: "stalled",
           issues: 2,
           status: {
             project: "beta",
@@ -1994,11 +2016,11 @@ test("renderStatusPage shows an interrupted run as interrupted and still expands
                 issues: [{ issueNumber: "101", status: "completed" }],
               },
               {
-                // The route reconciles an interrupted run's in-flight wave to the
-                // terminal `interrupted` — an archived run never reads as live (#152).
+                // The FSM folds a stalled run's in-flight issue to `parked{stalled}` —
+                // an archived run never reads as live (#152, ADR 0019).
                 index: 1,
-                status: "interrupted",
-                issues: [{ issueNumber: "201", status: "interrupted" }],
+                status: "parked",
+                issues: [{ issueNumber: "201", status: "parked", reason: "stalled" }],
               },
             ],
             parked: [],
@@ -2008,16 +2030,16 @@ test("renderStatusPage shows an interrupted run as interrupted and still expands
     },
   );
 
-  // The row reads interrupted — the parked (amber) dot and the `.lv-verb` disposition…
+  // The row reads stalled — the parked (amber) dot and the `.lv-verb` disposition…
   assert.match(
     html,
-    /<span class="lv-dot parked"><\/span><span class="lv-msg"><span class="lv-lead">2026-05-01T00-00-00-000Z<\/span><span class="lv-verb">interrupted · 2 issues<\/span><\/span>/,
+    /<span class="lv-dot parked"><\/span><span class="lv-msg"><span class="lv-lead">2026-05-01T00-00-00-000Z<\/span><span class="lv-verb">stalled · 2 issues<\/span><\/span>/,
   );
-  // …and, opened, its body still shows the partial waves it did run — the
-  // in-flight wave/issue reconciled to the terminal `interrupted`, never `running`.
+  // …and, opened, its body still shows the partial waves it did run — the in-flight
+  // wave/issue folded to the terminal `parked{stalled}`, never `running`.
   // (The live campaign has no waves, so these chips are the archived run's own.)
   assert.match(html, /#101 <small>completed<\/small>/);
-  assert.match(html, /#201 <small>interrupted<\/small>/);
+  assert.match(html, /#201 <small>parked<\/small>/);
   assert.doesNotMatch(html, /<small>running<\/small>/);
 });
 
@@ -2348,7 +2370,7 @@ test("renderStatusPage renders the turn log newest-first with each turn number i
   // The status dot palette is shared, so a turn number reuses the same status colours. Each
   // state's colour is `stateColor` (asserted by value there); one structural check confirms the
   // page splices those turn-num rules in, proven once rather than re-pinned per state.
-  const turnNumCss = ["completed", "parked", "failure", "running", "unstarted", "pruned", "quarantined"]
+  const turnNumCss = ["completed", "parked", "failure", "running", "unstarted"]
     .map((s) => `.turn-num.${s} { color: ${stateColor(s)}; }`)
     .join(" ");
   assert.ok(html.includes(turnNumCss), "the page splices the stateColor-derived turn-num rules");
@@ -3009,26 +3031,27 @@ test("formatStatusText summarizes waves, issue chips (with names), and the parke
   assert.match(text, /#655 — blocked/);
 });
 
-test("formatStatusText labels a wave-parked wave and a quarantined issue (ADR 0013)", () => {
+test("formatStatusText labels a held wave and its merge-conflict-held issue as parked (ADR 0019)", () => {
   const text = formatStatusText({
     project: "jjforge",
     waves: [
       {
         index: 0,
-        status: "wave-parked",
+        status: "parked",
         issues: [
           { issueNumber: "611", status: "completed", name: "Fix parser" },
-          { issueNumber: "640", status: "quarantined", name: "Add prune-out" },
+          { issueNumber: "640", status: "parked", reason: "conflict", name: "Add prune-out" },
         ],
       },
     ],
     parked: [],
   });
 
-  // The held wave reads its own label, distinct from an issue parked.
-  assert.match(text, /Wave 1\/1 ⏸ wave-parked/);
-  // The quarantined issue carries its own emoji + status word.
-  assert.match(text, /🚧 #640 Add prune-out/);
+  // The held wave reads the one `parked` word at every level (ADR 0019) — the specific
+  // reason lives in the detail, not a distinct wave word.
+  assert.match(text, /Wave 1\/1 ⏸ parked/);
+  // The merge-conflict-held issue reads the parked emoji + word, no retired status word.
+  assert.match(text, /⏸ #640 Add prune-out/);
 });
 
 test("formatStatusText reports when nothing is running", () => {

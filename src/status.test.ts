@@ -1383,14 +1383,14 @@ test("serveAllStatus lists a project's archived runs and renders one read-only w
     // run (201) still renders at the top.
     assert.match(root, /#201 <small>/);
     assert.match(root, /<section class="archived-runs">/);
-    // Each row carries its token, state (an interrupted run stopped short — a
-    // campaign-start with no terminal event) and issue count; unnamed runs fall back
-    // to the token as the label.
+    // Each row carries its token, state (a stalled run stopped short — a campaign-start
+    // with no terminal event, ADR 0019) and issue count; unnamed runs fall back to the
+    // token as the label.
     assert.match(
       root,
       /<li data-run="2026-02-01T00-00-00-000Z">/,
     );
-    assert.match(root, /<span class="lv-verb">interrupted · 1 issue<\/span>/);
+    assert.match(root, /<span class="lv-verb">stalled · 1 issue<\/span>/);
     assert.match(
       root,
       /<li data-run="2026-01-01T00-00-00-000Z">/,
@@ -1505,14 +1505,15 @@ test("serveAllStatus reconstructs a pruned issue in a selected archived run, rea
     ).text();
     // The archived run renders under its --name in the collapsible list…
     assert.match(html, /<span class="lv-lead">spring cleanup<\/span>/);
-    // …and its campaign pane reconstructs the pruned-out 201 as a pruned chip in the
-    // wave it left, so an operator can see what the run was pruned down to (ADR 0007).
+    // …and its campaign pane reconstructs the pruned-out 201 as a chip in the wave it
+    // left: its lifecycle dot/word read `unstarted`, and it carries the `pruned` membership
+    // badge, so an operator sees what the run was pruned down to (ADR 0007/0019).
     assert.match(
       html,
-      /<span class="dot pruned"><\/span>#201 <small>pruned<\/small>/,
+      /<span class="dot unstarted"><\/span>#201 <span class="member-badge pruned">pruned<\/span><small>unstarted<\/small>/,
     );
-    // Read-only: the archived pruned chip is never prunable.
-    assert.doesNotMatch(html, /data-prunable="1"[^>]*<span class="dot pruned">/);
+    // Read-only: the archived pruned chip (#201) is never prunable.
+    assert.doesNotMatch(html, /data-issue="201"[^>]*data-prunable/);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

@@ -60,7 +60,7 @@ test("the issue-detail sheet carries the issue's state on its top edge only (§2
   // check confirms the shared sheet CSS splices those rules in, proven once not per state.
   assert.ok(
     ISSUE_DETAIL_SHEET_STYLES.includes(
-      ["running", "parked", "failure", "completed", "unstarted", "pruned", "quarantined", "interrupted"]
+      ["running", "parked", "failure", "completed", "unstarted"]
         .map((s) => `.issue-detail-sheet.${s} { border-top-color: ${stateColor(s)}; }`)
         .join(" "),
     ),
@@ -93,16 +93,15 @@ test("stateColor is the single state→colour derivation, failure distinct from 
 });
 
 test("stateBorderColor is the single derivation for the muted 40%-alpha chip borders (§4, #83)", () => {
-  // §4: a wave-member row borders its status at 40% alpha — the same token as stateColor,
-  // suffixed `-40`. quarantined/interrupted read amber like parked (ADR 0013, #152).
+  // §4: a wave-member row borders its lifecycle at 40% alpha — the same token as stateColor,
+  // suffixed `-40`. The retired quarantined/interrupted overlays are gone (ADR 0019); pruned
+  // keeps its own token as a membership badge colour.
   assert.equal(stateBorderColor("running"), "var(--color-blue-40)");
   assert.equal(stateBorderColor("parked"), "var(--color-yellow-40)");
   assert.equal(stateBorderColor("failure"), "var(--color-failure-40)");
   assert.equal(stateBorderColor("completed"), "var(--color-green-40)");
   assert.equal(stateBorderColor("pruned"), "var(--color-pruned-40)");
   assert.equal(stateBorderColor("unstarted"), "var(--color-dim-40)");
-  assert.equal(stateBorderColor("quarantined"), "var(--color-yellow-40)");
-  assert.equal(stateBorderColor("interrupted"), "var(--color-yellow-40)");
 });
 
 test("counterColor is the single derivation for the landing counter-value colours (#80)", () => {

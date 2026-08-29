@@ -1,5 +1,5 @@
 import { listProjects } from "./registry.ts";
-import { archiveStatusConfig, buildAllStatus, buildStatus, festiveFromCookie, listArchivedRuns, projectRunState, reconcileArchivedStatus, repoForProject, selectStatus } from "./dashboard-model.ts";
+import { archiveStatusConfig, buildAllStatus, buildStatus, cardState, festiveFromCookie, listArchivedRuns, repoForProject, selectStatus } from "./dashboard-model.ts";
 import { renderLandingShell, renderStatusPage } from "./dashboard-render.ts";
 import type { RouteHandler } from "./dashboard-http.ts";
 
@@ -23,7 +23,7 @@ export const handlePage: RouteHandler = (req, res, url, deps) => {
   // owner/name (from the git remote) so it reads that instead of the bare key.
   const repos = statuses.map((s) => {
     const pointer = pointers.find((p) => p.project === s.project);
-    return { project: s.project, runState: projectRunState(s), repo: pointer ? repoForProject(pointer.projectRoot) : undefined };
+    return { project: s.project, runState: cardState(s), repo: pointer ? repoForProject(pointer.projectRoot) : undefined };
   });
   // No project selected → the all-repos landing shell. Also the empty-registry
   // fallback, so a fresh host lands on the (empty) landing rather than a stub page.
@@ -38,17 +38,17 @@ export const handlePage: RouteHandler = (req, res, url, deps) => {
   const requestedRun = url.searchParams.get("run") ?? undefined;
   const match = requestedRun ? archivedRuns.find((r) => r.run === requestedRun) : undefined;
   // Each row's body renders the run's reconstructed status read-only: point
-  // buildStatus at the archived log; its dir holds no parked records, so the status
-  // carries none (a finished run has nothing to act on). An interrupted run's log ends
-  // with no terminal event, so `reconcileArchivedStatus` folds its live `running`
-  // states to the terminal `interrupted` — an archived run must never read as live (#152).
+  // buildStatus at the archived log with `dead: true`; its dir holds no parked records,
+  // so the status carries none (a finished run has nothing to act on). A stalled run's
+  // log ends with no terminal event, so the FSM folds its in-flight `running` issues to
+  // `parked{stalled}` — an archived run must never read as live (#152, ADR 0019).
   const runs = archivedRuns.map((r) => ({
     run: r.run,
     name: r.name,
     startedAt: r.startedAt,
     state: r.state,
     issues: r.issues,
-    status: reconcileArchivedStatus(buildStatus(archiveStatusConfig(selected.project, r.file)), r.state),
+    status: buildStatus(archiveStatusConfig(selected.project, r.file), { dead: true }),
   }));
   res.end(
     renderStatusPage(selected, {

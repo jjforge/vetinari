@@ -42,37 +42,76 @@ export function repoForProject(projectRoot: string): string | undefined {
   }
 }
 
+/**
+ * The issue lifecycle — the single stored axis of the state machine (ADR 0019).
+ * An issue is `unstarted` until assigned, then `running`, and ends `completed`,
+ * `failure`, or (resumably) `parked`. This is the whole status enum: the old
+ * render-time overlays (`quarantined`, `interrupted`) collapse into `parked` plus a
+ * reason, and `pruned`/`grafted` move to the orthogonal `Membership` axis.
+ */
 export type IssueStatus = "completed" | "parked" | "failure" | "running" | "unstarted";
 
 /**
- * A chip's status as the dashboard renders it: the orchestrator's own `IssueStatus`
- * plus two states derived at render rather than carried as enum values — the agent
- * loop and `IssueStatus` stay untouched (ADR 0007). `pruned` is folded from prune
- * events; `quarantined` (ADR 0013) from the `quarantined` event a merge conflict
- * logs, an attention-class state that outranks the issue's own green outcome until
- * it is resolved and re-merged. Only the view layer knows them; `reduceCampaign`'s
- * `outcomes` stay `IssueStatus`.
+ * Why a `parked` issue is held (ADR 0019) — metadata set *by the transition*, not a
+ * status word: `question` (a `parked{blocked}` awaiting an answer), `conflict` (a
+ * `quarantined` merge conflict), `red-base` (a combined-gate wave-park), or `stalled`
+ * (a `parked{budget|idle-timeout}`, or a crash — end-of-log with no terminal event and
+ * a dead process). The reason selects the recovery affordance; the surface word is one.
  */
-export type DisplayStatus = IssueStatus | "pruned" | "grafted" | "quarantined" | "interrupted";
+export type ParkReason = "question" | "conflict" | "red-base" | "stalled";
+
+/**
+ * An issue's membership in the campaign (ADR 0019) — the axis orthogonal to its
+ * lifecycle: a plain `member`, a `grafted` addition still waiting to start, or a
+ * `pruned` issue dropped from the plan. Render composes `(lifecycle, membership)`:
+ * the dot reads the lifecycle, a badge reads the membership, with no precedence ladder.
+ */
+export type Membership = "member" | "grafted" | "pruned";
+
+/** An issue's lifecycle snapshot — its FSM state and, when `parked`, the reason. */
+export interface IssueLifecycle {
+  state: IssueStatus;
+  reason?: ParkReason;
+}
+
+/**
+ * The status a chip renders — now exactly the lifecycle (ADR 0019). The render-time
+ * overlays are gone: `quarantined`/`interrupted` fold into `parked`+reason, and
+ * `pruned`/`grafted` live on `StatusIssue.membership`. Kept as a distinct name only
+ * so the render sites read `DisplayStatus` where they mean "the lifecycle to paint".
+ */
+export type DisplayStatus = IssueStatus;
 
 export interface StatusIssue {
   issueNumber: string;
+  /** the issue's lifecycle state — the dot/word the chip paints (ADR 0019). */
   status: DisplayStatus;
+  /** why it is `parked`, when it is — selects the recovery affordance, not a word. */
+  reason?: ParkReason;
+  /** the orthogonal membership axis — the badge the chip carries. Absent reads as a
+   * plain `member` (the common case), so only a `grafted`/`pruned` chip sets it. */
+  membership?: Membership;
   name?: string;
   detail?: string;
 }
 
 /**
- * A wave's status as the dashboard renders it. `wave-parked` (ADR 0013) is the
- * run-level held state a red merged base leaves: every green passed alone, the
- * combined base gated red, so the wave's greens stay merged and the campaign pauses
- * for a human — distinct from an issue `parked`, which is one issue's slot awaiting
- * a reply. Derived at render from the `wave-parked` event, like `pruned`/`quarantined`.
- * `interrupted` is the archived-run reconciliation (#152): an interrupted run's log
- * ends with no terminal event, so its in-flight `running` wave is folded to this
- * terminal state — an archived run must never render a live status.
+ * A wave's status — a **pure fold of its issues' lifecycles** (ADR 0019), no longer a
+ * render-time derivation off campaign structure. `failed` (any member failed) outranks
+ * `parked` (any member held — a question, a conflict, or the combined-gate red-base),
+ * then `running` (any in flight), then `closed` (all resolved), else `unstarted`. The
+ * old `wave-parked`/`interrupted` words are gone: a held wave is `parked`, its members
+ * carry the specific `ParkReason`.
  */
-export type WaveStatus = "closed" | "running" | "unstarted" | "wave-parked" | "interrupted";
+export type WaveStatus = "closed" | "running" | "unstarted" | "parked" | "failed";
+
+/**
+ * A campaign's status — a pure fold of its waves (ADR 0019). Mirrors the wave fold's
+ * precedence (`failed` > `parked` > `running`), with `completed` when every wave has
+ * closed and `unstarted` when none has begun. The card fold (`cardState`) maps this to
+ * the landing's `RunState`, collapsing `completed`/`unstarted` to `idle`.
+ */
+export type CampaignState = "failed" | "parked" | "running" | "completed" | "unstarted";
 
 export interface StatusWave {
   index: number;
@@ -107,6 +146,47 @@ const statusForOutcome = (outcome: string | undefined): IssueStatus => {
   if (outcome?.startsWith("error")) return "failure";
   return "unstarted";
 };
+
+/**
+ * The `ParkReason` a `parked` event/record carries (ADR 0019), read off its freeform
+ * `reason`: a resource stop (`budget`, an idle/timeout) is `stalled`; anything else —
+ * `blocked`, or a human-worded ask — is a `question` awaiting an answer. The other two
+ * reasons (`conflict`, `red-base`) come from their own events, never a `parked` reason.
+ */
+export const parkReasonFromEvent = (reason: string | undefined): ParkReason =>
+  reason && /budget|idle|timeout/i.test(reason) ? "stalled" : "question";
+
+/**
+ * The wave fold (ADR 0019): a wave's status is a pure fold of its issues' lifecycles,
+ * skipping `pruned` members (they left the plan, so they never force a wave to read
+ * running/unstarted). `failed` outranks `parked` outranks `running`; a wave whose every
+ * live member has `completed` is `closed`; an empty or all-unstarted wave is `unstarted`.
+ * This is what makes a wave with a red member read `failed`, never `running` (#262).
+ */
+export function waveState(issues: readonly { status: DisplayStatus; membership?: Membership }[]): WaveStatus {
+  const live = issues.filter((i) => i.membership !== "pruned");
+  if (!live.length) return "unstarted";
+  if (live.some((i) => i.status === "failure")) return "failed";
+  if (live.some((i) => i.status === "parked")) return "parked";
+  if (live.some((i) => i.status === "running")) return "running";
+  if (live.every((i) => i.status === "completed")) return "closed";
+  return "unstarted";
+}
+
+/**
+ * The campaign fold (ADR 0019): a pure fold of the wave states below it, same
+ * precedence as the wave fold. Any `failed` wave → `failed`; any `parked` wave →
+ * `parked`; any `running` wave → `running`; all `closed` → `completed`; else
+ * `unstarted`. The card fold (`cardState`) collapses `completed`/`unstarted` to `idle`.
+ */
+export function campaignState(waves: readonly WaveStatus[]): CampaignState {
+  if (!waves.length) return "unstarted";
+  if (waves.some((w) => w === "failed")) return "failed";
+  if (waves.some((w) => w === "parked")) return "parked";
+  if (waves.some((w) => w === "running")) return "running";
+  if (waves.every((w) => w === "closed")) return "completed";
+  return "unstarted";
+}
 
 /**
  * The events appended to a jsonl event log past a character offset, and the
@@ -305,7 +385,7 @@ export function describeEvent(e: OrchestratorEvent, festive?: { offset: number }
     case "parked":
       return `${hash(e.taskId)} parked${e.reason ? `: ${e.reason}` : ""}`;
     case "quarantined":
-      return `${hash(e.taskId)} quarantined — resolve the conflict`;
+      return `${hash(e.taskId)} parked — merge conflict, resolve it`;
     case "wave-parked":
       return "Wave parked — merged base gated red";
     case "prune":
@@ -453,11 +533,10 @@ export interface ReducedCampaign {
    * reaches a started outcome (`running`/`completed`/…), so it reads `grafted` only
    * while waiting in a later wave. Both live and archived runs see it. */
   grafted: Set<string>;
-  /** the issues a merge conflict quarantined out of integration (ADR 0013), folded
-   * from `quarantined` events in log order and cleared once the issue re-merges. A
-   * render overlay like `pruned`: it outranks the issue's `IssueStatus` outcome (a
-   * quarantined issue passed its own gate, so `outcomes` holds `completed`) so the
-   * chip reads `quarantined` while the conflict is unresolved. */
+  /** the issues a merge conflict held out of integration (ADR 0013), folded from
+   * `quarantined` events in log order and cleared once the issue re-merges. It drives
+   * the lifecycle: a held issue passed its own gate (`outcomes` holds `completed`) but
+   * `issueLifecycle` reads it as `parked` with reason `conflict` until it re-merges (ADR 0019). */
   quarantined: Set<string>;
   /** the optional human name the campaign was launched with (`--name`), read off
    * the latest `campaign-start` event; undefined for an unnamed run. */
@@ -483,6 +562,14 @@ export interface ReducedCampaign {
    * `wave-parked` event, which lands on the in-flight wave with no `campaign-batch-done`
    * to close it, so this holds `currentWave` at the point the wave-park was logged. */
   parkedWave: number;
+  /** issue id → the structured `ParkReason` its `parked` event carried (ADR 0019),
+   * folded so the lifecycle can surface *why* an issue is held. Absent for an issue
+   * parked only by a surviving on-disk record (the reason is read from the record). */
+  parkReasons: Map<string, ParkReason>;
+  /** the issues a combined-gate wave-park is holding on a red base (ADR 0019) — the
+   * members of the wave the `wave-parked` event landed on. Their lifecycle reads
+   * `parked` with reason `red-base`, which is what makes the held wave fold to `parked`. */
+  redBase: Set<string>;
 }
 
 /**
@@ -508,6 +595,8 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
   const titles = new Map<string, string>();
   const mergedAt = new Map<string, string>();
   const closedWaves = new Set<number>();
+  const parkReasons = new Map<string, ParkReason>();
+  let redBase = new Set<string>();
   let currentWave = -1;
   let parkedWave = -1;
 
@@ -557,6 +646,7 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
     } else if (e.event === "parked" && e.taskId) {
       const taskId = normalizeIssue(String(e.taskId));
       outcomes.set(taskId, "parked");
+      parkReasons.set(taskId, parkReasonFromEvent(typeof e.reason === "string" ? e.reason : undefined));
       details.set(taskId, `Parked: ${e.reason ?? "needs attention"}`);
     } else if (e.event === "quarantined" && e.taskId) {
       // A merge conflict pulled this green from integration (ADR 0013). Overlay it
@@ -564,19 +654,22 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
       // so the set is what makes the chip read `quarantined` until it re-merges.
       const taskId = normalizeIssue(String(e.taskId));
       quarantined.add(taskId);
-      details.set(taskId, "Quarantined on a merge conflict — resolve the conflict");
+      details.set(taskId, "Parked on a merge conflict — resolve the conflict");
     } else if (e.event === "wave-parked") {
       // A red merged base parked the in-flight wave (ADR 0013). No `campaign-batch-done`
-      // follows to close it, so it stays `currentWave`; record that as the parked wave.
+      // follows to close it, so it stays `currentWave`; record that as the parked wave and
+      // remember its members — their lifecycle reads parked(red-base) so the wave folds parked.
       parkedWave = currentWave;
+      redBase = new Set(waves[currentWave] ?? []);
     } else if (e.event === "campaign-batch-done" && Number.isInteger(e.index)) {
       closedWaves.add(e.index);
       currentWave = -1;
       for (const taskId of e.merged ?? []) {
         const issueNumber = normalizeIssue(String(taskId));
         outcomes.set(issueNumber, "completed");
-        // A clean re-merge resolves an earlier quarantine, so the chip reads completed —
-        // and its stale "resolve the conflict" detail is replaced with the merge line.
+        // A clean re-merge resolves an earlier quarantine or a red-base hold, so the chip
+        // reads completed — and its stale "resolve the conflict" detail becomes the merge line.
+        redBase.delete(issueNumber);
         if (quarantined.delete(issueNumber)) details.set(issueNumber, "Merged into base");
         if (!details.has(issueNumber)) details.set(issueNumber, "Merged into base");
         if (e.ts && !mergedAt.has(issueNumber)) mergedAt.set(issueNumber, String(e.ts));
@@ -628,7 +721,39 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
   // becomes `running` on pickup — so drop any grafted id that has since reached an outcome.
   for (const id of [...grafted]) if (outcomes.has(id)) grafted.delete(id);
 
-  return { waves, layout, pruned, grafted, quarantined, name, festiveOffset, outcomes, details, titles, mergedAt, closedWaves, currentWave, parkedWave };
+  return { waves, layout, pruned, grafted, quarantined, name, festiveOffset, outcomes, details, titles, mergedAt, closedWaves, currentWave, parkedWave, parkReasons, redBase };
+}
+
+/**
+ * The issue lifecycle FSM read off a reduced campaign (ADR 0019): the single stored
+ * axis, `{state, reason?}`. The transitions the event fold recorded resolve here —
+ * a `quarantined` merge conflict and a `red-base` wave-park override the issue's own
+ * green outcome to `parked` with their reason; a `parked` outcome carries its folded
+ * `ParkReason` (defaulting to `question`); and, on a `stalled` read (a dead run whose
+ * log has no terminal event), a still-`running` issue folds to `parked{stalled}` — the
+ * transition that replaced `reconcileArchivedStatus`'s running→interrupted. Membership
+ * is the orthogonal axis (`issueMembership`) and never appears here.
+ */
+export function issueLifecycle(r: ReducedCampaign, id: string, opts: { stalled?: boolean } = {}): IssueLifecycle {
+  const base = r.outcomes.get(id) ?? "unstarted";
+  if (base === "failure") return { state: "failure" };
+  if (r.quarantined.has(id)) return { state: "parked", reason: "conflict" };
+  if (r.redBase.has(id)) return { state: "parked", reason: "red-base" };
+  if (base === "parked") return { state: "parked", reason: r.parkReasons.get(id) ?? "question" };
+  if (opts.stalled && base === "running") return { state: "parked", reason: "stalled" };
+  return { state: base };
+}
+
+/**
+ * An issue's membership axis (ADR 0019): `pruned` (dropped from the plan), `grafted`
+ * (an addition still waiting to start — the reducer already scopes the set to
+ * still-unstarted ids), else a plain `member`. Orthogonal to the lifecycle, so the
+ * two compose at render with no precedence ladder.
+ */
+export function issueMembership(r: ReducedCampaign, id: string): Membership {
+  if (r.pruned.has(id)) return "pruned";
+  if (r.grafted.has(id)) return "grafted";
+  return "member";
 }
 
 /** One entry in an issue's turn log (ADR 0009): the turn's number as logged
@@ -649,7 +774,13 @@ export interface IssueTurn {
  */
 export interface IssueDetail {
   issueNumber: string;
+  /** the issue's lifecycle state — the dot/word the sheet paints (ADR 0019). */
   status: DisplayStatus;
+  /** why it is `parked`, when it is (ADR 0019) — selects the sheet's recovery affordance. */
+  reason?: ParkReason;
+  /** the orthogonal membership axis — the badge the sheet carries (ADR 0019); absent
+   * reads as a plain `member`. */
+  membership?: Membership;
   title?: string;
   campaignName?: string;
   turns: number;
@@ -688,8 +819,10 @@ const eventNamesIssue = (e: OrchestratorEvent, id: string): boolean => {
  */
 export function reconstructIssueDetail(events: OrchestratorEvent[], issueNumber: string): IssueDetail {
   const id = normalizeIssue(issueNumber);
-  const { outcomes, pruned, grafted, quarantined, titles, name } = reduceCampaign(events);
-  const status: DisplayStatus = pruned.has(id) ? "pruned" : quarantined.has(id) ? "quarantined" : grafted.has(id) ? "grafted" : outcomes.get(id) ?? "unstarted";
+  const reduced = reduceCampaign(events);
+  const { titles, name } = reduced;
+  const life = issueLifecycle(reduced, id);
+  const membership = issueMembership(reduced, id);
 
   const latestCampaignIndex = events.findLastIndex((e) => e.event === "campaign-start" && Array.isArray(e.batches));
   const relevant = latestCampaignIndex >= 0 ? events.slice(latestCampaignIndex) : events;
@@ -706,7 +839,7 @@ export function reconstructIssueDetail(events: OrchestratorEvent[], issueNumber:
   }
   const elapsedMs = stamps.length > 1 ? Math.max(...stamps) - Math.min(...stamps) : 0;
 
-  return { issueNumber: id, status, title: titles.get(id), campaignName: name, turns: turnLog.length, elapsedMs, turnLog: turnLog.reverse(), ...(worktree ? { worktree } : {}) };
+  return { issueNumber: id, status: life.state, ...(life.reason ? { reason: life.reason } : {}), membership, title: titles.get(id), campaignName: name, turns: turnLog.length, elapsedMs, turnLog: turnLog.reverse(), ...(worktree ? { worktree } : {}) };
 }
 
 /**
@@ -723,10 +856,11 @@ export function campaignRunning(events: OrchestratorEvent[]): boolean {
 
 /** An archived run's terminal disposition for the archived-runs list: `complete`
  * when its latest campaign reached the terminal `campaign-done`/`queue-done` (a
- * full, clean finish), else `interrupted` — the run was cut short and only its
- * partial waves were recorded (killed mid-wave, no terminal event). An
- * interrupted run still expands to the waves that did run. */
-export type ArchivedRunState = "complete" | "interrupted";
+ * full, clean finish), else `stalled` — the run stopped with no terminal event
+ * (killed mid-wave, a crash), the reason `stalled` (ADR 0019) at the run level. A
+ * stalled run still expands to the waves that did run; its in-flight issues fold to
+ * `parked{stalled}` when read back (`buildStatus({ dead: true })`). */
+export type ArchivedRunState = "complete" | "stalled";
 
 /**
  * A run's terminal disposition, scoped to the latest `campaign-start` like the
@@ -736,31 +870,7 @@ export type ArchivedRunState = "complete" | "interrupted";
 export function archivedRunState(events: OrchestratorEvent[]): ArchivedRunState {
   const start = events.findLastIndex((e) => e.event === "campaign-start" && Array.isArray(e.batches));
   const relevant = start >= 0 ? events.slice(start) : events;
-  return relevant.some((e) => e.event === "campaign-done" || e.event === "queue-done") ? "complete" : "interrupted";
-}
-
-/**
- * Reconcile a status reconstructed from an **archived** run's log to a terminal
- * display (#152). An archived run is finished by definition, but an interrupted one
- * (a crash, a kill/OOM) leaves a log that ends with no terminal event, so the shared
- * `reduceCampaign` fold — correct for the *live* log — leaves its in-flight wave and
- * issues `running`, a live status an archived run must never present. Map every live
- * `running` to the terminal `interrupted` (distinct from a clean `completed` or a
- * failed issue's `failure`); an unstarted future wave is left as-is (not a live status). A
- * `complete` run finished clean and has no `running` to touch, so it passes through
- * unchanged — and the live path never calls this, so it keeps deriving `running` as
- * today. Pure (no I/O), applied only on the archived read boundary.
- */
-export function reconcileArchivedStatus(status: CampaignStatus, state: ArchivedRunState): CampaignStatus {
-  if (state === "complete") return status;
-  return {
-    ...status,
-    waves: status.waves.map((wave) => ({
-      ...wave,
-      status: wave.status === "running" ? "interrupted" : wave.status,
-      issues: wave.issues.map((issue) => (issue.status === "running" ? { ...issue, status: "interrupted" } : issue)),
-    })),
-  };
+  return relevant.some((e) => e.event === "campaign-done" || e.event === "queue-done") ? "complete" : "stalled";
 }
 
 /**
@@ -789,8 +899,8 @@ export interface ArchivedRun {
   /** the run's `--name`, when it was launched with one — the list's primary label
    * (it falls back to the `run` timestamp token when absent). */
   name?: string;
-  /** whether the run finished clean (`complete`) or was cut short (`interrupted`);
-   * an interrupted row still expands to the partial waves recorded before it stopped. */
+  /** whether the run finished clean (`complete`) or was cut short (`stalled`);
+   * a stalled row still expands to the partial waves recorded before it stopped. */
   state: ArchivedRunState;
   /** the run's start time as an ISO timestamp, parsed from its `run` token; undefined
    * for a token that doesn't parse (so the row falls back to the token verbatim). */
@@ -859,8 +969,19 @@ export function summarizeRun(events: OrchestratorEvent[]): string {
   return `${mode} · ${count} issue${count === 1 ? "" : "s"} · ${failed ? "failed" : "complete"}`;
 }
 
-export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
-  const { waves, layout, pruned, grafted, quarantined, name, festiveOffset, outcomes, details, titles, closedWaves, currentWave, parkedWave } = reduceCampaign(readEventLog(cfg));
+/**
+ * Reconstruct a project's live campaign status off its event log (ADR 0005/0019).
+ * Each chip composes the two orthogonal axes — its `issueLifecycle` (the dot/word) and
+ * `issueMembership` (the badge) — and each wave's status is the pure `waveState` fold of
+ * its members, so a wave with a red member reads `failed` and a held wave reads `parked`
+ * by construction (no render-time precedence). `dead` marks a run whose process is gone
+ * (an archived read): with no terminal event in the log, a still-`running` issue folds to
+ * `parked{stalled}`, the transition that replaced `reconcileArchivedStatus`.
+ */
+export function buildStatus(cfg: ResolvedConfig, opts: { dead?: boolean } = {}): CampaignStatus {
+  const events = readEventLog(cfg);
+  const reduced = reduceCampaign(events);
+  const { waves, layout, name, festiveOffset, outcomes, details, titles, closedWaves } = reduced;
 
   const activeIssueNumbers = new Set(waves.flat());
   const closedIssueNumbers = new Set([...closedWaves].flatMap((index) => waves[index] ?? []));
@@ -871,40 +992,31 @@ export function buildStatus(cfg: ResolvedConfig): CampaignStatus {
   for (const parked of parkedRecords) {
     const taskId = normalizeIssue(parked.taskId);
     outcomes.set(taskId, "parked");
+    reduced.parkReasons.set(taskId, parkReasonFromEvent(parked.reason));
     details.set(taskId, `Parked: ${parked.reason}`);
   }
 
-  // Display waves render off `layout` (the pre-prune membership) so a pruned issue
-  // still shows as a `pruned` chip in the wave it left (ADR 0007). `closedWaves`
-  // and `currentWave` index the pruned `waves`, so each surviving layout wave maps
-  // to its pruned index by counting non-empty layout waves before it; a wholly
-  // pruned-out wave keeps its slot as an unstarted wave of pruned chips.
-  let prunedIndex = 0;
+  // A dead run whose log never reached a terminal event stalls its in-flight work: the
+  // `stalled` transition folds those `running` issues to `parked{stalled}` (was #152's
+  // running→interrupted). A live run (or a cleanly terminal one) leaves `running` alone.
+  const stalled = Boolean(opts.dead) && !events.some((e) => e.event === "campaign-done" || e.event === "queue-done");
+
+  // Display waves render off `layout` (the pre-prune membership) so a pruned issue still
+  // shows as a chip in the wave it left (ADR 0007). Each chip carries both axes; the wave's
+  // own status is the pure fold of its members (`waveState`), pruned members excluded.
   const displayWaves = layout.map((wave, index) => {
-    const survives = wave.some((issueNumber) => !pruned.has(issueNumber));
-    const prunedWave = survives ? prunedIndex++ : -1;
-    return {
-      index,
-      // A wave-parked wave (ADR 0013) is not closed (no batch-done) and outranks the
-      // running read it would otherwise get (its `currentWave` never reset), so the
-      // wave-park check sits above running.
-      status: (prunedWave >= 0 && closedWaves.has(prunedWave)
-        ? "closed"
-        : prunedWave >= 0 && parkedWave === prunedWave
-          ? "wave-parked"
-          : prunedWave >= 0 && currentWave === prunedWave
-            ? "running"
-            : "unstarted") as WaveStatus,
-      issues: wave.map((issueNumber) => ({
+    const issues = wave.map((issueNumber): StatusIssue => {
+      const life = issueLifecycle(reduced, issueNumber, { stalled });
+      return {
         issueNumber,
-        // pruned/quarantined/grafted are render overlays that outrank the stored outcome
-        // (ADR 0007/0013/0014); pruned wins over quarantined (a prune removes the issue).
-        // `grafted` is transient and already scoped to still-unstarted issues by the reducer.
-        status: (pruned.has(issueNumber) ? "pruned" : quarantined.has(issueNumber) ? "quarantined" : grafted.has(issueNumber) ? "grafted" : outcomes.get(issueNumber) ?? "unstarted") as DisplayStatus,
+        status: life.state,
+        ...(life.reason ? { reason: life.reason } : {}),
+        membership: issueMembership(reduced, issueNumber),
         name: titles.get(issueNumber),
         detail: details.get(issueNumber),
-      })),
-    };
+      };
+    });
+    return { index, status: waveState(issues), issues };
   });
 
   return {
@@ -1186,11 +1298,11 @@ export function selectStatus(statuses: CampaignStatus[], requested?: string): Ca
   return statuses.find((s) => s.project === requested) ?? statuses[0];
 }
 
-/** A project's run-state rolled up to one word for the landing card, from the
- * ADR 0007 vocabulary: `idle` when there is no live run, else the most
- * human-blocking state its issues are in, by the §3 precedence (a human needed >
- * a failure to surface > work in flight > all done). */
-export type RunState = "running" | "parked" | "failure" | "completed" | "idle";
+/** A project's run-state rolled up to one word for the landing card (ADR 0019): the
+ * card fold of its campaign. `failure` (a broken issue) outranks `parked` (a held
+ * one), then `running`; a completed or absent campaign folds to `idle` — the card
+ * never reads a bare "completed", and never `idle` while anything is parked or failed. */
+export type RunState = "running" | "parked" | "failure" | "idle";
 
 /** One project's row on the all-repos landing: its run state, the campaign it is
  * (or last) running, how far through the waves it is, how much has merged, a
@@ -1241,22 +1353,20 @@ export interface LandingView {
 }
 
 /**
- * The single state→run-state derivation for a project card (§3 precedence:
- * `parked > failure > running > unstarted > completed`). The most human-blocking
- * state wins — a repo with one parked question and four running agents reads
- * `parked`, because the question is the thing that needs a person; `failure` ranks
- * just below, since it also needs a human but a parked question is the more direct
- * ask. Pruned chips are display-only ghosts of issues that left the plan, so the
- * roll-up reads the live plan (a run whose only unmerged work was pruned still lands).
+ * The card fold (ADR 0019): a project's `RunState` is the pure fold of its campaign
+ * (which is itself the fold of its waves), with `completed`/`unstarted`/no-campaign
+ * collapsed to `idle`. `failure` outranks `parked` — a broken issue is a louder signal
+ * than a held one (the deliberate reversal of the old `parked > failure` order). A
+ * surviving parked record (a park that outlived its live plan) still forces `parked`,
+ * so the card is never `idle` while a question waits (#232, #258). No precedence ladder:
+ * the fold is the single derivation, so a card can never disagree with its waves.
  */
-export const projectRunState = (status: CampaignStatus): RunState => {
-  if (!status.waves.length) return "idle";
-  const issues = status.waves.flatMap((wave) => wave.issues).filter((i) => i.status !== "pruned");
-  if (status.parked.length) return "parked";
-  if (issues.some((i) => i.status === "failure")) return "failure";
-  if (issues.some((i) => i.status === "running")) return "running";
-  if (issues.every((i) => i.status === "completed")) return "completed";
-  return "running";
+export const cardState = (status: CampaignStatus): RunState => {
+  const campaign = campaignState(status.waves.map((wave) => wave.status));
+  if (campaign === "failed") return "failure";
+  if (campaign === "parked" || status.parked.length) return "parked";
+  if (campaign === "running") return "running";
+  return "idle";
 };
 
 /** Same *local* calendar day — the basis for "merged today". The gateway runs in
@@ -1300,30 +1410,6 @@ const mergedTodayForProject = (baseLocation: string, liveEvents: OrchestratorEve
   return merged.size;
 };
 
-/**
- * Fold a `DisplayStatus` to the base `IssueStatus` bucket the landing card's tally
- * should count it under, or `null` when it belongs in no bucket. Base statuses pass
- * through; the render overlays map to their effective base so no issue silently
- * leaks out of the count (#200): `grafted`/`interrupted` are outstanding work →
- * `unstarted`, `quarantined` is an attention state grouped with `parked`, and
- * `pruned` is pruned from the campaign so it counts nowhere (ADR 0007/0013/0014).
- * Mirrors the statusline's own `countBucket` fold (#199) so the two count surfaces
- * agree by construction rather than drifting. Pure.
- */
-export function effectiveStatus(status: DisplayStatus): IssueStatus | null {
-  switch (status) {
-    case "grafted":
-    case "interrupted":
-      return "unstarted";
-    case "quarantined":
-      return "parked";
-    case "pruned":
-      return null; // pruned from the campaign — counted in no bucket
-    default:
-      return status;
-  }
-}
-
 const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, events: OrchestratorEvent[], parked: ParkedRecord[], logger: Logger, festive = false): ProjectCard => {
   // The card heading shows owner/name, read live off the checkout's git remote;
   // undefined for a project with none (the demo), so the display falls back to the key.
@@ -1353,17 +1439,15 @@ const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, event
       lastEvent: latest ? `Last run: ${latest.summary}` : "No runs yet",
     };
   }
-  // A finished run still lingering in the live log folds to idle at render time
-  // (#208): the read-only dashboard never archives (ADR 0002), so a campaign that
-  // reached its clean terminal `campaign-done`/`queue-done` — but whose log the CLI
-  // never emptied (a parked record kept `archiveIfIdle` a no-op, the process was
-  // killed before end-of-run, …) — otherwise reads `completed` forever. Fold only a
-  // run that is both cleanly terminal (`archivedRunState`) and would read `completed`:
-  // requiring `completed` keeps `parked` (parked wins), `failure` (a failed issue), and
-  // `running` off the fold, so an attention state never fades. The finished run's
-  // name + summary still show ("Last run: …"), read from the live log — which is left
-  // byte-for-byte untouched, this is display-only.
-  if (projectRunState(status) === "completed" && archivedRunState(events) === "complete") {
+  // A finished campaign still lingering in the live log folds to idle at render time
+  // (#208): the read-only dashboard never archives (ADR 0002), so a campaign whose
+  // every wave closed — but whose log the CLI never emptied — otherwise reads live
+  // forever. The card fold already collapses a `completed` campaign to `idle`; this
+  // branch swaps the live wave counts for the finished run's name + "Last run: …"
+  // summary. A surviving parked record still wins (parked over idle, #232); the fold's
+  // `failed`/`parked`/`running` never reach here, so no attention state ever fades. The
+  // live log is left byte-for-byte untouched — this is display-only.
+  if (campaignState(status.waves.map((wave) => wave.status)) === "completed") {
     const { waves, outcomes } = reduceCampaign(events);
     const finishedIssues = waves.flat();
     const merged = finishedIssues.filter((n) => outcomes.get(n) === "completed").length;
@@ -1380,9 +1464,9 @@ const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, event
   }
   // The card reflects the live plan, not the display's pruned ghosts: drop pruned
   // chips (and any wave left wholly pruned) so wave counts and progress match what
-  // is actually still running (ADR 0007's pruned is a campaign-view overlay only).
+  // is actually still running (ADR 0007/0019's pruned is a membership overlay only).
   const liveWaves = status.waves
-    .map((wave) => ({ ...wave, issues: wave.issues.filter((i) => i.status !== "pruned") }))
+    .map((wave) => ({ ...wave, issues: wave.issues.filter((i) => i.membership !== "pruned") }))
     .filter((wave) => wave.issues.length);
   const issues = liveWaves.flatMap((wave) => wave.issues);
   const total = liveWaves.length;
@@ -1392,18 +1476,18 @@ const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, event
   return {
     project: status.project,
     repo,
-    runState: projectRunState(status),
+    runState: cardState(status),
     campaignName: status.name,
     // "N of M": the wave in flight if one is, otherwise how many have closed.
     wave: { current: runningWave >= 0 ? runningWave + 1 : closed, total },
     percentMerged: issues.length ? Math.round((completed / issues.length) * 100) : 0,
-    // Count each issue under its *effective* status so a render overlay can't leak
-    // out of the tally: a grafted issue waiting in a later wave folds to `unstarted`
-    // and lands in `queued` (#200), matching the statusline's fold (#199).
+    // Count each issue by its lifecycle directly — the two-axis split means a chip's
+    // status is already a clean lifecycle (a grafted issue reads `unstarted` → queued,
+    // #200), with pruned members dropped above (a pruned chip counts in no bucket).
     tally: {
-      running: issues.filter((i) => effectiveStatus(i.status) === "running").length,
-      parked: issues.filter((i) => effectiveStatus(i.status) === "parked").length,
-      queued: issues.filter((i) => effectiveStatus(i.status) === "unstarted").length,
+      running: issues.filter((i) => i.status === "running").length,
+      parked: issues.filter((i) => i.status === "parked").length,
+      queued: issues.filter((i) => i.status === "unstarted").length,
     },
     lastEvent: lastEventText(events, festive),
   };
@@ -1453,7 +1537,11 @@ export function buildLanding(pointers: ProjectPointer[], now: Date = new Date(),
   return {
     counters: {
       working: sum((c) => c.tally.running),
-      parked: sum((c) => c.tally.parked),
+      // The parked counter *is* the length of the cross-repo parked queue it expands into
+      // (#259): both derive from the one `parked` array, so the number and the list can never
+      // disagree by construction — a conflict/red-base hold shows as an amber chip with its
+      // own recovery affordance, not as a phantom row the counter would over-count (ADR 0019).
+      parked: parked.length,
       queued: sum((c) => c.tally.queued),
       mergedToday,
     },

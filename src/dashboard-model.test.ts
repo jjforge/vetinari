@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { appendedEvents, archiveStatusConfig, archivedRunState, buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, describeEvent, event, extractParkedDetails, formatFeedEvent, issueStateFromTask, lastEventText, listArchivedRuns, ownerRepoFromRemote, parkedReplyFor, parsePruneClosure, parseRunTimestamp, reconcileArchivedStatus, reconstructIssueDetail, projectRunState, reduceCampaign, festiveFromCookie, viewRelevantEvents, waveLabel, selectStatus, summarizeRun, type CampaignStatus, type OrchestratorEvent } from "./status.ts";
+import { appendedEvents, archiveStatusConfig, archivedRunState, buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, campaignState, cardState, describeEvent, event, extractParkedDetails, formatFeedEvent, issueLifecycle, issueMembership, issueStateFromTask, lastEventText, listArchivedRuns, ownerRepoFromRemote, parkedReplyFor, parsePruneClosure, parseRunTimestamp, reconstructIssueDetail, reduceCampaign, festiveFromCookie, viewRelevantEvents, waveLabel, waveState, selectStatus, summarizeRun, type CampaignStatus, type OrchestratorEvent } from "./status.ts";
 import type { ProjectPointer } from "./registry.ts";
 import { memoryLogger } from "./log.ts";
 
@@ -1020,6 +1020,37 @@ test("buildLanding collects every parked question across repos, oldest first", (
   assert.equal(parked[1].question, "Should the counter live-update?");
 });
 
+test("the landing parked counter equals the cross-repo parked queue length, even with a conflict-held chip (#259)", () => {
+  const base = join(tmpdir(), `vetinari-landing-parked-count-${Date.now()}`);
+  const dir = join(base, "acme");
+  // 101 hit a merge conflict (parked{conflict}) and 102 parked on a question. Both read
+  // `parked` on the lifecycle, but only the question writes a parked record — so the
+  // cross-repo queue lists one row. The counter must equal that list, not the two held
+  // chips (ADR 0019, the pre-0019 bug where quarantined over-counted the queue).
+  seedState(dir, [
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["101", "102"]], slots: 1 }),
+    event("campaign-batch", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["101", "102"] }),
+    event("queue-start", { ts: "2025-01-01T00:02:00.000Z", taskIds: ["101", "102"], slots: 2 }),
+    event("green", { ts: "2025-01-01T00:03:00.000Z", taskId: "101", branch: "agent/101", commits: [] }),
+    event("quarantined", { ts: "2025-01-01T00:04:00.000Z", taskId: "101", branch: "agent/101", detail: "CONFLICT" }),
+    event("parked", { ts: "2025-01-01T00:05:00.000Z", taskId: "102", reason: "blocked" }),
+  ]);
+  writeFileSync(
+    join(dir, "parked", "102.json"),
+    JSON.stringify({ taskId: "102", parkedAt: "2025-01-01T00:05:00.000Z", reason: "blocked", branch: "agent/102", question: "Which approach?" }),
+  );
+
+  const { counters, parked } = buildLanding([pointerFor("acme", dir)], new Date("2025-01-01T12:00:00.000Z"));
+  // The conflict chip (101) is held but not a queued question — the queue lists only 102.
+  assert.deepEqual(
+    parked.map((p) => p.issueNumber),
+    ["102"],
+  );
+  // …and the counter equals that list length exactly, never the two held chips.
+  assert.equal(counters.parked, parked.length);
+  assert.equal(counters.parked, 1);
+});
+
 test("buildAllStatus builds one status per live project and skips a stale one", () => {
   const base = join(tmpdir(), `vetinari-all-status-${Date.now()}`);
   const alphaDir = join(base, "alpha");
@@ -1084,58 +1115,128 @@ test("buildAllStatus routes a stale-registration skip to the injected logger, no
   );
 });
 
-test("projectRunState resolves a card's state by the §3 precedence: parked > failure > running > completed (#83)", () => {
-  const wave = (issues: { issueNumber: string; status: string }[]) => [
-    { index: 0, status: "running" as const, issues: issues as any },
+test("cardState folds a card's state, failure outranking parked, completed/none → idle (ADR 0019)", () => {
+  const wave = (status: "running" | "parked" | "failed" | "closed" | "unstarted", issues: { issueNumber: string; status: string }[]) => [
+    { index: 0, status, issues: issues as any },
   ];
-  // The most human-blocking state wins. A parked question beats a failure and any
-  // number of running agents — it is the most direct ask (a change from the old
-  // failure-first order).
+  // failure outranks parked now — the deliberate reversal of the old parked-first order:
+  // a broken issue is a louder signal than a held one. A failed wave reads failure even
+  // with a surviving parked record.
   assert.equal(
-    projectRunState({
+    cardState({
       project: "p",
-      waves: wave([
+      waves: wave("failed", [
         { issueNumber: "1", status: "failure" },
         { issueNumber: "2", status: "running" },
       ]),
       parked: [{ issueNumber: "3" }] as any,
     }),
-    "parked",
-  );
-  // With no parked question, failure ranks next — above work still in flight.
-  assert.equal(
-    projectRunState({
-      project: "p",
-      waves: wave([
-        { issueNumber: "1", status: "failure" },
-        { issueNumber: "2", status: "running" },
-      ]),
-      parked: [],
-    }),
     "failure",
   );
-  // Then running, then all-done completed.
+  // A held (parked) wave with no failure reads parked.
   assert.equal(
-    projectRunState({
+    cardState({
       project: "p",
-      waves: wave([{ issueNumber: "1", status: "running" }]),
+      waves: wave("parked", [{ issueNumber: "1", status: "parked" }]),
+      parked: [],
+    }),
+    "parked",
+  );
+  // A surviving parked record forces parked even when the plan folds to idle (#232).
+  assert.equal(
+    cardState({
+      project: "p",
+      waves: wave("closed", [{ issueNumber: "1", status: "completed" }]),
+      parked: [{ issueNumber: "9" }] as any,
+    }),
+    "parked",
+  );
+  // Then running.
+  assert.equal(
+    cardState({
+      project: "p",
+      waves: wave("running", [{ issueNumber: "1", status: "running" }]),
       parked: [],
     }),
     "running",
   );
+  // A completed campaign folds to idle — the card never reads a bare "completed" (ADR 0019).
   assert.equal(
-    projectRunState({
+    cardState({
       project: "p",
-      waves: wave([{ issueNumber: "1", status: "completed" }]),
+      waves: wave("closed", [{ issueNumber: "1", status: "completed" }]),
       parked: [],
     }),
-    "completed",
-  );
-  // No live run at all reads idle.
-  assert.equal(
-    projectRunState({ project: "p", waves: [], parked: [] }),
     "idle",
   );
+  // No live run at all reads idle.
+  assert.equal(cardState({ project: "p", waves: [], parked: [] }), "idle");
+});
+
+test("issue lifecycle + wave/campaign folds are one FSM, tested by replaying events (ADR 0019)", () => {
+  // Replay an event sequence and assert the resulting issue lifecycles and the folds above
+  // them, no render harness needed. 101 merges (completed), 102 parks blocked (question),
+  // 103 quarantines on a merge conflict (parked/conflict), 104 errors (failure).
+  const reduced = reduceCampaign([
+    event("campaign-start", { ts: "t0", batches: [["101", "102", "103", "104"]], slots: 1 }),
+    event("campaign-batch", { ts: "t1", index: 0, tasks: ["101", "102", "103", "104"] }),
+    event("green", { ts: "t2", taskId: "101", branch: "agent/101", commits: [] }),
+    event("parked", { ts: "t3", taskId: "102", reason: "blocked" }),
+    event("green", { ts: "t4", taskId: "103", branch: "agent/103", commits: [] }),
+    event("quarantined", { ts: "t5", taskId: "103", branch: "agent/103", detail: "CONFLICT" }),
+    event("queue-done", { ts: "t6", outcomes: { "104": "error(3)" } }),
+  ]);
+  assert.deepEqual(issueLifecycle(reduced, "101"), { state: "completed" });
+  assert.deepEqual(issueLifecycle(reduced, "102"), { state: "parked", reason: "question" });
+  assert.deepEqual(issueLifecycle(reduced, "103"), { state: "parked", reason: "conflict" });
+  assert.deepEqual(issueLifecycle(reduced, "104"), { state: "failure" });
+  // Every id is a plain member here; the folds skip pruned membership only.
+  for (const id of ["101", "102", "103", "104"]) assert.equal(issueMembership(reduced, id), "member");
+
+  // The wave fold: failure outranks parked outranks running (#262). A red member makes the
+  // wave read `failed`, never `running`.
+  assert.equal(
+    waveState([
+      { status: "completed" },
+      { status: "parked" },
+      { status: "failure" },
+      { status: "running" },
+    ]),
+    "failed",
+  );
+  assert.equal(waveState([{ status: "completed" }, { status: "parked" }, { status: "running" }]), "parked");
+  assert.equal(waveState([{ status: "completed" }, { status: "running" }]), "running");
+  assert.equal(waveState([{ status: "completed" }, { status: "completed" }]), "closed");
+  // A pruned member never forces a wave's state; a wholly-pruned wave reads unstarted.
+  assert.equal(waveState([{ status: "running", membership: "pruned" }]), "unstarted");
+
+  // The campaign fold mirrors the wave fold's precedence over the waves below it.
+  assert.equal(campaignState(["closed", "parked", "failed", "running"]), "failed");
+  assert.equal(campaignState(["closed", "parked", "running"]), "parked");
+  assert.equal(campaignState(["closed", "running"]), "running");
+  assert.equal(campaignState(["closed", "closed"]), "completed");
+  assert.equal(campaignState([]), "unstarted");
+});
+
+test("issueLifecycle folds a stalled (dead, no-terminal) running issue to parked{stalled} (ADR 0019)", () => {
+  // A red-base wave-park holds its members with reason red-base; a budget/idle park stalls.
+  const redBase = reduceCampaign([
+    event("campaign-start", { ts: "t0", batches: [["201", "202"]], slots: 1 }),
+    event("campaign-batch", { ts: "t1", index: 0, tasks: ["201", "202"] }),
+    event("green", { ts: "t2", taskId: "201", branch: "agent/201", commits: [] }),
+    event("green", { ts: "t3", taskId: "202", branch: "agent/202", commits: [] }),
+    event("wave-parked", { ts: "t4", merged: ["201", "202"], detail: "npm test failed" }),
+  ]);
+  assert.deepEqual(issueLifecycle(redBase, "201"), { state: "parked", reason: "red-base" });
+
+  const running = reduceCampaign([
+    event("campaign-start", { ts: "t0", batches: [["301"]], slots: 1 }),
+    event("campaign-batch", { ts: "t1", index: 0, tasks: ["301"] }),
+    event("queue-start", { ts: "t2", taskIds: ["301"], slots: 1 }),
+  ]);
+  // A live read leaves it running; a dead read with no terminal event stalls it.
+  assert.deepEqual(issueLifecycle(running, "301"), { state: "running" });
+  assert.deepEqual(issueLifecycle(running, "301", { stalled: true }), { state: "parked", reason: "stalled" });
 });
 
 test("selectStatus picks the requested project, defaulting to the first otherwise", () => {
@@ -1321,7 +1422,7 @@ test("describeEvent narrates the operator-facing events in plain words", () => {
   // whose detail is the human's next move (ADR 0013).
   assert.equal(
     describeEvent(event("quarantined", { taskId: "640", branch: "agent/640", detail: "CONFLICT (content)" })),
-    "#640 quarantined — resolve the conflict",
+    "#640 parked — merge conflict, resolve it",
   );
   // A red merged base parked the whole wave — a run-level held state, no single culprit (ADR 0013).
   assert.equal(
@@ -1925,11 +2026,14 @@ test("buildStatus marks completed waves as closed", () => {
 
   const status = buildStatus(cfgFor(dir));
 
+  // The wave status is now a pure fold of its members' lifecycles (ADR 0019): wave 0's
+  // single merged issue → `closed`. Wave 1's batch was announced but no member has spawned
+  // (no queue-start), so it folds to `unstarted` — a wave is `running` only once a member is.
   assert.deepEqual(
     status.waves.map((w) => [w.index, w.status]),
     [
       [0, "closed"],
-      [1, "running"],
+      [1, "unstarted"],
     ],
   );
 });
@@ -1966,12 +2070,13 @@ test("buildStatus renders a pruned issue as a pruned chip in the wave it left", 
 
   const status = buildStatus(cfgFor(dir));
 
-  // …but it still renders as a pruned chip in the wave it left (ADR 0007), so a
-  // browsing operator sees what was pruned out — it is not silently gone.
+  // …but it still renders as a chip in the wave it left (ADR 0007), carrying the
+  // orthogonal `pruned` membership badge while its lifecycle stays its own (`unstarted`) —
+  // the two axes compose, no lifecycle "pruned" word (ADR 0019).
   assert.equal(status.waves.length, 2);
   assert.deepEqual(
-    status.waves.map((w) => w.issues.map((i) => [i.issueNumber, i.status])),
-    [[["101", "completed"]], [["201", "pruned"]]],
+    status.waves.map((w) => w.issues.map((i) => [i.issueNumber, i.status, i.membership])),
+    [[["101", "completed", "member"]], [["201", "unstarted", "pruned"]]],
   );
   // The pruned issue keeps its title on the chip.
   assert.equal(status.waves[1].issues[0].name, "add the report");
@@ -2011,12 +2116,13 @@ test("buildStatus marks active wave issues as running before they finish", () =>
   );
 });
 
-test("buildStatus marks a wave whose merged base gated red as wave-parked", () => {
+test("buildStatus folds a wave whose merged base gated red to parked (red-base members), ADR 0019", () => {
   const dir = join(tmpdir(), `vetinari-status-wave-parked-${Date.now()}`);
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
   // Both greens merged, but the combined base gated red: the wave wave-parks with no
-  // batch-done to close it (ADR 0013). Wave 1 (unstarted) still reads as itself.
+  // batch-done to close it (ADR 0013). Its members read parked(red-base), so the wave
+  // folds to `parked`; wave 1 (unstarted) still reads as itself.
   const events = [
     event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["611", "612"], ["701"]], slots: 1 }),
     event("campaign-batch", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["611", "612"] }),
@@ -2029,7 +2135,15 @@ test("buildStatus marks a wave whose merged base gated red as wave-parked", () =
   const status = buildStatus(cfgFor(dir));
   assert.deepEqual(
     status.waves.map((w) => w.status),
-    ["wave-parked", "unstarted"],
+    ["parked", "unstarted"],
+  );
+  // Each held member carries the red-base reason.
+  assert.deepEqual(
+    status.waves[0].issues.map((i) => [i.issueNumber, i.status, i.reason]),
+    [
+      ["611", "parked", "red-base"],
+      ["612", "parked", "red-base"],
+    ],
   );
 
   // The same reducer drives an archived run's read (buildStatus at the archive file),
@@ -2038,10 +2152,10 @@ test("buildStatus marks a wave whose merged base gated red as wave-parked", () =
   mkdirSync(join(dir, "logs", "archive"), { recursive: true });
   writeJsonl(archive, events);
   const archived = buildStatus(archiveStatusConfig("demo", archive));
-  assert.equal(archived.waves[0].status, "wave-parked");
+  assert.equal(archived.waves[0].status, "parked");
 });
 
-test("buildStatus renders a merge-conflict-quarantined issue as quarantined", () => {
+test("buildStatus renders a merge-conflict-quarantined issue as parked with reason conflict (ADR 0019)", () => {
   const dir = join(tmpdir(), `vetinari-status-quarantined-${Date.now()}`);
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
@@ -2058,18 +2172,19 @@ test("buildStatus renders a merge-conflict-quarantined issue as quarantined", ()
 
   const status = buildStatus(cfgFor(dir));
 
-  // The quarantine overlay wins over 640's green outcome; 611 stays completed.
+  // The conflict hold wins over 640's green outcome: it reads parked(conflict), a plain
+  // `member` on the other axis; 611 stays completed.
   assert.deepEqual(
-    status.waves[0].issues.map((i) => [i.issueNumber, i.status]),
+    status.waves[0].issues.map((i) => [i.issueNumber, i.status, i.reason]),
     [
-      ["611", "completed"],
-      ["640", "quarantined"],
+      ["611", "completed", undefined],
+      ["640", "parked", "conflict"],
     ],
   );
   // Its detail names the human's next move.
   assert.equal(
     status.waves[0].issues.find((i) => i.issueNumber === "640")?.detail,
-    "Quarantined on a merge conflict — resolve the conflict",
+    "Parked on a merge conflict — resolve the conflict",
   );
 });
 
@@ -2249,32 +2364,11 @@ test("buildStatusWithIssueNames adds issue names from fetchTask when available",
   assert.equal(status.waves[0].issues[1].name, undefined);
 });
 
-test("reconcileArchivedStatus maps an interrupted run's live `running` statuses to terminal `interrupted`, leaving a complete run untouched (#152)", () => {
-  const live: CampaignStatus = {
-    project: "beta",
-    waves: [
-      { index: 0, status: "closed", issues: [{ issueNumber: "101", status: "completed" }] },
-      { index: 1, status: "running", issues: [{ issueNumber: "201", status: "running" }] },
-    ],
-    parked: [],
-  };
-  // A complete run finished clean — it has no in-flight status to reconcile, so it
-  // passes through unchanged.
-  assert.deepEqual(reconcileArchivedStatus(live, "complete"), live);
-  // An interrupted run's in-flight `running` wave and issue become the terminal
-  // `interrupted`; the banked closed wave and its completed issue are untouched.
-  const fixed = reconcileArchivedStatus(live, "interrupted");
-  assert.equal(fixed.waves[0].status, "closed");
-  assert.equal(fixed.waves[0].issues[0].status, "completed");
-  assert.equal(fixed.waves[1].status, "interrupted");
-  assert.equal(fixed.waves[1].issues[0].status, "interrupted");
-});
-
-test("an archived non-terminal log renders a terminal status, not `running`, while the live log still derives `running` (#152)", () => {
+test("a dead (archived) run folds its in-flight `running` to parked{stalled}, while a live read stays running (#152, ADR 0019)", () => {
   // The issue's self-contained reproducer: a campaign that logged its first wave's
   // spawn and then stopped — no campaign-done / queue-done.
   const events = [
-    event("campaign-start", { ts: "2026-08-26T23:27:59.174Z", batches: [["101"], ["202"]], slots: 8, name: "interrupted run" }),
+    event("campaign-start", { ts: "2026-08-26T23:27:59.174Z", batches: [["101"], ["202"]], slots: 8, name: "stalled run" }),
     event("campaign-batch", { ts: "2026-08-26T23:28:00.000Z", index: 0, tasks: ["101"] }),
     event("queue-start", { ts: "2026-08-26T23:28:01.000Z", taskIds: ["101"], slots: 8 }),
     event("queue-spawn", { ts: "2026-08-26T23:28:02.000Z", taskId: "101", running: 1, left: 0 }),
@@ -2283,21 +2377,25 @@ test("an archived non-terminal log renders a terminal status, not `running`, whi
   // to `running`, exactly as today (no regression).
   assert.equal(reduceCampaign(events).outcomes.get("101"), "running");
 
-  // The archived path reconciles. The log has no terminal event, so the run is
-  // interrupted; its rendered status must carry no `running` — the in-flight wave and
-  // issue read the terminal `interrupted` instead.
   const dir = join(tmpdir(), `vetinari-status-152-${Date.now()}`);
   const archiveDir = join(dir, "logs", "archive");
   mkdirSync(archiveDir, { recursive: true });
   const archive = join(archiveDir, "orchestrator-2026-08-26T23-27-59-684Z.jsonl");
   writeJsonl(archive, events);
+  const cfg = archiveStatusConfig("demo", archive);
 
-  assert.equal(archivedRunState(events), "interrupted");
-  const status = reconcileArchivedStatus(buildStatus(archiveStatusConfig("demo", archive)), "interrupted");
+  // A live read of the same archived log still derives running (the FSM only stalls on a
+  // dead read).
+  assert.equal(buildStatus(cfg).waves[0].issues[0].status, "running");
+
+  // The dead read: the log has no terminal event and the process is gone, so the FSM folds
+  // the in-flight issue/wave to `parked{stalled}` — an archived run must carry no live status.
+  assert.equal(archivedRunState(events), "stalled");
+  const status = buildStatus(cfg, { dead: true });
   const statuses = status.waves.flatMap((w) => [w.status as string, ...w.issues.map((i) => i.status as string)]);
   assert.ok(!statuses.includes("running"), `an archived run must show no live status; got ${statuses.join(", ")}`);
-  assert.equal(status.waves[0].status, "interrupted");
-  assert.equal(status.waves[0].issues[0].status, "interrupted");
+  assert.equal(status.waves[0].status, "parked");
+  assert.deepEqual([status.waves[0].issues[0].status, status.waves[0].issues[0].reason], ["parked", "stalled"]);
   // The never-reached second wave stays honestly unstarted — that is not a live status.
   assert.equal(status.waves[1].status, "unstarted");
   assert.equal(status.waves[1].issues[0].status, "unstarted");
@@ -2411,7 +2509,7 @@ test("listArchivedRuns carries each run's state, startedAt and issue count, deri
     event("campaign-done", { batches: 2 }),
   ]);
   // A run whose log has a campaign-start but no terminal event — the process was
-  // killed mid-wave, so it reads interrupted and expands to its partial waves.
+  // killed mid-wave, so it reads stalled and expands to its partial waves (ADR 0019).
   writeJsonl(join(archiveDir, "orchestrator-2026-02-01T00-00-00-000Z.jsonl"), [
     event("campaign-start", { batches: [["301"], ["302"]], slots: 1 }),
     event("campaign-batch", { index: 0, tasks: ["301"] }),
@@ -2425,7 +2523,7 @@ test("listArchivedRuns carries each run's state, startedAt and issue count, deri
     byRun["2026-01-01T00-00-00-000Z"].startedAt,
     "2026-01-01T00:00:00.000Z",
   );
-  assert.equal(byRun["2026-02-01T00-00-00-000Z"].state, "interrupted");
+  assert.equal(byRun["2026-02-01T00-00-00-000Z"].state, "stalled");
   assert.equal(byRun["2026-02-01T00-00-00-000Z"].issues, 2);
 });
 
@@ -2661,7 +2759,7 @@ test("reduceCampaign drops a graft's grafted overlay once the issue is picked up
   assert.equal(reduced.grafted.has("301"), false);
 });
 
-test("buildStatus renders a grafted issue as `grafted` while unstarted, then running on pickup (#166)", () => {
+test("buildStatus renders a grafted issue with the `grafted` membership while unstarted, then a plain member on pickup (#166, ADR 0019)", () => {
   const dir = join(tmpdir(), `vetinari-status-graft-${Date.now()}`);
   seedState(dir, [
     event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["101"], ["201"]], slots: 1 }),
@@ -2670,9 +2768,11 @@ test("buildStatus renders a grafted issue as `grafted` while unstarted, then run
   ]);
 
   const status = buildStatus(cfgFor(dir));
-  // 301 joined wave 1 (index 1) and reads `grafted` while it waits there.
+  // 301 joined wave 1 (index 1): its lifecycle is `unstarted` (waiting), and it carries the
+  // `grafted` badge on the orthogonal membership axis while it waits there.
   const graftedChip = status.waves.flatMap((w) => w.issues).find((i) => i.issueNumber === "301");
-  assert.equal(graftedChip?.status, "grafted");
+  assert.equal(graftedChip?.status, "unstarted");
+  assert.equal(graftedChip?.membership, "grafted");
 });
 
 test("buildStatus reads a grafted issue as running once its wave picks it up (#166)", () => {

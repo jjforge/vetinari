@@ -2,7 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { listProjects, register, removePointer } from "./registry.ts";
-import type { DisplayStatus, RunState } from "./dashboard-model.ts";
+import type { DisplayStatus, Membership, RunState } from "./dashboard-model.ts";
 
 /**
  * The demo dashboard fixture: a handful of registered projects that between them
@@ -13,38 +13,39 @@ import type { DisplayStatus, RunState } from "./dashboard-model.ts";
  * `dashboard-demo.test.ts` (#225).
  *
  * There is one project per `RunState` — a live running wave, a parked/blocked
- * run, a failure run, an all-merged completed run, and an idle project
- * whose only history is an interrupted archived run — and their issues distribute
- * the nine `DisplayStatus` members across their chips so the union covers them all.
+ * run, a failure run, an all-merged completed run (which folds to `idle`), and an
+ * idle project whose only history is a stalled archived run — and their issues
+ * distribute the lifecycle `DisplayStatus` values and both non-`member` `Membership`
+ * badges across their chips so the unions are covered (ADR 0019).
  */
 
 // ── The state vocabulary the demo must cover ─────────────────────────────────
-// Two const tuples pinned to the dashboard's own unions by a compile-time
+// Three const tuples pinned to the dashboard's own unions by a compile-time
 // exhaustiveness link (type-only import, so this file never edits the unions):
 // `satisfies` rejects a wrong or extra member, and the `Exclude<…> extends never`
 // assertions below reject a *missing* one — so adding a member to
-// `DisplayStatus`/`RunState` is a typecheck error here, and then a red coverage
-// test, until the seed renders it.
+// `DisplayStatus`/`Membership`/`RunState` is a typecheck error here, and then a red
+// coverage test, until the seed renders it.
 export const ALL_DISPLAY_STATUSES = [
   "completed",
   "parked",
   "failure",
   "running",
   "unstarted",
-  "pruned",
-  "grafted",
-  "quarantined",
-  "interrupted",
 ] as const satisfies readonly DisplayStatus[];
 
-export const ALL_RUN_STATES = ["running", "parked", "failure", "completed", "idle"] as const satisfies readonly RunState[];
+export const ALL_MEMBERSHIPS = ["member", "grafted", "pruned"] as const satisfies readonly Membership[];
+
+export const ALL_RUN_STATES = ["running", "parked", "failure", "idle"] as const satisfies readonly RunState[];
 
 // Compile-time only: a union member missing from the tuple above leaves a non-never
 // residue here and fails `tsc` (`satisfies` alone catches only wrong/extra members).
 type AssertNever<T> = [T] extends [never] ? true : false;
 const _displayExhaustive: AssertNever<Exclude<DisplayStatus, (typeof ALL_DISPLAY_STATUSES)[number]>> = true;
+const _membershipExhaustive: AssertNever<Exclude<Membership, (typeof ALL_MEMBERSHIPS)[number]>> = true;
 const _runExhaustive: AssertNever<Exclude<RunState, (typeof ALL_RUN_STATES)[number]>> = true;
 void _displayExhaustive;
+void _membershipExhaustive;
 void _runExhaustive;
 
 /** The demo's project names, keyed by the `RunState` each one is built to render. */
@@ -142,8 +143,9 @@ const TITLES_IDLE: Record<string, string> = {
  */
 const DEMO_SPECS: DemoProjectSpec[] = [
   // ── RunState: parked ── a live guest-checkout run: a closed wave, a running wave
-  // holding a completed, a running (multi-turn), and a parked issue, plus a pruned
-  // one in a later wave. Covers completed, running, parked, pruned, unstarted.
+  // holding a merge-conflict-parked green, a running (multi-turn), and a blocked-parked
+  // issue, plus a pruned one in a later wave. Covers completed, running, parked (with the
+  // question and conflict reasons), the pruned membership, and unstarted (ADR 0019).
   {
     project: DEMO_PARKED_PROJECT,
     live: (at) => [
@@ -161,8 +163,11 @@ const DEMO_SPECS: DemoProjectSpec[] = [
       { ts: at(7), event: "queue-spawn", taskId: "203", running: 1, left: 2 },
       { ts: at(7), event: "queue-spawn", taskId: "204", running: 2, left: 1 },
       { ts: at(7), event: "queue-spawn", taskId: "205", running: 3, left: 0 },
-      { ts: at(8), event: "turn", taskId: "203", turn: 0, summary: "Added the /checkout/guest route behind a test asserting an anonymous cart reaches it." },
+      { ts: at(8), event: "turn", taskId: "203", turn: 0, summary: "Added the /checkout/guest route; green, but it collides with the session guard on merge." },
       { ts: at(9), event: "green", taskId: "203", branch: "agent/203" },
+      // 203 passed its own gate but hit a merge conflict on integration — a parked(conflict)
+      // hold (ADR 0019). The run already reads parked (205 blocked), so this adds the reason.
+      { ts: at(10), event: "quarantined", taskId: "203", reason: "merge conflict" },
       { ts: at(8), event: "turn", taskId: "204", turn: 0, summary: "Red test: an expired session should redirect to /login, not 500 — it currently 500s." },
       { ts: at(10), event: "turn", taskId: "204", turn: 1, summary: "Extracted the guard into middleware; the redirect passes but two existing route tests now fail." },
       { ts: at(12), event: "turn", taskId: "204", turn: 2, summary: "Fixed the two callers to mount the middleware; full suite green, tidying names before I signal." },
@@ -177,8 +182,9 @@ const DEMO_SPECS: DemoProjectSpec[] = [
   },
 
   // ── RunState: running ── a live settlement run with a closed wave, a running wave
-  // holding a quarantined green and an in-flight issue, a grafted issue waiting in a
-  // later wave, and an unstarted wave. Covers running, quarantined, grafted, unstarted.
+  // holding a merged green and an in-flight issue, a grafted issue waiting in a later
+  // wave, and an unstarted wave — nothing held, so the card folds to `running`. Covers
+  // running, completed, the grafted membership, and unstarted (ADR 0019).
   {
     project: DEMO_RUNNING_PROJECT,
     live: (at) => [
@@ -195,9 +201,8 @@ const DEMO_SPECS: DemoProjectSpec[] = [
       { ts: at(6), event: "queue-start", taskIds: ["303", "304"] },
       { ts: at(7), event: "queue-spawn", taskId: "303", running: 1, left: 1 },
       { ts: at(7), event: "queue-spawn", taskId: "304", running: 2, left: 0 },
-      { ts: at(8), event: "turn", taskId: "303", turn: 0, summary: "Reconciled refunds against the original capture; green, but it collides with 302 on merge." },
+      { ts: at(8), event: "turn", taskId: "303", turn: 0, summary: "Reconciled refunds against the original capture; green and merged clean." },
       { ts: at(9), event: "green", taskId: "303", branch: "agent/303" },
-      { ts: at(10), event: "quarantined", taskId: "303", reason: "merge conflict" },
       { ts: at(8), event: "turn", taskId: "304", turn: 0, summary: "Verifying the HMAC signature on inbound webhooks before we trust the payload." },
       // A graft adds a dispute-evidence issue; it lands in the unstarted later wave, so it reads `grafted`.
       { ts: at(11), event: "graft", ids: ["306"], blockedBy: {}, basenames: { "306": ["disputes.ts"] } },
@@ -226,8 +231,9 @@ const DEMO_SPECS: DemoProjectSpec[] = [
     ],
   },
 
-  // ── RunState: completed ── an all-merged nightly-ETL run left live (no terminal
-  // event), so its card reads `completed` rather than folding to idle. Covers completed.
+  // ── RunState: idle (completed campaign) ── an all-merged nightly-ETL run left live;
+  // a completed campaign folds to the card `idle` (ADR 0019). Covers completed chips and
+  // the completed→idle card fold.
   {
     project: DEMO_COMPLETED_PROJECT,
     live: (at) => [
@@ -243,8 +249,8 @@ const DEMO_SPECS: DemoProjectSpec[] = [
   },
 
   // ── RunState: idle ── a freshly-registered project with an empty live log; its
-  // only history is one interrupted archived run whose in-flight wave folds to the
-  // terminal `interrupted` when read back. Covers idle (card) and interrupted (chip).
+  // only history is one stalled archived run whose in-flight issue folds to the
+  // terminal `parked{stalled}` when read back. Covers idle (card) and a stalled chip.
   {
     project: DEMO_IDLE_PROJECT,
     live: () => [],

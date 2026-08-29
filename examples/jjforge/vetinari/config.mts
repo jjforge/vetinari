@@ -1,7 +1,7 @@
 // Real config from the project this harness was extracted from — a Go fork plus
 // a Rust sidecar, tasks sourced from GitHub issues.
 import { resolve } from "node:path";
-import { defineConfig, githubBlockedBy, githubFetchTask, githubFindingReporter } from "vetinari";
+import { defineConfig, githubBlockedBy, githubFetchTask, githubFindingReporter, githubIssueComment } from "vetinari";
 
 export default defineConfig({
   project: "jjforge",
@@ -54,6 +54,12 @@ export default defineConfig({
   // them as issues — otherwise that context dies with the container. Same label
   // discipline the interactive /fix-issue command uses.
   reportFinding: githubFindingReporter("jjforge/jjforge", { labels: ["P2", "bug", "needs-triage"] }),
+
+  // Relays a parked question's answer to a non-resumable agent (copilot/cursor/opencode):
+  // `answer` posts the human's reply as an issue comment, then re-runs fresh so the next
+  // turn's fetchTask re-reads it. Resumable agents resume their session instead and never
+  // call this (#212).
+  postComment: githubIssueComment("jjforge/jjforge"),
 
   toolchainProbe: "go version && cargo --version && sccache --version && claude --version && git --version",
 

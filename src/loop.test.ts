@@ -8,7 +8,7 @@ import type { Sandbox, SandboxRunOptions, SandboxRunResult } from "./sandbox.ts"
 import { loggerForRun } from "./log.ts";
 import { readEventLog } from "./event-log.ts";
 import { listOutbox, listParked } from "./state.ts";
-import { BLOCKED, DONE, extractTurnSummary, runLoop, type LoopDeps } from "./loop.ts";
+import { BLOCKED, DONE, extractTurnSummary, parkedAnswerComment, runLoop, type LoopDeps } from "./loop.ts";
 
 // A temp-dir `cfg` mirroring graft.test/modes.test's `harnessCfg`: a real on-disk
 // event log, parked dir and outbox under a throwaway state dir, driven by a real
@@ -121,6 +121,14 @@ test("extractTurnSummary does not mistake the <summary> nested in a <question> f
 </question>
 <promise>BLOCKED</promise>`;
   assert.equal(extractTurnSummary(stdout), "Parked to ask which base branch the prune should target.");
+});
+
+test("parkedAnswerComment marks the relay, echoes the parked question, then carries the answer", () => {
+  const body = parkedAnswerComment("Which base branch should the prune target?", "Use main.");
+  assert.equal(
+    body,
+    "> *Parked-question answer relayed by vetinari.*\n**Q:** Which base branch should the prune target?\nUse main.",
+  );
 });
 
 test("runLoop parks (blocked) when a turn emits the BLOCKED signal", async () => {

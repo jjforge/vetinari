@@ -84,6 +84,16 @@ export const answerPromptFor = (text: string) =>
   `Answer from the human to your question:\n\n${text}\n\nContinue the work. The signal contract is unchanged: ${DONE} when done, ${BLOCKED} if blocked again — and end this turn with a <turn-summary> line as before.`;
 
 /**
+ * The GitHub-issue comment a non-resumable park→answer relays (this issue / #212):
+ * a marked disclaimer so it is never mistaken for spec, the agent's parked question
+ * echoed for context, then the human's answer. The fresh run's `fetchTask` re-reads
+ * the issue including this comment, so the answer is delivered purely through
+ * "read the issue" — no session resume, no `answerPrompt` injection.
+ */
+export const parkedAnswerComment = (question: string, answer: string) =>
+  `> *Parked-question answer relayed by vetinari.*\n**Q:** ${question}\n${answer}`;
+
+/**
  * The one-line, agent-authored account of what happened this turn, pulled from
  * its own `<turn-summary>` tag (ADR 0009). Distinct from the `<summary>` nested
  * inside a `<question>` — that is the question's headline, not the turn's. Old

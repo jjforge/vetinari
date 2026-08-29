@@ -128,6 +128,21 @@ export const githubMarkPendingVerify =
   };
 
 /**
+ * A ready `postComment` handler that posts a comment on an issue via `gh issue
+ * comment`: the tracker-write seam the non-resumable park→answer path uses to
+ * relay a human's answer (ADR 0004 / #212). The repo stays inside the closure —
+ * the caller passes only the issue ref (a number, with or without a leading `#`)
+ * and the comment body. Drop it into a config as `postComment: githubIssueComment("owner/repo")`.
+ * `run` is injected only so the argument building can be tested without invoking `gh`.
+ */
+export const githubIssueComment =
+  (repo: string, run: (args: string[]) => string = gh) =>
+  async (issueRef: string, body: string): Promise<void> => {
+    const num = String(issueRef).replace(/^#/, "").trim();
+    run(["issue", "comment", num, "--repo", repo, "--body", body]);
+  };
+
+/**
  * A ready `reportFinding` handler that files each incidental finding as a GitHub
  * issue in `repo`, tagged with `labels` and cross-referenced to the task it was
  * found on. Returns the new issue URL that `gh issue create` prints. `run` is

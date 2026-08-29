@@ -422,6 +422,17 @@ export interface VetinariConfig {
    */
   onIssueMerged?: (id: string) => void | Promise<void>;
   /**
+   * Post a comment on a tracker issue — the tracker-write seam the non-resumable
+   * park→answer path uses (ADR 0004 / #212). A copilot/cursor/opencode provider
+   * carries no session to resume, so `answer` posts the human's reply as an issue
+   * comment and re-enters as a FRESH run whose `fetchTask` re-reads it; the answer
+   * is delivered purely through "read the issue". Fail-loud: `answer` errors and
+   * never starts the run if this is unconfigured or throws, so an answer is never
+   * silently lost. `githubIssueComment(repo)` ships as a GitHub implementation
+   * (the repo stays inside the closure). Resumable providers never call it.
+   */
+  postComment?: (issueRef: string, body: string) => void | Promise<void>;
+  /**
    * Named Telegram destinations this project routes categories to (name ->
    * `{bot, chat, thread?}`). A destination names a bot by reference — its token is
    * read from `.vetinari.local/`, never inlined here. The `notify` map's values

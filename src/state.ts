@@ -57,9 +57,17 @@ export function setParkedMessageId(parkedDir: string, taskId: string, tgMessageI
   writeFileSync(path, JSON.stringify({ ...rec, tgMessageId }, null, 2));
 }
 
-export function readParked(cfg: ResolvedConfig, taskId: string): ParkedRecord {
+/**
+ * The parked record for a task. Resuming a session needs its `sessionId`, so by
+ * default a record missing one throws — a resumable park→answer cannot proceed
+ * without it. The non-resumable answer path carries no session (it relays via an
+ * issue comment and re-enters fresh, #212), so it passes `requireSession: false`
+ * to read the record's branch/question without demanding a session id.
+ */
+export function readParked(cfg: ResolvedConfig, taskId: string, opts: { requireSession?: boolean } = {}): ParkedRecord {
+  const { requireSession = true } = opts;
   const rec = JSON.parse(readFileSync(file(cfg, taskId), "utf8"));
-  if (!rec.sessionId) throw new Error(`parked record for ${taskId} has no sessionId — cannot resume`);
+  if (requireSession && !rec.sessionId) throw new Error(`parked record for ${taskId} has no sessionId — cannot resume`);
   return rec;
 }
 

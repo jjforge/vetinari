@@ -223,6 +223,7 @@ test("resolveAgentSelection defaults to claude, its default model, and effort hi
     provider: "claude",
     model: "claude-opus-4-8",
     effort: "high",
+    resumable: true,
   });
 });
 
@@ -231,20 +232,21 @@ test("resolveAgentSelection takes the provider default from cfg.agent, falling b
     provider: "codex",
     model: AGENT_PROVIDERS.codex.defaultModel,
     effort: "high",
+    resumable: true,
   });
 });
 
 test("resolveAgentSelection honors an explicit model/effort on cfg.agent", () => {
   assert.deepEqual(
     resolveAgentSelection({ provider: "pi", model: "claude-sonnet-4-6", effort: "xhigh" }),
-    { provider: "pi", model: "claude-sonnet-4-6", effort: "xhigh" },
+    { provider: "pi", model: "claude-sonnet-4-6", effort: "xhigh", resumable: true },
   );
 });
 
 test("resolveAgentSelection lets a CLI override win over the cfg default (precedence: override > cfg > default)", () => {
   assert.deepEqual(
     resolveAgentSelection({ provider: "claude", effort: "low" }, { provider: "codex", effort: "high" }),
-    { provider: "codex", model: AGENT_PROVIDERS.codex.defaultModel, effort: "high" },
+    { provider: "codex", model: AGENT_PROVIDERS.codex.defaultModel, effort: "high", resumable: true },
   );
 });
 
@@ -253,7 +255,7 @@ test("resolveAgentSelection does not leak the cfg's model/effort across a provid
   // fall to codex's own defaults, not carry the claude model or the (invalid-for-codex) effort.
   assert.deepEqual(
     resolveAgentSelection({ provider: "claude", model: "claude-opus-4-8", effort: "max" }, { provider: "codex" }),
-    { provider: "codex", model: AGENT_PROVIDERS.codex.defaultModel, effort: "high" },
+    { provider: "codex", model: AGENT_PROVIDERS.codex.defaultModel, effort: "high", resumable: true },
   );
 });
 
@@ -274,13 +276,37 @@ test("resolveAgentSelection validates effort against the SELECTED provider's own
   assert.equal(resolveAgentSelection({ provider: "pi", effort: "off" }).effort, "off");
 });
 
-test("resolveAgentSelection rejects a non-resumable provider with a clear message pointing at the follow-up", () => {
+test("resolveAgentSelection accepts the non-resumable providers, flagging them resumable:false (they drive the loop by fresh re-runs)", () => {
+  // copilot carries a real effort dial; its default falls to the provider's default model + effort high.
+  assert.deepEqual(resolveAgentSelection(undefined, { provider: "copilot" }), {
+    provider: "copilot",
+    model: AGENT_PROVIDERS.copilot.defaultModel,
+    effort: "high",
+    resumable: false,
+  });
+  // opencode maps effort onto its `variant`; high is a valid variant.
+  assert.equal(resolveAgentSelection(undefined, { provider: "opencode" }).resumable, false);
+});
+
+test("resolveAgentSelection flags the resumable providers resumable:true", () => {
+  for (const provider of ["claude", "pi", "codex"] as const)
+    assert.equal(resolveAgentSelection({ provider }).resumable, true);
+});
+
+test("resolveAgentSelection carries no effort for a provider with no effort dial (cursor), and rejects one passed explicitly", () => {
+  // The Cursor CLI exposes no reasoning-effort level, so the default carries no effort at all…
+  assert.deepEqual(resolveAgentSelection({ provider: "cursor" }), {
+    provider: "cursor",
+    model: AGENT_PROVIDERS.cursor.defaultModel,
+    effort: undefined,
+    resumable: false,
+  });
+  // …and asking for one fails fast rather than silently doing nothing.
   assert.throws(
-    () => resolveAgentSelection(undefined, { provider: "copilot" }),
+    () => resolveAgentSelection({ provider: "cursor", effort: "high" }),
     (e: Error) => {
-      assert.match(e.message, /copilot/);
-      assert.match(e.message, /claude, pi, codex/);
-      assert.match(e.message, /#212/);
+      assert.match(e.message, /cursor/);
+      assert.match(e.message, /effort/);
       return true;
     },
   );

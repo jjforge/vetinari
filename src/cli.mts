@@ -568,7 +568,7 @@ const archiveLeftoverRun = () => {
  * Resolve and lock in the agent for a run/campaign invocation (ADR 0016). Merge any
  * `--agent`/`--model`/`--effort` override on the CLI over one already inherited via
  * `VETINARI_AGENT` (a campaign/queue child inherits its parent's), validate it (an
- * unknown/non-resumable provider or an out-of-vocabulary effort fails fast HERE,
+ * unknown provider or an out-of-vocabulary effort fails fast HERE,
  * before any container), and preflight the selected provider's credentials against the
  * container `.env` so a missing key is a helpful message rather than a death inside the
  * container. Re-stamp `VETINARI_AGENT` so every spawned child wave drives the same

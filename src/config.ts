@@ -87,12 +87,12 @@ export function containerShareWeight(share: ContainerShare): number {
 }
 
 /**
- * The agent providers vetinari can drive (ADR 0016). The loop is resume-based —
- * it resumes a session each turn — so only the sandcastle providers that expose
- * durable session storage qualify: Claude Code, pi, Codex. The non-resumable ones
- * (copilot/cursor/opencode) are rejected here; enabling them is a separate change (#212).
+ * The agent providers vetinari can drive (ADR 0016). The resumable ones (Claude
+ * Code, pi, Codex) drive the loop by resuming a session each turn; the
+ * non-resumable ones (copilot, cursor, opencode) carry no durable session, so the
+ * loop drives them by re-entering each turn as a fresh run (ADR 0016 / #212).
  */
-export type AgentProviderName = "claude" | "pi" | "codex";
+export type AgentProviderName = "claude" | "pi" | "codex" | "copilot" | "cursor" | "opencode";
 
 /**
  * A project's default agent (ADR 0016). A single object, not per-provider blocks:
@@ -108,7 +108,12 @@ export interface AgentConfig {
   effort?: string;
 }
 
-/** Per-provider facts `agentFor` and the preflight read: the default model, the effort vocabulary to validate against, and the `.env` credential keys (any one present satisfies the preflight). */
+/**
+ * Per-provider facts `agentFor` and the preflight read: the default model, the effort
+ * vocabulary to validate against (empty = the provider exposes no effort dial, so an
+ * effort passed to it is rejected rather than silently ignored), and the `.env`
+ * credential keys (any one present satisfies the preflight).
+ */
 export const AGENT_PROVIDERS: Record<
   AgentProviderName,
   { defaultModel: string; efforts: readonly string[]; credentialKeys: readonly string[] }
@@ -131,6 +136,24 @@ export const AGENT_PROVIDERS: Record<
     efforts: ["low", "medium", "high", "xhigh"],
     credentialKeys: ["OPENAI_API_KEY"],
   },
+  // copilot → GitHub Copilot CLI; low..high effort. Non-resumable — driven by fresh re-runs.
+  copilot: {
+    defaultModel: "claude-sonnet-4.5",
+    efforts: ["low", "medium", "high"],
+    credentialKeys: ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"],
+  },
+  // cursor → Cursor CLI; no effort dial (empty). Non-resumable.
+  cursor: {
+    defaultModel: "composer-2",
+    efforts: [],
+    credentialKeys: ["CURSOR_API_KEY"],
+  },
+  // opencode → OpenCode; effort maps to its `--variant` (minimal..max). Non-resumable.
+  opencode: {
+    defaultModel: "opencode/big-pickle",
+    efforts: ["minimal", "low", "high", "max"],
+    credentialKeys: ["OPENCODE_API_KEY"],
+  },
 };
 
 /** The provider a run defaults to when neither the config nor the CLI names one. */
@@ -138,15 +161,28 @@ export const DEFAULT_PROVIDER: AgentProviderName = "claude";
 /** The effort a run defaults to when neither the config nor the CLI names one. */
 export const DEFAULT_EFFORT = "high";
 
-/** The non-resumable sandcastle providers — rejected with a pointer at their follow-up. */
-const NON_RESUMABLE_PROVIDERS = ["copilot", "cursor", "opencode"];
-const SUPPORTED_LIST = "claude, pi, codex";
+/**
+ * The non-resumable sandcastle providers — the single source of truth for the
+ * `resumable` flag. They carry no durable session, so the loop drives them by
+ * re-entering each turn as a fresh run rather than resuming a session (#212).
+ */
+const NON_RESUMABLE_PROVIDERS: readonly AgentProviderName[] = ["copilot", "cursor", "opencode"];
+const SUPPORTED_LIST = "claude, pi, codex, copilot, cursor, opencode";
 
-/** The fully-resolved agent choice for one invocation, ready to hand to `agentFor`'s dispatch. */
+/** Whether the loop can resume this provider's session between turns, or must re-enter each turn fresh. */
+export const isResumableProvider = (provider: AgentProviderName): boolean =>
+  !NON_RESUMABLE_PROVIDERS.includes(provider);
+
+/**
+ * The fully-resolved agent choice for one invocation, ready to hand to `agentFor`'s
+ * dispatch. `effort` is absent for a provider with no effort dial (cursor). `resumable`
+ * is the single fact the loop branches its per-turn re-entry on (#212).
+ */
 export interface AgentSelection {
   provider: AgentProviderName;
   model: string;
-  effort: string;
+  effort?: string;
+  resumable: boolean;
 }
 
 /**
@@ -156,21 +192,16 @@ export interface AgentSelection {
  * a claude model or a claude-only effort must not leak onto a `--agent codex` run —
  * otherwise the selected provider's defaults apply. The resolved effort is validated
  * against that provider's own vocabulary and fails fast (naming the valid set) rather
- * than silently downgrading. A non-enabled/unknown provider is rejected here too.
+ * than silently downgrading. A provider with no effort dial rejects an effort passed
+ * to it. An unknown provider is rejected here too.
  */
 export function resolveAgentSelection(
   base: AgentConfig | undefined,
   override: { provider?: string; model?: string; effort?: string } = {},
 ): AgentSelection {
   const providerRaw = override.provider ?? base?.provider ?? DEFAULT_PROVIDER;
-  if (!(providerRaw in AGENT_PROVIDERS)) {
-    if (NON_RESUMABLE_PROVIDERS.includes(providerRaw))
-      throw new Error(
-        `agent provider "${providerRaw}" is not resumable, so vetinari's per-turn loop (which resumes a session each turn) cannot drive it. ` +
-          `Supported: ${SUPPORTED_LIST}. Non-resumable providers (${NON_RESUMABLE_PROVIDERS.join(", ")}) are tracked in #212.`,
-      );
+  if (!(providerRaw in AGENT_PROVIDERS))
     throw new Error(`unknown agent provider "${providerRaw}". Supported: ${SUPPORTED_LIST}.`);
-  }
   const provider = providerRaw as AgentProviderName;
   const spec = AGENT_PROVIDERS[provider];
 
@@ -178,14 +209,20 @@ export function resolveAgentSelection(
   // effective provider is unchanged, else fall to the selected provider's defaults.
   const inheritsBase = provider === (base?.provider ?? DEFAULT_PROVIDER);
   const model = override.model ?? (inheritsBase ? base?.model : undefined) ?? spec.defaultModel;
-  const effort = override.effort ?? (inheritsBase ? base?.effort : undefined) ?? DEFAULT_EFFORT;
+  const requestedEffort = override.effort ?? (inheritsBase ? base?.effort : undefined);
 
-  if (!spec.efforts.includes(effort))
+  // A provider with no effort dial (cursor) carries no effort — and rejects one asked for
+  // explicitly rather than silently dropping it. Otherwise the effort defaults and is validated.
+  const supportsEffort = spec.efforts.length > 0;
+  if (!supportsEffort && requestedEffort !== undefined)
+    throw new Error(`agent provider "${provider}" takes no effort setting (its CLI exposes no reasoning-effort dial).`);
+  const effort = supportsEffort ? (requestedEffort ?? DEFAULT_EFFORT) : undefined;
+  if (effort !== undefined && !spec.efforts.includes(effort))
     throw new Error(
       `agent effort "${effort}" is not valid for provider "${provider}". Valid: ${spec.efforts.join(", ")}.`,
     );
 
-  return { provider, model, effort };
+  return { provider, model, effort, resumable: isResumableProvider(provider) };
 }
 
 /**

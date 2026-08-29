@@ -196,6 +196,64 @@ test("runLoop resumes a red gate on the same session and reaches green next turn
   assert.equal(sbx.runCalls[1].resumeSession, "sess-0");
 });
 
+test("runLoop drives a non-resumable provider by a FRESH re-run each red turn — no resumeSession, no 'no session id' throw", async () => {
+  let fetched = 0;
+  const cfg = harnessCfg({
+    agent: { provider: "copilot" },
+    promptFile: "/prompts/tdd.md",
+    fetchTask: async () => {
+      fetched++;
+      return "task text";
+    },
+  });
+  const sbx = fakeSandbox([
+    { run: { completionSignal: DONE, stdout: "<turn-summary>Wrote a failing test for the parser.</turn-summary>" }, green: false },
+    { run: { completionSignal: DONE, commits: [{ sha: "def456" }] }, green: true },
+  ]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, depsFor(sbx)));
+
+  assert.equal(outcome, "green");
+  assert.equal(sbx.runCalls.length, 2);
+  // The second turn is a fresh run through the promptFile path — NOT a session resume.
+  assert.equal(sbx.runCalls[1].resumeSession, undefined);
+  assert.equal(sbx.runCalls[1].promptFile, "/prompts/tdd.md");
+  // It re-reads the issue (fetchTask again) and carries the gate report + most-recent turn summary.
+  assert.equal(fetched, 2);
+  const reentryTask = sbx.runCalls[1].promptArgs?.TASK ?? "";
+  assert.match(reentryTask, /task text/);
+  assert.match(reentryTask, /gate output/); // the verification/gate report
+  assert.match(reentryTask, /Wrote a failing test for the parser\./); // the prior turn summary
+});
+
+test("runLoop's fresh re-run carries only the most-recent turn summary, not the full history", async () => {
+  const cfg = harnessCfg({ agent: { provider: "copilot" }, promptFile: "/prompts/tdd.md" });
+  const sbx = fakeSandbox([
+    { run: { completionSignal: DONE, stdout: "<turn-summary>First slice.</turn-summary>" }, green: false },
+    { run: { completionSignal: DONE, stdout: "<turn-summary>Second slice.</turn-summary>" }, green: false },
+    { run: { completionSignal: DONE, commits: [{ sha: "abc" }] }, green: true },
+  ]);
+
+  await silence(() => runLoop(cfg, "T-1", undefined, depsFor(sbx)));
+
+  const thirdTask = sbx.runCalls[2].promptArgs?.TASK ?? "";
+  assert.match(thirdTask, /Second slice\./);
+  assert.doesNotMatch(thirdTask, /First slice\./);
+});
+
+test("runLoop parks (budget) for a one-shot non-resumable run (maxTurns 1) whose only turn is red", async () => {
+  const cfg = harnessCfg({ agent: { provider: "copilot" }, maxTurns: 1, promptFile: "/prompts/tdd.md" });
+  const sbx = fakeSandbox([{ run: { completionSignal: DONE }, green: false }]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, depsFor(sbx)));
+
+  assert.equal(outcome, "parked");
+  assert.equal(sbx.runCalls.length, 1);
+  const parked = listParked(cfg);
+  assert.equal(parked.length, 1);
+  assert.equal(parked[0].reason, "budget");
+});
+
 test("runLoop parks (budget) when every turn stays red through maxTurns", async () => {
   const cfg = harnessCfg({ maxTurns: 2 });
   const sbx = fakeSandbox([

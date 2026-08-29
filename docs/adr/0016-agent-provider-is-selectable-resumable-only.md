@@ -1,20 +1,33 @@
-# The agent provider is selectable per run; only resumable providers are supported
+# The agent provider is selectable per run; the loop drives resumable and non-resumable providers alike
 
 Vetinari runs its per-turn loop against a single **agent provider** seam — the one
 place a sandcastle `AgentProvider` is constructed (`agentFor`). We decided to make
 that seam **provider-agnostic**: it dispatches on a provider name rather than
-hard-wiring Claude Code, so a run or campaign can execute on **Claude, pi, or
-Codex**. Claude remains the default — a project or invocation that names no provider
-runs exactly as before, so the capability is purely additive.
+hard-wiring Claude Code, so a run or campaign can execute on **Claude, pi, Codex,
+GitHub Copilot CLI, Cursor, or OpenCode**. Claude remains the default — a project or
+invocation that names no provider runs exactly as before, so the capability is
+purely additive.
 
-## The provider set is the resumable ones
+## Resumable and non-resumable providers both drive the loop
 
-The loop is **resume-based**: after each turn it reads the run's session id and
-resumes that session on the next turn. Only providers that expose durable session
-storage — **Claude Code, pi, Codex** — can drive it. The non-resumable providers
-(GitHub Copilot CLI, Cursor, OpenCode) cannot continue past a single turn, so they
-are **out of scope** here; making the loop tolerate a non-resumable, single-shot
-agent is a separable change tracked on its own.
+The loop's steady state is **resume-based**: after a red gate it reads the run's
+session id and resumes that session on the next turn. The providers that expose
+durable session storage — **Claude Code, pi, Codex** — drive it this way unchanged.
+
+The **non-resumable** providers (GitHub Copilot CLI, Cursor, OpenCode) carry no
+session to resume. Rather than reject them, the loop drives them by **re-entering
+each red turn as a fresh run** through the same path the first turn uses: it
+re-reads the issue, the agent sees its own prior work as **commits already on the
+branch**, and the prompt carries the gate report plus the **most-recent turn
+summary** (bounded — never the full history). A single resumability flag, derived
+from the non-resumable set, is the one fact the loop branches on; everything else —
+the `maxTurns` ceiling, host budget, and the green / empty-green / `BLOCKED` /
+budget-park outcomes — is identical to a resumable run. A one-shot agent is simply
+`maxTurns 1`, not a separate mode.
+
+One gap remains: a non-resumable run that `BLOCKED`-parks has no session to resume,
+so its question cannot yet be **answered** — the park→answer path for these
+providers (posting the human's reply as an issue comment) is a separable follow-up.
 
 ## Selection
 

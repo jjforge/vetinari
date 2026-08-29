@@ -3,7 +3,9 @@ import type {
   AgentProvider,
   ClaudeCodeOptions,
   CodexOptions,
+  CopilotOptions,
   LoggingOption,
+  OpenCodeOptions,
   PiOptions,
 } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
@@ -12,6 +14,7 @@ import {
   AGENT_ENV_VAR,
   parseAgentOverride,
   resolveAgentSelection,
+  type AgentSelection,
   type ResolvedConfig,
 } from "./config.ts";
 
@@ -122,8 +125,17 @@ export async function makeSandbox(cfg: ResolvedConfig, taskId: string) {
  * factory, passing the (already-validated) effort in that provider's own vocabulary
  * (claude/codex `effort`, pi `--thinking`).
  */
+/**
+ * The resolved agent choice for this run — the project default (`cfg.agent`) with any
+ * CLI override read back from `VETINARI_AGENT` layered on top. The loop reads `.resumable`
+ * off this to decide whether to resume a session between turns or re-enter each turn fresh
+ * (#212); `agentFor` reads it to build the provider.
+ */
+export const agentSelectionFor = (cfg: ResolvedConfig): AgentSelection =>
+  resolveAgentSelection(cfg.agent, parseAgentOverride(process.env[AGENT_ENV_VAR]));
+
 export const agentFor = (cfg: ResolvedConfig) => {
-  const sel = resolveAgentSelection(cfg.agent, parseAgentOverride(process.env[AGENT_ENV_VAR]));
+  const sel = agentSelectionFor(cfg);
   switch (sel.provider) {
     case "claude":
       return sandcastle.claudeCode(sel.model, { effort: sel.effort as ClaudeCodeOptions["effort"] });
@@ -131,5 +143,12 @@ export const agentFor = (cfg: ResolvedConfig) => {
       return sandcastle.pi(sel.model, { thinking: sel.effort as PiOptions["thinking"] });
     case "codex":
       return sandcastle.codex(sel.model, { effort: sel.effort as CodexOptions["effort"] });
+    case "copilot":
+      return sandcastle.copilot(sel.model, { effort: sel.effort as CopilotOptions["effort"] });
+    // Cursor's CLI exposes no effort dial, so `sel.effort` is absent — pass none.
+    case "cursor":
+      return sandcastle.cursor(sel.model);
+    case "opencode":
+      return sandcastle.opencode(sel.model, { variant: sel.effort as OpenCodeOptions["variant"] });
   }
 };

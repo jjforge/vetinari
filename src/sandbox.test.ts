@@ -48,8 +48,16 @@ test("agentFor fails fast on an invalid effort for the selected provider (valida
   });
 });
 
-test("agentFor rejects a non-resumable provider named via the env override", () => {
+test("agentFor dispatches to the non-resumable providers too — the loop drives them by fresh re-runs (#212)", () => {
+  withAgentEnv(undefined, () => {
+    assert.equal(agentFor(cfgWith({ provider: "copilot" })).name, "copilot");
+    assert.equal(agentFor(cfgWith({ provider: "cursor" })).name, "cursor");
+    assert.equal(agentFor(cfgWith({ provider: "opencode" })).name, "opencode");
+  });
+});
+
+test("agentFor reads a non-resumable provider back from the env override", () => {
   withAgentEnv(JSON.stringify({ provider: "cursor" }), () => {
-    assert.throws(() => agentFor(cfgWith()), /#212/);
+    assert.equal(agentFor(cfgWith()).name, "cursor");
   });
 });

@@ -37,6 +37,7 @@ Within a milestone each bold section label appears at most once.
 - [internal] A coverage guard reads the seeded demo back through the dashboard model and goes red — plus a compile-time exhaustiveness check on `DisplayStatus`/`RunState` — whenever a new dashboard state is not represented in the demo (#225).
 - [user] Host-log settings panel: the filter input and Download JSON button now share one control row — the filter flexes to fill the line instead of stacking above the button (#233).
 - [user] The dashboard's graft input now renders its `graft issue ids` placeholder in the dim token, so it reads as an example rather than typed-in ids; real typed ids keep the full text colour (#236).
+- [user] Archived runs now render through the shared log-view control: each run is a collapsed `.lv-row` (dim when-time, status dot, run name, and `state · N issues`) that expands to reveal that run's wave cards, matching the live tail, feed, and host log instead of the bespoke archive chrome (#248).
 
 **Bug fixes:**
 - [user] A per-issue park no longer lets a campaign wave read "done" and roll on with an open question. The wave now drains (its in-flight siblings finish and their greens still merge), then escalates to a wave-park: the parked issue keeps its record — so it stays visible on the dashboard, answerable on Telegram, and resumable — and no succeeding wave starts until a human answers/resolves or prunes it and runs `campaign --resume` (#231).

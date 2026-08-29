@@ -695,7 +695,15 @@ export async function campaign(
         } else {
           // Default: the blast-radius call belongs to a human. Pause at the wave
           // boundary with the greens left merged; a human resolves the quarantine and
-          // resumes, or re-runs with --auto-prune to prune and continue.
+          // resumes, or re-runs with --auto-prune to prune and continue. Log an explicit
+          // `wave-parked` (like the red-base and per-issue-park pauses) so the log carries
+          // a terminal park marker — a stranded quarantine is never indistinguishable
+          // from a crash (ADR 0019).
+          const detail = `stranded conflict: quarantine stranded ${orphaning
+            .flatMap((i) => i.dropped)
+            .map((d) => `#${d}`)
+            .join(", ")} in later waves`;
+          cfg.log.log("wave-parked", { merged, detail });
           enqueueOutbound(cfg, quarantinePauseNotice(cfg.project, index + 1, orphaning, cfg.baseBranch));
           console.log(
             `campaign paused after batch ${index + 1}/${total} — quarantine stranded ${orphaning.flatMap((i) => i.dropped).map((d) => `#${d}`).join(", ")} in later waves; ${total - index - 1} batch(es) not started. Resolve and \`campaign --resume\`, or re-run with \`campaign --auto-prune\`.`,

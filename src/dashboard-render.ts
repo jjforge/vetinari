@@ -11,7 +11,7 @@ import {
   type WaveStatus,
 } from "./dashboard-model.ts";
 import { festiveWaveName } from "./festive-names.ts";
-import { splitOverflow, type HumanizedRow } from "./log-view.ts";
+import { splitOverflow, type HumanizedRow, type LogDotState } from "./log-view.ts";
 import type { StructuredGraftClosure } from "./graft.ts";
 import type { GraftRejection } from "./plan.ts";
 import {
@@ -668,13 +668,30 @@ const formatRunWhen = (iso: string) => {
 const ARCHIVE_CAP = 20;
 
 /**
- * One archived-run row: a collapsed head (chevron, name, `date · time` (local), a state
- * dot + `state · N issues`) over a hidden body. An archived run is a campaign artifact,
- * so its detail is the wave cards only — the body reuses the live wave renderer read-only
- * (`prune`/`interactive`/`collapsible` all off) so an archived run reads as its own wave
- * cards, with event-level context reached by clicking a member chip (the shared issue-detail
- * sheet, scoped to this run). There is no run-level log pane. `open` marks the row a `?run=`
- * deep-link selected; `hidden` puts it past the cap behind "show older".
+ * An archived run's terminal disposition → the shared log-view dot state its `.lv-dot`
+ * paints through (#248). The `.lv-dot` palette is keyed on `LogDotState` names, not the
+ * run's own `complete`/`interrupted`, so the row translates rather than minting new dot
+ * variants: `complete` reads the success green (`merged`), `interrupted` the held-attention
+ * amber (`parked`) — the colours the bespoke `.archive-dot` carried before.
+ */
+const ARCHIVE_DOT_STATE: Record<ArchivedRunState, LogDotState> = {
+  complete: "merged",
+  interrupted: "parked",
+};
+
+/**
+ * One archived-run row rendered through the shared log-view control (#248): a collapsed
+ * `.lv-row` head — the when-time in the dim `.lv-t` tier, a mapped `.lv-dot` (see
+ * `ARCHIVE_DOT_STATE`), the run name as the brightest `.lv-lead` and the disposition
+ * `state · N issues` as the dim `.lv-verb` — over a hidden body. The `.lv-row` is emitted
+ * as the clickable `<button>` head of the expandable row (`aria-expanded`/`aria-controls`
+ * wiring keeps it keyboard-operable), so an archived run reads as the same component the
+ * live tail / feed / host-log use rather than bespoke `.archive-*` chrome. An archived run
+ * is a campaign artifact, so its detail is the wave cards only — the body reuses the live
+ * wave renderer read-only (`prune`/`collapsible` off, `interactive` on) so its member chips
+ * open the shared issue-detail sheet scoped to this run. There is no run-level log pane.
+ * `open` marks the row a `?run=` deep-link selected; `hidden` puts it past the cap behind
+ * "show older".
  */
 const renderArchiveRow = (run: ArchivedRunView, open: boolean, hidden: boolean, festive = false) => {
   const label = run.name ?? run.run;
@@ -686,15 +703,12 @@ const renderArchiveRow = (run: ArchivedRunView, open: boolean, hidden: boolean, 
   // second campaign renderer.
   const body = renderWaves(run.status, false, true, false, run.run, festive);
   return (
-    `<li class="archive-row${open ? " open" : ""}" data-run="${escapeHtml(run.run)}"${hidden ? " hidden" : ""}>` +
-    `<div class="archive-row-head">` +
-    `<button type="button" class="archive-toggle" aria-expanded="${open}" aria-controls="${bodyId}">` +
-    `<span class="archive-chevron" aria-hidden="true"></span>` +
-    `<span class="archive-name">${escapeHtml(label)}</span>` +
-    `<span class="archive-when">${escapeHtml(when)}</span>` +
-    `<span class="archive-state ${run.state}"><span class="archive-dot ${run.state}"></span>${run.state} · ${count}</span>` +
+    `<li${open ? ' class="open"' : ""} data-run="${escapeHtml(run.run)}"${hidden ? " hidden" : ""}>` +
+    `<button type="button" class="lv-row" aria-expanded="${open}" aria-controls="${bodyId}">` +
+    `<span class="lv-t">${escapeHtml(when)}</span>` +
+    `<span class="lv-dot ${ARCHIVE_DOT_STATE[run.state]}"></span>` +
+    `<span class="lv-msg"><span class="lv-lead">${escapeHtml(label)}</span><span class="lv-verb">${run.state} · ${count}</span></span>` +
     `</button>` +
-    `</div>` +
     `<div class="archive-body" id="${bodyId}"${open ? "" : " hidden"}>${body}</div>` +
     `</li>`
   );
@@ -1506,27 +1520,17 @@ ${ISSUE_DETAIL_SHEET_STYLES}
   .parked-issue { font-weight: 700; color: var(--color-yellow); }
   .parked-card-meta { color: var(--color-text-light-2); font-size: .85rem; margin-top: .35rem; }
   .parked-waited { white-space: nowrap; }
-  /* The collapsible archived-runs list (#98): rows separated by hairlines, one open
-     at a time, the open row tinted. */
+  /* The collapsible archived-runs list (#98, #248): rows separated by hairlines, one
+     open at a time, the open row tinted. Each row's collapsed head is the shared lv-row
+     control emitted as a full-width toggle button — the reset below strips the button's own
+     chrome so the shared grid/hierarchy/dot CSS paints it exactly as the other log surfaces. */
   .archived-runs { margin: 1.5rem 0; }
   .archive-list { list-style: none; margin: .75rem 0 0; padding: 0; border: 1px solid var(--color-light-border); border-radius: var(--border-radius-medium); overflow: hidden; }
-  .archive-row + .archive-row, .archive-older-row { border-top: 1px solid var(--color-light-border); }
-  .archive-row.open { background: var(--color-card); }
-  .archive-row[hidden] { display: none; }
-  .archive-row-head { display: flex; align-items: center; gap: .75rem; }
-  .archive-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: .75rem; text-align: left; padding: .7rem 1rem; background: none; border: 0; color: var(--color-text); font: inherit; cursor: pointer; }
-  .archive-toggle:hover { background: var(--color-card-hover); }
-  /* The chevron is CSS keyed off aria-expanded — the client only flips the attribute. */
-  .archive-chevron::before { content: "›"; display: inline-block; color: var(--color-text-light-2); transition: transform 150ms; }
-  .archive-toggle[aria-expanded="true"] .archive-chevron::before { transform: rotate(90deg); }
-  .archive-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .archive-when { color: var(--color-text-light-2); font-size: .85rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .archive-state { margin-left: auto; display: inline-flex; align-items: center; gap: .4rem; font-size: .82rem; color: var(--color-text-light); white-space: nowrap; }
-  /* The run-level state dot: complete reads green, interrupted the caution amber
-     (a run disposition, not one of the ADR-0007 issue states). */
-  .archive-dot { width: .6rem; height: .6rem; border-radius: 999px; flex: none; }
-  .archive-dot.complete { background: var(--color-green); }
-  .archive-dot.interrupted { background: var(--color-yellow); }
+  .archive-list > li + li { border-top: 1px solid var(--color-light-border); }
+  .archive-list > li.open { background: var(--color-card); }
+  .archive-list > li[hidden] { display: none; }
+  .archive-list .lv-row { width: 100%; text-align: left; background: none; border: 0; color: var(--color-text); font: inherit; cursor: pointer; }
+  .archive-list .lv-row:hover { background: var(--color-card-hover); }
   .archive-show-older { width: 100%; padding: .6rem 1rem; text-align: left; background: none; border: 0; color: var(--color-primary); font: inherit; cursor: pointer; }
   .archive-show-older:hover { background: var(--color-card-hover); }
   .archive-body { padding: 0 1rem 1rem; }

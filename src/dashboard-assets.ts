@@ -68,14 +68,22 @@ export const stateBorderColor = (state: string): string => `var(--color-${STATE_
 /**
  * The status-dot colour rules, generated once from `stateColor` and shared by both
  * pages (previously two hand-kept copies). Scoped to `.dot` so a state colour tints
- * only the dot, never a whole card or list row (#81). Motion is a second channel for
+ * only the dot, never a whole card or list row (#81). The leading base rule carries the
+ * "small solid circle that never shrinks" invariant — `border-radius` + `flex: none` —
+ * for every status dot (`.dot`, `.repo-dot`, `.tail-dot`, `.lv-dot`) in one place rather
+ * than four; `flex: none` keeps a dot from collapsing into a pill or bar when it sits in a
+ * flex row whose sibling exerts fill pressure (a wave-member title, #234). Each variant
+ * then declares only its own `width`/`height`/`background`. Because those variants live in
+ * `TOP_BAR_STYLES`/`LIVE_TAIL_STYLES`, this block must ship alongside them — both pages
+ * already include all three. Motion is a second channel for
  * `running` alone (§5): a running dot pulses to signal active work, reduced-motion aware;
  * nothing else animates. A
  * `.running.idle` dot (a zero-count "0 running" tally chip) keeps the blue but no pulse —
  * motion means work in flight, and an idle tally has none.
  */
 export const STATE_DOT_CSS =
-  `.dot { width: .75rem; height: .75rem; border-radius: 999px; display: inline-block; } ` +
+  `.dot, .repo-dot, .tail-dot, .lv-dot { border-radius: 999px; flex: none; } ` +
+  `.dot { width: .75rem; height: .75rem; display: inline-block; } ` +
   ["running", "parked", "failure", "completed", "unstarted", "pruned", "queued", "quarantined", "interrupted"].map((s) => `.dot.${s} { background: ${stateColor(s)}; }`).join(" ") +
   ` @keyframes chip-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } } .dot.running { animation: chip-pulse 1.4s ease-in-out infinite; } .dot.running.idle { animation: none; } @media (prefers-reduced-motion: reduce) { .dot.running { animation: none; } }`;
 
@@ -128,7 +136,7 @@ export const TOP_BAR_STYLES = `  .page-top { display: flex; align-items: center;
   .repo-note { flex: none; font-size: 11px; color: var(--color-dim); white-space: nowrap; }
   /* The 6px status dot: the repo's run-state colour, or the teal accent for All repos
      (the aggregate has no run state of its own). Generated once from stateColor (§3). */
-  .repo-dot { width: 6px; height: 6px; border-radius: 999px; flex: none; background: var(--color-dim); }
+  .repo-dot { width: 6px; height: 6px; background: var(--color-dim); }
   .repo-dot.all { background: var(--color-primary); }
   ${["running", "parked", "failure", "completed", "idle"].map((s) => `.repo-dot.${s} { background: ${stateColor(s)}; }`).join(" ")}
   /* The mockup's density is desktop-tuned; touch rows grow to the 44px minimum, and the
@@ -140,7 +148,7 @@ export const TOP_BAR_STYLES = `  .page-top { display: flex; align-items: center;
   /* The green live dots (this one on the live-bar, and the event-log header's) track the
      live *stream*: they pulse whenever live, regardless of running count (§5 — the green
      dots are the stream channel, distinct from the blue .dot.running that tracks work). */
-  .live-indicator::before { content: ""; width: .55rem; height: .55rem; border-radius: 999px; background: currentColor; animation: chip-pulse 1.6s ease-in-out infinite; }
+  .live-indicator::before { content: ""; width: .55rem; height: .55rem; border-radius: 999px; flex: none; background: currentColor; animation: chip-pulse 1.6s ease-in-out infinite; }
   @media (prefers-reduced-motion: reduce) { .live-indicator::before { animation: none; } }`;
 
 /**
@@ -534,7 +542,7 @@ export const ARCHIVE_LIST_SCRIPT = `  const archiveList = document.querySelector
 export const LIVE_TAIL_STYLES = `  .live-tail { background: var(--color-card); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); overflow: hidden; margin: 1rem 0; }
   .live-tail[hidden] { display: none; }
   .tail-head { display: flex; align-items: center; gap: .5rem; padding: 10px 13px; }
-  .tail-dot { width: .6rem; height: .6rem; border-radius: 999px; background: var(--color-dim); flex: none; }
+  .tail-dot { width: .6rem; height: .6rem; background: var(--color-dim); }
   .tail-dot[data-state="live"] { background: var(--color-primary); animation: chip-pulse 2.4s ease-in-out infinite; }
   @media (prefers-reduced-motion: reduce) { .tail-dot[data-state="live"] { animation: none; } }
   .tail-title { display: inline-flex; align-items: center; gap: .4rem; border: 0; background: none; padding: 0; color: var(--color-text); font: inherit; font-weight: 600; cursor: pointer; }
@@ -576,7 +584,7 @@ export const LIVE_TAIL_STYLES = `  .live-tail { background: var(--color-card); b
   .lv-row { display: grid; grid-template-columns: auto auto 1fr; align-items: baseline; gap: .5rem; padding: .1rem .6rem; }
   .lv-row:hover { background: var(--color-card); }
   .lv-t { color: var(--color-dim); font-variant-numeric: tabular-nums; }
-  .lv-dot { width: .6rem; height: .6rem; border-radius: 999px; align-self: center; flex: none; background: var(--color-dim); }
+  .lv-dot { width: .6rem; height: .6rem; align-self: center; background: var(--color-dim); }
   ${Object.entries(LOG_DOT_STATE_COLOR).map(([s, token]) => `.lv-dot.${s} { background: ${stateColor(token)}; }`).join(" ")}
   .lv-msg { min-width: 0; white-space: pre-wrap; word-break: break-word; color: var(--color-text); }
   .lv-lead { font-family: ${MONO_FONT}; color: var(--color-text-light-2); font-weight: 600; margin-right: .4rem; }

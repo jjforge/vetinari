@@ -80,6 +80,7 @@ export {
   githubBlockedBy,
   githubFetchTask,
   githubFindingReporter,
+  githubIssueComment,
   githubIssuesByLabel,
   githubMarkPendingVerify,
 } from "./github.ts";

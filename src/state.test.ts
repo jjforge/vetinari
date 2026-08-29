@@ -14,6 +14,7 @@ import {
   markOutboundSent,
   outboxDirOf,
   park,
+  readParked,
   setParkedMessageId,
 } from "./state.ts";
 import { memoryLogger } from "./log.ts";
@@ -40,6 +41,40 @@ const parkFixture = (dir: string, taskId: string) =>
     join(dir, "parked", `${taskId}.json`),
     JSON.stringify({ taskId, parkedAt: "now", reason: "blocked", branch: `agent/${taskId}`, sessionId: "s", question: "Need a choice." }),
   );
+
+const parkFixtureNoSession = (dir: string, taskId: string) =>
+  writeFileSync(
+    join(dir, "parked", `${taskId}.json`),
+    JSON.stringify({ taskId, parkedAt: "now", reason: "blocked", branch: `agent/${taskId}`, question: "Need a choice." }),
+  );
+
+test("readParked returns the record and, by default, requires a sessionId to resume", () => {
+  const dir = join(tmpdir(), `vetinari-read-parked-${Date.now()}`);
+  mkdirSync(join(dir, "parked"), { recursive: true });
+  parkFixture(dir, "101");
+
+  const rec = readParked(cfgFor(dir), "101");
+  assert.equal(rec.sessionId, "s");
+  assert.equal(rec.question, "Need a choice.");
+});
+
+test("readParked throws by default when a record has no sessionId — a resumable resume cannot proceed", () => {
+  const dir = join(tmpdir(), `vetinari-read-parked-nosession-${Date.now()}`);
+  mkdirSync(join(dir, "parked"), { recursive: true });
+  parkFixtureNoSession(dir, "101");
+
+  assert.throws(() => readParked(cfgFor(dir), "101"), /no sessionId/);
+});
+
+test("readParked tolerates an absent sessionId when requireSession is false — the non-resumable answer path", () => {
+  const dir = join(tmpdir(), `vetinari-read-parked-optional-${Date.now()}`);
+  mkdirSync(join(dir, "parked"), { recursive: true });
+  parkFixtureNoSession(dir, "101");
+
+  const rec = readParked(cfgFor(dir), "101", { requireSession: false });
+  assert.equal(rec.sessionId, undefined);
+  assert.equal(rec.question, "Need a choice.");
+});
 
 test("clearParkedForTasks removes only parked records for completed wave tasks", () => {
   const dir = join(tmpdir(), `vetinari-clear-parked-${Date.now()}`);

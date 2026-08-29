@@ -4,6 +4,7 @@ import {
   githubBlockedBy,
   githubFetchTask,
   githubFindingReporter,
+  githubIssueComment,
   githubIssuesByLabel,
   githubMarkPendingVerify,
 } from "./github.ts";
@@ -204,6 +205,31 @@ test("githubMarkPendingVerify relabels ready-for-agent → pending-verify on the
       "pending-verify",
       "--remove-label",
       "ready-for-agent",
+    ],
+  ]);
+});
+
+test("githubIssueComment posts a comment body to the given issue, stripping a leading #", async () => {
+  const calls: string[][] = [];
+  const run = (args: string[]) => {
+    calls.push(args);
+    return "";
+  };
+
+  await githubIssueComment("jjforge/jjforge", run)(
+    "#226",
+    "> *Parked-question answer relayed by vetinari.*\n**Q:** which format?\nuse JSON",
+  );
+
+  assert.deepEqual(calls, [
+    [
+      "issue",
+      "comment",
+      "226",
+      "--repo",
+      "jjforge/jjforge",
+      "--body",
+      "> *Parked-question answer relayed by vetinari.*\n**Q:** which format?\nuse JSON",
     ],
   ]);
 });

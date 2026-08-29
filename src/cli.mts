@@ -25,7 +25,8 @@ import {
   readHostLogLines,
   renderHostEvent,
 } from "./log.ts";
-import { answerPromptFor, runLoop } from "./loop.ts";
+import { answerPromptFor, parkedAnswerComment, runLoop } from "./loop.ts";
+import { agentSelectionFor } from "./sandbox.ts";
 import {
   baseline,
   build,
@@ -890,14 +891,33 @@ switch (mode) {
       throw new Error(
         'answer needs a task id and text: answer <task> "<answer>"',
       );
-    const parked = readParked(cfg, taskId);
-    process.exitCode =
-      (await runLoop(cfg, taskId, {
-        resumeSessionId: parked.sessionId!,
-        answerPrompt: answerPromptFor(text.join(" ")),
-      })) === "green"
-        ? 0
-        : 2;
+    // Two ways to deliver a human's answer, branching on whether the provider carries
+    // a durable session (ADR 0016 / #212). Resumable (claude/pi/codex): resume the
+    // session with an answerPrompt — unchanged. Non-resumable (copilot/cursor/opencode):
+    // there is no session, so relay the answer as an issue comment and re-enter FRESH,
+    // letting the next turn's fetchTask re-read it. All three reply surfaces (Telegram /
+    // dashboard /answer / CLI) funnel through here, so all branch alike.
+    const { resumable } = agentSelectionFor(cfg);
+    if (resumable) {
+      const parked = readParked(cfg, taskId);
+      process.exitCode =
+        (await runLoop(cfg, taskId, {
+          resumeSessionId: parked.sessionId!,
+          answerPrompt: answerPromptFor(text.join(" ")),
+        })) === "green"
+          ? 0
+          : 2;
+    } else {
+      // Fail-loud (issue-only): post the comment BEFORE the run, and never start the
+      // run if it cannot be posted — an answer is never silently lost.
+      if (!cfg.postComment)
+        throw new Error(
+          `postComment not configured — cannot relay the answer to ${taskId} for a non-resumable agent (wire githubIssueComment(repo) in your config).`,
+        );
+      const parked = readParked(cfg, taskId, { requireSession: false });
+      await cfg.postComment(taskId, parkedAnswerComment(parked.question, text.join(" ")));
+      process.exitCode = (await runLoop(cfg, taskId)) === "green" ? 0 : 2;
+    }
     break;
   }
   case "parked": {

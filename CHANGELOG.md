@@ -23,6 +23,7 @@ Within a milestone each bold section label appears at most once.
 **Breaking changes:**
 - [ops] Retired the `make demo-create` / `make demo-clean` targets and `scripts/seed-demo-dashboard.mts`; seeding the demo dashboard is now `vetinari demo create` / `demo remove` (#225).
 - [user] Removed the `campaign-plan` command — invoking it now errors as unknown. Its plan-only behaviour moves onto `campaign --dry-run`, which prints the same wave plan, provenance, and suggested `--name` and runs nothing (#219).
+- [api] Retired the dead `campaign-halt` event from the orchestrator event-log schema; campaign failure is now derived from an issue reaching `failure` (#268).
 
 **New features:**
 - [user] The non-resumable agent providers `copilot`, `cursor`, and `opencode` can now drive the TDD loop: each is accepted by `--agent`/`cfg.agent.provider`, and the loop re-enters every red turn as a fresh run (re-reading the issue, its prior work already committed on the branch, the prompt carrying the gate report plus the most-recent turn summary) instead of resuming a session. `maxTurns`, host budget, and the green/empty-green/`BLOCKED`/budget-park outcomes are honored identically to a resumable run; `maxTurns 1` is a one-shot (#212).
@@ -38,6 +39,8 @@ Within a milestone each bold section label appears at most once.
 - [user] Host-log settings panel: the filter input and Download JSON button now share one control row — the filter flexes to fill the line instead of stacking above the button (#233).
 - [user] The dashboard's graft input now renders its `graft issue ids` placeholder in the dim token, so it reads as an example rather than typed-in ids; real typed ids keep the full text colour (#236).
 - [user] Archived runs now render through the shared log-view control: each run is a collapsed `.lv-row` (dim when-time, status dot, run name, and `state · N issues`) that expands to reveal that run's wave cards, matching the live tail, feed, and host log instead of the bespoke archive chrome (#248).
+- [user] The dashboard's archived-runs list now wears the shared log-view chrome — the same header control bar as the live tail / event feed / host log, with a substring filter box that hides non-matching runs — and drops the "show older" cap so every run renders in one scrollable pane (#256).
+- [user] A quarantine that strands later-wave dependents now logs an explicit `wave-parked` event, so a paused campaign is never indistinguishable from a crash in the log (#268).
 
 **Bug fixes:**
 - [user] A per-issue park no longer lets a campaign wave read "done" and roll on with an open question. The wave now drains (its in-flight siblings finish and their greens still merge), then escalates to a wave-park: the parked issue keeps its record — so it stays visible on the dashboard, answerable on Telegram, and resumable — and no succeeding wave starts until a human answers/resolves or prunes it and runs `campaign --resume` (#231).
@@ -45,6 +48,8 @@ Within a milestone each bold section label appears at most once.
 - [user] Dashboard wave-card status dots now render as consistent circles — a shared base rule pins every status dot (`.dot`/`.repo-dot`/`.tail-dot`/`.lv-dot`) to `flex: none` so a row's blue dot no longer collapses into a pill or bar under the wave-member title's fill pressure (#234).
 - [user] Event-feed, live-tail, and host-log row times now render in the host's local timezone, matching the archived-run header — previously they showed UTC, disagreeing with the rest of the dashboard (#239).
 - [user] Live-tail agent-log lines now render at a comfortable ~12.5px (.78rem), matching the sibling host-log pane, instead of the sub-readable 10.5px (#235).
+- [ops] File-set markers whose backticks are backslash-escaped (`\`src/foo.ts\``, as some authoring tools emit) now resolve to the real path instead of halting `campaign-plan` with "no confident file-set" — the stray escape is normalized away before the cite is read, for slash paths and bare names alike (#249).
+- [internal] The `/api/events` SSE test harness now parses each `\n\n`-terminated frame individually instead of joining `data:` lines across a whole (possibly multi-frame) read, so two coalesced frames no longer `JSON.parse` as `{…}{…}` and spuriously red the merged-base gate (#272).
 
 ### Collected changes — August 28, 2026
 

@@ -1613,6 +1613,36 @@ test("both pages share one set of status-dot rules, scoped to .dot so a state ne
   assert.doesNotMatch(campaign, /\n\s*\.parked \{ background/);
 });
 
+test("status dots never shrink under flex fill pressure — one shared base gives .dot/.repo-dot/.tail-dot/.lv-dot flex:none (#234)", () => {
+  const campaign = renderStatusPage(
+    {
+      project: "beta",
+      waves: [
+        {
+          index: 0,
+          status: "running",
+          issues: [{ issueNumber: "212", status: "running" }],
+        },
+      ],
+      parked: [],
+    },
+    { prune: true },
+  );
+  // A wave-member row is a flex container whose ellipsised title exerts fill pressure;
+  // a status dot with the default flex:0 1 auto collapses horizontally by a title-length
+  // dependent amount, rendering as a pill or bar instead of a circle (#234). The four
+  // status dots share one base rule so the "small solid circle that never shrinks"
+  // invariant — border-radius + flex:none — is written once, not four times.
+  assert.match(
+    campaign,
+    /\.dot, \.repo-dot, \.tail-dot, \.lv-dot \{[^}]*flex: none[^}]*\}/,
+  );
+  assert.match(
+    campaign,
+    /\.dot, \.repo-dot, \.tail-dot, \.lv-dot \{[^}]*border-radius: 999px[^}]*\}/,
+  );
+});
+
 test("renderStatusPage shows a Resume control only for a wave-parked campaign (#171)", () => {
   const waveParked = renderStatusPage(
     {

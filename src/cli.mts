@@ -7,12 +7,16 @@ import {
   encodeAgentOverride,
   loadConfig,
   missingCredentials,
-  parseAgentFlags,
   parseAgentOverride,
   resolveAgentSelection,
   resolveConfigPath,
   type ResolvedConfig,
 } from "./config.ts";
+import {
+  dispatch,
+  parseArgs,
+  type AgentOverride,
+} from "./cli-dispatch.ts";
 import {
   applyCollect,
   formatMilestoneDate,
@@ -25,7 +29,7 @@ import {
   readHostLogLines,
   renderHostEvent,
 } from "./log.ts";
-import { answerPromptFor, parkedAnswerComment, runLoop } from "./loop.ts";
+import { runLoop } from "./loop.ts";
 import { agentSelectionFor } from "./sandbox.ts";
 import {
   baseline,
@@ -47,13 +51,12 @@ import { gateway } from "./gateway.ts";
 import { defaultGatewayServiceIO, isGatewayServiceVerb, runGatewayService } from "./gateway-service.ts";
 import { runPrune } from "./prune.ts";
 import {
-  describeFilesetCheck,
   expandSelection,
   runCampaignPlan,
   runFilesetCheck,
   type UnderspecifiedDecision,
 } from "./plan.ts";
-import { runGraft, describeGraftRejections } from "./graft.ts";
+import { runGraft } from "./graft.ts";
 import { renderUsage } from "./help.ts";
 import {
   applyLayoutMigration,
@@ -602,20 +605,20 @@ const archiveLeftoverRun = () => {
 };
 
 /**
- * Resolve and lock in the agent for a run/campaign invocation (ADR 0016). Merge any
- * `--agent`/`--model`/`--effort` override on the CLI over one already inherited via
- * `VETINARI_AGENT` (a campaign/queue child inherits its parent's), validate it (an
- * unknown provider or an out-of-vocabulary effort fails fast HERE,
- * before any container), and preflight the selected provider's credentials against the
- * container `.env` so a missing key is a helpful message rather than a death inside the
- * container. Re-stamp `VETINARI_AGENT` so every spawned child wave drives the same
- * agent. Returns `rest` with the agent flags stripped for the mode's own parsing.
+ * Resolve and lock in the agent for a run/campaign invocation (ADR 0016) — the effectful
+ * half of the old `applyAgentSelection` (the flag-strip half now lives in `parseArgs`,
+ * which hands the parsed `--agent`/`--model`/`--effort` override in as `override`). Merge
+ * it over one already inherited via `VETINARI_AGENT` (a campaign/queue child inherits its
+ * parent's), validate it (an unknown provider or an out-of-vocabulary effort fails fast
+ * HERE, before any container), and preflight the selected provider's credentials against
+ * the container `.env` so a missing key is a helpful message rather than a death inside
+ * the container. Re-stamp `VETINARI_AGENT` so every spawned child wave drives the same
+ * agent. This is `dispatch`'s `selectAgent` dep.
  */
-function applyAgentSelection(cfg: ResolvedConfig, rest: string[]): string[] {
+function selectAgent(cfg: ResolvedConfig, override: AgentOverride): void {
   const inherited = parseAgentOverride(process.env[AGENT_ENV_VAR]);
-  const { override: cli, rest: remaining } = parseAgentFlags(rest);
-  const override = { ...inherited, ...cli };
-  const selection = resolveAgentSelection(cfg.agent, override); // throws on bad provider/effort
+  const merged = { ...inherited, ...override };
+  const selection = resolveAgentSelection(cfg.agent, merged); // throws on bad provider/effort
   const envPath = resolve(process.cwd(), cfg.stateDir, ".env");
   const missing = missingCredentials(selection.provider, envPath);
   if (missing.length)
@@ -623,343 +626,41 @@ function applyAgentSelection(cfg: ResolvedConfig, rest: string[]): string[] {
       `agent provider "${selection.provider}" has no credentials in ${envPath} — ` +
         `set ${missing.join(" or ")} there before launching (preflight, ADR 0016).`,
     );
-  if (Object.keys(override).length)
-    process.env[AGENT_ENV_VAR] = encodeAgentOverride(override);
-  return remaining;
+  if (Object.keys(merged).length)
+    process.env[AGENT_ENV_VAR] = encodeAgentOverride(merged);
 }
 
-switch (mode) {
-  case "build": {
-    // Default builds AND baselines; --no-baseline builds only. False (a build or
-    // baseline failure) maps to a non-zero exit; sandcastle's output was inherited.
-    const runBaseline = !rest.includes("--no-baseline");
-    process.exitCode = (await build(cfg, { baseline: runBaseline })) ? 0 : 1;
-    break;
-  }
-  case "baseline": {
-    process.exitCode = (await baseline(cfg)) ? 0 : 1;
-    break;
-  }
-  case "run": {
-    // Strip + lock in the agent selection first (ADR 0016): validates it and
-    // preflights its credentials before the container, and stamps VETINARI_AGENT.
-    const runArgs = applyAgentSelection(cfg, rest);
-    if (!runArgs[0]) throw new Error("run needs a task id");
-    archiveLeftoverRun();
-    // Exit code is the queue's slot signal: 0 green, 2 parked, other = error.
-    process.exitCode = (await runLoop(cfg, runArgs[0])) === "green" ? 0 : 2;
-    break;
-  }
-  case "campaign": {
-    // Positional tokens are the issue selection: a numeric token is an issue id, a
-    // non-numeric token is a LABEL expanded to the open issues carrying it (via
-    // `cfg.listByLabel`). By default the selection is PLANNED into dependency-ordered,
-    // file-disjoint waves and then run; `--dry-run` stops after planning (the old
-    // `campaign-plan`); `--override` treats each positional as one hand-crafted wave and
-    // skips the planner (today's old `campaign` semantics). `--name "…"` labels the run.
-    let name: string | undefined;
-    // `--auto-prune` opts into pruning a quarantine's stranded dependents and running
-    // on; the default pauses at the wave boundary for a human (ADR 0013).
-    let autoPrune = false;
-    // `--resume` continues the paused campaign already in the log (a wave-park a human
-    // fixed forward, or a prune they resolved) on the current base, from the plan the
-    // log reconstructs — no issues needed (ADR 0013).
-    let resume = false;
-    // `--dry-run` plans only (prints the wave plan/provenance/suggested name, runs
-    // nothing); `--override` skips the planner and runs the positionals as literal waves.
-    let dryRun = false;
-    let override = false;
-    // `--on-underspecified=drop|fail` pre-decides the planner's not-confident halt for
-    // non-interactive runs; it only applies when planning runs (default + --dry-run).
-    let onUnderspecified: string | undefined;
-    // Strip + lock in the agent selection first (ADR 0016): validates it and
-    // preflights its credentials before any container, and stamps VETINARI_AGENT so
-    // every child wave `run` drives the chosen provider, not a silent claude.
-    const campaignArgs = applyAgentSelection(cfg, rest);
-    const positional: string[] = [];
-    for (let i = 0; i < campaignArgs.length; i++) {
-      const a = campaignArgs[i];
-      if (a.startsWith("--name=")) name = a.slice("--name=".length);
-      else if (a === "--name") name = campaignArgs[++i];
-      else if (a === "--auto-prune") autoPrune = true;
-      else if (a === "--resume") resume = true;
-      else if (a === "--dry-run") dryRun = true;
-      else if (a === "--override") override = true;
-      else if (a.startsWith("--on-underspecified="))
-        onUnderspecified = a.slice("--on-underspecified=".length);
-      else if (a === "--on-underspecified") onUnderspecified = campaignArgs[++i];
-      else positional.push(a);
-    }
+// The post-config command family (build/baseline/run/campaign/prune/graft/fileset-check/
+// answer/parked/clear/tg-test) is parsed into a discriminated Command and routed through
+// injected deps (src/cli-dispatch.ts) — the pure seam that makes command routing testable
+// without spawning the process (#243). The host-level modes above run BEFORE the strict
+// config load and stay inline. Console/exit/spawn effects are wired in as deps here.
+await dispatch(parseArgs([mode, ...rest]), {
+  cfg,
+  host: hostBudget,
+  isTTY: Boolean(process.stdin.isTTY),
+  log: (m) => console.log(m),
+  setExitCode: (c) => {
+    process.exitCode = c;
+  },
+  selectAgent,
+  archiveLeftoverRun,
+  archiveIfIdle,
+  askUnderspecified,
+  build,
+  baseline,
+  runLoop,
+  campaign,
+  expandSelection,
+  runCampaignPlan,
+  runPrune,
+  runGraft,
+  runFilesetCheck,
+  listParked,
+  readParked,
+  archiveRun,
+  agentSelectionFor,
+  requireTelegram,
+  tgTest,
+});
 
-    // Resume reconstructs the plan from the log and takes no issues — no selection,
-    // planning, or override applies. It continues the live log, so (unlike a fresh
-    // run) it must NOT archive the leftover it would otherwise reconstruct from.
-    if (resume) {
-      await campaign(cfg, [], hostBudget, name, { autoPrune, resume });
-      archiveIfIdle();
-      break;
-    }
-
-    if (!positional.length)
-      throw new Error(
-        "campaign needs at least one issue id or label: campaign 436 611 640, campaign ready-for-agent (or --resume to continue a paused campaign)",
-      );
-
-    if (override) {
-      // Each positional is one explicit wave (split on whitespace/commas); the planner
-      // is skipped entirely (no blocked_by ordering, no file-disjoint check). A label
-      // token inside a wave still expands, joining that wave.
-      const batches: string[][] = [];
-      for (const group of positional) {
-        const tokens = group.split(/[\s,]+/).filter(Boolean);
-        const ids = await expandSelection(tokens, cfg.listByLabel);
-        if (ids.length) batches.push(ids);
-      }
-      if (!batches.length)
-        throw new Error(
-          "campaign --override: no issues to run — every wave expanded to nothing.",
-        );
-      if (dryRun) {
-        // --dry-run runs nothing, even with the planner skipped: print the literal
-        // waves (there is no provenance to report — override does no layering).
-        console.log(batches.map((w) => `"${w.join(" ")}"`).join(" "));
-        break;
-      }
-      archiveLeftoverRun();
-      await campaign(cfg, batches, hostBudget, name, { autoPrune });
-      archiveIfIdle();
-      break;
-    }
-
-    // Default (and --dry-run): expand any labels to a flat id set, then PLAN it into
-    // dependency-ordered, file-disjoint waves.
-    const tokens = positional.flatMap((a) => a.split(/[\s,]+/)).filter(Boolean);
-    const ids = await expandSelection(tokens, cfg.listByLabel);
-    if (!ids.length) {
-      console.log(
-        "campaign: nothing to run — the selection expanded to no open issues.",
-      );
-      break;
-    }
-    const report = await runCampaignPlan(
-      cfg,
-      ids,
-      { onUnderspecified },
-      { isTTY: Boolean(process.stdin.isTTY), ask: askUnderspecified },
-    );
-
-    if (dryRun) {
-      // The full `campaign-plan` replacement: the bare wave args, the provenance
-      // report, and a suggested --name — printed to read or paste, nothing run.
-      console.log(
-        report.waveArgs ||
-          "(nothing schedulable — every ticket is unreachable)",
-      );
-      console.log("");
-      console.log(report.report);
-      if (report.suggestedName)
-        console.log(`\nsuggested name: --name "${report.suggestedName}"`);
-      break;
-    }
-
-    if (!report.waves.length) {
-      // Nothing survived planning (every ticket unreachable) — show why, run nothing.
-      console.log("campaign: nothing schedulable — every ticket is unreachable.");
-      console.log("");
-      console.log(report.report);
-      break;
-    }
-
-    // Show the plan about to run, then run it. Archive any leftover run first, and
-    // archive on completion (a halt still enters the archived-runs list, #141).
-    console.log(report.report);
-    console.log("");
-    archiveLeftoverRun();
-    await campaign(cfg, report.waves, hostBudget, name, { autoPrune });
-    archiveIfIdle();
-    break;
-  }
-  case "prune": {
-    // `prune <issue>` prunes the running campaign; `prune <issue> "611 640" …`
-    // launches a reduced one. The orchestration lives in `runPrune` (a testable
-    // seam mirroring `runGraft`); the command only parses args and renders output.
-    const dryRun = rest.includes("--dry-run");
-    // `--purge` is the rare true-drop: clear the pruned issue's parked record too,
-    // discarding its resumable session. Default prune preserves it (ADR 0013).
-    const purge = rest.includes("--purge");
-    const positional = rest.filter((a) => a !== "--dry-run" && a !== "--purge");
-    const [target, ...batchArgs] = positional;
-    // A non-empty positional tail = an explicit plan → the fresh-launch path.
-    const plan = batchArgs.length
-      ? batchArgs.map((b) => b.split(/[\s,]+/).filter(Boolean)).filter((b) => b.length)
-      : undefined;
-
-    const result = await runPrune(cfg, target, { dryRun, purge, plan, host: hostBudget });
-    const tgt = result.target;
-
-    if (result.mode === "launch") {
-      const dependents = result.removed.filter((id) => id !== tgt);
-      console.log(
-        `prune #${tgt} → removed ${result.removed.map((i) => `#${i}`).join(", ")}` +
-          (dependents.length
-            ? ` (dependents: ${dependents.map((i) => `#${i}`).join(", ")})`
-            : " (no dependents)"),
-      );
-      console.log(
-        `remaining campaign: ${result.remaining.length ? result.remaining.map((w) => `"${w.join(" ")}"`).join(" ") : "(nothing left to run)"}`,
-      );
-      if (!dryRun && !result.remaining.length)
-        console.log("nothing left to run after the prune — done.");
-      break;
-    }
-
-    console.log(
-      `prune #${tgt} → ${result.dropped.length ? `dropping ${result.dropped.map((i) => `#${i}`).join(", ")}` : "nothing to drop"}` +
-        (result.kept.length
-          ? ` (keeping banked ${result.kept.map((i) => `#${i}`).join(", ")})`
-          : ""),
-    );
-    console.log(
-      `remaining campaign: ${result.remaining.length ? result.remaining.map((w) => `"${w.join(" ")}"`).join(" ") : "(nothing left to run)"}`,
-    );
-    if (result.parkedDropped.length)
-      console.log(
-        purge
-          ? `purging parked ${result.parkedDropped.map((i) => `#${i}`).join(", ")} — clearing their records and resumable sessions.`
-          : `preserving parked ${result.parkedDropped.map((i) => `#${i}`).join(", ")} — branch/worktree/session kept, resumable (--purge to drop).`,
-      );
-    if (result.closure) {
-      // Structured closure alongside the human text, so a consumer (the
-      // aggregated dashboard's prune preview) can name the exact closure
-      // without re-parsing the prose above.
-      console.log(`prune-closure ${JSON.stringify(result.closure)}`);
-      break;
-    }
-    console.log(
-      "prune event appended — the running campaign will prune future waves at the next wave boundary.",
-    );
-    break;
-  }
-  case "graft": {
-    // `graft <ids…>` adds issues to a running (or resumable) campaign — the additive
-    // mirror of `prune` (ADR 0014). The orchestration lives in `runGraft` (a testable
-    // seam, #176); the command only parses args and renders the console output.
-    const dryRun = rest.includes("--dry-run");
-    const ids = rest
-      .filter((a) => a !== "--dry-run")
-      .flatMap((a) => a.split(/[\s,]+/))
-      .filter(Boolean);
-    const result = await runGraft(cfg, ids, { dryRun });
-    if (result.rejected.length) {
-      // A `--dry-run` discloses a whole-batch rejection instead of throwing, so the
-      // aggregated dashboard's preview can name the offenders off the closure line.
-      console.log(`graft rejected — nothing added (${describeGraftRejections(result.rejected)}).`);
-    } else {
-      console.log(
-        `graft ${result.ids.map((i) => `#${i}`).join(", ")} → ` +
-          result.placement.map((p) => `#${p.id} in wave ${p.wave}`).join(", "),
-      );
-      console.log(
-        `resulting campaign: ${result.remaining.map((w) => `"${w.join(" ")}"`).join(" ")}`,
-      );
-    }
-    if (result.closure) {
-      // Structured closure alongside the human text, so the aggregated dashboard's
-      // graft preview names the placement (and any rejection) without re-parsing the
-      // prose above — the additive mirror of `prune-closure` (E2).
-      console.log(`graft-closure ${JSON.stringify(result.closure)}`);
-      break;
-    }
-    if (result.applied)
-      console.log(
-        "graft event appended — the running campaign will add these issues to future waves at the next wave boundary.",
-      );
-    break;
-  }
-  case "fileset-check": {
-    // The resolver-backed pre-campaign check: run the SAME resolution campaign-plan
-    // uses over each id and print its verdict, so the /fileset sweep and the planner
-    // agree by construction. Read-only — plans nothing, writes nothing.
-    const ids = rest.flatMap((a) => a.split(/[\s,]+/)).filter(Boolean);
-    const results = await runFilesetCheck(cfg, ids);
-    console.log(describeFilesetCheck(results));
-    break;
-  }
-  case "answer": {
-    const [taskId, ...text] = rest;
-    if (!taskId || !text.length)
-      throw new Error(
-        'answer needs a task id and text: answer <task> "<answer>"',
-      );
-    // Two ways to deliver a human's answer, branching on whether the provider carries
-    // a durable session (ADR 0016 / #212). Resumable (claude/pi/codex): resume the
-    // session with an answerPrompt — unchanged. Non-resumable (copilot/cursor/opencode):
-    // there is no session, so relay the answer as an issue comment and re-enter FRESH,
-    // letting the next turn's fetchTask re-read it. All three reply surfaces (Telegram /
-    // dashboard /answer / CLI) funnel through here, so all branch alike.
-    const { resumable } = agentSelectionFor(cfg);
-    if (resumable) {
-      const parked = readParked(cfg, taskId);
-      process.exitCode =
-        (await runLoop(cfg, taskId, {
-          resumeSessionId: parked.sessionId!,
-          answerPrompt: answerPromptFor(text.join(" ")),
-        })) === "green"
-          ? 0
-          : 2;
-    } else {
-      // Fail-loud (issue-only): post the comment BEFORE the run, and never start the
-      // run if it cannot be posted — an answer is never silently lost.
-      if (!cfg.postComment)
-        throw new Error(
-          `postComment not configured — cannot relay the answer to ${taskId} for a non-resumable agent (wire githubIssueComment(repo) in your config).`,
-        );
-      const parked = readParked(cfg, taskId, { requireSession: false });
-      await cfg.postComment(taskId, parkedAnswerComment(parked.question, text.join(" ")));
-      process.exitCode = (await runLoop(cfg, taskId)) === "green" ? 0 : 2;
-    }
-    break;
-  }
-  case "parked": {
-    const recs = listParked(cfg);
-    if (!recs.length) console.log("nothing parked");
-    for (const r of recs)
-      console.log(
-        `\n=== ${r.taskId} (${r.reason}, ${r.parkedAt}) branch ${r.branch}\n${r.question}\n`,
-      );
-    break;
-  }
-  case "clear": {
-    // Force a reset now, even with questions still parked — the manual escape
-    // hatch, unlike the automatic archive that waits for an idle queue.
-    const r = archiveRun(cfg);
-    cfg.log.log("archived", {
-      archivedLog: r.archivedLog ?? null,
-      clearedParked: r.clearedParked,
-      clearedOutbound: r.clearedOutbound,
-    });
-    console.log(
-      r.archivedLog
-        ? `archived run log → ${r.archivedLog}`
-        : "no run log to archive",
-    );
-    console.log(
-      `cleared ${r.clearedParked} parked record(s) — dashboard and status line now read idle`,
-    );
-    break;
-  }
-  case "tg-test": {
-    // Resolve creds from this project's host.env the way the gateway does, so a
-    // green tg-test guarantees the gateway can send (issue #117) — not from the
-    // invoking shell's env, which the gateway never reads.
-    const conn = requireTelegram(
-      "tg-test",
-      resolve(process.cwd(), cfg.stateDir),
-    );
-    await tgTest(cfg, conn);
-    break;
-  }
-  default:
-    console.log(USAGE);
-    process.exit(1);
-}

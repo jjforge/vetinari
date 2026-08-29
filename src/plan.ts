@@ -1,6 +1,7 @@
 /**
- * `campaign-plan`: turn a selected set of ticket ids into dependency-ordered
- * wave arguments (ready to paste after `campaign`) plus a provenance report.
+ * The campaign planner: turn a selected set of ticket ids into dependency-ordered
+ * waves plus a provenance report. `campaign` runs the planner then executes the
+ * waves; `campaign --dry-run` stops after and prints the plan.
  *
  * Waves come from the `blockedBy` graph restricted to the selected set (the
  * shared `restrictBlockers` foundation `prune` also uses): wave 0 is the tickets
@@ -130,7 +131,7 @@ export async function layerWaves(ids: string[], blockedByOf: BlockedByOf): Promi
   while (remaining.length) {
     const layer = remaining.filter((id) => [...inSet.get(id)!].every((b) => waveOf.has(b)));
     if (!layer.length) {
-      throw new Error(`campaign-plan: blockedBy cycle among ${remaining.map((i) => `#${i}`).join(", ")}.`);
+      throw new Error(`campaign: blockedBy cycle among ${remaining.map((i) => `#${i}`).join(", ")}.`);
     }
     for (const id of layer) waveOf.set(id, waves.length);
     waves.push(layer);
@@ -412,7 +413,7 @@ export function describePlan(plan: WavePlan & Partial<Pick<CampaignPlan, "pruned
   const scheduled = plan.placements.length;
   const pruned = plan.pruned ?? [];
   const lines: string[] = [
-    `campaign-plan: ${plan.waves.length} wave(s), ${scheduled} ticket(s) scheduled, ${plan.unreachable.length} unreachable` +
+    `campaign: ${plan.waves.length} wave(s), ${scheduled} ticket(s) scheduled, ${plan.unreachable.length} unreachable` +
       (pruned.length ? `, ${pruned.length} pruned` : "") +
       ".",
     "",
@@ -478,7 +479,7 @@ export async function planCampaign(ids: string[], deps: CampaignPlanDeps): Promi
       const list = underspecified.map((i) => `#${i}`).join(", ");
       const [subj, obj] = underspecified.length === 1 ? ["has", "it"] : ["have", "them"];
       throw new Error(
-        `campaign-plan: ${list} ${subj} no confident file-set. Add the file data to the issue(s) ` +
+        `campaign: ${list} ${subj} no confident file-set. Add the file data to the issue(s) ` +
           `and re-run, or pass --on-underspecified=drop to prune ${obj} and plan the rest.`,
       );
     }
@@ -590,13 +591,13 @@ export interface CampaignPlanReport {
 }
 
 /**
- * The `campaign-plan` command's read-only assembly, lifted out of `cli.mts`'s inline
- * switch so the composition is drivable with stubs. It builds the file-set resolver
- * (`cfg.fileSet ?? defaultFileSet()`, composed with `ticketProse ∘ fetchTask`), wires
- * the under-specified prompt off the injected `isTTY`/`ask`, runs `planCampaign`, and
- * renders the wave args, provenance report, and suggested `--name` — returning them
- * for the thin CLI case to print. No side effects: it reads the tracker and computes
- * strings; it never runs `campaign` and never writes.
+ * The planning assembly `campaign` runs before it executes (and `campaign --dry-run`
+ * stops after), lifted out of `cli.mts`'s inline switch so the composition is drivable
+ * with stubs. It builds the file-set resolver (`cfg.fileSet ?? defaultFileSet()`,
+ * composed with `ticketProse ∘ fetchTask`), wires the under-specified prompt off the
+ * injected `isTTY`/`ask`, runs `planCampaign`, and returns the layered waves alongside
+ * the rendered wave args, provenance report, and suggested `--name`. No side effects:
+ * it reads the tracker and computes the plan; running the waves is the caller's job.
  */
 export async function runCampaignPlan(
   cfg: CampaignPlanConfig,
@@ -606,11 +607,11 @@ export async function runCampaignPlan(
 ): Promise<CampaignPlanReport> {
   if (!ids.length)
     throw new Error(
-      "campaign-plan needs at least one ticket id: campaign-plan 436 611 640",
+      "campaign needs at least one issue id or label: campaign 436 611 640",
     );
   if (!cfg.blockedBy)
     throw new Error(
-      'campaign-plan needs a "blockedBy" resolver in your config — e.g. blockedBy: githubBlockedBy("owner/repo").',
+      'campaign needs a "blockedBy" resolver in your config to plan waves — e.g. blockedBy: githubBlockedBy("owner/repo") (or pass --override to run hand-crafted waves).',
     );
 
   // Which files each ticket touches: the project's resolver, or the shipped
@@ -686,7 +687,7 @@ export function describeFilesetCheck(results: FilesetCheckResult[]): string {
       const cites = r.files.map((f) => `\`${f}\``).join(", ");
       return r.confident
         ? `#${r.id}  confident — ${cites}`
-        : `#${r.id}  NOT confident — campaign-plan would halt` +
+        : `#${r.id}  NOT confident — campaign would halt (planning)` +
             (r.files.length ? ` (resolved so far: ${cites})` : "");
     })
     .join("\n");

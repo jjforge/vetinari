@@ -728,7 +728,7 @@ test("runCampaignPlan: no flag on a terminal asks the requestor, whose drop prun
 test("runCampaignPlan rejects an empty id set", async () => {
   await assert.rejects(
     () => runCampaignPlan(cfgFrom({}), [], {}, { isTTY: false, ask: () => "fail" }),
-    /at least one ticket id/,
+    /at least one issue id or label/,
   );
 });
 

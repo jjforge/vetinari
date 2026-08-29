@@ -13,6 +13,10 @@ import { register } from "./registry.ts";
 import { event } from "./event-log.ts";
 import { appendActivity, initActivityLog } from "./activity.ts";
 
+// Humanized row times render in the host's LOCAL timezone (#239); pin the process TZ to PDT
+// (UTC−7 in August) so the local slice is deterministic — a `…T09:15:00Z` line reads `02:15:00`.
+process.env.TZ = "America/Los_Angeles";
+
 let seq = 0;
 const tmp = (): string => {
   const dir = join(tmpdir(), `vetinari-tail-${Date.now()}-${seq++}`);
@@ -71,7 +75,7 @@ test("buildLiveTail attaches each line's humanized parts for the log-view compon
 
   // The server humanizes each raw line once so the client renders pre-humanized rows and
   // keeps `raw` for the Raw toggle and the download.
-  assert.deepEqual(tail.lines[0].humanized, { time: "09:15:00", actor: "#204", verb: "edited", spans: [{ text: "src/x.ts", kind: "code" }], dot: "running" });
+  assert.deepEqual(tail.lines[0].humanized, { time: "02:15:00", actor: "#204", verb: "edited", spans: [{ text: "src/x.ts", kind: "code" }], dot: "running" });
 });
 
 test("buildLiveTail interleaves two running agents by ts and excludes finished ones", () => {

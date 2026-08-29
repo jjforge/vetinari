@@ -331,3 +331,16 @@ what the tree lacks). `campaign-plan` never plans around it silently — it halt
 asks the requestor to either prune it (and its dependents) out and proceed, or stop
 and put the data on the issue.
 _Avoid_: unresolved ticket, ambiguous ticket
+
+### Testing
+
+**Local sandbox**:
+A no-container `Sandbox` implementation that runs the **real** gates and git against a
+temporary checkout — the second adapter behind the [[container-boundary]]'s `Sandbox`
+seam, used to integration-test the pipeline. Its `exec` actually runs the gate commands
+and git reads in the worktree; its `run` (the agent turn) is driven by a **test-supplied
+agent-script** that makes real commits, since no LLM runs under test. One span drives a
+real `campaign` wave through it, faking only the container boundary, so the gate → merge
+→ [[wave]]-advance seams are exercised rather than stubbed. A slower second tier beside
+the unit tests, not a replacement (ADR 0018).
+_Avoid_: in-memory sandbox, mock sandbox, fake container

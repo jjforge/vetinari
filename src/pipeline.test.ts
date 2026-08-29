@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
@@ -9,7 +9,7 @@ import { loggerForRun } from "./log.ts";
 import { readEventLog } from "./event-log.ts";
 import { listParked } from "./state.ts";
 import { readFileSync } from "node:fs";
-import { DONE, defaultLoopDeps, runLoop, type LoopDeps } from "./loop.ts";
+import { BLOCKED, DONE, defaultLoopDeps, runLoop, type LoopDeps } from "./loop.ts";
 import { campaign, type CampaignDeps, type RunSpawner } from "./modes.ts";
 import { collectWaveChangelog, currentBranch, integrateGreens } from "./merge.ts";
 import { runGates } from "./gate.ts";
@@ -172,9 +172,13 @@ const implScript = (id: string): LocalAgentScript => (turn) => {
  * integrateGreens, collectWaveChangelog and currentBranch are the production effects,
  * unswapped.
  */
-const localCampaignDeps = (cfg: ResolvedConfig, dir: string): CampaignDeps => {
+const localCampaignDeps = (
+  cfg: ResolvedConfig,
+  dir: string,
+  scriptFor: (id: string) => LocalAgentScript = implScript,
+): CampaignDeps => {
   const spawnRun: RunSpawner = async (taskId) => {
-    const outcome = await runLoop(cfg, taskId, undefined, loopDepsFor(implScript(taskId)));
+    const outcome = await runLoop(cfg, taskId, undefined, loopDepsFor(scriptFor(taskId)));
     return outcome === "green" ? 0 : outcome === "parked" ? 2 : 1;
   };
   // The merged-base gate: real runGates over the merged base through the local sandbox
@@ -242,4 +246,223 @@ test("a campaign wave of two issues spans agent → gate → merge → advance t
   const outbox = listOutbox(cfg);
   assert.ok(outbox.find((m) => m.event === "wave-merged"), "wave-merged went out");
   assert.ok(outbox.find((m) => m.event === "campaign-complete"), "campaign-complete went out");
+});
+
+// ── Span 1: merge conflict → quarantine (ADR 0013) ───────────────────────────
+//
+// Two same-wave greens whose branches touch the SAME file with conflicting content:
+// each passes its own gate alone, but the second cannot merge onto a base already
+// carrying the first. integrateGreens attributes the conflict to that one branch,
+// quarantines it (work preserved), and keeps the first green merged.
+
+/** Seed `conflict.txt` on the base so two branches that both rewrite it collide at merge. */
+function seedConflictRepo(): string {
+  const dir = seedRepo();
+  writeFileSync(join(dir, "conflict.txt"), "base\n");
+  execFileSync("git", ["-C", dir, "add", "-A"]);
+  execFileSync("git", ["-C", dir, "commit", "-qm", "seed conflict.txt"]);
+  return dir;
+}
+
+// Each issue rewrites the shared file to its own content and commits — file-conflicting,
+// so the loser cannot merge onto a base already carrying the winner.
+const conflictScript = (id: string): LocalAgentScript => (turn) => {
+  turn.write("conflict.txt", `resolved by ${id}\n`);
+  turn.commit(`rewrite conflict.txt in ${id}`);
+  return { signal: DONE, stdout: `<turn-summary>rewrote conflict.txt in ${id}</turn-summary>` };
+};
+
+test("a merge conflict quarantines the losing green (work preserved) while the winner stays merged, and — with a stranded dependent — quarantine-pauses the campaign", async () => {
+  const dir = seedConflictRepo();
+  // README exists everywhere, so each green passes its own gate and the merged base
+  // (carrying only the winner) gates green — the ONLY red here is the merge itself.
+  const cfg = repoCfg(dir, {
+    gates: [{ cmd: "test -f README.md" }],
+    // #103's dependent sits in a later, unstarted wave, so quarantining it strands work.
+    blockedBy: (id: string) => (id.replace(/^#/, "") === "103" ? ["102"] : []),
+  });
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 2, weight: 1 };
+
+  const ok = await inRepo(dir, () =>
+    campaign(cfg, [["101", "102"], ["103"]], host, "conflict", {}, localCampaignDeps(cfg, dir, conflictScript)),
+  );
+
+  // The blast-radius call belongs to a human: the campaign quarantine-pauses, not done.
+  assert.equal(ok, false);
+
+  const events = readEventLog(cfg);
+
+  // Both branches went green on their own gate (each rewrite passed `test -f README.md`).
+  const greens = events.filter((e) => e.event === "green") as { branch: string }[];
+  assert.deepEqual(greens.map((g) => g.branch).sort(), ["agent/101", "agent/102"]);
+
+  // 101 merged first and stays merged: its content is on the base, its branch GC'd.
+  assert.equal(gitOut(dir, ["show", "base:conflict.txt"]), "resolved by 101");
+  assert.equal(gitOut(dir, ["branch", "--list", "agent/101"]), "");
+
+  // 102 is the attributed loser: a real quarantined event, and its branch (work) preserved.
+  const q = events.find((e) => e.event === "quarantined") as { taskId: string; branch: string } | undefined;
+  assert.ok(q, "expected a quarantined event");
+  assert.equal(q!.taskId, "102");
+  assert.equal(q!.branch, "agent/102");
+  assert.equal(gitOut(dir, ["branch", "--list", "agent/102"]), "agent/102");
+
+  // The wave neither rolled back nor advanced past the boundary: no campaign-done, and the
+  // stranded dependent's wave never started (no agent/103, no green for it).
+  assert.equal(events.some((e) => e.event === "campaign-done"), false);
+  assert.equal(gitOut(dir, ["branch", "--list", "agent/103"]), "");
+  assert.equal(events.some((e) => e.event === "green" && (e as any).branch === "agent/103"), false);
+
+  // Blast-radius handling per config: default (no --auto-prune) pauses for a human.
+  const outbox = listOutbox(cfg);
+  assert.ok(outbox.find((m) => m.event === "quarantine-paused"), "quarantine-paused went out");
+  assert.equal(outbox.some((m) => m.event === "auto-prune"), false);
+  assert.equal(events.some((e) => e.event === "prune"), false);
+});
+
+test("a merge conflict under --auto-prune quarantines the loser, prunes the stranded dependent, and runs the campaign on to done", async () => {
+  const dir = seedConflictRepo();
+  const cfg = repoCfg(dir, {
+    gates: [{ cmd: "test -f README.md" }],
+    blockedBy: (id: string) => (id.replace(/^#/, "") === "103" ? ["102"] : []),
+  });
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 2, weight: 1 };
+
+  const ok = await inRepo(dir, () =>
+    campaign(cfg, [["101", "102"], ["103"]], host, "conflict", { autoPrune: true }, localCampaignDeps(cfg, dir, conflictScript)),
+  );
+
+  // Same conflict, opposite blast-radius call: --auto-prune prunes the closure and finishes.
+  assert.equal(ok, true);
+
+  const events = readEventLog(cfg);
+  // 102 still quarantined (its work kept), 101 still the merged winner.
+  const q = events.find((e) => e.event === "quarantined") as { taskId: string } | undefined;
+  assert.equal(q?.taskId, "102");
+  assert.equal(gitOut(dir, ["branch", "--list", "agent/102"]), "agent/102");
+  assert.equal(gitOut(dir, ["show", "base:conflict.txt"]), "resolved by 101");
+
+  // The stranded dependent was pruned (a real prune event on 102's closure) and the
+  // campaign advanced to done rather than pausing.
+  const prune = events.find((e) => e.event === "prune") as { target: string; dropped: string[] } | undefined;
+  assert.ok(prune, "expected a prune event");
+  assert.equal(prune!.target, "102");
+  assert.deepEqual(prune!.dropped, ["103"]);
+  assert.ok(events.some((e) => e.event === "campaign-done"), "the campaign advanced to done");
+
+  const outbox = listOutbox(cfg);
+  assert.ok(outbox.find((m) => m.event === "auto-prune"), "auto-prune went out");
+  assert.equal(outbox.some((m) => m.event === "quarantine-paused"), false);
+});
+
+// ── Span 2: per-issue park → drain → wave-park (ADR 0017) ────────────────────
+//
+// One issue's agent returns BLOCKED — a per-issue park. Its wave is NOT aborted:
+// the sibling green drains and merges under Gate 2, and only THEN does the park
+// escalate to a wave-park. The parked record survives the wave-boundary clear and
+// no succeeding wave starts.
+
+// 202 asks a question and parks; every other issue implements green.
+const parkOneScript = (blockedId: string) => (id: string): LocalAgentScript =>
+  id === blockedId
+    ? () => ({ signal: BLOCKED, stdout: "<question><summary>which approach?</summary></question>" })
+    : implScript(id);
+
+test("a per-issue BLOCKED park drains its wave's greens, then wave-parks — the parked record survives and no succeeding wave starts", async () => {
+  const dir = seedRepo();
+  // README exists everywhere, so 201's green passes its own gate and the merged base
+  // (carrying only 201) gates green — the wave-park here is the parked issue, not a red base.
+  const cfg = repoCfg(dir, { gates: [{ cmd: "test -f README.md" }] });
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 2, weight: 1 };
+
+  const ok = await inRepo(dir, () =>
+    campaign(cfg, [["201", "202"], ["203"]], host, "park", {}, localCampaignDeps(cfg, dir, parkOneScript("202"))),
+  );
+
+  // A wave that parks an issue is not fully resolved, so the campaign pauses (not done).
+  assert.equal(ok, false);
+
+  const events = readEventLog(cfg);
+
+  // Drain, don't abort (ADR 0017): 201's green drained and merged under Gate 2 —
+  // its impl is on the base and its branch GC'd.
+  assert.equal(gitOut(dir, ["show", "base:impl-201.txt"]), "impl for 201");
+  assert.equal(gitOut(dir, ["branch", "--list", "agent/201"]), "");
+
+  // Then the wave parked: a wave-parked event whose detail names the parked issue.
+  const wp = events.find((e) => e.event === "wave-parked") as { detail?: string } | undefined;
+  assert.ok(wp, "expected a wave-parked event");
+  assert.ok(wp!.detail?.includes("202"), "wave-park detail names the parked issue");
+
+  // The parked record survives the wave-boundary held-clear (ADR 0017): 202 is still
+  // listed, as a first-class durable `blocked` park — not cleared into silence.
+  const parked = listParked(cfg);
+  const p202 = parked.find((r) => r.taskId === "202");
+  assert.ok(p202, "202's parked record survived the wave-boundary clear");
+  assert.equal(p202!.reason, "blocked");
+
+  // No succeeding wave starts: the campaign did not advance to done and 203 never ran.
+  assert.equal(events.some((e) => e.event === "campaign-done"), false);
+  assert.equal(gitOut(dir, ["branch", "--list", "agent/203"]), "");
+  assert.equal(events.some((e) => e.event === "green" && (e as any).branch === "agent/203"), false);
+
+  // The operator feed drew a human with the wave-park notice.
+  assert.ok(listOutbox(cfg).find((m) => m.event === "wave-parked"), "wave-parked went out");
+});
+
+// ── Span 3: red merged base → Gate-2 wave-park (ADR 0013) ────────────────────
+//
+// Two greens with DISJOINT files (so they merge clean, no conflict) but a gate that
+// each passes alone and the combined base fails — the emergent, unattributable
+// failure. No branch is to blame, so nothing rolls back: the greens stay merged on a
+// red base and the wave parks for a human.
+
+test("each green passes its own gate but the merged base fails the combined gate → wave-park with greens left merged and no rollback", async () => {
+  const dir = seedRepo();
+  // The gate is green with at most one impl-*.txt present (true in each single-issue
+  // worktree) and RED once the merged base carries both — each passes alone, together red.
+  const cfg = repoCfg(dir, { gates: [{ cmd: 'test "$(ls impl-*.txt 2>/dev/null | wc -l)" -le 1' }] });
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 2, weight: 1 };
+
+  const ok = await inRepo(dir, () =>
+    campaign(cfg, [["301", "302"]], host, "red-base", {}, localCampaignDeps(cfg, dir)),
+  );
+
+  // An unattributable red base pauses the campaign for a human — never done.
+  assert.equal(ok, false);
+
+  const events = readEventLog(cfg);
+
+  // Each issue passed its OWN gate alone (its worktree carried one impl file).
+  const greens = events.filter((e) => e.event === "green") as { branch: string }[];
+  assert.deepEqual(greens.map((g) => g.branch).sort(), ["agent/301", "agent/302"]);
+  const perIssueGates = events.filter((e) => e.event === "gate-result" && (e as any).taskId) as { exitCode: number }[];
+  assert.ok(perIssueGates.length > 0 && perIssueGates.every((r) => r.exitCode === 0), "each per-issue gate went green alone");
+
+  // The combined base gated RED for real — the merged-base gate-result (no taskId) is non-zero.
+  const baseGate = events.filter((e) => e.event === "gate-result" && !(e as any).taskId) as { exitCode: number }[];
+  assert.ok(baseGate.length > 0, "expected a merged-base gate-result");
+  assert.ok(baseGate.some((r) => r.exitCode !== 0), "the merged base gated red");
+
+  // Wave-park (ADR 0013): the greens stayed MERGED on the base — no rollback — over the two
+  // branches. Both impl files are on the base and the wave-parked event carries them.
+  const wp = events.find((e) => e.event === "wave-parked") as { merged: string[] } | undefined;
+  assert.ok(wp, "expected a wave-parked event");
+  assert.deepEqual(wp!.merged.sort(), ["301", "302"]);
+  assert.equal(gitOut(dir, ["show", "base:impl-301.txt"]), "impl for 301");
+  assert.equal(gitOut(dir, ["show", "base:impl-302.txt"]), "impl for 302");
+
+  // No rollback and no green-path cleanup: the merged branches are left intact (never GC'd
+  // over a red base), so the work stays resumable once a human fixes it forward.
+  assert.equal(gitOut(dir, ["branch", "--list", "agent/301"]), "agent/301");
+  assert.equal(gitOut(dir, ["branch", "--list", "agent/302"]), "agent/302");
+
+  // A red base verifies nothing: no changelog fold (fragments left for the retry) and no done.
+  assert.equal(events.some((e) => e.event === "campaign-done"), false);
+  assert.ok(existsSync(join(dir, "changelog.d", "301.md")), "301's fragment left unfolded");
+  const changelog = readFileSync(join(dir, "CHANGELOG.md"), "utf8");
+  assert.equal(changelog.includes("feature from 301"), false);
+
+  // The operator feed drew a human with the wave-park notice.
+  assert.ok(listOutbox(cfg).find((m) => m.event === "wave-parked"), "wave-parked went out");
 });

@@ -47,6 +47,7 @@ import { defaultGatewayServiceIO, isGatewayServiceVerb, runGatewayService } from
 import { runPrune } from "./prune.ts";
 import {
   describeFilesetCheck,
+  expandSelection,
   runCampaignPlan,
   runFilesetCheck,
   type UnderspecifiedDecision,
@@ -108,7 +109,7 @@ async function askUnderspecified(
   const [subj, obj] =
     underspecified.length === 1 ? ["has", "it"] : ["have", "them"];
   console.log(
-    `\ncampaign-plan: ${list} ${subj} no confident file-set.\n` +
+    `\ncampaign: ${list} ${subj} no confident file-set.\n` +
       `  [d] drop ${obj} and ${underspecified.length === 1 ? "its" : "their"} dependents, and plan the rest\n` +
       `  [s] stop so you can add the file data to the issue(s) and re-run`,
   );
@@ -649,16 +650,27 @@ switch (mode) {
     break;
   }
   case "campaign": {
-    // Each positional arg is one batch: `campaign "436 611 623" "640 655" "701"`;
-    // an optional `--name "…"` labels the run in the dashboard and archive.
+    // Positional tokens are the issue selection: a numeric token is an issue id, a
+    // non-numeric token is a LABEL expanded to the open issues carrying it (via
+    // `cfg.listByLabel`). By default the selection is PLANNED into dependency-ordered,
+    // file-disjoint waves and then run; `--dry-run` stops after planning (the old
+    // `campaign-plan`); `--override` treats each positional as one hand-crafted wave and
+    // skips the planner (today's old `campaign` semantics). `--name "…"` labels the run.
     let name: string | undefined;
     // `--auto-prune` opts into pruning a quarantine's stranded dependents and running
     // on; the default pauses at the wave boundary for a human (ADR 0013).
     let autoPrune = false;
     // `--resume` continues the paused campaign already in the log (a wave-park a human
     // fixed forward, or a prune they resolved) on the current base, from the plan the
-    // log reconstructs — no batch args needed (ADR 0013).
+    // log reconstructs — no issues needed (ADR 0013).
     let resume = false;
+    // `--dry-run` plans only (prints the wave plan/provenance/suggested name, runs
+    // nothing); `--override` skips the planner and runs the positionals as literal waves.
+    let dryRun = false;
+    let override = false;
+    // `--on-underspecified=drop|fail` pre-decides the planner's not-confident halt for
+    // non-interactive runs; it only applies when planning runs (default + --dry-run).
+    let onUnderspecified: string | undefined;
     // Strip + lock in the agent selection first (ADR 0016): validates it and
     // preflights its credentials before any container, and stamps VETINARI_AGENT so
     // every child wave `run` drives the chosen provider, not a silent claude.
@@ -670,23 +682,99 @@ switch (mode) {
       else if (a === "--name") name = campaignArgs[++i];
       else if (a === "--auto-prune") autoPrune = true;
       else if (a === "--resume") resume = true;
+      else if (a === "--dry-run") dryRun = true;
+      else if (a === "--override") override = true;
+      else if (a.startsWith("--on-underspecified="))
+        onUnderspecified = a.slice("--on-underspecified=".length);
+      else if (a === "--on-underspecified") onUnderspecified = campaignArgs[++i];
       else positional.push(a);
     }
-    const batches = positional
-      .map((b) => b.split(/[\s,]+/).filter(Boolean))
-      .filter((b) => b.length);
-    if (!resume && !batches.length)
+
+    // Resume reconstructs the plan from the log and takes no issues — no selection,
+    // planning, or override applies. It continues the live log, so (unlike a fresh
+    // run) it must NOT archive the leftover it would otherwise reconstruct from.
+    if (resume) {
+      await campaign(cfg, [], hostBudget, name, { autoPrune, resume });
+      archiveIfIdle();
+      break;
+    }
+
+    if (!positional.length)
       throw new Error(
-        'campaign needs at least one batch: campaign "436 611" "623 640" (or --resume to continue a paused campaign)',
+        "campaign needs at least one issue id or label: campaign 436 611 640, campaign ready-for-agent (or --resume to continue a paused campaign)",
       );
-    // A resume continues the campaign already in the live log — archiving it aside first
-    // would leave `reduceCampaign` no plan to reconstruct (a wave-park leaves no parked
-    // record to hold the leftover-archive off), so only a fresh run archives a leftover.
-    if (!resume) archiveLeftoverRun();
-    // Archive every completed run — failed/halted or clean — so a halt still enters
-    // the archived-runs list to inspect (#141). archiveIfIdle no-ops while parked,
-    // so a still-waiting run (not finished) stays live as before.
-    await campaign(cfg, batches, hostBudget, name, { autoPrune, resume });
+
+    if (override) {
+      // Each positional is one explicit wave (split on whitespace/commas); the planner
+      // is skipped entirely (no blocked_by ordering, no file-disjoint check). A label
+      // token inside a wave still expands, joining that wave.
+      const batches: string[][] = [];
+      for (const group of positional) {
+        const tokens = group.split(/[\s,]+/).filter(Boolean);
+        const ids = await expandSelection(tokens, cfg.listByLabel);
+        if (ids.length) batches.push(ids);
+      }
+      if (!batches.length)
+        throw new Error(
+          "campaign --override: no issues to run — every wave expanded to nothing.",
+        );
+      if (dryRun) {
+        // --dry-run runs nothing, even with the planner skipped: print the literal
+        // waves (there is no provenance to report — override does no layering).
+        console.log(batches.map((w) => `"${w.join(" ")}"`).join(" "));
+        break;
+      }
+      archiveLeftoverRun();
+      await campaign(cfg, batches, hostBudget, name, { autoPrune });
+      archiveIfIdle();
+      break;
+    }
+
+    // Default (and --dry-run): expand any labels to a flat id set, then PLAN it into
+    // dependency-ordered, file-disjoint waves.
+    const tokens = positional.flatMap((a) => a.split(/[\s,]+/)).filter(Boolean);
+    const ids = await expandSelection(tokens, cfg.listByLabel);
+    if (!ids.length) {
+      console.log(
+        "campaign: nothing to run — the selection expanded to no open issues.",
+      );
+      break;
+    }
+    const report = await runCampaignPlan(
+      cfg,
+      ids,
+      { onUnderspecified },
+      { isTTY: Boolean(process.stdin.isTTY), ask: askUnderspecified },
+    );
+
+    if (dryRun) {
+      // The full `campaign-plan` replacement: the bare wave args, the provenance
+      // report, and a suggested --name — printed to read or paste, nothing run.
+      console.log(
+        report.waveArgs ||
+          "(nothing schedulable — every ticket is unreachable)",
+      );
+      console.log("");
+      console.log(report.report);
+      if (report.suggestedName)
+        console.log(`\nsuggested name: --name "${report.suggestedName}"`);
+      break;
+    }
+
+    if (!report.waves.length) {
+      // Nothing survived planning (every ticket unreachable) — show why, run nothing.
+      console.log("campaign: nothing schedulable — every ticket is unreachable.");
+      console.log("");
+      console.log(report.report);
+      break;
+    }
+
+    // Show the plan about to run, then run it. Archive any leftover run first, and
+    // archive on completion (a halt still enters the archived-runs list, #141).
+    console.log(report.report);
+    console.log("");
+    archiveLeftoverRun();
+    await campaign(cfg, report.waves, hostBudget, name, { autoPrune });
     archiveIfIdle();
     break;
   }
@@ -785,44 +873,6 @@ switch (mode) {
       console.log(
         "graft event appended — the running campaign will add these issues to future waves at the next wave boundary.",
       );
-    break;
-  }
-  case "campaign-plan": {
-    // A flat selected set of ids: `campaign-plan 436 611 623 640 701`.
-    // `--on-underspecified=drop|fail` pre-decides the halt for non-interactive runs.
-    let onUnderspecified: string | undefined;
-    const positional: string[] = [];
-    for (let i = 0; i < rest.length; i++) {
-      const a = rest[i];
-      if (a.startsWith("--on-underspecified="))
-        onUnderspecified = a.slice("--on-underspecified=".length);
-      else if (a === "--on-underspecified") onUnderspecified = rest[++i];
-      else positional.push(a);
-    }
-    const ids = positional.flatMap((a) => a.split(/[\s,]+/)).filter(Boolean);
-
-    // The read-only assembly (resolver composition, prompt wiring, name suggestion)
-    // lives in `runCampaignPlan` (#191); the command only parses args, injects the
-    // two process globals the prompt branches on, and prints what it returns.
-    const report = await runCampaignPlan(
-      cfg,
-      ids,
-      { onUnderspecified },
-      { isTTY: Boolean(process.stdin.isTTY), ask: askUnderspecified },
-    );
-
-    // The bare wave args, then the human-readable provenance report. Plans only.
-    console.log(
-      report.waveArgs ||
-        "(nothing schedulable — every ticket is unreachable)",
-    );
-    console.log("");
-    console.log(report.report);
-
-    // A suggested --name from the area labels the selected issues span — printed to
-    // paste or edit, never stored.
-    if (report.suggestedName)
-      console.log(`\nsuggested name: --name "${report.suggestedName}"`);
     break;
   }
   case "fileset-check": {

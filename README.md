@@ -155,10 +155,18 @@ Commits land on `agent/<task>`. Merging stays yours, or hand the whole
 merge→test→next-batch chain to `campaign`:
 
 ```bash
-git checkout main                                     # the merges land on the checked-out base
-npx vetinari campaign "436 611 623" "640 655"   # each quoted arg is one batch
+git checkout main                          # the merges land on the checked-out base
+npx vetinari campaign 436 611 623 640 655  # select ids → plan waves → run
+npx vetinari campaign ready-for-agent      # or select every open issue with a label
 ```
 
+`campaign` takes an issue **selection** — numeric tokens are issue ids, a
+non-numeric token is a **label** expanded (via the `listByLabel` config seam) to the
+open issues carrying it — **plans** it into dependency-ordered, file-disjoint waves,
+and then runs those waves. Two flags change that: `--dry-run` **plans only** (prints
+the wave plan + provenance + a suggested `--name`, runs nothing), and `--override`
+**skips the planner** and treats each positional as one literal, already-planned wave
+(`campaign --override "436 611" "640"` → wave 1 = {436, 611}, wave 2 = {640}). Then
 `campaign` drains a batch, merges **only its green** branches into the base with
 `--no-ff`, runs the full gate on the *merged* base (the each-green-but-together-red
 case a per-task gate can't catch), then deletes those branches, prunes their
@@ -247,17 +255,16 @@ npx vetinari graft 655 701   # add to the campaign already in flight
 # resulting campaign: "436 611" "623 640" "655" "701"
 ```
 
-**Plan the waves from a selected set.** Building the batch list by hand is where
-the dependency order gets encoded. `campaign-plan` does it for you: hand it the
-ids you selected and it layers them by the `blockedBy` graph *restricted to that
-set*, then prints the bare wave args (ready to paste after `campaign`) and a
-provenance report explaining each ticket's wave:
+**Preview the plan before you run it.** The planning `campaign` does by default is
+also inspectable on its own with `--dry-run`: hand it the selection and it layers the
+set by the `blockedBy` graph *restricted to that set*, then prints the bare wave args
+and a provenance report explaining each ticket's wave — running nothing:
 
 ```bash
-npx vetinari campaign-plan 611 623 640 701   # 640←611, 701←640
+npx vetinari campaign --dry-run 611 623 640 701   # 640←611, 701←640
 # "611 623" "640" "701"
 #
-# campaign-plan: 3 wave(s), 4 ticket(s) scheduled, 0 unreachable.
+# campaign: 3 wave(s), 4 ticket(s) scheduled, 0 unreachable.
 #   wave 0  #611: no open blocker in the selected set
 #   wave 0  #623: no open blocker in the selected set
 #   wave 1  #640: after #611
@@ -268,10 +275,10 @@ Wave 0 is the tickets with no *open* in-set blocker: a closed (already-merged)
 blocker does not hold a ticket back. A ticket whose only open blocker sits
 *outside* your selection cannot run against this set; it is reported as
 unreachable and dropped, along with everything that in turn depends on it, never
-scheduled silently. Blocker state comes from the same `blockedBy` resolver as
-`prune` (`githubBlockedBy` filters closed blockers at the edge). It **plans
-only**: it never runs `campaign` and never pushes; paste the wave args into
-`campaign` when you are ready.
+scheduled silently. Blocker state comes from the same `blockedBy` resolver the run
+itself uses (`githubBlockedBy` filters closed blockers at the edge). `--dry-run`
+**plans only**: it never runs the waves and never pushes; drop the flag (or pass
+`--override` with the printed wave args) to run them.
 
 ### In your Claude Code status bar
 
@@ -489,13 +496,12 @@ The README stops at the reader's first hour. The operational reference lives in
 | `build [--no-baseline]` | build `cfg.image` from `vetinari/Dockerfile` (neither repeated on the CLI) via sandcastle, then `baseline` on success; `--no-baseline` builds only. A build or baseline failure exits non-zero with sandcastle's output shown |
 | `baseline` | toolchain probe + all gates, no agent |
 | `run <task> [--agent <name>] [--model <m>] [--effort <e>]` | the TDD loop; exit 0 green, 2 parked. `--agent` selects the provider (`claude` \| `pi` \| `codex`, default `claude` or `cfg.agent.provider`); `--model`/`--effort` override that provider's defaults (effort in its **own** vocabulary). A bad provider/effort or a missing provider credential fails fast **before** the container (ADR 0016) |
-| `campaign [--name "…"] [--auto-prune] [--agent <name>] <batch…>` | drain each batch, merge its greens, gate the merged base, then start the next. Integration is **non-atomic** (ADR 0013): a merge conflict **quarantines** that one issue and the wave carries on (its already-merged greens stay merged); a red merged base **wave-parks** the wave and pauses for a human. `--name` labels the run in the dashboard/archive. `--agent` (with optional `--model`/`--effort`) picks the provider for the whole campaign and **every child wave** (`claude` \| `pi` \| `codex`; ADR 0016). When a quarantine strands dependents in later waves the campaign pauses for a human by default; `--auto-prune` prunes that closure and runs on instead |
+| `campaign [--dry-run] [--override] [--name "…"] [--auto-prune] [--agent <name>] <ids-or-labels…>` | select issues, **plan** them into dependency-ordered file-disjoint waves, then run them (queue a wave, merge greens, gate the merged base, then start the next). A numeric token is an issue id; a **non-numeric token is a label** expanded to the open issues carrying it (needs a `listByLabel` resolver — `githubIssuesByLabel(repo)` — else a label token fails fast). `--dry-run` **plans only** — prints the wave plan + provenance + suggested `--name` and runs nothing (this replaces the old `campaign-plan`). `--override` **skips the planner** and runs each positional as one literal wave (labels inside still expand). `--on-underspecified=drop\|fail` pre-decides the planner's not-confident halt for non-interactive runs. Integration is **non-atomic** (ADR 0013): a merge conflict **quarantines** that one issue and the wave carries on; a red merged base **wave-parks** the wave and pauses for a human. `--name` labels the run; `--agent` (with `--model`/`--effort`) picks the provider for the whole campaign and **every child wave** (`claude` \| `pi` \| `codex`; ADR 0016). When a quarantine strands dependents in later waves the campaign pauses for a human by default; `--auto-prune` prunes that closure and runs on instead |
 | `campaign --resume` | continue a **paused** campaign's unrun waves on the current base (after a human fixed a wave-park forward or pruned a suspect); reconstructs the plan from the event log, redoes no already-merged issue, takes no batch args |
 | `prune <issue>` | prune `<issue>` + everything blocked by it from the **running** campaign at the next wave boundary (the in-flight wave finishes; only future waves shrink). Banked/merged work is kept; the pruned issue's parked record (branch/worktree/session) is **preserved** so it stays resumable — `--purge` is the rare true-drop that clears it (`--dry-run` to preview) |
 | `prune <issue> <batch…>` | the from-scratch form: drop `<issue>` + its transitive dependents, then run the rest as a fresh reduced campaign from the plan you supply (`--dry-run` to just print) |
 | `graft <ids…>` | the additive mirror of `prune` (ADR 0014): add issues to a **running** (or paused/wave-parked/resumable) campaign at the next wave boundary. Appends a graft event the loop re-derives from; the in-flight wave finishes untouched and the added issues re-layer into **future** waves (after their blockers, basename-disjoint), leaving already-planned waves stable. Rejected whole — naming the offenders — if any id is unknown/closed or already in the campaign (`--dry-run` to preview the placement) |
-| `campaign-plan <ids…>` | layer a selected set into dependency-ordered wave args (paste after `campaign`) + a provenance report; plans only, never runs |
-| `fileset-check <ids…>` | report, per ticket id, whether `campaign-plan`'s resolver finds a **confident** file-set and which basenames it resolves — the exact `fetchTask`→`ticketProse`→`fileSet` path the planner uses, so the check and the planner **agree by construction**. A `NOT confident` line is precisely what `campaign-plan` would halt on. The `/fileset` sweep reads this to decide "already marked" only when a marker truly resolves (an anchored line whose cites don't parse — e.g. backslash-escaped backticks — reads NOT confident and is selected). Plans nothing, writes nothing |
+| `fileset-check <ids…>` | report, per ticket id, whether the campaign planner's resolver finds a **confident** file-set and which basenames it resolves — the exact `fetchTask`→`ticketProse`→`fileSet` path the planner uses, so the check and the planner **agree by construction**. A `NOT confident` line is precisely what `campaign` (planning) would halt on. The `/fileset` sweep reads this to decide "already marked" only when a marker truly resolves (an anchored line whose cites don't parse — e.g. backslash-escaped backticks — reads NOT confident and is selected). Plans nothing, writes nothing |
 | `init [--dry-run]` | scaffold a **new** project onto the layout: committed `vetinari/` (config skeleton + Dockerfile), excluded `.vetinari.local/`, `.gitignore` updated (idempotent, never clobbers an existing config; `--dry-run` to just print the plan) |
 | `migrate [--dry-run]` | move an **existing** project onto the `vetinari/` + `.vetinari.local/` layout: config → `vetinari/`, old `.sandcastle/` state → `.vetinari.local/`, `.gitignore` updated, the host-side `orchestrator.env` renamed to `host.env`, a stale `gateway.env` deleted, and the systemd unit rewritten into the gateway service (`--dry-run` to just print the plan) |
 | `changelog collect [--title "…"]` | fold this repo's `changelog.d/*.md` fragments into `CHANGELOG.md` under today's milestone (append to the top milestone if it is dated today, else start one), then delete the consumed fragments. What the orchestrator runs per wave at merge; a human may run it directly. `--title` sets a fresh milestone's title (default: "Collected changes") |

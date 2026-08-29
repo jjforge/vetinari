@@ -4,6 +4,7 @@ import {
   githubBlockedBy,
   githubFetchTask,
   githubFindingReporter,
+  githubIssuesByLabel,
   githubMarkPendingVerify,
 } from "./github.ts";
 import { issueStateFromTask } from "./dashboard-model.ts";
@@ -56,6 +57,39 @@ test("githubBlockedBy drops closed blockers — only OPEN prerequisites gate", (
     ]);
 
   assert.deepEqual(githubBlockedBy("jjforge/jjforge", run)("782"), ["191"]);
+});
+
+test("githubIssuesByLabel lists the OPEN issues carrying a label and returns their numbers", () => {
+  const calls: string[][] = [];
+  const run = (args: string[]) => {
+    calls.push(args);
+    return JSON.stringify([{ number: 436 }, { number: 611 }, { number: 640 }]);
+  };
+
+  const ids = githubIssuesByLabel("jjforge/vetinari", run)("ready-for-agent");
+
+  assert.deepEqual(calls, [
+    [
+      "issue",
+      "list",
+      "--repo",
+      "jjforge/vetinari",
+      "--label",
+      "ready-for-agent",
+      "--state",
+      "open",
+      "--json",
+      "number",
+    ],
+  ]);
+  assert.deepEqual(ids, ["436", "611", "640"]);
+});
+
+test("githubIssuesByLabel returns an empty list when no open issue carries the label", () => {
+  assert.deepEqual(
+    githubIssuesByLabel("jjforge/vetinari", () => "[]")("nonexistent"),
+    [],
+  );
 });
 
 test("githubFetchTask fetches an issue asking for state and closedAt, not just title/body/comments/labels", () => {

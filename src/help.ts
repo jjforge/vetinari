@@ -34,9 +34,10 @@ export const MODES: Mode[] = [
       "the TDD loop: agent turn → gate → resume on red. --agent picks the provider (claude | pi | codex, default claude or cfg.agent.provider); --model/--effort override that provider's defaults, effort in the provider's own vocabulary. A bad provider/effort or missing provider credentials fails fast before the container (ADR 0016)",
   },
   {
-    signature: 'campaign [--name "…"] [--auto-prune] [--agent <name>] <batch…>',
+    signature:
+      'campaign [--dry-run] [--override] [--name "…"] [--auto-prune] [--agent <name>] <ids-or-labels…>',
     blurb:
-      "queue each batch, then merge greens → gate base → next batch. --name labels the run in the dashboard + archived-runs list. --agent (with optional --model/--effort) selects the provider for the whole campaign and every child wave (claude | pi | codex; ADR 0016). If a merge-conflict quarantine strands dependents in later waves the campaign pauses for a human by default; --auto-prune prunes the stranded closure and runs on (ADR 0013)",
+      "select issues, plan them into dependency-ordered file-disjoint waves, then run them (queue a wave, merge greens → gate base → next). A numeric token is an issue id; a NON-numeric token is a label expanded to the open issues carrying it (needs a listByLabel resolver — githubIssuesByLabel(repo) — else a label fails fast). --dry-run plans only, printing the wave plan + provenance + suggested --name and running nothing (this replaces the old campaign-plan). --override skips the planner and runs each positional as one literal wave (labels inside still expand). --on-underspecified=drop|fail pre-decides the planner's not-confident halt for non-interactive runs. --name labels the run; --agent (with --model/--effort) selects the provider for the whole campaign and every child wave (claude | pi | codex; ADR 0016). If a merge-conflict quarantine strands dependents in later waves the campaign pauses for a human by default; --auto-prune prunes the stranded closure and runs on (ADR 0013)",
   },
   {
     signature: "campaign --resume",
@@ -59,14 +60,9 @@ export const MODES: Mode[] = [
       "add issues to a RUNNING (or paused/wave-parked/resumable) campaign — the additive mirror of prune (ADR 0014): appends a graft event the loop honors at the next wave boundary. The in-flight wave finishes untouched; the added issues re-layer into future waves (after their blockers, basename-disjoint), leaving already-planned waves stable. Rejected whole — naming the offenders — if any id is unknown/closed or already in the campaign. Needs a campaign that has not finished (--dry-run to only print the resulting placement).",
   },
   {
-    signature: "campaign-plan <ids…>",
-    blurb:
-      "layer a selected set into dependency-ordered, file-disjoint wave args (paste after `campaign`) + a provenance report, and a suggested --name from the area labels the selected issues span. Plans only — never runs campaign, never pushes. A ticket whose file-set can't be resolved confidently halts and asks; --on-underspecified=drop|fail pre-decides for non-interactive runs (no flag, no terminal defaults to fail).",
-  },
-  {
     signature: "fileset-check <ids…>",
     blurb:
-      "report, per ticket id, whether campaign-plan's resolver finds a confident file-set and which basenames it resolves — the exact fetchTask→ticketProse→fileSet path the planner uses, so the two agree by construction. A NOT-confident line is exactly what campaign-plan would halt on; the /fileset sweep reads this to decide whether a marker truly resolves. Plans nothing, writes nothing",
+      "report, per ticket id, whether the campaign planner's resolver finds a confident file-set and which basenames it resolves — the exact fetchTask→ticketProse→fileSet path the planner uses, so the two agree by construction. A NOT-confident line is exactly what `campaign` (planning) would halt on; the /fileset sweep reads this to decide whether a marker truly resolves. Plans nothing, writes nothing",
   },
   {
     signature: "init [--dry-run]",

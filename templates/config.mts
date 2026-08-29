@@ -32,7 +32,12 @@ export default defineConfig({
   // Fetch the task text for an id — a GitHub issue body, a spec file, anything.
   fetchTask: (id) => `TODO: fetch the task text for ${id}`,
 
-  // Optional: wire your tracker's blocked-by edges to enable carve / campaign-plan.
+  // Optional: wire your tracker's blocked-by edges to enable carve / campaign planning.
   // import { githubBlockedBy } from "vetinari";
   // blockedBy: githubBlockedBy("owner/repo"),
+
+  // Optional: list open issues by label, so `campaign <label>` (e.g.
+  // `campaign ready-for-agent`) selects its issue set from the tracker.
+  // import { githubIssuesByLabel } from "vetinari";
+  // listByLabel: githubIssuesByLabel("owner/repo"),
 });

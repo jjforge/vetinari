@@ -1,6 +1,7 @@
 /**
- * `campaign-plan`: turn a selected set of ticket ids into dependency-ordered
- * wave arguments (ready to paste after `campaign`) plus a provenance report.
+ * The campaign planner: turn a selected set of ticket ids into dependency-ordered
+ * waves plus a provenance report. `campaign` runs the planner then executes the
+ * waves; `campaign --dry-run` stops after and prints the plan.
  *
  * Waves come from the `blockedBy` graph restricted to the selected set (the
  * shared `restrictBlockers` foundation `prune` also uses): wave 0 is the tickets
@@ -61,6 +62,41 @@ const uniqueOrder = (ids: string[]) => {
   return order;
 };
 
+/** Whether a positional token is an issue id (all digits, optional leading `#`)
+ * rather than a label. A campaign token that is not an id is treated as a label. */
+export const isIssueId = (token: string): boolean => /^#?\d+$/.test(token);
+
+/**
+ * Expand a campaign's positional tokens into a flat, de-duplicated id set: a numeric
+ * token is an issue id (kept, `#` stripped); a non-numeric token is a **label**,
+ * expanded to the open issues carrying it via the `listByLabel` seam. Tokens may be
+ * mixed; the result is normalized and de-duplicated in first-seen order, so it feeds
+ * straight into the planner (or into an `--override` wave).
+ *
+ * A label token with no `listByLabel` resolver configured fails fast, naming the
+ * missing seam — a campaign cannot select by label without wiring the tracker in.
+ * Pure over the injected resolver; the CLI passes `cfg.listByLabel`.
+ */
+export async function expandSelection(
+  tokens: string[],
+  listByLabel?: (label: string) => string[] | Promise<string[]>,
+): Promise<string[]> {
+  const ids: string[] = [];
+  for (const token of tokens) {
+    if (isIssueId(token)) {
+      ids.push(token);
+      continue;
+    }
+    if (!listByLabel)
+      throw new Error(
+        `campaign: "${token}" is a label, but no "listByLabel" resolver is configured — ` +
+          `add e.g. listByLabel: githubIssuesByLabel("owner/repo") to your config to select issues by label.`,
+      );
+    ids.push(...(await listByLabel(token)));
+  }
+  return uniqueOrder(ids);
+}
+
 export async function layerWaves(ids: string[], blockedByOf: BlockedByOf): Promise<WavePlan> {
   const order = uniqueOrder(ids);
   const { inSet, external } = await restrictBlockers(order, blockedByOf);
@@ -95,7 +131,7 @@ export async function layerWaves(ids: string[], blockedByOf: BlockedByOf): Promi
   while (remaining.length) {
     const layer = remaining.filter((id) => [...inSet.get(id)!].every((b) => waveOf.has(b)));
     if (!layer.length) {
-      throw new Error(`campaign-plan: blockedBy cycle among ${remaining.map((i) => `#${i}`).join(", ")}.`);
+      throw new Error(`campaign: blockedBy cycle among ${remaining.map((i) => `#${i}`).join(", ")}.`);
     }
     for (const id of layer) waveOf.set(id, waves.length);
     waves.push(layer);
@@ -377,7 +413,7 @@ export function describePlan(plan: WavePlan & Partial<Pick<CampaignPlan, "pruned
   const scheduled = plan.placements.length;
   const pruned = plan.pruned ?? [];
   const lines: string[] = [
-    `campaign-plan: ${plan.waves.length} wave(s), ${scheduled} ticket(s) scheduled, ${plan.unreachable.length} unreachable` +
+    `campaign: ${plan.waves.length} wave(s), ${scheduled} ticket(s) scheduled, ${plan.unreachable.length} unreachable` +
       (pruned.length ? `, ${pruned.length} pruned` : "") +
       ".",
     "",
@@ -443,7 +479,7 @@ export async function planCampaign(ids: string[], deps: CampaignPlanDeps): Promi
       const list = underspecified.map((i) => `#${i}`).join(", ");
       const [subj, obj] = underspecified.length === 1 ? ["has", "it"] : ["have", "them"];
       throw new Error(
-        `campaign-plan: ${list} ${subj} no confident file-set. Add the file data to the issue(s) ` +
+        `campaign: ${list} ${subj} no confident file-set. Add the file data to the issue(s) ` +
           `and re-run, or pass --on-underspecified=drop to prune ${obj} and plan the rest.`,
       );
     }
@@ -543,6 +579,9 @@ export interface CampaignPlanRunDeps {
 
 /** The rendered-but-not-printed plan: the CLI case prints these three, in order. */
 export interface CampaignPlanReport {
+  /** the dependency-ordered, file-disjoint waves the set layered into — what the
+   *  default `campaign` path runs, and what `waveArgs` renders. */
+  waves: string[][];
   /** the bare quoted wave args (`waveArgs`) — empty when nothing is schedulable. */
   waveArgs: string;
   /** the human-readable provenance report (`describePlan`). */
@@ -552,13 +591,13 @@ export interface CampaignPlanReport {
 }
 
 /**
- * The `campaign-plan` command's read-only assembly, lifted out of `cli.mts`'s inline
- * switch so the composition is drivable with stubs. It builds the file-set resolver
- * (`cfg.fileSet ?? defaultFileSet()`, composed with `ticketProse ∘ fetchTask`), wires
- * the under-specified prompt off the injected `isTTY`/`ask`, runs `planCampaign`, and
- * renders the wave args, provenance report, and suggested `--name` — returning them
- * for the thin CLI case to print. No side effects: it reads the tracker and computes
- * strings; it never runs `campaign` and never writes.
+ * The planning assembly `campaign` runs before it executes (and `campaign --dry-run`
+ * stops after), lifted out of `cli.mts`'s inline switch so the composition is drivable
+ * with stubs. It builds the file-set resolver (`cfg.fileSet ?? defaultFileSet()`,
+ * composed with `ticketProse ∘ fetchTask`), wires the under-specified prompt off the
+ * injected `isTTY`/`ask`, runs `planCampaign`, and returns the layered waves alongside
+ * the rendered wave args, provenance report, and suggested `--name`. No side effects:
+ * it reads the tracker and computes the plan; running the waves is the caller's job.
  */
 export async function runCampaignPlan(
   cfg: CampaignPlanConfig,
@@ -568,11 +607,11 @@ export async function runCampaignPlan(
 ): Promise<CampaignPlanReport> {
   if (!ids.length)
     throw new Error(
-      "campaign-plan needs at least one ticket id: campaign-plan 436 611 640",
+      "campaign needs at least one issue id or label: campaign 436 611 640",
     );
   if (!cfg.blockedBy)
     throw new Error(
-      'campaign-plan needs a "blockedBy" resolver in your config — e.g. blockedBy: githubBlockedBy("owner/repo").',
+      'campaign needs a "blockedBy" resolver in your config to plan waves — e.g. blockedBy: githubBlockedBy("owner/repo") (or pass --override to run hand-crafted waves).',
     );
 
   // Which files each ticket touches: the project's resolver, or the shipped
@@ -594,7 +633,7 @@ export async function runCampaignPlan(
     labelsFromTask(String(await cfg.fetchTask(id))),
   );
 
-  return { waveArgs: waveArgs(plan), report: describePlan(plan), suggestedName };
+  return { waves: plan.waves, waveArgs: waveArgs(plan), report: describePlan(plan), suggestedName };
 }
 
 /** One ticket's resolver verdict, as `fileset-check` reports it. */
@@ -648,7 +687,7 @@ export function describeFilesetCheck(results: FilesetCheckResult[]): string {
       const cites = r.files.map((f) => `\`${f}\``).join(", ");
       return r.confident
         ? `#${r.id}  confident — ${cites}`
-        : `#${r.id}  NOT confident — campaign-plan would halt` +
+        : `#${r.id}  NOT confident — campaign would halt (planning)` +
             (r.files.length ? ` (resolved so far: ${cites})` : "");
     })
     .join("\n");

@@ -382,6 +382,16 @@ export interface VetinariConfig {
    */
   blockedBy?: (id: string) => string[] | Promise<string[]>;
   /**
+   * The open issue numbers (as strings) carrying a given tracker label. Lets
+   * `campaign <label>` select its issue set from the tracker — a non-numeric
+   * campaign token is a label, expanded through this seam to the open issues it
+   * tags — instead of a hand-typed id list. Follows ADR 0004: the CLI calls
+   * `listByLabel`; the repo string stays inside the resolver closure.
+   * `githubIssuesByLabel(repo)` ships as a ready GitHub implementation. Absent,
+   * a campaign can still select by explicit id, but a label token fails fast.
+   */
+  listByLabel?: (label: string) => string[] | Promise<string[]>;
+  /**
    * Which files a ticket will touch, by basename, so `campaign-plan` can keep
    * co-wave tickets file-disjoint (a wave that shares a file collides as a merge
    * conflict at integration). `ticket` is the ticket's text; return

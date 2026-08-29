@@ -80,6 +80,7 @@ export {
   githubBlockedBy,
   githubFetchTask,
   githubFindingReporter,
+  githubIssuesByLabel,
   githubMarkPendingVerify,
 } from "./github.ts";
 export { defaultFileSet } from "./fileset.ts";

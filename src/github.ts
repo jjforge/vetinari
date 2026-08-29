@@ -66,6 +66,38 @@ export const githubFetchTask =
   };
 
 /**
+ * A ready `listByLabel` resolver over `gh issue list`: the numbers (as strings) of
+ * the OPEN issues carrying `label` in `repo`. Drop it into a config as
+ * `listByLabel: githubIssuesByLabel("owner/repo")` so `campaign <label>` can select
+ * its issue set from the tracker instead of a hand-typed id list.
+ *
+ * Only open issues are listed (`--state open`) — a campaign works the live set — and
+ * only the number is requested, since the planner pulls each issue's dep/fileset/title
+ * data lazily through the other seams. `run` is injected only so the argument building
+ * can be tested without invoking `gh`.
+ */
+export const githubIssuesByLabel =
+  (repo: string, run: (args: string[]) => string = gh) =>
+  (label: string): string[] => {
+    const out = run([
+      "issue",
+      "list",
+      "--repo",
+      repo,
+      "--label",
+      label,
+      "--state",
+      "open",
+      "--json",
+      "number",
+    ]);
+    const rows: Array<{ number?: number }> = JSON.parse(out || "[]");
+    return rows
+      .filter((r) => r.number != null)
+      .map((r) => String(r.number));
+  };
+
+/**
  * A ready `onIssueMerged` handler that advances an issue to the first hop of the
  * merge→`pending-verify`→close lifecycle (`docs/issue-conventions.md`): it adds
  * `pending-verify` and drops `ready-for-agent`. Drop it into a config as

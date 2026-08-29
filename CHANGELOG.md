@@ -43,6 +43,7 @@ Within a milestone each bold section label appears at most once.
 - [user] The landing dashboard's idle/archived card now surfaces a parked record that outlived its run's log (a killed process or out-of-band archive): the card reads `parked` with a non-zero parked tally and rolls up to the parked counter and cross-repo queue, instead of folding to a clean idle/complete while a question still waits (#232).
 - [user] Dashboard wave-card status dots now render as consistent circles — a shared base rule pins every status dot (`.dot`/`.repo-dot`/`.tail-dot`/`.lv-dot`) to `flex: none` so a row's blue dot no longer collapses into a pill or bar under the wave-member title's fill pressure (#234).
 - [user] Event-feed, live-tail, and host-log row times now render in the host's local timezone, matching the archived-run header — previously they showed UTC, disagreeing with the rest of the dashboard (#239).
+- [user] Live-tail agent-log lines now render at a comfortable ~12.5px (.78rem), matching the sibling host-log pane, instead of the sub-readable 10.5px (#235).
 
 ### Collected changes — August 28, 2026
 

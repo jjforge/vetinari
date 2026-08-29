@@ -1846,6 +1846,25 @@ test("renderHostLog renders a gear entry point, a hidden badge, and a hidden hos
   assert.match(html, /Festive [Ww]ave [Nn]ames/);
 });
 
+test("renderHostLog seats the filter input and Download JSON on one control row (#233)", () => {
+  const html = renderHostLog();
+  // The filter now lives inside the .host-log-controls flex row, ahead of the
+  // Download JSON button — the two share a single line instead of stacking.
+  assert.match(
+    html,
+    /<div class="host-log-controls"><input type="text" class="host-log-filter" data-host-log-filter[^>]*\/><button type="button" class="lv-ico" data-host-log-save/,
+  );
+  // The redundant spacer span that used to push the lone button right is gone —
+  // the flexing filter now fills the row.
+  assert.doesNotMatch(html, /host-log-controls"><span class="host-log-gap"/);
+  // The filter flexes to fill the row and drops its own block margin, leaving
+  // the single gutter that .host-log-controls' top margin provides.
+  const filterRule = HOST_LOG_STYLES.match(/\.host-log-filter \{[^}]*\}/);
+  assert.ok(filterRule, "HOST_LOG_STYLES carries a .host-log-filter rule");
+  assert.match(filterRule[0], /flex: 1/);
+  assert.doesNotMatch(filterRule[0], /margin/);
+});
+
 test("renderHostLog is humanized-only: no Humanized/Raw toggle, keeps a Download JSON control (#221)", () => {
   const html = renderHostLog();
   // #221: the host-log pane always renders humanized — the Humanized/Raw toggle is gone entirely.

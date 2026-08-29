@@ -966,12 +966,12 @@ export const renderHostLog = () =>
   // The gear doubles as the fleet settings surface: the "Festive Wave Names" toggle (#193),
   // an unchecked-by-default checkbox the client syncs to the `festiveWaveNames` cookie.
   `<div class="host-log-settings"><label class="festive-toggle"><input type="checkbox" data-festive-toggle /> Festive wave names</label></div>` +
-  `<input type="text" class="host-log-filter" data-host-log-filter placeholder="filter lines…" aria-label="Filter host log lines" />` +
-  // The shared log-view control (#203, humanized-only per #221): a Download JSON control that
-  // always emits the raw NDJSON. Reuses the live tail's .lv-ico class (both style blocks ride the
-  // landing shell), so the two surfaces match.
+  // The shared log-view control row (#203, humanized-only per #221): the filter input and a
+  // Download JSON control that always emits the raw NDJSON share one line — the filter flexes to
+  // fill the row (#233), the button rides beside it. Reuses the live tail's .lv-ico class (both
+  // style blocks ride the landing shell), so the two surfaces match.
   `<div class="host-log-controls">` +
-  `<span class="host-log-gap"></span>` +
+  `<input type="text" class="host-log-filter" data-host-log-filter placeholder="filter lines…" aria-label="Filter host log lines" />` +
   `<button type="button" class="lv-ico" data-host-log-save aria-label="Download JSON" title="Download JSON">⤓</button>` +
   `</div>` +
   `<div class="host-log-lines" data-host-log-lines></div>` +

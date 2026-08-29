@@ -4,6 +4,10 @@ import { humanizedRow } from "./dashboard-render.ts";
 import { humanizeLogLine } from "./log-view.ts";
 import { event } from "./event-log.ts";
 
+// Pin the process TZ to PDT (UTC−7 in August) so the row time is deterministic across hosts:
+// the humanizer renders host-local time (#239), so a `…T14:01:23Z` line reads `07:01:23` local.
+process.env.TZ = "America/Los_Angeles";
+
 // A minimal DOM stub: enough of `document`/`Element` for the pure `.lv-row` factory. Each
 // node records its tag, className, textContent and children so a test can read the structure
 // back without a browser. `humanizedRow` only ever uses createElement/className/textContent/
@@ -45,7 +49,7 @@ test("a lv-row is the three-tier grid: time, dot, then the message cell in that 
   assert.equal(row.className, "lv-row");
   assert.deepEqual(cls(row), ["lv-t", "lv-dot running", "lv-msg"]);
   const [t, dot] = row.children;
-  assert.equal(t.textContent, "14:01:23");
+  assert.equal(t.textContent, "07:01:23");
   assert.ok(dot.className.includes("running"), "the dot carries the state colour class");
 });
 

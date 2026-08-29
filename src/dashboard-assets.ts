@@ -295,9 +295,11 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
   // it through /answer to resume the parked task. Options are best-effort — absent,
   // only the free-text field shows. Any other status hides the whole block.
   const renderReply = (d) => {
-    // An archived issue is read-only: it never offers a reply/resume, even if its
-    // reconstructed status is parked (an interrupted run's unanswered question).
-    const parked = d.status === "parked" && !d.archived;
+    // The reply/resume block is for a question park only (ADR 0019): a held issue reads
+    // parked whatever its reason, but a merge conflict, a red base, or a stall is resolved
+    // through the campaign-level affordance, not a per-issue answer. So gate on the reason
+    // (a legacy park with no reason still reads as a question). An archived issue is read-only.
+    const parked = d.status === "parked" && !d.archived && (!d.reason || d.reason === "question");
     detailReply.hidden = !parked;
     replyResume.hidden = !parked;
     if (parked) {

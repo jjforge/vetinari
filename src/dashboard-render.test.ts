@@ -753,6 +753,17 @@ test("the issue-detail sheet markup, CSS, and script are defined once and shared
   assert.ok(!landing.includes("kept in sync"));
 });
 
+test("the issue-detail sheet offers a reply/resume only for a question park, not a conflict/red-base/stall (ADR 0019)", () => {
+  // A held issue reads `parked` whatever its reason, so the reply block must gate on the
+  // reason — a merge conflict / red base / stall is resolved through the campaign-level
+  // affordance, not a per-issue answer. The shipped sheet script keys the reply block off
+  // `d.reason` (a legacy park with no reason still reads as a question).
+  assert.match(
+    ISSUE_DETAIL_SHEET_SCRIPT,
+    /const parked = d\.status === "parked" && !d\.archived && \(!d\.reason \|\| d\.reason === "question"\)/,
+  );
+});
+
 test("renderLandingShell's feed renders humanized rows in the shared .lv-row component, dot by event state (#216)", () => {
   const html = renderLandingShell(["alpha"]);
   // The feed's humanized branch builds the shared .lv-row from each row's server-attached parts,

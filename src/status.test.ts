@@ -931,15 +931,24 @@ test("buildFeed carries each row's underlying event as raw NDJSON, alongside the
   const green = event("green", { ts: "2025-03-01T08:02:00.000Z", taskId: "101", branch: "agent/101", commits: [] });
   seedState(dir, [green]);
 
-  const feed = buildFeed([pointerFor("acme", dir)], new Date("2025-03-01T09:00:00.000Z"));
+  // The humanized row `time` renders in the host's local timezone (#239); pin the process TZ to
+  // PST (UTC−8 on Mar 1, pre-DST) so the local slice is deterministic — `08:02:00Z` → `00:02:00`.
+  const origTZ = process.env.TZ;
+  process.env.TZ = "America/Los_Angeles";
+  try {
+    const feed = buildFeed([pointerFor("acme", dir)], new Date("2025-03-01T09:00:00.000Z"));
 
-  // The row's `raw` is the underlying event serialized — the bytes the Raw toggle highlights and
-  // Download JSON emits (#203), distinct from the repo-prefixed humanized `text`.
-  assert.equal(feed[0].text, "acme — #101 merged");
-  assert.deepEqual(JSON.parse(feed[0].raw), green);
-  // …and each row carries the shared log-view parts (#216): the repo leads the message as the
-  // actor, the narration is one plain span, and the dot reads the event's state (a merge → green).
-  assert.deepEqual(feed[0].humanized, { time: "08:02:00", actor: "acme", verb: "", spans: [{ text: "#101 merged", kind: "plain" }], dot: "merged" });
+    // The row's `raw` is the underlying event serialized — the bytes the Raw toggle highlights and
+    // Download JSON emits (#203), distinct from the repo-prefixed humanized `text`.
+    assert.equal(feed[0].text, "acme — #101 merged");
+    assert.deepEqual(JSON.parse(feed[0].raw), green);
+    // …and each row carries the shared log-view parts (#216): the repo leads the message as the
+    // actor, the narration is one plain span, and the dot reads the event's state (a merge → green).
+    assert.deepEqual(feed[0].humanized, { time: "00:02:00", actor: "acme", verb: "", spans: [{ text: "#101 merged", kind: "plain" }], dot: "merged" });
+  } finally {
+    if (origTZ === undefined) delete process.env.TZ;
+    else process.env.TZ = origTZ;
+  }
 });
 
 test("a merged event that names its issue only through its branch still renders the number, never #undefined", () => {

@@ -10,7 +10,7 @@ import { applyGraft } from "./plan.ts";
 import { festiveWaveName } from "./festive-names.ts";
 import { readEventLog, type GreenEvent, type OrchestratorEvent } from "./event-log.ts";
 import { activityLogPath } from "./activity.ts";
-import { humanizeLogLine, type HumanizedRow } from "./log-view.ts";
+import { humanizeLogLine, localTime, type HumanizedRow } from "./log-view.ts";
 
 /**
  * Parse a git remote URL to its `owner/name`, handling both the SSH
@@ -1170,7 +1170,7 @@ export function buildFeed(pointers: ProjectPointer[], now: Date = new Date(), lo
         // The feed is cross-repo, so the repo leads the message as the actor; the narration is
         // one plain span and the dot borrows the event's state from the shared log-view registry.
         const dot = humanizeLogLine(raw).dot;
-        const humanized: HumanizedRow = { time: /T(\d{2}:\d{2}:\d{2})/.exec(String(e.ts))?.[1] ?? "", actor: pointer.project, verb: "", spans: [{ text: sentence, kind: "plain" }], dot };
+        const humanized: HumanizedRow = { time: localTime(typeof e.ts === "string" ? e.ts : ""), actor: pointer.project, verb: "", spans: [{ text: sentence, kind: "plain" }], dot };
         entries.push({ project: pointer.project, ts: String(e.ts), kind: String(e.event ?? ""), text: formatFeedEvent(pointer.project, e, festiveArg), raw, humanized });
       }
     }

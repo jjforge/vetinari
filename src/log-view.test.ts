@@ -4,6 +4,11 @@ import { humanizeHostLine, humanizeLogLine, LOG_DOT_STATE_COLOR, plainText, spli
 import { event } from "./event-log.ts";
 import { describeEvent } from "./dashboard-model.ts";
 
+// The row `time` renders in the host's LOCAL timezone (#239), matching the archived-run header.
+// Pin the process TZ to PDT (UTC−7 in August) so the local slice is deterministic and visibly
+// differs from the UTC ISO stamp — a `…T14:01:23Z` line reads `07:01:23` local, not `14:01:23`.
+process.env.TZ = "America/Los_Angeles";
+
 const raw = (e: object) => JSON.stringify(e);
 const p = (text: string): MessageSpan => ({ text, kind: "plain" });
 const code = (text: string): MessageSpan => ({ text, kind: "code" });
@@ -17,7 +22,7 @@ const strong = (text: string): MessageSpan => ({ text, kind: "strong" });
 
 test("a tool event humanizes to `edited` + a code-styled path, running dot", () => {
   const row = humanizeLogLine(raw(event("tool", { taskId: "204", name: "Edit", path: "src/x.ts", ts: "2026-08-28T14:01:23.000Z" })));
-  assert.equal(row.time, "14:01:23");
+  assert.equal(row.time, "07:01:23");
   assert.equal(row.actor, "#204");
   assert.equal(row.verb, "edited");
   assert.deepEqual(row.spans, [code("src/x.ts")]);
@@ -35,7 +40,7 @@ test("a tool event with a byte size appends it; a pathless tool names the tool a
 
 test("a sandbox-exec event humanizes to `ran` + a code-styled command, running dot", () => {
   const row = humanizeLogLine(raw(event("sandbox-exec", { taskId: "204", cmd: "npm test", ts: "2026-08-28T09:15:00.000Z" })));
-  assert.equal(row.time, "09:15:00");
+  assert.equal(row.time, "02:15:00");
   assert.equal(row.actor, "#204");
   assert.equal(row.verb, "ran");
   assert.deepEqual(row.spans, [code("npm test")]);
@@ -146,7 +151,7 @@ test("run-level dot colours: success→merged, halt→failure, wave-parked→par
 test("an unknown event kind renders a readable generic summary, never a raw JSON dump", () => {
   const line = raw({ event: "host-heartbeat", taskId: "204", detail: "ok", ts: "2026-08-28T12:00:00.000Z" });
   const row = humanizeLogLine(line);
-  assert.equal(row.time, "12:00:00");
+  assert.equal(row.time, "05:00:00");
   assert.equal(row.actor, "#204");
   assert.equal(row.verb, "");
   assert.deepEqual(row.spans, [strong("host heartbeat"), p(" · detail "), code("ok")]);
@@ -240,7 +245,7 @@ test("each dot state maps to a stateColor token so the chrome can paint all five
 
 test("a gateway-routed line reads verb `routed` + code category → destination, project actor, neutral dot", () => {
   const row = humanizeHostLine(raw({ event: "gateway-routed", project: "alpha", id: "12", category: "question", destination: "telegram", ts: "2026-08-28T14:01:23.000Z" }));
-  assert.equal(row.time, "14:01:23");
+  assert.equal(row.time, "07:01:23");
   assert.equal(row.actor, "alpha");
   assert.equal(row.verb, "routed");
   assert.deepEqual(row.spans, [code("question"), p(" → "), code("telegram")]);
@@ -316,7 +321,7 @@ test("an unrecognized but notable host kind still paints red, rendering a readab
 test("an unknown, non-notable host kind renders a readable generic summary, neutral dot", () => {
   const line = raw({ event: "gateway-heartbeat", project: "alpha", detail: "ok", ts: "2026-08-28T12:00:00.000Z" });
   const row = humanizeHostLine(line);
-  assert.equal(row.time, "12:00:00");
+  assert.equal(row.time, "05:00:00");
   assert.equal(row.actor, "alpha");
   assert.deepEqual(row.spans, [strong("gateway heartbeat"), p(" · detail "), code("ok")]);
   assert.equal(row.dot, "neutral");

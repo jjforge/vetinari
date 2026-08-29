@@ -54,8 +54,8 @@ export interface MessageSpan {
 }
 
 /** One humanized log row: the shipped-verbatim structured shape `humanizeLogLine` returns
- * (#216). `time` is the `HH:MM:SS` slice of the row's ISO `ts` (UTC, matching the raw pane's
- * verbatim stamps), `actor` the `#issue` (or `host`, or "") that *leads* the message (option
+ * (#216). `time` is the row's ISO `ts` rendered `HH:MM:SS` in the host's *local* timezone
+ * (matching the archived-run header, #239), `actor` the `#issue` (or `host`, or "") that *leads* the message (option
  * 1a — no fixed actor column), `verb` the dim leading verb (`ran`, `edited`, `turn 3`,
  * `gate passed`, `committed`… — "" when the message narrates as one plain span), `spans` the
  * structured remainder, and `dot` the state colour. */
@@ -101,6 +101,20 @@ export function plainText(row: HumanizedRow): string {
   return row.verb + (body && !/^[\s:·—(]/.test(body) ? " " : "") + body;
 }
 
+/** An ISO `ts` rendered `HH:MM:SS` in the host's local timezone — the row-time formatter for
+ * the server-side feed/live-tail humanizer, matching the archived-run header's local formatting
+ * (#239). An empty or unparseable stamp yields "" (an invalid `Date` never leaks "NaN:NaN"). The
+ * host humanizer (`humanizeHostLine`) inlines this same logic because it ships to the browser via
+ * `.toString()` and cannot reach module scope. `buildFeed` (dashboard-model.ts) reuses it so the
+ * feed row time matches the tail's. */
+export function localTime(ts: string): string {
+  if (!ts) return "";
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return "";
+  const p2 = (n: number) => String(n).padStart(2, "0");
+  return `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
+}
+
 /** The tool families whose activity reads as `edited <path>` rather than the generic `ran`
  * (mockup 1c gives file-mutating tools their own verb). Everything else — searches, shells,
  * fetches — leads with `ran`. */
@@ -123,7 +137,7 @@ export function humanizeLogLine(raw: string): HumanizedRow {
   } catch {
     e = null;
   }
-  const time = e && typeof e.ts === "string" ? (/T(\d{2}:\d{2}:\d{2})/.exec(e.ts)?.[1] ?? "") : "";
+  const time = localTime(e && typeof e.ts === "string" ? e.ts : "");
   const hash = (id: unknown) => "#" + String(id).replace(/^#/, "");
   const actorOf = (id: unknown) => (id === undefined || id === null || id === "" ? "" : hash(id));
   const plain = (text: string): MessageSpan => ({ text, kind: "plain" });
@@ -229,7 +243,17 @@ export function humanizeHostLine(raw: string): HumanizedRow {
   } catch {
     e = null;
   }
-  const time = e && typeof e.ts === "string" ? (/T(\d{2}:\d{2}:\d{2})/.exec(e.ts)?.[1] ?? "") : "";
+  // Row time in the host's local timezone (#239), matching the archived-run header. Inlined
+  // rather than calling `localTime` because this function ships to the browser via `.toString()`
+  // and can't reach module scope; an empty/unparseable stamp yields "" (no "NaN:NaN" leak).
+  const localTime = (ts: string): string => {
+    if (!ts) return "";
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return "";
+    const p2 = (n: number) => String(n).padStart(2, "0");
+    return `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
+  };
+  const time = localTime(e && typeof e.ts === "string" ? e.ts : "");
   const hash = (id: unknown) => "#" + String(id).replace(/^#/, "");
   const project = e && typeof e.project === "string" ? e.project : "";
   const plain = (text: string): MessageSpan => ({ text, kind: "plain" });

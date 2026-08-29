@@ -410,6 +410,10 @@ test("renderStatusPage ships the tail styles and a client that reuses the archiv
   const html = renderStatusPage(statusWith([["204", "running"]]), {});
   // The pane's styles are present (fixed 236px body, the shell card).
   assert.match(html, /\.tail-body \{[^}]*height: 236px/);
+  // #235: the log lines read at the same comfortable size as the sibling host-log pane
+  // (.78rem ≈ 12.5px), not the old sub-readable 10.5px.
+  assert.match(html, /\.tail-body \{[^}]*font-size: \.78rem/);
+  assert.doesNotMatch(html, /\.tail-body \{[^}]*10\.5px/);
   assert.match(html, /\.live-tail \{/);
   // The client single-sources the pure reducers and listens for the named `tail` SSE frame —
   // live updates without a whole-page refetch.

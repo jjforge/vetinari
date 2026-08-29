@@ -613,6 +613,45 @@ export function tailView(state: {
   return followView({ buffer: state.buffer, mark: state.mark, live: state.live, cap: state.cap, match });
 }
 
+/**
+ * The event-log feed's body view-model (#220): the sibling of `tailView`, swapping the tail's
+ * issue criterion for a **project** one. The project dropdown and the (kind, text) filter fold
+ * into one match predicate — a row shows only when it is in the chosen project (empty = all repos)
+ * **and** matches the substring filter — that the shared `followView` applies to both the visible
+ * set and the backlog count. Pure and self-contained, unit-tested in node and shipped to the
+ * browser via `.toString()` (ADR 0012).
+ */
+export function feedView<T extends { project: string; kind: string; text: string }>(state: {
+  buffer: T[];
+  mark: number;
+  live: boolean;
+  project: string;
+  query: string;
+  cap: number;
+}): { rows: T[]; visible: number; total: number; backlog: number; empty: boolean; following: boolean } {
+  const match = (row: T) => (!state.project || row.project === state.project) && feedRowMatches(row, state.query);
+  return followView({ buffer: state.buffer, mark: state.mark, live: state.live, cap: state.cap, match });
+}
+
+/**
+ * The event-log feed's project-dropdown options (#220): the distinct `project` keys present in the
+ * buffer, sorted for a stable menu — so the dropdown offers only repos with events in the window
+ * (no dead options) and grows as a new project's events arrive, mirroring how the live tail's agent
+ * dropdown tracks running issues. Pure and self-contained, unit-tested in node and shipped to the
+ * browser via `.toString()` (ADR 0012).
+ */
+export function feedProjects(buffer: Array<{ project: string }>): string[] {
+  const seen: Record<string, true> = {};
+  const out: string[] = [];
+  for (const row of buffer) {
+    if (row.project && !seen[row.project]) {
+      seen[row.project] = true;
+      out.push(row.project);
+    }
+  }
+  return out.sort();
+}
+
 const ARCHIVE_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const pad2 = (n: number) => String(n).padStart(2, "0");
 
@@ -752,6 +791,15 @@ export interface RepoOption {
 }
 
 const asRepoOption = (repo: string | RepoOption): RepoOption => (typeof repo === "string" ? { project: repo, runState: "idle" } : repo);
+
+/** project → owner/name label map for the event-log feed's project dropdown (#220): the same
+ * `repo` display the top-bar switcher shows, so a buffer-sourced option reads as owner/name.
+ * A project with no parseable remote is absent, so the menu falls back to its bare project key. */
+const feedRepoLabelMap = (repos: readonly (string | RepoOption)[]): Record<string, string> => {
+  const map: Record<string, string> = {};
+  for (const opt of repos.map(asRepoOption)) if (opt.repo) map[opt.project] = opt.repo;
+  return map;
+};
 
 /**
  * The repo dropdown (#88): the toolbar's page heading and the repo switcher in one
@@ -1043,7 +1091,7 @@ ${renderTopBar(renderRepoDropdown(projects, undefined), renderHostLog())}
 </section>
 <section id="parked-queue" class="parked-queue" hidden aria-label="Parked questions across all repos"></section>
 <section id="cards" class="cards"><p class="empty">Loading…</p></section>
-<section id="feed" class="live-tail feed" data-feed aria-label="Event log across all repos"><div class="tail-head"><span class="tail-dot" data-feed-dot aria-hidden="true"></span><span class="tail-title tail-title-static">Event log · all repos</span><span class="tail-summary" data-feed-summary></span><span class="tail-gap"></span><span class="tail-controls" data-feed-controls><input type="text" class="tail-filter" placeholder="filter events…" aria-label="Filter events" data-feed-filter /><button type="button" class="lv-ico lv-pause" data-feed-play data-following="true" aria-label="Pause"></button><button type="button" class="lv-ico" data-feed-save aria-label="Download JSON" title="Download JSON">⤓</button></span></div><div class="feed-body" data-feed-body><p class="empty">Loading…</p></div><button type="button" class="tail-backlog" data-feed-backlog hidden></button><div class="tail-footer" data-feed-footer></div></section>
+<section id="feed" class="live-tail feed" data-feed aria-label="Event log across all repos"><div class="tail-head"><span class="tail-dot" data-feed-dot aria-hidden="true"></span><span class="tail-title tail-title-static">Event log · all repos</span><span class="tail-summary" data-feed-summary></span><span class="tail-gap"></span><span class="tail-controls" data-feed-controls><span class="tail-issue-dd" data-feed-project-dd><button type="button" class="tail-issue-trigger" data-feed-project-trigger aria-haspopup="listbox" aria-expanded="false"><span data-feed-project-label>all repos</span><span class="tail-issue-caret" aria-hidden="true">▾</span></button><ul class="tail-issue-menu" role="listbox" aria-label="Filter by project" data-feed-project-menu hidden></ul></span><input type="text" class="tail-filter" placeholder="filter events…" aria-label="Filter events" data-feed-filter /><button type="button" class="lv-ico lv-pause" data-feed-play data-following="true" aria-label="Pause"></button><button type="button" class="lv-ico" data-feed-save aria-label="Download JSON" title="Download JSON">⤓</button></span></div><div class="feed-body" data-feed-body><p class="empty">Loading…</p></div><button type="button" class="tail-backlog" data-feed-backlog hidden></button><div class="tail-footer" data-feed-footer></div></section>
 ${issueDetailSheetMarkup(true)}
 <script>
   // The state → visual-intent reducers (dashboard-visual-state.ts, ADR 0012), single-
@@ -1069,14 +1117,18 @@ ${issueDetailSheetMarkup(true)}
   // The event-log feed's pure logic is single-sourced from dashboard-render via .toString()
   // (ADR 0012): the shared follow/pause/backlog view-model (followView) and following-buffer
   // append (tailAppend) the live tail also drives, plus the feed's dedup (feedFresh/feedKey),
-  // its kind→label/category maps and its (kind, text) filter — so the node tests exercise the
-  // very functions the browser runs and the two panes share one tested path (#196).
+  // its kind→label/category maps, its (kind, text) filter, and its composed project+text body
+  // view-model (feedView) with the buffer-sourced project options (feedProjects, #220) — so the
+  // node tests exercise the very functions the browser runs and the two panes share one tested
+  // path (#196).
   ${followView.toString()}
   ${tailAppend.toString()}
   ${feedKey.toString()}
   ${feedFresh.toString()}
   ${feedKindLabel.toString()}
   ${feedRowMatches.toString()}
+  ${feedView.toString()}
+  ${feedProjects.toString()}
   ${splitOverflow.toString()}
   ${humanizedRow.toString()}
 ${ISSUE_DETAIL_SHEET_SCRIPT}
@@ -1093,10 +1145,15 @@ ${REPO_DROPDOWN_SCRIPT}
   const feedDot = fq("[data-feed-dot]"), feedSummary = fq("[data-feed-summary]"), feedBody = fq("[data-feed-body]");
   const feedFooter = fq("[data-feed-footer]"), feedBacklog = fq("[data-feed-backlog]"), feedPlay = fq("[data-feed-play]");
   const feedFilter = fq("[data-feed-filter]"), feedSave = fq("[data-feed-save]");
-  let feedBuffer = [], feedSeen = {}, feedLive = true, feedMark = 0, feedQuery = "", feedLoaded = false, feedError = false;
-  const feedMatch = (e) => feedRowMatches(e, feedQuery);
+  // The project dropdown (#220): a buffer-sourced menu (feedProjects) labelled by owner/name
+  // (the repo switcher's label, from this map), scoping the feed in place — client-only, no URL
+  // param (that is the repo switcher's ?project=), resets on reload.
+  const feedProjectDd = fq("[data-feed-project-dd]"), feedProjectTrigger = fq("[data-feed-project-trigger]");
+  const feedProjectMenu = fq("[data-feed-project-menu]"), feedProjectLabel = fq("[data-feed-project-label]");
+  const feedRepoLabels = ${JSON.stringify(feedRepoLabelMap(projects))};
+  let feedBuffer = [], feedSeen = {}, feedLive = true, feedMark = 0, feedQuery = "", feedProject = "", feedLoaded = false, feedError = false;
   function feedRender() {
-    const view = followView({ buffer: feedBuffer, mark: feedMark, live: feedLive, cap: FEED_RENDER_CAP, match: feedMatch });
+    const view = feedView({ buffer: feedBuffer, mark: feedMark, live: feedLive, project: feedProject, query: feedQuery, cap: FEED_RENDER_CAP });
     feedBody.textContent = "";
     if (feedError) { feedBody.append(el("p", "empty", "Couldn't load the activity feed.")); }
     else if (!feedLoaded) { feedBody.append(el("p", "empty", "Loading…")); }
@@ -1108,7 +1165,7 @@ ${REPO_DROPDOWN_SCRIPT}
         feedBody.append(humanizedRow(e.humanized, document));
       }
     } else {
-      feedBody.append(el("p", "empty", feedQuery.trim() ? "No events match that filter." : "No activity in the last 48 hours."));
+      feedBody.append(el("p", "empty", feedQuery.trim() || feedProject ? "No events match that filter." : "No activity in the last 48 hours."));
     }
     feedFooter.textContent = feedLoaded && !feedError ? (view.visible + " of " + view.total + " event" + (view.total === 1 ? "" : "s") + " · " + (view.following ? "following" : "paused")) : "";
     // Newest-on-top (#195), so the backlog affordance points up to the freshest events.
@@ -1118,11 +1175,27 @@ ${REPO_DROPDOWN_SCRIPT}
     feedSummary.textContent = feedLoaded && !feedError ? (view.total + " event" + (view.total === 1 ? "" : "s")) : "";
     if (feedLive) feedBody.scrollTop = 0;
   }
+  function feedRenderMenu() {
+    feedProjectMenu.textContent = "";
+    const projects = feedProjects(feedBuffer);
+    // "all repos" leads (keys on no project), then one row per project present in the buffer,
+    // labelled by its owner/name when known — a new project's first event grows this list.
+    const rows = [{ project: "", label: "all repos" }].concat(projects.map((p) => ({ project: p, label: feedRepoLabels[p] || p })));
+    for (const r of rows) {
+      const li = el("li", "tail-issue-option"); li.setAttribute("role", "option"); li.dataset.project = r.project;
+      li.append(el("span", null, r.label));
+      li.addEventListener("click", () => { feedProject = r.project; feedProjectLabel.textContent = r.label; feedProjectMenu.hidden = true; feedProjectTrigger.setAttribute("aria-expanded", "false"); feedRender(); });
+      feedProjectMenu.append(li);
+    }
+    // If the selected project rolled out of the 48h window, fall back to all repos (no dead option).
+    if (feedProject && projects.indexOf(feedProject) === -1) { feedProject = ""; feedProjectLabel.textContent = "all repos"; }
+  }
   function feedIngest(entries) {
     const res = feedFresh(entries, feedSeen); feedSeen = res.seen;
     // Grow past the cap while paused so a piling backlog survives to be revealed on resume;
     // following keeps the buffer bounded to a recent window.
     if (res.fresh.length) feedBuffer = tailAppend(feedBuffer, res.fresh, feedLive, FEED_FOLLOW_CAP);
+    feedRenderMenu();
     feedRender();
   }
   async function loadFeed() {
@@ -1135,13 +1208,17 @@ ${REPO_DROPDOWN_SCRIPT}
   feedPlay.addEventListener("click", () => { feedLive = !feedLive; feedMark = feedBuffer.length; feedRender(); });
   feedBacklog.addEventListener("click", () => { feedLive = true; feedMark = feedBuffer.length; feedRender(); });
   feedFilter.addEventListener("input", () => { feedQuery = feedFilter.value; feedRender(); });
+  feedProjectTrigger.addEventListener("click", (e) => { e.stopPropagation(); const willOpen = feedProjectMenu.hidden; feedProjectMenu.hidden = !willOpen; feedProjectTrigger.setAttribute("aria-expanded", String(willOpen)); });
+  document.addEventListener("click", (e) => { if (!feedProjectDd.contains(e.target)) { feedProjectMenu.hidden = true; feedProjectTrigger.setAttribute("aria-expanded", "false"); } });
   feedSave.addEventListener("click", () => {
     // Download JSON (#203): the currently-filtered rows — uncapped by the render window — as their
     // underlying event NDJSON (e.raw, one per line), so the raw bytes stay faithful in either mode.
-    const view = followView({ buffer: feedBuffer, mark: feedMark, live: feedLive, cap: Math.max(feedBuffer.length, 1), match: feedMatch });
+    // Honors the project selection too (#220), since feedView composes it with the text filter.
+    const view = feedView({ buffer: feedBuffer, mark: feedMark, live: feedLive, project: feedProject, query: feedQuery, cap: Math.max(feedBuffer.length, 1) });
     const blob = new Blob([view.rows.map((e) => e.raw).join("\\n")], { type: "application/x-ndjson" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "event-log.jsonl"; a.click(); URL.revokeObjectURL(a.href);
   });
+  feedRenderMenu();
   function renderParked(parked) {
     const toggle = document.querySelector('[data-counter="parked"]');
     const panel = document.getElementById("parked-queue");

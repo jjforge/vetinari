@@ -588,7 +588,7 @@ export const LIVE_TAIL_STYLES = `  .live-tail { background: var(--color-card); b
   .lv-pause[data-following="true"] { border-color: var(--color-blue-40); }
   .lv-pause[data-following="true"]::before { content: "▮▮"; letter-spacing: -.12em; }
   .lv-pause[data-following="false"]::before { content: "▶"; }
-  .tail-body { height: 236px; overflow-y: auto; overflow-x: hidden; background: var(--color-body); font-family: ${MONO_FONT}; font-size: 10.5px; line-height: 1.5; }
+  .tail-body { height: 236px; overflow-y: auto; overflow-x: hidden; background: var(--color-body); font-family: ${MONO_FONT}; font-size: .78rem; line-height: 1.5; }
   .tail-body[hidden] { display: none; }
   /* The shared log-view row (#216, mockup 1a/2b): the three-tier grid time · dot · message,
      painting the least→most emphasis ramp (#221). Left to right is least to most important — the

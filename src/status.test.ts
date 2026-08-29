@@ -13,13 +13,16 @@ import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import {
   ARCHIVE_LIST_SCRIPT,
+  counterColor,
   DASHBOARD_PALETTE_CSS,
   HOST_LOG_SCRIPT,
   HOST_LOG_STYLES,
   ISSUE_DETAIL_SHEET_SCRIPT,
   ISSUE_DETAIL_SHEET_STYLES,
   REPO_DROPDOWN_SCRIPT,
+  STATE_CHIP_BORDER_CSS,
   STATE_DOT_CSS,
+  stateBorderColor,
   stateColor,
   TOP_BAR_STYLES,
 } from "./dashboard-assets.ts";
@@ -1374,19 +1377,21 @@ test("cards fill card-grey and chips fill the darker panel with a 40%-alpha stat
     campaign,
     /\.wave-status, \.completed-wave-chip \{[^}]*background: var\(--color-chip\)/,
   );
-  // A member row carries its status class and borders that status at 40% alpha (§4).
+  // A member row carries its status class and borders that status at 40% alpha (§4). The
+  // border colour for each state is `stateBorderColor` (asserted by value there); one structural
+  // check confirms the campaign page splices the shared STATE_CHIP_BORDER_CSS that reducer builds.
   assert.match(campaign, /class="wave-member running"/);
-  assert.match(
-    campaign,
-    /\.wave-member\.running \{ border-color: var\(--color-blue-40\); \}/,
+  assert.ok(
+    campaign.includes(STATE_CHIP_BORDER_CSS),
+    "campaign splices the shared wave-member border rules",
   );
-  assert.match(
-    campaign,
-    /\.wave-member\.parked \{ border-color: var\(--color-yellow-40\); \}/,
-  );
-  assert.match(
-    campaign,
-    /\.wave-member\.pruned \{ border-color: var\(--color-pruned-40\); \}/,
+  assert.ok(
+    STATE_CHIP_BORDER_CSS.includes(
+      ["running", "parked", "failure", "completed", "unstarted", "pruned", "quarantined", "interrupted"]
+        .map((s) => `.wave-member.${s} { border-color: ${stateBorderColor(s)}; }`)
+        .join(" "),
+    ),
+    "the shared border rules are generated from stateBorderColor",
   );
 });
 
@@ -1430,17 +1435,15 @@ test("the issue-detail sheet carries the issue's state on its top edge only (§2
     ISSUE_DETAIL_SHEET_STYLES,
     /\.issue-detail-sheet \{[^}]*border-top: 2px solid/,
   );
-  assert.match(
-    ISSUE_DETAIL_SHEET_STYLES,
-    /\.issue-detail-sheet\.parked \{ border-top-color: var\(--color-yellow\); \}/,
-  );
-  assert.match(
-    ISSUE_DETAIL_SHEET_STYLES,
-    /\.issue-detail-sheet\.completed \{ border-top-color: var\(--color-green\); \}/,
-  );
-  assert.match(
-    ISSUE_DETAIL_SHEET_STYLES,
-    /\.issue-detail-sheet\.failure \{ border-top-color: var\(--color-failure\); \}/,
+  // The per-state top-edge colour is `stateColor` (asserted by value there); one structural
+  // check confirms the shared sheet CSS splices those rules in, proven once not per state.
+  assert.ok(
+    ISSUE_DETAIL_SHEET_STYLES.includes(
+      ["running", "parked", "failure", "completed", "unstarted", "pruned", "quarantined", "interrupted"]
+        .map((s) => `.issue-detail-sheet.${s} { border-top-color: ${stateColor(s)}; }`)
+        .join(" "),
+    ),
+    "the shared sheet CSS splices the stateColor-derived top edges",
   );
   // The sheet's state class is set from the fetched issue status when the detail renders,
   // and reset while a fresh issue is loading.
@@ -1496,9 +1499,8 @@ test("an idle running tally renders a solid blue dot with no pulse; genuinely-ru
   // called on the tally dot, so the browser runs the very function the node test pins.
   assert.match(html, /function tallyDotClass/);
   assert.match(html, /"dot " \+ tallyDotClass\(\{ kind: bucket, count \}\)/);
-  // CSS: a .dot.running is blue and pulses by default; an idle (zero-count) one is stilled,
-  // keeping the blue but dropping the motion.
-  assert.match(html, /\.dot\.running \{ background: var\(--color-blue\); \}/);
+  // Motion: a .dot.running pulses by default (its blue is the shared stateColor-derived dot
+  // rule); an idle (zero-count) one is stilled, keeping the blue but dropping the motion.
   assert.match(html, /\.dot\.running\.idle \{ animation: none; \}/);
   // The base running dot still pulses — a wave member with real running work is unaffected.
   assert.match(html, /\.dot\.running \{ animation: chip-pulse/);
@@ -1573,6 +1575,28 @@ test("stateColor is the single state→colour derivation, failure distinct from 
   assert.notEqual(stateColor("failure"), "var(--color-red)");
 });
 
+test("stateBorderColor is the single derivation for the muted 40%-alpha chip borders (§4, #83)", () => {
+  // §4: a wave-member row borders its status at 40% alpha — the same token as stateColor,
+  // suffixed `-40`. quarantined/interrupted read amber like parked (ADR 0013, #152).
+  assert.equal(stateBorderColor("running"), "var(--color-blue-40)");
+  assert.equal(stateBorderColor("parked"), "var(--color-yellow-40)");
+  assert.equal(stateBorderColor("failure"), "var(--color-failure-40)");
+  assert.equal(stateBorderColor("completed"), "var(--color-green-40)");
+  assert.equal(stateBorderColor("pruned"), "var(--color-pruned-40)");
+  assert.equal(stateBorderColor("unstarted"), "var(--color-dim-40)");
+  assert.equal(stateBorderColor("quarantined"), "var(--color-yellow-40)");
+  assert.equal(stateBorderColor("interrupted"), "var(--color-yellow-40)");
+});
+
+test("counterColor is the single derivation for the landing counter-value colours (#80)", () => {
+  // The three coloured counters read their status colour; queued (and any other kind)
+  // stays the neutral dim, matching the render's no-rule-for-queued.
+  assert.equal(counterColor("working"), "var(--color-blue)");
+  assert.equal(counterColor("parked"), "var(--color-yellow)");
+  assert.equal(counterColor("mergedToday"), "var(--color-green)");
+  assert.equal(counterColor("queued"), "var(--color-dim)");
+});
+
 test("both pages share one set of status-dot rules, scoped to .dot so a state never tints a whole card or row (#81, #83)", () => {
   const landing = renderLandingShell(["alpha"]);
   const campaign = renderStatusPage(
@@ -1598,13 +1622,19 @@ test("both pages share one set of status-dot rules, scoped to .dot so a state ne
     campaign.includes(STATE_DOT_CSS),
     "campaign page includes the shared dot rules",
   );
-  // Every status colour is scoped to `.dot` — the campaign page no longer emits the
-  // bare `.completed {…}` / `.pruned {…}` rules that leaked colour onto struck-through
-  // list rows and other elements sharing the class name (#81).
-  assert.match(
-    campaign,
-    /\.dot\.pruned \{ background: var\(--color-pruned\); \}/,
+  // Every status colour is scoped to `.dot`, and each dot's colour is `stateColor` (asserted
+  // by value there): the shared rules are generated from it, so one check proves the wiring for
+  // the whole family rather than re-pinning each state's background.
+  assert.ok(
+    STATE_DOT_CSS.includes(
+      ["running", "parked", "failure", "completed", "unstarted", "pruned", "queued", "quarantined", "interrupted"]
+        .map((s) => `.dot.${s} { background: ${stateColor(s)}; }`)
+        .join(" "),
+    ),
+    "the shared dot rules are generated from stateColor",
   );
+  // The campaign page no longer emits the bare `.completed {…}` / `.pruned {…}` rules that
+  // leaked colour onto struck-through list rows and other elements sharing the class name (#81).
   // A bare status-class rule sits at a selector boundary (start of a line, after
   // whitespace) — the shared dot rules are all `.dot.<state>`, never bare. So none of
   // these leak-prone bare rules should appear on the campaign page any more.
@@ -1826,32 +1856,26 @@ test("failure renders in its own red on every surface, never the prune action's 
     { project: "beta", waves: [], parked: [] },
     { prune: true },
   );
-  // The activity feed, the card highlight, and the run-state pill all read failure
-  // in --color-failure; the prune controls keep --color-red.
-  assert.match(
-    landing,
-    /\.lv-dot\.failure \{ background: var\(--color-failure\); \}/,
+  // failure derives --color-failure from stateColor, distinct from the prune action's own
+  // --color-red (the value distinction is asserted in the stateColor test). Here we confirm each
+  // surface splices that failure colour in — the feed dot, the card edge, the run-state pill, and
+  // the turn number — never re-pinning the token, which comes from the reducer.
+  const failure = stateColor("failure");
+  assert.notEqual(failure, "var(--color-red)");
+  assert.ok(landing.includes(`.lv-dot.failure { background: ${failure}; }`));
+  assert.ok(landing.includes(`.card.failure { border-top-color: ${failure}; }`));
+  assert.ok(
+    landing.includes(`.run-state.failure { border-color: ${failure}; color: ${failure}; }`),
   );
-  assert.match(
-    landing,
-    /\.card\.failure \{ border-top-color: var\(--color-failure\); \}/,
+  assert.ok(
+    ISSUE_DETAIL_SHEET_STYLES.includes(`.turn-num.failure { color: ${failure}; }`),
   );
-  assert.match(
-    landing,
-    /\.run-state\.failure \{ border-color: var\(--color-failure\); color: var\(--color-failure\); \}/,
-  );
-  // The shared turn-log failure number reads --color-failure; prune controls stay --color-red.
-  assert.match(
-    ISSUE_DETAIL_SHEET_STYLES,
-    /\.turn-num\.failure \{ color: var\(--color-failure\); \}/,
-  );
+  // The prune controls keep --color-red — a control, never the failure state.
   assert.match(
     ISSUE_DETAIL_SHEET_STYLES,
     /\.prune-start[^{]*\{[^}]*var\(--color-red\)/,
   );
-  assert.ok(
-    campaign.includes(".turn-num.failure { color: var(--color-failure); }"),
-  );
+  assert.ok(campaign.includes(`.turn-num.failure { color: ${failure}; }`));
 });
 
 test("renderLandingShell mounts the cross-project feed under the cards on every width", () => {
@@ -2015,8 +2039,9 @@ test("renderLandingShell opens a parked-queue row's issue detail inline, not by 
   // The sheet's collapse rules are present so a flex display can't defeat [hidden].
   assert.match(html, /\.issue-detail\[hidden\] \{ display: none; \}/);
   assert.match(html, /\.prune-panel\[hidden\] \{ display: none; \}/);
-  // The status dot colours are scoped to .dot so they don't tint the run-state pills.
-  assert.match(html, /\.dot\.parked \{ background: var\(--color-yellow\); \}/);
+  // The status dot colours are scoped to .dot (the shared stateColor-derived rules) so they
+  // don't tint the run-state pills.
+  assert.ok(html.includes(STATE_DOT_CSS));
 });
 
 test("the issue-detail sheet markup, CSS, and script are defined once and shared by both pages (#76)", () => {
@@ -2371,19 +2396,13 @@ test("renderLandingShell colours each project card's highlight by run state (#75
   const html = renderLandingShell(["alpha"]);
   // The card element carries its run-state class...
   assert.match(html, /el\("a", "card " \+ p\.runState\)/);
-  // ...and per-state border-top-color rules tint the highlight to match the pill.
-  assert.match(
-    html,
-    /\.card\.parked \{ border-top-color: var\(--color-yellow\); \}/,
-  );
-  assert.match(
-    html,
-    /\.card\.running \{ border-top-color: var\(--color-blue\); \}/,
-  );
-  assert.match(
-    html,
-    /\.card\.idle \{ border-top-color: var\(--color-dim\); \}/,
-  );
+  // ...and per-state border-top-color rules tint the highlight to match the pill. The colour
+  // for each state is `stateColor` (asserted by value there); one structural check confirms the
+  // rendered output carries those reducer-derived rules verbatim, proven once not per state.
+  const cardEdgeCss = ["running", "parked", "failure", "completed", "idle"]
+    .map((s) => `.card.${s} { border-top-color: ${stateColor(s)}; }`)
+    .join(" ");
+  assert.ok(html.includes(cardEdgeCss), "landing carries the stateColor-derived card edges");
 });
 
 test("renderLandingShell draws each card a run-state-coloured progress bar sized by percent merged (#80)", () => {
@@ -2392,19 +2411,13 @@ test("renderLandingShell draws each card a run-state-coloured progress bar sized
   // sitting beneath the wave/percent meta line.
   assert.match(html, /el\("div", "progress-fill " \+ p\.runState\)/);
   assert.match(html, /\.style\.width = p\.percentMerged \+ "%"/);
-  // The fill is coloured by run state: running blue, parked yellow, completed green; idle stays grey.
-  assert.match(
-    html,
-    /\.progress-fill\.running \{ background: var\(--color-blue\); \}/,
-  );
-  assert.match(
-    html,
-    /\.progress-fill\.parked \{ background: var\(--color-yellow\); \}/,
-  );
-  assert.match(
-    html,
-    /\.progress-fill\.completed \{ background: var\(--color-green\); \}/,
-  );
+  // The fill is coloured by run state (idle stays grey via the base rule). Each state's colour
+  // is `stateColor` (asserted by value there); one structural check confirms the rendered output
+  // carries those fill rules verbatim, proven once rather than re-pinned per state.
+  const fillCss = ["running", "parked", "completed"]
+    .map((s) => `.progress-fill.${s} { background: ${stateColor(s)}; }`)
+    .join(" ");
+  assert.ok(html.includes(fillCss), "landing carries the stateColor-derived progress fills");
 });
 
 test("renderLandingShell renders the card tally as status-dot chips, not plain text (#80)", () => {
@@ -2415,26 +2428,24 @@ test("renderLandingShell renders the card tally as status-dot chips, not plain t
   assert.match(html, /"dot " \+ tallyDotClass\(\{ kind: bucket, count \}\)/);
   // The chip treatment matches the campaign page's chips — a bordered pill.
   assert.match(html, /\.tally-chip \{[^}]*border-radius: 999px/);
-  // The queued dot is the dim unstarted grey; running/parked reuse the shared .dot colours.
-  assert.match(html, /\.dot\.queued \{ background: var\(--color-dim\); \}/);
+  // The tally dots reuse the shared stateColor-derived .dot colours (queued the dim unstarted
+  // grey, running/parked their status colours) — asserted by value against stateColor.
+  assert.ok(html.includes(STATE_DOT_CSS));
   // The old plain-text tally string is gone.
   assert.doesNotMatch(html, /" running · " \+ p\.tally\.parked/);
 });
 
 test("renderLandingShell colours the counter values and highlights the parked counter when it has questions (#80)", () => {
   const html = renderLandingShell(["alpha"]);
-  // Each counter value reads in its status colour: working blue, parked yellow, merged-today green; queued stays neutral.
-  assert.match(
-    html,
-    /\[data-counter="working"\] \.counter-value \{ color: var\(--color-blue\); \}/,
-  );
-  assert.match(
-    html,
-    /\[data-counter="parked"\] \.counter-value \{ color: var\(--color-yellow\); \}/,
-  );
-  assert.match(
-    html,
-    /\[data-counter="mergedToday"\] \.counter-value \{ color: var\(--color-green\); \}/,
+  // Each counter value reads in its status colour — working blue, parked amber, merged-today
+  // green; queued stays neutral. The value→colour mapping is owned by `counterColor` (asserted
+  // there); here one structural check confirms the rendered output carries that reducer's CSS.
+  const counterValueCss = ["working", "parked", "mergedToday"]
+    .map((k) => `[data-counter="${k}"] .counter-value { color: ${counterColor(k)}; }`)
+    .join(" ");
+  assert.ok(
+    html.includes(counterValueCss),
+    "landing carries the counterColor-derived counter-value rules",
   );
   // The parked counter carries a gold border only while it is actionable — enabled, i.e. parked > 0.
   assert.match(
@@ -5420,9 +5431,11 @@ test("renderStatusPage colours a pruned chip and pulses a running one", () => {
   // at a glance without counting struck-through chips (one of two issues pruned).
   assert.match(html, /<span class="wave-pruned">1 pruned<\/span>/);
   // …in a distinct pruned colour defined in the stylesheet (ADR 0007's sixth state),
-  // scoped to .dot so it tints only the dot, never the whole struck-through chip (#81).
+  // scoped to .dot so it tints only the dot, never the whole struck-through chip (#81). The
+  // pruned dot's colour is stateColor("pruned") (asserted by value there), carried in the shared
+  // dot rules the page splices in.
   assert.match(html, /--color-pruned:/);
-  assert.match(html, /\.dot\.pruned \{ background: var\(--color-pruned\); \}/);
+  assert.ok(html.includes(STATE_DOT_CSS));
   // A running chip pulses — a keyframed animation on its dot, reduced-motion aware.
   assert.match(html, /@keyframes chip-pulse/);
   assert.match(html, /\.dot\.running \{ animation: chip-pulse/);
@@ -6425,11 +6438,13 @@ test("renderStatusPage renders the turn log newest-first with each turn number i
   // The turn log region is an ordered list the script fills from the fetched turnLog.
   assert.match(html, /id="issue-detail-turnlog"/);
   assert.match(html, /turnLog/);
-  // The status dot palette is shared, so a turn number reuses the same status colours.
-  assert.match(
-    html,
-    /\.turn-num\.completed \{ color: var\(--color-green\); \}/,
-  );
+  // The status dot palette is shared, so a turn number reuses the same status colours. Each
+  // state's colour is `stateColor` (asserted by value there); one structural check confirms the
+  // page splices those turn-num rules in, proven once rather than re-pinned per state.
+  const turnNumCss = ["completed", "parked", "failure", "running", "unstarted", "pruned", "quarantined"]
+    .map((s) => `.turn-num.${s} { color: ${stateColor(s)}; }`)
+    .join(" ");
+  assert.ok(html.includes(turnNumCss), "the page splices the stateColor-derived turn-num rules");
 });
 
 test("renderStatusPage makes the issue-detail sheet a full-width bottom sheet on mobile", () => {

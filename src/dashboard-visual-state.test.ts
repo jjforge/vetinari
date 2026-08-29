@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import {
   dotClass,
   freezeIntent,
-  hiddenPastCap,
   paneActivity,
   tallyDotClass,
 } from "./dashboard-visual-state.ts";
@@ -25,12 +24,6 @@ test("tallyDotClass stills a 0-running tally dot with idle but keeps the blue (Â
   assert.equal(tallyDotClass({ kind: "parked", count: 3 }), "parked");
 });
 
-test("hiddenPastCap hides only rows at or past the cap, revealing the newest (#101)", () => {
-  assert.equal(hiddenPastCap(0, 20), false);
-  assert.equal(hiddenPastCap(19, 20), false);
-  assert.equal(hiddenPastCap(20, 20), true);
-  assert.equal(hiddenPastCap(21, 20), true);
-});
 
 test("freezeIntent ages the 'updated Ns ago' readout from now (#210)", () => {
   const intent = freezeIntent({ lastUpdate: 1000, now: 6000 });

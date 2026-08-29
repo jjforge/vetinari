@@ -6,8 +6,8 @@
  * on rendered HTML. Modelling it as named pure functions unit-tested in node (the
  * node-only gate, no jsdom/CDP) lets each rule be asserted directly (ADR 0012).
  *
- * Two kinds live here. **Server-side** class decisions (`dotClass`, `tallyDotClass`,
- * `hiddenPastCap`) are called at render. The **client-side** presentation-freeze
+ * Two kinds live here. **Server-side** class decisions (`dotClass`, `tallyDotClass`)
+ * are called at render. The **client-side** presentation-freeze
  * (`freezeIntent`) also runs in the browser — it ticks each second — so it is
  * single-sourced to the browser via `${freezeIntent.toString()}`
  * inlined into the page script: the node test imports the same function the payload
@@ -35,15 +35,6 @@ export function dotClass(status: string): string {
  */
 export function tallyDotClass({ kind, count }: { kind: string; count: number }): string {
   return dotClass(kind) + (kind === "running" && count === 0 ? " idle" : "");
-}
-
-/**
- * Whether a row past the collapsible cap renders `hidden` behind the "show older"
- * control (#101): the newest `cap` rows show, the rest hide until revealed. A pure
- * index test, called server-side by the archived-runs list.
- */
-export function hiddenPastCap(index: number, cap: number): boolean {
-  return index >= cap;
 }
 
 /**

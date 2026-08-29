@@ -1,4 +1,4 @@
-import { cappedRawRows, followView, humanizedRow, isNotableHostEvent, tailAppend, tailFresh, tailView } from "./dashboard-render.ts";
+import { archiveRowMatches, cappedRawRows, followView, humanizedRow, isNotableHostEvent, tailAppend, tailFresh, tailView } from "./dashboard-render.ts";
 import { paneActivity } from "./dashboard-visual-state.ts";
 import { humanizeHostLine, LOG_DOT_STATE_COLOR, splitOverflow } from "./log-view.ts";
 
@@ -513,15 +513,17 @@ export const REPO_DROPDOWN_SCRIPT = `  const repoRoot = document.querySelector("
   }`;
 
 /**
- * The archived-runs list's client script (#98): expand/collapse rows (one open at a
- * time, the open row tinted), mirror the open row into the URL (`?run=…`) so the view
- * is shareable without a navigation, and reveal older rows past the cap on demand. An
+ * The archived-runs list's client script (#98, #256): expand/collapse rows (one open at a
+ * time, the open row tinted), mirror the open row into the URL (`?run=…`) so the view is
+ * shareable without a navigation, and a substring filter (the shared feed/host-log contract,
+ * `archiveRowMatches`) that hides the rows whose visible summary text doesn't match. An
  * archived run's expanded body is its wave-card grid only (#222) — there is no run-level
- * log pane, so this script no run-level log to fetch, filter, or render. No-op when the
- * page has no archived list.
+ * log pane, so this script has no run-level log to fetch or render. No-op when the page has
+ * no archived list.
  */
 export const ARCHIVE_LIST_SCRIPT = `  const archiveList = document.querySelector(".archive-list");
   if (archiveList) {
+    ${archiveRowMatches.toString()}
     const archiveRows = [...archiveList.querySelectorAll("li[data-run]")];
     const syncUrl = (row) => { try { history.replaceState(null, "", "?project=" + encodeURIComponent(archiveList.dataset.project) + "&run=" + encodeURIComponent(row.dataset.run) + location.hash); } catch (e) {} };
     const closeRow = (row) => {
@@ -539,11 +541,12 @@ export const ARCHIVE_LIST_SCRIPT = `  const archiveList = document.querySelector
     for (const row of archiveRows) {
       row.querySelector(".lv-row").addEventListener("click", () => { if (row.classList.contains("open")) closeRow(row); else openRow(row); });
     }
-    const showOlder = archiveList.querySelector(".archive-show-older");
-    if (showOlder) showOlder.addEventListener("click", () => { for (const row of archiveRows) row.hidden = false; showOlder.closest(".archive-older-row").hidden = true; });
-    // Honour a server-opened row (a ?run= deep-link): reveal it if it is past the cap.
-    const opened = archiveRows.find((r) => r.classList.contains("open"));
-    if (opened && opened.hidden) { for (const r of archiveRows) r.hidden = false; const older = archiveList.querySelector(".archive-older-row"); if (older) older.hidden = true; }
+    // The shared log-view filter (#256): a case-insensitive substring over each row's visible
+    // summary text (the .lv-row head — run name + disposition), hiding the rows that miss.
+    const filterEl = archiveList.closest(".archived-runs").querySelector("[data-archive-filter]");
+    if (filterEl) filterEl.addEventListener("input", () => {
+      for (const row of archiveRows) row.hidden = !archiveRowMatches(row.querySelector(".lv-row").textContent, filterEl.value);
+    });
   }`;
 
 /**

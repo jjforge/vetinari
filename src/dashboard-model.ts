@@ -1337,10 +1337,15 @@ export function effectiveStatus(status: DisplayStatus): IssueStatus | null {
   }
 }
 
-const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, events: OrchestratorEvent[], logger: Logger, festive = false): ProjectCard => {
+const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, events: OrchestratorEvent[], parked: ParkedRecord[], logger: Logger, festive = false): ProjectCard => {
   // The card heading shows owner/name, read live off the checkout's git remote;
   // undefined for a project with none (the demo), so the display falls back to the key.
   const repo = repoForProject(pointer.projectRoot);
+  // A park that outlived its run's log (the log archived — a killed process, an
+  // out-of-band archive — while the record survives on disk) is invisible to the
+  // live-plan-filtered `status.parked` an idle branch has, so the idle branches read
+  // `listParked` directly: any surviving record makes the card `parked` with a real
+  // tally, never a clean idle/complete while a question still waits (ADR 0017, #232).
   if (!status.waves.length) {
     const [latest] = listArchivedRuns(pointer.baseLocation, logger);
     // An idle card's numbers come from the last archived run, not the emptied live
@@ -1353,11 +1358,11 @@ const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, event
     return {
       project: status.project,
       repo,
-      runState: "idle",
+      runState: parked.length ? "parked" : "idle",
       campaignName: latest?.name ?? latest?.run,
       wave: null,
       percentMerged: archivedIssues.length ? Math.round((merged / archivedIssues.length) * 100) : 0,
-      tally: { running: 0, parked: 0, queued: 0 },
+      tally: { running: 0, parked: parked.length, queued: 0 },
       lastEvent: latest ? `Last run: ${latest.summary}` : "No runs yet",
     };
   }
@@ -1378,11 +1383,11 @@ const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, event
     return {
       project: status.project,
       repo,
-      runState: "idle",
+      runState: parked.length ? "parked" : "idle",
       campaignName: status.name,
       wave: null,
       percentMerged: finishedIssues.length ? Math.round((merged / finishedIssues.length) * 100) : 0,
-      tally: { running: 0, parked: 0, queued: 0 },
+      tally: { running: 0, parked: parked.length, queued: 0 },
       lastEvent: `Last run: ${summarizeRun(events)}`,
     };
   }
@@ -1437,17 +1442,23 @@ export function buildLanding(pointers: ProjectPointer[], now: Date = new Date(),
     const cfg = statusConfigFromPointer(pointer);
     const events = readEventLog(cfg);
     const status = buildStatus(cfg);
+    const parkedRecords = listParked(cfg);
     // merged-today counts every issue merged today across all of the project's runs
     // — the live run plus every archived run, deduped per issue — so a project that
     // ran several campaigns today counts them all, not just its latest run (#97).
     // A completed run's merges live in its archive, not the cleared live log (#70).
     mergedToday += mergedTodayForProject(pointer.baseLocation, events, now, logger);
-    // The same active parked records the project's campaign view shows, tagged
-    // with their repo so the landing can list them cross-repo.
-    for (const p of status.parked) {
+    const card = buildProjectCard(pointer, status, events, parkedRecords, logger, festive);
+    // Cross-repo parked queue: a live/paused run lists its plan-filtered parks
+    // (`status.parked`); an idle-path card (archived or folded to complete) counts
+    // every surviving record on disk instead, so a park that outlived its emptied or
+    // closed log queues and matches the card's tally rather than the counter reading a
+    // park the queue then can't show (#232). Tagged with the repo for the cross-repo list.
+    const queueParked = card.runState === "parked" && !status.parked.length ? parkedRecords.map(toParkedIssue) : status.parked;
+    for (const p of queueParked) {
       parked.push({ issueNumber: p.issueNumber, project: status.project, question: p.description, parkedAt: p.parkedAt });
     }
-    projects.push(buildProjectCard(pointer, status, events, logger, festive));
+    projects.push(card);
   }
   // Oldest first — the question that has waited longest surfaces at the top.
   parked.sort((a, b) => a.parkedAt.localeCompare(b.parkedAt));

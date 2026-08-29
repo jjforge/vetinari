@@ -57,7 +57,9 @@ import {
   renderLandingShell,
   feedFresh,
   feedKindLabel,
+  feedProjects,
   feedRowMatches,
+  feedView,
   followView,
   festiveFromCookie,
   viewRelevantEvents,
@@ -2010,8 +2012,9 @@ test("renderLandingShell's feed carries the live-tail controls wired to the shar
   assert.match(html, /function feedFresh/);
   assert.match(html, /function feedRowMatches/);
   assert.match(html, /function tailAppend/);
-  // Follow/pause reads through followView; the backlog points up (newest-on-top, #195).
-  assert.match(html, /followView\(\{ buffer: feedBuffer/);
+  // Follow/pause reads through the shared view-model — now via feedView, which composes the
+  // project + text predicate over followView (#220); the backlog points up (newest-on-top, #195).
+  assert.match(html, /feedView\(\{ buffer: feedBuffer/);
   assert.match(html, /"↑ " \+ view\.backlog \+ " new event"/);
   // Filter drives feedRowMatches over the (kind, text) pair.
   assert.match(html, /feedRowMatches\(/);
@@ -2084,6 +2087,71 @@ test("the feed drives the shared followView with its (kind, text) filter — sam
   assert.deepEqual(paused.rows.map((r) => r.text), ["acme — #2 merged", "acme — #1 took a turn"]);
   assert.equal(paused.backlog, 1);
   assert.equal(paused.following, false);
+});
+
+test("renderLandingShell's feed carries the project dropdown wired to the shared feedView, labelled by owner/name (#220)", () => {
+  const html = renderLandingShell([{ project: "alpha", repo: "acme/alpha", runState: "idle" }]);
+  // The controls strip gains a project dropdown beside the free-text filter, defaulting to "all repos".
+  for (const hook of ["data-feed-project-dd", "data-feed-project-trigger", "data-feed-project-menu", "data-feed-project-label"]) {
+    assert.ok(html.includes(hook), `feed project-dropdown hook ${hook} is present`);
+  }
+  assert.match(html, /data-feed-project-label[^>]*>all repos</);
+  // The composed project+text filtering drives through the shared, tested feedView, and the option
+  // set is derived from the buffer by the tested feedProjects — the same functions the node test runs.
+  assert.match(html, /function feedView/);
+  assert.match(html, /function feedProjects/);
+  assert.match(html, /feedView\(\{ buffer: feedBuffer/);
+  // The options are labelled by owner/name (the repo switcher's label), keyed on the project — so
+  // the repo map for the registered projects is serialised into the page for the menu to read.
+  assert.match(html, /acme\/alpha/);
+});
+
+test("feedView composes the project dropdown and the (kind, text) filter as AND over the shared followView (#220)", () => {
+  // The event-log feed's body view-model, the sibling of tailView: it swaps the tail's issue
+  // criterion for a project one and folds it, with the substring filter, into one match predicate
+  // the shared followView applies to both the visible set and the backlog count.
+  const fe = (project: string, ts: string, kind: string, text: string) => ({ project, ts, kind, text });
+  const buffer = [
+    fe("acme", "t0", "turn", "acme — #1 took a turn"),
+    fe("beta", "t1", "green", "beta — #2 merged"),
+    fe("acme", "t2", "green", "acme — #3 merged"),
+  ];
+
+  // Both cleared: everything, newest-first (the default all-repos, no-text state).
+  const both = feedView({ buffer, mark: 0, live: true, project: "", query: "", cap: 160 });
+  assert.deepEqual(both.rows.map((r) => r.text), ["acme — #3 merged", "beta — #2 merged", "acme — #1 took a turn"]);
+
+  // Project only narrows to that project's rows; the text filter is widened (cleared).
+  const byProject = feedView({ buffer, mark: 0, live: true, project: "acme", query: "", cap: 160 });
+  assert.deepEqual(byProject.rows.map((r) => r.text), ["acme — #3 merged", "acme — #1 took a turn"]);
+
+  // Text only narrows by substring across every project; the project is widened (cleared).
+  const byText = feedView({ buffer, mark: 0, live: true, project: "", query: "merged", cap: 160 });
+  assert.deepEqual(byText.rows.map((r) => r.text), ["acme — #3 merged", "beta — #2 merged"]);
+
+  // Both set compose as AND — a chosen project AND the text substring.
+  const both2 = feedView({ buffer, mark: 0, live: true, project: "acme", query: "merged", cap: 160 });
+  assert.deepEqual(both2.rows.map((r) => r.text), ["acme — #3 merged"]);
+
+  // The composed predicate reaches the backlog count too: paused at mark=2, the later acme green
+  // is backlog only while it matches both criteria; a non-matching project would not count it.
+  const paused = feedView({ buffer, mark: 2, live: false, project: "acme", query: "", cap: 160 });
+  assert.equal(paused.backlog, 1);
+  const pausedOther = feedView({ buffer, mark: 2, live: false, project: "beta", query: "", cap: 160 });
+  assert.equal(pausedOther.backlog, 0);
+});
+
+test("feedProjects lists the distinct projects present in the buffer, sorted, updating as new projects arrive (#220)", () => {
+  // The dropdown's options are sourced from the buffer (no dead options), mirroring how the live
+  // tail's agent dropdown tracks running issues — so a project with nothing in the window is not
+  // offered, and a new project's first event grows the list.
+  const fe = (project: string, text: string) => ({ project, ts: "t", kind: "turn", text });
+  assert.deepEqual(feedProjects([]), []);
+  const buffer = [fe("beta", "b1"), fe("acme", "a1"), fe("beta", "b2")];
+  // Distinct and sorted for a stable menu, regardless of arrival order or repeats.
+  assert.deepEqual(feedProjects(buffer), ["acme", "beta"]);
+  // A new project's event grows the option set.
+  assert.deepEqual(feedProjects([...buffer, fe("gamma", "g1")]), ["acme", "beta", "gamma"]);
 });
 
 test("the card progress-bar selector is scoped so no bare `.progress {` rule can leak onto a status word (#85)", () => {

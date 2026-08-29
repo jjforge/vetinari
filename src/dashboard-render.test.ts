@@ -1864,27 +1864,23 @@ test("renderStatusPage renders archived runs as a collapsible list of wave cards
 
   assert.match(html, /<section class="archived-runs"><h2>Archived runs<\/h2>/);
   assert.match(html, /<ul class="archive-list" data-project="beta">/);
-  // A collapsed row carries its run token, name label, the runId parsed to a UTC
-  // clock, and a state dot with `state · N issues`.
+  // A collapsed row renders through the shared `.lv-row` control (not bespoke
+  // `.archive-*` chrome): the when-time in the dim `.lv-t` tier, a mapped `.lv-dot`
+  // (complete → merged/green), the run name as the brightest `.lv-lead`, and the
+  // disposition `state · N issues` as the dim `.lv-verb`.
+  assert.match(html, /<li data-run="2026-02-01T22-22-36-267Z">/);
   assert.match(
     html,
-    /<li class="archive-row" data-run="2026-02-01T22-22-36-267Z">/,
+    /<button type="button" class="lv-row" aria-expanded="false" aria-controls="archive-body-2026-02-01T22-22-36-267Z"><span class="lv-t">Feb 1, 2026 · 22:22:36<\/span><span class="lv-dot merged"><\/span><span class="lv-msg"><span class="lv-lead">comms \+ dashboard<\/span><span class="lv-verb">complete · 3 issues<\/span><\/span><\/button>/,
   );
-  assert.match(html, /<span class="archive-name">comms \+ dashboard<\/span>/);
+  // An unnamed run falls back to its token as the label; issue count pluralizes;
+  // interrupted maps to the parked (amber) dot.
   assert.match(
     html,
-    /<span class="archive-when">Feb 1, 2026 · 22:22:36<\/span>/,
+    /<span class="lv-dot parked"><\/span><span class="lv-msg"><span class="lv-lead">2026-01-01T00-00-00-000Z<\/span><span class="lv-verb">interrupted · 1 issue<\/span><\/span>/,
   );
-  assert.match(
-    html,
-    /<span class="archive-state complete"><span class="archive-dot complete"><\/span>complete · 3 issues<\/span>/,
-  );
-  // An unnamed run falls back to its token as the label; issue count pluralizes.
-  assert.match(html, /<span class="archive-name">2026-01-01T00-00-00-000Z<\/span>/);
-  assert.match(
-    html,
-    /<span class="archive-state interrupted"><span class="archive-dot interrupted"><\/span>interrupted · 1 issue<\/span>/,
-  );
+  // The bespoke `.archive-*` chrome is gone.
+  assert.doesNotMatch(html, /archive-name|archive-when|archive-state|archive-dot|archive-toggle|archive-chevron/);
   // No mode control at all — an archived run is a single expandable line (#222).
   assert.doesNotMatch(html, /class="archive-modes"/);
   assert.doesNotMatch(html, /class="archive-mode/);
@@ -1940,9 +1936,9 @@ test("renderStatusPage renders an archived run's when-time in the operator's LOC
     );
     assert.match(
       html,
-      /<span class="archive-when">Feb 1, 2026 · 14:22:36<\/span>/,
+      /<span class="lv-t">Feb 1, 2026 · 14:22:36<\/span>/,
     );
-    assert.doesNotMatch(html, /archive-when">[^<]*UTC/);
+    assert.doesNotMatch(html, /lv-t">[^<]*UTC/);
   } finally {
     if (origTZ === undefined) delete process.env.TZ;
     else process.env.TZ = origTZ;
@@ -1985,10 +1981,10 @@ test("renderStatusPage shows an interrupted run as interrupted and still expands
     },
   );
 
-  // The row reads interrupted…
+  // The row reads interrupted — the parked (amber) dot and the `.lv-verb` disposition…
   assert.match(
     html,
-    /<span class="archive-state interrupted"><span class="archive-dot interrupted"><\/span>interrupted · 2 issues<\/span>/,
+    /<span class="lv-dot parked"><\/span><span class="lv-msg"><span class="lv-lead">2026-05-01T00-00-00-000Z<\/span><span class="lv-verb">interrupted · 2 issues<\/span><\/span>/,
   );
   // …and, opened, its body still shows the partial waves it did run — the
   // in-flight wave/issue reconciled to the terminal `interrupted`, never `running`.
@@ -2016,14 +2012,14 @@ test("renderStatusPage opens the archived row named by archivedRun, showing its 
     },
   );
 
-  // The named row opens: its toggle expanded, its body shown.
+  // The named row opens: its `.lv-row` toggle expanded, its body shown.
   assert.match(
     html,
-    /<li class="archive-row open" data-run="2026-02-01T00-00-00-000Z">/,
+    /<li class="open" data-run="2026-02-01T00-00-00-000Z">/,
   );
   assert.match(
     html,
-    /<button type="button" class="archive-toggle" aria-expanded="true"/,
+    /<button type="button" class="lv-row" aria-expanded="true" aria-controls="archive-body-2026-02-01T00-00-00-000Z"/,
   );
   // The body shows and holds the wave-card grid directly — no mode toggle, no raw pane.
   assert.match(
@@ -2079,8 +2075,9 @@ test("renderStatusPage ships the archived-list client wiring: expand/collapse (o
   );
   // The page embeds the archived-list script…
   assert.ok(html.includes(ARCHIVE_LIST_SCRIPT), "page includes ARCHIVE_LIST_SCRIPT");
-  // …a row toggles its body open/closed…
-  assert.match(ARCHIVE_LIST_SCRIPT, /\.archive-toggle/);
+  // …a row's shared `.lv-row` head toggles its body open/closed…
+  assert.match(ARCHIVE_LIST_SCRIPT, /row\.querySelector\("\.lv-row"\)/);
+  assert.doesNotMatch(ARCHIVE_LIST_SCRIPT, /\.archive-toggle/);
   // …one row open at a time (opening closes the others)…
   assert.match(
     ARCHIVE_LIST_SCRIPT,
@@ -2162,12 +2159,11 @@ test("renderStatusPage caps the archived-runs list at 20 with a show-older contr
 
   // All 22 rows are in the DOM, but the two oldest render hidden behind the control.
   assert.equal(
-    [...html.matchAll(/<li class="archive-row(?: open)?" data-run=/g)].length,
+    [...html.matchAll(/<li(?: class="open")? data-run=/g)].length,
     22,
   );
   assert.equal(
-    [...html.matchAll(/<li class="archive-row[^"]*" data-run="[^"]*" hidden>/g)]
-      .length,
+    [...html.matchAll(/<li data-run="[^"]*" hidden>/g)].length,
     2,
   );
   assert.match(

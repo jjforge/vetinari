@@ -522,22 +522,22 @@ export const REPO_DROPDOWN_SCRIPT = `  const repoRoot = document.querySelector("
  */
 export const ARCHIVE_LIST_SCRIPT = `  const archiveList = document.querySelector(".archive-list");
   if (archiveList) {
-    const archiveRows = [...archiveList.querySelectorAll(".archive-row")];
+    const archiveRows = [...archiveList.querySelectorAll("li[data-run]")];
     const syncUrl = (row) => { try { history.replaceState(null, "", "?project=" + encodeURIComponent(archiveList.dataset.project) + "&run=" + encodeURIComponent(row.dataset.run) + location.hash); } catch (e) {} };
     const closeRow = (row) => {
       row.classList.remove("open");
-      row.querySelector(".archive-toggle").setAttribute("aria-expanded", "false");
+      row.querySelector(".lv-row").setAttribute("aria-expanded", "false");
       row.querySelector(".archive-body").hidden = true;
     };
     const openRow = (row) => {
       for (const other of archiveRows) if (other !== row && other.classList.contains("open")) closeRow(other);
       row.classList.add("open");
-      row.querySelector(".archive-toggle").setAttribute("aria-expanded", "true");
+      row.querySelector(".lv-row").setAttribute("aria-expanded", "true");
       row.querySelector(".archive-body").hidden = false;
       syncUrl(row);
     };
     for (const row of archiveRows) {
-      row.querySelector(".archive-toggle").addEventListener("click", () => { if (row.classList.contains("open")) closeRow(row); else openRow(row); });
+      row.querySelector(".lv-row").addEventListener("click", () => { if (row.classList.contains("open")) closeRow(row); else openRow(row); });
     }
     const showOlder = archiveList.querySelector(".archive-show-older");
     if (showOlder) showOlder.addEventListener("click", () => { for (const row of archiveRows) row.hidden = false; showOlder.closest(".archive-older-row").hidden = true; });

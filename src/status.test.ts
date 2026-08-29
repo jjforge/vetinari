@@ -1340,14 +1340,14 @@ test("serveAllStatus lists a project's archived runs and renders one read-only w
     // short) and issue count; unnamed runs fall back to the token as the label.
     assert.match(
       root,
-      /<li class="archive-row" data-run="2026-02-01T00-00-00-000Z">/,
+      /<li data-run="2026-02-01T00-00-00-000Z">/,
     );
-    assert.match(root, /interrupted · 1 issue<\/span>/);
+    assert.match(root, /<span class="lv-verb">interrupted · 1 issue<\/span>/);
     assert.match(
       root,
-      /<li class="archive-row" data-run="2026-01-01T00-00-00-000Z">/,
+      /<li data-run="2026-01-01T00-00-00-000Z">/,
     );
-    assert.match(root, /complete · 2 issues<\/span>/);
+    assert.match(root, /<span class="lv-verb">complete · 2 issues<\/span>/);
     assert.ok(
       root.indexOf("2026-02-01") < root.indexOf("2026-01-01"),
       "newest-first",
@@ -1355,7 +1355,7 @@ test("serveAllStatus lists a project's archived runs and renders one read-only w
     // The malformed run is skipped, never listed.
     assert.doesNotMatch(root, /2026-03-01/);
     // No run selected → every row starts collapsed.
-    assert.doesNotMatch(root, /class="archive-row open"/);
+    assert.doesNotMatch(root, /<li class="open" data-run=/);
     // No run-level raw/log pane rides any row — the detail is the wave cards only (#222).
     assert.doesNotMatch(root, /archive-raw/);
     assert.doesNotMatch(root, /data-pane=/);
@@ -1369,7 +1369,7 @@ test("serveAllStatus lists a project's archived runs and renders one read-only w
     assert.match(withRun, /#201 <small>/); // live run still on top
     assert.match(
       withRun,
-      /<li class="archive-row open" data-run="2026-01-01T00-00-00-000Z">/,
+      /<li class="open" data-run="2026-01-01T00-00-00-000Z">/,
     );
     assert.match(withRun, /#101 <small>/); // the archived run's own issues, in its body
     // Read-only: the archived run's chips are never prunable (a finished run has
@@ -1385,7 +1385,7 @@ test("serveAllStatus lists a project's archived runs and renders one read-only w
     const staleModeHtml = await staleMode.text();
     assert.match(
       staleModeHtml,
-      /<li class="archive-row open" data-run="2026-01-01T00-00-00-000Z">/,
+      /<li class="open" data-run="2026-01-01T00-00-00-000Z">/,
     );
     assert.match(staleModeHtml, /#101 <small>/); // wave cards, as normal
     assert.doesNotMatch(staleModeHtml, /archive-raw/);
@@ -1395,7 +1395,7 @@ test("serveAllStatus lists a project's archived runs and renders one read-only w
       `http://127.0.0.1:${port}/?project=beta&run=..%2F..%2Forchestrator`,
     );
     assert.equal(bogus.status, 200);
-    assert.doesNotMatch(await bogus.text(), /class="archive-row open"/);
+    assert.doesNotMatch(await bogus.text(), /<li class="open" data-run=/);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -1456,7 +1456,7 @@ test("serveAllStatus reconstructs a pruned issue in a selected archived run, rea
       )
     ).text();
     // The archived run renders under its --name in the collapsible list…
-    assert.match(html, /<span class="archive-name">spring cleanup<\/span>/);
+    assert.match(html, /<span class="lv-lead">spring cleanup<\/span>/);
     // …and its campaign pane reconstructs the pruned-out 201 as a pruned chip in the
     // wave it left, so an operator can see what the run was pruned down to (ADR 0007).
     assert.match(

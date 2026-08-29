@@ -567,12 +567,6 @@ export const LIVE_TAIL_STYLES = `  .live-tail { background: var(--color-card); b
   .lv-pause[data-following="false"]::before { content: "▶"; }
   .tail-body { height: 236px; overflow-y: auto; overflow-x: hidden; background: var(--color-body); font-family: ${MONO_FONT}; font-size: 10.5px; line-height: 1.5; }
   .tail-body[hidden] { display: none; }
-  /* The archived-run raw pane keeps its Humanized ⇄ Raw segmented toggle (#203): a two-button
-     pill, the pressed side accented. */
-  .tail-mode { display: inline-flex; border: 1px solid var(--color-secondary); border-radius: 999px; overflow: hidden; }
-  .tail-mode-btn { border: 0; background: var(--color-chip); color: var(--color-text-light-2); font: inherit; font-size: .78rem; padding: .28rem .6rem; cursor: pointer; }
-  .tail-mode-btn:hover { color: var(--color-text); }
-  .tail-mode-btn[aria-pressed="true"] { background: var(--color-blue); color: var(--color-body); font-weight: 700; }
   /* The shared log-view row (#216, mockup 1a/2b): the three-tier grid time · dot · message,
      painting the least→most emphasis ramp (#221). Left to right is least to most important — the
      time is the most muted (dim), the actor is distinct-but-subdued (a mono handle at mid

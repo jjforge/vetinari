@@ -163,8 +163,9 @@ kind of outbound record that also feeds the reply index.
 _Avoid_: message queue, mailbox
 
 **Wave**:
-One batch of a campaign — the tasks run together before their greens are merged
-and the next batch starts. "Wave start" is a **progress** message.
+One batch of a campaign — the tasks run together, their greens are merged, and the
+next batch starts **only once the wave is fully resolved**: a healthy combined base
+and zero outstanding parks (ADR 0017). "Wave start" is a **progress** message.
 _Avoid_: batch (in user-facing comms), round
 
 ### Runs
@@ -205,12 +206,14 @@ not an epic, name it.
 _Avoid_: batch name
 
 **Wave-parked**:
-A whole [[wave]] held because its **merged base failed the combined gate** — every
-issue went green alone, but the base is red together, so no single issue is at
-fault. Everything stays merged (the base sits red, never pushed), the campaign
-pauses, and a human resolves it: fix forward and resume, or prune a suspect and
-resume. A run-level counterpart to an issue's [[parked]] — the wave, not one agent,
-waits on a human. See [ADR 0013](../docs/adr/0013-wave-integration-is-non-atomic-quarantine-and-wave-park.md).
+A whole [[wave]] held on a human, from either of two triggers. **Combined-gate:**
+every issue went green alone, but the **merged base is red together**, so no single
+issue is at fault (ADR 0013). **Escalated park:** an issue in the wave [[parked]];
+the wave **drains** (its other agents finish, their greens merge) and then parks, so
+no succeeding wave builds on an unresolved one (ADR 0017). Either way everything
+green stays merged (the base sits red, never pushed), the campaign pauses, and a
+human resolves it: fix forward and resume, or prune a suspect and resume. A run-level
+counterpart to an issue's [[parked]] — the wave, not one agent, waits on a human.
 _Avoid_: halted, rolled back, failed wave
 
 ### Issue status
@@ -225,7 +228,11 @@ _Avoid_: working, in progress
 
 **parked**:
 The agent asked a question and stopped; the issue waits on a human answer. The one
-[[interactive]] state and the reason to open an issue's detail.
+[[interactive]] state and the reason to open an issue's detail. A park **holds its
+wave** — the wave drains, then wave-parks, and no succeeding wave starts until it is
+resolved (ADR 0017). It is **durable**: always shown in the dashboard and always
+announced via Telegram until a human resolves it, never cleared out from under an
+open question.
 
 **quarantined**:
 A merge **conflict** pulled the issue out of integration; its branch, worktree, and

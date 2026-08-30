@@ -881,8 +881,8 @@ test("feedKindLabel folds an orchestrator event kind to the feed's clean lowerca
   assert.equal(feedKindLabel("green"), "issue.merged");
   assert.equal(feedKindLabel("prune"), "issue.pruned");
   // The map speaks the §2.1 event vocabulary the reader normalizes to — waves are
-  // `wave-start`/`wave-done`, a red-base hold is `campaign-parked`, never the retired
-  // `campaign-batch`/`wave-parked`/`quarantined` names.
+  // `wave-start`/`wave-done`, a red-base hold is `campaign-parked` — never the retired
+  // pre-§2.1 event names (folded to §2.1 on the read path before they reach here).
   assert.equal(feedKindLabel("wave-start"), "wave.started");
   assert.equal(feedKindLabel("wave-done"), "wave.closed");
   assert.equal(feedKindLabel("campaign-parked"), "campaign.parked");

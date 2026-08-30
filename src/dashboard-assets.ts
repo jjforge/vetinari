@@ -1,4 +1,4 @@
-import { archiveRowMatches, cappedRawRows, followView, humanizedRow, isNotableHostEvent, tailAppend, tailFresh, tailView } from "./dashboard-render.ts";
+import { archiveRowMatches, archiveRunHref, cappedRawRows, followView, humanizedRow, isNotableHostEvent, tailAppend, tailFresh, tailView } from "./dashboard-render.ts";
 import { issueMoves, paneActivity, reasonWord } from "./dashboard-visual-state.ts";
 import { humanizeHostLine, LOG_DOT_STATE_COLOR, splitOverflow } from "./log-view.ts";
 
@@ -579,19 +579,27 @@ export const REPO_DROPDOWN_SCRIPT = `  const repoRoot = document.querySelector("
 export const ARCHIVE_LIST_SCRIPT = `  const archiveList = document.querySelector(".archive-list");
   if (archiveList) {
     ${archiveRowMatches.toString()}
+    ${archiveRunHref.toString()}
     const archiveRows = [...archiveList.querySelectorAll("li[data-run]")];
-    const syncUrl = (row) => { try { history.replaceState(null, "", "?project=" + encodeURIComponent(archiveList.dataset.project) + "&run=" + encodeURIComponent(row.dataset.run) + location.hash); } catch (e) {} };
+    // Mirror the open run into the URL (#98), or clear run= when none is open (#333) — the
+    // reducer owns the shape (deep link vs bare project URL, hash preserved). Open writes the
+    // run; close writes null.
+    const syncUrl = (run) => { try { history.replaceState(null, "", archiveRunHref(archiveList.dataset.project, run, location.hash)); } catch (e) {} };
     const closeRow = (row) => {
       row.classList.remove("open");
       row.querySelector(".lv-row").setAttribute("aria-expanded", "false");
       row.querySelector(".archive-body").hidden = true;
+      syncUrl(null);
     };
     const openRow = (row) => {
+      // INVARIANT: close the previously-open row *before* recording this one. closeRow clears
+      // run= from the URL, so the syncUrl below must run last — otherwise opening B while A is
+      // open would leave the URL bare instead of naming B (#333).
       for (const other of archiveRows) if (other !== row && other.classList.contains("open")) closeRow(other);
       row.classList.add("open");
       row.querySelector(".lv-row").setAttribute("aria-expanded", "true");
       row.querySelector(".archive-body").hidden = false;
-      syncUrl(row);
+      syncUrl(row.dataset.run);
     };
     for (const row of archiveRows) {
       row.querySelector(".lv-row").addEventListener("click", () => { if (row.classList.contains("open")) closeRow(row); else openRow(row); });

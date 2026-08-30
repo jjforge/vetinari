@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { DASHBOARD_PALETTE_CSS, stateColor, stateBorderColor, STATE_DOT_CSS, STATE_CHIP_BORDER_CSS, TOP_BAR_STYLES, ISSUE_DETAIL_SHEET_STYLES, REPO_DROPDOWN_SCRIPT, HOST_LOG_STYLES } from "./dashboard-assets.ts";
-import { archiveRowMatches, cappedRawRows, event, formatStatusText, highlightJsonLine, isNotableHostEvent, renderHostLog, renderLandingShell, renderStatusPage, renderTopBar } from "./status.ts";
+import { archiveRowMatches, archiveRunHref, cappedRawRows, event, formatStatusText, highlightJsonLine, isNotableHostEvent, renderHostLog, renderLandingShell, renderStatusPage, renderTopBar } from "./status.ts";
 
 // The set of palette tokens defined by a `:root { … }` block, and the set of
 // `var(--token)` references anywhere in a page — the two must agree, or a surface
@@ -328,6 +328,29 @@ test("archiveRowMatches filters an archived-run row case-insensitively over its 
   assert.equal(archiveRowMatches(text, "complete"), true);
   // A miss on the row's visible text hides the row.
   assert.equal(archiveRowMatches(text, "interrupted"), false);
+});
+test("archiveRunHref carries the open run as a deep link, and clears run= when none is open (#333)", () => {
+  // An open run is written into the URL — this is the deep link the server honours so a
+  // reload or share opens that run.
+  assert.equal(
+    archiveRunHref("vetinari", "2026-08-30T06-57-20-736Z", ""),
+    "?project=vetinari&run=2026-08-30T06-57-20-736Z",
+  );
+  // No open run (a null/empty run) yields the bare project URL — closing the open row clears
+  // run= so a reload renders the list collapsed.
+  assert.equal(archiveRunHref("vetinari", null, ""), "?project=vetinari");
+  assert.equal(archiveRunHref("vetinari", "", ""), "?project=vetinari");
+  // The location hash survives both the open and the close rewrite.
+  assert.equal(
+    archiveRunHref("vetinari", "2026-08-30T06-57-20-736Z", "#waves"),
+    "?project=vetinari&run=2026-08-30T06-57-20-736Z#waves",
+  );
+  assert.equal(archiveRunHref("vetinari", null, "#waves"), "?project=vetinari#waves");
+  // The project and run are URL-encoded.
+  assert.equal(
+    archiveRunHref("a b", "r/1", ""),
+    "?project=a%20b&run=r%2F1",
+  );
 });
 test("no status/category word is ever a bare top-level CSS class, so a component base can't inherit a modifier's layout (#91)", () => {
   // The convention (ADR 0007's status vocabulary): a status word (ADR 0007's

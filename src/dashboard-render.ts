@@ -297,6 +297,20 @@ export function archiveRowMatches(text: string, query: string): boolean {
 }
 
 /**
+ * The archived-run deep-link URL (#98, #333): the project page's shareable location for the
+ * open run, or none. Writing the run into the URL is what makes an opened row a deep link the
+ * server honours (a reload or share reopens it); a null/empty `run` yields the bare project
+ * URL, so closing the open row clears `run=` and a reload renders the list collapsed. The
+ * location hash is always preserved. Pure and self-contained, unit-tested in node and shipped
+ * to the browser via `.toString()` (ADR 0012).
+ */
+export function archiveRunHref(project: string, run: string | null, hash: string): string {
+  const base = "?project=" + encodeURIComponent(project);
+  const runPart = run ? "&run=" + encodeURIComponent(run) : "";
+  return base + runPart + (hash || "");
+}
+
+/**
  * The follow/pause/backlog view-model shared by the live tail (#124) and the event-log feed
  * (#196): from an accumulating oldest→newest `buffer` and the current controls, decide which
  * rows render and the footer/backlog counts. Following reads the whole buffer; paused freezes

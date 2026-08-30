@@ -27,6 +27,7 @@ import {
   type CampaignBatchDoneEvent,
   type CampaignBatchEvent,
   type CampaignDoneEvent,
+  type CampaignFailedEvent,
   type CampaignStartEvent,
   type QueueDoneEvent,
   type QueueSpawnEvent,
@@ -723,6 +724,49 @@ test("Gate 2 unchanged: an all-green wave whose combined base gates red still wa
     0,
     "the loop logs no extra wave-parked event — Gate 2 owns it via integrateGreens",
   );
+});
+
+test("a failed member drains its wave, integrates the greens, then stops the campaign as failed — no next wave (#285)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-fail-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+
+  // Wave 0: 101 goes green, 102 fails (child `run` exits 1 → outcome "error(1)"). The wave
+  // still drains and 101 still merges under integration; then the failure holds the wave
+  // and stops the whole campaign — the next wave never starts.
+  const spawned: string[] = [];
+  const childRun: CampaignDeps["spawnRun"] = async (taskId) => {
+    spawned.push(taskId);
+    return taskId === "102" ? 1 : 0;
+  };
+
+  const ok = await silenceConsole(() =>
+    campaign(cfg, [["101", "102"], ["201"]], host, "harness", {}, gitFreeDeps(cfg, childRun)),
+  );
+
+  assert.equal(ok, false, "a failed member stops the campaign non-zero");
+  assert.ok(!spawned.includes("201"), "the succeeding wave never starts once a member failed");
+
+  const events = readEventLog(cfg);
+  const batches = events.filter((e): e is CampaignBatchEvent => e.event === "campaign-batch");
+  assert.deepEqual(batches.map((b) => b.index), [0], "only wave 0 ran — no succeeding wave started");
+
+  // The green sibling still merged — a failure never aborts or un-merges a sibling.
+  const failed = events.filter((e): e is CampaignFailedEvent => e.event === "campaign-failed");
+  assert.equal(failed.length, 1, "exactly one campaign-failed stop marker");
+  assert.deepEqual(failed[0].merged, ["101"], "the green stayed merged on the base");
+  assert.deepEqual(failed[0].failed, ["102"], "the failed member is named");
+
+  // The wave is never logged done — it holds, it does not close.
+  assert.ok(
+    !events.some((e) => e.event === "campaign-batch-done"),
+    "the failed wave is not logged done",
+  );
+
+  // The operator notice went out on the failure channel.
+  const notice = listOutbox(cfg).find((r) => r.event === "campaign-failed");
+  assert.ok(notice, "a campaign-failed notice was enqueued for the operator");
+  assert.equal(notice?.category, "failure");
 });
 
 test("a quarantine that strands later-wave dependents wave-parks the campaign — an explicit terminal event, never a silent stop", async () => {

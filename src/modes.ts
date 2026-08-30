@@ -5,6 +5,7 @@ import type {
   CampaignBatchDoneEvent,
   CampaignBatchEvent,
   CampaignDoneEvent,
+  CampaignFailedEvent,
   CampaignStartEvent,
   QueueStartEvent,
 } from "./event-log.ts";
@@ -386,6 +387,28 @@ export function waveParkedNotice(
 }
 
 /**
+ * The operator-facing notice a campaign-failure enqueues (design §5 step 5). A wave drained with a
+ * member the agent could not make green (its child `run` exited non-zero); the wave's greens were still
+ * integrated, then the campaign stopped as failed — failure outranks parked (ADR 0019). `category:
+ * "failure"` routes it to the alert channel a wave-park uses, since a failed campaign demands attention.
+ * The failed issue's branch and worktree are kept (only the merged greens were cleaned up), so the human
+ * can fix it forward or prune it. Pure, so the wording and routing are checkable without a campaign.
+ */
+export function campaignFailedNotice(
+  project: string,
+  batchNumber: number,
+  merged: string[],
+  failed: string[],
+  baseBranch: string,
+): { category: MessageCategory; event: string; text: string } {
+  return {
+    category: "failure",
+    event: "campaign-failed",
+    text: `❌ ${project} · CAMPAIGN FAILED · batch ${batchNumber}\n${failed.join(", ")} failed — greens (${merged.join(", ") || "none"}) kept merged on ${baseBranch}, campaign stopped.\nThe failed branch/worktree are kept — fix it forward or \`prune <issue>\`.`,
+  };
+}
+
+/**
  * Render each quarantined issue and the dependents it stranded as `#640 → #701, #702`,
  * one per line — the shared body both quarantine notices show so a human reads the same
  * blast radius whether the campaign paused or pruned on.
@@ -625,6 +648,26 @@ export async function campaign(
     // is logged and never touches the halt/rollback path, which already returned
     // above on a red gate. Only the green `merged` set is passed.
     await markMergedIssues(cfg, merged);
+
+    // Failure holds the wave and stops the campaign (design §5 step 5). A member the agent
+    // could not make green (its child `run` exited non-zero → `error(n)` outcome) is a terminal
+    // failure that outranks a park (ADR 0019), so this check precedes the per-issue park below.
+    // The wave already drained and its greens already integrated and got the green-path cleanup
+    // above — a failure never aborts or un-merges a sibling — but the failed issue's branch and
+    // worktree are kept (they were never merged), so a human can fix it forward or prune it.
+    // Logged as `campaign-failed` (the stop marker `reduceCampaign` folds to `failed`), never a
+    // `campaign-batch-done`: the wave holds, it does not close, and no later wave starts.
+    const failed = tasks.filter((t) => outcomes[t]?.startsWith("error"));
+    if (failed.length) {
+      const failedEvent: Omit<CampaignFailedEvent, "ts" | "event"> = { merged, failed };
+      if (campaignName) failedEvent.name = campaignName;
+      cfg.log.log("campaign-failed", failedEvent);
+      enqueueOutbound(cfg, campaignFailedNotice(cfg.project, index + 1, merged, failed, cfg.baseBranch));
+      console.log(
+        `campaign failed at batch ${index + 1}/${total} — ${failed.join(", ")} failed, greens (${merged.join(", ") || "none"}) left merged, ${total - index - 1} batch(es) not started. Fix forward or \`prune <issue>\`.`,
+      );
+      return false;
+    }
 
     // Gate 1 (ADR 0017): a per-issue park escalates to a wave-park. A parked issue is
     // unfinished work awaiting a human, so — like a quarantined green (below) and unlike

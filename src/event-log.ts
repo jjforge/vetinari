@@ -73,6 +73,19 @@ export interface CampaignDoneEvent extends BaseEvent {
   name?: string;
 }
 
+/** `campaign-failed` — the campaign's terminal failure stop marker (design §5 step 5): a wave drained
+ * with a member the agent could not make green (its child `run` exited non-zero). The wave's greens were
+ * still integrated (`merged`), then the run stopped non-zero — failure outranks parked (ADR 0019), so no
+ * later wave starts. Carries the greens merged before the stop and the failed member ids; `reduceCampaign`
+ * reads it as a stop marker that folds the campaign to `failed` (modes.ts). */
+export interface CampaignFailedEvent extends BaseEvent {
+  event: "campaign-failed";
+  merged: string[];
+  failed: string[];
+  /** the campaign's optional `--name`, carried so a single-event reader can name the run. */
+  name?: string;
+}
+
 /** `queue-start` — a bounded queue run started: its task ids and slot count, optionally the id→title
  * map (a standalone queue records its own) and the host slot budget it ran under (modes.ts). */
 export interface QueueStartEvent extends BaseEvent {
@@ -278,6 +291,7 @@ export type OrchestratorEvent =
   | CampaignBatchEvent
   | CampaignBatchDoneEvent
   | CampaignDoneEvent
+  | CampaignFailedEvent
   | QueueStartEvent
   | QueueDoneEvent
   | QueueSpawnEvent

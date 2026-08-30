@@ -889,6 +889,18 @@ test("buildFeed carries each row's underlying event as raw NDJSON, alongside the
   }
 });
 
+test("describeEvent narrates a campaign-failed stop marker so the feed shows why it stopped (#285)", () => {
+  assert.equal(
+    describeEvent(event("campaign-failed", { merged: ["101"], failed: ["102"] })),
+    "Campaign failed — #102 could not be made green",
+  );
+  // More than one failure lists them all.
+  assert.equal(
+    describeEvent(event("campaign-failed", { merged: [], failed: ["102", "103"] })),
+    "Campaign failed — #102, #103 could not be made green",
+  );
+});
+
 test("a merged event that names its issue only through its branch still renders the number, never #undefined", () => {
   // The campaign wave-merge / per-issue green path can carry the issue number in
   // its `branch` (agent/<id>) rather than a `taskId`. The feed formatter must
@@ -1237,6 +1249,30 @@ test("issueLifecycle folds a stalled (dead, no-terminal) running issue to parked
   // A live read leaves it running; a dead read with no terminal event stalls it.
   assert.deepEqual(issueLifecycle(running, "301"), { state: "running" });
   assert.deepEqual(issueLifecycle(running, "301", { stalled: true }), { state: "parked", reason: "stalled" });
+});
+
+test("reduceCampaign folds a campaign-failed stop marker to a failed, un-closed wave (#285)", () => {
+  // The campaign-failed marker is authoritative: even with no error carried in queue-done,
+  // it names the failed member and the fold reads it `failure`, so the wave holding it folds
+  // to `failed` (failure outranks parked, ADR 0019). The wave is never logged done, so it is
+  // not closed and the campaign cannot read complete.
+  const reduced = reduceCampaign([
+    event("campaign-start", { ts: "t0", batches: [["101", "102"]], slots: 1 }),
+    event("campaign-batch", { ts: "t1", index: 0, tasks: ["101", "102"] }),
+    event("green", { ts: "t2", taskId: "101", branch: "agent/101", commits: [] }),
+    event("campaign-failed", { ts: "t3", merged: ["101"], failed: ["102"] }),
+  ]);
+
+  assert.deepEqual(issueLifecycle(reduced, "101"), { state: "completed" });
+  assert.deepEqual(issueLifecycle(reduced, "102"), { state: "failure" });
+
+  // The failed wave is not closed — it holds, it does not read done.
+  assert.ok(!reduced.closedWaves.has(0), "the wave holding the failure is not closed");
+
+  // The wave folds to `failed`, and the campaign with it.
+  const waveStatus = waveState(reduced.waves[0].map((id) => ({ status: issueLifecycle(reduced, id).state })));
+  assert.equal(waveStatus, "failed");
+  assert.equal(campaignState([waveStatus]), "failed");
 });
 
 test("selectStatus picks the requested project, defaulting to the first otherwise", () => {

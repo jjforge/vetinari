@@ -388,6 +388,8 @@ export function describeEvent(e: OrchestratorEvent, festive?: { offset: number }
       return `${hash(e.taskId)} parked — merge conflict, resolve it`;
     case "wave-parked":
       return "Wave parked — merged base gated red";
+    case "campaign-failed":
+      return `Campaign failed — ${(e.failed ?? []).map(hash).join(", ")} could not be made green`;
     case "prune":
       return `Pruned ${(e.removed ?? []).map(hash).join(", ")}`;
     case "graft":
@@ -661,6 +663,16 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
       // remember its members — their lifecycle reads parked(red-base) so the wave folds parked.
       parkedWave = currentWave;
       redBase = new Set(waves[currentWave] ?? []);
+    } else if (e.event === "campaign-failed" && Array.isArray(e.failed)) {
+      // The campaign's terminal failure stop marker (design §5 step 5): a member the agent
+      // could not make green held the wave and stopped the run. Mark each failed id `failure`
+      // authoritatively off the marker — it never lands a `campaign-batch-done`, so the wave it
+      // holds stays out of `closedWaves` and folds to `failed` (failure outranks parked, ADR 0019).
+      for (const taskId of e.failed) {
+        const issueNumber = normalizeIssue(String(taskId));
+        outcomes.set(issueNumber, "failure");
+        if (!details.has(issueNumber)) details.set(issueNumber, "Failed — the agent could not make it green");
+      }
     } else if (e.event === "campaign-batch-done" && Number.isInteger(e.index)) {
       closedWaves.add(e.index);
       currentWave = -1;

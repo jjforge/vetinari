@@ -251,20 +251,12 @@ export async function queue(
   // never wrote a record is never re-admitted — no self-respawn loop.
   const parkedWithRecord = new Set<string>();
   let running = 0;
-  // A standalone queue run records its own issue titles on the start event so the
-  // dashboard names them with no lookup (ADR 0002); inside a campaign the caller
-  // already wrote them onto `campaign-start` and passes them here, so we neither
-  // re-resolve nor re-log them.
-  const startTitles =
-    titles === undefined ? await resolveTitles(cfg, taskIds) : undefined;
   // Only a standalone queue warns here; inside a campaign the caller passes `titles`
   // and has already warned once at campaign start, so we don't repeat it per wave.
   if (titles === undefined) warnIfTelegramUnconfigured(cfg);
-  // A standalone drain records its own issue titles on `campaign-start` before this runs
-  // (via `campaign`); a bare `queue` call inside a wave resolves them for the outbound
-  // notice only. No `queue-start` event: the campaign's `wave-start` frames the wave, and
-  // each task announces itself with a `spawn` (design §2.1).
-  void startTitles;
+  // No `queue-start` event (design §2.1): the campaign's `wave-start` frames the wave and
+  // each task announces itself with a `spawn`. The issue titles the dashboard names chips
+  // by were recorded once on `campaign-start` by the caller, so this drain records nothing.
   enqueueOutbound(cfg, {
     category: "progress",
     event: "queue-start",

@@ -44,6 +44,24 @@ export function repoForProject(projectRoot: string): string | undefined {
 }
 
 /**
+ * The base branch a redrive would land on, read live from the project checkout's current
+ * branch (design §7, §11) — the impure git edge the Redrive confirm dialog names. The dumb
+ * router (ADR 0002) holds no project config to read `baseBranch` from, so it reads the tree:
+ * a stopped campaign — the only time Redrive enables — sits on its base (the loop merges onto
+ * and refuses off base, §5), so HEAD is the base at rest. A non-repo root or a detached/failed
+ * read yields `undefined` (the git call is silenced and never throws), and the dialog then
+ * says "the base branch" rather than a broken value.
+ */
+export function baseBranchForProject(projectRoot: string): string | undefined {
+  try {
+    const branch = execFileSync("git", ["-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    return branch && branch !== "HEAD" ? branch : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * The issue lifecycle — the single stored axis of the state machine (ADR 0019).
  * An issue is `unstarted` until assigned, then `running`, and ends `completed`,
  * `failure`, or (resumably) `parked`. This is the whole status enum: the old

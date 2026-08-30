@@ -103,7 +103,8 @@ test("renderLandingShell opens a parked-queue row's issue detail inline, not by 
   // The landing now hosts the issue-detail sheet (the same one the campaign page has).
   assert.match(html, /<div id="issue-detail" class="issue-detail"[^>]*hidden>/);
   assert.match(html, /id="reply-send"/);
-  assert.match(html, /id="redrive-form"/);
+  // Redrive is a whole-campaign control on the project page now, not a sheet move (#325).
+  assert.doesNotMatch(html, /id="redrive-form"/);
   assert.match(html, /id="prune-panel"/);
   // openIssue is defined here, and a parked row opens it in place — the click is
   // intercepted so the row never does the full navigation to the campaign page.

@@ -12,38 +12,46 @@ import { escapeHtml } from "./dashboard-render.ts";
  */
 export const isPrunable = (issue: StatusIssue) => issue.membership !== "pruned" && (issue.status === "unstarted" || issue.status === "parked");
 
-/**
- * Whether the campaign is parked on a red merged base — the combined-gate hold that
- * carries the `red-base` park reason (ADR 0019). The Redrive control below surfaces only
- * in that state, keyed on the reason rather than a distinct wave word.
- */
-export const isRedBaseParked = (status: CampaignStatus) => status.waves.some((wave) => wave.issues.some((issue) => issue.reason === "red-base"));
-
 /** Whether any issue is held on a merge conflict — the `conflict` park reason (ADR 0019),
  * a passed green pulled out of integration awaiting a manual resolve. Gates the note. */
 export const hasConflict = (status: CampaignStatus) => status.waves.some((wave) => wave.issues.some((issue) => issue.reason === "conflict"));
 
 /**
- * The red-base Redrive control (#171): when a campaign is paused on a red merged base,
- * a human fixes forward and taps Redrive, which POSTs `/redrive` for this project — the
- * aggregated dumb router (ADR 0002) shells `redrive` in the project's own root. Redrive
- * is non-destructive and project-scoped, so — unlike prune — it needs no preview/confirm
- * gate: a single POST. Emitted only on the interactive aggregated page (`prune`, the same
- * page option prune rides) and only while parked on a red base.
+ * The whole-campaign Redrive control (design §7, §11, #325). Redrive picks up an unfinished
+ * campaign — it is not a per-issue move, so it lives here on the project page beside graft,
+ * never on the issue sheet. It is a *risky* action (the observed bug: fired on a draining
+ * wave, it spawned a second campaign process over the live one), so it is rendered greyed-out
+ * with a one-line reason unless `gate.allowed` — the pure {@link redriveAllowed} rule off the
+ * campaign fold and the live-lease probe. Enabled, the button opens a confirm dialog naming
+ * exactly what a redrive will do (the campaign, the wave it re-enters, its members, the base)
+ * with Cancel the default; only Confirm POSTs `/redrive`, which the aggregated dumb router
+ * (ADR 0002) shells in the project's own root. A campaign-less page renders nothing.
+ *
+ * `baseBranch` is the base the redrive lands on, read live from the project checkout by the
+ * page (the dumb router has no config to read it from); when unknown the dialog says so.
  */
-export const renderRedriveControl = (status: CampaignStatus) =>
-  `<section class="redrive-banner"><div class="redrive-banner-text"><strong>Campaign paused</strong> — a wave's merged base gated red, so its greens were kept and the campaign paused for a human. Fix forward, then redrive.</div><form method="post" action="/redrive" class="redrive-form"><input type="hidden" name="project" value="${escapeHtml(status.project)}" /><button type="submit" class="redrive-btn">Redrive campaign</button></form></section>`;
+export const renderRedriveControl = (status: CampaignStatus, gate: { allowed: boolean; reason: string }, baseBranch?: string) => {
+  if (!status.waves.length) return "";
+  const openBtn = `<button type="button" class="redrive-btn" data-redrive-open${gate.allowed ? "" : " disabled"}>Redrive</button>`;
+  if (!gate.allowed) return `<div class="redrive-control">${openBtn}<span class="redrive-reason">${escapeHtml(gate.reason)}</span></div>`;
+  // The resume wave is the first not-fully-completed wave (design §7); its non-pruned members
+  // are what a redrive re-enters. The name falls back to the project key for an unnamed run.
+  const resume = status.waves.find((wave) => wave.status !== "closed");
+  const members = (resume?.issues ?? []).filter((issue) => issue.membership !== "pruned").map((issue) => `#${escapeHtml(issue.issueNumber)}`).join(", ");
+  const text = `Redrive <strong>${escapeHtml(status.name || status.project)}</strong>: re-enters wave ${(resume?.index ?? 0) + 1} — ${members} — on <code>${escapeHtml(baseBranch ?? "the base branch")}</code>`;
+  const dialog = `<dialog class="redrive-dialog" data-redrive-dialog><p class="redrive-dialog-text">${text}</p><form method="post" action="/redrive" class="redrive-dialog-actions" data-redrive-form><input type="hidden" name="project" value="${escapeHtml(status.project)}" /><button type="button" class="redrive-cancel" data-redrive-cancel autofocus>Cancel</button><button type="submit" class="redrive-confirm" data-redrive-confirm>Redrive</button></form></dialog>`;
+  return `<div class="redrive-control">${openBtn}${dialog}</div>`;
+};
 
 /**
  * The merge-conflict informational affordance (#171): a merge conflict held a passed
  * issue out of integration (ADR 0013). There is deliberately no conflict-release CLI to
  * shell, so this is a note only — it points the operator at resolve-then-redrive, with no
- * action route or button of its own. It points at the per-issue Redrive move (which now
- * renders in the sheet for a conflict park, #307) and the CLI — never a "Redrive control
- * above" that only renders on a red base, which for a conflict-only campaign was absent.
+ * action route or button of its own. It points at the campaign's Redrive control (a
+ * whole-campaign move now, #325) and the CLI, never a per-issue redrive.
  */
 export const renderConflictNote = () =>
-  `<section class="conflict-note"><strong>Issue held on a merge conflict</strong> — a passed green was kept out of integration. Resolve the conflict, then redrive the campaign (open the held issue and Redrive, or <code>vetinari redrive</code> in the project root).</section>`;
+  `<section class="conflict-note"><strong>Issue held on a merge conflict</strong> — a passed green was kept out of integration. Resolve the conflict, then redrive the campaign (use the Redrive control on this page, or <code>vetinari redrive</code> in the project root).</section>`;
 
 /**
  * The Graft affordance (#168, reworked to mockup 1a in #202). Where prune prunes an
@@ -165,16 +173,17 @@ ${DASHBOARD_PALETTE_CSS}
 /**
  * The issue-detail sheet's markup — one definition rendered by both the campaign
  * page and the all-repos landing (previously hand-synced copies, #76). The foot holds
- * exactly the moves a state allows (design §11, #307), each gated client-side by the pure
- * `issueMoves` rule off the fetched detail: the reply block (its heading, the hoisted issue
- * title + elapsed, the question or a fix-forward notice, the options and answer box), a
- * `Reply` submit (→ `/answer`), a `Redrive` form (→ `/redrive`, project-scoped), and the
- * prune panel. `prune` includes that panel: always on the landing (every parked row is
- * prunable), and on the campaign page only when its prune controls are enabled. All three
- * move buttons share the one `.sheet-btn` style.
+ * exactly the issue-level moves a state allows (design §11, #307, #325), each gated
+ * client-side by the pure `issueMoves` rule off the fetched detail: the reply block (its
+ * heading, the hoisted issue title + elapsed, the question or a fix-forward notice, the
+ * options and answer box), a `Reply` submit (→ `/answer`), and the prune panel. Redrive is
+ * a *whole-campaign* control on the project page (design §7), never an issue move, so it is
+ * not in this foot. `prune` includes that panel: always on the landing (every parked row is
+ * prunable), and on the campaign page only when its prune controls are enabled. Both move
+ * buttons share the one `.sheet-btn` style.
  */
 export const issueDetailSheetMarkup = (prune: boolean) =>
-  `<div id="issue-detail" class="issue-detail" role="dialog" aria-modal="true" aria-live="polite" hidden><div class="issue-detail-sheet"><header class="issue-detail-header"><div class="issue-detail-head-main"><span class="issue-detail-status"><span class="dot"></span><span class="issue-detail-num"></span> <span class="issue-detail-statuslabel"></span></span><h2 class="issue-detail-title"></h2><p class="issue-detail-context"></p></div><button type="button" id="issue-detail-close" class="issue-detail-close" aria-label="Dismiss">&times;</button></header><div class="issue-detail-meta"><div class="meta-tile"><span class="meta-label">Turns</span><span class="meta-value" id="issue-detail-turns"></span></div><div class="meta-tile meta-tile-path" id="issue-detail-worktree-tile" hidden><span class="meta-label">Worktree</span><span class="meta-value meta-value-path" id="issue-detail-worktree"></span></div></div><h3 class="turn-log-heading">Agent turns</h3><ol class="turn-log" id="issue-detail-turnlog"></ol><div id="issue-detail-reply" class="issue-detail-reply" hidden><h3 class="reply-heading" id="reply-heading">PARKED — NEEDS YOUR ANSWER</h3><p class="reply-context"><span class="reply-title" id="reply-title"></span><span class="reply-elapsed" id="reply-elapsed"></span></p><p class="reply-question" id="reply-question"></p><div class="reply-options" id="reply-options"></div><form method="post" action="/answer" id="reply-form"><input type="hidden" name="taskId" value="" /><input type="hidden" name="project" value="" /><textarea name="text" id="reply-text" placeholder="Type your reply…"></textarea></form></div><div class="sheet-actions"><button type="submit" form="reply-form" id="reply-send" class="sheet-btn" hidden>Reply</button><form method="post" action="/redrive" id="redrive-form" hidden><input type="hidden" name="project" value="" /><button type="submit" class="sheet-btn">Redrive</button></form>${
+  `<div id="issue-detail" class="issue-detail" role="dialog" aria-modal="true" aria-live="polite" hidden><div class="issue-detail-sheet"><header class="issue-detail-header"><div class="issue-detail-head-main"><span class="issue-detail-status"><span class="dot"></span><span class="issue-detail-num"></span> <span class="issue-detail-statuslabel"></span></span><h2 class="issue-detail-title"></h2><p class="issue-detail-context"></p></div><button type="button" id="issue-detail-close" class="issue-detail-close" aria-label="Dismiss">&times;</button></header><div class="issue-detail-meta"><div class="meta-tile"><span class="meta-label">Turns</span><span class="meta-value" id="issue-detail-turns"></span></div><div class="meta-tile meta-tile-path" id="issue-detail-worktree-tile" hidden><span class="meta-label">Worktree</span><span class="meta-value meta-value-path" id="issue-detail-worktree"></span></div></div><h3 class="turn-log-heading">Agent turns</h3><ol class="turn-log" id="issue-detail-turnlog"></ol><div id="issue-detail-reply" class="issue-detail-reply" hidden><h3 class="reply-heading" id="reply-heading">PARKED — NEEDS YOUR ANSWER</h3><p class="reply-context"><span class="reply-title" id="reply-title"></span><span class="reply-elapsed" id="reply-elapsed"></span></p><p class="reply-question" id="reply-question"></p><div class="reply-options" id="reply-options"></div><form method="post" action="/answer" id="reply-form"><input type="hidden" name="taskId" value="" /><input type="hidden" name="project" value="" /><textarea name="text" id="reply-text" placeholder="Type your reply…"></textarea></form></div><div class="sheet-actions"><button type="submit" form="reply-form" id="reply-send" class="sheet-btn" hidden>Reply</button>${
     prune
       ? `<div id="prune-panel" class="prune-panel" hidden><button type="button" id="prune-start" class="sheet-btn prune-start">Prune</button><span id="prune-explainer" class="prune-explainer" hidden>Removes this issue and everything blocked by it from the running campaign; merged and mergeable work is kept.</span><form method="post" action="/prune" id="prune-confirm" class="prune-confirm" hidden><span class="prune-confirm-text"></span><input type="hidden" name="taskId" value="" /><input type="hidden" name="project" value="" /><input type="hidden" name="confirm" value="1" /><button type="submit" class="prune-confirm-btn">Confirm</button><button type="button" id="prune-cancel" class="prune-cancel">Cancel</button></form><span id="prune-note" class="prune-note"></span></div>`
       : ""

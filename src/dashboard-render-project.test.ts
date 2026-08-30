@@ -254,6 +254,37 @@ test("renderStatusPage ships the graft input's client wiring, re-run on live ref
   // It validates against the retained dry-run closure endpoint on blur.
   assert.match(html, /\/graft\?preview/);
 });
+test("renderStatusPage's graft control reads as in-flight during its POST — aria-busy + `grafting…`, distinct from at-rest disabled, cleared on every exit (#327)", () => {
+  const running = {
+    project: "beta",
+    waves: [{ index: 0, status: "running" as const, issues: [{ issueNumber: "201", status: "running" as const }] }],
+    parked: [],
+  };
+  const html = renderStatusPage(running, { prune: true, graft: true });
+
+  // At rest the control is disabled with the resting label `graft`, and the form carries no
+  // aria-busy — so the in-flight rendering asserted below is genuinely distinct from the
+  // at-rest disabled state (which is identical to a graft that was never accepted).
+  const summary = html.slice(html.indexOf('class="campaign-summary"'), html.indexOf('class="waves-grid"'));
+  assert.match(summary, /<button type="submit" class="graft-btn" data-graft-submit disabled>graft<\/button>/);
+  assert.doesNotMatch(summary, /aria-busy/);
+
+  // On submit the control enters the in-flight state: aria-busy="true" on the form and the
+  // button relabelled `grafting…` and held disabled — a signal that is not colour/text-only
+  // and differs from the at-rest disabled rendering.
+  assert.match(html, /const enterFlight = \(\) => \{[^}]*form\.setAttribute\("aria-busy", "true"\)[^}]*submit\.textContent = "grafting…"[^}]*submit\.disabled = true[^}]*\}/);
+
+  // Re-submitting while a graft is in flight is impossible — the busy guard returns before
+  // any second /graft POST is shelled against the same ids.
+  assert.match(html, /if \(busy \|\| !typed\(\)\) return;/);
+
+  // Every exit path clears the in-flight state — the clear runs in a `finally`, so success,
+  // 422 and thrown/network error all restore the `graft` label and drop aria-busy, then
+  // sync() sets the disabled state from the ids. The finally also tolerates its own nodes
+  // being detached by a mid-flight soft-refresh (setAttribute/textContent never throw there).
+  assert.match(html, /const clearFlight = \(\) => \{[^}]*form\.removeAttribute\("aria-busy"\)[^}]*submit\.textContent = "graft"[^}]*\}/);
+  assert.match(html, /\} finally \{[^}]*busy = false;[^}]*clearFlight\(\);[^}]*sync\(\);[^}]*\}/);
+});
 test("renderStatusPage shows an informational merge-conflict affordance with no action of its own (#171)", () => {
   const held = renderStatusPage(
     {

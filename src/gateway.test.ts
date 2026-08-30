@@ -10,11 +10,13 @@ import type { TgConn } from "./telegram.ts";
 import {
   drainOutbox,
   formatGatewayStatus,
+  formatParkAnnouncement,
   handlePruneCommand,
   isStatusCommand,
   loadGatewayProjects,
   newPendingConfirms,
   newReplyIndex,
+  parkRecoveryMove,
   parseGatewayCommand,
   pendingAnnouncements,
   pollLoop,
@@ -30,6 +32,7 @@ import {
   type PendingConfirm,
   type SendRef,
 } from "./gateway.ts";
+import type { CampaignStatus, StatusWave, StatusIssue } from "./status.ts";
 
 let gwCounter = 0;
 
@@ -464,23 +467,114 @@ test("supervisePolls tears down a rotated-away token's loop and starts its repla
   assert.equal(started[1].signal.aborted, false, "the replacement loop keeps running");
 });
 
-test("formatGatewayStatus summarizes each served project and its parked questions", () => {
+test("parkRecoveryMove prints the exact move each reason asks of the human", () => {
+  assert.match(parkRecoveryMove("question", "640"), /reply .* answer/i);
+  // stalled: answer with guidance, or prune — carries the prune command for the issue.
+  assert.match(parkRecoveryMove("stalled", "640"), /reply/i);
+  assert.match(parkRecoveryMove("stalled", "640"), /prune #640/);
+  // conflict / red-base / crash are not answerable — they redrive, never resume by reply.
+  for (const reason of ["conflict", "red-base", "crash"] as const) {
+    assert.match(parkRecoveryMove(reason, "640"), /redrive/);
+    assert.doesNotMatch(parkRecoveryMove(reason, "640"), /reply/i);
+  }
+  assert.match(parkRecoveryMove("conflict", "640"), /resolve/i);
+  assert.match(parkRecoveryMove("red-base", "640"), /fix forward/i);
+});
+
+test("formatParkAnnouncement uses the notice skeleton: header, question, exact recovery move", () => {
+  const text = formatParkAnnouncement("jjforge", parked({ taskId: "640", reason: "question", question: "Which approach?" }));
+
+  const [header] = text.split("\n\n");
+  assert.match(header, /^⏸ jjforge · PARKED · #640 \(question\)$/, "header is <emoji> <project> · <STATE> · <context>");
+  assert.match(text, /Which approach\?/, "the question is the signal line");
+  assert.match(text, /Reply to this message to answer\./, "a question's recovery move is to reply");
+});
+
+test("formatParkAnnouncement names the reason and its recovery move for a non-answerable park", () => {
+  const text = formatParkAnnouncement("jjforge", parked({ taskId: "641", reason: "red-base", question: "" }));
+
+  assert.match(text, /^⏸ jjforge · PARKED · #641 \(red-base\)/);
+  assert.match(text, /Fix forward on the base, then `redrive`\./);
+  assert.doesNotMatch(text, /reply/i, "a red-base park is not resolved by a reply");
+});
+
+const statusIssue = (over: Partial<StatusIssue> = {}): StatusIssue => ({ issueNumber: "1", status: "completed", ...over });
+const statusWave = (index: number, status: StatusWave["status"], issues: StatusIssue[] = []): StatusWave => ({ index, status, issues });
+const parkedIssue = (over: Partial<CampaignStatus["parked"][number]> = {}) => ({
+  issueNumber: "640",
+  reason: "question",
+  parkedAt: "t",
+  branch: "agent/640",
+  description: "?",
+  options: [],
+  ...over,
+});
+const campaignStatus = (over: Partial<CampaignStatus> = {}): CampaignStatus => ({ project: "jjforge", waves: [], parked: [], ...over });
+
+test("formatGatewayStatus lists each served project with its parked queue and reasons", () => {
   const text = formatGatewayStatus([
-    project({ project: "alpha", parked: [parked({ taskId: "A1", reason: "question" }), parked({ taskId: "A2", reason: "stalled" })] }),
-    project({ project: "beta", parked: [] }),
+    campaignStatus({ project: "alpha", parked: [parkedIssue({ issueNumber: "A1", reason: "question" }), parkedIssue({ issueNumber: "A2", reason: "stalled" })] }),
+    campaignStatus({ project: "beta", parked: [] }),
   ]);
 
   assert.match(text, /alpha/);
-  assert.match(text, /A1/);
-  assert.match(text, /question/);
-  assert.match(text, /A2/);
+  assert.match(text, /⏸ #A1 — question/);
+  assert.match(text, /⏸ #A2 — stalled/);
   assert.match(text, /beta/);
   // beta has nothing parked — it still appears, marked as having no questions.
   assert.match(text, /beta[\s\S]*nothing parked/i);
 });
 
+test("formatGatewayStatus reports campaign state, the wave in flight, and per-state counts", () => {
+  const text = formatGatewayStatus([
+    campaignStatus({
+      project: "alpha",
+      waves: [
+        statusWave(0, "closed", [statusIssue({ status: "completed" }), statusIssue({ status: "completed" })]),
+        statusWave(1, "running", [statusIssue({ status: "running" })]),
+        statusWave(2, "unstarted", [statusIssue({ status: "unstarted" }), statusIssue({ status: "unstarted" })]),
+      ],
+    }),
+  ]);
+
+  // campaign fold over [closed, running, unstarted] → running; the wave in flight is the 2nd (index 1).
+  assert.match(text, /alpha · RUNNING · wave 2 in flight/);
+  assert.match(text, /completed 2/);
+  assert.match(text, /running 1/);
+  assert.match(text, /unstarted 2/);
+});
+
+test("formatGatewayStatus shows the reducer's failure as the guide word 'failed', in state and counts", () => {
+  const text = formatGatewayStatus([
+    campaignStatus({
+      project: "beta",
+      waves: [statusWave(0, "failed", [statusIssue({ status: "failure" }), statusIssue({ status: "parked", reason: "red-base" })])],
+      parked: [parkedIssue({ issueNumber: "88", reason: "red-base" })],
+    }),
+  ]);
+
+  assert.match(text, /beta · FAILED/);
+  assert.doesNotMatch(text, /wave \d+ in flight/, "a stopped campaign has no wave in flight");
+  assert.match(text, /failed 1/);
+  assert.match(text, /parked 1/);
+  assert.match(text, /parked queue:/);
+  assert.match(text, /⏸ #88 — red-base/);
+});
+
+test("formatGatewayStatus excludes pruned members from the per-state counts", () => {
+  const text = formatGatewayStatus([
+    campaignStatus({
+      project: "gamma",
+      waves: [statusWave(0, "closed", [statusIssue({ status: "completed" }), statusIssue({ status: "unstarted", membership: "pruned" })])],
+    }),
+  ]);
+
+  assert.match(text, /completed 1/);
+  assert.doesNotMatch(text, /unstarted/, "a pruned member left the plan and is not counted");
+});
+
 test("formatGatewayStatus reports when no served project has anything parked", () => {
-  const text = formatGatewayStatus([project({ project: "alpha", parked: [] })]);
+  const text = formatGatewayStatus([campaignStatus({ project: "alpha", parked: [] })]);
 
   assert.match(text, /nothing parked/i);
 });

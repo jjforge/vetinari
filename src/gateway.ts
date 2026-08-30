@@ -22,9 +22,20 @@ import {
   setParkedMessageId,
   type OutboundRecord,
   type ParkedRecord,
+  type ParkReason,
 } from "./state.ts";
 import { gatewayConfigDir, readProjects } from "./registry.ts";
-import { campaignRunning, logFileOf, readEventLog, serveAllStatus, shellPrunePreview } from "./status.ts";
+import {
+  buildAllStatus,
+  campaignRunning,
+  campaignState,
+  logFileOf,
+  readEventLog,
+  serveAllStatus,
+  shellPrunePreview,
+  type CampaignStatus,
+  type IssueStatus,
+} from "./status.ts";
 import { tgPoll, tgSend, type TgConn, type TgMsg } from "./telegram.ts";
 
 /**
@@ -479,22 +490,82 @@ export async function handlePruneCommand(
 }
 
 /**
- * A plain-text `/status` summary across the projects a bot serves: each project
- * and the questions it has parked. A text-only summary by design — richer
- * multi-project presentation is the dashboard's job (E5). Pure over the given
- * projects (the daemon filters them to the replying bot first).
+ * The exact recovery move a park reason asks of the human, taken verbatim from the
+ * user guide's park-reason table (design §10, §13.1). A `question`/`stalled` hold is
+ * answerable — replying to the announcement resumes the task (a `stalled` one may
+ * instead be pruned) — while `conflict`/`red-base`/`crash` are not answerable and
+ * need a `redrive` after the human's fix. One line, ending in the exact command
+ * where the table names one; the enum is the single `ParkReason`.
  */
-export function formatGatewayStatus(projects: GatewayProject[]): string {
-  const lines: string[] = ["📊 Gateway status"];
-  for (const p of projects) {
-    lines.push("", `${p.project}`);
-    if (!p.parked.length) lines.push("  nothing parked");
-    else for (const rec of p.parked) lines.push(`  ⏸ ${rec.taskId} — ${rec.reason}`);
+export function parkRecoveryMove(reason: ParkReason, issue: string): string {
+  switch (reason) {
+    case "question":
+      return "Reply to this message to answer.";
+    case "stalled":
+      return `Reply to this message with guidance, or \`prune #${issue}\`.`;
+    case "conflict":
+      return "Resolve the conflict on the base, then `redrive`.";
+    case "red-base":
+      return "Fix forward on the base, then `redrive`.";
+    case "crash":
+      return "`redrive`.";
   }
-  if (projects.every((p) => !p.parked.length)) {
+}
+
+/**
+ * A park announcement in the one notice skeleton (design §10): a header
+ * `⏸ <project> · PARKED · #<issue> (<reason>)`, the question (or the `detail`
+ * specifics behind a non-question reason) as the single signal line, and the exact
+ * recovery move the reason asks of the human (`parkRecoveryMove`). The reason is the
+ * single `ParkReason` enum; every park speaks the settled vocabulary.
+ */
+export function formatParkAnnouncement(project: string, record: ParkedRecord): string {
+  const signal = record.question?.trim() || record.detail?.trim() || `Parked (${record.reason}).`;
+  return [`⏸ ${project} · PARKED · #${record.taskId} (${record.reason})`, signal, parkRecoveryMove(record.reason, record.taskId)].join("\n\n");
+}
+
+/**
+ * A plain-text `/status` summary across the projects a bot serves (design §10): per
+ * project its campaign state, the wave in flight, the counts per issue state, and
+ * the parked queue with each hold's reason. A text-only summary by design — richer
+ * multi-project presentation is the dashboard's job (E5). Pure over each project's
+ * reconstructed `CampaignStatus` (the daemon builds those, filtered to the replying
+ * bot, first).
+ */
+export function formatGatewayStatus(statuses: CampaignStatus[]): string {
+  const lines: string[] = ["📊 Gateway status"];
+  for (const s of statuses) {
+    const state = campaignState(s.waves.map((w) => w.status));
+    const running = s.waves.find((w) => w.status === "running");
+    lines.push("", running ? `${s.project} · ${state.toUpperCase()} · wave ${running.index + 1} in flight` : `${s.project} · ${state.toUpperCase()}`);
+    const counts = stateCounts(s);
+    const countLine = STATE_ORDER.filter((k) => counts[k] > 0)
+      .map((k) => `${STATE_WORD[k]} ${counts[k]}`)
+      .join(" · ");
+    if (countLine) lines.push(`  ${countLine}`);
+    if (!s.parked.length) lines.push("  nothing parked");
+    else {
+      lines.push("  parked queue:");
+      for (const p of s.parked) lines.push(`    ⏸ #${p.issueNumber} — ${p.reason}`);
+    }
+  }
+  if (statuses.every((s) => !s.parked.length)) {
     lines.push("", "Nothing parked across these projects — reply to a question message to answer and resume it.");
   }
   return lines.join("\n");
+}
+
+// The five issue states in the user guide's display order; the reducer's `failure`
+// is shown as the guide's word `failed` (design §13.1: one vocabulary).
+const STATE_ORDER: readonly IssueStatus[] = ["unstarted", "running", "parked", "failure", "completed"];
+const STATE_WORD: Record<IssueStatus, string> = { unstarted: "unstarted", running: "running", parked: "parked", failure: "failed", completed: "completed" };
+
+/** Tally a project's issues by state for the `/status` counts, skipping pruned
+ * members — they left the plan, so they never count toward the live state totals. */
+function stateCounts(status: CampaignStatus): Record<IssueStatus, number> {
+  const counts: Record<IssueStatus, number> = { unstarted: 0, running: 0, parked: 0, failure: 0, completed: 0 };
+  for (const wave of status.waves) for (const issue of wave.issues) if (issue.membership !== "pruned") counts[issue.status]++;
+  return counts;
 }
 
 /**
@@ -611,8 +682,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const STATUS_PORT = Number(process.env.VETINARI_GATEWAY_STATUS_PORT ?? 8765);
 const STATUS_HOST = process.env.VETINARI_GATEWAY_STATUS_HOST ?? "127.0.0.1";
 
-const announceText = (a: Announcement) =>
-  `⏸ ${a.project} agent PARKED (${a.record.reason}) on ${a.record.taskId}\n\n${a.record.question}\n\nReply to this message to answer and resume.`;
+const announceText = (a: Announcement) => formatParkAnnouncement(a.project, a.record);
 
 /**
  * Announce every parked question not yet sent to its project's destination, then
@@ -779,8 +849,12 @@ export async function gateway(configDir: string = gatewayConfigDir()): Promise<v
       poll: (c, o) => tgPoll(c, o),
       resume: (ref, text) => spawnResume(ref, text, log),
       onStatus: async (c) => {
+        // Reconstruct each served project's campaign from its base location (the same
+        // read the dashboard does) so the summary carries state, wave in flight and
+        // per-state counts — not just the parked queue. Filtered to the replying bot.
         const served = loadGatewayProjects(configDir).filter((p) => p.conn?.token === c.token);
-        await tgSend(c, formatGatewayStatus(served));
+        const pointers = served.map((p) => ({ project: p.project, projectRoot: p.projectRoot, baseLocation: p.baseLocation }));
+        await tgSend(c, formatGatewayStatus(buildAllStatus(pointers, log, configDir)));
       },
       onPrune: (c, command) =>
         handlePruneCommand({ candidates: () => pruneCandidates(configDir), preview: (t) => prunePreview(t, log), send: tgSend }, pending, c, command),

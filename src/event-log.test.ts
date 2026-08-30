@@ -29,7 +29,7 @@ test("readEventLog skips a non-JSON line and a line missing a string event, keep
   );
 });
 
-// A `switch (e.event)` narrows each of the 24 kinds to its member's fields with no `any` — this
+// A `switch (e.event)` narrows each of the 25 kinds to its member's fields with no `any` — this
 // only type-checks (the `test` gate's typecheck compiles it) if every case reaches a field that
 // exists solely on that member. It returns a string per kind so the runtime assertion below also
 // proves the narrowing runs, not just compiles.
@@ -43,6 +43,8 @@ const describe = (e: OrchestratorEvent): string => {
       return `done ${e.index} merged ${e.merged.join(",")} held ${e.held.join(",")}`;
     case "campaign-done":
       return `campaign ${e.batches}`;
+    case "campaign-failed":
+      return `failed merged ${e.merged.join(",")} failed ${e.failed.join(",")}`;
     case "queue-start":
       return `queue ${e.taskIds.join(",")} x${e.slots}`;
     case "queue-done":
@@ -83,12 +85,13 @@ const describe = (e: OrchestratorEvent): string => {
   }
 };
 
-test("a switch over the 24 narrowed kinds reads each member's fields", () => {
+test("a switch over the 25 narrowed kinds reads each member's fields", () => {
   assert.equal(describe(event("green", { taskId: "42", branch: "agent/42", commits: ["abc"] })), "green 42 on agent/42 (1)");
   assert.equal(describe(event("queue-spawn", { taskId: "7", running: 2, left: 3 })), "spawn 7 (2/3)");
   assert.equal(describe(event("wave-start", { text: "wave 1 started" })), "wave 1 started");
   assert.equal(describe(event("quarantined", { taskId: "8", branch: "agent/8", detail: "CONFLICT" })), "quarantined 8 on agent/8");
   assert.equal(describe(event("wave-parked", { merged: ["1", "2"], detail: "GATE FAILED" })), "wave-parked merged 1,2");
+  assert.equal(describe(event("campaign-failed", { merged: ["1"], failed: ["2"] })), "failed merged 1 failed 2");
   assert.equal(describe(event("graft", { ids: ["305", "306"], blockedBy: {}, basenames: {} })), "graft 305,306");
   assert.equal(describe(event("gate", { taskId: "9", cmds: ["typecheck", "test"], skipped: 1 })), "gate typecheck,test skip 1");
   assert.equal(describe(event("tool", { taskId: "9", name: "Read", path: "/a.ts" })), "tool Read /a.ts");

@@ -50,8 +50,9 @@ export function reasonWord(reason: ParkReason): string {
  * - A question or a stall wants a human answer, so both carry `reply` alongside prune/redrive.
  * - A conflict, red base or crash is fixed forward on the base and redriven, never answered
  *   per issue — prune and redrive only (the fix-forward instruction rides the sheet notice).
- * - A `failed` issue offers prune and redrive; a `running`/`unstarted` one offers only prune;
- *   a `completed` one is banked and offers nothing.
+ * - A `failure` issue offers prune and redrive; a `running`/`unstarted` one offers only prune;
+ *   a `completed` one is banked and offers nothing. `failure` is the wire word `/api/issue`
+ *   ships (the `IssueStatus` enum), so the rule keys on it, never the design-prose `failed`.
  * - An archived (read-only) issue offers nothing — no move mutates a finished run's log.
  *
  * A legacy park with no reason reads as an answerable question (mirroring `renderMoves`).
@@ -73,7 +74,7 @@ export function issueMoves({
     const answerable = !reason || reason === "question" || reason === "stalled";
     return { reply: answerable, prune: true, redrive: true };
   }
-  if (status === "failed") return { reply: false, prune: true, redrive: true };
+  if (status === "failure") return { reply: false, prune: true, redrive: true };
   if (status === "running" || status === "unstarted") return { reply: false, prune: true, redrive: false };
   return { reply: false, prune: false, redrive: false };
 }

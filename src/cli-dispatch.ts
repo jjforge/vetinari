@@ -35,8 +35,19 @@ import type { runGraft } from "./graft.ts";
 import { describeGraftRejections } from "./graft.ts";
 import type { readEventLog } from "./event-log.ts";
 import { campaignStarted, reduceCampaign } from "./dashboard-model.ts";
+import { makeReporter } from "./report.ts";
 
 const USAGE = renderUsage();
+
+/**
+ * Turn on `--json` for the raw-event stream: set the `VETINARI_JSON` env the run logger keys its
+ * stdout echo on (`log.ts`) — and which child wave `run`s inherit — so `campaign`/`run`/`redrive`
+ * stream JSONL to stdout for tooling. Left unset, no JSON reaches stdout: the terminal view is the
+ * `report.ts` human lines alone (design §11, #299).
+ */
+const enableJson = (on: boolean): void => {
+  if (on) process.env.VETINARI_JSON = "1";
+};
 
 /** A partial `--agent`/`--model`/`--effort` override, as `parseAgentFlags` yields it. */
 export type AgentOverride = { provider?: string; model?: string; effort?: string };
@@ -49,7 +60,7 @@ export type AgentOverride = { provider?: string; model?: string; effort?: string
 export type Command =
   | { kind: "build"; baseline: boolean }
   | { kind: "baseline" }
-  | { kind: "run"; agent: AgentOverride; args: string[] }
+  | { kind: "run"; agent: AgentOverride; args: string[]; json: boolean }
   | {
       kind: "campaign";
       agent: AgentOverride;
@@ -60,8 +71,9 @@ export type Command =
       dryRun: boolean;
       override: boolean;
       onUnderspecified?: string;
+      json: boolean;
     }
-  | { kind: "redrive"; agent: AgentOverride; autoPrune: boolean; override: boolean }
+  | { kind: "redrive"; agent: AgentOverride; autoPrune: boolean; override: boolean; json: boolean }
   | { kind: "prune"; target?: string; dryRun: boolean; purge: boolean }
   | { kind: "graft"; ids: string[]; dryRun: boolean }
   | { kind: "answer"; taskId?: string; text: string[] }
@@ -91,9 +103,15 @@ export function parseArgs(argv: string[]): Command {
       return { kind: "tgTest" };
     case "run": {
       // Strip the agent selection first, exactly as the old `applyAgentSelection`
-      // did, so the task id is the surviving positional (ADR 0016).
+      // did, so the task id is the surviving positional (ADR 0016). `--json` streams
+      // the raw event log to stdout for tooling; strip it too so the task id survives.
       const { override, rest: args } = parseAgentFlags(rest);
-      return { kind: "run", agent: override, args };
+      return {
+        kind: "run",
+        agent: override,
+        args: args.filter((a) => a !== "--json"),
+        json: args.includes("--json"),
+      };
     }
     case "graft":
       return {
@@ -114,6 +132,7 @@ export function parseArgs(argv: string[]): Command {
         agent,
         autoPrune: redriveArgs.includes("--auto-prune"),
         override: redriveArgs.includes("--override"),
+        json: redriveArgs.includes("--json"),
       };
     }
     case "answer": {
@@ -129,6 +148,7 @@ export function parseArgs(argv: string[]): Command {
       let resume = false;
       let dryRun = false;
       let override = false;
+      let json = false;
       let onUnderspecified: string | undefined;
       const positional: string[] = [];
       for (let i = 0; i < campaignArgs.length; i++) {
@@ -139,6 +159,7 @@ export function parseArgs(argv: string[]): Command {
         else if (a === "--resume") resume = true;
         else if (a === "--dry-run") dryRun = true;
         else if (a === "--override") override = true;
+        else if (a === "--json") json = true;
         else if (a.startsWith("--on-underspecified="))
           onUnderspecified = a.slice("--on-underspecified=".length);
         else if (a === "--on-underspecified") onUnderspecified = campaignArgs[++i];
@@ -154,6 +175,7 @@ export function parseArgs(argv: string[]): Command {
         dryRun,
         override,
         onUnderspecified,
+        json,
       };
     }
     case "prune": {
@@ -241,6 +263,7 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
       // its credentials before the container, and stamps VETINARI_AGENT.
       deps.selectAgent(cfg, cmd.agent);
       if (!cmd.args[0]) throw new Error("run needs a task id");
+      enableJson(cmd.json);
       deps.archiveLeftoverRun();
       // Exit code is the queue's slot signal: 0 green, 2 parked, other = error.
       deps.setExitCode((await deps.runLoop(cfg, cmd.args[0])) === "green" ? 0 : 2);
@@ -256,6 +279,7 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
       // selection and continue the live log, so — like `campaign --resume` — never archive
       // the leftover it would reconstruct from, only archive once idle.
       deps.selectAgent(cfg, cmd.agent);
+      enableJson(cmd.json);
       await deps.campaign(cfg, [], deps.host, undefined, {
         autoPrune: cmd.autoPrune,
         resume: true,
@@ -324,8 +348,9 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
 
 /**
  * The campaign command: resume, override (literal waves) and the default plan-then-run,
- * each with a `--dry-run` that prints and runs nothing. A faithful port of the old
- * `switch`'s `campaign` case, its console writes routed through `deps.log`.
+ * each with a `--dry-run` that prints and runs nothing. Human lines route through a
+ * `report.ts` reporter that falls silent under `--json` (where the run logger streams the
+ * raw events instead); the `--dry-run` previews stay on `deps.log`, as they run nothing.
  */
 async function dispatchCampaign(
   cmd: Extract<Command, { kind: "campaign" }>,
@@ -337,13 +362,19 @@ async function dispatchCampaign(
   // `run` drives the chosen provider, not a silent claude.
   deps.selectAgent(cfg, cmd.agent);
 
+  // `--json` streams raw events to stdout (below, via the run logger) and — through this
+  // reporter — silences every human line, so tooling reads clean JSONL. Without it the
+  // pre-run plan lines print and no JSON reaches stdout (design §11, #299).
+  enableJson(cmd.json);
+  const reporter = makeReporter({ json: cmd.json, out: deps.log });
+
   // Resume reconstructs the plan from the log and takes no issues — no selection,
   // planning, or override applies. It continues the live log, so (unlike a fresh run)
   // it must NOT archive the leftover it would otherwise reconstruct from.
   if (cmd.resume) {
     // `campaign --resume` is the retained one-release alias for `redrive` (ADR 0020, design
     // §7): still honoured, but point the operator at the verb the docs now use.
-    deps.log(
+    reporter.line(
       "note: `campaign --resume` is now `redrive` — run `vetinari redrive` instead (this alias is kept for one release).",
     );
     // Under --resume, --override re-runs a failed member instead of stopping as failed
@@ -392,7 +423,7 @@ async function dispatchCampaign(
   const tokens = cmd.positional.flatMap((a) => a.split(/[\s,]+/)).filter(Boolean);
   const ids = await deps.expandSelection(tokens, cfg.listByLabel);
   if (!ids.length) {
-    deps.log("campaign: nothing to run — the selection expanded to no open issues.");
+    reporter.line("campaign: nothing to run — the selection expanded to no open issues.");
     return;
   }
   const report = await deps.runCampaignPlan(
@@ -417,16 +448,17 @@ async function dispatchCampaign(
 
   if (!report.waves.length) {
     // Nothing survived planning (every ticket unreachable) — show why, run nothing.
-    deps.log("campaign: nothing schedulable — every ticket is unreachable.");
-    deps.log("");
-    deps.log(report.report);
+    reporter.line("campaign: nothing schedulable — every ticket is unreachable.");
+    reporter.line("");
+    reporter.line(report.report);
     return;
   }
 
-  // Show the plan about to run, then run it. Archive any leftover run first, and archive
-  // on completion (a halt still enters the archived-runs list, #141).
-  deps.log(report.report);
-  deps.log("");
+  // Show the plan provenance about to run (its titled plan follows from `campaign` itself),
+  // then run it. Archive any leftover run first, and archive on completion (a halt still
+  // enters the archived-runs list, #141).
+  reporter.line(report.report);
+  reporter.line("");
   deps.archiveLeftoverRun();
   await deps.campaign(cfg, report.waves, host, cmd.name, { autoPrune: cmd.autoPrune });
   deps.archiveIfIdle();

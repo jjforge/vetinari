@@ -26,6 +26,18 @@ import { tgSend, tgWaitReply, type TgConn } from "./telegram.ts";
 import { hostSecretsPath, tgConnForBaseLocation } from "./registry.ts";
 import { issueNameFromTask, readEventLog, reduceCampaign } from "./status.ts";
 import {
+  formatComplete,
+  formatOutcomes,
+  formatPlan,
+  formatResume,
+  formatResumeNothing,
+  formatStop,
+  formatWaveDone,
+  formatWaveStart,
+  makeReporter,
+  type Reporter,
+} from "./report.ts";
+import {
   acquireSlot,
   deregisterProject,
   registerProject,
@@ -47,6 +59,15 @@ const HOST_SLOT_POLL_MS = 1000;
  * identically (`docs/gateway.md`, the comms skeleton).
  */
 const named = (name?: string): string => (name ? ` “${name}”` : "");
+
+/**
+ * The terminal reporter for a run/campaign's human lines (design §11): human-readable by
+ * default, and silent under `--json` — the same `VETINARI_JSON` env the logger's raw-JSONL
+ * echo keys on, so the screen is one or the other, never both. Read at call time so a child
+ * spawn (which inherits the env) reports the same way its parent does (#299).
+ */
+const envReporter = (): Reporter =>
+  makeReporter({ json: process.env.VETINARI_JSON === "1" });
 
 /**
  * Resolve each issue's title through the orchestrator's `fetchTask`, keyed by
@@ -241,6 +262,7 @@ export async function queue(
   host: HostBudget,
   titles?: Record<string, string>,
   spawnRun: RunSpawner = selfSpawnRun,
+  reporter: Reporter = envReporter(),
 ): Promise<Record<string, string>> {
   const pending = [...taskIds];
   const outcomes: Record<string, string> = {};
@@ -341,7 +363,7 @@ export async function queue(
     event: "queue-done",
     text: `🏁 ${cfg.project} · QUEUE DRAINED\n${summary}\nParked tasks stay answerable.`,
   });
-  console.log(`queue drained:\n${summary}`);
+  reporter.line(formatOutcomes(taskIds, outcomes));
   return outcomes;
 }
 
@@ -615,6 +637,11 @@ export async function campaign(
   // per-wave `queue` calls below pass `titles` and so stay silent (no per-wave repeat).
   warnIfTelegramUnconfigured(cfg);
 
+  // The terminal view (design §11): human-readable plan/progress/stop lines, or nothing
+  // under `--json` (where the logger streams raw events instead). Threaded into every
+  // `queue` call so the per-issue outcomes report the same way.
+  const reporter = envReporter();
+
   // Where the wave loop starts, the id→title map the per-wave `queue` calls carry, and the run's
   // human name — stamped onto every wave event and operator note so a resumed or mid-campaign run
   // never renders nameless (#174). Under resume the `--name` param is ignored, so the name is read
@@ -643,7 +670,7 @@ export async function campaign(
         event: "campaign-resume",
         text: `↩️ ${cfg.project} · RESUME · nothing to run — all ${reduced.waves.length} waves already merged`,
       });
-      console.log("campaign --resume: nothing left to run — all waves already merged.");
+      reporter.line(formatResumeNothing(reduced.waves.length));
       return true;
     }
     cfg.log.log("redrive", { fromWave: index });
@@ -652,7 +679,7 @@ export async function campaign(
       event: "campaign-resume",
       text: `↩️ ${cfg.project} · RESUME · wave ${index + 1}/${reduced.waves.length} on ${cfg.baseBranch} — continuing unrun waves`,
     });
-    console.log(`campaign --resume: continuing from wave ${index + 1}/${reduced.waves.length}.`);
+    reporter.line(formatResume(index, reduced.waves.length));
   } else {
     // Resolve the run's issue titles up front (the orchestrator has `fetchTask`) and
     // record them on the start event, so the dumb-router dashboard names every wave
@@ -677,6 +704,8 @@ export async function campaign(
       event: "campaign-start",
       text: `🎬 ${cfg.project} · CAMPAIGN${named(name)} · ${batches.length} batches\n${batches.map((b) => b.join(",")).join(" | ")}`,
     });
+    // The plan, on the terminal: the waves with their ids and titles (design §11).
+    reporter.line(formatPlan(batches, titles, campaignName));
   }
 
   // Only the first wave a redrive re-enters is reconciled against the log (design §7);
@@ -700,6 +729,7 @@ export async function campaign(
       event: "wave-start",
       text: `▶️ ${cfg.project} · BATCH ${index + 1}/${total}${named(campaignName)}\n${tasks.join(", ")}`,
     });
+    reporter.line(formatWaveStart(index, total, tasks, titles));
 
     let outcomes: Record<string, string>;
     if (reconcileResume) {
@@ -716,10 +746,10 @@ export async function campaign(
         (id) => hasParked(cfg, id),
         !!opts.override,
       );
-      const ran = toRun.length ? await queue(cfg, toRun, host, titles, deps.spawnRun) : {};
+      const ran = toRun.length ? await queue(cfg, toRun, host, titles, deps.spawnRun, reporter) : {};
       outcomes = { ...ran, ...pre };
     } else {
-      outcomes = await queue(cfg, tasks, host, titles, deps.spawnRun);
+      outcomes = await queue(cfg, tasks, host, titles, deps.spawnRun, reporter);
     }
 
     // Grace window at the wave boundary (design §5 step 5): a member parked as question/stalled
@@ -734,7 +764,7 @@ export async function campaign(
       await deps.grace(cfg, parkedNow, graceSeconds);
       const revived = parkedNow.filter((t) => !hasParked(cfg, t));
       if (revived.length)
-        outcomes = { ...outcomes, ...(await queue(cfg, revived, host, titles, deps.spawnRun)) };
+        outcomes = { ...outcomes, ...(await queue(cfg, revived, host, titles, deps.spawnRun, reporter)) };
     }
 
     const greens = tasks.filter((t) => outcomes[t] === "green");
@@ -749,9 +779,7 @@ export async function campaign(
       // since a red base verifies nothing; those wait for the human to resolve it green and resume.
       cfg.log.log("campaign-parked", { index, detail: parked.detail });
       enqueueOutbound(cfg, waveParkedNotice(cfg.project, index + 1, merged, cfg.baseBranch, parked.detail));
-      console.log(
-        `campaign wave-parked (${parked.reason}) at batch ${index + 1}/${total} — greens left merged, base paused, ${total - index - 1} batch(es) not started. Fix forward and \`campaign --resume\`, or \`prune <issue>\`.`,
-      );
+      reporter.line(formatStop({ kind: "red-base", index, total, merged }));
       return false;
     }
 
@@ -762,8 +790,8 @@ export async function campaign(
     // wave (handled above) rolls back and leaves its fragments for the retry.
     const collected = deps.collectChangelog(index, cfg.log);
     if (collected.committed)
-      console.log(
-        `batch ${index + 1}/${total}: collected changelog fragments — ${collected.collected.join(", ")}`,
+      reporter.line(
+        `wave ${index + 1}/${total}: collected changelog fragments — ${collected.collected.join(", ")}`,
       );
 
     // Green path only: advance each merged issue to `pending-verify` via the
@@ -787,9 +815,7 @@ export async function campaign(
       // `reduceCampaign` reads to hold the wave (design §2.1).
       cfg.log.log("campaign-failed", { index, detail: `${failed.join(", ")} failed` });
       enqueueOutbound(cfg, campaignFailedNotice(cfg.project, index + 1, merged, failed, cfg.baseBranch));
-      console.log(
-        `campaign failed at batch ${index + 1}/${total} — ${failed.join(", ")} failed, greens (${merged.join(", ") || "none"}) left merged, ${total - index - 1} batch(es) not started. Fix forward or \`prune <issue>\`.`,
-      );
+      reporter.line(formatStop({ kind: "failed", index, total, failed, merged }));
       return false;
     }
 
@@ -811,9 +837,7 @@ export async function campaign(
       const detail = `parked, awaiting a human: ${parkedTasks.join(", ")}`;
       cfg.log.log("campaign-parked", { index, detail });
       enqueueOutbound(cfg, waveParkedNotice(cfg.project, index + 1, merged, cfg.baseBranch, detail));
-      console.log(
-        `campaign wave-parked (issue parked) at batch ${index + 1}/${total} — greens (${merged.join(", ") || "none"}) left merged, base paused, ${total - index - 1} batch(es) not started. Answer/resolve the park and \`campaign --resume\`, or \`prune <issue>\`.`,
-      );
+      reporter.line(formatStop({ kind: "issue-parked", index, total, parked: parkedTasks, merged }));
       return false;
     }
     const note = held.length
@@ -831,9 +855,7 @@ export async function campaign(
       event: "wave-merged",
       text: `✅ ${cfg.project} · BATCH ${index + 1} MERGED${named(campaignName)}\n${merged.join(", ") || "nothing"}${note}${qNote}`,
     });
-    console.log(
-      `batch ${index + 1}/${total}: merged ${merged.join(", ") || "nothing"}${note}${qNote}`,
-    );
+    reporter.line(formatWaveDone(index, total, { merged, held, quarantined, outcomes }));
 
     // Quarantine blast-radius (ADR 0013): a merge conflict pulled an issue from this
     // wave, so its transitive dependents in later, unstarted waves cannot proceed. We
@@ -854,8 +876,8 @@ export async function campaign(
           for (const impact of orphaning)
             cfg.log.log("prune", { target: impact.target, removed: impact.removed, dropped: impact.dropped });
           enqueueOutbound(cfg, autoPruneNotice(cfg.project, index + 1, orphaning));
-          console.log(
-            `batch ${index + 1}/${total}: --auto-prune pruned ${orphaning.map((i) => `#${i.target}→${i.dropped.map((d) => `#${d}`).join(",")}`).join("; ")} and continued.`,
+          reporter.line(
+            `wave ${index + 1}/${total}: auto-pruned ${orphaning.map((i) => `#${i.target}→${i.dropped.map((d) => `#${d}`).join(",")}`).join("; ")} and continued.`,
           );
         } else {
           // Default: the blast-radius call belongs to a human. Pause at the wave
@@ -870,8 +892,14 @@ export async function campaign(
             .join(", ")} in later waves`;
           cfg.log.log("campaign-parked", { index, detail });
           enqueueOutbound(cfg, quarantinePauseNotice(cfg.project, index + 1, orphaning, cfg.baseBranch));
-          console.log(
-            `campaign paused after batch ${index + 1}/${total} — quarantine stranded ${orphaning.flatMap((i) => i.dropped).map((d) => `#${d}`).join(", ")} in later waves; ${total - index - 1} batch(es) not started. Resolve and \`campaign --resume\`, or re-run with \`campaign --auto-prune\`.`,
+          reporter.line(
+            formatStop({
+              kind: "quarantine-stranded",
+              index,
+              total,
+              stranded: orphaning.flatMap((i) => i.dropped),
+              merged,
+            }),
           );
           return false;
         }
@@ -887,7 +915,7 @@ export async function campaign(
     event: "campaign-complete",
     text: `🏆 ${cfg.project} · CAMPAIGN COMPLETE${named(campaignName)} · ${index} batches onto ${cfg.baseBranch}`,
   });
-  console.log("campaign complete.");
+  reporter.line(formatComplete(index, cfg.baseBranch, campaignName));
   return true;
 }
 

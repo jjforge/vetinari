@@ -185,6 +185,12 @@ export function humanizeLogLine(raw: string): HumanizedRow {
       const n = Array.isArray(e.cmds) ? e.cmds.length : 0;
       return { time, actor: actorOf(e.taskId), verb: "gate", spans: [plain("— "), strong(n + " check" + (n === 1 ? "" : "s"))], dot: "running" };
     }
+    // A gate check that is *starting* — the newest row names the command running now, so a slow
+    // suite reads as a live agent, not a wedged one (#332). Reuses `sandbox-exec`'s row shape
+    // (actor · monospace command · running dot) but a distinct verb, since a gate check is the
+    // gate's work, not the agent's own run; its `gate-result` sibling replaces it on completion.
+    case "gate-check":
+      return { time, actor: actorOf(e.taskId), verb: "gate running", spans: [code(String(e.cmd))], dot: "running" };
     case "gate-result": {
       const ok = e.exitCode === 0;
       const tail = ok ? " (" + e.seconds + "s)" : " — exit " + e.exitCode + " (" + e.seconds + "s)";

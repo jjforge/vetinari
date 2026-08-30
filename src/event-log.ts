@@ -209,6 +209,18 @@ export interface GateEvent extends BaseEvent {
   skipped: number;
 }
 
+/** `gate-check` — one gate command is *starting* (it names what is running now, before it exits): its
+ * `cmd`, carrying `taskId` when a per-task run drove it (loop.ts); the wave-merge gate has no single task
+ * and omits it. A live-only activity-stream row (ADR 0015), written before each check so the live tail's
+ * newest row names the command in flight instead of sitting on the gate-start summary for the check's whole
+ * duration (#332); its `gate-result` sibling follows on completion. Distinct from `sandbox-exec` — a gate
+ * check is run by the gate, not the agent — though the tail reuses that row's shape (gate.ts). */
+export interface GateCheckEvent extends BaseEvent {
+  event: "gate-check";
+  taskId?: string;
+  cmd: string;
+}
+
 /** `gate-result` — one gate command finished: its cmd, exit code, wall-clock seconds, and the captured
  * output file. Carries `taskId` when a per-task run drove it (loop.ts); the wave-merge gate omits it.
  * Part of the shared union for the live-tail activity stream (ADR 0015) (gate.ts). */
@@ -298,6 +310,7 @@ export type OrchestratorEvent =
   | RedriveEvent
   | GraceWaitEvent
   | GateEvent
+  | GateCheckEvent
   | GateResultEvent
   | ToolEvent
   | SandboxExecEvent

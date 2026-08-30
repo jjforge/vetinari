@@ -48,6 +48,10 @@ export async function runGates(
   if (taskId) appendActivity(cfg.stateDir, taskId, event("gate", gateFields));
 
   for (const g of selected) {
+    // Announce the check as it starts (before it runs), so the live tail's newest row names the
+    // command in flight rather than sitting on the gate-start summary for the check's whole duration
+    // (#332). Live-only, per-task: the wave-merge gate has no `taskId` and skips it, as above.
+    if (taskId) appendActivity(cfg.stateDir, taskId, event("gate-check", { taskId, cmd: g.cmd }));
     const t0 = Date.now();
     const res = await sbx.exec(g.cmd);
     const outFile = writeGateLog(cfg.stateDir, g.cmd, res);

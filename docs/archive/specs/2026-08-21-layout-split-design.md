@@ -1,6 +1,6 @@
 # E1: Layout split + config resolution + migrate
 
-Epic: [#12](https://github.com/jjforge/vetinari/issues/12) · Source: [ADR 0001](../adr/0001-vetinari-committed-vs-local-split.md), [ADR 0003](../adr/0003-shared-machine-install.md) · Glossary: [CONTEXT.md](../../CONTEXT.md)
+Epic: [#12](https://github.com/jjforge/vetinari/issues/12) · Source: [ADR 0001](../../adr/0001-vetinari-committed-vs-local-split.md), [ADR 0003](../../adr/0003-shared-machine-install.md) · Glossary: [CONTEXT.md](../../../CONTEXT.md)
 
 ## Problem Statement
 

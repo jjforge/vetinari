@@ -1,6 +1,6 @@
 # Archived runs in the dashboard
 
-Source: [ADR 0006](../adr/0006-one-dashboard-registry-backed-aggregated-server.md) · Glossary: [CONTEXT.md](../../CONTEXT.md) (`run`, `archived run`)
+Source: [ADR 0006](../../adr/0006-one-dashboard-registry-backed-aggregated-server.md) · Glossary: [CONTEXT.md](../../../CONTEXT.md) (`run`, `archived run`)
 
 ## Problem Statement
 

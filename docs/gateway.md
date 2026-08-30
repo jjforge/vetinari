@@ -11,8 +11,9 @@ sit unannounced. This guide takes you from nothing to a draining outbox.
 
 Design background: [ADR 0002 — the gateway is a dumb router; projects own their
 comms](adr/0002-gateway-is-a-dumb-router-projects-own-comms.md) and
-[ADR 0006 — one dashboard, registry-backed](adr/0006-one-dashboard-registry-backed-aggregated-server.md),
-with the full design in [the gateway design spec](specs/2026-08-21-gateway-design.md).
+[ADR 0006 — one dashboard, registry-backed](adr/0006-one-dashboard-registry-backed-aggregated-server.md).
+The current design lives in [`design.md`](design.md) §10 (communications);
+the dated build-time spec is archived under `archive/specs/`.
 
 ## How a message flows
 

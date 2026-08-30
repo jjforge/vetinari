@@ -1,6 +1,6 @@
 # E2: `vetinari init` — scaffold a new project onto the layout
 
-Epic: [#13](https://github.com/jjforge/vetinari/issues/13) · Source: [ADR 0003](../adr/0003-shared-machine-install.md), [ADR 0001](../adr/0001-vetinari-committed-vs-local-split.md) · Glossary: [CONTEXT.md](../../CONTEXT.md)
+Epic: [#13](https://github.com/jjforge/vetinari/issues/13) · Source: [ADR 0003](../../adr/0003-shared-machine-install.md), [ADR 0001](../../adr/0001-vetinari-committed-vs-local-split.md) · Glossary: [CONTEXT.md](../../../CONTEXT.md)
 
 ## Problem Statement
 

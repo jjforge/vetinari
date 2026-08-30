@@ -1,6 +1,6 @@
 # Campaign & wave names — make the archive legible
 
-Source: Glossary [CONTEXT.md](../../CONTEXT.md) (`campaign name`, `wave name`, `run`, `archived run`) · builds on the archived-runs dashboard.
+Source: Glossary [CONTEXT.md](../../../CONTEXT.md) (`campaign name`, `wave name`, `run`, `archived run`) · builds on the archived-runs dashboard.
 
 ## Problem Statement
 

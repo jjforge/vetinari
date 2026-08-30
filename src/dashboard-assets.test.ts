@@ -8,11 +8,13 @@ import { DASHBOARD_PALETTE_CSS, stateColor, stateBorderColor, counterColor, TOP_
 import { cappedRawRows, isNotableHostEvent, renderLandingShell } from "./status.ts";
 
 test("the card/chip colour rules are landed as a normative doc that pins the palette (#83)", () => {
+  // The colour rules live as appendix A of the design doc (#304 folded the standalone
+  // dashboard-color-rules.md into it): the palette, the edge rule and the precedence.
   const doc = readFileSync(
-    join(import.meta.dirname, "..", "docs", "dashboard-color-rules.md"),
+    join(import.meta.dirname, "..", "docs", "design.md"),
     "utf8",
   );
-  // The doc is the reference: it carries the §1 palette at the exact hexes the code uses.
+  // The appendix is the reference: it carries the palette at the exact hexes the code uses.
   for (const hex of [
     "#6cb6ff",
     "#c8a24e",
@@ -24,14 +26,12 @@ test("the card/chip colour rules are landed as a normative doc that pins the pal
     "#10151b",
     "#0b0e12",
   ]) {
-    assert.ok(doc.includes(hex), `the colour-rules doc pins ${hex}`);
+    assert.ok(doc.includes(hex), `the design appendix pins ${hex}`);
   }
-  // And it states the derivation precedence and the teal-is-not-a-state rule.
-  assert.match(doc, /parked > failure > running > unstarted > completed/);
-  assert.match(
-    doc,
-    /never appear on a status chip or a card edge|never a state/,
-  );
+  // And it states the roll-up precedence (§2.4's `failed > parked` order — the prune
+  // action red never means a state) and the teal-is-not-a-state rule.
+  assert.match(doc, /failed > parked > running > completed > unstarted/);
+  assert.match(doc, /never a state/);
 });
 
 test("the dashboard palette is one shared source defining every state token at its spec hex (#83)", () => {

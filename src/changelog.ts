@@ -129,8 +129,8 @@ function splitMilestones(text: string): { header: string; milestones: { heading:
  * into it — one block per label, sections in canonical order — so per-wave
  * collection accumulates into a single milestone for the day. Otherwise a new
  * milestone titled `title` and dated `today` is inserted at the top. Existing
- * milestones below the target are preserved verbatim, and the result keeps
- * `make check-changelog-sections` green (never two blocks of one label).
+ * milestones below the target are preserved verbatim, and each label renders as a
+ * single block per milestone (never two blocks of one label).
  */
 export function collectFragments(changelogText: string, sections: FragmentSection[], today: string, title: string): string {
   if (!sections.length) return changelogText;
@@ -220,7 +220,14 @@ export function foldFragments(opts: CollectOptions, names: string[]): { collecte
  * (empty `collected`, changelog untouched) when there are no fragments. Returns the
  * basenames it consumed. Folds every fragment present, unlike `foldFragments`'s
  * selective reconcile.
+ *
+ * The fold runs only when the project keeps a `CHANGELOG.md` (design §12): a project
+ * with no changelog is opting out, so its fragments are left in place and `skipped`
+ * is set to `no-changelog` for the caller to log — rather than materialising a
+ * changelog no one asked for (or crashing on the missing read).
  */
-export function applyCollect(opts: CollectOptions): { collected: string[] } {
-  return foldFragments(opts, scanFragments(opts.fragmentsDir).map((f) => f.name));
+export function applyCollect(opts: CollectOptions): { collected: string[]; skipped?: "no-changelog" } {
+  const names = scanFragments(opts.fragmentsDir).map((f) => f.name);
+  if (names.length && !existsSync(opts.changelogPath)) return { collected: [], skipped: "no-changelog" };
+  return foldFragments(opts, names);
 }

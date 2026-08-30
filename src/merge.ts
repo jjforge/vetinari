@@ -157,14 +157,22 @@ export async function integrateGreens(
  * on `baseBranch`); passing it explicitly is what makes this unit-testable against a
  * throwaway repo. `log` is the run's injected logger — this is a host helper, not a
  * `cfg` holder, so the logger is threaded in explicitly.
+ *
+ * The fold runs only when the project keeps a `CHANGELOG.md` (design §12). A project
+ * with none is opting out: its fragments are left on the base and one line is logged,
+ * rather than a changelog being materialised no one asked for.
  */
 export function collectWaveChangelog(waveIndex: number, log: Logger, root: string = process.cwd()): { collected: string[]; committed: boolean } {
-  const { collected } = applyCollect({
+  const { collected, skipped } = applyCollect({
     fragmentsDir: join(root, FRAGMENT_DIR),
     changelogPath: join(root, "CHANGELOG.md"),
     today: formatMilestoneDate(new Date()),
     title: "Collected changes",
   });
+  if (skipped === "no-changelog") {
+    log.log("campaign-changelog-skipped", { wave: waveIndex, reason: "no-changelog" });
+    return { collected, committed: false };
+  }
   if (!collected.length) {
     log.log("campaign-changelog-empty", { wave: waveIndex });
     return { collected, committed: false };

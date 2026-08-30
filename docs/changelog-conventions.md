@@ -13,7 +13,7 @@ section: Bug fixes
 - [user] <entry text> (#<issue>).
 ```
 
-It uses the same section labels and audience tags as `CHANGELOG.md` (below), and may carry more than one `section:` block when a change spans sections. When the orchestrator collects, the bullets fold into the current dated milestone — appended to the top milestone if it is already dated today, else a new milestone dated today — grouped by section, one block per label, so `make check-changelog-sections` stays green.
+It uses the same section labels and audience tags as `CHANGELOG.md` (below), and may carry more than one `section:` block when a change spans sections. When the orchestrator collects, the bullets fold into the current dated milestone — appended to the top milestone if it is already dated today, else a new milestone dated today — grouped by section, one block per label. The fold runs only when the project keeps a `CHANGELOG.md`; a project with none has its fragments left in place.
 
 `vetinari changelog collect [--title "…"]` runs the same fold by hand: it reads this repo's `changelog.d/*.md`, folds them into `CHANGELOG.md`, and deletes the consumed fragments. Interactive work not racing a wave may instead edit `CHANGELOG.md` directly.
 
@@ -48,7 +48,7 @@ Within a milestone, bullets are grouped under bold section labels, in this order
 4. `**Bug fixes:**` — something that was broken now works.
 5. `**Documentation:**` — docs/ADR/README changes worth surfacing.
 
-A milestone uses only the labels it needs, and **each label appears at most once** per milestone — collect every bullet of a kind under the single block, never a second header for the same label. This one is checked mechanically: `make check-changelog-sections` (script under `scripts/`, unit-tested by `scripts/check-changelog-sections.test.sh`) fails when any milestone repeats a bold label, and fails closed if the file has no milestone heading at all. Run it after editing the changelog.
+A milestone uses only the labels it needs, and **each label appears at most once** per milestone — collect every bullet of a kind under the single block, never a second header for the same label. A split `**Improvements:**` (one block, then another below `**New features:**`) reads as absent — a reader finds the first list and stops.
 
 ## Issue numbers are welcome here
 

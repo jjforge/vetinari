@@ -240,16 +240,18 @@ if (mode === "changelog") {
       ? rest[titleIdx + 1]
       : "Collected changes";
   const dir = process.cwd();
-  const { collected } = applyCollect({
+  const { collected, skipped } = applyCollect({
     fragmentsDir: join(dir, FRAGMENT_DIR),
     changelogPath: join(dir, "CHANGELOG.md"),
     today: formatMilestoneDate(new Date()),
     title,
   });
   console.log(
-    collected.length
-      ? `collected ${collected.length} fragment(s) into CHANGELOG.md: ${collected.join(", ")}`
-      : `nothing to collect — ${FRAGMENT_DIR}/ has no fragments.`,
+    skipped === "no-changelog"
+      ? `no CHANGELOG.md here — leaving ${FRAGMENT_DIR}/ fragments in place.`
+      : collected.length
+        ? `collected ${collected.length} fragment(s) into CHANGELOG.md: ${collected.join(", ")}`
+        : `nothing to collect — ${FRAGMENT_DIR}/ has no fragments.`,
   );
   process.exit(0);
 }

@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -102,17 +101,14 @@ test("collectFragments folds into today's top milestone, one block per label, ca
   assert.ok(out.indexOf("**Improvements:**") < out.indexOf("**Bug fixes:**"));
 });
 
-test("collectFragments output passes make check-changelog-sections", () => {
+test("collectFragments folds two same-day collects into one block per label, not a second header", () => {
   // Two collects in one day: the second must fold into the first's milestone, not
-  // add a second **Bug fixes:** block — the exact halt the lint guards against.
+  // add a second **Bug fixes:** block — one block per label per milestone.
   const once = collectFragments("# Changelog\n\n### Older — August 1, 2026\n\n**Bug fixes:**\n- [user] old (#1)\n", [{ section: "Bug fixes", bullets: ["- [user] fix one (#2)."] }], "August 26, 2026", "Wave collection");
   const twice = collectFragments(once, [{ section: "Bug fixes", bullets: ["- [user] fix two (#3)."] }], "August 26, 2026", "Wave collection");
   assert.equal(twice.match(/\*\*Bug fixes:\*\*/g)?.length, 2); // one per milestone, not two in one
-  const dir = mkdtempSync(join(tmpdir(), "vetinari-cl-"));
-  const file = join(dir, "CHANGELOG.md");
-  writeFileSync(file, twice);
-  // Exits 0 only when no milestone repeats a label.
-  execFileSync("bash", ["scripts/check-changelog-sections.sh", "--file", file], { encoding: "utf8" });
+  // Both of today's fixes live under today's single block.
+  assert.ok(twice.includes("- [user] fix one (#2).\n- [user] fix two (#3)."));
 });
 
 test("formatMilestoneDate renders a UTC date as the milestone's Month DD, YYYY", () => {
@@ -183,6 +179,37 @@ test("foldFragments is a no-op when the named set is empty or unmatched", () => 
   assert.deepEqual(result.collected, []);
   assert.equal(readFileSync(changelog, "utf8"), before); // untouched
   assert.equal(existsSync(join(fragDir, "42.md")), true); // unnamed fragment stays
+});
+
+test("applyCollect folds when the project has a CHANGELOG.md", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-collect-present-"));
+  const fragDir = join(dir, "changelog.d");
+  mkdirSync(fragDir);
+  const changelog = join(dir, "CHANGELOG.md");
+  writeFileSync(changelog, "# Changelog\n\n### Older — August 1, 2026\n\n**Bug fixes:**\n- [user] old (#1)\n");
+  writeFileSync(join(fragDir, "42.md"), "section: New features\n- [user] feature from 42 (#42).\n");
+
+  const result = applyCollect({ fragmentsDir: fragDir, changelogPath: changelog, today: "August 26, 2026", title: "Wave collection" });
+
+  assert.deepEqual(result.collected, ["42.md"]);
+  assert.equal(result.skipped, undefined);
+  assert.ok(readFileSync(changelog, "utf8").includes("- [user] feature from 42 (#42)."));
+  assert.equal(existsSync(join(fragDir, "42.md")), false); // consumed
+});
+
+test("applyCollect leaves fragments in place when the project has no CHANGELOG.md", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-collect-absent-"));
+  const fragDir = join(dir, "changelog.d");
+  mkdirSync(fragDir);
+  const changelog = join(dir, "CHANGELOG.md"); // never created
+  writeFileSync(join(fragDir, "42.md"), "section: New features\n- [user] feature from 42 (#42).\n");
+
+  const result = applyCollect({ fragmentsDir: fragDir, changelogPath: changelog, today: "August 26, 2026", title: "Wave collection" });
+
+  assert.deepEqual(result.collected, []);
+  assert.equal(result.skipped, "no-changelog");
+  assert.equal(existsSync(changelog), false); // not created
+  assert.equal(existsSync(join(fragDir, "42.md")), true); // fragment left in place
 });
 
 test("applyCollect is a no-op when there are no fragments", () => {

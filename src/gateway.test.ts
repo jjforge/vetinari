@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { register } from "./registry.ts";
@@ -1012,4 +1012,17 @@ test("drainOutbox leaves a record unsent when the send fails, so the next tick r
   await drainOutbox(routed(base), failingSend, memoryLogger());
 
   assert.equal(listOutboxIn(outboxDirOf(base))[0].sentAt, undefined, "a failed send is not marked sent");
+});
+
+// Repo-wide guard (#311): a raw NUL byte in a source file makes grep, rg and
+// git treat the whole module as binary, so searches come back empty and
+// `git diff`/`blame` are blind. Composite keys must join with the `"\0"`
+// escape, never a literal U+0000. This lives here because gateway.ts held two
+// of the three original offenders; it covers every module under src/ at once.
+test("no source file under src/ contains a literal NUL byte", () => {
+  const srcDir = import.meta.dirname;
+  const offenders = readdirSync(srcDir)
+    .filter((f) => f.endsWith(".ts") || f.endsWith(".mts"))
+    .filter((f) => readFileSync(join(srcDir, f)).includes(0x00));
+  assert.deepEqual(offenders, [], `source files with a raw NUL byte: ${offenders.join(", ")}`);
 });

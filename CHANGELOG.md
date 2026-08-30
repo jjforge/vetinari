@@ -52,6 +52,7 @@ Within a milestone each bold section label appears at most once.
 - [user] The issue sheet now offers exactly the moves a state allows: reply + prune + redrive for a question/stalled park, prune + redrive (with a fix-forward notice) for a conflict/red-base/crash park, prune + redrive for a failed issue, prune alone for a running/unstarted one, and nothing for a completed one — redrive posts to `/redrive` from the sheet itself. The reply panel hoists the question, issue title, and elapsed time above the box, and Reply/Redrive/Prune share one button style (#307).
 - [user] An idle project card now shows its last run's outcome and finish time (its campaign name already showed), and tapping the card opens the project page with that run expanded at the top of the archived list (#308).
 - [ops] A `COMPLETE` with no commit ahead of the base now parks `stalled/no-commit` before the gates run, without spending a gate cycle or a turn; the turn-budget park's `detail` now carries the specifics as `budget:<maxTurns>` (#313).
+- [ops] The `/fileset` skill now infers markers by pure LLM read — it invokes no `vetinari` command at all, deciding whether a ticket already has a usable marker by reading it against the "Declaring a ticket's file-set" convention in `docs/issue-conventions.md` rather than shelling out to grade its own input (#323).
 
 **Bug fixes:**
 - [user] A campaign wave with a failed issue now holds the wave and stops the campaign as failed: the wave still drains its siblings and merges their greens, then a `campaign-failed` event and a failure notice are logged and the run exits non-zero — no later wave starts on top of the missing work (#285).
@@ -67,6 +68,11 @@ Within a milestone each bold section label appears at most once.
 - [user] `run` now exits 1 (not 2) when it fails, distinct from 2 for parked and 0 for green; a standalone run that throws leaves a `failed` verdict on the event log instead of nothing (#313).
 - [ops] `prune --dry-run` and `graft --dry-run` no longer print their machine `prune-closure`/`graft-closure` JSON line to stdout unless `--json` is passed; the dashboard's preview shells pass it (#313).
 - [ops] A parked question is now announced to the destination its `question` routing key resolves to — the place the gateway watches for the reply — instead of always the project's default chat (#315).
+- [user] A merge conflict now holds its wave: the campaign parks even when the conflict strands no dependents, and a redrive lands it once you resolve the conflict on the branch (or hand-merge it onto the base) (#314).
+- [user] A redrive re-gates a red merged base even when nothing new merges, so a fix-forward is verified before the campaign advances past the wave that parked (#314).
+- [user] A failed member now outranks a red merged base at resolve time, so a wave with both stops as failed rather than parked (#314).
+- [api] The event schema is tightened: `campaign-parked` carries a `reason` (`red-base`/`question`/`stalled`/`conflict`) written by the code that stopped the wave, `wave-done` carries `{ index, merged }` only, and `redrive` carries `fromWave`, `landed`, and `skipped` (#314).
+- [user] Label expansion (`campaign <label>`, `campaign --dry-run`) now drops open issues carrying `pending-verify` — merged work awaiting close is no longer scheduled onto a fresh branch only to park `stalled/no-commit`; each exclusion is logged like the epic exclusion and shows in the dry-run provenance. An explicitly named id is still kept (#324).
 
 **Documentation:**
 - [internal] `CONTEXT.md` is now a domain-only glossary in the settled vocabulary: an entry for every object, state, park reason and move in the user guide's model; retired words (`carve`, `queue`, `quarantined`, `wave-parked`, `interrupted`, `campaign-plan`, `dispatch`/`attend`, `hostWeight`, `QUEUE_SLOTS`) demoted to _Avoid_ lines; dashboard widgets, colour rules and testing terms removed (#300).

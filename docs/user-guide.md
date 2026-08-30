@@ -56,7 +56,7 @@ Waves, campaigns and the project card roll up from their issues in this order: f
 
 **Your five moves.** These are the only things a human ever does to a campaign:
 
-1. **Answer** a question. The issue goes back to work and the campaign continues on its own. You do not answer and then separately ask it to continue.
+1. **Answer** a question. The answer is delivered to the parked issue; the campaign — live, or picked up by the answer — puts the issue back to work with it and continues on its own. You do not answer and then separately ask it to continue.
 2. **Prune** an issue — and everything that depends on it — out of the plan. Against a running campaign it takes effect at the next wave boundary; the wave in flight finishes. Work already merged is never undone; a pruned issue's branch is kept.
 3. **Graft** issues in. Each one lands in the **earliest unstarted wave** that comes after its blockers and whose members touch none of its files — only a `blocked_by` link or a shared file ever pushes it later. The wave in flight is never touched.
 
@@ -79,7 +79,7 @@ When something stops the campaign, you take one of the five moves. An answer con
 ## Where you see things
 
 - **Terminal**: the plan, per-wave progress, a one-line reason whenever it stops, and the exact command that resumes it — all as human-readable lines, never raw JSON. The event log is for the file (and `--json`), not the screen. The exit code says green, parked, or failed.
-- **Telegram**: a parked question arrives as a message; **reply to it** to answer. Wave and campaign progress, failures, and filed findings arrive as fire-and-forget notices. Each project names its own bot and chat in its `host.env` (projects may share a bot or each have their own), and replies route back to the project that asked. `/status` answers with a summary; `prune <issue>` previews and, on `yes`, prunes.
+- **Telegram**: a parked question arrives as a message; **reply to it** to answer. Wave and campaign progress, failures, and filed findings arrive as fire-and-forget notices. Each project names its own bot and chat in its `host.env` (projects may share a bot or each have their own), and replies route back to the project that asked. `/status` answers with a summary; `prune <issue>` previews and, on `yes`, prunes (`prune <project> <issue>` when projects share a bot).
 - **Dashboard**: one page over every project on the machine, live. A card per project with its wave and counts; open a project for its waves and issues; tap an issue for its turn log — one sentence per turn in the agent's own words — and the moves available for its state. Past runs are listed under the live one and open read-only.
 - **Status line** (optional): the wave in flight, a count per state, and the reason words for any parked work, in the Claude Code status bar.
 

@@ -86,6 +86,23 @@ Exit: the issue sheet offers exactly the moves the reason allows; the idle card 
 
 `blocked_by`: 306 ← 295 · 307, 308, 309 ← 306.
 
+## Campaign 5 — the design is true · epic #312
+
+Added 2026-08-30 after a claim-by-claim audit of `design.md`/`user-guide.md` against the code (~250 claims, ~70 divergences; the doc was corrected in the same pass and §15 rewritten). The epic carries **no** `campaign:*` label. Exit: §15 is empty.
+
+`… campaign campaign:audit` from the pinned driver — the planner layers it:
+
+| Wave | Issues |
+| --- | --- |
+| 1 | #313 exit codes + `failed` logged by a throwing run · #315 question routing key honoured, one bot per project, notify keys in the settled names |
+| 2 | #314 resolve/redrive: conflict holds the wave (absorbs #310), red base re-gated on redrive, failed > red base, crash reconciled (spills after #315: both cite `modes.ts`) |
+| 3 | #316 `answer` delivers to the record; live campaign or redrive re-admits with it · #317 dashboard: failed-sheet moves, reason word, idle card, palette/edge rule |
+| 4 | #318 standalone run/answer take a slot, preflight, `baseBranch` · #319 parked-record durability, unmerged green ≠ completed |
+| 5 | #320 retired words out of notices/help/template/init/skills; one notice skeleton |
+| 6 | #321 status words `failed`/`completed` in code; `quarantined` identifiers retired |
+
+`blocked_by`: 316 ← 313, 314 · 317 ← 314 · 318 ← 316 · 319 ← 316, 317 · 320 ← 319, 315 · 321 ← 320, 318.
+
 ## Found in flight
 
 - **A label selection pulls the epic in.** `campaign campaign:vocabulary` scheduled epic #282 because the epics carry the `campaign:*` labels too; the agent correctly changed nothing and it parked `stalled/no-commit`. Select by ids, or strip the label from #283/#284 before `campaign campaign:docs` / `campaign campaign:dashboard`.

@@ -69,16 +69,17 @@ The event vocabulary after consolidation (§13.2) is small and uses the user's w
 
 | Event | Fields | Emitted by |
 | --- | --- | --- |
-| `campaign-start` | `waves`, `name?`, `titles?` (id → title, recorded once) | campaign |
+| `campaign-start` | `waves`, `slots`, `name?`, `titles?` (id → title, recorded once) | campaign |
 | `wave-start` | `index`, `tasks` | campaign |
-| `spawn` | `task` | campaign (queue) |
-| `turn` | `task`, `turn`, `summary`, `signal`, `sessionId?`, `commits?` | run |
-| `green` | `task`, `branch`, `commits` | run |
-| `parked` | `task`, `reason`, `detail` | run (question/stalled), integrator (conflict), campaign (red-base) |
-| `failed` | `task`, `detail` | run |
-| `merged` | `task` | integrator |
+| `spawn` | `taskId` | campaign |
+| `turn` | `taskId`, `turn`, `summary`, `signal`, `sessionId?`, `commits?` | run |
+| `green` | `taskId`, `branch`, `commits` | run |
+| `parked` | `taskId`, `reason`, `detail` | run (question/stalled), integrator (conflict). A red base is the *wave's* reason: it is expressed by `campaign-parked` with the wave index, and the reducer derives `red-base` for that wave — no per-member `parked` event is written |
+| `failed` | `taskId`, `detail` | whichever process observes it: the run loop on a throw, the campaign on a child's non-zero exit |
+| `merged` | `taskId` | integrator |
 | `base-gate` | `index`, `green`, `detail` | integrator |
-| `wave-done` | `index` | campaign — only when every member is `completed` |
+| `wave-done` | `index`, `merged` | campaign — only when every member is `completed` |
+| `grace-wait` | `seconds`, `tasks` | campaign (§5 step 3) |
 | `campaign-parked` / `campaign-failed` | `index`, `detail` | campaign — the two stop markers |
 | `campaign-done` | `waves` | campaign |
 | `prune` | `target`, `removed`, `dropped` | prune |
@@ -115,7 +116,7 @@ Membership is an orthogonal axis — `member | grafted | pruned` — so a chip s
 | `question` | run loop on BLOCKED | yes | no — the answer continues |
 | `stalled` | run loop on turn budget, idle timeout, or an empty COMPLETE | yes (an answer is guidance) | no |
 | `conflict` | integrator on merge conflict | no | yes, after the human resolves it |
-| `red-base` | campaign on a red merged base | no | yes, after fix-forward or prune |
+| `red-base` | campaign on a red merged base — the wave's reason, carried by `campaign-parked` | no | yes, after fix-forward or prune |
 | `crash` | reconciliation (dead process, no stop marker) | no | yes |
 
 ### 2.4 Roll-ups
@@ -134,7 +135,7 @@ A parked record that survives a run (it always does, until resolved) keeps the c
 
 ### 2.6 Outbound record
 
-`outbox/<uuid>.json`: `{ id, category, event?, text, enqueuedAt, sentAt?, destination? }`. A run writes; the gateway drains, routes by the project's notify map, and stamps `sentAt`. Unsent records survive a gateway outage and an archive; sent ones are cleared at archive.
+`outbox/<uuid>.json`: `{ id, category, event?, text, enqueuedAt, sentAt?, destination? }`, `category` one of `success | failure | progress | finding`. A question is never an outbound record — it is the parked record (§2.5), which the gateway announces. A run writes; the gateway drains, routes by the project's notify map, and stamps `sentAt`. Unsent records survive a gateway outage and an archive; sent ones are cleared at archive.
 
 ## 3. The run loop
 
@@ -146,9 +147,9 @@ A parked record that survives a run (it always does, until resolved) keeps the c
 4. Turn: run the agent until it emits COMPLETE or BLOCKED, or the idle timeout fires. Log `turn` with the summary and session id.
 5. On BLOCKED: write the parked record (`question`), log `parked`, tear the container down, exit 2.
 6. On COMPLETE with no commits ahead of the base: park as `stalled` (an agent that says done and changed nothing is not green).
-7. On COMPLETE: run the gates (`when`-scoped by the branch's diff; the scoping is logged). Green → log `green`, run the optional findings harvest, exit 0. Red → resume the same session with the gate report attached and go to 4.
-8. After `maxTurns` red cycles (`config.mts`, default 6 — §9): park as `stalled` with the budget in `detail`.
-9. On idle timeout (`idleTimeoutSeconds` in `config.mts`, default 600 — §9): park as `stalled`. On anything else thrown: log `failed`, exit 1. `answer <issue> "<text>"` re-enters step 4 on the parked session with the answer as the prompt (resumable providers), or posts the answer as an issue comment and re-enters step 3 fresh (non-resumable providers, which re-read the issue).
+7. On COMPLETE: run the gates (`when`-scoped by the branch's diff; the scoping is logged). Green → log `green`, run the optional findings harvest, exit 0. Red → go to 4 with the gate report attached: on the same session for a resumable provider; as a fresh run with the report and the prior summary appended to the issue text for a non-resumable one.
+8. After `maxTurns` red cycles (`config.mts`, default 6 — §9): park as `stalled`, `detail: budget`, the count in `question`.
+9. On idle timeout (`idleTimeoutSeconds` in `config.mts`, default 600 — §9): park as `stalled`, `detail: idle`. On anything else thrown: log `failed`, exit 1. `answer <issue> "<text>"` re-enters step 4 on the parked session with the answer as the prompt (resumable providers), or posts the answer as an issue comment and re-enters step 3 fresh (non-resumable providers, which re-read the issue).
 
 ## 4. Planning
 
@@ -160,7 +161,7 @@ A parked record that survives a run (it always does, until resolved) keeps the c
 4. **Under-specified halt**: an issue whose file-set is not confident stops the plan and asks — drop it (and dependents) or fail so the issue can be fixed. A non-interactive run pre-decides with `--on-underspecified`.
 5. Print the plan with per-issue provenance (`--dry-run` stops here); record it on `campaign-start`.
 
-The planner is pure over injected resolvers; `prune` and `graft` reuse its layering and partition so a re-layered plan obeys the same two invariants.
+The planner is pure over injected resolvers; `prune` re-layers through it, and `graft` places with the same two invariants (after blockers, basename-disjoint) into the earliest unstarted wave.
 
 ## 5. The campaign loop
 
@@ -170,14 +171,14 @@ For each wave:
 
 1. Log `wave-start`; notify.
 2. **Drain.** Spawn a child `run` per issue as the host lease allows (§8). A park or failure frees its slot at once and never aborts a sibling. The wave is drained when every member has an outcome.
-3. **Re-admit.** If an answer landed for a parked member while the wave was still running, that member is re-queued and spawns when a slot frees; its earlier outcome is discarded. (A parked member may be re-admitted more than once; a second park is a park, not a loop.)
+3. **Re-admit.** An answer is *delivered*, not run: `answer` writes the text into the parked record and marks it answered. While a campaign process is live, it is the campaign that re-admits the member — re-queued with the answer as its prompt, spawning when a slot frees, its earlier outcome discarded — so no second process ever runs the issue beside the campaign. With no live campaign, `answer` runs the redrive (§7), which does the same. A parked member may be re-admitted more than once; a second park is a park, not a loop. At the end of the drain, a member parked as `question` or `stalled` holds the wave open for up to `parkGraceSeconds` (`grace-wait` is logged); an answer in that window re-admits it into *this* wave, expiry falls through.
 4. **Integrate** the greens (§6).
-5. **Resolve.** The wave is done only when every member is `completed`:
-   - any member `failed` → log `campaign-failed`, notify, exit non-zero;
-   - any member `parked` as `question` or `stalled` → wait up to `parkGraceSeconds` for an answer; if one lands, re-admit (step 3) and keep draining; otherwise fall through;
-   - any member still `parked` (question, stalled, conflict, or the whole wave `red-base`) → log `campaign-parked`, notify, exit non-zero;
+5. **Resolve.** The wave is done only when every member is `completed`, in this order:
+   - any member `failed` → log `campaign-failed`, notify, exit non-zero (failure outranks a red base or a park, §2.4);
+   - the merged base red → log `campaign-parked` (the wave's reason `red-base`), notify, exit non-zero;
+   - any member `parked` (question, stalled, conflict) → log `campaign-parked`, notify, exit non-zero. A conflict that strands dependents in later waves is named in the notice; `--auto-prune` prunes the stranded closure instead of stopping — it decides what happens to the *dependents*, never whether the conflicted member itself holds the wave;
    - otherwise log `wave-done` and continue.
-6. On the last wave: log `campaign-done`, notify, archive the run, exit zero.
+6. On the last wave: log `campaign-done`, notify, archive the run, exit zero. Every exit code is set by the campaign's outcome: zero only for `campaign-done`.
 
 The exit is deliberate: a paused campaign holds no container budget and no state that is not on disk, so keeping a process alive to wait for a human buys latency, not correctness. The durable path (§7) is the mechanism; the grace window (`parkGraceSeconds`, §9) is an optimization on top of it — a fast answer means the wave never parked at all — and is part of this plan, not a maybe.
 
@@ -199,20 +200,20 @@ Reconciliation, per member of the first wave that is not fully `completed`:
 | --- | --- |
 | `completed` | nothing — never respawned, never re-merged |
 | green but unmerged (answered park, conflict-parked green) | integrate it (§6) without an agent |
-| `parked(question)` with an answer | re-enter the run loop with the answer |
+| `parked(question)` / `parked(stalled)` with an answer (record marked answered) | re-enter the run loop with the answer as the prompt |
 | `parked(conflict)` after the human resolved it on the base | integrate |
-| `parked(red-base)` after a fix-forward | re-gate the base; continue |
+| `parked(red-base)` after a fix-forward | re-gate the base — even when nothing new merges — then continue |
 | `parked(crash)` | treat as unstarted if no commits, else resume the session |
-| `failed` | refused — prune it or fix it first; redrive names it |
+| `failed` | refused — prune it or fix it first; redrive names it. `redrive --override` re-runs it instead (the only meaning `--override` has on redrive) |
 | `pruned` membership | skipped |
 | `unstarted` / `grafted` | run |
 
-Then the loop continues from that wave as in §5. Redrive is idempotent against a human who answers twice or answers something a prune already removed: an answer for an issue that is not parked is reported and ignored. Crash is recognised by liveness — a campaign process that is gone with no `campaign-*` stop marker — and is reconciled to `parked(crash)` on the next read, never stored as a separate status.
+Then the loop continues from that wave as in §5. Redrive is idempotent against a human who answers twice or answers something a prune already removed: an answer for an issue that is not parked is reported and ignored. A redrive refuses to start while a campaign process for the project is live (the lease says so); an answer then only delivers (§5 step 3). Whichever process finishes the last wave archives the run. Crash is recognised by liveness — a campaign process that is gone with no `campaign-*` stop marker — and is reconciled to `parked(crash)` on the next read, never stored as a separate status.
 
 ## 8. Concurrency
 
 - **`MAX_CONCURRENT_CONTAINERS`** is a property of the host: an env var or a file in the host config dir; unset resolves to a machine-derived default, never unbounded.
-- **`containerShare: high | medium | low`** is a project's declared cut when projects contend: a floor of one per active project, a weighted share of the remainder, never preemptive, never starving. A lone project fills the ceiling.
+- **`containerShare: high | medium | low`** is a project's declared cut when projects contend: a floor of one per active project while the ceiling has a slot for each, a weighted share of the remainder, never preemptive. When more projects contend than the ceiling has slots, the heaviest are seated and the rest wait — the ceiling is never exceeded to honour the floor. A lone project fills the ceiling.
 - **The lease** is a file under the host config dir that every run reads and writes directly: what each run holds, its share, and its liveness. A run takes a container only when under its share; it releases on park, finish or death (a dead holder's containers are reclaimed on contention). A busy run drains to a smaller share as turns finish rather than being killed.
 
 The gateway is not the allocator; a gateway-spawned `answer` takes a slot like any run.
@@ -224,7 +225,7 @@ Every item is placed by three questions — scope (host / project / run), secret
 | Home | Holds |
 | --- | --- |
 | host env / host config dir | `MAX_CONCURRENT_CONTAINERS`; the registry; the lease; the host log |
-| `vetinari/config.mts` (committed, no secrets) | `project`, `image`, `baseBranch`, `gates`, `setup`, `mounts`, `agent`, `maxTurns` (default 6), `idleTimeoutSeconds` (default 600), `parkGraceSeconds` (default 0), `containerShare`, `hostEnv`, `promptFile`; the tracker seams `fetchTask`, `blockedBy`, `listByLabel`, `fileSet`; the hooks `reportFinding`, `onIssueMerged`, `postComment`; comms `destinations`, `notify` |
+| `vetinari/config.mts` (committed, no secrets) | `project`, `image`, `baseBranch`, `gates`, `setup`, `mounts`, `agent`, `maxTurns` (default 6), `idleTimeoutSeconds` (default 600), `parkGraceSeconds` (default 0), `containerShare`, `hostEnv`, `promptFile`, `branchPrefix`, `stateDir`, `setupTimeoutMs`, `toolchainProbe`, `festiveWaveNames` (cosmetic, optional); the tracker seams `fetchTask`, `blockedBy`, `listByLabel`, `fileSet`; the hooks `reportFinding`, `onIssueMerged`, `postComment`; comms `destinations`, `notify` |
 | `.vetinari.local/.env` | **the container gate** — only the agent provider's credential |
 | `.vetinari.local/host.env` | host-only secrets — this project's Telegram bot token and chat (per project; projects may share a bot or not) |
 
@@ -232,10 +233,10 @@ Invariants: the container gate is exactly one file; the gateway persists none of
 
 ## 10. Communications
 
-- A run never talks to Telegram. It writes an outbound record (§2.6) in one of five categories — `question` (interactive), `success`, `failure`, `progress`, `finding` — optionally with an event name (`progress:wave-start`).
-- Bots are per project: each project's `host.env` names its own token, and `destinations` may name more than one. The gateway is the one process that consumes each bot (Telegram allows one consumer per bot) and the sole sender, so any number of projects and bots share one gateway. Each tick it reads every registered project live: credentials from `host.env`, routing from the materialized `routing.json`, the outbox, the parked records. It announces new parks once (stamping `tgMessageId`), drains outboxes, and runs one poll loop per distinct bot.
-- A project's `notify` map routes `category` or `category:event` to a named destination `{ bot, chat, thread? }`, with `*` as default; with no map everything goes to the project's default chat. `question` must resolve to exactly one destination because the gateway watches it for the reply. A project with no credentials is skipped and its outbox simply fills.
-- A reply to a question message routes by `(bot, messageId)` to the project and issue, and the gateway shells `answer` in that project's root. `/status` and `prune <issue>` (preview, then `yes`) are the only commands.
+- A run never talks to Telegram. It writes an outbound record (§2.6) in one of four categories — `success`, `failure`, `progress`, `finding` — optionally with an event name (`progress:wave-start`). A question is a parked record; the gateway announces it under the `question` routing key.
+- One bot per project: its `host.env` names the token; `destinations` choose chats and threads on that bot. The gateway is the one process that consumes each bot (Telegram allows one consumer per bot) and the sole sender, so any number of projects and bots share one gateway. Each tick it reads every registered project live: credentials from `host.env`, routing from the materialized `routing.json`, the outbox, the parked records. It announces new parks once (stamping `tgMessageId`), drains outboxes, and runs one poll loop per distinct bot.
+- A project's `notify` map routes `category` or `category:event` to a named destination `{ chat, thread? }`, with `*` as default; with no map everything goes to the project's default chat. `question` must resolve to exactly one destination because the gateway watches it for the reply, and the park announcement goes there — not unconditionally to the default chat. A project with no credentials is skipped and its outbox simply fills.
+- A reply to a question message routes by `(bot, messageId)` to the project and issue, and the gateway shells `answer` in that project's root. `/status` and `prune <issue>` (preview, then `yes`; `prune <project> <issue>` when several projects share the bot) are the only commands.
 - Every notice uses one skeleton: header (`<emoji> <project> · <STATE> · <context>`), one signal line, and the exact recovery command where there is one.
 
 ## 11. Dashboard
@@ -246,7 +247,7 @@ The dashboard is a read-mostly HTTP server over the registry (no gateway needed)
 - **Project page**: the campaign's waves and issue chips; parked cards lifted to the top; archived runs listed beneath, opening read-only.
 - **Issue sheet**: state and reason, elapsed, the turn log (the agent's one-line summaries), and exactly the moves the reason allows: reply (question/stalled), prune, graft, redrive. Each action POSTs to a route that shells the CLI verb in the project root; nothing is decided in the server.
 - **Live tail**: per-agent activity projected from the agent's run stream, live-only.
-- **Terminal output** (the CLI's own view): human-readable lines only — plan, wave progress, stop reason, resume command. JSONL goes to the log file and to `--json`; it is never the default screen output.
+- **Terminal output** (the CLI's own view): human-readable lines only — plan, wave progress, stop reason, resume command. JSONL goes to the log file and to `--json`; it is never the default screen output. The one machine seam outside `--json` is the closure that `prune --dry-run` / `graft --dry-run` print for the dashboard's preview routes.
 - **Live updates**: the server watches each project's logs directory and pushes SSE; the client patches in place. State → visual mapping is a set of pure reducers with node tests; colour follows state by one rule set (appendix A). Nothing animates except the running dot and the live indicator.
 
 ## 12. Surface inventory — core, optional, and not ours
@@ -328,25 +329,45 @@ Deferred — wanted, not now:
 
 ## 15. Where the implementation diverges today
 
-Described by behaviour; the tracker holds the numbers (`gh issue list --label orchestrator`).
+Described by behaviour; the tracker holds the numbers (`gh issue list --label campaign:audit`). Audited 2026-08-30 against every claim in §2–§11; what is not listed here was verified to hold.
 
-- **An answer does not continue the campaign.** `answer` runs the loop standalone; its green is logged but never integrated, because integration only happens inside the campaign loop; the dashboard reads it as `completed` though it is unmerged.
-- **A failed issue does not hold its wave.** An `error` outcome lands in the wave's held set, the wave logs done, the next wave starts, and the campaign returns clean.
-- **Resume skips the parked wave.** The resume index counts a wave with any completed member as finished, so it starts past the wave whose park needs resolving.
-- **A wave-park overwrites an issue's own reason.** A `red-base` wave hides a member's `question`, so the reply box does not render.
-- **Prune and graft gate on the absence of `campaign-done`** rather than on unfinished members, so a run that ended incomplete is not adjustable.
-- **Crash is not detected** in the live read path; a dead run reads as running.
-- **Three park-reason enums, two status vocabularies, `batch` in the log.** §13.1.
-- **`campaign --resume`** is the CLI spelling of what this design calls `redrive` (the dashboard's route is already `/redrive`, shelling `vetinari redrive`).
-- **Changelog folding runs unconditionally** rather than only when the project has a `CHANGELOG.md` (§12).
-- **`demo create/remove` are CLI modes**, not `make` targets (§12).
-- **The event log carries presentation** (`festiveOffset`; `name`/`titles` on every wave event).
+**Verdicts and exits**
+
+- `campaign` and `redrive` exit zero whatever happened; only `run` and `answer` set a code, and `run` reports parked and failed as the same code.
+- A run that throws logs no `failed`; the event exists only when a campaign parent infers it from the child's exit.
+- A standalone `run` or an `answer` takes no host slot, so the ceiling and the crash-liveness probe see only campaign children; `answer` also skips the credential preflight. The sandbox cuts a new branch from `HEAD`, not `baseBranch`, and there is no one-run-per-issue preflight — git errors raw.
+
+**Redrive and resolve**
+
+- A conflict park with no stranded dependents does not hold the campaign; the wave logs `wave-done`, the run ends done, and the redrive has nothing to land.
+- A red-base wave is never re-gated on redrive: the base gate runs only when something new merged.
+- A red base outranks a failed member at resolve time, inverting §2.4.
+- An answer runs the loop itself and then redrives, instead of delivering to the record; so a live campaign's re-admit fires only after that run goes green (respawning a green issue), the redrive's own rerun carries no answer, and a second campaign process can start over a live one. The answer path never archives a finished run.
+- The reconciler has no `crash` row (a crashed member is plainly re-run, session not resumed); crash detection checks only `campaign-done`, not the other stop markers. `answer` on an unparked issue throws instead of reporting.
+- The `redrive` event carries only `fromWave`; `wave-done` still carries `held`, `clearedParked` and a `quarantined` field.
+
+**Records and states**
+
+- A conflict park writes no parked record; archive clears every parked record; the wave boundary clears held members' records — all against §2.5.
+- An unmerged green reads `completed` (and counts as merged today) instead of `running` with a pending green.
+- The state words in code are `failure` and `closed` where this design says `failed` and `completed`; the issue sheet's move rule keys on `failed` while the API ships `failure`, so a failed issue's sheet offers no moves.
+- The idle card has no last-run line when the finished campaign is still in the live log; the sheet never prints the park reason as a word.
+
+**Comms**
+
+- The `question` routing key is validated and then ignored — parks are announced to the default chat; `Destination.bot` is declared and never read.
+- Notices still say `WAVE-PARKED`, `QUARANTINE-PAUSED`, `BATCH`, `QUEUE STARTED` and give `campaign --resume` as the recovery command; the outbound `event` names (`queue-start`, `wave-parked`, …) are still the old words and are the `notify` routing keys. Notices do not share one skeleton.
+
+**Vocabulary that stopped short**
+
+- `--help` blurbs (and so `docs/reference.md`) still say campaign-plan, queue, wave-parked, quarantine; `templates/config.mts` ships `campaign --resume` and `carve` into every new project; `init`'s next-steps names one provider's key regardless of `agent`; `quarantined`/`waveParked` remain live identifiers; the `/fileset` skill calls the removed `fileset-check`; the triage skill points at the removed `.out-of-scope/`.
+- Two dashboard pages hand-author colours outside the palette and put the prune coral on the 3px edge; three elements pulse.
 
 ---
 
 ## Appendix A — dashboard colour rules
 
-Six states, one action, one accent; colour is always derived from state, never authored per element (`stateColor`/`projectRunState` in `src/dashboard-render.ts`, the roll-up in `src/dashboard-model.ts`, the one palette in `src/dashboard-assets.ts`).
+Six states, one action, one accent; colour is always derived from state, never authored per element (`stateColor` and the one palette in `src/dashboard-assets.ts`, the `cardState` roll-up in `src/dashboard-model.ts`, the pure reducers in `src/dashboard-visual-state.ts`).
 
 **The palette.** Every colour that carries meaning is one of these.
 

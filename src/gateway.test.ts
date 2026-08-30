@@ -951,7 +951,7 @@ test("drainOutbox is idempotent — a second drain re-sends nothing", async () =
 
 test("drainOutbox falls back to the project's default connection when no notify map routes it", async () => {
   const base = outboxBase();
-  enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "progress", event: "queue-start", text: "queue up" });
+  enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "progress", event: "wave-start", text: "batch up" });
 
   const { sends, send } = recordingSend();
   await drainOutbox(routed(base, { notify: undefined, destinations: undefined }), send, memoryLogger());
@@ -965,7 +965,7 @@ test("drainOutbox falls back to the project's default connection when no notify 
 
 test("drainOutbox reports the default destination — never undefined — when no notify map routes a delivered record", async () => {
   const base = outboxBase();
-  enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "progress", event: "queue-start", text: "queue up" });
+  enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "progress", event: "wave-start", text: "batch up" });
 
   const { send } = recordingSend();
   const results = await drainOutbox(routed(base, { notify: undefined, destinations: undefined }), send, memoryLogger());

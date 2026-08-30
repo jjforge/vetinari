@@ -665,7 +665,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       if ((outcomes.get(taskId) ?? "unstarted") === "unstarted") outcomes.set(taskId, "running");
       details.set(taskId, `Running in an agent slot (${e.running ?? "?"} active, ${e.left ?? "?"} waiting)`);
     } else if (e.event === "turn" && e.taskId) {
-      details.set(normalizeIssue(String(e.taskId)), `Agent turn ${e.turn ?? "?"} finished; waiting for verification/resume`);
+      details.set(normalizeIssue(String(e.taskId)), `Agent turn ${e.turn ?? "?"} finished; waiting for verification/redrive`);
     } else if (e.event === "green" && e.taskId) {
       const taskId = normalizeIssue(String(e.taskId));
       outcomes.set(taskId, "completed");

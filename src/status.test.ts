@@ -801,12 +801,12 @@ test("serveAllStatus POST /prune on confirm shells prune in the selected project
   }
 });
 
-test("serveAllStatus POST /resume shells campaign --resume in the selected project's root", async () => {
-  const configDir = join(tmpdir(), `vetinari-agg-resume-${Date.now()}`);
+test("serveAllStatus POST /redrive shells redrive in the selected project's root", async () => {
+  const configDir = join(tmpdir(), `vetinari-agg-redrive-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
   // Beta campaign-parked (greens merged, base gated red, campaign paused) — the state the
-  // Resume control acts on. Alpha is a plain running campaign, untouched.
+  // Redrive control acts on. Alpha is a plain running campaign, untouched.
   seedState(alphaDir, [
     event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["101"]], slots: 1 }),
   ]);
@@ -836,7 +836,7 @@ test("serveAllStatus POST /resume shells campaign --resume in the selected proje
   });
   const { port } = server.address() as AddressInfo;
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/resume`, {
+    const res = await fetch(`http://127.0.0.1:${port}/redrive`, {
       method: "POST",
       redirect: "manual",
       headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -845,18 +845,26 @@ test("serveAllStatus POST /resume shells campaign --resume in the selected proje
     // Redirects back to the selected project's board, like prune/answer.
     assert.equal(res.status, 303);
     assert.equal(res.headers.get("location"), "/?project=beta");
-    // Shells `campaign --resume` against the SELECTED project's own root (dumb router,
-    // ADR 0002), so the shared install continues beta's paused campaign in beta's log.
+    // Shells `redrive` against the SELECTED project's own root (dumb router, ADR 0002),
+    // so the shared install picks beta's unfinished campaign back up in beta's log.
     assert.equal(spawned.length, 1);
-    assert.deepEqual(spawned[0].args.slice(-2), ["campaign", "--resume"]);
+    assert.deepEqual(spawned[0].args.slice(-1), ["redrive"]);
     assert.equal(spawned[0].cwd, join(configDir, "beta-root"));
+    // The retired /resume path no longer routes — it 404s.
+    const gone = await fetch(`http://127.0.0.1:${port}/resume`, {
+      method: "POST",
+      redirect: "manual",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ project: "beta" }).toString(),
+    });
+    assert.equal(gone.status, 404);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
 
-test("serveAllStatus POST /resume validates the project (400 missing, 404 unknown)", async () => {
-  const configDir = join(tmpdir(), `vetinari-agg-resume-guard-${Date.now()}`);
+test("serveAllStatus POST /redrive validates the project (400 missing, 404 unknown)", async () => {
+  const configDir = join(tmpdir(), `vetinari-agg-redrive-guard-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
   seedState(betaDir, [
     event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["201"]], slots: 1 }),
@@ -876,7 +884,7 @@ test("serveAllStatus POST /resume validates the project (400 missing, 404 unknow
   const { port } = server.address() as AddressInfo;
   try {
     // Missing project → 400, matching the prune route's error contract.
-    const missing = await fetch(`http://127.0.0.1:${port}/resume`, {
+    const missing = await fetch(`http://127.0.0.1:${port}/redrive`, {
       method: "POST",
       redirect: "manual",
       headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -884,7 +892,7 @@ test("serveAllStatus POST /resume validates the project (400 missing, 404 unknow
     });
     assert.equal(missing.status, 400);
     // Unknown project → 404.
-    const unknown = await fetch(`http://127.0.0.1:${port}/resume`, {
+    const unknown = await fetch(`http://127.0.0.1:${port}/redrive`, {
       method: "POST",
       redirect: "manual",
       headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -1131,7 +1139,7 @@ test("serveAllStatus POST /graft shells graft directly for a clean batch — no 
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ ids: "640 655", project: "beta" }).toString(),
     });
-    // Redirects back to the selected project's board, like prune/resume/answer.
+    // Redirects back to the selected project's board, like prune/redrive/answer.
     assert.equal(res.status, 303);
     assert.equal(res.headers.get("location"), "/?project=beta");
     // Shells the variadic `graft <ids…>` against the SELECTED project's own root — so

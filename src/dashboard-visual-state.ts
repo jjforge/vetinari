@@ -14,7 +14,11 @@
  * ships. Every function shipped this way (`dotClass`, `tallyDotClass`, `freezeIntent`)
  * is a self-contained `function` declaration — no imports, no closures over module
  * scope, browser-safe JS only — so `.toString()` yields a runnable definition.
+ *
+ * `reasonWord` is server-side only (the status line and the dashboard read it), so it may
+ * lean on the type-only `ParkReason` import — erased at runtime, it never rides a `.toString()`.
  */
+import type { ParkReason } from "./state.ts";
 
 /**
  * The state-class fragment a status dot carries — the status verbatim today (a
@@ -24,6 +28,16 @@
  */
 export function dotClass(status: string): string {
   return status;
+}
+
+/**
+ * A park reason's display word (design §2.3): the single mapping from the one `ParkReason`
+ * enum to the word every surface prints beside `parked`. Driven off the enum, never a
+ * reason-string regex — so a reason is spelled one way in the status line and the dashboard
+ * alike. `red-base` reads as two words; the rest are their enum value verbatim.
+ */
+export function reasonWord(reason: ParkReason): string {
+  return reason === "red-base" ? "red base" : reason;
 }
 
 /**

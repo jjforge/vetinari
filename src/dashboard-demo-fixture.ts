@@ -238,7 +238,7 @@ const DEMO_SPECS: DemoProjectSpec[] = [
     live: (at) => [
       { ts: at(0), event: "campaign-start", waves: [["501", "502"]], name: "nightly ETL", titles: TITLES_COMPLETED },
       { ts: at(1), event: "wave-start", index: 0, tasks: ["501", "502"] },
-      { ts: at(2), event: "turn", taskId: "501", turn: 0, summary: "Extract job reads the change-feed cursor and resumes from the last watermark." },
+      { ts: at(2), event: "turn", taskId: "501", turn: 0, summary: "Extract job reads the change-feed cursor and continues from the last watermark." },
       { ts: at(2), event: "turn", taskId: "502", turn: 0, summary: "Load step upserts into the warehouse in batches, idempotent on the natural key." },
       { ts: at(4), event: "green", taskId: "501", branch: "agent/501" },
       { ts: at(4), event: "green", taskId: "502", branch: "agent/502" },

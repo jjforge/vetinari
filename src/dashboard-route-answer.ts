@@ -2,7 +2,7 @@ import { listProjects } from "./registry.ts";
 import { readBody, type RouteHandler } from "./dashboard-http.ts";
 
 /**
- * `POST /answer` — a parked issue's reply. The resume runs in the project's own
+ * `POST /answer` — a parked issue's reply. The redrive runs in the project's own
  * root so `answer` loads that project's config and gates — the same shell-out the
  * gateway's reply router uses (ADR 0003). Redirects back to that project's board.
  */

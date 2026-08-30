@@ -2452,7 +2452,7 @@ test("buildStatus adds rough activity details for issue hover", () => {
   assert.deepEqual(
     status.waves[0].issues.map((i) => [i.issueNumber, i.detail]),
     [
-      ["101", "Agent turn 2 finished; waiting for verification/resume"],
+      ["101", "Agent turn 2 finished; waiting for verification/redrive"],
       ["102", "Completed on agent/102"],
       ["103", "Parked: question"],
     ],

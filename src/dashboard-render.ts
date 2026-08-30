@@ -87,7 +87,7 @@ export function formatStatusText(status: CampaignStatus): string {
   if (status.parked.length) {
     lines.push("", `⏸ ${status.parked.length} awaiting your reply:`);
     for (const p of status.parked) lines.push(`  #${p.issueNumber} — ${p.reason}`);
-    lines.push("", "Reply to a parked question message to answer and resume it.");
+    lines.push("", "Reply to a parked question message to answer and redrive it.");
   }
 
   return lines.join("\n");
@@ -231,35 +231,35 @@ const renderWaves = (status: CampaignStatus, prune: boolean, interactive: boolea
 };
 
 /**
- * Whether the campaign is wave-parked — a red merged base paused it, so a held issue
- * carries the `red-base` park reason (ADR 0019). The Resume control below surfaces only
+ * Whether the campaign is parked on a red merged base — the combined-gate hold that
+ * carries the `red-base` park reason (ADR 0019). The Redrive control below surfaces only
  * in that state, keyed on the reason rather than a distinct wave word.
  */
-const isWaveParked = (status: CampaignStatus) => status.waves.some((wave) => wave.issues.some((issue) => issue.reason === "red-base"));
+const isRedBaseParked = (status: CampaignStatus) => status.waves.some((wave) => wave.issues.some((issue) => issue.reason === "red-base"));
 
 /** Whether any issue is held on a merge conflict — the `conflict` park reason (ADR 0019),
  * a passed green pulled out of integration awaiting a manual resolve. Gates the note. */
-const hasQuarantined = (status: CampaignStatus) => status.waves.some((wave) => wave.issues.some((issue) => issue.reason === "conflict"));
+const hasConflict = (status: CampaignStatus) => status.waves.some((wave) => wave.issues.some((issue) => issue.reason === "conflict"));
 
 /**
- * The wave-park Resume control (#171): when a campaign is paused on a red merged base,
- * a human fixes forward and taps Resume, which POSTs `/resume` for this project — the
- * aggregated dumb router (ADR 0002) shells `campaign --resume` in the project's own
- * root. Resume is non-destructive and project-scoped, so — unlike prune — it needs no
- * preview/confirm gate: a single POST. Emitted only on the interactive aggregated page
- * (`prune`, the same page option prune rides) and only while wave-parked.
+ * The red-base Redrive control (#171): when a campaign is paused on a red merged base,
+ * a human fixes forward and taps Redrive, which POSTs `/redrive` for this project — the
+ * aggregated dumb router (ADR 0002) shells `redrive` in the project's own root. Redrive
+ * is non-destructive and project-scoped, so — unlike prune — it needs no preview/confirm
+ * gate: a single POST. Emitted only on the interactive aggregated page (`prune`, the same
+ * page option prune rides) and only while parked on a red base.
  */
-const renderResumeControl = (status: CampaignStatus) =>
-  `<section class="resume-banner"><div class="resume-banner-text"><strong>Campaign paused</strong> — a wave's merged base gated red, so its greens were kept and the campaign paused for a human. Fix forward, then resume.</div><form method="post" action="/resume" class="resume-form"><input type="hidden" name="project" value="${escapeHtml(status.project)}" /><button type="submit" class="resume-btn">Resume campaign</button></form></section>`;
+const renderRedriveControl = (status: CampaignStatus) =>
+  `<section class="redrive-banner"><div class="redrive-banner-text"><strong>Campaign paused</strong> — a wave's merged base gated red, so its greens were kept and the campaign paused for a human. Fix forward, then redrive.</div><form method="post" action="/redrive" class="redrive-form"><input type="hidden" name="project" value="${escapeHtml(status.project)}" /><button type="submit" class="redrive-btn">Redrive campaign</button></form></section>`;
 
 /**
- * The quarantine informational affordance (#171): a merge conflict quarantined a passed
- * issue out of integration (ADR 0013). There is deliberately no un-quarantine CLI to
- * shell, so this is a note only — it points the operator at resolve-then-resume, with no
+ * The merge-conflict informational affordance (#171): a merge conflict held a passed
+ * issue out of integration (ADR 0013). There is deliberately no conflict-release CLI to
+ * shell, so this is a note only — it points the operator at resolve-then-redrive, with no
  * action route or button of its own.
  */
-const renderQuarantineNote = () =>
-  `<section class="quarantine-note"><strong>Issue held on a merge conflict</strong> — a passed green was kept out of integration. Resolve the conflict, then resume the campaign (the Resume control above, or <code>campaign --resume</code> in the project root).</section>`;
+const renderConflictNote = () =>
+  `<section class="conflict-note"><strong>Issue held on a merge conflict</strong> — a passed green was kept out of integration. Resolve the conflict, then redrive the campaign (the Redrive control above, or <code>vetinari redrive</code> in the project root).</section>`;
 
 /**
  * The Graft affordance (#168, reworked to mockup 1a in #202). Where prune prunes an
@@ -282,7 +282,7 @@ const renderQuarantineNote = () =>
 const renderGraftInline = (status: CampaignStatus) =>
   isGraftable(status)
     ? `<form method="post" action="/graft" class="graft-inline" data-graft><input type="text" name="ids" class="graft-ids" placeholder="graft issue ids" autocomplete="off" aria-label="Graft issue ids" data-graft-ids /><input type="hidden" name="project" value="${escapeHtml(status.project)}" /><button type="submit" class="graft-btn" data-graft-submit disabled>graft</button><span class="graft-error" data-graft-error hidden></span></form>`
-    : `<div class="graft-inline graft-refused" data-graft-refused><input type="text" class="graft-ids" placeholder="graft issue ids" aria-label="Graft issue ids" disabled /><button type="button" class="graft-btn" disabled>graft</button><span class="graft-refusal">Campaign is on its final wave — nothing left to layer into. Grafting resumes when a new campaign starts (<code>vetinari campaign</code>).</span></div>`;
+    : `<div class="graft-inline graft-refused" data-graft-refused><input type="text" class="graft-ids" placeholder="graft issue ids" aria-label="Graft issue ids" disabled /><button type="button" class="graft-btn" disabled>graft</button><span class="graft-refusal">Campaign is on its final wave — nothing left to layer into. Grafting is available again when a new campaign starts (<code>vetinari campaign</code>).</span></div>`;
 
 /** Whether the campaign can still accept a graft: it is live-or-resumable while any wave
  * is not yet closed. A wholly-closed campaign has reached its final wave — nothing left to
@@ -495,7 +495,7 @@ export function tailFresh(
 /**
  * Append fresh lines to the tail buffer (#124). While following, the buffer is capped at
  * `cap` (oldest discarded) so it tracks a bounded newest-window; while paused it grows
- * past the cap so a backlog that piles up survives to be revealed on resume. Pure and
+ * past the cap so a backlog that piles up survives to be revealed on unpause. Pure and
  * self-contained — shipped to the browser via `.toString()`.
  */
 export function tailAppend(buffer: TailRow[], fresh: TailRow[], live: boolean, cap: number): TailRow[] {
@@ -515,17 +515,14 @@ export function feedKindLabel(kind: string): string {
     {
       green: "issue.merged",
       parked: "issue.parked",
-      quarantined: "issue.quarantined",
-      "wave-parked": "wave.parked",
       prune: "issue.pruned",
       graft: "issue.grafted",
-      "campaign-batch": "wave.started",
-      "campaign-batch-done": "wave.closed",
+      "wave-start": "wave.started",
+      "wave-done": "wave.closed",
       "campaign-start": "campaign.started",
-      "queue-start": "campaign.started",
+      "campaign-parked": "campaign.parked",
       "campaign-done": "campaign.closed",
-      "queue-done": "campaign.closed",
-      "campaign-halt": "campaign.halted",
+      "campaign-failed": "campaign.failed",
       turn: "agent.turn",
     }[kind] ?? kind
   );
@@ -975,7 +972,7 @@ export const renderAggregatedGraftRejection = (project: string, closure: Structu
  * prunable), and on the campaign page only when its prune controls are enabled.
  */
 export const issueDetailSheetMarkup = (prune: boolean) =>
-  `<div id="issue-detail" class="issue-detail" role="dialog" aria-modal="true" aria-live="polite" hidden><div class="issue-detail-sheet"><header class="issue-detail-header"><div class="issue-detail-head-main"><span class="issue-detail-status"><span class="dot"></span><span class="issue-detail-num"></span> <span class="issue-detail-statuslabel"></span></span><h2 class="issue-detail-title"></h2><p class="issue-detail-context"></p></div><button type="button" id="issue-detail-close" class="issue-detail-close" aria-label="Dismiss">&times;</button></header><div class="issue-detail-meta"><div class="meta-tile"><span class="meta-label">Turns</span><span class="meta-value" id="issue-detail-turns"></span></div><div class="meta-tile meta-tile-path" id="issue-detail-worktree-tile" hidden><span class="meta-label">Worktree</span><span class="meta-value meta-value-path" id="issue-detail-worktree"></span></div></div><h3 class="turn-log-heading">Agent turns</h3><ol class="turn-log" id="issue-detail-turnlog"></ol><div id="issue-detail-reply" class="issue-detail-reply" hidden><h3 class="reply-heading">PARKED — NEEDS YOUR ANSWER</h3><p class="reply-question" id="reply-question"></p><div class="reply-options" id="reply-options"></div><form method="post" action="/answer" id="reply-form"><input type="hidden" name="taskId" value="" /><input type="hidden" name="project" value="" /><textarea name="text" id="reply-text" placeholder="Type your reply…"></textarea></form></div><div class="sheet-actions"><button type="submit" form="reply-form" id="reply-resume" class="reply-resume" hidden>Resume</button>${
+  `<div id="issue-detail" class="issue-detail" role="dialog" aria-modal="true" aria-live="polite" hidden><div class="issue-detail-sheet"><header class="issue-detail-header"><div class="issue-detail-head-main"><span class="issue-detail-status"><span class="dot"></span><span class="issue-detail-num"></span> <span class="issue-detail-statuslabel"></span></span><h2 class="issue-detail-title"></h2><p class="issue-detail-context"></p></div><button type="button" id="issue-detail-close" class="issue-detail-close" aria-label="Dismiss">&times;</button></header><div class="issue-detail-meta"><div class="meta-tile"><span class="meta-label">Turns</span><span class="meta-value" id="issue-detail-turns"></span></div><div class="meta-tile meta-tile-path" id="issue-detail-worktree-tile" hidden><span class="meta-label">Worktree</span><span class="meta-value meta-value-path" id="issue-detail-worktree"></span></div></div><h3 class="turn-log-heading">Agent turns</h3><ol class="turn-log" id="issue-detail-turnlog"></ol><div id="issue-detail-reply" class="issue-detail-reply" hidden><h3 class="reply-heading">PARKED — NEEDS YOUR ANSWER</h3><p class="reply-question" id="reply-question"></p><div class="reply-options" id="reply-options"></div><form method="post" action="/answer" id="reply-form"><input type="hidden" name="taskId" value="" /><input type="hidden" name="project" value="" /><textarea name="text" id="reply-text" placeholder="Type your reply…"></textarea></form></div><div class="sheet-actions"><button type="submit" form="reply-form" id="reply-redrive" class="reply-redrive" hidden>Redrive</button>${
     prune
       ? `<div id="prune-panel" class="prune-panel" hidden><button type="button" id="prune-start" class="prune-start">Prune</button><span id="prune-explainer" class="prune-explainer" hidden>Removes this issue and everything blocked by it from the running campaign; merged and mergeable work is kept.</span><form method="post" action="/prune" id="prune-confirm" class="prune-confirm" hidden><span class="prune-confirm-text"></span><input type="hidden" name="taskId" value="" /><input type="hidden" name="project" value="" /><input type="hidden" name="confirm" value="1" /><button type="submit" class="prune-confirm-btn">Confirm</button><button type="button" id="prune-cancel" class="prune-cancel">Cancel</button></form><span id="prune-note" class="prune-note"></span></div>`
       : ""
@@ -1213,7 +1210,7 @@ ${REPO_DROPDOWN_SCRIPT}
     feedFooter.textContent = feedLoaded && !feedError ? (view.visible + " of " + view.total + " event" + (view.total === 1 ? "" : "s") + " · " + (view.following ? "following" : "paused")) : "";
     // Newest-on-top (#195), so the backlog affordance points up to the freshest events.
     if (view.backlog > 0) { feedBacklog.hidden = false; feedBacklog.textContent = "↑ " + view.backlog + " new event" + (view.backlog === 1 ? "" : "s"); } else { feedBacklog.hidden = true; }
-    feedPlay.dataset.following = String(feedLive); feedPlay.setAttribute("aria-label", feedLive ? "Pause" : "Resume");
+    feedPlay.dataset.following = String(feedLive); feedPlay.setAttribute("aria-label", feedLive ? "Pause" : "Play");
     feedDot.dataset.state = feedLive ? "live" : "idle";
     feedSummary.textContent = feedLoaded && !feedError ? (view.total + " event" + (view.total === 1 ? "" : "s")) : "";
     if (feedLive) feedBody.scrollTop = 0;
@@ -1235,7 +1232,7 @@ ${REPO_DROPDOWN_SCRIPT}
   }
   function feedIngest(entries) {
     const res = feedFresh(entries, feedSeen); feedSeen = res.seen;
-    // Grow past the cap while paused so a piling backlog survives to be revealed on resume;
+    // Grow past the cap while paused so a piling backlog survives to be revealed on unpause;
     // following keeps the buffer bounded to a recent window.
     if (res.fresh.length) feedBuffer = tailAppend(feedBuffer, res.fresh, feedLive, FEED_FOLLOW_CAP);
     feedRenderMenu();
@@ -1500,16 +1497,16 @@ ${HOST_LOG_STYLES}
 ${ISSUE_DETAIL_SHEET_STYLES}
   .prune-fallback form { display: inline; }
   form button { padding: .5rem .8rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: #04110f; cursor: pointer; font-weight: 700; }
-  /* The wave-park Resume banner (#171): an attention-amber left edge (the human-action
-     queue, §2) with the Resume action pushed to the right. The button is a control, so it
+  /* The red-base Redrive banner (#171): an attention-amber left edge (the human-action
+     queue, §2) with the Redrive action pushed to the right. The button is a control, so it
      takes the primary accent, never a state colour. */
-  .resume-banner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; background: var(--color-card); border: 1px solid var(--color-secondary); border-left: 3px solid var(--color-yellow); border-radius: var(--border-radius-medium); padding: .8rem 1rem; margin: 1rem 0; box-shadow: 0 8px 22px #0004; }
-  .resume-banner-text { color: var(--color-text-light); }
-  .resume-form { margin: 0; }
-  .resume-btn { padding: .5rem .8rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: #04110f; cursor: pointer; font-weight: 700; }
-  /* The quarantine note (#171) is informational only — same amber edge, no action. */
-  .quarantine-note { background: var(--color-card); border: 1px solid var(--color-secondary); border-left: 3px solid var(--color-yellow); border-radius: var(--border-radius-medium); padding: .8rem 1rem; margin: 1rem 0; color: var(--color-text-light); box-shadow: 0 8px 22px #0004; }
-  .quarantine-note code { color: var(--color-text); }
+  .redrive-banner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; background: var(--color-card); border: 1px solid var(--color-secondary); border-left: 3px solid var(--color-yellow); border-radius: var(--border-radius-medium); padding: .8rem 1rem; margin: 1rem 0; box-shadow: 0 8px 22px #0004; }
+  .redrive-banner-text { color: var(--color-text-light); }
+  .redrive-form { margin: 0; }
+  .redrive-btn { padding: .5rem .8rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: #04110f; cursor: pointer; font-weight: 700; }
+  /* The merge-conflict note (#171) is informational only — same amber edge, no action. */
+  .conflict-note { background: var(--color-card); border: 1px solid var(--color-secondary); border-left: 3px solid var(--color-yellow); border-radius: var(--border-radius-medium); padding: .8rem 1rem; margin: 1rem 0; color: var(--color-text-light); box-shadow: 0 8px 22px #0004; }
+  .conflict-note code { color: var(--color-text); }
   /* The Graft affordance (1a, #202): a quiet input riding the campaign summary line,
      pushed to the right so the meta text keeps the left. Unobtrusive at rest — a dim
      placeholder and a greyed button — it wakes to the teal product accent once ids are
@@ -1581,11 +1578,11 @@ ${ISSUE_DETAIL_SHEET_STYLES}
 <body>
 ${renderTopBar(opts.projects?.length ? renderRepoDropdown(opts.projects, opts.selected ?? status.project) : `<h1>${escapeHtml(status.project)}</h1>`, renderHostLog())}
 <div id="live-region">${
-  // The wave-park Resume control and the quarantine note are aggregated-page actions
+  // The red-base Redrive control and the merge-conflict note are aggregated-page actions
   // (the same `prune` page option gates the interactive shell-out affordances), each
   // gated on its attention state so it appears only when there is something to act on.
-  opts.prune && isWaveParked(status) ? renderResumeControl(status) : ""
-}${opts.prune && hasQuarantined(status) ? renderQuarantineNote() : ""}${
+  opts.prune && isRedBaseParked(status) ? renderRedriveControl(status) : ""
+}${opts.prune && hasConflict(status) ? renderConflictNote() : ""}${
   status.parked.length
     ? `<section class="parked-issues"><h2>Parked · <span class="parked-count">${status.parked.length}</span></h2>${status.parked
         .map(

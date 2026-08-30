@@ -16,6 +16,7 @@
   "scripts": {
     "vetinari": "tsx ./src/cli.mts",
     "typecheck": "tsc --noEmit",
+    "gen-reference": "tsx ./scripts/gen-reference.ts",
     "check-contract": "tsx ./src/check-contract.mts"
   },
   "dependencies": {

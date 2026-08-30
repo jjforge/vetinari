@@ -150,6 +150,39 @@ export const MODES: Mode[] = [
   },
 ];
 
+/**
+ * Marker comments bracketing the generated modes table inside `docs/reference.md`.
+ * `scripts/gen-reference.ts` rewrites the region between them from `MODES`, and
+ * `help.test.ts` pins the region on disk to `renderModesReference()` — so the
+ * reference's mode list is generated, never hand-kept, and the drift test that
+ * once guarded the README "## Modes" table now guards this section (design §13.3).
+ */
+export const MODES_REFERENCE_BEGIN =
+  "<!-- BEGIN GENERATED MODES — from src/help.ts (MODES); regenerate with `npm run gen-reference`, do not hand-edit -->";
+export const MODES_REFERENCE_END = "<!-- END GENERATED MODES -->";
+
+/** Escape the markdown-table cell delimiter so a blurb's `a | b` keeps its cell. */
+function escapeCell(text: string): string {
+  return text.replace(/\|/g, "\\|");
+}
+
+/**
+ * Render the `docs/reference.md` "CLI modes" table from `MODES`, wrapped in the
+ * marker comments so the generator can rewrite exactly this block. Each row is
+ * `| \`signature\` | blurb |`, the blurb the same gloss `--help` shows, with its
+ * pipes escaped so the table survives.
+ */
+export function renderModesReference(): string {
+  const rows = MODES.map(
+    (m) => `| \`${m.signature}\` | ${escapeCell(m.blurb)} |`,
+  ).join("\n");
+  return `${MODES_REFERENCE_BEGIN}
+| Mode | What it does |
+| --- | --- |
+${rows}
+${MODES_REFERENCE_END}`;
+}
+
 /** The heading `--help` opens with. */
 const HEADER = "vetinari <mode> [args]";
 

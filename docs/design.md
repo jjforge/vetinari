@@ -330,26 +330,12 @@ Deferred — wanted, not now:
 
 ## 15. Where the implementation diverges today
 
-Described by behaviour; the tracker holds the numbers (`gh issue list --label campaign:audit`). Audited 2026-08-30 against every claim in §2–§11; what is not listed here was verified to hold.
+Described by behaviour; the tracker holds the numbers (`gh issue list --label campaign:audit`). Re-audited 2026-08-31 claim by claim against §2–§11 after the audit campaign landed; everything not listed here was verified to hold, including the whole of §5–§7 resolve/redrive, §10 comms, §11 dashboard and appendix A.
 
-**Verdicts and exits**
-
-- `campaign` and `redrive` exit zero whatever happened; only `run` and `answer` set a code, and `run` reports parked and failed as the same code.
-- A run that throws logs no `failed`; the event exists only when a campaign parent infers it from the child's exit.
-
-**Records and states**
-
-- The state words in code are `failure` and `closed` where this design says `failed` and `completed`; the issue sheet's move rule keys on `failed` while the API ships `failure`, so a failed issue's sheet offers no moves.
-- The idle card has no last-run line when the finished campaign is still in the live log; the sheet never prints the park reason as a word.
-
-**Comms**
-
-- Notices still say `WAVE-PARKED`, `QUARANTINE-PAUSED`, `BATCH` in their text and give `campaign --resume` as the recovery command; the outbound `event` names (the `notify` routing keys) are the settled §2.1 words, but the notice *wording* has not caught up and notices do not share one skeleton.
-
-**Vocabulary that stopped short**
-
-- `--help` blurbs (and so `docs/reference.md`) still say campaign-plan, queue, wave-parked, quarantine; `templates/config.mts` ships `campaign --resume` and `carve` into every new project; `init`'s next-steps names one provider's key regardless of `agent`; `quarantined`/`waveParked` remain live identifiers; the `/fileset` skill calls the removed `fileset-check`; the triage skill points at the removed `.out-of-scope/`.
-- Two dashboard pages hand-author colours outside the palette and put the prune coral on the 3px edge; three elements pulse.
+- **A throw before the sandbox logs no `failed`.** The run loop's catch covers the container's life; a worktree-preflight or tracker-fetch throw exits 1 with a stack trace and leaves no verdict in the log.
+- **A crash redrive never resumes the session.** §7 says "treat as unstarted if no commits, else resume the session"; the reconciler re-runs a crashed member fresh on its branch in every case, and a code comment overstates this.
+- **The host lease has no kind**, so the campaign-liveness guard reads a standalone `run`'s lease as a live campaign: a second `run`, an `answer`, or a `redrive` for the same project is refused with a message about a campaign that does not exist.
+- **The Epic and pending-verify exclusions are reported on stderr**, as resolver edge logs, rather than inside the plan's provenance text (§4 says the provenance names them).
 
 ---
 

@@ -54,7 +54,7 @@ export function reasonWord(reason: ParkReason): string {
  *   a `completed` one is banked and offers nothing.
  * - An archived (read-only) issue offers nothing — no move mutates a finished run's log.
  *
- * A legacy park with no reason reads as an answerable question (mirroring `renderReply`).
+ * A legacy park with no reason reads as an answerable question (mirroring `renderMoves`).
  * Self-contained and browser-safe: single-sourced into the sheet script via `.toString()`,
  * so the node test asserts the very function the browser runs. The `reason` param is a plain
  * string here (the `ParkReason` values) so the shipped `.toString()` carries no type import.

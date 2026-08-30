@@ -37,7 +37,7 @@ test("the issue-detail sheet markup, CSS, and script are defined once and shared
   assert.ok(campaignPrune.includes(ISSUE_DETAIL_SHEET_STYLES));
 
   // Script: one definition of the sheet behaviour (openIssue/renderDetail/
-  // renderReply/closeSheet/prune wiring), included by both pages verbatim.
+  // renderMoves/closeSheet/prune wiring), included by both pages verbatim.
   assert.ok(
     ISSUE_DETAIL_SHEET_SCRIPT.includes(
       "const openIssue = async (project, issue, prunable, run)",

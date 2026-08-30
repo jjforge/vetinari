@@ -253,7 +253,7 @@ export const ISSUE_DETAIL_SHEET_STYLES = `  .prune-panel { display: flex; align-
 /**
  * The issue-detail sheet's client script — one definition included by both pages
  * (previously hand-synced, #76). It wires the sheet itself: the element refs,
- * `openIssue`/`renderDetail`/`renderReply`, `closeSheet`, the foot's Redrive/Prune
+ * `openIssue`/`renderDetail`/`renderMoves`, `closeSheet`, the foot's Reply/Redrive/Prune
  * visibility, and the prune preview→confirm flow. Each page adds its own trigger
  * wiring around this (the campaign page's issue chips + parked cards; the
  * landing's parked-queue rows), which is what calls `openIssue`.

@@ -993,11 +993,22 @@ export const GRAFT_SCRIPT = `  function graftVerdicts(closure) {
       } catch {}
       sync();
     });
+    // The POST shells graft for seconds; while it is in flight the control must read as
+    // working, not as an at-rest disabled graft that was never accepted (#327). Entering
+    // flight sets aria-busy on the form (a non-visual signal, not colour/text-only) and
+    // relabels the button grafting… held disabled — distinct from the at-rest disabled
+    // state. clearFlight undoes it; sync() then sets the disabled state from the ids.
+    let busy = false;
+    const enterFlight = () => { form.setAttribute("aria-busy", "true"); submit.textContent = "grafting…"; submit.disabled = true; };
+    const clearFlight = () => { form.removeAttribute("aria-busy"); submit.textContent = "graft"; };
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
-      if (!typed()) return;
+      // A submit while a graft is already in flight is a no-op — no second graft is shelled
+      // against the same ids (the button is held disabled too, this guards the Enter path).
+      if (busy || !typed()) return;
+      busy = true;
       clearErr();
-      submit.disabled = true;
+      enterFlight();
       try {
         const res = await fetch("/graft", {
           method: "POST",
@@ -1011,13 +1022,18 @@ export const GRAFT_SCRIPT = `  function graftVerdicts(closure) {
           const list = doc.querySelector("[data-graft-verdicts]");
           invalid = true;
           showErr(list ? [...list.querySelectorAll("li")].map((li) => li.textContent).join("  ·  ") : "Nothing grafted — fix these ids.");
-          sync();
           return;
         }
         // Success — the graft confirms on the wave; clear the input back to rest.
-        ids.value = ""; invalid = false; sync();
+        ids.value = ""; invalid = false;
       } catch {
         showErr("Couldn't reach graft — is a campaign still running?");
+      } finally {
+        // Clears the in-flight state on every exit path (success, 422, thrown/network error).
+        // Tolerates its own nodes being detached by a mid-flight soft-refresh — setAttribute/
+        // textContent/toggleAttribute on a detached node never throw, so no stuck grafting… state.
+        busy = false;
+        clearFlight();
         sync();
       }
     });

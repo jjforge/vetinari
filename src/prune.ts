@@ -19,6 +19,7 @@ import type { HostBudget } from "./host-slots.ts";
 import { campaignSettled, campaignStarted, reduceCampaign } from "./dashboard-model.ts";
 import { readEventLog } from "./event-log.ts";
 import { clearParkedForTasks, enqueueOutbound } from "./state.ts";
+import { notice, type Notice } from "./notice.ts";
 // `campaign` is referenced by type only and lazy-imported in `defaultPruneDeps`
 // (see below): a static value import would close the `modes → prune → modes`
 // cycle at module-eval time and hit `modes`'s `defaultCampaignDeps` before its
@@ -177,7 +178,7 @@ export interface QuarantineImpact {
 }
 
 /**
- * Where a redrive (`campaign --resume`) picks up: the first wave whose fold is not
+ * Where a `redrive` picks up: the first wave whose fold is not
  * `completed` — the first wave that did not close (design §7). A wave closes only when
  * every member merged and it logged a `campaign-batch-done`; a wave holding a parked,
  * failed, running, or green-but-unmerged member never closed, so *that* wave is where a
@@ -329,11 +330,7 @@ export async function runPrune(
 
     // A prune had no notification before E4 — emit a progress:prune record so it
     // is announced and routable like any other outbound message (ADR 0002).
-    deps.enqueueOutbound(cfg, {
-      category: "progress",
-      event: "prune",
-      text: pruneLaunchNote(cfg.project, tgt, removed, remaining),
-    });
+    deps.enqueueOutbound(cfg, pruneLaunchNotice(cfg.project, tgt, removed, remaining));
     if (!remaining.length) return { mode: "launch", target: tgt, removed, remaining, launched: false };
     await deps.launchCampaign(cfg, remaining, opts.host!);
     return { mode: "launch", target: tgt, removed, remaining, launched: true };
@@ -383,11 +380,7 @@ export async function runPrune(
   // Append the prune event — the running loop re-reads it at the next wave
   // boundary; `removed` is the closure so the fold replays the same rule.
   cfg.log.log("prune", { target: tgt, removed, dropped });
-  deps.enqueueOutbound(cfg, {
-    category: "progress",
-    event: "prune",
-    text: pruneRunningNote(cfg.project, tgt, dropped, kept, remaining),
-  });
+  deps.enqueueOutbound(cfg, pruneRunningNotice(cfg.project, tgt, dropped, kept, remaining));
   return {
     mode: "prune",
     target: tgt,
@@ -404,30 +397,46 @@ export async function runPrune(
 const renderWaves = (waves: string[][], empty: string) =>
   waves.length ? waves.map((w) => `"${w.join(" ")}"`).join(" ") : empty;
 
-/** The `progress:prune` note for the running-campaign prune path. */
-function pruneRunningNote(
+/** The `progress:prune` notice for the running-campaign prune path (§10 skeleton). */
+function pruneRunningNotice(
   project: string,
   tgt: string,
   dropped: string[],
   kept: string[],
   remaining: string[][],
-): string {
-  return (
-    `✂️ ${project} pruned #${tgt} from the running campaign — ` +
+): Notice {
+  const signal =
+    `pruned #${tgt} — ` +
     (dropped.length ? `dropped ${dropped.map((i) => `#${i}`).join(", ")}` : "nothing to drop") +
     (kept.length ? ` (kept banked ${kept.map((i) => `#${i}`).join(", ")})` : "") +
-    `. Remaining: ${renderWaves(remaining, "nothing left to run")}.`
-  );
+    `. Remaining: ${renderWaves(remaining, "nothing left to run")}.`;
+  return notice({
+    emoji: "✂️",
+    project,
+    state: "PRUNED",
+    context: "running campaign",
+    signal,
+    category: "progress",
+    event: "prune",
+  });
 }
 
-/** The `progress:prune` note for the fresh-launch path. */
-function pruneLaunchNote(project: string, tgt: string, removed: string[], remaining: string[][]): string {
+/** The `progress:prune` notice for the fresh-launch path (§10 skeleton). */
+function pruneLaunchNotice(project: string, tgt: string, removed: string[], remaining: string[][]): Notice {
   const dependents = removed.filter((id) => id !== tgt);
-  return (
-    `✂️ ${project} pruned #${tgt} — dropped ${removed.map((i) => `#${i}`).join(", ")}` +
+  const signal =
+    `pruned #${tgt} — dropped ${removed.map((i) => `#${i}`).join(", ")}` +
     (dependents.length ? ` (dependents: ${dependents.map((i) => `#${i}`).join(", ")})` : "") +
-    `. Remaining: ${renderWaves(remaining, "nothing left to run")}.`
-  );
+    `. Remaining: ${renderWaves(remaining, "nothing left to run")}.`;
+  return notice({
+    emoji: "✂️",
+    project,
+    state: "PRUNED",
+    context: "reduced campaign",
+    signal,
+    category: "progress",
+    event: "prune",
+  });
 }
 
 export async function computePrune(waves: string[][], target: string, blockedByOf: BlockedByOf): Promise<PruneResult> {

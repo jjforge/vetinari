@@ -1,18 +1,18 @@
 /**
  * The single source of truth for the CLI's public mode list. `--help` (the
- * `USAGE` in `cli.mts`) is rendered from `MODES` by `renderUsage`, and a doc test
- * (`help.test.ts`) cross-checks the README "## Modes" table against the same list
- * — so the two hand-maintained command references an agent reads (README in its
- * worktree, `--help` on the host) can no longer drift apart (issue #167). Add,
- * remove or rename a mode here and both surfaces move together, or the gate fails.
+ * `USAGE` in `cli.mts`) is rendered from `MODES` by `renderUsage`, and
+ * `docs/reference.md`'s "CLI modes" table is generated from the same list by
+ * `npm run gen-reference` — with a doc test (`help.test.ts`) pinning the on-disk
+ * table to `renderModesReference()`, so `--help` and the reference can no longer
+ * drift apart (design §13.3). Add, remove or rename a mode here, regenerate, and
+ * both surfaces move together, or the gate fails.
  *
  * Each entry is one row: `signature` is the exact invocation shown as the mode's
- * heading and — verbatim — the README table's first column; `blurb` is the gloss
- * `--help` prints under it. The README keeps its own richer per-row prose; only
- * the set of signatures is pinned across the two.
+ * heading and — verbatim — the reference table's first column; `blurb` is the
+ * gloss `--help` prints under it and the reference table's second column.
  */
 export interface Mode {
-  /** The exact invocation, e.g. `campaign --resume`. Matched against the README. */
+  /** The exact invocation, e.g. `campaign --dry-run`. */
   signature: string;
   /** The one-line-ish gloss `--help` renders; word-wrapped by `renderUsage`. */
   blurb: string;
@@ -37,7 +37,7 @@ export const MODES: Mode[] = [
     signature:
       'campaign [--dry-run] [--override] [--name "…"] [--auto-prune] [--agent <name>] <ids-or-labels…>',
     blurb:
-      "select issues, plan them into dependency-ordered file-disjoint waves, then run them (queue a wave, merge greens → gate base → next). A numeric token is an issue id; a NON-numeric token is a label expanded to the open issues carrying it (needs a listByLabel resolver — githubIssuesByLabel(repo) — else a label fails fast). --dry-run plans only, printing the wave plan + provenance + suggested --name and running nothing (this replaces the old campaign-plan). --override skips the planner and runs each positional as one literal wave (labels inside still expand). --on-underspecified=drop|fail pre-decides the planner's not-confident halt for non-interactive runs. --name labels the run; --agent (with --model/--effort) selects the provider for the whole campaign and every child wave (claude | pi | codex; copilot | cursor | opencode experimental; ADR 0016). If a merge-conflict quarantine strands dependents in later waves the campaign pauses for a human by default; --auto-prune prunes the stranded closure and runs on (ADR 0013). The terminal shows human-readable lines — the plan, per-wave progress, the one-line stop reason and the exact recovery command; --json streams the raw event log to stdout for tooling instead, and without it no JSON reaches stdout (design §11)",
+      "select issues, plan them into dependency-ordered file-disjoint waves, then run them (run a wave, merge greens → gate base → next). A numeric token is an issue id; a NON-numeric token is a label expanded to the open issues carrying it (needs a listByLabel resolver — githubIssuesByLabel(repo) — else a label fails fast). --dry-run plans only, printing the wave plan + provenance + suggested --name and running nothing. --override skips the planner and runs each positional as one literal wave (labels inside still expand). --on-underspecified=drop|fail pre-decides the planner's not-confident halt for non-interactive runs. --name labels the run; --agent (with --model/--effort) selects the provider for the whole campaign and every child wave (claude | pi | codex; copilot | cursor | opencode experimental; ADR 0016). If a merge-conflict quarantine strands dependents in later waves the campaign pauses for a human by default; --auto-prune prunes the stranded closure and runs on (ADR 0013). The terminal shows human-readable lines — the plan, per-wave progress, the one-line stop reason and the exact recovery command; --json streams the raw event log to stdout for tooling instead, and without it no JSON reaches stdout (design §11)",
   },
   {
     signature: "redrive",
@@ -52,7 +52,7 @@ export const MODES: Mode[] = [
   {
     signature: "graft <ids…>",
     blurb:
-      "add issues to a RUNNING (or paused/wave-parked/resumable) campaign — the additive mirror of prune (ADR 0014): appends a graft event the loop honors at the next wave boundary. The in-flight wave finishes untouched; the added issues re-layer into future waves (after their blockers, basename-disjoint), leaving already-planned waves stable. Rejected whole — naming the offenders — if any id is unknown/closed or already in the campaign. Needs a campaign that has not finished (--dry-run to only print the resulting placement).",
+      "add issues to a RUNNING (or paused/parked/redrivable) campaign — the additive mirror of prune (ADR 0014): appends a graft event the loop honors at the next wave boundary. The in-flight wave finishes untouched; the added issues re-layer into future waves (after their blockers, basename-disjoint), leaving already-planned waves stable. Rejected whole — naming the offenders — if any id is unknown/closed or already in the campaign. Needs a campaign that has not finished (--dry-run to only print the resulting placement).",
   },
   {
     signature: "init [--dry-run]",
@@ -72,7 +72,7 @@ export const MODES: Mode[] = [
   {
     signature: "tidy [--apply] [--all]",
     blurb:
-      "reconcile the drift a by-hand fix-forward or merge leaks (ADR 0013): fold orphaned changelog.d/ fragments whose issue is merged, GC agent/<id> branches + worktrees that are PROVABLY reachable from the base, and clear parked records for issues now merged. Never touches an unmerged, quarantined, parked, or wave-parked branch. Dry-run by default (prints what it would do); --apply acts. --all sweeps every registered project, not just this one, and drops duplicate-projectRoot registry pointers (keeping the canonical .vetinari.local one)",
+      "reconcile the drift a by-hand fix-forward or merge leaks (ADR 0013): fold orphaned changelog.d/ fragments whose issue is merged, GC agent/<id> branches + worktrees that are PROVABLY reachable from the base, and clear parked records for issues now merged. Never touches an unmerged, parked, or conflicted branch. Dry-run by default (prints what it would do); --apply acts. --all sweeps every registered project, not just this one, and drops duplicate-projectRoot registry pointers (keeping the canonical .vetinari.local one)",
   },
   {
     signature: "answer <task> <text>",

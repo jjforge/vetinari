@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
-import type { MessageCategory, ResolvedConfig } from "./config.ts";
+import type { ResolvedConfig } from "./config.ts";
 import type {
   CampaignDoneEvent,
   CampaignStartEvent,
@@ -23,6 +23,7 @@ import {
   type ParkReason,
 } from "./state.ts";
 import { quarantineImpacts, resumeIndex, type QuarantineImpact } from "./prune.ts";
+import { notice, type Notice } from "./notice.ts";
 import { tgSend, tgWaitReply, type TgConn } from "./telegram.ts";
 import { hostSecretsPath, tgConnForBaseLocation } from "./registry.ts";
 import { issueNameFromTask, readEventLog, reduceCampaign } from "./status.ts";
@@ -410,16 +411,22 @@ export async function markMergedIssues(
  */
 export function waveParkedNotice(
   project: string,
-  batchNumber: number,
+  waveNumber: number,
   merged: string[],
   baseBranch: string,
   detail: string,
-): { category: MessageCategory; event: string; text: string } {
-  return {
+): Notice {
+  return notice({
+    emoji: "🅿️",
+    project,
+    state: "PARKED",
+    context: `wave ${waveNumber}`,
+    signal: `Base gated red, no attributable culprit — greens (${merged.join(", ") || "none"}) kept on ${baseBranch}, campaign paused.`,
+    recover: "`vetinari redrive` (after fix-forward) or `prune <issue>`",
+    detail,
     category: "failure",
     event: "campaign-parked",
-    text: `🅿️ ${project} · WAVE-PARKED · batch ${batchNumber}\nBase gated red, no attributable culprit — greens (${merged.join(", ") || "none"}) kept on ${baseBranch}, campaign paused.\nRecover: \`campaign --resume\` (after fix-forward) or \`prune <issue>\`\n\n${detail}`,
-  };
+  });
 }
 
 /**
@@ -432,24 +439,29 @@ export function waveParkedNotice(
  */
 export function campaignFailedNotice(
   project: string,
-  batchNumber: number,
+  waveNumber: number,
   merged: string[],
   failed: string[],
   baseBranch: string,
-): { category: MessageCategory; event: string; text: string } {
-  return {
+): Notice {
+  return notice({
+    emoji: "❌",
+    project,
+    state: "FAILED",
+    context: `wave ${waveNumber}`,
+    signal: `${failed.join(", ")} failed — greens (${merged.join(", ") || "none"}) kept merged on ${baseBranch}, campaign stopped. The failed branch/worktree are kept.`,
+    recover: "fix it forward then `vetinari redrive`, or `prune <issue>`",
     category: "failure",
     event: "campaign-failed",
-    text: `❌ ${project} · CAMPAIGN FAILED · batch ${batchNumber}\n${failed.join(", ")} failed — greens (${merged.join(", ") || "none"}) kept merged on ${baseBranch}, campaign stopped.\nThe failed branch/worktree are kept — fix it forward or \`prune <issue>\`.`,
-  };
+  });
 }
 
 /**
- * Render each quarantined issue and the dependents it stranded as `#640 → #701, #702`,
- * one per line — the shared body both quarantine notices show so a human reads the same
+ * Render each conflicted issue and the dependents it stranded as `#640 → #701, #702`,
+ * one per line — the shared body both conflict notices show so a human reads the same
  * blast radius whether the campaign paused or pruned on.
  */
-function describeQuarantineImpacts(impacts: QuarantineImpact[]): string {
+function describeConflictImpacts(impacts: QuarantineImpact[]): string {
   return impacts
     .map((i) => `  #${i.target} → ${i.dropped.map((d) => `#${d}`).join(", ")}`)
     .join("\n");
@@ -466,15 +478,21 @@ function describeQuarantineImpacts(impacts: QuarantineImpact[]): string {
  */
 export function quarantinePauseNotice(
   project: string,
-  batchNumber: number,
+  waveNumber: number,
   impacts: QuarantineImpact[],
   baseBranch: string,
-): { category: MessageCategory; event: string; text: string } {
-  return {
+): Notice {
+  return notice({
+    emoji: "🅿️",
+    project,
+    state: "PARKED",
+    context: `wave ${waveNumber}`,
+    signal: `A merge conflict stranded dependents in later waves — greens kept on ${baseBranch}, campaign paused.`,
+    detail: `Conflicted → orphaned:\n${describeConflictImpacts(impacts)}`,
+    recover: "`vetinari redrive` (after resolving the conflict) or `campaign --auto-prune` to prune and continue",
     category: "failure",
     event: "campaign-parked",
-    text: `🅿️ ${project} · QUARANTINE-PAUSED · batch ${batchNumber}\nMerge-conflict quarantine stranded dependents in later waves — greens kept on ${baseBranch}, campaign paused.\nQuarantined → orphaned:\n${describeQuarantineImpacts(impacts)}\nRecover: \`campaign --resume\` (after resolving the conflict) or \`campaign --auto-prune\` to prune and continue`,
-  };
+  });
 }
 
 /**
@@ -487,16 +505,21 @@ export function quarantinePauseNotice(
  */
 export function conflictParkedNotice(
   project: string,
-  batchNumber: number,
+  waveNumber: number,
   quarantined: string[],
   merged: string[],
   baseBranch: string,
-): { category: MessageCategory; event: string; text: string } {
-  return {
+): Notice {
+  return notice({
+    emoji: "🅿️",
+    project,
+    state: "PARKED",
+    context: `wave ${waveNumber}`,
+    signal: `Merge conflict on ${quarantined.map((q) => `#${q}`).join(", ")} — greens (${merged.join(", ") || "none"}) kept on ${baseBranch}, campaign paused.`,
+    recover: "resolve the conflict on the branch then `vetinari redrive` (or `prune <issue>`)",
     category: "failure",
     event: "campaign-parked",
-    text: `🅿️ ${project} · CONFLICT-PARKED · batch ${batchNumber}\nMerge conflict on ${quarantined.map((q) => `#${q}`).join(", ")} — greens (${merged.join(", ") || "none"}) kept on ${baseBranch}, campaign paused.\nRecover: resolve the conflict on the branch then \`vetinari redrive\` (or \`prune <issue>\`)`,
-  };
+  });
 }
 
 /**
@@ -529,14 +552,19 @@ export function waveParkReason(
  */
 export function autoPruneNotice(
   project: string,
-  batchNumber: number,
+  waveNumber: number,
   impacts: QuarantineImpact[],
-): { category: MessageCategory; event: string; text: string } {
-  return {
+): Notice {
+  return notice({
+    emoji: "✂️",
+    project,
+    state: "PRUNED",
+    context: `wave ${waveNumber}`,
+    signal: "A merge conflict stranded dependents — closure pruned, campaign ran on.",
+    detail: `Conflicted → pruned:\n${describeConflictImpacts(impacts)}`,
     category: "progress",
     event: "prune",
-    text: `✂️ ${project} · AUTO-PRUNE · batch ${batchNumber}\nQuarantine stranded dependents — closure pruned, campaign ran on.\nQuarantined → pruned:\n${describeQuarantineImpacts(impacts)}`,
-  };
+  });
 }
 
 /**
@@ -721,7 +749,7 @@ export async function campaign(
     const reduced = reduceCampaign(readEventLog(cfg));
     if (!reduced.waves.length)
       throw new Error(
-        "campaign --resume: no campaign found in the event log to resume. Launch one with `campaign <batch…>`.",
+        "redrive: no campaign found in the event log to pick up. Launch one with `campaign <ids…>`.",
       );
     titles = Object.fromEntries(reduced.titles);
     campaignName = reduced.name;
@@ -729,11 +757,15 @@ export async function campaign(
     if (index >= reduced.waves.length) {
       // Nothing left to run — every wave already banked. The redrive landed and skipped nothing.
       cfg.log.log("redrive", { fromWave: index, landed: 0, skipped: 0 });
-      enqueueOutbound(cfg, {
+      enqueueOutbound(cfg, notice({
+        emoji: "↩️",
+        project: cfg.project,
+        state: "REDRIVE",
+        context: `${reduced.waves.length} waves`,
+        signal: `nothing to run — all ${reduced.waves.length} waves already merged`,
         category: "progress",
         event: "redrive",
-        text: `↩️ ${cfg.project} · RESUME · nothing to run — all ${reduced.waves.length} waves already merged`,
-      });
+      }));
       reporter.line(formatResumeNothing(reduced.waves.length));
       return "done";
     }
@@ -741,11 +773,15 @@ export async function campaign(
     // the resume wave integrates — so it is logged there (see `pendingRedriveFromWave`). The
     // operator notice and terminal line go out now, at pickup.
     pendingRedriveFromWave = index;
-    enqueueOutbound(cfg, {
+    enqueueOutbound(cfg, notice({
+      emoji: "↩️",
+      project: cfg.project,
+      state: "REDRIVE",
+      context: `wave ${index + 1}/${reduced.waves.length}`,
+      signal: `on ${cfg.baseBranch} — continuing unrun waves`,
       category: "progress",
       event: "redrive",
-      text: `↩️ ${cfg.project} · RESUME · wave ${index + 1}/${reduced.waves.length} on ${cfg.baseBranch} — continuing unrun waves`,
-    });
+    }));
     reporter.line(formatResume(index, reduced.waves.length));
   } else {
     // Resolve the run's issue titles up front (the orchestrator has `fetchTask`) and
@@ -766,11 +802,15 @@ export async function campaign(
     if (name) startEvent.name = name;
     if (Object.keys(titles).length) startEvent.titles = titles;
     cfg.log.log("campaign-start", startEvent);
-    enqueueOutbound(cfg, {
+    enqueueOutbound(cfg, notice({
+      emoji: "🎬",
+      project: cfg.project,
+      state: "CAMPAIGN",
+      context: `${batches.length} waves${named(name)}`,
+      signal: batches.map((b) => b.join(",")).join(" | "),
       category: "progress",
       event: "campaign-start",
-      text: `🎬 ${cfg.project} · CAMPAIGN${named(name)} · ${batches.length} batches\n${batches.map((b) => b.join(",")).join(" | ")}`,
-    });
+    }));
     // The plan, on the terminal: the waves with their ids and titles (design §11).
     reporter.line(formatPlan(batches, titles, campaignName));
   }
@@ -791,11 +831,15 @@ export async function campaign(
     const total = waves.length;
     const waveEvent: Omit<WaveStartEvent, "ts" | "event"> = { index, tasks };
     cfg.log.log("wave-start", waveEvent);
-    enqueueOutbound(cfg, {
+    enqueueOutbound(cfg, notice({
+      emoji: "▶️",
+      project: cfg.project,
+      state: "WAVE",
+      context: `${index + 1}/${total}${named(campaignName)}`,
+      signal: tasks.join(", "),
       category: "progress",
       event: "wave-start",
-      text: `▶️ ${cfg.project} · BATCH ${index + 1}/${total}${named(campaignName)}\n${tasks.join(", ")}`,
-    });
+    }));
     reporter.line(formatWaveStart(index, total, tasks, titles));
 
     let outcomes: Record<string, string>;
@@ -962,22 +1006,30 @@ export async function campaign(
     // no held or quarantined member to record.
     const waveDoneEvent: Omit<WaveDoneEvent, "ts" | "event"> = { index, merged };
     cfg.log.log("wave-done", waveDoneEvent);
-    enqueueOutbound(cfg, {
+    enqueueOutbound(cfg, notice({
+      emoji: "✅",
+      project: cfg.project,
+      state: "WAVE",
+      context: `${index + 1} merged${named(campaignName)}`,
+      signal: merged.join(", ") || "nothing",
       category: "success",
       event: "wave-done",
-      text: `✅ ${cfg.project} · BATCH ${index + 1} MERGED${named(campaignName)}\n${merged.join(", ") || "nothing"}`,
-    });
+    }));
     reporter.line(formatWaveDone(index, total, { merged, held, quarantined, outcomes }));
   }
 
   const doneEvent: Omit<CampaignDoneEvent, "ts" | "event"> = { waves: index };
   if (campaignName) doneEvent.name = campaignName;
   cfg.log.log("campaign-done", doneEvent);
-  enqueueOutbound(cfg, {
+  enqueueOutbound(cfg, notice({
+    emoji: "🏆",
+    project: cfg.project,
+    state: "COMPLETE",
+    context: `campaign${named(campaignName)}`,
+    signal: `${index} waves merged onto ${cfg.baseBranch}`,
     category: "success",
     event: "campaign-done",
-    text: `🏆 ${cfg.project} · CAMPAIGN COMPLETE${named(campaignName)} · ${index} batches onto ${cfg.baseBranch}`,
-  });
+  }));
   reporter.line(formatComplete(index, cfg.baseBranch, campaignName));
   return "done";
 }

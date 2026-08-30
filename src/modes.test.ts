@@ -9,7 +9,9 @@ import {
   build,
   buildImageArgs,
   campaign,
+  campaignFailedNotice,
   childSpawnEnv,
+  conflictParkedNotice,
   markMergedIssues,
   quarantinePauseNotice,
   queue,
@@ -178,16 +180,16 @@ test("waveParkedNotice draws attention to a paused campaign whose greens stay me
   // Routed to the alerting channel — a wave-park demands a human, like the old halt did.
   assert.equal(notice.category, "failure");
   assert.equal(notice.event, "campaign-parked");
-  // Header follows the labeled skeleton: emoji · project · LABEL · context.
-  assert.ok(notice.text.startsWith("🅿️ acme · WAVE-PARKED · batch 2"));
+  // Header follows the §10 skeleton in the settled words: emoji · project · STATE · context.
+  assert.ok(notice.text.startsWith("🅿️ acme · PARKED · wave 2"));
   // The operator is told which greens stay merged, on which base, and that it paused.
   assert.ok(notice.text.includes("101, 102"));
   assert.ok(notice.text.includes("main"));
   assert.ok(/pause/i.test(notice.text));
   // No machine-named culprit: the notice says the failure is unattributable.
   assert.ok(/no attributable culprit/i.test(notice.text));
-  // Self-contained recovery: it names the exact commands to type (folded from #170).
-  assert.ok(notice.text.includes("campaign --resume"));
+  // Self-contained recovery: it names the exact commands to type (folded from #170), in the settled verb.
+  assert.ok(notice.text.includes("vetinari redrive"));
   assert.ok(notice.text.includes("prune <issue>"));
   // The gate report tail rides along so the human sees why it went red.
   assert.ok(notice.text.includes("GATE FAILED"));
@@ -203,14 +205,14 @@ test("quarantinePauseNotice draws a human to a campaign paused by a quarantine t
   // Routed to the alerting channel — a paused campaign demands a human, like a wave-park.
   assert.equal(notice.category, "failure");
   assert.equal(notice.event, "campaign-parked");
-  // Header follows the labeled skeleton: emoji · project · LABEL · context.
-  assert.ok(notice.text.startsWith("🅿️ acme · QUARANTINE-PAUSED · batch 1"));
-  // Names the quarantined issue and the dependents it stranded.
+  // Header follows the §10 skeleton in the settled words: emoji · project · STATE · context.
+  assert.ok(notice.text.startsWith("🅿️ acme · PARKED · wave 1"));
+  // Names the conflicted issue and the dependents it stranded.
   assert.ok(notice.text.includes("640"));
   assert.ok(notice.text.includes("701"));
   assert.ok(/pause/i.test(notice.text));
-  // Points at both recovery paths, each by its exact command (folded from #170).
-  assert.ok(notice.text.includes("campaign --resume"));
+  // Points at both recovery paths, each by its exact command (folded from #170), in the settled verb.
+  assert.ok(notice.text.includes("vetinari redrive"));
   assert.ok(notice.text.includes("campaign --auto-prune"));
 });
 
@@ -221,11 +223,43 @@ test("autoPruneNotice reports the pruned dependents and that the campaign ran on
   // Informational — the campaign continued, so it rides the progress channel.
   assert.equal(notice.category, "progress");
   assert.equal(notice.event, "prune");
-  // Header follows the labeled skeleton: emoji · project · LABEL · context.
-  assert.ok(notice.text.startsWith("✂️ acme · AUTO-PRUNE · batch 1"));
+  // Header follows the §10 skeleton in the settled words: emoji · project · STATE · context.
+  assert.ok(notice.text.startsWith("✂️ acme · PRUNED · wave 1"));
   assert.ok(notice.text.includes("640"));
   assert.ok(notice.text.includes("701"));
   assert.ok(/prune/i.test(notice.text));
+});
+
+// The retired words that must never reach an operator through a notice (design §10, §13.1):
+// the old halt labels, the queue/batch vocabulary, and `campaign --resume` as a recovery command.
+const RETIRED_IN_NOTICES = /quarantin|wave-park|batch|queue|--resume/i;
+
+test("no notice builder renders a retired word — the settled vocabulary reaches operators (§10, §13.1)", () => {
+  // Every operator notice a park/failure/prune builds, rendered with representative args.
+  const built = [
+    waveParkedNotice("acme", 2, ["101", "102"], "main", "gate line\nGATE FAILED"),
+    campaignFailedNotice("acme", 3, ["101"], ["102"], "main"),
+    quarantinePauseNotice("acme", 1, [{ target: "640", removed: ["640", "701"], dropped: ["701"] }], "main"),
+    conflictParkedNotice("acme", 1, ["640"], ["101"], "main"),
+    autoPruneNotice("acme", 1, [{ target: "640", removed: ["640", "701"], dropped: ["701"] }]),
+  ];
+  for (const n of built)
+    assert.ok(!RETIRED_IN_NOTICES.test(n.text), `retired word in: ${n.text}`);
+});
+
+test("a green campaign's outbound notices carry no retired word (§10, §13.1)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-notice-vocab-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  // A two-wave green campaign emits campaign-start, wave-start ×2, wave-done ×2, campaign-done —
+  // every inline campaign notice — so grepping the outbox proves the whole set uses the skeleton.
+  await silenceConsole(() =>
+    campaign(cfg, [["101"], ["201"]], host, "vocab work", {}, gitFreeDeps(cfg, async () => 0)),
+  );
+  const outbox = listOutbox(cfg);
+  assert.ok(outbox.length >= 6, "the campaign emitted its inline notices");
+  for (const rec of outbox)
+    assert.ok(!RETIRED_IN_NOTICES.test(rec.text), `retired word in notice: ${rec.text}`);
 });
 
 test("markMergedIssues is a no-op when onIssueMerged is unconfigured — core names no labels", async () => {

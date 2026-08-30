@@ -29,6 +29,7 @@ import {
 } from "./dashboard-model.ts";
 import { readEventLog } from "./event-log.ts";
 import { enqueueOutbound } from "./state.ts";
+import { notice, type Notice } from "./notice.ts";
 import { defaultFileSet, ticketProse } from "./fileset.ts";
 
 export interface GraftOptions {
@@ -85,8 +86,8 @@ export interface GraftResult {
     titles: Record<string, string>;
   };
   /** the `progress:graft` outbound message — enqueued unless `dryRun`; absent on a
-   *  `--dry-run` that disclosed a rejection. */
-  outbound?: { category: "progress"; event: "graft"; text: string };
+   *  `--dry-run` that disclosed a rejection. Built by the one §10 notice skeleton. */
+  outbound?: Notice;
   /** false for a `--dry-run` (previewed, nothing written); true once appended. */
   applied: boolean;
   /** the structured dry-run closure — present only on a `--dry-run`. */
@@ -136,12 +137,12 @@ export async function runGraft(
   if (!campaignStarted(events))
     throw new Error(
       "graft adds to an open campaign, but no campaign to graft into has been launched here. " +
-        "Launch one with `campaign <batch…>`, or resume a paused one with `campaign --resume`.",
+        "Launch one with `campaign <ids…>`, or pick a paused one back up with `redrive`.",
     );
   if (campaignSettled(events))
     throw new Error(
       "graft adds to an open campaign, but the latest one is settled — every member merged, nothing to graft into. " +
-        "Launch a new campaign with `campaign <batch…>`.",
+        "Launch a new campaign with `campaign <ids…>`.",
     );
 
   const reduced = reduceCampaign(events);
@@ -246,13 +247,17 @@ export async function runGraft(
   }
 
   const event = { ids: normalized, blockedBy, basenames, titles };
-  const outbound = {
-    category: "progress" as const,
-    event: "graft" as const,
-    text:
-      `🌱 ${cfg.project} grafted ${normalized.map((i) => `#${i}`).join(", ")} onto the running campaign — ` +
+  const outbound = notice({
+    emoji: "🌱",
+    project: cfg.project,
+    state: "GRAFTED",
+    context: "running campaign",
+    signal:
+      `grafted ${normalized.map((i) => `#${i}`).join(", ")} — ` +
       `landing in ${placement.map((p) => `#${p.id}→wave ${p.wave}`).join(", ")}.`,
-  };
+    category: "progress",
+    event: "graft",
+  });
 
   const result: GraftResult = {
     ids: normalized,

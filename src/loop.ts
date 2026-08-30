@@ -4,6 +4,7 @@ import type { Logger } from "./log.ts";
 import { runGates } from "./gate.ts";
 import { agentFor, agentSelectionFor, makeSandbox, type Sandbox } from "./sandbox.ts";
 import { clearParked, enqueueOutbound, hasParked, park, readParked } from "./state.ts";
+import { notice } from "./notice.ts";
 import { HARVEST_PROMPT, parseFindings, reportFindings } from "./findings.ts";
 import { activityLoggingSink, appendActivity, initActivityLog } from "./activity.ts";
 import { event } from "./event-log.ts";
@@ -149,10 +150,14 @@ async function harvestFindings(cfg: ResolvedConfig, sbx: Sandbox, sessionId: str
     }
     const filed = results.filter((r) => !r.error).length;
     if (filed)
-      enqueueOutbound(cfg, {
+      enqueueOutbound(cfg, notice({
+        emoji: "🔎",
+        project: cfg.project,
+        state: "FINDING",
+        context: taskId,
+        signal: `filed ${filed} incidental finding(s)${filed !== results.length ? ` (${results.length - filed} failed — see log)` : ""}`,
         category: "finding",
-        text: `🔎 ${cfg.project} ${taskId}: filed ${filed} incidental finding(s)${filed !== results.length ? ` (${results.length - filed} failed — see log)` : ""}.`,
-      });
+      }));
   } catch (e: any) {
     cfg.log.log("harvest-failed", { taskId, error: String(e?.message ?? e) });
   }
@@ -261,11 +266,15 @@ export async function runLoop(cfg: ResolvedConfig, taskId: string, host?: HostBu
             // The human GREEN banner is the terminal view (design §11); under --json the screen is
             // the raw event stream alone, so keep it out to leave the JSONL clean for tooling (#299).
             if (process.env.VETINARI_JSON !== "1") console.log(`\n*** GREEN — commits on ${sbx.branch}\n`);
-            enqueueOutbound(cfg, {
+            enqueueOutbound(cfg, notice({
+              emoji: "✅",
+              project: cfg.project,
+              state: "GREEN",
+              context: taskId,
+              signal: `orchestrator-verified, commits on ${sbx.branch}`,
               category: "success",
               event: "green",
-              text: `✅ ${cfg.project} agent GREEN on ${taskId} — orchestrator-verified, commits on ${sbx.branch}`,
-            });
+            }));
             clearParked(cfg, taskId);
             // Harvest incidental findings on the still-live session before teardown.
             await harvestFindings(cfg, sbx, sessionId, common, taskId);

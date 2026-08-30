@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applyInit, computeInit, describeInit, scanInit } from "./init.ts";
+import { AGENT_PROVIDERS, DEFAULT_PROVIDER } from "./config.ts";
 
 const TEMPLATES = { configTemplate: "CONFIG SKELETON\n", dockerfileTemplate: "FROM node:22-bookworm\n" };
 
@@ -155,12 +156,17 @@ test("describeInit summarizes the full scaffold and the next steps", () => {
   assert.match(text, /build/i);
 });
 
-test("describeInit's next steps name the agent credential file and its key", () => {
+test("describeInit's next steps name the agent credential file and every key of the default provider", () => {
   const text = describeInit(computeInit({ hasConfig: false, hasLocalDir: false, gitignore: undefined, ...TEMPLATES }));
 
   // The credential the first real `run` needs — named where a new project will look.
   assert.match(text, /\.vetinari\.local\/\.env/);
-  assert.match(text, /CLAUDE_CODE_OAUTH_TOKEN/);
+  // Both of the default provider's credential keys are printed from AGENT_PROVIDERS (any one
+  // satisfies the preflight), not one hard-coded key — so `init` tracks the provider table (§13.1).
+  for (const key of AGENT_PROVIDERS[DEFAULT_PROVIDER].credentialKeys)
+    assert.match(text, new RegExp(key));
+  // The next-steps name the `agent` config option, so a project picking another provider knows what to set.
+  assert.match(text, /`agent`/);
 });
 
 test("describeInit leads with a clear refusal when a config already exists", () => {

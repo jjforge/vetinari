@@ -1154,6 +1154,17 @@ test("renderStatusPage ships the archived-list client wiring: expand/collapse (o
     ARCHIVE_LIST_SCRIPT,
     /for \(const other of archiveRows\) if \(other !== row && other\.classList\.contains\("open"\)\) closeRow\(other\);/,
   );
+  // …the URL reducer is shipped to the browser (#333) so open/close mirror the run into the
+  // URL through the node-tested archiveRunHref…
+  assert.match(ARCHIVE_LIST_SCRIPT, /function archiveRunHref/);
+  // …closing a row clears run= (syncUrl(null)), so a reload renders the list collapsed…
+  assert.match(ARCHIVE_LIST_SCRIPT, /closeRow = \(row\) => \{[\s\S]*syncUrl\(null\);/);
+  // …and opening records the newly-opened run *after* closing the others, so opening B while A
+  // is open leaves the URL naming only B — the ordering invariant closeRow-then-syncUrl relies on.
+  assert.match(
+    ARCHIVE_LIST_SCRIPT,
+    /openRow = \(row\) => \{[\s\S]*closeRow\(other\);[\s\S]*syncUrl\(row\.dataset\.run\);/,
+  );
   // …and typing in the shared filter hides the non-matching li[data-run] rows over
   // their visible summary text (archiveRowMatches — the feed/host-log filter contract).
   assert.match(ARCHIVE_LIST_SCRIPT, /function archiveRowMatches/);

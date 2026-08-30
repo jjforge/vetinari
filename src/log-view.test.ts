@@ -74,6 +74,17 @@ test("a gate event reads `gate` + how many checks it selected as the key term, r
   assert.equal(row.dot, "running");
 });
 
+test("a gate-check event names the command running now — sandbox-exec's row shape, distinct verb, running dot", () => {
+  // Reuses sandbox-exec's shape (actor · monospace command · running dot) but a distinct
+  // verb, so a gate check in flight is attributed to the gate, not the agent's own run (#332).
+  const row = humanizeLogLine(raw(event("gate-check", { taskId: "204", cmd: "npx tsx --test src/*.test.ts", ts: "2026-08-28T09:15:00.000Z" })));
+  assert.equal(row.time, "02:15:00");
+  assert.equal(row.actor, "#204");
+  assert.equal(row.verb, "gate running");
+  assert.deepEqual(row.spans, [code("npx tsx --test src/*.test.ts")]);
+  assert.equal(row.dot, "running");
+});
+
 // Per-issue outcome kinds: the actor is split out to `#issue`, the verb leads the message,
 // and the dot reads the outcome's colour.
 test("a turn event reads `turn N` + the agent summary as the strong key term, running dot", () => {

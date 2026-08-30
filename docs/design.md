@@ -86,7 +86,7 @@ The event vocabulary after consolidation (§13.2) is small and uses the user's w
 | `graft` | `ids`, `blockedBy`, `basenames`, `titles?` | graft |
 | `redrive` | `fromWave`, `landed`, `skipped` | campaign |
 
-Diagnostic rows (`gate`, `gate-result`, `commit`, `tool`, `sandbox-exec`, sandbox setup, hook failures) are activity, not state: the reducer ignores them, the issue sheet and live tail read them. Two rules:
+Diagnostic rows (`gate`, `gate-check`, `gate-result`, `commit`, `tool`, `sandbox-exec`, sandbox setup, hook failures) are activity, not state: the reducer ignores them, the issue sheet and live tail read them. Two rules:
 
 - **An event records what happened, not how to render it.** Titles are recorded once on `campaign-start`; a single-event reader that wants a name looks it up. No presentation state (theme, cosmetic naming offsets) is ever written to the log.
 - **State is emitted by the transition that caused it.** The park reason is written by the code that parked, never inferred later from surrounding events.

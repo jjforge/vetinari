@@ -71,6 +71,8 @@ const describe = (e: OrchestratorEvent): string => {
       return `grace-wait ${e.seconds}s on ${e.tasks.join(",")}`;
     case "gate":
       return `gate ${e.cmds.join(",")} skip ${e.skipped}`;
+    case "gate-check":
+      return `gate-check ${e.cmd}`;
     case "gate-result":
       return `gate-result ${e.cmd} exit ${e.exitCode} in ${e.seconds}s -> ${e.outFile}`;
     case "tool":
@@ -101,6 +103,7 @@ test("a switch over the §2.1 narrowed kinds reads each member's fields", () => 
   assert.equal(describe(event("redrive", { fromWave: 1 })), "redrive from 1");
   assert.equal(describe(event("graft", { ids: ["305", "306"], blockedBy: {}, basenames: {} })), "graft 305,306");
   assert.equal(describe(event("gate", { taskId: "9", cmds: ["typecheck", "test"], skipped: 1 })), "gate typecheck,test skip 1");
+  assert.equal(describe(event("gate-check", { taskId: "9", cmd: "run-tests" })), "gate-check run-tests");
   assert.equal(describe(event("tool", { taskId: "9", name: "Read", path: "/a.ts" })), "tool Read /a.ts");
   assert.equal(describe(event("sandbox-exec", { taskId: "9", cmd: "ls" })), "sandbox-exec ls");
   assert.equal(describe(event("commit", { taskId: "9", branch: "agent/9", sha: "abc", files: ["a.ts", "b.ts"] })), "commit abc on agent/9 touched 2");

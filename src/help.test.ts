@@ -60,6 +60,19 @@ test("the standalone `queue` command is no longer a public mode — only campaig
   assert.deepEqual(queueModes, [], "MODES still lists a `queue` command");
 });
 
+test("`redrive` is the documented verb; `campaign --resume` is no longer a listed mode (#293)", () => {
+  const sigs = MODES.map((m) => m.signature);
+  assert.ok(sigs.includes("redrive"), "MODES lists `redrive`");
+  assert.ok(!sigs.includes("campaign --resume"), "`campaign --resume` is a one-release alias, not a documented mode");
+});
+
+test("the retired surfaces are gone from MODES — prune batch, fileset-check, demo (#293)", () => {
+  const sigs = MODES.map((m) => m.signature);
+  assert.ok(!sigs.includes("prune <issue> <batch…>"), "the prune batch form is retired");
+  assert.ok(!sigs.some((s) => /^fileset-check\b/.test(s)), "fileset-check is retired as a mode");
+  assert.ok(!sigs.some((s) => /^demo\b/.test(s)), "demo create/remove are `make` targets, not modes");
+});
+
 test("renderUsage shows every mode's signature — --help is produced from MODES, never hand-kept", () => {
   const usage = renderUsage();
   for (const m of MODES)

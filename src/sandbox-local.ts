@@ -21,6 +21,18 @@ import type { Sandbox, SandboxRunOptions, SandboxRunResult } from "./sandbox.ts"
 const gitIn = (dir: string, args: string[]): string =>
   execFileSync("git", ["-C", dir, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 
+/** Does `branch` already exist in `dir`? True when a run re-enters a branch it left behind. */
+const branchExists = (dir: string, branch: string): boolean => {
+  try {
+    execFileSync("git", ["-C", dir, "rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], {
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 // A wave spawns its issues concurrently (the real `queue`), so several sandboxes add
 // and remove worktrees at the same instant. `git worktree add`/`remove` mutate the one
 // shared `.git/worktrees` admin area, so serialize just those two ops per process — the
@@ -88,9 +100,19 @@ export async function makeLocalSandbox(
   const branch = `${cfg.branchPrefix}${taskId}`;
   const worktreeDir = resolve(repoRoot, cfg.stateDir, "worktrees", taskId);
   mkdirSync(dirname(worktreeDir), { recursive: true });
-  // A fresh worktree on a new branch cut from the base — the prod sandbox's one
-  // container per task, on its own branch and worktree.
-  await serialize(() => gitIn(repoRoot, ["worktree", "add", "-b", branch, worktreeDir, cfg.baseBranch]));
+  // A fresh worktree on this task's branch — the prod sandbox's one container per task,
+  // on its own branch and worktree. A first run cuts a new branch from the base; a run
+  // that RE-ENTERS a task (an answered park, a redrive) re-checks-out the branch it left
+  // behind — its prior commits already on it — rather than failing to recreate it. The
+  // prod container sandbox reuses a branch the same way (design §3 step 9 / §7).
+  await serialize(() =>
+    gitIn(
+      repoRoot,
+      branchExists(repoRoot, branch)
+        ? ["worktree", "add", worktreeDir, branch]
+        : ["worktree", "add", "-b", branch, worktreeDir, cfg.baseBranch],
+    ),
+  );
 
   let turn = -1;
   return {

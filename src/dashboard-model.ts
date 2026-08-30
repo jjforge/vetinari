@@ -54,9 +54,10 @@ export type IssueStatus = "completed" | "parked" | "failure" | "running" | "unst
 /**
  * Why a `parked` issue is held (ADR 0019) — metadata set *by the transition*, not a
  * status word: `question` (a `parked{blocked}` awaiting an answer), `conflict` (a
- * `quarantined` merge conflict), `red-base` (a combined-gate wave-park), or `stalled`
- * (a `parked{budget|idle-timeout}`, or a crash — end-of-log with no terminal event and
- * a dead process). The reason selects the recovery affordance; the surface word is one.
+ * `quarantined` merge conflict), `red-base` (a combined-gate wave-park — the *wave's*
+ * reason, never a member's; design §2.3), or `stalled` (a `parked{budget|idle-timeout}`,
+ * or a crash — end-of-log with no terminal event and a dead process). The reason selects
+ * the recovery affordance; the surface word is one.
  */
 export type ParkReason = "question" | "conflict" | "red-base" | "stalled";
 
@@ -96,12 +97,13 @@ export interface StatusIssue {
 }
 
 /**
- * A wave's status — a **pure fold of its issues' lifecycles** (ADR 0019), no longer a
+ * A wave's status — a **fold of its issues' lifecycles** (ADR 0019), no longer a
  * render-time derivation off campaign structure. `failed` (any member failed) outranks
- * `parked` (any member held — a question, a conflict, or the combined-gate red-base),
- * then `running` (any in flight), then `closed` (all resolved), else `unstarted`. The
- * old `wave-parked`/`interrupted` words are gone: a held wave is `parked`, its members
- * carry the specific `ParkReason`.
+ * `parked` (any member held — a question or a conflict — or the wave-level `red-base`
+ * hold on a red merged base, whose members stay `completed`; design §2.3), then `running`
+ * (any in flight), then `closed` (all resolved), else `unstarted`. The old
+ * `wave-parked`/`interrupted` words are gone: a held wave is `parked`, its members carry
+ * their own `ParkReason` and the wave carries `red-base` when that is the hold.
  */
 export type WaveStatus = "closed" | "running" | "unstarted" | "parked" | "failed";
 
@@ -116,6 +118,11 @@ export type CampaignState = "failed" | "parked" | "running" | "completed" | "uns
 export interface StatusWave {
   index: number;
   status: WaveStatus;
+  /** why the wave is `parked`, when the hold is a wave-level one: `red-base`, the
+   * combined-gate park on a red merged base (design §2.3). It is the *wave's* reason,
+   * not any member's — the members keep their own lifecycle. Absent otherwise; a wave
+   * parked only because a member is held carries no wave reason (the member has it). */
+  reason?: ParkReason;
   issues: StatusIssue[];
 }
 
@@ -162,12 +169,15 @@ export const parkReasonFromEvent = (reason: string | undefined): ParkReason =>
  * running/unstarted). `failed` outranks `parked` outranks `running`; a wave whose every
  * live member has `completed` is `closed`; an empty or all-unstarted wave is `unstarted`.
  * This is what makes a wave with a red member read `failed`, never `running` (#262).
+ * `opts.redBase` is the one wave-level hold: a combined-gate park on a red merged base
+ * (design §2.3) whose members all merged clean (each `completed`), so nothing in the fold
+ * would otherwise read `parked` — it lands at the `parked` rank, still below `failed` (#288).
  */
-export function waveState(issues: readonly { status: DisplayStatus; membership?: Membership }[]): WaveStatus {
+export function waveState(issues: readonly { status: DisplayStatus; membership?: Membership }[], opts: { redBase?: boolean } = {}): WaveStatus {
   const live = issues.filter((i) => i.membership !== "pruned");
   if (!live.length) return "unstarted";
   if (live.some((i) => i.status === "failure")) return "failed";
-  if (live.some((i) => i.status === "parked")) return "parked";
+  if (opts.redBase || live.some((i) => i.status === "parked")) return "parked";
   if (live.some((i) => i.status === "running")) return "running";
   if (live.every((i) => i.status === "completed")) return "closed";
   return "unstarted";
@@ -568,9 +578,10 @@ export interface ReducedCampaign {
    * folded so the lifecycle can surface *why* an issue is held. Absent for an issue
    * parked only by a surviving on-disk record (the reason is read from the record). */
   parkReasons: Map<string, ParkReason>;
-  /** the issues a combined-gate wave-park is holding on a red base (ADR 0019) — the
-   * members of the wave the `wave-parked` event landed on. Their lifecycle reads
-   * `parked` with reason `red-base`, which is what makes the held wave fold to `parked`. */
+  /** the members of the wave a combined-gate `wave-parked` landed on (ADR 0019) — a red
+   * merged base. It is the *wave's* reason, not the members': each member keeps its own
+   * lifecycle (a merged member stays `completed`, a question stays `parked{question}`), and
+   * this set is what makes the wave fold to `parked{red-base}` (design §2.3, #288). */
   redBase: Set<string>;
 }
 
@@ -660,7 +671,8 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
     } else if (e.event === "wave-parked") {
       // A red merged base parked the in-flight wave (ADR 0013). No `campaign-batch-done`
       // follows to close it, so it stays `currentWave`; record that as the parked wave and
-      // remember its members — their lifecycle reads parked(red-base) so the wave folds parked.
+      // remember its members — red-base is the *wave's* reason (design §2.3), so the members
+      // keep their own lifecycle and this set is what folds the wave to parked(red-base) (#288).
       parkedWave = currentWave;
       redBase = new Set(waves[currentWave] ?? []);
     } else if (e.event === "campaign-failed" && Array.isArray(e.failed)) {
@@ -739,18 +751,19 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
 /**
  * The issue lifecycle FSM read off a reduced campaign (ADR 0019): the single stored
  * axis, `{state, reason?}`. The transitions the event fold recorded resolve here —
- * a `quarantined` merge conflict and a `red-base` wave-park override the issue's own
- * green outcome to `parked` with their reason; a `parked` outcome carries its folded
- * `ParkReason` (defaulting to `question`); and, on a `stalled` read (a dead run whose
- * log has no terminal event), a still-`running` issue folds to `parked{stalled}` — the
- * transition that replaced `reconcileArchivedStatus`'s running→interrupted. Membership
- * is the orthogonal axis (`issueMembership`) and never appears here.
+ * a `quarantined` merge conflict overrides the issue's own green outcome to `parked`
+ * with reason `conflict`; a `parked` outcome carries its folded `ParkReason` (defaulting
+ * to `question`); and, on a `stalled` read (a dead run whose log has no terminal event),
+ * a still-`running` issue folds to `parked{stalled}` — the transition that replaced
+ * `reconcileArchivedStatus`'s running→interrupted. A `red-base` wave-park is the *wave's*
+ * reason, never a member's (design §2.3): it does not appear here, so a member holds its
+ * own reason (a merged member stays `completed`, a question stays `parked{question}` with
+ * its reply box). Membership is the orthogonal axis (`issueMembership`) and never appears here.
  */
 export function issueLifecycle(r: ReducedCampaign, id: string, opts: { stalled?: boolean } = {}): IssueLifecycle {
   const base = r.outcomes.get(id) ?? "unstarted";
   if (base === "failure") return { state: "failure" };
   if (r.quarantined.has(id)) return { state: "parked", reason: "conflict" };
-  if (r.redBase.has(id)) return { state: "parked", reason: "red-base" };
   if (base === "parked") return { state: "parked", reason: r.parkReasons.get(id) ?? "question" };
   if (opts.stalled && base === "running") return { state: "parked", reason: "stalled" };
   return { state: base };
@@ -894,7 +907,10 @@ export function campaignSettled(events: OrchestratorEvent[]): boolean {
   const reduced = reduceCampaign(events);
   if (!reduced.waves.length) return false;
   const waveStates = reduced.waves.map((wave) =>
-    waveState(wave.map((id) => ({ status: issueLifecycle(reduced, id).state }))),
+    waveState(
+      wave.map((id) => ({ status: issueLifecycle(reduced, id).state })),
+      { redBase: wave.some((id) => reduced.redBase.has(id)) },
+    ),
   );
   return campaignState(waveStates) === "completed";
 }
@@ -1061,7 +1077,10 @@ export function buildStatus(cfg: ResolvedConfig, opts: { dead?: boolean } = {}):
         detail: details.get(issueNumber),
       };
     });
-    return { index, status: waveState(issues), issues };
+    // A red-base wave-park is the wave's own reason (design §2.3): its members keep their
+    // lifecycle (a merged member stays completed), so the hold shows only on the wave.
+    const redBase = wave.some((issueNumber) => reduced.redBase.has(issueNumber));
+    return { index, status: waveState(issues, { redBase }), ...(redBase ? { reason: "red-base" as ParkReason } : {}), issues };
   });
 
   return {

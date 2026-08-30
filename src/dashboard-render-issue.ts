@@ -37,10 +37,12 @@ export const renderRedriveControl = (status: CampaignStatus) =>
  * The merge-conflict informational affordance (#171): a merge conflict held a passed
  * issue out of integration (ADR 0013). There is deliberately no conflict-release CLI to
  * shell, so this is a note only — it points the operator at resolve-then-redrive, with no
- * action route or button of its own.
+ * action route or button of its own. It points at the per-issue Redrive move (which now
+ * renders in the sheet for a conflict park, #307) and the CLI — never a "Redrive control
+ * above" that only renders on a red base, which for a conflict-only campaign was absent.
  */
 export const renderConflictNote = () =>
-  `<section class="conflict-note"><strong>Issue held on a merge conflict</strong> — a passed green was kept out of integration. Resolve the conflict, then redrive the campaign (the Redrive control above, or <code>vetinari redrive</code> in the project root).</section>`;
+  `<section class="conflict-note"><strong>Issue held on a merge conflict</strong> — a passed green was kept out of integration. Resolve the conflict, then redrive the campaign (open the held issue and Redrive, or <code>vetinari redrive</code> in the project root).</section>`;
 
 /**
  * The Graft affordance (#168, reworked to mockup 1a in #202). Where prune prunes an

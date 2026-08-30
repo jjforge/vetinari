@@ -247,6 +247,10 @@ test("renderStatusPage shows an informational merge-conflict affordance with no 
   const note = held.slice(held.indexOf('class="conflict-note"'));
   const noteBlock = note.slice(0, note.indexOf("</section>"));
   assert.doesNotMatch(noteBlock, /<form/);
+  // It points the operator at the per-issue Redrive (which now renders in the sheet) and the
+  // CLI — never a "Redrive control above" that only renders for a red base (#307).
+  assert.doesNotMatch(noteBlock, /control above/i);
+  assert.match(noteBlock, /vetinari redrive/);
 
   // No conflict-held issue → no note.
   const clean = renderStatusPage(

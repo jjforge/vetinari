@@ -69,9 +69,11 @@ export const isIssueId = (token: string): boolean => /^#?\d+$/.test(token);
 /**
  * Expand a campaign's positional tokens into a flat, de-duplicated id set: a numeric
  * token is an issue id (kept, `#` stripped); a non-numeric token is a **label**,
- * expanded to the open issues carrying it via the `listByLabel` seam. Tokens may be
- * mixed; the result is normalized and de-duplicated in first-seen order, so it feeds
- * straight into the planner (or into an `--override` wave).
+ * expanded to the open issues carrying it *that are work* via the `listByLabel` seam
+ * — an issue typed `Epic` owns no work and is never scheduled, so `listByLabel` drops
+ * it (design §4 step 1). Tokens may be mixed; the result is normalized and
+ * de-duplicated in first-seen order, so it feeds straight into the planner (or into an
+ * `--override` wave).
  *
  * A label token with no `listByLabel` resolver configured fails fast, naming the
  * missing seam — a campaign cannot select by label without wiring the tracker in.

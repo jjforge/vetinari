@@ -149,6 +149,12 @@ export interface CampaignStatus {
   festiveOffset?: number;
   waves: StatusWave[];
   parked: ParkedIssue[];
+  /** the issue ids of the wave currently in flight — the reducer's `currentWave` (design §11):
+   * what the live tail follows so it lists the slot-holders of the one wave the loop is draining,
+   * never a member still reading `running` in a wave that has advanced or one not yet in flight (a
+   * racy/partial log leaves such ghosts). An empty array means no wave is in flight; the field is
+   * absent only on a hand-built status, where {@link inFlightRunning} falls back to every runner. */
+  inFlight?: string[];
 }
 
 const statusForOutcome = (outcome: string | undefined): IssueStatus => {
@@ -1130,6 +1136,10 @@ export function buildStatus(cfg: ResolvedConfig, opts: { dead?: boolean; alive?:
     festiveOffset,
     waves: displayWaves,
     parked: parkedRecords.map(toParkedIssue),
+    // The wave in flight is the reducer's `currentWave` (design §11); its members are what the
+    // live tail follows. Always an array (empty when none is in flight) so the tail scopes rather
+    // than falling back to every runner across the plan.
+    inFlight: reduced.currentWave >= 0 ? [...(reduced.waves[reduced.currentWave] ?? [])] : [],
   };
 }
 
@@ -1174,21 +1184,32 @@ export interface LiveTail {
 export const TAIL_SNAPSHOT_CAP = 500;
 
 /**
- * The live-tail snapshot for a project (#124): every currently-running agent's raw
- * `activity-<issue>.jsonl` merged into one issue-keyed, newest-last stream. Running
- * agents are the issues `buildStatus` reads as `running`; each one's activity file
- * (the live-only scratch the loop writes per tool-use, ADR 0015) is read whole, every
- * line tagged with its issue, status, ISO `ts`, and 0-based file index, then all lines
- * merged by `ts` and capped to the newest window. A running agent whose file does not
- * exist yet (just spawned) still appears in `agents` so the dropdown lists it; it simply
- * contributes no lines. Pure over the filesystem — no clock — so it is unit-testable.
+ * The running (slot-holding) members of the wave in flight (design §11) — what the live tail
+ * follows. The tail answers "what is it doing right now", so it lists the runners of the one wave
+ * the loop is draining (`status.inFlight`), never a member still reading `running` in a wave that
+ * has advanced or one not yet in flight (a racy/partial log leaves such ghosts). A hand-built
+ * status with no `inFlight` field falls back to every running issue across the plan.
+ */
+export function inFlightRunning(status: CampaignStatus): StatusIssue[] {
+  const running = status.waves.flatMap((wave) => wave.issues).filter((issue) => issue.status === "running");
+  if (status.inFlight === undefined) return running;
+  const ids = new Set(status.inFlight);
+  return running.filter((issue) => ids.has(issue.issueNumber));
+}
+
+/**
+ * The live-tail snapshot for a project (#124): every running agent of the wave in flight
+ * ({@link inFlightRunning}), its raw `activity-<issue>.jsonl` merged into one issue-keyed,
+ * newest-last stream. Each agent's activity file (the live-only scratch the loop writes per
+ * tool-use, ADR 0015) is read whole, every line tagged with its issue, status, ISO `ts`, and
+ * 0-based file index, then all lines merged by `ts` and capped to the newest window. A running
+ * agent whose file does not exist yet (just spawned) still appears in `agents` so the dropdown
+ * lists it; it simply contributes no lines. Pure over the filesystem — no clock — so it is
+ * unit-testable.
  */
 export function buildLiveTail(cfg: ResolvedConfig): LiveTail {
   const status = buildStatus(cfg);
-  const agents: TailAgent[] = status.waves
-    .flatMap((wave) => wave.issues)
-    .filter((issue) => issue.status === "running")
-    .map((issue) => ({ issue: issue.issueNumber, status: "running" }));
+  const agents: TailAgent[] = inFlightRunning(status).map((issue) => ({ issue: issue.issueNumber, status: "running" }));
   const lines: TailLine[] = [];
   for (const agent of agents) {
     const file = activityLogPath(cfg.stateDir, agent.issue);

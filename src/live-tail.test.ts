@@ -41,6 +41,7 @@ test("buildLiveTail merges a running agent's activity lines, tagged with its iss
   // A wave marks both issues running; 203 then goes green (completed), so 204 alone runs.
   writeJsonl(cfgFor(dir).logFile, [
     event("campaign-start", { waves: [["203", "204"]], slots: 2, ts: "2026-08-27T00:00:00.000Z" }),
+    event("wave-start", { index: 0, tasks: ["203", "204"], ts: "2026-08-27T00:00:00.000Z" }),
     event("spawn", { taskId: "203", ts: "2026-08-27T00:00:00.000Z" }),
     event("spawn", { taskId: "204", ts: "2026-08-27T00:00:00.000Z" }),
     event("green", { taskId: "203", branch: "agent/203", commits: ["a"], ts: "2026-08-27T00:00:05.000Z" }),
@@ -71,6 +72,7 @@ test("buildLiveTail attaches each line's humanized parts for the log-view compon
   const dir = tmp();
   writeJsonl(cfgFor(dir).logFile, [
     event("campaign-start", { waves: [["204"]], slots: 1, ts: "2026-08-27T00:00:00.000Z" }),
+    event("wave-start", { index: 0, tasks: ["204"], ts: "2026-08-27T00:00:00.000Z" }),
     event("spawn", { taskId: "204", ts: "2026-08-27T00:00:00.000Z" }),
   ]);
   initActivityLog(dir, "204");
@@ -87,6 +89,7 @@ test("buildLiveTail interleaves two running agents by ts and excludes finished o
   const dir = tmp();
   writeJsonl(cfgFor(dir).logFile, [
     event("campaign-start", { waves: [["301", "302", "303"]], slots: 3, ts: "2026-08-27T00:00:00.000Z" }),
+    event("wave-start", { index: 0, tasks: ["301", "302", "303"], ts: "2026-08-27T00:00:00.000Z" }),
     event("spawn", { taskId: "301", ts: "2026-08-27T00:00:00.000Z" }),
     event("spawn", { taskId: "302", ts: "2026-08-27T00:00:00.000Z" }),
     event("spawn", { taskId: "303", ts: "2026-08-27T00:00:00.000Z" }),
@@ -109,6 +112,52 @@ test("buildLiveTail interleaves two running agents by ts and excludes finished o
     tail.lines.map((l) => l.issue),
     ["301", "302", "301"],
   );
+});
+
+test("buildLiveTail follows the wave in flight: a running agent from a wave not yet in flight is excluded (#309)", () => {
+  const dir = tmp();
+  // Wave 0 is in flight (301 running); a stray spawn logged 302 (a wave-1 member) running too —
+  // a racy/partial log leaves a ghost in a wave that has not started. The tail answers "what is
+  // running in the wave in flight", so it must list 301 only, never the ghost from the unstarted wave.
+  writeJsonl(cfgFor(dir).logFile, [
+    event("campaign-start", { waves: [["301"], ["302"]], slots: 1, ts: "2026-08-27T00:00:00.000Z" }),
+    event("wave-start", { index: 0, tasks: ["301"], ts: "2026-08-27T00:00:00.000Z" }),
+    event("spawn", { taskId: "301", ts: "2026-08-27T00:00:00.000Z" }),
+    event("spawn", { taskId: "302", ts: "2026-08-27T00:00:01.000Z" }),
+  ]);
+  initActivityLog(dir, "301");
+  initActivityLog(dir, "302");
+  appendActivity(dir, "301", event("tool", { taskId: "301", name: "Read", ts: "2026-08-27T00:00:02.000Z" }));
+  appendActivity(dir, "302", event("tool", { taskId: "302", name: "Read", ts: "2026-08-27T00:00:03.000Z" }));
+
+  const tail = buildLiveTail(cfgFor(dir));
+
+  assert.deepEqual(tail.agents, [{ issue: "301", status: "running" }]);
+  assert.deepEqual(tail.lines.map((l) => l.issue), ["301"]);
+});
+
+test("buildLiveTail re-subscribes to the new wave on advance: the prior wave's stale-running ghost is dropped (#309)", () => {
+  const dir = tmp();
+  // Wave 0 advanced to wave 1 (302 running), but 301 never logged a terminal, so it still reads
+  // running in a wave that is no longer in flight. The tail must follow wave 1 (302) and never
+  // strand the operator on the ghost — nor go empty.
+  writeJsonl(cfgFor(dir).logFile, [
+    event("campaign-start", { waves: [["301"], ["302"]], slots: 1, ts: "2026-08-27T00:00:00.000Z" }),
+    event("wave-start", { index: 0, tasks: ["301"], ts: "2026-08-27T00:00:00.000Z" }),
+    event("spawn", { taskId: "301", ts: "2026-08-27T00:00:00.000Z" }),
+    event("wave-done", { index: 0, merged: [], ts: "2026-08-27T00:00:05.000Z" }),
+    event("wave-start", { index: 1, tasks: ["302"], ts: "2026-08-27T00:00:06.000Z" }),
+    event("spawn", { taskId: "302", ts: "2026-08-27T00:00:06.000Z" }),
+  ]);
+  initActivityLog(dir, "301");
+  initActivityLog(dir, "302");
+  appendActivity(dir, "301", event("tool", { taskId: "301", name: "Read", ts: "2026-08-27T00:00:01.000Z" }));
+  appendActivity(dir, "302", event("tool", { taskId: "302", name: "Read", ts: "2026-08-27T00:00:07.000Z" }));
+
+  const tail = buildLiveTail(cfgFor(dir));
+
+  assert.deepEqual(tail.agents, [{ issue: "302", status: "running" }]);
+  assert.deepEqual(tail.lines.map((l) => l.issue), ["302"]);
 });
 
 // A small line factory for the pure client reducers (issue/raw are all they read).
@@ -264,6 +313,7 @@ test("GET /api/events seeds a running agent's tail as a named `tail` SSE frame (
   const projDir = tmp();
   writeJsonl(join(projDir, "logs", "orchestrator.jsonl"), [
     event("campaign-start", { waves: [["204"]], slots: 1, ts: "2026-08-27T00:00:00.000Z" }),
+    event("wave-start", { index: 0, tasks: ["204"], ts: "2026-08-27T00:00:00.000Z" }),
     event("spawn", { taskId: "204", ts: "2026-08-27T00:00:00.000Z" }),
   ]);
   initActivityLog(projDir, "204");
@@ -292,6 +342,7 @@ test("GET /api/events pushes an updated tail frame when a running agent appends 
   const projDir = tmp();
   writeJsonl(join(projDir, "logs", "orchestrator.jsonl"), [
     event("campaign-start", { waves: [["204"]], slots: 1, ts: "2026-08-27T00:00:00.000Z" }),
+    event("wave-start", { index: 0, tasks: ["204"], ts: "2026-08-27T00:00:00.000Z" }),
     event("spawn", { taskId: "204", ts: "2026-08-27T00:00:00.000Z" }),
   ]);
   initActivityLog(projDir, "204");
@@ -312,6 +363,56 @@ test("GET /api/events pushes an updated tail frame when a running agent appends 
     await delay(800);
     const updated = [...stream.frames].reverse().find((f) => f.event === "tail");
     assert.ok(updated && updated.data.tail.lines.length === 2, "the appended line arrives in a new tail frame");
+  } finally {
+    await stream.close();
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});
+
+test("GET /api/events re-subscribes the tail to the new wave on advance, without a reload (#309)", async () => {
+  const configDir = tmp();
+  const projDir = tmp();
+  // Connect while wave 0 is in flight (204 running).
+  writeJsonl(join(projDir, "logs", "orchestrator.jsonl"), [
+    event("campaign-start", { waves: [["204"], ["205"]], slots: 1, ts: "2026-08-27T00:00:00.000Z" }),
+    event("wave-start", { index: 0, tasks: ["204"], ts: "2026-08-27T00:00:00.000Z" }),
+    event("spawn", { taskId: "204", ts: "2026-08-27T00:00:00.000Z" }),
+  ]);
+  initActivityLog(projDir, "204");
+  appendActivity(projDir, "204", event("tool", { taskId: "204", name: "Read", ts: "2026-08-27T00:00:01.000Z" }));
+  register(configDir, { project: "acme", projectRoot: projDir, baseLocation: projDir });
+
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const port = (server.address() as AddressInfo).port;
+  const stream = await openStream(port);
+  try {
+    await delay(400);
+    const seed = stream.frames.find((f) => f.event === "tail");
+    assert.deepEqual(seed?.data.tail.agents, [{ issue: "204", status: "running" }], "the seed tail follows wave 0");
+
+    // The server advances the wave: wave 0 closes, wave 1 starts and its agent spawns and works.
+    appendFileSync(
+      join(projDir, "logs", "orchestrator.jsonl"),
+      [
+        event("green", { taskId: "204", branch: "agent/204", commits: ["a"], ts: "2026-08-27T00:00:05.000Z" }),
+        event("wave-done", { index: 0, merged: ["204"], ts: "2026-08-27T00:00:05.000Z" }),
+        event("wave-start", { index: 1, tasks: ["205"], ts: "2026-08-27T00:00:06.000Z" }),
+        event("spawn", { taskId: "205", ts: "2026-08-27T00:00:06.000Z" }),
+      ]
+        .map((e) => JSON.stringify(e))
+        .join("\n") + "\n",
+    );
+    initActivityLog(projDir, "205");
+    appendActivity(projDir, "205", event("tool", { taskId: "205", name: "Read", ts: "2026-08-27T00:00:07.000Z" }));
+    await delay(800);
+
+    // The tail re-subscribes to wave 1 in a fresh frame — no page reload — and drops wave 0's agent.
+    const advanced = [...stream.frames].reverse().find((f) => f.event === "tail");
+    assert.deepEqual(advanced?.data.tail.agents, [{ issue: "205", status: "running" }], "the tail follows the new wave");
+    assert.ok(
+      advanced!.data.tail.lines.every((l: { issue: string }) => l.issue === "205"),
+      "only the new wave's activity remains",
+    );
   } finally {
     await stream.close();
     await new Promise<void>((r) => server.close(() => r()));
@@ -403,6 +504,27 @@ test("renderLiveTail renders the pane hidden when no agent is running", () => {
   // vocabulary is ours — never the mockup's `queued`.
   assert.match(html, /data-live-tail[^>]*\shidden/);
   assert.doesNotMatch(html, /queued/);
+});
+
+test("renderLiveTail scopes the pane to the wave in flight, excluding a ghost runner from another wave (#309)", () => {
+  // Wave 1 is in flight (302 running); 301 still reads running in wave 0 (a stale ghost). The tail
+  // lists exactly the in-flight wave's slot-holder — never the ghost.
+  const status: CampaignStatus = {
+    project: "acme",
+    waves: [
+      { index: 0, status: "running", issues: [{ issueNumber: "301", status: "running" }] },
+      { index: 1, status: "running", issues: [{ issueNumber: "302", status: "running" }] },
+    ],
+    parked: [],
+    inFlight: ["302"],
+  };
+  const html = renderLiveTail(status);
+  // Exactly one agent — the in-flight runner — in both the summary and the dropdown.
+  assert.match(html, />1 agent</);
+  assert.match(html, /data-issue="302"[\s\S]*?#302/);
+  assert.doesNotMatch(html, /data-issue="301"/);
+  // The pane is visible (the wave in flight has a runner).
+  assert.doesNotMatch(html, /class="live-tail"[^>]*\shidden/);
 });
 
 test("renderStatusPage places the live tail between the wave grid and the archived runs, outside #live-region", () => {

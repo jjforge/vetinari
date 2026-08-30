@@ -337,7 +337,7 @@ Described by behaviour; the tracker holds the numbers (`gh issue list --label or
 - **Prune and graft gate on the absence of `campaign-done`** rather than on unfinished members, so a run that ended incomplete is not adjustable.
 - **Crash is not detected** in the live read path; a dead run reads as running.
 - **Three park-reason enums, two status vocabularies, `batch` in the log.** §13.1.
-- **`campaign --resume`** is the spelling of what this design calls `redrive`; the dashboard has a `/resume` route.
+- **`campaign --resume`** is the CLI spelling of what this design calls `redrive` (the dashboard's route is already `/redrive`, shelling `vetinari redrive`).
 - **Changelog folding runs unconditionally** rather than only when the project has a `CHANGELOG.md` (§12).
 - **`demo create/remove` are CLI modes**, not `make` targets (§12).
 - **The event log carries presentation** (`festiveOffset`; `name`/`titles` on every wave event).

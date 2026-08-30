@@ -4,8 +4,20 @@ import {
   dotClass,
   freezeIntent,
   paneActivity,
+  reasonWord,
   tallyDotClass,
 } from "./dashboard-visual-state.ts";
+
+test("reasonWord maps each ParkReason from the single enum to its display word (#295)", () => {
+  // The one mapping from the `ParkReason` enum to the word every surface prints beside
+  // `parked` — no reason-string regexes, just the enum. `red-base` reads as two words;
+  // the rest are their enum value verbatim.
+  assert.equal(reasonWord("question"), "question");
+  assert.equal(reasonWord("stalled"), "stalled");
+  assert.equal(reasonWord("conflict"), "conflict");
+  assert.equal(reasonWord("crash"), "crash");
+  assert.equal(reasonWord("red-base"), "red base");
+});
 
 test("dotClass maps a status to its dot state-class fragment (verbatim today)", () => {
   assert.equal(dotClass("running"), "running");

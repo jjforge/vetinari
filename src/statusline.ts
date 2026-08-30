@@ -2,6 +2,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { basename } from "node:path";
 import { loadConfig } from "./config.ts";
 import { buildStatus, type CampaignStatus, type IssueStatus } from "./status.ts";
+import { reasonWord } from "./dashboard-visual-state.ts";
 import { composeStatusLine } from "./statusline-install.ts";
 
 const COUNT_EMOJI: Array<[IssueStatus, string]> = [
@@ -61,6 +62,19 @@ export function formatStatusLine(status: CampaignStatus): string {
 
   const segs = COUNT_EMOJI.filter(([status]) => counts.get(status)).map(([status, emoji]) => `${emoji}${counts.get(status)}`);
   if (segs.length) parts.push(segs.join(" "));
+
+  // Name why work is parked, in the settled reason vocabulary (design §2.3): each held
+  // member's own reason plus any wave-level `red-base` hold, deduped and mapped through the
+  // single `reasonWord` so the bar spells a reason exactly as the dashboard does.
+  const reasons = new Set<string>();
+  for (const wave of status.waves) {
+    if (wave.reason) reasons.add(reasonWord(wave.reason));
+    for (const issue of wave.issues) {
+      if (issue.membership === "pruned") continue;
+      if (issue.status === "parked" && issue.reason) reasons.add(reasonWord(issue.reason));
+    }
+  }
+  if (reasons.size) parts.push([...reasons].join(", "));
 
   return parts.length ? `🏰 ${parts.join(" · ")}` : "🏰 idle";
 }

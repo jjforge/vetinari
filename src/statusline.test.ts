@@ -65,6 +65,41 @@ test("formatStatusLine counts each chip by its clean lifecycle and excludes a pr
   assert.doesNotMatch(line, /❌/); // no failure present
 });
 
+test("formatStatusLine prints the settled park-reason words for held members and a red base (#295)", () => {
+  // Beyond the five state counts, the line names why work is parked, in the settled reason
+  // vocabulary: a member's own reason (conflict/question/…) and the wave-level `red-base`
+  // hold, which reads as two words. One line, no newline.
+  const line = formatStatusLine({
+    project: "demo",
+    waves: [
+      {
+        index: 0,
+        status: "parked",
+        reason: "red-base",
+        issues: [
+          { issueNumber: "1", status: "completed" },
+          { issueNumber: "2", status: "completed" },
+        ],
+      },
+      {
+        index: 1,
+        status: "parked",
+        issues: [
+          { issueNumber: "3", status: "parked", reason: "conflict" },
+          { issueNumber: "4", status: "parked", reason: "question" },
+        ],
+      },
+    ],
+    parked: [],
+  });
+
+  assert.match(line, /⏸2/); // the two held members
+  assert.match(line, /conflict/);
+  assert.match(line, /question/);
+  assert.match(line, /red base/); // the wave-level red-base hold, spelled as two words
+  assert.equal(line.includes("\n"), false, "must be a single line");
+});
+
 test("formatStatusLine drops zero-count segments and omits the wave when none is running", () => {
   const line = formatStatusLine({
     project: "demo",

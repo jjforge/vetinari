@@ -81,7 +81,7 @@ When something stops the campaign, you take one of the five moves. An answer con
 - **Terminal**: the plan, per-wave progress, a one-line reason whenever it stops, and the exact command that resumes it — all as human-readable lines, never raw JSON. The event log is for the file (and `--json`), not the screen. The exit code says green, parked, or failed.
 - **Telegram**: a parked question arrives as a message; **reply to it** to answer. Wave and campaign progress, failures, and filed findings arrive as fire-and-forget notices. Each project names its own bot and chat in its `host.env` (projects may share a bot or each have their own), and replies route back to the project that asked. `/status` answers with a summary; `prune <issue>` previews and, on `yes`, prunes.
 - **Dashboard**: one page over every project on the machine, live. A card per project with its wave and counts; open a project for its waves and issues; tap an issue for its turn log — one sentence per turn in the agent's own words — and the moves available for its state. Past runs are listed under the live one and open read-only.
-- **Status line** (optional): the wave in flight and a count per state in the Claude Code status bar.
+- **Status line** (optional): the wave in flight, a count per state, and the reason words for any parked work, in the Claude Code status bar.
 
 ## Setup, once per project
 

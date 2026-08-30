@@ -20,9 +20,15 @@ Within a milestone each bold section label appears at most once.
 
 ### Collected changes — August 30, 2026
 
+**New features:**
+- [user] `campaign --resume --override` re-runs a failed member on a redrive; without it, a member that failed on the prior run holds its wave and the campaign stops as failed again (prune it or fix it forward instead) (#287).
+
 **Bug fixes:**
 - [user] A campaign wave with a failed issue now holds the wave and stops the campaign as failed: the wave still drains its siblings and merges their greens, then a `campaign-failed` event and a failure notice are logged and the run exits non-zero — no later wave starts on top of the missing work (#285).
 - [user] `prune` and `graft` (CLI and the dashboard prune/graft routes) now gate on whether the campaign is *settled* — every member merged — rather than on the presence of a `campaign-done` event (#286). A run that stopped incomplete (parked, failed, or crashed with no `campaign-done`) stays adjustable, and a run whose every member merged refuses adjustment even if its process died before logging `campaign-done`. A log with no campaign refuses with "nothing to prune/graft into".
+- [user] `campaign --resume` now redrives from the wave that stopped the campaign instead of stepping over it: it re-enters the first wave that did not close, lands a green-but-unmerged member (an answered park or a resolved conflict) by integrating it rather than re-running it, re-runs an answered park whose record is gone, and re-parks a wave whose park is still unresolved (#287).
+- [user] `answer <issue>` on a paused campaign's issue now continues the campaign by itself: once the answer goes green it triggers the redrive that integrates the green and runs the remaining waves — you no longer have to answer and then separately resume (#287).
+- [user] A question parked inside a red-base wave keeps its own reason, so the issue sheet still draws its reply box; a merged member of a red-base wave stays completed, with `red-base` carried as the wave's reason (#288).
 
 ### Collected changes — August 29, 2026
 

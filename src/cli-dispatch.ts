@@ -286,8 +286,10 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
       if (!cmd.args[0]) throw new Error("run needs a task id");
       enableJson(cmd.json);
       deps.archiveLeftoverRun();
-      // Exit code is the queue's slot signal (design §3): 0 green, 2 parked, 1 failed.
-      deps.setExitCode(exitCodeFor(await deps.runLoop(cfg, cmd.args[0])));
+      // Exit code is the queue's slot signal (design §3): 0 green, 2 parked, 1 failed. The loop
+      // holds one host slot around the container (design §3 step 1, §8) — `deps.host` carries the
+      // budget; a campaign child skips the slot itself (its parent holds one for it).
+      deps.setExitCode(exitCodeFor(await deps.runLoop(cfg, cmd.args[0], deps.host)));
       return;
     }
     case "campaign": {
@@ -600,6 +602,12 @@ async function dispatchAnswer(
     throw new Error('answer needs a task id and text: answer <task> "<answer>"');
   const taskId = cmd.taskId;
 
+  // Same preflight as `run` (design §3 step 1, §15): validate the provider and check its
+  // credentials before anything, so a gateway-spawned answer fails fast with a helpful line
+  // rather than dying inside a container. `answer` carries no `--agent` flags, so the selection
+  // is the project default with any inherited `VETINARI_AGENT` layered on.
+  deps.selectAgent(cfg, {});
+
   // Not parked → nothing to deliver to. Report one line and exit clean, idempotent against a
   // double answer or an answer a prune already removed (design §7).
   if (!deps.hasParked(cfg, taskId)) {
@@ -630,8 +638,8 @@ async function dispatchAnswer(
 
   // A standalone park (no campaign): run the loop directly — it consumes the answered record
   // (resume the session with the answer, or post it and re-enter fresh) and exits on its own
-  // verdict: 0 green, 2 parked, 1 failed.
-  deps.setExitCode(exitCodeFor(await deps.runLoop(cfg, taskId)));
+  // verdict: 0 green, 2 parked, 1 failed. Like any run it holds one host slot (design §8).
+  deps.setExitCode(exitCodeFor(await deps.runLoop(cfg, taskId, host)));
 }
 
 /**

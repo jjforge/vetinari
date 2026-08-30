@@ -336,7 +336,6 @@ Described by behaviour; the tracker holds the numbers (`gh issue list --label ca
 
 - `campaign` and `redrive` exit zero whatever happened; only `run` and `answer` set a code, and `run` reports parked and failed as the same code.
 - A run that throws logs no `failed`; the event exists only when a campaign parent infers it from the child's exit.
-- A standalone `run` or an `answer` takes no host slot, so the ceiling and the crash-liveness probe see only campaign children; `answer` also skips the credential preflight. The sandbox cuts a new branch from `HEAD`, not `baseBranch`, and there is no one-run-per-issue preflight — git errors raw.
 
 **Records and states**
 

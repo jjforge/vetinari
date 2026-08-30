@@ -9,7 +9,9 @@ import type {
   PiOptions,
 } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
+import { resolve, sep } from "node:path";
 import {
   AGENT_ENV_VAR,
   parseAgentOverride,
@@ -100,10 +102,32 @@ export async function makeSandbox(cfg: ResolvedConfig, taskId: string) {
   for (const m of mounts) mkdirSync(m.hostPath, { recursive: true });
 
   const branch = `${cfg.branchPrefix}${taskId}`;
+  // Preflight (design §3 step 1): git refuses a second worktree on a branch already
+  // checked out, so name that path and refuse cleanly here — before any container starts —
+  // rather than letting createSandbox surface a raw git error. sandcastle's own worktree
+  // for a resumed branch lives under stateDir and is reused, so it is excluded.
+  const foreign = foreignWorktreeFor(branch, cfg.stateDir);
+  if (foreign)
+    throw new Error(
+      `${branch} is already checked out at ${foreign} — remove that worktree before running this issue (one run per issue).`,
+    );
+
   cfg.log.log("sandbox", { taskId, branch, mounts: mounts.map((m) => m.hostPath) });
 
-  return sandcastle.createSandbox({
-    branch,
+  return sandcastle.createSandbox(makeSandboxOptions(cfg, taskId));
+}
+
+/**
+ * The `createSandbox` options for this run's container (design §3 step 2), split out so the
+ * fork point and branch are checkable without a Docker daemon. A fresh `agent/<id>` is cut
+ * from `cfg.baseBranch` — sandcastle ignores `baseBranch` when the branch already exists, so
+ * a reused branch keeps its commits regardless of what HEAD is currently on.
+ */
+export function makeSandboxOptions(cfg: ResolvedConfig, taskId: string): sandcastle.CreateSandboxOptions {
+  const mounts = cfg.mounts ?? [];
+  return {
+    branch: `${cfg.branchPrefix}${taskId}`,
+    baseBranch: cfg.baseBranch,
     // Route sandcastle's own gitignored artifacts (worktrees/, .env, patches/,
     // default logs/) into the project's state dir instead of a stray
     // `.sandcastle/`, so all ephemeral state lives under one place (default
@@ -113,7 +137,48 @@ export async function makeSandbox(cfg: ResolvedConfig, taskId: string) {
     hooks: cfg.setup?.length
       ? { sandbox: { onSandboxReady: cfg.setup.map((command) => ({ command, timeoutMs: cfg.setupTimeoutMs ?? 300_000 })) } }
       : undefined,
-  });
+  };
+}
+
+/** True when `p` resolves to `root` or a path beneath it. */
+const isUnder = (p: string, root: string): boolean => {
+  const rp = resolve(p);
+  return rp === root || rp.startsWith(root + sep);
+};
+
+/**
+ * Scan `git worktree list --porcelain` output for a worktree holding `branch` that is NOT
+ * under `stateRoot` — a foreign checkout (the host repo itself, or a manual review
+ * worktree), the one case git refuses a second worktree for (design §3 step 1). sandcastle's
+ * own worktrees live under `stateRoot` and are reused on resume, so they are excluded.
+ * Returns the offending path, or undefined when the branch is free to check out. Pure — the
+ * caller runs git and resolves `stateRoot`.
+ */
+export function parseForeignWorktree(porcelain: string, branch: string, stateRoot: string): string | undefined {
+  const wanted = `branch refs/heads/${branch}`;
+  const root = resolve(stateRoot);
+  let path: string | undefined;
+  for (const raw of porcelain.split("\n")) {
+    const line = raw.trim();
+    if (line.startsWith("worktree ")) path = line.slice("worktree ".length).trim();
+    else if (line === wanted && path && !isUnder(path, root)) return path;
+  }
+  return undefined;
+}
+
+/**
+ * The path where `branch` is checked out in a foreign worktree, or undefined when it is free
+ * (design §3 step 1). Runs git in `cwd` (the host repo); a git failure — e.g. not a repo —
+ * yields undefined so `createSandbox` still surfaces the real error.
+ */
+export function foreignWorktreeFor(branch: string, stateDir: string, cwd: string = process.cwd()): string | undefined {
+  let porcelain: string;
+  try {
+    porcelain = execFileSync("git", ["worktree", "list", "--porcelain"], { cwd, encoding: "utf8" });
+  } catch {
+    return undefined;
+  }
+  return parseForeignWorktree(porcelain, branch, resolve(cwd, stateDir));
 }
 
 /**

@@ -103,7 +103,7 @@ test("a green agent turn commits on its branch and the real gate runs via the lo
     return { signal: DONE, stdout: "<turn-summary>added the marker</turn-summary>" };
   };
 
-  const outcome = await inRepo(dir, () => runLoop(cfg, "T1", undefined, loopDepsFor(greenScript)));
+  const outcome = await inRepo(dir, () => runLoop(cfg, "T1", undefined, undefined, loopDepsFor(greenScript)));
 
   assert.equal(outcome, "green");
   assert.equal(listParked(cfg).length, 0);
@@ -138,7 +138,7 @@ test("a deliberately red gate yields a real non-zero exit via exec and parks —
     return { signal: DONE, stdout: "<turn-summary>tried again</turn-summary>" };
   };
 
-  const outcome = await inRepo(dir, () => runLoop(cfg, "T2", undefined, loopDepsFor(redScript)));
+  const outcome = await inRepo(dir, () => runLoop(cfg, "T2", undefined, undefined, loopDepsFor(redScript)));
 
   // A red gate parks (stalled on the turn budget) — never a green over a red suite.
   assert.equal(outcome, "parked");
@@ -179,7 +179,7 @@ const localCampaignDeps = (
   scriptFor: (id: string) => LocalAgentScript = implScript,
 ): CampaignDeps => {
   const spawnRun: RunSpawner = async (taskId) => {
-    const outcome = await runLoop(cfg, taskId, undefined, loopDepsFor(scriptFor(taskId)));
+    const outcome = await runLoop(cfg, taskId, undefined, undefined, loopDepsFor(scriptFor(taskId)));
     return outcome === "green" ? 0 : outcome === "parked" ? 2 : 1;
   };
   // The merged-base gate: real runGates over the merged base through the local sandbox

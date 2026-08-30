@@ -8,6 +8,7 @@ import type { Sandbox, SandboxRunOptions, SandboxRunResult } from "./sandbox.ts"
 import { loggerForRun } from "./log.ts";
 import { readEventLog } from "./event-log.ts";
 import { answerParked, hasParked, listOutbox, listParked, park } from "./state.ts";
+import { projectHasLiveLease, readLeases, type HostBudget } from "./host-slots.ts";
 import { BLOCKED, DONE, extractTurnSummary, parkedAnswerComment, runLoop, type LoopDeps } from "./loop.ts";
 
 // A temp-dir `cfg` mirroring graft.test/modes.test's `harnessCfg`: a real on-disk
@@ -139,7 +140,7 @@ test("runLoop parks (question) when a turn emits the BLOCKED signal", async () =
     { run: { completionSignal: BLOCKED, stdout: "<question><summary>Which base?</summary></question>" } },
   ]);
 
-  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, depsFor(sbx)));
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
 
   assert.equal(outcome, "parked");
   const parked = listParked(cfg);
@@ -152,7 +153,7 @@ test("runLoop parks (stalled: no-commit) when the gate passes but the branch has
   const cfg = harnessCfg();
   const sbx = fakeSandbox([{ run: { completionSignal: DONE }, green: true }]);
 
-  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, depsFor(sbx, { commitsAhead: () => 0 })));
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { commitsAhead: () => 0 })));
 
   assert.equal(outcome, "parked");
   const parked = listParked(cfg);
@@ -170,7 +171,7 @@ test("runLoop's no-commit park precedes the gates (design §3 step 6): a COMPLET
   // the gate never runs.
   const sbx = fakeSandbox([{ run: { completionSignal: DONE }, green: false }]);
 
-  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, depsFor(sbx, { commitsAhead: () => 0 })));
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { commitsAhead: () => 0 })));
 
   assert.equal(outcome, "parked");
   const parked = listParked(cfg);
@@ -185,7 +186,7 @@ test("runLoop logs a failed verdict and returns failed when a turn throws a non-
   const cfg = harnessCfg();
   const sbx = fakeSandbox([{ throwGeneric: "container vanished" }]);
 
-  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, depsFor(sbx)));
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
 
   assert.equal(outcome, "failed");
   const failed = readEventLog(cfg).find((e) => e.event === "failed") as { taskId: string; detail: string } | undefined;
@@ -200,7 +201,7 @@ test("runLoop returns green when the gate passes on a real change", async () => 
   const cfg = harnessCfg();
   const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc123" }] }, green: true }]);
 
-  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, depsFor(sbx)));
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
 
   assert.equal(outcome, "green");
   const green = readEventLog(cfg).find((e) => e.event === "green") as { branch: string; commits: string[] } | undefined;
@@ -218,7 +219,7 @@ test("runLoop counts a null commitsAhead (git failed) as a real change, not an e
   const cfg = harnessCfg();
   const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc123" }] }, green: true }]);
 
-  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, depsFor(sbx, { commitsAhead: () => null })));
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { commitsAhead: () => null })));
 
   assert.equal(outcome, "green");
   assert.ok(readEventLog(cfg).some((e) => e.event === "green"), "null commitsAhead must still be green");
@@ -232,7 +233,7 @@ test("runLoop resumes a red gate on the same session and reaches green next turn
     { run: { completionSignal: DONE, commits: [{ sha: "def456" }] }, green: true },
   ]);
 
-  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, depsFor(sbx)));
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
 
   assert.equal(outcome, "green");
   // The second run is a resume of turn 0's session — the same path park→answer uses.
@@ -259,7 +260,7 @@ test("runLoop preflight warns once when a non-resumable provider has no postComm
   const cfg = harnessCfg({ agent: { provider: "copilot" }, promptFile: "/prompts/tdd.md" });
   const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc" }] }, green: true }]);
 
-  const { warnings } = await captureWarn(() => runLoop(cfg, "T-1", undefined, depsFor(sbx)));
+  const { warnings } = await captureWarn(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
 
   const preflight = warnings.filter((w) => /postComment/.test(w));
   assert.equal(preflight.length, 1, "the preflight warning is printed exactly once");
@@ -271,7 +272,7 @@ test("runLoop preflight does not warn when a non-resumable provider HAS postComm
   const cfg = harnessCfg({ agent: { provider: "copilot" }, promptFile: "/prompts/tdd.md", postComment: async () => {} });
   const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc" }] }, green: true }]);
 
-  const { warnings } = await captureWarn(() => runLoop(cfg, "T-1", undefined, depsFor(sbx)));
+  const { warnings } = await captureWarn(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
 
   assert.equal(warnings.filter((w) => /postComment/.test(w)).length, 0);
 });
@@ -280,7 +281,7 @@ test("runLoop preflight does not warn for a resumable provider (its park→answe
   const cfg = harnessCfg({ agent: { provider: "claude" } });
   const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc" }] }, green: true }]);
 
-  const { warnings } = await captureWarn(() => runLoop(cfg, "T-1", undefined, depsFor(sbx)));
+  const { warnings } = await captureWarn(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
 
   assert.equal(warnings.filter((w) => /postComment/.test(w)).length, 0);
 });
@@ -300,7 +301,7 @@ test("runLoop drives a non-resumable provider by a FRESH re-run each red turn �
     { run: { completionSignal: DONE, commits: [{ sha: "def456" }] }, green: true },
   ]);
 
-  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, depsFor(sbx)));
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
 
   assert.equal(outcome, "green");
   assert.equal(sbx.runCalls.length, 2);
@@ -323,7 +324,7 @@ test("runLoop's fresh re-run carries only the most-recent turn summary, not the 
     { run: { completionSignal: DONE, commits: [{ sha: "abc" }] }, green: true },
   ]);
 
-  await silence(() => runLoop(cfg, "T-1", undefined, depsFor(sbx)));
+  await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
 
   const thirdTask = sbx.runCalls[2].promptArgs?.TASK ?? "";
   assert.match(thirdTask, /Second slice\./);
@@ -334,7 +335,7 @@ test("runLoop parks (stalled: budget) for a one-shot non-resumable run (maxTurns
   const cfg = harnessCfg({ agent: { provider: "copilot" }, maxTurns: 1, promptFile: "/prompts/tdd.md" });
   const sbx = fakeSandbox([{ run: { completionSignal: DONE }, green: false }]);
 
-  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, depsFor(sbx)));
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
 
   assert.equal(outcome, "parked");
   assert.equal(sbx.runCalls.length, 1);
@@ -351,7 +352,7 @@ test("runLoop parks (stalled: budget) when every turn stays red through maxTurns
     { run: { completionSignal: DONE }, green: false },
   ]);
 
-  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, depsFor(sbx)));
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
 
   assert.equal(outcome, "parked");
   const parked = listParked(cfg);
@@ -364,7 +365,7 @@ test("runLoop parks (stalled: idle) when the agent dies on an Idle-named error",
   const cfg = harnessCfg();
   const sbx = fakeSandbox([{ throwIdle: true }]);
 
-  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, depsFor(sbx)));
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
 
   assert.equal(outcome, "parked");
   const parked = listParked(cfg);
@@ -384,7 +385,7 @@ test("runLoop resumes the parked session on the answer path without re-fetching 
   const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc123" }] }, green: true }]);
 
   const outcome = await silence(() =>
-    runLoop(cfg, "T-1", { resumeSessionId: "prev-sess", answerPrompt: "the human's answer" }, depsFor(sbx)),
+    runLoop(cfg, "T-1", undefined, { resumeSessionId: "prev-sess", answerPrompt: "the human's answer" }, depsFor(sbx)),
   );
 
   assert.equal(outcome, "green");
@@ -401,7 +402,7 @@ test("runLoop consumes an answered parked record for a resumable provider — re
   answerParked(cfg, "T-1", "use approach A");
   const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc123" }] }, green: true }]);
 
-  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, depsFor(sbx)));
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
 
   assert.equal(outcome, "green");
   // The answered record drove a session resume carrying the human's answer — not a fresh fetch.
@@ -425,7 +426,7 @@ test("runLoop consumes an answered parked record for a non-resumable provider �
   answerParked(cfg, "T-1", "use approach A");
   const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc" }] }, green: true }]);
 
-  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, depsFor(sbx)));
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
 
   assert.equal(outcome, "green");
   // Non-resumable: the answer is relayed as an issue comment and the run re-enters fresh (re-reads the issue).
@@ -434,4 +435,64 @@ test("runLoop consumes an answered parked record for a non-resumable provider �
   assert.equal(sbx.runCalls[0].resumeSession, undefined, "no session resume — a fresh run");
   assert.ok(fetched >= 1, "the fresh run re-reads the issue");
   assert.equal(hasParked(cfg, "T-1"), false, "the answered record is cleared once the run starts");
+});
+
+// A fake sandbox whose `run()` observes the host lease mid-container, so a test can assert
+// the run is holding a slot exactly while the agent works.
+const leaseObservingSandbox = (configDir: string, project: string) => {
+  const observed: { live: boolean } = { live: false };
+  const sbx: Sandbox = {
+    branch: "agent/T-1",
+    async run() {
+      observed.live = projectHasLiveLease(configDir, project);
+      return { iterations: [{ sessionId: "s" }], commits: [{ sha: "abc123" }], completionSignal: DONE, stdout: "" };
+    },
+    async exec(cmd) {
+      if (cmd.startsWith("git diff --name-only")) return { stdout: "src/loop.ts\n", stderr: "", exitCode: 0 };
+      return { stdout: "", stderr: "", exitCode: 0 };
+    },
+    async close() {
+      return undefined;
+    },
+  };
+  return { sbx, observed };
+};
+
+test("a standalone run holds one host slot around the container's life so projectHasLiveLease sees it (design §3 step 1, §8)", async () => {
+  const configDir = mkdtempSync(join(tmpdir(), "vetinari-loop-slots-"));
+  const host: HostBudget = { configDir, ceiling: 4, weight: 1 };
+  const cfg = harnessCfg({ project: "solo" });
+  const { sbx, observed } = leaseObservingSandbox(configDir, "solo");
+
+  const prevChild = process.env.VETINARI_CHILD;
+  delete process.env.VETINARI_CHILD;
+  try {
+    const outcome = await silence(() => runLoop(cfg, "T-1", host, undefined, depsFor(sbx)));
+    assert.equal(outcome, "green");
+  } finally {
+    if (prevChild === undefined) delete process.env.VETINARI_CHILD;
+    else process.env.VETINARI_CHILD = prevChild;
+  }
+
+  assert.equal(observed.live, true, "the project holds a live lease while the container runs");
+  assert.deepEqual(readLeases(configDir), [], "the slot is released and the project deregistered once the run finishes");
+});
+
+test("a campaign child run takes no host slot — its parent already holds one for it (design §8)", async () => {
+  const configDir = mkdtempSync(join(tmpdir(), "vetinari-loop-slots-"));
+  const host: HostBudget = { configDir, ceiling: 4, weight: 1 };
+  const cfg = harnessCfg({ project: "solo" });
+  const { sbx, observed } = leaseObservingSandbox(configDir, "solo");
+
+  const prevChild = process.env.VETINARI_CHILD;
+  process.env.VETINARI_CHILD = "1";
+  try {
+    await silence(() => runLoop(cfg, "T-1", host, undefined, depsFor(sbx)));
+  } finally {
+    if (prevChild === undefined) delete process.env.VETINARI_CHILD;
+    else process.env.VETINARI_CHILD = prevChild;
+  }
+
+  assert.equal(observed.live, false, "a child never registers a second lease beside its parent's");
+  assert.deepEqual(readLeases(configDir), [], "no lease is left behind");
 });

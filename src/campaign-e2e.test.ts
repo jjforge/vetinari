@@ -144,7 +144,7 @@ const localCampaignDeps = (
   const spawnRun: RunSpawner = async (taskId) => {
     spawns.push(taskId);
     try {
-      const outcome = await runLoop(cfg, taskId, undefined, loopDepsFor(scriptFor(taskId)));
+      const outcome = await runLoop(cfg, taskId, undefined, undefined, loopDepsFor(scriptFor(taskId)));
       // Mirror the real child `run`'s exit code (cli-dispatch's `exitCodeFor`): 0 green, 2
       // parked, 1 failed — the loop now returns `failed` for a thrown turn rather than
       // rethrowing (design §3 step 9), so the child exits 1 without spawnRun's catch.
@@ -351,7 +351,7 @@ test("scenario 4: a redrive integrates a green-but-unmerged member — landed wi
     // `answer` does) re-enters agent/102, greens, logs `green`, and clears the record — but
     // does NOT merge. So the redrive re-enters a wave with a green-but-unmerged member.
     tracker.answer("102", "use approach B");
-    const answered = await runLoop(cfg, "102", undefined, loopDepsFor(scriptFor("102")));
+    const answered = await runLoop(cfg, "102", undefined, undefined, loopDepsFor(scriptFor("102")));
     assert.equal(answered, "green", "the answered member ran to green");
     assert.equal(gitOut(dir, ["branch", "--list", "agent/102"]), "agent/102", "102 is green but its branch is unmerged");
 

@@ -255,6 +255,39 @@ export function acquireSlot(configDir: string, ceiling: number, project: string,
   });
 }
 
+/** How long to wait before re-checking for a freed slot when the ceiling is full. */
+const SLOT_POLL_MS = 1000;
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Hold one host slot for the life of a standalone run or `answer` (design §3 step 1, §8).
+ * Register the project first — so `projectHasLiveLease` sees it and contending projects drain
+ * toward their share even while this run waits at held zero — then acquire one slot, waiting
+ * first-come while the ceiling or this project's fair share is full. Run `fn`, then give the
+ * slot back and deregister, even if `fn` throws. A campaign child never calls this: its parent
+ * already holds a slot for it.
+ */
+export async function withHostSlot<T>(
+  host: HostBudget,
+  project: string,
+  fn: () => Promise<T>,
+  opts: LeaseOpts & { wait?: (ms: number) => Promise<void> } = {},
+): Promise<T> {
+  const wait = opts.wait ?? sleep;
+  registerProject(host.configDir, project, host.weight, opts);
+  try {
+    while (!acquireSlot(host.configDir, host.ceiling, project, host.weight, opts))
+      await wait(SLOT_POLL_MS);
+    try {
+      return await fn();
+    } finally {
+      releaseSlot(host.configDir, opts);
+    }
+  } finally {
+    deregisterProject(host.configDir, opts);
+  }
+}
+
 /** Give one held slot back — called when a container parks or finishes. Never drops below zero. */
 export function releaseSlot(configDir: string, opts: LeaseOpts = {}): void {
   const pid = opts.pid ?? process.pid;

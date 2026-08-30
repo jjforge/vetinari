@@ -100,14 +100,16 @@ test("renderStatusPage shows a Redrive control only for a campaign parked on a r
     },
     { prune: true },
   );
-  // A campaign parked on a red base (a held member with the red-base reason) offers a Redrive
-  // action that POSTs to /redrive carrying only its project (redrive is project-scoped — no
-  // taskId), mirroring the prune/answer forms.
-  assert.match(redBaseParked, /<form method="post" action="\/redrive"[^>]*>/);
-  assert.match(redBaseParked, /name="project" value="beta"/);
+  // A campaign parked on a red base (a held member with the red-base reason) offers the
+  // campaign-level Redrive banner that POSTs to /redrive carrying only its project (redrive is
+  // project-scoped — no taskId), mirroring the prune/answer forms.
+  assert.match(redBaseParked, /<section class="redrive-banner">/);
+  assert.match(redBaseParked, /<form method="post" action="\/redrive" class="redrive-form"><input type="hidden" name="project" value="beta"/);
   assert.match(redBaseParked, /Redrive/);
 
-  // A plain running campaign (no red-base hold) shows no Redrive control at all.
+  // A plain running campaign (no red-base hold) shows no campaign-level Redrive banner. (The
+  // per-issue Redrive move now lives in the issue sheet, gated client-side by issueMoves — its
+  // hidden form is present on every page, so the contrast here is the banner, #307.)
   const running = renderStatusPage(
     {
       project: "beta",
@@ -116,7 +118,7 @@ test("renderStatusPage shows a Redrive control only for a campaign parked on a r
     },
     { prune: true },
   );
-  assert.doesNotMatch(running, /action="\/redrive"/);
+  assert.doesNotMatch(running, /class="redrive-banner"/);
 });
 test("renderStatusPage puts a quiet graft input on the summary line, greyed at rest (#202, #168)", () => {
   const runningCampaign = {
@@ -1346,10 +1348,11 @@ test("renderStatusPage hosts the prune affordance and inline confirm in the tap-
     { prune: true },
   );
 
-  // The panel — not the chip — carries a Prune button and a hidden inline confirm.
+  // The panel — not the chip — carries a Prune button (in the one shared move-button style)
+  // and a hidden inline confirm.
   assert.match(
     html,
-    /<button type="button" id="prune-start" class="prune-start">Prune<\/button>/,
+    /<button type="button" id="prune-start" class="sheet-btn prune-start">Prune<\/button>/,
   );
   assert.match(
     html,
@@ -1377,7 +1380,7 @@ test("renderStatusPage hosts the prune affordance and inline confirm in the tap-
   assert.match(html, /method: "POST"/);
   assert.match(html, /pruning/);
 });
-test("renderStatusPage hosts a parked reply block with a Redrive button in the tap-detail sheet", () => {
+test("renderStatusPage hosts a parked reply block with a Reply submit and a separate Redrive form (#307)", () => {
   const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
 
   // The sheet carries a reply block, hidden until the opened issue is parked.
@@ -1393,10 +1396,16 @@ test("renderStatusPage hosts a parked reply block with a Redrive button in the t
     html,
     /id="reply-form"[\s\S]*?name="taskId"[\s\S]*?name="project"[\s\S]*?<textarea name="text"/,
   );
-  // Redrive submits that form; it is associated by `form=` so it can sit outside the form, beside Prune.
+  // Reply submits that form; it is associated by `form=` so it can sit outside the form, beside
+  // the Redrive form and Prune.
   assert.match(
     html,
-    /<button type="submit" form="reply-form" id="reply-redrive" class="reply-redrive" hidden>Redrive<\/button>/,
+    /<button type="submit" form="reply-form" id="reply-send" class="sheet-btn" hidden>Reply<\/button>/,
+  );
+  // Redrive is its own move: a form POSTing /redrive (project-scoped, no taskId).
+  assert.match(
+    html,
+    /<form method="post" action="\/redrive" id="redrive-form" hidden><input type="hidden" name="project" value="" \/><button type="submit" class="sheet-btn">Redrive<\/button><\/form>/,
   );
 });
 test("renderStatusPage caps the reply textarea so it stays within the sheet/card (#73)", () => {
@@ -1406,19 +1415,19 @@ test("renderStatusPage caps the reply textarea so it stays within the sheet/card
   // never overflows and introduces no horizontal scroll on the sheet.
   assert.match(html, /\btextarea \{[^}]*max-width: 100%/);
 });
-test("renderStatusPage places Redrive beside Prune in one sheet-actions row, sized for touch", () => {
+test("renderStatusPage places Reply, Redrive and Prune in one sheet-actions row, sized for touch (#307)", () => {
   const html = renderStatusPage(
     { project: "demo", waves: [], parked: [] },
     { prune: true },
   );
 
-  // Both controls live in the same actions row so they are reachable one-handed together.
+  // All the move controls live in the same actions row so they are reachable one-handed together.
   assert.match(
     html,
-    /<div class="sheet-actions"><button type="submit" form="reply-form" id="reply-redrive"[^>]*>Redrive<\/button><div id="prune-panel"/,
+    /<div class="sheet-actions"><button type="submit" form="reply-form" id="reply-send"[^>]*>Reply<\/button><form method="post" action="\/redrive" id="redrive-form"[^>]*>[\s\S]*?Redrive<\/button><\/form><div id="prune-panel"/,
   );
-  // A 44px tap target for the primary Redrive action on a phone.
-  assert.match(html, /\.reply-redrive \{[^}]*min-height: 44px;/);
+  // A 44px tap target for the shared move button on a phone.
+  assert.match(html, /\.sheet-btn \{[^}]*min-height: 44px;/);
   // The actions row is a flex box, so it needs [hidden] restored explicitly or an
   // empty foot (no reply, no prune) would always show its border and padding.
   assert.match(html, /\.sheet-actions\[hidden\][^{]*\{ display: none; \}/);
@@ -1445,7 +1454,7 @@ test("renderStatusPage gives the parked block a directive heading and labels the
   const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
 
   // The parked block leads with a directive heading, not a flat "Reply & redrive".
-  assert.match(html, /class="reply-heading">PARKED — NEEDS YOUR ANSWER</);
+  assert.match(html, /class="reply-heading" id="reply-heading">PARKED — NEEDS YOUR ANSWER</);
   assert.doesNotMatch(html, /Reply &amp; redrive/);
   // The turn log is its own labeled section ("Agent turns"), distinct from the meta tiles.
   assert.match(html, /class="turn-log-heading">Agent turns</);

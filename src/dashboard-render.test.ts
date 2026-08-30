@@ -228,10 +228,12 @@ test("failure renders in its own red on every surface, never the prune action's 
   assert.ok(
     ISSUE_DETAIL_SHEET_STYLES.includes(`.turn-num.failure { color: ${failure}; }`),
   );
-  // The prune controls keep --color-red — a control, never the failure state.
+  // The prune confirm/cancel keep --color-red — a control's own red, never the failure state.
+  // (The Prune button itself now shares the one teal .sheet-btn move style, #307; the red marks
+  // the destructive confirm step.)
   assert.match(
     ISSUE_DETAIL_SHEET_STYLES,
-    /\.prune-start[^{]*\{[^}]*var\(--color-red\)/,
+    /\.prune-confirm-btn[^{]*\{[^}]*var\(--color-red\)/,
   );
   assert.ok(campaign.includes(`.turn-num.failure { color: ${failure}; }`));
 });

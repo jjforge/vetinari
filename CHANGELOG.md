@@ -103,6 +103,7 @@ Within a milestone each bold section label appears at most once.
 - [ops] A merge-conflict quarantine now writes a durable parked record, and parked records survive an archive and the wave boundary, so a conflict-held card stays off idle and answerable until it is resolved/redriven or `prune --purge`d (#319).
 - [ops] A re-admitted parked member (its answer delivered, child re-spawned) reads `running` again on the dashboard, instead of lingering as parked until its next verdict (#319).
 - [user] The dashboard no longer offers Redrive while a campaign process is still running, so a redrive can no longer spawn a second campaign over a draining wave (#325).
+- [user] Closing an archived run on the project page now clears `run=` from the URL, so a reload renders the list collapsed instead of re-expanding the run you dismissed; opening a run still deep-links it (#333).
 
 **Documentation:**
 - [internal] `CONTEXT.md` is now a domain-only glossary in the settled vocabulary: an entry for every object, state, park reason and move in the user guide's model; retired words (`carve`, `queue`, `quarantined`, `wave-parked`, `interrupted`, `campaign-plan`, `dispatch`/`attend`, `hostWeight`, `QUEUE_SLOTS`) demoted to _Avoid_ lines; dashboard widgets, colour rules and testing terms removed (#300).

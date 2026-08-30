@@ -353,6 +353,20 @@ test("feedProjects lists the distinct projects present in the buffer, sorted, up
   // A new project's event grows the option set.
   assert.deepEqual(feedProjects([...buffer, fe("gamma", "g1")]), ["acme", "beta", "gamma"]);
 });
+test("an idle card links to its last run and shows that run's outcome and finish time (design §11)", () => {
+  const html = renderLandingShell(["alpha"]);
+  // Clicking an idle card opens the project page with its last run expanded at the top:
+  // the href carries the run token when the card has a lastRun, plain ?project= otherwise.
+  assert.match(
+    html,
+    /card\.href = "\/\?project=" \+ encodeURIComponent\(p\.project\) \+ \(p\.lastRun \? "&run=" \+ encodeURIComponent\(p\.lastRun\.run\) : ""\)/,
+  );
+  // The card renders the run's outcome (complete → "Completed", stalled → "Stalled")…
+  assert.match(html, /p\.lastRun\.outcome === "complete" \? "Completed" : "Stalled"/);
+  // …and when it finished, humanized off finishedAt (the campaign name is the card-campaign line).
+  assert.match(html, /fmtWaited\(p\.lastRun\.finishedAt\)/);
+  assert.match(html, /finished /);
+});
 test("the card progress-bar selector is scoped so no bare `.progress {` rule can leak onto a status word (#85)", () => {
   const html = renderLandingShell(["alpha"]);
   // A bare `.progress {` rule (the card progress bar) would match any element carrying the

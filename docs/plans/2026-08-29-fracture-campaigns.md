@@ -79,7 +79,10 @@ Exit: the issue sheet offers exactly the moves the reason allows; the idle card 
 | Wave | Issues |
 | --- | --- |
 | 1 | #306 split `dashboard-render.ts` into landing / project / issue-sheet renderers |
-| 2 | #307 moves per park reason on the issue sheet · #308 idle card shows the last run · #309 live tail follows the wave in flight (`needs-triage` — reproduce first, or run by ids without it) |
+| 2 | #307 moves per park reason on the issue sheet |
+| 3 | #308 idle card shows the last run (spills after #307: both cite `dashboard-render.ts`, which survives the split as the re-export) · #309 live tail follows the wave in flight (`needs-triage` — reproduce first, or run by ids without it) |
+
+#307/#308 originally cited the files #306 *creates*; a tree-absent `Touches:` cite makes the planner drop the issue before #306 ever runs, so `/fileset` rewrote them to today's files (the post-split targets are in each body's prose).
 
 `blocked_by`: 306 ← 295 · 307, 308, 309 ← 306.
 

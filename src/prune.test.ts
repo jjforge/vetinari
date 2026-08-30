@@ -247,49 +247,51 @@ test("quarantineImpacts skips a quarantined id no longer in the plan (an earlier
   assert.deepEqual(impacts, []);
 });
 
-test("resumeIndex skips waves that already merged work and points at the first unrun wave", () => {
-  // Waves 0 and 1 fully merged, wave 2 never started: resume picks up at wave 2.
+test("resumeIndex skips closed waves and points at the first wave that did not close", () => {
+  // Waves 0 and 1 closed (batch-done), wave 2 never started: resume picks up at wave 2.
   const index = resumeIndex({
     waves: [["611", "640"], ["623"], ["701", "712"]],
-    outcomes: outcomesFrom({ "611": "completed", "640": "completed", "623": "completed" }),
+    closedWaves: new Set([0, 1]),
   });
   assert.equal(index, 2);
 });
 
-test("resumeIndex skips a wave-parked wave whose greens are merged but never closed", () => {
-  // Wave 1 wave-parked: its greens merged (completed) though the wave never closed.
-  // Resume must not redo those merged issues, so it continues at the unstarted wave 2.
+test("resumeIndex re-enters a wave-parked wave whose greens merged but never closed", () => {
+  // Wave 1 wave-parked: its greens merged though the wave never closed (no batch-done).
+  // The redrive re-enters wave 1 to reconcile it — its already-merged greens are landed
+  // (not respawned) by the wave's reconciliation, not skipped over here.
   const index = resumeIndex({
     waves: [["611"], ["640", "655"], ["701"]],
-    outcomes: outcomesFrom({ "611": "completed", "640": "completed", "655": "completed" }),
+    closedWaves: new Set([0]),
   });
-  assert.equal(index, 2);
+  assert.equal(index, 1);
 });
 
-test("resumeIndex returns the wave count when every wave has merged — nothing left to run", () => {
+test("resumeIndex returns the wave count when every wave closed — nothing left to run", () => {
   const index = resumeIndex({
     waves: [["611"], ["640"]],
-    outcomes: outcomesFrom({ "611": "completed", "640": "completed" }),
+    closedWaves: new Set([0, 1]),
   });
   assert.equal(index, 2); // == waves.length: the caller reports nothing left
 });
 
-test("resumeIndex resumes from the top when no wave has banked any work", () => {
+test("resumeIndex resumes from the top when no wave has closed", () => {
   const index = resumeIndex({
     waves: [["611"], ["640"]],
-    outcomes: outcomesFrom({ "611": "parked" }),
+    closedWaves: new Set(),
   });
   assert.equal(index, 0);
 });
 
-test("resumeIndex resumes past the last wave with any merged member, not just fully-merged waves", () => {
-  // Wave 1 has one merged (640) and one still parked (655): it banked work, so resume
-  // must not re-run it (that would redo 640). Continue at the next unrun wave.
+test("resumeIndex re-enters a wave that banked some work but did not close", () => {
+  // Wave 1 has one merged (640) and one still parked (655): it never closed, so the
+  // redrive re-enters it — reconciliation lands 640 without a rerun and re-runs or
+  // re-parks 655 — rather than stepping over the unresolved park.
   const index = resumeIndex({
     waves: [["611"], ["640", "655"], ["701"]],
-    outcomes: outcomesFrom({ "611": "completed", "640": "completed", "655": "parked" }),
+    closedWaves: new Set([0]),
   });
-  assert.equal(index, 2);
+  assert.equal(index, 1);
 });
 
 test("restrictBlockers keeps only the edges that stay inside the selected set", async () => {

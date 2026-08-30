@@ -595,6 +595,171 @@ test("campaign --resume recovers the run's name from the log, not the ignored pa
   assert.deepEqual(resumed?.tasks, ["102"]);
 });
 
+// A CampaignDeps that records which task ids it spawns and which green sets it is asked
+// to integrate, so a redrive test can prove work was landed rather than re-run.
+const recordingDeps = (
+  cfg: ResolvedConfig,
+  spawned: string[],
+  integrated: string[][],
+  spawnRun: CampaignDeps["spawnRun"] = async (id) => {
+    spawned.push(id);
+    return 0;
+  },
+): CampaignDeps => ({
+  spawnRun: async (id) => spawnRun(id),
+  integrate: async (_cfg, greens) => {
+    integrated.push(greens);
+    return { merged: greens, quarantined: [] };
+  },
+  collectChangelog: () => ({ collected: [], committed: false }),
+  currentBranch: () => cfg.baseBranch,
+});
+
+// Seed a wave-0 park: 101 merged green, 102 parked — with no `campaign-batch-done`, so
+// the wave never closed. The base state every redrive-reconciliation test starts from.
+const seedParkedWave = (cfg: ResolvedConfig) => {
+  cfg.log.log("campaign-start", { batches: [["101", "102"]], slots: 4 });
+  cfg.log.log("campaign-batch", { index: 0, tasks: ["101", "102"] });
+  cfg.log.log("green", { taskId: "101", branch: "agent/101", commits: ["a"] });
+  cfg.log.log("parked", { taskId: "102", reason: "blocked" });
+  cfg.log.log("wave-parked", { merged: ["101"], detail: "parked, awaiting a human: 102" });
+};
+
+test("redrive re-enters the parked wave and integrates a green-but-unmerged member without respawning it (design §7)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-green-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  seedParkedWave(cfg);
+  // The answer landed: 102 ran to green (its record cleared, a `green` logged) — so both
+  // members are `completed`, but the wave still never closed.
+  cfg.log.log("green", { taskId: "102", branch: "agent/102", commits: ["b"] });
+
+  const spawned: string[] = [];
+  const integrated: string[][] = [];
+  const ok = await silenceConsole(() =>
+    campaign(cfg, [], host, undefined, { resume: true }, recordingDeps(cfg, spawned, integrated)),
+  );
+
+  assert.equal(ok, true);
+  assert.deepEqual(spawned, [], "no member of the parked wave was respawned");
+  assert.deepEqual(integrated, [["101", "102"]], "both greens were handed to integration to land");
+  assert.ok(
+    readEventLog(cfg).some((e) => e.event === "campaign-batch-done"),
+    "the reconciled wave closed",
+  );
+});
+
+test("redrive re-runs a parked member whose parked record is gone (answered), and lands the rest", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-answered-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  seedParkedWave(cfg);
+  // 102 is parked in the log but has NO on-disk record — the answered-park signal.
+
+  const spawned: string[] = [];
+  const integrated: string[][] = [];
+  const ok = await silenceConsole(() =>
+    campaign(cfg, [], host, undefined, { resume: true }, recordingDeps(cfg, spawned, integrated)),
+  );
+
+  assert.equal(ok, true);
+  assert.deepEqual(spawned, ["102"], "only the answered park re-ran — 101 was banked, not respawned");
+});
+
+test("redrive does not spawn a parked member whose record remains; the wave parks again", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-unanswered-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  seedParkedWave(cfg);
+  // 102's parked record is still on disk — no answer landed.
+  mkdirSync(cfg.parkedDir, { recursive: true });
+  writeFileSync(
+    join(cfg.parkedDir, "102.json"),
+    JSON.stringify({ taskId: "102", reason: "blocked", branch: "agent/102", question: "?", parkedAt: "2026-08-30T00:00:00Z" }),
+  );
+
+  const spawned: string[] = [];
+  const integrated: string[][] = [];
+  const ok = await silenceConsole(() =>
+    campaign(cfg, [], host, undefined, { resume: true }, recordingDeps(cfg, spawned, integrated)),
+  );
+
+  assert.equal(ok, false, "the unresolved park re-parks the wave and stops the campaign");
+  assert.deepEqual(spawned, [], "the still-parked member was not respawned");
+  // A fresh wave-park was recorded on the redrive (the second one in the log).
+  assert.equal(
+    readEventLog(cfg).filter((e) => e.event === "wave-parked").length,
+    2,
+    "the redrive re-parked the wave",
+  );
+});
+
+test("redrive resumes at the parked wave, not past it — a closed earlier wave is skipped", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-index-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  // Wave 0 closed (batch-done), wave 1 parked (102 parked, record present), wave 2 unrun.
+  cfg.log.log("campaign-start", { batches: [["101"], ["102"], ["103"]], slots: 4 });
+  cfg.log.log("campaign-batch", { index: 0, tasks: ["101"] });
+  cfg.log.log("green", { taskId: "101", branch: "agent/101", commits: ["a"] });
+  cfg.log.log("campaign-batch-done", { index: 0, merged: ["101"], held: [], clearedParked: [], quarantined: [] });
+  cfg.log.log("campaign-batch", { index: 1, tasks: ["102"] });
+  cfg.log.log("parked", { taskId: "102", reason: "blocked" });
+  cfg.log.log("wave-parked", { merged: [], detail: "parked, awaiting a human: 102" });
+  mkdirSync(cfg.parkedDir, { recursive: true });
+  writeFileSync(
+    join(cfg.parkedDir, "102.json"),
+    JSON.stringify({ taskId: "102", reason: "blocked", branch: "agent/102", question: "?", parkedAt: "2026-08-30T00:00:00Z" }),
+  );
+
+  const spawned: string[] = [];
+  const integrated: string[][] = [];
+  const ok = await silenceConsole(() =>
+    campaign(cfg, [], host, undefined, { resume: true }, recordingDeps(cfg, spawned, integrated)),
+  );
+
+  assert.equal(ok, false, "the parked wave 1 stops the redrive again");
+  assert.deepEqual(spawned, [], "neither the closed wave 0 nor the still-parked wave 1 respawned");
+  // The redrive re-entered wave 1 (its batch event re-logged), never stepping to wave 2.
+  const batches = readEventLog(cfg)
+    .filter((e): e is CampaignBatchEvent => e.event === "campaign-batch")
+    .map((b) => b.index);
+  assert.ok(batches.includes(1), "the redrive re-entered the parked wave 1");
+  assert.ok(!batches.includes(2), "the redrive never started wave 2 past the unresolved park");
+});
+
+test("redrive stops as failed again on a failed member, but re-runs it under --override", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-failed-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const seedFailedWave = () => {
+    cfg.log.log("campaign-start", { batches: [["101", "102"]], slots: 4 });
+    cfg.log.log("campaign-batch", { index: 0, tasks: ["101", "102"] });
+    cfg.log.log("green", { taskId: "101", branch: "agent/101", commits: ["a"] });
+    cfg.log.log("queue-done", { outcomes: { "101": "green", "102": "error(1)" } });
+    cfg.log.log("campaign-failed", { merged: ["101"], failed: ["102"] });
+  };
+  seedFailedWave();
+
+  // No override: the failed member holds the wave and the campaign stops as failed again.
+  const spawned: string[] = [];
+  const integrated: string[][] = [];
+  const stopped = await silenceConsole(() =>
+    campaign(cfg, [], host, undefined, { resume: true }, recordingDeps(cfg, spawned, integrated)),
+  );
+  assert.equal(stopped, false, "the failed member stops the redrive as failed");
+  assert.deepEqual(spawned, [], "a failed member is not silently re-run without an override");
+
+  // With --override: the operator chose to re-run the failed member.
+  const spawned2: string[] = [];
+  const integrated2: string[][] = [];
+  const ok = await silenceConsole(() =>
+    campaign(cfg, [], host, undefined, { resume: true, override: true }, recordingDeps(cfg, spawned2, integrated2)),
+  );
+  assert.equal(ok, true, "the overridden failed member re-ran to green and the wave closed");
+  assert.deepEqual(spawned2, ["102"], "only the failed member re-ran; 101 stayed banked");
+});
+
 test("a graft appended mid-wave lands in a future wave; the loop re-derives and runs it (#166)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-graft-"));
   const cfg = harnessCfg(dir);

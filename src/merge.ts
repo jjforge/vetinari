@@ -25,6 +25,17 @@ function gitTry(args: string[]): { code: number; stdout: string; stderr: string 
 
 export const currentBranch = () => git(["rev-parse", "--abbrev-ref", "HEAD"]);
 
+/**
+ * Is `branch` already banked on the checked-out base? True when the ref is gone
+ * (merged and reclaimed in a prior run) or when every commit on it is already an
+ * ancestor of HEAD — the same provable-reachability rule `tidy` uses (ADR 0013).
+ * Lets `integrateGreens` skip banked greens on a redrive re-entry (design §7).
+ */
+function branchAlreadyMerged(branch: string): boolean {
+  if (gitTry(["rev-parse", "--verify", "--quiet", branch]).code !== 0) return true;
+  return gitTry(["merge-base", "--is-ancestor", branch, "HEAD"]).code === 0;
+}
+
 export interface IntegrateResult {
   merged: string[];
   /**
@@ -81,6 +92,15 @@ export async function integrateGreens(
   const quarantined: string[] = [];
   for (const taskId of greens) {
     const branch = `${cfg.branchPrefix}${taskId}`;
+    // Redrive idempotency (design §7): a green already banked on the base — its branch
+    // gone, or every commit already an ancestor of HEAD — is never merged a second time.
+    // Re-entering a parked wave passes its whole green set (the already-merged ones plus
+    // any newly landable answered-park / resolved-conflict green); only the genuinely
+    // unmerged greens are integrated here, so banked work is skipped, not redone.
+    if (branchAlreadyMerged(branch)) {
+      cfg.log.log("campaign-merge-skipped", { taskId, branch });
+      continue;
+    }
     const r = gitTry(["merge", "--no-ff", branch, "-m", `campaign: merge ${branch}`]);
     if (r.code !== 0) {
       // Attributable failure (ADR 0013): abort ONLY this merge — a `reset --hard` to

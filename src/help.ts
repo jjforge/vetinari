@@ -42,7 +42,7 @@ export const MODES: Mode[] = [
   {
     signature: "campaign --resume",
     blurb:
-      "continue a PAUSED campaign on the current base (after a human fixed a wave-park forward, or pruned a suspect): reconstructs the plan from the event log and runs the unrun waves, redoing no already-merged issue. Nothing left to run reports so and exits clean. Takes no batch args (ADR 0013)",
+      "redrive a PAUSED campaign on the current base (after a human fixed a wave-park forward, or pruned a suspect): reconstructs the plan from the event log and re-enters the first wave that did not close, reconciling it before running (design §7) — a green-but-unmerged member is integrated without a rerun, an answered park (its record gone) re-runs, an unresolved park re-parks the wave, and a failed member stops the campaign as failed again unless --override re-runs it. Redoes no already-merged issue. Nothing left to run reports so and exits clean. Takes no batch args (ADR 0013)",
   },
   {
     signature: "prune <issue>",

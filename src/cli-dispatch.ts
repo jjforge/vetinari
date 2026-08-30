@@ -32,9 +32,11 @@ import type {
   runFilesetCheck,
 } from "./plan.ts";
 import { describeFilesetCheck } from "./plan.ts";
-import type { runPrune } from "./prune.ts";
+import { resumeIndex, type runPrune } from "./prune.ts";
 import type { runGraft } from "./graft.ts";
 import { describeGraftRejections } from "./graft.ts";
+import type { readEventLog } from "./event-log.ts";
+import { campaignStarted, reduceCampaign } from "./dashboard-model.ts";
 
 const USAGE = renderUsage();
 
@@ -209,6 +211,9 @@ export interface DispatchDeps {
   runFilesetCheck: typeof runFilesetCheck;
   listParked: typeof listParked;
   readParked: typeof readParked;
+  /** Read this project's event log — the source a green `answer` checks to decide
+   *  whether the issue belongs to a paused campaign it should redrive (design §7). */
+  readEventLog: typeof readEventLog;
   archiveRun: typeof archiveRun;
   agentSelectionFor: typeof agentSelectionFor;
   requireTelegram: typeof requireTelegram;
@@ -331,9 +336,13 @@ async function dispatchCampaign(
   // planning, or override applies. It continues the live log, so (unlike a fresh run)
   // it must NOT archive the leftover it would otherwise reconstruct from.
   if (cmd.resume) {
+    // Under --resume, --override re-runs a failed member instead of stopping as failed
+    // again (design §7); the literal-waves meaning of --override below never applies here
+    // (resume takes no batch args and returns before reaching it).
     await deps.campaign(cfg, [], host, cmd.name, {
       autoPrune: cmd.autoPrune,
       resume: true,
+      override: cmd.override,
     });
     deps.archiveIfIdle();
     return;
@@ -511,30 +520,30 @@ async function dispatchGraft(
 
 /**
  * The answer command: deliver a human's answer to a parked task, branching on whether
- * the provider carries a durable session (ADR 0016 / #212). A faithful port of the old
- * `switch`'s `answer` case.
+ * the provider carries a durable session (ADR 0016 / #212). On a green answer to a member
+ * of a paused campaign, an answer *is* the continue signal (ADR 0020, design §7): it
+ * redrives so the now-green work is integrated and the campaign carries on — the human
+ * never has to answer and then separately ask it to continue. A standalone answer (no
+ * campaign) or a second park runs exactly as before.
  */
 async function dispatchAnswer(
   cmd: Extract<Command, { kind: "answer" }>,
   deps: DispatchDeps,
 ): Promise<void> {
-  const { cfg } = deps;
+  const { cfg, host } = deps;
   if (!cmd.taskId || !cmd.text.length)
     throw new Error('answer needs a task id and text: answer <task> "<answer>"');
   const taskId = cmd.taskId;
   // Resumable (claude/pi/codex): resume the session with an answerPrompt. Non-resumable
   // (copilot/cursor/opencode): relay the answer as an issue comment and re-enter FRESH.
   const { resumable } = deps.agentSelectionFor(cfg);
+  let outcome: string;
   if (resumable) {
     const parked = deps.readParked(cfg, taskId);
-    deps.setExitCode(
-      (await deps.runLoop(cfg, taskId, {
-        resumeSessionId: parked.sessionId!,
-        answerPrompt: answerPromptFor(cmd.text.join(" ")),
-      })) === "green"
-        ? 0
-        : 2,
-    );
+    outcome = await deps.runLoop(cfg, taskId, {
+      resumeSessionId: parked.sessionId!,
+      answerPrompt: answerPromptFor(cmd.text.join(" ")),
+    });
   } else {
     // Fail-loud (issue-only): post the comment BEFORE the run, and never start the run
     // if it cannot be posted — an answer is never silently lost.
@@ -547,6 +556,30 @@ async function dispatchAnswer(
       taskId,
       parkedAnswerComment(parked.question, cmd.text.join(" ")),
     );
-    deps.setExitCode((await deps.runLoop(cfg, taskId)) === "green" ? 0 : 2);
+    outcome = await deps.runLoop(cfg, taskId);
   }
+
+  // A green answer to a paused campaign's member continues it (ADR 0020): redrive so the
+  // green is integrated (the standalone run only logged it) and later waves run. On a
+  // second park (outcome !== "green"), or a standalone answer, there is nothing to redrive.
+  if (outcome === "green" && issueAwaitsRedrive(deps.readEventLog(cfg), taskId)) {
+    const ok = await deps.campaign(cfg, [], host, undefined, { resume: true });
+    deps.setExitCode(ok ? 0 : 2);
+    return;
+  }
+  deps.setExitCode(outcome === "green" ? 0 : 2);
+}
+
+/**
+ * Does `taskId` belong to a campaign that has stopped short of done — the case a green
+ * answer should redrive (design §7)? True only when a campaign was launched here
+ * (`campaign-start`, so a standalone `run`/`answer` never redrives), the issue is a
+ * member of its current plan, and at least one wave has not closed — so an answer to an
+ * already-settled campaign is reported and ignored, not re-run.
+ */
+function issueAwaitsRedrive(events: ReturnType<typeof readEventLog>, taskId: string): boolean {
+  if (!campaignStarted(events)) return false;
+  const reduced = reduceCampaign(events);
+  const norm = taskId.replace(/^#/, "");
+  return reduced.waves.flat().includes(norm) && resumeIndex(reduced) < reduced.waves.length;
 }

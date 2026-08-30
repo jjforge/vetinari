@@ -44,6 +44,7 @@ function makeDeps(overrides: Partial<DispatchDeps> = {}) {
     runFilesetCheck: spy(Promise.resolve([])) as unknown as DispatchDeps["runFilesetCheck"],
     listParked: spy([]) as unknown as DispatchDeps["listParked"],
     readParked: spy({ sessionId: "sess", question: "q?" }) as unknown as DispatchDeps["readParked"],
+    readEventLog: spy([]) as unknown as DispatchDeps["readEventLog"],
     archiveRun: spy({ archivedLog: null, clearedParked: 0, clearedOutbound: 0 }) as unknown as DispatchDeps["archiveRun"],
     agentSelectionFor: spy({ resumable: true }) as unknown as DispatchDeps["agentSelectionFor"],
     requireTelegram: spy({}) as unknown as DispatchDeps["requireTelegram"],
@@ -272,9 +273,18 @@ test("dispatch campaign --resume runs a resume with no selection and never archi
     { kind: "campaign", agent: {}, positional: [], name: "r", autoPrune: true, resume: true, dryRun: false, override: false, onUnderspecified: undefined },
     deps,
   );
-  assert.deepEqual((deps.campaign as any).calls, [[deps.cfg, [], deps.host, "r", { autoPrune: true, resume: true }]]);
+  assert.deepEqual((deps.campaign as any).calls, [[deps.cfg, [], deps.host, "r", { autoPrune: true, resume: true, override: false }]]);
   assert.equal((deps.archiveLeftoverRun as any).calls.length, 0);
   assert.equal((deps.archiveIfIdle as any).calls.length, 1);
+});
+
+test("dispatch campaign --resume --override forwards the failed-member override to the redrive", async () => {
+  const { deps } = makeDeps();
+  await dispatch(
+    { kind: "campaign", agent: {}, positional: [], name: undefined, autoPrune: false, resume: true, dryRun: false, override: true, onUnderspecified: undefined },
+    deps,
+  );
+  assert.deepEqual((deps.campaign as any).calls[0][4], { autoPrune: false, resume: true, override: true });
 });
 
 test("dispatch campaign with an empty selection throws the needs-an-issue message", async () => {
@@ -359,6 +369,44 @@ test("dispatch answer posts a comment and re-enters fresh for a non-resumable ag
   await dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps);
   assert.equal(((cfg as any).postComment as any).calls.length, 1);
   assert.equal((deps.runLoop as any).calls.length, 1);
+});
+
+// A paused campaign's event log where issue 436 (its only member) parked then, after the
+// answer, ran to green — the wave never closed, so a redrive still has work to land.
+const pausedCampaignAfterGreen = () => [
+  { event: "campaign-start", batches: [["436"]] },
+  { event: "campaign-batch", index: 0, tasks: ["436"] },
+  { event: "parked", taskId: "436", reason: "blocked" },
+  { event: "wave-parked", merged: [], detail: "parked: 436" },
+  { event: "green", taskId: "436", branch: "agent/436" },
+];
+
+test("dispatch answer redrives the paused campaign after a green answer (ADR 0020)", async () => {
+  const { deps } = makeDeps({
+    readEventLog: spy(pausedCampaignAfterGreen()) as any,
+  });
+  await dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps);
+  // The green answer continued the campaign by itself: a resume redrive was launched.
+  assert.equal((deps.campaign as any).calls.length, 1);
+  assert.deepEqual((deps.campaign as any).calls[0][4], { resume: true });
+});
+
+test("dispatch answer does not redrive a standalone parked issue with no campaign", async () => {
+  const { deps, exitCodes } = makeDeps(); // default readEventLog → [] (no campaign started)
+  await dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps);
+  assert.equal((deps.campaign as any).calls.length, 0);
+  assert.deepEqual(exitCodes, [0]); // the standalone green answer still exits 0
+});
+
+test("dispatch answer that parks again does not redrive", async () => {
+  const { deps, exitCodes } = makeDeps({
+    runLoop: spy(Promise.resolve("parked")) as any,
+    readEventLog: spy(pausedCampaignAfterGreen()) as any,
+  });
+  await dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps);
+  // A second park is not a green, so nothing is redriven; the exit code says parked.
+  assert.equal((deps.campaign as any).calls.length, 0);
+  assert.deepEqual(exitCodes, [2]);
 });
 
 test("dispatch answer with no text throws the needs-a-task-id-and-text message", async () => {

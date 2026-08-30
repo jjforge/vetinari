@@ -177,24 +177,25 @@ export interface QuarantineImpact {
 }
 
 /**
- * Where `campaign --resume` picks up: the index of the first wave that still has
- * unrun work, given a reconstructed plan (ADR 0013). Resume continues a paused
- * campaign on the fixed base, so it must skip every wave that already banked work —
- * a closed wave merged its whole batch, a wave-park left its greens merged on the
- * base — and never redo a merged issue. The resume point is therefore one past the
- * last wave holding a `completed` member: a plan with no merged work resumes from
- * the top, and an index at or past `waves.length` means nothing is left to run.
+ * Where a redrive (`campaign --resume`) picks up: the first wave whose fold is not
+ * `completed` — the first wave that did not close (design §7). A wave closes only when
+ * every member merged and it logged a `campaign-batch-done`; a wave holding a parked,
+ * failed, running, or green-but-unmerged member never closed, so *that* wave is where a
+ * redrive re-enters and reconciles (design §7's table), rather than one that stepped
+ * over it. Closed waves form a contiguous prefix (waves run strictly in order and the
+ * campaign stops at the first that does not close), so this is the first index absent
+ * from `closedWaves`; an index at or past `waves.length` means every wave closed and
+ * nothing is left to run.
  *
- * Pure over the reduced plan (`waves` + `outcomes`, exactly the shape `applyPrune`
- * takes), so the resume boundary is unit-testable without a running campaign — the
- * same reconstruction `prune` reuses (ADR 0005).
+ * Pure over the reduced plan's `waves` + `closedWaves` (the `campaign-batch-done`
+ * indices `reduceCampaign` folds), so the resume boundary is unit-testable without a
+ * running campaign — the same reconstruction the loop re-reads each wave (ADR 0005).
  */
-export function resumeIndex(campaign: { waves: string[][]; outcomes: Map<string, string> }): number {
-  let lastRun = -1;
-  campaign.waves.forEach((wave, i) => {
-    if (wave.some((id) => campaign.outcomes.get(normalize(id)) === "completed")) lastRun = i;
-  });
-  return lastRun + 1;
+export function resumeIndex(campaign: { waves: string[][]; closedWaves: Set<number> }): number {
+  for (let i = 0; i < campaign.waves.length; i++) {
+    if (!campaign.closedWaves.has(i)) return i;
+  }
+  return campaign.waves.length;
 }
 
 export async function quarantineImpacts(

@@ -9,6 +9,7 @@ import {
   githubMarkPendingVerify,
 } from "./github.ts";
 import { issueStateFromTask } from "./dashboard-model.ts";
+import { expandSelection } from "./plan.ts";
 
 test("githubBlockedBy queries the blocked_by endpoint and returns blocker numbers", () => {
   const calls: string[][] = [];
@@ -80,11 +81,45 @@ test("githubIssuesByLabel lists the OPEN issues carrying a label and returns the
       "--state",
       "open",
       "--json",
-      // issueType so an Epic — a container that owns no work — is never scheduled (#322).
-      "number,issueType",
+      // issueType so an Epic — a container that owns no work — is never scheduled (#322);
+      // labels so a pending-verify issue — merged work awaiting close — is dropped (#322).
+      "number,issueType,labels",
     ],
   ]);
   assert.deepEqual(ids, ["436", "611", "640"]);
+});
+
+test("githubIssuesByLabel drops a pending-verify row — merged work awaiting close is not work (#322)", () => {
+  const logs: string[] = [];
+  const run = () =>
+    JSON.stringify([
+      { number: 322, labels: [{ name: "pending-verify" }] },
+      { number: 611, labels: [{ name: "ready-for-agent" }] },
+    ]);
+
+  const ids = githubIssuesByLabel(
+    "jjforge/vetinari",
+    run,
+    (line) => logs.push(line),
+  )("campaign:audit");
+
+  // the still-open work stays; the merged, pending-verify issue is gone.
+  assert.deepEqual(ids, ["611"]);
+  // one line naming the excluded issue, so the operator sees why the count shrank.
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /#322 — pending-verify, already merged/);
+});
+
+test("the readiness axis is label-expansion only — an explicitly named pending-verify id is kept (#322)", async () => {
+  // The same seam a real campaign wires: a stub gh returning #322 as pending-verify.
+  const run = () =>
+    JSON.stringify([{ number: 322, labels: [{ name: "pending-verify" }] }]);
+  const listByLabel = githubIssuesByLabel("jjforge/vetinari", run, () => {});
+
+  // Via label expansion: #322 is dropped as merged-already work.
+  assert.deepEqual(await expandSelection(["campaign:audit"], listByLabel), []);
+  // Named explicitly: the operator chose it, so it is kept — the resolver is bypassed.
+  assert.deepEqual(await expandSelection(["322"], listByLabel), ["322"]);
 });
 
 test("githubIssuesByLabel returns an empty list when no open issue carries the label", () => {

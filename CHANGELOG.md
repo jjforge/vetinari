@@ -26,12 +26,14 @@ Within a milestone each bold section label appears at most once.
 - [ops] `demo create` / `demo remove` are no longer CLI modes — the dev fixture is now `make demo-create` / `make demo-remove` (#293).
 - [api] The dashboard's `POST /resume` route is now `POST /redrive` and shells `vetinari redrive` (not `campaign --resume`); the old `/resume` path 404s (#295).
 - [ops] `migrate` now performs only the one-time layout move and the `orchestrator.env`→`host.env` rename; every other compatibility shim it carried is gone — the `hostWeight`→`containerShare` config rewrite, the `host-slots`→`max-concurrent-containers` ceiling-file rename, the `dispatch`→`gateway` systemd-unit rewrite, the stale `gateway.env` deletion, and the `VETINARI_TELEGRAM_*` strip from the container-gate `.env` (#296). A rename is a breaking change, not something `migrate` absorbs forever (design §9, §13.1); see `docs/upgrading.md` for the by-hand fixups.
+- [internal] Removed the `check-changelog-sections` section lint, its shell tests, and the `make check-changelog-sections`/`check-changelog-sections-test` targets (#297).
 
 **New features:**
 - [user] `campaign --resume --override` re-runs a failed member on a redrive; without it, a member that failed on the prior run holds its wave and the campaign stops as failed again (prune it or fix it forward instead) (#287).
 - [user] A campaign now re-admits a parked member the moment its question is answered mid-wave: the member re-runs and merges in the same wave instead of parking the wave (#289).
 - [ops] New `parkGraceSeconds` config field (default 0): at a wave boundary, a member parked as a question/stalled is held for up to this long for an answer before the wave parks; `conflict`/`red-base` parks never wait (#289).
 - [user] New `redrive` verb picks an unfinished campaign back up (design §7) — the umbrella verb for continuing after a prune, graft, fix-forward, crash, or failure; `campaign --resume` still works as a one-release alias and prints a notice pointing at `redrive` (#293).
+- [user] `campaign`, `run`, and `redrive` take `--json`, which streams the raw event log to stdout for tooling (#299).
 
 **Improvements:**
 - [api] The event log gains a `grace-wait` row (its seconds and the waited-on tasks) so the fold and the dashboard can narrate the boundary wait (#289).
@@ -43,6 +45,8 @@ Within a milestone each bold section label appears at most once.
 - [user] The status line names the reason words for any parked work (e.g. `conflict`, `red base`) beside its per-state counts (#295).
 - [ops] Selecting an experimental non-resumable provider (`copilot`/`cursor`/`opencode`) with no `postComment` configured now prints a one-line preflight warning — a parked question cannot be answered without it — instead of only surfacing at a stranded park. `--help` and the provider table mark the three as experimental (#298).
 - [ops] `answer` on a non-resumable provider without `postComment` now fails fast with that same line, rather than silently re-running the whole task from scratch (#298).
+- [ops] The changelog fragment fold — at wave merge and via `vetinari changelog collect` — now runs only when the project keeps a `CHANGELOG.md`; a project with none has its fragments left in place and logs one line, instead of crashing on the missing file (#297).
+- [user] Terminal output for a `campaign`/`run`/`redrive` is now human-readable lines — the plan (waves with ids and titles), per-wave progress, the per-issue outcome, the one-line stop reason and the exact recovery command (`redrive`, `answer <id>`, `prune <id>`) — instead of raw event JSON. JSONL now reaches stdout only under `--json`; the event log file is unchanged (#299).
 
 **Bug fixes:**
 - [user] A campaign wave with a failed issue now holds the wave and stops the campaign as failed: the wave still drains its siblings and merges their greens, then a `campaign-failed` event and a failure notice are logged and the run exits non-zero — no later wave starts on top of the missing work (#285).

@@ -156,7 +156,7 @@ A parked record that survives a run (it always does, until resolved) keeps the c
 `campaign <selection>` turns a selection into waves before anything runs:
 
 1. **Expand**: numeric tokens are ids; a non-numeric token is a label expanded through `listByLabel` to the open issues carrying it that are *work* — an issue whose tracker type is `Epic` (a container that owns no work, `docs/issue-conventions.md`) is never scheduled, even when it carries the label.
-2. **Restrict and layer**: fetch each issue's _open_ blockers through `blockedBy`; keep only edges inside the selection; topologically layer. An issue with an open blocker outside the selection is unreachable — reported, and dropped with its dependents. A closed blocker does not gate.
+2. **Restrict and layer**: fetch each issue's _open_ blockers through `blockedBy`; keep only edges inside the selection; topologically layer. An issue with an open blocker outside the selection is unreachable — reported, and dropped with its dependents. A closed blocker does not gate, and neither does a `pending-verify` one: its work is already on the base (`docs/issue-conventions.md`), so it is treated as satisfied and named as such in the provenance.
 3. **Partition**: resolve each issue's file-set (`fileSet`, default: the `Touches:`/`Creates:` marker line → basenames, validated against the tree); split each layer greedily so no two issues in a wave share a basename.
 4. **Under-specified halt**: an issue whose file-set is not confident stops the plan and asks — drop it (and dependents) or fail so the issue can be fixed. A non-interactive run pre-decides with `--on-underspecified`.
 5. Print the plan with per-issue provenance (`--dry-run` stops here); record it on `campaign-start`.

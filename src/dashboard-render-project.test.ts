@@ -581,6 +581,29 @@ test("renderStatusPage colours a pruned chip and pulses a running one", () => {
   assert.match(html, /\.dot\.running \{ animation: chip-pulse/);
   assert.match(html, /prefers-reduced-motion/);
 });
+test("renderStatusPage renders a grafted member row's status dot alongside its grafted badge (#307)", () => {
+  // A grafted issue composes the two axes (ADR 0019): its lifecycle dot reads its own
+  // status (here running), and the `grafted` membership badge rides alongside — the dot is
+  // never suppressed by the membership, so a grafted row still reads its run-state at a glance.
+  const html = renderStatusPage(
+    {
+      project: "beta",
+      waves: [
+        {
+          index: 0,
+          status: "running",
+          issues: [{ issueNumber: "305", status: "running", membership: "grafted", name: "grafted one" }],
+        },
+      ],
+      parked: [],
+    },
+    { prune: true, graft: true },
+  );
+  assert.match(
+    html,
+    /<button type="button" class="wave-member running grafted"[^>]*><span class="dot running"><\/span>#305 <span class="wave-member-title">grafted one<\/span><span class="member-badge grafted">grafted<\/span><small>running<\/small><\/button>/,
+  );
+});
 test("renderStatusPage's prune panel discloses kept-banked work and carries a standalone explainer", () => {
   const html = renderStatusPage(
     {

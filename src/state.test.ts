@@ -18,6 +18,7 @@ import {
   park,
   readParked,
   setParkedMessageId,
+  writeParkedRecord,
 } from "./state.ts";
 import { memoryLogger } from "./log.ts";
 
@@ -145,6 +146,23 @@ test("park writes its record silently — the gateway is the only sender, so par
   const rec = listParked(cfgFor(dir)).find((p) => p.taskId === "301");
   assert.ok(rec, "the record is written");
   assert.equal(rec!.tgMessageId, undefined, "no message id yet — the gateway announces and fills it in");
+});
+
+test("writeParkedRecord writes the record only — no event log, no Telegram, no console notice", () => {
+  const dir = join(tmpdir(), `vetinari-write-record-${Date.now()}`);
+  mkdirSync(join(dir, "parked"), { recursive: true });
+  const cfg = cfgFor(dir);
+
+  writeParkedRecord(cfg, { taskId: "B", reason: "conflict", detail: "CONFLICT (content): Merge conflict in f.txt", branch: "agent/B", question: "Merge conflict on agent/B — resolve on the base, then redrive." });
+
+  const rec = listParked(cfg).find((p) => p.taskId === "B");
+  assert.ok(rec, "the record is written to disk");
+  assert.equal(rec!.reason, "conflict");
+  assert.equal(rec!.detail, "CONFLICT (content): Merge conflict in f.txt");
+  assert.equal(rec!.branch, "agent/B");
+  assert.ok(rec!.parkedAt, "parkedAt is stamped");
+  // Write-only: it is not the parking transition, so it logs no `parked` event.
+  assert.deepEqual((cfg.log as any).events ?? [], [], "no event is logged");
 });
 
 test("setParkedMessageId stamps the announced message id into an existing parked record", async () => {

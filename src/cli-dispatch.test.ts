@@ -47,7 +47,7 @@ function makeDeps(overrides: Partial<DispatchDeps> = {}) {
     answerParked: spy() as unknown as DispatchDeps["answerParked"],
     projectHasLiveLease: spy(false) as unknown as DispatchDeps["projectHasLiveLease"],
     readEventLog: spy([]) as unknown as DispatchDeps["readEventLog"],
-    archiveRun: spy({ archivedLog: null, clearedParked: 0, clearedOutbound: 0 }) as unknown as DispatchDeps["archiveRun"],
+    archiveRun: spy({ archivedLog: null, clearedOutbound: 0 }) as unknown as DispatchDeps["archiveRun"],
     requireTelegram: spy({}) as unknown as DispatchDeps["requireTelegram"],
     tgTest: spy(Promise.resolve()) as unknown as DispatchDeps["tgTest"],
     ...overrides,
@@ -268,7 +268,8 @@ test("dispatch clear archives the run and reports the reset", async () => {
   const { deps, logged } = makeDeps();
   await dispatch({ kind: "clear" }, deps);
   assert.deepEqual((deps.archiveRun as any).calls, [[deps.cfg]]);
-  assert.ok(logged.some((l) => /cleared/.test(l)));
+  // The reset is reported; parked records are kept (design §2.5), so the line says so.
+  assert.ok(logged.some((l) => /reset/.test(l) && /parked records are kept/.test(l)));
 });
 
 test("dispatch tg-test resolves creds and proves the round-trip", async () => {

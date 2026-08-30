@@ -339,12 +339,13 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
       return;
     }
     case "clear": {
-      // Force a reset now, even with questions still parked — the manual escape
-      // hatch, unlike the automatic archive that waits for an idle queue.
+      // Force a reset of the live log now, even mid-run — the manual escape hatch,
+      // unlike the automatic archive that waits for an idle queue. Parked records are
+      // left intact (design §2.5): a surviving record keeps its card parked until the
+      // issue is answered/redriven or explicitly dropped with `prune --purge`.
       const r = deps.archiveRun(cfg);
       cfg.log.log("archived", {
         archivedLog: r.archivedLog ?? null,
-        clearedParked: r.clearedParked,
         clearedOutbound: r.clearedOutbound,
       });
       deps.log(
@@ -353,7 +354,7 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
           : "no run log to archive",
       );
       deps.log(
-        `cleared ${r.clearedParked} parked record(s) — dashboard and status line now read idle`,
+        "live log reset — any parked records are kept (answer/redrive to resume, or `prune --purge` to drop)",
       );
       return;
     }

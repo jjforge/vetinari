@@ -72,7 +72,7 @@ export const MODES: Mode[] = [
   {
     signature: "migrate [--dry-run]",
     blurb:
-      "move this project onto the vetinari/ + .vetinari.local/ layout: config → vetinari/, old .sandcastle/ state → .vetinari.local/, .gitignore updated, the host-side orchestrator.env renamed to host.env, a stale gateway.env deleted, the systemd unit rewritten into the host-level gateway service, VETINARI_TELEGRAM_* stripped from the container gate .env (rotate any token exposed there), a numeric hostWeight translated to a containerShare tier, and the host-slots ceiling file renamed max-concurrent-containers (--dry-run to print the plan and change nothing)",
+      "move this project onto the vetinari/ + .vetinari.local/ layout: config → vetinari/, old .sandcastle/ state → .vetinari.local/, .gitignore updated, and the host-side orchestrator.env renamed to host.env. A one-time layout move — it carries no other rename shims (--dry-run to print the plan and change nothing)",
   },
   {
     signature: 'changelog collect [--title "…"]',

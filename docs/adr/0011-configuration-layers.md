@@ -1,5 +1,7 @@
 # Configuration lives in layers keyed by scope, secrecy, and whether it reaches the container
 
+Status: recorded in design.md §9.
+
 Vetinari's configuration had drifted into conflation, and the symptoms all traced to a
 missing model: the migration folded every project's Telegram token up into a single
 host-level `gateway.env` (making the gateway look like it needed its own credentials,

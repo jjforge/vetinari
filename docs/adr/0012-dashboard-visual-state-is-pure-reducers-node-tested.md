@@ -1,5 +1,7 @@
 # The dashboard's state → visual-intent mapping is pure reducers, node-tested
 
+Status: recorded in design.md §11.
+
 The dashboard's recurring regressions (#96, #100, #101, #104) were all the same
 shape: a piece of state maps to the wrong class or readout text. A "0 running"
 tally kept pulsing (#100); a feed row past the cap still painted (#101). The

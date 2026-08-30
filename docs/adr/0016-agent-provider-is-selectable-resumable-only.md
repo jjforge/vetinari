@@ -1,5 +1,7 @@
 # The agent provider is selectable per run; the loop drives resumable and non-resumable providers alike
 
+Status: recorded in design.md §12.
+
 Vetinari runs its per-turn loop against a single **agent provider** seam — the one
 place a sandcastle `AgentProvider` is constructed (`agentFor`). We decided to make
 that seam **provider-agnostic**: it dispatches on a provider name rather than

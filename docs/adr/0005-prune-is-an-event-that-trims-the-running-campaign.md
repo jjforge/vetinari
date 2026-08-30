@@ -1,5 +1,7 @@
 # Prune is an event that trims the running campaign; the plan is reconstructed from the log
 
+Status: recorded in design.md §5.
+
 Pruning an issue out of a **running** campaign must not require a plan on the
 command line or a fresh campaign process. We decided that prune appends a
 **prune event** to the project's event log, and the `campaign` loop reconstructs

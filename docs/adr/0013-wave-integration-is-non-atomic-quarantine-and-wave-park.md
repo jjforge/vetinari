@@ -1,5 +1,7 @@
 # Wave integration is non-atomic: a conflict quarantines one issue, a red combined gate parks the wave
 
+Status: superseded by design.md §6.
+
 Integration was atomic per wave. When `integrateGreens` hit a merge conflict or a
 red merged-base gate, it ran `git reset --hard` to the commit the wave started at —
 un-merging every green that had **already** merged in that wave — and halted the

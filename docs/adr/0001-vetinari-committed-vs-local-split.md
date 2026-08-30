@@ -1,5 +1,7 @@
 # Split project config from runtime/secrets into `vetinari/` and `.vetinari.local/`
 
+Status: recorded in design.md §9.
+
 A consuming project keeps its versioned Vetinari configuration in a committed
 `vetinari/` directory, and all runtime, secrets, and run state in an excluded
 `.vetinari.local/` directory. The `.local` suffix carries the "yours, not

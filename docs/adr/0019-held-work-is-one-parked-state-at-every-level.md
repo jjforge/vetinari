@@ -1,6 +1,6 @@
 # Held work is one `parked` state at every level; the reason is metadata, not a status
 
-Status: accepted. Amends [ADR 0013](0013-wave-integration-is-non-atomic-quarantine-and-wave-park.md) and builds on [ADR 0017](0017-a-wave-gates-the-next-on-a-healthy-base-and-zero-parks.md).
+Status: superseded by design.md §2.3. Amends [ADR 0013](0013-wave-integration-is-non-atomic-quarantine-and-wave-park.md) and builds on [ADR 0017](0017-a-wave-gates-the-next-on-a-healthy-base-and-zero-parks.md).
 
 ## Context
 

@@ -199,6 +199,50 @@ test("rebuildIndex re-announces nothing but still routes a reply to a persisted 
   assert.equal(routed?.task, "A1");
 });
 
+test("pendingAnnouncements routes a park to the chat/thread its question key resolves through notify", () => {
+  const pend = pendingAnnouncements(
+    [
+      project({
+        conn: { token: "botA", chat: "-100" },
+        notify: { question: "asks" },
+        destinations: { asks: { chat: "-999", thread: "7" } },
+        parked: [parked({ taskId: "A1" })],
+      }),
+    ],
+    newReplyIndex(),
+  );
+
+  // The park announcement goes to the named destination on the project's bot —
+  // its chat and thread — never unconditionally to the default chat (design §10).
+  assert.deepEqual(pend[0].conn, { token: "botA", chat: "-999", thread: "7" });
+});
+
+test("pendingAnnouncements resolves the question key through the wildcard when there is no bare question entry", () => {
+  const pend = pendingAnnouncements(
+    [
+      project({
+        conn: { token: "botA", chat: "-100" },
+        notify: { "*": "wild" },
+        destinations: { wild: { chat: "-42" } },
+        parked: [parked({ taskId: "A1" })],
+      }),
+    ],
+    newReplyIndex(),
+  );
+
+  assert.equal(pend[0].conn.chat, "-42");
+  assert.equal(pend[0].conn.token, "botA");
+});
+
+test("pendingAnnouncements falls back to the project's default chat when no notify map routes the question", () => {
+  const pend = pendingAnnouncements(
+    [project({ conn: { token: "botA", chat: "-100" }, notify: undefined, destinations: undefined, parked: [parked({ taskId: "A1" })] })],
+    newReplyIndex(),
+  );
+
+  assert.deepEqual(pend[0].conn, { token: "botA", chat: "-100" });
+});
+
 const conn: TgConn = { token: "botA", chat: "-100" };
 const noPending = () => newPendingConfirms(() => 0);
 

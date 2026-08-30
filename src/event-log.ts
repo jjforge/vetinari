@@ -221,6 +221,16 @@ export interface WaveParkedEvent extends BaseEvent {
   detail: string;
 }
 
+/** `grace-wait` — a drained wave held its boundary open for up to `seconds`, waiting for an answer to
+ * a member parked as `question`/`stalled` before declaring the wave parked (design §5, `parkGraceSeconds`).
+ * Carries the seconds and the parked members being waited on, so the fold and the dashboard can narrate
+ * the pause (modes.ts, ADR 0020). */
+export interface GraceWaitEvent extends BaseEvent {
+  event: "grace-wait";
+  seconds: number;
+  tasks: string[];
+}
+
 /** `prune` — an issue (and its dependency closure) was pruned out of a running campaign: the target
  * issue, the closure computed for removal, and the members actually dropped from the plan
  * (cli.mts, ADR 0005/0007). */
@@ -305,6 +315,7 @@ export type OrchestratorEvent =
   | ParkedEvent
   | QuarantinedEvent
   | WaveParkedEvent
+  | GraceWaitEvent
   | PruneEvent
   | GraftEvent
   | WorktreePreservedEvent

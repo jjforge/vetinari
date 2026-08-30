@@ -21,7 +21,7 @@ import {
   type RunSpawner,
 } from "./modes.ts";
 import { loggerForRun, memoryLogger, type MemoryLogger } from "./log.ts";
-import { listOutbox } from "./state.ts";
+import { clearParked, hasParked, listOutbox } from "./state.ts";
 import {
   readEventLog,
   type CampaignBatchDoneEvent,
@@ -29,6 +29,7 @@ import {
   type CampaignDoneEvent,
   type CampaignFailedEvent,
   type CampaignStartEvent,
+  type GraceWaitEvent,
   type QueueDoneEvent,
   type QueueSpawnEvent,
   type QueueStartEvent,
@@ -454,6 +455,9 @@ const gitFreeDeps = (
   integrate: async (_cfg, greens) => ({ merged: greens, quarantined: [] }),
   collectChangelog: () => ({ collected: [], committed: false }),
   currentBranch: () => cfg.baseBranch,
+  // Default grace is a no-op that resolves at once — a wave never blocks a test on real time.
+  // A grace test overrides this to observe the wait or to model an answer landing in-window.
+  grace: async () => {},
 });
 
 test("campaign drives every wave with no Docker — the per-wave re-derive survives a faithful child spawn (#151/#150)", async () => {
@@ -613,6 +617,7 @@ const recordingDeps = (
   },
   collectChangelog: () => ({ collected: [], committed: false }),
   currentBranch: () => cfg.baseBranch,
+  grace: async () => {},
 });
 
 // Seed a wave-0 park: 101 merged green, 102 parked — with no `campaign-batch-done`, so
@@ -851,6 +856,179 @@ test("Gate 1: the parked issue's record survives the wave-boundary held-clear (r
   );
 
   assert.ok(existsSync(parkedRecord), "the parked record is spared the held-clear so the issue stays resumable");
+});
+
+test("re-admit: a parked member answered while the wave still drains re-runs and merges in the same wave (design §5 step 3)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-readmit-"));
+  const cfg = harnessCfg(dir);
+  cfg.parkGraceSeconds = 0; // re-admit during the drain is independent of the boundary grace window
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+
+  // 101 drains slowly (its slot stays leased until we resolve it); 102 parks first —
+  // writing its on-disk record like a real child — then, while 101 is still in flight,
+  // the human's answer clears that record and 101 frees its slot. The freed slot re-admits
+  // 102, which re-runs green. Both greens then integrate in this one wave.
+  let resolve101!: (code: number) => void;
+  const p101 = new Promise<number>((r) => (resolve101 = r));
+  const spawns: string[] = [];
+  let firstPark = true;
+  const spawnRun: CampaignDeps["spawnRun"] = (taskId) => {
+    spawns.push(taskId);
+    if (taskId === "101") return p101;
+    if (firstPark) {
+      firstPark = false;
+      mkdirSync(cfg.parkedDir, { recursive: true });
+      writeFileSync(
+        join(cfg.parkedDir, "102.json"),
+        JSON.stringify({ taskId: "102", reason: "blocked", branch: "agent/102", question: "?", parkedAt: "2026-08-30T00:00:00Z" }),
+      );
+      // Deferred to a macrotask so 102 has settled parked-with-record before the answer lands.
+      setTimeout(() => {
+        clearParked(cfg, "102");
+        resolve101(0);
+      }, 0);
+      return Promise.resolve(2);
+    }
+    return Promise.resolve(0);
+  };
+
+  const ok = await silenceConsole(() =>
+    campaign(cfg, [["101", "102"]], host, "harness", {}, gitFreeDeps(cfg, spawnRun)),
+  );
+
+  assert.equal(ok, true, "the wave completed once the answered park re-ran green");
+  const done = readEventLog(cfg).find((e): e is CampaignBatchDoneEvent => e.event === "campaign-batch-done");
+  assert.deepEqual([...(done?.merged ?? [])].sort(), ["101", "102"], "both greens merged in the same wave");
+  assert.deepEqual(spawns, ["101", "102", "102"], "102 was re-admitted — spawned once to park, once to re-run");
+  assert.equal(hasParked(cfg, "102"), false, "the answered park's record stays cleared");
+});
+
+// A parking child would write its on-disk record; the stub only returns the exit code, so a
+// grace test writes the record itself to model a genuine question/stalled park awaiting an answer.
+const seedParkedRecord = (cfg: ResolvedConfig, taskId: string) => {
+  mkdirSync(cfg.parkedDir, { recursive: true });
+  writeFileSync(
+    join(cfg.parkedDir, `${taskId}.json`),
+    JSON.stringify({ taskId, reason: "blocked", branch: `agent/${taskId}`, question: "?", parkedAt: "2026-08-30T00:00:00Z" }),
+  );
+};
+
+test("grace window: a question/stalled park no answer resolves within parkGraceSeconds falls through to a wave-park", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-grace-expiry-"));
+  const cfg = harnessCfg(dir);
+  cfg.parkGraceSeconds = 30;
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+
+  // 101 green, 102 parks and its record stays in place — no answer lands within the window.
+  const spawnRun: CampaignDeps["spawnRun"] = async (taskId) => {
+    if (taskId === "102") {
+      seedParkedRecord(cfg, "102");
+      return 2;
+    }
+    return 0;
+  };
+  let graceArgs: { ids: string[]; secs: number } | undefined;
+  const deps: CampaignDeps = {
+    ...gitFreeDeps(cfg, spawnRun),
+    // Expiry: the window ends with the record still on disk — no re-admission.
+    grace: async (_c, ids, secs) => {
+      graceArgs = { ids, secs };
+    },
+  };
+
+  const ok = await silenceConsole(() => campaign(cfg, [["101", "102"]], host, "harness", {}, deps));
+
+  assert.equal(ok, false, "an unanswered park at expiry stops the campaign");
+  assert.deepEqual(graceArgs, { ids: ["102"], secs: 30 }, "the wave waited on 102 for the configured window");
+  const grace = readEventLog(cfg).find((e): e is GraceWaitEvent => e.event === "grace-wait");
+  assert.equal(grace?.seconds, 30);
+  assert.deepEqual(grace?.tasks, ["102"]);
+  assert.ok(
+    readEventLog(cfg).some((e) => e.event === "wave-parked"),
+    "the wave parked once the window expired",
+  );
+});
+
+test("grace window: an answer that lands within parkGraceSeconds re-admits the member, which merges in the same wave", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-grace-answered-"));
+  const cfg = harnessCfg(dir);
+  cfg.parkGraceSeconds = 30;
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+
+  let parked102 = true;
+  const spawnRun: CampaignDeps["spawnRun"] = async (taskId) => {
+    if (taskId === "102" && parked102) {
+      parked102 = false;
+      seedParkedRecord(cfg, "102");
+      return 2;
+    }
+    return 0; // 101 green; 102 green on re-admission
+  };
+  const deps: CampaignDeps = {
+    ...gitFreeDeps(cfg, spawnRun),
+    // The answer lands inside the window: clear the record so the caller re-admits 102.
+    grace: async (c, ids) => {
+      for (const id of ids) clearParked(c, id);
+    },
+  };
+
+  const ok = await silenceConsole(() => campaign(cfg, [["101", "102"]], host, "harness", {}, deps));
+
+  assert.equal(ok, true, "the in-window answer let the wave finish");
+  const done = readEventLog(cfg).find((e): e is CampaignBatchDoneEvent => e.event === "campaign-batch-done");
+  assert.deepEqual([...(done?.merged ?? [])].sort(), ["101", "102"], "the re-admitted member merged in the same wave");
+});
+
+test("grace window: a conflict (quarantine) never triggers the wait, even with parkGraceSeconds set", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-grace-conflict-"));
+  const cfg = harnessCfg(dir);
+  cfg.parkGraceSeconds = 30;
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+
+  // Both green; integration then quarantines 102 on a merge conflict — a conflict park, not a
+  // question/stalled member park. No member is `parked`, so the grace window is never entered.
+  let graceCalls = 0;
+  const deps: CampaignDeps = {
+    ...gitFreeDeps(cfg, async () => 0),
+    integrate: async (_cfg, greens) => ({ merged: greens.filter((g) => g !== "102"), quarantined: ["102"] }),
+    grace: async () => {
+      graceCalls++;
+    },
+  };
+
+  const ok = await silenceConsole(() => campaign(cfg, [["101", "102"]], host, "harness", {}, deps));
+
+  assert.equal(ok, true, "a quarantine with no stranded dependents runs the wave to done");
+  assert.equal(graceCalls, 0, "a conflict never waits");
+  assert.ok(!readEventLog(cfg).some((e) => e.event === "grace-wait"), "no grace-wait was logged for a conflict");
+});
+
+test("grace window: the default parkGraceSeconds of 0 never waits — a park stops the campaign at once", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-grace-default-"));
+  const cfg = harnessCfg(dir);
+  cfg.parkGraceSeconds = 0;
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+
+  const spawnRun: CampaignDeps["spawnRun"] = async (taskId) => {
+    if (taskId === "102") {
+      seedParkedRecord(cfg, "102");
+      return 2;
+    }
+    return 0;
+  };
+  let graceCalls = 0;
+  const deps: CampaignDeps = {
+    ...gitFreeDeps(cfg, spawnRun),
+    grace: async () => {
+      graceCalls++;
+    },
+  };
+
+  const ok = await silenceConsole(() => campaign(cfg, [["101", "102"]], host, "harness", {}, deps));
+
+  assert.equal(ok, false, "with no grace, the park stops the campaign");
+  assert.equal(graceCalls, 0, "the grace waiter is never invoked when the window is 0");
+  assert.ok(!readEventLog(cfg).some((e) => e.event === "grace-wait"), "no grace-wait event with the window at 0");
 });
 
 test("Gate 2 unchanged: an all-green wave whose combined base gates red still wave-parks via the existing path — Gate 1 does not double-fire", async () => {

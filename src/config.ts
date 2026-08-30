@@ -457,6 +457,16 @@ export interface VetinariConfig {
   maxTurns?: number;
   /** Default 600. A stalled agent parks rather than dying unrecorded. */
   idleTimeoutSeconds?: number;
+  /**
+   * How long, in seconds, the campaign loop holds a drained wave open at its
+   * boundary when a member parked as `question` or `stalled`, waiting for an
+   * answer to land before declaring the wave parked (design §5). An answer
+   * within the window re-admits the member (it re-runs and merges in the same
+   * wave); `conflict`/`red-base` parks never wait. Default 0 — no grace, park
+   * at once. The window is a latency optimization on the durable resume path
+   * (ADR 0020), never a substitute for it.
+   */
+  parkGraceSeconds?: number;
   /** Where logs and parked records live. Default ".vetinari.local". */
   stateDir?: string;
   /**
@@ -489,6 +499,7 @@ export type ResolvedConfig = Required<
     | "gates"
     | "maxTurns"
     | "idleTimeoutSeconds"
+    | "parkGraceSeconds"
     | "stateDir"
     | "fetchTask"
   >
@@ -603,6 +614,7 @@ export async function loadConfig(
     containerShare: "medium",
     maxTurns: 6,
     idleTimeoutSeconds: 600,
+    parkGraceSeconds: 0,
     ...c,
     stateDir,
     promptFile:

@@ -8,6 +8,7 @@ import {
   reasonWord,
   tallyDotClass,
 } from "./dashboard-visual-state.ts";
+import { reconstructIssueDetail } from "./dashboard-model.ts";
 
 test("reasonWord maps each ParkReason from the single enum to its display word (#295)", () => {
   // The one mapping from the `ParkReason` enum to the word every surface prints beside
@@ -77,7 +78,23 @@ test("issueMoves drops reply for a conflict, red-base or crash park — prune an
 });
 
 test("issueMoves offers prune and redrive for a failed issue (#307)", () => {
-  assert.deepEqual(issueMoves({ status: "failed" }), { reply: false, prune: true, redrive: true });
+  // The wire status is `failure` (the `IssueStatus` enum), the string `/api/issue` ships —
+  // never `failed`, which the sheet's move rule used to key on so a failed issue got no moves.
+  assert.deepEqual(issueMoves({ status: "failure" }), { reply: false, prune: true, redrive: true });
+});
+
+test("issueMoves keys on the exact status /api/issue emits for a failed issue, so its sheet renders Prune (#317)", () => {
+  // The single shared fixture: a member the agent could not make green. The status
+  // `reconstructIssueDetail` folds is precisely what `/api/issue` serializes and the sheet
+  // feeds back into `issueMoves` — assert the two agree so the wire word and the rule can't drift.
+  const events = [
+    { event: "campaign-start", ts: "2026-08-01T00:00:00.000Z", waves: [["101"]] },
+    { event: "spawn", ts: "2026-08-01T00:01:00.000Z", taskId: "101" },
+    { event: "failed", ts: "2026-08-01T00:05:00.000Z", taskId: "101" },
+  ] as unknown as Parameters<typeof reconstructIssueDetail>[0];
+  const wireStatus = reconstructIssueDetail(events, "101").status;
+  assert.equal(wireStatus, "failure");
+  assert.deepEqual(issueMoves({ status: wireStatus }), { reply: false, prune: true, redrive: true });
 });
 
 test("issueMoves offers only prune for a running or unstarted issue (#307)", () => {
@@ -92,7 +109,7 @@ test("issueMoves offers nothing for a completed issue (#307)", () => {
 test("issueMoves offers nothing for an archived (read-only) issue, whatever its state (#307)", () => {
   // An archived run is read-only — no move mutates a finished campaign's log.
   assert.deepEqual(issueMoves({ status: "parked", reason: "question", archived: true }), { reply: false, prune: false, redrive: false });
-  assert.deepEqual(issueMoves({ status: "failed", archived: true }), { reply: false, prune: false, redrive: false });
+  assert.deepEqual(issueMoves({ status: "failure", archived: true }), { reply: false, prune: false, redrive: false });
 });
 
 test("paneActivity ignores a frame that adds no visible lines (#198)", () => {

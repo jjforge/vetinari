@@ -1,6 +1,7 @@
 import type { CampaignStatus, StatusIssue } from "./dashboard-model.ts";
 import type { StructuredGraftClosure } from "./graft.ts";
 import type { GraftRejection } from "./plan.ts";
+import { DASHBOARD_PALETTE_CSS } from "./dashboard-assets.ts";
 import { escapeHtml } from "./dashboard-render.ts";
 
 /**
@@ -77,7 +78,9 @@ const isGraftable = (status: CampaignStatus) => status.waves.some((wave) => wave
  * project's `blockedBy` resolver, so it does not compute the closure itself — it
  * shows the closure the selected project's own `prune <issue> --dry-run` printed,
  * behind a confirm form (preview-then-confirm parity, story 19/23). Confirming
- * shells `prune` in that project's root. Serves as the no-JS prune fallback.
+ * shells `prune` in that project's root. Serves as the no-JS prune fallback. Colour
+ * comes from the one shared palette (Appendix A): the card carries the amber 3px left
+ * edge every "needs you" card takes, and the confirm button the prune coral it acts.
  */
 export const renderAggregatedPrunePreview = (project: string, target: string, previewText: string) => `<!doctype html>
 <html lang="en">
@@ -86,15 +89,16 @@ export const renderAggregatedPrunePreview = (project: string, target: string, pr
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${escapeHtml(project)} — prune #${escapeHtml(target)}</title>
 <style>
-  body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 2rem; background: #090c10; color: #e6edf3; }
+${DASHBOARD_PALETTE_CSS}
+  body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 2rem; background: var(--color-body); color: var(--color-text); }
   h1 { letter-spacing: -0.035em; }
-  .card { background: #0b0e12; border: 1px solid #232b35; border-left: 3px solid #f79287; border-radius: 12px; padding: 1rem 1.25rem; margin: 1rem 0; }
+  .card { background: var(--color-box-body); border: 1px solid var(--color-secondary); border-left: 3px solid var(--color-yellow); border-radius: var(--border-radius-medium); padding: 1rem 1.25rem; margin: 1rem 0; }
   pre { white-space: pre-wrap; margin: 0; }
   .actions { display: flex; gap: .75rem; align-items: center; }
   form { margin: 0; }
-  button { padding: .5rem .9rem; border: 0; border-radius: 9px; cursor: pointer; font-weight: 700; }
-  .confirm button { background: #f79287; color: #2a0a06; }
-  a.cancel { color: #8b98a5; text-decoration: none; padding: .5rem .9rem; }
+  button { padding: .5rem .9rem; border: 0; border-radius: var(--border-radius); cursor: pointer; font-weight: 700; }
+  .confirm button { background: var(--color-red); color: var(--color-on-accent); }
+  a.cancel { color: var(--color-text-light-2); text-decoration: none; padding: .5rem .9rem; }
 </style>
 </head>
 <body>
@@ -122,8 +126,9 @@ const GRAFT_REASON_TEXT: Record<GraftRejection["reason"], string> = {
  * "would graft" for the clean ids, the reason per offender — under a "Nothing
  * grafted — fix these" header, carrying the typed ids so the summary-line input can
  * retain them. The client lifts `[data-graft-verdicts]` to show it inline beside the
- * input; served whole it is the no-JS fallback. Red edge — a rejection, distinct
- * from the teal success and the amber structural refusal.
+ * input; served whole it is the no-JS fallback. Colour comes from the one shared palette
+ * (Appendix A): the card carries the amber 3px left edge every "needs you" card takes (the
+ * single edge rule — never the prune coral), and each offender's reason reads the rejection red.
  */
 export const renderAggregatedGraftRejection = (project: string, closure: StructuredGraftClosure) => {
   const verdicts = closure.ids
@@ -140,12 +145,13 @@ export const renderAggregatedGraftRejection = (project: string, closure: Structu
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${escapeHtml(project)} — graft rejected</title>
 <style>
-  body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 2rem; background: #090c10; color: #e6edf3; }
+${DASHBOARD_PALETTE_CSS}
+  body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 2rem; background: var(--color-body); color: var(--color-text); }
   h1 { letter-spacing: -0.035em; }
-  .card { background: #0b0e12; border: 1px solid #232b35; border-left: 3px solid #f79287; border-radius: 12px; padding: 1rem 1.25rem; margin: 1rem 0; }
+  .card { background: var(--color-box-body); border: 1px solid var(--color-secondary); border-left: 3px solid var(--color-yellow); border-radius: var(--border-radius-medium); padding: 1rem 1.25rem; margin: 1rem 0; }
   ul { margin: 0; padding-left: 1.2rem; }
-  .graft-verdict.bad { color: #f79287; }
-  a.cancel { color: #8b98a5; text-decoration: none; }
+  .graft-verdict.bad { color: var(--color-red); }
+  a.cancel { color: var(--color-text-light-2); text-decoration: none; }
 </style>
 </head>
 <body>

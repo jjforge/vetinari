@@ -1006,6 +1006,20 @@ export function parseRunTimestamp(run: string): string | undefined {
   return Number.isNaN(Date.parse(iso)) ? undefined : iso;
 }
 
+/** The archive-token form of an ISO timestamp — the inverse of {@link parseRunTimestamp}:
+ * flatten only the time's `:`/`.` to `-`, exactly as `archiveRun` writes a run's token
+ * (`new Date().toISOString().replace(/[:.]/g, "-")`). The date keeps its own `-`. Used to
+ * mint a `lastRun` token for a finished campaign still living in the live log — never
+ * archived, so with no token of its own (design §11). */
+const runTokenFor = (iso: string): string => iso.replace(/[:.]/g, "-");
+
+/** The latest event timestamp in a log — the finish stamp of the run it records. Undefined
+ * when no event carries a `ts`. */
+const lastEventStamp = (events: OrchestratorEvent[]): string | undefined => {
+  for (let i = events.length - 1; i >= 0; i--) if (typeof events[i].ts === "string") return events[i].ts as string;
+  return undefined;
+};
+
 /** An archived run addressable in the dashboard: its timestamp token (`run`), the
  * resolved log path, and a one-line summary of what it did. The token is the only
  * thing a request supplies; `file` is resolved from the listing, never joined from
@@ -1604,6 +1618,15 @@ const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, event
     const { waves, outcomes } = reduceCampaign(events);
     const finishedIssues = waves.flat();
     const merged = finishedIssues.filter((n) => outcomes.get(n) === "completed").length;
+    // The finished run's facts, read off the live log it still sits in (design §11): its
+    // clean/stalled disposition, when it finished (its last stamp), and — since it was never
+    // archived so has no archive token — a token derived from that finish stamp (the inverse
+    // of `parseRunTimestamp`). The card links `/?project=…&run=<token>`; the run renders as the
+    // live campaign at the top of the project page, so the link opens onto it either way.
+    const finishedAt = lastEventStamp(events);
+    const lastRun = finishedAt
+      ? { run: runTokenFor(finishedAt), outcome: archivedRunState(events), name: status.name ?? runTokenFor(finishedAt), finishedAt }
+      : undefined;
     return {
       project: status.project,
       repo,
@@ -1613,6 +1636,7 @@ const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, event
       percentMerged: finishedIssues.length ? Math.round((merged / finishedIssues.length) * 100) : 0,
       tally: { running: 0, parked: parked.length, queued: 0 },
       lastEvent: `Last run: ${summarizeRun(events)}`,
+      ...(lastRun ? { lastRun } : {}),
     };
   }
   // The card reflects the live plan, not the display's pruned ghosts: drop pruned

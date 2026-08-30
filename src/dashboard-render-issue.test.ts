@@ -2,8 +2,23 @@
 // (dashboard-render-issue.ts, via the status barrel).
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ISSUE_DETAIL_SHEET_STYLES, ISSUE_DETAIL_SHEET_SCRIPT } from "./dashboard-assets.ts";
-import { issueDetailSheetMarkup, renderLandingShell, renderStatusPage } from "./status.ts";
+import { DASHBOARD_PALETTE_CSS, ISSUE_DETAIL_SHEET_STYLES, ISSUE_DETAIL_SHEET_SCRIPT } from "./dashboard-assets.ts";
+import { issueDetailSheetMarkup, renderAggregatedGraftRejection, renderAggregatedPrunePreview, renderLandingShell, renderStatusPage } from "./status.ts";
+
+test("the aggregated prune-preview and graft-rejection pages draw from the shared palette and carry the amber 3px edge, never a hand-authored hex (Appendix A, #317)", () => {
+  const prunePage = renderAggregatedPrunePreview("demo", "42", "would drop #42, #43");
+  const graftPage = renderAggregatedGraftRejection("demo", { ids: ["42"], placement: [], remaining: [], rejected: [{ id: "42", reason: "unknown" }] });
+  for (const page of [prunePage, graftPage]) {
+    // The one palette, not a local :root — so a token can never drift between pages.
+    assert.ok(page.includes(DASHBOARD_PALETTE_CSS), "the page inlines the shared palette CSS");
+    // Appendix A reserves the 3px left edge for amber ("needs you"); the prune coral never rides it.
+    assert.match(page, /border-left: 3px solid var\(--color-yellow\)/);
+    assert.doesNotMatch(page, /border-left: 3px solid #f79287/);
+    // Every colour derives from the palette — outside the one palette block the page
+    // hand-authors no hex (the shared palette is the sole home of raw colour).
+    assert.doesNotMatch(page.replace(DASHBOARD_PALETTE_CSS, ""), /#[0-9a-fA-F]{6}\b/);
+  }
+});
 
 test("the issue-detail sheet markup, CSS, and script are defined once and shared by both pages (#76)", () => {
   const landing = renderLandingShell(["alpha", "beta"]);

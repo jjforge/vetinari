@@ -604,6 +604,32 @@ test("buildLanding folds a finished campaign still in the live log to idle, disp
   assert.equal(existsSync(join(dir, "logs", "archive")), false);
 });
 
+test("a finished campaign lingering in the live log exposes lastRun too, so the idle card has a last-run line and a run link (design §11, #317)", () => {
+  const base = join(tmpdir(), `vetinari-landing-done-live-lastrun-${Date.now()}`);
+  const dir = join(base, "demo");
+  // The same #208 fold-to-idle scenario — a clean campaign-done still in the live log,
+  // never archived — but now the idle card must carry its last run's facts (outcome,
+  // name, finish time) and a token to link, exactly as the empty-live-log branch does.
+  seedState(dir, [
+    event("campaign-start", { ts: "2026-06-15T08:00:00.000Z", waves: [["101"], ["201"]], name: "gateway work", slots: 1 }),
+    event("wave-done", { ts: "2026-06-15T08:03:00.000Z", index: 0, merged: ["101"], held: [], clearedParked: [] }),
+    event("wave-done", { ts: "2026-06-15T08:05:00.000Z", index: 1, merged: ["201"], held: [], clearedParked: [] }),
+    event("campaign-done", { ts: "2026-06-15T08:06:00.000Z", waves: 2 }),
+  ]);
+
+  const [card] = buildLanding([pointerFor("demo", dir)], new Date("2026-06-15T12:00:00.000Z")).projects;
+  assert.equal(card.runState, "idle");
+  // The run's finish stamp (its last event) becomes both the finish time and the run token
+  // — the archive-token form of that ISO, the inverse of parseRunTimestamp — so the card links.
+  assert.deepEqual(card.lastRun, {
+    run: "2026-06-15T08-06-00-000Z",
+    outcome: "complete",
+    name: "gateway work",
+    finishedAt: "2026-06-15T08:06:00.000Z",
+  });
+  assert.equal(parseRunTimestamp(card.lastRun!.run), card.lastRun!.finishedAt);
+});
+
 test("buildLanding folds a finished single-wave live log to idle too (#208)", () => {
   const base = join(tmpdir(), `vetinari-landing-done-queue-${Date.now()}`);
   const dir = join(base, "demo");

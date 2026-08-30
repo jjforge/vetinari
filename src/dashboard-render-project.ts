@@ -23,7 +23,7 @@ import {
   STATE_DOT_CSS,
   TOP_BAR_STYLES,
 } from "./dashboard-assets.ts";
-import { dotClass, freezeIntent } from "./dashboard-visual-state.ts";
+import { dotClass, freezeIntent, reasonWord } from "./dashboard-visual-state.ts";
 import {
   escapeHtml,
   escapeTitle,
@@ -432,14 +432,14 @@ ${HOST_LOG_STYLES}
   textarea { width: 100%; max-width: 100%; min-height: 7rem; margin: .5rem 0; color: var(--color-text); background: var(--color-body); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: .75rem; }
 ${ISSUE_DETAIL_SHEET_STYLES}
   .prune-fallback form { display: inline; }
-  form button { padding: .5rem .8rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: #04110f; cursor: pointer; font-weight: 700; }
+  form button { padding: .5rem .8rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: var(--color-on-accent); cursor: pointer; font-weight: 700; }
   /* The red-base Redrive banner (#171): an attention-amber left edge (the human-action
      queue, §2) with the Redrive action pushed to the right. The button is a control, so it
      takes the primary accent, never a state colour. */
   .redrive-banner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; background: var(--color-card); border: 1px solid var(--color-secondary); border-left: 3px solid var(--color-yellow); border-radius: var(--border-radius-medium); padding: .8rem 1rem; margin: 1rem 0; box-shadow: 0 8px 22px #0004; }
   .redrive-banner-text { color: var(--color-text-light); }
   .redrive-form { margin: 0; }
-  .redrive-btn { padding: .5rem .8rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: #04110f; cursor: pointer; font-weight: 700; }
+  .redrive-btn { padding: .5rem .8rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: var(--color-on-accent); cursor: pointer; font-weight: 700; }
   /* The merge-conflict note (#171) is informational only — same amber edge, no action. */
   .conflict-note { background: var(--color-card); border: 1px solid var(--color-secondary); border-left: 3px solid var(--color-yellow); border-radius: var(--border-radius-medium); padding: .8rem 1rem; margin: 1rem 0; color: var(--color-text-light); box-shadow: 0 8px 22px #0004; }
   .conflict-note code { color: var(--color-text); }
@@ -460,7 +460,7 @@ ${ISSUE_DETAIL_SHEET_STYLES}
   .graft-btn { padding: .35rem .7rem; border: 1px solid var(--color-secondary); border-radius: var(--border-radius); background: none; color: var(--color-text-light-2); cursor: pointer; font: inherit; font-size: .85rem; }
   .graft-btn:disabled { color: var(--color-dim); cursor: default; }
   .graft-inline[data-graft-active] .graft-btn { border-color: var(--color-primary); color: var(--color-primary); }
-  .graft-inline[data-graft-active] .graft-btn:hover { background: var(--color-primary); color: #04110f; }
+  .graft-inline[data-graft-active] .graft-btn:hover { background: var(--color-primary); color: var(--color-on-accent); }
   /* A bad-id / whole-batch rejection surfaces inline beside the input — the rejection red
      (a control's refusal, distinct from the failure state and the amber refusal, §1). */
   .graft-error { color: var(--color-red); font-size: .82rem; }
@@ -522,7 +522,7 @@ ${renderTopBar(opts.projects?.length ? renderRepoDropdown(opts.projects, opts.se
           // happens there — no inline /answer form). The href to the campaign view is
           // the no-JS fallback; parked issues are always prunable, so under prune the
           // card carries data-prunable so the sheet offers Prune (ADR 0005).
-          (p) => `<a class="parked-card" href="/?project=${encodeURIComponent(status.project)}" data-issue="${escapeHtml(p.issueNumber)}" data-project="${escapeHtml(status.project)}"${opts.prune ? ` data-prunable="1"` : ""}><div class="parked-card-title"><span class="parked-issue">#${escapeHtml(p.issueNumber)}</span> ${escapeHtml(p.description)}</div><div class="parked-card-meta">waiting <span class="parked-waited" data-parked-at="${escapeHtml(p.parkedAt)}">…</span> · ${escapeHtml(p.reason)}</div></a>`,
+          (p) => `<a class="parked-card" href="/?project=${encodeURIComponent(status.project)}" data-issue="${escapeHtml(p.issueNumber)}" data-project="${escapeHtml(status.project)}"${opts.prune ? ` data-prunable="1"` : ""}><div class="parked-card-title"><span class="parked-issue">#${escapeHtml(p.issueNumber)}</span> ${escapeHtml(p.description)}</div><div class="parked-card-meta">waiting <span class="parked-waited" data-parked-at="${escapeHtml(p.parkedAt)}">…</span> · ${escapeHtml(reasonWord(p.reason))}</div></a>`,
         )
         .join("")}</section>`
     : ""

@@ -1,5 +1,5 @@
 import { archiveRowMatches, cappedRawRows, followView, humanizedRow, isNotableHostEvent, tailAppend, tailFresh, tailView } from "./dashboard-render.ts";
-import { issueMoves, paneActivity } from "./dashboard-visual-state.ts";
+import { issueMoves, paneActivity, reasonWord } from "./dashboard-visual-state.ts";
 import { humanizeHostLine, LOG_DOT_STATE_COLOR, splitOverflow } from "./log-view.ts";
 
 /**
@@ -35,6 +35,9 @@ export const DASHBOARD_PALETTE_CSS = `  :root {
     --color-blue-40: rgb(108 182 255 / 40%); --color-yellow-40: rgb(200 162 78 / 40%); --color-failure-40: rgb(248 81 73 / 40%); --color-green-40: rgb(63 185 132 / 40%); --color-pruned-40: rgb(163 113 247 / 40%); --color-dim-40: rgb(95 107 120 / 40%);
     /* Prune action — a control, never a state; a different red from failure (§1) */
     --color-red: #f79287;
+    /* The dark ink for text on a bright (accent/prune) button — the one on-bright colour, so
+       no button hand-authors its own foreground hex (§1). */
+    --color-on-accent: #04110f;
     --border-radius: 9px; --border-radius-medium: 12px;
   }`;
 
@@ -176,7 +179,7 @@ export const ISSUE_DETAIL_SHEET_STYLES = `  .prune-panel { display: flex; align-
   .prune-panel[hidden] { display: none; }
   /* One button style across the sheet's moves (#307): Reply, Redrive and Prune share the
      teal product-accent action button — a control, never a state (§1). */
-  .sheet-btn { min-height: 44px; padding: .5rem 1rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: #04110f; font: inherit; font-weight: 700; line-height: 1; cursor: pointer; }
+  .sheet-btn { min-height: 44px; padding: .5rem 1rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: var(--color-on-accent); font: inherit; font-weight: 700; line-height: 1; cursor: pointer; }
   /* The prune flow's confirm/cancel stay their own affordances: the destructive confirm in
      the prune red, cancel a neutral out. */
   .prune-confirm-btn, .prune-cancel { padding: .35rem .7rem; border: 1px solid var(--color-red); border-radius: 999px; background: rgb(247 146 135 / 12%); color: var(--color-red); font: inherit; line-height: 1; cursor: pointer; }
@@ -284,6 +287,9 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
   // The single moves rule (dashboard-visual-state.ts, #307), single-sourced into the
   // browser via .toString() so the node test and this script run the same function.
   ${issueMoves.toString()}
+  // The one park-reason → word mapping (dashboard-visual-state.ts), single-sourced the same
+  // way so the sheet spells a reason exactly as the status line and the parked card do (#317).
+  ${reasonWord.toString()}
   // The fix-forward instruction each redrive-only park reads in the sheet notice (design
   // §11, user-guide park reasons): a conflict/red-base/crash is fixed forward on the base
   // and redriven, never answered per-issue.
@@ -388,7 +394,9 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
     // The sheet's top edge reads the issue's state (§2), the dot its full-strength colour.
     detailSheet.className = "issue-detail-sheet " + d.status;
     detailStatusDot.className = "dot " + d.status;
-    detailStatusLabel.textContent = d.status;
+    // State and reason (design §11): the reason rides beside the state as its word, so a
+    // parked{red-base} sheet reads "parked · red base" — the reason a word, never the raw enum.
+    detailStatusLabel.textContent = d.status + (d.reason ? " · " + reasonWord(d.reason) : "");
     detailTitle.textContent = d.title || ("Issue #" + d.issueNumber);
     detailContext.textContent = [d.project, d.campaignName].filter(Boolean).join(" · ");
     // Turns carry their working duration (POC: "11 turns · 26m"), the one duration
@@ -606,15 +614,15 @@ export const ARCHIVE_LIST_SCRIPT = `  const archiveList = document.querySelector
  * the shared palette (§1, no local hexes): the `--color-card` card, the `--color-body`
  * body, the `--color-secondary` hairline. The body is a fixed 236px scroll region (not
  * resizable) rendering the shared `.lv-row` component (humanized-only, #221). The header dot
- * pulses teal only while the pane is open and following (§5, reduced-motion aware). Play/pause
- * is a 26×26 CSS-drawn icon flipped by `data-following`.
+ * reads teal while live and dim otherwise, but does not animate: §11/Appendix A reserve motion
+ * for the running dot and the live indicator alone, so the stream dot is a static colour, not a
+ * third pulse (#317). Play/pause is a 26×26 CSS-drawn icon flipped by `data-following`.
  */
 export const LIVE_TAIL_STYLES = `  .live-tail { background: var(--color-card); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); overflow: hidden; margin: 1rem 0; }
   .live-tail[hidden] { display: none; }
   .tail-head { display: flex; align-items: center; gap: .5rem; padding: 10px 13px; }
   .tail-dot { width: .6rem; height: .6rem; background: var(--color-dim); }
-  .tail-dot[data-state="live"] { background: var(--color-primary); animation: chip-pulse 2.4s ease-in-out infinite; }
-  @media (prefers-reduced-motion: reduce) { .tail-dot[data-state="live"] { animation: none; } }
+  .tail-dot[data-state="live"] { background: var(--color-primary); }
   .tail-title { display: inline-flex; align-items: center; gap: .4rem; border: 0; background: none; padding: 0; color: var(--color-text); font: inherit; font-weight: 600; cursor: pointer; }
   .tail-caret::before { content: "▾"; color: var(--color-text-light-2); display: inline-block; transition: transform 150ms; }
   .tail-title[aria-expanded="false"] .tail-caret::before { transform: rotate(-90deg); }

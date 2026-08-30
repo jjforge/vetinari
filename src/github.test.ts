@@ -80,7 +80,8 @@ test("githubIssuesByLabel lists the OPEN issues carrying a label and returns the
       "--state",
       "open",
       "--json",
-      "number",
+      // issueType so an Epic — a container that owns no work — is never scheduled (#322).
+      "number,issueType",
     ],
   ]);
   assert.deepEqual(ids, ["436", "611", "640"]);
@@ -91,6 +92,59 @@ test("githubIssuesByLabel returns an empty list when no open issue carries the l
     githubIssuesByLabel("jjforge/vetinari", () => "[]")("nonexistent"),
     [],
   );
+});
+
+test("githubIssuesByLabel drops an Epic carrying the label — it owns no work, is never scheduled (#322)", () => {
+  const logs: string[] = [];
+  const run = () =>
+    JSON.stringify([
+      { number: 282, issueType: { name: "Epic" } },
+      { number: 611, issueType: { name: "Task" } },
+    ]);
+
+  const ids = githubIssuesByLabel(
+    "jjforge/vetinari",
+    run,
+    (line) => logs.push(line),
+  )("campaign:vocabulary");
+
+  // the task stays; the epic is gone.
+  assert.deepEqual(ids, ["611"]);
+  // one line naming the excluded epic, so the operator sees why the count shrank.
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /#282 — epic, not work/);
+});
+
+test("githubIssuesByLabel matches the Epic type case-insensitively", () => {
+  const run = () =>
+    JSON.stringify([
+      { number: 282, issueType: { name: "EPIC" } },
+      { number: 283, issueType: { name: "epic" } },
+      { number: 611, issueType: { name: "Bug" } },
+    ]);
+
+  assert.deepEqual(
+    githubIssuesByLabel("jjforge/vetinari", run, () => {})("campaign:vocabulary"),
+    ["611"],
+  );
+});
+
+test("githubIssuesByLabel keeps a row with no issueType — an untyped issue is work", () => {
+  const logs: string[] = [];
+  const run = () =>
+    JSON.stringify([
+      { number: 611, issueType: null },
+      { number: 640 },
+    ]);
+
+  const ids = githubIssuesByLabel(
+    "jjforge/vetinari",
+    run,
+    (line) => logs.push(line),
+  )("campaign:vocabulary");
+
+  assert.deepEqual(ids, ["611", "640"]);
+  assert.deepEqual(logs, []);
 });
 
 test("githubFetchTask fetches an issue asking for state and closedAt, not just title/body/comments/labels", () => {

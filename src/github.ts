@@ -67,17 +67,28 @@ export const githubFetchTask =
 
 /**
  * A ready `listByLabel` resolver over `gh issue list`: the numbers (as strings) of
- * the OPEN issues carrying `label` in `repo`. Drop it into a config as
- * `listByLabel: githubIssuesByLabel("owner/repo")` so `campaign <label>` can select
+ * the OPEN issues carrying `label` in `repo` **that are work**. Drop it into a config
+ * as `listByLabel: githubIssuesByLabel("owner/repo")` so `campaign <label>` can select
  * its issue set from the tracker instead of a hand-typed id list.
  *
- * Only open issues are listed (`--state open`) — a campaign works the live set — and
- * only the number is requested, since the planner pulls each issue's dep/fileset/title
- * data lazily through the other seams. `run` is injected only so the argument building
- * can be tested without invoking `gh`.
+ * Only open issues are listed (`--state open`) — a campaign works the live set. An
+ * issue whose native tracker type is `Epic` is a container that owns no work
+ * (`docs/issue-conventions.md`) and is never scheduled, so it is dropped here at the
+ * edge (matched case-insensitively; a row with no type is kept — an untyped issue is
+ * work), design §4 step 1. Each excluded epic is logged one line so the operator sees
+ * why the count is smaller than the label's — and, since `campaign --dry-run <label>`
+ * expands the label through this seam, that line surfaces in the plan's provenance
+ * rather than the epic being silently omitted. `issueType` is the only extra field
+ * requested; the planner pulls each issue's dep/fileset/title data lazily through the
+ * other seams. `run`/`log` are injected only so the behaviour can be tested without
+ * invoking `gh` or writing to the real console.
  */
 export const githubIssuesByLabel =
-  (repo: string, run: (args: string[]) => string = gh) =>
+  (
+    repo: string,
+    run: (args: string[]) => string = gh,
+    log: (line: string) => void = console.error,
+  ) =>
   (label: string): string[] => {
     const out = run([
       "issue",
@@ -89,12 +100,20 @@ export const githubIssuesByLabel =
       "--state",
       "open",
       "--json",
-      "number",
+      "number,issueType",
     ]);
-    const rows: Array<{ number?: number }> = JSON.parse(out || "[]");
-    return rows
-      .filter((r) => r.number != null)
-      .map((r) => String(r.number));
+    const rows: Array<{ number?: number; issueType?: { name?: string } | null }> =
+      JSON.parse(out || "[]");
+    const ids: string[] = [];
+    for (const r of rows) {
+      if (r.number == null) continue;
+      if (r.issueType?.name?.toLowerCase() === "epic") {
+        log(`[vetinari] #${r.number} — epic, not work (carries "${label}", not scheduled)`);
+        continue;
+      }
+      ids.push(String(r.number));
+    }
+    return ids;
   };
 
 /**

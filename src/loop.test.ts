@@ -205,6 +205,51 @@ test("runLoop resumes a red gate on the same session and reaches green next turn
   assert.equal(sbx.runCalls[1].resumeSession, "sess-0");
 });
 
+// Capture console.warn for the preflight-warning assertions, silencing console.log too.
+const captureWarn = async <T>(fn: () => Promise<T>): Promise<{ result: T; warnings: string[] }> => {
+  const realWarn = console.warn;
+  const realLog = console.log;
+  const warnings: string[] = [];
+  console.warn = (...a: unknown[]) => warnings.push(a.join(" "));
+  console.log = () => {};
+  try {
+    return { result: await fn(), warnings };
+  } finally {
+    console.warn = realWarn;
+    console.log = realLog;
+  }
+};
+
+test("runLoop preflight warns once when a non-resumable provider has no postComment (a park could not be answered)", async () => {
+  const cfg = harnessCfg({ agent: { provider: "copilot" }, promptFile: "/prompts/tdd.md" });
+  const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc" }] }, green: true }]);
+
+  const { warnings } = await captureWarn(() => runLoop(cfg, "T-1", undefined, depsFor(sbx)));
+
+  const preflight = warnings.filter((w) => /postComment/.test(w));
+  assert.equal(preflight.length, 1, "the preflight warning is printed exactly once");
+  assert.match(preflight[0], /copilot/);
+  assert.match(preflight[0], /park/);
+});
+
+test("runLoop preflight does not warn when a non-resumable provider HAS postComment configured (the answer path works)", async () => {
+  const cfg = harnessCfg({ agent: { provider: "copilot" }, promptFile: "/prompts/tdd.md", postComment: async () => {} });
+  const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc" }] }, green: true }]);
+
+  const { warnings } = await captureWarn(() => runLoop(cfg, "T-1", undefined, depsFor(sbx)));
+
+  assert.equal(warnings.filter((w) => /postComment/.test(w)).length, 0);
+});
+
+test("runLoop preflight does not warn for a resumable provider (its park→answer resumes the session)", async () => {
+  const cfg = harnessCfg({ agent: { provider: "claude" } });
+  const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc" }] }, green: true }]);
+
+  const { warnings } = await captureWarn(() => runLoop(cfg, "T-1", undefined, depsFor(sbx)));
+
+  assert.equal(warnings.filter((w) => /postComment/.test(w)).length, 0);
+});
+
 test("runLoop drives a non-resumable provider by a FRESH re-run each red turn — no resumeSession, no 'no session id' throw", async () => {
   let fetched = 0;
   const cfg = harnessCfg({

@@ -31,13 +31,13 @@ export const MODES: Mode[] = [
   {
     signature: "run <task> [--agent <name>] [--model <m>] [--effort <e>]",
     blurb:
-      "the TDD loop: agent turn → gate → resume on red. --agent picks the provider (claude | pi | codex, default claude or cfg.agent.provider); --model/--effort override that provider's defaults, effort in the provider's own vocabulary. A bad provider/effort or missing provider credentials fails fast before the container (ADR 0016)",
+      "the TDD loop: agent turn → gate → resume on red. --agent picks the provider (claude | pi | codex, default claude or cfg.agent.provider; copilot | cursor | opencode are experimental — non-resumable, so a parked question needs postComment to be answered); --model/--effort override that provider's defaults, effort in the provider's own vocabulary. A bad provider/effort or missing provider credentials fails fast before the container (ADR 0016)",
   },
   {
     signature:
       'campaign [--dry-run] [--override] [--name "…"] [--auto-prune] [--agent <name>] <ids-or-labels…>',
     blurb:
-      "select issues, plan them into dependency-ordered file-disjoint waves, then run them (queue a wave, merge greens → gate base → next). A numeric token is an issue id; a NON-numeric token is a label expanded to the open issues carrying it (needs a listByLabel resolver — githubIssuesByLabel(repo) — else a label fails fast). --dry-run plans only, printing the wave plan + provenance + suggested --name and running nothing (this replaces the old campaign-plan). --override skips the planner and runs each positional as one literal wave (labels inside still expand). --on-underspecified=drop|fail pre-decides the planner's not-confident halt for non-interactive runs. --name labels the run; --agent (with --model/--effort) selects the provider for the whole campaign and every child wave (claude | pi | codex; ADR 0016). If a merge-conflict quarantine strands dependents in later waves the campaign pauses for a human by default; --auto-prune prunes the stranded closure and runs on (ADR 0013)",
+      "select issues, plan them into dependency-ordered file-disjoint waves, then run them (queue a wave, merge greens → gate base → next). A numeric token is an issue id; a NON-numeric token is a label expanded to the open issues carrying it (needs a listByLabel resolver — githubIssuesByLabel(repo) — else a label fails fast). --dry-run plans only, printing the wave plan + provenance + suggested --name and running nothing (this replaces the old campaign-plan). --override skips the planner and runs each positional as one literal wave (labels inside still expand). --on-underspecified=drop|fail pre-decides the planner's not-confident halt for non-interactive runs. --name labels the run; --agent (with --model/--effort) selects the provider for the whole campaign and every child wave (claude | pi | codex; copilot | cursor | opencode experimental; ADR 0016). If a merge-conflict quarantine strands dependents in later waves the campaign pauses for a human by default; --auto-prune prunes the stranded closure and runs on (ADR 0013)",
   },
   {
     signature: "campaign --resume",

@@ -64,6 +64,7 @@ Within a milestone each bold section label appears at most once.
 - [user] `campaign --help` (and `docs/reference.md`) describe a merge conflict *parking* an issue rather than the retired "quarantine" wording (#321).
 - [api] The `wave-done` event carries only `{ index, merged }` now — the always-empty `held`, `clearedParked`, and `quarantined` fields are gone, since a wave-done fires only when every member merged (#321).
 - [internal] Retired the `quarantined`/`waveParked` identifiers across the reducer, integrator, and `tidy` in favour of `conflictParked`, `campaign-parked`, and `parked(conflict)`; the `quarantineImpacts` seam is now `strandedByConflict` (#321).
+- [user] The dashboard's graft control now reads as in-flight while its POST runs — the button relabels to `grafting…` and the form carries `aria-busy`, held disabled so it cannot re-submit, and restores on success, whole-batch rejection, or a network error (#327).
 
 **Bug fixes:**
 - [user] A campaign wave with a failed issue now holds the wave and stops the campaign as failed: the wave still drains its siblings and merges their greens, then a `campaign-failed` event and a failure notice are logged and the run exits non-zero — no later wave starts on top of the missing work (#285).

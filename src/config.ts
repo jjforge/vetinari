@@ -450,9 +450,9 @@ export interface VetinariConfig {
   postComment?: (issueRef: string, body: string) => void | Promise<void>;
   /**
    * Named Telegram destinations this project routes categories to (name ->
-   * `{bot, chat, thread?}`). A destination names a bot by reference — its token is
-   * read from `.vetinari.local/`, never inlined here. The `notify` map's values
-   * are keys of this map.
+   * `{chat, thread?}`). One bot per project — its token is read from
+   * `.vetinari.local/`, never inlined here — so a destination names no bot, only
+   * where on that bot a message lands. The `notify` map's values are keys of this map.
    */
   destinations?: Record<string, Destination>;
   /**

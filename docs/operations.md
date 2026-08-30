@@ -77,10 +77,10 @@ asked, and the gateway shells `answer` in that project's root.
 Where a project's messages land is declared in its committed
 `vetinari/config.mts` with two maps:
 
-- **`destinations`** — named `{ bot, chat, thread? }` targets. The `bot` names
-  the project's bot (its token is the one read from `host.env`, never inlined
-  here); `chat` and the optional `thread` say *where* on that bot a message
-  lands.
+- **`destinations`** — named `{ chat, thread? }` targets. One bot per project
+  (design §10): its token is the one read from `host.env`, never inlined here, so
+  a destination names no bot — `chat` and the optional `thread` only say *where*
+  on that one bot a message lands.
 - **`notify`** — routing rules: each key is a bare `category` or a
   `category:event`, plus a `*` wildcard default; each value is a destination
   name.
@@ -89,25 +89,40 @@ Where a project's messages land is declared in its committed
 export default defineConfig({
   // …
   destinations: {
-    ops:    { chat: "-1001111111111", bot: "mybot" },
-    alerts: { chat: "-1002222222222", bot: "mybot" },
+    ops:    { chat: "-1001111111111" },
+    alerts: { chat: "-1002222222222" },
   },
   notify: {
     "*": "ops",              // everything, by default, to ops
     failure: "alerts",       // halts and resume errors to alerts
     "progress:prune": "alerts",
-    question: "ops",         // the interactive category — see below
+    question: "ops",         // the interactive routing key — see below
   },
 });
 ```
 
-The five message categories are fixed: `question`, `success`, `failure`,
-`progress`, `finding`. Resolution is exact-`category:event` over bare `category`
-over `*`. `question` is the only **interactive** category (the gateway watches
-its destination for your reply), so it must resolve to **exactly one**
-destination — config load fails with a clear error if your notify map (via a
-`question` entry or the wildcard) would fan `question` to more than one place.
-Broadcast categories may fan anywhere.
+The four message categories are fixed: `success`, `failure`, `progress`,
+`finding`. Resolution is exact-`category:event` over bare `category` over `*`.
+`question` is not a category — a question is a parked record the gateway
+announces — but it is a **routing key** you may map: it is the one **interactive**
+key (the gateway watches its destination for your reply and the park announcement
+goes there), so it must resolve to **exactly one** destination — config load fails
+with a clear error if your notify map (via a `question` entry or the wildcard)
+would fan `question` to more than one place. Broadcast categories may fan anywhere.
+
+**The event names changed (breaking).** A `category:event` key uses the settled
+§2.1 event words. If you routed on the old outbound event names, update the keys:
+
+| Old key | New key |
+| --- | --- |
+| `progress:queue-start` | *(removed — the wave is framed by `progress:wave-start`)* |
+| `progress:queue-done` | *(removed — the wave is framed by `success:wave-done`)* |
+| `success:wave-merged` | `success:wave-done` |
+| `success:campaign-complete` | `success:campaign-done` |
+| `progress:campaign-resume` | `progress:redrive` |
+| `failure:wave-parked` | `failure:campaign-parked` |
+| `failure:quarantine-paused` | `failure:campaign-parked` |
+| `progress:auto-prune` | `progress:prune` |
 
 **How routing reaches the gateway.** On every run, `autoRegister` materializes
 your `destinations` + `notify` into the base location as

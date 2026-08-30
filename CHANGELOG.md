@@ -27,6 +27,8 @@ Within a milestone each bold section label appears at most once.
 - [api] The dashboard's `POST /resume` route is now `POST /redrive` and shells `vetinari redrive` (not `campaign --resume`); the old `/resume` path 404s (#295).
 - [ops] `migrate` now performs only the one-time layout move and the `orchestrator.env`→`host.env` rename; every other compatibility shim it carried is gone — the `hostWeight`→`containerShare` config rewrite, the `host-slots`→`max-concurrent-containers` ceiling-file rename, the `dispatch`→`gateway` systemd-unit rewrite, the stale `gateway.env` deletion, and the `VETINARI_TELEGRAM_*` strip from the container-gate `.env` (#296). A rename is a breaking change, not something `migrate` absorbs forever (design §9, §13.1); see `docs/operations.md` for the by-hand fixups.
 - [internal] Removed the `check-changelog-sections` section lint, its shell tests, and the `make check-changelog-sections`/`check-changelog-sections-test` targets (#297).
+- [ops] Telegram `notify` keys now use the settled §2.1 event names. Rename any `category:event` key you route on: `success:wave-merged`→`success:wave-done`, `success:campaign-complete`→`success:campaign-done`, `progress:campaign-resume`→`progress:redrive`, `failure:wave-parked`/`failure:quarantine-paused`→`failure:campaign-parked`, `progress:auto-prune`→`progress:prune`; `progress:queue-start`/`progress:queue-done` are gone (the wave is framed by `wave-start`/`wave-done`). The old→new table is in `docs/operations.md` (#315).
+- [api] A `destinations` entry is `{ chat, thread? }` — the `bot` field is removed. One bot per project, its token read from `host.env`, so a destination names no bot (#315).
 
 **New features:**
 - [user] `campaign --resume --override` re-runs a failed member on a redrive; without it, a member that failed on the prior run holds its wave and the campaign stops as failed again (prune it or fix it forward instead) (#287).
@@ -64,6 +66,7 @@ Within a milestone each bold section label appears at most once.
 - [user] `campaign` and `redrive` now exit with their outcome — 0 only after the campaign is done, 2 when it parked, 1 when it failed — instead of always exiting 0; the same codes apply when a green `answer` implicitly redrives (#313).
 - [user] `run` now exits 1 (not 2) when it fails, distinct from 2 for parked and 0 for green; a standalone run that throws leaves a `failed` verdict on the event log instead of nothing (#313).
 - [ops] `prune --dry-run` and `graft --dry-run` no longer print their machine `prune-closure`/`graft-closure` JSON line to stdout unless `--json` is passed; the dashboard's preview shells pass it (#313).
+- [ops] A parked question is now announced to the destination its `question` routing key resolves to — the place the gateway watches for the reply — instead of always the project's default chat (#315).
 
 **Documentation:**
 - [internal] `CONTEXT.md` is now a domain-only glossary in the settled vocabulary: an entry for every object, state, park reason and move in the user guide's model; retired words (`carve`, `queue`, `quarantined`, `wave-parked`, `interrupted`, `campaign-plan`, `dispatch`/`attend`, `hostWeight`, `QUEUE_SLOTS`) demoted to _Avoid_ lines; dashboard widgets, colour rules and testing terms removed (#300).

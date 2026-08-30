@@ -127,12 +127,14 @@ export interface WaveDoneEvent extends BaseEvent {
 }
 
 /** `campaign-parked` — the campaign paused at a wave boundary (design §2.1, the first of the two
- * stop markers): the wave index and why (a red merged base, an unresolved issue park, or a
- * conflict that stranded later-wave dependents). The greens already merged stay on the base
- * (modes.ts). */
+ * stop markers): the wave index, the wave-level `reason` written by the code that stopped it
+ * (`red-base`, `question`, `stalled`, or `conflict` — §2.1 rule 2: the reducer reads this reason,
+ * it never infers one from surrounding events), and the detail. The greens already merged stay on
+ * the base (modes.ts). */
 export interface CampaignParkedEvent extends BaseEvent {
   event: "campaign-parked";
   index?: number;
+  reason?: ParkReason;
   detail?: string;
 }
 

@@ -116,6 +116,7 @@ export type Stop =
   | { kind: "failed"; index: number; total: number; failed: string[]; merged: string[] }
   | { kind: "issue-parked"; index: number; total: number; parked: string[]; merged: string[] }
   | { kind: "red-base"; index: number; total: number; merged: string[] }
+  | { kind: "conflict"; index: number; total: number; conflicted: string[]; merged: string[] }
   | { kind: "quarantine-stranded"; index: number; total: number; stranded: string[]; merged: string[] };
 
 /** The one-line stop reason and, on the next line, the exact command that resumes it. */
@@ -142,6 +143,14 @@ export function formatStop(stop: Stop): string {
       return (
         `🅿 campaign parked at ${pos} — merged base is red (red-base); ${tail}\n` +
         "recover: fix forward on the base, then `vetinari redrive` — or `vetinari prune <id>`"
+      );
+    }
+    case "conflict": {
+      const tail = keptTail(stop.merged, stop.index, stop.total);
+      const id = stop.conflicted[0];
+      return (
+        `🅿 campaign parked at ${pos} — merge conflict on ${stop.conflicted.map((c) => `#${c}`).join(", ")} (conflict); ${tail}\n` +
+        `recover: resolve the conflict on the branch then \`vetinari redrive\` (or \`vetinari prune ${id}\`)`
       );
     }
     case "quarantine-stranded": {

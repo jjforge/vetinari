@@ -1356,6 +1356,82 @@ test("reduceCampaign reconciles a dead run's in-flight issue to parked{crash}; a
   assert.equal(reduceCampaign(done, { alive: false }).outcomes.get("301"), "completed");
 });
 
+test("reduceCampaign treats any campaign-* stop marker as not-a-crash — an in-flight member is not crash-folded past a park/fail (design §7, #314)", () => {
+  // A wave stopped with a stop marker on the log, but a member never reached a terminal
+  // event of its own (a racy/partial log). A crash is the ABSENCE of a stop marker (design
+  // §7); a campaign-parked or campaign-failed is a clean stop, so the reducer must not
+  // reconcile the lingering `running` member to parked{crash}.
+  const parked = [
+    event("campaign-start", { ts: "t0", waves: [["301", "302"]], slots: 1 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["301", "302"] }),
+    event("spawn", { ts: "t2", taskId: "301" }),
+    event("parked", { ts: "t3", taskId: "302", reason: "question" }),
+    event("campaign-parked", { ts: "t4", index: 0, reason: "question", detail: "302 parked" }),
+  ];
+  assert.equal(reduceCampaign(parked, { alive: false }).outcomes.get("301"), "running", "a campaign-parked marker is not a crash");
+
+  const failed = [
+    event("campaign-start", { ts: "t0", waves: [["301", "302"]], slots: 1 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["301", "302"] }),
+    event("spawn", { ts: "t2", taskId: "301" }),
+    event("failed", { ts: "t3", taskId: "302" }),
+    event("campaign-failed", { ts: "t4", index: 0, detail: "302 failed" }),
+  ];
+  assert.equal(reduceCampaign(failed, { alive: false }).outcomes.get("301"), "running", "a campaign-failed marker is not a crash");
+});
+
+test("reduceCampaign: a campaign-parked reason question/conflict does not fold its wave to red-base — members keep their own reason (design §2.1, §2.3, #314)", () => {
+  // The wave's reason is written on `campaign-parked`, not inferred (§2.1 rule 2). A
+  // question/conflict park is NOT a red merged base, so the reducer must not stamp the
+  // wave `red-base` — its members carry their own hold and the wave has no wave-level reason.
+  const question = reduceCampaign([
+    event("campaign-start", { ts: "t0", waves: [["611", "612"]], slots: 1 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["611", "612"] }),
+    event("green", { ts: "t2", taskId: "611", branch: "agent/611", commits: [] }),
+    event("parked", { ts: "t3", taskId: "612", reason: "question" }),
+    event("campaign-parked", { ts: "t4", index: 0, reason: "question", detail: "612 parked" }),
+  ]);
+  assert.equal(question.redBase.size, 0, "a question park is not a red base");
+
+  const conflict = reduceCampaign([
+    event("campaign-start", { ts: "t0", waves: [["611", "640"]], slots: 1 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["611", "640"] }),
+    event("green", { ts: "t2", taskId: "611", branch: "agent/611", commits: [] }),
+    event("green", { ts: "t3", taskId: "640", branch: "agent/640", commits: [] }),
+    event("parked", { ts: "t4", taskId: "640", reason: "conflict", detail: "CONFLICT" }),
+    event("campaign-parked", { ts: "t5", index: 0, reason: "conflict", detail: "640 conflict" }),
+  ]);
+  assert.equal(conflict.redBase.size, 0, "a conflict park is not a red base");
+  assert.deepEqual(issueLifecycle(conflict, "640"), { state: "parked", reason: "conflict" });
+
+  // The explicit red-base reason still stamps the wave.
+  const red = reduceCampaign([
+    event("campaign-start", { ts: "t0", waves: [["611", "612"]], slots: 1 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["611", "612"] }),
+    event("green", { ts: "t2", taskId: "611", branch: "agent/611", commits: [] }),
+    event("green", { ts: "t3", taskId: "612", branch: "agent/612", commits: [] }),
+    event("campaign-parked", { ts: "t4", index: 0, reason: "red-base", detail: "GATE FAILED" }),
+  ]);
+  assert.deepEqual([...red.redBase].sort(), ["611", "612"], "an explicit red-base park stamps the wave");
+});
+
+test("reduceCampaign never adds a wave with a quarantined member to closedWaves; resumeIndex returns it (design §7, #314)", () => {
+  // A conflict-parked green holds the wave — even were a wave-done ever logged over it, a
+  // quarantined member means the wave is not resolved, so it stays out of closedWaves and a
+  // redrive re-enters it (the resumeIndex boundary reads closedWaves).
+  const reduced = reduceCampaign([
+    event("campaign-start", { ts: "t0", waves: [["611", "640"]], slots: 1 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["611", "640"] }),
+    event("green", { ts: "t2", taskId: "611", branch: "agent/611", commits: [] }),
+    event("green", { ts: "t3", taskId: "640", branch: "agent/640", commits: [] }),
+    event("merged", { ts: "t4", taskId: "611" }),
+    event("parked", { ts: "t5", taskId: "640", reason: "conflict", detail: "CONFLICT" }),
+    // A wave-done that names only the merged member must NOT close a wave still holding a quarantine.
+    event("wave-done", { ts: "t6", index: 0, merged: ["611"] }),
+  ]);
+  assert.ok(!reduced.closedWaves.has(0), "a wave with a quarantined member is not closed");
+});
+
 test("reduceCampaign folds a campaign-failed stop marker to a failed, un-closed wave (#285)", () => {
   // The campaign-failed marker is authoritative: even with no error carried in queue-done,
   // it names the failed member and the fold reads it `failure`, so the wave holding it folds

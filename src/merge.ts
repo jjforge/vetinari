@@ -39,6 +39,15 @@ function branchAlreadyMerged(branch: string): boolean {
 export interface IntegrateResult {
   merged: string[];
   /**
+   * Greens recognised as already on the base (`branchAlreadyMerged`) — a redrive re-entry's
+   * banked greens, or a green a human hand-merged onto the base (design §7). Each is logged
+   * `merged` (so the reducer marks it completed and clears any conflict hold) but is kept OUT
+   * of `merged`: no second merge commit is made. This is the redrive's "skipped as already
+   * merged" set the caller counts. Optional so a test stub that never re-enters a wave may
+   * omit it (absent reads as none).
+   */
+  alreadyMerged?: string[];
+  /**
    * Greens a merge conflict pulled from this wave's integration (ADR 0013). A conflict
    * is attributable — git blames one branch — so only that merge is aborted; the issue
    * is quarantined with its branch, worktree, and agent session left intact so it is
@@ -88,18 +97,22 @@ export async function integrateGreens(
   greens: string[],
   deps: IntegrateDeps = defaultIntegrateDeps,
   index?: number,
+  opts: { regate?: boolean } = {},
 ): Promise<IntegrateResult> {
   const merged: string[] = [];
+  const alreadyMerged: string[] = [];
   const quarantined: string[] = [];
   for (const taskId of greens) {
     const branch = `${cfg.branchPrefix}${taskId}`;
-    // Redrive idempotency (design §7): a green already banked on the base — its branch
-    // gone, or every commit already an ancestor of HEAD — is never merged a second time.
-    // Re-entering a parked wave passes its whole green set (the already-merged ones plus
-    // any newly landable answered-park / resolved-conflict green); only the genuinely
-    // unmerged greens are integrated here, so banked work is skipped, not redone.
+    // Redrive idempotency + hand-merge recognition (design §7): a green already banked on the
+    // base — its branch gone, or every commit already an ancestor of HEAD — is never merged a
+    // second time. But it IS recognised as landed: `merged` is logged so the reducer marks it
+    // completed and clears any conflict hold (a human who hand-merges a conflict-parked green
+    // onto the base, then redrives, must close the wave). It rides `alreadyMerged`, not `merged`
+    // — no second merge commit — so the caller can count it as "skipped as already merged".
     if (branchAlreadyMerged(branch)) {
-      cfg.log.log("campaign-merge-skipped", { taskId, branch });
+      cfg.log.log("merged", { taskId, branch });
+      alreadyMerged.push(taskId);
       continue;
     }
     const r = gitTry(["merge", "--no-ff", branch, "-m", `campaign: merge ${branch}`]);
@@ -119,7 +132,10 @@ export async function integrateGreens(
     merged.push(taskId);
   }
 
-  if (merged.length) {
+  // Gate the merged base when something new merged, OR when re-entering a red-base-parked
+  // wave (`regate`, design §7) where nothing new merges but the base must be re-proven: a
+  // fix-forward may have turned it green, or it may still be red and re-park.
+  if (merged.length || opts.regate) {
     const { green, report } = await deps.gate(cfg, index);
     if (!green) {
       // Emergent, unattributable failure (ADR 0013): every green passed alone, the
@@ -132,7 +148,7 @@ export async function integrateGreens(
       // stay merged and the campaign parks. The `base-gate` above already recorded the red
       // result; the caller logs the `campaign-parked` stop marker with the wave index.
       const detail = report.split("\n").slice(-40).join("\n");
-      return { merged, quarantined, parked: { reason: "red-base", detail } };
+      return { merged, alreadyMerged, quarantined, parked: { reason: "red-base", detail } };
     }
   }
 
@@ -142,7 +158,7 @@ export async function integrateGreens(
   for (const taskId of merged) gitTry(["branch", "-D", `${cfg.branchPrefix}${taskId}`]);
   gitTry(["worktree", "prune"]);
   cfg.log.log("campaign-integrated", { merged, headSha: git(["rev-parse", "HEAD"]) });
-  return { merged, quarantined };
+  return { merged, alreadyMerged, quarantined };
 }
 
 /**

@@ -726,6 +726,51 @@ test("redrive re-enters the parked wave and integrates a green-but-unmerged memb
   );
 });
 
+test("the redrive event carries fromWave, landed, and skipped (design §2.1, §7, #314)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-counts-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  seedParkedWave(cfg);
+  cfg.log.log("green", { taskId: "102", branch: "agent/102", commits: ["b"] }); // both completed
+
+  // Integration lands 102 (freshly merged) and recognises 101 as already banked (skipped).
+  const deps: CampaignDeps = {
+    spawnRun: async () => 0,
+    integrate: async (_cfg, greens) => ({
+      merged: greens.filter((g) => g !== "101"),
+      alreadyMerged: greens.filter((g) => g === "101"),
+      quarantined: [],
+    }),
+    collectChangelog: () => ({ collected: [], committed: false }),
+    currentBranch: () => cfg.baseBranch,
+    grace: async () => {},
+  };
+
+  const ok = await silenceConsole(() => campaign(cfg, [], host, undefined, { resume: true }, deps));
+  assert.equal(ok, "done");
+  const redrive = readEventLog(cfg).find((e) => e.event === "redrive") as any;
+  assert.equal(redrive.fromWave, 0, "the wave the redrive re-entered");
+  assert.equal(redrive.landed, 1, "102 was freshly landed");
+  assert.equal(redrive.skipped, 1, "101 was already banked and skipped");
+});
+
+test("resolve reads only the wave's members — a stray parked record for a non-member never holds the wave (design §5 step 5, #314)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-nonmember-park-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  // A parked record on disk for #999 — an issue NOT in this campaign (a prune removed it, or
+  // another process left it). Every member of the wave goes green.
+  seedParkedRecord(cfg, "999");
+
+  const ok = await silenceConsole(() =>
+    campaign(cfg, [["101", "102"]], host, "harness", {}, gitFreeDeps(cfg, async () => 0)),
+  );
+
+  assert.equal(ok, "done", "the stray non-member parked record never held the wave");
+  assert.ok(readEventLog(cfg).some((e) => e.event === "wave-done"), "the wave closed");
+  assert.ok(readEventLog(cfg).some((e) => e.event === "campaign-done"), "the campaign finished");
+});
+
 test("redrive re-runs a parked member whose parked record is gone (answered), and lands the rest", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-answered-"));
   const cfg = harnessCfg(dir);
@@ -1071,9 +1116,15 @@ test("grace window: a conflict (quarantine) never triggers the wait, even with p
 
   const ok = await silenceConsole(() => campaign(cfg, [["101", "102"]], host, "harness", {}, deps));
 
-  assert.equal(ok, "done", "a quarantine with no stranded dependents runs the wave to done");
+  // A conflict-parked green holds the wave like any park (design §5 step 5, #310): even with
+  // nothing stranded, the campaign parks — it does not slip through to done.
+  assert.equal(ok, "parked", "a conflict park holds the wave and stops the campaign");
   assert.equal(graceCalls, 0, "a conflict never waits");
   assert.ok(!readEventLog(cfg).some((e) => e.event === "grace-wait"), "no grace-wait was logged for a conflict");
+  // The campaign-parked stop marker carries the wave's reason `conflict` (§2.1 rule 2).
+  const parked = readEventLog(cfg).filter((e) => e.event === "campaign-parked");
+  assert.equal(parked.length, 1, "exactly one campaign-parked marks the conflict hold");
+  assert.equal((parked[0] as any).reason, "conflict", "the wave's reason is conflict");
 });
 
 test("grace window: the default parkGraceSeconds of 0 never waits — a park stops the campaign at once", async () => {

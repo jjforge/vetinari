@@ -866,6 +866,39 @@ export function campaignRunning(events: OrchestratorEvent[]): boolean {
   return !events.slice(start).some((e) => e.event === "campaign-done");
 }
 
+/**
+ * Has a campaign ever been launched over this log? True iff any `campaign-start`
+ * with wave batches is present — the "is there a campaign to adjust at all?" guard
+ * prune and graft check before `campaignSettled`, so an empty (or campaign-less)
+ * log refuses with "nothing to adjust" rather than proceeding into an empty plan.
+ * Unlike `campaignRunning` it ignores `campaign-done`: a settled campaign has still
+ * been launched, and its "already settled" refusal is `campaignSettled`'s to give.
+ */
+export function campaignStarted(events: OrchestratorEvent[]): boolean {
+  return events.some((e) => e.event === "campaign-start" && Array.isArray(e.batches));
+}
+
+/**
+ * Is the latest campaign *settled* — every member merged, nothing left to adjust?
+ * The single definition prune and graft share (ADR 0019): a campaign is settled
+ * exactly when its fold is `completed` — every wave closed, every live member
+ * `completed`. `reduceCampaign` is the source; no new state is stored. This is the
+ * fold, not the `campaign-done` marker: a run that ended incomplete (parked, failed,
+ * or crashed with no `campaign-done`) is *unsettled* and stays adjustable, and a run
+ * whose every member merged is settled even if its process died before it logged
+ * `campaign-done` (design §5, §15). A log with no campaign folds to no waves, which is
+ * not `completed`, so an empty or campaign-less log is never settled — callers that
+ * must refuse "nothing to adjust" guard the missing campaign separately.
+ */
+export function campaignSettled(events: OrchestratorEvent[]): boolean {
+  const reduced = reduceCampaign(events);
+  if (!reduced.waves.length) return false;
+  const waveStates = reduced.waves.map((wave) =>
+    waveState(wave.map((id) => ({ status: issueLifecycle(reduced, id).state }))),
+  );
+  return campaignState(waveStates) === "completed";
+}
+
 /** An archived run's terminal disposition for the archived-runs list: `complete`
  * when its latest campaign reached the terminal `campaign-done`/`queue-done` (a
  * full, clean finish), else `stalled` — the run stopped with no terminal event

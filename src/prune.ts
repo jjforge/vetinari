@@ -16,7 +16,7 @@
 
 import type { ResolvedConfig } from "./config.ts";
 import type { HostBudget } from "./host-slots.ts";
-import { campaignRunning, reduceCampaign } from "./dashboard-model.ts";
+import { campaignSettled, campaignStarted, reduceCampaign } from "./dashboard-model.ts";
 import { readEventLog } from "./event-log.ts";
 import { clearParkedForTasks, enqueueOutbound } from "./state.ts";
 // `campaign` is referenced by type only and lazy-imported in `defaultPruneDeps`
@@ -342,9 +342,14 @@ export async function runPrune(
   // compute the closure, apply the keep-banked-work rule, then append a prune
   // event the loop honors at its next wave boundary (ADR 0005).
   const events = deps.readEventLog(cfg);
-  if (!campaignRunning(events))
+  if (!campaignStarted(events))
     throw new Error(
-      "prune <issue> prunes a running campaign, but none is running. To launch a reduced campaign from a plan you supply, pass the waves: " +
+      "prune <issue> prunes an open campaign, but no campaign to prune has been launched here. To launch a reduced campaign from a plan you supply, pass the waves: " +
+        'prune <issue> "611 640" "623 701".',
+    );
+  if (campaignSettled(events))
+    throw new Error(
+      "prune <issue> adjusts an open campaign, but the latest one is settled — every member merged, nothing to prune. To launch a reduced campaign from a plan you supply, pass the waves: " +
         'prune <issue> "611 640" "623 701".',
     );
   const reduced = reduceCampaign(events);

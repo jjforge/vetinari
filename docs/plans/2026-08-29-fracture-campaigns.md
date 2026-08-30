@@ -83,6 +83,12 @@ Exit: the issue sheet offers exactly the moves the reason allows; the idle card 
 
 `blocked_by`: 306 ← 295 · 307, 308, 309 ← 306.
 
+## Found in flight
+
+- **A label selection pulls the epic in.** `campaign campaign:vocabulary` scheduled epic #282 because the epics carry the `campaign:*` labels too; the agent correctly changed nothing and it parked `stalled/no-commit`. Select by ids, or strip the label from #283/#284 before `campaign campaign:docs` / `campaign campaign:dashboard`.
+- **A shared file the marker lines did not declare.** #301 (README rewrite) and #302 (delete three docs) both edited `README.md` — #302 to retarget links — so #302 parked `conflict`. The marker line lists the files an issue *edits*, including link fix-ups; the planner cannot see an edit the body does not name.
+- **A conflict park does not hold the campaign** (#310, P1). The run went on to `CAMPAIGN COMPLETE` with #302's green unmerged and `redrive` had nothing to land; the recovery was by hand (merge `main` into `agent/302` taking the rewritten README, then `--no-ff` onto `main`). Fix before campaign 4.
+
 ## Between campaigns
 
 1. Merge → the orchestrator labels `pending-verify` → verify locally → `gh issue close`. An epic closes when its last child does.

@@ -62,6 +62,9 @@ Within a milestone each bold section label appears at most once.
 - [internal] `docs/reference.md`'s CLI-modes table is generated from `MODES` in `src/help.ts` via `npm run gen-reference`, and the README/help drift test now pins that section to `MODES` instead of the README (#301).
 - [internal] Process docs rewritten in the settled campaign vocabulary — `campaigns.md` against the user guide's "A campaign, start to finish" and design §4–§7 (parked + reason, `prune`, `graft`, `redrive`; pointing at `docs/reference.md` for flags), plus retired words fixed in `issue-conventions.md` and `CLAUDE.md` (`campaign-plan`→the planner, `carve`→`prune`, quarantine/wave-park→parked) (#305).
 - [internal] Each ADR now carries a one-line `Status:` pointer to the `docs/design.md` section that holds its decision (`recorded in` where the design states it unchanged, `superseded by` where the design consolidated it), and a new `docs/adr/README.md` frames the ADRs as frozen history with the design as current truth — a new ADR only for a genuinely new decision, changed alongside the design in the same commit (#303).
+- [internal] Dated design specs moved from `docs/specs/` to `docs/archive/specs/` (build-time artifacts, not linked from current docs), with a new `docs/archive/README.md` (#304).
+- [internal] `docs/dashboard-color-rules.md` folded into `docs/design.md` appendix A — the palette, the edge rule and the roll-up precedence; the standalone spec is removed (#304).
+- [internal] `.out-of-scope/*.md` removed; the quarantine-verb and `host log` ordering decisions already live as bullets in design §14 (non-goals) (#304).
 
 ### Collected changes — August 29, 2026
 

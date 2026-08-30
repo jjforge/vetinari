@@ -74,13 +74,13 @@ The event vocabulary after consolidation (§13.2) is small and uses the user's w
 | `spawn` | `taskId` | campaign |
 | `turn` | `taskId`, `turn`, `summary`, `signal`, `sessionId?`, `commits?` | run |
 | `green` | `taskId`, `branch`, `commits` | run |
-| `parked` | `taskId`, `reason`, `detail` | run (question/stalled), integrator (conflict). A red base is the *wave's* reason: it is expressed by `campaign-parked` with the wave index, and the reducer derives `red-base` for that wave — no per-member `parked` event is written |
+| `parked` | `taskId`, `reason`, `detail` | run (question/stalled), integrator (conflict). A red base is the *wave's* reason and is written, not inferred: `campaign-parked` carries `reason: red-base` for that wave index; no per-member `parked` event is written |
 | `failed` | `taskId`, `detail` | whichever process observes it: the run loop on a throw, the campaign on a child's non-zero exit |
 | `merged` | `taskId` | integrator |
 | `base-gate` | `index`, `green`, `detail` | integrator |
 | `wave-done` | `index`, `merged` | campaign — only when every member is `completed` |
 | `grace-wait` | `seconds`, `tasks` | campaign (§5 step 3) |
-| `campaign-parked` / `campaign-failed` | `index`, `detail` | campaign — the two stop markers |
+| `campaign-parked` / `campaign-failed` | `index`, `reason` (`red-base`, `question`, `stalled`, `conflict` — the wave's reason, written by the code that stopped), `detail` | campaign — the two stop markers |
 | `campaign-done` | `waves` | campaign |
 | `prune` | `target`, `removed`, `dropped` | prune |
 | `graft` | `ids`, `blockedBy`, `basenames`, `titles?` | graft |
@@ -148,7 +148,7 @@ A parked record that survives a run (it always does, until resolved) keeps the c
 5. On BLOCKED: write the parked record (`question`), log `parked`, tear the container down, exit 2.
 6. On COMPLETE with no commits ahead of the base: park as `stalled` (an agent that says done and changed nothing is not green).
 7. On COMPLETE: run the gates (`when`-scoped by the branch's diff; the scoping is logged). Green → log `green`, run the optional findings harvest, exit 0. Red → go to 4 with the gate report attached: on the same session for a resumable provider; as a fresh run with the report and the prior summary appended to the issue text for a non-resumable one.
-8. After `maxTurns` red cycles (`config.mts`, default 6 — §9): park as `stalled`, `detail: budget`, the count in `question`.
+8. After `maxTurns` red cycles (`config.mts`, default 6 — §9): park as `stalled` with the budget in `detail` (`budget:6`), so `detail` carries the specifics as §2.3 says.
 9. On idle timeout (`idleTimeoutSeconds` in `config.mts`, default 600 — §9): park as `stalled`, `detail: idle`. On anything else thrown: log `failed`, exit 1. `answer <issue> "<text>"` re-enters step 4 on the parked session with the answer as the prompt (resumable providers), or posts the answer as an issue comment and re-enters step 3 fresh (non-resumable providers, which re-read the issue).
 
 ## 4. Planning
@@ -247,7 +247,7 @@ The dashboard is a read-mostly HTTP server over the registry (no gateway needed)
 - **Project page**: the campaign's waves and issue chips; parked cards lifted to the top; archived runs listed beneath, opening read-only.
 - **Issue sheet**: state and reason, elapsed, the turn log (the agent's one-line summaries), and exactly the moves the reason allows: reply (question/stalled), prune, graft, redrive. Each action POSTs to a route that shells the CLI verb in the project root; nothing is decided in the server.
 - **Live tail**: per-agent activity projected from the agent's run stream, live-only.
-- **Terminal output** (the CLI's own view): human-readable lines only — plan, wave progress, stop reason, resume command. JSONL goes to the log file and to `--json`; it is never the default screen output. The one machine seam outside `--json` is the closure that `prune --dry-run` / `graft --dry-run` print for the dashboard's preview routes.
+- **Terminal output** (the CLI's own view): human-readable lines only — plan, wave progress, stop reason, resume command. JSONL goes to the log file and to `--json`; it is never the default screen output.
 - **Live updates**: the server watches each project's logs directory and pushes SSE; the client patches in place. State → visual mapping is a set of pure reducers with node tests; colour follows state by one rule set (appendix A). Nothing animates except the running dot and the live indicator.
 
 ## 12. Surface inventory — core, optional, and not ours

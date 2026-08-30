@@ -229,8 +229,8 @@ export const newReplyIndex = (): ReplyIndex => ({ byMessage: new Map(), announce
 
 // NUL-joined keys: a bot token and a message id cannot collide across projects
 // that share a bot, because the message id is unique per bot.
-const messageKey = (token: string, messageId: number) => `${token} ${messageId}`;
-const announceKey = (project: string, task: string, parkedAt: string) => `${project} ${task} ${parkedAt}`;
+const messageKey = (token: string, messageId: number) => `${token}\0${messageId}`;
+const announceKey = (project: string, task: string, parkedAt: string) => `${project}\0${task}\0${parkedAt}`;
 
 /** Record that a question for `ref` was announced as `messageId` on `token`. */
 export function recordSend(index: ReplyIndex, token: string, messageId: number, ref: SendRef): void {

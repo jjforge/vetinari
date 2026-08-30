@@ -199,7 +199,7 @@ export interface CollectOptions {
  * and delete only those consumed. `names` are fragment basenames (`147.md`); a name
  * that matches no fragment is skipped. This is the selective core `tidy` folds
  * with — it reconciles only the fragments whose issue is provably merged and leaves
- * the rest (a still-parked/quarantined issue's fragment) on disk. A no-op (empty
+ * the rest (a still-parked issue's fragment) on disk. A no-op (empty
  * `collected`, changelog untouched) when nothing named matches.
  */
 export function foldFragments(opts: CollectOptions, names: string[]): { collected: string[] } {

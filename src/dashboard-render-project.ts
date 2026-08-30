@@ -148,8 +148,8 @@ const renderClosedWaveChip = (wave: StatusWave, festiveName?: string) =>
 const renderWaves = (status: CampaignStatus, prune: boolean, interactive: boolean, collapsible = true, run?: string, festive = false) => {
   if (!status.waves.length) return "<p>No active campaign or queue found.</p>";
   if (!collapsible) return `<div class="waves-grid">${status.waves.map((wave) => renderWaveCard(wave, status.project, prune, interactive, "", run, festiveNameFor(status, wave, festive))).join("")}</div>`;
-  const closedWaves = status.waves.filter((wave) => wave.status === "closed");
-  const openWaves = status.waves.filter((wave) => wave.status !== "closed");
+  const closedWaves = status.waves.filter((wave) => wave.status === "completed");
+  const openWaves = status.waves.filter((wave) => wave.status !== "completed");
   const toggleRow = closedWaves.length
     ? `<div class="completed-waves"><div class="completed-wave-bar" data-project="${escapeHtml(status.project)}">${closedWaves.map((wave) => renderClosedWaveChip(wave, festiveNameFor(status, wave, festive))).join("")}</div></div>`
     : "";
@@ -385,15 +385,15 @@ ${HOST_LOG_STYLES}
   .waves-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 1rem; margin: 1rem 0; }
   .wave { background: var(--color-card); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); padding: 1rem; box-shadow: 0 8px 22px #0004; border-top: 3px solid var(--color-dim); }
   .wave.running { border-top-color: var(--color-blue); }
-  /* A closed wave's card carries the green top edge its CLOSED state reads (§2). */
-  .wave.closed { border-top-color: var(--color-green); }
+  /* A completed wave's card carries the green top edge its COMPLETED state reads (§2). */
+  .wave.completed { border-top-color: var(--color-green); }
   /* A parked wave — a held member (a question, a conflict, or a red merged base) — carries
      the attention amber top edge, the same amber an issue parked reads (§2, ADR 0019). */
   .wave.parked { border-top-color: var(--color-yellow); }
   /* A failed wave — a member the agent could not make green — reads the failure red (§2). */
   .wave.failed { border-top-color: var(--color-failure); }
-  /* A flex-grid item beats the UA [hidden] rule, so a collapsed closed card needs it back explicitly. */
-  .wave.closed[hidden] { display: none; }
+  /* A flex-grid item beats the UA [hidden] rule, so a collapsed completed card needs it back explicitly. */
+  .wave.completed[hidden] { display: none; }
   /* One stable head row: the label takes the slack and wraps within itself, the meta
      group (merged/total · state · pruned) stays a nowrap unit on the right so the state
      pill never drops onto its own line in one card while it stays inline in a neighbour. */
@@ -429,7 +429,7 @@ ${HOST_LOG_STYLES}
   .member-badge.pruned { color: var(--color-pruned); border: 1px solid var(--color-pruned); background: rgb(163 113 247 / 12%); }
   .member-badge.grafted { color: var(--color-primary); border: 1px solid var(--color-primary); background: var(--color-primary-alpha-20); }
   .wave-status { font-size: .85rem; margin-left: .5rem; text-transform: uppercase; letter-spacing: .03em; }
-  .wave-status.closed { border-color: var(--color-green); color: var(--color-green); background: rgb(63 185 132 / 12%); }
+  .wave-status.completed { border-color: var(--color-green); color: var(--color-green); background: rgb(63 185 132 / 12%); }
   .wave-status.running { border-color: var(--color-blue); color: var(--color-blue); background: rgb(108 182 255 / 12%); }
   .wave-status.unstarted { border-color: var(--color-dim); color: var(--color-dim); background: rgb(95 107 120 / 12%); }
   .wave-status.parked { border-color: var(--color-yellow); color: var(--color-yellow); background: rgb(200 162 78 / 12%); }
@@ -520,8 +520,8 @@ ${ISSUE_DETAIL_SHEET_STYLES}
   // inert without JS, so reveal every closed card in the grid and hide the toggle bar,
   // keeping the content reachable (the old <details> degraded the same way). Emitted
   // only when there are closed waves to fall back for.
-  status.waves.some((wave) => wave.status === "closed")
-    ? `\n<noscript><style>.completed-wave-bar { display: none; } .wave.closed[hidden] { display: block; }</style></noscript>`
+  status.waves.some((wave) => wave.status === "completed")
+    ? `\n<noscript><style>.completed-wave-bar { display: none; } .wave.completed[hidden] { display: block; }</style></noscript>`
     : ""
 }
 </head>

@@ -576,15 +576,15 @@ export function formatGatewayStatus(statuses: CampaignStatus[]): string {
   return lines.join("\n");
 }
 
-// The five issue states in the user guide's display order; the reducer's `failure`
-// is shown as the guide's word `failed` (design §13.1: one vocabulary).
-const STATE_ORDER: readonly IssueStatus[] = ["unstarted", "running", "parked", "failure", "completed"];
-const STATE_WORD: Record<IssueStatus, string> = { unstarted: "unstarted", running: "running", parked: "parked", failure: "failed", completed: "completed" };
+// The five issue states in the user guide's display order — the reducer and the guide now
+// speak one word, `failed` (design §13.1: one vocabulary).
+const STATE_ORDER: readonly IssueStatus[] = ["unstarted", "running", "parked", "failed", "completed"];
+const STATE_WORD: Record<IssueStatus, string> = { unstarted: "unstarted", running: "running", parked: "parked", failed: "failed", completed: "completed" };
 
 /** Tally a project's issues by state for the `/status` counts, skipping pruned
  * members — they left the plan, so they never count toward the live state totals. */
 function stateCounts(status: CampaignStatus): Record<IssueStatus, number> {
-  const counts: Record<IssueStatus, number> = { unstarted: 0, running: 0, parked: 0, failure: 0, completed: 0 };
+  const counts: Record<IssueStatus, number> = { unstarted: 0, running: 0, parked: 0, failed: 0, completed: 0 };
   for (const wave of status.waves) for (const issue of wave.issues) if (issue.membership !== "pruned") counts[issue.status]++;
   return counts;
 }

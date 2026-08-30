@@ -49,27 +49,15 @@ test("formatWaveStart names the wave, its position, and its issues", () => {
 
 test("formatWaveDone reports what merged", () => {
   assert.equal(
-    formatWaveDone(0, 2, { merged: ["101"], held: [], quarantined: [], outcomes: {} }),
+    formatWaveDone(0, 2, { merged: ["101"] }),
     "✔ wave 1/2 merged #101",
   );
 });
 
 test("formatWaveDone says nothing merged when the wave banked none", () => {
   assert.equal(
-    formatWaveDone(0, 1, { merged: [], held: [], quarantined: [], outcomes: {} }),
+    formatWaveDone(0, 1, { merged: [] }),
     "✔ wave 1/1 merged nothing",
-  );
-});
-
-test("formatWaveDone annotates held and conflict-quarantined issues", () => {
-  assert.equal(
-    formatWaveDone(0, 2, {
-      merged: ["101"],
-      held: ["102"],
-      quarantined: ["103"],
-      outcomes: { "102": "parked" },
-    }),
-    "✔ wave 1/2 merged #101 · held #102 (parked) · parked on conflict (kept) #103",
   );
 });
 
@@ -146,9 +134,9 @@ test("a red-base stop points at fix-forward then redrive", () => {
   );
 });
 
-test("a quarantine-stranded stop offers redrive or redrive --auto-prune", () => {
+test("a stranded-conflict stop offers redrive or redrive --auto-prune", () => {
   const out = formatStop({
-    kind: "quarantine-stranded",
+    kind: "stranded-conflict",
     index: 0,
     total: 2,
     stranded: ["201"],

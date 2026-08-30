@@ -200,7 +200,7 @@ ${LIVE_TAIL_STYLES}
   .run-state { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; border-radius: 999px; padding: .2rem .6rem; border: 1px solid var(--color-dim); color: var(--color-dim); }
   .run-state.running { border-color: var(--color-blue); color: var(--color-blue); }
   .run-state.parked { border-color: var(--color-yellow); color: var(--color-yellow); }
-  .run-state.failure { border-color: var(--color-failure); color: var(--color-failure); }
+  .run-state.failed { border-color: var(--color-failure); color: var(--color-failure); }
   .run-state.completed { border-color: var(--color-green); color: var(--color-green); }
   .card-campaign { color: var(--color-primary); font-weight: 600; margin: .5rem 0 .1rem; }
   .card-meta { color: var(--color-text-light); font-size: .9rem; display: flex; flex-wrap: wrap; gap: .3rem .9rem; margin: .35rem 0; }
@@ -228,7 +228,7 @@ ${LIVE_TAIL_STYLES}
   /* The feed body's loading/empty placeholder sits inside the padded scroll pane. */
   .feed-body .empty { padding: .6rem 0; }
   /* The card's highlight (top border) tracks its run state (#75) — its only coloured edge (§2). */
-  .card.running { border-top-color: var(--color-blue); } .card.parked { border-top-color: var(--color-yellow); } .card.failure { border-top-color: var(--color-failure); } .card.completed { border-top-color: var(--color-green); } .card.idle { border-top-color: var(--color-dim); }
+  .card.running { border-top-color: var(--color-blue); } .card.parked { border-top-color: var(--color-yellow); } .card.failed { border-top-color: var(--color-failure); } .card.completed { border-top-color: var(--color-green); } .card.idle { border-top-color: var(--color-dim); }
   /* Status dot colours, generated once from stateColor and shared with the campaign
      page (§3), scoped to .dot so a state never tints a run-state pill or a whole card. */
   ${STATE_DOT_CSS}

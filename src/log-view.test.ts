@@ -122,7 +122,7 @@ test("run-level kinds narrate through describeEvent verbatim as one plain span, 
   const cases = [
     event("campaign-start", { waves: [["1"]], slots: 1, name: "Ship it", ts: "2026-08-28T00:00:00.000Z" }),
     event("wave-start", { index: 0, tasks: ["1", "2"], ts: "2026-08-28T00:00:00.000Z" }),
-    event("wave-done", { index: 0, merged: ["1"], held: [], clearedParked: [], ts: "2026-08-28T00:00:00.000Z" }),
+    event("wave-done", { index: 0, merged: ["1"], ts: "2026-08-28T00:00:00.000Z" }),
     event("campaign-done", { waves: 2, ts: "2026-08-28T00:00:00.000Z" }),
     event("campaign-parked", { index: 0, detail: "red", ts: "2026-08-28T00:00:00.000Z" }),
     event("prune", { target: "5", removed: ["5", "6"], dropped: ["6"], ts: "2026-08-28T00:00:00.000Z" }),
@@ -138,7 +138,7 @@ test("run-level kinds narrate through describeEvent verbatim as one plain span, 
 
 test("run-level dot colours: success→merged, campaign-parked→parked, start→running, prune→neutral", () => {
   const dot = (e: object) => humanizeLogLine(raw(e)).dot;
-  assert.equal(dot(event("wave-done", { index: 0, merged: ["1"], held: [], clearedParked: [], ts: "2026-08-28T00:00:00.000Z" })), "merged");
+  assert.equal(dot(event("wave-done", { index: 0, merged: ["1"], ts: "2026-08-28T00:00:00.000Z" })), "merged");
   assert.equal(dot(event("campaign-done", { waves: 1, ts: "2026-08-28T00:00:00.000Z" })), "merged");
   assert.equal(dot(event("campaign-parked", { index: 0, detail: "d", ts: "2026-08-28T00:00:00.000Z" })), "parked");
   assert.equal(dot(event("campaign-start", { waves: [], slots: 1, ts: "2026-08-28T00:00:00.000Z" })), "running");

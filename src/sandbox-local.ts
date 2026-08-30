@@ -13,7 +13,7 @@ import type { Sandbox, SandboxRunOptions, SandboxRunResult } from "./sandbox.ts"
  *
  * It exists to span the seams the unit tests each cut: driven through `runLoop` /
  * `campaign` with only the container boundary faked, everything downstream of the
- * agent turn (the gate and its exit codes, the merge/quarantine path, the merged-base
+ * agent turn (the gate and its exit codes, the merge/conflict path, the merged-base
  * gate, the on-disk event log) is exercised, not stubbed.
  */
 

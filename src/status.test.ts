@@ -1550,7 +1550,7 @@ test("serveAllStatus GET /api/issue reads an archived run's own log when a run t
       summary: "did the thing",
     }),
     event("green", { ts: "2026-01-01T00:02:00.000Z", taskId: "101", branch: "agent/101", commits: [] }),
-    event("wave-done", { ts: "2026-01-01T00:03:00.000Z", index: 0, merged: ["101"], held: [] }),
+    event("wave-done", { ts: "2026-01-01T00:03:00.000Z", index: 0, merged: ["101"] }),
     event("campaign-done", { waves: 1 }),
   ]);
   register(configDir, {

@@ -36,7 +36,7 @@ export const renderRedriveControl = (status: CampaignStatus, gate: { allowed: bo
   if (!gate.allowed) return `<div class="redrive-control">${openBtn}<span class="redrive-reason">${escapeHtml(gate.reason)}</span></div>`;
   // The resume wave is the first not-fully-completed wave (design §7); its non-pruned members
   // are what a redrive re-enters. The name falls back to the project key for an unnamed run.
-  const resume = status.waves.find((wave) => wave.status !== "closed");
+  const resume = status.waves.find((wave) => wave.status !== "completed");
   const members = (resume?.issues ?? []).filter((issue) => issue.membership !== "pruned").map((issue) => `#${escapeHtml(issue.issueNumber)}`).join(", ");
   const text = `Redrive <strong>${escapeHtml(status.name || status.project)}</strong>: re-enters wave ${(resume?.index ?? 0) + 1} — ${members} — on <code>${escapeHtml(baseBranch ?? "the base branch")}</code>`;
   const dialog = `<dialog class="redrive-dialog" data-redrive-dialog><p class="redrive-dialog-text">${text}</p><form method="post" action="/redrive" class="redrive-dialog-actions" data-redrive-form><input type="hidden" name="project" value="${escapeHtml(status.project)}" /><button type="button" class="redrive-cancel" data-redrive-cancel autofocus>Cancel</button><button type="submit" class="redrive-confirm" data-redrive-confirm>Redrive</button></form></dialog>`;
@@ -79,7 +79,7 @@ export const renderGraftInline = (status: CampaignStatus) =>
 /** Whether the campaign can still accept a graft: it is live-or-resumable (unsettled) while
  * any wave is not yet closed. A wholly-closed campaign is settled — nothing left to layer
  * into, which the graft engine refuses (ADR 0014) — so the affordance renders nothing (#307). */
-const isGraftable = (status: CampaignStatus) => status.waves.some((wave) => wave.status !== "closed");
+const isGraftable = (status: CampaignStatus) => status.waves.some((wave) => wave.status !== "completed");
 
 /**
  * The aggregated site's prune preview: it is a dumb router (ADR 0002) with no

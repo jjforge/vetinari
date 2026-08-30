@@ -574,7 +574,7 @@ test("formatGatewayStatus reports campaign state, the wave in flight, and per-st
     campaignStatus({
       project: "alpha",
       waves: [
-        statusWave(0, "closed", [statusIssue({ status: "completed" }), statusIssue({ status: "completed" })]),
+        statusWave(0, "completed", [statusIssue({ status: "completed" }), statusIssue({ status: "completed" })]),
         statusWave(1, "running", [statusIssue({ status: "running" })]),
         statusWave(2, "unstarted", [statusIssue({ status: "unstarted" }), statusIssue({ status: "unstarted" })]),
       ],
@@ -592,7 +592,7 @@ test("formatGatewayStatus shows the reducer's failure as the guide word 'failed'
   const text = formatGatewayStatus([
     campaignStatus({
       project: "beta",
-      waves: [statusWave(0, "failed", [statusIssue({ status: "failure" }), statusIssue({ status: "parked", reason: "red-base" })])],
+      waves: [statusWave(0, "failed", [statusIssue({ status: "failed" }), statusIssue({ status: "parked", reason: "red-base" })])],
       parked: [parkedIssue({ issueNumber: "88", reason: "red-base" })],
     }),
   ]);
@@ -609,7 +609,7 @@ test("formatGatewayStatus excludes pruned members from the per-state counts", ()
   const text = formatGatewayStatus([
     campaignStatus({
       project: "gamma",
-      waves: [statusWave(0, "closed", [statusIssue({ status: "completed" }), statusIssue({ status: "unstarted", membership: "pruned" })])],
+      waves: [statusWave(0, "completed", [statusIssue({ status: "completed" }), statusIssue({ status: "unstarted", membership: "pruned" })])],
     }),
   ]);
 

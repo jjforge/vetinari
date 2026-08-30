@@ -93,7 +93,7 @@ test("the issue-detail sheet carries the issue's state on its top edge only (§2
   // check confirms the shared sheet CSS splices those rules in, proven once not per state.
   assert.ok(
     ISSUE_DETAIL_SHEET_STYLES.includes(
-      ["running", "parked", "failure", "completed", "unstarted"]
+      ["running", "parked", "failed", "completed", "unstarted"]
         .map((s) => `.issue-detail-sheet.${s} { border-top-color: ${stateColor(s)}; }`)
         .join(" "),
     ),

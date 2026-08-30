@@ -13,7 +13,7 @@ import {
   pruneClosure,
   computePrune,
   defaultPruneDeps,
-  quarantineImpacts,
+  strandedByConflict,
   restrictBlockers,
   resumeIndex,
   runPrune,
@@ -197,10 +197,10 @@ test("pruneClosure normalizes a leading # target and keeps closure order for kep
   });
 });
 
-test("quarantineImpacts reports a quarantined issue's orphaned later-wave dependents", async () => {
+test("strandedByConflict reports a quarantined issue's orphaned later-wave dependents", async () => {
   // Wave 0 ran; 640 quarantined on a merge conflict (green, so `completed`), 611 merged.
   // 701 in the unstarted wave 1 is blocked by 640, so it is orphaned.
-  const impacts = await quarantineImpacts(
+  const impacts = await strandedByConflict(
     { waves: [["611", "640"], ["623", "701"]], outcomes: outcomesFrom({ "611": "completed", "640": "completed" }) },
     ["640"],
     blockedByFrom({ "701": ["640"] }),
@@ -213,9 +213,9 @@ test("quarantineImpacts reports a quarantined issue's orphaned later-wave depend
   assert.deepEqual(impacts[0].dropped, ["701"]);
 });
 
-test("quarantineImpacts reports an empty drop for a quarantine that orphans nothing", async () => {
+test("strandedByConflict reports an empty drop for a quarantine that orphans nothing", async () => {
   // 611 quarantined but nothing depends on it — no later-wave work is stranded.
-  const impacts = await quarantineImpacts(
+  const impacts = await strandedByConflict(
     { waves: [["611", "640"], ["623", "701"]], outcomes: outcomesFrom({ "611": "completed", "640": "completed" }) },
     ["611"],
     blockedByFrom({ "701": ["640"] }),
@@ -226,9 +226,9 @@ test("quarantineImpacts reports an empty drop for a quarantine that orphans noth
   assert.deepEqual(impacts[0].dropped, []);
 });
 
-test("quarantineImpacts follows the transitive closure across every quarantined issue", async () => {
+test("strandedByConflict follows the transitive closure across every quarantined issue", async () => {
   // 640 quarantined; 701 (blocked by 640) and 712 (blocked by 701) are both orphaned.
-  const impacts = await quarantineImpacts(
+  const impacts = await strandedByConflict(
     { waves: [["640"], ["701"], ["712"]], outcomes: outcomesFrom({ "640": "completed" }) },
     ["640"],
     blockedByFrom({ "701": ["640"], "712": ["701"] }),
@@ -238,8 +238,8 @@ test("quarantineImpacts follows the transitive closure across every quarantined 
   assert.deepEqual(impacts[0].dropped.sort(), ["701", "712"]);
 });
 
-test("quarantineImpacts skips a quarantined id no longer in the plan (an earlier prune took it)", async () => {
-  const impacts = await quarantineImpacts(
+test("strandedByConflict skips a quarantined id no longer in the plan (an earlier prune took it)", async () => {
+  const impacts = await strandedByConflict(
     { waves: [["611"]], outcomes: outcomesFrom({ "611": "completed" }) },
     ["999"],
     blockedByFrom({}),
@@ -383,8 +383,8 @@ test("runPrune rejects a prune when the campaign is settled (every member merged
   // settled and refuses adjustment, even though the log carries no `campaign-done`.
   const cfg = harnessCfg();
   cfg.log.log("campaign-start", { waves: [["101"], ["640"]], slots: 4 });
-  cfg.log.log("wave-done", { index: 0, merged: ["101"], held: [], clearedParked: [] });
-  cfg.log.log("wave-done", { index: 1, merged: ["640"], held: [], clearedParked: [] });
+  cfg.log.log("wave-done", { index: 0, merged: ["101"] });
+  cfg.log.log("wave-done", { index: 1, merged: ["640"] });
 
   await assert.rejects(() => runPrune(cfg, "640", {}), /settled/);
 });

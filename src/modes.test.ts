@@ -13,12 +13,12 @@ import {
   childSpawnEnv,
   conflictParkedNotice,
   markMergedIssues,
-  quarantinePauseNotice,
+  strandedConflictNotice,
   queue,
   requireTelegram,
   resolveTitles,
   warnIfTelegramUnconfigured,
-  waveParkedNotice,
+  campaignParkedNotice,
   type CampaignDeps,
   type RunSpawner,
 } from "./modes.ts";
@@ -175,8 +175,8 @@ test("markMergedIssues calls the configured onIssueMerged seam with exactly the 
   assert.deepEqual(seen, ["101", "102", "103"]);
 });
 
-test("waveParkedNotice draws attention to a paused campaign whose greens stay merged, carrying the gate detail", () => {
-  const notice = waveParkedNotice("acme", 2, ["101", "102"], "main", "gate line\nGATE FAILED");
+test("campaignParkedNotice draws attention to a paused campaign whose greens stay merged, carrying the gate detail", () => {
+  const notice = campaignParkedNotice("acme", 2, ["101", "102"], "main", "gate line\nGATE FAILED");
   // Routed to the alerting channel — a wave-park demands a human, like the old halt did.
   assert.equal(notice.category, "failure");
   assert.equal(notice.event, "campaign-parked");
@@ -195,8 +195,8 @@ test("waveParkedNotice draws attention to a paused campaign whose greens stay me
   assert.ok(notice.text.includes("GATE FAILED"));
 });
 
-test("quarantinePauseNotice draws a human to a campaign paused by a quarantine that orphaned later-wave dependents", () => {
-  const notice = quarantinePauseNotice(
+test("strandedConflictNotice draws a human to a campaign paused by a quarantine that orphaned later-wave dependents", () => {
+  const notice = strandedConflictNotice(
     "acme",
     1,
     [{ target: "640", removed: ["640", "701"], dropped: ["701"] }],
@@ -237,9 +237,9 @@ const RETIRED_IN_NOTICES = /quarantin|wave-park|batch|queue|--resume/i;
 test("no notice builder renders a retired word — the settled vocabulary reaches operators (§10, §13.1)", () => {
   // Every operator notice a park/failure/prune builds, rendered with representative args.
   const built = [
-    waveParkedNotice("acme", 2, ["101", "102"], "main", "gate line\nGATE FAILED"),
+    campaignParkedNotice("acme", 2, ["101", "102"], "main", "gate line\nGATE FAILED"),
     campaignFailedNotice("acme", 3, ["101"], ["102"], "main"),
-    quarantinePauseNotice("acme", 1, [{ target: "640", removed: ["640", "701"], dropped: ["701"] }], "main"),
+    strandedConflictNotice("acme", 1, [{ target: "640", removed: ["640", "701"], dropped: ["701"] }], "main"),
     conflictParkedNotice("acme", 1, ["640"], ["101"], "main"),
     autoPruneNotice("acme", 1, [{ target: "640", removed: ["640", "701"], dropped: ["701"] }]),
   ];
@@ -503,7 +503,7 @@ const gitFreeDeps = (
   spawnRun: CampaignDeps["spawnRun"],
 ): CampaignDeps => ({
   spawnRun,
-  integrate: async (_cfg, greens) => ({ merged: greens, quarantined: [] }),
+  integrate: async (_cfg, greens) => ({ merged: greens, conflictParked: [] }),
   collectChangelog: () => ({ collected: [], committed: false }),
   currentBranch: () => cfg.baseBranch,
   // Default grace is a no-op that resolves at once — a wave never blocks a test on real time.
@@ -719,7 +719,7 @@ const recordingDeps = (
   spawnRun: async (id) => spawnRun(id),
   integrate: async (_cfg, greens) => {
     integrated.push(greens);
-    return { merged: greens, quarantined: [] };
+    return { merged: greens, conflictParked: [] };
   },
   collectChangelog: () => ({ collected: [], committed: false }),
   currentBranch: () => cfg.baseBranch,
@@ -773,7 +773,7 @@ test("the redrive event carries fromWave, landed, and skipped (design §2.1, §7
     integrate: async (_cfg, greens) => ({
       merged: greens.filter((g) => g !== "101"),
       alreadyMerged: greens.filter((g) => g === "101"),
-      quarantined: [],
+      conflictParked: [],
     }),
     collectChangelog: () => ({ collected: [], committed: false }),
     currentBranch: () => cfg.baseBranch,
@@ -885,7 +885,7 @@ test("redrive resumes at the parked wave, not past it — a closed earlier wave 
   cfg.log.log("campaign-start", { waves: [["101"], ["102"], ["103"]], slots: 4 });
   cfg.log.log("wave-start", { index: 0, tasks: ["101"] });
   cfg.log.log("green", { taskId: "101", branch: "agent/101", commits: ["a"] });
-  cfg.log.log("wave-done", { index: 0, merged: ["101"], held: [], clearedParked: [], quarantined: [] });
+  cfg.log.log("wave-done", { index: 0, merged: ["101"] });
   cfg.log.log("wave-start", { index: 1, tasks: ["102"] });
   cfg.log.log("parked", { taskId: "102", reason: "question" });
   cfg.log.log("campaign-parked", { index: 1, detail: "parked, awaiting a human: 102" });
@@ -1006,7 +1006,7 @@ test("Gate 1 (ADR 0017): a per-issue park drains its wave, merges the greens, th
 
   // …and the operator notice went out on the same wave-park channel, naming the green kept merged.
   const notice = listOutbox(cfg).find((r) => r.event === "campaign-parked");
-  assert.ok(notice, "a waveParkedNotice was enqueued for the operator");
+  assert.ok(notice, "a campaignParkedNotice was enqueued for the operator");
   assert.equal(notice?.category, "failure");
   assert.ok(notice?.text.includes("101"), "the green stayed merged on the base");
 
@@ -1174,7 +1174,7 @@ test("grace window: a conflict (quarantine) never triggers the wait, even with p
   let graceCalls = 0;
   const deps: CampaignDeps = {
     ...gitFreeDeps(cfg, async () => 0),
-    integrate: async (_cfg, greens) => ({ merged: greens.filter((g) => g !== "102"), quarantined: ["102"] }),
+    integrate: async (_cfg, greens) => ({ merged: greens.filter((g) => g !== "102"), conflictParked: ["102"] }),
     grace: async () => {
       graceCalls++;
     },
@@ -1238,7 +1238,7 @@ test("Gate 2 unchanged: an all-green wave whose combined base gates red still wa
     }),
     integrate: async (_cfg, greens) => ({
       merged: greens,
-      quarantined: [],
+      conflictParked: [],
       parked: { reason: "red-base", detail: "GATE FAILED" },
     }),
   };
@@ -1250,7 +1250,7 @@ test("Gate 2 unchanged: an all-green wave whose combined base gates red still wa
   assert.equal(ok, "parked", "the red combined base wave-parks");
   assert.ok(!spawned.includes("201"), "no succeeding wave starts on a red base");
   const notice = listOutbox(cfg).find((r) => r.event === "campaign-parked");
-  assert.ok(notice, "the existing waveParkedNotice still goes out");
+  assert.ok(notice, "the existing campaignParkedNotice still goes out");
   // The loop logs exactly one campaign-parked for the red-base park; Gate 1 (the per-issue
   // park path) must not add a second — no issue parked here.
   assert.equal(
@@ -1322,7 +1322,7 @@ test("a quarantine that strands later-wave dependents wave-parks the campaign �
       spawned.push(taskId);
       return 0;
     }),
-    integrate: async (_cfg, _greens) => ({ merged: [], quarantined: ["640"] }),
+    integrate: async (_cfg, _greens) => ({ merged: [], conflictParked: ["640"] }),
   };
 
   const ok = await silenceConsole(() =>

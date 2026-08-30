@@ -54,23 +54,10 @@ export function formatWaveStart(
 const outcomeWord = (outcome: string | undefined): string =>
   outcome?.startsWith("error") ? "failed" : (outcome ?? "?");
 
-/** A wave closed: what merged, plus any held or conflict-quarantined issues. */
-export function formatWaveDone(
-  index: number,
-  total: number,
-  d: {
-    merged: string[];
-    held: string[];
-    quarantined: string[];
-    outcomes: Record<string, string>;
-  },
-): string {
-  let line = `✔ wave ${index + 1}/${total} merged ${d.merged.map((id) => `#${id}`).join(", ") || "nothing"}`;
-  if (d.held.length)
-    line += ` · held ${d.held.map((id) => `#${id} (${outcomeWord(d.outcomes[id])})`).join(", ")}`;
-  if (d.quarantined.length)
-    line += ` · parked on conflict (kept) ${d.quarantined.map((id) => `#${id}`).join(", ")}`;
-  return line;
+/** A wave closed: what merged. A wave-done fires only when every member merged (design §2.1),
+ * so there is no held or conflict-parked member to annotate — the `merged` list is the wave. */
+export function formatWaveDone(index: number, total: number, d: { merged: string[] }): string {
+  return `✔ wave ${index + 1}/${total} merged ${d.merged.map((id) => `#${id}`).join(", ") || "nothing"}`;
 }
 
 /** The per-issue outcome, one indented line each, `error(n)` mapped to the `failed` vocabulary. */
@@ -117,7 +104,7 @@ export type Stop =
   | { kind: "issue-parked"; index: number; total: number; parked: string[]; merged: string[] }
   | { kind: "red-base"; index: number; total: number; merged: string[] }
   | { kind: "conflict"; index: number; total: number; conflicted: string[]; merged: string[] }
-  | { kind: "quarantine-stranded"; index: number; total: number; stranded: string[]; merged: string[] };
+  | { kind: "stranded-conflict"; index: number; total: number; stranded: string[]; merged: string[] };
 
 /** The one-line stop reason and, on the next line, the exact command that resumes it. */
 export function formatStop(stop: Stop): string {
@@ -153,7 +140,7 @@ export function formatStop(stop: Stop): string {
         `recover: resolve the conflict on the branch then \`vetinari redrive\` (or \`vetinari prune ${id}\`)`
       );
     }
-    case "quarantine-stranded": {
+    case "stranded-conflict": {
       const tail = keptTail(stop.merged, stop.index, stop.total);
       return (
         `🅿 campaign parked at ${pos} — conflict stranded ${stop.stranded.map((id) => `#${id}`).join(", ")} in a later wave; ${tail}\n` +

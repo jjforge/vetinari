@@ -9,7 +9,7 @@ const COUNT_EMOJI: Array<[IssueStatus, string]> = [
   ["completed", "✅"],
   ["running", "🔄"],
   ["parked", "⏸"],
-  ["failure", "❌"],
+  ["failed", "❌"],
   ["unstarted", "⚪"],
 ];
 

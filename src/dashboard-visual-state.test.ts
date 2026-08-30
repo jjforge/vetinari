@@ -103,9 +103,9 @@ test("issueMoves drops reply for a conflict, red-base or crash park — prune on
 });
 
 test("issueMoves offers prune for a failed issue (#325)", () => {
-  // The wire status is `failure` (the `IssueStatus` enum), the string `/api/issue` ships —
-  // never `failed`, which the sheet's move rule used to key on so a failed issue got no moves.
-  assert.deepEqual(issueMoves({ status: "failure" }), { reply: false, prune: true });
+  // The wire status is `failed` (the `IssueStatus` enum), the string `/api/issue` ships and the
+  // sheet's move rule keys on — one word now (design §13.1), so a failed issue gets its Prune move.
+  assert.deepEqual(issueMoves({ status: "failed" }), { reply: false, prune: true });
 });
 
 test("issueMoves keys on the exact status /api/issue emits for a failed issue, so its sheet renders Prune (#317)", () => {
@@ -118,7 +118,7 @@ test("issueMoves keys on the exact status /api/issue emits for a failed issue, s
     { event: "failed", ts: "2026-08-01T00:05:00.000Z", taskId: "101" },
   ] as unknown as Parameters<typeof reconstructIssueDetail>[0];
   const wireStatus = reconstructIssueDetail(events, "101").status;
-  assert.equal(wireStatus, "failure");
+  assert.equal(wireStatus, "failed");
   assert.deepEqual(issueMoves({ status: wireStatus }), { reply: false, prune: true });
 });
 
@@ -134,7 +134,7 @@ test("issueMoves offers nothing for a completed issue (#307)", () => {
 test("issueMoves offers nothing for an archived (read-only) issue, whatever its state (#307)", () => {
   // An archived run is read-only — no move mutates a finished campaign's log.
   assert.deepEqual(issueMoves({ status: "parked", reason: "question", archived: true }), { reply: false, prune: false });
-  assert.deepEqual(issueMoves({ status: "failure", archived: true }), { reply: false, prune: false });
+  assert.deepEqual(issueMoves({ status: "failed", archived: true }), { reply: false, prune: false });
 });
 
 test("paneActivity ignores a frame that adds no visible lines (#198)", () => {

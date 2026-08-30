@@ -6,7 +6,7 @@ test("formatStatusLine summarizes the running wave and status counts on one line
   const line = formatStatusLine({
     project: "jjforge",
     waves: [
-      { index: 0, status: "closed", issues: [{ issueNumber: "436", status: "completed" }, { issueNumber: "611", status: "completed" }] },
+      { index: 0, status: "completed", issues: [{ issueNumber: "436", status: "completed" }, { issueNumber: "611", status: "completed" }] },
       { index: 1, status: "running", issues: [{ issueNumber: "640", status: "running" }, { issueNumber: "655", status: "parked" }] },
       { index: 2, status: "unstarted", issues: [{ issueNumber: "720", status: "unstarted" }] },
     ],
@@ -103,7 +103,7 @@ test("formatStatusLine prints the settled park-reason words for held members and
 test("formatStatusLine drops zero-count segments and omits the wave when none is running", () => {
   const line = formatStatusLine({
     project: "demo",
-    waves: [{ index: 0, status: "closed", issues: [{ issueNumber: "1", status: "completed" }] }],
+    waves: [{ index: 0, status: "completed", issues: [{ issueNumber: "1", status: "completed" }] }],
     parked: [],
   });
 

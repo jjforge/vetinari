@@ -91,7 +91,7 @@ test("integrateGreens quarantines a conflicting green, keeps the earlier green m
 
     // A stayed merged; only B was held — the wave neither rolled back nor parked.
     assert.deepEqual(result.merged, ["A"]);
-    assert.deepEqual(result.quarantined, ["B"]);
+    assert.deepEqual(result.conflictParked, ["B"]);
     assert.equal(result.parked, undefined);
     // No `reset --hard` to the wave start: A's change is on the base (not "base").
     assert.equal(readFileSync(join(dir, "f.txt"), "utf8"), "A\n");
@@ -173,7 +173,7 @@ test("integrateGreens wave-parks a red merged base: leaves the greens merged, do
 
     // AC1: both greens stay merged on the base — no rollback, no reset to the wave start.
     assert.deepEqual(result.merged, ["A", "B"]);
-    assert.deepEqual(result.quarantined, []);
+    assert.deepEqual(result.conflictParked, []);
     assert.equal(readFileSync(join(dir, "a.txt"), "utf8"), "A\n");
     assert.equal(readFileSync(join(dir, "b.txt"), "utf8"), "B\n");
     assert.notEqual(headSha(dir), preSha); // HEAD advanced past the wave start — merges are real
@@ -213,7 +213,7 @@ test("integrateGreens skips the merged-base gate when every green conflicts", as
       },
     });
     assert.deepEqual(result.merged, []);
-    assert.deepEqual(result.quarantined, ["A"]);
+    assert.deepEqual(result.conflictParked, ["A"]);
     assert.equal(result.parked, undefined);
     assert.equal(gateRan, false); // nothing merged → nothing to gate
   } finally {
@@ -266,7 +266,7 @@ test("integrateGreens skips an already-merged green and lands only the unmerged 
     // A was already banked (its branch is a reachable ancestor) → not re-merged; only
     // the genuinely-unmerged B is landed on this re-entry.
     assert.deepEqual(result.merged, ["B"]);
-    assert.deepEqual(result.quarantined, []);
+    assert.deepEqual(result.conflictParked, []);
     assert.equal(result.parked, undefined);
     assert.equal(readFileSync(join(dir, "b.txt"), "utf8"), "B\n");
     // No second merge commit for A (it is already an ancestor); B's merged branch is reclaimed.
@@ -289,7 +289,7 @@ test("integrateGreens skips a green whose branch is already gone, never erroring
     });
     // A's branch is gone → treated as already integrated (skipped, no throw); B lands.
     assert.deepEqual(result.merged, ["B"]);
-    assert.deepEqual(result.quarantined, []);
+    assert.deepEqual(result.conflictParked, []);
   } finally {
     process.chdir(prevCwd);
   }
@@ -366,7 +366,7 @@ test("integrateGreens with regate set and a green base does not park — the fix
   }
 });
 
-const emptySnapshot = (): TidySnapshot => ({ branches: [], fragments: [], parked: [], quarantined: [], waveParked: [] });
+const emptySnapshot = (): TidySnapshot => ({ branches: [], fragments: [], parked: [], conflictParked: [], campaignParked: [] });
 
 test("computeTidy deletes a reachable branch and folds its fragment, keeps an unmerged one", () => {
   const plan = computeTidy({
@@ -400,15 +400,15 @@ test("computeTidy never touches a quarantined, parked, or wave-parked branch eve
     ],
     fragments: ["q", "p", "w", "ok"],
     parked: ["p"],
-    quarantined: ["q"],
-    waveParked: ["w"],
+    conflictParked: ["q"],
+    campaignParked: ["w"],
   });
 
   // Only the unprotected merged branch is GC'd; the three protected ones are kept.
   assert.deepEqual(plan.deleteBranches, ["ok"]);
   assert.deepEqual(plan.fold, ["ok"]);
   const reasons = Object.fromEntries(plan.keep.map((k) => [k.id, k.reason]));
-  assert.deepEqual(reasons, { q: "quarantined", p: "parked", w: "wave-parked" });
+  assert.deepEqual(reasons, { q: "parked(conflict)", p: "parked", w: "campaign-parked" });
 });
 
 test("computeTidy folds an orphaned fragment whose branch is already gone", () => {
@@ -575,13 +575,13 @@ test("scanTidy reads wave-parked issues from the event log so their reachable br
   };
 
   const snap = scanTidy(target);
-  assert.deepEqual(snap.waveParked.sort(), ["70", "71"]);
+  assert.deepEqual(snap.campaignParked.sort(), ["70", "71"]);
 
   const plan = computeTidy(snap);
   // Only the unrelated #72 is GC'd; the wave-parked greens are kept despite being reachable.
   assert.deepEqual(plan.deleteBranches, ["72"]);
   const kept = Object.fromEntries(plan.keep.map((k) => [k.id, k.reason]));
-  assert.deepEqual(kept, { "70": "wave-parked", "71": "wave-parked" });
+  assert.deepEqual(kept, { "70": "campaign-parked", "71": "campaign-parked" });
 });
 
 test("describeRegistryDedup renders one drop line per duplicate, or empty when none", () => {

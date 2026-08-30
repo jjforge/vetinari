@@ -21,6 +21,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaultFileSet } from "./fileset.ts";
 import type { FileSet } from "./fileset.ts";
+import { githubBlockedBy } from "./github.ts";
 
 // A fake OPEN-blocked-by resolver from a plain edge map: id -> its open blockers.
 // (Closed blockers never reach the resolver — they are filtered at the edge — so
@@ -723,6 +724,51 @@ test("runCampaignPlan: no flag on a terminal asks the requestor, whose drop prun
 
   assert.deepEqual(asked, [["640"]]);
   assert.equal(report.waveArgs, '"611"');
+});
+
+test("a pending-verify blocker outside the selection is named in the provenance, and its dependent is scheduled, not dropped (#326)", async () => {
+  // #316's out-of-set blocker #313 is merged-but-unclosed (pending-verify); #314 is a
+  // still-open in-set blocker. Composed with the REAL githubBlockedBy, #313 is treated
+  // as satisfied at the edge — so #316 is reachable (after #314), not stranded — and the
+  // drop is named on the provenance sink rather than the dependent vanishing silently.
+  const logs: string[] = [];
+  const run = (args: string[]) => {
+    const num = args[1]?.match(/issues\/(\d+)\/dependencies/)?.[1];
+    if (num === "316")
+      return JSON.stringify([
+        { number: 314, state: "open", labels: [{ name: "ready-for-agent" }] },
+        { number: 313, state: "open", labels: [{ name: "pending-verify" }] },
+      ]);
+    return "[]";
+  };
+  const blockedBy = githubBlockedBy("jjforge/vetinari", run, (l) => logs.push(l));
+
+  const report = await runCampaignPlan(
+    {
+      blockedBy,
+      fetchTask: (id: string) =>
+        id === "316"
+          ? JSON.stringify({ body: "Touches: a.ts" })
+          : JSON.stringify({ body: "Touches: b.ts" }),
+      fileSet: (ticket: string): FileSet => {
+        const m = ticket.match(/Touches: (\S+)/);
+        return { files: m ? [m[1]] : [], confident: Boolean(m) };
+      },
+    },
+    ["314", "316"],
+    {},
+    { isTTY: false, ask: () => "fail" },
+  );
+
+  // #316 is scheduled after its still-open in-set blocker #314 — not dropped as unreachable.
+  assert.deepEqual(report.waves, [["314"], ["316"]]);
+  assert.match(report.report, /wave 1.*#316.*#314/);
+  // The provenance names the satisfied blocker, never silently.
+  assert.equal(logs.length, 1);
+  assert.match(
+    logs[0],
+    /#316 — blocker #313 pending-verify, treated as satisfied/,
+  );
 });
 
 test("runCampaignPlan rejects an empty id set", async () => {

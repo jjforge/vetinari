@@ -61,6 +61,53 @@ test("githubBlockedBy drops closed blockers — only OPEN prerequisites gate", (
   assert.deepEqual(githubBlockedBy("jjforge/jjforge", run)("782"), ["191"]);
 });
 
+test("githubBlockedBy drops a pending-verify blocker and names it — merged-but-unclosed work is satisfied (#326)", () => {
+  const logs: string[] = [];
+  const run = () =>
+    JSON.stringify([
+      {
+        number: 314,
+        state: "open",
+        labels: [{ name: "ready-for-agent" }],
+        repository: { full_name: "jjforge/vetinari" },
+      },
+      {
+        number: 313,
+        state: "open",
+        labels: [{ name: "pending-verify" }],
+        repository: { full_name: "jjforge/vetinari" },
+      },
+    ]);
+
+  const blockers = githubBlockedBy(
+    "jjforge/vetinari",
+    run,
+    (line) => logs.push(line),
+  )("#316");
+
+  // the still-open, merely-ready blocker gates; the pending-verify one — merged on
+  // the base, awaiting only a human close — is treated as satisfied and dropped.
+  assert.deepEqual(blockers, ["314"]);
+  // named, never silently: the dependent and the satisfied blocker both appear.
+  assert.equal(logs.length, 1);
+  assert.match(
+    logs[0],
+    /#316 — blocker #313 pending-verify, treated as satisfied/,
+  );
+});
+
+test("githubBlockedBy keeps an open ready-for-agent blocker — an untouched prerequisite still gates (#326)", () => {
+  const run = () =>
+    JSON.stringify([
+      { number: 314, state: "open", labels: [{ name: "ready-for-agent" }] },
+    ]);
+
+  assert.deepEqual(
+    githubBlockedBy("jjforge/vetinari", run, () => {})("316"),
+    ["314"],
+  );
+});
+
 test("githubIssuesByLabel lists the OPEN issues carrying a label and returns their numbers", () => {
   const calls: string[][] = [];
   const run = (args: string[]) => {

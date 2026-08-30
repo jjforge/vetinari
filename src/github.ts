@@ -10,12 +10,28 @@ const gh = (args: string[]) => execFileSync("gh", args, { encoding: "utf8" });
  *
  * Closed blockers are filtered here at the edge: an already-merged prerequisite
  * does not gate, so `prune` and `campaign-plan` only ever see the blockers still
- * in flight. Cross-repo blockers are dropped too: a campaign is a set of ids in
- * one repo, so a blocker in another repo could not be one of them anyway. `run`
- * is injected only so the JSON handling can be tested without invoking `gh`.
+ * in flight. A `pending-verify` blocker is filtered too, even though GitHub still
+ * reports it OPEN: its work is merged on the base and only the human close is
+ * outstanding (`docs/issue-conventions.md`), so it is done and does not gate
+ * (design §4 step 2). Without this, a dependent whose blocker is merged-but-unclosed
+ * and outside the selection is dropped as unreachable — and every follow-up campaign
+ * stalls waiting on the previous one's issues being closed by hand. So the blocker's
+ * labels are requested alongside its state, and a `pending-verify` one is treated as
+ * satisfied — but **named**, not silently dropped: each is logged one line so the drop
+ * surfaces in the plan's provenance (the same edge-log contract `githubIssuesByLabel`
+ * uses, so `campaign --dry-run` shows it rather than the dependent vanishing).
+ *
+ * Cross-repo blockers are dropped too (silently): a campaign is a set of ids in one
+ * repo, so a blocker in another repo could not be one of them anyway. `run`/`log` are
+ * injected only so the JSON handling can be tested without invoking `gh` or writing to
+ * the real console.
  */
 export const githubBlockedBy =
-  (repo: string, run: (args: string[]) => string = gh) =>
+  (
+    repo: string,
+    run: (args: string[]) => string = gh,
+    log: (line: string) => void = console.error,
+  ) =>
   (id: string): string[] => {
     const num = id.replace(/^#/, "").trim();
     const out = run([
@@ -25,16 +41,23 @@ export const githubBlockedBy =
     const rows: Array<{
       number?: number;
       state?: string;
+      labels?: Array<{ name?: string }> | null;
       repository?: { full_name?: string };
     }> = JSON.parse(out || "[]");
-    return rows
-      .filter(
-        (r) =>
-          r.number != null &&
-          r.state !== "closed" &&
-          (!r.repository?.full_name || r.repository.full_name === repo),
-      )
-      .map((r) => String(r.number));
+    const blockers: string[] = [];
+    for (const r of rows) {
+      if (r.number == null) continue;
+      if (r.repository?.full_name && r.repository.full_name !== repo) continue;
+      if (r.state === "closed") continue;
+      if (r.labels?.some((l) => l?.name === "pending-verify")) {
+        log(
+          `[vetinari] #${num} — blocker #${r.number} pending-verify, treated as satisfied`,
+        );
+        continue;
+      }
+      blockers.push(String(r.number));
+    }
+    return blockers;
   };
 
 /**

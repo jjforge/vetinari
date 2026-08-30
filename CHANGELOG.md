@@ -58,6 +58,9 @@ Within a milestone each bold section label appears at most once.
 
 **Documentation:**
 - [internal] `CONTEXT.md` is now a domain-only glossary in the settled vocabulary: an entry for every object, state, park reason and move in the user guide's model; retired words (`carve`, `queue`, `quarantined`, `wave-parked`, `interrupted`, `campaign-plan`, `dispatch`/`attend`, `hostWeight`, `QUEUE_SLOTS`) demoted to _Avoid_ lines; dashboard widgets, colour rules and testing terms removed (#300).
+- [user] The README is now the pitch and first hour only (≤ 1,500 words, no modes table), and the exhaustive lists move to the new `docs/reference.md` — every CLI mode (generated from `--help`), config field, on-disk file, env var, event kind, and Telegram routing rule (#301).
+- [internal] `docs/reference.md`'s CLI-modes table is generated from `MODES` in `src/help.ts` via `npm run gen-reference`, and the README/help drift test now pins that section to `MODES` instead of the README (#301).
+- [internal] Process docs rewritten in the settled campaign vocabulary — `campaigns.md` against the user guide's "A campaign, start to finish" and design §4–§7 (parked + reason, `prune`, `graft`, `redrive`; pointing at `docs/reference.md` for flags), plus retired words fixed in `issue-conventions.md` and `CLAUDE.md` (`campaign-plan`→the planner, `carve`→`prune`, quarantine/wave-park→parked) (#305).
 
 ### Collected changes — August 29, 2026
 

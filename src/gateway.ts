@@ -11,7 +11,7 @@
 
 import { spawn } from "node:child_process";
 import { normalize } from "./prune.ts";
-import { resolveDestination, type Destination, type NotifyMap } from "./config.ts";
+import { questionDestinations, resolveDestination, type Destination, type NotifyMap } from "./config.ts";
 import { hostLogger, type Logger } from "./log.ts";
 import {
   listOutboxIn,
@@ -306,19 +306,40 @@ export interface Announcement {
 }
 
 /**
+ * Where a project's park announcements are sent: the destination its `question`
+ * routing key resolves to (its chat/thread on the project's bot), or the project's
+ * default connection when no map (or no wildcard) routes it — never
+ * unconditionally to the default chat (design §10). `undefined` only when the
+ * project configures no Telegram at all. The `question` key is validated to a
+ * single destination at config load (`questionDestinations`), so this reads that
+ * one destination and rides the project's own bot token. Pure, so the selection
+ * stays testable without a send.
+ */
+export function resolveQuestionConn(project: GatewayProject): TgConn | undefined {
+  if (!project.conn) return undefined;
+  const dests = questionDestinations(project.notify ?? {});
+  const name = dests.size === 1 ? [...dests][0] : undefined;
+  const named = name ? project.destinations?.[name] : undefined;
+  return named ? { token: project.conn.token, chat: named.chat, thread: named.thread } : project.conn;
+}
+
+/**
  * The parked records not yet announced: those with no persisted message id and
  * not already announced this session (the index guard). A project with no
- * destination is skipped — there is nowhere to route its reply. Pure, so the
- * daemon can act on the result and the selection stays trivially testable.
+ * destination is skipped — there is nowhere to route its reply. Each pending
+ * announcement carries the connection its `question` key resolves to
+ * (`resolveQuestionConn`), so the park lands where the reply is watched. Pure, so
+ * the daemon can act on the result and the selection stays trivially testable.
  */
 export function pendingAnnouncements(projects: GatewayProject[], index: ReplyIndex): Announcement[] {
   const out: Announcement[] = [];
   for (const p of projects) {
-    if (!p.conn) continue;
+    const conn = resolveQuestionConn(p);
+    if (!conn) continue;
     for (const record of p.parked) {
       if (record.tgMessageId != null) continue;
       if (isAnnounced(index, p.project, record.taskId, record.parkedAt)) continue;
-      out.push({ project: p.project, projectRoot: p.projectRoot, baseLocation: p.baseLocation, conn: p.conn, record });
+      out.push({ project: p.project, projectRoot: p.projectRoot, baseLocation: p.baseLocation, conn, record });
     }
   }
   return out;

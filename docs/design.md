@@ -355,8 +355,7 @@ Described by behaviour; the tracker holds the numbers (`gh issue list --label ca
 
 **Comms**
 
-- The `question` routing key is validated and then ignored — parks are announced to the default chat; `Destination.bot` is declared and never read.
-- Notices still say `WAVE-PARKED`, `QUARANTINE-PAUSED`, `BATCH`, `QUEUE STARTED` and give `campaign --resume` as the recovery command; the outbound `event` names (`queue-start`, `wave-parked`, …) are still the old words and are the `notify` routing keys. Notices do not share one skeleton.
+- Notices still say `WAVE-PARKED`, `QUARANTINE-PAUSED`, `BATCH` in their text and give `campaign --resume` as the recovery command; the outbound `event` names (the `notify` routing keys) are the settled §2.1 words, but the notice *wording* has not caught up and notices do not share one skeleton.
 
 **Vocabulary that stopped short**
 

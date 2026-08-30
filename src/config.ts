@@ -5,20 +5,22 @@ import type { FileSetOf } from "./fileset.ts";
 import { loggerForRun, type Logger } from "./log.ts";
 
 /**
- * The five fixed message categories a piece of outbound communication carries,
- * used to route it. `question` is the only interactive one (it expects a reply).
- * Adding categories is out of scope.
+ * The four fixed categories a piece of outbound communication carries, used to
+ * route it (design §2.6). A question is never an outbound record — it is a parked
+ * record the gateway announces under the `question` routing key (§10), which is
+ * why `question` is a `notify` key but not a category here. Adding categories is
+ * out of scope.
  */
 export type MessageCategory =
-  "question" | "success" | "failure" | "progress" | "finding";
+  "success" | "failure" | "progress" | "finding";
 
 /**
- * A named Telegram connection a project routes categories to. `bot` names a bot
- * whose token is read by reference from `.vetinari.local/` — a destination
- * carries no secret. `thread` optionally targets a forum thread under the chat.
+ * A named Telegram target a project routes categories to. One bot per project
+ * (design §10) — its token is read by reference from `.vetinari.local/host.env`,
+ * so a destination names no bot and carries no secret; it only picks *where* on
+ * that bot a message lands: `chat`, and optionally a forum `thread` under it.
  */
 export interface Destination {
-  bot: string;
   chat: string;
   thread?: string;
 }
@@ -55,9 +57,10 @@ export function resolveDestination(
  * The distinct destinations a `question` message could resolve to under a notify
  * map, across every possible event: every explicit `question`/`question:event`
  * target, plus the `*` wildcard when unlisted question events would fall to it
- * (i.e. there is no bare `question` entry to catch them). `question` is the only
- * interactive category — the gateway watches one place for the reply — so this
- * set must be a singleton; more than one is a fan-out the config load rejects.
+ * (i.e. there is no bare `question` entry to catch them). `question` is the
+ * interactive routing key — the gateway watches one place for the reply and the
+ * park announcement goes there (§10) — so this set must be a singleton; more than
+ * one is a fan-out the config load rejects.
  */
 export function questionDestinations(notify: NotifyMap): Set<string> {
   const dests = new Set<string>();
@@ -447,9 +450,9 @@ export interface VetinariConfig {
   postComment?: (issueRef: string, body: string) => void | Promise<void>;
   /**
    * Named Telegram destinations this project routes categories to (name ->
-   * `{bot, chat, thread?}`). A destination names a bot by reference — its token is
-   * read from `.vetinari.local/`, never inlined here. The `notify` map's values
-   * are keys of this map.
+   * `{chat, thread?}`). One bot per project — its token is read from
+   * `.vetinari.local/`, never inlined here — so a destination names no bot, only
+   * where on that bot a message lands. The `notify` map's values are keys of this map.
    */
   destinations?: Record<string, Destination>;
   /**

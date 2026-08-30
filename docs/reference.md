@@ -78,7 +78,7 @@ the config object itself.
 | `reportFinding` | hook: file a finding harvested from a green run (`githubFindingReporter(repo, opts)`); absent → no harvest turn |
 | `onIssueMerged` | hook: advance a merged issue's label (`githubMarkPendingVerify(repo)`); absent → no-op |
 | `postComment` | hook: post a comment to the tracker (used to answer a non-resumable provider's park) |
-| `destinations` | named Telegram targets `{ bot, chat, thread? }` |
+| `destinations` | named Telegram targets `{ chat, thread? }` on the project's one bot |
 | `notify` | routing rules mapping a `category` / `category:event` / `*` to a destination name |
 
 ## On-disk layout
@@ -157,11 +157,14 @@ One host daemon, the `gateway`, is the single Telegram consumer and sole sender;
 a run never talks to Telegram — it writes an outbound record and the gateway
 sends it (design §10).
 
-- **Categories** — five, the `category` on every outbound record:
-  `question` (interactive), `success`, `failure`, `progress`, `finding`.
-  A record may carry an event name too, e.g. `progress:wave-start`.
-- **Destinations** — `destinations` names `{ bot, chat, thread? }` targets; a
-  project may name more than one bot.
+- **Categories** — four, the `category` on every outbound record: `success`,
+  `failure`, `progress`, `finding`. A record may carry an event name too, e.g.
+  `progress:wave-start`; the event names are the §2.1 words (`wave-start`,
+  `wave-done`, `campaign-parked`, `campaign-failed`, `campaign-done`, `prune`,
+  `graft`, `redrive`). A question is not an outbound record — it is a parked
+  record announced under the `question` routing key.
+- **Destinations** — one bot per project (its token read from `host.env`);
+  `destinations` names `{ chat, thread? }` targets on that bot.
 - **`notify` rules** — map a `category`, a `category:event`, or `*` (default) to a
   destination name. With no `notify` map, every category falls back to the
   project's default chat (`VETINARI_TELEGRAM_CHAT_ID`). `question` **must** resolve

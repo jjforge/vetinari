@@ -122,8 +122,8 @@ test("readProject loads the project's notify map and destinations live from its 
   writeRouting(base, {
     notify: { "*": "ops", failure: "alerts" },
     destinations: {
-      ops: { bot: "main", chat: "-100" },
-      alerts: { bot: "main", chat: "-200" },
+      ops: { chat: "-100" },
+      alerts: { chat: "-200" },
     },
   });
 
@@ -131,8 +131,8 @@ test("readProject loads the project's notify map and destinations live from its 
 
   assert.deepEqual(read?.notify, { "*": "ops", failure: "alerts" });
   assert.deepEqual(read?.destinations, {
-    ops: { bot: "main", chat: "-100" },
-    alerts: { bot: "main", chat: "-200" },
+    ops: { chat: "-100" },
+    alerts: { chat: "-200" },
   });
 });
 
@@ -389,7 +389,7 @@ test("autoRegister materializes the project's routing so the gateway reads it li
     project: "jjforge",
     stateDir: join(projectRoot, ".vetinari.local"),
     notify: { "*": "ops" },
-    destinations: { ops: { bot: "main", chat: "-100" } },
+    destinations: { ops: { chat: "-100" } },
   } as unknown as ResolvedConfig;
   withEnv({ VETINARI_GATEWAY_HOME: configDir }, () =>
     autoRegister(cfg, projectRoot),
@@ -397,7 +397,7 @@ test("autoRegister materializes the project's routing so the gateway reads it li
 
   const [read] = readProjects(configDir);
   assert.deepEqual(read.notify, { "*": "ops" });
-  assert.deepEqual(read.destinations, { ops: { bot: "main", chat: "-100" } });
+  assert.deepEqual(read.destinations, { ops: { chat: "-100" } });
 });
 
 test("re-registering a project refreshes its pointer in place", () => {

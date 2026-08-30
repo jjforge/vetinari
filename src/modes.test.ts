@@ -177,7 +177,7 @@ test("waveParkedNotice draws attention to a paused campaign whose greens stay me
   const notice = waveParkedNotice("acme", 2, ["101", "102"], "main", "gate line\nGATE FAILED");
   // Routed to the alerting channel — a wave-park demands a human, like the old halt did.
   assert.equal(notice.category, "failure");
-  assert.equal(notice.event, "wave-parked");
+  assert.equal(notice.event, "campaign-parked");
   // Header follows the labeled skeleton: emoji · project · LABEL · context.
   assert.ok(notice.text.startsWith("🅿️ acme · WAVE-PARKED · batch 2"));
   // The operator is told which greens stay merged, on which base, and that it paused.
@@ -202,7 +202,7 @@ test("quarantinePauseNotice draws a human to a campaign paused by a quarantine t
   );
   // Routed to the alerting channel — a paused campaign demands a human, like a wave-park.
   assert.equal(notice.category, "failure");
-  assert.equal(notice.event, "quarantine-paused");
+  assert.equal(notice.event, "campaign-parked");
   // Header follows the labeled skeleton: emoji · project · LABEL · context.
   assert.ok(notice.text.startsWith("🅿️ acme · QUARANTINE-PAUSED · batch 1"));
   // Names the quarantined issue and the dependents it stranded.
@@ -220,7 +220,7 @@ test("autoPruneNotice reports the pruned dependents and that the campaign ran on
   ]);
   // Informational — the campaign continued, so it rides the progress channel.
   assert.equal(notice.category, "progress");
-  assert.equal(notice.event, "auto-prune");
+  assert.equal(notice.event, "prune");
   // Header follows the labeled skeleton: emoji · project · LABEL · context.
   assert.ok(notice.text.startsWith("✂️ acme · AUTO-PRUNE · batch 1"));
   assert.ok(notice.text.includes("640"));
@@ -614,7 +614,7 @@ test("campaign stamps its name and titles once on campaign-start, names the comp
   // The operator notes name the run too, so the Telegram feed isn't anonymous mid-campaign.
   const outbox = listOutbox(cfg);
   assert.ok(outbox.find((m) => m.event === "wave-start")?.text.includes("gateway work"));
-  assert.ok(outbox.find((m) => m.event === "wave-merged")?.text.includes("gateway work"));
+  assert.ok(outbox.find((m) => m.event === "wave-done")?.text.includes("gateway work"));
 });
 
 test("campaign writes no festive-name offset on campaign-start — the name is derived at render, never reserved on a host cursor (#193)", async () => {
@@ -899,7 +899,7 @@ test("Gate 1 (ADR 0017): a per-issue park drains its wave, merges the greens, th
   assert.equal(parked[0].index, 0, "the parked wave's index is recorded");
 
   // …and the operator notice went out on the same wave-park channel, naming the green kept merged.
-  const notice = listOutbox(cfg).find((r) => r.event === "wave-parked");
+  const notice = listOutbox(cfg).find((r) => r.event === "campaign-parked");
   assert.ok(notice, "a waveParkedNotice was enqueued for the operator");
   assert.equal(notice?.category, "failure");
   assert.ok(notice?.text.includes("101"), "the green stayed merged on the base");
@@ -1132,7 +1132,7 @@ test("Gate 2 unchanged: an all-green wave whose combined base gates red still wa
 
   assert.equal(ok, "parked", "the red combined base wave-parks");
   assert.ok(!spawned.includes("201"), "no succeeding wave starts on a red base");
-  const notice = listOutbox(cfg).find((r) => r.event === "wave-parked");
+  const notice = listOutbox(cfg).find((r) => r.event === "campaign-parked");
   assert.ok(notice, "the existing waveParkedNotice still goes out");
   // The loop logs exactly one campaign-parked for the red-base park; Gate 1 (the per-issue
   // park path) must not add a second — no issue parked here.

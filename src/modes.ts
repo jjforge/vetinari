@@ -286,14 +286,10 @@ export async function queue(
   // Only a standalone queue warns here; inside a campaign the caller passes `titles`
   // and has already warned once at campaign start, so we don't repeat it per wave.
   if (titles === undefined) warnIfTelegramUnconfigured(cfg);
-  // No `queue-start` event (design §2.1): the campaign's `wave-start` frames the wave and
-  // each task announces itself with a `spawn`. The issue titles the dashboard names chips
-  // by were recorded once on `campaign-start` by the caller, so this drain records nothing.
-  enqueueOutbound(cfg, {
-    category: "progress",
-    event: "queue-start",
-    text: `🚦 ${cfg.project} · QUEUE STARTED · ${taskIds.length} tasks, ≤${host.ceiling} containers\n${taskIds.join(", ")}\nReply to a parked question to resume it.`,
-  });
+  // No `queue-start`/`queue-done` outbound (design §2.1, §10): the campaign's own
+  // `wave-start`/`wave-done` frame the wave and each task announces itself with a
+  // `spawn`. The issue titles the dashboard names chips by were recorded once on
+  // `campaign-start` by the caller, so this drain records and announces nothing itself.
 
   // The host container ceiling (ADR 0010/0011) is always in effect: the run marks
   // itself active so other projects drain toward their share, and every spawn is
@@ -367,12 +363,6 @@ export async function queue(
     deregisterProject(host.configDir);
   }
 
-  const summary = taskIds.map((i) => `${i}: ${outcomes[i] ?? "?"}`).join("\n");
-  enqueueOutbound(cfg, {
-    category: "progress",
-    event: "queue-done",
-    text: `🏁 ${cfg.project} · QUEUE DRAINED\n${summary}\nParked tasks stay answerable.`,
-  });
   reporter.line(formatOutcomes(taskIds, outcomes));
   return outcomes;
 }
@@ -425,7 +415,7 @@ export function waveParkedNotice(
 ): { category: MessageCategory; event: string; text: string } {
   return {
     category: "failure",
-    event: "wave-parked",
+    event: "campaign-parked",
     text: `🅿️ ${project} · WAVE-PARKED · batch ${batchNumber}\nBase gated red, no attributable culprit — greens (${merged.join(", ") || "none"}) kept on ${baseBranch}, campaign paused.\nRecover: \`campaign --resume\` (after fix-forward) or \`prune <issue>\`\n\n${detail}`,
   };
 }
@@ -480,7 +470,7 @@ export function quarantinePauseNotice(
 ): { category: MessageCategory; event: string; text: string } {
   return {
     category: "failure",
-    event: "quarantine-paused",
+    event: "campaign-parked",
     text: `🅿️ ${project} · QUARANTINE-PAUSED · batch ${batchNumber}\nMerge-conflict quarantine stranded dependents in later waves — greens kept on ${baseBranch}, campaign paused.\nQuarantined → orphaned:\n${describeQuarantineImpacts(impacts)}\nRecover: \`campaign --resume\` (after resolving the conflict) or \`campaign --auto-prune\` to prune and continue`,
   };
 }
@@ -498,7 +488,7 @@ export function autoPruneNotice(
 ): { category: MessageCategory; event: string; text: string } {
   return {
     category: "progress",
-    event: "auto-prune",
+    event: "prune",
     text: `✂️ ${project} · AUTO-PRUNE · batch ${batchNumber}\nQuarantine stranded dependents — closure pruned, campaign ran on.\nQuarantined → pruned:\n${describeQuarantineImpacts(impacts)}`,
   };
 }
@@ -677,7 +667,7 @@ export async function campaign(
       cfg.log.log("redrive", { fromWave: index });
       enqueueOutbound(cfg, {
         category: "progress",
-        event: "campaign-resume",
+        event: "redrive",
         text: `↩️ ${cfg.project} · RESUME · nothing to run — all ${reduced.waves.length} waves already merged`,
       });
       reporter.line(formatResumeNothing(reduced.waves.length));
@@ -686,7 +676,7 @@ export async function campaign(
     cfg.log.log("redrive", { fromWave: index });
     enqueueOutbound(cfg, {
       category: "progress",
-      event: "campaign-resume",
+      event: "redrive",
       text: `↩️ ${cfg.project} · RESUME · wave ${index + 1}/${reduced.waves.length} on ${cfg.baseBranch} — continuing unrun waves`,
     });
     reporter.line(formatResume(index, reduced.waves.length));
@@ -862,7 +852,7 @@ export async function campaign(
     cfg.log.log("wave-done", waveDoneEvent);
     enqueueOutbound(cfg, {
       category: "success",
-      event: "wave-merged",
+      event: "wave-done",
       text: `✅ ${cfg.project} · BATCH ${index + 1} MERGED${named(campaignName)}\n${merged.join(", ") || "nothing"}${note}${qNote}`,
     });
     reporter.line(formatWaveDone(index, total, { merged, held, quarantined, outcomes }));
@@ -922,7 +912,7 @@ export async function campaign(
   cfg.log.log("campaign-done", doneEvent);
   enqueueOutbound(cfg, {
     category: "success",
-    event: "campaign-complete",
+    event: "campaign-done",
     text: `🏆 ${cfg.project} · CAMPAIGN COMPLETE${named(campaignName)} · ${index} batches onto ${cfg.baseBranch}`,
   });
   reporter.line(formatComplete(index, cfg.baseBranch, campaignName));

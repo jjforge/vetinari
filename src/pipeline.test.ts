@@ -246,8 +246,8 @@ test("a campaign wave of two issues spans agent → gate → merge → advance t
 
   // The operator feed reports the merged wave and the completed campaign.
   const outbox = listOutbox(cfg);
-  assert.ok(outbox.find((m) => m.event === "wave-merged"), "wave-merged went out");
-  assert.ok(outbox.find((m) => m.event === "campaign-complete"), "campaign-complete went out");
+  assert.ok(outbox.find((m) => m.event === "wave-done"), "wave-done went out");
+  assert.ok(outbox.find((m) => m.event === "campaign-done"), "campaign-done went out");
 });
 
 // ── Span 1: merge conflict → quarantine (ADR 0013) ───────────────────────────
@@ -316,8 +316,8 @@ test("a merge conflict quarantines the losing green (work preserved) while the w
 
   // Blast-radius handling per config: default (no --auto-prune) pauses for a human.
   const outbox = listOutbox(cfg);
-  assert.ok(outbox.find((m) => m.event === "quarantine-paused"), "quarantine-paused went out");
-  assert.equal(outbox.some((m) => m.event === "auto-prune"), false);
+  assert.ok(outbox.find((m) => m.event === "campaign-parked"), "the quarantine-pause notice (campaign-parked) went out");
+  assert.equal(outbox.some((m) => m.event === "prune"), false);
   assert.equal(events.some((e) => e.event === "prune"), false);
 });
 
@@ -352,8 +352,8 @@ test("a merge conflict under --auto-prune quarantines the loser, prunes the stra
   assert.ok(events.some((e) => e.event === "campaign-done"), "the campaign advanced to done");
 
   const outbox = listOutbox(cfg);
-  assert.ok(outbox.find((m) => m.event === "auto-prune"), "auto-prune went out");
-  assert.equal(outbox.some((m) => m.event === "quarantine-paused"), false);
+  assert.ok(outbox.find((m) => m.event === "prune"), "the auto-prune notice (prune) went out");
+  assert.equal(outbox.some((m) => m.event === "campaign-parked"), false);
 });
 
 // ── Span 2: per-issue park → drain → wave-park (ADR 0017) ────────────────────
@@ -408,7 +408,7 @@ test("a per-issue BLOCKED park drains its wave's greens, then wave-parks — the
   assert.equal(events.some((e) => e.event === "green" && (e as any).branch === "agent/203"), false);
 
   // The operator feed drew a human with the wave-park notice.
-  assert.ok(listOutbox(cfg).find((m) => m.event === "wave-parked"), "wave-parked went out");
+  assert.ok(listOutbox(cfg).find((m) => m.event === "campaign-parked"), "the wave-park notice (campaign-parked) went out");
 });
 
 // ── Span 3: red merged base → Gate-2 wave-park (ADR 0013) ────────────────────
@@ -467,5 +467,5 @@ test("each green passes its own gate but the merged base fails the combined gate
   assert.equal(changelog.includes("feature from 301"), false);
 
   // The operator feed drew a human with the wave-park notice.
-  assert.ok(listOutbox(cfg).find((m) => m.event === "wave-parked"), "wave-parked went out");
+  assert.ok(listOutbox(cfg).find((m) => m.event === "campaign-parked"), "the wave-park notice (campaign-parked) went out");
 });

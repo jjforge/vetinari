@@ -1451,6 +1451,13 @@ export interface ProjectCard {
   percentMerged: number;
   tally: { running: number; parked: number; queued: number };
   lastEvent: string;
+  /** for an idle project, the facts of its newest archived run (design §11): the run
+   * token the card links to (`/?project=…&run=<token>`, which the project page expands
+   * as `archivedRun` at the top of the newest-first list), the run's `complete`/`stalled`
+   * outcome, its campaign name (the run's `--name`, falling back to the token), and the
+   * finish time parsed off the token (the archive stamp `archiveRun` writes at end-of-run).
+   * Absent for a live run (running/parked) — there is no finished run to point the card at. */
+  lastRun?: { run: string; outcome: ArchivedRunState; name: string; finishedAt?: string };
 }
 
 /** The four numbers across the top of the landing, summed across every live
@@ -1568,6 +1575,10 @@ const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, event
       percentMerged: archivedIssues.length ? Math.round((merged / archivedIssues.length) * 100) : 0,
       tally: { running: 0, parked: parked.length, queued: 0 },
       lastEvent: latest ? `Last run: ${latest.summary}` : "No runs yet",
+      // The card opens onto its newest archived run: its outcome, name and finish time,
+      // plus the token the card links to so the project page expands it at the top of the
+      // archived list (design §11). Absent when the project has never archived a run.
+      ...(latest ? { lastRun: { run: latest.run, outcome: latest.state, name: latest.name ?? latest.run, finishedAt: latest.startedAt } } : {}),
     };
   }
   // A finished campaign still lingering in the live log folds to idle at render time

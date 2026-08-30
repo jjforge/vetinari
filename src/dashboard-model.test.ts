@@ -384,6 +384,86 @@ test("an idle project's merged % and merged-today read its latest archived run, 
   assert.equal(counters.mergedToday, 2);
 });
 
+test("an idle project's card exposes lastRun — its newest archived run's outcome, name and finish time — for the card to open (design §11)", () => {
+  const base = join(tmpdir(), `vetinari-landing-lastrun-${Date.now()}`);
+  const dir = join(base, "beta");
+  seedState(dir, []);
+  mkdirSync(join(dir, "logs", "archive"), { recursive: true });
+  writeJsonl(
+    join(dir, "logs", "archive", "orchestrator-2026-06-15T00-00-00-000Z.jsonl"),
+    [
+      event("campaign-start", {
+        ts: "2026-06-15T09:00:00.000Z",
+        waves: [["501"]],
+        name: "shipped",
+        slots: 1,
+      }),
+      event("wave-done", {
+        ts: "2026-06-15T09:05:00.000Z",
+        index: 0,
+        merged: ["501"],
+        held: [],
+        clearedParked: [],
+      }),
+      event("campaign-done", { ts: "2026-06-15T09:06:00.000Z", waves: 1 }),
+    ],
+  );
+
+  const [card] = buildLanding([pointerFor("beta", dir)], new Date("2026-06-16T12:00:00.000Z")).projects;
+  assert.equal(card.runState, "idle");
+  // The card carries its newest archived run's facts: the token it links to, the
+  // clean/stalled outcome, the campaign name, and the finish time parsed off the token.
+  assert.deepEqual(card.lastRun, {
+    run: "2026-06-15T00-00-00-000Z",
+    outcome: "complete",
+    name: "shipped",
+    finishedAt: "2026-06-15T00:00:00.000Z",
+  });
+});
+
+test("a stalled idle run's card lastRun reads its stalled outcome, and an unnamed run falls back to its token name (design §11)", () => {
+  const base = join(tmpdir(), `vetinari-landing-lastrun-stalled-${Date.now()}`);
+  const dir = join(base, "beta");
+  seedState(dir, []);
+  mkdirSync(join(dir, "logs", "archive"), { recursive: true });
+  // A run that stopped mid-wave: it logged no campaign-done, so it reads stalled.
+  writeJsonl(
+    join(dir, "logs", "archive", "orchestrator-2026-06-14T00-00-00-000Z.jsonl"),
+    [
+      event("campaign-start", {
+        ts: "2026-06-14T09:00:00.000Z",
+        waves: [["601"]],
+        slots: 1,
+      }),
+      event("wave-done", {
+        ts: "2026-06-14T09:05:00.000Z",
+        index: 0,
+        merged: ["601"],
+        held: [],
+        clearedParked: [],
+      }),
+    ],
+  );
+
+  const [card] = buildLanding([pointerFor("beta", dir)], new Date("2026-06-16T12:00:00.000Z")).projects;
+  assert.equal(card.runState, "idle");
+  assert.equal(card.lastRun?.outcome, "stalled");
+  // No --name on the run, so the name falls back to the run token (as campaignName does).
+  assert.equal(card.lastRun?.name, "2026-06-14T00-00-00-000Z");
+});
+
+test("a live (running) project's card carries no lastRun — there is no finished run to open", () => {
+  const dir = join(tmpdir(), `vetinari-landing-lastrun-live-${Date.now()}`);
+  seedState(dir, [
+    event("campaign-start", { ts: "2026-06-15T08:00:00.000Z", waves: [["101"]], slots: 1 }),
+    event("wave-start", { ts: "2026-06-15T08:01:00.000Z", index: 0, tasks: ["101"] }),
+    event("spawn", { ts: "2026-06-15T08:02:00.000Z", taskId: "101" }),
+  ]);
+  const [card] = buildLanding([pointerFor("beta", dir)], new Date("2026-06-15T12:00:00.000Z")).projects;
+  assert.equal(card.runState, "running");
+  assert.equal(card.lastRun, undefined);
+});
+
 test("an archived run whose parked record survived reads parked, not idle — it still rolls up to the counter, queue, and card (#232)", () => {
   const base = join(tmpdir(), `vetinari-landing-archived-parked-${Date.now()}`);
   const dir = join(base, "beta");

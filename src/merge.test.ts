@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import { applyTidy, collectWaveChangelog, computeTidy, describeRegistryDedup, integrateGreens, scanTidy, type TidySnapshot } from "./merge.ts";
+import { listParkedIn } from "./state.ts";
 import { memoryLogger } from "./log.ts";
 
 /** A fresh git repo with a CHANGELOG.md committed, standing in for a campaign base. */
@@ -80,7 +81,7 @@ function repoWithConflictingGreens(): { dir: string; git: (args: string[]) => st
 test("integrateGreens quarantines a conflicting green, keeps the earlier green merged, and continues", async () => {
   const { dir, git } = repoWithConflictingGreens();
   const log = memoryLogger();
-  const cfg = { branchPrefix: "agent/", baseBranch: "main", log } as unknown as ResolvedConfig;
+  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir: join(dir, "parked"), log } as unknown as ResolvedConfig;
   const prevCwd = process.cwd();
   process.chdir(dir);
   try {
@@ -105,6 +106,29 @@ test("integrateGreens quarantines a conflicting green, keeps the earlier green m
   const q = log.events.filter((e) => e.event === "parked" && (e as any).reason === "conflict");
   assert.equal(q.length, 1);
   assert.equal((q[0] as any).taskId, "B");
+});
+
+test("integrateGreens writes a durable parked{conflict} record for the quarantined green (design §2.5)", async () => {
+  const { dir } = repoWithConflictingGreens();
+  const parkedDir = join(dir, "parked");
+  const log = memoryLogger();
+  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir, log } as unknown as ResolvedConfig;
+  const prevCwd = process.cwd();
+  process.chdir(dir);
+  try {
+    await integrateGreens(cfg, ["A", "B"], { gate: async () => ({ green: true, report: "" }) });
+  } finally {
+    process.chdir(prevCwd);
+  }
+
+  // A per-member record on disk, not just the event: reason `conflict`, the conflict output
+  // in `detail`, and B's branch — so the record outlives the run and keeps the card off idle.
+  const rec = listParkedIn(parkedDir).find((r) => r.taskId === "B");
+  assert.ok(rec, "a parked record for B is written to disk");
+  assert.equal(rec!.reason, "conflict");
+  assert.equal(rec!.branch, "agent/B");
+  assert.ok(rec!.detail && rec!.detail.length > 0, "the conflict output rides in detail");
+  assert.ok(rec!.parkedAt, "parkedAt is stamped");
 });
 
 /**
@@ -175,7 +199,7 @@ test("integrateGreens wave-parks a red merged base: leaves the greens merged, do
 
 test("integrateGreens skips the merged-base gate when every green conflicts", async () => {
   const { dir } = repoWithConflictingGreens();
-  const cfg = { branchPrefix: "agent/", baseBranch: "main", log: memoryLogger() } as unknown as ResolvedConfig;
+  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir: join(dir, "parked"), log: memoryLogger() } as unknown as ResolvedConfig;
   const prevCwd = process.cwd();
   process.chdir(dir);
   let gateRan = false;

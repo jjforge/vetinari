@@ -323,12 +323,14 @@ test("buildLanding sums the counters, reads an idle project's last campaign, and
     projects.map((p) => p.project),
     ["alpha", "beta"],
   );
-  // Counters sum across live projects; merged-today counts only 101 (102 merged yesterday).
+  // Counters sum across live projects; merged-today counts by the MERGE stamp, not the green
+  // (design §2.2). 102 went green yesterday but only banked when the wave merged today, so both
+  // 101 and 102 count for today.
   assert.deepEqual(counters, {
     working: 1,
     parked: 0,
     queued: 1,
-    mergedToday: 1,
+    mergedToday: 2,
   });
 
   const beta = projects[1];
@@ -637,6 +639,9 @@ test("buildLanding folds a finished single-wave live log to idle too (#208)", ()
     event("campaign-start", { ts: "2026-06-15T07:59:00.000Z", waves: [["101"]], slots: 1 }),
     event("spawn", { ts: "2026-06-15T08:00:00.000Z", taskId: "101" }),
     event("green", { ts: "2026-06-15T08:01:00.000Z", taskId: "101", branch: "agent/101", commits: [] }),
+    // The single wave's green was banked on the base (design §2.2: only a merge finishes it),
+    // so the campaign is settled and folds to idle even with no campaign-done marker (#208).
+    event("wave-done", { ts: "2026-06-15T08:02:00.000Z", index: 0, merged: ["101"], held: [] }),
   ]);
 
   const [card] = buildLanding(
@@ -1207,7 +1212,8 @@ test("buildAllStatus builds one status per live project and skips a stale one", 
   assert.deepEqual(
     statuses[0].waves[0].issues.map((i) => [i.issueNumber, i.status]),
     [
-      ["101", "completed"],
+      // 101 went green but no wave-done merged it yet — running with a pending green (§2.2).
+      ["101", "running"],
       ["102", "unstarted"],
     ],
   );
@@ -1300,6 +1306,7 @@ test("issue lifecycle + wave/campaign folds are one FSM, tested by replaying eve
     event("campaign-start", { ts: "t0", waves: [["101", "102", "103", "104"]], slots: 1 }),
     event("wave-start", { ts: "t1", index: 0, tasks: ["101", "102", "103", "104"] }),
     event("green", { ts: "t2", taskId: "101", branch: "agent/101", commits: [] }),
+    event("merged", { ts: "t2b", taskId: "101", branch: "agent/101" }),
     event("parked", { ts: "t3", taskId: "102", reason: "question" }),
     event("green", { ts: "t4", taskId: "103", branch: "agent/103", commits: [] }),
     event("parked", { ts: "t5", taskId: "103", reason: "conflict", detail: "CONFLICT" }),
@@ -1380,6 +1387,96 @@ test("reduceCampaign reconciles a dead run's in-flight issue to parked{crash}; a
     event("campaign-done", { ts: "t6", waves: 1 }),
   ];
   assert.equal(reduceCampaign(done, { alive: false }).outcomes.get("301"), "completed");
+});
+
+test("reduceCampaign: a bare green is running-with-a-pending-green, completed only once merged (design §2.2)", () => {
+  const base = [
+    event("campaign-start", { ts: "t0", waves: [["101"]], slots: 1 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["101"] }),
+    event("spawn", { ts: "t2", taskId: "101" }),
+    event("green", { ts: "t3", taskId: "101", branch: "agent/101", commits: [] }),
+  ];
+  // An unmerged green banks nothing on the base: the issue is `running` with a pending green,
+  // exposed as a distinct chip detail and set in `pendingGreen` — never `completed`, and it
+  // does NOT count toward "merged today" (no `mergedAt` stamp) since nothing merged.
+  const green = reduceCampaign(base);
+  assert.equal(green.outcomes.get("101"), "running", "an unmerged green reads running, not completed");
+  assert.equal(green.pendingGreen.has("101"), true, "the pending green is flagged");
+  assert.equal(green.mergedAt.has("101"), false, "a bare green stamps no mergedAt — nothing merged");
+  assert.deepEqual(issueLifecycle(green, "101"), { state: "running" });
+  assert.notEqual(green.details.get("101"), undefined);
+  assert.match(green.details.get("101")!, /pending/i, "the chip detail distinguishes a pending green");
+
+  // The integrator lands it: `merged` is what banks it — `completed`, with a `mergedAt` stamp,
+  // and the pending-green flag cleared.
+  const merged = reduceCampaign([...base, event("merged", { ts: "t4", taskId: "101", branch: "agent/101" })]);
+  assert.equal(merged.outcomes.get("101"), "completed", "a merged green is completed");
+  assert.equal(merged.pendingGreen.has("101"), false, "the pending-green flag clears on merge");
+  assert.equal(merged.mergedAt.get("101"), "t4", "mergedAt is the merge stamp, not the green stamp");
+
+  // A wave-done's `merged` list banks it the same way (the batch-merge path).
+  const waveDone = reduceCampaign([...base, event("wave-done", { ts: "t5", index: 0, merged: ["101"], held: [] })]);
+  assert.equal(waveDone.outcomes.get("101"), "completed");
+  assert.equal(waveDone.pendingGreen.has("101"), false);
+  assert.equal(waveDone.mergedAt.get("101"), "t5");
+});
+
+test("reduceCampaign: completed (merged) is terminal — a stale parked/failed/spawn is ignored and logged as an anomaly (design §2.2)", () => {
+  // Observed 2026-08-30: #313 merged at 16:47:49Z, then a second process's stale parked{stalled}
+  // at 16:48:28Z made the dashboard read it parked after the record was gone. A merge is terminal.
+  const base = [
+    event("campaign-start", { ts: "t0", waves: [["313"]], slots: 1 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["313"] }),
+    event("spawn", { ts: "t2", taskId: "313" }),
+    event("green", { ts: "t3", taskId: "313", branch: "agent/313", commits: [] }),
+    event("merged", { ts: "2026-08-30T16:47:49.000Z", taskId: "313", branch: "agent/313" }),
+  ];
+
+  const staleParked = reduceCampaign([...base, event("parked", { ts: "2026-08-30T16:48:28.000Z", taskId: "313", reason: "stalled" })]);
+  assert.equal(staleParked.outcomes.get("313"), "completed", "a stale parked never flips a merged issue back to parked");
+  assert.deepEqual(issueLifecycle(staleParked, "313"), { state: "completed" });
+  assert.ok(staleParked.anomalies.some((a) => a.includes("313")), "the ignored stale event is recorded as an anomaly");
+
+  const staleFailed = reduceCampaign([...base, event("failed", { ts: "2026-08-30T16:48:28.000Z", taskId: "313" })]);
+  assert.equal(staleFailed.outcomes.get("313"), "completed", "a stale failed never flips a merged issue to failure");
+  assert.ok(staleFailed.anomalies.some((a) => a.includes("313")));
+
+  const staleSpawn = reduceCampaign([...base, event("spawn", { ts: "2026-08-30T16:48:28.000Z", taskId: "313" })]);
+  assert.equal(staleSpawn.outcomes.get("313"), "completed", "a stale spawn never flips a merged issue to running");
+  assert.ok(staleSpawn.anomalies.some((a) => a.includes("313")));
+});
+
+test("reduceCampaign: a dead run's pending green is NOT crash-folded — it reached a green verdict (design §2.2, §7)", () => {
+  const events = [
+    event("campaign-start", { ts: "t0", waves: [["301", "302"]], slots: 1 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["301", "302"] }),
+    event("spawn", { ts: "t2", taskId: "301" }),
+    event("spawn", { ts: "t3", taskId: "302" }),
+    // 301 reached green (a verdict) but never merged before the run died; 302 was still in flight.
+    event("green", { ts: "t4", taskId: "301", branch: "agent/301", commits: [] }),
+  ];
+  const dead = reduceCampaign(events, { alive: false });
+  // The in-flight, verdict-less 302 crash-folds; the pending green 301 keeps its verdict — it is
+  // banked-but-unmerged work a redrive lands, not a crash to redrive from scratch.
+  assert.equal(dead.outcomes.get("302"), "parked");
+  assert.equal(dead.parkReasons.get("302"), "crash");
+  assert.equal(dead.outcomes.get("301"), "running");
+  assert.equal(dead.pendingGreen.has("301"), true);
+  assert.deepEqual(issueLifecycle(dead, "301"), { state: "running" });
+});
+
+test("reduceCampaign: a spawn re-admits a parked member back to running (design §5 step 3)", () => {
+  const reduced = reduceCampaign([
+    event("campaign-start", { ts: "t0", waves: [["101"]], slots: 1 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["101"] }),
+    event("spawn", { ts: "t2", taskId: "101" }),
+    event("parked", { ts: "t3", taskId: "101", reason: "question" }),
+    // The answer is delivered and the member re-admitted — its child spawns again.
+    event("spawn", { ts: "t4", taskId: "101" }),
+  ]);
+  // The re-admit moves it back to running; a redrive/dashboard reads it running, not still parked.
+  assert.equal(reduced.outcomes.get("101"), "running");
+  assert.deepEqual(issueLifecycle(reduced, "101"), { state: "running" });
 });
 
 test("reduceCampaign treats any campaign-* stop marker as not-a-crash — an in-flight member is not crash-folded past a park/fail (design §7, #314)", () => {
@@ -1467,6 +1564,8 @@ test("reduceCampaign folds a campaign-failed stop marker to a failed, un-closed 
     event("campaign-start", { ts: "t0", waves: [["101", "102"]], slots: 1 }),
     event("wave-start", { ts: "t1", index: 0, tasks: ["101", "102"] }),
     event("green", { ts: "t2", taskId: "101", branch: "agent/101", commits: [] }),
+    // 101's green was integrated before the wave failed on 102, so it is banked on the base.
+    event("merged", { ts: "t2b", taskId: "101", branch: "agent/101" }),
     // The per-task failure marks 102 `failure`; the campaign-failed marker is just the stop.
     event("failed", { ts: "t3", taskId: "102" }),
     event("campaign-failed", { ts: "t3", index: 0, detail: "#102 could not be made green" }),
@@ -1814,7 +1913,7 @@ test("reduceCampaign reports one completed wave closed and the next wave current
   assert.equal(reduced.outcomes.get("101"), "completed");
 });
 
-test("reduceCampaign records when each issue merged, from wave-done and green", () => {
+test("reduceCampaign records when each issue merged, from wave-done and merged", () => {
   const reduced = reduceCampaign([
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
@@ -1828,14 +1927,14 @@ test("reduceCampaign records when each issue merged, from wave-done and green", 
       held: [],
       clearedParked: [],
     }),
-    event("green", { ts: "2025-01-02T09:00:00.000Z", taskId: "201", branch: "agent/201", commits: [] }),
-    event("green", { ts: "2025-01-02T10:00:00.000Z", taskId: "202", branch: "agent/202", commits: [] }),
-    event("green", { ts: "2025-01-02T10:00:00.000Z", taskId: "201", branch: "agent/201", commits: [] }),
+    event("merged", { ts: "2025-01-02T09:00:00.000Z", taskId: "201", branch: "agent/201" }),
+    event("merged", { ts: "2025-01-02T10:00:00.000Z", taskId: "202", branch: "agent/202" }),
+    event("merged", { ts: "2025-01-02T10:00:00.000Z", taskId: "201", branch: "agent/201" }),
   ]);
 
-  // A merge stamp is recorded from every path an issue reaches "completed" by — the
-  // wave merge and a bare green — so merged-today can count them. 201's stamp keeps its
-  // first (09:00) green, not the later duplicate.
+  // A merge stamp is recorded from every path an issue reaches "completed" by — the wave
+  // merge and a per-issue `merged` (design §2.2: only merged banks work) — so merged-today
+  // can count them. 201's stamp keeps its first (09:00) merge, not the later duplicate.
   assert.equal(reduced.mergedAt.get("101"), "2025-01-01T00:02:00.000Z");
   assert.equal(reduced.mergedAt.get("201"), "2025-01-02T09:00:00.000Z");
   assert.equal(reduced.mergedAt.get("202"), "2025-01-02T10:00:00.000Z");
@@ -1857,9 +1956,11 @@ test("reduceCampaign derives failure from an issue that errored, not a campaign-
     event("green", { ts: "2025-01-01T00:02:00.000Z", taskId: "102", branch: "agent/102", commits: [] }),
   ]);
 
-  // `failure` is the single red terminal — an issue the agent could not make green.
+  // `failure` is the single red terminal — an issue the agent could not make green. 102 went
+  // green but is not yet merged, so it reads `running` with a pending green (design §2.2).
   assert.equal(reduced.outcomes.get("101"), "failure");
-  assert.equal(reduced.outcomes.get("102"), "completed");
+  assert.equal(reduced.outcomes.get("102"), "running");
+  assert.equal(reduced.pendingGreen.has("102"), true);
 });
 
 test("campaignRunning is true for a started campaign that has not finished", () => {
@@ -2091,7 +2192,8 @@ test("reconstructIssueDetail folds an issue's turn log, count, elapsed and statu
   );
 
   assert.equal(detail.issueNumber, "101");
-  assert.equal(detail.status, "completed");
+  // The log ends at an unmerged green, so the sheet reads `running` with a pending green (§2.2).
+  assert.equal(detail.status, "running");
   assert.equal(detail.title, "Do the thing");
   assert.equal(detail.campaignName, "gateway work");
   assert.equal(detail.turns, 2);
@@ -2187,7 +2289,8 @@ test("buildStatus shows campaign waves with issue chips and statuses", () => {
     status.waves.map((w) => w.issues.map((i) => [i.issueNumber, i.status])),
     [
       [
-        ["101", "completed"],
+        // 101 went green but is not yet merged onto the base — running with a pending green (§2.2).
+        ["101", "running"],
         ["102", "parked"],
       ],
       [["201", "unstarted"]],
@@ -2378,7 +2481,9 @@ test("buildStatus marks active wave issues as running before they finish", () =>
   assert.deepEqual(
     status.waves[0].issues.map((i) => [i.issueNumber, i.status]),
     [
-      ["101", "completed"],
+      // Mid-wave, 101's green is not yet integrated (merges land at the wave boundary), so it
+      // reads running with a pending green — not completed — just like the still-in-flight 102.
+      ["101", "running"],
       ["102", "running"],
     ],
   );
@@ -2391,6 +2496,7 @@ test("issueLifecycle: an issue's own reason outranks the wave's red-base park; a
     event("campaign-start", { ts: "t0", waves: [["611", "612"]], slots: 1 }),
     event("wave-start", { ts: "t1", index: 0, tasks: ["611", "612"] }),
     event("green", { ts: "t2", taskId: "611", branch: "agent/611", commits: [] }),
+    event("merged", { ts: "t2b", taskId: "611", branch: "agent/611" }),
     event("parked", { ts: "t3", taskId: "612", reason: "question" }),
     event("campaign-parked", { ts: "t4", index: 0, detail: "npm test failed" }),
   ]);
@@ -2428,6 +2534,8 @@ test("buildStatus folds a red-base wave-park to a parked wave whose completed me
     event("wave-start", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["611", "612"] }),
     event("green", { ts: "2025-01-01T00:02:00.000Z", taskId: "611", branch: "agent/611", commits: [] }),
     event("green", { ts: "2025-01-01T00:03:00.000Z", taskId: "612", branch: "agent/612", commits: [] }),
+    event("merged", { ts: "2025-01-01T00:03:30.000Z", taskId: "611", branch: "agent/611" }),
+    event("merged", { ts: "2025-01-01T00:03:40.000Z", taskId: "612", branch: "agent/612" }),
     event("campaign-parked", { ts: "2025-01-01T00:04:00.000Z", index: 0, detail: "npm test failed" }),
   ];
   writeJsonl(join(dir, "logs", "orchestrator.jsonl"), events);
@@ -2635,7 +2743,8 @@ test("buildStatus adds rough activity details for issue hover", () => {
     status.waves[0].issues.map((i) => [i.issueNumber, i.detail]),
     [
       ["101", "Agent turn 2 finished; waiting for verification/redrive"],
-      ["102", "Completed on agent/102"],
+      // A green banks nothing yet — the chip detail says so, distinct from a merged "completed".
+      ["102", "Green on agent/102 — pending merge onto the base"],
       ["103", "Parked: question"],
     ],
   );
@@ -3056,6 +3165,7 @@ test("reduceCampaign drops a graft's grafted overlay once the issue is picked up
     event("graft", { ts: "2025-01-01T00:02:00.000Z", ids: ["301"], blockedBy: {}, basenames: {} }),
     // 301 is picked up in the next wave and merges — it is no longer "grafted".
     event("green", { ts: "2025-01-01T00:03:00.000Z", taskId: "301", branch: "agent/301", commits: [] }),
+    event("merged", { ts: "2025-01-01T00:04:00.000Z", taskId: "301", branch: "agent/301" }),
   ]);
   assert.equal(reduced.outcomes.get("301"), "completed");
   // The overlay is transient: it drops once the issue leaves the unstarted state.

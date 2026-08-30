@@ -6,7 +6,7 @@ import type { Logger } from "./log.ts";
 import { runGates } from "./gate.ts";
 import { makeSandbox } from "./sandbox.ts";
 import { applyCollect, foldFragments, formatMilestoneDate, FRAGMENT_DIR } from "./changelog.ts";
-import { listParkedIn } from "./state.ts";
+import { listParkedIn, writeParkedRecord } from "./state.ts";
 import { readEventLog } from "./event-log.ts";
 import { reduceCampaign } from "./dashboard-model.ts";
 import type { PointerDrop } from "./registry.ts";
@@ -124,6 +124,11 @@ export async function integrateGreens(
       gitTry(["merge", "--abort"]);
       // A merge conflict is an integrator park with reason `conflict` (design §2.3): the
       // issue's green stays banked, its branch/worktree/session preserved and resumable.
+      // Write the durable parked record beside the event (design §2.5, "written by whatever
+      // parks") so the card stays off idle and the gateway can announce/redrive it after the
+      // run's log is archived — the event alone vanishes with the log. `conflict` redrives,
+      // never resumes by reply, so the record carries no session; `question` names the move.
+      writeParkedRecord(cfg, { taskId, reason: "conflict", detail, branch, question: `Merge conflict on ${branch} — resolve it on the base, then redrive.` });
       cfg.log.log("parked", { taskId, reason: "conflict", detail });
       quarantined.push(taskId);
       continue;

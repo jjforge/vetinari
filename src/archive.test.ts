@@ -16,21 +16,21 @@ const cfgFor = (): ResolvedConfig => {
   return { project: "demo", stateDir: dir, logFile: join(dir, "logs", "orchestrator.jsonl"), parkedDir: join(dir, "parked"), log: memoryLogger() } as unknown as ResolvedConfig;
 };
 
-test("archiveRun moves the log aside, resets it, and clears parked records", () => {
+test("archiveRun moves the log aside and resets it, but leaves parked records alone (design §2.5)", () => {
   const cfg = cfgFor();
   writeFileSync(cfg.logFile, '{"event":"campaign-start","batches":[["101"]]}\n{"event":"green","taskId":"101"}\n');
   writeFileSync(join(cfg.parkedDir, "202.json"), JSON.stringify({ taskId: "202", reason: "question", branch: "agent/202", sessionId: "s", question: "?" }));
 
   const result = archiveRun(cfg);
 
-  // Live log is reset to empty, so the dashboard/statusline read as idle.
+  // Live log is reset to empty; the archive preserves the old content.
   assert.equal(readFileSync(cfg.logFile, "utf8"), "");
-  // The old content is preserved in a timestamped archive.
   assert.ok(result.archivedLog && existsSync(result.archivedLog));
   assert.match(readFileSync(result.archivedLog!, "utf8"), /campaign-start/);
-  // Parked records are cleared.
-  assert.equal(result.clearedParked, 1);
-  assert.equal(readdirSync(cfg.parkedDir).filter((f) => f.endsWith(".json")).length, 0);
+  // The parked record survives the archive — it keeps the card off idle and the gateway's
+  // reply index intact until the issue is answered/redriven or explicitly purged (§2.4, §2.5).
+  assert.equal(readdirSync(cfg.parkedDir).filter((f) => f.endsWith(".json")).length, 1);
+  assert.equal(existsSync(join(cfg.parkedDir, "202.json")), true);
 });
 
 test("archiveRun clears sent outbound records but leaves unsent ones for the gateway", () => {
@@ -91,12 +91,12 @@ test("shouldArchiveLeftover: a top-level run still archives a genuine leftover (
   assert.equal(shouldArchiveLeftover(fresh, { isChild: false }), false);
 });
 
-test("archiveRun handles a missing or empty log without creating an archive", () => {
+test("archiveRun handles a missing or empty log without creating an archive, and still leaves records alone", () => {
   const cfg = cfgFor();
   writeFileSync(join(cfg.parkedDir, "1.json"), JSON.stringify({ taskId: "1", reason: "question", branch: "b", sessionId: "s", question: "?" }));
 
   const result = archiveRun(cfg);
 
   assert.equal(result.archivedLog, undefined); // nothing to archive
-  assert.equal(result.clearedParked, 1); // parked still cleared
+  assert.equal(existsSync(join(cfg.parkedDir, "1.json")), true); // the record is untouched (§2.5)
 });

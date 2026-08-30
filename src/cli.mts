@@ -543,7 +543,6 @@ const archiveIfIdle = () => {
   const r = archiveRun(cfg);
   cfg.log.log("archived", {
     archivedLog: r.archivedLog ?? null,
-    clearedParked: r.clearedParked,
     clearedOutbound: r.clearedOutbound,
   });
   if (r.archivedLog) console.log(`archived run log → ${r.archivedLog}`);

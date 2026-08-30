@@ -35,7 +35,7 @@ export interface ParkedRecord {
   answeredAt?: string;
 }
 
-const file = (cfg: ResolvedConfig, taskId: string) => `${cfg.parkedDir}/${taskId}.json`;
+const file = (cfg: Pick<ResolvedConfig, "parkedDir">, taskId: string) => `${cfg.parkedDir}/${taskId}.json`;
 
 /**
  * Parking is a TERMINAL state for the slot, not a blocking wait: the record and
@@ -47,10 +47,21 @@ const file = (cfg: ResolvedConfig, taskId: string) => `${cfg.parkedDir}/${taskId
  * the message id (see `setParkedMessageId`), so the record starts with none.
  */
 export async function park(cfg: ResolvedConfig, rec: Omit<ParkedRecord, "parkedAt" | "tgMessageId">) {
-  mkdirSync(cfg.parkedDir, { recursive: true });
-  writeFileSync(file(cfg, rec.taskId), JSON.stringify({ parkedAt: new Date().toISOString(), ...rec }, null, 2));
+  writeParkedRecord(cfg, rec);
   cfg.log.log("parked", { taskId: rec.taskId, reason: rec.reason, ...(rec.detail ? { detail: rec.detail } : {}) });
   console.log(`\n*** PARKED (${rec.reason}) — the gateway will announce this question; or answer directly with:\n    vetinari answer ${rec.taskId} "<answer>"\n`);
+}
+
+/**
+ * Write (or overwrite) the on-disk parked record only — no `parked` event, no console
+ * notice. `park` is the parking *transition* (it also logs the event and prints); this is
+ * the record-write half, for a parker that logs its own event separately: the integrator
+ * writing a `conflict` record beside the `parked{conflict}` it already logs (design §2.5,
+ * "written by whatever parks"). `parkedAt` is stamped here.
+ */
+export function writeParkedRecord(cfg: Pick<ResolvedConfig, "parkedDir">, rec: Omit<ParkedRecord, "parkedAt" | "tgMessageId">): void {
+  mkdirSync(cfg.parkedDir, { recursive: true });
+  writeFileSync(file(cfg, rec.taskId), JSON.stringify({ parkedAt: new Date().toISOString(), ...rec }, null, 2));
 }
 
 /** A project's parked directory under a base location (its `.vetinari.local/`). */

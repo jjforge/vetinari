@@ -519,7 +519,9 @@ test("serveAllStatus GET /api/issue omits parked reply data for a non-parked iss
     const detail = await (
       await fetch(`http://127.0.0.1:${port}/api/issue?project=alpha&issue=101`)
     ).json();
-    assert.equal(detail.status, "completed");
+    // An unmerged green reads running with a pending green (§2.2); it is a non-parked issue,
+    // so the reply data is still omitted.
+    assert.equal(detail.status, "running");
     assert.equal(detail.parked, undefined);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -1548,6 +1550,7 @@ test("serveAllStatus GET /api/issue reads an archived run's own log when a run t
       summary: "did the thing",
     }),
     event("green", { ts: "2026-01-01T00:02:00.000Z", taskId: "101", branch: "agent/101", commits: [] }),
+    event("wave-done", { ts: "2026-01-01T00:03:00.000Z", index: 0, merged: ["101"], held: [] }),
     event("campaign-done", { waves: 1 }),
   ]);
   register(configDir, {

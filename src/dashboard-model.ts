@@ -95,6 +95,10 @@ export interface StatusIssue {
   /** the orthogonal membership axis — the badge the chip carries. Absent reads as a
    * plain `member` (the common case), so only a `grafted`/`pruned` chip sets it. */
   membership?: Membership;
+  /** true when this `running` chip is a green awaiting merge (design §2.2): it went green but
+   * has not banked on the base, so its agent slot is already freed — the live tail must not
+   * follow it as an in-flight runner. Absent for a genuinely slot-holding `running` chip. */
+  pendingGreen?: boolean;
   name?: string;
   detail?: string;
 }
@@ -589,6 +593,10 @@ export interface ReducedCampaign {
    * wave names are on. */
   festiveOffset?: number;
   outcomes: Map<string, IssueStatus>;
+  /** issues that went green but are not yet merged onto the base — `running` with a pending
+   * green (design §2.2). Cleared when the id merges (`merged`, or a `wave-done`'s merged list).
+   * The chip reads `running`; this set drives the distinct "pending merge" chip detail. */
+  pendingGreen: Set<string>;
   details: Map<string, string>;
   /** issue id → title, captured onto the run's start event at launch by the
    * orchestrator (which has `fetchTask`) so the dumb-router dashboard renders
@@ -614,6 +622,11 @@ export interface ReducedCampaign {
    * lifecycle (a merged member stays `completed`, a question stays `parked{question}`), and
    * this set is what makes the wave fold to `parked{red-base}` (design §2.3, #288). */
   redBase: Set<string>;
+  /** events the fold refused to apply because they contradicted a terminal `completed` (merged)
+   * state (design §2.2): a stale second process logging a `parked`/`failed`/`spawn` for an issue
+   * already merged. Recorded here — the reducer's log of what it ignored — never folded, so a
+   * late stale event can never flip a merged card back to parked/failed/running. */
+  anomalies: string[];
 }
 
 /**
@@ -639,11 +652,13 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
   let name: string | undefined;
   let festiveOffset: number | undefined;
   const outcomes = new Map<string, IssueStatus>();
+  const pendingGreen = new Set<string>();
   const details = new Map<string, string>();
   const titles = new Map<string, string>();
   const mergedAt = new Map<string, string>();
   const closedWaves = new Set<number>();
   const parkReasons = new Map<string, ParkReason>();
+  const anomalies: string[] = [];
   let redBase = new Set<string>();
   let currentWave = -1;
   let parkedWave = -1;
@@ -666,28 +681,50 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
     } else if (e.event === "wave-start" && Number.isInteger(e.index)) {
       currentWave = e.index;
     } else if (e.event === "spawn" && e.taskId) {
-      // A task took an agent slot (design §2.1) — running until a terminal event lands.
+      // A task took an agent slot (design §2.1) — running until a terminal event lands. A spawn
+      // promotes an `unstarted` member OR a `parked` one (a re-admit, §5 step 3: the answer was
+      // delivered and the child re-spawned) back to `running`; without the parked case a
+      // re-admitted chip reads parked until its next verdict. A `completed` (merged) member is
+      // terminal (§2.2): a spawn for it is a stale second process, ignored as an anomaly.
       const taskId = normalizeIssue(String(e.taskId));
-      if ((outcomes.get(taskId) ?? "unstarted") === "unstarted") outcomes.set(taskId, "running");
+      const prev = outcomes.get(taskId) ?? "unstarted";
+      if (prev === "completed") {
+        anomalies.push(`spawn for already-merged ${taskId} ignored (completed is terminal)`);
+        continue;
+      }
+      if (prev === "unstarted" || prev === "parked") {
+        outcomes.set(taskId, "running");
+        parkReasons.delete(taskId);
+      }
       details.set(taskId, `Running in an agent slot (${e.running ?? "?"} active, ${e.left ?? "?"} waiting)`);
     } else if (e.event === "turn" && e.taskId) {
       details.set(normalizeIssue(String(e.taskId)), `Agent turn ${e.turn ?? "?"} finished; waiting for verification/redrive`);
     } else if (e.event === "green" && e.taskId) {
+      // A green banks nothing on the base yet (design §2.2): the issue is `running` with a
+      // pending green, not `completed` — the word for banked work is reserved for `merged`.
+      // No `mergedAt` stamp, so it never counts toward "merged today" until it merges.
       const taskId = normalizeIssue(String(e.taskId));
-      outcomes.set(taskId, "completed");
-      details.set(taskId, e.branch ? `Completed on ${e.branch}` : "Completed");
-      if (e.ts && !mergedAt.has(taskId)) mergedAt.set(taskId, String(e.ts));
+      outcomes.set(taskId, "running");
+      pendingGreen.add(taskId);
+      details.set(taskId, e.branch ? `Green on ${e.branch} — pending merge onto the base` : "Green — pending merge onto the base");
     } else if (e.event === "merged" && e.taskId) {
       // The integrator landed this green on the base (design §2.1). Completion, and the
       // resolution of any earlier quarantine or red-base hold on the same id.
       const taskId = normalizeIssue(String(e.taskId));
       outcomes.set(taskId, "completed");
+      pendingGreen.delete(taskId);
       redBase.delete(taskId);
       quarantined.delete(taskId);
       details.set(taskId, "Merged into base");
       if (e.ts && !mergedAt.has(taskId)) mergedAt.set(taskId, String(e.ts));
     } else if (e.event === "parked" && e.taskId) {
       const taskId = normalizeIssue(String(e.taskId));
+      // `completed` (merged) is terminal (design §2.2): a `parked` for an already-merged issue is
+      // a stale second process, ignored as an anomaly — it must never flip a merged card to parked.
+      if (outcomes.get(taskId) === "completed") {
+        anomalies.push(`parked for already-merged ${taskId} ignored (completed is terminal)`);
+        continue;
+      }
       const reason = parkReasonFromEvent(typeof e.reason === "string" ? e.reason : undefined);
       if (reason === "conflict") {
         // A merge conflict pulled this green from integration (design §2.3). Overlay it
@@ -705,6 +742,12 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       // that holds its wave — the wave lands no `wave-done`, so it stays out of `closedWaves`
       // and folds to `failed` (failure outranks parked, ADR 0019).
       const taskId = normalizeIssue(String(e.taskId));
+      // `completed` (merged) is terminal (design §2.2): a `failed` for an already-merged issue is
+      // a stale second process, ignored as an anomaly rather than flipping a merged card to failed.
+      if (outcomes.get(taskId) === "completed") {
+        anomalies.push(`failed for already-merged ${taskId} ignored (completed is terminal)`);
+        continue;
+      }
       outcomes.set(taskId, "failure");
       if (!details.has(taskId)) details.set(taskId, "Failed — the agent could not make it green");
     } else if (e.event === "campaign-parked") {
@@ -722,6 +765,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       for (const taskId of e.merged ?? []) {
         const issueNumber = normalizeIssue(String(taskId));
         outcomes.set(issueNumber, "completed");
+        pendingGreen.delete(issueNumber);
         // A clean re-merge resolves an earlier quarantine or a red-base hold, so the chip
         // reads completed — and its stale "resolve the conflict" detail becomes the merge line.
         redBase.delete(issueNumber);
@@ -795,14 +839,17 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
   const stopMarkers: ReadonlySet<string> = new Set(["campaign-done", "campaign-parked", "campaign-failed"]);
   if (opts.alive === false && !relevant.some((e) => stopMarkers.has(e.event))) {
     for (const [id, status] of outcomes) {
-      if (status !== "running") continue;
+      // A pending green reads `running` (design §2.2) but reached a green verdict — it is
+      // banked-but-unmerged work a redrive lands, not a verdict-less in-flight crash — so it is
+      // never crash-folded. Only a genuinely in-flight `running` member (no verdict) reconciles.
+      if (status !== "running" || pendingGreen.has(id)) continue;
       outcomes.set(id, "parked");
       parkReasons.set(id, "crash");
       details.set(id, "Crashed — the run died with no verdict; redrive");
     }
   }
 
-  return { waves, layout, pruned, grafted, quarantined, name, festiveOffset, outcomes, details, titles, mergedAt, closedWaves, currentWave, parkedWave, parkReasons, redBase };
+  return { waves, layout, pruned, grafted, quarantined, name, festiveOffset, outcomes, pendingGreen, details, titles, mergedAt, closedWaves, currentWave, parkedWave, parkReasons, redBase, anomalies };
 }
 
 /**
@@ -1128,6 +1175,10 @@ export function buildStatus(cfg: ResolvedConfig, opts: { dead?: boolean; alive?:
   });
   for (const parked of parkedRecords) {
     const taskId = normalizeIssue(parked.taskId);
+    // `completed` (merged) is terminal (design §2.2): a record that outlived a since-merged issue
+    // (durable records are only cleared on re-admit/redrive or `prune --purge`, §2.5) must not flip
+    // the merged card back to parked. Leave the outcome; the surviving record is a stale straggler.
+    if (outcomes.get(taskId) === "completed") continue;
     outcomes.set(taskId, "parked");
     reduced.parkReasons.set(taskId, parkReasonFromEvent(parked.reason));
     details.set(taskId, `Parked: ${parked.reason}`);
@@ -1145,6 +1196,7 @@ export function buildStatus(cfg: ResolvedConfig, opts: { dead?: boolean; alive?:
         status: life.state,
         ...(life.reason ? { reason: life.reason } : {}),
         membership: issueMembership(reduced, issueNumber),
+        ...(reduced.pendingGreen.has(issueNumber) ? { pendingGreen: true } : {}),
         name: titles.get(issueNumber),
         detail: details.get(issueNumber),
       };
@@ -1216,7 +1268,9 @@ export const TAIL_SNAPSHOT_CAP = 500;
  * status with no `inFlight` field falls back to every running issue across the plan.
  */
 export function inFlightRunning(status: CampaignStatus): StatusIssue[] {
-  const running = status.waves.flatMap((wave) => wave.issues).filter((issue) => issue.status === "running");
+  // A pending green reads `running` (design §2.2) but its slot is already freed, so it is not an
+  // in-flight runner the tail should follow — exclude it, leaving only slot-holding runners.
+  const running = status.waves.flatMap((wave) => wave.issues).filter((issue) => issue.status === "running" && !issue.pendingGreen);
   if (status.inFlight === undefined) return running;
   const ids = new Set(status.inFlight);
   return running.filter((issue) => ids.has(issue.issueNumber));

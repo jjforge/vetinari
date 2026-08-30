@@ -16,7 +16,6 @@ import {
 } from "./merge.ts";
 import {
   clearParked,
-  clearParkedForTasks,
   enqueueOutbound,
   hasParked,
   isAnswered,
@@ -599,9 +598,12 @@ const defaultCampaignDeps: CampaignDeps = {
  * by the log, so re-entering a parked wave lands its banked work rather than redoing it.
  *
  * Per member (its status as `reduceCampaign` reconstructs it):
- * - `completed` → a `green`: handed to integration, which lands a still-unmerged green
- *   (an answered park, a resolved conflict) and skips an already-merged one — never a
- *   respawn (integration is idempotent, `merge.ts`).
+ * - `completed` (merged) or a **pending green** (green but not yet merged — an answered park
+ *   that went green outside its wave, a resolved conflict) → a `green`: handed to integration,
+ *   which lands a still-unmerged green and skips an already-merged one — never a respawn
+ *   (integration is idempotent, `merge.ts`). A pending green reads `running` in the reducer
+ *   (design §2.2), so `pendingGreen` — not the status word — is what marks banked-but-unmerged
+ *   work apart from a genuinely in-flight/crashed `running` member.
  * - `parked` → re-run when its record is answered (the answer delivered into it — the child
  *   consumes and clears it) OR gone (a crash left no record), else a `parked` outcome that
  *   leaves the member unspawned and re-parks the wave — the un-answered park holds it (design
@@ -622,12 +624,16 @@ export function reconcileResumeWave(
   outcomes: ReadonlyMap<string, string>,
   parkHoldsWave: (id: string) => boolean,
   override: boolean,
+  pendingGreen: ReadonlySet<string> = new Set(),
 ): { toRun: string[]; pre: Record<string, string> } {
   const toRun: string[] = [];
   const pre: Record<string, string> = {};
   for (const id of members) {
     const status = outcomes.get(id) ?? "unstarted";
-    if (status === "completed") pre[id] = "green";
+    // Banked green — merged (`completed`) or green-but-unmerged (`pendingGreen`, which reads
+    // `running`, design §2.2) — is handed to integration, never re-run. `pendingGreen` is
+    // checked explicitly so a genuinely in-flight/crashed `running` member still re-runs below.
+    if (status === "completed" || pendingGreen.has(id)) pre[id] = "green";
     else if (status === "failure") {
       if (override) toRun.push(id);
       else pre[id] = "error(failed on a prior run — prune it or redrive with --override)";
@@ -814,6 +820,7 @@ export async function campaign(
         // too — design §5 step 3, §7.
         (id) => hasParked(cfg, id) && !isAnswered(cfg, id),
         !!opts.override,
+        reduced.pendingGreen,
       );
       const ran = toRun.length ? await queue(cfg, toRun, host, titles, deps.spawnRun, reporter) : {};
       outcomes = { ...ran, ...pre };
@@ -894,12 +901,12 @@ export async function campaign(
       return "parked";
     }
 
-    // The base gated green from here. Clear the parked records of held-but-not-parked members;
-    // a parked member's record and a quarantined green's record are spared so they stay
-    // answerable/resumable (design §2.5).
+    // The base gated green from here. The wave boundary clears NO parked records (design §2.5):
+    // a record is cleared only when its issue goes back to running (a re-admit/redrive run
+    // consuming it) or by an explicit `prune --purge`. A held member's record — a question, a
+    // stall, or a quarantined green's conflict — survives the boundary so it stays answerable,
+    // dashboard-visible, and resumable until a human resolves it.
     const parkedTasks = tasks.filter((t) => outcomes[t] === "parked");
-    const toClear = held.filter((t) => outcomes[t] !== "parked");
-    if (toClear.length) clearParkedForTasks(cfg, toClear);
 
     // (3) Any parked member holds the wave (design §5 step 5): a question, a stall, or a merge
     // conflict (`quarantined` — a green pulled from integration, its work preserved). A conflict

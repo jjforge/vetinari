@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import { loggerForRun } from "./log.ts";
-import { readEventLog } from "./event-log.ts";
+import { event, readEventLog } from "./event-log.ts";
+import { reduceCampaign } from "./dashboard-model.ts";
 import { listOutbox } from "./state.ts";
 import {
   applyPrune,
@@ -265,6 +266,25 @@ test("resumeIndex re-enters a wave-parked wave whose greens merged but never clo
     closedWaves: new Set([0]),
   });
   assert.equal(index, 1);
+});
+
+test("resumeIndex re-enters a wave holding a conflict-parked member — reduceCampaign kept it out of closedWaves (design §7, #314)", () => {
+  // A conflict-parked green holds the wave: even with a `wave-done` naming only the merged
+  // member, the reducer must not close the wave, so `resumeIndex` returns it for a redrive.
+  const reduced = reduceCampaign([
+    event("campaign-start", { ts: "t0", waves: [["101"], ["611", "640"]], slots: 1 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["101"] }),
+    event("merged", { ts: "t2", taskId: "101" }),
+    event("wave-done", { ts: "t3", index: 0, merged: ["101"] }),
+    event("wave-start", { ts: "t4", index: 1, tasks: ["611", "640"] }),
+    event("green", { ts: "t5", taskId: "611", branch: "agent/611", commits: [] }),
+    event("green", { ts: "t6", taskId: "640", branch: "agent/640", commits: [] }),
+    event("merged", { ts: "t7", taskId: "611" }),
+    event("parked", { ts: "t8", taskId: "640", reason: "conflict", detail: "CONFLICT" }),
+    event("wave-done", { ts: "t9", index: 1, merged: ["611"] }),
+  ]);
+  assert.ok(!reduced.closedWaves.has(1), "the wave holding the conflict is not closed");
+  assert.equal(resumeIndex(reduced), 1, "the redrive re-enters the wave the conflict holds");
 });
 
 test("resumeIndex returns the wave count when every wave closed — nothing left to run", () => {

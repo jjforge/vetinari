@@ -709,15 +709,16 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       if (!details.has(taskId)) details.set(taskId, "Failed — the agent could not make it green");
     } else if (e.event === "campaign-parked") {
       // The campaign paused at a wave boundary (design §2.1): a red merged base, an unresolved
-      // issue park, or a stranded conflict. No `wave-done` follows to close the wave, so it stays
-      // `currentWave`; record that as the parked wave and remember its members — `red-base` is the
-      // *wave's* reason (design §2.3), so the members keep their own lifecycle and this set is what
-      // folds the wave to parked(red-base) (#288). A carried `index` pins it; else the in-flight wave.
+      // issue park (question/stalled), or a merge conflict. No `wave-done` follows to close the
+      // wave, so it stays `currentWave`; record that as the parked wave. The wave's reason is
+      // written on the event (§2.1 rule 2 — read it, never infer): only `red-base` is a wave-level
+      // hold whose members all merged clean, so only then do we stamp `redBase` (what folds the
+      // wave to parked(red-base), #288). A question/stalled/conflict park is a member's hold, so the
+      // members keep their own lifecycle and the wave carries no wave-level reason. A reason-absent
+      // event is a legacy/aliased wave-park (historically red-base), kept back-compatible.
       parkedWave = Number.isInteger(e.index) ? (e.index as number) : currentWave;
-      redBase = new Set(waves[parkedWave] ?? []);
+      redBase = e.reason === undefined || e.reason === "red-base" ? new Set(waves[parkedWave] ?? []) : new Set();
     } else if (e.event === "wave-done" && Number.isInteger(e.index)) {
-      closedWaves.add(e.index);
-      currentWave = -1;
       for (const taskId of e.merged ?? []) {
         const issueNumber = normalizeIssue(String(taskId));
         outcomes.set(issueNumber, "completed");
@@ -727,6 +728,13 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
         if (quarantined.delete(issueNumber)) details.set(issueNumber, "Merged into base");
         if (!details.has(issueNumber)) details.set(issueNumber, "Merged into base");
         if (e.ts && !mergedAt.has(issueNumber)) mergedAt.set(issueNumber, String(e.ts));
+      }
+      // A wave-done closes the wave only when it holds no quarantined member (design §7): a
+      // conflict-parked green is unresolved work, so its wave stays out of `closedWaves` and a
+      // redrive re-enters it (`resumeIndex` reads the first wave absent from `closedWaves`).
+      if (!(waves[e.index] ?? []).some((m) => quarantined.has(normalizeIssue(m)))) {
+        closedWaves.add(e.index);
+        currentWave = -1;
       }
     } else if (e.event === "prune" && Array.isArray(e.removed)) {
       // Prune the running campaign at the point the prune was issued: banked and
@@ -777,12 +785,15 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
 
   // Crash reconciliation (design §2.3, §7): liveness comes from the host-slot lease — a
   // run holds a slot while alive (§8). When the injected probe says the run is dead
-  // (`alive === false`) and its log carries no terminal stop marker, every issue still
+  // (`alive === false`) and its log carries NO `campaign-*` stop marker, every issue still
   // `running` (its last event non-terminal) died with no verdict, so it reconciles to
-  // parked{crash} — never left reading running forever (§15). Crash is never stored: the
-  // probe is an injected input, so the reducer stays pure. A live or unknown run
-  // (`alive !== false`) leaves `running` untouched.
-  if (opts.alive === false && !relevant.some((e) => e.event === "campaign-done")) {
+  // parked{crash} — never left reading running forever (§15). A crash is the ABSENCE of a
+  // stop marker, so any of the three (`campaign-done`/`campaign-parked`/`campaign-failed`)
+  // means a clean stop and no crash-fold. Crash is never stored: the probe is an injected
+  // input, so the reducer stays pure. A live or unknown run (`alive !== false`) leaves
+  // `running` untouched.
+  const stopMarkers: ReadonlySet<string> = new Set(["campaign-done", "campaign-parked", "campaign-failed"]);
+  if (opts.alive === false && !relevant.some((e) => stopMarkers.has(e.event))) {
     for (const [id, status] of outcomes) {
       if (status !== "running") continue;
       outcomes.set(id, "parked");

@@ -340,12 +340,8 @@ Described by behaviour; the tracker holds the numbers (`gh issue list --label ca
 
 **Redrive and resolve**
 
-- A conflict park with no stranded dependents does not hold the campaign; the wave logs `wave-done`, the run ends done, and the redrive has nothing to land.
-- A red-base wave is never re-gated on redrive: the base gate runs only when something new merged.
-- A red base outranks a failed member at resolve time, inverting §2.4.
 - An answer runs the loop itself and then redrives, instead of delivering to the record; so a live campaign's re-admit fires only after that run goes green (respawning a green issue), the redrive's own rerun carries no answer, and a second campaign process can start over a live one. The answer path never archives a finished run.
-- The reconciler has no `crash` row (a crashed member is plainly re-run, session not resumed); crash detection checks only `campaign-done`, not the other stop markers. `answer` on an unparked issue throws instead of reporting.
-- The `redrive` event carries only `fromWave`; `wave-done` still carries `held`, `clearedParked` and a `quarantined` field.
+- `answer` on an unparked issue throws instead of reporting.
 
 **Records and states**
 

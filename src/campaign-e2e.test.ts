@@ -165,7 +165,9 @@ const localCampaignDeps = (
   };
   return {
     spawnRun,
-    integrate: (c, greens) => integrateGreens(c, greens, { gate: mergedBaseGate }),
+    // Forward `index` and `opts` (the redrive re-gate flag) so integration behaves exactly as it
+    // does in production; only the gate's sandbox is swapped for the local one.
+    integrate: (c, greens, _deps, index, opts) => integrateGreens(c, greens, { gate: mergedBaseGate }, index, opts),
     collectChangelog: collectWaveChangelog,
     currentBranch,
     grace: async () => {},
@@ -214,37 +216,120 @@ const conflictScript = (id: string): LocalAgentScript => (turn) => {
 
 const host = (dir: string): HostBudget => ({ configDir: join(dir, "host"), ceiling: 2, weight: 1 });
 
-test("scenario 5: a merge conflict quarantines that member (its work preserved) while the rest of the wave merges (ADR 0013)", async () => {
+test("scenario 5: a merge conflict with no dependents holds the wave — the campaign parks; a branch-side resolve then a redrive lands it (design §5 step 5, §7)", async () => {
   const dir = seedConflictRepo();
-  const tracker = fakeTracker(); // no blockers → the conflict strands nothing, so the wave still closes
+  const tracker = fakeTracker(); // no blockers → the conflict strands nothing
   const cfg = repoCfg(dir, tracker);
-  const host2 = host(dir);
 
-  const ok = await inRepo(dir, () => campaign(cfg, [["101", "102"]], host2, "conflict", {}, localCampaignDeps(cfg, dir, conflictScript)));
-  // With nothing stranded, the wave closes and the campaign finishes.
-  assert.equal(ok, "done", "a conflict that strands nothing runs the wave to done");
+  await inRepo(dir, async () => {
+    // 101 merges first; 102 conflicts at merge → quarantined. A conflict-parked green is
+    // unresolved work awaiting a human, so — even with nothing stranded — it holds the wave and
+    // the campaign parks (it no longer slips through to done, #310).
+    const parkedOk = await campaign(cfg, [["101", "102"]], host(dir), "conflict", {}, localCampaignDeps(cfg, dir, conflictScript));
+    assert.equal(parkedOk, "parked", "a conflict park holds the wave");
 
-  const events = readEventLog(cfg);
+    const events = readEventLog(cfg);
+    // 101 merged and stays; 102 is the attributed loser — quarantined, its branch preserved.
+    assert.equal(gitOut(dir, ["show", "base:conflict.txt"]), "resolved by 101");
+    assert.equal(gitOut(dir, ["branch", "--list", "agent/101"]), "");
+    const q = events.find((e: any) => e.event === "parked" && e.reason === "conflict");
+    assert.equal((q as any)?.taskId, "102");
+    assert.equal(gitOut(dir, ["branch", "--list", "agent/102"]), "agent/102", "the conflicted member's work is preserved");
+    // The wave never closed and the campaign did not finish — the stop marker carries reason conflict.
+    assert.equal(events.some((e) => e.event === "wave-done"), false, "the held wave is not closed");
+    assert.equal(events.some((e) => e.event === "campaign-done"), false);
+    const parked = events.filter((e) => e.event === "campaign-parked") as any[];
+    assert.equal(parked.length, 1);
+    assert.equal(parked[0].reason, "conflict", "the wave's reason is conflict");
+  });
 
-  // Both went green on their own gate; the conflict is only at merge.
-  const greens = events.filter((e: any) => e.event === "green").map((e: any) => e.branch).sort();
-  assert.deepEqual(greens, ["agent/101", "agent/102"]);
+  // The human resolves the conflict on the branch: merge the base into agent/102 and settle
+  // conflict.txt, so agent/102 now merges onto the base clean.
+  const wt = mkdtempSync(join(tmpdir(), "vetinari-resolve-"));
+  execFileSync("git", ["-C", dir, "worktree", "add", "--force", wt, "agent/102"], { stdio: "ignore" });
+  try {
+    execFileSync("git", ["-C", wt, "merge", "base"], { stdio: "ignore" }); // conflicts — exits non-zero, resolved next
+  } catch {
+    // expected: the merge stops on the conflict.txt conflict, which we resolve by hand below.
+  }
+  writeFileSync(join(wt, "conflict.txt"), "resolved by 101 and 102\n");
+  execFileSync("git", ["-C", wt, "add", "-A"]);
+  execFileSync("git", ["-C", wt, "commit", "-qm", "resolve conflict.txt on agent/102"]);
+  execFileSync("git", ["-C", dir, "worktree", "remove", "--force", wt], { stdio: "ignore" });
 
-  // 101 merged first and stays merged; 102 is the attributed loser — quarantined, its
-  // branch (work) preserved and resumable.
-  assert.equal(gitOut(dir, ["show", "base:conflict.txt"]), "resolved by 101");
-  assert.equal(gitOut(dir, ["branch", "--list", "agent/101"]), "");
-  const q = events.find((e: any) => e.event === "parked" && e.reason === "conflict");
-  assert.ok(q, "expected a parked{conflict} event for the losing member");
-  assert.equal((q as any).taskId, "102");
-  assert.equal(gitOut(dir, ["branch", "--list", "agent/102"]), "agent/102", "the conflicted member's work is preserved");
+  await inRepo(dir, async () => {
+    // Redrive re-enters the held wave and INTEGRATES the now-mergeable 102 without re-running it;
+    // 101 is already banked. The wave closes and the campaign finishes.
+    const spawns: string[] = [];
+    const doneOk = await campaign(cfg, [], host(dir), undefined, { resume: true }, localCampaignDeps(cfg, dir, conflictScript, spawns));
+    assert.equal(doneOk, "done", "the redrive landed the resolved conflict and finished");
+    assert.deepEqual(spawns, [], "no member of the reconciled wave was re-run");
 
-  // The wave closed carrying the quarantine, and the campaign finished.
-  const done = events.find((e: any) => e.event === "wave-done");
-  assert.ok(done, "the wave closed");
-  assert.deepEqual((done as any).merged, ["101"], "the rest of the wave merged");
-  assert.deepEqual((done as any).quarantined, ["102"], "the conflicted member is recorded as quarantined");
-  assert.ok(events.some((e) => e.event === "campaign-done"), "the campaign advanced to done");
+    // 102's resolved work is on the base, and the campaign completed.
+    assert.equal(gitOut(dir, ["show", "base:conflict.txt"]), "resolved by 101 and 102");
+    const events = readEventLog(cfg);
+    assert.ok(events.some((e) => e.event === "merged" && (e as any).taskId === "102"), "102 was merged on the redrive");
+    assert.ok(events.some((e) => e.event === "campaign-done"), "the campaign advanced to done");
+  });
+});
+
+// Two branches each green alone but red together (both present) — an emergent red base. The
+// merged-base gate passes when at most one of a.txt/b.txt is present.
+const abScript = (id: string): LocalAgentScript => (turn) => {
+  const file = id === "101" ? "a.txt" : "b.txt";
+  turn.write(file, `${id}\n`);
+  turn.commit(`add ${file} in ${id}`);
+  return { signal: DONE, stdout: `<turn-summary>added ${file}</turn-summary>` };
+};
+
+test("scenario 6: a red base parks the wave; a fix-forward then a redrive RE-GATES the base even though nothing new merges (design §7)", async () => {
+  const dir = seedRepo();
+  const tracker = fakeTracker();
+  // Green alone (only one of a.txt/b.txt present on each branch), red on the merged base (both).
+  const cfg = repoCfg(dir, tracker, { gates: [{ cmd: "[ ! -f a.txt ] || [ ! -f b.txt ]" }] });
+
+  await inRepo(dir, async () => {
+    const parkedOk = await campaign(cfg, [["101", "102"]], host(dir), "red-base", {}, localCampaignDeps(cfg, dir, abScript));
+    assert.equal(parkedOk, "parked", "the emergent red base parks the wave");
+    const events = readEventLog(cfg);
+    const parked = events.filter((e) => e.event === "campaign-parked") as any[];
+    assert.equal(parked.length, 1);
+    assert.equal(parked[0].reason, "red-base", "the wave's reason is red-base");
+    // Both greens are merged on the base (never rolled back), the base sitting red.
+    assert.equal(gitOut(dir, ["show", "base:a.txt"]), "101");
+    assert.equal(gitOut(dir, ["show", "base:b.txt"]), "102");
+    assert.equal(events.some((e) => e.event === "wave-done"), false);
+  });
+
+  // Fix forward on the base: drop b.txt so the base gate goes green again.
+  execFileSync("git", ["-C", dir, "rm", "-q", "b.txt"]);
+  execFileSync("git", ["-C", dir, "commit", "-qm", "fix forward: drop b.txt"]);
+
+  await inRepo(dir, async () => {
+    const spawns: string[] = [];
+    const doneOk = await campaign(cfg, [], host(dir), undefined, { resume: true }, localCampaignDeps(cfg, dir, abScript, spawns));
+    assert.equal(doneOk, "done", "the redrive re-gated the fixed base green and finished");
+    assert.deepEqual(spawns, [], "nothing was re-run — the fix lived on the base, not a member branch");
+
+    const events = readEventLog(cfg);
+    // The base was re-gated on re-entry even though nothing new merged (design §7): the
+    // merged-base gate (a gate-result with no taskId) ran after the redrive and passed, the wave
+    // closed, and the campaign completed. `landed` on the redrive event is 0 — nothing freshly
+    // merged — yet the gate still ran.
+    const redrive = events.find((e) => e.event === "redrive") as any;
+    assert.ok(redrive, "a redrive event was logged");
+    assert.equal(redrive.landed, 0, "nothing freshly merged on the re-entry");
+    // The re-entry runs a second wave-start; the merged-base gate (gate-result, no taskId) fires
+    // during that wave's integration even though nothing new merged.
+    const secondWaveStart = events.map((e) => e.event).lastIndexOf("wave-start");
+    const gatesAfterRedrive = events
+      .slice(secondWaveStart)
+      .filter((e) => e.event === "gate-result" && !(e as any).taskId) as any[];
+    assert.ok(gatesAfterRedrive.length > 0, "the merged base was re-gated after the redrive");
+    assert.ok(gatesAfterRedrive.every((g) => g.exitCode === 0), "the re-gated base passed");
+    assert.ok(events.some((e) => e.event === "wave-done"), "the re-gated wave closed");
+    assert.ok(events.some((e) => e.event === "campaign-done"), "the campaign advanced to done");
+  });
 });
 
 test("scenario 4: a redrive integrates a green-but-unmerged member — landed without re-running it (design §7)", async () => {

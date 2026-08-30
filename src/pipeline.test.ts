@@ -321,7 +321,7 @@ test("a merge conflict quarantines the losing green (work preserved) while the w
   assert.equal(events.some((e) => e.event === "prune"), false);
 });
 
-test("a merge conflict under --auto-prune quarantines the loser, prunes the stranded dependent, and runs the campaign on to done", async () => {
+test("a merge conflict under --auto-prune quarantines the loser and prunes the stranded dependent, but the conflict still holds the wave (design §5 step 5, #314)", async () => {
   const dir = seedConflictRepo();
   const cfg = repoCfg(dir, {
     gates: [{ cmd: "test -f README.md" }],
@@ -333,8 +333,9 @@ test("a merge conflict under --auto-prune quarantines the loser, prunes the stra
     campaign(cfg, [["101", "102"], ["103"]], host, "conflict", { autoPrune: true }, localCampaignDeps(cfg, dir, conflictScript)),
   );
 
-  // Same conflict, opposite blast-radius call: --auto-prune prunes the closure and finishes.
-  assert.equal(ok, "done");
+  // `--auto-prune` decides the DEPENDENTS' fate (prune the stranded closure), never whether the
+  // campaign stops: the conflict-parked green itself holds the wave, so the campaign parks.
+  assert.equal(ok, "parked");
 
   const events = readEventLog(cfg);
   // 102 still quarantined (its work kept), 101 still the merged winner.
@@ -343,17 +344,21 @@ test("a merge conflict under --auto-prune quarantines the loser, prunes the stra
   assert.equal(gitOut(dir, ["branch", "--list", "agent/102"]), "agent/102");
   assert.equal(gitOut(dir, ["show", "base:conflict.txt"]), "resolved by 101");
 
-  // The stranded dependent was pruned (a real prune event on 102's closure) and the
-  // campaign advanced to done rather than pausing.
+  // The stranded dependent was still pruned (a real prune event on 102's closure) so a later
+  // redrive skips the doomed dependent — but the campaign parked rather than advancing to done.
   const prune = events.find((e) => e.event === "prune") as { target: string; dropped: string[] } | undefined;
   assert.ok(prune, "expected a prune event");
   assert.equal(prune!.target, "102");
   assert.deepEqual(prune!.dropped, ["103"]);
-  assert.ok(events.some((e) => e.event === "campaign-done"), "the campaign advanced to done");
+  assert.equal(events.some((e) => e.event === "campaign-done"), false, "the campaign did not advance to done");
+  // The conflict hold is an explicit campaign-parked with reason conflict (§2.1 rule 2).
+  const parked = events.filter((e) => e.event === "campaign-parked") as any[];
+  assert.equal(parked.length, 1);
+  assert.equal(parked[0].reason, "conflict");
 
   const outbox = listOutbox(cfg);
   assert.ok(outbox.find((m) => m.event === "prune"), "the auto-prune notice (prune) went out");
-  assert.equal(outbox.some((m) => m.event === "campaign-parked"), false);
+  assert.ok(outbox.some((m) => m.event === "campaign-parked"), "the conflict-park notice went out");
 });
 
 // ── Span 2: per-issue park → drain → wave-park (ADR 0017) ────────────────────

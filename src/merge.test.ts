@@ -271,6 +271,77 @@ test("integrateGreens skips a green whose branch is already gone, never erroring
   }
 });
 
+test("integrateGreens recognises an already-merged green — logs `merged` and reports it in alreadyMerged, not only a skip (design §7, #314)", async () => {
+  // A hand merge onto the base leaves the green a reachable ancestor. A redrive re-entering
+  // the wave must RECOGNISE that as landed — logging `merged` so the reducer clears its
+  // quarantine and closes the wave — rather than only skipping it. It stays out of the
+  // freshly-merged `result.merged` (no second merge commit) and rides `result.alreadyMerged`.
+  const { dir } = repoWithOneBankedGreen();
+  const log = memoryLogger();
+  const cfg = { branchPrefix: "agent/", baseBranch: "main", log } as unknown as ResolvedConfig;
+  const prevCwd = process.cwd();
+  process.chdir(dir);
+  try {
+    const result = await integrateGreens(cfg, ["A", "B"], { gate: async () => ({ green: true, report: "" }) });
+    assert.deepEqual(result.merged, ["B"], "only the genuinely-unmerged B is freshly merged");
+    assert.deepEqual(result.alreadyMerged, ["A"], "A is recognised as already on the base");
+    // Both are logged `merged` — A so a redrive marks it completed / clears its conflict hold.
+    const merged = log.events.filter((e) => e.event === "merged").map((e) => (e as any).taskId).sort();
+    assert.deepEqual(merged, ["A", "B"]);
+  } finally {
+    process.chdir(prevCwd);
+  }
+});
+
+test("integrateGreens re-gates a wave with no fresh merges when regate is set — red base re-entry re-parks (design §7, #314)", async () => {
+  // Re-entering a red-base-parked wave, every green is already merged, so nothing new merges.
+  // The base gate must still run (a fix-forward may have made it green — or not): with regate
+  // set, a still-red base re-parks with reason `red-base`.
+  const { dir } = repoWithOneBankedGreen();
+  const log = memoryLogger();
+  const cfg = { branchPrefix: "agent/", baseBranch: "main", log } as unknown as ResolvedConfig;
+  const prevCwd = process.cwd();
+  process.chdir(dir);
+  let gateRan = false;
+  try {
+    const result = await integrateGreens(
+      cfg,
+      ["A"],
+      { gate: async () => { gateRan = true; return { green: false, report: "still red" }; } },
+      0,
+      { regate: true },
+    );
+    assert.deepEqual(result.merged, [], "nothing new merged on the re-entry");
+    assert.equal(gateRan, true, "the merged-base gate ran even though nothing new merged");
+    assert.ok(result.parked, "a still-red base re-parks");
+    assert.equal(result.parked!.reason, "red-base");
+  } finally {
+    process.chdir(prevCwd);
+  }
+});
+
+test("integrateGreens with regate set and a green base does not park — the fix-forward cleared it (design §7, #314)", async () => {
+  const { dir } = repoWithOneBankedGreen();
+  const log = memoryLogger();
+  const cfg = { branchPrefix: "agent/", baseBranch: "main", log } as unknown as ResolvedConfig;
+  const prevCwd = process.cwd();
+  process.chdir(dir);
+  let gateRan = false;
+  try {
+    const result = await integrateGreens(
+      cfg,
+      ["A"],
+      { gate: async () => { gateRan = true; return { green: true, report: "" }; } },
+      0,
+      { regate: true },
+    );
+    assert.equal(gateRan, true, "the base is re-gated");
+    assert.equal(result.parked, undefined, "a green base clears the red-base hold");
+  } finally {
+    process.chdir(prevCwd);
+  }
+});
+
 const emptySnapshot = (): TidySnapshot => ({ branches: [], fragments: [], parked: [], quarantined: [], waveParked: [] });
 
 test("computeTidy deletes a reachable branch and folds its fragment, keeps an unmerged one", () => {

@@ -302,7 +302,7 @@ vetinari statusline install      # or: statusline uninstall
 Install keeps a status line you already have (including one set at the user level
 in `~/.claude/settings.json`) as line 1 and adds the 🏰 line under it, never
 replacing it. The flags (`--run-command`, `--dry-run`), the by-hand wiring, and
-how the wrapping works are in [`docs/statusline.md`](docs/statusline.md).
+how the wrapping works are in [`docs/operations.md`](docs/operations.md).
 
 ### Capture what the agent notices in passing
 
@@ -363,7 +363,7 @@ talks to Telegram itself. A run that parks or emits a notification writes a reco
 into its own `.vetinari.local/`; the gateway drains it and sends. Until the
 gateway is running, notifications remain queued locally and are delivered when it
 resumes, so an unanswered park is waiting, not lost. The full standing-up guide,
-end to end, is [`docs/gateway.md`](docs/gateway.md); the short path:
+end to end, is [`docs/operations.md`](docs/operations.md); the short path:
 
 Put each project's Telegram credentials in its **base location**, in
 `.vetinari.local/host.env` (gitignored, host-only), never in
@@ -396,7 +396,7 @@ two maps: `destinations` (named `{ bot, chat, thread? }` targets) and `notify`
 (routing rules: a bare `category`, a `category:event`, or a `*` default → a
 destination name), so you can split failures onto an alerts bot or a thread. The
 five categories and the full routing model are in
-[`docs/gateway.md`](docs/gateway.md). With no `notify` map, every category falls
+[`docs/operations.md`](docs/operations.md). With no `notify` map, every category falls
 back to the project's default chat.
 
 A backgrounded `gateway &` dies with its shell, so for anything past a quick try
@@ -406,7 +406,7 @@ your host with `npx vetinari gateway install` — it bakes a fully absolute `nod
 tsx-loader + CLI `ExecStart` (no `bash -lc`, `env`, `npx`, or `PATH` lookup) so it
 starts under systemd's clean environment instead of crash-looping when a
 `.bashrc`-hooked node manager (nvm/fnm/mise/asdf) is off `PATH`. The install steps
-and the `dispatch`→gateway migration are in [`docs/gateway.md`](docs/gateway.md).
+and the `dispatch`→gateway migration are in [`docs/operations.md`](docs/operations.md).
 
 ## Skills in the agent container
 
@@ -475,15 +475,11 @@ each a second time.
 The README stops at the reader's first hour. The operational reference lives in
 `docs/`:
 
-- **[`docs/gateway.md`](docs/gateway.md)** covers the Telegram gateway end to
-  end: credentials, the routing model, running it as a systemd service, and the
-  `dispatch`→gateway migration.
-- **[`docs/statusline.md`](docs/statusline.md)** has the status-line internals:
-  install flags, wiring it by hand, and how it wraps a status line you already
-  have.
-- **[`docs/upgrading.md`](docs/upgrading.md)** covers updating this package and
-  `@ai-hero/sandcastle` (the temporary fork pin, the `check-contract`→`baseline`→
-  `run` ladder, and the four integration points to re-verify on a minor bump).
+- **[`docs/operations.md`](docs/operations.md)** covers running vetinari on a
+  host end to end: the Telegram gateway (credentials, the routing model, running
+  it as a systemd service, the `dispatch`→gateway migration), capping containers,
+  the status-line internals, upgrading this package and `@ai-hero/sandcastle`,
+  and the `tidy` / `registry remove` / `host log` reconciliation tools.
 - **[`docs/campaigns.md`](docs/campaigns.md)** covers planning and running campaigns.
 - **[`docs/adr/`](docs/adr/)** holds the architecture decisions, including
   [ADR 0011](docs/adr/0011-configuration-layers.md), the configuration-layers

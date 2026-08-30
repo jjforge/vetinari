@@ -32,13 +32,18 @@ export default defineConfig({
   // How long (seconds) a drained wave waits at its boundary for an answer to a
   // parked member before declaring the wave parked. An answer within the window
   // re-admits the member so it re-runs and merges in the same wave. Default 0 —
-  // no grace; park at once and recover with `answer` + `campaign --resume`.
+  // no grace; park at once and recover with `answer` + `vetinari redrive`.
   parkGraceSeconds: 0,
+
+  // Optional: the agent provider driving each run — `claude` (default), `pi`, or
+  // `codex`. Selects which credential key the container reads from .env and the
+  // provider's default model/effort. Override per run with `--agent`.
+  // agent: { provider: "claude" },
 
   // Fetch the task text for an id — a GitHub issue body, a spec file, anything.
   fetchTask: (id) => `TODO: fetch the task text for ${id}`,
 
-  // Optional: wire your tracker's blocked-by edges to enable carve / campaign planning.
+  // Optional: wire your tracker's blocked-by edges to enable prune / campaign planning.
   // import { githubBlockedBy } from "vetinari";
   // blockedBy: githubBlockedBy("owner/repo"),
 

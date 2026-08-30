@@ -89,7 +89,15 @@ Creates (new files): `.agents/skills/fileset/SKILL.md`
 
 ### 4. Report
 
-Summarise what happened per ticket: **marked** (with the marker written), **skipped** (already has a resolvable marker), or **left unmarked** (no resolvable file-set — the operator now has a paste-ready starting point to fill in by hand). The unmarked ones are exactly what `campaign` would still halt on, surfaced early. Re-reading a freshly marked ticket against the rule above is the quickest confirmation the marker now resolves.
+Summarise what happened per ticket: **marked** (with the marker written), **skipped** (already has a resolvable marker), or **left unmarked** (no resolvable file-set — the operator now has a paste-ready starting point to fill in by hand). The unmarked ones are exactly what `campaign` would still halt on, surfaced early.
+
+To confirm the markers now resolve, run the planner over the selected ids with the halt pre-decided to a drop rather than an interactive stop:
+
+```
+vetinari campaign --dry-run --on-underspecified=drop <ids>
+```
+
+It plans without running anything and drops (rather than halts on) any id still underspecified, so the printed plan shows exactly which markers the planner now accepts and which it would still skip — the machine confirmation that a freshly written marker resolves.
 
 ## Out of scope
 

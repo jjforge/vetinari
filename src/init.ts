@@ -18,6 +18,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { AGENT_PROVIDERS, DEFAULT_PROVIDER, type AgentProviderName } from "./config.ts";
 
 const CANONICAL_DIR = "vetinari";
 const LOCAL_DIR = ".vetinari.local";
@@ -105,7 +106,7 @@ export function computeInit(scan: InitScan): InitPlan {
  * real run (what it did). An empty plan reads as "nothing to do"; a plan that laid
  * down the committed scaffold ends with the maintainer's next steps. Pure.
  */
-export function describeInit(plan: InitPlan): string {
+export function describeInit(plan: InitPlan, provider: AgentProviderName = DEFAULT_PROVIDER): string {
   const nothing = !plan.creates.length && !plan.dirs.length && plan.gitignore === undefined;
   if (nothing) {
     return "Nothing to do — this project is already initialized onto the vetinari/ + .vetinari.local/ layout.";
@@ -125,10 +126,15 @@ export function describeInit(plan: InitPlan): string {
 
   // Next steps only apply when the committed scaffold was actually laid down.
   if (plan.creates.length) {
+    // The credential keys the selected provider's preflight accepts (any one satisfies), read
+    // from AGENT_PROVIDERS so this never drifts from the provider table (§13.1). A greenfield
+    // scaffold has no `agent` in its config yet, so it defaults to the default provider; the
+    // template comment naming `agent` tells a project picking another provider what to set.
+    const keys = AGENT_PROVIDERS[provider].credentialKeys.join(" or ");
     lines.push("");
     lines.push("Next steps:");
     lines.push(`  1. Add your toolchain to ${DOCKERFILE_DEST} and your gates to ${CONFIG_DEST}.`);
-    lines.push(`  2. Put your agent credential in ${LOCAL_DIR}/.env as CLAUDE_CODE_OAUTH_TOKEN — the container reads it there, and the first real \`run\` is the first thing that needs it.`);
+    lines.push(`  2. Put your agent credential in ${LOCAL_DIR}/.env as ${keys} — the key(s) the \`${provider}\` provider reads (set \`agent\` in ${CONFIG_DEST} to pick another). The container reads it there, and the first real \`run\` is the first thing that needs it.`);
     lines.push("  3. Build the image, then run `vetinari baseline` to prove every gate green.");
   }
 

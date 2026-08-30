@@ -197,6 +197,80 @@ test("integrateGreens skips the merged-base gate when every green conflicts", as
   }
 });
 
+/**
+ * A base with one green already banked on it (agent/A merged, its branch lingering as
+ * a reachable ancestor) and one green still unmerged (agent/B). The setup for a redrive
+ * re-entering a wave: the already-merged green must be skipped, the unmerged one landed.
+ */
+function repoWithOneBankedGreen(): { dir: string; git: (args: string[]) => string } {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-"));
+  const git = (args: string[]) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" }).trim();
+  execFileSync("git", ["-C", dir, "-c", "init.defaultBranch=main", "init", "-q"]);
+  git(["config", "user.email", "test@example.com"]);
+  git(["config", "user.name", "test"]);
+  writeFileSync(join(dir, "a.txt"), "base\n");
+  writeFileSync(join(dir, "b.txt"), "base\n");
+  git(["add", "-A"]);
+  git(["commit", "-qm", "seed"]);
+  // A already merged onto the base in a prior (parked) wave; its branch still lingers.
+  git(["checkout", "-q", "-b", "agent/A"]);
+  writeFileSync(join(dir, "a.txt"), "A\n");
+  git(["add", "-A"]);
+  git(["commit", "-qm", "A"]);
+  git(["checkout", "-q", "main"]);
+  git(["merge", "--no-ff", "agent/A", "-m", "campaign: merge agent/A"]);
+  // B is still unmerged — the answered park / resolved conflict a redrive must land.
+  git(["checkout", "-q", "-b", "agent/B"]);
+  writeFileSync(join(dir, "b.txt"), "B\n");
+  git(["add", "-A"]);
+  git(["commit", "-qm", "B"]);
+  git(["checkout", "-q", "main"]);
+  return { dir, git };
+}
+
+test("integrateGreens skips an already-merged green and lands only the unmerged one (redrive idempotency)", async () => {
+  const { dir, git } = repoWithOneBankedGreen();
+  const log = memoryLogger();
+  const cfg = { branchPrefix: "agent/", baseBranch: "main", log } as unknown as ResolvedConfig;
+  const prevCwd = process.cwd();
+  process.chdir(dir);
+  try {
+    const result = await integrateGreens(cfg, ["A", "B"], {
+      gate: async () => ({ green: true, report: "" }),
+    });
+
+    // A was already banked (its branch is a reachable ancestor) → not re-merged; only
+    // the genuinely-unmerged B is landed on this re-entry.
+    assert.deepEqual(result.merged, ["B"]);
+    assert.deepEqual(result.quarantined, []);
+    assert.equal(result.parked, undefined);
+    assert.equal(readFileSync(join(dir, "b.txt"), "utf8"), "B\n");
+    // No second merge commit for A (it is already an ancestor); B's merged branch is reclaimed.
+    assert.equal(git(["branch", "--list", "agent/B"]), "");
+  } finally {
+    process.chdir(prevCwd);
+  }
+});
+
+test("integrateGreens skips a green whose branch is already gone, never erroring", async () => {
+  const { dir, git } = repoWithOneBankedGreen();
+  git(["branch", "-D", "agent/A"]); // banked and its branch already reclaimed
+  const log = memoryLogger();
+  const cfg = { branchPrefix: "agent/", baseBranch: "main", log } as unknown as ResolvedConfig;
+  const prevCwd = process.cwd();
+  process.chdir(dir);
+  try {
+    const result = await integrateGreens(cfg, ["A", "B"], {
+      gate: async () => ({ green: true, report: "" }),
+    });
+    // A's branch is gone → treated as already integrated (skipped, no throw); B lands.
+    assert.deepEqual(result.merged, ["B"]);
+    assert.deepEqual(result.quarantined, []);
+  } finally {
+    process.chdir(prevCwd);
+  }
+});
+
 const emptySnapshot = (): TidySnapshot => ({ branches: [], fragments: [], parked: [], quarantined: [], waveParked: [] });
 
 test("computeTidy deletes a reachable branch and folds its fragment, keeps an unmerged one", () => {

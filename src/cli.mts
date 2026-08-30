@@ -73,6 +73,7 @@ import {
   listParked,
   readParked,
 } from "./state.ts";
+import { readEventLog } from "./event-log.ts";
 import {
   autoRegister,
   computeRegistryDedup,
@@ -658,6 +659,7 @@ await dispatch(parseArgs([mode, ...rest]), {
   runFilesetCheck,
   listParked,
   readParked,
+  readEventLog,
   archiveRun,
   agentSelectionFor,
   requireTelegram,

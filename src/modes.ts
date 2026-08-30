@@ -20,6 +20,7 @@ import {
   clearParked,
   clearParkedForTasks,
   enqueueOutbound,
+  hasParked,
   listParked,
 } from "./state.ts";
 import { quarantineImpacts, resumeIndex, type QuarantineImpact } from "./prune.ts";
@@ -482,6 +483,47 @@ const defaultCampaignDeps: CampaignDeps = {
 };
 
 /**
+ * The redrive reconciliation of the resume wave (design §7): classify each member of
+ * the first not-fully-completed wave into work to spawn versus outcomes already decided
+ * by the log, so re-entering a parked wave lands its banked work rather than redoing it.
+ *
+ * Per member (its status as `reduceCampaign` reconstructs it):
+ * - `completed` → a `green`: handed to integration, which lands a still-unmerged green
+ *   (an answered park, a resolved conflict) and skips an already-merged one — never a
+ *   respawn (integration is idempotent, `merge.ts`).
+ * - `parked` → re-run when its on-disk record is gone (the answer consumed it), else a
+ *   `parked` outcome that leaves the member unspawned and re-parks the wave.
+ * - `failure` → re-run only under `override` (the operator's explicit choice); otherwise
+ *   an `error(...)` outcome that stops the campaign as failed again (design §7).
+ * - anything else (`running`/`unstarted`/grafted) → run.
+ *
+ * Pure over the outcome map + a parked-record predicate, so the reconciliation is
+ * unit-testable and, fed back through the wave's ordinary resolve logic, needs no new
+ * park/fail/merge paths. `pre` is keyed exactly as `queue` reports an outcome.
+ */
+export function reconcileResumeWave(
+  members: string[],
+  outcomes: ReadonlyMap<string, string>,
+  hasParkedRecord: (id: string) => boolean,
+  override: boolean,
+): { toRun: string[]; pre: Record<string, string> } {
+  const toRun: string[] = [];
+  const pre: Record<string, string> = {};
+  for (const id of members) {
+    const status = outcomes.get(id) ?? "unstarted";
+    if (status === "completed") pre[id] = "green";
+    else if (status === "failure") {
+      if (override) toRun.push(id);
+      else pre[id] = "error(failed on a prior run — prune it or redrive with --override)";
+    } else if (status === "parked") {
+      if (hasParkedRecord(id)) pre[id] = "parked";
+      else toRun.push(id);
+    } else toRun.push(id);
+  }
+  return { toRun, pre };
+}
+
+/**
  * Drain each batch, then merge its greens into the base, re-verify the merged
  * base, clean up the merged branches/worktrees, and only then start the next
  * batch — the manual merge→test→next-queue chain, automated.
@@ -501,18 +543,20 @@ const defaultCampaignDeps: CampaignDeps = {
  *
  * `opts.resume` continues a *paused* campaign on the current base rather than starting a
  * fresh one (ADR 0013): it reconstructs the existing plan from the event log (no new
- * `campaign-start`, no re-resolved titles), skips every wave that already banked work
- * (`resumeIndex`), and runs the remainder — so a wave-park a human has fixed forward, or
- * a prune they resolved, picks up where it left off without redoing a merged issue. The
- * supplied `batches`/`name` are ignored under resume; the plan comes from the log. A
- * resume with nothing left to run reports so and returns green.
+ * `campaign-start`, no re-resolved titles), resumes at the first wave that did not close
+ * (`resumeIndex`), and reconciles that wave before running it (design §7,
+ * `reconcileResumeWave`) — landing a green-but-unmerged member without a rerun, re-running
+ * an answered park (its record gone), re-parking one whose record remains, and stopping as
+ * failed again on a failed member unless `opts.override` re-runs it. Every later wave runs
+ * fresh. The supplied `batches`/`name` are ignored under resume; the plan comes from the
+ * log. A resume with nothing left to run reports so and returns green.
  */
 export async function campaign(
   cfg: ResolvedConfig,
   batches: string[][],
   host: HostBudget,
   name?: string,
-  opts: { autoPrune?: boolean; resume?: boolean } = {},
+  opts: { autoPrune?: boolean; resume?: boolean; override?: boolean } = {},
   deps: CampaignDeps = defaultCampaignDeps,
 ): Promise<boolean> {
   // Every green branch merges into whatever the main tree has checked out, and
@@ -595,12 +639,17 @@ export async function campaign(
     });
   }
 
+  // Only the first wave a redrive re-enters is reconciled against the log (design §7);
+  // every later wave was never started, so it runs fresh.
+  let reconcileResume = !!opts.resume;
+
   // The plan is re-derived from the log at each wave boundary rather than
   // iterated from the in-memory array: a `prune` event appended mid-campaign
   // prunes future waves here, while the in-flight wave (already past this point)
   // finishes as-is — the single-source-of-truth loop of ADR 0005.
   for (; ; index++) {
-    const waves = reduceCampaign(readEventLog(cfg)).waves;
+    const reduced = reduceCampaign(readEventLog(cfg));
+    const waves = reduced.waves;
     if (index >= waves.length) break;
     const tasks = waves[index];
     const total = waves.length;
@@ -614,7 +663,26 @@ export async function campaign(
       text: `▶️ ${cfg.project} · BATCH ${index + 1}/${total}${named(campaignName)}\n${tasks.join(", ")}`,
     });
 
-    const outcomes = await queue(cfg, tasks, host, titles, deps.spawnRun);
+    let outcomes: Record<string, string>;
+    if (reconcileResume) {
+      // Redrive reconciliation (design §7): re-entering the parked wave, decide each
+      // member's outcome from the log — a banked/green member is landed by integration
+      // below without a rerun, an unanswered park re-parks the wave, a failed member
+      // (unless `--override`) stops the campaign as failed again — and spawn only the
+      // members that genuinely need to run. Fed back through the wave's ordinary resolve
+      // logic below, so no park/fail/merge path is special-cased for a redrive.
+      reconcileResume = false;
+      const { toRun, pre } = reconcileResumeWave(
+        tasks,
+        reduced.outcomes,
+        (id) => hasParked(cfg, id),
+        !!opts.override,
+      );
+      const ran = toRun.length ? await queue(cfg, toRun, host, titles, deps.spawnRun) : {};
+      outcomes = { ...ran, ...pre };
+    } else {
+      outcomes = await queue(cfg, tasks, host, titles, deps.spawnRun);
+    }
     const greens = tasks.filter((t) => outcomes[t] === "green");
     const held = tasks.filter((t) => outcomes[t] !== "green");
 

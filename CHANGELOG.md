@@ -65,6 +65,7 @@ Within a milestone each bold section label appears at most once.
 - [internal] Dated design specs moved from `docs/specs/` to `docs/archive/specs/` (build-time artifacts, not linked from current docs), with a new `docs/archive/README.md` (#304).
 - [internal] `docs/dashboard-color-rules.md` folded into `docs/design.md` appendix A — the palette, the edge rule and the roll-up precedence; the standalone spec is removed (#304).
 - [internal] `.out-of-scope/*.md` removed; the quarantine-verb and `host log` ordering decisions already live as bullets in design §14 (non-goals) (#304).
+- [ops] Consolidated `docs/gateway.md`, `docs/upgrading.md`, and `docs/statusline.md` into one `docs/operations.md` — the "how do I run it on a host" reference: the gateway as a service, per-project `host.env` and bots, `MAX_CONCURRENT_CONTAINERS` and `containerShare`, the status line, upgrading, and the `tidy` / `registry remove` / `host log` reconciliation tools (#302).
 
 ### Collected changes — August 29, 2026
 

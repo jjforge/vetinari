@@ -97,15 +97,18 @@ test("a green event reads verb `merged` (green dot), #issue actor, no spans", ()
 });
 
 test("a parked event reads verb `parked` amber with its reason as the strong key term", () => {
-  const row = humanizeLogLine(raw(event("parked", { taskId: "204", reason: "blocked", ts: "2026-08-28T00:00:00.000Z" })));
+  const row = humanizeLogLine(raw(event("parked", { taskId: "204", reason: "question", ts: "2026-08-28T00:00:00.000Z" })));
   assert.equal(row.actor, "#204");
   assert.equal(row.verb, "parked");
-  assert.deepEqual(row.spans, [p(": "), strong("blocked")]);
+  assert.deepEqual(row.spans, [p(": "), strong("question")]);
   assert.equal(row.dot, "parked");
 });
 
 test("a quarantined event reads as a parked (amber) merge-conflict hold, not the retired word (ADR 0019)", () => {
-  const row = humanizeLogLine(raw(event("quarantined", { taskId: "204", branch: "agent/204", detail: "conflict", ts: "2026-08-28T00:00:00.000Z" })));
+  // An archived line in the retired `quarantined` name still humanizes: the alias table
+  // normalizes it to `parked{conflict}` before the switch, so a legacy raw line renders the
+  // same amber merge-conflict hold as the live `parked` name (design §13.2).
+  const row = humanizeLogLine(raw({ event: "quarantined", taskId: "204", branch: "agent/204", detail: "conflict", ts: "2026-08-28T00:00:00.000Z" }));
   assert.equal(row.actor, "#204");
   assert.equal(row.verb, "parked");
   assert.deepEqual(row.spans, [p("— merge conflict, resolve it")]);
@@ -117,11 +120,11 @@ test("a quarantined event reads as a parked (amber) merge-conflict hold, not the
 // with identical words. The dot reads the comms colour.
 test("run-level kinds narrate through describeEvent verbatim as one plain span, no actor, no verb", () => {
   const cases = [
-    event("campaign-start", { batches: [["1"]], slots: 1, name: "Ship it", ts: "2026-08-28T00:00:00.000Z" }),
-    event("campaign-batch", { index: 0, tasks: ["1", "2"], name: "Ship it", ts: "2026-08-28T00:00:00.000Z" }),
-    event("campaign-batch-done", { index: 0, merged: ["1"], held: [], clearedParked: [], ts: "2026-08-28T00:00:00.000Z" }),
-    event("campaign-done", { batches: 2, ts: "2026-08-28T00:00:00.000Z" }),
-    event("wave-parked", { merged: ["1"], detail: "red", ts: "2026-08-28T00:00:00.000Z" }),
+    event("campaign-start", { waves: [["1"]], slots: 1, name: "Ship it", ts: "2026-08-28T00:00:00.000Z" }),
+    event("wave-start", { index: 0, tasks: ["1", "2"], ts: "2026-08-28T00:00:00.000Z" }),
+    event("wave-done", { index: 0, merged: ["1"], held: [], clearedParked: [], ts: "2026-08-28T00:00:00.000Z" }),
+    event("campaign-done", { waves: 2, ts: "2026-08-28T00:00:00.000Z" }),
+    event("campaign-parked", { index: 0, detail: "red", ts: "2026-08-28T00:00:00.000Z" }),
     event("prune", { target: "5", removed: ["5", "6"], dropped: ["6"], ts: "2026-08-28T00:00:00.000Z" }),
     event("graft", { ids: ["9"], blockedBy: {}, basenames: {}, ts: "2026-08-28T00:00:00.000Z" }),
   ];
@@ -133,12 +136,12 @@ test("run-level kinds narrate through describeEvent verbatim as one plain span, 
   }
 });
 
-test("run-level dot colours: success→merged, wave-parked→parked, start→running, prune→neutral", () => {
+test("run-level dot colours: success→merged, campaign-parked→parked, start→running, prune→neutral", () => {
   const dot = (e: object) => humanizeLogLine(raw(e)).dot;
-  assert.equal(dot(event("campaign-batch-done", { index: 0, merged: ["1"], held: [], clearedParked: [], ts: "2026-08-28T00:00:00.000Z" })), "merged");
-  assert.equal(dot(event("campaign-done", { batches: 1, ts: "2026-08-28T00:00:00.000Z" })), "merged");
-  assert.equal(dot(event("wave-parked", { merged: [], detail: "d", ts: "2026-08-28T00:00:00.000Z" })), "parked");
-  assert.equal(dot(event("campaign-start", { batches: [], slots: 1, ts: "2026-08-28T00:00:00.000Z" })), "running");
+  assert.equal(dot(event("wave-done", { index: 0, merged: ["1"], held: [], clearedParked: [], ts: "2026-08-28T00:00:00.000Z" })), "merged");
+  assert.equal(dot(event("campaign-done", { waves: 1, ts: "2026-08-28T00:00:00.000Z" })), "merged");
+  assert.equal(dot(event("campaign-parked", { index: 0, detail: "d", ts: "2026-08-28T00:00:00.000Z" })), "parked");
+  assert.equal(dot(event("campaign-start", { waves: [], slots: 1, ts: "2026-08-28T00:00:00.000Z" })), "running");
   assert.equal(dot(event("prune", { target: "5", removed: ["5"], dropped: [], ts: "2026-08-28T00:00:00.000Z" })), "neutral");
 });
 

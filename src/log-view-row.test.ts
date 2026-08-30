@@ -82,7 +82,7 @@ test("a strong span renders as <strong>, a code span as <code>; plain spans stay
 });
 
 test("a run-level row (no actor, no verb) is just the message spans — no empty lead/verb cells", () => {
-  const row = build(event("campaign-done", { batches: 2, ts: "2026-08-28T00:00:00.000Z" }));
+  const row = build(event("campaign-done", { waves: 2, ts: "2026-08-28T00:00:00.000Z" }));
   const msg = row.children[2];
   // Exactly one span (the describeEvent narration); no .lv-lead and no .lv-verb.
   assert.equal(msg.children.length, 1);

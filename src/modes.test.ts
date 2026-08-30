@@ -24,16 +24,15 @@ import { loggerForRun, memoryLogger, type MemoryLogger } from "./log.ts";
 import { clearParked, hasParked, listOutbox } from "./state.ts";
 import {
   readEventLog,
-  type CampaignBatchDoneEvent,
-  type CampaignBatchEvent,
   type CampaignDoneEvent,
   type CampaignFailedEvent,
+  type CampaignParkedEvent,
   type CampaignStartEvent,
+  type FailedEvent,
   type GraceWaitEvent,
-  type QueueDoneEvent,
-  type QueueSpawnEvent,
-  type QueueStartEvent,
-  type WaveParkedEvent,
+  type SpawnEvent,
+  type WaveDoneEvent,
+  type WaveStartEvent,
 } from "./event-log.ts";
 import { archiveRun, shouldArchiveLeftover } from "./archive.ts";
 import type { HostBudget } from "./host-slots.ts";
@@ -483,7 +482,7 @@ test("campaign drives every wave with no Docker — the per-wave re-derive survi
   assert.equal(ok, true);
   const events = readEventLog(cfg);
   const batches = events.filter(
-    (e): e is CampaignBatchEvent => e.event === "campaign-batch",
+    (e): e is WaveStartEvent => e.event === "wave-start",
   );
   // Every wave in the plan re-derived and ran, in order — the log was never stranded.
   assert.deepEqual(
@@ -516,14 +515,14 @@ test("the harness has teeth — a child that archives the parent log (the #150 b
 
   // With the plan stranded, waves 1 and 2 never start — proof the harness would go
   // red against pre-#150 code, so the faithful-child test above genuinely pins it.
-  const batches = readEventLog(cfg).filter((e) => e.event === "campaign-batch");
+  const batches = readEventLog(cfg).filter((e) => e.event === "wave-start");
   assert.ok(
     batches.length < 3,
     `expected the archive to strand the plan, but ${batches.length} waves ran`,
   );
 });
 
-test("campaign stamps its name and titles onto the wave events and operator notes (#174)", async () => {
+test("campaign stamps its name and titles once on campaign-start, names the completion, and names the operator notes (#174)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-named-"));
   const cfg = harnessCfg(dir);
   const titles: Record<string, string> = { "101": "cache eviction", "102": "warm the cache" };
@@ -536,13 +535,10 @@ test("campaign stamps its name and titles onto the wave events and operator note
   assert.equal(ok, true);
 
   const events = readEventLog(cfg);
-  const batch = events.find((e): e is CampaignBatchEvent => e.event === "campaign-batch");
-  assert.equal(batch?.name, "gateway work");
-  assert.deepEqual(batch?.titles, titles);
-
-  const batchDone = events.find((e): e is CampaignBatchDoneEvent => e.event === "campaign-batch-done");
-  assert.equal(batchDone?.name, "gateway work");
-  assert.deepEqual(batchDone?.titles, titles);
+  // The name and the id→title map are recorded once, on campaign-start (design §2.1); no wave event repeats them.
+  const start = events.find((e): e is CampaignStartEvent => e.event === "campaign-start");
+  assert.equal(start?.name, "gateway work");
+  assert.deepEqual(start?.titles, titles);
 
   const done = events.find((e): e is CampaignDoneEvent => e.event === "campaign-done");
   assert.equal(done?.name, "gateway work");
@@ -553,23 +549,24 @@ test("campaign stamps its name and titles onto the wave events and operator note
   assert.ok(outbox.find((m) => m.event === "wave-merged")?.text.includes("gateway work"));
 });
 
-test("campaign reserves a festive-name block on the host cursor, stamped on campaign-start (#193)", async () => {
+test("campaign writes no festive-name offset on campaign-start — the name is derived at render, never reserved on a host cursor (#193)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-festive-"));
   const cfg = harnessCfg(dir);
-  // One shared host cursor across both campaigns (same configDir).
+  // One shared host cursor across both campaigns (same configDir) — nothing should consume it.
   const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
 
   await silenceConsole(() => campaign(cfg, [["101"], ["102"], ["103"]], host, "first", {}, gitFreeDeps(cfg, async () => 0)));
   const firstStart = readEventLog(cfg).find((e): e is CampaignStartEvent => e.event === "campaign-start");
-  // The first campaign reserves the block starting at the fresh host's zero.
-  assert.equal(firstStart?.festiveOffset, 0);
+  // No presentation state is written: the festive wave name is derived at render from this
+  // event's timestamp, so campaign-start carries no reserved offset.
+  assert.equal((firstStart as { festiveOffset?: number } | undefined)?.festiveOffset, undefined);
 
-  // A second campaign in the same project/host reserves a disjoint block past the first
-  // (three waves consumed → next offset is 3), so the two never share a name.
+  // A second campaign in the same project/host writes no offset either — nothing was reserved,
+  // so nothing was consumed off the host cursor.
   const cfg2 = harnessCfg(join(dir, "run2"));
   await silenceConsole(() => campaign(cfg2, [["201"]], host, "second", {}, gitFreeDeps(cfg2, async () => 0)));
   const secondStart = readEventLog(cfg2).find((e): e is CampaignStartEvent => e.event === "campaign-start");
-  assert.equal(secondStart?.festiveOffset, 3);
+  assert.equal((secondStart as { festiveOffset?: number } | undefined)?.festiveOffset, undefined);
 });
 
 test("campaign --resume recovers the run's name from the log, not the ignored param (#174)", async () => {
@@ -579,7 +576,7 @@ test("campaign --resume recovers the run's name from the log, not the ignored pa
 
   // Seed a paused campaign: wave 0 (101) already banked green, wave 1 (102) still to run.
   cfg.log.log("campaign-start", {
-    batches: [["101"], ["102"]],
+    waves: [["101"], ["102"]],
     slots: 4,
     name: "seeded run",
     titles: { "101": "cache eviction", "102": "warm the cache" },
@@ -591,12 +588,19 @@ test("campaign --resume recovers the run's name from the log, not the ignored pa
   );
   assert.equal(ok, true);
 
-  // The resumed wave carries the seeded name (read back from campaign-start), never the param.
+  // The redrive re-entered wave 1 and ran 102 (read off the wave-start it re-logged).
   const resumed = readEventLog(cfg).find(
-    (e): e is CampaignBatchEvent => e.event === "campaign-batch" && e.index === 1,
+    (e): e is WaveStartEvent => e.event === "wave-start" && e.index === 1,
   );
-  assert.equal(resumed?.name, "seeded run");
   assert.deepEqual(resumed?.tasks, ["102"]);
+
+  // The run's name is recovered from campaign-start (design §2.1), never the ignored param: it
+  // rides the completion event and every operator note.
+  const done = readEventLog(cfg).find((e): e is CampaignDoneEvent => e.event === "campaign-done");
+  assert.equal(done?.name, "seeded run");
+  const note = listOutbox(cfg).find((m) => m.event === "wave-start");
+  assert.ok(note?.text.includes("seeded run"), "the note carries the seeded name");
+  assert.ok(!note?.text.includes("ignored param"), "never the ignored --name param");
 });
 
 // A CampaignDeps that records which task ids it spawns and which green sets it is asked
@@ -620,14 +624,14 @@ const recordingDeps = (
   grace: async () => {},
 });
 
-// Seed a wave-0 park: 101 merged green, 102 parked — with no `campaign-batch-done`, so
-// the wave never closed. The base state every redrive-reconciliation test starts from.
+// Seed a wave-0 park: 101 merged green, 102 parked — with no `wave-done`, so the wave never
+// closed. The base state every redrive-reconciliation test starts from.
 const seedParkedWave = (cfg: ResolvedConfig) => {
-  cfg.log.log("campaign-start", { batches: [["101", "102"]], slots: 4 });
-  cfg.log.log("campaign-batch", { index: 0, tasks: ["101", "102"] });
+  cfg.log.log("campaign-start", { waves: [["101", "102"]], slots: 4 });
+  cfg.log.log("wave-start", { index: 0, tasks: ["101", "102"] });
   cfg.log.log("green", { taskId: "101", branch: "agent/101", commits: ["a"] });
-  cfg.log.log("parked", { taskId: "102", reason: "blocked" });
-  cfg.log.log("wave-parked", { merged: ["101"], detail: "parked, awaiting a human: 102" });
+  cfg.log.log("parked", { taskId: "102", reason: "question" });
+  cfg.log.log("campaign-parked", { index: 0, detail: "parked, awaiting a human: 102" });
 };
 
 test("redrive re-enters the parked wave and integrates a green-but-unmerged member without respawning it (design §7)", async () => {
@@ -649,7 +653,7 @@ test("redrive re-enters the parked wave and integrates a green-but-unmerged memb
   assert.deepEqual(spawned, [], "no member of the parked wave was respawned");
   assert.deepEqual(integrated, [["101", "102"]], "both greens were handed to integration to land");
   assert.ok(
-    readEventLog(cfg).some((e) => e.event === "campaign-batch-done"),
+    readEventLog(cfg).some((e) => e.event === "wave-done"),
     "the reconciled wave closed",
   );
 });
@@ -680,7 +684,7 @@ test("redrive does not spawn a parked member whose record remains; the wave park
   mkdirSync(cfg.parkedDir, { recursive: true });
   writeFileSync(
     join(cfg.parkedDir, "102.json"),
-    JSON.stringify({ taskId: "102", reason: "blocked", branch: "agent/102", question: "?", parkedAt: "2026-08-30T00:00:00Z" }),
+    JSON.stringify({ taskId: "102", reason: "question", branch: "agent/102", question: "?", parkedAt: "2026-08-30T00:00:00Z" }),
   );
 
   const spawned: string[] = [];
@@ -691,9 +695,9 @@ test("redrive does not spawn a parked member whose record remains; the wave park
 
   assert.equal(ok, false, "the unresolved park re-parks the wave and stops the campaign");
   assert.deepEqual(spawned, [], "the still-parked member was not respawned");
-  // A fresh wave-park was recorded on the redrive (the second one in the log).
+  // A fresh campaign-park was recorded on the redrive (the second one in the log).
   assert.equal(
-    readEventLog(cfg).filter((e) => e.event === "wave-parked").length,
+    readEventLog(cfg).filter((e) => e.event === "campaign-parked").length,
     2,
     "the redrive re-parked the wave",
   );
@@ -703,18 +707,18 @@ test("redrive resumes at the parked wave, not past it — a closed earlier wave 
   const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-index-"));
   const cfg = harnessCfg(dir);
   const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
-  // Wave 0 closed (batch-done), wave 1 parked (102 parked, record present), wave 2 unrun.
-  cfg.log.log("campaign-start", { batches: [["101"], ["102"], ["103"]], slots: 4 });
-  cfg.log.log("campaign-batch", { index: 0, tasks: ["101"] });
+  // Wave 0 closed (wave-done), wave 1 parked (102 parked, record present), wave 2 unrun.
+  cfg.log.log("campaign-start", { waves: [["101"], ["102"], ["103"]], slots: 4 });
+  cfg.log.log("wave-start", { index: 0, tasks: ["101"] });
   cfg.log.log("green", { taskId: "101", branch: "agent/101", commits: ["a"] });
-  cfg.log.log("campaign-batch-done", { index: 0, merged: ["101"], held: [], clearedParked: [], quarantined: [] });
-  cfg.log.log("campaign-batch", { index: 1, tasks: ["102"] });
-  cfg.log.log("parked", { taskId: "102", reason: "blocked" });
-  cfg.log.log("wave-parked", { merged: [], detail: "parked, awaiting a human: 102" });
+  cfg.log.log("wave-done", { index: 0, merged: ["101"], held: [], clearedParked: [], quarantined: [] });
+  cfg.log.log("wave-start", { index: 1, tasks: ["102"] });
+  cfg.log.log("parked", { taskId: "102", reason: "question" });
+  cfg.log.log("campaign-parked", { index: 1, detail: "parked, awaiting a human: 102" });
   mkdirSync(cfg.parkedDir, { recursive: true });
   writeFileSync(
     join(cfg.parkedDir, "102.json"),
-    JSON.stringify({ taskId: "102", reason: "blocked", branch: "agent/102", question: "?", parkedAt: "2026-08-30T00:00:00Z" }),
+    JSON.stringify({ taskId: "102", reason: "question", branch: "agent/102", question: "?", parkedAt: "2026-08-30T00:00:00Z" }),
   );
 
   const spawned: string[] = [];
@@ -725,9 +729,9 @@ test("redrive resumes at the parked wave, not past it — a closed earlier wave 
 
   assert.equal(ok, false, "the parked wave 1 stops the redrive again");
   assert.deepEqual(spawned, [], "neither the closed wave 0 nor the still-parked wave 1 respawned");
-  // The redrive re-entered wave 1 (its batch event re-logged), never stepping to wave 2.
+  // The redrive re-entered wave 1 (its wave-start re-logged), never stepping to wave 2.
   const batches = readEventLog(cfg)
-    .filter((e): e is CampaignBatchEvent => e.event === "campaign-batch")
+    .filter((e): e is WaveStartEvent => e.event === "wave-start")
     .map((b) => b.index);
   assert.ok(batches.includes(1), "the redrive re-entered the parked wave 1");
   assert.ok(!batches.includes(2), "the redrive never started wave 2 past the unresolved park");
@@ -738,11 +742,11 @@ test("redrive stops as failed again on a failed member, but re-runs it under --o
   const cfg = harnessCfg(dir);
   const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   const seedFailedWave = () => {
-    cfg.log.log("campaign-start", { batches: [["101", "102"]], slots: 4 });
-    cfg.log.log("campaign-batch", { index: 0, tasks: ["101", "102"] });
+    cfg.log.log("campaign-start", { waves: [["101", "102"]], slots: 4 });
+    cfg.log.log("wave-start", { index: 0, tasks: ["101", "102"] });
     cfg.log.log("green", { taskId: "101", branch: "agent/101", commits: ["a"] });
-    cfg.log.log("queue-done", { outcomes: { "101": "green", "102": "error(1)" } });
-    cfg.log.log("campaign-failed", { merged: ["101"], failed: ["102"] });
+    cfg.log.log("failed", { taskId: "102", detail: "error(1)" });
+    cfg.log.log("campaign-failed", { index: 0, detail: "102 failed" });
   };
   seedFailedWave();
 
@@ -788,7 +792,7 @@ test("a graft appended mid-wave lands in a future wave; the loop re-derives and 
 
   assert.equal(ok, true);
   const batches = readEventLog(cfg)
-    .filter((e): e is CampaignBatchEvent => e.event === "campaign-batch")
+    .filter((e): e is WaveStartEvent => e.event === "wave-start")
     .map((b) => b.tasks);
   // Wave 0 ran 101 alone (untouched by the graft); 301 landed in a later wave and ran.
   assert.deepEqual(batches[0], ["101"]);
@@ -818,22 +822,23 @@ test("Gate 1 (ADR 0017): a per-issue park drains its wave, merges the greens, th
   assert.ok(!spawned.includes("201"), "the succeeding wave's issue never spawned");
 
   const events = readEventLog(cfg);
-  const batches = events.filter((e): e is CampaignBatchEvent => e.event === "campaign-batch");
+  const batches = events.filter((e): e is WaveStartEvent => e.event === "wave-start");
   assert.deepEqual(batches.map((b) => b.index), [0], "only wave 0 ran — no succeeding wave started");
 
-  // The green drained and merged: it reached the wave-park event's `merged` set…
-  const parked = events.filter((e): e is WaveParkedEvent => e.event === "wave-parked");
-  assert.equal(parked.length, 1, "exactly one wave-parked event — the existing state, reused");
-  assert.deepEqual(parked[0].merged, ["101"], "the green stayed merged on the base");
+  // The wave parked at index 0, the in-flight parked wave.
+  const parked = events.filter((e): e is CampaignParkedEvent => e.event === "campaign-parked");
+  assert.equal(parked.length, 1, "exactly one campaign-parked event — the existing state, reused");
+  assert.equal(parked[0].index, 0, "the parked wave's index is recorded");
 
-  // …and the operator notice went out on the same wave-park channel.
+  // …and the operator notice went out on the same wave-park channel, naming the green kept merged.
   const notice = listOutbox(cfg).find((r) => r.event === "wave-parked");
   assert.ok(notice, "a waveParkedNotice was enqueued for the operator");
   assert.equal(notice?.category, "failure");
+  assert.ok(notice?.text.includes("101"), "the green stayed merged on the base");
 
-  // No batch-done closed the wave — it stays the in-flight parked wave, not a completed one.
+  // No wave-done closed the wave — it stays the in-flight parked wave, not a completed one.
   assert.ok(
-    !events.some((e) => e.event === "campaign-batch-done"),
+    !events.some((e) => e.event === "wave-done"),
     "the parked wave is not logged done",
   );
 });
@@ -880,7 +885,7 @@ test("re-admit: a parked member answered while the wave still drains re-runs and
       mkdirSync(cfg.parkedDir, { recursive: true });
       writeFileSync(
         join(cfg.parkedDir, "102.json"),
-        JSON.stringify({ taskId: "102", reason: "blocked", branch: "agent/102", question: "?", parkedAt: "2026-08-30T00:00:00Z" }),
+        JSON.stringify({ taskId: "102", reason: "question", branch: "agent/102", question: "?", parkedAt: "2026-08-30T00:00:00Z" }),
       );
       // Deferred to a macrotask so 102 has settled parked-with-record before the answer lands.
       setTimeout(() => {
@@ -897,7 +902,7 @@ test("re-admit: a parked member answered while the wave still drains re-runs and
   );
 
   assert.equal(ok, true, "the wave completed once the answered park re-ran green");
-  const done = readEventLog(cfg).find((e): e is CampaignBatchDoneEvent => e.event === "campaign-batch-done");
+  const done = readEventLog(cfg).find((e): e is WaveDoneEvent => e.event === "wave-done");
   assert.deepEqual([...(done?.merged ?? [])].sort(), ["101", "102"], "both greens merged in the same wave");
   assert.deepEqual(spawns, ["101", "102", "102"], "102 was re-admitted — spawned once to park, once to re-run");
   assert.equal(hasParked(cfg, "102"), false, "the answered park's record stays cleared");
@@ -909,7 +914,7 @@ const seedParkedRecord = (cfg: ResolvedConfig, taskId: string) => {
   mkdirSync(cfg.parkedDir, { recursive: true });
   writeFileSync(
     join(cfg.parkedDir, `${taskId}.json`),
-    JSON.stringify({ taskId, reason: "blocked", branch: `agent/${taskId}`, question: "?", parkedAt: "2026-08-30T00:00:00Z" }),
+    JSON.stringify({ taskId, reason: "question", branch: `agent/${taskId}`, question: "?", parkedAt: "2026-08-30T00:00:00Z" }),
   );
 };
 
@@ -944,7 +949,7 @@ test("grace window: a question/stalled park no answer resolves within parkGraceS
   assert.equal(grace?.seconds, 30);
   assert.deepEqual(grace?.tasks, ["102"]);
   assert.ok(
-    readEventLog(cfg).some((e) => e.event === "wave-parked"),
+    readEventLog(cfg).some((e) => e.event === "campaign-parked"),
     "the wave parked once the window expired",
   );
 });
@@ -975,7 +980,7 @@ test("grace window: an answer that lands within parkGraceSeconds re-admits the m
   const ok = await silenceConsole(() => campaign(cfg, [["101", "102"]], host, "harness", {}, deps));
 
   assert.equal(ok, true, "the in-window answer let the wave finish");
-  const done = readEventLog(cfg).find((e): e is CampaignBatchDoneEvent => e.event === "campaign-batch-done");
+  const done = readEventLog(cfg).find((e): e is WaveDoneEvent => e.event === "wave-done");
   assert.deepEqual([...(done?.merged ?? [])].sort(), ["101", "102"], "the re-admitted member merged in the same wave");
 });
 
@@ -1049,7 +1054,7 @@ test("Gate 2 unchanged: an all-green wave whose combined base gates red still wa
     integrate: async (_cfg, greens) => ({
       merged: greens,
       quarantined: [],
-      parked: { reason: "gate-red", detail: "GATE FAILED" },
+      parked: { reason: "red-base", detail: "GATE FAILED" },
     }),
   };
 
@@ -1061,11 +1066,12 @@ test("Gate 2 unchanged: an all-green wave whose combined base gates red still wa
   assert.ok(!spawned.includes("201"), "no succeeding wave starts on a red base");
   const notice = listOutbox(cfg).find((r) => r.event === "wave-parked");
   assert.ok(notice, "the existing waveParkedNotice still goes out");
-  // Gate 1 must not add a second wave-parked event on top of Gate 2's — no issue parked here.
+  // The loop logs exactly one campaign-parked for the red-base park; Gate 1 (the per-issue
+  // park path) must not add a second — no issue parked here.
   assert.equal(
-    readEventLog(cfg).filter((e) => e.event === "wave-parked").length,
-    0,
-    "the loop logs no extra wave-parked event — Gate 2 owns it via integrateGreens",
+    readEventLog(cfg).filter((e) => e.event === "campaign-parked").length,
+    1,
+    "exactly one campaign-parked — the red-base park; Gate 1 does not double-fire",
   );
 });
 
@@ -1091,25 +1097,29 @@ test("a failed member drains its wave, integrates the greens, then stops the cam
   assert.ok(!spawned.includes("201"), "the succeeding wave never starts once a member failed");
 
   const events = readEventLog(cfg);
-  const batches = events.filter((e): e is CampaignBatchEvent => e.event === "campaign-batch");
+  const batches = events.filter((e): e is WaveStartEvent => e.event === "wave-start");
   assert.deepEqual(batches.map((b) => b.index), [0], "only wave 0 ran — no succeeding wave started");
 
-  // The green sibling still merged — a failure never aborts or un-merges a sibling.
+  // The failed member is named on its own `failed` event (logged by queue), and the campaign
+  // stop marker carries the failed wave's index.
+  const perTaskFailed = events.filter((e): e is FailedEvent => e.event === "failed");
+  assert.deepEqual(perTaskFailed.map((f) => f.taskId), ["102"], "the failed member is named on its own failed event");
   const failed = events.filter((e): e is CampaignFailedEvent => e.event === "campaign-failed");
   assert.equal(failed.length, 1, "exactly one campaign-failed stop marker");
-  assert.deepEqual(failed[0].merged, ["101"], "the green stayed merged on the base");
-  assert.deepEqual(failed[0].failed, ["102"], "the failed member is named");
+  assert.equal(failed[0].index, 0, "the stop marker carries the failed wave's index");
 
   // The wave is never logged done — it holds, it does not close.
   assert.ok(
-    !events.some((e) => e.event === "campaign-batch-done"),
+    !events.some((e) => e.event === "wave-done"),
     "the failed wave is not logged done",
   );
 
-  // The operator notice went out on the failure channel.
+  // The operator notice went out on the failure channel, naming the green sibling kept merged —
+  // a failure never aborts or un-merges a sibling.
   const notice = listOutbox(cfg).find((r) => r.event === "campaign-failed");
   assert.ok(notice, "a campaign-failed notice was enqueued for the operator");
   assert.equal(notice?.category, "failure");
+  assert.ok(notice?.text.includes("101"), "the green stayed merged on the base");
 });
 
 test("a quarantine that strands later-wave dependents wave-parks the campaign — an explicit terminal event, never a silent stop", async () => {
@@ -1137,10 +1147,10 @@ test("a quarantine that strands later-wave dependents wave-parks the campaign �
   assert.equal(ok, false, "the stranded quarantine pauses the campaign");
   assert.ok(!spawned.includes("701"), "the stranded later wave never starts");
 
-  // The pause is an explicit wave-park, so the log is never indistinguishable from a crash.
-  const parked = readEventLog(cfg).filter((e): e is WaveParkedEvent => e.event === "wave-parked");
-  assert.equal(parked.length, 1, "exactly one wave-parked event marks the pause");
-  assert.match(parked[0].detail, /stranded|conflict/i, "the detail names the stranded-conflict reason");
+  // The pause is an explicit campaign-park, so the log is never indistinguishable from a crash.
+  const parked = readEventLog(cfg).filter((e): e is CampaignParkedEvent => e.event === "campaign-parked");
+  assert.equal(parked.length, 1, "exactly one campaign-parked event marks the pause");
+  assert.match(parked[0].detail ?? "", /stranded|conflict/i, "the detail names the stranded-conflict reason");
 });
 
 // One event-loop tick — lets the queue's synchronous `fill()` (and its microtask
@@ -1150,9 +1160,9 @@ const tick = () => new Promise<void>((r) => setImmediate(r));
 // A Docker-free harness for `queue()` (#190): the same on-disk log + injected-deps
 // pattern the campaign tests use, but driving `queue` directly. `spawnRun` is a
 // deferred/controllable child so the queue fills to the ceiling with every slot held —
-// the `queue-spawn` running count is then observable climbing to `host.ceiling` — and
+// the `spawn` running count is then observable climbing to `host.ceiling` — and
 // each task's exit code is chosen per test to pin the outcome map.
-test("queue fills to the host ceiling, then writes queue-start/queue-spawn with climbing running counts (#190)", async () => {
+test("queue fills to the host ceiling, then writes a spawn per task with climbing running counts (#190)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-queue-"));
   const cfg = harnessCfg(dir);
   const taskIds = ["101", "102", "103"];
@@ -1180,13 +1190,9 @@ test("queue fills to the host ceiling, then writes queue-start/queue-spawn with 
   await draining;
 
   const events = readEventLog(cfg);
-  const start = events.find((e): e is QueueStartEvent => e.event === "queue-start");
-  assert.deepEqual(start?.taskIds, taskIds);
-  assert.equal(start?.slots, host.ceiling);
-  assert.equal(start?.hostBudget, host.ceiling);
-
-  // Each spawn reports the running count climbing to the ceiling and the queue draining.
-  const spawns = events.filter((e): e is QueueSpawnEvent => e.event === "queue-spawn");
+  // No durable queue-start event frames the drain (design §2.1): each task announces itself
+  // with a `spawn`, reporting the running count climbing to the ceiling and the queue draining.
+  const spawns = events.filter((e): e is SpawnEvent => e.event === "spawn");
   assert.deepEqual(spawns.map((s) => s.taskId), taskIds);
   assert.deepEqual(spawns.map((s) => s.running), [1, 2, 3]);
   assert.deepEqual(spawns.map((s) => s.left), [2, 1, 0]);
@@ -1207,7 +1213,10 @@ test("queue returns and logs a per-task outcome map translating each child's exi
   const expected = { "101": "green", "102": "parked", "103": "error(7)" };
   assert.deepEqual(outcomes, expected, "the returned map is the caller's greens without re-deriving from the log");
 
-  // The same map is logged on queue-done so the dashboard reduces it to statuses.
-  const done = readEventLog(cfg).find((e): e is QueueDoneEvent => e.event === "queue-done");
-  assert.deepEqual(done?.outcomes, expected);
+  // No durable queue-done event: a member the agent could not make green is folded to its own
+  // `failed` event (design §2.1) so the reducer holds its wave; green/parked members carry their
+  // own rows from the run loop.
+  const failed = readEventLog(cfg).filter((e): e is FailedEvent => e.event === "failed");
+  assert.deepEqual(failed.map((f) => f.taskId), ["103"], "only the errored member is folded to a failed event");
+  assert.equal(failed[0].detail, "error(7)", "the failed event carries the translated exit code");
 });

@@ -101,10 +101,10 @@ test("integrateGreens quarantines a conflicting green, keeps the earlier green m
     process.chdir(prevCwd);
   }
 
-  // The conflict was recorded as a `quarantined` event naming B and its branch.
-  const q = log.events.filter((e) => e.event === "quarantined");
+  // The conflict was recorded as an integrator `parked{conflict}` event naming B.
+  const q = log.events.filter((e) => e.event === "parked" && (e as any).reason === "conflict");
   assert.equal(q.length, 1);
-  assert.deepEqual({ taskId: (q[0] as any).taskId, branch: (q[0] as any).branch }, { taskId: "B", branch: "agent/B" });
+  assert.equal((q[0] as any).taskId, "B");
 });
 
 /**
@@ -156,7 +156,7 @@ test("integrateGreens wave-parks a red merged base: leaves the greens merged, do
 
     // AC2: the emergent, unattributable failure surfaces as a resumable park, not a halt.
     assert.ok(result.parked);
-    assert.equal(result.parked!.reason, "gate-red");
+    assert.equal(result.parked!.reason, "red-base");
     assert.ok(result.parked!.detail.includes("GATE FAILED here"));
 
     // Branches are preserved so a human can fix forward or prune a suspect and resume.
@@ -166,11 +166,11 @@ test("integrateGreens wave-parks a red merged base: leaves the greens merged, do
     process.chdir(prevCwd);
   }
 
-  // AC2: a `wave-parked` event records the greens left merged and the tail of the gate report.
-  const parked = log.events.filter((e) => e.event === "wave-parked");
-  assert.equal(parked.length, 1);
-  assert.deepEqual((parked[0] as any).merged, ["A", "B"]);
-  assert.ok((parked[0] as any).detail.includes("GATE FAILED here"));
+  // AC2: integrateGreens no longer logs the park itself (the caller logs `campaign-parked`);
+  // it records each green it merged and surfaces the red base via its return value. Both greens
+  // are on the log as `merged`, and the gate-report tail rides `result.parked.detail` (above).
+  const merged = log.events.filter((e) => e.event === "merged");
+  assert.deepEqual(merged.map((e) => (e as any).taskId).sort(), ["A", "B"]);
 });
 
 test("integrateGreens skips the merged-base gate when every green conflicts", async () => {
@@ -387,7 +387,7 @@ test("scanTidy reads reachability, fragments, and parked records; applyTidy fold
   // by hand, so the record is orphaned (no `agent/50` head remains).
   const parkedDir = join(dir, "parked");
   mkdirSync(parkedDir);
-  writeFileSync(join(parkedDir, "50.json"), JSON.stringify({ taskId: "50", branch: "agent/50", reason: "blocked", parkedAt: "x", question: "?" }));
+  writeFileSync(join(parkedDir, "50.json"), JSON.stringify({ taskId: "50", branch: "agent/50", reason: "question", parkedAt: "x", question: "?" }));
 
   const target = {
     project: "demo",
@@ -462,9 +462,9 @@ test("scanTidy reads wave-parked issues from the event log so their reachable br
   writeFileSync(
     logFile,
     [
-      JSON.stringify({ event: "campaign-start", batches: [["70", "71"]] }),
-      JSON.stringify({ event: "campaign-batch", index: 0 }),
-      JSON.stringify({ event: "wave-parked", merged: ["70", "71"], detail: "gate red" }),
+      JSON.stringify({ event: "campaign-start", waves: [["70", "71"]] }),
+      JSON.stringify({ event: "wave-start", index: 0, tasks: ["70", "71"] }),
+      JSON.stringify({ event: "campaign-parked", index: 0, detail: "gate red" }),
     ].join("\n") + "\n",
   );
 

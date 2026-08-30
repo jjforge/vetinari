@@ -142,9 +142,10 @@ export interface CampaignStatus {
   project: string;
   /** the run's optional `--name`, shown as the header label; absent when unnamed. */
   name?: string;
-  /** the festive-name block this campaign reserved at start (#193); wave `i` renders
-   * as `festiveWaveName(festiveOffset, i)` when festive wave names are on. Absent for a
-   * run started before the feature, which then renders nameless under festive. */
+  /** the festive-name offset for this campaign (#193), derived at render from its
+   * `campaign-start` timestamp ({@link festiveOffsetFor}); wave `i` renders as
+   * `festiveWaveName(festiveOffset, i)` when festive wave names are on. Absent for a run
+   * with no `campaign-start`, which then renders nameless under festive. */
   festiveOffset?: number;
   waves: StatusWave[];
   parked: ParkedIssue[];
@@ -576,9 +577,10 @@ export interface ReducedCampaign {
   /** the optional human name the campaign was launched with (`--name`), read off
    * the latest `campaign-start` event; undefined for an unnamed run. */
   name?: string;
-  /** the start of the festive-name block this campaign reserved (#193), read off the
-   * latest `campaign-start`; undefined for a run started before the feature. Wave `i`
-   * draws `festiveWaveName(festiveOffset, i)` when festive wave names are on. */
+  /** the festive-name offset for this campaign (#193), derived from the latest
+   * `campaign-start` timestamp ({@link festiveOffsetFor}); undefined for a run with no
+   * `campaign-start`. Wave `i` draws `festiveWaveName(festiveOffset, i)` when festive
+   * wave names are on. */
   festiveOffset?: number;
   outcomes: Map<string, IssueStatus>;
   details: Map<string, string>;
@@ -611,9 +613,10 @@ export interface ReducedCampaign {
 /**
  * Reduce a project's event log to its current campaign's plan — pure, no I/O.
  * Only the latest `campaign-start` and everything after it is folded (a fresh
- * campaign supersedes an earlier one in the same log); a queue-only run with no
- * campaign frames it as a single wave. This is the load-bearing seam of ADR
- * 0005: `buildStatus` renders it and the `campaign` loop re-reads it each wave.
+ * campaign supersedes an earlier one in the same log); the plan (the waves) comes
+ * from `campaign-start`, so a log with no `campaign-start` frames no waves. This is
+ * the load-bearing seam of ADR 0005: `buildStatus` renders it and the `campaign`
+ * loop re-reads it each wave.
  * `opts.alive` is the injected liveness probe (design §7): `false` means the run's
  * process is gone (its host slot is not held, §8), so an in-flight `running` issue with
  * no terminal stop marker reconciles to parked{crash}; omitted/`true` never crash-folds.

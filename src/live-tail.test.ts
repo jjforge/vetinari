@@ -38,9 +38,11 @@ const writeJsonl = (path: string, events: object[]) => writeFileSync(path, event
 
 test("buildLiveTail merges a running agent's activity lines, tagged with its issue and status", () => {
   const dir = tmp();
-  // A bare queue marks both issues running; 203 then goes green (completed), so 204 alone runs.
+  // A wave marks both issues running; 203 then goes green (completed), so 204 alone runs.
   writeJsonl(cfgFor(dir).logFile, [
-    event("queue-start", { taskIds: ["203", "204"], slots: 2, ts: "2026-08-27T00:00:00.000Z" }),
+    event("campaign-start", { waves: [["203", "204"]], slots: 2, ts: "2026-08-27T00:00:00.000Z" }),
+    event("spawn", { taskId: "203", ts: "2026-08-27T00:00:00.000Z" }),
+    event("spawn", { taskId: "204", ts: "2026-08-27T00:00:00.000Z" }),
     event("green", { taskId: "203", branch: "agent/203", commits: ["a"], ts: "2026-08-27T00:00:05.000Z" }),
   ]);
   // 204's live activity stream (the file the pane tails).
@@ -67,7 +69,10 @@ test("buildLiveTail merges a running agent's activity lines, tagged with its iss
 
 test("buildLiveTail attaches each line's humanized parts for the log-view component (#203)", () => {
   const dir = tmp();
-  writeJsonl(cfgFor(dir).logFile, [event("queue-start", { taskIds: ["204"], slots: 1, ts: "2026-08-27T00:00:00.000Z" })]);
+  writeJsonl(cfgFor(dir).logFile, [
+    event("campaign-start", { waves: [["204"]], slots: 1, ts: "2026-08-27T00:00:00.000Z" }),
+    event("spawn", { taskId: "204", ts: "2026-08-27T00:00:00.000Z" }),
+  ]);
   initActivityLog(dir, "204");
   appendActivity(dir, "204", event("tool", { taskId: "204", name: "Edit", path: "src/x.ts", ts: "2026-08-27T09:15:00.000Z" }));
 
@@ -81,7 +86,10 @@ test("buildLiveTail attaches each line's humanized parts for the log-view compon
 test("buildLiveTail interleaves two running agents by ts and excludes finished ones", () => {
   const dir = tmp();
   writeJsonl(cfgFor(dir).logFile, [
-    event("queue-start", { taskIds: ["301", "302", "303"], slots: 3, ts: "2026-08-27T00:00:00.000Z" }),
+    event("campaign-start", { waves: [["301", "302", "303"]], slots: 3, ts: "2026-08-27T00:00:00.000Z" }),
+    event("spawn", { taskId: "301", ts: "2026-08-27T00:00:00.000Z" }),
+    event("spawn", { taskId: "302", ts: "2026-08-27T00:00:00.000Z" }),
+    event("spawn", { taskId: "303", ts: "2026-08-27T00:00:00.000Z" }),
     event("green", { taskId: "303", branch: "agent/303", commits: ["a"], ts: "2026-08-27T00:00:09.000Z" }),
   ]);
   // 301 and 302 run; 303 completed. Even though 303 has an activity file, it is dropped.
@@ -255,7 +263,8 @@ test("GET /api/events seeds a running agent's tail as a named `tail` SSE frame (
   const configDir = tmp();
   const projDir = tmp();
   writeJsonl(join(projDir, "logs", "orchestrator.jsonl"), [
-    event("queue-start", { taskIds: ["204"], slots: 1, ts: "2026-08-27T00:00:00.000Z" }),
+    event("campaign-start", { waves: [["204"]], slots: 1, ts: "2026-08-27T00:00:00.000Z" }),
+    event("spawn", { taskId: "204", ts: "2026-08-27T00:00:00.000Z" }),
   ]);
   initActivityLog(projDir, "204");
   appendActivity(projDir, "204", event("tool", { taskId: "204", name: "Edit", path: "/repo/a.ts", ts: "2026-08-27T00:00:01.000Z" }));
@@ -281,7 +290,10 @@ test("GET /api/events seeds a running agent's tail as a named `tail` SSE frame (
 test("GET /api/events pushes an updated tail frame when a running agent appends activity (#124)", async () => {
   const configDir = tmp();
   const projDir = tmp();
-  writeJsonl(join(projDir, "logs", "orchestrator.jsonl"), [event("queue-start", { taskIds: ["204"], slots: 1, ts: "2026-08-27T00:00:00.000Z" })]);
+  writeJsonl(join(projDir, "logs", "orchestrator.jsonl"), [
+    event("campaign-start", { waves: [["204"]], slots: 1, ts: "2026-08-27T00:00:00.000Z" }),
+    event("spawn", { taskId: "204", ts: "2026-08-27T00:00:00.000Z" }),
+  ]);
   initActivityLog(projDir, "204");
   appendActivity(projDir, "204", event("tool", { taskId: "204", name: "Read", ts: "2026-08-27T00:00:01.000Z" }));
   register(configDir, { project: "acme", projectRoot: projDir, baseLocation: projDir });

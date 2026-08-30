@@ -140,11 +140,12 @@ test("a deliberately red gate yields a real non-zero exit via exec and parks —
 
   const outcome = await inRepo(dir, () => runLoop(cfg, "T2", undefined, loopDepsFor(redScript)));
 
-  // A red gate parks (budget) — never a green over a red suite.
+  // A red gate parks (stalled on the turn budget) — never a green over a red suite.
   assert.equal(outcome, "parked");
   const parked = listParked(cfg);
   assert.equal(parked.length, 1);
-  assert.equal(parked[0].reason, "budget");
+  assert.equal(parked[0].reason, "stalled");
+  assert.equal(parked[0].detail, "budget");
 
   const events = readEventLog(cfg);
   assert.equal(events.some((e) => e.event === "green"), false);
@@ -301,11 +302,10 @@ test("a merge conflict quarantines the losing green (work preserved) while the w
   assert.equal(gitOut(dir, ["show", "base:conflict.txt"]), "resolved by 101");
   assert.equal(gitOut(dir, ["branch", "--list", "agent/101"]), "");
 
-  // 102 is the attributed loser: a real quarantined event, and its branch (work) preserved.
-  const q = events.find((e) => e.event === "quarantined") as { taskId: string; branch: string } | undefined;
-  assert.ok(q, "expected a quarantined event");
+  // 102 is the attributed loser: a real integrator `parked{conflict}` event, and its branch (work) preserved.
+  const q = events.find((e) => e.event === "parked" && (e as any).reason === "conflict") as { taskId: string } | undefined;
+  assert.ok(q, "expected a parked{conflict} event");
   assert.equal(q!.taskId, "102");
-  assert.equal(q!.branch, "agent/102");
   assert.equal(gitOut(dir, ["branch", "--list", "agent/102"]), "agent/102");
 
   // The wave neither rolled back nor advanced past the boundary: no campaign-done, and the
@@ -338,7 +338,7 @@ test("a merge conflict under --auto-prune quarantines the loser, prunes the stra
 
   const events = readEventLog(cfg);
   // 102 still quarantined (its work kept), 101 still the merged winner.
-  const q = events.find((e) => e.event === "quarantined") as { taskId: string } | undefined;
+  const q = events.find((e) => e.event === "parked" && (e as any).reason === "conflict") as { taskId: string } | undefined;
   assert.equal(q?.taskId, "102");
   assert.equal(gitOut(dir, ["branch", "--list", "agent/102"]), "agent/102");
   assert.equal(gitOut(dir, ["show", "base:conflict.txt"]), "resolved by 101");
@@ -390,17 +390,17 @@ test("a per-issue BLOCKED park drains its wave's greens, then wave-parks — the
   assert.equal(gitOut(dir, ["show", "base:impl-201.txt"]), "impl for 201");
   assert.equal(gitOut(dir, ["branch", "--list", "agent/201"]), "");
 
-  // Then the wave parked: a wave-parked event whose detail names the parked issue.
-  const wp = events.find((e) => e.event === "wave-parked") as { detail?: string } | undefined;
-  assert.ok(wp, "expected a wave-parked event");
-  assert.ok(wp!.detail?.includes("202"), "wave-park detail names the parked issue");
+  // Then the wave parked: a campaign-parked event whose detail names the parked issue.
+  const wp = events.find((e) => e.event === "campaign-parked") as { detail?: string } | undefined;
+  assert.ok(wp, "expected a campaign-parked event");
+  assert.ok(wp!.detail?.includes("202"), "campaign-park detail names the parked issue");
 
   // The parked record survives the wave-boundary held-clear (ADR 0017): 202 is still
-  // listed, as a first-class durable `blocked` park — not cleared into silence.
+  // listed, as a first-class durable `question` park — not cleared into silence.
   const parked = listParked(cfg);
   const p202 = parked.find((r) => r.taskId === "202");
   assert.ok(p202, "202's parked record survived the wave-boundary clear");
-  assert.equal(p202!.reason, "blocked");
+  assert.equal(p202!.reason, "question");
 
   // No succeeding wave starts: the campaign did not advance to done and 203 never ran.
   assert.equal(events.some((e) => e.event === "campaign-done"), false);
@@ -446,10 +446,12 @@ test("each green passes its own gate but the merged base fails the combined gate
   assert.ok(baseGate.some((r) => r.exitCode !== 0), "the merged base gated red");
 
   // Wave-park (ADR 0013): the greens stayed MERGED on the base — no rollback — over the two
-  // branches. Both impl files are on the base and the wave-parked event carries them.
-  const wp = events.find((e) => e.event === "wave-parked") as { merged: string[] } | undefined;
-  assert.ok(wp, "expected a wave-parked event");
-  assert.deepEqual(wp!.merged.sort(), ["301", "302"]);
+  // branches. The campaign-parked stop marker records the pause, and each landed green is on
+  // the log as a `merged` event; both impl files are on the base.
+  const cp = events.find((e) => e.event === "campaign-parked");
+  assert.ok(cp, "expected a campaign-parked event");
+  const mergedEvents = events.filter((e) => e.event === "merged").map((e) => (e as any).taskId).sort();
+  assert.deepEqual(mergedEvents, ["301", "302"]);
   assert.equal(gitOut(dir, ["show", "base:impl-301.txt"]), "impl for 301");
   assert.equal(gitOut(dir, ["show", "base:impl-302.txt"]), "impl for 302");
 

@@ -39,13 +39,13 @@ const cfgFor = (dir: string): ResolvedConfig =>
 const parkFixture = (dir: string, taskId: string) =>
   writeFileSync(
     join(dir, "parked", `${taskId}.json`),
-    JSON.stringify({ taskId, parkedAt: "now", reason: "blocked", branch: `agent/${taskId}`, sessionId: "s", question: "Need a choice." }),
+    JSON.stringify({ taskId, parkedAt: "now", reason: "question", branch: `agent/${taskId}`, sessionId: "s", question: "Need a choice." }),
   );
 
 const parkFixtureNoSession = (dir: string, taskId: string) =>
   writeFileSync(
     join(dir, "parked", `${taskId}.json`),
-    JSON.stringify({ taskId, parkedAt: "now", reason: "blocked", branch: `agent/${taskId}`, question: "Need a choice." }),
+    JSON.stringify({ taskId, parkedAt: "now", reason: "question", branch: `agent/${taskId}`, question: "Need a choice." }),
   );
 
 test("readParked returns the record and, by default, requires a sessionId to resume", () => {
@@ -107,7 +107,7 @@ test("park writes its record silently — the gateway is the only sender, so par
   }) as typeof fetch;
 
   try {
-    await park(cfgFor(dir), { taskId: "301", reason: "blocked", sessionId: "s", branch: "agent/301", question: "Need a choice." });
+    await park(cfgFor(dir), { taskId: "301", reason: "question", sessionId: "s", branch: "agent/301", question: "Need a choice." });
   } finally {
     globalThis.fetch = savedFetch;
     process.env = savedEnv;
@@ -122,7 +122,7 @@ test("park writes its record silently — the gateway is the only sender, so par
 test("setParkedMessageId stamps the announced message id into an existing parked record", async () => {
   const dir = join(tmpdir(), `vetinari-stamp-${Date.now()}`);
   mkdirSync(join(dir, "parked"), { recursive: true });
-  await park(cfgFor(dir), { taskId: "410", reason: "blocked", sessionId: "s", branch: "agent/410", question: "?" });
+  await park(cfgFor(dir), { taskId: "410", reason: "question", sessionId: "s", branch: "agent/410", question: "?" });
 
   setParkedMessageId(join(dir, "parked"), "410", 4242);
 

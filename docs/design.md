@@ -340,8 +340,6 @@ Described by behaviour; the tracker holds the numbers (`gh issue list --label ca
 
 **Records and states**
 
-- A conflict park writes no parked record; archive clears every parked record; the wave boundary clears held members' records — all against §2.5.
-- An unmerged green reads `completed` (and counts as merged today) instead of `running` with a pending green.
 - The state words in code are `failure` and `closed` where this design says `failed` and `completed`; the issue sheet's move rule keys on `failed` while the API ships `failure`, so a failed issue's sheet offers no moves.
 - The idle card has no last-run line when the finished campaign is still in the live log; the sheet never prints the park reason as a word.
 

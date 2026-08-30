@@ -37,7 +37,7 @@ Three properties carry the whole value. Everything else in the tool exists to se
 | State | Meaning |
 | --- | --- |
 | `unstarted` | in the plan, no agent yet |
-| `running` | an agent is on it (or waiting for a container slot) |
+| `running` | an agent is on it (or waiting for a container slot), or it is green but not yet merged onto the base |
 | `parked` | held on you; work preserved; the **reason** says what happened and what to do |
 | `failed` | the agent could not make it green; terminal until you change something |
 | `completed` | merged onto the base |

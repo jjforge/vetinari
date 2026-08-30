@@ -983,13 +983,13 @@ test("Gate 1 (ADR 0017): a per-issue park drains its wave, merges the greens, th
   );
 });
 
-test("Gate 1: the parked issue's record survives the wave-boundary held-clear (resumable, dashboard-visible, Telegram-answerable)", async () => {
+test("Gate 1: a parked record survives the wave boundary — the boundary clears nothing (design §2.5)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-park-rec-"));
   const cfg = harnessCfg(dir);
   const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
 
   // Seed the parked record a parking child would have written — the stubbed spawnRun
-  // only returns the exit code, so we place the record the held-clear would otherwise wipe.
+  // only returns the exit code, so we place the record the wave boundary must leave alone.
   const parkedRecord = join(cfg.parkedDir, "102.json");
   mkdirSync(cfg.parkedDir, { recursive: true });
   writeFileSync(parkedRecord, JSON.stringify({ taskId: "102", reason: "question", sessionId: "s1" }));
@@ -1000,7 +1000,7 @@ test("Gate 1: the parked issue's record survives the wave-boundary held-clear (r
     campaign(cfg, [["101", "102"]], host, "harness", {}, gitFreeDeps(cfg, childRun)),
   );
 
-  assert.ok(existsSync(parkedRecord), "the parked record is spared the held-clear so the issue stays resumable");
+  assert.ok(existsSync(parkedRecord), "the parked record survives the wave boundary — resumable, dashboard-visible, answerable");
 });
 
 test("re-admit: a parked member answered while the wave still drains re-runs and merges in the same wave (design §5 step 3)", async () => {

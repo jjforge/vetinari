@@ -16,7 +16,6 @@ import {
 } from "./merge.ts";
 import {
   clearParked,
-  clearParkedForTasks,
   enqueueOutbound,
   hasParked,
   isAnswered,
@@ -894,12 +893,12 @@ export async function campaign(
       return "parked";
     }
 
-    // The base gated green from here. Clear the parked records of held-but-not-parked members;
-    // a parked member's record and a quarantined green's record are spared so they stay
-    // answerable/resumable (design §2.5).
+    // The base gated green from here. The wave boundary clears NO parked records (design §2.5):
+    // a record is cleared only when its issue goes back to running (a re-admit/redrive run
+    // consuming it) or by an explicit `prune --purge`. A held member's record — a question, a
+    // stall, or a quarantined green's conflict — survives the boundary so it stays answerable,
+    // dashboard-visible, and resumable until a human resolves it.
     const parkedTasks = tasks.filter((t) => outcomes[t] === "parked");
-    const toClear = held.filter((t) => outcomes[t] !== "parked");
-    if (toClear.length) clearParkedForTasks(cfg, toClear);
 
     // (3) Any parked member holds the wave (design §5 step 5): a question, a stall, or a merge
     // conflict (`quarantined` — a green pulled from integration, its work preserved). A conflict

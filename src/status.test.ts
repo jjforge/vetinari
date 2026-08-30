@@ -92,14 +92,14 @@ test("serveAllStatus serves the aggregated site, selecting the project from the 
   seedState(alphaDir, [
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      batches: [["101"]],
+      waves: [["101"]],
       slots: 1,
     }),
   ]);
   seedState(betaDir, [
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      batches: [["201"]],
+      waves: [["201"]],
       slots: 1,
     }),
   ]);
@@ -182,14 +182,14 @@ test("serveAllStatus GET / serves the all-repos landing shell, not a server-rend
   seedState(alphaDir, [
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      batches: [["101"]],
+      waves: [["101"]],
       slots: 1,
     }),
   ]);
   seedState(betaDir, [
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      batches: [["201"]],
+      waves: [["201"]],
       slots: 1,
     }),
   ]);
@@ -241,16 +241,16 @@ test("serveAllStatus GET /api/landing serves the all-repos landing model as JSON
   seedState(alphaDir, [
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      batches: [["101"], ["201"]],
+      waves: [["101"], ["201"]],
       name: "alpha work",
       slots: 1,
     }),
-    event("queue-start", { ts: "2025-01-01T00:01:00.000Z", taskIds: ["101"], slots: 1 }),
+    event("spawn", { ts: "2025-01-01T00:01:00.000Z", taskId: "101" }),
   ]);
   seedState(betaDir, [
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      batches: [["301"]],
+      waves: [["301"]],
       slots: 1,
     }),
   ]);
@@ -310,7 +310,7 @@ test("serveAllStatus GET /api/feed serves the cross-project event feed as JSON",
   seedState(alphaDir, [
     event("campaign-start", {
       ts: hoursAgo(3),
-      batches: [["101"]],
+      waves: [["101"]],
       name: "alpha work",
       slots: 1,
     }),
@@ -320,7 +320,7 @@ test("serveAllStatus GET /api/feed serves the cross-project event feed as JSON",
     event("parked", {
       ts: hoursAgo(2),
       taskId: "201",
-      reason: "needs a choice",
+      reason: "question",
     }),
   ]);
   register(configDir, {
@@ -349,7 +349,7 @@ test("serveAllStatus GET /api/feed serves the cross-project event feed as JSON",
       feed.map((f: { text: string }) => f.text),
       [
         "alpha — #101 merged",
-        "beta — #201 parked: needs a choice",
+        "beta — #201 parked: question",
         "alpha — Campaign “alpha work” started",
       ],
     );
@@ -365,7 +365,7 @@ test("serveAllStatus GET /api/issue serves one issue's reconstructed detail as J
   seedState(alphaDir, [
     event("campaign-start", {
       ts: "2025-05-01T08:00:00.000Z",
-      batches: [["101"]],
+      waves: [["101"]],
       titles: { "101": "Wire the parser" },
       name: "parser work",
       slots: 1,
@@ -379,7 +379,7 @@ test("serveAllStatus GET /api/issue serves one issue's reconstructed detail as J
     event("parked", {
       ts: "2025-05-01T08:06:00.000Z",
       taskId: "101",
-      reason: "needs a decision",
+      reason: "question",
     }),
   ]);
   register(configDir, {
@@ -434,7 +434,7 @@ test("serveAllStatus GET /api/issue carries the parked question and options for 
   seedState(alphaDir, [
     event("campaign-start", {
       ts: "2025-05-01T08:00:00.000Z",
-      batches: [["101"]],
+      waves: [["101"]],
       titles: { "101": "Wire the parser" },
       slots: 1,
     }),
@@ -447,7 +447,7 @@ test("serveAllStatus GET /api/issue carries the parked question and options for 
     event("parked", {
       ts: "2025-05-01T08:06:00.000Z",
       taskId: "101",
-      reason: "needs a decision",
+      reason: "question",
     }),
   ]);
   writeFileSync(
@@ -455,7 +455,7 @@ test("serveAllStatus GET /api/issue carries the parked question and options for 
     JSON.stringify({
       taskId: "101",
       parkedAt: "now",
-      reason: "blocked",
+      reason: "question",
       branch: "agent/101",
       sessionId: "s",
       question:
@@ -494,7 +494,7 @@ test("serveAllStatus GET /api/issue omits parked reply data for a non-parked iss
   seedState(alphaDir, [
     event("campaign-start", {
       ts: "2025-05-01T08:00:00.000Z",
-      batches: [["101"]],
+      waves: [["101"]],
       slots: 1,
     }),
     event("green", {
@@ -563,7 +563,7 @@ test("serveAllStatus GET /api/events streams a project's log appends as SSE fram
   seedState(alphaDir, [
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      batches: [["101"]],
+      waves: [["101"]],
       slots: 1,
     }),
   ]);
@@ -632,7 +632,7 @@ test("serveAllStatus GET /api/events streams a project's log appends as SSE fram
 test("serveAllStatus GET /api/events debounces a burst of appends into one frame (#131)", async () => {
   const configDir = join(tmpdir(), `vetinari-sse-debounce-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
-  seedState(alphaDir, [event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["101"]], slots: 1 })]);
+  seedState(alphaDir, [event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["101"]], slots: 1 })]);
   register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
   const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
   const { port } = server.address() as AddressInfo;
@@ -660,7 +660,7 @@ test("serveAllStatus GET /api/events debounces a burst of appends into one frame
 test("serveAllStatus GET /api/events emits no frame for a pure machine-noise append (#131)", async () => {
   const configDir = join(tmpdir(), `vetinari-sse-noise-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
-  seedState(alphaDir, [event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["101"]], slots: 1 })]);
+  seedState(alphaDir, [event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["101"]], slots: 1 })]);
   register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
   const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
   const { port } = server.address() as AddressInfo;
@@ -690,7 +690,7 @@ test("serveAllStatus renders a single registered project as a one-entry dropdown
   seedState(soloDir, [
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      batches: [["101"]],
+      waves: [["101"]],
       slots: 1,
     }),
   ]);
@@ -700,7 +700,7 @@ test("serveAllStatus renders a single registered project as a one-entry dropdown
     JSON.stringify({
       taskId: "101",
       parkedAt: "now",
-      reason: "blocked",
+      reason: "question",
       branch: "agent/101",
       sessionId: "s",
       question: "Need a choice.",
@@ -748,14 +748,14 @@ test("serveAllStatus POST /prune on confirm shells prune in the selected project
   seedState(alphaDir, [
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      batches: [["101"], ["301"]],
+      waves: [["101"], ["301"]],
       slots: 1,
     }),
   ]);
   seedState(betaDir, [
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      batches: [["201"], ["401"]],
+      waves: [["201"], ["401"]],
       slots: 1,
     }),
   ]);
@@ -805,17 +805,17 @@ test("serveAllStatus POST /resume shells campaign --resume in the selected proje
   const configDir = join(tmpdir(), `vetinari-agg-resume-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
-  // Beta wave-parked (greens merged, base gated red, campaign paused) — the state the
+  // Beta campaign-parked (greens merged, base gated red, campaign paused) — the state the
   // Resume control acts on. Alpha is a plain running campaign, untouched.
   seedState(alphaDir, [
-    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["101"]], slots: 1 }),
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["101"]], slots: 1 }),
   ]);
   seedState(betaDir, [
-    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["201", "202"], ["401"]], slots: 1 }),
-    event("campaign-batch", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["201", "202"] }),
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["201", "202"], ["401"]], slots: 1 }),
+    event("wave-start", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["201", "202"] }),
     event("green", { ts: "2025-01-01T00:02:00.000Z", taskId: "201", branch: "agent/201", commits: [] }),
     event("green", { ts: "2025-01-01T00:03:00.000Z", taskId: "202", branch: "agent/202", commits: [] }),
-    event("wave-parked", { ts: "2025-01-01T00:04:00.000Z", merged: ["201", "202"], detail: "npm test failed" }),
+    event("campaign-parked", { ts: "2025-01-01T00:04:00.000Z", index: 0, detail: "npm test failed" }),
   ]);
   register(configDir, {
     project: "alpha",
@@ -859,7 +859,7 @@ test("serveAllStatus POST /resume validates the project (400 missing, 404 unknow
   const configDir = join(tmpdir(), `vetinari-agg-resume-guard-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
   seedState(betaDir, [
-    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["201"]], slots: 1 }),
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["201"]], slots: 1 }),
   ]);
   register(configDir, {
     project: "beta",
@@ -905,14 +905,14 @@ test("serveAllStatus GET /prune?preview returns the selected project's structure
   seedState(alphaDir, [
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      batches: [["101"], ["301"]],
+      waves: [["101"], ["301"]],
       slots: 1,
     }),
   ]);
   seedState(betaDir, [
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      batches: [["201"], ["401"]],
+      waves: [["201"], ["401"]],
       slots: 1,
     }),
   ]);
@@ -975,7 +975,7 @@ test("serveAllStatus GET /prune?preview validates params and the project", async
   seedState(betaDir, [
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      batches: [["201"]],
+      waves: [["201"]],
       slots: 1,
     }),
   ]);
@@ -1025,14 +1025,14 @@ test("serveAllStatus POST /prune previews the selected project's closure without
   seedState(alphaDir, [
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      batches: [["101"], ["301"]],
+      waves: [["101"], ["301"]],
       slots: 1,
     }),
   ]);
   seedState(betaDir, [
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      batches: [["201"], ["401"]],
+      waves: [["201"], ["401"]],
       slots: 1,
     }),
   ]);
@@ -1095,10 +1095,10 @@ test("serveAllStatus POST /graft shells graft directly for a clean batch — no 
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
   seedState(alphaDir, [
-    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["101"]], slots: 1 }),
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["101"]], slots: 1 }),
   ]);
   seedState(betaDir, [
-    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["201"]], slots: 1 }),
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["201"]], slots: 1 }),
   ]);
   register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
   register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
@@ -1149,10 +1149,10 @@ test("serveAllStatus GET /graft?preview returns the selected project's structure
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
   seedState(alphaDir, [
-    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["101"]], slots: 1 }),
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["101"]], slots: 1 }),
   ]);
   seedState(betaDir, [
-    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["201"]], slots: 1 }),
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["201"]], slots: 1 }),
   ]);
   register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
   register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
@@ -1199,7 +1199,7 @@ test("serveAllStatus GET /graft?preview validates params and the project", async
   const configDir = join(tmpdir(), `vetinari-agg-graft-json-guard-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
   seedState(betaDir, [
-    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["201"]], slots: 1 }),
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["201"]], slots: 1 }),
   ]);
   register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
 
@@ -1226,7 +1226,7 @@ test("serveAllStatus GET /graft?preview 502s when the project emits no closure l
   const configDir = join(tmpdir(), `vetinari-agg-graft-502-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
   seedState(betaDir, [
-    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["201"]], slots: 1 }),
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["201"]], slots: 1 }),
   ]);
   register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
 
@@ -1251,7 +1251,7 @@ test("serveAllStatus POST /graft rejects a whole batch with per-id verdicts and 
   const configDir = join(tmpdir(), `vetinari-agg-graft-reject-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
   seedState(betaDir, [
-    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["201"]], slots: 1 }),
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["201"]], slots: 1 }),
   ]);
   register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
 
@@ -1306,10 +1306,10 @@ test("serveAllStatus flags the selected project's prunable chips with its projec
   seedState(betaDir, [
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      batches: [["201"], ["401"]],
+      waves: [["201"], ["401"]],
       slots: 1,
     }),
-    event("campaign-batch", {
+    event("wave-start", {
       ts: "2025-01-01T00:01:00.000Z",
       index: 0,
       tasks: ["201"],
@@ -1350,7 +1350,7 @@ test("serveAllStatus lists a project's archived runs and renders one read-only w
   seedState(betaDir, [
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      batches: [["201"]],
+      waves: [["201"]],
       slots: 1,
     }),
   ]);
@@ -1358,12 +1358,12 @@ test("serveAllStatus lists a project's archived runs and renders one read-only w
   const archiveDir = join(betaDir, "logs", "archive");
   mkdirSync(archiveDir, { recursive: true });
   writeJsonl(join(archiveDir, "orchestrator-2026-01-01T00-00-00-000Z.jsonl"), [
-    event("campaign-start", { batches: [["101"], ["102"]], slots: 1 }),
-    event("campaign-done", { batches: 2 }),
+    event("campaign-start", { waves: [["101"], ["102"]], slots: 1 }),
+    event("campaign-done", { waves: 2 }),
   ]);
   writeJsonl(join(archiveDir, "orchestrator-2026-02-01T00-00-00-000Z.jsonl"), [
-    event("campaign-start", { batches: [["111"]], slots: 1 }),
-    event("campaign-batch", { index: 0, tasks: ["111"] }),
+    event("campaign-start", { waves: [["111"]], slots: 1 }),
+    event("wave-start", { index: 0, tasks: ["111"] }),
   ]);
   writeFileSync(
     join(archiveDir, "orchestrator-2026-03-01T00-00-00-000Z.jsonl"),
@@ -1462,7 +1462,7 @@ test("serveAllStatus reconstructs a pruned issue in a selected archived run, rea
   seedState(betaDir, [
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      batches: [["900"]],
+      waves: [["900"]],
       slots: 1,
     }),
   ]);
@@ -1473,7 +1473,7 @@ test("serveAllStatus reconstructs a pruned issue in a selected archived run, rea
   writeJsonl(join(archiveDir, "orchestrator-2026-04-01T00-00-00-000Z.jsonl"), [
     event("campaign-start", {
       ts: "2026-04-01T00:00:00.000Z",
-      batches: [["101"], ["201"]],
+      waves: [["101"], ["201"]],
       name: "spring cleanup",
       slots: 1,
     }),
@@ -1489,7 +1489,7 @@ test("serveAllStatus reconstructs a pruned issue in a selected archived run, rea
       removed: ["201"],
       dropped: [],
     }),
-    event("campaign-done", { ts: "2026-04-01T00:03:00.000Z", batches: 2 }),
+    event("campaign-done", { ts: "2026-04-01T00:03:00.000Z", waves: 2 }),
   ]);
   register(configDir, {
     project: "beta",
@@ -1528,11 +1528,11 @@ test("serveAllStatus GET /api/issue reads an archived run's own log when a run t
   const configDir = join(tmpdir(), `vetinari-api-issue-archive-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
   // The live log names 101 nowhere — its detail lives only in the archived run.
-  seedState(betaDir, [event("campaign-start", { batches: [["900"]], slots: 1 })]);
+  seedState(betaDir, [event("campaign-start", { waves: [["900"]], slots: 1 })]);
   const archiveDir = join(betaDir, "logs", "archive");
   mkdirSync(archiveDir, { recursive: true });
   writeJsonl(join(archiveDir, "orchestrator-2026-01-01T00-00-00-000Z.jsonl"), [
-    event("campaign-start", { batches: [["101"]], titles: { "101": "old work" }, slots: 1 }),
+    event("campaign-start", { waves: [["101"]], titles: { "101": "old work" }, slots: 1 }),
     event("turn", {
       ts: "2026-01-01T00:01:00.000Z",
       taskId: "101",
@@ -1540,7 +1540,7 @@ test("serveAllStatus GET /api/issue reads an archived run's own log when a run t
       summary: "did the thing",
     }),
     event("green", { ts: "2026-01-01T00:02:00.000Z", taskId: "101", branch: "agent/101", commits: [] }),
-    event("campaign-done", { batches: 1 }),
+    event("campaign-done", { waves: 1 }),
   ]);
   register(configDir, {
     project: "beta",
@@ -1588,13 +1588,13 @@ test("serveAllStatus GET /api/issue reads an archived run's own log when a run t
 test("serveAllStatus no longer serves GET /archive/log — the route is removed (#222)", async () => {
   const configDir = join(tmpdir(), `vetinari-archive-log-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
-  seedState(betaDir, [event("campaign-start", { batches: [["201"]], slots: 1 })]);
+  seedState(betaDir, [event("campaign-start", { waves: [["201"]], slots: 1 })]);
   const archiveDir = join(betaDir, "logs", "archive");
   mkdirSync(archiveDir, { recursive: true });
   const raw =
     [
-      event("campaign-start", { batches: [["101"], ["102"]], slots: 1 }),
-      event("campaign-done", { batches: 2 }),
+      event("campaign-start", { waves: [["101"], ["102"]], slots: 1 }),
+      event("campaign-done", { waves: 2 }),
     ]
       .map((e) => JSON.stringify(e))
       .join("\n") + "\n";

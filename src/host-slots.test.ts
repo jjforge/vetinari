@@ -3,31 +3,13 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { cpus, tmpdir } from "node:os";
 import { join } from "node:path";
-import { acquireSlot, deregisterProject, fairShare, machineDefaultCeiling, projectHasLiveLease, readLeases, registerProject, releaseSlot, reserveFestiveBlock, resolveHostCeiling } from "./host-slots.ts";
+import { acquireSlot, deregisterProject, fairShare, machineDefaultCeiling, projectHasLiveLease, readLeases, registerProject, releaseSlot, resolveHostCeiling } from "./host-slots.ts";
 
 const freshDir = () => mkdtempSync(join(tmpdir(), "vetinari-slots-"));
 const alive = () => true;
 
 test("a project running alone gets the whole budget", () => {
   assert.equal(fairShare(8, { solo: 1 }, "solo"), 8);
-});
-
-test("reserveFestiveBlock hands out contiguous, non-overlapping blocks from a host cursor (#193)", () => {
-  const dir = freshDir();
-  // The first reservation starts at 0 and advances the cursor by the wave count.
-  assert.equal(reserveFestiveBlock(dir, 5), 0);
-  // The next campaign gets a disjoint block starting where the last left off — two
-  // concurrent campaigns can never share a name.
-  assert.equal(reserveFestiveBlock(dir, 3), 5);
-  assert.equal(reserveFestiveBlock(dir, 2), 8);
-  // The cursor persists on disk across calls (a fresh read continues the walk).
-  assert.equal(reserveFestiveBlock(dir, 1), 10);
-});
-
-test("reserveFestiveBlock starts a fresh host at zero and tolerates a zero-wave reservation (#193)", () => {
-  const dir = freshDir();
-  assert.equal(reserveFestiveBlock(dir, 0), 0);
-  assert.equal(reserveFestiveBlock(dir, 4), 0);
 });
 
 test("when active projects outnumber the budget, floors go to the heaviest and the rest get zero", () => {

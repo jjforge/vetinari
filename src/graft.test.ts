@@ -33,12 +33,12 @@ const harnessCfg = (
   } as unknown as ResolvedConfig;
 };
 
-// Seed a running campaign onto the temp log: `campaign-start` with wave batches
-// (unsettled — no member merged, so the fold reads it as open) plus a `campaign-batch`
+// Seed a running campaign onto the temp log: `campaign-start` with waves
+// (unsettled — no member merged, so the fold reads it as open) plus a `wave-start`
 // marking wave 0 in-flight — so grafts land in a *future* wave, as they do live.
 const launch = (cfg: ResolvedConfig, batches: string[][]) => {
-  cfg.log.log("campaign-start", { batches, slots: 4 });
-  cfg.log.log("campaign-batch", { index: 0, tasks: batches[0] });
+  cfg.log.log("campaign-start", { waves: batches, slots: 4 });
+  cfg.log.log("wave-start", { index: 0, tasks: batches[0] });
 };
 
 test("graft with no ids is rejected before any campaign lookup", async () => {
@@ -61,17 +61,17 @@ test("graft onto a settled campaign (every member merged) is rejected", async ()
   // Every wave merged and closed — the fold reads `completed`, so the campaign is
   // settled and refuses a graft, even with no `campaign-done` on the log.
   const cfg = harnessCfg();
-  cfg.log.log("campaign-start", { batches: [["101"]], slots: 4 });
-  cfg.log.log("campaign-batch-done", { index: 0, merged: ["101"], held: [], clearedParked: [] });
+  cfg.log.log("campaign-start", { waves: [["101"]], slots: 4 });
+  cfg.log.log("wave-done", { index: 0, merged: ["101"], held: [], clearedParked: [] });
 
   await assert.rejects(() => runGraft(cfg, ["301"], {}), /settled/);
 });
 
 test("graft proceeds on a campaign parked and stopped with no campaign-done", async () => {
   const cfg = harnessCfg();
-  cfg.log.log("campaign-start", { batches: [["101"]], slots: 4 });
-  cfg.log.log("campaign-batch", { index: 0, tasks: ["101"] });
-  cfg.log.log("parked", { taskId: "101", reason: "needs a decision" });
+  cfg.log.log("campaign-start", { waves: [["101"]], slots: 4 });
+  cfg.log.log("wave-start", { index: 0, tasks: ["101"] });
+  cfg.log.log("parked", { taskId: "101", reason: "question" });
 
   const result = await runGraft(cfg, ["301"], {});
   assert.equal(result.applied, true);
@@ -80,9 +80,9 @@ test("graft proceeds on a campaign parked and stopped with no campaign-done", as
 
 test("graft proceeds on a campaign that failed and stopped with no campaign-done", async () => {
   const cfg = harnessCfg();
-  cfg.log.log("campaign-start", { batches: [["101"]], slots: 4 });
-  cfg.log.log("campaign-batch", { index: 0, tasks: ["101"] });
-  cfg.log.log("queue-done", { outcomes: { "101": "error(1)" } });
+  cfg.log.log("campaign-start", { waves: [["101"]], slots: 4 });
+  cfg.log.log("wave-start", { index: 0, tasks: ["101"] });
+  cfg.log.log("failed", { taskId: "101", detail: "error(1)" });
 
   const result = await runGraft(cfg, ["301"], {});
   assert.equal(result.applied, true);
@@ -91,9 +91,9 @@ test("graft proceeds on a campaign that failed and stopped with no campaign-done
 
 test("graft proceeds on a running campaign", async () => {
   const cfg = harnessCfg();
-  cfg.log.log("campaign-start", { batches: [["101"]], slots: 4 });
-  cfg.log.log("campaign-batch", { index: 0, tasks: ["101"] });
-  cfg.log.log("queue-start", { taskIds: ["101"], slots: 4 });
+  cfg.log.log("campaign-start", { waves: [["101"]], slots: 4 });
+  cfg.log.log("wave-start", { index: 0, tasks: ["101"] });
+  cfg.log.log("spawn", { taskId: "101" });
 
   const result = await runGraft(cfg, ["301"], {});
   assert.equal(result.applied, true);

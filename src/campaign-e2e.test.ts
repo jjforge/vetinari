@@ -29,8 +29,8 @@ import { makeLocalSandbox, type LocalAgentScript } from "./sandbox-local.ts";
 // a green-but-unmerged member without re-running it.
 //
 // Note on vocabulary: the design's §13.2 rename (`campaign-batch`→`wave-start`,
-// `quarantined`→`parked{conflict}`, the `campaign-*` stop markers) is a future
-// consolidation; the events asserted here are the ones the code emits TODAY.
+// `quarantined`→`parked{conflict}`, the `campaign-*` stop markers) has landed;
+// the events asserted here are that current §2.1 vocabulary.
 
 /** A fresh repo on `base` seeding README.md + a CHANGELOG.md the folder folds into. */
 function seedRepo(): string {
@@ -231,13 +231,13 @@ test("scenario 5: a merge conflict quarantines that member (its work preserved) 
   // branch (work) preserved and resumable.
   assert.equal(gitOut(dir, ["show", "base:conflict.txt"]), "resolved by 101");
   assert.equal(gitOut(dir, ["branch", "--list", "agent/101"]), "");
-  const q = events.find((e: any) => e.event === "quarantined");
-  assert.ok(q, "expected a quarantined event for the losing member");
+  const q = events.find((e: any) => e.event === "parked" && e.reason === "conflict");
+  assert.ok(q, "expected a parked{conflict} event for the losing member");
   assert.equal((q as any).taskId, "102");
   assert.equal(gitOut(dir, ["branch", "--list", "agent/102"]), "agent/102", "the conflicted member's work is preserved");
 
   // The wave closed carrying the quarantine, and the campaign finished.
-  const done = events.find((e: any) => e.event === "campaign-batch-done");
+  const done = events.find((e: any) => e.event === "wave-done");
   assert.ok(done, "the wave closed");
   assert.deepEqual((done as any).merged, ["101"], "the rest of the wave merged");
   assert.deepEqual((done as any).quarantined, ["102"], "the conflicted member is recorded as quarantined");
@@ -290,7 +290,7 @@ test("scenario 1: two all-green waves merge in order, the base is gated between 
   const events = readEventLog(cfg);
 
   // Both waves ran, in order.
-  const batches = events.filter((e: any) => e.event === "campaign-batch").map((e: any) => e.tasks);
+  const batches = events.filter((e: any) => e.event === "wave-start").map((e: any) => e.tasks);
   assert.deepEqual(batches, [["101"], ["102"]], "the two waves ran in order");
 
   // Each wave integrated its green, in order — integrateGreens logs one per wave.
@@ -323,7 +323,7 @@ test("scenario 3: a failed member drains its wave — the sibling merges — the
   const events = readEventLog(cfg);
 
   // Only wave 0 ran — the failure held the wave and no succeeding wave started.
-  const batches = events.filter((e: any) => e.event === "campaign-batch").map((e: any) => e.index);
+  const batches = events.filter((e: any) => e.event === "wave-start").map((e: any) => e.index);
   assert.deepEqual(batches, [0], "only wave 0 ran — no succeeding wave started");
   assert.equal(gitOut(dir, ["branch", "--list", "agent/201"]), "", "the succeeding wave's issue never ran");
 
@@ -331,13 +331,20 @@ test("scenario 3: a failed member drains its wave — the sibling merges — the
   assert.equal(gitOut(dir, ["show", "base:impl-101.txt"]), "impl for 101");
   assert.equal(gitOut(dir, ["branch", "--list", "agent/101"]), "");
 
-  // The campaign stopped as failed, naming the merged green and the failed member.
+  // The campaign stopped as failed: one `campaign-failed` stop marker naming the wave and member.
   const failed = events.filter((e) => e.event === "campaign-failed") as any[];
   assert.equal(failed.length, 1, "exactly one campaign-failed stop marker");
-  assert.deepEqual(failed[0].merged, ["101"], "the green stayed merged on the base");
-  assert.deepEqual(failed[0].failed, ["102"], "the failed member is named");
+  assert.equal(failed[0].index, 0, "the stop marker names the wave that failed");
+  assert.ok(String(failed[0].detail).includes("102"), "the stop marker's detail names the failed member");
+  // The failed member is carried by its own `failed` event (design §2.1).
+  const failedMember = events.find((e) => e.event === "failed") as any;
+  assert.ok(failedMember, "the failed member has its own failed event");
+  assert.equal(failedMember.taskId, "102");
+  // The sibling green stayed merged on the base — a `merged` event names it.
+  const mergedMembers = events.filter((e) => e.event === "merged").map((e: any) => e.taskId);
+  assert.deepEqual(mergedMembers, ["101"], "the green stayed merged on the base");
   // The wave holds, it does not close.
-  assert.equal(events.some((e) => e.event === "campaign-batch-done"), false, "the failed wave is not logged done");
+  assert.equal(events.some((e) => e.event === "wave-done"), false, "the failed wave is not logged done");
   assert.equal(events.some((e) => e.event === "campaign-done"), false);
 });
 

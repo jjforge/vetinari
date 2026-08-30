@@ -374,10 +374,10 @@ test("dispatch answer posts a comment and re-enters fresh for a non-resumable ag
 // A paused campaign's event log where issue 436 (its only member) parked then, after the
 // answer, ran to green — the wave never closed, so a redrive still has work to land.
 const pausedCampaignAfterGreen = () => [
-  { event: "campaign-start", batches: [["436"]] },
-  { event: "campaign-batch", index: 0, tasks: ["436"] },
-  { event: "parked", taskId: "436", reason: "blocked" },
-  { event: "wave-parked", merged: [], detail: "parked: 436" },
+  { event: "campaign-start", waves: [["436"]] },
+  { event: "wave-start", index: 0, tasks: ["436"] },
+  { event: "parked", taskId: "436", reason: "question" },
+  { event: "campaign-parked", index: 0, detail: "parked: 436" },
   { event: "green", taskId: "436", branch: "agent/436" },
 ];
 

@@ -46,7 +46,7 @@ const project = (over: Partial<GatewayProject> = {}): GatewayProject => ({
 const parked = (over: Partial<ParkedRecord> = {}): ParkedRecord => ({
   taskId: "640",
   parkedAt: "2026-08-22T00:00:00.000Z",
-  reason: "blocked",
+  reason: "question",
   sessionId: "s",
   branch: "agent/640",
   question: "Which approach?",
@@ -466,13 +466,13 @@ test("supervisePolls tears down a rotated-away token's loop and starts its repla
 
 test("formatGatewayStatus summarizes each served project and its parked questions", () => {
   const text = formatGatewayStatus([
-    project({ project: "alpha", parked: [parked({ taskId: "A1", reason: "blocked" }), parked({ taskId: "A2", reason: "budget" })] }),
+    project({ project: "alpha", parked: [parked({ taskId: "A1", reason: "question" }), parked({ taskId: "A2", reason: "stalled" })] }),
     project({ project: "beta", parked: [] }),
   ]);
 
   assert.match(text, /alpha/);
   assert.match(text, /A1/);
-  assert.match(text, /blocked/);
+  assert.match(text, /question/);
   assert.match(text, /A2/);
   assert.match(text, /beta/);
   // beta has nothing parked — it still appears, marked as having no questions.
@@ -492,7 +492,7 @@ test("loadGatewayProjects reads each live project's connection and parked record
   writeFileSync(join(base, "host.env"), "VETINARI_TELEGRAM_BOT_TOKEN=tok\nVETINARI_TELEGRAM_CHAT_ID=chat\n");
   writeFileSync(
     join(base, "parked", "A1.json"),
-    JSON.stringify({ taskId: "A1", parkedAt: "t1", reason: "blocked", sessionId: "s", branch: "agent/A1", question: "?" }),
+    JSON.stringify({ taskId: "A1", parkedAt: "t1", reason: "question", sessionId: "s", branch: "agent/A1", question: "?" }),
   );
   register(configDir, { project: "alpha", projectRoot: "/home/me/alpha", baseLocation: base });
 

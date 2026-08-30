@@ -199,7 +199,7 @@ export async function runLoop(cfg: ResolvedConfig, taskId: string, entry?: Resum
           appendActivity(cfg.stateDir, taskId, event("commit", { taskId, branch: sbx.branch, sha: c.sha, files: deps.filesInCommit(c.sha, cfg.log) }));
 
         if (r.completionSignal === BLOCKED) {
-          await park(cfg, { taskId, reason: "blocked", sessionId, branch: sbx.branch, question: extractQuestion(r.stdout ?? "") });
+          await park(cfg, { taskId, reason: "question", sessionId, branch: sbx.branch, question: extractQuestion(r.stdout ?? "") });
           return "parked";
         }
 
@@ -215,7 +215,8 @@ export async function runLoop(cfg: ResolvedConfig, taskId: string, entry?: Resum
             cfg.log.log("empty-green", { taskId, branch: sbx.branch });
             await park(cfg, {
               taskId,
-              reason: "no-commit",
+              reason: "stalled",
+              detail: "no-commit",
               sessionId,
               branch: sbx.branch,
               question: `The gate passed but ${sbx.branch} has no commit beyond ${cfg.baseBranch} — the agent produced no change. Likely a no-op, or the task needs clarification before it can be done.`,
@@ -259,14 +260,14 @@ export async function runLoop(cfg: ResolvedConfig, taskId: string, entry?: Resum
         }
       }
 
-      await park(cfg, { taskId, reason: "budget", sessionId: r.iterations.at(-1)?.sessionId, branch: sbx.branch, question: `Turn budget exhausted (${cfg.maxTurns} gate cycles).` });
+      await park(cfg, { taskId, reason: "stalled", detail: "budget", sessionId: r.iterations.at(-1)?.sessionId, branch: sbx.branch, question: `Turn budget exhausted (${cfg.maxTurns} gate cycles).` });
       return "parked";
     } catch (err: any) {
       // An agent that emits NEITHER signal dies on the idle timeout as a thrown
       // error, not a result. Without this catch the slot leaves no parked
       // record and the work is unrecoverable.
       if (String(err?.name ?? err?.constructor?.name).includes("Idle")) {
-        await park(cfg, { taskId, reason: "idle-timeout", sessionId: err?.sessionId, branch: sbx.branch, question: "Agent stalled without emitting a signal." });
+        await park(cfg, { taskId, reason: "stalled", detail: "idle", sessionId: err?.sessionId, branch: sbx.branch, question: "Agent stalled without emitting a signal." });
         return "parked";
       }
       throw err;

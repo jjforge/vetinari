@@ -329,12 +329,12 @@ const harnessCfg = (overrides: Partial<ResolvedConfig> = {}): ResolvedConfig => 
   } as unknown as ResolvedConfig;
 };
 
-// Seed a running campaign onto the temp log: `campaign-start` with wave batches
-// (unsettled — no member merged, so the fold reads it as open) plus a `campaign-batch`
+// Seed a running campaign onto the temp log: `campaign-start` with waves
+// (unsettled — no member merged, so the fold reads it as open) plus a `wave-start`
 // marking wave 0 in-flight.
 const launch = (cfg: ResolvedConfig, batches: string[][]) => {
-  cfg.log.log("campaign-start", { batches, slots: 4 });
-  cfg.log.log("campaign-batch", { index: 0, tasks: batches[0] });
+  cfg.log.log("campaign-start", { waves: batches, slots: 4 });
+  cfg.log.log("wave-start", { index: 0, tasks: batches[0] });
 };
 
 test("runPrune rejects a missing target before any campaign lookup", async () => {
@@ -362,9 +362,9 @@ test("runPrune rejects a prune when the campaign is settled (every member merged
   // Every wave merged and closed — the fold reads `completed`, so the campaign is
   // settled and refuses adjustment, even though the log carries no `campaign-done`.
   const cfg = harnessCfg();
-  cfg.log.log("campaign-start", { batches: [["101"], ["640"]], slots: 4 });
-  cfg.log.log("campaign-batch-done", { index: 0, merged: ["101"], held: [], clearedParked: [] });
-  cfg.log.log("campaign-batch-done", { index: 1, merged: ["640"], held: [], clearedParked: [] });
+  cfg.log.log("campaign-start", { waves: [["101"], ["640"]], slots: 4 });
+  cfg.log.log("wave-done", { index: 0, merged: ["101"], held: [], clearedParked: [] });
+  cfg.log.log("wave-done", { index: 1, merged: ["640"], held: [], clearedParked: [] });
 
   await assert.rejects(() => runPrune(cfg, "640", {}), /settled/);
 });
@@ -373,9 +373,9 @@ test("runPrune proceeds on a campaign parked and stopped with no campaign-done",
   // Wave 0 parked and the run stopped; wave 1's 640 is still unstarted. The campaign
   // is unsettled, so a prune of 640 takes effect.
   const cfg = harnessCfg();
-  cfg.log.log("campaign-start", { batches: [["101"], ["640"]], slots: 4 });
-  cfg.log.log("campaign-batch", { index: 0, tasks: ["101"] });
-  cfg.log.log("parked", { taskId: "101", reason: "needs a decision" });
+  cfg.log.log("campaign-start", { waves: [["101"], ["640"]], slots: 4 });
+  cfg.log.log("wave-start", { index: 0, tasks: ["101"] });
+  cfg.log.log("parked", { taskId: "101", reason: "question" });
 
   const result = await runPrune(cfg, "640", {});
   assert.equal(result.mode, "prune");
@@ -387,9 +387,9 @@ test("runPrune proceeds on a campaign that failed and stopped with no campaign-d
   // Wave 0's member errored out; wave 1's 640 is unstarted. A failed run is unsettled,
   // so a prune of 640 takes effect.
   const cfg = harnessCfg();
-  cfg.log.log("campaign-start", { batches: [["101"], ["640"]], slots: 4 });
-  cfg.log.log("campaign-batch", { index: 0, tasks: ["101"] });
-  cfg.log.log("queue-done", { outcomes: { "101": "error(1)" } });
+  cfg.log.log("campaign-start", { waves: [["101"], ["640"]], slots: 4 });
+  cfg.log.log("wave-start", { index: 0, tasks: ["101"] });
+  cfg.log.log("failed", { taskId: "101", detail: "error(1)" });
 
   const result = await runPrune(cfg, "640", {});
   assert.equal(result.mode, "prune");
@@ -398,12 +398,12 @@ test("runPrune proceeds on a campaign that failed and stopped with no campaign-d
 });
 
 test("runPrune proceeds on a running campaign", async () => {
-  // Wave 0 in flight (queue-start, no outcomes yet); wave 1's 640 is unstarted. A
+  // Wave 0 in flight (spawned, no outcome yet); wave 1's 640 is unstarted. A
   // running campaign is unsettled, so a prune of 640 takes effect.
   const cfg = harnessCfg();
-  cfg.log.log("campaign-start", { batches: [["101"], ["640"]], slots: 4 });
-  cfg.log.log("campaign-batch", { index: 0, tasks: ["101"] });
-  cfg.log.log("queue-start", { taskIds: ["101"], slots: 4 });
+  cfg.log.log("campaign-start", { waves: [["101"], ["640"]], slots: 4 });
+  cfg.log.log("wave-start", { index: 0, tasks: ["101"] });
+  cfg.log.log("spawn", { taskId: "101" });
 
   const result = await runPrune(cfg, "640", {});
   assert.equal(result.mode, "prune");
@@ -468,9 +468,9 @@ test("runPrune appends the prune event with its closure and enqueues a progress:
 
 test("runPrune preserves a dropped parked member's record by default", async () => {
   const cfg = harnessCfg();
-  cfg.log.log("campaign-start", { batches: [["101"], ["701"]], slots: 4 });
-  cfg.log.log("campaign-batch", { index: 0, tasks: ["101"] });
-  cfg.log.log("parked", { taskId: "701", reason: "needs attention" });
+  cfg.log.log("campaign-start", { waves: [["101"], ["701"]], slots: 4 });
+  cfg.log.log("wave-start", { index: 0, tasks: ["101"] });
+  cfg.log.log("parked", { taskId: "701", reason: "question" });
 
   const cleared: string[][] = [];
   const result = await runPrune(cfg, "701", {}, {
@@ -487,9 +487,9 @@ test("runPrune preserves a dropped parked member's record by default", async () 
 
 test("runPrune --purge clears a dropped parked member's record", async () => {
   const cfg = harnessCfg();
-  cfg.log.log("campaign-start", { batches: [["101"], ["701"]], slots: 4 });
-  cfg.log.log("campaign-batch", { index: 0, tasks: ["101"] });
-  cfg.log.log("parked", { taskId: "701", reason: "needs attention" });
+  cfg.log.log("campaign-start", { waves: [["101"], ["701"]], slots: 4 });
+  cfg.log.log("wave-start", { index: 0, tasks: ["101"] });
+  cfg.log.log("parked", { taskId: "701", reason: "question" });
 
   const cleared: string[][] = [];
   const result = await runPrune(cfg, "701", { purge: true }, {

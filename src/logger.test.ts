@@ -43,11 +43,11 @@ test("memoryLogger captures typed events, writing nothing to disk and echoing no
   try {
     const logger = memoryLogger();
     logger.log("green", { taskId: "42", branch: "agent/42", commits: ["abc"] });
-    logger.log("parked", { taskId: "7", reason: "budget" });
+    logger.log("parked", { taskId: "7", reason: "stalled" });
 
     assert.equal(logger.events.length, 2);
     assert.equal(logger.events[0].event, "green");
-    assert.deepEqual(logger.events[1], { ts: logger.events[1].ts, event: "parked", taskId: "7", reason: "budget" });
+    assert.deepEqual(logger.events[1], { ts: logger.events[1].ts, event: "parked", taskId: "7", reason: "stalled" });
   } finally {
     console.log = before;
   }

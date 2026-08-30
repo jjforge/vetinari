@@ -19,7 +19,7 @@ const cfgFor = (): ResolvedConfig => {
 test("archiveRun moves the log aside, resets it, and clears parked records", () => {
   const cfg = cfgFor();
   writeFileSync(cfg.logFile, '{"event":"campaign-start","batches":[["101"]]}\n{"event":"green","taskId":"101"}\n');
-  writeFileSync(join(cfg.parkedDir, "202.json"), JSON.stringify({ taskId: "202", reason: "blocked", branch: "agent/202", sessionId: "s", question: "?" }));
+  writeFileSync(join(cfg.parkedDir, "202.json"), JSON.stringify({ taskId: "202", reason: "question", branch: "agent/202", sessionId: "s", question: "?" }));
 
   const result = archiveRun(cfg);
 
@@ -93,7 +93,7 @@ test("shouldArchiveLeftover: a top-level run still archives a genuine leftover (
 
 test("archiveRun handles a missing or empty log without creating an archive", () => {
   const cfg = cfgFor();
-  writeFileSync(join(cfg.parkedDir, "1.json"), JSON.stringify({ taskId: "1", reason: "blocked", branch: "b", sessionId: "s", question: "?" }));
+  writeFileSync(join(cfg.parkedDir, "1.json"), JSON.stringify({ taskId: "1", reason: "question", branch: "b", sessionId: "s", question: "?" }));
 
   const result = archiveRun(cfg);
 

@@ -15,7 +15,7 @@
  * raw JSON dump and never a blank row (#221).
  */
 import { describeEvent } from "./dashboard-model.ts";
-import type { OrchestratorEvent } from "./event-log.ts";
+import { normalizeLegacyEvent, type OrchestratorEvent } from "./event-log.ts";
 
 /**
  * The dot state a humanized row carries — the event's own state, from the ADR-0007 /
@@ -133,7 +133,12 @@ export function humanizeLogLine(raw: string): HumanizedRow {
   let e: Record<string, unknown> | null = null;
   try {
     const parsed: unknown = JSON.parse(raw);
-    if (parsed && typeof parsed === "object") e = parsed as Record<string, unknown>;
+    if (parsed && typeof parsed === "object") {
+      e = parsed as Record<string, unknown>;
+      // Speak the current §2.1 vocabulary: an archived line in a retired name is translated
+      // through the one alias table (design §13.2) before the registry keys on its `event`.
+      if (typeof e.event === "string") e = (normalizeLegacyEvent(e as { event: string }) as unknown as Record<string, unknown>[])[0] ?? e;
+    }
   } catch {
     e = null;
   }
@@ -190,25 +195,28 @@ export function humanizeLogLine(raw: string): HumanizedRow {
       return { time, actor: actorOf(e.taskId), verb: "turn " + (e.turn ?? "?"), spans: summary ? [strong(summary)] : [], dot: "running" };
     }
     case "green":
+    case "merged":
       return { time, actor: actorOf(e.taskId), verb: "merged", spans: [], dot: "merged" };
+    // A merge-conflict park carries reason `conflict` (design §2.3); the log names it
+    // `parked — merge conflict`, never the retired status word.
     case "parked":
-      return { time, actor: actorOf(e.taskId), verb: "parked", spans: e.reason ? [plain(": "), strong(String(e.reason))] : [], dot: "parked" };
-    // A merge-conflict quarantine is a held (parked) state with reason `conflict` (ADR 0019);
-    // the log names the event as `parked — merge conflict`, never the retired status word.
-    case "quarantined":
-      return { time, actor: actorOf(e.taskId), verb: "parked", spans: [plain("— merge conflict, resolve it")], dot: "parked" };
+      return e.reason === "conflict"
+        ? { time, actor: actorOf(e.taskId), verb: "parked", spans: [plain("— merge conflict, resolve it")], dot: "parked" }
+        : { time, actor: actorOf(e.taskId), verb: "parked", spans: e.reason ? [plain(": "), strong(String(e.reason))] : [], dot: "parked" };
+    case "failed":
+      return { time, actor: actorOf(e.taskId), verb: "failed", spans: [], dot: "failure" };
     // Run-level campaign/wave kinds — no per-issue actor; the message is single-sourced from
     // `describeEvent` so the log view and the feed narrate them identically, and the dot reads
-    // the comms colour (a success green, a wave-parked amber, a start blue).
-    case "campaign-batch-done":
+    // the comms colour (a success green, a parked amber, a start blue).
+    case "wave-done":
     case "campaign-done":
-    case "queue-done":
       return narrated("merged");
-    case "wave-parked":
+    case "campaign-parked":
       return narrated("parked");
+    case "campaign-failed":
+      return narrated("failure");
     case "campaign-start":
-    case "campaign-batch":
-    case "queue-start":
+    case "wave-start":
       return narrated("running");
     case "prune":
     case "graft":

@@ -2,12 +2,10 @@ import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import type { MessageCategory, ResolvedConfig } from "./config.ts";
 import type {
-  CampaignBatchDoneEvent,
-  CampaignBatchEvent,
   CampaignDoneEvent,
-  CampaignFailedEvent,
   CampaignStartEvent,
-  QueueStartEvent,
+  WaveDoneEvent,
+  WaveStartEvent,
 } from "./event-log.ts";
 import { runGates } from "./gate.ts";
 import { makeSandbox } from "./sandbox.ts";
@@ -32,7 +30,6 @@ import {
   deregisterProject,
   registerProject,
   releaseSlot,
-  reserveFestiveBlock,
   type HostBudget,
 } from "./host-slots.ts";
 
@@ -254,23 +251,12 @@ export async function queue(
   // never wrote a record is never re-admitted — no self-respawn loop.
   const parkedWithRecord = new Set<string>();
   let running = 0;
-  // A standalone queue run records its own issue titles on the start event so the
-  // dashboard names them with no lookup (ADR 0002); inside a campaign the caller
-  // already wrote them onto `campaign-start` and passes them here, so we neither
-  // re-resolve nor re-log them.
-  const startTitles =
-    titles === undefined ? await resolveTitles(cfg, taskIds) : undefined;
   // Only a standalone queue warns here; inside a campaign the caller passes `titles`
   // and has already warned once at campaign start, so we don't repeat it per wave.
   if (titles === undefined) warnIfTelegramUnconfigured(cfg);
-  const startLog: Omit<QueueStartEvent, "ts" | "event"> = {
-    taskIds,
-    slots: host.ceiling,
-    hostBudget: host.ceiling,
-  };
-  if (startTitles && Object.keys(startTitles).length)
-    startLog.titles = startTitles;
-  cfg.log.log("queue-start", startLog);
+  // No `queue-start` event (design §2.1): the campaign's `wave-start` frames the wave and
+  // each task announces itself with a `spawn`. The issue titles the dashboard names chips
+  // by were recorded once on `campaign-start` by the caller, so this drain records nothing.
   enqueueOutbound(cfg, {
     category: "progress",
     event: "queue-start",
@@ -314,16 +300,20 @@ export async function queue(
         ) {
           const next = pending.shift()!;
           running++;
-          cfg.log.log("queue-spawn", { taskId: next, running, left: pending.length });
+          cfg.log.log("spawn", { taskId: next, running, left: pending.length });
           spawnRun(next).then((code) => {
             running--;
             releaseSlot(host.configDir);
             outcomes[next] =
               code === 0 ? "green" : code === 2 ? "parked" : `error(${code})`;
+            // A member the agent could not make green (a non-zero, non-park exit) is a terminal
+            // failure (design §2.1): record it so the reducer folds the wave to `failed` even
+            // though the run itself logged no verdict.
+            if (outcomes[next].startsWith("error"))
+              cfg.log.log("failed", { taskId: next, detail: outcomes[next] });
             // A park with a live record is re-admittable if that record is later answered.
             if (outcomes[next] === "parked" && hasParked(cfg, next))
               parkedWithRecord.add(next);
-            cfg.log.log("queue-slot-freed", { taskId: next, outcome: outcomes[next] });
             fill();
           });
         }
@@ -346,7 +336,6 @@ export async function queue(
   }
 
   const summary = taskIds.map((i) => `${i}: ${outcomes[i] ?? "?"}`).join("\n");
-  cfg.log.log("queue-done", { outcomes });
   enqueueOutbound(cfg, {
     category: "progress",
     event: "queue-done",
@@ -648,7 +637,7 @@ export async function campaign(
     campaignName = reduced.name;
     index = resumeIndex(reduced);
     if (index >= reduced.waves.length) {
-      cfg.log.log("campaign-resume", { fromIndex: index, waves: reduced.waves.length, nothingLeft: true });
+      cfg.log.log("redrive", { fromWave: index });
       enqueueOutbound(cfg, {
         category: "progress",
         event: "campaign-resume",
@@ -657,7 +646,7 @@ export async function campaign(
       console.log("campaign --resume: nothing left to run — all waves already merged.");
       return true;
     }
-    cfg.log.log("campaign-resume", { fromIndex: index, waves: reduced.waves.length });
+    cfg.log.log("redrive", { fromWave: index });
     enqueueOutbound(cfg, {
       category: "progress",
       event: "campaign-resume",
@@ -672,15 +661,13 @@ export async function campaign(
     // omits them and degrades to `number:status`.
     titles = await resolveTitles(cfg, batches.flat());
     campaignName = name;
-    // Reserve this campaign's festive-name block from the host cursor (#193): the plan's
-    // wave count is known now, so stamp the reserved offset onto `campaign-start` (read
-    // back on resume alongside the name) and let the cursor advance past it — concurrent
-    // campaigns draw disjoint blocks. The reservation is unconditional (a cheap integer):
-    // the "Festive Wave Names" toggle only decides whether the dashboard renders the names.
+    // Record the plan, the slot budget, and — once — the optional `--name` and the id→title
+    // map, so the dumb-router dashboard names every wave and chip with no lookup of its own
+    // (design §2.1, ADR 0002). No presentation state is written: the festive wave name is
+    // derived at render from this event's timestamp, not a cursor stamped here.
     const startEvent: Omit<CampaignStartEvent, "ts" | "event"> = {
-      batches,
+      waves: batches,
       slots: host.ceiling,
-      festiveOffset: reserveFestiveBlock(host.configDir, batches.length),
     };
     if (name) startEvent.name = name;
     if (Object.keys(titles).length) startEvent.titles = titles;
@@ -706,10 +693,8 @@ export async function campaign(
     if (index >= waves.length) break;
     const tasks = waves[index];
     const total = waves.length;
-    const batchEvent: Omit<CampaignBatchEvent, "ts" | "event"> = { index, tasks };
-    if (campaignName) batchEvent.name = campaignName;
-    if (Object.keys(titles).length) batchEvent.titles = titles;
-    cfg.log.log("campaign-batch", batchEvent);
+    const waveEvent: Omit<WaveStartEvent, "ts" | "event"> = { index, tasks };
+    cfg.log.log("wave-start", waveEvent);
     enqueueOutbound(cfg, {
       category: "progress",
       event: "wave-start",
@@ -755,13 +740,14 @@ export async function campaign(
     const greens = tasks.filter((t) => outcomes[t] === "green");
     const held = tasks.filter((t) => outcomes[t] !== "green");
 
-    const { merged, quarantined, parked } = await deps.integrate(cfg, greens);
+    const { merged, quarantined, parked } = await deps.integrate(cfg, greens, undefined, index);
     if (parked) {
-      // Wave-park (ADR 0013): the merged base gated red with no attributable culprit, so
-      // `integrateGreens` left the greens merged (never a rollback) and logged the
-      // `wave-parked` event. Draw a human's attention and pause the campaign — no
-      // changelog fold and no `pending-verify` labels for this wave, since a red base
-      // verifies nothing; those wait for the human to resolve it green and resume.
+      // Red-base campaign-park (design §2.3): the merged base gated red with no attributable
+      // culprit, so `integrateGreens` left the greens merged (never a rollback). Log the
+      // `campaign-parked` stop marker with this wave's index, draw a human's attention, and
+      // pause the campaign — no changelog fold and no `pending-verify` labels for this wave,
+      // since a red base verifies nothing; those wait for the human to resolve it green and resume.
+      cfg.log.log("campaign-parked", { index, detail: parked.detail });
       enqueueOutbound(cfg, waveParkedNotice(cfg.project, index + 1, merged, cfg.baseBranch, parked.detail));
       console.log(
         `campaign wave-parked (${parked.reason}) at batch ${index + 1}/${total} — greens left merged, base paused, ${total - index - 1} batch(es) not started. Fix forward and \`campaign --resume\`, or \`prune <issue>\`.`,
@@ -796,9 +782,10 @@ export async function campaign(
     // `campaign-batch-done`: the wave holds, it does not close, and no later wave starts.
     const failed = tasks.filter((t) => outcomes[t]?.startsWith("error"));
     if (failed.length) {
-      const failedEvent: Omit<CampaignFailedEvent, "ts" | "event"> = { merged, failed };
-      if (campaignName) failedEvent.name = campaignName;
-      cfg.log.log("campaign-failed", failedEvent);
+      // The per-task `failed` events were logged as each member exited non-zero (in `queue`);
+      // here the campaign records the `campaign-failed` stop marker with the wave index, which
+      // `reduceCampaign` reads to hold the wave (design §2.1).
+      cfg.log.log("campaign-failed", { index, detail: `${failed.join(", ")} failed` });
       enqueueOutbound(cfg, campaignFailedNotice(cfg.project, index + 1, merged, failed, cfg.baseBranch));
       console.log(
         `campaign failed at batch ${index + 1}/${total} — ${failed.join(", ")} failed, greens (${merged.join(", ") || "none"}) left merged, ${total - index - 1} batch(es) not started. Fix forward or \`prune <issue>\`.`,
@@ -822,7 +809,7 @@ export async function campaign(
       // human, and stop the campaign at the wave boundary so no succeeding wave builds on
       // unresolved work. Recovery is answer/resolve or prune, then `campaign --resume`.
       const detail = `parked, awaiting a human: ${parkedTasks.join(", ")}`;
-      cfg.log.log("wave-parked", { merged, detail });
+      cfg.log.log("campaign-parked", { index, detail });
       enqueueOutbound(cfg, waveParkedNotice(cfg.project, index + 1, merged, cfg.baseBranch, detail));
       console.log(
         `campaign wave-parked (issue parked) at batch ${index + 1}/${total} — greens (${merged.join(", ") || "none"}) left merged, base paused, ${total - index - 1} batch(es) not started. Answer/resolve the park and \`campaign --resume\`, or \`prune <issue>\`.`,
@@ -837,10 +824,8 @@ export async function campaign(
     const qNote = quarantined.length
       ? ` — quarantined on merge conflict (kept for you): ${quarantined.join(", ")}`
       : "";
-    const batchDoneEvent: Omit<CampaignBatchDoneEvent, "ts" | "event"> = { index, merged, held, clearedParked: held, quarantined };
-    if (campaignName) batchDoneEvent.name = campaignName;
-    if (Object.keys(titles).length) batchDoneEvent.titles = titles;
-    cfg.log.log("campaign-batch-done", batchDoneEvent);
+    const waveDoneEvent: Omit<WaveDoneEvent, "ts" | "event"> = { index, merged, held, clearedParked: held, quarantined };
+    cfg.log.log("wave-done", waveDoneEvent);
     enqueueOutbound(cfg, {
       category: "success",
       event: "wave-merged",
@@ -883,7 +868,7 @@ export async function campaign(
             .flatMap((i) => i.dropped)
             .map((d) => `#${d}`)
             .join(", ")} in later waves`;
-          cfg.log.log("wave-parked", { merged, detail });
+          cfg.log.log("campaign-parked", { index, detail });
           enqueueOutbound(cfg, quarantinePauseNotice(cfg.project, index + 1, orphaning, cfg.baseBranch));
           console.log(
             `campaign paused after batch ${index + 1}/${total} — quarantine stranded ${orphaning.flatMap((i) => i.dropped).map((d) => `#${d}`).join(", ")} in later waves; ${total - index - 1} batch(es) not started. Resolve and \`campaign --resume\`, or re-run with \`campaign --auto-prune\`.`,
@@ -894,7 +879,7 @@ export async function campaign(
     }
   }
 
-  const doneEvent: Omit<CampaignDoneEvent, "ts" | "event"> = { batches: index };
+  const doneEvent: Omit<CampaignDoneEvent, "ts" | "event"> = { waves: index };
   if (campaignName) doneEvent.name = campaignName;
   cfg.log.log("campaign-done", doneEvent);
   enqueueOutbound(cfg, {

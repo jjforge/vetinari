@@ -2,15 +2,16 @@
  * The festive wave-name roster and its pure lookup (#193). When "Festive Wave
  * Names" is on, a wave is labelled after a Discworld character instead of a bare
  * index. This module is pure — no I/O — so the naming is unit-testable and the
- * render/resume paths need no new machinery: a wave's name is a function of the
- * `festiveOffset` stamped on its campaign's `campaign-start` event plus the wave's
- * index within the campaign.
+ * render/resume paths need no new machinery: a wave's name is a function of a
+ * per-campaign `offset` plus the wave's index within the campaign.
+ *
+ * The offset is not stored (design §2.1: no cosmetic naming state on the durable
+ * log). It is derived at render from the campaign's `campaign-start` timestamp
+ * (`festiveOffsetFor`, dashboard-model.ts), so it is stable across every SSE
+ * re-render and disjoint between campaigns started at different times.
  *
  * The pool is **fixed order** (never re-shuffled per render): a wave's name is
- * derived, not stored, so it must be stable across every SSE re-render. Cooling-off
- * that spans campaigns is achieved outside this module — a host-level cursor reserves
- * a contiguous block of offsets per campaign — so concurrent campaigns draw disjoint
- * blocks and a name does not recur until the whole roster has been walked.
+ * derived, not stored, so it must stay stable. Extend by appending, never reordering.
  */
 
 /**

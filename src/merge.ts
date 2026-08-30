@@ -52,7 +52,7 @@ export interface IntegrateResult {
    * (a resumable pause) for a human to fix forward and resume, or prune a suspect
    * (ADR 0013). `detail` is the tail of the gate report.
    */
-  parked?: { reason: "gate-red"; detail: string };
+  parked?: { reason: "red-base"; detail: string };
 }
 
 /**
@@ -60,7 +60,7 @@ export interface IntegrateResult {
  * is unit-testable without a Docker sandbox. The default runs the real gate.
  */
 export interface IntegrateDeps {
-  gate: (cfg: ResolvedConfig) => Promise<{ green: boolean; report: string }>;
+  gate: (cfg: ResolvedConfig, index?: number) => Promise<{ green: boolean; report: string }>;
 }
 const defaultIntegrateDeps: IntegrateDeps = { gate: gateMergedBase };
 
@@ -87,6 +87,7 @@ export async function integrateGreens(
   cfg: ResolvedConfig,
   greens: string[],
   deps: IntegrateDeps = defaultIntegrateDeps,
+  index?: number,
 ): Promise<IntegrateResult> {
   const merged: string[] = [];
   const quarantined: string[] = [];
@@ -108,16 +109,18 @@ export async function integrateGreens(
       // quarantine the issue with its work preserved, and carry on with the rest.
       const detail = `${r.stdout}\n${r.stderr}`.trim().split("\n").slice(-12).join("\n");
       gitTry(["merge", "--abort"]);
-      cfg.log.log("quarantined", { taskId, branch, detail });
+      // A merge conflict is an integrator park with reason `conflict` (design §2.3): the
+      // issue's green stays banked, its branch/worktree/session preserved and resumable.
+      cfg.log.log("parked", { taskId, reason: "conflict", detail });
       quarantined.push(taskId);
       continue;
     }
-    cfg.log.log("campaign-merged", { taskId, branch });
+    cfg.log.log("merged", { taskId, branch });
     merged.push(taskId);
   }
 
   if (merged.length) {
-    const { green, report } = await deps.gate(cfg);
+    const { green, report } = await deps.gate(cfg, index);
     if (!green) {
       // Emergent, unattributable failure (ADR 0013): every green passed alone, the
       // combined base is red, so no branch is to blame. Do NOT `reset --hard` to the
@@ -125,9 +128,11 @@ export async function integrateGreens(
       // leave everything merged on the base and wave-park. The caller pauses the
       // campaign for a human to fix forward and resume, or prune a suspect. The base
       // sits red but is never pushed and nothing builds on it while paused.
+      // The combined base gated red with no attributable culprit (design §2.3): the greens
+      // stay merged and the campaign parks. The `base-gate` above already recorded the red
+      // result; the caller logs the `campaign-parked` stop marker with the wave index.
       const detail = report.split("\n").slice(-40).join("\n");
-      cfg.log.log("wave-parked", { merged, detail });
-      return { merged, quarantined, parked: { reason: "gate-red", detail } };
+      return { merged, quarantined, parked: { reason: "red-base", detail } };
     }
   }
 
@@ -176,11 +181,15 @@ export function collectWaveChangelog(waveIndex: number, log: Logger, root: strin
  * from HEAD (now carrying all the merges), so `all: true` verifies the combined
  * tree the same way `baseline` verifies a fresh one.
  */
-async function gateMergedBase(cfg: ResolvedConfig): Promise<{ green: boolean; report: string }> {
+async function gateMergedBase(cfg: ResolvedConfig, index?: number): Promise<{ green: boolean; report: string }> {
   const sbx = await makeSandbox(cfg, "campaign-integrate");
   try {
     const result = await runGates(cfg, sbx, { all: true });
-    cfg.log.log("campaign-merged-base-gate", { green: result.green });
+    cfg.log.log("base-gate", {
+      ...(index !== undefined ? { index } : {}),
+      green: result.green,
+      ...(result.green ? {} : { detail: result.report.split("\n").slice(-40).join("\n") }),
+    });
     return result;
   } finally {
     await sbx.close();

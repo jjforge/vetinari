@@ -59,7 +59,7 @@ const chipCampaign = () =>
       parked: [
         {
           issueNumber: "2",
-          reason: "blocked",
+          reason: "question",
           parkedAt: "2025-06-15T09:00:00.000Z",
           branch: "agent/2",
           description: "Need a choice.",
@@ -1226,29 +1226,29 @@ test("wave labels read from tmp-log issue titles, resolved through buildStatusWi
     // Wave 0 (many issues) closes; wave 1 (one issue) is now running.
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      batches: [["101", "102", "103"], ["201"]],
+      waves: [["101", "102", "103"], ["201"]],
       slots: 1,
     }),
-    event("campaign-batch", {
+    event("wave-start", {
       ts: "2025-01-01T00:01:00.000Z",
       index: 0,
       tasks: ["101", "102", "103"],
     }),
-    event("campaign-batch-done", {
+    event("wave-done", {
       ts: "2025-01-01T00:02:00.000Z",
       index: 0,
       merged: ["101", "102", "103"],
       held: [],
       clearedParked: [],
     }),
-    event("campaign-batch", {
+    event("wave-start", {
       ts: "2025-01-01T00:03:00.000Z",
       index: 1,
       tasks: ["201"],
     }),
-    // The batch spawns its member: 201 goes running, so the wave folds to `running`
+    // The wave spawns its member: 201 goes running, so the wave folds to `running`
     // (the wave status is a pure fold of its issues now, ADR 0019).
-    event("queue-start", { ts: "2025-01-01T00:03:30.000Z", taskIds: ["201"], slots: 1 }),
+    event("spawn", { ts: "2025-01-01T00:03:30.000Z", taskId: "201", running: 1, left: 0 }),
   ]);
   const titles: Record<string, string> = {
     "101": "config resolution",
@@ -1288,14 +1288,13 @@ test("renderStatusPage names waves festively when the toggle is on (#193)", () =
   seedState(dir, [
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      batches: [["101", "102"], ["201"]],
+      waves: [["101", "102"], ["201"]],
       titles: { "101": "config resolution", "102": "retry policy", "201": "cache eviction" },
       slots: 1,
-      festiveOffset: 11, // pool[11] = Granny Weatherwax, pool[12] = Nanny Ogg
     }),
-    event("campaign-batch", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["101", "102"] }),
-    event("campaign-batch-done", { ts: "2025-01-01T00:02:00.000Z", index: 0, merged: ["101", "102"], held: [], clearedParked: [] }),
-    event("campaign-batch", { ts: "2025-01-01T00:03:00.000Z", index: 1, tasks: ["201"] }),
+    event("wave-start", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["101", "102"] }),
+    event("wave-done", { ts: "2025-01-01T00:02:00.000Z", index: 0, merged: ["101", "102"], held: [], clearedParked: [] }),
+    event("wave-start", { ts: "2025-01-01T00:03:00.000Z", index: 1, tasks: ["201"] }),
   ]);
   const status = buildStatus(cfgFor(dir));
 
@@ -1303,23 +1302,30 @@ test("renderStatusPage names waves festively when the toggle is on (#193)", () =
   const plain = renderStatusPage(status);
   assert.match(plain, /<h2 class="wave-label">Wave 2 — cache eviction<\/h2>/);
   assert.match(plain, /Wave 1 <span class="completed-wave-tally">/);
-  assert.doesNotMatch(plain, /Granny Weatherwax/);
+  assert.doesNotMatch(plain, /Susan Sto Helit/);
 
   // On — cards and the closed-wave chip carry `index · name`; the closed card drops the
-  // lead-title collapse (its member rows carry the titles).
+  // lead-title collapse (its member rows carry the titles). The offset is no longer stored
+  // on the log — it is derived from the `campaign-start` ts, so wave 0/1 draw
+  // festiveWaveName(festiveOffsetFor("2025-01-01T00:00:00.000Z"), 0/1) = Susan Sto Helit / Ysabell.
   const festive = renderStatusPage(status, { festive: true });
-  assert.match(festive, /<h2 class="wave-label">Wave 2 · Nanny Ogg<\/h2>/);
-  assert.match(festive, /<h2 class="wave-label">Wave 1 · Granny Weatherwax<\/h2>/);
-  assert.match(festive, /✓<\/span> Wave 1 · Granny Weatherwax <span class="completed-wave-tally">/);
+  assert.match(festive, /<h2 class="wave-label">Wave 2 · Ysabell<\/h2>/);
+  assert.match(festive, /<h2 class="wave-label">Wave 1 · Susan Sto Helit<\/h2>/);
+  assert.match(festive, /✓<\/span> Wave 1 · Susan Sto Helit <span class="completed-wave-tally">/);
 });
 
 test("renderStatusPage renders a nameless Wave N when festive is on but the run reserved no offset (#193)", () => {
-  const dir = join(tmpdir(), `vetinari-festive-nooffset-${Date.now()}`);
-  seedState(dir, [
-    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["201"]], slots: 1 }),
-    event("campaign-batch", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["201"] }),
-  ]);
-  const festive = renderStatusPage(buildStatus(cfgFor(dir)), { festive: true });
+  // A run that reserved no festive offset (its status carries no `festiveOffset` — a run from
+  // before the feature) still renders plain `Wave N` under the festive toggle: `festiveNameFor`
+  // yields no name when `festiveOffset` is undefined, so the label stays nameless. Driven off a
+  // status literal because a `campaign-start` now always derives its offset from the start ts —
+  // the no-offset case only survives on a CampaignStatus with the field absent.
+  const status: CampaignStatus = {
+    project: "beta",
+    waves: [{ index: 0, status: "running", issues: [{ issueNumber: "201", status: "running" }] }],
+    parked: [],
+  };
+  const festive = renderStatusPage(status, { festive: true });
   assert.match(festive, /<h2 class="wave-label">Wave 1<\/h2>/);
 });
 
@@ -1329,7 +1335,7 @@ test("wave labels and chip hovers render from the log's titles, with no fetchTas
     // Wave 0 (many issues) closes; wave 1 (one issue) is now running.
     event("campaign-start", {
       ts: "2025-01-01T00:00:00.000Z",
-      batches: [["101", "102", "103"], ["201"]],
+      waves: [["101", "102", "103"], ["201"]],
       titles: {
         "101": "config resolution",
         "102": "retry policy",
@@ -1338,26 +1344,26 @@ test("wave labels and chip hovers render from the log's titles, with no fetchTas
       },
       slots: 1,
     }),
-    event("campaign-batch", {
+    event("wave-start", {
       ts: "2025-01-01T00:01:00.000Z",
       index: 0,
       tasks: ["101", "102", "103"],
     }),
-    event("campaign-batch-done", {
+    event("wave-done", {
       ts: "2025-01-01T00:02:00.000Z",
       index: 0,
       merged: ["101", "102", "103"],
       held: [],
       clearedParked: [],
     }),
-    event("campaign-batch", {
+    event("wave-start", {
       ts: "2025-01-01T00:03:00.000Z",
       index: 1,
       tasks: ["201"],
     }),
-    // The batch spawns its member: 201 goes running, so the wave folds to `running`
+    // The wave spawns its member: 201 goes running, so the wave folds to `running`
     // (the wave status is a pure fold of its issues now, ADR 0019).
-    event("queue-start", { ts: "2025-01-01T00:03:30.000Z", taskIds: ["201"], slots: 1 }),
+    event("spawn", { ts: "2025-01-01T00:03:30.000Z", taskId: "201", running: 1, left: 0 }),
   ]);
 
   // buildStatus over cfgFor's id-echoing fetchTask: the only source of titles is
@@ -1379,9 +1385,9 @@ test("wave labels and chip hovers render from the log's titles, with no fetchTas
     html,
     /<section class="wave running"><div class="wave-head"><h2 class="wave-label">Wave 2 — cache eviction<\/h2><div class="wave-meta"><span class="wave-tally">0\/1<\/span><span class="wave-status running">running<\/span>/,
   );
-  // Every chip carries its own title on hover, alongside its status detail — 201 is
-  // running (queued for this wave), so its hover is the title plus that detail.
-  assert.match(html, /title="cache eviction&#10;Queued for this wave"/);
+  // Every chip carries its own title on hover, alongside its status detail — 201 took
+  // an agent slot (the `spawn` seeds it running), so its hover is the title plus that detail.
+  assert.match(html, /title="cache eviction&#10;Running in an agent slot \(1 active, 0 waiting\)"/);
   // A chip whose issue also has a status detail carries the title alongside it.
   assert.match(html, /title="config resolution&#10;Merged into base"/);
 });
@@ -1586,7 +1592,7 @@ test("renderStatusPage renders the repo dropdown (with a no-JS select fallback) 
       parked: [
         {
           issueNumber: "201",
-          reason: "blocked",
+          reason: "question",
           parkedAt: "now",
           branch: "agent/201",
           description: "Need a choice.",
@@ -2615,7 +2621,7 @@ test("renderStatusPage leads with parked issues above the waves when any are par
     parked: [
       {
         issueNumber: "102",
-        reason: "blocked",
+        reason: "question",
         parkedAt: "now",
         branch: "agent/102",
         description: "Need a choice.",
@@ -2646,7 +2652,7 @@ test("renderStatusPage opens the issue-detail sheet from a parked row too", () =
     parked: [
       {
         issueNumber: "102",
-        reason: "blocked",
+        reason: "question",
         parkedAt: "now",
         branch: "agent/102",
         description: "Need a choice.",
@@ -2695,7 +2701,7 @@ test("renderStatusPage orders the top of the page: Parked → campaign-meta → 
     parked: [
       {
         issueNumber: "102",
-        reason: "blocked",
+        reason: "question",
         parkedAt: "now",
         branch: "agent/102",
         description: "Need a choice.",
@@ -2961,7 +2967,7 @@ test("renderStatusPage's parked card carries no inline reply form — the reply 
     parked: [
       {
         issueNumber: "102",
-        reason: "blocked",
+        reason: "question",
         parkedAt: "2025-06-15T09:00:00.000Z",
         branch: "agent/102",
         description: "Need a choice.",
@@ -2978,7 +2984,7 @@ test("renderStatusPage's parked card carries no inline reply form — the reply 
   assert.doesNotMatch(card, /<form|<textarea|Send response/);
   assert.match(
     html,
-    /waiting <span class="parked-waited" data-parked-at="2025-06-15T09:00:00.000Z">…<\/span> · blocked/,
+    /waiting <span class="parked-waited" data-parked-at="2025-06-15T09:00:00.000Z">…<\/span> · question/,
   );
   // Exactly one /answer form remains — the sheet's reply-form.
   assert.equal(html.match(/action="\/answer"/g)?.length, 1);
@@ -3011,7 +3017,7 @@ test("formatStatusText summarizes waves, issue chips (with names), and the parke
     parked: [
       {
         issueNumber: "655",
-        reason: "blocked",
+        reason: "question",
         parkedAt: "now",
         branch: "agent/655",
         description: "?",
@@ -3028,7 +3034,7 @@ test("formatStatusText summarizes waves, issue chips (with names), and the parke
   // No name available → chip is just the status + number.
   assert.match(text, /⏸ #655$/m);
   assert.match(text, /1 awaiting your reply/);
-  assert.match(text, /#655 — blocked/);
+  assert.match(text, /#655 — question/);
 });
 
 test("formatStatusText labels a held wave and its merge-conflict-held issue as parked (ADR 0019)", () => {

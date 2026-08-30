@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import { hostLogger, type Logger } from "./log.ts";
 import { type ProjectPointer } from "./registry.ts";
-import { listParked, parkedDirOf, type ParkedRecord } from "./state.ts";
+import { listParked, parkedDirOf, type ParkedRecord, type ParkReason } from "./state.ts";
 import { projectHasLiveLease } from "./host-slots.ts";
 import { applyPrune } from "./prune.ts";
 import { applyGraft } from "./plan.ts";
@@ -53,15 +53,16 @@ export function repoForProject(projectRoot: string): string | undefined {
 export type IssueStatus = "completed" | "parked" | "failure" | "running" | "unstarted";
 
 /**
- * Why a `parked` issue is held (ADR 0019) — metadata set *by the transition*, not a
- * status word: `question` (a `parked{blocked}` awaiting an answer), `conflict` (a
- * `quarantined` merge conflict), `red-base` (a combined-gate wave-park — the *wave's*
- * reason, never a member's; design §2.3), `stalled` (a `parked{budget|idle-timeout}`,
- * the run loop's own resource stop), or `crash` (reconciliation: the run's process is
- * gone with no terminal stop marker, so an in-flight issue never verdicted — design §2.3,
- * §7). The reason selects the recovery affordance; the surface word is one.
+ * Why a `parked` issue is held (design §2.3) — metadata set *by the transition*, not a
+ * status word: `question` (a `parked{question}` awaiting an answer), `conflict` (an
+ * integrator merge conflict), `red-base` (a combined-gate wave-park — the *wave's* reason,
+ * never a member's), `stalled` (a `parked{stalled}` on turn budget / idle / no-commit, the
+ * run loop's own resource stop), or `crash` (reconciliation: the run's process is gone with
+ * no terminal stop marker, so an in-flight issue never verdicted — design §7). The reason
+ * selects the recovery affordance; the surface word is one. The single enum lives in
+ * `state.ts` and is re-exported here so the render sites can import it beside the model.
  */
-export type ParkReason = "question" | "conflict" | "red-base" | "stalled" | "crash";
+export type { ParkReason };
 
 /**
  * An issue's membership in the campaign (ADR 0019) — the axis orthogonal to its
@@ -141,9 +142,10 @@ export interface CampaignStatus {
   project: string;
   /** the run's optional `--name`, shown as the header label; absent when unnamed. */
   name?: string;
-  /** the festive-name block this campaign reserved at start (#193); wave `i` renders
-   * as `festiveWaveName(festiveOffset, i)` when festive wave names are on. Absent for a
-   * run started before the feature, which then renders nameless under festive. */
+  /** the festive-name offset for this campaign (#193), derived at render from its
+   * `campaign-start` timestamp ({@link festiveOffsetFor}); wave `i` renders as
+   * `festiveWaveName(festiveOffset, i)` when festive wave names are on. Absent for a run
+   * with no `campaign-start`, which then renders nameless under festive. */
   festiveOffset?: number;
   waves: StatusWave[];
   parked: ParkedIssue[];
@@ -156,14 +158,29 @@ const statusForOutcome = (outcome: string | undefined): IssueStatus => {
   return "unstarted";
 };
 
+const PARK_REASONS: ReadonlySet<string> = new Set(["question", "stalled", "conflict", "red-base", "crash"]);
+
 /**
- * The `ParkReason` a `parked` event/record carries (ADR 0019), read off its freeform
- * `reason`: a resource stop (`budget`, an idle/timeout) is `stalled`; anything else —
- * `blocked`, or a human-worded ask — is a `question` awaiting an answer. The other two
- * reasons (`conflict`, `red-base`) come from their own events, never a `parked` reason.
+ * The festive-name offset for a campaign, derived from its `campaign-start` (design §2.1:
+ * "no presentation state — cosmetic naming offsets — is ever written to the log"). The name
+ * is *chosen at campaign-start* by hashing the one thing recorded there once — the start
+ * timestamp — into the roster, so it is stable across every re-render and disjoint between
+ * campaigns started at different times, with no host cursor and nothing cosmetic on disk.
+ */
+export const festiveOffsetFor = (campaignStartTs: string | undefined): number => {
+  let h = 0;
+  for (const ch of campaignStartTs ?? "") h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return h;
+};
+
+/**
+ * Coerce a `parked` event/record's `reason` to the one enum (design §2.3). Writers emit the
+ * enum directly and archived logs are translated by the alias table before they reach the
+ * reducer, so this is a validator: a recognised reason passes through, anything else defaults
+ * to `question` (an answerable hold rather than a silent drop).
  */
 export const parkReasonFromEvent = (reason: string | undefined): ParkReason =>
-  reason && /budget|idle|timeout/i.test(reason) ? "stalled" : "question";
+  reason && PARK_REASONS.has(reason) ? (reason as ParkReason) : "question";
 
 /**
  * The wave fold (ADR 0019): a wave's status is a pure fold of its issues' lifecycles,
@@ -332,7 +349,6 @@ export function waveMembersLabel(index: number, titles: string[]): string {
 
 /** The `Campaign “X” — ` prefix a named campaign/wave event leads with, so an unnamed run
  * (or an old log row) degrades to the nameless wording rather than rendering `Campaign “” —`. */
-const campaignPrefix = (name?: string) => (name ? `Campaign “${name}” — ` : "");
 
 /**
  * Narrate one event log entry as the single plain-words line the landing card
@@ -341,7 +357,11 @@ const campaignPrefix = (name?: string) => (name ? `Campaign “${name}” — ` 
  * line only when a pre-summary run has none. Events with no operator-facing
  * narration return "" so `lastEventText` can skip past machine noise.
  */
-export function describeEvent(e: OrchestratorEvent, festive?: { offset: number }): string {
+export function describeEvent(e: OrchestratorEvent, opts: { festive?: { offset: number }; titles?: Map<string, string> } = {}): string {
+  const { festive, titles } = opts;
+  // Titles are recorded once on `campaign-start` (design §2.1), so a single-event reader
+  // that wants a member's name looks it up in the resolved map the caller threads in.
+  const named = (id: unknown) => titles?.get(normalizeIssue(String(id))) ?? hash(id);
   // The one-line festive form of a wave — `Wave N · name · #num, #num, …` — through the
   // shared `waveLabel` (surface `line`), so the narration can't drift from the card/chip.
   const festiveLine = (index: number, members: string[]) =>
@@ -353,55 +373,42 @@ export function describeEvent(e: OrchestratorEvent, festive?: { offset: number }
   switch (e.event) {
     case "campaign-start":
       return e.name ? `Campaign “${e.name}” started` : "Campaign started";
-    case "campaign-batch": {
+    case "wave-start": {
       const tasks = e.tasks ?? [];
       const label = festive
         ? festiveLine(e.index ?? 0, tasks.map(String))
-        : waveMembersLabel(e.index ?? 0, tasks.map((id) => e.titles?.[normalizeIssue(String(id))] ?? hash(id)));
-      return `${campaignPrefix(e.name)}${label} started`;
+        : waveMembersLabel(e.index ?? 0, tasks.map((id) => named(id)));
+      return `${label} started`;
     }
-    case "campaign-batch-done": {
+    case "wave-done": {
       // The event holds no plan-ordered task list, so the wave's membership is reconstructed
       // from the outcomes it does carry (merged, then quarantined, then held) and each member
       // is named by title (an unresolved id falls back to its `#id`), listing them all.
       const members = [...(e.merged ?? []), ...(e.quarantined ?? []), ...(e.held ?? [])];
       const label = festive
         ? festiveLine(e.index ?? 0, members.map(String))
-        : waveMembersLabel(e.index ?? 0, members.map((id) => e.titles?.[normalizeIssue(String(id))] ?? hash(id)));
+        : waveMembersLabel(e.index ?? 0, members.map((id) => named(id)));
       const hashes = (e.merged ?? []).length ? (e.merged as unknown[]).map(hash).join(", ") : "nothing";
-      return `${campaignPrefix(e.name)}${label} merged ${hashes}`;
+      return `${label} merged ${hashes}`;
     }
     case "campaign-done": {
-      const n = e.batches ?? 0;
+      const n = e.waves ?? 0;
       return `${e.name ? `Campaign “${e.name}”` : "Campaign"} complete (${n} wave${n === 1 ? "" : "s"})`;
-    }
-    case "queue-start": {
-      const n = (e.taskIds ?? []).length;
-      return n ? `Queue started — ${n} task${n === 1 ? "" : "s"}` : "Queue started";
-    }
-    case "queue-done": {
-      const vals = Object.values(e.outcomes ?? {}).map(String);
-      const merged = vals.filter((v) => v === "green").length;
-      const parked = vals.filter((v) => v === "parked").length;
-      const errored = vals.filter((v) => v.startsWith("error")).length;
-      const parts: string[] = [];
-      if (merged) parts.push(`${merged} merged`);
-      if (parked) parts.push(`${parked} parked`);
-      if (errored) parts.push(`${errored} errored`);
-      return parts.length ? `Queue drained — ${parts.join(", ")}` : "Queue drained";
     }
     case "green": {
       const id = mergedIssue(e);
       return id ? `#${id} merged` : "merged";
     }
     case "parked":
-      return `${hash(e.taskId)} parked${e.reason ? `: ${e.reason}` : ""}`;
-    case "quarantined":
-      return `${hash(e.taskId)} parked — merge conflict, resolve it`;
-    case "wave-parked":
-      return "Wave parked — merged base gated red";
+      return e.reason === "conflict"
+        ? `${hash(e.taskId)} parked — merge conflict, resolve it`
+        : `${hash(e.taskId)} parked${e.reason ? `: ${e.reason}` : ""}`;
+    case "failed":
+      return `${hash(e.taskId)} failed — could not be made green`;
+    case "campaign-parked":
+      return `Campaign parked${e.detail ? ` — ${e.detail}` : " — merged base gated red"}`;
     case "campaign-failed":
-      return `Campaign failed — ${(e.failed ?? []).map(hash).join(", ")} could not be made green`;
+      return `Campaign failed${e.detail ? ` — ${e.detail}` : ""}`;
     case "prune":
       return `Pruned ${(e.removed ?? []).map(hash).join(", ")}`;
     case "graft":
@@ -415,14 +422,15 @@ export function describeEvent(e: OrchestratorEvent, festive?: { offset: number }
   }
 }
 
-/** The festive descriptor `describeEvent` needs for a run's events (#193): the offset
- * reserved by the run's latest `campaign-start`, wrapped so an offset of 0 stays a real
- * reservation. Undefined when festive is off, or the run stamped no offset (pre-feature)
- * — narration then stays plain even under the toggle. */
+/** The festive descriptor `describeEvent` needs for a run's events (design §2.1): the offset
+ * derived from the run's latest `campaign-start` timestamp ({@link festiveOffsetFor}). Undefined
+ * when festive is off, or the log carries no `campaign-start` — narration then stays plain even
+ * under the toggle. Nothing cosmetic is read from the log; the offset is a function of the start
+ * time recorded there once. */
 const festiveFor = (events: OrchestratorEvent[], festive: boolean): { offset: number } | undefined => {
   if (!festive) return undefined;
-  const start = events.findLast((e): e is OrchestratorEvent & { festiveOffset?: number } => e.event === "campaign-start");
-  return Number.isInteger(start?.festiveOffset) ? { offset: start!.festiveOffset as number } : undefined;
+  const start = events.findLast((e) => e.event === "campaign-start");
+  return start ? { offset: festiveOffsetFor(typeof start.ts === "string" ? start.ts : undefined) } : undefined;
 };
 
 /**
@@ -432,8 +440,8 @@ const festiveFor = (events: OrchestratorEvent[], festive: boolean): { offset: nu
  * can skip past it, exactly as `lastEventText` does. `festive` (its run's reserved
  * offset, resolved by the caller) names the wave after a character (#193).
  */
-export function formatFeedEvent(project: string, e: OrchestratorEvent, festive?: { offset: number }): string {
-  const sentence = describeEvent(e, festive);
+export function formatFeedEvent(project: string, e: OrchestratorEvent, opts: { festive?: { offset: number }; titles?: Map<string, string> } = {}): string {
+  const sentence = describeEvent(e, opts);
   return sentence ? `${project} — ${sentence}` : "";
 }
 
@@ -447,12 +455,26 @@ export function formatFeedEvent(project: string, e: OrchestratorEvent, festive?:
  */
 export function lastEventText(events: OrchestratorEvent[], festive = false): string {
   const festiveArg = festiveFor(events, festive);
+  const titles = titlesFromLog(events);
   for (let i = events.length - 1; i >= 0; i--) {
-    const text = describeEvent(events[i], festiveArg);
+    const text = describeEvent(events[i], { festive: festiveArg, titles });
     if (text) return text;
   }
   return "No activity yet";
 }
+
+/** The id→title map a run recorded once on its latest `campaign-start` (design §2.1),
+ * so a single-event narrator (`describeEvent`) can name a wave's members without the
+ * events carrying titles. Empty when no campaign-start recorded any. */
+export const titlesFromLog = (events: OrchestratorEvent[]): Map<string, string> => {
+  const titles = new Map<string, string>();
+  const start = events.findLast((e) => e.event === "campaign-start");
+  const map = start && "titles" in start ? start.titles : undefined;
+  if (map && typeof map === "object")
+    for (const [id, title] of Object.entries(map))
+      if (typeof title === "string" && title.trim()) titles.set(normalizeIssue(id), title.trim());
+  return titles;
+};
 
 // Issue titles rarely change during a campaign, so we cache them for the process
 // lifetime; a rename won't surface until the status server restarts.
@@ -555,9 +577,10 @@ export interface ReducedCampaign {
   /** the optional human name the campaign was launched with (`--name`), read off
    * the latest `campaign-start` event; undefined for an unnamed run. */
   name?: string;
-  /** the start of the festive-name block this campaign reserved (#193), read off the
-   * latest `campaign-start`; undefined for a run started before the feature. Wave `i`
-   * draws `festiveWaveName(festiveOffset, i)` when festive wave names are on. */
+  /** the festive-name offset for this campaign (#193), derived from the latest
+   * `campaign-start` timestamp ({@link festiveOffsetFor}); undefined for a run with no
+   * `campaign-start`. Wave `i` draws `festiveWaveName(festiveOffset, i)` when festive
+   * wave names are on. */
   festiveOffset?: number;
   outcomes: Map<string, IssueStatus>;
   details: Map<string, string>;
@@ -590,15 +613,16 @@ export interface ReducedCampaign {
 /**
  * Reduce a project's event log to its current campaign's plan — pure, no I/O.
  * Only the latest `campaign-start` and everything after it is folded (a fresh
- * campaign supersedes an earlier one in the same log); a queue-only run with no
- * campaign frames it as a single wave. This is the load-bearing seam of ADR
- * 0005: `buildStatus` renders it and the `campaign` loop re-reads it each wave.
+ * campaign supersedes an earlier one in the same log); the plan (the waves) comes
+ * from `campaign-start`, so a log with no `campaign-start` frames no waves. This is
+ * the load-bearing seam of ADR 0005: `buildStatus` renders it and the `campaign`
+ * loop re-reads it each wave.
  * `opts.alive` is the injected liveness probe (design §7): `false` means the run's
  * process is gone (its host slot is not held, §8), so an in-flight `running` issue with
  * no terminal stop marker reconciles to parked{crash}; omitted/`true` never crash-folds.
  */
 export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: boolean } = {}): ReducedCampaign {
-  const latestCampaignIndex = events.findLastIndex((e) => e.event === "campaign-start" && Array.isArray(e.batches));
+  const latestCampaignIndex = events.findLastIndex((e) => e.event === "campaign-start" && Array.isArray(e.waves));
   const relevant = latestCampaignIndex >= 0 ? events.slice(latestCampaignIndex) : events;
 
   let waves: string[][] = [];
@@ -627,70 +651,65 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
         if (typeof title === "string" && title.trim()) titles.set(normalizeIssue(id), title.trim());
       }
     }
-    if (e.event === "campaign-start" && Array.isArray(e.batches)) {
-      waves = e.batches.map((batch: unknown[]) => batch.map(String).map(normalizeIssue));
+    if (e.event === "campaign-start" && Array.isArray(e.waves)) {
+      waves = e.waves.map((wave: unknown[]) => wave.map(String).map(normalizeIssue));
       layout = waves.map((wave) => [...wave]);
       name = typeof e.name === "string" && e.name.trim() ? e.name : undefined;
-      festiveOffset = Number.isInteger(e.festiveOffset) ? e.festiveOffset : undefined;
+      festiveOffset = festiveOffsetFor(typeof e.ts === "string" ? e.ts : undefined);
       currentWave = -1;
-    } else if (e.event === "campaign-batch" && Number.isInteger(e.index)) {
+    } else if (e.event === "wave-start" && Number.isInteger(e.index)) {
       currentWave = e.index;
-    } else if (e.event === "queue-start" && Array.isArray(e.taskIds)) {
-      const taskIds = e.taskIds.map(String).map(normalizeIssue);
-      if (!waves.length) {
-        waves = [taskIds];
-        layout = [[...taskIds]];
-        currentWave = 0;
-      }
-      for (const taskId of taskIds) {
-        outcomes.set(taskId, "running");
-        details.set(taskId, "Queued for this wave");
-      }
-    } else if (e.event === "queue-spawn" && e.taskId) {
-      details.set(normalizeIssue(String(e.taskId)), `Running in agent slot (${e.running ?? "?"} active, ${e.left ?? "?"} waiting)`);
+    } else if (e.event === "spawn" && e.taskId) {
+      // A task took an agent slot (design §2.1) — running until a terminal event lands.
+      const taskId = normalizeIssue(String(e.taskId));
+      if ((outcomes.get(taskId) ?? "unstarted") === "unstarted") outcomes.set(taskId, "running");
+      details.set(taskId, `Running in an agent slot (${e.running ?? "?"} active, ${e.left ?? "?"} waiting)`);
     } else if (e.event === "turn" && e.taskId) {
       details.set(normalizeIssue(String(e.taskId)), `Agent turn ${e.turn ?? "?"} finished; waiting for verification/resume`);
-    } else if (e.event === "queue-done" && e.outcomes && typeof e.outcomes === "object") {
-      for (const [taskId, outcome] of Object.entries(e.outcomes)) {
-        const status = statusForOutcome(String(outcome));
-        outcomes.set(normalizeIssue(taskId), status);
-        if (status === "completed" && e.ts && !mergedAt.has(normalizeIssue(taskId))) mergedAt.set(normalizeIssue(taskId), String(e.ts));
-      }
     } else if (e.event === "green" && e.taskId) {
       const taskId = normalizeIssue(String(e.taskId));
       outcomes.set(taskId, "completed");
       details.set(taskId, e.branch ? `Completed on ${e.branch}` : "Completed");
       if (e.ts && !mergedAt.has(taskId)) mergedAt.set(taskId, String(e.ts));
+    } else if (e.event === "merged" && e.taskId) {
+      // The integrator landed this green on the base (design §2.1). Completion, and the
+      // resolution of any earlier quarantine or red-base hold on the same id.
+      const taskId = normalizeIssue(String(e.taskId));
+      outcomes.set(taskId, "completed");
+      redBase.delete(taskId);
+      quarantined.delete(taskId);
+      details.set(taskId, "Merged into base");
+      if (e.ts && !mergedAt.has(taskId)) mergedAt.set(taskId, String(e.ts));
     } else if (e.event === "parked" && e.taskId) {
       const taskId = normalizeIssue(String(e.taskId));
-      outcomes.set(taskId, "parked");
-      parkReasons.set(taskId, parkReasonFromEvent(typeof e.reason === "string" ? e.reason : undefined));
-      details.set(taskId, `Parked: ${e.reason ?? "needs attention"}`);
-    } else if (e.event === "quarantined" && e.taskId) {
-      // A merge conflict pulled this green from integration (ADR 0013). Overlay it
-      // like `pruned` — the issue's own outcome is `completed` (it passed its gate),
-      // so the set is what makes the chip read `quarantined` until it re-merges.
-      const taskId = normalizeIssue(String(e.taskId));
-      quarantined.add(taskId);
-      details.set(taskId, "Parked on a merge conflict — resolve the conflict");
-    } else if (e.event === "wave-parked") {
-      // A red merged base parked the in-flight wave (ADR 0013). No `campaign-batch-done`
-      // follows to close it, so it stays `currentWave`; record that as the parked wave and
-      // remember its members — red-base is the *wave's* reason (design §2.3), so the members
-      // keep their own lifecycle and this set is what folds the wave to parked(red-base) (#288).
-      parkedWave = currentWave;
-      redBase = new Set(waves[currentWave] ?? []);
-    } else if (e.event === "campaign-failed" && Array.isArray(e.failed)) {
-      // The campaign's terminal failure stop marker (design §5 step 5): a member the agent
-      // could not make green held the wave and stopped the run. Mark each failed id `failure`
-      // authoritatively off the marker — it never lands a `campaign-batch-done`, so the wave it
-      // holds stays out of `closedWaves` and folds to `failed` (failure outranks parked, ADR 0019).
-      for (const taskId of e.failed) {
-        const issueNumber = normalizeIssue(String(taskId));
-        outcomes.set(issueNumber, "failure");
-        if (!details.has(issueNumber)) details.set(issueNumber, "Failed — the agent could not make it green");
+      const reason = parkReasonFromEvent(typeof e.reason === "string" ? e.reason : undefined);
+      if (reason === "conflict") {
+        // A merge conflict pulled this green from integration (design §2.3). Overlay it
+        // like `pruned` — the issue's own outcome stays `completed` (it passed its gate),
+        // so the set is what makes the chip read `parked{conflict}` until it re-merges.
+        quarantined.add(taskId);
+        details.set(taskId, "Parked on a merge conflict — resolve the conflict");
+      } else {
+        outcomes.set(taskId, "parked");
+        parkReasons.set(taskId, reason);
+        details.set(taskId, `Parked: ${e.detail ?? reason}`);
       }
-    } else if (e.event === "campaign-batch-done" && Number.isInteger(e.index)) {
+    } else if (e.event === "failed" && e.taskId) {
+      // A member the agent could not make green (design §2.1, §5 step 5): a terminal failure
+      // that holds its wave — the wave lands no `wave-done`, so it stays out of `closedWaves`
+      // and folds to `failed` (failure outranks parked, ADR 0019).
+      const taskId = normalizeIssue(String(e.taskId));
+      outcomes.set(taskId, "failure");
+      if (!details.has(taskId)) details.set(taskId, "Failed — the agent could not make it green");
+    } else if (e.event === "campaign-parked") {
+      // The campaign paused at a wave boundary (design §2.1): a red merged base, an unresolved
+      // issue park, or a stranded conflict. No `wave-done` follows to close the wave, so it stays
+      // `currentWave`; record that as the parked wave and remember its members — `red-base` is the
+      // *wave's* reason (design §2.3), so the members keep their own lifecycle and this set is what
+      // folds the wave to parked(red-base) (#288). A carried `index` pins it; else the in-flight wave.
+      parkedWave = Number.isInteger(e.index) ? (e.index as number) : currentWave;
+      redBase = new Set(waves[parkedWave] ?? []);
+    } else if (e.event === "wave-done" && Number.isInteger(e.index)) {
       closedWaves.add(e.index);
       currentWave = -1;
       for (const taskId of e.merged ?? []) {
@@ -757,7 +776,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
   // parked{crash} — never left reading running forever (§15). Crash is never stored: the
   // probe is an injected input, so the reducer stays pure. A live or unknown run
   // (`alive !== false`) leaves `running` untouched.
-  if (opts.alive === false && !relevant.some((e) => e.event === "campaign-done" || e.event === "queue-done")) {
+  if (opts.alive === false && !relevant.some((e) => e.event === "campaign-done")) {
     for (const [id, status] of outcomes) {
       if (status !== "running") continue;
       outcomes.set(id, "parked");
@@ -869,7 +888,7 @@ export function reconstructIssueDetail(events: OrchestratorEvent[], issueNumber:
   const life = issueLifecycle(reduced, id);
   const membership = issueMembership(reduced, id);
 
-  const latestCampaignIndex = events.findLastIndex((e) => e.event === "campaign-start" && Array.isArray(e.batches));
+  const latestCampaignIndex = events.findLastIndex((e) => e.event === "campaign-start" && Array.isArray(e.waves));
   const relevant = latestCampaignIndex >= 0 ? events.slice(latestCampaignIndex) : events;
 
   const turnLog: IssueTurn[] = [];
@@ -894,7 +913,7 @@ export function reconstructIssueDetail(events: OrchestratorEvent[], issueNumber:
  * campaign frame is not a campaign and returns false.
  */
 export function campaignRunning(events: OrchestratorEvent[]): boolean {
-  const start = events.findLastIndex((e) => e.event === "campaign-start" && Array.isArray(e.batches));
+  const start = events.findLastIndex((e) => e.event === "campaign-start" && Array.isArray(e.waves));
   if (start < 0) return false;
   return !events.slice(start).some((e) => e.event === "campaign-done");
 }
@@ -908,7 +927,7 @@ export function campaignRunning(events: OrchestratorEvent[]): boolean {
  * been launched, and its "already settled" refusal is `campaignSettled`'s to give.
  */
 export function campaignStarted(events: OrchestratorEvent[]): boolean {
-  return events.some((e) => e.event === "campaign-start" && Array.isArray(e.batches));
+  return events.some((e) => e.event === "campaign-start" && Array.isArray(e.waves));
 }
 
 /**
@@ -946,13 +965,13 @@ export type ArchivedRunState = "complete" | "stalled";
 
 /**
  * A run's terminal disposition, scoped to the latest `campaign-start` like the
- * rest of the reducer (#69) so a superseded earlier run never decides it — a
- * queue-only run (no campaign frame) is folded whole and reads its `queue-done`.
+ * rest of the reducer (#69) so a superseded earlier run never decides it — a run
+ * is `complete` once it lands its `campaign-done` marker.
  */
 export function archivedRunState(events: OrchestratorEvent[]): ArchivedRunState {
-  const start = events.findLastIndex((e) => e.event === "campaign-start" && Array.isArray(e.batches));
+  const start = events.findLastIndex((e) => e.event === "campaign-start" && Array.isArray(e.waves));
   const relevant = start >= 0 ? events.slice(start) : events;
-  return relevant.some((e) => e.event === "campaign-done" || e.event === "queue-done") ? "complete" : "stalled";
+  return relevant.some((e) => e.event === "campaign-done") ? "complete" : "stalled";
 }
 
 /**
@@ -1350,17 +1369,18 @@ export function buildFeed(pointers: ProjectPointer[], now: Date = new Date(), lo
       // Each run carries its own reserved offset on its `campaign-start`, so resolve it
       // once per run and narrate that run's wave events festively off it (#193).
       const festiveArg = festiveFor(events, festive);
+      const titles = titlesFromLog(events);
       for (const e of events) {
         const tsMs = Date.parse(String(e.ts ?? ""));
         if (Number.isNaN(tsMs) || tsMs < cutoffMs) continue;
-        const sentence = describeEvent(e, festiveArg);
+        const sentence = describeEvent(e, { festive: festiveArg, titles });
         if (!sentence) continue;
         const raw = JSON.stringify(e);
         // The feed is cross-repo, so the repo leads the message as the actor; the narration is
         // one plain span and the dot borrows the event's state from the shared log-view registry.
         const dot = humanizeLogLine(raw).dot;
         const humanized: HumanizedRow = { time: localTime(typeof e.ts === "string" ? e.ts : ""), actor: pointer.project, verb: "", spans: [{ text: sentence, kind: "plain" }], dot };
-        entries.push({ project: pointer.project, ts: String(e.ts), kind: String(e.event ?? ""), text: formatFeedEvent(pointer.project, e, festiveArg), raw, humanized });
+        entries.push({ project: pointer.project, ts: String(e.ts), kind: String(e.event ?? ""), text: formatFeedEvent(pointer.project, e, { festive: festiveArg, titles }), raw, humanized });
       }
     }
   }

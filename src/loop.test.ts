@@ -131,7 +131,7 @@ test("parkedAnswerComment marks the relay, echoes the parked question, then carr
   );
 });
 
-test("runLoop parks (blocked) when a turn emits the BLOCKED signal", async () => {
+test("runLoop parks (question) when a turn emits the BLOCKED signal", async () => {
   const cfg = harnessCfg();
   const sbx = fakeSandbox([
     { run: { completionSignal: BLOCKED, stdout: "<question><summary>Which base?</summary></question>" } },
@@ -142,11 +142,11 @@ test("runLoop parks (blocked) when a turn emits the BLOCKED signal", async () =>
   assert.equal(outcome, "parked");
   const parked = listParked(cfg);
   assert.equal(parked.length, 1);
-  assert.equal(parked[0].reason, "blocked");
+  assert.equal(parked[0].reason, "question");
   assert.match(parked[0].question, /Which base\?/);
 });
 
-test("runLoop parks (no-commit) when the gate passes but the branch has no commit beyond base", async () => {
+test("runLoop parks (stalled: no-commit) when the gate passes but the branch has no commit beyond base", async () => {
   const cfg = harnessCfg();
   const sbx = fakeSandbox([{ run: { completionSignal: DONE }, green: true }]);
 
@@ -155,7 +155,8 @@ test("runLoop parks (no-commit) when the gate passes but the branch has no commi
   assert.equal(outcome, "parked");
   const parked = listParked(cfg);
   assert.equal(parked.length, 1);
-  assert.equal(parked[0].reason, "no-commit");
+  assert.equal(parked[0].reason, "stalled");
+  assert.equal(parked[0].detail, "no-commit");
   // The empty-green guard fired — no green event, no success outbound.
   assert.equal(readEventLog(cfg).some((e) => e.event === "green"), false);
 });
@@ -249,7 +250,7 @@ test("runLoop's fresh re-run carries only the most-recent turn summary, not the 
   assert.doesNotMatch(thirdTask, /First slice\./);
 });
 
-test("runLoop parks (budget) for a one-shot non-resumable run (maxTurns 1) whose only turn is red", async () => {
+test("runLoop parks (stalled: budget) for a one-shot non-resumable run (maxTurns 1) whose only turn is red", async () => {
   const cfg = harnessCfg({ agent: { provider: "copilot" }, maxTurns: 1, promptFile: "/prompts/tdd.md" });
   const sbx = fakeSandbox([{ run: { completionSignal: DONE }, green: false }]);
 
@@ -259,10 +260,11 @@ test("runLoop parks (budget) for a one-shot non-resumable run (maxTurns 1) whose
   assert.equal(sbx.runCalls.length, 1);
   const parked = listParked(cfg);
   assert.equal(parked.length, 1);
-  assert.equal(parked[0].reason, "budget");
+  assert.equal(parked[0].reason, "stalled");
+  assert.equal(parked[0].detail, "budget");
 });
 
-test("runLoop parks (budget) when every turn stays red through maxTurns", async () => {
+test("runLoop parks (stalled: budget) when every turn stays red through maxTurns", async () => {
   const cfg = harnessCfg({ maxTurns: 2 });
   const sbx = fakeSandbox([
     { run: { completionSignal: DONE }, green: false },
@@ -274,10 +276,11 @@ test("runLoop parks (budget) when every turn stays red through maxTurns", async 
   assert.equal(outcome, "parked");
   const parked = listParked(cfg);
   assert.equal(parked.length, 1);
-  assert.equal(parked[0].reason, "budget");
+  assert.equal(parked[0].reason, "stalled");
+  assert.equal(parked[0].detail, "budget");
 });
 
-test("runLoop parks (idle-timeout) when the agent dies on an Idle-named error", async () => {
+test("runLoop parks (stalled: idle) when the agent dies on an Idle-named error", async () => {
   const cfg = harnessCfg();
   const sbx = fakeSandbox([{ throwIdle: true }]);
 
@@ -286,7 +289,8 @@ test("runLoop parks (idle-timeout) when the agent dies on an Idle-named error", 
   assert.equal(outcome, "parked");
   const parked = listParked(cfg);
   assert.equal(parked.length, 1);
-  assert.equal(parked[0].reason, "idle-timeout");
+  assert.equal(parked[0].reason, "stalled");
+  assert.equal(parked[0].detail, "idle");
 });
 
 test("runLoop resumes the parked session on the answer path without re-fetching the task", async () => {

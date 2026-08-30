@@ -41,7 +41,7 @@ const archStatus = (issue: string): CampaignStatus => ({
   waves: [
     {
       index: 0,
-      status: "closed",
+      status: "completed",
       issues: [{ issueNumber: issue, status: "completed" }],
     },
   ],
@@ -117,7 +117,7 @@ test("renderStatusPage enables the Redrive control with a naming confirm dialog 
       project: "beta",
       name: "checkout revamp",
       waves: [
-        { index: 0, status: "closed", issues: [{ issueNumber: "101", status: "completed" }] },
+        { index: 0, status: "completed", issues: [{ issueNumber: "101", status: "completed" }] },
         { index: 1, status: "parked", reason: "red-base", issues: [{ issueNumber: "201", status: "completed" }, { issueNumber: "202", status: "completed" }] },
       ],
       parked: [],
@@ -145,7 +145,7 @@ test("renderStatusPage greys the Redrive control on a settled campaign — nothi
   const settled = renderStatusPage(
     {
       project: "beta",
-      waves: [{ index: 0, status: "closed", issues: [{ issueNumber: "101", status: "completed" }] }],
+      waves: [{ index: 0, status: "completed", issues: [{ issueNumber: "101", status: "completed" }] }],
       parked: [],
     },
     { prune: true, graft: true, leaseLive: false, baseBranch: "main" },
@@ -186,8 +186,8 @@ test("renderStatusPage offers no graft affordance — and no 'final wave' notice
   const finished = {
     project: "beta",
     waves: [
-      { index: 0, status: "closed" as const, issues: [{ issueNumber: "101", status: "completed" as const }] },
-      { index: 1, status: "closed" as const, issues: [{ issueNumber: "201", status: "completed" as const }] },
+      { index: 0, status: "completed" as const, issues: [{ issueNumber: "101", status: "completed" as const }] },
+      { index: 1, status: "completed" as const, issues: [{ issueNumber: "201", status: "completed" as const }] },
     ],
     parked: [],
   };
@@ -314,8 +314,6 @@ test("wave labels read from tmp-log issue titles, resolved through buildStatusWi
       ts: "2025-01-01T00:02:00.000Z",
       index: 0,
       merged: ["101", "102", "103"],
-      held: [],
-      clearedParked: [],
     }),
     event("wave-start", {
       ts: "2025-01-01T00:03:00.000Z",
@@ -350,7 +348,7 @@ test("wave labels read from tmp-log issue titles, resolved through buildStatusWi
   );
   assert.match(
     html,
-    /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2 class="wave-label">Wave 1 — config resolution \+2<\/h2><div class="wave-meta"><span class="wave-tally">3\/3<\/span><span class="wave-status closed">closed<\/span>/,
+    /<section class="wave completed" id="closed-wave-0" hidden><div class="wave-head"><h2 class="wave-label">Wave 1 — config resolution \+2<\/h2><div class="wave-meta"><span class="wave-tally">3\/3<\/span><span class="wave-status completed">completed<\/span>/,
   );
   // Single-issue wave (open): just that issue's title, in a wave card.
   assert.match(
@@ -368,7 +366,7 @@ test("renderStatusPage names waves festively when the toggle is on (#193)", () =
       slots: 1,
     }),
     event("wave-start", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["101", "102"] }),
-    event("wave-done", { ts: "2025-01-01T00:02:00.000Z", index: 0, merged: ["101", "102"], held: [], clearedParked: [] }),
+    event("wave-done", { ts: "2025-01-01T00:02:00.000Z", index: 0, merged: ["101", "102"] }),
     event("wave-start", { ts: "2025-01-01T00:03:00.000Z", index: 1, tasks: ["201"] }),
   ]);
   const status = buildStatus(cfgFor(dir));
@@ -426,8 +424,6 @@ test("wave labels and chip hovers render from the log's titles, with no fetchTas
       ts: "2025-01-01T00:02:00.000Z",
       index: 0,
       merged: ["101", "102", "103"],
-      held: [],
-      clearedParked: [],
     }),
     event("wave-start", {
       ts: "2025-01-01T00:03:00.000Z",
@@ -451,7 +447,7 @@ test("wave labels and chip hovers render from the log's titles, with no fetchTas
   );
   assert.match(
     html,
-    /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2 class="wave-label">Wave 1 — config resolution \+2<\/h2><div class="wave-meta"><span class="wave-tally">3\/3<\/span><span class="wave-status closed">closed<\/span>/,
+    /<section class="wave completed" id="closed-wave-0" hidden><div class="wave-head"><h2 class="wave-label">Wave 1 — config resolution \+2<\/h2><div class="wave-meta"><span class="wave-tally">3\/3<\/span><span class="wave-status completed">completed<\/span>/,
   );
   // Single-issue wave (open): just that issue's title, in a wave card.
   assert.match(
@@ -830,7 +826,7 @@ test("switching scope resets the view: it navigates (fresh sheet) and closed-wav
       waves: [
         {
           index: 0,
-          status: "closed",
+          status: "completed",
           issues: [{ issueNumber: "201", status: "completed" }],
         },
       ],
@@ -1010,7 +1006,7 @@ test("renderStatusPage shows a stalled run as stalled and still expands it to it
             waves: [
               {
                 index: 0,
-                status: "closed",
+                status: "completed",
                 issues: [{ issueNumber: "101", status: "completed" }],
               },
               {
@@ -1163,7 +1159,7 @@ test("renderStatusPage makes archived campaign chips open the issue sheet agains
             waves: [
               {
                 index: 0,
-                status: "closed",
+                status: "completed",
                 issues: [{ issueNumber: "101", status: "completed" }],
               },
             ],
@@ -1354,7 +1350,7 @@ test("renderStatusPage renders the turn log newest-first with each turn number i
   // The status dot palette is shared, so a turn number reuses the same status colours. Each
   // state's colour is `stateColor` (asserted by value there); one structural check confirms the
   // page splices those turn-num rules in, proven once rather than re-pinned per state.
-  const turnNumCss = ["completed", "parked", "failure", "running", "unstarted"]
+  const turnNumCss = ["completed", "parked", "failed", "running", "unstarted"]
     .map((s) => `.turn-num.${s} { color: ${stateColor(s)}; }`)
     .join(" ");
   assert.ok(html.includes(turnNumCss), "the page splices the stateColor-derived turn-num rules");
@@ -1715,7 +1711,7 @@ test("renderStatusPage collapses closed waves into expandable completed wave chi
     waves: [
       {
         index: 0,
-        status: "closed",
+        status: "completed",
         issues: [{ issueNumber: "101", status: "completed" }],
       },
       {
@@ -1804,7 +1800,7 @@ test("renderStatusPage keeps a closed wave's chip compact and puts the issue tit
     waves: [
       {
         index: 0,
-        status: "closed",
+        status: "completed",
         issues: [
           {
             issueNumber: "101",
@@ -1831,7 +1827,7 @@ test("renderStatusPage keeps a closed wave's chip compact and puts the issue tit
   // The lead title + "+N" reads on the full card the chip reveals in the grid.
   assert.match(
     html,
-    /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2 class="wave-label">Wave 1 — config resolution \+1<\/h2><div class="wave-meta"><span class="wave-tally">2\/2<\/span><span class="wave-status closed">closed<\/span>/,
+    /<section class="wave completed" id="closed-wave-0" hidden><div class="wave-head"><h2 class="wave-label">Wave 1 — config resolution \+1<\/h2><div class="wave-meta"><span class="wave-tally">2\/2<\/span><span class="wave-status completed">completed<\/span>/,
   );
 });
 test("renderStatusPage escapes a wave name derived from an issue title", () => {
@@ -1883,7 +1879,7 @@ test("renderStatusPage renders a campaign meta line of name · issues · waves, 
     waves: [
       {
         index: 0,
-        status: "closed",
+        status: "completed",
         issues: [{ issueNumber: "101", status: "completed" }],
       },
       {
@@ -1970,7 +1966,7 @@ test("renderStatusPage's parked card carries no inline reply form — the reply 
 test("renderStatusPage renders the landing live-bar top-right, not the old refresh widget (#79)", () => {
   const html = renderStatusPage({
     project: "demo",
-    waves: [{ index: 0, status: "closed", issues: [] }],
+    waves: [{ index: 0, status: "completed", issues: [] }],
     parked: [],
   });
 
@@ -2040,7 +2036,7 @@ test("renderStatusPage marks prunable chips with prune data and never puts a pru
       waves: [
         {
           index: 0,
-          status: "closed",
+          status: "completed",
           issues: [{ issueNumber: "101", status: "completed" }],
         },
         {
@@ -2104,7 +2100,7 @@ test("renderStatusPage renders closed waves as a compact toggle row of chip butt
     waves: [
       {
         index: 0,
-        status: "closed",
+        status: "completed",
         issues: [
           { issueNumber: "101", status: "completed" },
           { issueNumber: "102", status: "completed" },
@@ -2135,7 +2131,7 @@ test("renderStatusPage renders each expanded closed wave's full card in the grid
     waves: [
       {
         index: 0,
-        status: "closed",
+        status: "completed",
         issues: [
           { issueNumber: "101", status: "completed", name: "cart persists" },
         ],
@@ -2154,7 +2150,7 @@ test("renderStatusPage renders each expanded closed wave's full card in the grid
   // stable id, hidden until its chip toggles it open.
   assert.match(
     html,
-    /<section class="wave closed" id="closed-wave-0" hidden><div class="wave-head"><h2 class="wave-label">Wave 1 — cart persists<\/h2><div class="wave-meta"><span class="wave-tally">1\/1<\/span><span class="wave-status closed">closed<\/span><\/div><\/div>/,
+    /<section class="wave completed" id="closed-wave-0" hidden><div class="wave-head"><h2 class="wave-label">Wave 1 — cart persists<\/h2><div class="wave-meta"><span class="wave-tally">1\/1<\/span><span class="wave-status completed">completed<\/span><\/div><\/div>/,
   );
   // The closed card renders inside the same grid, positioned before the open running wave.
   const grid = html.match(
@@ -2172,7 +2168,7 @@ test("renderStatusPage gives the closed-wave chip a chevron and a green accent w
     waves: [
       {
         index: 0,
-        status: "closed",
+        status: "completed",
         issues: [{ issueNumber: "101", status: "completed" }],
       },
     ],
@@ -2197,7 +2193,7 @@ test("renderStatusPage persists the expanded closed-wave set across a live reloa
     waves: [
       {
         index: 0,
-        status: "closed",
+        status: "completed",
         issues: [{ issueNumber: "101", status: "completed" }],
       },
     ],
@@ -2217,7 +2213,7 @@ test("renderStatusPage degrades the closed-wave toggle without JS", () => {
     waves: [
       {
         index: 0,
-        status: "closed",
+        status: "completed",
         issues: [{ issueNumber: "101", status: "completed" }],
       },
     ],
@@ -2228,7 +2224,7 @@ test("renderStatusPage degrades the closed-wave toggle without JS", () => {
   // closed card in the grid and hides the inert toggle bar — the content stays reachable.
   assert.match(
     html,
-    /<noscript><style>[^<]*\.completed-wave-bar \{ display: none;[^<]*\.wave\.closed\[hidden\] \{ display: block;/,
+    /<noscript><style>[^<]*\.completed-wave-bar \{ display: none;[^<]*\.wave\.completed\[hidden\] \{ display: block;/,
   );
 });
 test("renderStatusPage renders an archived run's closed waves as full cards, not colliding toggle ids", () => {
@@ -2238,7 +2234,7 @@ test("renderStatusPage renders an archived run's closed waves as full cards, not
       waves: [
         {
           index: 0,
-          status: "closed",
+          status: "completed",
           issues: [{ issueNumber: "201", status: "completed" }],
         },
       ],
@@ -2258,7 +2254,7 @@ test("renderStatusPage renders an archived run's closed waves as full cards, not
             waves: [
               {
                 index: 0,
-                status: "closed",
+                status: "completed",
                 issues: [
                   { issueNumber: "101", status: "completed", name: "old work" },
                 ],
@@ -2282,7 +2278,7 @@ test("renderStatusPage renders an archived run's closed waves as full cards, not
   assert.doesNotMatch(body, /id="closed-wave-0"/);
   assert.match(
     body,
-    /<section class="wave closed"><div class="wave-head"><h2 class="wave-label">Wave 1 — old work<\/h2><div class="wave-meta"><span class="wave-tally">1\/1<\/span><span class="wave-status closed">closed<\/span>/,
+    /<section class="wave completed"><div class="wave-head"><h2 class="wave-label">Wave 1 — old work<\/h2><div class="wave-meta"><span class="wave-tally">1\/1<\/span><span class="wave-status completed">completed<\/span>/,
   );
   // Exactly one element carries the toggle id across the whole page (no duplicate ids).
   assert.equal(html.split('id="closed-wave-0"').length - 1, 1);

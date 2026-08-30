@@ -64,11 +64,11 @@ export function baseBranchForProject(projectRoot: string): string | undefined {
 /**
  * The issue lifecycle — the single stored axis of the state machine (ADR 0019).
  * An issue is `unstarted` until assigned, then `running`, and ends `completed`,
- * `failure`, or (resumably) `parked`. This is the whole status enum: the old
- * render-time overlays (`quarantined`, `interrupted`) collapse into `parked` plus a
+ * `failed`, or (resumably) `parked`. This is the whole status enum: the old
+ * render-time overlays (the conflict hold, `interrupted`) collapse into `parked` plus a
  * reason, and `pruned`/`grafted` move to the orthogonal `Membership` axis.
  */
-export type IssueStatus = "completed" | "parked" | "failure" | "running" | "unstarted";
+export type IssueStatus = "completed" | "parked" | "failed" | "running" | "unstarted";
 
 /**
  * Why a `parked` issue is held (design §2.3) — metadata set *by the transition*, not a
@@ -98,7 +98,7 @@ export interface IssueLifecycle {
 
 /**
  * The status a chip renders — now exactly the lifecycle (ADR 0019). The render-time
- * overlays are gone: `quarantined`/`interrupted` fold into `parked`+reason, and
+ * overlays are gone: the conflict hold and `interrupted` fold into `parked`+reason, and
  * `pruned`/`grafted` live on `StatusIssue.membership`. Kept as a distinct name only
  * so the render sites read `DisplayStatus` where they mean "the lifecycle to paint".
  */
@@ -126,11 +126,11 @@ export interface StatusIssue {
  * render-time derivation off campaign structure. `failed` (any member failed) outranks
  * `parked` (any member held — a question or a conflict — or the wave-level `red-base`
  * hold on a red merged base, whose members stay `completed`; design §2.3), then `running`
- * (any in flight), then `closed` (all resolved), else `unstarted`. The old
- * `wave-parked`/`interrupted` words are gone: a held wave is `parked`, its members carry
+ * (any in flight), then `completed` (all resolved), else `unstarted`. The old
+ * wave-park/`interrupted` words are gone: a held wave is `parked`, its members carry
  * their own `ParkReason` and the wave carries `red-base` when that is the hold.
  */
-export type WaveStatus = "closed" | "running" | "unstarted" | "parked" | "failed";
+export type WaveStatus = "completed" | "running" | "unstarted" | "parked" | "failed";
 
 /**
  * A campaign's status — a pure fold of its waves (ADR 0019). Mirrors the wave fold's
@@ -182,7 +182,7 @@ export interface CampaignStatus {
 const statusForOutcome = (outcome: string | undefined): IssueStatus => {
   if (outcome === "green") return "completed";
   if (outcome === "parked") return "parked";
-  if (outcome?.startsWith("error")) return "failure";
+  if (outcome?.startsWith("error")) return "failed";
   return "unstarted";
 };
 
@@ -214,7 +214,8 @@ export const parkReasonFromEvent = (reason: string | undefined): ParkReason =>
  * The wave fold (ADR 0019): a wave's status is a pure fold of its issues' lifecycles,
  * skipping `pruned` members (they left the plan, so they never force a wave to read
  * running/unstarted). `failed` outranks `parked` outranks `running`; a wave whose every
- * live member has `completed` is `closed`; an empty or all-unstarted wave is `unstarted`.
+ * live member has `completed` is itself `completed`; an empty or all-unstarted wave is
+ * `unstarted`.
  * This is what makes a wave with a red member read `failed`, never `running` (#262).
  * `opts.redBase` is the one wave-level hold: a combined-gate park on a red merged base
  * (design §2.3) whose members all merged clean (each `completed`), so nothing in the fold
@@ -223,17 +224,17 @@ export const parkReasonFromEvent = (reason: string | undefined): ParkReason =>
 export function waveState(issues: readonly { status: DisplayStatus; membership?: Membership }[], opts: { redBase?: boolean } = {}): WaveStatus {
   const live = issues.filter((i) => i.membership !== "pruned");
   if (!live.length) return "unstarted";
-  if (live.some((i) => i.status === "failure")) return "failed";
+  if (live.some((i) => i.status === "failed")) return "failed";
   if (opts.redBase || live.some((i) => i.status === "parked")) return "parked";
   if (live.some((i) => i.status === "running")) return "running";
-  if (live.every((i) => i.status === "completed")) return "closed";
+  if (live.every((i) => i.status === "completed")) return "completed";
   return "unstarted";
 }
 
 /**
  * The campaign fold (ADR 0019): a pure fold of the wave states below it, same
  * precedence as the wave fold. Any `failed` wave → `failed`; any `parked` wave →
- * `parked`; any `running` wave → `running`; all `closed` → `completed`; else
+ * `parked`; any `running` wave → `running`; all `completed` → `completed`; else
  * `unstarted`. The card fold (`cardState`) collapses `completed`/`unstarted` to `idle`.
  */
 export function campaignState(waves: readonly WaveStatus[]): CampaignState {
@@ -241,7 +242,7 @@ export function campaignState(waves: readonly WaveStatus[]): CampaignState {
   if (waves.some((w) => w === "failed")) return "failed";
   if (waves.some((w) => w === "parked")) return "parked";
   if (waves.some((w) => w === "running")) return "running";
-  if (waves.every((w) => w === "closed")) return "completed";
+  if (waves.every((w) => w === "completed")) return "completed";
   return "unstarted";
 }
 
@@ -409,10 +410,10 @@ export function describeEvent(e: OrchestratorEvent, opts: { festive?: { offset: 
       return `${label} started`;
     }
     case "wave-done": {
-      // The event holds no plan-ordered task list, so the wave's membership is reconstructed
-      // from the outcomes it does carry (merged, then quarantined, then held) and each member
-      // is named by title (an unresolved id falls back to its `#id`), listing them all.
-      const members = [...(e.merged ?? []), ...(e.quarantined ?? []), ...(e.held ?? [])];
+      // A wave-done fires only when every member merged (design §2.1), so the event carries
+      // just its `merged` list — the wave's whole membership. Each member is named by title
+      // (an unresolved id falls back to its `#id`), listing them all.
+      const members = [...(e.merged ?? [])];
       const label = festive
         ? festiveLine(e.index ?? 0, members.map(String))
         : waveMembersLabel(e.index ?? 0, members.map((id) => named(id)));
@@ -597,11 +598,11 @@ export interface ReducedCampaign {
    * reaches a started outcome (`running`/`completed`/…), so it reads `grafted` only
    * while waiting in a later wave. Both live and archived runs see it. */
   grafted: Set<string>;
-  /** the issues a merge conflict held out of integration (ADR 0013), folded from
-   * `quarantined` events in log order and cleared once the issue re-merges. It drives
+  /** the issues a merge conflict held out of integration (ADR 0013), folded from the
+   * `parked{conflict}` events in log order and cleared once the issue re-merges. It drives
    * the lifecycle: a held issue passed its own gate (`outcomes` holds `completed`) but
    * `issueLifecycle` reads it as `parked` with reason `conflict` until it re-merges (ADR 0019). */
-  quarantined: Set<string>;
+  conflictParked: Set<string>;
   /** the optional human name the campaign was launched with (`--name`), read off
    * the latest `campaign-start` event; undefined for an unnamed run. */
   name?: string;
@@ -666,7 +667,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
   let layout: string[][] = [];
   const pruned = new Set<string>();
   const grafted = new Set<string>();
-  const quarantined = new Set<string>();
+  const conflictParked = new Set<string>();
   let name: string | undefined;
   let festiveOffset: number | undefined;
   const outcomes = new Map<string, IssueStatus>();
@@ -727,12 +728,12 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       details.set(taskId, e.branch ? `Green on ${e.branch} — pending merge onto the base` : "Green — pending merge onto the base");
     } else if (e.event === "merged" && e.taskId) {
       // The integrator landed this green on the base (design §2.1). Completion, and the
-      // resolution of any earlier quarantine or red-base hold on the same id.
+      // resolution of any earlier conflict hold or red-base hold on the same id.
       const taskId = normalizeIssue(String(e.taskId));
       outcomes.set(taskId, "completed");
       pendingGreen.delete(taskId);
       redBase.delete(taskId);
-      quarantined.delete(taskId);
+      conflictParked.delete(taskId);
       details.set(taskId, "Merged into base");
       if (e.ts && !mergedAt.has(taskId)) mergedAt.set(taskId, String(e.ts));
     } else if (e.event === "parked" && e.taskId) {
@@ -748,7 +749,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
         // A merge conflict pulled this green from integration (design §2.3). Overlay it
         // like `pruned` — the issue's own outcome stays `completed` (it passed its gate),
         // so the set is what makes the chip read `parked{conflict}` until it re-merges.
-        quarantined.add(taskId);
+        conflictParked.add(taskId);
         details.set(taskId, "Parked on a merge conflict — resolve the conflict");
       } else {
         outcomes.set(taskId, "parked");
@@ -766,7 +767,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
         anomalies.push(`failed for already-merged ${taskId} ignored (completed is terminal)`);
         continue;
       }
-      outcomes.set(taskId, "failure");
+      outcomes.set(taskId, "failed");
       if (!details.has(taskId)) details.set(taskId, "Failed — the agent could not make it green");
     } else if (e.event === "campaign-parked") {
       // The campaign paused at a wave boundary (design §2.1): a red merged base, an unresolved
@@ -784,17 +785,17 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
         const issueNumber = normalizeIssue(String(taskId));
         outcomes.set(issueNumber, "completed");
         pendingGreen.delete(issueNumber);
-        // A clean re-merge resolves an earlier quarantine or a red-base hold, so the chip
+        // A clean re-merge resolves an earlier conflict hold or a red-base hold, so the chip
         // reads completed — and its stale "resolve the conflict" detail becomes the merge line.
         redBase.delete(issueNumber);
-        if (quarantined.delete(issueNumber)) details.set(issueNumber, "Merged into base");
+        if (conflictParked.delete(issueNumber)) details.set(issueNumber, "Merged into base");
         if (!details.has(issueNumber)) details.set(issueNumber, "Merged into base");
         if (e.ts && !mergedAt.has(issueNumber)) mergedAt.set(issueNumber, String(e.ts));
       }
-      // A wave-done closes the wave only when it holds no quarantined member (design §7): a
+      // A wave-done closes the wave only when it holds no conflict-parked member (design §7): a
       // conflict-parked green is unresolved work, so its wave stays out of `closedWaves` and a
       // redrive re-enters it (`resumeIndex` reads the first wave absent from `closedWaves`).
-      if (!(waves[e.index] ?? []).some((m) => quarantined.has(normalizeIssue(m)))) {
+      if (!(waves[e.index] ?? []).some((m) => conflictParked.has(normalizeIssue(m)))) {
         closedWaves.add(e.index);
         currentWave = -1;
       }
@@ -867,13 +868,13 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
     }
   }
 
-  return { waves, layout, pruned, grafted, quarantined, name, festiveOffset, outcomes, pendingGreen, details, titles, mergedAt, closedWaves, currentWave, parkedWave, parkReasons, redBase, anomalies };
+  return { waves, layout, pruned, grafted, conflictParked, name, festiveOffset, outcomes, pendingGreen, details, titles, mergedAt, closedWaves, currentWave, parkedWave, parkReasons, redBase, anomalies };
 }
 
 /**
  * The issue lifecycle FSM read off a reduced campaign (ADR 0019): the single stored
  * axis, `{state, reason?}`. The transitions the event fold recorded resolve here —
- * a `quarantined` merge conflict overrides the issue's own green outcome to `parked`
+ * a conflict-parked merge conflict overrides the issue's own green outcome to `parked`
  * with reason `conflict`; a `parked` outcome carries its folded `ParkReason` (defaulting
  * to `question`) — including a dead run's in-flight `running` issue, which the reducer
  * has already reconciled to `parked{crash}` off its injected liveness probe (design §7,
@@ -884,8 +885,8 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
  */
 export function issueLifecycle(r: ReducedCampaign, id: string): IssueLifecycle {
   const base = r.outcomes.get(id) ?? "unstarted";
-  if (base === "failure") return { state: "failure" };
-  if (r.quarantined.has(id)) return { state: "parked", reason: "conflict" };
+  if (base === "failed") return { state: "failed" };
+  if (r.conflictParked.has(id)) return { state: "parked", reason: "conflict" };
   if (base === "parked") return { state: "parked", reason: r.parkReasons.get(id) ?? "question" };
   return { state: base };
 }
@@ -1162,7 +1163,7 @@ export function summarizeRun(events: OrchestratorEvent[]): string {
   const { waves, outcomes } = reduceCampaign(events);
   const mode = events.some((e) => e.event === "campaign-start") ? "campaign" : "queue";
   const count = waves.flat().length;
-  const failed = [...outcomes.values()].includes("failure");
+  const failed = [...outcomes.values()].includes("failed");
   return `${mode} · ${count} issue${count === 1 ? "" : "s"} · ${failed ? "failed" : "complete"}`;
 }
 
@@ -1527,10 +1528,10 @@ export function selectStatus(statuses: CampaignStatus[], requested?: string): Ca
 }
 
 /** A project's run-state rolled up to one word for the landing card (ADR 0019): the
- * card fold of its campaign. `failure` (a broken issue) outranks `parked` (a held
+ * card fold of its campaign. `failed` (a broken issue) outranks `parked` (a held
  * one), then `running`; a completed or absent campaign folds to `idle` — the card
  * never reads a bare "completed", and never `idle` while anything is parked or failed. */
-export type RunState = "running" | "parked" | "failure" | "idle";
+export type RunState = "running" | "parked" | "failed" | "idle";
 
 /** One project's row on the all-repos landing: its run state, the campaign it is
  * (or last) running, how far through the waves it is, how much has merged, a
@@ -1590,15 +1591,15 @@ export interface LandingView {
 /**
  * The card fold (ADR 0019): a project's `RunState` is the pure fold of its campaign
  * (which is itself the fold of its waves), with `completed`/`unstarted`/no-campaign
- * collapsed to `idle`. `failure` outranks `parked` — a broken issue is a louder signal
- * than a held one (the deliberate reversal of the old `parked > failure` order). A
+ * collapsed to `idle`. `failed` outranks `parked` — a broken issue is a louder signal
+ * than a held one (the deliberate reversal of the old `parked > failed` order). A
  * surviving parked record (a park that outlived its live plan) still forces `parked`,
  * so the card is never `idle` while a question waits (#232, #258). No precedence ladder:
  * the fold is the single derivation, so a card can never disagree with its waves.
  */
 export const cardState = (status: CampaignStatus): RunState => {
   const campaign = campaignState(status.waves.map((wave) => wave.status));
-  if (campaign === "failed") return "failure";
+  if (campaign === "failed") return "failed";
   if (campaign === "parked" || status.parked.length) return "parked";
   if (campaign === "running") return "running";
   return "idle";
@@ -1719,7 +1720,7 @@ const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, event
     .filter((wave) => wave.issues.length);
   const issues = liveWaves.flatMap((wave) => wave.issues);
   const total = liveWaves.length;
-  const closed = liveWaves.filter((wave) => wave.status === "closed").length;
+  const closed = liveWaves.filter((wave) => wave.status === "completed").length;
   const runningWave = liveWaves.findIndex((wave) => wave.status === "running");
   const completed = issues.filter((i) => i.status === "completed").length;
   return {

@@ -16,8 +16,8 @@ export interface Notice {
  * `<emoji> <project> · <STATE> · <context>`, one signal line, and — where a park
  * or failure gives one — the exact recovery command (`vetinari redrive`,
  * `answer <id>`, `prune <id>`). One place so every notice speaks the settled
- * vocabulary (§13.1) and no retired word (`wave-park`, `quarantine`, `batch`,
- * `queue`, `--resume`) can reach an operator through a hand-rolled string.
+ * vocabulary (§13.1) and no retired word (`wave-park`, the old conflict-hold word,
+ * `batch`, `queue`, `--resume`) can reach an operator through a hand-rolled string.
  *
  * `recover` renders as a trailing `Recover: …` line only when a recovery command
  * exists; `detail` is an optional free-form tail (a gate report, an impact list)

@@ -22,7 +22,7 @@ import {
   listParked,
   type ParkReason,
 } from "./state.ts";
-import { quarantineImpacts, resumeIndex, type QuarantineImpact } from "./prune.ts";
+import { strandedByConflict, resumeIndex, type StrandedImpact } from "./prune.ts";
 import { notice, type Notice } from "./notice.ts";
 import { tgSend, tgWaitReply, type TgConn } from "./telegram.ts";
 import { hostSecretsPath, tgConnForBaseLocation } from "./registry.ts";
@@ -401,15 +401,16 @@ export async function markMergedIssues(
 }
 
 /**
- * The operator-facing notice a wave-park enqueues (ADR 0013). The merged base gated red
+ * The operator-facing notice a campaign-park enqueues (ADR 0013). The merged base gated red
  * with no attributable culprit — every issue passed alone — so the wave's greens stay
  * merged on the base and the campaign pauses for a human to resolve: fix forward and
  * resume, or prune a suspect. `category: "failure"` routes it to the same alert channel
  * the old halt used, since a paused red base demands attention; the gate-report `detail`
- * tail rides along so the human sees why it went red. Pure, so the wording and routing
- * are checkable without running a campaign.
+ * tail rides along so the human sees why it went red. Also carries a member-park's detail
+ * for the plain question/stall hold. Pure, so the wording and routing are checkable without
+ * running a campaign.
  */
-export function waveParkedNotice(
+export function campaignParkedNotice(
   project: string,
   waveNumber: number,
   merged: string[],
@@ -461,25 +462,25 @@ export function campaignFailedNotice(
  * one per line — the shared body both conflict notices show so a human reads the same
  * blast radius whether the campaign paused or pruned on.
  */
-function describeConflictImpacts(impacts: QuarantineImpact[]): string {
+function describeConflictImpacts(impacts: StrandedImpact[]): string {
   return impacts
     .map((i) => `  #${i.target} → ${i.dropped.map((d) => `#${d}`).join(", ")}`)
     .join("\n");
 }
 
 /**
- * The operator-facing notice a quarantine-pause enqueues (ADR 0013). A merge conflict
- * quarantined an issue whose dependents sit in later, unstarted waves — a blast-radius
+ * The operator-facing notice a stranded-conflict pause enqueues (ADR 0013). A merge conflict
+ * parked an issue whose dependents sit in later, unstarted waves — a blast-radius
  * call that belongs to a human — so the campaign pauses at the wave boundary with the
  * greens already merged left in place. `category: "failure"` routes it to the alert
- * channel a wave-park uses. The human has two moves: resolve the quarantined issue's
+ * channel a red base uses. The human has two moves: resolve the conflict-parked issue's
  * conflict and resume, or re-run with `--auto-prune` to prune the stranded dependents
  * and continue. Pure, so the wording and routing are checkable without a campaign.
  */
-export function quarantinePauseNotice(
+export function strandedConflictNotice(
   project: string,
   waveNumber: number,
-  impacts: QuarantineImpact[],
+  impacts: StrandedImpact[],
   baseBranch: string,
 ): Notice {
   return notice({
@@ -496,17 +497,17 @@ export function quarantinePauseNotice(
 }
 
 /**
- * The operator-facing notice a merge-conflict quarantine enqueues when it holds the wave
+ * The operator-facing notice a merge-conflict park enqueues when it holds the wave
  * (design §5 step 5). One or more greens conflicted at merge and are parked as `conflict`,
  * their branches/worktrees/sessions intact; the wave's other greens stay merged on the base
  * and the campaign parks for a human to resolve the conflict on the branch and redrive.
- * `category: "failure"` routes it to the alert channel a wave-park uses. Pure, so the wording
+ * `category: "failure"` routes it to the alert channel a red base uses. Pure, so the wording
  * and routing are checkable without a campaign.
  */
 export function conflictParkedNotice(
   project: string,
   waveNumber: number,
-  quarantined: string[],
+  conflictParked: string[],
   merged: string[],
   baseBranch: string,
 ): Notice {
@@ -515,7 +516,7 @@ export function conflictParkedNotice(
     project,
     state: "PARKED",
     context: `wave ${waveNumber}`,
-    signal: `Merge conflict on ${quarantined.map((q) => `#${q}`).join(", ")} — greens (${merged.join(", ") || "none"}) kept on ${baseBranch}, campaign paused.`,
+    signal: `Merge conflict on ${conflictParked.map((q) => `#${q}`).join(", ")} — greens (${merged.join(", ") || "none"}) kept on ${baseBranch}, campaign paused.`,
     recover: "resolve the conflict on the branch then `vetinari redrive` (or `prune <issue>`)",
     category: "failure",
     event: "campaign-parked",
@@ -526,12 +527,12 @@ export function conflictParkedNotice(
  * The wave-level reason a `campaign-parked` carries when a member holds the wave (design §2.1
  * rule 2 — written, never inferred): a held member's own `question`/`stalled` reason wins over a
  * conflict (an answerable hold is the more actionable one to surface), else `conflict` for a
- * quarantine-only hold. Reads the reason off the on-disk parked records; a member with no record
+ * conflict-only hold. Reads the reason off the on-disk parked records; a member with no record
  * (a stub, or a race) defaults to `question`, the answerable hold. Pure over the record set.
  */
 export function waveParkReason(
   parkedTasks: string[],
-  quarantined: string[],
+  conflictParked: string[],
   records: { taskId: string; reason: ParkReason }[],
 ): ParkReason {
   const norm = (id: string) => id.replace(/^#/, "");
@@ -545,15 +546,15 @@ export function waveParkReason(
 }
 
 /**
- * The notice `campaign --auto-prune` enqueues when it prunes a quarantine's stranded
+ * The notice `campaign --auto-prune` enqueues when it prunes a stranded conflict's
  * dependents and runs on (ADR 0013). Informational — the campaign continued — so it
- * rides the `progress` channel, naming each quarantined issue and the dependents its
+ * rides the `progress` channel, naming each conflict-parked issue and the dependents its
  * prune pruned. Pure, checkable without a campaign.
  */
 export function autoPruneNotice(
   project: string,
   waveNumber: number,
-  impacts: QuarantineImpact[],
+  impacts: StrandedImpact[],
 ): Notice {
   return notice({
     emoji: "✂️",
@@ -639,7 +640,7 @@ const defaultCampaignDeps: CampaignDeps = {
  *   it re-runs on the existing branch here (the run loop resumes its session when resumable). A
  *   live redrive reads the same crashed member as `running` (the process is now alive), which
  *   the `else` below also re-runs; either way a crash is plainly re-run, never left parked.
- * - `failure` → re-run only under `override` (the operator's explicit choice); otherwise
+ * - `failed` → re-run only under `override` (the operator's explicit choice); otherwise
  *   an `error(...)` outcome that stops the campaign as failed again (design §7).
  * - anything else (`running`/`unstarted`/grafted) → run.
  *
@@ -662,7 +663,7 @@ export function reconcileResumeWave(
     // `running`, design §2.2) — is handed to integration, never re-run. `pendingGreen` is
     // checked explicitly so a genuinely in-flight/crashed `running` member still re-runs below.
     if (status === "completed" || pendingGreen.has(id)) pre[id] = "green";
-    else if (status === "failure") {
+    else if (status === "failed") {
       if (override) toRun.push(id);
       else pre[id] = "error(failed on a prior run — prune it or redrive with --override)";
     } else if (status === "parked") {
@@ -683,14 +684,14 @@ export function reconcileResumeWave(
  * Green-only by design: only green branches are merged. Once a wave is over,
  * parked records for its non-green tasks are cleared so stale questions do not
  * bleed into the next wave. Integration is non-atomic (ADR 0013): a merge conflict
- * quarantines just the conflicting green and the wave carries on with the rest,
- * while a red merged base — with no single culprit — wave-parks: the wave's greens
+ * parks just the conflicting green and the wave carries on with the rest,
+ * while a red merged base — with no single culprit — parks the campaign: the wave's greens
  * stay merged on the base and the campaign pauses for a human, with no changelog fold
  * and no `pending-verify` labels (a red base verifies nothing).
  *
- * A quarantine that strands dependents in later, unstarted waves is a blast-radius
+ * A conflict that strands dependents in later, unstarted waves is a blast-radius
  * call for a human, so by default the campaign pauses at the wave boundary (ADR 0013);
- * `opts.autoPrune` opts into pruning the stranded closure and running on. A quarantine
+ * `opts.autoPrune` opts into pruning the stranded closure and running on. A conflict
  * that orphans nothing never stops the campaign.
  *
  * `opts.resume` continues a *paused* campaign on the current base rather than starting a
@@ -888,9 +889,8 @@ export async function campaign(
     }
 
     const greens = tasks.filter((t) => outcomes[t] === "green");
-    const held = tasks.filter((t) => outcomes[t] !== "green");
 
-    const { merged, alreadyMerged = [], quarantined, parked } = await deps.integrate(cfg, greens, undefined, index, { regate });
+    const { merged, alreadyMerged = [], conflictParked, parked } = await deps.integrate(cfg, greens, undefined, index, { regate });
 
     // The reconciled resume wave has now integrated its banked greens — log the `redrive`
     // stop-to-continue event with what it landed (freshly merged) vs skipped (already on the
@@ -940,7 +940,7 @@ export async function campaign(
     // the stop marker (§2.1 rule 2), so a redrive re-gates this wave rather than stepping over it.
     if (baseRed) {
       cfg.log.log("campaign-parked", { index, reason: "red-base", detail: parked!.detail });
-      enqueueOutbound(cfg, waveParkedNotice(cfg.project, index + 1, merged, cfg.baseBranch, parked!.detail));
+      enqueueOutbound(cfg, campaignParkedNotice(cfg.project, index + 1, merged, cfg.baseBranch, parked!.detail));
       reporter.line(formatStop({ kind: "red-base", index, total, merged }));
       return "parked";
     }
@@ -948,26 +948,26 @@ export async function campaign(
     // The base gated green from here. The wave boundary clears NO parked records (design §2.5):
     // a record is cleared only when its issue goes back to running (a re-admit/redrive run
     // consuming it) or by an explicit `prune --purge`. A held member's record — a question, a
-    // stall, or a quarantined green's conflict — survives the boundary so it stays answerable,
+    // stall, or a conflict-parked green's conflict — survives the boundary so it stays answerable,
     // dashboard-visible, and resumable until a human resolves it.
     const parkedTasks = tasks.filter((t) => outcomes[t] === "parked");
 
     // (3) Any parked member holds the wave (design §5 step 5): a question, a stall, or a merge
-    // conflict (`quarantined` — a green pulled from integration, its work preserved). A conflict
+    // conflict (`conflictParked` — a green pulled from integration, its work preserved). A conflict
     // that strands nothing no longer slips through to `wave-done` (#310, this issue absorbs it);
     // it is unresolved work awaiting a human, so it parks the campaign like any other park. The
     // stranded-dependents check + `--auto-prune` decide the DEPENDENTS' fate on top of this —
     // never whether the campaign stops.
-    if (parkedTasks.length || quarantined.length) {
-      const reason = waveParkReason(parkedTasks, quarantined, listParked(cfg));
+    if (parkedTasks.length || conflictParked.length) {
+      const reason = waveParkReason(parkedTasks, conflictParked, listParked(cfg));
 
       // A merge conflict that strands dependents in later, unstarted waves is a blast-radius call.
       // `--auto-prune` prunes the stranded closure (ADR 0005) so a later redrive skips the doomed
       // dependents; without it, the notice names them. Either way the conflict holds the wave.
-      let orphaning: QuarantineImpact[] = [];
-      if (quarantined.length && cfg.blockedBy) {
+      let orphaning: StrandedImpact[] = [];
+      if (conflictParked.length && cfg.blockedBy) {
         const plan = reduceCampaign(readEventLog(cfg));
-        orphaning = (await quarantineImpacts(plan, quarantined, cfg.blockedBy)).filter((i) => i.dropped.length);
+        orphaning = (await strandedByConflict(plan, conflictParked, cfg.blockedBy)).filter((i) => i.dropped.length);
       }
       const autoPruned = orphaning.length > 0 && !!opts.autoPrune;
       if (autoPruned) {
@@ -983,19 +983,19 @@ export async function campaign(
       // Record the stop marker with the wave's reason (§2.1 rule 2). The notice and terminal line
       // take the shape of the hold: a stranded conflict, a plain conflict, or a member park.
       if (reason === "conflict" && stranded.length) {
-        const detail = `stranded conflict: quarantine stranded ${stranded.map((d) => `#${d}`).join(", ")} in later waves`;
+        const detail = `stranded conflict: a merge conflict stranded ${stranded.map((d) => `#${d}`).join(", ")} in later waves`;
         cfg.log.log("campaign-parked", { index, reason, detail });
-        enqueueOutbound(cfg, quarantinePauseNotice(cfg.project, index + 1, orphaning, cfg.baseBranch));
-        reporter.line(formatStop({ kind: "quarantine-stranded", index, total, stranded, merged }));
+        enqueueOutbound(cfg, strandedConflictNotice(cfg.project, index + 1, orphaning, cfg.baseBranch));
+        reporter.line(formatStop({ kind: "stranded-conflict", index, total, stranded, merged }));
       } else if (reason === "conflict") {
-        const detail = `merge conflict: ${quarantined.join(", ")} parked, awaiting a human`;
+        const detail = `merge conflict: ${conflictParked.join(", ")} parked, awaiting a human`;
         cfg.log.log("campaign-parked", { index, reason, detail });
-        enqueueOutbound(cfg, conflictParkedNotice(cfg.project, index + 1, quarantined, merged, cfg.baseBranch));
-        reporter.line(formatStop({ kind: "conflict", index, total, conflicted: quarantined, merged }));
+        enqueueOutbound(cfg, conflictParkedNotice(cfg.project, index + 1, conflictParked, merged, cfg.baseBranch));
+        reporter.line(formatStop({ kind: "conflict", index, total, conflicted: conflictParked, merged }));
       } else {
         const detail = `parked, awaiting a human: ${parkedTasks.join(", ")}`;
         cfg.log.log("campaign-parked", { index, reason, detail });
-        enqueueOutbound(cfg, waveParkedNotice(cfg.project, index + 1, merged, cfg.baseBranch, detail));
+        enqueueOutbound(cfg, campaignParkedNotice(cfg.project, index + 1, merged, cfg.baseBranch, detail));
         reporter.line(formatStop({ kind: "issue-parked", index, total, parked: parkedTasks, merged }));
       }
       return "parked";
@@ -1003,7 +1003,7 @@ export async function campaign(
 
     // (4) Every member merged and the base is green: the wave closes (design §5 step 5). The event
     // carries `{ index, merged }` only (§2.1) — a wave-done means every member merged, so there is
-    // no held or quarantined member to record.
+    // no held or conflict-parked member to record.
     const waveDoneEvent: Omit<WaveDoneEvent, "ts" | "event"> = { index, merged };
     cfg.log.log("wave-done", waveDoneEvent);
     enqueueOutbound(cfg, notice({
@@ -1015,7 +1015,7 @@ export async function campaign(
       category: "success",
       event: "wave-done",
     }));
-    reporter.line(formatWaveDone(index, total, { merged, held, quarantined, outcomes }));
+    reporter.line(formatWaveDone(index, total, { merged }));
   }
 
   const doneEvent: Omit<CampaignDoneEvent, "ts" | "event"> = { waves: index };

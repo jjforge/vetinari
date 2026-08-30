@@ -29,14 +29,14 @@ import type { DisplayStatus, Membership, RunState } from "./dashboard-model.ts";
 export const ALL_DISPLAY_STATUSES = [
   "completed",
   "parked",
-  "failure",
+  "failed",
   "running",
   "unstarted",
 ] as const satisfies readonly DisplayStatus[];
 
 export const ALL_MEMBERSHIPS = ["member", "grafted", "pruned"] as const satisfies readonly Membership[];
 
-export const ALL_RUN_STATES = ["running", "parked", "failure", "idle"] as const satisfies readonly RunState[];
+export const ALL_RUN_STATES = ["running", "parked", "failed", "idle"] as const satisfies readonly RunState[];
 
 // Compile-time only: a union member missing from the tuple above leaves a non-never
 // residue here and fails `tsc` (`satisfies` alone catches only wrong/extra members).

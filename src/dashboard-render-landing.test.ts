@@ -382,7 +382,7 @@ test("renderLandingShell colours each project card's highlight by run state (#75
   // ...and per-state border-top-color rules tint the highlight to match the pill. The colour
   // for each state is `stateColor` (asserted by value there); one structural check confirms the
   // rendered output carries those reducer-derived rules verbatim, proven once not per state.
-  const cardEdgeCss = ["running", "parked", "failure", "completed", "idle"]
+  const cardEdgeCss = ["running", "parked", "failed", "completed", "idle"]
     .map((s) => `.card.${s} { border-top-color: ${stateColor(s)}; }`)
     .join(" ");
   assert.ok(html.includes(cardEdgeCss), "landing carries the stateColor-derived card edges");

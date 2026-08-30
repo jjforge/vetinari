@@ -50,10 +50,10 @@ export interface IntegrateResult {
   /**
    * Greens a merge conflict pulled from this wave's integration (ADR 0013). A conflict
    * is attributable — git blames one branch — so only that merge is aborted; the issue
-   * is quarantined with its branch, worktree, and agent session left intact so it is
-   * resumable, and the wave neither rolls back nor halts.
+   * is parked with reason `conflict`, its branch, worktree, and agent session left intact
+   * so it is resumable, and the wave neither rolls back nor halts.
    */
-  quarantined: string[];
+  conflictParked: string[];
   /**
    * Set when the merged base gated red — the emergent, unattributable failure (each
    * green passed alone, together they are red). No branch is to blame, so the wave is
@@ -65,7 +65,7 @@ export interface IntegrateResult {
 }
 
 /**
- * The merged-base gate, injected so `integrateGreens`'s merge/quarantine control flow
+ * The merged-base gate, injected so `integrateGreens`'s merge/conflict control flow
  * is unit-testable without a Docker sandbox. The default runs the real gate.
  */
 export interface IntegrateDeps {
@@ -81,8 +81,8 @@ const defaultIntegrateDeps: IntegrateDeps = { gate: gateMergedBase };
  *
  * A **merge conflict** is attributable to one branch, so `git merge --abort`s only that
  * merge — never `reset --hard` to the wave start, which would un-merge the greens
- * already banked — quarantines the issue (branch/worktree/session preserved, resumable)
- * and continues integrating the rest of the wave.
+ * already banked — parks the issue with reason `conflict` (branch/worktree/session
+ * preserved, resumable) and continues integrating the rest of the wave.
  *
  * A **red merged base** has no single culprit, so it is NOT rolled back either: the
  * greens stay merged, the branches are left intact, and the result carries `parked` so
@@ -101,7 +101,7 @@ export async function integrateGreens(
 ): Promise<IntegrateResult> {
   const merged: string[] = [];
   const alreadyMerged: string[] = [];
-  const quarantined: string[] = [];
+  const conflictParked: string[] = [];
   for (const taskId of greens) {
     const branch = `${cfg.branchPrefix}${taskId}`;
     // Redrive idempotency + hand-merge recognition (design §7): a green already banked on the
@@ -119,7 +119,7 @@ export async function integrateGreens(
     if (r.code !== 0) {
       // Attributable failure (ADR 0013): abort ONLY this merge — a `reset --hard` to
       // the wave start here would discard the greens already merged this wave —
-      // quarantine the issue with its work preserved, and carry on with the rest.
+      // park the issue with its work preserved, and carry on with the rest.
       const detail = `${r.stdout}\n${r.stderr}`.trim().split("\n").slice(-12).join("\n");
       gitTry(["merge", "--abort"]);
       // A merge conflict is an integrator park with reason `conflict` (design §2.3): the
@@ -130,7 +130,7 @@ export async function integrateGreens(
       // never resumes by reply, so the record carries no session; `question` names the move.
       writeParkedRecord(cfg, { taskId, reason: "conflict", detail, branch, question: `Merge conflict on ${branch} — resolve it on the base, then redrive.` });
       cfg.log.log("parked", { taskId, reason: "conflict", detail });
-      quarantined.push(taskId);
+      conflictParked.push(taskId);
       continue;
     }
     cfg.log.log("merged", { taskId, branch });
@@ -153,17 +153,17 @@ export async function integrateGreens(
       // stay merged and the campaign parks. The `base-gate` above already recorded the red
       // result; the caller logs the `campaign-parked` stop marker with the wave index.
       const detail = report.split("\n").slice(-40).join("\n");
-      return { merged, alreadyMerged, quarantined, parked: { reason: "red-base", detail } };
+      return { merged, alreadyMerged, conflictParked, parked: { reason: "red-base", detail } };
     }
   }
 
   // Only once the combined result is green: drop the merged branches and let git
-  // reclaim their (already-removed) worktree entries. Quarantined and parked/non-green
+  // reclaim their (already-removed) worktree entries. Conflict-parked and parked/non-green
   // branches are never touched here — they stay resumable.
   for (const taskId of merged) gitTry(["branch", "-D", `${cfg.branchPrefix}${taskId}`]);
   gitTry(["worktree", "prune"]);
   cfg.log.log("campaign-integrated", { merged, headSha: git(["rev-parse", "HEAD"]) });
-  return { merged, alreadyMerged, quarantined };
+  return { merged, alreadyMerged, conflictParked };
 }
 
 /**
@@ -234,7 +234,7 @@ async function gateMergedBase(cfg: ResolvedConfig, index?: number): Promise<{ gr
 // GC, and parked records for now-resolved issues linger. `tidy` reconciles that,
 // dry-run by default. Its one load-bearing rule is that a branch dies only when it
 // is PROVABLY reachable from the base — never a branch with unmerged work, and never
-// a `quarantined`/`parked`/`wave-parked` issue (whose work must stay resumable).
+// a conflict-parked / parked / campaign-parked issue (whose work must stay resumable).
 
 /** Strip a leading `#` so a logged/parked id (`#42`) matches a branch suffix (`42`). */
 const normalizeTidyId = (id: string) => id.replace(/^#/, "").trim();
@@ -249,7 +249,7 @@ export interface TidyBranch {
 
 /**
  * The reconcilable on-disk/tracker state of one project, gathered at the edge so
- * `computeTidy` stays a pure decision. `parked`/`quarantined`/`waveParked` are the
+ * `computeTidy` stays a pure decision. `parked`/`conflictParked`/`campaignParked` are the
  * three states whose work must be preserved (ADR 0013).
  */
 export interface TidySnapshot {
@@ -259,10 +259,10 @@ export interface TidySnapshot {
   fragments: string[];
   /** issue ids with a live parked record. */
   parked: string[];
-  /** issue ids a merge conflict quarantined out of integration (event log). */
-  quarantined: string[];
-  /** issue ids whose wave a red merged base wave-parked (event log). */
-  waveParked: string[];
+  /** issue ids a merge conflict parked out of integration (event log). */
+  conflictParked: string[];
+  /** issue ids whose wave a red merged base parked the campaign on (event log). */
+  campaignParked: string[];
 }
 
 /** What `tidy` would fold, delete, and clear — the plan a dry-run prints and `--apply` acts on. */
@@ -275,8 +275,8 @@ export interface TidyPlan {
   clearParked: string[];
   /** merged issue ids being GC'd that carry no changelog fragment — warned, never invented. */
   warnNoChangelog: string[];
-  /** present branches left untouched, each with why (unmerged / quarantined / parked / wave-parked). */
-  keep: { id: string; reason: "unmerged" | "quarantined" | "parked" | "wave-parked" }[];
+  /** present branches left untouched, each with why (unmerged / parked(conflict) / parked / campaign-parked). */
+  keep: { id: string; reason: "unmerged" | "parked(conflict)" | "parked" | "campaign-parked" }[];
 }
 
 /**
@@ -290,12 +290,12 @@ export interface TidyPlan {
 export function computeTidy(snap: TidySnapshot): TidyPlan {
   const present = new Set(snap.branches.map((b) => normalizeTidyId(b.id)));
   const reachable = new Map(snap.branches.map((b) => [normalizeTidyId(b.id), b.reachable]));
-  const quarantined = new Set(snap.quarantined.map(normalizeTidyId));
-  const waveParked = new Set(snap.waveParked.map(normalizeTidyId));
+  const conflictParked = new Set(snap.conflictParked.map(normalizeTidyId));
+  const campaignParked = new Set(snap.campaignParked.map(normalizeTidyId));
   const parked = new Set(snap.parked.map(normalizeTidyId));
   const fragments = snap.fragments.map(normalizeTidyId);
   const fragmentSet = new Set(fragments);
-  const protectedId = new Set([...quarantined, ...waveParked, ...parked]);
+  const protectedId = new Set([...conflictParked, ...campaignParked, ...parked]);
 
   // Merged = the work is on the base: its branch is a reachable ancestor, or the
   // branch is already gone (cleaned by hand) yet an artifact for it still lingers.
@@ -315,10 +315,10 @@ export function computeTidy(snap: TidySnapshot): TidyPlan {
     .filter((id) => !deleteSet.has(id))
     .map((id) => ({
       id,
-      reason: quarantined.has(id)
-        ? ("quarantined" as const)
-        : waveParked.has(id)
-          ? ("wave-parked" as const)
+      reason: conflictParked.has(id)
+        ? ("parked(conflict)" as const)
+        : campaignParked.has(id)
+          ? ("campaign-parked" as const)
           : parked.has(id)
             ? ("parked" as const)
             : ("unmerged" as const),
@@ -365,7 +365,7 @@ function scanBranches(root: string, baseBranch: string, branchPrefix: string): T
 /** Gather a project's reconcilable state — the edge that keeps `computeTidy` pure. */
 export function scanTidy(target: TidyTarget): TidySnapshot {
   const reduced = reduceCampaign(readEventLog({ logFile: target.logFile }));
-  const waveParked = reduced.parkedWave >= 0 ? (reduced.waves[reduced.parkedWave] ?? []) : [];
+  const campaignParked = reduced.parkedWave >= 0 ? (reduced.waves[reduced.parkedWave] ?? []) : [];
   return {
     branches: scanBranches(target.root, target.baseBranch, target.branchPrefix),
     fragments: existsSync(target.fragmentsDir)
@@ -374,8 +374,8 @@ export function scanTidy(target: TidyTarget): TidySnapshot {
           .map((f) => f.slice(0, -".md".length))
       : [],
     parked: listParkedIn(target.parkedDir).map((r) => r.taskId),
-    quarantined: [...reduced.quarantined],
-    waveParked,
+    conflictParked: [...reduced.conflictParked],
+    campaignParked,
   };
 }
 

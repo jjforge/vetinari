@@ -102,7 +102,7 @@ test("cards fill card-grey and chips fill the darker panel with a 40%-alpha stat
   );
   assert.ok(
     STATE_CHIP_BORDER_CSS.includes(
-      ["running", "parked", "failure", "completed", "unstarted"]
+      ["running", "parked", "failed", "completed", "unstarted"]
         .map((s) => `.wave-member.${s} { border-color: ${stateBorderColor(s)}; }`)
         .join(" "),
     ),
@@ -193,7 +193,7 @@ test("both pages share one set of status-dot rules, scoped to .dot so a state ne
   // interrupted overlays are gone, and pruned is a membership badge, not a dot state.
   assert.ok(
     STATE_DOT_CSS.includes(
-      ["running", "parked", "failure", "completed", "unstarted", "queued"]
+      ["running", "parked", "failed", "completed", "unstarted", "queued"]
         .map((s) => `.dot.${s} { background: ${stateColor(s)}; }`)
         .join(" "),
     ),
@@ -214,19 +214,19 @@ test("failure renders in its own red on every surface, never the prune action's 
     { project: "beta", waves: [], parked: [] },
     { prune: true },
   );
-  // failure derives --color-failure from stateColor, distinct from the prune action's own
+  // The failed state derives --color-failure from stateColor, distinct from the prune action's own
   // --color-red (the value distinction is asserted in the stateColor test). Here we confirm each
-  // surface splices that failure colour in — the feed dot, the card edge, the run-state pill, and
-  // the turn number — never re-pinning the token, which comes from the reducer.
-  const failure = stateColor("failure");
-  assert.notEqual(failure, "var(--color-red)");
-  assert.ok(landing.includes(`.lv-dot.failure { background: ${failure}; }`));
-  assert.ok(landing.includes(`.card.failure { border-top-color: ${failure}; }`));
+  // surface splices that failed colour in — the feed dot (the log-view's `failure` dot-state), the
+  // card edge, the run-state pill, and the turn number — never re-pinning the token.
+  const failed = stateColor("failed");
+  assert.notEqual(failed, "var(--color-red)");
+  assert.ok(landing.includes(`.lv-dot.failure { background: ${stateColor("failure")}; }`));
+  assert.ok(landing.includes(`.card.failed { border-top-color: ${failed}; }`));
   assert.ok(
-    landing.includes(`.run-state.failure { border-color: ${failure}; color: ${failure}; }`),
+    landing.includes(`.run-state.failed { border-color: ${failed}; color: ${failed}; }`),
   );
   assert.ok(
-    ISSUE_DETAIL_SHEET_STYLES.includes(`.turn-num.failure { color: ${failure}; }`),
+    ISSUE_DETAIL_SHEET_STYLES.includes(`.turn-num.failed { color: ${failed}; }`),
   );
   // The prune confirm/cancel keep --color-red — a control's own red, never the failure state.
   // (The Prune button itself now shares the one teal .sheet-btn move style, #307; the red marks
@@ -235,7 +235,7 @@ test("failure renders in its own red on every surface, never the prune action's 
     ISSUE_DETAIL_SHEET_STYLES,
     /\.prune-confirm-btn[^{]*\{[^}]*var\(--color-red\)/,
   );
-  assert.ok(campaign.includes(`.turn-num.failure { color: ${failure}; }`));
+  assert.ok(campaign.includes(`.turn-num.failed { color: ${failed}; }`));
 });
 test("renderHostLog renders a gear entry point, a hidden badge, and a hidden host-log pane with a filter (#180)", () => {
   const html = renderHostLog();
@@ -459,7 +459,7 @@ test("formatStatusText summarizes waves, issue chips (with names), and the parke
     waves: [
       {
         index: 0,
-        status: "closed",
+        status: "completed",
         issues: [
           {
             issueNumber: "436",
@@ -490,7 +490,7 @@ test("formatStatusText summarizes waves, issue chips (with names), and the parke
   });
 
   assert.match(text, /jjforge — status/);
-  assert.match(text, /Wave 1\/2 ✅ closed/);
+  assert.match(text, /Wave 1\/2 ✅ completed/);
   assert.match(text, /✅ #436 Fix login redirect/);
   assert.match(text, /Wave 2\/2 ▶️ running/);
   assert.match(text, /🔄 #640 Add prune-out/);

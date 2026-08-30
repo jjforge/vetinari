@@ -157,19 +157,19 @@ export function pruneClosure(target: string, removed: string[], applied: Applied
 }
 
 /**
- * What a single quarantined issue strands in the remaining campaign (ADR 0013). A
- * merge conflict quarantines one issue mid-wave; its transitive dependents in the
+ * What a single conflict-parked issue strands in the remaining campaign (ADR 0013). A
+ * merge conflict parks one issue mid-wave; its transitive dependents in the
  * unstarted later waves cannot proceed without it. Each impact reuses `computePrune`
  * (the same graph `prune` walks) for the closure, then `applyPrune` to name the
  * members a prune would actually drop now — the orphaned dependents (`dropped`). A
- * quarantined issue that drops nothing orphans nothing; the campaign need not stop.
+ * conflict-parked issue that drops nothing orphans nothing; the campaign need not stop.
  *
  * Pure over the injected `blockedByOf`, so the campaign's pause-vs-`--auto-prune`
- * decision is testable without a tracker or a running campaign. A quarantined id no
+ * decision is testable without a tracker or a running campaign. A conflict-parked id no
  * longer in the plan (an earlier prune already took it) is skipped, not an error.
  */
-export interface QuarantineImpact {
-  /** the quarantined issue. */
+export interface StrandedImpact {
+  /** the conflict-parked issue. */
   target: string;
   /** its transitive dependent closure over the plan (the target plus its dependents). */
   removed: string[];
@@ -199,14 +199,14 @@ export function resumeIndex(campaign: { waves: string[][]; closedWaves: Set<numb
   return campaign.waves.length;
 }
 
-export async function quarantineImpacts(
+export async function strandedByConflict(
   campaign: { waves: string[][]; outcomes: Map<string, string> },
-  quarantined: string[],
+  conflictParked: string[],
   blockedByOf: BlockedByOf,
-): Promise<QuarantineImpact[]> {
+): Promise<StrandedImpact[]> {
   const inPlan = new Set(campaign.waves.flat().map(normalize));
-  const impacts: QuarantineImpact[] = [];
-  for (const target of quarantined.map(normalize)) {
+  const impacts: StrandedImpact[] = [];
+  for (const target of conflictParked.map(normalize)) {
     if (!inPlan.has(target)) continue;
     const { removed } = await computePrune(campaign.waves, target, blockedByOf);
     const { dropped } = applyPrune(campaign, removed);

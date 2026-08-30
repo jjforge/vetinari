@@ -62,7 +62,7 @@ test("graft onto a settled campaign (every member merged) is rejected", async ()
   // settled and refuses a graft, even with no `campaign-done` on the log.
   const cfg = harnessCfg();
   cfg.log.log("campaign-start", { waves: [["101"]], slots: 4 });
-  cfg.log.log("wave-done", { index: 0, merged: ["101"], held: [], clearedParked: [] });
+  cfg.log.log("wave-done", { index: 0, merged: ["101"] });
 
   await assert.rejects(() => runGraft(cfg, ["301"], {}), /settled/);
 });

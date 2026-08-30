@@ -13,7 +13,7 @@ const ISSUE_EMOJI: Record<DisplayStatus, string> = {
   completed: "✅",
   running: "🔄",
   parked: "⏸",
-  failure: "❌",
+  failed: "❌",
   unstarted: "⚪",
 };
 
@@ -25,7 +25,7 @@ const MEMBERSHIP_EMOJI: Record<Exclude<Membership, "member">, string> = {
 };
 
 const WAVE_EMOJI: Record<WaveStatus, string> = {
-  closed: "✅",
+  completed: "✅",
   running: "▶️",
   unstarted: "⚪",
   parked: "⏸",

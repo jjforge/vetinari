@@ -114,16 +114,13 @@ export interface BaseGateEvent extends BaseEvent {
   detail?: string;
 }
 
-/** `wave-done` — a wave closed with every member completed (design §2.1): its index, plus the
- * integration outcome the reducer folds (what merged, what was held/cleared, and any greens a
- * merge conflict quarantined). No wave-done is logged for a wave that parked or failed (modes.ts). */
+/** `wave-done` — a wave closed with every member completed (design §2.1): its index and the
+ * `merged` list, which — because a wave-done fires only when every member merged — is the wave's
+ * whole membership. No wave-done is logged for a wave that parked or failed (modes.ts). */
 export interface WaveDoneEvent extends BaseEvent {
   event: "wave-done";
   index: number;
   merged?: string[];
-  held?: string[];
-  clearedParked?: string[];
-  quarantined?: string[];
 }
 
 /** `campaign-parked` — the campaign paused at a wave boundary (design §2.1, the first of the two
@@ -342,6 +339,10 @@ type Row = Record<string, unknown> & { ts?: unknown; event: string };
  *   `campaign-done.waves`.
  * - park reasons `blocked`/`budget`/`idle-timeout`/`no-commit` → `question`/`stalled` (the specific
  *   kept in `detail`).
+ *
+ * The state words `failed`/`completed` (and their retired forms `failure`/`closed`) are *derived*
+ * by the reducer and never written to the log (design §2.1), so no archived row carries them and
+ * none needs aliasing here; if a stray one ever did, this is where its translation would live.
  */
 export function normalizeLegacyEvent(row: Row): OrchestratorEvent[] {
   const ts = typeof row.ts === "string" ? row.ts : "";

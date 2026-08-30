@@ -95,7 +95,7 @@ test("a switch over the §2.1 narrowed kinds reads each member's fields", () => 
   assert.equal(describe(event("parked", { taskId: "8", reason: "conflict", detail: "CONFLICT" })), "parked 8: conflict (CONFLICT)");
   assert.equal(describe(event("failed", { taskId: "2", detail: "error(1)" })), "failed 2");
   assert.equal(describe(event("base-gate", { index: 1, green: false, detail: "boom" })), "base-gate 1 green=false");
-  assert.equal(describe(event("wave-done", { index: 1, merged: ["1"], held: ["2"], clearedParked: [] })), "done 1 merged 1");
+  assert.equal(describe(event("wave-done", { index: 1, merged: ["1"] })), "done 1 merged 1");
   assert.equal(describe(event("campaign-parked", { index: 2, detail: "red base" })), "campaign-parked 2: red base");
   assert.equal(describe(event("campaign-failed", { index: 2, detail: "2 failed" })), "campaign-failed 2: 2 failed");
   assert.equal(describe(event("redrive", { fromWave: 1 })), "redrive from 1");

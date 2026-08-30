@@ -134,8 +134,6 @@ test("buildLanding builds a per-project card for a live campaign", () => {
       ts: "2025-01-02T08:03:00.000Z",
       index: 0,
       merged: ["101"],
-      held: [],
-      clearedParked: [],
     }),
     event("wave-start", {
       ts: "2025-01-02T08:04:00.000Z",
@@ -190,8 +188,6 @@ test("buildLanding's card counts the live plan, not pruned chips", () => {
       ts: "2025-01-02T08:03:00.000Z",
       index: 0,
       merged: ["101"],
-      held: [],
-      clearedParked: [],
     }),
     event("wave-start", {
       ts: "2025-01-02T08:04:00.000Z",
@@ -237,8 +233,6 @@ test("buildLanding counts grafted issues as queued but still excludes pruned (#2
       ts: "2025-01-02T08:03:00.000Z",
       index: 0,
       merged: ["101"],
-      held: [],
-      clearedParked: [],
     }),
     event("wave-start", { ts: "2025-01-02T08:04:00.000Z", index: 1, tasks: ["201"] }),
     event("spawn", { ts: "2025-01-02T08:05:00.000Z", taskId: "201" }),
@@ -276,8 +270,6 @@ test("buildLanding sums the counters, reads an idle project's last campaign, and
       ts: "2025-06-15T09:05:00.000Z",
       index: 0,
       merged: ["101", "102"],
-      held: [],
-      clearedParked: [],
     }),
     event("wave-start", {
       ts: "2025-06-15T09:06:00.000Z",
@@ -302,8 +294,6 @@ test("buildLanding sums the counters, reads an idle project's last campaign, and
         ts: "2025-06-10T00:05:00.000Z",
         index: 0,
         merged: ["501"],
-        held: [],
-        clearedParked: [],
       }),
       event("campaign-done", { ts: "2025-06-10T00:06:00.000Z", waves: 1 }),
     ],
@@ -360,15 +350,11 @@ test("an idle project's merged % and merged-today read its latest archived run, 
         ts: "2026-06-15T09:05:00.000Z",
         index: 0,
         merged: ["501"],
-        held: [],
-        clearedParked: [],
       }),
       event("wave-done", {
         ts: "2026-06-15T09:10:00.000Z",
         index: 1,
         merged: ["502"],
-        held: [],
-        clearedParked: [],
       }),
       event("campaign-done", { ts: "2026-06-15T09:11:00.000Z", waves: 2 }),
     ],
@@ -404,8 +390,6 @@ test("an idle project's card exposes lastRun — its newest archived run's outco
         ts: "2026-06-15T09:05:00.000Z",
         index: 0,
         merged: ["501"],
-        held: [],
-        clearedParked: [],
       }),
       event("campaign-done", { ts: "2026-06-15T09:06:00.000Z", waves: 1 }),
     ],
@@ -441,8 +425,6 @@ test("a stalled idle run's card lastRun reads its stalled outcome, and an unname
         ts: "2026-06-14T09:05:00.000Z",
         index: 0,
         merged: ["601"],
-        held: [],
-        clearedParked: [],
       }),
     ],
   );
@@ -487,8 +469,6 @@ test("an archived run whose parked record survived reads parked, not idle — it
         ts: "2026-06-15T09:05:00.000Z",
         index: 0,
         merged: ["501"],
-        held: [],
-        clearedParked: [],
       }),
     ],
   );
@@ -528,7 +508,7 @@ test("a finished run lingering in the live log whose parked record survived read
   // so the fold branch must consult it and surface the outstanding park, not idle.
   seedState(dir, [
     event("campaign-start", { ts: "2026-06-15T08:00:00.000Z", waves: [["101"]], name: "gateway work", slots: 1 }),
-    event("wave-done", { ts: "2026-06-15T08:03:00.000Z", index: 0, merged: ["101"], held: [], clearedParked: [] }),
+    event("wave-done", { ts: "2026-06-15T08:03:00.000Z", index: 0, merged: ["101"] }),
     event("campaign-done", { ts: "2026-06-15T08:06:00.000Z", waves: 1 }),
   ]);
   writeFileSync(
@@ -573,15 +553,11 @@ test("buildLanding folds a finished campaign still in the live log to idle, disp
       ts: "2026-06-15T08:03:00.000Z",
       index: 0,
       merged: ["101"],
-      held: [],
-      clearedParked: [],
     }),
     event("wave-done", {
       ts: "2026-06-15T08:05:00.000Z",
       index: 1,
       merged: ["201"],
-      held: [],
-      clearedParked: [],
     }),
     event("campaign-done", { ts: "2026-06-15T08:06:00.000Z", waves: 2 }),
   ]);
@@ -614,8 +590,8 @@ test("a finished campaign lingering in the live log exposes lastRun too, so the 
   // name, finish time) and a token to link, exactly as the empty-live-log branch does.
   seedState(dir, [
     event("campaign-start", { ts: "2026-06-15T08:00:00.000Z", waves: [["101"], ["201"]], name: "gateway work", slots: 1 }),
-    event("wave-done", { ts: "2026-06-15T08:03:00.000Z", index: 0, merged: ["101"], held: [], clearedParked: [] }),
-    event("wave-done", { ts: "2026-06-15T08:05:00.000Z", index: 1, merged: ["201"], held: [], clearedParked: [] }),
+    event("wave-done", { ts: "2026-06-15T08:03:00.000Z", index: 0, merged: ["101"] }),
+    event("wave-done", { ts: "2026-06-15T08:05:00.000Z", index: 1, merged: ["201"] }),
     event("campaign-done", { ts: "2026-06-15T08:06:00.000Z", waves: 2 }),
   ]);
 
@@ -641,7 +617,7 @@ test("buildLanding folds a finished single-wave live log to idle too (#208)", ()
     event("green", { ts: "2026-06-15T08:01:00.000Z", taskId: "101", branch: "agent/101", commits: [] }),
     // The single wave's green was banked on the base (design §2.2: only a merge finishes it),
     // so the campaign is settled and folds to idle even with no campaign-done marker (#208).
-    event("wave-done", { ts: "2026-06-15T08:02:00.000Z", index: 0, merged: ["101"], held: [] }),
+    event("wave-done", { ts: "2026-06-15T08:02:00.000Z", index: 0, merged: ["101"] }),
   ]);
 
   const [card] = buildLanding(
@@ -668,7 +644,7 @@ test("buildLanding does NOT fold a failed, parked, or in-flight live log to idle
   const parkedDir = join(base, "parked");
   seedState(parkedDir, [
     event("campaign-start", { ts: "2026-06-15T08:00:00.000Z", waves: [["201"], ["101"]], name: "parked", slots: 1 }),
-    event("wave-done", { ts: "2026-06-15T08:03:00.000Z", index: 0, merged: ["201"], held: [], clearedParked: [] }),
+    event("wave-done", { ts: "2026-06-15T08:03:00.000Z", index: 0, merged: ["201"] }),
     event("campaign-done", { ts: "2026-06-15T08:06:00.000Z", waves: 2 }),
   ]);
   writeFileSync(
@@ -694,7 +670,7 @@ test("buildLanding does NOT fold a failed, parked, or in-flight live log to idle
     new Date("2026-06-15T12:00:00.000Z"),
   );
   const byProject = Object.fromEntries(projects.map((p) => [p.project, p.runState]));
-  assert.equal(byProject.failed, "failure");
+  assert.equal(byProject.failed, "failed");
   assert.equal(byProject.parked, "parked");
   assert.equal(byProject.run, "running");
 });
@@ -717,8 +693,6 @@ test("an idle project whose latest archived run merged on an earlier day counts 
         ts: "2026-06-10T09:05:00.000Z",
         index: 0,
         merged: ["501"],
-        held: [],
-        clearedParked: [],
       }),
       event("campaign-done", { ts: "2026-06-10T09:06:00.000Z", waves: 1 }),
     ],
@@ -753,8 +727,6 @@ test("merged-today sums every archived run merged today, not just the latest (#9
         ts: "2026-06-15T08:05:00.000Z",
         index: 0,
         merged: ["501"],
-        held: [],
-        clearedParked: [],
       }),
       event("campaign-done", { ts: "2026-06-15T08:06:00.000Z", waves: 1 }),
     ],
@@ -773,8 +745,6 @@ test("merged-today sums every archived run merged today, not just the latest (#9
         ts: "2026-06-15T10:05:00.000Z",
         index: 0,
         merged: ["502"],
-        held: [],
-        clearedParked: [],
       }),
       event("campaign-done", { ts: "2026-06-15T10:06:00.000Z", waves: 1 }),
     ],
@@ -803,8 +773,6 @@ test("merged-today combines the live run's merges with the archives' (#97)", () 
       ts: "2026-06-15T11:05:00.000Z",
       index: 0,
       merged: ["601"],
-      held: [],
-      clearedParked: [],
     }),
     event("wave-start", { ts: "2026-06-15T11:06:00.000Z", index: 1, tasks: [] }),
     event("spawn", { ts: "2026-06-15T11:07:00.000Z", taskId: "602" }),
@@ -824,8 +792,6 @@ test("merged-today combines the live run's merges with the archives' (#97)", () 
         ts: "2026-06-15T08:05:00.000Z",
         index: 0,
         merged: ["701"],
-        held: [],
-        clearedParked: [],
       }),
       event("campaign-done", { ts: "2026-06-15T08:06:00.000Z", waves: 1 }),
     ],
@@ -854,8 +820,6 @@ test("merged-today counts an issue merged in more than one run only once (#97)",
       ts: "2026-06-15T11:05:00.000Z",
       index: 0,
       merged: ["801"],
-      held: [],
-      clearedParked: [],
     }),
     event("campaign-done", { ts: "2026-06-15T11:06:00.000Z", waves: 1 }),
   ]);
@@ -874,8 +838,6 @@ test("merged-today counts an issue merged in more than one run only once (#97)",
         ts: "2026-06-15T08:05:00.000Z",
         index: 0,
         merged: ["801"],
-        held: [],
-        clearedParked: [],
       }),
       event("campaign-done", { ts: "2026-06-15T08:06:00.000Z", waves: 1 }),
     ],
@@ -910,8 +872,6 @@ test("merged-today counts against the operator's LOCAL day, not the UTC day (#97
         ts: "2026-08-23T20:00:00.000Z",
         index: 0,
         merged: ["901"],
-        held: [],
-        clearedParked: [],
       }),
       event("campaign-done", { ts: "2026-08-23T20:01:00.000Z", waves: 1 }),
     ]);
@@ -1241,7 +1201,7 @@ test("buildAllStatus routes a stale-registration skip to the injected logger, no
 });
 
 test("cardState folds a card's state, failure outranking parked, completed/none → idle (ADR 0019)", () => {
-  const wave = (status: "running" | "parked" | "failed" | "closed" | "unstarted", issues: { issueNumber: string; status: string }[]) => [
+  const wave = (status: "running" | "parked" | "failed" | "completed" | "unstarted", issues: { issueNumber: string; status: string }[]) => [
     { index: 0, status, issues: issues as any },
   ];
   // failure outranks parked now — the deliberate reversal of the old parked-first order:
@@ -1251,12 +1211,12 @@ test("cardState folds a card's state, failure outranking parked, completed/none 
     cardState({
       project: "p",
       waves: wave("failed", [
-        { issueNumber: "1", status: "failure" },
+        { issueNumber: "1", status: "failed" },
         { issueNumber: "2", status: "running" },
       ]),
       parked: [{ issueNumber: "3" }] as any,
     }),
-    "failure",
+    "failed",
   );
   // A held (parked) wave with no failure reads parked.
   assert.equal(
@@ -1271,7 +1231,7 @@ test("cardState folds a card's state, failure outranking parked, completed/none 
   assert.equal(
     cardState({
       project: "p",
-      waves: wave("closed", [{ issueNumber: "1", status: "completed" }]),
+      waves: wave("completed", [{ issueNumber: "1", status: "completed" }]),
       parked: [{ issueNumber: "9" }] as any,
     }),
     "parked",
@@ -1289,7 +1249,7 @@ test("cardState folds a card's state, failure outranking parked, completed/none 
   assert.equal(
     cardState({
       project: "p",
-      waves: wave("closed", [{ issueNumber: "1", status: "completed" }]),
+      waves: wave("completed", [{ issueNumber: "1", status: "completed" }]),
       parked: [],
     }),
     "idle",
@@ -1315,7 +1275,7 @@ test("issue lifecycle + wave/campaign folds are one FSM, tested by replaying eve
   assert.deepEqual(issueLifecycle(reduced, "101"), { state: "completed" });
   assert.deepEqual(issueLifecycle(reduced, "102"), { state: "parked", reason: "question" });
   assert.deepEqual(issueLifecycle(reduced, "103"), { state: "parked", reason: "conflict" });
-  assert.deepEqual(issueLifecycle(reduced, "104"), { state: "failure" });
+  assert.deepEqual(issueLifecycle(reduced, "104"), { state: "failed" });
   // Every id is a plain member here; the folds skip pruned membership only.
   for (const id of ["101", "102", "103", "104"]) assert.equal(issueMembership(reduced, id), "member");
 
@@ -1325,22 +1285,22 @@ test("issue lifecycle + wave/campaign folds are one FSM, tested by replaying eve
     waveState([
       { status: "completed" },
       { status: "parked" },
-      { status: "failure" },
+      { status: "failed" },
       { status: "running" },
     ]),
     "failed",
   );
   assert.equal(waveState([{ status: "completed" }, { status: "parked" }, { status: "running" }]), "parked");
   assert.equal(waveState([{ status: "completed" }, { status: "running" }]), "running");
-  assert.equal(waveState([{ status: "completed" }, { status: "completed" }]), "closed");
+  assert.equal(waveState([{ status: "completed" }, { status: "completed" }]), "completed");
   // A pruned member never forces a wave's state; a wholly-pruned wave reads unstarted.
   assert.equal(waveState([{ status: "running", membership: "pruned" }]), "unstarted");
 
   // The campaign fold mirrors the wave fold's precedence over the waves below it.
-  assert.equal(campaignState(["closed", "parked", "failed", "running"]), "failed");
-  assert.equal(campaignState(["closed", "parked", "running"]), "parked");
-  assert.equal(campaignState(["closed", "running"]), "running");
-  assert.equal(campaignState(["closed", "closed"]), "completed");
+  assert.equal(campaignState(["completed", "parked", "failed", "running"]), "failed");
+  assert.equal(campaignState(["completed", "parked", "running"]), "parked");
+  assert.equal(campaignState(["completed", "running"]), "running");
+  assert.equal(campaignState(["completed", "completed"]), "completed");
   assert.equal(campaignState([]), "unstarted");
 });
 
@@ -1383,7 +1343,7 @@ test("reduceCampaign reconciles a dead run's in-flight issue to parked{crash}; a
   const done = [
     ...events,
     event("green", { ts: "t4", taskId: "301", branch: "agent/301", commits: [] }),
-    event("wave-done", { ts: "t5", index: 0, merged: ["301"], held: [], clearedParked: [] }),
+    event("wave-done", { ts: "t5", index: 0, merged: ["301"] }),
     event("campaign-done", { ts: "t6", waves: 1 }),
   ];
   assert.equal(reduceCampaign(done, { alive: false }).outcomes.get("301"), "completed");
@@ -1415,7 +1375,7 @@ test("reduceCampaign: a bare green is running-with-a-pending-green, completed on
   assert.equal(merged.mergedAt.get("101"), "t4", "mergedAt is the merge stamp, not the green stamp");
 
   // A wave-done's `merged` list banks it the same way (the batch-merge path).
-  const waveDone = reduceCampaign([...base, event("wave-done", { ts: "t5", index: 0, merged: ["101"], held: [] })]);
+  const waveDone = reduceCampaign([...base, event("wave-done", { ts: "t5", index: 0, merged: ["101"] })]);
   assert.equal(waveDone.outcomes.get("101"), "completed");
   assert.equal(waveDone.pendingGreen.has("101"), false);
   assert.equal(waveDone.mergedAt.get("101"), "t5");
@@ -1572,7 +1532,7 @@ test("reduceCampaign folds a campaign-failed stop marker to a failed, un-closed 
   ]);
 
   assert.deepEqual(issueLifecycle(reduced, "101"), { state: "completed" });
-  assert.deepEqual(issueLifecycle(reduced, "102"), { state: "failure" });
+  assert.deepEqual(issueLifecycle(reduced, "102"), { state: "failed" });
 
   // The failed wave is not closed — it holds, it does not read done.
   assert.ok(!reduced.closedWaves.has(0), "the wave holding the failure is not closed");
@@ -1655,11 +1615,11 @@ test("describeEvent narrates festively when given a campaign's reserved offset (
     ),
     "Wave 1 · Granny Weatherwax · #1234, #145, #234 started",
   );
-  // wave-done reconstructs the members from merged/quarantined/held, still names
+  // wave-done carries just its merged list (every member merged, design §2.1), names
   // the wave festively, and keeps the merged-hashes tail.
   assert.equal(
-    describeEvent(event("wave-done", { index: 1, merged: ["101"], held: ["102"], clearedParked: [] }), { festive: { offset: 11 } }),
-    "Wave 2 · Nanny Ogg · #101, #102 merged #101",
+    describeEvent(event("wave-done", { index: 1, merged: ["101", "102"] }), { festive: { offset: 11 } }),
+    "Wave 2 · Nanny Ogg · #101, #102 merged #101, #102",
   );
   // Same event with no festive input → the plain-words narration; a resolved title
   // (threaded in via `titles`) names the member.
@@ -1697,17 +1657,17 @@ test("describeEvent narrates the operator-facing events in plain words", () => {
   );
   assert.equal(
     describeEvent(
-      event("wave-done", { index: 1, merged: ["101"], held: [], clearedParked: [] }),
+      event("wave-done", { index: 1, merged: ["101"] }),
       { titles: new Map([["101", "cache eviction"]]) },
     ),
     "Wave 2 — cache eviction merged #101",
   );
   assert.equal(
-    describeEvent(event("wave-done", { index: 0, merged: ["101", "102"], held: [], clearedParked: [] })),
+    describeEvent(event("wave-done", { index: 0, merged: ["101", "102"] })),
     "Wave 1 — #101, #102 merged #101, #102",
   );
   assert.equal(
-    describeEvent(event("wave-done", { index: 2, merged: [], held: [], clearedParked: [] })),
+    describeEvent(event("wave-done", { index: 2, merged: [] })),
     "Wave 3 merged nothing",
   );
   assert.equal(
@@ -1896,8 +1856,6 @@ test("reduceCampaign reports one completed wave closed and the next wave current
       ts: "2025-01-01T00:02:00.000Z",
       index: 0,
       merged: ["101"],
-      held: [],
-      clearedParked: [],
     }),
     event("wave-start", {
       ts: "2025-01-01T00:03:00.000Z",
@@ -1924,8 +1882,6 @@ test("reduceCampaign records when each issue merged, from wave-done and merged",
       ts: "2025-01-01T00:02:00.000Z",
       index: 0,
       merged: ["101"],
-      held: [],
-      clearedParked: [],
     }),
     event("merged", { ts: "2025-01-02T09:00:00.000Z", taskId: "201", branch: "agent/201" }),
     event("merged", { ts: "2025-01-02T10:00:00.000Z", taskId: "202", branch: "agent/202" }),
@@ -1958,7 +1914,7 @@ test("reduceCampaign derives failure from an issue that errored, not a campaign-
 
   // `failure` is the single red terminal — an issue the agent could not make green. 102 went
   // green but is not yet merged, so it reads `running` with a pending green (design §2.2).
-  assert.equal(reduced.outcomes.get("101"), "failure");
+  assert.equal(reduced.outcomes.get("101"), "failed");
   assert.equal(reduced.outcomes.get("102"), "running");
   assert.equal(reduced.pendingGreen.has("102"), true);
 });
@@ -2007,8 +1963,8 @@ test("campaignSettled is true only when every member merged — the fold, not th
   assert.equal(
     campaignSettled([
       event("campaign-start", { waves: [["101"], ["201"]], slots: 1 }),
-      event("wave-done", { index: 0, merged: ["101"], held: [], clearedParked: [] }),
-      event("wave-done", { index: 1, merged: ["201"], held: [], clearedParked: [] }),
+      event("wave-done", { index: 0, merged: ["101"] }),
+      event("wave-done", { index: 1, merged: ["201"] }),
     ]),
     true,
     "every member merged → settled",
@@ -2066,8 +2022,6 @@ test("reduceCampaign folds a prune event, pruning unfinished issues from future 
       ts: "2025-01-01T00:02:00.000Z",
       index: 0,
       merged: ["101"],
-      held: [],
-      clearedParked: [],
     }),
     event("wave-start", {
       ts: "2025-01-01T00:03:00.000Z",
@@ -2108,8 +2062,6 @@ test("reduceCampaign's prune fold clears an emptied future wave and reindexes", 
       ts: "2025-01-01T00:02:00.000Z",
       index: 0,
       merged: ["101"],
-      held: [],
-      clearedParked: [],
     }),
     // Between waves: 201 not yet started, so pruning it empties and drops its wave.
     event("prune", {
@@ -2388,8 +2340,6 @@ test("buildStatus marks completed waves as closed", () => {
       ts: "2025-01-01T00:02:00.000Z",
       index: 0,
       merged: ["101"],
-      held: [],
-      clearedParked: [],
     }),
     event("wave-start", {
       ts: "2025-01-01T00:03:00.000Z",
@@ -2406,7 +2356,7 @@ test("buildStatus marks completed waves as closed", () => {
   assert.deepEqual(
     status.waves.map((w) => [w.index, w.status]),
     [
-      [0, "closed"],
+      [0, "completed"],
       [1, "unstarted"],
     ],
   );
@@ -2430,8 +2380,6 @@ test("buildStatus renders a pruned issue as a pruned chip in the wave it left", 
       ts: "2025-01-01T00:02:00.000Z",
       index: 0,
       merged: ["101"],
-      held: [],
-      clearedParked: [],
     }),
     // 201 is a future, unstarted wave: pruning it drops it from the running plan…
     event("prune", {
@@ -2579,7 +2527,7 @@ test("buildStatus renders a merge-conflict-quarantined issue as parked with reas
     event("green", { ts: "2025-01-01T00:02:00.000Z", taskId: "611", branch: "agent/611", commits: [] }),
     event("green", { ts: "2025-01-01T00:03:00.000Z", taskId: "640", branch: "agent/640", commits: [] }),
     event("parked", { ts: "2025-01-01T00:04:00.000Z", taskId: "640", reason: "conflict", detail: "CONFLICT" }),
-    event("wave-done", { ts: "2025-01-01T00:05:00.000Z", index: 0, merged: ["611"], held: [], clearedParked: [], quarantined: ["640"] }),
+    event("wave-done", { ts: "2025-01-01T00:05:00.000Z", index: 0, merged: ["611"] }),
   ]);
 
   const status = buildStatus(cfgFor(dir));
@@ -2610,7 +2558,7 @@ test("buildStatus clears the quarantine once the issue merges on resume", () => 
     event("wave-start", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["640"] }),
     event("green", { ts: "2025-01-01T00:02:00.000Z", taskId: "640", branch: "agent/640", commits: [] }),
     event("parked", { ts: "2025-01-01T00:03:00.000Z", taskId: "640", reason: "conflict", detail: "CONFLICT" }),
-    event("wave-done", { ts: "2025-01-01T00:04:00.000Z", index: 0, merged: ["640"], held: [], clearedParked: [], quarantined: [] }),
+    event("wave-done", { ts: "2025-01-01T00:04:00.000Z", index: 0, merged: ["640"] }),
   ]);
 
   assert.equal(buildStatus(cfgFor(dir)).waves[0].issues[0].status, "completed");
@@ -2635,8 +2583,6 @@ test("buildStatus does not show parked interaction cards for closed wave issues"
       ts: "2025-01-01T00:02:00.000Z",
       index: 0,
       merged: [],
-      held: ["101"],
-      clearedParked: [],
     }),
     event("wave-start", {
       ts: "2025-01-01T00:03:00.000Z",
@@ -2976,10 +2922,10 @@ test("summarizeRun describes only the last run in a multi-run archive (#69)", ()
     event("campaign-start", { waves: [["56", "57"], ["61"]], slots: 1, name: "first" }),
     event("failed", { taskId: "61" }),
     event("campaign-start", { waves: [["63"], ["64"], ["65"], ["67"]], slots: 1, name: "second" }),
-    event("wave-done", { index: 0, merged: ["63"], held: [], clearedParked: [] }),
-    event("wave-done", { index: 1, merged: ["64"], held: [], clearedParked: [] }),
-    event("wave-done", { index: 2, merged: ["65"], held: [], clearedParked: [] }),
-    event("wave-done", { index: 3, merged: ["67"], held: [], clearedParked: [] }),
+    event("wave-done", { index: 0, merged: ["63"] }),
+    event("wave-done", { index: 1, merged: ["64"] }),
+    event("wave-done", { index: 2, merged: ["65"] }),
+    event("wave-done", { index: 3, merged: ["67"] }),
     event("campaign-done", { waves: 4 }),
   ];
   assert.equal(summarizeRun(events), "campaign · 4 issues · complete");

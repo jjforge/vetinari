@@ -54,9 +54,9 @@ export function reasonWord(reason: string): string {
  * - A question or a stall wants a human answer, so both carry `reply` alongside prune.
  * - A conflict, red base or crash is fixed forward on the base and redriven at the campaign,
  *   never answered per issue — prune only (the fix-forward instruction rides the sheet notice).
- * - A `failure` issue offers prune; a `running`/`unstarted` one offers prune; a `completed`
- *   one is banked and offers nothing. `failure` is the wire word `/api/issue` ships (the
- *   `IssueStatus` enum), so the rule keys on it, never the design-prose `failed`.
+ * - A `failed` issue offers prune; a `running`/`unstarted` one offers prune; a `completed`
+ *   one is banked and offers nothing. `failed` is the wire word `/api/issue` ships (the
+ *   `IssueStatus` enum, now the design's own word), so the rule keys on it directly.
  * - An archived (read-only) issue offers nothing — no move mutates a finished run's log.
  *
  * A legacy park with no reason reads as an answerable question (mirroring `renderMoves`).
@@ -78,7 +78,7 @@ export function issueMoves({
     const answerable = !reason || reason === "question" || reason === "stalled";
     return { reply: answerable, prune: true };
   }
-  if (status === "failure") return { reply: false, prune: true };
+  if (status === "failed") return { reply: false, prune: true };
   if (status === "running" || status === "unstarted") return { reply: false, prune: true };
   return { reply: false, prune: false };
 }

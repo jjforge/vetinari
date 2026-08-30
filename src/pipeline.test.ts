@@ -10,7 +10,7 @@ import { readEventLog } from "./event-log.ts";
 import { listParked } from "./state.ts";
 import { readFileSync } from "node:fs";
 import { BLOCKED, DONE, defaultLoopDeps, runLoop, type LoopDeps } from "./loop.ts";
-import { campaign, type CampaignDeps, type RunSpawner } from "./modes.ts";
+import { campaign, graceWaitForAnswer, type CampaignDeps, type RunSpawner } from "./modes.ts";
 import { collectWaveChangelog, currentBranch, integrateGreens } from "./merge.ts";
 import { runGates } from "./gate.ts";
 import { listOutbox } from "./state.ts";
@@ -199,6 +199,7 @@ const localCampaignDeps = (
     integrate: (c, greens) => integrateGreens(c, greens, { gate: mergedBaseGate }),
     collectChangelog: collectWaveChangelog,
     currentBranch,
+    grace: graceWaitForAnswer,
   };
 };
 

@@ -335,12 +335,10 @@ Described by behaviour; the tracker holds the numbers (`gh issue list --label or
 - **Resume skips the parked wave.** The resume index counts a wave with any completed member as finished, so it starts past the wave whose park needs resolving.
 - **A wave-park overwrites an issue's own reason.** A `red-base` wave hides a member's `question`, so the reply box does not render.
 - **Prune and graft gate on the absence of `campaign-done`** rather than on unfinished members, so a run that ended incomplete is not adjustable.
-- **No re-admission mid-wave.** The queue fixes its work at entry; an answer during the drain cannot rejoin.
 - **Crash is not detected** in the live read path; a dead run reads as running.
 - **Three park-reason enums, two status vocabularies, `batch` in the log.** §13.1.
 - **`campaign --resume`** is the spelling of what this design calls `redrive`; the dashboard has a `/resume` route.
 - **Changelog folding runs unconditionally** rather than only when the project has a `CHANGELOG.md` (§12).
-- **No grace window at the wave boundary.** A drained wave with a `question`/`stalled` park is declared parked at once; `parkGraceSeconds` (§5, §9) does not exist yet.
 - **`demo create/remove` are CLI modes**, not `make` targets (§12).
 - **The event log carries presentation** (`festiveOffset`; `name`/`titles` on every wave event).
 

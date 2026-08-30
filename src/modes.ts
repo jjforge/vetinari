@@ -247,6 +247,12 @@ export async function queue(
 ): Promise<Record<string, string>> {
   const pending = [...taskIds];
   const outcomes: Record<string, string> = {};
+  // Members that settled `parked` with an on-disk record present. When that record later
+  // vanishes (an answer landed) while the wave is still draining, the member is re-admitted:
+  // re-queued to spawn when a slot frees, its earlier `parked` outcome discarded (design §5
+  // step 3). A member is only tracked once it genuinely parked-with-record, so a member that
+  // never wrote a record is never re-admitted — no self-respawn loop.
+  const parkedWithRecord = new Set<string>();
   let running = 0;
   // A standalone queue run records its own issue titles on the start event so the
   // dashboard names them with no lookup (ADR 0002); inside a campaign the caller
@@ -285,7 +291,21 @@ export async function queue(
           poll = undefined;
         }
       };
+      // Re-queue any parked-with-record member whose record has since vanished (an answer
+      // landed): discard its `parked` outcome and let `fill` spawn it as a slot frees. Runs
+      // at the head of every `fill`, so a sibling's exit (or the ceiling poll) is what drives
+      // a mid-drain re-admission (design §5 step 3).
+      const readmit = () => {
+        for (const id of [...parkedWithRecord]) {
+          if (!hasParked(cfg, id)) {
+            parkedWithRecord.delete(id);
+            delete outcomes[id];
+            pending.push(id);
+          }
+        }
+      };
       const fill = () => {
+        readmit();
         // No per-run cap: spawn as long as work remains and the cooperative lease
         // grants a slot — the fair share (and the ceiling) is the only bound.
         while (
@@ -300,12 +320,11 @@ export async function queue(
             releaseSlot(host.configDir);
             outcomes[next] =
               code === 0 ? "green" : code === 2 ? "parked" : `error(${code})`;
+            // A park with a live record is re-admittable if that record is later answered.
+            if (outcomes[next] === "parked" && hasParked(cfg, next))
+              parkedWithRecord.add(next);
             cfg.log.log("queue-slot-freed", { taskId: next, outcome: outcomes[next] });
-            if (pending.length) fill();
-            else if (running === 0) {
-              stopPoll();
-              done();
-            }
+            fill();
           });
         }
         // Blocked by the ceiling or the fair share with work still queued: poll for
@@ -313,6 +332,9 @@ export async function queue(
         // exit callback re-drives fill, so no poll is needed.
         if (pending.length) {
           if (!poll) poll = setInterval(fill, HOST_SLOT_POLL_MS);
+        } else if (running === 0) {
+          stopPoll();
+          done();
         } else {
           stopPoll();
         }
@@ -469,17 +491,48 @@ export function autoPruneNotice(
  * `integrate` runs the real merge+gate, `collectChangelog` folds the real
  * fragments, and `currentBranch` reads the real checked-out branch.
  */
+/** How often {@link graceWaitForAnswer} re-checks the parked records while the window runs. */
+const GRACE_POLL_MS = 1000;
+
+/**
+ * Wait up to `seconds` for an answer to land for one of `parkedIds` — its on-disk parked
+ * record vanishing — resolving as soon as one does, or when the window elapses. Injected on
+ * `CampaignDeps` so the wave-boundary grace window (design §5 step 5) is drivable without real
+ * time; the default polls the records. The caller re-checks the records afterwards to decide
+ * which members to re-admit, so this resolves `void` whichever way the window ended.
+ */
+export type GraceWaiter = (
+  cfg: ResolvedConfig,
+  parkedIds: string[],
+  seconds: number,
+) => Promise<void>;
+
+/** The production grace waiter: poll `parkedIds`' records until one is answered or the window ends. */
+export const graceWaitForAnswer: GraceWaiter = (cfg, parkedIds, seconds) =>
+  new Promise((resolve) => {
+    const deadline = Date.now() + seconds * 1000;
+    const tick = () => {
+      if (parkedIds.some((id) => !hasParked(cfg, id))) return resolve();
+      const left = deadline - Date.now();
+      if (left <= 0) return resolve();
+      setTimeout(tick, Math.min(GRACE_POLL_MS, left));
+    };
+    tick();
+  });
+
 export interface CampaignDeps {
   spawnRun: RunSpawner;
   integrate: typeof integrateGreens;
   collectChangelog: typeof collectWaveChangelog;
   currentBranch: typeof currentBranch;
+  grace: GraceWaiter;
 }
 const defaultCampaignDeps: CampaignDeps = {
   spawnRun: selfSpawnRun,
   integrate: integrateGreens,
   collectChangelog: collectWaveChangelog,
   currentBranch,
+  grace: graceWaitForAnswer,
 };
 
 /**
@@ -683,6 +736,22 @@ export async function campaign(
     } else {
       outcomes = await queue(cfg, tasks, host, titles, deps.spawnRun);
     }
+
+    // Grace window at the wave boundary (design §5 step 5): a member parked as question/stalled
+    // may still be answered. Hold the drained wave open up to `parkGraceSeconds`; an answer that
+    // lands (its parked record cleared) re-admits the member so it re-runs and merges in THIS
+    // wave, and expiry falls through to the normal park-and-stop below. `conflict`/`red-base`
+    // parks are integration-time states, decided after this point, so they never wait here.
+    const graceSeconds = cfg.parkGraceSeconds ?? 0;
+    const parkedNow = tasks.filter((t) => outcomes[t] === "parked");
+    if (parkedNow.length && graceSeconds > 0) {
+      cfg.log.log("grace-wait", { seconds: graceSeconds, tasks: parkedNow });
+      await deps.grace(cfg, parkedNow, graceSeconds);
+      const revived = parkedNow.filter((t) => !hasParked(cfg, t));
+      if (revived.length)
+        outcomes = { ...outcomes, ...(await queue(cfg, revived, host, titles, deps.spawnRun)) };
+    }
+
     const greens = tasks.filter((t) => outcomes[t] === "green");
     const held = tasks.filter((t) => outcomes[t] !== "green");
 

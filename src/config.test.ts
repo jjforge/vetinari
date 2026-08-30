@@ -101,6 +101,23 @@ test("loadConfig defaults containerShare to medium, and honors an explicit tier"
   assert.equal(cfg.containerShare, "high");
 });
 
+test("loadConfig defaults parkGraceSeconds to 0, and honors an explicit window", async () => {
+  const dflt = await loadConfig(writeConfig(scratch(), "vetinari/config.mts"));
+  assert.equal(dflt.parkGraceSeconds, 0);
+
+  const withGrace = `export default {
+  project: "demo",
+  image: "img",
+  baseBranch: "main",
+  gates: [{ cmd: "true" }],
+  fetchTask: (id) => id,
+  parkGraceSeconds: 45,
+};
+`;
+  const cfg = await loadConfig(writeConfig(scratch(), "vetinari/config.mts", withGrace));
+  assert.equal(cfg.parkGraceSeconds, 45);
+});
+
 test("loadConfig's not-found error leads with the canonical path and mentions --config", async () => {
   const cwd = process.cwd();
   process.chdir(scratch());

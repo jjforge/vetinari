@@ -29,6 +29,12 @@ export default defineConfig({
   // Commands run once per sandbox before the agent starts (install deps, etc.).
   setup: [],
 
+  // How long (seconds) a drained wave waits at its boundary for an answer to a
+  // parked member before declaring the wave parked. An answer within the window
+  // re-admits the member so it re-runs and merges in the same wave. Default 0 —
+  // no grace; park at once and recover with `answer` + `campaign --resume`.
+  parkGraceSeconds: 0,
+
   // Fetch the task text for an id — a GitHub issue body, a spec file, anything.
   fetchTask: (id) => `TODO: fetch the task text for ${id}`,
 

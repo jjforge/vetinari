@@ -1231,16 +1231,6 @@ test("issue lifecycle + wave/campaign folds are one FSM, tested by replaying eve
 });
 
 test("issueLifecycle folds a stalled (dead, no-terminal) running issue to parked{stalled} (ADR 0019)", () => {
-  // A red-base wave-park holds its members with reason red-base; a budget/idle park stalls.
-  const redBase = reduceCampaign([
-    event("campaign-start", { ts: "t0", batches: [["201", "202"]], slots: 1 }),
-    event("campaign-batch", { ts: "t1", index: 0, tasks: ["201", "202"] }),
-    event("green", { ts: "t2", taskId: "201", branch: "agent/201", commits: [] }),
-    event("green", { ts: "t3", taskId: "202", branch: "agent/202", commits: [] }),
-    event("wave-parked", { ts: "t4", merged: ["201", "202"], detail: "npm test failed" }),
-  ]);
-  assert.deepEqual(issueLifecycle(redBase, "201"), { state: "parked", reason: "red-base" });
-
   const running = reduceCampaign([
     event("campaign-start", { ts: "t0", batches: [["301"]], slots: 1 }),
     event("campaign-batch", { ts: "t1", index: 0, tasks: ["301"] }),
@@ -2201,13 +2191,45 @@ test("buildStatus marks active wave issues as running before they finish", () =>
   );
 });
 
-test("buildStatus folds a wave whose merged base gated red to parked (red-base members), ADR 0019", () => {
+test("issueLifecycle: an issue's own reason outranks the wave's red-base park; a completed member stays completed (#288)", () => {
+  // A red-base wave-park is the wave's reason, not a rewrite of its members (design §2.3):
+  // 611 merged clean (completed), 612 parked on a question inside the same red-base wave.
+  const reduced = reduceCampaign([
+    event("campaign-start", { ts: "t0", batches: [["611", "612"]], slots: 1 }),
+    event("campaign-batch", { ts: "t1", index: 0, tasks: ["611", "612"] }),
+    event("green", { ts: "t2", taskId: "611", branch: "agent/611", commits: [] }),
+    event("parked", { ts: "t3", taskId: "612", reason: "which colour?" }),
+    event("wave-parked", { ts: "t4", merged: ["611"], detail: "npm test failed" }),
+  ]);
+  // The merged member stays completed — the wave-park never rewrites it.
+  assert.deepEqual(issueLifecycle(reduced, "611"), { state: "completed" });
+  // The parked member keeps its own question reason, so the sheet still draws its reply box.
+  assert.deepEqual(issueLifecycle(reduced, "612"), { state: "parked", reason: "question" });
+});
+
+test("reconstructIssueDetail carries a question member's own reason inside a red-base wave (reply box) (#288)", () => {
+  // The issue sheet's reply affordance keys off the issue reason: a question held inside a
+  // red-base wave must read reason `question`, not the wave's `red-base`, or it loses its reply.
+  const events = [
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["611", "612"]], slots: 1 }),
+    event("campaign-batch", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["611", "612"] }),
+    event("green", { ts: "2025-01-01T00:02:00.000Z", taskId: "611", branch: "agent/611", commits: [] }),
+    event("parked", { ts: "2025-01-01T00:03:00.000Z", taskId: "612", reason: "which colour?" }),
+    event("wave-parked", { ts: "2025-01-01T00:04:00.000Z", merged: ["611"], detail: "npm test failed" }),
+  ];
+  const detail = reconstructIssueDetail(events, "612");
+  assert.equal(detail.status, "parked");
+  assert.equal(detail.reason, "question");
+});
+
+test("buildStatus folds a red-base wave-park to a parked wave whose completed members stay completed (#288)", () => {
   const dir = join(tmpdir(), `vetinari-status-wave-parked-${Date.now()}`);
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
   // Both greens merged, but the combined base gated red: the wave wave-parks with no
-  // batch-done to close it (ADR 0013). Its members read parked(red-base), so the wave
-  // folds to `parked`; wave 1 (unstarted) still reads as itself.
+  // batch-done to close it (ADR 0013). Red-base is the wave's reason (design §2.3), not a
+  // rewrite of its members — so the members stay `completed` and the wave folds to `parked`
+  // carrying reason `red-base`; wave 1 (unstarted) still reads as itself.
   const events = [
     event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", batches: [["611", "612"], ["701"]], slots: 1 }),
     event("campaign-batch", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["611", "612"] }),
@@ -2222,12 +2244,15 @@ test("buildStatus folds a wave whose merged base gated red to parked (red-base m
     status.waves.map((w) => w.status),
     ["parked", "unstarted"],
   );
-  // Each held member carries the red-base reason.
+  // The wave carries the red-base reason; wave 1 has no reason.
+  assert.equal(status.waves[0].reason, "red-base");
+  assert.equal(status.waves[1].reason, undefined);
+  // Each member stays completed — the wave-park never rewrites it.
   assert.deepEqual(
     status.waves[0].issues.map((i) => [i.issueNumber, i.status, i.reason]),
     [
-      ["611", "parked", "red-base"],
-      ["612", "parked", "red-base"],
+      ["611", "completed", undefined],
+      ["612", "completed", undefined],
     ],
   );
 
@@ -2238,6 +2263,7 @@ test("buildStatus folds a wave whose merged base gated red to parked (red-base m
   writeJsonl(archive, events);
   const archived = buildStatus(archiveStatusConfig("demo", archive));
   assert.equal(archived.waves[0].status, "parked");
+  assert.equal(archived.waves[0].reason, "red-base");
 });
 
 test("buildStatus renders a merge-conflict-quarantined issue as parked with reason conflict (ADR 0019)", () => {

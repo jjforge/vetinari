@@ -94,7 +94,7 @@ test("stateColor is the single state→colour derivation, failure distinct from 
 
 test("stateBorderColor is the single derivation for the muted 40%-alpha chip borders (§4, #83)", () => {
   // §4: a wave-member row borders its lifecycle at 40% alpha — the same token as stateColor,
-  // suffixed `-40`. The retired quarantined/interrupted overlays are gone (ADR 0019); pruned
+  // suffixed `-40`. The retired held/interrupted overlays are gone (ADR 0019); pruned
   // keeps its own token as a membership badge colour.
   assert.equal(stateBorderColor("running"), "var(--color-blue-40)");
   assert.equal(stateBorderColor("parked"), "var(--color-yellow-40)");

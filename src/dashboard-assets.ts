@@ -217,7 +217,7 @@ export const ISSUE_DETAIL_SHEET_STYLES = `  .prune-panel { display: flex; align-
   ${["completed", "parked", "failure", "running", "unstarted"].map((s) => `.turn-num.${s} { color: ${stateColor(s)}; }`).join(" ")}
   .turn-summary { color: var(--color-text-light); }
   .turn-empty { color: var(--color-text-light-2); padding: .55rem 0; }
-  /* Parked-reply block + the actions row pin to the sheet foot so Resume/Prune stay
+  /* Parked-reply block + the actions row pin to the sheet foot so Redrive/Prune stay
      reachable one-handed while the turn log scrolls above. */
   /* The reply block is the human-action queue inside the sheet, so it carries the
      3px amber left edge (§2); it only ever shows for a parked issue. */
@@ -235,13 +235,13 @@ export const ISSUE_DETAIL_SHEET_STYLES = `  .prune-panel { display: flex; align-
   .sheet-actions { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; padding: .9rem 1.15rem; border-top: 1px solid var(--color-light-border); }
   /* A flex display beats the UA [hidden] rule, so these need it back explicitly. */
   .sheet-actions[hidden], .reply-options[hidden] { display: none; }
-  .reply-resume { min-height: 44px; padding: .5rem 1rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: #04110f; font: inherit; font-weight: 700; cursor: pointer; }
+  .reply-redrive { min-height: 44px; padding: .5rem 1rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: #04110f; font: inherit; font-weight: 700; cursor: pointer; }
   @media (max-width: 640px) { .issue-detail-sheet { width: 100%; max-height: 88vh; border-radius: var(--border-radius-medium) var(--border-radius-medium) 0 0; padding-bottom: env(safe-area-inset-bottom); } .issue-detail { align-items: flex-end; padding: 0; } }`;
 
 /**
  * The issue-detail sheet's client script — one definition included by both pages
  * (previously hand-synced, #76). It wires the sheet itself: the element refs,
- * `openIssue`/`renderDetail`/`renderReply`, `closeSheet`, the foot's Resume/Prune
+ * `openIssue`/`renderDetail`/`renderReply`, `closeSheet`, the foot's Redrive/Prune
  * visibility, and the prune preview→confirm flow. Each page adds its own trigger
  * wiring around this (the campaign page's issue chips + parked cards; the
  * landing's parked-queue rows), which is what calls `openIssue`.
@@ -258,7 +258,7 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
   const detailWorktreeTile = document.getElementById("issue-detail-worktree-tile");
   const detailTurnLog = document.getElementById("issue-detail-turnlog");
   const detailReply = document.getElementById("issue-detail-reply");
-  const replyResume = document.getElementById("reply-resume");
+  const replyRedrive = document.getElementById("reply-redrive");
   const replyQuestion = document.getElementById("reply-question");
   const replyOptions = document.getElementById("reply-options");
   const replyText = document.getElementById("reply-text");
@@ -269,13 +269,13 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
   const updateFoot = () => {
     const prune = document.getElementById("prune-panel");
     const pruneShown = Boolean(prune && !prune.hidden);
-    sheetActions.hidden = replyResume.hidden && !pruneShown;
-    // A standalone Prune — offered, not beside a parked issue's Resume, and not yet
+    sheetActions.hidden = replyRedrive.hidden && !pruneShown;
+    // A standalone Prune — offered, not beside a parked issue's Redrive, and not yet
     // in its confirm step — gets a plain-words explainer of what a prune does; a
-    // parked issue's Resume gives the context instead, so the explainer stays hidden.
+    // parked issue's Redrive gives the context instead, so the explainer stays hidden.
     const explainer = document.getElementById("prune-explainer");
     const start = document.getElementById("prune-start");
-    if (explainer) explainer.hidden = !pruneShown || !replyResume.hidden || (start ? start.hidden : true);
+    if (explainer) explainer.hidden = !pruneShown || !replyRedrive.hidden || (start ? start.hidden : true);
   };
   // Elapsed is a working span in ms; show it as coarse minutes/hours.
   const fmtElapsed = (ms) => {
@@ -291,17 +291,17 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
   // Reassigned by the prune block when prune is enabled; a no-op otherwise.
   let onOpenIssue = () => {};
   // A parked issue's reply block: the full question, the offered options as buttons
-  // that fill the field (never submit), and the free-text field itself; Resume posts
-  // it through /answer to resume the parked task. Options are best-effort — absent,
+  // that fill the field (never submit), and the free-text field itself; Redrive posts
+  // it through /answer to redrive the parked task. Options are best-effort — absent,
   // only the free-text field shows. Any other status hides the whole block.
   const renderReply = (d) => {
-    // The reply/resume block is for a question park only (ADR 0019): a held issue reads
+    // The reply/redrive block is for a question park only (ADR 0019): a held issue reads
     // parked whatever its reason, but a merge conflict, a red base, or a stall is resolved
     // through the campaign-level affordance, not a per-issue answer. So gate on the reason
     // (a legacy park with no reason still reads as a question). An archived issue is read-only.
     const parked = d.status === "parked" && !d.archived && (!d.reason || d.reason === "question");
     detailReply.hidden = !parked;
-    replyResume.hidden = !parked;
+    replyRedrive.hidden = !parked;
     if (parked) {
       replyForm.querySelector('input[name="taskId"]').value = d.issueNumber;
       replyForm.querySelector('input[name="project"]').value = d.project;
@@ -386,7 +386,7 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
     detailTurnLog.textContent = "";
     // Hide the reply block until the fetched status confirms the issue is parked.
     detailReply.hidden = true;
-    replyResume.hidden = true;
+    replyRedrive.hidden = true;
     onOpenIssue(prunable, project, issue);
     updateFoot();
     try {
@@ -687,7 +687,7 @@ export const LIVE_TAIL_SCRIPT = `  const tailEl = document.querySelector("[data-
       }
       footer.textContent = view.visible + " of " + view.total + " lines · " + (view.following ? "following" : "paused");
       if (view.backlog > 0) { backlogEl.hidden = false; backlogEl.textContent = "↑ " + view.backlog + " new line" + (view.backlog === 1 ? "" : "s"); } else { backlogEl.hidden = true; }
-      playBtn.dataset.following = String(live); playBtn.setAttribute("aria-label", live ? "Pause" : "Resume");
+      playBtn.dataset.following = String(live); playBtn.setAttribute("aria-label", live ? "Pause" : "Play");
       dotEl.dataset.state = open && live ? "live" : "idle";
       // Newest-on-top (#195): following pins the newest line to the top, not the bottom.
       if (live) body.scrollTop = 0;

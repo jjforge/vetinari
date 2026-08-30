@@ -15,7 +15,7 @@ import type { RouteHandler } from "./dashboard-http.ts";
  *
  * With a `run` token the detail is read from that archived run's own log instead of
  * the live one — so an archived campaign chip opens the sheet on its own turns — and
- * the response is flagged `archived` (read-only: no reply/resume). The token is
+ * the response is flagged `archived` (read-only: no reply/redrive). The token is
  * resolved by matching the archive listing, exactly as the raw-log route does, so an
  * unlisted or crafted token is a 404, never a path joined from request input.
  */

@@ -283,7 +283,7 @@ test("both pages share one set of status-dot rules, scoped to .dot so a state ne
   );
   // Every lifecycle colour is scoped to `.dot`, and each dot's colour is `stateColor` (asserted
   // by value there): the shared rules are generated from it, so one check proves the wiring for
-  // the whole family. The dot reads the lifecycle only (ADR 0019) — the retired quarantined/
+  // the whole family. The dot reads the lifecycle only (ADR 0019) — the retired held/
   // interrupted overlays are gone, and pruned is a membership badge, not a dot state.
   assert.ok(
     STATE_DOT_CSS.includes(
@@ -333,8 +333,8 @@ test("status dots never shrink under flex fill pressure — one shared base give
   );
 });
 
-test("renderStatusPage shows a Resume control only for a wave-parked campaign (#171)", () => {
-  const waveParked = renderStatusPage(
+test("renderStatusPage shows a Redrive control only for a campaign parked on a red base (#171)", () => {
+  const redBaseParked = renderStatusPage(
     {
       project: "beta",
       waves: [
@@ -345,14 +345,14 @@ test("renderStatusPage shows a Resume control only for a wave-parked campaign (#
     },
     { prune: true },
   );
-  // A wave-parked campaign (a held member with the red-base reason) offers a Resume action
-  // that POSTs to /resume carrying only
-  // its project (resume is project-scoped — no taskId), mirroring the prune/answer forms.
-  assert.match(waveParked, /<form method="post" action="\/resume"[^>]*>/);
-  assert.match(waveParked, /name="project" value="beta"/);
-  assert.match(waveParked, /Resume/);
+  // A campaign parked on a red base (a held member with the red-base reason) offers a Redrive
+  // action that POSTs to /redrive carrying only its project (redrive is project-scoped — no
+  // taskId), mirroring the prune/answer forms.
+  assert.match(redBaseParked, /<form method="post" action="\/redrive"[^>]*>/);
+  assert.match(redBaseParked, /name="project" value="beta"/);
+  assert.match(redBaseParked, /Redrive/);
 
-  // A plain running campaign (no wave-parked wave) shows no Resume control at all.
+  // A plain running campaign (no red-base hold) shows no Redrive control at all.
   const running = renderStatusPage(
     {
       project: "beta",
@@ -361,7 +361,7 @@ test("renderStatusPage shows a Resume control only for a wave-parked campaign (#
     },
     { prune: true },
   );
-  assert.doesNotMatch(running, /action="\/resume"/);
+  assert.doesNotMatch(running, /action="\/redrive"/);
 });
 
 test("renderStatusPage puts a quiet graft input on the summary line, greyed at rest (#202, #168)", () => {
@@ -473,8 +473,8 @@ test("renderStatusPage ships the graft input's client wiring, re-run on live ref
   assert.match(html, /\/graft\?preview/);
 });
 
-test("renderStatusPage shows an informational quarantine affordance with no action of its own (#171)", () => {
-  const quarantined = renderStatusPage(
+test("renderStatusPage shows an informational merge-conflict affordance with no action of its own (#171)", () => {
+  const held = renderStatusPage(
     {
       project: "beta",
       waves: [
@@ -492,15 +492,15 @@ test("renderStatusPage shows an informational quarantine affordance with no acti
     { prune: true },
   );
   // A merge-conflict-held issue (the conflict park reason) surfaces a "resolve the conflict,
-  // then resume" note...
-  assert.match(quarantined, /class="quarantine-note"/);
-  assert.match(quarantined, /resolve the conflict/i);
+  // then redrive" note...
+  assert.match(held, /class="conflict-note"/);
+  assert.match(held, /resolve the conflict/i);
   // ...but the note is informational only — it introduces no action form/route of its own.
-  const note = quarantined.slice(quarantined.indexOf('class="quarantine-note"'));
+  const note = held.slice(held.indexOf('class="conflict-note"'));
   const noteBlock = note.slice(0, note.indexOf("</section>"));
   assert.doesNotMatch(noteBlock, /<form/);
 
-  // No quarantined issue → no note.
+  // No conflict-held issue → no note.
   const clean = renderStatusPage(
     {
       project: "beta",
@@ -509,7 +509,7 @@ test("renderStatusPage shows an informational quarantine affordance with no acti
     },
     { prune: true },
   );
-  assert.doesNotMatch(clean, /class="quarantine-note"/);
+  assert.doesNotMatch(clean, /class="conflict-note"/);
 });
 
 test("failure renders in its own red on every surface, never the prune action's red (#83)", () => {
@@ -689,7 +689,7 @@ test("renderLandingShell opens a parked-queue row's issue detail inline, not by 
   const html = renderLandingShell(["alpha"]);
   // The landing now hosts the issue-detail sheet (the same one the campaign page has).
   assert.match(html, /<div id="issue-detail" class="issue-detail"[^>]*hidden>/);
-  assert.match(html, /id="reply-resume"/);
+  assert.match(html, /id="reply-redrive"/);
   assert.match(html, /id="prune-panel"/);
   // openIssue is defined here, and a parked row opens it in place — the click is
   // intercepted so the row never does the full navigation to the campaign page.
@@ -753,7 +753,7 @@ test("the issue-detail sheet markup, CSS, and script are defined once and shared
   assert.ok(!landing.includes("kept in sync"));
 });
 
-test("the issue-detail sheet offers a reply/resume only for a question park, not a conflict/red-base/stall (ADR 0019)", () => {
+test("the issue-detail sheet offers a reply/redrive only for a question park, not a conflict/red-base/stall (ADR 0019)", () => {
   // A held issue reads `parked` whatever its reason, so the reply block must gate on the
   // reason — a merge conflict / red base / stall is resolved through the campaign-level
   // affordance, not a per-issue answer. The shipped sheet script keys the reply block off
@@ -880,6 +880,13 @@ test("feedKindLabel folds an orchestrator event kind to the feed's clean lowerca
   // shows as a per-row chip — it survives only as the term feedRowMatches lets the filter match.
   assert.equal(feedKindLabel("green"), "issue.merged");
   assert.equal(feedKindLabel("prune"), "issue.pruned");
+  // The map speaks the §2.1 event vocabulary the reader normalizes to — waves are
+  // `wave-start`/`wave-done`, a red-base hold is `campaign-parked`, never the retired
+  // `campaign-batch`/`wave-parked`/`quarantined` names.
+  assert.equal(feedKindLabel("wave-start"), "wave.started");
+  assert.equal(feedKindLabel("wave-done"), "wave.closed");
+  assert.equal(feedKindLabel("campaign-parked"), "campaign.parked");
+  assert.equal(feedKindLabel("campaign-failed"), "campaign.failed");
   assert.equal(feedKindLabel("some-unmapped-kind"), "some-unmapped-kind");
 });
 
@@ -1572,7 +1579,7 @@ test("renderStatusPage's prune panel discloses kept-banked work and carries a st
   // mergeable) work that is kept — so a confirm never implies banked work leaves.
   assert.match(html, /also drops/);
   assert.match(html, /Keeps banked \(merged or mergeable\)/);
-  // A standalone Prune (no Resume beside it) carries a plain-words explainer of
+  // A standalone Prune (no Redrive beside it) carries a plain-words explainer of
   // what a prune does, keyed to show only when the issue is prunable and unparked.
   assert.match(html, /id="prune-explainer"/);
   assert.match(html, /everything blocked by it/);
@@ -2288,7 +2295,7 @@ test("renderStatusPage makes issue chips tap-friendly for touch devices", () => 
             issueNumber: "101",
             status: "running",
             name: "Add login flow",
-            detail: "Agent turn 2 finished; waiting for verification/resume",
+            detail: "Agent turn 2 finished; waiting for verification/redrive",
           },
         ],
       },
@@ -2299,7 +2306,7 @@ test("renderStatusPage makes issue chips tap-friendly for touch devices", () => 
   // The chip keeps its hover title and now carries the ids the sheet fetches with.
   assert.match(
     html,
-    /title="Add login flow&#10;Agent turn 2 finished; waiting for verification\/resume"/,
+    /title="Add login flow&#10;Agent turn 2 finished; waiting for verification\/redrive"/,
   );
   assert.match(
     html,
@@ -2441,7 +2448,7 @@ test("renderStatusPage hosts the prune affordance and inline confirm in the tap-
   assert.match(html, /pruning/);
 });
 
-test("renderStatusPage hosts a parked reply block with a Resume button in the tap-detail sheet", () => {
+test("renderStatusPage hosts a parked reply block with a Redrive button in the tap-detail sheet", () => {
   const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
 
   // The sheet carries a reply block, hidden until the opened issue is parked.
@@ -2457,10 +2464,10 @@ test("renderStatusPage hosts a parked reply block with a Resume button in the ta
     html,
     /id="reply-form"[\s\S]*?name="taskId"[\s\S]*?name="project"[\s\S]*?<textarea name="text"/,
   );
-  // Resume submits that form; it is associated by `form=` so it can sit outside the form, beside Prune.
+  // Redrive submits that form; it is associated by `form=` so it can sit outside the form, beside Prune.
   assert.match(
     html,
-    /<button type="submit" form="reply-form" id="reply-resume" class="reply-resume" hidden>Resume<\/button>/,
+    /<button type="submit" form="reply-form" id="reply-redrive" class="reply-redrive" hidden>Redrive<\/button>/,
   );
 });
 
@@ -2472,7 +2479,7 @@ test("renderStatusPage caps the reply textarea so it stays within the sheet/card
   assert.match(html, /\btextarea \{[^}]*max-width: 100%/);
 });
 
-test("renderStatusPage places Resume beside Prune in one sheet-actions row, sized for touch", () => {
+test("renderStatusPage places Redrive beside Prune in one sheet-actions row, sized for touch", () => {
   const html = renderStatusPage(
     { project: "demo", waves: [], parked: [] },
     { prune: true },
@@ -2481,10 +2488,10 @@ test("renderStatusPage places Resume beside Prune in one sheet-actions row, size
   // Both controls live in the same actions row so they are reachable one-handed together.
   assert.match(
     html,
-    /<div class="sheet-actions"><button type="submit" form="reply-form" id="reply-resume"[^>]*>Resume<\/button><div id="prune-panel"/,
+    /<div class="sheet-actions"><button type="submit" form="reply-form" id="reply-redrive"[^>]*>Redrive<\/button><div id="prune-panel"/,
   );
-  // A 44px tap target for the primary Resume action on a phone.
-  assert.match(html, /\.reply-resume \{[^}]*min-height: 44px;/);
+  // A 44px tap target for the primary Redrive action on a phone.
+  assert.match(html, /\.reply-redrive \{[^}]*min-height: 44px;/);
   // The actions row is a flex box, so it needs [hidden] restored explicitly or an
   // empty foot (no reply, no prune) would always show its border and padding.
   assert.match(html, /\.sheet-actions\[hidden\][^{]*\{ display: none; \}/);
@@ -2492,9 +2499,9 @@ test("renderStatusPage places Resume beside Prune in one sheet-actions row, size
   // [hidden] rule; restore its collapse rule so a non-prunable issue can hide it (#72).
   assert.match(html, /\.prune-panel\[hidden\][^{]*\{ display: none;? \}/);
   // …and the confirm form inside it: its own `display: flex` would defeat the UA
-  // [hidden] rule too, so Confirm/Cancel showed by default beside Resume+Prune —
+  // [hidden] rule too, so Confirm/Cancel showed by default beside Redrive+Prune —
   // four buttons at once. Restore the collapse so they reveal only in the prune
-  // step and the default action row is Resume + Prune alone (#90).
+  // step and the default action row is Redrive + Prune alone (#90).
   assert.match(html, /\.prune-confirm\[hidden\][^{]*\{ display: none;? \}/);
 });
 
@@ -2512,9 +2519,9 @@ test("renderStatusPage wires the parked reply block: shown when parked, options 
 test("renderStatusPage gives the parked block a directive heading and labels the turn log (#92)", () => {
   const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
 
-  // The parked block leads with a directive heading, not the flat "Reply & resume".
+  // The parked block leads with a directive heading, not a flat "Reply & redrive".
   assert.match(html, /class="reply-heading">PARKED — NEEDS YOUR ANSWER</);
-  assert.doesNotMatch(html, /Reply &amp; resume/);
+  assert.doesNotMatch(html, /Reply &amp; redrive/);
   // The turn log is its own labeled section ("Agent turns"), distinct from the meta tiles.
   assert.match(html, /class="turn-log-heading">Agent turns</);
 });

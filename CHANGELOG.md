@@ -57,6 +57,9 @@ Within a milestone each bold section label appears at most once.
 - [ops] `vetinari clear` now resets only the live log and keeps parked records — a surviving record keeps its card parked (answer/redrive to resume, or `prune --purge` to drop). Automatic end-of-run archiving already skipped while anything was parked, so only the manual escape hatch changes (#319).
 - [user] Redrive is now a whole-campaign control on the project page, not a per-issue move: it renders greyed-out with a one-line reason unless it is safe (the campaign is stopped — parked, failed or crashed — and no campaign process holds the host lease), and enabled it opens a confirmation dialog naming the campaign, the wave it re-enters, its members and the base before it runs (#325).
 - [api] `POST /redrive` re-checks the safety rule server-side and refuses with `409` and the reason when a redrive is unsafe (#325).
+- [ops] Every Telegram notice now renders one §10 skeleton — `<emoji> <project> · <STATE> · <context>`, one signal line, and the exact recovery command — in the settled vocabulary: the retired `WAVE-PARKED`/`QUARANTINE-PAUSED`/`CONFLICT-PARKED`/`AUTO-PRUNE`/`BATCH n/m` labels and `campaign --resume` as a recovery command are gone, replaced by `PARKED`/`FAILED`/`PRUNED`/`WAVE` and `vetinari redrive` (#320).
+- [user] `--help` blurbs (and the generated `docs/reference.md`) drop the retired `campaign-plan`, `queue`, `wave-parked`, and `quarantine` wording (#320).
+- [user] `vetinari init`'s next steps now print the credential keys of the selected agent provider from the provider table (both keys for the default `claude`), not a single hard-coded `CLAUDE_CODE_OAUTH_TOKEN`, and the config template comments name the `agent` option and say `redrive`/`prune` instead of `campaign --resume`/`carve` (#320).
 
 **Bug fixes:**
 - [user] A campaign wave with a failed issue now holds the wave and stops the campaign as failed: the wave still drains its siblings and merges their greens, then a `campaign-failed` event and a failure notice are logged and the run exits non-zero — no later wave starts on top of the missing work (#285).
@@ -106,6 +109,7 @@ Within a milestone each bold section label appears at most once.
 - [internal] `docs/dashboard-color-rules.md` folded into `docs/design.md` appendix A — the palette, the edge rule and the roll-up precedence; the standalone spec is removed (#304).
 - [internal] `.out-of-scope/*.md` removed; the quarantine-verb and `host log` ordering decisions already live as bullets in design §14 (non-goals) (#304).
 - [ops] Consolidated `docs/gateway.md`, `docs/upgrading.md`, and `docs/statusline.md` into one `docs/operations.md` — the "how do I run it on a host" reference: the gateway as a service, per-project `host.env` and bots, `MAX_CONCURRENT_CONTAINERS` and `containerShare`, the status line, upgrading, and the `tidy` / `registry remove` / `host log` reconciliation tools (#302).
+- [internal] The `/fileset` skill documents `campaign --dry-run --on-underspecified=drop <ids>` as the marker confidence check, and the triage skill records rejected requests as non-goals in `docs/design.md` §14 rather than the removed `.out-of-scope/` (#320).
 
 ### Collected changes — August 29, 2026
 

@@ -2,7 +2,7 @@
 // derivations, and the CSS/script constants (dashboard-assets.ts).
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { DASHBOARD_PALETTE_CSS, stateColor, stateBorderColor, counterColor, TOP_BAR_STYLES, ISSUE_DETAIL_SHEET_STYLES, ISSUE_DETAIL_SHEET_SCRIPT, HOST_LOG_STYLES, HOST_LOG_SCRIPT } from "./dashboard-assets.ts";
 import { cappedRawRows, isNotableHostEvent, renderLandingShell } from "./status.ts";
@@ -47,6 +47,39 @@ test("the dashboard palette is one shared source defining every state token at i
   assert.notEqual("#f85149", "#f79287");
   // The teal product accent is present but is not a state colour.
   assert.match(DASHBOARD_PALETTE_CSS, /--color-primary: #3fb9b0/);
+});
+
+test("no dashboard surface hand-authors a colour hex — every hex ties back to the one shared palette (Appendix A, #317)", () => {
+  // Colour is always derived from the palette, never authored per element: the shared
+  // `:root` palette is the sole home of raw hex, so every 6-digit hex in any dashboard
+  // source must be one the palette defines. A page that hand-authors its own colour
+  // (the old aggregated prune/graft pages) fails here.
+  const hexes = (s: string) => s.match(/#[0-9a-fA-F]{6}\b/g) ?? [];
+  const authorized = new Set(hexes(DASHBOARD_PALETTE_CSS));
+  const srcDir = import.meta.dirname;
+  const files = readdirSync(srcDir).filter((f) => f.startsWith("dashboard-") && f.endsWith(".ts") && !f.endsWith(".test.ts"));
+  assert.ok(files.length > 5, "found the dashboard source files to scan");
+  for (const file of files) {
+    for (const hex of hexes(readFileSync(join(srcDir, file), "utf8"))) {
+      assert.ok(authorized.has(hex), `${file} authors ${hex}, a colour outside the shared palette (Appendix A)`);
+    }
+  }
+});
+
+test("only the running dot and the live indicator animate — nothing else pulses (design §11, Appendix A, #317)", () => {
+  // §11: "Nothing animates except the running dot and the live indicator." The colour-bearing
+  // animation is `chip-pulse`; it may ride exactly two selectors — the running dot (work in
+  // flight) and the live indicator (the stream) — so a third pulsing element (the live-tail /
+  // feed stream dot) is a violation. Scan every dashboard source for `animation: chip-pulse`.
+  const srcDir = import.meta.dirname;
+  const files = readdirSync(srcDir).filter((f) => f.startsWith("dashboard-") && f.endsWith(".ts") && !f.endsWith(".test.ts"));
+  const pulsing: string[] = [];
+  for (const file of files) {
+    const src = readFileSync(join(srcDir, file), "utf8");
+    // The selector immediately before each non-`none` chip-pulse declaration.
+    for (const m of src.matchAll(/((?:[.#][\w-]+)+(?:\[[^\]]*\])?(?:::[\w-]+)?) \{[^}]*animation: chip-pulse/g)) pulsing.push(m[1]);
+  }
+  assert.deepEqual(new Set(pulsing), new Set([".dot.running", ".live-indicator::before"]));
 });
 
 test("the issue-detail sheet carries the issue's state on its top edge only (§2, #83)", () => {

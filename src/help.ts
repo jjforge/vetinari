@@ -40,9 +40,9 @@ export const MODES: Mode[] = [
       "select issues, plan them into dependency-ordered file-disjoint waves, then run them (queue a wave, merge greens → gate base → next). A numeric token is an issue id; a NON-numeric token is a label expanded to the open issues carrying it (needs a listByLabel resolver — githubIssuesByLabel(repo) — else a label fails fast). --dry-run plans only, printing the wave plan + provenance + suggested --name and running nothing (this replaces the old campaign-plan). --override skips the planner and runs each positional as one literal wave (labels inside still expand). --on-underspecified=drop|fail pre-decides the planner's not-confident halt for non-interactive runs. --name labels the run; --agent (with --model/--effort) selects the provider for the whole campaign and every child wave (claude | pi | codex; copilot | cursor | opencode experimental; ADR 0016). If a merge-conflict quarantine strands dependents in later waves the campaign pauses for a human by default; --auto-prune prunes the stranded closure and runs on (ADR 0013)",
   },
   {
-    signature: "campaign --resume",
+    signature: "redrive",
     blurb:
-      "redrive a PAUSED campaign on the current base (after a human fixed a wave-park forward, or pruned a suspect): reconstructs the plan from the event log and re-enters the first wave that did not close, reconciling it before running (design §7) — a green-but-unmerged member is integrated without a rerun, an answered park (its record gone) re-runs, an unresolved park re-parks the wave, and a failed member stops the campaign as failed again unless --override re-runs it. Redoes no already-merged issue. Nothing left to run reports so and exits clean. Takes no batch args (ADR 0013)",
+      "pick an unfinished campaign back up on the current base — the umbrella verb (ADR 0020): reconstructs the plan from the event log and re-enters the first wave that did not close, reconciling it before running (design §7) — a green-but-unmerged member is integrated without a rerun, an answered park (its record gone) re-runs, an unresolved park re-parks the wave, and a failed member stops the campaign as failed again unless --override re-runs it. Redoes no already-merged issue. Takes no issue args; use it after a prune, graft, fix-forward, crash, or failure. Nothing left to run reports so and exits clean (`campaign --resume` is a one-release alias)",
   },
   {
     signature: "prune <issue>",
@@ -50,19 +50,9 @@ export const MODES: Mode[] = [
       "prune <issue> + everything blocked by it from the RUNNING campaign: appends a prune event the loop honors at the next wave boundary (the in-flight wave finishes; only future waves shrink). Banked work stays — a merged/green member is kept, only parked/not-yet-started ones leave. A pruned issue's parked record (branch/worktree/session) is preserved so it stays resumable; --purge is the rare true-drop that clears it. Needs a running campaign (--dry-run to only preview).",
   },
   {
-    signature: "prune <issue> <batch…>",
-    blurb:
-      "drop <issue> + everything blocked by it, then run the rest as a fresh reduced campaign from the plan you supply (--dry-run to only print the reduced plan)",
-  },
-  {
     signature: "graft <ids…>",
     blurb:
       "add issues to a RUNNING (or paused/wave-parked/resumable) campaign — the additive mirror of prune (ADR 0014): appends a graft event the loop honors at the next wave boundary. The in-flight wave finishes untouched; the added issues re-layer into future waves (after their blockers, basename-disjoint), leaving already-planned waves stable. Rejected whole — naming the offenders — if any id is unknown/closed or already in the campaign. Needs a campaign that has not finished (--dry-run to only print the resulting placement).",
-  },
-  {
-    signature: "fileset-check <ids…>",
-    blurb:
-      "report, per ticket id, whether the campaign planner's resolver finds a confident file-set and which basenames it resolves — the exact fetchTask→ticketProse→fileSet path the planner uses, so the two agree by construction. A NOT-confident line is exactly what `campaign` (planning) would halt on; the /fileset sweep reads this to decide whether a marker truly resolves. Plans nothing, writes nothing",
   },
   {
     signature: "init [--dry-run]",
@@ -139,16 +129,6 @@ export const MODES: Mode[] = [
     signature: "registry remove <name>",
     blurb:
       "remove one project's pointer from the host registry, so the dashboard stops listing it (the explicit counterpart to the auto-register every run performs — not container slots). A name that is not registered is a clean no-op",
-  },
-  {
-    signature: "demo create",
-    blurb:
-      "seed + register the demo dashboard fixture — one project per run-state (running, parked, failure, completed, idle) whose issues between them render every dashboard chip state — so you can click through the status UI. Seeds under $VETINARI_DEMO_DIR (default ~/.cache/vetinari-demo). Idempotent: a re-run clears and reseeds. Refresh the running dashboard to see them",
-  },
-  {
-    signature: "demo remove",
-    blurb:
-      "unregister + delete the demo dashboard fixture — removes the demo root and exactly the registry pointers whose base location sits under it (never a real project). A clean no-op when nothing is seeded",
   },
   {
     signature: "statusline",

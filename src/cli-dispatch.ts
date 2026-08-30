@@ -1,6 +1,6 @@
 /**
  * The pure parse + injected-dispatch seam in front of `cli.mts`'s config-dependent
- * command family (build/baseline/run/campaign/prune/graft/fileset-check/answer/
+ * command family (build/baseline/run/campaign/redrive/prune/graft/answer/
  * parked/clear/tg-test). `cli.mts` was a 965-line `switch (mode)` welded to
  * `console`, `process.exit` and real spawns, so command routing could only be
  * reached by launching the process. Splitting it in two — `parseArgs` (argv →
@@ -10,7 +10,7 @@
  * over an injected `IO`).
  *
  * The host-level modes that must run BEFORE the strict config load (init, migrate,
- * gateway, host, status, registry, demo, tidy, changelog, statusline) stay inline in
+ * gateway, host, status, registry, tidy, changelog, statusline) stay inline in
  * `cli.mts`: each already delegates to its own tested seam. This module owns only the
  * post-config `switch`.
  */
@@ -29,9 +29,7 @@ import type { UnderspecifiedPrompt } from "./plan.ts";
 import type {
   expandSelection,
   runCampaignPlan,
-  runFilesetCheck,
 } from "./plan.ts";
-import { describeFilesetCheck } from "./plan.ts";
 import { resumeIndex, type runPrune } from "./prune.ts";
 import type { runGraft } from "./graft.ts";
 import { describeGraftRejections } from "./graft.ts";
@@ -63,9 +61,9 @@ export type Command =
       override: boolean;
       onUnderspecified?: string;
     }
-  | { kind: "prune"; target?: string; plan?: string[][]; dryRun: boolean; purge: boolean }
+  | { kind: "redrive"; agent: AgentOverride; autoPrune: boolean; override: boolean }
+  | { kind: "prune"; target?: string; dryRun: boolean; purge: boolean }
   | { kind: "graft"; ids: string[]; dryRun: boolean }
-  | { kind: "filesetCheck"; ids: string[] }
   | { kind: "answer"; taskId?: string; text: string[] }
   | { kind: "parked" }
   | { kind: "clear" }
@@ -106,11 +104,18 @@ export function parseArgs(argv: string[]): Command {
           .filter(Boolean),
         dryRun: rest.includes("--dry-run"),
       };
-    case "fileset-check":
+    case "redrive": {
+      // Redrive picks an unfinished campaign back up (design §7) — the umbrella verb
+      // (ADR 0020). It takes no issue selection; strip the agent, then read only its
+      // two forwarded flags. `--override` re-runs a failed member; stray tokens are ignored.
+      const { override: agent, rest: redriveArgs } = parseAgentFlags(rest);
       return {
-        kind: "filesetCheck",
-        ids: rest.flatMap((a) => a.split(/[\s,]+/)).filter(Boolean),
+        kind: "redrive",
+        agent,
+        autoPrune: redriveArgs.includes("--auto-prune"),
+        override: redriveArgs.includes("--override"),
       };
+    }
     case "answer": {
       const [taskId, ...text] = rest;
       return { kind: "answer", taskId, text };
@@ -152,18 +157,12 @@ export function parseArgs(argv: string[]): Command {
       };
     }
     case "prune": {
-      const positional = rest.filter((a) => a !== "--dry-run" && a !== "--purge");
-      const [target, ...batchArgs] = positional;
-      // A non-empty positional tail = an explicit plan → the fresh-launch path.
-      const plan = batchArgs.length
-        ? batchArgs
-            .map((b) => b.split(/[\s,]+/).filter(Boolean))
-            .filter((b) => b.length)
-        : undefined;
+      // `prune <issue>` (with `--purge`) is the only form — it prunes the RUNNING campaign
+      // at the next wave boundary. The fresh-reduced-launch batch form is retired (design §12).
+      const [target] = rest.filter((a) => a !== "--dry-run" && a !== "--purge");
       return {
         kind: "prune",
         target,
-        plan,
         dryRun: rest.includes("--dry-run"),
         purge: rest.includes("--purge"),
       };
@@ -208,7 +207,6 @@ export interface DispatchDeps {
   runCampaignPlan: typeof runCampaignPlan;
   runPrune: typeof runPrune;
   runGraft: typeof runGraft;
-  runFilesetCheck: typeof runFilesetCheck;
   listParked: typeof listParked;
   readParked: typeof readParked;
   /** Read this project's event log — the source a green `answer` checks to decide
@@ -252,19 +250,26 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
       await dispatchCampaign(cmd, deps);
       return;
     }
+    case "redrive": {
+      // The umbrella verb (ADR 0020, design §7): reconstruct the plan from the log and
+      // re-enter the first unclosed wave. Lock in the agent first (ADR 0016); take no
+      // selection and continue the live log, so — like `campaign --resume` — never archive
+      // the leftover it would reconstruct from, only archive once idle.
+      deps.selectAgent(cfg, cmd.agent);
+      await deps.campaign(cfg, [], deps.host, undefined, {
+        autoPrune: cmd.autoPrune,
+        resume: true,
+        override: cmd.override,
+      });
+      deps.archiveIfIdle();
+      return;
+    }
     case "prune": {
       await dispatchPrune(cmd, deps);
       return;
     }
     case "graft": {
       await dispatchGraft(cmd, deps);
-      return;
-    }
-    case "filesetCheck": {
-      // The resolver-backed pre-campaign check: run the SAME resolution campaign-plan
-      // uses over each id and print its verdict. Read-only — plans nothing, writes nothing.
-      const results = await deps.runFilesetCheck(cfg, cmd.ids);
-      deps.log(describeFilesetCheck(results));
       return;
     }
     case "answer": {
@@ -336,6 +341,11 @@ async function dispatchCampaign(
   // planning, or override applies. It continues the live log, so (unlike a fresh run)
   // it must NOT archive the leftover it would otherwise reconstruct from.
   if (cmd.resume) {
+    // `campaign --resume` is the retained one-release alias for `redrive` (ADR 0020, design
+    // §7): still honoured, but point the operator at the verb the docs now use.
+    deps.log(
+      "note: `campaign --resume` is now `redrive` — run `vetinari redrive` instead (this alias is kept for one release).",
+    );
     // Under --resume, --override re-runs a failed member instead of stopping as failed
     // again (design §7); the literal-waves meaning of --override below never applies here
     // (resume takes no batch args and returns before reaching it).
@@ -423,9 +433,9 @@ async function dispatchCampaign(
 }
 
 /**
- * The prune command: prune the running campaign, or (with a positional batch tail)
- * launch a reduced one. The orchestration lives in `runPrune`; this only parses (done
- * in `parseArgs`) and renders. A faithful port of the old `switch`'s `prune` case.
+ * The prune command: prune `<issue>` + everything blocked by it from the RUNNING campaign
+ * (the from-scratch reduced-launch batch form is retired — design §12). The orchestration
+ * lives in `runPrune`; this only parses (done in `parseArgs`) and renders.
  */
 async function dispatchPrune(
   cmd: Extract<Command, { kind: "prune" }>,
@@ -435,26 +445,12 @@ async function dispatchPrune(
   const result = await deps.runPrune(cfg, cmd.target!, {
     dryRun: cmd.dryRun,
     purge: cmd.purge,
-    plan: cmd.plan,
     host,
   });
   const tgt = result.target;
-
-  if (result.mode === "launch") {
-    const dependents = result.removed.filter((id) => id !== tgt);
-    deps.log(
-      `prune #${tgt} → removed ${result.removed.map((i) => `#${i}`).join(", ")}` +
-        (dependents.length
-          ? ` (dependents: ${dependents.map((i) => `#${i}`).join(", ")})`
-          : " (no dependents)"),
-    );
-    deps.log(
-      `remaining campaign: ${result.remaining.length ? result.remaining.map((w) => `"${w.join(" ")}"`).join(" ") : "(nothing left to run)"}`,
-    );
-    if (!cmd.dryRun && !result.remaining.length)
-      deps.log("nothing left to run after the prune — done.");
-    return;
-  }
+  // The CLI only drives the running-campaign path now; `runPrune`'s retired launch mode
+  // is never reached without a `plan`.
+  if (result.mode !== "prune") return;
 
   deps.log(
     `prune #${tgt} → ${result.dropped.length ? `dropping ${result.dropped.map((i) => `#${i}`).join(", ")}` : "nothing to drop"}` +

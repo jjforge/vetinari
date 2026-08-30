@@ -41,7 +41,6 @@ function makeDeps(overrides: Partial<DispatchDeps> = {}) {
     runCampaignPlan: spy(Promise.resolve({ waves: [], waveArgs: "", report: "", suggestedName: "" })) as unknown as DispatchDeps["runCampaignPlan"],
     runPrune: spy(Promise.resolve({ mode: "prune", target: "436", dropped: [], kept: [], remaining: [], parkedDropped: [] })) as unknown as DispatchDeps["runPrune"],
     runGraft: spy(Promise.resolve({ ids: [], rejected: [], placement: [], remaining: [], applied: true })) as unknown as DispatchDeps["runGraft"],
-    runFilesetCheck: spy(Promise.resolve([])) as unknown as DispatchDeps["runFilesetCheck"],
     listParked: spy([]) as unknown as DispatchDeps["listParked"],
     readParked: spy({ sessionId: "sess", question: "q?" }) as unknown as DispatchDeps["readParked"],
     readEventLog: spy([]) as unknown as DispatchDeps["readEventLog"],
@@ -97,13 +96,6 @@ test("parseArgs splits `graft` ids on whitespace/commas and reads --dry-run", ()
   });
 });
 
-test("parseArgs splits `fileset-check` ids on whitespace/commas", () => {
-  assert.deepEqual(parseArgs(["fileset-check", "436 611", "640"]), {
-    kind: "filesetCheck",
-    ids: ["436", "611", "640"],
-  });
-});
-
 test("parseArgs maps `answer` to its task id and the answer text tail", () => {
   assert.deepEqual(parseArgs(["answer", "436", "looks", "good"]), {
     kind: "answer",
@@ -112,27 +104,22 @@ test("parseArgs maps `answer` to its task id and the answer text tail", () => {
   });
 });
 
-test("parseArgs maps a bare `prune <issue>` to a prune of that target with no fresh plan", () => {
+test("parseArgs maps a bare `prune <issue>` to a prune of that target", () => {
   assert.deepEqual(parseArgs(["prune", "436"]), {
     kind: "prune",
     target: "436",
-    plan: undefined,
     dryRun: false,
     purge: false,
   });
 });
 
-test("parseArgs reads `prune` flags and a positional batch tail into a fresh-launch plan", () => {
-  assert.deepEqual(
-    parseArgs(["prune", "436", "611 640", "623", "--dry-run", "--purge"]),
-    {
-      kind: "prune",
-      target: "436",
-      plan: [["611", "640"], ["623"]],
-      dryRun: true,
-      purge: true,
-    },
-  );
+test("parseArgs reads `prune` flags and ignores a retired batch tail — only the issue is the target", () => {
+  assert.deepEqual(parseArgs(["prune", "436", "611 640", "623", "--dry-run", "--purge"]), {
+    kind: "prune",
+    target: "436",
+    dryRun: true,
+    purge: true,
+  });
 });
 
 test("parseArgs maps a plain `campaign <ids>` to its positional selection with default flags", () => {
@@ -175,6 +162,24 @@ test("parseArgs strips the agent and reads every `campaign` flag (both --flag va
       onUnderspecified: "drop",
     },
   );
+});
+
+test("parseArgs maps a bare `redrive` to a redrive command with default flags", () => {
+  assert.deepEqual(parseArgs(["redrive"]), {
+    kind: "redrive",
+    agent: {},
+    autoPrune: false,
+    override: false,
+  });
+});
+
+test("parseArgs strips the agent and reads redrive's --override/--auto-prune flags", () => {
+  assert.deepEqual(parseArgs(["redrive", "--agent", "codex", "--override", "--auto-prune"]), {
+    kind: "redrive",
+    agent: { provider: "codex" },
+    autoPrune: true,
+    override: true,
+  });
 });
 
 test("parseArgs maps `campaign --resume` to a resume with no positional selection", () => {
@@ -287,6 +292,32 @@ test("dispatch campaign --resume --override forwards the failed-member override 
   assert.deepEqual((deps.campaign as any).calls[0][4], { autoPrune: false, resume: true, override: true });
 });
 
+test("dispatch redrive selects the agent, redrives the campaign from the log, and archives if idle", async () => {
+  const { deps } = makeDeps();
+  await dispatch({ kind: "redrive", agent: { provider: "codex" }, autoPrune: false, override: false }, deps);
+  assert.deepEqual((deps.selectAgent as any).calls, [[deps.cfg, { provider: "codex" }]]);
+  // Redrive takes no selection and continues the live log — no leftover archive, resume=true.
+  assert.deepEqual((deps.campaign as any).calls, [[deps.cfg, [], deps.host, undefined, { autoPrune: false, resume: true, override: false }]]);
+  assert.equal((deps.archiveLeftoverRun as any).calls.length, 0);
+  assert.equal((deps.archiveIfIdle as any).calls.length, 1);
+});
+
+test("dispatch redrive --override forwards the failed-member override", async () => {
+  const { deps } = makeDeps();
+  await dispatch({ kind: "redrive", agent: {}, autoPrune: false, override: true }, deps);
+  assert.deepEqual((deps.campaign as any).calls[0][4], { autoPrune: false, resume: true, override: true });
+});
+
+test("dispatch campaign --resume still redrives but prints the one-release alias notice pointing at redrive", async () => {
+  const { deps, logged } = makeDeps();
+  await dispatch(
+    { kind: "campaign", agent: {}, positional: [], name: undefined, autoPrune: false, resume: true, dryRun: false, override: false, onUnderspecified: undefined },
+    deps,
+  );
+  assert.equal((deps.campaign as any).calls.length, 1);
+  assert.ok(logged.some((l) => /campaign --resume/.test(l) && /redrive/.test(l)), "prints the alias notice");
+});
+
 test("dispatch campaign with an empty selection throws the needs-an-issue message", async () => {
   const { deps } = makeDeps();
   await assert.rejects(
@@ -336,22 +367,16 @@ test("dispatch campaign --dry-run plans but runs nothing", async () => {
   assert.equal((deps.campaign as any).calls.length, 0);
 });
 
-test("dispatch prune routes to runPrune with the parsed target, flags and plan", async () => {
+test("dispatch prune routes to runPrune with the parsed target and flags", async () => {
   const { deps } = makeDeps();
-  await dispatch({ kind: "prune", target: "436", plan: undefined, dryRun: true, purge: false }, deps);
-  assert.deepEqual((deps.runPrune as any).calls, [[deps.cfg, "436", { dryRun: true, purge: false, plan: undefined, host: deps.host }]]);
+  await dispatch({ kind: "prune", target: "436", dryRun: true, purge: false }, deps);
+  assert.deepEqual((deps.runPrune as any).calls, [[deps.cfg, "436", { dryRun: true, purge: false, host: deps.host }]]);
 });
 
 test("dispatch graft routes to runGraft with the parsed ids and flag", async () => {
   const { deps } = makeDeps();
   await dispatch({ kind: "graft", ids: ["436", "611"], dryRun: false }, deps);
   assert.deepEqual((deps.runGraft as any).calls, [[deps.cfg, ["436", "611"], { dryRun: false }]]);
-});
-
-test("dispatch fileset-check routes to runFilesetCheck with the parsed ids", async () => {
-  const { deps } = makeDeps();
-  await dispatch({ kind: "filesetCheck", ids: ["436"] }, deps);
-  assert.deepEqual((deps.runFilesetCheck as any).calls, [[deps.cfg, ["436"]]]);
 });
 
 test("dispatch answer resumes the parked session for a resumable agent and maps green to exit 0", async () => {

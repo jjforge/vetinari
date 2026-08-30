@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -21,6 +21,7 @@ import {
   ALL_MEMBERSHIPS,
   ALL_RUN_STATES,
   createDemo,
+  demoBaseLocation,
   DEMO_PARKED_PROJECT,
   removeDemo,
 } from "./dashboard-demo-fixture.ts";
@@ -70,6 +71,30 @@ test("the demo covers every dashboard state — a new DisplayStatus/Membership/R
     assert.deepEqual(
       { missingStatuses, missingMemberships, missingRunStates },
       { missingStatuses: [], missingMemberships: [], missingRunStates: [] },
+    );
+  } finally {
+    rmSync(configDir, { recursive: true, force: true });
+  }
+});
+
+test("the parked demo project writes the `parked` event a real park writes — parity, not a placeholder (#278)", () => {
+  const configDir = mkdtempSync(join(tmpdir(), "vetinari-demo-"));
+  const root = join(configDir, "demo");
+  try {
+    createDemo(configDir, root, new Date());
+    const log = readFileSync(join(demoBaseLocation(root, DEMO_PARKED_PROJECT), "logs", "orchestrator.jsonl"), "utf8");
+    const events = log.split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    const parked = events.filter((e) => e.event === "parked");
+    // A real question park (state.ts `park`) logs exactly { event:"parked", taskId, reason }
+    // (a ts stamp, no detail). The demo must emit that, not merely materialize a record file.
+    const question = parked.find((e) => e.reason === "question");
+    assert.ok(question, "a question park event is present in the demo live log");
+    assert.equal(question.event, "parked");
+    assert.ok(question.taskId, "the parked event carries its taskId");
+    assert.deepEqual(
+      Object.keys(question).filter((k) => k !== "ts").sort(),
+      ["event", "reason", "taskId"],
+      "the question park event has exactly the keys a real park writes",
     );
   } finally {
     rmSync(configDir, { recursive: true, force: true });

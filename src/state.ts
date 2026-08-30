@@ -3,12 +3,26 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import { join } from "node:path";
 import type { MessageCategory, ResolvedConfig } from "./config.ts";
 
-export type ParkReason = "blocked" | "budget" | "idle-timeout";
+/**
+ * The one park-reason enum (design §2.3), the reason on the parked record, the
+ * `parked` event, the reducer, the gateway and the dashboard. `detail` carries the
+ * specifics — which `stalled` (budget / idle / no-commit), the conflict output, the
+ * gate tail — so the reason itself stays a small closed set:
+ * - `question` — the run loop hit `BLOCKED`; an answer resumes it.
+ * - `stalled`  — turn budget, idle timeout, or an empty `COMPLETE`; an answer guides it.
+ * - `conflict` — the integrator hit a merge conflict; a human resolves and redrives.
+ * - `red-base` — the merged base gated red; fix-forward or prune, then redrive.
+ * - `crash`    — reconciliation found a dead run with no stop marker; redrive.
+ */
+export type ParkReason = "question" | "stalled" | "conflict" | "red-base" | "crash";
 
 export interface ParkedRecord {
   taskId: string;
   parkedAt: string;
-  reason: ParkReason | string;
+  reason: ParkReason;
+  /** the specifics behind `reason` — which `stalled` (budget/idle/no-commit), etc.
+   * (design §2.3). Absent when the reason needs no qualifier. */
+  detail?: string;
   sessionId?: string;
   branch: string;
   question: string;
@@ -29,7 +43,7 @@ const file = (cfg: ResolvedConfig, taskId: string) => `${cfg.parkedDir}/${taskId
 export async function park(cfg: ResolvedConfig, rec: Omit<ParkedRecord, "parkedAt" | "tgMessageId">) {
   mkdirSync(cfg.parkedDir, { recursive: true });
   writeFileSync(file(cfg, rec.taskId), JSON.stringify({ parkedAt: new Date().toISOString(), ...rec }, null, 2));
-  cfg.log.log("parked", { taskId: rec.taskId, reason: rec.reason });
+  cfg.log.log("parked", { taskId: rec.taskId, reason: rec.reason, ...(rec.detail ? { detail: rec.detail } : {}) });
   console.log(`\n*** PARKED (${rec.reason}) — the gateway will announce this question; or answer directly with:\n    vetinari answer ${rec.taskId} "<answer>"\n`);
 }
 

@@ -17,7 +17,7 @@ export const handlePage: RouteHandler = (req, res, url, deps) => {
   if (!(req.method === "GET" && (url.pathname === "/" || req.url === undefined))) return false;
   res.setHeader("content-type", "text/html; charset=utf-8");
   const pointers = listProjects(deps.configDir);
-  const statuses = buildAllStatus(pointers);
+  const statuses = buildAllStatus(pointers, undefined, deps.configDir);
   // The repo dropdown, on both pages, is one option per registered project carrying
   // its rolled-up run state (ADR 0007) so each menu row can dot + note it, and its
   // owner/name (from the git remote) so it reads that instead of the bare key.
@@ -40,8 +40,9 @@ export const handlePage: RouteHandler = (req, res, url, deps) => {
   // Each row's body renders the run's reconstructed status read-only: point
   // buildStatus at the archived log with `dead: true`; its dir holds no parked records,
   // so the status carries none (a finished run has nothing to act on). A stalled run's
-  // log ends with no terminal event, so the FSM folds its in-flight `running` issues to
-  // `parked{stalled}` — an archived run must never read as live (#152, ADR 0019).
+  // log ends with no terminal event, so the reducer folds its in-flight `running` issues,
+  // dead with no verdict, to `parked{crash}` — an archived run must never read as live
+  // (#152, design §7).
   const runs = archivedRuns.map((r) => ({
     run: r.run,
     name: r.name,

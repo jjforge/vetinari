@@ -166,6 +166,19 @@ export function readLeases(configDir: string): SlotLease[] {
   return leases;
 }
 
+/**
+ * Whether `project` currently holds a live host slot — the crash probe the dashboard
+ * injects into `reduceCampaign` (design §8). A run writes its lease when it registers
+ * and holds it (even at held zero, waiting first-come) until it finishes or dies; a
+ * crashed run's lease lingers on disk but its pid is gone, so a project with no live
+ * lease has no run on it. Read-only — it never reclaims a dead lease (acquire does that
+ * under the lock); this is a probe any read path can take at any time.
+ */
+export function projectHasLiveLease(configDir: string, project: string, opts: LeaseOpts = {}): boolean {
+  const isAlive = opts.isAlive ?? pidAlive;
+  return readLeases(configDir).some((l) => l.project === project && isAlive(l.pid));
+}
+
 /** Read the live leases, unlinking any whose pid is dead so their slots return. */
 function liveLeases(configDir: string, isAlive: (pid: number) => boolean): SlotLease[] {
   const live: SlotLease[] = [];

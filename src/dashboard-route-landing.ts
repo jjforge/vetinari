@@ -10,6 +10,6 @@ export const handleLanding: RouteHandler = (req, res, url, deps) => {
   if (!(req.method === "GET" && url.pathname === "/api/landing")) return false;
   res.setHeader("content-type", "application/json");
   const festive = festiveFromCookie(req.headers.cookie);
-  res.end(JSON.stringify(buildLanding(listProjects(deps.configDir), new Date(), undefined, festive)));
+  res.end(JSON.stringify(buildLanding(listProjects(deps.configDir), new Date(), undefined, festive, deps.configDir)));
   return true;
 };

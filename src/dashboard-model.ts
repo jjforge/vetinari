@@ -5,6 +5,7 @@ import type { ResolvedConfig } from "./config.ts";
 import { hostLogger, type Logger } from "./log.ts";
 import { type ProjectPointer } from "./registry.ts";
 import { listParked, parkedDirOf, type ParkedRecord } from "./state.ts";
+import { projectHasLiveLease } from "./host-slots.ts";
 import { applyPrune } from "./prune.ts";
 import { applyGraft } from "./plan.ts";
 import { festiveWaveName } from "./festive-names.ts";
@@ -55,11 +56,12 @@ export type IssueStatus = "completed" | "parked" | "failure" | "running" | "unst
  * Why a `parked` issue is held (ADR 0019) — metadata set *by the transition*, not a
  * status word: `question` (a `parked{blocked}` awaiting an answer), `conflict` (a
  * `quarantined` merge conflict), `red-base` (a combined-gate wave-park — the *wave's*
- * reason, never a member's; design §2.3), or `stalled` (a `parked{budget|idle-timeout}`,
- * or a crash — end-of-log with no terminal event and a dead process). The reason selects
- * the recovery affordance; the surface word is one.
+ * reason, never a member's; design §2.3), `stalled` (a `parked{budget|idle-timeout}`,
+ * the run loop's own resource stop), or `crash` (reconciliation: the run's process is
+ * gone with no terminal stop marker, so an in-flight issue never verdicted — design §2.3,
+ * §7). The reason selects the recovery affordance; the surface word is one.
  */
-export type ParkReason = "question" | "conflict" | "red-base" | "stalled";
+export type ParkReason = "question" | "conflict" | "red-base" | "stalled" | "crash";
 
 /**
  * An issue's membership in the campaign (ADR 0019) — the axis orthogonal to its
@@ -591,8 +593,11 @@ export interface ReducedCampaign {
  * campaign supersedes an earlier one in the same log); a queue-only run with no
  * campaign frames it as a single wave. This is the load-bearing seam of ADR
  * 0005: `buildStatus` renders it and the `campaign` loop re-reads it each wave.
+ * `opts.alive` is the injected liveness probe (design §7): `false` means the run's
+ * process is gone (its host slot is not held, §8), so an in-flight `running` issue with
+ * no terminal stop marker reconciles to parked{crash}; omitted/`true` never crash-folds.
  */
-export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
+export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: boolean } = {}): ReducedCampaign {
   const latestCampaignIndex = events.findLastIndex((e) => e.event === "campaign-start" && Array.isArray(e.batches));
   const relevant = latestCampaignIndex >= 0 ? events.slice(latestCampaignIndex) : events;
 
@@ -745,6 +750,22 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
   // becomes `running` on pickup — so drop any grafted id that has since reached an outcome.
   for (const id of [...grafted]) if (outcomes.has(id)) grafted.delete(id);
 
+  // Crash reconciliation (design §2.3, §7): liveness comes from the host-slot lease — a
+  // run holds a slot while alive (§8). When the injected probe says the run is dead
+  // (`alive === false`) and its log carries no terminal stop marker, every issue still
+  // `running` (its last event non-terminal) died with no verdict, so it reconciles to
+  // parked{crash} — never left reading running forever (§15). Crash is never stored: the
+  // probe is an injected input, so the reducer stays pure. A live or unknown run
+  // (`alive !== false`) leaves `running` untouched.
+  if (opts.alive === false && !relevant.some((e) => e.event === "campaign-done" || e.event === "queue-done")) {
+    for (const [id, status] of outcomes) {
+      if (status !== "running") continue;
+      outcomes.set(id, "parked");
+      parkReasons.set(id, "crash");
+      details.set(id, "Crashed — the run died with no verdict; redrive");
+    }
+  }
+
   return { waves, layout, pruned, grafted, quarantined, name, festiveOffset, outcomes, details, titles, mergedAt, closedWaves, currentWave, parkedWave, parkReasons, redBase };
 }
 
@@ -753,19 +774,18 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
  * axis, `{state, reason?}`. The transitions the event fold recorded resolve here —
  * a `quarantined` merge conflict overrides the issue's own green outcome to `parked`
  * with reason `conflict`; a `parked` outcome carries its folded `ParkReason` (defaulting
- * to `question`); and, on a `stalled` read (a dead run whose log has no terminal event),
- * a still-`running` issue folds to `parked{stalled}` — the transition that replaced
- * `reconcileArchivedStatus`'s running→interrupted. A `red-base` wave-park is the *wave's*
- * reason, never a member's (design §2.3): it does not appear here, so a member holds its
- * own reason (a merged member stays `completed`, a question stays `parked{question}` with
- * its reply box). Membership is the orthogonal axis (`issueMembership`) and never appears here.
+ * to `question`) — including a dead run's in-flight `running` issue, which the reducer
+ * has already reconciled to `parked{crash}` off its injected liveness probe (design §7,
+ * §15). A `red-base` wave-park is the *wave's* reason, never a member's (design §2.3): it
+ * does not appear here, so a member holds its own reason (a merged member stays
+ * `completed`, a question stays `parked{question}` with its reply box). Membership is the
+ * orthogonal axis (`issueMembership`) and never appears here.
  */
-export function issueLifecycle(r: ReducedCampaign, id: string, opts: { stalled?: boolean } = {}): IssueLifecycle {
+export function issueLifecycle(r: ReducedCampaign, id: string): IssueLifecycle {
   const base = r.outcomes.get(id) ?? "unstarted";
   if (base === "failure") return { state: "failure" };
   if (r.quarantined.has(id)) return { state: "parked", reason: "conflict" };
   if (base === "parked") return { state: "parked", reason: r.parkReasons.get(id) ?? "question" };
-  if (opts.stalled && base === "running") return { state: "parked", reason: "stalled" };
   return { state: base };
 }
 
@@ -918,9 +938,10 @@ export function campaignSettled(events: OrchestratorEvent[]): boolean {
 /** An archived run's terminal disposition for the archived-runs list: `complete`
  * when its latest campaign reached the terminal `campaign-done`/`queue-done` (a
  * full, clean finish), else `stalled` — the run stopped with no terminal event
- * (killed mid-wave, a crash), the reason `stalled` (ADR 0019) at the run level. A
- * stalled run still expands to the waves that did run; its in-flight issues fold to
- * `parked{stalled}` when read back (`buildStatus({ dead: true })`). */
+ * (killed mid-wave, a crash), the coarse run-level word for the archived list. A
+ * stalled run still expands to the waves that did run; its in-flight issues, dead with
+ * no verdict, fold to `parked{crash}` when read back (`buildStatus({ dead: true })`,
+ * design §7). */
 export type ArchivedRunState = "complete" | "stalled";
 
 /**
@@ -1035,13 +1056,18 @@ export function summarizeRun(events: OrchestratorEvent[]): string {
  * Each chip composes the two orthogonal axes — its `issueLifecycle` (the dot/word) and
  * `issueMembership` (the badge) — and each wave's status is the pure `waveState` fold of
  * its members, so a wave with a red member reads `failed` and a held wave reads `parked`
- * by construction (no render-time precedence). `dead` marks a run whose process is gone
- * (an archived read): with no terminal event in the log, a still-`running` issue folds to
- * `parked{stalled}`, the transition that replaced `reconcileArchivedStatus`.
+ * by construction (no render-time precedence). Liveness feeds crash detection (design §7):
+ * `dead` marks a run whose process is gone (an archived read) and `alive` carries the live
+ * host-slot probe (`projectHasLiveLease`); either way an `alive === false` run with no
+ * terminal event reconciles its still-`running` issues to `parked{crash}` inside the
+ * reducer. Omitting both leaves the live default — `running` stays `running`.
  */
-export function buildStatus(cfg: ResolvedConfig, opts: { dead?: boolean } = {}): CampaignStatus {
+export function buildStatus(cfg: ResolvedConfig, opts: { dead?: boolean; alive?: boolean } = {}): CampaignStatus {
   const events = readEventLog(cfg);
-  const reduced = reduceCampaign(events);
+  // An archived read is dead by definition; a live read passes the slot-lease probe. The
+  // reducer folds an in-flight `running` issue of a dead run to `parked{crash}` (§7, §15).
+  const alive = opts.dead ? false : opts.alive;
+  const reduced = reduceCampaign(events, { alive });
   const { waves, layout, name, festiveOffset, outcomes, details, titles, closedWaves } = reduced;
 
   const activeIssueNumbers = new Set(waves.flat());
@@ -1057,17 +1083,13 @@ export function buildStatus(cfg: ResolvedConfig, opts: { dead?: boolean } = {}):
     details.set(taskId, `Parked: ${parked.reason}`);
   }
 
-  // A dead run whose log never reached a terminal event stalls its in-flight work: the
-  // `stalled` transition folds those `running` issues to `parked{stalled}` (was #152's
-  // running→interrupted). A live run (or a cleanly terminal one) leaves `running` alone.
-  const stalled = Boolean(opts.dead) && !events.some((e) => e.event === "campaign-done" || e.event === "queue-done");
-
   // Display waves render off `layout` (the pre-prune membership) so a pruned issue still
   // shows as a chip in the wave it left (ADR 0007). Each chip carries both axes; the wave's
-  // own status is the pure fold of its members (`waveState`), pruned members excluded.
+  // own status is the pure fold of its members (`waveState`), pruned members excluded. A
+  // crashed run's in-flight issues already read `parked{crash}` off the reducer above.
   const displayWaves = layout.map((wave, index) => {
     const issues = wave.map((issueNumber): StatusIssue => {
-      const life = issueLifecycle(reduced, issueNumber, { stalled });
+      const life = issueLifecycle(reduced, issueNumber);
       return {
         issueNumber,
         status: life.state,
@@ -1239,16 +1261,20 @@ export const statusConfigFromPointer = (pointer: ProjectPointer): ResolvedConfig
  * (moved or deleted since it registered) is skipped with a log line, never
  * throwing — one stale registration must not take the whole dashboard down (ADR
  * 0002). Uses the pure `buildStatus`, so issue names are not resolved here (that
- * needs the project's own `fetchTask`); the aggregated view is names-free.
+ * needs the project's own `fetchTask`); the aggregated view is names-free. `configDir`
+ * (the gateway config dir) enables live crash detection (design §7): each project's
+ * host-slot lease is probed for liveness so a run that died with no verdict folds to
+ * `parked{crash}`. Omitted (a pure caller with no lease to reach), the live default holds.
  */
-export function buildAllStatus(pointers: ProjectPointer[], logger: Logger = hostLogger()): CampaignStatus[] {
+export function buildAllStatus(pointers: ProjectPointer[], logger: Logger = hostLogger(), configDir?: string): CampaignStatus[] {
   const statuses: CampaignStatus[] = [];
   for (const pointer of pointers) {
     if (!existsSync(pointer.baseLocation)) {
       logger.log("status-project-skipped", { project: pointer.project, baseLocation: pointer.baseLocation });
       continue;
     }
-    statuses.push(buildStatus(statusConfigFromPointer(pointer)));
+    const alive = configDir !== undefined ? projectHasLiveLease(configDir, pointer.project) : undefined;
+    statuses.push(buildStatus(statusConfigFromPointer(pointer), { alive }));
   }
   return statuses;
 }
@@ -1563,9 +1589,12 @@ const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, event
  * skipped with a log line, never throwing — one stale registration must not take
  * the landing down (ADR 0002), the same tolerance `buildAllStatus` has.
  * merged-today counts each project's issues whose reconstructed merge stamp
- * (`reduceCampaign`'s `mergedAt`) falls on `now`'s local day.
+ * (`reduceCampaign`'s `mergedAt`) falls on `now`'s local day. `configDir` (the gateway
+ * config dir) enables live crash detection (design §7): a project whose run died with no
+ * verdict folds to `parked{crash}`, so its card never reads idle or running. Omitted, the
+ * live default holds — the same optional probe `buildAllStatus` takes.
  */
-export function buildLanding(pointers: ProjectPointer[], now: Date = new Date(), logger: Logger = hostLogger(), festive = false): LandingView {
+export function buildLanding(pointers: ProjectPointer[], now: Date = new Date(), logger: Logger = hostLogger(), festive = false, configDir?: string): LandingView {
   const projects: ProjectCard[] = [];
   const parked: ParkedQuestion[] = [];
   let mergedToday = 0;
@@ -1576,7 +1605,8 @@ export function buildLanding(pointers: ProjectPointer[], now: Date = new Date(),
     }
     const cfg = statusConfigFromPointer(pointer);
     const events = readEventLog(cfg);
-    const status = buildStatus(cfg);
+    const alive = configDir !== undefined ? projectHasLiveLease(configDir, pointer.project) : undefined;
+    const status = buildStatus(cfg, { alive });
     const parkedRecords = listParked(cfg);
     // merged-today counts every issue merged today across all of the project's runs
     // — the live run plus every archived run, deduped per issue — so a project that

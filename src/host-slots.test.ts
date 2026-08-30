@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { cpus, tmpdir } from "node:os";
 import { join } from "node:path";
-import { acquireSlot, deregisterProject, fairShare, machineDefaultCeiling, readLeases, registerProject, releaseSlot, reserveFestiveBlock, resolveHostCeiling } from "./host-slots.ts";
+import { acquireSlot, deregisterProject, fairShare, machineDefaultCeiling, projectHasLiveLease, readLeases, registerProject, releaseSlot, reserveFestiveBlock, resolveHostCeiling } from "./host-slots.ts";
 
 const freshDir = () => mkdtempSync(join(tmpdir(), "vetinari-slots-"));
 const alive = () => true;
@@ -126,6 +126,27 @@ test("over-subscribed, only the heaviest projects seat a slot; the rest are deni
   assert.equal(acquireSlot(dir, 2, "c", 1, c), false);
   const held = Object.fromEntries(readLeases(dir).map((l) => [l.project, l.held]));
   assert.deepEqual(held, { a: 1, b: 1, c: 0 });
+});
+
+test("projectHasLiveLease reads the slot lease as a run's liveness — the crash probe (design §8)", () => {
+  const dir = freshDir();
+  const dead = new Set<number>();
+  const isAlive = (pid: number) => !dead.has(pid);
+
+  // No lease at all — the project holds no slot, so it is not live.
+  assert.equal(projectHasLiveLease(dir, "alpha", { isAlive }), false);
+
+  // A registered run holds a slot the moment it registers (even at held zero, waiting
+  // first-come), so it reads live while its process is up.
+  registerProject(dir, "alpha", 1, { pid: 500, isAlive });
+  assert.equal(projectHasLiveLease(dir, "alpha", { isAlive }), true);
+  // The probe is per-project — a sibling project's live lease says nothing about this one.
+  assert.equal(projectHasLiveLease(dir, "beta", { isAlive }), false);
+
+  // The run dies: its lease lingers on disk (nothing deregistered it) but its pid is gone,
+  // so the slot is no longer held — the signal a live read reconciles to a crash.
+  dead.add(500);
+  assert.equal(projectHasLiveLease(dir, "alpha", { isAlive }), false);
 });
 
 test("machineDefaultCeiling derives a bounded ceiling from the CPU count, never below one", () => {

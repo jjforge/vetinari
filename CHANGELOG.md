@@ -53,6 +53,7 @@ Within a milestone each bold section label appears at most once.
 - [user] An idle project card now shows its last run's outcome and finish time (its campaign name already showed), and tapping the card opens the project page with that run expanded at the top of the archived list (#308).
 - [ops] A `COMPLETE` with no commit ahead of the base now parks `stalled/no-commit` before the gates run, without spending a gate cycle or a turn; the turn-budget park's `detail` now carries the specifics as `budget:<maxTurns>` (#313).
 - [ops] The `/fileset` skill now infers markers by pure LLM read — it invokes no `vetinari` command at all, deciding whether a ticket already has a usable marker by reading it against the "Declaring a ticket's file-set" convention in `docs/issue-conventions.md` rather than shelling out to grade its own input (#323).
+- [user] The aggregated prune-preview and graft-rejection pages now draw from the shared colour palette and carry the amber "needs you" left edge (never the prune coral); the live-tail and event-feed stream dot no longer pulses, leaving only the running dot and the live indicator in motion (#317).
 
 **Bug fixes:**
 - [user] A campaign wave with a failed issue now holds the wave and stops the campaign as failed: the wave still drains its siblings and merges their greens, then a `campaign-failed` event and a failure notice are logged and the run exits non-zero — no later wave starts on top of the missing work (#285).
@@ -73,6 +74,14 @@ Within a milestone each bold section label appears at most once.
 - [user] A failed member now outranks a red merged base at resolve time, so a wave with both stops as failed rather than parked (#314).
 - [api] The event schema is tightened: `campaign-parked` carries a `reason` (`red-base`/`question`/`stalled`/`conflict`) written by the code that stopped the wave, `wave-done` carries `{ index, merged }` only, and `redrive` carries `fromWave`, `landed`, and `skipped` (#314).
 - [user] Label expansion (`campaign <label>`, `campaign --dry-run`) now drops open issues carrying `pending-verify` — merged work awaiting close is no longer scheduled onto a fresh branch only to park `stalled/no-commit`; each exclusion is logged like the epic exclusion and shows in the dry-run provenance. An explicitly named id is still kept (#324).
+- [user] `answer` now *delivers* the answer into the parked record and lets whoever owns the re-admit run it, instead of running the loop itself and then redriving: a live campaign re-admits the member with the answer as its prompt (no second process runs it beside the campaign, no respawn of an already-green issue), and with no live campaign the redrive re-runs the answered park carrying the answer (#316).
+- [user] `answer` on an issue that is not parked now reports one line and exits 0 (idempotent) instead of throwing `ENOENT` (#316).
+- [user] `redrive` (and the redrive an `answer` triggers) now refuses with one line while a campaign process for the project is live — the live campaign owns the re-admit (#316).
+- [user] the `answer`→redrive path now archives the run once the last wave finishes and the queue is idle (#316).
+- [user] A failed issue's detail sheet now offers Prune and Redrive — the move rule keyed on `failed` while the API ships the status word `failure`, so a failed issue's sheet had no moves (#317).
+- [user] The issue sheet and a parked card now spell the park reason as a word (e.g. `red base`, not `red-base`) beside the state, the same word the status line uses (#317).
+- [user] An idle project card whose completed campaign is still in the live log now shows that run's outcome and finish time and links to it, matching the archived-log path (#317).
+- [user] A `pending-verify` blocker outside a campaign's selection no longer strands its dependents as unreachable — merged-but-unclosed work counts as satisfied (like a closed blocker), so a follow-up campaign no longer waits on the previous one's issues being closed by hand. The drop is named in the plan's provenance rather than the dependent vanishing silently (#326).
 
 **Documentation:**
 - [internal] `CONTEXT.md` is now a domain-only glossary in the settled vocabulary: an entry for every object, state, park reason and move in the user guide's model; retired words (`carve`, `queue`, `quarantined`, `wave-parked`, `interrupted`, `campaign-plan`, `dispatch`/`attend`, `hostWeight`, `QUEUE_SLOTS`) demoted to _Avoid_ lines; dashboard widgets, colour rules and testing terms removed (#300).

@@ -462,10 +462,6 @@ ${ISSUE_DETAIL_SHEET_STYLES}
      (a control's refusal, distinct from the failure state and the amber refusal, §1). */
   .graft-error { color: var(--color-red); font-size: .82rem; }
   .graft-error[hidden] { display: none; }
-  /* Structural refusal — a finished campaign has nothing to layer into. Amber guidance
-     (the caution channel, §1), distinct from the teal success and the red rejection. */
-  .graft-refusal { color: var(--color-yellow); font-size: .82rem; }
-  .graft-refusal code { color: var(--color-text-light); }
   /* A graft confirms on the wave (#202): the wave holding the freshly-grafted issues
      takes the teal product accent on its edge, so the new card reads at a glance when it
      arrives on the live refresh. Static, not a pulse — §5 reserves motion for the work

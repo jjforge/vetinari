@@ -143,11 +143,11 @@ test("renderStatusPage puts a quiet graft input on the summary line, greyed at r
   assert.doesNotMatch(withoutGraft, /action="\/graft"/);
   assert.doesNotMatch(withoutGraft, /class="campaign-summary"/);
 });
-test("renderStatusPage disables the graft input with amber guidance when the campaign is finished (#202)", () => {
-  // Every wave closed → the campaign has reached its final wave; nothing is live-or-
-  // resumable to layer into (the graft engine refuses, ADR 0014). Rather than fail on
-  // submit, 1a renders the input structurally disabled with amber guidance and a
-  // start-campaign affordance.
+test("renderStatusPage offers no graft affordance — and no 'final wave' notice — on a settled campaign (#307)", () => {
+  // Graft is offered only while the campaign is unsettled (design §11). A settled campaign
+  // (every wave closed) has nothing live-or-resumable to layer into, so the affordance
+  // renders nothing at all — no graft form, and none of the old "final wave" refusal notice
+  // (#202's structural-disable message, superseded). The campaign meta still renders.
   const finished = {
     project: "beta",
     waves: [
@@ -158,15 +158,12 @@ test("renderStatusPage disables the graft input with amber guidance when the cam
   };
   const html = renderStatusPage(finished, { prune: true, graft: true });
   const summary = html.slice(html.indexOf('class="campaign-summary"'), html.indexOf('class="waves-grid"'));
-  // The refusal replaces the active form — no live POST target, a disabled input/button.
-  assert.match(summary, /graft-refused/);
-  assert.doesNotMatch(summary, /<form method="post" action="\/graft"/);
-  assert.match(summary, /class="graft-ids"[^>]*disabled/);
-  // Amber guidance naming the structural reason, plus a start-campaign affordance.
-  assert.match(summary, /final wave/i);
-  assert.match(summary, /new campaign starts/i);
-  assert.match(summary, /class="graft-refusal"/);
-  assert.match(summary, /vetinari campaign/);
+  // The meta still reads, but the graft input, the refusal, and the "final wave" words are gone.
+  assert.match(summary, /class="campaign-meta"/);
+  assert.doesNotMatch(html, /graft-refused/);
+  assert.doesNotMatch(html, /class="graft-refusal"/);
+  assert.doesNotMatch(html, /final wave/i);
+  assert.doesNotMatch(html, /<form method="post" action="\/graft"/);
 });
 test("renderStatusPage marks a freshly-grafted wave with a static teal edge, not motion (#202, §5)", () => {
   const grafted = {

@@ -54,21 +54,20 @@ export const renderConflictNote = () =>
  * (whitespace/comma-split, matching the CLI). A whole-batch rejection and any per-id
  * validation surface inline in `[data-graft-error]`, never navigating away.
  *
- * When the campaign is finished (no wave left open, so the graft engine has nothing
- * live-or-resumable to layer into — ADR 0014), the affordance renders *structurally
- * disabled* instead: a greyed input and amber guidance with a start-campaign hint,
- * rather than an input that would only fail on submit. Amber marks a structural refusal,
- * distinct from the teal success and the red bad-id/rejection (§1).
+ * Graft is offered only while the campaign is unsettled (design §11, #307). A settled
+ * campaign (every wave closed) has nothing live-or-resumable to layer into (the graft
+ * engine refuses, ADR 0014), so the affordance renders *nothing at all* — no input and no
+ * notice. The earlier structural-disable "final wave" message (#202) is superseded: a
+ * settled campaign simply carries no graft chrome.
  */
 export const renderGraftInline = (status: CampaignStatus) =>
   isGraftable(status)
     ? `<form method="post" action="/graft" class="graft-inline" data-graft><input type="text" name="ids" class="graft-ids" placeholder="graft issue ids" autocomplete="off" aria-label="Graft issue ids" data-graft-ids /><input type="hidden" name="project" value="${escapeHtml(status.project)}" /><button type="submit" class="graft-btn" data-graft-submit disabled>graft</button><span class="graft-error" data-graft-error hidden></span></form>`
-    : `<div class="graft-inline graft-refused" data-graft-refused><input type="text" class="graft-ids" placeholder="graft issue ids" aria-label="Graft issue ids" disabled /><button type="button" class="graft-btn" disabled>graft</button><span class="graft-refusal">Campaign is on its final wave — nothing left to layer into. Grafting is available again when a new campaign starts (<code>vetinari campaign</code>).</span></div>`;
+    : "";
 
-/** Whether the campaign can still accept a graft: it is live-or-resumable while any wave
- * is not yet closed. A wholly-closed campaign has reached its final wave — nothing left to
- * layer into, which the graft engine refuses (ADR 0014) — so the input renders structurally
- * disabled (amber) rather than failing on submit. */
+/** Whether the campaign can still accept a graft: it is live-or-resumable (unsettled) while
+ * any wave is not yet closed. A wholly-closed campaign is settled — nothing left to layer
+ * into, which the graft engine refuses (ADR 0014) — so the affordance renders nothing (#307). */
 const isGraftable = (status: CampaignStatus) => status.waves.some((wave) => wave.status !== "closed");
 
 /**

@@ -1,6 +1,6 @@
 # One dashboard + inline carve in the tap-detail panel
 
-Source: [ADR 0006](../adr/0006-one-dashboard-registry-backed-aggregated-server.md), [ADR 0005](../adr/0005-prune-is-an-event-that-trims-the-running-campaign.md), [ADR 0002](../adr/0002-gateway-is-a-dumb-router-projects-own-comms.md) · Glossary: [CONTEXT.md](../../CONTEXT.md)
+Source: [ADR 0006](../../adr/0006-one-dashboard-registry-backed-aggregated-server.md), [ADR 0005](../../adr/0005-prune-is-an-event-that-trims-the-running-campaign.md), [ADR 0002](../../adr/0002-gateway-is-a-dumb-router-projects-own-comms.md) · Glossary: [CONTEXT.md](../../../CONTEXT.md)
 
 ## Problem Statement
 

@@ -1036,7 +1036,7 @@ test("the card progress-bar selector is scoped so no bare `.progress {` rule can
 });
 
 test("no status/category word is ever a bare top-level CSS class, so a component base can't inherit a modifier's layout (#91)", () => {
-  // The convention (docs/dashboard-color-rules.md §8): a status word (ADR 0007's
+  // The convention (ADR 0007's status vocabulary): a status word (ADR 0007's
   // running/parked/failure/completed/unstarted/pruned, plus the landing's queued/idle
   // aliases and a wave's closed) and a comms category (success/attention/progress) only
   // ever appear *scoped* — `.dot.running`, `.card.parked`, `.lv-dot.failure` — never as a

@@ -1,6 +1,6 @@
 # E3: Gateway — registration, single Telegram consumer, reply routing
 
-Epic: [#14](https://github.com/jjforge/vetinari/issues/14) · Source: [ADR 0002](../adr/0002-gateway-is-a-dumb-router-projects-own-comms.md), [ADR 0001](../adr/0001-vetinari-committed-vs-local-split.md), [ADR 0003](../adr/0003-shared-machine-install.md) · Glossary: [CONTEXT.md](../../CONTEXT.md)
+Epic: [#14](https://github.com/jjforge/vetinari/issues/14) · Source: [ADR 0002](../../adr/0002-gateway-is-a-dumb-router-projects-own-comms.md), [ADR 0001](../../adr/0001-vetinari-committed-vs-local-split.md), [ADR 0003](../../adr/0003-shared-machine-install.md) · Glossary: [CONTEXT.md](../../../CONTEXT.md)
 
 ## Problem Statement
 

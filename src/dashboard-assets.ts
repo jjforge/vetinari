@@ -13,7 +13,7 @@ import { humanizeHostLine, LOG_DOT_STATE_COLOR, splitOverflow } from "./log-view
  * and host log) via `.toString()` — the back-reference this module makes.
  */
 /**
- * The dashboard's single colour source (`docs/dashboard-color-rules.md`, #83): one
+ * The dashboard's single colour source (`docs/design.md` appendix A, #83): one
  * `:root` palette emitted verbatim into every surface's `<style>` — the all-repos
  * landing, the repo/campaign page, and the issue-detail sheet they share. No
  * surface defines a colour locally, so a token can never be "defined in one root,

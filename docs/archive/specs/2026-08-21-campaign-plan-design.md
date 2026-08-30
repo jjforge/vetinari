@@ -1,6 +1,6 @@
 # campaign-plan: waves from the selected set, not the graph
 
-Epic: [#10](https://github.com/jjforge/vetinari/issues/10) · Source: [ADR 0004](../adr/0004-campaign-plan-is-a-generic-feature-with-a-config-fileset-resolver.md) · Glossary: [CONTEXT.md](../../CONTEXT.md) · Supersedes: jjforge `docs/specs/2026-08-20-campaign-builder-design.md`
+Epic: [#10](https://github.com/jjforge/vetinari/issues/10) · Source: [ADR 0004](../../adr/0004-campaign-plan-is-a-generic-feature-with-a-config-fileset-resolver.md) · Glossary: [CONTEXT.md](../../../CONTEXT.md) · Supersedes: jjforge `docs/specs/2026-08-20-campaign-builder-design.md`
 
 ## Problem Statement
 

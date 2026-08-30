@@ -1,6 +1,6 @@
 # E4: Comms taxonomy + notify map
 
-Epic: [#15](https://github.com/jjforge/vetinari/issues/15) · Source: [ADR 0002](../adr/0002-gateway-is-a-dumb-router-projects-own-comms.md) · Glossary: [CONTEXT.md](../../CONTEXT.md)
+Epic: [#15](https://github.com/jjforge/vetinari/issues/15) · Source: [ADR 0002](../../adr/0002-gateway-is-a-dumb-router-projects-own-comms.md) · Glossary: [CONTEXT.md](../../../CONTEXT.md)
 
 ## Problem Statement
 

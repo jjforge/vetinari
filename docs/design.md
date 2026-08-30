@@ -1,6 +1,6 @@
 # Vetinari — design
 
-This is the current design: the one document the implementation is meant to match. It is written from the operator's model in [`user-guide.md`](user-guide.md) — each section says what the user sees and then what implements it. ADRs under [`adr/`](adr/) record _why_ a decision was taken and stay as history; when an ADR and this document disagree, this document wins and the ADR gets a one-line superseded note. Dated specs under [`specs/`](specs/) are build-time artifacts and are not current truth.
+This is the current design: the one document the implementation is meant to match. It is written from the operator's model in [`user-guide.md`](user-guide.md) — each section says what the user sees and then what implements it. ADRs under [`adr/`](adr/) record _why_ a decision was taken and stay as history; when an ADR and this document disagree, this document wins and the ADR gets a one-line superseded note. Dated specs are build-time artifacts and are not current truth; they are kept for provenance under [`archive/`](archive/) and are not linked from current docs.
 
 The document has three parts: the system as it should be (§1–§11), the surface inventory that says what is core and what is not (§12), and the consolidation this design asks for — vocabulary, schema, documentation — with the places the implementation diverges today (§13–§15).
 
@@ -346,17 +346,23 @@ Described by behaviour; the tracker holds the numbers (`gh issue list --label or
 
 ## Appendix A — dashboard colour rules
 
-Six states, one action, one accent; colour is always derived from state, never authored per element.
+Six states, one action, one accent; colour is always derived from state, never authored per element (`stateColor`/`projectRunState` in `src/dashboard-render.ts`, the roll-up in `src/dashboard-model.ts`, the one palette in `src/dashboard-assets.ts`).
 
-| State          | Colour | Note                                               |
-| -------------- | ------ | -------------------------------------------------- |
-| running        | blue   | dot pulses while work is in flight                 |
-| parked         | amber  | the only colour a "needs you" left edge ever takes |
-| failed         | red    | distinct from the prune action's red               |
-| unstarted      | grey   | also `idle`                                        |
-| completed      | green  |                                                    |
-| pruned (badge) | purple | membership, not lifecycle                          |
-| prune action   | coral  | a control, never a state                           |
-| accent         | teal   | buttons, links, focus — never a state              |
+**The palette.** Every colour that carries meaning is one of these.
 
-A card carries state on exactly one edge: top edge for "this has a state", left edge (always amber) for "this needs you", full outline for a chip or a confirmation. Precedence on roll-up is the fold in §2.4. Status and category words are only ever compound selectors (`.dot.parked`), never bare top-level rules — a test guards it.
+| State          | Hex       | Note                                               |
+| -------------- | --------- | -------------------------------------------------- |
+| running        | `#6cb6ff` | blue; dot pulses while work is in flight           |
+| parked         | `#c8a24e` | amber; the only colour a "needs you" left edge takes |
+| failed         | `#f85149` | red (Primer `danger.fg`); distinct from the prune action's red |
+| unstarted      | `#5f6b78` | grey; also `idle`                                  |
+| completed      | `#3fb984` | green                                              |
+| pruned (badge) | `#a371f7` | purple; membership, not lifecycle                  |
+| prune action   | `#f79287` | coral; a control, never a state                    |
+| accent         | `#3fb9b0` | teal; buttons, links, focus — never a state        |
+
+Neutral surfaces carry no meaning: card fill `#10151b`, panel/chip fill `#0b0e12`.
+
+**The edge rule.** A card carries state on exactly one edge — the 2px top edge for "this has a state", the 3px left edge (always amber `#c8a24e`) for "this needs you", the full 1px outline for a chip or a confirmation. Never two coloured edges, never a coloured bottom or right border.
+
+**The precedence.** When a card could claim two states its colour is the §2.4 roll-up fold — `failed > parked > running > completed > unstarted` — the most human-blocking state wins.

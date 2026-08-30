@@ -9,9 +9,13 @@ import type { StructuredGraftClosure } from "./graft.ts";
  * of `shellPrunePreview` — the same dumb-router routing the aggregated dashboard
  * uses. `graft` is variadic, so this carries a *set* of ids, not a single target.
  */
-export function shellGraftPreview(projectRoot: string, taskIds: string[]): Promise<string | null> {
+export function shellGraftPreview(projectRoot: string, taskIds: string[], opts: { json?: boolean } = {}): Promise<string | null> {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [...process.execArgv, process.argv[1], "graft", ...taskIds, "--dry-run"], {
+    // The human-prose preview shells without `--json`; the structured-closure path
+    // (`shellGraftClosure`) passes `--json` so the child also emits the machine
+    // `graft-closure {json}` line to parse. No JSON reaches stdout otherwise (§11).
+    const args = ["graft", ...taskIds, "--dry-run", ...(opts.json ? ["--json"] : [])];
+    const child = spawn(process.execPath, [...process.execArgv, process.argv[1], ...args], {
       cwd: projectRoot,
       stdio: ["ignore", "pipe", "inherit"],
     });
@@ -59,6 +63,6 @@ export function parseGraftClosure(previewText: string): GraftClosure | null {
  * panel to report.
  */
 export async function shellGraftClosure(projectRoot: string, taskIds: string[]): Promise<GraftClosure | null> {
-  const previewText = await shellGraftPreview(projectRoot, taskIds);
+  const previewText = await shellGraftPreview(projectRoot, taskIds, { json: true });
   return previewText == null ? null : parseGraftClosure(previewText);
 }

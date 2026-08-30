@@ -145,9 +145,12 @@ const localCampaignDeps = (
     spawns.push(taskId);
     try {
       const outcome = await runLoop(cfg, taskId, undefined, loopDepsFor(scriptFor(taskId)));
-      return outcome === "green" ? 0 : 2;
+      // Mirror the real child `run`'s exit code (cli-dispatch's `exitCodeFor`): 0 green, 2
+      // parked, 1 failed — the loop now returns `failed` for a thrown turn rather than
+      // rethrowing (design §3 step 9), so the child exits 1 without spawnRun's catch.
+      return outcome === "green" ? 0 : outcome === "failed" ? 1 : 2;
     } catch {
-      return 1; // an unrecoverable turn → the child `run` would exit non-zero → a failed member
+      return 1; // a still-thrown turn → the child `run` would exit non-zero → a failed member
     }
   };
   const mergedBaseGate = async (c: ResolvedConfig) => {
@@ -219,7 +222,7 @@ test("scenario 5: a merge conflict quarantines that member (its work preserved) 
 
   const ok = await inRepo(dir, () => campaign(cfg, [["101", "102"]], host2, "conflict", {}, localCampaignDeps(cfg, dir, conflictScript)));
   // With nothing stranded, the wave closes and the campaign finishes.
-  assert.equal(ok, true, "a conflict that strands nothing runs the wave to done");
+  assert.equal(ok, "done", "a conflict that strands nothing runs the wave to done");
 
   const events = readEventLog(cfg);
 
@@ -253,7 +256,7 @@ test("scenario 4: a redrive integrates a green-but-unmerged member — landed wi
   await inRepo(dir, async () => {
     // First run: 101 greens and merges; 102 parks → the wave parks and exits.
     const parkedOk = await campaign(cfg, [["101", "102"]], host(dir), "redrive", {}, localCampaignDeps(cfg, dir, scriptFor));
-    assert.equal(parkedOk, false);
+    assert.equal(parkedOk, "parked");
 
     // The answer produces a GREEN 102 that is not yet integrated: a standalone run (what
     // `answer` does) re-enters agent/102, greens, logs `green`, and clears the record — but
@@ -267,7 +270,7 @@ test("scenario 4: a redrive integrates a green-but-unmerged member — landed wi
     // being re-run. 101 is already banked and is likewise not re-run.
     const spawns: string[] = [];
     const doneOk = await campaign(cfg, [], host(dir), undefined, { resume: true }, localCampaignDeps(cfg, dir, scriptFor, spawns));
-    assert.equal(doneOk, true, "the redrive landed the banked greens and finished");
+    assert.equal(doneOk, "done", "the redrive landed the banked greens and finished");
     assert.deepEqual(spawns, [], "no member of the reconciled wave was re-run");
 
     // 102's green work is now merged onto the base, and the campaign completed.
@@ -285,7 +288,7 @@ test("scenario 1: two all-green waves merge in order, the base is gated between 
   const cfg = repoCfg(dir, tracker);
 
   const ok = await inRepo(dir, () => campaign(cfg, [["101"], ["102"]], host(dir), "two-waves", {}, localCampaignDeps(cfg, dir, implScript)));
-  assert.equal(ok, true, "both waves ran green and the campaign completed");
+  assert.equal(ok, "done", "both waves ran green and the campaign completed");
 
   const events = readEventLog(cfg);
 
@@ -318,7 +321,7 @@ test("scenario 3: a failed member drains its wave — the sibling merges — the
   const scriptFor = (id: string) => (id === "102" ? failingScript() : implScript(id));
 
   const ok = await inRepo(dir, () => campaign(cfg, [["101", "102"], ["201"]], host(dir), "fail", {}, localCampaignDeps(cfg, dir, scriptFor)));
-  assert.equal(ok, false, "a failed member stops the campaign non-zero");
+  assert.equal(ok, "failed", "a failed member stops the campaign non-zero");
 
   const events = readEventLog(cfg);
 
@@ -358,7 +361,7 @@ test("scenario 2: a question park drains its wave, campaign parks and exits; an 
   await inRepo(dir, async () => {
     // First run: 101 greens and merges under Gate 2; 102 parks → the wave parks and exits.
     const parkedOk = await campaign(cfg, [["101", "102"]], host(dir), "rejoin", {}, localCampaignDeps(cfg, dir, scriptFor));
-    assert.equal(parkedOk, false, "the parked wave stops the campaign");
+    assert.equal(parkedOk, "parked", "the parked wave stops the campaign");
 
     // The sibling merged (drain, don't abort): 101's impl is on the base, its branch GC'd.
     assert.equal(gitOut(dir, ["show", "base:impl-101.txt"]), "impl for 101");
@@ -378,7 +381,7 @@ test("scenario 2: a question park drains its wave, campaign parks and exits; an 
     // reads the answer, greens, and merges; 101 (already banked) is not re-run.
     const spawns: string[] = [];
     const doneOk = await campaign(cfg, [], host(dir), undefined, { resume: true }, localCampaignDeps(cfg, dir, scriptFor, spawns));
-    assert.equal(doneOk, true, "the answered member rejoined and the campaign finished");
+    assert.equal(doneOk, "done", "the answered member rejoined and the campaign finished");
     assert.deepEqual(spawns, ["102"], "only the answered member re-ran; the banked sibling did not");
 
     // 102's work is now on the base, and the campaign completed.

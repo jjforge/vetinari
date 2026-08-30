@@ -36,7 +36,7 @@ function makeDeps(overrides: Partial<DispatchDeps> = {}) {
     build: spy(Promise.resolve(true)) as unknown as DispatchDeps["build"],
     baseline: spy(Promise.resolve(true)) as unknown as DispatchDeps["baseline"],
     runLoop: spy(Promise.resolve("green")) as unknown as DispatchDeps["runLoop"],
-    campaign: spy(Promise.resolve(true)) as unknown as DispatchDeps["campaign"],
+    campaign: spy(Promise.resolve("done")) as unknown as DispatchDeps["campaign"],
     expandSelection: spy(Promise.resolve([])) as unknown as DispatchDeps["expandSelection"],
     runCampaignPlan: spy(Promise.resolve({ waves: [], waveArgs: "", report: "", suggestedName: "" })) as unknown as DispatchDeps["runCampaignPlan"],
     runPrune: spy(Promise.resolve({ mode: "prune", target: "436", dropped: [], kept: [], remaining: [], parkedDropped: [] })) as unknown as DispatchDeps["runPrune"],
@@ -103,6 +103,16 @@ test("parseArgs splits `graft` ids on whitespace/commas and reads --dry-run", ()
     kind: "graft",
     ids: ["436", "611", "640"],
     dryRun: true,
+    json: false,
+  });
+});
+
+test("parseArgs reads graft --json and keeps it out of the ids", () => {
+  assert.deepEqual(parseArgs(["graft", "436", "--dry-run", "--json"]), {
+    kind: "graft",
+    ids: ["436"],
+    dryRun: true,
+    json: true,
   });
 });
 
@@ -120,6 +130,17 @@ test("parseArgs maps a bare `prune <issue>` to a prune of that target", () => {
     target: "436",
     dryRun: false,
     purge: false,
+    json: false,
+  });
+});
+
+test("parseArgs reads prune --json and keeps it out of the target", () => {
+  assert.deepEqual(parseArgs(["prune", "436", "--dry-run", "--json"]), {
+    kind: "prune",
+    target: "436",
+    dryRun: true,
+    purge: false,
+    json: true,
   });
 });
 
@@ -129,6 +150,7 @@ test("parseArgs reads `prune` flags and ignores a retired batch tail — only th
     target: "436",
     dryRun: true,
     purge: true,
+    json: false,
   });
 });
 
@@ -277,6 +299,59 @@ test("dispatch run maps a parked outcome to the queue's parked exit code 2", asy
   await dispatch({ kind: "run", agent: {}, args: ["436"], json: false }, deps);
   assert.deepEqual(exitCodes, [2]);
 });
+
+test("dispatch run maps a failed outcome to exit 1 (run distinguishes failed)", async () => {
+  const { deps, exitCodes } = makeDeps({
+    runLoop: spy(Promise.resolve("failed")) as any,
+  });
+  await dispatch({ kind: "run", agent: {}, args: ["436"], json: false }, deps);
+  assert.deepEqual(exitCodes, [1]);
+});
+
+// The campaign/redrive exit codes follow the outcome the loop returns (design §5 step 6,
+// §15): 0 only for `done`, 2 for `parked`, 1 for `failed` — no exit-code logic in modes.ts.
+for (const [outcome, code] of [["done", 0], ["parked", 2], ["failed", 1]] as const) {
+  test(`dispatch campaign exits ${code} on a ${outcome} campaign`, async () => {
+    const { deps, exitCodes } = makeDeps({
+      expandSelection: spy(Promise.resolve(["436"])) as any,
+      runCampaignPlan: spy(Promise.resolve({ waves: [["436"]], waveArgs: '"436"', report: "the plan", suggestedName: "" })) as any,
+      campaign: spy(Promise.resolve(outcome)) as any,
+    });
+    await dispatch(
+      { kind: "campaign", agent: {}, positional: ["436"], name: undefined, autoPrune: false, resume: false, dryRun: false, override: false, onUnderspecified: undefined, json: false },
+      deps,
+    );
+    assert.deepEqual(exitCodes, [code]);
+  });
+
+  test(`dispatch campaign --resume exits ${code} on a ${outcome} campaign`, async () => {
+    const { deps, exitCodes } = makeDeps({
+      campaign: spy(Promise.resolve(outcome)) as any,
+    });
+    await dispatch(
+      { kind: "campaign", agent: {}, positional: [], name: undefined, autoPrune: false, resume: true, dryRun: false, override: false, onUnderspecified: undefined, json: false },
+      deps,
+    );
+    assert.deepEqual(exitCodes, [code]);
+  });
+
+  test(`dispatch redrive exits ${code} on a ${outcome} campaign`, async () => {
+    const { deps, exitCodes } = makeDeps({
+      campaign: spy(Promise.resolve(outcome)) as any,
+    });
+    await dispatch({ kind: "redrive", agent: {}, autoPrune: false, override: false, json: false }, deps);
+    assert.deepEqual(exitCodes, [code]);
+  });
+
+  test(`dispatch answer's implicit redrive exits ${code} on a ${outcome} campaign`, async () => {
+    const { deps, exitCodes } = makeDeps({
+      readEventLog: spy(pausedCampaignAfterGreen()) as any,
+      campaign: spy(Promise.resolve(outcome)) as any,
+    });
+    await dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps);
+    assert.deepEqual(exitCodes, [code]);
+  });
+}
 
 test("dispatch run with no task id throws the same message the old switch threw, after agent select", async () => {
   const { deps } = makeDeps();
@@ -432,14 +507,45 @@ test("dispatch run --json switches on the raw event stream for the single loop (
 
 test("dispatch prune routes to runPrune with the parsed target and flags", async () => {
   const { deps } = makeDeps();
-  await dispatch({ kind: "prune", target: "436", dryRun: true, purge: false }, deps);
+  await dispatch({ kind: "prune", target: "436", dryRun: true, purge: false, json: false }, deps);
   assert.deepEqual((deps.runPrune as any).calls, [[deps.cfg, "436", { dryRun: true, purge: false, host: deps.host }]]);
 });
 
 test("dispatch graft routes to runGraft with the parsed ids and flag", async () => {
   const { deps } = makeDeps();
-  await dispatch({ kind: "graft", ids: ["436", "611"], dryRun: false }, deps);
+  await dispatch({ kind: "graft", ids: ["436", "611"], dryRun: false, json: false }, deps);
   assert.deepEqual((deps.runGraft as any).calls, [[deps.cfg, ["436", "611"], { dryRun: false }]]);
+});
+
+// No JSON reaches stdout without `--json` (design §11): a `--dry-run` closure emits its
+// machine `prune-closure`/`graft-closure {json}` line only under `--json`; the dashboard
+// preview shells pass it. The human prose stays either way.
+test("dispatch prune --dry-run emits the machine closure line only under --json", async () => {
+  const withClosure = {
+    mode: "prune", target: "436", dropped: [], kept: [], remaining: [], parkedDropped: [],
+    closure: { target: "436", dropped: [], keptBanked: [], remaining: [] },
+  };
+  const noJson = makeDeps({ runPrune: spy(Promise.resolve(withClosure)) as any });
+  await dispatch({ kind: "prune", target: "436", dryRun: true, purge: false, json: false }, noJson.deps);
+  assert.ok(!noJson.logged.some((l) => l.startsWith("prune-closure")), "no closure JSON without --json");
+
+  const withJson = makeDeps({ runPrune: spy(Promise.resolve(withClosure)) as any });
+  await dispatch({ kind: "prune", target: "436", dryRun: true, purge: false, json: true }, withJson.deps);
+  assert.ok(withJson.logged.some((l) => l.startsWith("prune-closure ")), "closure JSON under --json");
+});
+
+test("dispatch graft --dry-run emits the machine closure line only under --json", async () => {
+  const withClosure = {
+    ids: ["436"], rejected: [], placement: [], remaining: [], applied: false,
+    closure: { ids: ["436"], placement: [], remaining: [], rejected: [] },
+  };
+  const noJson = makeDeps({ runGraft: spy(Promise.resolve(withClosure)) as any });
+  await dispatch({ kind: "graft", ids: ["436"], dryRun: true, json: false }, noJson.deps);
+  assert.ok(!noJson.logged.some((l) => l.startsWith("graft-closure")), "no closure JSON without --json");
+
+  const withJson = makeDeps({ runGraft: spy(Promise.resolve(withClosure)) as any });
+  await dispatch({ kind: "graft", ids: ["436"], dryRun: true, json: true }, withJson.deps);
+  assert.ok(withJson.logged.some((l) => l.startsWith("graft-closure ")), "closure JSON under --json");
 });
 
 test("dispatch answer resumes the parked session for a resumable agent and maps green to exit 0", async () => {

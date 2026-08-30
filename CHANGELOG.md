@@ -22,6 +22,11 @@ Within a milestone each bold section label appears at most once.
 
 **New features:**
 - [user] `campaign --resume --override` re-runs a failed member on a redrive; without it, a member that failed on the prior run holds its wave and the campaign stops as failed again (prune it or fix it forward instead) (#287).
+- [user] A campaign now re-admits a parked member the moment its question is answered mid-wave: the member re-runs and merges in the same wave instead of parking the wave (#289).
+- [ops] New `parkGraceSeconds` config field (default 0): at a wave boundary, a member parked as a question/stalled is held for up to this long for an answer before the wave parks; `conflict`/`red-base` parks never wait (#289).
+
+**Improvements:**
+- [api] The event log gains a `grace-wait` row (its seconds and the waited-on tasks) so the fold and the dashboard can narrate the boundary wait (#289).
 
 **Bug fixes:**
 - [user] A campaign wave with a failed issue now holds the wave and stops the campaign as failed: the wave still drains its siblings and merges their greens, then a `campaign-failed` event and a failure notice are logged and the run exits non-zero — no later wave starts on top of the missing work (#285).
@@ -29,6 +34,7 @@ Within a milestone each bold section label appears at most once.
 - [user] `campaign --resume` now redrives from the wave that stopped the campaign instead of stepping over it: it re-enters the first wave that did not close, lands a green-but-unmerged member (an answered park or a resolved conflict) by integrating it rather than re-running it, re-runs an answered park whose record is gone, and re-parks a wave whose park is still unresolved (#287).
 - [user] `answer <issue>` on a paused campaign's issue now continues the campaign by itself: once the answer goes green it triggers the redrive that integrates the green and runs the remaining waves — you no longer have to answer and then separately resume (#287).
 - [user] A question parked inside a red-base wave keeps its own reason, so the issue sheet still draws its reply box; a merged member of a red-base wave stays completed, with `red-base` carried as the wave's reason (#288).
+- [user] A crashed run — its process gone with no verdict — no longer reads as running forever on the dashboard: its in-flight issue reconciles to `parked{crash}`, so the wave, campaign and project card fold to `parked` and redrive is the move (#290).
 
 ### Collected changes — August 29, 2026
 

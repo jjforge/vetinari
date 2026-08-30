@@ -1241,6 +1241,39 @@ test("issueLifecycle folds a stalled (dead, no-terminal) running issue to parked
   assert.deepEqual(issueLifecycle(running, "301", { stalled: true }), { state: "parked", reason: "stalled" });
 });
 
+test("reduceCampaign reconciles a dead run's in-flight issue to parked{crash}; a live probe leaves it running (design §7)", () => {
+  const events = [
+    event("campaign-start", { ts: "t0", batches: [["301"], ["302"]], slots: 1 }),
+    event("campaign-batch", { ts: "t1", index: 0, tasks: ["301"] }),
+    event("queue-start", { ts: "t2", taskIds: ["301"], slots: 1 }),
+    event("queue-spawn", { ts: "t3", taskId: "301", running: 1, left: 0 }),
+  ];
+  // A live run (its slot is held) leaves the in-flight issue running — and the pure
+  // default (no probe injected) never crash-folds either.
+  assert.equal(reduceCampaign(events, { alive: true }).outcomes.get("301"), "running");
+  assert.equal(reduceCampaign(events).outcomes.get("301"), "running");
+
+  // A dead run — its slot is not held (design §8) and its log has no terminal stop
+  // marker — reconciles the in-flight issue to parked{crash}, never left reading
+  // running forever (§15). A never-started later member stays honestly unstarted.
+  const dead = reduceCampaign(events, { alive: false });
+  assert.equal(dead.outcomes.get("301"), "parked");
+  assert.equal(dead.parkReasons.get("301"), "crash");
+  assert.equal(dead.outcomes.get("302") ?? "unstarted", "unstarted");
+  assert.deepEqual(issueLifecycle(dead, "301"), { state: "parked", reason: "crash" });
+
+  // A cleanly-finished run has released its slot too (dead process), but its members
+  // reached a terminal event and the log carries a stop marker — a crash never
+  // overrides a completed issue.
+  const done = [
+    ...events,
+    event("green", { ts: "t4", taskId: "301", branch: "agent/301", commits: [] }),
+    event("campaign-batch-done", { ts: "t5", index: 0, merged: ["301"], held: [], clearedParked: [] }),
+    event("campaign-done", { ts: "t6", batches: 1 }),
+  ];
+  assert.equal(reduceCampaign(done, { alive: false }).outcomes.get("301"), "completed");
+});
+
 test("reduceCampaign folds a campaign-failed stop marker to a failed, un-closed wave (#285)", () => {
   // The campaign-failed marker is authoritative: even with no error carried in queue-done,
   // it names the failed member and the fold reads it `failure`, so the wave holding it folds

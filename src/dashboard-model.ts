@@ -55,11 +55,12 @@ export type IssueStatus = "completed" | "parked" | "failure" | "running" | "unst
  * Why a `parked` issue is held (ADR 0019) — metadata set *by the transition*, not a
  * status word: `question` (a `parked{blocked}` awaiting an answer), `conflict` (a
  * `quarantined` merge conflict), `red-base` (a combined-gate wave-park — the *wave's*
- * reason, never a member's; design §2.3), or `stalled` (a `parked{budget|idle-timeout}`,
- * or a crash — end-of-log with no terminal event and a dead process). The reason selects
- * the recovery affordance; the surface word is one.
+ * reason, never a member's; design §2.3), `stalled` (a `parked{budget|idle-timeout}`,
+ * the run loop's own resource stop), or `crash` (reconciliation: the run's process is
+ * gone with no terminal stop marker, so an in-flight issue never verdicted — design §2.3,
+ * §7). The reason selects the recovery affordance; the surface word is one.
  */
-export type ParkReason = "question" | "conflict" | "red-base" | "stalled";
+export type ParkReason = "question" | "conflict" | "red-base" | "stalled" | "crash";
 
 /**
  * An issue's membership in the campaign (ADR 0019) — the axis orthogonal to its
@@ -591,8 +592,11 @@ export interface ReducedCampaign {
  * campaign supersedes an earlier one in the same log); a queue-only run with no
  * campaign frames it as a single wave. This is the load-bearing seam of ADR
  * 0005: `buildStatus` renders it and the `campaign` loop re-reads it each wave.
+ * `opts.alive` is the injected liveness probe (design §7): `false` means the run's
+ * process is gone (its host slot is not held, §8), so an in-flight `running` issue with
+ * no terminal stop marker reconciles to parked{crash}; omitted/`true` never crash-folds.
  */
-export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
+export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: boolean } = {}): ReducedCampaign {
   const latestCampaignIndex = events.findLastIndex((e) => e.event === "campaign-start" && Array.isArray(e.batches));
   const relevant = latestCampaignIndex >= 0 ? events.slice(latestCampaignIndex) : events;
 
@@ -744,6 +748,22 @@ export function reduceCampaign(events: OrchestratorEvent[]): ReducedCampaign {
   // `grafted` is transient (ADR 0014): an id reads `grafted` only while unstarted, and
   // becomes `running` on pickup — so drop any grafted id that has since reached an outcome.
   for (const id of [...grafted]) if (outcomes.has(id)) grafted.delete(id);
+
+  // Crash reconciliation (design §2.3, §7): liveness comes from the host-slot lease — a
+  // run holds a slot while alive (§8). When the injected probe says the run is dead
+  // (`alive === false`) and its log carries no terminal stop marker, every issue still
+  // `running` (its last event non-terminal) died with no verdict, so it reconciles to
+  // parked{crash} — never left reading running forever (§15). Crash is never stored: the
+  // probe is an injected input, so the reducer stays pure. A live or unknown run
+  // (`alive !== false`) leaves `running` untouched.
+  if (opts.alive === false && !relevant.some((e) => e.event === "campaign-done" || e.event === "queue-done")) {
+    for (const [id, status] of outcomes) {
+      if (status !== "running") continue;
+      outcomes.set(id, "parked");
+      parkReasons.set(id, "crash");
+      details.set(id, "Crashed — the run died with no verdict; redrive");
+    }
+  }
 
   return { waves, layout, pruned, grafted, quarantined, name, festiveOffset, outcomes, details, titles, mergedAt, closedWaves, currentWave, parkedWave, parkReasons, redBase };
 }

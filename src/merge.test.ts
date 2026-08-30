@@ -512,3 +512,30 @@ test("collectWaveChangelog makes no commit when the wave left no fragments", () 
   assert.deepEqual(result.collected, []);
   assert.equal(headSha(dir), before); // HEAD untouched — nothing to collect
 });
+
+test("collectWaveChangelog leaves fragments in place and logs one line when the project has no CHANGELOG.md", () => {
+  // A repo that keeps no changelog — the fold is opting out, not folding into nothing.
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-merge-nocl-"));
+  const git = (args: string[]) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });
+  git(["init", "-q"]);
+  git(["config", "user.email", "test@example.com"]);
+  git(["config", "user.name", "test"]);
+  const fragDir = join(dir, "changelog.d");
+  mkdirSync(fragDir);
+  writeFileSync(join(fragDir, "42.md"), "section: New features\n- [user] feature from 42 (#42).\n");
+  git(["add", "-A"]);
+  git(["commit", "-qm", "seed with a fragment, no changelog"]);
+  const before = headSha(dir);
+  const log = memoryLogger();
+
+  const result = collectWaveChangelog(0, log, dir);
+
+  assert.equal(result.committed, false);
+  assert.deepEqual(result.collected, []);
+  assert.equal(headSha(dir), before); // HEAD untouched — nothing folded or committed
+  assert.equal(existsSync(join(dir, "CHANGELOG.md")), false); // not materialised
+  assert.equal(existsSync(join(fragDir, "42.md")), true); // fragment left in place
+  // One line logged for the skip, distinct from the empty case. (These campaign-changelog-*
+  // rows ride the logger's untyped catch-all, so `event` is compared as a plain string.)
+  assert.equal(log.events.filter((e) => (e.event as string) === "campaign-changelog-skipped").length, 1);
+});

@@ -20,15 +20,29 @@ Within a milestone each bold section label appears at most once.
 
 ### Collected changes — August 30, 2026
 
+**Breaking changes:**
+- [user] `prune <issue> <batch…>` (launch a fresh reduced campaign) is removed — `prune <issue>` (with `--purge`) prunes the running campaign is now the only form; use `campaign --dry-run` + editing the selection to launch a reduced one (#293).
+- [user] `fileset-check` is removed as a CLI mode — `campaign --dry-run` already reports NOT-confident issues (#293).
+- [ops] `demo create` / `demo remove` are no longer CLI modes — the dev fixture is now `make demo-create` / `make demo-remove` (#293).
+- [api] The dashboard's `POST /resume` route is now `POST /redrive` and shells `vetinari redrive` (not `campaign --resume`); the old `/resume` path 404s (#295).
+- [ops] `migrate` now performs only the one-time layout move and the `orchestrator.env`→`host.env` rename; every other compatibility shim it carried is gone — the `hostWeight`→`containerShare` config rewrite, the `host-slots`→`max-concurrent-containers` ceiling-file rename, the `dispatch`→`gateway` systemd-unit rewrite, the stale `gateway.env` deletion, and the `VETINARI_TELEGRAM_*` strip from the container-gate `.env` (#296). A rename is a breaking change, not something `migrate` absorbs forever (design §9, §13.1); see `docs/upgrading.md` for the by-hand fixups.
+
 **New features:**
 - [user] `campaign --resume --override` re-runs a failed member on a redrive; without it, a member that failed on the prior run holds its wave and the campaign stops as failed again (prune it or fix it forward instead) (#287).
 - [user] A campaign now re-admits a parked member the moment its question is answered mid-wave: the member re-runs and merges in the same wave instead of parking the wave (#289).
 - [ops] New `parkGraceSeconds` config field (default 0): at a wave boundary, a member parked as a question/stalled is held for up to this long for an answer before the wave parks; `conflict`/`red-base` parks never wait (#289).
+- [user] New `redrive` verb picks an unfinished campaign back up (design §7) — the umbrella verb for continuing after a prune, graft, fix-forward, crash, or failure; `campaign --resume` still works as a one-release alias and prints a notice pointing at `redrive` (#293).
 
 **Improvements:**
 - [api] The event log gains a `grace-wait` row (its seconds and the waited-on tasks) so the fold and the dashboard can narrate the boundary wait (#289).
 - [api] The orchestrator event log now uses one consolidated §2.1 vocabulary — `wave-start`/`wave-done` (was `campaign-batch`/`campaign-batch-done`), `spawn` (was `queue-*`), `merged`/`base-gate` from the integrator, `parked` with a reason (folding the retired `quarantined` and `wave-parked` events), an explicit `failed`, `campaign-parked`/`campaign-failed` stop markers, and `redrive`. One `ParkReason` enum — `question | stalled | conflict | red-base | crash` — is shared by the parked record, the `parked` event, the reducer and the dashboard, with the specific (budget/idle/no-commit, the conflict output) carried in `detail`. Archived logs written in the retired names still render: the log reader translates them through one alias table (#292).
 - [internal] Festive wave names no longer touch the durable log or the host lease — the offset is derived at render from the `campaign-start` timestamp, and the host festive cursor is gone (#292).
+- [user] Gateway Telegram notices speak the settled vocabulary (#294): a park announcement now uses the one notice skeleton (`⏸ <project> · PARKED · #<issue> (<reason>)`) and prints the exact recovery move its `ParkReason` asks — reply to answer, or `prune`/`redrive` — instead of always saying "reply to resume".
+- [user] `/status` now reports each project's campaign state, the wave in flight, and per-state issue counts alongside the parked queue with reasons (#294).
+- [user] The dashboard speaks the settled vocabulary everywhere (design §11, §13.1): the red-base recovery banner and the parked-issue sheet button are **Redrive**, the merge-conflict note points at resolve-then-redrive and `vetinari redrive`, and the event-feed filter labels use the §2.1 event names (#295).
+- [user] The status line names the reason words for any parked work (e.g. `conflict`, `red base`) beside its per-state counts (#295).
+- [ops] Selecting an experimental non-resumable provider (`copilot`/`cursor`/`opencode`) with no `postComment` configured now prints a one-line preflight warning — a parked question cannot be answered without it — instead of only surfacing at a stranded park. `--help` and the provider table mark the three as experimental (#298).
+- [ops] `answer` on a non-resumable provider without `postComment` now fails fast with that same line, rather than silently re-running the whole task from scratch (#298).
 
 **Bug fixes:**
 - [user] A campaign wave with a failed issue now holds the wave and stops the campaign as failed: the wave still drains its siblings and merges their greens, then a `campaign-failed` event and a failure notice are logged and the run exits non-zero — no later wave starts on top of the missing work (#285).
@@ -37,6 +51,9 @@ Within a milestone each bold section label appears at most once.
 - [user] `answer <issue>` on a paused campaign's issue now continues the campaign by itself: once the answer goes green it triggers the redrive that integrates the green and runs the remaining waves — you no longer have to answer and then separately resume (#287).
 - [user] A question parked inside a red-base wave keeps its own reason, so the issue sheet still draws its reply box; a merged member of a red-base wave stays completed, with `red-base` carried as the wave's reason (#288).
 - [user] A crashed run — its process gone with no verdict — no longer reads as running forever on the dashboard: its in-flight issue reconciles to `parked{crash}`, so the wave, campaign and project card fold to `parked` and redrive is the move (#290).
+
+**Documentation:**
+- [internal] `CONTEXT.md` is now a domain-only glossary in the settled vocabulary: an entry for every object, state, park reason and move in the user guide's model; retired words (`carve`, `queue`, `quarantined`, `wave-parked`, `interrupted`, `campaign-plan`, `dispatch`/`attend`, `hostWeight`, `QUEUE_SLOTS`) demoted to _Avoid_ lines; dashboard widgets, colour rules and testing terms removed (#300).
 
 ### Collected changes — August 29, 2026
 

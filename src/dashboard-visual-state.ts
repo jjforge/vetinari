@@ -41,6 +41,44 @@ export function reasonWord(reason: ParkReason): string {
 }
 
 /**
+ * The moves the issue sheet offers for a given lifecycle state and park reason (design §11,
+ * user-guide park reasons) — the single pure rule behind "exactly the moves the reason
+ * allows" (#307). Each move POSTs to a route that shells the CLI verb: `reply` → `/answer`,
+ * `prune` → `/prune`, `redrive` → `/redrive`. Graft is a campaign-level move, not a per-issue
+ * one, so it is not here.
+ *
+ * - A question or a stall wants a human answer, so both carry `reply` alongside prune/redrive.
+ * - A conflict, red base or crash is fixed forward on the base and redriven, never answered
+ *   per issue — prune and redrive only (the fix-forward instruction rides the sheet notice).
+ * - A `failed` issue offers prune and redrive; a `running`/`unstarted` one offers only prune;
+ *   a `completed` one is banked and offers nothing.
+ * - An archived (read-only) issue offers nothing — no move mutates a finished run's log.
+ *
+ * A legacy park with no reason reads as an answerable question (mirroring `renderMoves`).
+ * Self-contained and browser-safe: single-sourced into the sheet script via `.toString()`,
+ * so the node test asserts the very function the browser runs. The `reason` param is a plain
+ * string here (the `ParkReason` values) so the shipped `.toString()` carries no type import.
+ */
+export function issueMoves({
+  status,
+  reason,
+  archived,
+}: {
+  status: string;
+  reason?: string;
+  archived?: boolean;
+}): { reply: boolean; prune: boolean; redrive: boolean } {
+  if (archived) return { reply: false, prune: false, redrive: false };
+  if (status === "parked") {
+    const answerable = !reason || reason === "question" || reason === "stalled";
+    return { reply: answerable, prune: true, redrive: true };
+  }
+  if (status === "failed") return { reply: false, prune: true, redrive: true };
+  if (status === "running" || status === "unstarted") return { reply: false, prune: true, redrive: false };
+  return { reply: false, prune: false, redrive: false };
+}
+
+/**
  * The tally chip's dot-class fragment, with the idle rule (§5, #100): a running dot
  * pulses to signal work in flight, so a "0 running" tally — which has none — keeps the
  * blue but gets `idle` to still it. Only `running` at zero is idle; `parked`/`queued`

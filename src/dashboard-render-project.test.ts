@@ -100,14 +100,16 @@ test("renderStatusPage shows a Redrive control only for a campaign parked on a r
     },
     { prune: true },
   );
-  // A campaign parked on a red base (a held member with the red-base reason) offers a Redrive
-  // action that POSTs to /redrive carrying only its project (redrive is project-scoped — no
-  // taskId), mirroring the prune/answer forms.
-  assert.match(redBaseParked, /<form method="post" action="\/redrive"[^>]*>/);
-  assert.match(redBaseParked, /name="project" value="beta"/);
+  // A campaign parked on a red base (a held member with the red-base reason) offers the
+  // campaign-level Redrive banner that POSTs to /redrive carrying only its project (redrive is
+  // project-scoped — no taskId), mirroring the prune/answer forms.
+  assert.match(redBaseParked, /<section class="redrive-banner">/);
+  assert.match(redBaseParked, /<form method="post" action="\/redrive" class="redrive-form"><input type="hidden" name="project" value="beta"/);
   assert.match(redBaseParked, /Redrive/);
 
-  // A plain running campaign (no red-base hold) shows no Redrive control at all.
+  // A plain running campaign (no red-base hold) shows no campaign-level Redrive banner. (The
+  // per-issue Redrive move now lives in the issue sheet, gated client-side by issueMoves — its
+  // hidden form is present on every page, so the contrast here is the banner, #307.)
   const running = renderStatusPage(
     {
       project: "beta",
@@ -116,7 +118,7 @@ test("renderStatusPage shows a Redrive control only for a campaign parked on a r
     },
     { prune: true },
   );
-  assert.doesNotMatch(running, /action="\/redrive"/);
+  assert.doesNotMatch(running, /class="redrive-banner"/);
 });
 test("renderStatusPage puts a quiet graft input on the summary line, greyed at rest (#202, #168)", () => {
   const runningCampaign = {
@@ -143,11 +145,11 @@ test("renderStatusPage puts a quiet graft input on the summary line, greyed at r
   assert.doesNotMatch(withoutGraft, /action="\/graft"/);
   assert.doesNotMatch(withoutGraft, /class="campaign-summary"/);
 });
-test("renderStatusPage disables the graft input with amber guidance when the campaign is finished (#202)", () => {
-  // Every wave closed → the campaign has reached its final wave; nothing is live-or-
-  // resumable to layer into (the graft engine refuses, ADR 0014). Rather than fail on
-  // submit, 1a renders the input structurally disabled with amber guidance and a
-  // start-campaign affordance.
+test("renderStatusPage offers no graft affordance — and no 'final wave' notice — on a settled campaign (#307)", () => {
+  // Graft is offered only while the campaign is unsettled (design §11). A settled campaign
+  // (every wave closed) has nothing live-or-resumable to layer into, so the affordance
+  // renders nothing at all — no graft form, and none of the old "final wave" refusal notice
+  // (#202's structural-disable message, superseded). The campaign meta still renders.
   const finished = {
     project: "beta",
     waves: [
@@ -158,15 +160,12 @@ test("renderStatusPage disables the graft input with amber guidance when the cam
   };
   const html = renderStatusPage(finished, { prune: true, graft: true });
   const summary = html.slice(html.indexOf('class="campaign-summary"'), html.indexOf('class="waves-grid"'));
-  // The refusal replaces the active form — no live POST target, a disabled input/button.
-  assert.match(summary, /graft-refused/);
-  assert.doesNotMatch(summary, /<form method="post" action="\/graft"/);
-  assert.match(summary, /class="graft-ids"[^>]*disabled/);
-  // Amber guidance naming the structural reason, plus a start-campaign affordance.
-  assert.match(summary, /final wave/i);
-  assert.match(summary, /new campaign starts/i);
-  assert.match(summary, /class="graft-refusal"/);
-  assert.match(summary, /vetinari campaign/);
+  // The meta still reads, but the graft input, the refusal, and the "final wave" words are gone.
+  assert.match(summary, /class="campaign-meta"/);
+  assert.doesNotMatch(html, /graft-refused/);
+  assert.doesNotMatch(html, /class="graft-refusal"/);
+  assert.doesNotMatch(html, /final wave/i);
+  assert.doesNotMatch(html, /<form method="post" action="\/graft"/);
 });
 test("renderStatusPage marks a freshly-grafted wave with a static teal edge, not motion (#202, §5)", () => {
   const grafted = {
@@ -248,6 +247,10 @@ test("renderStatusPage shows an informational merge-conflict affordance with no 
   const note = held.slice(held.indexOf('class="conflict-note"'));
   const noteBlock = note.slice(0, note.indexOf("</section>"));
   assert.doesNotMatch(noteBlock, /<form/);
+  // It points the operator at the per-issue Redrive (which now renders in the sheet) and the
+  // CLI — never a "Redrive control above" that only renders for a red base (#307).
+  assert.doesNotMatch(noteBlock, /control above/i);
+  assert.match(noteBlock, /vetinari redrive/);
 
   // No conflict-held issue → no note.
   const clean = renderStatusPage(
@@ -583,6 +586,29 @@ test("renderStatusPage colours a pruned chip and pulses a running one", () => {
   assert.match(html, /@keyframes chip-pulse/);
   assert.match(html, /\.dot\.running \{ animation: chip-pulse/);
   assert.match(html, /prefers-reduced-motion/);
+});
+test("renderStatusPage renders a grafted member row's status dot alongside its grafted badge (#307)", () => {
+  // A grafted issue composes the two axes (ADR 0019): its lifecycle dot reads its own
+  // status (here running), and the `grafted` membership badge rides alongside — the dot is
+  // never suppressed by the membership, so a grafted row still reads its run-state at a glance.
+  const html = renderStatusPage(
+    {
+      project: "beta",
+      waves: [
+        {
+          index: 0,
+          status: "running",
+          issues: [{ issueNumber: "305", status: "running", membership: "grafted", name: "grafted one" }],
+        },
+      ],
+      parked: [],
+    },
+    { prune: true, graft: true },
+  );
+  assert.match(
+    html,
+    /<button type="button" class="wave-member running grafted"[^>]*><span class="dot running"><\/span>#305 <span class="wave-member-title">grafted one<\/span><span class="member-badge grafted">grafted<\/span><small>running<\/small><\/button>/,
+  );
 });
 test("renderStatusPage's prune panel discloses kept-banked work and carries a standalone explainer", () => {
   const html = renderStatusPage(
@@ -1326,10 +1352,11 @@ test("renderStatusPage hosts the prune affordance and inline confirm in the tap-
     { prune: true },
   );
 
-  // The panel — not the chip — carries a Prune button and a hidden inline confirm.
+  // The panel — not the chip — carries a Prune button (in the one shared move-button style)
+  // and a hidden inline confirm.
   assert.match(
     html,
-    /<button type="button" id="prune-start" class="prune-start">Prune<\/button>/,
+    /<button type="button" id="prune-start" class="sheet-btn prune-start">Prune<\/button>/,
   );
   assert.match(
     html,
@@ -1357,7 +1384,7 @@ test("renderStatusPage hosts the prune affordance and inline confirm in the tap-
   assert.match(html, /method: "POST"/);
   assert.match(html, /pruning/);
 });
-test("renderStatusPage hosts a parked reply block with a Redrive button in the tap-detail sheet", () => {
+test("renderStatusPage hosts a parked reply block with a Reply submit and a separate Redrive form (#307)", () => {
   const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
 
   // The sheet carries a reply block, hidden until the opened issue is parked.
@@ -1373,10 +1400,16 @@ test("renderStatusPage hosts a parked reply block with a Redrive button in the t
     html,
     /id="reply-form"[\s\S]*?name="taskId"[\s\S]*?name="project"[\s\S]*?<textarea name="text"/,
   );
-  // Redrive submits that form; it is associated by `form=` so it can sit outside the form, beside Prune.
+  // Reply submits that form; it is associated by `form=` so it can sit outside the form, beside
+  // the Redrive form and Prune.
   assert.match(
     html,
-    /<button type="submit" form="reply-form" id="reply-redrive" class="reply-redrive" hidden>Redrive<\/button>/,
+    /<button type="submit" form="reply-form" id="reply-send" class="sheet-btn" hidden>Reply<\/button>/,
+  );
+  // Redrive is its own move: a form POSTing /redrive (project-scoped, no taskId).
+  assert.match(
+    html,
+    /<form method="post" action="\/redrive" id="redrive-form" hidden><input type="hidden" name="project" value="" \/><button type="submit" class="sheet-btn">Redrive<\/button><\/form>/,
   );
 });
 test("renderStatusPage caps the reply textarea so it stays within the sheet/card (#73)", () => {
@@ -1386,19 +1419,19 @@ test("renderStatusPage caps the reply textarea so it stays within the sheet/card
   // never overflows and introduces no horizontal scroll on the sheet.
   assert.match(html, /\btextarea \{[^}]*max-width: 100%/);
 });
-test("renderStatusPage places Redrive beside Prune in one sheet-actions row, sized for touch", () => {
+test("renderStatusPage places Reply, Redrive and Prune in one sheet-actions row, sized for touch (#307)", () => {
   const html = renderStatusPage(
     { project: "demo", waves: [], parked: [] },
     { prune: true },
   );
 
-  // Both controls live in the same actions row so they are reachable one-handed together.
+  // All the move controls live in the same actions row so they are reachable one-handed together.
   assert.match(
     html,
-    /<div class="sheet-actions"><button type="submit" form="reply-form" id="reply-redrive"[^>]*>Redrive<\/button><div id="prune-panel"/,
+    /<div class="sheet-actions"><button type="submit" form="reply-form" id="reply-send"[^>]*>Reply<\/button><form method="post" action="\/redrive" id="redrive-form"[^>]*>[\s\S]*?Redrive<\/button><\/form><div id="prune-panel"/,
   );
-  // A 44px tap target for the primary Redrive action on a phone.
-  assert.match(html, /\.reply-redrive \{[^}]*min-height: 44px;/);
+  // A 44px tap target for the shared move button on a phone.
+  assert.match(html, /\.sheet-btn \{[^}]*min-height: 44px;/);
   // The actions row is a flex box, so it needs [hidden] restored explicitly or an
   // empty foot (no reply, no prune) would always show its border and padding.
   assert.match(html, /\.sheet-actions\[hidden\][^{]*\{ display: none; \}/);
@@ -1425,7 +1458,7 @@ test("renderStatusPage gives the parked block a directive heading and labels the
   const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
 
   // The parked block leads with a directive heading, not a flat "Reply & redrive".
-  assert.match(html, /class="reply-heading">PARKED — NEEDS YOUR ANSWER</);
+  assert.match(html, /class="reply-heading" id="reply-heading">PARKED — NEEDS YOUR ANSWER</);
   assert.doesNotMatch(html, /Reply &amp; redrive/);
   // The turn log is its own labeled section ("Agent turns"), distinct from the meta tiles.
   assert.match(html, /class="turn-log-heading">Agent turns</);

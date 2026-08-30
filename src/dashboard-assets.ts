@@ -1,5 +1,5 @@
 import { archiveRowMatches, cappedRawRows, followView, humanizedRow, isNotableHostEvent, tailAppend, tailFresh, tailView } from "./dashboard-render.ts";
-import { paneActivity } from "./dashboard-visual-state.ts";
+import { issueMoves, paneActivity } from "./dashboard-visual-state.ts";
 import { humanizeHostLine, LOG_DOT_STATE_COLOR, splitOverflow } from "./log-view.ts";
 
 /**
@@ -174,7 +174,12 @@ export const TOP_BAR_STYLES = `  .page-top { display: flex; align-items: center;
 export const ISSUE_DETAIL_SHEET_STYLES = `  .prune-panel { display: flex; align-items: center; gap: .5rem; }
   /* A flex display beats the UA [hidden] rule, so the prune panel needs it back explicitly. */
   .prune-panel[hidden] { display: none; }
-  .prune-start, .prune-confirm-btn, .prune-cancel { padding: .35rem .7rem; border: 1px solid var(--color-red); border-radius: 999px; background: rgb(247 146 135 / 12%); color: var(--color-red); font: inherit; line-height: 1; cursor: pointer; }
+  /* One button style across the sheet's moves (#307): Reply, Redrive and Prune share the
+     teal product-accent action button — a control, never a state (§1). */
+  .sheet-btn { min-height: 44px; padding: .5rem 1rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: #04110f; font: inherit; font-weight: 700; line-height: 1; cursor: pointer; }
+  /* The prune flow's confirm/cancel stay their own affordances: the destructive confirm in
+     the prune red, cancel a neutral out. */
+  .prune-confirm-btn, .prune-cancel { padding: .35rem .7rem; border: 1px solid var(--color-red); border-radius: 999px; background: rgb(247 146 135 / 12%); color: var(--color-red); font: inherit; line-height: 1; cursor: pointer; }
   .prune-cancel { border-color: var(--color-secondary); background: none; color: var(--color-text-light-2); }
   .prune-confirm { display: flex; align-items: center; gap: .5rem; margin: 0; }
   /* A flex display beats the UA [hidden] rule, so the confirm form needs it back
@@ -223,6 +228,11 @@ export const ISSUE_DETAIL_SHEET_STYLES = `  .prune-panel { display: flex; align-
      3px amber left edge (§2); it only ever shows for a parked issue. */
   .issue-detail-reply { flex: none; padding: .9rem 1.15rem; border-top: 1px solid var(--color-light-border); border-left: 3px solid var(--color-yellow); background: var(--color-box-header); }
   .reply-heading { margin: 0 0 .5rem; font-size: .95rem; color: var(--color-text-light); }
+  /* The hoisted facts (#307): the issue title and how long it has waited, sat above the box
+     so the key context reads without scrolling back up to the sheet header. */
+  .reply-context { margin: 0 0 .5rem; display: flex; flex-wrap: wrap; gap: .5rem; align-items: baseline; }
+  .reply-title { color: var(--color-text); font-weight: 600; min-width: 0; }
+  .reply-elapsed { color: var(--color-text-light-2); font-size: .85rem; white-space: nowrap; }
   .reply-question { margin: 0 0 .6rem; color: var(--color-text-light); white-space: pre-wrap; max-height: 30vh; overflow-y: auto; }
   /* Options stack one per line as full-width bordered rows (POC), not inline pills:
      the A/B/C letter sits in a fixed left margin, the label fills the rest. */
@@ -235,13 +245,15 @@ export const ISSUE_DETAIL_SHEET_STYLES = `  .prune-panel { display: flex; align-
   .sheet-actions { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; padding: .9rem 1.15rem; border-top: 1px solid var(--color-light-border); }
   /* A flex display beats the UA [hidden] rule, so these need it back explicitly. */
   .sheet-actions[hidden], .reply-options[hidden] { display: none; }
-  .reply-redrive { min-height: 44px; padding: .5rem 1rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: #04110f; font: inherit; font-weight: 700; cursor: pointer; }
+  /* The redrive move is a bare form wrapping its button; drop the form's own box so it sits
+     flush in the actions row like the other buttons. */
+  #redrive-form { margin: 0; }
   @media (max-width: 640px) { .issue-detail-sheet { width: 100%; max-height: 88vh; border-radius: var(--border-radius-medium) var(--border-radius-medium) 0 0; padding-bottom: env(safe-area-inset-bottom); } .issue-detail { align-items: flex-end; padding: 0; } }`;
 
 /**
  * The issue-detail sheet's client script — one definition included by both pages
  * (previously hand-synced, #76). It wires the sheet itself: the element refs,
- * `openIssue`/`renderDetail`/`renderReply`, `closeSheet`, the foot's Redrive/Prune
+ * `openIssue`/`renderDetail`/`renderMoves`, `closeSheet`, the foot's Reply/Redrive/Prune
  * visibility, and the prune preview→confirm flow. Each page adds its own trigger
  * wiring around this (the campaign page's issue chips + parked cards; the
  * landing's parked-queue rows), which is what calls `openIssue`.
@@ -258,24 +270,40 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
   const detailWorktreeTile = document.getElementById("issue-detail-worktree-tile");
   const detailTurnLog = document.getElementById("issue-detail-turnlog");
   const detailReply = document.getElementById("issue-detail-reply");
-  const replyRedrive = document.getElementById("reply-redrive");
+  const replyHeading = document.getElementById("reply-heading");
+  const replyTitle = document.getElementById("reply-title");
+  const replyElapsed = document.getElementById("reply-elapsed");
+  const replySend = document.getElementById("reply-send");
   const replyQuestion = document.getElementById("reply-question");
   const replyOptions = document.getElementById("reply-options");
   const replyText = document.getElementById("reply-text");
   const replyForm = document.getElementById("reply-form");
+  const redriveForm = document.getElementById("redrive-form");
+  const redriveProject = redriveForm.querySelector('input[name="project"]');
   const sheetActions = document.querySelector(".sheet-actions");
-  // The foot (reply + actions) shows only while it holds a live control — a parked
-  // reply to send or a prune to offer — so a plain issue's sheet grows no empty bar.
+  // The single moves rule (dashboard-visual-state.ts, #307), single-sourced into the
+  // browser via .toString() so the node test and this script run the same function.
+  ${issueMoves.toString()}
+  // The fix-forward instruction each redrive-only park reads in the sheet notice (design
+  // §11, user-guide park reasons): a conflict/red-base/crash is fixed forward on the base
+  // and redriven, never answered per-issue.
+  const FIX_FORWARD = {
+    conflict: "This green branch conflicts with the base at merge. Resolve the conflict on the base, then redrive.",
+    "red-base": "Every issue passed alone; the merged base fails together. Fix forward on the base, then redrive.",
+    crash: "The run died with no verdict. Redrive to pick the campaign back up.",
+  };
+  // The foot (reply + actions) shows only while it holds a live control — a reply to
+  // send, a redrive to run, or a prune to offer — so a plain issue's sheet grows no empty bar.
   const updateFoot = () => {
     const prune = document.getElementById("prune-panel");
     const pruneShown = Boolean(prune && !prune.hidden);
-    sheetActions.hidden = replyRedrive.hidden && !pruneShown;
-    // A standalone Prune — offered, not beside a parked issue's Redrive, and not yet
-    // in its confirm step — gets a plain-words explainer of what a prune does; a
-    // parked issue's Redrive gives the context instead, so the explainer stays hidden.
+    sheetActions.hidden = replySend.hidden && redriveForm.hidden && !pruneShown;
+    // A standalone Prune — the only move (a running/unstarted issue), not beside a reply or
+    // a redrive, and not yet in its confirm step — gets a plain-words explainer of what a
+    // prune does; when a reply or redrive sits alongside, they give the context instead.
     const explainer = document.getElementById("prune-explainer");
     const start = document.getElementById("prune-start");
-    if (explainer) explainer.hidden = !pruneShown || !replyRedrive.hidden || (start ? start.hidden : true);
+    if (explainer) explainer.hidden = !pruneShown || !replySend.hidden || !redriveForm.hidden || (start ? start.hidden : true);
   };
   // Elapsed is a working span in ms; show it as coarse minutes/hours.
   const fmtElapsed = (ms) => {
@@ -290,19 +318,31 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
   issueDetail.addEventListener("click", (event) => { if (event.target === issueDetail) closeSheet(); });
   // Reassigned by the prune block when prune is enabled; a no-op otherwise.
   let onOpenIssue = () => {};
-  // A parked issue's reply block: the full question, the offered options as buttons
-  // that fill the field (never submit), and the free-text field itself; Redrive posts
-  // it through /answer to redrive the parked task. Options are best-effort — absent,
-  // only the free-text field shows. Any other status hides the whole block.
-  const renderReply = (d) => {
-    // The reply/redrive block is for a question park only (ADR 0019): a held issue reads
-    // parked whatever its reason, but a merge conflict, a red base, or a stall is resolved
-    // through the campaign-level affordance, not a per-issue answer. So gate on the reason
-    // (a legacy park with no reason still reads as a question). An archived issue is read-only.
-    const parked = d.status === "parked" && !d.archived && (!d.reason || d.reason === "question");
-    detailReply.hidden = !parked;
-    replyRedrive.hidden = !parked;
-    if (parked) {
+  // The moves a state allows (design §11, #307), all gated through the one issueMoves rule:
+  // - reply (question/stall): the hoisted title + elapsed, the full question, the offered
+  //   options as buttons that fill the field (never submit), and the free-text box; Reply
+  //   posts it through /answer to answer-and-continue the parked task.
+  // - a redrive-only park (conflict/red-base/crash): the same block shows a fix-forward
+  //   notice instead of the box, and Redrive (→ /redrive) picks the campaign back up.
+  // - prune / redrive gate their own controls; a completed or archived issue offers none.
+  const renderMoves = (d) => {
+    const moves = issueMoves({ status: d.status, reason: d.reason, archived: d.archived });
+    // The reply block shows the answer UI for a question/stall, or a fix-forward notice for
+    // a conflict/red-base/crash park; every other state hides it.
+    const notice = !moves.reply && d.status === "parked" && !d.archived ? (FIX_FORWARD[d.reason] || "") : "";
+    detailReply.hidden = !(moves.reply || notice);
+    replySend.hidden = !moves.reply;
+    // Redrive is project-scoped (no taskId): the /redrive form carries only the project.
+    redriveForm.hidden = !moves.redrive;
+    redriveProject.value = moves.redrive ? d.project : "";
+    if (moves.reply || notice) {
+      // The hoisted facts above the box: the issue title and how long it has waited.
+      replyTitle.textContent = d.title || ("Issue #" + d.issueNumber);
+      replyElapsed.textContent = fmtElapsed(d.elapsedMs);
+    }
+    if (moves.reply) {
+      replyHeading.textContent = "PARKED — NEEDS YOUR ANSWER";
+      replyForm.hidden = false;
       replyForm.querySelector('input[name="taskId"]').value = d.issueNumber;
       replyForm.querySelector('input[name="project"]').value = d.project;
       const question = d.parked && d.parked.question;
@@ -329,11 +369,21 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
         return button;
       }));
       replyOptions.hidden = !options.length;
+    } else if (notice) {
+      replyHeading.textContent = "PARKED — FIX FORWARD";
+      replyForm.hidden = true;
+      replyQuestion.textContent = notice;
+      replyQuestion.hidden = false;
+      replyOptions.replaceChildren();
+      replyOptions.hidden = true;
     }
+    // Prune visibility is authoritative from the rule now (keyed off the fetched state),
+    // not the server's data-prunable hint — so a running/failed issue can prune too.
+    onOpenIssue(moves.prune, d.project, d.issueNumber);
     updateFoot();
   };
   const renderDetail = (d) => {
-    renderReply(d);
+    renderMoves(d);
     detailNum.textContent = "#" + d.issueNumber;
     // The sheet's top edge reads the issue's state (§2), the dot its full-strength colour.
     detailSheet.className = "issue-detail-sheet " + d.status;
@@ -384,9 +434,11 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
     detailTurns.textContent = "…";
     detailWorktreeTile.hidden = true;
     detailTurnLog.textContent = "";
-    // Hide the reply block until the fetched status confirms the issue is parked.
+    // Hide the move controls until the fetched detail decides them through issueMoves; the
+    // passed prunable is only the loading-state hint for the prune panel.
     detailReply.hidden = true;
-    replyRedrive.hidden = true;
+    replySend.hidden = true;
+    redriveForm.hidden = true;
     onOpenIssue(prunable, project, issue);
     updateFoot();
     try {

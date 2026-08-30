@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   dotClass,
   freezeIntent,
+  issueMoves,
   paneActivity,
   reasonWord,
   tallyDotClass,
@@ -53,6 +54,45 @@ test("paneActivity counts a visible append — new lines, pane open and followin
   // the live-bar's freshness clock, just like a wave/feed refresh.
   assert.equal(paneActivity({ appended: 3, open: true, following: true }), true);
   assert.equal(paneActivity({ appended: 1, open: true, following: true }), true);
+});
+
+test("issueMoves offers reply, prune and redrive for a question or stalled park (#307)", () => {
+  // A question or a stall wants a human answer, so both carry the full set: reply the
+  // agent, prune the issue, or redrive the campaign (user-guide park reasons, design §11).
+  assert.deepEqual(issueMoves({ status: "parked", reason: "question" }), { reply: true, prune: true, redrive: true });
+  assert.deepEqual(issueMoves({ status: "parked", reason: "stalled" }), { reply: true, prune: true, redrive: true });
+});
+
+test("issueMoves reads a reasonless legacy park as a question (#307)", () => {
+  // A park written before the reason enum existed still reads as an answerable question.
+  assert.deepEqual(issueMoves({ status: "parked" }), { reply: true, prune: true, redrive: true });
+});
+
+test("issueMoves drops reply for a conflict, red-base or crash park — prune and redrive only (#307)", () => {
+  // These are fixed forward on the base and redriven, never answered per-issue: no reply,
+  // just prune and redrive (with the fix-forward instruction carried in the sheet notice).
+  for (const reason of ["conflict", "red-base", "crash"] as const) {
+    assert.deepEqual(issueMoves({ status: "parked", reason }), { reply: false, prune: true, redrive: true });
+  }
+});
+
+test("issueMoves offers prune and redrive for a failed issue (#307)", () => {
+  assert.deepEqual(issueMoves({ status: "failed" }), { reply: false, prune: true, redrive: true });
+});
+
+test("issueMoves offers only prune for a running or unstarted issue (#307)", () => {
+  assert.deepEqual(issueMoves({ status: "running" }), { reply: false, prune: true, redrive: false });
+  assert.deepEqual(issueMoves({ status: "unstarted" }), { reply: false, prune: true, redrive: false });
+});
+
+test("issueMoves offers nothing for a completed issue (#307)", () => {
+  assert.deepEqual(issueMoves({ status: "completed" }), { reply: false, prune: false, redrive: false });
+});
+
+test("issueMoves offers nothing for an archived (read-only) issue, whatever its state (#307)", () => {
+  // An archived run is read-only — no move mutates a finished campaign's log.
+  assert.deepEqual(issueMoves({ status: "parked", reason: "question", archived: true }), { reply: false, prune: false, redrive: false });
+  assert.deepEqual(issueMoves({ status: "failed", archived: true }), { reply: false, prune: false, redrive: false });
 });
 
 test("paneActivity ignores a frame that adds no visible lines (#198)", () => {

@@ -37,10 +37,12 @@ export const renderRedriveControl = (status: CampaignStatus) =>
  * The merge-conflict informational affordance (#171): a merge conflict held a passed
  * issue out of integration (ADR 0013). There is deliberately no conflict-release CLI to
  * shell, so this is a note only — it points the operator at resolve-then-redrive, with no
- * action route or button of its own.
+ * action route or button of its own. It points at the per-issue Redrive move (which now
+ * renders in the sheet for a conflict park, #307) and the CLI — never a "Redrive control
+ * above" that only renders on a red base, which for a conflict-only campaign was absent.
  */
 export const renderConflictNote = () =>
-  `<section class="conflict-note"><strong>Issue held on a merge conflict</strong> — a passed green was kept out of integration. Resolve the conflict, then redrive the campaign (the Redrive control above, or <code>vetinari redrive</code> in the project root).</section>`;
+  `<section class="conflict-note"><strong>Issue held on a merge conflict</strong> — a passed green was kept out of integration. Resolve the conflict, then redrive the campaign (open the held issue and Redrive, or <code>vetinari redrive</code> in the project root).</section>`;
 
 /**
  * The Graft affordance (#168, reworked to mockup 1a in #202). Where prune prunes an
@@ -54,21 +56,20 @@ export const renderConflictNote = () =>
  * (whitespace/comma-split, matching the CLI). A whole-batch rejection and any per-id
  * validation surface inline in `[data-graft-error]`, never navigating away.
  *
- * When the campaign is finished (no wave left open, so the graft engine has nothing
- * live-or-resumable to layer into — ADR 0014), the affordance renders *structurally
- * disabled* instead: a greyed input and amber guidance with a start-campaign hint,
- * rather than an input that would only fail on submit. Amber marks a structural refusal,
- * distinct from the teal success and the red bad-id/rejection (§1).
+ * Graft is offered only while the campaign is unsettled (design §11, #307). A settled
+ * campaign (every wave closed) has nothing live-or-resumable to layer into (the graft
+ * engine refuses, ADR 0014), so the affordance renders *nothing at all* — no input and no
+ * notice. The earlier structural-disable "final wave" message (#202) is superseded: a
+ * settled campaign simply carries no graft chrome.
  */
 export const renderGraftInline = (status: CampaignStatus) =>
   isGraftable(status)
     ? `<form method="post" action="/graft" class="graft-inline" data-graft><input type="text" name="ids" class="graft-ids" placeholder="graft issue ids" autocomplete="off" aria-label="Graft issue ids" data-graft-ids /><input type="hidden" name="project" value="${escapeHtml(status.project)}" /><button type="submit" class="graft-btn" data-graft-submit disabled>graft</button><span class="graft-error" data-graft-error hidden></span></form>`
-    : `<div class="graft-inline graft-refused" data-graft-refused><input type="text" class="graft-ids" placeholder="graft issue ids" aria-label="Graft issue ids" disabled /><button type="button" class="graft-btn" disabled>graft</button><span class="graft-refusal">Campaign is on its final wave — nothing left to layer into. Grafting is available again when a new campaign starts (<code>vetinari campaign</code>).</span></div>`;
+    : "";
 
-/** Whether the campaign can still accept a graft: it is live-or-resumable while any wave
- * is not yet closed. A wholly-closed campaign has reached its final wave — nothing left to
- * layer into, which the graft engine refuses (ADR 0014) — so the input renders structurally
- * disabled (amber) rather than failing on submit. */
+/** Whether the campaign can still accept a graft: it is live-or-resumable (unsettled) while
+ * any wave is not yet closed. A wholly-closed campaign is settled — nothing left to layer
+ * into, which the graft engine refuses (ADR 0014) — so the affordance renders nothing (#307). */
 const isGraftable = (status: CampaignStatus) => status.waves.some((wave) => wave.status !== "closed");
 
 /**
@@ -157,14 +158,19 @@ export const renderAggregatedGraftRejection = (project: string, closure: Structu
 
 /**
  * The issue-detail sheet's markup — one definition rendered by both the campaign
- * page and the all-repos landing (previously hand-synced copies, #76). `prune`
- * includes the in-sheet prune panel: always on the landing (every parked row is
- * prunable), and on the campaign page only when its prune controls are enabled.
+ * page and the all-repos landing (previously hand-synced copies, #76). The foot holds
+ * exactly the moves a state allows (design §11, #307), each gated client-side by the pure
+ * `issueMoves` rule off the fetched detail: the reply block (its heading, the hoisted issue
+ * title + elapsed, the question or a fix-forward notice, the options and answer box), a
+ * `Reply` submit (→ `/answer`), a `Redrive` form (→ `/redrive`, project-scoped), and the
+ * prune panel. `prune` includes that panel: always on the landing (every parked row is
+ * prunable), and on the campaign page only when its prune controls are enabled. All three
+ * move buttons share the one `.sheet-btn` style.
  */
 export const issueDetailSheetMarkup = (prune: boolean) =>
-  `<div id="issue-detail" class="issue-detail" role="dialog" aria-modal="true" aria-live="polite" hidden><div class="issue-detail-sheet"><header class="issue-detail-header"><div class="issue-detail-head-main"><span class="issue-detail-status"><span class="dot"></span><span class="issue-detail-num"></span> <span class="issue-detail-statuslabel"></span></span><h2 class="issue-detail-title"></h2><p class="issue-detail-context"></p></div><button type="button" id="issue-detail-close" class="issue-detail-close" aria-label="Dismiss">&times;</button></header><div class="issue-detail-meta"><div class="meta-tile"><span class="meta-label">Turns</span><span class="meta-value" id="issue-detail-turns"></span></div><div class="meta-tile meta-tile-path" id="issue-detail-worktree-tile" hidden><span class="meta-label">Worktree</span><span class="meta-value meta-value-path" id="issue-detail-worktree"></span></div></div><h3 class="turn-log-heading">Agent turns</h3><ol class="turn-log" id="issue-detail-turnlog"></ol><div id="issue-detail-reply" class="issue-detail-reply" hidden><h3 class="reply-heading">PARKED — NEEDS YOUR ANSWER</h3><p class="reply-question" id="reply-question"></p><div class="reply-options" id="reply-options"></div><form method="post" action="/answer" id="reply-form"><input type="hidden" name="taskId" value="" /><input type="hidden" name="project" value="" /><textarea name="text" id="reply-text" placeholder="Type your reply…"></textarea></form></div><div class="sheet-actions"><button type="submit" form="reply-form" id="reply-redrive" class="reply-redrive" hidden>Redrive</button>${
+  `<div id="issue-detail" class="issue-detail" role="dialog" aria-modal="true" aria-live="polite" hidden><div class="issue-detail-sheet"><header class="issue-detail-header"><div class="issue-detail-head-main"><span class="issue-detail-status"><span class="dot"></span><span class="issue-detail-num"></span> <span class="issue-detail-statuslabel"></span></span><h2 class="issue-detail-title"></h2><p class="issue-detail-context"></p></div><button type="button" id="issue-detail-close" class="issue-detail-close" aria-label="Dismiss">&times;</button></header><div class="issue-detail-meta"><div class="meta-tile"><span class="meta-label">Turns</span><span class="meta-value" id="issue-detail-turns"></span></div><div class="meta-tile meta-tile-path" id="issue-detail-worktree-tile" hidden><span class="meta-label">Worktree</span><span class="meta-value meta-value-path" id="issue-detail-worktree"></span></div></div><h3 class="turn-log-heading">Agent turns</h3><ol class="turn-log" id="issue-detail-turnlog"></ol><div id="issue-detail-reply" class="issue-detail-reply" hidden><h3 class="reply-heading" id="reply-heading">PARKED — NEEDS YOUR ANSWER</h3><p class="reply-context"><span class="reply-title" id="reply-title"></span><span class="reply-elapsed" id="reply-elapsed"></span></p><p class="reply-question" id="reply-question"></p><div class="reply-options" id="reply-options"></div><form method="post" action="/answer" id="reply-form"><input type="hidden" name="taskId" value="" /><input type="hidden" name="project" value="" /><textarea name="text" id="reply-text" placeholder="Type your reply…"></textarea></form></div><div class="sheet-actions"><button type="submit" form="reply-form" id="reply-send" class="sheet-btn" hidden>Reply</button><form method="post" action="/redrive" id="redrive-form" hidden><input type="hidden" name="project" value="" /><button type="submit" class="sheet-btn">Redrive</button></form>${
     prune
-      ? `<div id="prune-panel" class="prune-panel" hidden><button type="button" id="prune-start" class="prune-start">Prune</button><span id="prune-explainer" class="prune-explainer" hidden>Removes this issue and everything blocked by it from the running campaign; merged and mergeable work is kept.</span><form method="post" action="/prune" id="prune-confirm" class="prune-confirm" hidden><span class="prune-confirm-text"></span><input type="hidden" name="taskId" value="" /><input type="hidden" name="project" value="" /><input type="hidden" name="confirm" value="1" /><button type="submit" class="prune-confirm-btn">Confirm</button><button type="button" id="prune-cancel" class="prune-cancel">Cancel</button></form><span id="prune-note" class="prune-note"></span></div>`
+      ? `<div id="prune-panel" class="prune-panel" hidden><button type="button" id="prune-start" class="sheet-btn prune-start">Prune</button><span id="prune-explainer" class="prune-explainer" hidden>Removes this issue and everything blocked by it from the running campaign; merged and mergeable work is kept.</span><form method="post" action="/prune" id="prune-confirm" class="prune-confirm" hidden><span class="prune-confirm-text"></span><input type="hidden" name="taskId" value="" /><input type="hidden" name="project" value="" /><input type="hidden" name="confirm" value="1" /><button type="submit" class="prune-confirm-btn">Confirm</button><button type="button" id="prune-cancel" class="prune-cancel">Cancel</button></form><span id="prune-note" class="prune-note"></span></div>`
       : ""
   }</div></div></div>`;
 

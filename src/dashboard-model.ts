@@ -839,7 +839,10 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
   const stopMarkers: ReadonlySet<string> = new Set(["campaign-done", "campaign-parked", "campaign-failed"]);
   if (opts.alive === false && !relevant.some((e) => stopMarkers.has(e.event))) {
     for (const [id, status] of outcomes) {
-      if (status !== "running") continue;
+      // A pending green reads `running` (design §2.2) but reached a green verdict — it is
+      // banked-but-unmerged work a redrive lands, not a verdict-less in-flight crash — so it is
+      // never crash-folded. Only a genuinely in-flight `running` member (no verdict) reconciles.
+      if (status !== "running" || pendingGreen.has(id)) continue;
       outcomes.set(id, "parked");
       parkReasons.set(id, "crash");
       details.set(id, "Crashed — the run died with no verdict; redrive");

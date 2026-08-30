@@ -1446,6 +1446,25 @@ test("reduceCampaign: completed (merged) is terminal — a stale parked/failed/s
   assert.ok(staleSpawn.anomalies.some((a) => a.includes("313")));
 });
 
+test("reduceCampaign: a dead run's pending green is NOT crash-folded — it reached a green verdict (design §2.2, §7)", () => {
+  const events = [
+    event("campaign-start", { ts: "t0", waves: [["301", "302"]], slots: 1 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["301", "302"] }),
+    event("spawn", { ts: "t2", taskId: "301" }),
+    event("spawn", { ts: "t3", taskId: "302" }),
+    // 301 reached green (a verdict) but never merged before the run died; 302 was still in flight.
+    event("green", { ts: "t4", taskId: "301", branch: "agent/301", commits: [] }),
+  ];
+  const dead = reduceCampaign(events, { alive: false });
+  // The in-flight, verdict-less 302 crash-folds; the pending green 301 keeps its verdict — it is
+  // banked-but-unmerged work a redrive lands, not a crash to redrive from scratch.
+  assert.equal(dead.outcomes.get("302"), "parked");
+  assert.equal(dead.parkReasons.get("302"), "crash");
+  assert.equal(dead.outcomes.get("301"), "running");
+  assert.equal(dead.pendingGreen.has("301"), true);
+  assert.deepEqual(issueLifecycle(dead, "301"), { state: "running" });
+});
+
 test("reduceCampaign: a spawn re-admits a parked member back to running (design §5 step 3)", () => {
   const reduced = reduceCampaign([
     event("campaign-start", { ts: "t0", waves: [["101"]], slots: 1 }),

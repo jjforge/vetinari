@@ -77,6 +77,17 @@ test("the issue-detail sheet carries the issue's state on its top edge only (§2
   );
 });
 
+test("the issue sheet prints the park reason as a word beside the state, single-sourcing reasonWord (#317)", () => {
+  // The sheet single-sources the one `reasonWord` mapping into the browser via .toString()
+  // and prints it beside the state, so a parked{red-base} sheet reads "parked · red base"
+  // rather than the raw enum — the same word the status line and the parked card spell.
+  assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /function reasonWord/);
+  assert.match(
+    ISSUE_DETAIL_SHEET_SCRIPT,
+    /detailStatusLabel\.textContent = d\.status \+ \(d\.reason \? " · " \+ reasonWord\(d\.reason\) : ""\)/,
+  );
+});
+
 test("stateColor is the single state→colour derivation, failure distinct from the prune action (#83)", () => {
   // §3: every state derives its colour here, never a per-instance hex.
   assert.equal(stateColor("running"), "var(--color-blue)");

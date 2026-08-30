@@ -1659,6 +1659,26 @@ test("renderStatusPage orders the top of the page: Parked → campaign-meta → 
     "campaign-meta should render above the waves",
   );
 });
+test("a parked card spells its reason with reasonWord, so red-base reads as two words (#317)", () => {
+  // The parked card's meta prints the park reason the same way every other surface does —
+  // through the one `reasonWord` mapping — so `red-base` reads `red base`, never the raw enum.
+  const html = renderStatusPage({
+    project: "demo",
+    waves: [],
+    parked: [
+      {
+        issueNumber: "102",
+        reason: "red-base",
+        parkedAt: "now",
+        branch: "agent/102",
+        description: "Held on a red base.",
+        options: [],
+      },
+    ],
+  });
+  assert.match(html, /<div class="parked-card-meta">waiting <span class="parked-waited"[^>]*>…<\/span> · red base<\/div>/);
+  assert.doesNotMatch(html, /· red-base<\/div>/);
+});
 test("renderStatusPage collapses closed waves into expandable completed wave chips", () => {
   const html = renderStatusPage({
     project: "demo",

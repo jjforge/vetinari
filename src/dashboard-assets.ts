@@ -1,5 +1,5 @@
 import { archiveRowMatches, cappedRawRows, followView, humanizedRow, isNotableHostEvent, tailAppend, tailFresh, tailView } from "./dashboard-render.ts";
-import { issueMoves, paneActivity } from "./dashboard-visual-state.ts";
+import { issueMoves, paneActivity, reasonWord } from "./dashboard-visual-state.ts";
 import { humanizeHostLine, LOG_DOT_STATE_COLOR, splitOverflow } from "./log-view.ts";
 
 /**
@@ -284,6 +284,9 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
   // The single moves rule (dashboard-visual-state.ts, #307), single-sourced into the
   // browser via .toString() so the node test and this script run the same function.
   ${issueMoves.toString()}
+  // The one park-reason → word mapping (dashboard-visual-state.ts), single-sourced the same
+  // way so the sheet spells a reason exactly as the status line and the parked card do (#317).
+  ${reasonWord.toString()}
   // The fix-forward instruction each redrive-only park reads in the sheet notice (design
   // §11, user-guide park reasons): a conflict/red-base/crash is fixed forward on the base
   // and redriven, never answered per-issue.
@@ -388,7 +391,9 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
     // The sheet's top edge reads the issue's state (§2), the dot its full-strength colour.
     detailSheet.className = "issue-detail-sheet " + d.status;
     detailStatusDot.className = "dot " + d.status;
-    detailStatusLabel.textContent = d.status;
+    // State and reason (design §11): the reason rides beside the state as its word, so a
+    // parked{red-base} sheet reads "parked · red base" — the reason a word, never the raw enum.
+    detailStatusLabel.textContent = d.status + (d.reason ? " · " + reasonWord(d.reason) : "");
     detailTitle.textContent = d.title || ("Issue #" + d.issueNumber);
     detailContext.textContent = [d.project, d.campaignName].filter(Boolean).join(" · ");
     // Turns carry their working duration (POC: "11 turns · 26m"), the one duration

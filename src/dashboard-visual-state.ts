@@ -15,10 +15,11 @@
  * is a self-contained `function` declaration — no imports, no closures over module
  * scope, browser-safe JS only — so `.toString()` yields a runnable definition.
  *
- * `reasonWord` is server-side only (the status line and the dashboard read it), so it may
- * lean on the type-only `ParkReason` import — erased at runtime, it never rides a `.toString()`.
+ * `reasonWord` is shipped both ways — the status line and the parked card read it server-side,
+ * and the issue sheet single-sources it into the browser via `.toString()` — so it is a
+ * self-contained `function` over a plain string (a `ParkReason` value, or a raw park-record
+ * reason), browser-safe with no imports, exactly like `issueMoves` and the freeze reducers.
  */
-import type { ParkReason } from "./state.ts";
 
 /**
  * The state-class fragment a status dot carries — the status verbatim today (a
@@ -31,12 +32,14 @@ export function dotClass(status: string): string {
 }
 
 /**
- * A park reason's display word (design §2.3): the single mapping from the one `ParkReason`
- * enum to the word every surface prints beside `parked`. Driven off the enum, never a
- * reason-string regex — so a reason is spelled one way in the status line and the dashboard
- * alike. `red-base` reads as two words; the rest are their enum value verbatim.
+ * A park reason's display word (design §2.3): the single mapping from a `ParkReason` value to
+ * the word every surface prints beside `parked`. The one rule — never a reason-string regex —
+ * so a reason is spelled one way in the status line, the parked card and the issue sheet alike.
+ * `red-base` reads as two words; the rest are their value verbatim (an unrecognised record
+ * reason passes straight through). Takes a plain string so the shipped `.toString()` carries
+ * no type import and a raw park-record reason feeds it directly.
  */
-export function reasonWord(reason: ParkReason): string {
+export function reasonWord(reason: string): string {
   return reason === "red-base" ? "red base" : reason;
 }
 

@@ -23,7 +23,7 @@ import {
   STATE_DOT_CSS,
   TOP_BAR_STYLES,
 } from "./dashboard-assets.ts";
-import { dotClass, freezeIntent } from "./dashboard-visual-state.ts";
+import { dotClass, freezeIntent, reasonWord } from "./dashboard-visual-state.ts";
 import {
   escapeHtml,
   escapeTitle,
@@ -522,7 +522,7 @@ ${renderTopBar(opts.projects?.length ? renderRepoDropdown(opts.projects, opts.se
           // happens there — no inline /answer form). The href to the campaign view is
           // the no-JS fallback; parked issues are always prunable, so under prune the
           // card carries data-prunable so the sheet offers Prune (ADR 0005).
-          (p) => `<a class="parked-card" href="/?project=${encodeURIComponent(status.project)}" data-issue="${escapeHtml(p.issueNumber)}" data-project="${escapeHtml(status.project)}"${opts.prune ? ` data-prunable="1"` : ""}><div class="parked-card-title"><span class="parked-issue">#${escapeHtml(p.issueNumber)}</span> ${escapeHtml(p.description)}</div><div class="parked-card-meta">waiting <span class="parked-waited" data-parked-at="${escapeHtml(p.parkedAt)}">…</span> · ${escapeHtml(p.reason)}</div></a>`,
+          (p) => `<a class="parked-card" href="/?project=${encodeURIComponent(status.project)}" data-issue="${escapeHtml(p.issueNumber)}" data-project="${escapeHtml(status.project)}"${opts.prune ? ` data-prunable="1"` : ""}><div class="parked-card-title"><span class="parked-issue">#${escapeHtml(p.issueNumber)}</span> ${escapeHtml(p.description)}</div><div class="parked-card-meta">waiting <span class="parked-waited" data-parked-at="${escapeHtml(p.parkedAt)}">…</span> · ${escapeHtml(reasonWord(p.reason))}</div></a>`,
         )
         .join("")}</section>`
     : ""

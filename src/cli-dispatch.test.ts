@@ -290,7 +290,8 @@ test("dispatch run selects the agent, archives the leftover, runs the loop, maps
   await dispatch({ kind: "run", agent: { provider: "codex" }, args: ["436"], json: false }, deps);
   assert.deepEqual((deps.selectAgent as any).calls, [[deps.cfg, { provider: "codex" }]]);
   assert.equal((deps.archiveLeftoverRun as any).calls.length, 1);
-  assert.deepEqual((deps.runLoop as any).calls, [[deps.cfg, "436"]]);
+  // The loop is handed the host budget so it holds one slot around the container (design §8).
+  assert.deepEqual((deps.runLoop as any).calls, [[deps.cfg, "436", deps.host]]);
   assert.deepEqual(exitCodes, [0]);
 });
 
@@ -619,8 +620,25 @@ test("dispatch answer for a standalone park (no campaign) delivers then runs the
   await dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps);
   assert.deepEqual((deps.answerParked as any).calls, [[deps.cfg, "436", "ok"]]);
   assert.equal((deps.campaign as any).calls.length, 0, "a standalone park never redrives");
-  assert.deepEqual((deps.runLoop as any).calls, [[deps.cfg, "436"]], "the run consumes the answered record");
+  assert.deepEqual((deps.runLoop as any).calls, [[deps.cfg, "436", deps.host]], "the run consumes the answered record and takes a host slot");
   assert.deepEqual(exitCodes, [0]); // the standalone green answer exits 0
+});
+
+test("dispatch answer runs the same credential preflight as run before delivering (design §3 step 1, §15)", async () => {
+  const { deps } = makeDeps();
+  await dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps);
+  // answer carries no --agent flags, so it preflights the project/inherited selection.
+  assert.deepEqual((deps.selectAgent as any).calls, [[deps.cfg, {}]], "the provider and its credentials are checked up front");
+});
+
+test("dispatch answer preflight refuses before delivering when the agent selection is bad", async () => {
+  const { deps } = makeDeps({
+    selectAgent: (() => {
+      throw new Error('agent provider "codex" has no credentials');
+    }) as any,
+  });
+  await assert.rejects(dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps), /no credentials/);
+  assert.equal((deps.answerParked as any).calls.length, 0, "a failed preflight delivers nothing");
 });
 
 test("dispatch answer with no text throws the needs-a-task-id-and-text message", async () => {

@@ -10,7 +10,7 @@ Titles are plain and descriptive, with **no bracketed prefix** — a prefix cann
 | --- | --- |
 | **Type (nature)** | native GitHub **issue type**, exactly one: `Epic` (a container — holds no work of its own, closes when its sub-issues do), `Bug` (something is broken), `Task` (every other deliberate piece of work). There is no Documentation or Feature type — a doc change is a `Task` labelled `documentation`; a feature is a `Task`. |
 | Priority | label, exactly one of `P0` (critical), `P1` (high — blocking), `P2` (medium), `P3` (low) — applies to **all** work (severity on a bug, priority on planned work). |
-| Readiness | label — `ready-for-agent` (fully specified, runnable unattended), `ready-for-human`, `needs-info`, and `needs-triage` (the default until you are certain it is `ready-for-agent`). |
+| Readiness | label — `ready-for-agent` (fully specified, runnable AFK), `ready-for-human`, `needs-info`, and `needs-triage` (the default until you are certain it is `ready-for-agent`). |
 | Area | label — `orchestrator`, `gateway`, `comms`, `dashboard`, `layout`, `launcher`. |
 | Lifecycle | `known-red` (a check already failing at baseline), `pending-verify` (merged on branch, awaiting a local end-to-end validation — see Closing). |
 | Shape / decision | `duplicate`, `wont-fix`. |
@@ -26,13 +26,13 @@ Type is set via the **API**, not a label: `gh api --method PATCH repos/jjforge/v
 
 ## Declaring a ticket's file-set
 
-`campaign-plan` keeps co-wave tickets file-disjoint so a wave never collides at integration ([`campaigns.md`](campaigns.md)), and it reads which files a ticket touches from the body. Give every `ready-for-agent` ticket an explicit marker **line** — start a line with `Touches:` or `Files:` and list the files it touches, each in backticks:
+The planner keeps co-wave tickets file-disjoint so a wave never collides at integration ([`campaigns.md`](campaigns.md)), and it reads which files a ticket touches from the body. Give every `ready-for-agent` ticket an explicit marker **line** — start a line with `Touches:` or `Files:` and list the files it touches, each in backticks:
 
 ```
 Touches (existing files): `fileset.ts`, `src/cli.mts`
 ```
 
-Only that line is read, so naming other filenames in the prose (an env file, a config, a spec link) is harmless. Paths reduce to their basename, so cite a file however you like. A ticket with no marker line falls back to a whole-body scan and is far likelier to resolve as under-specified — so `campaign-plan` halts on it; the marker line is what makes a ticket schedulable unattended.
+Only that line is read, so naming other filenames in the prose (an env file, a config, a spec link) is harmless. Paths reduce to their basename, so cite a file however you like. A ticket with no marker line falls back to a whole-body scan and is far likelier to resolve as under-specified — so the planner halts on it; the marker line is what makes a ticket schedulable AFK.
 
 **Files the ticket _creates_ go on a `Creates:` line** — a peer of `Touches:`/`Files:` — because a new file is legitimately absent from the tree, and a `Touches:` cite that the tree lacks is treated as a stale or typo'd note (it forbids confidence). `Creates:` cites are counted for wave-disjointness like any other, but are exempt from that tree-presence check:
 
@@ -40,7 +40,7 @@ Only that line is read, so naming other filenames in the prose (an env file, a c
 Creates (new files): `event-log.ts`, `event-log.test.ts`
 ```
 
-A tracer-bullet ticket whose whole job is to add a new module carries only a `Creates:` line; a ticket that both edits existing files and adds new ones carries both a `Touches:` and a `Creates:` line. Without this, a new-file-only ticket cites basenames the tree does not have yet and resolves under-specified, so `campaign-plan` cannot schedule it.
+A tracer-bullet ticket whose whole job is to add a new module carries only a `Creates:` line; a ticket that both edits existing files and adds new ones carries both a `Touches:` and a `Creates:` line. Without this, a new-file-only ticket cites basenames the tree does not have yet and resolves under-specified, so the planner cannot schedule it.
 
 ## Closing — merge → `pending-verify` → close
 

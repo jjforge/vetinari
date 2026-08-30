@@ -22,7 +22,7 @@ These govern every change — yours interactively and every campaign agent's (th
 
 **File one the moment you find it — no permission needed.** An issue changes no code and ships nothing, so it is not an outward action that needs a confirm; a finding you carry to the end of a turn instead of filing is lost. Say what you saw and where, label it, and **file it separately** — do not fold the finding into the change you are making.
 
-**No issue numbers in always-on / current-truth context** — this file, `CONTEXT.md`, `docs/adr/`, the memory store. A number there rots: the issue closes and the text still implies pending work. Describe the _behaviour_ ("a carve of a merged target still dropped its dependents") and let the tracker hold the number; query the live set when you need it (`gh issue list --label …`). **Cite numbers freely in dated records** — commits, `CHANGELOG.md`, issue comments, what you report to the user — those are pinned to a moment and stay accurate.
+**No issue numbers in always-on / current-truth context** — this file, `CONTEXT.md`, `docs/adr/`, the memory store. A number there rots: the issue closes and the text still implies pending work. Describe the _behaviour_ ("a prune of a merged target still dropped its dependents") and let the tracker hold the number; query the live set when you need it (`gh issue list --label …`). **Cite numbers freely in dated records** — commits, `CHANGELOG.md`, issue comments, what you report to the user — those are pinned to a moment and stay accurate.
 
 ## Changelog — log every user-facing change as part of landing it
 

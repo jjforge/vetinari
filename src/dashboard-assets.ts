@@ -281,8 +281,6 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
   const replyOptions = document.getElementById("reply-options");
   const replyText = document.getElementById("reply-text");
   const replyForm = document.getElementById("reply-form");
-  const redriveForm = document.getElementById("redrive-form");
-  const redriveProject = redriveForm.querySelector('input[name="project"]');
   const sheetActions = document.querySelector(".sheet-actions");
   // The single moves rule (dashboard-visual-state.ts, #307), single-sourced into the
   // browser via .toString() so the node test and this script run the same function.
@@ -299,17 +297,17 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
     crash: "The run died with no verdict. Redrive to pick the campaign back up.",
   };
   // The foot (reply + actions) shows only while it holds a live control — a reply to
-  // send, a redrive to run, or a prune to offer — so a plain issue's sheet grows no empty bar.
+  // send or a prune to offer — so a plain issue's sheet grows no empty bar.
   const updateFoot = () => {
     const prune = document.getElementById("prune-panel");
     const pruneShown = Boolean(prune && !prune.hidden);
-    sheetActions.hidden = replySend.hidden && redriveForm.hidden && !pruneShown;
-    // A standalone Prune — the only move (a running/unstarted issue), not beside a reply or
-    // a redrive, and not yet in its confirm step — gets a plain-words explainer of what a
-    // prune does; when a reply or redrive sits alongside, they give the context instead.
+    sheetActions.hidden = replySend.hidden && !pruneShown;
+    // A standalone Prune — the only move (a running/unstarted issue), not beside a reply and
+    // not yet in its confirm step — gets a plain-words explainer of what a prune does; when a
+    // reply sits alongside, it gives the context instead.
     const explainer = document.getElementById("prune-explainer");
     const start = document.getElementById("prune-start");
-    if (explainer) explainer.hidden = !pruneShown || !replySend.hidden || !redriveForm.hidden || (start ? start.hidden : true);
+    if (explainer) explainer.hidden = !pruneShown || !replySend.hidden || (start ? start.hidden : true);
   };
   // Elapsed is a working span in ms; show it as coarse minutes/hours.
   const fmtElapsed = (ms) => {
@@ -324,13 +322,14 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
   issueDetail.addEventListener("click", (event) => { if (event.target === issueDetail) closeSheet(); });
   // Reassigned by the prune block when prune is enabled; a no-op otherwise.
   let onOpenIssue = () => {};
-  // The moves a state allows (design §11, #307), all gated through the one issueMoves rule:
+  // The issue-level moves a state allows (design §11, #307, #325), gated through the one
+  // issueMoves rule:
   // - reply (question/stall): the hoisted title + elapsed, the full question, the offered
   //   options as buttons that fill the field (never submit), and the free-text box; Reply
   //   posts it through /answer to answer-and-continue the parked task.
   // - a redrive-only park (conflict/red-base/crash): the same block shows a fix-forward
-  //   notice instead of the box, and Redrive (→ /redrive) picks the campaign back up.
-  // - prune / redrive gate their own controls; a completed or archived issue offers none.
+  //   notice instead of the box; the redrive itself is the whole-campaign control on the page.
+  // - prune gates its own control; a completed or archived issue offers none.
   const renderMoves = (d) => {
     const moves = issueMoves({ status: d.status, reason: d.reason, archived: d.archived });
     // The reply block shows the answer UI for a question/stall, or a fix-forward notice for
@@ -338,9 +337,6 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
     const notice = !moves.reply && d.status === "parked" && !d.archived ? (FIX_FORWARD[d.reason] || "") : "";
     detailReply.hidden = !(moves.reply || notice);
     replySend.hidden = !moves.reply;
-    // Redrive is project-scoped (no taskId): the /redrive form carries only the project.
-    redriveForm.hidden = !moves.redrive;
-    redriveProject.value = moves.redrive ? d.project : "";
     if (moves.reply || notice) {
       // The hoisted facts above the box: the issue title and how long it has waited.
       replyTitle.textContent = d.title || ("Issue #" + d.issueNumber);
@@ -446,7 +442,6 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
     // passed prunable is only the loading-state hint for the prune panel.
     detailReply.hidden = true;
     replySend.hidden = true;
-    redriveForm.hidden = true;
     onOpenIssue(prunable, project, issue);
     updateFoot();
     try {

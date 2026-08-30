@@ -6,6 +6,7 @@ import {
   issueMoves,
   paneActivity,
   reasonWord,
+  redriveAllowed,
   tallyDotClass,
 } from "./dashboard-visual-state.ts";
 import { reconstructIssueDetail } from "./dashboard-model.ts";
@@ -50,6 +51,30 @@ test("freezeIntent reads 'waiting for updates' before the first refresh (null la
   assert.equal(intent.updatedText, "waiting for updates");
 });
 
+test("redriveAllowed allows a redrive only for a stopped campaign whose lease is dead (design §7, §11, #325)", () => {
+  // The whole-campaign safety rule: redrive is safe only when the campaign's fold is
+  // stopped (parked or failed — a crash folds its in-flight members to parked{crash})
+  // AND no campaign process for the project still holds the host lease.
+  assert.deepEqual(redriveAllowed("parked", false), { allowed: true, reason: "" });
+  assert.deepEqual(redriveAllowed("failed", false), { allowed: true, reason: "" });
+});
+
+test("redriveAllowed refuses while a campaign process still holds the lease, with a one-line reason (#325)", () => {
+  // The observed bug: redrive fired on a draining wave started a second campaign process
+  // over the live one. A live lease is the strongest signal there is a process to collide with.
+  assert.deepEqual(redriveAllowed("parked", true), { allowed: false, reason: "a campaign process is still running" });
+  assert.deepEqual(redriveAllowed("failed", true), { allowed: false, reason: "a campaign process is still running" });
+  // A running fold reads as a live process too, whatever the lease probe returned.
+  assert.deepEqual(redriveAllowed("running", false), { allowed: false, reason: "a campaign process is still running" });
+});
+
+test("redriveAllowed refuses a settled or never-run campaign — nothing to pick back up (#325)", () => {
+  // A completed campaign is settled (every wave closed); an unstarted/empty one has no
+  // stopped campaign to resume. Neither is a redrive target, so each greys with its reason.
+  assert.deepEqual(redriveAllowed("completed", false), { allowed: false, reason: "the campaign is settled — nothing to redrive" });
+  assert.deepEqual(redriveAllowed("unstarted", false), { allowed: false, reason: "no campaign to redrive" });
+});
+
 test("paneActivity counts a visible append — new lines, pane open and following (#198)", () => {
   // A live-tail/host-log frame that visibly adds lines is a co-equal update: it resets
   // the live-bar's freshness clock, just like a wave/feed refresh.
@@ -57,30 +82,30 @@ test("paneActivity counts a visible append — new lines, pane open and followin
   assert.equal(paneActivity({ appended: 1, open: true, following: true }), true);
 });
 
-test("issueMoves offers reply, prune and redrive for a question or stalled park (#307)", () => {
-  // A question or a stall wants a human answer, so both carry the full set: reply the
-  // agent, prune the issue, or redrive the campaign (user-guide park reasons, design §11).
-  assert.deepEqual(issueMoves({ status: "parked", reason: "question" }), { reply: true, prune: true, redrive: true });
-  assert.deepEqual(issueMoves({ status: "parked", reason: "stalled" }), { reply: true, prune: true, redrive: true });
+test("issueMoves offers reply and prune for a question or stalled park — redrive is a campaign move, not an issue one (#325)", () => {
+  // A question or a stall wants a human answer, so both carry reply + prune. Redrive picks up
+  // the whole campaign (design §7, §11), so it is a project-page control, never an issue move.
+  assert.deepEqual(issueMoves({ status: "parked", reason: "question" }), { reply: true, prune: true });
+  assert.deepEqual(issueMoves({ status: "parked", reason: "stalled" }), { reply: true, prune: true });
 });
 
 test("issueMoves reads a reasonless legacy park as a question (#307)", () => {
   // A park written before the reason enum existed still reads as an answerable question.
-  assert.deepEqual(issueMoves({ status: "parked" }), { reply: true, prune: true, redrive: true });
+  assert.deepEqual(issueMoves({ status: "parked" }), { reply: true, prune: true });
 });
 
-test("issueMoves drops reply for a conflict, red-base or crash park — prune and redrive only (#307)", () => {
+test("issueMoves drops reply for a conflict, red-base or crash park — prune only (#325)", () => {
   // These are fixed forward on the base and redriven, never answered per-issue: no reply,
-  // just prune and redrive (with the fix-forward instruction carried in the sheet notice).
+  // just prune (the fix-forward instruction rides the sheet notice; redrive is on the page).
   for (const reason of ["conflict", "red-base", "crash"] as const) {
-    assert.deepEqual(issueMoves({ status: "parked", reason }), { reply: false, prune: true, redrive: true });
+    assert.deepEqual(issueMoves({ status: "parked", reason }), { reply: false, prune: true });
   }
 });
 
-test("issueMoves offers prune and redrive for a failed issue (#307)", () => {
+test("issueMoves offers prune for a failed issue (#325)", () => {
   // The wire status is `failure` (the `IssueStatus` enum), the string `/api/issue` ships —
   // never `failed`, which the sheet's move rule used to key on so a failed issue got no moves.
-  assert.deepEqual(issueMoves({ status: "failure" }), { reply: false, prune: true, redrive: true });
+  assert.deepEqual(issueMoves({ status: "failure" }), { reply: false, prune: true });
 });
 
 test("issueMoves keys on the exact status /api/issue emits for a failed issue, so its sheet renders Prune (#317)", () => {
@@ -94,22 +119,22 @@ test("issueMoves keys on the exact status /api/issue emits for a failed issue, s
   ] as unknown as Parameters<typeof reconstructIssueDetail>[0];
   const wireStatus = reconstructIssueDetail(events, "101").status;
   assert.equal(wireStatus, "failure");
-  assert.deepEqual(issueMoves({ status: wireStatus }), { reply: false, prune: true, redrive: true });
+  assert.deepEqual(issueMoves({ status: wireStatus }), { reply: false, prune: true });
 });
 
 test("issueMoves offers only prune for a running or unstarted issue (#307)", () => {
-  assert.deepEqual(issueMoves({ status: "running" }), { reply: false, prune: true, redrive: false });
-  assert.deepEqual(issueMoves({ status: "unstarted" }), { reply: false, prune: true, redrive: false });
+  assert.deepEqual(issueMoves({ status: "running" }), { reply: false, prune: true });
+  assert.deepEqual(issueMoves({ status: "unstarted" }), { reply: false, prune: true });
 });
 
 test("issueMoves offers nothing for a completed issue (#307)", () => {
-  assert.deepEqual(issueMoves({ status: "completed" }), { reply: false, prune: false, redrive: false });
+  assert.deepEqual(issueMoves({ status: "completed" }), { reply: false, prune: false });
 });
 
 test("issueMoves offers nothing for an archived (read-only) issue, whatever its state (#307)", () => {
   // An archived run is read-only — no move mutates a finished campaign's log.
-  assert.deepEqual(issueMoves({ status: "parked", reason: "question", archived: true }), { reply: false, prune: false, redrive: false });
-  assert.deepEqual(issueMoves({ status: "failure", archived: true }), { reply: false, prune: false, redrive: false });
+  assert.deepEqual(issueMoves({ status: "parked", reason: "question", archived: true }), { reply: false, prune: false });
+  assert.deepEqual(issueMoves({ status: "failure", archived: true }), { reply: false, prune: false });
 });
 
 test("paneActivity ignores a frame that adds no visible lines (#198)", () => {

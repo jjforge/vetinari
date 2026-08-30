@@ -47,15 +47,16 @@ export function reasonWord(reason: string): string {
  * The moves the issue sheet offers for a given lifecycle state and park reason (design §11,
  * user-guide park reasons) — the single pure rule behind "exactly the moves the reason
  * allows" (#307). Each move POSTs to a route that shells the CLI verb: `reply` → `/answer`,
- * `prune` → `/prune`, `redrive` → `/redrive`. Graft is a campaign-level move, not a per-issue
- * one, so it is not here.
+ * `prune` → `/prune`. Redrive picks up the *whole campaign* (design §7), so it is a
+ * campaign control on the project page ({@link redriveAllowed}), never an issue move — and
+ * neither is graft; both are absent here (#325).
  *
- * - A question or a stall wants a human answer, so both carry `reply` alongside prune/redrive.
- * - A conflict, red base or crash is fixed forward on the base and redriven, never answered
- *   per issue — prune and redrive only (the fix-forward instruction rides the sheet notice).
- * - A `failure` issue offers prune and redrive; a `running`/`unstarted` one offers only prune;
- *   a `completed` one is banked and offers nothing. `failure` is the wire word `/api/issue`
- *   ships (the `IssueStatus` enum), so the rule keys on it, never the design-prose `failed`.
+ * - A question or a stall wants a human answer, so both carry `reply` alongside prune.
+ * - A conflict, red base or crash is fixed forward on the base and redriven at the campaign,
+ *   never answered per issue — prune only (the fix-forward instruction rides the sheet notice).
+ * - A `failure` issue offers prune; a `running`/`unstarted` one offers prune; a `completed`
+ *   one is banked and offers nothing. `failure` is the wire word `/api/issue` ships (the
+ *   `IssueStatus` enum), so the rule keys on it, never the design-prose `failed`.
  * - An archived (read-only) issue offers nothing — no move mutates a finished run's log.
  *
  * A legacy park with no reason reads as an answerable question (mirroring `renderMoves`).
@@ -71,15 +72,39 @@ export function issueMoves({
   status: string;
   reason?: string;
   archived?: boolean;
-}): { reply: boolean; prune: boolean; redrive: boolean } {
-  if (archived) return { reply: false, prune: false, redrive: false };
+}): { reply: boolean; prune: boolean } {
+  if (archived) return { reply: false, prune: false };
   if (status === "parked") {
     const answerable = !reason || reason === "question" || reason === "stalled";
-    return { reply: answerable, prune: true, redrive: true };
+    return { reply: answerable, prune: true };
   }
-  if (status === "failure") return { reply: false, prune: true, redrive: true };
-  if (status === "running" || status === "unstarted") return { reply: false, prune: true, redrive: false };
-  return { reply: false, prune: false, redrive: false };
+  if (status === "failure") return { reply: false, prune: true };
+  if (status === "running" || status === "unstarted") return { reply: false, prune: true };
+  return { reply: false, prune: false };
+}
+
+/**
+ * Whether a whole-campaign redrive is safe to offer (design §7, §11) — the single pure
+ * rule the greyed control, its confirm dialog, and the `/redrive` route all gate on, so the
+ * button, the page and the server can never disagree on when a redrive is allowed (#325).
+ *
+ * Redrive is safe only when both hold: the campaign's fold is **stopped** — `parked`
+ * (`campaign-parked`, or a crash whose in-flight members folded to `parked{crash}`) or
+ * `failed` (`campaign-failed`) — **and** no campaign process for the project still holds the
+ * host lease (`leaseLive` is false, from the same probe crash detection reads). A live lease,
+ * or a still-`running` fold, means there is a process to collide with — the observed bug was a
+ * second campaign spawned over a draining wave — so it refuses. A `completed` campaign is
+ * settled and an `unstarted`/empty one never ran, so neither is a redrive target. When it
+ * refuses it carries a one-line reason the control and the route's 409 both surface verbatim.
+ *
+ * `campaignState` is a plain string (the `CampaignState` values) so this stays a
+ * dependency-free reducer beside the others in this file.
+ */
+export function redriveAllowed(campaignState: string, leaseLive: boolean): { allowed: boolean; reason: string } {
+  if (leaseLive || campaignState === "running") return { allowed: false, reason: "a campaign process is still running" };
+  if (campaignState === "parked" || campaignState === "failed") return { allowed: true, reason: "" };
+  if (campaignState === "completed") return { allowed: false, reason: "the campaign is settled — nothing to redrive" };
+  return { allowed: false, reason: "no campaign to redrive" };
 }
 
 /**

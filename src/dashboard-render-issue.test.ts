@@ -66,14 +66,14 @@ test("the issue-detail sheet markup, CSS, and script are defined once and shared
   assert.ok(!landing.includes("#76"));
   assert.ok(!landing.includes("kept in sync"));
 });
-test("the issue sheet foot carries a /redrive form and a reply-send button, one button style across moves (#307)", () => {
+test("the issue sheet foot carries a reply-send button but no Redrive control — redrive is a campaign move now (#325)", () => {
   const markup = issueDetailSheetMarkup(true);
-  // Redrive is its own move — a form POSTing /redrive (project-scoped, no taskId) in the foot.
-  assert.match(
-    markup,
-    /<form method="post" action="\/redrive" id="redrive-form"[^>]*hidden><input type="hidden" name="project" value="" \/><button type="submit" class="sheet-btn">Redrive<\/button><\/form>/,
-  );
-  // Reply submits the answer form; it shares the one move-button style with Redrive and Prune.
+  // Redrive picks up the whole campaign (design §7), so it moved to the project page: the
+  // sheet foot no longer carries a /redrive form or a Redrive button of its own.
+  assert.doesNotMatch(markup, /action="\/redrive"/);
+  assert.doesNotMatch(markup, /id="redrive-form"/);
+  assert.doesNotMatch(markup, />Redrive</);
+  // Reply submits the answer form; it shares the one move-button style with Prune.
   assert.match(markup, /<button type="submit" form="reply-form" id="reply-send" class="sheet-btn" hidden>Reply<\/button>/);
   assert.match(markup, /class="sheet-btn prune-start"/);
   // The reply panel hoists the issue title and the elapsed time above the answer box.
@@ -85,13 +85,15 @@ test("the issue sheet foot carries a /redrive form and a reply-send button, one 
   assert.doesNotMatch(ISSUE_DETAIL_SHEET_STYLES, /\.reply-redrive \{/);
 });
 
-test("the issue sheet gates its moves through the single issueMoves rule, single-sourced into the script (#307)", () => {
-  // The sheet's reply/redrive/prune visibility is the one pure rule (dashboard-visual-state),
-  // shipped into the browser via .toString() so the node test and the sheet run the same
-  // function — a question/stall gets reply, a conflict/red-base/crash gets a fix-forward
-  // notice + redrive, and every non-completed state prunes per the rule.
+test("the issue sheet gates its moves through the single issueMoves rule, single-sourced into the script (#307, #325)", () => {
+  // The sheet's reply/prune visibility is the one pure rule (dashboard-visual-state), shipped
+  // into the browser via .toString() so the node test and the sheet run the same function —
+  // a question/stall gets reply, a conflict/red-base/crash gets a fix-forward notice, and
+  // every non-completed state prunes per the rule. No redrive: it is a campaign control now.
   assert.ok(ISSUE_DETAIL_SHEET_SCRIPT.includes("function issueMoves("));
   assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /issueMoves\(\{ status: d\.status, reason: d\.reason, archived: d\.archived \}\)/);
+  assert.doesNotMatch(ISSUE_DETAIL_SHEET_SCRIPT, /redriveForm/);
+  assert.doesNotMatch(ISSUE_DETAIL_SHEET_SCRIPT, /moves\.redrive/);
 });
 
 test("the issue sheet carries a fix-forward notice keyed by reason for a conflict/red-base/crash park (#307)", () => {

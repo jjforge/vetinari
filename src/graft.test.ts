@@ -34,7 +34,7 @@ const harnessCfg = (
 };
 
 // Seed a running campaign onto the temp log: `campaign-start` with wave batches
-// (no terminal event, so `campaignRunning` reads it as open) plus a `campaign-batch`
+// (unsettled — no member merged, so the fold reads it as open) plus a `campaign-batch`
 // marking wave 0 in-flight — so grafts land in a *future* wave, as they do live.
 const launch = (cfg: ResolvedConfig, batches: string[][]) => {
   cfg.log.log("campaign-start", { batches, slots: 4 });
@@ -49,12 +49,55 @@ test("graft with no ids is rejected before any campaign lookup", async () => {
   );
 });
 
-test("graft with no open campaign is rejected by the precondition guard", async () => {
+test("graft with no campaign launched (empty log) is rejected by the precondition guard", async () => {
   const cfg = harnessCfg();
   await assert.rejects(
     () => runGraft(cfg, ["301"], {}),
-    /graft adds to a live-or-resumable campaign, but none is open/,
+    /no campaign to graft/,
   );
+});
+
+test("graft onto a settled campaign (every member merged) is rejected", async () => {
+  // Every wave merged and closed — the fold reads `completed`, so the campaign is
+  // settled and refuses a graft, even with no `campaign-done` on the log.
+  const cfg = harnessCfg();
+  cfg.log.log("campaign-start", { batches: [["101"]], slots: 4 });
+  cfg.log.log("campaign-batch-done", { index: 0, merged: ["101"], held: [], clearedParked: [] });
+
+  await assert.rejects(() => runGraft(cfg, ["301"], {}), /settled/);
+});
+
+test("graft proceeds on a campaign parked and stopped with no campaign-done", async () => {
+  const cfg = harnessCfg();
+  cfg.log.log("campaign-start", { batches: [["101"]], slots: 4 });
+  cfg.log.log("campaign-batch", { index: 0, tasks: ["101"] });
+  cfg.log.log("parked", { taskId: "101", reason: "needs a decision" });
+
+  const result = await runGraft(cfg, ["301"], {});
+  assert.equal(result.applied, true);
+  assert.deepEqual(result.ids, ["301"]);
+});
+
+test("graft proceeds on a campaign that failed and stopped with no campaign-done", async () => {
+  const cfg = harnessCfg();
+  cfg.log.log("campaign-start", { batches: [["101"]], slots: 4 });
+  cfg.log.log("campaign-batch", { index: 0, tasks: ["101"] });
+  cfg.log.log("queue-done", { outcomes: { "101": "error(1)" } });
+
+  const result = await runGraft(cfg, ["301"], {});
+  assert.equal(result.applied, true);
+  assert.deepEqual(result.ids, ["301"]);
+});
+
+test("graft proceeds on a running campaign", async () => {
+  const cfg = harnessCfg();
+  cfg.log.log("campaign-start", { batches: [["101"]], slots: 4 });
+  cfg.log.log("campaign-batch", { index: 0, tasks: ["101"] });
+  cfg.log.log("queue-start", { taskIds: ["101"], slots: 4 });
+
+  const result = await runGraft(cfg, ["301"], {});
+  assert.equal(result.applied, true);
+  assert.deepEqual(result.ids, ["301"]);
 });
 
 test("--dry-run previews the placement but appends no event and enqueues nothing", async () => {

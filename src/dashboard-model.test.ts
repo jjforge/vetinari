@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { appendedEvents, archiveStatusConfig, archivedRunState, buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, campaignState, cardState, describeEvent, event, extractParkedDetails, formatFeedEvent, issueLifecycle, issueMembership, issueStateFromTask, lastEventText, listArchivedRuns, ownerRepoFromRemote, parkedReplyFor, parsePruneClosure, parseRunTimestamp, reconstructIssueDetail, reduceCampaign, festiveFromCookie, viewRelevantEvents, waveLabel, waveState, selectStatus, summarizeRun, type CampaignStatus, type OrchestratorEvent } from "./status.ts";
+import { appendedEvents, archiveStatusConfig, archivedRunState, buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, campaignSettled, campaignState, cardState, describeEvent, event, extractParkedDetails, formatFeedEvent, issueLifecycle, issueMembership, issueStateFromTask, lastEventText, listArchivedRuns, ownerRepoFromRemote, parkedReplyFor, parsePruneClosure, parseRunTimestamp, reconstructIssueDetail, reduceCampaign, festiveFromCookie, viewRelevantEvents, waveLabel, waveState, selectStatus, summarizeRun, type CampaignStatus, type OrchestratorEvent } from "./status.ts";
 import type { ProjectPointer } from "./registry.ts";
 import { memoryLogger } from "./log.ts";
 
@@ -1670,6 +1670,55 @@ test("campaignRunning tracks the latest campaign only", () => {
     ]),
     true,
   );
+});
+
+test("campaignSettled is true only when every member merged — the fold, not the campaign-done marker", () => {
+  // A campaign whose every wave merged is settled even with no `campaign-done` on
+  // the log (a crash right after the last merge): the fold decides, not the marker.
+  assert.equal(
+    campaignSettled([
+      event("campaign-start", { batches: [["101"], ["201"]], slots: 1 }),
+      event("campaign-batch-done", { index: 0, merged: ["101"], held: [], clearedParked: [] }),
+      event("campaign-batch-done", { index: 1, merged: ["201"], held: [], clearedParked: [] }),
+    ]),
+    true,
+    "every member merged → settled",
+  );
+});
+
+test("campaignSettled is false for an unsettled campaign, whatever stopped it", () => {
+  // Parked and stopped with no `campaign-done`: a held member is unsettled.
+  assert.equal(
+    campaignSettled([
+      event("campaign-start", { batches: [["101"]], slots: 1 }),
+      event("campaign-batch", { index: 0, tasks: ["101"] }),
+      event("parked", { taskId: "101", reason: "needs a decision" }),
+    ]),
+    false,
+    "parked-and-stopped is unsettled",
+  );
+  // Failed and stopped: a member that errored out holds the campaign unsettled.
+  assert.equal(
+    campaignSettled([
+      event("campaign-start", { batches: [["101"]], slots: 1 }),
+      event("campaign-batch", { index: 0, tasks: ["101"] }),
+      event("queue-done", { outcomes: { "101": "error(1)" } }),
+    ]),
+    false,
+    "failed-and-stopped is unsettled",
+  );
+  // Still running: a member in flight is unsettled.
+  assert.equal(
+    campaignSettled([
+      event("campaign-start", { batches: [["101"]], slots: 1 }),
+      event("campaign-batch", { index: 0, tasks: ["101"] }),
+      event("queue-start", { taskIds: ["101"], slots: 1 }),
+    ]),
+    false,
+    "running is unsettled",
+  );
+  // No events at all: nothing folds to completed.
+  assert.equal(campaignSettled([]), false, "an empty log is not settled");
 });
 
 test("reduceCampaign folds a prune event, pruning unfinished issues from future waves", () => {

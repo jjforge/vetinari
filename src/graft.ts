@@ -21,7 +21,8 @@ import {
   type GraftRejection,
 } from "./plan.ts";
 import {
-  campaignRunning,
+  campaignSettled,
+  campaignStarted,
   issueNameFromTask,
   issueStateFromTask,
   reduceCampaign,
@@ -132,10 +133,15 @@ export async function runGraft(
     );
 
   const events = deps.readEventLog(cfg);
-  if (!campaignRunning(events))
+  if (!campaignStarted(events))
     throw new Error(
-      "graft adds to a live-or-resumable campaign, but none is open (it has finished, or none has run). " +
+      "graft adds to an open campaign, but no campaign to graft into has been launched here. " +
         "Launch one with `campaign <batch…>`, or resume a paused one with `campaign --resume`.",
+    );
+  if (campaignSettled(events))
+    throw new Error(
+      "graft adds to an open campaign, but the latest one is settled — every member merged, nothing to graft into. " +
+        "Launch a new campaign with `campaign <batch…>`.",
     );
 
   const reduced = reduceCampaign(events);

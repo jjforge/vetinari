@@ -832,7 +832,7 @@ const routed = (base: string, over: Partial<GatewayProject> = {}): GatewayProjec
   projectRoot: "/home/me/code/jjforge",
   baseLocation: base,
   conn: { token: "tok", chat: "-1" },
-  destinations: { ops: { bot: "main", chat: "-100" }, alerts: { bot: "main", chat: "-200" } },
+  destinations: { ops: { chat: "-100" }, alerts: { chat: "-200" } },
   notify: { "*": "ops", failure: "alerts", "progress:prune": "alerts" },
   parked: [],
   outbox: listOutboxIn(outboxDirOf(base)),

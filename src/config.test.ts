@@ -15,6 +15,7 @@ import {
   resolveAgentSelection,
   resolveConfigPath,
   resolveDestination,
+  type Destination,
 } from "./config.ts";
 
 const CONFIG_BODY = `export default {
@@ -171,6 +172,18 @@ test("loadConfig does not warn when resolving from the canonical location", asyn
   }
 
   assert.deepEqual(warnings, []);
+});
+
+test("a Destination is { chat, thread? } — the bot field is gone (one bot per project, design §10)", () => {
+  // A destination names no bot: one bot per project, its token read from host.env,
+  // so a destination only picks where on that bot a message lands.
+  const chatOnly: Destination = { chat: "-100" };
+  const withThread: Destination = { chat: "-100", thread: "42" };
+  assert.equal(chatOnly.chat, "-100");
+  assert.equal(withThread.thread, "42");
+  // @ts-expect-error `bot` was removed from Destination — a destination carries no bot.
+  const withBot: Destination = { chat: "-100", bot: "mybot" };
+  assert.equal(withBot.chat, "-100");
 });
 
 test("resolveDestination prefers a bare category entry over the wildcard default", () => {

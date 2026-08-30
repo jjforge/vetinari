@@ -136,19 +136,19 @@ export const AGENT_PROVIDERS: Record<
     efforts: ["low", "medium", "high", "xhigh"],
     credentialKeys: ["OPENAI_API_KEY"],
   },
-  // copilot → GitHub Copilot CLI; low..high effort. Non-resumable — driven by fresh re-runs.
+  // copilot → GitHub Copilot CLI; low..high effort. Experimental — non-resumable, driven by fresh re-runs (§12).
   copilot: {
     defaultModel: "claude-sonnet-4.5",
     efforts: ["low", "medium", "high"],
     credentialKeys: ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"],
   },
-  // cursor → Cursor CLI; no effort dial (empty). Non-resumable.
+  // cursor → Cursor CLI; no effort dial (empty). Experimental — non-resumable (§12).
   cursor: {
     defaultModel: "composer-2",
     efforts: [],
     credentialKeys: ["CURSOR_API_KEY"],
   },
-  // opencode → OpenCode; effort maps to its `--variant` (minimal..max). Non-resumable.
+  // opencode → OpenCode; effort maps to its `--variant` (minimal..max). Experimental — non-resumable (§12).
   opencode: {
     defaultModel: "opencode/big-pickle",
     efforts: ["minimal", "low", "high", "max"],
@@ -172,6 +172,19 @@ const SUPPORTED_LIST = "claude, pi, codex, copilot, cursor, opencode";
 /** Whether the loop can resume this provider's session between turns, or must re-enter each turn fresh. */
 export const isResumableProvider = (provider: AgentProviderName): boolean =>
   !NON_RESUMABLE_PROVIDERS.includes(provider);
+
+/**
+ * The one line the non-resumable park→answer gap turns on (design §3, §12 / #212).
+ * The experimental providers (copilot/cursor/opencode) keep no session across a park, so
+ * an answer can only reach a fresh run through the issue text — which needs `postComment`.
+ * Preflight prints it as a warning when the selected provider is non-resumable and
+ * `postComment` is unset; `answer` fails fast with the SAME line rather than silently
+ * re-running the whole task from scratch. Provider-only so both sites read identically.
+ */
+export const nonResumableAnswerWarning = (provider: AgentProviderName): string =>
+  `agent provider "${provider}" is experimental and non-resumable: it keeps no session across a park, ` +
+  `so a parked question can only be answered by posting the reply as an issue comment and re-entering a fresh run — ` +
+  `configure \`postComment\` (e.g. githubIssueComment(repo)) or a park on ${provider} cannot be answered.`;
 
 /**
  * The fully-resolved agent choice for one invocation, ready to hand to `agentFor`'s

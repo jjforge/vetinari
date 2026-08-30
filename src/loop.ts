@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import type { ResolvedConfig } from "./config.ts";
+import { nonResumableAnswerWarning, type ResolvedConfig } from "./config.ts";
 import type { Logger } from "./log.ts";
 import { runGates } from "./gate.ts";
 import { agentFor, agentSelectionFor, makeSandbox, type Sandbox } from "./sandbox.ts";
@@ -169,7 +169,10 @@ export async function runLoop(cfg: ResolvedConfig, taskId: string, entry?: Resum
   const task = entry ? "" : await cfg.fetchTask(taskId);
   // Whether the loop resumes a session between turns (claude/pi/codex) or re-enters each
   // turn as a fresh run (copilot/cursor/opencode carry no durable session) — ADR 0016 / #212.
-  const { resumable } = agentSelectionFor(cfg);
+  const { resumable, provider } = agentSelectionFor(cfg);
+  // Preflight (design §3 step 1): a non-resumable provider with no `postComment` cannot have
+  // a parked question answered — surface it up front rather than only when a park is stranded.
+  if (!resumable && !cfg.postComment) console.warn(nonResumableAnswerWarning(provider));
   const sbx = await deps.makeSandbox(cfg, taskId);
   // Start the per-task activity stream fresh — live-only scratch, overwritten per run (ADR 0015).
   initActivityLog(cfg.stateDir, taskId);

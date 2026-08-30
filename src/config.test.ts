@@ -10,6 +10,7 @@ import {
   loadConfig,
   parseAgentFlags,
   missingCredentials,
+  nonResumableAnswerWarning,
   parseAgentOverride,
   resolveAgentSelection,
   resolveConfigPath,
@@ -308,6 +309,16 @@ test("resolveAgentSelection accepts the non-resumable providers, flagging them r
 test("resolveAgentSelection flags the resumable providers resumable:true", () => {
   for (const provider of ["claude", "pi", "codex"] as const)
     assert.equal(resolveAgentSelection({ provider }).resumable, true);
+});
+
+test("nonResumableAnswerWarning names the provider as experimental, what happens on a park, and postComment as the fix", () => {
+  const line = nonResumableAnswerWarning("copilot");
+  // One line: no embedded newline splitting it into paragraphs.
+  assert.ok(!line.includes("\n"), "the warning is a single line");
+  assert.match(line, /copilot/); // the selected provider
+  assert.match(line, /experimental/); // §12 marks the three experimental
+  assert.match(line, /park/); // what will happen on a park
+  assert.match(line, /postComment/); // what to configure
 });
 
 test("resolveAgentSelection carries no effort for a provider with no effort dial (cursor), and rejects one passed explicitly", () => {

@@ -16,7 +16,7 @@
  */
 import { resolve } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { parseAgentFlags } from "./config.ts";
+import { nonResumableAnswerWarning, parseAgentFlags } from "./config.ts";
 import { renderUsage } from "./help.ts";
 import type { HostBudget } from "./host-slots.ts";
 import type { build, baseline, campaign, tgTest, requireTelegram } from "./modes.ts";
@@ -536,7 +536,7 @@ async function dispatchAnswer(
   const taskId = cmd.taskId;
   // Resumable (claude/pi/codex): resume the session with an answerPrompt. Non-resumable
   // (copilot/cursor/opencode): relay the answer as an issue comment and re-enter FRESH.
-  const { resumable } = deps.agentSelectionFor(cfg);
+  const { resumable, provider } = deps.agentSelectionFor(cfg);
   let outcome: string;
   if (resumable) {
     const parked = deps.readParked(cfg, taskId);
@@ -547,10 +547,7 @@ async function dispatchAnswer(
   } else {
     // Fail-loud (issue-only): post the comment BEFORE the run, and never start the run
     // if it cannot be posted — an answer is never silently lost.
-    if (!cfg.postComment)
-      throw new Error(
-        `postComment not configured — cannot relay the answer to ${taskId} for a non-resumable agent (wire githubIssueComment(repo) in your config).`,
-      );
+    if (!cfg.postComment) throw new Error(nonResumableAnswerWarning(provider));
     const parked = deps.readParked(cfg, taskId, { requireSession: false });
     await cfg.postComment(
       taskId,

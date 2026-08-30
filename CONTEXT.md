@@ -1,380 +1,281 @@
 # Vetinari
 
-The boundary model for running the vetinari orchestrator across multiple
-projects at once: what each project commits, what it excludes, and the shared
-host process that fronts them all.
+The domain glossary: the words vetinari's code, logs, dashboard and docs all
+speak, in the settled vocabulary. Every term here appears in the operator's
+model ([`docs/user-guide.md`](docs/user-guide.md)) or the design
+([`docs/design.md`](docs/design.md)) — those two documents are the source, this
+is the index. When two words exist for one concept, the current one is the
+heading and the retired one sits under `_Avoid_`.
 
 ## Language
 
-### Per-project layout
+### Objects
+
+**Project**:
+A repo you run vetinari in. Has a committed [[vetinari]] (config, Dockerfile) and
+an ignored [[vetinari-local]] holding this machine's secrets, logs and run state.
+_Avoid_: client, target repo, consuming project.
+
+**Issue**:
+The unit of work, read from your tracker. Runnable unattended only when its body
+says what to build and which files it touches.
+
+**Agent**:
+One per [[issue]], sealed in a container on branch `agent/<id>`, committing as it
+goes. Ends each turn by saying COMPLETE or BLOCKED-with-a-question; it never
+decides "done".
+
+**Gate**:
+Your test commands. The orchestrator runs them after every COMPLETE and again on
+the merged base; green is the only signal that an issue is done. A red gate
+resumes the same agent with the output.
+
+**Campaign**:
+A set of [[issue]]s planned into [[wave]]s and run wave by wave — the unit you
+launch, watch and pick back up.
+_Avoid_: queue (removed as a mode), campaign-plan (say `campaign --dry-run`).
+
+**Wave**:
+The [[issue]]s that run at the same time: no dependency between them, no shared
+files. When a wave finishes its greens merge onto the [[base]], the base is gated
+as a whole, and the next wave starts from there.
+_Avoid_: batch, round.
+
+**Base**:
+The branch checked out when a [[campaign]] launched. Merges land on it locally;
+pushing is the human's. The next [[wave]] never starts until the base is green.
+
+### Issue states
+
+Five words, one per situation. Waves, campaigns and the project card roll up from
+their issues in the order failed > parked > running > completed.
+
+**unstarted**:
+In the plan, no [[agent]] yet.
+_Avoid_: queued, pending.
+
+**running**:
+An [[agent]] is on the [[issue]] — executing, or waiting for a container slot.
+The slot-wait is not a separate status.
+_Avoid_: working, in progress.
+
+**parked**:
+Held on a human, work preserved, resumable — the one word for every "needs a
+human" situation, at the [[issue]], [[wave]], campaign and card level alike. What
+differs is the [[park-reason]], which selects the recovery. Durable: shown and
+announced until a human resolves it.
+_Avoid_: blocked, waiting, quarantined, wave-parked, interrupted (each is
+`parked` + a reason).
+
+**failed**:
+The red terminal — an [[issue]] the [[agent]] could not make green. Holds its
+[[wave]] like a park, but stops the run rather than pausing for an answer; the
+recovery is a [[redrive]]. Outranks [[parked]] on roll-up.
+_Avoid_: errored, broken.
+
+**completed**:
+The issue's work merged onto the [[base]]. A green that is not yet merged is still
+[[running]] — the word for banked work is reserved for work on the base.
+_Avoid_: merged, done.
+
+Membership is an orthogonal axis, shown as a badge rather than a state:
+
+**pruned**:
+A [[prune]] left the [[issue]] out of the campaign with its unstarted dependents.
+Derived at render from the prune event, so it shows in a live and an
+[[archived-run]] alike.
+_Avoid_: removed, dropped, carved.
+
+**grafted**:
+A [[graft]] added the [[issue]] to the running campaign; it waits in a later
+[[wave]]. Derived at render and transient — becomes [[running]] on pickup.
+_Avoid_: added, appended, injected.
+
+### Park reasons
+
+**Park reason**:
+Why a [[parked]] issue or wave is held, and which recovery it offers — metadata on
+the park, not a status. One enum: `question | stalled | conflict | red-base |
+crash`.
+_Avoid_: quarantined, interrupted (those were reasons masquerading as statuses).
+
+**question**:
+The [[agent]] asked something only a human can answer. Answer it and the campaign
+continues on its own.
+
+**stalled**:
+The turn budget was spent, the [[agent]] went quiet, or a COMPLETE changed
+nothing. Read the turn log, then answer with guidance or [[prune]].
+
+**conflict**:
+A green branch conflicts with the [[base]] at merge; its branch, worktree and
+session are kept. Resolve on the base, then [[redrive]].
+_Avoid_: quarantined.
+
+**red-base**:
+Every [[issue]] passed alone but the merged [[base]] fails together — no single
+culprit is knowable. Fix forward on the base, then [[redrive]].
+
+**crash**:
+The run died with no verdict. [[redrive]] to continue.
+_Avoid_: interrupted.
+
+### The five moves
+
+The only things a human does to a [[campaign]].
+
+**Answer**:
+Reply to a [[parked]] question; the [[issue]] goes back to work and the campaign
+continues by itself. You do not answer and then separately ask it to continue.
+
+**Prune**:
+Drop an [[issue]] and everything that depends on it from a running campaign. It
+takes effect at the next [[wave]] boundary; banked work is never undone and a
+pruned issue's branch is kept.
+_Avoid_: carve, remove, cancel, drop (as the noun).
+
+**Graft**:
+Add [[issue]]s to a running campaign. Each lands in the earliest unstarted
+[[wave]] after its blockers whose members touch none of its files; the wave in
+flight is never touched.
+_Avoid_: extend, add (as the noun), append, inject.
+
+**Fix forward**:
+Repair the [[base]] by hand — resolve a [[conflict]] or a [[red-base]] — then
+[[redrive]].
+
+**Redrive**:
+Pick an unfinished [[campaign]] back up where it stopped: reconcile the log, then
+continue. Never redoes merged work, and lands green-but-unmerged work rather than
+re-running it. Resume is one path through it, not a synonym.
+_Avoid_: restart, recover, re-run, resume (as the umbrella).
+
+### Roll-ups
+
+Wave, campaign and card states are derived from their issues, one fold per level.
+
+**failed** (roll-up):
+A [[wave]], campaign or card carrying at least one [[failed]] issue — the red
+"something broke" state. Outranks [[parked]]; the recovery is a [[redrive]].
+_Avoid_: halted, errored.
+
+**idle**:
+A card with no campaign that is running, [[parked]] or [[failed]] — no plan, or a
+cleanly [[completed]] run folded away.
+_Avoid_: done, empty, inactive.
+
+### Planning
+
+**File-set resolver** (`fileSet`):
+A project config function, `fileSet(ticket) → { files, confident }`, naming the
+files an [[issue]] touches (by basename; the default reads the `Touches:`/
+`Creates:` line) so co-[[wave]] issues stay file-disjoint.
+_Avoid_: file matcher, crossover detector.
+
+**Under-specified ticket**:
+An [[issue]] whose file-set resolves `confident: false` — cites nothing, or cites
+what the tree lacks. The planner never schedules it silently: it halts and asks to
+[[prune]] it out or fix the issue.
+_Avoid_: unresolved ticket, ambiguous ticket.
+
+### Project layout & configuration
 
 **`vetinari/`**:
-The project's **committed** Vetinari configuration, versioned in the
-project's own repo. Holds the config module, the project's `Dockerfile`, and any
-custom build things or prompt override. `vetinari/` = shared.
-_Avoid_: config folder, config dir
+The project's committed vetinari configuration — config module, `Dockerfile`,
+prompt overrides — versioned in the project's own repo.
+_Avoid_: config folder, config dir.
 
 **`.vetinari.local/`**:
-The project's **excluded** (gitignored) machine-local area. Holds the project's
-credentials (`.env`), run logs, and run state (`parked/`). Never committed. The
-`.local` suffix carries the "yours, not shared" convention (`settings.local.json`,
-`.env.local`).
-_Avoid_: state dir, work dir, `.sandcastle/`
+The project's ignored, machine-local area: credentials (`.env`, `host.env`), run
+logs, and run state (`parked/`). Never committed.
+_Avoid_: state dir, work dir, `.sandcastle/`.
 
-**Shared install**:
-The single machine-wide install of vetinari, shared by every project on the
-host (ADR 0003). A project runs whatever version the machine has — it is never
-vendored a copy and never pins a version, and vetinari never appears in the
-app's own `package.json`.
-_Avoid_: runtime pull, vendored runtime
+**Container gate** (`.env`):
+The one file in [[vetinari-local]] that crosses into the [[agent]] container —
+only the agent provider's credential. A secret the agent must not see never goes
+here.
+_Avoid_: container boundary, sandbox env, container config.
 
-### Configuration layers
+**`host.env`**:
+The project's host-only secrets the container must never get — its Telegram bot
+token and chat. Read by the [[gateway]], never injected into a container.
+_Avoid_: orchestrator.env.
 
-**Configuration axes**:
-Where a config item lives is fixed by three orthogonal questions (ADR 0011): its
-**scope** (host / project / run), whether it is a **secret** (secret → the excluded
-`.vetinari.local/`, else the committed `vetinari/`), and its **container-reach** (does
-it cross into the agent container?). Answering the three names the file it belongs in.
+**`hostEnv`**:
+A committed, non-secret map in [[vetinari]] applied to the orchestrator process
+only (e.g. `GIT_CONFIG_GLOBAL`). A secret the host needs goes in [[host.env]],
+never here.
 
-**Container boundary**:
-The single gate into the agent container: **only** the keys declared in
-`.vetinari.local/.env` cross in (the sandbox runtime injects them as container env).
-Everything else — Telegram credentials, `GIT_CONFIG_GLOBAL`, the
-[[max-concurrent-containers]] ceiling — stays host-side by construction. A secret that
-must not reach the agent must never appear in `.env`.
-_Avoid_: sandbox env, container config
-
-**`.env`** (container secrets):
-The project's excluded secrets the **in-container agent** needs — the selected agent
-provider's credential (ADR 0016: `claude` → `CLAUDE_CODE_OAUTH_TOKEN`/`ANTHROPIC_API_KEY`,
-`pi` → `ANTHROPIC_API_KEY`, `codex` → `OPENAI_API_KEY`). The one file that crosses the
-[[container-boundary]]; it keeps the name `.env` because the sandbox runtime reads it by
-that name. A run whose provider's key is absent here fails a preflight before launch.
-_Avoid_: container.env
-
-**`host.env`** (host-side secrets):
-The project's excluded secrets the **host** process needs but the container must not
-get — the Telegram bot token and chat. Read into the orchestrator process and live
-per-project by the [[gateway]]; never injected into a sandbox.
-_Avoid_: orchestrator.env
-
-**hostEnv**:
-A committed, **non-secret** map in `vetinari/` applied to the orchestrator process only
-(never a sandbox) — e.g. `GIT_CONFIG_GLOBAL` pointing at a writable gitconfig path. A
-secret the host needs goes in [[host.env]], never as a literal here.
-
-### Shared host
+### Host & concurrency
 
 **Gateway**:
-The single host-level daemon (systemd) that fronts **every** project at once. A
-**dumb router**: it holds no project config and no secrets, only a registry of
-pointers. It is the sole Telegram consumer — deduping shared bot tokens so each
-bot is polled exactly once — routing each project's outbound messages per that
-project's own rules and routing inbound replies back to the right parked task.
-Replaces the old one-poller-per-project `dispatch`.
-_Avoid_: dispatcher, poller
-
-**Registration** / **register event**:
-How a project makes itself known to the gateway: it hands over its **base
-location** and nothing else. The gateway reads config and secrets from there,
-never copying them.
-_Avoid_: enrollment, subscribe
-
-**Base location**:
-The `.vetinari.local/` path a project registers with the gateway — the single
-place its config and secrets are read from, so a secret is never duplicated.
-
-**Consuming project**:
-Any software project that runs vetinari against its own backlog. Has a
-committed `vetinari/` and an excluded `.vetinari.local/`; the gateway serves
-many of them simultaneously.
-_Avoid_: client, target repo
-
-### Host concurrency
+The single host daemon that fronts every [[project]] at once — a dumb router
+holding no project config or secrets. The sole Telegram consumer: it routes each
+project's outbound notices and routes replies back to the [[parked]] issue that
+asked.
+_Avoid_: dispatch, attend, dispatcher, poller.
 
 **Max concurrent containers** (`MAX_CONCURRENT_CONTAINERS`):
-The ceiling on agent containers the **machine** allows across every project at once —
-a property of the host, set host-side (env var or a file in the gateway config dir),
-never in a project's config. A project running alone consumes all of it; unset resolves
-to a machine-derived default rather than unbounded, so the host is never swamped. Every
-run cooperates to keep the sum of live containers within it (ADR 0010, ADR 0011).
-_Avoid_: host slot budget, QUEUE_SLOTS, global slots, concurrency cap
+The ceiling on [[agent]] containers the machine allows across every project at
+once — a host property, never a project's config. Unset resolves to a
+machine-derived default, never unbounded.
+_Avoid_: QUEUE_SLOTS, host slot budget, global slots, concurrency cap.
 
 **Container share** (`containerShare`):
-A named tier — `high`, `medium` (default), or `low` — a project declares in its
-`vetinari/` config, setting its cut of [[max-concurrent-containers]] when projects
-contend. A **weighted share with a floor of one, never preemptive and never starving**:
-a higher tier takes more of the remainder, not all of it, and it only bites while more
-than one project is active.
-_Avoid_: project weight, hostWeight, priority, rank
+A tier — `high`, `medium` (default) or `low` — a project declares in [[vetinari]],
+setting its cut of [[max-concurrent-containers]] when projects contend: a weighted
+share with a floor of one, never preemptive, never starving.
+_Avoid_: hostWeight, project weight, priority, rank.
 
-**Fair share**:
-A project's currently-allowed container count under [[max-concurrent-containers]]: a
-**floor of one** per active project, plus a [[container-share]]-weighted cut of the
-remainder, computed over the *currently active* projects — so a project alone gets the
-whole ceiling and each active project always gets something. Not a reservation: it is
-the ceiling a run checks before taking its next container.
-_Avoid_: quota, allocation
-
-**Slot lease**:
-The host-level **filesystem** primitive the `campaign`/`queue` processes cooperate
-through to honor [[max-concurrent-containers]] — each records the containers it holds and
-its [[container-share]] there, and a dead holder's are reclaimed on contention. It is
-**not** the [[gateway]] (which stays a dumb router and never allocates); it is a shared
-file every run reads and writes directly, so it needs no daemon. A run takes a container
-only when under its current [[fair-share]], and releases on park or finish — so when a
-new project becomes active a busy one stops re-acquiring above its now-smaller share and
-**drains to it** as turns finish, never preempting a running container.
-_Avoid_: semaphore, lock, allocator
+**Lease**:
+The host-level file every run reads and writes directly to honour
+[[max-concurrent-containers]] — recording what each run holds and its share, and
+reclaimed from a dead holder on contention. Not the [[gateway]], which never
+allocates.
+_Avoid_: semaphore, lock, allocator.
 
 ### Communications
 
 **Message category**:
-The kind of a piece of outbound communication, used to route it. The five:
-**question** (a parked task needs a human answer — the only *interactive* one),
-**success** (green, merged, campaign complete), **failure** (halt, resume error),
-**progress** (queue/campaign/wave/batch lifecycle, including a **prune** dropping
-an issue and its dependents and a **graft** adding issues to the running campaign),
-**finding** (an incidental defect was filed).
-A routing rule may target a whole category or a specific event under it
-(`progress:wave-start`, `progress:prune`, `progress:graft`).
-_Avoid_: message type, event kind
+The kind of an outbound notice, used to route it: **question** (the only
+interactive kind), **success**, **failure**, **progress**, **finding**. A routing
+rule may target a whole category or a specific event under it
+(`progress:wave-start`).
+_Avoid_: message type, event kind.
 
-**Interactive** (of a message):
-A message that expects a reply routed back — only **question** is. Its
-destination is *where the human answers*, so a project's questions must resolve to
-a single destination the gateway can watch. All other categories are fire-and-forget.
+**Interactive** (of a notice):
+Expects a reply routed back — only **question** is. Every other category is
+fire-and-forget.
 
 **Destination**:
-A named Telegram connection (bot + chat, optionally thread) a project defines and
-routes categories to. "All → bot A, failures → bot B" is two destinations.
-_Avoid_: channel, target, route
+A named Telegram connection (bot + chat, optionally thread) a [[project]] routes
+categories to. "All → bot A, failures → bot B" is two destinations.
+_Avoid_: channel, target, route.
 
-**Routing rule** / **notify map**:
-A project's declaration, in its `vetinari/` config, of which message category
-goes to which destination. The gateway enforces it; the project owns it.
+**Routing rule** (`notify`):
+A project's declaration, in [[vetinari]], of which [[message-category]] goes to
+which [[destination]]. The [[gateway]] enforces it; the project owns it.
 
-**Outbound record** / **outbox**:
-A category-tagged message (`{category, event?, text}`) a run writes into its
-`.vetinari.local/` instead of sending to Telegram itself. The gateway drains the
-outbox and routes each record per the notify map — so all outbound flows through
-the gateway (the sole sender), and a parked **question** is simply the interactive
-kind of outbound record that also feeds the reply index.
-_Avoid_: message queue, mailbox
-
-**Wave**:
-One batch of a campaign — the tasks run together, their greens are merged, and the
-next batch starts **only once the wave is fully resolved**: a healthy combined base
-and zero outstanding parks (ADR 0017). "Wave start" is a **progress** message.
-_Avoid_: batch (in user-facing comms), round
+**Outbound record** (outbox):
+A category-tagged message a run writes into [[vetinari-local]] instead of sending
+to Telegram itself. The [[gateway]] drains the outbox and routes each record per
+the notify map.
+_Avoid_: message queue, mailbox.
 
 ### Runs
 
 **Run**:
-One invocation of `campaign` or `queue` — the unit whose event log the dashboard
-reads. A project has one **live run** at a time (its `orchestrator.jsonl`);
-finishing it archives that log (see [[archived-run]]).
-_Avoid_: session, job
+One invocation of `run` or `campaign` — the unit whose event log the dashboard
+reads. A [[project]] has one live run at a time; finishing it archives that log.
+_Avoid_: session, job.
 
 **Archived run**:
-A completed run whose event log `archiveRun` moved aside to
-`logs/archive/orchestrator-<timestamp>.jsonl` (kept, never deleted) so a finished
-run stops reading as current. The event log is the run's durable, per-run artifact
-— the dashboard reconstructs the whole wave/issue view from it. The `agent-*` and
-`gate-*` logs are **live-only scratch**: overwritten across runs and not archived.
-_Avoid_: past run, old log
-
-**Event feed** (the landing's `EVENT LOG`):
-A rolling recent-history operator log of the narratable events across every
-project's live run and recently-[[archived-run]] logs, newest-first — what the fleet
-has been doing lately, at a glance. Bounded to a recent window; deeper per-run
-history lives in the [[archived-run]] list, not here.
-_Avoid_: ticker, live feed, activity stream
-
-**Repo switcher**:
-The top-bar `All repos ▾` control. Selecting a project **navigates** the dashboard
-to that project's single-project page; "All repos" returns to the landing. A
-navigation control, **not a filter** — it changes which page you are on, and owns
-the `?project=` URL param.
-_Avoid_: project filter, project dropdown (those name the [[event-feed-filter]])
-
-**Event-feed filter**:
-The [[event-feed]]'s in-place narrowing — a **project** dropdown ("all repos" by
-default) plus a free-text box — that scopes the rows you see without leaving the
-landing. The two criteria compose (both must match). Ephemeral: client-only, resets
-on reload, and independent of the [[repo-switcher]]. The project criterion mirrors
-the [[agent-filter]]'s model, swapping agent for project.
-_Avoid_: repo switcher (that navigates), search
-
-**Agent filter**:
-The single-project live-tail's `all agents ▾` dropdown, which narrows the tail to one
-agent (issue). The existing control the [[event-feed-filter]]'s project dropdown is
-modelled on.
-_Avoid_: issue picker
+A completed run whose event log was moved to `logs/archive/` (kept, never deleted)
+so a finished run stops reading as current.
+_Avoid_: past run, old log.
 
 **Campaign name**:
-An optional human label for a run, passed as `campaign --name` and recorded on the
-`campaign-start` event, so the dashboard and the [[archived-run]] list say what a
-run was for at a glance. `campaign-plan` suggests one from the area labels the
-selected issues span. Absent, a run falls back to its timestamp.
-_Avoid_: run title
-
-**Wave name**:
-A wave's human label, **derived at render** from the titles of the issues it holds
-(one issue → its title; several → the lead title + "+N") — never stored, and never
-an epic: a [[wave]] is a file-disjoint layer that crosses epics, so its issues,
-not an epic, name it.
-_Avoid_: batch name
-
-**Wave-parked**:
-The wave-level [[parked]] — the label a [[wave]] pill carries when the whole wave is
-held on a human (ADR 0019), from either of two [[park-reason]]s. **`red-base`
-(combined-gate):** every issue went green alone, but the **merged base is red
-together**, so no single issue is at fault (ADR 0013). **`question` (escalated
-park):** an issue in the wave [[parked]]; the wave **drains** (its other agents
-finish, their greens merge) and then parks, so no succeeding wave builds on an
-unresolved one (ADR 0017). Either way everything green stays merged (the base sits
-red, never pushed), the campaign pauses, and a human resolves it: fix forward, or
-prune a suspect, and [[redrive]].
-_Avoid_: halted, rolled back, failed wave
-
-### Issue status
-
-The dashboard shows the orchestrator's own `IssueStatus` vocabulary, plus one
-render-derived state (`pruned`) — not the UX handoff's friendlier labels (ADR 0007).
-
-**running**:
-An agent is on the issue in the active [[wave]] — whether executing or waiting for
-a slot. The active-wave slot-wait is not a separate status; it is still running.
-_Avoid_: working, in progress
-
-**parked**:
-Held on a human, work preserved, resumable — the one word for every "needs-a-human"
-situation, at the issue, [[wave]], campaign, and card level alike (ADR 0019). What
-differs is the **[[park-reason]]** — which selects the recovery, not the status. A
-park **holds its wave** (the wave drains, then wave-parks; no succeeding wave starts
-until it is resolved — ADR 0017) and is **durable**: always shown and always
-announced via Telegram until a human resolves it.
-_Avoid_: blocked, waiting, quarantined, interrupted (all are `parked` + a reason)
-
-**Park reason**:
-Why a [[parked]] issue or wave is held, and which recovery it offers — metadata, not
-a status (ADR 0019). `question`: the agent asked something (answer it). `conflict`: a
-merge conflict pulled a passed green out of integration, branch/worktree/session
-preserved (resolve the conflict — see [ADR 0013](../docs/adr/0013-wave-integration-is-non-atomic-quarantine-and-wave-park.md)).
-`red-base`: every issue passed alone but the merged base is red (fix forward).
-`crash`: the run stopped with no verdict ([[redrive]] to continue).
-_Avoid_: quarantined, interrupted (those were reasons masquerading as statuses)
-
-**failure**:
-The single **red terminal** — an issue the agent could not make green. Distinct from
-[[parked]] (amber, waiting) and it **outranks** it on roll-up: a level with any
-failure reads [[failed]], not parked (ADR 0019). Like a park it **holds its wave** —
-no succeeding wave starts — but where a park pauses for an answer, a failure **stops
-the run**: the recovery is a deliberate [[redrive]], not a continuation (ADR 0020).
-The turn log tells the story of why.
-_Avoid_: errored, broken
-
-**completed**:
-The issue's work landed on the base.
-_Avoid_: merged, done
-
-**unstarted**:
-In the plan, not yet begun — a later [[wave]] with no agent assigned.
-_Avoid_: queued, pending
-
-**pruned**:
-A [[prune]] left the issue out of the campaign with its unstarted dependents.
-**Derived at render** from the prune event (not a stored status), so it shows in
-both the live run and an [[archived-run]] — a browsing operator can see what was
-pruned out of a finished run.
-_Avoid_: removed, dropped, carved
-
-**grafted**:
-A [[graft]] added the issue to the running campaign; it waits in a later [[wave]].
-**Derived at render** from the graft event (not a stored status), and **transient**
-— the additive mirror of [[pruned]]: shown while the issue is `unstarted`, it
-becomes [[running]] on pickup. Answers "why did this wave grow?" at a glance.
-_Avoid_: added, appended, injected
-
-### Campaign & card state
-
-Derived, one derivation per level, aggregating issue → [[wave]] → campaign → card
-(ADR 0019). A level is never stored; it is read from the level below.
-
-**failed**:
-A campaign or card roll-up carrying at least one [[failure]] issue — the red
-"something broke" state. Needs a human — the recovery is a [[redrive]] (prune the
-broken work, or fix it and drive again) — and it **outranks** [[parked]] on roll-up.
-_Avoid_: halted, errored
-
-**idle**:
-A card with **no** campaign that is running, [[parked]], or [[failed]] — either no
-plan at all or a cleanly [[completed]] run folded away. Never a held or failed
-campaign hidden behind it.
-_Avoid_: done, empty, inactive
-
-### Campaign planning
-
-**Campaign plan** (the `campaign-plan` tool):
-A generic vetinari tool that turns a selected set of ticket ids into the
-dependency-ordered, file-disjoint wave arguments `campaign` consumes. It plans; it
-never runs Vetinari or pushes. A peer of [[prune]], sharing its DAG foundation.
-_Avoid_: campaign builder, batcher
-
-**Redrive**:
-The umbrella act of picking an unfinished campaign back up: reconcile what the log
-says happened, then continue (ADR 0020). One word for every way a campaign regains
-forward motion — answering a [[parked]] question, a [[prune]] of the stuck work, a
-[[graft]] of its replacement, or fixing forward by hand — of which **resume is one
-path, not a synonym**. A redrive is **durable** (it reconstructs the campaign from
-the event log rather than depending on a process having stayed alive) and it **never
-re-actions banked work**: a merged member is skipped, a green-but-unmerged one is
-landed rather than re-run.
-_Avoid_: restart, recover, re-run, resume (as the umbrella)
-
-**Prune**:
-Dropping an issue and its transitive dependents from a **running** campaign. It
-**prunes the unfinished remainder without discarding banked work**: of the removed
-closure, anything already merged or mergeable is kept, only parked/not-yet-started
-issues leave the plan. Against a running campaign it appends a **prune event** the
-loop honors at the next wave boundary (the in-flight wave finishes; future waves
-shrink) — distinct from the from-scratch `prune <issue> <batch…>` form, which
-launches a reduced campaign from a plan you supply.
-_Avoid_: carve, remove, cancel, drop (as the noun)
-
-**Graft**:
-Adding issues to a **running** campaign — the additive counterpart of [[prune]]
-(ADR 0014). `graft <ids…>` appends a **graft event** the loop honors at the next
-wave boundary: the in-flight wave finishes untouched and the added issues are
-re-layered into future waves (dependency-ordered, basename-disjoint), leaving
-already-planned [[wave]]s stable. Unlike prune it is allowed against any run not yet
-done — live, or paused/[[wave-parked]] and honored on the next `--resume`.
-_Avoid_: extend, add (as the noun), append, inject
-
-**File-set resolver**:
-A project-provided config function, `fileSet(ticket) → { files, confident }`, that
-names the files a ticket will touch (by basename) so co-wave tickets can be kept
-file-disjoint. A config seam like [[base-location]]'s `blockedBy`/`fetchTask`;
-vetinari ships a generic cites-from-body default.
-_Avoid_: file matcher, crossover detector
-
-**Under-specified ticket**:
-A ticket whose file-set resolves with `confident: false` (cites nothing, or cites
-what the tree lacks). `campaign-plan` never plans around it silently — it halts and
-asks the requestor to either prune it (and its dependents) out and proceed, or stop
-and put the data on the issue.
-_Avoid_: unresolved ticket, ambiguous ticket
-
-### Testing
-
-**Local sandbox**:
-A no-container `Sandbox` implementation that runs the **real** gates and git against a
-temporary checkout — the second adapter behind the [[container-boundary]]'s `Sandbox`
-seam, used to integration-test the pipeline. Its `exec` actually runs the gate commands
-and git reads in the worktree; its `run` (the agent turn) is driven by a **test-supplied
-agent-script** that makes real commits, since no LLM runs under test. One span drives a
-real `campaign` wave through it, faking only the container boundary, so the gate → merge
-→ [[wave]]-advance seams are exercised rather than stubbed. A slower second tier beside
-the unit tests, not a replacement (ADR 0018).
-_Avoid_: in-memory sandbox, mock sandbox, fake container
+An optional human label for a run, passed as `campaign --name` and recorded on
+`campaign-start`, so the dashboard and the [[archived-run]] list say what a run was
+for. Absent, a run falls back to its timestamp.
+_Avoid_: run title.

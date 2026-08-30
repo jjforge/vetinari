@@ -94,7 +94,7 @@ Added 2026-08-30 after a claim-by-claim audit of `design.md`/`user-guide.md` aga
 
 | Wave | Issues |
 | --- | --- |
-| 1 | #313 exit codes + `failed` logged by a throwing run · #315 question routing key honoured, one bot per project, notify keys in the settled names |
+| 1 | #313 exit codes + `failed` logged by a throwing run · #315 question routing key honoured, one bot per project, notify keys in the settled names · #322 label expansion never schedules an Epic |
 | 2 | #314 resolve/redrive: conflict holds the wave (absorbs #310), red base re-gated on redrive, failed > red base, crash reconciled (spills after #315: both cite `modes.ts`) |
 | 3 | #316 `answer` delivers to the record; live campaign or redrive re-admits with it · #317 dashboard: failed-sheet moves, reason word, idle card, palette/edge rule |
 | 4 | #318 standalone run/answer take a slot, preflight, `baseBranch` · #319 parked-record durability, unmerged green ≠ completed |

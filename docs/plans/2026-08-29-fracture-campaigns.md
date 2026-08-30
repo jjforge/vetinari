@@ -42,13 +42,15 @@ Exit: an end-to-end test through the local sandbox exercises park → answer →
 
 Exit: one park-reason enum; the §2.1 event set with an alias reader for archived logs; the CLI says `redrive`; the §12 retire list gone; `demo` is a `make` target; the changelog fold gated on `CHANGELOG.md`.
 
-**Pinned driver mandatory.** Run as two campaigns: the schema issue alone, then the rest as one label-selected campaign that the planner layers into two waves.
+**Pinned driver mandatory.** One command once #291 is closed — `… campaign campaign:vocabulary` — and the planner layers it into three waves from `blocked_by` and the marker lines (the driver and every child it spawns keep running the pre-schema code; only the gates exercise the new code):
 
-| Wave | Issues | Command |
-| --- | --- | --- |
-| 1 (alone, indivisible) | #292 one event schema + one reason enum + alias table | `… campaign 292` |
-| 2 | #293 CLI: `redrive`, retire prune-batch / `fileset-check` / demo modes → `make` · #294 gateway words · #295 dashboard + status-line words, `/resume`→`/redrive` · #296 `migrate` without shims · #298 non-resumable providers warn · #300 CONTEXT.md domain-only | `… campaign campaign:vocabulary` (planner layers waves 2 and 3) |
-| 3 | #297 changelog fold gated on `CHANGELOG.md`, lint removed · #299 human-readable terminal output (`report.ts`) | (same campaign) |
+| Wave | Issues |
+| --- | --- |
+| 1 (alone, indivisible) | #292 one event schema + one reason enum + alias table |
+| 2 | #293 CLI: `redrive`, retire prune-batch / `fileset-check` / demo modes → `make` · #294 gateway words · #295 dashboard + status-line words, `/resume`→`/redrive` · #296 `migrate` without shims · #298 non-resumable providers warn · #300 CONTEXT.md domain-only |
+| 3 | #297 changelog fold gated on `CHANGELOG.md`, lint removed · #299 human-readable terminal output (`report.ts`) |
+
+A blocker outside the selection that is still open makes its dependents _unreachable_ — reported, never silently skipped — so close #291 before selecting, or nothing schedules.
 
 `blocked_by`: 292 ← 291 · 293–296, 298, 300 ← 292 · 297, 299 ← 293.
 

@@ -27,6 +27,8 @@ Within a milestone each bold section label appears at most once.
 
 **Improvements:**
 - [api] The event log gains a `grace-wait` row (its seconds and the waited-on tasks) so the fold and the dashboard can narrate the boundary wait (#289).
+- [api] The orchestrator event log now uses one consolidated §2.1 vocabulary — `wave-start`/`wave-done` (was `campaign-batch`/`campaign-batch-done`), `spawn` (was `queue-*`), `merged`/`base-gate` from the integrator, `parked` with a reason (folding the retired `quarantined` and `wave-parked` events), an explicit `failed`, `campaign-parked`/`campaign-failed` stop markers, and `redrive`. One `ParkReason` enum — `question | stalled | conflict | red-base | crash` — is shared by the parked record, the `parked` event, the reducer and the dashboard, with the specific (budget/idle/no-commit, the conflict output) carried in `detail`. Archived logs written in the retired names still render: the log reader translates them through one alias table (#292).
+- [internal] Festive wave names no longer touch the durable log or the host lease — the offset is derived at render from the `campaign-start` timestamp, and the host festive cursor is gone (#292).
 
 **Bug fixes:**
 - [user] A campaign wave with a failed issue now holds the wave and stops the campaign as failed: the wave still drains its siblings and merges their greens, then a `campaign-failed` event and a failure notice are logged and the run exits non-zero — no later wave starts on top of the missing work (#285).

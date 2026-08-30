@@ -519,7 +519,7 @@ test("runPrune with an explicit plan launches a fresh reduced campaign", async (
       ...defaultPruneDeps,
       launchCampaign: async (_cfg, batches) => {
         launched.push(batches);
-        return true;
+        return "done";
       },
     },
   );
@@ -551,7 +551,7 @@ test("runPrune --dry-run on an explicit plan previews but launches nothing", asy
       ...defaultPruneDeps,
       launchCampaign: async (_cfg, batches) => {
         launched.push(batches);
-        return true;
+        return "done";
       },
     },
   );

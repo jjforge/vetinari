@@ -40,6 +40,7 @@ interface TurnScript {
   run?: Partial<SandboxRunResult>;
   green?: boolean;
   throwIdle?: boolean;
+  throwGeneric?: string;
 }
 
 // A scriptable fake sandbox: `run()` shifts through `script` (one entry per turn),
@@ -61,6 +62,7 @@ const fakeSandbox = (script: TurnScript[], branch = "agent/T-1"): FakeSandbox =>
         e.name = "IdleTimeoutError";
         throw e;
       }
+      if (s?.throwGeneric) throw new Error(s.throwGeneric);
       return { iterations: [{ sessionId: `sess-${turn}` }], commits: [], stdout: "", ...s?.run };
     },
     async exec(cmd) {
@@ -159,6 +161,39 @@ test("runLoop parks (stalled: no-commit) when the gate passes but the branch has
   assert.equal(parked[0].detail, "no-commit");
   // The empty-green guard fired — no green event, no success outbound.
   assert.equal(readEventLog(cfg).some((e) => e.event === "green"), false);
+});
+
+test("runLoop's no-commit park precedes the gates (design §3 step 6): a COMPLETE with nothing ahead parks stalled/no-commit without spending a gate run", async () => {
+  const cfg = harnessCfg();
+  // The gate would go RED this turn, but there is no commit ahead of base — the
+  // no-commit check (step 6) runs before the gates (step 7), so it parks first and
+  // the gate never runs.
+  const sbx = fakeSandbox([{ run: { completionSignal: DONE }, green: false }]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, depsFor(sbx, { commitsAhead: () => 0 })));
+
+  assert.equal(outcome, "parked");
+  const parked = listParked(cfg);
+  assert.equal(parked.length, 1);
+  assert.equal(parked[0].reason, "stalled");
+  assert.equal(parked[0].detail, "no-commit");
+  // No gate run was spent — the no-commit check short-circuits ahead of step 7.
+  assert.equal(readEventLog(cfg).some((e) => e.event === "gate"), false);
+});
+
+test("runLoop logs a failed verdict and returns failed when a turn throws a non-Idle error (design §3 step 9)", async () => {
+  const cfg = harnessCfg();
+  const sbx = fakeSandbox([{ throwGeneric: "container vanished" }]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, depsFor(sbx)));
+
+  assert.equal(outcome, "failed");
+  const failed = readEventLog(cfg).find((e) => e.event === "failed") as { taskId: string; detail: string } | undefined;
+  assert.ok(failed, "a standalone run that throws leaves a failed verdict on the log");
+  assert.equal(failed!.taskId, "T-1");
+  assert.match(failed!.detail, /container vanished/);
+  // A failed verdict is a terminal outcome, not a park — no parked record is written.
+  assert.equal(listParked(cfg).length, 0);
 });
 
 test("runLoop returns green when the gate passes on a real change", async () => {
@@ -306,7 +341,7 @@ test("runLoop parks (stalled: budget) for a one-shot non-resumable run (maxTurns
   const parked = listParked(cfg);
   assert.equal(parked.length, 1);
   assert.equal(parked[0].reason, "stalled");
-  assert.equal(parked[0].detail, "budget");
+  assert.equal(parked[0].detail, "budget:1");
 });
 
 test("runLoop parks (stalled: budget) when every turn stays red through maxTurns", async () => {
@@ -322,7 +357,7 @@ test("runLoop parks (stalled: budget) when every turn stays red through maxTurns
   const parked = listParked(cfg);
   assert.equal(parked.length, 1);
   assert.equal(parked[0].reason, "stalled");
-  assert.equal(parked[0].detail, "budget");
+  assert.equal(parked[0].detail, "budget:2");
 });
 
 test("runLoop parks (stalled: idle) when the agent dies on an Idle-named error", async () => {

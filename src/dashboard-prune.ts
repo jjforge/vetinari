@@ -8,9 +8,13 @@ import type { StructuredPruneClosure } from "./prune.ts";
  * printed closure, or null when the child fails. Mirrors the Telegram gateway's
  * `prunePreview` — the same dumb-router routing the aggregated dashboard uses.
  */
-export function shellPrunePreview(projectRoot: string, taskId: string): Promise<string | null> {
+export function shellPrunePreview(projectRoot: string, taskId: string, opts: { json?: boolean } = {}): Promise<string | null> {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [...process.execArgv, process.argv[1], "prune", taskId, "--dry-run"], {
+    // The human-prose preview shells without `--json` (its prose renders in the confirm
+    // HTML); the structured-closure path (`shellPruneClosure`) passes `--json` so the child
+    // also emits the machine `prune-closure {json}` line to parse. No JSON to stdout otherwise (§11).
+    const args = ["prune", taskId, "--dry-run", ...(opts.json ? ["--json"] : [])];
+    const child = spawn(process.execPath, [...process.execArgv, process.argv[1], ...args], {
       cwd: projectRoot,
       stdio: ["ignore", "pipe", "inherit"],
     });
@@ -58,6 +62,6 @@ export function parsePruneClosure(previewText: string): PruneClosure | null {
  * report.
  */
 export async function shellPruneClosure(projectRoot: string, taskId: string): Promise<PruneClosure | null> {
-  const previewText = await shellPrunePreview(projectRoot, taskId);
+  const previewText = await shellPrunePreview(projectRoot, taskId, { json: true });
   return previewText == null ? null : parsePruneClosure(previewText);
 }

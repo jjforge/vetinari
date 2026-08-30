@@ -46,6 +46,16 @@ import {
 } from "./host-slots.ts";
 
 /**
+ * A campaign's terminal verdict (design §5 step 6, §15): `done` only when the last wave
+ * closed and `campaign-done` was logged, `parked` when a wave boundary paused it
+ * (`campaign-parked` — a red base, an unresolved issue park, or a stranded conflict), and
+ * `failed` when a member the agent could not make green stopped it (`campaign-failed`,
+ * failure outranks a park — ADR 0019). cli-dispatch maps these to the exit codes 0 / 2 / 1;
+ * modes.ts carries no exit-code logic of its own.
+ */
+export type CampaignOutcome = "done" | "parked" | "failed";
+
+/**
  * How often a run blocked by the host budget re-checks for a freed slot. A run
  * that cannot acquire right now (the host is full, or it is already at its share)
  * has no event of its own to wake on — another project's container may free a slot
@@ -613,7 +623,7 @@ export function reconcileResumeWave(
  * an answered park (its record gone), re-parking one whose record remains, and stopping as
  * failed again on a failed member unless `opts.override` re-runs it. Every later wave runs
  * fresh. The supplied `batches`/`name` are ignored under resume; the plan comes from the
- * log. A resume with nothing left to run reports so and returns green.
+ * log. A resume with nothing left to run reports so and returns `done`.
  */
 export async function campaign(
   cfg: ResolvedConfig,
@@ -622,7 +632,7 @@ export async function campaign(
   name?: string,
   opts: { autoPrune?: boolean; resume?: boolean; override?: boolean } = {},
   deps: CampaignDeps = defaultCampaignDeps,
-): Promise<boolean> {
+): Promise<CampaignOutcome> {
   // Every green branch merges into whatever the main tree has checked out, and
   // each batch's agents cut their branch from that same HEAD. If it is not the
   // base branch the campaign would merge into, and build on, the wrong place.
@@ -671,7 +681,7 @@ export async function campaign(
         text: `↩️ ${cfg.project} · RESUME · nothing to run — all ${reduced.waves.length} waves already merged`,
       });
       reporter.line(formatResumeNothing(reduced.waves.length));
-      return true;
+      return "done";
     }
     cfg.log.log("redrive", { fromWave: index });
     enqueueOutbound(cfg, {
@@ -780,7 +790,7 @@ export async function campaign(
       cfg.log.log("campaign-parked", { index, detail: parked.detail });
       enqueueOutbound(cfg, waveParkedNotice(cfg.project, index + 1, merged, cfg.baseBranch, parked.detail));
       reporter.line(formatStop({ kind: "red-base", index, total, merged }));
-      return false;
+      return "parked";
     }
 
     // Green path only: fold this wave's merged changelog.d/ fragments into
@@ -816,7 +826,7 @@ export async function campaign(
       cfg.log.log("campaign-failed", { index, detail: `${failed.join(", ")} failed` });
       enqueueOutbound(cfg, campaignFailedNotice(cfg.project, index + 1, merged, failed, cfg.baseBranch));
       reporter.line(formatStop({ kind: "failed", index, total, failed, merged }));
-      return false;
+      return "failed";
     }
 
     // Gate 1 (ADR 0017): a per-issue park escalates to a wave-park. A parked issue is
@@ -838,7 +848,7 @@ export async function campaign(
       cfg.log.log("campaign-parked", { index, detail });
       enqueueOutbound(cfg, waveParkedNotice(cfg.project, index + 1, merged, cfg.baseBranch, detail));
       reporter.line(formatStop({ kind: "issue-parked", index, total, parked: parkedTasks, merged }));
-      return false;
+      return "parked";
     }
     const note = held.length
       ? ` — cleared parked records for completed wave: ${held.map((t) => `${t}(${outcomes[t]})`).join(", ")}`
@@ -901,7 +911,7 @@ export async function campaign(
               merged,
             }),
           );
-          return false;
+          return "parked";
         }
       }
     }
@@ -916,7 +926,7 @@ export async function campaign(
     text: `🏆 ${cfg.project} · CAMPAIGN COMPLETE${named(campaignName)} · ${index} batches onto ${cfg.baseBranch}`,
   });
   reporter.line(formatComplete(index, cfg.baseBranch, campaignName));
-  return true;
+  return "done";
 }
 
 export async function tgTest(cfg: ResolvedConfig, conn: TgConn) {

@@ -145,7 +145,7 @@ test("a deliberately red gate yields a real non-zero exit via exec and parks —
   const parked = listParked(cfg);
   assert.equal(parked.length, 1);
   assert.equal(parked[0].reason, "stalled");
-  assert.equal(parked[0].detail, "budget");
+  assert.equal(parked[0].detail, "budget:2");
 
   const events = readEventLog(cfg);
   assert.equal(events.some((e) => e.event === "green"), false);
@@ -213,7 +213,7 @@ test("a campaign wave of two issues spans agent → gate → merge → advance t
 
   const ok = await inRepo(dir, () => campaign(cfg, [["101", "102"]], host, "span", {}, localCampaignDeps(cfg, dir)));
 
-  assert.equal(ok, true);
+  assert.equal(ok, "done");
 
   const events = readEventLog(cfg);
 
@@ -290,7 +290,7 @@ test("a merge conflict quarantines the losing green (work preserved) while the w
   );
 
   // The blast-radius call belongs to a human: the campaign quarantine-pauses, not done.
-  assert.equal(ok, false);
+  assert.equal(ok, "parked");
 
   const events = readEventLog(cfg);
 
@@ -334,7 +334,7 @@ test("a merge conflict under --auto-prune quarantines the loser, prunes the stra
   );
 
   // Same conflict, opposite blast-radius call: --auto-prune prunes the closure and finishes.
-  assert.equal(ok, true);
+  assert.equal(ok, "done");
 
   const events = readEventLog(cfg);
   // 102 still quarantined (its work kept), 101 still the merged winner.
@@ -381,7 +381,7 @@ test("a per-issue BLOCKED park drains its wave's greens, then wave-parks — the
   );
 
   // A wave that parks an issue is not fully resolved, so the campaign pauses (not done).
-  assert.equal(ok, false);
+  assert.equal(ok, "parked");
 
   const events = readEventLog(cfg);
 
@@ -430,7 +430,7 @@ test("each green passes its own gate but the merged base fails the combined gate
   );
 
   // An unattributable red base pauses the campaign for a human — never done.
-  assert.equal(ok, false);
+  assert.equal(ok, "parked");
 
   const events = readEventLog(cfg);
 

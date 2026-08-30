@@ -41,7 +41,7 @@ function commitsAhead(base: string, branch: string, log: Logger): number | null 
 export const DONE = "<promise>COMPLETE</promise>";
 export const BLOCKED = "<promise>BLOCKED</promise>";
 
-export type Outcome = "green" | "parked";
+export type Outcome = "green" | "parked" | "failed";
 
 export interface ResumeEntry {
   resumeSessionId: string;
@@ -206,26 +206,28 @@ export async function runLoop(cfg: ResolvedConfig, taskId: string, entry?: Resum
           return "parked";
         }
 
+        // No-commit park (design §3 step 6): a COMPLETE that left no commit beyond the
+        // base is not green — a no-op agent that says done and changed nothing. This runs
+        // BEFORE the gates (step 7), so nothing-ahead parks `stalled/no-commit` without
+        // spending a gate run or a turn — and a `when`-scoped gate never trivially greens
+        // an empty diff. null (git couldn't tell) is NOT zero, so a transient failure falls
+        // through to the gate rather than falsely parking.
+        const ahead = deps.commitsAhead(cfg.baseBranch, sbx.branch, cfg.log);
+        if (ahead === 0) {
+          cfg.log.log("empty-green", { taskId, branch: sbx.branch });
+          await park(cfg, {
+            taskId,
+            reason: "stalled",
+            detail: "no-commit",
+            sessionId,
+            branch: sbx.branch,
+            question: `COMPLETE but ${sbx.branch} has no commit beyond ${cfg.baseBranch} — the agent produced no change. Likely a no-op, or the task needs clarification before it can be done.`,
+          });
+          return "parked";
+        }
+
         const { green, report } = await runGates(cfg, sbx, { taskId });
         if (green) {
-          // Empty-green guard (#1): a `when`-scoped gate does not fire on an
-          // empty diff, so a no-op agent that emits DONE gets a trivial green on
-          // a branch it never advanced. Green must mean "the gate passed on a
-          // real change" — require a commit beyond the base. null (git couldn't
-          // tell) is NOT zero, so a transient failure never falsely parks.
-          const ahead = deps.commitsAhead(cfg.baseBranch, sbx.branch, cfg.log);
-          if (ahead === 0) {
-            cfg.log.log("empty-green", { taskId, branch: sbx.branch });
-            await park(cfg, {
-              taskId,
-              reason: "stalled",
-              detail: "no-commit",
-              sessionId,
-              branch: sbx.branch,
-              question: `The gate passed but ${sbx.branch} has no commit beyond ${cfg.baseBranch} — the agent produced no change. Likely a no-op, or the task needs clarification before it can be done.`,
-            });
-            return "parked";
-          }
           cfg.log.log("green", { taskId, branch: sbx.branch, commits: (r.commits ?? []).map((c: any) => c.sha) });
           // The human GREEN banner is the terminal view (design §11); under --json the screen is
           // the raw event stream alone, so keep it out to leave the JSONL clean for tooling (#299).
@@ -265,7 +267,9 @@ export async function runLoop(cfg: ResolvedConfig, taskId: string, entry?: Resum
         }
       }
 
-      await park(cfg, { taskId, reason: "stalled", detail: "budget", sessionId: r.iterations.at(-1)?.sessionId, branch: sbx.branch, question: `Turn budget exhausted (${cfg.maxTurns} gate cycles).` });
+      // Budget park (design §3 step 8): `detail` carries the specifics (`budget:<maxTurns>`)
+      // per §2.3, not the bare reason.
+      await park(cfg, { taskId, reason: "stalled", detail: `budget:${cfg.maxTurns}`, sessionId: r.iterations.at(-1)?.sessionId, branch: sbx.branch, question: `Turn budget exhausted (${cfg.maxTurns} gate cycles).` });
       return "parked";
     } catch (err: any) {
       // An agent that emits NEITHER signal dies on the idle timeout as a thrown
@@ -275,7 +279,12 @@ export async function runLoop(cfg: ResolvedConfig, taskId: string, entry?: Resum
         await park(cfg, { taskId, reason: "stalled", detail: "idle", sessionId: err?.sessionId, branch: sbx.branch, question: "Agent stalled without emitting a signal." });
         return "parked";
       }
-      throw err;
+      // Anything else thrown is a terminal failure, not a park (design §3 step 9): log a
+      // `failed` verdict — with the detail — so even a standalone run leaves one on the log,
+      // then return `failed`. cli-dispatch maps that to exit 1; under a campaign the child's
+      // non-zero exit is what the parent folds to `campaign-failed`.
+      cfg.log.log("failed", { taskId, detail: String(err?.message ?? err) });
+      return "failed";
     }
   } finally {
     const closed = await sbx.close();

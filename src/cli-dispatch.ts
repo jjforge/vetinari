@@ -19,8 +19,8 @@ import type { ResolvedConfig } from "./config.ts";
 import { nonResumableAnswerWarning, parseAgentFlags } from "./config.ts";
 import { renderUsage } from "./help.ts";
 import type { HostBudget } from "./host-slots.ts";
-import type { build, baseline, campaign, tgTest, requireTelegram } from "./modes.ts";
-import type { runLoop } from "./loop.ts";
+import type { build, baseline, campaign, tgTest, requireTelegram, CampaignOutcome } from "./modes.ts";
+import type { runLoop, Outcome } from "./loop.ts";
 import { answerPromptFor, parkedAnswerComment } from "./loop.ts";
 import type { agentSelectionFor } from "./sandbox.ts";
 import type { listParked, readParked } from "./state.ts";
@@ -53,6 +53,15 @@ const enableJson = (on: boolean): void => {
 export type AgentOverride = { provider?: string; model?: string; effort?: string };
 
 /**
+ * The verdict→exit-code map both the run loop and the campaign share (design §3, §5 step 6,
+ * user-guide "Where you see things"): 0 green/done, 2 parked, 1 failed. The loop returns the
+ * outcome; the exit-code decision lives HERE (never in modes.ts/loop.ts). `green` and `done`
+ * are the same success code so `run` and `campaign` speak one exit vocabulary.
+ */
+const exitCodeFor = (outcome: Outcome | CampaignOutcome): number =>
+  outcome === "green" || outcome === "done" ? 0 : outcome === "parked" ? 2 : 1;
+
+/**
  * One command form, discriminated on `kind`. `parseArgs` maps each subcommand of the
  * post-config family to exactly one of these; anything else (an unknown or garbage
  * mode) becomes `usage`.
@@ -74,8 +83,8 @@ export type Command =
       json: boolean;
     }
   | { kind: "redrive"; agent: AgentOverride; autoPrune: boolean; override: boolean; json: boolean }
-  | { kind: "prune"; target?: string; dryRun: boolean; purge: boolean }
-  | { kind: "graft"; ids: string[]; dryRun: boolean }
+  | { kind: "prune"; target?: string; dryRun: boolean; purge: boolean; json: boolean }
+  | { kind: "graft"; ids: string[]; dryRun: boolean; json: boolean }
   | { kind: "answer"; taskId?: string; text: string[] }
   | { kind: "parked" }
   | { kind: "clear" }
@@ -117,10 +126,13 @@ export function parseArgs(argv: string[]): Command {
       return {
         kind: "graft",
         ids: rest
-          .filter((a) => a !== "--dry-run")
+          .filter((a) => a !== "--dry-run" && a !== "--json")
           .flatMap((a) => a.split(/[\s,]+/))
           .filter(Boolean),
         dryRun: rest.includes("--dry-run"),
+        // `--json` gates the machine `graft-closure {json}` line so no JSON reaches stdout
+        // without it; the dashboard's preview shell passes it (design §11).
+        json: rest.includes("--json"),
       };
     case "redrive": {
       // Redrive picks an unfinished campaign back up (design §7) — the umbrella verb
@@ -181,12 +193,15 @@ export function parseArgs(argv: string[]): Command {
     case "prune": {
       // `prune <issue>` (with `--purge`) is the only form — it prunes the RUNNING campaign
       // at the next wave boundary. The fresh-reduced-launch batch form is retired (design §12).
-      const [target] = rest.filter((a) => a !== "--dry-run" && a !== "--purge");
+      const [target] = rest.filter((a) => a !== "--dry-run" && a !== "--purge" && a !== "--json");
       return {
         kind: "prune",
         target,
         dryRun: rest.includes("--dry-run"),
         purge: rest.includes("--purge"),
+        // `--json` gates the machine `prune-closure {json}` line so no JSON reaches stdout
+        // without it; the dashboard's preview shell passes it (design §11).
+        json: rest.includes("--json"),
       };
     }
     default:
@@ -265,8 +280,8 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
       if (!cmd.args[0]) throw new Error("run needs a task id");
       enableJson(cmd.json);
       deps.archiveLeftoverRun();
-      // Exit code is the queue's slot signal: 0 green, 2 parked, other = error.
-      deps.setExitCode((await deps.runLoop(cfg, cmd.args[0])) === "green" ? 0 : 2);
+      // Exit code is the queue's slot signal (design §3): 0 green, 2 parked, 1 failed.
+      deps.setExitCode(exitCodeFor(await deps.runLoop(cfg, cmd.args[0])));
       return;
     }
     case "campaign": {
@@ -280,12 +295,14 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
       // the leftover it would reconstruct from, only archive once idle.
       deps.selectAgent(cfg, cmd.agent);
       enableJson(cmd.json);
-      await deps.campaign(cfg, [], deps.host, undefined, {
+      const outcome = await deps.campaign(cfg, [], deps.host, undefined, {
         autoPrune: cmd.autoPrune,
         resume: true,
         override: cmd.override,
       });
       deps.archiveIfIdle();
+      // Exit with the campaign's verdict (design §5 step 6): 0 done, 2 parked, 1 failed.
+      deps.setExitCode(exitCodeFor(outcome));
       return;
     }
     case "prune": {
@@ -380,12 +397,13 @@ async function dispatchCampaign(
     // Under --resume, --override re-runs a failed member instead of stopping as failed
     // again (design §7); the literal-waves meaning of --override below never applies here
     // (resume takes no batch args and returns before reaching it).
-    await deps.campaign(cfg, [], host, cmd.name, {
+    const outcome = await deps.campaign(cfg, [], host, cmd.name, {
       autoPrune: cmd.autoPrune,
       resume: true,
       override: cmd.override,
     });
     deps.archiveIfIdle();
+    deps.setExitCode(exitCodeFor(outcome));
     return;
   }
 
@@ -413,8 +431,9 @@ async function dispatchCampaign(
       return;
     }
     deps.archiveLeftoverRun();
-    await deps.campaign(cfg, batches, host, cmd.name, { autoPrune: cmd.autoPrune });
+    const outcome = await deps.campaign(cfg, batches, host, cmd.name, { autoPrune: cmd.autoPrune });
     deps.archiveIfIdle();
+    deps.setExitCode(exitCodeFor(outcome));
     return;
   }
 
@@ -460,8 +479,9 @@ async function dispatchCampaign(
   reporter.line(report.report);
   reporter.line("");
   deps.archiveLeftoverRun();
-  await deps.campaign(cfg, report.waves, host, cmd.name, { autoPrune: cmd.autoPrune });
+  const outcome = await deps.campaign(cfg, report.waves, host, cmd.name, { autoPrune: cmd.autoPrune });
   deps.archiveIfIdle();
+  deps.setExitCode(exitCodeFor(outcome));
 }
 
 /**
@@ -500,9 +520,11 @@ async function dispatchPrune(
         : `preserving parked ${result.parkedDropped.map((i) => `#${i}`).join(", ")} — branch/worktree/session kept, resumable (--purge to drop).`,
     );
   if (result.closure) {
-    // Structured closure alongside the human text, so a consumer (the aggregated
-    // dashboard's prune preview) can name the exact closure without re-parsing the prose.
-    deps.log(`prune-closure ${JSON.stringify(result.closure)}`);
+    // Dry-run preview: the human prose already printed above. Emit the structured closure
+    // — which the aggregated dashboard's prune preview parses — only under `--json`, so a
+    // bare `prune --dry-run` leaves no JSON on stdout (design §11). The dashboard's shell
+    // passes `--json`. A dry-run appends no event, so return either way.
+    if (cmd.json) deps.log(`prune-closure ${JSON.stringify(result.closure)}`);
     return;
   }
   deps.log(
@@ -535,9 +557,11 @@ async function dispatchGraft(
     );
   }
   if (result.closure) {
-    // Structured closure alongside the human text, so the aggregated dashboard's graft
-    // preview names the placement (and any rejection) without re-parsing the prose.
-    deps.log(`graft-closure ${JSON.stringify(result.closure)}`);
+    // Dry-run preview: the human prose already printed above. Emit the structured closure
+    // — which the aggregated dashboard's graft preview parses — only under `--json`, so a
+    // bare `graft --dry-run` leaves no JSON on stdout (design §11). The dashboard's shell
+    // passes `--json`. A dry-run appends no event, so return either way.
+    if (cmd.json) deps.log(`graft-closure ${JSON.stringify(result.closure)}`);
     return;
   }
   if (result.applied)
@@ -565,7 +589,7 @@ async function dispatchAnswer(
   // Resumable (claude/pi/codex): resume the session with an answerPrompt. Non-resumable
   // (copilot/cursor/opencode): relay the answer as an issue comment and re-enter FRESH.
   const { resumable, provider } = deps.agentSelectionFor(cfg);
-  let outcome: string;
+  let outcome: Outcome;
   if (resumable) {
     const parked = deps.readParked(cfg, taskId);
     outcome = await deps.runLoop(cfg, taskId, {
@@ -588,11 +612,14 @@ async function dispatchAnswer(
   // green is integrated (the standalone run only logged it) and later waves run. On a
   // second park (outcome !== "green"), or a standalone answer, there is nothing to redrive.
   if (outcome === "green" && issueAwaitsRedrive(deps.readEventLog(cfg), taskId)) {
-    const ok = await deps.campaign(cfg, [], host, undefined, { resume: true });
-    deps.setExitCode(ok ? 0 : 2);
+    // The implicit redrive carries the campaign's own verdict out (design §5 step 6): the
+    // same 0 done / 2 parked / 1 failed codes `campaign`/`redrive` exit with.
+    deps.setExitCode(exitCodeFor(await deps.campaign(cfg, [], host, undefined, { resume: true })));
     return;
   }
-  deps.setExitCode(outcome === "green" ? 0 : 2);
+  // A standalone answer (or a second park) exits on the loop's own verdict: 0 green, 2
+  // parked, 1 failed — `run`'s codes, since an answer re-enters the run loop.
+  deps.setExitCode(exitCodeFor(outcome));
 }
 
 /**

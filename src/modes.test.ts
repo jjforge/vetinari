@@ -547,7 +547,7 @@ test("campaign drives every wave with no Docker — the per-wave re-derive survi
     campaign(cfg, [["101"], ["102"], ["103"]], host, "harness", {}, gitFreeDeps(cfg, childRun)),
   );
 
-  assert.equal(ok, true);
+  assert.equal(ok, "done");
   const events = readEventLog(cfg);
   const batches = events.filter(
     (e): e is WaveStartEvent => e.event === "wave-start",
@@ -600,7 +600,7 @@ test("campaign stamps its name and titles once on campaign-start, names the comp
   const ok = await silenceConsole(() =>
     campaign(cfg, [["101", "102"]], host, "gateway work", {}, gitFreeDeps(cfg, async () => 0)),
   );
-  assert.equal(ok, true);
+  assert.equal(ok, "done");
 
   const events = readEventLog(cfg);
   // The name and the id→title map are recorded once, on campaign-start (design §2.1); no wave event repeats them.
@@ -654,7 +654,7 @@ test("campaign --resume recovers the run's name from the log, not the ignored pa
   const ok = await silenceConsole(() =>
     campaign(cfg, [], host, "ignored param", { resume: true }, gitFreeDeps(cfg, async () => 0)),
   );
-  assert.equal(ok, true);
+  assert.equal(ok, "done");
 
   // The redrive re-entered wave 1 and ran 102 (read off the wave-start it re-logged).
   const resumed = readEventLog(cfg).find(
@@ -717,7 +717,7 @@ test("redrive re-enters the parked wave and integrates a green-but-unmerged memb
     campaign(cfg, [], host, undefined, { resume: true }, recordingDeps(cfg, spawned, integrated)),
   );
 
-  assert.equal(ok, true);
+  assert.equal(ok, "done");
   assert.deepEqual(spawned, [], "no member of the parked wave was respawned");
   assert.deepEqual(integrated, [["101", "102"]], "both greens were handed to integration to land");
   assert.ok(
@@ -739,7 +739,7 @@ test("redrive re-runs a parked member whose parked record is gone (answered), an
     campaign(cfg, [], host, undefined, { resume: true }, recordingDeps(cfg, spawned, integrated)),
   );
 
-  assert.equal(ok, true);
+  assert.equal(ok, "done");
   assert.deepEqual(spawned, ["102"], "only the answered park re-ran — 101 was banked, not respawned");
 });
 
@@ -761,7 +761,7 @@ test("redrive does not spawn a parked member whose record remains; the wave park
     campaign(cfg, [], host, undefined, { resume: true }, recordingDeps(cfg, spawned, integrated)),
   );
 
-  assert.equal(ok, false, "the unresolved park re-parks the wave and stops the campaign");
+  assert.equal(ok, "parked", "the unresolved park re-parks the wave and stops the campaign");
   assert.deepEqual(spawned, [], "the still-parked member was not respawned");
   // A fresh campaign-park was recorded on the redrive (the second one in the log).
   assert.equal(
@@ -795,7 +795,7 @@ test("redrive resumes at the parked wave, not past it — a closed earlier wave 
     campaign(cfg, [], host, undefined, { resume: true }, recordingDeps(cfg, spawned, integrated)),
   );
 
-  assert.equal(ok, false, "the parked wave 1 stops the redrive again");
+  assert.equal(ok, "parked", "the parked wave 1 stops the redrive again");
   assert.deepEqual(spawned, [], "neither the closed wave 0 nor the still-parked wave 1 respawned");
   // The redrive re-entered wave 1 (its wave-start re-logged), never stepping to wave 2.
   const batches = readEventLog(cfg)
@@ -824,7 +824,7 @@ test("redrive stops as failed again on a failed member, but re-runs it under --o
   const stopped = await silenceConsole(() =>
     campaign(cfg, [], host, undefined, { resume: true }, recordingDeps(cfg, spawned, integrated)),
   );
-  assert.equal(stopped, false, "the failed member stops the redrive as failed");
+  assert.equal(stopped, "failed", "the failed member stops the redrive as failed");
   assert.deepEqual(spawned, [], "a failed member is not silently re-run without an override");
 
   // With --override: the operator chose to re-run the failed member.
@@ -833,7 +833,7 @@ test("redrive stops as failed again on a failed member, but re-runs it under --o
   const ok = await silenceConsole(() =>
     campaign(cfg, [], host, undefined, { resume: true, override: true }, recordingDeps(cfg, spawned2, integrated2)),
   );
-  assert.equal(ok, true, "the overridden failed member re-ran to green and the wave closed");
+  assert.equal(ok, "done", "the overridden failed member re-ran to green and the wave closed");
   assert.deepEqual(spawned2, ["102"], "only the failed member re-ran; 101 stayed banked");
 });
 
@@ -858,7 +858,7 @@ test("a graft appended mid-wave lands in a future wave; the loop re-derives and 
     campaign(cfg, [["101"], ["201"]], host, "harness", {}, gitFreeDeps(cfg, childRun)),
   );
 
-  assert.equal(ok, true);
+  assert.equal(ok, "done");
   const batches = readEventLog(cfg)
     .filter((e): e is WaveStartEvent => e.event === "wave-start")
     .map((b) => b.tasks);
@@ -886,7 +886,7 @@ test("Gate 1 (ADR 0017): a per-issue park drains its wave, merges the greens, th
   );
 
   // The wave wave-parks, so the campaign returns false and never runs the next wave.
-  assert.equal(ok, false);
+  assert.equal(ok, "parked");
   assert.ok(!spawned.includes("201"), "the succeeding wave's issue never spawned");
 
   const events = readEventLog(cfg);
@@ -969,7 +969,7 @@ test("re-admit: a parked member answered while the wave still drains re-runs and
     campaign(cfg, [["101", "102"]], host, "harness", {}, gitFreeDeps(cfg, spawnRun)),
   );
 
-  assert.equal(ok, true, "the wave completed once the answered park re-ran green");
+  assert.equal(ok, "done", "the wave completed once the answered park re-ran green");
   const done = readEventLog(cfg).find((e): e is WaveDoneEvent => e.event === "wave-done");
   assert.deepEqual([...(done?.merged ?? [])].sort(), ["101", "102"], "both greens merged in the same wave");
   assert.deepEqual(spawns, ["101", "102", "102"], "102 was re-admitted — spawned once to park, once to re-run");
@@ -1011,7 +1011,7 @@ test("grace window: a question/stalled park no answer resolves within parkGraceS
 
   const ok = await silenceConsole(() => campaign(cfg, [["101", "102"]], host, "harness", {}, deps));
 
-  assert.equal(ok, false, "an unanswered park at expiry stops the campaign");
+  assert.equal(ok, "parked", "an unanswered park at expiry stops the campaign");
   assert.deepEqual(graceArgs, { ids: ["102"], secs: 30 }, "the wave waited on 102 for the configured window");
   const grace = readEventLog(cfg).find((e): e is GraceWaitEvent => e.event === "grace-wait");
   assert.equal(grace?.seconds, 30);
@@ -1047,7 +1047,7 @@ test("grace window: an answer that lands within parkGraceSeconds re-admits the m
 
   const ok = await silenceConsole(() => campaign(cfg, [["101", "102"]], host, "harness", {}, deps));
 
-  assert.equal(ok, true, "the in-window answer let the wave finish");
+  assert.equal(ok, "done", "the in-window answer let the wave finish");
   const done = readEventLog(cfg).find((e): e is WaveDoneEvent => e.event === "wave-done");
   assert.deepEqual([...(done?.merged ?? [])].sort(), ["101", "102"], "the re-admitted member merged in the same wave");
 });
@@ -1071,7 +1071,7 @@ test("grace window: a conflict (quarantine) never triggers the wait, even with p
 
   const ok = await silenceConsole(() => campaign(cfg, [["101", "102"]], host, "harness", {}, deps));
 
-  assert.equal(ok, true, "a quarantine with no stranded dependents runs the wave to done");
+  assert.equal(ok, "done", "a quarantine with no stranded dependents runs the wave to done");
   assert.equal(graceCalls, 0, "a conflict never waits");
   assert.ok(!readEventLog(cfg).some((e) => e.event === "grace-wait"), "no grace-wait was logged for a conflict");
 });
@@ -1099,7 +1099,7 @@ test("grace window: the default parkGraceSeconds of 0 never waits — a park sto
 
   const ok = await silenceConsole(() => campaign(cfg, [["101", "102"]], host, "harness", {}, deps));
 
-  assert.equal(ok, false, "with no grace, the park stops the campaign");
+  assert.equal(ok, "parked", "with no grace, the park stops the campaign");
   assert.equal(graceCalls, 0, "the grace waiter is never invoked when the window is 0");
   assert.ok(!readEventLog(cfg).some((e) => e.event === "grace-wait"), "no grace-wait event with the window at 0");
 });
@@ -1130,7 +1130,7 @@ test("Gate 2 unchanged: an all-green wave whose combined base gates red still wa
     campaign(cfg, [["101", "102"], ["201"]], host, "harness", {}, deps),
   );
 
-  assert.equal(ok, false, "the red combined base wave-parks");
+  assert.equal(ok, "parked", "the red combined base wave-parks");
   assert.ok(!spawned.includes("201"), "no succeeding wave starts on a red base");
   const notice = listOutbox(cfg).find((r) => r.event === "wave-parked");
   assert.ok(notice, "the existing waveParkedNotice still goes out");
@@ -1161,7 +1161,7 @@ test("a failed member drains its wave, integrates the greens, then stops the cam
     campaign(cfg, [["101", "102"], ["201"]], host, "harness", {}, gitFreeDeps(cfg, childRun)),
   );
 
-  assert.equal(ok, false, "a failed member stops the campaign non-zero");
+  assert.equal(ok, "failed", "a failed member stops the campaign non-zero");
   assert.ok(!spawned.includes("201"), "the succeeding wave never starts once a member failed");
 
   const events = readEventLog(cfg);
@@ -1212,7 +1212,7 @@ test("a quarantine that strands later-wave dependents wave-parks the campaign �
     campaign(cfg, [["640"], ["701"]], host, "harness", {}, deps),
   );
 
-  assert.equal(ok, false, "the stranded quarantine pauses the campaign");
+  assert.equal(ok, "parked", "the stranded quarantine pauses the campaign");
   assert.ok(!spawned.includes("701"), "the stranded later wave never starts");
 
   // The pause is an explicit campaign-park, so the log is never indistinguishable from a crash.

@@ -1,6 +1,7 @@
 import {
   type ArchivedRunState,
   type CampaignStatus,
+  inFlightRunning,
   type StatusIssue,
   type StatusWave,
   waveLabel,
@@ -318,7 +319,9 @@ export interface ArchivedRunView {
  * client script (`LIVE_TAIL_SCRIPT`), reusing `highlightJsonLine`.
  */
 export const renderLiveTail = (status: CampaignStatus, streaming = true) => {
-  const running = status.waves.flatMap((wave) => wave.issues).filter((issue) => issue.status === "running");
+  // Only the runners of the wave in flight (design §11) — never a ghost still reading `running` in
+  // a wave that has advanced or one not yet in flight, which a racy/partial log can leave behind.
+  const running = inFlightRunning(status);
   const summary = `${running.length} agent${running.length === 1 ? "" : "s"}`;
   const issueRow = (issue: string, dot: string, label: string) =>
     `<li class="tail-issue-option" role="option" data-issue="${escapeHtml(issue)}"><span class="dot ${dot}"></span>${escapeHtml(label)}</li>`;

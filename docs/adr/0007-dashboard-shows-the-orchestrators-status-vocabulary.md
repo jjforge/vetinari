@@ -1,5 +1,7 @@
 # The dashboard shows the orchestrator's real status vocabulary, plus `pruned`
 
+Status: superseded by design.md §2.2.
+
 The UX handoff (the `dashboard-ux` package) defined a five-word status vocabulary
 — *running, parked, queued, merged, pruned* — and **banned a failure status**, on
 the theory that a run that breaks parks and asks rather than failing. The

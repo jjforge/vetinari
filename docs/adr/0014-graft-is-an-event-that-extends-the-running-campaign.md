@@ -1,5 +1,7 @@
 # Graft is an event that extends the running campaign; the added issues are re-layered from the log
 
+Status: recorded in design.md §5.
+
 Adding issues to a **running** campaign is the symmetric counterpart to prune
 (ADR 0005), and takes the same shape: `graft <ids…>` appends a **graft event** to
 the project's event log, and the `campaign` loop reconstructs its remaining waves

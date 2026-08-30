@@ -2,53 +2,90 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { MODES, renderUsage } from "./help.ts";
+import {
+  MODES,
+  renderUsage,
+  renderModesReference,
+  MODES_REFERENCE_BEGIN,
+  MODES_REFERENCE_END,
+} from "./help.ts";
 
 /**
- * The first-column mode signatures of the README "## Modes" table — the command
- * reference an agent actually reads in its worktree (ADR 0003). Parsed from the
- * markdown so the test compares the same text a human reads, not a re-encoding of
- * it. Scoped to the one table under `## Modes`, stopping at the next section.
+ * The generated modes block of `docs/reference.md` — the exhaustive CLI-mode list
+ * the README/help drift test now points at (design §13.3; it used to guard the
+ * README "## Modes" table). Read verbatim between the marker comments so the test
+ * compares the same text on disk, not a re-encoding of it.
  */
-function readmeModeSignatures(): string[] {
-  const md = readFileSync(join(process.cwd(), "README.md"), "utf8");
-  const lines = md.split("\n");
-  const start = lines.findIndex((l) => /^##\s+Modes\s*$/.test(l));
-  assert.ok(start >= 0, "README has no `## Modes` section");
+function referenceModesBlock(): string {
+  const md = readFileSync(join(process.cwd(), "docs/reference.md"), "utf8");
+  const start = md.indexOf(MODES_REFERENCE_BEGIN);
+  const end = md.indexOf(MODES_REFERENCE_END);
+  assert.ok(
+    start >= 0 && end > start,
+    "docs/reference.md has no generated modes block (regenerate with `npm run gen-reference`)",
+  );
+  return md.slice(start, end + MODES_REFERENCE_END.length);
+}
+
+/** The first-column mode signatures of that generated block. */
+function referenceModeSignatures(): string[] {
   const sigs: string[] = [];
-  for (let i = start + 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (/^##\s/.test(line)) break; // the next section ends the Modes table
-    if (!line.startsWith("|")) continue;
-    const first = line.split("|")[1].trim(); // cell between the 1st and 2nd pipe
-    if (first === "Mode" || /^-+$/.test(first)) continue; // header / separator row
-    const m = first.match(/^`([^`]+)`/);
+  for (const line of referenceModesBlock().split("\n")) {
+    if (!line.startsWith("| `")) continue; // data rows only
+    const m = line.match(/^\|\s*`([^`]+)`/);
     if (m) sigs.push(m[1]);
   }
   return sigs;
 }
 
-test("the README Modes table lists exactly the CLI's modes — neither can drift (#167)", () => {
-  const readme = readmeModeSignatures();
+test("docs/reference.md's modes block is generated verbatim from MODES — regenerate, never hand-edit (#167)", () => {
+  // The block on disk must byte-match the renderer, so an edit to a signature OR
+  // a blurb is caught, not just an added/removed row.
+  assert.equal(
+    referenceModesBlock(),
+    renderModesReference(),
+    "docs/reference.md modes block is stale — run `npm run gen-reference`",
+  );
+});
+
+test("docs/reference.md's modes table lists exactly the CLI's modes — neither can drift (#167)", () => {
+  const reference = referenceModeSignatures();
   const cli = MODES.map((m) => m.signature);
 
-  const readmeSet = new Set(readme);
+  const referenceSet = new Set(reference);
   const cliSet = new Set(cli);
-  const missingFromReadme = cli.filter((s) => !readmeSet.has(s));
-  const staleInReadme = readme.filter((s) => !cliSet.has(s));
+  const missingFromReference = cli.filter((s) => !referenceSet.has(s));
+  const staleInReference = reference.filter((s) => !cliSet.has(s));
 
   // The failure message names exactly which mode drifted, so the gate tells the
   // implementer what to add or remove rather than just "they differ".
   assert.deepEqual(
-    { missingFromReadme, staleInReadme },
-    { missingFromReadme: [], staleInReadme: [] },
+    { missingFromReference, staleInReference },
+    { missingFromReference: [], staleInReference: [] },
   );
 });
 
-test("neither the README table nor the CLI mode list carries a duplicate signature", () => {
-  const readme = readmeModeSignatures();
+test("the README stays under its 1,500-word ceiling — the pitch and first hour, not the reference (design §13.3)", () => {
+  const readme = readFileSync(join(process.cwd(), "README.md"), "utf8");
+  const words = readme.split(/\s+/).filter(Boolean).length;
+  assert.ok(
+    words <= 1500,
+    `README.md is ${words} words (> 1,500) — move detail into docs/reference.md or the guides`,
+  );
+});
+
+test("the README no longer carries a Modes table — the exhaustive list lives in docs/reference.md (design §13.3)", () => {
+  const readme = readFileSync(join(process.cwd(), "README.md"), "utf8");
+  assert.ok(
+    !/^##\s+Modes\s*$/m.test(readme),
+    "README.md still has a `## Modes` section; the modes table belongs in docs/reference.md",
+  );
+});
+
+test("neither the reference table nor the CLI mode list carries a duplicate signature", () => {
+  const reference = referenceModeSignatures();
   const cli = MODES.map((m) => m.signature);
-  assert.equal(new Set(readme).size, readme.length, "duplicate mode row in README");
+  assert.equal(new Set(reference).size, reference.length, "duplicate mode row in docs/reference.md");
   assert.equal(new Set(cli).size, cli.length, "duplicate mode in MODES");
 });
 
@@ -71,6 +108,23 @@ test("the retired surfaces are gone from MODES — prune batch, fileset-check, d
   assert.ok(!sigs.includes("prune <issue> <batch…>"), "the prune batch form is retired");
   assert.ok(!sigs.some((s) => /^fileset-check\b/.test(s)), "fileset-check is retired as a mode");
   assert.ok(!sigs.some((s) => /^demo\b/.test(s)), "demo create/remove are `make` targets, not modes");
+});
+
+test("renderModesReference renders one table row per mode, MODES pipes escaped so the table survives", () => {
+  const md = renderModesReference();
+  for (const m of MODES)
+    assert.ok(
+      md.includes("`" + m.signature + "`"),
+      `docs/reference.md modes section is missing "${m.signature}"`,
+    );
+  // Every generated row is `| \`sig\` | blurb |`: exactly three UNescaped pipes,
+  // so a blurb pipe (`claude | pi | codex`) that leaked through unescaped would
+  // split the cell and be caught here.
+  for (const line of md.split("\n")) {
+    if (!line.startsWith("| `")) continue; // only the data rows, not header/separator
+    const unescaped = (line.match(/(?<!\\)\|/g) ?? []).length;
+    assert.equal(unescaped, 3, `row has unescaped pipes: ${line}`);
+  }
 });
 
 test("renderUsage shows every mode's signature — --help is produced from MODES, never hand-kept", () => {

@@ -272,15 +272,6 @@ if (mode === "migrate") {
   const did: string[] = [];
   if (result.moved.length) did.push(`moved ${result.moved.length} path(s)`);
   if (result.gitignoreUpdated) did.push("updated .gitignore");
-  if (result.gatewayEnvDeleted) did.push("deleted the stale gateway.env");
-  if (result.unitRewritten)
-    did.push("rewrote the systemd unit into the gateway service");
-  if (result.envRewritten)
-    did.push("stripped host-side secrets from the container gate .env");
-  if (result.configRewritten)
-    did.push("translated hostWeight → containerShare");
-  if (result.hostCeilingRenamed)
-    did.push("renamed the host-ceiling file to max-concurrent-containers");
   if (did.length) console.log(`\nMigrated: ${did.join(", ")}.`);
   process.exit(0);
 }

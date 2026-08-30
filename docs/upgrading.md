@@ -1,5 +1,29 @@
 # Upgrading
 
+## Removed from `migrate` — August 30, 2026
+
+`migrate` now performs **only** the one-time layout move (`vetinari/` +
+`.vetinari.local/`, config → `vetinari/`, old `.sandcastle/` state →
+`.vetinari.local/`, the `.gitignore` edit) and the host-side
+`orchestrator.env` → `host.env` rename. A rename is a breaking change with a
+stated benefit, not a shim `migrate` carries forever (design §9, §13.1), so the
+following one-off shims — added for a tool only weeks old — have been removed. If
+you are upgrading a project old enough to need one, apply it by hand:
+
+- **`hostWeight` → `containerShare`.** Replace a numeric `hostWeight: N` in
+  `vetinari/config.mts` with `containerShare: "high" | "medium" | "low"`.
+- **`host-slots` → `max-concurrent-containers`.** Rename the host-ceiling file
+  in the gateway config dir, keeping its value.
+- **`dispatch` → `gateway` systemd unit.** Re-run `vetinari gateway install` to
+  write this host's `vetinari-gateway.service`, replacing any per-project
+  `dispatch` poller unit.
+- **Stale `gateway.env`.** Delete any `gateway.env` in the gateway config dir —
+  the gateway holds no secrets of its own (ADR 0002).
+- **`VETINARI_TELEGRAM_*` in the container gate.** Remove any
+  `VETINARI_TELEGRAM_*` keys from `.vetinari.local/.env`; they belong only in
+  `.vetinari.local/host.env`, never in a container. Rotate any bot token that
+  was exposed there.
+
 Two things get updated independently: this package (the orchestrator) and
 `@ai-hero/sandcastle` (the library it runs on). Both come down to the same habit
 afterwards: re-run `baseline` in each consuming project, because that is what

@@ -1,5 +1,7 @@
 # Agent activity is captured live from the run stream, not the session log
 
+Status: recorded in design.md §11.
+
 The live tail renders each running agent's activity **per tool-use, as it happens**.
 We decided to source that stream from the agent runner's live streaming callback
 (sandcastle's `onAgentStreamEvent`, which fires per stdout line during a run),

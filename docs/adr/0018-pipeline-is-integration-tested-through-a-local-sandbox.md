@@ -1,5 +1,7 @@
 # The orchestrator pipeline is integration-tested through a local sandbox
 
+Status: recorded in design.md §13.4.
+
 The orchestrator's hard behaviors — per-issue gate, green→merge, conflict→quarantine,
 the merged-base gate, and the park→drain→wave-park escalation (ADR 0013, ADR 0017) —
 are each unit-tested against real on-disk state, but **every unit test stubs the seams

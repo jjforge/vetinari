@@ -1,6 +1,6 @@
 # Redrive is the umbrella recovery: an answer continues a campaign, a failure stops it
 
-Status: accepted. Amends [ADR 0017](0017-a-wave-gates-the-next-on-a-healthy-base-and-zero-parks.md) and builds on [ADR 0013](0013-wave-integration-is-non-atomic-quarantine-and-wave-park.md) and [ADR 0019](0019-held-work-is-one-parked-state-at-every-level.md).
+Status: superseded by design.md §7. Amends [ADR 0017](0017-a-wave-gates-the-next-on-a-healthy-base-and-zero-parks.md) and builds on [ADR 0013](0013-wave-integration-is-non-atomic-quarantine-and-wave-park.md) and [ADR 0019](0019-held-work-is-one-parked-state-at-every-level.md).
 
 ## Context
 

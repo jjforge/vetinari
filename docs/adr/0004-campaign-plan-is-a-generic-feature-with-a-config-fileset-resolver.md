@@ -1,5 +1,7 @@
 # The campaign wave-planner is a generic feature with a config-provided file-set resolver
 
+Status: recorded in design.md §4.
+
 The campaign wave-planner (`campaign-plan`) — which turns a selected set of ticket
 ids into the dependency-ordered, file-disjoint wave arguments `campaign` consumes —
 is a **generic vetinari feature**, a peer of `prune`, not a project-owned tool.

@@ -1,5 +1,7 @@
 # A host slot budget is honored by a cooperative filesystem lease, not a gateway allocator
 
+Status: superseded by design.md §8.
+
 Multiple projects run their own `campaign`/`queue` at once, and each self-limits by
 its own `QUEUE_SLOTS` with no cross-project coordination — so N projects at eight
 slots is 8N containers, and one busy machine oversubscribes. We want a **host-level

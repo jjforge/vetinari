@@ -1,5 +1,7 @@
 # Live dashboard updates come from watching the log files and pushing over SSE
 
+Status: recorded in design.md §11.
+
 The dashboard is read-mostly: an operator opens it to find out whether anything
 needs them. For that to stay true without a manual refresh, the open page has to
 learn about new events as they land. Three mechanisms were on the table — the

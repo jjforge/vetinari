@@ -1,5 +1,7 @@
 # The `turn` event carries an agent-authored one-line summary
 
+Status: recorded in design.md §2.1.
+
 An issue's detail view is built around a **turn log**: for each turn the agent
 took, one sentence saying what happened, newest first. It is the whole reason to
 open the detail sheet — it is how the operator decides whether to answer, prune, or

@@ -1,5 +1,7 @@
 # The status dashboard is the registry-backed aggregated server; the standalone single-project server is retired
 
+Status: recorded in design.md §11.
+
 E5 (ADR 0002, #16) shipped two status servers: the original single-project
 `serveStatus`, and a gateway-hosted aggregated `serveAllStatus` with a project
 dropdown over the host registry. E5 deliberately **kept** the standalone one as a

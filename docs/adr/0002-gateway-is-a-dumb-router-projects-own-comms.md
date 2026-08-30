@@ -1,5 +1,7 @@
 # The gateway is a dumb router; projects own their comms and register a pointer
 
+Status: recorded in design.md §10.
+
 The host-level gateway holds no project config and no secrets. Each project owns
 its full Telegram configuration in its committed `vetinari/` (destinations, and
 which message category goes where) with tokens in its excluded

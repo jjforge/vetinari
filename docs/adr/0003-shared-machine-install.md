@@ -1,5 +1,7 @@
 # vetinari is one shared machine install, not vendored per project
 
+Status: recorded in design.md §1.
+
 vetinari is installed once on the host and that single install is shared by
 every project on the machine. A project is not given its own copy of the runtime
 and does not pin a version — it runs whatever the machine has installed. The CLI

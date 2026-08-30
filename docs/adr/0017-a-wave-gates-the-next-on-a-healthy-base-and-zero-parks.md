@@ -1,5 +1,7 @@
 # A wave gates the next on a healthy base and zero parks: a per-issue park escalates to a wave-park
 
+Status: superseded by design.md §5.
+
 Only a red combined gate held a wave ([ADR 0013](0013-wave-integration-is-non-atomic-quarantine-and-wave-park.md)). A **per-issue park** — an agent that asked a question, produced no change, or ran out of turns — was folded into the wave's non-green `held` set, its parked record cleared, and the campaign advanced to the next wave. So a wave could read **done**, and succeeding waves build on top, while an issue in it still waited on a human.
 
 Worse, the park went **dark**. The parked record that drives the dashboard's parked surfaces and the gateway's Telegram announcement is the same record cleared at the wave boundary (and again at archive), so the question vanished from the dashboard, the run reported a clean "complete", and the dropped issue was left un-merged and no longer resumable. A human who missed the one announcement in the moment had no standing signal that anything was outstanding.

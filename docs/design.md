@@ -338,11 +338,6 @@ Described by behaviour; the tracker holds the numbers (`gh issue list --label ca
 - A run that throws logs no `failed`; the event exists only when a campaign parent infers it from the child's exit.
 - A standalone `run` or an `answer` takes no host slot, so the ceiling and the crash-liveness probe see only campaign children; `answer` also skips the credential preflight. The sandbox cuts a new branch from `HEAD`, not `baseBranch`, and there is no one-run-per-issue preflight — git errors raw.
 
-**Redrive and resolve**
-
-- An answer runs the loop itself and then redrives, instead of delivering to the record; so a live campaign's re-admit fires only after that run goes green (respawning a green issue), the redrive's own rerun carries no answer, and a second campaign process can start over a live one. The answer path never archives a finished run.
-- `answer` on an unparked issue throws instead of reporting.
-
 **Records and states**
 
 - A conflict park writes no parked record; archive clears every parked record; the wave boundary clears held members' records — all against §2.5.

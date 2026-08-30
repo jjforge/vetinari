@@ -5,8 +5,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ResolvedConfig } from "./config.ts";
 import {
+  answerParked,
   clearParkedForTasks,
   enqueueOutbound,
+  isAnswered,
   listOutbox,
   listOutboxIn,
   listParked,
@@ -74,6 +76,32 @@ test("readParked tolerates an absent sessionId when requireSession is false — 
   const rec = readParked(cfgFor(dir), "101", { requireSession: false });
   assert.equal(rec.sessionId, undefined);
   assert.equal(rec.question, "Need a choice.");
+});
+
+test("answerParked writes the answer and answeredAt into the record, keeping it (and its tgMessageId)", async () => {
+  const dir = join(tmpdir(), `vetinari-answer-parked-${Date.now()}`);
+  mkdirSync(join(dir, "parked"), { recursive: true });
+  await park(cfgFor(dir), { taskId: "555", reason: "question", sessionId: "s", branch: "agent/555", question: "Which approach?" });
+  setParkedMessageId(join(dir, "parked"), "555", 909);
+
+  assert.equal(isAnswered(cfgFor(dir), "555"), false, "an un-answered park is not answered");
+  answerParked(cfgFor(dir), "555", "use approach A");
+
+  const rec = readParked(cfgFor(dir), "555");
+  assert.equal(rec.answer, "use approach A", "the answer text is written into the record");
+  assert.ok(rec.answeredAt, "an answeredAt marker is stamped");
+  assert.equal(rec.tgMessageId, 909, "the announce guard is kept so the gateway does not re-announce");
+  assert.equal(rec.sessionId, "s", "the session id is kept so a resumable answer can resume");
+  assert.equal(rec.question, "Which approach?", "the question is kept");
+  assert.equal(isAnswered(cfgFor(dir), "555"), true, "the record now reads answered");
+});
+
+test("isAnswered is false for a record with no answer and for a missing record", () => {
+  const dir = join(tmpdir(), `vetinari-is-answered-${Date.now()}`);
+  mkdirSync(join(dir, "parked"), { recursive: true });
+  parkFixture(dir, "606");
+  assert.equal(isAnswered(cfgFor(dir), "606"), false, "a parked-but-unanswered record is not answered");
+  assert.equal(isAnswered(cfgFor(dir), "999"), false, "a record that is not on disk is not answered");
 });
 
 test("clearParkedForTasks removes only parked records for completed wave tasks", () => {

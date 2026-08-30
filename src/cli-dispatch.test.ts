@@ -18,6 +18,7 @@ function makeDeps(overrides: Partial<DispatchDeps> = {}) {
   const logged: string[] = [];
   const exitCodes: number[] = [];
   const cfg = {
+    project: "demo",
     stateDir: ".vetinari.local",
     listByLabel: () => [],
     log: { log: spy() },
@@ -42,10 +43,11 @@ function makeDeps(overrides: Partial<DispatchDeps> = {}) {
     runPrune: spy(Promise.resolve({ mode: "prune", target: "436", dropped: [], kept: [], remaining: [], parkedDropped: [] })) as unknown as DispatchDeps["runPrune"],
     runGraft: spy(Promise.resolve({ ids: [], rejected: [], placement: [], remaining: [], applied: true })) as unknown as DispatchDeps["runGraft"],
     listParked: spy([]) as unknown as DispatchDeps["listParked"],
-    readParked: spy({ sessionId: "sess", question: "q?" }) as unknown as DispatchDeps["readParked"],
+    hasParked: spy(true) as unknown as DispatchDeps["hasParked"],
+    answerParked: spy() as unknown as DispatchDeps["answerParked"],
+    projectHasLiveLease: spy(false) as unknown as DispatchDeps["projectHasLiveLease"],
     readEventLog: spy([]) as unknown as DispatchDeps["readEventLog"],
     archiveRun: spy({ archivedLog: null, clearedParked: 0, clearedOutbound: 0 }) as unknown as DispatchDeps["archiveRun"],
-    agentSelectionFor: spy({ resumable: true }) as unknown as DispatchDeps["agentSelectionFor"],
     requireTelegram: spy({}) as unknown as DispatchDeps["requireTelegram"],
     tgTest: spy(Promise.resolve()) as unknown as DispatchDeps["tgTest"],
     ...overrides,
@@ -393,6 +395,16 @@ test("dispatch redrive selects the agent, redrives the campaign from the log, an
   assert.equal((deps.archiveIfIdle as any).calls.length, 1);
 });
 
+test("dispatch redrive refuses with one line when a campaign lease for the project is live (§7)", async () => {
+  const { deps, logged } = makeDeps({
+    projectHasLiveLease: spy(true) as any,
+  });
+  await dispatch({ kind: "redrive", agent: {}, autoPrune: false, override: false, json: false }, deps);
+  assert.equal((deps.campaign as any).calls.length, 0, "no second process redrives over a live campaign");
+  assert.equal((deps.archiveIfIdle as any).calls.length, 0);
+  assert.ok(logged.some((l) => /live|running|campaign/i.test(l)), "it says why it refused");
+});
+
 test("dispatch redrive --override forwards the failed-member override", async () => {
   const { deps } = makeDeps();
   await dispatch({ kind: "redrive", agent: {}, autoPrune: false, override: true, json: false }, deps);
@@ -548,59 +560,67 @@ test("dispatch graft --dry-run emits the machine closure line only under --json"
   assert.ok(withJson.logged.some((l) => l.startsWith("graft-closure ")), "closure JSON under --json");
 });
 
-test("dispatch answer resumes the parked session for a resumable agent and maps green to exit 0", async () => {
-  const { deps, exitCodes } = makeDeps();
-  await dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps);
-  assert.equal((deps.readParked as any).calls.length, 1);
-  assert.equal((deps.runLoop as any).calls.length, 1);
-  assert.deepEqual(exitCodes, [0]);
-});
-
-test("dispatch answer posts a comment and re-enters fresh for a non-resumable agent", async () => {
-  const { deps, cfg } = makeDeps({
-    agentSelectionFor: spy({ resumable: false }) as any,
-  });
-  await dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps);
-  assert.equal(((cfg as any).postComment as any).calls.length, 1);
-  assert.equal((deps.runLoop as any).calls.length, 1);
-});
-
-// A paused campaign's event log where issue 436 (its only member) parked then, after the
-// answer, ran to green — the wave never closed, so a redrive still has work to land.
+// A paused campaign's event log where issue 436 (its only member) parked — the wave never
+// closed, so a redrive still has work to land once the answer re-admits it.
 const pausedCampaignAfterGreen = () => [
   { event: "campaign-start", waves: [["436"]] },
   { event: "wave-start", index: 0, tasks: ["436"] },
   { event: "parked", taskId: "436", reason: "question" },
   { event: "campaign-parked", index: 0, detail: "parked: 436" },
-  { event: "green", taskId: "436", branch: "agent/436" },
 ];
 
-test("dispatch answer redrives the paused campaign after a green answer (ADR 0020)", async () => {
+test("dispatch answer on an unparked issue reports it and exits 0 — never runs or redrives (§7)", async () => {
+  const { deps, logged, exitCodes } = makeDeps({
+    hasParked: spy(false) as any,
+  });
+  await dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps);
+  assert.equal((deps.answerParked as any).calls.length, 0, "nothing to deliver to");
+  assert.equal((deps.runLoop as any).calls.length, 0, "an unparked issue never runs");
+  assert.equal((deps.campaign as any).calls.length, 0, "an unparked issue never redrives");
+  assert.ok(logged.some((l) => /not parked/i.test(l)), "the report names it not parked");
+  assert.deepEqual(exitCodes, []); // exit stays 0
+});
+
+test("dispatch answer delivers to the record and, with a live campaign lease, stops there — no run, no redrive (§5 step 3, §8)", async () => {
+  const { deps } = makeDeps({
+    projectHasLiveLease: spy(true) as any,
+    readEventLog: spy(pausedCampaignAfterGreen()) as any,
+  });
+  await dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps);
+  assert.deepEqual((deps.answerParked as any).calls, [[deps.cfg, "436", "ok"]], "the answer is written into the record");
+  assert.equal((deps.runLoop as any).calls.length, 0, "the live campaign re-admits — the answer never runs the loop itself");
+  assert.equal((deps.campaign as any).calls.length, 0, "no second process redrives over a live campaign");
+});
+
+test("dispatch answer delivers then redrives the paused campaign when no campaign is live (§5 step 3, §7)", async () => {
   const { deps } = makeDeps({
     readEventLog: spy(pausedCampaignAfterGreen()) as any,
   });
   await dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps);
-  // The green answer continued the campaign by itself: a resume redrive was launched.
+  assert.deepEqual((deps.answerParked as any).calls, [[deps.cfg, "436", "ok"]], "the answer is delivered first");
+  // No live campaign: a resume redrive re-admits the answered member (which consumes the answer).
+  assert.equal((deps.runLoop as any).calls.length, 0, "the answer delivers — the redrive runs the member");
   assert.equal((deps.campaign as any).calls.length, 1);
   assert.deepEqual((deps.campaign as any).calls[0][4], { resume: true });
+  assert.equal((deps.archiveIfIdle as any).calls.length, 1, "the answer→redrive path archives once idle");
 });
 
-test("dispatch answer does not redrive a standalone parked issue with no campaign", async () => {
-  const { deps, exitCodes } = makeDeps(); // default readEventLog → [] (no campaign started)
-  await dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps);
-  assert.equal((deps.campaign as any).calls.length, 0);
-  assert.deepEqual(exitCodes, [0]); // the standalone green answer still exits 0
-});
-
-test("dispatch answer that parks again does not redrive", async () => {
-  const { deps, exitCodes } = makeDeps({
-    runLoop: spy(Promise.resolve("parked")) as any,
+test("dispatch answer redrive refuses to start while a campaign lease is live (§7)", async () => {
+  const { deps } = makeDeps({
+    projectHasLiveLease: spy(true) as any,
     readEventLog: spy(pausedCampaignAfterGreen()) as any,
   });
   await dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps);
-  // A second park is not a green, so nothing is redriven; the exit code says parked.
-  assert.equal((deps.campaign as any).calls.length, 0);
-  assert.deepEqual(exitCodes, [2]);
+  assert.equal((deps.campaign as any).calls.length, 0, "the live lease blocks the answer's redrive");
+});
+
+test("dispatch answer for a standalone park (no campaign) delivers then runs the loop, exiting on its verdict", async () => {
+  const { deps, exitCodes } = makeDeps(); // default readEventLog → [] (no campaign started)
+  await dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps);
+  assert.deepEqual((deps.answerParked as any).calls, [[deps.cfg, "436", "ok"]]);
+  assert.equal((deps.campaign as any).calls.length, 0, "a standalone park never redrives");
+  assert.deepEqual((deps.runLoop as any).calls, [[deps.cfg, "436"]], "the run consumes the answered record");
+  assert.deepEqual(exitCodes, [0]); // the standalone green answer exits 0
 });
 
 test("dispatch answer with no text throws the needs-a-task-id-and-text message", async () => {

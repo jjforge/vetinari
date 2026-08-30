@@ -228,6 +228,12 @@ export interface DispatchDeps {
    * bad provider/effort or missing credentials, before any container (ADR 0016).
    */
   selectAgent: (cfg: ResolvedConfig, override: AgentOverride) => void;
+  /**
+   * Was this process spawned as a campaign/queue child `run` (VETINARI_CHILD)? A child is
+   * exempt from `run`'s live-campaign refusal: its parent campaign holds the project lease
+   * FOR it, so it must run rather than refuse against its own parent (design §5 step 3, §8).
+   */
+  isCampaignChild: boolean;
   /** Archive a prior run still sitting in the live log before a fresh run appends. */
   archiveLeftoverRun: () => void;
   /** Reset live state once a run is truly over (skipped while anything is parked). */
@@ -284,6 +290,19 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
       // its credentials before the container, and stamps VETINARI_AGENT.
       deps.selectAgent(cfg, cmd.agent);
       if (!cmd.args[0]) throw new Error("run needs a task id");
+      // A standalone `run` refuses while a campaign process for the project is live
+      // (design §5 step 3, §8): that campaign owns the issue and its worktree, so a second
+      // process must not run it — it would archive the campaign's live log out from under it
+      // and start a second sandbox on the same issue. Refuse BEFORE any destructive step —
+      // before the leftover-archive and the container — with one line and a non-zero exit,
+      // so a later reordering that archives first is caught by the test rather than shipping.
+      // A campaign's OWN child `run` (VETINARI_CHILD) is exempt: its parent holds the lease
+      // FOR it, so it must run (the archive-leftover step already skips children too).
+      if (!deps.isCampaignChild && deps.projectHasLiveLease(deps.host.configDir, cfg.project)) {
+        deps.log(`a campaign is already running for ${cfg.project} — it owns this issue; run refused.`);
+        deps.setExitCode(1);
+        return;
+      }
       enableJson(cmd.json);
       deps.archiveLeftoverRun();
       // Exit code is the queue's slot signal (design §3): 0 green, 2 parked, 1 failed. The loop

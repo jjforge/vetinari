@@ -31,6 +31,7 @@ function makeDeps(overrides: Partial<DispatchDeps> = {}) {
     log: (m: string) => logged.push(m),
     setExitCode: (c: number) => exitCodes.push(c),
     selectAgent: spy(),
+    isCampaignChild: false,
     archiveLeftoverRun: spy(),
     archiveIfIdle: spy(),
     askUnderspecified: spy("drop") as unknown as DispatchDeps["askUnderspecified"],
@@ -293,6 +294,41 @@ test("dispatch run selects the agent, archives the leftover, runs the loop, maps
   assert.equal((deps.archiveLeftoverRun as any).calls.length, 1);
   // The loop is handed the host budget so it holds one slot around the container (design §8).
   assert.deepEqual((deps.runLoop as any).calls, [[deps.cfg, "436", deps.host]]);
+  assert.deepEqual(exitCodes, [0]);
+});
+
+test("dispatch run refuses with one line naming the project and exits non-zero when a campaign lease is live (§5 step 3, §8)", async () => {
+  const { deps, logged, exitCodes } = makeDeps({
+    projectHasLiveLease: spy(true) as any,
+  });
+  await dispatch({ kind: "run", agent: {}, args: ["436"], json: false }, deps);
+  // Nothing is mutated: no leftover archived, no container started, no slot consumed.
+  assert.equal((deps.archiveLeftoverRun as any).calls.length, 0, "the live log is not archived");
+  assert.equal((deps.runLoop as any).calls.length, 0, "no second process runs the issue");
+  // One line naming the project, and a non-zero exit.
+  assert.equal(logged.length, 1, "exactly one refusal line");
+  assert.ok(/demo/.test(logged[0]), "the refusal names the project");
+  assert.ok(exitCodes.length === 1 && exitCodes[0] !== 0, "it exits non-zero");
+});
+
+test("dispatch run consults the lease with the host config dir and the project", async () => {
+  const lease = spy(false);
+  const { deps } = makeDeps({
+    host: { configDir: "/cfg" } as any,
+    projectHasLiveLease: lease as any,
+  });
+  await dispatch({ kind: "run", agent: {}, args: ["436"], json: false }, deps);
+  assert.deepEqual(lease.calls, [["/cfg", "demo"]]);
+});
+
+test("dispatch run for a campaign's own child (VETINARI_CHILD) runs even while the lease is live", async () => {
+  const { deps, exitCodes } = makeDeps({
+    isCampaignChild: true,
+    projectHasLiveLease: spy(true) as any,
+  });
+  await dispatch({ kind: "run", agent: {}, args: ["436"], json: false }, deps);
+  // The child is admitted: it archives (a no-op for a child) and runs the loop, mapping green to 0.
+  assert.equal((deps.runLoop as any).calls.length, 1, "the child run is not refused");
   assert.deepEqual(exitCodes, [0]);
 });
 

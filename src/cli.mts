@@ -601,6 +601,7 @@ await dispatch(parseArgs([mode, ...rest]), {
     process.exitCode = c;
   },
   selectAgent,
+  isCampaignChild: !!process.env.VETINARI_CHILD,
   archiveLeftoverRun,
   archiveIfIdle,
   askUnderspecified,

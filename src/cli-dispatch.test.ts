@@ -81,11 +81,21 @@ test("parseArgs pulls the agent override out of `run`, leaving the task id as th
     kind: "run",
     agent: { provider: "codex", effort: "high" },
     args: ["436"],
+    json: false,
   });
 });
 
 test("parseArgs maps `run` with no task id to a run command with empty args (dispatch throws the message)", () => {
-  assert.deepEqual(parseArgs(["run"]), { kind: "run", agent: {}, args: [] });
+  assert.deepEqual(parseArgs(["run"]), { kind: "run", agent: {}, args: [], json: false });
+});
+
+test("parseArgs reads `run --json` and keeps the task id as the surviving positional (#299)", () => {
+  assert.deepEqual(parseArgs(["run", "436", "--json"]), {
+    kind: "run",
+    agent: {},
+    args: ["436"],
+    json: true,
+  });
 });
 
 test("parseArgs splits `graft` ids on whitespace/commas and reads --dry-run", () => {
@@ -133,6 +143,7 @@ test("parseArgs maps a plain `campaign <ids>` to its positional selection with d
     dryRun: false,
     override: false,
     onUnderspecified: undefined,
+    json: false,
   });
 });
 
@@ -149,6 +160,7 @@ test("parseArgs strips the agent and reads every `campaign` flag (both --flag va
       "--override",
       "--on-underspecified",
       "drop",
+      "--json",
     ]),
     {
       kind: "campaign",
@@ -160,6 +172,7 @@ test("parseArgs strips the agent and reads every `campaign` flag (both --flag va
       dryRun: true,
       override: true,
       onUnderspecified: "drop",
+      json: true,
     },
   );
 });
@@ -170,15 +183,17 @@ test("parseArgs maps a bare `redrive` to a redrive command with default flags", 
     agent: {},
     autoPrune: false,
     override: false,
+    json: false,
   });
 });
 
-test("parseArgs strips the agent and reads redrive's --override/--auto-prune flags", () => {
-  assert.deepEqual(parseArgs(["redrive", "--agent", "codex", "--override", "--auto-prune"]), {
+test("parseArgs strips the agent and reads redrive's --override/--auto-prune/--json flags", () => {
+  assert.deepEqual(parseArgs(["redrive", "--agent", "codex", "--override", "--auto-prune", "--json"]), {
     kind: "redrive",
     agent: { provider: "codex" },
     autoPrune: true,
     override: true,
+    json: true,
   });
 });
 
@@ -193,6 +208,7 @@ test("parseArgs maps `campaign --resume` to a resume with no positional selectio
     dryRun: false,
     override: false,
     onUnderspecified: undefined,
+    json: false,
   });
 });
 
@@ -247,7 +263,7 @@ test("dispatch usage prints the usage and exits non-zero", async () => {
 
 test("dispatch run selects the agent, archives the leftover, runs the loop, maps green to exit 0", async () => {
   const { deps, exitCodes } = makeDeps();
-  await dispatch({ kind: "run", agent: { provider: "codex" }, args: ["436"] }, deps);
+  await dispatch({ kind: "run", agent: { provider: "codex" }, args: ["436"], json: false }, deps);
   assert.deepEqual((deps.selectAgent as any).calls, [[deps.cfg, { provider: "codex" }]]);
   assert.equal((deps.archiveLeftoverRun as any).calls.length, 1);
   assert.deepEqual((deps.runLoop as any).calls, [[deps.cfg, "436"]]);
@@ -258,14 +274,14 @@ test("dispatch run maps a parked outcome to the queue's parked exit code 2", asy
   const { deps, exitCodes } = makeDeps({
     runLoop: spy(Promise.resolve("parked")) as any,
   });
-  await dispatch({ kind: "run", agent: {}, args: ["436"] }, deps);
+  await dispatch({ kind: "run", agent: {}, args: ["436"], json: false }, deps);
   assert.deepEqual(exitCodes, [2]);
 });
 
 test("dispatch run with no task id throws the same message the old switch threw, after agent select", async () => {
   const { deps } = makeDeps();
   await assert.rejects(
-    dispatch({ kind: "run", agent: {}, args: [] }, deps),
+    dispatch({ kind: "run", agent: {}, args: [], json: false }, deps),
     /run needs a task id/,
   );
   assert.equal((deps.selectAgent as any).calls.length, 1);
@@ -275,7 +291,7 @@ test("dispatch run with no task id throws the same message the old switch threw,
 test("dispatch campaign --resume runs a resume with no selection and never archives a leftover", async () => {
   const { deps } = makeDeps();
   await dispatch(
-    { kind: "campaign", agent: {}, positional: [], name: "r", autoPrune: true, resume: true, dryRun: false, override: false, onUnderspecified: undefined },
+    { kind: "campaign", agent: {}, positional: [], name: "r", autoPrune: true, resume: true, dryRun: false, override: false, onUnderspecified: undefined, json: false },
     deps,
   );
   assert.deepEqual((deps.campaign as any).calls, [[deps.cfg, [], deps.host, "r", { autoPrune: true, resume: true, override: false }]]);
@@ -286,7 +302,7 @@ test("dispatch campaign --resume runs a resume with no selection and never archi
 test("dispatch campaign --resume --override forwards the failed-member override to the redrive", async () => {
   const { deps } = makeDeps();
   await dispatch(
-    { kind: "campaign", agent: {}, positional: [], name: undefined, autoPrune: false, resume: true, dryRun: false, override: true, onUnderspecified: undefined },
+    { kind: "campaign", agent: {}, positional: [], name: undefined, autoPrune: false, resume: true, dryRun: false, override: true, onUnderspecified: undefined, json: false },
     deps,
   );
   assert.deepEqual((deps.campaign as any).calls[0][4], { autoPrune: false, resume: true, override: true });
@@ -294,7 +310,7 @@ test("dispatch campaign --resume --override forwards the failed-member override 
 
 test("dispatch redrive selects the agent, redrives the campaign from the log, and archives if idle", async () => {
   const { deps } = makeDeps();
-  await dispatch({ kind: "redrive", agent: { provider: "codex" }, autoPrune: false, override: false }, deps);
+  await dispatch({ kind: "redrive", agent: { provider: "codex" }, autoPrune: false, override: false, json: false }, deps);
   assert.deepEqual((deps.selectAgent as any).calls, [[deps.cfg, { provider: "codex" }]]);
   // Redrive takes no selection and continues the live log — no leftover archive, resume=true.
   assert.deepEqual((deps.campaign as any).calls, [[deps.cfg, [], deps.host, undefined, { autoPrune: false, resume: true, override: false }]]);
@@ -304,14 +320,14 @@ test("dispatch redrive selects the agent, redrives the campaign from the log, an
 
 test("dispatch redrive --override forwards the failed-member override", async () => {
   const { deps } = makeDeps();
-  await dispatch({ kind: "redrive", agent: {}, autoPrune: false, override: true }, deps);
+  await dispatch({ kind: "redrive", agent: {}, autoPrune: false, override: true, json: false }, deps);
   assert.deepEqual((deps.campaign as any).calls[0][4], { autoPrune: false, resume: true, override: true });
 });
 
 test("dispatch campaign --resume still redrives but prints the one-release alias notice pointing at redrive", async () => {
   const { deps, logged } = makeDeps();
   await dispatch(
-    { kind: "campaign", agent: {}, positional: [], name: undefined, autoPrune: false, resume: true, dryRun: false, override: false, onUnderspecified: undefined },
+    { kind: "campaign", agent: {}, positional: [], name: undefined, autoPrune: false, resume: true, dryRun: false, override: false, onUnderspecified: undefined, json: false },
     deps,
   );
   assert.equal((deps.campaign as any).calls.length, 1);
@@ -322,7 +338,7 @@ test("dispatch campaign with an empty selection throws the needs-an-issue messag
   const { deps } = makeDeps();
   await assert.rejects(
     dispatch(
-      { kind: "campaign", agent: {}, positional: [], name: undefined, autoPrune: false, resume: false, dryRun: false, override: false, onUnderspecified: undefined },
+      { kind: "campaign", agent: {}, positional: [], name: undefined, autoPrune: false, resume: false, dryRun: false, override: false, onUnderspecified: undefined, json: false },
       deps,
     ),
     /campaign needs at least one issue id or label/,
@@ -334,7 +350,7 @@ test("dispatch campaign --override runs each positional as a literal wave via ex
     expandSelection: spy(Promise.resolve(["436", "611"])) as any,
   });
   await dispatch(
-    { kind: "campaign", agent: {}, positional: ["436 611"], name: undefined, autoPrune: false, resume: false, dryRun: false, override: true, onUnderspecified: undefined },
+    { kind: "campaign", agent: {}, positional: ["436 611"], name: undefined, autoPrune: false, resume: false, dryRun: false, override: true, onUnderspecified: undefined, json: false },
     deps,
   );
   assert.deepEqual((deps.campaign as any).calls, [[deps.cfg, [["436", "611"]], deps.host, undefined, { autoPrune: false }]]);
@@ -347,7 +363,7 @@ test("dispatch campaign default plans the selection then runs the planned waves"
     runCampaignPlan: spy(Promise.resolve({ waves: [["436"]], waveArgs: '"436"', report: "the plan", suggestedName: "" })) as any,
   });
   await dispatch(
-    { kind: "campaign", agent: {}, positional: ["436"], name: "n", autoPrune: false, resume: false, dryRun: false, override: false, onUnderspecified: "drop" },
+    { kind: "campaign", agent: {}, positional: ["436"], name: "n", autoPrune: false, resume: false, dryRun: false, override: false, onUnderspecified: "drop", json: false },
     deps,
   );
   assert.equal((deps.runCampaignPlan as any).calls.length, 1);
@@ -360,11 +376,58 @@ test("dispatch campaign --dry-run plans but runs nothing", async () => {
     runCampaignPlan: spy(Promise.resolve({ waves: [["436"]], waveArgs: '"436"', report: "the plan", suggestedName: "big" })) as any,
   });
   await dispatch(
-    { kind: "campaign", agent: {}, positional: ["436"], name: undefined, autoPrune: false, resume: false, dryRun: true, override: false, onUnderspecified: undefined },
+    { kind: "campaign", agent: {}, positional: ["436"], name: undefined, autoPrune: false, resume: false, dryRun: true, override: false, onUnderspecified: undefined, json: false },
     deps,
   );
   assert.equal((deps.runCampaignPlan as any).calls.length, 1);
   assert.equal((deps.campaign as any).calls.length, 0);
+});
+
+test("dispatch campaign default prints the plan provenance and streams no JSON without --json (#299)", async () => {
+  const { deps, logged } = makeDeps({
+    expandSelection: spy(Promise.resolve(["436"])) as any,
+    runCampaignPlan: spy(Promise.resolve({ waves: [["436"]], waveArgs: '"436"', report: "the plan", suggestedName: "" })) as any,
+  });
+  const prev = process.env.VETINARI_JSON;
+  delete process.env.VETINARI_JSON;
+  await dispatch(
+    { kind: "campaign", agent: {}, positional: ["436"], name: "n", autoPrune: false, resume: false, dryRun: false, override: false, onUnderspecified: undefined, json: false },
+    deps,
+  );
+  const json = process.env.VETINARI_JSON;
+  if (prev === undefined) delete process.env.VETINARI_JSON;
+  else process.env.VETINARI_JSON = prev;
+  assert.ok(logged.includes("the plan"), "prints the plan provenance");
+  assert.notEqual(json, "1", "does not switch on the JSON event stream");
+});
+
+test("dispatch campaign --json switches on the raw event stream and suppresses the plan provenance (#299)", async () => {
+  const { deps, logged } = makeDeps({
+    expandSelection: spy(Promise.resolve(["436"])) as any,
+    runCampaignPlan: spy(Promise.resolve({ waves: [["436"]], waveArgs: '"436"', report: "the plan", suggestedName: "" })) as any,
+  });
+  const prev = process.env.VETINARI_JSON;
+  delete process.env.VETINARI_JSON;
+  await dispatch(
+    { kind: "campaign", agent: {}, positional: ["436"], name: "n", autoPrune: false, resume: false, dryRun: false, override: false, onUnderspecified: undefined, json: true },
+    deps,
+  );
+  const json = process.env.VETINARI_JSON;
+  if (prev === undefined) delete process.env.VETINARI_JSON;
+  else process.env.VETINARI_JSON = prev;
+  assert.equal(json, "1", "sets VETINARI_JSON so the run logger streams raw events to stdout");
+  assert.ok(!logged.includes("the plan"), "the human plan provenance is suppressed under --json");
+});
+
+test("dispatch run --json switches on the raw event stream for the single loop (#299)", async () => {
+  const { deps } = makeDeps();
+  const prev = process.env.VETINARI_JSON;
+  delete process.env.VETINARI_JSON;
+  await dispatch({ kind: "run", agent: {}, args: ["436"], json: true }, deps);
+  const json = process.env.VETINARI_JSON;
+  if (prev === undefined) delete process.env.VETINARI_JSON;
+  else process.env.VETINARI_JSON = prev;
+  assert.equal(json, "1");
 });
 
 test("dispatch prune routes to runPrune with the parsed target and flags", async () => {

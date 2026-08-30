@@ -26,12 +26,15 @@ export interface Logger {
  * authoritative `event` last so a stray `data.event` can't override the kind. */
 const stampRow = (event: string, data: Record<string, unknown>) => ({ ts: new Date().toISOString(), ...data, event });
 
-/** An adapter that appends stamped JSONL to `path` and echoes to the console — the shared backend
- * of `loggerForRun` and `hostLogger`. */
+/** An adapter that appends stamped JSONL to `path` — the shared backend of `loggerForRun` and
+ * `hostLogger`. The screen is human-readable by default (design §11): events go to the file, and
+ * to stdout ONLY under `--json` (the `VETINARI_JSON` env the CLI sets and child spawns inherit),
+ * where the raw JSONL line is streamed verbatim for tooling. Without it no JSON reaches stdout —
+ * the terminal view is the `report.ts` lines alone (#299). */
 function fileLogger(path: string): Logger {
   const write = (event: string, data: Record<string, unknown> = {}): void => {
     const line = JSON.stringify(stampRow(event, data));
-    console.log(`[vetinari] ${event}`, data);
+    if (process.env.VETINARI_JSON === "1") console.log(line);
     try {
       appendFileSync(path, line + "\n");
     } catch {
@@ -87,9 +90,9 @@ export function readHostLogLines(limit?: number): string[] {
 
 /**
  * Render one stamped host-log row as a single human-readable line — timestamp, event kind, then
- * its salient fields as compact JSON — in the spirit of the `[vetinari] <event> {data}` console
- * echo. A pure function over a row so it is unit-testable without spawning the CLI (#169); a row
- * carrying nothing beyond `ts`/`event` renders those two alone, with no trailing `{}`.
+ * its salient fields as compact JSON. A pure function over a row so it is unit-testable without
+ * spawning the CLI (#169); a row carrying nothing beyond `ts`/`event` renders those two alone,
+ * with no trailing `{}`.
  */
 export function renderHostEvent(row: BaseEvent): string {
   const { ts, event, ...data } = row as BaseEvent & Record<string, unknown>;

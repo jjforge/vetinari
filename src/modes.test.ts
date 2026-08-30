@@ -443,6 +443,24 @@ const silenceConsole = async <T>(fn: () => Promise<T>): Promise<T> => {
   }
 };
 
+// Capture the terminal lines a campaign writes to stdout (the report.ts human lines, or the
+// raw event JSONL under --json), restoring console.log afterwards. The #299 output tests read
+// the screen the operator sees, not the event log.
+const captureLines = async <T>(fn: () => Promise<T>): Promise<string[]> => {
+  const lines: string[] = [];
+  const realLog = console.log;
+  const realErr = console.error;
+  console.log = (...args: unknown[]) => void lines.push(args.map(String).join(" "));
+  console.error = () => {};
+  try {
+    await fn();
+  } finally {
+    console.log = realLog;
+    console.error = realErr;
+  }
+  return lines;
+};
+
 // The container-bound effects a campaign would otherwise run, stubbed git-free:
 // greens merge as-is, no changelog fold, and the base-branch guard passes. Only
 // `spawnRun` varies per test — it stands in for the spawned child `run`.
@@ -457,6 +475,56 @@ const gitFreeDeps = (
   // Default grace is a no-op that resolves at once — a wave never blocks a test on real time.
   // A grace test overrides this to observe the wait or to model an answer landing in-window.
   grace: async () => {},
+});
+
+test("campaign prints human-readable plan/wave/complete lines and NO event JSON to stdout by default (#299)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-report-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const prev = process.env.VETINARI_JSON;
+  delete process.env.VETINARI_JSON;
+  const lines = await captureLines(() =>
+    campaign(cfg, [["101"], ["201"]], host, "vocab", {}, gitFreeDeps(cfg, async () => 0)),
+  );
+  if (prev !== undefined) process.env.VETINARI_JSON = prev;
+  const text = lines.join("\n");
+  assert.match(text, /plan “vocab” · 2 waves/, "the plan, with the campaign name");
+  assert.match(text, /▶ wave 1\/2 — #101/, "per-wave progress");
+  assert.match(text, /🏆 campaign “vocab” complete · 2 waves onto base/, "the completion line");
+  // The screen is human-readable: no raw event line (a JSON object carrying an `event`) leaks.
+  const jsonLeaked = lines.some((l) => {
+    try {
+      return typeof JSON.parse(l)?.event === "string";
+    } catch {
+      return false;
+    }
+  });
+  assert.equal(jsonLeaked, false, "no event JSON reaches stdout without --json");
+});
+
+test("campaign under --json streams the raw event stream and suppresses the human lines (#299)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-report-json-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const prev = process.env.VETINARI_JSON;
+  process.env.VETINARI_JSON = "1";
+  const lines = await captureLines(() =>
+    campaign(cfg, [["101"], ["201"]], host, "vocab", {}, gitFreeDeps(cfg, async () => 0)),
+  );
+  if (prev === undefined) delete process.env.VETINARI_JSON;
+  else process.env.VETINARI_JSON = prev;
+  // Tooling reads clean JSONL: the campaign-start event is on stdout as a parseable line…
+  const events = lines.flatMap((l) => {
+    try {
+      return [JSON.parse(l)];
+    } catch {
+      return [];
+    }
+  });
+  assert.ok(events.some((e) => e.event === "campaign-start"), "raw events reach stdout under --json");
+  // …and none of the human report lines do.
+  assert.ok(!lines.some((l) => l.includes("plan “vocab”")), "human plan line suppressed under --json");
+  assert.ok(!lines.some((l) => l.includes("🏆")), "human completion line suppressed under --json");
 });
 
 test("campaign drives every wave with no Docker — the per-wave re-derive survives a faithful child spawn (#151/#150)", async () => {

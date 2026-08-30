@@ -227,7 +227,9 @@ export async function runLoop(cfg: ResolvedConfig, taskId: string, entry?: Resum
             return "parked";
           }
           cfg.log.log("green", { taskId, branch: sbx.branch, commits: (r.commits ?? []).map((c: any) => c.sha) });
-          console.log(`\n*** GREEN — commits on ${sbx.branch}\n`);
+          // The human GREEN banner is the terminal view (design §11); under --json the screen is
+          // the raw event stream alone, so keep it out to leave the JSONL clean for tooling (#299).
+          if (process.env.VETINARI_JSON !== "1") console.log(`\n*** GREEN — commits on ${sbx.branch}\n`);
           enqueueOutbound(cfg, {
             category: "success",
             event: "green",

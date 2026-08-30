@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { DASHBOARD_PALETTE_CSS, stateColor, stateBorderColor, counterColor, TOP_BAR_STYLES, ISSUE_DETAIL_SHEET_STYLES, ISSUE_DETAIL_SHEET_SCRIPT, HOST_LOG_STYLES, HOST_LOG_SCRIPT } from "./dashboard-assets.ts";
+import { DASHBOARD_PALETTE_CSS, stateColor, stateBorderColor, counterColor, TOP_BAR_STYLES, ISSUE_DETAIL_SHEET_STYLES, ISSUE_DETAIL_SHEET_SCRIPT, HOST_LOG_STYLES, HOST_LOG_SCRIPT, REDRIVE_SCRIPT } from "./dashboard-assets.ts";
 import { cappedRawRows, isNotableHostEvent, renderLandingShell } from "./status.ts";
 
 test("the card/chip colour rules are landed as a normative doc that pins the palette (#83)", () => {
@@ -218,6 +218,20 @@ test("the repo dropdown's CSS matches the spec: mono heading, borderless trigger
     css,
     /@media \(max-width: 640px\) \{ \.repo-label \{ font-size: 15px; \} \}/,
   );
+});
+
+test("REDRIVE_SCRIPT opens the confirm dialog on click and closes it on Cancel — only enabled, no double-bind (#325)", () => {
+  // The greyed-until-safe Redrive control (design §11): enabled, its button opens the native
+  // <dialog> (Cancel the default); Cancel closes without POSTing. It is a no-op when disabled.
+  assert.match(REDRIVE_SCRIPT, /function wireRedrive\(\)/);
+  // Only wires an enabled control — a disabled button (no dialog) is left inert.
+  assert.match(REDRIVE_SCRIPT, /open\.disabled/);
+  // Opening shows the modal dialog; only Confirm (a submit in the /redrive form) sends it.
+  assert.match(REDRIVE_SCRIPT, /open\.addEventListener\("click", \(\) => \{ if \(typeof dialog\.showModal === "function"\) dialog\.showModal\(\); \}\)/);
+  // Cancel closes the dialog (no POST); Escape/backdrop close it natively.
+  assert.match(REDRIVE_SCRIPT, /cancel\.addEventListener\("click", \(\) => dialog\.close\(\)\)/);
+  // Guarded against a re-bind so re-running over the same node (a soft-refresh) adds no second listener.
+  assert.match(REDRIVE_SCRIPT, /open\.dataset\.redriveWired/);
 });
 
 test("HOST_LOG_SCRIPT wires the host-log pane: gear show/hide, badge off isNotableHostEvent, filter, live host frames (#180)", () => {

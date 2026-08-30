@@ -88,37 +88,70 @@ test("status dots never shrink under flex fill pressure — one shared base give
     /\.dot, \.repo-dot, \.tail-dot, \.lv-dot \{[^}]*border-radius: 999px[^}]*\}/,
   );
 });
-test("renderStatusPage shows a Redrive control only for a campaign parked on a red base (#171)", () => {
-  const redBaseParked = renderStatusPage(
+test("renderStatusPage greys the Redrive campaign control with a one-line reason while a campaign process is live (#325)", () => {
+  // Redrive picks up the whole campaign (design §7, §11): a campaign control on the project
+  // page, never an issue move. While a campaign process still holds the lease — the observed
+  // bug fired it on a draining wave — it renders disabled with the reason, and no dialog opens.
+  const live = renderStatusPage(
     {
       project: "beta",
-      waves: [
-        { index: 0, status: "parked", issues: [{ issueNumber: "201", status: "parked", reason: "red-base" }] },
-        { index: 1, status: "unstarted", issues: [{ issueNumber: "401", status: "unstarted" }] },
-      ],
-      parked: [],
-    },
-    { prune: true },
-  );
-  // A campaign parked on a red base (a held member with the red-base reason) offers the
-  // campaign-level Redrive banner that POSTs to /redrive carrying only its project (redrive is
-  // project-scoped — no taskId), mirroring the prune/answer forms.
-  assert.match(redBaseParked, /<section class="redrive-banner">/);
-  assert.match(redBaseParked, /<form method="post" action="\/redrive" class="redrive-form"><input type="hidden" name="project" value="beta"/);
-  assert.match(redBaseParked, /Redrive/);
-
-  // A plain running campaign (no red-base hold) shows no campaign-level Redrive banner. (The
-  // per-issue Redrive move now lives in the issue sheet, gated client-side by issueMoves — its
-  // hidden form is present on every page, so the contrast here is the banner, #307.)
-  const running = renderStatusPage(
-    {
-      project: "beta",
+      name: "checkout revamp",
       waves: [{ index: 0, status: "running", issues: [{ issueNumber: "201", status: "running" }] }],
       parked: [],
     },
-    { prune: true },
+    { prune: true, graft: true, leaseLive: true, baseBranch: "main" },
   );
-  assert.doesNotMatch(running, /class="redrive-banner"/);
+  assert.match(live, /class="redrive-btn"[^>]*data-redrive-open[^>]*disabled/);
+  assert.match(live, /class="redrive-reason">a campaign process is still running</);
+  // The old always-fires red-base banner is gone — the greyed-until-safe control replaces it.
+  assert.doesNotMatch(live, /class="redrive-banner"/);
+  // No confirm dialog renders while the control is disabled — there is nothing to confirm.
+  assert.doesNotMatch(live, /class="redrive-dialog"/);
+});
+test("renderStatusPage enables the Redrive control with a naming confirm dialog when the campaign is stopped and the lease is dead (#325)", () => {
+  // A campaign parked on a red base with no live process is exactly when a redrive is safe:
+  // the fold is stopped and the lease is dead (design §7, §11). The control enables and opens
+  // a dialog naming what will happen — the campaign, the wave it re-enters, its members, the base.
+  const parked = renderStatusPage(
+    {
+      project: "beta",
+      name: "checkout revamp",
+      waves: [
+        { index: 0, status: "closed", issues: [{ issueNumber: "101", status: "completed" }] },
+        { index: 1, status: "parked", reason: "red-base", issues: [{ issueNumber: "201", status: "completed" }, { issueNumber: "202", status: "completed" }] },
+      ],
+      parked: [],
+    },
+    { prune: true, graft: true, leaseLive: false, baseBranch: "main" },
+  );
+  // Enabled: the button opens the dialog and is not disabled.
+  assert.match(parked, /<button type="button" class="redrive-btn" data-redrive-open>Redrive<\/button>/);
+  assert.doesNotMatch(parked, /class="redrive-btn"[^>]*disabled/);
+  // The dialog names the campaign, the resume wave (wave 2), its members and the base.
+  assert.match(parked, /<dialog class="redrive-dialog" data-redrive-dialog>/);
+  assert.match(parked, /Redrive <strong>checkout revamp<\/strong>: re-enters wave 2 — #201, #202 — on <code>main<\/code>/);
+  // Only Confirm POSTs /redrive (project-scoped, no taskId); Cancel is the default (autofocus)
+  // and does not submit.
+  assert.match(parked, /<form method="post" action="\/redrive" class="redrive-dialog-actions" data-redrive-form><input type="hidden" name="project" value="beta" \/>/);
+  assert.match(parked, /<button type="button" class="redrive-cancel" data-redrive-cancel autofocus>Cancel<\/button>/);
+  assert.match(parked, /<button type="submit" class="redrive-confirm" data-redrive-confirm>Redrive<\/button>/);
+  // The page ships the dialog's open/cancel wiring, re-run on live refresh like graft.
+  assert.match(parked, /function wireRedrive\(\)/);
+  assert.match(parked, /wireRedrive\(\);/);
+});
+test("renderStatusPage greys the Redrive control on a settled campaign — nothing to redrive (#325)", () => {
+  // Every wave closed → the campaign is settled; there is no stopped campaign to pick up, so
+  // the control is disabled with that reason (the graft affordance renders nothing, as before).
+  const settled = renderStatusPage(
+    {
+      project: "beta",
+      waves: [{ index: 0, status: "closed", issues: [{ issueNumber: "101", status: "completed" }] }],
+      parked: [],
+    },
+    { prune: true, graft: true, leaseLive: false, baseBranch: "main" },
+  );
+  assert.match(settled, /class="redrive-btn"[^>]*disabled/);
+  assert.match(settled, /class="redrive-reason">the campaign is settled — nothing to redrive</);
 });
 test("renderStatusPage puts a quiet graft input on the summary line, greyed at rest (#202, #168)", () => {
   const runningCampaign = {
@@ -247,9 +280,9 @@ test("renderStatusPage shows an informational merge-conflict affordance with no 
   const note = held.slice(held.indexOf('class="conflict-note"'));
   const noteBlock = note.slice(0, note.indexOf("</section>"));
   assert.doesNotMatch(noteBlock, /<form/);
-  // It points the operator at the per-issue Redrive (which now renders in the sheet) and the
-  // CLI — never a "Redrive control above" that only renders for a red base (#307).
-  assert.doesNotMatch(noteBlock, /control above/i);
+  // It points the operator at the campaign's Redrive control and the CLI — the redrive is a
+  // whole-campaign move now, not a per-issue one (#325).
+  assert.match(noteBlock, /Redrive control/);
   assert.match(noteBlock, /vetinari redrive/);
 
   // No conflict-held issue → no note.
@@ -1384,7 +1417,7 @@ test("renderStatusPage hosts the prune affordance and inline confirm in the tap-
   assert.match(html, /method: "POST"/);
   assert.match(html, /pruning/);
 });
-test("renderStatusPage hosts a parked reply block with a Reply submit and a separate Redrive form (#307)", () => {
+test("renderStatusPage hosts a parked reply block with a Reply submit and no sheet Redrive form (#307, #325)", () => {
   const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
 
   // The sheet carries a reply block, hidden until the opened issue is parked.
@@ -1400,17 +1433,13 @@ test("renderStatusPage hosts a parked reply block with a Reply submit and a sepa
     html,
     /id="reply-form"[\s\S]*?name="taskId"[\s\S]*?name="project"[\s\S]*?<textarea name="text"/,
   );
-  // Reply submits that form; it is associated by `form=` so it can sit outside the form, beside
-  // the Redrive form and Prune.
+  // Reply submits that form; it is associated by `form=` so it can sit outside the form, beside Prune.
   assert.match(
     html,
     /<button type="submit" form="reply-form" id="reply-send" class="sheet-btn" hidden>Reply<\/button>/,
   );
-  // Redrive is its own move: a form POSTing /redrive (project-scoped, no taskId).
-  assert.match(
-    html,
-    /<form method="post" action="\/redrive" id="redrive-form" hidden><input type="hidden" name="project" value="" \/><button type="submit" class="sheet-btn">Redrive<\/button><\/form>/,
-  );
+  // The sheet has no Redrive form of its own — redrive is a whole-campaign control on the page (#325).
+  assert.doesNotMatch(html, /id="redrive-form"/);
 });
 test("renderStatusPage caps the reply textarea so it stays within the sheet/card (#73)", () => {
   const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
@@ -1419,17 +1448,19 @@ test("renderStatusPage caps the reply textarea so it stays within the sheet/card
   // never overflows and introduces no horizontal scroll on the sheet.
   assert.match(html, /\btextarea \{[^}]*max-width: 100%/);
 });
-test("renderStatusPage places Reply, Redrive and Prune in one sheet-actions row, sized for touch (#307)", () => {
+test("renderStatusPage places Reply and Prune in one sheet-actions row, sized for touch (#307, #325)", () => {
   const html = renderStatusPage(
     { project: "demo", waves: [], parked: [] },
     { prune: true },
   );
 
-  // All the move controls live in the same actions row so they are reachable one-handed together.
+  // The issue-level move controls live in the same actions row so they are reachable together;
+  // Redrive is no longer among them — it is a campaign control on the page (#325).
   assert.match(
     html,
-    /<div class="sheet-actions"><button type="submit" form="reply-form" id="reply-send"[^>]*>Reply<\/button><form method="post" action="\/redrive" id="redrive-form"[^>]*>[\s\S]*?Redrive<\/button><\/form><div id="prune-panel"/,
+    /<div class="sheet-actions"><button type="submit" form="reply-form" id="reply-send"[^>]*>Reply<\/button><div id="prune-panel"/,
   );
+  assert.doesNotMatch(html, /id="redrive-form"/);
   // A 44px tap target for the shared move button on a phone.
   assert.match(html, /\.sheet-btn \{[^}]*min-height: 44px;/);
   // The actions row is a flex box, so it needs [hidden] restored explicitly or an
@@ -1439,9 +1470,8 @@ test("renderStatusPage places Reply, Redrive and Prune in one sheet-actions row,
   // [hidden] rule; restore its collapse rule so a non-prunable issue can hide it (#72).
   assert.match(html, /\.prune-panel\[hidden\][^{]*\{ display: none;? \}/);
   // …and the confirm form inside it: its own `display: flex` would defeat the UA
-  // [hidden] rule too, so Confirm/Cancel showed by default beside Redrive+Prune —
-  // four buttons at once. Restore the collapse so they reveal only in the prune
-  // step and the default action row is Redrive + Prune alone (#90).
+  // [hidden] rule too, so Confirm/Cancel showed by default beside Prune. Restore the
+  // collapse so they reveal only in the prune step and the default action row is Prune alone (#90).
   assert.match(html, /\.prune-confirm\[hidden\][^{]*\{ display: none;? \}/);
 });
 test("renderStatusPage wires the parked reply block: shown when parked, options fill the field", () => {

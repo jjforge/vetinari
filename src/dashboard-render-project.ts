@@ -1,6 +1,7 @@
 import {
   type ArchivedRunState,
   type CampaignStatus,
+  campaignState,
   inFlightRunning,
   type StatusIssue,
   type StatusWave,
@@ -18,12 +19,13 @@ import {
   ISSUE_DETAIL_SHEET_STYLES,
   LIVE_TAIL_SCRIPT,
   LIVE_TAIL_STYLES,
+  REDRIVE_SCRIPT,
   REPO_DROPDOWN_SCRIPT,
   STATE_CHIP_BORDER_CSS,
   STATE_DOT_CSS,
   TOP_BAR_STYLES,
 } from "./dashboard-assets.ts";
-import { dotClass, freezeIntent, reasonWord } from "./dashboard-visual-state.ts";
+import { dotClass, freezeIntent, reasonWord, redriveAllowed } from "./dashboard-visual-state.ts";
 import {
   escapeHtml,
   escapeTitle,
@@ -35,7 +37,6 @@ import {
 import {
   hasConflict,
   isPrunable,
-  isRedBaseParked,
   issueDetailSheetMarkup,
   renderConflictNote,
   renderGraftInline,
@@ -287,6 +288,14 @@ export interface StatusPageOptions {
    * `festiveWaveNames` cookie), each wave is labelled `index · name` after a Discworld
    * character instead of the plain `Wave N` (#193). Default off. */
   festive?: boolean;
+  /** Whether a campaign process for this project still holds the host lease — the same
+   * live-lease probe crash detection reads (design §7, §8). It gates the Redrive campaign
+   * control through {@link redriveAllowed}: a live lease means a process to collide with, so
+   * redrive stays disabled. Absent reads as no live lease (a pure caller with none to probe). */
+  leaseLive?: boolean;
+  /** The base branch a redrive lands on, read live from the project checkout by the page —
+   * named in the Redrive confirm dialog. Absent leaves the dialog saying "the base branch". */
+  baseBranch?: string;
 }
 
 /**
@@ -433,13 +442,22 @@ ${HOST_LOG_STYLES}
 ${ISSUE_DETAIL_SHEET_STYLES}
   .prune-fallback form { display: inline; }
   form button { padding: .5rem .8rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: var(--color-on-accent); cursor: pointer; font-weight: 700; }
-  /* The red-base Redrive banner (#171): an attention-amber left edge (the human-action
-     queue, §2) with the Redrive action pushed to the right. The button is a control, so it
-     takes the primary accent, never a state colour. */
-  .redrive-banner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; background: var(--color-card); border: 1px solid var(--color-secondary); border-left: 3px solid var(--color-yellow); border-radius: var(--border-radius-medium); padding: .8rem 1rem; margin: 1rem 0; box-shadow: 0 8px 22px #0004; }
-  .redrive-banner-text { color: var(--color-text-light); }
-  .redrive-form { margin: 0; }
-  .redrive-btn { padding: .5rem .8rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: var(--color-on-accent); cursor: pointer; font-weight: 700; }
+  /* The whole-campaign Redrive control (design §11, #325): a small control riding the
+     campaign summary row beside graft. The button is a control, so it takes the primary
+     accent (never a state colour); disabled it greys and the one-line reason reads beside it. */
+  .redrive-control { display: inline-flex; align-items: center; gap: .5rem; }
+  .redrive-btn { padding: .35rem .7rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: var(--color-on-accent); cursor: pointer; font: inherit; font-size: .85rem; font-weight: 700; }
+  .redrive-btn:disabled { background: none; border: 1px solid var(--color-secondary); color: var(--color-dim); cursor: default; }
+  .redrive-reason { color: var(--color-text-light-2); font-size: .82rem; }
+  /* The confirm dialog (Cancel the default): a modal naming exactly what the redrive will do
+     before any POST. A control, so its Confirm takes the primary accent, never a state colour. */
+  .redrive-dialog { border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); background: var(--color-card); color: var(--color-text); padding: 1rem 1.25rem; max-width: 32rem; box-shadow: 0 8px 22px #0006; }
+  .redrive-dialog::backdrop { background: #0009; }
+  .redrive-dialog-text { margin: 0 0 1rem; }
+  .redrive-dialog-text code { color: var(--color-text); }
+  .redrive-dialog-actions { display: flex; justify-content: flex-end; gap: .75rem; margin: 0; }
+  .redrive-cancel { padding: .5rem .9rem; border: 1px solid var(--color-secondary); border-radius: var(--border-radius); background: none; color: var(--color-text); cursor: pointer; font: inherit; font-weight: 700; }
+  .redrive-confirm { padding: .5rem .9rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: var(--color-on-accent); cursor: pointer; font: inherit; font-weight: 700; }
   /* The merge-conflict note (#171) is informational only — same amber edge, no action. */
   .conflict-note { background: var(--color-card); border: 1px solid var(--color-secondary); border-left: 3px solid var(--color-yellow); border-radius: var(--border-radius-medium); padding: .8rem 1rem; margin: 1rem 0; color: var(--color-text-light); box-shadow: 0 8px 22px #0004; }
   .conflict-note code { color: var(--color-text); }
@@ -510,11 +528,11 @@ ${ISSUE_DETAIL_SHEET_STYLES}
 <body>
 ${renderTopBar(opts.projects?.length ? renderRepoDropdown(opts.projects, opts.selected ?? status.project) : `<h1>${escapeHtml(status.project)}</h1>`, renderHostLog())}
 <div id="live-region">${
-  // The red-base Redrive control and the merge-conflict note are aggregated-page actions
-  // (the same `prune` page option gates the interactive shell-out affordances), each
-  // gated on its attention state so it appears only when there is something to act on.
-  opts.prune && isRedBaseParked(status) ? renderRedriveControl(status) : ""
-}${opts.prune && hasConflict(status) ? renderConflictNote() : ""}${
+  // The merge-conflict note is an aggregated-page affordance (the same `prune` page option
+  // gates the interactive shell-out affordances), gated on the conflict state so it appears
+  // only when there is a held conflict to act on.
+  opts.prune && hasConflict(status) ? renderConflictNote() : ""
+}${
   status.parked.length
     ? `<section class="parked-issues"><h2>Parked · <span class="parked-count">${status.parked.length}</span></h2>${status.parked
         .map(
@@ -528,11 +546,12 @@ ${renderTopBar(opts.projects?.length ? renderRepoDropdown(opts.projects, opts.se
     : ""
 }
 ${
-  // The summary line: the meta bare, or — under the graft page option — the meta paired
-  // with the quiet inline graft input (1a), the two laid out as one summary row.
+  // The summary line: the meta bare, or — under the graft page option — the meta paired with
+  // the campaign controls (the quiet inline graft input, 1a, and the greyed-until-safe Redrive
+  // control, design §11/#325), the three laid out as one summary row.
   status.waves.length
     ? opts.graft
-      ? `<div class="campaign-summary">${renderCampaignMeta(status)}${renderGraftInline(status)}</div>`
+      ? `<div class="campaign-summary">${renderCampaignMeta(status)}<div class="campaign-controls">${renderGraftInline(status)}${renderRedriveControl(status, redriveAllowed(campaignState(status.waves.map((wave) => wave.status)), Boolean(opts.leaseLive)), opts.baseBranch)}</div></div>`
       : renderCampaignMeta(status)
     : ""
 }
@@ -650,10 +669,13 @@ ${ARCHIVE_LIST_SCRIPT}
         });
       }
     }
-    // The summary-line graft input is inside #live-region too, so rebind it each refresh.
+    // The summary-line graft input and the Redrive control are inside #live-region too, so
+    // rebind them each refresh (their nodes are replaced on every soft-refresh).
     wireGraft();
+    wireRedrive();
   }
 ${GRAFT_SCRIPT}
+${REDRIVE_SCRIPT}
   wireLiveRegion();
 ${LIVE_TAIL_SCRIPT}
 ${HOST_LOG_SCRIPT}

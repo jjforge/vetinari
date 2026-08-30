@@ -248,9 +248,6 @@ export const ISSUE_DETAIL_SHEET_STYLES = `  .prune-panel { display: flex; align-
   .sheet-actions { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; padding: .9rem 1.15rem; border-top: 1px solid var(--color-light-border); }
   /* A flex display beats the UA [hidden] rule, so these need it back explicitly. */
   .sheet-actions[hidden], .reply-options[hidden] { display: none; }
-  /* The redrive move is a bare form wrapping its button; drop the form's own box so it sits
-     flush in the actions row like the other buttons. */
-  #redrive-form { margin: 0; }
   @media (max-width: 640px) { .issue-detail-sheet { width: 100%; max-height: 88vh; border-radius: var(--border-radius-medium) var(--border-radius-medium) 0 0; padding-bottom: env(safe-area-inset-bottom); } .issue-detail { align-items: flex-end; padding: 0; } }`;
 
 /**
@@ -1022,4 +1019,23 @@ export const GRAFT_SCRIPT = `  function graftVerdicts(closure) {
       }
     });
     sync();
+  }`;
+
+/**
+ * The Redrive control's client script (design §11, #325): the greyed-until-safe button, when
+ * enabled, opens a native `<dialog>` confirming exactly what the redrive will do; only Confirm
+ * (a submit inside the `/redrive` POST form) sends it. Cancel — the dialog's default, `autofocus`
+ * and closed by Escape/backdrop for free — closes without POSTing. Lives inside `#live-region`
+ * (its enabled/disabled state tracks the live fold), so `wireRedrive` re-binds the fresh nodes
+ * on every soft-refresh; a disabled button (no dialog rendered) is a no-op. Guarded against a
+ * double bind so a re-run over the same node adds no second listener.
+ */
+export const REDRIVE_SCRIPT = `  function wireRedrive() {
+    const open = document.querySelector("[data-redrive-open]");
+    const dialog = document.querySelector("[data-redrive-dialog]");
+    if (!open || !dialog || open.disabled || open.dataset.redriveWired) return;
+    open.dataset.redriveWired = "1";
+    open.addEventListener("click", () => { if (typeof dialog.showModal === "function") dialog.showModal(); });
+    const cancel = dialog.querySelector("[data-redrive-cancel]");
+    if (cancel) cancel.addEventListener("click", () => dialog.close());
   }`;

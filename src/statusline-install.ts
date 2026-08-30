@@ -75,7 +75,7 @@ const DEFAULT_REFRESH_INTERVAL = 5;
 export function computeInstall(settings: Settings, opts: { runCommand: string; inheritedBase?: string; shadowedByLocal?: boolean }): { settings: Settings; base?: string; alreadyInstalled: boolean; shadowedByLocal: boolean } {
   // A statusLine in the higher-precedence `.claude/settings.local.json` owns the
   // rendered block wholesale, so any write here would be inert. Skip it rather
-  // than leave a shadowed entry that has no effect (see docs/statusline.md).
+  // than leave a shadowed entry that has no effect (see docs/operations.md).
   if (opts.shadowedByLocal) {
     return { settings, alreadyInstalled: false, shadowedByLocal: true };
   }

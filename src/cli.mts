@@ -165,7 +165,7 @@ if (mode === "statusline") {
     const inheritedBase = readInheritedStatusLine();
     // A statusLine in the higher-precedence .claude/settings.local.json owns the
     // rendered block, so writing here would be inert — the planner turns that into
-    // a warning-and-skip rather than a shadowed write (see docs/statusline.md).
+    // a warning-and-skip rather than a shadowed write (see docs/operations.md).
     const shadowedByLocal = localStatusLineShadows(dir);
     if (sub === "install") {
       const plan = computeInstall(settings, {

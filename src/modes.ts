@@ -56,7 +56,7 @@ const HOST_SLOT_POLL_MS = 1000;
 /**
  * The optional-name suffix a campaign notice header carries — ` “<name>”` when the
  * campaign was named, empty otherwise. One place so every header renders the name
- * identically (`docs/gateway.md`, the comms skeleton).
+ * identically (`docs/operations.md`, the comms skeleton).
  */
 const named = (name?: string): string => (name ? ` “${name}”` : "");
 

@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { event, serveAllStatus, type OrchestratorEvent } from "./status.ts";
 import type { AddressInfo } from "node:net";
 import { register } from "./registry.ts";
+import { registerProject } from "./host-slots.ts";
 
 // The parsed payload the dashboard SSE stream carries in each `data:` frame.
 type EventPayload = { project?: string; events?: { event: string; turn?: number }[] };
@@ -263,6 +264,10 @@ test("serveAllStatus GET /api/landing serves the all-repos landing model as JSON
     projectRoot: join(configDir, "beta-root"),
     baseLocation: betaDir,
   });
+  // Alpha's run is live: it holds a host slot (this test's own pid is alive), so its
+  // in-flight #101 reads `running` rather than reconciling to `parked{crash}` — the live
+  // liveness probe the landing route now consults (design §7, §8).
+  registerProject(configDir, "alpha", 1, { pid: process.pid });
 
   const server = await serveAllStatus(configDir, {
     port: 0,

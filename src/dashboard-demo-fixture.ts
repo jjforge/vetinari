@@ -249,8 +249,8 @@ const DEMO_SPECS: DemoProjectSpec[] = [
   },
 
   // ── RunState: idle ── a freshly-registered project with an empty live log; its
-  // only history is one stalled archived run whose in-flight issue folds to the
-  // terminal `parked{stalled}` when read back. Covers idle (card) and a stalled chip.
+  // only history is one stalled archived run whose in-flight issue, dead with no verdict,
+  // folds to the terminal `parked{crash}` when read back. Covers idle (card) and the chip.
   {
     project: DEMO_IDLE_PROJECT,
     live: () => [],
@@ -265,7 +265,8 @@ const DEMO_SPECS: DemoProjectSpec[] = [
       { ts: at(-176), event: "queue-start", taskIds: ["603"] },
       { ts: at(-175), event: "queue-spawn", taskId: "603", running: 1, left: 0 },
       { ts: at(-175), event: "turn", taskId: "603", turn: 0, summary: "Wiring the dashboard widgets when the run was cut short." },
-      // No terminal event — the run reads interrupted, and its in-flight #603 folds to `interrupted`.
+      // No terminal event — the run stalled at the run level, and its in-flight #603, dead
+      // with no verdict, folds to `parked{crash}` when read back (design §7).
     ],
   },
 ];

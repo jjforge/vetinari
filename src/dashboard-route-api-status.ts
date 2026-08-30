@@ -7,6 +7,6 @@ import type { RouteHandler } from "./dashboard-http.ts";
 export const handleApiStatus: RouteHandler = (req, res, url, deps) => {
   if (!(req.method === "GET" && url.pathname === "/api/status")) return false;
   res.setHeader("content-type", "application/json");
-  res.end(JSON.stringify(buildAllStatus(listProjects(deps.configDir))));
+  res.end(JSON.stringify(buildAllStatus(listProjects(deps.configDir), undefined, deps.configDir)));
   return true;
 };

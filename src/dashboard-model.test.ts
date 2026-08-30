@@ -1230,15 +1230,16 @@ test("issue lifecycle + wave/campaign folds are one FSM, tested by replaying eve
   assert.equal(campaignState([]), "unstarted");
 });
 
-test("issueLifecycle folds a stalled (dead, no-terminal) running issue to parked{stalled} (ADR 0019)", () => {
-  const running = reduceCampaign([
+test("issueLifecycle reads a running issue live, and its crash reconciliation off the reducer (ADR 0019, design §7)", () => {
+  const events = [
     event("campaign-start", { ts: "t0", batches: [["301"]], slots: 1 }),
     event("campaign-batch", { ts: "t1", index: 0, tasks: ["301"] }),
     event("queue-start", { ts: "t2", taskIds: ["301"], slots: 1 }),
-  ]);
-  // A live read leaves it running; a dead read with no terminal event stalls it.
-  assert.deepEqual(issueLifecycle(running, "301"), { state: "running" });
-  assert.deepEqual(issueLifecycle(running, "301", { stalled: true }), { state: "parked", reason: "stalled" });
+  ];
+  // A live (or probe-less) read leaves it running.
+  assert.deepEqual(issueLifecycle(reduceCampaign(events), "301"), { state: "running" });
+  // A dead read reconciles it inside the reducer; the lifecycle just surfaces the crash.
+  assert.deepEqual(issueLifecycle(reduceCampaign(events, { alive: false }), "301"), { state: "parked", reason: "crash" });
 });
 
 test("reduceCampaign reconciles a dead run's in-flight issue to parked{crash}; a live probe leaves it running (design §7)", () => {
@@ -2508,11 +2509,11 @@ test("buildStatusWithIssueNames adds issue names from fetchTask when available",
   assert.equal(status.waves[0].issues[1].name, undefined);
 });
 
-test("a dead (archived) run folds its in-flight `running` to parked{stalled}, while a live read stays running (#152, ADR 0019)", () => {
+test("a dead (archived) run folds its in-flight `running` to parked{crash}, while a live read stays running (#152, design §7)", () => {
   // The issue's self-contained reproducer: a campaign that logged its first wave's
   // spawn and then stopped — no campaign-done / queue-done.
   const events = [
-    event("campaign-start", { ts: "2026-08-26T23:27:59.174Z", batches: [["101"], ["202"]], slots: 8, name: "stalled run" }),
+    event("campaign-start", { ts: "2026-08-26T23:27:59.174Z", batches: [["101"], ["202"]], slots: 8, name: "crashed run" }),
     event("campaign-batch", { ts: "2026-08-26T23:28:00.000Z", index: 0, tasks: ["101"] }),
     event("queue-start", { ts: "2026-08-26T23:28:01.000Z", taskIds: ["101"], slots: 8 }),
     event("queue-spawn", { ts: "2026-08-26T23:28:02.000Z", taskId: "101", running: 1, left: 0 }),
@@ -2528,18 +2529,18 @@ test("a dead (archived) run folds its in-flight `running` to parked{stalled}, wh
   writeJsonl(archive, events);
   const cfg = archiveStatusConfig("demo", archive);
 
-  // A live read of the same archived log still derives running (the FSM only stalls on a
-  // dead read).
+  // A live read of the same archived log still derives running (the reducer only crash-folds
+  // on a dead read).
   assert.equal(buildStatus(cfg).waves[0].issues[0].status, "running");
 
-  // The dead read: the log has no terminal event and the process is gone, so the FSM folds
-  // the in-flight issue/wave to `parked{stalled}` — an archived run must carry no live status.
+  // The dead read: the log has no terminal event and the process is gone, so the reducer folds
+  // the in-flight issue/wave to `parked{crash}` — an archived run must carry no live status.
   assert.equal(archivedRunState(events), "stalled");
   const status = buildStatus(cfg, { dead: true });
   const statuses = status.waves.flatMap((w) => [w.status as string, ...w.issues.map((i) => i.status as string)]);
   assert.ok(!statuses.includes("running"), `an archived run must show no live status; got ${statuses.join(", ")}`);
   assert.equal(status.waves[0].status, "parked");
-  assert.deepEqual([status.waves[0].issues[0].status, status.waves[0].issues[0].reason], ["parked", "stalled"]);
+  assert.deepEqual([status.waves[0].issues[0].status, status.waves[0].issues[0].reason], ["parked", "crash"]);
   // The never-reached second wave stays honestly unstarted — that is not a live status.
   assert.equal(status.waves[1].status, "unstarted");
   assert.equal(status.waves[1].issues[0].status, "unstarted");

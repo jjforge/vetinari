@@ -65,6 +65,7 @@ Within a milestone each bold section label appears at most once.
 - [api] The `wave-done` event carries only `{ index, merged }` now — the always-empty `held`, `clearedParked`, and `quarantined` fields are gone, since a wave-done fires only when every member merged (#321).
 - [internal] Retired the `quarantined`/`waveParked` identifiers across the reducer, integrator, and `tidy` in favour of `conflictParked`, `campaign-parked`, and `parked(conflict)`; the `quarantineImpacts` seam is now `strandedByConflict` (#321).
 - [user] The dashboard's graft control now reads as in-flight while its POST runs — the button relabels to `grafting…` and the form carries `aria-busy`, held disabled so it cannot re-submit, and restores on success, whole-batch rejection, or a network error (#327).
+- [user] The live tail now names the gate check that is currently running: each check writes a `gate running <cmd>` row when it starts, not only a pass/fail row when it finishes, so a slow suite reads as a live agent instead of a wedged one (#332).
 
 **Bug fixes:**
 - [user] A campaign wave with a failed issue now holds the wave and stops the campaign as failed: the wave still drains its siblings and merges their greens, then a `campaign-failed` event and a failure notice are logged and the run exits non-zero — no later wave starts on top of the missing work (#285).
@@ -104,6 +105,7 @@ Within a milestone each bold section label appears at most once.
 - [ops] A re-admitted parked member (its answer delivered, child re-spawned) reads `running` again on the dashboard, instead of lingering as parked until its next verdict (#319).
 - [user] The dashboard no longer offers Redrive while a campaign process is still running, so a redrive can no longer spawn a second campaign over a draining wave (#325).
 - [user] Closing an archived run on the project page now clears `run=` from the URL, so a reload renders the list collapsed instead of re-expanding the run you dismissed; opening a run still deep-links it (#333).
+- [user] `run <issue>` now refuses with one line naming the project and exits non-zero when a campaign for that project is already live, instead of archiving the campaign's event log and starting a second process on the same issue; the refusal happens before anything is archived or any container starts, and a campaign's own child runs are unaffected (#335).
 
 **Documentation:**
 - [internal] `CONTEXT.md` is now a domain-only glossary in the settled vocabulary: an entry for every object, state, park reason and move in the user guide's model; retired words (`carve`, `queue`, `quarantined`, `wave-parked`, `interrupted`, `campaign-plan`, `dispatch`/`attend`, `hostWeight`, `QUEUE_SLOTS`) demoted to _Avoid_ lines; dashboard widgets, colour rules and testing terms removed (#300).

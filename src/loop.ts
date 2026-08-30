@@ -3,7 +3,7 @@ import { nonResumableAnswerWarning, type ResolvedConfig } from "./config.ts";
 import type { Logger } from "./log.ts";
 import { runGates } from "./gate.ts";
 import { agentFor, agentSelectionFor, makeSandbox, type Sandbox } from "./sandbox.ts";
-import { clearParked, enqueueOutbound, park } from "./state.ts";
+import { clearParked, enqueueOutbound, hasParked, park, readParked } from "./state.ts";
 import { HARVEST_PROMPT, parseFindings, reportFindings } from "./findings.ts";
 import { activityLoggingSink, appendActivity, initActivityLog } from "./activity.ts";
 import { event } from "./event-log.ts";
@@ -166,10 +166,31 @@ async function harvestFindings(cfg: ResolvedConfig, sbx: Sandbox, sessionId: str
  * sandbox is created), so iterations are always driven from here.
  */
 export async function runLoop(cfg: ResolvedConfig, taskId: string, entry?: ResumeEntry, deps: LoopDeps = defaultLoopDeps): Promise<Outcome> {
-  const task = entry ? "" : await cfg.fetchTask(taskId);
   // Whether the loop resumes a session between turns (claude/pi/codex) or re-enters each
   // turn as a fresh run (copilot/cursor/opencode carry no durable session) — ADR 0016 / #212.
   const { resumable, provider } = agentSelectionFor(cfg);
+
+  // An answered parked record re-admits this member with the human's answer (design §5 step 3,
+  // §7): consume it here, as the run starts — resume the session with the answer (resumable) or
+  // relay it as an issue comment and re-enter fresh (non-resumable) — then clear the record so the
+  // gateway never re-announces and no re-admit fires twice. An explicit `entry` (a direct resume)
+  // already carries its prompt and skips this.
+  if (!entry && hasParked(cfg, taskId)) {
+    const rec = readParked(cfg, taskId, { requireSession: false });
+    if (rec.answer != null) {
+      if (resumable) {
+        if (!rec.sessionId)
+          throw new Error(`parked record for ${taskId} has no sessionId — cannot resume the answer`);
+        entry = { resumeSessionId: rec.sessionId, answerPrompt: answerPromptFor(rec.answer) };
+      } else {
+        if (!cfg.postComment) throw new Error(nonResumableAnswerWarning(provider));
+        await cfg.postComment(taskId, parkedAnswerComment(rec.question, rec.answer));
+      }
+      clearParked(cfg, taskId);
+    }
+  }
+
+  const task = entry ? "" : await cfg.fetchTask(taskId);
   // Preflight (design §3 step 1): a non-resumable provider with no `postComment` cannot have
   // a parked question answered — surface it up front rather than only when a park is stranded.
   if (!resumable && !cfg.postComment) console.warn(nonResumableAnswerWarning(provider));

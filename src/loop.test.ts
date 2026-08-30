@@ -7,7 +7,7 @@ import type { ResolvedConfig } from "./config.ts";
 import type { Sandbox, SandboxRunOptions, SandboxRunResult } from "./sandbox.ts";
 import { loggerForRun } from "./log.ts";
 import { readEventLog } from "./event-log.ts";
-import { listOutbox, listParked } from "./state.ts";
+import { answerParked, hasParked, listOutbox, listParked, park } from "./state.ts";
 import { BLOCKED, DONE, extractTurnSummary, parkedAnswerComment, runLoop, type LoopDeps } from "./loop.ts";
 
 // A temp-dir `cfg` mirroring graft.test/modes.test's `harnessCfg`: a real on-disk
@@ -392,4 +392,46 @@ test("runLoop resumes the parked session on the answer path without re-fetching 
   assert.equal(fetched, 0);
   assert.equal(sbx.runCalls[0].resumeSession, "prev-sess");
   assert.equal(sbx.runCalls[0].prompt, "the human's answer");
+});
+
+test("runLoop consumes an answered parked record for a resumable provider — resumes the session with the answer and clears the record", async () => {
+  let fetched = 0;
+  const cfg = harnessCfg({ agent: { provider: "claude" }, fetchTask: async () => { fetched++; return "task text"; } });
+  await park(cfg, { taskId: "T-1", reason: "question", sessionId: "prev-sess", branch: "agent/T-1", question: "Which approach?" });
+  answerParked(cfg, "T-1", "use approach A");
+  const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc123" }] }, green: true }]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, depsFor(sbx)));
+
+  assert.equal(outcome, "green");
+  // The answered record drove a session resume carrying the human's answer — not a fresh fetch.
+  assert.equal(fetched, 0, "an answered resume never re-fetches the task");
+  assert.equal(sbx.runCalls[0].resumeSession, "prev-sess");
+  assert.match(String(sbx.runCalls[0].prompt), /use approach A/);
+  // The record is consumed when the run starts, so the member is never re-admitted twice.
+  assert.equal(hasParked(cfg, "T-1"), false, "the answered record is cleared once the run starts");
+});
+
+test("runLoop consumes an answered parked record for a non-resumable provider — posts the answer as a comment and re-enters fresh", async () => {
+  const posted: { taskId: string; body: string }[] = [];
+  let fetched = 0;
+  const cfg = harnessCfg({
+    agent: { provider: "copilot" },
+    promptFile: "/prompts/tdd.md",
+    postComment: async (taskId: string, body: string) => { posted.push({ taskId, body }); },
+    fetchTask: async () => { fetched++; return "task text"; },
+  });
+  await park(cfg, { taskId: "T-1", reason: "question", branch: "agent/T-1", question: "Which approach?" });
+  answerParked(cfg, "T-1", "use approach A");
+  const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc" }] }, green: true }]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, depsFor(sbx)));
+
+  assert.equal(outcome, "green");
+  // Non-resumable: the answer is relayed as an issue comment and the run re-enters fresh (re-reads the issue).
+  assert.equal(posted.length, 1, "the answer is posted as a comment");
+  assert.match(posted[0].body, /use approach A/);
+  assert.equal(sbx.runCalls[0].resumeSession, undefined, "no session resume — a fresh run");
+  assert.ok(fetched >= 1, "the fresh run re-reads the issue");
+  assert.equal(hasParked(cfg, "T-1"), false, "the answered record is cleared once the run starts");
 });

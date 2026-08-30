@@ -21,7 +21,7 @@ import {
   type RunSpawner,
 } from "./modes.ts";
 import { loggerForRun, memoryLogger, type MemoryLogger } from "./log.ts";
-import { clearParked, hasParked, listOutbox } from "./state.ts";
+import { answerParked, clearParked, hasParked, listOutbox } from "./state.ts";
 import {
   readEventLog,
   type CampaignDoneEvent,
@@ -771,12 +771,12 @@ test("resolve reads only the wave's members — a stray parked record for a non-
   assert.ok(readEventLog(cfg).some((e) => e.event === "campaign-done"), "the campaign finished");
 });
 
-test("redrive re-runs a parked member whose parked record is gone (answered), and lands the rest", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-answered-"));
+test("redrive re-runs a parked member whose parked record is gone (a crash, no record), and lands the rest", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-norecord-"));
   const cfg = harnessCfg(dir);
   const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   seedParkedWave(cfg);
-  // 102 is parked in the log but has NO on-disk record — the answered-park signal.
+  // 102 is parked in the log but has NO on-disk record — a crash-shaped member, re-run on its branch.
 
   const spawned: string[] = [];
   const integrated: string[][] = [];
@@ -785,7 +785,34 @@ test("redrive re-runs a parked member whose parked record is gone (answered), an
   );
 
   assert.equal(ok, "done");
+  assert.deepEqual(spawned, ["102"], "the recordless park re-ran — 101 was banked, not respawned");
+});
+
+test("redrive re-runs a parked member whose record is ANSWERED, consuming the answer, and lands the rest (design §5 step 3, §7)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-answered-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  seedParkedWave(cfg);
+  // 102's parked record is on disk WITH a delivered answer — the re-admit signal. Its record
+  // is present but answered, so it re-runs (a plain un-answered record would hold the wave).
+  seedParkedRecord(cfg, "102");
+  answerParked(cfg, "102", "use approach A");
+
+  const spawned: string[] = [];
+  const integrated: string[][] = [];
+  // The re-admitted run models the real child consuming the answered record: it clears it.
+  const spawnRun: CampaignDeps["spawnRun"] = async (id) => {
+    spawned.push(id);
+    clearParked(cfg, id);
+    return 0;
+  };
+  const ok = await silenceConsole(() =>
+    campaign(cfg, [], host, undefined, { resume: true }, recordingDeps(cfg, spawned, integrated, spawnRun)),
+  );
+
+  assert.equal(ok, "done");
   assert.deepEqual(spawned, ["102"], "only the answered park re-ran — 101 was banked, not respawned");
+  assert.equal(hasParked(cfg, "102"), false, "the answered record was consumed by the re-run");
 });
 
 test("redrive does not spawn a parked member whose record remains; the wave parks again", async () => {
@@ -984,8 +1011,9 @@ test("re-admit: a parked member answered while the wave still drains re-runs and
 
   // 101 drains slowly (its slot stays leased until we resolve it); 102 parks first —
   // writing its on-disk record like a real child — then, while 101 is still in flight,
-  // the human's answer clears that record and 101 frees its slot. The freed slot re-admits
-  // 102, which re-runs green. Both greens then integrate in this one wave.
+  // the human's answer is *delivered* to that record (answered, not cleared) and 101 frees
+  // its slot. The freed slot re-admits 102 with the answer; the re-run consumes the record
+  // (clearing it, as a real child `run` does) and greens. Both greens integrate in this wave.
   let resolve101!: (code: number) => void;
   const p101 = new Promise<number>((r) => (resolve101 = r));
   const spawns: string[] = [];
@@ -1002,11 +1030,13 @@ test("re-admit: a parked member answered while the wave still drains re-runs and
       );
       // Deferred to a macrotask so 102 has settled parked-with-record before the answer lands.
       setTimeout(() => {
-        clearParked(cfg, "102");
+        answerParked(cfg, "102", "use approach A");
         resolve101(0);
       }, 0);
       return Promise.resolve(2);
     }
+    // The re-admitted run models the real child consuming the answered record: it clears it.
+    clearParked(cfg, "102");
     return Promise.resolve(0);
   };
 
@@ -1080,13 +1110,15 @@ test("grace window: an answer that lands within parkGraceSeconds re-admits the m
       seedParkedRecord(cfg, "102");
       return 2;
     }
+    // The re-admitted run models the real child consuming the answered record: it clears it.
+    if (taskId === "102") clearParked(cfg, "102");
     return 0; // 101 green; 102 green on re-admission
   };
   const deps: CampaignDeps = {
     ...gitFreeDeps(cfg, spawnRun),
-    // The answer lands inside the window: clear the record so the caller re-admits 102.
+    // The answer lands inside the window: deliver it to the record so the caller re-admits 102.
     grace: async (c, ids) => {
-      for (const id of ids) clearParked(c, id);
+      for (const id of ids) answerParked(c, id, "use approach A");
     },
   };
 

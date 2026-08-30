@@ -19,6 +19,7 @@ import {
   clearParkedForTasks,
   enqueueOutbound,
   hasParked,
+  isAnswered,
   listParked,
   type ParkReason,
 } from "./state.ts";
@@ -277,11 +278,12 @@ export async function queue(
 ): Promise<Record<string, string>> {
   const pending = [...taskIds];
   const outcomes: Record<string, string> = {};
-  // Members that settled `parked` with an on-disk record present. When that record later
-  // vanishes (an answer landed) while the wave is still draining, the member is re-admitted:
-  // re-queued to spawn when a slot frees, its earlier `parked` outcome discarded (design §5
-  // step 3). A member is only tracked once it genuinely parked-with-record, so a member that
-  // never wrote a record is never re-admitted — no self-respawn loop.
+  // Members that settled `parked` with an on-disk record present. When that record is later
+  // *answered* (the answer delivered into it) while the wave is still draining, the member is
+  // re-admitted: re-queued to spawn when a slot frees with the answer as its prompt, its earlier
+  // `parked` outcome discarded (design §5 step 3). A member is only tracked once it genuinely
+  // parked-with-record, so a member that never wrote a record is never re-admitted — no
+  // self-respawn loop; the re-admitted child consumes and clears the record when it starts.
   const parkedWithRecord = new Set<string>();
   let running = 0;
   // Only a standalone queue warns here; inside a campaign the caller passes `titles`
@@ -306,13 +308,13 @@ export async function queue(
           poll = undefined;
         }
       };
-      // Re-queue any parked-with-record member whose record has since vanished (an answer
-      // landed): discard its `parked` outcome and let `fill` spawn it as a slot frees. Runs
-      // at the head of every `fill`, so a sibling's exit (or the ceiling poll) is what drives
-      // a mid-drain re-admission (design §5 step 3).
+      // Re-queue any parked-with-record member whose record has since been answered: discard its
+      // `parked` outcome and let `fill` spawn it as a slot frees — the child consumes the answer
+      // and clears the record. Runs at the head of every `fill`, so a sibling's exit (or the
+      // ceiling poll) is what drives a mid-drain re-admission (design §5 step 3).
       const readmit = () => {
         for (const id of [...parkedWithRecord]) {
-          if (!hasParked(cfg, id)) {
+          if (isAnswered(cfg, id)) {
             parkedWithRecord.delete(id);
             delete outcomes[id];
             pending.push(id);
@@ -568,7 +570,7 @@ export const graceWaitForAnswer: GraceWaiter = (cfg, parkedIds, seconds) =>
   new Promise((resolve) => {
     const deadline = Date.now() + seconds * 1000;
     const tick = () => {
-      if (parkedIds.some((id) => !hasParked(cfg, id))) return resolve();
+      if (parkedIds.some((id) => isAnswered(cfg, id))) return resolve();
       const left = deadline - Date.now();
       if (left <= 0) return resolve();
       setTimeout(tick, Math.min(GRACE_POLL_MS, left));
@@ -600,10 +602,11 @@ const defaultCampaignDeps: CampaignDeps = {
  * - `completed` → a `green`: handed to integration, which lands a still-unmerged green
  *   (an answered park, a resolved conflict) and skips an already-merged one — never a
  *   respawn (integration is idempotent, `merge.ts`).
- * - `parked` → re-run when its on-disk record is gone (the answer consumed it), else a
- *   `parked` outcome that leaves the member unspawned and re-parks the wave. A `crash`
- *   (§7) is exactly this shape — reconciled to `parked{crash}` with no on-disk record — so it
- *   re-runs on the existing branch here (the run loop resumes its session when resumable). A
+ * - `parked` → re-run when its record is answered (the answer delivered into it — the child
+ *   consumes and clears it) OR gone (a crash left no record), else a `parked` outcome that
+ *   leaves the member unspawned and re-parks the wave — the un-answered park holds it (design
+ *   §5 step 3, §7). A `crash` (§7) is the recordless shape — reconciled to `parked{crash}` — so
+ *   it re-runs on the existing branch here (the run loop resumes its session when resumable). A
  *   live redrive reads the same crashed member as `running` (the process is now alive), which
  *   the `else` below also re-runs; either way a crash is plainly re-run, never left parked.
  * - `failure` → re-run only under `override` (the operator's explicit choice); otherwise
@@ -617,7 +620,7 @@ const defaultCampaignDeps: CampaignDeps = {
 export function reconcileResumeWave(
   members: string[],
   outcomes: ReadonlyMap<string, string>,
-  hasParkedRecord: (id: string) => boolean,
+  parkHoldsWave: (id: string) => boolean,
   override: boolean,
 ): { toRun: string[]; pre: Record<string, string> } {
   const toRun: string[] = [];
@@ -629,7 +632,9 @@ export function reconcileResumeWave(
       if (override) toRun.push(id);
       else pre[id] = "error(failed on a prior run — prune it or redrive with --override)";
     } else if (status === "parked") {
-      if (hasParkedRecord(id)) pre[id] = "parked";
+      // An un-answered on-disk record holds the wave; an answered one (consumed by the child) or
+      // a recordless crash re-runs.
+      if (parkHoldsWave(id)) pre[id] = "parked";
       else toRun.push(id);
     } else toRun.push(id);
   }
@@ -804,7 +809,10 @@ export async function campaign(
       const { toRun, pre } = reconcileResumeWave(
         tasks,
         reduced.outcomes,
-        (id) => hasParked(cfg, id),
+        // A park holds the wave only while its record is present AND un-answered; an answered
+        // record re-runs (the child consumes the answer), and a recordless park (a crash) re-runs
+        // too — design §5 step 3, §7.
+        (id) => hasParked(cfg, id) && !isAnswered(cfg, id),
         !!opts.override,
       );
       const ran = toRun.length ? await queue(cfg, toRun, host, titles, deps.spawnRun, reporter) : {};
@@ -823,7 +831,7 @@ export async function campaign(
     if (parkedNow.length && graceSeconds > 0) {
       cfg.log.log("grace-wait", { seconds: graceSeconds, tasks: parkedNow });
       await deps.grace(cfg, parkedNow, graceSeconds);
-      const revived = parkedNow.filter((t) => !hasParked(cfg, t));
+      const revived = parkedNow.filter((t) => isAnswered(cfg, t));
       if (revived.length)
         outcomes = { ...outcomes, ...(await queue(cfg, revived, host, titles, deps.spawnRun, reporter)) };
     }

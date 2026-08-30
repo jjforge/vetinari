@@ -30,7 +30,6 @@ import {
   renderHostEvent,
 } from "./log.ts";
 import { runLoop } from "./loop.ts";
-import { agentSelectionFor } from "./sandbox.ts";
 import {
   baseline,
   build,
@@ -69,8 +68,9 @@ import {
 import { applyInit, computeInit, describeInit, scanInit } from "./init.ts";
 import { archiveRun, shouldArchiveLeftover } from "./archive.ts";
 import {
+  answerParked,
+  hasParked,
   listParked,
-  readParked,
 } from "./state.ts";
 import { readEventLog } from "./event-log.ts";
 import {
@@ -80,7 +80,7 @@ import {
   listProjects,
   removePointer,
 } from "./registry.ts";
-import { resolveHostCeiling, type HostBudget } from "./host-slots.ts";
+import { projectHasLiveLease, resolveHostCeiling, type HostBudget } from "./host-slots.ts";
 import { containerShareWeight } from "./config.ts";
 import { serveAllStatus } from "./status.ts";
 import { runStatusLine } from "./statusline.ts";
@@ -614,10 +614,11 @@ await dispatch(parseArgs([mode, ...rest]), {
   runPrune,
   runGraft,
   listParked,
-  readParked,
+  hasParked,
+  answerParked,
+  projectHasLiveLease,
   readEventLog,
   archiveRun,
-  agentSelectionFor,
   requireTelegram,
   tgTest,
 });

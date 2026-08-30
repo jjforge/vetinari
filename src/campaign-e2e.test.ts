@@ -7,7 +7,7 @@ import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import { loggerForRun } from "./log.ts";
 import { readEventLog } from "./event-log.ts";
-import { clearParked, listParked } from "./state.ts";
+import { answerParked, listParked } from "./state.ts";
 import { BLOCKED, DONE, defaultLoopDeps, runLoop, type LoopDeps } from "./loop.ts";
 import { campaign, type CampaignDeps, type RunSpawner } from "./modes.ts";
 import { collectWaveChangelog, currentBranch, integrateGreens } from "./merge.ts";
@@ -188,11 +188,15 @@ const failingScript = (): LocalAgentScript => () => {
   throw new Error("unrecoverable agent turn");
 };
 
-// An issue that parks with a question until its issue body carries an ANSWER, then
-// implements green — the non-resumable park→answer path (answer delivered by re-read).
+// An issue that parks with a question until the human's answer reaches it, then implements
+// green. The answer arrives one of two ways, both of which this recognises: a resumable provider
+// resumes the parked session with an answer prompt (`turn.opts.prompt`), and a non-resumable one
+// re-reads the issue body the answer was appended to (`ANSWER:` in the TASK — design §3 step 9).
 const answerGatedScript = (id: string): LocalAgentScript => (turn) => {
   const task = (turn.opts.promptArgs?.TASK as string) ?? "";
-  if (!task.includes("ANSWER:"))
+  const resumePrompt = (turn.opts.prompt as string) ?? "";
+  const answered = task.includes("ANSWER:") || resumePrompt.includes("Answer from the human");
+  if (!answered)
     return { signal: BLOCKED, stdout: `<question><summary>which approach for ${id}?</summary></question>` };
   return implScript(id)(turn);
 };
@@ -367,6 +371,38 @@ test("scenario 4: a redrive integrates a green-but-unmerged member — landed wi
   });
 });
 
+test("scenario 2b: an answer delivered mid-wave (the grace window) re-admits the member into the SAME wave with the answer, and the campaign finishes without a redrive (design §5 step 3)", async () => {
+  const dir = seedRepo();
+  const tracker = fakeTracker();
+  const cfg = repoCfg(dir, tracker, { parkGraceSeconds: 30 });
+  // 101 implements green; 102 parks until answered.
+  const scriptFor = (id: string) => (id === "102" ? answerGatedScript(id) : implScript(id));
+
+  await inRepo(dir, async () => {
+    const deps: CampaignDeps = {
+      ...localCampaignDeps(cfg, dir, scriptFor),
+      // The human's answer lands inside the grace window: DELIVERED into 102's parked record.
+      // The live campaign re-admits it into this same wave — the re-run resumes the session with
+      // the answer, greens, and merges alongside 101, so the wave never parks.
+      grace: async (c, ids) => {
+        for (const id of ids) answerParked(c, id, "use approach A");
+      },
+    };
+    const ok = await campaign(cfg, [["101", "102"]], host(dir), "rejoin-in-wave", {}, deps);
+    assert.equal(ok, "done", "the in-window answer let the member rejoin and the wave finish");
+
+    // Both greens are on the base — 102 merged in the same wave it parked in, no separate redrive.
+    assert.equal(gitOut(dir, ["show", "base:impl-101.txt"]), "impl for 101");
+    assert.equal(gitOut(dir, ["show", "base:impl-102.txt"]), "impl for 102");
+    const events = readEventLog(cfg);
+    assert.ok(events.some((e) => e.event === "grace-wait"), "the wave held open for the answer");
+    assert.ok(events.some((e) => e.event === "wave-done"), "the wave closed with both members merged");
+    assert.ok(events.some((e) => e.event === "campaign-done"), "the campaign finished");
+    assert.equal(events.some((e) => e.event === "campaign-parked"), false, "the answered member never parked the wave");
+    assert.equal(listParked(cfg).some((r) => r.taskId === "102"), false, "the answered record was consumed by the re-run");
+  });
+});
+
 test("scenario 1: two all-green waves merge in order, the base is gated between them, and the campaign finishes done", async () => {
   const dir = seedRepo();
   const tracker = fakeTracker();
@@ -457,17 +493,19 @@ test("scenario 2: a question park drains its wave, campaign parks and exits; an 
     assert.equal(gitOut(dir, ["branch", "--list", "agent/102"]), "agent/102", "the parked member's branch is preserved");
   });
 
-  // The human answers 102: the answer lands on the issue body and clears the parked record.
-  tracker.answer("102", "use approach A");
-  clearParked(cfg, "102");
+  // The human answers 102: the answer is DELIVERED into the parked record (design §5 step 3),
+  // not run — the record and its session id are kept so the redrive can resume it.
+  answerParked(cfg, "102", "use approach A");
 
   await inRepo(dir, async () => {
-    // Redrive: 102 (record gone) re-runs — re-entering its existing agent/102 branch —
-    // reads the answer, greens, and merges; 101 (already banked) is not re-run.
+    // Redrive: 102's answered record re-runs — re-entering its existing agent/102 branch,
+    // resuming the session with the answer — greens, merges, and clears the record; 101
+    // (already banked) is not re-run.
     const spawns: string[] = [];
     const doneOk = await campaign(cfg, [], host(dir), undefined, { resume: true }, localCampaignDeps(cfg, dir, scriptFor, spawns));
     assert.equal(doneOk, "done", "the answered member rejoined and the campaign finished");
     assert.deepEqual(spawns, ["102"], "only the answered member re-ran; the banked sibling did not");
+    assert.equal(listParked(cfg).some((r) => r.taskId === "102"), false, "the answered record was consumed by the re-run");
 
     // 102's work is now on the base, and the campaign completed.
     assert.equal(gitOut(dir, ["show", "base:impl-102.txt"]), "impl for 102");

@@ -16,14 +16,12 @@
  */
 import { resolve } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { nonResumableAnswerWarning, parseAgentFlags } from "./config.ts";
+import { parseAgentFlags } from "./config.ts";
 import { renderUsage } from "./help.ts";
-import type { HostBudget } from "./host-slots.ts";
+import type { HostBudget, projectHasLiveLease } from "./host-slots.ts";
 import type { build, baseline, campaign, tgTest, requireTelegram, CampaignOutcome } from "./modes.ts";
 import type { runLoop, Outcome } from "./loop.ts";
-import { answerPromptFor, parkedAnswerComment } from "./loop.ts";
-import type { agentSelectionFor } from "./sandbox.ts";
-import type { listParked, readParked } from "./state.ts";
+import type { answerParked, hasParked, listParked } from "./state.ts";
 import type { archiveRun } from "./archive.ts";
 import type { UnderspecifiedPrompt } from "./plan.ts";
 import type {
@@ -245,12 +243,20 @@ export interface DispatchDeps {
   runPrune: typeof runPrune;
   runGraft: typeof runGraft;
   listParked: typeof listParked;
-  readParked: typeof readParked;
+  /** Is the issue parked (a record on disk)? An `answer` delivers to it; an unparked
+   *  issue is reported and ignored (design §7). */
+  hasParked: typeof hasParked;
+  /** Deliver a human's answer into the parked record — the answer is delivered, not run
+   *  (design §5 step 3). */
+  answerParked: typeof answerParked;
+  /** Does a live campaign process hold this project's lease (design §8)? When it does, an
+   *  `answer` only delivers and a `redrive` refuses — the live campaign owns the re-admit,
+   *  so no second process runs the member beside it. */
+  projectHasLiveLease: typeof projectHasLiveLease;
   /** Read this project's event log — the source a green `answer` checks to decide
    *  whether the issue belongs to a paused campaign it should redrive (design §7). */
   readEventLog: typeof readEventLog;
   archiveRun: typeof archiveRun;
-  agentSelectionFor: typeof agentSelectionFor;
   requireTelegram: typeof requireTelegram;
   tgTest: typeof tgTest;
 }
@@ -289,6 +295,12 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
       return;
     }
     case "redrive": {
+      // A redrive refuses while a campaign process for the project is live (design §7): that
+      // process owns the re-admit, so a second one must not run over it. Report one line and stop.
+      if (deps.projectHasLiveLease(deps.host.configDir, cfg.project)) {
+        deps.log(`a campaign is already running for ${cfg.project} — it will pick up the work; redrive refused.`);
+        return;
+      }
       // The umbrella verb (ADR 0020, design §7): reconstruct the plan from the log and
       // re-enter the first unclosed wave. Lock in the agent first (ADR 0016); take no
       // selection and continue the live log, so — like `campaign --resume` — never archive
@@ -571,12 +583,13 @@ async function dispatchGraft(
 }
 
 /**
- * The answer command: deliver a human's answer to a parked task, branching on whether
- * the provider carries a durable session (ADR 0016 / #212). On a green answer to a member
- * of a paused campaign, an answer *is* the continue signal (ADR 0020, design §7): it
- * redrives so the now-green work is integrated and the campaign carries on — the human
- * never has to answer and then separately ask it to continue. A standalone answer (no
- * campaign) or a second park runs exactly as before.
+ * The answer command: an answer is *delivered*, not run (design §5 step 3, §7). It writes the
+ * text into the parked record and marks it answered; whoever re-admits the member consumes it
+ * (resume the session with the answer, or post it and re-enter fresh — `runLoop` does this). Who
+ * re-admits depends on liveness: a live campaign owns the re-admit (the answer only delivers, so
+ * no second process runs the member beside it); with no live campaign, a member of a paused
+ * campaign is re-admitted by the redrive, and a standalone park (no campaign) re-runs directly.
+ * An answer for an issue that is not parked is reported and ignored — idempotent (§7).
  */
 async function dispatchAnswer(
   cmd: Extract<Command, { kind: "answer" }>,
@@ -586,40 +599,39 @@ async function dispatchAnswer(
   if (!cmd.taskId || !cmd.text.length)
     throw new Error('answer needs a task id and text: answer <task> "<answer>"');
   const taskId = cmd.taskId;
-  // Resumable (claude/pi/codex): resume the session with an answerPrompt. Non-resumable
-  // (copilot/cursor/opencode): relay the answer as an issue comment and re-enter FRESH.
-  const { resumable, provider } = deps.agentSelectionFor(cfg);
-  let outcome: Outcome;
-  if (resumable) {
-    const parked = deps.readParked(cfg, taskId);
-    outcome = await deps.runLoop(cfg, taskId, {
-      resumeSessionId: parked.sessionId!,
-      answerPrompt: answerPromptFor(cmd.text.join(" ")),
-    });
-  } else {
-    // Fail-loud (issue-only): post the comment BEFORE the run, and never start the run
-    // if it cannot be posted — an answer is never silently lost.
-    if (!cfg.postComment) throw new Error(nonResumableAnswerWarning(provider));
-    const parked = deps.readParked(cfg, taskId, { requireSession: false });
-    await cfg.postComment(
-      taskId,
-      parkedAnswerComment(parked.question, cmd.text.join(" ")),
-    );
-    outcome = await deps.runLoop(cfg, taskId);
-  }
 
-  // A green answer to a paused campaign's member continues it (ADR 0020): redrive so the
-  // green is integrated (the standalone run only logged it) and later waves run. On a
-  // second park (outcome !== "green"), or a standalone answer, there is nothing to redrive.
-  if (outcome === "green" && issueAwaitsRedrive(deps.readEventLog(cfg), taskId)) {
-    // The implicit redrive carries the campaign's own verdict out (design §5 step 6): the
-    // same 0 done / 2 parked / 1 failed codes `campaign`/`redrive` exit with.
-    deps.setExitCode(exitCodeFor(await deps.campaign(cfg, [], host, undefined, { resume: true })));
+  // Not parked → nothing to deliver to. Report one line and exit clean, idempotent against a
+  // double answer or an answer a prune already removed (design §7).
+  if (!deps.hasParked(cfg, taskId)) {
+    deps.log(`${taskId} is not parked — nothing to answer.`);
     return;
   }
-  // A standalone answer (or a second park) exits on the loop's own verdict: 0 green, 2
-  // parked, 1 failed — `run`'s codes, since an answer re-enters the run loop.
-  deps.setExitCode(exitCodeFor(outcome));
+
+  // Deliver: write the answer into the parked record and mark it answered. The record and its
+  // `tgMessageId` are kept so the gateway does not re-announce; the re-admit consumes it.
+  deps.answerParked(cfg, taskId, cmd.text.join(" "));
+
+  // A live campaign owns the re-admit (design §5 step 3, §8): stop here so no second process
+  // runs the member beside it — the campaign's drain/grace picks up the answered record next tick.
+  if (deps.projectHasLiveLease(host.configDir, cfg.project)) {
+    deps.log(`${taskId} answered — the live campaign will re-admit it.`);
+    return;
+  }
+
+  // No live campaign. A member of a paused campaign is re-admitted by the redrive (design §7):
+  // it reconciles the answered park into a re-run-with-answer and integrates it, then archives
+  // once idle. The redrive carries the campaign's own verdict out (0 done / 2 parked / 1 failed).
+  if (issueAwaitsRedrive(deps.readEventLog(cfg), taskId)) {
+    const outcome = await deps.campaign(cfg, [], host, undefined, { resume: true });
+    deps.archiveIfIdle();
+    deps.setExitCode(exitCodeFor(outcome));
+    return;
+  }
+
+  // A standalone park (no campaign): run the loop directly — it consumes the answered record
+  // (resume the session with the answer, or post it and re-enter fresh) and exits on its own
+  // verdict: 0 green, 2 parked, 1 failed.
+  deps.setExitCode(exitCodeFor(await deps.runLoop(cfg, taskId)));
 }
 
 /**

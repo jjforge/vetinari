@@ -27,6 +27,12 @@ export interface ParkedRecord {
   branch: string;
   question: string;
   tgMessageId?: number;
+  /** the human's answer, written by `answerParked` when an answer is *delivered* (design §5
+   * step 3, §7). Its presence marks the record answered — the signal that re-admits the member
+   * with the answer as its prompt. Kept until the re-admitted run consumes and clears it. */
+  answer?: string;
+  /** ISO timestamp the answer was delivered, stamped alongside `answer`. */
+  answeredAt?: string;
 }
 
 const file = (cfg: ResolvedConfig, taskId: string) => `${cfg.parkedDir}/${taskId}.json`;
@@ -86,6 +92,28 @@ export function readParked(cfg: ResolvedConfig, taskId: string, opts: { requireS
 }
 
 export const hasParked = (cfg: ResolvedConfig, taskId: string) => existsSync(file(cfg, taskId));
+
+/**
+ * Deliver a human's answer to a parked record (design §5 step 3, §7): write the `answer` text
+ * and an `answeredAt` marker into it, keeping everything else — notably `tgMessageId` (so the
+ * gateway does not re-announce) and `sessionId` (so a resumable re-admit can resume). An answer
+ * is *delivered*, not run: whoever re-admits the member (a live campaign, or a redrive) consumes
+ * this record and runs it with the answer as its prompt. Idempotent against a re-delivered answer.
+ */
+export function answerParked(cfg: ResolvedConfig, taskId: string, answer: string): void {
+  const rec = JSON.parse(readFileSync(file(cfg, taskId), "utf8")) as ParkedRecord;
+  writeFileSync(file(cfg, taskId), JSON.stringify({ ...rec, answer, answeredAt: new Date().toISOString() }, null, 2));
+}
+
+/**
+ * Whether a parked record for `taskId` is present AND carries a delivered answer — the re-admit
+ * signal (design §5 step 3). False for an un-answered park (it holds the wave, awaiting a human)
+ * and for a record that is not on disk.
+ */
+export function isAnswered(cfg: ResolvedConfig, taskId: string): boolean {
+  if (!hasParked(cfg, taskId)) return false;
+  return (JSON.parse(readFileSync(file(cfg, taskId), "utf8")) as ParkedRecord).answer != null;
+}
 
 export const clearParked = (cfg: ResolvedConfig, taskId: string) => rmSync(file(cfg, taskId), { force: true });
 

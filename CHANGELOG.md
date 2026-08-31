@@ -18,6 +18,21 @@ and each entry opens with a tag saying who it reaches:
 `**Breaking changes:**` sorts first in a milestone and names the contract it broke.
 Within a milestone each bold section label appears at most once.
 
+### Collected changes — August 31, 2026
+
+**Improvements:**
+- [user] `campaign --dry-run` now names the epic and pending-verify issues its resolvers drop at the tracker edge in an `Excluded:` section of the plan's provenance text, not only as stderr edge logs — so a piped or captured plan keeps the explanation (#343).
+- [ops] A project's identity is now derived from its `origin` repo (`owner/name`) and stored on its registry pointer, falling back to the declared name when the repo can't be derived (no `origin`, a non-GitHub remote, or an unparseable URL) (#345).
+- [user] A project-scoped command run outside a git repository now refuses in one line naming the directory, instead of silently registering a bogus root. Project roots resolve worktree-safely (via `git --git-common-dir`), so a command typed inside an agent worktree still enrolls the one main checkout (#345).
+- [user] `prune` and `graft` now lead with what they act on — the project, the derived `owner/repo` and the issue title (`vetinari · owner/repo#42 — "…"`) — so an issue that belongs to the wrong repo is recognizable (a title that can't be fetched degrades the line to project and id) (#346).
+- [user] `prune <project> <issue>` and `graft <project> <ids…>` accept a project qualifier (the spelling the gateway already uses); it is an assertion, not a dispatch — it refuses and changes nothing when it names a different project or when the repo identity can't be derived to verify it (#346).
+- [api] The `prune-closure` and `graft-closure` dry-run JSON now carry the `project` and derived `repo`, so a consumer shows the same identity the terminal does without re-parsing prose (#346).
+
+**Bug fixes:**
+- [ops] `autoRegister` now refuses to overwrite a registry pointer belonging to a different root: two projects declaring the same name no longer silently collapse to one pointer (which routed one project's replies into the other's tree). The incumbent is kept, both roots are named on stderr, and the command still runs (#345).
+- [user] `prune` no longer reports a target that is not a member of the campaign as dropped — a non-member is reported as not in the campaign and no prune event is appended (#346).
+- [ops] The gateway's Telegram prune confirmation now rides the notice skeleton — a `✂️ <project> · PRUNE · #<issue>` header, the closure the project computed, then the confirm instruction — instead of forwarding the child's raw `prune --dry-run` stdout as the whole message, so the most destructive exchange on a shared bot names its project; a bare `prune <issue>` resolved to the single running campaign names the project it landed on in the message you reply `yes` to (#347).
+
 ### Collected changes — August 30, 2026
 
 **Breaking changes:**

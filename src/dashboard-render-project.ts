@@ -346,9 +346,11 @@ export interface ArchivedRunView {
  * server renders the shell — header (tail status dot, disclosure title, agent-count
  * summary) and the open-only controls (issue dropdown seeded with the running issues,
  * substring filter, play/pause, save, clear) — plus an empty body/footer the client
- * fills from the `/api/events` SSE `tail` frames. It renders `hidden` when no agent is
- * running (so the client can reveal it the moment one starts, since it lives outside the
- * soft-refreshed `#live-region`) and visible otherwise. Status vocabulary is ours (ADR
+ * fills from the `/api/events` SSE `tail` frames. The pane holds its space at all times
+ * (#330): with no runner it seeds *collapsed* — the head bar stays, `aria-expanded="false"`
+ * and the controls/body/footer folded — rather than `hidden` (which dropped it from the
+ * layout and reflowed the board on every gap between agents). The client re-expands it when
+ * an agent returns unless the operator folded it themselves. Status vocabulary is ours (ADR
  * 0007): the gutter/dot colours key off each running issue's `IssueStatus`, never the
  * mockup's `queued`. The body's JSON colouring and line accumulation are wired in the
  * client script (`LIVE_TAIL_SCRIPT`), reusing `highlightJsonLine`.
@@ -357,7 +359,12 @@ export const renderLiveTail = (status: CampaignStatus, streaming = true) => {
   // Only the runners of the wave in flight (design §11) — never a ghost still reading `running` in
   // a wave that has advanced or one not yet in flight, which a racy/partial log can leave behind.
   const running = inFlightRunning(status);
-  const summary = `${running.length} agent${running.length === 1 ? "" : "s"}`;
+  // With no runner the pane rests collapsed rather than removed (#330): the head bar holds its
+  // space and the summary reads exactly `no agents running` — never `0 agents`, and the client's
+  // renderSummary seeds the identical string, since it overwrites this span on the first frame.
+  const collapsed = running.length === 0;
+  const hide = collapsed ? " hidden" : "";
+  const summary = collapsed ? "no agents running" : `${running.length} agent${running.length === 1 ? "" : "s"}`;
   const issueRow = (issue: string, dot: string, label: string) =>
     `<li class="tail-issue-option" role="option" data-issue="${escapeHtml(issue)}"><span class="dot ${dot}"></span>${escapeHtml(label)}</li>`;
   const options = [
@@ -372,22 +379,22 @@ export const renderLiveTail = (status: CampaignStatus, streaming = true) => {
   const playBtn = streaming ? `<button type="button" class="lv-ico lv-pause" data-tail-play data-following="true" aria-label="Pause"></button>` : "";
   const dot = streaming ? `<span class="tail-dot" data-tail-dot aria-hidden="true"></span>` : `<span class="tail-dot" data-tail-dot data-state="idle" aria-hidden="true"></span>`;
   return (
-    `<section class="live-tail" data-live-tail data-project="${escapeHtml(status.project)}" data-agents="${agentsJson}"${running.length ? "" : " hidden"}>` +
+    `<section class="live-tail" data-live-tail data-project="${escapeHtml(status.project)}" data-agents="${agentsJson}">` +
     `<div class="tail-head">` +
     dot +
-    `<button type="button" class="tail-title" data-tail-toggle aria-expanded="true"><span class="tail-caret" aria-hidden="true"></span>Live tail · agent logs</button>` +
+    `<button type="button" class="tail-title" data-tail-toggle aria-expanded="${collapsed ? "false" : "true"}"><span class="tail-caret" aria-hidden="true"></span>Live tail · agent logs</button>` +
     `<span class="tail-summary" data-tail-summary>${summary}</span>` +
     `<span class="tail-gap"></span>` +
-    `<span class="tail-controls" data-tail-controls>` +
+    `<span class="tail-controls" data-tail-controls${hide}>` +
     `<span class="tail-issue-dd" data-tail-issue-dd><button type="button" class="tail-issue-trigger" data-tail-issue-trigger aria-haspopup="listbox" aria-expanded="false"><span class="dot all" data-tail-issue-dot></span><span data-tail-issue-label>all agents</span><span class="tail-issue-caret" aria-hidden="true">▾</span></button><ul class="tail-issue-menu" role="listbox" aria-label="Filter by agent" data-tail-issue-menu hidden>${options}</ul></span>` +
     `<input type="text" class="tail-filter" placeholder="filter lines…" aria-label="Filter tail lines" data-tail-filter />` +
     playBtn +
     `<button type="button" class="lv-ico" data-tail-save aria-label="Download JSON" title="Download JSON">⤓</button>` +
     `</span>` +
     `</div>` +
-    `<div class="tail-body" data-tail-body></div>` +
+    `<div class="tail-body" data-tail-body${hide}></div>` +
     `<button type="button" class="tail-backlog" data-tail-backlog hidden></button>` +
-    `<div class="tail-footer" data-tail-footer></div>` +
+    `<div class="tail-footer" data-tail-footer${hide}></div>` +
     `</section>`
   );
 };

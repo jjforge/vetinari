@@ -207,6 +207,35 @@ export function paneActivity({
 }
 
 /**
+ * Whether the live-tail pane should sit open after a `tail` frame (#330). The pane holds its
+ * space at all times and collapses to its head bar when it has nothing to show, so this decides
+ * the one open/closed axis from the incoming agent count and *why* the pane is currently closed:
+ *
+ * - No agents → collapsed. There is nothing to display, so it folds to the head bar.
+ * - Agents present and the pane was closed only because it had no agents (`!manualCollapse`) →
+ *   re-open. An automatic fold re-establishes following the moment work restarts.
+ * - Agents present and the operator folded it themselves (`manualCollapse`) → stay closed. A
+ *   deliberate collapse survives agents coming and going until the operator opens it again.
+ *
+ * `manualCollapse` is owned by the toggle handler alone; this reducer never sets it. Self-contained
+ * and browser-safe: single-sourced into the pane script via `${tailCollapseIntent.toString()}`, so
+ * the node test asserts the very function the browser runs.
+ */
+export function tailCollapseIntent({
+  agents,
+  open,
+  manualCollapse,
+}: {
+  agents: number;
+  open: boolean;
+  manualCollapse: boolean;
+}): { open: boolean } {
+  if (agents === 0) return { open: false };
+  if (!open && !manualCollapse) return { open: true };
+  return { open };
+}
+
+/**
  * The live-bar's freshness readout (ADR 0008): maps the last-refresh time to the
  * "updated Ns ago" text its thin DOM glue writes onto the readout. `lastUpdate` is null
  * before the first refresh (the landing opens "waiting for updates"; the campaign page

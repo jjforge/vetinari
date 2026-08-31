@@ -27,6 +27,7 @@ Within a milestone each bold section label appears at most once.
 - [user] `prune` and `graft` now lead with what they act on — the project, the derived `owner/repo` and the issue title (`vetinari · owner/repo#42 — "…"`) — so an issue that belongs to the wrong repo is recognizable (a title that can't be fetched degrades the line to project and id) (#346).
 - [user] `prune <project> <issue>` and `graft <project> <ids…>` accept a project qualifier (the spelling the gateway already uses); it is an assertion, not a dispatch — it refuses and changes nothing when it names a different project or when the repo identity can't be derived to verify it (#346).
 - [api] The `prune-closure` and `graft-closure` dry-run JSON now carry the `project` and derived `repo`, so a consumer shows the same identity the terminal does without re-parsing prose (#346).
+- [ops] The gateway's park announcement now renders through the shared `notice()` skeleton, so its recovery step reads on a `Recover:` line like every other notice (#344).
 
 **Bug fixes:**
 - [ops] `autoRegister` now refuses to overwrite a registry pointer belonging to a different root: two projects declaring the same name no longer silently collapse to one pointer (which routed one project's replies into the other's tree). The incumbent is kept, both roots are named on stderr, and the command still runs (#345).

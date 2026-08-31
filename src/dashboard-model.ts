@@ -153,13 +153,6 @@ export interface CampaignStatus {
   inFlight?: string[];
 }
 
-const statusForOutcome = (outcome: string | undefined): IssueStatus => {
-  if (outcome === "green") return "completed";
-  if (outcome === "parked") return "parked";
-  if (outcome?.startsWith("error")) return "failed";
-  return "unstarted";
-};
-
 const PARK_REASONS: ReadonlySet<string> = new Set(["question", "stalled", "conflict", "red-base", "crash"]);
 
 /**
@@ -608,14 +601,14 @@ export interface ReducedCampaign {
   currentWave: number;
   /** the wave a red merged base wave-parked (ADR 0013), indexing the pruned `waves`
    * like `currentWave`/`closedWaves`; -1 when none is parked. Set from the
-   * `wave-parked` event, which lands on the in-flight wave with no `campaign-batch-done`
+   * `campaign-parked` event, which lands on the in-flight wave with no `wave-done`
    * to close it, so this holds `currentWave` at the point the wave-park was logged. */
   parkedWave: number;
   /** issue id → the structured `ParkReason` its `parked` event carried (ADR 0019),
    * folded so the lifecycle can surface *why* an issue is held. Absent for an issue
    * parked only by a surviving on-disk record (the reason is read from the record). */
   parkReasons: Map<string, ParkReason>;
-  /** the members of the wave a combined-gate `wave-parked` landed on (ADR 0019) — a red
+  /** the members of the wave a combined-gate `campaign-parked` landed on (ADR 0019) — a red
    * merged base. It is the *wave's* reason, not the members': each member keeps its own
    * lifecycle (a merged member stays `completed`, a question stays `parked{question}`), and
    * this set is what makes the wave fold to `parked{red-base}` (design §2.3, #288). */

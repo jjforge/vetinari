@@ -713,9 +713,11 @@ export function reconcileResumeWave(
  * base, clean up the merged branches/worktrees, and only then start the next
  * batch — the manual merge→test→next-queue chain, automated.
  *
- * Green-only by design: only green branches are merged. Once a wave is over,
- * parked records for its non-green tasks are cleared so stale questions do not
- * bleed into the next wave. Integration is non-atomic (ADR 0013): a merge conflict
+ * Green-only by design: only green branches are merged. A wave boundary clears NO
+ * parked records (design §2.5): a held member's record survives the boundary so it
+ * stays answerable, dashboard-visible, and resumable until a human resolves it — a
+ * record is cleared only when its issue goes back to running (a re-admit/redrive run
+ * consuming it) or by an explicit `prune --purge`. Integration is non-atomic (ADR 0013): a merge conflict
  * parks just the conflicting green and the wave carries on with the rest,
  * while a red merged base — with no single culprit — parks the campaign: the wave's greens
  * stay merged on the base and the campaign pauses for a human, with no changelog fold

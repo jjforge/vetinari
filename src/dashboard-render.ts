@@ -251,16 +251,36 @@ export const TAIL_RENDER_CAP = 160;
  * Fold a fresh server snapshot's lines into the client's dedup state (#124): a snapshot
  * re-sends its whole window each push, so a line counts as *new* only when its per-file
  * index `n` exceeds the highest `n` already seen for its issue (`seen[issue]`). Monotonic
- * by construction, so it never re-appends a line the following buffer has since dropped,
- * nor one a paused buffer already holds. Returns the genuinely-new lines and the advanced
- * `seen` map (pure — the caller swaps its state for the returned one). Shipped to the
- * browser via `.toString()`, so it is a self-contained `function` over plain values.
+ * while the file only grows, so it never re-appends a line the following buffer has since
+ * dropped, nor one a paused buffer already holds.
+ *
+ * When `activity-<issue>.jsonl` is recreated — redrive, prune-respawn, campaign rollover — its
+ * per-file index restarts at 0, so the whole new stream sits below the old mark and forward-only
+ * dedup would filter it forever, silencing that issue for the life of the page (#353). A restart
+ * shows as the snapshot's *highest* index for an issue dropping below its mark (the file shrank);
+ * the sliding window re-sending old lines below the mark during normal growth does not, because its
+ * newest line still advances. So we re-base a restarted issue's mark before deduping, which delivers
+ * the new run while leaving forward streaming and re-sent snapshots untouched.
+ *
+ * Returns the genuinely-new lines and the advanced `seen` map (pure — the caller swaps its state for
+ * the returned one). Shipped to the browser via `.toString()`, so it is a self-contained `function`
+ * over plain values.
  */
 export function tailFresh(
   lines: TailRow[],
   seen: Record<string, number>,
 ): { fresh: TailRow[]; seen: Record<string, number> } {
   const next: Record<string, number> = { ...seen };
+  // A restart shows as an issue's highest index in this snapshot falling below its mark (the file
+  // shrank); clear that mark so the new run's lines — all below the old mark — are delivered.
+  const maxByIssue: Record<string, number> = {};
+  for (const line of lines) {
+    const m = maxByIssue[line.issue];
+    if (m === undefined || line.n > m) maxByIssue[line.issue] = line.n;
+  }
+  for (const issue in maxByIssue) {
+    if (next[issue] !== undefined && maxByIssue[issue] < next[issue]) delete next[issue];
+  }
   const fresh: TailRow[] = [];
   for (const line of lines) {
     const high = next[line.issue];

@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { DASHBOARD_PALETTE_CSS, stateColor, stateBorderColor, counterColor, TOP_BAR_STYLES, ISSUE_DETAIL_SHEET_STYLES, ISSUE_DETAIL_SHEET_SCRIPT, HOST_LOG_STYLES, HOST_LOG_SCRIPT, REDRIVE_SCRIPT } from "./dashboard-assets.ts";
+import { DASHBOARD_PALETTE_CSS, stateColor, stateBorderColor, counterColor, TOP_BAR_STYLES, ISSUE_DETAIL_SHEET_STYLES, ISSUE_DETAIL_SHEET_SCRIPT, HOST_LOG_STYLES, HOST_LOG_SCRIPT, LIVE_TAIL_STYLES, REDRIVE_SCRIPT } from "./dashboard-assets.ts";
 import { cappedRawRows, isNotableHostEvent, renderLandingShell } from "./status.ts";
 
 test("the card/chip colour rules are landed as a normative doc that pins the palette (#83)", () => {
@@ -234,6 +234,16 @@ test("the repo dropdown's CSS matches the spec: mono heading, borderless trigger
   assert.match(
     css,
     /@media \(max-width: 640px\) \{ \.repo-label \{ font-size: 15px; \} \}/,
+  );
+});
+
+test("under 640px the shared .tail-head drops the .tail-summary so the title stays one line and the filter isn't clipped (#336)", () => {
+  // Option (c): the summary ("2 agents") duplicates the agent dropdown, so on a phone we hide it
+  // to reclaim the row's width — pinned alongside the three existing 640px rules. CSS-only; every
+  // pane sharing .tail-head (live tail, archived runs, landing event-log feed) inherits it.
+  assert.match(
+    LIVE_TAIL_STYLES,
+    /@media \(max-width: 640px\) \{ \.tail-summary \{ display: none; \} \}/,
   );
 });
 

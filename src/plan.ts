@@ -39,6 +39,19 @@ export interface UnreachableTicket {
   via: string[];
 }
 
+/**
+ * An issue a resolver dropped at the tracker edge before it reached the plan — an
+ * `Epic` (owns no work) or a `pending-verify` issue/blocker (merged, awaiting close),
+ * design §4 steps 1–2. Carried as data on the plan so `describePlan` names it in the
+ * provenance rather than the drop surfacing only as a stderr edge log.
+ */
+export interface Exclusion {
+  /** the excluded issue's number (normalized, no leading #). */
+  id: string;
+  /** why it was excluded — the human phrase the provenance shows. */
+  reason: string;
+}
+
 export interface WavePlan {
   /** dependency-ordered waves of ids (normalized, no leading #). */
   waves: string[][];
@@ -46,6 +59,8 @@ export interface WavePlan {
   placements: Placement[];
   /** tickets dropped because they cannot run against this set. */
   unreachable: UnreachableTicket[];
+  /** issues a resolver dropped at the edge (epic / pending-verify), design §4. */
+  excluded: Exclusion[];
 }
 
 /** Dedup while preserving first-seen order. */
@@ -72,10 +87,13 @@ export const isIssueId = (token: string): boolean => /^#?\d+$/.test(token);
  * expanded to the open issues carrying it *that are work* via the `listByLabel` seam
  * — an issue typed `Epic` owns no work, and a `pending-verify` issue is merged work
  * awaiting close, so `listByLabel` drops both and never schedules them (design §4
- * step 1). The readiness axis is label-expansion only: an explicitly named id is
- * passed straight through, so an operator who names such an id keeps it. Tokens may be
- * mixed; the result is normalized and de-duplicated in first-seen order, so it feeds
- * straight into the planner (or into an `--override` wave).
+ * step 1). Each such drop is reported to the optional `onExcluded` sink — the resolver
+ * knows why (epic / pending-verify), so it names it there as data the planner threads
+ * into the plan's provenance rather than the issue vanishing silently. The readiness
+ * axis is label-expansion only: an explicitly named id is passed straight through, so an
+ * operator who names such an id keeps it. Tokens may be mixed; the result is normalized
+ * and de-duplicated in first-seen order, so it feeds straight into the planner (or into
+ * an `--override` wave).
  *
  * A label token with no `listByLabel` resolver configured fails fast, naming the
  * missing seam — a campaign cannot select by label without wiring the tracker in.
@@ -83,7 +101,11 @@ export const isIssueId = (token: string): boolean => /^#?\d+$/.test(token);
  */
 export async function expandSelection(
   tokens: string[],
-  listByLabel?: (label: string) => string[] | Promise<string[]>,
+  listByLabel?: (
+    label: string,
+    onExcluded?: (e: Exclusion) => void,
+  ) => string[] | Promise<string[]>,
+  onExcluded?: (e: Exclusion) => void,
 ): Promise<string[]> {
   const ids: string[] = [];
   for (const token of tokens) {
@@ -96,14 +118,33 @@ export async function expandSelection(
         `campaign: "${token}" is a label, but no "listByLabel" resolver is configured — ` +
           `add e.g. listByLabel: githubIssuesByLabel("owner/repo") to your config to select issues by label.`,
       );
-    ids.push(...(await listByLabel(token)));
+    ids.push(...(await listByLabel(token, onExcluded)));
   }
   return uniqueOrder(ids);
 }
 
+/**
+ * A `blockedBy` resolver that also reports the blockers it drops at the edge (a
+ * `pending-verify` prerequisite treated as satisfied, §4 step 2) to an optional sink.
+ * `githubBlockedBy` implements this; a plain `BlockedByOf` that ignores the second
+ * argument is assignable to it, so the wrap below is a no-op for resolvers that never
+ * exclude anything.
+ */
+type ExcludingBlockedBy = (
+  id: string,
+  onExcluded?: (e: Exclusion) => void,
+) => string[] | Promise<string[]>;
+
 export async function layerWaves(ids: string[], blockedByOf: BlockedByOf): Promise<WavePlan> {
   const order = uniqueOrder(ids);
-  const { inSet, external } = await restrictBlockers(order, blockedByOf);
+  // Collect the edge exclusions the resolver reports while restricting — a
+  // pending-verify blocker is dropped inside the resolver, so the only way it reaches
+  // the provenance is the resolver naming it here (§4 step 2). Wrapping keeps
+  // `restrictBlockers` (shared with `prune`) untouched: it still calls a one-arg fn.
+  const excluded: Exclusion[] = [];
+  const collecting: BlockedByOf = (id) =>
+    (blockedByOf as ExcludingBlockedBy)(id, (e) => excluded.push(e));
+  const { inSet, external } = await restrictBlockers(order, collecting);
 
   // Unreachable closure. Seed with any ticket held by an open blocker outside the
   // set, then drop anything whose in-set blocker was itself dropped, to a fixpoint
@@ -153,7 +194,7 @@ export async function layerWaves(ids: string[], blockedByOf: BlockedByOf): Promi
       via: [...inSet.get(id)!].filter((b) => dropped.has(b)),
     }));
 
-  return { waves, placements, unreachable };
+  return { waves, placements, unreachable, excluded };
 }
 
 /** What to do about a ticket whose file-set came back `confident: false`. */
@@ -239,7 +280,7 @@ export function partitionWaves(plan: WavePlan, basenamesOf: Map<string, Set<stri
     for (const sw of subWaves) waves.push(sw.ids);
   }
 
-  return { waves, placements, unreachable: plan.unreachable };
+  return { waves, placements, unreachable: plan.unreachable, excluded: plan.excluded };
 }
 
 /**
@@ -449,6 +490,13 @@ export function describePlan(plan: WavePlan & Partial<Pick<CampaignPlan, "pruned
     }
   }
 
+  if (plan.excluded?.length) {
+    lines.push("", "Excluded (dropped at the tracker edge — not work for this campaign):");
+    for (const e of plan.excluded) {
+      lines.push(`  #${e.id}  — ${e.reason}`);
+    }
+  }
+
   return lines.join("\n");
 }
 
@@ -509,9 +557,11 @@ export async function planCampaign(ids: string[], deps: CampaignPlanDeps): Promi
 
   return {
     ...partitioned,
-    // The unreachable list belongs to the original layering — re-layering the
-    // survivors alone would forget the dependency drops from the first pass.
+    // The unreachable list and the edge exclusions both belong to the original
+    // layering — re-layering the survivors alone would forget the dependency drops
+    // from the first pass (and re-layering never re-reports the same exclusions).
     unreachable: layered.unreachable,
+    excluded: layered.excluded,
     underspecified,
     pruned,
   };
@@ -602,12 +652,18 @@ export interface CampaignPlanReport {
  * injected `isTTY`/`ask`, runs `planCampaign`, and returns the layered waves alongside
  * the rendered wave args, provenance report, and suggested `--name`. No side effects:
  * it reads the tracker and computes the plan; running the waves is the caller's job.
+ *
+ * `expandExcluded` carries the drops `expandSelection` already made when it turned the
+ * label tokens into ids (epic / pending-verify, §4 step 1) — they happened before this
+ * call, so the CLI passes them here for the provenance to name alongside the blocker
+ * exclusions the planner itself discovers (§4 step 2).
  */
 export async function runCampaignPlan(
   cfg: CampaignPlanConfig,
   ids: string[],
   opts: CampaignPlanOptions,
   deps: CampaignPlanRunDeps,
+  expandExcluded: Exclusion[] = [],
 ): Promise<CampaignPlanReport> {
   if (!ids.length)
     throw new Error(
@@ -637,7 +693,10 @@ export async function runCampaignPlan(
     labelsFromTask(String(await cfg.fetchTask(id))),
   );
 
-  return { waves: plan.waves, waveArgs: waveArgs(plan), report: describePlan(plan), suggestedName };
+  // Fold the label-expansion exclusions in front of the planner's own so the
+  // provenance's Excluded section names every edge drop, expansion then layering.
+  const report = describePlan({ ...plan, excluded: [...expandExcluded, ...plan.excluded] });
+  return { waves: plan.waves, waveArgs: waveArgs(plan), report, suggestedName };
 }
 
 /** One ticket's resolver verdict, as `fileset-check` reports it. */

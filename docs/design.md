@@ -335,7 +335,6 @@ Described by behaviour; the tracker holds the numbers (`gh issue list --label ca
 - **A throw before the sandbox logs no `failed`.** The run loop's catch covers the container's life; a worktree-preflight or tracker-fetch throw exits 1 with a stack trace and leaves no verdict in the log.
 - **A crash redrive never resumes the session.** §7 says "treat as unstarted if no commits, else resume the session"; the reconciler re-runs a crashed member fresh on its branch in every case, and a code comment overstates this.
 - **The host lease has no kind**, so the campaign-liveness guard reads a standalone `run`'s lease as a live campaign: a second `run`, an `answer`, or a `redrive` for the same project is refused with a message about a campaign that does not exist.
-- **The Epic and pending-verify exclusions are reported on stderr**, as resolver edge logs, rather than inside the plan's provenance text (§4 says the provenance names them).
 
 ---
 

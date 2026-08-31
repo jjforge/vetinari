@@ -14,6 +14,9 @@ heading and the retired one sits under `_Avoid_`.
 **Project**:
 A repo you run vetinari in. Has a committed [[vetinari]] (config, Dockerfile) and
 an ignored [[vetinari-local]] holding this machine's secrets, logs and run state.
+Identified by its `origin` repo (`owner/name`), falling back to its declared name
+when the repo can't be derived — a repo with no `origin`, a non-GitHub remote, or an
+unparseable URL degrades to the name rather than erroring.
 _Avoid_: client, target repo, consuming project.
 
 **Issue**:

@@ -1,7 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { ResolvedConfig } from "./config.ts";
+import { ownerRepoFromRemote, repoForProject, type ResolvedConfig } from "./config.ts";
+// Re-exported so `status.ts`'s `export *` and `dashboard-route-page.ts` keep
+// reaching them here; the definitions moved to config.ts once the registry and CLI
+// came to depend on this project-identity edge (an odd fit under dashboard-model).
+export { ownerRepoFromRemote, repoForProject };
 import { hostLogger, type Logger } from "./log.ts";
 import { type ProjectPointer } from "./registry.ts";
 import { listParked, parkedDirOf, type ParkedRecord, type ParkReason } from "./state.ts";
@@ -12,36 +16,6 @@ import { festiveWaveName } from "./festive-names.ts";
 import { readEventLog, type GreenEvent, type OrchestratorEvent } from "./event-log.ts";
 import { activityLogPath } from "./activity.ts";
 import { humanizeLogLine, localTime, type HumanizedRow } from "./log-view.ts";
-
-/**
- * Parse a git remote URL to its `owner/name`, handling both the SSH
- * (`git@github.com:owner/name.git`) and HTTPS (`https://github.com/owner/name(.git)`)
- * forms, stripping a `.git` suffix and any trailing slash. Pure and testable — the
- * `git remote get-url` call is the impure edge (`repoForProject`), this is the parse.
- * Anything it can't recognize as a remote is `undefined`, so a caller falls back to
- * the bare project key rather than showing a broken label.
- */
-export function ownerRepoFromRemote(url: string): string | undefined {
-  const match = url.trim().match(/(?:git@[^:]+:|https?:\/\/[^/]+\/)([^/]+)\/([^/]+?)(?:\.git)?\/?$/);
-  if (!match) return undefined;
-  const [, owner, name] = match;
-  return owner && name ? `${owner}/${name}` : undefined;
-}
-
-/**
- * A project's `owner/name`, read live from its checkout's `origin` remote — the
- * impure edge over the pure `ownerRepoFromRemote` parse. A root that is not a git
- * repo, has no `origin`, or whose URL doesn't parse yields `undefined` (the git
- * call is silenced and never throws), so the display falls back to the bare key.
- */
-export function repoForProject(projectRoot: string): string | undefined {
-  try {
-    const url = execFileSync("git", ["-C", projectRoot, "remote", "get-url", "origin"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-    return ownerRepoFromRemote(url);
-  } catch {
-    return undefined;
-  }
-}
 
 /**
  * The base branch a redrive would land on, read live from the project checkout's current

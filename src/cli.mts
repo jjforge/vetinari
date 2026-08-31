@@ -10,6 +10,7 @@ import {
   parseAgentOverride,
   resolveAgentSelection,
   resolveConfigPath,
+  resolveProjectRoot,
   type ResolvedConfig,
 } from "./config.ts";
 import {
@@ -512,6 +513,13 @@ if (mode === "tidy") {
   process.exit(0);
 }
 
+// Every remaining mode is project-scoped (the host-level modes above already
+// exited), so resolve the project's ONE root from git, worktree-safely: the parent
+// of `--git-common-dir`, so a command typed inside an agent worktree still resolves
+// to the main checkout and not the sandbox dir that vanishes when it closes. A
+// directory that is not a git repo at all refuses here, in one line naming it.
+const projectRoot = resolveProjectRoot();
+
 const cfg = await loadConfig(cfgPath);
 
 // The host's own logger for the emitters that aren't scoped to this run — the
@@ -520,9 +528,10 @@ const cfg = await loadConfig(cfgPath);
 const hostLog = hostLogger();
 
 // Enroll (or refresh) this project's pointer with the gateway at the start of
-// every run, so a project registers itself with no manual step (ADR 0002).
+// every run, so a project registers itself with no manual step (ADR 0002). Keyed to
+// the git-resolved root, so worktrees and the main checkout enroll as one project.
 // Pointer-only and best-effort — never fatal to the run.
-autoRegister(cfg, process.cwd(), hostLog);
+autoRegister(cfg, projectRoot, hostLog);
 
 // Resolve the host container ceiling once (ADR 0011): always in effect —
 // MAX_CONCURRENT_CONTAINERS (or the max-concurrent-containers file) when set, else

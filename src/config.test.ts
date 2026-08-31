@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -8,13 +9,16 @@ import {
   containerShareWeight,
   encodeAgentOverride,
   loadConfig,
+  ownerRepoFromRemote,
   parseAgentFlags,
   missingCredentials,
   nonResumableAnswerWarning,
   parseAgentOverride,
+  repoForProject,
   resolveAgentSelection,
   resolveConfigPath,
   resolveDestination,
+  resolveProjectRoot,
   type Destination,
 } from "./config.ts";
 
@@ -443,4 +447,54 @@ test("loadConfig honors an explicit stateDir over the flipped default", async ()
   assert.equal(cfg.stateDir, "custom-state");
   assert.equal(cfg.parkedDir, "custom-state/parked");
   assert.equal(cfg.logFile, "custom-state/logs/orchestrator.jsonl");
+});
+
+const git = (dir: string, args: string[]) =>
+  execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });
+
+// A temp git repo whose realpathed root is returned, so comparisons hold on
+// platforms (macOS) where tmpdir is itself a symlink.
+const initRepo = (): string => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "vetinari-root-")));
+  git(dir, ["init", "-q"]);
+  return dir;
+};
+
+test("resolveProjectRoot resolves the main repo root from cwd", () => {
+  const root = initRepo();
+  assert.equal(resolveProjectRoot(root), root);
+});
+
+test("resolveProjectRoot resolves a linked worktree back to the main root, not the worktree", () => {
+  const root = initRepo();
+  // A commit is needed before a worktree can be added.
+  git(root, ["-c", "user.email=a@b.c", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"]);
+  // Mirror the real agent layout: the worktree lives INSIDE the project root, and
+  // is its own toplevel — `--show-toplevel` there would resolve to it, not the root.
+  const worktree = join(root, ".vetinari.local", "worktrees", "task-1");
+  git(root, ["worktree", "add", "-q", worktree, "-b", "agent/task-1"]);
+
+  assert.equal(resolveProjectRoot(worktree), root);
+  assert.notEqual(realpathSync(git(worktree, ["rev-parse", "--show-toplevel"]).trim()), root);
+});
+
+test("resolveProjectRoot refuses outside a git repo, naming the directory", () => {
+  const notARepo = realpathSync(mkdtempSync(join(tmpdir(), "vetinari-norepo-")));
+  assert.throws(
+    () => resolveProjectRoot(notARepo),
+    (e: Error) => e.message.includes("not a git repository") && e.message.includes(notARepo),
+  );
+});
+
+test("repoForProject derives owner/name from origin, and degrades to undefined without one", () => {
+  const root = initRepo();
+  assert.equal(repoForProject(root), undefined); // a repo with no origin degrades
+  git(root, ["remote", "add", "origin", "git@github.com:jjforge/vetinari.git"]);
+  assert.equal(repoForProject(root), "jjforge/vetinari");
+});
+
+test("ownerRepoFromRemote parses SSH and HTTPS GitHub remotes, and rejects garbage", () => {
+  assert.equal(ownerRepoFromRemote("git@github.com:jjforge/vetinari.git"), "jjforge/vetinari");
+  assert.equal(ownerRepoFromRemote("https://github.com/acme/tidepool"), "acme/tidepool");
+  assert.equal(ownerRepoFromRemote("not-a-remote"), undefined);
 });

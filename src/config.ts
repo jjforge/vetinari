@@ -1,4 +1,5 @@
-import { resolve } from "node:path";
+import { execFileSync } from "node:child_process";
+import { dirname, resolve } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import type { FindingReporter } from "./findings.ts";
 import type { FileSetOf } from "./fileset.ts";
@@ -529,6 +530,66 @@ export type ResolvedConfig = Required<
 
 export function defineConfig(c: VetinariConfig): VetinariConfig {
   return c;
+}
+
+/**
+ * A project's root, resolved from git and worktree-safely — the one main checkout,
+ * not wherever the command was typed. The root is the parent of
+ * `git rev-parse --git-common-dir`, NOT `--show-toplevel` and NOT `process.cwd()`:
+ * an agent worktree lives at `<root>/<stateDir>/worktrees/<taskId>` and is its own
+ * toplevel carrying a real `vetinari/config.mts`, so `--show-toplevel` typed there
+ * would resolve the project to a sandbox dir that is deleted when it closes, while
+ * `--git-common-dir` always points at the MAIN checkout's `.git`. A directory that
+ * is not a git repository at all refuses, in one line naming it — only "not a repo"
+ * refuses; a repo whose `origin` we cannot identify degrades (see `repoForProject`).
+ */
+export function resolveProjectRoot(cwd: string = process.cwd()): string {
+  let commonDir: string;
+  try {
+    commonDir = execFileSync(
+      "git",
+      ["-C", cwd, "rev-parse", "--git-common-dir"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    ).trim();
+  } catch {
+    throw new Error(
+      `not a git repository: ${cwd} — run this from inside your project's checkout.`,
+    );
+  }
+  // `--git-common-dir` is relative (`.git`) in a main checkout and absolute in a
+  // linked worktree; `resolve` handles both, then the parent is the project root.
+  return dirname(resolve(cwd, commonDir));
+}
+
+/**
+ * Parse a git remote URL to its `owner/name`, handling both the SSH
+ * (`git@github.com:owner/name.git`) and HTTPS (`https://github.com/owner/name(.git)`)
+ * forms, stripping a `.git` suffix and any trailing slash. Pure and testable — the
+ * `git remote get-url` call is the impure edge (`repoForProject`), this is the parse.
+ * Anything it can't recognize as a remote is `undefined`, so a caller falls back to
+ * the bare project key rather than showing a broken label.
+ */
+export function ownerRepoFromRemote(url: string): string | undefined {
+  const match = url.trim().match(/(?:git@[^:]+:|https?:\/\/[^/]+\/)([^/]+)\/([^/]+?)(?:\.git)?\/?$/);
+  if (!match) return undefined;
+  const [, owner, name] = match;
+  return owner && name ? `${owner}/${name}` : undefined;
+}
+
+/**
+ * A project's `owner/name`, read live from its checkout's `origin` remote — the
+ * impure edge over the pure `ownerRepoFromRemote` parse, and a project's identity
+ * (CONTEXT.md's Project). A root that is not a git repo, has no `origin`, or whose
+ * URL doesn't parse yields `undefined` (the git call is silenced and never throws),
+ * so every consumer falls back to the declared project name.
+ */
+export function repoForProject(projectRoot: string): string | undefined {
+  try {
+    const url = execFileSync("git", ["-C", projectRoot, "remote", "get-url", "origin"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    return ownerRepoFromRemote(url);
+  } catch {
+    return undefined;
+  }
 }
 
 /**

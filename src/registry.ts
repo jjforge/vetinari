@@ -10,6 +10,7 @@ import {
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { hostLogger, type Logger } from "./log.ts";
+import { repoForProject } from "./config.ts";
 import type { Destination, NotifyMap, ResolvedConfig } from "./config.ts";
 import type { TgConn } from "./telegram.ts";
 
@@ -23,6 +24,14 @@ export interface ProjectPointer {
   project: string;
   projectRoot: string;
   baseLocation: string;
+  /**
+   * The project's identity: its `origin` repo as `owner/name`, derived at
+   * registration (`repoForProject`). Undefined when the root has no `origin`, a
+   * non-GitHub remote, or a URL that won't parse — a degraded derivation, never an
+   * error; consumers fall back to the declared `project` name. Not encoded into the
+   * pointer filename (still `registry/<project>.json`), so no migration.
+   */
+  repo?: string;
 }
 
 /**
@@ -50,8 +59,25 @@ export function autoRegister(
   logger: Logger = hostLogger(),
 ): void {
   try {
-    const pointer = pointerFor(cfg, projectRoot);
-    register(gatewayConfigDir(), pointer);
+    const configDir = gatewayConfigDir();
+    // A pointer name is self-declared, so two projects can collide on one. Refuse to
+    // overwrite an incumbent that resolves to a DIFFERENT root — otherwise the second
+    // registration would silently steal the first's routing and the gateway would
+    // deliver one project's replies into the other's tree. Keep the incumbent, name
+    // both roots on stderr, and let the command run on (registration is best-effort).
+    const incumbent = readPointer(configDir, cfg.project);
+    if (
+      incumbent &&
+      normalizeProjectRoot(incumbent.projectRoot) !== normalizeProjectRoot(projectRoot)
+    ) {
+      console.error(
+        `vetinari: project name "${cfg.project}" is already registered to ${incumbent.projectRoot}; ` +
+          `refusing to overwrite it from ${projectRoot} — rename one project's \`project\` to disambiguate.`,
+      );
+      return;
+    }
+    const pointer = pointerFor(cfg, projectRoot, repoForProject(projectRoot));
+    register(configDir, pointer);
     // Materialize the project's routing into its base location so the gateway —
     // which holds no project config (ADR 0002) — can route the outbox by it live.
     writeRouting(pointer.baseLocation, {
@@ -71,11 +97,16 @@ export function autoRegister(
 export function pointerFor(
   cfg: Pick<ResolvedConfig, "project" | "stateDir">,
   projectRoot: string,
+  repo?: string,
 ): ProjectPointer {
   return {
     project: cfg.project,
     projectRoot,
     baseLocation: resolve(projectRoot, cfg.stateDir),
+    // Only carry the key when the derivation succeeded — a degraded repo leaves it
+    // off entirely (JSON drops undefined), so the pointer file and every consumer
+    // fall back to the declared name rather than storing an explicit `undefined`.
+    ...(repo !== undefined ? { repo } : {}),
   };
 }
 
@@ -95,6 +126,21 @@ export function register(configDir: string, pointer: ProjectPointer): void {
     pointerFile(configDir, pointer.project),
     JSON.stringify(pointer, null, 2),
   );
+}
+
+/**
+ * Read one project's pointer by name, or `undefined` when none is registered (or the
+ * file is unreadable). The single-pointer read-side counterpart to `listProjects`,
+ * used by `autoRegister` to spot a name collision before overwriting an incumbent.
+ */
+export function readPointer(configDir: string, project: string): ProjectPointer | undefined {
+  const file = pointerFile(configDir, project);
+  if (!existsSync(file)) return undefined;
+  try {
+    return JSON.parse(readFileSync(file, "utf8")) as ProjectPointer;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

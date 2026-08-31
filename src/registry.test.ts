@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
@@ -12,6 +13,7 @@ import {
   listProjects,
   normalizeProjectRoot,
   pointerFor,
+  readPointer,
   readProject,
   readProjects,
   register,
@@ -409,4 +411,74 @@ test("re-registering a project refreshes its pointer in place", () => {
   assert.deepEqual(listProjects(configDir), [
     pointer({ baseLocation: "/new/.vetinari.local" }),
   ]);
+});
+
+test("readPointer reads one pointer by name, and is undefined when unregistered", () => {
+  const configDir = tmpConfigDir();
+  register(configDir, pointer({ project: "here" }));
+  assert.deepEqual(readPointer(configDir, "here"), pointer({ project: "here" }));
+  assert.equal(readPointer(configDir, "absent"), undefined);
+});
+
+test("pointerFor carries the derived repo when given one, and omits the key when not", () => {
+  const cfg = { project: "jjforge", stateDir: ".vetinari.local" } as ResolvedConfig;
+  assert.deepEqual(pointerFor(cfg, "/root", "jjforge/vetinari"), {
+    project: "jjforge",
+    projectRoot: "/root",
+    baseLocation: "/root/.vetinari.local",
+    repo: "jjforge/vetinari",
+  });
+  // A degraded derivation leaves the key off entirely — no explicit `undefined`.
+  assert.deepEqual(Object.keys(pointerFor(cfg, "/root")), [
+    "project",
+    "projectRoot",
+    "baseLocation",
+  ]);
+});
+
+test("autoRegister fills the pointer's repo from the root's git origin", () => {
+  const configDir = tmpConfigDir();
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "vetinari-reporoot-")));
+  execFileSync("git", ["-C", root, "init", "-q"]);
+  execFileSync("git", ["-C", root, "remote", "add", "origin", "git@github.com:jjforge/vetinari.git"]);
+  const cfg = { project: "jjforge", stateDir: ".vetinari.local" } as ResolvedConfig;
+
+  withEnv({ VETINARI_GATEWAY_HOME: configDir }, () => autoRegister(cfg, root));
+
+  assert.equal(readPointer(configDir, "jjforge")?.repo, "jjforge/vetinari");
+});
+
+test("autoRegister refuses to overwrite an incumbent pointer at a different root", () => {
+  const configDir = tmpConfigDir();
+  const cfg = { project: "shared", stateDir: ".vetinari.local" } as ResolvedConfig;
+  const errors: string[] = [];
+  const realErr = console.error;
+  console.error = (m: string) => void errors.push(m);
+  try {
+    withEnv({ VETINARI_GATEWAY_HOME: configDir }, () => {
+      autoRegister(cfg, "/home/me/alpha");
+      // A second project declaring the same name from a different root must not steal it.
+      autoRegister(cfg, "/home/me/beta");
+    });
+  } finally {
+    console.error = realErr;
+  }
+
+  // The incumbent is kept intact — the collision never overwrote it.
+  assert.equal(readPointer(configDir, "shared")?.projectRoot, "/home/me/alpha");
+  // One line on stderr names both roots and the shared name.
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /shared/);
+  assert.match(errors[0], /\/home\/me\/alpha/);
+  assert.match(errors[0], /\/home\/me\/beta/);
+});
+
+test("autoRegister still refreshes a pointer at the same root (not a collision)", () => {
+  const configDir = tmpConfigDir();
+  const cfg = { project: "shared", stateDir: ".vetinari.local" } as ResolvedConfig;
+  withEnv({ VETINARI_GATEWAY_HOME: configDir }, () => {
+    autoRegister(cfg, "/home/me/alpha");
+    autoRegister(cfg, "/home/me/alpha");
+  });
+  assert.equal(readPointer(configDir, "shared")?.projectRoot, "/home/me/alpha");
 });

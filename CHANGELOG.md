@@ -37,6 +37,7 @@ Within a milestone each bold section label appears at most once.
 - [user] A redrive of a crashed campaign member now resumes its interrupted session on the existing branch when the provider is resumable and the branch already carries committed work, rather than re-running it from scratch; a member with no commits, or a non-resumable provider, still runs fresh (#341).
 - [user] A standalone `run` in flight no longer refuses a second `run` for a different issue, an `answer`, or a `redrive` in the same project as "a campaign is already running" — the host lease now records whether it is a campaign or a standalone run, and the campaign-liveness guard matches only a live campaign (#342).
 - [user] The summary-line graft control now keeps its state across a live-region refresh: typed-but-unsubmitted issue ids, an inline validation error, and an in-flight `grafting…` graft all survive a log event landing mid-edit instead of being silently emptied (#329).
+- [user] The campaign board no longer stops updating after a reply draft is left in a closed issue sheet — the soft-refresh's mid-compose guard, which protected nothing but could freeze the whole board on a stale hidden draft, is removed so every live event refreshes (#348).
 
 ### Collected changes — August 30, 2026
 

@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { DASHBOARD_PALETTE_CSS, stateColor, stateBorderColor, STATE_DOT_CSS, STATE_CHIP_BORDER_CSS, TOP_BAR_STYLES, ISSUE_DETAIL_SHEET_STYLES, REPO_DROPDOWN_SCRIPT, HOST_LOG_STYLES } from "./dashboard-assets.ts";
-import { archiveRowMatches, archiveRunHref, cappedRawRows, event, formatStatusText, highlightJsonLine, isNotableHostEvent, renderHostLog, renderLandingShell, renderStatusPage, renderTopBar } from "./status.ts";
+import { archiveRowMatches, archiveRunHref, cappedRawRows, event, formatStatusText, highlightJsonLine, isNotableHostEvent, renderHostLog, renderLandingShell, renderStatusPage, renderTopBar, tailFresh } from "./status.ts";
 
 // The set of palette tokens defined by a `:root { … }` block, and the set of
 // `var(--token)` references anywhere in a page — the two must agree, or a surface
@@ -666,4 +666,56 @@ test("isNotableHostEvent flags a fail/error kind or a row carrying error/ok:fals
   assert.equal(isNotableHostEvent({ ts: "t", event: "gateway-routed", ok: true }), false);
   // A routine host event with no error signal is not notable.
   assert.equal(isNotableHostEvent({ ts: "t", event: "gateway-routed", project: "acme" }), false);
+});
+
+// A tail row as `tailFresh` reads it — only `issue` and `n` matter to the dedup (#353).
+const tln = (issue: string, n: number) => ({ issue, status: "running", ts: "", n, raw: `{"issue":"${issue}","n":${n}}` });
+
+// #353: an issue's `activity-<issue>.jsonl` is recreated on redrive/prune-respawn/rollover, so its
+// per-file index restarts at 0. The whole new stream then sits below the high-water mark; without a
+// restart rule `tailFresh` filters it all as already-seen and the pane goes permanently silent.
+test("tailFresh treats a restarted stream (max index below the mark) as new and re-bases the mark", () => {
+  // Issue 1 has streamed up to n=5; the mark records it.
+  const grown = tailFresh([tln("1", 4), tln("1", 5)], { "1": 3 });
+  assert.deepEqual(grown.seen, { "1": 5 });
+  // Its file is recreated and restarts at 0 — every line is below the mark of 5.
+  const restarted = tailFresh([tln("1", 0), tln("1", 1), tln("1", 2)], grown.seen);
+  assert.deepEqual(
+    restarted.fresh.map((r) => [r.issue, r.n]),
+    [["1", 0], ["1", 1], ["1", 2]],
+    "the restarted stream's lines are delivered, not suppressed",
+  );
+  assert.deepEqual(restarted.seen, { "1": 2 }, "the mark is re-based on the new stream");
+});
+
+// Forward-only growth still dedupes: the restart rule keys off the snapshot's *max* index, so a
+// growing file (max at or above the mark) is untouched (#353).
+test("tailFresh still dedupes a growing file — only lines past the mark are fresh", () => {
+  const res = tailFresh([tln("1", 3), tln("1", 4), tln("1", 5)], { "1": 4 });
+  assert.deepEqual(res.fresh.map((r) => r.n), [5], "only the line past the mark is fresh");
+  assert.deepEqual(res.seen, { "1": 5 });
+});
+
+// The sliding snapshot window (cap 500) re-sends old lines *below* the mark during normal growth;
+// those must stay suppressed — a restart is the max index dropping, not any single low line (#353).
+test("tailFresh re-sends a window below the mark without duplicating, and stays quiet with no new line", () => {
+  // Window re-sends n=3..5 (all at/below the mark of 5) — nothing new, no rows delivered.
+  const resent = tailFresh([tln("1", 3), tln("1", 4), tln("1", 5)], { "1": 5 });
+  assert.deepEqual(resent.fresh, [], "a re-sent window below the mark produces no duplicate rows");
+  assert.deepEqual(resent.seen, { "1": 5 }, "the mark is unchanged");
+  // Same window plus one genuinely new line — only that line is fresh.
+  const advanced = tailFresh([tln("1", 3), tln("1", 4), tln("1", 5), tln("1", 6)], { "1": 5 });
+  assert.deepEqual(advanced.fresh.map((r) => r.n), [6]);
+});
+
+// Per-issue isolation: one issue restarting must not reset another issue's mark (#353).
+test("tailFresh isolates a restart to its own issue", () => {
+  // Issue 1 restarts (max 1 < mark 5); issue 2 keeps growing (max 8 > mark 7) in the same snapshot.
+  const res = tailFresh([tln("1", 0), tln("1", 1), tln("2", 8)], { "1": 5, "2": 7 });
+  assert.deepEqual(
+    res.fresh.map((r) => [r.issue, r.n]),
+    [["1", 0], ["1", 1], ["2", 8]],
+    "issue 1's restart is delivered and issue 2's forward line is delivered once",
+  );
+  assert.deepEqual(res.seen, { "1": 1, "2": 8 }, "issue 2's mark advances normally, unaffected by issue 1's restart");
 });

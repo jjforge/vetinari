@@ -9,6 +9,7 @@ import {
   reasonWord,
   redriveAllowed,
   resumeIntent,
+  tailCollapseIntent,
   tallyDotClass,
 } from "./dashboard-visual-state.ts";
 import { reconstructIssueDetail } from "./dashboard-model.ts";
@@ -82,6 +83,26 @@ test("paneActivity counts a visible append — new lines, pane open and followin
   // the live-bar's freshness clock, just like a wave/feed refresh.
   assert.equal(paneActivity({ appended: 3, open: true, following: true }), true);
   assert.equal(paneActivity({ appended: 1, open: true, following: true }), true);
+});
+
+test("tailCollapseIntent folds the pane closed whenever there are no agents to show (#330)", () => {
+  // No runner → collapsed, whichever way it was open before; the head bar holds its space
+  // but there is nothing to display.
+  assert.deepEqual(tailCollapseIntent({ agents: 0, open: true, manualCollapse: false }), { open: false });
+  assert.deepEqual(tailCollapseIntent({ agents: 0, open: false, manualCollapse: false }), { open: false });
+});
+
+test("tailCollapseIntent auto-re-expands a pane that only closed because it had no agents (#330)", () => {
+  // Collapsed automatically (manualCollapse false) → the next agent re-opens it.
+  assert.deepEqual(tailCollapseIntent({ agents: 1, open: false, manualCollapse: false }), { open: true });
+});
+
+test("tailCollapseIntent leaves an operator's own collapse folded when agents return (#330)", () => {
+  // The operator used the toggle (manualCollapse true) → agents appearing must not override it.
+  assert.deepEqual(tailCollapseIntent({ agents: 2, open: false, manualCollapse: true }), { open: false });
+  // An already-open pane with agents stays open regardless of the flag.
+  assert.deepEqual(tailCollapseIntent({ agents: 2, open: true, manualCollapse: false }), { open: true });
+  assert.deepEqual(tailCollapseIntent({ agents: 2, open: true, manualCollapse: true }), { open: true });
 });
 
 test("issueMoves offers reply and prune for a question or stalled park — redrive is a campaign move, not an issue one (#325)", () => {

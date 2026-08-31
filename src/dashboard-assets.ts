@@ -1,5 +1,5 @@
 import { archiveRowMatches, archiveRunHref, cappedRawRows, followView, humanizedRow, isNotableHostEvent, tailAppend, tailFresh, tailView } from "./dashboard-render.ts";
-import { issueMoves, paneActivity, reasonWord } from "./dashboard-visual-state.ts";
+import { issueMoves, paneActivity, reasonWord, tailCollapseIntent } from "./dashboard-visual-state.ts";
 import { humanizeHostLine, LOG_DOT_STATE_COLOR, splitOverflow } from "./log-view.ts";
 
 /**
@@ -709,10 +709,15 @@ export const LIVE_TAIL_SCRIPT = `  const tailEl = document.querySelector("[data-
     ${followView.toString()}
     ${tailView.toString()}
     ${paneActivity.toString()}
+    ${tailCollapseIntent.toString()}
     const FOLLOW_CAP = 260, RENDER_CAP = 160;
     const project = tailEl.dataset.project;
     let agents = []; try { agents = JSON.parse(tailEl.dataset.agents || "[]"); } catch (e) {}
-    let open = true, live = true, mark = 0, issue = "", query = "", buffer = [], seen = {};
+    // The pane holds its space and rests collapsed with no agents (#330), so \`open\` starts from
+    // the server-seeded state (agents present ⇒ open). \`manualCollapse\` is the one extra bit: set
+    // only by the toggle handler, it marks a collapse the operator owns so an agent returning does
+    // not override it — an *automatic* (no-agents) collapse re-opens, a manual one persists.
+    let open = agents.length > 0, live = open, manualCollapse = false, mark = 0, issue = "", query = "", buffer = [], seen = {};
     const q = (sel) => tailEl.querySelector(sel);
     const dotEl = q("[data-tail-dot]"), toggle = q("[data-tail-toggle]"), summaryEl = q("[data-tail-summary]");
     const controls = q("[data-tail-controls]"), body = q("[data-tail-body]"), footer = q("[data-tail-footer]");
@@ -733,7 +738,18 @@ export const LIVE_TAIL_SCRIPT = `  const tailEl = document.querySelector("[data-
       // If the selected agent finished (dropped from the running set), fall back to all agents.
       if (issue && !agents.some((a) => a.issue === issue)) { issue = ""; issueLabel.textContent = "all agents"; issueDot.className = "dot all"; }
     }
-    function renderSummary() { summaryEl.textContent = agents.length + " agent" + (agents.length === 1 ? "" : "s") + (open ? "" : " · paused"); }
+    // With no agents the pane rests collapsed and reads exactly "no agents running" — never
+    // "0 agents", and the " · paused" suffix (the operator's own follow-pause) is suppressed,
+    // matching the string the server seeds (#330).
+    function renderSummary() { summaryEl.textContent = agents.length === 0 ? "no agents running" : agents.length + " agent" + (agents.length === 1 ? "" : "s") + (open ? "" : " · paused"); }
+    // Apply the open/closed axis to the DOM and the tail's own follow coupling — the shared body
+    // of the toggle handler and the automatic collapse/expand. Opening resumes following, closing
+    // pauses it (the tail's own state, not the campaign's).
+    function applyOpen(next) {
+      open = next; toggle.setAttribute("aria-expanded", String(open));
+      controls.hidden = !open; body.hidden = !open; footer.hidden = !open;
+      live = open; mark = buffer.length; if (!open) backlogEl.hidden = true;
+    }
     function render() {
       const view = tailView({ buffer, mark, live, issue, query, cap: RENDER_CAP });
       body.textContent = "";
@@ -757,7 +773,11 @@ export const LIVE_TAIL_SCRIPT = `  const tailEl = document.querySelector("[data-
     }
     function ingest(tail) {
       agents = (tail && tail.agents) || [];
-      tailEl.hidden = agents.length === 0;
+      // The pane stays in the layout (#330): instead of removing it, fold or unfold it. An
+      // automatic collapse (no agents) re-opens on the next agent and resumes following; a
+      // collapse the operator performed with the toggle persists (see tailCollapseIntent).
+      const intent = tailCollapseIntent({ agents: agents.length, open, manualCollapse });
+      if (intent.open !== open) applyOpen(intent.open);
       renderMenu(); renderSummary();
       const res = tailFresh((tail && tail.lines) || [], seen); seen = res.seen;
       // Grow the buffer past the cap only while explicitly paused with the pane open (a backlog
@@ -771,9 +791,10 @@ export const LIVE_TAIL_SCRIPT = `  const tailEl = document.querySelector("[data-
     }
     events.addEventListener("tail", (e) => { let m; try { m = JSON.parse(e.data); } catch (x) { return; } if (m && m.project === project) ingest(m.tail); });
     toggle.addEventListener("click", () => {
-      open = !open; toggle.setAttribute("aria-expanded", String(open)); controls.hidden = !open; body.hidden = !open; footer.hidden = !open;
-      // Opening starts following; closing pauses (the tail's own state, not the campaign's).
-      live = open; mark = buffer.length; if (!open) backlogEl.hidden = true;
+      applyOpen(!open);
+      // Record whose choice this collapse is: a manual fold sticks (an agent returning must not
+      // override it), a manual expand clears the flag so the pane auto-follows agents again (#330).
+      manualCollapse = !open;
       renderSummary(); render();
     });
     playBtn.addEventListener("click", () => { live = !live; mark = buffer.length; render(); });

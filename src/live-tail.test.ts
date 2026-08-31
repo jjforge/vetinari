@@ -498,11 +498,22 @@ test("renderLiveTail omits follow/pause and renders the dot idle for a static (n
   assert.match(stat, /data-tail-dot[^>]*data-state="idle"/);
 });
 
-test("renderLiveTail renders the pane hidden when no agent is running", () => {
+test("renderLiveTail renders the pane collapsed (present, not hidden) when no agent is running (#330)", () => {
   const html = renderLiveTail(statusWith([["203", "completed"], ["205", "parked"]]));
-  // Still emitted (so the client can reveal it when an agent starts) but hidden, and the
-  // vocabulary is ours — never the mockup's `queued`.
-  assert.match(html, /data-live-tail[^>]*\shidden/);
+  // The pane holds its space at all times now — never removed from the layout, so no `hidden`
+  // on the section (that would drop it and reflow everything below).
+  assert.doesNotMatch(html, /data-live-tail[^>]*\shidden/);
+  // It seeds collapsed instead: the toggle reports aria-expanded="false" and the controls,
+  // body and footer regions are hidden — exactly the state the toggle handler produces.
+  assert.match(html, /data-tail-toggle aria-expanded="false"/);
+  assert.match(html, /class="tail-controls" data-tail-controls hidden/);
+  assert.match(html, /class="tail-body" data-tail-body hidden/);
+  assert.match(html, /class="tail-footer" data-tail-footer hidden/);
+  // The resting summary reads "no agents running" — never "0 agents", never a " · paused" suffix.
+  assert.match(html, /data-tail-summary>no agents running</);
+  assert.doesNotMatch(html, /0 agent/);
+  assert.doesNotMatch(html, /· paused/);
+  // The vocabulary is ours — never the mockup's `queued`.
   assert.doesNotMatch(html, /queued/);
 });
 
@@ -561,6 +572,19 @@ test("renderStatusPage ships the tail styles and a client that reuses the archiv
   assert.doesNotMatch(html, /scrollTop = body\.scrollHeight/);
   assert.match(html, /"↑ " \+ view\.backlog/);
   assert.doesNotMatch(html, /"↓ " \+ view\.backlog/);
+});
+
+test("the tail client collapses the pane instead of removing it, and single-sources the collapse reducer (#330)", () => {
+  const html = renderStatusPage(statusWith([["204", "running"]]), {});
+  // The pane is never taken out of the layout on the client any more — the old
+  // `tailEl.hidden = agents.length === 0` full-removal is gone.
+  assert.doesNotMatch(html, /tailEl\.hidden/);
+  // The collapse/expand decision is the single-sourced pure reducer, so the browser runs the
+  // very function the node test pins.
+  assert.match(html, /function tailCollapseIntent/);
+  // The resting summary the client writes reads exactly "no agents running" — the same string
+  // the server seeds, so the first frame does not flicker the text.
+  assert.match(html, /"no agents running"/);
 });
 
 test("the tail client renders humanized-only rows in the shared .lv-row, keeping the raw NDJSON download (#221)", () => {

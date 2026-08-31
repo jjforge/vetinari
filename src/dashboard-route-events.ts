@@ -196,6 +196,23 @@ export const handleEvents: RouteHandler = (req, res, url, deps) => {
     }
   }
 
+  // Ring the grid on connect, symmetric with the tail's connect-seed above (#331). Every
+  // offset seeded to the log's current end assumes a connection means a fresh page load — true
+  // on first load, false on the `EventSource` auto-reconnect (`retry: 3000`) after a network
+  // blip or gateway restart, which seeds past everything written during the gap so those events
+  // are never delivered and the grid sits stale until the next append (many minutes away, or
+  // never). No client reads this frame's payload — both consumers re-fetch authoritative state
+  // on any unnamed frame — so one unconditional doorbell on connect heals a gap of any size from
+  // any cause, and also covers the render→connect window (events landing between the page render
+  // and this connect). It fires *last*, after every offset is seeded and every watcher armed, so
+  // there is no window an append could fall through: the ring covers up to seeding, the armed
+  // watcher covers everything after. A direct `res.write`, bypassing the debounce and denylist —
+  // it is not an append, and a gap may have hidden view-relevant events even if only noise landed
+  // last. One frame per connection (not per project): the landing page's `refresh()` has no
+  // single-flight latch and would fire N concurrent loads for N registered projects. The
+  // `{ project, events }` shape is kept, sent empty since nothing reads it.
+  if (!res.writableEnded) res.write(`data: ${JSON.stringify({ project: null, events: [] })}\n\n`);
+
   req.on("close", () => {
     for (const watcher of watchers) watcher.close();
     for (const timer of timers.values()) clearTimeout(timer);

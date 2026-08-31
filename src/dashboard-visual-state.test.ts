@@ -43,15 +43,17 @@ test("tallyDotClass stills a 0-running tally dot with idle but keeps the blue (�
 });
 
 
-test("freezeIntent ages the 'updated Ns ago' readout from now (#210)", () => {
+test("freezeIntent ages the 'last activity Ns ago' readout from now (#210, #337)", () => {
+  // The readout means page liveness — the last time any live surface visibly appended —
+  // so its word names that event, never grid freshness (#337).
   const intent = freezeIntent({ lastUpdate: 1000, now: 6000 });
-  assert.equal(intent.updatedText, "updated 5s ago");
+  assert.equal(intent.updatedText, "last activity 5s ago");
 });
 
-test("freezeIntent reads 'waiting for updates' before the first refresh (null lastUpdate)", () => {
-  // The landing opens with no lastUpdate; the campaign page seeds it to now instead.
+test("freezeIntent reads a quiet '—' before the first activity (null lastUpdate, #337)", () => {
+  // Both pages seed lastUpdate to null and show a dash until the first activity — no fake zero.
   const intent = freezeIntent({ lastUpdate: null, now: 5000 });
-  assert.equal(intent.updatedText, "waiting for updates");
+  assert.equal(intent.updatedText, "—");
 });
 
 test("redriveAllowed allows a redrive only for a stopped campaign whose lease is dead (design §7, §11, #325)", () => {

@@ -788,7 +788,7 @@ export const LIVE_TAIL_SCRIPT = `  const tailEl = document.querySelector("[data-
       // to reveal); following or collapsed keeps it bounded — reopening jumps to live anyway.
       if (res.fresh.length) buffer = tailAppend(buffer, res.fresh, live || !open, FOLLOW_CAP);
       // A visible append (pane open + following, with new lines) is a live-surface update:
-      // signal the live-bar to reset its "updated Ns ago" clock (#198). Buffered frames
+      // signal the live-bar to reset its "last activity Ns ago" clock (#198). Buffered frames
       // (collapsed, or the tail's own follow paused) present nothing new and stay silent.
       if (paneActivity({ appended: res.fresh.length, open, following: live })) window.dispatchEvent(new CustomEvent("vetinari:activity"));
       render();
@@ -957,7 +957,7 @@ export const HOST_LOG_SCRIPT = `  const hostLogRoot = document.querySelector("[d
       if (!panel.hidden) draw();
       updateBadge();
       // A visible append (the panel open) is a live-surface update: signal the live-bar to
-      // reset its "updated Ns ago" clock (#198). The host-log always shows newest-first, so
+      // reset its "last activity Ns ago" clock (#198). The host-log always shows newest-first, so
       // there is no follow to pause — visibility is just the panel; a closed panel stays
       // silent (the badge still signals).
       if (paneActivity({ appended: appended.length, open: !panel.hidden, following: true })) window.dispatchEvent(new CustomEvent("vetinari:activity"));

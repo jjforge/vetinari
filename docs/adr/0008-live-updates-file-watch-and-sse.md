@@ -48,7 +48,7 @@ being read — losing the events that landed during the pause would defeat the p
 ## Considered Options
 
 - **Client polls `/api/status` on an interval** — rejected: it reintroduces the
-  request/response cadence the "updated Ns ago" affordance is meant to replace, and
+  request/response cadence the "last activity Ns ago" affordance is meant to replace, and
   either wastes reads when nothing changed or lags when something did. The log
   files give an exact change signal for free.
 - **WebSocket** — rejected: the dashboard is server→client only; the client issues

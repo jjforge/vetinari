@@ -482,7 +482,7 @@ test("renderLandingShell wires live SSE updates and an updated-ago readout, no p
   const html = renderLandingShell(["alpha", "beta"]);
   // Subscribes to the one-way SSE stream and re-reads the landing as events land.
   assert.match(html, /new EventSource\("\/api\/events"\)/);
-  // A live indicator and an "updated Ns ago" readout live in the toolbar header.
+  // A live indicator and an "last activity Ns ago" readout live in the toolbar header.
   assert.match(html, /data-live-state/);
   assert.match(html, /data-updated/);
   // The page-level pause is gone (#210): no pause button, no paused-state page-level freeze.

@@ -2043,7 +2043,7 @@ test("renderStatusPage renders the landing live-bar top-right, not the old refre
   });
 
   // The live-bar replaces the fixed-interval Refresh widget: a dot-only live indicator and
-  // an "updated Ns ago" readout — the same shared control the landing renders (#81). The
+  // an "last activity Ns ago" readout — the same shared control the landing renders (#81). The
   // indicator shows no visible "Live" text (its state is an accessible label). The
   // page-level pause is gone (#210), so the bar carries no pause button; the settings gear
   // now rides the end of the bar after the readout (#215), so the readout no longer closes it.
@@ -2086,7 +2086,7 @@ test("renderStatusPage updates live off /api/events, soft-refreshing on a ping u
   // event always soft-refreshes.
   assert.doesNotMatch(html, /pauseBtn/);
   assert.doesNotMatch(html, /let paused/);
-  // The "updated Ns ago" readout is `freezeIntent`'s `updatedText` (dashboard-visual-state.ts,
+  // The "last activity Ns ago" readout is `freezeIntent`'s `updatedText` (dashboard-visual-state.ts,
   // asserted directly there), single-sourced into this page and written onto the readout.
   assert.match(html, /function freezeIntent/);
   assert.match(

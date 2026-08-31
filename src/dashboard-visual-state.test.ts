@@ -8,6 +8,7 @@ import {
   paneActivity,
   reasonWord,
   redriveAllowed,
+  resumeIntent,
   tallyDotClass,
 } from "./dashboard-visual-state.ts";
 import { reconstructIssueDetail } from "./dashboard-model.ts";
@@ -201,6 +202,25 @@ test("graftCarry carries the in-flight state so a shelling graft still reads as 
     invalid: false,
     busy: true,
   });
+});
+
+test("resumeIntent reconnects only after a hide longer than the threshold (#351)", () => {
+  // A backgrounded tab has its SSE connection silently closed by iOS ~20s in — no error
+  // event, readyState still OPEN — so a resume must decide to reconnect from how long the
+  // page was hidden, never from the (lying) stream state. The threshold sits below that
+  // ~20s window, so a hide past it always reconnects and a brief hide never does.
+  const now = 1_000_000;
+  // A page that was never hidden (no recorded hiddenAt) never reconnects — a page that was
+  // never backgrounded is unaffected.
+  assert.deepEqual(resumeIntent({ hiddenAt: null, now }), { reconnect: false });
+  // Hidden well past the threshold (the OS-close case) → reconnect.
+  assert.deepEqual(resumeIntent({ hiddenAt: now - 30_000, now }), { reconnect: true });
+  // Hidden only briefly (a desktop tab-flick) → no reconnect, so the connect ring's
+  // re-fetch cost is not paid on every glance away.
+  assert.deepEqual(resumeIntent({ hiddenAt: now - 2_000, now }), { reconnect: false });
+  // Exactly at the threshold does not yet reconnect; a hair past it does.
+  assert.deepEqual(resumeIntent({ hiddenAt: now - 10_000, now }), { reconnect: false });
+  assert.deepEqual(resumeIntent({ hiddenAt: now - 10_001, now }), { reconnect: true });
 });
 
 test("graftCarry carries nothing for an empty, untouched field (#329)", () => {

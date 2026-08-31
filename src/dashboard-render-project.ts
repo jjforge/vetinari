@@ -25,7 +25,7 @@ import {
   STATE_DOT_CSS,
   TOP_BAR_STYLES,
 } from "./dashboard-assets.ts";
-import { dotClass, freezeIntent, graftCarry, reasonWord, redriveAllowed } from "./dashboard-visual-state.ts";
+import { dotClass, freezeIntent, graftCarry, reasonWord, redriveAllowed, resumeIntent } from "./dashboard-visual-state.ts";
 import {
   escapeHtml,
   escapeTitle,
@@ -611,6 +611,12 @@ ${issueDetailSheetMarkup(Boolean(opts.prune))}${
   // what wireGraft restores onto the freshly-swapped node, so nothing typed/erroring/in-flight
   // is lost. Held here for both softRefresh (the capture) and wireGraft (the apply) to reach.
   ${graftCarry.toString()}
+  // The resume-reconnect reducer (dashboard-visual-state.ts, ADR 0012, #351), single-sourced
+  // the same way: a tab backgrounded past iOS's ~20s connection-close window comes back with a
+  // dead EventSource that never fires an error and keeps readyState OPEN, so no reconnect is
+  // attempted and the whole board freezes. This decides, from how long the page was hidden,
+  // whether a resume should force a fresh connection.
+  ${resumeIntent.toString()}
   let pendingGraftCarry = null;
   // A parked card's "waiting Nm" ages off its parkedAt, filled client-side so the
   // server render stays pure (mirrors the landing's fmtWaited).
@@ -664,8 +670,52 @@ ${issueDetailSheetMarkup(Boolean(opts.prune))}${
     } catch (e) {}
     refreshing = false;
   };
-  const events = new EventSource("/api/events");
-  events.onmessage = () => { softRefresh(); };
+  // A stable event bus the panes bind to once, at wiring time, and are never re-bound (#351).
+  // \`connect()\` owns the real EventSource and forwards its message/tail/host frames onto this
+  // bus; replacing a dead stream swaps the EventSource underneath while every closure the panes
+  // hold — the live-tail's per-issue high-water \`seen\` above all — survives untouched. Re-running
+  // the pane wiring would reset \`seen\` to {}, so the connect ring's re-seed snapshot would read
+  // as entirely fresh and the tail would duplicate itself; the bus is what prevents that.
+  const events = new EventTarget();
+  let stream = null;
+  // Single-flight latch: a \`pageshow\` and a \`visibilitychange\` both fire on one iOS resume,
+  // milliseconds apart, and both pass resumeIntent's threshold reading the same stale hiddenAt.
+  // The latch — mirroring softRefresh's \`refreshing\` — is what collapses them to one new stream,
+  // one connect ring and one re-fetch. Released when the fresh connection opens or errors.
+  let connecting = false;
+  const connect = () => {
+    if (connecting) return;
+    connecting = true;
+    // Explicitly drop the previous stream so a forced reconnect never leaves two live.
+    if (stream) stream.close();
+    const s = new EventSource("/api/events");
+    stream = s;
+    const release = () => { if (stream === s) connecting = false; };
+    s.onopen = release;
+    s.onerror = release;
+    // Forward each frame onto the bus verbatim (data preserved) so the panes' one-time
+    // listeners see it exactly as a direct EventSource binding would.
+    s.onmessage = (e) => events.dispatchEvent(new MessageEvent("message", { data: e.data }));
+    s.addEventListener("tail", (e) => events.dispatchEvent(new MessageEvent("tail", { data: e.data })));
+    s.addEventListener("host", (e) => events.dispatchEvent(new MessageEvent("host", { data: e.data })));
+  };
+  events.addEventListener("message", () => { softRefresh(); });
+  connect();
+  // Reconnect a stream the OS silently killed while the tab was backgrounded (#351). readyState
+  // and the error event both lie in this case, so the trigger is visibility, not stream state:
+  // stamp hiddenAt on hide, and on resume let resumeIntent decide from how long we were away.
+  // A brief hide never reconnects (the connect ring is not free); hiddenAt is left for the next
+  // hide to overwrite, so both resume triggers read the same value and the latch dedupes them.
+  // No direct softRefresh() here — the new connection's own ring already turns into one (#331).
+  let hiddenAt = null;
+  const onResume = () => { if (resumeIntent({ hiddenAt, now: Date.now() }).reconnect) connect(); };
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") hiddenAt = Date.now();
+    else onResume();
+  });
+  // pageshow covers a bfcache restore, where no visibilitychange may fire. Not focus (it fires
+  // constantly on desktop) and not online (a network blip does not imply a dead stream).
+  window.addEventListener("pageshow", onResume);
   // A live pane (the live-tail) that visibly appends is a co-equal update (#198): reset the
   // freshness clock so "updated Ns ago" reflects any live surface, not just a soft-refresh.
   window.addEventListener("vetinari:activity", () => { lastUpdate = Date.now(); renderUpdated(); });

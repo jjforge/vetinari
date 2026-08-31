@@ -142,6 +142,36 @@ export function graftCarry(captured: { ids: string; error: string; busy: boolean
 }
 
 /**
+ * Whether a page resurfacing from the background should reconnect its SSE stream (#351).
+ * On iOS 18+ a tab hidden more than ~20s has its connection silently closed by the OS with
+ * no `error` event and `readyState` still `1` (OPEN) — the stream is dead but nothing in the
+ * page can learn that by asking. So a resume decides purely from how long the page was
+ * hidden: `hiddenAt` is the wall-clock stamp taken when it went hidden (null if it was never
+ * hidden this session), `now` the resume moment. Both a `visibilitychange`→visible and a
+ * `pageshow` fire on one iOS resume and read the same stale `hiddenAt`, so both reach the same
+ * verdict here — a `connecting` latch, not this reducer, is what collapses them to one stream.
+ *
+ * Self-contained and browser-safe: single-sourced into both page scripts via
+ * `${resumeIntent.toString()}`, so the node test asserts the very function the browser runs.
+ */
+export function resumeIntent({
+  hiddenAt,
+  now,
+}: {
+  hiddenAt: number | null;
+  now: number;
+}): { reconnect: boolean } {
+  // Reconnect only past this hidden-duration. A reconnect is not free — the new connection
+  // trips #331's connect ring, costing a full page re-fetch and a tail re-seed (worst over
+  // the tailnet, ADR 0008) — so a brief desktop tab-flick must not pay it. Sized below the
+  // ~20s window in which iOS closes a backgrounded connection, so the error is always in the
+  // safe direction: an occasional needless reconnect, never a missed dead stream.
+  const RECONNECT_AFTER_MS = 10000;
+  if (hiddenAt == null) return { reconnect: false };
+  return { reconnect: now - hiddenAt > RECONNECT_AFTER_MS };
+}
+
+/**
  * The tally chip's dot-class fragment, with the idle rule (§5, #100): a running dot
  * pulses to signal work in flight, so a "0 running" tally — which has none — keeps the
  * blue but gets `idle` to still it. Only `running` at zero is idle; `parked`/`queued`

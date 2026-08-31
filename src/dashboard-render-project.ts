@@ -475,22 +475,25 @@ ${HOST_LOG_STYLES}
 ${ISSUE_DETAIL_SHEET_STYLES}
   .prune-fallback form { display: inline; }
   form button { padding: .5rem .8rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: var(--color-on-accent); cursor: pointer; font-weight: 700; }
-  /* The whole-campaign Redrive control (design §11, #325): a small control riding the
-     campaign summary row beside graft. The button is a control, so it takes the primary
-     accent (never a state colour); disabled it greys and the one-line reason reads beside it. */
+  /* The whole-campaign Redrive control (design §11, #325, #328): a small control riding the
+     campaign summary row beside graft. Redrive re-runs stopped work, so it is a risky action
+     (Appendix A) and its enabled button wears the risky-action coral, never the plain accent;
+     disabled it greys neutral and the one-line reason reads beside it — colour is never the only
+     channel, the disabled-with-reason and the confirm dialog are the load-bearing guards. */
   .redrive-control { display: inline-flex; align-items: center; gap: .5rem; }
-  .redrive-btn { padding: .35rem .7rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: var(--color-on-accent); cursor: pointer; font: inherit; font-size: .85rem; font-weight: 700; }
+  .redrive-btn { padding: .35rem .7rem; border: 0; border-radius: var(--border-radius); background: var(--color-red); color: var(--color-on-accent); cursor: pointer; font: inherit; font-size: .85rem; font-weight: 700; }
   .redrive-btn:disabled { background: none; border: 1px solid var(--color-secondary); color: var(--color-dim); cursor: default; }
   .redrive-reason { color: var(--color-text-light-2); font-size: .82rem; }
   /* The confirm dialog (Cancel the default): a modal naming exactly what the redrive will do
-     before any POST. A control, so its Confirm takes the primary accent, never a state colour. */
-  .redrive-dialog { border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); background: var(--color-card); color: var(--color-text); padding: 1rem 1.25rem; max-width: 32rem; box-shadow: 0 8px 22px #0006; }
+     before any POST. A risky confirmation, so it takes the 1px-outline confirmation treatment in
+     the risky-action coral and its Confirm the coral fill (§11, Appendix A). */
+  .redrive-dialog { border: 1px solid var(--color-red); border-radius: var(--border-radius-medium); background: var(--color-card); color: var(--color-text); padding: 1rem 1.25rem; max-width: 32rem; box-shadow: 0 8px 22px #0006; }
   .redrive-dialog::backdrop { background: #0009; }
   .redrive-dialog-text { margin: 0 0 1rem; }
   .redrive-dialog-text code { color: var(--color-text); }
   .redrive-dialog-actions { display: flex; justify-content: flex-end; gap: .75rem; margin: 0; }
   .redrive-cancel { padding: .5rem .9rem; border: 1px solid var(--color-secondary); border-radius: var(--border-radius); background: none; color: var(--color-text); cursor: pointer; font: inherit; font-weight: 700; }
-  .redrive-confirm { padding: .5rem .9rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: var(--color-on-accent); cursor: pointer; font: inherit; font-weight: 700; }
+  .redrive-confirm { padding: .5rem .9rem; border: 0; border-radius: var(--border-radius); background: var(--color-red); color: var(--color-on-accent); cursor: pointer; font: inherit; font-weight: 700; }
   /* The merge-conflict note (#171) is informational only — same amber edge, no action. */
   .conflict-note { background: var(--color-card); border: 1px solid var(--color-secondary); border-left: 3px solid var(--color-yellow); border-radius: var(--border-radius-medium); padding: .8rem 1rem; margin: 1rem 0; color: var(--color-text-light); box-shadow: 0 8px 22px #0004; }
   .conflict-note code { color: var(--color-text); }

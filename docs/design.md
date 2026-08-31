@@ -247,6 +247,7 @@ The dashboard is a read-mostly HTTP server over the registry (no gateway needed)
 - **Project page**: the campaign's waves and issue chips; parked cards lifted to the top; archived runs listed beneath, opening read-only.
 - **Issue sheet**: state and reason, elapsed, the turn log (the agent's one-line summaries), and exactly the issue-level moves the reason allows: reply (question/stalled) and prune. Each action POSTs to a route that shells the CLI verb in the project root; nothing is decided in the server.
 - **Campaign controls** live on the project page, never on an issue: **graft** while the campaign is unsettled, and **redrive** — a risky, whole-campaign action — rendered greyed-out with the reason unless it is safe (the campaign is stopped: `campaign-parked`, `campaign-failed` or crashed, and no campaign process for the project holds the lease) and confirmed in a dialog before it POSTs.
+- **Risky controls read risky.** A control that discards or re-runs work — prune and redrive — wears the risky-action coral (appendix A) on its enabled button and confirm surface; an additive control (graft) wears the plain accent. Colour is never the only channel: the confirm dialog and the disabled-with-reason state remain the load-bearing guards.
 - **Live tail**: per-agent activity projected from the agent's run stream, live-only.
 - **Terminal output** (the CLI's own view): human-readable lines only — plan, wave progress, stop reason, resume command. JSONL goes to the log file and to `--json`; it is never the default screen output.
 - **Live updates**: the server watches each project's logs directory and pushes SSE; the client patches in place. Every connection also rings the client once — an unnamed frame emitted on connect, after the offsets are seeded and the watchers armed, so the client re-fetches without waiting for the next append. This heals any gap the client was not listening across (a reconnect after a drop, or events landing between the page render and the stream opening); an offset seeded to the log's end covers only what arrives after, so without the ring a reconnect would seed past the gap and leave the grid stale until the next append. The ring is unconditional (first connect included) and one per connection, not per project. Because a backgrounded tab can have its stream silently closed by the OS with no error event and a lying `readyState`, the client does not trust the stream to notice: a page re-shown after being hidden longer than a short threshold forces a fresh connection, whose own ring then re-fetches and re-seeds — so the grid, tail and host pane all come back live without a manual reload; a briefly-hidden page does not reconnect. State → visual mapping is a set of pure reducers with node tests; colour follows state by one rule set (appendix A). Nothing animates except the running dot and the live indicator.
@@ -339,7 +340,7 @@ Described by behaviour; the tracker holds the numbers (`gh issue list --label ca
 
 ## Appendix A — dashboard colour rules
 
-Six states, one action, one accent; colour is always derived from state, never authored per element (`stateColor` and the one palette in `src/dashboard-assets.ts`, the `cardState` roll-up in `src/dashboard-model.ts`, the pure reducers in `src/dashboard-visual-state.ts`).
+Six states, one accent, and one action colour; colour is derived from state by one rule set, never authored per element (`stateColor` and the one palette in `src/dashboard-assets.ts`, the `cardState` roll-up in `src/dashboard-model.ts`, the pure reducers in `src/dashboard-visual-state.ts`) — with the single exception of the **risky-action** coral below, the one meaning-bearing colour attached to a *control* rather than a state.
 
 **The palette.** Every colour that carries meaning is one of these.
 
@@ -347,12 +348,14 @@ Six states, one action, one accent; colour is always derived from state, never a
 | -------------- | --------- | -------------------------------------------------- |
 | running        | `#6cb6ff` | blue; dot pulses while work is in flight           |
 | parked         | `#c8a24e` | amber; the only colour a "needs you" left edge takes |
-| failed         | `#f85149` | red (Primer `danger.fg`); distinct from the prune action's red |
+| failed         | `#f85149` | red (Primer `danger.fg`); distinct from the risky action's red |
 | unstarted      | `#5f6b78` | grey; also `idle`                                  |
 | completed      | `#3fb984` | green                                              |
 | pruned (badge) | `#a371f7` | purple; membership, not lifecycle                  |
-| prune action   | `#f79287` | coral; a control, never a state                    |
+| risky action   | `#f79287` | coral; a control, never a state                    |
 | accent         | `#3fb9b0` | teal; buttons, links, focus — never a state        |
+
+**The risky-action rule.** A risky action is one that discards or re-runs work — prune (drops an issue and its dependents) and redrive (re-runs a whole stopped campaign) — and its enabled button and its confirm surface wear the risky-action coral. An additive action wears the plain accent instead: graft is additive (a mis-graft is recoverable by pruning the grafted issue), so it stays teal. Colour is never the only channel — the confirm dialog and the disabled-with-reason state are the load-bearing guards.
 
 Neutral surfaces carry no meaning: card fill `#10151b`, panel/chip fill `#0b0e12`.
 

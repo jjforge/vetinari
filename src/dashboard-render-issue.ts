@@ -64,8 +64,10 @@ const isGraftable = (status: CampaignStatus) => status.waves.some((wave) => wave
  * shows the closure the selected project's own `prune <issue> --dry-run` printed,
  * behind a confirm form (preview-then-confirm parity, story 19/23). Confirming
  * shells `prune` in that project's root. Serves as the no-JS prune fallback. Colour
- * comes from the one shared palette (Appendix A): the card carries the amber 3px left
- * edge every "needs you" card takes, and the confirm button the prune coral it acts.
+ * comes from the one shared palette (Appendix A): a prune is a risky action, so its confirm
+ * card takes the 1px-outline confirmation treatment in the risky-action coral — no coloured
+ * left edge (that edge is reserved for amber "needs you") — and the confirm button the coral
+ * it acts (#328).
  */
 export const renderAggregatedPrunePreview = (project: string, target: string, previewText: string) => `<!doctype html>
 <html lang="en">
@@ -77,7 +79,7 @@ export const renderAggregatedPrunePreview = (project: string, target: string, pr
 ${DASHBOARD_PALETTE_CSS}
   body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 2rem; background: var(--color-body); color: var(--color-text); }
   h1 { letter-spacing: -0.035em; }
-  .card { background: var(--color-box-body); border: 1px solid var(--color-secondary); border-left: 3px solid var(--color-yellow); border-radius: var(--border-radius-medium); padding: 1rem 1.25rem; margin: 1rem 0; }
+  .card { background: var(--color-box-body); border: 1px solid var(--color-red); border-radius: var(--border-radius-medium); padding: 1rem 1.25rem; margin: 1rem 0; }
   pre { white-space: pre-wrap; margin: 0; }
   .actions { display: flex; gap: .75rem; align-items: center; }
   form { margin: 0; }
@@ -113,7 +115,7 @@ const GRAFT_REASON_TEXT: Record<GraftRejection["reason"], string> = {
  * retain them. The client lifts `[data-graft-verdicts]` to show it inline beside the
  * input; served whole it is the no-JS fallback. Colour comes from the one shared palette
  * (Appendix A): the card carries the amber 3px left edge every "needs you" card takes (the
- * single edge rule — never the prune coral), and each offender's reason reads the rejection red.
+ * single edge rule — never the risky-action coral), and each offender's reason reads the rejection red.
  */
 export const renderAggregatedGraftRejection = (project: string, closure: StructuredGraftClosure) => {
   const verdicts = closure.ids

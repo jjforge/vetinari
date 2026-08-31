@@ -153,6 +153,28 @@ test("renderStatusPage greys the Redrive control on a settled campaign — nothi
   assert.match(settled, /class="redrive-btn"[^>]*disabled/);
   assert.match(settled, /class="redrive-reason">the campaign is settled — nothing to redrive</);
 });
+test("the Redrive control reads the risky-action coral — enabled button, dialog outline and confirm (#328)", () => {
+  // Redrive discards/re-runs work, so it is a risky action (Appendix A): its enabled button and
+  // its confirm surface wear the risky-action coral (--color-red), not the plain teal accent a
+  // benign link wears. The greyed-unless-safe disabled state stays neutral — colour is never the
+  // only channel, the confirm dialog and the disabled-with-reason are the load-bearing guards.
+  const page = renderStatusPage(
+    {
+      project: "beta",
+      waves: [{ index: 0, status: "parked", reason: "red-base", issues: [{ issueNumber: "201", status: "completed" }] }],
+      parked: [],
+    },
+    { prune: true, graft: true, leaseLive: false, baseBranch: "main" },
+  );
+  // The enabled button wears coral.
+  assert.match(page, /\.redrive-btn \{[^}]*background: var\(--color-red\)/);
+  // Its disabled state stays neutral (the grey greyed-out control), untouched.
+  assert.match(page, /\.redrive-btn:disabled \{[^}]*border: 1px solid var\(--color-secondary\)/);
+  // The confirm dialog is the 1px-outline confirmation treatment, in coral.
+  assert.match(page, /\.redrive-dialog \{[^}]*border: 1px solid var\(--color-red\)/);
+  // The Confirm button wears coral too.
+  assert.match(page, /\.redrive-confirm \{[^}]*background: var\(--color-red\)/);
+});
 test("renderStatusPage puts a quiet graft input on the summary line, greyed at rest (#202, #168)", () => {
   const runningCampaign = {
     project: "beta",

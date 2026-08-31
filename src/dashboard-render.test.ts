@@ -208,13 +208,13 @@ test("both pages share one set of status-dot rules, scoped to .dot so a state ne
   assert.doesNotMatch(campaign, /\n\s*\.completed \{ background/);
   assert.doesNotMatch(campaign, /\n\s*\.parked \{ background/);
 });
-test("failure renders in its own red on every surface, never the prune action's red (#83)", () => {
+test("failure renders in its own red on every surface, never the risky action's red (#83)", () => {
   const landing = renderLandingShell(["alpha"]);
   const campaign = renderStatusPage(
     { project: "beta", waves: [], parked: [] },
     { prune: true },
   );
-  // The failed state derives --color-failure from stateColor, distinct from the prune action's own
+  // The failed state derives --color-failure from stateColor, distinct from the risky action's own
   // --color-red (the value distinction is asserted in the stateColor test). Here we confirm each
   // surface splices that failed colour in — the feed dot (the log-view's `failure` dot-state), the
   // card edge, the run-state pill, and the turn number — never re-pinning the token.
@@ -229,8 +229,8 @@ test("failure renders in its own red on every surface, never the prune action's 
     ISSUE_DETAIL_SHEET_STYLES.includes(`.turn-num.failed { color: ${failed}; }`),
   );
   // The prune confirm/cancel keep --color-red — a control's own red, never the failure state.
-  // (The Prune button itself now shares the one teal .sheet-btn move style, #307; the red marks
-  // the destructive confirm step.)
+  // (Prune is a risky action, so its enabled button wears the risky-action coral too, #328; the
+  // red here marks the destructive confirm step.)
   assert.match(
     ISSUE_DETAIL_SHEET_STYLES,
     /\.prune-confirm-btn[^{]*\{[^}]*var\(--color-red\)/,

@@ -18,7 +18,7 @@ import { humanizeHostLine, LOG_DOT_STATE_COLOR, splitOverflow } from "./log-view
  * landing, the repo/campaign page, and the issue-detail sheet they share. No
  * surface defines a colour locally, so a token can never be "defined in one root,
  * missing in the other" (the #78 class of bug). Every colour that carries meaning
- * is one of the six ADR-0007 states or the prune action (§1); the teal
+ * is one of the six ADR-0007 states or the risky action (§1); the teal
  * `--color-primary` is the product accent and is never a state.
  */
 export const DASHBOARD_PALETTE_CSS = `  :root {
@@ -33,9 +33,9 @@ export const DASHBOARD_PALETTE_CSS = `  :root {
     --color-blue: #6cb6ff; --color-yellow: #c8a24e; --color-failure: #f85149; --color-green: #3fb984; --color-pruned: #a371f7;
     /* State colours at 40% alpha — the muted chip borders (§4) */
     --color-blue-40: rgb(108 182 255 / 40%); --color-yellow-40: rgb(200 162 78 / 40%); --color-failure-40: rgb(248 81 73 / 40%); --color-green-40: rgb(63 185 132 / 40%); --color-pruned-40: rgb(163 113 247 / 40%); --color-dim-40: rgb(95 107 120 / 40%);
-    /* Prune action — a control, never a state; a different red from failure (§1) */
+    /* Risky action (prune, redrive) — a control, never a state; a different red from failure (§1, #328) */
     --color-red: #f79287;
-    /* The dark ink for text on a bright (accent/prune) button — the one on-bright colour, so
+    /* The dark ink for text on a bright (accent/risky-action) button — the one on-bright colour, so
        no button hand-authors its own foreground hex (§1). */
     --color-on-accent: #04110f;
     --border-radius: 9px; --border-radius-medium: 12px;
@@ -180,11 +180,15 @@ export const TOP_BAR_STYLES = `  .page-top { display: flex; align-items: center;
 export const ISSUE_DETAIL_SHEET_STYLES = `  .prune-panel { display: flex; align-items: center; gap: .5rem; }
   /* A flex display beats the UA [hidden] rule, so the prune panel needs it back explicitly. */
   .prune-panel[hidden] { display: none; }
-  /* One button style across the sheet's moves (#307): Reply, Redrive and Prune share the
-     teal product-accent action button — a control, never a state (§1). */
+  /* One button base across the sheet's moves (#307): Reply and Prune share the sheet-btn shape.
+     Reply is additive, so it keeps the plain teal product-accent — a control, never a state (§1). */
   .sheet-btn { min-height: 44px; padding: .5rem 1rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: var(--color-on-accent); font: inherit; font-weight: 700; line-height: 1; cursor: pointer; }
+  /* Prune discards work, so it is a risky action (#328, Appendix A): its enabled button wears the
+     risky-action coral over the shared teal — colour is never the only channel, the confirm step
+     is the load-bearing guard. */
+  .prune-start { background: var(--color-red); }
   /* The prune flow's confirm/cancel stay their own affordances: the destructive confirm in
-     the prune red, cancel a neutral out. */
+     the risky-action coral, cancel a neutral out. */
   .prune-confirm-btn, .prune-cancel { padding: .35rem .7rem; border: 1px solid var(--color-red); border-radius: 999px; background: rgb(247 146 135 / 12%); color: var(--color-red); font: inherit; line-height: 1; cursor: pointer; }
   .prune-cancel { border-color: var(--color-secondary); background: none; color: var(--color-text-light-2); }
   .prune-confirm { display: flex; align-items: center; gap: .5rem; margin: 0; }

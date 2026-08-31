@@ -36,6 +36,7 @@ Within a milestone each bold section label appears at most once.
 - [ops] A `run` or `answer` that throws before its container starts — a worktree-preflight failure or an unreachable tracker — now logs one `failed` verdict with the detail to the event log before exiting non-zero, instead of dying with a bare stack trace and no verdict (#341).
 - [user] A redrive of a crashed campaign member now resumes its interrupted session on the existing branch when the provider is resumable and the branch already carries committed work, rather than re-running it from scratch; a member with no commits, or a non-resumable provider, still runs fresh (#341).
 - [user] A standalone `run` in flight no longer refuses a second `run` for a different issue, an `answer`, or a `redrive` in the same project as "a campaign is already running" — the host lease now records whether it is a campaign or a standalone run, and the campaign-liveness guard matches only a live campaign (#342).
+- [user] The summary-line graft control now keeps its state across a live-region refresh: typed-but-unsubmitted issue ids, an inline validation error, and an in-flight `grafting…` graft all survive a log event landing mid-edit instead of being silently emptied (#329).
 
 ### Collected changes — August 30, 2026
 

@@ -938,15 +938,34 @@ export const HOST_LOG_SCRIPT = `  const hostLogRoot = document.querySelector("[d
       if (paneActivity({ appended: appended.length, open: !panel.hidden, following: true })) window.dispatchEvent(new CustomEvent("vetinari:activity"));
     };
     events.addEventListener("host", (e) => { let m; try { m = JSON.parse(e.data); } catch (x) { return; } ingest((m && m.lines) || []); });
-    // The initial window is the no-daemon host-log read (readHostLog), newest-first already.
-    // Append it behind any rows a live frame already delivered so a frame racing this fetch
-    // isn't clobbered; the fetch rows are the older backlog, so newest-first order holds.
-    fetch("/api/host-log").then((r) => (r.ok ? r.json() : { lines: [] })).then((d) => {
-      lines = lines.concat((d && d.lines) || []);
-      if (lines.length > HOST_WINDOW) lines = lines.slice(0, HOST_WINDOW);
-      if (!panel.hidden) draw();
-      updateBadge();
-    }).catch(() => {});
+    // Re-read the bounded window from the no-daemon host-log read (readHostLog), newest-first
+    // already. \`replace\` swaps the whole buffer — the connect heal (#352), safe because the pane
+    // has no follow/pause state and the badge counts from this same buffer, so it self-corrects.
+    // Otherwise the fetched rows land *behind* any a live frame already delivered so a frame
+    // racing the fetch isn't clobbered (the fetch rows are the older backlog). A generation token
+    // means the newest backfill wins if a connect ring races the wiring fetch on a fresh load, so
+    // the load never double-counts the window.
+    let backfillGen = 0;
+    const backfill = (replace) => {
+      const gen = ++backfillGen;
+      fetch("/api/host-log").then((r) => (r.ok ? r.json() : { lines: [] })).then((d) => {
+        if (gen !== backfillGen) return;
+        const win = (d && d.lines) || [];
+        lines = replace ? win : lines.concat(win);
+        if (lines.length > HOST_WINDOW) lines = lines.slice(0, HOST_WINDOW);
+        if (!panel.hidden) draw();
+        updateBadge();
+      }).catch(() => {});
+    };
+    // #331's connect ring is the only unnamed frame (project === null); named append frames never
+    // fire "message". Every connection — first load and every EventSource reconnect after a blip —
+    // re-reads the window and replaces the buffer, healing lines written while the stream was down
+    // and the render→connect gap in one rule (#352). No renderer changes: both assign onmessage as
+    // a property, so this added listener coexists with the grid's connect refresh.
+    events.addEventListener("message", (e) => { let m; try { m = JSON.parse(e.data); } catch (x) { return; } if (m && m.project === null) backfill(true); });
+    // The wiring-time backfill fills the pane immediately, before the connect ring's extra round
+    // trip lands; it appends behind live rows rather than replacing, so a load-time race holds.
+    backfill(false);
   }`;
 
 /**

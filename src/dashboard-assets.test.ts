@@ -28,22 +28,29 @@ test("the card/chip colour rules are landed as a normative doc that pins the pal
   ]) {
     assert.ok(doc.includes(hex), `the design appendix pins ${hex}`);
   }
-  // And it states the roll-up precedence (§2.4's `failed > parked` order — the prune
+  // And it states the roll-up precedence (§2.4's `failed > parked` order — the risky
   // action red never means a state) and the teal-is-not-a-state rule.
   assert.match(doc, /failed > parked > running > completed > unstarted/);
   assert.match(doc, /never a state/);
+  // The action colour is named after the property (risk), not one verb: the palette row is
+  // `risky action`, generalised from prune to every risky control (redrive too) (#328).
+  assert.match(doc, /risky action/);
+  assert.doesNotMatch(doc, /prune action/);
+  // The membership rule that decides who wears it: discards-or-re-runs is risky, additive is
+  // the plain accent (so graft stays teal).
+  assert.match(doc, /discards or re-runs work/);
 });
 
 test("the dashboard palette is one shared source defining every state token at its spec hex (#83)", () => {
-  // §1: the six ADR-0007 states plus the prune action, each at its exact hex.
+  // §1: the six ADR-0007 states plus the risky action, each at its exact hex.
   assert.match(DASHBOARD_PALETTE_CSS, /--color-blue: #6cb6ff/); // running
   assert.match(DASHBOARD_PALETTE_CSS, /--color-yellow: #c8a24e/); // parked
   assert.match(DASHBOARD_PALETTE_CSS, /--color-failure: #f85149/); // failure — distinct red
   assert.match(DASHBOARD_PALETTE_CSS, /--color-dim: #5f6b78/); // unstarted / idle grey
   assert.match(DASHBOARD_PALETTE_CSS, /--color-green: #3fb984/); // completed
   assert.match(DASHBOARD_PALETTE_CSS, /--color-pruned: #a371f7/); // pruned
-  assert.match(DASHBOARD_PALETTE_CSS, /--color-red: #f79287/); // prune action — a control, never a state
-  // The prune action and the failure state are deliberately different reds.
+  assert.match(DASHBOARD_PALETTE_CSS, /--color-red: #f79287/); // risky action — a control, never a state
+  // The risky action and the failure state are deliberately different reds.
   assert.notEqual("#f85149", "#f79287");
   // The teal product accent is present but is not a state colour.
   assert.match(DASHBOARD_PALETTE_CSS, /--color-primary: #3fb9b0/);
@@ -110,6 +117,16 @@ test("the issue-detail sheet carries the issue's state on its top edge only (§2
   );
 });
 
+test("the sheet's Prune wears the risky-action coral while Reply keeps the plain accent (#328)", () => {
+  // Prune discards work, so it is a risky action (Appendix A): its enabled button reads the
+  // risky-action coral over the shared sheet-btn teal. Reply is additive, so it keeps the plain
+  // teal accent — the shared .sheet-btn base — with no coral override.
+  assert.match(ISSUE_DETAIL_SHEET_STYLES, /\.sheet-btn \{[^}]*background: var\(--color-primary\)/);
+  assert.match(ISSUE_DETAIL_SHEET_STYLES, /\.prune-start \{[^}]*background: var\(--color-red\)/);
+  // The confirm button stays the coral it already acts (unchanged).
+  assert.match(ISSUE_DETAIL_SHEET_STYLES, /\.prune-confirm-btn[^{]*\{[^}]*var\(--color-red\)/);
+});
+
 test("the issue sheet prints the park reason as a word beside the state, single-sourcing reasonWord (#317)", () => {
   // The sheet single-sources the one `reasonWord` mapping into the browser via .toString()
   // and prints it beside the state, so a parked{red-base} sheet reads "parked · red base"
@@ -121,7 +138,7 @@ test("the issue sheet prints the park reason as a word beside the state, single-
   );
 });
 
-test("stateColor is the single state→colour derivation, failure distinct from the prune action (#83)", () => {
+test("stateColor is the single state→colour derivation, failure distinct from the risky action (#83)", () => {
   // §3: every state derives its colour here, never a per-instance hex.
   assert.equal(stateColor("running"), "var(--color-blue)");
   assert.equal(stateColor("parked"), "var(--color-yellow)");
@@ -131,7 +148,7 @@ test("stateColor is the single state→colour derivation, failure distinct from 
   assert.equal(stateColor("unstarted"), "var(--color-dim)");
   assert.equal(stateColor("queued"), "var(--color-dim)");
   assert.equal(stateColor("idle"), "var(--color-dim)");
-  // failure has its own token, distinct from the prune action's --color-red (§1).
+  // failure has its own token, distinct from the risky action's --color-red (§1).
   assert.equal(stateColor("failure"), "var(--color-failure)");
   assert.notEqual(stateColor("failure"), "var(--color-red)");
 });

@@ -259,6 +259,25 @@ test("HOST_LOG_SCRIPT wires the host-log pane: gear show/hide, badge off isNotab
   assert.match(HOST_LOG_SCRIPT, /No host log yet/);
 });
 
+test("HOST_LOG_SCRIPT heals the buffer on the connect ring: re-fetch + replace, once per connection (#352)", () => {
+  // #331's ring is the only unnamed frame (project === null); named append frames never fire
+  // "message", so the pane binds its own listener beside the "host" one — neither renderer changes.
+  assert.match(HOST_LOG_SCRIPT, /events\.addEventListener\("message"/);
+  // The connect handler guards on the ring's project === null and re-reads the window, replacing
+  // the buffer so lines written while the stream was down (or between render and connect) heal in.
+  assert.match(HOST_LOG_SCRIPT, /m\.project === null/);
+  // The heal goes through the existing no-daemon /api/host-log read — no new frame type, no dedupe.
+  assert.match(HOST_LOG_SCRIPT, /const backfill = \(replace\) =>/);
+  assert.match(HOST_LOG_SCRIPT, /backfill\(true\)/); // connect: replace the buffer
+  assert.match(HOST_LOG_SCRIPT, /backfill\(false\)/); // wiring-time: append behind live rows
+  // On replace the buffer is swapped, not concatenated (a concat would double a legitimately
+  // repeated line); on the wiring path the fetched rows stay behind any racing live frame.
+  assert.match(HOST_LOG_SCRIPT, /lines = replace \? win : lines\.concat\(win\)/);
+  // A generation token means the newest backfill wins if a connect ring races the wiring fetch on
+  // a fresh load, so the load never double-counts the window.
+  assert.match(HOST_LOG_SCRIPT, /if \(gen !== backfillGen\) return;/);
+});
+
 test("HOST_LOG_SCRIPT renders humanized-only rows, keeping the raw NDJSON Download JSON control (#221)", () => {
   // Ships the host humanizer via .toString() (not a hand-mirrored copy).
   assert.match(HOST_LOG_SCRIPT, /function humanizeHostLine/);

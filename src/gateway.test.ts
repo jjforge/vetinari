@@ -11,6 +11,7 @@ import {
   drainOutbox,
   formatGatewayStatus,
   formatParkAnnouncement,
+  formatPrunePreview,
   handlePruneCommand,
   isStatusCommand,
   loadGatewayProjects,
@@ -542,6 +543,15 @@ test("formatParkAnnouncement names the reason and its recovery move for a non-an
   assert.doesNotMatch(text, /reply/i, "a red-base park is not resolved by a reply");
 });
 
+test("formatPrunePreview uses the notice skeleton: header, closure, confirm instruction", () => {
+  const text = formatPrunePreview("jjforge", "640", "would drop #640, #641");
+
+  const [header, closure, confirm] = text.split("\n\n");
+  assert.match(header, /^✂️ jjforge · PRUNE · #640$/, "header is <emoji> <project> · <STATE> · <context>");
+  assert.equal(closure, "would drop #640, #641", "the project's computed closure is the signal line");
+  assert.match(confirm, /Reply "yes" to this message to prune\./, "the exact confirm instruction is the tail");
+});
+
 const statusIssue = (over: Partial<StatusIssue> = {}): StatusIssue => ({ issueNumber: "1", status: "completed", ...over });
 const statusWave = (index: number, status: StatusWave["status"], issues: StatusIssue[] = []): StatusWave => ({ index, status, issues });
 const parkedIssue = (over: Partial<CampaignStatus["parked"][number]> = {}) => ({
@@ -831,7 +841,14 @@ test("handlePruneCommand previews the closure and records a pending confirm keye
     "the resolved project's prune is previewed for the named issue",
   );
   assert.equal(sends.length, 1, "exactly the preview is sent");
-  assert.match(sends[0].text, /would drop #640, #641/);
+  // The preview rides the notice skeleton: a header naming the resolved project and
+  // the issue — so a bare `prune 640` on a shared bot names what it resolved to —
+  // then the closure the project computed, then the confirm instruction.
+  const [header, closure, confirm] = sends[0].text.split("\n\n");
+  assert.match(header, /^✂️ alpha · PRUNE · #640$/, "the header names the resolved project and issue");
+  assert.match(closure, /would drop #640, #641/, "the closure the project computed is kept");
+  assert.match(confirm, /Reply "yes" to this message to prune\./, "the confirm instruction is the tail");
+  assert.doesNotMatch(sends[0].text, /^would drop/, "it no longer leads with the child's raw stdout");
   // The preview's message id (500, the first send) carries the pending confirm.
   assert.deepEqual(pending.resolve("botA", 500)?.issue, "640");
 });

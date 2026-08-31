@@ -1,4 +1,4 @@
-import { dotClass, freezeIntent, tallyDotClass } from "./dashboard-visual-state.ts";
+import { dotClass, freezeIntent, resumeIntent, tallyDotClass } from "./dashboard-visual-state.ts";
 import { splitOverflow } from "./log-view.ts";
 import {
   DASHBOARD_PALETTE_CSS,
@@ -266,6 +266,11 @@ ${issueDetailSheetMarkup(true)}
   ${dotClass.toString()}
   ${tallyDotClass.toString()}
   ${freezeIntent.toString()}
+  // The resume-reconnect reducer (dashboard-visual-state.ts, ADR 0012, #351), single-sourced
+  // into the browser via .toString() so the node test runs the very function this page ships:
+  // a tab backgrounded past iOS's ~20s connection-close window returns with a dead EventSource
+  // that never fires error and keeps readyState OPEN, freezing the board until a manual reload.
+  ${resumeIntent.toString()}
   const fmtWave = (w) => (w ? "Wave " + w.current + " of " + w.total : "idle");
   const fmtWaited = (iso) => {
     const ms = Date.now() - new Date(iso).getTime();
@@ -494,8 +499,41 @@ ${REPO_DROPDOWN_SCRIPT}
   // Refresh both the landing and the cross-project feed on every live tick, so the
   // feed (#55) stays current alongside the cards.
   const refresh = async () => { await Promise.all([load(), loadFeed()]); lastUpdate = Date.now(); renderUpdated(); };
-  const events = new EventSource("/api/events");
-  events.onmessage = () => { refresh(); };
+  // A stable event bus the host-log pane binds to once (its host/message listeners in
+  // HOST_LOG_SCRIPT) and is never re-bound (#351); \`connect()\` owns the real EventSource and
+  // forwards its frames onto the bus, so a forced reconnect swaps the dead stream underneath
+  // while the pane's bindings — and thus its #331/#352 connect-ring heal — survive untouched.
+  const events = new EventTarget();
+  let stream = null;
+  // Single-flight latch: pageshow and visibilitychange both fire on one iOS resume and both
+  // pass resumeIntent's threshold, so the latch collapses them to one new stream and one heal.
+  let connecting = false;
+  const connect = () => {
+    if (connecting) return;
+    connecting = true;
+    if (stream) stream.close();
+    const s = new EventSource("/api/events");
+    stream = s;
+    const release = () => { if (stream === s) connecting = false; };
+    s.onopen = release;
+    s.onerror = release;
+    s.onmessage = (e) => events.dispatchEvent(new MessageEvent("message", { data: e.data }));
+    s.addEventListener("host", (e) => events.dispatchEvent(new MessageEvent("host", { data: e.data })));
+  };
+  events.addEventListener("message", () => { refresh(); });
+  connect();
+  // Reconnect a stream the OS silently killed while the tab was backgrounded (#351): readyState
+  // and the error event both lie in that case, so the trigger is visibility, not stream state.
+  // Stamp hiddenAt on hide; on resume resumeIntent decides from how long we were away. A brief
+  // hide never reconnects; both resume triggers read the same hiddenAt and the latch dedupes.
+  let hiddenAt = null;
+  const onResume = () => { if (resumeIntent({ hiddenAt, now: Date.now() }).reconnect) connect(); };
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") hiddenAt = Date.now();
+    else onResume();
+  });
+  // pageshow covers a bfcache restore, where no visibilitychange may fire.
+  window.addEventListener("pageshow", onResume);
   // A live pane (the host-log) that visibly appends is a co-equal update (#198): reset the
   // freshness clock so "updated Ns ago" reflects any live surface, not just a feed refresh.
   window.addEventListener("vetinari:activity", () => { lastUpdate = Date.now(); renderUpdated(); });

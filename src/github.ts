@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import type { Finding, FindingContext } from "./findings.ts";
+import type { Exclusion } from "./plan.ts";
 
 const gh = (args: string[]) => execFileSync("gh", args, { encoding: "utf8" });
 
@@ -17,9 +18,11 @@ const gh = (args: string[]) => execFileSync("gh", args, { encoding: "utf8" });
  * and outside the selection is dropped as unreachable — and every follow-up campaign
  * stalls waiting on the previous one's issues being closed by hand. So the blocker's
  * labels are requested alongside its state, and a `pending-verify` one is treated as
- * satisfied — but **named**, not silently dropped: each is logged one line so the drop
- * surfaces in the plan's provenance (the same edge-log contract `githubIssuesByLabel`
- * uses, so `campaign --dry-run` shows it rather than the dependent vanishing).
+ * satisfied — but **named**, not silently dropped: each drop is both logged one line
+ * and pushed to the optional `onExcluded` sink the planner passes, so it surfaces in the
+ * plan's provenance text (an `Excluded:` section) rather than only on stderr — the same
+ * data channel `githubIssuesByLabel` uses. The sink is optional so `prune`/`graft`, which
+ * call this seam without one, are unaffected.
  *
  * Cross-repo blockers are dropped too (silently): a campaign is a set of ids in one
  * repo, so a blocker in another repo could not be one of them anyway. `run`/`log` are
@@ -32,7 +35,7 @@ export const githubBlockedBy =
     run: (args: string[]) => string = gh,
     log: (line: string) => void = console.error,
   ) =>
-  (id: string): string[] => {
+  (id: string, onExcluded?: (e: Exclusion) => void): string[] => {
     const num = id.replace(/^#/, "").trim();
     const out = run([
       "api",
@@ -53,6 +56,10 @@ export const githubBlockedBy =
         log(
           `[vetinari] #${num} — blocker #${r.number} pending-verify, treated as satisfied`,
         );
+        onExcluded?.({
+          id: String(r.number),
+          reason: `pending-verify blocker of #${num}, treated as satisfied`,
+        });
         continue;
       }
       blockers.push(String(r.number));
@@ -101,10 +108,11 @@ export const githubFetchTask =
  * work), design §4 step 1. A `pending-verify` issue is dropped too: it is merged on the
  * base awaiting a human's local verification and close (`docs/issue-conventions.md`),
  * so the work is already done — scheduling it cuts a fresh branch from a base that
- * already contains it and the agent parks `stalled/no-commit`. Each exclusion is logged
- * one line so the operator sees why the count is smaller than the label's — and, since
- * `campaign --dry-run <label>` expands the label through this seam, that line surfaces
- * in the plan's provenance rather than the issue being silently omitted.
+ * already contains it and the agent parks `stalled/no-commit`. Each exclusion is both
+ * logged one line and pushed to the optional `onExcluded` sink `expandSelection` passes,
+ * so it surfaces in the plan's provenance text (an `Excluded:` section) rather than only
+ * on stderr — the operator sees why the count is smaller than the label's even when the
+ * plan is piped or captured.
  *
  * This is the label-expansion axis only: an explicit id list never reaches this seam
  * (`expandSelection` passes numeric tokens straight through), so an operator who names
@@ -119,7 +127,7 @@ export const githubIssuesByLabel =
     run: (args: string[]) => string = gh,
     log: (line: string) => void = console.error,
   ) =>
-  (label: string): string[] => {
+  (label: string, onExcluded?: (e: Exclusion) => void): string[] => {
     const out = run([
       "issue",
       "list",
@@ -142,10 +150,12 @@ export const githubIssuesByLabel =
       if (r.number == null) continue;
       if (r.issueType?.name?.toLowerCase() === "epic") {
         log(`[vetinari] #${r.number} — epic, not work (carries "${label}", not scheduled)`);
+        onExcluded?.({ id: String(r.number), reason: "epic, not work" });
         continue;
       }
       if (r.labels?.some((l) => l?.name === "pending-verify")) {
         log(`[vetinari] #${r.number} — pending-verify, already merged (carries "${label}", not scheduled)`);
+        onExcluded?.({ id: String(r.number), reason: "pending-verify, already merged" });
         continue;
       }
       ids.push(String(r.number));

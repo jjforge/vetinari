@@ -23,7 +23,7 @@ import type { build, baseline, campaign, tgTest, requireTelegram, CampaignOutcom
 import type { runLoop, Outcome } from "./loop.ts";
 import type { answerParked, hasParked, listParked } from "./state.ts";
 import type { archiveRun } from "./archive.ts";
-import type { UnderspecifiedPrompt } from "./plan.ts";
+import type { Exclusion, UnderspecifiedPrompt } from "./plan.ts";
 import type {
   expandSelection,
   runCampaignPlan,
@@ -501,9 +501,11 @@ async function dispatchCampaign(
   }
 
   // Default (and --dry-run): expand any labels to a flat id set, then PLAN it into
-  // dependency-ordered, file-disjoint waves.
+  // dependency-ordered, file-disjoint waves. The epic/pending-verify drops the label
+  // expansion makes are collected here so the planner names them in the provenance (#343).
   const tokens = cmd.positional.flatMap((a) => a.split(/[\s,]+/)).filter(Boolean);
-  const ids = await deps.expandSelection(tokens, cfg.listByLabel);
+  const excluded: Exclusion[] = [];
+  const ids = await deps.expandSelection(tokens, cfg.listByLabel, (e) => excluded.push(e));
   if (!ids.length) {
     reporter.line("campaign: nothing to run — the selection expanded to no open issues.");
     return;
@@ -513,6 +515,7 @@ async function dispatchCampaign(
     ids,
     { onUnderspecified: cmd.onUnderspecified },
     { isTTY: deps.isTTY, ask: deps.askUnderspecified },
+    excluded,
   );
 
   if (cmd.dryRun) {

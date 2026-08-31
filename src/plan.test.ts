@@ -21,7 +21,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaultFileSet } from "./fileset.ts";
 import type { FileSet } from "./fileset.ts";
-import { githubBlockedBy } from "./github.ts";
+import { githubBlockedBy, githubIssuesByLabel } from "./github.ts";
+import type { Exclusion } from "./plan.ts";
 
 // A fake OPEN-blocked-by resolver from a plain edge map: id -> its open blockers.
 // (Closed blockers never reach the resolver — they are filtered at the edge — so
@@ -53,6 +54,43 @@ test("expandSelection unions mixed id and label tokens, de-duplicated in first-s
     await expandSelection(["436", "ready-for-agent", "640"], listByLabel),
     ["436", "611", "640"],
   );
+});
+
+test("expandSelection reports the resolver's label exclusions to the onExcluded sink, keeping the work (#343)", async () => {
+  // Composed with the REAL githubIssuesByLabel: an Epic and a pending-verify row are
+  // dropped at the edge; each surfaces to the sink as data, not only a stderr log.
+  const run = () =>
+    JSON.stringify([
+      { number: 282, issueType: { name: "Epic" } },
+      { number: 322, labels: [{ name: "pending-verify" }] },
+      { number: 611, issueType: { name: "Task" } },
+    ]);
+  const listByLabel = githubIssuesByLabel("jjforge/vetinari", run, () => {});
+  const excluded: Exclusion[] = [];
+  const ids = await expandSelection(
+    ["campaign:vocabulary"],
+    listByLabel,
+    (e) => excluded.push(e),
+  );
+
+  assert.deepEqual(ids, ["611"]);
+  assert.deepEqual(excluded, [
+    { id: "282", reason: "epic, not work" },
+    { id: "322", reason: "pending-verify, already merged" },
+  ]);
+});
+
+test("runCampaignPlan folds expansion exclusions into the provenance's Excluded section (#343)", async () => {
+  const report = await runCampaignPlan(
+    cfgFrom({ "611": JSON.stringify({ body: "Touches: a.ts" }) }),
+    ["611"],
+    {},
+    { isTTY: false, ask: () => "fail" },
+    [{ id: "282", reason: "epic, not work" }],
+  );
+
+  assert.match(report.report, /Excluded/);
+  assert.match(report.report, /#282.*epic, not work/);
 });
 
 test("expandSelection fails naming the missing seam when a label is passed without listByLabel", async () => {
@@ -525,6 +563,34 @@ test("describePlan explains each ticket's wave and lists what was dropped", asyn
   assert.doesNotMatch(report, /wave \d+\s+#701/);
 });
 
+test("describePlan lists resolver exclusions in an Excluded section, each id and why (#343)", () => {
+  // The epic and pending-verify drops the resolvers make — data on the plan, not
+  // only a stderr edge log — so a piped or captured plan keeps the explanation.
+  const report = describePlan({
+    waves: [["611"]],
+    placements: [{ id: "611", wave: 0, after: [] }],
+    unreachable: [],
+    excluded: [
+      { id: "282", reason: "epic, not work" },
+      { id: "313", reason: "pending-verify blocker of #316, treated as satisfied" },
+    ],
+  });
+
+  assert.match(report, /Excluded/);
+  assert.match(report, /#282.*epic, not work/);
+  assert.match(report, /#313.*pending-verify.*satisfied/);
+});
+
+test("describePlan omits the Excluded section when nothing was excluded", () => {
+  const report = describePlan({
+    waves: [["611"]],
+    placements: [{ id: "611", wave: 0, after: [] }],
+    unreachable: [],
+    excluded: [],
+  });
+  assert.doesNotMatch(report, /Excluded/);
+});
+
 test("describePlan explains why a ticket was spilled to a later sub-wave", async () => {
   const layered = await layerWaves(["a", "b", "c"], openBlockedByFrom({}));
   const plan = partitionWaves(
@@ -763,7 +829,11 @@ test("a pending-verify blocker outside the selection is named in the provenance,
   // #316 is scheduled after its still-open in-set blocker #314 — not dropped as unreachable.
   assert.deepEqual(report.waves, [["314"], ["316"]]);
   assert.match(report.report, /wave 1.*#316.*#314/);
-  // The provenance names the satisfied blocker, never silently.
+  // The provenance text itself names the satisfied blocker in an Excluded section —
+  // so a piped or captured plan keeps the explanation, not only the stderr edge log (#343).
+  assert.match(report.report, /Excluded/);
+  assert.match(report.report, /#313.*pending-verify.*satisfied/);
+  // The stderr edge log may stay; it still names the drop, never silently.
   assert.equal(logs.length, 1);
   assert.match(
     logs[0],

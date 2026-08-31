@@ -326,6 +326,11 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
   issueDetail.addEventListener("click", (event) => { if (event.target === issueDetail) closeSheet(); });
   // Reassigned by the prune block when prune is enabled; a no-op otherwise.
   let onOpenIssue = () => {};
+  // The single #reply-text box is reused for every issue, so a draft typed for one issue
+  // would otherwise sit in the box when the sheet binds another — and post to that other
+  // issue's taskId (#349). Track which issue the box is bound to (project + number) and
+  // empty it on an actual switch; closing and reopening the same issue keeps the draft.
+  let boundIssueKey = null;
   // The issue-level moves a state allows (design §11, #307, #325), gated through the one
   // issueMoves rule:
   // - reply (question/stall): the hoisted title + elapsed, the full question, the offered
@@ -431,6 +436,11 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
     }
   };
   const openIssue = async (project, issue, prunable, run) => {
+    // Clear the reply draft only when the box binds a different issue, so text written for
+    // one issue can never post as another's answer (#349).
+    const issueKey = project + "#" + issue;
+    if (boundIssueKey !== issueKey) replyText.value = "";
+    boundIssueKey = issueKey;
     issueDetail.hidden = false;
     issueDetail.classList.add("show");
     detailNum.textContent = "#" + issue;

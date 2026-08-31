@@ -333,3 +333,22 @@ test("HOST_LOG_SCRIPT wires the Festive Wave Names toggle to the cookie + reload
   assert.match(HOST_LOG_SCRIPT, /document\.cookie = /);
   assert.match(HOST_LOG_SCRIPT, /location\.reload\(\)/);
 });
+
+test("openIssue clears the reply draft only when the sheet binds a different issue, so one issue's text can't post as another's answer (#349)", () => {
+  // The sheet reuses one static #reply-text box for every issue. Binding a new issue
+  // rebinds the hidden taskId, so a stale draft would post to the wrong issue — the box
+  // must empty on an actual issue switch. The bound issue is keyed by project + number.
+  assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /const issueKey = project \+ "#" \+ issue/);
+  // The clear is conditional on the key changing — closing and reopening the SAME issue
+  // keeps the draft; only a switch to a different issue empties the box.
+  assert.match(
+    ISSUE_DETAIL_SHEET_SCRIPT,
+    /if \(boundIssueKey !== issueKey\) replyText\.value = ""/,
+  );
+  // closeSheet stays a pure dismiss (class + hidden) — clearing there would drop a draft
+  // when the operator closes to check something and reopens the same issue.
+  assert.match(
+    ISSUE_DETAIL_SHEET_SCRIPT,
+    /const closeSheet = \(\) => \{ issueDetail\.classList\.remove\("show"\); issueDetail\.hidden = true; \};/,
+  );
+});

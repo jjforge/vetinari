@@ -2060,15 +2060,8 @@ test("renderStatusPage updates live off /api/events, soft-refreshing on a ping u
   assert.match(html, /DOMParser/);
   assert.match(html, /getElementById\("live-region"\)/);
   assert.match(html, /softRefresh\(\)/);
-  // Guarded: a reply being composed in any textarea freezes the refresh so it is never lost.
-  assert.match(html, /const isComposing = \(\) =>/);
-  assert.match(
-    html,
-    /el === document\.activeElement \|\| el\.value\.trim\(\) !== ""/,
-  );
-  assert.match(html, /if \(isComposing\(\)\) return;/);
   // The page-level pause is gone (#210): no pause button, no paused/buffered state — a live
-  // event always soft-refreshes unless composing.
+  // event always soft-refreshes.
   assert.doesNotMatch(html, /pauseBtn/);
   assert.doesNotMatch(html, /let paused/);
   // The "updated Ns ago" readout is `freezeIntent`'s `updatedText` (dashboard-visual-state.ts,

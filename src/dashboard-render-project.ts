@@ -623,10 +623,6 @@ ${issueDetailSheetMarkup(Boolean(opts.prune))}${
     if (hrs < 24) return hrs + "h";
     return Math.floor(hrs / 24) + "d";
   };
-  // A reply being composed anywhere (a parked card's sheet reply) must never be lost
-  // to a live refresh; this guards it the way the old full-reload one did.
-  const isComposing = () =>
-    [...document.querySelectorAll("textarea")].some((el) => el === document.activeElement || el.value.trim() !== "");
   const updatedEl = document.querySelector("[data-updated]");
   let lastUpdate = Date.now();
   // freezeIntent (dashboard-visual-state.ts) decides the readout; the glue only writes it.
@@ -636,8 +632,7 @@ ${issueDetailSheetMarkup(Boolean(opts.prune))}${
   // campaign meta and wave grid) — the issue sheet, its open reply/compose, the repo
   // dropdown, the archived-runs list and the scroll position all live outside it and are
   // left untouched. A full-page reload blanked the page and lost scroll/compose state,
-  // worst over the tailnet. Guarded (never mid-compose) and single-flighted so overlapping
-  // ticks can't race.
+  // worst over the tailnet. Single-flighted so overlapping ticks can't race.
   let refreshing = false;
   const softRefresh = async () => {
     if (refreshing) return;
@@ -670,11 +665,7 @@ ${issueDetailSheetMarkup(Boolean(opts.prune))}${
     refreshing = false;
   };
   const events = new EventSource("/api/events");
-  events.onmessage = () => {
-    // Skip while mid-compose so a reply-in-progress is never lost; the next event refreshes.
-    if (isComposing()) return;
-    softRefresh();
-  };
+  events.onmessage = () => { softRefresh(); };
   // A live pane (the live-tail) that visibly appends is a co-equal update (#198): reset the
   // freshness clock so "updated Ns ago" reflects any live surface, not just a soft-refresh.
   window.addEventListener("vetinari:activity", () => { lastUpdate = Date.now(); renderUpdated(); });

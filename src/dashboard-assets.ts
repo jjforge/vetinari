@@ -1046,6 +1046,22 @@ export const GRAFT_SCRIPT = `  function graftVerdicts(closure) {
       }
     });
     sync();
+    // Carry the outgoing control's operator state across the soft-refresh swap (#329): the
+    // graftCarry reducer (dashboard-visual-state.ts) already decided — from the node that was
+    // replaced — what to restore; this applies it to the freshly-wired node. pendingGraftCarry
+    // is the page-script hand-off softRefresh set immediately before the swap; null on the
+    // first wire and every non-refresh re-bind, so an empty at-rest form is left untouched.
+    if (pendingGraftCarry) {
+      const carry = pendingGraftCarry;
+      pendingGraftCarry = null;
+      if (carry.ids) ids.value = carry.ids;
+      invalid = carry.invalid;
+      if (carry.error) showErr(carry.error);
+      // sync() sets the active/disabled state from the restored ids + invalid flag; a carried
+      // in-flight graft then re-enters the busy look, which holds the button disabled over it.
+      sync();
+      if (carry.busy) { busy = true; enterFlight(); }
+    }
   }`;
 
 /**

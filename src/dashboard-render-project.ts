@@ -25,7 +25,7 @@ import {
   STATE_DOT_CSS,
   TOP_BAR_STYLES,
 } from "./dashboard-assets.ts";
-import { dotClass, freezeIntent, reasonWord, redriveAllowed } from "./dashboard-visual-state.ts";
+import { dotClass, freezeIntent, graftCarry, reasonWord, redriveAllowed } from "./dashboard-visual-state.ts";
 import {
   escapeHtml,
   escapeTitle,
@@ -606,6 +606,12 @@ ${issueDetailSheetMarkup(Boolean(opts.prune))}${
   // a named function (a no-op when none is applied).
   const __name = (fn) => fn;
   ${freezeIntent.toString()}
+  // The graft carry-over reducer (dashboard-visual-state.ts, ADR 0012, #329), single-sourced
+  // the same way: the soft-refresh captures the outgoing graft control's state and this decides
+  // what wireGraft restores onto the freshly-swapped node, so nothing typed/erroring/in-flight
+  // is lost. Held here for both softRefresh (the capture) and wireGraft (the apply) to reach.
+  ${graftCarry.toString()}
+  let pendingGraftCarry = null;
   // A parked card's "waiting Nm" ages off its parkedAt, filled client-side so the
   // server render stays pure (mirrors the landing's fmtWaited).
   const fmtWaited = (iso) => {
@@ -640,7 +646,24 @@ ${issueDetailSheetMarkup(Boolean(opts.prune))}${
       const res = await fetch(location.href);
       const next = new DOMParser().parseFromString(await res.text(), "text/html").getElementById("live-region");
       const current = document.getElementById("live-region");
-      if (next && current) { current.replaceWith(next); wireLiveRegion(); }
+      if (next && current) {
+        // Capture the graft control's operator state *immediately before* the swap (#329) —
+        // not before the re-fetch above, so an id typed while the fetch was in flight is the
+        // value seen here. graftCarry decides what wireGraft restores onto the fresh node.
+        const graftForm = current.querySelector("[data-graft]");
+        pendingGraftCarry = null;
+        if (graftForm) {
+          const gIds = graftForm.querySelector("[data-graft-ids]");
+          const gErr = graftForm.querySelector("[data-graft-error]");
+          pendingGraftCarry = graftCarry({
+            ids: gIds ? gIds.value : "",
+            error: gErr && !gErr.hidden ? gErr.textContent : "",
+            busy: graftForm.hasAttribute("aria-busy"),
+          });
+        }
+        current.replaceWith(next);
+        wireLiveRegion();
+      }
       lastUpdate = Date.now();
       renderUpdated();
     } catch (e) {}

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   dotClass,
   freezeIntent,
+  graftCarry,
   issueMoves,
   paneActivity,
   reasonWord,
@@ -148,4 +149,73 @@ test("paneActivity ignores appends the pane doesn't show — collapsed or follow
   assert.equal(paneActivity({ appended: 5, open: false, following: true }), false);
   assert.equal(paneActivity({ appended: 5, open: true, following: false }), false);
   assert.equal(paneActivity({ appended: 5, open: false, following: false }), false);
+});
+
+test("graftCarry carries ids typed but not yet submitted across the swap (#329)", () => {
+  // The soft-refresh swaps #live-region whole and the server renders the ids input with no
+  // value, so the fresh node arrives empty; graftCarry decides that the typed ids are put back.
+  assert.deepEqual(graftCarry({ ids: "101 102", error: "", busy: false }), {
+    ids: "101 102",
+    error: "",
+    invalid: false,
+    busy: false,
+  });
+});
+
+test("graftCarry carries the value captured at replace-time, so ids typed during the fetch window win (#329)", () => {
+  // The refresh re-fetches the page, then swaps the node. If ids are captured before the
+  // fetch, an id typed while it was in flight is clobbered; captured immediately before the
+  // swap, the later value is what graftCarry is handed — and it carries exactly that. The
+  // reducer is a faithful function of its input, so the later capture wins over the earlier.
+  const earlier = graftCarry({ ids: "101 102", error: "", busy: false });
+  const later = graftCarry({ ids: "101 102 103", error: "", busy: false });
+  assert.equal(earlier.ids, "101 102");
+  assert.equal(later.ids, "101 102 103");
+  assert.notEqual(later.ids, earlier.ids);
+});
+
+test("graftCarry carries an inline error alongside its ids and keeps the submit disabled (#329)", () => {
+  // A blur validation showing an error for the typed ids survives the swap with the same
+  // text, and invalid is set so the fresh submit stays disabled for the same reason.
+  assert.deepEqual(graftCarry({ ids: "101 999", error: "#999 — not found", busy: false }), {
+    ids: "101 999",
+    error: "#999 — not found",
+    invalid: true,
+    busy: false,
+  });
+});
+
+test("graftCarry carries the in-flight state so a shelling graft still reads as busy after the swap (#329, #327)", () => {
+  // While a graft POST is shelling the form is aria-busy and the button reads "grafting…";
+  // a refresh landing then must not reset it to an at-rest form — the operator loses the
+  // only signal their graft was accepted. busy is carried whether or not ids remain.
+  assert.deepEqual(graftCarry({ ids: "101 102", error: "", busy: true }), {
+    ids: "101 102",
+    error: "",
+    invalid: false,
+    busy: true,
+  });
+  assert.deepEqual(graftCarry({ ids: "", error: "", busy: true }), {
+    ids: "",
+    error: "",
+    invalid: false,
+    busy: true,
+  });
+});
+
+test("graftCarry carries nothing for an empty, untouched field (#329)", () => {
+  // An empty field with no graft in flight is left exactly as the server rendered it —
+  // nothing is restored that was not there. Whitespace-only counts as empty.
+  assert.deepEqual(graftCarry({ ids: "", error: "", busy: false }), {
+    ids: "",
+    error: "",
+    invalid: false,
+    busy: false,
+  });
+  assert.deepEqual(graftCarry({ ids: "   ", error: "", busy: false }), {
+    ids: "",
+    error: "",
+    invalid: false,
+    busy: false,
+  });
 });

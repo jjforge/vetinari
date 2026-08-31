@@ -611,6 +611,7 @@ await dispatch(parseArgs([mode, ...rest]), {
   },
   selectAgent,
   isCampaignChild: !!process.env.VETINARI_CHILD,
+  resumeSession: process.env.VETINARI_RESUME_SESSION,
   archiveLeftoverRun,
   archiveIfIdle,
   askUnderspecified,

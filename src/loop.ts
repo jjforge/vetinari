@@ -86,6 +86,15 @@ export const answerPromptFor = (text: string) =>
   `Answer from the human to your question:\n\n${text}\n\nContinue the work. The signal contract is unchanged: ${DONE} when done, ${BLOCKED} if blocked again — and end this turn with a <turn-summary> line as before.`;
 
 /**
+ * The prompt a crash redrive resumes a member's interrupted session with (design §7): the
+ * process died mid-turn before it reported a result, so its own prior work is already committed
+ * on this branch. Nudge the resumed session to pick that work back up — the signal contract is
+ * unchanged, so a resumed run reaches green (or parks) exactly as a live one would.
+ */
+export const crashResumePrompt = () =>
+  `Your previous session on this task was interrupted before it reported a result. Your earlier work is already committed on this branch — continue from where it left off. The signal contract is unchanged: ${DONE} when done, ${BLOCKED} if blocked — and end this turn with a <turn-summary> line as before.`;
+
+/**
  * The GitHub-issue comment a non-resumable park→answer relays (this issue / #212):
  * a marked disclaimer so it is never mistaken for spec, the agent's parked question
  * echoed for context, then the human's answer. The fresh run's `fetchTask` re-reads
@@ -177,6 +186,7 @@ async function harvestFindings(cfg: ResolvedConfig, sbx: Sandbox, sessionId: str
  * slot for it. Omitted only by in-process tests that drive the loop without a lease.
  */
 export async function runLoop(cfg: ResolvedConfig, taskId: string, host?: HostBudget, entry?: ResumeEntry, deps: LoopDeps = defaultLoopDeps): Promise<Outcome> {
+ try {
   // Whether the loop resumes a session between turns (claude/pi/codex) or re-enters each
   // turn as a fresh run (copilot/cursor/opencode carry no durable session) — ADR 0016 / #212.
   const { resumable, provider } = agentSelectionFor(cfg);
@@ -317,12 +327,10 @@ export async function runLoop(cfg: ResolvedConfig, taskId: string, host?: HostBu
           await park(cfg, { taskId, reason: "stalled", detail: "idle", sessionId: err?.sessionId, branch: sbx.branch, question: "Agent stalled without emitting a signal." });
           return "parked";
         }
-        // Anything else thrown is a terminal failure, not a park (design §3 step 9): log a
-        // `failed` verdict — with the detail — so even a standalone run leaves one on the log,
-        // then return `failed`. cli-dispatch maps that to exit 1; under a campaign the child's
-        // non-zero exit is what the parent folds to `campaign-failed`.
-        cfg.log.log("failed", { taskId, detail: String(err?.message ?? err) });
-        return "failed";
+        // Anything else thrown is a terminal failure, not a park (design §3 step 9): re-throw
+        // so the single outer catch logs one `failed` verdict — the same verdict a throw before
+        // the container (preflight, fetchTask, sandbox creation) now gets.
+        throw err;
       }
     } finally {
       const closed = await sbx.close();
@@ -332,7 +340,19 @@ export async function runLoop(cfg: ResolvedConfig, taskId: string, host?: HostBu
 
   // A standalone run or answer holds one host slot around the container's life (design §3
   // step 1, §8); a campaign child never does — its parent already holds a slot for it.
-  return host && !process.env.VETINARI_CHILD
+  // `await` so a rejection lands in the outer catch below rather than escaping as an
+  // unlogged promise (design §3 step 9).
+  return await (host && !process.env.VETINARI_CHILD
     ? withHostSlot(host, cfg.project, runContainer)
-    : runContainer();
+    : runContainer());
+ } catch (err: any) {
+  // Design §3 step 9 — any throw logs `failed` and exits 1. This one outer catch covers every
+  // path before and around the container: the parked-answer preflight, `fetchTask`, sandbox
+  // creation (a worktree-preflight throw), and a container turn re-thrown from the inner handler.
+  // So even a standalone run leaves one `failed` verdict with `detail` on the log rather than
+  // exiting with a bare stack trace; cli-dispatch maps `failed` to exit 1, and under a campaign
+  // the child's non-zero exit is what the parent folds to `campaign-failed`.
+  cfg.log.log("failed", { taskId, detail: String(err?.message ?? err) });
+  return "failed";
+ }
 }

@@ -36,6 +36,19 @@ function branchAlreadyMerged(branch: string): boolean {
   return gitTry(["merge-base", "--is-ancestor", branch, "HEAD"]).code === 0;
 }
 
+/**
+ * Does `taskId`'s agent branch carry any commit beyond the base — banked work a crash left
+ * behind? True only when the ref exists and `baseBranch..branch` is non-empty. Lets a redrive
+ * tell a crashed member with committed work (resume its session, design §7) from one that never
+ * got started (treat as unstarted → a fresh run). A missing ref or a git failure reads false, so
+ * an unverifiable branch degrades to a fresh run rather than a resume onto nothing.
+ */
+export function branchHasCommits(cfg: { baseBranch: string; branchPrefix: string }, taskId: string): boolean {
+  const branch = `${cfg.branchPrefix}${taskId}`;
+  const r = gitTry(["rev-list", "--count", `${cfg.baseBranch}..${branch}`]);
+  return r.code === 0 && Number(r.stdout.trim()) > 0;
+}
+
 export interface IntegrateResult {
   merged: string[];
   /**

@@ -318,9 +318,19 @@ test("dispatch run selects the agent, archives the leftover, runs the loop, maps
   await dispatch({ kind: "run", agent: { provider: "codex" }, args: ["436"], json: false }, deps);
   assert.deepEqual((deps.selectAgent as any).calls, [[deps.cfg, { provider: "codex" }]]);
   assert.equal((deps.archiveLeftoverRun as any).calls.length, 1);
-  // The loop is handed the host budget so it holds one slot around the container (design §8).
-  assert.deepEqual((deps.runLoop as any).calls, [[deps.cfg, "436", deps.host]]);
+  // The loop is handed the host budget so it holds one slot around the container (design §8), and
+  // no resume entry for a fresh run (no VETINARI_RESUME_SESSION → undefined).
+  assert.deepEqual((deps.runLoop as any).calls, [[deps.cfg, "436", deps.host, undefined]]);
   assert.deepEqual(exitCodes, [0]);
+});
+
+test("dispatch run resumes a crashed session when spawned with one (design §7): the loop gets a resume entry", async () => {
+  const { deps } = makeDeps({ resumeSession: "sess-436" });
+  await dispatch({ kind: "run", agent: {}, args: ["436"], json: false }, deps);
+  const call = (deps.runLoop as any).calls[0];
+  assert.deepEqual(call.slice(0, 3), [deps.cfg, "436", deps.host]);
+  assert.equal(call[3].resumeSessionId, "sess-436", "the crashed session is resumed on the existing branch");
+  assert.match(call[3].answerPrompt, /interrupted before it reported a result/);
 });
 
 test("dispatch run refuses with one line naming the project and exits non-zero when a campaign lease is live (§5 step 3, §8)", async () => {

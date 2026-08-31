@@ -13,6 +13,7 @@ import {
   childSpawnEnv,
   conflictParkedNotice,
   markMergedIssues,
+  reconcileResumeWave,
   strandedConflictNotice,
   queue,
   requireTelegram,
@@ -820,6 +821,142 @@ test("redrive re-runs a parked member whose parked record is gone (a crash, no r
 
   assert.equal(ok, "done");
   assert.deepEqual(spawned, ["102"], "the recordless park re-ran — 101 was banked, not respawned");
+});
+
+test("reconcileResumeWave resumes a crashed member's session and runs the rest fresh (design §7)", () => {
+  // 101 banked (completed), 102 a recordless crash with a resumable session on a branch with
+  // commits, 103 unstarted. Only the crash carries a session out; the fresh runs carry none.
+  const outcomes = new Map<string, string>([
+    ["101", "completed"],
+    ["102", "parked"],
+    ["103", "unstarted"],
+  ]);
+  const resumeSessionFor = (id: string) => (id === "102" ? "sess-102" : undefined);
+  const { toRun, pre, resume } = reconcileResumeWave(
+    ["101", "102", "103"],
+    outcomes,
+    () => false, // 102's record is gone — a crash holds nothing
+    false,
+    new Set(),
+    resumeSessionFor,
+  );
+
+  assert.deepEqual(pre, { "101": "green" }, "the banked member is handed to integration");
+  assert.deepEqual(toRun, ["102", "103"], "the crash and the unstarted member both run");
+  assert.deepEqual(resume, { "102": "sess-102" }, "only the crash resumes its session; the unstarted runs fresh");
+});
+
+test("reconcileResumeWave runs a crashed member fresh when its session cannot be resumed — no commits / non-resumable (design §7)", () => {
+  // The resolver yields nothing (no commits on the branch, or a non-resumable provider): the
+  // crash still re-runs, but fresh — no session in the resume map.
+  const { toRun, resume } = reconcileResumeWave(
+    ["102"],
+    new Map([["102", "parked"]]),
+    () => false,
+    false,
+    new Set(),
+    () => undefined,
+  );
+
+  assert.deepEqual(toRun, ["102"], "the crash re-runs");
+  assert.deepEqual(resume, {}, "with no resumable session it runs fresh");
+});
+
+test("reconcileResumeWave never resumes an answered park or a --override failed re-run (design §7)", () => {
+  // The resolver would happily hand a session to either, but the reconciler only consults it on
+  // the crash/unstarted spawn paths: an answered park re-runs via its own record, and a failed
+  // --override re-run is an explicit fresh start.
+  const outcomes = new Map<string, string>([
+    ["201", "parked"], // answered park — record present, so parkHoldsWave is false but it is NOT a crash
+    ["202", "failed"],
+  ]);
+  const { toRun, resume } = reconcileResumeWave(
+    ["201", "202"],
+    outcomes,
+    () => false,
+    true, // --override
+    new Set(),
+    () => "SHOULD-NOT-BE-USED",
+  );
+
+  assert.deepEqual(toRun.sort(), ["201", "202"], "both re-run");
+  assert.deepEqual(resume, { "201": "SHOULD-NOT-BE-USED" }, "the resolver alone gates: the campaign returns undefined for an answered park, never the failed re-run");
+});
+
+// Seed a wave-0 crash for 102 that recorded a session before the process died: 101 merged green,
+// 102 spawned and finished a turn (session on the log) then the campaign process vanished — a
+// crash, reconciled to parked{crash} with no on-disk record.
+const seedCrashWithSession = (cfg: ResolvedConfig) => {
+  cfg.log.log("campaign-start", { waves: [["101", "102"]], slots: 4 });
+  cfg.log.log("wave-start", { index: 0, tasks: ["101", "102"] });
+  cfg.log.log("green", { taskId: "101", branch: "agent/101", commits: ["a"] });
+  cfg.log.log("spawn", { taskId: "102", running: 1, left: 0 });
+  cfg.log.log("turn", { taskId: "102", turn: 0, sessionId: "sess-102", summary: "" });
+  cfg.log.log("campaign-parked", { index: 0, detail: "crash" });
+};
+
+// A recordingDeps whose spawnRun captures the resume session each spawn was handed, and whose
+// branch-commits probe is stubbed (no real git in the harness).
+const resumeCapturingDeps = (
+  cfg: ResolvedConfig,
+  spawns: { id: string; resume?: string }[],
+  branchHasCommits: (cfg: ResolvedConfig, id: string) => boolean,
+): CampaignDeps => ({
+  spawnRun: async (id, resume) => {
+    spawns.push({ id, resume });
+    return 0;
+  },
+  integrate: async (_cfg, greens) => ({ merged: greens, conflictParked: [] }),
+  collectChangelog: () => ({ collected: [], committed: false }),
+  currentBranch: () => cfg.baseBranch,
+  grace: async () => {},
+  branchHasCommits,
+});
+
+test("redrive resumes a crashed member's session when the provider is resumable and the branch has commits (design §7)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-resume-"));
+  const cfg = harnessCfg(dir); // no agent → claude, resumable
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  seedCrashWithSession(cfg);
+
+  const spawns: { id: string; resume?: string }[] = [];
+  const ok = await silenceConsole(() =>
+    campaign(cfg, [], host, undefined, { resume: true }, resumeCapturingDeps(cfg, spawns, () => true)),
+  );
+
+  assert.equal(ok, "done");
+  assert.deepEqual(spawns, [{ id: "102", resume: "sess-102" }], "the crash re-ran resuming its recorded session");
+});
+
+test("redrive runs a crashed member fresh when its branch has no commits (design §7)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-nocommits-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  seedCrashWithSession(cfg);
+
+  const spawns: { id: string; resume?: string }[] = [];
+  const ok = await silenceConsole(() =>
+    campaign(cfg, [], host, undefined, { resume: true }, resumeCapturingDeps(cfg, spawns, () => false)),
+  );
+
+  assert.equal(ok, "done");
+  assert.deepEqual(spawns, [{ id: "102", resume: undefined }], "no commits on the branch → a fresh run, no session resumed");
+});
+
+test("redrive runs a crashed member fresh when the provider is non-resumable, even with commits (design §7)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-nonresumable-"));
+  const cfg = harnessCfg(dir);
+  (cfg as { agent?: unknown }).agent = { provider: "copilot" }; // non-resumable
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  seedCrashWithSession(cfg);
+
+  const spawns: { id: string; resume?: string }[] = [];
+  const ok = await silenceConsole(() =>
+    campaign(cfg, [], host, undefined, { resume: true }, resumeCapturingDeps(cfg, spawns, () => true)),
+  );
+
+  assert.equal(ok, "done");
+  assert.deepEqual(spawns, [{ id: "102", resume: undefined }], "a non-resumable provider carries no session across a crash → a fresh run");
 });
 
 test("redrive re-runs a parked member whose record is ANSWERED, consuming the answer, and lands the rest (design §5 step 3, §7)", async () => {

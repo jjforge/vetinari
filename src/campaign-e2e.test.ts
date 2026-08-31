@@ -7,8 +7,8 @@ import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import { loggerForRun } from "./log.ts";
 import { readEventLog } from "./event-log.ts";
-import { answerParked, listParked } from "./state.ts";
-import { BLOCKED, DONE, defaultLoopDeps, runLoop, type LoopDeps } from "./loop.ts";
+import { answerParked, clearParked, listParked } from "./state.ts";
+import { BLOCKED, crashResumePrompt, DONE, defaultLoopDeps, runLoop, type LoopDeps } from "./loop.ts";
 import { campaign, type CampaignDeps, type RunSpawner } from "./modes.ts";
 import { collectWaveChangelog, currentBranch, integrateGreens } from "./merge.ts";
 import { runGates } from "./gate.ts";
@@ -141,10 +141,15 @@ const localCampaignDeps = (
   scriptFor: (id: string) => LocalAgentScript,
   spawns: string[] = [],
 ): CampaignDeps => {
-  const spawnRun: RunSpawner = async (taskId) => {
+  const spawnRun: RunSpawner = async (taskId, resumeSession) => {
     spawns.push(taskId);
+    // A crash redrive hands the crashed session id (design §7): the child `run` resumes it on the
+    // existing branch with the continue-where-you-left-off prompt. Every other spawn gets none.
+    const entry = resumeSession
+      ? { resumeSessionId: resumeSession, answerPrompt: crashResumePrompt() }
+      : undefined;
     try {
-      const outcome = await runLoop(cfg, taskId, undefined, undefined, loopDepsFor(scriptFor(taskId)));
+      const outcome = await runLoop(cfg, taskId, undefined, entry, loopDepsFor(scriptFor(taskId)));
       // Mirror the real child `run`'s exit code (cli-dispatch's `exitCodeFor`): 0 green, 2
       // parked, 1 failed — the loop now returns `failed` for a thrown turn rather than
       // rethrowing (design §3 step 9), so the child exits 1 without spawnRun's catch.
@@ -511,5 +516,55 @@ test("scenario 2: a question park drains its wave, campaign parks and exits; an 
     assert.equal(gitOut(dir, ["show", "base:impl-102.txt"]), "impl for 102");
     const events = readEventLog(cfg);
     assert.ok(events.some((e) => e.event === "campaign-done"), "the campaign advanced to done");
+  });
+});
+
+// A member that commits its work then crashes mid-turn: its first turn writes and commits (so the
+// branch banks a commit and a session lands on the log), then the process dies before a verdict.
+// On resume it observes the crash prompt and greens with the already-banked commit. `seen` records
+// the session id each resume was driven on, so the test can prove it resumed vs re-ran fresh.
+const crashThenResumeScript = (seen: string[]) => (id: string): LocalAgentScript => (turn) => {
+  const resume = turn.opts.resumeSession as string | undefined;
+  if (resume) {
+    seen.push(resume);
+    return { signal: DONE, stdout: `<turn-summary>resumed ${id} from a crash</turn-summary>` };
+  }
+  turn.write(`impl-${id}.txt`, `impl for ${id}\n`);
+  turn.commit(`implement ${id}`);
+  // The process vanishes here — a parked question stands in for the crash, then the test deletes
+  // the on-disk record to leave the recordless shape §7 reconciles to parked{crash}.
+  return { signal: BLOCKED, stdout: `<question><summary>crash point for ${id}</summary></question>` };
+};
+
+test("scenario 7: a crashed member with commits on its branch resumes its session on redrive; no record, but the banked work and session drive a resume, not a fresh run (design §7)", async () => {
+  const dir = seedRepo();
+  const tracker = fakeTracker();
+  const cfg = repoCfg(dir, tracker);
+  const seen: string[] = [];
+  const scriptFor = crashThenResumeScript(seen);
+  const scriptForBoth = (id: string) => (id === "102" ? scriptFor("102") : implScript(id));
+
+  await inRepo(dir, async () => {
+    // First run: 101 greens and merges; 102 commits then "crashes" (parks, standing in for a
+    // dead process). The wave parks and the campaign exits.
+    const parkedOk = await campaign(cfg, [["101", "102"]], host(dir), "crash", {}, localCampaignDeps(cfg, dir, scriptForBoth));
+    assert.equal(parkedOk, "parked", "the crash-shaped park stops the campaign");
+    assert.equal(gitOut(dir, ["branch", "--list", "agent/102"]), "agent/102", "102's committed work is preserved on its branch");
+  });
+
+  // The crash leaves NO on-disk record (a dead process wrote no park record): drop it, leaving the
+  // recordless shape §7 reconciles to parked{crash}. Its committed branch and logged session remain.
+  clearParked(cfg, "102");
+  assert.equal(listParked(cfg).some((r) => r.taskId === "102"), false, "the crash left no record");
+
+  await inRepo(dir, async () => {
+    const spawns: string[] = [];
+    const doneOk = await campaign(cfg, [], host(dir), undefined, { resume: true }, localCampaignDeps(cfg, dir, scriptForBoth, spawns));
+    assert.equal(doneOk, "done", "the redrive resumed the crash, greened, merged, and finished");
+    assert.deepEqual(spawns, ["102"], "only the crashed member re-ran; the banked sibling did not");
+    // The proof of §7: the resume was driven on the member's recorded session, not a fresh start.
+    assert.deepEqual(seen, ["local-102-0"], "the crashed session was resumed, not re-run fresh");
+    assert.equal(gitOut(dir, ["show", "base:impl-102.txt"]), "impl for 102", "the banked work landed on the base");
+    assert.ok(readEventLog(cfg).some((e) => e.event === "campaign-done"), "the campaign advanced to done");
   });
 });

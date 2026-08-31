@@ -8,8 +8,9 @@ import type {
   WaveStartEvent,
 } from "./event-log.ts";
 import { runGates } from "./gate.ts";
-import { makeSandbox } from "./sandbox.ts";
+import { agentSelectionFor, makeSandbox } from "./sandbox.ts";
 import {
+  branchHasCommits,
   collectWaveChangelog,
   currentBranch,
   integrateGreens,
@@ -120,10 +121,10 @@ export function childSpawnEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
  * Re-invoke this CLI as a child, preserving however it was launched (the tsx
  * loader flags live in execArgv). Spawning a bare `node` would fail on TS.
  */
-const selfSpawn = (args: string[]) =>
+const selfSpawn = (args: string[], extraEnv?: NodeJS.ProcessEnv) =>
   spawn(process.execPath, [...process.execArgv, process.argv[1], ...args], {
     stdio: ["ignore", "inherit", "inherit"],
-    env: childSpawnEnv(process.env),
+    env: { ...childSpawnEnv(process.env), ...extraEnv },
   });
 
 /**
@@ -132,13 +133,20 @@ const selfSpawn = (args: string[]) =>
  * driven Docker-free in a test with a fake child that never touches a container —
  * the default spawns the real containerized `run` (#151). The exit-code contract is
  * `run`'s: `0` green, `2` parked, anything else an error.
+ *
+ * `resumeSession` is the crashed session a redrive re-enters this member on (design §7): when
+ * set, the child `run` resumes that session on its existing branch instead of a fresh start.
  */
-export type RunSpawner = (taskId: string) => Promise<number | null>;
+export type RunSpawner = (taskId: string, resumeSession?: string) => Promise<number | null>;
 
-/** The production spawner: a real child `run`, resolving on its exit. */
-const selfSpawnRun: RunSpawner = (taskId) =>
+/** The production spawner: a real child `run`, resolving on its exit. A crash redrive passes the
+ * crashed session id through to the child as `VETINARI_RESUME_SESSION` so it resumes (design §7). */
+const selfSpawnRun: RunSpawner = (taskId, resumeSession) =>
   new Promise((resolve) => {
-    selfSpawn(["run", taskId]).on("exit", (code) => resolve(code));
+    selfSpawn(["run", taskId], resumeSession ? { VETINARI_RESUME_SESSION: resumeSession } : undefined).on(
+      "exit",
+      (code) => resolve(code),
+    );
   });
 
 /**
@@ -275,6 +283,7 @@ export async function queue(
   titles?: Record<string, string>,
   spawnRun: RunSpawner = selfSpawnRun,
   reporter: Reporter = envReporter(),
+  resumeSessions: Record<string, string> = {},
 ): Promise<Record<string, string>> {
   const pending = [...taskIds];
   const outcomes: Record<string, string> = {};
@@ -332,7 +341,9 @@ export async function queue(
           const next = pending.shift()!;
           running++;
           cfg.log.log("spawn", { taskId: next, running, left: pending.length });
-          spawnRun(next).then((code) => {
+          // A crash redrive passes the crashed session id so the child resumes on its existing
+          // branch (design §7); every other spawn (fresh, answered re-admit) passes none.
+          spawnRun(next, resumeSessions[next]).then((code) => {
             running--;
             releaseSlot(host.configDir);
             outcomes[next] =
@@ -612,6 +623,10 @@ export interface CampaignDeps {
   collectChangelog: typeof collectWaveChangelog;
   currentBranch: typeof currentBranch;
   grace: GraceWaiter;
+  /** Does a member's agent branch carry committed work (design §7)? A redrive reads it to tell a
+   * crashed member with banked commits (resume its session) from one that never started (fresh).
+   * Optional so a partial test-`CampaignDeps` may omit it; absent falls back to the real git read. */
+  branchHasCommits?: (cfg: ResolvedConfig, taskId: string) => boolean;
 }
 const defaultCampaignDeps: CampaignDeps = {
   spawnRun: selfSpawnRun,
@@ -619,6 +634,7 @@ const defaultCampaignDeps: CampaignDeps = {
   collectChangelog: collectWaveChangelog,
   currentBranch,
   grace: graceWaitForAnswer,
+  branchHasCommits,
 };
 
 /**
@@ -636,17 +652,24 @@ const defaultCampaignDeps: CampaignDeps = {
  * - `parked` → re-run when its record is answered (the answer delivered into it — the child
  *   consumes and clears it) OR gone (a crash left no record), else a `parked` outcome that
  *   leaves the member unspawned and re-parks the wave — the un-answered park holds it (design
- *   §5 step 3, §7). A `crash` (§7) is the recordless shape — reconciled to `parked{crash}` — so
- *   it re-runs on the existing branch here (the run loop resumes its session when resumable). A
+ *   §5 step 3, §7). A `crash` (§7) is the recordless shape — reconciled to `parked{crash}`. A
  *   live redrive reads the same crashed member as `running` (the process is now alive), which
- *   the `else` below also re-runs; either way a crash is plainly re-run, never left parked.
+ *   the `else` below also re-runs; either way a crash re-runs, never left parked.
  * - `failed` → re-run only under `override` (the operator's explicit choice); otherwise
  *   an `error(...)` outcome that stops the campaign as failed again (design §7).
  * - anything else (`running`/`unstarted`/grafted) → run.
  *
- * Pure over the outcome map + a parked-record predicate, so the reconciliation is
- * unit-testable and, fed back through the wave's ordinary resolve logic, needs no new
- * park/fail/merge paths. `pre` is keyed exactly as `queue` reports an outcome.
+ * A crashed member (a recordless park or a `running` member the process left behind) is *resumed*
+ * on its recorded session rather than re-run fresh when `resumeSessionFor(id)` yields one — the
+ * caller returns a session id only for a resumable provider whose branch carries committed work
+ * (design §7's "else resume the session"); no commits, or a non-resumable provider, yields none
+ * and the member runs fresh. The resolver is consulted only on the crash/unstarted spawn paths,
+ * never on an answered park (its record carries the answer) or a `--override` re-run of a failed
+ * member (an explicit fresh re-run). The chosen session id rides out in `resume`, keyed by member.
+ *
+ * Pure over the outcome map + a parked-record predicate + the session resolver, so the
+ * reconciliation is unit-testable and, fed back through the wave's ordinary resolve logic, needs
+ * no new park/fail/merge paths. `pre` is keyed exactly as `queue` reports an outcome.
  */
 export function reconcileResumeWave(
   members: string[],
@@ -654,9 +677,17 @@ export function reconcileResumeWave(
   parkHoldsWave: (id: string) => boolean,
   override: boolean,
   pendingGreen: ReadonlySet<string> = new Set(),
-): { toRun: string[]; pre: Record<string, string> } {
+  resumeSessionFor: (id: string) => string | undefined = () => undefined,
+): { toRun: string[]; pre: Record<string, string>; resume: Record<string, string> } {
   const toRun: string[] = [];
   const pre: Record<string, string> = {};
+  const resume: Record<string, string> = {};
+  // Spawn `id`, resuming its crashed session when the resolver yields one (design §7).
+  const run = (id: string) => {
+    toRun.push(id);
+    const sid = resumeSessionFor(id);
+    if (sid) resume[id] = sid;
+  };
   for (const id of members) {
     const status = outcomes.get(id) ?? "unstarted";
     // Banked green — merged (`completed`) or green-but-unmerged (`pendingGreen`, which reads
@@ -664,16 +695,17 @@ export function reconcileResumeWave(
     // checked explicitly so a genuinely in-flight/crashed `running` member still re-runs below.
     if (status === "completed" || pendingGreen.has(id)) pre[id] = "green";
     else if (status === "failed") {
+      // A `--override` re-run of a failed member is an explicit fresh re-run — never a resume.
       if (override) toRun.push(id);
       else pre[id] = "error(failed on a prior run — prune it or redrive with --override)";
     } else if (status === "parked") {
       // An un-answered on-disk record holds the wave; an answered one (consumed by the child) or
-      // a recordless crash re-runs.
+      // a recordless crash re-runs — the crash resuming its session when the resolver yields one.
       if (parkHoldsWave(id)) pre[id] = "parked";
-      else toRun.push(id);
-    } else toRun.push(id);
+      else run(id);
+    } else run(id);
   }
-  return { toRun, pre };
+  return { toRun, pre, resume };
 }
 
 /**
@@ -857,7 +889,19 @@ export async function campaign(
       // logic below, so no park/fail/merge path is special-cased for a redrive.
       reconcileResume = false;
       regate = reduced.redBase.size > 0 && reduced.parkedWave === index;
-      const { toRun, pre } = reconcileResumeWave(
+      // A crashed member is resumed on its recorded session rather than re-run fresh only when the
+      // provider keeps a durable session AND its branch carries committed work (design §7's "else
+      // resume the session"); no commits, non-resumable, or an answered park (which re-runs via its
+      // own record) → no session, so the member runs fresh.
+      const { resumable } = agentSelectionFor(cfg);
+      const branchHasCommitsFor = deps.branchHasCommits ?? branchHasCommits;
+      const resumeSessionFor = (id: string): string | undefined => {
+        if (!resumable || hasParked(cfg, id)) return undefined;
+        const sid = reduced.sessions.get(id);
+        if (!sid) return undefined;
+        return branchHasCommitsFor(cfg, id) ? sid : undefined;
+      };
+      const { toRun, pre, resume } = reconcileResumeWave(
         tasks,
         reduced.outcomes,
         // A park holds the wave only while its record is present AND un-answered; an answered
@@ -866,8 +910,9 @@ export async function campaign(
         (id) => hasParked(cfg, id) && !isAnswered(cfg, id),
         !!opts.override,
         reduced.pendingGreen,
+        resumeSessionFor,
       );
-      const ran = toRun.length ? await queue(cfg, toRun, host, titles, deps.spawnRun, reporter) : {};
+      const ran = toRun.length ? await queue(cfg, toRun, host, titles, deps.spawnRun, reporter, resume) : {};
       outcomes = { ...ran, ...pre };
     } else {
       outcomes = await queue(cfg, tasks, host, titles, deps.spawnRun, reporter);

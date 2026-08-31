@@ -586,6 +586,11 @@ export interface ReducedCampaign {
    * wave names are on. */
   festiveOffset?: number;
   outcomes: Map<string, IssueStatus>;
+  /** issue id → the most recent durable session id seen for it, folded from any event that
+   * carries one (`turn`, `parked`). A crash redrive reads it to resume a crashed member's session
+   * on its existing branch rather than re-run fresh (design §7); absent for a member that never
+   * recorded a session (a non-resumable provider, or one that never completed a turn). */
+  sessions: Map<string, string>;
   /** issues that went green but are not yet merged onto the base — `running` with a pending
    * green (design §2.2). Cleared when the id merges (`merged`, or a `wave-done`'s merged list).
    * The chip reads `running`; this set drives the distinct "pending merge" chip detail. */
@@ -645,6 +650,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
   let name: string | undefined;
   let festiveOffset: number | undefined;
   const outcomes = new Map<string, IssueStatus>();
+  const sessions = new Map<string, string>();
   const pendingGreen = new Set<string>();
   const details = new Map<string, string>();
   const titles = new Map<string, string>();
@@ -665,6 +671,10 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
         if (typeof title === "string" && title.trim()) titles.set(normalizeIssue(id), title.trim());
       }
     }
+    // Remember the latest durable session id an event carried for a member (`turn`, `parked`),
+    // so a crash redrive can resume that session on the existing branch (design §7).
+    if ("sessionId" in e && e.sessionId && e.taskId)
+      sessions.set(normalizeIssue(String(e.taskId)), String(e.sessionId));
     if (e.event === "campaign-start" && Array.isArray(e.waves)) {
       waves = e.waves.map((wave: unknown[]) => wave.map(String).map(normalizeIssue));
       layout = waves.map((wave) => [...wave]);
@@ -842,7 +852,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
     }
   }
 
-  return { waves, layout, pruned, grafted, conflictParked, name, festiveOffset, outcomes, pendingGreen, details, titles, mergedAt, closedWaves, currentWave, parkedWave, parkReasons, redBase, anomalies };
+  return { waves, layout, pruned, grafted, conflictParked, name, festiveOffset, outcomes, sessions, pendingGreen, details, titles, mergedAt, closedWaves, currentWave, parkedWave, parkReasons, redBase, anomalies };
 }
 
 /**

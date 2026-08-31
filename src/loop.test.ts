@@ -197,6 +197,45 @@ test("runLoop logs a failed verdict and returns failed when a turn throws a non-
   assert.equal(listParked(cfg).length, 0);
 });
 
+test("runLoop logs a failed verdict when the sandbox cannot be created — a throw before the container (design §3 step 9)", async () => {
+  // A worktree-preflight throw in makeSandbox happens before the inner container try, so the
+  // old catch never saw it: the run exited with a stack trace and no verdict on the log. Now
+  // an outer catch logs one `failed` for every path before/around the container.
+  const cfg = harnessCfg();
+  const sbx = fakeSandbox([]);
+  const deps = depsFor(sbx, {
+    makeSandbox: async () => {
+      throw new Error("worktree preflight: base branch missing");
+    },
+  });
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, deps));
+
+  assert.equal(outcome, "failed");
+  const failed = readEventLog(cfg).find((e) => e.event === "failed") as { taskId: string; detail: string } | undefined;
+  assert.ok(failed, "a pre-sandbox throw leaves a failed verdict on the log");
+  assert.equal(failed!.taskId, "T-1");
+  assert.match(failed!.detail, /worktree preflight/);
+  assert.equal(listParked(cfg).length, 0);
+});
+
+test("runLoop logs a failed verdict when fetchTask throws — a throw before the container (design §3 step 9)", async () => {
+  const cfg = harnessCfg({
+    fetchTask: async () => {
+      throw new Error("tracker unreachable");
+    },
+  });
+  const sbx = fakeSandbox([]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+
+  assert.equal(outcome, "failed");
+  const failed = readEventLog(cfg).find((e) => e.event === "failed") as { taskId: string; detail: string } | undefined;
+  assert.ok(failed, "a fetchTask throw leaves a failed verdict on the log");
+  assert.match(failed!.detail, /tracker unreachable/);
+  assert.equal(listParked(cfg).length, 0);
+});
+
 test("runLoop returns green when the gate passes on a real change", async () => {
   const cfg = harnessCfg();
   const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc123" }] }, green: true }]);

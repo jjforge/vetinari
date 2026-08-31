@@ -20,7 +20,7 @@ import { parseAgentFlags } from "./config.ts";
 import { renderUsage } from "./help.ts";
 import type { HostBudget, projectHasLiveLease } from "./host-slots.ts";
 import type { build, baseline, campaign, tgTest, requireTelegram, CampaignOutcome } from "./modes.ts";
-import type { runLoop, Outcome } from "./loop.ts";
+import { crashResumePrompt, type runLoop, type Outcome } from "./loop.ts";
 import type { answerParked, hasParked, listParked } from "./state.ts";
 import type { archiveRun } from "./archive.ts";
 import type { Exclusion, UnderspecifiedPrompt } from "./plan.ts";
@@ -263,6 +263,12 @@ export interface DispatchDeps {
    * FOR it, so it must run rather than refuse against its own parent (design §5 step 3, §8).
    */
   isCampaignChild: boolean;
+  /**
+   * The crashed session id a campaign redrive spawned this child to resume (design §7,
+   * `VETINARI_RESUME_SESSION`): when set, a `run` re-enters the loop on that session on the
+   * existing branch instead of a fresh start. Undefined for a fresh run or an answered re-admit.
+   */
+  resumeSession?: string;
   /** Archive a prior run still sitting in the live log before a fresh run appends. */
   archiveLeftoverRun: () => void;
   /** Reset live state once a run is truly over (skipped while anything is parked). */
@@ -334,10 +340,16 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
       }
       enableJson(cmd.json);
       deps.archiveLeftoverRun();
+      // A crash redrive spawned this child to resume a crashed session on the existing branch
+      // (design §7, `VETINARI_RESUME_SESSION`): re-enter the loop on that session with a
+      // continue-where-you-left-off prompt rather than a fresh fetch. Absent → a fresh run.
+      const resumeEntry = deps.resumeSession
+        ? { resumeSessionId: deps.resumeSession, answerPrompt: crashResumePrompt() }
+        : undefined;
       // Exit code is the queue's slot signal (design §3): 0 green, 2 parked, 1 failed. The loop
       // holds one host slot around the container (design §3 step 1, §8) — `deps.host` carries the
       // budget; a campaign child skips the slot itself (its parent holds one for it).
-      deps.setExitCode(exitCodeFor(await deps.runLoop(cfg, cmd.args[0], deps.host)));
+      deps.setExitCode(exitCodeFor(await deps.runLoop(cfg, cmd.args[0], deps.host, resumeEntry)));
       return;
     }
     case "campaign": {

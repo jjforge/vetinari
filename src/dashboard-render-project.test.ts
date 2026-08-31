@@ -253,6 +253,14 @@ test("renderStatusPage ships the graft input's client wiring, re-run on live ref
   assert.match(html, /data-graft-error/);
   // It validates against the retained dry-run closure endpoint on blur.
   assert.match(html, /\/graft\?preview/);
+  // The carry-over reducer is single-sourced into the page via `.toString()` (#329) — the
+  // shipped function is the same one the node test drives — and the soft-refresh hands its
+  // decision to wireGraft. This asserts the wiring is present, not the rule (that is the
+  // reducer's own node test, per ADR 0012); a rule-source-text match here would pass whether
+  // or not the rule is correct.
+  assert.match(html, /function graftCarry\(captured\)/);
+  assert.match(html, /pendingGraftCarry = graftCarry\(/);
+  assert.match(html, /if \(pendingGraftCarry\)/);
 });
 test("renderStatusPage's graft control reads as in-flight during its POST — aria-busy + `grafting…`, distinct from at-rest disabled, cleared on every exit (#327)", () => {
   const running = {

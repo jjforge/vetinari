@@ -108,6 +108,40 @@ export function redriveAllowed(campaignState: string, leaseLive: boolean): { all
 }
 
 /**
+ * What the summary-line graft control carries across a live-region soft-refresh (#329) — the
+ * single pure rule the swap gates on. A live event replaces `#live-region` wholesale, and the
+ * graft form lives inside it: the server renders the ids input with no `value`, so the fresh
+ * node always arrives empty and re-wired at rest. This decides, from the outgoing node's
+ * captured state, exactly what the incoming node should show, so nothing the operator typed —
+ * ids, an inline validation error, or an in-flight graft — is silently lost.
+ *
+ * `captured` is read off the outgoing form immediately before the swap: `ids` the typed value
+ * (verbatim, so spacing survives), `error` the inline error text currently showing (`""` when
+ * none), `busy` whether a graft POST is in flight (`aria-busy`). The return is what to apply:
+ * `ids`/`error` to restore, `invalid` the validation flag (an error means the submit stays
+ * disabled for the same reason), `busy` whether to re-enter the in-flight look.
+ *
+ * An empty, untouched field with no graft in flight carries nothing — the fresh node is left
+ * exactly as the server rendered it. Self-contained and browser-safe: single-sourced into the
+ * page script via `.toString()`, so the node test drives the very function the swap runs.
+ */
+export function graftCarry(captured: { ids: string; error: string; busy: boolean }): {
+  ids: string;
+  error: string;
+  invalid: boolean;
+  busy: boolean;
+} {
+  const busy = Boolean(captured.busy);
+  const ids = captured.ids || "";
+  const hasIds = ids.trim().length > 0;
+  // Nothing typed and no graft in flight → carry nothing; the fresh node stays at rest.
+  if (!hasIds && !busy) return { ids: "", error: "", invalid: false, busy: false };
+  // An in-flight graft has cleared its error, so an error only rides alongside settled ids.
+  const error = hasIds && !busy ? captured.error || "" : "";
+  return { ids: hasIds ? ids : "", error, invalid: error.length > 0, busy };
+}
+
+/**
  * The tally chip's dot-class fragment, with the idle rule (§5, #100): a running dot
  * pulses to signal work in flight, so a "0 running" tally — which has none — keeps the
  * blue but gets `idle` to still it. Only `running` at zero is idle; `parked`/`queued`

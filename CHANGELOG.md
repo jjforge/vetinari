@@ -32,6 +32,8 @@ Within a milestone each bold section label appears at most once.
 - [ops] `autoRegister` now refuses to overwrite a registry pointer belonging to a different root: two projects declaring the same name no longer silently collapse to one pointer (which routed one project's replies into the other's tree). The incumbent is kept, both roots are named on stderr, and the command still runs (#345).
 - [user] `prune` no longer reports a target that is not a member of the campaign as dropped — a non-member is reported as not in the campaign and no prune event is appended (#346).
 - [ops] The gateway's Telegram prune confirmation now rides the notice skeleton — a `✂️ <project> · PRUNE · #<issue>` header, the closure the project computed, then the confirm instruction — instead of forwarding the child's raw `prune --dry-run` stdout as the whole message, so the most destructive exchange on a shared bot names its project; a bare `prune <issue>` resolved to the single running campaign names the project it landed on in the message you reply `yes` to (#347).
+- [ops] A `run` or `answer` that throws before its container starts — a worktree-preflight failure or an unreachable tracker — now logs one `failed` verdict with the detail to the event log before exiting non-zero, instead of dying with a bare stack trace and no verdict (#341).
+- [user] A redrive of a crashed campaign member now resumes its interrupted session on the existing branch when the provider is resumable and the branch already carries committed work, rather than re-running it from scratch; a member with no commits, or a non-resumable provider, still runs fresh (#341).
 
 ### Collected changes — August 30, 2026
 

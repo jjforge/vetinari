@@ -529,10 +529,12 @@ test("parkRecoveryMove prints the exact move each reason asks of the human", () 
 test("formatParkAnnouncement uses the notice skeleton: header, question, exact recovery move", () => {
   const text = formatParkAnnouncement("jjforge", parked({ taskId: "640", reason: "question", question: "Which approach?" }));
 
-  const [header] = text.split("\n\n");
+  // The one notice() skeleton (§10): header, one signal line, then the recovery command
+  // on a `Recover:` line — every line joined by a single newline.
+  const [header, signal, recover] = text.split("\n");
   assert.match(header, /^⏸ jjforge · PARKED · #640 \(question\)$/, "header is <emoji> <project> · <STATE> · <context>");
-  assert.match(text, /Which approach\?/, "the question is the signal line");
-  assert.match(text, /Reply to this message to answer\./, "a question's recovery move is to reply");
+  assert.equal(signal, "Which approach?", "the question is the signal line");
+  assert.equal(recover, "Recover: Reply to this message to answer.", "a question's recovery move is the exact reply command");
 });
 
 test("formatParkAnnouncement names the reason and its recovery move for a non-answerable park", () => {

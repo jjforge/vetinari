@@ -25,6 +25,7 @@ import {
   type ParkReason,
 } from "./state.ts";
 import { gatewayConfigDir, readProjects } from "./registry.ts";
+import { notice } from "./notice.ts";
 import {
   buildAllStatus,
   campaignRunning,
@@ -547,15 +548,27 @@ export function parkRecoveryMove(reason: ParkReason, issue: string): string {
 }
 
 /**
- * A park announcement in the one notice skeleton (design §10): a header
- * `⏸ <project> · PARKED · #<issue> (<reason>)`, the question (or the `detail`
- * specifics behind a non-question reason) as the single signal line, and the exact
- * recovery move the reason asks of the human (`parkRecoveryMove`). The reason is the
- * single `ParkReason` enum; every park speaks the settled vocabulary.
+ * A park announcement built by the one shared `notice()` skeleton (design §10) — the same
+ * renderer every outbound notice uses, so a hand-rolled second copy can never drift from it:
+ * a header `⏸ <project> · PARKED · #<issue> (<reason>)`, the question (or the `detail`
+ * specifics behind a non-question reason) as the single signal line, and the exact recovery
+ * move the reason asks of the human (`parkRecoveryMove`) on the skeleton's `Recover:` line.
+ * The reason is the single `ParkReason` enum; every park speaks the settled vocabulary.
+ *
+ * The gateway takes only the rendered `.text` — a park is routed to its project's `question`
+ * destination by the reply index, not by the notice's `category` (which is unused here).
  */
 export function formatParkAnnouncement(project: string, record: ParkedRecord): string {
   const signal = record.question?.trim() || record.detail?.trim() || `Parked (${record.reason}).`;
-  return [`⏸ ${project} · PARKED · #${record.taskId} (${record.reason})`, signal, parkRecoveryMove(record.reason, record.taskId)].join("\n\n");
+  return notice({
+    emoji: "⏸",
+    project,
+    state: "PARKED",
+    context: `#${record.taskId} (${record.reason})`,
+    signal,
+    recover: parkRecoveryMove(record.reason, record.taskId),
+    category: "finding",
+  }).text;
 }
 
 /**

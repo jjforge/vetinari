@@ -40,10 +40,36 @@ import {
   issueDetailSheetMarkup,
   renderConflictNote,
   renderGraftInline,
-  renderRedriveControl,
 } from "./dashboard-render-issue.ts";
 
 const chipTitle = (issue: StatusIssue) => [issue.name, issue.detail].filter(Boolean).join("\n");
+
+/**
+ * The whole-campaign Redrive control (design §7, §11, #325). Redrive picks up an unfinished
+ * campaign — it is not a per-issue move, so it lives here on the project page beside graft,
+ * never on the issue sheet. It is a *risky* action (the observed bug: fired on a draining
+ * wave, it spawned a second campaign process over the live one), so it is rendered greyed-out
+ * with a one-line reason unless `gate.allowed` — the pure {@link redriveAllowed} rule off the
+ * campaign fold and the live-lease probe. Enabled, the button opens a confirm dialog naming
+ * exactly what a redrive will do (the campaign, the wave it re-enters, its members, the base)
+ * with Cancel the default; only Confirm POSTs `/redrive`, which the aggregated dumb router
+ * (ADR 0002) shells in the project's own root. A campaign-less page renders nothing.
+ *
+ * `baseBranch` is the base the redrive lands on, read live from the project checkout by the
+ * page (the dumb router has no config to read it from); when unknown the dialog says so.
+ */
+export const renderRedriveControl = (status: CampaignStatus, gate: { allowed: boolean; reason: string }, baseBranch?: string) => {
+  if (!status.waves.length) return "";
+  const openBtn = `<button type="button" class="redrive-btn" data-redrive-open${gate.allowed ? "" : " disabled"}>Redrive</button>`;
+  if (!gate.allowed) return `<div class="redrive-control">${openBtn}<span class="redrive-reason">${escapeHtml(gate.reason)}</span></div>`;
+  // The resume wave is the first not-fully-completed wave (design §7); its non-pruned members
+  // are what a redrive re-enters. The name falls back to the project key for an unnamed run.
+  const resume = status.waves.find((wave) => wave.status !== "completed");
+  const members = (resume?.issues ?? []).filter((issue) => issue.membership !== "pruned").map((issue) => `#${escapeHtml(issue.issueNumber)}`).join(", ");
+  const text = `Redrive <strong>${escapeHtml(status.name || status.project)}</strong>: re-enters wave ${(resume?.index ?? 0) + 1} — ${members} — on <code>${escapeHtml(baseBranch ?? "the base branch")}</code>`;
+  const dialog = `<dialog class="redrive-dialog" data-redrive-dialog><p class="redrive-dialog-text">${text}</p><form method="post" action="/redrive" class="redrive-dialog-actions" data-redrive-form><input type="hidden" name="project" value="${escapeHtml(status.project)}" /><button type="button" class="redrive-cancel" data-redrive-cancel autofocus>Cancel</button><button type="submit" class="redrive-confirm" data-redrive-confirm>Redrive</button></form></dialog>`;
+  return `<div class="redrive-control">${openBtn}${dialog}</div>`;
+};
 
 /**
  * One issue's member row — the single line a wave card gives each of its issues,

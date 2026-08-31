@@ -81,7 +81,7 @@ import {
   listProjects,
   removePointer,
 } from "./registry.ts";
-import { projectHasLiveLease, resolveHostCeiling, type HostBudget } from "./host-slots.ts";
+import { projectHasLiveCampaign, resolveHostCeiling, type HostBudget } from "./host-slots.ts";
 import { containerShareWeight } from "./config.ts";
 import { serveAllStatus } from "./status.ts";
 import { runStatusLine } from "./statusline.ts";
@@ -626,7 +626,7 @@ await dispatch(parseArgs([mode, ...rest]), {
   listParked,
   hasParked,
   answerParked,
-  projectHasLiveLease,
+  projectHasLiveCampaign,
   readEventLog,
   archiveRun,
   requireTelegram,

@@ -8,7 +8,7 @@ import type { Sandbox, SandboxRunOptions, SandboxRunResult } from "./sandbox.ts"
 import { loggerForRun } from "./log.ts";
 import { readEventLog } from "./event-log.ts";
 import { answerParked, hasParked, listOutbox, listParked, park } from "./state.ts";
-import { projectHasLiveLease, readLeases, type HostBudget } from "./host-slots.ts";
+import { projectHasLiveCampaign, readLeases, type HostBudget } from "./host-slots.ts";
 import { BLOCKED, DONE, extractTurnSummary, parkedAnswerComment, runLoop, type LoopDeps } from "./loop.ts";
 
 // A temp-dir `cfg` mirroring graft.test/modes.test's `harnessCfg`: a real on-disk
@@ -477,13 +477,16 @@ test("runLoop consumes an answered parked record for a non-resumable provider �
 });
 
 // A fake sandbox whose `run()` observes the host lease mid-container, so a test can assert
-// the run is holding a slot exactly while the agent works.
+// the run is holding a slot exactly while the agent works. It records both the run's own
+// held lease and whether the project reads as a live *campaign* — a standalone run holds a
+// slot but is never a campaign (design §8).
 const leaseObservingSandbox = (configDir: string, project: string) => {
-  const observed: { live: boolean } = { live: false };
+  const observed: { runHeld: number; liveCampaign: boolean } = { runHeld: 0, liveCampaign: false };
   const sbx: Sandbox = {
     branch: "agent/T-1",
     async run() {
-      observed.live = projectHasLiveLease(configDir, project);
+      observed.runHeld = readLeases(configDir).filter((l) => l.project === project).reduce((s, l) => s + l.held, 0);
+      observed.liveCampaign = projectHasLiveCampaign(configDir, project);
       return { iterations: [{ sessionId: "s" }], commits: [{ sha: "abc123" }], completionSignal: DONE, stdout: "" };
     },
     async exec(cmd) {
@@ -497,7 +500,7 @@ const leaseObservingSandbox = (configDir: string, project: string) => {
   return { sbx, observed };
 };
 
-test("a standalone run holds one host slot around the container's life so projectHasLiveLease sees it (design §3 step 1, §8)", async () => {
+test("a standalone run holds one host slot around the container's life, but is not a live campaign (design §3 step 1, §8)", async () => {
   const configDir = mkdtempSync(join(tmpdir(), "vetinari-loop-slots-"));
   const host: HostBudget = { configDir, ceiling: 4, weight: 1 };
   const cfg = harnessCfg({ project: "solo" });
@@ -513,7 +516,8 @@ test("a standalone run holds one host slot around the container's life so projec
     else process.env.VETINARI_CHILD = prevChild;
   }
 
-  assert.equal(observed.live, true, "the project holds a live lease while the container runs");
+  assert.equal(observed.runHeld, 1, "the run holds one slot while the container runs");
+  assert.equal(observed.liveCampaign, false, "a standalone run's lease is not a live campaign");
   assert.deepEqual(readLeases(configDir), [], "the slot is released and the project deregistered once the run finishes");
 });
 
@@ -532,6 +536,6 @@ test("a campaign child run takes no host slot — its parent already holds one f
     else process.env.VETINARI_CHILD = prevChild;
   }
 
-  assert.equal(observed.live, false, "a child never registers a second lease beside its parent's");
+  assert.equal(observed.runHeld, 0, "a child never registers a second lease beside its parent's");
   assert.deepEqual(readLeases(configDir), [], "no lease is left behind");
 });

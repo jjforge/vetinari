@@ -9,7 +9,7 @@ export { ownerRepoFromRemote, repoForProject };
 import { hostLogger, type Logger } from "./log.ts";
 import { type ProjectPointer } from "./registry.ts";
 import { listParked, parkedDirOf, type ParkedRecord, type ParkReason } from "./state.ts";
-import { projectHasLiveLease } from "./host-slots.ts";
+import { projectHasLiveCampaign } from "./host-slots.ts";
 import { applyPrune } from "./prune.ts";
 import { applyGraft } from "./plan.ts";
 import { festiveWaveName } from "./festive-names.ts";
@@ -1158,7 +1158,7 @@ export function summarizeRun(events: OrchestratorEvent[]): string {
  * its members, so a wave with a red member reads `failed` and a held wave reads `parked`
  * by construction (no render-time precedence). Liveness feeds crash detection (design §7):
  * `dead` marks a run whose process is gone (an archived read) and `alive` carries the live
- * host-slot probe (`projectHasLiveLease`); either way an `alive === false` run with no
+ * host-slot probe (`projectHasLiveCampaign`); either way an `alive === false` run with no
  * terminal event reconciles its still-`running` issues to `parked{crash}` inside the
  * reducer. Omitting both leaves the live default — `running` stays `running`.
  */
@@ -1395,7 +1395,7 @@ export function buildAllStatus(pointers: ProjectPointer[], logger: Logger = host
       logger.log("status-project-skipped", { project: pointer.project, baseLocation: pointer.baseLocation });
       continue;
     }
-    const alive = configDir !== undefined ? projectHasLiveLease(configDir, pointer.project) : undefined;
+    const alive = configDir !== undefined ? projectHasLiveCampaign(configDir, pointer.project) : undefined;
     statuses.push(buildStatus(statusConfigFromPointer(pointer), { alive }));
   }
   return statuses;
@@ -1749,7 +1749,7 @@ export function buildLanding(pointers: ProjectPointer[], now: Date = new Date(),
     }
     const cfg = statusConfigFromPointer(pointer);
     const events = readEventLog(cfg);
-    const alive = configDir !== undefined ? projectHasLiveLease(configDir, pointer.project) : undefined;
+    const alive = configDir !== undefined ? projectHasLiveCampaign(configDir, pointer.project) : undefined;
     const status = buildStatus(cfg, { alive });
     const parkedRecords = listParked(cfg);
     // merged-today counts every issue merged today across all of the project's runs

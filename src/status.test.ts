@@ -267,7 +267,7 @@ test("serveAllStatus GET /api/landing serves the all-repos landing model as JSON
   // Alpha's run is live: it holds a host slot (this test's own pid is alive), so its
   // in-flight #101 reads `running` rather than reconciling to `parked{crash}` — the live
   // liveness probe the landing route now consults (design §7, §8).
-  registerProject(configDir, "alpha", 1, { pid: process.pid });
+  registerProject(configDir, "alpha", 1, "campaign", { pid: process.pid });
 
   const server = await serveAllStatus(configDir, {
     port: 0,

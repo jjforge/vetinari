@@ -307,7 +307,7 @@ export async function queue(
   // itself active so other projects drain toward their share, and every spawn is
   // gated on a cooperative lease so the sum of live containers across all projects
   // stays within the ceiling and within this project's current fair share.
-  registerProject(host.configDir, cfg.project, host.weight);
+  registerProject(host.configDir, cfg.project, host.weight, "campaign");
   try {
     await new Promise<void>((done) => {
       let poll: ReturnType<typeof setInterval> | undefined;

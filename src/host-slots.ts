@@ -10,16 +10,28 @@ import { join } from "node:path";
  */
 
 /**
+ * What acquired the lease: a `campaign` process (owns its issues and their
+ * re-admit) or a standalone `run`/`answer` (owns only its own issue). The
+ * campaign-liveness guard keys on this — only a live `campaign` refuses a second
+ * `run`/`redrive` or stops an `answer` at deliver (design §5 step 3, §7, §8). A
+ * legacy lease written before the kind existed is read as `campaign` (the
+ * conservative reading) and rewritten with its kind on the next acquire.
+ */
+export type LeaseKind = "campaign" | "run";
+
+/**
  * One active run's record in the lease directory: the project it belongs to, its
- * declared weight, how many live containers it currently holds, and the pid that
- * owns it (so a dead run's slots can be reclaimed on contention). Keyed on disk by
- * pid, so two runs of the same project never clobber each other.
+ * declared weight, how many live containers it currently holds, the pid that owns
+ * it (so a dead run's slots can be reclaimed on contention), and its `kind` (a
+ * campaign or a standalone run). Keyed on disk by pid, so two runs of the same
+ * project never clobber each other.
  */
 export interface SlotLease {
   project: string;
   weight: number;
   held: number;
   pid: number;
+  kind: LeaseKind;
 }
 
 /** Optional seams: the pid this call acts as, and how it tests liveness. */
@@ -158,7 +170,10 @@ export function readLeases(configDir: string): SlotLease[] {
     if (!name.endsWith(".json")) continue;
     try {
       const l = JSON.parse(readFileSync(join(dir, name), "utf8")) as SlotLease;
-      if (l && typeof l.project === "string" && typeof l.pid === "number") leases.push(l);
+      // A legacy lease predates the kind field; read it as `campaign` (the conservative
+      // reading — never let an unknown lease silently stop being a live campaign).
+      if (l && typeof l.project === "string" && typeof l.pid === "number")
+        leases.push({ ...l, kind: l.kind === "run" ? "run" : "campaign" });
     } catch {
       // A half-written or malformed file is ignored, not fatal.
     }
@@ -167,16 +182,21 @@ export function readLeases(configDir: string): SlotLease[] {
 }
 
 /**
- * Whether `project` currently holds a live host slot — the crash probe the dashboard
- * injects into `reduceCampaign` (design §8). A run writes its lease when it registers
- * and holds it (even at held zero, waiting first-come) until it finishes or dies; a
- * crashed run's lease lingers on disk but its pid is gone, so a project with no live
- * lease has no run on it. Read-only — it never reclaims a dead lease (acquire does that
- * under the lock); this is a probe any read path can take at any time.
+ * Whether a live *campaign* process holds a lease for `project` — the campaign-liveness
+ * guard (design §5 step 3, §7, §8) and the dashboard's crash probe injected into
+ * `reduceCampaign`. Matches only `kind: "campaign"` leases: a campaign owns its issues and
+ * their re-admit, so while one is live a second `run`/`redrive` is refused and an `answer`
+ * only delivers. A standalone `run`'s lease (`kind: "run"`) is deliberately not a live
+ * campaign — concurrent standalone runs share the ceiling (§8) without one being read as a
+ * campaign that does not exist. A campaign writes its lease when it registers and holds it
+ * (even at held zero, waiting first-come) until it finishes or dies; a crashed campaign's
+ * lease lingers on disk but its pid is gone, so a project with no live campaign lease has no
+ * campaign on it. Read-only — it never reclaims a dead lease (acquire does that under the
+ * lock); this is a probe any read path can take at any time.
  */
-export function projectHasLiveLease(configDir: string, project: string, opts: LeaseOpts = {}): boolean {
+export function projectHasLiveCampaign(configDir: string, project: string, opts: LeaseOpts = {}): boolean {
   const isAlive = opts.isAlive ?? pidAlive;
-  return readLeases(configDir).some((l) => l.project === project && isAlive(l.pid));
+  return readLeases(configDir).some((l) => l.project === project && l.kind === "campaign" && isAlive(l.pid));
 }
 
 /** Read the live leases, unlinking any whose pid is dead so their slots return. */
@@ -201,13 +221,13 @@ function liveLeases(configDir: string, isAlive: (pid: number) => boolean): SlotL
  * run registers before it acquires so other projects see it as active and drain
  * toward their smaller share, even while it is waiting first-come at zero held.
  */
-export function registerProject(configDir: string, project: string, weight: number, opts: LeaseOpts = {}): void {
+export function registerProject(configDir: string, project: string, weight: number, kind: LeaseKind, opts: LeaseOpts = {}): void {
   const pid = opts.pid ?? process.pid;
   const isAlive = opts.isAlive ?? pidAlive;
   withLock(slotsDir(configDir), isAlive, () => {
     const file = leaseFile(configDir, pid);
     const existing = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as SlotLease).held : 0;
-    writeFileSync(file, JSON.stringify({ project, weight, held: existing || 0, pid }));
+    writeFileSync(file, JSON.stringify({ project, weight, held: existing || 0, pid, kind }));
   });
 }
 
@@ -250,7 +270,11 @@ export function acquireSlot(configDir: string, ceiling: number, project: string,
 
     if (myProjectHeld >= share || total >= ceiling) return false;
 
-    writeFileSync(leaseFile(configDir, pid), JSON.stringify({ project, weight, held: myRunHeld + 1, pid }));
+    // Preserve the kind `registerProject` (always called first) stamped. A legacy lease that
+    // predates the field reads as `campaign` (via `readLeases`), so it is rewritten with an
+    // explicit kind here on its next acquire.
+    const kind: LeaseKind = mine?.kind ?? "campaign";
+    writeFileSync(leaseFile(configDir, pid), JSON.stringify({ project, weight, held: myRunHeld + 1, pid, kind }));
     return true;
   });
 }
@@ -261,7 +285,7 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 
 /**
  * Hold one host slot for the life of a standalone run or `answer` (design §3 step 1, §8).
- * Register the project first — so `projectHasLiveLease` sees it and contending projects drain
+ * Register the project first — so contending projects see the lease and drain
  * toward their share even while this run waits at held zero — then acquire one slot, waiting
  * first-come while the ceiling or this project's fair share is full. Run `fn`, then give the
  * slot back and deregister, even if `fn` throws. A campaign child never calls this: its parent
@@ -274,7 +298,8 @@ export async function withHostSlot<T>(
   opts: LeaseOpts & { wait?: (ms: number) => Promise<void> } = {},
 ): Promise<T> {
   const wait = opts.wait ?? sleep;
-  registerProject(host.configDir, project, host.weight, opts);
+  // A standalone `run`/`answer` — its lease is `kind: "run"`, never a live campaign (§8).
+  registerProject(host.configDir, project, host.weight, "run", opts);
   try {
     while (!acquireSlot(host.configDir, host.ceiling, project, host.weight, opts))
       await wait(SLOT_POLL_MS);

@@ -30,6 +30,7 @@ Within a milestone each bold section label appears at most once.
 - [ops] The gateway's park announcement now renders through the shared `notice()` skeleton, so its recovery step reads on a `Recover:` line like every other notice (#344).
 - [user] The dashboard's live-tail pane now holds its place on screen at all times, collapsing to its head bar (summary: `no agents running`) when no agent is running instead of vanishing from the layout and reflowing the board on every gap between agents; it re-expands and resumes following when an agent returns, unless you folded it yourself with the toggle (#330).
 - [user] Risky campaign controls now read as risky: the dashboard's Redrive button and its confirm dialog wear the coral risky-action colour (matching Prune), and Prune's confirm card takes a coral outline in place of its coloured left edge — colour is never the only channel, the confirm dialog and disabled-with-reason guards are unchanged (#328).
+- [user] The dashboard's live-bar readout now reads `last activity Ns ago` (from any live surface's last visible append) and shows a quiet `—` before the first activity, so it no longer implies the wave grid is fresh when only the tail is moving (#337).
 
 **Bug fixes:**
 - [ops] `autoRegister` now refuses to overwrite a registry pointer belonging to a different root: two projects declaring the same name no longer silently collapse to one pointer (which routed one project's replies into the other's tree). The incumbent is kept, both roots are named on stderr, and the command still runs (#345).
@@ -44,6 +45,7 @@ Within a milestone each bold section label appears at most once.
 - [user] The host-log pane now heals on reconnect: lines written to `host.jsonl` while the SSE stream was down (a network blip, gateway restart, or backgrounded tab) appear when the stream returns, instead of being silently and permanently lost for that page. The gear badge corrects itself from the same buffer (#352).
 - [user] The live tail no longer goes permanently silent for an issue whose agent stream restarts — a redriven, respawned, or rolled-over `activity-<issue>.jsonl` restarts its per-file numbering, and the tail now recognizes that as a restart and delivers the new run instead of filtering it as already-seen (#353).
 - [user] A dashboard tab backgrounded past the OS's connection-close window (iOS 18+ closes a hidden SSE stream ~20s in without an error event, `readyState` still OPEN) now reconnects on resume instead of freezing the whole board until a manual reload — the grid, live tail and host log all come back live; a briefly-hidden tab does not reconnect (#351).
+- [user] On phones (under 640px), the live-tail header drops the redundant agent summary so the title stays on one line and the filter input is no longer clipped (#336).
 
 ### Collected changes — August 30, 2026
 

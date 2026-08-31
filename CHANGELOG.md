@@ -29,6 +29,7 @@ Within a milestone each bold section label appears at most once.
 - [api] The `prune-closure` and `graft-closure` dry-run JSON now carry the `project` and derived `repo`, so a consumer shows the same identity the terminal does without re-parsing prose (#346).
 - [ops] The gateway's park announcement now renders through the shared `notice()` skeleton, so its recovery step reads on a `Recover:` line like every other notice (#344).
 - [user] The dashboard's live-tail pane now holds its place on screen at all times, collapsing to its head bar (summary: `no agents running`) when no agent is running instead of vanishing from the layout and reflowing the board on every gap between agents; it re-expands and resumes following when an agent returns, unless you folded it yourself with the toggle (#330).
+- [user] Risky campaign controls now read as risky: the dashboard's Redrive button and its confirm dialog wear the coral risky-action colour (matching Prune), and Prune's confirm card takes a coral outline in place of its coloured left edge — colour is never the only channel, the confirm dialog and disabled-with-reason guards are unchanged (#328).
 
 **Bug fixes:**
 - [ops] `autoRegister` now refuses to overwrite a registry pointer belonging to a different root: two projects declaring the same name no longer silently collapse to one pointer (which routed one project's replies into the other's tree). The incumbent is kept, both roots are named on stderr, and the command still runs (#345).

@@ -46,6 +46,7 @@ Within a milestone each bold section label appears at most once.
 - [user] The live tail no longer goes permanently silent for an issue whose agent stream restarts — a redriven, respawned, or rolled-over `activity-<issue>.jsonl` restarts its per-file numbering, and the tail now recognizes that as a restart and delivers the new run instead of filtering it as already-seen (#353).
 - [user] A dashboard tab backgrounded past the OS's connection-close window (iOS 18+ closes a hidden SSE stream ~20s in without an error event, `readyState` still OPEN) now reconnects on resume instead of freezing the whole board until a manual reload — the grid, live tail and host log all come back live; a briefly-hidden tab does not reconnect (#351).
 - [user] On phones (under 640px), the live-tail header drops the redundant agent summary so the title stays on one line and the filter input is no longer clipped (#336).
+- [user] The issue sheet's reply box now empties when it binds a different issue, so a draft typed for one parked issue can no longer be posted as another issue's answer; closing and reopening the same issue keeps the draft (#349).
 
 ### Collected changes — August 30, 2026
 

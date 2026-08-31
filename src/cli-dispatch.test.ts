@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { dispatch, identityLine, parseArgs, type Command, type DispatchDeps } from "./cli-dispatch.ts";
+import { projectHasLiveCampaign, registerProject } from "./host-slots.ts";
 
 // A spy that records each call's arguments and returns a canned value.
 function spy<T>(ret?: T) {
@@ -46,7 +50,7 @@ function makeDeps(overrides: Partial<DispatchDeps> = {}) {
     listParked: spy([]) as unknown as DispatchDeps["listParked"],
     hasParked: spy(true) as unknown as DispatchDeps["hasParked"],
     answerParked: spy() as unknown as DispatchDeps["answerParked"],
-    projectHasLiveLease: spy(false) as unknown as DispatchDeps["projectHasLiveLease"],
+    projectHasLiveCampaign: spy(false) as unknown as DispatchDeps["projectHasLiveCampaign"],
     readEventLog: spy([]) as unknown as DispatchDeps["readEventLog"],
     archiveRun: spy({ archivedLog: null, clearedOutbound: 0 }) as unknown as DispatchDeps["archiveRun"],
     requireTelegram: spy({}) as unknown as DispatchDeps["requireTelegram"],
@@ -335,7 +339,7 @@ test("dispatch run resumes a crashed session when spawned with one (design §7):
 
 test("dispatch run refuses with one line naming the project and exits non-zero when a campaign lease is live (§5 step 3, §8)", async () => {
   const { deps, logged, exitCodes } = makeDeps({
-    projectHasLiveLease: spy(true) as any,
+    projectHasLiveCampaign: spy(true) as any,
   });
   await dispatch({ kind: "run", agent: {}, args: ["436"], json: false }, deps);
   // Nothing is mutated: no leftover archived, no container started, no slot consumed.
@@ -351,16 +355,41 @@ test("dispatch run consults the lease with the host config dir and the project",
   const lease = spy(false);
   const { deps } = makeDeps({
     host: { configDir: "/cfg" } as any,
-    projectHasLiveLease: lease as any,
+    projectHasLiveCampaign: lease as any,
   });
   await dispatch({ kind: "run", agent: {}, args: ["436"], json: false }, deps);
   assert.deepEqual(lease.calls, [["/cfg", "demo"]]);
 });
 
+test("dispatch run is not refused by a standalone run's own lease — only a live campaign refuses (§5 step 3, §8)", async () => {
+  // Wire the real lease probe against a real config dir: a standalone `run` for issue 436 is in
+  // flight, holding a `kind: "run"` lease, and its pid is this test's own (alive). A second `run`
+  // for a different issue must proceed — the run lease is not a live campaign.
+  const configDir = mkdtempSync(join(tmpdir(), "vetinari-dispatch-slots-"));
+  registerProject(configDir, "demo", 1, "run", { pid: process.pid });
+  assert.equal(projectHasLiveCampaign(configDir, "demo"), false, "a run lease is not a live campaign");
+  const { deps } = makeDeps({
+    host: { configDir } as any,
+    projectHasLiveCampaign: projectHasLiveCampaign as any,
+  });
+  await dispatch({ kind: "run", agent: {}, args: ["611"], json: false }, deps);
+  assert.equal((deps.runLoop as any).calls.length, 1, "the second standalone run is not refused by the first run's lease");
+
+  // A campaign lease for the same project, by contrast, does refuse the run.
+  registerProject(configDir, "demo", 1, "campaign", { pid: process.pid });
+  const { deps: deps2, logged } = makeDeps({
+    host: { configDir } as any,
+    projectHasLiveCampaign: projectHasLiveCampaign as any,
+  });
+  await dispatch({ kind: "run", agent: {}, args: ["611"], json: false }, deps2);
+  assert.equal((deps2.runLoop as any).calls.length, 0, "a live campaign lease refuses the standalone run");
+  assert.ok(logged.some((l) => /campaign is already running/.test(l)), "the refusal names a live campaign");
+});
+
 test("dispatch run for a campaign's own child (VETINARI_CHILD) runs even while the lease is live", async () => {
   const { deps, exitCodes } = makeDeps({
     isCampaignChild: true,
-    projectHasLiveLease: spy(true) as any,
+    projectHasLiveCampaign: spy(true) as any,
   });
   await dispatch({ kind: "run", agent: {}, args: ["436"], json: false }, deps);
   // The child is admitted: it archives (a no-op for a child) and runs the loop, mapping green to 0.
@@ -471,7 +500,7 @@ test("dispatch redrive selects the agent, redrives the campaign from the log, an
 
 test("dispatch redrive refuses with one line when a campaign lease for the project is live (§7)", async () => {
   const { deps, logged } = makeDeps({
-    projectHasLiveLease: spy(true) as any,
+    projectHasLiveCampaign: spy(true) as any,
   });
   await dispatch({ kind: "redrive", agent: {}, autoPrune: false, override: false, json: false }, deps);
   assert.equal((deps.campaign as any).calls.length, 0, "no second process redrives over a live campaign");
@@ -705,7 +734,7 @@ test("dispatch answer on an unparked issue reports it and exits 0 — never runs
 
 test("dispatch answer delivers to the record and, with a live campaign lease, stops there — no run, no redrive (§5 step 3, §8)", async () => {
   const { deps } = makeDeps({
-    projectHasLiveLease: spy(true) as any,
+    projectHasLiveCampaign: spy(true) as any,
     readEventLog: spy(pausedCampaignAfterGreen()) as any,
   });
   await dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps);
@@ -729,7 +758,7 @@ test("dispatch answer delivers then redrives the paused campaign when no campaig
 
 test("dispatch answer redrive refuses to start while a campaign lease is live (§7)", async () => {
   const { deps } = makeDeps({
-    projectHasLiveLease: spy(true) as any,
+    projectHasLiveCampaign: spy(true) as any,
     readEventLog: spy(pausedCampaignAfterGreen()) as any,
   });
   await dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps);

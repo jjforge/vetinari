@@ -18,7 +18,7 @@ import { resolve } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import { parseAgentFlags } from "./config.ts";
 import { renderUsage } from "./help.ts";
-import type { HostBudget, projectHasLiveLease } from "./host-slots.ts";
+import type { HostBudget, projectHasLiveCampaign } from "./host-slots.ts";
 import type { build, baseline, campaign, tgTest, requireTelegram, CampaignOutcome } from "./modes.ts";
 import { crashResumePrompt, type runLoop, type Outcome } from "./loop.ts";
 import type { answerParked, hasParked, listParked } from "./state.ts";
@@ -293,7 +293,7 @@ export interface DispatchDeps {
   /** Does a live campaign process hold this project's lease (design §8)? When it does, an
    *  `answer` only delivers and a `redrive` refuses — the live campaign owns the re-admit,
    *  so no second process runs the member beside it. */
-  projectHasLiveLease: typeof projectHasLiveLease;
+  projectHasLiveCampaign: typeof projectHasLiveCampaign;
   /** Read this project's event log — the source a green `answer` checks to decide
    *  whether the issue belongs to a paused campaign it should redrive (design §7). */
   readEventLog: typeof readEventLog;
@@ -333,7 +333,7 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
       // so a later reordering that archives first is caught by the test rather than shipping.
       // A campaign's OWN child `run` (VETINARI_CHILD) is exempt: its parent holds the lease
       // FOR it, so it must run (the archive-leftover step already skips children too).
-      if (!deps.isCampaignChild && deps.projectHasLiveLease(deps.host.configDir, cfg.project)) {
+      if (!deps.isCampaignChild && deps.projectHasLiveCampaign(deps.host.configDir, cfg.project)) {
         deps.log(`a campaign is already running for ${cfg.project} — it owns this issue; run refused.`);
         deps.setExitCode(1);
         return;
@@ -359,7 +359,7 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
     case "redrive": {
       // A redrive refuses while a campaign process for the project is live (design §7): that
       // process owns the re-admit, so a second one must not run over it. Report one line and stop.
-      if (deps.projectHasLiveLease(deps.host.configDir, cfg.project)) {
+      if (deps.projectHasLiveCampaign(deps.host.configDir, cfg.project)) {
         deps.log(`a campaign is already running for ${cfg.project} — it will pick up the work; redrive refused.`);
         return;
       }
@@ -693,7 +693,7 @@ async function dispatchAnswer(
 
   // A live campaign owns the re-admit (design §5 step 3, §8): stop here so no second process
   // runs the member beside it — the campaign's drain/grace picks up the answered record next tick.
-  if (deps.projectHasLiveLease(host.configDir, cfg.project)) {
+  if (deps.projectHasLiveCampaign(host.configDir, cfg.project)) {
     deps.log(`${taskId} answered — the live campaign will re-admit it.`);
     return;
   }

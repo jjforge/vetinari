@@ -214,7 +214,7 @@ Then the loop continues from that wave as in §5. Redrive is idempotent against 
 
 - **`MAX_CONCURRENT_CONTAINERS`** is a property of the host: an env var or a file in the host config dir; unset resolves to a machine-derived default, never unbounded.
 - **`containerShare: high | medium | low`** is a project's declared cut when projects contend: a floor of one per active project while the ceiling has a slot for each, a weighted share of the remainder, never preemptive. When more projects contend than the ceiling has slots, the heaviest are seated and the rest wait — the ceiling is never exceeded to honour the floor. A lone project fills the ceiling.
-- **The lease** is a file under the host config dir that every run reads and writes directly: what each run holds, its share, and its liveness. A run takes a container only when under its share; it releases on park, finish or death (a dead holder's containers are reclaimed on contention). A busy run drains to a smaller share as turns finish rather than being killed.
+- **The lease** is a file under the host config dir that every run reads and writes directly: what each run holds, its share, its liveness, and its kind (a campaign or a standalone run). A run takes a container only when under its share; it releases on park, finish or death (a dead holder's containers are reclaimed on contention). A busy run drains to a smaller share as turns finish rather than being killed. The campaign-liveness guard (§5 step 3, §7) matches only a live *campaign* lease, so concurrent standalone runs share the ceiling without one being read as a campaign.
 
 The gateway is not the allocator; a gateway-spawned `answer` takes a slot like any run.
 
@@ -334,7 +334,6 @@ Described by behaviour; the tracker holds the numbers (`gh issue list --label ca
 
 - **A throw before the sandbox logs no `failed`.** The run loop's catch covers the container's life; a worktree-preflight or tracker-fetch throw exits 1 with a stack trace and leaves no verdict in the log.
 - **A crash redrive never resumes the session.** §7 says "treat as unstarted if no commits, else resume the session"; the reconciler re-runs a crashed member fresh on its branch in every case, and a code comment overstates this.
-- **The host lease has no kind**, so the campaign-liveness guard reads a standalone `run`'s lease as a live campaign: a second `run`, an `answer`, or a `redrive` for the same project is refused with a message about a campaign that does not exist.
 
 ---
 

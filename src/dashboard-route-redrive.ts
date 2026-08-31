@@ -1,6 +1,6 @@
 import { listProjects } from "./registry.ts";
 import { buildStatus, campaignState, statusConfigFromPointer } from "./dashboard-model.ts";
-import { projectHasLiveLease } from "./host-slots.ts";
+import { projectHasLiveCampaign } from "./host-slots.ts";
 import { redriveAllowed } from "./dashboard-visual-state.ts";
 import { readBody, type RouteHandler } from "./dashboard-http.ts";
 
@@ -33,7 +33,7 @@ export const handleRedrive: RouteHandler = async (req, res, url, deps) => {
   }
   // Re-check the safety rule the control gates on — the same live-lease probe crash detection
   // reads (design §8), folded through the campaign state so a crash reads as stopped.
-  const leaseLive = projectHasLiveLease(deps.configDir, project);
+  const leaseLive = projectHasLiveCampaign(deps.configDir, project);
   const status = buildStatus(statusConfigFromPointer(pointer), { alive: leaseLive });
   const gate = redriveAllowed(campaignState(status.waves.map((wave) => wave.status)), leaseLive);
   if (!gate.allowed) {

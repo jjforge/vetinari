@@ -1,7 +1,7 @@
 import { listProjects } from "./registry.ts";
 import { archiveStatusConfig, baseBranchForProject, buildAllStatus, buildStatus, cardState, festiveFromCookie, listArchivedRuns, repoForProject, selectStatus } from "./dashboard-model.ts";
 import { renderLandingShell, renderStatusPage } from "./dashboard-render.ts";
-import { projectHasLiveLease } from "./host-slots.ts";
+import { projectHasLiveCampaign } from "./host-slots.ts";
 import type { RouteHandler } from "./dashboard-http.ts";
 
 /**
@@ -55,7 +55,7 @@ export const handlePage: RouteHandler = (req, res, url, deps) => {
   // The Redrive campaign control (design §7, §11): whether a campaign process still holds the
   // host lease — the same live-lease probe crash detection reads — gates it, and the base
   // branch it would land on is read live from the checkout for its confirm dialog.
-  const leaseLive = pointer ? projectHasLiveLease(deps.configDir, selected.project) : false;
+  const leaseLive = pointer ? projectHasLiveCampaign(deps.configDir, selected.project) : false;
   res.end(
     renderStatusPage(selected, {
       projects: repos,

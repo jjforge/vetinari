@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dispatch, parseArgs, type Command, type DispatchDeps } from "./cli-dispatch.ts";
+import { dispatch, identityLine, parseArgs, type Command, type DispatchDeps } from "./cli-dispatch.ts";
 
 // A spy that records each call's arguments and returns a canned value.
 function spy<T>(ret?: T) {
@@ -41,8 +41,8 @@ function makeDeps(overrides: Partial<DispatchDeps> = {}) {
     campaign: spy(Promise.resolve("done")) as unknown as DispatchDeps["campaign"],
     expandSelection: spy(Promise.resolve([])) as unknown as DispatchDeps["expandSelection"],
     runCampaignPlan: spy(Promise.resolve({ waves: [], waveArgs: "", report: "", suggestedName: "" })) as unknown as DispatchDeps["runCampaignPlan"],
-    runPrune: spy(Promise.resolve({ mode: "prune", target: "436", dropped: [], kept: [], remaining: [], parkedDropped: [] })) as unknown as DispatchDeps["runPrune"],
-    runGraft: spy(Promise.resolve({ ids: [], rejected: [], placement: [], remaining: [], applied: true })) as unknown as DispatchDeps["runGraft"],
+    runPrune: spy(Promise.resolve({ mode: "prune", project: "demo", repo: undefined, title: undefined, target: "436", dropped: [], kept: [], remaining: [], parkedDropped: [] })) as unknown as DispatchDeps["runPrune"],
+    runGraft: spy(Promise.resolve({ project: "demo", repo: undefined, titles: {}, ids: [], rejected: [], placement: [], remaining: [], applied: true })) as unknown as DispatchDeps["runGraft"],
     listParked: spy([]) as unknown as DispatchDeps["listParked"],
     hasParked: spy(true) as unknown as DispatchDeps["hasParked"],
     answerParked: spy() as unknown as DispatchDeps["answerParked"],
@@ -104,7 +104,18 @@ test("parseArgs reads `run --json` and keeps the task id as the surviving positi
 test("parseArgs splits `graft` ids on whitespace/commas and reads --dry-run", () => {
   assert.deepEqual(parseArgs(["graft", "436,611", "640", "--dry-run"]), {
     kind: "graft",
+    project: undefined,
     ids: ["436", "611", "640"],
+    dryRun: true,
+    json: false,
+  });
+});
+
+test("parseArgs reads a project qualifier on graft — a leading non-issue token", () => {
+  assert.deepEqual(parseArgs(["graft", "vetinari", "436", "611", "--dry-run"]), {
+    kind: "graft",
+    project: "vetinari",
+    ids: ["436", "611"],
     dryRun: true,
     json: false,
   });
@@ -113,6 +124,7 @@ test("parseArgs splits `graft` ids on whitespace/commas and reads --dry-run", ()
 test("parseArgs reads graft --json and keeps it out of the ids", () => {
   assert.deepEqual(parseArgs(["graft", "436", "--dry-run", "--json"]), {
     kind: "graft",
+    project: undefined,
     ids: ["436"],
     dryRun: true,
     json: true,
@@ -130,6 +142,18 @@ test("parseArgs maps `answer` to its task id and the answer text tail", () => {
 test("parseArgs maps a bare `prune <issue>` to a prune of that target", () => {
   assert.deepEqual(parseArgs(["prune", "436"]), {
     kind: "prune",
+    project: undefined,
+    target: "436",
+    dryRun: false,
+    purge: false,
+    json: false,
+  });
+});
+
+test("parseArgs reads a project qualifier on prune — a non-issue token before the issue", () => {
+  assert.deepEqual(parseArgs(["prune", "vetinari", "436"]), {
+    kind: "prune",
+    project: "vetinari",
     target: "436",
     dryRun: false,
     purge: false,
@@ -140,6 +164,7 @@ test("parseArgs maps a bare `prune <issue>` to a prune of that target", () => {
 test("parseArgs reads prune --json and keeps it out of the target", () => {
   assert.deepEqual(parseArgs(["prune", "436", "--dry-run", "--json"]), {
     kind: "prune",
+    project: undefined,
     target: "436",
     dryRun: true,
     purge: false,
@@ -150,6 +175,7 @@ test("parseArgs reads prune --json and keeps it out of the target", () => {
 test("parseArgs reads `prune` flags and ignores a retired batch tail — only the issue is the target", () => {
   assert.deepEqual(parseArgs(["prune", "436", "611 640", "623", "--dry-run", "--purge"]), {
     kind: "prune",
+    project: undefined,
     target: "436",
     dryRun: true,
     purge: true,
@@ -558,13 +584,25 @@ test("dispatch run --json switches on the raw event stream for the single loop (
 test("dispatch prune routes to runPrune with the parsed target and flags", async () => {
   const { deps } = makeDeps();
   await dispatch({ kind: "prune", target: "436", dryRun: true, purge: false, json: false }, deps);
-  assert.deepEqual((deps.runPrune as any).calls, [[deps.cfg, "436", { dryRun: true, purge: false, host: deps.host }]]);
+  assert.deepEqual((deps.runPrune as any).calls, [[deps.cfg, "436", { project: undefined, dryRun: true, purge: false, host: deps.host }]]);
+});
+
+test("dispatch prune forwards a project qualifier to runPrune", async () => {
+  const { deps } = makeDeps();
+  await dispatch({ kind: "prune", project: "vetinari", target: "436", dryRun: false, purge: false, json: false }, deps);
+  assert.deepEqual((deps.runPrune as any).calls, [[deps.cfg, "436", { project: "vetinari", dryRun: false, purge: false, host: deps.host }]]);
 });
 
 test("dispatch graft routes to runGraft with the parsed ids and flag", async () => {
   const { deps } = makeDeps();
   await dispatch({ kind: "graft", ids: ["436", "611"], dryRun: false, json: false }, deps);
-  assert.deepEqual((deps.runGraft as any).calls, [[deps.cfg, ["436", "611"], { dryRun: false }]]);
+  assert.deepEqual((deps.runGraft as any).calls, [[deps.cfg, ["436", "611"], { project: undefined, dryRun: false }]]);
+});
+
+test("dispatch graft forwards a project qualifier to runGraft", async () => {
+  const { deps } = makeDeps();
+  await dispatch({ kind: "graft", project: "vetinari", ids: ["436"], dryRun: false, json: false }, deps);
+  assert.deepEqual((deps.runGraft as any).calls, [[deps.cfg, ["436"], { project: "vetinari", dryRun: false }]]);
 });
 
 // No JSON reaches stdout without `--json` (design §11): a `--dry-run` closure emits its
@@ -572,8 +610,8 @@ test("dispatch graft routes to runGraft with the parsed ids and flag", async () 
 // preview shells pass it. The human prose stays either way.
 test("dispatch prune --dry-run emits the machine closure line only under --json", async () => {
   const withClosure = {
-    mode: "prune", target: "436", dropped: [], kept: [], remaining: [], parkedDropped: [],
-    closure: { target: "436", dropped: [], keptBanked: [], remaining: [] },
+    mode: "prune", project: "demo", repo: undefined, title: undefined, target: "436", dropped: [], kept: [], remaining: [], parkedDropped: [],
+    closure: { project: "demo", repo: undefined, target: "436", dropped: [], keptBanked: [], remaining: [] },
   };
   const noJson = makeDeps({ runPrune: spy(Promise.resolve(withClosure)) as any });
   await dispatch({ kind: "prune", target: "436", dryRun: true, purge: false, json: false }, noJson.deps);
@@ -586,8 +624,8 @@ test("dispatch prune --dry-run emits the machine closure line only under --json"
 
 test("dispatch graft --dry-run emits the machine closure line only under --json", async () => {
   const withClosure = {
-    ids: ["436"], rejected: [], placement: [], remaining: [], applied: false,
-    closure: { ids: ["436"], placement: [], remaining: [], rejected: [] },
+    project: "demo", repo: undefined, titles: {}, ids: ["436"], rejected: [], placement: [], remaining: [], applied: false,
+    closure: { project: "demo", repo: undefined, ids: ["436"], placement: [], remaining: [], rejected: [] },
   };
   const noJson = makeDeps({ runGraft: spy(Promise.resolve(withClosure)) as any });
   await dispatch({ kind: "graft", ids: ["436"], dryRun: true, json: false }, noJson.deps);
@@ -596,6 +634,42 @@ test("dispatch graft --dry-run emits the machine closure line only under --json"
   const withJson = makeDeps({ runGraft: spy(Promise.resolve(withClosure)) as any });
   await dispatch({ kind: "graft", ids: ["436"], dryRun: true, json: true }, withJson.deps);
   assert.ok(withJson.logged.some((l) => l.startsWith("graft-closure ")), "closure JSON under --json");
+});
+
+test("identityLine names project, repo and title, and degrades each end gracefully", () => {
+  assert.equal(
+    identityLine("vetinari", "jjforge/vetinari", "42", "Fix the thing"),
+    'vetinari · jjforge/vetinari#42 — "Fix the thing"',
+  );
+  // No title → project · repo#id.
+  assert.equal(identityLine("vetinari", "jjforge/vetinari", "42"), "vetinari · jjforge/vetinari#42");
+  // No repo → project and id.
+  assert.equal(identityLine("vetinari", undefined, "42", "Fix the thing"), 'vetinari #42 — "Fix the thing"');
+  assert.equal(identityLine("vetinari", undefined, "42"), "vetinari #42");
+});
+
+test("dispatch prune leads with the project/repo/title identity line", async () => {
+  const result = {
+    mode: "prune", project: "vetinari", repo: "jjforge/vetinari", title: "Fix the thing",
+    target: "42", dropped: ["42"], kept: [], remaining: [["101"]], parkedDropped: [],
+  };
+  const { deps, logged } = makeDeps({ runPrune: spy(Promise.resolve(result)) as any });
+  await dispatch({ kind: "prune", target: "42", dryRun: false, purge: false, json: false }, deps);
+  assert.equal(logged[0], 'vetinari · jjforge/vetinari#42 — "Fix the thing"');
+});
+
+test("dispatch graft leads with an identity line per grafted id", async () => {
+  const result = {
+    project: "vetinari", repo: "jjforge/vetinari",
+    titles: { "301": "First", "302": "Second" },
+    ids: ["301", "302"], rejected: [],
+    placement: [{ id: "301", wave: 2 }, { id: "302", wave: 2 }],
+    remaining: [["101"], ["301", "302"]], applied: true,
+  };
+  const { deps, logged } = makeDeps({ runGraft: spy(Promise.resolve(result)) as any });
+  await dispatch({ kind: "graft", ids: ["301", "302"], dryRun: false, json: false }, deps);
+  assert.equal(logged[0], 'vetinari · jjforge/vetinari#301 — "First"');
+  assert.equal(logged[1], 'vetinari · jjforge/vetinari#302 — "Second"');
 });
 
 // A paused campaign's event log where issue 436 (its only member) parked — the wave never

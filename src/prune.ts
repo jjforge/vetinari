@@ -16,7 +16,7 @@
 
 import type { ResolvedConfig } from "./config.ts";
 import type { HostBudget } from "./host-slots.ts";
-import { campaignSettled, campaignStarted, reduceCampaign } from "./dashboard-model.ts";
+import { campaignSettled, campaignStarted, issueNameFromTask, reduceCampaign, repoForProject } from "./dashboard-model.ts";
 import { readEventLog } from "./event-log.ts";
 import { clearParkedForTasks, enqueueOutbound } from "./state.ts";
 import { notice, type Notice } from "./notice.ts";
@@ -109,7 +109,12 @@ export function applyPrune(
 ): AppliedPrune {
   const dropped: string[] = [];
   const parkedToClear: string[] = [];
+  // Only a genuine member can leave the plan: an id absent from every wave is not
+  // in the campaign, so it must never default to `unstarted` and be reported as
+  // dropped — that would manufacture a drop for a non-member (a lying confirmation).
+  const inPlan = new Set(campaign.waves.flat().map(normalize));
   for (const id of removed.map(normalize)) {
+    if (!inPlan.has(id)) continue;
     const status = campaign.outcomes.get(id) ?? "unstarted";
     if (status === "unstarted" || status === "parked") {
       dropped.push(id);
@@ -130,6 +135,10 @@ export function applyPrune(
  * CLI's human text.
  */
 export interface StructuredPruneClosure {
+  /** the project this prune acts on (`cfg.project`) — `runPrune` always stamps it. */
+  project?: string;
+  /** the derived `owner/repo`, or absent when the identity could not be derived. */
+  repo?: string;
   /** the pruned issue itself. */
   target: string;
   /** the closure members that leave the plan (parked or unstarted). */
@@ -146,7 +155,11 @@ export interface StructuredPruneClosure {
  * was dropped, in campaign order. Pure so the CLI's structured dry-run output is
  * unit-tested at the seam rather than by re-parsing its own prose.
  */
-export function pruneClosure(target: string, removed: string[], applied: AppliedPrune): StructuredPruneClosure {
+export function pruneClosure(
+  target: string,
+  removed: string[],
+  applied: AppliedPrune,
+): Omit<StructuredPruneClosure, "project" | "repo"> {
   const dropped = new Set(applied.dropped);
   return {
     target: normalize(target),
@@ -229,17 +242,31 @@ export interface PruneDeps {
   clearParkedForTasks: typeof clearParkedForTasks;
   /** the fresh-launch path's campaign runner (`prune <issue> "611 640" …`). */
   launchCampaign: Campaign;
+  /**
+   * The project's derived `owner/repo`, read live from the checkout the CLI runs in
+   * (the impure git edge, injected so the identity line is drivable with a stub).
+   * `undefined` when no repo can be derived — the identity has degraded.
+   */
+  repoOf: () => string | undefined;
 }
 export const defaultPruneDeps: PruneDeps = {
   readEventLog,
   enqueueOutbound,
   clearParkedForTasks,
+  repoOf: () => repoForProject(process.cwd()),
   // Lazy-import to keep `modes` out of the static graph — see the `Campaign` note.
   launchCampaign: (cfg, batches, host, name, opts) =>
     import("./modes.ts").then((m) => m.campaign(cfg, batches, host, name, opts)),
 };
 
 export interface PruneOptions {
+  /**
+   * A project qualifier asserted on the CLI (`prune <project> <issue>`). It is an
+   * assertion, never a dispatch: the CLI acts only on the project it is run in, so a
+   * qualifier that names a different project — or one that cannot be verified because
+   * the repo identity has degraded — refuses and changes nothing.
+   */
+  project?: string;
   /** preview the prune but change nothing — no event, no enqueue, no launch. */
   dryRun?: boolean;
   /** the rare true-drop: clear a dropped parked member's record too (ADR 0013). */
@@ -254,6 +281,12 @@ export interface PruneOptions {
 /** Pruning the running campaign: the closure met the current outcomes (ADR 0005). */
 export interface RunningPruneResult {
   mode: "prune";
+  /** the project this prune acts on (`cfg.project`) — the identity line leads with it. */
+  project: string;
+  /** the derived `owner/repo`, or absent when the identity could not be derived. */
+  repo?: string;
+  /** the target's issue title, or absent when it could not be fetched (a degrade, not a failure). */
+  title?: string;
   /** the pruned issue. */
   target: string;
   /** the target plus its transitive dependents, in campaign order. */
@@ -323,6 +356,13 @@ export async function runPrune(
   const blockedBy = cfg.blockedBy;
   const tgt = normalize(target);
 
+  // Derive the project's identity and, when a project qualifier was asserted, verify
+  // it before anything is written. The qualifier is an assertion, never a dispatch: it
+  // must name the project the CLI is run in, and the repo identity must be derivable to
+  // check it against — silently ignoring the qualifier is the one dangerous degrade.
+  const repo = deps.repoOf();
+  assertProjectQualifier(opts.project, cfg.project, repo);
+
   // Explicit plan → launch a fresh reduced campaign (unchanged behavior).
   if (opts.plan) {
     const { removed, remaining } = await computePrune(opts.plan, target, blockedBy);
@@ -357,9 +397,17 @@ export async function runPrune(
   const kept = removed.filter((id) => !dropped.includes(id));
   const parkedDropped = dropped.filter((id) => reduced.outcomes.get(id) === "parked");
 
+  // The title names what the human recognizes as belonging to the wrong repo. It rides
+  // the same tracker call graft uses; a title that cannot be fetched degrades the line
+  // to project and id rather than failing the command.
+  const title = await titleOf(cfg, tgt);
+
   if (opts.dryRun) {
     return {
       mode: "prune",
+      project: cfg.project,
+      repo,
+      title,
       target: tgt,
       removed,
       dropped,
@@ -368,7 +416,7 @@ export async function runPrune(
       parkedDropped,
       purge: !!opts.purge,
       applied: false,
-      closure: pruneClosure(target, removed, applied),
+      closure: { ...pruneClosure(target, removed, applied), project: cfg.project, repo },
     };
   }
 
@@ -383,6 +431,9 @@ export async function runPrune(
   deps.enqueueOutbound(cfg, pruneRunningNotice(cfg.project, tgt, dropped, kept, remaining));
   return {
     mode: "prune",
+    project: cfg.project,
+    repo,
+    title,
     target: tgt,
     removed,
     dropped,
@@ -392,6 +443,46 @@ export async function runPrune(
     purge: !!opts.purge,
     applied: true,
   };
+}
+
+/**
+ * Verify a project qualifier before any write (shared by `prune` and `graft`). The
+ * qualifier is an assertion, never a dispatch: the CLI acts only on the project it is
+ * run in. A qualifier naming a different project refuses; and a qualifier the identity
+ * cannot be verified against — no derivable repo — refuses too, since silently ignoring
+ * it is the one genuinely dangerous degrade. No qualifier means the bare form, which
+ * works exactly as before (identity only degrades the display line, never refuses).
+ */
+export function assertProjectQualifier(
+  qualifier: string | undefined,
+  project: string,
+  repo: string | undefined,
+): void {
+  if (qualifier === undefined) return;
+  if (qualifier !== project)
+    throw new Error(
+      `refusing: this project is "${project}", but the qualifier names "${qualifier}". ` +
+        "The CLI acts only on the project it is run in — it never reaches across into another.",
+    );
+  if (repo === undefined)
+    throw new Error(
+      `refusing: cannot derive this project's repo to verify the "${qualifier}" qualifier. ` +
+        "With no repo identity to check against, the qualifier cannot be honored — run it in the project's checkout, or drop the qualifier.",
+    );
+}
+
+/**
+ * An issue's title from the tracker (`fetchTask` + `issueNameFromTask`), or `undefined`
+ * when it cannot be fetched or carries no title — a degrade the caller renders as project
+ * and id, never a failure. Used by `prune`'s identity line; `graft` already caches each
+ * candidate's task text during validation, so it parses the title from that instead.
+ */
+export async function titleOf(cfg: ResolvedConfig, id: string): Promise<string | undefined> {
+  try {
+    return issueNameFromTask(String(await cfg.fetchTask(id)));
+  } catch {
+    return undefined;
+  }
 }
 
 const renderWaves = (waves: string[][], empty: string) =>

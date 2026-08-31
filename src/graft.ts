@@ -14,7 +14,7 @@
  * the observable effects without re-parsing prose.
  */
 import type { ResolvedConfig } from "./config.ts";
-import { normalize } from "./prune.ts";
+import { assertProjectQualifier, normalize } from "./prune.ts";
 import {
   applyGraft,
   validateGraftTargets,
@@ -26,6 +26,7 @@ import {
   issueNameFromTask,
   issueStateFromTask,
   reduceCampaign,
+  repoForProject,
 } from "./dashboard-model.ts";
 import { readEventLog } from "./event-log.ts";
 import { enqueueOutbound } from "./state.ts";
@@ -33,6 +34,13 @@ import { notice, type Notice } from "./notice.ts";
 import { defaultFileSet, ticketProse } from "./fileset.ts";
 
 export interface GraftOptions {
+  /**
+   * A project qualifier asserted on the CLI (`graft <project> <ids…>`). It is an
+   * assertion, never a dispatch: the CLI acts only on the project it is run in, so a
+   * qualifier that names a different project — or one that cannot be verified because the
+   * repo identity has degraded — refuses and adds nothing.
+   */
+  project?: string;
   /** preview the placement but append nothing — no event, no outbound. */
   dryRun?: boolean;
 }
@@ -46,8 +54,18 @@ export interface GraftOptions {
 export interface GraftDeps {
   readEventLog: typeof readEventLog;
   enqueueOutbound: typeof enqueueOutbound;
+  /**
+   * The project's derived `owner/repo`, read live from the checkout the CLI runs in
+   * (the impure git edge, injected so the identity line is drivable with a stub).
+   * `undefined` when no repo can be derived — the identity has degraded.
+   */
+  repoOf: () => string | undefined;
 }
-export const defaultGraftDeps: GraftDeps = { readEventLog, enqueueOutbound };
+export const defaultGraftDeps: GraftDeps = {
+  readEventLog,
+  enqueueOutbound,
+  repoOf: () => repoForProject(process.cwd()),
+};
 
 /**
  * A graft dry-run's placement in structured form: the requested ids, where each
@@ -57,6 +75,10 @@ export const defaultGraftDeps: GraftDeps = { readEventLog, enqueueOutbound };
  * aggregated dashboard's preview names each id's fate without re-parsing the prose.
  */
 export interface StructuredGraftClosure {
+  /** the project this graft acts on (`cfg.project`) — `runGraft` always stamps it. */
+  project?: string;
+  /** the derived `owner/repo`, or absent when the identity could not be derived. */
+  repo?: string;
   /** the requested ids, normalized, in input order. */
   ids: string[];
   /** each accepted id and the 1-based wave it lands in — empty on a rejected batch. */
@@ -68,6 +90,12 @@ export interface StructuredGraftClosure {
 }
 
 export interface GraftResult {
+  /** the project this graft acts on (`cfg.project`) — the identity line leads with it. */
+  project: string;
+  /** the derived `owner/repo`, or absent when the identity could not be derived. */
+  repo?: string;
+  /** each requested id's issue title, when it could be fetched — the identity line names it. */
+  titles: Record<string, string>;
   /** the grafted ids, normalized, in input order. */
   ids: string[];
   /** each grafted id and the 1-based wave it lands in, in input order. */
@@ -133,6 +161,11 @@ export async function runGraft(
       'graft needs a "blockedBy" resolver in your config — e.g. blockedBy: githubBlockedBy("owner/repo").',
     );
 
+  // Derive the project's identity and, when a project qualifier was asserted, verify it
+  // before anything is written — an assertion, never a dispatch (see `assertProjectQualifier`).
+  const repo = deps.repoOf();
+  assertProjectQualifier(opts.project, cfg.project, repo);
+
   const events = deps.readEventLog(cfg);
   if (!campaignStarted(events))
     throw new Error(
@@ -168,6 +201,18 @@ export async function runGraft(
     return text === undefined ? "unknown" : issueStateFromTask(text);
   };
 
+  // Each candidate id's title, parsed from the task text already fetched above (reusing
+  // the same parser the campaign path uses). It names what a human recognizes as
+  // belonging to the wrong repo, and is stamped on the graft event so the reducer's
+  // title-folding gives the grafted wave a real header (#197). A title that could not be
+  // fetched is simply absent — the identity line degrades to project and id.
+  const titles: Record<string, string> = {};
+  for (const id of normalized) {
+    const text = taskText.get(id);
+    const title = text === undefined ? undefined : issueNameFromTask(text);
+    if (title) titles[id] = title;
+  }
+
   // All-or-nothing: reject the whole graft naming the offenders, never half-apply.
   // A `--dry-run` is a preview, so it discloses the rejection in its closure rather
   // than throwing (the aggregated dashboard's preview names the offenders off it); a
@@ -179,12 +224,17 @@ export async function runGraft(
   if (rejections.length) {
     if (opts.dryRun)
       return {
+        project: cfg.project,
+        repo,
+        titles,
         ids: normalized,
         placement: [],
         remaining: reduced.waves,
         rejected: rejections,
         applied: false,
         closure: {
+          project: cfg.project,
+          repo,
           ids: normalized,
           placement: [],
           remaining: reduced.waves,
@@ -236,16 +286,6 @@ export async function runGraft(
     wave: placeOf.get(id)! + 1,
   }));
 
-  // Stamp each grafted id's title from the task text already fetched during validation
-  // (reusing the same parser the campaign path uses), so the reducer's title-folding
-  // gives the grafted wave a real header and its rows real titles (#197).
-  const titles: Record<string, string> = {};
-  for (const id of normalized) {
-    const text = taskText.get(id);
-    const title = text === undefined ? undefined : issueNameFromTask(text);
-    if (title) titles[id] = title;
-  }
-
   const event = { ids: normalized, blockedBy, basenames, titles };
   const outbound = notice({
     emoji: "🌱",
@@ -260,6 +300,9 @@ export async function runGraft(
   });
 
   const result: GraftResult = {
+    project: cfg.project,
+    repo,
+    titles,
     ids: normalized,
     placement,
     remaining: applied.remaining,
@@ -270,6 +313,8 @@ export async function runGraft(
     ...(opts.dryRun
       ? {
           closure: {
+            project: cfg.project,
+            repo,
             ids: normalized,
             placement,
             remaining: applied.remaining,

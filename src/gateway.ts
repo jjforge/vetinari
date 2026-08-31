@@ -474,6 +474,19 @@ export interface PruneHandlerDeps {
 }
 
 /**
+ * A prune preview in the one notice skeleton (design §10), so the single most
+ * destructive exchange on a shared bot names its project like every other notice:
+ * a header `✂️ <project> · PRUNE · #<issue>`, the closure the project's own
+ * `prune --dry-run` computed as the signal line, then the exact confirm
+ * instruction. It rides the skeleton rather than forwarding the child's raw stdout
+ * as the whole message body, and because the header names the resolved project a
+ * bare `prune <issue>` on a shared bot still says which project it landed on.
+ */
+export function formatPrunePreview(project: string, issue: string, closure: string): string {
+  return [`✂️ ${project} · PRUNE · #${issue}`, closure, `Reply "yes" to this message to prune.`].join("\n\n");
+}
+
+/**
  * Handle a `prune` command end to end but for the execution: resolve the target
  * from the bot it arrived on, and either reject (ambiguous → candidate list,
  * none → nothing running) or preview the closure and record a pending
@@ -505,7 +518,7 @@ export async function handlePruneCommand(
     await deps.send(conn, `Couldn't preview prune #${command.issue} for ${p.project} — is a campaign still running?`);
     return;
   }
-  const messageId = await deps.send(conn, `${previewText}\n\nReply "yes" to this message to prune.`);
+  const messageId = await deps.send(conn, formatPrunePreview(p.project, command.issue, previewText));
   if (messageId == null) return; // send failed — nothing to confirm against, drop it
   pending.record(conn.token, messageId, target);
 }

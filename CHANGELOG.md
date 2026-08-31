@@ -41,6 +41,7 @@ Within a milestone each bold section label appears at most once.
 - [user] The dashboard now heals a stale board after an SSE reconnect: a re-established live-update stream (after a network blip or gateway restart) re-fetches instead of seeding past the gap, so the wave grid no longer sits disagreeing with the server until the next append (#331).
 - [user] The host-log pane now heals on reconnect: lines written to `host.jsonl` while the SSE stream was down (a network blip, gateway restart, or backgrounded tab) appear when the stream returns, instead of being silently and permanently lost for that page. The gear badge corrects itself from the same buffer (#352).
 - [user] The live tail no longer goes permanently silent for an issue whose agent stream restarts — a redriven, respawned, or rolled-over `activity-<issue>.jsonl` restarts its per-file numbering, and the tail now recognizes that as a restart and delivers the new run instead of filtering it as already-seen (#353).
+- [user] A dashboard tab backgrounded past the OS's connection-close window (iOS 18+ closes a hidden SSE stream ~20s in without an error event, `readyState` still OPEN) now reconnects on resume instead of freezing the whole board until a manual reload — the grid, live tail and host log all come back live; a briefly-hidden tab does not reconnect (#351).
 
 ### Collected changes — August 30, 2026
 

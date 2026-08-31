@@ -39,6 +39,8 @@ Within a milestone each bold section label appears at most once.
 - [user] The summary-line graft control now keeps its state across a live-region refresh: typed-but-unsubmitted issue ids, an inline validation error, and an in-flight `grafting…` graft all survive a log event landing mid-edit instead of being silently emptied (#329).
 - [user] The campaign board no longer stops updating after a reply draft is left in a closed issue sheet — the soft-refresh's mid-compose guard, which protected nothing but could freeze the whole board on a stale hidden draft, is removed so every live event refreshes (#348).
 - [user] The dashboard now heals a stale board after an SSE reconnect: a re-established live-update stream (after a network blip or gateway restart) re-fetches instead of seeding past the gap, so the wave grid no longer sits disagreeing with the server until the next append (#331).
+- [user] The host-log pane now heals on reconnect: lines written to `host.jsonl` while the SSE stream was down (a network blip, gateway restart, or backgrounded tab) appear when the stream returns, instead of being silently and permanently lost for that page. The gear badge corrects itself from the same buffer (#352).
+- [user] The live tail no longer goes permanently silent for an issue whose agent stream restarts — a redriven, respawned, or rolled-over `activity-<issue>.jsonl` restarts its per-file numbering, and the tail now recognizes that as a restart and delivers the new run instead of filtering it as already-seen (#353).
 
 ### Collected changes — August 30, 2026
 

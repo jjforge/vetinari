@@ -184,7 +184,7 @@ export function tallyDotClass({ kind, count }: { kind: string; count: number }):
 
 /**
  * Whether a live-pane frame counts as *visible* freshness activity — the signal that
- * resets the live-bar's "updated Ns ago" clock (#198). A pane (the live-tail, the
+ * resets the live-bar's "last activity Ns ago" clock (#198). A pane (the live-tail, the
  * host-log) is a co-equal live surface, so lines it visibly appends should read as an
  * update just like a wave/feed refresh. Only a *visible* append counts: no new lines
  * (`appended === 0`), a collapsed pane (`!open`), or a pane whose own follow is paused so
@@ -236,10 +236,14 @@ export function tailCollapseIntent({
 }
 
 /**
- * The live-bar's freshness readout (ADR 0008): maps the last-refresh time to the
- * "updated Ns ago" text its thin DOM glue writes onto the readout. `lastUpdate` is null
- * before the first refresh (the landing opens "waiting for updates"; the campaign page
- * seeds it to now), and otherwise the readout ages second by second from `now`.
+ * The live-bar's liveness readout (ADR 0008, #337): maps the last-activity time to the
+ * "last activity Ns ago" text its thin DOM glue writes onto the readout. The readout
+ * promises *page liveness* — the last moment any live surface (a wave/feed soft-refresh,
+ * the live-tail, the host log) visibly appended — not that the wave grid is current. Its
+ * word names exactly the event that resets it, so it is true by construction and cannot
+ * re-form the #198↔#337 mirror around a grid it does not measure. `lastUpdate` is null
+ * before the first activity — both pages seed it null and the readout shows a quiet `—`,
+ * never a fake zero — and otherwise it ages second by second from `now`.
  *
  * Self-contained and browser-safe: it is single-sourced into both page scripts via
  * `${freezeIntent.toString()}`, so the node test asserts the very function the browser
@@ -255,7 +259,7 @@ export function freezeIntent({
   return {
     updatedText:
       lastUpdate == null
-        ? "waiting for updates"
-        : "updated " + Math.round((now - lastUpdate) / 1000) + "s ago",
+        ? "—"
+        : "last activity " + Math.round((now - lastUpdate) / 1000) + "s ago",
   };
 }

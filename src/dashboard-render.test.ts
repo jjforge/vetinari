@@ -283,8 +283,8 @@ test("renderHostLog is humanized-only: no Humanized/Raw toggle, keeps a Download
 });
 test("renderLandingShell seats the host-log gear at the end of the top-right live-bar, after the readout (#201)", () => {
   const html = renderLandingShell(["alpha", "beta"]);
-  // The gear rides the end of the live-bar, immediately after the "updated Ns ago" readout:
-  // the bar reads live dot → "updated Ns ago" → gear. Its pane travels with it (popover).
+  // The gear rides the end of the live-bar, immediately after the "last activity Ns ago" readout:
+  // the bar reads live dot → "last activity Ns ago" → gear. Its pane travels with it (popover).
   assert.match(
     html,
     /<span class="updated" data-updated>[^<]*<\/span><section class="host-log" data-host-log>/,
@@ -293,7 +293,7 @@ test("renderLandingShell seats the host-log gear at the end of the top-right liv
   // opens only from within the live-bar.
   assert.doesNotMatch(html, /<\/div>\s*<section class="host-log"/);
   // The gear now rides the campaign page's live-bar too, in the very same seat — after the
-  // "updated Ns ago" readout — so settings are one click away on every page (#215).
+  // "last activity Ns ago" readout — so settings are one click away on every page (#215).
   const campaign = renderStatusPage({ project: "demo", waves: [], parked: [] });
   assert.match(
     campaign,
@@ -402,13 +402,13 @@ test("no status/category word is ever a bare top-level CSS class, so a component
     }
   }
 });
-test("the updated readout ages 'updated Ns ago' from the last refresh, on both pages (§5, #210)", () => {
+test("the updated readout ages 'last activity Ns ago' from the last activity, on both pages (§5, #210, #337)", () => {
   for (const html of [
     renderLandingShell(["alpha"]),
     renderStatusPage({ project: "beta", waves: [], parked: [] }),
   ]) {
-    // The "updated Ns ago" readout is `freezeIntent`'s `updatedText` (dashboard-visual-state.ts,
-    // asserted directly there: live⇒"updated Ns ago", null⇒"waiting for updates"),
+    // The "last activity Ns ago" readout is `freezeIntent`'s `updatedText` (dashboard-visual-state.ts,
+    // asserted directly there: live⇒"last activity Ns ago", null⇒"—"),
     // single-sourced into both pages and written onto the readout. With the page-level pause
     // gone (#210) there is no "Paused" branch — the clock always ages.
     assert.match(html, /function freezeIntent/);

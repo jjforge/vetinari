@@ -640,7 +640,9 @@ ${issueDetailSheetMarkup(Boolean(opts.prune))}${
     return Math.floor(hrs / 24) + "d";
   };
   const updatedEl = document.querySelector("[data-updated]");
-  let lastUpdate = Date.now();
+  // Seeded null, not now (#337): the readout means last-activity, so it shows a quiet "—"
+  // until the first live surface appends rather than faking "last activity 0s ago" at load.
+  let lastUpdate = null;
   // freezeIntent (dashboard-visual-state.ts) decides the readout; the glue only writes it.
   const renderUpdated = () => { updatedEl.textContent = freezeIntent({ lastUpdate, now: Date.now() }).updatedText; };
   // Live updates (ADR 0008, #131): a live event soft-refreshes rather than reloading the
@@ -727,7 +729,7 @@ ${issueDetailSheetMarkup(Boolean(opts.prune))}${
   // constantly on desktop) and not online (a network blip does not imply a dead stream).
   window.addEventListener("pageshow", onResume);
   // A live pane (the live-tail) that visibly appends is a co-equal update (#198): reset the
-  // freshness clock so "updated Ns ago" reflects any live surface, not just a soft-refresh.
+  // clock so "last activity Ns ago" reflects any live surface, not just a soft-refresh (#337).
   window.addEventListener("vetinari:activity", () => { lastUpdate = Date.now(); renderUpdated(); });
   renderUpdated();
   setInterval(renderUpdated, 1000);

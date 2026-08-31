@@ -17,7 +17,7 @@ src/*.test.ts`) — no jsdom, no CDP, no browser. A reducer takes state and retu
 the visual intent (a class fragment, or an `{updatedText}` object); the render code
 and the browser glue call it and apply the result, but never re-decide. Today:
 `dotClass` and `tallyDotClass` (the dot/idle class decisions), `hiddenPastCap` (the
-show-older cap), and `freezeIntent` (the live-bar's "updated Ns ago" readout).
+show-older cap), and `freezeIntent` (the live-bar's "last activity Ns ago" readout).
 
 **The client reducer is single-sourced to the browser via `.toString()`.** The
 freshness readout and the tally class run *in the browser* — they tick each second —

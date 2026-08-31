@@ -428,7 +428,7 @@ export const renderRepoDropdown = (repos: readonly (string | RepoOption)[], sele
 
 /**
  * The top bar every page shares (#81): the heading/dropdown on the left and the
- * live-bar (live dot + "updated Ns ago") on the right, wrapped in the `.page-top` flex
+ * live-bar (live dot + "last activity Ns ago") on the right, wrapped in the `.page-top` flex
  * row. One definition rendered by the landing, the repo page, and any archived view, so
  * the two can no longer drift — which is what let the "Live" word survive on one page.
  * The live indicator is a dot only: its "Live" state is an accessible label
@@ -438,7 +438,7 @@ export const renderRepoDropdown = (repos: readonly (string | RepoOption)[], sele
  * nothing to add leave the live-bar untouched.
  */
 export const renderTopBar = (left: string, trailing = "") =>
-  `<div class="page-top">${left}<div class="live-bar" title="Live updates over SSE"><span class="live-indicator" data-live-state="live" aria-label="Live"></span><span class="updated" data-updated>waiting for updates</span>${trailing}</div></div>`;
+  `<div class="page-top">${left}<div class="live-bar" title="Live updates over SSE"><span class="live-indicator" data-live-state="live" aria-label="Live"></span><span class="updated" data-updated>—</span>${trailing}</div></div>`;
 
 /**
  * The shared settings surface (#180): a settings gear the fleet-level `host.jsonl`

@@ -488,8 +488,8 @@ ${REPO_DROPDOWN_SCRIPT}
     }
   }
   // Live updates (ADR 0008): one SSE stream feeds re-reads of the landing as events
-  // land. "updated Ns ago" counts from the last time the view actually refreshed, so it
-  // visibly ages between ticks.
+  // land. "last activity Ns ago" counts from the last time any live surface appended (#337),
+  // so it visibly ages between ticks.
   const updatedEl = document.querySelector("[data-updated]");
   let lastUpdate = null;
   // freezeIntent (dashboard-visual-state.ts) decides the readout; the glue only writes it.
@@ -535,7 +535,7 @@ ${REPO_DROPDOWN_SCRIPT}
   // pageshow covers a bfcache restore, where no visibilitychange may fire.
   window.addEventListener("pageshow", onResume);
   // A live pane (the host-log) that visibly appends is a co-equal update (#198): reset the
-  // freshness clock so "updated Ns ago" reflects any live surface, not just a feed refresh.
+  // clock so "last activity Ns ago" reflects any live surface, not just a feed refresh (#337).
   window.addEventListener("vetinari:activity", () => { lastUpdate = Date.now(); renderUpdated(); });
   setInterval(renderUpdated, 1000);
   refresh();

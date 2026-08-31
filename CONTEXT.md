@@ -250,9 +250,16 @@ _Avoid_: message type, event kind.
 Expects a reply routed back — only **question** is. Every other category is
 fire-and-forget.
 
+**Bot connection**:
+A [[project]]'s one Telegram bot and the chat it speaks in by default — the token
+and chat id in its [[host.env]], read live by the [[gateway]]. One bot per
+project: a project has exactly one, or none (and then the gateway skips it).
+_Avoid_: telegram config, bot creds, the project's telegram.
+
 **Destination**:
-A named Telegram connection (bot + chat, optionally thread) a [[project]] routes
-categories to. "All → bot A, failures → bot B" is two destinations.
+A named place on the project's [[bot connection]] — a chat, optionally a forum
+thread under it — that a [[message-category]] routes to. It names no bot and
+carries no secret; it only picks *where* on that one bot a message lands.
 _Avoid_: channel, target, route.
 
 **Routing rule** (`notify`):

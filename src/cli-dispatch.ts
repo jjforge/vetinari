@@ -38,6 +38,24 @@ import { makeReporter } from "./report.ts";
 const USAGE = renderUsage();
 
 /**
+ * A bare, numeric issue token (`640` or `#640`) — the same shape the gateway's command
+ * parser recognizes. A project qualifier is, by contrast, a non-numeric name, so the two
+ * are told apart the same way on every surface: a leading non-issue token is the project.
+ */
+const isIssueToken = (t: string) => /^#?\d+$/.test(t);
+
+/**
+ * The line `prune`/`graft` lead with so a human recognizes what they are acting on:
+ * `vetinari · jjforge/vetinari#42 — "…"`. A repo that could not be derived degrades to
+ * project and id (`vetinari #42`); a title that could not be fetched drops the `— "…"`
+ * tail. The title is what a human recognizes as belonging to the wrong repo.
+ */
+export const identityLine = (project: string, repo: string | undefined, id: string, title?: string): string => {
+  const base = repo ? `${project} · ${repo}#${id}` : `${project} #${id}`;
+  return title ? `${base} — "${title}"` : base;
+};
+
+/**
  * Turn on `--json` for the raw-event stream: set the `VETINARI_JSON` env the run logger keys its
  * stdout echo on (`log.ts`) — and which child wave `run`s inherit — so `campaign`/`run`/`redrive`
  * stream JSONL to stdout for tooling. Left unset, no JSON reaches stdout: the terminal view is the
@@ -81,8 +99,8 @@ export type Command =
       json: boolean;
     }
   | { kind: "redrive"; agent: AgentOverride; autoPrune: boolean; override: boolean; json: boolean }
-  | { kind: "prune"; target?: string; dryRun: boolean; purge: boolean; json: boolean }
-  | { kind: "graft"; ids: string[]; dryRun: boolean; json: boolean }
+  | { kind: "prune"; project?: string; target?: string; dryRun: boolean; purge: boolean; json: boolean }
+  | { kind: "graft"; project?: string; ids: string[]; dryRun: boolean; json: boolean }
   | { kind: "answer"; taskId?: string; text: string[] }
   | { kind: "parked" }
   | { kind: "clear" }
@@ -120,18 +138,24 @@ export function parseArgs(argv: string[]): Command {
         json: args.includes("--json"),
       };
     }
-    case "graft":
+    case "graft": {
+      const tokens = rest
+        .filter((a) => a !== "--dry-run" && a !== "--json")
+        .flatMap((a) => a.split(/[\s,]+/))
+        .filter(Boolean);
+      // `graft <project> <ids…>`: a leading non-issue token is the project qualifier — the
+      // spelling the gateway accepts. `graft <ids…>` (every token an issue) has no qualifier.
+      const project = tokens.length && !isIssueToken(tokens[0]) ? tokens[0] : undefined;
       return {
         kind: "graft",
-        ids: rest
-          .filter((a) => a !== "--dry-run" && a !== "--json")
-          .flatMap((a) => a.split(/[\s,]+/))
-          .filter(Boolean),
+        project,
+        ids: project ? tokens.slice(1) : tokens,
         dryRun: rest.includes("--dry-run"),
         // `--json` gates the machine `graft-closure {json}` line so no JSON reaches stdout
         // without it; the dashboard's preview shell passes it (design §11).
         json: rest.includes("--json"),
       };
+    }
     case "redrive": {
       // Redrive picks an unfinished campaign back up (design §7) — the umbrella verb
       // (ADR 0020). It takes no issue selection; strip the agent, then read only its
@@ -189,12 +213,17 @@ export function parseArgs(argv: string[]): Command {
       };
     }
     case "prune": {
-      // `prune <issue>` (with `--purge`) is the only form — it prunes the RUNNING campaign
-      // at the next wave boundary. The fresh-reduced-launch batch form is retired (design §12).
-      const [target] = rest.filter((a) => a !== "--dry-run" && a !== "--purge" && a !== "--json");
+      // `prune <issue>` prunes the RUNNING campaign at the next wave boundary; the
+      // fresh-reduced-launch batch form is retired (design §12). `prune <project> <issue>`
+      // — a leading non-issue token followed by an issue — carries a project qualifier, the
+      // spelling the gateway accepts; a leading issue token is the bare form and any tail is
+      // ignored (the retired batch args).
+      const positional = rest.filter((a) => a !== "--dry-run" && a !== "--purge" && a !== "--json");
+      const qualified = positional.length >= 2 && !isIssueToken(positional[0]) && isIssueToken(positional[1]);
       return {
         kind: "prune",
-        target,
+        project: qualified ? positional[0] : undefined,
+        target: qualified ? positional[1] : positional[0],
         dryRun: rest.includes("--dry-run"),
         purge: rest.includes("--purge"),
         // `--json` gates the machine `prune-closure {json}` line so no JSON reaches stdout
@@ -529,6 +558,7 @@ async function dispatchPrune(
 ): Promise<void> {
   const { cfg, host } = deps;
   const result = await deps.runPrune(cfg, cmd.target!, {
+    project: cmd.project,
     dryRun: cmd.dryRun,
     purge: cmd.purge,
     host,
@@ -538,6 +568,9 @@ async function dispatchPrune(
   // is never reached without a `plan`.
   if (result.mode !== "prune") return;
 
+  // Lead with the identity so a human recognizes what is being pruned — the project, the
+  // derived repo, and the issue title (dry-run and applied alike).
+  deps.log(identityLine(result.project, result.repo, tgt, result.title));
   deps.log(
     `prune #${tgt} → ${result.dropped.length ? `dropping ${result.dropped.map((i) => `#${i}`).join(", ")}` : "nothing to drop"}` +
       (result.kept.length
@@ -574,7 +607,7 @@ async function dispatchGraft(
   cmd: Extract<Command, { kind: "graft" }>,
   deps: DispatchDeps,
 ): Promise<void> {
-  const result = await deps.runGraft(deps.cfg, cmd.ids, { dryRun: cmd.dryRun });
+  const result = await deps.runGraft(deps.cfg, cmd.ids, { project: cmd.project, dryRun: cmd.dryRun });
   if (result.rejected.length) {
     // A `--dry-run` discloses a whole-batch rejection instead of throwing, so the
     // aggregated dashboard's preview can name the offenders off the closure line.
@@ -582,6 +615,10 @@ async function dispatchGraft(
       `graft rejected — nothing added (${describeGraftRejections(result.rejected)}).`,
     );
   } else {
+    // Lead with the identity of each grafted id — the project, the derived repo, and the
+    // issue title — so a human recognizes an id that belongs to the wrong repo.
+    for (const id of result.ids)
+      deps.log(identityLine(result.project, result.repo, id, result.titles[id]));
     deps.log(
       `graft ${result.ids.map((i) => `#${i}`).join(", ")} → ` +
         result.placement.map((p) => `#${p.id} in wave ${p.wave}`).join(", "),

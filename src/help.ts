@@ -45,14 +45,14 @@ export const MODES: Mode[] = [
       "pick an unfinished campaign back up on the current base — the umbrella verb (ADR 0020): reconstructs the plan from the event log and re-enters the first wave that did not close, reconciling it before running (design §7) — a green-but-unmerged member is integrated without a rerun, an answered park (its record gone) re-runs, an unresolved park re-parks the wave, and a failed member stops the campaign as failed again unless --override re-runs it. Redoes no already-merged issue. Takes no issue args; use it after a prune, graft, fix-forward, crash, or failure. Nothing left to run reports so and exits clean (`campaign --resume` is a one-release alias). --json streams the raw event log to stdout for tooling; without it the terminal shows human-readable lines only (design §11)",
   },
   {
-    signature: "prune <issue>",
+    signature: "prune [<project>] <issue>",
     blurb:
-      "prune <issue> + everything blocked by it from the RUNNING campaign: appends a prune event the loop honors at the next wave boundary (the in-flight wave finishes; only future waves shrink). Banked work stays — a merged/green member is kept, only parked/not-yet-started ones leave. A pruned issue's parked record (branch/worktree/session) is preserved so it stays resumable; --purge is the rare true-drop that clears it. Needs a running campaign (--dry-run to only preview).",
+      "prune <issue> + everything blocked by it from the RUNNING campaign: appends a prune event the loop honors at the next wave boundary (the in-flight wave finishes; only future waves shrink). Leads with what it acts on — the project, the derived owner/repo and the issue title (`vetinari · owner/repo#42 — \"…\"`). Banked work stays — a merged/green member is kept, only parked/not-yet-started ones leave. A pruned issue's parked record (branch/worktree/session) is preserved so it stays resumable; --purge is the rare true-drop that clears it. An optional <project> qualifier (the spelling the gateway accepts) asserts which project you mean and refuses if it names a different one or the repo identity can't be derived — it never dispatches across projects. Needs a running campaign (--dry-run to only preview).",
   },
   {
-    signature: "graft <ids…>",
+    signature: "graft [<project>] <ids…>",
     blurb:
-      "add issues to a RUNNING (or paused/parked/redrivable) campaign — the additive mirror of prune (ADR 0014): appends a graft event the loop honors at the next wave boundary. The in-flight wave finishes untouched; the added issues re-layer into future waves (after their blockers, basename-disjoint), leaving already-planned waves stable. Rejected whole — naming the offenders — if any id is unknown/closed or already in the campaign. Needs a campaign that has not finished (--dry-run to only print the resulting placement).",
+      "add issues to a RUNNING (or paused/parked/redrivable) campaign — the additive mirror of prune (ADR 0014): appends a graft event the loop honors at the next wave boundary. Leads with what it acts on — the project, the derived owner/repo and each id's title — so an id from the wrong repo is recognizable. The in-flight wave finishes untouched; the added issues re-layer into future waves (after their blockers, basename-disjoint), leaving already-planned waves stable. Rejected whole — naming the offenders — if any id is unknown/closed or already in the campaign. An optional <project> qualifier asserts which project you mean and refuses if it names a different one or the repo identity can't be derived. Needs a campaign that has not finished (--dry-run to only print the resulting placement).",
   },
   {
     signature: "init [--dry-run]",

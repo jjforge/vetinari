@@ -100,6 +100,20 @@ test("computePrune ignores blockers that live outside the named campaign", async
   assert.deepEqual(res.remaining, []);
 });
 
+test("applyPrune never manufactures a drop for a non-member id", () => {
+  // A closure id that is not in any wave must not default to `unstarted` and land
+  // in `dropped` — otherwise a prune of a non-member would report dropping it while
+  // dropping nothing (the confirmation would lie).
+  const res = applyPrune(
+    { waves: [["101"], ["640"]], outcomes: outcomesFrom({}) },
+    ["42"],
+  );
+
+  assert.deepEqual(res.dropped, []);
+  assert.deepEqual(res.parkedToClear, []);
+  assert.deepEqual(res.remaining, [["101"], ["640"]]);
+});
+
 test("applyPrune keeps a merged member and drops an unstarted one", () => {
   // 640 already merged, 701 not yet started; both are in the removed closure.
   const res = applyPrune(
@@ -345,9 +359,17 @@ const harnessCfg = (overrides: Partial<ResolvedConfig> = {}): ResolvedConfig => 
     branchPrefix: "agent/",
     log: loggerForRun({ logFile }),
     blockedBy: async () => [],
+    fetchTask: async () => JSON.stringify({ state: "OPEN", title: "Target title" }),
     ...overrides,
   } as unknown as ResolvedConfig;
 };
+
+// The prune deps with the git edge (`repoOf`) stubbed to a fixed repo, so the
+// identity line is exercised without shelling out to git.
+const depsWithRepo = (repo: string | undefined) => ({
+  ...defaultPruneDeps,
+  repoOf: () => repo,
+});
 
 // Seed a running campaign onto the temp log: `campaign-start` with waves
 // (unsettled — no member merged, so the fold reads it as open) plus a `wave-start`
@@ -435,7 +457,8 @@ test("runPrune --dry-run previews the prune but appends no event and enqueues no
   const cfg = harnessCfg();
   launch(cfg, [["101"], ["640"]]);
 
-  const result = await runPrune(cfg, "640", { dryRun: true });
+  // repoOf stubbed to undefined so the closure's repo is deterministic (no git shell-out).
+  const result = await runPrune(cfg, "640", { dryRun: true }, depsWithRepo(undefined));
 
   assert.equal(result.mode, "prune");
   assert.equal(result.applied, false);
@@ -443,6 +466,8 @@ test("runPrune --dry-run previews the prune but appends no event and enqueues no
   // The structured closure rides along on a dry-run so the dashboard preview can
   // name the exact closure without re-parsing prose.
   assert.deepEqual(result.mode === "prune" && result.closure, {
+    project: "harness",
+    repo: undefined,
     target: "640",
     dropped: ["640"],
     keptBanked: [],
@@ -521,6 +546,89 @@ test("runPrune --purge clears a dropped parked member's record", async () => {
   assert.deepEqual(result.mode === "prune" && result.parkedDropped, ["701"]);
   // The rare true-drop: the parked record is cleared, reclaiming the work.
   assert.deepEqual(cleared, [["701"]]);
+});
+
+test("runPrune names the target's project, repo and title, and carries them into the closure", async () => {
+  const cfg = harnessCfg({
+    project: "vetinari",
+    fetchTask: async () => JSON.stringify({ state: "OPEN", title: "Fix the thing" }),
+  });
+  launch(cfg, [["101"], ["640"]]);
+
+  const result = await runPrune(cfg, "640", { dryRun: true }, depsWithRepo("jjforge/vetinari"));
+
+  assert.equal(result.mode, "prune");
+  assert.equal(result.mode === "prune" && result.project, "vetinari");
+  assert.equal(result.mode === "prune" && result.repo, "jjforge/vetinari");
+  assert.equal(result.mode === "prune" && result.title, "Fix the thing");
+  // The structured closure carries the project and repo so the dashboard preview shows
+  // the same identity the terminal does without re-parsing prose.
+  assert.equal(result.mode === "prune" && result.closure?.project, "vetinari");
+  assert.equal(result.mode === "prune" && result.closure?.repo, "jjforge/vetinari");
+});
+
+test("runPrune degrades to project and id when the title cannot be fetched", async () => {
+  // A throwing fetchTask must not fail the prune — the line just loses its title.
+  const cfg = harnessCfg({
+    project: "vetinari",
+    fetchTask: async () => {
+      throw new Error("no such issue");
+    },
+  });
+  launch(cfg, [["101"], ["640"]]);
+
+  const result = await runPrune(cfg, "640", {}, depsWithRepo("jjforge/vetinari"));
+
+  assert.equal(result.mode, "prune");
+  assert.equal(result.mode === "prune" && result.applied, true);
+  assert.equal(result.mode === "prune" && result.title, undefined);
+  assert.equal(result.mode === "prune" && result.repo, "jjforge/vetinari");
+});
+
+test("runPrune accepts a project qualifier that matches the project it runs in", async () => {
+  const cfg = harnessCfg({ project: "vetinari" });
+  launch(cfg, [["101"], ["640"]]);
+
+  const result = await runPrune(cfg, "640", { project: "vetinari" }, depsWithRepo("jjforge/vetinari"));
+
+  assert.equal(result.mode, "prune");
+  assert.equal(result.mode === "prune" && result.applied, true);
+  assert.deepEqual(result.mode === "prune" && result.dropped, ["640"]);
+});
+
+test("runPrune refuses a project qualifier that names a different project, changing nothing", async () => {
+  const cfg = harnessCfg({ project: "jjforge" });
+  launch(cfg, [["101"], ["640"]]);
+
+  await assert.rejects(
+    () => runPrune(cfg, "640", { project: "vetinari" }, depsWithRepo("jjforge/jjforge")),
+    /refusing: this project is "jjforge", but the qualifier names "vetinari"/,
+  );
+  // Nothing was written.
+  assert.equal(readEventLog(cfg).some((e) => e.event === "prune"), false);
+  assert.equal(listOutbox(cfg).length, 0);
+});
+
+test("runPrune refuses a qualified target when the repo identity is not derivable", async () => {
+  const cfg = harnessCfg({ project: "vetinari" });
+  launch(cfg, [["101"], ["640"]]);
+
+  await assert.rejects(
+    () => runPrune(cfg, "640", { project: "vetinari" }, depsWithRepo(undefined)),
+    /cannot derive this project's repo to verify the "vetinari" qualifier/,
+  );
+  assert.equal(readEventLog(cfg).some((e) => e.event === "prune"), false);
+});
+
+test("runPrune's bare form still works when the repo identity is not derivable", async () => {
+  const cfg = harnessCfg({ project: "vetinari" });
+  launch(cfg, [["101"], ["640"]]);
+
+  const result = await runPrune(cfg, "640", {}, depsWithRepo(undefined));
+
+  assert.equal(result.mode, "prune");
+  assert.equal(result.mode === "prune" && result.applied, true);
+  assert.equal(result.mode === "prune" && result.repo, undefined);
 });
 
 test("runPrune with an explicit plan launches a fresh reduced campaign", async () => {

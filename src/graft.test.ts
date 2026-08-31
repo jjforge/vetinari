@@ -7,7 +7,7 @@ import type { ResolvedConfig } from "./config.ts";
 import { loggerForRun } from "./log.ts";
 import { readEventLog } from "./event-log.ts";
 import { listOutbox } from "./state.ts";
-import { runGraft } from "./graft.ts";
+import { defaultGraftDeps, runGraft } from "./graft.ts";
 
 // A temp-dir `cfg` mirroring modes.test's `harnessCfg`: a real on-disk event log
 // under a throwaway state dir is what the command's `readEventLog`/`reduceCampaign`
@@ -32,6 +32,13 @@ const harnessCfg = (
     ...overrides,
   } as unknown as ResolvedConfig;
 };
+
+// The graft deps with the git edge (`repoOf`) stubbed to a fixed repo, so the identity
+// line is exercised without shelling out to git.
+const depsWithRepo = (repo: string | undefined) => ({
+  ...defaultGraftDeps,
+  repoOf: () => repo,
+});
 
 // Seed a running campaign onto the temp log: `campaign-start` with waves
 // (unsettled — no member merged, so the fold reads it as open) plus a `wave-start`
@@ -121,12 +128,14 @@ test("--dry-run surfaces a structured graft-closure for the aggregated dashboard
   const cfg = harnessCfg();
   launch(cfg, [["101"]]);
 
-  const result = await runGraft(cfg, ["301", "302"], { dryRun: true });
+  const result = await runGraft(cfg, ["301", "302"], { dryRun: true }, depsWithRepo(undefined));
 
   // The machine-readable closure (mirroring prune's E2) the dashboard parses out of
-  // the CLI's `--dry-run` output: the requested ids, where each lands, the resulting
-  // waves, and no rejections when every id is a new open issue.
+  // the CLI's `--dry-run` output: the project + repo identity, the requested ids, where
+  // each lands, the resulting waves, and no rejections when every id is a new open issue.
   assert.deepEqual(result.closure, {
+    project: "harness",
+    repo: undefined,
     ids: ["301", "302"],
     placement: [
       { id: "301", wave: 2 },
@@ -144,12 +153,14 @@ test("--dry-run discloses a whole-batch rejection in the closure without throwin
   const cfg = harnessCfg();
   launch(cfg, [["101"], ["202"]]);
 
-  const result = await runGraft(cfg, ["202", "303"], { dryRun: true });
+  const result = await runGraft(cfg, ["202", "303"], { dryRun: true }, depsWithRepo(undefined));
 
   assert.deepEqual(result.rejected, [
     { id: "202", reason: "already-in-campaign" },
   ]);
   assert.deepEqual(result.closure, {
+    project: "harness",
+    repo: undefined,
     ids: ["202", "303"],
     placement: [],
     // Nothing is added — the campaign's remaining waves are unchanged.
@@ -230,6 +241,79 @@ test("the graft event records only in-campaign/co-grafted blockers, and placemen
     { id: "301", wave: 2 },
     { id: "302", wave: 3 },
   ]);
+});
+
+test("graft names the project, repo and each id's title, and carries project+repo into the closure", async () => {
+  const cfg = harnessCfg({
+    project: "vetinari",
+    fetchTask: async (id: string) =>
+      JSON.stringify({ state: "OPEN", title: `Issue ${id} title` }),
+  });
+  launch(cfg, [["101"]]);
+
+  const result = await runGraft(cfg, ["301"], { dryRun: true }, depsWithRepo("jjforge/vetinari"));
+
+  assert.equal(result.project, "vetinari");
+  assert.equal(result.repo, "jjforge/vetinari");
+  assert.deepEqual(result.titles, { "301": "Issue 301 title" });
+  assert.equal(result.closure?.project, "vetinari");
+  assert.equal(result.closure?.repo, "jjforge/vetinari");
+});
+
+test("graft degrades to project and id when a title cannot be fetched", async () => {
+  const cfg = harnessCfg({
+    project: "vetinari",
+    fetchTask: async () => JSON.stringify({ state: "OPEN" }), // no title field
+  });
+  launch(cfg, [["101"]]);
+
+  const result = await runGraft(cfg, ["301"], { dryRun: true }, depsWithRepo("jjforge/vetinari"));
+
+  assert.deepEqual(result.titles, {});
+  assert.equal(result.repo, "jjforge/vetinari");
+});
+
+test("graft accepts a project qualifier that matches the project it runs in", async () => {
+  const cfg = harnessCfg({ project: "vetinari" });
+  launch(cfg, [["101"]]);
+
+  const result = await runGraft(cfg, ["301"], { project: "vetinari" }, depsWithRepo("jjforge/vetinari"));
+
+  assert.equal(result.applied, true);
+  assert.deepEqual(result.ids, ["301"]);
+});
+
+test("graft refuses a project qualifier that names a different project, adding nothing", async () => {
+  const cfg = harnessCfg({ project: "jjforge" });
+  launch(cfg, [["101"]]);
+
+  await assert.rejects(
+    () => runGraft(cfg, ["301"], { project: "vetinari" }, depsWithRepo("jjforge/jjforge")),
+    /refusing: this project is "jjforge", but the qualifier names "vetinari"/,
+  );
+  assert.equal(readEventLog(cfg).some((e) => e.event === "graft"), false);
+  assert.equal(listOutbox(cfg).length, 0);
+});
+
+test("graft refuses a qualified target when the repo identity is not derivable", async () => {
+  const cfg = harnessCfg({ project: "vetinari" });
+  launch(cfg, [["101"]]);
+
+  await assert.rejects(
+    () => runGraft(cfg, ["301"], { project: "vetinari" }, depsWithRepo(undefined)),
+    /cannot derive this project's repo to verify the "vetinari" qualifier/,
+  );
+  assert.equal(readEventLog(cfg).some((e) => e.event === "graft"), false);
+});
+
+test("graft's bare form still works when the repo identity is not derivable", async () => {
+  const cfg = harnessCfg({ project: "vetinari" });
+  launch(cfg, [["101"]]);
+
+  const result = await runGraft(cfg, ["301"], {}, depsWithRepo(undefined));
+
+  assert.equal(result.applied, true);
+  assert.equal(result.repo, undefined);
 });
 
 test("an id already in the campaign is rejected whole — nothing appended", async () => {

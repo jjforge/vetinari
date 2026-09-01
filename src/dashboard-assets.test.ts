@@ -132,9 +132,24 @@ test("the issue sheet prints the park reason as a word beside the state, single-
   // and prints it beside the state, so a parked{red-base} sheet reads "parked · red base"
   // rather than the raw enum — the same word the status line and the parked card spell.
   assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /function reasonWord/);
+  // A non-running issue still reads its state word (+ reason); the phase only replaces it for
+  // a running one (asserted separately below).
   assert.match(
     ISSUE_DETAIL_SHEET_SCRIPT,
-    /detailStatusLabel\.textContent = d\.status \+ \(d\.reason \? " · " \+ reasonWord\(d\.reason\) : ""\)/,
+    /detailStatusLabel\.textContent = phase \? phase\.label : d\.status \+ \(d\.reason \? " · " \+ reasonWord\(d\.reason\) : ""\)/,
+  );
+});
+
+test("the issue sheet shows a live running issue's phase in place of the word, controlling the pulse (#359)", () => {
+  // A running issue's phase replaces the state word; a steady phase stills the dot via the
+  // shared `.dot.running.idle` rule (no new colour). An archived (read-only) sheet shows none.
+  assert.match(
+    ISSUE_DETAIL_SHEET_SCRIPT,
+    /const phase = d\.status === "running" && !d\.archived \? d\.phase : null/,
+  );
+  assert.match(
+    ISSUE_DETAIL_SHEET_SCRIPT,
+    /detailStatusDot\.className = "dot " \+ d\.status \+ \(phase && phase\.steady \? " idle" : ""\)/,
   );
 });
 

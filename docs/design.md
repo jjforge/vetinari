@@ -107,6 +107,8 @@ unstarted ──spawn──► running ──green+merged──► completed
 
 Membership is an orthogonal axis — `member | grafted | pruned` — so a chip shows its lifecycle as the dot and its membership as a badge, with no precedence between them.
 
+**Phase** is a sub-axis of `running`, never a sixth state, so the five words and the `failed > parked > running > completed` roll-up are untouched. One word ("running") otherwise collapses every distinct thing a running issue can be doing, so an operator cannot tell an agent mid-gate from a green waiting for its wave to integrate. The phase — `starting` (`spawn`), `coding` (`sandbox`/`turn`), `testing · <cmd>` (the `gate` command running now, advancing with each `gate-result`), `filing findings` (the post-green harvest), `waiting to merge` (a pending green) — is derived at render from the issue's latest event (§2.1 forbids storing presentation state), shown on the issue row and sheet **in place of** the word `running` (never beside it). The other four states keep their word and carry no phase. It is issue-only: a wave has no single phase, so it is never rolled up, and an archived run renders none.
+
 ### 2.3 Park reasons — one enum
 
 `question | stalled | conflict | red-base | crash`. This is the reason on the parked record, the reason on the `parked` event, the reason the reducer exposes, and the reason the dashboard and the docs use. `detail` carries the specifics (which budget, idle vs no-commit, the conflict output, the gate tail). The reason selects the recovery affordance:
@@ -245,7 +247,7 @@ The dashboard is a read-mostly HTTP server over the registry (no gateway needed)
 
 - **Landing**: counters, a card per project (its card state, wave in flight, counts — an idle card shows the last run's outcome, campaign name and finish time, and opens the project page with that run first), the cross-project parked queue, a recent-events feed.
 - **Project page**: the campaign's waves and issue chips; parked cards lifted to the top; archived runs listed beneath, opening read-only.
-- **Issue sheet**: state and reason, elapsed, the turn log (the agent's one-line summaries), and exactly the issue-level moves the reason allows: reply (question/stalled) and prune. Each action POSTs to a route that shells the CLI verb in the project root; nothing is decided in the server.
+- **Issue sheet**: state and reason, elapsed, the turn log (the agent's one-line summaries), and exactly the issue-level moves the reason allows: reply (question/stalled) and prune. A `running` issue reads its **phase** (§2.2) in place of the word, on the row and the sheet alike; every other state keeps its word. Each action POSTs to a route that shells the CLI verb in the project root; nothing is decided in the server.
 - **Campaign controls** live on the project page, never on an issue: **graft** while the campaign is unsettled, and **redrive** — a risky, whole-campaign action — rendered greyed-out with the reason unless it is safe (the campaign is stopped: `campaign-parked`, `campaign-failed` or crashed, and no campaign process for the project holds the lease) and confirmed in a dialog before it POSTs.
 - **Risky controls read risky.** A control that discards or re-runs work — prune and redrive — wears the risky-action coral (appendix A) on its enabled button and confirm surface; an additive control (graft) wears the plain accent. Colour is never the only channel: the confirm dialog and the disabled-with-reason state remain the load-bearing guards.
 - **Live tail**: per-agent activity projected from the agent's run stream, live-only.
@@ -346,7 +348,7 @@ Six states, one accent, and one action colour; colour is derived from state by o
 
 | State          | Hex       | Note                                               |
 | -------------- | --------- | -------------------------------------------------- |
-| running        | `#6cb6ff` | blue; dot pulses while work is in flight           |
+| running        | `#6cb6ff` | blue; dot pulses while work is in flight — a `running` phase where nothing executes (`waiting to merge`) holds it steady (the existing `.dot.running.idle` rule), no extra channel |
 | parked         | `#c8a24e` | amber; the only colour a "needs you" left edge takes |
 | failed         | `#f85149` | red (Primer `danger.fg`); distinct from the risky action's red |
 | unstarted      | `#5f6b78` | grey; also `idle`                                  |

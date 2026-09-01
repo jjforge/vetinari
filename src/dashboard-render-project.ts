@@ -95,7 +95,13 @@ const renderWaveMember = (issue: StatusIssue, project: string, prune: boolean, i
   const membership = issue.membership ?? "member";
   const memberClass = membership !== "member" ? ` ${membership}` : "";
   const badge = membership !== "member" ? `<span class="member-badge ${membership}">${escapeHtml(membership)}</span>` : "";
-  return `<li><button type="button" class="wave-member ${issue.status}${memberClass}" title="${escapeTitle(detail)}"${openData}${pruneData}><span class="dot ${dotClass(issue.status)}"></span>#${escapeHtml(issue.issueNumber)} ${title}${badge}<small>${escapeHtml(issue.status)}</small></button></li>`;
+  // A running issue's phase (design §11, #359) replaces the word `running` on the row and, when it
+  // is a wait (nothing executing), stills the dot via the existing `.dot.running.idle` rule — no
+  // new colour. Every other lifecycle keeps its word and carries no phase.
+  const phase = issue.status === "running" ? issue.phase : undefined;
+  const word = phase ? phase.label : issue.status;
+  const dot = phase?.steady ? `${dotClass(issue.status)} idle` : dotClass(issue.status);
+  return `<li><button type="button" class="wave-member ${issue.status}${memberClass}" title="${escapeTitle(detail)}"${openData}${pruneData}><span class="dot ${dot}"></span>#${escapeHtml(issue.issueNumber)} ${title}${badge}<small>${escapeHtml(word)}</small></button></li>`;
 };
 
 /** A wave's member list — one interactive row per issue (see `renderWaveMember`),

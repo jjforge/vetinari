@@ -59,7 +59,10 @@ _Avoid_: queued, pending.
 
 **running**:
 An [[agent]] is on the [[issue]] — executing, or waiting for a container slot.
-The slot-wait is not a separate status.
+The slot-wait is not a separate status. A green that is not yet merged is also
+`running` even though no [[agent]] is on it: banked-but-unmerged work waiting for
+its [[wave]] to integrate, since [[completed]] is reserved for work on the
+[[base]]. What the [[issue]] is doing within `running` is its [[phase]].
 _Avoid_: working, in progress.
 
 **parked**:
@@ -93,6 +96,16 @@ _Avoid_: removed, dropped, carved.
 A [[graft]] added the [[issue]] to the running campaign; it waits in a later
 [[wave]]. Derived at render and transient — becomes [[running]] on pickup.
 _Avoid_: added, appended, injected.
+
+**phase**:
+The step an [[issue]] is currently in — `starting`, `coding`, `testing · <cmd>`
+(naming the [[gate]] command running now), `filing findings`, `waiting to merge`
+(a green awaiting integration). A sub-axis of [[running]], never a sixth state:
+derived at render from the issue's latest event (nothing stored), orthogonal to
+status and never rolled up to a [[wave]] or campaign. It shows on the issue row
+and sheet in place of the word `running`; the other four states keep their word
+and carry none. A phase where nothing is executing (a wait) stills the dot.
+_Avoid_: step, stage, substate as the surface word.
 
 ### Park reasons
 

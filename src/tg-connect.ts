@@ -167,12 +167,15 @@ export async function runTgConnect(
 
   // Whether this invocation prompts at all: a TTY with at least one value not supplied
   // by a flag. When true, a failed verify (or an empty entry) re-prompts; when false,
-  // the values are fixed, so a failure returns rather than looping.
+  // the values are fixed, so a failure returns rather than looping. A re-prompt clears
+  // any flag-supplied value too (see below) so a bad flag can be corrected — otherwise a
+  // bad `--token` with a prompted chat would loop forever, unable to fix the token.
   const prompting = deps.isTTY && (opts.token === undefined || opts.chat === undefined);
+  let fromFlags = { token: opts.token, chat: opts.chat };
 
   for (;;) {
-    let token = opts.token;
-    let chat = opts.chat;
+    let token = fromFlags.token;
+    let chat = fromFlags.chat;
     if (deps.isTTY) {
       if (token === undefined) token = (await deps.ask("bot token: ")).trim();
       if (chat === undefined) chat = (await deps.ask("chat id: ")).trim();
@@ -203,7 +206,12 @@ export async function runTgConnect(
         deps.log(
           "Telegram rejected the send — the token or chat id is wrong (see telegram-send-failed in the log). Nothing was written.",
         );
-        if (prompting) continue;
+        if (prompting) {
+          // Re-prompt for BOTH values on a TTY so a bad flag value is corrected too, not
+          // just a mistyped prompt — clearing the flags forces the next pass to ask again.
+          fromFlags = { token: undefined, chat: undefined };
+          continue;
+        }
         return { ok: false, written: false };
       }
     }

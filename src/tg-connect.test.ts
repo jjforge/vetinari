@@ -240,3 +240,17 @@ test("runTgConnect leaves an existing host.env's mode untouched", async () => {
   const mode = statSync(path).mode & 0o777;
   assert.equal(mode, 0o644, "an existing file's mode is left as-is");
 });
+
+test("runTgConnect on a TTY with a bad --token flag re-prompts for both values rather than looping (a bad flag is correctable)", async () => {
+  const base = tmpBase();
+  // --token is a bad flag, no --chat. First send fails; the re-prompt asks for BOTH values.
+  const ask = fakeAsk([VALUES.chat, VALUES.token, VALUES.chat]);
+  const send = fakeSend([undefined, 1]);
+  const { deps: d } = deps({ isTTY: true, ask, send });
+  const r = await runTgConnect(base, { token: "bad-flag-token", chat: undefined, noVerify: false, force: false }, d);
+  assert.deepEqual(r, { ok: true, written: true });
+  assert.equal(send.calls.length, 2);
+  // The re-prompt re-asked for the token (not only the prompted chat), so the bad flag was fixable.
+  assert.ok(ask.asked.some((q) => /token/i.test(q)), "the token is re-prompted after a bad flag");
+  assert.match(readFileSync(hostSecretsPath(base), "utf8"), /VETINARI_TELEGRAM_BOT_TOKEN=123456:ABC-tok/);
+});

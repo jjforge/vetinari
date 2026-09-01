@@ -422,6 +422,43 @@ test("planCampaign does not ask about a ticket that is already unreachable", asy
   ]);
 });
 
+test("planCampaign skips the file-set check for a one-issue selection, planning without a file-set or a prompt (#356)", async () => {
+  // A lone ticket with no confident file-set is planned, not halted: the disjointness
+  // check is vacuous with no co-wave. Nothing is resolved and the requestor is never asked.
+  const plan = await planCampaign(["611"], {
+    blockedBy: openBlockedByFrom({}),
+    fileSet: () => {
+      throw new Error("must not resolve a file-set for a one-issue selection");
+    },
+    onUnderspecified: () => {
+      throw new Error("must not prompt on a one-issue selection");
+    },
+  });
+
+  assert.deepEqual(plan.waves, [["611"]]);
+  assert.equal(plan.filesetCheckSkipped, true);
+  assert.deepEqual(plan.underspecified, []);
+  assert.deepEqual(plan.pruned, []);
+});
+
+test("planCampaign still drops a lone ticket held by an open out-of-set blocker (#356)", async () => {
+  // The blockedBy *requirement* stands down for one ticket, but the reachability *check*
+  // does not: 611's open blocker 555 is outside the selection, so 611 is dropped and
+  // reported — the guard against running an issue whose prerequisite is still open stays.
+  const plan = await planCampaign(["611"], {
+    blockedBy: openBlockedByFrom({ "611": ["555"] }),
+    fileSet: () => {
+      throw new Error("must not resolve a file-set for a one-issue selection");
+    },
+    onUnderspecified: () => {
+      throw new Error("must not prompt on a one-issue selection");
+    },
+  });
+
+  assert.deepEqual(plan.waves, []);
+  assert.deepEqual(plan.unreachable, [{ id: "611", external: ["555"], via: [] }]);
+});
+
 test("underspecifiedPromptFor: --on-underspecified=drop pre-decides without asking", async () => {
   const prompt = underspecifiedPromptFor({
     flag: "drop",
@@ -579,6 +616,36 @@ test("describePlan lists resolver exclusions in an Excluded section, each id and
   assert.match(report, /Excluded/);
   assert.match(report, /#282.*epic, not work/);
   assert.match(report, /#313.*pending-verify.*satisfied/);
+});
+
+test("describePlan names the skipped file-set check for a one-issue plan, as a skip not a drop (#356)", () => {
+  const report = describePlan({
+    waves: [["611"]],
+    placements: [{ id: "611", wave: 0, after: [] }],
+    unreachable: [],
+    excluded: [],
+    filesetCheckSkipped: true,
+  });
+
+  // Reads as the third word — a check that was skipped as vacuous — never "pruned"
+  // (a dropped ticket) or "halt" (a stop-and-ask). The single issue is still scheduled.
+  assert.match(report, /skipped.*file-set/i);
+  assert.match(report, /one-issue|single|one issue/i);
+  assert.doesNotMatch(report, /pruned|halt/i);
+  assert.match(report, /wave 0.*#611/);
+});
+
+test("describePlan says nothing about a skipped check on a multi-issue plan (#356)", () => {
+  const report = describePlan({
+    waves: [["611"], ["640"]],
+    placements: [
+      { id: "611", wave: 0, after: [] },
+      { id: "640", wave: 1, after: ["611"] },
+    ],
+    unreachable: [],
+    excluded: [],
+  });
+  assert.doesNotMatch(report, /skipped/i);
 });
 
 test("describePlan omits the Excluded section when nothing was excluded", () => {
@@ -848,17 +915,89 @@ test("runCampaignPlan rejects an empty id set", async () => {
   );
 });
 
-test("runCampaignPlan requires a blockedBy resolver", async () => {
+test("runCampaignPlan requires a blockedBy resolver for a multi-issue selection", async () => {
   await assert.rejects(
     () =>
       runCampaignPlan(
         { fetchTask: () => "" },
-        ["611"],
+        ["611", "640"],
         {},
         { isTTY: false, ask: () => "fail" },
       ),
     /blockedBy/,
   );
+});
+
+test("runCampaignPlan plans a one-issue selection with no blockedBy resolver, instead of throwing (#356)", async () => {
+  // The blockedBy *requirement* is vacuous for a lone ticket — there is no co-wave to
+  // layer it against — so a bare `campaign <id>` in a project with no resolver plans and
+  // runs rather than refusing and steering the operator to --override.
+  const report = await runCampaignPlan(
+    { fetchTask: () => JSON.stringify({ body: "no files named here" }) },
+    ["611"],
+    {},
+    { isTTY: false, ask: () => "fail" },
+  );
+
+  assert.deepEqual(report.waves, [["611"]]);
+  assert.equal(report.waveArgs, '"611"');
+});
+
+test("runCampaignPlan: a one-issue selection with no marker runs and names the skipped file-set check in the provenance (#356)", async () => {
+  // No `Touches:` line and a non-terminal, no-flag run: today this fails as under-specified.
+  // For one issue it now plans, and the provenance reads the skip as a skip, not a drop.
+  const report = await runCampaignPlan(
+    cfgFrom({ "611": JSON.stringify({ body: "no files named here" }) }),
+    ["611"],
+    {},
+    { isTTY: false, ask: () => "fail" },
+  );
+
+  assert.deepEqual(report.waves, [["611"]]);
+  assert.match(report.report, /skipped.*file-set/i);
+  assert.doesNotMatch(report.report, /pruned|halt/i);
+});
+
+test("runCampaignPlan: --on-underspecified is inert on a one-issue selection, not an error (#356)", async () => {
+  // A scripted caller passing --on-underspecified=drop uniformly must not fail because
+  // today's selection happened to be one issue: the flag is accepted and has no effect.
+  const report = await runCampaignPlan(
+    cfgFrom({ "611": JSON.stringify({ body: "no files named here" }) }),
+    ["611"],
+    { onUnderspecified: "drop" },
+    { isTTY: false, ask: () => "fail" },
+  );
+
+  assert.deepEqual(report.waves, [["611"]]);
+});
+
+test("runCampaignPlan: an invalid --on-underspecified value is still rejected on a one-issue selection (#356)", async () => {
+  await assert.rejects(
+    () =>
+      runCampaignPlan(
+        cfgFrom({ "611": JSON.stringify({ body: "no files named here" }) }),
+        ["611"],
+        { onUnderspecified: "maybe" },
+        { isTTY: false, ask: () => "fail" },
+      ),
+    /on-underspecified/i,
+  );
+});
+
+test("runCampaignPlan: a label expanding to one open issue gets the one-issue treatment (#356)", async () => {
+  // Expansion happens upstream; the planner sees a length-one id list either way. A label
+  // resolving to a single id runs with no marker and no resolver, exactly as a bare id does.
+  const listByLabel = async () => ["611"];
+  const ids = await expandSelection(["ready-for-agent"], listByLabel);
+  const report = await runCampaignPlan(
+    { fetchTask: () => JSON.stringify({ body: "no files named here" }) },
+    ids,
+    {},
+    { isTTY: false, ask: () => "fail" },
+  );
+
+  assert.deepEqual(report.waves, [["611"]]);
+  assert.match(report.report, /skipped.*file-set/i);
 });
 
 test("runCampaignPlan suggests no name when the set spans no area label", async () => {

@@ -32,7 +32,7 @@ The planner keeps co-wave tickets file-disjoint so a wave never collides at inte
 Touches (existing files): `fileset.ts`, `src/cli.mts`
 ```
 
-Only that line is read, so naming other filenames in the prose (an env file, a config, a spec link) is harmless. Paths reduce to their basename, so cite a file however you like. A ticket with no marker line falls back to a whole-body scan and is far likelier to resolve as under-specified — so the planner halts on it; the marker line is what makes a ticket schedulable AFK.
+Only that line is read, so naming other filenames in the prose (an env file, a config, a spec link) is harmless. Paths reduce to their basename, so cite a file however you like. A ticket with no marker line falls back to a whole-body scan and is far likelier to resolve as under-specified — so the planner halts on it; the marker line is what makes a ticket schedulable AFK. **The one exception:** a selection that resolves to a single issue has no co-wave to collide with, so the file-set check is *skipped* as vacuous — `campaign <id>` runs a lone issue with no marker line (the provenance names the skipped check). The marker still earns its keep the moment the ticket rides in a real wave beside others.
 
 **Files the ticket _creates_ go on a `Creates:` line** — a peer of `Touches:`/`Files:` — because a new file is legitimately absent from the tree, and a `Touches:` cite that the tree lacks is treated as a stale or typo'd note (it forbids confidence). `Creates:` cites are counted for wave-disjointness like any other, but are exempt from that tree-presence check:
 

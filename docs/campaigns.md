@@ -47,6 +47,16 @@ the not-confident tickets and their dependents, or fail so the file data can be
 added and the plan re-run. Parallelize **across epics** — epics carry no inherent
 order, so a wave normally spans several; never serialize by epic.
 
+**A selection that resolves to one issue is the exception to both.** With no
+co-wave, invariant 2 guards nothing, so the file-set check is **skipped** (not
+halted, not pruned — the provenance says so) and the ticket runs without a marker
+line. Invariant 1's *layering* is likewise trivial, so a configured `blocked_by`
+resolver is no longer *required* — bare `campaign <id>` runs in a project that has
+none. The resolver's *reachability* is not vacuous, though: when one **is**
+configured, a lone ticket held by an open blocker outside the selection is still
+dropped and reported, exactly as in a larger set. Above one ticket everything
+above holds unchanged.
+
 ## The loop
 
 The campaign drains a wave, merges its greens one at a time, gates the **merged**

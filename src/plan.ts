@@ -228,6 +228,12 @@ export interface CampaignPlan extends WavePlan {
   underspecified: string[];
   /** everything the drop decision removed: the under-specified roots + dependents. */
   pruned: string[];
+  /**
+   * true when the selection resolved to one issue and the file-set disjointness check
+   * was skipped as vacuous — there is no co-wave to collide with, so nothing was
+   * resolved, pruned, or prompted (§356). A *skipped* check, never a dropped ticket.
+   */
+  filesetCheckSkipped?: boolean;
 }
 
 const disjoint = (a: Set<string>, b: Set<string>) => {
@@ -454,7 +460,7 @@ export function waveArgs(plan: WavePlan): string {
  * tickets unreachable by dependency. Plans only — this describes the plan, it
  * does not run it.
  */
-export function describePlan(plan: WavePlan & Partial<Pick<CampaignPlan, "pruned" | "underspecified">>): string {
+export function describePlan(plan: WavePlan & Partial<Pick<CampaignPlan, "pruned" | "underspecified" | "filesetCheckSkipped">>): string {
   const scheduled = plan.placements.length;
   const pruned = plan.pruned ?? [];
   const lines: string[] = [
@@ -470,6 +476,12 @@ export function describePlan(plan: WavePlan & Partial<Pick<CampaignPlan, "pruned
       reasons.push(`spilled — shares a file with ${p.sharesFilesWith.map((b) => `#${b}`).join(", ")}`);
     }
     lines.push(`  wave ${p.wave}  #${p.id}  — ${reasons.join("; ")}`);
+  }
+
+  if (plan.filesetCheckSkipped) {
+    // A note, not a section: the file-disjointness check was *skipped* as vacuous for a
+    // one-issue selection (no co-wave to collide with), never a ticket that was dropped.
+    lines.push("", "Skipped the file-set check — a one-issue selection has no co-wave to collide with.");
   }
 
   if (plan.unreachable.length) {
@@ -511,11 +523,23 @@ export function describePlan(plan: WavePlan & Partial<Pick<CampaignPlan, "pruned
  *
  * File-sets are resolved only for tickets that survive dependency layering — a
  * ticket already dropped as unreachable is not one we could run anyway, so there
- * is nothing to ask about it. Pure over the injected resolvers; the tree read and
- * the interactive prompt live at the edge.
+ * is nothing to ask about it. A selection that resolves to a single issue skips the
+ * file-set step entirely (no co-wave to collide with, §356) — the reachability
+ * layering above still runs, so a lone blocked ticket is still dropped. Pure over
+ * the injected resolvers; the tree read and the interactive prompt live at the edge.
  */
 export async function planCampaign(ids: string[], deps: CampaignPlanDeps): Promise<CampaignPlan> {
   const layered = await layerWaves(ids, deps.blockedBy);
+
+  // A selection that resolves to a single issue has no co-wave, so the file-set
+  // disjointness check guards nothing (§356): skip it whole — resolve no file-sets,
+  // prune nothing, never prompt — and record the skip so the provenance names it as a
+  // *skipped* check. Reachability already ran in `layerWaves` above, so a lone ticket
+  // held by an open out-of-set blocker is still dropped and reported, unaffected.
+  if (uniqueOrder(ids).length === 1) {
+    return { ...layered, underspecified: [], pruned: [], filesetCheckSkipped: true };
+  }
+
   const scheduled = layered.placements.map((p) => p.id);
 
   const sets = new Map<string, FileSet>();
@@ -669,7 +693,13 @@ export async function runCampaignPlan(
     throw new Error(
       "campaign needs at least one issue id or label: campaign 436 611 640",
     );
-  if (!cfg.blockedBy)
+  // A selection that resolves to a single issue layers into one trivial wave, so the
+  // blockedBy *requirement* guards nothing — stand it down (§356). The check itself is
+  // not skipped: a configured resolver still runs below and still drops a lone ticket
+  // held by an open blocker outside the selection; only the "no resolver configured"
+  // throw is lifted, so bare `campaign <id>` runs without a resolver wired in.
+  const single = uniqueOrder(ids).length === 1;
+  if (!cfg.blockedBy && !single)
     throw new Error(
       'campaign needs a "blockedBy" resolver in your config to plan waves — e.g. blockedBy: githubBlockedBy("owner/repo") (or pass --override to run hand-crafted waves).',
     );
@@ -678,7 +708,7 @@ export async function runCampaignPlan(
   // cites-from-body default, over the ticket's ticketProse'd text.
   const resolveFileSet = cfg.fileSet ?? defaultFileSet();
   const plan = await planCampaign(ids, {
-    blockedBy: cfg.blockedBy,
+    blockedBy: cfg.blockedBy ?? (() => []),
     fileSet: async (id) => resolveFileSet(ticketProse(String(await cfg.fetchTask(id)))),
     onUnderspecified: underspecifiedPromptFor({
       flag: opts.onUnderspecified,

@@ -18,6 +18,12 @@ and each entry opens with a tag saying who it reaches:
 `**Breaking changes:**` sorts first in a milestone and names the contract it broke.
 Within a milestone each bold section label appears at most once.
 
+### Collected changes — September 1, 2026
+
+**Bug fixes:**
+- [user] Dashboard: a `running` issue's row and sheet now show its phase — `starting`, `coding`, `testing · <cmd>` (naming the gate command running now), `filing findings`, or `waiting to merge` — in place of the bare word `running`, so a green waiting for its wave to integrate (steady dot) no longer looks identical to an agent mid-gate (pulsing). Derived from the issue's latest event; the wave tally, live tail, and the five-state roll-up are unchanged (#359).
+- [ops] Incidental findings are now harvested from a stalled agent's still-live session too — a budget-exhausted park and a recoverable idle stall each harvest before the container is torn down, not only a green run; findings filed from a non-green session are marked `[unverified: <exit>]` so triage can weigh them as weaker evidence, while a green run's filed form is unchanged and a thrown terminal failure is not harvested (#360).
+
 ### Collected changes — August 31, 2026
 
 **Improvements:**

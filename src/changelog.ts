@@ -57,8 +57,26 @@ export function parseFragment(text: string): FragmentSection[] {
  * The bold section labels, in the order docs/changelog-conventions.md fixes them.
  * A milestone renders its sections in this order; a fragment naming a label outside
  * this set is still folded (appended after the known ones) rather than dropped.
+ *
+ * The list is the sibling jjforge project's full set, which this format follows: its
+ * five extra labels sit between `Bug fixes` and `Documentation`, exactly where that
+ * project's own doc puts them. Knowing them matters because the fold RE-RENDERS the
+ * milestone it folds into — an unknown label is appended after the known ones, so a
+ * short list would silently reorder a consuming project's existing sections (moving
+ * `Documentation` above `Security`), and a repeated-label lint cannot see it.
  */
-export const SECTION_ORDER = ["Breaking changes", "New features", "Improvements", "Bug fixes", "Documentation"];
+export const SECTION_ORDER = [
+  "Breaking changes",
+  "New features",
+  "Improvements",
+  "Bug fixes",
+  "Security",
+  "Infrastructure",
+  "Architecture",
+  "Testing",
+  "Code quality",
+  "Documentation",
+];
 
 /** A whole-line bold section label, `**New features:**` → `New features`. */
 const LABEL_LINE = /^\*\*(.+):\*\*$/;

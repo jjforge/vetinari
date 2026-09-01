@@ -101,6 +101,33 @@ test("collectFragments folds into today's top milestone, one block per label, ca
   assert.ok(out.indexOf("**Improvements:**") < out.indexOf("**Bug fixes:**"));
 });
 
+test("collectFragments keeps a consuming project's extra section labels in their documented order", () => {
+  // The fold RE-RENDERS the milestone it folds into, so every label the sibling
+  // jjforge project uses must be known here: an unknown one is appended after the
+  // known set, which would move Documentation above Security and silently reorder a
+  // milestone the fragment never mentioned. A repeated-label lint cannot catch that,
+  // so this is the only guard.
+  const today = `# Changelog
+
+### Today's work — August 26, 2026
+
+**Security:**
+- [ops] a hardening (#1)
+
+**Documentation:**
+- [internal] a doc (#2)
+`;
+  const out = collectFragments(
+    today,
+    [{ section: "Testing", bullets: ["- [internal] a test (#3)."] }],
+    "August 26, 2026",
+    "ignored — the top milestone is today's",
+  );
+  // Security stays above Documentation, and the new Testing block lands between them.
+  assert.ok(out.indexOf("**Security:**") < out.indexOf("**Testing:**"));
+  assert.ok(out.indexOf("**Testing:**") < out.indexOf("**Documentation:**"));
+});
+
 test("collectFragments folds two same-day collects into one block per label, not a second header", () => {
   // Two collects in one day: the second must fold into the first's milestone, not
   // add a second **Bug fixes:** block — one block per label per milestone.

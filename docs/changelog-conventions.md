@@ -48,6 +48,8 @@ Within a milestone, bullets are grouped under bold section labels, in this order
 4. `**Bug fixes:**` — something that was broken now works.
 5. `**Documentation:**` — docs/ADR/README changes worth surfacing.
 
+These five are the labels Vetinari itself uses. The fold additionally knows the sibling [`jjforge`](https://github.com/jjforge/jjforge) project's five extra labels — `**Security:**`, `**Infrastructure:**`, `**Architecture:**`, `**Testing:**`, `**Code quality:**`, which sit between `Bug fixes` and `Documentation` — because collecting **re-renders the milestone it folds into**. A label the fold does not know is appended after the known ones, so a short list would silently reorder a consuming project's existing sections, and a repeated-label lint cannot see it. A label outside the full set is still folded, never dropped.
+
 A milestone uses only the labels it needs, and **each label appears at most once** per milestone — collect every bullet of a kind under the single block, never a second header for the same label. A split `**Improvements:**` (one block, then another below `**New features:**`) reads as absent — a reader finds the first list and stops.
 
 ## Issue numbers are welcome here

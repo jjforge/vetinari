@@ -31,7 +31,7 @@ export const MODES: Mode[] = [
   {
     signature: "run <task> [--agent <name>] [--model <m>] [--effort <e>]",
     blurb:
-      "the TDD loop: agent turn → gate → resume on red. --agent picks the provider (claude | pi | codex, default claude or cfg.agent.provider; copilot | cursor | opencode are experimental — non-resumable, so a parked question needs postComment to be answered); --model/--effort override that provider's defaults, effort in the provider's own vocabulary. A bad provider/effort or missing provider credentials fails fast before the container (ADR 0016). --json streams the raw event log to stdout for tooling; without it the terminal shows human-readable lines only and no JSON reaches stdout (design §11)",
+      "the TDD loop: agent turn → gate → resume on red. Banks its commits on agent/<task> and MERGES NOTHING — integration (the merge onto the base and the merged-base gate) is the campaign's, so a green run leaves work on its branch, not on the base; `campaign <task>` is the one-issue campaign that lands it. --agent picks the provider (claude | pi | codex, default claude or cfg.agent.provider; copilot | cursor | opencode are experimental — non-resumable, so a parked question needs postComment to be answered); --model/--effort override that provider's defaults, effort in the provider's own vocabulary. A bad provider/effort or missing provider credentials fails fast before the container (ADR 0016). --json streams the raw event log to stdout for tooling; without it the terminal shows human-readable lines only and no JSON reaches stdout (design §11)",
   },
   {
     signature:

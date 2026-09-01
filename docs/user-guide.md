@@ -89,8 +89,8 @@ When something stops the campaign, you take one of the five moves. An answer con
 2. Fill in `vetinari/config.mts`: the image, the gates, any setup commands, and how to fetch an issue and its blockers from your tracker. Fill in `vetinari/Dockerfile` with your toolchain.
 3. `vetinari build` builds the image and runs `baseline`: the toolchain probe and every gate, with no agent. A red baseline is the cheapest failure you will ever buy; do not run an agent until it is green.
 4. Pick the agent in `config.mts` and put its provider key in `.vetinari.local/.env` — the one file that crosses into the container. `claude`, `pi` and `codex` keep their session, so an answer resumes the same agent with everything it had. `copilot`, `cursor` and `opencode` cannot: an answer is posted to the issue as a comment (`postComment` must be configured) and a fresh agent starts from the issue. Put the Telegram bot token and chat in `.vetinari.local/host.env` — which never crosses.
-5. `vetinari run <issue>` once, to see a single loop go green or park.
-6. Then `vetinari campaign …`.
+5. `vetinari run <issue>` once, to see a single loop go green or park. A run proves the loop; it banks its commits on the issue's branch and merges nothing.
+6. Then `vetinari campaign …` — the same loop plus integration: it merges each green onto the base and gates the merged base, which is how work actually lands.
 
 Once per machine: run the gateway as a service (`vetinari gateway install`) so questions reach you when no terminal is open, and set `MAX_CONCURRENT_CONTAINERS` to what the host can carry. Every project on the machine shares that ceiling.
 

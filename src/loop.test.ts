@@ -256,6 +256,85 @@ test("runLoop returns green when the gate passes on a real change", async () => 
   assert.equal(listParked(cfg).length, 0);
 });
 
+// Capture the human banner console.log emits (the logger only echoes under --json, off here),
+// so a test can read exactly what a standalone run prints on green.
+const captureLog = async <T>(fn: () => Promise<T>): Promise<{ result: T; lines: string[] }> => {
+  const realLog = console.log;
+  const lines: string[] = [];
+  console.log = (...a: unknown[]) => lines.push(a.map(String).join(" "));
+  try {
+    return { result: await fn(), lines };
+  } finally {
+    console.log = realLog;
+  }
+};
+
+test("a standalone green run's banner says the commits are not merged and names campaign <id> as what integrates them (#339)", async () => {
+  const cfg = harnessCfg();
+  const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc123" }] }, green: true }], "agent/T-1");
+
+  const prevChild = process.env.VETINARI_CHILD;
+  delete process.env.VETINARI_CHILD;
+  let captured: { result: string; lines: string[] };
+  try {
+    captured = await captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+  } finally {
+    if (prevChild === undefined) delete process.env.VETINARI_CHILD;
+    else process.env.VETINARI_CHILD = prevChild;
+  }
+
+  assert.equal(captured.result, "green");
+  const banner = captured.lines.join("\n");
+  assert.match(banner, /agent\/T-1/, "still names the branch");
+  assert.match(banner, /not merged/i, "says the work is not merged");
+  assert.match(banner, /campaign T-1/, "names campaign <id> as what integrates it");
+});
+
+test("a campaign child's green run does not tell the operator to run campaign — the child marker suppresses the guidance (#339)", async () => {
+  const cfg = harnessCfg();
+  const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc123" }] }, green: true }], "agent/T-1");
+
+  const prevChild = process.env.VETINARI_CHILD;
+  process.env.VETINARI_CHILD = "1";
+  let captured: { result: string; lines: string[] };
+  try {
+    captured = await captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+  } finally {
+    if (prevChild === undefined) delete process.env.VETINARI_CHILD;
+    else process.env.VETINARI_CHILD = prevChild;
+  }
+
+  assert.equal(captured.result, "green");
+  const banner = captured.lines.join("\n");
+  assert.match(banner, /agent\/T-1/, "the branch line still prints for a child");
+  assert.doesNotMatch(banner, /campaign T-1/, "a wave member never tells the operator to run campaign");
+  assert.doesNotMatch(banner, /not merged/i, "the not-merged guidance is suppressed for a child");
+});
+
+test("under --json neither the green banner nor the new not-merged guidance reaches stdout (#339, #299)", async () => {
+  const cfg = harnessCfg();
+  const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc123" }] }, green: true }], "agent/T-1");
+
+  const prevJson = process.env.VETINARI_JSON;
+  const prevChild = process.env.VETINARI_CHILD;
+  process.env.VETINARI_JSON = "1";
+  delete process.env.VETINARI_CHILD;
+  let captured: { result: string; lines: string[] };
+  try {
+    captured = await captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+  } finally {
+    if (prevJson === undefined) delete process.env.VETINARI_JSON;
+    else process.env.VETINARI_JSON = prevJson;
+    if (prevChild === undefined) delete process.env.VETINARI_CHILD;
+    else process.env.VETINARI_CHILD = prevChild;
+  }
+
+  assert.equal(captured.result, "green");
+  const banner = captured.lines.join("\n");
+  assert.doesNotMatch(banner, /\*\*\* GREEN/, "no human GREEN banner under --json");
+  assert.doesNotMatch(banner, /not merged/i, "no not-merged guidance under --json — the JSONL stays clean");
+});
+
 test("runLoop counts a null commitsAhead (git failed) as a real change, not an empty green", async () => {
   // null means git could not tell — the guard must fall through to green, never park.
   const cfg = harnessCfg();

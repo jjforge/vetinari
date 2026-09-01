@@ -38,6 +38,8 @@ import {
   requireTelegram,
   tgTest,
 } from "./modes.ts";
+import { runTgConnect } from "./tg-connect.ts";
+import { tgSend } from "./telegram.ts";
 import {
   applyTidy,
   computeTidy,
@@ -66,7 +68,7 @@ import {
   systemdUnitPath,
   writeGatewayUnit,
 } from "./migrate.ts";
-import { applyInit, computeInit, describeInit, scanInit } from "./init.ts";
+import { applyInit, computeInit, describeInit, LOCAL_DIR, scanInit } from "./init.ts";
 import { archiveRun, shouldArchiveLeftover } from "./archive.ts";
 import {
   answerParked,
@@ -127,6 +129,21 @@ async function askUnderspecified(
       if (answer === "s" || answer === "stop") return "fail";
       console.log('please answer "d" (drop) or "s" (stop).');
     }
+  } finally {
+    rl.close();
+  }
+}
+
+/**
+ * A one-shot readline prompt — the injected `ask` seam the bot-connection collector
+ * (`tg-connect`, and `init`'s offer) reads its token/chat/replace answers through, so
+ * that logic stays testable without a terminal. Opens and closes readline per question,
+ * matching `askUnderspecified`'s shape.
+ */
+async function ask(question: string): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return await rl.question(question);
   } finally {
     rl.close();
   }
@@ -221,6 +238,24 @@ if (mode === "init") {
     did.push(`created ${result.dirsCreated.length} dir(s)`);
   if (result.gitignoreUpdated) did.push("updated .gitignore");
   if (did.length) console.log(`\nDone: ${did.join(", ")}.`);
+
+  // On a terminal, offer to wire this project's Telegram bot connection right after the
+  // scaffold (only when the committed scaffold was actually laid down — a re-run that
+  // filled in stray pieces skips it). Declining is not an error: the printed next step
+  // above still points at `tg-connect`. A non-interactive init never reaches this — it
+  // prompts and sends nothing, by design (ADR 0002; init requires no network today).
+  if (process.stdin.isTTY && result.created.length) {
+    const answer = (await ask("\nWire this project's Telegram bot connection now? [y/N] "))
+      .trim()
+      .toLowerCase();
+    if (answer === "y" || answer === "yes") {
+      await runTgConnect(
+        resolve(process.cwd(), LOCAL_DIR),
+        { noVerify: false, force: false },
+        { isTTY: true, ask, send: tgSend, log: (m) => console.log(m) },
+      );
+    }
+  }
   process.exit(0);
 }
 
@@ -631,5 +666,8 @@ await dispatch(parseArgs([mode, ...rest]), {
   archiveRun,
   requireTelegram,
   tgTest,
+  runTgConnect,
+  ask,
+  tgSend,
 });
 

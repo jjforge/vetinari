@@ -58,6 +58,13 @@ VETINARI_TELEGRAM_CHAT_ID=-1001234567890
 VETINARI_TELEGRAM_THREAD_ID=42          # optional — a forum thread under the chat
 ```
 
+Rather than hand-editing the file, run **`vetinari tg-connect`** from the project
+root: it prompts for the bot token and chat (or takes `--token`/`--chat`), sends
+one message to verify them, and writes the two `VETINARI_TELEGRAM_*` keys into this
+`host.env` (creating it `0600`), leaving any other keys in place. `vetinari init`
+offers the same step after its scaffold. The optional `VETINARI_TELEGRAM_THREAD_ID`
+is a property of a destination, not the bot connection — it stays a hand-edit here.
+
 The gateway reads these live from each registered project's base location (it
 never holds them itself), builds a bot connection from the token + chat, and uses
 it to poll and send for that project. A project with **no** token/chat has no

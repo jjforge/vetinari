@@ -55,6 +55,9 @@ function makeDeps(overrides: Partial<DispatchDeps> = {}) {
     archiveRun: spy({ archivedLog: null, clearedOutbound: 0 }) as unknown as DispatchDeps["archiveRun"],
     requireTelegram: spy({}) as unknown as DispatchDeps["requireTelegram"],
     tgTest: spy(Promise.resolve()) as unknown as DispatchDeps["tgTest"],
+    ask: spy(Promise.resolve("")) as unknown as DispatchDeps["ask"],
+    tgSend: spy(Promise.resolve(1)) as unknown as DispatchDeps["tgSend"],
+    runTgConnect: spy(Promise.resolve({ ok: true, written: true })) as unknown as DispatchDeps["runTgConnect"],
     ...overrides,
   };
   return { deps, logged, exitCodes, cfg };
@@ -76,6 +79,33 @@ test("parseArgs maps the no-argument modes to their bare command", () => {
   assert.deepEqual(parseArgs(["parked"]), { kind: "parked" });
   assert.deepEqual(parseArgs(["clear"]), { kind: "clear" });
   assert.deepEqual(parseArgs(["tg-test"]), { kind: "tgTest" });
+});
+
+test("parseArgs maps a bare `tg-connect` to a collect command with default flags", () => {
+  assert.deepEqual(parseArgs(["tg-connect"]), {
+    kind: "tgConnect",
+    token: undefined,
+    chat: undefined,
+    noVerify: false,
+    force: false,
+  });
+});
+
+test("parseArgs reads tg-connect's --token/--chat (both `--flag value` and `--flag=` forms) and --no-verify/--force", () => {
+  assert.deepEqual(parseArgs(["tg-connect", "--token", "T", "--chat=C", "--no-verify", "--force"]), {
+    kind: "tgConnect",
+    token: "T",
+    chat: "C",
+    noVerify: true,
+    force: true,
+  });
+  assert.deepEqual(parseArgs(["tg-connect", "--token=T2", "--chat", "C2"]), {
+    kind: "tgConnect",
+    token: "T2",
+    chat: "C2",
+    noVerify: false,
+    force: false,
+  });
 });
 
 test("parseArgs maps an unknown mode, and no mode at all, to usage", () => {
@@ -308,6 +338,31 @@ test("dispatch tg-test resolves creds and proves the round-trip", async () => {
   await dispatch({ kind: "tgTest" }, deps);
   assert.equal((deps.requireTelegram as any).calls.length, 1);
   assert.equal((deps.tgTest as any).calls.length, 1);
+});
+
+test("dispatch tg-connect resolves the base location from cfg.stateDir and runs the collector with the parsed opts", async () => {
+  const runTgConnect = spy(Promise.resolve({ ok: true, written: true }));
+  const { deps, exitCodes } = makeDeps({ runTgConnect: runTgConnect as any });
+  await dispatch({ kind: "tgConnect", token: "T", chat: "C", noVerify: false, force: true }, deps);
+  assert.equal(runTgConnect.calls.length, 1);
+  const [baseLocation, opts, collectorDeps] = runTgConnect.calls[0] as any[];
+  // The base location is this project's stateDir resolved against cwd — the same path tg-test uses.
+  assert.equal(baseLocation, join(process.cwd(), ".vetinari.local"));
+  assert.deepEqual(opts, { token: "T", chat: "C", noVerify: false, force: true });
+  // The collector's prompt + verification send + label are wired from dispatch deps.
+  assert.equal(typeof collectorDeps.ask, "function");
+  assert.equal(typeof collectorDeps.send, "function");
+  assert.equal(collectorDeps.label, "demo");
+  // A successful collect leaves the exit code at its default (0).
+  assert.deepEqual(exitCodes, []);
+});
+
+test("dispatch tg-connect exits non-zero when the collector returns not-ok", async () => {
+  const { deps, exitCodes } = makeDeps({
+    runTgConnect: spy(Promise.resolve({ ok: false, written: false })) as any,
+  });
+  await dispatch({ kind: "tgConnect", token: undefined, chat: undefined, noVerify: false, force: false }, deps);
+  assert.deepEqual(exitCodes, [1]);
 });
 
 test("dispatch usage prints the usage and exits non-zero", async () => {

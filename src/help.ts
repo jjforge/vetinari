@@ -148,6 +148,11 @@ export const MODES: Mode[] = [
     signature: "tg-test",
     blurb: "prove the Telegram round-trip",
   },
+  {
+    signature: "tg-connect [--token <t>] [--chat <c>] [--no-verify] [--force]",
+    blurb:
+      "collect this project's Telegram bot connection — its bot token and default chat — into its own .vetinari.local/host.env (host-side, never the container gate; ADR 0002/0011). On a terminal with no flags it prompts for the two values; --token/--chat supply them for a scripted run and then it never prompts (non-interactively, a missing value exits non-zero naming it). Before writing it sends one message to verify the token and chat; on failure nothing is written (a terminal re-prompts, non-interactive exits non-zero) — --no-verify skips the send. A host.env that already carries a connection is left alone unless you confirm (terminal) or pass --force; re-running is safe and other keys in the file are preserved. `init` offers this same step after its scaffold",
+  },
 ];
 
 /**

@@ -396,12 +396,16 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
   const renderDetail = (d) => {
     renderMoves(d);
     detailNum.textContent = "#" + d.issueNumber;
+    // A live running issue's phase (design §11, #359) replaces the word running and, when it is a
+    // wait (nothing executing), stills the dot via the shared dot.running.idle rule — no new colour.
+    // Every other state keeps its word, and a read-only archived sheet renders no phase.
+    const phase = d.status === "running" && !d.archived ? d.phase : null;
     // The sheet's top edge reads the issue's state (§2), the dot its full-strength colour.
     detailSheet.className = "issue-detail-sheet " + d.status;
-    detailStatusDot.className = "dot " + d.status;
+    detailStatusDot.className = "dot " + d.status + (phase && phase.steady ? " idle" : "");
     // State and reason (design §11): the reason rides beside the state as its word, so a
     // parked{red-base} sheet reads "parked · red base" — the reason a word, never the raw enum.
-    detailStatusLabel.textContent = d.status + (d.reason ? " · " + reasonWord(d.reason) : "");
+    detailStatusLabel.textContent = phase ? phase.label : d.status + (d.reason ? " · " + reasonWord(d.reason) : "");
     detailTitle.textContent = d.title || ("Issue #" + d.issueNumber);
     detailContext.textContent = [d.project, d.campaignName].filter(Boolean).join(" · ");
     // Turns carry their working duration (POC: "11 turns · 26m"), the one duration

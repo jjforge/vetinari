@@ -677,6 +677,39 @@ test("renderStatusPage colours a pruned chip and pulses a running one", () => {
   assert.match(html, /\.dot\.running \{ animation: chip-pulse/);
   assert.match(html, /prefers-reduced-motion/);
 });
+test("renderStatusPage shows a running member's phase in place of the word, controlling the pulse (#359)", () => {
+  const html = renderStatusPage({
+    project: "beta",
+    waves: [
+      {
+        index: 0,
+        status: "running",
+        issues: [
+          // An agent mid-gate: its phase names the running command and the dot keeps pulsing.
+          { issueNumber: "201", status: "running", name: "mid gate", phase: { label: "testing · go-unit", steady: false } },
+          // A green waiting to merge: nothing executes, so the dot goes steady (`idle`) and the
+          // phase replaces the word — never "running".
+          { issueNumber: "202", status: "running", name: "green one", phase: { label: "waiting to merge", steady: true } },
+        ],
+      },
+    ],
+    parked: [],
+  });
+
+  // The phase replaces the status word on the row (never "running · testing"); the row's own
+  // lifecycle class stays `running` (it colours the left edge, unchanged).
+  assert.match(
+    html,
+    /<button type="button" class="wave-member running"[^>]*><span class="dot running"><\/span>#201 <span class="wave-member-title">mid gate<\/span><small>testing · go-unit<\/small><\/button>/,
+  );
+  // The steady phase drops the pulse via the existing `.dot.running.idle` rule — no new colour,
+  // just the `idle` class — and still shows the phase word, not "running".
+  assert.match(
+    html,
+    /<button type="button" class="wave-member running"[^>]*><span class="dot running idle"><\/span>#202 <span class="wave-member-title">green one<\/span><small>waiting to merge<\/small><\/button>/,
+  );
+  assert.doesNotMatch(html, /<small>running<\/small>/);
+});
 test("renderStatusPage renders a grafted member row's status dot alongside its grafted badge (#307)", () => {
   // A grafted issue composes the two axes (ADR 0019): its lifecycle dot reads its own
   // status (here running), and the `grafted` membership badge rides alongside — the dot is

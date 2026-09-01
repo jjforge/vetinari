@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { appendedEvents, archiveStatusConfig, archivedRunState, buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, campaignSettled, campaignState, cardState, describeEvent, event, extractParkedDetails, festiveOffsetFor, formatFeedEvent, issueLifecycle, issueMembership, issueStateFromTask, lastEventText, listArchivedRuns, ownerRepoFromRemote, parkedReplyFor, parsePruneClosure, parseRunTimestamp, reconstructIssueDetail, reduceCampaign, festiveFromCookie, viewRelevantEvents, waveLabel, waveState, selectStatus, summarizeRun, type CampaignStatus, type OrchestratorEvent } from "./status.ts";
+import { appendedEvents, archiveStatusConfig, archivedRunState, buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, campaignSettled, campaignState, cardState, describeEvent, event, extractParkedDetails, festiveOffsetFor, formatFeedEvent, issueLifecycle, issueMembership, issuePhase, issueStateFromTask, lastEventText, listArchivedRuns, ownerRepoFromRemote, parkedReplyFor, parsePruneClosure, parseRunTimestamp, reconstructIssueDetail, reduceCampaign, festiveFromCookie, viewRelevantEvents, waveLabel, waveState, selectStatus, summarizeRun, type CampaignStatus, type OrchestratorEvent } from "./status.ts";
 import { festiveWaveName } from "./festive-names.ts";
 import type { ParkedRecord } from "./state.ts";
 import type { ProjectPointer } from "./registry.ts";
@@ -3178,4 +3178,142 @@ test("a graft into a wave-parked (resumable) campaign is folded and allowed (#16
   assert.ok(reduced.waves.flat().includes("301"));
   assert.deepEqual(reduced.waves[0], ["101"]);
   assert.equal(reduced.grafted.has("301"), true);
+});
+
+test("issuePhase derives a running issue's phase from its latest own event (design §11)", () => {
+  // A spawned issue with no container up yet is `starting`, and pulses (work spinning up).
+  const spawned = [
+    event("campaign-start", { ts: "t0", waves: [["301"]], slots: 1 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["301"] }),
+    event("spawn", { ts: "t2", taskId: "301", running: 1, left: 0 }),
+  ];
+  assert.deepEqual(issuePhase(spawned, "301"), { label: "starting", steady: false });
+
+  // Container up (`sandbox`) → the agent is `coding`.
+  const coding = [...spawned, noise({ event: "sandbox", ts: "t3", taskId: "301" })];
+  assert.deepEqual(issuePhase(coding, "301"), { label: "coding", steady: false });
+
+  // A finished turn keeps it `coding` until the gate opens.
+  const turned = [...coding, event("turn", { ts: "t4", taskId: "301", turn: 0, summary: "did a thing" })];
+  assert.deepEqual(issuePhase(turned, "301"), { label: "coding", steady: false });
+});
+
+test("issuePhase names the running gate command, advancing as the gate progresses (#332)", () => {
+  const base = [
+    event("campaign-start", { ts: "t0", waves: [["301"]], slots: 1 }),
+    event("spawn", { ts: "t1", taskId: "301", running: 1, left: 0 }),
+    event("turn", { ts: "t2", taskId: "301", turn: 0, summary: "s" }),
+    event("gate", { ts: "t3", taskId: "301", cmds: ["go-unit", "rust"], skipped: 0 }),
+  ];
+  // Right after the gate opens, its first command is the one running.
+  assert.deepEqual(issuePhase(base, "301"), { label: "testing · go-unit", steady: false });
+
+  // go-unit passes → rust is now the command in flight.
+  const second = [...base, event("gate-result", { ts: "t4", taskId: "301", cmd: "go-unit", exitCode: 0, seconds: 221, outFile: "f" })];
+  assert.deepEqual(issuePhase(second, "301"), { label: "testing · rust", steady: false });
+
+  // rust passes too → the whole gate is green, so the agent is back to coding (green imminent).
+  const done = [...second, event("gate-result", { ts: "t5", taskId: "301", cmd: "rust", exitCode: 0, seconds: 54, outFile: "f" })];
+  assert.deepEqual(issuePhase(done, "301"), { label: "coding", steady: false });
+
+  // A red command ends the gate early — the agent resumes to fix it, so it reads coding.
+  const red = [...base, event("gate-result", { ts: "t4", taskId: "301", cmd: "go-unit", exitCode: 1, seconds: 3, outFile: "f" })];
+  assert.deepEqual(issuePhase(red, "301"), { label: "coding", steady: false });
+});
+
+test("issuePhase reads a green-but-unmerged issue as waiting to merge, with a steady dot (design §2.2, Appendix A)", () => {
+  const green = [
+    event("campaign-start", { ts: "t0", waves: [["301"]], slots: 1 }),
+    event("spawn", { ts: "t1", taskId: "301", running: 1, left: 0 }),
+    event("green", { ts: "t2", taskId: "301", branch: "agent/301", commits: ["abc"] }),
+  ];
+  // Green banks nothing on the base yet, so its slot is freed and nothing executes: steady.
+  assert.deepEqual(issuePhase(green, "301"), { label: "waiting to merge", steady: true });
+
+  // The post-green findings harvest is a real phase while it runs...
+  const filing = [...green, noise({ event: "findings", ts: "t3", taskId: "301", count: 2 })];
+  assert.deepEqual(issuePhase(filing, "301"), { label: "filing findings", steady: false });
+
+  // ...and once every finding is filed the issue is back to waiting to merge, not stuck filing.
+  const filed = [
+    ...filing,
+    noise({ event: "finding-filed", ts: "t4", taskId: "301", summary: "a", url: "u" }),
+    noise({ event: "finding-filed", ts: "t5", taskId: "301", summary: "b", url: "u" }),
+  ];
+  assert.deepEqual(issuePhase(filed, "301"), { label: "waiting to merge", steady: true });
+
+  // A merged issue is terminal (completed), never running — so it carries no phase.
+  const merged = [...green, event("merged", { ts: "t6", taskId: "301", branch: "agent/301" })];
+  assert.equal(issuePhase(merged, "301"), undefined);
+});
+
+test("issuePhase scopes to the latest campaign and ignores the wave-merge gate (no taskId)", () => {
+  const events = [
+    // A superseded earlier run for the same issue — must not leak into the latest campaign's phase.
+    event("campaign-start", { ts: "a0", waves: [["301"]], slots: 1 }),
+    event("spawn", { ts: "a1", taskId: "301", running: 1, left: 0 }),
+    event("green", { ts: "a2", taskId: "301", branch: "agent/301", commits: [] }),
+    // The latest campaign: 301 is only just spawned.
+    event("campaign-start", { ts: "b0", waves: [["301"]], slots: 1 }),
+    event("spawn", { ts: "b1", taskId: "301", running: 1, left: 0 }),
+    // The wave-merge gate carries no taskId, so it never touches a member's phase.
+    event("gate", { ts: "b2", cmds: ["base"], skipped: 0 }),
+  ];
+  assert.deepEqual(issuePhase(events, "301"), { label: "starting", steady: false });
+});
+
+test("buildStatus attaches a live running issue's phase, and an archived run carries none (#359)", () => {
+  const dir = join(tmpdir(), `vetinari-status-phase-${Date.now()}`);
+  const events = [
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["301", "302"]], slots: 2 }),
+    event("wave-start", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["301", "302"] }),
+    // 301 is mid-gate; 302 went green and is waiting to merge (its wave has not drained).
+    event("spawn", { ts: "2025-01-01T00:02:00.000Z", taskId: "301", running: 2, left: 0 }),
+    event("spawn", { ts: "2025-01-01T00:02:01.000Z", taskId: "302", running: 2, left: 0 }),
+    event("turn", { ts: "2025-01-01T00:03:00.000Z", taskId: "301", turn: 0, summary: "s" }),
+    event("gate", { ts: "2025-01-01T00:04:00.000Z", taskId: "301", cmds: ["go-unit", "rust"], skipped: 0 }),
+    event("green", { ts: "2025-01-01T00:05:00.000Z", taskId: "302", branch: "agent/302", commits: [] }),
+  ];
+  seedState(dir, events);
+
+  const status = buildStatus(cfgFor(dir));
+  const [mid, green] = status.waves[0].issues;
+  assert.deepEqual(mid.phase, { label: "testing · go-unit", steady: false });
+  assert.deepEqual(green.phase, { label: "waiting to merge", steady: true });
+
+  // An archived (dead) read renders no phases (design settled: every issue's last event is
+  // terminal or its work is banked, and phase is running-only for a live grid).
+  const archive = join(dir, "logs", "archive", "orchestrator-2025-01-01T00-06-00-000Z.jsonl");
+  mkdirSync(join(dir, "logs", "archive"), { recursive: true });
+  writeJsonl(archive, events);
+  const archived = buildStatus(archiveStatusConfig("demo", archive), { dead: true });
+  for (const issue of archived.waves[0].issues) assert.equal(issue.phase, undefined);
+});
+
+test("reconstructIssueDetail carries a live running issue's phase for the sheet (#359)", () => {
+  const events = [
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["101"]], slots: 1 }),
+    event("wave-start", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["101"] }),
+    event("spawn", { ts: "2025-01-01T00:02:00.000Z", taskId: "101", running: 1, left: 0 }),
+    event("turn", { ts: "2025-01-01T00:03:00.000Z", taskId: "101", turn: 0, summary: "s" }),
+    event("gate", { ts: "2025-01-01T00:04:00.000Z", taskId: "101", cmds: ["npm-test"], skipped: 0 }),
+  ];
+  assert.deepEqual(reconstructIssueDetail(events, "101").phase, { label: "testing · npm-test", steady: false });
+
+  // A completed (merged) issue is not running, so the sheet carries no phase.
+  const merged = [...events, event("green", { ts: "2025-01-01T00:05:00.000Z", taskId: "101", branch: "agent/101", commits: [] }), event("merged", { ts: "2025-01-01T00:06:00.000Z", taskId: "101", branch: "agent/101" })];
+  assert.equal(reconstructIssueDetail(merged, "101").phase, undefined);
+});
+
+test("issuePhase re-establishes a phase after a park is re-admitted (design §5 step 3)", () => {
+  const events = [
+    event("campaign-start", { ts: "t0", waves: [["301"]], slots: 1 }),
+    event("spawn", { ts: "t1", taskId: "301", running: 1, left: 0 }),
+    event("parked", { ts: "t2", taskId: "301", reason: "question" }),
+    // The answer is delivered and the member re-spawns — its phase follows the re-admit,
+    // never stuck on the cleared park.
+    event("spawn", { ts: "t3", taskId: "301", running: 1, left: 0 }),
+    event("turn", { ts: "t4", taskId: "301", turn: 1, summary: "s" }),
+  ];
+  assert.deepEqual(issuePhase(events, "301"), { label: "coding", steady: false });
 });

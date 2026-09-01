@@ -138,13 +138,18 @@ const usageOf = (r: any) =>
   );
 
 /**
- * A green run's last act, before the container is destroyed: ask the agent, on
- * its own live session, for any defect it noticed but did not fix, and file each
- * through the configured reporter. Self-contained and never throws — a failed
- * harvest must not turn a real green into an error. No-op unless a reporter is
- * configured.
+ * A run's last act, before the container is destroyed: ask the agent, on its own
+ * live session, for any defect it noticed but did not fix, and file each through
+ * the configured reporter. Fired on green and on the two stall parks (budget,
+ * idle) — every exit that leaves a live session holding real diagnostic work
+ * (design §3 steps 8–9); a thrown terminal failure is excluded, since its session
+ * state is unknown. `source` names the non-green exit so the reporter can mark the
+ * finding as weaker evidence; it is absent on green, whose filed form is unchanged.
+ * Self-contained and never throws — a failed harvest must not turn a real green
+ * into an error, nor convert a park into a failure. No-op unless a reporter is
+ * configured and a session id is in hand (an idle stall may have neither).
  */
-async function harvestFindings(cfg: ResolvedConfig, sbx: Sandbox, sessionId: string | undefined, common: any, taskId: string) {
+async function harvestFindings(cfg: ResolvedConfig, sbx: Sandbox, sessionId: string | undefined, common: any, taskId: string, source?: string) {
   if (!cfg.reportFinding || !sessionId) return;
   try {
     const hr = await sbx.run({ ...common, maxIterations: 1, resumeSession: sessionId, prompt: HARVEST_PROMPT });
@@ -152,7 +157,7 @@ async function harvestFindings(cfg: ResolvedConfig, sbx: Sandbox, sessionId: str
     cfg.log.log("findings", { taskId, count: findings.length });
     if (!findings.length) return;
 
-    const results = await reportFindings(cfg.reportFinding, findings, { taskId, project: cfg.project });
+    const results = await reportFindings(cfg.reportFinding, findings, { taskId, project: cfg.project, source });
     for (const r of results) {
       if (r.error) cfg.log.log("finding-report-failed", { taskId, summary: r.finding.summary, error: r.error });
       else cfg.log.log("finding-filed", { taskId, summary: r.finding.summary, url: r.url });
@@ -316,14 +321,22 @@ export async function runLoop(cfg: ResolvedConfig, taskId: string, host?: HostBu
         }
 
         // Budget park (design §3 step 8): `detail` carries the specifics (`budget:<maxTurns>`)
-        // per §2.3, not the bare reason.
-        await park(cfg, { taskId, reason: "stalled", detail: `budget:${cfg.maxTurns}`, sessionId: r.iterations.at(-1)?.sessionId, branch: sbx.branch, question: `Turn budget exhausted (${cfg.maxTurns} gate cycles).` });
+        // per §2.3, not the bare reason. This is the richest session the loop produces —
+        // maxTurns genuine attempts against a real gate — so harvest it before teardown,
+        // marked with the exit so triage weighs it as weaker evidence than a green run.
+        const budgetSessionId = r.iterations.at(-1)?.sessionId;
+        const budgetDetail = `budget:${cfg.maxTurns}`;
+        await harvestFindings(cfg, sbx, budgetSessionId, common, taskId, budgetDetail);
+        await park(cfg, { taskId, reason: "stalled", detail: budgetDetail, sessionId: budgetSessionId, branch: sbx.branch, question: `Turn budget exhausted (${cfg.maxTurns} gate cycles).` });
         return "parked";
       } catch (err: any) {
         // An agent that emits NEITHER signal dies on the idle timeout as a thrown
         // error, not a result. Without this catch the slot leaves no parked
         // record and the work is unrecoverable.
         if (String(err?.name ?? err?.constructor?.name).includes("Idle")) {
+          // Harvest when the error carries a recoverable session; harvestFindings no-ops when
+          // it does not, so an unrecoverable idle stall skips cleanly (design §3 step 9).
+          await harvestFindings(cfg, sbx, err?.sessionId, common, taskId, "idle");
           await park(cfg, { taskId, reason: "stalled", detail: "idle", sessionId: err?.sessionId, branch: sbx.branch, question: "Agent stalled without emitting a signal." });
           return "parked";
         }

@@ -14,6 +14,14 @@ export interface Finding {
 export interface FindingContext {
   taskId: string;
   project: string;
+  /**
+   * The non-green exit this finding was harvested from (the park detail — e.g.
+   * `budget:6`, `idle`). A finding from a stalled agent is weaker evidence than one
+   * from a green run: the agent never proved its understanding by passing the gate,
+   * so triage should weigh it accordingly. Absent for a green run, whose filed form
+   * is unchanged.
+   */
+  source?: string;
 }
 
 /** Files one finding and returns the created record's URL, if any. */
@@ -68,15 +76,26 @@ export function parseFindings(stdout: string): Finding[] {
 }
 
 /**
+ * A finding harvested from a non-green session, marked so the filed issue reads as
+ * weaker evidence. The mark rides on the summary — the one field every reporter
+ * renders (as the issue title), so the caution is visible to a triager whatever the
+ * reporter is, without every reporter having to know about `source`. A green finding
+ * (no source) is returned untouched.
+ */
+const markForSource = (finding: Finding, source: string | undefined): Finding =>
+  source ? { ...finding, summary: `[unverified: ${source}] ${finding.summary}` } : finding;
+
+/**
  * File each finding through `reporter`, isolating a failure to its own finding
  * so one bad report never loses the others. Returns per-finding outcomes for the
- * caller to log.
+ * caller to log — carrying the ORIGINAL finding, since the `source` mark is a filing
+ * concern, not part of what was observed.
  */
 export async function reportFindings(reporter: FindingReporter, findings: Finding[], ctx: FindingContext): Promise<FindingResult[]> {
   const results: FindingResult[] = [];
   for (const finding of findings) {
     try {
-      const url = await reporter(finding, ctx);
+      const url = await reporter(markForSource(finding, ctx.source), ctx);
       results.push({ finding, url: typeof url === "string" ? url : undefined });
     } catch (e: any) {
       results.push({ finding, error: String(e?.message ?? e) });

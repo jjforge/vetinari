@@ -10,6 +10,7 @@ import { readEventLog } from "./event-log.ts";
 import { answerParked, hasParked, listOutbox, listParked, park } from "./state.ts";
 import { projectHasLiveCampaign, readLeases, type HostBudget } from "./host-slots.ts";
 import { BLOCKED, DONE, extractTurnSummary, parkedAnswerComment, runLoop, type LoopDeps } from "./loop.ts";
+import { HARVEST_PROMPT, type Finding, type FindingContext } from "./findings.ts";
 
 // A temp-dir `cfg` mirroring graft.test/modes.test's `harnessCfg`: a real on-disk
 // event log, parked dir and outbox under a throwaway state dir, driven by a real
@@ -41,6 +42,7 @@ interface TurnScript {
   run?: Partial<SandboxRunResult>;
   green?: boolean;
   throwIdle?: boolean;
+  throwIdleSession?: string;
   throwGeneric?: string;
 }
 
@@ -58,9 +60,10 @@ const fakeSandbox = (script: TurnScript[], branch = "agent/T-1"): FakeSandbox =>
       runCalls.push(opts);
       turn++;
       const s = script[turn];
-      if (s?.throwIdle) {
+      if (s?.throwIdle || s?.throwIdleSession) {
         const e = new Error("agent stalled without a signal");
         e.name = "IdleTimeoutError";
+        if (s.throwIdleSession) (e as any).sessionId = s.throwIdleSession;
         throw e;
       }
       if (s?.throwGeneric) throw new Error(s.throwGeneric);
@@ -411,6 +414,131 @@ test("runLoop parks (stalled: idle) when the agent dies on an Idle-named error",
   assert.equal(parked.length, 1);
   assert.equal(parked[0].reason, "stalled");
   assert.equal(parked[0].detail, "idle");
+});
+
+// A reporter that records every (finding, ctx) it is handed, so a test can assert both
+// what was filed and whether it carried a non-green `source` mark.
+const capturingReporter = () => {
+  const calls: { finding: Finding; ctx: FindingContext }[] = [];
+  const reportFinding = (finding: Finding, ctx: FindingContext) => {
+    calls.push({ finding, ctx });
+    return `https://example/issues/${calls.length}`;
+  };
+  return { calls, reportFinding };
+};
+
+const ONE_FINDING = "<finding><summary>Cache extracted corrupt</summary><location>vendor/hex</location></finding><promise>COMPLETE</promise>";
+
+test("runLoop harvests a budget-exhausted park on the still-live session, filing findings marked with the exit", async () => {
+  const rep = capturingReporter();
+  const cfg = harnessCfg({ maxTurns: 2, reportFinding: rep.reportFinding });
+  // Two red turns, an (ungated) final resume, then the harvest turn returns one finding.
+  const sbx = fakeSandbox([
+    { run: { completionSignal: DONE }, green: false },
+    { run: { completionSignal: DONE }, green: false },
+    { run: { completionSignal: DONE }, green: false },
+    { run: { stdout: ONE_FINDING } },
+  ]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+
+  // The park itself is unaffected — same reason, detail and resumability as without a harvest.
+  assert.equal(outcome, "parked");
+  const parked = listParked(cfg);
+  assert.equal(parked.length, 1);
+  assert.equal(parked[0].reason, "stalled");
+  assert.equal(parked[0].detail, "budget:2");
+  // The harvest ran on the very session the park carries — not a fresh one.
+  const harvestCall = sbx.runCalls.find((c) => c.prompt === HARVEST_PROMPT);
+  assert.ok(harvestCall, "the harvest turn ran before teardown");
+  assert.equal(harvestCall!.resumeSession, parked[0].sessionId);
+  // The filed finding is marked with the exit that produced it, so triage can weigh it.
+  assert.equal(rep.calls.length, 1);
+  assert.equal(rep.calls[0].ctx.source, "budget:2");
+  assert.match(rep.calls[0].finding.summary, /budget:2/);
+  assert.match(rep.calls[0].finding.summary, /Cache extracted corrupt/);
+});
+
+test("runLoop's budget park with no findings files nothing and leaves the park unchanged", async () => {
+  const rep = capturingReporter();
+  const cfg = harnessCfg({ maxTurns: 2, reportFinding: rep.reportFinding });
+  const sbx = fakeSandbox([
+    { run: { completionSignal: DONE }, green: false },
+    { run: { completionSignal: DONE }, green: false },
+    { run: { completionSignal: DONE }, green: false },
+    { run: { stdout: "<finding>none</finding><promise>COMPLETE</promise>" } },
+  ]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+
+  assert.equal(outcome, "parked");
+  assert.equal(rep.calls.length, 0, "nothing observed means nothing filed");
+  const parked = listParked(cfg);
+  assert.equal(parked.length, 1);
+  assert.equal(parked[0].reason, "stalled");
+  assert.equal(parked[0].detail, "budget:2");
+});
+
+test("runLoop harvests an idle stall when the error carries a recoverable session, marking findings idle", async () => {
+  const rep = capturingReporter();
+  const cfg = harnessCfg({ reportFinding: rep.reportFinding });
+  const sbx = fakeSandbox([{ throwIdleSession: "sess-idle" }, { run: { stdout: ONE_FINDING } }]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+
+  assert.equal(outcome, "parked");
+  const parked = listParked(cfg);
+  assert.equal(parked[0].reason, "stalled");
+  assert.equal(parked[0].detail, "idle");
+  const harvestCall = sbx.runCalls.find((c) => c.prompt === HARVEST_PROMPT);
+  assert.ok(harvestCall, "the idle stall harvested on the recoverable session");
+  assert.equal(harvestCall!.resumeSession, "sess-idle");
+  assert.equal(rep.calls.length, 1);
+  assert.equal(rep.calls[0].ctx.source, "idle");
+  assert.match(rep.calls[0].finding.summary, /idle/);
+});
+
+test("runLoop's idle stall with no recoverable session skips the harvest cleanly", async () => {
+  const rep = capturingReporter();
+  const cfg = harnessCfg({ reportFinding: rep.reportFinding });
+  const sbx = fakeSandbox([{ throwIdle: true }]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+
+  assert.equal(outcome, "parked");
+  assert.equal(listParked(cfg)[0].detail, "idle");
+  // No session to resume, so no harvest turn ran and nothing was filed — silently skipped.
+  assert.equal(sbx.runCalls.some((c) => c.prompt === HARVEST_PROMPT), false);
+  assert.equal(rep.calls.length, 0);
+});
+
+test("runLoop does not harvest a thrown terminal failure", async () => {
+  const rep = capturingReporter();
+  const cfg = harnessCfg({ reportFinding: rep.reportFinding });
+  const sbx = fakeSandbox([{ throwGeneric: "container vanished" }]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+
+  assert.equal(outcome, "failed");
+  assert.equal(sbx.runCalls.some((c) => c.prompt === HARVEST_PROMPT), false, "a thrown failure never harvests");
+  assert.equal(rep.calls.length, 0);
+});
+
+test("runLoop's green harvest is unmarked — a verified finding carries no source", async () => {
+  const rep = capturingReporter();
+  const cfg = harnessCfg({ reportFinding: rep.reportFinding });
+  const sbx = fakeSandbox([
+    { run: { completionSignal: DONE, commits: [{ sha: "abc" }] }, green: true },
+    { run: { stdout: ONE_FINDING } },
+  ]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+
+  assert.equal(outcome, "green");
+  assert.equal(rep.calls.length, 1);
+  assert.equal(rep.calls[0].ctx.source, undefined, "a green finding carries no source");
+  assert.doesNotMatch(rep.calls[0].finding.summary, /unverified/, "a green finding's filed form is unchanged");
+  assert.equal(rep.calls[0].finding.summary, "Cache extracted corrupt");
 });
 
 test("runLoop resumes the parked session on the answer path without re-fetching the task", async () => {

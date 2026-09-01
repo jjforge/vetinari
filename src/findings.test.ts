@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseFindings, reportFindings } from "./findings.ts";
+import { parseFindings, reportFindings, type Finding } from "./findings.ts";
 
 test("parseFindings extracts each finding block with its sub-fields", () => {
   const stdout = `working... here is what I noticed.
@@ -50,4 +50,41 @@ test("reportFindings files every finding and isolates a failure to its own findi
   assert.equal(results[1].error, "gh exploded");
   assert.equal(results[1].url, undefined);
   assert.equal(results[2].url, "https://example/issues/3");
+});
+
+test("reportFindings marks the finding handed to the reporter with the non-green exit its context carries", async () => {
+  const received: Finding[] = [];
+  const reporter = (finding: Finding) => {
+    received.push(finding);
+    return "https://example/issues/1";
+  };
+
+  const results = await reportFindings(
+    reporter,
+    [{ summary: "Sidecar leaks a file handle", location: "src/db.rs", repro: "start then SIGTERM" }],
+    { taskId: "640", project: "demo", source: "budget:6" },
+  );
+
+  // The reporter (whatever it is) sees the source folded into the filed finding, so the
+  // issue a triager reads is marked as weaker evidence — the agent never went green.
+  assert.match(received[0].summary, /budget:6/);
+  assert.match(received[0].summary, /Sidecar leaks a file handle/);
+  // location and repro pass through untouched — only the summary carries the mark.
+  assert.equal(received[0].location, "src/db.rs");
+  assert.equal(received[0].repro, "start then SIGTERM");
+  // The returned result records the original finding, unmarked — the mark is a filing concern.
+  assert.equal(results[0].finding.summary, "Sidecar leaks a file handle");
+});
+
+test("reportFindings leaves a green-run finding untouched — no source in context, filed form unchanged", async () => {
+  const received: Finding[] = [];
+  const reporter = (finding: Finding) => {
+    received.push(finding);
+    return "https://example/issues/1";
+  };
+  const original = { summary: "Sidecar leaks a file handle", location: "src/db.rs", repro: "start then SIGTERM" };
+
+  await reportFindings(reporter, [original], { taskId: "640", project: "demo" });
+
+  assert.deepEqual(received[0], original);
 });

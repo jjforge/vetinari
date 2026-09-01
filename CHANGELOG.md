@@ -20,6 +20,13 @@ Within a milestone each bold section label appears at most once.
 
 ### Collected changes — September 1, 2026
 
+**New features:**
+- [user] `vetinari tg-connect` collects a project's Telegram bot connection — its bot token and default chat — into that project's own `.vetinari.local/host.env`, verified by one send before it writes; prompts on a terminal or takes `--token`/`--chat` for a scripted run, with `--no-verify` and `--force`, and preserves any other keys in the file (#340).
+- [user] `vetinari init` now offers to wire the bot connection right after its scaffold on a terminal, and names `tg-connect` in its "Next steps" otherwise (#340).
+
+**Improvements:**
+- [user] `campaign <id>` now runs a selection that resolves to a single issue with no `Touches:`/`Files:`/`Creates:` marker and in a project with no `blockedBy` resolver configured — the file-set check is skipped as vacuous (named in the plan provenance) and the resolver requirement stands down, while a configured resolver still drops a lone ticket held by an open blocker outside the selection. `--on-underspecified` is accepted and inert on a one-issue selection (#356).
+
 **Bug fixes:**
 - [user] Dashboard: a `running` issue's row and sheet now show its phase — `starting`, `coding`, `testing · <cmd>` (naming the gate command running now), `filing findings`, or `waiting to merge` — in place of the bare word `running`, so a green waiting for its wave to integrate (steady dot) no longer looks identical to an agent mid-gate (pulsing). Derived from the issue's latest event; the wave tally, live tail, and the five-state roll-up are unchanged (#359).
 - [ops] Incidental findings are now harvested from a stalled agent's still-live session too — a budget-exhausted park and a recoverable idle stall each harvest before the container is torn down, not only a green run; findings filed from a non-green session are marked `[unverified: <exit>]` so triage can weigh them as weaker evidence, while a green run's filed form is unchanged and a thrown terminal failure is not harvested (#360).

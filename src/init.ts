@@ -21,7 +21,9 @@ import { dirname, resolve } from "node:path";
 import { AGENT_PROVIDERS, DEFAULT_PROVIDER, type AgentProviderName } from "./config.ts";
 
 const CANONICAL_DIR = "vetinari";
-const LOCAL_DIR = ".vetinari.local";
+/** The excluded machine-local base location init lays down and knows by its own constant
+ *  (init runs before the strict config load, so it cannot read `cfg.stateDir`). */
+export const LOCAL_DIR = ".vetinari.local";
 const CONFIG_DEST = `${CANONICAL_DIR}/config.mts`;
 const DOCKERFILE_DEST = `${CANONICAL_DIR}/Dockerfile`;
 
@@ -135,7 +137,8 @@ export function describeInit(plan: InitPlan, provider: AgentProviderName = DEFAU
     lines.push("Next steps:");
     lines.push(`  1. Add your toolchain to ${DOCKERFILE_DEST} and your gates to ${CONFIG_DEST}.`);
     lines.push(`  2. Put your agent credential in ${LOCAL_DIR}/.env as ${keys} — the key(s) the \`${provider}\` provider reads (set \`agent\` in ${CONFIG_DEST} to pick another). The container reads it there, and the first real \`run\` is the first thing that needs it.`);
-    lines.push("  3. Build the image, then run `vetinari baseline` to prove every gate green.");
+    lines.push(`  3. Wire this project's Telegram bot connection with \`vetinari tg-connect\` — it collects the bot token and chat into ${LOCAL_DIR}/host.env (host-side, never the container gate) so parked questions are announced. Optional; skip it to run without notifications.`);
+    lines.push("  4. Build the image, then run `vetinari baseline` to prove every gate green.");
   }
 
   return lines.join("\n");

@@ -20,6 +20,8 @@ import { parseAgentFlags } from "./config.ts";
 import { renderUsage } from "./help.ts";
 import type { HostBudget, projectHasLiveCampaign } from "./host-slots.ts";
 import type { build, baseline, campaign, tgTest, requireTelegram, CampaignOutcome } from "./modes.ts";
+import type { runTgConnect } from "./tg-connect.ts";
+import type { tgSend } from "./telegram.ts";
 import { crashResumePrompt, type runLoop, type Outcome } from "./loop.ts";
 import type { answerParked, hasParked, listParked } from "./state.ts";
 import type { archiveRun } from "./archive.ts";
@@ -105,6 +107,7 @@ export type Command =
   | { kind: "parked" }
   | { kind: "clear" }
   | { kind: "tgTest" }
+  | { kind: "tgConnect"; token?: string; chat?: string; noVerify: boolean; force: boolean }
   | { kind: "usage" };
 
 /**
@@ -126,6 +129,27 @@ export function parseArgs(argv: string[]): Command {
       return { kind: "clear" };
     case "tg-test":
       return { kind: "tgTest" };
+    case "tg-connect": {
+      // Collect a project's bot connection into its host.env. `--token`/`--chat` supply the
+      // two values a scripted run needs (both `--flag value` and `--flag=` forms); `--no-verify`
+      // skips the verification send and `--force` replaces an already-configured connection.
+      let token: string | undefined;
+      let chat: string | undefined;
+      for (let i = 0; i < rest.length; i++) {
+        const a = rest[i];
+        if (a === "--token") token = rest[++i];
+        else if (a.startsWith("--token=")) token = a.slice("--token=".length);
+        else if (a === "--chat") chat = rest[++i];
+        else if (a.startsWith("--chat=")) chat = a.slice("--chat=".length);
+      }
+      return {
+        kind: "tgConnect",
+        token,
+        chat,
+        noVerify: rest.includes("--no-verify"),
+        force: rest.includes("--force"),
+      };
+    }
     case "run": {
       // Strip the agent selection first, exactly as the old `applyAgentSelection`
       // did, so the task id is the surviving positional (ADR 0016). `--json` streams
@@ -300,6 +324,12 @@ export interface DispatchDeps {
   archiveRun: typeof archiveRun;
   requireTelegram: typeof requireTelegram;
   tgTest: typeof tgTest;
+  /** Collect a project's Telegram bot connection into its host.env (the `tg-connect` mode). */
+  runTgConnect: typeof runTgConnect;
+  /** A readline prompt, TTY-gated by the collector — the same seam `askUnderspecified` uses. */
+  ask: (question: string) => Promise<string>;
+  /** One `sendMessage`, the collector's verification of a bot connection before it writes. */
+  tgSend: typeof tgSend;
 }
 
 /**
@@ -428,6 +458,20 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
         resolve(process.cwd(), cfg.stateDir),
       );
       await deps.tgTest(cfg, conn);
+      return;
+    }
+    case "tgConnect": {
+      // Collect this project's bot connection into its own host.env — the same base
+      // location tg-test resolves from cfg.stateDir (ADR 0002). The pure planner/apply and
+      // the collect loop live in tg-connect.ts; the prompt and the verification send are
+      // wired from deps here, TTY-gated inside the collector. `ok` false → non-zero exit.
+      const baseLocation = resolve(process.cwd(), cfg.stateDir);
+      const result = await deps.runTgConnect(
+        baseLocation,
+        { token: cmd.token, chat: cmd.chat, noVerify: cmd.noVerify, force: cmd.force },
+        { isTTY: deps.isTTY, ask: deps.ask, send: deps.tgSend, log: deps.log, label: cfg.project },
+      );
+      if (!result.ok) deps.setExitCode(1);
       return;
     }
     case "usage": {

@@ -169,6 +169,16 @@ test("describeInit's next steps name the agent credential file and every key of 
   assert.match(text, /`agent`/);
 });
 
+test("describeInit's next steps name the Telegram bot connection step and the tg-connect mode", () => {
+  const text = describeInit(computeInit({ hasConfig: false, hasLocalDir: false, gitignore: undefined, ...TEMPLATES }));
+
+  // The bot connection is called out as a next step, naming the mode that collects it —
+  // in our vocabulary ("bot connection"), and pointing at host.env, not the container gate.
+  assert.match(text, /bot connection/i);
+  assert.match(text, /tg-connect/);
+  assert.match(text, /host\.env/);
+});
+
 test("describeInit leads with a clear refusal when a config already exists", () => {
   const text = describeInit(computeInit({ hasConfig: true, hasLocalDir: false, gitignore: "node_modules/\n", ...TEMPLATES }));
 

@@ -141,7 +141,7 @@ A parked record that survives a run (it always does, until resolved) keeps the c
 
 ## 3. The run loop
 
-`run <issue>` is one container, one branch, one agent session, and returns exactly one of green / parked / failed as its exit code (0 / 2 / 1).
+`run <issue>` is one container, one branch, one agent session, and returns exactly one of green / parked / failed as its exit code (0 / 2 / 1). A run **merges nothing**: it banks its commits on `agent/<id>` and stops there — the merge onto the base and the merged-base gate are the campaign's (§6), never the run's. So a green run is banked work on a branch, not a finished issue; its terminal banner says as much (§11) and names `campaign <id>` as what integrates it (suppressed for a campaign's own child run, which is already inside integration).
 
 1. Preflight: the provider's credential key is present in `.env`; the working tree is not already checked out on `agent/<id>` (one run per issue, enforced by git).
 2. Create the sandbox: branch `agent/<id>` cut from the base (or reused with its commits if it exists), worktree, container from `cfg.image`, `setup` commands, the mounts.

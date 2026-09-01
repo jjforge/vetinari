@@ -280,7 +280,16 @@ export async function runLoop(cfg: ResolvedConfig, taskId: string, host?: HostBu
             cfg.log.log("green", { taskId, branch: sbx.branch, commits: (r.commits ?? []).map((c: any) => c.sha) });
             // The human GREEN banner is the terminal view (design §11); under --json the screen is
             // the raw event stream alone, so keep it out to leave the JSONL clean for tooling (#299).
-            if (process.env.VETINARI_JSON !== "1") console.log(`\n*** GREEN — commits on ${sbx.branch}\n`);
+            if (process.env.VETINARI_JSON !== "1") {
+              console.log(`\n*** GREEN — commits on ${sbx.branch}\n`);
+              // A run banks work on its branch and merges nothing — integration (the merge and the
+              // merged-base gate) is the campaign's, so say so lest the branch read as a finished
+              // issue (#339). Suppressed for a campaign's OWN child run: telling a wave member to go
+              // run `campaign` is nonsense. The child marker is the same VETINARI_CHILD the host-lease
+              // exemption reads a few lines below — one discriminator, not two.
+              if (!process.env.VETINARI_CHILD)
+                console.log(`Not merged — the commits are banked on ${sbx.branch}. Integrate them with: campaign ${taskId}\n`);
+            }
             enqueueOutbound(cfg, notice({
               emoji: "✅",
               project: cfg.project,

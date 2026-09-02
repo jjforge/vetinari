@@ -2284,6 +2284,78 @@ test("buildStatus marks a display wave `closed` only once it actually closed, no
   assert.equal(closed.waves[0].closed, true);
 });
 
+test("buildStatus marks a wave `closed` when its surviving member merged, even though a member was pruned (#363)", () => {
+  // A pruned member's chip stays in the wave it left (ADR 0007), but it left the loop-facing
+  // plan and never appears in `closedWaves` — so the `closed` fold must skip it, exactly as
+  // `waveState` does, or a wave that genuinely closed never collapses into its chip.
+  const dir = join(tmpdir(), `vetinari-wave-closed-pruned-${Date.now()}`);
+  seedState(dir, [
+    event("campaign-start", { ts: "2026-09-02T04:00:00.000Z", waves: [["854", "999"]], slots: 1 }),
+    event("wave-start", { ts: "2026-09-02T04:10:00.000Z", index: 0, tasks: ["854", "999"] }),
+    event("parked", { ts: "2026-09-02T04:12:00.000Z", taskId: "999", reason: "question" }),
+    event("prune", { ts: "2026-09-02T04:13:00.000Z", target: "999", removed: ["999"], dropped: [] }),
+    event("green", { ts: "2026-09-02T04:15:00.000Z", taskId: "854", branch: "agent/854", commits: [] }),
+    event("merged", { ts: "2026-09-02T04:16:55.000Z", taskId: "854" }),
+    event("wave-done", { ts: "2026-09-02T04:20:03.000Z", index: 0, merged: ["854"] }),
+  ]);
+  const status = buildStatus(cfgFor(dir));
+  // The surviving member merged and the wave's `wave-done` landed — the wave closed.
+  assert.equal(status.waves[0].status, "completed");
+  assert.equal(status.waves[0].closed, true);
+  // The pruned chip still renders in the wave it left (ADR 0007) — only the fold changed.
+  const chip = status.waves[0].issues.find((i) => i.issueNumber === "999");
+  assert.equal(chip?.membership, "pruned");
+});
+
+test("buildStatus collapses a wave that had a member pruned and a member grafted once its wave-done lands (#363)", () => {
+  // A grafted id lands in both `waves` and `layout`, so it satisfies the `closed` fold like a
+  // plain member; a pruned id lands only in `layout` and is skipped. The two overlays must not
+  // interfere — a wave carrying one of each still collapses when its surviving members close.
+  const dir = join(tmpdir(), `vetinari-wave-closed-graft-prune-${Date.now()}`);
+  seedState(dir, [
+    event("campaign-start", { ts: "2026-09-02T04:00:00.000Z", waves: [["101"], ["201", "301"]], slots: 1 }),
+    event("wave-start", { ts: "2026-09-02T04:01:00.000Z", index: 0, tasks: ["101"] }),
+    // 401 grafts in while wave 0 is in flight → lands in the next unstarted wave (wave 1).
+    event("graft", { ts: "2026-09-02T04:02:00.000Z", ids: ["401"], blockedBy: {}, basenames: {} }),
+    // 301 is pruned out of wave 1 but keeps its chip there (ADR 0007).
+    event("prune", { ts: "2026-09-02T04:03:00.000Z", target: "301", removed: ["301"], dropped: [] }),
+    event("green", { ts: "2026-09-02T04:04:00.000Z", taskId: "101", branch: "agent/101", commits: [] }),
+    event("merged", { ts: "2026-09-02T04:05:00.000Z", taskId: "101" }),
+    event("wave-done", { ts: "2026-09-02T04:06:00.000Z", index: 0, merged: ["101"] }),
+    event("wave-start", { ts: "2026-09-02T04:07:00.000Z", index: 1, tasks: ["201", "401"] }),
+    event("green", { ts: "2026-09-02T04:08:00.000Z", taskId: "201", branch: "agent/201", commits: [] }),
+    event("merged", { ts: "2026-09-02T04:09:00.000Z", taskId: "201" }),
+    event("green", { ts: "2026-09-02T04:10:00.000Z", taskId: "401", branch: "agent/401", commits: [] }),
+    event("merged", { ts: "2026-09-02T04:11:00.000Z", taskId: "401" }),
+    event("wave-done", { ts: "2026-09-02T04:12:00.000Z", index: 1, merged: ["201", "401"] }),
+  ]);
+  const status = buildStatus(cfgFor(dir));
+  // The grafted 401 landed in wave 1 alongside 201; 301's pruned chip stays but is skipped.
+  const wave = status.waves.find((w) => w.issues.some((i) => i.issueNumber === "401"));
+  assert.ok(wave, "the grafted member should land in a display wave");
+  assert.ok(wave!.issues.some((i) => i.issueNumber === "301" && i.membership === "pruned"), "the pruned chip stays");
+  assert.equal(wave!.status, "completed");
+  assert.equal(wave!.closed, true);
+});
+
+test("buildStatus never reads a wholly-pruned display wave as `closed` (#363)", () => {
+  // A wave every member of which was pruned is a display ghost — its `live` set is empty, so the
+  // `live.length > 0` guard holds exactly as `waveState`'s does and it never reads `closed`.
+  const dir = join(tmpdir(), `vetinari-wave-closed-all-pruned-${Date.now()}`);
+  seedState(dir, [
+    event("campaign-start", { ts: "2026-09-02T04:00:00.000Z", waves: [["101"], ["301"]], slots: 1 }),
+    event("wave-start", { ts: "2026-09-02T04:01:00.000Z", index: 0, tasks: ["101"] }),
+    event("prune", { ts: "2026-09-02T04:02:00.000Z", target: "301", removed: ["301"], dropped: [] }),
+    event("green", { ts: "2026-09-02T04:03:00.000Z", taskId: "101", branch: "agent/101", commits: [] }),
+    event("merged", { ts: "2026-09-02T04:04:00.000Z", taskId: "101" }),
+    event("wave-done", { ts: "2026-09-02T04:05:00.000Z", index: 0, merged: ["101"] }),
+  ]);
+  const status = buildStatus(cfgFor(dir));
+  const ghost = status.waves.find((w) => w.issues.every((i) => i.membership === "pruned"));
+  assert.ok(ghost, "the wholly-pruned wave still renders as a ghost");
+  assert.notEqual(ghost!.closed, true);
+});
+
 test("buildStatus surfaces the campaign name from the start event", () => {
   const dir = join(tmpdir(), `vetinari-status-name-${Date.now()}`);
   mkdirSync(join(dir, "logs"), { recursive: true });

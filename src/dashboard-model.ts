@@ -1332,8 +1332,11 @@ export function buildStatus(cfg: ResolvedConfig, opts: { dead?: boolean; alive?:
     // rather than `wave.index`, because `closedWaves` indexes the pruned loop-facing `waves`
     // while these display waves index `layout` — a mid-campaign prune that empties a wave
     // makes the two indices diverge, but the member ids never lie. The renderer collapses
-    // on this, never on the status word.
-    const closed = wave.length > 0 && wave.every((issueNumber) => closedIssueNumbers.has(issueNumber));
+    // on this, never on the status word. A pruned member left the loop-facing plan and so
+    // never appears in `closedWaves`; skip it, exactly as `waveState` does, or a wave whose
+    // surviving members all closed could never satisfy the fold (ADR 0007, #363).
+    const live = issues.filter((i) => i.membership !== "pruned");
+    const closed = live.length > 0 && live.every((i) => closedIssueNumbers.has(i.issueNumber));
     return { index, status: waveState(issues, { redBase }), ...(redBase ? { reason: "red-base" as ParkReason } : {}), closed, issues };
   });
 

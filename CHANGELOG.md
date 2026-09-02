@@ -22,6 +22,7 @@ Within a milestone each bold section label appears at most once.
 
 **Bug fixes:**
 - [user] A campaign wave no longer collapses into its "completed" chip the moment its last member merges: it stays an expanded card until the wave has actually closed (its wave-level gates ran and `wave-done` logged), so a wave still integrating — or one that then parks `red-base`, holds a conflict-parked member, or fails — is never filed away as finished (#362).
+- [user] A wave that had a member pruned now collapses into its completed chip once its `wave-done` lands, instead of staying an expanded card for the rest of the run — the `closed` fold skips pruned members, as the wave-status fold already does (#363).
 
 ### Collected changes — September 1, 2026
 

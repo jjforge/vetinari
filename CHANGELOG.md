@@ -18,6 +18,11 @@ and each entry opens with a tag saying who it reaches:
 `**Breaking changes:**` sorts first in a milestone and names the contract it broke.
 Within a milestone each bold section label appears at most once.
 
+### Collected changes — September 2, 2026
+
+**Bug fixes:**
+- [user] A campaign wave no longer collapses into its "completed" chip the moment its last member merges: it stays an expanded card until the wave has actually closed (its wave-level gates ran and `wave-done` logged), so a wave still integrating — or one that then parks `red-base`, holds a conflict-parked member, or fails — is never filed away as finished (#362).
+
 ### Collected changes — September 1, 2026
 
 **New features:**

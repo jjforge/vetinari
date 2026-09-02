@@ -126,6 +126,15 @@ export interface StatusWave {
    * not any member's — the members keep their own lifecycle. Absent otherwise; a wave
    * parked only because a member is held carries no wave reason (the member has it). */
   reason?: ParkReason;
+  /** whether the wave has actually *closed* — the reducer's `closedWaves` membership,
+   * carried onto the display wave (derived at render from the event log, so §2.1's
+   * no-stored-presentation-state rule is untouched). Set only by `wave-done` and only when
+   * no member is conflict-parked, so it lags `status === "completed"`: a wave whose last
+   * member merged reads `completed` while its wave-level gates still run, but stays `closed:
+   * false` until `wave-done` lands. The renderer keys the collapse-into-chip affordance on
+   * this, not on the status word, so a still-integrating wave stays an expanded card. Absent
+   * on a hand-built status (reads as not-closed). */
+  closed?: boolean;
   issues: StatusIssue[];
 }
 
@@ -1317,7 +1326,15 @@ export function buildStatus(cfg: ResolvedConfig, opts: { dead?: boolean; alive?:
     // A red-base wave-park is the wave's own reason (design §2.3): its members keep their
     // lifecycle (a merged member stays completed), so the hold shows only on the wave.
     const redBase = wave.some((issueNumber) => reduced.redBase.has(issueNumber));
-    return { index, status: waveState(issues, { redBase }), ...(redBase ? { reason: "red-base" as ParkReason } : {}), issues };
+    // `closed` is the reducer's `closedWaves` membership carried onto the display wave —
+    // the wave actually closed (its gates ran and `wave-done` logged, with no conflict-parked
+    // member), which lags the `completed` fold. Keyed on member id (via `closedIssueNumbers`)
+    // rather than `wave.index`, because `closedWaves` indexes the pruned loop-facing `waves`
+    // while these display waves index `layout` — a mid-campaign prune that empties a wave
+    // makes the two indices diverge, but the member ids never lie. The renderer collapses
+    // on this, never on the status word.
+    const closed = wave.length > 0 && wave.every((issueNumber) => closedIssueNumbers.has(issueNumber));
+    return { index, status: waveState(issues, { redBase }), ...(redBase ? { reason: "red-base" as ParkReason } : {}), closed, issues };
   });
 
   return {

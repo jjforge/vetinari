@@ -180,8 +180,8 @@ const renderClosedWaveChip = (wave: StatusWave, festiveName?: string) =>
 const renderWaves = (status: CampaignStatus, prune: boolean, interactive: boolean, collapsible = true, run?: string, festive = false) => {
   if (!status.waves.length) return "<p>No active campaign or queue found.</p>";
   if (!collapsible) return `<div class="waves-grid">${status.waves.map((wave) => renderWaveCard(wave, status.project, prune, interactive, "", run, festiveNameFor(status, wave, festive))).join("")}</div>`;
-  const closedWaves = status.waves.filter((wave) => wave.status === "completed");
-  const openWaves = status.waves.filter((wave) => wave.status !== "completed");
+  const closedWaves = status.waves.filter((wave) => wave.closed);
+  const openWaves = status.waves.filter((wave) => !wave.closed);
   const toggleRow = closedWaves.length
     ? `<div class="completed-waves"><div class="completed-wave-bar" data-project="${escapeHtml(status.project)}">${closedWaves.map((wave) => renderClosedWaveChip(wave, festiveNameFor(status, wave, festive))).join("")}</div></div>`
     : "";
@@ -562,7 +562,7 @@ ${ISSUE_DETAIL_SHEET_STYLES}
   // inert without JS, so reveal every closed card in the grid and hide the toggle bar,
   // keeping the content reachable (the old <details> degraded the same way). Emitted
   // only when there are closed waves to fall back for.
-  status.waves.some((wave) => wave.status === "completed")
+  status.waves.some((wave) => wave.closed)
     ? `\n<noscript><style>.completed-wave-bar { display: none; } .wave.completed[hidden] { display: block; }</style></noscript>`
     : ""
 }

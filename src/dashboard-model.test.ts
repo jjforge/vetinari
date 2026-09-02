@@ -2255,6 +2255,35 @@ test("buildStatus shows campaign waves with issue chips and statuses", () => {
   ]);
 });
 
+test("buildStatus marks a display wave `closed` only once it actually closed, not when its members merge (#362)", () => {
+  // The `closed` flag carries the reducer's `closedWaves` membership — set by `wave-done`,
+  // never by a member's `merged` — so a wave reads `completed` (the fold) while `closed` still
+  // lags until its gates ran. The renderer keys the collapse-into-a-chip affordance on `closed`.
+  const dir = join(tmpdir(), `vetinari-wave-closed-${Date.now()}`);
+  seedState(dir, [
+    event("campaign-start", { ts: "2026-09-02T04:00:00.000Z", waves: [["854"]], slots: 1 }),
+    event("wave-start", { ts: "2026-09-02T04:10:00.000Z", index: 0, tasks: ["854"] }),
+    event("green", { ts: "2026-09-02T04:15:00.000Z", taskId: "854", branch: "agent/854", commits: [] }),
+    event("merged", { ts: "2026-09-02T04:16:55.000Z", taskId: "854" }),
+  ]);
+  const merged = buildStatus(cfgFor(dir));
+  // Every member merged → the fold reads `completed`, but no `wave-done` → not yet closed.
+  assert.equal(merged.waves[0].status, "completed");
+  assert.equal(merged.waves[0].closed, false);
+
+  // Add the `wave-done` its gates produce → the wave has actually closed.
+  seedState(dir, [
+    event("campaign-start", { ts: "2026-09-02T04:00:00.000Z", waves: [["854"]], slots: 1 }),
+    event("wave-start", { ts: "2026-09-02T04:10:00.000Z", index: 0, tasks: ["854"] }),
+    event("green", { ts: "2026-09-02T04:15:00.000Z", taskId: "854", branch: "agent/854", commits: [] }),
+    event("merged", { ts: "2026-09-02T04:16:55.000Z", taskId: "854" }),
+    event("wave-done", { ts: "2026-09-02T04:20:03.000Z", index: 0, merged: ["854"] }),
+  ]);
+  const closed = buildStatus(cfgFor(dir));
+  assert.equal(closed.waves[0].status, "completed");
+  assert.equal(closed.waves[0].closed, true);
+});
+
 test("buildStatus surfaces the campaign name from the start event", () => {
   const dir = join(tmpdir(), `vetinari-status-name-${Date.now()}`);
   mkdirSync(join(dir, "logs"), { recursive: true });

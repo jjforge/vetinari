@@ -1817,6 +1817,7 @@ test("renderStatusPage collapses closed waves into expandable completed wave chi
       {
         index: 0,
         status: "completed",
+        closed: true,
         issues: [{ issueNumber: "101", status: "completed" }],
       },
       {
@@ -1853,6 +1854,95 @@ test("renderStatusPage collapses closed waves into expandable completed wave chi
     html,
     /<section class="wave running"><div class="wave-head"><h2 class="wave-label">Wave 2<\/h2><div class="wave-meta"><span class="wave-tally">0\/1<\/span><span class="wave-status running">running<\/span><\/div><\/div>/,
   );
+});
+// The collapse-into-a-chip affordance keys on the wave having actually *closed* (its gates
+// ran and `wave-done` logged), never on the `completed` status word — a wave whose last
+// member merged reads `completed` while its wave-level gates still run, and must stay an
+// expanded card until `wave-done` (#362). These four drive it end-to-end off the event log.
+test("renderStatusPage keeps a wave whose last member merged but has no wave-done expanded, not a chip (#362)", () => {
+  const dir = join(tmpdir(), `vetinari-merged-no-wavedone-${Date.now()}`);
+  seedState(dir, [
+    event("campaign-start", { ts: "2026-09-02T04:00:00.000Z", waves: [["854"]], slots: 1 }),
+    event("wave-start", { ts: "2026-09-02T04:10:00.000Z", index: 0, tasks: ["854"] }),
+    event("spawn", { ts: "2026-09-02T04:11:00.000Z", taskId: "854", running: 1, left: 0 }),
+    event("green", { ts: "2026-09-02T04:15:00.000Z", taskId: "854", branch: "agent/854", commits: ["abc"] }),
+    // Every member merged, so the fold reads `completed` — but the merged-base gate, the
+    // integration step and the changelog collect have not run and no `wave-done` has landed.
+    event("merged", { ts: "2026-09-02T04:16:55.000Z", taskId: "854" }),
+  ]);
+  const html = renderStatusPage(buildStatus(cfgFor(dir)));
+
+  // No closed-wave bar and no chip — the wave has not closed.
+  assert.doesNotMatch(html, /<div class="completed-wave-bar"/);
+  assert.doesNotMatch(html, /class="completed-wave-chip"/);
+  // It renders as a full, expanded card in the grid (no `hidden`, no `closed-wave-0` id),
+  // and its status word and tally are exactly the `completed` fold (criterion 5).
+  assert.match(
+    html,
+    /<section class="wave completed"><div class="wave-head"><h2 class="wave-label">Wave 1<\/h2><div class="wave-meta"><span class="wave-tally">1\/1<\/span><span class="wave-status completed">completed<\/span>/,
+  );
+  assert.doesNotMatch(html, /id="closed-wave-0"/);
+});
+test("renderStatusPage collapses that same wave to its chip once wave-done lands (#362)", () => {
+  const dir = join(tmpdir(), `vetinari-merged-wavedone-${Date.now()}`);
+  seedState(dir, [
+    event("campaign-start", { ts: "2026-09-02T04:00:00.000Z", waves: [["854"]], slots: 1 }),
+    event("wave-start", { ts: "2026-09-02T04:10:00.000Z", index: 0, tasks: ["854"] }),
+    event("spawn", { ts: "2026-09-02T04:11:00.000Z", taskId: "854", running: 1, left: 0 }),
+    event("green", { ts: "2026-09-02T04:15:00.000Z", taskId: "854", branch: "agent/854", commits: ["abc"] }),
+    event("merged", { ts: "2026-09-02T04:16:55.000Z", taskId: "854" }),
+    // The wave's gates ran and it actually closed.
+    event("wave-done", { ts: "2026-09-02T04:20:03.000Z", index: 0, merged: ["854"] }),
+  ]);
+  const html = renderStatusPage(buildStatus(cfgFor(dir)));
+
+  // Now it collapses: a chip in the closed-wave bar, and its card is the hidden `closed-wave-0`.
+  assert.match(html, /<div class="completed-wave-bar" data-project="demo">/);
+  assert.match(html, /class="completed-wave-chip"[^>]*aria-controls="closed-wave-0"/);
+  assert.match(html, /<section class="wave completed" id="closed-wave-0" hidden>/);
+});
+test("renderStatusPage never collapses a wave holding a conflict-parked member, even after a wave-done (#362)", () => {
+  const dir = join(tmpdir(), `vetinari-conflict-nocollapse-${Date.now()}`);
+  seedState(dir, [
+    event("campaign-start", { ts: "2026-09-02T04:00:00.000Z", waves: [["101", "102"]], slots: 2 }),
+    event("wave-start", { ts: "2026-09-02T04:10:00.000Z", index: 0, tasks: ["101", "102"] }),
+    event("spawn", { ts: "2026-09-02T04:11:00.000Z", taskId: "101", running: 2, left: 0 }),
+    event("spawn", { ts: "2026-09-02T04:11:01.000Z", taskId: "102", running: 2, left: 0 }),
+    event("green", { ts: "2026-09-02T04:15:00.000Z", taskId: "101", branch: "agent/101", commits: ["a"] }),
+    event("green", { ts: "2026-09-02T04:15:30.000Z", taskId: "102", branch: "agent/102", commits: ["b"] }),
+    event("merged", { ts: "2026-09-02T04:16:00.000Z", taskId: "101" }),
+    // 102's green hit a merge conflict at integration — a conflict-park holds the wave.
+    event("parked", { ts: "2026-09-02T04:16:30.000Z", taskId: "102", reason: "conflict" }),
+    // A wave-done naming only the merged member must NOT close a wave still holding a quarantine.
+    event("wave-done", { ts: "2026-09-02T04:20:00.000Z", index: 0, merged: ["101"] }),
+  ]);
+  const html = renderStatusPage(buildStatus(cfgFor(dir)));
+
+  // The quarantine keeps the wave out of `closedWaves`, so it never collapses.
+  assert.doesNotMatch(html, /<div class="completed-wave-bar"/);
+  assert.doesNotMatch(html, /class="completed-wave-chip"/);
+  assert.doesNotMatch(html, /id="closed-wave-0"/);
+});
+test("renderStatusPage keeps a red-base-parked wave expanded — members completed, no wave-done (#362)", () => {
+  const dir = join(tmpdir(), `vetinari-redbase-nocollapse-${Date.now()}`);
+  seedState(dir, [
+    event("campaign-start", { ts: "2026-09-02T04:00:00.000Z", waves: [["854"]], slots: 1 }),
+    event("wave-start", { ts: "2026-09-02T04:10:00.000Z", index: 0, tasks: ["854"] }),
+    event("spawn", { ts: "2026-09-02T04:11:00.000Z", taskId: "854", running: 1, left: 0 }),
+    event("green", { ts: "2026-09-02T04:15:00.000Z", taskId: "854", branch: "agent/854", commits: ["abc"] }),
+    event("merged", { ts: "2026-09-02T04:16:55.000Z", taskId: "854" }),
+    // The merged-base gate went red: the wave parks `red-base`, its member stays `completed`,
+    // and no `wave-done` closes it — so the card must stay expanded (criterion 4).
+    event("campaign-parked", { ts: "2026-09-02T04:19:49.000Z", index: 0, reason: "red-base" }),
+  ]);
+  const status = buildStatus(cfgFor(dir));
+  // The member kept its own `completed` lifecycle; only the wave carries the red-base hold.
+  assert.equal(status.waves[0].status, "parked");
+  assert.equal(status.waves[0].issues[0].status, "completed");
+  const html = renderStatusPage(status);
+  assert.doesNotMatch(html, /<div class="completed-wave-bar"/);
+  assert.doesNotMatch(html, /class="completed-wave-chip"/);
+  assert.doesNotMatch(html, /id="closed-wave-0"/);
 });
 test("renderStatusPage labels a single-issue wave with that issue's resolved title, keeping the index", () => {
   const html = renderStatusPage({
@@ -1906,6 +1996,7 @@ test("renderStatusPage keeps a closed wave's chip compact and puts the issue tit
       {
         index: 0,
         status: "completed",
+        closed: true,
         issues: [
           {
             issueNumber: "101",
@@ -1985,6 +2076,7 @@ test("renderStatusPage renders a campaign meta line of name · issues · waves, 
       {
         index: 0,
         status: "completed",
+        closed: true,
         issues: [{ issueNumber: "101", status: "completed" }],
       },
       {
@@ -2199,6 +2291,7 @@ test("renderStatusPage renders closed waves as a compact toggle row of chip butt
       {
         index: 0,
         status: "completed",
+        closed: true,
         issues: [
           { issueNumber: "101", status: "completed" },
           { issueNumber: "102", status: "completed" },
@@ -2230,6 +2323,7 @@ test("renderStatusPage renders each expanded closed wave's full card in the grid
       {
         index: 0,
         status: "completed",
+        closed: true,
         issues: [
           { issueNumber: "101", status: "completed", name: "cart persists" },
         ],
@@ -2267,6 +2361,7 @@ test("renderStatusPage gives the closed-wave chip a chevron and a green accent w
       {
         index: 0,
         status: "completed",
+        closed: true,
         issues: [{ issueNumber: "101", status: "completed" }],
       },
     ],
@@ -2292,6 +2387,7 @@ test("renderStatusPage persists the expanded closed-wave set across a live reloa
       {
         index: 0,
         status: "completed",
+        closed: true,
         issues: [{ issueNumber: "101", status: "completed" }],
       },
     ],
@@ -2312,6 +2408,7 @@ test("renderStatusPage degrades the closed-wave toggle without JS", () => {
       {
         index: 0,
         status: "completed",
+        closed: true,
         issues: [{ issueNumber: "101", status: "completed" }],
       },
     ],
@@ -2333,6 +2430,7 @@ test("renderStatusPage renders an archived run's closed waves as full cards, not
         {
           index: 0,
           status: "completed",
+          closed: true,
           issues: [{ issueNumber: "201", status: "completed" }],
         },
       ],

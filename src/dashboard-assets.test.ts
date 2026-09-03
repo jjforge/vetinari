@@ -4,8 +4,27 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { DASHBOARD_PALETTE_CSS, stateColor, stateBorderColor, counterColor, TOP_BAR_STYLES, ISSUE_DETAIL_SHEET_STYLES, ISSUE_DETAIL_SHEET_SCRIPT, HOST_LOG_STYLES, HOST_LOG_SCRIPT, LIVE_TAIL_STYLES, REDRIVE_SCRIPT } from "./dashboard-assets.ts";
+import { DASHBOARD_PALETTE_CSS, stateColor, stateBorderColor, counterColor, TOP_BAR_STYLES, ISSUE_DETAIL_SHEET_STYLES, ISSUE_DETAIL_SHEET_SCRIPT, HOST_LOG_STYLES, HOST_LOG_SCRIPT, LIVE_TAIL_STYLES, REDRIVE_SCRIPT, GRAFT_SCRIPT } from "./dashboard-assets.ts";
+import type { GraftRejection } from "./plan.ts";
 import { cappedRawRows, isNotableHostEvent, renderLandingShell } from "./status.ts";
+
+test("graftVerdicts maps every graft rejection reason — no key renders undefined (#374)", () => {
+  // The reason map lives in browser JS, where an unmapped key renders `undefined` to
+  // the operator. This list is typed as the whole `GraftRejection` union, so adding a
+  // reason without a rendering fails to compile here rather than shipping `undefined`.
+  const reasons: GraftRejection["reason"][] = [
+    "malformed",
+    "unknown",
+    "closed",
+    "already-in-campaign",
+  ];
+  const map = GRAFT_SCRIPT.match(/const reason = \{[^}]*\}/)?.[0] ?? "";
+  for (const r of reasons)
+    assert.ok(map.includes(r), `graftVerdicts must map the "${r}" reason`);
+  // The internal token names what is true of the input; the rendering says what the
+  // operator must do.
+  assert.match(map, /malformed: "not an issue id"/);
+});
 
 test("the card/chip colour rules are landed as a normative doc that pins the palette (#83)", () => {
   // The colour rules live as appendix A of the design doc (#304 folded the standalone

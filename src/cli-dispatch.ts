@@ -161,13 +161,16 @@ export function parseArgs(argv: string[]): Command {
         .filter((a) => a !== "--dry-run" && a !== "--json")
         .flatMap((a) => a.split(/[\s,]+/))
         .filter(Boolean);
-      // `graft <project> <ids…>`: a leading non-issue token is the project qualifier — the
-      // spelling the gateway accepts. `graft <ids…>` (every token an issue) has no qualifier.
-      const project = tokens.length && !isIssueToken(tokens[0]) ? tokens[0] : undefined;
+      // `graft <project> <ids…>`: a leading non-issue token FOLLOWED BY an issue token
+      // is the project qualifier — the spelling the gateway accepts, and prune's rule
+      // verbatim (`:246`), so the two sibling commands parse alike. Demanding the issue
+      // token after it stops a malformed id (`"875"`) in lead position being read as a
+      // bogus qualifier; every token then reaches validation as an id.
+      const qualified = tokens.length >= 2 && !isIssueToken(tokens[0]) && isIssueToken(tokens[1]);
       return {
         kind: "graft",
-        project,
-        ids: project ? tokens.slice(1) : tokens,
+        project: qualified ? tokens[0] : undefined,
+        ids: qualified ? tokens.slice(1) : tokens,
         dryRun: rest.includes("--dry-run"),
         // `--json` gates the machine `graft-closure {json}` line so no JSON reaches stdout
         // without it; the dashboard's preview shell passes it (design §11).

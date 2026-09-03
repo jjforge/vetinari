@@ -52,7 +52,7 @@ export const MODES: Mode[] = [
   {
     signature: "graft [<project>] <ids…>",
     blurb:
-      "add issues to a RUNNING (or paused/parked/redrivable) campaign — the additive mirror of prune (ADR 0014): appends a graft event the loop honors at the next wave boundary. Leads with what it acts on — the project, the derived owner/repo and each id's title — so an id from the wrong repo is recognizable. The in-flight wave finishes untouched; the added issues re-layer into future waves (after their blockers, basename-disjoint), leaving already-planned waves stable. Rejected whole — naming the offenders — if any id is unknown/closed or already in the campaign. An optional <project> qualifier asserts which project you mean and refuses if it names a different one or the repo identity can't be derived. Needs a campaign that has not finished (--dry-run to only print the resulting placement).",
+      "add issues to a RUNNING (or paused/parked/redrivable) campaign — the additive mirror of prune (ADR 0014): appends a graft event the loop honors at the next wave boundary. Leads with what it acts on — the project, the derived owner/repo and each id's title — so an id from the wrong repo is recognizable. The in-flight wave finishes untouched; the added issues re-layer into future waves (after their blockers, basename-disjoint), leaving already-planned waves stable. Rejected whole — naming the offenders — if any id is malformed (not an issue id), unknown/closed, or already in the campaign. An optional <project> qualifier asserts which project you mean and refuses if it names a different one or the repo identity can't be derived. Needs a campaign that has not finished (--dry-run to only print the resulting placement).",
   },
   {
     signature: "init [--dry-run]",

@@ -7,7 +7,7 @@ import type { ResolvedConfig } from "./config.ts";
 import { loggerForRun } from "./log.ts";
 import { readEventLog } from "./event-log.ts";
 import { listOutbox } from "./state.ts";
-import { defaultGraftDeps, runGraft } from "./graft.ts";
+import { defaultGraftDeps, describeGraftRejections, runGraft } from "./graft.ts";
 
 // A temp-dir `cfg` mirroring modes.test's `harnessCfg`: a real on-disk event log
 // under a throwaway state dir is what the command's `readEventLog`/`reduceCampaign`
@@ -206,6 +206,39 @@ test("a real graft appends the graft event and enqueues a progress:graft note", 
   assert.equal(outbox[0].category, "progress");
   assert.equal(outbox[0].event, "graft");
   assert.match(outbox[0].text, /grafted #301/);
+});
+
+test("describeGraftRejections groups a malformed offender alongside the existing three (#374)", () => {
+  const clause = describeGraftRejections([
+    { id: '"875"', reason: "malformed" },
+    { id: "302", reason: "closed" },
+    { id: "303", reason: "unknown" },
+    { id: "404", reason: "already-in-campaign" },
+  ]);
+  assert.match(clause, /not an issue id: #"875"/);
+  assert.match(clause, /closed: #302/);
+  assert.match(clause, /unknown\/missing: #303/);
+  assert.match(clause, /already in the campaign: #404/);
+});
+
+test("a malformed graft token is rejected whole without ever reaching fetchTask (#374)", async () => {
+  // The whole batch is malformed; each is decided from the input alone, so the tracker
+  // is never consulted — a garbage token costs no round-trip, and the throw names the
+  // input for what it is rather than sending the operator to check a fine tracker.
+  let fetched = 0;
+  const cfg = harnessCfg({
+    fetchTask: async () => {
+      fetched++;
+      return JSON.stringify({ state: "OPEN" });
+    },
+  });
+  launch(cfg, [["101"]]);
+
+  await assert.rejects(
+    () => runGraft(cfg, ['"875"', '"876"'], {}),
+    /graft rejected — nothing added \(not an issue id: #"875", #"876"\)/,
+  );
+  assert.equal(fetched, 0, "a malformed token must never reach fetchTask");
 });
 
 test("the graft event carries the grafted ids' titles so the dashboard renders them", async () => {

@@ -155,6 +155,21 @@ test("parseArgs reads a project qualifier on graft — a leading non-issue token
   });
 });
 
+test("parseArgs reads NO graft qualifier when the leading non-issue token is not followed by an issue token (a malformed batch)", () => {
+  // `graft "875" "876" "877"` — every token is a malformed id, not a project. The
+  // leading token being non-issue is not enough to read it as a qualifier (prune's
+  // rule): the token after it must look like an issue. So all three stay ids and
+  // reach validation, where each is rejected as malformed rather than one becoming a
+  // bogus project qualifier.
+  assert.deepEqual(parseArgs(["graft", '"875"', '"876"', '"877"']), {
+    kind: "graft",
+    project: undefined,
+    ids: ['"875"', '"876"', '"877"'],
+    dryRun: false,
+    json: false,
+  });
+});
+
 test("parseArgs reads graft --json and keeps it out of the ids", () => {
   assert.deepEqual(parseArgs(["graft", "436", "--dry-run", "--json"]), {
     kind: "graft",

@@ -15,7 +15,7 @@
  * Pure over the injected `blockedByOf`, so it stays testable with no live tracker.
  */
 import { computePrune, restrictBlockers, type BlockedByOf } from "./prune.ts";
-import { normalize } from "./issue-id.ts";
+import { isIssueToken, normalize } from "./issue-id.ts";
 import { defaultFileSet, ticketProse, type FileSet, type FileSetOf } from "./fileset.ts";
 
 export interface Placement {
@@ -385,11 +385,13 @@ export function applyGraft(
   return { remaining: result.filter((wave) => wave.length), grafted };
 }
 
-/** Why a candidate graft id was rejected: it names no open issue (`unknown` /
- * `closed`), or it is already part of this campaign (`already-in-campaign`). */
+/** Why a candidate graft id was rejected: it does not look like an issue id at all
+ * (`malformed`, decided from the input before any tracker fetch), it names no open
+ * issue (`unknown` / `closed`), or it is already part of this campaign
+ * (`already-in-campaign`). */
 export interface GraftRejection {
   id: string;
-  reason: "unknown" | "closed" | "already-in-campaign";
+  reason: "malformed" | "unknown" | "closed" | "already-in-campaign";
 }
 
 /**
@@ -408,6 +410,13 @@ export function validateGraftTargets(
   const rejections: GraftRejection[] = [];
   for (const raw of ids) {
     const id = normalize(raw);
+    // A token that does not look like an issue id is decided malformed from the input
+    // alone — the pure verdict every rejection should carry, so `state` (which lies
+    // "unknown" on a garbage token that names a real issue elsewhere) is never asked.
+    if (!isIssueToken(id)) {
+      rejections.push({ id, reason: "malformed" });
+      continue;
+    }
     if (inCampaign.has(id)) {
       rejections.push({ id, reason: "already-in-campaign" });
       continue;

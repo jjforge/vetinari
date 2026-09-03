@@ -101,6 +101,7 @@ ${DASHBOARD_PALETTE_CSS}
 /** A graft rejection reason (ADR 0014) as the operator reads it in the verdict list —
  * graft's own words, so the dashboard and the CLI name an offender the same way. */
 const GRAFT_REASON_TEXT: Record<GraftRejection["reason"], string> = {
+  malformed: "not an issue id",
   unknown: "not found",
   closed: "closed on GitHub",
   "already-in-campaign": "already in the campaign",

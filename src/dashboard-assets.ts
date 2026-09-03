@@ -1028,7 +1028,7 @@ export const HOST_LOG_SCRIPT = `  const hostLogRoot = document.querySelector("[d
  * the same the route's rejection page uses.
  */
 export const GRAFT_SCRIPT = `  function graftVerdicts(closure) {
-    const reason = { unknown: "not found", closed: "closed on GitHub", "already-in-campaign": "already in the campaign" };
+    const reason = { malformed: "not an issue id", unknown: "not found", closed: "closed on GitHub", "already-in-campaign": "already in the campaign" };
     return closure.ids.map((id) => {
       const bad = (closure.rejected || []).find((r) => r.id === id);
       return "#" + id + " — " + (bad ? reason[bad.reason] : "would graft");

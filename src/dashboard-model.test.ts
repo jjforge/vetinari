@@ -3089,6 +3089,40 @@ test("parkedReplyFor returns the matching record's question and parsed options f
   assert.equal(parkedReplyFor(records, "999"), undefined);
 });
 
+test("extractParkedDetails parses the XML question shape agents emit (summary/detail/options)", () => {
+  // The run loop strips the outer <question> wrapper and stores the inner content
+  // verbatim (prompts/tdd.md), so a parked question can arrive as this XML shape.
+  const details = extractParkedDetails(
+    "<summary>Wiring the GHCR delete needs a credential decision.</summary>\n" +
+      "<detail>The decision function is done and tested; only the deploy.yml wiring remains.</detail>\n" +
+      "<options>\n" +
+      "  <option>Dry-run wiring first (my recommendation): log what would be deleted.</option>\n" +
+      "  <option>Best-effort real prune now: delete on every deploy.</option>\n" +
+      "  <option>Leave deploy.yml untouched: ship the function only.</option>\n" +
+      "</options>",
+  );
+
+  // Summary is the headline, detail the body — no visible tag characters.
+  assert.equal(
+    details.description,
+    "Wiring the GHCR delete needs a credential decision.\n\n" +
+      "The decision function is done and tested; only the deploy.yml wiring remains.",
+  );
+  assert.deepEqual(details.options, [
+    "Dry-run wiring first (my recommendation): log what would be deleted.",
+    "Best-effort real prune now: delete on every deploy.",
+    "Leave deploy.yml untouched: ship the function only.",
+  ]);
+});
+
+test("extractParkedDetails XML shape tolerates a missing detail and still lists options", () => {
+  const details = extractParkedDetails(
+    "<summary>Pick a store.</summary><options><option>Postgres</option><option>SQLite</option></options>",
+  );
+  assert.equal(details.description, "Pick a store.");
+  assert.deepEqual(details.options, ["Postgres", "SQLite"]);
+});
+
 test("appendedEvents returns the whole log and its end offset from a zero offset", () => {
   const log =
     JSON.stringify(event("campaign-start", { waves: [], slots: 1 })) +

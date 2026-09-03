@@ -537,7 +537,26 @@ export function parkedReplyFor(records: ParkedRecord[], issueNumber: string): { 
   return { question: description, options };
 }
 
+/** Pull one tag's trimmed inner text out of a loosely-structured agent block, mirroring
+ *  the `field` convention the harvest turn uses over `<finding>` stdout (findings.ts). */
+const parkedField = (block: string, tag: string): string | undefined => {
+  const m = block.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, "i"));
+  const value = m?.[1].trim();
+  return value ? value : undefined;
+};
+
 export function extractParkedDetails(question: string): { description: string; options: string[] } {
+  // The XML shape agents emit (prompts/tdd.md): the run loop strips the outer <question>
+  // wrapper and stores the inner <summary>/<detail>/<options><option> verbatim. Recognise
+  // it alongside the Markdown form — summary as the headline, detail as the body, each
+  // <option> a fill-the-field choice — so no raw tags reach the reader.
+  const summary = parkedField(question, "summary");
+  const detail = parkedField(question, "detail");
+  const xmlOptions = [...question.matchAll(/<option>([\s\S]*?)<\/option>/gi)].map((m) => m[1].trim()).filter(Boolean);
+  if (summary || detail || xmlOptions.length) {
+    return { description: [summary, detail].filter(Boolean).join("\n\n"), options: xmlOptions };
+  }
+
   const match = question.match(/(?:^|\n)\s*options?\s*:\s*\n([\s\S]*)/i);
   if (!match) return { description: question.trim(), options: [] };
 

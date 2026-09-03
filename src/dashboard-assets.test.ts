@@ -136,6 +136,16 @@ test("the issue-detail sheet carries the issue's state on its top edge only (§2
   );
 });
 
+test("the reply block can shrink and scroll so the sheet-actions Reply button stays reachable (#370)", () => {
+  // A long parked question must never push the actions row past the sheet's bottom: the
+  // reply block flexes down and scrolls its own content, so the pinned (flex: none) actions
+  // row — carrying the Reply submit — always stays in view, even on a short landscape tablet.
+  assert.match(ISSUE_DETAIL_SHEET_STYLES, /\.issue-detail-reply \{[^}]*min-height: 0/);
+  assert.match(ISSUE_DETAIL_SHEET_STYLES, /\.issue-detail-reply \{[^}]*overflow-y: auto/);
+  assert.match(ISSUE_DETAIL_SHEET_STYLES, /\.issue-detail-reply \{[^}]*flex: 0 1 auto/);
+  assert.match(ISSUE_DETAIL_SHEET_STYLES, /\.sheet-actions \{[^}]*flex: none/);
+});
+
 test("the sheet's Prune wears the risky-action coral while Reply keeps the plain accent (#328)", () => {
   // Prune discards work, so it is a risky action (Appendix A): its enabled button reads the
   // risky-action coral over the shared sheet-btn teal. Reply is additive, so it keeps the plain

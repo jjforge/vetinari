@@ -236,7 +236,11 @@ export const ISSUE_DETAIL_SHEET_STYLES = `  .prune-panel { display: flex; align-
      reachable one-handed while the turn log scrolls above. */
   /* The reply block is the human-action queue inside the sheet, so it carries the
      3px amber left edge (§2); it only ever shows for a parked issue. */
-  .issue-detail-reply { flex: none; padding: .9rem 1.15rem; border-top: 1px solid var(--color-light-border); border-left: 3px solid var(--color-yellow); background: var(--color-box-header); }
+  /* The reply block shrinks and scrolls its own content (flex: 0 1 auto; min-height: 0;
+     overflow-y: auto) so a long parked question never pushes the flex:none actions row —
+     which carries the Reply submit — past the sheet's bottom, on any viewport (#370). Its
+     inner scroll caps (the question's max-height) still apply, unchanged. */
+  .issue-detail-reply { flex: 0 1 auto; min-height: 0; overflow-y: auto; padding: .9rem 1.15rem; border-top: 1px solid var(--color-light-border); border-left: 3px solid var(--color-yellow); background: var(--color-box-header); }
   .reply-heading { margin: 0 0 .5rem; font-size: .95rem; color: var(--color-text-light); }
   /* The hoisted facts (#307): the issue title and how long it has waited, sat above the box
      so the key context reads without scrolling back up to the sheet header. */

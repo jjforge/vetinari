@@ -806,6 +806,44 @@ test("dispatch prune leads with the project/repo/title identity line", async () 
   assert.equal(logged[0], 'vetinari · jjforge/vetinari#42 — "Fix the thing"');
 });
 
+// A dry-run clears nothing, so its report must read as a preview, not a completed side-effect.
+// The parked-record line branches on `cmd.dryRun` the way its --purge neighbour already does.
+test("dispatch prune --dry-run reports the parked record in the future tense (would clear), not the past", async () => {
+  const result = {
+    mode: "prune", project: "demo", repo: undefined, title: undefined,
+    target: "101", dropped: ["101"], kept: [], remaining: [["102", "103"]], parkedDropped: ["101"],
+    closure: { project: "demo", repo: undefined, target: "101", dropped: ["101"], keptBanked: [], remaining: [["102", "103"]] },
+  };
+  const { deps, logged } = makeDeps({ runPrune: spy(Promise.resolve(result)) as any });
+  await dispatch({ kind: "prune", target: "101", dryRun: true, purge: false, json: false }, deps);
+  const line = logged.find((l) => /parked record/.test(l))!;
+  assert.match(line, /^would clear the parked record for #101 — branch\/worktree\/session kept, resumable \(--purge also drops the branch \+ worktree\)\.$/);
+});
+
+test("dispatch prune --purge --dry-run reports the parked record in the future tense (would clear)", async () => {
+  const result = {
+    mode: "prune", project: "demo", repo: undefined, title: undefined,
+    target: "101", dropped: ["101"], kept: [], remaining: [["102", "103"]], parkedDropped: ["101"],
+    closure: { project: "demo", repo: undefined, target: "101", dropped: ["101"], keptBanked: [], remaining: [["102", "103"]] },
+  };
+  const { deps, logged } = makeDeps({ runPrune: spy(Promise.resolve(result)) as any });
+  await dispatch({ kind: "prune", target: "101", dryRun: true, purge: true, json: false }, deps);
+  const line = logged.find((l) => /parked record/.test(l))!;
+  assert.equal(line, "would clear the parked record for #101.");
+});
+
+// An applied prune still reports the completed side-effect in the past tense — unchanged by the fix.
+test("dispatch prune (applied) reports the parked record as cleared, past tense", async () => {
+  const result = {
+    mode: "prune", project: "demo", repo: undefined, title: undefined,
+    target: "101", dropped: ["101"], kept: [], remaining: [["102", "103"]], parkedDropped: ["101"],
+  };
+  const { deps, logged } = makeDeps({ runPrune: spy(Promise.resolve(result)) as any });
+  await dispatch({ kind: "prune", target: "101", dryRun: false, purge: false, json: false }, deps);
+  const line = logged.find((l) => /parked record/.test(l))!;
+  assert.equal(line, "cleared parked record for #101 — branch/worktree/session kept, resumable (--purge also drops the branch + worktree).");
+});
+
 test("dispatch graft leads with an identity line per grafted id", async () => {
   const result = {
     project: "vetinari", repo: "jjforge/vetinari",

@@ -1,7 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
@@ -43,6 +51,51 @@ test("register then listProjects round-trips the pointer", () => {
   register(configDir, pointer());
 
   assert.deepEqual(listProjects(configDir), [pointer()]);
+});
+
+test("listProjects skips a pointer that will not parse and returns every other one", () => {
+  const configDir = tmpConfigDir();
+  register(configDir, pointer({ project: "good" }));
+  // The exact reported corruption: a zero-byte pointer file left by a torn write.
+  writeFileSync(join(configDir, "registry", "broken.json"), "");
+
+  assert.deepEqual(
+    listProjects(configDir).map((p) => p.project),
+    ["good"],
+  );
+});
+
+test("listProjects logs an unparseable pointer as registry-pointer-unreadable, naming the file", () => {
+  const configDir = tmpConfigDir();
+  const logger = memoryLogger();
+  register(configDir, pointer({ project: "good" }));
+  writeFileSync(join(configDir, "registry", "broken.json"), "{ not json");
+
+  listProjects(configDir, logger);
+
+  assert.deepEqual(
+    logger.events.map((e) => [e.event, (e as { file?: string }).file]),
+    [
+      [
+        "registry-pointer-unreadable",
+        join(configDir, "registry", "broken.json"),
+      ],
+    ],
+  );
+});
+
+test("register replaces a pointer without leaving a temp file the listing would pick up", () => {
+  const configDir = tmpConfigDir();
+  register(configDir, pointer({ baseLocation: "/old/.vetinari.local" }));
+  register(configDir, pointer({ baseLocation: "/new/.vetinari.local" }));
+
+  // The atomic write renames its same-directory temp into place — no residue is
+  // left behind, and none of what remains is a stray *.json the listing reads.
+  const files = readdirSync(join(configDir, "registry"));
+  assert.deepEqual(files, ["jjforge.json"]);
+  assert.deepEqual(listProjects(configDir), [
+    pointer({ baseLocation: "/new/.vetinari.local" }),
+  ]);
 });
 
 test("removePointer drops the named pointer and leaves live ones — a stale entry stops rendering", () => {
@@ -138,6 +191,19 @@ test("readProject loads the project's notify map and destinations live from its 
   });
 });
 
+test("writeRouting refreshes routing.json without leaving a temp file behind", () => {
+  const base = join(tmpConfigDir(), ".vetinari.local");
+  writeRouting(base, { notify: { "*": "ops" } });
+  writeRouting(base, { notify: { "*": "alerts" } });
+
+  // The atomic write leaves only the final routing.json — no half-written residue.
+  assert.deepEqual(readdirSync(base), ["routing.json"]);
+  assert.deepEqual(
+    JSON.parse(readFileSync(join(base, "routing.json"), "utf8")),
+    { notify: { "*": "alerts" } },
+  );
+});
+
 test("readProject leaves notify/destinations undefined when the project materialized no routing", () => {
   const baseLocation = baseLocationWith(
     "VETINARI_TELEGRAM_BOT_TOKEN=t\nVETINARI_TELEGRAM_CHAT_ID=c\n",
@@ -231,6 +297,28 @@ test("readProjects skips a stale pointer and never throws on it", () => {
   );
 });
 
+test("readProjects survives an unparseable pointer mid-registry, serving the rest — the reconcile-tick path", () => {
+  const configDir = tmpConfigDir();
+  const logger = memoryLogger();
+  const live = baseLocationWith(
+    "VETINARI_TELEGRAM_BOT_TOKEN=t\nVETINARI_TELEGRAM_CHAT_ID=c\n",
+  );
+  register(configDir, pointer({ project: "live", baseLocation: live }));
+  // A zero-byte pointer appears mid-run, exactly as a torn write leaves it.
+  writeFileSync(join(configDir, "registry", "torn.json"), "");
+
+  const read = readProjects(configDir, logger);
+
+  assert.deepEqual(
+    read.map((r) => r.pointer.project),
+    ["live"],
+  );
+  assert.deepEqual(
+    logger.events.map((e) => e.event),
+    ["registry-pointer-unreadable"],
+  );
+});
+
 test("readProjects routes a stale pointer's skip to the injected logger, not the process-global", () => {
   const configDir = tmpConfigDir();
   const logger = memoryLogger();
@@ -272,7 +360,11 @@ test("computeRegistryDedup drops the non-canonical duplicate, keeps the canonica
   const drops = computeRegistryDedup([pointer(), dupPointer()]);
 
   assert.deepEqual(drops, [
-    { drop: "verify150", kept: "jjforge", projectRoot: "/home/me/code/jjforge" },
+    {
+      drop: "verify150",
+      kept: "jjforge",
+      projectRoot: "/home/me/code/jjforge",
+    },
   ]);
 });
 
@@ -301,7 +393,11 @@ test("computeRegistryDedup leaves singletons and distinct-root pointers untouche
   // different root — neither is a duplicate, so neither is ever dropped.
   const drops = computeRegistryDedup([
     pointer(),
-    dupPointer({ project: "other", projectRoot: "/home/me/code/elsewhere", baseLocation: "/tmp/x/.vetinari.local" }),
+    dupPointer({
+      project: "other",
+      projectRoot: "/home/me/code/elsewhere",
+      baseLocation: "/tmp/x/.vetinari.local",
+    }),
   ]);
 
   assert.deepEqual(drops, []);
@@ -314,12 +410,19 @@ test("computeRegistryDedup groups by NORMALIZED root — a trailing slash is one
   ]);
 
   assert.deepEqual(drops, [
-    { drop: "verify150", kept: "jjforge", projectRoot: "/home/me/code/jjforge" },
+    {
+      drop: "verify150",
+      kept: "jjforge",
+      projectRoot: "/home/me/code/jjforge",
+    },
   ]);
 });
 
 test("normalizeProjectRoot strips a trailing slash", () => {
-  assert.equal(normalizeProjectRoot("/home/me/code/jjforge/"), "/home/me/code/jjforge");
+  assert.equal(
+    normalizeProjectRoot("/home/me/code/jjforge/"),
+    "/home/me/code/jjforge",
+  );
 });
 
 test("normalizeProjectRoot realpath-resolves a symlinked root so path variants dedup", () => {
@@ -416,12 +519,18 @@ test("re-registering a project refreshes its pointer in place", () => {
 test("readPointer reads one pointer by name, and is undefined when unregistered", () => {
   const configDir = tmpConfigDir();
   register(configDir, pointer({ project: "here" }));
-  assert.deepEqual(readPointer(configDir, "here"), pointer({ project: "here" }));
+  assert.deepEqual(
+    readPointer(configDir, "here"),
+    pointer({ project: "here" }),
+  );
   assert.equal(readPointer(configDir, "absent"), undefined);
 });
 
 test("pointerFor carries the derived repo when given one, and omits the key when not", () => {
-  const cfg = { project: "jjforge", stateDir: ".vetinari.local" } as ResolvedConfig;
+  const cfg = {
+    project: "jjforge",
+    stateDir: ".vetinari.local",
+  } as ResolvedConfig;
   assert.deepEqual(pointerFor(cfg, "/root", "jjforge/vetinari"), {
     project: "jjforge",
     projectRoot: "/root",
@@ -440,8 +549,18 @@ test("autoRegister fills the pointer's repo from the root's git origin", () => {
   const configDir = tmpConfigDir();
   const root = realpathSync(mkdtempSync(join(tmpdir(), "vetinari-reporoot-")));
   execFileSync("git", ["-C", root, "init", "-q"]);
-  execFileSync("git", ["-C", root, "remote", "add", "origin", "git@github.com:jjforge/vetinari.git"]);
-  const cfg = { project: "jjforge", stateDir: ".vetinari.local" } as ResolvedConfig;
+  execFileSync("git", [
+    "-C",
+    root,
+    "remote",
+    "add",
+    "origin",
+    "git@github.com:jjforge/vetinari.git",
+  ]);
+  const cfg = {
+    project: "jjforge",
+    stateDir: ".vetinari.local",
+  } as ResolvedConfig;
 
   withEnv({ VETINARI_GATEWAY_HOME: configDir }, () => autoRegister(cfg, root));
 
@@ -450,7 +569,10 @@ test("autoRegister fills the pointer's repo from the root's git origin", () => {
 
 test("autoRegister refuses to overwrite an incumbent pointer at a different root", () => {
   const configDir = tmpConfigDir();
-  const cfg = { project: "shared", stateDir: ".vetinari.local" } as ResolvedConfig;
+  const cfg = {
+    project: "shared",
+    stateDir: ".vetinari.local",
+  } as ResolvedConfig;
   const errors: string[] = [];
   const realErr = console.error;
   console.error = (m: string) => void errors.push(m);
@@ -475,7 +597,10 @@ test("autoRegister refuses to overwrite an incumbent pointer at a different root
 
 test("autoRegister still refreshes a pointer at the same root (not a collision)", () => {
   const configDir = tmpConfigDir();
-  const cfg = { project: "shared", stateDir: ".vetinari.local" } as ResolvedConfig;
+  const cfg = {
+    project: "shared",
+    stateDir: ".vetinari.local",
+  } as ResolvedConfig;
   withEnv({ VETINARI_GATEWAY_HOME: configDir }, () => {
     autoRegister(cfg, "/home/me/alpha");
     autoRegister(cfg, "/home/me/alpha");

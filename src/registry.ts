@@ -4,6 +4,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -68,7 +69,8 @@ export function autoRegister(
     const incumbent = readPointer(configDir, cfg.project);
     if (
       incumbent &&
-      normalizeProjectRoot(incumbent.projectRoot) !== normalizeProjectRoot(projectRoot)
+      normalizeProjectRoot(incumbent.projectRoot) !==
+        normalizeProjectRoot(projectRoot)
     ) {
       console.error(
         `vetinari: project name "${cfg.project}" is already registered to ${incumbent.projectRoot}; ` +
@@ -85,7 +87,10 @@ export function autoRegister(
       destinations: cfg.destinations,
     });
   } catch (e) {
-    logger.log("registry-register-failed", { project: cfg.project, error: String(e) });
+    logger.log("registry-register-failed", {
+      project: cfg.project,
+      error: String(e),
+    });
   }
 }
 
@@ -110,6 +115,22 @@ export function pointerFor(
   };
 }
 
+/**
+ * Write `data` to `path` atomically: to a temp file in the SAME directory (so the
+ * final step is a rename within one filesystem, which is atomic), then
+ * `renameSync` into place. A writer killed mid-write leaves the untouched
+ * destination or a stray `*.tmp` — never the truncated, zero-byte target a plain
+ * `writeFileSync` leaves between its truncate and its write. The temp carries the
+ * writer's pid so concurrent registrations (a gateway shelling several children)
+ * don't collide on one temp name, and a `.tmp` suffix keeps it out of the
+ * `*.json` listing (`listProjects`) even if a crash strands it.
+ */
+function writeFileAtomic(path: string, data: string): void {
+  const temp = `${path}.${process.pid}.tmp`;
+  writeFileSync(temp, data);
+  renameSync(temp, path);
+}
+
 /** One pointer file per project, keyed by project name — like `parked/`. */
 const registryDir = (configDir: string) => join(configDir, "registry");
 const pointerFile = (configDir: string, project: string) =>
@@ -122,7 +143,7 @@ const pointerFile = (configDir: string, project: string) =>
  */
 export function register(configDir: string, pointer: ProjectPointer): void {
   mkdirSync(registryDir(configDir), { recursive: true });
-  writeFileSync(
+  writeFileAtomic(
     pointerFile(configDir, pointer.project),
     JSON.stringify(pointer, null, 2),
   );
@@ -133,7 +154,10 @@ export function register(configDir: string, pointer: ProjectPointer): void {
  * file is unreadable). The single-pointer read-side counterpart to `listProjects`,
  * used by `autoRegister` to spot a name collision before overwriting an incumbent.
  */
-export function readPointer(configDir: string, project: string): ProjectPointer | undefined {
+export function readPointer(
+  configDir: string,
+  project: string,
+): ProjectPointer | undefined {
   const file = pointerFile(configDir, project);
   if (!existsSync(file)) return undefined;
   try {
@@ -182,7 +206,10 @@ export function normalizeProjectRoot(root: string): string {
 }
 
 /** True when a pointer's base location is the canonical `<projectRoot>/.vetinari.local`. */
-function hasCanonicalBase(pointer: ProjectPointer, normalizedRoot: string): boolean {
+function hasCanonicalBase(
+  pointer: ProjectPointer,
+  normalizedRoot: string,
+): boolean {
   const base = pointer.baseLocation.replace(/\/+$/, "");
   return (
     basename(base) === CANONICAL_BASE_DIR &&
@@ -209,7 +236,9 @@ export interface PointerDrop {
  * issue #163). Singletons and distinct-root pointers are never touched, so a real
  * project — even one whose root is gone or whose base is a temp dir — is never dropped.
  */
-export function computeRegistryDedup(pointers: ProjectPointer[]): PointerDrop[] {
+export function computeRegistryDedup(
+  pointers: ProjectPointer[],
+): PointerDrop[] {
   const groups = new Map<string, ProjectPointer[]>();
   for (const p of pointers) {
     const key = normalizeProjectRoot(p.projectRoot);
@@ -225,21 +254,42 @@ export function computeRegistryDedup(pointers: ProjectPointer[]): PointerDrop[] 
     if (canonical.length !== 1) continue; // ambiguous winner → drop nothing here.
     const kept = canonical[0];
     for (const p of group) {
-      if (p !== kept) drops.push({ drop: p.project, kept: kept.project, projectRoot: normalizedRoot });
+      if (p !== kept)
+        drops.push({
+          drop: p.project,
+          kept: kept.project,
+          projectRoot: normalizedRoot,
+        });
     }
   }
   return drops;
 }
 
-/** Every registered pointer. The gateway's source of truth for "what projects exist". */
-export function listProjects(configDir: string): ProjectPointer[] {
+/**
+ * Every registered pointer. The gateway's source of truth for "what projects
+ * exist". A pointer that will not parse — a zero-byte or torn write left by an
+ * interrupted `register` — is skipped (logged `registry-pointer-unreadable`,
+ * naming the file) rather than throwing out of the whole listing: one degraded
+ * registration must never take the gateway down (ADR 0002), the same guarantee
+ * `readRouting`/`readPointer` already give. Takes the logger the way
+ * `readProjects` does, so no caller changes.
+ */
+export function listProjects(
+  configDir: string,
+  logger: Logger = hostLogger(),
+): ProjectPointer[] {
   const dir = registryDir(configDir);
   mkdirSync(dir, { recursive: true });
-  return readdirSync(dir)
-    .filter((f) => f.endsWith(".json"))
-    .map(
-      (f) => JSON.parse(readFileSync(join(dir, f), "utf8")) as ProjectPointer,
-    );
+  const pointers: ProjectPointer[] = [];
+  for (const f of readdirSync(dir).filter((f) => f.endsWith(".json"))) {
+    const file = join(dir, f);
+    try {
+      pointers.push(JSON.parse(readFileSync(file, "utf8")) as ProjectPointer);
+    } catch (e) {
+      logger.log("registry-pointer-unreadable", { file, error: String(e) });
+    }
+  }
+  return pointers;
 }
 
 /** A project read live from its base location: its pointer plus its resolved comms. */
@@ -269,7 +319,7 @@ interface Routing {
 /** Write the project's routing into its base location for the gateway to read live. Idempotent — a re-run just refreshes it. */
 export function writeRouting(baseLocation: string, routing: Routing): void {
   mkdirSync(baseLocation, { recursive: true });
-  writeFileSync(
+  writeFileAtomic(
     join(baseLocation, ROUTING_FILE),
     JSON.stringify(routing, null, 2),
   );
@@ -282,7 +332,10 @@ function readRouting(baseLocation: string, logger: Logger): Routing {
   try {
     return JSON.parse(readFileSync(path, "utf8")) as Routing;
   } catch (e) {
-    logger.log("registry-routing-unreadable", { baseLocation, error: String(e) });
+    logger.log("registry-routing-unreadable", {
+      baseLocation,
+      error: String(e),
+    });
     return {};
   }
 }
@@ -363,7 +416,10 @@ export function tgConnForBaseLocation(
  * skipped (logged, `undefined` returned) rather than throwing — one stale
  * registration must never take the gateway down (ADR 0002).
  */
-export function readProject(pointer: ProjectPointer, logger: Logger = hostLogger()): ReadProject | undefined {
+export function readProject(
+  pointer: ProjectPointer,
+  logger: Logger = hostLogger(),
+): ReadProject | undefined {
   if (!existsSync(pointer.baseLocation)) {
     logger.log("registry-stale", {
       project: pointer.project,
@@ -385,8 +441,11 @@ export function readProject(pointer: ProjectPointer, logger: Logger = hostLogger
  * Stale pointers (base location gone) are dropped, so a caller iterating the
  * registry gets only projects it can actually serve.
  */
-export function readProjects(configDir: string, logger: Logger = hostLogger()): ReadProject[] {
-  return listProjects(configDir)
+export function readProjects(
+  configDir: string,
+  logger: Logger = hostLogger(),
+): ReadProject[] {
+  return listProjects(configDir, logger)
     .map((pointer) => readProject(pointer, logger))
     .filter((r): r is ReadProject => r !== undefined);
 }

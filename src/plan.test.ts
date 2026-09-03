@@ -744,6 +744,20 @@ test("validateGraftTargets rejects unknown, closed and already-in-campaign ids, 
   ]);
 });
 
+test("validateGraftTargets rejects a token that does not look like an issue id as malformed, before consulting state (#374)", () => {
+  // `"875"` (quote characters and all) is not an issue token. It is decided malformed
+  // from the input alone — `state` is never asked, so a `state` that would lie
+  // ("open") cannot rescue it. Real ids around it still resolve normally.
+  const rejections = validateGraftTargets(['"875"', "302", "301"], {
+    inCampaign: new Set(),
+    state: (id) => (id === "302" ? "closed" : "open"),
+  });
+  assert.deepEqual(rejections, [
+    { id: '"875"', reason: "malformed" },
+    { id: "302", reason: "closed" },
+  ]);
+});
+
 test("validateGraftTargets returns nothing when every id is open and new (#166)", () => {
   assert.deepEqual(
     validateGraftTargets(["301", "302"], { inCampaign: new Set(["101"]), state: () => "open" }),

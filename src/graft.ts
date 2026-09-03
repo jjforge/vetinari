@@ -14,7 +14,7 @@
  * the observable effects without re-parsing prose.
  */
 import { assertProjectQualifier, repoForProject, type ResolvedConfig } from "./config.ts";
-import { normalize } from "./issue-id.ts";
+import { isIssueToken, normalize } from "./issue-id.ts";
 import {
   applyGraft,
   validateGraftTargets,
@@ -131,6 +131,7 @@ export function describeGraftRejections(rejections: GraftRejection[]): string {
     return hit.length ? `${label}: ${hit.join(", ")}` : "";
   };
   return [
+    group("malformed", "not an issue id"),
     group("unknown", "unknown/missing"),
     group("closed", "closed"),
     group("already-in-campaign", "already in the campaign"),
@@ -188,6 +189,13 @@ export async function runGraft(
   const taskText = new Map<string, string | undefined>();
   await Promise.all(
     normalized.map(async (id) => {
+      // A token that does not look like an issue id is rejected as `malformed` from the
+      // input alone (`validateGraftTargets` below) — never fetch it, so a garbage token
+      // costs no tracker round-trip.
+      if (!isIssueToken(id)) {
+        taskText.set(id, undefined);
+        return;
+      }
       try {
         taskText.set(id, String(await cfg.fetchTask(id)));
       } catch {

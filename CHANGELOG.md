@@ -23,6 +23,8 @@ Within a milestone each bold section label appears at most once.
 **Bug fixes:**
 - [ops] A zero-byte or otherwise unparseable registry pointer no longer crash-loops the host gateway and blanks the dashboard for every project: `listProjects` now skips a pointer it cannot parse (logging `registry-pointer-unreadable` with the file) instead of throwing, and `register`/`writeRouting` write atomically via a same-directory temp file and `rename`, so an interrupted writer leaves the old pointer or a stray `*.tmp` — never a truncated file (#372).
 - [user] The dashboard graft control no longer reads a failed graft as success: a non-ok `POST /graft` (a 502, 400 or 404) now shows the route's own response body inline and keeps the typed ids, instead of silently clearing the input and reporting nothing. An unevaluable blur-time preview discloses its message inline but leaves the button enabled (#373).
+- [user] `graft` no longer reads a malformed id (e.g. a quoted `"875"`) as a project qualifier: it now takes a `<project>` qualifier only when a leading non-issue token is followed by an issue token (prune's rule), so a typo'd batch is rejected whole as "not an issue id" instead of erroring about the wrong project or a phantom missing issue (#374).
+- [ops] Graft's dashboard and CLI verdicts now name a garbage token "not an issue id" — a new `malformed` rejection decided before any tracker fetch, so a malformed token never costs a tracker round-trip and never renders `undefined` on the board (#374).
 
 ### Collected changes — September 2, 2026
 

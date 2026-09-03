@@ -127,28 +127,29 @@ test("applyPrune keeps a merged member and drops an unstarted one", () => {
   assert.deepEqual(res.remaining, [["611", "640"]]); // 701's wave emptied and dropped
 });
 
-test("applyPrune drops a parked member but preserves its record by default (resumable)", () => {
-  // 701 is parked; pruning it drops it from the plan but leaves its parked record
-  // intact so its branch/worktree/session can be investigated and resumed (ADR 0013).
+test("applyPrune drops a parked member and clears its record so it stops reading as a member", () => {
+  // 701 is parked; pruning it drops it from the plan AND queues its parked record for
+  // clearing — the record only NAMES the work, so deleting the JSON leaves the
+  // branch/worktree/session resumable (ADR 0013) while nothing on disk still reads a
+  // pruned issue as a live campaign member.
   const res = applyPrune(
     { waves: [["611"], ["701"]], outcomes: outcomesFrom({ "701": "parked" }) },
     ["701"],
   );
 
   assert.deepEqual(res.dropped, ["701"]);
-  assert.deepEqual(res.parkedToClear, []); // preserved, not cleared
+  assert.deepEqual(res.parkedToClear, ["701"]); // cleared as it leaves the plan
   assert.deepEqual(res.remaining, [["611"]]);
 });
 
-test("applyPrune with purge drops a parked member and clears its record (the true drop)", () => {
-  // `--purge` is the rare true-drop: the parked record is cleared, reclaiming the work.
+test("applyPrune clears only the parked drops, never an unstarted one (no record to clear)", () => {
+  // 701 parked, 712 never started: both leave, but only the parked one has a record.
   const res = applyPrune(
-    { waves: [["611"], ["701"]], outcomes: outcomesFrom({ "701": "parked" }) },
-    ["701"],
-    { purge: true },
+    { waves: [["611"], ["701", "712"]], outcomes: outcomesFrom({ "701": "parked" }) },
+    ["701", "712"],
   );
 
-  assert.deepEqual(res.dropped, ["701"]);
+  assert.deepEqual(res.dropped, ["701", "712"]);
   assert.deepEqual(res.parkedToClear, ["701"]);
   assert.deepEqual(res.remaining, [["611"]]);
 });
@@ -177,7 +178,7 @@ test("applyPrune keeps a merged/green target but still drops its unfinished depe
   );
 
   assert.deepEqual(res.dropped, ["701", "712"]);
-  assert.deepEqual(res.parkedToClear, []); // preserved by default
+  assert.deepEqual(res.parkedToClear, ["701"]); // 701 was parked; 712 never started
   assert.deepEqual(res.remaining, [["640"]]);
 });
 
@@ -511,41 +512,79 @@ test("runPrune appends the prune event with its closure and enqueues a progress:
   assert.match(outbox[0].text, /pruned #640/);
 });
 
-test("runPrune preserves a dropped parked member's record by default", async () => {
+test("runPrune clears a dropped parked member's record by default, touching no branch", async () => {
   const cfg = harnessCfg();
   cfg.log.log("campaign-start", { waves: [["101"], ["701"]], slots: 4 });
   cfg.log.log("wave-start", { index: 0, tasks: ["101"] });
   cfg.log.log("parked", { taskId: "701", reason: "question" });
 
   const cleared: string[][] = [];
+  const purged: string[][] = [];
   const result = await runPrune(cfg, "701", {}, {
     ...defaultPruneDeps,
     clearParkedForTasks: (_cfg, ids) => cleared.push(ids),
+    purgeBranches: (_t, ids) => purged.push(ids),
   });
 
   assert.equal(result.mode, "prune");
   assert.deepEqual(result.mode === "prune" && result.dropped, ["701"]);
   assert.deepEqual(result.mode === "prune" && result.parkedDropped, ["701"]);
-  // Preserved, not cleared (ADR 0013): the parked record stays resumable.
-  assert.deepEqual(cleared, []);
+  // The record is cleared as it leaves the plan (ADR 0013); its branch/worktree stay.
+  assert.deepEqual(cleared, [["701"]]);
+  assert.deepEqual(purged, []); // no branch or worktree touched
+  assert.equal(result.mode === "prune" && result.purged, undefined);
 });
 
-test("runPrune --purge clears a dropped parked member's record", async () => {
+test("runPrune --purge deletes each dropped member's branch + worktree after disclosing them", async () => {
   const cfg = harnessCfg();
   cfg.log.log("campaign-start", { waves: [["101"], ["701"]], slots: 4 });
   cfg.log.log("wave-start", { index: 0, tasks: ["101"] });
   cfg.log.log("parked", { taskId: "701", reason: "question" });
 
   const cleared: string[][] = [];
+  const purged: string[][] = [];
+  const disclosure = [{ id: "701", branch: "agent/701", unmergedCommits: 3, worktree: "/wt/701" }];
   const result = await runPrune(cfg, "701", { purge: true }, {
     ...defaultPruneDeps,
     clearParkedForTasks: (_cfg, ids) => cleared.push(ids),
+    rootOf: () => "/root",
+    describeBranchPurge: (_t, ids) => ids.map((id) => disclosure.find((d) => d.id === id)!),
+    purgeBranches: (_t, ids) => purged.push(ids),
   });
 
   assert.equal(result.mode, "prune");
-  assert.deepEqual(result.mode === "prune" && result.parkedDropped, ["701"]);
-  // The rare true-drop: the parked record is cleared, reclaiming the work.
+  // The record is still cleared, and the branch + worktree are additionally dropped.
   assert.deepEqual(cleared, [["701"]]);
+  assert.deepEqual(purged, [["701"]]);
+  // The disclosure the CLI prints before acting rides the result.
+  assert.deepEqual(result.mode === "prune" && result.purged, disclosure);
+});
+
+test("runPrune --purge --dry-run discloses the true drop but deletes nothing", async () => {
+  const cfg = harnessCfg();
+  cfg.log.log("campaign-start", { waves: [["101"], ["701"]], slots: 4 });
+  cfg.log.log("wave-start", { index: 0, tasks: ["101"] });
+  cfg.log.log("parked", { taskId: "701", reason: "question" });
+
+  const cleared: string[][] = [];
+  const purged: string[][] = [];
+  const disclosure = [{ id: "701", branch: "agent/701", unmergedCommits: 2, worktree: "/wt/701" }];
+  const result = await runPrune(cfg, "701", { purge: true, dryRun: true }, {
+    ...defaultPruneDeps,
+    clearParkedForTasks: (_cfg, ids) => cleared.push(ids),
+    rootOf: () => "/root",
+    describeBranchPurge: (_t, ids) => ids.map((id) => disclosure.find((d) => d.id === id)!),
+    purgeBranches: (_t, ids) => purged.push(ids),
+  });
+
+  assert.equal(result.mode, "prune");
+  assert.equal(result.mode === "prune" && result.applied, false);
+  // Same disclosure a real --purge shows...
+  assert.deepEqual(result.mode === "prune" && result.purged, disclosure);
+  // ...but nothing is cleared, dropped, or logged.
+  assert.deepEqual(cleared, []);
+  assert.deepEqual(purged, []);
+  assert.equal(readEventLog(cfg).some((e) => e.event === "prune"), false);
 });
 
 test("runPrune names the target's project, repo and title, and carries them into the closure", async () => {

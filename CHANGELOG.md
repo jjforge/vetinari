@@ -18,6 +18,12 @@ and each entry opens with a tag saying who it reaches:
 `**Breaking changes:**` sorts first in a milestone and names the contract it broke.
 Within a milestone each bold section label appears at most once.
 
+### Collected changes — September 3, 2026
+
+**Bug fixes:**
+- [ops] A zero-byte or otherwise unparseable registry pointer no longer crash-loops the host gateway and blanks the dashboard for every project: `listProjects` now skips a pointer it cannot parse (logging `registry-pointer-unreadable` with the file) instead of throwing, and `register`/`writeRouting` write atomically via a same-directory temp file and `rename`, so an interrupted writer leaves the old pointer or a stray `*.tmp` — never a truncated file (#372).
+- [user] The dashboard graft control no longer reads a failed graft as success: a non-ok `POST /graft` (a 502, 400 or 404) now shows the route's own response body inline and keeps the typed ids, instead of silently clearing the input and reporting nothing. An unevaluable blur-time preview discloses its message inline but leaves the button enabled (#373).
+
 ### Collected changes — September 2, 2026
 
 **Bug fixes:**

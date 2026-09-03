@@ -429,14 +429,66 @@ export function applyTidy(target: TidyTarget, plan: TidyPlan): void {
     );
   }
 
-  for (const id of plan.deleteBranches) {
+  purgeBranches(target, plan.deleteBranches);
+
+  for (const id of plan.clearParked) rmSync(join(target.parkedDir, `${id}.json`), { force: true });
+}
+
+/** The git edge a branch/worktree true-drop acts in — the fields `purgeBranches` needs. */
+export interface PurgeTarget {
+  /** the project's main checkout (git runs with `-C root`). */
+  root: string;
+  /** the branch the unmerged-commit count is measured against. */
+  baseBranch: string;
+  /** agent branches are `${branchPrefix}${taskId}`. */
+  branchPrefix: string;
+}
+
+/** What dropping one agent branch destroys — disclosed before `--purge` acts. */
+export interface BranchPurge {
+  /** the task id whose branch this is. */
+  id: string;
+  /** the `${branchPrefix}${id}` branch name. */
+  branch: string;
+  /** commits on the branch not reachable from the base — the unmerged work being dropped. */
+  unmergedCommits: number;
+  /** the worktree path checked out on the branch, or absent when none is. */
+  worktree?: string;
+}
+
+/**
+ * Disclose, touching nothing, what purging each id's agent branch would destroy: the
+ * branch, the count of its commits not reachable from `baseBranch` (the unmerged work),
+ * and the worktree path checked out on it (if any). A branch that does not exist still
+ * discloses cleanly (zero unmerged commits, no worktree) so a caller sees a no-op, not a
+ * gap — the read-only preview `prune --purge --dry-run` prints as its safety net.
+ */
+export function describeBranchPurge(target: PurgeTarget, ids: string[]): BranchPurge[] {
+  return ids.map((id) => {
+    const branch = `${target.branchPrefix}${id}`;
+    const r = gitTry(["-C", target.root, "rev-list", "--count", `${target.baseBranch}..${branch}`]);
+    return {
+      id,
+      branch,
+      unmergedCommits: r.code === 0 ? Number(r.stdout.trim()) : 0,
+      worktree: worktreePathFor(target.root, branch),
+    };
+  });
+}
+
+/**
+ * Delete each id's `${branchPrefix}${id}` branch and its worktree, then prune — the
+ * true-drop `tidy` runs on provably-merged branches (`applyTidy`) and `prune --purge`
+ * runs on the branches an operator deliberately drops unmerged. A missing branch or
+ * worktree is a clean no-op, never an error.
+ */
+export function purgeBranches(target: Pick<PurgeTarget, "root" | "branchPrefix">, ids: string[]): void {
+  for (const id of ids) {
     const branch = `${target.branchPrefix}${id}`;
     removeWorktreeFor(target.root, branch);
     gitTry(["-C", target.root, "branch", "-D", branch]);
   }
-  if (plan.deleteBranches.length) gitTry(["-C", target.root, "worktree", "prune"]);
-
-  for (const id of plan.clearParked) rmSync(join(target.parkedDir, `${id}.json`), { force: true });
+  if (ids.length) gitTry(["-C", target.root, "worktree", "prune"]);
 }
 
 /**
@@ -455,18 +507,20 @@ export function describeRegistryDedup(drops: PointerDrop[]): string {
   ].join("\n");
 }
 
-/** Remove a live worktree checked out on `branch`, so its branch ref can then be deleted. */
-function removeWorktreeFor(root: string, branch: string): void {
+/** The path of the worktree checked out on `branch`, or undefined when none is. */
+function worktreePathFor(root: string, branch: string): string | undefined {
   const porcelain = gitTry(["-C", root, "worktree", "list", "--porcelain"]).stdout;
   // Blocks are separated by blank lines: `worktree <path>` … `branch refs/heads/<name>`.
-  let path: string | undefined;
   for (const block of porcelain.split("\n\n")) {
     const p = block.match(/^worktree (.+)$/m)?.[1];
     const b = block.match(/^branch refs\/heads\/(.+)$/m)?.[1];
-    if (p && b === branch) {
-      path = p;
-      break;
-    }
+    if (p && b === branch) return p;
   }
+  return undefined;
+}
+
+/** Remove a live worktree checked out on `branch`, so its branch ref can then be deleted. */
+function removeWorktreeFor(root: string, branch: string): void {
+  const path = worktreePathFor(root, branch);
   if (path) gitTry(["-C", root, "worktree", "remove", "--force", path]);
 }

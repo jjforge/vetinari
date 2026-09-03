@@ -14,7 +14,8 @@
  * lives at the edge and this stays trivially testable.
  */
 
-import { assertProjectQualifier, repoForProject, type ResolvedConfig } from "./config.ts";
+import { assertProjectQualifier, repoForProject, resolveProjectRoot, type ResolvedConfig } from "./config.ts";
+import { describeBranchPurge, purgeBranches, type BranchPurge, type PurgeTarget } from "./merge.ts";
 import type { HostBudget } from "./host-slots.ts";
 import { normalize } from "./issue-id.ts";
 import { campaignSettled, campaignStarted, issueNameFromTask, reduceCampaign } from "./dashboard-model.ts";
@@ -86,7 +87,7 @@ export interface AppliedPrune {
   remaining: string[][];
   /** the closure members that actually leave the plan (parked or unstarted). */
   dropped: string[];
-  /** parked members whose record to clear — empty unless `purge` was set (ADR 0013). */
+  /** the dropped members that were parked — their records are cleared as they leave. */
   parkedToClear: string[];
 }
 
@@ -97,14 +98,14 @@ export interface AppliedPrune {
  * `completed` (merged or green) stays, and anything in-flight (`running`) or
  * failed is left for the wave it is in to resolve.
  *
- * A dropped parked member leaves the plan either way, but its parked record is
- * kept by default so its branch/worktree/session stay resumable (ADR 0013);
- * `purge` is the rare true-drop that flags the record for clearing.
+ * A dropped parked member leaves the plan and its parked record is cleared as it
+ * goes, so nothing on disk keeps reading it as a campaign member (its branch,
+ * worktree and session survive the record's deletion, ADR 0013). The rarer true-drop
+ * of the branch and worktree themselves is `prune --purge`, applied in `runPrune`.
  */
 export function applyPrune(
   campaign: { waves: string[][]; outcomes: Map<string, string> },
   removed: string[],
-  opts: { purge?: boolean } = {},
 ): AppliedPrune {
   const dropped: string[] = [];
   const parkedToClear: string[] = [];
@@ -117,7 +118,7 @@ export function applyPrune(
     const status = campaign.outcomes.get(id) ?? "unstarted";
     if (status === "unstarted" || status === "parked") {
       dropped.push(id);
-      if (status === "parked" && opts.purge) parkedToClear.push(id);
+      if (status === "parked") parkedToClear.push(id);
     }
   }
   const drop = new Set(dropped);
@@ -247,12 +248,21 @@ export interface PruneDeps {
    * `undefined` when no repo can be derived — the identity has degraded.
    */
   repoOf: () => string | undefined;
+  /** the project's main checkout, where `--purge`'s branch/worktree drop acts (git edge). */
+  rootOf: () => string;
+  /** disclose what `--purge` would destroy per dropped member, touching nothing (git edge). */
+  describeBranchPurge: (target: PurgeTarget, ids: string[]) => BranchPurge[];
+  /** delete each dropped member's agent branch + worktree, then prune — `--purge`'s true drop (git edge). */
+  purgeBranches: (target: Pick<PurgeTarget, "root" | "branchPrefix">, ids: string[]) => void;
 }
 export const defaultPruneDeps: PruneDeps = {
   readEventLog,
   enqueueOutbound,
   clearParkedForTasks,
   repoOf: () => repoForProject(process.cwd()),
+  rootOf: () => resolveProjectRoot(),
+  describeBranchPurge,
+  purgeBranches,
   // Lazy-import to keep `modes` out of the static graph — see the `Campaign` note.
   launchCampaign: (cfg, batches, host, name, opts) =>
     import("./modes.ts").then((m) => m.campaign(cfg, batches, host, name, opts)),
@@ -268,7 +278,7 @@ export interface PruneOptions {
   project?: string;
   /** preview the prune but change nothing — no event, no enqueue, no launch. */
   dryRun?: boolean;
-  /** the rare true-drop: clear a dropped parked member's record too (ADR 0013). */
+  /** the rare true-drop: also delete each dropped member's branch + worktree (ADR 0013). */
   purge?: boolean;
   /** explicit waves supplied on the CLI → launch a fresh reduced campaign instead
    *  of pruning the running one. Absent/empty → prune the running campaign. */
@@ -300,6 +310,13 @@ export interface RunningPruneResult {
   parkedDropped: string[];
   /** whether `--purge` was set — the parked-message is worded off it. */
   purge: boolean;
+  /**
+   * Under `--purge` only: per dropped member, what its branch/worktree true-drop
+   * destroys — the branch, its unmerged commit count, and the worktree path. The
+   * disclosure the CLI prints before acting (and the whole of a `--purge --dry-run`).
+   * Absent on a plain prune, which touches no branch or worktree.
+   */
+  purged?: BranchPurge[];
   /** false for a `--dry-run` (previewed, nothing written); true once appended. */
   applied: boolean;
   /** the structured dry-run closure — present only on a `--dry-run`. */
@@ -327,8 +344,9 @@ export type RunPruneResult = RunningPruneResult | LaunchPruneResult;
  *
  * - No `plan` → **prune the running campaign**: read the event log, guard that one
  *   is open, reduce it to its current plan, compute the dependent closure, apply the
- *   keep-banked-work rule (ADR 0005), clear any purged parked records (ADR 0013),
- *   append a `prune` event the loop honors at its next wave boundary, and enqueue a
+ *   keep-banked-work rule (ADR 0005), clear the dropped members' parked records, and
+ *   under `--purge` true-drop their branches + worktrees (ADR 0013); then append a
+ *   `prune` event the loop honors at its next wave boundary, and enqueue a
  *   `progress:prune` note.
  * - A `plan` → **launch a fresh reduced campaign**: compute the closure over the
  *   supplied waves, enqueue a `progress:prune` note, and run `campaign()` on the
@@ -391,10 +409,22 @@ export async function runPrune(
     );
   const reduced = reduceCampaign(events);
   const { removed } = await computePrune(reduced.waves, target, blockedBy);
-  const applied = applyPrune(reduced, removed, { purge: opts.purge });
+  const applied = applyPrune(reduced, removed);
   const { remaining, dropped, parkedToClear } = applied;
   const kept = removed.filter((id) => !dropped.includes(id));
   const parkedDropped = dropped.filter((id) => reduced.outcomes.get(id) === "parked");
+
+  // `--purge` is the rare true-drop of the dropped members' branches + worktrees
+  // (ADR 0013). Disclose what it destroys per member — branch, unmerged commit count,
+  // worktree path — from the pre-action state, so a `--purge --dry-run` previews exactly
+  // what the real run would take. Only members prune actually drops are ever touched;
+  // a plain prune touches no branch or worktree, so the git edge is read only under it.
+  let purgeTarget: PurgeTarget | undefined;
+  let purged: BranchPurge[] | undefined;
+  if (opts.purge) {
+    purgeTarget = { root: deps.rootOf(), baseBranch: cfg.baseBranch, branchPrefix: cfg.branchPrefix };
+    purged = deps.describeBranchPurge(purgeTarget, dropped);
+  }
 
   // The title names what the human recognizes as belonging to the wrong repo. It rides
   // the same tracker call graft uses; a title that cannot be fetched degrades the line
@@ -414,16 +444,20 @@ export async function runPrune(
       remaining,
       parkedDropped,
       purge: !!opts.purge,
+      purged,
       applied: false,
       closure: { ...pruneClosure(target, removed, applied), project: cfg.project, repo },
     };
   }
 
-  // Preserve pruned work by default: the dropped issue leaves the plan but its
-  // parked record (branch/worktree/session) stays so it can be investigated and
-  // resumed (ADR 0013). Only `--purge` clears it — the rare true-drop — and
-  // `applyPrune` reflects that in `parkedToClear`.
+  // Clear the dropped members' parked records as they leave the plan (ADR 0013): the
+  // record only NAMES the work — deleting the JSON leaves the branch, worktree and
+  // session intact, so nothing on disk keeps reading a pruned issue as a live member.
   if (parkedToClear.length) deps.clearParkedForTasks(cfg, parkedToClear);
+  // `--purge` additionally drops the branch and worktree themselves — the rare true-drop
+  // of unmerged work nothing else removes. It proceeds on unmerged commits by design
+  // (dropping them IS the feature); the disclosure above named what it is destroying.
+  if (purgeTarget) deps.purgeBranches(purgeTarget, dropped);
   // Append the prune event — the running loop re-reads it at the next wave
   // boundary; `removed` is the closure so the fold replays the same rule.
   cfg.log.log("prune", { target: tgt, removed, dropped });
@@ -440,6 +474,7 @@ export async function runPrune(
     remaining,
     parkedDropped,
     purge: !!opts.purge,
+    purged,
     applied: true,
   };
 }

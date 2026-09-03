@@ -639,11 +639,23 @@ async function dispatchPrune(
   deps.log(
     `remaining campaign: ${result.remaining.length ? result.remaining.map((w) => `"${w.join(" ")}"`).join(" ") : "(nothing left to run)"}`,
   );
+  // --purge additionally true-drops each dropped member's branch + worktree. Disclose
+  // exactly what that destroys — branch, unmerged commit count, worktree path — before
+  // the human reads the outcome; a `--dry-run` prints this same disclosure and acts on
+  // nothing (its safety net).
+  if (result.purged?.length) {
+    deps.log(cmd.dryRun ? "would purge each dropped member's branch + worktree:" : "purged each dropped member's branch + worktree:");
+    for (const p of result.purged)
+      deps.log(
+        `  ${p.branch} — ${p.unmergedCommits} commit${p.unmergedCommits === 1 ? "" : "s"} not reachable from base` +
+          (p.worktree ? `, worktree ${p.worktree}` : ", no worktree"),
+      );
+  }
   if (result.parkedDropped.length)
     deps.log(
       cmd.purge
-        ? `purging parked ${result.parkedDropped.map((i) => `#${i}`).join(", ")} — clearing their records and resumable sessions.`
-        : `preserving parked ${result.parkedDropped.map((i) => `#${i}`).join(", ")} — branch/worktree/session kept, resumable (--purge to drop).`,
+        ? `cleared parked record for ${result.parkedDropped.map((i) => `#${i}`).join(", ")}.`
+        : `cleared parked record for ${result.parkedDropped.map((i) => `#${i}`).join(", ")} — branch/worktree/session kept, resumable (--purge also drops the branch + worktree).`,
     );
   if (result.closure) {
     // Dry-run preview: the human prose already printed above. Emit the structured closure

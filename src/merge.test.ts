@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { applyTidy, collectWaveChangelog, computeTidy, describeRegistryDedup, integrateGreens, scanTidy, type TidySnapshot } from "./merge.ts";
+import { applyTidy, collectWaveChangelog, computeTidy, describeBranchPurge, describeRegistryDedup, integrateGreens, purgeBranches, scanTidy, type TidySnapshot } from "./merge.ts";
 import { listParkedIn } from "./state.ts";
 import { memoryLogger } from "./log.ts";
 
@@ -633,4 +633,71 @@ test("collectWaveChangelog leaves fragments in place and logs one line when the 
   // One line logged for the skip, distinct from the empty case. (These campaign-changelog-*
   // rows ride the logger's untyped catch-all, so `event` is compared as a plain string.)
   assert.equal(log.events.filter((e) => (e.event as string) === "campaign-changelog-skipped").length, 1);
+});
+
+// A repo with one agent branch carrying unmerged commits and a worktree checked out on
+// it — the state a parked, still-unmerged campaign member leaves behind. `--purge` (and
+// `tidy`) run their branch/worktree true-drop over exactly this.
+function repoWithUnmergedAgentBranch(): { dir: string; git: (args: string[]) => string } {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-purge-"));
+  const git = (args: string[]) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" }).trim();
+  execFileSync("git", ["-C", dir, "-c", "init.defaultBranch=main", "init", "-q"]);
+  git(["config", "user.email", "test@example.com"]);
+  git(["config", "user.name", "test"]);
+  writeFileSync(join(dir, "seed.txt"), "base\n");
+  git(["add", "-A"]);
+  git(["commit", "-qm", "seed"]);
+  // agent/701: two commits beyond main, never merged, with a live worktree.
+  git(["branch", "agent/701"]);
+  const wt = join(dir, "wt-701");
+  git(["worktree", "add", "-q", wt, "agent/701"]);
+  writeFileSync(join(wt, "a.txt"), "1\n");
+  execFileSync("git", ["-C", wt, "add", "-A"]);
+  execFileSync("git", ["-C", wt, "commit", "-qm", "a"]);
+  writeFileSync(join(wt, "b.txt"), "2\n");
+  execFileSync("git", ["-C", wt, "add", "-A"]);
+  execFileSync("git", ["-C", wt, "commit", "-qm", "b"]);
+  return { dir, git };
+}
+
+test("describeBranchPurge discloses the branch, its unmerged commit count, and its worktree", () => {
+  const { dir } = repoWithUnmergedAgentBranch();
+  const target = { root: dir, baseBranch: "main", branchPrefix: "agent/" };
+
+  const [disclosed] = describeBranchPurge(target, ["701"]);
+  assert.equal(disclosed.id, "701");
+  assert.equal(disclosed.branch, "agent/701");
+  assert.equal(disclosed.unmergedCommits, 2); // two commits not reachable from base
+  assert.equal(disclosed.worktree, join(dir, "wt-701"));
+});
+
+test("describeBranchPurge is a clean no-op for a member with no branch (zero commits, no worktree)", () => {
+  const { dir } = repoWithUnmergedAgentBranch();
+  const target = { root: dir, baseBranch: "main", branchPrefix: "agent/" };
+
+  const [disclosed] = describeBranchPurge(target, ["999"]);
+  assert.equal(disclosed.branch, "agent/999");
+  assert.equal(disclosed.unmergedCommits, 0);
+  assert.equal(disclosed.worktree, undefined);
+});
+
+test("purgeBranches deletes the branch and its worktree, then prunes", () => {
+  const { dir, git } = repoWithUnmergedAgentBranch();
+  const target = { root: dir, baseBranch: "main", branchPrefix: "agent/" };
+  assert.ok(git(["branch", "--list", "agent/701"]).length > 0);
+  assert.ok(existsSync(join(dir, "wt-701")));
+
+  purgeBranches(target, ["701"]);
+
+  assert.equal(git(["branch", "--list", "agent/701"]), ""); // branch gone
+  assert.equal(existsSync(join(dir, "wt-701")), false); // worktree removed
+  assert.ok(!git(["worktree", "list", "--porcelain"]).includes("wt-701")); // pruned
+});
+
+test("purgeBranches on a member with no branch or worktree is a clean no-op, not an error", () => {
+  const { dir, git } = repoWithUnmergedAgentBranch();
+  const target = { root: dir, baseBranch: "main", branchPrefix: "agent/" };
+
+  assert.doesNotThrow(() => purgeBranches(target, ["999"]));
+  assert.ok(git(["branch", "--list", "agent/701"]).length > 0); // untouched member survives
 });

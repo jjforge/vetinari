@@ -1018,11 +1018,14 @@ export const HOST_LOG_SCRIPT = `  const hostLogRoot = document.querySelector("[d
  * node idempotent). At rest the button is greyed; typing wakes it (the teal
  * `data-graft-active`) and clears any error; blur validates the batch against the
  * project's own dry-run closure (the retained `GET /graft?preview`) so a bad id greys
- * the button before anything is sent; submit POSTs `/graft` directly — a clean batch
- * confirms on the wave (the new card arrives via the live refresh), while a whole-batch
- * rejection (422) surfaces its per-id verdicts inline and keeps the typed ids for
- * correction. `graftVerdicts` renders those verdicts in graft's own words — the same the
- * route's rejection page uses.
+ * the button before anything is sent (an *unevaluable* preview, a non-ok response, only
+ * discloses its message — it leaves the button enabled, as the batch may still be valid);
+ * submit POSTs `/graft` directly — a clean batch confirms on the wave (the new card arrives
+ * via the live refresh), while a whole-batch rejection (422) surfaces its per-id verdicts
+ * inline and keeps the typed ids for correction. Any other non-ok response (a 502/400/404
+ * failure) is treated the same way — its body is shown inline and the ids are kept, never
+ * read as a done graft. `graftVerdicts` renders the per-id verdicts in graft's own words —
+ * the same the route's rejection page uses.
  */
 export const GRAFT_SCRIPT = `  function graftVerdicts(closure) {
     const reason = { unknown: "not found", closed: "closed on GitHub", "already-in-campaign": "already in the campaign" };
@@ -1057,7 +1060,11 @@ export const GRAFT_SCRIPT = `  function graftVerdicts(closure) {
       if (!typed()) return;
       try {
         const res = await fetch("/graft?preview&ids=" + encodeURIComponent(typed()) + "&project=" + encodeURIComponent(project));
-        if (!res.ok) return;
+        // A preview that could not be evaluated (a non-ok response) is disclosure, not a
+        // refusal: show its message inline but leave the button enabled and the batch not
+        // marked invalid — the submit path reports its own failure honestly, so greying here
+        // would only block a batch that may be perfectly valid.
+        if (!res.ok) { showErr((await res.text()).trim() || "Couldn't preview this batch — the graft did not run."); return; }
         const closure = await res.json();
         if (closure.rejected && closure.rejected.length) { invalid = true; showErr(graftVerdicts(closure)); }
       } catch {}
@@ -1092,6 +1099,14 @@ export const GRAFT_SCRIPT = `  function graftVerdicts(closure) {
           const list = doc.querySelector("[data-graft-verdicts]");
           invalid = true;
           showErr(list ? [...list.querySelectorAll("li")].map((li) => li.textContent).join("  ·  ") : "Nothing grafted — fix these ids.");
+          return;
+        }
+        if (!res.ok) {
+          // Any other non-ok — 502 (couldn't reach graft), 400 (missing ids/project), 404
+          // (unknown project) — is a failure, not a done graft: surface the route's own body
+          // inline and keep the typed ids for a retry. Without this, every non-422 error read
+          // as success and silently wiped the operator's input (#373).
+          showErr((await res.text()).trim() || "Nothing grafted — the graft did not run.");
           return;
         }
         // Success — the graft confirms on the wave; clear the input back to rest.

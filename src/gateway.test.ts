@@ -537,6 +537,29 @@ test("formatParkAnnouncement uses the notice skeleton: header, question, exact r
   assert.equal(recover, "Recover: Reply to this message to answer.", "a question's recovery move is the exact reply command");
 });
 
+test("formatParkAnnouncement parses the XML question form into the signal, no raw tags (#384)", () => {
+  const text = formatParkAnnouncement(
+    "jjforge",
+    parked({
+      taskId: "640",
+      reason: "question",
+      question: "<summary>Which store?</summary><detail>Redis or Postgres.</detail>",
+    }),
+  );
+
+  assert.doesNotMatch(text, /<summary>|<detail>|<option>/, "no raw XML tags reach the announcement");
+  assert.match(text, /Which store\?/, "the parsed summary is in the signal");
+  assert.match(text, /Redis or Postgres\./, "the parsed detail is in the signal");
+});
+
+test("formatParkAnnouncement leaves a non-matching question as its trimmed text and keeps the detail/reason fallback (#384)", () => {
+  const plain = formatParkAnnouncement("jjforge", parked({ taskId: "640", reason: "question", question: "  Which approach?  " }));
+  assert.match(plain.split("\n")[1], /^Which approach\?$/, "a non-matching question stays its full trimmed text");
+
+  const detailFallback = formatParkAnnouncement("jjforge", parked({ taskId: "641", reason: "stalled", question: "", detail: "no commit in budget" }));
+  assert.match(detailFallback, /no commit in budget/, "an empty question still falls back to the detail");
+});
+
 test("formatParkAnnouncement names the reason and its recovery move for a non-answerable park", () => {
   const text = formatParkAnnouncement("jjforge", parked({ taskId: "641", reason: "red-base", question: "" }));
 

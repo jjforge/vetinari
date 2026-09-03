@@ -30,6 +30,7 @@ import {
   buildAllStatus,
   campaignRunning,
   campaignState,
+  extractParkedDetails,
   logFileOf,
   readEventLog,
   serveAllStatus,
@@ -557,7 +558,11 @@ export function parkRecoveryMove(reason: ParkReason, issue: string): string {
  * destination by the reply index, not by the notice's `category` (which is unused here).
  */
 export function formatParkAnnouncement(project: string, record: ParkedRecord): string {
-  const signal = record.question?.trim() || record.detail?.trim() || `Parked (${record.reason}).`;
+  // Parse the agent's structured question (#384) so no raw <summary>/<detail>/<option> tags
+  // reach the bot, reusing #370's shared parser; a non-matching question parses back to its
+  // own trimmed text, so the detail/reason fallback chain below is unchanged.
+  const parsed = record.question ? extractParkedDetails(record.question).description.trim() : "";
+  const signal = parsed || record.detail?.trim() || `Parked (${record.reason}).`;
   return notice({
     emoji: "⏸",
     project,

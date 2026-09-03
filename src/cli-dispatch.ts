@@ -35,7 +35,7 @@ import { isIssueToken } from "./issue-id.ts";
 import type { runGraft } from "./graft.ts";
 import { GraftRejectedError, describeGraftRejections } from "./graft.ts";
 import type { readEventLog } from "./event-log.ts";
-import { campaignStarted, reduceCampaign } from "./dashboard-model.ts";
+import { campaignStarted, extractParkedDetails, reduceCampaign } from "./dashboard-model.ts";
 import { makeReporter } from "./report.ts";
 
 const USAGE = renderUsage();
@@ -424,10 +424,16 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
     case "parked": {
       const recs = deps.listParked(cfg);
       if (!recs.length) deps.log("nothing parked");
-      for (const r of recs)
+      for (const r of recs) {
+        // Parse the agent's structured question (#384) so no raw <summary>/<detail>/<option>
+        // tags reach the terminal, reusing #370's shared parser; a terminal reader has no
+        // clickable option, so list the parsed choices as plain text below the description.
+        const { description, options } = extractParkedDetails(r.question);
+        const optionLines = options.length ? `\n${options.map((o) => `  - ${o}`).join("\n")}` : "";
         deps.log(
-          `\n=== ${r.taskId} (${r.reason}, ${r.parkedAt}) branch ${r.branch}\n${r.question}\n`,
+          `\n=== ${r.taskId} (${r.reason}, ${r.parkedAt}) branch ${r.branch}\n${description}${optionLines}\n`,
         );
+      }
       return;
     }
     case "clear": {

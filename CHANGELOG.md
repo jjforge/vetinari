@@ -35,6 +35,8 @@ Within a milestone each bold section label appears at most once.
 - [user] `prune --dry-run` now previews the parked-record clear in the future tense ("would clear the parked record for …") instead of reporting it as already cleared — a dry-run clears nothing (#382).
 - [user] A parked question in the dashboard now renders cleanly whether the agent emitted the XML shape (`<summary>`/`<detail>`/`<options>`) or the older Markdown `options:` shape — the summary reads as the headline, the detail as the body, and each option is a clickable button that fills the reply box; no raw tags leak through (#370).
 - [user] The Reply submit button stays reachable no matter how long the parked question is — the reply block now scrolls its own content so the actions row is never pushed off-screen, including on short landscape-tablet viewports (#370).
+- [user] A campaign that stops on a `failed` member or a `red-base` merge (neither writes a per-issue parked record) now keeps its log in the live event log instead of archiving it, so `redrive` (or `redrive --override`) can find and continue it with no manual recovery (#383).
+- [user] `vetinari parked` and the Telegram park announcement now parse the agent's XML question form (`<summary>`/`<detail>`/`<option>`) instead of printing raw tags, reusing the dashboard's parser; the CLI also lists the options as plain text (#384).
 
 ### Collected changes — September 2, 2026
 

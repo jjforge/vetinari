@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { dispatch, identityLine, parseArgs, type Command, type DispatchDeps } from "./cli-dispatch.ts";
 import { projectHasLiveCampaign, registerProject } from "./host-slots.ts";
+import { GraftRejectedError } from "./graft.ts";
 
 // A spy that records each call's arguments and returns a canned value.
 function spy<T>(ret?: T) {
@@ -743,6 +744,28 @@ test("dispatch graft --dry-run emits the machine closure line only under --json"
   const withJson = makeDeps({ runGraft: spy(Promise.resolve(withClosure)) as any });
   await dispatch({ kind: "graft", ids: ["436"], dryRun: true, json: true }, withJson.deps);
   assert.ok(withJson.logged.some((l) => l.startsWith("graft-closure ")), "closure JSON under --json");
+});
+
+test("dispatch graft on a real (non-dry-run) rejection prints the prose, emits the closure line only under --json, and exits non-zero", async () => {
+  const closure = {
+    project: "demo", repo: undefined, ids: ["202"], placement: [], remaining: [["101"], ["202"]],
+    rejected: [{ id: "202", reason: "already-in-campaign" as const }],
+  };
+  const rejecting = (): Promise<never> =>
+    Promise.reject(new GraftRejectedError("graft rejected — nothing added (already in the campaign: #202).", closure));
+
+  // Without --json: the human prose prints, no JSON on stdout, exit non-zero.
+  const noJson = makeDeps({ runGraft: (() => rejecting()) as unknown as DispatchDeps["runGraft"] });
+  await dispatch({ kind: "graft", ids: ["202"], dryRun: false, json: false }, noJson.deps);
+  assert.ok(noJson.logged.some((l) => /graft rejected — nothing added \(already in the campaign: #202\)/.test(l)), "prints the prose");
+  assert.ok(!noJson.logged.some((l) => l.startsWith("graft-closure")), "no closure JSON without --json");
+  assert.deepEqual(noJson.exitCodes, [1], "a rejected graft exits non-zero");
+
+  // With --json: the machine `graft-closure {json}` line is emitted too (design §11).
+  const withJson = makeDeps({ runGraft: (() => rejecting()) as unknown as DispatchDeps["runGraft"] });
+  await dispatch({ kind: "graft", ids: ["202"], dryRun: false, json: true }, withJson.deps);
+  assert.ok(withJson.logged.some((l) => l === `graft-closure ${JSON.stringify(closure)}`), "closure JSON under --json");
+  assert.deepEqual(withJson.exitCodes, [1]);
 });
 
 test("identityLine names project, repo and title, and degrades each end gracefully", () => {

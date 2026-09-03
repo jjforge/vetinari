@@ -33,7 +33,7 @@ import type {
 import { resumeIndex, type runPrune } from "./prune.ts";
 import { isIssueToken } from "./issue-id.ts";
 import type { runGraft } from "./graft.ts";
-import { describeGraftRejections } from "./graft.ts";
+import { GraftRejectedError, describeGraftRejections } from "./graft.ts";
 import type { readEventLog } from "./event-log.ts";
 import { campaignStarted, reduceCampaign } from "./dashboard-model.ts";
 import { makeReporter } from "./report.ts";
@@ -663,7 +663,22 @@ async function dispatchGraft(
   cmd: Extract<Command, { kind: "graft" }>,
   deps: DispatchDeps,
 ): Promise<void> {
-  const result = await deps.runGraft(deps.cfg, cmd.ids, { project: cmd.project, dryRun: cmd.dryRun });
+  let result;
+  try {
+    result = await deps.runGraft(deps.cfg, cmd.ids, { project: cmd.project, dryRun: cmd.dryRun });
+  } catch (err) {
+    if (err instanceof GraftRejectedError) {
+      // A real graft rejects whole (ADR 0014). Print the human prose the dry-run also
+      // prints, emit the machine `graft-closure {json}` line only under `--json` (design
+      // §11 — a bare `graft` leaves no JSON on stdout), and exit non-zero. The awaiting
+      // dashboard route reads that same closure off the child's stdout to 422.
+      deps.log(err.message);
+      if (cmd.json) deps.log(`graft-closure ${JSON.stringify(err.closure)}`);
+      deps.setExitCode(1);
+      return;
+    }
+    throw err;
+  }
   if (result.rejected.length) {
     // A `--dry-run` discloses a whole-batch rejection instead of throwing, so the
     // aggregated dashboard's preview can name the offenders off the closure line.

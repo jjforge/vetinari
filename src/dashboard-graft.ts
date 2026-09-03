@@ -1,5 +1,10 @@
-import { spawn } from "node:child_process";
+import { runChild } from "./dashboard-child.ts";
 import type { StructuredGraftClosure } from "./graft.ts";
+
+/** The cap on how long the preview waits for the project's own dry-run child. The
+ *  preview is a read-only disclosure, so a hang surfaces as a 502 the client tolerates
+ *  (it leaves the button enabled), never a stuck request. */
+const GRAFT_PREVIEW_TIMEOUT_MS = 60_000;
 
 /**
  * Preview a graft by shelling the project's own `graft <ids…> --dry-run` via the
@@ -9,21 +14,16 @@ import type { StructuredGraftClosure } from "./graft.ts";
  * of `shellPrunePreview` — the same dumb-router routing the aggregated dashboard
  * uses. `graft` is variadic, so this carries a *set* of ids, not a single target.
  */
-export function shellGraftPreview(projectRoot: string, taskIds: string[], opts: { json?: boolean } = {}): Promise<string | null> {
-  return new Promise((resolve) => {
-    // The human-prose preview shells without `--json`; the structured-closure path
-    // (`shellGraftClosure`) passes `--json` so the child also emits the machine
-    // `graft-closure {json}` line to parse. No JSON reaches stdout otherwise (§11).
-    const args = ["graft", ...taskIds, "--dry-run", ...(opts.json ? ["--json"] : [])];
-    const child = spawn(process.execPath, [...process.execArgv, process.argv[1], ...args], {
-      cwd: projectRoot,
-      stdio: ["ignore", "pipe", "inherit"],
-    });
-    let out = "";
-    child.stdout?.on("data", (chunk) => (out += chunk));
-    child.on("error", () => resolve(null));
-    child.on("exit", (code) => resolve(code === 0 ? out.trim() || null : null));
-  });
+export async function shellGraftPreview(projectRoot: string, taskIds: string[], opts: { json?: boolean } = {}): Promise<string | null> {
+  // The human-prose preview shells without `--json`; the structured-closure path
+  // (`shellGraftClosure`) passes `--json` so the child also emits the machine
+  // `graft-closure {json}` line to parse. No JSON reaches stdout otherwise (§11).
+  // The spawn-collect is `runChild`'s now — this is the same dry-run shell the POST
+  // path used to duplicate, so it folds into the one seam (a timeout, or a non-zero
+  // exit, reads as null: nothing to preview).
+  const args = ["graft", ...taskIds, "--dry-run", ...(opts.json ? ["--json"] : [])];
+  const { code, stdout, timedOut } = await runChild(projectRoot, args, { timeoutMs: GRAFT_PREVIEW_TIMEOUT_MS });
+  return !timedOut && code === 0 ? stdout.trim() || null : null;
 }
 
 /**

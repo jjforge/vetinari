@@ -1113,24 +1113,19 @@ test("serveAllStatus POST /graft shells graft directly for a clean batch — no 
   register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
   register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
 
-  const spawned: { args: string[]; cwd: string }[] = [];
+  const children: { args: string[]; cwd: string }[] = [];
+  let dryRunClosures = 0;
   const server = await serveAllStatus(configDir, {
     port: 0,
     host: "127.0.0.1",
-    spawn: (_cmd, args, options) => spawned.push({ args, cwd: options.cwd }),
-    // Option 1a validates the batch against the project's dry-run closure and, when it
-    // is clean (no offenders), grafts directly — no preview/confirm form. A clean closure
-    // stands in for beta's install accepting both ids.
-    graftClosure: () =>
-      Promise.resolve({
-        ids: ["640", "655"],
-        placement: [
-          { id: "640", wave: 2 },
-          { id: "655", wave: 2 },
-        ],
-        remaining: [["201"], ["640", "655"]],
-        rejected: [],
-      }),
+    // Option 1a acts on submit: it shells the SELECTED project's own real `graft --json`
+    // and awaits it (#367) — no pre-validation dry-run. A clean (code 0) exit stands in for
+    // beta's install accepting both ids and appending the graft event.
+    runChild: (projectRoot, args) => {
+      children.push({ args, cwd: projectRoot });
+      return Promise.resolve({ code: 0, stdout: "", stderr: "", timedOut: false });
+    },
+    graftClosure: () => (dryRunClosures++, Promise.resolve(null)),
   });
   const { port } = server.address() as AddressInfo;
   try {
@@ -1141,14 +1136,15 @@ test("serveAllStatus POST /graft shells graft directly for a clean batch — no 
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ ids: "640 655", project: "beta" }).toString(),
     });
-    // Redirects back to the selected project's board, like prune/redrive/answer.
+    // The response comes back only once the child has exited — then redirects to the board.
     assert.equal(res.status, 303);
     assert.equal(res.headers.get("location"), "/?project=beta");
-    // Shells the variadic `graft <ids…>` against the SELECTED project's own root — so
-    // the shared install loads beta's config and gates, and both ids round-trip.
-    assert.equal(spawned.length, 1);
-    assert.deepEqual(spawned[0].args.slice(-3), ["graft", "640", "655"]);
-    assert.equal(spawned[0].cwd, join(configDir, "beta-root"));
+    // Shells the variadic real `graft <ids…> --json` against beta's own root, exactly once,
+    // and never a pre-validation dry-run (acceptance: a clean submit grafts once).
+    assert.equal(children.length, 1);
+    assert.deepEqual(children[0].args, ["graft", "640", "655", "--json"]);
+    assert.equal(children[0].cwd, join(configDir, "beta-root"));
+    assert.equal(dryRunClosures, 0);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -1265,21 +1261,27 @@ test("serveAllStatus POST /graft rejects a whole batch with per-id verdicts and 
   ]);
   register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
 
-  const closures: { projectRoot: string; taskIds: string[] }[] = [];
-  const spawned: unknown[] = [];
+  const children: { projectRoot: string; args: string[] }[] = [];
+  // beta's real graft rejects the whole batch: #202 is already in the campaign, so per
+  // ADR 0014 *nothing* grafts. It exits non-zero and prints the `graft-closure {json}` line
+  // (dispatchGraft under --json) — exactly what the route reads to 422.
+  const rejectionClosure = {
+    project: "beta",
+    ids: ["640", "202"],
+    placement: [],
+    remaining: [["201"]],
+    rejected: [{ id: "202", reason: "already-in-campaign" as const }],
+  };
   const server = await serveAllStatus(configDir, {
     port: 0,
     host: "127.0.0.1",
-    spawn: (...a) => spawned.push(a),
-    // beta's install rejects the whole batch: #202 is already in the campaign, so per
-    // ADR 0014 *nothing* grafts — #640 would have grafted, but the batch is all-or-nothing.
-    graftClosure: (projectRoot, taskIds) => {
-      closures.push({ projectRoot, taskIds });
+    runChild: (projectRoot, args) => {
+      children.push({ projectRoot, args });
       return Promise.resolve({
-        ids: ["640", "202"],
-        placement: [],
-        remaining: [["201"]],
-        rejected: [{ id: "202", reason: "already-in-campaign" as const }],
+        code: 1,
+        stdout: `graft rejected — nothing added (already in the campaign: #202).\ngraft-closure ${JSON.stringify(rejectionClosure)}`,
+        stderr: "",
+        timedOut: false,
       });
     },
   });
@@ -1294,16 +1296,14 @@ test("serveAllStatus POST /graft rejects a whole batch with per-id verdicts and 
     // A rejection is surfaced inline (422), never a redirect — the operator stays put.
     assert.equal(res.status, 422);
     const html = await res.text();
-    // The verdict came from the selected project's install (beta's root), carrying both ids.
-    assert.deepEqual(closures, [{ projectRoot: join(configDir, "beta-root"), taskIds: ["640", "202"] }]);
+    // The real graft ran once against the selected project's install (beta's root).
+    assert.deepEqual(children, [{ projectRoot: join(configDir, "beta-root"), args: ["graft", "640", "202", "--json"] }]);
     // Per-id verdicts under the "Nothing grafted" header — the clean id "would graft",
     // the offender names its reason — and the typed ids are retained for correction.
     assert.match(html, /Nothing grafted/i);
     assert.match(html, /#640 — would graft/);
     assert.match(html, /#202 — already in the campaign/);
     assert.match(html, /data-graft-ids="640 202"/);
-    // Whole-batch rejection grafts nothing — no graft is spawned.
-    assert.equal(spawned.length, 0);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

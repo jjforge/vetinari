@@ -56,6 +56,8 @@ const depsFor = (configDir: string): DashboardDeps => ({
   prunePreview: async () => null,
   pruneClosure: async () => null,
   graftClosure: async () => null,
+  runChild: async () => ({ code: 0, stdout: "", stderr: "", timedOut: false }),
+  graftTimeoutMs: 60_000,
 });
 
 // The grid frames: unnamed `data:` frames (the doorbell), distinct from the named `tail`/`host`

@@ -651,12 +651,17 @@ async function dispatchPrune(
           (p.worktree ? `, worktree ${p.worktree}` : ", no worktree"),
       );
   }
-  if (result.parkedDropped.length)
+  if (result.parkedDropped.length) {
+    // A dry-run clears nothing, so it previews ("would clear …"); an applied prune reports the
+    // completed side-effect ("cleared …"). The --purge/plain distinction lives inside each arm.
+    const ids = result.parkedDropped.map((i) => `#${i}`).join(", ");
+    const verb = cmd.dryRun ? "would clear the parked record" : "cleared parked record";
     deps.log(
       cmd.purge
-        ? `cleared parked record for ${result.parkedDropped.map((i) => `#${i}`).join(", ")}.`
-        : `cleared parked record for ${result.parkedDropped.map((i) => `#${i}`).join(", ")} — branch/worktree/session kept, resumable (--purge also drops the branch + worktree).`,
+        ? `${verb} for ${ids}.`
+        : `${verb} for ${ids} — branch/worktree/session kept, resumable (--purge also drops the branch + worktree).`,
     );
+  }
   if (result.closure) {
     // Dry-run preview: the human prose already printed above. Emit the structured closure
     // — which the aggregated dashboard's prune preview parses — only under `--json`, so a

@@ -33,7 +33,7 @@ import type {
 import { resumeIndex, type runPrune } from "./prune.ts";
 import { isIssueToken } from "./issue-id.ts";
 import type { runGraft } from "./graft.ts";
-import { describeGraftRejections } from "./graft.ts";
+import { GraftRejectedError, describeGraftRejections } from "./graft.ts";
 import type { readEventLog } from "./event-log.ts";
 import { campaignStarted, reduceCampaign } from "./dashboard-model.ts";
 import { makeReporter } from "./report.ts";
@@ -271,6 +271,9 @@ export interface DispatchDeps {
   host: HostBudget;
   isTTY: boolean;
   log: (msg: string) => void;
+  /** Write a line to stderr — the operator-language failure a command surfaces without a
+   *  stack-trace footer (e.g. a broken `graft`, whose last stderr line the dashboard lifts). */
+  error: (msg: string) => void;
   setExitCode: (code: number) => void;
   /**
    * Validate + preflight + stamp the agent selection (the effectful half of the old
@@ -663,7 +666,28 @@ async function dispatchGraft(
   cmd: Extract<Command, { kind: "graft" }>,
   deps: DispatchDeps,
 ): Promise<void> {
-  const result = await deps.runGraft(deps.cfg, cmd.ids, { project: cmd.project, dryRun: cmd.dryRun });
+  let result;
+  try {
+    result = await deps.runGraft(deps.cfg, cmd.ids, { project: cmd.project, dryRun: cmd.dryRun });
+  } catch (err) {
+    if (err instanceof GraftRejectedError) {
+      // A real graft rejects whole (ADR 0014). Print the human prose the dry-run also
+      // prints, emit the machine `graft-closure {json}` line only under `--json` (design
+      // §11 — a bare `graft` leaves no JSON on stdout), and exit non-zero. The awaiting
+      // dashboard route reads that same closure off the child's stdout to 422.
+      deps.log(err.message);
+      if (cmd.json) deps.log(`graft-closure ${JSON.stringify(err.closure)}`);
+      deps.setExitCode(1);
+      return;
+    }
+    // A broken graft — a precondition throw (no campaign, settled, degraded config), not a
+    // whole-batch rejection, so it carries no closure. Surface its message on stderr as a
+    // clean last line (the dashboard route lifts it, #367) and exit non-zero, rather than
+    // letting it bubble to an unhandled rejection whose stack buries the sentence.
+    deps.error(err instanceof Error ? err.message : String(err));
+    deps.setExitCode(1);
+    return;
+  }
   if (result.rejected.length) {
     // A `--dry-run` discloses a whole-batch rejection instead of throwing, so the
     // aggregated dashboard's preview can name the offenders off the closure line.

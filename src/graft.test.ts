@@ -7,7 +7,7 @@ import type { ResolvedConfig } from "./config.ts";
 import { loggerForRun } from "./log.ts";
 import { readEventLog } from "./event-log.ts";
 import { listOutbox } from "./state.ts";
-import { defaultGraftDeps, describeGraftRejections, runGraft } from "./graft.ts";
+import { GraftRejectedError, defaultGraftDeps, describeGraftRejections, runGraft } from "./graft.ts";
 
 // A temp-dir `cfg` mirroring modes.test's `harnessCfg`: a real on-disk event log
 // under a throwaway state dir is what the command's `readEventLog`/`reduceCampaign`
@@ -357,6 +357,37 @@ test("an id already in the campaign is rejected whole — nothing appended", asy
     () => runGraft(cfg, ["202"], {}),
     /graft rejected — nothing added \(already in the campaign: #202\)/,
   );
+  assert.equal(
+    readEventLog(cfg).some((e) => e.event === "graft"),
+    false,
+  );
+  assert.equal(listOutbox(cfg).length, 0);
+});
+
+test("a real graft's rejection throws GraftRejectedError carrying the same closure the dry-run discloses", async () => {
+  // The route awaits the real child now, so a rejection must reach it as data, not just
+  // prose: the throw carries the StructuredGraftClosure so `dispatchGraft` can emit the
+  // `graft-closure {json}` line and the route can 422 with the per-id verdicts.
+  const cfg = harnessCfg();
+  launch(cfg, [["101"], ["202"]]);
+
+  await assert.rejects(
+    () => runGraft(cfg, ["202", "303"], {}, depsWithRepo(undefined)),
+    (err: unknown) => {
+      assert.ok(err instanceof GraftRejectedError, "a rejection is a GraftRejectedError");
+      assert.match(err.message, /graft rejected — nothing added \(already in the campaign: #202\)/);
+      assert.deepEqual(err.closure, {
+        project: "harness",
+        repo: undefined,
+        ids: ["202", "303"],
+        placement: [],
+        remaining: [["101"], ["202"]],
+        rejected: [{ id: "202", reason: "already-in-campaign" }],
+      });
+      return true;
+    },
+  );
+  // Still all-or-nothing: nothing appended, nothing enqueued.
   assert.equal(
     readEventLog(cfg).some((e) => e.event === "graft"),
     false,

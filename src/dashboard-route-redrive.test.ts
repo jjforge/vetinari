@@ -57,6 +57,8 @@ const depsFor = (configDir: string, spawn: DashboardDeps["spawn"]): DashboardDep
   prunePreview: async () => null,
   pruneClosure: async () => null,
   graftClosure: async () => null,
+  runChild: async () => ({ code: 0, stdout: "", stderr: "", timedOut: false }),
+  graftTimeoutMs: 60_000,
 });
 
 test("POST /redrive refuses with 409 and the reason while a campaign process holds the host lease (#325)", async () => {

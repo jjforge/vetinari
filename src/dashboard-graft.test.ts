@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseGraftClosure } from "./dashboard-graft.ts";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { parseGraftClosure, shellGraftClosure } from "./dashboard-graft.ts";
 
 test("parseGraftClosure reads the structured closure line the dry-run prints", () => {
   // `graft <ids…> --dry-run` prints a `graft-closure {json}` line alongside its
@@ -36,6 +39,40 @@ test("parseGraftClosure carries a whole-batch rejection's offenders", () => {
     ),
     structured,
   );
+});
+
+// The preview path (`GET /graft?preview`) shells the project's own `graft --dry-run`
+// through `runChild` now (folded off the old duplicated spawn). Point `process.argv[1]`
+// at a fixture CLI that prints a `graft-closure {json}` line to exercise the fold + parse.
+const withFixtureCli = async <T>(script: string, fn: () => Promise<T>): Promise<T> => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-graft-preview-"));
+  const entry = join(dir, "cli.cjs");
+  writeFileSync(entry, script);
+  const orig = process.argv[1];
+  process.argv[1] = entry;
+  try {
+    return await fn();
+  } finally {
+    process.argv[1] = orig;
+  }
+};
+
+test("shellGraftClosure parses the closure the project's own dry-run prints", async () => {
+  const closure = { project: "demo", ids: ["301"], placement: [{ id: "301", wave: 2 }], remaining: [["101"], ["301"]], rejected: [] };
+  const closure_json = JSON.stringify(closure);
+  const result = await withFixtureCli(
+    `process.stdout.write('graft #301 → #301 in wave 2\\ngraft-closure ' + ${JSON.stringify(closure_json)} + '\\n'); process.exit(0);`,
+    () => shellGraftClosure("/tmp", ["301"]),
+  );
+  assert.deepEqual(result, closure);
+});
+
+test("shellGraftClosure returns null when the child exits non-zero", async () => {
+  const result = await withFixtureCli(
+    `process.stderr.write('no campaign running\\n'); process.exit(1);`,
+    () => shellGraftClosure("/tmp", ["301"]),
+  );
+  assert.equal(result, null);
 });
 
 test("parseGraftClosure returns null when the line is absent or unparseable", () => {

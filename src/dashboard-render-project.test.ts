@@ -333,6 +333,24 @@ test("graft submit branches on res.ok, not one status — every non-422 failure 
   // wipes the input.
   assert.match(submit, /if \(!res\.ok\) \{[\s\S]*?return;\s*\}\s*(?:\/\/[^\n]*\n\s*)*ids\.value = "";/);
 });
+test("graft submit on a 202 (child still running at the cap) clears the ids and shows a persistent 'lands later' note, not a failure (#367)", () => {
+  // The route awaits the graft child but caps the wait; on the cap it 202s without killing
+  // the child. The batch was NOT refused (a refusal exits with its closure), so the control
+  // clears the ids — retaining them would invite a retry that races the first graft — and
+  // settles into a persistent note in prune's idiom rather than an error.
+  const submit = GRAFT_SCRIPT.slice(GRAFT_SCRIPT.indexOf('fetch("/graft"'));
+
+  // A 202 is handled explicitly, before the generic ok/!ok branches (202 is ok, so without
+  // this it would fall through to the silent success clear with no note).
+  assert.match(submit, /if \(res\.status === 202\) \{[\s\S]*?ids\.value = "";[\s\S]*?return;[\s\S]*?\}/);
+  // The note says the wave will appear when it lands…
+  assert.match(submit, /if \(res\.status === 202\) \{[\s\S]*?wave will appear when it lands[\s\S]*?\}/);
+  // …and it is a note, not the red error surface (it goes through showNote, not showErr).
+  assert.match(submit, /if \(res\.status === 202\) \{(?:(?!showErr)[\s\S])*?showNote\([\s\S]*?\}/);
+  // The 202 branch is intercepted before the generic ok success clear — 202 is itself ok, so
+  // without an explicit branch it would fall through to the silent success clear with no note.
+  assert.ok(submit.indexOf("res.status === 202") < submit.indexOf("if (!res.ok)"), "202 handled before the failure/success fallthrough");
+});
 test("graft blur preview discloses an unevaluable batch but does not gate it — button stays enabled, batch not marked invalid (#373)", () => {
   // The quieter half of the same hole: a non-ok preview returned silently, so a batch the
   // preview could not evaluate looked identical to one it approved. The fix shows the message

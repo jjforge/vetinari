@@ -88,6 +88,23 @@ export interface StructuredGraftClosure {
   rejected: GraftRejection[];
 }
 
+/**
+ * A real graft's whole-batch rejection (ADR 0014 — all-or-nothing, never half-applied).
+ * `runGraft` throws it rather than returning, so a caller cannot proceed on a refused
+ * batch; it carries the same `StructuredGraftClosure` the `--dry-run` path returns, so
+ * `dispatchGraft` can emit the `graft-closure {json}` line under `--json` and the
+ * awaiting dashboard route can 422 with the per-id verdicts. The message is the same
+ * human prose the dry-run prints.
+ */
+export class GraftRejectedError extends Error {
+  readonly closure: StructuredGraftClosure;
+  constructor(message: string, closure: StructuredGraftClosure) {
+    super(message);
+    this.name = "GraftRejectedError";
+    this.closure = closure;
+  }
+}
+
 export interface GraftResult {
   /** the project this graft acts on (`cfg.project`) — the identity line leads with it. */
   project: string;
@@ -229,6 +246,14 @@ export async function runGraft(
     state: stateOf,
   });
   if (rejections.length) {
+    const closure: StructuredGraftClosure = {
+      project: cfg.project,
+      repo,
+      ids: normalized,
+      placement: [],
+      remaining: reduced.waves,
+      rejected: rejections,
+    };
     if (opts.dryRun)
       return {
         project: cfg.project,
@@ -239,17 +264,13 @@ export async function runGraft(
         remaining: reduced.waves,
         rejected: rejections,
         applied: false,
-        closure: {
-          project: cfg.project,
-          repo,
-          ids: normalized,
-          placement: [],
-          remaining: reduced.waves,
-          rejected: rejections,
-        },
+        closure,
       };
-    throw new Error(
+    // A real graft still rejects whole — but carries the closure so the awaiting caller
+    // (the dashboard route) and `dispatchGraft` read the offenders as data, not prose.
+    throw new GraftRejectedError(
       `graft rejected — nothing added (${describeGraftRejections(rejections)}).`,
+      closure,
     );
   }
 

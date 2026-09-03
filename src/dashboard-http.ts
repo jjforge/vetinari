@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { PruneClosure } from "./dashboard-prune.ts";
 import type { GraftClosure } from "./dashboard-graft.ts";
+import type { ChildResult } from "./dashboard-child.ts";
 
 /** How the dumb-router shells a project's own CLI (`answer`, `prune`, `graft`) in its
  * root — the injectable seam every route that spawns a child shares, so tests can
@@ -27,6 +28,16 @@ export interface DashboardDeps {
    *  `graft <ids…> --dry-run` exactly as `pruneClosure` routes to `prune … --dry-run`;
    *  the graft surface (option 1a) validates the batch against it before acting. */
   graftClosure: (projectRoot: string, taskIds: string[]) => Promise<GraftClosure | null>;
+  /**
+   * Shell a project's own CLI in its root and *await* it — the seam a route adopts when its
+   * response must mean "recorded in the log", not "spawned" (#367). It sits beside the
+   * fire-and-forget `spawn`: `graft`'s POST awaits it so the wave card is in the log by the
+   * time the client hears back, and reads the child's exit code + captured output to decide
+   * the response. Caps the wait at `graftTimeoutMs` without killing the child.
+   */
+  runChild: (projectRoot: string, args: string[], opts: { timeoutMs: number }) => Promise<ChildResult>;
+  /** The cap POST /graft passes to `runChild` — injectable so a test need not wait it out. */
+  graftTimeoutMs: number;
 }
 
 /**

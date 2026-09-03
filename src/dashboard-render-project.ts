@@ -525,6 +525,9 @@ ${ISSUE_DETAIL_SHEET_STYLES}
      (a control's refusal, distinct from the failure state and the amber refusal, §1). */
   .graft-error { color: var(--color-red); font-size: .82rem; }
   .graft-error[hidden] { display: none; }
+  /* A graft accepted but not yet landed (the 202 at the wait cap, #367) reads as a note,
+     not a failure — the calm blue prune uses for a persistent status, never the error red. */
+  .graft-error.graft-note { color: var(--color-blue); }
   /* A graft confirms on the wave (#202): the wave holding the freshly-grafted issues
      takes the teal product accent on its edge, so the new card reads at a glance when it
      arrives on the live refresh. Static, not a pulse — §5 reserves motion for the work

@@ -1043,8 +1043,11 @@ export const GRAFT_SCRIPT = `  function graftVerdicts(closure) {
     const errBox = form.querySelector("[data-graft-error]");
     const project = form.querySelector("input[name=project]").value;
     const typed = () => ids.value.trim();
-    const clearErr = () => { errBox.hidden = true; errBox.textContent = ""; };
-    const showErr = (text) => { errBox.textContent = text; errBox.hidden = false; };
+    const clearErr = () => { errBox.hidden = true; errBox.textContent = ""; errBox.classList.remove("graft-note"); };
+    const showErr = (text) => { errBox.classList.remove("graft-note"); errBox.textContent = text; errBox.hidden = false; };
+    // A note, not a failure: the same inline box in prune's idiom (a calm colour, not the
+    // error red) — used when a graft was accepted but has not landed yet (the 202 at the cap).
+    const showNote = (text) => { errBox.classList.add("graft-note"); errBox.textContent = text; errBox.hidden = false; };
     let invalid = false;
     // Empty → greyed and disabled; any ids → teal-active and enabled (unless a blur
     // validation already flagged a bad id).
@@ -1099,6 +1102,16 @@ export const GRAFT_SCRIPT = `  function graftVerdicts(closure) {
           const list = doc.querySelector("[data-graft-verdicts]");
           invalid = true;
           showErr(list ? [...list.querySelectorAll("li")].map((li) => li.textContent).join("  ·  ") : "Nothing grafted — fix these ids.");
+          return;
+        }
+        if (res.status === 202) {
+          // The route awaited the graft child but capped the wait (#367): it 202s without
+          // killing the child, which is still running. A refusal would have exited with its
+          // closure, so the one thing known is the batch was NOT refused — clear the ids
+          // (retaining them invites a retry that races the first graft or reads as
+          // "already in the campaign") and settle into a persistent note, not an error.
+          ids.value = ""; invalid = false;
+          showNote("grafting… the wave will appear when it lands");
           return;
         }
         if (!res.ok) {

@@ -6,7 +6,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { stateColor, STATE_DOT_CSS, ISSUE_DETAIL_SHEET_SCRIPT, REPO_DROPDOWN_SCRIPT, ARCHIVE_LIST_SCRIPT } from "./dashboard-assets.ts";
+import { stateColor, STATE_DOT_CSS, ISSUE_DETAIL_SHEET_SCRIPT, REPO_DROPDOWN_SCRIPT, ARCHIVE_LIST_SCRIPT, GRAFT_SCRIPT } from "./dashboard-assets.ts";
 import { archiveRowMatches, buildStatus, buildStatusWithIssueNames, cappedRawRows, event, highlightJsonLine, renderStatusPage, type CampaignStatus } from "./status.ts";
 
 const cfgFor = (dir: string): ResolvedConfig =>
@@ -314,6 +314,39 @@ test("renderStatusPage's graft control reads as in-flight during its POST — ar
   // being detached by a mid-flight soft-refresh (setAttribute/textContent never throw there).
   assert.match(html, /const clearFlight = \(\) => \{[^}]*form\.removeAttribute\("aria-busy"\)[^}]*submit\.textContent = "graft"[^}]*\}/);
   assert.match(html, /\} finally \{[^}]*busy = false;[^}]*clearFlight\(\);[^}]*sync\(\);[^}]*\}/);
+});
+test("graft submit branches on res.ok, not one status — every non-422 failure keeps the ids and shows the route body; only success clears (#373)", () => {
+  // The bug: the submit handler special-cased 422 and then fell through to the success
+  // path, so 502/400/404 were all read as success — the typed ids were wiped and no error
+  // shown. The fix branches on res.ok: a non-ok, non-422 response surfaces the route's own
+  // body inline via showErr and returns without clearing the input.
+  const submit = GRAFT_SCRIPT.slice(GRAFT_SCRIPT.indexOf('fetch("/graft"'));
+
+  // The 422 per-id-verdict rendering is unchanged and still returns before the ok check.
+  assert.match(submit, /if \(res\.status === 422\) \{[\s\S]*?data-graft-verdicts[\s\S]*?return;[\s\S]*?\}/);
+
+  // A non-ok response that is not 422 is a failure, not a done graft: it shows the route's
+  // own response body through showErr and returns — it does NOT reach the clear.
+  assert.match(submit, /if \(!res\.ok\) \{[\s\S]*?showErr\(\(await res\.text\(\)\)[\s\S]*?return;[\s\S]*?\}/);
+
+  // The clear-back-to-rest only runs past the !res.ok guard — i.e. only a genuine success
+  // wipes the input.
+  assert.match(submit, /if \(!res\.ok\) \{[\s\S]*?return;\s*\}\s*(?:\/\/[^\n]*\n\s*)*ids\.value = "";/);
+});
+test("graft blur preview discloses an unevaluable batch but does not gate it — button stays enabled, batch not marked invalid (#373)", () => {
+  // The quieter half of the same hole: a non-ok preview returned silently, so a batch the
+  // preview could not evaluate looked identical to one it approved. The fix shows the message
+  // inline but leaves the button enabled and does not set invalid — an unevaluable preview
+  // informs, it does not refuse.
+  const blur = GRAFT_SCRIPT.slice(GRAFT_SCRIPT.indexOf('fetch("/graft?preview'));
+
+  // The non-ok preview now surfaces its message inline instead of returning silently...
+  assert.match(blur, /if \(!res\.ok\) \{[\s\S]*?showErr\([\s\S]*?return;[\s\S]*?\}/);
+  // ...and the old silent `return` with no disclosure is gone.
+  assert.doesNotMatch(blur, /if \(!res\.ok\) return;/);
+  // It must not mark the batch invalid — greying would block a batch that may be valid. The
+  // only `invalid = true` in the preview path stays behind the closure-rejection check.
+  assert.match(blur, /if \(!res\.ok\) \{(?:(?!invalid = true)[\s\S])*?\}/);
 });
 test("renderStatusPage shows an informational merge-conflict affordance with no action of its own (#171)", () => {
   const held = renderStatusPage(

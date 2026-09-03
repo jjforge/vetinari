@@ -343,6 +343,44 @@ test("dispatch parked lists parked records", async () => {
   assert.deepEqual((deps.listParked as any).calls, [[deps.cfg]]);
 });
 
+// A parked record whose question is the XML shape agents emit (prompts/tdd.md): the run
+// loop stores the inner <summary>/<detail>/<options><option> verbatim, no outer wrapper.
+const xmlParked = {
+  taskId: "640",
+  parkedAt: "2026-08-22T00:00:00.000Z",
+  reason: "question" as const,
+  branch: "agent/640",
+  question:
+    "<summary>Which store?</summary><detail>Redis or Postgres.</detail><options><option>Redis</option><option>Postgres</option></options>",
+};
+
+test("dispatch parked renders a parsed summary/detail/options for the XML question form (#384)", async () => {
+  const { deps, logged } = makeDeps({
+    listParked: spy([xmlParked]) as unknown as DispatchDeps["listParked"],
+  });
+  await dispatch({ kind: "parked" }, deps);
+  const out = logged.join("\n");
+  assert.doesNotMatch(out, /<summary>|<detail>|<option>/, "no raw XML tags reach the terminal");
+  assert.match(out, /Which store\?/, "summary is shown");
+  assert.match(out, /Redis or Postgres\./, "detail is shown");
+  assert.match(out, /Redis/, "each option is listed as plain text");
+  assert.match(out, /Postgres/);
+});
+
+test("dispatch parked leaves the Markdown `options:` form parsed and a non-matching question as its trimmed text (#384)", async () => {
+  const mdParked = { ...xmlParked, taskId: "641", question: "Pick a store.\noptions:\n- Redis\n- Postgres" };
+  const plainParked = { ...xmlParked, taskId: "642", question: "  Just a plain question, no structure.  " };
+  const { deps, logged } = makeDeps({
+    listParked: spy([mdParked, plainParked]) as unknown as DispatchDeps["listParked"],
+  });
+  await dispatch({ kind: "parked" }, deps);
+  const out = logged.join("\n");
+  assert.match(out, /Pick a store\./);
+  assert.match(out, /Redis/);
+  assert.match(out, /Postgres/);
+  assert.match(out, /Just a plain question, no structure\./, "a non-matching question falls back to its full trimmed text");
+});
+
 test("dispatch clear archives the run and reports the reset", async () => {
   const { deps, logged } = makeDeps();
   await dispatch({ kind: "clear" }, deps);

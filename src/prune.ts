@@ -14,9 +14,10 @@
  * lives at the edge and this stays trivially testable.
  */
 
-import type { ResolvedConfig } from "./config.ts";
+import { assertProjectQualifier, repoForProject, type ResolvedConfig } from "./config.ts";
 import type { HostBudget } from "./host-slots.ts";
-import { campaignSettled, campaignStarted, issueNameFromTask, reduceCampaign, repoForProject } from "./dashboard-model.ts";
+import { normalize } from "./issue-id.ts";
+import { campaignSettled, campaignStarted, issueNameFromTask, reduceCampaign } from "./dashboard-model.ts";
 import { readEventLog } from "./event-log.ts";
 import { clearParkedForTasks, enqueueOutbound } from "./state.ts";
 import { notice, type Notice } from "./notice.ts";
@@ -25,8 +26,6 @@ import { notice, type Notice } from "./notice.ts";
 // cycle at module-eval time and hit `modes`'s `defaultCampaignDeps` before its
 // `currentBranch` const is initialized (a TDZ crash).
 type Campaign = typeof import("./modes.ts").campaign;
-
-export const normalize = (id: string) => id.replace(/^#/, "").trim();
 
 /**
  * id -> the ids of its OPEN blockers (its prerequisites still in flight). Closed
@@ -443,32 +442,6 @@ export async function runPrune(
     purge: !!opts.purge,
     applied: true,
   };
-}
-
-/**
- * Verify a project qualifier before any write (shared by `prune` and `graft`). The
- * qualifier is an assertion, never a dispatch: the CLI acts only on the project it is
- * run in. A qualifier naming a different project refuses; and a qualifier the identity
- * cannot be verified against — no derivable repo — refuses too, since silently ignoring
- * it is the one genuinely dangerous degrade. No qualifier means the bare form, which
- * works exactly as before (identity only degrades the display line, never refuses).
- */
-export function assertProjectQualifier(
-  qualifier: string | undefined,
-  project: string,
-  repo: string | undefined,
-): void {
-  if (qualifier === undefined) return;
-  if (qualifier !== project)
-    throw new Error(
-      `refusing: this project is "${project}", but the qualifier names "${qualifier}". ` +
-        "The CLI acts only on the project it is run in — it never reaches across into another.",
-    );
-  if (repo === undefined)
-    throw new Error(
-      `refusing: cannot derive this project's repo to verify the "${qualifier}" qualifier. ` +
-        "With no repo identity to check against, the qualifier cannot be honored — run it in the project's checkout, or drop the qualifier.",
-    );
 }
 
 /**

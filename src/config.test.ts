@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   AGENT_PROVIDERS,
+  assertProjectQualifier,
   containerShareWeight,
   encodeAgentOverride,
   loadConfig,
@@ -497,4 +498,23 @@ test("ownerRepoFromRemote parses SSH and HTTPS GitHub remotes, and rejects garba
   assert.equal(ownerRepoFromRemote("git@github.com:jjforge/vetinari.git"), "jjforge/vetinari");
   assert.equal(ownerRepoFromRemote("https://github.com/acme/tidepool"), "acme/tidepool");
   assert.equal(ownerRepoFromRemote("not-a-remote"), undefined);
+});
+
+test("assertProjectQualifier allows a matching qualifier and the bare (no-qualifier) form", () => {
+  assert.doesNotThrow(() => assertProjectQualifier(undefined, "jjforge", undefined));
+  assert.doesNotThrow(() => assertProjectQualifier("jjforge", "jjforge", "jjforge/vetinari"));
+});
+
+test("assertProjectQualifier refuses a qualifier naming a different project", () => {
+  assert.throws(
+    () => assertProjectQualifier("vetinari", "jjforge", "jjforge/vetinari"),
+    /refusing: this project is "jjforge", but the qualifier names "vetinari"/,
+  );
+});
+
+test("assertProjectQualifier refuses when the repo identity cannot verify the qualifier", () => {
+  assert.throws(
+    () => assertProjectQualifier("jjforge", "jjforge", undefined),
+    /cannot derive this project's repo to verify the "jjforge" qualifier/,
+  );
 });

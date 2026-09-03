@@ -13,8 +13,8 @@
  * the event/outbound payloads) so the CLI renders the console output and a test asserts
  * the observable effects without re-parsing prose.
  */
-import type { ResolvedConfig } from "./config.ts";
-import { assertProjectQualifier, normalize } from "./prune.ts";
+import { assertProjectQualifier, repoForProject, type ResolvedConfig } from "./config.ts";
+import { normalize } from "./issue-id.ts";
 import {
   applyGraft,
   validateGraftTargets,
@@ -26,7 +26,6 @@ import {
   issueNameFromTask,
   issueStateFromTask,
   reduceCampaign,
-  repoForProject,
 } from "./dashboard-model.ts";
 import { readEventLog } from "./event-log.ts";
 import { enqueueOutbound } from "./state.ts";

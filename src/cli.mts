@@ -69,7 +69,7 @@ import {
   writeGatewayUnit,
 } from "./migrate.ts";
 import { applyInit, computeInit, describeInit, LOCAL_DIR, scanInit } from "./init.ts";
-import { archiveRun, shouldArchiveLeftover } from "./archive.ts";
+import { archiveRun, shouldArchiveIdle, shouldArchiveLeftover } from "./archive.ts";
 import {
   answerParked,
   hasParked,
@@ -579,11 +579,10 @@ const hostBudget: HostBudget = {
   weight: containerShareWeight(cfg.containerShare),
 };
 
-// Reset the live state the dashboard and status line read once a run is truly
-// over, so a finished run stops showing as current. Skip while anything is still
-// parked — an unanswered question means the run is not finished.
-const archiveIfIdle = () => {
-  if (listParked(cfg).length) return;
+// Move the live log aside to a timestamped archive and reset it, so the dashboard and
+// status line stop showing a superseded run as current. The shared effect behind both
+// archive gates below — each decides *whether* to run it; this is the *how*.
+const doArchive = () => {
   const r = archiveRun(cfg);
   cfg.log.log("archived", {
     archivedLog: r.archivedLog ?? null,
@@ -592,17 +591,31 @@ const archiveIfIdle = () => {
   if (r.archivedLog) console.log(`archived run log → ${r.archivedLog}`);
 };
 
+// Reset the live state once a run is truly over. Skip while anything is still
+// parked — an unanswered question means the run is not finished — and while a
+// campaign has started but not settled (a `failed` or `red-base` stop writes no
+// per-issue parked record), so `redrive` can still find it in the live log (#383).
+const archiveIfIdle = () => {
+  if (!shouldArchiveIdle(readEventLog(cfg), { parked: listParked(cfg).length }))
+    return;
+  doArchive();
+};
+
 // Before a new run appends to the live log, archive any prior run still sitting in
 // it — an interruption that bypassed the end-of-run archive (crash, kill) would
 // otherwise concatenate the old run ahead of the new one, and the run-summary fold
 // would report only the terminal run, burying the earlier one. No-ops on a fresh or
-// marker-only log (nothing to archive) and, via archiveIfIdle, while anything is
-// parked (a parked run is being resumed, not superseded). A child `run` spawned by a
-// queue/campaign (VETINARI_CHILD) never archives — the "leftover" it would see is its
-// own parent's in-flight log (#150).
+// marker-only log (nothing to archive) and while anything is parked (a parked run is
+// being resumed, not superseded). Unlike `archiveIfIdle`, this DOES supersede an
+// unsettled leftover campaign: the operator launched a fresh run rather than a
+// `redrive`, so the crashed/failed prior campaign is being replaced, not recovered
+// (#141, #383). A child `run` spawned by a queue/campaign (VETINARI_CHILD) never
+// archives — the "leftover" it would see is its own parent's in-flight log (#150).
 const archiveLeftoverRun = () => {
   const isChild = !!process.env.VETINARI_CHILD;
-  if (shouldArchiveLeftover(cfg, { isChild })) archiveIfIdle();
+  if (!shouldArchiveLeftover(cfg, { isChild })) return;
+  if (listParked(cfg).length) return;
+  doArchive();
 };
 
 /**

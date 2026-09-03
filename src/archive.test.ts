@@ -4,8 +4,9 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { archiveRun, hasUnarchivedRun, shouldArchiveLeftover } from "./archive.ts";
+import { archiveRun, hasUnarchivedRun, shouldArchiveIdle, shouldArchiveLeftover } from "./archive.ts";
 import { enqueueOutbound, listOutbox, markOutboundSent, outboxDirOf } from "./state.ts";
+import type { OrchestratorEvent } from "./event-log.ts";
 import { memoryLogger } from "./log.ts";
 
 let counter = 0;
@@ -89,6 +90,64 @@ test("shouldArchiveLeftover: a top-level run still archives a genuine leftover (
   // No leftover → nothing to archive, child or not.
   const fresh = cfgFor();
   assert.equal(shouldArchiveLeftover(fresh, { isChild: false }), false);
+});
+
+const ev = (event: string, extra: Record<string, unknown> = {}): OrchestratorEvent =>
+  ({ event, ...extra }) as unknown as OrchestratorEvent;
+
+test("shouldArchiveIdle: a campaign that ended failed (nothing parked) is not idle — stays in the live log for redrive (#383)", () => {
+  // A member's agent could not go green; the campaign logs campaign-failed and stops.
+  // No per-issue parked record — a failure needs a redrive or a fix, not an answer.
+  const events = [
+    ev("campaign-start", { waves: [["382"]], slots: 1 }),
+    ev("wave-start", { index: 0, tasks: ["382"] }),
+    ev("spawn", { taskId: "382" }),
+    ev("failed", { taskId: "382" }),
+    ev("campaign-failed", { index: 0, detail: "382 failed" }),
+  ];
+  assert.equal(shouldArchiveIdle(events, { parked: 0 }), false);
+});
+
+test("shouldArchiveIdle: a campaign parked on a red base (no per-issue record) is not idle (#383)", () => {
+  // The merged base gated red — a whole-wave park, never a per-issue parked record.
+  // Nothing is parked on disk, but the campaign has not settled, so it must stay live
+  // for a plain redrive (once the base is fixed) to find and continue it.
+  const events = [
+    ev("campaign-start", { waves: [["101"]], slots: 1 }),
+    ev("wave-start", { index: 0, tasks: ["101"] }),
+    ev("green", { taskId: "101" }),
+    ev("campaign-parked", { index: 0, reason: "red-base" }),
+  ];
+  assert.equal(shouldArchiveIdle(events, { parked: 0 }), false);
+});
+
+test("shouldArchiveIdle: a campaign that reached campaign-done still archives immediately (#383)", () => {
+  // Every wave closed, every member merged — the run is truly over and archives at once,
+  // exactly as before.
+  const events = [
+    ev("campaign-start", { waves: [["101"]], slots: 1 }),
+    ev("wave-start", { index: 0, tasks: ["101"] }),
+    ev("green", { taskId: "101" }),
+    ev("wave-done", { index: 0, merged: ["101"] }),
+    ev("campaign-done", { waves: 1 }),
+  ];
+  assert.equal(shouldArchiveIdle(events, { parked: 0 }), true);
+});
+
+test("shouldArchiveIdle: a per-issue parked record keeps the run live, campaign or not (#383)", () => {
+  // A question/stall/conflict park was already suppressed by the parked check — still is.
+  const settled = [
+    ev("campaign-start", { waves: [["101"]], slots: 1 }),
+    ev("wave-done", { index: 0, merged: ["101"] }),
+    ev("campaign-done", { waves: 1 }),
+  ];
+  assert.equal(shouldArchiveIdle(settled, { parked: 1 }), false);
+});
+
+test("shouldArchiveIdle: a standalone run/answer (never a campaign-start) is decided by the parked check alone (#383)", () => {
+  // A green standalone run archives; a parked one stays live. No campaign to keep live either way.
+  assert.equal(shouldArchiveIdle([ev("spawn", { taskId: "101" }), ev("green", { taskId: "101" })], { parked: 0 }), true);
+  assert.equal(shouldArchiveIdle([ev("spawn", { taskId: "101" })], { parked: 1 }), false);
 });
 
 test("archiveRun handles a missing or empty log without creating an archive, and still leaves records alone", () => {

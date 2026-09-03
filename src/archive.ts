@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import type { ResolvedConfig } from "./config.ts";
-import { readEventLog } from "./event-log.ts";
+import { campaignSettled, campaignStarted } from "./dashboard-model.ts";
+import { readEventLog, type OrchestratorEvent } from "./event-log.ts";
 import { clearSentOutbound } from "./state.ts";
 
 export interface ArchiveResult {
@@ -64,4 +65,32 @@ export function shouldArchiveLeftover(
   opts: { isChild: boolean },
 ): boolean {
   return !opts.isChild && hasUnarchivedRun(cfg);
+}
+
+/**
+ * Should the end-of-run reset archive the live log, or is the run still live? The
+ * pure decision behind `archiveIfIdle` (`cli.mts`): true only when the run is
+ * *truly over*, so the dashboard and status line stop showing it as current.
+ *
+ * A run is NOT over — keep the log live — while either:
+ *   - something is parked (`opts.parked`): an unanswered question/stall/conflict is
+ *     still being resumed, not superseded (the existing check); or
+ *   - a campaign has started here but not settled: a campaign that stopped short of
+ *     `campaign-done` on a `failed` member or a `red-base` merge writes no per-issue
+ *     parked record, so "nothing parked" misreads it as idle and archives it before
+ *     `redrive` can find it (#383). "Nothing parked" is not the same test as "truly
+ *     over"; an unsettled campaign is exactly the state `redrive` must find in the
+ *     live log to recover (design §7, ADR 0019).
+ *
+ * A campaign that reached `campaign-done` folds to *settled* and still archives at
+ * once, as before. A standalone `run`/`answer` (never a `campaign-start`) is decided
+ * by the parked check alone, unchanged.
+ */
+export function shouldArchiveIdle(
+  events: OrchestratorEvent[],
+  opts: { parked: number },
+): boolean {
+  if (opts.parked > 0) return false;
+  if (campaignStarted(events) && !campaignSettled(events)) return false;
+  return true;
 }

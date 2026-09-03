@@ -20,11 +20,16 @@ Within a milestone each bold section label appears at most once.
 
 ### Collected changes — September 3, 2026
 
+**Improvements:**
+- [api] `graft <ids…> --json` on a real (non-dry-run) rejected batch now prints the `graft-closure {json}` line and exits non-zero (a bare `graft` still prints no JSON), so a caller can read the per-id verdicts of a refused graft without re-running a dry-run (#367).
+- [user] A `graft` that can't run (no open campaign, the latest campaign settled) now prints its one-line reason to stderr and exits non-zero, instead of a stack trace — the same sentence the dashboard now surfaces inline (#367).
+
 **Bug fixes:**
 - [ops] A zero-byte or otherwise unparseable registry pointer no longer crash-loops the host gateway and blanks the dashboard for every project: `listProjects` now skips a pointer it cannot parse (logging `registry-pointer-unreadable` with the file) instead of throwing, and `register`/`writeRouting` write atomically via a same-directory temp file and `rename`, so an interrupted writer leaves the old pointer or a stray `*.tmp` — never a truncated file (#372).
 - [user] The dashboard graft control no longer reads a failed graft as success: a non-ok `POST /graft` (a 502, 400 or 404) now shows the route's own response body inline and keeps the typed ids, instead of silently clearing the input and reporting nothing. An unevaluable blur-time preview discloses its message inline but leaves the button enabled (#373).
 - [user] `graft` no longer reads a malformed id (e.g. a quoted `"875"`) as a project qualifier: it now takes a `<project>` qualifier only when a leading non-issue token is followed by an issue token (prune's rule), so a typo'd batch is rejected whole as "not an issue id" instead of erroring about the wrong project or a phantom missing issue (#374).
 - [ops] Graft's dashboard and CLI verdicts now name a garbage token "not an issue id" — a new `malformed` rejection decided before any tracker fetch, so a malformed token never costs a tracker round-trip and never renders `undefined` on the board (#374).
+- [user] The dashboard graft control no longer reports done seconds before the graft lands: `POST /graft` now shells the project's real `graft <ids…>` and awaits it, so the button holds `grafting…` until the graft is recorded in the log. A batch still running at a 60s cap settles into a persistent "the wave will appear when it lands" note with the input cleared; a graft that breaks surfaces its own last error line inline with the ids retained (#367).
 
 ### Collected changes — September 2, 2026
 

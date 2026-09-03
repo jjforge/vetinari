@@ -10,7 +10,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { normalize } from "./prune.ts";
+import { isIssueToken, normalize } from "./issue-id.ts";
 import { questionDestinations, resolveDestination, type Destination, type NotifyMap } from "./config.ts";
 import { hostLogger, type Logger } from "./log.ts";
 import {
@@ -61,8 +61,6 @@ export type GatewayCommand =
   | { kind: "status" }
   | { kind: "prune"; project?: string; issue: string }
   | { kind: "confirm" };
-
-const isIssueToken = (t: string) => /^#?\d+$/.test(t);
 
 export function parseGatewayCommand(text: string): GatewayCommand | null {
   const trimmed = text.trim();

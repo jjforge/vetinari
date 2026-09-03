@@ -31,6 +31,7 @@ import type {
   runCampaignPlan,
 } from "./plan.ts";
 import { resumeIndex, type runPrune } from "./prune.ts";
+import { isIssueToken } from "./issue-id.ts";
 import type { runGraft } from "./graft.ts";
 import { describeGraftRejections } from "./graft.ts";
 import type { readEventLog } from "./event-log.ts";
@@ -38,13 +39,6 @@ import { campaignStarted, reduceCampaign } from "./dashboard-model.ts";
 import { makeReporter } from "./report.ts";
 
 const USAGE = renderUsage();
-
-/**
- * A bare, numeric issue token (`640` or `#640`) — the same shape the gateway's command
- * parser recognizes. A project qualifier is, by contrast, a non-numeric name, so the two
- * are told apart the same way on every surface: a leading non-issue token is the project.
- */
-const isIssueToken = (t: string) => /^#?\d+$/.test(t);
 
 /**
  * The line `prune`/`graft` lead with so a human recognizes what they are acting on:

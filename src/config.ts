@@ -593,6 +593,35 @@ export function repoForProject(projectRoot: string): string | undefined {
 }
 
 /**
+ * Verify a project qualifier before any write (shared by `prune` and `graft`). The
+ * qualifier is an assertion, never a dispatch: the CLI acts only on the project it is
+ * run in. A qualifier naming a different project refuses; and a qualifier the identity
+ * cannot be verified against — no derivable repo — refuses too, since silently ignoring
+ * it is the one genuinely dangerous degrade. No qualifier means the bare form, which
+ * works exactly as before (identity only degrades the display line, never refuses).
+ *
+ * It sits beside `repoForProject` — the project-identity value it checks a qualifier
+ * against — because it is about *project identity*, not how an id is spelled.
+ */
+export function assertProjectQualifier(
+  qualifier: string | undefined,
+  project: string,
+  repo: string | undefined,
+): void {
+  if (qualifier === undefined) return;
+  if (qualifier !== project)
+    throw new Error(
+      `refusing: this project is "${project}", but the qualifier names "${qualifier}". ` +
+        "The CLI acts only on the project it is run in — it never reaches across into another.",
+    );
+  if (repo === undefined)
+    throw new Error(
+      `refusing: cannot derive this project's repo to verify the "${qualifier}" qualifier. ` +
+        "With no repo identity to check against, the qualifier cannot be honored — run it in the project's checkout, or drop the qualifier.",
+    );
+}
+
+/**
  * Config candidate locations, highest precedence first. The committed
  * `vetinari/` locations are canonical; the rest resolve only as deprecated
  * fallbacks so a live setup keeps working for one minor after the layout split.

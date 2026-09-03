@@ -14,7 +14,8 @@
  * This plans only: it computes waves, it never runs `campaign` and never pushes.
  * Pure over the injected `blockedByOf`, so it stays testable with no live tracker.
  */
-import { computePrune, normalize, restrictBlockers, type BlockedByOf } from "./prune.ts";
+import { computePrune, restrictBlockers, type BlockedByOf } from "./prune.ts";
+import { normalize } from "./issue-id.ts";
 import { defaultFileSet, ticketProse, type FileSet, type FileSetOf } from "./fileset.ts";
 
 export interface Placement {

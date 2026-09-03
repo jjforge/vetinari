@@ -641,6 +641,7 @@ await dispatch(parseArgs([mode, ...rest]), {
   host: hostBudget,
   isTTY: Boolean(process.stdin.isTTY),
   log: (m) => console.log(m),
+  error: (m) => console.error(m),
   setExitCode: (c) => {
     process.exitCode = c;
   },

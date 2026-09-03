@@ -271,6 +271,9 @@ export interface DispatchDeps {
   host: HostBudget;
   isTTY: boolean;
   log: (msg: string) => void;
+  /** Write a line to stderr — the operator-language failure a command surfaces without a
+   *  stack-trace footer (e.g. a broken `graft`, whose last stderr line the dashboard lifts). */
+  error: (msg: string) => void;
   setExitCode: (code: number) => void;
   /**
    * Validate + preflight + stamp the agent selection (the effectful half of the old
@@ -677,7 +680,13 @@ async function dispatchGraft(
       deps.setExitCode(1);
       return;
     }
-    throw err;
+    // A broken graft — a precondition throw (no campaign, settled, degraded config), not a
+    // whole-batch rejection, so it carries no closure. Surface its message on stderr as a
+    // clean last line (the dashboard route lifts it, #367) and exit non-zero, rather than
+    // letting it bubble to an unhandled rejection whose stack buries the sentence.
+    deps.error(err instanceof Error ? err.message : String(err));
+    deps.setExitCode(1);
+    return;
   }
   if (result.rejected.length) {
     // A `--dry-run` discloses a whole-batch rejection instead of throwing, so the

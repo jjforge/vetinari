@@ -21,6 +21,7 @@ function spy<T>(ret?: T) {
 // calls with no real spawn. `overrides` swaps in a return value or a throwing stub.
 function makeDeps(overrides: Partial<DispatchDeps> = {}) {
   const logged: string[] = [];
+  const errored: string[] = [];
   const exitCodes: number[] = [];
   const cfg = {
     project: "demo",
@@ -34,6 +35,7 @@ function makeDeps(overrides: Partial<DispatchDeps> = {}) {
     host: {} as DispatchDeps["host"],
     isTTY: false,
     log: (m: string) => logged.push(m),
+    error: (m: string) => errored.push(m),
     setExitCode: (c: number) => exitCodes.push(c),
     selectAgent: spy(),
     isCampaignChild: false,
@@ -61,7 +63,7 @@ function makeDeps(overrides: Partial<DispatchDeps> = {}) {
     runTgConnect: spy(Promise.resolve({ ok: true, written: true })) as unknown as DispatchDeps["runTgConnect"],
     ...overrides,
   };
-  return { deps, logged, exitCodes, cfg };
+  return { deps, logged, errored, exitCodes, cfg };
 }
 
 test("parseArgs maps `build` to a build command that baselines by default", () => {
@@ -766,6 +768,20 @@ test("dispatch graft on a real (non-dry-run) rejection prints the prose, emits t
   await dispatch({ kind: "graft", ids: ["202"], dryRun: false, json: true }, withJson.deps);
   assert.ok(withJson.logged.some((l) => l === `graft-closure ${JSON.stringify(closure)}`), "closure JSON under --json");
   assert.deepEqual(withJson.exitCodes, [1]);
+});
+
+test("dispatch graft on a broken graft (a non-rejection throw) surfaces the message cleanly on stderr and exits non-zero — no stack-trace footer", async () => {
+  // A precondition throw ("no campaign", "settled", bad config) is NOT a rejection — it
+  // carries no closure. The operator (via the dashboard route lifting the child's last
+  // stderr line, #367) needs runGraft's sentence, not a Node stack ending in "Node.js vX",
+  // so dispatchGraft prints just the message to stderr and exits non-zero.
+  const broken = (): Promise<never> =>
+    Promise.reject(new Error("graft adds to an open campaign, but the latest one is settled — every member merged."));
+  const { deps, logged, errored, exitCodes } = makeDeps({ runGraft: (() => broken()) as unknown as DispatchDeps["runGraft"] });
+  await dispatch({ kind: "graft", ids: ["640"], dryRun: false, json: false }, deps);
+  assert.deepEqual(errored, ["graft adds to an open campaign, but the latest one is settled — every member merged."]);
+  assert.ok(!logged.some((l) => l.startsWith("graft-closure")), "a broken child prints no closure line");
+  assert.deepEqual(exitCodes, [1]);
 });
 
 test("identityLine names project, repo and title, and degrades each end gracefully", () => {

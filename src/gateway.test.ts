@@ -658,6 +658,47 @@ test("formatGatewayStatus reports when no served project has anything parked", (
   assert.match(text, /nothing parked/i);
 });
 
+test("formatGatewayStatus names a redrive-only park and its recovery, never 'nothing parked' or a reply (#391)", () => {
+  // A red-base wave-park writes no per-issue record (src/archive.ts), so `parked` is empty while the
+  // campaign folds to parked — the exact state that used to print PARKED and "nothing parked" side by side.
+  const text = formatGatewayStatus([
+    campaignStatus({
+      project: "vetinari",
+      waves: [{ index: 0, status: "parked", reason: "red-base", issues: [statusIssue({ status: "completed" })] }],
+      parked: [],
+    }),
+  ]);
+
+  assert.match(text, /vetinari · PARKED/);
+  assert.doesNotMatch(text, /nothing parked/i, "a parked campaign is not idle");
+  assert.match(text, /⏸ red-base — Fix forward on the base, then `redrive`\./);
+  assert.doesNotMatch(text, /reply/i, "a red-base park is not resolved by a reply, so no reply advice appears");
+});
+
+test("formatGatewayStatus names a conflict/crash hold from a parked member with no record (#391)", () => {
+  const text = formatGatewayStatus([
+    campaignStatus({
+      project: "vetinari",
+      waves: [statusWave(0, "parked", [statusIssue({ status: "parked", reason: "conflict" })])],
+      parked: [],
+    }),
+  ]);
+
+  assert.doesNotMatch(text, /nothing parked/i);
+  assert.match(text, /⏸ conflict — Resolve the conflict on the base, then `redrive`\./);
+  assert.doesNotMatch(text, /reply/i);
+});
+
+test("formatGatewayStatus advises replying only when an answerable park exists (#391)", () => {
+  const answerable = formatGatewayStatus([campaignStatus({ project: "alpha", parked: [parkedIssue({ issueNumber: "A1", reason: "question" })] })]);
+  assert.match(answerable, /Reply to a question message to answer and resume it\./);
+
+  // A genuinely idle project: nothing parked, and nothing to reply to.
+  const idle = formatGatewayStatus([campaignStatus({ project: "alpha", parked: [] })]);
+  assert.match(idle, /Nothing parked across these projects\./);
+  assert.doesNotMatch(idle, /reply to a question/i);
+});
+
 test("loadGatewayProjects reads each live project's connection and parked records from its base location", () => {
   const configDir = join(tmpdir(), `vetinari-gw-load-${Date.now()}-${gwCounter++}`);
   const base = join(tmpdir(), `vetinari-gw-base-${Date.now()}-${gwCounter++}`, ".vetinari.local");

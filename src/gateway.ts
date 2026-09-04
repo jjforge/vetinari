@@ -575,6 +575,33 @@ export function formatParkAnnouncement(project: string, record: ParkedRecord): s
 }
 
 /**
+ * The park reasons the user guide marks *not answerable* (design §10, §13.1): a redrive-only
+ * hold recovered by a `redrive` after the human's fix, never by replying to a question. These
+ * are exactly the reasons that, by design, write no per-issue parked record (`src/archive.ts`),
+ * so a records-only reading of "what is parked?" misses them.
+ */
+export const REDRIVE_ONLY_REASONS: ReadonlySet<ParkReason> = new Set(["red-base", "conflict", "crash"]);
+
+/**
+ * The redrive-only reason a campaign is parked on when it has no answerable per-issue record —
+ * `red-base`/`conflict`/`crash`. Such a park writes no record (`src/archive.ts`), so a surface that
+ * lists only the records reports "nothing parked" while the campaign sits parked; this reads the
+ * campaign's own fold instead. Returns the reason only when the campaign folds to `parked` and no
+ * record exists (an answerable question/stalled hold carries a record the caller lists), so the
+ * surface can name the recovery that applies instead of the answer-a-question dead end. The reason
+ * is the wave-level hold (`red-base`) or, failing that, a parked member's own (`conflict`/`crash`).
+ */
+export function redriveOnlyPark(status: CampaignStatus): ParkReason | undefined {
+  if (status.parked.length) return undefined;
+  if (campaignState(status.waves.map((w) => w.status)) !== "parked") return undefined;
+  const waveReason = status.waves.find((w) => w.reason && REDRIVE_ONLY_REASONS.has(w.reason))?.reason;
+  if (waveReason) return waveReason;
+  for (const w of status.waves)
+    for (const i of w.issues) if (i.status === "parked" && i.reason && REDRIVE_ONLY_REASONS.has(i.reason)) return i.reason;
+  return undefined;
+}
+
+/**
  * A plain-text `/status` summary across the projects a bot serves (design §10): per
  * project its campaign state, the wave in flight, the counts per issue state, and
  * the parked queue with each hold's reason. A text-only summary by design — richer
@@ -593,14 +620,26 @@ export function formatGatewayStatus(statuses: CampaignStatus[]): string {
       .map((k) => `${STATE_WORD[k]} ${counts[k]}`)
       .join(" · ");
     if (countLine) lines.push(`  ${countLine}`);
-    if (!s.parked.length) lines.push("  nothing parked");
-    else {
+    if (s.parked.length) {
       lines.push("  parked queue:");
       for (const p of s.parked) lines.push(`    ⏸ #${p.issueNumber} — ${p.reason}`);
+    } else {
+      // A redrive-only park (red-base/conflict/crash) leaves no per-issue record, so "nothing
+      // parked" would misreport the parked campaign as idle and point at a reply that cannot
+      // resolve it. Name the hold and the recovery it actually needs; a truly idle project still
+      // reads "nothing parked".
+      const redrive = redriveOnlyPark(s);
+      lines.push(redrive ? `  ⏸ ${redrive} — ${parkRecoveryMove(redrive, "")}` : "  nothing parked");
     }
   }
-  if (statuses.every((s) => !s.parked.length)) {
-    lines.push("", "Nothing parked across these projects — reply to a question message to answer and resume it.");
+  // The reply advice is correct only for an answerable park (question/stalled — the holds that
+  // leave a record), so show it only when one exists. When only redrive-only holds are parked the
+  // per-project lines above already name each recovery; a genuinely idle set of projects reads as
+  // nothing parked, with no question to reply to.
+  if (statuses.some((s) => s.parked.length > 0)) {
+    lines.push("", "Reply to a question message to answer and resume it.");
+  } else if (!statuses.some((s) => redriveOnlyPark(s))) {
+    lines.push("", "Nothing parked across these projects.");
   }
   return lines.join("\n");
 }

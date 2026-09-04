@@ -23,7 +23,7 @@ import type { build, baseline, campaign, tgTest, requireTelegram, CampaignOutcom
 import type { runTgConnect } from "./tg-connect.ts";
 import type { tgSend } from "./telegram.ts";
 import { crashResumePrompt, type runLoop, type Outcome } from "./loop.ts";
-import type { answerParked, hasParked, listParked } from "./state.ts";
+import type { answerParked, hasParked, listParked, ParkReason } from "./state.ts";
 import type { archiveRun } from "./archive.ts";
 import type { Exclusion, UnderspecifiedPrompt } from "./plan.ts";
 import type {
@@ -35,7 +35,8 @@ import { isIssueToken } from "./issue-id.ts";
 import type { runGraft } from "./graft.ts";
 import { GraftRejectedError, describeGraftRejections } from "./graft.ts";
 import type { readEventLog } from "./event-log.ts";
-import { campaignStarted, extractParkedDetails, reduceCampaign } from "./dashboard-model.ts";
+import { campaignStarted, campaignState, extractParkedDetails, issueLifecycle, reduceCampaign, waveState, type ReducedCampaign } from "./dashboard-model.ts";
+import { parkRecoveryMove, REDRIVE_ONLY_REASONS } from "./gateway.ts";
 import { makeReporter } from "./report.ts";
 
 const USAGE = renderUsage();
@@ -72,6 +73,33 @@ export type AgentOverride = { provider?: string; model?: string; effort?: string
  */
 const exitCodeFor = (outcome: Outcome | CampaignOutcome): number =>
   outcome === "green" || outcome === "done" ? 0 : outcome === "parked" ? 2 : 1;
+
+/**
+ * The redrive-only reason a campaign is parked on when it has left no answerable per-issue record —
+ * `red-base`/`conflict`/`crash`. Such a park writes no record (`src/archive.ts`), so the record-only
+ * `parked` listing reports "nothing parked" while the campaign sits parked; this reads the campaign's
+ * own fold instead. Returns the reason only when the reduced plan folds to `parked` on a redrive-only
+ * hold — the wave-level `red-base`, or failing that a member held `conflict`/`crash` — so the listing
+ * can name the recovery that applies rather than the answer-a-question dead end. Undefined otherwise
+ * (running/failed/done/idle, or an answerable question/stalled hold whose record is listed instead).
+ */
+function redriveOnlyParkReason(reduced: ReducedCampaign): ParkReason | undefined {
+  if (!reduced.waves.length) return undefined;
+  const waveStates = reduced.waves.map((wave) =>
+    waveState(
+      wave.map((id) => ({ status: issueLifecycle(reduced, id).state })),
+      { redBase: wave.some((id) => reduced.redBase.has(id)) },
+    ),
+  );
+  if (campaignState(waveStates) !== "parked") return undefined;
+  if (reduced.redBase.size) return "red-base";
+  for (const wave of reduced.waves)
+    for (const id of wave) {
+      const { state, reason } = issueLifecycle(reduced, id);
+      if (state === "parked" && reason && REDRIVE_ONLY_REASONS.has(reason)) return reason;
+    }
+  return undefined;
+}
 
 /**
  * One command form, discriminated on `kind`. `parseArgs` maps each subcommand of the
@@ -423,7 +451,17 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
     }
     case "parked": {
       const recs = deps.listParked(cfg);
-      if (!recs.length) deps.log("nothing parked");
+      if (!recs.length) {
+        // A redrive-only park (red-base/conflict/crash) writes no per-issue record by design
+        // (src/archive.ts), so reading records alone would misreport a parked campaign as idle and
+        // advise answering a question nobody asked. Consult the campaign's own fold: name the hold
+        // and the recovery it needs when one is held, else it really is nothing parked. The liveness
+        // probe lets a crashed run's in-flight members reconcile to parked{crash} (design §7).
+        const alive = deps.projectHasLiveCampaign(deps.host.configDir, cfg.project);
+        const reason = redriveOnlyParkReason(reduceCampaign(deps.readEventLog(cfg), { alive }));
+        deps.log(reason ? `campaign parked (${reason}) — ${parkRecoveryMove(reason, "")}` : "nothing parked");
+        return;
+      }
       for (const r of recs) {
         // Parse the agent's structured question (#384) so no raw <summary>/<detail>/<option>
         // tags reach the terminal, reusing #370's shared parser; a terminal reader has no

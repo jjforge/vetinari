@@ -237,50 +237,66 @@ export interface CampaignPlan extends WavePlan {
   filesetCheckSkipped?: boolean;
 }
 
+/** A fileKey is bare — carries no path, only a basename — when it has no separator:
+ *  an ambiguous cite kept as a basename, or a `Creates:` cite (never resolved). */
+const isBareKey = (k: string) => !k.includes("/");
+const keyBasename = (k: string) => k.slice(k.lastIndexOf("/") + 1);
+
+/**
+ * Whether two fileKeys collide. Two resolved paths collide only when equal — distinct
+ * files at `a/b/c/foo.md` and `a/c/foo.md` do not. A bare key (an ambiguous cite, or a
+ * `Creates:` basename) collides with any key of the same basename, since it names no
+ * one path — exactly today's basename semantics for that one cite.
+ */
+const keysCollide = (a: string, b: string) =>
+  a === b || (keyBasename(a) === keyBasename(b) && (isBareKey(a) || isBareKey(b)));
+
+/** True when no fileKey in `a` collides with any in `b`. */
 const disjoint = (a: Set<string>, b: Set<string>) => {
-  for (const x of b) if (a.has(x)) return false;
+  for (const x of a) for (const y of b) if (keysCollide(x, y)) return false;
   return true;
 };
 
 /**
- * Split each dependency layer of a `layerWaves` plan into basename-disjoint
- * sub-waves, so no two tickets in a wave touch the same file (user story 5).
- * Cross-layer pairs are already serialized by the DAG, so crossover only has to
- * be resolved *within* a layer.
+ * Split each dependency layer of a `layerWaves` plan into file-disjoint sub-waves,
+ * so no two tickets in a wave touch the same file (user story 5). Cross-layer pairs
+ * are already serialized by the DAG, so crossover only has to be resolved *within* a
+ * layer.
  *
- * Greedy first-fit: walk the layer in order and drop each ticket into the
- * earliest sub-wave that shares none of its basenames; if every existing sub-wave
- * collides, it spills into a new one. Spilling can add a wave or two — the
- * intended trade for a wave that never collides at integration. Collisions are
- * judged by basename (`basenamesOf`), never by cited path.
+ * Greedy first-fit: walk the layer in order and drop each ticket into the earliest
+ * sub-wave whose fileKeys none of its own collide with; if every existing sub-wave
+ * collides, it spills into a new one. Spilling can add a wave or two — the intended
+ * trade for a wave that never collides at integration. Collisions are judged by
+ * fileKey (`fileKeysOf`) — a resolved path, or a bare basename for an ambiguous or
+ * `Creates:` cite — never by the raw cited path.
  *
- * A ticket with no known basenames (empty set) collides with nothing and stays on
+ * A ticket with no known fileKeys (empty set) collides with nothing and stays on
  * the frontier of its layer. The DAG ordering is preserved: a ticket's blockers
  * sit in strictly earlier layers, hence in strictly earlier sub-waves.
  */
-export function partitionWaves(plan: WavePlan, basenamesOf: Map<string, Set<string>>): WavePlan {
-  const namesOf = (id: string) => basenamesOf.get(id) ?? new Set<string>();
+export function partitionWaves(plan: WavePlan, fileKeysOf: Map<string, Set<string>>): WavePlan {
+  const keysOf = (id: string) => fileKeysOf.get(id) ?? new Set<string>();
   const afterOf = new Map(plan.placements.map((p) => [p.id, p.after]));
 
   const waves: string[][] = [];
   const placements: Placement[] = [];
   for (const layer of plan.waves) {
-    const subWaves: { ids: string[]; names: Set<string> }[] = [];
+    const subWaves: { ids: string[]; keys: Set<string> }[] = [];
     for (const id of layer) {
-      const names = namesOf(id);
+      const keys = keysOf(id);
 
-      let idx = subWaves.findIndex((sw) => disjoint(sw.names, names));
+      let idx = subWaves.findIndex((sw) => disjoint(sw.keys, keys));
       if (idx === -1) {
-        idx = subWaves.push({ ids: [], names: new Set() }) - 1;
+        idx = subWaves.push({ ids: [], keys: new Set() }) - 1;
       }
       const slot = subWaves[idx];
       slot.ids.push(id);
-      for (const n of names) slot.names.add(n);
+      for (const k of keys) slot.keys.add(k);
 
       // Why it landed here and not earlier: the already-placed tickets in strictly
       // earlier sub-waves it shares a file with. Empty when it stayed on the
       // frontier — greedy first-fit means every earlier sub-wave holds a collider.
-      const sharesFilesWith = subWaves.slice(0, idx).flatMap((sw) => sw.ids).filter((prior) => !disjoint(namesOf(prior), names));
+      const sharesFilesWith = subWaves.slice(0, idx).flatMap((sw) => sw.ids).filter((prior) => !disjoint(keysOf(prior), keys));
 
       placements.push({ id, wave: waves.length + idx, after: afterOf.get(id) ?? [], sharesFilesWith });
     }
@@ -295,17 +311,21 @@ export function partitionWaves(plan: WavePlan, basenamesOf: Map<string, Set<stri
  * append time (ADR 0014) so the fold stays pure (ADR 0012): the added ids, each
  * added id's in-campaign open blockers, and — for every id the placement may share
  * a wave with (the added ids plus the campaign's still-unstarted members) — its
- * basenames. With these `applyGraft` runs the same dependency + file-disjoint
+ * fileKeys. With these `applyGraft` runs the same dependency + file-disjoint
  * placement `campaign-plan` does, with no tracker or filesystem access.
+ *
+ * The persisted `GraftEvent.basenames` wire field maps into `fileKeys` here (the
+ * field kept its name so existing `orchestrator.jsonl` logs still read; a later
+ * migration renames it — tracked separately).
  */
 export interface GraftInputs {
   /** the grafted issue ids, in the order given. */
   ids: string[];
   /** grafted id -> its OPEN blockers that are inside this campaign. */
   blockedBy: Record<string, string[]>;
-  /** id -> its basenames, for the grafted ids and the still-unstarted members the
+  /** id -> its fileKeys, for the grafted ids and the still-unstarted members the
    *  placement checks disjointness against. */
-  basenames: Record<string, string[]>;
+  fileKeys: Record<string, string[]>;
 }
 
 /** The result of folding a graft into a running campaign's plan: the extended
@@ -321,7 +341,7 @@ export interface AppliedGraft {
  * Pure rule folding a graft into a running campaign — the additive mirror of
  * `applyPrune` (ADR 0014). The in-flight and banked waves are pinned; each grafted
  * issue is **stable-inserted** into the earliest *later* wave that satisfies its
- * in-campaign `blockedBy` deps and stays basename-disjoint, appending a new wave
+ * in-campaign `blockedBy` deps and stays fileKey-disjoint, appending a new wave
  * only when none fits. Existing wave assignments are never reordered.
  *
  * `firstFree` is the first wave grafted work may enter: past the in-flight wave
@@ -353,12 +373,12 @@ export function applyGraft(
   });
   const firstFree = lastPinned + 1;
 
-  const namesOf = (id: string) => new Set((graft.basenames[normalize(id)] ?? []).map(normalize));
-  // The basenames already committed to each wave, grown as grafts land.
-  const waveNames = result.map((wave) => {
-    const names = new Set<string>();
-    for (const id of wave) for (const n of namesOf(id)) names.add(n);
-    return names;
+  const keysOf = (id: string) => new Set((graft.fileKeys[normalize(id)] ?? []).map(normalize));
+  // The fileKeys already committed to each wave, grown as grafts land.
+  const waveKeys = result.map((wave) => {
+    const keys = new Set<string>();
+    for (const id of wave) for (const k of keysOf(id)) keys.add(k);
+    return keys;
   });
 
   const grafted: string[] = [];
@@ -368,16 +388,16 @@ export function applyGraft(
       const bw = waveOf.get(b);
       if (bw !== undefined) earliest = Math.max(earliest, bw + 1);
     }
-    const names = namesOf(id);
+    const keys = keysOf(id);
     // `earliest` is at least `firstFree` (>= 0), so it never indexes a pinned wave.
     let target = earliest;
-    while (target < result.length && !disjoint(waveNames[target], names)) target++;
+    while (target < result.length && !disjoint(waveKeys[target], keys)) target++;
     while (result.length <= target) {
       result.push([]);
-      waveNames.push(new Set());
+      waveKeys.push(new Set());
     }
     result[target].push(id);
-    for (const n of names) waveNames[target].add(n);
+    for (const k of keys) waveKeys[target].add(k);
     waveOf.set(id, target);
     grafted.push(id);
   }
@@ -586,8 +606,8 @@ export async function planCampaign(ids: string[], deps: CampaignPlanDeps): Promi
     survivorPlan = await layerWaves(remaining.flat(), deps.blockedBy);
   }
 
-  const basenames = new Map(survivorPlan.placements.map((p) => [p.id, new Set(sets.get(p.id)?.files ?? [])]));
-  const partitioned = partitionWaves(survivorPlan, basenames);
+  const fileKeys = new Map(survivorPlan.placements.map((p) => [p.id, new Set(sets.get(p.id)?.files ?? [])]));
+  const partitioned = partitionWaves(survivorPlan, fileKeys);
 
   return {
     ...partitioned,
@@ -745,7 +765,7 @@ export interface FilesetCheckResult {
   id: string;
   /** the resolver's `confident` verdict — false is exactly what `campaign-plan` halts on. */
   confident: boolean;
-  /** the basenames the resolver pinned down (may be partial when not confident). */
+  /** the fileKeys the resolver pinned down (may be partial when not confident). */
   files: string[];
 }
 
@@ -780,7 +800,7 @@ export async function runFilesetCheck(
 
 /**
  * Render `runFilesetCheck`'s results one line per ticket: a confident ticket lists
- * the basenames the resolver pinned down; a not-confident one says `campaign-plan`
+ * the fileKeys the resolver pinned down; a not-confident one says `campaign-plan`
  * would halt on it (naming any partial cites resolved so far). Plain text for the
  * terminal and for the `/fileset` sweep to read.
  */

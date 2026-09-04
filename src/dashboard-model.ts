@@ -828,7 +828,8 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       // state the graft saw, so the same placement replays deterministically. Mirror
       // the pruned `waves` change into the display `layout` so a grafted issue shows
       // as a chip in the wave it joined, and mark it `grafted` while it stays unstarted.
-      const applied = applyGraft({ waves, outcomes, currentWave }, { ids: e.ids.map(String), blockedBy: e.blockedBy ?? {}, basenames: e.basenames ?? {} });
+      // The persisted `basenames` wire field maps into the pure fold's `fileKeys`.
+      const applied = applyGraft({ waves, outcomes, currentWave }, { ids: e.ids.map(String), blockedBy: e.blockedBy ?? {}, fileKeys: e.basenames ?? {} });
       const placeOf = new Map<string, number>();
       applied.remaining.forEach((wave, i) => wave.forEach((id) => placeOf.set(id, i)));
       const survivors: number[] = [];

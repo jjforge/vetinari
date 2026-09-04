@@ -16,7 +16,7 @@ import {
   underspecifiedPromptFor,
   waveArgs,
 } from "./plan.ts";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaultFileSet } from "./fileset.ts";
@@ -155,9 +155,33 @@ test("layerWaves carries unreachability down the dependent chain", async () => {
   ]);
 });
 
-// id -> the basenames it touches, for the file-disjoint partition.
-const basenamesFrom = (files: Record<string, string[]>) =>
+// id -> the fileKeys it touches, for the file-disjoint partition.
+const fileKeysFrom = (files: Record<string, string[]>) =>
   new Map(Object.entries(files).map(([id, names]) => [id, new Set(names)]));
+
+test("partitionWaves keeps distinct files with a shared basename in the same wave (#386)", async () => {
+  // Two resolved paths that merely share a basename — `a/b/c/foo.md` and `a/c/foo.md`
+  // — are distinct files, so they must NOT read as a collision: both stay in wave 0.
+  const layered = await layerWaves(["a", "b"], openBlockedByFrom({}));
+  const plan = partitionWaves(
+    layered,
+    fileKeysFrom({ a: ["a/b/c/foo.md"], b: ["a/c/foo.md"] }),
+  );
+
+  assert.deepEqual(plan.waves, [["a", "b"]]);
+});
+
+test("partitionWaves collides an ambiguous bare basename with any same-named path (#386)", async () => {
+  // 'a' resolved `src/foo.md`; 'b' kept a bare `foo.md` (its cite was ambiguous). A
+  // bare basename collides with any file of that name, so they cannot share a wave.
+  const layered = await layerWaves(["a", "b"], openBlockedByFrom({}));
+  const plan = partitionWaves(
+    layered,
+    fileKeysFrom({ a: ["src/foo.md"], b: ["foo.md"] }),
+  );
+
+  assert.deepEqual(plan.waves, [["a"], ["b"]]);
+});
 
 test("partitionWaves spills a basename-colliding ticket into a later sub-wave", async () => {
   // One dependency layer of three; 'a' and 'c' both touch x, so they cannot share
@@ -165,7 +189,7 @@ test("partitionWaves spills a basename-colliding ticket into a later sub-wave", 
   const layered = await layerWaves(["a", "b", "c"], openBlockedByFrom({}));
   const plan = partitionWaves(
     layered,
-    basenamesFrom({ a: ["x"], b: ["y"], c: ["x"] }),
+    fileKeysFrom({ a: ["x"], b: ["y"], c: ["x"] }),
   );
 
   assert.deepEqual(plan.waves, [["a", "b"], ["c"]]);
@@ -177,7 +201,7 @@ test("partitionWaves spills a basename-colliding ticket into a later sub-wave", 
 
 test("Creates-cited new files feed wave-disjointness: two tickets creating one file spill apart", async () => {
   // Both tickets create `event-log.ts` — a new file in neither's tree — so the
-  // resolver's basenames must still keep them out of one wave. Resolve through the
+  // resolver's fileKeys must still keep them out of one wave. Resolve through the
   // shipped defaultFileSet (an empty tree: the file does not exist yet) to prove
   // Creates cites reach the partition, not just a hand-built basename map.
   const emptyRoot = join(tmpdir(), `vetinari-noexist-${Date.now()}`);
@@ -187,6 +211,55 @@ test("Creates-cited new files feed wave-disjointness: two tickets creating one f
   const b = fileSet("Creates: `src/event-log.ts`"); // same basename via a path
   assert.equal(a.confident, true);
   assert.equal(b.confident, true);
+
+  const layered = await layerWaves(["a", "b"], openBlockedByFrom({}));
+  const plan = partitionWaves(
+    layered,
+    new Map([
+      ["a", new Set(a.files)],
+      ["b", new Set(b.files)],
+    ]),
+  );
+
+  assert.deepEqual(plan.waves, [["a"], ["b"]]);
+});
+
+test("resolver → partition: distinct files sharing a basename land in the same wave (#386)", async () => {
+  // End to end through the shipped defaultFileSet against a tmp tree holding both
+  // `a/b/c/foo.md` and `a/c/foo.md`: each cite resolves to its real path, so the two
+  // tickets are file-disjoint and must NOT be spilled apart.
+  const root = join(tmpdir(), `vetinari-386-${Date.now()}`);
+  for (const rel of ["a/b/c/foo.md", "a/c/foo.md"]) {
+    mkdirSync(join(root, rel, ".."), { recursive: true });
+    writeFileSync(join(root, rel), "");
+  }
+  const fileSet = defaultFileSet(root);
+  const a = fileSet("Touches: `a/b/c/foo.md`\n");
+  const b = fileSet("Touches: `a/c/foo.md`\n");
+  assert.deepEqual(a.files, ["a/b/c/foo.md"]);
+  assert.deepEqual(b.files, ["a/c/foo.md"]);
+
+  const layered = await layerWaves(["a", "b"], openBlockedByFrom({}));
+  const plan = partitionWaves(
+    layered,
+    new Map([
+      ["a", new Set(a.files)],
+      ["b", new Set(b.files)],
+    ]),
+  );
+
+  assert.deepEqual(plan.waves, [["a", "b"]]);
+});
+
+test("resolver → partition: a bare cite and a path cite of one file still collide (story 6, #386)", async () => {
+  // The authoring promise: cite a file however you like. Ticket a writes the path,
+  // ticket b the bare name; both resolve to `src/fileset.ts`, so they must collide.
+  const root = join(tmpdir(), `vetinari-386s6-${Date.now()}`);
+  mkdirSync(join(root, "src"), { recursive: true });
+  writeFileSync(join(root, "src/fileset.ts"), "");
+  const fileSet = defaultFileSet(root);
+  const a = fileSet("Touches: `src/fileset.ts`\n");
+  const b = fileSet("Touches: `fileset.ts`\n");
 
   const layered = await layerWaves(["a", "b"], openBlockedByFrom({}));
   const plan = partitionWaves(
@@ -311,7 +384,7 @@ test("partitionWaves only blames earlier sub-waves — a frontier ticket is neve
   const layered = await layerWaves(["a", "b", "c", "d"], openBlockedByFrom({}));
   const plan = partitionWaves(
     layered,
-    basenamesFrom({ a: ["x"], b: ["x"], c: ["x", "z"], d: ["z"] }),
+    fileKeysFrom({ a: ["x"], b: ["x"], c: ["x", "z"], d: ["z"] }),
   );
 
   const d = plan.placements.find((p) => p.id === "d")!;
@@ -662,7 +735,7 @@ test("describePlan explains why a ticket was spilled to a later sub-wave", async
   const layered = await layerWaves(["a", "b", "c"], openBlockedByFrom({}));
   const plan = partitionWaves(
     layered,
-    basenamesFrom({ a: ["x"], b: ["y"], c: ["x"] }),
+    fileKeysFrom({ a: ["x"], b: ["y"], c: ["x"] }),
   );
   const report = describePlan(plan);
 
@@ -676,7 +749,7 @@ const graftOutcomes = (o: Record<string, string>) => new Map(Object.entries(o));
 test("applyGraft drops a no-dep issue into the earliest later wave, never the in-flight one", () => {
   const res = applyGraft(
     { waves: [["101"], ["201"]], outcomes: graftOutcomes({}), currentWave: 0 },
-    { ids: ["301"], blockedBy: {}, basenames: {} },
+    { ids: ["301"], blockedBy: {}, fileKeys: {} },
   );
   // 301 has no blocker, so it fills wave 1 (the earliest wave after the in-flight
   // wave 0) rather than opening a new one.
@@ -687,7 +760,7 @@ test("applyGraft drops a no-dep issue into the earliest later wave, never the in
 test("applyGraft layers a grafted issue after an unrun in-campaign blocker", () => {
   const res = applyGraft(
     { waves: [["101"], ["201"]], outcomes: graftOutcomes({}), currentWave: 0 },
-    { ids: ["301"], blockedBy: { "301": ["201"] }, basenames: {} },
+    { ids: ["301"], blockedBy: { "301": ["201"] }, fileKeys: {} },
   );
   // 301 is blocked by 201 (wave 1), so it cannot share 201's wave — it opens wave 2.
   assert.deepEqual(res.remaining, [["101"], ["201"], ["301"]]);
@@ -696,7 +769,7 @@ test("applyGraft layers a grafted issue after an unrun in-campaign blocker", () 
 test("applyGraft makes an issue blocked only by a merged issue eligible in the next wave", () => {
   const res = applyGraft(
     { waves: [["101"], ["201"]], outcomes: graftOutcomes({ "101": "completed" }), currentWave: 1 },
-    { ids: ["301"], blockedBy: { "301": ["101"] }, basenames: {} },
+    { ids: ["301"], blockedBy: { "301": ["101"] }, fileKeys: {} },
   );
   // 101 is merged (not in the remaining waves' unrun set); its wave is behind the
   // firstFree boundary, so 301 is eligible in the next later wave (wave 2, since
@@ -707,7 +780,7 @@ test("applyGraft makes an issue blocked only by a merged issue eligible in the n
 test("applyGraft spills a basename-colliding graft into a new later wave", () => {
   const res = applyGraft(
     { waves: [["101"], ["201"]], outcomes: graftOutcomes({}), currentWave: 0 },
-    { ids: ["301"], blockedBy: {}, basenames: { "301": ["a.ts"], "201": ["a.ts"] } },
+    { ids: ["301"], blockedBy: {}, fileKeys: { "301": ["a.ts"], "201": ["a.ts"] } },
   );
   // 301 and 201 both touch a.ts, so 301 cannot join wave 1 — it spills to wave 2.
   assert.deepEqual(res.remaining, [["101"], ["201"], ["301"]]);
@@ -716,7 +789,7 @@ test("applyGraft spills a basename-colliding graft into a new later wave", () =>
 test("applyGraft layers a grafted issue after another issue grafted in the same call", () => {
   const res = applyGraft(
     { waves: [["101"]], outcomes: graftOutcomes({}), currentWave: 0 },
-    { ids: ["301", "302"], blockedBy: { "302": ["301"] }, basenames: {} },
+    { ids: ["301", "302"], blockedBy: { "302": ["301"] }, fileKeys: {} },
   );
   // 302 is blocked by 301 (also grafted), so it must land in a strictly later wave.
   assert.deepEqual(res.remaining, [["101"], ["301"], ["302"]]);
@@ -726,7 +799,7 @@ test("applyGraft layers a grafted issue after another issue grafted in the same 
 test("applyGraft packs file-disjoint grafts into the same later wave", () => {
   const res = applyGraft(
     { waves: [["101"]], outcomes: graftOutcomes({}), currentWave: 0 },
-    { ids: ["301", "302"], blockedBy: {}, basenames: { "301": ["a.ts"], "302": ["b.ts"] } },
+    { ids: ["301", "302"], blockedBy: {}, fileKeys: { "301": ["a.ts"], "302": ["b.ts"] } },
   );
   // No deps and disjoint files, so both fill the same earliest later wave.
   assert.deepEqual(res.remaining, [["101"], ["301", "302"]]);

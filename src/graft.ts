@@ -275,7 +275,7 @@ export async function runGraft(
   }
 
   // The layering inputs the pure reducer folds with (ADR 0012): each grafted id's
-  // in-campaign (or co-grafted) open blockers, and the basenames of the grafted ids
+  // in-campaign (or co-grafted) open blockers, and the fileKeys of the grafted ids
   // plus the campaign's still-unstarted members it places disjointly against.
   const campaignPlusGrafted = new Set([...inCampaign, ...normalized]);
   const blockedBy: Record<string, string[]> = {};
@@ -288,11 +288,11 @@ export async function runGraft(
   const unstarted = reduced.waves
     .flat()
     .filter((m) => !reduced.outcomes.has(m));
-  const basenames: Record<string, string[]> = {};
+  const fileKeys: Record<string, string[]> = {};
   await Promise.all(
     [...new Set([...normalized, ...unstarted])].map(async (id) => {
       const text = taskText.get(id) ?? String(await cfg.fetchTask(id));
-      basenames[id] = (await resolveFileSet(ticketProse(text))).files;
+      fileKeys[id] = (await resolveFileSet(ticketProse(text))).files;
     }),
   );
 
@@ -303,7 +303,7 @@ export async function runGraft(
       outcomes: reduced.outcomes,
       currentWave: reduced.currentWave,
     },
-    { ids: normalized, blockedBy, basenames },
+    { ids: normalized, blockedBy, fileKeys },
   );
   const placeOf = new Map<string, number>();
   applied.remaining.forEach((wave, i) =>
@@ -314,7 +314,10 @@ export async function runGraft(
     wave: placeOf.get(id)! + 1,
   }));
 
-  const event = { ids: normalized, blockedBy, basenames, titles };
+  // The persisted event keeps `basenames` as its field name — it is a wire format read
+  // back by `reduceCampaign` from logs already on disk, with no graft migration yet
+  // (renamed separately). The value it carries is now fileKeys.
+  const event = { ids: normalized, blockedBy, basenames: fileKeys, titles };
   const outbound = notice({
     emoji: "🌱",
     project: cfg.project,

@@ -189,7 +189,8 @@ function treeBasenames(root: string): Set<string> {
 /**
  * The shipped generic `fileSet` resolver, normalizing each cite to its basename
  * and validating against the tree at `root` (the cwd by default — the tree the
- * campaign will actually run on, snapshotted once when the resolver is built).
+ * campaign will actually run on, snapshotted once on first use and reused for
+ * every later ticket, so one plan validates against one tree).
  *
  * Two signals, in order:
  *   - **Marker lines (primary).** When the ticket carries an explicit
@@ -212,17 +213,23 @@ function treeBasenames(root: string): Set<string> {
  * `Creates:` cite never forces `confident: false`. Exported alongside
  * `githubBlockedBy` as a ready implementation a project can use or wrap.
  */
-export const defaultFileSet =
-  (root: string = process.cwd()): ((ticket: string) => FileSet) =>
-  (ticket: string): FileSet => {
-    const present = treeBasenames(root);
+export const defaultFileSet = (
+  root: string = process.cwd(),
+): ((ticket: string) => FileSet) => {
+  // Snapshot the tree lazily, on the first ticket resolved — not at construction.
+  // `campaign-plan` builds a resolver even for a single-issue selection it then
+  // resolves nothing against (§356), so a resolver that is never invoked must
+  // never walk the tree; and every ticket in one plan shares this one snapshot.
+  let present: Set<string> | undefined;
+  return (ticket: string): FileSet => {
+    const tree = (present ??= treeBasenames(root));
     const touches = markerCites(ticket, TOUCHES_RE);
     const creates = markerCites(ticket, CREATES_RE);
 
     // No marker line of either kind — fall back to the all-or-nothing whole-body scan.
     if (touches === null && creates === null) {
       const cited = citedBasenames(ticket);
-      const files = cited.filter((name) => present.has(name));
+      const files = cited.filter((name) => tree.has(name));
       return {
         files,
         confident: cited.length > 0 && files.length === cited.length,
@@ -233,9 +240,10 @@ export const defaultFileSet =
     // counted for disjointness but never validated. A missing existing-file cite
     // forbids confidence; a missing created-file cite does not.
     const touchesCites = touches ?? [];
-    const validTouches = touchesCites.filter((name) => present.has(name));
+    const validTouches = touchesCites.filter((name) => tree.has(name));
     const files = [...new Set([...validTouches, ...(creates ?? [])])];
     const confident =
       files.length > 0 && validTouches.length === touchesCites.length;
     return { files, confident };
   };
+};

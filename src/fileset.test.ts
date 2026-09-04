@@ -6,15 +6,22 @@ import { join } from "node:path";
 import { defaultFileSet, ticketProse } from "./fileset.ts";
 
 let counter = 0;
-/** A throwaway tree with the given repo-relative files (each created empty). */
-const treeWith = (...files: string[]): string => {
-  const root = join(tmpdir(), `vetinari-fileset-${Date.now()}-${counter++}`);
+/** A fresh, not-yet-created throwaway tree path. */
+const freshRoot = (): string =>
+  join(tmpdir(), `vetinari-fileset-${Date.now()}-${counter++}`);
+/** Create the given repo-relative files (each empty) under `root`. */
+const populate = (root: string, ...files: string[]): void => {
   for (const rel of files) {
     const path = join(root, rel);
     mkdirSync(join(path, ".."), { recursive: true });
     writeFileSync(path, "");
   }
   mkdirSync(root, { recursive: true });
+};
+/** A throwaway tree with the given repo-relative files (each created empty). */
+const treeWith = (...files: string[]): string => {
+  const root = freshRoot();
+  populate(root, ...files);
   return root;
 };
 
@@ -62,6 +69,45 @@ test("defaultFileSet is not confident when a cited path is not in the tree", () 
 
   assert.deepEqual(res.files, ["plan.ts"]); // only the validated basename survives
   assert.equal(res.confident, false); // ...but the miss forbids confidence
+});
+
+test("defaultFileSet snapshots the tree once: a mutation between two resolutions is not seen", () => {
+  const root = treeWith("src/plan.ts");
+  const fileSet = defaultFileSet(root);
+
+  // First resolution populates the snapshot from the pre-mutation tree.
+  const first = fileSet("Touches `src/plan.ts`.");
+  assert.equal(first.confident, true);
+
+  // A file appears mid-plan (a concurrent checkout, an editor temp file). The
+  // resolver holds one snapshot per built resolver, so the second call must not
+  // see it — proving one plan validates against one tree, not N.
+  populate(root, "src/ghost.ts");
+  const second = fileSet("Touches `src/ghost.ts`.");
+
+  assert.deepEqual(second.files, []); // ghost.ts is off the pre-mutation snapshot
+  assert.equal(second.confident, false);
+});
+
+test("defaultFileSet never walks the tree when the built resolver is never invoked (§356)", () => {
+  // The single-issue path builds a resolver, then decides to resolve no file-sets
+  // at all. A root that would throw if walked must not be read at construction.
+  assert.doesNotThrow(() =>
+    defaultFileSet("/vetinari-nonexistent-root-that-would-throw-if-walked"),
+  );
+});
+
+test("defaultFileSet snapshots on first use, not at construction", () => {
+  const root = freshRoot();
+  // Built against a tree that does not exist yet...
+  const fileSet = defaultFileSet(root);
+  // ...populated only after construction, before the first call.
+  populate(root, "src/plan.ts");
+
+  const res = fileSet("Touches `src/plan.ts`.");
+
+  assert.deepEqual(res.files, ["plan.ts"]); // first use snapshots the now-present file
+  assert.equal(res.confident, true);
 });
 
 test("ticketProse keeps a GitHub task's title and body but drops its comments", () => {

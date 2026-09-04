@@ -477,7 +477,7 @@ test("dispatch run is not refused by a standalone run's own lease — only a liv
   // flight, holding a `kind: "run"` lease, and its pid is this test's own (alive). A second `run`
   // for a different issue must proceed — the run lease is not a live campaign.
   const configDir = mkdtempSync(join(tmpdir(), "vetinari-dispatch-slots-"));
-  registerProject(configDir, "demo", 1, "run", { pid: process.pid });
+  registerProject(configDir, "demo", 1, "run", 1, { pid: process.pid });
   assert.equal(projectHasLiveCampaign(configDir, "demo"), false, "a run lease is not a live campaign");
   const { deps } = makeDeps({
     host: { configDir } as any,
@@ -487,7 +487,7 @@ test("dispatch run is not refused by a standalone run's own lease — only a liv
   assert.equal((deps.runLoop as any).calls.length, 1, "the second standalone run is not refused by the first run's lease");
 
   // A campaign lease for the same project, by contrast, does refuse the run.
-  registerProject(configDir, "demo", 1, "campaign", { pid: process.pid });
+  registerProject(configDir, "demo", 1, "campaign", 1, { pid: process.pid });
   const { deps: deps2, logged } = makeDeps({
     host: { configDir } as any,
     projectHasLiveCampaign: projectHasLiveCampaign as any,

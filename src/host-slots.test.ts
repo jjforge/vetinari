@@ -21,6 +21,16 @@ test("when active projects outnumber the budget, floors go to the heaviest and t
   assert.equal(fairShare(2, weights, "c"), 0);
 });
 
+test("a project is capped at what it wants; the surplus flows to a project still short of its want", () => {
+  // Ceiling 8, equal weight, one wanting 1 and one wanting 7. Weight alone would
+  // split 4/4, reserving three idle slots against work vetinari does not have;
+  // demand-aware max-min gives vetinari its 1 and jjforge the whole 7 it wants.
+  const weights = { vetinari: 2, jjforge: 2 };
+  const wants = { vetinari: 1, jjforge: 7 };
+  assert.equal(fairShare(8, weights, "vetinari", wants), 1);
+  assert.equal(fairShare(8, weights, "jjforge", wants), 7);
+});
+
 test("a heavier weight takes a larger cut of the remainder", () => {
   // budget 10, a:3 b:1 → floor 1 each (2 used), remainder 8 split 3:1 → a +6, b +2.
   const weights = { a: 3, b: 1 };
@@ -39,7 +49,7 @@ test("equal-weight projects each get a floor of one plus an even cut of the rema
 
 test("a lone project acquires up to the budget, then is denied — held is recorded", () => {
   const dir = freshDir();
-  registerProject(dir, "solo", 1, "campaign", { pid: 100, isAlive: alive });
+  registerProject(dir, "solo", 1, "campaign", 3, { pid: 100, isAlive: alive });
   // Alone, the project fills the whole ceiling (3) — only the host ceiling bites.
   assert.equal(acquireSlot(dir, 3, "solo", 1, { pid: 100, isAlive: alive }), true);
   assert.equal(acquireSlot(dir, 3, "solo", 1, { pid: 100, isAlive: alive }), true);
@@ -57,12 +67,12 @@ test("a busy project drains to its fair share as a new project becomes active �
   const A = { pid: 1, isAlive: alive };
   const B = { pid: 2, isAlive: alive };
   // A runs alone and fills the whole budget of 4.
-  registerProject(dir, "A", 1, "campaign", A);
+  registerProject(dir, "A", 1, "campaign", 4, A);
   for (let i = 0; i < 4; i++) assert.equal(acquireSlot(dir, 4, "A", 1, A), true);
 
   // B arrives. The host is full, so neither can take a slot yet — A is never
   // preempted; it only stops re-acquiring above its now-smaller share.
-  registerProject(dir, "B", 1, "campaign", B);
+  registerProject(dir, "B", 1, "campaign", 4, B);
   assert.equal(acquireSlot(dir, 4, "A", 1, A), false);
   assert.equal(acquireSlot(dir, 4, "B", 1, B), false);
 
@@ -79,16 +89,33 @@ test("a busy project drains to its fair share as a new project becomes active �
   assert.deepEqual(held, { A: 2, B: 2 });
 });
 
+test("a one-ticket wave reserves no idle slots: a busy project fills the host up to what it wants (max-min share)", () => {
+  const dir = freshDir();
+  const V = { pid: 1, isAlive: alive };
+  const J = { pid: 2, isAlive: alive };
+  // vetinari's wave is a single ticket: it holds one slot and wants no more.
+  registerProject(dir, "vetinari", 2, "campaign", 1, V);
+  assert.equal(acquireSlot(dir, 8, "vetinari", 2, V), true);
+  // jjforge wants seven. Weight alone would cap it at four, idling three host slots
+  // while its tickets are refused; demand-aware share lets it take the whole seven.
+  registerProject(dir, "jjforge", 2, "campaign", 7, J);
+  for (let i = 0; i < 7; i++) assert.equal(acquireSlot(dir, 8, "jjforge", 2, J), true, `slot ${i}`);
+  // Host full at eight (vetinari 1 + jjforge 7); the next acquire is refused.
+  assert.equal(acquireSlot(dir, 8, "jjforge", 2, J), false);
+  const held = Object.fromEntries(readLeases(dir).map((l) => [l.project, l.held]));
+  assert.deepEqual(held, { vetinari: 1, jjforge: 7 });
+});
+
 test("a crashed run's leases are reclaimed on contention — the budget is never wedged", () => {
   const dir = freshDir();
   // A fills the whole budget of 2, then its process dies.
-  registerProject(dir, "A", 1, "campaign", { pid: 1, isAlive: alive });
+  registerProject(dir, "A", 1, "campaign", 2, { pid: 1, isAlive: alive });
   assert.equal(acquireSlot(dir, 2, "A", 1, { pid: 1, isAlive: alive }), true);
   assert.equal(acquireSlot(dir, 2, "A", 1, { pid: 1, isAlive: alive }), true);
 
   // B arrives and sees pid 1 as dead: A's slots are reclaimed, so B is not wedged.
   const bIsAlive = (pid: number) => pid !== 1;
-  registerProject(dir, "B", 1, "campaign", { pid: 2, isAlive: bIsAlive });
+  registerProject(dir, "B", 1, "campaign", 2, { pid: 2, isAlive: bIsAlive });
   assert.equal(acquireSlot(dir, 2, "B", 1, { pid: 2, isAlive: bIsAlive }), true);
 
   const held = Object.fromEntries(readLeases(dir).map((l) => [l.project, l.held]));
@@ -100,9 +127,9 @@ test("over-subscribed, only the heaviest projects seat a slot; the rest are deni
   const a = { pid: 1, isAlive: alive };
   const b = { pid: 2, isAlive: alive };
   const c = { pid: 3, isAlive: alive };
-  registerProject(dir, "a", 3, "campaign", a);
-  registerProject(dir, "b", 2, "campaign", b);
-  registerProject(dir, "c", 1, "campaign", c);
+  registerProject(dir, "a", 3, "campaign", 2, a);
+  registerProject(dir, "b", 2, "campaign", 2, b);
+  registerProject(dir, "c", 1, "campaign", 2, c);
   // Budget 2, three active projects: a and b get their floor, c waits.
   assert.equal(acquireSlot(dir, 2, "a", 3, a), true);
   assert.equal(acquireSlot(dir, 2, "b", 2, b), true);
@@ -121,7 +148,7 @@ test("projectHasLiveCampaign reads a live campaign lease — the campaign-livene
 
   // A registered campaign holds a lease the moment it registers (even at held zero, waiting
   // first-come), so it reads live while its process is up.
-  registerProject(dir, "alpha", 1, "campaign", { pid: 500, isAlive });
+  registerProject(dir, "alpha", 1, "campaign", 1, { pid: 500, isAlive });
   assert.equal(projectHasLiveCampaign(dir, "alpha", { isAlive }), true);
   // The probe is per-project — a sibling project's live campaign says nothing about this one.
   assert.equal(projectHasLiveCampaign(dir, "beta", { isAlive }), false);
@@ -136,7 +163,7 @@ test("projectHasLiveCampaign ignores a standalone run's lease — a run is not a
   const dir = freshDir();
   // A standalone `run` registers its lease as `kind: "run"`; it holds a slot, but it is not
   // a campaign, so a second run/answer/redrive for the project must not be refused as one.
-  registerProject(dir, "solo", 1, "run", { pid: 700, isAlive: alive });
+  registerProject(dir, "solo", 1, "run", 1, { pid: 700, isAlive: alive });
   assert.equal(acquireSlot(dir, 4, "solo", 1, { pid: 700, isAlive: alive }), true);
   assert.equal(projectHasLiveCampaign(dir, "solo", { isAlive: alive }), false);
   // The run lease is real on disk and holds a slot — it just does not read as a campaign.
@@ -150,8 +177,8 @@ test("two standalone runs for different issues share one project's ceiling concu
   // Two `run` processes for the same project (different issues) each keyed by their own pid.
   const one = { pid: 71, isAlive: alive };
   const two = { pid: 72, isAlive: alive };
-  registerProject(dir, "solo", 1, "run", one);
-  registerProject(dir, "solo", 1, "run", two);
+  registerProject(dir, "solo", 1, "run", 1, one);
+  registerProject(dir, "solo", 1, "run", 1, two);
   // Alone in the project, both fit under the fair share (the whole ceiling) — they run concurrently.
   assert.equal(acquireSlot(dir, 4, "solo", 1, one), true);
   assert.equal(acquireSlot(dir, 4, "solo", 1, two), true);
@@ -230,7 +257,7 @@ test("resolveHostCeiling: a non-numeric or non-positive setting falls back to th
 test("deregister removes a run's lease entirely, returning its slots to the budget", () => {
   const dir = freshDir();
   const A = { pid: 1, isAlive: alive };
-  registerProject(dir, "A", 1, "campaign", A);
+  registerProject(dir, "A", 1, "campaign", 2, A);
   assert.equal(acquireSlot(dir, 2, "A", 1, A), true);
   deregisterProject(dir, A);
   assert.deepEqual(readLeases(dir), []);
@@ -269,7 +296,7 @@ test("withHostSlot waits first-come when the ceiling is full, then proceeds once
   const dir = freshDir();
   // Another project already fills the single-slot ceiling.
   const other = { pid: 7, isAlive: alive };
-  registerProject(dir, "other", 1, "campaign", other);
+  registerProject(dir, "other", 1, "campaign", 1, other);
   assert.equal(acquireSlot(dir, 1, "other", 1, other), true);
 
   let waits = 0;

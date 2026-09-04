@@ -21,15 +21,20 @@ export type LeaseKind = "campaign" | "run";
 
 /**
  * One active run's record in the lease directory: the project it belongs to, its
- * declared weight, how many live containers it currently holds, the pid that owns
+ * declared weight, how many live containers it currently holds, how many it *wants*
+ * (its demand — held plus still-queued work; the max-min fair share caps a project
+ * here so it never reserves slots against work it does not have), the pid that owns
  * it (so a dead run's slots can be reclaimed on contention), and its `kind` (a
  * campaign or a standalone run). Keyed on disk by pid, so two runs of the same
- * project never clobber each other.
+ * project never clobber each other. `want` is optional: a legacy lease written
+ * before the field reads as unbounded demand — its full weight-derived cut, i.e.
+ * today's behaviour — so there is no flag day.
  */
 export interface SlotLease {
   project: string;
   weight: number;
   held: number;
+  want?: number;
   pid: number;
   kind: LeaseKind;
 }
@@ -171,9 +176,15 @@ export function readLeases(configDir: string): SlotLease[] {
     try {
       const l = JSON.parse(readFileSync(join(dir, name), "utf8")) as SlotLease;
       // A legacy lease predates the kind field; read it as `campaign` (the conservative
-      // reading — never let an unknown lease silently stop being a live campaign).
+      // reading — never let an unknown lease silently stop being a live campaign). A
+      // legacy lease also predates `want`; leaving it undefined reads as unbounded
+      // demand in `fairShare`, i.e. today's weight-only allocation.
       if (l && typeof l.project === "string" && typeof l.pid === "number")
-        leases.push({ ...l, kind: l.kind === "run" ? "run" : "campaign" });
+        leases.push({
+          ...l,
+          want: typeof l.want === "number" ? l.want : undefined,
+          kind: l.kind === "run" ? "run" : "campaign",
+        });
     } catch {
       // A half-written or malformed file is ignored, not fatal.
     }
@@ -217,17 +228,21 @@ function liveLeases(configDir: string, isAlive: (pid: number) => boolean): SlotL
 }
 
 /**
- * Announce this run as active by writing its lease at held zero (idempotent). A
- * run registers before it acquires so other projects see it as active and drain
- * toward their smaller share, even while it is waiting first-come at zero held.
+ * Announce this run as active, and refresh its declared demand, by writing its lease
+ * (held preserved, idempotent). A run registers before it acquires so other projects
+ * see it as active and drain toward their smaller share, even while it is waiting
+ * first-come at zero held. `want` — how many slots the run would use if unbounded
+ * (held plus still-queued work) — must be refreshed as demand changes, not written
+ * once: call this again when a wave grows or drains so a project that no longer wants
+ * the surplus releases its claim on it, or the reservation bug returns one level up.
  */
-export function registerProject(configDir: string, project: string, weight: number, kind: LeaseKind, opts: LeaseOpts = {}): void {
+export function registerProject(configDir: string, project: string, weight: number, kind: LeaseKind, want: number, opts: LeaseOpts = {}): void {
   const pid = opts.pid ?? process.pid;
   const isAlive = opts.isAlive ?? pidAlive;
   withLock(slotsDir(configDir), isAlive, () => {
     const file = leaseFile(configDir, pid);
     const existing = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as SlotLease).held : 0;
-    writeFileSync(file, JSON.stringify({ project, weight, held: existing || 0, pid, kind }));
+    writeFileSync(file, JSON.stringify({ project, weight, held: existing || 0, want, pid, kind }));
   });
 }
 
@@ -260,21 +275,28 @@ export function acquireSlot(configDir: string, ceiling: number, project: string,
   return withLock(slotsDir(configDir), isAlive, () => {
     const live = liveLeases(configDir, isAlive);
     const activeWeights: Record<string, number> = { [project]: weight };
-    for (const l of live) activeWeights[l.project] = l.weight;
+    // A project's demand is the sum of its runs' wants; a run with no `want` (a legacy
+    // lease) contributes unbounded demand, so the project takes its full weight cut.
+    const wants: Record<string, number> = {};
+    for (const l of live) {
+      activeWeights[l.project] = l.weight;
+      wants[l.project] = (wants[l.project] ?? 0) + (l.want ?? Infinity);
+    }
 
     const total = live.reduce((s, l) => s + l.held, 0);
     const mine = live.find((l) => l.pid === pid);
     const myRunHeld = mine?.held ?? 0;
     const myProjectHeld = live.filter((l) => l.project === project).reduce((s, l) => s + l.held, 0);
-    const share = fairShare(ceiling, activeWeights, project);
+    const share = fairShare(ceiling, activeWeights, project, wants);
 
     if (myProjectHeld >= share || total >= ceiling) return false;
 
     // Preserve the kind `registerProject` (always called first) stamped. A legacy lease that
     // predates the field reads as `campaign` (via `readLeases`), so it is rewritten with an
-    // explicit kind here on its next acquire.
+    // explicit kind here on its next acquire. Preserve the declared `want` too — acquiring a
+    // slot does not change demand; `registerProject` owns refreshing it.
     const kind: LeaseKind = mine?.kind ?? "campaign";
-    writeFileSync(leaseFile(configDir, pid), JSON.stringify({ project, weight, held: myRunHeld + 1, pid, kind }));
+    writeFileSync(leaseFile(configDir, pid), JSON.stringify({ project, weight, held: myRunHeld + 1, want: mine?.want, pid, kind }));
     return true;
   });
 }
@@ -299,7 +321,8 @@ export async function withHostSlot<T>(
 ): Promise<T> {
   const wait = opts.wait ?? sleep;
   // A standalone `run`/`answer` — its lease is `kind: "run"`, never a live campaign (§8).
-  registerProject(host.configDir, project, host.weight, "run", opts);
+  // It wants exactly one slot, for the single container it holds for the life of `fn`.
+  registerProject(host.configDir, project, host.weight, "run", 1, opts);
   try {
     while (!acquireSlot(host.configDir, host.ceiling, project, host.weight, opts))
       await wait(SLOT_POLL_MS);
@@ -326,35 +349,32 @@ export function releaseSlot(configDir: string, opts: LeaseOpts = {}): void {
 }
 
 /**
- * A project's currently-allowed slot count under a host `ceiling`, given the
- * weights of every currently-active project: a floor of one slot per active
- * project plus a weight-proportional cut of the remainder. Pure — no filesystem. A
- * project alone gets the whole ceiling; each active project always gets at least
- * one while the ceiling can seat them all.
+ * Integer weighted split of `cap` slots among `projects`, demand-blind: a floor of
+ * one slot each, then the remainder cut weight-proportionally by the
+ * largest-remainder (Hamilton) method — each project's base is the floor of its
+ * ideal cut and the leftover slots go to the largest fractional parts, ties broken
+ * by project name so every run computes the identical split. When `cap` cannot seat
+ * one slot per project the heaviest `cap` projects (ties by name) get the single
+ * seat and the rest get zero. `fairShare` layers max-min demand-capping over this.
  */
-export function fairShare(ceiling: number, activeWeights: Record<string, number>, project: string): number {
-  const projects = Object.keys(activeWeights);
+function weightedSplit(cap: number, projects: string[], weightOf: (p: string) => number): Record<string, number> {
+  const out: Record<string, number> = {};
   const n = projects.length;
-  if (ceiling <= 0 || n === 0 || !(project in activeWeights)) return 0;
-
-  // Over-subscription: the machine cannot seat one slot for every active project,
-  // so the floor is best-effort — the heaviest `ceiling` projects get their one
-  // slot and the rest get none (they wait first-come for a freed slot). Ties
-  // broken by name so every run agrees on who is seated.
-  if (ceiling < n) {
-    const seated = [...projects]
-      .sort((x, y) => activeWeights[y] - activeWeights[x] || (x < y ? -1 : 1))
-      .slice(0, ceiling);
-    return seated.includes(project) ? 1 : 0;
+  if (cap <= 0 || n === 0) {
+    for (const p of projects) out[p] = 0;
+    return out;
   }
-
-  // Everyone gets a floor of one, then the remainder is cut weight-proportionally
-  // by the largest-remainder (Hamilton) method: each project's base is the floor
-  // of its ideal cut, and the leftover slots go to the largest fractional parts,
-  // ties broken by project name so every run computes the identical split.
-  const remainder = ceiling - n;
-  const totalWeight = projects.reduce((s, p) => s + activeWeights[p], 0) || 1;
-  const ideal = (p: string) => (remainder * activeWeights[p]) / totalWeight;
+  // Over-subscription: the machine cannot seat one slot for every project, so the
+  // floor is best-effort — the heaviest `cap` projects get their one slot and the
+  // rest get none (they wait first-come for a freed slot).
+  if (cap < n) {
+    const seated = [...projects].sort((x, y) => weightOf(y) - weightOf(x) || (x < y ? -1 : 1)).slice(0, cap);
+    for (const p of projects) out[p] = seated.includes(p) ? 1 : 0;
+    return out;
+  }
+  const remainder = cap - n;
+  const totalWeight = projects.reduce((s, p) => s + weightOf(p), 0) || 1;
+  const ideal = (p: string) => (remainder * weightOf(p)) / totalWeight;
   const base = (p: string) => Math.floor(ideal(p));
   const leftover = remainder - projects.reduce((s, p) => s + base(p), 0);
   const byFraction = [...projects].sort((x, y) => {
@@ -363,5 +383,53 @@ export function fairShare(ceiling: number, activeWeights: Record<string, number>
     return fy - fx || (x < y ? -1 : 1);
   });
   const bonus = new Set(byFraction.slice(0, leftover));
-  return 1 + base(project) + (bonus.has(project) ? 1 : 0);
+  for (const p of projects) out[p] = 1 + base(p) + (bonus.has(p) ? 1 : 0);
+  return out;
+}
+
+/**
+ * A project's currently-allowed slot count under a host `ceiling`, given the weights
+ * and demands of every currently-active project. Max-min fair by progressive
+ * filling: each project is offered its weight-proportional cut (`weightedSplit`);
+ * any project whose cut meets or exceeds what it *wants* is capped at its want and
+ * the surplus it releases is redistributed to projects still short, repeated until
+ * nothing moves. `wants[p]` absent reads as unbounded demand — the project takes its
+ * full weight-derived cut, i.e. the pre-demand behaviour, so a legacy lease (no
+ * `want`) allocates exactly as it did before. A project that wants nothing contends
+ * for nothing: it takes no floor and does not count toward over-subscription, so its
+ * unused cut flows to projects with work. Pure — no filesystem. A project alone gets
+ * the whole ceiling; under genuine contention every wanting project keeps its floor.
+ */
+export function fairShare(
+  ceiling: number,
+  activeWeights: Record<string, number>,
+  project: string,
+  wants: Record<string, number> = {},
+): number {
+  if (ceiling <= 0 || !(project in activeWeights)) return 0;
+  const want = (p: string): number => (wants[p] === undefined ? Infinity : wants[p]);
+
+  // Only projects that want a slot contend; a want-nothing project neither takes a
+  // floor nor counts toward the seat-everyone test, freeing its cut for the rest.
+  const contenders = Object.keys(activeWeights).filter((p) => want(p) >= 1);
+  if (!contenders.includes(project)) return 0;
+
+  const final: Record<string, number> = {};
+  let free = [...contenders];
+  let cap = ceiling;
+  for (;;) {
+    const raw = weightedSplit(cap, free, (p) => activeWeights[p]);
+    const capped = free.filter((p) => raw[p] >= want(p));
+    if (capped.length === 0) {
+      for (const p of free) final[p] = raw[p];
+      break;
+    }
+    for (const p of capped) {
+      final[p] = want(p);
+      cap -= want(p);
+    }
+    free = free.filter((p) => !capped.includes(p));
+    if (free.length === 0) break;
+  }
+  return final[project] ?? 0;
 }

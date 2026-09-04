@@ -51,10 +51,13 @@ ADR 0010, whose cooperative-lease mechanism (drain-to-share, no preemption) is u
   alone consumes all of it. Unset resolves to a sensible machine-derived default rather
   than "unbounded", so the machine is never swamped.
 - **`containerShare: high | medium | low`** (Project, default `medium`) — a project's
-  cut of the ceiling *when projects contend*. It is a **weighted share with a floor of
-  one, never preemptive and never starving**: "high" takes more of the remainder, not
-  all of it. A named tier replaces a raw numeric weight so nobody has to reason about why
-  a given number of containers is running.
+  cut of the ceiling *when projects contend for more than it can seat*. It is a
+  **max-min weighted share with a floor of one, never preemptive and never starving**:
+  "high" takes more of the remainder, not all of it, and every project is capped at
+  what it actually wants so its unclaimed cut flows to a busier project rather than
+  idling the host — a one-ticket wave holds one slot, not a full share reserved against
+  work it does not have. A named tier replaces a raw numeric weight so nobody has to
+  reason about why a given number of containers is running.
 - The per-run parallelism cap is **eliminated** — it was the knob that made effective
   concurrency opaque and that leaked into gateway-spawned children. A run simply fills up
   to its current fair share; a lone project fills the ceiling.

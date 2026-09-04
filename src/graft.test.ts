@@ -190,15 +190,18 @@ test("a real graft appends the graft event and enqueues a progress:graft note", 
     | {
         ids: string[];
         blockedBy: Record<string, string[]>;
-        basenames: Record<string, string[]>;
+        fileKeys: Record<string, string[]>;
+        basenames?: Record<string, string[]>;
       }
     | undefined;
   assert.ok(graftEvent, "expected a graft event on the log");
   assert.deepEqual(graftEvent!.ids, ["301"]);
   assert.deepEqual(graftEvent!.blockedBy, { "301": [] });
-  // Basenames cover the grafted id plus the still-unstarted members it lays out
+  // fileKeys cover the grafted id plus the still-unstarted members it lays out
   // disjointly against (the in-flight wave 0's 101 has no outcome yet).
-  assert.deepEqual(graftEvent!.basenames, { "101": [], "301": [] });
+  assert.deepEqual(graftEvent!.fileKeys, { "101": [], "301": [] });
+  // The writer emits only the new name — no legacy `basenames` key on a fresh event.
+  assert.ok(!("basenames" in graftEvent!), "writer must not emit the legacy basenames key");
 
   // ...and a single routable progress:graft outbound record.
   const outbox = listOutbox(cfg);

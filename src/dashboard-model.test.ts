@@ -239,7 +239,7 @@ test("buildLanding counts grafted issues as queued but still excludes pruned (#2
     // The future, unstarted wave 301 is pruned out — a display ghost, not live work.
     event("prune", { ts: "2025-01-02T08:06:00.000Z", target: "301", removed: ["301"], dropped: [] }),
     // Two issues grafted into later, unstarted waves — pending work that reads `grafted`.
-    event("graft", { ts: "2025-01-02T08:07:00.000Z", ids: ["305", "306"], blockedBy: {}, basenames: {} }),
+    event("graft", { ts: "2025-01-02T08:07:00.000Z", ids: ["305", "306"], blockedBy: {}, fileKeys: {} }),
   ]);
 
   const { counters, projects } = buildLanding(
@@ -1689,7 +1689,7 @@ test("describeEvent narrates the operator-facing events in plain words", () => {
     "Pruned #303, #304",
   );
   assert.equal(
-    describeEvent(event("graft", { ids: ["305", "306"], blockedBy: {}, basenames: {} })),
+    describeEvent(event("graft", { ids: ["305", "306"], blockedBy: {}, fileKeys: {} })),
     "Grafted #305, #306",
   );
   // A turn renders its agent-authored summary verbatim (ADR 0009), falling back when absent.
@@ -2316,7 +2316,7 @@ test("buildStatus collapses a wave that had a member pruned and a member grafted
     event("campaign-start", { ts: "2026-09-02T04:00:00.000Z", waves: [["101"], ["201", "301"]], slots: 1 }),
     event("wave-start", { ts: "2026-09-02T04:01:00.000Z", index: 0, tasks: ["101"] }),
     // 401 grafts in while wave 0 is in flight → lands in the next unstarted wave (wave 1).
-    event("graft", { ts: "2026-09-02T04:02:00.000Z", ids: ["401"], blockedBy: {}, basenames: {} }),
+    event("graft", { ts: "2026-09-02T04:02:00.000Z", ids: ["401"], blockedBy: {}, fileKeys: {} }),
     // 301 is pruned out of wave 1 but keeps its chip there (ADR 0007).
     event("prune", { ts: "2026-09-02T04:03:00.000Z", target: "301", removed: ["301"], dropped: [] }),
     event("green", { ts: "2026-09-02T04:04:00.000Z", taskId: "101", branch: "agent/101", commits: [] }),
@@ -3226,7 +3226,7 @@ test("reduceCampaign folds a graft event, extending future waves with the added 
       ts: "2025-01-01T00:02:00.000Z",
       ids: ["301", "302"],
       blockedBy: { "302": ["301"] },
-      basenames: {},
+      fileKeys: {},
     }),
   ]);
 
@@ -3239,11 +3239,34 @@ test("reduceCampaign folds a graft event, extending future waves with the added 
   assert.deepEqual([...reduced.grafted].sort(), ["301", "302"]);
 });
 
+test("reduceCampaign folds a graft event written before the rename, reading its layering input from the legacy `basenames` key (#394)", () => {
+  // A graft event exactly as an `orchestrator.jsonl` already on disk carries it: the
+  // layering input lives under the pre-rename `basenames` key, never `fileKeys`. The
+  // reducer must still read it, so the file-disjoint placement replays. Here 301 shares
+  // `shared.ts` with the still-unstarted 201, so it cannot join 201's wave and opens a
+  // new one after it — a placement only reachable if the `basenames` value is honored.
+  const oldShapeGraft = {
+    ts: "2025-01-01T00:02:00.000Z",
+    event: "graft",
+    ids: ["301"],
+    blockedBy: {},
+    basenames: { "201": ["shared.ts"], "301": ["shared.ts"] },
+  } as unknown as OrchestratorEvent;
+  const reduced = reduceCampaign([
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["101"], ["201"]], slots: 1 }),
+    event("wave-start", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["101"] }),
+    oldShapeGraft,
+  ]);
+  // 301 is bumped past 201's wave by the shared file — proving the legacy value folded.
+  assert.deepEqual(reduced.waves, [["101"], ["201"], ["301"]]);
+  assert.equal(reduced.grafted.has("301"), true);
+});
+
 test("reduceCampaign drops a graft's grafted overlay once the issue is picked up (#166)", () => {
   const reduced = reduceCampaign([
     event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["101"]], slots: 1 }),
     event("wave-start", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["101"] }),
-    event("graft", { ts: "2025-01-01T00:02:00.000Z", ids: ["301"], blockedBy: {}, basenames: {} }),
+    event("graft", { ts: "2025-01-01T00:02:00.000Z", ids: ["301"], blockedBy: {}, fileKeys: {} }),
     // 301 is picked up in the next wave and merges — it is no longer "grafted".
     event("green", { ts: "2025-01-01T00:03:00.000Z", taskId: "301", branch: "agent/301", commits: [] }),
     event("merged", { ts: "2025-01-01T00:04:00.000Z", taskId: "301", branch: "agent/301" }),
@@ -3258,7 +3281,7 @@ test("buildStatus renders a grafted issue with the `grafted` membership while un
   seedState(dir, [
     event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["101"], ["201"]], slots: 1 }),
     event("wave-start", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["101"] }),
-    event("graft", { ts: "2025-01-01T00:02:00.000Z", ids: ["301"], blockedBy: {}, basenames: {} }),
+    event("graft", { ts: "2025-01-01T00:02:00.000Z", ids: ["301"], blockedBy: {}, fileKeys: {} }),
   ]);
 
   const status = buildStatus(cfgFor(dir));
@@ -3274,7 +3297,7 @@ test("buildStatus reads a grafted issue as running once its wave picks it up (#1
   seedState(dir, [
     event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["101"]], slots: 1 }),
     event("wave-start", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["101"] }),
-    event("graft", { ts: "2025-01-01T00:02:00.000Z", ids: ["301"], blockedBy: {}, basenames: {} }),
+    event("graft", { ts: "2025-01-01T00:02:00.000Z", ids: ["301"], blockedBy: {}, fileKeys: {} }),
     event("wave-start", { ts: "2025-01-01T00:03:00.000Z", index: 1, tasks: ["301"] }),
     event("spawn", { ts: "2025-01-01T00:04:00.000Z", taskId: "301" }),
   ]);
@@ -3304,7 +3327,7 @@ test("a graft into a wave-parked (resumable) campaign is folded and allowed (#16
     // The wave's merged base gated red — the campaign pauses, resumable (ADR 0013).
     event("campaign-parked", { ts: "2025-01-01T00:03:00.000Z", index: 0, detail: "GATE FAILED" }),
     // An operator grafts new work while it is parked, honored on the next --resume.
-    event("graft", { ts: "2025-01-01T00:04:00.000Z", ids: ["301"], blockedBy: {}, basenames: {} }),
+    event("graft", { ts: "2025-01-01T00:04:00.000Z", ids: ["301"], blockedBy: {}, fileKeys: {} }),
   ];
   // A wave-parked run is not done, so graft is allowed against it.
   assert.equal(campaignRunning(log), true);

@@ -137,7 +137,7 @@ test("run-level kinds narrate through describeEvent verbatim as one plain span, 
     event("campaign-done", { waves: 2, ts: "2026-08-28T00:00:00.000Z" }),
     event("campaign-parked", { index: 0, detail: "red", ts: "2026-08-28T00:00:00.000Z" }),
     event("prune", { target: "5", removed: ["5", "6"], dropped: ["6"], ts: "2026-08-28T00:00:00.000Z" }),
-    event("graft", { ids: ["9"], blockedBy: {}, basenames: {}, ts: "2026-08-28T00:00:00.000Z" }),
+    event("graft", { ids: ["9"], blockedBy: {}, fileKeys: {}, ts: "2026-08-28T00:00:00.000Z" }),
   ];
   for (const e of cases) {
     const row = humanizeLogLine(raw(e));

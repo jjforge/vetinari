@@ -101,7 +101,7 @@ test("a switch over the §2.1 narrowed kinds reads each member's fields", () => 
   assert.equal(describe(event("campaign-parked", { index: 2, detail: "red base" })), "campaign-parked 2: red base");
   assert.equal(describe(event("campaign-failed", { index: 2, detail: "2 failed" })), "campaign-failed 2: 2 failed");
   assert.equal(describe(event("redrive", { fromWave: 1 })), "redrive from 1");
-  assert.equal(describe(event("graft", { ids: ["305", "306"], blockedBy: {}, basenames: {} })), "graft 305,306");
+  assert.equal(describe(event("graft", { ids: ["305", "306"], blockedBy: {}, fileKeys: {} })), "graft 305,306");
   assert.equal(describe(event("gate", { taskId: "9", cmds: ["typecheck", "test"], skipped: 1 })), "gate typecheck,test skip 1");
   assert.equal(describe(event("gate-check", { taskId: "9", cmd: "run-tests" })), "gate-check run-tests");
   assert.equal(describe(event("tool", { taskId: "9", name: "Read", path: "/a.ts" })), "tool Read /a.ts");

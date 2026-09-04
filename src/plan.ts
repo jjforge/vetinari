@@ -314,9 +314,9 @@ export function partitionWaves(plan: WavePlan, fileKeysOf: Map<string, Set<strin
  * fileKeys. With these `applyGraft` runs the same dependency + file-disjoint
  * placement `campaign-plan` does, with no tracker or filesystem access.
  *
- * The persisted `GraftEvent.basenames` wire field maps into `fileKeys` here (the
- * field kept its name so existing `orchestrator.jsonl` logs still read; a later
- * migration renames it — tracked separately).
+ * The persisted `GraftEvent.fileKeys` wire field maps straight into `fileKeys`
+ * here; a log written before the rename carried the same value under `basenames`,
+ * which the reducer's reader still accepts (preferring `fileKeys`).
  */
 export interface GraftInputs {
   /** the grafted issue ids, in the order given. */

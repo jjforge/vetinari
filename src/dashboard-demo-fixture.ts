@@ -203,7 +203,7 @@ const DEMO_SPECS: DemoProjectSpec[] = [
       { ts: at(9), event: "green", taskId: "303", branch: "agent/303" },
       { ts: at(8), event: "turn", taskId: "304", turn: 0, summary: "Verifying the HMAC signature on inbound webhooks before we trust the payload." },
       // A graft adds a dispute-evidence issue; it lands in the unstarted later wave, so it reads `grafted`.
-      { ts: at(11), event: "graft", ids: ["306"], blockedBy: {}, basenames: { "306": ["disputes.ts"] } },
+      { ts: at(11), event: "graft", ids: ["306"], blockedBy: {}, fileKeys: { "306": ["disputes.ts"] } },
     ],
   },
 

@@ -20,12 +20,16 @@ Within a milestone each bold section label appears at most once.
 
 ### Collected changes — September 4, 2026
 
+**Improvements:**
+- [ops] The `fileSet` resolver's `files` now carry resolved repo-relative paths (a bare basename only where a cite is genuinely ambiguous), and an ambiguous bare filename stays confident and collides with any file of that name rather than halting the plan (#386).
+
 **Bug fixes:**
 - [user] `campaign` plans now validate every ticket's file-set against one tree snapshot taken on first resolution, instead of re-walking the repo per ticket — so a plan's tickets can no longer disagree about the tree, and an N-ticket plan walks the tree once, not N times (#385).
 - [user] The host slot budget now allocates by demand, not weight alone: a project takes at most the number of slots it actually has work for (its live containers plus its still-queued tickets), so a one-ticket wave no longer reserves its whole weighted cut and leaves the host idling while another project's tickets are refused — the surplus flows to the project with queued work. Under genuine contention the weighted floor still holds (#387).
 - [user] A cited path carrying a `:line` or `:line:col` suffix (e.g. `` `src/host-slots.ts:329` ``) now resolves to the real file instead of failing the file-set check — a line-numbered body, or a `Touches:`/`Creates:` marker line whose cite points at a line, no longer halts campaign planning (#388).
 - [ops] A red gate's report now selects the failing tests out of TAP output — each `not ok` line with its YAML diagnostic (`error`, `location`, …), capped with a count of any omitted — instead of blindly tailing the log, so a failure above the tail window is no longer invisible and the `campaign-parked` notice names what broke rather than showing only passing tests. Non-TAP output (e.g. `typecheck`) still tails as before (#389).
 - [user] A campaign parked on a redrive-only reason (red-base, conflict, crash) — which writes no per-issue parked record — no longer reports "nothing parked". `vetinari parked` and the gateway `/status` now name the park reason and the recovery it needs (fix forward then redrive, or prune), and the "reply to a question message" advice appears only when an answerable question/stall park exists (#391).
+- [user] Wave planning no longer treats two distinct files that merely share a basename (e.g. `a/b/c/foo.md` and `a/c/foo.md`) as a collision: each cite now resolves to its real repo-relative path by longest-suffix match against the tree, so tickets touching different files stay in one wave instead of being needlessly spilled apart (#386).
 
 ### Collected changes — September 3, 2026
 

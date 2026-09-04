@@ -267,6 +267,21 @@ test("followView (paused) freezes the visible set at the mark and counts matchin
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+// Poll `pred` on a short interval up to a generous deadline, returning its first truthy value (or
+// its last falsy result at timeout, so the assertion that follows still reports the miss). The
+// stream pump fills `stream.frames` asynchronously and the push is debounced, so a test waits for
+// the expected frame to land rather than sleeping a fixed span a loaded host can outlast; an idle
+// run returns as soon as the frame arrives instead of always waiting out the full budget (#392).
+const waitFor = async <T>(pred: () => T): Promise<T> => {
+  const deadline = Date.now() + 10_000;
+  let value = pred();
+  while (!value && Date.now() < deadline) {
+    await delay(25);
+    value = pred();
+  }
+  return value;
+};
+
 // Open an /api/events stream and continuously accumulate parsed frames (with their optional
 // `event:` type) into an array until closed — a continuous pump, so a frame that arrives at any
 // time is captured (racing read() against a timeout would drop a late frame mid-read).
@@ -324,8 +339,7 @@ test("GET /api/events seeds a running agent's tail as a named `tail` SSE frame (
   const port = (server.address() as AddressInfo).port;
   const stream = await openStream(port);
   try {
-    await delay(500);
-    const tail = stream.frames.find((f) => f.event === "tail");
+    const tail = await waitFor(() => stream.frames.find((f) => f.event === "tail"));
     assert.ok(tail, "a tail frame was seeded on connect");
     assert.equal(tail!.data.project, "acme");
     assert.deepEqual(tail!.data.tail.agents, [{ issue: "204", status: "running" }]);
@@ -353,15 +367,13 @@ test("GET /api/events pushes an updated tail frame when a running agent appends 
   const port = (server.address() as AddressInfo).port;
   const stream = await openStream(port);
   try {
-    await delay(400);
     assert.ok(
-      stream.frames.find((f) => f.event === "tail" && f.data.tail.lines.length === 1),
+      await waitFor(() => stream.frames.find((f) => f.event === "tail" && f.data.tail.lines.length === 1)),
       "the seed tail frame carries the one existing line",
     );
     // A fresh activity append must surface as a new tail frame with both lines.
     appendActivity(projDir, "204", event("sandbox-exec", { taskId: "204", cmd: "npm test", ts: "2026-08-27T00:00:02.000Z" }));
-    await delay(800);
-    const updated = [...stream.frames].reverse().find((f) => f.event === "tail");
+    const updated = await waitFor(() => [...stream.frames].reverse().find((f) => f.event === "tail" && f.data.tail.lines.length === 2));
     assert.ok(updated && updated.data.tail.lines.length === 2, "the appended line arrives in a new tail frame");
   } finally {
     await stream.close();
@@ -386,8 +398,7 @@ test("GET /api/events re-subscribes the tail to the new wave on advance, without
   const port = (server.address() as AddressInfo).port;
   const stream = await openStream(port);
   try {
-    await delay(400);
-    const seed = stream.frames.find((f) => f.event === "tail");
+    const seed = await waitFor(() => stream.frames.find((f) => f.event === "tail"));
     assert.deepEqual(seed?.data.tail.agents, [{ issue: "204", status: "running" }], "the seed tail follows wave 0");
 
     // The server advances the wave: wave 0 closes, wave 1 starts and its agent spawns and works.
@@ -404,10 +415,12 @@ test("GET /api/events re-subscribes the tail to the new wave on advance, without
     );
     initActivityLog(projDir, "205");
     appendActivity(projDir, "205", event("tool", { taskId: "205", name: "Read", ts: "2026-08-27T00:00:07.000Z" }));
-    await delay(800);
 
     // The tail re-subscribes to wave 1 in a fresh frame — no page reload — and drops wave 0's agent.
-    const advanced = [...stream.frames].reverse().find((f) => f.event === "tail");
+    const advanced = await waitFor(() => {
+      const f = [...stream.frames].reverse().find((f) => f.event === "tail");
+      return f && f.data.tail.agents.length === 1 && f.data.tail.agents[0].issue === "205" ? f : undefined;
+    });
     assert.deepEqual(advanced?.data.tail.agents, [{ issue: "205", status: "running" }], "the tail follows the new wave");
     assert.ok(
       advanced!.data.tail.lines.every((l: { issue: string }) => l.issue === "205"),
@@ -437,8 +450,7 @@ test("GET /api/events pushes a named `host` frame when host.jsonl gains a row (#
       // only rows appended after connect arrive as frames.
       assert.ok(!stream.frames.some((f) => f.event === "host"), "no host frame for the connect backlog");
       appendFileSync(hostFile, '{"ts":"2026-08-28T00:00:01.000Z","event":"telegram-send","error":"429"}\n');
-      await delay(800);
-      const host = [...stream.frames].reverse().find((f) => f.event === "host");
+      const host = await waitFor(() => [...stream.frames].reverse().find((f) => f.event === "host"));
       assert.ok(host, "the appended host row arrives as a named host frame");
       assert.equal(host!.data.lines.length, 1);
       assert.ok(host!.data.lines[0].includes('"error":"429"'), "the frame carries the raw appended line");

@@ -1131,7 +1131,7 @@ test("a graft appended mid-wave lands in a future wave; the loop re-derives and 
   const childRun: CampaignDeps["spawnRun"] = async (taskId) => {
     spawned.push(taskId);
     if (taskId === "101") {
-      cfg.log.log("graft", { ids: ["301"], blockedBy: {}, basenames: {} });
+      cfg.log.log("graft", { ids: ["301"], blockedBy: {}, fileKeys: {} });
     }
     return 0;
   };

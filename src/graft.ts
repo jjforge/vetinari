@@ -126,7 +126,7 @@ export interface GraftResult {
   event?: {
     ids: string[];
     blockedBy: Record<string, string[]>;
-    basenames: Record<string, string[]>;
+    fileKeys: Record<string, string[]>;
     titles: Record<string, string>;
   };
   /** the `progress:graft` outbound message — enqueued unless `dryRun`; absent on a
@@ -314,10 +314,10 @@ export async function runGraft(
     wave: placeOf.get(id)! + 1,
   }));
 
-  // The persisted event keeps `basenames` as its field name — it is a wire format read
-  // back by `reduceCampaign` from logs already on disk, with no graft migration yet
-  // (renamed separately). The value it carries is now fileKeys.
-  const event = { ids: normalized, blockedBy, basenames: fileKeys, titles };
+  // The persisted event names its layering input `fileKeys`, matching the pure fold's
+  // vocabulary (ADR 0014). A log written before this rename carried the same value under
+  // `basenames`; the reducer's reader accepts either, preferring `fileKeys`.
+  const event = { ids: normalized, blockedBy, fileKeys, titles };
   const outbound = notice({
     emoji: "🌱",
     project: cfg.project,

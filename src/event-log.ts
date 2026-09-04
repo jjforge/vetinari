@@ -164,14 +164,17 @@ export interface PruneEvent extends BaseEvent {
 
 /** `graft` — issues were added to a running (or resumable) campaign: the added ids and the
  * precomputed layering inputs the pure reducer folds them with (each added id's in-campaign
- * `blockedBy`, and the basenames of the added ids plus the still-unstarted members it places
+ * `blockedBy`, and the fileKeys of the added ids plus the still-unstarted members it places
  * against) so `reduceCampaign` stays free of tracker/filesystem access (cli.mts, ADR 0014/0012).
  * The additive mirror of `prune`. */
 export interface GraftEvent extends BaseEvent {
   event: "graft";
   ids: string[];
   blockedBy: Record<string, string[]>;
-  basenames: Record<string, string[]>;
+  fileKeys: Record<string, string[]>;
+  /** Legacy name for `fileKeys` in logs written before the rename. Read back preferring
+   *  `fileKeys` (never written) so an `orchestrator.jsonl` already on disk still folds. */
+  basenames?: Record<string, string[]>;
   /** each grafted id's issue title (parsed from the task text graft already fetches),
    * so the reducer's title-folding renders the grafted wave's header and rows with a
    * real title instead of a bare `Wave N` / `#num` (#197). */

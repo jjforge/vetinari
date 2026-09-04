@@ -22,6 +22,7 @@ Within a milestone each bold section label appears at most once.
 
 **Improvements:**
 - [ops] The `fileSet` resolver's `files` now carry resolved repo-relative paths (a bare basename only where a cite is genuinely ambiguous), and an ambiguous bare filename stays confident and collides with any file of that name rather than halting the plan (#386).
+- [api] The persisted `graft` event now names its layering input `fileKeys`, matching the resolved-path vocabulary the reducer folds it with; a log written before the rename (carrying `basenames`) still folds correctly — the reducer's reader accepts either, preferring `fileKeys` (#394).
 
 **Bug fixes:**
 - [user] `campaign` plans now validate every ticket's file-set against one tree snapshot taken on first resolution, instead of re-walking the repo per ticket — so a plan's tickets can no longer disagree about the tree, and an N-ticket plan walks the tree once, not N times (#385).

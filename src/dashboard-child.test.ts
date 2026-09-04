@@ -68,6 +68,11 @@ test("runChild caps the wait at timeoutMs and does NOT kill the still-running ch
   // The marker is absent now — the child is still running, not killed. It appears once the
   // child finishes on its own, proving `runChild` left it alone (decision 6).
   assert.equal(existsSync(marker), false, "the child had not finished when the cap fired");
-  await delay(400);
+  // Poll rather than sleep a fixed span: the child needs 300ms of its own, and a loaded
+  // host (a campaign saturating the box is exactly when this suite runs) can stretch that
+  // past any fixed wait. Polling returns as soon as the child lands, so an idle run is no
+  // slower, while the deadline is generous enough not to flake (#390).
+  const deadline = Date.now() + 10_000;
+  while (!existsSync(marker) && Date.now() < deadline) await delay(25);
   assert.equal(existsSync(marker), true, "the un-killed child ran to completion after the cap");
 });

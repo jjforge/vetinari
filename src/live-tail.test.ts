@@ -445,15 +445,26 @@ test("GET /api/events pushes a named `host` frame when host.jsonl gains a row (#
     const port = (server.address() as AddressInfo).port;
     const stream = await openStream(port);
     try {
-      await delay(300);
       // The connect backlog is not re-pushed (the page's own /api/host-log fetch already has it);
-      // only rows appended after connect arrive as frames.
-      assert.ok(!stream.frames.some((f) => f.event === "host"), "no host frame for the connect backlog");
+      // only rows appended after connect arrive as frames. A negative ("no backlog frame") cannot be
+      // polled for, so rather than sleep a fixed span and assert silence — which a loaded host can
+      // outlast — append a fresh row and synchronize on *its* frame: the frame's arrival proves the
+      // watcher fired and the debounce elapsed, so the backlog row's absence from it (and the fact
+      // that exactly one host frame ever landed) is evidence, not an unobserved race.
       appendFileSync(hostFile, '{"ts":"2026-08-28T00:00:01.000Z","event":"telegram-send","error":"429"}\n');
       const host = await waitFor(() => [...stream.frames].reverse().find((f) => f.event === "host"));
       assert.ok(host, "the appended host row arrives as a named host frame");
       assert.equal(host!.data.lines.length, 1);
       assert.ok(host!.data.lines[0].includes('"error":"429"'), "the frame carries the raw appended line");
+      assert.ok(
+        !host!.data.lines.some((l: string) => l.includes("gateway-routed")),
+        "the connect backlog row is not re-pushed within the frame",
+      );
+      assert.equal(
+        stream.frames.filter((f) => f.event === "host").length,
+        1,
+        "the connect backlog never surfaced a host frame of its own",
+      );
     } finally {
       await stream.close();
       await new Promise<void>((r) => server.close(() => r()));

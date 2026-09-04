@@ -25,7 +25,7 @@ const treeWith = (...files: string[]): string => {
   return root;
 };
 
-test("defaultFileSet cites the body's paths, normalized to basename and validated against the tree", () => {
+test("defaultFileSet resolves the body's cites to their real repo-relative paths against the tree", () => {
   const root = treeWith("src/plan.ts", "templates/repo/stack_strip.tmpl");
   const fileSet = defaultFileSet(root);
 
@@ -33,20 +33,23 @@ test("defaultFileSet cites the body's paths, normalized to basename and validate
     "Touches `src/plan.ts` and templates/repo/stack_strip.tmpl for the strip.",
   );
 
-  assert.deepEqual(res.files.sort(), ["plan.ts", "stack_strip.tmpl"]);
+  assert.deepEqual(res.files.sort(), [
+    "src/plan.ts",
+    "templates/repo/stack_strip.tmpl",
+  ]);
   assert.equal(res.confident, true);
 });
 
-test("defaultFileSet judges collisions by basename: the same file via different paths is one entry", () => {
+test("defaultFileSet resolves the same file cited via different paths to one entry", () => {
   const root = treeWith("src/plan.ts");
   const fileSet = defaultFileSet(root);
 
-  // Cited twice under two different paths — both normalize to the one basename.
+  // Cited twice under two different paths — both resolve to the one real path.
   const res = fileSet(
     "Edits `src/plan.ts`, and also referenced as a/b/plan.ts elsewhere.",
   );
 
-  assert.deepEqual(res.files, ["plan.ts"]);
+  assert.deepEqual(res.files, ["src/plan.ts"]);
   assert.equal(res.confident, true);
 });
 
@@ -67,7 +70,7 @@ test("defaultFileSet is not confident when a cited path is not in the tree", () 
   // `src/plan.ts` exists, but `src/ghost.ts` does not — a stale or wrong note.
   const res = defaultFileSet(root)("Touches `src/plan.ts` and `src/ghost.ts`.");
 
-  assert.deepEqual(res.files, ["plan.ts"]); // only the validated basename survives
+  assert.deepEqual(res.files, ["src/plan.ts"]); // only the resolved path survives
   assert.equal(res.confident, false); // ...but the miss forbids confidence
 });
 
@@ -106,7 +109,51 @@ test("defaultFileSet snapshots on first use, not at construction", () => {
 
   const res = fileSet("Touches `src/plan.ts`.");
 
-  assert.deepEqual(res.files, ["plan.ts"]); // first use snapshots the now-present file
+  assert.deepEqual(res.files, ["src/plan.ts"]); // first use snapshots the now-present file
+  assert.equal(res.confident, true);
+});
+
+test("defaultFileSet resolves a cite to its full repo-relative path by suffix match", () => {
+  const root = treeWith("a/b/c/foo.md", "a/c/foo.md");
+  const fileSet = defaultFileSet(root);
+
+  // Two distinct files share the basename foo.md. Each cite carries enough of its
+  // path to name exactly one, so each resolves to that real path — not the shared
+  // basename that used to conflate them.
+  const one = fileSet("Touches: `a/b/c/foo.md`\n");
+  const two = fileSet("Touches: `a/c/foo.md`\n");
+
+  assert.deepEqual(one.files, ["a/b/c/foo.md"]);
+  assert.equal(one.confident, true);
+  assert.deepEqual(two.files, ["a/c/foo.md"]);
+  assert.equal(two.confident, true);
+});
+
+test("defaultFileSet resolves a bare filename to its real path when the tree holds exactly one", () => {
+  const root = treeWith("src/fileset.ts");
+  const fileSet = defaultFileSet(root);
+
+  // The authoring promise: cite a file however you like. A bare `fileset.ts` and a
+  // path `src/fileset.ts` both resolve to the one real path, so they still collide
+  // (user story 6).
+  const bare = fileSet("Touches: `fileset.ts`\n");
+  const path = fileSet("Touches: `src/fileset.ts`\n");
+
+  assert.deepEqual(bare.files, ["src/fileset.ts"]);
+  assert.deepEqual(path.files, ["src/fileset.ts"]);
+  assert.equal(bare.confident, true);
+});
+
+test("defaultFileSet keeps an ambiguous bare cite as a basename, still confident", () => {
+  const root = treeWith("a/foo.md", "b/foo.md", "c/foo.md");
+  const fileSet = defaultFileSet(root);
+
+  // Three files named foo.md and only a bare `foo.md` to go on — genuinely
+  // ambiguous. It must NOT flip the ticket to not-confident (halting a ticket that
+  // plans fine today); it stays a bare basename that collides with any foo.md.
+  const res = fileSet("Touches: `foo.md`\n");
+
+  assert.deepEqual(res.files, ["foo.md"]);
   assert.equal(res.confident, true);
 });
 
@@ -143,7 +190,7 @@ test("defaultFileSet over a task's prose ignores a filename token that lived onl
 
   const res = fileSet(ticketProse(task));
 
-  assert.deepEqual(res.files, ["fileset.ts"]);
+  assert.deepEqual(res.files, ["src/fileset.ts"]);
   assert.equal(res.confident, true);
 });
 
@@ -163,7 +210,7 @@ test("ticketProse falls back to an anchored marker line found only in a comment"
 
   const res = fileSet(ticketProse(task));
 
-  assert.deepEqual(res.files, ["fileset.ts"]);
+  assert.deepEqual(res.files, ["src/fileset.ts"]);
   assert.equal(res.confident, true);
 });
 
@@ -185,7 +232,7 @@ test("ticketProse reads a comment's marker line but ignores a filename in the co
 
   const res = fileSet(ticketProse(task));
 
-  assert.deepEqual(res.files, ["fileset.ts"]);
+  assert.deepEqual(res.files, ["src/fileset.ts"]);
   assert.equal(res.confident, true);
 });
 
@@ -203,7 +250,7 @@ test("ticketProse lets a body marker win over a stale marker in a comment", () =
 
   const res = fileSet(ticketProse(task));
 
-  assert.deepEqual(res.files, ["fileset.ts"]);
+  assert.deepEqual(res.files, ["src/fileset.ts"]);
   assert.equal(res.confident, true);
 });
 
@@ -224,7 +271,7 @@ test("ticketProse unions marker lines across several comments when the body has 
 
   const res = fileSet(ticketProse(task));
 
-  assert.deepEqual(res.files.sort(), ["fileset.ts", "plan.ts"]);
+  assert.deepEqual(res.files.sort(), ["src/fileset.ts", "src/plan.ts"]);
   assert.equal(res.confident, true);
 });
 
@@ -233,12 +280,12 @@ test("defaultFileSet recovers a slash-path cite fenced by backslash-escaped back
 
   // #249's shape: `\`src/dashboard-render.ts\`` — a slash path fenced by stray
   // backslashes. The escape is a delimiter artifact orthogonal to tree-presence, so
-  // the resolver strips it and recovers the clean basename rather than halting.
+  // the resolver strips it and recovers the clean path rather than halting.
   const res = defaultFileSet(root)(
     "Touches (existing files): \\`src/dashboard-render.ts\\`\n",
   );
 
-  assert.deepEqual(res.files, ["dashboard-render.ts"]);
+  assert.deepEqual(res.files, ["src/dashboard-render.ts"]);
   assert.equal(res.confident, true);
 });
 
@@ -262,7 +309,7 @@ test("defaultFileSet recovers a #201-shaped bare-filename cite fenced by escaped
     "Touches (existing files): \\`fileset.ts\\`\n",
   );
 
-  assert.deepEqual(res.files, ["fileset.ts"]);
+  assert.deepEqual(res.files, ["src/fileset.ts"]);
   assert.equal(res.confident, true);
 });
 
@@ -292,7 +339,7 @@ test("ticketProse resolves an escaped-backtick body marker directly, no comment 
 
   const res = fileSet(ticketProse(task));
 
-  assert.deepEqual(res.files, ["fileset.ts"]);
+  assert.deepEqual(res.files, ["src/fileset.ts"]);
   assert.equal(res.confident, true);
 });
 
@@ -311,18 +358,18 @@ test("ticketProse still falls back to a comment marker when the body's marker ci
 
   const res = fileSet(ticketProse(task));
 
-  assert.deepEqual(res.files, ["fileset.ts"]);
+  assert.deepEqual(res.files, ["src/fileset.ts"]);
   assert.equal(res.confident, true);
 });
 
-test("defaultFileSet strips a trailing :line off a cite before taking its basename (#388)", () => {
+test("defaultFileSet strips a trailing :line off a cite before resolving it (#388)", () => {
   const root = treeWith("src/host-slots.ts");
 
   // The most natural way to point at a line — `path:line` — must resolve to the
   // real file, not the unmatchable `host-slots.ts:329` basename.
   const res = defaultFileSet(root)("Fix `src/host-slots.ts:329` please.");
 
-  assert.deepEqual(res.files, ["host-slots.ts"]);
+  assert.deepEqual(res.files, ["src/host-slots.ts"]);
   assert.equal(res.confident, true);
 });
 
@@ -331,7 +378,7 @@ test("defaultFileSet strips a trailing :line:col off a cite (#388)", () => {
 
   const res = defaultFileSet(root)("See `src/host-slots.ts:329:12`.");
 
-  assert.deepEqual(res.files, ["host-slots.ts"]);
+  assert.deepEqual(res.files, ["src/host-slots.ts"]);
   assert.equal(res.confident, true);
 });
 
@@ -342,7 +389,7 @@ test("defaultFileSet strips a :line suffix carried on a marker-line cite (#388)"
   // but pointed at a line. The suffix must not fail tree validation.
   const res = defaultFileSet(root)("Touches: `src/host-slots.ts:329`\n");
 
-  assert.deepEqual(res.files, ["host-slots.ts"]);
+  assert.deepEqual(res.files, ["src/host-slots.ts"]);
   assert.equal(res.confident, true);
 });
 
@@ -367,7 +414,7 @@ test("defaultFileSet still ignores a :line prose cite beside a clean marker line
     "prose cites `src/modes.ts:335`\n\nTouches: `src/host-slots.ts`\n",
   );
 
-  assert.deepEqual(res.files, ["host-slots.ts"]);
+  assert.deepEqual(res.files, ["src/host-slots.ts"]);
   assert.equal(res.confident, true);
 });
 
@@ -383,7 +430,7 @@ test("defaultFileSet anchors the marker at a line start — an inline prose ment
       "Touches (existing files): `src/plan.ts`\n",
   );
 
-  assert.deepEqual(res.files, ["plan.ts"]);
+  assert.deepEqual(res.files, ["src/plan.ts"]);
   assert.equal(res.confident, true);
 });
 
@@ -394,7 +441,7 @@ test("defaultFileSet lets the last marker line win when several qualify", () => 
   // A first marker line, then a corrected one lower down — the correction wins.
   const res = fileSet("Files: `src/plan.ts`\nFiles: `src/prune.ts`\n");
 
-  assert.deepEqual(res.files, ["prune.ts"]);
+  assert.deepEqual(res.files, ["src/prune.ts"]);
   assert.equal(res.confident, true);
 });
 
@@ -434,7 +481,7 @@ test("defaultFileSet unions a Touches line (existing) with a Creates line (new)"
     "Touches: `status.ts`\nCreates (new files): `event-log.ts`\n",
   );
 
-  assert.deepEqual(res.files.sort(), ["event-log.ts", "status.ts"]);
+  assert.deepEqual(res.files.sort(), ["event-log.ts", "src/status.ts"]);
   assert.equal(res.confident, true);
 });
 
@@ -448,7 +495,7 @@ test("defaultFileSet keeps Touches strictness even alongside a Creates line", ()
     "Touches: `status.ts`, `ghost.ts`\nCreates: `event-log.ts`\n",
   );
 
-  assert.deepEqual(res.files.sort(), ["event-log.ts", "status.ts"]);
+  assert.deepEqual(res.files.sort(), ["event-log.ts", "src/status.ts"]);
   assert.equal(res.confident, false);
 });
 
@@ -464,6 +511,6 @@ test("defaultFileSet reads only the marker line's cites, ignoring incidental pro
       "Touches (existing files): `fileset.ts`, `cli.mts`\n",
   );
 
-  assert.deepEqual(res.files.sort(), ["cli.mts", "fileset.ts"]);
+  assert.deepEqual(res.files.sort(), ["src/cli.mts", "src/fileset.ts"]);
   assert.equal(res.confident, true);
 });

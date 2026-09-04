@@ -409,13 +409,14 @@ export interface VetinariConfig {
    */
   listByLabel?: (label: string) => string[] | Promise<string[]>;
   /**
-   * Which files a ticket will touch, by basename, so `campaign-plan` can keep
-   * co-wave tickets file-disjoint (a wave that shares a file collides as a merge
-   * conflict at integration). `ticket` is the ticket's text; return
-   * `{ files, confident }` where `files` are basenames and `confident: false`
-   * means the file-set could not be pinned down (the planner then halts rather
-   * than guess). A config seam beside `blockedBy`/`fetchTask` — `defaultFileSet()`
-   * ships as a generic cites-from-body implementation you can use or wrap.
+   * Which files a ticket will touch, so `campaign-plan` can keep co-wave tickets
+   * file-disjoint (a wave that shares a file collides as a merge conflict at
+   * integration). `ticket` is the ticket's text; return `{ files, confident }` where
+   * `files` are fileKeys — resolved repo-relative paths, or a bare basename where a
+   * cite was ambiguous — and `confident: false` means the file-set could not be
+   * pinned down (the planner then halts rather than guess). A config seam beside
+   * `blockedBy`/`fetchTask` — `defaultFileSet()` ships as a generic cites-from-body
+   * implementation you can use or wrap.
    */
   fileSet?: FileSetOf;
   /**

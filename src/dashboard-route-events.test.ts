@@ -66,6 +66,25 @@ const unnamedFrames = (chunks: string[]): string[] => chunks.filter((c) => c.inc
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Poll `pred` on a short interval up to a generous deadline, returning its first truthy value (or
+// its last falsy result at timeout so the assertion that follows still reports the miss). A frame
+// arrives asynchronously (fs.watch latency + the debounce window), so a test waits for the expected
+// frame to land rather than sleeping a fixed span a loaded host can outlast; an idle run returns as
+// soon as it arrives instead of waiting out the full budget.
+const waitFor = async <T>(pred: () => T): Promise<T> => {
+  const deadline = Date.now() + 10_000;
+  let value = pred();
+  while (!value && Date.now() < deadline) {
+    await delay(25);
+    value = pred();
+  }
+  return value;
+};
+
+// The parsed `{ project, events }` payload of an unnamed `data:` frame.
+const framePayload = (frame: string): { project: string | null; events: { event: string }[] } =>
+  JSON.parse(frame.slice(frame.indexOf("data:") + "data:".length).trim());
+
 test("a connection emits one unnamed frame without waiting for an append (#331)", (t) => {
   const { configDir } = seed([event("campaign-start", { ts: "2026-08-01T00:00:00.000Z", waves: [["1"]], slots: 1 })]);
   const req = connReq();
@@ -91,10 +110,25 @@ test("a burst of denylisted noise after connect emits no further unnamed frame (
   const afterConnect = unnamedFrames(res.chunks).length;
   assert.equal(afterConnect, 1, "the connect ring is the only unnamed frame so far");
 
-  // Pure machine-noise (a denylisted kind) lands; the watcher fires but `viewRelevantEvents`
-  // drops it, so no grid frame follows.
-  appendFileSync(logFileOf(base), JSON.stringify({ ts: "2026-08-01T00:01:00.000Z", event: "outbound-enqueued" }) + "\n");
-  await delay(600); // fs.watch latency + the DEBOUNCE_MS window
+  // Pure machine-noise (a denylisted kind) and a view-relevant event land in the same append.
+  // The watcher fires once for both; `viewRelevantEvents` drops the noise, so the single frame
+  // that follows must carry only the view-relevant event. A negative ("nothing pushed") cannot be
+  // polled for, so we synchronize on that positive frame instead of sleeping a fixed span: its
+  // arrival proves the watcher fired and the debounce window elapsed, making the noise's absence
+  // from it evidence rather than an unobserved race (the technique status.test.ts's noise test names).
+  appendFileSync(
+    logFileOf(base),
+    JSON.stringify({ ts: "2026-08-01T00:01:00.000Z", event: "outbound-enqueued" }) +
+      "\n" +
+      JSON.stringify(event("turn", { taskId: "1", turn: 0, summary: "", ts: "2026-08-01T00:02:00.000Z" })) +
+      "\n",
+  );
 
-  assert.equal(unnamedFrames(res.chunks).length, afterConnect, "denylisted noise pushes nothing");
+  const frame = await waitFor(() => unnamedFrames(res.chunks)[afterConnect]);
+  assert.ok(frame, "the view-relevant append surfaces one further unnamed frame");
+  assert.deepEqual(
+    framePayload(frame).events.map((e) => e.event),
+    ["turn"],
+    "only the view-relevant event surfaces; the denylisted noise beside it is stripped",
+  );
 });

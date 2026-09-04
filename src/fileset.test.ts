@@ -315,6 +315,62 @@ test("ticketProse still falls back to a comment marker when the body's marker ci
   assert.equal(res.confident, true);
 });
 
+test("defaultFileSet strips a trailing :line off a cite before taking its basename (#388)", () => {
+  const root = treeWith("src/host-slots.ts");
+
+  // The most natural way to point at a line — `path:line` — must resolve to the
+  // real file, not the unmatchable `host-slots.ts:329` basename.
+  const res = defaultFileSet(root)("Fix `src/host-slots.ts:329` please.");
+
+  assert.deepEqual(res.files, ["host-slots.ts"]);
+  assert.equal(res.confident, true);
+});
+
+test("defaultFileSet strips a trailing :line:col off a cite (#388)", () => {
+  const root = treeWith("src/host-slots.ts");
+
+  const res = defaultFileSet(root)("See `src/host-slots.ts:329:12`.");
+
+  assert.deepEqual(res.files, ["host-slots.ts"]);
+  assert.equal(res.confident, true);
+});
+
+test("defaultFileSet strips a :line suffix carried on a marker-line cite (#388)", () => {
+  const root = treeWith("src/host-slots.ts");
+
+  // The convention-following case: the author wrote the marker line docs ask for,
+  // but pointed at a line. The suffix must not fail tree validation.
+  const res = defaultFileSet(root)("Touches: `src/host-slots.ts:329`\n");
+
+  assert.deepEqual(res.files, ["host-slots.ts"]);
+  assert.equal(res.confident, true);
+});
+
+test("defaultFileSet still halts on a genuinely absent file even with a :line suffix (#388)", () => {
+  const root = treeWith("src/host-slots.ts");
+
+  // Stripping the suffix must not launder a stale cite into a confident one:
+  // `ghost.ts` is absent from the tree, suffix or not.
+  const res = defaultFileSet(root)("Fix `src/ghost.ts:329` please.");
+
+  assert.deepEqual(res.files, []);
+  assert.equal(res.confident, false);
+});
+
+test("defaultFileSet still ignores a :line prose cite beside a clean marker line (#388)", () => {
+  const root = treeWith("src/host-slots.ts", "src/modes.ts");
+  const fileSet = defaultFileSet(root);
+
+  // The marker line wins outright; the prose cite (even now that its suffix would
+  // strip cleanly) stays ignored because a marker line is present.
+  const res = fileSet(
+    "prose cites `src/modes.ts:335`\n\nTouches: `src/host-slots.ts`\n",
+  );
+
+  assert.deepEqual(res.files, ["host-slots.ts"]);
+  assert.equal(res.confident, true);
+});
+
 test("defaultFileSet anchors the marker at a line start — an inline prose mention is not the marker", () => {
   const root = treeWith("src/plan.ts");
   const fileSet = defaultFileSet(root);

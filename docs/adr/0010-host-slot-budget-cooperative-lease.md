@@ -11,14 +11,21 @@ without throwing away in-flight work.
 The decision: a **host slot budget** — a host-side setting; unset leaves today's
 uncoordinated behavior untouched — is honored by a **cooperative lease that lives in
 the filesystem**, which every run reads and writes directly. A run takes a slot only
-when it is under both its own `QUEUE_SLOTS` and its current **fair share**: a floor
-of one slot per active project plus a weight-proportional cut of the remainder,
-computed over the currently-active projects. Because a run only ever *checks its
-share before acquiring the next slot*, allocation self-corrects — when another
-project becomes active, a busy run stops re-acquiring above its now-smaller share and
-**drains to it as its turns finish**, with no preemption and no discarded work. A
-project declares its **weight** in its own `vetinari/` config (default one); the
-host owns the total.
+when it is under both its own `QUEUE_SLOTS` and its current **fair share**. The share
+is **max-min fair by demand**: a floor of one slot per active project plus a
+weight-proportional cut of the remainder, but each project is then capped at what it
+actually *wants* — the number of slots it would fill if unbounded (its live
+containers plus its still-queued work) — and the surplus a want-capped project
+releases is redistributed to projects still short of their want, repeated until
+nothing moves. So a one-ticket wave reserves one slot, not its whole weighted cut,
+and the slots it does not want stay available to a busier project rather than idling.
+A run declares its **want** on its lease and refreshes it as its queue drains — a
+lease written with no want reads as unbounded demand, i.e. the plain weight-only cut.
+Because a run only ever *checks its share before acquiring the next slot*, allocation
+self-corrects — when another project becomes active, a busy run stops re-acquiring
+above its now-smaller share and **drains to it as its turns finish**, with no
+preemption and no discarded work. A project declares its **weight** in its own
+`vetinari/` config (default one); the host owns the total.
 
 Crucially, the lease is **not** the gateway. The gateway stays a dumb router
 (ADR 0002) that holds no cross-project decisions; making it the allocator would give
@@ -52,3 +59,9 @@ the gateway rather than living inside it.
   the budget, so a dead holder's slots are reclaimed on contention.
 - When active projects outnumber the budget, the one-slot floor is best-effort:
   projects that cannot get their slot wait first-come for the next freed one.
+- The floor and the weighted cut are a **floor under real demand, not a reservation
+  against absent work**: a project takes at most what it wants, so its unclaimed cut
+  flows to a project with queued work instead of idling the host. The floor still
+  holds under genuine contention — two projects that both want the whole budget split
+  it by weight — because there each project's want exceeds its cut, so nothing is
+  released. A run must keep its declared want current for this to hold.

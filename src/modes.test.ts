@@ -38,7 +38,7 @@ import {
   type WaveStartEvent,
 } from "./event-log.ts";
 import { archiveRun, shouldArchiveLeftover } from "./archive.ts";
-import type { HostBudget } from "./host-slots.ts";
+import { readLeases, type HostBudget } from "./host-slots.ts";
 
 const cfgWith = (fetchTask: ResolvedConfig["fetchTask"]): ResolvedConfig =>
   ({ fetchTask }) as ResolvedConfig;
@@ -510,6 +510,45 @@ const gitFreeDeps = (
   // Default grace is a no-op that resolves at once — a wave never blocks a test on real time.
   // A grace test overrides this to observe the wait or to model an answer landing in-window.
   grace: async () => {},
+});
+
+test("a wave declares its want as held-plus-pending and refreshes it as the wave drains, never reserving idle slots (#387)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-want-"));
+  const cfg = harnessCfg(dir);
+  // Ceiling 2 with a three-ticket wave: one ticket stays pending while two run, so
+  // the want must move as containers finish rather than sit frozen at the wave size.
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 2, weight: 1 };
+  const seen: Record<string, number | undefined> = {};
+  // Capture the project's declared want on its lease at the moment each child starts.
+  const childRun: CampaignDeps["spawnRun"] = async (id) => {
+    seen[id] = readLeases(host.configDir).find((l) => l.project === cfg.project)?.want;
+    return 0;
+  };
+  await silenceConsole(() =>
+    campaign(cfg, [["101", "102", "103"]], host, "drain", {}, gitFreeDeps(cfg, childRun)),
+  );
+  const wants = Object.values(seen).filter((w): w is number => w !== undefined);
+  assert.equal(wants.length, 3, "every child observed a declared want");
+  // The wave opens declaring it wants all three; by the time the last-admitted ticket
+  // spawns a sibling has drained, so the declared want has fallen below the wave size.
+  assert.equal(Math.max(...wants), 3, "the wave opens wanting all three tickets");
+  assert.ok(Math.min(...wants) < 3, "the want falls as the wave drains — not frozen at the wave size");
+});
+
+test("a one-ticket wave declares it wants exactly one slot — the reservation bug (#387)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-want-one-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 8, weight: 2 };
+  let seen: number | undefined;
+  const childRun: CampaignDeps["spawnRun"] = async () => {
+    seen = readLeases(host.configDir).find((l) => l.project === cfg.project)?.want;
+    return 0;
+  };
+  await silenceConsole(() =>
+    campaign(cfg, [["101"]], host, "one", {}, gitFreeDeps(cfg, childRun)),
+  );
+  // A single-ticket wave wants one slot, not its weight-derived cut of the ceiling.
+  assert.equal(seen, 1);
 });
 
 test("campaign prints human-readable plan/wave/complete lines and NO event JSON to stdout by default (#299)", async () => {

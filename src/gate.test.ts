@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { GateSpec, ResolvedConfig } from "./config.ts";
 import type { Sandbox } from "./sandbox.ts";
-import { runGates, selectGates } from "./gate.ts";
+import { runGates, selectGates, tapFailures } from "./gate.ts";
 import { activityLogPath } from "./activity.ts";
-import { loggerForRun } from "./log.ts";
+import { loggerForRun, tail } from "./log.ts";
 import type { OrchestratorEvent } from "./event-log.ts";
 
 // Fixtures mirror the scoped gates the field actually sees (issue #240): the
@@ -117,4 +117,80 @@ test("the wave-merge gate (no taskId) writes no per-task activity — not even a
   const sbx = gateSandbox({ "tsc --noEmit": 0 });
   await runGates(cfg, sbx, { all: true });
   assert.equal(existsSync(activityLogPath(cfg.stateDir, "any")), false);
+});
+
+// --- TAP failure selection (#389) ---
+// A red gate's report used to tail the command output. On TAP that is the wrong window: failures
+// are interleaved in run order and the tail is a passing-heavy summary, so the failing test never
+// appears. tapFailures selects the `not ok` lines and their YAML diagnostics instead.
+
+// One `not ok` at the very start, then 500 passing lines and the TAP summary — the shape the ticket
+// measured (a failure ~6400 lines above the tail window).
+const tapFailFirst = [
+  "not ok 1 - the widget explodes",
+  "  ---",
+  "  error: 'expected 1 to equal 2'",
+  "  failureType: 'testCodeFailure'",
+  "  location: '/src/widget.test.ts:42:3'",
+  "  ...",
+  ...Array.from({ length: 500 }, (_, i) => `ok ${i + 2} - passing check ${i + 2}`),
+  "1..501",
+  "# tests 501",
+  "# pass 500",
+  "# fail 1",
+].join("\n");
+
+test("tapFailures names a failing test the tail would bury under passing lines", () => {
+  const report = tapFailures(tapFailFirst);
+  assert.ok(report, "TAP output should be recognised");
+  assert.match(report!, /not ok 1 - the widget explodes/);
+  // Today's report — the last 200 lines — never names it.
+  assert.doesNotMatch(tail(tapFailFirst, 200), /the widget explodes/);
+});
+
+test("tapFailures carries the failing test's YAML diagnostic — error and location", () => {
+  const report = tapFailures(tapFailFirst)!;
+  assert.match(report, /error: 'expected 1 to equal 2'/);
+  assert.match(report, /location: '\/src\/widget\.test\.ts:42:3'/);
+});
+
+test("tapFailures represents several failures, capped, with a count of any omitted", () => {
+  const failures = Array.from({ length: 25 }, (_, i) => [
+    `not ok ${i + 1} - failure number ${i + 1}`,
+    "  ---",
+    `  error: 'boom ${i + 1}'`,
+    "  ...",
+  ]).flat();
+  const tap = [...failures, "1..25", "# tests 25", "# pass 0", "# fail 25"].join("\n");
+  const report = tapFailures(tap)!;
+  assert.match(report, /failure number 1\b/);
+  assert.match(report, /failure number 20\b/);
+  // Capped: the 21st onward are omitted, and the report says how many.
+  assert.doesNotMatch(report, /failure number 21\b/);
+  assert.match(report, /5 more failing tests/);
+});
+
+test("tapFailures returns null for non-TAP output so the caller keeps today's tail", () => {
+  const typecheckOut = "src/gate.ts(62,5): error TS2345: Argument of type 'x'.\nFound 1 error.";
+  assert.equal(tapFailures(typecheckOut), null);
+});
+
+test("a red TAP gate's report names the failure instead of tailing passing lines", async () => {
+  const cfg = gateCfg([{ cmd: "run-tests" }]);
+  const sbx = {
+    branch: "agent/T",
+    async exec(cmd: string) {
+      if (cmd === "run-tests") return { stdout: tapFailFirst, stderr: "", exitCode: 1 };
+      return { stdout: "", stderr: "", exitCode: 0 };
+    },
+    async run() {
+      throw new Error("unused");
+    },
+    async close() {},
+  } as unknown as Sandbox;
+  const { green, report } = await runGates(cfg, sbx, { all: true, taskId: "389" });
+  assert.equal(green, false);
+  assert.match(report, /\$ run-tests/);
+  assert.match(report, /not ok 1 - the widget explodes/);
+  assert.match(report, /location: '\/src\/widget\.test\.ts:42:3'/);
 });

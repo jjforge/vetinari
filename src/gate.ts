@@ -20,6 +20,44 @@ import { event } from "./event-log.ts";
  * every gate regardless of the diff. Pure — the selection decision lifted out
  * of `runGates` so it has a direct test surface (issue #240).
  */
+/** How many failing TAP tests a red gate's report shows before it summarises the rest as a count. */
+const MAX_TAP_FAILURES = 20;
+
+/**
+ * Select the failures out of a TAP stream, or `null` when the stream is not TAP.
+ *
+ * A red gate's report tails the command output so "the human sees why it went red". A tail is the
+ * right window for `tsc` and friends, but exactly wrong for TAP: failures are interleaved in run
+ * order and the stream ends with a passing-heavy summary, so a failure above the tail window is
+ * invisible and the park notice shows only passing tests (#389). When the output is TAP, keep the
+ * `not ok` lines and each one's indented YAML diagnostic block (`error`, `location`, …) instead —
+ * capped, with a count of any omitted. Detection keys off the TAP stream itself (a `1..N` plan
+ * line or a `^not ok` line), not the command string, so a project's own test command benefits with
+ * no config. Returns `null` when the output is not TAP, or is TAP with no failures, so the caller
+ * falls back to today's tail.
+ */
+export function tapFailures(stdout: string): string | null {
+  const lines = stdout.split("\n");
+  const isTap = lines.some((l) => /^\d+\.\.\d+$/.test(l) || /^not ok\b/.test(l));
+  if (!isTap) return null;
+
+  const blocks: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^not ok\b/.test(lines[i])) continue;
+    const block = [lines[i]];
+    // The indented YAML diagnostic block (`  ---` … `  ...`) belongs to this failure; it runs until
+    // the next non-indented line (the next test, or the `1..N`/`# …` summary).
+    while (i + 1 < lines.length && /^\s/.test(lines[i + 1])) block.push(lines[++i]);
+    blocks.push(block.join("\n"));
+  }
+  if (blocks.length === 0) return null;
+
+  const shown = blocks.slice(0, MAX_TAP_FAILURES);
+  const omitted = blocks.length - shown.length;
+  if (omitted > 0) shown.push(`… and ${omitted} more failing test${omitted === 1 ? "" : "s"}`);
+  return shown.join("\n");
+}
+
 export function selectGates(
   gates: GateSpec[],
   changedFiles: string,
@@ -59,7 +97,9 @@ export async function runGates(
     cfg.log.log("gate-result", resultFields);
     if (taskId) appendActivity(cfg.stateDir, taskId, event("gate-result", resultFields));
     if (res.exitCode !== 0) {
-      return { green: false, report: `$ ${g.cmd}\n${tail(res.stdout ?? "", 200)}\n${tail(res.stderr ?? "", 100)}` };
+      const stdout = res.stdout ?? "";
+      const evidence = tapFailures(stdout) ?? tail(stdout, 200);
+      return { green: false, report: `$ ${g.cmd}\n${evidence}\n${tail(res.stderr ?? "", 100)}` };
     }
   }
   return { green: true, report: "" };

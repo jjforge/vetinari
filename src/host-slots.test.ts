@@ -31,6 +31,15 @@ test("a project is capped at what it wants; the surplus flows to a project still
   assert.equal(fairShare(8, weights, "jjforge", wants), 7);
 });
 
+test("under genuine contention the weighted floor holds — both wanting the whole ceiling split it by weight", () => {
+  // Ceiling 8, equal weight, both wanting all eight: neither is want-capped, so the
+  // surplus never moves and the demand-aware split is the plain weighted 4/4.
+  const weights = { a: 2, b: 2 };
+  const wants = { a: 8, b: 8 };
+  assert.equal(fairShare(8, weights, "a", wants), 4);
+  assert.equal(fairShare(8, weights, "b", wants), 4);
+});
+
 test("a heavier weight takes a larger cut of the remainder", () => {
   // budget 10, a:3 b:1 → floor 1 each (2 used), remainder 8 split 3:1 → a +6, b +2.
   const weights = { a: 3, b: 1 };

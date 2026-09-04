@@ -40,6 +40,13 @@ export type FileSetOf = (ticket: string) => FileSet | Promise<FileSet>;
 const CITE_RE = /`([^`\n]+)`|((?:[\w.\-]+\/)+[\w.\-]+)/g;
 /** A bare filename with an alphabetic extension, e.g. `stack_strip.tmpl`. */
 const FILENAME_RE = /^[\w.\-]+\.[A-Za-z][\w-]*$/;
+/**
+ * A trailing `:<line>` or `:<line>:<col>` on a cite — the `path:line` form editors
+ * and review tools produce, and what `file_path:line` conventions encourage (#388).
+ * A colon is not legal in a basename on the platforms vetinari targets, so — like the
+ * escaped-backtick strip — removing it is unambiguous and cannot corrupt a real name.
+ */
+const LINE_SUFFIX_RE = /:\d+(?::\d+)?$/;
 
 /** The cited paths in a body, each reduced to its basename (deduped, in order). */
 function citedBasenames(body: string): string[] {
@@ -50,7 +57,10 @@ function citedBasenames(body: string): string[] {
   // a backslash, so stripping the escape is unambiguous and recovers the real path.
   const normalized = body.replace(/\\`/g, "`");
   for (const m of normalized.matchAll(CITE_RE)) {
-    const raw = (m[1] ?? m[2]).trim();
+    // Strip a trailing `:line[:col]` before anything else, so a line-numbered cite
+    // is path-shaped and reduces to the real basename rather than an unmatchable
+    // `host-slots.ts:329` the tree never contains (#388).
+    const raw = (m[1] ?? m[2]).trim().replace(LINE_SUFFIX_RE, "");
     // A backtick token counts only if it is path-shaped, not just any word.
     if (!raw.includes("/") && !FILENAME_RE.test(raw)) continue;
     seen.add(basename(raw));

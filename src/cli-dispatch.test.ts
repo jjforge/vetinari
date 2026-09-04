@@ -343,6 +343,48 @@ test("dispatch parked lists parked records", async () => {
   assert.deepEqual((deps.listParked as any).calls, [[deps.cfg]]);
 });
 
+// A campaign parked on a red merged base: its member merged (completed) and the wave holds red —
+// no per-issue parked record is written (src/archive.ts), so listParked is empty while it sits parked.
+const redBaseParkedCampaign = () => [
+  { event: "campaign-start", waves: [["436"]] },
+  { event: "wave-start", index: 0, tasks: ["436"] },
+  { event: "green", taskId: "436" },
+  { event: "merged", taskId: "436" },
+  { event: "campaign-parked", index: 0, reason: "red-base", detail: "merged base gated red" },
+];
+
+test("dispatch parked names a redrive-only park and its recovery when no per-issue record exists (#391)", async () => {
+  const { deps, logged } = makeDeps({
+    listParked: spy([]) as unknown as DispatchDeps["listParked"],
+    readEventLog: spy(redBaseParkedCampaign()) as any,
+  });
+  await dispatch({ kind: "parked" }, deps);
+  const out = logged.join("\n");
+  assert.doesNotMatch(out, /nothing parked/i, "a parked campaign is not idle");
+  assert.match(out, /red-base/);
+  assert.match(out, /Fix forward on the base, then `redrive`\./);
+  assert.doesNotMatch(out, /reply/i, "a red-base park is not answered by a reply");
+});
+
+test("dispatch parked reports nothing parked when no records and no campaign in flight (#391)", async () => {
+  const { deps, logged } = makeDeps(); // listParked → [] and readEventLog → [] by default
+  await dispatch({ kind: "parked" }, deps);
+  assert.deepEqual(logged, ["nothing parked"]);
+});
+
+test("dispatch parked reports nothing parked for a campaign that reached campaign-done (#391)", async () => {
+  const doneCampaign = () => [
+    { event: "campaign-start", waves: [["436"]] },
+    { event: "wave-start", index: 0, tasks: ["436"] },
+    { event: "merged", taskId: "436" },
+    { event: "wave-done", index: 0, merged: ["436"] },
+    { event: "campaign-done", waves: 1 },
+  ];
+  const { deps, logged } = makeDeps({ readEventLog: spy(doneCampaign()) as any });
+  await dispatch({ kind: "parked" }, deps);
+  assert.deepEqual(logged, ["nothing parked"]);
+});
+
 // A parked record whose question is the XML shape agents emit (prompts/tdd.md): the run
 // loop stores the inner <summary>/<detail>/<options><option> verbatim, no outer wrapper.
 const xmlParked = {

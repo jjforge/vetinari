@@ -18,6 +18,11 @@ and each entry opens with a tag saying who it reaches:
 `**Breaking changes:**` sorts first in a milestone and names the contract it broke.
 Within a milestone each bold section label appears at most once.
 
+### Collected changes — September 4, 2026
+
+**Bug fixes:**
+- [user] `campaign` plans now validate every ticket's file-set against one tree snapshot taken on first resolution, instead of re-walking the repo per ticket — so a plan's tickets can no longer disagree about the tree, and an N-ticket plan walks the tree once, not N times (#385).
+
 ### Collected changes — September 3, 2026
 
 **Improvements:**

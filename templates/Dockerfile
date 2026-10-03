@@ -1,7 +1,7 @@
 # Starting point for a vetinari task image: node + git + gh + the resumable agent
 # CLIs vetinari can drive — Claude Code, pi, and Codex (selectable per run with
 # `--agent`, ADR 0016) — running as a non-root `agent` user whose UID/GID match the
-# host's (sandcastle passes AGENT_UID/AGENT_GID when it builds).
+# host's (`vetinari build` passes AGENT_UID/AGENT_GID when it builds).
 #
 # Credentials stay per-provider and user-supplied in `.vetinari.local/.env`:
 #   claude → CLAUDE_CODE_OAUTH_TOKEN (or ANTHROPIC_API_KEY)
@@ -14,7 +14,7 @@
 # here. Prove it with `vetinari baseline` before running an agent.
 #
 # Build:
-#   npx sandcastle docker build-image --dockerfile <this file> --image-name <name>
+#   vetinari build   (builds cfg.image from this file; neither repeated on the CLI)
 
 FROM node:22-bookworm
 

@@ -7,7 +7,7 @@ import type { ResolvedConfig } from "./config.ts";
 import {
   autoPruneNotice,
   build,
-  buildImageArgs,
+  buildImageCommand,
   campaign,
   campaignFailedNotice,
   childSpawnEnv,
@@ -336,15 +336,41 @@ test("resolveTitles degrades gracefully when a fetch throws — the id is simply
   assert.deepEqual(map, { "101": "ok" });
 });
 
-test("buildImageArgs shells sandcastle build-image with the image and dockerfile, each named once", () => {
-  const args = buildImageArgs("vetinari-myapp", "vetinari/Dockerfile");
-  assert.deepEqual(args, [
-    "docker",
-    "build-image",
-    "--dockerfile",
-    "vetinari/Dockerfile",
-    "--image-name",
+test("buildImageCommand runs `docker` with the image tag, both uid/gid build args, the absolute Dockerfile and the project-root context", () => {
+  const cmd = buildImageCommand(
     "vetinari-myapp",
+    "/proj/vetinari/Dockerfile",
+    "/proj",
+    1001,
+    1002,
+  );
+  // The spawned program is docker itself — never npx/sandcastle, whose CLI guard refuses
+  // without a .sandcastle/ (#396).
+  assert.equal(cmd.program, "docker");
+  assert.deepEqual(cmd.args, [
+    "build",
+    "-t",
+    "vetinari-myapp",
+    "--build-arg",
+    "AGENT_UID=1001",
+    "--build-arg",
+    "AGENT_GID=1002",
+    "-f",
+    "/proj/vetinari/Dockerfile",
+    "/proj",
+  ]);
+});
+
+test("buildImageCommand leaves the --build-args out when no uid/gid is available (a platform without them)", () => {
+  const cmd = buildImageCommand("vetinari-myapp", "/proj/vetinari/Dockerfile", "/proj");
+  assert.equal(cmd.program, "docker");
+  assert.deepEqual(cmd.args, [
+    "build",
+    "-t",
+    "vetinari-myapp",
+    "-f",
+    "/proj/vetinari/Dockerfile",
+    "/proj",
   ]);
 });
 

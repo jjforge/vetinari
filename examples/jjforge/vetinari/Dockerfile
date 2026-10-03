@@ -4,8 +4,8 @@
 # rustup (rust-toolchain.toml resolves the channel), and the C build deps
 # jj-lib/sidecar crates link against.
 #
-# Build:  npx sandcastle docker build-image --dockerfile vetinari/Dockerfile --image-name vetinari-jjforge
-# (build-args AGENT_UID/AGENT_GID are supplied by sandcastle on Linux)
+# Build:  vetinari build   (builds vetinari-jjforge from this file)
+# (build-args AGENT_UID/AGENT_GID are supplied by `vetinari build` on Linux)
 
 FROM node:22-bookworm
 

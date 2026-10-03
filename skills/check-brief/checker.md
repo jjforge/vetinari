@@ -12,7 +12,7 @@ Be sceptical of the brief, not of the code: the code is what's true. Report only
 2. For each name, find it on the base branch: the schema and migrations, the queries, the import/export format docs, the routes, the templates, the glossary. A name the brief tells the agent to create is fine. A name that exists nowhere and that the brief doesn't say to create is a **blocker**: say where you looked.
 3. Check each criterion against the brief's **out-of-scope** list and against the other criteria. A criterion that can only be met by doing something out of scope — a new table, a new kind of event, a change the brief excludes — is a **blocker**, even when it doesn't say so in as many words: work out what meeting it would take.
 4. Check each criterion is testable as written: it names an observable outcome a test could assert. Flag vague ones ("works well", "is clear") and ones that depend on something no test can see.
-5. Check the file-set marker, if there is one: every `Touches` path exists on the base branch and every `Creates` path doesn't. Note any file the work plainly needs that neither lists.
+5. Check the file-set marker, if there is one: every `Touches` path exists on the base branch and every `Creates` path doesn't. Note any file the work plainly needs that neither lists, except the changelog fragment (`changelog.d/<n>.md`): every ticket writes one, so the marker leaves it out.
 
 Report, compact and with no preamble:
 

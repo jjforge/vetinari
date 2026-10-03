@@ -157,19 +157,34 @@ const selfSpawnRun: RunSpawner = (taskId, resumeSession) =>
 export const DOCKERFILE = "vetinari/Dockerfile";
 
 /**
- * The sandcastle argv that builds `image` from `dockerfile` — `docker
- * build-image` with both passed by flag. Pure, so the one place that names the
- * image and the Dockerfile on the CLI is checkable without a Docker daemon.
+ * The program and argv that build `image` from `dockerfile` — `docker build`
+ * verbatim, as sandcastle's `build-image` would run it: `-t <image>`, the uid/gid
+ * `--build-arg`s (left out when the platform has no uid/gid, matching sandcastle's
+ * `defaultUidBuildArgs`), `-f <absolute Dockerfile>`, then the build context. We go
+ * straight to `docker` rather than through sandcastle's CLI because that CLI refuses
+ * to run without a `.sandcastle/` directory — the exact stray dir the `stateDir` fork
+ * pin exists to eliminate — even though the one thing it guards (a default Dockerfile
+ * location) is never read once `--dockerfile` is given (#396). Pure, so the one place
+ * that assembles the build command is checkable without a Docker daemon.
  */
-export function buildImageArgs(image: string, dockerfile: string): string[] {
-  return [
-    "docker",
-    "build-image",
-    "--dockerfile",
-    dockerfile,
-    "--image-name",
-    image,
-  ];
+export interface BuildCommand {
+  program: string;
+  args: string[];
+}
+export function buildImageCommand(
+  image: string,
+  dockerfile: string,
+  context: string,
+  uid?: number,
+  gid?: number,
+): BuildCommand {
+  const buildArgs: string[] = [];
+  if (uid !== undefined) buildArgs.push("--build-arg", `AGENT_UID=${uid}`);
+  if (gid !== undefined) buildArgs.push("--build-arg", `AGENT_GID=${gid}`);
+  return {
+    program: "docker",
+    args: ["build", "-t", image, ...buildArgs, "-f", resolve(dockerfile), context],
+  };
 }
 
 /**
@@ -209,22 +224,27 @@ export interface BuildDeps {
 }
 
 /**
- * Shell sandcastle's `docker build-image` for `image`/`dockerfile`, inheriting
- * stdio so its progress and any error stay visible, and resolve to its exit code
- * (a launch failure counts as non-zero). The real effect behind `BuildDeps`.
+ * Run `docker build` for `image`/`dockerfile` with the project root as the build
+ * context, inheriting stdio so its progress and any error stay visible, and resolve
+ * to docker's exit code (a launch failure counts as non-zero). The uid/gid build args
+ * come from the host process, as sandcastle's `defaultUidBuildArgs` does. The real
+ * effect behind `BuildDeps`; the spawn runs exactly what `buildImageCommand` returns.
  */
 const runBuildImage = (image: string, dockerfile: string): Promise<number> =>
-  new Promise((resolve) => {
-    const child = spawn(
-      "npx",
-      ["sandcastle", ...buildImageArgs(image, dockerfile)],
-      { stdio: ["ignore", "inherit", "inherit"] },
+  new Promise((done) => {
+    const { program, args } = buildImageCommand(
+      image,
+      dockerfile,
+      process.cwd(),
+      process.getuid?.(),
+      process.getgid?.(),
     );
+    const child = spawn(program, args, { stdio: ["ignore", "inherit", "inherit"] });
     child.on("error", (err) => {
-      console.error(`build: could not launch sandcastle — ${err.message}`);
-      resolve(1);
+      console.error(`build: could not launch docker — ${err.message}`);
+      done(1);
     });
-    child.on("exit", (code) => resolve(code ?? 1));
+    child.on("exit", (code) => done(code ?? 1));
   });
 
 const defaultBuildDeps: BuildDeps = { buildImage: runBuildImage, baseline };

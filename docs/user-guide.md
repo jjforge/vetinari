@@ -92,7 +92,7 @@ When something stops the campaign, you take one of the five moves. An answer con
 5. `vetinari run <issue>` once, to see a single loop go green or park. A run proves the loop; it banks its commits on the issue's branch and merges nothing.
 6. Then `vetinari campaign …` — the same loop plus integration: it merges each green onto the base and gates the merged base, which is how work actually lands.
 
-Once per machine: run the gateway as a service (`vetinari gateway install`) so questions reach you when no terminal is open, and set `MAX_CONCURRENT_CONTAINERS` to what the host can carry. Every project on the machine shares that ceiling.
+Once per machine: run the gateway as a service (`vetinari gateway install`) so questions reach you when no terminal is open, and set `MAX_CONCURRENT_CONTAINERS` to what the host can carry. Every project on the machine shares that ceiling. Then run `scripts/install-skills.sh` from the vetinari checkout: it links the operator skills (`/fileset`, `/triage-placement`, `/verify-pending`) into `~/.claude/skills`, so every project sees one copy that tracks the checkout.
 
 ## Writing an issue that can run unattended
 

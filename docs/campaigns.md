@@ -63,7 +63,8 @@ The campaign drains a wave, merges its greens one at a time, gates the **merged*
 base as a whole, then advances — all on the checked-out base branch, locally,
 never pushing. The merged-base gate is integration, not live verification: a
 merged ticket is `pending-verify` until a local run confirms it (the closing rule
-in [`issue-conventions.md`](issue-conventions.md)), then it closes. A wave is done
+in [`issue-conventions.md`](issue-conventions.md)), then it closes. The
+`/verify-pending` skill runs that confirmation over every `pending-verify` issue. A wave is done
 only when every member is `completed`; one member parking or failing never aborts
 its siblings — the wave drains, every green still merges, and only then does the
 campaign park or stop as failed.

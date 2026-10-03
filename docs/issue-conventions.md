@@ -23,6 +23,7 @@ Type is set via the **API**, not a label: `gh api --method PATCH repos/jjforge/v
 
 - **Epic → issue.** An epic is typed `Epic` (or holds native sub-issues), owns no work of its own, and closes when its children do. A large childless issue is not an epic however big it is — it is _unspecced_ work; give it `needs-triage` and let `/grill-with-docs → /to-spec → /to-tickets` produce the children.
 - **Dependencies are native.** Use GitHub's `blocked_by` dependencies, not prose in a body — a ticket is grabbable once all its blockers are closed: `gh api -X POST repos/jjforge/vetinari/issues/<n>/dependencies/blocked_by -F issue_id=<blocker-id>`.
+- The `/triage-placement` skill places an issue under its epic and wires these edges.
 
 ## Declaring a ticket's file-set
 
@@ -46,6 +47,6 @@ A tracer-bullet ticket whose whole job is to add a new module carries only a `Cr
 
 A merge is **not** a close (and a plain `git merge` never auto-closes anyway). When work lands on a branch, label it **`pending-verify`**; close it only after a **local end-to-end validation** — driving the change on a local run/stack is enough, it need not reach a remote or production. Then `gh issue close <n> -c "…"` and the label drops with it. An epic closes when its last child closes.
 
-The orchestrator applies the **first hop automatically** when the config wires an `onIssueMerged` handler (`githubMarkPendingVerify(repo)` ships for GitHub): once a campaign wave merges an issue's green locally and the merged-base gate passes, that issue is relabelled `ready-for-agent` → `pending-verify` — best-effort, so an offline write never fails the run. Closing stays the separate, human/verify step above. With no handler configured the orchestrator labels nothing and this stays a manual step.
+The orchestrator applies the **first hop automatically** when the config wires an `onIssueMerged` handler (`githubMarkPendingVerify(repo)` ships for GitHub): once a campaign wave merges an issue's green locally and the merged-base gate passes, that issue is relabelled `ready-for-agent` → `pending-verify` — best-effort, so an offline write never fails the run. Closing stays the separate, human/verify step above. With no handler configured the orchestrator labels nothing and this stays a manual step. The `/verify-pending` skill runs the second hop: it checks each `pending-verify` issue on the base and closes the resolved ones.
 
 **Wont-fix is a close with a reason:** the `wont-fix` label plus a comment giving the rationale, so the decision is a durable record and is not re-filed or re-argued.

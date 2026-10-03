@@ -27,6 +27,7 @@ Within a milestone each bold section label appears at most once.
 
 **Bug fixes:**
 - [ops] `scripts/install-skills.sh` now finds the repo from its real path, so it links the skills when run through a symlink instead of creating a dangling entry named `*`; it fails when it finds no skills, and exits non-zero when a real directory blocked a skill, after linking the rest (#407).
+- [user] `vetinari build` now runs `docker build` directly (passing the host uid/gid as AGENT_UID/AGENT_GID build args) instead of shelling sandcastle's `build-image` CLI, so it works in a correctly-configured project with no `.sandcastle/` directory — the stray dir the `stateDir` fork pin exists to eliminate (#396).
 
 ### Collected changes — September 4, 2026
 

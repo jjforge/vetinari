@@ -22,7 +22,7 @@ export const MODES: Mode[] = [
   {
     signature: "build [--no-baseline]",
     blurb:
-      "build the agent image (cfg.image from vetinari/Dockerfile, neither repeated on the CLI) by running `docker build` directly — passing the host uid/gid as AGENT_UID/AGENT_GID build args — then run baseline on success. --no-baseline builds only. A build or baseline failure exits non-zero with docker's output shown. Needs no .sandcastle/ (#396)",
+      "build the agent image (cfg.image from vetinari/Dockerfile, neither repeated on the CLI) by running `docker build` directly — passing the host uid/gid as AGENT_UID/AGENT_GID build args — then run baseline on success. --no-baseline builds only. A build or baseline failure exits non-zero with docker's output shown. Needs no .sandcastle/",
   },
   {
     signature: "baseline",

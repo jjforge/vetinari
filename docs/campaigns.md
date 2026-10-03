@@ -88,7 +88,8 @@ green, terminal until you change something), or a member `parked` with the
 - **`question`** / **`stalled`** / **`crash`** — a run needs you. Answer the
   question; read the turn log and answer a stall with guidance or prune it; a
   crash just needs a redrive. The reason table in
-  [`user-guide.md`](user-guide.md) gives the full mapping.
+  [`user-guide.md`](user-guide.md) gives the full mapping. The `/unpark` skill
+  investigates a park and prints the move it recommends.
 
 A parked or failed campaign holds no live state — everything is on disk. You take
 one of the **five moves** — answer, prune, graft, fix forward, redrive

@@ -10,7 +10,7 @@ Titles are plain and descriptive, with **no bracketed prefix** — a prefix cann
 | --- | --- |
 | **Type (nature)** | native GitHub **issue type**, exactly one: `Epic` (a container — holds no work of its own, closes when its sub-issues do), `Bug` (something is broken), `Task` (every other deliberate piece of work). There is no Documentation or Feature type — a doc change is a `Task` labelled `documentation`; a feature is a `Task`. |
 | Priority | label, exactly one of `P0` (critical), `P1` (high — blocking), `P2` (medium), `P3` (low) — applies to **all** work (severity on a bug, priority on planned work). |
-| Readiness | label — `ready-for-agent` (fully specified, runnable AFK), `ready-for-human`, `needs-info`, and `needs-triage` (the default until you are certain it is `ready-for-agent`). |
+| Readiness | label — `ready-for-agent` (fully specified, runnable AFK), `ready-for-human`, `needs-info`, and `needs-triage` (the default until you are certain it is `ready-for-agent`). The `/check-brief` skill reads a brief against the code before it gets `ready-for-agent`. |
 | Area | label — `orchestrator`, `gateway`, `comms`, `dashboard`, `layout`, `launcher`. |
 | Lifecycle | `known-red` (a check already failing at baseline), `pending-verify` (merged on branch, awaiting a local end-to-end validation — see Closing). |
 | Shape / decision | `duplicate`, `wont-fix`. |

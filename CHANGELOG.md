@@ -25,6 +25,9 @@ Within a milestone each bold section label appears at most once.
 - [ops] `/unpark` operator skill: diagnoses a parked issue from its parked record, turn log, event log and branch, checks the agent's claim against the code, says whether the brief was at fault, recommends a move and prints the exact command — `vetinari answer` for a question or stall, a fix then `vetinari redrive` for a conflict, red base or crash. It runs nothing that changes campaign state (#408).
 - [ops] `/check-brief` operator skill: before an issue goes `ready-for-agent`, a fresh subagent reads its brief against the base branch and reports names the criteria rely on that don't exist, criteria that contradict the out-of-scope list or each other, criteria no test could check, and a file-set marker that doesn't resolve (the changelog fragment, which markers leave out, is not flagged). It changes nothing (#409).
 
+**Improvements:**
+- [user] `vetinari --help` and `docs/reference.md` no longer carry a tracker issue number in the `build` mode blurb (#410).
+
 **Bug fixes:**
 - [ops] `scripts/install-skills.sh` now finds the repo from its real path, so it links the skills when run through a symlink instead of creating a dangling entry named `*`; it fails when it finds no skills, and exits non-zero when a real directory blocked a skill, after linking the rest (#407).
 - [user] `vetinari build` now runs `docker build` directly (passing the host uid/gid as AGENT_UID/AGENT_GID build args) instead of shelling sandcastle's `build-image` CLI, so it works in a correctly-configured project with no `.sandcastle/` directory — the stray dir the `stateDir` fork pin exists to eliminate (#396).

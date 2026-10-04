@@ -88,15 +88,21 @@ the config object itself.
 | `containerShare` | this project's cut of the container ceiling when projects contend — `high` \| `medium` \| `low` (default `medium`; weights 7:2:1) |
 | `hostEnv` | host-only, non-secret env values (e.g. `GIT_CONFIG_GLOBAL`) — set host-side, never crosses into the container |
 | `promptFile` | override the TDD prompt handed to the agent |
-| `fetchTask` | tracker seam: fetch an issue's title/body/comments/labels **and** state/closedAt (`githubFetchTask(repo)`) |
-| `blockedBy` | tracker seam: an issue's blockers, for wave layering (`githubBlockedBy(repo)`, closed blockers filtered at the edge) |
-| `listByLabel` | tracker seam: expand a label token to its open issues (`githubIssuesByLabel(repo)`) |
+| `fetchTask` | tracker seam: fetch an issue's title/body/comments/labels **and** state/closedAt (`githubFetchTask()`) |
+| `blockedBy` | tracker seam: an issue's blockers, for wave layering (`githubBlockedBy()`, closed blockers filtered at the edge) |
+| `listByLabel` | tracker seam: expand a label token to its open issues (`githubIssuesByLabel()`) |
 | `fileSet` | seam: the files an issue touches/creates, for keeping a wave file-disjoint |
-| `reportFinding` | hook: file a finding harvested from a green run (`githubFindingReporter(repo, opts)`); absent → no harvest turn |
-| `onIssueMerged` | hook: advance a merged issue's label (`githubMarkPendingVerify(repo)`); absent → no-op |
-| `postComment` | hook: post a comment to the tracker (used to answer a non-resumable provider's park) |
+| `reportFinding` | hook: file a finding harvested from a green run (`githubFindingReporter(undefined, opts)`); absent → no harvest turn |
+| `onIssueMerged` | hook: advance a merged issue's label (`githubMarkPendingVerify()`); absent → no-op |
+| `postComment` | hook: post a comment to the tracker (`githubIssueComment()`, used to answer a non-resumable provider's park) |
 | `destinations` | named Telegram targets `{ chat, thread? }` on the project's one bot |
 | `notify` | routing rules mapping a `category` / `category:event` / `*` to a destination name |
+
+Each `github*` resolver's `owner/repo` argument is optional: called with no
+argument it derives the repo from the project's git `origin` (the default), so a
+config stops repeating it per resolver. Pass an explicit `"owner/repo"` only when
+the tracker is **not** the project's `origin` — a resolver whose repo can be
+neither passed nor derived refuses, naming the factory and telling you to pass it.
 
 ## On-disk layout
 

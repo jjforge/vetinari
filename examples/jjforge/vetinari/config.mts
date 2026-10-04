@@ -44,22 +44,22 @@ export default defineConfig({
   // The shared helper fetches the full field set — title/body/comments/labels for
   // the prompt, plus state/closedAt so `issueStateFromTask` can reject a closed graft
   // target (#175). Hand-rolling the `--json` list here would silently re-drop those.
-  fetchTask: githubFetchTask("jjforge/jjforge"),
+  fetchTask: githubFetchTask(),
 
   // Powers `carve`: native GitHub "blocked by" links tell it which issues fall
   // when one is pulled from a campaign.
-  blockedBy: githubBlockedBy("jjforge/jjforge"),
+  blockedBy: githubBlockedBy(),
 
   // After a green run, harvest defects the agent noticed but did not fix and file
   // them as issues — otherwise that context dies with the container. Same label
   // discipline the interactive /fix-issue command uses.
-  reportFinding: githubFindingReporter("jjforge/jjforge", { labels: ["P2", "bug", "needs-triage"] }),
+  reportFinding: githubFindingReporter(undefined, { labels: ["P2", "bug", "needs-triage"] }),
 
   // Relays a parked question's answer to a non-resumable agent (copilot/cursor/opencode):
   // `answer` posts the human's reply as an issue comment, then re-runs fresh so the next
   // turn's fetchTask re-reads it. Resumable agents resume their session instead and never
   // call this (#212).
-  postComment: githubIssueComment("jjforge/jjforge"),
+  postComment: githubIssueComment(),
 
   toolchainProbe: "go version && cargo --version && sccache --version && claude --version && git --version",
 

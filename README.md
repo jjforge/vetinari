@@ -87,9 +87,14 @@ export default defineConfig({
   ],
 
   setup: ["npm ci"],                   // once per sandbox, before the agent starts
-  fetchTask: githubFetchTask("owner/repo"),  // title/body/comments/labels + state
+  fetchTask: githubFetchTask(),        // repo derived from origin; title/body/comments/labels + state
 });
 ```
+
+Every `github*` resolver takes an optional `owner/repo`. Called with no argument —
+`githubFetchTask()`, `githubBlockedBy()`, … — it derives the repo from this
+project's git `origin`, so you never repeat it per resolver. Pass an explicit
+`"owner/repo"` only when your tracker is **not** the project's `origin`.
 
 Build the image and prove it before spending anything on an agent:
 

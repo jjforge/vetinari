@@ -206,15 +206,17 @@ export const parkReasonFromEvent = (reason: string | undefined): ParkReason =>
  * `opts.redBase` is the one wave-level hold: a combined-gate park on a red merged base
  * (design §2.3) whose members all merged clean (each `completed`), so nothing in the fold
  * would otherwise read `parked` — it lands at the `parked` rank, still below `failed` (#288).
+ * `opts.stopped` is the other: an operator stop parked the campaign before this wave started
+ * (`campaign-parked{stopped}`), so its members are still unstarted — same rank as `redBase`.
  */
 export function waveState(
   issues: readonly { status: DisplayStatus; membership?: Membership }[],
-  opts: { redBase?: boolean } = {},
+  opts: { redBase?: boolean; stopped?: boolean } = {},
 ): WaveStatus {
   const live = issues.filter((i) => i.membership !== "pruned");
   if (!live.length) return "unstarted";
   if (live.some((i) => i.status === "failed")) return "failed";
-  if (opts.redBase || live.some((i) => i.status === "parked")) return "parked";
+  if (opts.redBase || opts.stopped || live.some((i) => i.status === "parked")) return "parked";
   if (live.some((i) => i.status === "running")) return "running";
   if (live.every((i) => i.status === "completed")) return "completed";
   return "unstarted";
@@ -662,6 +664,11 @@ export interface ReducedCampaign {
    * lifecycle (a merged member stays `completed`, a question stays `parked{question}`), and
    * this set is what makes the wave fold to `parked{red-base}` (design §2.3, #288). */
   redBase: Set<string>;
+  /** the members of the wave a `campaign-parked{stopped}` named — an operator stop (`vetinari stop`,
+   * Ctrl-C). Like `redBase` it is the wave's hold, not the members': it folds the wave to
+   * `parked{stopped}` even while every member is still unstarted, and the next `wave-start` (the
+   * redrive picking the wave back up) clears it. */
+  stopped: Set<string>;
   /** events the fold refused to apply because they contradicted a terminal `completed` (merged)
    * state (design §2.2): a stale second process logging a `parked`/`failed`/`spawn` for an issue
    * already merged. Recorded here — the reducer's log of what it ignored — never folded, so a
@@ -702,6 +709,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
   const parkReasons = new Map<string, ParkReason>();
   const anomalies: string[] = [];
   let redBase = new Set<string>();
+  let stopped = new Set<string>();
   let currentWave = -1;
   let parkedWave = -1;
 
@@ -725,6 +733,8 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       currentWave = -1;
     } else if (e.event === "wave-start" && Number.isInteger(e.index)) {
       currentWave = e.index;
+      // A wave-start after an operator stop is the redrive picking the campaign back up.
+      stopped = new Set();
     } else if (e.event === "spawn" && e.taskId) {
       // A task took an agent slot (design §2.1) — running until a terminal event lands. A spawn
       // promotes an `unstarted` member, a `parked` one (a re-admit, §5 step 3: the answer was
@@ -808,6 +818,9 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       // event is a legacy/aliased wave-park (historically red-base), kept back-compatible.
       parkedWave = Number.isInteger(e.index) ? (e.index as number) : currentWave;
       redBase = e.reason === undefined || e.reason === "red-base" ? new Set(waves[parkedWave] ?? []) : new Set();
+      // An operator stop is the other wave-level hold: a graceful stop names the next, unstarted
+      // wave, whose members would otherwise fold to `unstarted` and the campaign to idle.
+      stopped = e.reason === "stopped" ? new Set(waves[parkedWave] ?? []) : new Set();
     } else if (e.event === "wave-done" && Number.isInteger(e.index)) {
       for (const taskId of e.merged ?? []) {
         const issueNumber = normalize(String(taskId));
@@ -929,6 +942,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
     parkedWave,
     parkReasons,
     redBase,
+    stopped,
     anomalies,
   };
 }
@@ -1214,7 +1228,7 @@ export function campaignSettled(events: OrchestratorEvent[]): boolean {
   const waveStates = reduced.waves.map((wave) =>
     waveState(
       wave.map((id) => ({ status: issueLifecycle(reduced, id).state })),
-      { redBase: wave.some((id) => reduced.redBase.has(id)) },
+      { redBase: wave.some((id) => reduced.redBase.has(id)), stopped: wave.some((id) => reduced.stopped.has(id)) },
     ),
   );
   return campaignState(waveStates) === "completed";
@@ -1425,6 +1439,9 @@ export function buildStatus(cfg: ResolvedConfig, opts: { dead?: boolean; alive?:
     // A red-base wave-park is the wave's own reason (design §2.3): its members keep their
     // lifecycle (a merged member stays completed), so the hold shows only on the wave.
     const redBase = wave.some((issueNumber) => reduced.redBase.has(issueNumber));
+    // An operator stop is likewise the wave's own hold, shown only on the wave.
+    const stopped = wave.some((issueNumber) => reduced.stopped.has(issueNumber));
+    const waveReason: ParkReason | undefined = redBase ? "red-base" : stopped ? "stopped" : undefined;
     // `closed` is the reducer's `closedWaves` membership carried onto the display wave —
     // the wave actually closed (its gates ran and `wave-done` logged, with no conflict-parked
     // member), which lags the `completed` fold. Keyed on member id (via `closedIssueNumbers`)
@@ -1436,7 +1453,7 @@ export function buildStatus(cfg: ResolvedConfig, opts: { dead?: boolean; alive?:
     // surviving members all closed could never satisfy the fold (ADR 0007, #363).
     const live = issues.filter((i) => i.membership !== "pruned");
     const closed = live.length > 0 && live.every((i) => closedIssueNumbers.has(i.issueNumber));
-    return { index, status: waveState(issues, { redBase }), ...(redBase ? { reason: "red-base" as ParkReason } : {}), closed, issues };
+    return { index, status: waveState(issues, { redBase, stopped }), ...(waveReason ? { reason: waveReason } : {}), closed, issues };
   });
 
   return {

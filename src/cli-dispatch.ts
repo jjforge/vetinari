@@ -1,7 +1,7 @@
 /**
  * The pure parse + injected-dispatch seam in front of `cli.mts`'s config-dependent
  * command family (build/baseline/run/campaign/redrive/prune/graft/answer/
- * parked/clear/tg-test). `cli.mts` was a 965-line `switch (mode)` welded to
+ * parked/stop/clear/tg-test). `cli.mts` was a 965-line `switch (mode)` welded to
  * `console`, `process.exit` and real spawns, so command routing could only be
  * reached by launching the process. Splitting it in two — `parseArgs` (argv →
  * a discriminated `Command`, no IO) and `dispatch` (a `Command` → its handler
@@ -18,7 +18,7 @@ import { resolve } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import { parseAgentFlags } from "./config.ts";
 import { renderUsage } from "./help.ts";
-import type { HostBudget, projectHasLiveCampaign } from "./host-slots.ts";
+import type { HostBudget, liveCampaignPid, projectHasLiveCampaign } from "./host-slots.ts";
 import type { build, baseline, campaign, tgTest, requireTelegram, CampaignOutcome } from "./modes.ts";
 import type { runTgConnect } from "./tg-connect.ts";
 import type { tgSend } from "./telegram.ts";
@@ -32,7 +32,7 @@ import { resumeIndex, type runPrune } from "./prune.ts";
 import { isIssueToken, normalize } from "./issue-id.ts";
 import type { runGraft } from "./graft.ts";
 import { GraftRejectedError, describeGraftRejections } from "./graft.ts";
-import type { readEventLog } from "./event-log.ts";
+import type { OrchestratorEvent, readEventLog } from "./event-log.ts";
 import {
   campaignStarted,
   campaignState,
@@ -95,17 +95,30 @@ function redriveOnlyParkReason(reduced: ReducedCampaign): ParkReason | undefined
   const waveStates = reduced.waves.map((wave) =>
     waveState(
       wave.map((id) => ({ status: issueLifecycle(reduced, id).state })),
-      { redBase: wave.some((id) => reduced.redBase.has(id)) },
+      { redBase: wave.some((id) => reduced.redBase.has(id)), stopped: wave.some((id) => reduced.stopped.has(id)) },
     ),
   );
   if (campaignState(waveStates) !== "parked") return undefined;
   if (reduced.redBase.size) return "red-base";
+  if (reduced.stopped.size) return "stopped";
   for (const wave of reduced.waves)
     for (const id of wave) {
       const { state, reason } = issueLifecycle(reduced, id);
       if (state === "parked" && reason && REDRIVE_ONLY_REASONS.has(reason)) return reason;
     }
   return undefined;
+}
+
+/**
+ * Is a stop already pending on the latest campaign? One is when the log carries a `stop-requested`
+ * after the latest `campaign-start` with no stop marker (`campaign-parked`/`-failed`/`-done`) after
+ * it — the campaign took the request and has not yet parked on it. Pure over the event log.
+ */
+function stopPending(events: OrchestratorEvent[]): boolean {
+  const start = events.findLastIndex((e) => e.event === "campaign-start");
+  const request = events.findLastIndex((e) => e.event === "stop-requested");
+  if (request < 0 || request < start) return false;
+  return !events.slice(request).some((e) => e.event === "campaign-parked" || e.event === "campaign-failed" || e.event === "campaign-done");
 }
 
 /**
@@ -138,6 +151,7 @@ export type Command =
   | { kind: "graft"; project?: string; ids: string[]; dryRun: boolean; json: boolean }
   | { kind: "answer"; taskId?: string; text: string[] }
   | { kind: "parked" }
+  | { kind: "stop"; now: boolean }
   | { kind: "clear" }
   | { kind: "tgTest" }
   | { kind: "tgConnect"; token?: string; chat?: string; noVerify: boolean; force: boolean }
@@ -166,6 +180,8 @@ export function parseArgs(argv: string[]): Command {
       return { kind: "parked" };
     case "clear":
       return { kind: "clear" };
+    case "stop":
+      return { kind: "stop", now: rest.includes("--now") };
     case "tg-test":
       return { kind: "tgTest" };
     case "tg-connect": {
@@ -377,6 +393,12 @@ export interface DispatchDeps {
    *  `answer` only delivers and a `redrive` refuses — the live campaign owns the re-admit,
    *  so no second process runs the member beside it. */
   projectHasLiveCampaign: typeof projectHasLiveCampaign;
+  /** The pid of this project's live campaign, from the same lease `projectHasLiveCampaign` reads —
+   *  the process `stop` signals. */
+  liveCampaignPid: typeof liveCampaignPid;
+  /** Send a signal to a process (wired to `process.kill`): `stop` sends SIGINT for a graceful stop,
+   *  SIGTERM for `--now`. */
+  signalProcess: (pid: number, signal: "SIGINT" | "SIGTERM") => void;
   /** Read this project's event log — the source a green `answer` checks to decide
    *  whether the issue belongs to a paused campaign it should redrive (design §7). */
   readEventLog: typeof readEventLog;
@@ -497,7 +519,10 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
         // probe lets a crashed run's in-flight members reconcile to parked{crash} (design §7).
         const alive = deps.projectHasLiveCampaign(deps.host.configDir, cfg.project);
         const reason = redriveOnlyParkReason(reduceCampaign(deps.readEventLog(cfg), { alive }));
-        deps.log(reason ? `campaign parked (${reason}) — ${parkRecoveryMove(reason, "")}` : "nothing parked");
+        // An operator stop is a campaign-level hold with no issue to name, so it gets the campaign's
+        // own move — never `parkRecoveryMove`'s per-issue `vetinari run <id>` with a blank id.
+        const move = reason === "stopped" ? "`vetinari redrive` to resume it." : reason ? parkRecoveryMove(reason, "") : "";
+        deps.log(reason ? `campaign parked (${reason}) — ${move}` : "nothing parked");
         return;
       }
       for (const r of recs) {
@@ -508,6 +533,25 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
         const optionLines = options.length ? `\n${options.map((o) => `  - ${o}`).join("\n")}` : "";
         deps.log(`\n=== ${r.taskId} (${r.reason}, ${r.parkedAt}) branch ${r.branch}\n${description}${optionLines}\n`);
       }
+      return;
+    }
+    case "stop": {
+      // Stop the project's running campaign (design §5): signal its process and let it stop itself —
+      // SIGINT for a graceful stop (the wave in flight finishes, then it parks `stopped`), SIGTERM
+      // for `--now` (its runs stop at once). The campaign owns the stop; this only delivers it.
+      const pid = deps.liveCampaignPid(deps.host.configDir, cfg.project);
+      if (pid === undefined) throw new Refusal(`no campaign running for ${cfg.project}`);
+      if (cmd.now) {
+        deps.signalProcess(pid, "SIGTERM");
+        deps.log(`stopping now — the ${cfg.project} campaign's runs stop and keep their work; \`vetinari redrive\` resumes it`);
+        return;
+      }
+      if (stopPending(deps.readEventLog(cfg))) {
+        deps.log(`a stop is already pending for ${cfg.project} — \`vetinari stop --now\` to stop immediately`);
+        return;
+      }
+      deps.signalProcess(pid, "SIGINT");
+      deps.log(`the ${cfg.project} campaign will stop after the wave in flight — \`vetinari stop --now\` to stop immediately`);
       return;
     }
     case "clear": {

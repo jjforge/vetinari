@@ -157,6 +157,36 @@ export const crashResumePrompt = () =>
   `Your previous session on this task was interrupted before it reported a result. Your earlier work is already committed on this branch — continue from where it left off. The signal contract is unchanged: ${DONE} when done, ${BLOCKED} if blocked — and end this turn with a <turn-summary> line as before.`;
 
 /**
+ * The `stalled/no-commit` park's question. No commit ahead of the base is not "no change": the
+ * worktree may hold uncommitted work, so it reports what `git status --porcelain` saw (the first
+ * five paths), and only a clean worktree is called a no-op. It names COMPLETE only when the
+ * turn signalled it.
+ */
+function noCommitQuestion(signalled: boolean, branch: string, base: string, status: { stdout?: string; exitCode: number }): string {
+  const lead = signalled
+    ? `COMPLETE but ${branch} has no commit beyond ${base}`
+    : `The turn ended without a completion signal and ${branch} has no commit beyond ${base}`;
+  if (status.exitCode !== 0) return `${lead}, and the worktree state could not be read (git status failed).`;
+  const paths = (status.stdout ?? "")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => line.slice(3));
+  if (paths.length > 0) {
+    const more = paths.length > 5 ? ` +${paths.length - 5} more` : "";
+    return `${lead}, but the worktree has uncommitted changes: ${paths.slice(0, 5).join(", ")}${more}.`;
+  }
+  if (!signalled) return `${lead}; the worktree is clean.`;
+  return `${lead} — the agent produced no change. Likely a no-op, or the task needs clarification before it can be done.`;
+}
+
+/**
+ * The one nudge a turn that ended with neither signal gets (design §3 step 5): the run hit its
+ * iteration limit mid-work, so it is asked to commit and signal rather than parked as a no-op.
+ */
+export const noSignalNudgePrompt = (): string =>
+  `Your iteration ended before you committed or signalled. Commit your work, then emit ${DONE} — or ${BLOCKED} with a question if you are blocked — and end this turn with a <turn-summary> line as before.`;
+
+/**
  * The GitHub-issue comment a non-resumable park→answer relays (this issue / #212):
  * a marked disclaimer so it is never mistaken for spec, the agent's parked question
  * echoed for context, then the human's answer. The fresh run's `fetchTask` re-reads
@@ -383,12 +413,31 @@ export async function runLoop(
           // activity-<taskId>.jsonl per tool-use, so the live-tail pane has a structured source (ADR 0015).
           logging: activityLoggingSink(cfg.stateDir, taskId),
         };
+        // Start the next turn. A resumable provider resumes the live session with an inline
+        // `prompt` — the SAME path the park→answer resume uses (above); `r.resume()` inherits the
+        // turn-0 promptArgs, which the library rejects alongside an inline prompt ("promptArgs is
+        // only supported with promptFile"), so a red gate errored instead of resuming (#3). A
+        // non-resumable provider has no session to resume, so the next turn is a FRESH run through
+        // the same promptFile path turn 0 uses — re-reading the issue via fetchTask, its prior work
+        // visible as commits already on the branch, with `reentry` appended to the issue text (#212).
+        const nextTurn = async (sessionId: string | undefined, prompt: string, reentry: string) => {
+          if (resumable) {
+            if (!sessionId) throw new Error("no session id to resume — cannot drive the TDD loop");
+            return stoppable(sbx!.run({ ...common, maxIterations: 1, resumeSession: sessionId, prompt }));
+          }
+          const freshTask = await stoppable(Promise.resolve(cfg.fetchTask(taskId)));
+          return stoppable(
+            sbx!.run({ ...common, promptFile: cfg.promptFile, promptArgs: { TASK: `${freshTask}\n\n${reentry}`, PROJECT: cfg.project } }),
+          );
+        };
         let r: any;
         try {
           r = entry
             ? await stoppable(sbx.run({ ...common, maxIterations: 1, resumeSession: entry.resumeSessionId, prompt: entry.answerPrompt }))
             : await stoppable(sbx.run({ ...common, promptFile: cfg.promptFile, promptArgs: { TASK: task, PROJECT: cfg.project } }));
 
+          // At most one no-signal nudge per run (design §3 step 5).
+          let nudged = false;
           for (let turn = 0; turn < cfg.maxTurns; turn++) {
             const sessionId = r.iterations.at(-1)?.sessionId;
             // The most recent session a finished turn produced — what a `stopped` park records so a
@@ -421,8 +470,18 @@ export async function runLoop(
               return "parked";
             }
 
-            // No-commit park (design §3 step 6): a COMPLETE that left no commit beyond the
-            // base is not green — a no-op agent that says done and changed nothing. This runs
+            // No-signal nudge (design §3 step 5): a turn that ended with neither signal hit its
+            // iteration limit mid-work — resume it once to commit and signal, rather than parking
+            // or gating unfinished work. It spends a turn; the last turn falls through.
+            if (r.completionSignal !== DONE && !nudged && turn + 1 < cfg.maxTurns) {
+              nudged = true;
+              r = await nextTurn(sessionId, noSignalNudgePrompt(), noSignalNudgePrompt());
+              continue;
+            }
+
+            // No-commit park (design §3 step 6): a COMPLETE (or a no-signal turn past its nudge)
+            // that left no commit beyond the base is not green. The question reports the
+            // worktree's uncommitted changes, so unfinished work is never called a no-op. This runs
             // BEFORE the gates (step 7), so nothing-ahead parks `stalled/no-commit` without
             // spending a gate run or a turn — and a `when`-scoped gate never trivially greens
             // an empty diff. null (git couldn't tell) is NOT zero, so a transient failure falls
@@ -430,7 +489,12 @@ export async function runLoop(
             const ahead = deps.commitsAhead(cfg.baseBranch, sbx.branch, cfg.log);
             if (ahead === 0) {
               cfg.log.log("empty-green", { taskId, branch: sbx.branch });
-              const question = `COMPLETE but ${sbx.branch} has no commit beyond ${cfg.baseBranch} — the agent produced no change. Likely a no-op, or the task needs clarification before it can be done.`;
+              const question = noCommitQuestion(
+                r.completionSignal === DONE,
+                sbx.branch,
+                cfg.baseBranch,
+                await sbx.exec("git status --porcelain"),
+              );
               await park(cfg, { taskId, reason: "stalled", detail: "no-commit", sessionId, branch: sbx.branch, question });
               printParked(taskId, "stalled", question);
               return "parked";
@@ -469,32 +533,11 @@ export async function runLoop(
               return "green";
             }
 
-            if (resumable) {
-              // Resume via resumeSession + inline prompt — the SAME path the park→answer
-              // resume uses (above). `r.resume()` inherits the turn-0 promptArgs, which the
-              // library rejects alongside an inline prompt ("promptArgs is only supported
-              // with promptFile"), so a red gate errored instead of resuming (#3).
-              const resumeSessionId = r.iterations.at(-1)?.sessionId;
-              if (!resumeSessionId) throw new Error("no session id to resume — cannot drive the TDD loop");
-              r = await stoppable(
-                sbx.run({ ...common, maxIterations: 1, resumeSession: resumeSessionId, prompt: redResumePrompt(report) }),
-              );
-            } else {
-              // Non-resumable provider: there is no session to resume, so the next turn is a
-              // FRESH run through the same promptFile path turn 0 uses — re-reading the issue
-              // via fetchTask, its prior work visible as commits already on the branch, with the
-              // gate report + most-recent turn summary carried in the prompt (#212). Don't spin a
-              // fresh run on the final turn: it would never be gated. Fall through to the budget park.
-              if (turn + 1 >= cfg.maxTurns) break;
-              const freshTask = await stoppable(Promise.resolve(cfg.fetchTask(taskId)));
-              r = await stoppable(
-                sbx.run({
-                  ...common,
-                  promptFile: cfg.promptFile,
-                  promptArgs: { TASK: `${freshTask}\n\n${freshRedReentry(report, turnFields.summary)}`, PROJECT: cfg.project },
-                }),
-              );
-            }
+            // Red: the next turn carries the gate report and, for a non-resumable provider, the
+            // most-recent turn summary (#212). Don't spin a fresh run on the final turn: it would
+            // never be gated. Fall through to the budget park.
+            if (!resumable && turn + 1 >= cfg.maxTurns) break;
+            r = await nextTurn(sessionId, redResumePrompt(report), freshRedReentry(report, turnFields.summary));
           }
 
           // Budget park (design §3 step 8): `detail` carries the specifics (`budget:<maxTurns>`)

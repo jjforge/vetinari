@@ -393,9 +393,8 @@ export async function markMergedIssues(cfg: Pick<ResolvedConfig, "onIssueMerged"
  * merged on the base and the campaign pauses for a human to resolve: fix forward and
  * resume, or prune a suspect. `category: "failure"` routes it to the same alert channel
  * the old halt used, since a paused red base demands attention; the gate-report `detail`
- * tail rides along so the human sees why it went red. Also carries a member-park's detail
- * for the plain question/stall hold. Pure, so the wording and routing are checkable without
- * running a campaign.
+ * tail rides along so the human sees why it went red. Pure, so the wording and routing are
+ * checkable without running a campaign.
  */
 export function campaignParkedNotice(project: string, waveNumber: number, merged: string[], baseBranch: string, detail: string): Notice {
   return notice({
@@ -486,6 +485,29 @@ export function conflictParkedNotice(
     context: `wave ${waveNumber}`,
     signal: `Merge conflict on ${conflictParked.map((q) => `#${q}`).join(", ")} — greens (${merged.join(", ") || "none"}) kept on ${baseBranch}, campaign paused.`,
     recover: "resolve the conflict on the branch then `vetinari redrive` (or `prune <issue>`)",
+    category: "failure",
+    event: "campaign-parked",
+  });
+}
+
+/**
+ * The operator-facing notice a member park enqueues when it holds the wave (design §5 step 5).
+ * One or more members parked awaiting a human (a question or a stall); the base gated green, so
+ * the wave's greens stay merged and the campaign parks until the members are answered. The move
+ * is to answer — a reply to the member's own question message, or `vetinari answer`, which
+ * redrives on its own — or to prune the member and redrive. `category: "failure"` routes it to
+ * the alert channel every campaign park uses. Pure, so the wording and routing are checkable
+ * without a campaign.
+ */
+export function memberParkedNotice(project: string, waveNumber: number, parked: string[], merged: string[], baseBranch: string): Notice {
+  return notice({
+    emoji: "🅿️",
+    project,
+    state: "PARKED",
+    context: `wave ${waveNumber}`,
+    signal: `${parked.map((p) => `#${p}`).join(", ")} awaiting a human — greens (${merged.join(", ") || "none"}) kept on ${baseBranch}, campaign paused.`,
+    recover:
+      "reply to the member's question message or `vetinari answer <issue> <text>` (an answer redrives), or `prune <issue>` then `vetinari redrive`",
     category: "failure",
     event: "campaign-parked",
   });
@@ -1010,7 +1032,7 @@ export async function campaign(
         } else {
           const detail = `parked, awaiting a human: ${parkedTasks.join(", ")}`;
           cfg.log.log("campaign-parked", { index, reason, detail });
-          enqueueOutbound(cfg, campaignParkedNotice(cfg.project, index + 1, merged, cfg.baseBranch, detail));
+          enqueueOutbound(cfg, memberParkedNotice(cfg.project, index + 1, parkedTasks, merged, cfg.baseBranch));
           reporter.line(formatStop({ kind: "issue-parked", index, total, parked: parkedTasks, merged }));
         }
         return "parked";

@@ -42,7 +42,7 @@ import {
   waveState,
   type ReducedCampaign,
 } from "./dashboard-model.ts";
-import { parkRecoveryMove, REDRIVE_ONLY_REASONS } from "./gateway.ts";
+import { campaignParkMove, REDRIVE_ONLY_REASONS } from "./gateway.ts";
 import { makeReporter } from "./report.ts";
 import { Refusal } from "./refusal.ts";
 
@@ -519,10 +519,7 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
         // probe lets a crashed run's in-flight members reconcile to parked{crash} (design §7).
         const alive = deps.projectHasLiveCampaign(deps.host.configDir, cfg.project);
         const reason = redriveOnlyParkReason(reduceCampaign(deps.readEventLog(cfg), { alive }));
-        // An operator stop is a campaign-level hold with no issue to name, so it gets the campaign's
-        // own move — never `parkRecoveryMove`'s per-issue `vetinari run <id>` with a blank id.
-        const move = reason === "stopped" ? "`vetinari redrive` to resume it." : reason ? parkRecoveryMove(reason, "") : "";
-        deps.log(reason ? `campaign parked (${reason}) — ${move}` : "nothing parked");
+        deps.log(reason ? `campaign parked (${reason}) — ${campaignParkMove(reason)}` : "nothing parked");
         return;
       }
       for (const r of recs) {

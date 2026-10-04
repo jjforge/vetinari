@@ -546,6 +546,15 @@ export function parkRecoveryMove(reason: ParkReason, issue: string): string {
 }
 
 /**
+ * The move a campaign-level park asks for, where no single issue is named (the `parked` listing, the
+ * `/status` summary). An operator stop (`stopped` on the wave, #403) is resumed by a plain redrive —
+ * never `parkRecoveryMove`'s per-issue `vetinari run <id>`, which would print with a blank id.
+ */
+export function campaignParkMove(reason: ParkReason): string {
+  return reason === "stopped" ? "`vetinari redrive` to resume it." : parkRecoveryMove(reason, "");
+}
+
+/**
  * A park announcement built by the one shared `notice()` skeleton (design §10) — the same
  * renderer every outbound notice uses, so a hand-rolled second copy can never drift from it:
  * a header `⏸ <project> · PARKED · #<issue> (<reason>)`, the question (or the `detail`
@@ -633,7 +642,7 @@ export function formatGatewayStatus(statuses: CampaignStatus[]): string {
       // resolve it. Name the hold and the recovery it actually needs; a truly idle project still
       // reads "nothing parked".
       const redrive = redriveOnlyPark(s);
-      lines.push(redrive ? `  ⏸ ${redrive} — ${parkRecoveryMove(redrive, "")}` : "  nothing parked");
+      lines.push(redrive ? `  ⏸ ${redrive} — ${campaignParkMove(redrive)}` : "  nothing parked");
     }
   }
   // The reply advice is correct only for an answerable park (question/stalled — the holds that

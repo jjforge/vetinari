@@ -199,10 +199,12 @@ export function readLeases(configDir: string): SlotLease[] {
  * their re-admit, so while one is live a second `run`/`redrive` is refused and an `answer`
  * only delivers. A standalone `run`'s lease (`kind: "run"`) is deliberately not a live
  * campaign — concurrent standalone runs share the ceiling (§8) without one being read as a
- * campaign that does not exist. A campaign writes its lease when it registers and holds it
- * (even at held zero, waiting first-come) until it finishes or dies; a crashed campaign's
- * lease lingers on disk but its pid is gone, so a project with no live campaign lease has no
- * campaign on it. Read-only — it never reclaims a dead lease (acquire does that under the
+ * campaign that does not exist. A campaign holds its lease for its WHOLE life — registered when
+ * `campaign()` starts and dropped only when it finishes or dies — at zero demand between waves
+ * (held and want both zero while it integrates, gates, and plans the next wave), so the guard
+ * covers those windows too and a `want: 0` lease still takes no floor in `fairShare`. A crashed
+ * campaign's lease lingers on disk but its pid is gone, so a project with no live campaign lease
+ * has no campaign on it. Read-only — it never reclaims a dead lease (acquire does that under the
  * lock); this is a probe any read path can take at any time.
  */
 export function projectHasLiveCampaign(configDir: string, project: string, opts: LeaseOpts = {}): boolean {

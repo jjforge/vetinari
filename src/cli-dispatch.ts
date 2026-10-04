@@ -553,6 +553,21 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
  */
 async function dispatchCampaign(cmd: Extract<Command, { kind: "campaign" }>, deps: DispatchDeps): Promise<void> {
   const { cfg, host } = deps;
+  // Refuse a second launch while a campaign for the project is live (design §8, #424): the
+  // campaign now holds its lease start to finish — through integration and gating, not just a
+  // draining wave — so a fresh `campaign` or the `--resume` alias must not start a second process
+  // over it. Checked FIRST, before agent selection, the alias note, the usage refusal and any
+  // archive step, so no destructive step runs on a refusal. A `--dry-run` only prints a plan, so
+  // it is never refused.
+  if (!cmd.dryRun && deps.projectHasLiveCampaign(host.configDir, cfg.project)) {
+    if (cmd.resume) {
+      // `campaign --resume` is the retained alias for `redrive`, so it refuses the way `redrive`
+      // does: the live campaign owns the re-admit, so log its line and stop — no exit code.
+      deps.log(`a campaign is already running for ${cfg.project} — it will pick up the work; redrive refused.`);
+      return;
+    }
+    throw new Refusal(`a campaign is already running for ${cfg.project} — campaign refused.`);
+  }
   // Lock in the agent selection first (ADR 0016): validates it and preflights its
   // credentials before any container, and stamps VETINARI_AGENT so every child wave
   // `run` drives the chosen provider, not a silent claude.

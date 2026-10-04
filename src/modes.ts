@@ -278,7 +278,10 @@ export async function queue(
   // The host container ceiling (ADR 0010/0011) is always in effect: the run marks
   // itself active so other projects drain toward their share, and every spawn is
   // gated on a cooperative lease so the sum of live containers across all projects
-  // stays within the ceiling and within this project's current fair share.
+  // stays within the ceiling and within this project's current fair share. The
+  // campaign-liveness lease itself is registered for the whole campaign by `campaign`
+  // (#424); this refreshes its demand to the wave's size and drops it back to zero in
+  // the `finally`, so the lease lives on between waves at zero demand (no slot floor).
   registerProject(host.configDir, cfg.project, host.weight, "campaign", pending.length);
   try {
     await new Promise<void>((done) => {
@@ -347,7 +350,10 @@ export async function queue(
       fill();
     });
   } finally {
-    deregisterProject(host.configDir);
+    // The wave has drained (held is already 0). Do NOT deregister — the campaign-liveness lease
+    // spans the whole campaign (#424); just drop this project's demand to zero so a `want: 0`
+    // lease takes no floor in `fairShare` and other projects keep every slot between waves.
+    registerProject(host.configDir, cfg.project, host.weight, "campaign", 0);
   }
 
   reporter.line(formatOutcomes(taskIds, outcomes));
@@ -704,341 +710,353 @@ export async function campaign(
     );
   }
 
-  // Surface an un-notifiable project once, at the start of the whole campaign — the
-  // per-wave `queue` calls below pass `titles` and so stay silent (no per-wave repeat).
-  warnIfTelegramUnconfigured(cfg);
+  // Register the campaign-liveness lease for the WHOLE campaign (design §8, #424): a campaign owns
+  // its issues start to finish, so its lease must span integration, the merged-base gate and the
+  // next wave's planning — not just a draining wave. Registered at zero demand (`queue` raises it
+  // per wave and drops it back to zero in its own finally), so a `want: 0` lease takes no floor in
+  // `fairShare` and other projects keep every slot between waves. The `try/finally` below drops it
+  // on every exit — done, parked, failed, the nothing-to-run redrive, and a thrown Refusal/error.
+  registerProject(host.configDir, cfg.project, host.weight, "campaign", 0);
+  try {
+    // Surface an un-notifiable project once, at the start of the whole campaign — the
+    // per-wave `queue` calls below pass `titles` and so stay silent (no per-wave repeat).
+    warnIfTelegramUnconfigured(cfg);
 
-  // The terminal view (design §11): human-readable plan/progress/stop lines, or nothing
-  // under `--json` (where the logger streams raw events instead). Threaded into every
-  // `queue` call so the per-issue outcomes report the same way.
-  const reporter = envReporter();
+    // The terminal view (design §11): human-readable plan/progress/stop lines, or nothing
+    // under `--json` (where the logger streams raw events instead). Threaded into every
+    // `queue` call so the per-issue outcomes report the same way.
+    const reporter = envReporter();
 
-  // Where the wave loop starts, the id→title map the per-wave `queue` calls carry, and the run's
-  // human name — stamped onto every wave event and operator note so a resumed or mid-campaign run
-  // never renders nameless (#174). Under resume the `--name` param is ignored, so the name is read
-  // back from the log's `campaign-start` alongside the plan; otherwise it is the supplied param.
-  let index = 0;
-  let titles: Record<string, string>;
-  let campaignName: string | undefined;
-  // Set to the resume wave's index while a `redrive` event is owed: it is logged once that wave
-  // integrates, carrying the `landed`/`skipped` counts the reconciliation produced (design §2.1, §7).
-  let pendingRedriveFromWave: number | undefined;
+    // Where the wave loop starts, the id→title map the per-wave `queue` calls carry, and the run's
+    // human name — stamped onto every wave event and operator note so a resumed or mid-campaign run
+    // never renders nameless (#174). Under resume the `--name` param is ignored, so the name is read
+    // back from the log's `campaign-start` alongside the plan; otherwise it is the supplied param.
+    let index = 0;
+    let titles: Record<string, string>;
+    let campaignName: string | undefined;
+    // Set to the resume wave's index while a `redrive` event is owed: it is logged once that wave
+    // integrates, carrying the `landed`/`skipped` counts the reconciliation produced (design §2.1, §7).
+    let pendingRedriveFromWave: number | undefined;
 
-  if (opts.resume) {
-    // Resume a paused campaign (ADR 0013): reconstruct the existing plan from the log —
-    // no new `campaign-start`, no re-resolved titles — and skip every wave that already
-    // banked work so no merged issue is redone. The supplied `batches`/`name` are ignored;
-    // the plan is whatever the running campaign's `campaign-start` (minus any prune) reduced to.
-    const reduced = reduceCampaign(readEventLog(cfg));
-    if (!reduced.waves.length)
-      throw new Refusal("redrive: no campaign found in the event log to pick up. Launch one with `campaign <ids…>`.");
-    titles = Object.fromEntries(reduced.titles);
-    campaignName = reduced.name;
-    index = resumeIndex(reduced);
-    if (index >= reduced.waves.length) {
-      // Nothing left to run — every wave already banked. The redrive landed and skipped nothing.
-      cfg.log.log("redrive", { fromWave: index, landed: 0, skipped: 0 });
+    if (opts.resume) {
+      // Resume a paused campaign (ADR 0013): reconstruct the existing plan from the log —
+      // no new `campaign-start`, no re-resolved titles — and skip every wave that already
+      // banked work so no merged issue is redone. The supplied `batches`/`name` are ignored;
+      // the plan is whatever the running campaign's `campaign-start` (minus any prune) reduced to.
+      const reduced = reduceCampaign(readEventLog(cfg));
+      if (!reduced.waves.length)
+        throw new Refusal("redrive: no campaign found in the event log to pick up. Launch one with `campaign <ids…>`.");
+      titles = Object.fromEntries(reduced.titles);
+      campaignName = reduced.name;
+      index = resumeIndex(reduced);
+      if (index >= reduced.waves.length) {
+        // Nothing left to run — every wave already banked. The redrive landed and skipped nothing.
+        cfg.log.log("redrive", { fromWave: index, landed: 0, skipped: 0 });
+        enqueueOutbound(
+          cfg,
+          notice({
+            emoji: "↩️",
+            project: cfg.project,
+            state: "REDRIVE",
+            context: `${reduced.waves.length} waves`,
+            signal: `nothing to run — all ${reduced.waves.length} waves already merged`,
+            category: "progress",
+            event: "redrive",
+          }),
+        );
+        reporter.line(formatResumeNothing(reduced.waves.length));
+        return "done";
+      }
+      // The structured `redrive` event carries `landed`/`skipped` (design §2.1), known only once
+      // the resume wave integrates — so it is logged there (see `pendingRedriveFromWave`). The
+      // operator notice and terminal line go out now, at pickup.
+      pendingRedriveFromWave = index;
       enqueueOutbound(
         cfg,
         notice({
           emoji: "↩️",
           project: cfg.project,
           state: "REDRIVE",
-          context: `${reduced.waves.length} waves`,
-          signal: `nothing to run — all ${reduced.waves.length} waves already merged`,
+          context: `wave ${index + 1}/${reduced.waves.length}`,
+          signal: `on ${cfg.baseBranch} — continuing unrun waves`,
           category: "progress",
           event: "redrive",
         }),
       );
-      reporter.line(formatResumeNothing(reduced.waves.length));
-      return "done";
-    }
-    // The structured `redrive` event carries `landed`/`skipped` (design §2.1), known only once
-    // the resume wave integrates — so it is logged there (see `pendingRedriveFromWave`). The
-    // operator notice and terminal line go out now, at pickup.
-    pendingRedriveFromWave = index;
-    enqueueOutbound(
-      cfg,
-      notice({
-        emoji: "↩️",
-        project: cfg.project,
-        state: "REDRIVE",
-        context: `wave ${index + 1}/${reduced.waves.length}`,
-        signal: `on ${cfg.baseBranch} — continuing unrun waves`,
-        category: "progress",
-        event: "redrive",
-      }),
-    );
-    reporter.line(formatResume(index, reduced.waves.length));
-  } else {
-    // Resolve the run's issue titles up front (the orchestrator has `fetchTask`) and
-    // record them on the start event, so the dumb-router dashboard names every wave
-    // and chip — live and archived — with no lookup of its own (ADR 0002). `name` is
-    // still recorded only when given; a run whose titles could not be resolved simply
-    // omits them and degrades to `number:status`.
-    titles = await resolveTitles(cfg, batches.flat());
-    campaignName = name;
-    // Record the plan, the slot budget, and — once — the optional `--name` and the id→title
-    // map, so the dumb-router dashboard names every wave and chip with no lookup of its own
-    // (design §2.1, ADR 0002). No presentation state is written: the festive wave name is
-    // derived at render from this event's timestamp, not a cursor stamped here.
-    const startEvent: Omit<CampaignStartEvent, "ts" | "event"> = {
-      waves: batches,
-      slots: host.ceiling,
-    };
-    if (name) startEvent.name = name;
-    if (Object.keys(titles).length) startEvent.titles = titles;
-    cfg.log.log("campaign-start", startEvent);
-    enqueueOutbound(
-      cfg,
-      notice({
-        emoji: "🎬",
-        project: cfg.project,
-        state: "CAMPAIGN",
-        context: `${batches.length} waves${named(name)}`,
-        signal: batches.map((b) => b.join(",")).join(" | "),
-        category: "progress",
-        event: "campaign-start",
-      }),
-    );
-    // The plan, on the terminal: the waves with their ids and titles (design §11).
-    reporter.line(formatPlan(batches, titles, campaignName));
-  }
-
-  // Only the first wave a redrive re-enters is reconciled against the log (design §7);
-  // every later wave was never started, so it runs fresh.
-  let reconcileResume = !!opts.resume;
-
-  // The plan is re-derived from the log at each wave boundary rather than
-  // iterated from the in-memory array: a `prune` event appended mid-campaign
-  // prunes future waves here, while the in-flight wave (already past this point)
-  // finishes as-is — the single-source-of-truth loop of ADR 0005.
-  for (; ; index++) {
-    const reduced = reduceCampaign(readEventLog(cfg));
-    const waves = reduced.waves;
-    if (index >= waves.length) break;
-    const tasks = waves[index];
-    const total = waves.length;
-    const waveEvent: Omit<WaveStartEvent, "ts" | "event"> = { index, tasks };
-    cfg.log.log("wave-start", waveEvent);
-    enqueueOutbound(
-      cfg,
-      notice({
-        emoji: "▶️",
-        project: cfg.project,
-        state: "WAVE",
-        context: `${index + 1}/${total}${named(campaignName)}`,
-        signal: tasks.join(", "),
-        category: "progress",
-        event: "wave-start",
-      }),
-    );
-    reporter.line(formatWaveStart(index, total, tasks, titles));
-
-    let outcomes: Record<string, string>;
-    // A wave whose stop was `red-base` must be re-gated on re-entry even though nothing new
-    // merges (design §7): the fix-forward that resolves it lands on the base, not on any member
-    // branch, so `redBase` being set for this reconciled wave is the signal to force the gate.
-    let regate = false;
-    if (reconcileResume) {
-      // Redrive reconciliation (design §7): re-entering the parked wave, decide each
-      // member's outcome from the log — a banked/green member is landed by integration
-      // below without a rerun, an unanswered park re-parks the wave, a failed member
-      // (unless `--override`) stops the campaign as failed again — and spawn only the
-      // members that genuinely need to run. Fed back through the wave's ordinary resolve
-      // logic below, so no park/fail/merge path is special-cased for a redrive.
-      reconcileResume = false;
-      regate = reduced.redBase.size > 0 && reduced.parkedWave === index;
-      // A crashed member is resumed on its recorded session rather than re-run fresh only when the
-      // provider keeps a durable session AND its branch carries committed work (design §7's "else
-      // resume the session"); no commits, non-resumable, or an answered park (which re-runs via its
-      // own record) → no session, so the member runs fresh.
-      const { resumable } = agentSelectionFor(cfg);
-      const branchHasCommitsFor = deps.branchHasCommits ?? branchHasCommits;
-      const resumeSessionFor = (id: string): string | undefined => {
-        if (!resumable || hasParked(cfg, id)) return undefined;
-        const sid = reduced.sessions.get(id);
-        if (!sid) return undefined;
-        return branchHasCommitsFor(cfg, id) ? sid : undefined;
-      };
-      const { toRun, pre, resume } = reconcileResumeWave(
-        tasks,
-        reduced.outcomes,
-        // A park holds the wave only while its record is present AND un-answered; an answered
-        // record re-runs (the child consumes the answer), and a recordless park (a crash) re-runs
-        // too — design §5 step 3, §7.
-        (id) => hasParked(cfg, id) && !isAnswered(cfg, id),
-        !!opts.override,
-        reduced.pendingGreen,
-        resumeSessionFor,
-      );
-      const ran = toRun.length ? await queue(cfg, toRun, host, titles, deps.spawnRun, reporter, resume) : {};
-      outcomes = { ...ran, ...pre };
+      reporter.line(formatResume(index, reduced.waves.length));
     } else {
-      outcomes = await queue(cfg, tasks, host, titles, deps.spawnRun, reporter);
+      // Resolve the run's issue titles up front (the orchestrator has `fetchTask`) and
+      // record them on the start event, so the dumb-router dashboard names every wave
+      // and chip — live and archived — with no lookup of its own (ADR 0002). `name` is
+      // still recorded only when given; a run whose titles could not be resolved simply
+      // omits them and degrades to `number:status`.
+      titles = await resolveTitles(cfg, batches.flat());
+      campaignName = name;
+      // Record the plan, the slot budget, and — once — the optional `--name` and the id→title
+      // map, so the dumb-router dashboard names every wave and chip with no lookup of its own
+      // (design §2.1, ADR 0002). No presentation state is written: the festive wave name is
+      // derived at render from this event's timestamp, not a cursor stamped here.
+      const startEvent: Omit<CampaignStartEvent, "ts" | "event"> = {
+        waves: batches,
+        slots: host.ceiling,
+      };
+      if (name) startEvent.name = name;
+      if (Object.keys(titles).length) startEvent.titles = titles;
+      cfg.log.log("campaign-start", startEvent);
+      enqueueOutbound(
+        cfg,
+        notice({
+          emoji: "🎬",
+          project: cfg.project,
+          state: "CAMPAIGN",
+          context: `${batches.length} waves${named(name)}`,
+          signal: batches.map((b) => b.join(",")).join(" | "),
+          category: "progress",
+          event: "campaign-start",
+        }),
+      );
+      // The plan, on the terminal: the waves with their ids and titles (design §11).
+      reporter.line(formatPlan(batches, titles, campaignName));
     }
 
-    // Grace window at the wave boundary (design §5 step 5): a member parked as question/stalled
-    // may still be answered. Hold the drained wave open up to `parkGraceSeconds`; an answer that
-    // lands (its parked record cleared) re-admits the member so it re-runs and merges in THIS
-    // wave, and expiry falls through to the normal park-and-stop below. `conflict`/`red-base`
-    // parks are integration-time states, decided after this point, so they never wait here.
-    const graceSeconds = cfg.parkGraceSeconds ?? 0;
-    const parkedNow = tasks.filter((t) => outcomes[t] === "parked");
-    if (parkedNow.length && graceSeconds > 0) {
-      cfg.log.log("grace-wait", { seconds: graceSeconds, tasks: parkedNow });
-      await deps.grace(cfg, parkedNow, graceSeconds);
-      const revived = parkedNow.filter((t) => isAnswered(cfg, t));
-      if (revived.length) outcomes = { ...outcomes, ...(await queue(cfg, revived, host, titles, deps.spawnRun, reporter)) };
-    }
+    // Only the first wave a redrive re-enters is reconciled against the log (design §7);
+    // every later wave was never started, so it runs fresh.
+    let reconcileResume = !!opts.resume;
 
-    const greens = tasks.filter((t) => outcomes[t] === "green");
+    // The plan is re-derived from the log at each wave boundary rather than
+    // iterated from the in-memory array: a `prune` event appended mid-campaign
+    // prunes future waves here, while the in-flight wave (already past this point)
+    // finishes as-is — the single-source-of-truth loop of ADR 0005.
+    for (; ; index++) {
+      const reduced = reduceCampaign(readEventLog(cfg));
+      const waves = reduced.waves;
+      if (index >= waves.length) break;
+      const tasks = waves[index];
+      const total = waves.length;
+      const waveEvent: Omit<WaveStartEvent, "ts" | "event"> = { index, tasks };
+      cfg.log.log("wave-start", waveEvent);
+      enqueueOutbound(
+        cfg,
+        notice({
+          emoji: "▶️",
+          project: cfg.project,
+          state: "WAVE",
+          context: `${index + 1}/${total}${named(campaignName)}`,
+          signal: tasks.join(", "),
+          category: "progress",
+          event: "wave-start",
+        }),
+      );
+      reporter.line(formatWaveStart(index, total, tasks, titles));
 
-    const { merged, alreadyMerged = [], conflictParked, parked } = await deps.integrate(cfg, greens, undefined, index, { regate });
-
-    // The reconciled resume wave has now integrated its banked greens — log the `redrive`
-    // stop-to-continue event with what it landed (freshly merged) vs skipped (already on the
-    // base), design §2.1, §7. Logged once, for the first wave a redrive re-enters.
-    if (pendingRedriveFromWave === index) {
-      cfg.log.log("redrive", { fromWave: index, landed: merged.length, skipped: alreadyMerged.length });
-      pendingRedriveFromWave = undefined;
-    }
-
-    // The base gated red (an emergent, unattributable failure): `integrateGreens` left the greens
-    // merged (never a rollback). A red base verifies nothing, so the green-path steps below (fold
-    // the changelog, advance labels) are skipped while it is parked.
-    const baseRed = !!parked;
-    if (!baseRed) {
-      // Green path only: fold this wave's merged `changelog.d/` fragments into CHANGELOG.md and
-      // commit on the base in one commit (issue #123). Agents write per-task fragments instead of
-      // editing the shared changelog, so co-wave branches never conflict on it.
-      const collected = deps.collectChangelog(index, cfg.log);
-      if (collected.committed)
-        reporter.line(`wave ${index + 1}/${total}: collected changelog fragments — ${collected.collected.join(", ")}`);
-      // Green path only: advance each merged issue to `pending-verify` via the configured
-      // `onIssueMerged` seam (issue #103). Best-effort — a failing write is logged and never
-      // touches a stop path. Only the green `merged` set is passed.
-      await markMergedIssues(cfg, merged);
-    }
-
-    // Resolve, in the exact §5 step 5 order: failed → red base → any parked member → wave-done.
-
-    // (1) Failure outranks everything (§2.4, ADR 0019). A member the agent could not make green
-    // (its child `run` exited non-zero → `error(n)`) is a terminal failure; its greens were still
-    // integrated (and got the green-path steps above when the base gated green), and the failed
-    // branch/worktree are kept for a fix-forward or prune. The wave holds — no `wave-done`, no
-    // succeeding wave. The per-task `failed` events were logged in `queue`; here the campaign
-    // records the `campaign-failed` stop marker (which `reduceCampaign` reads to hold the wave).
-    const failed = tasks.filter((t) => outcomes[t]?.startsWith("error"));
-    if (failed.length) {
-      cfg.log.log("campaign-failed", { index, detail: `${failed.join(", ")} failed` });
-      enqueueOutbound(cfg, campaignFailedNotice(cfg.project, index + 1, merged, failed, cfg.baseBranch));
-      reporter.line(formatStop({ kind: "failed", index, total, failed, merged }));
-      return "failed";
-    }
-
-    // (2) A red merged base (§2.3): everything stays merged, the base sits red (never pushed or
-    // built on while paused), and the campaign parks. The wave's reason is `red-base`, written on
-    // the stop marker (§2.1 rule 2), so a redrive re-gates this wave rather than stepping over it.
-    if (baseRed) {
-      cfg.log.log("campaign-parked", { index, reason: "red-base", detail: parked!.detail });
-      enqueueOutbound(cfg, campaignParkedNotice(cfg.project, index + 1, merged, cfg.baseBranch, parked!.detail));
-      reporter.line(formatStop({ kind: "red-base", index, total, merged }));
-      return "parked";
-    }
-
-    // The base gated green from here. The wave boundary clears NO parked records (design §2.5):
-    // a record is cleared only when its issue goes back to running (a re-admit/redrive run
-    // consuming it) or by an explicit `prune --purge`. A held member's record — a question, a
-    // stall, or a conflict-parked green's conflict — survives the boundary so it stays answerable,
-    // dashboard-visible, and resumable until a human resolves it.
-    const parkedTasks = tasks.filter((t) => outcomes[t] === "parked");
-
-    // (3) Any parked member holds the wave (design §5 step 5): a question, a stall, or a merge
-    // conflict (`conflictParked` — a green pulled from integration, its work preserved). A conflict
-    // that strands nothing no longer slips through to `wave-done` (#310, this issue absorbs it);
-    // it is unresolved work awaiting a human, so it parks the campaign like any other park. The
-    // stranded-dependents check + `--auto-prune` decide the DEPENDENTS' fate on top of this —
-    // never whether the campaign stops.
-    if (parkedTasks.length || conflictParked.length) {
-      const reason = waveParkReason(parkedTasks, conflictParked, listParked(cfg));
-
-      // A merge conflict that strands dependents in later, unstarted waves is a blast-radius call.
-      // `--auto-prune` prunes the stranded closure (ADR 0005) so a later redrive skips the doomed
-      // dependents; without it, the notice names them. Either way the conflict holds the wave.
-      let orphaning: StrandedImpact[] = [];
-      if (conflictParked.length && cfg.blockedBy) {
-        const plan = reduceCampaign(readEventLog(cfg));
-        orphaning = (await strandedByConflict(plan, conflictParked, cfg.blockedBy)).filter((i) => i.dropped.length);
-      }
-      const autoPruned = orphaning.length > 0 && !!opts.autoPrune;
-      if (autoPruned) {
-        for (const impact of orphaning) cfg.log.log("prune", { target: impact.target, removed: impact.removed, dropped: impact.dropped });
-        enqueueOutbound(cfg, autoPruneNotice(cfg.project, index + 1, orphaning));
-        reporter.line(
-          `wave ${index + 1}/${total}: auto-pruned ${orphaning.map((i) => `#${i.target}→${i.dropped.map((d) => `#${d}`).join(",")}`).join("; ")}.`,
+      let outcomes: Record<string, string>;
+      // A wave whose stop was `red-base` must be re-gated on re-entry even though nothing new
+      // merges (design §7): the fix-forward that resolves it lands on the base, not on any member
+      // branch, so `redBase` being set for this reconciled wave is the signal to force the gate.
+      let regate = false;
+      if (reconcileResume) {
+        // Redrive reconciliation (design §7): re-entering the parked wave, decide each
+        // member's outcome from the log — a banked/green member is landed by integration
+        // below without a rerun, an unanswered park re-parks the wave, a failed member
+        // (unless `--override`) stops the campaign as failed again — and spawn only the
+        // members that genuinely need to run. Fed back through the wave's ordinary resolve
+        // logic below, so no park/fail/merge path is special-cased for a redrive.
+        reconcileResume = false;
+        regate = reduced.redBase.size > 0 && reduced.parkedWave === index;
+        // A crashed member is resumed on its recorded session rather than re-run fresh only when the
+        // provider keeps a durable session AND its branch carries committed work (design §7's "else
+        // resume the session"); no commits, non-resumable, or an answered park (which re-runs via its
+        // own record) → no session, so the member runs fresh.
+        const { resumable } = agentSelectionFor(cfg);
+        const branchHasCommitsFor = deps.branchHasCommits ?? branchHasCommits;
+        const resumeSessionFor = (id: string): string | undefined => {
+          if (!resumable || hasParked(cfg, id)) return undefined;
+          const sid = reduced.sessions.get(id);
+          if (!sid) return undefined;
+          return branchHasCommitsFor(cfg, id) ? sid : undefined;
+        };
+        const { toRun, pre, resume } = reconcileResumeWave(
+          tasks,
+          reduced.outcomes,
+          // A park holds the wave only while its record is present AND un-answered; an answered
+          // record re-runs (the child consumes the answer), and a recordless park (a crash) re-runs
+          // too — design §5 step 3, §7.
+          (id) => hasParked(cfg, id) && !isAnswered(cfg, id),
+          !!opts.override,
+          reduced.pendingGreen,
+          resumeSessionFor,
         );
-      }
-      const stranded = autoPruned ? [] : orphaning.flatMap((i) => i.dropped);
-
-      // Record the stop marker with the wave's reason (§2.1 rule 2). The notice and terminal line
-      // take the shape of the hold: a stranded conflict, a plain conflict, or a member park.
-      if (reason === "conflict" && stranded.length) {
-        const detail = `stranded conflict: a merge conflict stranded ${stranded.map((d) => `#${d}`).join(", ")} in later waves`;
-        cfg.log.log("campaign-parked", { index, reason, detail });
-        enqueueOutbound(cfg, strandedConflictNotice(cfg.project, index + 1, orphaning, cfg.baseBranch));
-        reporter.line(formatStop({ kind: "stranded-conflict", index, total, stranded, merged }));
-      } else if (reason === "conflict") {
-        const detail = `merge conflict: ${conflictParked.join(", ")} parked, awaiting a human`;
-        cfg.log.log("campaign-parked", { index, reason, detail });
-        enqueueOutbound(cfg, conflictParkedNotice(cfg.project, index + 1, conflictParked, merged, cfg.baseBranch));
-        reporter.line(formatStop({ kind: "conflict", index, total, conflicted: conflictParked, merged }));
+        const ran = toRun.length ? await queue(cfg, toRun, host, titles, deps.spawnRun, reporter, resume) : {};
+        outcomes = { ...ran, ...pre };
       } else {
-        const detail = `parked, awaiting a human: ${parkedTasks.join(", ")}`;
-        cfg.log.log("campaign-parked", { index, reason, detail });
-        enqueueOutbound(cfg, campaignParkedNotice(cfg.project, index + 1, merged, cfg.baseBranch, detail));
-        reporter.line(formatStop({ kind: "issue-parked", index, total, parked: parkedTasks, merged }));
+        outcomes = await queue(cfg, tasks, host, titles, deps.spawnRun, reporter);
       }
-      return "parked";
+
+      // Grace window at the wave boundary (design §5 step 5): a member parked as question/stalled
+      // may still be answered. Hold the drained wave open up to `parkGraceSeconds`; an answer that
+      // lands (its parked record cleared) re-admits the member so it re-runs and merges in THIS
+      // wave, and expiry falls through to the normal park-and-stop below. `conflict`/`red-base`
+      // parks are integration-time states, decided after this point, so they never wait here.
+      const graceSeconds = cfg.parkGraceSeconds ?? 0;
+      const parkedNow = tasks.filter((t) => outcomes[t] === "parked");
+      if (parkedNow.length && graceSeconds > 0) {
+        cfg.log.log("grace-wait", { seconds: graceSeconds, tasks: parkedNow });
+        await deps.grace(cfg, parkedNow, graceSeconds);
+        const revived = parkedNow.filter((t) => isAnswered(cfg, t));
+        if (revived.length) outcomes = { ...outcomes, ...(await queue(cfg, revived, host, titles, deps.spawnRun, reporter)) };
+      }
+
+      const greens = tasks.filter((t) => outcomes[t] === "green");
+
+      const { merged, alreadyMerged = [], conflictParked, parked } = await deps.integrate(cfg, greens, undefined, index, { regate });
+
+      // The reconciled resume wave has now integrated its banked greens — log the `redrive`
+      // stop-to-continue event with what it landed (freshly merged) vs skipped (already on the
+      // base), design §2.1, §7. Logged once, for the first wave a redrive re-enters.
+      if (pendingRedriveFromWave === index) {
+        cfg.log.log("redrive", { fromWave: index, landed: merged.length, skipped: alreadyMerged.length });
+        pendingRedriveFromWave = undefined;
+      }
+
+      // The base gated red (an emergent, unattributable failure): `integrateGreens` left the greens
+      // merged (never a rollback). A red base verifies nothing, so the green-path steps below (fold
+      // the changelog, advance labels) are skipped while it is parked.
+      const baseRed = !!parked;
+      if (!baseRed) {
+        // Green path only: fold this wave's merged `changelog.d/` fragments into CHANGELOG.md and
+        // commit on the base in one commit (issue #123). Agents write per-task fragments instead of
+        // editing the shared changelog, so co-wave branches never conflict on it.
+        const collected = deps.collectChangelog(index, cfg.log);
+        if (collected.committed)
+          reporter.line(`wave ${index + 1}/${total}: collected changelog fragments — ${collected.collected.join(", ")}`);
+        // Green path only: advance each merged issue to `pending-verify` via the configured
+        // `onIssueMerged` seam (issue #103). Best-effort — a failing write is logged and never
+        // touches a stop path. Only the green `merged` set is passed.
+        await markMergedIssues(cfg, merged);
+      }
+
+      // Resolve, in the exact §5 step 5 order: failed → red base → any parked member → wave-done.
+
+      // (1) Failure outranks everything (§2.4, ADR 0019). A member the agent could not make green
+      // (its child `run` exited non-zero → `error(n)`) is a terminal failure; its greens were still
+      // integrated (and got the green-path steps above when the base gated green), and the failed
+      // branch/worktree are kept for a fix-forward or prune. The wave holds — no `wave-done`, no
+      // succeeding wave. The per-task `failed` events were logged in `queue`; here the campaign
+      // records the `campaign-failed` stop marker (which `reduceCampaign` reads to hold the wave).
+      const failed = tasks.filter((t) => outcomes[t]?.startsWith("error"));
+      if (failed.length) {
+        cfg.log.log("campaign-failed", { index, detail: `${failed.join(", ")} failed` });
+        enqueueOutbound(cfg, campaignFailedNotice(cfg.project, index + 1, merged, failed, cfg.baseBranch));
+        reporter.line(formatStop({ kind: "failed", index, total, failed, merged }));
+        return "failed";
+      }
+
+      // (2) A red merged base (§2.3): everything stays merged, the base sits red (never pushed or
+      // built on while paused), and the campaign parks. The wave's reason is `red-base`, written on
+      // the stop marker (§2.1 rule 2), so a redrive re-gates this wave rather than stepping over it.
+      if (baseRed) {
+        cfg.log.log("campaign-parked", { index, reason: "red-base", detail: parked!.detail });
+        enqueueOutbound(cfg, campaignParkedNotice(cfg.project, index + 1, merged, cfg.baseBranch, parked!.detail));
+        reporter.line(formatStop({ kind: "red-base", index, total, merged }));
+        return "parked";
+      }
+
+      // The base gated green from here. The wave boundary clears NO parked records (design §2.5):
+      // a record is cleared only when its issue goes back to running (a re-admit/redrive run
+      // consuming it) or by an explicit `prune --purge`. A held member's record — a question, a
+      // stall, or a conflict-parked green's conflict — survives the boundary so it stays answerable,
+      // dashboard-visible, and resumable until a human resolves it.
+      const parkedTasks = tasks.filter((t) => outcomes[t] === "parked");
+
+      // (3) Any parked member holds the wave (design §5 step 5): a question, a stall, or a merge
+      // conflict (`conflictParked` — a green pulled from integration, its work preserved). A conflict
+      // that strands nothing no longer slips through to `wave-done` (#310, this issue absorbs it);
+      // it is unresolved work awaiting a human, so it parks the campaign like any other park. The
+      // stranded-dependents check + `--auto-prune` decide the DEPENDENTS' fate on top of this —
+      // never whether the campaign stops.
+      if (parkedTasks.length || conflictParked.length) {
+        const reason = waveParkReason(parkedTasks, conflictParked, listParked(cfg));
+
+        // A merge conflict that strands dependents in later, unstarted waves is a blast-radius call.
+        // `--auto-prune` prunes the stranded closure (ADR 0005) so a later redrive skips the doomed
+        // dependents; without it, the notice names them. Either way the conflict holds the wave.
+        let orphaning: StrandedImpact[] = [];
+        if (conflictParked.length && cfg.blockedBy) {
+          const plan = reduceCampaign(readEventLog(cfg));
+          orphaning = (await strandedByConflict(plan, conflictParked, cfg.blockedBy)).filter((i) => i.dropped.length);
+        }
+        const autoPruned = orphaning.length > 0 && !!opts.autoPrune;
+        if (autoPruned) {
+          for (const impact of orphaning) cfg.log.log("prune", { target: impact.target, removed: impact.removed, dropped: impact.dropped });
+          enqueueOutbound(cfg, autoPruneNotice(cfg.project, index + 1, orphaning));
+          reporter.line(
+            `wave ${index + 1}/${total}: auto-pruned ${orphaning.map((i) => `#${i.target}→${i.dropped.map((d) => `#${d}`).join(",")}`).join("; ")}.`,
+          );
+        }
+        const stranded = autoPruned ? [] : orphaning.flatMap((i) => i.dropped);
+
+        // Record the stop marker with the wave's reason (§2.1 rule 2). The notice and terminal line
+        // take the shape of the hold: a stranded conflict, a plain conflict, or a member park.
+        if (reason === "conflict" && stranded.length) {
+          const detail = `stranded conflict: a merge conflict stranded ${stranded.map((d) => `#${d}`).join(", ")} in later waves`;
+          cfg.log.log("campaign-parked", { index, reason, detail });
+          enqueueOutbound(cfg, strandedConflictNotice(cfg.project, index + 1, orphaning, cfg.baseBranch));
+          reporter.line(formatStop({ kind: "stranded-conflict", index, total, stranded, merged }));
+        } else if (reason === "conflict") {
+          const detail = `merge conflict: ${conflictParked.join(", ")} parked, awaiting a human`;
+          cfg.log.log("campaign-parked", { index, reason, detail });
+          enqueueOutbound(cfg, conflictParkedNotice(cfg.project, index + 1, conflictParked, merged, cfg.baseBranch));
+          reporter.line(formatStop({ kind: "conflict", index, total, conflicted: conflictParked, merged }));
+        } else {
+          const detail = `parked, awaiting a human: ${parkedTasks.join(", ")}`;
+          cfg.log.log("campaign-parked", { index, reason, detail });
+          enqueueOutbound(cfg, campaignParkedNotice(cfg.project, index + 1, merged, cfg.baseBranch, detail));
+          reporter.line(formatStop({ kind: "issue-parked", index, total, parked: parkedTasks, merged }));
+        }
+        return "parked";
+      }
+
+      // (4) Every member merged and the base is green: the wave closes (design §5 step 5). The event
+      // carries `{ index, merged }` only (§2.1) — a wave-done means every member merged, so there is
+      // no held or conflict-parked member to record.
+      const waveDoneEvent: Omit<WaveDoneEvent, "ts" | "event"> = { index, merged };
+      cfg.log.log("wave-done", waveDoneEvent);
+      enqueueOutbound(
+        cfg,
+        notice({
+          emoji: "✅",
+          project: cfg.project,
+          state: "WAVE",
+          context: `${index + 1} merged${named(campaignName)}`,
+          signal: merged.join(", ") || "nothing",
+          category: "success",
+          event: "wave-done",
+        }),
+      );
+      reporter.line(formatWaveDone(index, total, { merged }));
     }
 
-    // (4) Every member merged and the base is green: the wave closes (design §5 step 5). The event
-    // carries `{ index, merged }` only (§2.1) — a wave-done means every member merged, so there is
-    // no held or conflict-parked member to record.
-    const waveDoneEvent: Omit<WaveDoneEvent, "ts" | "event"> = { index, merged };
-    cfg.log.log("wave-done", waveDoneEvent);
+    const doneEvent: Omit<CampaignDoneEvent, "ts" | "event"> = { waves: index };
+    if (campaignName) doneEvent.name = campaignName;
+    cfg.log.log("campaign-done", doneEvent);
     enqueueOutbound(
       cfg,
       notice({
-        emoji: "✅",
+        emoji: "🏆",
         project: cfg.project,
-        state: "WAVE",
-        context: `${index + 1} merged${named(campaignName)}`,
-        signal: merged.join(", ") || "nothing",
+        state: "COMPLETE",
+        context: `campaign${named(campaignName)}`,
+        signal: `${index} waves merged onto ${cfg.baseBranch}`,
         category: "success",
-        event: "wave-done",
+        event: "campaign-done",
       }),
     );
-    reporter.line(formatWaveDone(index, total, { merged }));
+    reporter.line(formatComplete(index, cfg.baseBranch, campaignName));
+    return "done";
+  } finally {
+    // Drop the whole-life lease on every exit — a clean return or a thrown Refusal/error (#424).
+    deregisterProject(host.configDir);
   }
-
-  const doneEvent: Omit<CampaignDoneEvent, "ts" | "event"> = { waves: index };
-  if (campaignName) doneEvent.name = campaignName;
-  cfg.log.log("campaign-done", doneEvent);
-  enqueueOutbound(
-    cfg,
-    notice({
-      emoji: "🏆",
-      project: cfg.project,
-      state: "COMPLETE",
-      context: `campaign${named(campaignName)}`,
-      signal: `${index} waves merged onto ${cfg.baseBranch}`,
-      category: "success",
-      event: "campaign-done",
-    }),
-  );
-  reporter.line(formatComplete(index, cfg.baseBranch, campaignName));
-  return "done";
 }
 
 export async function tgTest(cfg: ResolvedConfig, conn: TgConn) {

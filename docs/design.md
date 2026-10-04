@@ -142,7 +142,7 @@ A parked record that survives a run (it always does, until resolved) keeps the c
 
 ## 3. The run loop
 
-`run <issue>` is one container, one branch, one agent session, and returns exactly one of green / parked / failed as its exit code (0 / 2 / 1). A run **merges nothing**: it banks its commits on `agent/<id>` and stops there — the merge onto the base and the merged-base gate are the campaign's (§6), never the run's. So a green run is banked work on a branch, not a finished issue; its terminal banner says as much (§11) and names `campaign <id>` as what integrates it (suppressed for a campaign's own child run, which is already inside integration).
+`run <issue>` is one container, one branch, one agent session, and returns exactly one of green / parked / failed as its exit code (0 / 2 / 1) — or, when it is refused before it runs (a live campaign owns the issue, the task id is missing, the credentials preflight fails), a **refusal**'s exit `4` (the exit codes are in [`reference.md`](reference.md#exit-codes)). A run **merges nothing**: it banks its commits on `agent/<id>` and stops there — the merge onto the base and the merged-base gate are the campaign's (§6), never the run's. So a green run is banked work on a branch, not a finished issue; its terminal banner says as much (§11) and names `campaign <id>` as what integrates it (suppressed for a campaign's own child run, which is already inside integration).
 
 1. Preflight: the provider's credential key is present in `.env`; the working tree is not already checked out on `agent/<id>` (one run per issue, enforced by git).
 2. Create the sandbox: branch `agent/<id>` cut from the base (or reused with its commits if it exists), worktree, container from `cfg.image`, `setup` commands, the mounts.
@@ -181,7 +181,7 @@ For each wave:
    - the merged base red → log `campaign-parked` (the wave's reason `red-base`), notify, exit non-zero;
    - any member `parked` (question, stalled, conflict) → log `campaign-parked`, notify, exit non-zero. A conflict that strands dependents in later waves is named in the notice; `--auto-prune` prunes the stranded closure instead of stopping — it decides what happens to the *dependents*, never whether the conflicted member itself holds the wave;
    - otherwise log `wave-done` and continue.
-6. On the last wave: log `campaign-done`, notify, archive the run, exit zero. Every exit code is set by the campaign's outcome: zero only for `campaign-done`.
+6. On the last wave: log `campaign-done`, notify, archive the run, exit zero. Once the campaign is running, every exit code is set by its outcome: zero only for `campaign-done`. A campaign refused before it runs (no ids, the interactive under-specified stop, a missing resolver) has no outcome and exits `4`.
 
 The exit is deliberate: a paused campaign holds no container budget and no state that is not on disk, so keeping a process alive to wait for a human buys latency, not correctness. The durable path (§7) is the mechanism; the grace window (`parkGraceSeconds`, §9) is an optimization on top of it — a fast answer means the wave never parked at all — and is part of this plan, not a maybe.
 
@@ -336,7 +336,6 @@ Deferred — wanted, not now:
 
 Described by behaviour; the tracker holds the numbers (`gh issue list --label campaign:audit`). Re-audited 2026-08-31 claim by claim against §2–§11 after the audit campaign landed; everything not listed here was verified to hold, including the whole of §5–§7 resolve/redrive, §10 comms, §11 dashboard and appendix A.
 
-- **A throw before the sandbox logs no `failed`.** The run loop's outer catch now covers the whole loop — the parked-answer preflight, `fetchTask` and sandbox creation included — so a worktree-preflight or tracker-fetch throw logs one `failed` verdict and the run exits `1`, no stack trace. (A refusal raised *outside* the run loop — a precondition, a usage error — is not folded to a verdict: the process-wide CLI handler prints its message alone on stderr and exits `4`.)
 - **A crash redrive never resumes the session.** §7 says "treat as unstarted if no commits, else resume the session"; the reconciler re-runs a crashed member fresh on its branch in every case, and a code comment overstates this.
 
 ---

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ResolvedConfig } from "./config.ts";
@@ -329,4 +329,28 @@ test("neither parked lister returns a temp file stranded by a crashed atomic wri
     ["103"],
   );
   assert.deepEqual(logger.events, [], "a stranded temp is not even read");
+});
+
+test("the parked writers leave only <id>.json records behind, each parsing with its fields", async () => {
+  const dir = join(tmpdir(), `vetinari-park-writers-${Date.now()}`);
+  mkdirSync(join(dir, "parked"), { recursive: true });
+  await park(cfgFor(dir), { taskId: "201", reason: "question", sessionId: "s", branch: "agent/201", question: "?" });
+  writeParkedRecord(cfgFor(dir), {
+    taskId: "202",
+    reason: "conflict",
+    branch: "agent/202",
+    question: "Merge conflict.",
+    detail: "both modified",
+  });
+  setParkedMessageId(join(dir, "parked"), "201", 77);
+  answerParked(cfgFor(dir), "201", "go with A");
+
+  assert.deepEqual(readdirSync(join(dir, "parked")).sort(), ["201.json", "202.json"]);
+  const a = JSON.parse(readFileSync(join(dir, "parked", "201.json"), "utf8"));
+  assert.equal(a.tgMessageId, 77);
+  assert.equal(a.answer, "go with A");
+  assert.equal(a.question, "?");
+  const b = JSON.parse(readFileSync(join(dir, "parked", "202.json"), "utf8"));
+  assert.equal(b.reason, "conflict");
+  assert.equal(b.detail, "both modified");
 });

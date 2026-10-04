@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { writeFileAtomic } from "./atomic-write.ts";
 import type { MessageCategory, ResolvedConfig } from "./config.ts";
 import { hostLogger, type Logger } from "./log.ts";
 
@@ -63,7 +64,7 @@ export async function park(cfg: ResolvedConfig, rec: Omit<ParkedRecord, "parkedA
  */
 export function writeParkedRecord(cfg: Pick<ResolvedConfig, "parkedDir">, rec: Omit<ParkedRecord, "parkedAt" | "tgMessageId">): void {
   mkdirSync(cfg.parkedDir, { recursive: true });
-  writeFileSync(file(cfg, rec.taskId), JSON.stringify({ parkedAt: new Date().toISOString(), ...rec }, null, 2));
+  writeFileAtomic(file(cfg, rec.taskId), JSON.stringify({ parkedAt: new Date().toISOString(), ...rec }, null, 2));
 }
 
 /** A project's parked directory under a base location (its `.vetinari.local/`). */
@@ -100,7 +101,7 @@ export function setParkedMessageId(parkedDir: string, taskId: string, tgMessageI
   const path = join(parkedDir, `${taskId}.json`);
   if (!existsSync(path)) return;
   const rec = JSON.parse(readFileSync(path, "utf8")) as ParkedRecord;
-  writeFileSync(path, JSON.stringify({ ...rec, tgMessageId }, null, 2));
+  writeFileAtomic(path, JSON.stringify({ ...rec, tgMessageId }, null, 2));
 }
 
 /**
@@ -128,7 +129,7 @@ export const hasParked = (cfg: ResolvedConfig, taskId: string) => existsSync(fil
  */
 export function answerParked(cfg: ResolvedConfig, taskId: string, answer: string): void {
   const rec = JSON.parse(readFileSync(file(cfg, taskId), "utf8")) as ParkedRecord;
-  writeFileSync(file(cfg, taskId), JSON.stringify({ ...rec, answer, answeredAt: new Date().toISOString() }, null, 2));
+  writeFileAtomic(file(cfg, taskId), JSON.stringify({ ...rec, answer, answeredAt: new Date().toISOString() }, null, 2));
 }
 
 /**

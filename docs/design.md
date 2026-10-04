@@ -234,6 +234,8 @@ Every item is placed by three questions — scope (host / project / run), secret
 | `.vetinari.local/.env` | **the container gate** — only the agent provider's credential |
 | `.vetinari.local/host.env` | host-only secrets — this project's Telegram bot token and chat (per project; projects may share a bot or not) |
 
+`vetinari/tsconfig.json` (committed) extends `.vetinari.local/tsconfig.json` (machine-local, kept pointing at the running install by the CLI), so a project's config type-checks with no install of its own.
+
 Invariants: the container gate is exactly one file; the gateway persists none of the project layers; `hostEnv` values are non-secret. `init` scaffolds the layout; `migrate` moves a pre-layout project once and does not accumulate shims for later renames (§13.1).
 
 ## 10. Communications

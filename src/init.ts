@@ -11,9 +11,10 @@
  *
  * Idempotent and non-clobbering: re-running yields an empty plan and a "nothing to
  * do" report, and an existing `vetinari/` config is never overwritten — the
- * committed scaffold is refused with a clear message while the still-missing
- * machine-local pieces (the excluded dir, the `.gitignore` entry) are filled in
- * without disturbing what already exists.
+ * committed scaffold (config, Dockerfile, tsconfig) is refused with a clear message
+ * while the still-missing pieces (the `vetinari/tsconfig.json` an older project
+ * predates, the excluded dir, the `.gitignore` entry) are filled in without
+ * disturbing what already exists.
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -27,6 +28,7 @@ const CANONICAL_DIR = "vetinari";
 export const LOCAL_DIR = ".vetinari.local";
 const CONFIG_DEST = `${CANONICAL_DIR}/config.mts`;
 const DOCKERFILE_DEST = `${CANONICAL_DIR}/Dockerfile`;
+const TSCONFIG_DEST = `${CANONICAL_DIR}/tsconfig.json`;
 
 /** A file to write: its path relative to the project root and its full content. */
 export interface FileCreate {
@@ -42,6 +44,8 @@ export interface FileCreate {
 export interface InitScan {
   /** Whether a canonical `vetinari/` config already exists (→ scaffold refused). */
   hasConfig: boolean;
+  /** Whether the committed `vetinari/tsconfig.json` already exists. */
+  hasTsconfig: boolean;
   /** Whether the excluded `.vetinari.local/` dir already exists. */
   hasLocalDir: boolean;
   /** Current `.gitignore` content, or undefined when there is no `.gitignore`. */
@@ -50,10 +54,12 @@ export interface InitScan {
   configTemplate: string;
   /** The Dockerfile template to write, shipped with the install. */
   dockerfileTemplate: string;
+  /** The committed tsconfig that extends `.vetinari.local/tsconfig.json`, shipped with the install. */
+  tsconfigTemplate: string;
 }
 
 export interface InitPlan {
-  /** Committed scaffold files to write (the config skeleton and the Dockerfile). */
+  /** Committed scaffold files to write (the config skeleton, the Dockerfile and the tsconfig). */
   creates: FileCreate[];
   /** Directories to create (the excluded `.vetinari.local/`). */
   dirs: string[];
@@ -61,8 +67,9 @@ export interface InitPlan {
   gitignore?: string;
   /**
    * True when a `vetinari/` config already existed, so the committed scaffold
-   * (config + Dockerfile) was withheld rather than overwritten. The machine-local
-   * pieces are still filled in.
+   * (config + Dockerfile) was withheld rather than overwritten. A missing
+   * `vetinari/tsconfig.json` — the one committed file an existing project may
+   * predate — and the machine-local pieces are still filled in.
    */
   refused: boolean;
 }
@@ -85,8 +92,9 @@ function planGitignore(current: string | undefined): string | undefined {
 /**
  * Pure planner: from a described target directory, return what `init` would create
  * and the `.gitignore` edit. Writes nothing. When a config already exists the
- * committed scaffold is withheld (`refused`) so it is never overwritten, while the
- * still-missing machine-local pieces are planned so a partial layout is topped up.
+ * committed scaffold is withheld (`refused`) so it is never overwritten, while a
+ * missing tsconfig and the machine-local pieces are planned so a partial layout is
+ * topped up.
  */
 export function computeInit(scan: InitScan): InitPlan {
   const creates: FileCreate[] = [];
@@ -97,6 +105,7 @@ export function computeInit(scan: InitScan): InitPlan {
     creates.push({ path: CONFIG_DEST, content: scan.configTemplate });
     creates.push({ path: DOCKERFILE_DEST, content: scan.dockerfileTemplate });
   }
+  if (!scan.hasTsconfig) creates.push({ path: TSCONFIG_DEST, content: scan.tsconfigTemplate });
   if (!scan.hasLocalDir) dirs.push(LOCAL_DIR);
 
   const gitignore = planGitignore(scan.gitignore);
@@ -128,7 +137,7 @@ export function describeInit(plan: InitPlan, provider: AgentProviderName = DEFAU
   if (plan.gitignore !== undefined) lines.push(`  ~ .gitignore — exclude ${LOCAL_DIR}/`);
 
   // Next steps only apply when the committed scaffold was actually laid down.
-  if (plan.creates.length) {
+  if (!plan.refused) {
     // The credential keys the selected provider's preflight accepts (any one satisfies), read
     // from AGENT_PROVIDERS so this never drifts from the provider table (§13.1). A greenfield
     // scaffold has no `agent` in its config yet, so it defaults to the default provider; the
@@ -205,14 +214,16 @@ const templatePath = (name: string) => new URL(`../templates/${name}`, import.me
  * so the planner stays pure. A canonical `vetinari/config.{mts,ts}` counts as an
  * existing config (the refusal trigger); the deprecated locations do not, since
  * init is for a greenfield project (a legacy layout is `migrate`'s job). The
- * config skeleton and Dockerfile templates are read from the shared install.
+ * config skeleton, Dockerfile and tsconfig templates are read from the shared install.
  */
 export function scanInit(baseDir: string): InitScan {
   return {
     hasConfig: existsSync(resolve(baseDir, CONFIG_DEST)) || existsSync(resolve(baseDir, `${CANONICAL_DIR}/config.ts`)),
+    hasTsconfig: existsSync(resolve(baseDir, TSCONFIG_DEST)),
     hasLocalDir: existsSync(resolve(baseDir, LOCAL_DIR)),
     gitignore: readOrUndef(resolve(baseDir, ".gitignore")),
     configTemplate: readFileSync(templatePath("config.mts"), "utf8"),
     dockerfileTemplate: readFileSync(templatePath("Dockerfile"), "utf8"),
+    tsconfigTemplate: readFileSync(templatePath("tsconfig.json"), "utf8"),
   };
 }

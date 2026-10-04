@@ -59,6 +59,7 @@ import {
 } from "./plan.ts";
 import { runGraft } from "./graft.ts";
 import { renderUsage } from "./help.ts";
+import { Refusal, handleCliError } from "./refusal.ts";
 import {
   applyLayoutMigration,
   computeLayoutMigration,
@@ -101,6 +102,20 @@ import {
 } from "./statusline-install.ts";
 
 const USAGE = renderUsage();
+
+// One error handler for the whole CLI process — registered before any command work
+// (including the pre-dispatch project-root/config resolution and the host-level modes)
+// so a `Refusal` thrown anywhere reaches the operator as its message alone on stderr,
+// exit 4, while a genuine defect keeps its stack trace and exit 1 (src/refusal.ts). Node
+// surfaces a top-level-await module's throw — sync or async, before or after an await —
+// as an `uncaughtException`; an unhandled rejection is covered too. The handler is
+// process-wide, so it also wraps the gateway/status daemons the CLI hosts (intended).
+const cliErrorIO = {
+  writeStderr: (s: string) => process.stderr.write(s),
+  exit: (code: number) => process.exit(code),
+};
+process.on("uncaughtException", (err) => handleCliError(err, cliErrorIO));
+process.on("unhandledRejection", (err) => handleCliError(err, cliErrorIO));
 
 /**
  * The interactive under-specified halt: shown only on a terminal (the flag/TTY
@@ -155,9 +170,18 @@ const cfgPath = cfgIdx >= 0 ? argv[cfgIdx + 1] : undefined;
 if (cfgIdx >= 0) argv.splice(cfgIdx, 2);
 const [mode, ...rest] = argv;
 
-if (!mode) {
+// Help is not a refusal (ADR: CLI exit codes): `--help`/`-h`/`help` print usage on
+// stdout and exit 0. Handled here, before config load, so help works outside a project.
+if (mode === "--help" || mode === "-h" || mode === "help") {
   console.log(USAGE);
-  process.exit(1);
+  process.exit(0);
+}
+
+// A bare `vetinari` (no mode) is a usage refusal: usage on stderr, exit 4, still before
+// config load so it keeps working outside a project.
+if (!mode) {
+  console.error(USAGE);
+  process.exit(4);
 }
 
 // The Claude Code status bar runs this on every refresh, in any directory, and
@@ -268,7 +292,7 @@ if (mode === "changelog") {
     console.error(
       'changelog needs a subcommand: `vetinari changelog collect [--title "…"]`',
     );
-    process.exit(1);
+    process.exit(4);
   }
   const titleIdx = rest.indexOf("--title");
   const title =
@@ -299,7 +323,9 @@ if (mode === "migrate") {
   const dryRun = rest.includes("--dry-run");
   const plan = computeLayoutMigration(scanLayout(process.cwd()));
   console.log(describeMigration(plan));
-  if (plan.conflicts.length) process.exit(1);
+  // Conflicts refuse the migration: its plan is printed above (conflicts included), then
+  // exit 4 (refused). The plan stays on stdout — the operator asked for it.
+  if (plan.conflicts.length) process.exit(4);
   if (dryRun) {
     console.log("\n(dry run — nothing was changed)");
     process.exit(0);
@@ -362,7 +388,7 @@ if (mode === "host") {
     console.error(
       "host needs a subcommand: `vetinari host log [-n <count>] [--tail] [--json]`",
     );
-    process.exit(1);
+    process.exit(4);
   }
   const opts = rest.slice(1);
   const asJson = opts.includes("--json");
@@ -370,7 +396,7 @@ if (mode === "host") {
   const nIdx = opts.indexOf("-n");
   const limit = nIdx >= 0 ? Number(opts[nIdx + 1]) : 50;
   if (!Number.isInteger(limit) || limit < 0)
-    throw new Error("host log -n needs a non-negative integer count");
+    throw new Refusal("host log -n needs a non-negative integer count");
 
   // Render a batch of raw JSONL lines to stdout: `--json` passes them through
   // untouched (byte-faithful for jq/grep); otherwise each parses to a row and
@@ -448,9 +474,9 @@ if (mode === "status") {
       ? rest[hostIdx + 1]
       : (process.env.VETINARI_STATUS_HOST ?? "127.0.0.1");
   if (!Number.isInteger(port) || port < 0)
-    throw new Error("status --port needs a non-negative integer");
+    throw new Refusal("status --port needs a non-negative integer");
   if (!host)
-    throw new Error("status --host needs a host, e.g. 127.0.0.1 or 0.0.0.0");
+    throw new Refusal("status --host needs a host, e.g. 127.0.0.1 or 0.0.0.0");
   await serveAllStatus(gatewayConfigDir(), { port, host });
   // serveAllStatus resolves once it is listening; the process must then stay up
   // to serve, so park here instead of exiting (an exit would kill the server the
@@ -468,7 +494,7 @@ if (mode === "registry") {
     console.error(
       "registry needs a subcommand: `vetinari registry remove <name>`",
     );
-    process.exit(1);
+    process.exit(4);
   }
   const name = rest[1];
   const removed = removePointer(gatewayConfigDir(), name);
@@ -530,7 +556,7 @@ if (mode === "tidy") {
   } else {
     const resolved = resolveConfigPath(process.cwd());
     if (!resolved)
-      throw new Error(
+      throw new Refusal(
         "tidy needs a vetinari project — run it from a project root, or use `tidy --all` to sweep every registered project.",
       );
     targets.push(targetFor(await loadConfig(resolved.path), process.cwd()));
@@ -636,7 +662,7 @@ function selectAgent(cfg: ResolvedConfig, override: AgentOverride): void {
   const envPath = resolve(process.cwd(), cfg.stateDir, ".env");
   const missing = missingCredentials(selection.provider, envPath);
   if (missing.length)
-    throw new Error(
+    throw new Refusal(
       `agent provider "${selection.provider}" has no credentials in ${envPath} — ` +
         `set ${missing.join(" or ")} there before launching (preflight, ADR 0016).`,
     );

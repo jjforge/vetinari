@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import type { FindingReporter } from "./findings.ts";
 import type { FileSetOf } from "./fileset.ts";
 import { loggerForRun, type Logger } from "./log.ts";
+import { Refusal } from "./refusal.ts";
 
 /**
  * The four fixed categories a piece of outbound communication carries, used to
@@ -218,7 +219,7 @@ export function resolveAgentSelection(
 ): AgentSelection {
   const providerRaw = override.provider ?? base?.provider ?? DEFAULT_PROVIDER;
   if (!(providerRaw in AGENT_PROVIDERS))
-    throw new Error(`unknown agent provider "${providerRaw}". Supported: ${SUPPORTED_LIST}.`);
+    throw new Refusal(`unknown agent provider "${providerRaw}". Supported: ${SUPPORTED_LIST}.`);
   const provider = providerRaw as AgentProviderName;
   const spec = AGENT_PROVIDERS[provider];
 
@@ -232,10 +233,10 @@ export function resolveAgentSelection(
   // explicitly rather than silently dropping it. Otherwise the effort defaults and is validated.
   const supportsEffort = spec.efforts.length > 0;
   if (!supportsEffort && requestedEffort !== undefined)
-    throw new Error(`agent provider "${provider}" takes no effort setting (its CLI exposes no reasoning-effort dial).`);
+    throw new Refusal(`agent provider "${provider}" takes no effort setting (its CLI exposes no reasoning-effort dial).`);
   const effort = supportsEffort ? (requestedEffort ?? DEFAULT_EFFORT) : undefined;
   if (effort !== undefined && !spec.efforts.includes(effort))
-    throw new Error(
+    throw new Refusal(
       `agent effort "${effort}" is not valid for provider "${provider}". Valid: ${spec.efforts.join(", ")}.`,
     );
 
@@ -553,7 +554,7 @@ export function resolveProjectRoot(cwd: string = process.cwd()): string {
       { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
     ).trim();
   } catch {
-    throw new Error(
+    throw new Refusal(
       `not a git repository: ${cwd} — run this from inside your project's checkout.`,
     );
   }
@@ -611,12 +612,12 @@ export function assertProjectQualifier(
 ): void {
   if (qualifier === undefined) return;
   if (qualifier !== project)
-    throw new Error(
+    throw new Refusal(
       `refusing: this project is "${project}", but the qualifier names "${qualifier}". ` +
         "The CLI acts only on the project it is run in — it never reaches across into another.",
     );
   if (repo === undefined)
-    throw new Error(
+    throw new Refusal(
       `refusing: cannot derive this project's repo to verify the "${qualifier}" qualifier. ` +
         "With no repo identity to check against, the qualifier cannot be honored — run it in the project's checkout, or drop the qualifier.",
     );
@@ -670,7 +671,7 @@ export async function loadConfig(
   if (!path) {
     const resolved = resolveConfigPath(process.cwd());
     if (!resolved) {
-      throw new Error(
+      throw new Refusal(
         `No config found. Create ${CANONICAL_CONFIG} in the project root (or pass --config <path>). ` +
           `See the README for a template.`,
       );
@@ -685,7 +686,7 @@ export async function loadConfig(
   }
   const mod = await import(resolve(path));
   const c: VetinariConfig = mod.default ?? mod.config;
-  if (!c) throw new Error(`${path} has no default export`);
+  if (!c) throw new Refusal(`${path} has no default export`);
   for (const required of [
     "project",
     "image",
@@ -694,16 +695,16 @@ export async function loadConfig(
     "fetchTask",
   ] as const) {
     if (c[required] == null)
-      throw new Error(`${path}: missing required field "${required}"`);
+      throw new Refusal(`${path}: missing required field "${required}"`);
   }
   if (!c.gates.length)
-    throw new Error(
+    throw new Refusal(
       `${path}: "gates" is empty — the orchestrator would verify nothing`,
     );
   if (c.notify) {
     const qDests = questionDestinations(c.notify);
     if (qDests.size > 1) {
-      throw new Error(
+      throw new Refusal(
         `${path}: the notify map routes the interactive "question" category to more than one destination ` +
           `(${[...qDests].join(", ")}). question expects a reply, so the gateway watches a single destination for it — ` +
           `route "question" (and any "question:event") to exactly one place.`,

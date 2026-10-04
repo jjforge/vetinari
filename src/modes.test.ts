@@ -923,13 +923,14 @@ const recordingDeps = (
 });
 
 // Seed a wave-0 park: 101 merged green, 102 parked — with no `wave-done`, so the wave never
-// closed. The base state every redrive-reconciliation test starts from.
-const seedParkedWave = (cfg: ResolvedConfig) => {
+// closed. The base state every redrive-reconciliation test starts from. With no `reason` the
+// `campaign-parked` reads as a legacy (red-base) wave-park; pass `reason` to seed a member park.
+const seedParkedWave = (cfg: ResolvedConfig, reason?: "question") => {
   cfg.log.log("campaign-start", { waves: [["101", "102"]], slots: 4 });
   cfg.log.log("wave-start", { index: 0, tasks: ["101", "102"] });
   cfg.log.log("green", { taskId: "101", branch: "agent/101", commits: ["a"] });
   cfg.log.log("parked", { taskId: "102", reason: "question" });
-  cfg.log.log("campaign-parked", { index: 0, detail: "parked, awaiting a human: 102" });
+  cfg.log.log("campaign-parked", { index: 0, ...(reason ? { reason } : {}), detail: "parked, awaiting a human: 102" });
 };
 
 test("redrive re-enters the parked wave and integrates a green-but-unmerged member without respawning it (design §7)", async () => {
@@ -980,6 +981,84 @@ test("the redrive event carries fromWave, landed, and skipped (design §2.1, §7
   assert.equal(redrive.fromWave, 0, "the wave the redrive re-entered");
   assert.equal(redrive.landed, 1, "102 was freshly landed");
   assert.equal(redrive.skipped, 1, "101 was already banked and skipped");
+});
+
+// Seed a wave-0 red-base park: 101 and 102 went green and merged, then the merged base gated
+// red — the greens stay on the base and the wave parks with no `wave-done`.
+const seedRedBaseParkedWave = (cfg: ResolvedConfig) => {
+  cfg.log.log("campaign-start", { waves: [["101", "102"]], slots: 4 });
+  cfg.log.log("wave-start", { index: 0, tasks: ["101", "102"] });
+  for (const id of ["101", "102"]) {
+    cfg.log.log("green", { taskId: id, branch: `agent/${id}`, commits: [id] });
+    cfg.log.log("merged", { taskId: id, branch: `agent/${id}` });
+  }
+  cfg.log.log("campaign-parked", { index: 0, reason: "red-base", detail: "GATE FAILED" });
+};
+
+// A CampaignDeps whose integrate stub records the `regate` flag it was handed and returns `result`.
+const regateDeps = (
+  cfg: ResolvedConfig,
+  result: Awaited<ReturnType<CampaignDeps["integrate"]>>,
+  regates: (boolean | undefined)[],
+): CampaignDeps => ({
+  spawnRun: async () => 0,
+  integrate: async (_cfg, _greens, _deps, _index, opts) => {
+    regates.push(opts?.regate);
+    return result;
+  },
+  collectChangelog: () => ({ collected: [], committed: false }),
+  currentBranch: () => cfg.baseBranch,
+  grace: async () => {},
+});
+
+test("a green re-gate of a red-base wave fires onIssueMerged for every member already merged onto the base (#420)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-regate-green-"));
+  const seen: string[] = [];
+  const cfg = { ...harnessCfg(dir), onIssueMerged: (id: string) => void seen.push(id) };
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  seedRedBaseParkedWave(cfg);
+
+  const regates: (boolean | undefined)[] = [];
+  const deps = regateDeps(cfg, { merged: [], alreadyMerged: ["101", "102"], conflictParked: [] }, regates);
+  await silenceConsole(() => campaign(cfg, [], host, undefined, { resume: true }, deps));
+
+  assert.deepEqual(regates, [true], "the red-base wave was re-entered with regate set");
+  assert.deepEqual(seen.sort(), ["101", "102"], "both members merged before the park got the merged hook, once each");
+});
+
+test("a re-gate of a red-base wave that is still red fires onIssueMerged for no one (#420)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-regate-red-"));
+  const seen: string[] = [];
+  const cfg = { ...harnessCfg(dir), onIssueMerged: (id: string) => void seen.push(id) };
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  seedRedBaseParkedWave(cfg);
+
+  const regates: (boolean | undefined)[] = [];
+  const deps = regateDeps(
+    cfg,
+    { merged: [], alreadyMerged: ["101", "102"], conflictParked: [], parked: { reason: "red-base", detail: "GATE FAILED" } },
+    regates,
+  );
+  await silenceConsole(() => campaign(cfg, [], host, undefined, { resume: true }, deps));
+
+  assert.deepEqual(regates, [true], "the red-base wave was re-entered with regate set");
+  assert.deepEqual(seen, [], "a base still red verifies nothing — no member is relabelled");
+});
+
+test("a redrive of a non-red-base park relabels only the freshly merged members, not those already on the base (#420)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-question-hook-"));
+  const seen: string[] = [];
+  const cfg = { ...harnessCfg(dir), onIssueMerged: (id: string) => void seen.push(id) };
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  seedParkedWave(cfg, "question");
+  cfg.log.log("green", { taskId: "102", branch: "agent/102", commits: ["b"] }); // the answer landed
+
+  const regates: (boolean | undefined)[] = [];
+  const deps = regateDeps(cfg, { merged: ["102"], alreadyMerged: ["101"], conflictParked: [] }, regates);
+  await silenceConsole(() => campaign(cfg, [], host, undefined, { resume: true }, deps));
+
+  assert.deepEqual(regates, [false], "a question park is not re-gated");
+  assert.deepEqual(seen, ["102"], "only the freshly merged member got the merged hook");
 });
 
 test("resolve reads only the wave's members — a stray parked record for a non-member never holds the wave (design §5 step 5, #314)", async () => {

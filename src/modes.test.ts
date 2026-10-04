@@ -10,7 +10,9 @@ import {
   buildImageCommand,
   campaign,
   campaignFailedNotice,
+  campaignStoppedNotice,
   childSpawnEnv,
+  childSpawnOptions,
   conflictParkedNotice,
   memberParkedNotice,
   markMergedIssues,
@@ -1871,4 +1873,263 @@ test("queue returns and logs a per-task outcome map translating each child's exi
     "only the errored member is folded to a failed event",
   );
   assert.equal(failed[0].detail, "error(7)", "the failed event carries the translated exit code");
+});
+
+// ---- `vetinari stop` / Ctrl-C (#403) ----------------------------------------------------------
+// The campaign's stop handler is driven through its injected seams — no real signal, no real child.
+// `stopDeps` captures the callback `campaign()` registers on `onStop` (so a test fires SIGINT/SIGTERM/
+// SIGHUP at a moment it chooses), records each `signalRuns` call, and counts the unsubscribe.
+type StopSignal = "SIGINT" | "SIGTERM" | "SIGHUP";
+const stopDeps = (base: CampaignDeps, onSignalRuns: (signal: string) => void = () => {}) => {
+  const h = {
+    fire: ((_s: StopSignal) => {
+      throw new Error("campaign() never registered a stop handler");
+    }) as (s: StopSignal) => void,
+    signalled: [] as string[],
+    unsubscribed: 0,
+  };
+  const deps: CampaignDeps = {
+    ...base,
+    onStop: (cb) => {
+      h.fire = cb;
+      return () => void h.unsubscribed++;
+    },
+    signalRuns: (signal) => {
+      h.signalled.push(signal);
+      onSignalRuns(signal);
+    },
+  };
+  return { deps, h };
+};
+
+// A child that parks itself `stopped` (#431): it writes its own `stopped` record and exits 2.
+const writeStoppedRecord = (cfg: ResolvedConfig, taskId: string) => {
+  mkdirSync(cfg.parkedDir, { recursive: true });
+  writeFileSync(
+    join(cfg.parkedDir, `${taskId}.json`),
+    JSON.stringify({ taskId, reason: "stopped", branch: `agent/${taskId}`, question: "", parkedAt: "2026-10-04T00:00:00Z" }),
+  );
+};
+
+test("a graceful stop (SIGINT) lets the wave in flight drain and integrate, then parks `stopped` before the next wave (#403)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-stop-graceful-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const integrated: string[][] = [];
+  let stop!: ReturnType<typeof stopDeps>;
+  // Wave 1's child takes the Ctrl-C mid-run, then finishes green as normal.
+  const childRun: CampaignDeps["spawnRun"] = async (id) => {
+    if (id === "101") stop.h.fire("SIGINT");
+    return 0;
+  };
+  stop = stopDeps({
+    ...gitFreeDeps(cfg, childRun),
+    integrate: async (_cfg, greens) => {
+      integrated.push(greens);
+      return { merged: greens, conflictParked: [] };
+    },
+  });
+
+  let outcome: string | undefined;
+  const lines = await captureLines(async () => {
+    outcome = await campaign(cfg, [["101"], ["102"]], host, undefined, {}, stop.deps);
+  });
+
+  assert.equal(outcome, "parked");
+  assert.deepEqual(integrated, [["101"]], "wave 1 integrated; wave 2 never ran");
+  const events = readEventLog(cfg);
+  assert.ok(
+    events.some((e) => e.event === "wave-done" && e.index === 0),
+    "wave 1 closed",
+  );
+  assert.ok(
+    events.some((e) => e.event === "stop-requested" && e.index === 0),
+    "the request is logged",
+  );
+  const parked = events.filter((e): e is CampaignParkedEvent => e.event === "campaign-parked");
+  assert.deepEqual(
+    parked.map((p) => [p.index, p.reason]),
+    [[1, "stopped"]],
+  );
+  assert.ok(!events.some((e) => e.event === "wave-start" && e.index === 1), "wave 2 never started");
+  assert.ok(!events.some((e) => e.event === "spawn" && (e as SpawnEvent).taskId === "102"));
+  assert.equal(lines.filter((l) => l.includes("stopping after wave 1")).length, 1);
+  assert.ok(lines.some((l) => /campaign parked at wave 2\/2 — stopped/.test(l)));
+  assert.ok(
+    listOutbox(cfg).some((n) => n.event === "campaign-parked"),
+    "the stopped notice is queued",
+  );
+  assert.equal(stop.h.unsubscribed, 1, "the stop handler is removed when campaign() returns");
+});
+
+test("a graceful stop over a wave that parks on a question keeps the member's own reason (#403)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-stop-question-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  let stop!: ReturnType<typeof stopDeps>;
+  const childRun: CampaignDeps["spawnRun"] = async (id) => {
+    if (id === "101") stop.h.fire("SIGINT");
+    if (id === "102") {
+      seedParkedRecord(cfg, "102");
+      return 2;
+    }
+    return 0;
+  };
+  stop = stopDeps(gitFreeDeps(cfg, childRun));
+  const outcome = await silenceConsole(() => campaign(cfg, [["101", "102"], ["103"]], host, undefined, {}, stop.deps));
+  assert.equal(outcome, "parked");
+  const parked = readEventLog(cfg).filter((e): e is CampaignParkedEvent => e.event === "campaign-parked");
+  assert.deepEqual(
+    parked.map((p) => [p.index, p.reason]),
+    [[0, "question"]],
+  );
+});
+
+test("a graceful stop on the last wave lets the campaign finish done (#403)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-stop-last-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  let stop!: ReturnType<typeof stopDeps>;
+  const childRun: CampaignDeps["spawnRun"] = async (id) => {
+    if (id === "102") stop.h.fire("SIGINT");
+    return 0;
+  };
+  stop = stopDeps(gitFreeDeps(cfg, childRun));
+  const outcome = await silenceConsole(() => campaign(cfg, [["101"], ["102"]], host, undefined, {}, stop.deps));
+  assert.equal(outcome, "done");
+  const events = readEventLog(cfg);
+  assert.ok(events.some((e) => e.event === "campaign-done"));
+  assert.ok(!events.some((e) => e.event === "campaign-parked"));
+});
+
+// Two held-open children that only exit once signalled: each then parks itself `stopped` (#431) —
+// writes its record and exits 2 — as a real child `run` does on SIGTERM.
+const signalledChildren = (cfg: ResolvedConfig, exitCodes: Record<string, number> = {}) => {
+  const spawned: string[] = [];
+  const release = new Map<string, () => void>();
+  const spawnRun: RunSpawner = (id) => {
+    spawned.push(id);
+    return new Promise((resolve) =>
+      release.set(id, () => {
+        const code = exitCodes[id] ?? 2;
+        if (code === 2) writeStoppedRecord(cfg, id);
+        resolve(code);
+      }),
+    );
+  };
+  const releaseAll = () => {
+    for (const r of release.values()) r();
+    release.clear();
+  };
+  return { spawned, spawnRun, releaseAll };
+};
+
+for (const [label, signals] of [
+  ["two SIGINTs", ["SIGINT", "SIGINT"]],
+  ["one SIGTERM", ["SIGTERM"]],
+  ["one SIGHUP", ["SIGHUP"]],
+] as [string, StopSignal[]][]) {
+  test(`a --now stop (${label}) signals the runs, waits for them, skips integration and parks \`stopped\` (#403)`, async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vetinari-stop-now-"));
+    const cfg = harnessCfg(dir);
+    const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+    const kids = signalledChildren(cfg);
+    const integrated: string[][] = [];
+    const stop = stopDeps(
+      {
+        ...gitFreeDeps(cfg, kids.spawnRun),
+        integrate: async (_cfg, greens) => {
+          integrated.push(greens);
+          return { merged: greens, conflictParked: [] };
+        },
+      },
+      () => setImmediate(kids.releaseAll),
+    );
+    const running = silenceConsole(() => campaign(cfg, [["101", "102"], ["103"]], host, undefined, {}, stop.deps));
+    while (kids.spawned.length < 2) await tick();
+    for (const s of signals) stop.h.fire(s);
+
+    assert.equal(await running, "parked");
+    assert.deepEqual(stop.h.signalled, ["SIGTERM"], "the runs in flight were signalled once");
+    assert.deepEqual(integrated, [], "a --now stop never integrates the wave");
+    const events = readEventLog(cfg);
+    const parked = events.filter((e): e is CampaignParkedEvent => e.event === "campaign-parked");
+    assert.deepEqual(
+      parked.map((p) => [p.index, p.reason]),
+      [[0, "stopped"]],
+    );
+    assert.equal(events.filter((e) => e.event === "stop-requested").length, 1, "the first request alone is logged");
+    assert.ok(!events.some((e) => e.event === "wave-start" && e.index === 1));
+    assert.equal(stop.h.unsubscribed, 1);
+  });
+}
+
+test("a --now stop where a member fails outright stops the campaign failed — failure outranks the stop (#403)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-stop-now-failed-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const kids = signalledChildren(cfg, { "101": 1 });
+  const stop = stopDeps(gitFreeDeps(cfg, kids.spawnRun), () => setImmediate(kids.releaseAll));
+  const running = silenceConsole(() => campaign(cfg, [["101", "102"]], host, undefined, {}, stop.deps));
+  while (kids.spawned.length < 2) await tick();
+  stop.h.fire("SIGTERM");
+
+  assert.equal(await running, "failed");
+  const events = readEventLog(cfg);
+  assert.ok(events.some((e) => e.event === "campaign-failed"));
+  assert.ok(!events.some((e) => e.event === "campaign-parked"));
+});
+
+test("a --now stop spawns no queued member — with a ceiling of one the second member never starts (#403)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-stop-now-ceiling-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 1, weight: 1 };
+  const kids = signalledChildren(cfg);
+  const stop = stopDeps(gitFreeDeps(cfg, kids.spawnRun), () => setImmediate(kids.releaseAll));
+  const running = silenceConsole(() => campaign(cfg, [["101", "102"]], host, undefined, {}, stop.deps));
+  while (kids.spawned.length < 1) await tick();
+  stop.h.fire("SIGTERM");
+
+  assert.equal(await running, "parked");
+  assert.deepEqual(kids.spawned, ["101"]);
+  assert.ok(!readEventLog(cfg).some((e) => e.event === "spawn" && (e as SpawnEvent).taskId === "102"));
+});
+
+test("childSpawnOptions puts a child run in its own process group and carries VETINARI_CHILD (#403)", () => {
+  const opts = childSpawnOptions({ PATH: "/bin" }, { VETINARI_RESUME_SESSION: "s1" });
+  assert.equal(opts.detached, true);
+  assert.equal(opts.env?.VETINARI_CHILD, "1");
+  assert.equal(opts.env?.PATH, "/bin");
+  assert.equal(opts.env?.VETINARI_RESUME_SESSION, "s1");
+});
+
+test("campaignStoppedNotice is a campaign-park notice whose recovery is a plain redrive (#403)", () => {
+  const n = campaignStoppedNotice("demo", 2, ["101"], "main");
+  assert.equal(n.event, "campaign-parked");
+  assert.match(n.text, /PARKED/);
+  assert.match(n.text, /wave 2/);
+  assert.match(n.text, /101/);
+  assert.match(n.text, /Recover:.*`vetinari redrive`/);
+  assert.equal(n.category, campaignParkedNotice("demo", 2, [], "main", "").category);
+});
+
+test("redrive after a stop re-runs the stopped member and lands the banked green without rerunning it (#403)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-stop-redrive-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  // A --now stop at wave 0: 101 parked itself `stopped` (its record on disk); 102 had gone green.
+  cfg.log.log("campaign-start", { waves: [["101", "102"]], slots: 4 });
+  cfg.log.log("wave-start", { index: 0, tasks: ["101", "102"] });
+  cfg.log.log("green", { taskId: "102", branch: "agent/102", commits: ["b"] });
+  cfg.log.log("stop-requested", { index: 0 });
+  cfg.log.log("parked", { taskId: "101", reason: "stopped", detail: "SIGTERM" });
+  writeStoppedRecord(cfg, "101");
+  cfg.log.log("campaign-parked", { index: 0, reason: "stopped", detail: "stopped by an operator (SIGTERM)" });
+
+  const spawned: string[] = [];
+  const integrated: string[][] = [];
+  const ok = await silenceConsole(() => campaign(cfg, [], host, undefined, { resume: true }, recordingDeps(cfg, spawned, integrated)));
+  assert.equal(ok, "done");
+  assert.deepEqual(spawned, ["101"], "the stopped member re-runs; the green one does not");
+  assert.deepEqual(integrated, [["101", "102"]]);
 });

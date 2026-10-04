@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
@@ -9,7 +9,7 @@ import { loggerForRun } from "./log.ts";
 import { readEventLog } from "./event-log.ts";
 import { answerParked, hasParked, listOutbox, listParked, park } from "./state.ts";
 import { projectHasLiveCampaign, readLeases, type HostBudget } from "./host-slots.ts";
-import { BLOCKED, DONE, extractTurnSummary, parkedAnswerComment, runLoop, type LoopDeps } from "./loop.ts";
+import { BLOCKED, DONE, defaultLoopDeps, extractTurnSummary, parkedAnswerComment, runLoop, type LoopDeps } from "./loop.ts";
 import { HARVEST_PROMPT, type Finding, type FindingContext } from "./findings.ts";
 import { Refusal } from "./refusal.ts";
 
@@ -87,6 +87,8 @@ const depsFor = (sbx: Sandbox, over: Partial<LoopDeps> = {}): LoopDeps => ({
   makeSandbox: async () => sbx,
   commitsAhead: () => 1,
   filesInCommit: () => [],
+  // No stop by default: the handler installs but is never fired (returns a no-op unsubscribe).
+  onStop: () => () => {},
   ...over,
 });
 
@@ -791,4 +793,332 @@ test("a campaign child run takes no host slot — its parent already holds one f
 
   assert.equal(observed.runHeld, 0, "a child never registers a second lease beside its parent's");
   assert.deepEqual(readLeases(configDir), [], "no lease is left behind");
+});
+
+// --- The per-run stop handler (SIGINT/SIGTERM → park `stopped`, exit 2) ---------------------
+
+// A controllable stop seam: capture the handler `runLoop` installs, fire it on demand, and report
+// whether the run unsubscribed it. Tests drive a stop through this rather than a real signal.
+const makeStopControl = () => {
+  let cb: ((s: "SIGINT" | "SIGTERM") => void) | undefined;
+  let unsubscribed = false;
+  const onStop: LoopDeps["onStop"] = (c) => {
+    cb = c;
+    return () => {
+      unsubscribed = true;
+    };
+  };
+  return {
+    onStop,
+    fire: (s: "SIGINT" | "SIGTERM" = "SIGINT") => cb?.(s),
+    get unsubscribed() {
+      return unsubscribed;
+    },
+  };
+};
+
+// One scripted turn for the stop-capable fake: fire the stop as this `run()` is called, never
+// settle (an in-flight agent call), reject the pending run when `close()` lands, or just return a
+// result (optionally driving its gate green/red).
+interface StopTurn {
+  fireStop?: "SIGINT" | "SIGTERM";
+  neverSettles?: boolean;
+  rejectOnClose?: boolean;
+  run?: Partial<SandboxRunResult>;
+  green?: boolean;
+}
+
+// A fake sandbox that can fire a stop mid-`run` and, optionally, never settle that run — so a
+// test can drive a signal that lands while the agent call is in flight. `close()` counts its
+// calls and, for a `rejectOnClose` turn, rejects the abandoned run so the "run rejects once the
+// sandbox closes" path is exercised.
+const stopSandbox = (script: StopTurn[], control: ReturnType<typeof makeStopControl>, branch = "agent/T-1") => {
+  let turn = -1;
+  const runCalls: SandboxRunOptions[] = [];
+  const state = { closeCalled: 0 };
+  let rejectPending: ((e: Error) => void) | undefined;
+  const sbx: Sandbox & { runCalls: SandboxRunOptions[]; state: typeof state } = {
+    branch,
+    runCalls,
+    state,
+    async run(opts) {
+      runCalls.push(opts);
+      turn++;
+      const s = script[turn];
+      if (s?.fireStop) control.fire(s.fireStop);
+      if (s?.neverSettles)
+        return new Promise<SandboxRunResult>((_res, rej) => {
+          if (s.rejectOnClose) rejectPending = rej;
+        });
+      return { iterations: [{ sessionId: `sess-${turn}` }], commits: [], stdout: "", ...s?.run } as SandboxRunResult;
+    },
+    async exec(cmd) {
+      if (cmd.startsWith("git diff --name-only")) return { stdout: "src/loop.ts\n", stderr: "", exitCode: 0 };
+      const green = script[turn]?.green ?? true;
+      return { stdout: "gate output", stderr: "gate errors", exitCode: green ? 0 : 1 };
+    },
+    async close() {
+      state.closeCalled++;
+      rejectPending?.(new Error("run abandoned when the sandbox closed"));
+      return undefined;
+    },
+  };
+  return sbx;
+};
+
+const sleepMs = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+test("a stop mid-turn parks `stopped` (signal detail + branch), one parked event, no failed, closes the sandbox", async () => {
+  const cfg = harnessCfg();
+  const control = makeStopControl();
+  const sbx = stopSandbox([{ fireStop: "SIGINT", neverSettles: true }], control);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { onStop: control.onStop })));
+
+  assert.equal(outcome, "parked");
+  const parked = listParked(cfg);
+  assert.equal(parked.length, 1);
+  assert.equal(parked[0].reason, "stopped");
+  assert.equal(parked[0].detail, "SIGINT");
+  assert.equal(parked[0].branch, "agent/T-1");
+  const events = readEventLog(cfg);
+  assert.equal(events.filter((e) => e.event === "parked" && (e as any).reason === "stopped").length, 1);
+  assert.equal(
+    events.some((e) => e.event === "failed"),
+    false,
+    "a stop is a park, never a failed verdict",
+  );
+  assert.ok(sbx.state.closeCalled >= 1, "the sandbox was closed");
+  assert.ok(control.unsubscribed, "the stop handler is removed when runLoop returns");
+});
+
+test("a stop whose abandoned run rejects once the sandbox closes still logs exactly one parked{stopped}, no failed", async () => {
+  const cfg = harnessCfg();
+  const control = makeStopControl();
+  const sbx = stopSandbox([{ fireStop: "SIGINT", neverSettles: true, rejectOnClose: true }], control);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { onStop: control.onStop })));
+
+  assert.equal(outcome, "parked");
+  const events = readEventLog(cfg);
+  assert.equal(events.filter((e) => e.event === "parked" && (e as any).reason === "stopped").length, 1);
+  assert.equal(
+    events.some((e) => e.event === "failed"),
+    false,
+  );
+});
+
+test("a `stopped` park records the most recent finished-turn session — turn 0 red (sess-0), stop during turn 1", async () => {
+  const cfg = harnessCfg();
+  const control = makeStopControl();
+  const sbx = stopSandbox([{ green: false }, { fireStop: "SIGINT", neverSettles: true }], control);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { onStop: control.onStop })));
+
+  assert.equal(outcome, "parked");
+  assert.equal(listParked(cfg)[0].sessionId, "sess-0", "the record carries turn 0's session, the most recent finished turn");
+});
+
+test("a stop while fetchTask is still pending parks `stopped`; makeSandbox is never reached", async () => {
+  const control = makeStopControl();
+  const cfg = harnessCfg({
+    fetchTask: () => {
+      control.fire("SIGTERM");
+      return new Promise<string>(() => {});
+    },
+  });
+  let madeSandbox = false;
+  const sbx = stopSandbox([], control);
+  const outcome = await silence(() =>
+    runLoop(
+      cfg,
+      "T-1",
+      undefined,
+      undefined,
+      depsFor(sbx, {
+        onStop: control.onStop,
+        makeSandbox: async () => {
+          madeSandbox = true;
+          return sbx;
+        },
+      }),
+    ),
+  );
+
+  assert.equal(outcome, "parked");
+  assert.equal(madeSandbox, false, "a stop before the container never creates a sandbox");
+  const rec = listParked(cfg)[0];
+  assert.equal(rec.reason, "stopped");
+  assert.equal(rec.detail, "SIGTERM");
+  assert.equal(rec.branch, "agent/T-1", "the branch is the conventional <branchPrefix><id> when no container exists");
+});
+
+test("a stop during the budget harvest parks `stopped`, not `stalled` — exactly one parked event", async () => {
+  const cfg = harnessCfg({ maxTurns: 1, reportFinding: async () => ({ url: "x" }) as any });
+  const control = makeStopControl();
+  // run#0 (turn 0) goes red → resume (run#1) → loop exits (maxTurns=1) → budget harvest (run#2),
+  // which fires the stop and resolves. The stalled budget park must never be logged.
+  const sbx = stopSandbox([{ green: false }, { green: false }, { fireStop: "SIGINT" }], control);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { onStop: control.onStop })));
+
+  assert.equal(outcome, "parked");
+  const parkedEvents = readEventLog(cfg).filter((e) => e.event === "parked");
+  assert.equal(parkedEvents.length, 1, "exactly one parked event");
+  assert.equal((parkedEvents[0] as any).reason, "stopped");
+  assert.equal(
+    parkedEvents.some((e) => (e as any).reason === "stalled"),
+    false,
+    "no budget stall park",
+  );
+});
+
+test("a standalone run signalled while waiting first-come for a slot parks `stopped`, takes no slot, deregisters its lease", async () => {
+  const configDir = mkdtempSync(join(tmpdir(), "vetinari-loop-stop-slots-"));
+  // A blocker lease held by pid 1 (always alive) fills the ceiling, so this run can never acquire.
+  mkdirSync(join(configDir, "slots"), { recursive: true });
+  writeFileSync(join(configDir, "slots", "1.json"), JSON.stringify({ project: "solo", weight: 1, held: 1, want: 1, pid: 1, kind: "run" }));
+  const host: HostBudget = { configDir, ceiling: 1, weight: 1 };
+  const cfg = harnessCfg({ project: "solo" });
+  const control = makeStopControl();
+  let madeSandbox = false;
+  const sbx = stopSandbox([], control);
+
+  const prevChild = process.env.VETINARI_CHILD;
+  delete process.env.VETINARI_CHILD;
+  try {
+    const p = silence(() =>
+      runLoop(
+        cfg,
+        "T-1",
+        host,
+        undefined,
+        depsFor(sbx, {
+          onStop: control.onStop,
+          makeSandbox: async () => {
+            madeSandbox = true;
+            return sbx;
+          },
+        }),
+      ),
+    );
+    await sleepMs(150); // let the run enter the first-come slot wait
+    control.fire("SIGINT");
+    const outcome = await p;
+    assert.equal(outcome, "parked");
+  } finally {
+    if (prevChild === undefined) delete process.env.VETINARI_CHILD;
+    else process.env.VETINARI_CHILD = prevChild;
+  }
+
+  assert.equal(madeSandbox, false, "a run that never acquired a slot never created a sandbox");
+  assert.equal(listParked(cfg)[0].reason, "stopped");
+  assert.equal(
+    readLeases(configDir).some((l) => l.pid === process.pid),
+    false,
+    "the waiting run deregistered its own lease on the way out",
+  );
+});
+
+test("a stop while makeSandbox is still pending waits for it, then closes the sandbox without starting a turn", async () => {
+  const cfg = harnessCfg();
+  const control = makeStopControl();
+  const sbx = stopSandbox([], control);
+  const outcome = await silence(() =>
+    runLoop(
+      cfg,
+      "T-1",
+      undefined,
+      undefined,
+      depsFor(sbx, {
+        onStop: control.onStop,
+        makeSandbox: async () => {
+          control.fire("SIGINT");
+          return sbx;
+        },
+      }),
+    ),
+  );
+
+  assert.equal(outcome, "parked");
+  assert.equal(sbx.runCalls.length, 0, "no turn is started — run is never called");
+  assert.ok(sbx.state.closeCalled >= 1, "the created sandbox is closed at once");
+  assert.equal(listParked(cfg)[0].reason, "stopped");
+});
+
+test("a stop after green (inside the harvest) adds no parked event and the run resolves green", async () => {
+  const cfg = harnessCfg({ reportFinding: async () => ({ url: "x" }) as any });
+  const control = makeStopControl();
+  // run#0 goes green; the harvest (run#1) fires the stop and resolves. A post-verdict stop is a no-op.
+  const sbx = stopSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc" }] }, green: true }, { fireStop: "SIGINT" }], control);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { onStop: control.onStop })));
+
+  assert.equal(outcome, "green");
+  assert.equal(
+    readEventLog(cfg).some((e) => e.event === "parked"),
+    false,
+    "a stop after a verdict adds nothing",
+  );
+  assert.ok(control.unsubscribed, "the handler is removed on a green return too");
+});
+
+test("defaultLoopDeps.onStop adds exactly one SIGINT and one SIGTERM listener for the run's life", async () => {
+  const cfg = harnessCfg();
+  const beforeInt = process.listenerCount("SIGINT");
+  const beforeTerm = process.listenerCount("SIGTERM");
+  let duringInt = -1;
+  let duringTerm = -1;
+  const sbx: Sandbox = {
+    branch: "agent/T-1",
+    async run() {
+      duringInt = process.listenerCount("SIGINT");
+      duringTerm = process.listenerCount("SIGTERM");
+      return { iterations: [{ sessionId: "s" }], commits: [{ sha: "abc" }], completionSignal: DONE, stdout: "" };
+    },
+    async exec(cmd) {
+      if (cmd.startsWith("git diff --name-only")) return { stdout: "src/loop.ts\n", stderr: "", exitCode: 0 };
+      return { stdout: "", stderr: "", exitCode: 0 };
+    },
+    async close() {
+      return undefined;
+    },
+  };
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { onStop: defaultLoopDeps.onStop })));
+
+  assert.equal(outcome, "green");
+  assert.equal(duringInt, beforeInt + 1, "one SIGINT listener added during the run");
+  assert.equal(duringTerm, beforeTerm + 1, "one SIGTERM listener added during the run");
+  assert.equal(process.listenerCount("SIGINT"), beforeInt, "the SIGINT listener is removed after runLoop returns");
+  assert.equal(process.listenerCount("SIGTERM"), beforeTerm, "the SIGTERM listener is removed after runLoop returns");
+});
+
+test("a `stopped` record resumes its session (crashResumePrompt) when resumable + sessionId + commitsAhead>0", async () => {
+  const cfg = harnessCfg({ agent: { provider: "claude" }, promptFile: "/prompts/tdd.md" } as any);
+  await park(cfg, { taskId: "T-1", reason: "stopped", detail: "SIGINT", sessionId: "prev-sess", branch: "agent/T-1", question: "stopped" });
+  const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc" }] }, green: true }]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { commitsAhead: () => 1 })));
+
+  assert.equal(outcome, "green");
+  assert.equal(sbx.runCalls[0].resumeSession, "prev-sess", "the recorded session is resumed");
+  assert.match(String(sbx.runCalls[0].prompt), /interrupted/, "the crash-resume prompt is carried");
+  assert.equal(hasParked(cfg, "T-1"), false, "the stopped record is consumed and cleared");
+});
+
+test("a `stopped` record runs fresh on the kept branch when commitsAhead is 0 at the resume check", async () => {
+  const cfg = harnessCfg({ agent: { provider: "claude" }, promptFile: "/prompts/tdd.md" } as any);
+  await park(cfg, { taskId: "T-1", reason: "stopped", detail: "SIGINT", sessionId: "prev-sess", branch: "agent/T-1", question: "stopped" });
+  const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc" }] }, green: true }]);
+  // 0 for the resume check (run fresh), 1 for the loop's later no-commit check (a real change).
+  let calls = 0;
+  const commitsAhead = () => (calls++ === 0 ? 0 : 1);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { commitsAhead })));
+
+  assert.equal(outcome, "green");
+  assert.equal(sbx.runCalls[0].resumeSession, undefined, "no session resume — a fresh run");
+  assert.equal(sbx.runCalls[0].promptFile, "/prompts/tdd.md", "a fresh promptFile run on the kept branch");
+  assert.equal(hasParked(cfg, "T-1"), false, "no stopped record remains");
 });

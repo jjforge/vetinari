@@ -111,7 +111,7 @@ Membership is an orthogonal axis — `member | grafted | pruned` — so a chip s
 
 ### 2.3 Park reasons — one enum
 
-`question | stalled | conflict | red-base | crash`. This is the reason on the parked record, the reason on the `parked` event, the reason the reducer exposes, and the reason the dashboard and the docs use. `detail` carries the specifics (which budget, idle vs no-commit, the conflict output, the gate tail). The reason selects the recovery affordance:
+`question | stalled | conflict | red-base | crash | stopped`. This is the reason on the parked record, the reason on the `parked` event, the reason the reducer exposes, and the reason the dashboard and the docs use. `detail` carries the specifics (which budget, idle vs no-commit, the conflict output, the gate tail, or the stop signal name). The reason selects the recovery affordance:
 
 | Reason | Set by | Resumable by an answer | Needs a redrive |
 | --- | --- | --- | --- |
@@ -120,6 +120,7 @@ Membership is an orthogonal axis — `member | grafted | pruned` — so a chip s
 | `conflict` | integrator on merge conflict | no | yes, after the human resolves it |
 | `red-base` | campaign on a red merged base — the wave's reason, carried by `campaign-parked` | no | yes, after fix-forward or prune |
 | `crash` | reconciliation (dead process, no stop marker) | no | yes |
+| `stopped` | run loop on SIGINT/SIGTERM before a verdict (its work is kept) | no | yes — a redrive, or `vetinari run <id>` for a standalone run |
 
 ### 2.4 Roll-ups
 

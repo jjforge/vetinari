@@ -85,9 +85,11 @@ green, terminal until you change something), or a member `parked` with the
   (never pushed, nothing builds on it while paused), and the campaign stops. The
   machine never guesses a culprit — none is knowable. Fix forward on the base, or
   `prune` a suspect, then redrive.
-- **`question`** / **`stalled`** / **`crash`** — a run needs you. Answer the
-  question; read the turn log and answer a stall with guidance or prune it; a
-  crash just needs a redrive. The reason table in
+- **`question`** / **`stalled`** / **`crash`** / **`stopped`** — a run needs you.
+  Answer the question; read the turn log and answer a stall with guidance or prune
+  it; a crash just needs a redrive; a `stopped` run (a human sent it SIGINT/SIGTERM
+  before it reached a verdict, its work kept) is redriven, or continued standalone
+  with `vetinari run <id>`. The reason table in
   [`user-guide.md`](user-guide.md) gives the full mapping. The `/unpark` skill
   investigates a park and prints the move it recommends.
 

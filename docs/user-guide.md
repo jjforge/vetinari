@@ -53,6 +53,7 @@ Waves, campaigns and the project card roll up from their issues in this order: f
 | `conflict` | its green branch conflicts with the base at merge | resolve the conflict on the base, then redrive |
 | `red-base` | every issue passed alone; the merged base fails together | fix forward on the base, then redrive |
 | `crash` | the run died with no verdict | redrive |
+| `stopped` | you stopped the run (Ctrl-C / SIGTERM) before it reached a verdict; its work is kept | `vetinari run <id>` for a standalone run, or redrive a campaign |
 
 **Your five moves.** These are the only things a human ever does to a campaign:
 

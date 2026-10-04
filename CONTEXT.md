@@ -68,8 +68,9 @@ _Avoid_: working, in progress.
 **parked**:
 Held on a human, work preserved, resumable — the one word for every "needs a
 human" situation, at the [[issue]], [[wave]], campaign and card level alike. What
-differs is the [[park-reason]], which selects the recovery. Durable: shown and
-announced until a human resolves it.
+differs is the [[park-reason]], which selects the recovery. Durable: shown until a
+human resolves it, and announced too — except a `stopped` park, which is shown but
+never announced (a person already stopped it; there is nothing to ask).
 _Avoid_: blocked, waiting, quarantined, wave-parked, interrupted (each is
 `parked` + a reason).
 
@@ -112,7 +113,7 @@ _Avoid_: step, stage, substate as the surface word.
 **Park reason**:
 Why a [[parked]] issue or wave is held, and which recovery it offers — metadata on
 the park, not a status. One enum: `question | stalled | conflict | red-base |
-crash`.
+crash | stopped`.
 _Avoid_: quarantined, interrupted (those were reasons masquerading as statuses).
 
 **question**:
@@ -135,6 +136,11 @@ culprit is knowable. Fix forward on the base, then [[redrive]].
 **crash**:
 The run died with no verdict. [[redrive]] to continue.
 _Avoid_: interrupted.
+
+**stopped**:
+A person stopped the run (SIGINT/SIGTERM) before it reached a verdict; its work is
+kept. It cannot be answered: `vetinari run <id>` continues a standalone run,
+[[redrive]] continues a campaign.
 
 ### The five moves
 

@@ -39,7 +39,7 @@ import {
   type WaveStartEvent,
 } from "./event-log.ts";
 import { archiveRun, shouldArchiveLeftover } from "./archive.ts";
-import { readLeases, type HostBudget } from "./host-slots.ts";
+import { projectHasLiveCampaign, readLeases, type HostBudget, type SlotLease } from "./host-slots.ts";
 
 const cfgWith = (fetchTask: ResolvedConfig["fetchTask"]): ResolvedConfig => ({ fetchTask }) as ResolvedConfig;
 
@@ -539,6 +539,115 @@ test("a one-ticket wave declares it wants exactly one slot — the reservation b
   await silenceConsole(() => campaign(cfg, [["101"]], host, "one", {}, gitFreeDeps(cfg, childRun)));
   // A single-ticket wave wants one slot, not its weight-derived cut of the ceiling.
   assert.equal(seen, 1);
+});
+
+test("the campaign lease spans the whole campaign — it is live during integration, at held 0 / want 0 between waves (#424)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-lease-life-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+
+  // Record what the campaign-liveness guard and this process's own lease look like at each
+  // integration — the between-waves window the lease used to fall out of (#424).
+  const liveAtIntegrate: boolean[] = [];
+  const leaseAtIntegrate: (SlotLease | undefined)[] = [];
+  const deps: CampaignDeps = {
+    ...gitFreeDeps(cfg, async () => 0),
+    integrate: async (_cfg, greens) => {
+      liveAtIntegrate.push(projectHasLiveCampaign(host.configDir, cfg.project));
+      leaseAtIntegrate.push(readLeases(host.configDir).find((l) => l.pid === process.pid));
+      return { merged: greens, conflictParked: [] };
+    },
+  };
+
+  const ok = await silenceConsole(() => campaign(cfg, [["101"], ["102"]], host, "spanning", {}, deps));
+  assert.equal(ok, "done");
+
+  // Both waves integrated while the campaign read as live — the guard covers integration/gating.
+  assert.deepEqual(liveAtIntegrate, [true, true], "the campaign is live during every wave's integration");
+  // Between waves the lease is held at zero demand so other projects keep every slot.
+  for (const lease of leaseAtIntegrate) {
+    assert.ok(lease, "this process still holds a lease during integration");
+    assert.equal(lease!.kind, "campaign");
+    assert.equal(lease!.held, 0, "no slot is held between waves");
+    assert.equal(lease!.want, 0, "zero demand between waves");
+  }
+});
+
+// After a campaign leaves — however it left — the whole-life lease is gone: the guard reads
+// not-live and no lease file remains for this process (#424).
+const assertLeaseDropped = (host: HostBudget, cfg: ResolvedConfig) => {
+  assert.equal(projectHasLiveCampaign(host.configDir, cfg.project), false, "no live campaign after the campaign leaves");
+  assert.equal(
+    readLeases(host.configDir).some((l) => l.pid === process.pid),
+    false,
+    "this process's lease file is gone",
+  );
+};
+
+test("a done campaign drops its whole-life lease on the way out (#424)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-lease-done-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const ok = await silenceConsole(() =>
+    campaign(
+      cfg,
+      [["101"], ["102"]],
+      host,
+      "done",
+      {},
+      gitFreeDeps(cfg, async () => 0),
+    ),
+  );
+  assert.equal(ok, "done");
+  assertLeaseDropped(host, cfg);
+});
+
+test("a parked campaign drops its whole-life lease on the way out (#424)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-lease-parked-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  // 102 parks (its child `run` exits 2) and holds the wave — the campaign returns parked.
+  const childRun: CampaignDeps["spawnRun"] = async (taskId) => (taskId === "102" ? 2 : 0);
+  const ok = await silenceConsole(() => campaign(cfg, [["101", "102"]], host, "parked", {}, gitFreeDeps(cfg, childRun)));
+  assert.equal(ok, "parked");
+  assertLeaseDropped(host, cfg);
+});
+
+test("a campaign whose integration throws still drops its whole-life lease (#424)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-lease-throw-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const deps: CampaignDeps = {
+    ...gitFreeDeps(cfg, async () => 0),
+    integrate: async () => {
+      throw new Error("integration blew up");
+    },
+  };
+  await assert.rejects(() => silenceConsole(() => campaign(cfg, [["101"]], host, "boom", {}, deps)), /integration blew up/);
+  assertLeaseDropped(host, cfg);
+});
+
+test("a redrive with nothing left to run returns done and leaves no lease behind (#424)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-lease-nothing-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  // A paused campaign whose only wave already closed: a resume finds nothing to run.
+  cfg.log.log("campaign-start", { waves: [["101"]], slots: 4 });
+  cfg.log.log("green", { taskId: "101", branch: "agent/101", commits: ["abc"] });
+  cfg.log.log("wave-done", { index: 0, merged: ["101"] });
+
+  const ok = await silenceConsole(() =>
+    campaign(
+      cfg,
+      [],
+      host,
+      undefined,
+      { resume: true },
+      gitFreeDeps(cfg, async () => 0),
+    ),
+  );
+  assert.equal(ok, "done");
+  assertLeaseDropped(host, cfg);
 });
 
 test("campaign prints human-readable plan/wave/complete lines and NO event JSON to stdout by default (#299)", async () => {

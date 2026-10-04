@@ -828,6 +828,56 @@ test("dispatch campaign --resume still redrives but prints the one-release alias
   );
 });
 
+const campaignCmd = (overrides: Partial<Extract<Command, { kind: "campaign" }>> = {}): Extract<Command, { kind: "campaign" }> => ({
+  kind: "campaign",
+  agent: {},
+  positional: ["101"],
+  name: undefined,
+  autoPrune: false,
+  resume: false,
+  dryRun: false,
+  override: false,
+  onUnderspecified: undefined,
+  json: false,
+  ...overrides,
+});
+
+test("dispatch campaign refuses a fresh launch while a campaign for the project is live (#424)", async () => {
+  const { deps } = makeDeps({ projectHasLiveCampaign: spy(true) as any });
+  await assert.rejects(
+    () => dispatch(campaignCmd(), deps),
+    (err: Error) => err instanceof Refusal && err.message === "a campaign is already running for demo — campaign refused.",
+  );
+  // Refused before any step: no agent selection, no leftover archive, no second campaign.
+  assert.equal((deps.selectAgent as any).calls.length, 0, "no agent selection on a refused launch");
+  assert.equal((deps.archiveLeftoverRun as any).calls.length, 0, "no leftover archive on a refused launch");
+  assert.equal((deps.campaign as any).calls.length, 0, "no second campaign process");
+});
+
+test("dispatch campaign --dry-run is never refused by a live campaign — it only prints a plan (#424)", async () => {
+  const { deps } = makeDeps({
+    projectHasLiveCampaign: spy(true) as any,
+    expandSelection: spy(Promise.resolve(["101"])) as any,
+    runCampaignPlan: spy(Promise.resolve({ waves: [["101"]], waveArgs: '"101"', report: "the plan", suggestedName: "" })) as any,
+  });
+  // A --dry-run runs nothing but must not throw: it reaches the planner and returns.
+  await dispatch(campaignCmd({ dryRun: true }), deps);
+  assert.equal((deps.runCampaignPlan as any).calls.length, 1, "the dry-run planned rather than refusing");
+  assert.equal((deps.campaign as any).calls.length, 0, "a dry-run still runs no campaign");
+});
+
+test("dispatch campaign --resume refuses like redrive while a campaign is live — one line, no campaign, no exit code (#424)", async () => {
+  const { deps, logged, exitCodes } = makeDeps({ projectHasLiveCampaign: spy(true) as any });
+  await dispatch(campaignCmd({ positional: [], resume: true }), deps);
+  assert.equal((deps.selectAgent as any).calls.length, 0, "no agent selection on a refused resume");
+  assert.equal((deps.campaign as any).calls.length, 0, "the live campaign owns the re-admit — no second process");
+  assert.deepEqual(exitCodes, [], "an alias refusal sets no exit code, exactly as redrive");
+  assert.ok(
+    logged.some((l) => l === "a campaign is already running for demo — it will pick up the work; redrive refused."),
+    "it logs redrive's existing refusal line",
+  );
+});
+
 test("dispatch campaign with an empty selection throws the needs-an-issue message", async () => {
   const { deps } = makeDeps();
   await assert.rejects(

@@ -33,8 +33,10 @@ export const handlePrunePreview: RouteHandler = async (req, res, url, deps) => {
 
 /**
  * `POST /prune` — the prune surface's write. With `confirm` it shells `prune
- * <issue>` in the selected project's own root (the no-plan prune, ticket B),
- * redirecting back to that project's board; without it, it shells `prune … --dry-run`
+ * <issue>` in the selected project's own root (the no-plan prune, ticket B) and
+ * awaits it (#365): a clean exit redirects back to that project's board, a failed
+ * child is a 502 carrying its last stderr line, and a child still running at the
+ * cap is a 202, left running; without it, it shells `prune … --dry-run`
  * and shows the closure behind a confirm form, gating the destructive act. The
  * aggregated site is a dumb router (ADR 0002), so both route to the project's own
  * install, exactly as the Telegram gateway does.
@@ -55,11 +57,28 @@ export const handlePrune: RouteHandler = async (req, res, url, deps) => {
     return true;
   }
   if (form.get("confirm")) {
-    deps.spawn(process.execPath, [...process.execArgv, process.argv[1], "prune", taskId], {
-      cwd: pointer.projectRoot,
-      stdio: ["ignore", "inherit", "inherit"],
+    // Await the child under the one dashboard child cap (#365), as graft does, so the
+    // response reports what the prune did rather than that it was merely spawned.
+    const { code, stderr, timedOut } = await deps.runChild(pointer.projectRoot, ["prune", taskId], {
+      timeoutMs: deps.graftTimeoutMs,
     });
-    res.writeHead(303, { location: `/?project=${encodeURIComponent(project)}` }).end();
+    const text = { "content-type": "text/plain; charset=utf-8" };
+    if (timedOut) {
+      // Still running at the cap: left running, never killed — it may be about to append its event.
+      res.writeHead(202, text).end(`pruning… #${taskId} will drop from the plan when it lands`);
+      return true;
+    }
+    if (code === 0) {
+      res.writeHead(303, { location: `/?project=${encodeURIComponent(project)}` }).end();
+      return true;
+    }
+    // A failed child: surface its own last non-empty stderr line — the operator's language.
+    const lastLine = stderr
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .at(-1);
+    res.writeHead(502, text).end(lastLine || `Couldn't prune #${taskId} for ${project} — is a campaign still running?`);
     return true;
   }
   // Preview step: route `prune <issue> --dry-run` to the selected project's

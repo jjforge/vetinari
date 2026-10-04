@@ -736,11 +736,14 @@ test("serveAllStatus POST /prune on confirm shells prune in the selected project
     baseLocation: betaDir,
   });
 
-  const spawned: { args: string[]; cwd: string }[] = [];
+  const ran: { args: string[]; cwd: string }[] = [];
   const server = await serveAllStatus(configDir, {
     port: 0,
     host: "127.0.0.1",
-    spawn: (_cmd, args, options) => spawned.push({ args, cwd: options.cwd }),
+    runChild: async (projectRoot, args) => {
+      ran.push({ args, cwd: projectRoot });
+      return { code: 0, stdout: "", stderr: "", timedOut: false };
+    },
   });
   const { port } = server.address() as AddressInfo;
   try {
@@ -754,14 +757,12 @@ test("serveAllStatus POST /prune on confirm shells prune in the selected project
         confirm: "1",
       }).toString(),
     });
-    // Redirects back to the selected project's dashboard, like the answer control.
+    // Redirects back to the selected project's dashboard once the awaited prune exits clean.
     assert.equal(res.status, 303);
     assert.equal(res.headers.get("location"), "/?project=beta");
     // Executes the no-plan prune (ticket B) against the SELECTED project's own root
     // — so the shared install loads beta's config and gates, not alpha's.
-    assert.equal(spawned.length, 1);
-    assert.deepEqual(spawned[0].args.slice(-2), ["prune", "401"]);
-    assert.equal(spawned[0].cwd, join(configDir, "beta-root"));
+    assert.deepEqual(ran, [{ args: ["prune", "401"], cwd: join(configDir, "beta-root") }]);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

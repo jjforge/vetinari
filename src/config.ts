@@ -705,6 +705,9 @@ export async function loadConfig(explicitPath?: string): Promise<ResolvedConfig>
 
   const stateDir = c.stateDir ?? ".vetinari.local";
   // hostEnv is applied to THIS process only; it is never handed to a sandbox.
+  // Host-side git (sandcastle's pre-worktree fetch) inherits this env: fail fast on a
+  // missing credential rather than prompt past the worktree timeout. hostEnv may override.
+  process.env.GIT_TERMINAL_PROMPT = "0";
   for (const [k, v] of Object.entries(c.hostEnv ?? {})) process.env[k] = v;
 
   const logFile = `${stateDir}/logs/orchestrator.jsonl`;

@@ -1351,6 +1351,24 @@ export function summarizeRun(events: OrchestratorEvent[]): string {
 }
 
 /**
+ * The one rule for which parked records count (#379) — the project page (`buildStatus`) and
+ * the landing (its card and cross-repo queue, off `status.parked`) both read it, so the two
+ * surfaces never disagree. A record counts when its issue is in the current campaign's plan
+ * (the reducer's pruned loop-facing `waves`, folded from the latest `campaign-start` only, so a
+ * superseded campaign's records drop out) and not in a closed wave. An empty plan — the live
+ * log archived or emptied — keeps every surviving record, so a park that outlived its log
+ * still counts (#232).
+ */
+const parkedInCurrentPlan = (records: ParkedRecord[], plan: { waves: string[][]; closedWaves: Set<number> }): ParkedRecord[] => {
+  const activeIssueNumbers = new Set(plan.waves.flat());
+  const closedIssueNumbers = new Set([...plan.closedWaves].flatMap((index) => plan.waves[index] ?? []));
+  return records.filter((parked) => {
+    const issueNumber = normalize(parked.taskId);
+    return (!activeIssueNumbers.size || activeIssueNumbers.has(issueNumber)) && !closedIssueNumbers.has(issueNumber);
+  });
+};
+
+/**
  * Reconstruct a project's live campaign status off its event log (ADR 0005/0019).
  * Each chip composes the two orthogonal axes — its `issueLifecycle` (the dot/word) and
  * `issueMembership` (the badge) — and each wave's status is the pure `waveState` fold of
@@ -1370,12 +1388,8 @@ export function buildStatus(cfg: ResolvedConfig, opts: { dead?: boolean; alive?:
   const reduced = reduceCampaign(events, { alive });
   const { waves, layout, name, festiveOffset, outcomes, details, titles, closedWaves } = reduced;
 
-  const activeIssueNumbers = new Set(waves.flat());
   const closedIssueNumbers = new Set([...closedWaves].flatMap((index) => waves[index] ?? []));
-  const parkedRecords = listParked(cfg).filter((parked) => {
-    const issueNumber = normalize(parked.taskId);
-    return (!activeIssueNumbers.size || activeIssueNumbers.has(issueNumber)) && !closedIssueNumbers.has(issueNumber);
-  });
+  const parkedRecords = parkedInCurrentPlan(listParked(cfg), { waves, closedWaves });
   for (const parked of parkedRecords) {
     const taskId = normalize(parked.taskId);
     // `completed` (merged) is terminal (design §2.2): a record that outlived a since-merged issue
@@ -1805,8 +1819,9 @@ export interface LandingView {
  * (which is itself the fold of its waves), with `completed`/`unstarted`/no-campaign
  * collapsed to `idle`. `failed` outranks `parked` — a broken issue is a louder signal
  * than a held one (the deliberate reversal of the old `parked > failed` order). A
- * surviving parked record (a park that outlived its live plan) still forces `parked`,
- * so the card is never `idle` while a question waits (#232, #258). No precedence ladder:
+ * counted parked record (`status.parked`, the project page's plan filter — every surviving
+ * record when the live log is empty) still forces `parked`, so the card is never `idle`
+ * while a question waits (#232, #258, #379). No precedence ladder:
  * the fold is the single derivation, so a card can never disagree with its waves.
  */
 export const cardState = (status: CampaignStatus): RunState => {
@@ -1858,18 +1873,19 @@ const buildProjectCard = (
   pointer: ProjectPointer,
   status: CampaignStatus,
   events: OrchestratorEvent[],
-  parked: ParkedRecord[],
   logger: Logger,
   festive = false,
 ): ProjectCard => {
   // The card heading shows owner/name, read live off the checkout's git remote;
   // undefined for a project with none (the demo), so the display falls back to the key.
   const repo = repoForProject(pointer.projectRoot);
-  // A park that outlived its run's log (the log archived — a killed process, an
-  // out-of-band archive — while the record survives on disk) is invisible to the
-  // live-plan-filtered `status.parked` an idle branch has, so the idle branches read
-  // `listParked` directly: any surviving record makes the card `parked` with a real
-  // tally, never a clean idle/complete while a question still waits (ADR 0017, #232).
+  // The idle branches count `status.parked` — the project page's own filter
+  // (`parkedInCurrentPlan`), so the card and the page never disagree (#379). A park that
+  // outlived its run's log (the log archived — a killed process, an out-of-band archive —
+  // while the record survives on disk) leaves an empty plan, which keeps every surviving
+  // record: the card reads `parked` with a real tally, never a clean idle while a question
+  // still waits (#232). A record outside the current plan or in a closed wave counts nowhere.
+  const parked = status.parked;
   if (!status.waves.length) {
     const [latest] = listArchivedRuns(pointer.baseLocation, logger);
     // An idle card's numbers come from the last archived run, not the emptied live
@@ -1901,7 +1917,7 @@ const buildProjectCard = (
   // every wave closed — but whose log the CLI never emptied — otherwise reads live
   // forever. The card fold already collapses a `completed` campaign to `idle`; this
   // branch swaps the live wave counts for the finished run's name + "Last run: …"
-  // summary. A surviving parked record still wins (parked over idle, #232); the fold's
+  // summary. A counted parked record still wins (parked over idle, #232); the fold's
   // `failed`/`parked`/`running` never reach here, so no attention state ever fades. The
   // live log is left byte-for-byte untouched — this is display-only.
   if (campaignState(status.waves.map((wave) => wave.status)) === "completed") {
@@ -1990,20 +2006,17 @@ export function buildLanding(
     const events = readEventLog(cfg);
     const alive = configDir !== undefined ? projectHasLiveCampaign(configDir, pointer.project) : undefined;
     const status = buildStatus(cfg, { alive });
-    const parkedRecords = listParked(cfg);
     // merged-today counts every issue merged today across all of the project's runs
     // — the live run plus every archived run, deduped per issue — so a project that
     // ran several campaigns today counts them all, not just its latest run (#97).
     // A completed run's merges live in its archive, not the cleared live log (#70).
     mergedToday += mergedTodayForProject(pointer.baseLocation, events, now, logger);
-    const card = buildProjectCard(pointer, status, events, parkedRecords, logger, festive);
-    // Cross-repo parked queue: a live/paused run lists its plan-filtered parks
-    // (`status.parked`); an idle-path card (archived or folded to complete) counts
-    // every surviving record on disk instead, so a park that outlived its emptied or
-    // closed log queues and matches the card's tally rather than the counter reading a
-    // park the queue then can't show (#232). Tagged with the repo for the cross-repo list.
-    const queueParked = card.runState === "parked" && !status.parked.length ? parkedRecords.map(toParkedIssue) : status.parked;
-    for (const p of queueParked) {
+    const card = buildProjectCard(pointer, status, events, logger, festive);
+    // Cross-repo parked queue: the project page's own plan-filtered parks (`status.parked`),
+    // the same list the card counts — so the counter, the queue and the card agree, and a park
+    // that outlived an emptied log (an empty plan keeps every record) still queues (#232, #379).
+    // Tagged with the repo for the cross-repo list.
+    for (const p of status.parked) {
       parked.push({ issueNumber: p.issueNumber, project: status.project, question: p.description, parkedAt: p.parkedAt });
     }
     projects.push(card);

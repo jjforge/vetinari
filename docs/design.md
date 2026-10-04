@@ -130,7 +130,7 @@ Wave, campaign and card states are pure folds of the level below, never stored:
 - campaign: the same fold over its waves.
 - card: campaign state, with `completed`/`unstarted`/no-campaign folding to `idle`.
 
-A parked record that survives a run (it always does, until resolved) keeps the card out of `idle` even if the log was archived out of band.
+A parked record of the **current** campaign's plan keeps the card out of `idle`. When the live log is empty or archived (out of band, say) there is no plan to check against, so every surviving record does. A record outside the current plan, in a closed wave, or from a campaign a newer `campaign-start` superseded does not. The landing card, its cross-repo parked queue and the project page all count by this one rule, so they always agree.
 
 ### 2.5 Parked record
 

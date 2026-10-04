@@ -22,6 +22,7 @@ Within a milestone each bold section label appears at most once.
 
 **Breaking changes:**
 - [api] The exported `github*` resolvers (`githubBlockedBy`, `githubFetchTask`, `githubIssuesByLabel`, `githubMarkPendingVerify`, `githubIssueComment`, `githubFindingReporter`) now return promises, and their injectable `run` is `(args) => Promise<string>` instead of `(args) => string`. The `VetinariConfig` seams are unchanged — they already accept a promise — so a hand-written synchronous `blockedBy`/`fetchTask` in a project config keeps working (#368).
+- [user] The built-in default agent models are now current: the `claude` provider defaults to `claude-opus-5-5` and the `pi` provider to `claude-sonnet-5-5`. A project that sets no `agent.model` picks these up automatically (#400).
 
 **New features:**
 - [ops] `/review-logs` operator skill: reads the project's own `.vetinari.local/logs/` (`digest.sh` boils event, activity and gate logs down to per-task outcomes, turns, tool calls, minutes, failing gates and the files agents touch most) and hunts for where agents struggled — stops, recurring red gates, hotspot files, churn, orientation every agent repeats, brief and doc faults agents report in passing — then checks each against today's code and the tracker and reports ranked, evidence-backed changes to the project. It files only the ones you choose (#412–#418 came from its first run).
@@ -32,12 +33,28 @@ Within a milestone each bold section label appears at most once.
 - [internal] The codebase is formatted with Prettier (pinned dev dependency, `.prettierrc.json` with a 140-column width, the closest to the existing style): `npm run format` writes, `npm run format:check` checks, and `CLAUDE.md` names the command, so campaign agents stop hunting for a formatter that wasn't there. The whole tree was reformatted once (#414).
 - [ops] The default agent prompt (`prompts/tdd.md`) now lists the valid changelog `section:` labels and the four audience tags inline, instead of pointing at `docs/changelog-conventions.md` — which does not exist in consuming projects, so the pointer led nowhere there and cost an extra lookup on almost every run here. A drift test pins the prompt's label list to `SECTION_ORDER` (#415).
 - [ops] `/check-brief` now flags line-number cites in a brief (they go stale before the run, suggesting a symbol-naming rewrite), reports as a blocker a brief that builds on an open issue with no native `blocked_by` edge (read from `gh api .../dependencies/blocked_by`), and names README/`docs/*` files the change must update that the `Touches:` marker leaves out. `docs/issue-conventions.md` and `/fileset` now say doc files a change updates belong on the `Touches:` line like any source file, so co-wave tickets don't collide on an unmarked doc at merge (#418).
+- [api] The `github*` tracker resolvers' `repo` argument is now optional and defaults to the project's `origin`-derived `owner/repo` (#338).
+- [user] A project config no longer needs to repeat `owner/repo` per resolver; a resolver whose repo can't be derived refuses with a message saying to pass it explicitly (#338).
 
 **Bug fixes:**
 - [ops] The wave changelog-collect commit now stages only `CHANGELOG.md` and the fragments it collected, so a campaign running alongside your work can no longer swallow unrelated edits in your checkout (#364).
 - [user] `graft`, campaign planning, `prune` and the dashboard's graft/prune previews now make their per-id GitHub calls concurrently. The shipped `gh` resolvers ran synchronously, so a `Promise.all` fan-out over them actually ran one `gh` after another — a 12-id graft took ~7s (24 serial `gh` invocations). The default runner is now promise-based, so the fan-outs overlap as written (#368).
 - [ops] vetinari's own project config now wires `reportFinding`, so the harvest turn runs on a green campaign run and incidental findings are filed as `jjforge/vetinari` issues (labelled `needs-triage`, `P2`). It was never set, so the loop skipped the harvest entirely and agents' findings died with the sandbox — the container has no `gh` login for them to fall back on (#413).
 - [user] `campaign <label>` now considers every open issue carrying the label. It used to select at most 30, because the label lookup never raised `gh issue list`'s default limit, so a larger label silently lost its oldest issues while the plan still said "0 unreachable". The lookup now fetches up to 1000, and a label that fills that limit prints a line saying some issues may be missing (#434).
+- [user] On phones (under 640px) the live-tail header no longer breaks: it now wraps so the title stays on one line and the agent dropdown, filter, pause and download controls move to a full-width row of their own beneath it — nothing is clipped. Every pane sharing the header (live tail, archived runs, landing event-log feed) inherits it; the desktop layout is unchanged (#336).
+- [user] A standalone `run`/`answer` that fails now prints a `*** FAILED — <reason>` banner and the re-run command instead of exiting silently; a parked verdict prints a matching `*** PARKED (<reason>) — <question>` banner and its answer command, following the GREEN banner's `--json` and campaign-child rules (#355).
+</content>
+</invoke>
+- [user] The dashboard no longer keeps a member, its wave, and the campaign reading failed after `redrive --override` re-runs a failed member — a spawn for a failed member now promotes it back to running, and the live tail follows it again (#399).
+- [internal] Loosened the `graftCarry` wiring assertion in the dashboard project-render tests to tolerate whitespace, so it no longer false-reds under `node --test`'s TypeScript type stripping (#412).
+- [user] A campaign now holds its liveness lease for its whole life, not just while a wave drains, so a second `campaign`/`run`/`redrive` is refused — and an `answer` only delivers — during integration and gating too; a fresh `campaign` over a live one is refused with "a campaign is already running for <project> — campaign refused." (#424).
+- [ops] Between waves the campaign lease sits at zero demand, so other projects keep every slot while it integrates, gates, and plans the next wave (#424).
+
+**Infrastructure:**
+- [ops] Added an `npm test` script matching the test gate's runner (`tsx --test src/*.test.ts`), and a commands line in `CLAUDE.md` naming typecheck, full-suite, and single-file test commands so agents stop guessing runners (#412).
+
+**Documentation:**
+- [user] A documented `fileSet` recipe for package-scoped languages (`examples/package-scoped-fileset.mts`, `packageScopedFileSet`) widens each file-set to its directory so same-package tickets land in separate waves, and the agent prompt now asks for unique, feature-specific names for new package-level identifiers so co-wave siblings do not redeclare the same symbol (#404).
 
 ### Collected changes — October 4, 2026
 

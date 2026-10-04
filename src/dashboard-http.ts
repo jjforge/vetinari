@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { PruneClosure } from "./dashboard-prune.ts";
 import type { GraftClosure } from "./dashboard-graft.ts";
-import type { ChildResult } from "./dashboard-child.ts";
+import type { ChildResult, StartedChild } from "./dashboard-child.ts";
 
 /** How the dumb-router shells a project's own CLI (`answer`, `prune`, `graft`) in its
  * root — the injectable seam every route that spawns a child shares, so tests can
@@ -38,6 +38,14 @@ export interface DashboardDeps {
   runChild: (projectRoot: string, args: string[], opts: { timeoutMs: number }) => Promise<ChildResult>;
   /** The cap POST /graft passes to `runChild` — injectable so a test need not wait it out. */
   graftTimeoutMs: number;
+  /**
+   * Start a long-lived child (`redrive`, `answer`) with its output in a per-spawn log file and
+   * wait only its startup window (#369) — the route's 2xx then means "started and survived the
+   * window", not merely "spawned". Optional: the routes fall back to the real `startChild`.
+   */
+  startChild?: (projectRoot: string, args: string[], opts: { logFile: string; startupMs: number }) => Promise<StartedChild>;
+  /** The startup window POST /redrive and POST /answer wait — default 5000ms, injectable for tests. */
+  childStartupMs?: number;
 }
 
 /**

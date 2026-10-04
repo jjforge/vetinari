@@ -5,7 +5,7 @@ import type { PruneClosure } from "./dashboard-prune.ts";
 import { shellPruneClosure, shellPrunePreview } from "./dashboard-prune.ts";
 import type { GraftClosure } from "./dashboard-graft.ts";
 import { shellGraftClosure } from "./dashboard-graft.ts";
-import { runChild } from "./dashboard-child.ts";
+import { runChild, startChild } from "./dashboard-child.ts";
 import type { DashboardDeps, RouteHandler, SpawnDashboardChild } from "./dashboard-http.ts";
 import { handleApiStatus } from "./dashboard-route-api-status.ts";
 import { handleApiIssue } from "./dashboard-route-api-issue.ts";
@@ -70,6 +70,8 @@ export async function serveAllStatus(
     graftClosure?: (projectRoot: string, taskIds: string[]) => Promise<GraftClosure | null>;
     runChild?: DashboardDeps["runChild"];
     graftTimeoutMs?: number;
+    startChild?: DashboardDeps["startChild"];
+    childStartupMs?: number;
   },
 ) {
   const deps: DashboardDeps = {
@@ -80,6 +82,8 @@ export async function serveAllStatus(
     graftClosure: opts.graftClosure ?? shellGraftClosure,
     runChild: opts.runChild ?? runChild,
     graftTimeoutMs: opts.graftTimeoutMs ?? 60_000,
+    startChild: opts.startChild ?? startChild,
+    childStartupMs: opts.childStartupMs ?? 5_000,
   };
   const server = createServer((req, res) => {
     void (async () => {

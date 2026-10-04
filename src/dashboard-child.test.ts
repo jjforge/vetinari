@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { runChild } from "./dashboard-child.ts";
+import { runChild, startChild } from "./dashboard-child.ts";
 
 // A throwaway node fixture standing in for the project's own CLI: `runChild` shells
 // `process.argv[1]` (the vetinari entry), so a test points that at this script instead.
@@ -17,6 +17,17 @@ if (mode === "fail") { process.stderr.write("first noise\\nthe actionable last l
 if (mode === "slow") {
   const marker = process.argv[3];
   setTimeout(() => { require("node:fs").writeFileSync(marker, "landed"); process.exit(0); }, 300);
+}
+if (mode === "noisy") {
+  process.stdout.write("out one\\n");
+  process.stderr.write("err two\\nthe last words\\n\\n");
+  process.exit(3);
+}
+if (mode === "silent") process.exit(0);
+if (mode === "long") {
+  const marker = process.argv[3];
+  process.stdout.write("started\\n");
+  setTimeout(() => { process.stdout.write("later output\\n"); require("node:fs").writeFileSync(marker, "landed"); process.exit(0); }, 300);
 }
 `;
 
@@ -75,4 +86,43 @@ test("runChild caps the wait at timeoutMs and does NOT kill the still-running ch
   const deadline = Date.now() + 10_000;
   while (!existsSync(marker) && Date.now() < deadline) await delay(25);
   assert.equal(existsSync(marker), true, "the un-killed child ran to completion after the cap");
+});
+
+test("startChild resolves an in-window exit with its code and the log's last non-empty line, both streams in the file", async () => {
+  const { dir, entry } = fixtureEntry();
+  const logFile = join(dir, "logs", "dashboard", "redrive-x.log");
+  const result = await withEntry(entry, () => startChild(dir, ["noisy"], { logFile, startupMs: 5_000 }));
+  assert.deepEqual(result, { code: 3, lastLine: "the last words", running: false });
+  const text = readFileSync(logFile, "utf8");
+  assert.match(text, /out one/);
+  assert.match(text, /err two/);
+});
+
+test("startChild resolves running at the startup window and does NOT kill the child, whose later output lands in the log", async () => {
+  const { dir, entry } = fixtureEntry();
+  const marker = join(dir, "marker");
+  const logFile = join(dir, "logs", "dashboard", "redrive-y.log");
+  const result = await withEntry(entry, () => startChild(dir, ["long", marker], { logFile, startupMs: 50 }));
+  assert.equal(result.running, true);
+  assert.equal(existsSync(marker), false, "the child had not finished when the window closed");
+  const deadline = Date.now() + 10_000;
+  while (!existsSync(marker) && Date.now() < deadline) await delay(25);
+  assert.equal(existsSync(marker), true, "the un-killed child ran to completion after the window");
+  assert.match(readFileSync(logFile, "utf8"), /later output/);
+});
+
+test("startChild resolves a silent clean exit with an empty last line", async () => {
+  const { dir, entry } = fixtureEntry();
+  const logFile = join(dir, "logs", "dashboard", "answer-z.log");
+  const result = await withEntry(entry, () => startChild(dir, ["silent"], { logFile, startupMs: 5_000 }));
+  assert.deepEqual(result, { code: 0, lastLine: "", running: false });
+});
+
+test("startChild creates logs/dashboard/ under a fresh base directory and writes the child's output to the named file", async () => {
+  const { dir, entry } = fixtureEntry();
+  const base = mkdtempSync(join(tmpdir(), "vetinari-base-"));
+  const logFile = join(base, "logs", "dashboard", "redrive-fresh.log");
+  assert.equal(existsSync(join(base, "logs")), false);
+  await withEntry(entry, () => startChild(dir, ["noisy"], { logFile, startupMs: 5_000 }));
+  assert.match(readFileSync(logFile, "utf8"), /the last words/);
 });

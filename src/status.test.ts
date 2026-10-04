@@ -767,7 +767,7 @@ test("serveAllStatus POST /prune on confirm shells prune in the selected project
   }
 });
 
-test("serveAllStatus POST /redrive shells redrive in the selected project's root", async () => {
+test("serveAllStatus POST /redrive starts redrive in the selected project's root", async () => {
   const configDir = join(tmpdir(), `vetinari-agg-redrive-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
@@ -792,11 +792,11 @@ test("serveAllStatus POST /redrive shells redrive in the selected project's root
     baseLocation: betaDir,
   });
 
-  const spawned: { args: string[]; cwd: string }[] = [];
+  const started: { args: string[]; cwd: string }[] = [];
   const server = await serveAllStatus(configDir, {
     port: 0,
     host: "127.0.0.1",
-    spawn: (_cmd, args, options) => spawned.push({ args, cwd: options.cwd }),
+    startChild: async (projectRoot, args) => (started.push({ args, cwd: projectRoot }), { code: 0, lastLine: "", running: false }),
   });
   const { port } = server.address() as AddressInfo;
   try {
@@ -809,11 +809,11 @@ test("serveAllStatus POST /redrive shells redrive in the selected project's root
     // Redirects back to the selected project's board, like prune/answer.
     assert.equal(res.status, 303);
     assert.equal(res.headers.get("location"), "/?project=beta");
-    // Shells `redrive` against the SELECTED project's own root (dumb router, ADR 0002),
+    // Starts `redrive` against the SELECTED project's own root (dumb router, ADR 0002),
     // so the shared install picks beta's unfinished campaign back up in beta's log.
-    assert.equal(spawned.length, 1);
-    assert.deepEqual(spawned[0].args.slice(-1), ["redrive"]);
-    assert.equal(spawned[0].cwd, join(configDir, "beta-root"));
+    assert.equal(started.length, 1);
+    assert.deepEqual(started[0].args, ["redrive"]);
+    assert.equal(started[0].cwd, join(configDir, "beta-root"));
     // The retired /resume path no longer routes — it 404s.
     const gone = await fetch(`http://127.0.0.1:${port}/resume`, {
       method: "POST",
@@ -837,11 +837,11 @@ test("serveAllStatus POST /redrive validates the project (400 missing, 404 unkno
     baseLocation: betaDir,
   });
 
-  const spawned: unknown[] = [];
+  const started: unknown[] = [];
   const server = await serveAllStatus(configDir, {
     port: 0,
     host: "127.0.0.1",
-    spawn: (...a) => spawned.push(a),
+    startChild: async (...a) => (started.push(a), { code: 0, lastLine: "", running: false }),
   });
   const { port } = server.address() as AddressInfo;
   try {
@@ -861,8 +861,8 @@ test("serveAllStatus POST /redrive validates the project (400 missing, 404 unkno
       body: new URLSearchParams({ project: "ghost" }).toString(),
     });
     assert.equal(unknown.status, 404);
-    // Neither validation failure shells anything.
-    assert.equal(spawned.length, 0);
+    // Neither validation failure starts anything.
+    assert.equal(started.length, 0);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

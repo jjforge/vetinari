@@ -3,13 +3,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { register } from "./registry.ts";
 import { logFileOf } from "./dashboard-model.ts";
 import { slotsDir } from "./host-slots.ts";
 import { event } from "./event-log.ts";
 import type { DashboardDeps } from "./dashboard-http.ts";
+import type { StartedChild } from "./dashboard-child.ts";
 import { handleRedrive } from "./dashboard-route-redrive.ts";
 
 let counter = 0;
@@ -78,12 +79,10 @@ test("POST /redrive refuses with 409 and the reason while a campaign process hol
   seedLiveLease(configDir, project);
   let spawned = 0;
   const res = resSpy();
-  const handled = await handleRedrive(
-    postReq(`project=${project}`) as never,
-    res as never,
-    new URL("http://x/redrive"),
-    depsFor(configDir, () => (spawned++, undefined)),
-  );
+  const handled = await handleRedrive(postReq(`project=${project}`) as never, res as never, new URL("http://x/redrive"), {
+    ...depsFor(configDir, () => (spawned++, undefined)),
+    startChild: async () => (spawned++, { code: 0, lastLine: "", running: false }),
+  });
   assert.equal(handled, true);
   assert.equal(res.statusCode, 409);
   assert.equal(res.body, "a campaign process is still running");
@@ -91,27 +90,70 @@ test("POST /redrive refuses with 409 and the reason while a campaign process hol
   assert.equal(spawned, 0);
 });
 
-test("POST /redrive shells the CLI and redirects when the campaign is stopped and the lease is dead (#325)", async () => {
-  // A campaign parked on a red base with no live lease is safe: the fold is stopped and no
-  // process holds the lease, so the route shells `redrive` in the project root and redirects.
-  const { configDir, project } = seed([
+// A campaign parked on a red base with no live lease: the fold is stopped and no process holds
+// the lease, so the gate lets a redrive through to the child.
+const seedStopped = () =>
+  seed([
     event("campaign-start", { ts: "2026-08-01T00:00:00.000Z", waves: [["201"]], slots: 1 }),
     event("wave-start", { ts: "2026-08-01T00:01:00.000Z", index: 0, tasks: ["201"] }),
     event("spawn", { ts: "2026-08-01T00:02:00.000Z", taskId: "201", running: 1, left: 0 }),
     event("green", { ts: "2026-08-01T00:03:00.000Z", taskId: "201", commits: ["abc123"], branch: "agent/201" }),
     event("campaign-parked", { ts: "2026-08-01T00:04:00.000Z", index: 0, reason: "red-base", detail: "base gated red" }),
   ]);
-  let spawnedCwd: string | undefined;
+
+// POST /redrive against a stopped campaign with `startChild` stubbed to the given outcome,
+// recording what the stub was called with.
+const redriveWith = async (outcome: StartedChild) => {
+  const { configDir, project } = seedStopped();
+  const calls: { projectRoot: string; args: string[]; opts: { logFile: string; startupMs: number } }[] = [];
   const res = resSpy();
-  const handled = await handleRedrive(
-    postReq(`project=${project}`) as never,
-    res as never,
-    new URL("http://x/redrive"),
-    depsFor(configDir, (_cmd, _args, opts) => ((spawnedCwd = (opts as { cwd: string }).cwd), undefined)),
-  );
+  const handled = await handleRedrive(postReq(`project=${project}`) as never, res as never, new URL("http://x/redrive"), {
+    ...depsFor(configDir, () => undefined),
+    childStartupMs: 7,
+    startChild: async (projectRoot, args, opts) => (calls.push({ projectRoot, args, opts }), outcome),
+  });
   assert.equal(handled, true);
+  return { configDir, res, calls };
+};
+
+test("POST /redrive starts redrive in the project root, logging under logs/dashboard/, and redirects on a clean exit (#369)", async () => {
+  const { configDir, res, calls } = await redriveWith({ code: 0, lastLine: "", running: false });
   assert.equal(res.statusCode, 303);
   assert.match(String((res.headers as { location: string }).location), /\/\?project=beta/);
-  // It shelled the CLI in the project's own root (dumb router, ADR 0002).
-  assert.equal(spawnedCwd, join(configDir, "root"));
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].projectRoot, join(configDir, "root"));
+  assert.deepEqual(calls[0].args, ["redrive"]);
+  assert.equal(calls[0].opts.startupMs, 7);
+  const dashboardLogs = join(configDir, "base", "logs", "dashboard");
+  assert.equal(dirname(calls[0].opts.logFile), dashboardLogs);
+  assert.match(basename(calls[0].opts.logFile), /^redrive-.+\.log$/);
+});
+
+test("POST /redrive redirects when the child parks inside the window (exit 2) (#369)", async () => {
+  const { res } = await redriveWith({ code: 2, lastLine: "parked", running: false });
+  assert.equal(res.statusCode, 303);
+});
+
+test("POST /redrive answers 409 with the refusal's sentence when the child exits 4 (#369)", async () => {
+  const { res } = await redriveWith({ code: 4, lastLine: "no ANTHROPIC_API_KEY set", running: false });
+  assert.equal(res.statusCode, 409);
+  assert.equal(res.body, "no ANTHROPIC_API_KEY set");
+});
+
+test("POST /redrive answers 502 with the child's last line when it dies inside the window (#369)", async () => {
+  const { res } = await redriveWith({ code: 1, lastLine: "TypeError: boom", running: false });
+  assert.equal(res.statusCode, 502);
+  assert.equal(res.body, "TypeError: boom");
+});
+
+test("POST /redrive answers 502 with a fixed sentence when the dead child printed nothing (#369)", async () => {
+  const { res } = await redriveWith({ code: 1, lastLine: "", running: false });
+  assert.equal(res.statusCode, 502);
+  assert.equal(res.body, "redrive did not start — no output");
+});
+
+test("POST /redrive answers 202 naming the log file when the child outlives the window (#369)", async () => {
+  const { res, calls } = await redriveWith({ code: null, lastLine: "", running: true });
+  assert.equal(res.statusCode, 202);
+  assert.equal(res.body, `redrive started — output in ${calls[0].opts.logFile}`);
 });

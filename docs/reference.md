@@ -56,7 +56,7 @@ applies to every mode and is not itself a mode.
 | --- | --- |
 | `0` | green / done — or a no-op (a request already satisfied, or one someone else will carry out), or `--help` |
 | `1` | failed — a run or campaign the agent could not make green; also a genuine **defect**, which still prints its stack trace |
-| `2` | parked — a run or campaign stopped on a question or a stall, awaiting a human |
+| `2` | parked — a run or campaign stopped on a question or a stall, awaiting a human; also a run a human stopped with SIGINT/SIGTERM, which parks `stopped` and exits `2` |
 | `4` | refused — a **refusal**: the command understood the request and declined it on purpose (e.g. "not a git repository", an unknown mode, a missing required argument, a project qualifier that names another project). The message is printed **alone on stderr**, never wrapped in a stack trace |
 
 `--help`, `-h` and `help` print the usage text on **stdout** and exit `0` — help is
@@ -148,7 +148,7 @@ The event log (`logs/orchestrator.jsonl`) is one JSON object per line,
 | `spawn` | `task` | campaign (queue) |
 | `turn` | `task`, `turn`, `summary`, `signal`, `sessionId?`, `commits?` | run |
 | `green` | `task`, `branch`, `commits` | run |
-| `parked` | `task`, `reason`, `detail` | run (question/stalled), integrator (conflict), campaign (red-base) |
+| `parked` | `task`, `reason`, `detail` | run (question/stalled/stopped), integrator (conflict), campaign (red-base) |
 | `failed` | `task`, `detail` | run |
 | `merged` | `task` | integrator |
 | `base-gate` | `index`, `green`, `detail` | integrator |
@@ -164,9 +164,11 @@ sandbox setup, hook failures — are activity, not state: the reducer ignores th
 the issue sheet and live tail read them.
 
 **Park reasons** (design §2.3) — the one enum on the parked record, the `parked`
-event, and the dashboard: `question | stalled | conflict | red-base | crash`.
+event, and the dashboard: `question | stalled | conflict | red-base | crash | stopped`.
 `detail` carries the specifics. `question` and `stalled` are resumable by an
-answer; `conflict`, `red-base`, and `crash` need a redrive after a human move.
+answer; `conflict`, `red-base`, `crash`, and `stopped` need a redrive after a human
+move (a `stopped` standalone run also continues with `vetinari run <id>`). A `stopped`
+record is never announced and cannot be answered.
 
 ## Telegram routing
 

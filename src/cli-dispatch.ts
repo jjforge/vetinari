@@ -28,7 +28,7 @@ import type { archiveRun } from "./archive.ts";
 import type { Exclusion, UnderspecifiedPrompt } from "./plan.ts";
 import type { expandSelection, runCampaignPlan } from "./plan.ts";
 import { resumeIndex, type runPrune } from "./prune.ts";
-import { isIssueToken } from "./issue-id.ts";
+import { isIssueToken, normalize } from "./issue-id.ts";
 import type { runGraft } from "./graft.ts";
 import { GraftRejectedError, describeGraftRejections } from "./graft.ts";
 import type { readEventLog } from "./event-log.ts";
@@ -315,6 +315,12 @@ export interface DispatchDeps {
   error: (msg: string) => void;
   setExitCode: (code: number) => void;
   /**
+   * Force the process to exit NOW with `code` (wired to `process.exit`). A stopped `run` uses this
+   * so the process does not wait for the abandoned agent call to release its handles (this issue);
+   * every other path sets `setExitCode` and returns, letting the process end on its own.
+   */
+  exit: (code: number) => void;
+  /**
    * Validate + preflight + stamp the agent selection (the effectful half of the old
    * `applyAgentSelection`; the flag-strip half now lives in `parseArgs`). Throws on a
    * bad provider/effort or missing credentials, before any container (ADR 0016).
@@ -416,7 +422,16 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
       // Exit code is the queue's slot signal (design §3): 0 green, 2 parked, 1 failed. The loop
       // holds one host slot around the container (design §3 step 1, §8) — `deps.host` carries the
       // budget; a campaign child skips the slot itself (its parent holds one for it).
-      deps.setExitCode(exitCodeFor(await deps.runLoop(cfg, cmd.args[0], deps.host, resumeEntry)));
+      const outcome = await deps.runLoop(cfg, cmd.args[0], deps.host, resumeEntry);
+      deps.setExitCode(exitCodeFor(outcome));
+      // A `stopped` park (a signalled run) force-exits 2 now rather than returning and waiting for
+      // the abandoned agent call to let go of its handles (this issue). Keyed on the issue's own
+      // record reason read back through `listParked`, so a question/stall park exits normally.
+      if (
+        outcome === "parked" &&
+        deps.listParked(cfg).some((r) => normalize(r.taskId) === normalize(cmd.args[0]) && r.reason === "stopped")
+      )
+        deps.exit(2);
       return;
     }
     case "campaign": {
@@ -790,6 +805,16 @@ async function dispatchAnswer(cmd: Extract<Command, { kind: "answer" }>, deps: D
     deps.log(`${taskId} is not parked — nothing to answer.`);
     return;
   }
+
+  // A `stopped` park cannot be answered (this issue): a person stopped the run before a verdict,
+  // so there is no question to resolve — only a resume move. Refuse before delivering anything,
+  // naming the moves (a redrive for a campaign, `vetinari run <id>` for a standalone run). Every
+  // gateway reply ends up here, so this also refuses a reply to an old question message for a task
+  // whose current record is `stopped`.
+  if (deps.listParked(cfg).some((r) => normalize(r.taskId) === normalize(taskId) && r.reason === "stopped"))
+    throw new Refusal(
+      `${taskId} was stopped before it reached a verdict — it cannot be answered. Resume it with \`vetinari redrive\` (a campaign) or \`vetinari run ${taskId}\` (a standalone run).`,
+    );
 
   // Deliver: write the answer into the parked record and mark it answered. The record and its
   // `tgMessageId` are kept so the gateway does not re-announce; the re-admit consumes it.

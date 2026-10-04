@@ -315,6 +315,7 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
     conflict: "This green branch conflicts with the base at merge. Resolve the conflict on the base, then redrive.",
     "red-base": "Every issue passed alone; the merged base fails together. Fix forward on the base, then redrive.",
     crash: "The run died with no verdict. Redrive to pick the campaign back up.",
+    stopped: "The run was stopped by an operator. Redrive to pick the campaign back up, or vetinari run <id> for a standalone run.",
   };
   // The foot (reply + actions) shows only while it holds a live control — a reply to
   // send or a prune to offer — so a plain issue's sheet grows no empty bar.

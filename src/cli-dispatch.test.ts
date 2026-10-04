@@ -38,6 +38,7 @@ function makeDeps(overrides: Partial<DispatchDeps> = {}) {
     log: (m: string) => logged.push(m),
     error: (m: string) => errored.push(m),
     setExitCode: (c: number) => exitCodes.push(c),
+    exit: spy() as unknown as DispatchDeps["exit"],
     selectAgent: spy(),
     isCampaignChild: false,
     archiveLeftoverRun: spy(),
@@ -535,6 +536,40 @@ test("dispatch run refuses on stderr with one line naming the project and exits 
   assert.equal(logged.length, 0, "nothing on stdout");
   assert.ok(/demo/.test(errored[0]), "the refusal names the project");
   assert.deepEqual(exitCodes, [4]);
+});
+
+test("dispatch run exits 2 via deps.exit when the loop parks `stopped` — the process does not wait for the abandoned agent call", async () => {
+  const { deps, exitCodes } = makeDeps({
+    runLoop: spy(Promise.resolve("parked")) as any,
+    listParked: spy([{ taskId: "436", reason: "stopped", branch: "agent/436", parkedAt: "t", question: "stopped" }]) as any,
+  });
+  await dispatch({ kind: "run", agent: {}, args: ["436"], json: false }, deps);
+  assert.deepEqual(exitCodes, [2], "the exit code is set to 2 as today");
+  assert.deepEqual((deps.exit as any).calls, [[2]], "a stopped park also force-exits 2");
+});
+
+test("dispatch run on a non-stopped park sets exit 2 but does NOT force-exit", async () => {
+  const { deps, exitCodes } = makeDeps({
+    runLoop: spy(Promise.resolve("parked")) as any,
+    listParked: spy([{ taskId: "436", reason: "question", branch: "agent/436", parkedAt: "t", question: "?" }]) as any,
+  });
+  await dispatch({ kind: "run", agent: {}, args: ["436"], json: false }, deps);
+  assert.deepEqual(exitCodes, [2], "exit code set to 2 as today");
+  assert.deepEqual((deps.exit as any).calls, [], "a question park never force-exits");
+});
+
+test("dispatch answer refuses a `stopped` record — it cannot be answered, naming redrive and `vetinari run <id>`", async () => {
+  const { deps } = makeDeps({
+    hasParked: spy(true) as any,
+    listParked: spy([{ taskId: "436", reason: "stopped", branch: "agent/436", parkedAt: "t", question: "stopped" }]) as any,
+  });
+  await assert.rejects(
+    () => dispatch({ kind: "answer", taskId: "436", text: ["do", "it"] }, deps),
+    (err: Error) => err instanceof Refusal && /vetinari redrive/.test(err.message) && /vetinari run 436/.test(err.message),
+  );
+  assert.equal((deps.answerParked as any).calls.length, 0, "nothing is delivered to a stopped record");
+  assert.equal((deps.campaign as any).calls.length, 0, "no redrive is kicked off");
+  assert.equal((deps.runLoop as any).calls.length, 0, "no run is kicked off");
 });
 
 test("dispatch run rejects with a Refusal when the task id is missing (a required-argument refusal)", async () => {

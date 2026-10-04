@@ -32,6 +32,7 @@ import {
   lastEventText,
   listArchivedRuns,
   ownerRepoFromRemote,
+  parkReasonFromEvent,
   parkedReplyFor,
   parsePruneClosure,
   parseRunTimestamp,
@@ -1243,6 +1244,19 @@ test("issue lifecycle + wave/campaign folds are one FSM, tested by replaying eve
   assert.equal(campaignState(["completed", "running"]), "running");
   assert.equal(campaignState(["completed", "completed"]), "completed");
   assert.equal(campaignState([]), "unstarted");
+});
+
+test("parkReasonFromEvent recognizes `stopped`, and a member parked{stopped} folds to parked/stopped", () => {
+  // `stopped` is a park reason (a signalled run), so it passes the validator unchanged rather
+  // than defaulting to `question`.
+  assert.equal(parkReasonFromEvent("stopped"), "stopped");
+  const reduced = reduceCampaign([
+    event("campaign-start", { ts: "t0", waves: [["501"]], slots: 1 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["501"] }),
+    event("spawn", { ts: "t2", taskId: "501" }),
+    event("parked", { ts: "t3", taskId: "501", reason: "stopped", detail: "SIGINT" }),
+  ]);
+  assert.deepEqual(issueLifecycle(reduced, "501"), { state: "parked", reason: "stopped" });
 });
 
 test("issueLifecycle reads a running issue live, and its crash reconciliation off the reducer (ADR 0019, design §7)", () => {

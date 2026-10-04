@@ -126,6 +126,10 @@ test("issueMoves drops reply for a conflict, red-base or crash park — prune on
   }
 });
 
+test("issueMoves drops reply for a `stopped` park — prune only (a signalled run cannot be answered)", () => {
+  assert.deepEqual(issueMoves({ status: "parked", reason: "stopped" }), { reply: false, prune: true });
+});
+
 test("issueMoves offers prune for a failed issue (#325)", () => {
   // The wire status is `failed` (the `IssueStatus` enum), the string `/api/issue` ships and the
   // sheet's move rule keys on — one word now (design §13.1), so a failed issue gets its Prune move.

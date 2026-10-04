@@ -15,6 +15,7 @@ import {
   markMergedIssues,
   reconcileResumeWave,
   strandedConflictNotice,
+  waveParkReason,
   queue,
   requireTelegram,
   resolveTitles,
@@ -142,6 +143,23 @@ test("warnIfTelegramUnconfigured is silent when the base location's host.env res
 
   assert.equal(stderr, "");
   assert.equal(eventsOf(cfg).filter((e) => e.event === "telegram-unconfigured").length, 0);
+});
+
+test("waveParkReason surfaces a `stopped` member, but an answerable question/stalled still wins", () => {
+  // A lone stopped member gives the wave reason `stopped` — it is redrive-only, not answerable.
+  assert.equal(waveParkReason(["701"], [], [{ taskId: "701", reason: "stopped" }]), "stopped");
+  // A question (or stall) held alongside wins, because it can be answered.
+  assert.equal(
+    waveParkReason(
+      ["701", "702"],
+      [],
+      [
+        { taskId: "701", reason: "stopped" },
+        { taskId: "702", reason: "question" },
+      ],
+    ),
+    "question",
+  );
 });
 
 test("markMergedIssues calls the configured onIssueMerged seam with exactly the merged ids", async () => {

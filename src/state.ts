@@ -13,8 +13,10 @@ import type { MessageCategory, ResolvedConfig } from "./config.ts";
  * - `conflict` — the integrator hit a merge conflict; a human resolves and redrives.
  * - `red-base` — the merged base gated red; fix-forward or prune, then redrive.
  * - `crash`    — reconciliation found a dead run with no stop marker; redrive.
+ * - `stopped`  — a person stopped the run (SIGINT/SIGTERM) before it reached a verdict; its work is
+ *   kept. It cannot be answered — `vetinari run <id>` continues a standalone run, a redrive a campaign.
  */
-export type ParkReason = "question" | "stalled" | "conflict" | "red-base" | "crash";
+export type ParkReason = "question" | "stalled" | "conflict" | "red-base" | "crash" | "stopped";
 
 export interface ParkedRecord {
   taskId: string;
@@ -49,9 +51,22 @@ const file = (cfg: Pick<ResolvedConfig, "parkedDir">, taskId: string) => `${cfg.
 export async function park(cfg: ResolvedConfig, rec: Omit<ParkedRecord, "parkedAt" | "tgMessageId">) {
   writeParkedRecord(cfg, rec);
   cfg.log.log("parked", { taskId: rec.taskId, reason: rec.reason, ...(rec.detail ? { detail: rec.detail } : {}) });
-  console.log(
-    `\n*** PARKED (${rec.reason}) — the gateway will announce this question; or answer directly with:\n    vetinari answer ${rec.taskId} "<answer>"\n`,
-  );
+  console.log(`\n*** PARKED (${rec.reason}) — ${parkConsoleMove(rec)}\n`);
+}
+
+/**
+ * The console tail `park()` prints for a reason. A `stopped` park cannot be answered — a person
+ * stopped the run before it reached a verdict and its work is kept — so it names the resume move
+ * instead: `vetinari redrive` for a campaign child (`VETINARI_CHILD`), else `vetinari run <id>` for
+ * a standalone run. Every other reason keeps today's answer-or-announce line.
+ */
+function parkConsoleMove(rec: Pick<ParkedRecord, "reason" | "taskId">): string {
+  if (rec.reason === "stopped") {
+    return process.env.VETINARI_CHILD
+      ? `the run was stopped; \`vetinari redrive\` resumes the campaign.`
+      : `the run was stopped; continue it with:\n    vetinari run ${rec.taskId}`;
+  }
+  return `the gateway will announce this question; or answer directly with:\n    vetinari answer ${rec.taskId} "<answer>"`;
 }
 
 /**

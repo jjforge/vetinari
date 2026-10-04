@@ -44,6 +44,18 @@ export const BLOCKED = "<promise>BLOCKED</promise>";
 
 export type Outcome = "green" | "parked" | "failed";
 
+/** Thrown internally when a SIGINT/SIGTERM lands before the run reached a verdict (this issue):
+ * it unwinds the in-flight turn — abandoning the agent call, not awaiting it — so the sole outer
+ * handler closes the sandbox and parks `stopped`. Never leaves `runLoop`; it is caught there. */
+class StopRequested extends Error {
+  constructor() {
+    super("run stopped by signal");
+    this.name = "StopRequested";
+  }
+}
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 export interface ResumeEntry {
   resumeSessionId: string;
   answerPrompt: string;
@@ -62,8 +74,27 @@ export interface LoopDeps {
   makeSandbox: (cfg: ResolvedConfig, taskId: string) => Promise<Sandbox>;
   commitsAhead: (base: string, branch: string, log: Logger) => number | null;
   filesInCommit: (sha: string, log: Logger) => string[];
+  /**
+   * Install the per-run stop handler: register `cb` for SIGINT and SIGTERM, returning an
+   * unsubscribe that removes it (this issue). The default registers on `process`; a test drives
+   * a stop through this seam rather than with a real signal. `runLoop` installs when it starts and
+   * unsubscribes when it returns, so the handler lives exactly as long as the run.
+   */
+  onStop: (cb: (signal: "SIGINT" | "SIGTERM") => void) => () => void;
 }
-export const defaultLoopDeps: LoopDeps = { makeSandbox, commitsAhead, filesInCommit };
+
+const onStopDefault: LoopDeps["onStop"] = (cb) => {
+  const onSigint = () => cb("SIGINT");
+  const onSigterm = () => cb("SIGTERM");
+  process.on("SIGINT", onSigint);
+  process.on("SIGTERM", onSigterm);
+  return () => {
+    process.off("SIGINT", onSigint);
+    process.off("SIGTERM", onSigterm);
+  };
+};
+
+export const defaultLoopDeps: LoopDeps = { makeSandbox, commitsAhead, filesInCommit, onStop: onStopDefault };
 
 /**
  * The verification/gate report the orchestrator hands a red turn. Its resumable
@@ -206,6 +237,63 @@ export async function runLoop(
   entry?: ResumeEntry,
   deps: LoopDeps = defaultLoopDeps,
 ): Promise<Outcome> {
+  // The per-run stop handler's shared state (this issue): the sandbox once created (so the stop
+  // can close it and name its branch), the most recent session id a finished turn produced (so a
+  // `stopped` park can resume it later), and the signal + its promise. A stop before a verdict
+  // unwinds the in-flight turn as a `StopRequested`; the sole outer handler then parks `stopped`.
+  let sbx: Sandbox | undefined;
+  let lastSessionId: string | undefined;
+  let stopSignal: "SIGINT" | "SIGTERM" | undefined;
+  let resolveStop!: (signal: "SIGINT" | "SIGTERM") => void;
+  const stopPromise = new Promise<"SIGINT" | "SIGTERM">((r) => (resolveStop = r));
+  const stopped = () => stopSignal !== undefined;
+  // Race `p` against the stop: once a signal lands, the race rejects `StopRequested` and the
+  // in-flight agent call is abandoned, not awaited (design: "does not wait for the agent call to
+  // settle"). A fresh throwing promise per call keeps `Promise.race`'s handler attached, so the
+  // abandoned call's later settle never surfaces as an unhandled rejection.
+  const stoppable = <T>(p: Promise<T>): Promise<T> =>
+    Promise.race([
+      p,
+      stopPromise.then((): never => {
+        throw new StopRequested();
+      }),
+    ]);
+  const unsubscribe = deps.onStop((signal) => {
+    if (stopSignal === undefined) {
+      stopSignal = signal;
+      resolveStop(signal);
+    }
+  });
+
+  // Close the sandbox if one was created, logging (never throwing) on failure so a stop still
+  // parks even when teardown fails (design: "if the close fails, it logs the failure and still
+  // parks"). Idempotent-safe: called once from the container's `finally`.
+  const closeSandbox = async () => {
+    if (!sbx) return;
+    try {
+      const closed = await sbx.close();
+      if (closed?.preservedWorktreePath) cfg.log.log("worktree-preserved", { taskId, path: closed.preservedWorktreePath });
+    } catch (e: any) {
+      cfg.log.log("sandbox-close-failed", { taskId, error: String(e?.message ?? e) });
+    }
+  };
+
+  // Park the stopped run (reason `stopped`, `detail` the signal name, the sandbox branch — or the
+  // conventional `<branchPrefix><id>` when no container was ever created, the recorded session so
+  // a later `run <id>` can resume it, and a one-line question). The sandbox was already closed by
+  // the container's `finally` on the way here. `park()` logs the `parked{stopped}` event.
+  const parkStopped = async (): Promise<Outcome> => {
+    await park(cfg, {
+      taskId,
+      reason: "stopped",
+      detail: stopSignal,
+      sessionId: lastSessionId,
+      branch: sbx?.branch ?? `${cfg.branchPrefix}${taskId}`,
+      question: "The run was stopped before it reached a verdict.",
+    });
+    return "parked";
+  };
+
   try {
     // Whether the loop resumes a session between turns (claude/pi/codex) or re-enters each
     // turn as a fresh run (copilot/cursor/opencode carry no durable session) — ADR 0016 / #212.
@@ -227,19 +315,32 @@ export async function runLoop(
           await cfg.postComment(taskId, parkedAnswerComment(rec.question, rec.answer));
         }
         clearParked(cfg, taskId);
+      } else if (rec.reason === "stopped") {
+        // A `stopped` record continues a signalled run (this issue): `vetinari run <id>` resumes
+        // the recorded session when the provider is resumable, the record kept a session id, and
+        // the kept branch already carries work (commitsAhead > 0) — otherwise it runs fresh on the
+        // kept branch. Consume the record either way so the next run starts clean.
+        if (resumable && rec.sessionId && (deps.commitsAhead(cfg.baseBranch, rec.branch, cfg.log) ?? 0) > 0)
+          entry = { resumeSessionId: rec.sessionId, answerPrompt: crashResumePrompt() };
+        clearParked(cfg, taskId);
       }
     }
 
-    const task = entry ? "" : await cfg.fetchTask(taskId);
+    // A stop while the task is still being fetched (before any container) unwinds here — nothing
+    // to close, and `makeSandbox` is never reached.
+    const task = entry ? "" : await stoppable(Promise.resolve(cfg.fetchTask(taskId)));
     // Preflight (design §3 step 1): a non-resumable provider with no `postComment` cannot have
     // a parked question answered — surface it up front rather than only when a park is stranded.
     if (!resumable && !cfg.postComment) console.warn(nonResumableAnswerWarning(provider));
 
     const runContainer = async (): Promise<Outcome> => {
-      const sbx = await deps.makeSandbox(cfg, taskId);
+      // A stop during sandbox creation waits for it to settle (so the container is never leaked),
+      // then unwinds — the `finally` below closes it and no turn is started.
+      sbx = await deps.makeSandbox(cfg, taskId);
       // Start the per-task activity stream fresh — live-only scratch, overwritten per run (ADR 0015).
       initActivityLog(cfg.stateDir, taskId);
       try {
+        if (stopped()) throw new StopRequested();
         const common = {
           agent: agentFor(cfg),
           completionSignal: [DONE, BLOCKED],
@@ -251,11 +352,14 @@ export async function runLoop(
         let r: any;
         try {
           r = entry
-            ? await sbx.run({ ...common, maxIterations: 1, resumeSession: entry.resumeSessionId, prompt: entry.answerPrompt })
-            : await sbx.run({ ...common, promptFile: cfg.promptFile, promptArgs: { TASK: task, PROJECT: cfg.project } });
+            ? await stoppable(sbx.run({ ...common, maxIterations: 1, resumeSession: entry.resumeSessionId, prompt: entry.answerPrompt }))
+            : await stoppable(sbx.run({ ...common, promptFile: cfg.promptFile, promptArgs: { TASK: task, PROJECT: cfg.project } }));
 
           for (let turn = 0; turn < cfg.maxTurns; turn++) {
             const sessionId = r.iterations.at(-1)?.sessionId;
+            // The most recent session a finished turn produced — what a `stopped` park records so a
+            // later `run <id>` can resume it (none until a turn completes).
+            lastSessionId = sessionId;
             const turnFields = {
               taskId,
               turn,
@@ -341,7 +445,9 @@ export async function runLoop(
               // with promptFile"), so a red gate errored instead of resuming (#3).
               const resumeSessionId = r.iterations.at(-1)?.sessionId;
               if (!resumeSessionId) throw new Error("no session id to resume — cannot drive the TDD loop");
-              r = await sbx.run({ ...common, maxIterations: 1, resumeSession: resumeSessionId, prompt: redResumePrompt(report) });
+              r = await stoppable(
+                sbx.run({ ...common, maxIterations: 1, resumeSession: resumeSessionId, prompt: redResumePrompt(report) }),
+              );
             } else {
               // Non-resumable provider: there is no session to resume, so the next turn is a
               // FRESH run through the same promptFile path turn 0 uses — re-reading the issue
@@ -349,12 +455,14 @@ export async function runLoop(
               // gate report + most-recent turn summary carried in the prompt (#212). Don't spin a
               // fresh run on the final turn: it would never be gated. Fall through to the budget park.
               if (turn + 1 >= cfg.maxTurns) break;
-              const freshTask = await cfg.fetchTask(taskId);
-              r = await sbx.run({
-                ...common,
-                promptFile: cfg.promptFile,
-                promptArgs: { TASK: `${freshTask}\n\n${freshRedReentry(report, turnFields.summary)}`, PROJECT: cfg.project },
-              });
+              const freshTask = await stoppable(Promise.resolve(cfg.fetchTask(taskId)));
+              r = await stoppable(
+                sbx.run({
+                  ...common,
+                  promptFile: cfg.promptFile,
+                  promptArgs: { TASK: `${freshTask}\n\n${freshRedReentry(report, turnFields.summary)}`, PROJECT: cfg.project },
+                }),
+              );
             }
           }
 
@@ -363,8 +471,12 @@ export async function runLoop(
           // maxTurns genuine attempts against a real gate — so harvest it before teardown,
           // marked with the exit so triage weighs it as weaker evidence than a green run.
           const budgetSessionId = r.iterations.at(-1)?.sessionId;
+          lastSessionId = budgetSessionId;
           const budgetDetail = `budget:${cfg.maxTurns}`;
           await harvestFindings(cfg, sbx, budgetSessionId, common, taskId, budgetDetail);
+          // A stop that landed during the harvest above parks `stopped` instead of the budget stall —
+          // the loop logs no second verdict (design: no `failed`, no `stalled`, no double park).
+          if (stopped()) throw new StopRequested();
           await park(cfg, {
             taskId,
             reason: "stalled",
@@ -375,6 +487,9 @@ export async function runLoop(
           });
           return "parked";
         } catch (err: any) {
+          // A stop unwinds straight through — rethrow so the outer handler closes the sandbox
+          // (via the `finally` below) and parks `stopped`, never a `failed` or `stalled`.
+          if (err instanceof StopRequested) throw err;
           // An agent that emits NEITHER signal dies on the idle timeout as a thrown
           // error, not a result. Without this catch the slot leaves no parked
           // record and the work is unrecoverable.
@@ -382,6 +497,8 @@ export async function runLoop(
             // Harvest when the error carries a recoverable session; harvestFindings no-ops when
             // it does not, so an unrecoverable idle stall skips cleanly (design §3 step 9).
             await harvestFindings(cfg, sbx, err?.sessionId, common, taskId, "idle");
+            // A stop during the idle harvest parks `stopped`, not `stalled` — same guard as budget.
+            if (stopped()) throw new StopRequested();
             await park(cfg, {
               taskId,
               reason: "stalled",
@@ -398,17 +515,23 @@ export async function runLoop(
           throw err;
         }
       } finally {
-        const closed = await sbx.close();
-        if (closed?.preservedWorktreePath) cfg.log.log("worktree-preserved", { taskId, path: closed.preservedWorktreePath });
+        await closeSandbox();
       }
     };
 
     // A standalone run or answer holds one host slot around the container's life (design §3
     // step 1, §8); a campaign child never does — its parent already holds a slot for it.
     // `await` so a rejection lands in the outer catch below rather than escaping as an
-    // unlogged promise (design §3 step 9).
-    return await (host && !process.env.VETINARI_CHILD ? withHostSlot(host, cfg.project, runContainer) : runContainer());
+    // unlogged promise (design §3 step 9). The `wait` races the stop, so a run signalled while it
+    // waits first-come for a slot takes none and unwinds to `parkStopped` — withHostSlot's own
+    // `finally` deregisters its lease on the way out.
+    return await (host && !process.env.VETINARI_CHILD
+      ? withHostSlot(host, cfg.project, runContainer, { wait: (ms) => stoppable(sleep(ms)) })
+      : runContainer());
   } catch (err: any) {
+    // A stop before any verdict parks `stopped` and exits 2 (this issue): the sandbox, if one was
+    // created, has already been closed by the container's `finally` on the way here.
+    if (err instanceof StopRequested) return await parkStopped();
     // Design §3 step 9 — any throw logs `failed` and exits 1. This one outer catch covers every
     // path before and around the container: the parked-answer preflight, `fetchTask`, sandbox
     // creation (a worktree-preflight throw), and a container turn re-thrown from the inner handler.
@@ -417,5 +540,9 @@ export async function runLoop(
     // the child's non-zero exit is what the parent folds to `campaign-failed`.
     cfg.log.log("failed", { taskId, detail: String(err?.message ?? err) });
     return "failed";
+  } finally {
+    // Remove the SIGINT/SIGTERM handler whichever way the run ended — green, parked, failed, or
+    // stopped — so it never outlives the run (design: installed at start, removed on return).
+    unsubscribe();
   }
 }

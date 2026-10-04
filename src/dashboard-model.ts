@@ -52,8 +52,9 @@ export type IssueStatus = "completed" | "parked" | "failed" | "running" | "unsta
  * status word: `question` (a `parked{question}` awaiting an answer), `conflict` (an
  * integrator merge conflict), `red-base` (a combined-gate wave-park — the *wave's* reason,
  * never a member's), `stalled` (a `parked{stalled}` on turn budget / idle / no-commit, the
- * run loop's own resource stop), or `crash` (reconciliation: the run's process is gone with
- * no terminal stop marker, so an in-flight issue never verdicted — design §7). The reason
+ * run loop's own resource stop), `crash` (reconciliation: the run's process is gone with
+ * no terminal stop marker, so an in-flight issue never verdicted — design §7), or `stopped`
+ * (a person signalled the run before it reached a verdict; its work is kept, redrive to resume). The reason
  * selects the recovery affordance; the surface word is one. The single enum lives in
  * `state.ts` and is re-exported here so the render sites can import it beside the model.
  */
@@ -169,7 +170,7 @@ export interface CampaignStatus {
   inFlight?: string[];
 }
 
-const PARK_REASONS: ReadonlySet<string> = new Set(["question", "stalled", "conflict", "red-base", "crash"]);
+const PARK_REASONS: ReadonlySet<string> = new Set(["question", "stalled", "conflict", "red-base", "crash", "stopped"]);
 
 /**
  * The festive-name offset for a campaign, derived from its `campaign-start` (design §2.1:

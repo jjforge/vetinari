@@ -23,6 +23,7 @@ import {
   pollLoop,
   pollTargets,
   rebuildIndex,
+  REDRIVE_ONLY_REASONS,
   reconcilePollTargets,
   recordSend,
   supervisePolls,
@@ -170,6 +171,36 @@ test("pendingAnnouncements returns parked records that carry no announced messag
   );
   assert.equal(pend[0].project, "alpha");
   assert.equal(pend[0].conn.token, "botA");
+});
+
+test("pendingAnnouncements skips a `stopped` record — it is never announced (only the question is returned)", () => {
+  const pend = pendingAnnouncements(
+    [
+      project({
+        project: "alpha",
+        parked: [parked({ taskId: "A1" }), parked({ taskId: "A2", reason: "stopped", detail: "SIGINT" })],
+      }),
+    ],
+    newReplyIndex(),
+  );
+
+  assert.deepEqual(
+    pend.map((a) => a.record.taskId),
+    ["A1"],
+  );
+});
+
+test("rebuildIndex adds no index entry for a `stopped` record that carries a tgMessageId", () => {
+  const projects = [
+    project({
+      project: "alpha",
+      conn: { token: "botA", chat: "-1" },
+      parked: [parked({ taskId: "A1", reason: "stopped", parkedAt: "t1", tgMessageId: 100 })],
+    }),
+  ];
+  const index = rebuildIndex(projects);
+
+  assert.equal(resolveReply(index, "botA", 100), null, "a stopped record is not re-indexed, so a reply to it routes nowhere");
 });
 
 test("pendingAnnouncements skips a project with no destination to announce to", () => {
@@ -529,6 +560,15 @@ test("parkRecoveryMove prints the exact move each reason asks of the human", () 
   }
   assert.match(parkRecoveryMove("conflict", "640"), /resolve/i);
   assert.match(parkRecoveryMove("red-base", "640"), /fix forward/i);
+});
+
+test("parkRecoveryMove: `stopped` is redrive-only and names the standalone `run` move", () => {
+  // A stopped run cannot be answered: a campaign redrives, a standalone run is continued with
+  // `vetinari run <id>`. Both moves are named; a reply is never offered.
+  assert.match(parkRecoveryMove("stopped", "12"), /redrive/);
+  assert.match(parkRecoveryMove("stopped", "12"), /vetinari run 12/);
+  assert.doesNotMatch(parkRecoveryMove("stopped", "12"), /reply/i);
+  assert.ok(REDRIVE_ONLY_REASONS.has("stopped"), "a stopped record cannot be answered, so it is redrive-only");
 });
 
 test("formatParkAnnouncement uses the notice skeleton: header, question, exact recovery move", () => {

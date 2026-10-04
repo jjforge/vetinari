@@ -503,6 +503,11 @@ export function waveParkReason(
     if (rec?.reason === "stalled") return "stalled";
     if (rec?.reason === "question") return "question";
   }
+  // No answerable (question/stalled) member held the wave. A `stopped` member — a signalled run —
+  // gives the wave reason `stopped`: redrive-only, so the wave surfaces that rather than a reply.
+  for (const t of parkedTasks) {
+    if (records.find((r) => norm(r.taskId) === norm(t))?.reason === "stopped") return "stopped";
+  }
   if (parkedTasks.length) return "question";
   return "conflict";
 }

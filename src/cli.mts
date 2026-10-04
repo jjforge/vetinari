@@ -580,6 +580,7 @@ await dispatch(parseArgs([mode, ...rest]), {
   setExitCode: (c) => {
     process.exitCode = c;
   },
+  exit: (c) => process.exit(c),
   selectAgent,
   isCampaignChild: !!process.env.VETINARI_CHILD,
   resumeSession: process.env.VETINARI_RESUME_SESSION,

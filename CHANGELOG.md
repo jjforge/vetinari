@@ -37,6 +37,9 @@ Within a milestone each bold section label appears at most once.
 - [api] `applyCollect` and `foldFragments` results gain a `nearMisses` list, `applyTidy` returns it, `collectWaveChangelog` returns it as an optional field and records it on its `campaign-changelog-*` event, and `Fragment` gains an optional `nearMiss` reason; the new `FragmentNearMiss` / `FragmentNearMissReason` types are exported. `collected` and `skipped` are unchanged (#357).
 - [user] A redriven campaign whose process dies mid-wave now reconciles its in-flight members to `parked (crash)` instead of leaving them reading `running` forever: only a stop marker written since the latest `wave-start` counts as a clean stop, so the earlier run's `campaign-parked`/`campaign-failed` no longer masks the crash (#419).
 
+**Code quality:**
+- [internal] Every copy of the issue-id normalizer now calls the shared `normalize` in `issue-id.ts`, which also gains a shared `hash` (render an id as `#n`). Ids with surrounding whitespace now normalize the same way at every call site. The browser-shipped `humanizeHostLine` keeps its own inlined `hash` (#377).
+
 ### Log-review skill and a code formatter — October 4, 2026
 
 **Breaking changes:**

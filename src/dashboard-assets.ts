@@ -1329,3 +1329,58 @@ export const REDRIVE_SCRIPT = `  function wireRedrive() {
       }
     });
   }`;
+
+/**
+ * The Stop control's client script (design §11): enabled, the Stop button opens its native
+ * `<dialog>` (Cancel the default, `autofocus`, Escape/backdrop close it for free). Both submits —
+ * Stop after this wave and Stop now — are sent by fetch with the pressed button in the body, so
+ * `now=1` rides it exactly as the native POST it falls back to without script. Lives inside
+ * `#live-region`, so `wireStop` re-binds the fresh nodes on every soft-refresh, guarded against a
+ * double bind. In flight the form is aria-busy, the pressed button reads stopping… and both
+ * submits are disabled; a refusal or broken stop shows the route's words in the dialog, and a
+ * delivered stop (a followed 303) goes to the board, where "stop pending" reads off the event log.
+ */
+export const STOP_SCRIPT = `  function wireStop() {
+    const open = document.querySelector("[data-stop-open]");
+    const dialog = document.querySelector("[data-stop-dialog]");
+    if (!open || !dialog || open.disabled || open.dataset.stopWired) return;
+    open.dataset.stopWired = "1";
+    open.addEventListener("click", () => { if (typeof dialog.showModal === "function") dialog.showModal(); });
+    const cancel = dialog.querySelector("[data-stop-cancel]");
+    if (cancel) cancel.addEventListener("click", () => dialog.close());
+    const form = dialog.querySelector("[data-stop-form]");
+    const submits = [...form.querySelectorAll("button[type=submit]")];
+    const status = dialog.querySelector("[data-stop-status]");
+    const showErr = (text) => { status.textContent = text; status.hidden = false; };
+    let busy = false;
+    let label = "";
+    const enterFlight = (pressed) => { form.setAttribute("aria-busy", "true"); label = pressed.textContent; pressed.textContent = "stopping…"; for (const b of submits) b.disabled = true; };
+    const clearFlight = (pressed) => { form.removeAttribute("aria-busy"); pressed.textContent = label; for (const b of submits) b.disabled = false; };
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (busy) return;
+      busy = true;
+      const pressed = event.submitter || submits[0];
+      // Read the body before entering flight — a disabled submitter is left out of the form data.
+      const body = new URLSearchParams(new FormData(form, pressed));
+      status.hidden = true;
+      enterFlight(pressed);
+      try {
+        const res = await fetch("/stop", {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body,
+        });
+        if (!res.ok) {
+          showErr((await res.text()).trim() || "The stop was not sent.");
+          return;
+        }
+        location.assign(res.url);
+      } catch {
+        showErr("Couldn't reach the dashboard — the stop was not sent.");
+      } finally {
+        busy = false;
+        clearFlight(pressed);
+      }
+    });
+  }`;

@@ -44,6 +44,7 @@ import {
   waveState,
   selectStatus,
   statusConfigFromPointer,
+  stopPending,
   summarizeRun,
   type CampaignStatus,
   type OrchestratorEvent,
@@ -3541,4 +3542,30 @@ test("buildStatus folds a campaign stopped between waves to parked{stopped} on t
   const resumed = buildStatus(cfgFor(dir));
   assert.equal(resumed.waves[1].status, "unstarted");
   assert.equal(resumed.waves[1].reason, undefined);
+});
+
+test("stopPending reads a stop-requested after the latest campaign-start with no stop marker after it as pending (#432)", () => {
+  const start = event("campaign-start", { waves: [["201"], ["202"]], slots: 1 });
+  const wave = event("wave-start", { index: 0, tasks: ["201"] });
+  const request = event("stop-requested", { index: 0 });
+  assert.equal(stopPending([start, wave, request]), true);
+  // A stop marker after the request settles it — the campaign took the stop (or ended anyway).
+  assert.equal(stopPending([start, wave, request, event("campaign-parked", { index: 1, reason: "stopped" })]), false);
+  assert.equal(stopPending([start, wave, request, event("campaign-failed", { index: 0 })]), false);
+  assert.equal(stopPending([start, wave, request, event("campaign-done", { waves: 2 })]), false);
+  // A request that belongs to an earlier campaign is not this campaign's stop.
+  assert.equal(stopPending([start, wave, request, event("campaign-parked", { reason: "stopped" }), start, wave]), false);
+  assert.equal(stopPending([request, start, wave]), false);
+  // No request at all is not pending.
+  assert.equal(stopPending([start, wave]), false);
+});
+
+test("buildStatus carries the stop pending flag off the event log (#432)", () => {
+  const dir = join(tmpdir(), `vetinari-stop-pending-${Date.now()}`);
+  const start = event("campaign-start", { waves: [["201"]], slots: 1 });
+  const wave = event("wave-start", { index: 0, tasks: ["201"] });
+  seedState(dir, [start, wave]);
+  assert.equal(buildStatus(cfgFor(dir)).stopPending, false);
+  seedState(dir, [start, wave, event("stop-requested", { index: 0 })]);
+  assert.equal(buildStatus(cfgFor(dir)).stopPending, true);
 });

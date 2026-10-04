@@ -9,6 +9,7 @@ import {
   reasonWord,
   redriveAllowed,
   resumeIntent,
+  stopAllowed,
   tailCollapseIntent,
   tallyDotClass,
 } from "./dashboard-visual-state.ts";
@@ -287,4 +288,9 @@ test("graftCarry carries nothing for an empty, untouched field (#329)", () => {
     invalid: false,
     busy: false,
   });
+});
+
+test("stopAllowed offers a stop only while a campaign process holds the lease (#432)", () => {
+  assert.deepEqual(stopAllowed(true), { allowed: true, reason: "" });
+  assert.deepEqual(stopAllowed(false), { allowed: false, reason: "no campaign running" });
 });

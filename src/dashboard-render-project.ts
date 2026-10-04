@@ -23,9 +23,10 @@ import {
   REPO_DROPDOWN_SCRIPT,
   STATE_CHIP_BORDER_CSS,
   STATE_DOT_CSS,
+  STOP_SCRIPT,
   TOP_BAR_STYLES,
 } from "./dashboard-assets.ts";
-import { dotClass, freezeIntent, graftCarry, reasonWord, redriveAllowed, resumeIntent } from "./dashboard-visual-state.ts";
+import { dotClass, freezeIntent, graftCarry, reasonWord, redriveAllowed, resumeIntent, stopAllowed } from "./dashboard-visual-state.ts";
 import { escapeHtml, escapeTitle, type RepoOption, renderHostLog, renderRepoDropdown, renderTopBar } from "./dashboard-render.ts";
 import { hasConflict, isPrunable, issueDetailSheetMarkup, renderConflictNote, renderGraftInline } from "./dashboard-render-issue.ts";
 
@@ -59,6 +60,34 @@ export const renderRedriveControl = (status: CampaignStatus, gate: { allowed: bo
   const text = `Redrive <strong>${escapeHtml(status.name || status.project)}</strong>: re-enters wave ${(resume?.index ?? 0) + 1} — ${members} — on <code>${escapeHtml(baseBranch ?? "the base branch")}</code>`;
   const dialog = `<dialog class="redrive-dialog" data-redrive-dialog><p class="redrive-dialog-text">${text}</p><form method="post" action="/redrive" class="redrive-dialog-actions" data-redrive-form><input type="hidden" name="project" value="${escapeHtml(status.project)}" /><button type="button" class="redrive-cancel" data-redrive-cancel autofocus>Cancel</button><button type="submit" class="redrive-confirm" data-redrive-confirm>Redrive</button></form><p class="redrive-status" data-redrive-status role="status" hidden></p></dialog>`;
   return `<div class="redrive-control">${openBtn}${dialog}</div>`;
+};
+
+/**
+ * The whole-campaign Stop control (design §11): a campaign control beside graft and redrive that
+ * asks the running campaign to stop. Like redrive it is always rendered, greyed with a one-line
+ * reason unless `gate.allowed` — the pure {@link stopAllowed} rule off the live-lease probe.
+ * Enabled, its button opens a confirm dialog naming the campaign and the wave in flight (the first
+ * not-completed wave, the one redrive would re-enter), Cancel the default, offering a graceful
+ * **Stop after this wave** (plain accent) or **Stop now** (`now=1`, the risky-action coral — it
+ * interrupts running agents). Both POST `/stop`, which shells `vetinari stop [--now]` in the
+ * project's own root. A stop already pending (`status.stopPending`, read only while the gate is
+ * allowed so a campaign that died after a request does not read as stopping) relabels the button
+ * and leaves only Stop now to offer. A campaign-less page renders nothing.
+ */
+export const renderStopControl = (status: CampaignStatus, gate: { allowed: boolean; reason: string }) => {
+  if (!status.waves.length) return "";
+  const pending = gate.allowed && Boolean(status.stopPending);
+  const openBtn = `<button type="button" class="stop-btn" data-stop-open${gate.allowed ? "" : " disabled"}>${pending ? "Stop pending" : "Stop"}</button>`;
+  if (!gate.allowed) return `<div class="stop-control">${openBtn}<span class="stop-reason">${escapeHtml(gate.reason)}</span></div>`;
+  const wave = (status.waves.find((w) => w.status !== "completed")?.index ?? 0) + 1;
+  const name = `<strong>${escapeHtml(status.name || status.project)}</strong>`;
+  const text = pending
+    ? `${name} will stop once wave ${wave} finishes and merges. Stop now stops the running agents mid-turn instead and keeps their work for a redrive.`
+    : `Stop ${name} with wave ${wave} in flight. A graceful stop lets wave ${wave} finish and merge, then parks the campaign; stop now stops the running agents mid-turn and keeps their work for a redrive.`;
+  const graceful = pending ? "" : `<button type="submit" class="stop-graceful" data-stop-graceful>Stop after this wave</button>`;
+  const dialog = `<dialog class="stop-dialog" data-stop-dialog><p class="stop-dialog-text">${text}</p><form method="post" action="/stop" class="stop-dialog-actions" data-stop-form><input type="hidden" name="project" value="${escapeHtml(status.project)}" /><button type="button" class="stop-cancel" data-stop-cancel autofocus>Cancel</button>${graceful}<button type="submit" class="stop-now" name="now" value="1" data-stop-now>Stop now</button></form><p class="stop-status" data-stop-status role="status" hidden></p></dialog>`;
+  const note = pending ? `<span class="stop-pending">stop pending: finishing wave ${wave}</span>` : "";
+  return `<div class="stop-control">${openBtn}${note}${dialog}</div>`;
 };
 
 /**
@@ -525,6 +554,23 @@ ${ISSUE_DETAIL_SHEET_STYLES}
   .redrive-status.redrive-note { color: var(--color-blue); }
   .redrive-cancel { padding: .5rem .9rem; border: 1px solid var(--color-secondary); border-radius: var(--border-radius); background: none; color: var(--color-text); cursor: pointer; font: inherit; font-weight: 700; }
   .redrive-confirm { padding: .5rem .9rem; border: 0; border-radius: var(--border-radius); background: var(--color-red); color: var(--color-on-accent); cursor: pointer; font: inherit; font-weight: 700; }
+  /* The whole-campaign Stop control (design §11): beside redrive, greyed the same way with its
+     reason while no campaign holds the lease. A graceful stop loses no work, so the button and
+     Stop after this wave wear the plain accent; Stop now interrupts running agents (a redrive
+     re-runs their work), so it alone wears the risky-action coral (Appendix A). */
+  .stop-control { display: inline-flex; align-items: center; gap: .5rem; }
+  .stop-btn { padding: .35rem .7rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: var(--color-on-accent); cursor: pointer; font: inherit; font-size: .85rem; font-weight: 700; }
+  .stop-btn:disabled { background: none; border: 1px solid var(--color-secondary); color: var(--color-dim); cursor: default; }
+  .stop-reason { color: var(--color-text-light-2); font-size: .82rem; }
+  .stop-pending { color: var(--color-blue); font-size: .82rem; }
+  .stop-dialog { border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); background: var(--color-card); color: var(--color-text); padding: 1rem 1.25rem; max-width: 32rem; box-shadow: 0 8px 22px #0006; }
+  .stop-dialog::backdrop { background: #0009; }
+  .stop-dialog-text { margin: 0 0 1rem; }
+  .stop-dialog-actions { display: flex; justify-content: flex-end; gap: .75rem; margin: 0; }
+  .stop-status { margin: .75rem 0 0; color: var(--color-red); font-size: .85rem; }
+  .stop-cancel { padding: .5rem .9rem; border: 1px solid var(--color-secondary); border-radius: var(--border-radius); background: none; color: var(--color-text); cursor: pointer; font: inherit; font-weight: 700; }
+  .stop-graceful { padding: .5rem .9rem; border: 0; border-radius: var(--border-radius); background: var(--color-primary); color: var(--color-on-accent); cursor: pointer; font: inherit; font-weight: 700; }
+  .stop-now { padding: .5rem .9rem; border: 0; border-radius: var(--border-radius); background: var(--color-red); color: var(--color-on-accent); cursor: pointer; font: inherit; font-weight: 700; }
   /* The merge-conflict note (#171) is informational only — same amber edge, no action. */
   .conflict-note { background: var(--color-card); border: 1px solid var(--color-secondary); border-left: 3px solid var(--color-yellow); border-radius: var(--border-radius-medium); padding: .8rem 1rem; margin: 1rem 0; color: var(--color-text-light); box-shadow: 0 8px 22px #0004; }
   .conflict-note code { color: var(--color-text); }
@@ -618,11 +664,11 @@ ${renderTopBar(opts.projects?.length ? renderRepoDropdown(opts.projects, opts.se
 }
 ${
   // The summary line: the meta bare, or — under the graft page option — the meta paired with
-  // the campaign controls (the quiet inline graft input, 1a, and the greyed-until-safe Redrive
-  // control, design §11/#325), the three laid out as one summary row.
+  // the campaign controls (the quiet inline graft input, 1a, the greyed-until-safe Redrive
+  // control, design §11/#325, and the Stop control), laid out as one summary row.
   status.waves.length
     ? opts.graft
-      ? `<div class="campaign-summary">${renderCampaignMeta(status)}<div class="campaign-controls">${renderGraftInline(status)}${renderRedriveControl(status, redriveAllowed(campaignState(status.waves.map((wave) => wave.status)), Boolean(opts.leaseLive), status.waves), opts.baseBranch)}</div></div>`
+      ? `<div class="campaign-summary">${renderCampaignMeta(status)}<div class="campaign-controls">${renderGraftInline(status)}${renderRedriveControl(status, redriveAllowed(campaignState(status.waves.map((wave) => wave.status)), Boolean(opts.leaseLive), status.waves), opts.baseBranch)}${renderStopControl(status, stopAllowed(Boolean(opts.leaseLive)))}</div></div>`
       : renderCampaignMeta(status)
     : ""
 }
@@ -806,13 +852,15 @@ ${ARCHIVE_LIST_SCRIPT}
         });
       }
     }
-    // The summary-line graft input and the Redrive control are inside #live-region too, so
-    // rebind them each refresh (their nodes are replaced on every soft-refresh).
+    // The summary-line graft input and the Redrive and Stop controls are inside #live-region
+    // too, so rebind them each refresh (their nodes are replaced on every soft-refresh).
     wireGraft();
     wireRedrive();
+    wireStop();
   }
 ${GRAFT_SCRIPT}
 ${REDRIVE_SCRIPT}
+${STOP_SCRIPT}
   wireLiveRegion();
 ${LIVE_TAIL_SCRIPT}
 ${HOST_LOG_SCRIPT}

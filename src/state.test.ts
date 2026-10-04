@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ResolvedConfig } from "./config.ts";
@@ -214,6 +214,25 @@ test("setParkedMessageId leaves an already-cleared record alone", () => {
   assert.deepEqual(listParkedIn(join(dir, "parked")), []);
 });
 
+test("listParked skips an unparseable record and logs it as parked-record-unreadable, naming the file", () => {
+  const dir = join(tmpdir(), `vetinari-list-torn-${Date.now()}`);
+  mkdirSync(join(dir, "parked"), { recursive: true });
+  parkFixture(dir, "101");
+  writeFileSync(join(dir, "parked", "bad.json"), '{ "taskId": "1');
+  const logger = memoryLogger();
+
+  const recs = listParked(cfgFor(dir), logger);
+
+  assert.deepEqual(
+    recs.map((r) => r.taskId),
+    ["101"],
+  );
+  assert.deepEqual(
+    logger.events.map((e) => [e.event, (e as { file?: string }).file]),
+    [["parked-record-unreadable", join(dir, "parked", "bad.json")]],
+  );
+});
+
 let outboxCounter = 0;
 const outboxDir = () => join(tmpdir(), `vetinari-outbox-${Date.now()}-${outboxCounter++}`);
 
@@ -273,4 +292,65 @@ test("markOutboundSent leaves an already-cleared record alone", () => {
   markOutboundSent(outboxDirOf(dir), "gone", "ops");
 
   assert.deepEqual(listOutboxIn(outboxDirOf(dir)), []);
+});
+
+test("listParkedIn skips a zero-byte record and logs it as parked-record-unreadable, naming the file", () => {
+  const dir = join(tmpdir(), `vetinari-list-in-empty-${Date.now()}`);
+  mkdirSync(join(dir, "parked"), { recursive: true });
+  parkFixture(dir, "102");
+  writeFileSync(join(dir, "parked", "bad.json"), "");
+  const logger = memoryLogger();
+
+  const recs = listParkedIn(join(dir, "parked"), logger);
+
+  assert.deepEqual(
+    recs.map((r) => r.taskId),
+    ["102"],
+  );
+  assert.deepEqual(
+    logger.events.map((e) => [e.event, (e as { file?: string }).file]),
+    [["parked-record-unreadable", join(dir, "parked", "bad.json")]],
+  );
+});
+
+test("neither parked lister returns a temp file stranded by a crashed atomic write", () => {
+  const dir = join(tmpdir(), `vetinari-list-stranded-${Date.now()}`);
+  mkdirSync(join(dir, "parked"), { recursive: true });
+  parkFixture(dir, "103");
+  writeFileSync(join(dir, "parked", "104.json.4321.tmp"), '{ "taskId": "104"');
+  const logger = memoryLogger();
+
+  assert.deepEqual(
+    listParked(cfgFor(dir), logger).map((r) => r.taskId),
+    ["103"],
+  );
+  assert.deepEqual(
+    listParkedIn(join(dir, "parked"), logger).map((r) => r.taskId),
+    ["103"],
+  );
+  assert.deepEqual(logger.events, [], "a stranded temp is not even read");
+});
+
+test("the parked writers leave only <id>.json records behind, each parsing with its fields", async () => {
+  const dir = join(tmpdir(), `vetinari-park-writers-${Date.now()}`);
+  mkdirSync(join(dir, "parked"), { recursive: true });
+  await park(cfgFor(dir), { taskId: "201", reason: "question", sessionId: "s", branch: "agent/201", question: "?" });
+  writeParkedRecord(cfgFor(dir), {
+    taskId: "202",
+    reason: "conflict",
+    branch: "agent/202",
+    question: "Merge conflict.",
+    detail: "both modified",
+  });
+  setParkedMessageId(join(dir, "parked"), "201", 77);
+  answerParked(cfgFor(dir), "201", "go with A");
+
+  assert.deepEqual(readdirSync(join(dir, "parked")).sort(), ["201.json", "202.json"]);
+  const a = JSON.parse(readFileSync(join(dir, "parked", "201.json"), "utf8"));
+  assert.equal(a.tgMessageId, 77);
+  assert.equal(a.answer, "go with A");
+  assert.equal(a.question, "?");
+  const b = JSON.parse(readFileSync(join(dir, "parked", "202.json"), "utf8"));
+  assert.equal(b.reason, "conflict");
+  assert.equal(b.detail, "both modified");
 });

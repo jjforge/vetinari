@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { writeFileAtomic } from "./atomic-write.ts";
 import { hostLogger, type Logger } from "./log.ts";
 import { repoForProject } from "./config.ts";
 import type { Destination, NotifyMap, ResolvedConfig } from "./config.ts";
@@ -96,22 +97,6 @@ export function pointerFor(cfg: Pick<ResolvedConfig, "project" | "stateDir">, pr
     // fall back to the declared name rather than storing an explicit `undefined`.
     ...(repo !== undefined ? { repo } : {}),
   };
-}
-
-/**
- * Write `data` to `path` atomically: to a temp file in the SAME directory (so the
- * final step is a rename within one filesystem, which is atomic), then
- * `renameSync` into place. A writer killed mid-write leaves the untouched
- * destination or a stray `*.tmp` — never the truncated, zero-byte target a plain
- * `writeFileSync` leaves between its truncate and its write. The temp carries the
- * writer's pid so concurrent registrations (a gateway shelling several children)
- * don't collide on one temp name, and a `.tmp` suffix keeps it out of the
- * `*.json` listing (`listProjects`) even if a crash strands it.
- */
-function writeFileAtomic(path: string, data: string): void {
-  const temp = `${path}.${process.pid}.tmp`;
-  writeFileSync(temp, data);
-  renameSync(temp, path);
 }
 
 /** One pointer file per project, keyed by project name — like `parked/`. */

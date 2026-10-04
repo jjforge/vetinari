@@ -16,6 +16,7 @@ import { handleAnswer } from "./dashboard-route-answer.ts";
 import { handlePrune, handlePrunePreview } from "./dashboard-route-prune.ts";
 import { handleGraft, handleGraftPreview } from "./dashboard-route-graft.ts";
 import { handleRedrive } from "./dashboard-route-redrive.ts";
+import { handleStop } from "./dashboard-route-stop.ts";
 import { handleHostLog } from "./dashboard-route-host-log.ts";
 import { handlePage } from "./dashboard-route-page.ts";
 
@@ -45,6 +46,7 @@ const routes: RouteHandler[] = [
   handlePrune,
   handleGraft,
   handleRedrive,
+  handleStop,
   handlePage,
 ];
 

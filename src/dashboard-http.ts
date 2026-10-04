@@ -38,6 +38,8 @@ export interface DashboardDeps {
   runChild: (projectRoot: string, args: string[], opts: { timeoutMs: number }) => Promise<ChildResult>;
   /** The cap POST /graft passes to `runChild` — injectable so a test need not wait it out. */
   graftTimeoutMs: number;
+  /** The cap POST /stop passes to `runChild` — default 10000ms, injectable for tests. */
+  stopTimeoutMs?: number;
   /**
    * Start a long-lived child (`redrive`, `answer`) with its output in a per-spawn log file and
    * wait only its startup window (#369) — the route's 2xx then means "started and survived the

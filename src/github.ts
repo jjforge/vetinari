@@ -78,13 +78,19 @@ export const githubFetchTask =
     return run(["issue", "view", num, "--repo", repo, "--json", "title,body,comments,labels,state,closedAt"]);
   };
 
+/** How many issues a label lookup fetches. `gh issue list` lists only 30 by default,
+ * which silently dropped a large label's oldest issues from a campaign (#434). */
+const LABEL_FETCH_LIMIT = 1000;
+
 /**
  * A ready `listByLabel` resolver over `gh issue list`: the numbers (as strings) of
  * the OPEN issues carrying `label` in `repo` **that are work**. Drop it into a config
  * as `listByLabel: githubIssuesByLabel("owner/repo")` so `campaign <label>` can select
  * its issue set from the tracker instead of a hand-typed id list.
  *
- * Only open issues are listed (`--state open`) — a campaign works the live set. An
+ * Only open issues are listed (`--state open`) — a campaign works the live set — up to
+ * `LABEL_FETCH_LIMIT`; a label that fills the limit logs one line saying some may be
+ * missing, so a shortfall is never silent. An
  * issue whose native tracker type is `Epic` is a container that owns no work
  * (`docs/issue-conventions.md`) and is never scheduled, so it is dropped here at the
  * edge (matched case-insensitively; a row with no type is kept — an untyped issue is
@@ -107,12 +113,27 @@ export const githubFetchTask =
 export const githubIssuesByLabel =
   (repo: string, run: (args: string[]) => string = gh, log: (line: string) => void = console.error) =>
   (label: string, onExcluded?: (e: Exclusion) => void): string[] => {
-    const out = run(["issue", "list", "--repo", repo, "--label", label, "--state", "open", "--json", "number,issueType,labels"]);
+    const out = run([
+      "issue",
+      "list",
+      "--repo",
+      repo,
+      "--label",
+      label,
+      "--state",
+      "open",
+      "--limit",
+      String(LABEL_FETCH_LIMIT),
+      "--json",
+      "number,issueType,labels",
+    ]);
     const rows: Array<{
       number?: number;
       issueType?: { name?: string } | null;
       labels?: Array<{ name?: string }> | null;
     }> = JSON.parse(out || "[]");
+    if (rows.length >= LABEL_FETCH_LIMIT)
+      log(`[vetinari] label "${label}" returned ${rows.length} issues — the fetch limit; some may be missing`);
     const ids: string[] = [];
     for (const r of rows) {
       if (r.number == null) continue;

@@ -112,6 +112,9 @@ test("githubIssuesByLabel lists the OPEN issues carrying a label and returns the
       "ready-for-agent",
       "--state",
       "open",
+      // gh lists only 30 by default, which silently dropped the oldest work (#434).
+      "--limit",
+      "1000",
       "--json",
       // issueType so an Epic — a container that owns no work — is never scheduled (#322);
       // labels so a pending-verify issue — merged work awaiting close — is dropped (#322).
@@ -147,6 +150,31 @@ test("the readiness axis is label-expansion only — an explicitly named pending
   assert.deepEqual(await expandSelection(["campaign:audit"], listByLabel), []);
   // Named explicitly: the operator chose it, so it is kept — the resolver is bypassed.
   assert.deepEqual(await expandSelection(["322"], listByLabel), ["322"]);
+});
+
+test("githubIssuesByLabel warns when a label fills the fetch limit — a shortfall is never silent (#434)", () => {
+  const logs: string[] = [];
+  const rows = Array.from({ length: 1000 }, (_, i) => ({ number: i + 1 }));
+
+  const ids = githubIssuesByLabel(
+    "jjforge/vetinari",
+    () => JSON.stringify(rows),
+    (line) => logs.push(line),
+  )("ready-for-agent");
+
+  // every fetched issue is still returned…
+  assert.equal(ids.length, 1000);
+  // …and one line tells the operator the label may hold more than was fetched.
+  assert.deepEqual(logs, [`[vetinari] label "ready-for-agent" returned 1000 issues — the fetch limit; some may be missing`]);
+});
+
+test("githubIssuesByLabel logs nothing for a label under the fetch limit (#434)", () => {
+  const logs: string[] = [];
+  const run = () => JSON.stringify([{ number: 436 }, { number: 611 }, { number: 640 }]);
+
+  githubIssuesByLabel("jjforge/vetinari", run, (line) => logs.push(line))("ready-for-agent");
+
+  assert.deepEqual(logs, []);
 });
 
 test("githubIssuesByLabel returns an empty list when no open issue carries the label", () => {

@@ -208,8 +208,17 @@ export function readLeases(configDir: string): SlotLease[] {
  * lock); this is a probe any read path can take at any time.
  */
 export function projectHasLiveCampaign(configDir: string, project: string, opts: LeaseOpts = {}): boolean {
+  return liveCampaignPid(configDir, project, opts) !== undefined;
+}
+
+/**
+ * The pid of `project`'s live campaign — the process `vetinari stop` signals — read from the same
+ * live `kind: "campaign"` lease {@link projectHasLiveCampaign} matches, or `undefined` when there is
+ * none (no lease, a standalone run's lease, or a campaign whose pid is gone). Read-only, like the probe.
+ */
+export function liveCampaignPid(configDir: string, project: string, opts: LeaseOpts = {}): number | undefined {
   const isAlive = opts.isAlive ?? pidAlive;
-  return readLeases(configDir).some((l) => l.project === project && l.kind === "campaign" && isAlive(l.pid));
+  return readLeases(configDir).find((l) => l.project === project && l.kind === "campaign" && isAlive(l.pid))?.pid;
 }
 
 /** Read the live leases, unlinking any whose pid is dead so their slots return. */

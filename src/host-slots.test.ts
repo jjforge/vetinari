@@ -8,6 +8,7 @@ import {
   deregisterProject,
   fairShare,
   machineDefaultCeiling,
+  liveCampaignPid,
   projectHasLiveCampaign,
   readLeases,
   registerProject,
@@ -346,4 +347,27 @@ test("withHostSlot waits first-come when the ceiling is full, then proceeds once
   );
   assert.equal(ran, true, "fn runs once the ceiling frees");
   assert.ok(waits >= 1, "it waited rather than exceeding the ceiling");
+});
+
+test("liveCampaignPid returns the live campaign's pid for the project — the `vetinari stop` target", () => {
+  const dir = freshDir();
+  const dead = new Set<number>();
+  const isAlive = (pid: number) => !dead.has(pid);
+
+  assert.equal(liveCampaignPid(dir, "alpha", { isAlive }), undefined);
+
+  // A campaign between waves holds its lease at zero demand (#424) — still a live campaign.
+  registerProject(dir, "alpha", 1, "campaign", 0, { pid: 500, isAlive });
+  assert.equal(projectHasLiveCampaign(dir, "alpha", { isAlive }), true);
+  assert.equal(liveCampaignPid(dir, "alpha", { isAlive }), 500);
+
+  // Another project's campaign and a standalone run are not this project's campaign.
+  registerProject(dir, "beta", 1, "campaign", 1, { pid: 600, isAlive });
+  registerProject(dir, "gamma", 1, "run", 1, { pid: 700, isAlive });
+  assert.equal(liveCampaignPid(dir, "gamma", { isAlive }), undefined);
+  assert.equal(liveCampaignPid(dir, "alpha", { isAlive }), 500);
+
+  // The campaign died: its lease lingers but its pid is gone.
+  dead.add(500);
+  assert.equal(liveCampaignPid(dir, "alpha", { isAlive }), undefined);
 });

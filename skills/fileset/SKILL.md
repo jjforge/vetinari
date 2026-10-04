@@ -104,6 +104,11 @@ Touches (existing files): `cmd/app/main.go`, `Makefile`
 Creates (new files): `internal/report/report.go`, `internal/report/report_test.go`
 ```
 
+**Docs count as files.** A README or `docs/*` file the change must update — because it
+documents the flag, command, config field or behaviour being changed — goes on the
+`Touches:` line like any source file. The planner schedules co-wave tickets by the marker
+alone, so two tickets editing the same doc that neither marked collide at merge.
+
 A ticket that only edits existing files carries just a `Touches:` line; one that only
 adds a new module carries just a `Creates:` line; one that does both carries both. A
 `Touches:` cite resolves by matching the tail of its path against the tree, so a bare

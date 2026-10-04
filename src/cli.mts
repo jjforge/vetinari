@@ -194,11 +194,12 @@ if (mode === "init") {
   if (did.length) console.log(`\nDone: ${did.join(", ")}.`);
 
   // On a terminal, offer to wire this project's Telegram bot connection right after the
-  // scaffold (only when the committed scaffold was actually laid down — a re-run that
-  // filled in stray pieces skips it). Declining is not an error: the printed next step
-  // above still points at `tg-connect`. A non-interactive init never reaches this — it
-  // prompts and sends nothing, by design (ADR 0002; init requires no network today).
-  if (process.stdin.isTTY && result.created.length) {
+  // scaffold (only when the committed scaffold was actually laid down — a re-run on an
+  // existing config that filled in stray pieces, even a new tsconfig, skips it). Declining
+  // is not an error: the printed next step above still points at `tg-connect`. A
+  // non-interactive init never reaches this — it prompts and sends nothing, by design
+  // (ADR 0002; init requires no network today).
+  if (process.stdin.isTTY && !plan.refused) {
     const answer = (await ask("\nWire this project's Telegram bot connection now? [y/N] ")).trim().toLowerCase();
     if (answer === "y" || answer === "yes") {
       await runTgConnect(

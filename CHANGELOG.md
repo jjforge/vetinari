@@ -27,6 +27,7 @@ Within a milestone each bold section label appears at most once.
 - [ops] The TDD prompt every campaign agent gets now says the container has no GitHub login, so the agent shouldn't run `gh`. It says to note defects unrelated to the task and report them as `<finding>` blocks when the final harvest turn asks, which the host files through `reportFinding`. With no harvest turn, they go in the final message. Until now only vetinari's own `CLAUDE.md` said this, so other projects' agents tried `gh issue create`, failed, and buried the finding in their closing account (#440).
 - [user] `statusline install` now defaults its run command to `vetinari statusline` (was `npx vetinari statusline`, which failed outside this checkout); `--run-command` still overrides it. A project already wired keeps its existing command (#358).
 - [api] `DEFAULT_RUN_COMMAND` is now `"vetinari statusline"` (#358).
+- [user] A project's `vetinari/config.mts` now type-checks in the editor and with `tsc -p vetinari`, against the machine's install, with no `package.json`, `node_modules` or symlink in the project: `init` writes a committed `vetinari/tsconfig.json` (also into an existing project that lacks one, without touching its config), which extends a machine-local `.vetinari.local/tsconfig.json` that every vetinari command keeps pointed at the running install (#433).
 
 **Bug fixes:**
 - [user] The dashboard's Redrive confirm and issue-sheet Reply no longer answer "done" the moment their child is spawned. They wait a short startup window: a clean or parked exit goes back to the board as before, a refusal (exit 4) or a child that dies starting shows its own last line inline — in the redrive dialog or under the reply box, with the typed reply kept — and a child still running answers "started" with the path of its log file. Both controls read busy ("redriving…" / "sending…") while in flight (#369).
@@ -58,6 +59,7 @@ Within a milestone each bold section label appears at most once.
 **Documentation:**
 - [internal] ADR 0021 records the dashboard's posture — unauthenticated by design, private network or reverse proxy only — with design §11 and a new `docs/operations.md` section on exposing the dashboard (#361).
 - [user] README, user guide and operations guide now teach `vetinari install` as the once-per-machine step and call the CLI as `vetinari …`; design §1 records the wrapper as how the CLI reaches PATH, with the `npx tsx` shebang kept as the in-repo convenience (#358).
+- [ops] The README quickstart and `docs/operations.md` now teach only the shared machine install (ADR 0003): clone vetinari once, `npm ci`, `npm run vetinari -- install`; upgrade with `git pull && npm ci` in that checkout, `vetinari gateway restart`, then `vetinari baseline` per project. The per-project `npm install github:…` / `file:` instructions and every `npx vetinari` example are gone, the status line's hand-wired command is `vetinari statusline`, and the README says Node 22.15+ (#422).
 
 ### Log-review skill and a code formatter — October 4, 2026
 

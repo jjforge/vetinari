@@ -170,6 +170,10 @@ export interface CampaignStatus {
    * racy/partial log leaves such ghosts). An empty array means no wave is in flight; the field is
    * absent only on a hand-built status, where {@link inFlightRunning} falls back to every runner. */
   inFlight?: string[];
+  /** whether a stop is pending on the latest campaign ({@link stopPending}) — `vetinari stop` asked
+   * it to stop after the wave in flight and it has not yet parked. Absent reads as false, like
+   * `inFlight` on a hand-built status. */
+  stopPending?: boolean;
 }
 
 const PARK_REASONS: ReadonlySet<string> = new Set(["question", "stalled", "conflict", "red-base", "crash", "stopped"]);
@@ -1466,7 +1470,21 @@ export function buildStatus(cfg: ResolvedConfig, opts: { dead?: boolean; alive?:
     // live tail follows. Always an array (empty when none is in flight) so the tail scopes rather
     // than falling back to every runner across the plan.
     inFlight: reduced.currentWave >= 0 ? [...(reduced.waves[reduced.currentWave] ?? [])] : [],
+    stopPending: stopPending(events),
   };
+}
+
+/**
+ * Is a stop already pending on the latest campaign? One is when the log carries a `stop-requested`
+ * after the latest `campaign-start` with no stop marker (`campaign-parked`/`-failed`/`-done`) after
+ * it — the campaign took the request and has not yet parked on it. Pure over the event log; the
+ * CLI's `stop` and the dashboard's Stop control both read it.
+ */
+export function stopPending(events: OrchestratorEvent[]): boolean {
+  const start = events.findLastIndex((e) => e.event === "campaign-start");
+  const request = events.findLastIndex((e) => e.event === "stop-requested");
+  if (request < 0 || request < start) return false;
+  return !events.slice(request).some((e) => e.event === "campaign-parked" || e.event === "campaign-failed" || e.event === "campaign-done");
 }
 
 /**

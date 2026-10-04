@@ -39,6 +39,7 @@ import {
   extractParkedDetails,
   issueLifecycle,
   reduceCampaign,
+  stopPending,
   waveState,
   type ReducedCampaign,
 } from "./dashboard-model.ts";
@@ -107,18 +108,6 @@ function redriveOnlyParkReason(reduced: ReducedCampaign): ParkReason | undefined
       if (state === "parked" && reason && REDRIVE_ONLY_REASONS.has(reason)) return reason;
     }
   return undefined;
-}
-
-/**
- * Is a stop already pending on the latest campaign? One is when the log carries a `stop-requested`
- * after the latest `campaign-start` with no stop marker (`campaign-parked`/`-failed`/`-done`) after
- * it — the campaign took the request and has not yet parked on it. Pure over the event log.
- */
-function stopPending(events: OrchestratorEvent[]): boolean {
-  const start = events.findLastIndex((e) => e.event === "campaign-start");
-  const request = events.findLastIndex((e) => e.event === "stop-requested");
-  if (request < 0 || request < start) return false;
-  return !events.slice(request).some((e) => e.event === "campaign-parked" || e.event === "campaign-failed" || e.event === "campaign-done");
 }
 
 /**

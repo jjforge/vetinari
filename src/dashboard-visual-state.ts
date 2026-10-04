@@ -117,6 +117,16 @@ export function redriveAllowed(
 }
 
 /**
+ * Whether a campaign stop is offered (design §11) — the rule the Stop control greys on. A stop
+ * only has something to act on while a campaign process holds the host lease (`leaseLive`, the
+ * same probe {@link redriveAllowed} reads); otherwise it refuses with the one-line reason the
+ * control shows beside its greyed button. The `/stop` route re-checks the lease itself.
+ */
+export function stopAllowed(leaseLive: boolean): { allowed: boolean; reason: string } {
+  return leaseLive ? { allowed: true, reason: "" } : { allowed: false, reason: "no campaign running" };
+}
+
+/**
  * What the summary-line graft control carries across a live-region soft-refresh (#329) — the
  * single pure rule the swap gates on. A live event replaces `#live-region` wholesale, and the
  * graft form lives inside it: the server renders the ids input with no `value`, so the fresh

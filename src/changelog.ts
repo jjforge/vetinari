@@ -26,8 +26,12 @@ export interface FragmentSection {
   bullets: string[];
 }
 
-/** Matches a fragment's `section: <label>` header line (leading/trailing space tolerated). */
-const SECTION_HEADER = /^\s*section:\s*(.+?)\s*$/i;
+/**
+ * Matches a fragment's `section: <label>` header line. The header starts at column 0:
+ * an indented `section:` (a README's code-block example) is not a header. Trailing
+ * space is tolerated.
+ */
+const SECTION_HEADER = /^section:\s*(.+?)\s*$/i;
 
 /**
  * Parse one fragment file's text into its section blocks. A fragment is a sequence
@@ -180,25 +184,60 @@ export function formatMilestoneDate(d: Date): string {
   return d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
 }
 
-/** One fragment file: its basename and the sections parsed from its text. */
+/**
+ * Why a `changelog.d/` file that looks like a fragment contributed nothing — the two
+ * near-misses a collect names rather than folding or deleting.
+ */
+export type FragmentNearMissReason = "bullets but no section: header" | "section: header but no bullets";
+
+/** A near-miss file a collect left in place: its basename and why it folded nothing. */
+export interface FragmentNearMiss {
+  name: string;
+  reason: FragmentNearMissReason;
+}
+
+/** One `changelog.d/*.md` file: its basename and the sections parsed from its text. */
 export interface Fragment {
   /** The file's basename, e.g. `123.md` — reported and deleted after a collect. */
   name: string;
   /** The section blocks parsed from the file. */
   sections: FragmentSection[];
+  /** Set when the file contributes no bullets but looks like a botched fragment. */
+  nearMiss?: FragmentNearMissReason;
 }
 
 /**
- * Read and parse every `*.md` fragment under `dir` (the edge read that keeps the
- * fold pure). A missing dir yields nothing; files are returned in sorted name
- * order so a collect is deterministic.
+ * Classify a file that contributes no bullets: a column-0 `section:` line with
+ * nothing under it, or column-0 `- ` bullets with no header. Anything else (a prose
+ * README, even one with an indented example) is not a near-miss.
+ */
+function nearMissOf(text: string, sections: FragmentSection[]): FragmentNearMissReason | undefined {
+  if (sections.some((s) => s.bullets.length)) return undefined;
+  if (sections.length) return "section: header but no bullets";
+  if (text.split("\n").some((line) => line.startsWith("- "))) return "bullets but no section: header";
+  return undefined;
+}
+
+/** A fragment is a file that contributes at least one bullet — only these are folded and deleted. */
+const contributes = (f: Fragment): boolean => f.sections.some((s) => s.bullets.length);
+
+/**
+ * Read and parse every `*.md` file under `dir` (the edge read that keeps the fold
+ * pure). A missing dir yields nothing; files are returned in sorted name order so a
+ * collect is deterministic. A file with no column-0 `section:` line parses to no
+ * sections and is never folded.
  */
 export function scanFragments(dir: string): Fragment[] {
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
     .filter((name) => name.endsWith(".md"))
     .sort()
-    .map((name) => ({ name, sections: parseFragment(readFileSync(join(dir, name), "utf8")) }));
+    .map((name) => {
+      const text = readFileSync(join(dir, name), "utf8");
+      const sections = parseFragment(text);
+      const nearMiss = nearMissOf(text, sections);
+      return nearMiss ? { name, sections, nearMiss } : { name, sections };
+    });
 }
 
 export interface CollectOptions {
@@ -215,37 +254,46 @@ export interface CollectOptions {
 /**
  * Fold a NAMED subset of the directory's fragments into `CHANGELOG.md`, write it,
  * and delete only those consumed. `names` are fragment basenames (`147.md`); a name
- * that matches no fragment is skipped. This is the selective core `tidy` folds
- * with — it reconciles only the fragments whose issue is provably merged and leaves
- * the rest (a still-parked issue's fragment) on disk. A no-op (empty
- * `collected`, changelog untouched) when nothing named matches.
+ * that matches no file is skipped. This is the selective core `tidy` folds with — it
+ * reconciles only the fragments whose issue is provably merged and leaves the rest
+ * (a still-parked issue's fragment) on disk. A named file that contributes no
+ * bullets is never deleted: it is returned in `nearMisses` when it looks like a
+ * botched fragment, and left in place silently otherwise. The changelog is
+ * untouched when nothing named contributes.
  */
-export function foldFragments(opts: CollectOptions, names: string[]): { collected: string[] } {
+export function foldFragments(opts: CollectOptions, names: string[]): { collected: string[]; nearMisses: FragmentNearMiss[] } {
   const wanted = new Set(names);
-  const fragments = scanFragments(opts.fragmentsDir).filter((f) => wanted.has(f.name));
-  if (!fragments.length) return { collected: [] };
+  const named = scanFragments(opts.fragmentsDir).filter((f) => wanted.has(f.name));
+  const nearMisses = named.flatMap((f) => (f.nearMiss ? [{ name: f.name, reason: f.nearMiss }] : []));
+  const fragments = named.filter(contributes);
+  if (!fragments.length) return { collected: [], nearMisses };
 
   const sections = fragments.flatMap((f) => f.sections);
   const updated = collectFragments(readFileSync(opts.changelogPath, "utf8"), sections, opts.today, opts.title);
   writeFileSync(opts.changelogPath, updated);
   for (const f of fragments) unlinkSync(join(opts.fragmentsDir, f.name));
-  return { collected: fragments.map((f) => f.name) };
+  return { collected: fragments.map((f) => f.name), nearMisses };
 }
 
 /**
  * The CLI edge of `vetinari changelog collect`: read the wave's fragments, fold
  * them into `CHANGELOG.md`, write it, and delete the consumed fragments. A no-op
  * (empty `collected`, changelog untouched) when there are no fragments. Returns the
- * basenames it consumed. Folds every fragment present, unlike `foldFragments`'s
- * selective reconcile.
+ * basenames it consumed and the near-misses it left in place. Folds every fragment
+ * present, unlike `foldFragments`'s selective reconcile.
  *
  * The fold runs only when the project keeps a `CHANGELOG.md` (design §12): a project
  * with no changelog is opting out, so its fragments are left in place and `skipped`
  * is set to `no-changelog` for the caller to log — rather than materialising a
  * changelog no one asked for (or crashing on the missing read).
  */
-export function applyCollect(opts: CollectOptions): { collected: string[]; skipped?: "no-changelog" } {
-  const names = scanFragments(opts.fragmentsDir).map((f) => f.name);
-  if (names.length && !existsSync(opts.changelogPath)) return { collected: [], skipped: "no-changelog" };
-  return foldFragments(opts, names);
+export function applyCollect(opts: CollectOptions): { collected: string[]; skipped?: "no-changelog"; nearMisses: FragmentNearMiss[] } {
+  const scanned = scanFragments(opts.fragmentsDir);
+  if (!existsSync(opts.changelogPath)) {
+    return scanned.some(contributes) ? { collected: [], skipped: "no-changelog", nearMisses: [] } : { collected: [], nearMisses: [] };
+  }
+  return foldFragments(
+    opts,
+    scanned.map((f) => f.name),
+  );
 }

@@ -218,6 +218,15 @@ function nearMissOf(text: string, sections: FragmentSection[]): FragmentNearMiss
   return undefined;
 }
 
+/**
+ * The one human-readable line every collect path prints for the near-misses it left
+ * in place, e.g. `changelog.d: left in place, not folded — 90.md (bullets but no
+ * section: header)`.
+ */
+export function describeFragmentNearMisses(nearMisses: FragmentNearMiss[]): string {
+  return `${FRAGMENT_DIR}: left in place, not folded — ${nearMisses.map((m) => `${m.name} (${m.reason})`).join(", ")}`;
+}
+
 /** A fragment is a file that contributes at least one bullet — only these are folded and deleted. */
 const contributes = (f: Fragment): boolean => f.sections.some((s) => s.bullets.length);
 

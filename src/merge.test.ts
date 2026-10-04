@@ -739,6 +739,27 @@ test("collectWaveChangelog leaves fragments in place and logs one line when the 
   assert.equal(log.events.filter((e) => (e.event as string) === "campaign-changelog-skipped").length, 1);
 });
 
+test("collectWaveChangelog returns the near-misses it left in place and records them on its event", () => {
+  const dir = repoWithChangelog("# Changelog\n\n### Older — August 1, 2026\n\n**Bug fixes:**\n- [user] old (#1)\n");
+  const fragDir = join(dir, "changelog.d");
+  mkdirSync(fragDir);
+  writeFileSync(join(fragDir, "90.md"), "- [internal] headerless bullet (#90).\n");
+  execFileSync("git", ["-C", dir, "add", "-A"]);
+  execFileSync("git", ["-C", dir, "commit", "-qm", "merge agent branch"]);
+  const before = headSha(dir);
+  const log = memoryLogger();
+
+  const result = collectWaveChangelog(0, log, dir);
+
+  const nearMisses = [{ name: "90.md", reason: "bullets but no section: header" }];
+  assert.equal(result.committed, false);
+  assert.deepEqual(result.nearMisses, nearMisses);
+  assert.equal(headSha(dir), before); // nothing folded, nothing committed
+  assert.equal(existsSync(join(fragDir, "90.md")), true); // left in place
+  const event = log.events.find((e) => (e.event as string) === "campaign-changelog-empty");
+  assert.deepEqual((event as Record<string, unknown> | undefined)?.nearMisses, nearMisses);
+});
+
 // A repo with one agent branch carrying unmerged commits and a worktree checked out on
 // it — the state a parked, still-unmerged campaign member leaves behind. `--purge` (and
 // `tidy`) run their branch/worktree true-drop over exactly this.

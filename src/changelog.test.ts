@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { applyCollect, collectFragments, foldFragments, formatMilestoneDate, parseFragment } from "./changelog.ts";
 
 test("parseFragment reads a single section and its bullets", () => {
@@ -341,4 +343,38 @@ test("foldFragments never deletes a named file that contributed no bullets, and 
   assert.equal(readFileSync(changelog, "utf8"), before); // nothing folded
   assert.equal(existsSync(join(fragDir, "90.md")), true);
   assert.equal(existsSync(join(fragDir, "91.md")), true);
+});
+
+// Spawn the real CLI so `changelog collect`'s printed output is exercised end to end.
+const CLI = fileURLToPath(new URL("./cli.mts", import.meta.url));
+const TSX = fileURLToPath(new URL("../node_modules/.bin/tsx", import.meta.url));
+
+test("changelog collect prints the near-miss line alongside its usual output", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-collect-cli-"));
+  const fragDir = join(dir, "changelog.d");
+  mkdirSync(fragDir);
+  writeFileSync(join(dir, "CHANGELOG.md"), "# Changelog\n\n### Older — August 1, 2026\n\n**Bug fixes:**\n- [user] old (#1)\n");
+  writeFileSync(join(fragDir, "42.md"), "section: New features\n- [user] feature from 42 (#42).\n");
+  writeFileSync(join(fragDir, "91.md"), "section: Bug fixes\n");
+
+  const run = spawnSync(TSX, [CLI, "changelog", "collect"], { cwd: dir, encoding: "utf8" });
+
+  assert.equal(run.status, 0, run.stderr);
+  assert.deepEqual(run.stdout.trim().split("\n"), [
+    "collected 1 fragment(s) into CHANGELOG.md: 42.md",
+    "changelog.d: left in place, not folded — 91.md (section: header but no bullets)",
+  ]);
+});
+
+test("changelog collect prints no near-miss line when there are none", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-collect-cli-clean-"));
+  const fragDir = join(dir, "changelog.d");
+  mkdirSync(fragDir);
+  writeFileSync(join(dir, "CHANGELOG.md"), "# Changelog\n");
+  writeFileSync(join(fragDir, "README.md"), "Fragments go here.\n");
+
+  const run = spawnSync(TSX, [CLI, "changelog", "collect"], { cwd: dir, encoding: "utf8" });
+
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(run.stdout, "nothing to collect — changelog.d/ has no fragments.\n");
 });

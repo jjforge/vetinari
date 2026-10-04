@@ -66,6 +66,7 @@ Both take effect at the next wave boundary; the wave in flight finishes untouche
 - **`vetinari clear`** archives the run log and resets the dashboard to idle. Automatic on a clean finish; use it to force idle after abandoning a run.
 - **`vetinari changelog collect`** folds `changelog.d/` fragments into `CHANGELOG.md` by hand, the same fold a wave runs at merge.
 - **`vetinari registry remove <name>`** stops the dashboard listing a project.
+- **`/review-logs`** reads this project's `.vetinari.local/logs/` for where agents struggled — stops, red gates, hotspot files, churn, facts every agent rediscovers — and suggests changes to the project's code, tests, docs and briefs. It changes nothing until you pick which to file.
 
 ## The host gateway
 

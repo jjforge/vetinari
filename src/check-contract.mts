@@ -14,6 +14,7 @@
  */
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { AGENT_PROVIDERS } from "./config.ts";
 
 const problems: string[] = [];
 
@@ -35,7 +36,7 @@ try {
 
 // The agent factory must still accept a model id plus an effort option.
 try {
-  const agent: any = (sandcastle as any).claudeCode("claude-opus-4-8", { effort: "high" });
+  const agent: any = (sandcastle as any).claudeCode(AGENT_PROVIDERS.claude.defaultModel, { effort: "high" });
   if (!agent) problems.push("claudeCode() returned nothing");
 } catch (err: any) {
   problems.push(`claudeCode(model, {effort}) threw: ${err?.message ?? err}`);

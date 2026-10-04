@@ -53,7 +53,8 @@ export type IssueStatus = "completed" | "parked" | "failed" | "running" | "unsta
  * integrator merge conflict), `red-base` (a combined-gate wave-park — the *wave's* reason,
  * never a member's), `stalled` (a `parked{stalled}` on turn budget / idle / no-commit, the
  * run loop's own resource stop), `crash` (reconciliation: the run's process is gone with
- * no terminal stop marker, so an in-flight issue never verdicted — design §7), or `stopped`
+ * no terminal stop marker since the latest `wave-start`, so an in-flight issue never
+ * verdicted — design §7), or `stopped`
  * (a person signalled the run before it reached a verdict; its work is kept, redrive to resume). The reason
  * selects the recovery affordance; the surface word is one. The single enum lives in
  * `state.ts` and is re-exported here so the render sites can import it beside the model.
@@ -681,7 +682,8 @@ export interface ReducedCampaign {
  * loop re-reads it each wave.
  * `opts.alive` is the injected liveness probe (design §7): `false` means the run's
  * process is gone (its host slot is not held, §8), so an in-flight `running` issue with
- * no terminal stop marker reconciles to parked{crash}; omitted/`true` never crash-folds.
+ * no terminal stop marker since the latest `wave-start` reconciles to parked{crash};
+ * omitted/`true` never crash-folds.
  */
 export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: boolean } = {}): ReducedCampaign {
   const latestCampaignIndex = events.findLastIndex((e) => e.event === "campaign-start" && Array.isArray(e.waves));
@@ -883,15 +885,24 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
 
   // Crash reconciliation (design §2.3, §7): liveness comes from the host-slot lease — a
   // run holds a slot while alive (§8). When the injected probe says the run is dead
-  // (`alive === false`) and its log carries NO `campaign-*` stop marker, every issue still
-  // `running` (its last event non-terminal) died with no verdict, so it reconciles to
-  // parked{crash} — never left reading running forever (§15). A crash is the ABSENCE of a
-  // stop marker, so any of the three (`campaign-done`/`campaign-parked`/`campaign-failed`)
-  // means a clean stop and no crash-fold. Crash is never stored: the probe is an injected
-  // input, so the reducer stays pure. A live or unknown run (`alive !== false`) leaves
-  // `running` untouched.
+  // (`alive === false`) and its log carries NO `campaign-*` stop marker since the latest
+  // `wave-start`, every issue still `running` (its last event non-terminal) died with no
+  // verdict, so it reconciles to parked{crash} — never left reading running forever (§15). A
+  // crash is the ABSENCE of a stop marker, so any of the three
+  // (`campaign-done`/`campaign-parked`/`campaign-failed`) means a clean stop and no
+  // crash-fold. Only a marker since the latest `wave-start` counts: every pickup (a redrive
+  // included, which writes no fresh `campaign-start`) writes `wave-start` before it spawns,
+  // so an earlier marker belongs to a finished stop, not the run that died. Crash is never
+  // stored: the probe is an injected input, so the reducer stays pure. A live or unknown run
+  // (`alive !== false`) leaves `running` untouched.
   const stopMarkers: ReadonlySet<string> = new Set(["campaign-done", "campaign-parked", "campaign-failed"]);
-  if (opts.alive === false && !relevant.some((e) => stopMarkers.has(e.event))) {
+  const sinceLatestWave = relevant.slice(
+    Math.max(
+      0,
+      relevant.findLastIndex((e) => e.event === "wave-start"),
+    ),
+  );
+  if (opts.alive === false && !sinceLatestWave.some((e) => stopMarkers.has(e.event))) {
     for (const [id, status] of outcomes) {
       // A pending green reads `running` (design §2.2) but reached a green verdict — it is
       // banked-but-unmerged work a redrive lands, not a verdict-less in-flight crash — so it is
@@ -1352,7 +1363,8 @@ export function summarizeRun(events: OrchestratorEvent[]): string {
  * by construction (no render-time precedence). Liveness feeds crash detection (design §7):
  * `dead` marks a run whose process is gone (an archived read) and `alive` carries the live
  * host-slot probe (`projectHasLiveCampaign`); either way an `alive === false` run with no
- * terminal event reconciles its still-`running` issues to `parked{crash}` inside the
+ * terminal stop marker since the latest `wave-start` reconciles its still-`running` issues
+ * to `parked{crash}` inside the
  * reducer. Omitting both leaves the live default — `running` stays `running`.
  */
 export function buildStatus(cfg: ResolvedConfig, opts: { dead?: boolean; alive?: boolean } = {}): CampaignStatus {

@@ -1448,6 +1448,57 @@ test("reduceCampaign treats any campaign-* stop marker as not-a-crash — an in-
   assert.equal(reduceCampaign(failed, { alive: false }).outcomes.get("301"), "running", "a campaign-failed marker is not a crash");
 });
 
+test("reduceCampaign crash-folds a redriven run that died mid-wave — only a stop marker since the latest wave-start counts (design §7)", () => {
+  // A redrive writes no new `campaign-start` and logs its `redrive` only once the re-entered
+  // wave integrates, so a redrive that dies mid-wave leaves the earlier run's
+  // `campaign-parked`, then a fresh `wave-start` and `spawn`, then nothing. The earlier
+  // marker belongs to a finished stop, not to the run that died.
+  const redriven = [
+    event("campaign-start", { ts: "t0", waves: [["6"]], slots: 1 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["6"] }),
+    event("spawn", { ts: "t2", taskId: "6" }),
+    event("parked", { ts: "t3", taskId: "6", reason: "question" }),
+    event("campaign-parked", { ts: "t4", index: 0, reason: "question", detail: "6 parked" }),
+    event("wave-start", { ts: "t5", index: 0, tasks: ["6"] }),
+    event("spawn", { ts: "t6", taskId: "6" }),
+  ];
+  assert.deepEqual(issueLifecycle(reduceCampaign(redriven, { alive: false }), "6"), { state: "parked", reason: "crash" });
+  // A live or unprobed read never crash-folds.
+  assert.deepEqual(issueLifecycle(reduceCampaign(redriven, { alive: true }), "6"), { state: "running" });
+  assert.deepEqual(issueLifecycle(reduceCampaign(redriven), "6"), { state: "running" });
+});
+
+test("reduceCampaign: a redriven run that died mid-wave after a campaign-failed never reads running (design §7)", () => {
+  const redriven = [
+    event("campaign-start", { ts: "t0", waves: [["6"]], slots: 1 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["6"] }),
+    event("spawn", { ts: "t2", taskId: "6" }),
+    event("failed", { ts: "t3", taskId: "6" }),
+    event("campaign-failed", { ts: "t4", index: 0, detail: "6 failed" }),
+    event("wave-start", { ts: "t5", index: 0, tasks: ["6"] }),
+    event("spawn", { ts: "t6", taskId: "6" }),
+  ];
+  assert.notEqual(issueLifecycle(reduceCampaign(redriven, { alive: false }), "6").state, "running");
+});
+
+test("reduceCampaign: a redriven run that stopped cleanly again is not crash-folded (design §7)", () => {
+  const redriven = [
+    event("campaign-start", { ts: "t0", waves: [["6", "7"]], slots: 1 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["6", "7"] }),
+    event("spawn", { ts: "t2", taskId: "6" }),
+    event("parked", { ts: "t3", taskId: "6", reason: "question" }),
+    event("campaign-parked", { ts: "t4", index: 0, reason: "question", detail: "6 parked" }),
+    event("wave-start", { ts: "t5", index: 0, tasks: ["6", "7"] }),
+    event("spawn", { ts: "t6", taskId: "6" }),
+    event("spawn", { ts: "t7", taskId: "7" }),
+    event("parked", { ts: "t8", taskId: "6", reason: "question" }),
+    event("campaign-parked", { ts: "t9", index: 0, reason: "question", detail: "6 parked" }),
+  ];
+  const reduced = reduceCampaign(redriven, { alive: false });
+  assert.deepEqual(issueLifecycle(reduced, "7"), { state: "running" });
+  assert.deepEqual(issueLifecycle(reduced, "6"), { state: "parked", reason: "question" });
+});
+
 test("reduceCampaign: a campaign-parked reason question/conflict does not fold its wave to red-base — members keep their own reason (design §2.1, §2.3, #314)", () => {
   // The wave's reason is written on `campaign-parked`, not inferred (§2.1 rule 2). A
   // question/conflict park is NOT a red merged base, so the reducer must not stamp the

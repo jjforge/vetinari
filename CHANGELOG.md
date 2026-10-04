@@ -18,6 +18,15 @@ and each entry opens with a tag saying who it reaches:
 `**Breaking changes:**` sorts first in a milestone and names the contract it broke.
 Within a milestone each bold section label appears at most once.
 
+### Collected changes — October 4, 2026
+
+**Breaking changes:**
+- [user] CLI refusals now exit `4` (refused), distinct from `1` (failed): a deliberate "no" — "not a git repository", an unknown mode, a missing required argument, a project qualifier that names another project, a live-campaign "run refused" — exits `4` with its message alone on stderr. `--help`/`-h`/`help` now exit `0` on stdout (help is not a refusal); a bare `vetinari` and an unknown mode print usage on stderr and exit `4`. `migrate` with conflicts exits `4` (was `1`). The `gateway status|start|stop|restart` systemctl pass-through is unchanged (#354).
+
+**Bug fixes:**
+- [user] Deliberate CLI refusals reach you as their one line, not a Node stack trace: "not a git repository", the planner's under-specified halt, the qualifier refusals, a bad `--agent`, and the rest now print the message alone on stderr. Choosing `s` (stop) at the campaign under-specified prompt is delivered as `stopped — add Touches:/Creates: lines to #… and re-run` (no `--on-underspecified` hint), not a crash-looking trace. Genuine defects still print their stack and exit `1` (#354).
+- [user] The live-campaign "run refused" line moved from stdout/exit `1` to stderr/exit `4`; the "redrive refused" and "not parked — nothing to answer" no-ops are unchanged (stdout, exit `0`) (#354).
+
 ### Operator skills ship with vetinari — October 3, 2026
 
 **New features:**

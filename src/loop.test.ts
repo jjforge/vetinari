@@ -45,6 +45,10 @@ interface TurnScript {
   throwIdle?: boolean;
   throwIdleSession?: string;
   throwGeneric?: string;
+  // What `git status --porcelain` reports in the worktree after this turn (default clean),
+  // and whether that read fails (non-zero exit).
+  status?: string;
+  statusFails?: boolean;
 }
 
 // A scriptable fake sandbox: `run()` shifts through `script` (one entry per turn),
@@ -72,6 +76,10 @@ const fakeSandbox = (script: TurnScript[], branch = "agent/T-1"): FakeSandbox =>
     },
     async exec(cmd) {
       if (cmd.startsWith("git diff --name-only")) return { stdout: "src/loop.ts\n", stderr: "", exitCode: 0 };
+      if (cmd.startsWith("git status --porcelain"))
+        return script[turn]?.statusFails
+          ? { stdout: "", stderr: "fatal: not a git repository", exitCode: 128 }
+          : { stdout: script[turn]?.status ?? "", stderr: "", exitCode: 0 };
       const green = script[turn]?.green ?? true;
       return { stdout: "gate output", stderr: "gate errors", exitCode: green ? 0 : 1 };
     },
@@ -161,6 +169,11 @@ test("runLoop parks (stalled: no-commit) when the gate passes but the branch has
   assert.equal(parked.length, 1);
   assert.equal(parked[0].reason, "stalled");
   assert.equal(parked[0].detail, "no-commit");
+  // A clean worktree keeps the no-op wording.
+  assert.equal(
+    parked[0].question,
+    "COMPLETE but agent/T-1 has no commit beyond base — the agent produced no change. Likely a no-op, or the task needs clarification before it can be done.",
+  );
   // The empty-green guard fired — no green event, no success outbound.
   assert.equal(
     readEventLog(cfg).some((e) => e.event === "green"),
@@ -187,6 +200,131 @@ test("runLoop's no-commit park precedes the gates (design §3 step 6): a COMPLET
     readEventLog(cfg).some((e) => e.event === "gate"),
     false,
   );
+});
+
+test("runLoop nudges a no-signal turn once on the same session instead of parking it no-commit", async () => {
+  const cfg = harnessCfg();
+  // Turn 0 hit its iteration limit mid-work: no signal, nothing committed yet. The nudge
+  // turn commits and signals DONE.
+  const sbx = fakeSandbox([{ run: {} }, { run: { completionSignal: DONE, commits: [{ sha: "abc123" }] }, green: true }]);
+  const commitsAhead = () => (sbx.runCalls.length >= 2 ? 1 : 0);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { commitsAhead })));
+
+  assert.equal(outcome, "green");
+  assert.equal(sbx.runCalls.length, 2);
+  assert.equal(sbx.runCalls[1].resumeSession, "sess-0");
+  assert.equal(sbx.runCalls[1].maxIterations, 1);
+  assert.match(sbx.runCalls[1].prompt ?? "", /ended before you committed or signalled/);
+  assert.match(sbx.runCalls[1].prompt ?? "", /<turn-summary>/);
+  assert.equal(listParked(cfg).length, 0);
+});
+
+test("runLoop nudges a non-resumable provider's no-signal turn as a fresh run carrying the issue text and the nudge", async () => {
+  const cfg = harnessCfg({ agent: { provider: "copilot" }, promptFile: "/prompts/tdd.md", postComment: async () => {} });
+  const sbx = fakeSandbox([{ run: {} }, { run: { completionSignal: DONE, commits: [{ sha: "abc123" }] }, green: true }]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+
+  assert.equal(outcome, "green");
+  assert.equal(sbx.runCalls.length, 2);
+  assert.equal(sbx.runCalls[1].resumeSession, undefined);
+  assert.equal(sbx.runCalls[1].promptFile, "/prompts/tdd.md");
+  const task = sbx.runCalls[1].promptArgs?.TASK ?? "";
+  assert.match(task, /task text/);
+  assert.match(task, /ended before you committed or signalled/);
+});
+
+test("runLoop nudges a no-signal turn even with commits ahead — it is gated only after the nudge turn", async () => {
+  const cfg = harnessCfg();
+  const sbx = fakeSandbox([{ run: { commits: [{ sha: "abc123" }] } }, { run: { completionSignal: DONE }, green: true }]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+
+  assert.equal(outcome, "green");
+  assert.equal(sbx.runCalls.length, 2);
+  assert.match(sbx.runCalls[1].prompt ?? "", /ended before you committed or signalled/);
+  const events = readEventLog(cfg) as { event: string; turn?: number }[];
+  const gates = events.flatMap((e, i) => (e.event === "gate" ? [i] : []));
+  assert.equal(gates.length, 1);
+  const turn1 = events.findIndex((e) => e.event === "turn" && e.turn === 1);
+  assert.ok(turn1 >= 0 && gates[0] > turn1, "the only gate runs after the nudge turn");
+});
+
+test("runLoop sends no nudge when the no-signal turn is the last of the budget (maxTurns 1)", async () => {
+  const cfg = harnessCfg({ maxTurns: 1 });
+  const sbx = fakeSandbox([{ run: {} }]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { commitsAhead: () => 0 })));
+
+  assert.equal(outcome, "parked");
+  assert.equal(sbx.runCalls.length, 1);
+});
+
+test("runLoop's no-commit park names the uncommitted worktree changes instead of claiming no change", async () => {
+  const cfg = harnessCfg();
+  const sbx = fakeSandbox([{ run: { completionSignal: DONE }, status: " M src/loop.ts\n?? changelog.d/25.md\n" }]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { commitsAhead: () => 0 })));
+
+  assert.equal(outcome, "parked");
+  const [rec] = listParked(cfg);
+  assert.equal(rec.reason, "stalled");
+  assert.equal(rec.detail, "no-commit");
+  assert.match(rec.question, /^COMPLETE but agent\/T-1 has no commit beyond base/);
+  assert.match(rec.question, /worktree has uncommitted changes: src\/loop\.ts, changelog\.d\/25\.md/);
+  assert.doesNotMatch(rec.question, /produced no change/);
+});
+
+test("runLoop's no-commit park names only the first five uncommitted paths, then counts the rest", async () => {
+  const cfg = harnessCfg();
+  const status = ["a.ts", "b.ts", "c.ts", "d.ts", "e.ts", "f.ts", "g.ts"].map((f) => ` M ${f}`).join("\n") + "\n";
+  const sbx = fakeSandbox([{ run: { completionSignal: DONE }, status }]);
+
+  await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { commitsAhead: () => 0 })));
+
+  const [rec] = listParked(cfg);
+  assert.match(rec.question, /uncommitted changes: a\.ts, b\.ts, c\.ts, d\.ts, e\.ts \+2 more\./);
+  assert.doesNotMatch(rec.question, /f\.ts/);
+});
+
+test("runLoop nudges at most once: a second no-signal turn with nothing ahead parks no-commit without claiming COMPLETE", async () => {
+  const cfg = harnessCfg();
+  const sbx = fakeSandbox([{ run: {} }, { run: {}, status: " M src/loop.ts\n" }]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { commitsAhead: () => 0 })));
+
+  assert.equal(outcome, "parked");
+  assert.equal(sbx.runCalls.length, 2, "only one nudge was sent");
+  const [rec] = listParked(cfg);
+  assert.equal(rec.detail, "no-commit");
+  assert.match(rec.question, /without a completion signal/);
+  assert.match(rec.question, /uncommitted changes: src\/loop\.ts/);
+  assert.doesNotMatch(rec.question, /COMPLETE/);
+  assert.doesNotMatch(rec.question, /produced no change/);
+});
+
+test("runLoop's no-commit park after a no-signal turn on a clean worktree claims neither COMPLETE nor no change", async () => {
+  const cfg = harnessCfg({ maxTurns: 1 });
+  const sbx = fakeSandbox([{ run: {} }]);
+
+  await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { commitsAhead: () => 0 })));
+
+  const [rec] = listParked(cfg);
+  assert.equal(rec.detail, "no-commit");
+  assert.equal(rec.question, "The turn ended without a completion signal and agent/T-1 has no commit beyond base; the worktree is clean.");
+});
+
+test("runLoop's no-commit park says the worktree state could not be read when git status fails", async () => {
+  const cfg = harnessCfg();
+  const sbx = fakeSandbox([{ run: { completionSignal: DONE }, statusFails: true }]);
+
+  await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { commitsAhead: () => 0 })));
+
+  const [rec] = listParked(cfg);
+  assert.equal(rec.detail, "no-commit");
+  assert.match(rec.question, /worktree state could not be read/);
+  assert.doesNotMatch(rec.question, /produced no change/);
 });
 
 test("runLoop logs a failed verdict and returns failed when a turn throws a non-Idle error (design §3 step 9)", async () => {

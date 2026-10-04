@@ -1,8 +1,14 @@
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type { Finding, FindingContext } from "./findings.ts";
 import type { Exclusion } from "./plan.ts";
 
-const gh = (args: string[]) => execFileSync("gh", args, { encoding: "utf8" });
+const execFileAsync = promisify(execFile);
+
+// Promise-based so the `Promise.all` fan-outs in graft, campaign planning, prune and
+// the dashboard previews actually overlap their `gh` calls instead of running one id
+// after another (#368). A non-zero exit rejects, as the former `execFileSync` threw.
+const gh = async (args: string[]): Promise<string> => (await execFileAsync("gh", args, { encoding: "utf8" })).stdout;
 
 /**
  * A ready `blockedBy` resolver over GitHub's native issue dependencies: for an
@@ -30,10 +36,10 @@ const gh = (args: string[]) => execFileSync("gh", args, { encoding: "utf8" });
  * the real console.
  */
 export const githubBlockedBy =
-  (repo: string, run: (args: string[]) => string = gh, log: (line: string) => void = console.error) =>
-  (id: string, onExcluded?: (e: Exclusion) => void): string[] => {
+  (repo: string, run: (args: string[]) => Promise<string> = gh, log: (line: string) => void = console.error) =>
+  async (id: string, onExcluded?: (e: Exclusion) => void): Promise<string[]> => {
     const num = id.replace(/^#/, "").trim();
-    const out = run(["api", `repos/${repo}/issues/${num}/dependencies/blocked_by`]);
+    const out = await run(["api", `repos/${repo}/issues/${num}/dependencies/blocked_by`]);
     const rows: Array<{
       number?: number;
       state?: string;
@@ -72,10 +78,10 @@ export const githubBlockedBy =
  * invoking `gh`.
  */
 export const githubFetchTask =
-  (repo: string, run: (args: string[]) => string = gh) =>
-  (id: string): string => {
+  (repo: string, run: (args: string[]) => Promise<string> = gh) =>
+  async (id: string): Promise<string> => {
     const num = id.replace(/^#/, "").trim();
-    return run(["issue", "view", num, "--repo", repo, "--json", "title,body,comments,labels,state,closedAt"]);
+    return await run(["issue", "view", num, "--repo", repo, "--json", "title,body,comments,labels,state,closedAt"]);
   };
 
 /** How many issues a label lookup fetches. `gh issue list` lists only 30 by default,
@@ -111,9 +117,9 @@ const LABEL_FETCH_LIMIT = 1000;
  * invoking `gh` or writing to the real console.
  */
 export const githubIssuesByLabel =
-  (repo: string, run: (args: string[]) => string = gh, log: (line: string) => void = console.error) =>
-  (label: string, onExcluded?: (e: Exclusion) => void): string[] => {
-    const out = run([
+  (repo: string, run: (args: string[]) => Promise<string> = gh, log: (line: string) => void = console.error) =>
+  async (label: string, onExcluded?: (e: Exclusion) => void): Promise<string[]> => {
+    const out = await run([
       "issue",
       "list",
       "--repo",
@@ -166,10 +172,10 @@ export const githubIssuesByLabel =
  * injected only so the argument building can be tested without invoking `gh`.
  */
 export const githubMarkPendingVerify =
-  (repo: string, run: (args: string[]) => string = gh) =>
-  (id: string): void => {
+  (repo: string, run: (args: string[]) => Promise<string> = gh) =>
+  async (id: string): Promise<void> => {
     const num = id.replace(/^#/, "").trim();
-    run(["issue", "edit", num, "--repo", repo, "--add-label", "pending-verify", "--remove-label", "ready-for-agent"]);
+    await run(["issue", "edit", num, "--repo", repo, "--add-label", "pending-verify", "--remove-label", "ready-for-agent"]);
   };
 
 /**
@@ -181,10 +187,10 @@ export const githubMarkPendingVerify =
  * `run` is injected only so the argument building can be tested without invoking `gh`.
  */
 export const githubIssueComment =
-  (repo: string, run: (args: string[]) => string = gh) =>
+  (repo: string, run: (args: string[]) => Promise<string> = gh) =>
   async (issueRef: string, body: string): Promise<void> => {
     const num = String(issueRef).replace(/^#/, "").trim();
-    run(["issue", "comment", num, "--repo", repo, "--body", body]);
+    await run(["issue", "comment", num, "--repo", repo, "--body", body]);
   };
 
 /**
@@ -194,8 +200,8 @@ export const githubIssueComment =
  * injected only so the argument building can be tested without invoking `gh`.
  */
 export const githubFindingReporter =
-  (repo: string, opts: { labels?: string[] } = {}, run: (args: string[]) => string = gh) =>
-  (finding: Finding, ctx: FindingContext): string => {
+  (repo: string, opts: { labels?: string[] } = {}, run: (args: string[]) => Promise<string> = gh) =>
+  async (finding: Finding, ctx: FindingContext): Promise<string> => {
     const body = [
       finding.repro ? `**Repro:** ${finding.repro}` : "",
       finding.location ? `**Location:** ${finding.location}` : "",
@@ -205,5 +211,5 @@ export const githubFindingReporter =
       .join("\n\n");
     const args = ["issue", "create", "--repo", repo, "--title", finding.summary, "--body", body];
     for (const label of opts.labels ?? []) args.push("--label", label);
-    return run(args).trim();
+    return (await run(args)).trim();
   };

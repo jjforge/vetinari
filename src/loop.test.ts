@@ -11,6 +11,7 @@ import { answerParked, hasParked, listOutbox, listParked, park } from "./state.t
 import { projectHasLiveCampaign, readLeases, type HostBudget } from "./host-slots.ts";
 import { BLOCKED, DONE, extractTurnSummary, parkedAnswerComment, runLoop, type LoopDeps } from "./loop.ts";
 import { HARVEST_PROMPT, type Finding, type FindingContext } from "./findings.ts";
+import { Refusal } from "./refusal.ts";
 
 // A temp-dir `cfg` mirroring graft.test/modes.test's `harnessCfg`: a real on-disk
 // event log, parked dir and outbox under a throwaway state dir, driven by a real
@@ -219,6 +220,27 @@ test("runLoop logs a failed verdict when the sandbox cannot be created — a thr
   assert.ok(failed, "a pre-sandbox throw leaves a failed verdict on the log");
   assert.equal(failed!.taskId, "T-1");
   assert.match(failed!.detail, /worktree preflight/);
+  assert.equal(listParked(cfg).length, 0);
+});
+
+test("runLoop folds a Refusal to a failed verdict and returns failed — the loop does not re-throw a refusal (#354)", async () => {
+  // A refusal reached only through the run loop (e.g. sandbox's already-checked-out
+  // worktree) still becomes a logged `failed` verdict and the run's exit 1 — nothing
+  // changes for the operator inside the loop; the Refusal is not re-thrown to the CLI handler.
+  const cfg = harnessCfg();
+  const sbx = fakeSandbox([]);
+  const deps = depsFor(sbx, {
+    makeSandbox: async () => {
+      throw new Refusal("agent/T-1 is already checked out at /somewhere — remove that worktree before running this issue (one run per issue).");
+    },
+  });
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, deps));
+
+  assert.equal(outcome, "failed", "a run-loop refusal folds to failed, not re-thrown");
+  const failed = readEventLog(cfg).find((e) => e.event === "failed") as { taskId: string; detail: string } | undefined;
+  assert.ok(failed, "the refusal leaves a failed verdict on the log");
+  assert.match(failed!.detail, /already checked out/);
   assert.equal(listParked(cfg).length, 0);
 });
 

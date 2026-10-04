@@ -20,7 +20,16 @@ import { runLoop } from "./loop.ts";
 import { baseline, build, campaign, requireTelegram, tgTest } from "./modes.ts";
 import { runTgConnect } from "./tg-connect.ts";
 import { tgSend } from "./telegram.ts";
-import { applyTidy, computeTidy, describeRegistryDedup, describeTidy, scanTidy, tidyIsEmpty, type TidyTarget } from "./merge.ts";
+import {
+  applyTidy,
+  computeTidy,
+  describeRegistryDedup,
+  describeTidy,
+  findMergeCommit,
+  scanTidy,
+  tidyIsEmpty,
+  type TidyTarget,
+} from "./merge.ts";
 import { gateway } from "./gateway.ts";
 import { defaultGatewayServiceIO, isGatewayServiceVerb, runGatewayService } from "./gateway-service.ts";
 import { runPrune } from "./prune.ts";
@@ -597,6 +606,7 @@ await dispatch(parseArgs([mode, ...rest]), {
   campaign,
   expandSelection,
   runCampaignPlan,
+  findMergeCommit,
   runPrune,
   runGraft,
   listParked,

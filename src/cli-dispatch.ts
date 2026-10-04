@@ -27,6 +27,7 @@ import type { answerParked, hasParked, listParked, ParkReason } from "./state.ts
 import type { archiveRun } from "./archive.ts";
 import type { Exclusion, UnderspecifiedPrompt } from "./plan.ts";
 import type { expandSelection, runCampaignPlan } from "./plan.ts";
+import type { findMergeCommit } from "./merge.ts";
 import { resumeIndex, type runPrune } from "./prune.ts";
 import { isIssueToken, normalize } from "./issue-id.ts";
 import type { runGraft } from "./graft.ts";
@@ -125,6 +126,10 @@ export type Command =
       resume: boolean;
       dryRun: boolean;
       override: boolean;
+      /** `--supersede`: archive a leftover red-base park and start fresh instead of refusing. */
+      supersede: boolean;
+      /** `--include-merged`: plan selected issues whose merge commit is already on the base. */
+      includeMerged: boolean;
       onUnderspecified?: string;
       json: boolean;
     }
@@ -243,6 +248,8 @@ export function parseArgs(argv: string[]): Command {
       let resume = false;
       let dryRun = false;
       let override = false;
+      let supersede = false;
+      let includeMerged = false;
       let json = false;
       let onUnderspecified: string | undefined;
       const positional: string[] = [];
@@ -254,6 +261,8 @@ export function parseArgs(argv: string[]): Command {
         else if (a === "--resume") resume = true;
         else if (a === "--dry-run") dryRun = true;
         else if (a === "--override") override = true;
+        else if (a === "--supersede") supersede = true;
+        else if (a === "--include-merged") includeMerged = true;
         else if (a === "--json") json = true;
         else if (a.startsWith("--on-underspecified=")) onUnderspecified = a.slice("--on-underspecified=".length);
         else if (a === "--on-underspecified") onUnderspecified = campaignArgs[++i];
@@ -268,6 +277,8 @@ export function parseArgs(argv: string[]): Command {
         resume,
         dryRun,
         override,
+        supersede,
+        includeMerged,
         onUnderspecified,
         json,
       };
@@ -350,6 +361,9 @@ export interface DispatchDeps {
   campaign: typeof campaign;
   expandSelection: typeof expandSelection;
   runCampaignPlan: typeof runCampaignPlan;
+  /** The sha of an issue's campaign merge commit on the base — what lets the planner skip a
+   *  selected issue that already merged though its label has not caught up (design §4). */
+  findMergeCommit: typeof findMergeCommit;
   runPrune: typeof runPrune;
   runGraft: typeof runGraft;
   listParked: typeof listParked;
@@ -604,6 +618,20 @@ async function dispatchCampaign(cmd: Extract<Command, { kind: "campaign" }>, dep
       "campaign needs at least one issue id or label: campaign 436 611 640, campaign ready-for-agent (or --resume to continue a paused campaign)",
     );
 
+  // A leftover parked on a red merged base is `redrive`'s to finish (design §7): a fresh launch
+  // would archive it (a red-base park writes no parked record), so `redrive` could no longer find
+  // it, and its merged members — still labelled ready — would be planned again as no-ops. Refuse
+  // and point at the redrive, before any expansion, planning or archive; `--supersede` archives it
+  // anyway, and a `--dry-run` archives nothing, so neither refuses.
+  if (!cmd.dryRun && !cmd.supersede) {
+    const reduced = reduceCampaign(deps.readEventLog(cfg));
+    if (redriveOnlyParkReason(reduced) === "red-base")
+      throw new Refusal(
+        `campaign: the last campaign is parked on a red merged base at wave ${reduced.parkedWave + 1} — fix forward on the base, ` +
+          "then run `vetinari redrive` (or pass --supersede to archive it and start fresh).",
+      );
+  }
+
   if (cmd.override) {
     // Each positional is one explicit wave (split on whitespace/commas); the planner
     // is skipped entirely. A label token inside a wave still expands, joining that wave.
@@ -639,15 +667,15 @@ async function dispatchCampaign(cmd: Extract<Command, { kind: "campaign" }>, dep
   const report = await deps.runCampaignPlan(
     cfg,
     ids,
-    { onUnderspecified: cmd.onUnderspecified },
-    { isTTY: deps.isTTY, ask: deps.askUnderspecified },
+    { onUnderspecified: cmd.onUnderspecified, includeMerged: cmd.includeMerged },
+    { isTTY: deps.isTTY, ask: deps.askUnderspecified, mergeCommitOf: (id) => deps.findMergeCommit(cfg, id) },
     excluded,
   );
 
   if (cmd.dryRun) {
     // The full `campaign-plan` replacement: the bare wave args, the provenance report,
     // and a suggested --name — printed to read or paste, nothing run.
-    deps.log(report.waveArgs || "(nothing schedulable — every ticket is unreachable)");
+    deps.log(report.waveArgs || "(nothing schedulable)");
     deps.log("");
     deps.log(report.report);
     if (report.suggestedName) deps.log(`\nsuggested name: --name "${report.suggestedName}"`);
@@ -655,8 +683,9 @@ async function dispatchCampaign(cmd: Extract<Command, { kind: "campaign" }>, dep
   }
 
   if (!report.waves.length) {
-    // Nothing survived planning (every ticket unreachable) — show why, run nothing.
-    reporter.line("campaign: nothing schedulable — every ticket is unreachable.");
+    // Nothing survived planning (unreachable, or skipped as already merged) — the report
+    // below says why; run nothing.
+    reporter.line("campaign: nothing schedulable.");
     reporter.line("");
     reporter.line(report.report);
     return;

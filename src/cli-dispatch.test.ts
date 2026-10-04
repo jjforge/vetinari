@@ -79,6 +79,7 @@ function makeDeps(overrides: Partial<DispatchDeps> = {}) {
     ask: spy(Promise.resolve("")) as unknown as DispatchDeps["ask"],
     tgSend: spy(Promise.resolve(1)) as unknown as DispatchDeps["tgSend"],
     runTgConnect: spy(Promise.resolve({ ok: true, written: true })) as unknown as DispatchDeps["runTgConnect"],
+    findMergeCommit: spy(undefined) as unknown as DispatchDeps["findMergeCommit"],
     ...overrides,
   };
   return { deps, logged, errored, exitCodes, cfg };
@@ -269,6 +270,8 @@ test("parseArgs maps a plain `campaign <ids>` to its positional selection with d
     resume: false,
     dryRun: false,
     override: false,
+    supersede: false,
+    includeMerged: false,
     onUnderspecified: undefined,
     json: false,
   });
@@ -298,10 +301,21 @@ test("parseArgs strips the agent and reads every `campaign` flag (both --flag va
       resume: false,
       dryRun: true,
       override: true,
+      supersede: false,
+      includeMerged: false,
       onUnderspecified: "drop",
       json: true,
     },
   );
+});
+
+test("parseArgs reads campaign's --supersede and --include-merged flags (#405)", () => {
+  const cmd = parseArgs(["campaign", "--supersede", "--include-merged", "436"]);
+  assert.equal(cmd.kind, "campaign");
+  if (cmd.kind !== "campaign") return;
+  assert.equal(cmd.supersede, true);
+  assert.equal(cmd.includeMerged, true);
+  assert.deepEqual(cmd.positional, ["436"]);
 });
 
 test("parseArgs maps a bare `redrive` to a redrive command with default flags", () => {
@@ -334,6 +348,8 @@ test("parseArgs maps `campaign --resume` to a resume with no positional selectio
     resume: true,
     dryRun: false,
     override: false,
+    supersede: false,
+    includeMerged: false,
     onUnderspecified: undefined,
     json: false,
   });
@@ -676,6 +692,8 @@ for (const [outcome, code] of [
         resume: false,
         dryRun: false,
         override: false,
+        supersede: false,
+        includeMerged: false,
         onUnderspecified: undefined,
         json: false,
       },
@@ -698,6 +716,8 @@ for (const [outcome, code] of [
         resume: true,
         dryRun: false,
         override: false,
+        supersede: false,
+        includeMerged: false,
         onUnderspecified: undefined,
         json: false,
       },
@@ -743,6 +763,8 @@ test("dispatch campaign --resume runs a resume with no selection and never archi
       resume: true,
       dryRun: false,
       override: false,
+      supersede: false,
+      includeMerged: false,
       onUnderspecified: undefined,
       json: false,
     },
@@ -765,6 +787,8 @@ test("dispatch campaign --resume --override forwards the failed-member override 
       resume: true,
       dryRun: false,
       override: true,
+      supersede: false,
+      includeMerged: false,
       onUnderspecified: undefined,
       json: false,
     },
@@ -816,6 +840,8 @@ test("dispatch campaign --resume still redrives but prints the one-release alias
       resume: true,
       dryRun: false,
       override: false,
+      supersede: false,
+      includeMerged: false,
       onUnderspecified: undefined,
       json: false,
     },
@@ -837,6 +863,8 @@ const campaignCmd = (overrides: Partial<Extract<Command, { kind: "campaign" }>> 
   resume: false,
   dryRun: false,
   override: false,
+  supersede: false,
+  includeMerged: false,
   onUnderspecified: undefined,
   json: false,
   ...overrides,
@@ -891,6 +919,8 @@ test("dispatch campaign with an empty selection throws the needs-an-issue messag
         resume: false,
         dryRun: false,
         override: false,
+        supersede: false,
+        includeMerged: false,
         onUnderspecified: undefined,
         json: false,
       },
@@ -914,6 +944,8 @@ test("dispatch campaign --override runs each positional as a literal wave via ex
       resume: false,
       dryRun: false,
       override: true,
+      supersede: false,
+      includeMerged: false,
       onUnderspecified: undefined,
       json: false,
     },
@@ -938,6 +970,8 @@ test("dispatch campaign default plans the selection then runs the planned waves"
       resume: false,
       dryRun: false,
       override: false,
+      supersede: false,
+      includeMerged: false,
       onUnderspecified: "drop",
       json: false,
     },
@@ -962,6 +996,8 @@ test("dispatch campaign --dry-run plans but runs nothing", async () => {
       resume: false,
       dryRun: true,
       override: false,
+      supersede: false,
+      includeMerged: false,
       onUnderspecified: undefined,
       json: false,
     },
@@ -988,6 +1024,8 @@ test("dispatch campaign default prints the plan provenance and streams no JSON w
       resume: false,
       dryRun: false,
       override: false,
+      supersede: false,
+      includeMerged: false,
       onUnderspecified: undefined,
       json: false,
     },
@@ -1017,6 +1055,8 @@ test("dispatch campaign --json switches on the raw event stream and suppresses t
       resume: false,
       dryRun: false,
       override: false,
+      supersede: false,
+      includeMerged: false,
       onUnderspecified: undefined,
       json: true,
     },
@@ -1375,4 +1415,111 @@ test("dispatch answer preflight refuses before delivering when the agent selecti
 test("dispatch answer with no text throws the needs-a-task-id-and-text message", async () => {
   const { deps } = makeDeps();
   await assert.rejects(dispatch({ kind: "answer", taskId: "436", text: [] }, deps), /answer needs a task id and text/);
+});
+
+// A fresh campaign over a leftover parked on a red merged base must not archive it — that would
+// strand the park so `redrive` can no longer find it. It refuses and names the redrive (#405).
+test("dispatch campaign refuses a fresh planned launch over a red-base park, naming redrive (#405)", async () => {
+  const { deps } = makeDeps({
+    readEventLog: spy(redBaseParkedCampaign()) as any,
+    expandSelection: spy(Promise.resolve(["437"])) as any,
+  });
+  await assert.rejects(
+    () => dispatch(campaignCmd({ positional: ["437"] }), deps),
+    (err: Error) => err instanceof Refusal && /wave 1/.test(err.message) && /red/.test(err.message) && /vetinari redrive/.test(err.message),
+  );
+  assert.equal((deps.archiveLeftoverRun as any).calls.length, 0, "the red-base park is not archived");
+  assert.equal((deps.runCampaignPlan as any).calls.length, 0, "refused before planning");
+  assert.equal((deps.campaign as any).calls.length, 0);
+});
+
+test("dispatch campaign --override also refuses over a red-base park (#405)", async () => {
+  const { deps } = makeDeps({
+    readEventLog: spy(redBaseParkedCampaign()) as any,
+    expandSelection: spy(Promise.resolve(["437"])) as any,
+  });
+  await assert.rejects(() => dispatch(campaignCmd({ positional: ["437"], override: true }), deps), Refusal);
+  assert.equal((deps.archiveLeftoverRun as any).calls.length, 0);
+  assert.equal((deps.campaign as any).calls.length, 0);
+});
+
+test("dispatch campaign --supersede archives a red-base park and runs fresh (#405)", async () => {
+  const { deps } = makeDeps({
+    readEventLog: spy(redBaseParkedCampaign()) as any,
+    expandSelection: spy(Promise.resolve(["437"])) as any,
+    runCampaignPlan: spy(Promise.resolve({ waves: [["437"]], waveArgs: '"437"', report: "the plan", alreadyMerged: [] })) as any,
+  });
+  await dispatch(campaignCmd({ positional: ["437"], supersede: true }), deps);
+  assert.equal((deps.archiveLeftoverRun as any).calls.length, 1);
+  assert.equal((deps.campaign as any).calls.length, 1);
+});
+
+test("dispatch campaign --dry-run over a red-base park neither refuses nor archives (#405)", async () => {
+  const { deps } = makeDeps({
+    readEventLog: spy(redBaseParkedCampaign()) as any,
+    expandSelection: spy(Promise.resolve(["437"])) as any,
+    runCampaignPlan: spy(Promise.resolve({ waves: [["437"]], waveArgs: '"437"', report: "the plan", alreadyMerged: [] })) as any,
+  });
+  await dispatch(campaignCmd({ positional: ["437"], dryRun: true }), deps);
+  assert.equal((deps.archiveLeftoverRun as any).calls.length, 0);
+  assert.equal((deps.runCampaignPlan as any).calls.length, 1);
+});
+
+for (const [kind, log] of [
+  [
+    "failed",
+    [
+      { event: "campaign-start", waves: [["436"]] },
+      { event: "wave-start", index: 0, tasks: ["436"] },
+      { event: "failed", taskId: "436" },
+      { event: "campaign-failed", detail: "436 failed" },
+    ],
+  ],
+  [
+    "question-parked",
+    [
+      { event: "campaign-start", waves: [["436"]] },
+      { event: "wave-start", index: 0, tasks: ["436"] },
+      { event: "parked", taskId: "436", reason: "question" },
+      { event: "campaign-parked", index: 0, reason: "question", detail: "parked: 436" },
+    ],
+  ],
+] as const) {
+  test(`dispatch campaign supersedes a ${kind} leftover as before — no refusal (#405)`, async () => {
+    const { deps } = makeDeps({
+      readEventLog: spy(log) as any,
+      expandSelection: spy(Promise.resolve(["437"])) as any,
+      runCampaignPlan: spy(Promise.resolve({ waves: [["437"]], waveArgs: '"437"', report: "the plan", alreadyMerged: [] })) as any,
+    });
+    await dispatch(campaignCmd({ positional: ["437"] }), deps);
+    assert.equal((deps.archiveLeftoverRun as any).calls.length, 1);
+    assert.equal((deps.campaign as any).calls.length, 1);
+  });
+}
+
+test("dispatch campaign hands the planner a merge-commit lookup over findMergeCommit and the --include-merged flag (#405)", async () => {
+  const { deps } = makeDeps({
+    expandSelection: spy(Promise.resolve(["611", "640"])) as any,
+    findMergeCommit: spy("abc1234") as any,
+    runCampaignPlan: spy(Promise.resolve({ waves: [["640"]], waveArgs: '"640"', report: "the plan", alreadyMerged: [] })) as any,
+  });
+  await dispatch(campaignCmd({ positional: ["611", "640"], includeMerged: true }), deps);
+  const [, , opts, runDeps] = (deps.runCampaignPlan as any).calls[0];
+  assert.equal(opts.includeMerged, true);
+  assert.equal(runDeps.mergeCommitOf("611"), "abc1234");
+  assert.deepEqual((deps.findMergeCommit as any).calls, [[deps.cfg, "611"]]);
+});
+
+test("dispatch campaign with nothing left after the already-merged skip blames no unreachable ticket (#405)", async () => {
+  const { deps, logged } = makeDeps({
+    expandSelection: spy(Promise.resolve(["611"])) as any,
+    runCampaignPlan: spy(
+      Promise.resolve({ waves: [], waveArgs: "", report: "#611 looks already merged", alreadyMerged: [{ id: "611", sha: "abc" }] }),
+    ) as any,
+  });
+  await dispatch(campaignCmd({ positional: ["611"] }), deps);
+  await dispatch(campaignCmd({ positional: ["611"], dryRun: true }), deps);
+  assert.ok(!logged.some((l) => /unreachable/.test(l)), logged.join("\n"));
+  assert.ok(logged.includes("#611 looks already merged"));
+  assert.equal((deps.campaign as any).calls.length, 0);
 });

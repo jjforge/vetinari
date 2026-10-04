@@ -11,6 +11,7 @@ import {
   computeTidy,
   describeBranchPurge,
   describeRegistryDedup,
+  findMergeCommit,
   integrateGreens,
   purgeBranches,
   scanTidy,
@@ -887,4 +888,49 @@ test("purgeBranches on a member with no branch or worktree is a clean no-op, not
 
   assert.doesNotThrow(() => purgeBranches(target, ["999"]));
   assert.ok(git(["branch", "--list", "agent/701"]).length > 0); // untouched member survives
+});
+
+test("findMergeCommit finds a campaign merge commit on the base even after its branch is deleted (#405)", () => {
+  const { dir, git } = repoWithOneBankedGreen();
+  git(["branch", "-D", "agent/A"]); // the green path reclaims the branch after merging
+  git(["checkout", "-q", "agent/B"]); // the lookup reads the base ref, not HEAD
+  const prevCwd = process.cwd();
+  process.chdir(dir);
+  try {
+    const sha = findMergeCommit({ baseBranch: "main", branchPrefix: "agent/" }, "A");
+    assert.ok(sha, "the merge commit is found");
+    assert.equal(git(["rev-parse", sha!]), git(["rev-parse", "main"]));
+    assert.equal(findMergeCommit({ baseBranch: "main", branchPrefix: "agent/" }, "B"), undefined);
+  } finally {
+    process.chdir(prevCwd);
+  }
+});
+
+test("findMergeCommit matches the merge subject exactly — agent/40 is not agent/405 (#405)", () => {
+  const { dir, git } = repoWithOneBankedGreen();
+  git(["checkout", "-q", "-b", "agent/405"]);
+  writeFileSync(join(dir, "c.txt"), "405\n");
+  git(["add", "-A"]);
+  git(["commit", "-qm", "405"]);
+  git(["checkout", "-q", "main"]);
+  git(["merge", "--no-ff", "agent/405", "-m", "campaign: merge agent/405"]);
+  const prevCwd = process.cwd();
+  process.chdir(dir);
+  try {
+    assert.equal(findMergeCommit({ baseBranch: "main", branchPrefix: "agent/" }, "40"), undefined);
+    assert.ok(findMergeCommit({ baseBranch: "main", branchPrefix: "agent/" }, "405"));
+  } finally {
+    process.chdir(prevCwd);
+  }
+});
+
+test("findMergeCommit returns undefined when git fails, so an unreadable repo skips nothing (#405)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-nogit-"));
+  const prevCwd = process.cwd();
+  process.chdir(dir);
+  try {
+    assert.equal(findMergeCommit({ baseBranch: "main", branchPrefix: "agent/" }, "A"), undefined);
+  } finally {
+    process.chdir(prevCwd);
+  }
 });

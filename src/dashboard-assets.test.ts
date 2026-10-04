@@ -348,3 +348,10 @@ test("openIssue clears the reply draft only when the sheet binds a different iss
     /const closeSheet = \(\) => \{ issueDetail\.classList\.remove\("show"\); issueDetail\.hidden = true; \};/,
   );
 });
+
+test("the issue-sheet FIX_FORWARD map carries a `stopped` entry — a signalled run is redriven, not answered", () => {
+  // A stopped park is redrive-only (dashboard-visual-state issueMoves), so the sheet shows a
+  // fix-forward notice rather than a reply box. The notice text comes from FIX_FORWARD[stopped].
+  assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /stopped:/);
+  assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /vetinari run/);
+});

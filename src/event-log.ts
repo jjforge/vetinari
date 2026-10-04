@@ -88,8 +88,8 @@ export interface MergedEvent extends BaseEvent {
 
 /** `parked` — a slot parked its task for a human (design §2.1, §2.3): the task, the one-enum
  * `reason`, and `detail` carrying the specifics (which `stalled`, the conflict output, the gate
- * tail). Written by the run loop (`question`/`stalled`) and the integrator (`conflict`) (state.ts,
- * merge.ts). */
+ * tail, or the stop signal name). Written by the run loop (`question`/`stalled`/`stopped`) and the
+ * integrator (`conflict`) (state.ts, merge.ts). */
 export interface ParkedEvent extends BaseEvent {
   event: "parked";
   taskId: string;

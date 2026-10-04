@@ -520,3 +520,22 @@ test("assertProjectQualifier refuses when the repo identity cannot verify the qu
     /cannot derive this project's repo to verify the "jjforge" qualifier/,
   );
 });
+
+// A project config written as the `init` template writes it: importing from
+// "vetinari". A scratch() dir sits outside this checkout, so only the CLI's
+// resolve hook — not package self-reference or a node_modules link — can find it.
+const VETINARI_CONFIG_BODY = `import { defineConfig } from "vetinari";
+export default defineConfig({
+  project: "demo",
+  image: "img",
+  baseBranch: "main",
+  gates: [{ cmd: "true" }],
+  fetchTask: (id) => id,
+});
+`;
+
+test('loadConfig resolves a config\'s import from "vetinari" with no node_modules in the project', async () => {
+  const cfg = await loadConfig(writeConfig(scratch(), "vetinari/config.mts", VETINARI_CONFIG_BODY));
+
+  assert.equal(cfg.project, "demo");
+});

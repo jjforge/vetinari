@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
+import { registerHooks } from "node:module";
 import type { FindingReporter } from "./findings.ts";
 import type { FileSetOf } from "./fileset.ts";
 import { loggerForRun, type Logger } from "./log.ts";
@@ -642,6 +643,29 @@ export function resolveConfigPath(baseDir: string): ResolvedConfigPath | undefin
   return undefined;
 }
 
+// The running install's package.json: resolving from here makes Node apply the
+// install's own `exports` map by package self-reference.
+const VETINARI_PACKAGE_URL = new URL("../package.json", import.meta.url).href;
+let vetinariResolveRegistered = false;
+
+/**
+ * Register (once per process) a resolve hook that maps `vetinari` and every
+ * `vetinari/<subpath>` to the running install, so a project's config imports
+ * the package with no install of its own or node_modules link. It always wins
+ * over a project's own node_modules/vetinari. True only on the registering call.
+ */
+export function registerVetinariResolve(): boolean {
+  if (vetinariResolveRegistered) return false;
+  registerHooks({
+    resolve(specifier, context, nextResolve) {
+      if (specifier !== "vetinari" && !specifier.startsWith("vetinari/")) return nextResolve(specifier, context);
+      return nextResolve(specifier, { ...context, parentURL: VETINARI_PACKAGE_URL });
+    },
+  });
+  vetinariResolveRegistered = true;
+  return true;
+}
+
 /** Load the consuming project's config from cwd (or an explicit path). */
 export async function loadConfig(explicitPath?: string): Promise<ResolvedConfig> {
   let path = explicitPath;
@@ -660,6 +684,7 @@ export async function loadConfig(explicitPath?: string): Promise<ResolvedConfig>
       );
     }
   }
+  registerVetinariResolve();
   const mod = await import(resolve(path));
   const c: VetinariConfig = mod.default ?? mod.config;
   if (!c) throw new Refusal(`${path} has no default export`);

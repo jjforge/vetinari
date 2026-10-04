@@ -18,10 +18,13 @@ and each entry opens with a tag saying who it reaches:
 `**Breaking changes:**` sorts first in a milestone and names the contract it broke.
 Within a milestone each bold section label appears at most once.
 
-### Log-review skill — October 4, 2026
+### Log-review skill and a code formatter — October 4, 2026
 
 **New features:**
 - [ops] `/review-logs` operator skill: reads the project's own `.vetinari.local/logs/` (`digest.sh` boils event, activity and gate logs down to per-task outcomes, turns, tool calls, minutes, failing gates and the files agents touch most) and hunts for where agents struggled — stops, recurring red gates, hotspot files, churn, orientation every agent repeats, brief and doc faults agents report in passing — then checks each against today's code and the tracker and reports ranked, evidence-backed changes to the project. It files only the ones you choose (#412–#418 came from its first run).
+
+**Improvements:**
+- [internal] The codebase is formatted with Prettier (pinned dev dependency, `.prettierrc.json` with a 140-column width, the closest to the existing style): `npm run format` writes, `npm run format:check` checks, and `CLAUDE.md` names the command, so campaign agents stop hunting for a formatter that wasn't there. The whole tree was reformatted once (#414).
 
 ### Collected changes — October 4, 2026
 

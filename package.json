@@ -17,7 +17,9 @@
     "vetinari": "tsx ./src/cli.mts",
     "typecheck": "tsc --noEmit",
     "gen-reference": "tsx ./scripts/gen-reference.ts",
-    "check-contract": "tsx ./src/check-contract.mts"
+    "check-contract": "tsx ./src/check-contract.mts",
+    "format": "prettier --write \"**/*.{ts,mts,js,mjs}\"",
+    "format:check": "prettier --check \"**/*.{ts,mts,js,mjs}\""
   },
   "dependencies": {
     "@ai-hero/sandcastle": "git+https://github.com/zachthieme/sandcastle.git#76c8459e01ab5dcda750c98459e3d010bdcc0076",
@@ -25,6 +27,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "prettier": "3.9.9",
     "typescript": "^5.9.0"
   }
 }

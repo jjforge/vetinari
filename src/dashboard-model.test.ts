@@ -3502,3 +3502,43 @@ test("issuePhase re-establishes a phase after a park is re-admitted (design §5 
   ];
   assert.deepEqual(issuePhase(events, "301"), { label: "coding", steady: false });
 });
+
+test("buildStatus folds a campaign stopped between waves to parked{stopped} on the next wave — not idle, not crashed (#403)", () => {
+  const dir = join(tmpdir(), `vetinari-status-stopped-${Date.now()}`);
+  mkdirSync(join(dir, "logs"), { recursive: true });
+  mkdirSync(join(dir, "parked"), { recursive: true });
+  // Wave 0 closed; a graceful stop parked the campaign before wave 1 started.
+  const events = [
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["611"], ["701"]], slots: 1 }),
+    event("wave-start", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["611"] }),
+    event("green", { ts: "2025-01-01T00:02:00.000Z", taskId: "611", branch: "agent/611", commits: [] }),
+    event("merged", { ts: "2025-01-01T00:03:00.000Z", taskId: "611", branch: "agent/611" }),
+    event("stop-requested", { ts: "2025-01-01T00:03:10.000Z", index: 0 }),
+    event("wave-done", { ts: "2025-01-01T00:03:30.000Z", index: 0, merged: ["611"] }),
+    event("campaign-parked", { ts: "2025-01-01T00:04:00.000Z", index: 1, reason: "stopped", detail: "stopped by an operator" }),
+  ];
+  writeJsonl(join(dir, "logs", "orchestrator.jsonl"), events);
+
+  for (const status of [buildStatus(cfgFor(dir)), buildStatus(cfgFor(dir), { alive: false })]) {
+    assert.deepEqual(
+      status.waves.map((w) => [w.status, w.reason]),
+      [
+        ["completed", undefined],
+        ["parked", "stopped"],
+      ],
+    );
+    assert.equal(campaignState(status.waves.map((w) => w.status)), "parked");
+    // No crash fold: the unstarted member stays unstarted under a dead probe.
+    assert.equal(status.waves[1].issues[0].status, "unstarted");
+  }
+  assert.equal(campaignSettled(events as OrchestratorEvent[]), false);
+
+  // The redrive's wave-start for wave 1 clears the hold.
+  writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
+    ...events,
+    event("wave-start", { ts: "2025-01-01T00:05:00.000Z", index: 1, tasks: ["701"] }),
+  ]);
+  const resumed = buildStatus(cfgFor(dir));
+  assert.equal(resumed.waves[1].status, "unstarted");
+  assert.equal(resumed.waves[1].reason, undefined);
+});

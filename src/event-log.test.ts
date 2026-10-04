@@ -69,6 +69,8 @@ const describe = (e: OrchestratorEvent): string => {
       return `redrive from ${e.fromWave}`;
     case "grace-wait":
       return `grace-wait ${e.seconds}s on ${e.tasks.join(",")}`;
+    case "stop-requested":
+      return `stop-requested at wave ${e.index}`;
     case "gate":
       return `gate ${e.cmds.join(",")} skip ${e.skipped}`;
     case "gate-check":

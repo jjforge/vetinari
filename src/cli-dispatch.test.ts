@@ -80,6 +80,8 @@ function makeDeps(overrides: Partial<DispatchDeps> = {}) {
     tgSend: spy(Promise.resolve(1)) as unknown as DispatchDeps["tgSend"],
     runTgConnect: spy(Promise.resolve({ ok: true, written: true })) as unknown as DispatchDeps["runTgConnect"],
     findMergeCommit: spy(undefined) as unknown as DispatchDeps["findMergeCommit"],
+    liveCampaignPid: spy(undefined) as unknown as DispatchDeps["liveCampaignPid"],
+    signalProcess: spy() as unknown as DispatchDeps["signalProcess"],
     ...overrides,
   };
   return { deps, logged, errored, exitCodes, cfg };
@@ -1522,4 +1524,81 @@ test("dispatch campaign with nothing left after the already-merged skip blames n
   assert.ok(!logged.some((l) => /unreachable/.test(l)), logged.join("\n"));
   assert.ok(logged.includes("#611 looks already merged"));
   assert.equal((deps.campaign as any).calls.length, 0);
+});
+
+test("parseArgs maps `stop` to a graceful stop and `stop --now` to an immediate one (#403)", () => {
+  assert.deepEqual(parseArgs(["stop"]), { kind: "stop", now: false });
+  assert.deepEqual(parseArgs(["stop", "--now"]), { kind: "stop", now: true });
+});
+
+test("dispatch stop refuses when no campaign is running for the project (#403)", async () => {
+  const { deps } = makeDeps({ liveCampaignPid: spy(undefined) as any });
+  await assert.rejects(
+    dispatch({ kind: "stop", now: false }, deps),
+    (err: Error) => err instanceof Refusal && err.message === "no campaign running for demo",
+  );
+  assert.equal((deps.signalProcess as any).calls.length, 0);
+});
+
+test("dispatch stop sends SIGINT to the live campaign; --now sends SIGTERM (#403)", async () => {
+  const graceful = makeDeps({ liveCampaignPid: spy(4242) as any });
+  await dispatch({ kind: "stop", now: false }, graceful.deps);
+  assert.deepEqual((graceful.deps.signalProcess as any).calls, [[4242, "SIGINT"]]);
+  assert.match(graceful.logged.join("\n"), /after the wave in flight/);
+  assert.match(graceful.logged.join("\n"), /vetinari stop --now/);
+
+  const now = makeDeps({ liveCampaignPid: spy(4242) as any });
+  await dispatch({ kind: "stop", now: true }, now.deps);
+  assert.deepEqual((now.deps.signalProcess as any).calls, [[4242, "SIGTERM"]]);
+  assert.match(now.logged.join("\n"), /stopping now/i);
+});
+
+// A campaign with a graceful stop already requested: `stop-requested` after the latest
+// `campaign-start`, and no stop marker after it.
+const stopPendingLog = () => [
+  { event: "campaign-start", waves: [["436"], ["437"]] },
+  { event: "wave-start", index: 0, tasks: ["436"] },
+  { event: "stop-requested", index: 0 },
+];
+
+test("dispatch stop with a stop already pending signals nothing; --now still sends SIGTERM (#403)", async () => {
+  const graceful = makeDeps({ liveCampaignPid: spy(4242) as any, readEventLog: spy(stopPendingLog()) as any });
+  await dispatch({ kind: "stop", now: false }, graceful.deps);
+  assert.equal((graceful.deps.signalProcess as any).calls.length, 0);
+  assert.deepEqual(graceful.logged, ["a stop is already pending for demo — `vetinari stop --now` to stop immediately"]);
+
+  const now = makeDeps({ liveCampaignPid: spy(4242) as any, readEventLog: spy(stopPendingLog()) as any });
+  await dispatch({ kind: "stop", now: true }, now.deps);
+  assert.deepEqual((now.deps.signalProcess as any).calls, [[4242, "SIGTERM"]]);
+});
+
+test("dispatch stop ignores a stop-requested that an earlier campaign's stop marker already settled (#403)", async () => {
+  const log = [
+    { event: "campaign-start", waves: [["436"], ["437"]] },
+    { event: "stop-requested", index: 0 },
+    { event: "campaign-parked", index: 1, reason: "stopped" },
+    // a redrive of the same campaign is running again — no new stop pending
+    { event: "wave-start", index: 1, tasks: ["437"] },
+  ];
+  const { deps } = makeDeps({ liveCampaignPid: spy(4242) as any, readEventLog: spy(log) as any });
+  await dispatch({ kind: "stop", now: false }, deps);
+  assert.deepEqual((deps.signalProcess as any).calls, [[4242, "SIGINT"]]);
+});
+
+test("dispatch parked over a campaign stopped between waves names `vetinari redrive`, not `vetinari run` (#403)", async () => {
+  const stopped = [
+    { event: "campaign-start", waves: [["436"], ["437"]] },
+    { event: "wave-start", index: 0, tasks: ["436"] },
+    { event: "green", taskId: "436" },
+    { event: "merged", taskId: "436" },
+    { event: "wave-done", index: 0, merged: ["436"] },
+    { event: "stop-requested", index: 0 },
+    { event: "campaign-parked", index: 1, reason: "stopped", detail: "stopped by an operator" },
+  ];
+  const { deps, logged } = makeDeps({ readEventLog: spy(stopped) as any });
+  await dispatch({ kind: "parked" }, deps);
+  const out = logged.join("\n");
+  assert.match(out, /campaign parked \(stopped\)/);
+  assert.match(out, /vetinari redrive/);
+  assert.doesNotMatch(out, /vetinari run/);
 });

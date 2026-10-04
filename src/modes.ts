@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { resolve } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import type { CampaignDoneEvent, CampaignStartEvent, WaveDoneEvent, WaveStartEvent } from "./event-log.ts";
@@ -94,14 +94,51 @@ export function childSpawnEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 }
 
 /**
+ * The spawn options a child `run` gets: the {@link childSpawnEnv} env plus `extraEnv`, and its own
+ * process group (`detached: true`) so a Ctrl-C or a terminal hang-up reaches only the campaign,
+ * which alone decides when its children stop (#403). The child is never `unref()`ed — the campaign
+ * still waits for its exit.
+ */
+export function childSpawnOptions(env: NodeJS.ProcessEnv, extraEnv?: NodeJS.ProcessEnv): SpawnOptions {
+  return {
+    stdio: ["ignore", "inherit", "inherit"],
+    env: { ...childSpawnEnv(env), ...extraEnv },
+    detached: true,
+  };
+}
+
+/** The live child `run`s this process spawned — added on spawn, removed on exit — so a stop can
+ * signal them (`signalTrackedRuns`). */
+const liveRuns = new Set<ChildProcess>();
+
+/**
  * Re-invoke this CLI as a child, preserving however it was launched (the tsx
  * loader flags live in execArgv). Spawning a bare `node` would fail on TS.
  */
-const selfSpawn = (args: string[], extraEnv?: NodeJS.ProcessEnv) =>
-  spawn(process.execPath, [...process.execArgv, process.argv[1], ...args], {
-    stdio: ["ignore", "inherit", "inherit"],
-    env: { ...childSpawnEnv(process.env), ...extraEnv },
-  });
+const selfSpawn = (args: string[], extraEnv?: NodeJS.ProcessEnv) => {
+  const child = spawn(process.execPath, [...process.execArgv, process.argv[1], ...args], childSpawnOptions(process.env, extraEnv));
+  liveRuns.add(child);
+  child.on("exit", () => liveRuns.delete(child));
+  return child;
+};
+
+/** Signal every live child `run` — the production `signalRuns` a `--now` stop uses (#403). */
+const signalTrackedRuns = (signal: NodeJS.Signals): void => {
+  for (const child of liveRuns) child.kill(signal);
+};
+
+/** The signals a campaign takes as a stop request (#403): SIGINT (Ctrl-C, `vetinari stop`), SIGTERM
+ * (`vetinari stop --now`) and SIGHUP (the terminal closed). */
+export type StopSignal = "SIGINT" | "SIGTERM" | "SIGHUP";
+
+/** The production `onStop`: listen on `process` for every stop signal; the return removes them. */
+const onProcessStop = (cb: (signal: StopSignal) => void): (() => void) => {
+  const signals: StopSignal[] = ["SIGINT", "SIGTERM", "SIGHUP"];
+  for (const signal of signals) process.on(signal, cb);
+  return () => {
+    for (const signal of signals) process.off(signal, cb);
+  };
+};
 
 /**
  * How `queue` runs one task: spawn a child `run` and resolve to its exit code
@@ -248,7 +285,8 @@ export function warnIfTelegramUnconfigured(cfg: Pick<ResolvedConfig, "project" |
  * host container ceiling (ADR 0011) — there is no per-run cap, so a lone project
  * fills the whole ceiling. A park frees its slot immediately. Returns the per-task
  * outcome map so a caller (campaign) can act on the greens without re-deriving
- * them from the log.
+ * them from the log. Once `halted()` (a `--now` stop, #403) it spawns and re-admits nothing more:
+ * the drain ends when the runs in flight exit, and a member never spawned gets no outcome.
  */
 export async function queue(
   cfg: ResolvedConfig,
@@ -258,6 +296,7 @@ export async function queue(
   spawnRun: RunSpawner = selfSpawnRun,
   reporter: Reporter = envReporter(),
   resumeSessions: Record<string, string> = {},
+  halted: () => boolean = () => false,
 ): Promise<Record<string, string>> {
   const pending = [...taskIds];
   const outcomes: Record<string, string> = {};
@@ -308,7 +347,9 @@ export async function queue(
         }
       };
       const fill = () => {
-        readmit();
+        // A `--now` stop spawns nothing more: no re-admit, and the still-queued members stay unspawned.
+        if (halted()) pending.length = 0;
+        else readmit();
         // Refresh this project's declared demand before consulting the lease: the
         // max-min fair share caps a project at what it wants (held + still-queued),
         // so a wave that has drained must release its claim on the surplus or it
@@ -407,6 +448,25 @@ export function campaignParkedNotice(project: string, waveNumber: number, merged
     signal: `Base gated red, no attributable culprit — greens (${merged.join(", ") || "none"}) kept on ${baseBranch}, campaign paused.`,
     recover: "`vetinari redrive` (after fix-forward) or `prune <issue>`",
     detail,
+    category: "failure",
+    event: "campaign-parked",
+  });
+}
+
+/**
+ * The operator-facing notice an operator stop enqueues (#403): `vetinari stop` or a Ctrl-C parked the
+ * campaign at a wave boundary (or, with `--now`, mid-wave with its runs stopped and their work kept).
+ * The greens already merged stay on the base and a plain `redrive` resumes it. The same category as
+ * every other campaign park. Pure, so the wording and routing are checkable without a campaign.
+ */
+export function campaignStoppedNotice(project: string, waveNumber: number, merged: string[], baseBranch: string): Notice {
+  return notice({
+    emoji: "🅿️",
+    project,
+    state: "PARKED",
+    context: `wave ${waveNumber}`,
+    signal: `Stopped by an operator — greens (${merged.join(", ") || "none"}) kept on ${baseBranch}, campaign paused.`,
+    recover: "`vetinari redrive`",
     category: "failure",
     event: "campaign-parked",
   });
@@ -604,6 +664,12 @@ export interface CampaignDeps {
    * crashed member with banked commits (resume its session) from one that never started (fresh).
    * Optional so a partial test-`CampaignDeps` may omit it; absent falls back to the real git read. */
   branchHasCommits?: (cfg: ResolvedConfig, taskId: string) => boolean;
+  /** Subscribe to stop requests (#403); the return unsubscribes. Optional so a partial test-`CampaignDeps`
+   * may omit it; absent falls back to listening on `process` for SIGINT/SIGTERM/SIGHUP. */
+  onStop?: (cb: (signal: StopSignal) => void) => () => void;
+  /** Signal every child `run` in flight — a `--now` stop sends SIGTERM (#403). Optional like `onStop`;
+   * absent falls back to the tracked child processes. */
+  signalRuns?: (signal: NodeJS.Signals) => void;
 }
 const defaultCampaignDeps: CampaignDeps = {
   spawnRun: selfSpawnRun,
@@ -612,6 +678,8 @@ const defaultCampaignDeps: CampaignDeps = {
   currentBranch,
   grace: graceWaitForAnswer,
   branchHasCommits,
+  onStop: onProcessStop,
+  signalRuns: signalTrackedRuns,
 };
 
 /**
@@ -740,21 +808,45 @@ export async function campaign(
   // `fairShare` and other projects keep every slot between waves. The `try/finally` below drops it
   // on every exit — done, parked, failed, the nothing-to-run redrive, and a thrown Refusal/error.
   registerProject(host.configDir, cfg.project, host.weight, "campaign", 0);
+  // The terminal view (design §11): human-readable plan/progress/stop lines, or nothing
+  // under `--json` (where the logger streams raw events instead). Threaded into every
+  // `queue` call so the per-issue outcomes report the same way.
+  const reporter = envReporter();
+  let index = 0;
+
+  // The stop handler (#403), installed for the campaign's whole life and removed on every exit. A
+  // first SIGINT asks for a graceful stop: the wave in flight drains and resolves as normal, then the
+  // campaign parks `stopped` before the next `wave-start`. A SIGINT while one is pending, a SIGTERM,
+  // or a SIGHUP (the terminal closed) asks for `--now`: if a wave is draining its runs are signalled
+  // (each parks itself `stopped`) and the wave skips integration; outside a drain it can only wait for
+  // what is running to finish, so it stops like a graceful one.
+  let stop: { mode: "graceful" | "now"; signal: StopSignal } | undefined;
+  let draining = false;
+  const signalRuns = deps.signalRuns ?? signalTrackedRuns;
+  const halted = () => stop?.mode === "now";
+  const onStopRequest = (signal: StopSignal) => {
+    if (stop?.mode === "now") return;
+    const now = signal !== "SIGINT" || stop !== undefined;
+    if (!stop) cfg.log.log("stop-requested", { index });
+    if (now && draining) {
+      stop = { mode: "now", signal };
+      reporter.line(`stopping now — signalling the runs in wave ${index + 1}; their work is kept`);
+      signalRuns("SIGTERM");
+    } else if (!stop) {
+      stop = { mode: "graceful", signal };
+      reporter.line(`stopping after wave ${index + 1} — \`vetinari stop --now\` to stop immediately`);
+    }
+  };
+  const unsubscribeStop = (deps.onStop ?? onProcessStop)(onStopRequest);
   try {
     // Surface an un-notifiable project once, at the start of the whole campaign — the
     // per-wave `queue` calls below pass `titles` and so stay silent (no per-wave repeat).
     warnIfTelegramUnconfigured(cfg);
 
-    // The terminal view (design §11): human-readable plan/progress/stop lines, or nothing
-    // under `--json` (where the logger streams raw events instead). Threaded into every
-    // `queue` call so the per-issue outcomes report the same way.
-    const reporter = envReporter();
-
     // Where the wave loop starts, the id→title map the per-wave `queue` calls carry, and the run's
     // human name — stamped onto every wave event and operator note so a resumed or mid-campaign run
     // never renders nameless (#174). Under resume the `--name` param is ignored, so the name is read
     // back from the log's `campaign-start` alongside the plan; otherwise it is the supplied param.
-    let index = 0;
     let titles: Record<string, string>;
     let campaignName: string | undefined;
     // Set to the resume wave's index while a `redrive` event is owed: it is logged once that wave
@@ -856,6 +948,19 @@ export async function campaign(
       if (index >= waves.length) break;
       const tasks = waves[index];
       const total = waves.length;
+      // A stop requested outside a drain, or a graceful one, parks here — before the next `wave-start`
+      // — once whatever was running has finished (#403). The last wave's close already broke out above
+      // to `campaign-done`. Merged is empty: this wave never started, and the earlier ones closed.
+      if (stop) {
+        cfg.log.log("campaign-parked", {
+          index,
+          reason: "stopped",
+          detail: `stopped by an operator (${stop.signal}) before wave ${index + 1}`,
+        });
+        enqueueOutbound(cfg, campaignStoppedNotice(cfg.project, index + 1, [], cfg.baseBranch));
+        reporter.line(formatStop({ kind: "stopped", index, total, merged: [] }));
+        return "parked";
+      }
       const waveEvent: Omit<WaveStartEvent, "ts" | "event"> = { index, tasks };
       cfg.log.log("wave-start", waveEvent);
       enqueueOutbound(
@@ -898,22 +1003,35 @@ export async function campaign(
           if (!sid) return undefined;
           return branchHasCommitsFor(cfg, id) ? sid : undefined;
         };
+        const stoppedIds = new Set(
+          listParked(cfg)
+            .filter((r) => r.reason === "stopped")
+            .map((r) => normalize(r.taskId)),
+        );
         const { toRun, pre, resume } = reconcileResumeWave(
           tasks,
           reduced.outcomes,
           // A park holds the wave only while its record is present AND un-answered; an answered
           // record re-runs (the child consumes the answer), and a recordless park (a crash) re-runs
-          // too — design §5 step 3, §7.
-          (id) => hasParked(cfg, id) && !isAnswered(cfg, id),
+          // too — design §5 step 3, §7. A `stopped` record (an operator stop, #403) never holds the
+          // wave: the member re-runs, and the child consumes the record, resuming when it can (#431).
+          (id) => hasParked(cfg, id) && !isAnswered(cfg, id) && !stoppedIds.has(normalize(id)),
           !!opts.override,
           reduced.pendingGreen,
           resumeSessionFor,
         );
-        const ran = toRun.length ? await queue(cfg, toRun, host, titles, deps.spawnRun, reporter, resume) : {};
+        draining = true;
+        const ran = toRun.length ? await queue(cfg, toRun, host, titles, deps.spawnRun, reporter, resume, halted) : {};
+        draining = false;
         outcomes = { ...ran, ...pre };
       } else {
-        outcomes = await queue(cfg, tasks, host, titles, deps.spawnRun, reporter);
+        draining = true;
+        outcomes = await queue(cfg, tasks, host, titles, deps.spawnRun, reporter, {}, halted);
+        draining = false;
       }
+      // A `--now` stop landed during this drain: its runs were signalled and have exited. The wave
+      // skips the grace wait, integration, the changelog fold and the labels (#403).
+      const stoppedNow = halted();
 
       // Grace window at the wave boundary (design §5 step 5): a member parked as question/stalled
       // may still be answered. Hold the drained wave open up to `parkGraceSeconds`; an answer that
@@ -922,21 +1040,30 @@ export async function campaign(
       // parks are integration-time states, decided after this point, so they never wait here.
       const graceSeconds = cfg.parkGraceSeconds ?? 0;
       const parkedNow = tasks.filter((t) => outcomes[t] === "parked");
-      if (parkedNow.length && graceSeconds > 0) {
+      // A pending stop skips the wait (#403): the campaign is going to park anyway.
+      if (parkedNow.length && graceSeconds > 0 && !stop) {
         cfg.log.log("grace-wait", { seconds: graceSeconds, tasks: parkedNow });
         await deps.grace(cfg, parkedNow, graceSeconds);
         const revived = parkedNow.filter((t) => isAnswered(cfg, t));
-        if (revived.length) outcomes = { ...outcomes, ...(await queue(cfg, revived, host, titles, deps.spawnRun, reporter)) };
+        // A stop requested during the wait re-admits nothing: the campaign parks with the member held.
+        if (revived.length && !stop) outcomes = { ...outcomes, ...(await queue(cfg, revived, host, titles, deps.spawnRun, reporter)) };
       }
 
       const greens = tasks.filter((t) => outcomes[t] === "green");
 
-      const { merged, alreadyMerged = [], conflictParked, parked } = await deps.integrate(cfg, greens, undefined, index, { regate });
+      const {
+        merged,
+        alreadyMerged = [],
+        conflictParked,
+        parked,
+      } = stoppedNow
+        ? { merged: [], conflictParked: [], parked: undefined }
+        : await deps.integrate(cfg, greens, undefined, index, { regate });
 
       // The reconciled resume wave has now integrated its banked greens — log the `redrive`
       // stop-to-continue event with what it landed (freshly merged) vs skipped (already on the
       // base), design §2.1, §7. Logged once, for the first wave a redrive re-enters.
-      if (pendingRedriveFromWave === index) {
+      if (pendingRedriveFromWave === index && !stoppedNow) {
         cfg.log.log("redrive", { fromWave: index, landed: merged.length, skipped: alreadyMerged.length });
         pendingRedriveFromWave = undefined;
       }
@@ -945,7 +1072,7 @@ export async function campaign(
       // merged (never a rollback). A red base verifies nothing, so the green-path steps below (fold
       // the changelog, advance labels) are skipped while it is parked.
       const baseRed = !!parked;
-      if (!baseRed) {
+      if (!baseRed && !stoppedNow) {
         // Green path only: fold this wave's merged `changelog.d/` fragments into CHANGELOG.md and
         // commit on the base in one commit (issue #123). Agents write per-task fragments instead of
         // editing the shared changelog, so co-wave branches never conflict on it.
@@ -985,6 +1112,20 @@ export async function campaign(
         cfg.log.log("campaign-parked", { index, reason: "red-base", detail: parked!.detail });
         enqueueOutbound(cfg, campaignParkedNotice(cfg.project, index + 1, merged, cfg.baseBranch, parked!.detail));
         reporter.line(formatStop({ kind: "red-base", index, total, merged }));
+        return "parked";
+      }
+
+      // (2b) A `--now` stop (#403): the runs it signalled parked themselves `stopped`, keeping their
+      // work on their branches. Failure (1) still outranked it; otherwise the wave parks `stopped`.
+      if (stoppedNow) {
+        const interrupted = tasks.filter((t) => outcomes[t] !== "green");
+        cfg.log.log("campaign-parked", {
+          index,
+          reason: "stopped",
+          detail: `stopped by an operator (${stop!.signal}) — in flight: ${interrupted.join(", ") || "none"}`,
+        });
+        enqueueOutbound(cfg, campaignStoppedNotice(cfg.project, index + 1, merged, cfg.baseBranch));
+        reporter.line(formatStop({ kind: "stopped", index, total, merged }));
         return "parked";
       }
 
@@ -1081,6 +1222,7 @@ export async function campaign(
     reporter.line(formatComplete(index, cfg.baseBranch, campaignName));
     return "done";
   } finally {
+    unsubscribeStop();
     // Drop the whole-life lease on every exit — a clean return or a thrown Refusal/error (#424).
     deregisterProject(host.configDir);
   }

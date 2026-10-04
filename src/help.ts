@@ -42,7 +42,12 @@ export const MODES: Mode[] = [
   {
     signature: "redrive",
     blurb:
-      "pick an unfinished campaign back up on the current base — the umbrella verb (ADR 0020): reconstructs the plan from the event log and re-enters the first wave that did not close, reconciling it before running (design §7) — a green-but-unmerged member is integrated without a rerun, an answered park (its record gone) re-runs, an unresolved park re-parks the wave, and a failed member stops the campaign as failed again unless --override re-runs it. Redoes no already-merged issue. Takes no issue args; use it after a prune, graft, fix-forward, crash, or failure. Nothing left to run reports so and exits clean (`campaign --resume` is a one-release alias). --json streams the raw event log to stdout for tooling; without it the terminal shows human-readable lines only (design §11)",
+      "pick an unfinished campaign back up on the current base — the umbrella verb (ADR 0020): reconstructs the plan from the event log and re-enters the first wave that did not close, reconciling it before running (design §7) — a green-but-unmerged member is integrated without a rerun, an answered park (its record gone) re-runs, an unresolved park re-parks the wave, and a failed member stops the campaign as failed again unless --override re-runs it. Redoes no already-merged issue. Takes no issue args; use it after a prune, graft, fix-forward, crash, failure, or stop — after a stop it lands the stopped wave's banked greens without a rerun and re-runs the members a `--now` stop interrupted. Nothing left to run reports so and exits clean (`campaign --resume` is a one-release alias). --json streams the raw event log to stdout for tooling; without it the terminal shows human-readable lines only (design §11)",
+  },
+  {
+    signature: "stop [--now]",
+    blurb:
+      "stop this project's running campaign. By default it stops gracefully: the wave in flight finishes — its members run to their verdicts, then integration, the merged-base gate, the changelog fold and the labels run as normal — and the campaign parks `stopped` before the next wave and exits 2. --now stops it at once: every run in flight stops and parks itself `stopped`, keeping its branch and worktree, and the wave skips integration. Ctrl-C on the campaign is a graceful stop, a second Ctrl-C (or closing its terminal) is --now. A second `stop` while one is pending says so and sends nothing. `vetinari redrive` resumes it. Refuses when no campaign is running for the project",
   },
   {
     signature: "prune [<project>] <issue>",

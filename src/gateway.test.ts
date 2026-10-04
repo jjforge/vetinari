@@ -742,6 +742,21 @@ test("formatGatewayStatus names a conflict/crash hold from a parked member with 
   assert.doesNotMatch(text, /reply/i);
 });
 
+test("formatGatewayStatus names a stopped campaign's move as a plain redrive, never a blank `vetinari run` (#403)", () => {
+  const text = formatGatewayStatus([
+    campaignStatus({
+      project: "vetinari",
+      waves: [
+        statusWave(0, "completed", [statusIssue({ status: "completed" })]),
+        { index: 1, status: "parked", reason: "stopped", issues: [statusIssue({ status: "unstarted" })] },
+      ],
+      parked: [],
+    }),
+  ]);
+  assert.match(text, /⏸ stopped — `vetinari redrive` to resume it\./);
+  assert.doesNotMatch(text, /vetinari run/);
+});
+
 test("formatGatewayStatus advises replying only when an answerable park exists (#391)", () => {
   const answerable = formatGatewayStatus([
     campaignStatus({ project: "alpha", parked: [parkedIssue({ issueNumber: "A1", reason: "question" })] }),

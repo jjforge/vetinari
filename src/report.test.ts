@@ -154,3 +154,8 @@ test("a --json reporter suppresses human lines (raw events go to the log echo in
   assert.deepEqual(lines, []);
   assert.equal(r.json, true);
 });
+
+test("a stopped stop names the wave, the stop, and `vetinari redrive` (#403)", () => {
+  const out = formatStop({ kind: "stopped", index: 1, total: 3, merged: ["101"] });
+  assert.equal(out, "🅿 campaign parked at wave 2/3 — stopped; merged #101 kept, 1 wave not started\n" + "recover: `vetinari redrive`");
+});

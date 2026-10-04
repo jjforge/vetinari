@@ -125,7 +125,7 @@ export interface WaveDoneEvent extends BaseEvent {
 
 /** `campaign-parked` — the campaign paused at a wave boundary (design §2.1, the first of the two
  * stop markers): the wave index, the wave-level `reason` written by the code that stopped it
- * (`red-base`, `question`, `stalled`, or `conflict` — §2.1 rule 2: the reducer reads this reason,
+ * (`red-base`, `question`, `stalled`, `conflict`, or `stopped` for an operator stop — §2.1 rule 2: the reducer reads this reason,
  * it never infers one from surrounding events), and the detail. The greens already merged stay on
  * the base (modes.ts). */
 export interface CampaignParkedEvent extends BaseEvent {
@@ -199,6 +199,16 @@ export interface GraceWaitEvent extends BaseEvent {
   event: "grace-wait";
   seconds: number;
   tasks: string[];
+}
+
+/** `stop-requested` — an operator asked the running campaign to stop (`vetinari stop`, a SIGINT,
+ * SIGTERM or SIGHUP): the wave `index` in flight when the first request landed. The reducer ignores
+ * it; `vetinari stop` reads it to tell a stop already pending (one after the latest `campaign-start`
+ * with no `campaign-parked`/`campaign-failed`/`campaign-done` after it). The stop itself is marked by
+ * `campaign-parked{stopped}` (modes.ts). */
+export interface StopRequestedEvent extends BaseEvent {
+  event: "stop-requested";
+  index: number;
 }
 
 /** `gate` — the orchestrator gate selected a set of commands to run for a task: the labels/cmds it will
@@ -312,6 +322,7 @@ export type OrchestratorEvent =
   | GraftEvent
   | RedriveEvent
   | GraceWaitEvent
+  | StopRequestedEvent
   | GateEvent
   | GateCheckEvent
   | GateResultEvent

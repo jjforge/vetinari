@@ -53,7 +53,7 @@ import { archiveRun, shouldArchiveIdle, shouldArchiveLeftover } from "./archive.
 import { answerParked, hasParked, listParked } from "./state.ts";
 import { readEventLog } from "./event-log.ts";
 import { autoRegister, computeRegistryDedup, gatewayConfigDir, listProjects, removePointer } from "./registry.ts";
-import { projectHasLiveCampaign, resolveHostCeiling, type HostBudget } from "./host-slots.ts";
+import { liveCampaignPid, projectHasLiveCampaign, resolveHostCeiling, type HostBudget } from "./host-slots.ts";
 import { containerShareWeight } from "./config.ts";
 import { serveAllStatus } from "./status.ts";
 import { runStatusLine } from "./statusline.ts";
@@ -603,7 +603,7 @@ function selectAgent(cfg: ResolvedConfig, override: AgentOverride): void {
 }
 
 // The post-config command family (build/baseline/run/campaign/redrive/prune/graft/
-// answer/parked/clear/tg-test) is parsed into a discriminated Command and routed through
+// answer/parked/stop/clear/tg-test) is parsed into a discriminated Command and routed through
 // injected deps (src/cli-dispatch.ts) — the pure seam that makes command routing testable
 // without spawning the process (#243). The host-level modes above run BEFORE the strict
 // config load and stay inline. Console/exit/spawn effects are wired in as deps here.
@@ -638,6 +638,10 @@ await dispatch(parseArgs([mode, ...rest]), {
   hasParked,
   answerParked,
   projectHasLiveCampaign,
+  liveCampaignPid,
+  signalProcess: (pid, signal) => {
+    process.kill(pid, signal);
+  },
   readEventLog,
   archiveRun,
   requireTelegram,

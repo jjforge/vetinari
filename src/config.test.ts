@@ -5,6 +5,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { githubFetchTask } from "./index.ts";
 import {
   AGENT_PROVIDERS,
   assertProjectQualifier,
@@ -16,6 +17,7 @@ import {
   missingCredentials,
   nonResumableAnswerWarning,
   parseAgentOverride,
+  registerVetinariResolve,
   repoForProject,
   resolveAgentSelection,
   resolveConfigPath,
@@ -519,4 +521,72 @@ test("assertProjectQualifier refuses when the repo identity cannot verify the qu
     () => assertProjectQualifier("jjforge", "jjforge", undefined),
     /cannot derive this project's repo to verify the "jjforge" qualifier/,
   );
+});
+
+// A project config written as the `init` template writes it: importing from
+// "vetinari". A scratch() dir sits outside this checkout, so only the CLI's
+// resolve hook — not package self-reference or a node_modules link — can find it.
+const VETINARI_CONFIG_BODY = `import { defineConfig } from "vetinari";
+export default defineConfig({
+  project: "demo",
+  image: "img",
+  baseBranch: "main",
+  gates: [{ cmd: "true" }],
+  fetchTask: (id) => id,
+});
+`;
+
+test('loadConfig resolves a config\'s import from "vetinari" with no node_modules in the project', async () => {
+  const cfg = await loadConfig(writeConfig(scratch(), "vetinari/config.mts", VETINARI_CONFIG_BODY));
+
+  assert.equal(cfg.project, "demo");
+});
+
+test('a config\'s "vetinari" import is the same module instance the CLI runs', async () => {
+  // githubFetchTask is a factory; it is left uncalled and used only as an identity probe.
+  const body = VETINARI_CONFIG_BODY.replace("{ defineConfig }", "{ defineConfig, githubFetchTask }").replace(
+    "fetchTask: (id) => id",
+    "fetchTask: githubFetchTask",
+  );
+
+  const cfg = await loadConfig(writeConfig(scratch(), "vetinari/config.mts", body));
+
+  assert.equal(cfg.fetchTask, githubFetchTask);
+});
+
+test("a config's \"vetinari/<subpath>\" resolves through the running install's exports map", async () => {
+  // import.meta.resolve, never import: importing vetinari/cli would run the CLI.
+  const body = `const probe = { cli: import.meta.resolve("vetinari/cli") };
+try {
+  import.meta.resolve("vetinari/src/loop.ts");
+} catch (err) {
+  probe.unexportedCode = err.code;
+}
+globalThis.__vetinariSubpathProbe = probe;
+${VETINARI_CONFIG_BODY}`;
+
+  await loadConfig(writeConfig(scratch(), "vetinari/config.mts", body));
+
+  const probe = (globalThis as { __vetinariSubpathProbe?: { cli: string; unexportedCode?: string } }).__vetinariSubpathProbe;
+  assert.equal(probe?.cli, new URL("./cli.mts", import.meta.url).href);
+  assert.equal(probe?.unexportedCode, "ERR_PACKAGE_PATH_NOT_EXPORTED");
+});
+
+test("the running install wins over a project's own node_modules/vetinari", async () => {
+  const dir = scratch();
+  const decoy = join(dir, "node_modules/vetinari");
+  mkdirSync(decoy, { recursive: true });
+  writeFileSync(join(decoy, "package.json"), JSON.stringify({ name: "vetinari", type: "module", exports: "./index.js" }));
+  writeFileSync(join(decoy, "index.js"), 'export const defineConfig = (c) => ({ ...c, project: "decoy" });\n');
+
+  const cfg = await loadConfig(writeConfig(dir, "vetinari/config.mts", VETINARI_CONFIG_BODY));
+
+  assert.equal(cfg.project, "demo");
+});
+
+test("loadConfig registers the vetinari resolve hook only once per process", async () => {
+  await loadConfig(writeConfig(scratch(), "vetinari/config.mts", VETINARI_CONFIG_BODY));
+  await loadConfig(writeConfig(scratch(), "vetinari/config.mts", VETINARI_CONFIG_BODY));
+
+  assert.equal(registerVetinariResolve(), false);
 });

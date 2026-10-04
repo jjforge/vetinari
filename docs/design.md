@@ -8,7 +8,7 @@ The document has three parts: the system as it should be (§1–§11), the surfa
 
 ## 1. Shape
 
-One process per CLI invocation; the working directory selects the project. A campaign is a parent process that spawns one child `run` per issue. Two long-lived host processes exist: the gateway (Telegram) and the dashboard (HTTP), and neither holds state of its own — both read every project live from a pointer registry.
+One process per CLI invocation; the working directory selects the project. A campaign is a parent process that spawns one child `run` per issue. Two long-lived host processes exist: the gateway (Telegram) and the dashboard (HTTP), and neither holds state of its own — both read every project live from a pointer registry. A project's config imports `vetinari`, and the CLI resolves that import to the running install, so a project needs no install of its own or any link to it.
 
 ```
                     ┌─────────────── host (~/.config/vetinari/) ───────────────┐

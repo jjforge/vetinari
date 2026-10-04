@@ -243,6 +243,18 @@ test("under 640px the shared .tail-head drops the .tail-summary so the title sta
   assert.match(LIVE_TAIL_STYLES, /@media \(max-width: 640px\) \{ \.tail-summary \{ display: none; \} \}/);
 });
 
+test("under 640px the shared .tail-head wraps so the title keeps one line and the controls get a full-width row (#336)", () => {
+  // Dropping the summary alone wasn't enough at ~440px — the title still wrapped to four lines and
+  // the right-hand controls were clipped. Under the 640px breakpoint the head now wraps: .tail-title
+  // stays on one line (nowrap) and .tail-controls drops to a full-width row of its own below it, with
+  // .tail-filter growing to fill that row. CSS-only; every pane sharing .tail-head (live tail,
+  // archived runs, landing event-log feed) inherits it, no renderer touched.
+  assert.match(
+    LIVE_TAIL_STYLES,
+    /@media \(max-width: 640px\) \{ \.tail-head \{ flex-wrap: wrap; \} \.tail-title \{ white-space: nowrap; \} \.tail-controls \{ flex-basis: 100%; \} \.tail-filter \{ flex: 1; max-width: none; \} \}/,
+  );
+});
+
 test("REDRIVE_SCRIPT opens the confirm dialog on click and closes it on Cancel — only enabled, no double-bind (#325)", () => {
   // The greyed-until-safe Redrive control (design §11): enabled, its button opens the native
   // <dialog> (Cancel the default); Cancel closes without POSTing. It is a no-op when disabled.

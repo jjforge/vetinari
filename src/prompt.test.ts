@@ -64,3 +64,13 @@ test("the TDD prompt lists the four audience tags with a project-neutral meaning
 test("the TDD prompt no longer sends agents to docs/changelog-conventions.md for labels or tags (#415)", () => {
   assert.ok(!prompt.includes("changelog-conventions"), "prompt still points at docs/changelog-conventions.md for the fragment vocabulary");
 });
+
+test("the TDD prompt warns that co-wave siblings may share a package and asks for unique package-level names (#404)", () => {
+  // File-disjoint is not compile-disjoint in a package-scoped language: a sibling
+  // ticket in the same wave may land in the same package, so the agent must prefer
+  // unique, feature-specific names for new package-level identifiers, not generic
+  // ones that collide at merge.
+  assert.match(prompt, /package/i);
+  assert.match(prompt, /sibling|co-wave|concurrently|same wave/i);
+  assert.match(prompt, /unique/i);
+});

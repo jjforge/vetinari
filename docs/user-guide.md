@@ -110,6 +110,33 @@ Once per machine: run the gateway as a service (`vetinari gateway install`) so q
 - Record dependencies as the tracker's native blocked-by links, not prose.
 - Anything the agent notices but does not fix is filed as a new issue, not folded in.
 
+## Package-scoped languages: widen file-sets to the directory
+
+The planner keeps a wave's members file-disjoint, and that is its only co-wave guard. In Go — and any language where a directory is one namespace — **file-disjoint is not compile-disjoint**: two tickets that touch *different* files in the *same* package still share one package namespace, so each can add the same package-level identifier. Each goes green alone; merged, they do not compile, and the merged-base gate goes red. Separate agents in separate sandboxes cannot see each other's new helpers.
+
+To make same-package tickets land in separate waves, widen each file-set to its directory. The [`packageScopedFileSet`](../examples/package-scoped-fileset.mts) recipe wraps the shipped `defaultFileSet`, maps each resolved fileKey to its directory, de-duplicates, and passes `confident` through unchanged — so two tickets in one directory collide on the same key and the planner serializes them. Wire it into `vetinari/config.mts`:
+
+```ts
+import { dirname } from "node:path";
+import { defaultFileSet, type FileSetOf } from "vetinari";
+
+export function packageScopedFileSet(root?: string): FileSetOf {
+  const base = defaultFileSet(root);
+  return (ticket: string) => {
+    const { files, confident } = base(ticket);
+    return { files: [...new Set(files.map((f) => dirname(f)))], confident };
+  };
+}
+
+// ...then in defineConfig({ ... }):
+//   fileSet: packageScopedFileSet(),
+```
+
+Two things to know:
+
+- **The cost is wave count.** Widening the key means fewer, larger-grained waves — same-directory tickets now serialize that otherwise ran together. That is the price of never leaving the base red on a duplicate symbol.
+- **`Creates:` cites (and ambiguous `Touches:` cites) key under `.`.** A `Creates:` cite names a file not yet in the tree, so the resolver has no path for it and keeps it a bare basename; its `dirname` is `.`, as is that of a `Touches:` cite the tree holds under several paths. These collide with every other bare key and every root-level file. That is conservative: it serializes more, never less.
+
 ## How work leaves the container
 
 The agent can reach only its branch. Everything else goes through the orchestrator on the host:

@@ -4,8 +4,9 @@ import assert from "node:assert/strict";
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { event, serveAllStatus, type OrchestratorEvent } from "./status.ts";
+import { dashboardRequestDenial, event, serveAllStatus, type OrchestratorEvent } from "./status.ts";
 import type { AddressInfo } from "node:net";
+import { request } from "node:http";
 import { register } from "./registry.ts";
 import { registerProject } from "./host-slots.ts";
 
@@ -1499,4 +1500,92 @@ test("serveAllStatus no longer serves GET /archive/log — the route is removed 
 
 test("serveAllStatus can bind to a non-localhost host for tailnet access", () => {
   assert.match(String(serveAllStatus), /server\.listen\(opts\.port,\s*opts\.host,/);
+});
+
+test("dashboardRequestDenial admits an IP-literal or localhost Host, and an allowlisted name, ignoring the port (#361)", () => {
+  for (const host of ["127.0.0.1:8765", "[::1]:8765", "100.64.1.2:8765", "localhost:8765", "127.0.0.1"]) {
+    assert.equal(dashboardRequestDenial(host, undefined, []), null, host);
+  }
+  // A MagicDNS or reverse-proxy name is admitted only when listed, case-insensitively.
+  assert.equal(dashboardRequestDenial("MyHost.Tailnet.ts.net:8765", undefined, ["myhost.tailnet.ts.net"]), null);
+  assert.equal(dashboardRequestDenial("myhost.tailnet.ts.net:8765", undefined, ["MYHOST.tailnet.ts.net"]), null);
+});
+
+test("dashboardRequestDenial refuses a DNS-name Host that is not allowlisted, and a missing Host, naming the variable (#361)", () => {
+  const rebound = dashboardRequestDenial("evil.example:8765", undefined, []);
+  assert.match(rebound ?? "", /evil\.example/);
+  assert.match(rebound ?? "", /VETINARI_STATUS_ALLOWED_HOSTS/);
+  assert.doesNotMatch(rebound ?? "", /\n/);
+  assert.notEqual(dashboardRequestDenial("other.tailnet.ts.net:8765", undefined, ["myhost.tailnet.ts.net"]), null);
+  assert.match(dashboardRequestDenial(undefined, undefined, []) ?? "", /VETINARI_STATUS_ALLOWED_HOSTS/);
+});
+
+test("dashboardRequestDenial admits no Origin, or an Origin of the request's own Host over http or https (#361)", () => {
+  assert.equal(dashboardRequestDenial("127.0.0.1:8765", undefined, []), null);
+  assert.equal(dashboardRequestDenial("127.0.0.1:8765", "http://127.0.0.1:8765", []), null);
+  assert.equal(dashboardRequestDenial("myhost.tailnet.ts.net", "https://myhost.tailnet.ts.net", ["myhost.tailnet.ts.net"]), null);
+});
+
+test("dashboardRequestDenial refuses a cross-site Origin, a different port, and the literal null (#361)", () => {
+  for (const origin of ["http://evil.example", "http://127.0.0.1:9999", "null"]) {
+    const denial = dashboardRequestDenial("127.0.0.1:8765", origin, []);
+    assert.notEqual(denial, null, origin);
+    assert.doesNotMatch(denial ?? "", /\n/);
+  }
+});
+
+test("serveAllStatus refuses a cross-site POST /answer with 403 and spawns nothing; with no Origin it reaches the route (#361)", async () => {
+  const configDir = join(tmpdir(), `vetinari-agg-origin-${Date.now()}`);
+  const stateDir = join(configDir, "state-solo");
+  seedState(stateDir, [event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["101"]], slots: 1 })]);
+  register(configDir, { project: "solo", projectRoot: join(configDir, "solo-root"), baseLocation: stateDir });
+
+  const started: string[][] = [];
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+    startChild: async (_root, args) => (started.push(args), { code: 0, lastLine: "", running: false }),
+  });
+  const { port } = server.address() as AddressInfo;
+  const answer = (headers: Record<string, string>) =>
+    fetch(`http://127.0.0.1:${port}/answer`, {
+      method: "POST",
+      redirect: "manual",
+      headers: { "content-type": "application/x-www-form-urlencoded", ...headers },
+      body: new URLSearchParams({ taskId: "101", text: "rm -rf /", project: "solo" }).toString(),
+    });
+  try {
+    const refused = await answer({ origin: "http://evil.example" });
+    assert.equal(refused.status, 403);
+    assert.match(await refused.text(), /evil\.example/);
+    assert.deepEqual(started, []);
+
+    const admitted = await answer({});
+    assert.notEqual(admitted.status, 403);
+    assert.deepEqual(started, [["answer", "101", "rm -rf /"]]);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serveAllStatus refuses GET /api/status under a rebound DNS-name Host with 403, and serves it under a loopback Host (#361)", async () => {
+  const configDir = join(tmpdir(), `vetinari-agg-host-${Date.now()}`);
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const { port } = server.address() as AddressInfo;
+  // `fetch` silently replaces a caller-set Host, so the rebound request goes out by node:http.
+  const statusUnder = (host: string) =>
+    new Promise<number>((resolve, reject) => {
+      request({ host: "127.0.0.1", port, path: "/api/status", headers: { host } }, (res) => {
+        res.resume();
+        resolve(res.statusCode ?? 0);
+      })
+        .on("error", reject)
+        .end();
+    });
+  try {
+    assert.equal(await statusUnder(`evil.example:${port}`), 403);
+    assert.equal(await statusUnder(`127.0.0.1:${port}`), 200);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });

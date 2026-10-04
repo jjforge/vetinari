@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
-import type { AddressInfo } from "node:net";
+import { isIP, type AddressInfo } from "node:net";
 import type { PruneClosure } from "./dashboard-prune.ts";
 import { shellPruneClosure, shellPrunePreview } from "./dashboard-prune.ts";
 import type { GraftClosure } from "./dashboard-graft.ts";
@@ -49,6 +49,30 @@ const routes: RouteHandler[] = [
 ];
 
 /**
+ * The dashboard's guard against browser-borne requests (ADR 0021): the server is
+ * unauthenticated by design, so this decides — before any route runs — whether a
+ * request could only have come from a page that is not the dashboard's own. Returns
+ * the one-line 403 body for a refusal, or null to admit the request.
+ *
+ * The Host check defeats DNS rebinding: a rebound page always arrives under a DNS
+ * name, so only an IP literal, `localhost`, or a name the operator allowlisted is
+ * admitted. The Origin check defeats a cross-site form POST: a browser that sends an
+ * Origin (the literal `null` included) must name this very Host, port and all. No
+ * Origin passes — curl and scripts send none, and they are not the browser threat.
+ */
+export function dashboardRequestDenial(host: string | undefined, origin: string | undefined, allowedHosts: string[]): string | null {
+  if (!host) return "missing Host header; list the dashboard's name in VETINARI_STATUS_ALLOWED_HOSTS";
+  const bracketed = /^\[([^\]]+)\](?::\d+)?$/.exec(host);
+  const name = (bracketed ? bracketed[1] : host.replace(/:\d+$/, "")).toLowerCase();
+  const admitted = isIP(name) !== 0 || name === "localhost" || allowedHosts.some((h) => h.toLowerCase() === name);
+  if (!admitted) return `host not allowed: ${name}; list it in VETINARI_STATUS_ALLOWED_HOSTS`;
+  if (origin !== undefined && origin !== `http://${host}` && origin !== `https://${host}`) {
+    return `cross-origin request refused: Origin ${origin} does not match Host ${host}`;
+  }
+  return null;
+}
+
+/**
  * The gateway's aggregated status site: one port fronting every registered
  * project. It reads the registry live each request (so a newly run project shows
  * up with no restart), builds each project's status from its base location, and
@@ -85,8 +109,17 @@ export async function serveAllStatus(
     startChild: opts.startChild ?? startChild,
     childStartupMs: opts.childStartupMs ?? 5_000,
   };
+  const allowedHosts = (process.env.VETINARI_STATUS_ALLOWED_HOSTS ?? "")
+    .split(",")
+    .map((h) => h.trim())
+    .filter(Boolean);
   const server = createServer((req, res) => {
     void (async () => {
+      const denial = dashboardRequestDenial(req.headers.host, req.headers.origin, allowedHosts);
+      if (denial) {
+        res.writeHead(403, { "content-type": "text/plain; charset=utf-8" }).end(denial);
+        return;
+      }
       const url = new URL(req.url ?? "/", "http://localhost");
       for (const handle of routes) {
         if (await handle(req, res, url, deps)) return;

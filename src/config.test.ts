@@ -86,6 +86,16 @@ test("loadConfig defaults state under .vetinari.local, with parkedDir and logFil
   assert.equal(cfg.logFile, ".vetinari.local/logs/orchestrator.jsonl");
 });
 
+test("loadConfig over vetinari's own committed config wires reportFinding as a function so campaign findings get filed", async () => {
+  // The real dogfood config, not a fixture: tsc's `include` does not cover vetinari/,
+  // so a type on ProjectConfig cannot pin this — loading the actual file is the only check.
+  const cfgPath = new URL("../vetinari/config.mts", import.meta.url).pathname;
+
+  const cfg = await loadConfig(cfgPath);
+
+  assert.equal(typeof cfg.reportFinding, "function");
+});
+
 test("containerShareWeight maps the three tiers to internal fair-share weights (~7:2:1)", () => {
   assert.equal(containerShareWeight("high"), 7);
   assert.equal(containerShareWeight("medium"), 2);

@@ -42,11 +42,13 @@ export default defineConfig({
   fetchTask: (id) => `TODO: fetch the task text for ${id}`,
 
   // Optional: wire your tracker's blocked-by edges to enable prune / campaign planning.
+  // With no argument the repo is derived from this project's git `origin`; pass
+  // "owner/repo" only when your tracker is NOT the project's `origin`.
   // import { githubBlockedBy } from "vetinari";
-  // blockedBy: githubBlockedBy("owner/repo"),
+  // blockedBy: githubBlockedBy(),
 
   // Optional: list open issues by label, so `campaign <label>` (e.g.
   // `campaign ready-for-agent`) selects its issue set from the tracker.
   // import { githubIssuesByLabel } from "vetinari";
-  // listByLabel: githubIssuesByLabel("owner/repo"),
+  // listByLabel: githubIssuesByLabel(),
 });

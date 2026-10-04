@@ -8,6 +8,7 @@ import {
   githubIssuesByLabel,
   githubMarkPendingVerify,
 } from "./github.ts";
+import { Refusal } from "./refusal.ts";
 import { issueStateFromTask } from "./dashboard-model.ts";
 import { expandSelection, layerWaves } from "./plan.ts";
 import { restrictBlockers } from "./prune.ts";
@@ -109,6 +110,68 @@ test("githubBlockedBy keeps an open ready-for-agent blocker — an untouched pre
   const run = async () => JSON.stringify([{ number: 314, state: "open", labels: [{ name: "ready-for-agent" }] }]);
 
   assert.deepEqual(await githubBlockedBy("jjforge/vetinari", run, () => {})("316"), ["314"]);
+});
+
+test("githubBlockedBy with no repo derives owner/repo and queries that repo's endpoint (#338)", async () => {
+  const calls: string[][] = [];
+  const run = async (args: string[]) => {
+    calls.push(args);
+    return "[]";
+  };
+
+  await githubBlockedBy(
+    undefined,
+    run,
+    () => {},
+    () => "o/r",
+  )("#782");
+
+  assert.deepEqual(calls, [["api", "repos/o/r/issues/782/dependencies/blocked_by"]]);
+});
+
+test("githubBlockedBy's cross-repo filter compares against the derived repo (#338)", async () => {
+  const run = async () =>
+    JSON.stringify([
+      { number: 191, repository: { full_name: "o/r" } },
+      { number: 5, repository: { full_name: "someone/other" } },
+    ]);
+
+  // the blocker in the derived repo is kept; the one in a different repo is dropped.
+  assert.deepEqual(
+    await githubBlockedBy(
+      undefined,
+      run,
+      () => {},
+      () => "o/r",
+    )("782"),
+    ["191"],
+  );
+});
+
+test("githubBlockedBy refuses when the repo cannot be derived — names the factory, calls no gh (#338)", async () => {
+  let ran = false;
+  const run = async () => {
+    ran = true;
+    return "[]";
+  };
+
+  await assert.rejects(
+    () =>
+      githubBlockedBy(
+        undefined,
+        run,
+        () => {},
+        () => undefined,
+      )("782"),
+    (e: unknown) => {
+      assert.ok(e instanceof Refusal);
+      assert.match(e.message, /githubBlockedBy/);
+      assert.match(e.message, /owner\/repo/);
+      assert.match(e.message, /explicitly/);
+      return true;
+    },
+  );
+  assert.equal(ran, false);
 });
 
 test("githubBlockedBy fans out concurrently under restrictBlockers — every id's gh call is in flight at once (#368)", async () => {
@@ -325,6 +388,228 @@ test("githubFetchTask fans out concurrently under Promise.all — every id's gh 
 
   // Serial under a sync resolver (peak 1); overlapped once the resolver awaits gh.
   assert.equal(state.maxInFlight, ids.length);
+});
+
+test("githubIssuesByLabel with no repo derives owner/repo and lists against it (#338)", async () => {
+  const calls: string[][] = [];
+  const run = async (args: string[]) => {
+    calls.push(args);
+    return "[]";
+  };
+
+  await githubIssuesByLabel(
+    undefined,
+    run,
+    () => {},
+    () => "o/r",
+  )("ready-for-agent");
+
+  assert.equal(calls[0][calls[0].indexOf("--repo") + 1], "o/r");
+});
+
+test("githubIssuesByLabel refuses when the repo cannot be derived — names the factory, calls no gh (#338)", async () => {
+  let ran = false;
+  const run = async () => {
+    ran = true;
+    return "[]";
+  };
+
+  await assert.rejects(
+    () =>
+      githubIssuesByLabel(
+        undefined,
+        run,
+        () => {},
+        () => undefined,
+      )("ready-for-agent"),
+    (e: unknown) => {
+      assert.ok(e instanceof Refusal);
+      assert.match(e.message, /githubIssuesByLabel/);
+      assert.match(e.message, /owner\/repo/);
+      assert.match(e.message, /explicitly/);
+      return true;
+    },
+  );
+  assert.equal(ran, false);
+});
+
+test("githubMarkPendingVerify with no repo derives owner/repo and edits against it (#338)", async () => {
+  const calls: string[][] = [];
+  const run = async (args: string[]) => {
+    calls.push(args);
+    return "";
+  };
+
+  await githubMarkPendingVerify(undefined, run, () => "o/r")("#640");
+
+  assert.equal(calls[0][calls[0].indexOf("--repo") + 1], "o/r");
+});
+
+test("githubMarkPendingVerify refuses when the repo cannot be derived — names the factory, calls no gh (#338)", async () => {
+  let ran = false;
+  const run = async () => {
+    ran = true;
+    return "";
+  };
+
+  await assert.rejects(
+    () => githubMarkPendingVerify(undefined, run, () => undefined)("#640"),
+    (e: unknown) => {
+      assert.ok(e instanceof Refusal);
+      assert.match(e.message, /githubMarkPendingVerify/);
+      assert.match(e.message, /owner\/repo/);
+      assert.match(e.message, /explicitly/);
+      return true;
+    },
+  );
+  assert.equal(ran, false);
+});
+
+test("githubIssueComment with no repo derives owner/repo and comments against it (#338)", async () => {
+  const calls: string[][] = [];
+  const run = async (args: string[]) => {
+    calls.push(args);
+    return "";
+  };
+
+  await githubIssueComment(undefined, run, () => "o/r")("#226", "the answer");
+
+  assert.equal(calls[0][calls[0].indexOf("--repo") + 1], "o/r");
+});
+
+test("githubIssueComment refuses when the repo cannot be derived — names the factory, calls no gh (#338)", async () => {
+  let ran = false;
+  const run = async () => {
+    ran = true;
+    return "";
+  };
+
+  await assert.rejects(
+    () => githubIssueComment(undefined, run, () => undefined)("#226", "the answer"),
+    (e: unknown) => {
+      assert.ok(e instanceof Refusal);
+      assert.match(e.message, /githubIssueComment/);
+      assert.match(e.message, /owner\/repo/);
+      assert.match(e.message, /explicitly/);
+      return true;
+    },
+  );
+  assert.equal(ran, false);
+});
+
+test("githubFindingReporter with no repo derives owner/repo and creates against it, opts kept second (#338)", async () => {
+  const calls: string[][] = [];
+  const run = async (args: string[]) => {
+    calls.push(args);
+    return "https://github.com/o/r/issues/901\n";
+  };
+
+  await githubFindingReporter(
+    undefined,
+    { labels: ["needs-triage"] },
+    run,
+    () => "o/r",
+  )({ summary: "a bug" }, { taskId: "640", project: "p" });
+
+  assert.equal(calls[0][calls[0].indexOf("--repo") + 1], "o/r");
+  assert.deepEqual(
+    calls[0].filter((_, i) => calls[0][i - 1] === "--label"),
+    ["needs-triage"],
+  );
+});
+
+test("githubFindingReporter refuses when the repo cannot be derived — names the factory, calls no gh (#338)", async () => {
+  let ran = false;
+  const run = async () => {
+    ran = true;
+    return "";
+  };
+
+  await assert.rejects(
+    () => githubFindingReporter(undefined, {}, run, () => undefined)({ summary: "a bug" }, { taskId: "640", project: "p" }),
+    (e: unknown) => {
+      assert.ok(e instanceof Refusal);
+      assert.match(e.message, /githubFindingReporter/);
+      assert.match(e.message, /owner\/repo/);
+      assert.match(e.message, /explicitly/);
+      return true;
+    },
+  );
+  assert.equal(ran, false);
+});
+
+test("githubFetchTask with no repo derives owner/repo from the project and uses it in the gh args (#338)", async () => {
+  const calls: string[][] = [];
+  const run = async (args: string[]) => {
+    calls.push(args);
+    return JSON.stringify({ title: "t", state: "OPEN" });
+  };
+
+  await githubFetchTask(undefined, run, () => "o/r")("#165");
+
+  assert.deepEqual(calls[0].slice(0, 5), ["issue", "view", "165", "--repo", "o/r"]);
+});
+
+test("a github factory with no repo does not call the deriver at construction — only when first invoked (#338)", async () => {
+  let derives = 0;
+  const deriveRepo = () => {
+    derives++;
+    return "o/r";
+  };
+
+  const resolver = githubFetchTask(undefined, async () => JSON.stringify({ title: "t" }), deriveRepo);
+  // constructed, not yet called: the deriver must not have run.
+  assert.equal(derives, 0);
+
+  await resolver("#165");
+  assert.equal(derives, 1);
+});
+
+test("an explicit repo wins — the deriver never runs even at call time (#338)", async () => {
+  const calls: string[][] = [];
+  const run = async (args: string[]) => {
+    calls.push(args);
+    return JSON.stringify({ title: "t" });
+  };
+  const deriveRepo = () => assert.fail("deriver must not be called when a repo is passed explicitly");
+
+  await githubFetchTask("x/y", run, deriveRepo)("#165");
+
+  assert.equal(calls[0][calls[0].indexOf("--repo") + 1], "x/y");
+});
+
+test("a derived repo is cached — two calls on one resolver instance derive at most once (#338)", async () => {
+  let derives = 0;
+  const deriveRepo = () => {
+    derives++;
+    return "o/r";
+  };
+  const fetchTask = githubFetchTask(undefined, async () => JSON.stringify({ title: "t" }), deriveRepo);
+
+  await fetchTask("#1");
+  await fetchTask("#2");
+
+  assert.equal(derives, 1);
+});
+
+test("githubFetchTask refuses when the repo cannot be derived — names the factory, calls no gh (#338)", async () => {
+  let ran = false;
+  const run = async () => {
+    ran = true;
+    return "{}";
+  };
+
+  await assert.rejects(
+    () => githubFetchTask(undefined, run, () => undefined)("#165"),
+    (e: unknown) => {
+      assert.ok(e instanceof Refusal);
+      assert.match(e.message, /githubFetchTask/);
+      assert.match(e.message, /owner\/repo/);
+      assert.match(e.message, /explicitly/);
+      return true;
+    },
+  );
+  assert.equal(ran, false);
 });
 
 test("githubFindingReporter creates a labeled issue cross-referenced to the task", async () => {

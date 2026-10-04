@@ -1397,6 +1397,33 @@ test("reduceCampaign: a spawn re-admits a parked member back to running (design 
   assert.deepEqual(issueLifecycle(reduced, "101"), { state: "running" });
 });
 
+test("reduceCampaign: a spawn re-runs a failed member back to running — redrive --override (#399)", () => {
+  // Observed on wave 10: a member timed out (`failed`), `campaign-failed`, then `redrive --override`
+  // re-ran it — `wave-start` for the same index, `spawn` for the same id. The agent is live, but the
+  // fold kept the member `failed`, so (failed outranks all) its wave and the campaign read failed.
+  const base = [
+    event("campaign-start", { ts: "t0", waves: [["6"]], slots: 1 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["6"] }),
+    event("spawn", { ts: "t2", taskId: "6" }),
+    event("failed", { ts: "t3", taskId: "6" }),
+    event("campaign-failed", { ts: "t4", index: 0, detail: "6 failed" }),
+    event("wave-start", { ts: "t5", index: 0, tasks: ["6"] }),
+    event("spawn", { ts: "t6", taskId: "6" }),
+  ];
+  const reduced = reduceCampaign(base);
+  const waveStatuses = (reduced.waves[reduced.currentWave] ?? []).map((id) => ({ status: issueLifecycle(reduced, id).state }));
+  assert.deepEqual(issueLifecycle(reduced, "6"), { state: "running" }, "the re-spawned member reads running, not failed");
+  assert.equal(waveState(waveStatuses), "running", "its wave is running again");
+  assert.equal(campaignState([waveState(waveStatuses)]), "running", "the campaign is running again");
+
+  // A later failure for the same id still folds back to failed — the promotion is a re-run, not a lock.
+  const refailed = reduceCampaign([...base, event("failed", { ts: "t7", taskId: "6" })]);
+  const refailedStatuses = (refailed.waves[refailed.currentWave] ?? []).map((id) => ({ status: issueLifecycle(refailed, id).state }));
+  assert.deepEqual(issueLifecycle(refailed, "6"), { state: "failed" });
+  assert.equal(waveState(refailedStatuses), "failed");
+  assert.equal(campaignState([waveState(refailedStatuses)]), "failed");
+});
+
 test("reduceCampaign treats any campaign-* stop marker as not-a-crash — an in-flight member is not crash-folded past a park/fail (design §7, #314)", () => {
   // A wave stopped with a stop marker on the log, but a member never reached a terminal
   // event of its own (a racy/partial log). A crash is the ABSENCE of a stop marker (design

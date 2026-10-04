@@ -176,6 +176,59 @@ test("buildLiveTail re-subscribes to the new wave on advance: the prior wave's s
   );
 });
 
+test("buildLiveTail follows a member re-run by redrive --override: a failed-then-re-spawned member is tailed again (#399)", () => {
+  const dir = tmp();
+  // A member timed out (`failed`), `campaign-failed`, then `redrive --override` re-ran it:
+  // `wave-start` for the same index, `spawn` for the same id. The fold reads it running again, so
+  // the tail must follow its activity file — not strand the operator on a card that reads failed.
+  writeJsonl(cfgFor(dir).logFile, [
+    event("campaign-start", { waves: [["6"]], slots: 1, ts: "2026-08-27T00:00:00.000Z" }),
+    event("wave-start", { index: 0, tasks: ["6"], ts: "2026-08-27T00:00:00.000Z" }),
+    event("spawn", { taskId: "6", ts: "2026-08-27T00:00:00.000Z" }),
+    event("failed", { taskId: "6", ts: "2026-08-27T00:00:05.000Z" }),
+    event("campaign-failed", { index: 0, detail: "6 failed", ts: "2026-08-27T00:00:06.000Z" }),
+    event("wave-start", { index: 0, tasks: ["6"], ts: "2026-08-27T00:00:07.000Z" }),
+    event("spawn", { taskId: "6", ts: "2026-08-27T00:00:08.000Z" }),
+  ]);
+  initActivityLog(dir, "6");
+  appendActivity(dir, "6", event("tool", { taskId: "6", name: "Read", path: "src/x.ts", ts: "2026-08-27T00:00:09.000Z" }));
+  appendActivity(dir, "6", event("sandbox-exec", { taskId: "6", cmd: "npm test", ts: "2026-08-27T00:00:10.000Z" }));
+
+  const tail = buildLiveTail(cfgFor(dir));
+
+  assert.deepEqual(tail.agents, [{ issue: "6", status: "running" }]);
+  assert.deepEqual(
+    tail.lines.map((l) => l.issue),
+    ["6", "6"],
+  );
+});
+
+test("buildLiveTail leaves out a re-run member that reached a pending green after its re-spawn (#399)", () => {
+  const dir = tmp();
+  // The re-run member went green again (pending merge). inFlightRunning drops a pending green, so
+  // the tail excludes it exactly as it excludes any green — the re-run path does not change that.
+  writeJsonl(cfgFor(dir).logFile, [
+    event("campaign-start", { waves: [["6"]], slots: 1, ts: "2026-08-27T00:00:00.000Z" }),
+    event("wave-start", { index: 0, tasks: ["6"], ts: "2026-08-27T00:00:00.000Z" }),
+    event("spawn", { taskId: "6", ts: "2026-08-27T00:00:00.000Z" }),
+    event("failed", { taskId: "6", ts: "2026-08-27T00:00:05.000Z" }),
+    event("campaign-failed", { index: 0, detail: "6 failed", ts: "2026-08-27T00:00:06.000Z" }),
+    event("wave-start", { index: 0, tasks: ["6"], ts: "2026-08-27T00:00:07.000Z" }),
+    event("spawn", { taskId: "6", ts: "2026-08-27T00:00:08.000Z" }),
+    event("green", { taskId: "6", branch: "agent/6", commits: ["a"], ts: "2026-08-27T00:00:11.000Z" }),
+  ]);
+  initActivityLog(dir, "6");
+  appendActivity(dir, "6", event("tool", { taskId: "6", name: "Read", ts: "2026-08-27T00:00:09.000Z" }));
+
+  const tail = buildLiveTail(cfgFor(dir));
+
+  assert.deepEqual(tail.agents, [], "a pending green is left out of the tail even after a re-run");
+  assert.deepEqual(
+    tail.lines.map((l) => l.issue),
+    [],
+  );
+});
+
 // A small line factory for the pure client reducers (issue/raw are all they read).
 const ln = (issue: string, n: number, raw = `{"issue":"${issue}","n":${n}}`) => ({ issue, status: "running", ts: "", n, raw });
 

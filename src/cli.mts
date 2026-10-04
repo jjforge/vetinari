@@ -465,8 +465,9 @@ if (mode === "tidy") {
     const plan = computeTidy(scanTidy(target));
     console.log(describeTidy(target.project, plan));
     if (apply && !tidyIsEmpty(plan)) {
-      applyTidy(target, plan);
+      const nearMisses = applyTidy(target, plan);
       console.log(plan.fold.length ? "  → applied — review the CHANGELOG.md fold and commit it." : "  → applied.");
+      if (nearMisses.length) console.log(`  ${describeFragmentNearMisses(nearMisses)}`);
     }
   }
   if (!apply) console.log("\n(dry run — nothing changed; pass --apply to act)");

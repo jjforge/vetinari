@@ -15,6 +15,13 @@ section: Bug fixes
 
 It uses the same section labels and audience tags as `CHANGELOG.md` (below), and may carry more than one `section:` block when a change spans sections. When the orchestrator collects, the bullets fold into the current dated milestone — appended to the top milestone if it is already dated today, else a new milestone dated today — grouped by section, one block per label. The fold runs only when the project keeps a `CHANGELOG.md`; a project with none has its fragments left in place.
 
+**What counts as a fragment.** A fragment is a `.md` file in `changelog.d/` with at least one `section: <label>` line starting at **column 0** — a `section:` line with leading whitespace (an indented example in a README) is not a header. Only a file that contributes at least one bullet is folded, and only such a file is deleted; every other file in `changelog.d/` is left exactly where it is, so the directory can carry its own README. Two near-misses are named by every collect (the per-wave fold, `changelog collect`, and `tidy --apply`) in one line, each with its reason:
+
+- `bullets but no section: header` — the file has a line starting `- ` at column 0 and no column-0 `section:` line;
+- `section: header but no bullets` — the file has a column-0 `section:` line but nothing under it.
+
+Any other file (prose with neither a column-0 `section:` nor a column-0 `- ` line) is left alone silently.
+
 `vetinari changelog collect [--title "…"]` runs the same fold by hand: it reads this repo's `changelog.d/*.md`, folds them into `CHANGELOG.md`, and deletes the consumed fragments. Interactive work not racing a wave may instead edit `CHANGELOG.md` directly.
 
 The shape follows the sibling [`jjforge`](https://github.com/jjforge/jjforge) project's `docs/agents/changelog.md`: **dated milestones, newest first, each with audience-tagged bullets grouped under bold section labels.** It is deliberately *not* the Keep-a-Changelog `[Unreleased]` + `Added/Changed/Removed/Fixed` structure — that older shape is what this format replaced.

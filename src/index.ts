@@ -77,7 +77,7 @@ export {
   FRAGMENT_DIR,
   SECTION_ORDER,
 } from "./changelog.ts";
-export type { FragmentSection, Fragment, CollectOptions } from "./changelog.ts";
+export type { FragmentSection, Fragment, FragmentNearMiss, FragmentNearMissReason, CollectOptions } from "./changelog.ts";
 export {
   buildInstalledCommand,
   composeStatusLine,

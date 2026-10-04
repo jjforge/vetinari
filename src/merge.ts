@@ -432,11 +432,12 @@ export function describeTidy(project: string, plan: TidyPlan): string {
  * GC each provably-merged branch (removing its worktree first, then pruning), and
  * clear the stale parked records. Only ever called on `--apply`; the changelog fold
  * and fragment deletions are left uncommitted for the human to review, mirroring
- * `changelog collect`.
+ * `changelog collect`. Returns the near-miss fragments the fold left in place.
  */
-export function applyTidy(target: TidyTarget, plan: TidyPlan): void {
+export function applyTidy(target: TidyTarget, plan: TidyPlan): FragmentNearMiss[] {
+  let nearMisses: FragmentNearMiss[] = [];
   if (plan.fold.length) {
-    foldFragments(
+    ({ nearMisses } = foldFragments(
       {
         fragmentsDir: target.fragmentsDir,
         changelogPath: target.changelogPath,
@@ -444,12 +445,13 @@ export function applyTidy(target: TidyTarget, plan: TidyPlan): void {
         title: "Collected changes",
       },
       plan.fold.map((id) => `${id}.md`),
-    );
+    ));
   }
 
   purgeBranches(target, plan.deleteBranches);
 
   for (const id of plan.clearParked) rmSync(join(target.parkedDir, `${id}.json`), { force: true });
+  return nearMisses;
 }
 
 /** The git edge a branch/worktree true-drop acts in — the fields `purgeBranches` needs. */

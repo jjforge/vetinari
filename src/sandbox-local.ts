@@ -128,6 +128,8 @@ export async function makeLocalSandbox(cfg: ResolvedConfig, taskId: string, scri
           writeFileSync(abs, contents);
         },
         commit: (message) => {
+          // `-A` is safe here: this runs inside the agent's own worktree, so the only
+          // dirty paths are the ones this turn produced — never an operator's checkout.
           gitIn(worktreeDir, ["add", "-A"]);
           gitIn(worktreeDir, ["commit", "-qm", message]);
           return gitIn(worktreeDir, ["rev-parse", "HEAD"]);

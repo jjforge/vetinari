@@ -221,8 +221,15 @@ export function collectWaveChangelog(
     log.log("campaign-changelog-empty", { wave: waveIndex });
     return { collected, committed: false };
   }
-  // `-A` stages both the CHANGELOG.md fold and the fragment deletions.
-  execFileSync("git", ["-C", root, "add", "-A"], { encoding: "utf8" });
+  // Stage only what the fold touched — never `git add -A`, which would sweep any
+  // unrelated edit in the operator's checkout into this commit (issue #364). The
+  // CHANGELOG.md fold is always staged; an unstaged edit the operator had made to
+  // CHANGELOG.md itself is swept in too, because the fold rewrites that file.
+  execFileSync("git", ["-C", root, "add", "--", "CHANGELOG.md"], { encoding: "utf8" });
+  // Stage each collected fragment's deletion by explicit path. A fragment that was
+  // never committed (untracked) has nothing to stage once deleted — `git add` of a
+  // deleted untracked path exits 128 — so tolerate the failure rather than abort.
+  for (const name of collected) gitTry(["-C", root, "add", "-A", "--", join(FRAGMENT_DIR, name)]);
   execFileSync("git", ["-C", root, "commit", "-m", `campaign: collect changelog (wave ${waveIndex + 1})`], { encoding: "utf8" });
   log.log("campaign-changelog-collected", { wave: waveIndex, collected });
   return { collected, committed: true };

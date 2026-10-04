@@ -640,6 +640,78 @@ test("collectWaveChangelog makes no commit when the wave left no fragments", () 
   assert.equal(headSha(dir), before); // HEAD untouched — nothing to collect
 });
 
+/** The HEAD commit's changed paths as `<status>\t<path>` lines, sorted. */
+function headChanges(dir: string): string[] {
+  return execFileSync("git", ["-C", dir, "show", "--name-status", "--format=", "HEAD"], { encoding: "utf8" })
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .sort();
+}
+
+test("collectWaveChangelog commits only CHANGELOG.md and the collected fragment, leaving unrelated edits alone", () => {
+  const dir = repoWithChangelog("# Changelog\n\n### Older — August 1, 2026\n\n**Bug fixes:**\n- [user] old (#1)\n");
+  const git = (args: string[]) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });
+  const fragDir = join(dir, "changelog.d");
+  mkdirSync(fragDir);
+  writeFileSync(join(fragDir, "42.md"), "section: New features\n- [user] feature from 42 (#42).\n");
+  writeFileSync(join(dir, "tracked.txt"), "original\n");
+  // Post-merge state: the fragment and the operator's other file arrived committed.
+  git(["add", "-A"]);
+  git(["commit", "-qm", "merge agent branches"]);
+  // The operator's unrelated working-tree edits during the collect step.
+  writeFileSync(join(dir, "tracked.txt"), "operator edit\n");
+  writeFileSync(join(dir, "untracked.txt"), "operator scratch\n");
+
+  const result = collectWaveChangelog(0, memoryLogger(), dir);
+
+  assert.equal(result.committed, true);
+  // The collect commit touches exactly CHANGELOG.md and the fragment's deletion.
+  assert.deepEqual(headChanges(dir), ["D\tchangelog.d/42.md", "M\tCHANGELOG.md"]);
+  // The operator's files are left exactly as they were — still dirty, uncommitted.
+  const status = execFileSync("git", ["-C", dir, "status", "--porcelain"], { encoding: "utf8" });
+  assert.ok(status.includes(" M tracked.txt"), `tracked.txt still modified:\n${status}`);
+  assert.ok(status.includes("?? untracked.txt"), `untracked.txt still untracked:\n${status}`);
+});
+
+test("collectWaveChangelog leaves a non-collected file in changelog.d out of the commit", () => {
+  const dir = repoWithChangelog("# Changelog\n\n### Older — August 1, 2026\n\n**Bug fixes:**\n- [user] old (#1)\n");
+  const git = (args: string[]) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });
+  const fragDir = join(dir, "changelog.d");
+  mkdirSync(fragDir);
+  writeFileSync(join(fragDir, "42.md"), "section: New features\n- [user] feature from 42 (#42).\n");
+  git(["add", "-A"]);
+  git(["commit", "-qm", "merge agent branch"]);
+  // A non-`.md` file sitting in changelog.d is never collected (#357 owns which
+  // files count); staging the whole directory would sweep it in — explicit paths do not.
+  writeFileSync(join(fragDir, "notes.txt"), "operator scratch\n");
+
+  const result = collectWaveChangelog(0, memoryLogger(), dir);
+
+  assert.equal(result.committed, true);
+  assert.deepEqual(headChanges(dir), ["D\tchangelog.d/42.md", "M\tCHANGELOG.md"]);
+  const status = execFileSync("git", ["-C", dir, "status", "--porcelain", "-uall"], { encoding: "utf8" });
+  assert.ok(status.includes("?? changelog.d/notes.txt"), `notes.txt still untracked:\n${status}`);
+  assert.equal(existsSync(join(fragDir, "notes.txt")), true);
+});
+
+test("collectWaveChangelog commits CHANGELOG.md and does not throw when a collected fragment was never committed", () => {
+  const dir = repoWithChangelog("# Changelog\n\n### Older — August 1, 2026\n\n**Bug fixes:**\n- [user] old (#1)\n");
+  const fragDir = join(dir, "changelog.d");
+  mkdirSync(fragDir);
+  // The fragment is never committed — an untracked file git has nothing to stage
+  // once the fold deletes it (`git add` of a deleted untracked path exits 128).
+  writeFileSync(join(fragDir, "42.md"), "section: New features\n- [user] feature from 42 (#42).\n");
+
+  const result = collectWaveChangelog(0, memoryLogger(), dir);
+
+  assert.equal(result.committed, true);
+  assert.deepEqual(result.collected, ["42.md"]);
+  // Only the fold's CHANGELOG.md change lands — no deletion of a never-tracked path.
+  assert.deepEqual(headChanges(dir), ["M\tCHANGELOG.md"]);
+  assert.ok(readFileSync(join(dir, "CHANGELOG.md"), "utf8").includes("feature from 42"));
+});
+
 test("collectWaveChangelog leaves fragments in place and logs one line when the project has no CHANGELOG.md", () => {
   // A repo that keeps no changelog — the fold is opting out, not folding into nothing.
   const dir = mkdtempSync(join(tmpdir(), "vetinari-merge-nocl-"));

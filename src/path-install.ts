@@ -22,7 +22,7 @@ export const WRAPPER_MARKER = "# vetinari-install-wrapper: written by `vetinari 
 const SH_SAFE_ARG = /^[A-Za-z0-9_@%+=:,./-]+$/;
 
 /** POSIX single-quote `arg` unless it is already shell-safe (`'` written as `'\''`). Pure. */
-export function shQuoteArg(arg: string): string {
+function shQuoteArg(arg: string): string {
   if (SH_SAFE_ARG.test(arg)) return arg;
   return `'${arg.replace(/'/g, "'\\''")}'`;
 }

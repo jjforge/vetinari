@@ -69,10 +69,18 @@ translation error, not a naming choice.
   - [user] <entry text> (#<issue>).
   ```
 
-  Use the section labels and audience tags (`[user]`/`[ops]`/`[api]`/`[internal]`) from
-  `docs/changelog-conventions.md`; a fragment may carry more than one `section:` block.
-  A purely internal refactor with no user-visible effect needs none. Do not defer it to
-  a later pass — an unlogged change is one nobody downstream can see landed.
+  A `section:` label is one of these, in this order — pick the one that fits:
+
+  <!-- SECTION-LABELS:BEGIN — pinned to SECTION_ORDER by src/prompt.test.ts; edit both together -->
+  Breaking changes · New features · Improvements · Bug fixes · Security · Infrastructure · Architecture · Testing · Code quality · Documentation
+  <!-- SECTION-LABELS:END -->
+
+  Each bullet opens with exactly one audience tag naming who the change reaches — pick
+  the highest-reach one that fits: `[user]` someone using the tool · `[ops]` someone
+  running or configuring it · `[api]` a programmatic contract · `[internal]` nothing
+  externally observable. A fragment may carry more than one `section:` block. A purely
+  internal refactor with no user-visible effect needs none. Do not defer it to a later
+  pass — an unlogged change is one nobody downstream can see landed.
 
 Commit your work as you go — the orchestrator reads commits off this branch —
 and run the repository's own formatter before each commit.

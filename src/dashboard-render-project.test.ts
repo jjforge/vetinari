@@ -13,6 +13,7 @@ import {
   REPO_DROPDOWN_SCRIPT,
   ARCHIVE_LIST_SCRIPT,
   GRAFT_SCRIPT,
+  STOP_SCRIPT,
 } from "./dashboard-assets.ts";
 import {
   archiveRowMatches,
@@ -284,6 +285,31 @@ test("the Stop control wears the plain accent and only stop now the risky-action
   assert.match(page, /\.stop-btn:disabled \{[^}]*border: 1px solid var\(--color-secondary\)/);
   assert.match(page, /\.stop-graceful \{[^}]*background: var\(--color-primary\)/);
   assert.match(page, /\.stop-now \{[^}]*background: var\(--color-red\)/);
+});
+test("the Stop dialog submits by fetch with an in-flight state, reporting a refusal inside the dialog (#432)", () => {
+  // The page ships the shipped script and re-wires it on every live refresh, like redrive.
+  const html = renderStatusPage(stopCampaign(), { prune: true, graft: true, leaseLive: true });
+  assert.ok(html.includes(STOP_SCRIPT));
+  assert.match(html, /wireStop\(\);/);
+  const submit = STOP_SCRIPT.slice(STOP_SCRIPT.indexOf('form.addEventListener("submit"'));
+  assert.match(submit, /event\.preventDefault\(\);/);
+  // The pressed button rides the body, so Stop now carries `now=1` as the native POST would.
+  assert.match(submit, /new FormData\(form, pressed\)/);
+  assert.match(submit, /fetch\("\/stop"/);
+  // Entering flight sets aria-busy, relabels the pressed button "stopping…" and disables both submits.
+  assert.match(
+    STOP_SCRIPT,
+    /const enterFlight = \(pressed\) => \{[^}]*form\.setAttribute\("aria-busy", "true"\)[^}]*pressed\.textContent = "stopping…"[^}]*b\.disabled = true[^}]*\}/,
+  );
+  // A busy guard returns before a second fetch; the clear runs in a finally on every exit.
+  assert.match(submit, /if \(busy\) return;[\s\S]*fetch\("\/stop"/);
+  assert.match(submit, /\} finally \{[^}]*busy = false;[^}]*clearFlight\(pressed\);[^}]*\}/);
+  assert.match(STOP_SCRIPT, /const clearFlight = \(pressed\) => \{[^}]*form\.removeAttribute\("aria-busy"\)[^}]*\}/);
+  // A refusal (409) or a broken stop (502) shows the route's own words inside the dialog.
+  assert.match(submit, /if \(!res\.ok\) \{[^}]*showErr\(\(await res\.text\(\)\)\.trim\(\)[^}]*return;[^}]*\}/);
+  assert.match(STOP_SCRIPT, /dialog\.querySelector\("\[data-stop-status\]"\)/);
+  // A followed 303 goes to the board, where the pending stop shows off the event log.
+  assert.match(submit, /location\.assign\(res\.url\);/);
 });
 test("renderStatusPage puts a quiet graft input on the summary line, greyed at rest (#202, #168)", () => {
   const runningCampaign = {

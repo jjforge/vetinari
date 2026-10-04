@@ -23,6 +23,7 @@ import {
   REPO_DROPDOWN_SCRIPT,
   STATE_CHIP_BORDER_CSS,
   STATE_DOT_CSS,
+  STOP_SCRIPT,
   TOP_BAR_STYLES,
 } from "./dashboard-assets.ts";
 import { dotClass, freezeIntent, graftCarry, reasonWord, redriveAllowed, resumeIntent, stopAllowed } from "./dashboard-visual-state.ts";
@@ -851,13 +852,15 @@ ${ARCHIVE_LIST_SCRIPT}
         });
       }
     }
-    // The summary-line graft input and the Redrive control are inside #live-region too, so
-    // rebind them each refresh (their nodes are replaced on every soft-refresh).
+    // The summary-line graft input and the Redrive and Stop controls are inside #live-region
+    // too, so rebind them each refresh (their nodes are replaced on every soft-refresh).
     wireGraft();
     wireRedrive();
+    wireStop();
   }
 ${GRAFT_SCRIPT}
 ${REDRIVE_SCRIPT}
+${STOP_SCRIPT}
   wireLiveRegion();
 ${LIVE_TAIL_SCRIPT}
 ${HOST_LOG_SCRIPT}

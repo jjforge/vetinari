@@ -16,6 +16,7 @@ import {
   HOST_LOG_SCRIPT,
   LIVE_TAIL_STYLES,
   REDRIVE_SCRIPT,
+  STOP_SCRIPT,
   GRAFT_SCRIPT,
 } from "./dashboard-assets.ts";
 import type { GraftRejection } from "./plan.ts";
@@ -303,6 +304,19 @@ test("REDRIVE_SCRIPT sends the confirm by fetch with an in-flight state, and rep
   assert.match(submit, /location\.assign\(res\.url\);/);
   // The note and error land in the dialog's own status element.
   assert.match(REDRIVE_SCRIPT, /dialog\.querySelector\("\[data-redrive-status\]"\)/);
+});
+
+test("STOP_SCRIPT opens the confirm dialog on click and closes it on Cancel — only enabled, no double-bind (#432)", () => {
+  assert.match(STOP_SCRIPT, /function wireStop\(\)/);
+  // Only wires an enabled control — a greyed button (no dialog) is left inert.
+  assert.match(STOP_SCRIPT, /open\.disabled/);
+  assert.match(
+    STOP_SCRIPT,
+    /open\.addEventListener\("click", \(\) => \{ if \(typeof dialog\.showModal === "function"\) dialog\.showModal\(\); \}\)/,
+  );
+  assert.match(STOP_SCRIPT, /cancel\.addEventListener\("click", \(\) => dialog\.close\(\)\)/);
+  // Guarded against a re-bind so a soft-refresh re-run over the same node adds no second listener.
+  assert.match(STOP_SCRIPT, /open\.dataset\.stopWired/);
 });
 
 test("the issue sheet sends a reply by fetch with an in-flight state, and reports the route's answer under the reply box (#369)", () => {

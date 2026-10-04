@@ -43,6 +43,7 @@ import {
   waveLabel,
   waveState,
   selectStatus,
+  statusConfigFromPointer,
   summarizeRun,
   type CampaignStatus,
   type OrchestratorEvent,
@@ -490,39 +491,94 @@ test("an archived run whose parked record survived reads parked, not idle — it
   );
 });
 
-test("a finished run lingering in the live log whose parked record survived reads parked, not folded-to-idle (#232)", () => {
-  const base = join(tmpdir(), `vetinari-landing-fold-parked-${Date.now()}`);
-  const dir = join(base, "demo");
-  // The live log reached its clean terminal campaign-done (101 merged, its wave closed),
-  // so `status.parked` filters the record out and the run would otherwise fold to idle
-  // (#208). But a parked record for 101 survived on disk (a crash before `clearParked`),
-  // so the fold branch must consult it and surface the outstanding park, not idle.
+// Both surfaces read one rule for which parked records count (#379): the project page's
+// `buildStatus(...).parked` and the landing's card tally, counter and queue must agree.
+const assertParkedAgree = (project: string, dir: string, expected: string[]) => {
+  const status = buildStatus(statusConfigFromPointer(pointerFor(project, dir)));
+  const { counters, projects, parked } = buildLanding([pointerFor(project, dir)], new Date("2026-06-15T12:00:00.000Z"));
+  const [card] = projects;
+  assert.deepEqual(
+    status.parked.map((p) => p.issueNumber),
+    expected,
+  );
+  assert.equal(card.runState === "parked", expected.length > 0, `card reads ${card.runState}`);
+  assert.equal(card.tally.parked, expected.length);
+  assert.equal(counters.parked, expected.length);
+  assert.deepEqual(
+    parked.map((p) => [p.project, p.issueNumber]),
+    expected.map((issue) => [project, issue]),
+  );
+};
+
+const writeParkedRecord = (dir: string, taskId: string, parkedAt: string) =>
+  writeFileSync(
+    join(dir, "parked", `${taskId}.json`),
+    JSON.stringify({ taskId, parkedAt, reason: "stalled", detail: "no-commit", branch: `agent/${taskId}`, question: "Stalled" }),
+  );
+
+test("a record for an issue pruned out of a since-done campaign counts on neither surface (#379)", () => {
+  const dir = join(tmpdir(), `vetinari-landing-pruned-parked-${Date.now()}`, "demo");
+  // 102 parks, is pruned out of the plan, and the rest of the campaign merges and
+  // finishes. Its record still sits on disk; it is outside the plan, so it counts nowhere.
+  seedState(dir, [
+    event("campaign-start", { ts: "2026-06-15T08:00:00.000Z", waves: [["101", "102"]], name: "work", slots: 2 }),
+    event("wave-start", { ts: "2026-06-15T08:01:00.000Z", index: 0, tasks: ["101", "102"] }),
+    event("parked", { ts: "2026-06-15T08:02:00.000Z", taskId: "102", reason: "stalled", detail: "no-commit" }),
+    event("prune", { ts: "2026-06-15T08:03:00.000Z", target: "102", removed: ["102"], dropped: ["102"] }),
+    event("wave-done", { ts: "2026-06-15T08:04:00.000Z", index: 0, merged: ["101"] }),
+    event("campaign-done", { ts: "2026-06-15T08:05:00.000Z", waves: 1 }),
+  ]);
+  writeParkedRecord(dir, "102", "2026-06-15T08:02:00.000Z");
+  assertParkedAgree("demo", dir, []);
+});
+
+test("a record for a member of a closed wave counts on neither surface, even once the run folds to idle (#379)", () => {
+  const dir = join(tmpdir(), `vetinari-landing-closed-parked-${Date.now()}`, "demo");
+  // 101 merged and its wave logged wave-done; its record survived (a crash before
+  // `clearParked`). A closed wave's member is not parked, so neither surface counts it —
+  // the deliberate reversal of the old landing-only read of every record on disk.
   seedState(dir, [
     event("campaign-start", { ts: "2026-06-15T08:00:00.000Z", waves: [["101"]], name: "gateway work", slots: 1 }),
     event("wave-done", { ts: "2026-06-15T08:03:00.000Z", index: 0, merged: ["101"] }),
     event("campaign-done", { ts: "2026-06-15T08:06:00.000Z", waves: 1 }),
   ]);
-  writeFileSync(
-    join(dir, "parked", "101.json"),
-    JSON.stringify({
-      taskId: "101",
-      parkedAt: "2026-06-15T08:02:00.000Z",
-      reason: "question",
-      branch: "agent/101",
-      question: "Which approach?",
-    }),
-  );
+  writeParkedRecord(dir, "101", "2026-06-15T08:02:00.000Z");
+  assertParkedAgree("demo", dir, []);
+});
 
-  const { counters, projects, parked } = buildLanding([pointerFor("demo", dir)], new Date("2026-06-15T12:00:00.000Z"));
-  const [card] = projects;
-  assert.equal(card.runState, "parked");
-  assert.ok(card.tally.parked >= 1, `expected tally.parked >= 1, got ${card.tally.parked}`);
-  // Counter and queue stay consistent with the card — the surviving park is not filtered away.
-  assert.equal(counters.parked, 1);
-  assert.deepEqual(
-    parked.map((p) => [p.project, p.issueNumber]),
-    [["demo", "101"]],
-  );
+test("a record from a campaign a newer campaign-start superseded counts on neither surface (#379)", () => {
+  const dir = join(tmpdir(), `vetinari-landing-superseded-parked-${Date.now()}`, "demo");
+  // 348 parked in an earlier campaign; a newer campaign (without 348) then ran to done.
+  // The reducer folds only the latest campaign-start onward, so 348 is outside the plan.
+  seedState(dir, [
+    event("campaign-start", { ts: "2026-06-15T07:00:00.000Z", waves: [["348"]], name: "earlier", slots: 1 }),
+    event("wave-start", { ts: "2026-06-15T07:01:00.000Z", index: 0, tasks: ["348"] }),
+    event("parked", { ts: "2026-06-15T07:02:00.000Z", taskId: "348", reason: "stalled", detail: "no-commit" }),
+    event("campaign-start", { ts: "2026-06-15T08:00:00.000Z", waves: [["875"]], name: "later", slots: 1 }),
+    event("wave-done", { ts: "2026-06-15T08:03:00.000Z", index: 0, merged: ["875"] }),
+    event("campaign-done", { ts: "2026-06-15T08:06:00.000Z", waves: 1 }),
+  ]);
+  writeParkedRecord(dir, "348", "2026-06-15T07:02:00.000Z");
+  assertParkedAgree("demo", dir, []);
+});
+
+test("with an empty live log every surviving record counts on both surfaces (#232, #379)", () => {
+  const dir = join(tmpdir(), `vetinari-landing-empty-parked-${Date.now()}`, "demo");
+  seedState(dir, []);
+  writeParkedRecord(dir, "601", "2026-06-15T09:06:00.000Z");
+  assertParkedAgree("demo", dir, ["601"]);
+});
+
+test("a live, in-plan park counts on both surfaces (#379)", () => {
+  const dir = join(tmpdir(), `vetinari-landing-live-parked-${Date.now()}`, "demo");
+  seedState(dir, [
+    event("campaign-start", { ts: "2026-06-15T08:00:00.000Z", waves: [["101", "102"]], name: "work", slots: 2 }),
+    event("wave-start", { ts: "2026-06-15T08:01:00.000Z", index: 0, tasks: ["101", "102"] }),
+    event("spawn", { ts: "2026-06-15T08:01:30.000Z", taskId: "101" }),
+    event("parked", { ts: "2026-06-15T08:02:00.000Z", taskId: "102", reason: "stalled", detail: "no-commit" }),
+  ]);
+  writeParkedRecord(dir, "102", "2026-06-15T08:02:00.000Z");
+  assertParkedAgree("demo", dir, ["102"]);
 });
 
 test("buildLanding folds a finished campaign still in the live log to idle, display-only, keeping its summary (#208)", () => {

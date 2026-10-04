@@ -229,6 +229,12 @@ export interface CampaignPlan extends WavePlan {
    * resolved, pruned, or prompted (§356). A *skipped* check, never a dropped ticket.
    */
   filesetCheckSkipped?: boolean;
+  /**
+   * selected issues skipped before planning because their campaign merge commit is already
+   * on the base (design §4) — merged work whose label has not caught up. Each carries the
+   * merge commit's sha so the provenance can name the proof. Absent/empty when none was.
+   */
+  alreadyMerged?: { id: string; sha: string }[];
 }
 
 /** A fileKey is bare — carries no path, only a basename — when it has no separator:
@@ -488,12 +494,16 @@ export function waveArgs(plan: WavePlan): string {
  * tickets unreachable by dependency. Plans only — this describes the plan, it
  * does not run it.
  */
-export function describePlan(plan: WavePlan & Partial<Pick<CampaignPlan, "pruned" | "underspecified" | "filesetCheckSkipped">>): string {
+export function describePlan(
+  plan: WavePlan & Partial<Pick<CampaignPlan, "pruned" | "underspecified" | "filesetCheckSkipped" | "alreadyMerged">>,
+): string {
   const scheduled = plan.placements.length;
   const pruned = plan.pruned ?? [];
+  const alreadyMerged = plan.alreadyMerged ?? [];
   const lines: string[] = [
     `campaign: ${plan.waves.length} wave(s), ${scheduled} ticket(s) scheduled, ${plan.unreachable.length} unreachable` +
       (pruned.length ? `, ${pruned.length} pruned` : "") +
+      (alreadyMerged.length ? `, ${alreadyMerged.length} already merged` : "") +
       ".",
     "",
   ];
@@ -534,6 +544,13 @@ export function describePlan(plan: WavePlan & Partial<Pick<CampaignPlan, "pruned
     lines.push("", "Excluded (dropped at the tracker edge — not work for this campaign):");
     for (const e of plan.excluded) {
       lines.push(`  #${e.id}  — ${e.reason}`);
+    }
+  }
+
+  if (alreadyMerged.length) {
+    lines.push("", "Already merged (skipped — its campaign merge commit is on the base):");
+    for (const m of alreadyMerged) {
+      lines.push(`  #${m.id} looks already merged (merge commit ${m.sha}) — skipped; --include-merged to include`);
     }
   }
 
@@ -709,6 +726,8 @@ export interface CampaignPlanConfig {
 /** The parsed `--on-underspecified` flag, if the caller passed one. */
 export interface CampaignPlanOptions {
   onUnderspecified?: string;
+  /** `--include-merged`: plan a selected issue even when its merge commit is on the base. */
+  includeMerged?: boolean;
 }
 
 /**
@@ -719,6 +738,12 @@ export interface CampaignPlanOptions {
 export interface CampaignPlanRunDeps {
   isTTY: boolean;
   ask: UnderspecifiedPrompt;
+  /**
+   * id -> the sha of its campaign merge commit on the base, or undefined (the CLI passes
+   * `findMergeCommit`). When given, a selected id that has one is skipped as already merged
+   * (design §4); when absent, nothing is skipped.
+   */
+  mergeCommitOf?: (id: string) => string | undefined;
 }
 
 /** The rendered-but-not-printed plan: the CLI case prints these three, in order. */
@@ -732,6 +757,8 @@ export interface CampaignPlanReport {
   report: string;
   /** the suggested `--name` value, or undefined when the set spans no area label. */
   suggestedName?: string;
+  /** the selected issues skipped as already merged, with their merge commit sha (design §4). */
+  alreadyMerged: { id: string; sha: string }[];
 }
 
 /**
@@ -756,12 +783,28 @@ export async function runCampaignPlan(
   expandExcluded: Exclusion[] = [],
 ): Promise<CampaignPlanReport> {
   if (!ids.length) throw new Refusal("campaign needs at least one issue id or label: campaign 436 611 640");
+
+  // Skip a selected issue whose campaign merge commit is already on the base (design §4):
+  // its label may not have caught up (a red-base park never relabels; a green relabel can
+  // race the next launch), so the merge commit, not the label, says it is done. Reported,
+  // never silent; `--include-merged` plans it anyway (a reopened issue).
+  const alreadyMerged: { id: string; sha: string }[] = [];
+  let planIds = uniqueOrder(ids);
+  if (deps.mergeCommitOf && !opts.includeMerged) {
+    const mergeCommitOf = deps.mergeCommitOf;
+    planIds = planIds.filter((id) => {
+      const sha = mergeCommitOf(id);
+      if (sha) alreadyMerged.push({ id, sha });
+      return !sha;
+    });
+  }
+
   // A selection that resolves to a single issue layers into one trivial wave, so the
   // blockedBy *requirement* guards nothing — stand it down (§356). The check itself is
   // not skipped: a configured resolver still runs below and still drops a lone ticket
   // held by an open blocker outside the selection; only the "no resolver configured"
   // throw is lifted, so bare `campaign <id>` runs without a resolver wired in.
-  const single = uniqueOrder(ids).length === 1;
+  const single = planIds.length <= 1;
   if (!cfg.blockedBy && !single)
     throw new Refusal(
       'campaign needs a "blockedBy" resolver in your config to plan waves — e.g. blockedBy: githubBlockedBy("owner/repo") (or pass --override to run hand-crafted waves).',
@@ -770,8 +813,17 @@ export async function runCampaignPlan(
   // Which files each ticket touches: the project's resolver, or the shipped
   // cites-from-body default, over the ticket's ticketProse'd text.
   const resolveFileSet = cfg.fileSet ?? defaultFileSet();
-  const plan = await planCampaign(ids, {
-    blockedBy: cfg.blockedBy ?? (() => []),
+  // A skipped issue is a satisfied blocker, like a merged (pending-verify) one: it is still
+  // open, so the resolver still returns it — strip it so it never gates or strands a
+  // dependent. The resolver's `onExcluded` sink is forwarded so its own drops still report.
+  const skipped = new Set(alreadyMerged.map((m) => m.id));
+  const resolveBlockedBy = cfg.blockedBy as ExcludingBlockedBy | undefined;
+  const blockedBy: ExcludingBlockedBy | undefined =
+    resolveBlockedBy && skipped.size
+      ? async (id, onExcluded) => (await resolveBlockedBy(id, onExcluded)).filter((b) => !skipped.has(normalize(b)))
+      : resolveBlockedBy;
+  const plan = await planCampaign(planIds, {
+    blockedBy: blockedBy ?? (() => []),
     fileSet: async (id) => resolveFileSet(ticketProse(String(await cfg.fetchTask(id)))),
     onUnderspecified: underspecifiedPromptFor({
       flag: opts.onUnderspecified,
@@ -782,12 +834,12 @@ export async function runCampaignPlan(
 
   // A suggested --name from the area labels the selected issues span — the same
   // fetchTask the plan uses, read for its labels.
-  const suggestedName = await suggestCampaignName(ids, async (id) => labelsFromTask(String(await cfg.fetchTask(id))));
+  const suggestedName = await suggestCampaignName(planIds, async (id) => labelsFromTask(String(await cfg.fetchTask(id))));
 
   // Fold the label-expansion exclusions in front of the planner's own so the
   // provenance's Excluded section names every edge drop, expansion then layering.
-  const report = describePlan({ ...plan, excluded: [...expandExcluded, ...plan.excluded] });
-  return { waves: plan.waves, waveArgs: waveArgs(plan), report, suggestedName };
+  const report = describePlan({ ...plan, excluded: [...expandExcluded, ...plan.excluded], alreadyMerged });
+  return { waves: plan.waves, waveArgs: waveArgs(plan), report, suggestedName, alreadyMerged };
 }
 
 /** One ticket's resolver verdict, as `fileset-check` reports it. */

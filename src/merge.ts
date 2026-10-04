@@ -50,6 +50,26 @@ export function branchHasCommits(cfg: { baseBranch: string; branchPrefix: string
   return r.code === 0 && Number(r.stdout.trim()) > 0;
 }
 
+/**
+ * The abbreviated sha of the campaign merge commit that landed `taskId` on the base — a commit
+ * reachable from `cfg.baseBranch` (the ref, not HEAD) whose subject is exactly
+ * `campaign: merge <branchPrefix><taskId>` — or undefined when there is none. The green path
+ * reclaims the agent branch after merging, so the merge subject, not the branch, is what still
+ * proves the issue merged; a fresh campaign's planner skips such an issue (design §4). The match
+ * is exact (`agent/40` never matches `agent/405`), and a git failure reads undefined, so an
+ * unreadable repo skips nothing.
+ */
+export function findMergeCommit(cfg: { baseBranch: string; branchPrefix: string }, taskId: string): string | undefined {
+  const subject = `campaign: merge ${cfg.branchPrefix}${taskId}`;
+  const r = gitTry(["log", cfg.baseBranch, "--fixed-strings", `--grep=${subject}`, "--format=%h %s", "--"]);
+  if (r.code !== 0) return undefined;
+  for (const line of r.stdout.split("\n")) {
+    const space = line.indexOf(" ");
+    if (space > 0 && line.slice(space + 1) === subject) return line.slice(0, space);
+  }
+  return undefined;
+}
+
 export interface IntegrateResult {
   merged: string[];
   /**

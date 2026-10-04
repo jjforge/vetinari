@@ -1047,3 +1047,84 @@ test("labelsFromTask reads GitHub label objects and is best-effort on non-JSON",
   assert.deepEqual(labelsFromTask(JSON.stringify({ labels: [{ name: "gateway" }, { name: "P2" }] })), ["gateway", "P2"]);
   assert.deepEqual(labelsFromTask("not json at all"), []);
 });
+
+test("runCampaignPlan skips and reports a selected issue whose merge commit is already on the base (#405)", async () => {
+  // 611 still carries the ready label (the swap to pending-verify has not landed), so the
+  // selection lists it — but its campaign merge commit is on the base, so it is skipped.
+  const report = await runCampaignPlan(
+    cfgFrom({
+      "611": JSON.stringify({ body: "Touches: a.ts" }),
+      "640": JSON.stringify({ body: "Touches: b.ts" }),
+    }),
+    ["611", "640"],
+    {},
+    { isTTY: false, ask: () => "fail", mergeCommitOf: (id) => (id === "611" ? "abc1234" : undefined) },
+  );
+
+  assert.deepEqual(report.waves, [["640"]]);
+  assert.deepEqual(report.alreadyMerged, [{ id: "611", sha: "abc1234" }]);
+  assert.ok(
+    report.report.includes("#611 looks already merged (merge commit abc1234) — skipped; --include-merged to include"),
+    report.report,
+  );
+  assert.match(report.report, /, 1 already merged/);
+});
+
+test("runCampaignPlan treats an already-merged skip as a satisfied blocker — its dependent plans in wave 0 (#405)", async () => {
+  // 640 is blocked by 611; 611 is still open (so the resolver returns it) but merged.
+  const cfg = cfgFrom(
+    {
+      "611": JSON.stringify({ body: "Touches: a.ts" }),
+      "640": JSON.stringify({ body: "Touches: b.ts" }),
+      "701": JSON.stringify({ body: "Touches: c.ts" }),
+    },
+    { "640": ["611"] },
+  );
+  const report = await runCampaignPlan(
+    {
+      ...cfg,
+      // a resolver that also reports an edge exclusion — it must still reach the report
+      blockedBy: (id: string, onExcluded?: (e: { id: string; reason: string }) => void) => {
+        if (id === "701") onExcluded?.({ id: "699", reason: "pending-verify blocker" });
+        return cfg.blockedBy(id);
+      },
+    } as never,
+    ["611", "640", "701"],
+    {},
+    { isTTY: false, ask: () => "fail", mergeCommitOf: (id) => (id === "611" ? "abc1234" : undefined) },
+  );
+
+  assert.deepEqual(report.waves, [["640", "701"]]);
+  assert.doesNotMatch(report.report, /Unreachable/);
+  assert.match(report.report, /#699.*pending-verify blocker/);
+});
+
+test("runCampaignPlan with includeMerged plans an issue whose merge commit is on the base (#405)", async () => {
+  const report = await runCampaignPlan(
+    cfgFrom({
+      "611": JSON.stringify({ body: "Touches: a.ts" }),
+      "640": JSON.stringify({ body: "Touches: b.ts" }),
+    }),
+    ["611", "640"],
+    { includeMerged: true },
+    { isTTY: false, ask: () => "fail", mergeCommitOf: (id) => (id === "611" ? "abc1234" : undefined) },
+  );
+
+  assert.deepEqual(report.waves, [["611", "640"]]);
+  assert.deepEqual(report.alreadyMerged, []);
+  assert.doesNotMatch(report.report, /already merged/);
+});
+
+test("runCampaignPlan returns empty waves, without throwing, when every selected issue is already merged (#405)", async () => {
+  const report = await runCampaignPlan(
+    cfgFrom({}),
+    ["611", "640"],
+    {},
+    { isTTY: false, ask: () => "fail", mergeCommitOf: (id) => `sha${id}` },
+  );
+
+  assert.deepEqual(report.waves, []);
+  assert.equal(report.waveArgs, "");
+  assert.match(report.report, /#611 looks already merged \(merge commit sha611\)/);
+  assert.match(report.report, /#640 looks already merged \(merge commit sha640\)/);
+});

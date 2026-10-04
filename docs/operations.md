@@ -1,11 +1,46 @@
 # Operations — running vetinari on a host
 
-This is the "how do I run it on a host" material: standing up the gateway as a
-service so questions reach you, capping how many containers the machine runs,
+This is the "how do I run it on a host" material: putting the CLI on PATH,
+standing up the gateway as a service so questions reach you, capping how many containers the machine runs,
 wiring the status line, upgrading, and the reconciliation tools you reach for
 when something drifts. The [README](../README.md) covers the first hour and the
 [user guide](user-guide.md) the operator's model; this is the reference for
 keeping an install healthy over time.
+
+## Putting the CLI on PATH
+
+`npx vetinari` resolves only inside a project whose `node_modules` holds the
+package, and `npm link` / `npm install -g` need a writable global prefix (on a nix
+host it is the read-only store). A `node_modules/.bin` shim does not help either:
+`src/cli.mts`'s `#!/usr/bin/env -S npx tsx` shebang looks for `tsx` in the
+*calling* project. So put a wrapper on PATH, once per machine, from where the
+package is installed:
+
+```bash
+npx vetinari install                     # writes ~/.local/bin/vetinari
+npx vetinari install --dir ~/bin         # a different directory
+npx vetinari install --dry-run           # print the wrapper, write nothing
+```
+
+The wrapper is a `/bin/sh` script that runs `node` with this checkout's tsx loader
+and `src/cli.mts` — the launch `gateway install` resolves, without `npx`, so it
+works in any directory, including a project with no `package.json`. After it,
+`vetinari …` is the invocation everywhere, and the one the status line defaults
+to.
+
+- **`--dir`** picks the directory (default `~/.local/bin`, created if missing; a
+  relative path resolves against the current directory).
+- **Re-running is safe.** A wrapper `install` wrote before (it carries a marker
+  comment) is rewritten. Any other file at `<dir>/vetinari` is a refusal (exit 4)
+  naming the path; **`--force`** overwrites it.
+- **Off PATH.** If the directory is not on your `PATH`, `install` still writes the
+  wrapper, then prints the line to add to your shell profile:
+  `export PATH="<dir>:$PATH"`, or `fish_add_path <dir>` under fish.
+- **Re-run after moving the checkout** — the wrapper bakes its absolute path. A
+  node upgrade needs no rerun: the wrapper takes `node` from your `PATH`, where an
+  interactive shell's toolchain manager has already put it. The gateway's systemd
+  unit pins an absolute `node` instead, because systemd starts it with no such
+  `PATH` (see below).
 
 ## The gateway
 
@@ -377,7 +412,7 @@ piece just narrows what prints.
 ### Install
 
 ```bash
-vetinari statusline install                      # default: npx vetinari statusline
+vetinari statusline install                      # default: vetinari statusline
 vetinari statusline install --run-command ".vetinari.local/run statusline"
 vetinari statusline install --dry-run            # print the plan, write nothing
 vetinari statusline uninstall                    # restore what it wrapped
@@ -387,8 +422,10 @@ vetinari statusline uninstall                    # restore what it wrapped
 idempotent, and `--dry-run` prints the plan and writes nothing.
 
 Pass `--run-command` to match however you invoke the CLI in your project, so the
-`vetinari` import and the config both resolve. The default is `npx vetinari
-statusline`; an in-repo launcher such as `.vetinari.local/run statusline` is the
+`vetinari` import and the config both resolve. The default is `vetinari
+statusline` — the wrapper [`vetinari install`](#putting-the-cli-on-path) puts on
+PATH once per machine. It lands in the committed settings, so it reads the same on
+every machine. An in-repo launcher such as `.vetinari.local/run statusline` is the
 common override.
 
 **Wrapping a status line you already have.** Install **respects a status line you

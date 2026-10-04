@@ -1,5 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   buildInstalledCommand,
   composeStatusLine,
@@ -37,6 +42,21 @@ test("the encoded base survives shell metacharacters (so uninstall restores it v
   const gnarly = `sh -c 'echo "$USER · $(git branch --show-current)"'`;
   const parsed = parseInstalledCommand(buildInstalledCommand("npx vetinari statusline", gnarly));
   assert.equal(parsed?.base, gnarly);
+});
+
+test("the default run command is the bare `vetinari statusline` the PATH wrapper answers — the same on every machine", () => {
+  assert.equal(DEFAULT_RUN_COMMAND, "vetinari statusline");
+});
+
+test("`vetinari statusline install` with no --run-command writes `vetinari statusline` into the committed settings", () => {
+  const cli = fileURLToPath(new URL("./cli.mts", import.meta.url));
+  const tsx = fileURLToPath(new URL("../node_modules/.bin/tsx", import.meta.url));
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-statusline-install-"));
+  // A bare HOME so no user-level status line is inherited as a base to wrap.
+  const r = spawnSync(tsx, [cli, "statusline", "install"], { cwd: dir, env: { ...process.env, HOME: dir }, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const settings = JSON.parse(readFileSync(join(dir, ".claude", "settings.json"), "utf8")) as Settings;
+  assert.equal(settings.statusLine?.command, "vetinari statusline");
 });
 
 test("computeInstall on a project with no status line configures vetinari's, no base to wrap", () => {

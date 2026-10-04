@@ -50,7 +50,12 @@ each one asks of you, and a campaign start to finish — is
 
 ```bash
 npm install github:jjforge/vetinari
+npx vetinari install     # once per machine, from where the package is installed
 ```
+
+`vetinari install` puts a `vetinari` wrapper on your PATH (default `~/.local/bin`),
+so the CLI runs in every project, with or without a `node_modules`. The rest of
+this page calls it as `vetinari`.
 
 Needs Docker, Node 22+, and one agent-provider credential. Vetinari is
 **provider-agnostic** (ADR 0016): a run or campaign executes on **Claude Code**
@@ -63,7 +68,7 @@ the agent container; the exhaustive key list is in
 Scaffold the layout:
 
 ```bash
-npx vetinari init
+vetinari init
 ```
 
 This writes a committed `vetinari/config.mts` and `vetinari/Dockerfile`, plus the
@@ -99,7 +104,7 @@ project's git `origin`, so you never repeat it per resolver. Pass an explicit
 Build the image and prove it before spending anything on an agent:
 
 ```bash
-npx vetinari build          # build cfg.image from vetinari/Dockerfile, then baseline
+vetinari build          # build cfg.image from vetinari/Dockerfile, then baseline
 ```
 
 `build` builds `cfg.image` from your Dockerfile and, on success, runs `baseline` —
@@ -109,9 +114,9 @@ cheapest failure you will ever buy; do not run an agent until it is green.
 Run one issue to watch a single loop go green or park:
 
 ```bash
-npx vetinari run 436                    # one task: loop until green or parked
-npx vetinari parked                     # what's waiting on you, and why
-npx vetinari answer 436 "use approach B, and say why in the commit"
+vetinari run 436                    # one task: loop until green or parked
+vetinari parked                     # what's waiting on you, and why
+vetinari answer 436 "use approach B, and say why in the commit"
 ```
 
 Commits land on `agent/436`; merging stays yours. Or hand the whole merge → test →
@@ -119,15 +124,15 @@ next-wave chain to a campaign:
 
 ```bash
 git checkout main                       # merges land on the checked-out base
-npx vetinari campaign 436 611 640       # select ids → plan waves → run
-npx vetinari campaign ready-for-agent   # or select every open issue with a label
+vetinari campaign 436 611 640           # select ids → plan waves → run
+vetinari campaign ready-for-agent       # or select every open issue with a label
 ```
 
 A campaign takes an issue **selection** (ids, or a label expanded to its open
 issues), **plans** it into dependency-ordered, file-disjoint **waves**, and runs
 them wave by wave: each wave's greens merge onto the base, the merged base is gated
 as a whole, and only then does the next wave start. Watch every project on the
-machine live with `npx vetinari status`, or answer parks from your phone through
+machine live with `vetinari status`, or answer parks from your phone through
 the Telegram gateway.
 
 ## Where to go deeper

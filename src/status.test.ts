@@ -1589,3 +1589,22 @@ test("serveAllStatus refuses GET /api/status under a rebound DNS-name Host with 
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+test("serveAllStatus warns, after its URL line, that a non-loopback bind is unauthenticated; a loopback bind prints no warning (#361)", async (t) => {
+  const configDir = join(tmpdir(), `vetinari-agg-bind-${Date.now()}`);
+  const log = t.mock.method(console, "log", () => {});
+  const linesFor = async (host: string) => {
+    log.mock.resetCalls();
+    const server = await serveAllStatus(configDir, { port: 0, host });
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    return log.mock.calls.map((c) => String(c.arguments[0]));
+  };
+  const wide = await linesFor("0.0.0.0");
+  assert.equal(wide.length, 2);
+  assert.match(wide[0], /^vetinari status: http:\/\//);
+  assert.match(wide[1], /unauthenticated/);
+  assert.match(wide[1], /docs\/operations\.md/);
+  const loopback = await linesFor("127.0.0.1");
+  assert.equal(loopback.length, 1);
+  assert.match(loopback[0], /^vetinari status: http:\/\//);
+});

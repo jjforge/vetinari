@@ -133,5 +133,11 @@ export async function serveAllStatus(
   const address = server.address() as AddressInfo;
   const shownHost = opts.host === "0.0.0.0" ? "<tailnet-or-host-ip>" : opts.host;
   console.log(`vetinari status: http://${shownHost}:${address.port}`);
+  const loopback = opts.host === "localhost" || opts.host === "::1" || /^127\.\d+\.\d+\.\d+$/.test(opts.host);
+  if (!loopback) {
+    console.log(
+      "vetinari status: the dashboard is unauthenticated — reach it only over a private overlay network or an authenticating reverse proxy (see docs/operations.md)",
+    );
+  }
   return server;
 }

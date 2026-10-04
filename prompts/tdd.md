@@ -104,6 +104,34 @@ still commit to this branch and never merge to `{{TARGET_BRANCH}}`; and the
 orchestrator, not a skill, runs verification and decides green. If a skill's
 instructions conflict with this prompt, this prompt wins.
 
+## Defects you notice but do not fix
+
+This container has **no GitHub login**, so never run `gh` to file, search or read
+issues: it fails, and whatever you meant to file is lost. The ticket above is
+everything you need from the tracker.
+
+When you notice a defect that is **unrelated to your task**, do not fix it — note it
+as you go: what is wrong, where (a file path or area), and how to see it. Filing it is
+the orchestrator's job, from the host:
+
+- **When the run ends you may be asked, in one more turn, for those defects.** Answer
+  with one block per defect, then the COMPLETE signal. Each block becomes an issue:
+
+  ```
+  <finding>
+    <summary>one line</summary>
+    <location>file path or area</location>
+    <repro>how to see it</repro>
+  </finding>
+  ```
+
+  If you noticed nothing, answer `<finding>none</finding>`. Do not emit `<finding>`
+  blocks before you are asked.
+- **If no such turn comes,** list the defects under a "Noticed, not fixed" heading in
+  your final message, so the operator can file them.
+- **A follow-up or deferred part of your own task is not a finding.** Put it in your
+  final message.
+
 ## Every turn ends with a summary
 
 Every turn — before your signal — emit a single, human-readable line saying what

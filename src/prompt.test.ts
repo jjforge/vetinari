@@ -74,3 +74,16 @@ test("the TDD prompt warns that co-wave siblings may share a package and asks fo
   assert.match(prompt, /sibling|co-wave|concurrently|same wave/i);
   assert.match(prompt, /unique/i);
 });
+
+test("the TDD prompt tells the agent it has no GitHub login and how a finding reaches the host instead (#440)", () => {
+  // The container never holds tracker credentials, so an agent that tries `gh issue
+  // create` fails and its finding dies in the closing account. The prompt every
+  // project's agents receive must say so, and name the harvest turn's `<finding>`
+  // block — the same tags parseFindings reads — as the route to the host.
+  assert.match(prompt, /no GitHub login/i);
+  assert.match(prompt, /never run `gh`/i);
+  for (const tag of ["<finding>", "<summary>", "<location>", "<repro>"]) {
+    assert.ok(prompt.includes(tag), `prompt is missing the ${tag} tag the harvest parser reads`);
+  }
+  assert.match(prompt, /final message/i, "prompt does not say where a finding goes when no harvest turn comes");
+});

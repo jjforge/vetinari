@@ -18,6 +18,11 @@ and each entry opens with a tag saying who it reaches:
 `**Breaking changes:**` sorts first in a milestone and names the contract it broke.
 Within a milestone each bold section label appears at most once.
 
+### Agents told how findings reach the host — October 4, 2026
+
+**Improvements:**
+- [ops] The TDD prompt every campaign agent gets now says the container has no GitHub login, so the agent shouldn't run `gh`. It says to note defects unrelated to the task and report them as `<finding>` blocks when the final harvest turn asks, which the host files through `reportFinding`. With no harvest turn, they go in the final message. Until now only vetinari's own `CLAUDE.md` said this, so other projects' agents tried `gh issue create`, failed, and buried the finding in their closing account (#440).
+
 ### Log-review skill and a code formatter — October 4, 2026
 
 **Breaking changes:**

@@ -119,7 +119,7 @@ Membership is an orthogonal axis — `member | grafted | pruned` — so a chip s
 | `stalled` | run loop on turn budget, idle timeout, or an empty COMPLETE | yes (an answer is guidance) | no |
 | `conflict` | integrator on merge conflict | no | yes, after the human resolves it |
 | `red-base` | campaign on a red merged base — the wave's reason, carried by `campaign-parked` | no | yes, after fix-forward or prune |
-| `crash` | reconciliation (dead process, no stop marker) | no | yes |
+| `crash` | reconciliation (dead process, no stop marker since the latest wave-start) | no | yes |
 | `stopped` | run loop on SIGINT/SIGTERM before a verdict (its work is kept) | no | yes — a redrive, or `vetinari run <id>` for a standalone run |
 
 ### 2.4 Roll-ups
@@ -211,7 +211,7 @@ Reconciliation, per member of the first wave that is not fully `completed`:
 | `pruned` membership | skipped |
 | `unstarted` / `grafted` | run |
 
-Then the loop continues from that wave as in §5. Redrive is idempotent against a human who answers twice or answers something a prune already removed: an answer for an issue that is not parked is reported and ignored. A redrive refuses to start while a campaign process for the project is live (the lease says so); an answer then only delivers (§5 step 3). Whichever process finishes the last wave archives the run. Crash is recognised by liveness — a campaign process that is gone with no `campaign-*` stop marker — and is reconciled to `parked(crash)` on the next read, never stored as a separate status.
+Then the loop continues from that wave as in §5. Redrive is idempotent against a human who answers twice or answers something a prune already removed: an answer for an issue that is not parked is reported and ignored. A redrive refuses to start while a campaign process for the project is live (the lease says so); an answer then only delivers (§5 step 3). Whichever process finishes the last wave archives the run. Crash is recognised by liveness — a campaign process that is gone with no `campaign-*` stop marker since its latest `wave-start` — and is reconciled to `parked(crash)` on the next read, never stored as a separate status.
 
 ## 8. Concurrency
 

@@ -26,6 +26,8 @@ Within a milestone each bold section label appears at most once.
 - [user] Ctrl-C on a campaign is now a graceful stop, and a second Ctrl-C (or closing its terminal) is `stop --now`; child runs sit in their own process group, so none outlives the campaign (#403).
 - [user] The dashboard and `vetinari parked` show a stopped campaign as parked (`stopped`) with `vetinari redrive` as the move, not idle or crashed (#403).
 - [api] The event log gains `stop-requested { index }`, and `campaign-parked` carries `reason: "stopped"` for an operator stop (#403).
+- [user] The dashboard's project page gains a **Stop** campaign control beside graft and redrive: while a campaign is running it opens a confirm dialog offering **Stop after this wave** or **Stop now**, and a stop already requested reads "stop pending: finishing wave N" until the campaign parks; greyed with "no campaign running" otherwise (#432).
+- [api] New `POST /stop` dashboard route (form fields `project`, optional `now`): shells `vetinari stop [--now]` in the project root — 303 to the board on success, 409 when no campaign is running, 502 when the stop fails or does not finish (#432).
 
 **Improvements:**
 - [ops] The TDD prompt every campaign agent gets now says the container has no GitHub login, so the agent shouldn't run `gh`. It says to note defects unrelated to the task and report them as `<finding>` blocks when the final harvest turn asks, which the host files through `reportFinding`. With no harvest turn, they go in the final message. Until now only vetinari's own `CLAUDE.md` said this, so other projects' agents tried `gh issue create`, failed, and buried the finding in their closing account (#440).

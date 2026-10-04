@@ -729,17 +729,19 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       currentWave = e.index;
     } else if (e.event === "spawn" && e.taskId) {
       // A task took an agent slot (design §2.1) — running until a terminal event lands. A spawn
-      // promotes an `unstarted` member OR a `parked` one (a re-admit, §5 step 3: the answer was
-      // delivered and the child re-spawned) back to `running`; without the parked case a
-      // re-admitted chip reads parked until its next verdict. A `completed` (merged) member is
-      // terminal (§2.2): a spawn for it is a stale second process, ignored as an anomaly.
+      // promotes an `unstarted` member, a `parked` one (a re-admit, §5 step 3: the answer was
+      // delivered and the child re-spawned), OR a `failed` one (a re-run by `redrive --override`)
+      // back to `running`; without the parked case a re-admitted chip reads parked until its next
+      // verdict, and without the failed case a re-driven member keeps its whole card reading failed.
+      // A `completed` (merged) member is terminal (§2.2): a spawn for it is a stale second process,
+      // ignored as an anomaly.
       const taskId = normalizeIssue(String(e.taskId));
       const prev = outcomes.get(taskId) ?? "unstarted";
       if (prev === "completed") {
         anomalies.push(`spawn for already-merged ${taskId} ignored (completed is terminal)`);
         continue;
       }
-      if (prev === "unstarted" || prev === "parked") {
+      if (prev === "unstarted" || prev === "parked" || prev === "failed") {
         outcomes.set(taskId, "running");
         parkReasons.delete(taskId);
       }

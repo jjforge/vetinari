@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaultFileSet, ticketProse } from "./fileset.ts";
+import { packageScopedFileSet } from "../examples/package-scoped-fileset.mts";
 
 let counter = 0;
 /** A fresh, not-yet-created throwaway tree path. */
@@ -143,6 +144,45 @@ test("defaultFileSet keeps an ambiguous bare cite as a basename, still confident
 
   assert.deepEqual(res.files, ["foo.md"]);
   assert.equal(res.confident, true);
+});
+
+test("packageScopedFileSet maps two files in one directory to the same key, so same-package tickets serialize", async () => {
+  // The goal-tracker case: two tickets touch different files in internal/web, a
+  // single Go package. Widened to the directory, their keys collide, so the
+  // planner puts them in separate waves rather than one wave that cannot compile.
+  const root = treeWith("internal/web/checkins.templ", "internal/web/reports.templ", "internal/api/handler.go");
+  const fileSet = packageScopedFileSet(root);
+
+  const checkins = await fileSet("Touches: `internal/web/checkins.templ`\n");
+  const reports = await fileSet("Touches: `internal/web/reports.templ`\n");
+  const api = await fileSet("Touches: `internal/api/handler.go`\n");
+
+  assert.deepEqual(checkins.files, ["internal/web"]);
+  assert.deepEqual(reports.files, ["internal/web"]); // same dir -> same key
+  assert.deepEqual(api.files, ["internal/api"]); // different dir -> different key
+});
+
+test("packageScopedFileSet keys a Creates:-only ticket under '.' (a bare basename has no tree path)", async () => {
+  const root = treeWith("internal/web/checkins.templ");
+  const fileSet = packageScopedFileSet(root);
+
+  // A Creates: cite stays a bare basename (the resolver has no tree path for a file
+  // that does not exist yet), whose dirname is ".". Conservative: it collides with
+  // every other bare key and every root-level file, so it serializes more, never less.
+  const res = await fileSet("Creates (new files): `reports.templ`\n");
+
+  assert.deepEqual(res.files, ["."]);
+  assert.equal(res.confident, true);
+});
+
+test("packageScopedFileSet passes confident through from the wrapped defaultFileSet unchanged", async () => {
+  const root = treeWith("internal/web/checkins.templ");
+  const fileSet = packageScopedFileSet(root);
+
+  // A resolvable cite is confident; a cite absent from the tree forbids confidence —
+  // widening the key to the directory must not alter either verdict.
+  assert.equal((await fileSet("Touches: `internal/web/checkins.templ`\n")).confident, true);
+  assert.equal((await fileSet("Touches: `internal/web/ghost.templ`\n")).confident, false);
 });
 
 test("ticketProse keeps a GitHub task's title and body but drops its comments", () => {

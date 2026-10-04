@@ -56,6 +56,11 @@ translation error, not a naming choice.
   and the counts in your final message and in the commit body.
 - **Confirm a bug still reproduces** before fixing it. If it does not, stop and
   say so rather than changing working code.
+- **Sibling tickets may share your package.** A co-wave sibling can land in the
+  same package as your change in the same wave — file-disjoint is not
+  compile-disjoint in a package-scoped language. Prefer unique, feature-specific
+  names for any new package-level identifier rather than generic ones, so two
+  independently-green branches do not redeclare the same symbol when merged.
 - **Log user-facing changes as a changelog fragment, as part of the work.** When your
   change adds or alters a command, flag, behaviour, config surface, or output, write
   your entry to `changelog.d/<issue>.md` (named for the issue you are implementing) in

@@ -23,6 +23,13 @@ Within a milestone each bold section label appears at most once.
 **Improvements:**
 - [ops] The TDD prompt every campaign agent gets now says the container has no GitHub login, so the agent shouldn't run `gh`. It says to note defects unrelated to the task and report them as `<finding>` blocks when the final harvest turn asks, which the host files through `reportFinding`. With no harvest turn, they go in the final message. Until now only vetinari's own `CLAUDE.md` said this, so other projects' agents tried `gh issue create`, failed, and buried the finding in their closing account (#440).
 
+**Bug fixes:**
+- [user] The dashboard's Redrive confirm and issue-sheet Reply no longer answer "done" the moment their child is spawned. They wait a short startup window: a clean or parked exit goes back to the board as before, a refusal (exit 4) or a child that dies starting shows its own last line inline — in the redrive dialog or under the reply box, with the typed reply kept — and a child still running answers "started" with the path of its log file. Both controls read busy ("redriving…" / "sending…") while in flight (#369).
+- [ops] `redrive` and `answer` started from the dashboard now write their stdout and stderr to `.vetinari.local/logs/dashboard/<verb>-<ts>.log` instead of the dashboard's own console; `POST /redrive` and `POST /answer` answer 303, 409, 502 or 202 accordingly (#369).
+- [user] One unparseable (zero-byte or torn) parked record no longer takes a project's dashboard down or crash-loops the gateway: the parked listings skip it, log it as `parked-record-unreadable` naming the file, and return the rest. Parked records are now also written atomically, so a writer killed mid-write can no longer leave a torn record behind (#381).
+- [user] A project's `vetinari/config.mts` now loads its `import … from "vetinari"` (and `"vetinari/<subpath>"`) from the running install, so a freshly `init`-ed project no longer fails with `ERR_MODULE_NOT_FOUND` and needs no hand-made `node_modules/vetinari` symlink; the running install always wins over any project-local copy (#421).
+- [user] A campaign parked on a member's question or stall now sends its own Telegram notice naming the parked members and pointing at `vetinari answer` (or prune then `vetinari redrive`), instead of wrongly reporting that the base gated red and needs a fix-forward (#423).
+
 ### Log-review skill and a code formatter — October 4, 2026
 
 **Breaking changes:**

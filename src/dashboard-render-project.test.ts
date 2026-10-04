@@ -1482,6 +1482,72 @@ test("renderStatusPage hosts the prune affordance and inline confirm in the tap-
   assert.match(html, /method: "POST"/);
   assert.match(html, /pruning/);
 });
+test("prune's preview leg reads as in-flight while `prune --dry-run` shells — aria-busy + `previewing…`, guarded, cleared in a finally (#365)", () => {
+  const preview = ISSUE_DETAIL_SHEET_SCRIPT.slice(
+    ISSUE_DETAIL_SHEET_SCRIPT.indexOf('const prunePanel = document.getElementById("prune-panel")'),
+  );
+
+  // Entering flight marks the Prune button busy (a non-visual signal), relabels it and holds it disabled.
+  assert.match(
+    preview,
+    /const enterPreviewFlight = \(\) => \{[^}]*pruneStart\.setAttribute\("aria-busy", "true"\)[^}]*pruneStart\.textContent = "previewing…"[^}]*pruneStart\.disabled = true[^}]*\}/,
+  );
+  // A repeat click while the preview is in flight returns before a second fetch.
+  assert.match(
+    preview,
+    /pruneStart\.addEventListener\("click", async \(\) => \{\s*if \(previewBusy\) return;\s*previewBusy = true;\s*enterPreviewFlight\(\);[\s\S]*?fetch\("\/prune\?preview/,
+  );
+  // The clear runs in a finally, so a failed or thrown preview never leaves the button stuck.
+  assert.match(
+    preview,
+    /const clearPreviewFlight = \(\) => \{[^}]*pruneStart\.removeAttribute\("aria-busy"\)[^}]*pruneStart\.textContent = "Prune"[^}]*pruneStart\.disabled = false[^}]*\}/,
+  );
+  assert.match(preview, /fetch\("\/prune\?preview[\s\S]*?\} finally \{[^}]*previewBusy = false;[^}]*clearPreviewFlight\(\);[^}]*\}/);
+  // A failed preview shows the route's own text in place of the closure.
+  assert.match(
+    preview,
+    /fetch\("\/prune\?preview[\s\S]*?if \(!res\.ok\) \{[\s\S]*?pruneConfirmText\.textContent = \(await res\.text\(\)\)\.trim\(\)/,
+  );
+});
+test("prune's confirm leg reads as in-flight while the awaited prune runs — aria-busy + `pruning…`, guarded, cleared in a finally (#365)", () => {
+  const confirm = ISSUE_DETAIL_SHEET_SCRIPT.slice(
+    ISSUE_DETAIL_SHEET_SCRIPT.indexOf('const prunePanel = document.getElementById("prune-panel")'),
+  );
+
+  // Entering flight marks the confirm form busy and relabels its button pruning…, held disabled.
+  assert.match(
+    confirm,
+    /const enterConfirmFlight = \(\) => \{[^}]*pruneConfirm\.setAttribute\("aria-busy", "true"\)[^}]*pruneConfirmBtn\.textContent = "pruning…"[^}]*pruneConfirmBtn\.disabled = true[^}]*\}/,
+  );
+  // A second submit while the prune is in flight returns before a second POST.
+  assert.match(
+    confirm,
+    /pruneConfirm\.addEventListener\("submit", async \(event\) => \{\s*event\.preventDefault\(\);\s*if \(confirmBusy \|\| !pruneTaskId\.value\) return;\s*confirmBusy = true;\s*enterConfirmFlight\(\);[\s\S]*?fetch\("\/prune", \{/,
+  );
+  // The clear runs in a finally, on every exit path.
+  assert.match(
+    confirm,
+    /const clearConfirmFlight = \(\) => \{[^}]*pruneConfirm\.removeAttribute\("aria-busy"\)[^}]*pruneConfirmBtn\.textContent = "Confirm"[^}]*pruneConfirmBtn\.disabled = false[^}]*\}/,
+  );
+  assert.match(confirm, /fetch\("\/prune", \{[\s\S]*?\} finally \{[^}]*confirmBusy = false;[^}]*clearConfirmFlight\(\);[^}]*\}/);
+});
+test("prune's confirm branches on res.ok — a failed prune shows the route's text and never claims it will drop from the plan; a 202 is a persistent note (#365)", () => {
+  const submit = ISSUE_DETAIL_SHEET_SCRIPT.slice(ISSUE_DETAIL_SHEET_SCRIPT.indexOf('fetch("/prune", {'));
+
+  // A 202 (still running at the cap) is ok, so it is intercepted first and shows the route's
+  // own text as the note, keeping the panel (which holds the note) visible.
+  assert.match(
+    submit,
+    /if \(res\.status === 202\) \{(?:(?!prunePanel\.hidden = true)[\s\S])*?pruneNote\.textContent = \(await res\.text\(\)\)\.trim\(\);[\s\S]*?return;[\s\S]*?\}/,
+  );
+  assert.ok(submit.indexOf("res.status === 202") < submit.indexOf("if (!res.ok)"), "202 handled before the failure/success fallthrough");
+  // A non-ok response shows the route's own text and returns before the success note.
+  assert.match(submit, /if \(!res\.ok\) \{[\s\S]*?\(await res\.text\(\)\)\.trim\(\)[\s\S]*?return;\s*\}/);
+  assert.ok(
+    submit.indexOf("if (!res.ok)") < submit.indexOf("will drop from the plan on the next refresh"),
+    "failure returns before the success note",
+  );
+});
 test("renderStatusPage hosts a parked reply block with a Reply submit and no sheet Redrive form (#307, #325)", () => {
   const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
 

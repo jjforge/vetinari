@@ -557,41 +557,87 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
         resetPrune();
       }
     };
+    // The preview shells prune --dry-run for seconds; while it is in flight the Prune
+    // button must read as working (#365), as graft's does: aria-busy, relabelled
+    // previewing… and held disabled, with a guard against a second fetch.
+    let previewBusy = false;
+    const enterPreviewFlight = () => { pruneStart.setAttribute("aria-busy", "true"); pruneStart.textContent = "previewing…"; pruneStart.disabled = true; };
+    const clearPreviewFlight = () => { pruneStart.removeAttribute("aria-busy"); pruneStart.textContent = "Prune"; pruneStart.disabled = false; };
     pruneStart.addEventListener("click", async () => {
+      if (previewBusy) return;
+      previewBusy = true;
+      enterPreviewFlight();
       try {
         const res = await fetch("/prune?preview&taskId=" + encodeURIComponent(pruneTarget) + "&project=" + encodeURIComponent(pruneProj));
-        if (!res.ok) throw new Error(String(res.status));
-        // The structured closure (E2): the dependents that would leave (dropped)
-        // and the banked work kept (keptBanked). Name each so a confirm discloses
-        // the exact closure and never implies merged/mergeable work is discarded.
-        const { target, dropped, keptBanked } = await res.json();
-        const drops = (dropped || []).filter((id) => id !== target);
-        const kept = keptBanked || [];
-        pruneConfirmText.textContent =
-          "Prune #" + target +
-          (drops.length ? " — also drops " + drops.map((id) => "#" + id).join(", ") : " — no dependents") +
-          (kept.length ? ". Keeps banked (merged or mergeable) " + kept.map((id) => "#" + id).join(", ") : "");
-        pruneTaskId.value = target;
-        pruneProject.value = pruneProj;
+        if (!res.ok) {
+          // A failed preview shows the route's own words in place of the closure.
+          pruneConfirmText.textContent = (await res.text()).trim() || "Couldn't preview this prune — is a campaign still running?";
+          pruneTaskId.value = "";
+        } else {
+          // The structured closure (E2): the dependents that would leave (dropped)
+          // and the banked work kept (keptBanked). Name each so a confirm discloses
+          // the exact closure and never implies merged/mergeable work is discarded.
+          const { target, dropped, keptBanked } = await res.json();
+          const drops = (dropped || []).filter((id) => id !== target);
+          const kept = keptBanked || [];
+          pruneConfirmText.textContent =
+            "Prune #" + target +
+            (drops.length ? " — also drops " + drops.map((id) => "#" + id).join(", ") : " — no dependents") +
+            (kept.length ? ". Keeps banked (merged or mergeable) " + kept.map((id) => "#" + id).join(", ") : "");
+          pruneTaskId.value = target;
+          pruneProject.value = pruneProj;
+        }
       } catch {
         pruneConfirmText.textContent = "Couldn't preview this prune — is a campaign still running?";
         pruneTaskId.value = "";
+      } finally {
+        previewBusy = false;
+        clearPreviewFlight();
       }
       pruneStart.hidden = true;
       pruneConfirm.hidden = false;
       updateFoot();
     });
     document.getElementById("prune-cancel").addEventListener("click", resetPrune);
+    // The route awaits the prune child (#365), so the confirm is in flight for as long as the
+    // prune runs: the form is aria-busy and Confirm reads pruning…, held disabled, as graft's.
+    const pruneConfirmBtn = pruneConfirm.querySelector(".prune-confirm-btn");
+    const pruneNote = document.getElementById("prune-note");
+    let confirmBusy = false;
+    const enterConfirmFlight = () => { pruneConfirm.setAttribute("aria-busy", "true"); pruneConfirmBtn.textContent = "pruning…"; pruneConfirmBtn.disabled = true; };
+    const clearConfirmFlight = () => { pruneConfirm.removeAttribute("aria-busy"); pruneConfirmBtn.textContent = "Confirm"; pruneConfirmBtn.disabled = false; };
     pruneConfirm.addEventListener("submit", async (event) => {
       event.preventDefault();
-      if (!pruneTaskId.value) return;
-      await fetch("/prune", {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ taskId: pruneTaskId.value, project: pruneProject.value, confirm: "1" }),
-      });
-      prunePanel.hidden = true;
-      document.getElementById("prune-note").textContent = "pruning… #" + pruneTaskId.value + " will drop from the plan on the next refresh";
+      if (confirmBusy || !pruneTaskId.value) return;
+      confirmBusy = true;
+      enterConfirmFlight();
+      try {
+        const res = await fetch("/prune", {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ taskId: pruneTaskId.value, project: pruneProject.value, confirm: "1" }),
+        });
+        if (res.status === 202) {
+          // Still running at the cap, left running: a persistent note in the panel, which
+          // stays shown (the note lives inside it) with the confirm put away.
+          pruneConfirm.hidden = true;
+          pruneNote.textContent = (await res.text()).trim();
+          return;
+        }
+        if (!res.ok) {
+          // A failed prune (502/400/404) is not a done one: show the route's own words in
+          // place of the closure and never claim the issue will drop from the plan.
+          pruneConfirmText.textContent = (await res.text()).trim() || "Couldn't prune #" + pruneTaskId.value + " — the prune did not run.";
+          return;
+        }
+        prunePanel.hidden = true;
+        pruneNote.textContent = "pruning… #" + pruneTaskId.value + " will drop from the plan on the next refresh";
+      } catch {
+        pruneConfirmText.textContent = "Couldn't reach the dashboard — the prune did not run.";
+      } finally {
+        confirmBusy = false;
+        clearConfirmFlight();
+      }
     });
   }`;
 

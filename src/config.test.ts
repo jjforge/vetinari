@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Refusal } from "./refusal.ts";
-import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { githubFetchTask } from "./index.ts";
@@ -12,6 +13,7 @@ import {
   containerShareWeight,
   encodeAgentOverride,
   loadConfig,
+  localTsconfig,
   ownerRepoFromRemote,
   parseAgentFlags,
   missingCredentials,
@@ -624,4 +626,72 @@ test("loadConfig registers the vetinari resolve hook only once per process", asy
   await loadConfig(writeConfig(scratch(), "vetinari/config.mts", VETINARI_CONFIG_BODY));
 
   assert.equal(registerVetinariResolve(), false);
+});
+
+test("localTsconfig points the type checker at an install's source and its @types/node", () => {
+  const { compilerOptions } = JSON.parse(localTsconfig("/x"));
+
+  assert.deepEqual(compilerOptions.paths.vetinari, ["/x/src/index.ts"]);
+  assert.deepEqual(compilerOptions.typeRoots, ["/x/node_modules/@types"]);
+  assert.deepEqual(compilerOptions.types, ["node"]);
+});
+
+// This install's root as a filesystem path, and the committed tsconfig `init` writes.
+const THIS_INSTALL = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
+const TSCONFIG_TEMPLATE = readFileSync(new URL("../templates/tsconfig.json", import.meta.url), "utf8");
+
+/** A scratch project with `vetinari/config.mts` and, unless opted out, the committed `vetinari/tsconfig.json`. */
+const typedProject = (body = VETINARI_CONFIG_BODY, withTsconfig = true) => {
+  const dir = scratch();
+  const cfgPath = writeConfig(dir, "vetinari/config.mts", body);
+  if (withTsconfig) writeFileSync(join(dir, "vetinari/tsconfig.json"), TSCONFIG_TEMPLATE);
+  return { dir, cfgPath, local: join(dir, ".vetinari.local/tsconfig.json") };
+};
+
+test("loadConfig writes .vetinari.local/tsconfig.json pointing at this install, and rewrites it only when it differs", async () => {
+  const { cfgPath, local } = typedProject();
+
+  await loadConfig(cfgPath);
+  assert.equal(readFileSync(local, "utf8"), localTsconfig(THIS_INSTALL));
+
+  const written = statSync(local).mtimeMs;
+  await new Promise((r) => setTimeout(r, 20));
+  await loadConfig(cfgPath);
+  assert.equal(statSync(local).mtimeMs, written);
+
+  writeFileSync(local, localTsconfig("/moved/install"));
+  await loadConfig(cfgPath);
+  assert.equal(readFileSync(local, "utf8"), localTsconfig(THIS_INSTALL));
+});
+
+test("loadConfig writes no .vetinari.local/tsconfig.json for a project without vetinari/tsconfig.json", async () => {
+  const { cfgPath, local } = typedProject(VETINARI_CONFIG_BODY, false);
+
+  await loadConfig(cfgPath);
+
+  assert.equal(existsSync(local), false);
+});
+
+test("loadConfig still loads when .vetinari.local/tsconfig.json cannot be written", async () => {
+  const { dir, cfgPath } = typedProject();
+  writeFileSync(join(dir, ".vetinari.local"), "a file where the dir should be\n");
+
+  const cfg = await loadConfig(cfgPath);
+
+  assert.equal(cfg.project, "demo");
+});
+
+test("after a load, tsc -p vetinari type-checks a project's config against this install and catches a misspelled field", async () => {
+  const { dir, cfgPath } = typedProject();
+  await loadConfig(cfgPath);
+  const tsc = () =>
+    spawnSync(fileURLToPath(new URL("../node_modules/.bin/tsc", import.meta.url)), ["-p", join(dir, "vetinari")], { encoding: "utf8" });
+
+  const clean = tsc();
+  assert.equal(clean.status, 0, clean.stdout + clean.stderr);
+
+  writeFileSync(cfgPath, VETINARI_CONFIG_BODY.replace("baseBranch", "baseBrnch"));
+  const misspelled = tsc();
+  assert.notEqual(misspelled.status, 0);
+  assert.match(misspelled.stdout, /TS2561/);
 });

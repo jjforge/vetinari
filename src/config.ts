@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { dirname, resolve } from "node:path";
-import { existsSync, readFileSync } from "node:fs";
+import { basename, dirname, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { registerHooks } from "node:module";
 import type { FindingReporter } from "./findings.ts";
 import type { FileSetOf } from "./fileset.ts";
@@ -666,6 +667,42 @@ export function registerVetinariResolve(): boolean {
   return true;
 }
 
+/**
+ * The machine-local `.vetinari.local/tsconfig.json` a project's committed
+ * `vetinari/tsconfig.json` extends: it points the type checker's `"vetinari"` at
+ * the install's source and its `@types/node`, so a project's config type-checks
+ * with no install of its own. Every path is absolute, which is why it is never
+ * committed. Pure; `installRoot` is a filesystem path with no trailing slash.
+ */
+export function localTsconfig(installRoot: string): string {
+  const compilerOptions = {
+    paths: { vetinari: [`${installRoot}/src/index.ts`] },
+    typeRoots: [`${installRoot}/node_modules/@types`],
+    types: ["node"],
+  };
+  return `${JSON.stringify({ compilerOptions }, null, 2)}\n`;
+}
+
+/**
+ * Keep a project's `.vetinari.local/tsconfig.json` pointed at the running install.
+ * Only a config in a `vetinari/` dir that carries a committed `tsconfig.json` has
+ * opted in; an identical file is left alone. A failed write is ignored — types are
+ * a convenience and must never fail the load.
+ */
+function refreshLocalTsconfig(configPath: string): void {
+  const configDir = dirname(configPath);
+  if (basename(configDir) !== "vetinari" || !existsSync(resolve(configDir, "tsconfig.json"))) return;
+  const local = resolve(configDir, "..", ".vetinari.local", "tsconfig.json");
+  const want = localTsconfig(dirname(fileURLToPath(VETINARI_PACKAGE_URL)));
+  try {
+    if (existsSync(local) && readFileSync(local, "utf8") === want) return;
+    mkdirSync(dirname(local), { recursive: true });
+    writeFileSync(local, want);
+  } catch {
+    // ignored: the load goes on without editor types.
+  }
+}
+
 /** Load the consuming project's config from cwd (or an explicit path). */
 export async function loadConfig(explicitPath?: string): Promise<ResolvedConfig> {
   let path = explicitPath;
@@ -684,6 +721,7 @@ export async function loadConfig(explicitPath?: string): Promise<ResolvedConfig>
       );
     }
   }
+  refreshLocalTsconfig(resolve(path));
   registerVetinariResolve();
   const mod = await import(resolve(path));
   const c: VetinariConfig = mod.default ?? mod.config;

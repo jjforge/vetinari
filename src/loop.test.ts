@@ -362,6 +362,187 @@ test("under --json neither the green banner nor the new not-merged guidance reac
   assert.doesNotMatch(banner, /not merged/i, "no not-merged guidance under --json — the JSONL stays clean");
 });
 
+// --- Verdict banners: a run's failed/parked outcomes print on the terminal like green (#355) ------
+
+test("a run whose sandbox creation throws prints a FAILED banner and the re-run line, outcome still failed (#355)", async () => {
+  const cfg = harnessCfg();
+  const sbx = fakeSandbox([]);
+  const deps = depsFor(sbx, {
+    makeSandbox: async () => {
+      throw new Error("agent/T-1 is already checked out at /somewhere — remove that worktree");
+    },
+  });
+
+  const prevChild = process.env.VETINARI_CHILD;
+  delete process.env.VETINARI_CHILD;
+  let captured: { result: string; lines: string[] };
+  try {
+    captured = await captureLog(() => runLoop(cfg, "T-1", undefined, undefined, deps));
+  } finally {
+    if (prevChild === undefined) delete process.env.VETINARI_CHILD;
+    else process.env.VETINARI_CHILD = prevChild;
+  }
+
+  assert.equal(captured.result, "failed");
+  const banner = captured.lines.join("\n");
+  assert.match(banner, /\*\*\* FAILED — agent\/T-1 is already checked out at \/somewhere — remove that worktree/);
+  assert.match(banner, /Fix that, then re-run: vetinari run T-1/);
+});
+
+test("a parked (question) run prints a PARKED banner with the question and the answer line (#355)", async () => {
+  const cfg = harnessCfg();
+  const sbx = fakeSandbox([{ run: { completionSignal: BLOCKED, stdout: "<question><summary>Which base?</summary></question>" } }]);
+
+  const prevChild = process.env.VETINARI_CHILD;
+  delete process.env.VETINARI_CHILD;
+  let captured: { result: string; lines: string[] };
+  try {
+    captured = await captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+  } finally {
+    if (prevChild === undefined) delete process.env.VETINARI_CHILD;
+    else process.env.VETINARI_CHILD = prevChild;
+  }
+
+  assert.equal(captured.result, "parked");
+  const banner = captured.lines.join("\n");
+  assert.match(banner, /\*\*\* PARKED \(question\) — .*Which base\?/);
+  assert.match(banner, /Answer with: vetinari answer T-1/);
+});
+
+test("a stall park (no-commit) prints a PARKED (stalled) banner carrying the record's question (#355)", async () => {
+  const cfg = harnessCfg();
+  const sbx = fakeSandbox([{ run: { completionSignal: DONE } }], "agent/T-1");
+
+  const prevChild = process.env.VETINARI_CHILD;
+  delete process.env.VETINARI_CHILD;
+  let captured: { result: string; lines: string[] };
+  try {
+    captured = await captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { commitsAhead: () => 0 })));
+  } finally {
+    if (prevChild === undefined) delete process.env.VETINARI_CHILD;
+    else process.env.VETINARI_CHILD = prevChild;
+  }
+
+  assert.equal(captured.result, "parked");
+  const banner = captured.lines.join("\n");
+  assert.match(banner, /\*\*\* PARKED \(stalled\) — COMPLETE but agent\/T-1 has no commit beyond base/);
+  assert.match(banner, /Answer with: vetinari answer T-1/);
+});
+
+test("a park prints exactly one PARKED line — park() itself prints nothing (#355)", async () => {
+  const cfg = harnessCfg();
+  const sbx = fakeSandbox([{ run: { completionSignal: BLOCKED, stdout: "<question><summary>Which base?</summary></question>" } }]);
+
+  const { lines } = await captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+
+  const parkedLines = lines.filter((l) => l.includes("*** PARKED"));
+  assert.equal(parkedLines.length, 1, "exactly one PARKED banner — the run loop prints it, park() does not");
+});
+
+test("under --json no FAILED/PARKED or next-step line prints, though the JSONL event lines are still captured (#355)", async () => {
+  const cfg = harnessCfg();
+  const sbx = fakeSandbox([{ run: { completionSignal: BLOCKED, stdout: "<question><summary>Which base?</summary></question>" } }]);
+
+  const prevJson = process.env.VETINARI_JSON;
+  process.env.VETINARI_JSON = "1";
+  let captured: { result: string; lines: string[] };
+  try {
+    captured = await captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+  } finally {
+    if (prevJson === undefined) delete process.env.VETINARI_JSON;
+    else process.env.VETINARI_JSON = prevJson;
+  }
+
+  assert.equal(captured.result, "parked");
+  const banner = captured.lines.join("\n");
+  assert.doesNotMatch(banner, /\*\*\* PARKED/, "no human PARKED banner under --json");
+  assert.doesNotMatch(banner, /Answer with/, "no next-step line under --json");
+  assert.ok(
+    captured.lines.some((l) => l.includes('"event":"parked"')),
+    "the JSONL parked event still reaches stdout under --json",
+  );
+});
+
+test("a FAILED banner under --json prints neither the *** line nor the re-run line (#355)", async () => {
+  const cfg = harnessCfg();
+  const sbx = fakeSandbox([{ throwGeneric: "container vanished" }]);
+
+  const prevJson = process.env.VETINARI_JSON;
+  process.env.VETINARI_JSON = "1";
+  let captured: { result: string; lines: string[] };
+  try {
+    captured = await captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+  } finally {
+    if (prevJson === undefined) delete process.env.VETINARI_JSON;
+    else process.env.VETINARI_JSON = prevJson;
+  }
+
+  assert.equal(captured.result, "failed");
+  const banner = captured.lines.join("\n");
+  assert.doesNotMatch(banner, /\*\*\* FAILED/, "no human FAILED banner under --json");
+  assert.doesNotMatch(banner, /Fix that/, "no re-run line under --json");
+});
+
+test("a campaign child prints the *** verdict line but suppresses the next-step line (#355)", async () => {
+  const cfg = harnessCfg();
+  const sbx = fakeSandbox([{ throwGeneric: "container vanished" }]);
+
+  const prevChild = process.env.VETINARI_CHILD;
+  process.env.VETINARI_CHILD = "1";
+  let captured: { result: string; lines: string[] };
+  try {
+    captured = await captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+  } finally {
+    if (prevChild === undefined) delete process.env.VETINARI_CHILD;
+    else process.env.VETINARI_CHILD = prevChild;
+  }
+
+  assert.equal(captured.result, "failed");
+  const banner = captured.lines.join("\n");
+  assert.match(banner, /\*\*\* FAILED — container vanished/, "the reason line prints for a child");
+  assert.doesNotMatch(banner, /Fix that/, "the next-step line is suppressed for a campaign child");
+});
+
+test("a child's parked verdict prints the *** line but suppresses the answer line (#355)", async () => {
+  const cfg = harnessCfg();
+  const sbx = fakeSandbox([{ run: { completionSignal: BLOCKED, stdout: "<question><summary>Which base?</summary></question>" } }]);
+
+  const prevChild = process.env.VETINARI_CHILD;
+  process.env.VETINARI_CHILD = "1";
+  let captured: { result: string; lines: string[] };
+  try {
+    captured = await captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+  } finally {
+    if (prevChild === undefined) delete process.env.VETINARI_CHILD;
+    else process.env.VETINARI_CHILD = prevChild;
+  }
+
+  assert.equal(captured.result, "parked");
+  const banner = captured.lines.join("\n");
+  assert.match(banner, /\*\*\* PARKED \(question\)/, "the reason line prints for a child");
+  assert.doesNotMatch(banner, /Answer with/, "the answer line is suppressed for a campaign child");
+});
+
+test("a FAILED banner collapses a multi-line detail to its first non-empty line (#355)", async () => {
+  const cfg = harnessCfg();
+  const sbx = fakeSandbox([{ throwGeneric: "first line of the failure\nsecond line with more detail" }]);
+
+  const prevChild = process.env.VETINARI_CHILD;
+  delete process.env.VETINARI_CHILD;
+  let captured: { result: string; lines: string[] };
+  try {
+    captured = await captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+  } finally {
+    if (prevChild === undefined) delete process.env.VETINARI_CHILD;
+    else process.env.VETINARI_CHILD = prevChild;
+  }
+
+  assert.equal(captured.result, "failed");
+  const banner = captured.lines.join("\n");
+  assert.match(banner, /\*\*\* FAILED — first line of the failure/);
+  assert.doesNotMatch(banner, /second line with more detail/, "only the first non-empty line is on the *** line");
+});
+
 test("runLoop counts a null commitsAhead (git failed) as a real change, not an empty green", async () => {
   // null means git could not tell — the guard must fall through to green, never park.
   const cfg = harnessCfg();
@@ -890,6 +1071,29 @@ test("a stop mid-turn parks `stopped` (signal detail + branch), one parked event
   );
   assert.ok(sbx.state.closeCalled >= 1, "the sandbox was closed");
   assert.ok(control.unsubscribed, "the stop handler is removed when runLoop returns");
+});
+
+test("a stopped run's banner prints from the run loop and names `vetinari run <id>` as the resume move (#355)", async () => {
+  const cfg = harnessCfg();
+  const control = makeStopControl();
+  const sbx = stopSandbox([{ fireStop: "SIGINT", neverSettles: true }], control);
+
+  const prevChild = process.env.VETINARI_CHILD;
+  delete process.env.VETINARI_CHILD;
+  let captured: { result: string; lines: string[] };
+  try {
+    captured = await captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { onStop: control.onStop })));
+  } finally {
+    if (prevChild === undefined) delete process.env.VETINARI_CHILD;
+    else process.env.VETINARI_CHILD = prevChild;
+  }
+
+  assert.equal(captured.result, "parked");
+  const parkedLines = captured.lines.filter((l) => l.includes("*** PARKED"));
+  assert.equal(parkedLines.length, 1, "exactly one PARKED banner — printed from the run loop, not park()");
+  const banner = captured.lines.join("\n");
+  assert.match(banner, /\*\*\* PARKED \(stopped\) — The run was stopped before it reached a verdict\./);
+  assert.match(banner, /Continue it with: vetinari run T-1/);
 });
 
 test("a stop whose abandoned run rejects once the sandbox closes still logs exactly one parked{stopped}, no failed", async () => {

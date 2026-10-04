@@ -205,7 +205,7 @@ Reconciliation, per member of the first wave that is not fully `completed`:
 | green but unmerged (answered park, conflict-parked green) | integrate it (§6) without an agent |
 | `parked(question)` / `parked(stalled)` with an answer (record marked answered) | re-enter the run loop with the answer as the prompt |
 | `parked(conflict)` after the human resolved it on the base | integrate |
-| `parked(red-base)` after a fix-forward | re-gate the base — even when nothing new merges — then continue |
+| `parked(red-base)` after a fix-forward | re-gate the base — even when nothing new merges — then continue; when the re-gate is green, every member of the wave merged onto the base (including those merged before the park) gets the merged hook (`onIssueMerged`) once |
 | `parked(crash)` | treat as unstarted if no commits, else resume the session |
 | `failed` | refused — prune it or fix it first; redrive names it. `redrive --override` re-runs it instead (the only meaning `--override` has on redrive) |
 | `pruned` membership | skipped |

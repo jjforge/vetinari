@@ -953,8 +953,10 @@ export async function campaign(
           reporter.line(`wave ${index + 1}/${total}: collected changelog fragments — ${collected.collected.join(", ")}`);
         // Green path only: advance each merged issue to `pending-verify` via the configured
         // `onIssueMerged` seam (issue #103). Best-effort — a failing write is logged and never
-        // touches a stop path. Only the green `merged` set is passed.
-        await markMergedIssues(cfg, merged);
+        // touches a stop path. Only the green `merged` set is passed — plus, on a green re-gate of a
+        // red-base wave, the members merged before the park (`alreadyMerged`), which never got the
+        // hook because their base had not yet passed the gate (ADR 0013).
+        await markMergedIssues(cfg, regate ? [...new Set([...merged, ...alreadyMerged])] : merged);
       }
 
       // Resolve, in the exact §5 step 5 order: failed → red base → any parked member → wave-done.

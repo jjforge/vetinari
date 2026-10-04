@@ -59,24 +59,47 @@ test("redriveAllowed allows a redrive only for a stopped campaign whose lease is
   // The whole-campaign safety rule: redrive is safe only when the campaign's fold is
   // stopped (parked or failed — a crash folds its in-flight members to parked{crash})
   // AND no campaign process for the project still holds the host lease.
-  assert.deepEqual(redriveAllowed("parked", false), { allowed: true, reason: "" });
-  assert.deepEqual(redriveAllowed("failed", false), { allowed: true, reason: "" });
+  assert.deepEqual(redriveAllowed("parked", false, []), { allowed: true, reason: "" });
+  assert.deepEqual(redriveAllowed("failed", false, []), { allowed: true, reason: "" });
 });
 
 test("redriveAllowed refuses while a campaign process still holds the lease, with a one-line reason (#325)", () => {
   // The observed bug: redrive fired on a draining wave started a second campaign process
   // over the live one. A live lease is the strongest signal there is a process to collide with.
-  assert.deepEqual(redriveAllowed("parked", true), { allowed: false, reason: "a campaign process is still running" });
-  assert.deepEqual(redriveAllowed("failed", true), { allowed: false, reason: "a campaign process is still running" });
+  assert.deepEqual(redriveAllowed("parked", true, []), { allowed: false, reason: "a campaign process is still running" });
+  assert.deepEqual(redriveAllowed("failed", true, []), { allowed: false, reason: "a campaign process is still running" });
   // A running fold reads as a live process too, whatever the lease probe returned.
-  assert.deepEqual(redriveAllowed("running", false), { allowed: false, reason: "a campaign process is still running" });
+  assert.deepEqual(redriveAllowed("running", false, []), { allowed: false, reason: "a campaign process is still running" });
 });
 
 test("redriveAllowed refuses a settled or never-run campaign — nothing to pick back up (#325)", () => {
   // A completed campaign is settled (every wave closed); an unstarted/empty one has no
   // stopped campaign to resume. Neither is a redrive target, so each greys with its reason.
-  assert.deepEqual(redriveAllowed("completed", false), { allowed: false, reason: "the campaign is settled — nothing to redrive" });
-  assert.deepEqual(redriveAllowed("unstarted", false), { allowed: false, reason: "no campaign to redrive" });
+  assert.deepEqual(redriveAllowed("completed", false, []), { allowed: false, reason: "the campaign is settled — nothing to redrive" });
+  assert.deepEqual(redriveAllowed("unstarted", false, []), { allowed: false, reason: "no campaign to redrive" });
+});
+
+test("redriveAllowed allows a campaign stopped between waves — a wave completed, a later one never entered (#366)", () => {
+  // Pruning the last non-completed member of a wave folds it to `completed`, so the campaign
+  // folds to `unstarted` while a later wave of real work is still pending. That is a campaign
+  // stopped between waves, not one that never ran: redrive is its only way forward.
+  const waves = [
+    { status: "completed", issues: [{ membership: "member" }, { membership: "pruned" }] },
+    { status: "unstarted", issues: [{ membership: "member" }] },
+  ];
+  assert.deepEqual(redriveAllowed("unstarted", false, waves), { allowed: true, reason: "" });
+  // The lease still gates it — a live process is a collision whatever the fold says.
+  assert.deepEqual(redriveAllowed("unstarted", true, waves), { allowed: false, reason: "a campaign process is still running" });
+});
+
+test("redriveAllowed still refuses a never-run campaign, and one whose only pending wave was pruned away (#366)", () => {
+  const unstarted = { status: "unstarted", issues: [{ membership: "member" }] };
+  const completed = { status: "completed", issues: [{ membership: "member" }] };
+  assert.deepEqual(redriveAllowed("unstarted", false, []), { allowed: false, reason: "no campaign to redrive" });
+  assert.deepEqual(redriveAllowed("unstarted", false, [unstarted, unstarted]), { allowed: false, reason: "no campaign to redrive" });
+  // A wave whose every member is pruned folds to `unstarted`, but it is not pending work.
+  const prunedAway = { status: "unstarted", issues: [{ membership: "pruned" }, { membership: "pruned" }] };
+  assert.deepEqual(redriveAllowed("unstarted", false, [completed, prunedAway]), { allowed: false, reason: "no campaign to redrive" });
 });
 
 test("paneActivity counts a visible append — new lines, pane open and following (#198)", () => {

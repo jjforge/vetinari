@@ -8,6 +8,7 @@ import { agentSelectionFor, makeSandbox } from "./sandbox.ts";
 import { branchHasCommits, collectWaveChangelog, currentBranch, integrateGreens } from "./merge.ts";
 import { clearParked, enqueueOutbound, hasParked, isAnswered, listParked, type ParkReason } from "./state.ts";
 import { strandedByConflict, resumeIndex, type StrandedImpact } from "./prune.ts";
+import { normalize } from "./issue-id.ts";
 import { notice, type Notice } from "./notice.ts";
 import { Refusal } from "./refusal.ts";
 import { tgSend, tgWaitReply, type TgConn } from "./telegram.ts";
@@ -71,7 +72,7 @@ const envReporter = (): Reporter => makeReporter({ json: process.env.VETINARI_JS
 export async function resolveTitles(cfg: Pick<ResolvedConfig, "fetchTask">, ids: string[]): Promise<Record<string, string>> {
   const titles: Record<string, string> = {};
   await Promise.all(
-    [...new Set(ids.map((id) => id.replace(/^#/, "")))].map(async (id) => {
+    [...new Set(ids.map(normalize))].map(async (id) => {
       try {
         const title = issueNameFromTask(String(await cfg.fetchTask(id)));
         if (title) titles[id] = title;
@@ -526,16 +527,15 @@ export function waveParkReason(
   conflictParked: string[],
   records: { taskId: string; reason: ParkReason }[],
 ): ParkReason {
-  const norm = (id: string) => id.replace(/^#/, "");
   for (const t of parkedTasks) {
-    const rec = records.find((r) => norm(r.taskId) === norm(t));
+    const rec = records.find((r) => normalize(r.taskId) === normalize(t));
     if (rec?.reason === "stalled") return "stalled";
     if (rec?.reason === "question") return "question";
   }
   // No answerable (question/stalled) member held the wave. A `stopped` member — a signalled run —
   // gives the wave reason `stopped`: redrive-only, so the wave surfaces that rather than a reply.
   for (const t of parkedTasks) {
-    if (records.find((r) => norm(r.taskId) === norm(t))?.reason === "stopped") return "stopped";
+    if (records.find((r) => normalize(r.taskId) === normalize(t))?.reason === "stopped") return "stopped";
   }
   if (parkedTasks.length) return "question";
   return "conflict";

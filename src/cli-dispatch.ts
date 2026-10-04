@@ -868,6 +868,5 @@ async function dispatchAnswer(cmd: Extract<Command, { kind: "answer" }>, deps: D
 function issueAwaitsRedrive(events: ReturnType<typeof readEventLog>, taskId: string): boolean {
   if (!campaignStarted(events)) return false;
   const reduced = reduceCampaign(events);
-  const norm = taskId.replace(/^#/, "");
-  return reduced.waves.flat().includes(norm) && resumeIndex(reduced) < reduced.waves.length;
+  return reduced.waves.flat().includes(normalize(taskId)) && resumeIndex(reduced) < reduced.waves.length;
 }

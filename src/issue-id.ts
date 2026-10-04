@@ -8,6 +8,9 @@
 /** An id with a single leading `#` stripped and surrounding whitespace trimmed. */
 export const normalize = (id: string) => id.replace(/^#/, "").trim();
 
+/** An id rendered as `#n` — any spelling (`640`, `#640`, a number) prints the same. */
+export const hash = (id: unknown) => "#" + normalize(String(id));
+
 /**
  * A bare, numeric issue token (`640` or `#640`) — the shape every surface uses to
  * tell an issue id apart from a project qualifier (a non-numeric name).

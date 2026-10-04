@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalize, isIssueToken } from "./issue-id.ts";
+import { normalize, hash, isIssueToken } from "./issue-id.ts";
 
 test("normalize strips a single leading # and trims surrounding whitespace", () => {
   assert.equal(normalize("#640"), "640");
@@ -20,4 +20,11 @@ test("isIssueToken accepts a bare or #-prefixed number and rejects anything else
   assert.equal(isIssueToken("#"), false);
   assert.equal(isIssueToken("64a"), false);
   assert.equal(isIssueToken(""), false);
+});
+
+test("hash renders an id as #n, whatever spelling or type it arrives in", () => {
+  assert.equal(hash("640"), "#640");
+  assert.equal(hash("#640"), "#640");
+  assert.equal(hash(640), "#640");
+  assert.equal(hash(" 640 "), "#640");
 });

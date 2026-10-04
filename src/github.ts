@@ -4,6 +4,7 @@ import type { Finding, FindingContext } from "./findings.ts";
 import type { Exclusion } from "./plan.ts";
 import { repoForProject } from "./config.ts";
 import { Refusal } from "./refusal.ts";
+import { normalize } from "./issue-id.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -79,7 +80,7 @@ export const githubBlockedBy = (
   const repoOf = repoAccessor("githubBlockedBy", repo, deriveRepo);
   return async (id: string, onExcluded?: (e: Exclusion) => void): Promise<string[]> => {
     const repo = repoOf();
-    const num = id.replace(/^#/, "").trim();
+    const num = normalize(id);
     const out = await run(["api", `repos/${repo}/issues/${num}/dependencies/blocked_by`]);
     const rows: Array<{
       number?: number;
@@ -125,7 +126,7 @@ export const githubFetchTask = (repo?: string, run: (args: string[]) => Promise<
   const repoOf = repoAccessor("githubFetchTask", repo, deriveRepo);
   return async (id: string): Promise<string> => {
     const r = repoOf();
-    const num = id.replace(/^#/, "").trim();
+    const num = normalize(id);
     return await run(["issue", "view", num, "--repo", r, "--json", "title,body,comments,labels,state,closedAt"]);
   };
 };
@@ -235,7 +236,7 @@ export const githubMarkPendingVerify = (
   const repoOf = repoAccessor("githubMarkPendingVerify", repo, deriveRepo);
   return async (id: string): Promise<void> => {
     const r = repoOf();
-    const num = id.replace(/^#/, "").trim();
+    const num = normalize(id);
     await run(["issue", "edit", num, "--repo", r, "--add-label", "pending-verify", "--remove-label", "ready-for-agent"]);
   };
 };
@@ -254,7 +255,7 @@ export const githubIssueComment = (repo?: string, run: (args: string[]) => Promi
   const repoOf = repoAccessor("githubIssueComment", repo, deriveRepo);
   return async (issueRef: string, body: string): Promise<void> => {
     const r = repoOf();
-    const num = String(issueRef).replace(/^#/, "").trim();
+    const num = normalize(String(issueRef));
     await run(["issue", "comment", num, "--repo", r, "--body", body]);
   };
 };

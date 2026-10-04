@@ -16,6 +16,7 @@ import { festiveWaveName } from "./festive-names.ts";
 import { readEventLog, type GreenEvent, type OrchestratorEvent } from "./event-log.ts";
 import { activityLogPath } from "./activity.ts";
 import { humanizeLogLine, localTime, type HumanizedRow } from "./log-view.ts";
+import { hash, normalize } from "./issue-id.ts";
 
 /**
  * The base branch a redrive would land on, read live from the project checkout's current
@@ -305,18 +306,14 @@ export function festiveFromCookie(cookieHeader: string | undefined, fallback = f
   return match[1] === "1";
 }
 
-const normalizeIssue = (id: string) => id.replace(/^#/, "");
-
-const hash = (id: unknown) => `#${normalizeIssue(String(id))}`;
-
 /** The issue number a merge/green event is about: its explicit `taskId`, or —
  * for a merge that names its issue only through the branch (`agent/<id>`, the
  * campaign wave-merge / per-issue green path) — the id embedded in that branch.
  * Keeps the feed from rendering `#undefined` when only the branch carries it. */
 const mergedIssue = (e: GreenEvent): string | undefined => {
-  if (e?.taskId != null && String(e.taskId) !== "") return normalizeIssue(String(e.taskId));
+  if (e?.taskId != null && String(e.taskId) !== "") return normalize(String(e.taskId));
   const tail = e?.branch != null ? String(e.branch).split("/").pop() : "";
-  return tail ? normalizeIssue(tail) : undefined;
+  return tail ? normalize(tail) : undefined;
 };
 
 /**
@@ -378,14 +375,14 @@ export function describeEvent(e: OrchestratorEvent, opts: { festive?: { offset: 
   const { festive, titles } = opts;
   // Titles are recorded once on `campaign-start` (design §2.1), so a single-event reader
   // that wants a member's name looks it up in the resolved map the caller threads in.
-  const named = (id: unknown) => titles?.get(normalizeIssue(String(id))) ?? hash(id);
+  const named = (id: unknown) => titles?.get(normalize(String(id))) ?? hash(id);
   // The one-line festive form of a wave — `Wave N · name · #num, #num, …` — through the
   // shared `waveLabel` (surface `line`), so the narration can't drift from the card/chip.
   const festiveLine = (index: number, members: string[]) =>
     waveLabel(index, undefined, 0, {
       name: festiveWaveName(festive!.offset, index),
       surface: "line",
-      numbers: members.map((id) => normalizeIssue(String(id))),
+      numbers: members.map((id) => normalize(String(id))),
     });
   switch (e.event) {
     case "campaign-start":
@@ -498,8 +495,7 @@ export const titlesFromLog = (events: OrchestratorEvent[]): Map<string, string> 
   const start = events.findLast((e) => e.event === "campaign-start");
   const map = start && "titles" in start ? start.titles : undefined;
   if (map && typeof map === "object")
-    for (const [id, title] of Object.entries(map))
-      if (typeof title === "string" && title.trim()) titles.set(normalizeIssue(id), title.trim());
+    for (const [id, title] of Object.entries(map)) if (typeof title === "string" && title.trim()) titles.set(normalize(id), title.trim());
   return titles;
 };
 
@@ -548,8 +544,8 @@ export const issueNameFromTask = (task: string): string | undefined => {
  * free-text field.
  */
 export function parkedReplyFor(records: ParkedRecord[], issueNumber: string): { question: string; options: string[] } | undefined {
-  const id = normalizeIssue(issueNumber);
-  const rec = records.find((r) => normalizeIssue(r.taskId) === id);
+  const id = normalize(issueNumber);
+  const rec = records.find((r) => normalize(r.taskId) === id);
   if (!rec) return undefined;
   const { description, options } = extractParkedDetails(rec.question);
   return { question: description, options };
@@ -715,14 +711,14 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
     // the plan carries a name for every issue a title was resolved for.
     if ("titles" in e && e.titles && typeof e.titles === "object") {
       for (const [id, title] of Object.entries(e.titles)) {
-        if (typeof title === "string" && title.trim()) titles.set(normalizeIssue(id), title.trim());
+        if (typeof title === "string" && title.trim()) titles.set(normalize(id), title.trim());
       }
     }
     // Remember the latest durable session id an event carried for a member (`turn`, `parked`),
     // so a crash redrive can resume that session on the existing branch (design §7).
-    if ("sessionId" in e && e.sessionId && e.taskId) sessions.set(normalizeIssue(String(e.taskId)), String(e.sessionId));
+    if ("sessionId" in e && e.sessionId && e.taskId) sessions.set(normalize(String(e.taskId)), String(e.sessionId));
     if (e.event === "campaign-start" && Array.isArray(e.waves)) {
-      waves = e.waves.map((wave: unknown[]) => wave.map(String).map(normalizeIssue));
+      waves = e.waves.map((wave: unknown[]) => wave.map(String).map(normalize));
       layout = waves.map((wave) => [...wave]);
       name = typeof e.name === "string" && e.name.trim() ? e.name : undefined;
       festiveOffset = festiveOffsetFor(typeof e.ts === "string" ? e.ts : undefined);
@@ -737,7 +733,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       // verdict, and without the failed case a re-driven member keeps its whole card reading failed.
       // A `completed` (merged) member is terminal (§2.2): a spawn for it is a stale second process,
       // ignored as an anomaly.
-      const taskId = normalizeIssue(String(e.taskId));
+      const taskId = normalize(String(e.taskId));
       const prev = outcomes.get(taskId) ?? "unstarted";
       if (prev === "completed") {
         anomalies.push(`spawn for already-merged ${taskId} ignored (completed is terminal)`);
@@ -749,19 +745,19 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       }
       details.set(taskId, `Running in an agent slot (${e.running ?? "?"} active, ${e.left ?? "?"} waiting)`);
     } else if (e.event === "turn" && e.taskId) {
-      details.set(normalizeIssue(String(e.taskId)), `Agent turn ${e.turn ?? "?"} finished; waiting for verification/redrive`);
+      details.set(normalize(String(e.taskId)), `Agent turn ${e.turn ?? "?"} finished; waiting for verification/redrive`);
     } else if (e.event === "green" && e.taskId) {
       // A green banks nothing on the base yet (design §2.2): the issue is `running` with a
       // pending green, not `completed` — the word for banked work is reserved for `merged`.
       // No `mergedAt` stamp, so it never counts toward "merged today" until it merges.
-      const taskId = normalizeIssue(String(e.taskId));
+      const taskId = normalize(String(e.taskId));
       outcomes.set(taskId, "running");
       pendingGreen.add(taskId);
       details.set(taskId, e.branch ? `Green on ${e.branch} — pending merge onto the base` : "Green — pending merge onto the base");
     } else if (e.event === "merged" && e.taskId) {
       // The integrator landed this green on the base (design §2.1). Completion, and the
       // resolution of any earlier conflict hold or red-base hold on the same id.
-      const taskId = normalizeIssue(String(e.taskId));
+      const taskId = normalize(String(e.taskId));
       outcomes.set(taskId, "completed");
       pendingGreen.delete(taskId);
       redBase.delete(taskId);
@@ -769,7 +765,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       details.set(taskId, "Merged into base");
       if (e.ts && !mergedAt.has(taskId)) mergedAt.set(taskId, String(e.ts));
     } else if (e.event === "parked" && e.taskId) {
-      const taskId = normalizeIssue(String(e.taskId));
+      const taskId = normalize(String(e.taskId));
       // `completed` (merged) is terminal (design §2.2): a `parked` for an already-merged issue is
       // a stale second process, ignored as an anomaly — it must never flip a merged card to parked.
       if (outcomes.get(taskId) === "completed") {
@@ -792,7 +788,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       // A member the agent could not make green (design §2.1, §5 step 5): a terminal failure
       // that holds its wave — the wave lands no `wave-done`, so it stays out of `closedWaves`
       // and folds to `failed` (failure outranks parked, ADR 0019).
-      const taskId = normalizeIssue(String(e.taskId));
+      const taskId = normalize(String(e.taskId));
       // `completed` (merged) is terminal (design §2.2): a `failed` for an already-merged issue is
       // a stale second process, ignored as an anomaly rather than flipping a merged card to failed.
       if (outcomes.get(taskId) === "completed") {
@@ -814,7 +810,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       redBase = e.reason === undefined || e.reason === "red-base" ? new Set(waves[parkedWave] ?? []) : new Set();
     } else if (e.event === "wave-done" && Number.isInteger(e.index)) {
       for (const taskId of e.merged ?? []) {
-        const issueNumber = normalizeIssue(String(taskId));
+        const issueNumber = normalize(String(taskId));
         outcomes.set(issueNumber, "completed");
         pendingGreen.delete(issueNumber);
         // A clean re-merge resolves an earlier conflict hold or a red-base hold, so the chip
@@ -827,7 +823,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       // A wave-done closes the wave only when it holds no conflict-parked member (design §7): a
       // conflict-parked green is unresolved work, so its wave stays out of `closedWaves` and a
       // redrive re-enters it (`resumeIndex` reads the first wave absent from `closedWaves`).
-      if (!(waves[e.index] ?? []).some((m) => conflictParked.has(normalizeIssue(m)))) {
+      if (!(waves[e.index] ?? []).some((m) => conflictParked.has(normalize(m)))) {
         closedWaves.add(e.index);
         currentWave = -1;
       }
@@ -996,7 +992,7 @@ const testingPhase = (cmd: string | undefined): IssuePhase => ({ label: cmd ? `t
  * (the wave-merge gate, which has no single task, so its gate rows never touch a member). */
 const eventTaskId = (e: OrchestratorEvent): string | undefined => {
   const raw = (e as { taskId?: unknown }).taskId;
-  return raw != null && String(raw) !== "" ? normalizeIssue(String(raw)) : undefined;
+  return raw != null && String(raw) !== "" ? normalize(String(raw)) : undefined;
 };
 
 /**
@@ -1019,7 +1015,7 @@ const eventTaskId = (e: OrchestratorEvent): string | undefined => {
  *   nothing executing — a steady dot).
  */
 export function issuePhase(events: OrchestratorEvent[], issueNumber: string): IssuePhase | undefined {
-  const id = normalizeIssue(issueNumber);
+  const id = normalize(issueNumber);
   const latestCampaignIndex = events.findLastIndex((e) => e.event === "campaign-start" && Array.isArray(e.waves));
   const relevant = latestCampaignIndex >= 0 ? events.slice(latestCampaignIndex) : events;
 
@@ -1120,11 +1116,10 @@ export interface IssueDetail {
  * `queue-done` outcomes)? The plan-only `campaign-start` `batches` are excluded so
  * the working span starts when work does, not at campaign launch. */
 const eventNamesIssue = (e: OrchestratorEvent, id: string): boolean => {
-  if ("taskId" in e && e.taskId != null && normalizeIssue(String(e.taskId)) === id) return true;
-  const inArray = (a: unknown) => Array.isArray(a) && a.map(String).map(normalizeIssue).includes(id);
+  if ("taskId" in e && e.taskId != null && normalize(String(e.taskId)) === id) return true;
+  const inArray = (a: unknown) => Array.isArray(a) && a.map(String).map(normalize).includes(id);
   if (("taskIds" in e && inArray(e.taskIds)) || ("merged" in e && inArray(e.merged)) || ("removed" in e && inArray(e.removed))) return true;
-  if ("outcomes" in e && e.outcomes && typeof e.outcomes === "object" && Object.keys(e.outcomes).map(normalizeIssue).includes(id))
-    return true;
+  if ("outcomes" in e && e.outcomes && typeof e.outcomes === "object" && Object.keys(e.outcomes).map(normalize).includes(id)) return true;
   return false;
 };
 
@@ -1138,7 +1133,7 @@ const eventNamesIssue = (e: OrchestratorEvent, id: string): boolean => {
  * no campaign frame is folded whole.
  */
 export function reconstructIssueDetail(events: OrchestratorEvent[], issueNumber: string): IssueDetail {
-  const id = normalizeIssue(issueNumber);
+  const id = normalize(issueNumber);
   const reduced = reduceCampaign(events);
   const { titles, name } = reduced;
   const life = issueLifecycle(reduced, id);
@@ -1378,11 +1373,11 @@ export function buildStatus(cfg: ResolvedConfig, opts: { dead?: boolean; alive?:
   const activeIssueNumbers = new Set(waves.flat());
   const closedIssueNumbers = new Set([...closedWaves].flatMap((index) => waves[index] ?? []));
   const parkedRecords = listParked(cfg).filter((parked) => {
-    const issueNumber = normalizeIssue(parked.taskId);
+    const issueNumber = normalize(parked.taskId);
     return (!activeIssueNumbers.size || activeIssueNumbers.has(issueNumber)) && !closedIssueNumbers.has(issueNumber);
   });
   for (const parked of parkedRecords) {
-    const taskId = normalizeIssue(parked.taskId);
+    const taskId = normalize(parked.taskId);
     // `completed` (merged) is terminal (design §2.2): a record that outlived a since-merged issue
     // (durable records are only cleared on re-admit/redrive or `prune --purge`, §2.5) must not flip
     // the merged card back to parked. Leave the outcome; the surviving record is a stale straggler.
@@ -1726,7 +1721,7 @@ export function buildFeed(pointers: ProjectPointer[], now: Date = new Date(), lo
 const toParkedIssue = (rec: ParkedRecord): ParkedIssue => {
   const details = extractParkedDetails(rec.question);
   return {
-    issueNumber: normalizeIssue(rec.taskId),
+    issueNumber: normalize(rec.taskId),
     reason: rec.reason,
     parkedAt: rec.parkedAt,
     branch: rec.branch,

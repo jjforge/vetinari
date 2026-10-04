@@ -10,6 +10,7 @@ import { listParkedIn, writeParkedRecord } from "./state.ts";
 import { readEventLog } from "./event-log.ts";
 import { reduceCampaign } from "./dashboard-model.ts";
 import type { PointerDrop } from "./registry.ts";
+import { normalize } from "./issue-id.ts";
 
 /** Run git in the host project root, throwing its stderr on a non-zero exit. */
 const git = (args: string[]) => execFileSync("git", args, { encoding: "utf8" }).trim();
@@ -269,9 +270,6 @@ async function gateMergedBase(cfg: ResolvedConfig, index?: number): Promise<{ gr
 // is PROVABLY reachable from the base — never a branch with unmerged work, and never
 // a conflict-parked / parked / campaign-parked issue (whose work must stay resumable).
 
-/** Strip a leading `#` so a logged/parked id (`#42`) matches a branch suffix (`42`). */
-const normalizeTidyId = (id: string) => id.replace(/^#/, "").trim();
-
 /** One agent branch present in the repo, with whether it is fully merged into the base. */
 export interface TidyBranch {
   /** the task id — the `agent/<id>` branch's suffix after the prefix. */
@@ -321,12 +319,12 @@ export interface TidyPlan {
  * never touched — a later run GCs it once the record is gone).
  */
 export function computeTidy(snap: TidySnapshot): TidyPlan {
-  const present = new Set(snap.branches.map((b) => normalizeTidyId(b.id)));
-  const reachable = new Map(snap.branches.map((b) => [normalizeTidyId(b.id), b.reachable]));
-  const conflictParked = new Set(snap.conflictParked.map(normalizeTidyId));
-  const campaignParked = new Set(snap.campaignParked.map(normalizeTidyId));
-  const parked = new Set(snap.parked.map(normalizeTidyId));
-  const fragments = snap.fragments.map(normalizeTidyId);
+  const present = new Set(snap.branches.map((b) => normalize(b.id)));
+  const reachable = new Map(snap.branches.map((b) => [normalize(b.id), b.reachable]));
+  const conflictParked = new Set(snap.conflictParked.map(normalize));
+  const campaignParked = new Set(snap.campaignParked.map(normalize));
+  const parked = new Set(snap.parked.map(normalize));
+  const fragments = snap.fragments.map(normalize);
   const fragmentSet = new Set(fragments);
   const protectedId = new Set([...conflictParked, ...campaignParked, ...parked]);
 
@@ -334,7 +332,7 @@ export function computeTidy(snap: TidySnapshot): TidyPlan {
   // branch is already gone (cleaned by hand) yet an artifact for it still lingers.
   const isMerged = (id: string) => !present.has(id) || reachable.get(id) === true;
 
-  const deleteBranches = snap.branches.map((b) => normalizeTidyId(b.id)).filter((id) => reachable.get(id) === true && !protectedId.has(id));
+  const deleteBranches = snap.branches.map((b) => normalize(b.id)).filter((id) => reachable.get(id) === true && !protectedId.has(id));
 
   const fold = fragments.filter((id) => isMerged(id) && !protectedId.has(id));
   const clearParked = [...parked].filter(isMerged);
@@ -342,7 +340,7 @@ export function computeTidy(snap: TidySnapshot): TidyPlan {
 
   const deleteSet = new Set(deleteBranches);
   const keep = snap.branches
-    .map((b) => normalizeTidyId(b.id))
+    .map((b) => normalize(b.id))
     .filter((id) => !deleteSet.has(id))
     .map((id) => ({
       id,

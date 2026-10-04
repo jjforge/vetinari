@@ -57,7 +57,7 @@ export const renderRedriveControl = (status: CampaignStatus, gate: { allowed: bo
     .map((issue) => `#${escapeHtml(issue.issueNumber)}`)
     .join(", ");
   const text = `Redrive <strong>${escapeHtml(status.name || status.project)}</strong>: re-enters wave ${(resume?.index ?? 0) + 1} — ${members} — on <code>${escapeHtml(baseBranch ?? "the base branch")}</code>`;
-  const dialog = `<dialog class="redrive-dialog" data-redrive-dialog><p class="redrive-dialog-text">${text}</p><form method="post" action="/redrive" class="redrive-dialog-actions" data-redrive-form><input type="hidden" name="project" value="${escapeHtml(status.project)}" /><button type="button" class="redrive-cancel" data-redrive-cancel autofocus>Cancel</button><button type="submit" class="redrive-confirm" data-redrive-confirm>Redrive</button></form></dialog>`;
+  const dialog = `<dialog class="redrive-dialog" data-redrive-dialog><p class="redrive-dialog-text">${text}</p><form method="post" action="/redrive" class="redrive-dialog-actions" data-redrive-form><input type="hidden" name="project" value="${escapeHtml(status.project)}" /><button type="button" class="redrive-cancel" data-redrive-cancel autofocus>Cancel</button><button type="submit" class="redrive-confirm" data-redrive-confirm>Redrive</button></form><p class="redrive-status" data-redrive-status role="status" hidden></p></dialog>`;
   return `<div class="redrive-control">${openBtn}${dialog}</div>`;
 };
 
@@ -521,6 +521,8 @@ ${ISSUE_DETAIL_SHEET_STYLES}
   .redrive-dialog-text { margin: 0 0 1rem; }
   .redrive-dialog-text code { color: var(--color-text); }
   .redrive-dialog-actions { display: flex; justify-content: flex-end; gap: .75rem; margin: 0; }
+  .redrive-status { margin: .75rem 0 0; color: var(--color-red); font-size: .85rem; }
+  .redrive-status.redrive-note { color: var(--color-blue); }
   .redrive-cancel { padding: .5rem .9rem; border: 1px solid var(--color-secondary); border-radius: var(--border-radius); background: none; color: var(--color-text); cursor: pointer; font: inherit; font-weight: 700; }
   .redrive-confirm { padding: .5rem .9rem; border: 0; border-radius: var(--border-radius); background: var(--color-red); color: var(--color-on-accent); cursor: pointer; font: inherit; font-weight: 700; }
   /* The merge-conflict note (#171) is informational only — same amber edge, no action. */

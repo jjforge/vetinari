@@ -155,6 +155,9 @@ test("renderStatusPage enables the Redrive control with a naming confirm dialog 
   );
   assert.match(parked, /<button type="button" class="redrive-cancel" data-redrive-cancel autofocus>Cancel<\/button>/);
   assert.match(parked, /<button type="submit" class="redrive-confirm" data-redrive-confirm>Redrive<\/button>/);
+  // The dialog carries one inline status element — where a refusal, a startup death or the
+  // "started" note lands once the confirm is sent by fetch (#369). Hidden until it has words.
+  assert.match(parked, /<p class="redrive-status" data-redrive-status role="status" hidden><\/p><\/dialog>/);
   // The page ships the dialog's open/cancel wiring, re-run on live refresh like graft.
   assert.match(parked, /function wireRedrive\(\)/);
   assert.match(parked, /wireRedrive\(\);/);

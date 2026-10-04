@@ -272,6 +272,68 @@ test("REDRIVE_SCRIPT opens the confirm dialog on click and closes it on Cancel �
   assert.match(REDRIVE_SCRIPT, /open\.dataset\.redriveWired/);
 });
 
+test("REDRIVE_SCRIPT sends the confirm by fetch with an in-flight state, and reports the route's answer inside the dialog (#369)", () => {
+  // The route now answers with what the startup window saw — 303 on a clean/parked exit, 409
+  // on a refusal, 502 on a startup death, 202 for a child still running — so the confirm is
+  // sent by fetch rather than a native POST the page could not read.
+  const submit = REDRIVE_SCRIPT.slice(REDRIVE_SCRIPT.indexOf('form.addEventListener("submit"'));
+  assert.match(submit, /event\.preventDefault\(\);/);
+  assert.match(submit, /fetch\("\/redrive"/);
+  // Entering flight sets aria-busy, relabels Confirm "redriving…" and disables it.
+  assert.match(
+    REDRIVE_SCRIPT,
+    /const enterFlight = \(\) => \{[^}]*form\.setAttribute\("aria-busy", "true"\)[^}]*confirm\.textContent = "redriving…"[^}]*confirm\.disabled = true[^}]*\}/,
+  );
+  // A busy guard returns before a second fetch; the clear runs in a finally on every exit.
+  assert.match(submit, /if \(busy \|\| started\) return;[\s\S]*fetch\("\/redrive"/);
+  assert.match(submit, /\} finally \{[^}]*busy = false;[^}]*clearFlight\(\);[^}]*\}/);
+  // 202: the child is running — a persistent note, not an error, and Confirm stays disabled
+  // so a second redrive cannot be fired from the same dialog.
+  assert.match(
+    submit,
+    /if \(res\.status === 202\) \{[^}]*started = true;[^}]*showNote\(\(await res\.text\(\)\)\.trim\(\)\);[^}]*return;[^}]*\}/,
+  );
+  assert.match(
+    REDRIVE_SCRIPT,
+    /const clearFlight = \(\) => \{[^}]*form\.removeAttribute\("aria-busy"\)[^}]*confirm\.disabled = started;[^}]*\}/,
+  );
+  // Any other non-ok (400, 404, 409, 502) shows the route's own words inside the dialog.
+  assert.match(submit, /if \(!res\.ok\) \{[^}]*showErr\(\(await res\.text\(\)\)\.trim\(\)[^}]*return;[^}]*\}/);
+  // A followed 303 behaves as the native form did: go to the board.
+  assert.match(submit, /location\.assign\(res\.url\);/);
+  // The note and error land in the dialog's own status element.
+  assert.match(REDRIVE_SCRIPT, /dialog\.querySelector\("\[data-redrive-status\]"\)/);
+});
+
+test("the issue sheet sends a reply by fetch with an in-flight state, and reports the route's answer under the reply box (#369)", () => {
+  // /answer now answers with what the startup window saw, so the reply is sent by fetch and a
+  // failed answer — an offline tracker write the operator most needs to see — lands inline.
+  const submit = ISSUE_DETAIL_SHEET_SCRIPT.slice(ISSUE_DETAIL_SHEET_SCRIPT.indexOf('replyForm.addEventListener("submit"'));
+  assert.match(submit, /event\.preventDefault\(\);/);
+  assert.match(submit, /fetch\("\/answer"/);
+  // Entering flight sets aria-busy, relabels Reply "sending…" and disables it.
+  assert.match(
+    ISSUE_DETAIL_SHEET_SCRIPT,
+    /const enterReplyFlight = \(\) => \{[^}]*replyForm\.setAttribute\("aria-busy", "true"\)[^}]*replySend\.textContent = "sending…"[^}]*replySend\.disabled = true[^}]*\}/,
+  );
+  // A busy guard returns before a second fetch; the clear runs in a finally on every exit.
+  assert.match(submit, /if \(replyBusy\) return;[\s\S]*fetch\("\/answer"/);
+  assert.match(submit, /\} finally \{[^}]*replyBusy = false;[^}]*clearReplyFlight\(\);[^}]*\}/);
+  // 202: delivered to the parked record and running — clear the reply text, show a note.
+  assert.match(
+    submit,
+    /if \(res\.status === 202\) \{[^}]*replyText\.value = "";[^}]*showReplyNote\(\(await res\.text\(\)\)\.trim\(\)\);[^}]*return;[^}]*\}/,
+  );
+  // Any other non-ok shows the route's words and keeps the typed reply for a retry.
+  const notOk = submit.slice(submit.indexOf("if (!res.ok) {"));
+  assert.match(notOk, /^if \(!res\.ok\) \{[^}]*showReplyErr\(\(await res\.text\(\)\)\.trim\(\)[^}]*return;[^}]*\}/);
+  assert.doesNotMatch(notOk.slice(0, notOk.indexOf("return;")), /replyText\.value = ""/);
+  // A followed 303 behaves as the native form did: go to the board.
+  assert.match(submit, /location\.assign\(res\.url\);/);
+  // The note and error land in the sheet's own reply status element.
+  assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /const replyStatus = document\.getElementById\("reply-status"\);/);
+});
+
 test("HOST_LOG_SCRIPT wires the host-log pane: gear show/hide, badge off isNotableHostEvent, filter, live host frames (#180)", () => {
   const html = renderLandingShell(["alpha"]);
   // The landing embeds the host-log script and its styles.

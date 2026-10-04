@@ -1,4 +1,5 @@
 import * as sandcastle from "@ai-hero/sandcastle";
+import { Refusal } from "./refusal.ts";
 import type {
   AgentProvider,
   ClaudeCodeOptions,
@@ -108,7 +109,7 @@ export async function makeSandbox(cfg: ResolvedConfig, taskId: string) {
   // for a resumed branch lives under stateDir and is reused, so it is excluded.
   const foreign = foreignWorktreeFor(branch, cfg.stateDir);
   if (foreign)
-    throw new Error(
+    throw new Refusal(
       `${branch} is already checked out at ${foreign} — remove that worktree before running this issue (one run per issue).`,
     );
 

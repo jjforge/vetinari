@@ -17,6 +17,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { Refusal } from "./refusal.ts";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { resolveConfigPath } from "./config.ts";
@@ -135,7 +136,7 @@ export interface ApplyResult {
  */
 export function applyLayoutMigration(baseDir: string, plan: LayoutMigrationPlan): ApplyResult {
   if (plan.conflicts.length) {
-    throw new Error(
+    throw new Refusal(
       `migrate refused: ${plan.conflicts.length} destination(s) already exist — ${plan.conflicts.join(", ")}. ` +
         `Move or remove them, then re-run. Nothing was changed.`,
     );
@@ -143,7 +144,7 @@ export function applyLayoutMigration(baseDir: string, plan: LayoutMigrationPlan)
 
   for (const { from, to } of plan.moves) {
     const dest = resolve(baseDir, to);
-    if (existsSync(dest)) throw new Error(`migrate refused: destination ${to} already exists. Nothing was changed.`);
+    if (existsSync(dest)) throw new Refusal(`migrate refused: destination ${to} already exists. Nothing was changed.`);
     mkdirSync(dirname(dest), { recursive: true });
     renameSync(resolve(baseDir, from), dest);
   }

@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { Refusal } from "./refusal.ts";
 import { nonResumableAnswerWarning, type ResolvedConfig } from "./config.ts";
 import type { Logger } from "./log.ts";
 import { runGates } from "./gate.ts";
@@ -209,7 +210,7 @@ export async function runLoop(cfg: ResolvedConfig, taskId: string, host?: HostBu
           throw new Error(`parked record for ${taskId} has no sessionId — cannot resume the answer`);
         entry = { resumeSessionId: rec.sessionId, answerPrompt: answerPromptFor(rec.answer) };
       } else {
-        if (!cfg.postComment) throw new Error(nonResumableAnswerWarning(provider));
+        if (!cfg.postComment) throw new Refusal(nonResumableAnswerWarning(provider));
         await cfg.postComment(taskId, parkedAnswerComment(rec.question, rec.answer));
       }
       clearParked(cfg, taskId);

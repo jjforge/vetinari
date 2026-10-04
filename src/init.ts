@@ -17,6 +17,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { Refusal } from "./refusal.ts";
 import { dirname, resolve } from "node:path";
 import { AGENT_PROVIDERS, DEFAULT_PROVIDER, type AgentProviderName } from "./config.ts";
 
@@ -165,7 +166,7 @@ export function applyInit(baseDir: string, plan: InitPlan): ApplyInitResult {
   const created: string[] = [];
   for (const { path, content } of plan.creates) {
     const dest = resolve(baseDir, path);
-    if (existsSync(dest)) throw new Error(`init refused: ${path} already exists — not overwriting it. Nothing was changed to it.`);
+    if (existsSync(dest)) throw new Refusal(`init refused: ${path} already exists — not overwriting it. Nothing was changed to it.`);
     mkdirSync(dirname(dest), { recursive: true });
     writeFileSync(dest, content);
     created.push(path);

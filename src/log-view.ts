@@ -16,6 +16,7 @@
  */
 import { describeEvent } from "./dashboard-model.ts";
 import { normalizeLegacyEvent, type OrchestratorEvent } from "./event-log.ts";
+import { hash } from "./issue-id.ts";
 
 /**
  * The dot state a humanized row carries — the event's own state, from the ADR-0007 /
@@ -148,7 +149,6 @@ export function humanizeLogLine(raw: string): HumanizedRow {
     e = null;
   }
   const time = localTime(e && typeof e.ts === "string" ? e.ts : "");
-  const hash = (id: unknown) => "#" + String(id).replace(/^#/, "");
   const actorOf = (id: unknown) => (id === undefined || id === null || id === "" ? "" : hash(id));
   const plain = (text: string): MessageSpan => ({ text, kind: "plain" });
   const code = (text: string): MessageSpan => ({ text, kind: "code" });
@@ -304,6 +304,8 @@ export function humanizeHostLine(raw: string): HumanizedRow {
     return `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
   };
   const time = localTime(e && typeof e.ts === "string" ? e.ts : "");
+  // Inlined rather than importing `hash` from issue-id.ts, for the same `.toString()` reason as
+  // `localTime` above — and so it does not trim, unlike the shared one.
   const hash = (id: unknown) => "#" + String(id).replace(/^#/, "");
   const project = e && typeof e.project === "string" ? e.project : "";
   const plain = (text: string): MessageSpan => ({ text, kind: "plain" });

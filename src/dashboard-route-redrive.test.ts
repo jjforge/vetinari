@@ -157,3 +157,29 @@ test("POST /redrive answers 202 naming the log file when the child outlives the 
   assert.equal(res.statusCode, 202);
   assert.equal(res.body, `redrive started — output in ${calls[0].opts.logFile}`);
 });
+
+test("POST /redrive spawns redrive for a campaign stopped between waves after its parked member was pruned (#366)", async () => {
+  // Wave 0's only unmerged member parks, the campaign parks, then the member is pruned: wave 0
+  // folds `completed`, wave 1 never started, and the campaign folds `unstarted`. With no live
+  // lease that is a stopped campaign the route must let through, not a never-run one it refuses.
+  const { configDir, project } = seed([
+    event("campaign-start", { ts: "2026-08-01T00:00:00.000Z", waves: [["101", "102"], ["201"]], slots: 2 }),
+    event("wave-start", { ts: "2026-08-01T00:01:00.000Z", index: 0, tasks: ["101", "102"] }),
+    event("spawn", { ts: "2026-08-01T00:02:00.000Z", taskId: "101", running: 1, left: 1 }),
+    event("spawn", { ts: "2026-08-01T00:02:00.000Z", taskId: "102", running: 2, left: 0 }),
+    event("green", { ts: "2026-08-01T00:03:00.000Z", taskId: "101", commits: ["abc123"], branch: "agent/101" }),
+    event("merged", { ts: "2026-08-01T00:04:00.000Z", taskId: "101", branch: "agent/101" }),
+    event("parked", { ts: "2026-08-01T00:05:00.000Z", taskId: "102", reason: "stalled", detail: "no-commit" }),
+    event("campaign-parked", { ts: "2026-08-01T00:06:00.000Z", index: 0, reason: "stalled", detail: "102 stalled" }),
+    event("prune", { ts: "2026-08-01T00:07:00.000Z", target: "102", removed: ["102"], dropped: ["102"] }),
+  ]);
+  const calls: string[][] = [];
+  const res = resSpy();
+  const handled = await handleRedrive(postReq(`project=${project}`) as never, res as never, new URL("http://x/redrive"), {
+    ...depsFor(configDir, () => undefined),
+    startChild: async (_projectRoot, args) => (calls.push(args), { code: 0, lastLine: "", running: false }),
+  });
+  assert.equal(handled, true);
+  assert.equal(res.statusCode, 303);
+  assert.deepEqual(calls, [["redrive"]]);
+});

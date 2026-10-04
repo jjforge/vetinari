@@ -162,6 +162,34 @@ test("renderStatusPage enables the Redrive control with a naming confirm dialog 
   assert.match(parked, /function wireRedrive\(\)/);
   assert.match(parked, /wireRedrive\(\);/);
 });
+test("renderStatusPage enables the Redrive control for a campaign stopped between waves after a prune (#366)", () => {
+  // Wave 0's only parked member was pruned, so wave 0 folds `completed` and the campaign folds
+  // `unstarted` — yet wave 1 has never run. That is a stopped campaign, not a never-run one, so
+  // the control enables and the dialog names the wave a redrive re-enters.
+  const stopped = renderStatusPage(
+    {
+      project: "jjforge",
+      name: "forge",
+      waves: [
+        {
+          index: 0,
+          status: "completed",
+          issues: [
+            { issueNumber: "776", status: "completed" },
+            { issueNumber: "348", status: "parked", membership: "pruned" },
+            { issueNumber: "74", status: "completed" },
+          ],
+        },
+        { index: 1, status: "unstarted", issues: [{ issueNumber: "10", status: "unstarted" }] },
+      ],
+      parked: [],
+    },
+    { prune: true, graft: true, leaseLive: false, baseBranch: "main" },
+  );
+  assert.match(stopped, /<button type="button" class="redrive-btn" data-redrive-open>Redrive<\/button>/);
+  assert.doesNotMatch(stopped, /class="redrive-btn"[^>]*disabled/);
+  assert.match(stopped, /Redrive <strong>forge<\/strong>: re-enters wave 2 — #10 — on <code>main<\/code>/);
+});
 test("renderStatusPage greys the Redrive control on a settled campaign — nothing to redrive (#325)", () => {
   // Every wave closed → the campaign is settled; there is no stopped campaign to pick up, so
   // the control is disabled with that reason (the graft affordance renders nothing, as before).

@@ -89,15 +89,29 @@ export function issueMoves({ status, reason, archived }: { status: string; reaso
  * host lease (`leaseLive` is false, from the same probe crash detection reads). A live lease,
  * or a still-`running` fold, means there is a process to collide with — the observed bug was a
  * second campaign spawned over a draining wave — so it refuses. A `completed` campaign is
- * settled and an `unstarted`/empty one never ran, so neither is a redrive target. When it
- * refuses it carries a one-line reason the control and the route's 409 both surface verbatim.
+ * settled and an empty or all-`unstarted` one never ran, so neither is a redrive target. When
+ * it refuses it carries a one-line reason the control and the route's 409 both surface verbatim.
  *
- * `campaignState` is a plain string (the `CampaignState` values) so this stays a
- * dependency-free reducer beside the others in this file.
+ * One `unstarted` fold is a stopped campaign all the same: one **stopped between waves** — a
+ * wave `completed`, a later wave not yet entered (#366). Pruning the last non-`completed` member
+ * of a wave lands exactly there, and redrive is its only way forward. A wave whose every member
+ * is `pruned` also folds to `unstarted`, but it is not pending work, so it is skipped here.
+ *
+ * `campaignState` is a plain string (the `CampaignState` values) and `waves` is typed
+ * structurally so this stays a dependency-free reducer beside the others in this file.
  */
-export function redriveAllowed(campaignState: string, leaseLive: boolean): { allowed: boolean; reason: string } {
+export function redriveAllowed(
+  campaignState: string,
+  leaseLive: boolean,
+  waves: readonly { status: string; issues: readonly { membership?: string }[] }[],
+): { allowed: boolean; reason: string } {
   if (leaseLive || campaignState === "running") return { allowed: false, reason: "a campaign process is still running" };
   if (campaignState === "parked" || campaignState === "failed") return { allowed: true, reason: "" };
+  if (campaignState === "unstarted") {
+    const pending = waves.filter((wave) => !wave.issues.every((issue) => issue.membership === "pruned")).map((wave) => wave.status);
+    const firstCompleted = pending.indexOf("completed");
+    if (firstCompleted !== -1 && pending.indexOf("unstarted", firstCompleted) !== -1) return { allowed: true, reason: "" };
+  }
   if (campaignState === "completed") return { allowed: false, reason: "the campaign is settled — nothing to redrive" };
   return { allowed: false, reason: "no campaign to redrive" };
 }

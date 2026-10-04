@@ -622,7 +622,7 @@ ${
   // control, design §11/#325), the three laid out as one summary row.
   status.waves.length
     ? opts.graft
-      ? `<div class="campaign-summary">${renderCampaignMeta(status)}<div class="campaign-controls">${renderGraftInline(status)}${renderRedriveControl(status, redriveAllowed(campaignState(status.waves.map((wave) => wave.status)), Boolean(opts.leaseLive)), opts.baseBranch)}</div></div>`
+      ? `<div class="campaign-summary">${renderCampaignMeta(status)}<div class="campaign-controls">${renderGraftInline(status)}${renderRedriveControl(status, redriveAllowed(campaignState(status.waves.map((wave) => wave.status)), Boolean(opts.leaseLive), status.waves), opts.baseBranch)}</div></div>`
       : renderCampaignMeta(status)
     : ""
 }

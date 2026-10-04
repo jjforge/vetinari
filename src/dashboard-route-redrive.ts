@@ -40,7 +40,7 @@ export const handleRedrive: RouteHandler = async (req, res, url, deps) => {
   // reads (design §8), folded through the campaign state so a crash reads as stopped.
   const leaseLive = projectHasLiveCampaign(deps.configDir, project);
   const status = buildStatus(statusConfigFromPointer(pointer), { alive: leaseLive });
-  const gate = redriveAllowed(campaignState(status.waves.map((wave) => wave.status)), leaseLive);
+  const gate = redriveAllowed(campaignState(status.waves.map((wave) => wave.status)), leaseLive, status.waves);
   if (!gate.allowed) {
     res.writeHead(409).end(gate.reason);
     return true;

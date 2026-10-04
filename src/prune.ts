@@ -104,10 +104,7 @@ export interface AppliedPrune {
  * worktree and session survive the record's deletion, ADR 0013). The rarer true-drop
  * of the branch and worktree themselves is `prune --purge`, applied in `runPrune`.
  */
-export function applyPrune(
-  campaign: { waves: string[][]; outcomes: Map<string, string> },
-  removed: string[],
-): AppliedPrune {
+export function applyPrune(campaign: { waves: string[][]; outcomes: Map<string, string> }, removed: string[]): AppliedPrune {
   const dropped: string[] = [];
   const parkedToClear: string[] = [];
   // Only a genuine member can leave the plan: an id absent from every wave is not
@@ -123,9 +120,7 @@ export function applyPrune(
     }
   }
   const drop = new Set(dropped);
-  const remaining = campaign.waves
-    .map((wave) => wave.map(normalize).filter((id) => !drop.has(id)))
-    .filter((wave) => wave.length);
+  const remaining = campaign.waves.map((wave) => wave.map(normalize).filter((id) => !drop.has(id))).filter((wave) => wave.length);
   return { remaining, dropped, parkedToClear };
 }
 
@@ -156,11 +151,7 @@ export interface StructuredPruneClosure {
  * was dropped, in campaign order. Pure so the CLI's structured dry-run output is
  * unit-tested at the seam rather than by re-parsing its own prose.
  */
-export function pruneClosure(
-  target: string,
-  removed: string[],
-  applied: AppliedPrune,
-): Omit<StructuredPruneClosure, "project" | "repo"> {
+export function pruneClosure(target: string, removed: string[], applied: AppliedPrune): Omit<StructuredPruneClosure, "project" | "repo"> {
   const dropped = new Set(applied.dropped);
   return {
     target: normalize(target),
@@ -265,8 +256,7 @@ export const defaultPruneDeps: PruneDeps = {
   describeBranchPurge,
   purgeBranches,
   // Lazy-import to keep `modes` out of the static graph — see the `Campaign` note.
-  launchCampaign: (cfg, batches, host, name, opts) =>
-    import("./modes.ts").then((m) => m.campaign(cfg, batches, host, name, opts)),
+  launchCampaign: (cfg, batches, host, name, opts) => import("./modes.ts").then((m) => m.campaign(cfg, batches, host, name, opts)),
 };
 
 export interface PruneOptions {
@@ -368,9 +358,7 @@ export async function runPrune(
       'prune needs an issue: `prune 640` prunes the running campaign, `prune 640 "611 640" "623 701"` launches a reduced one.',
     );
   if (!cfg.blockedBy)
-    throw new Refusal(
-      'prune needs a "blockedBy" resolver in your config — e.g. blockedBy: githubBlockedBy("owner/repo").',
-    );
+    throw new Refusal('prune needs a "blockedBy" resolver in your config — e.g. blockedBy: githubBlockedBy("owner/repo").');
   const blockedBy = cfg.blockedBy;
   const tgt = normalize(target);
 
@@ -494,17 +482,10 @@ export async function titleOf(cfg: ResolvedConfig, id: string): Promise<string |
   }
 }
 
-const renderWaves = (waves: string[][], empty: string) =>
-  waves.length ? waves.map((w) => `"${w.join(" ")}"`).join(" ") : empty;
+const renderWaves = (waves: string[][], empty: string) => (waves.length ? waves.map((w) => `"${w.join(" ")}"`).join(" ") : empty);
 
 /** The `progress:prune` notice for the running-campaign prune path (§10 skeleton). */
-function pruneRunningNotice(
-  project: string,
-  tgt: string,
-  dropped: string[],
-  kept: string[],
-  remaining: string[][],
-): Notice {
+function pruneRunningNotice(project: string, tgt: string, dropped: string[], kept: string[], remaining: string[][]): Notice {
   const signal =
     `pruned #${tgt} — ` +
     (dropped.length ? `dropped ${dropped.map((i) => `#${i}`).join(", ")}` : "nothing to drop") +
@@ -555,7 +536,7 @@ export async function computePrune(waves: string[][], target: string, blockedByO
 
   // Fixpoint: drop the target, then anything with a dropped blocker, until stable.
   const removed = new Set<string>([tgt]);
-  for (let changed = true; changed; ) {
+  for (let changed = true; changed;) {
     changed = false;
     for (const id of campaign) {
       if (removed.has(id)) continue;

@@ -103,7 +103,8 @@ export function isNotableHostEvent(event: { event?: string; error?: unknown; ok?
  * inject markup; the gaps between tokens are escaped too.
  */
 export function highlightJsonLine(line: string): string {
-  const esc = (s: string) => s.replace(/[&<>"']/g, (c) => (c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#039;"));
+  const esc = (s: string) =>
+    s.replace(/[&<>"']/g, (c) => (c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#039;"));
   const span = (cls: string, inner: string) => `<span class="${cls}">${inner}</span>`;
   const re = /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g;
   let out = "";
@@ -266,10 +267,7 @@ export const TAIL_RENDER_CAP = 160;
  * the returned one). Shipped to the browser via `.toString()`, so it is a self-contained `function`
  * over plain values.
  */
-export function tailFresh(
-  lines: TailRow[],
-  seen: Record<string, number>,
-): { fresh: TailRow[]; seen: Record<string, number> } {
+export function tailFresh(lines: TailRow[], seen: Record<string, number>): { fresh: TailRow[]; seen: Record<string, number> } {
   const next: Record<string, number> = { ...seen };
   // A restart shows as an issue's highest index in this snapshot falling below its mark (the file
   // shrank); clear that mark so the new run's lines — all below the old mark — are delivered.
@@ -342,13 +340,14 @@ export function archiveRunHref(project: string, run: string | null, hash: string
  * shows the empty-state text). Pure and self-contained, unit-tested in node and shipped to the
  * browser via `.toString()` (ADR 0012).
  */
-export function followView<T>(state: {
-  buffer: T[];
-  mark: number;
-  live: boolean;
-  cap: number;
-  match: (row: T) => boolean;
-}): { rows: T[]; visible: number; total: number; backlog: number; empty: boolean; following: boolean } {
+export function followView<T>(state: { buffer: T[]; mark: number; live: boolean; cap: number; match: (row: T) => boolean }): {
+  rows: T[];
+  visible: number;
+  total: number;
+  backlog: number;
+  empty: boolean;
+  following: boolean;
+} {
   const source = state.live ? state.buffer : state.buffer.slice(0, state.mark);
   const filtered = source.filter(state.match);
   // Keep the newest `cap` matches (the tail of the canonical oldest→newest array), then
@@ -363,14 +362,14 @@ export function followView<T>(state: {
  * filter (both applied) over the raw JSONL line and drives the shared `followView` (#196).
  * Pure and self-contained, unit-tested in node and shipped to the browser via `.toString()`.
  */
-export function tailView(state: {
-  buffer: TailRow[];
-  mark: number;
-  live: boolean;
-  issue: string;
-  query: string;
-  cap: number;
-}): { rows: TailRow[]; visible: number; total: number; backlog: number; empty: boolean; following: boolean } {
+export function tailView(state: { buffer: TailRow[]; mark: number; live: boolean; issue: string; query: string; cap: number }): {
+  rows: TailRow[];
+  visible: number;
+  total: number;
+  backlog: number;
+  empty: boolean;
+  following: boolean;
+} {
   const q = (state.query || "").trim().toLowerCase();
   const match = (line: TailRow) => (!state.issue || line.issue === state.issue) && (!q || line.raw.toLowerCase().indexOf(q) !== -1);
   return followView({ buffer: state.buffer, mark: state.mark, live: state.live, cap: state.cap, match });
@@ -398,7 +397,8 @@ export interface RepoOption {
   runState: RunState;
 }
 
-export const asRepoOption = (repo: string | RepoOption): RepoOption => (typeof repo === "string" ? { project: repo, runState: "idle" } : repo);
+export const asRepoOption = (repo: string | RepoOption): RepoOption =>
+  typeof repo === "string" ? { project: repo, runState: "idle" } : repo;
 
 /**
  * The repo dropdown (#88): the toolbar's page heading and the repo switcher in one
@@ -423,7 +423,10 @@ export const renderRepoDropdown = (repos: readonly (string | RepoOption)[], sele
     row("", !selected, "all", "All repos", count),
     ...options.map((repo) => row(repo.project, repo.project === selected, repo.runState, repo.repo ?? repo.project, repo.runState)),
   ].join("");
-  return `<div class="repo-dropdown" data-repo-dropdown><button type="button" class="repo-trigger" id="repo-trigger" aria-haspopup="listbox" aria-expanded="false" aria-controls="repo-menu"><span class="repo-label">${escapeHtml(label)}</span><span class="repo-chevron" aria-hidden="true">▾</span></button><ul class="repo-menu" id="repo-menu" role="listbox" aria-label="Switch repo" tabindex="-1" hidden>${rows}</ul><noscript>${renderProjectPicker(options.map((repo) => repo.project), selected)}</noscript></div>`;
+  return `<div class="repo-dropdown" data-repo-dropdown><button type="button" class="repo-trigger" id="repo-trigger" aria-haspopup="listbox" aria-expanded="false" aria-controls="repo-menu"><span class="repo-label">${escapeHtml(label)}</span><span class="repo-chevron" aria-hidden="true">▾</span></button><ul class="repo-menu" id="repo-menu" role="listbox" aria-label="Switch repo" tabindex="-1" hidden>${rows}</ul><noscript>${renderProjectPicker(
+    options.map((repo) => repo.project),
+    selected,
+  )}</noscript></div>`;
 };
 
 /**

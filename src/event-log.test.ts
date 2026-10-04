@@ -106,13 +106,18 @@ test("a switch over the §2.1 narrowed kinds reads each member's fields", () => 
   assert.equal(describe(event("gate-check", { taskId: "9", cmd: "run-tests" })), "gate-check run-tests");
   assert.equal(describe(event("tool", { taskId: "9", name: "Read", path: "/a.ts" })), "tool Read /a.ts");
   assert.equal(describe(event("sandbox-exec", { taskId: "9", cmd: "ls" })), "sandbox-exec ls");
-  assert.equal(describe(event("commit", { taskId: "9", branch: "agent/9", sha: "abc", files: ["a.ts", "b.ts"] })), "commit abc on agent/9 touched 2");
+  assert.equal(
+    describe(event("commit", { taskId: "9", branch: "agent/9", sha: "abc", files: ["a.ts", "b.ts"] })),
+    "commit abc on agent/9 touched 2",
+  );
 });
 
 test("campaign-start records name and titles once, and they round-trip through readEventLog", () => {
   const titles = { "101": "cache eviction", "102": "warm the cache" };
   const logFile = withLog([
-    JSON.stringify(event("campaign-start", { ts: "2026-08-27T00:00:00.000Z", waves: [["101", "102"]], slots: 2, name: "gateway work", titles })),
+    JSON.stringify(
+      event("campaign-start", { ts: "2026-08-27T00:00:00.000Z", waves: [["101", "102"]], slots: 2, name: "gateway work", titles }),
+    ),
     JSON.stringify(event("wave-start", { ts: "2026-08-27T00:00:01.000Z", index: 0, tasks: ["101", "102"] })),
     JSON.stringify(event("campaign-done", { ts: "2026-08-27T00:00:02.000Z", waves: 1, name: "gateway work" })),
   ]);
@@ -153,7 +158,13 @@ test("normalizeLegacyEvent renames the retired event kinds one-for-one to the §
 });
 
 test("normalizeLegacyEvent maps a quarantined event to parked with reason conflict, keeping its detail", () => {
-  const [parked] = normalizeLegacyEvent({ ts: "t", event: "quarantined", taskId: "640", branch: "agent/640", detail: "CONFLICT (content)" });
+  const [parked] = normalizeLegacyEvent({
+    ts: "t",
+    event: "quarantined",
+    taskId: "640",
+    branch: "agent/640",
+    detail: "CONFLICT (content)",
+  });
   assert.equal(parked.event, "parked");
   assert.equal(parked.event === "parked" && parked.reason, "conflict");
   assert.equal(parked.event === "parked" && parked.detail, "CONFLICT (content)");
@@ -172,16 +183,31 @@ test("normalizeLegacyEvent maps the retired park reasons to the one enum, keepin
 
 test("normalizeLegacyEvent fans a legacy queue-start into a spawn per task and a legacy queue-done into per-task terminals", () => {
   const spawns = normalizeLegacyEvent({ ts: "t", event: "queue-start", taskIds: ["1", "2"], slots: 2 });
-  assert.deepEqual(spawns.map((e) => [e.event, e.event === "spawn" ? e.taskId : undefined]), [["spawn", "1"], ["spawn", "2"]]);
+  assert.deepEqual(
+    spawns.map((e) => [e.event, e.event === "spawn" ? e.taskId : undefined]),
+    [
+      ["spawn", "1"],
+      ["spawn", "2"],
+    ],
+  );
   const drained = normalizeLegacyEvent({ ts: "t", event: "queue-done", outcomes: { "1": "green", "2": "error(1)", "3": "parked" } });
   // green → green, error → failed; a parked outcome already carried its own parked row.
-  assert.deepEqual(drained.map((e) => e.event), ["green", "failed"]);
+  assert.deepEqual(
+    drained.map((e) => e.event),
+    ["green", "failed"],
+  );
 });
 
 test("normalizeLegacyEvent fans an old campaign-failed (failures inline) into a failed per id plus the bare stop marker", () => {
   const rows = normalizeLegacyEvent({ ts: "t", event: "campaign-failed", merged: ["1"], failed: ["2", "3"] });
-  assert.deepEqual(rows.map((e) => e.event), ["failed", "failed", "campaign-failed"]);
-  assert.deepEqual(rows.filter((e) => e.event === "failed").map((e) => (e.event === "failed" ? e.taskId : "")), ["2", "3"]);
+  assert.deepEqual(
+    rows.map((e) => e.event),
+    ["failed", "failed", "campaign-failed"],
+  );
+  assert.deepEqual(
+    rows.filter((e) => e.event === "failed").map((e) => (e.event === "failed" ? e.taskId : "")),
+    ["2", "3"],
+  );
 });
 
 test("normalizeLegacyEvent renames campaign-done.batches to waves", () => {

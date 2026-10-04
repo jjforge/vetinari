@@ -11,11 +11,7 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  renderModesReference,
-  MODES_REFERENCE_BEGIN,
-  MODES_REFERENCE_END,
-} from "../src/help.ts";
+import { renderModesReference, MODES_REFERENCE_BEGIN, MODES_REFERENCE_END } from "../src/help.ts";
 
 const path = join(process.cwd(), "docs/reference.md");
 const md = readFileSync(path, "utf8");

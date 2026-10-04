@@ -24,8 +24,7 @@ export type GatewayServiceVerb = "status" | "start" | "stop" | "restart";
 const GATEWAY_SERVICE_VERBS: GatewayServiceVerb[] = ["status", "start", "stop", "restart"];
 
 /** Whether a raw CLI token is one of the four exposed lifecycle verbs. */
-export const isGatewayServiceVerb = (token: string): token is GatewayServiceVerb =>
-  (GATEWAY_SERVICE_VERBS as string[]).includes(token);
+export const isGatewayServiceVerb = (token: string): token is GatewayServiceVerb => (GATEWAY_SERVICE_VERBS as string[]).includes(token);
 
 /**
  * The `systemctl` argv for one command against the gateway unit: always `--user
@@ -75,14 +74,9 @@ export interface GatewayServiceIO {
  * couldn't read. The honest "came up not active" variants already point at
  * journalctl themselves, so they carry no separate hint.
  */
-export function gatewayServiceMessage(
-  verb: GatewayServiceVerb,
-  wasActive: boolean | undefined,
-  nowActive: boolean | undefined,
-): string {
+export function gatewayServiceMessage(verb: GatewayServiceVerb, wasActive: boolean | undefined, nowActive: boolean | undefined): string {
   const withHint = (line: string) => `${line}\n${logsHint}`;
-  const notActive = (past: string) =>
-    `${past} ${GATEWAY_UNIT} — but it is not active; see journalctl --user -u ${GATEWAY_UNIT}`;
+  const notActive = (past: string) => `${past} ${GATEWAY_UNIT} — but it is not active; see journalctl --user -u ${GATEWAY_UNIT}`;
   switch (verb) {
     case "start":
       if (wasActive === true) return withHint(`${GATEWAY_UNIT} was already running — nothing to do.`);

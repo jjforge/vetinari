@@ -91,11 +91,7 @@ export type LocalAgentScript = (turn: LocalAgentTurn) => LocalAgentResult | Prom
  * The host repo is the process cwd — the same place `integrateGreens` /
  * `collectWaveChangelog` / `commitsAhead` operate — so the whole pipeline sees one repo.
  */
-export async function makeLocalSandbox(
-  cfg: ResolvedConfig,
-  taskId: string,
-  script: LocalAgentScript,
-): Promise<Sandbox> {
+export async function makeLocalSandbox(cfg: ResolvedConfig, taskId: string, script: LocalAgentScript): Promise<Sandbox> {
   const repoRoot = process.cwd();
   const branch = `${cfg.branchPrefix}${taskId}`;
   const worktreeDir = resolve(repoRoot, cfg.stateDir, "worktrees", taskId);

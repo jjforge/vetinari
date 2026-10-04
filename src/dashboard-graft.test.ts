@@ -34,9 +34,7 @@ test("parseGraftClosure carries a whole-batch rejection's offenders", () => {
     rejected: [{ id: "202", reason: "already-in-campaign" }],
   };
   assert.deepEqual(
-    parseGraftClosure(
-      `graft rejected — nothing added (already in the campaign: #202).\ngraft-closure ${JSON.stringify(structured)}`,
-    ),
+    parseGraftClosure(`graft rejected — nothing added (already in the campaign: #202).\ngraft-closure ${JSON.stringify(structured)}`),
     structured,
   );
 });
@@ -68,9 +66,8 @@ test("shellGraftClosure parses the closure the project's own dry-run prints", as
 });
 
 test("shellGraftClosure returns null when the child exits non-zero", async () => {
-  const result = await withFixtureCli(
-    `process.stderr.write('no campaign running\\n'); process.exit(1);`,
-    () => shellGraftClosure("/tmp", ["301"]),
+  const result = await withFixtureCli(`process.stderr.write('no campaign running\\n'); process.exit(1);`, () =>
+    shellGraftClosure("/tmp", ["301"]),
   );
   assert.equal(result, null);
 });
@@ -78,10 +75,7 @@ test("shellGraftClosure returns null when the child exits non-zero", async () =>
 test("parseGraftClosure returns null when the line is absent or unparseable", () => {
   // No structured line (an install predating this closure) → null, so the route can
   // 502 rather than half-render a closure it cannot vouch for.
-  assert.equal(
-    parseGraftClosure(`graft #301 → #301 in wave 2\nresulting campaign: "101" "301"`),
-    null,
-  );
+  assert.equal(parseGraftClosure(`graft #301 → #301 in wave 2\nresulting campaign: "101" "301"`), null);
   // Present but malformed JSON → null too.
   assert.equal(parseGraftClosure("graft-closure {not json"), null);
 });

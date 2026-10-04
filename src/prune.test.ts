@@ -27,7 +27,10 @@ const outcomesFrom = (o: Record<string, string>) => new Map(Object.entries(o));
 
 test("computePrune removes a linear dependent chain and keeps unrelated issues", async () => {
   const res = await computePrune(
-    [["611", "640"], ["623", "701"]],
+    [
+      ["611", "640"],
+      ["623", "701"],
+    ],
     "640",
     blockedByFrom({ "701": ["640"] }), // 701 is blocked by 640
   );
@@ -60,41 +63,26 @@ test("computePrune removes a diamond dependent even when it has another, kept bl
 });
 
 test("computePrune removes only the target when nothing depends on it, dropping an emptied wave", async () => {
-  const res = await computePrune(
-    [["611", "623"], ["640"]],
-    "640",
-    blockedByFrom({}),
-  );
+  const res = await computePrune([["611", "623"], ["640"]], "640", blockedByFrom({}));
 
   assert.deepEqual(res.removed, ["640"]);
   assert.deepEqual(res.remaining, [["611", "623"]]); // the "640"-only wave is dropped
 });
 
 test("computePrune normalizes leading # in the target, waves, and resolver output", async () => {
-  const res = await computePrune(
-    [["#611", "#640"], ["#701"]],
-    "#640",
-    blockedByFrom({ "701": ["#640"] }),
-  );
+  const res = await computePrune([["#611", "#640"], ["#701"]], "#640", blockedByFrom({ "701": ["#640"] }));
 
   assert.deepEqual(res.removed, ["640", "701"]);
   assert.deepEqual(res.remaining, [["611"]]);
 });
 
 test("computePrune rejects a target that is not in the campaign", async () => {
-  await assert.rejects(
-    () => computePrune([["611", "640"]], "999", blockedByFrom({})),
-    /999.*not in the campaign/i,
-  );
+  await assert.rejects(() => computePrune([["611", "640"]], "999", blockedByFrom({})), /999.*not in the campaign/i);
 });
 
 test("computePrune ignores blockers that live outside the named campaign", async () => {
   // 701's blocker 555 is not part of this campaign; only the in-campaign edge to 640 matters.
-  const res = await computePrune(
-    [["640", "701"]],
-    "640",
-    blockedByFrom({ "701": ["640", "555"] }),
-  );
+  const res = await computePrune([["640", "701"]], "640", blockedByFrom({ "701": ["640", "555"] }));
 
   assert.deepEqual(res.removed, ["640", "701"]);
   assert.deepEqual(res.remaining, []);
@@ -104,10 +92,7 @@ test("applyPrune never manufactures a drop for a non-member id", () => {
   // A closure id that is not in any wave must not default to `unstarted` and land
   // in `dropped` — otherwise a prune of a non-member would report dropping it while
   // dropping nothing (the confirmation would lie).
-  const res = applyPrune(
-    { waves: [["101"], ["640"]], outcomes: outcomesFrom({}) },
-    ["42"],
-  );
+  const res = applyPrune({ waves: [["101"], ["640"]], outcomes: outcomesFrom({}) }, ["42"]);
 
   assert.deepEqual(res.dropped, []);
   assert.deepEqual(res.parkedToClear, []);
@@ -116,10 +101,7 @@ test("applyPrune never manufactures a drop for a non-member id", () => {
 
 test("applyPrune keeps a merged member and drops an unstarted one", () => {
   // 640 already merged, 701 not yet started; both are in the removed closure.
-  const res = applyPrune(
-    { waves: [["611", "640"], ["701"]], outcomes: outcomesFrom({ "640": "completed" }) },
-    ["640", "701"],
-  );
+  const res = applyPrune({ waves: [["611", "640"], ["701"]], outcomes: outcomesFrom({ "640": "completed" }) }, ["640", "701"]);
 
   // Banked work stays; the unstarted dependent leaves the plan.
   assert.deepEqual(res.dropped, ["701"]);
@@ -132,10 +114,7 @@ test("applyPrune drops a parked member and clears its record so it stops reading
   // clearing — the record only NAMES the work, so deleting the JSON leaves the
   // branch/worktree/session resumable (ADR 0013) while nothing on disk still reads a
   // pruned issue as a live campaign member.
-  const res = applyPrune(
-    { waves: [["611"], ["701"]], outcomes: outcomesFrom({ "701": "parked" }) },
-    ["701"],
-  );
+  const res = applyPrune({ waves: [["611"], ["701"]], outcomes: outcomesFrom({ "701": "parked" }) }, ["701"]);
 
   assert.deepEqual(res.dropped, ["701"]);
   assert.deepEqual(res.parkedToClear, ["701"]); // cleared as it leaves the plan
@@ -144,10 +123,7 @@ test("applyPrune drops a parked member and clears its record so it stops reading
 
 test("applyPrune clears only the parked drops, never an unstarted one (no record to clear)", () => {
   // 701 parked, 712 never started: both leave, but only the parked one has a record.
-  const res = applyPrune(
-    { waves: [["611"], ["701", "712"]], outcomes: outcomesFrom({ "701": "parked" }) },
-    ["701", "712"],
-  );
+  const res = applyPrune({ waves: [["611"], ["701", "712"]], outcomes: outcomesFrom({ "701": "parked" }) }, ["701", "712"]);
 
   assert.deepEqual(res.dropped, ["701", "712"]);
   assert.deepEqual(res.parkedToClear, ["701"]);
@@ -156,10 +132,7 @@ test("applyPrune clears only the parked drops, never an unstarted one (no record
 
 test("applyPrune keeps a green member so it still merges", () => {
   // 640 is green (mergeable) but in the closure — banked work is never discarded.
-  const res = applyPrune(
-    { waves: [["640", "701"]], outcomes: outcomesFrom({ "640": "completed", "701": "unstarted" }) },
-    ["640", "701"],
-  );
+  const res = applyPrune({ waves: [["640", "701"]], outcomes: outcomesFrom({ "640": "completed", "701": "unstarted" }) }, ["640", "701"]);
 
   assert.deepEqual(res.dropped, ["701"]);
   assert.deepEqual(res.parkedToClear, []);
@@ -186,10 +159,7 @@ test("pruneClosure names the target, dropped dependents, kept-banked work, and r
   // 640 already merged (banked), its dependent 701 unstarted: the closure is
   // {640, 701}, but only 701 leaves the plan — 640 stays banked.
   const removed = ["640", "701"];
-  const applied = applyPrune(
-    { waves: [["611", "640"], ["701"]], outcomes: outcomesFrom({ "640": "completed" }) },
-    removed,
-  );
+  const applied = applyPrune({ waves: [["611", "640"], ["701"]], outcomes: outcomesFrom({ "640": "completed" }) }, removed);
 
   assert.deepEqual(pruneClosure("640", removed, applied), {
     target: "640",
@@ -216,7 +186,13 @@ test("strandedByConflict reports a quarantined issue's orphaned later-wave depen
   // Wave 0 ran; 640 quarantined on a merge conflict (green, so `completed`), 611 merged.
   // 701 in the unstarted wave 1 is blocked by 640, so it is orphaned.
   const impacts = await strandedByConflict(
-    { waves: [["611", "640"], ["623", "701"]], outcomes: outcomesFrom({ "611": "completed", "640": "completed" }) },
+    {
+      waves: [
+        ["611", "640"],
+        ["623", "701"],
+      ],
+      outcomes: outcomesFrom({ "611": "completed", "640": "completed" }),
+    },
     ["640"],
     blockedByFrom({ "701": ["640"] }),
   );
@@ -231,7 +207,13 @@ test("strandedByConflict reports a quarantined issue's orphaned later-wave depen
 test("strandedByConflict reports an empty drop for a quarantine that orphans nothing", async () => {
   // 611 quarantined but nothing depends on it — no later-wave work is stranded.
   const impacts = await strandedByConflict(
-    { waves: [["611", "640"], ["623", "701"]], outcomes: outcomesFrom({ "611": "completed", "640": "completed" }) },
+    {
+      waves: [
+        ["611", "640"],
+        ["623", "701"],
+      ],
+      outcomes: outcomesFrom({ "611": "completed", "640": "completed" }),
+    },
     ["611"],
     blockedByFrom({ "701": ["640"] }),
   );
@@ -331,10 +313,7 @@ test("resumeIndex re-enters a wave that banked some work but did not close", () 
 
 test("restrictBlockers keeps only the edges that stay inside the selected set", async () => {
   // 701 is blocked by 640 (in the set) and 555 (outside it); 611 has no blocker.
-  const { inSet, external } = await restrictBlockers(
-    ["611", "640", "701"],
-    blockedByFrom({ "701": ["#640", "555"], "640": ["611"] }),
-  );
+  const { inSet, external } = await restrictBlockers(["611", "640", "701"], blockedByFrom({ "701": ["#640", "555"], "640": ["611"] }));
 
   assert.deepEqual([...inSet.get("701")!], ["640"], "external blocker 555 is not an in-set edge");
   assert.deepEqual([...external.get("701")!], ["555"], "555 is recorded as external");
@@ -387,18 +366,12 @@ test("runPrune rejects a missing target before any campaign lookup", async () =>
 
 test("runPrune rejects a config with no blockedBy resolver", async () => {
   const cfg = harnessCfg({ blockedBy: undefined });
-  await assert.rejects(
-    () => runPrune(cfg, "640", {}),
-    /prune needs a "blockedBy" resolver/,
-  );
+  await assert.rejects(() => runPrune(cfg, "640", {}), /prune needs a "blockedBy" resolver/);
 });
 
 test("runPrune rejects a prune when no campaign has been launched (empty log)", async () => {
   const cfg = harnessCfg();
-  await assert.rejects(
-    () => runPrune(cfg, "640", {}),
-    /no campaign to prune/,
-  );
+  await assert.rejects(() => runPrune(cfg, "640", {}), /no campaign to prune/);
 });
 
 test("runPrune rejects a prune when the campaign is settled (every member merged)", async () => {
@@ -475,7 +448,10 @@ test("runPrune --dry-run previews the prune but appends no event and enqueues no
     remaining: [["101"]],
   });
   // Nothing was written: no prune event on the log, no outbound record.
-  assert.equal(readEventLog(cfg).some((e) => e.event === "prune"), false);
+  assert.equal(
+    readEventLog(cfg).some((e) => e.event === "prune"),
+    false,
+  );
   assert.equal(listOutbox(cfg).length, 0);
 });
 
@@ -496,9 +472,7 @@ test("runPrune appends the prune event with its closure and enqueues a progress:
 
   // The appended prune event carries target + closure + dropped, so the loop
   // replays the same rule at its next wave boundary.
-  const ev = readEventLog(cfg).find((e) => e.event === "prune") as
-    | { target: string; removed: string[]; dropped: string[] }
-    | undefined;
+  const ev = readEventLog(cfg).find((e) => e.event === "prune") as { target: string; removed: string[]; dropped: string[] } | undefined;
   assert.ok(ev, "expected a prune event on the log");
   assert.equal(ev!.target, "640");
   assert.deepEqual(ev!.removed, ["640", "701"]);
@@ -520,11 +494,16 @@ test("runPrune clears a dropped parked member's record by default, touching no b
 
   const cleared: string[][] = [];
   const purged: string[][] = [];
-  const result = await runPrune(cfg, "701", {}, {
-    ...defaultPruneDeps,
-    clearParkedForTasks: (_cfg, ids) => cleared.push(ids),
-    purgeBranches: (_t, ids) => purged.push(ids),
-  });
+  const result = await runPrune(
+    cfg,
+    "701",
+    {},
+    {
+      ...defaultPruneDeps,
+      clearParkedForTasks: (_cfg, ids) => cleared.push(ids),
+      purgeBranches: (_t, ids) => purged.push(ids),
+    },
+  );
 
   assert.equal(result.mode, "prune");
   assert.deepEqual(result.mode === "prune" && result.dropped, ["701"]);
@@ -544,13 +523,18 @@ test("runPrune --purge deletes each dropped member's branch + worktree after dis
   const cleared: string[][] = [];
   const purged: string[][] = [];
   const disclosure = [{ id: "701", branch: "agent/701", unmergedCommits: 3, worktree: "/wt/701" }];
-  const result = await runPrune(cfg, "701", { purge: true }, {
-    ...defaultPruneDeps,
-    clearParkedForTasks: (_cfg, ids) => cleared.push(ids),
-    rootOf: () => "/root",
-    describeBranchPurge: (_t, ids) => ids.map((id) => disclosure.find((d) => d.id === id)!),
-    purgeBranches: (_t, ids) => purged.push(ids),
-  });
+  const result = await runPrune(
+    cfg,
+    "701",
+    { purge: true },
+    {
+      ...defaultPruneDeps,
+      clearParkedForTasks: (_cfg, ids) => cleared.push(ids),
+      rootOf: () => "/root",
+      describeBranchPurge: (_t, ids) => ids.map((id) => disclosure.find((d) => d.id === id)!),
+      purgeBranches: (_t, ids) => purged.push(ids),
+    },
+  );
 
   assert.equal(result.mode, "prune");
   // The record is still cleared, and the branch + worktree are additionally dropped.
@@ -569,13 +553,18 @@ test("runPrune --purge --dry-run discloses the true drop but deletes nothing", a
   const cleared: string[][] = [];
   const purged: string[][] = [];
   const disclosure = [{ id: "701", branch: "agent/701", unmergedCommits: 2, worktree: "/wt/701" }];
-  const result = await runPrune(cfg, "701", { purge: true, dryRun: true }, {
-    ...defaultPruneDeps,
-    clearParkedForTasks: (_cfg, ids) => cleared.push(ids),
-    rootOf: () => "/root",
-    describeBranchPurge: (_t, ids) => ids.map((id) => disclosure.find((d) => d.id === id)!),
-    purgeBranches: (_t, ids) => purged.push(ids),
-  });
+  const result = await runPrune(
+    cfg,
+    "701",
+    { purge: true, dryRun: true },
+    {
+      ...defaultPruneDeps,
+      clearParkedForTasks: (_cfg, ids) => cleared.push(ids),
+      rootOf: () => "/root",
+      describeBranchPurge: (_t, ids) => ids.map((id) => disclosure.find((d) => d.id === id)!),
+      purgeBranches: (_t, ids) => purged.push(ids),
+    },
+  );
 
   assert.equal(result.mode, "prune");
   assert.equal(result.mode === "prune" && result.applied, false);
@@ -584,7 +573,10 @@ test("runPrune --purge --dry-run discloses the true drop but deletes nothing", a
   // ...but nothing is cleared, dropped, or logged.
   assert.deepEqual(cleared, []);
   assert.deepEqual(purged, []);
-  assert.equal(readEventLog(cfg).some((e) => e.event === "prune"), false);
+  assert.equal(
+    readEventLog(cfg).some((e) => e.event === "prune"),
+    false,
+  );
 });
 
 test("runPrune names the target's project, repo and title, and carries them into the closure", async () => {
@@ -644,7 +636,10 @@ test("runPrune refuses a project qualifier that names a different project, chang
     /refusing: this project is "jjforge", but the qualifier names "vetinari"/,
   );
   // Nothing was written.
-  assert.equal(readEventLog(cfg).some((e) => e.event === "prune"), false);
+  assert.equal(
+    readEventLog(cfg).some((e) => e.event === "prune"),
+    false,
+  );
   assert.equal(listOutbox(cfg).length, 0);
 });
 
@@ -656,7 +651,10 @@ test("runPrune refuses a qualified target when the repo identity is not derivabl
     () => runPrune(cfg, "640", { project: "vetinari" }, depsWithRepo(undefined)),
     /cannot derive this project's repo to verify the "vetinari" qualifier/,
   );
-  assert.equal(readEventLog(cfg).some((e) => e.event === "prune"), false);
+  assert.equal(
+    readEventLog(cfg).some((e) => e.event === "prune"),
+    false,
+  );
 });
 
 test("runPrune's bare form still works when the repo identity is not derivable", async () => {
@@ -681,7 +679,12 @@ test("runPrune with an explicit plan launches a fresh reduced campaign", async (
   const result = await runPrune(
     cfg,
     "640",
-    { plan: [["611", "640"], ["623", "701"]] },
+    {
+      plan: [
+        ["611", "640"],
+        ["623", "701"],
+      ],
+    },
     {
       ...defaultPruneDeps,
       launchCampaign: async (_cfg, batches) => {
@@ -713,7 +716,13 @@ test("runPrune --dry-run on an explicit plan previews but launches nothing", asy
   const result = await runPrune(
     cfg,
     "640",
-    { dryRun: true, plan: [["611", "640"], ["623", "701"]] },
+    {
+      dryRun: true,
+      plan: [
+        ["611", "640"],
+        ["623", "701"],
+      ],
+    },
     {
       ...defaultPruneDeps,
       launchCampaign: async (_cfg, batches) => {

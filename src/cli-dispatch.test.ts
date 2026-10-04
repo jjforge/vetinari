@@ -48,9 +48,25 @@ function makeDeps(overrides: Partial<DispatchDeps> = {}) {
     runLoop: spy(Promise.resolve("green")) as unknown as DispatchDeps["runLoop"],
     campaign: spy(Promise.resolve("done")) as unknown as DispatchDeps["campaign"],
     expandSelection: spy(Promise.resolve([])) as unknown as DispatchDeps["expandSelection"],
-    runCampaignPlan: spy(Promise.resolve({ waves: [], waveArgs: "", report: "", suggestedName: "" })) as unknown as DispatchDeps["runCampaignPlan"],
-    runPrune: spy(Promise.resolve({ mode: "prune", project: "demo", repo: undefined, title: undefined, target: "436", dropped: [], kept: [], remaining: [], parkedDropped: [] })) as unknown as DispatchDeps["runPrune"],
-    runGraft: spy(Promise.resolve({ project: "demo", repo: undefined, titles: {}, ids: [], rejected: [], placement: [], remaining: [], applied: true })) as unknown as DispatchDeps["runGraft"],
+    runCampaignPlan: spy(
+      Promise.resolve({ waves: [], waveArgs: "", report: "", suggestedName: "" }),
+    ) as unknown as DispatchDeps["runCampaignPlan"],
+    runPrune: spy(
+      Promise.resolve({
+        mode: "prune",
+        project: "demo",
+        repo: undefined,
+        title: undefined,
+        target: "436",
+        dropped: [],
+        kept: [],
+        remaining: [],
+        parkedDropped: [],
+      }),
+    ) as unknown as DispatchDeps["runPrune"],
+    runGraft: spy(
+      Promise.resolve({ project: "demo", repo: undefined, titles: {}, ids: [], rejected: [], placement: [], remaining: [], applied: true }),
+    ) as unknown as DispatchDeps["runGraft"],
     listParked: spy([]) as unknown as DispatchDeps["listParked"],
     hasParked: spy(true) as unknown as DispatchDeps["hasParked"],
     answerParked: spy() as unknown as DispatchDeps["answerParked"],
@@ -569,7 +585,10 @@ test("dispatch run is not refused by a standalone run's own lease — only a liv
   });
   await dispatch({ kind: "run", agent: {}, args: ["611"], json: false }, deps2);
   assert.equal((deps2.runLoop as any).calls.length, 0, "a live campaign lease refuses the standalone run");
-  assert.ok(errored.some((l) => /campaign is already running/.test(l)), "the refusal names a live campaign, on stderr");
+  assert.ok(
+    errored.some((l) => /campaign is already running/.test(l)),
+    "the refusal names a live campaign, on stderr",
+  );
 });
 
 test("dispatch run for a campaign's own child (VETINARI_CHILD) runs even while the lease is live", async () => {
@@ -601,7 +620,11 @@ test("dispatch run maps a failed outcome to exit 1 (run distinguishes failed)", 
 
 // The campaign/redrive exit codes follow the outcome the loop returns (design §5 step 6,
 // §15): 0 only for `done`, 2 for `parked`, 1 for `failed` — no exit-code logic in modes.ts.
-for (const [outcome, code] of [["done", 0], ["parked", 2], ["failed", 1]] as const) {
+for (const [outcome, code] of [
+  ["done", 0],
+  ["parked", 2],
+  ["failed", 1],
+] as const) {
   test(`dispatch campaign exits ${code} on a ${outcome} campaign`, async () => {
     const { deps, exitCodes } = makeDeps({
       expandSelection: spy(Promise.resolve(["436"])) as any,
@@ -609,7 +632,18 @@ for (const [outcome, code] of [["done", 0], ["parked", 2], ["failed", 1]] as con
       campaign: spy(Promise.resolve(outcome)) as any,
     });
     await dispatch(
-      { kind: "campaign", agent: {}, positional: ["436"], name: undefined, autoPrune: false, resume: false, dryRun: false, override: false, onUnderspecified: undefined, json: false },
+      {
+        kind: "campaign",
+        agent: {},
+        positional: ["436"],
+        name: undefined,
+        autoPrune: false,
+        resume: false,
+        dryRun: false,
+        override: false,
+        onUnderspecified: undefined,
+        json: false,
+      },
       deps,
     );
     assert.deepEqual(exitCodes, [code]);
@@ -620,7 +654,18 @@ for (const [outcome, code] of [["done", 0], ["parked", 2], ["failed", 1]] as con
       campaign: spy(Promise.resolve(outcome)) as any,
     });
     await dispatch(
-      { kind: "campaign", agent: {}, positional: [], name: undefined, autoPrune: false, resume: true, dryRun: false, override: false, onUnderspecified: undefined, json: false },
+      {
+        kind: "campaign",
+        agent: {},
+        positional: [],
+        name: undefined,
+        autoPrune: false,
+        resume: true,
+        dryRun: false,
+        override: false,
+        onUnderspecified: undefined,
+        json: false,
+      },
       deps,
     );
     assert.deepEqual(exitCodes, [code]);
@@ -646,10 +691,7 @@ for (const [outcome, code] of [["done", 0], ["parked", 2], ["failed", 1]] as con
 
 test("dispatch run with no task id throws the same message the old switch threw, after agent select", async () => {
   const { deps } = makeDeps();
-  await assert.rejects(
-    dispatch({ kind: "run", agent: {}, args: [], json: false }, deps),
-    /run needs a task id/,
-  );
+  await assert.rejects(dispatch({ kind: "run", agent: {}, args: [], json: false }, deps), /run needs a task id/);
   assert.equal((deps.selectAgent as any).calls.length, 1);
   assert.equal((deps.runLoop as any).calls.length, 0);
 });
@@ -657,7 +699,18 @@ test("dispatch run with no task id throws the same message the old switch threw,
 test("dispatch campaign --resume runs a resume with no selection and never archives a leftover", async () => {
   const { deps } = makeDeps();
   await dispatch(
-    { kind: "campaign", agent: {}, positional: [], name: "r", autoPrune: true, resume: true, dryRun: false, override: false, onUnderspecified: undefined, json: false },
+    {
+      kind: "campaign",
+      agent: {},
+      positional: [],
+      name: "r",
+      autoPrune: true,
+      resume: true,
+      dryRun: false,
+      override: false,
+      onUnderspecified: undefined,
+      json: false,
+    },
     deps,
   );
   assert.deepEqual((deps.campaign as any).calls, [[deps.cfg, [], deps.host, "r", { autoPrune: true, resume: true, override: false }]]);
@@ -668,7 +721,18 @@ test("dispatch campaign --resume runs a resume with no selection and never archi
 test("dispatch campaign --resume --override forwards the failed-member override to the redrive", async () => {
   const { deps } = makeDeps();
   await dispatch(
-    { kind: "campaign", agent: {}, positional: [], name: undefined, autoPrune: false, resume: true, dryRun: false, override: true, onUnderspecified: undefined, json: false },
+    {
+      kind: "campaign",
+      agent: {},
+      positional: [],
+      name: undefined,
+      autoPrune: false,
+      resume: true,
+      dryRun: false,
+      override: true,
+      onUnderspecified: undefined,
+      json: false,
+    },
     deps,
   );
   assert.deepEqual((deps.campaign as any).calls[0][4], { autoPrune: false, resume: true, override: true });
@@ -679,7 +743,9 @@ test("dispatch redrive selects the agent, redrives the campaign from the log, an
   await dispatch({ kind: "redrive", agent: { provider: "codex" }, autoPrune: false, override: false, json: false }, deps);
   assert.deepEqual((deps.selectAgent as any).calls, [[deps.cfg, { provider: "codex" }]]);
   // Redrive takes no selection and continues the live log — no leftover archive, resume=true.
-  assert.deepEqual((deps.campaign as any).calls, [[deps.cfg, [], deps.host, undefined, { autoPrune: false, resume: true, override: false }]]);
+  assert.deepEqual((deps.campaign as any).calls, [
+    [deps.cfg, [], deps.host, undefined, { autoPrune: false, resume: true, override: false }],
+  ]);
   assert.equal((deps.archiveLeftoverRun as any).calls.length, 0);
   assert.equal((deps.archiveIfIdle as any).calls.length, 1);
 });
@@ -691,7 +757,10 @@ test("dispatch redrive refuses with one line when a campaign lease for the proje
   await dispatch({ kind: "redrive", agent: {}, autoPrune: false, override: false, json: false }, deps);
   assert.equal((deps.campaign as any).calls.length, 0, "no second process redrives over a live campaign");
   assert.equal((deps.archiveIfIdle as any).calls.length, 0);
-  assert.ok(logged.some((l) => /live|running|campaign/i.test(l)), "it says why it refused");
+  assert.ok(
+    logged.some((l) => /live|running|campaign/i.test(l)),
+    "it says why it refused",
+  );
 });
 
 test("dispatch redrive --override forwards the failed-member override", async () => {
@@ -703,18 +772,43 @@ test("dispatch redrive --override forwards the failed-member override", async ()
 test("dispatch campaign --resume still redrives but prints the one-release alias notice pointing at redrive", async () => {
   const { deps, logged } = makeDeps();
   await dispatch(
-    { kind: "campaign", agent: {}, positional: [], name: undefined, autoPrune: false, resume: true, dryRun: false, override: false, onUnderspecified: undefined, json: false },
+    {
+      kind: "campaign",
+      agent: {},
+      positional: [],
+      name: undefined,
+      autoPrune: false,
+      resume: true,
+      dryRun: false,
+      override: false,
+      onUnderspecified: undefined,
+      json: false,
+    },
     deps,
   );
   assert.equal((deps.campaign as any).calls.length, 1);
-  assert.ok(logged.some((l) => /campaign --resume/.test(l) && /redrive/.test(l)), "prints the alias notice");
+  assert.ok(
+    logged.some((l) => /campaign --resume/.test(l) && /redrive/.test(l)),
+    "prints the alias notice",
+  );
 });
 
 test("dispatch campaign with an empty selection throws the needs-an-issue message", async () => {
   const { deps } = makeDeps();
   await assert.rejects(
     dispatch(
-      { kind: "campaign", agent: {}, positional: [], name: undefined, autoPrune: false, resume: false, dryRun: false, override: false, onUnderspecified: undefined, json: false },
+      {
+        kind: "campaign",
+        agent: {},
+        positional: [],
+        name: undefined,
+        autoPrune: false,
+        resume: false,
+        dryRun: false,
+        override: false,
+        onUnderspecified: undefined,
+        json: false,
+      },
       deps,
     ),
     /campaign needs at least one issue id or label/,
@@ -726,7 +820,18 @@ test("dispatch campaign --override runs each positional as a literal wave via ex
     expandSelection: spy(Promise.resolve(["436", "611"])) as any,
   });
   await dispatch(
-    { kind: "campaign", agent: {}, positional: ["436 611"], name: undefined, autoPrune: false, resume: false, dryRun: false, override: true, onUnderspecified: undefined, json: false },
+    {
+      kind: "campaign",
+      agent: {},
+      positional: ["436 611"],
+      name: undefined,
+      autoPrune: false,
+      resume: false,
+      dryRun: false,
+      override: true,
+      onUnderspecified: undefined,
+      json: false,
+    },
     deps,
   );
   assert.deepEqual((deps.campaign as any).calls, [[deps.cfg, [["436", "611"]], deps.host, undefined, { autoPrune: false }]]);
@@ -739,7 +844,18 @@ test("dispatch campaign default plans the selection then runs the planned waves"
     runCampaignPlan: spy(Promise.resolve({ waves: [["436"]], waveArgs: '"436"', report: "the plan", suggestedName: "" })) as any,
   });
   await dispatch(
-    { kind: "campaign", agent: {}, positional: ["436"], name: "n", autoPrune: false, resume: false, dryRun: false, override: false, onUnderspecified: "drop", json: false },
+    {
+      kind: "campaign",
+      agent: {},
+      positional: ["436"],
+      name: "n",
+      autoPrune: false,
+      resume: false,
+      dryRun: false,
+      override: false,
+      onUnderspecified: "drop",
+      json: false,
+    },
     deps,
   );
   assert.equal((deps.runCampaignPlan as any).calls.length, 1);
@@ -752,7 +868,18 @@ test("dispatch campaign --dry-run plans but runs nothing", async () => {
     runCampaignPlan: spy(Promise.resolve({ waves: [["436"]], waveArgs: '"436"', report: "the plan", suggestedName: "big" })) as any,
   });
   await dispatch(
-    { kind: "campaign", agent: {}, positional: ["436"], name: undefined, autoPrune: false, resume: false, dryRun: true, override: false, onUnderspecified: undefined, json: false },
+    {
+      kind: "campaign",
+      agent: {},
+      positional: ["436"],
+      name: undefined,
+      autoPrune: false,
+      resume: false,
+      dryRun: true,
+      override: false,
+      onUnderspecified: undefined,
+      json: false,
+    },
     deps,
   );
   assert.equal((deps.runCampaignPlan as any).calls.length, 1);
@@ -767,7 +894,18 @@ test("dispatch campaign default prints the plan provenance and streams no JSON w
   const prev = process.env.VETINARI_JSON;
   delete process.env.VETINARI_JSON;
   await dispatch(
-    { kind: "campaign", agent: {}, positional: ["436"], name: "n", autoPrune: false, resume: false, dryRun: false, override: false, onUnderspecified: undefined, json: false },
+    {
+      kind: "campaign",
+      agent: {},
+      positional: ["436"],
+      name: "n",
+      autoPrune: false,
+      resume: false,
+      dryRun: false,
+      override: false,
+      onUnderspecified: undefined,
+      json: false,
+    },
     deps,
   );
   const json = process.env.VETINARI_JSON;
@@ -785,7 +923,18 @@ test("dispatch campaign --json switches on the raw event stream and suppresses t
   const prev = process.env.VETINARI_JSON;
   delete process.env.VETINARI_JSON;
   await dispatch(
-    { kind: "campaign", agent: {}, positional: ["436"], name: "n", autoPrune: false, resume: false, dryRun: false, override: false, onUnderspecified: undefined, json: true },
+    {
+      kind: "campaign",
+      agent: {},
+      positional: ["436"],
+      name: "n",
+      autoPrune: false,
+      resume: false,
+      dryRun: false,
+      override: false,
+      onUnderspecified: undefined,
+      json: true,
+    },
     deps,
   );
   const json = process.env.VETINARI_JSON;
@@ -815,7 +964,9 @@ test("dispatch prune routes to runPrune with the parsed target and flags", async
 test("dispatch prune forwards a project qualifier to runPrune", async () => {
   const { deps } = makeDeps();
   await dispatch({ kind: "prune", project: "vetinari", target: "436", dryRun: false, purge: false, json: false }, deps);
-  assert.deepEqual((deps.runPrune as any).calls, [[deps.cfg, "436", { project: "vetinari", dryRun: false, purge: false, host: deps.host }]]);
+  assert.deepEqual((deps.runPrune as any).calls, [
+    [deps.cfg, "436", { project: "vetinari", dryRun: false, purge: false, host: deps.host }],
+  ]);
 });
 
 test("dispatch graft routes to runGraft with the parsed ids and flag", async () => {
@@ -835,7 +986,15 @@ test("dispatch graft forwards a project qualifier to runGraft", async () => {
 // preview shells pass it. The human prose stays either way.
 test("dispatch prune --dry-run emits the machine closure line only under --json", async () => {
   const withClosure = {
-    mode: "prune", project: "demo", repo: undefined, title: undefined, target: "436", dropped: [], kept: [], remaining: [], parkedDropped: [],
+    mode: "prune",
+    project: "demo",
+    repo: undefined,
+    title: undefined,
+    target: "436",
+    dropped: [],
+    kept: [],
+    remaining: [],
+    parkedDropped: [],
     closure: { project: "demo", repo: undefined, target: "436", dropped: [], keptBanked: [], remaining: [] },
   };
   const noJson = makeDeps({ runPrune: spy(Promise.resolve(withClosure)) as any });
@@ -844,12 +1003,22 @@ test("dispatch prune --dry-run emits the machine closure line only under --json"
 
   const withJson = makeDeps({ runPrune: spy(Promise.resolve(withClosure)) as any });
   await dispatch({ kind: "prune", target: "436", dryRun: true, purge: false, json: true }, withJson.deps);
-  assert.ok(withJson.logged.some((l) => l.startsWith("prune-closure ")), "closure JSON under --json");
+  assert.ok(
+    withJson.logged.some((l) => l.startsWith("prune-closure ")),
+    "closure JSON under --json",
+  );
 });
 
 test("dispatch graft --dry-run emits the machine closure line only under --json", async () => {
   const withClosure = {
-    project: "demo", repo: undefined, titles: {}, ids: ["436"], rejected: [], placement: [], remaining: [], applied: false,
+    project: "demo",
+    repo: undefined,
+    titles: {},
+    ids: ["436"],
+    rejected: [],
+    placement: [],
+    remaining: [],
+    applied: false,
     closure: { project: "demo", repo: undefined, ids: ["436"], placement: [], remaining: [], rejected: [] },
   };
   const noJson = makeDeps({ runGraft: spy(Promise.resolve(withClosure)) as any });
@@ -858,12 +1027,19 @@ test("dispatch graft --dry-run emits the machine closure line only under --json"
 
   const withJson = makeDeps({ runGraft: spy(Promise.resolve(withClosure)) as any });
   await dispatch({ kind: "graft", ids: ["436"], dryRun: true, json: true }, withJson.deps);
-  assert.ok(withJson.logged.some((l) => l.startsWith("graft-closure ")), "closure JSON under --json");
+  assert.ok(
+    withJson.logged.some((l) => l.startsWith("graft-closure ")),
+    "closure JSON under --json",
+  );
 });
 
 test("dispatch graft on a real (non-dry-run) rejection prints the prose, emits the closure line only under --json, and exits non-zero", async () => {
   const closure = {
-    project: "demo", repo: undefined, ids: ["202"], placement: [], remaining: [["101"], ["202"]],
+    project: "demo",
+    repo: undefined,
+    ids: ["202"],
+    placement: [],
+    remaining: [["101"], ["202"]],
     rejected: [{ id: "202", reason: "already-in-campaign" as const }],
   };
   const rejecting = (): Promise<never> =>
@@ -872,14 +1048,20 @@ test("dispatch graft on a real (non-dry-run) rejection prints the prose, emits t
   // Without --json: the human prose prints, no JSON on stdout, exit non-zero.
   const noJson = makeDeps({ runGraft: (() => rejecting()) as unknown as DispatchDeps["runGraft"] });
   await dispatch({ kind: "graft", ids: ["202"], dryRun: false, json: false }, noJson.deps);
-  assert.ok(noJson.logged.some((l) => /graft rejected — nothing added \(already in the campaign: #202\)/.test(l)), "prints the prose");
+  assert.ok(
+    noJson.logged.some((l) => /graft rejected — nothing added \(already in the campaign: #202\)/.test(l)),
+    "prints the prose",
+  );
   assert.ok(!noJson.logged.some((l) => l.startsWith("graft-closure")), "no closure JSON without --json");
   assert.deepEqual(noJson.exitCodes, [1], "a rejected graft exits non-zero");
 
   // With --json: the machine `graft-closure {json}` line is emitted too (design §11).
   const withJson = makeDeps({ runGraft: (() => rejecting()) as unknown as DispatchDeps["runGraft"] });
   await dispatch({ kind: "graft", ids: ["202"], dryRun: false, json: true }, withJson.deps);
-  assert.ok(withJson.logged.some((l) => l === `graft-closure ${JSON.stringify(closure)}`), "closure JSON under --json");
+  assert.ok(
+    withJson.logged.some((l) => l === `graft-closure ${JSON.stringify(closure)}`),
+    "closure JSON under --json",
+  );
   assert.deepEqual(withJson.exitCodes, [1]);
 });
 
@@ -908,10 +1090,7 @@ test("dispatch graft on an unexpected defect (a non-Refusal, non-rejection throw
 });
 
 test("identityLine names project, repo and title, and degrades each end gracefully", () => {
-  assert.equal(
-    identityLine("vetinari", "jjforge/vetinari", "42", "Fix the thing"),
-    'vetinari · jjforge/vetinari#42 — "Fix the thing"',
-  );
+  assert.equal(identityLine("vetinari", "jjforge/vetinari", "42", "Fix the thing"), 'vetinari · jjforge/vetinari#42 — "Fix the thing"');
   // No title → project · repo#id.
   assert.equal(identityLine("vetinari", "jjforge/vetinari", "42"), "vetinari · jjforge/vetinari#42");
   // No repo → project and id.
@@ -921,8 +1100,15 @@ test("identityLine names project, repo and title, and degrades each end graceful
 
 test("dispatch prune leads with the project/repo/title identity line", async () => {
   const result = {
-    mode: "prune", project: "vetinari", repo: "jjforge/vetinari", title: "Fix the thing",
-    target: "42", dropped: ["42"], kept: [], remaining: [["101"]], parkedDropped: [],
+    mode: "prune",
+    project: "vetinari",
+    repo: "jjforge/vetinari",
+    title: "Fix the thing",
+    target: "42",
+    dropped: ["42"],
+    kept: [],
+    remaining: [["101"]],
+    parkedDropped: [],
   };
   const { deps, logged } = makeDeps({ runPrune: spy(Promise.resolve(result)) as any });
   await dispatch({ kind: "prune", target: "42", dryRun: false, purge: false, json: false }, deps);
@@ -933,20 +1119,37 @@ test("dispatch prune leads with the project/repo/title identity line", async () 
 // The parked-record line branches on `cmd.dryRun` the way its --purge neighbour already does.
 test("dispatch prune --dry-run reports the parked record in the future tense (would clear), not the past", async () => {
   const result = {
-    mode: "prune", project: "demo", repo: undefined, title: undefined,
-    target: "101", dropped: ["101"], kept: [], remaining: [["102", "103"]], parkedDropped: ["101"],
+    mode: "prune",
+    project: "demo",
+    repo: undefined,
+    title: undefined,
+    target: "101",
+    dropped: ["101"],
+    kept: [],
+    remaining: [["102", "103"]],
+    parkedDropped: ["101"],
     closure: { project: "demo", repo: undefined, target: "101", dropped: ["101"], keptBanked: [], remaining: [["102", "103"]] },
   };
   const { deps, logged } = makeDeps({ runPrune: spy(Promise.resolve(result)) as any });
   await dispatch({ kind: "prune", target: "101", dryRun: true, purge: false, json: false }, deps);
   const line = logged.find((l) => /parked record/.test(l))!;
-  assert.match(line, /^would clear the parked record for #101 — branch\/worktree\/session kept, resumable \(--purge also drops the branch \+ worktree\)\.$/);
+  assert.match(
+    line,
+    /^would clear the parked record for #101 — branch\/worktree\/session kept, resumable \(--purge also drops the branch \+ worktree\)\.$/,
+  );
 });
 
 test("dispatch prune --purge --dry-run reports the parked record in the future tense (would clear)", async () => {
   const result = {
-    mode: "prune", project: "demo", repo: undefined, title: undefined,
-    target: "101", dropped: ["101"], kept: [], remaining: [["102", "103"]], parkedDropped: ["101"],
+    mode: "prune",
+    project: "demo",
+    repo: undefined,
+    title: undefined,
+    target: "101",
+    dropped: ["101"],
+    kept: [],
+    remaining: [["102", "103"]],
+    parkedDropped: ["101"],
     closure: { project: "demo", repo: undefined, target: "101", dropped: ["101"], keptBanked: [], remaining: [["102", "103"]] },
   };
   const { deps, logged } = makeDeps({ runPrune: spy(Promise.resolve(result)) as any });
@@ -958,22 +1161,38 @@ test("dispatch prune --purge --dry-run reports the parked record in the future t
 // An applied prune still reports the completed side-effect in the past tense — unchanged by the fix.
 test("dispatch prune (applied) reports the parked record as cleared, past tense", async () => {
   const result = {
-    mode: "prune", project: "demo", repo: undefined, title: undefined,
-    target: "101", dropped: ["101"], kept: [], remaining: [["102", "103"]], parkedDropped: ["101"],
+    mode: "prune",
+    project: "demo",
+    repo: undefined,
+    title: undefined,
+    target: "101",
+    dropped: ["101"],
+    kept: [],
+    remaining: [["102", "103"]],
+    parkedDropped: ["101"],
   };
   const { deps, logged } = makeDeps({ runPrune: spy(Promise.resolve(result)) as any });
   await dispatch({ kind: "prune", target: "101", dryRun: false, purge: false, json: false }, deps);
   const line = logged.find((l) => /parked record/.test(l))!;
-  assert.equal(line, "cleared parked record for #101 — branch/worktree/session kept, resumable (--purge also drops the branch + worktree).");
+  assert.equal(
+    line,
+    "cleared parked record for #101 — branch/worktree/session kept, resumable (--purge also drops the branch + worktree).",
+  );
 });
 
 test("dispatch graft leads with an identity line per grafted id", async () => {
   const result = {
-    project: "vetinari", repo: "jjforge/vetinari",
+    project: "vetinari",
+    repo: "jjforge/vetinari",
     titles: { "301": "First", "302": "Second" },
-    ids: ["301", "302"], rejected: [],
-    placement: [{ id: "301", wave: 2 }, { id: "302", wave: 2 }],
-    remaining: [["101"], ["301", "302"]], applied: true,
+    ids: ["301", "302"],
+    rejected: [],
+    placement: [
+      { id: "301", wave: 2 },
+      { id: "302", wave: 2 },
+    ],
+    remaining: [["101"], ["301", "302"]],
+    applied: true,
   };
   const { deps, logged } = makeDeps({ runGraft: spy(Promise.resolve(result)) as any });
   await dispatch({ kind: "graft", ids: ["301", "302"], dryRun: false, json: false }, deps);
@@ -998,7 +1217,10 @@ test("dispatch answer on an unparked issue reports it and exits 0 — never runs
   assert.equal((deps.answerParked as any).calls.length, 0, "nothing to deliver to");
   assert.equal((deps.runLoop as any).calls.length, 0, "an unparked issue never runs");
   assert.equal((deps.campaign as any).calls.length, 0, "an unparked issue never redrives");
-  assert.ok(logged.some((l) => /not parked/i.test(l)), "the report names it not parked");
+  assert.ok(
+    logged.some((l) => /not parked/i.test(l)),
+    "the report names it not parked",
+  );
   assert.deepEqual(exitCodes, []); // exit stays 0
 });
 
@@ -1040,7 +1262,11 @@ test("dispatch answer for a standalone park (no campaign) delivers then runs the
   await dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps);
   assert.deepEqual((deps.answerParked as any).calls, [[deps.cfg, "436", "ok"]]);
   assert.equal((deps.campaign as any).calls.length, 0, "a standalone park never redrives");
-  assert.deepEqual((deps.runLoop as any).calls, [[deps.cfg, "436", deps.host]], "the run consumes the answered record and takes a host slot");
+  assert.deepEqual(
+    (deps.runLoop as any).calls,
+    [[deps.cfg, "436", deps.host]],
+    "the run consumes the answered record and takes a host slot",
+  );
   assert.deepEqual(exitCodes, [0]); // the standalone green answer exits 0
 });
 
@@ -1063,8 +1289,5 @@ test("dispatch answer preflight refuses before delivering when the agent selecti
 
 test("dispatch answer with no text throws the needs-a-task-id-and-text message", async () => {
   const { deps } = makeDeps();
-  await assert.rejects(
-    dispatch({ kind: "answer", taskId: "436", text: [] }, deps),
-    /answer needs a task id and text/,
-  );
+  await assert.rejects(dispatch({ kind: "answer", taskId: "436", text: [] }, deps), /answer needs a task id and text/);
 });

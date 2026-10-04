@@ -4,17 +4,38 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { DASHBOARD_PALETTE_CSS, stateColor, stateBorderColor, STATE_DOT_CSS, STATE_CHIP_BORDER_CSS, TOP_BAR_STYLES, ISSUE_DETAIL_SHEET_STYLES, REPO_DROPDOWN_SCRIPT, HOST_LOG_STYLES } from "./dashboard-assets.ts";
-import { archiveRowMatches, archiveRunHref, cappedRawRows, event, formatStatusText, highlightJsonLine, isNotableHostEvent, renderHostLog, renderLandingShell, renderStatusPage, renderTopBar, tailFresh } from "./status.ts";
+import {
+  DASHBOARD_PALETTE_CSS,
+  stateColor,
+  stateBorderColor,
+  STATE_DOT_CSS,
+  STATE_CHIP_BORDER_CSS,
+  TOP_BAR_STYLES,
+  ISSUE_DETAIL_SHEET_STYLES,
+  REPO_DROPDOWN_SCRIPT,
+  HOST_LOG_STYLES,
+} from "./dashboard-assets.ts";
+import {
+  archiveRowMatches,
+  archiveRunHref,
+  cappedRawRows,
+  event,
+  formatStatusText,
+  highlightJsonLine,
+  isNotableHostEvent,
+  renderHostLog,
+  renderLandingShell,
+  renderStatusPage,
+  renderTopBar,
+  tailFresh,
+} from "./status.ts";
 
 // The set of palette tokens defined by a `:root { … }` block, and the set of
 // `var(--token)` references anywhere in a page — the two must agree, or a surface
 // references a colour that never resolves (the #78 class of bug).
-const definedTokens = (css: string) =>
-  new Set([...css.matchAll(/(--[a-z0-9-]+):/g)].map((m) => m[1]));
+const definedTokens = (css: string) => new Set([...css.matchAll(/(--[a-z0-9-]+):/g)].map((m) => m[1]));
 
-const referencedTokens = (html: string) =>
-  new Set([...html.matchAll(/var\((--[a-z0-9-]+)\)/g)].map((m) => m[1]));
+const referencedTokens = (html: string) => new Set([...html.matchAll(/var\((--[a-z0-9-]+)\)/g)].map((m) => m[1]));
 
 // A running-wave campaign page with one issue chip and a parked card — enough
 // surface to assert the §4/§6 chip and card rules against.
@@ -45,37 +66,22 @@ const chipCampaign = () =>
 
 test("both the landing and the campaign page emit the one shared palette, and every colour they reference resolves (#78, #83)", () => {
   const landing = renderLandingShell(["alpha", "beta"]);
-  const campaign = renderStatusPage(
-    { project: "beta", waves: [], parked: [] },
-    { prune: true },
-  );
+  const campaign = renderStatusPage({ project: "beta", waves: [], parked: [] }, { prune: true });
   // The palette is included verbatim by both surfaces — one source, not a per-renderer copy.
-  assert.ok(
-    landing.includes(DASHBOARD_PALETTE_CSS),
-    "landing includes the shared palette",
-  );
-  assert.ok(
-    campaign.includes(DASHBOARD_PALETTE_CSS),
-    "campaign page includes the shared palette",
-  );
+  assert.ok(landing.includes(DASHBOARD_PALETTE_CSS), "landing includes the shared palette");
+  assert.ok(campaign.includes(DASHBOARD_PALETTE_CSS), "campaign page includes the shared palette");
   // Every colour token either page references is actually defined — so `--color-pruned`
   // (and every other token) resolves identically on `/` and `/?project=…`, not merely
   // referenced (the blind spot #78's original rule-string test had).
   const defined = definedTokens(DASHBOARD_PALETTE_CSS);
   for (const page of [landing, campaign]) {
     for (const token of referencedTokens(page)) {
-      assert.ok(
-        defined.has(token),
-        `${token} is referenced but never defined in the shared palette`,
-      );
+      assert.ok(defined.has(token), `${token} is referenced but never defined in the shared palette`);
     }
   }
   // The concrete #78 repro: pruned is referenced on the campaign page (the pruned membership
   // badge + the wave-pruned tally, ADR 0019) and resolves.
-  assert.ok(
-    referencedTokens(campaign).has("--color-pruned"),
-    "campaign references --color-pruned",
-  );
+  assert.ok(referencedTokens(campaign).has("--color-pruned"), "campaign references --color-pruned");
   assert.ok(defined.has("--color-pruned"), "--color-pruned resolves");
 });
 test("cards fill card-grey and chips fill the darker panel with a 40%-alpha state border (§4, #83)", () => {
@@ -88,18 +94,12 @@ test("cards fill card-grey and chips fill the darker panel with a 40%-alpha stat
   assert.match(landing, /\.card \{[^}]*background: var\(--color-card\)/);
   assert.match(campaign, /\.wave \{[^}]*background: var\(--color-card\)/);
   // The state pill and closed-wave chip take the darker panel fill — never a coloured fill (§4).
-  assert.match(
-    campaign,
-    /\.wave-status, \.completed-wave-chip \{[^}]*background: var\(--color-chip\)/,
-  );
+  assert.match(campaign, /\.wave-status, \.completed-wave-chip \{[^}]*background: var\(--color-chip\)/);
   // A member row carries its status class and borders that status at 40% alpha (§4). The
   // border colour for each state is `stateBorderColor` (asserted by value there); one structural
   // check confirms the campaign page splices the shared STATE_CHIP_BORDER_CSS that reducer builds.
   assert.match(campaign, /class="wave-member running"/);
-  assert.ok(
-    campaign.includes(STATE_CHIP_BORDER_CSS),
-    "campaign splices the shared wave-member border rules",
-  );
+  assert.ok(campaign.includes(STATE_CHIP_BORDER_CSS), "campaign splices the shared wave-member border rules");
   assert.ok(
     STATE_CHIP_BORDER_CSS.includes(
       ["running", "parked", "failed", "completed", "unstarted"]
@@ -113,39 +113,21 @@ test("cards and chips lift only their fill on hover, never recolouring their edg
   const landing = renderLandingShell(["alpha"]);
   const campaign = chipCampaign();
   // Card / member row / parked-row hover lifts the fill only — the coloured edge is unchanged.
-  assert.match(
-    landing,
-    /\.card:hover \{ background: var\(--color-card-hover\); \}/,
-  );
-  assert.match(
-    campaign,
-    /\.wave-member:hover[^{]*\{ background: var\(--color-chip-hover\); \}/,
-  );
-  assert.match(
-    landing,
-    /\.parked-row:hover \{ background: var\(--color-card-hover\); \}/,
-  );
-  assert.match(
-    campaign,
-    /\.parked-card:hover \{ background: var\(--color-card-hover\); \}/,
-  );
+  assert.match(landing, /\.card:hover \{ background: var\(--color-card-hover\); \}/);
+  assert.match(campaign, /\.wave-member:hover[^{]*\{ background: var\(--color-chip-hover\); \}/);
+  assert.match(landing, /\.parked-row:hover \{ background: var\(--color-card-hover\); \}/);
+  assert.match(campaign, /\.parked-card:hover \{ background: var\(--color-card-hover\); \}/);
   // No card/row hover recolours a border — the accent must not creep onto an edge.
   assert.doesNotMatch(landing, /\.card:hover \{[^}]*border-color/);
   assert.doesNotMatch(campaign, /\.wave-member:hover[^}]*border-color/);
   assert.doesNotMatch(landing, /\.parked-row:hover[^}]*border-color/);
   // §2: a card carries state colour on exactly one edge — never a coloured bottom or right.
   for (const page of [landing, campaign]) {
-    assert.doesNotMatch(
-      page,
-      /border-(bottom|right)-color: var\(--color-(blue|yellow|green|failure|pruned|dim)\)/,
-    );
+    assert.doesNotMatch(page, /border-(bottom|right)-color: var\(--color-(blue|yellow|green|failure|pruned|dim)\)/);
   }
 });
 test("motion is a running/stream channel only: green live dots always pulse while live (§5, #100)", () => {
-  for (const html of [
-    renderLandingShell(["alpha"]),
-    renderStatusPage({ project: "beta", waves: [], parked: [] }),
-  ]) {
+  for (const html of [renderLandingShell(["alpha"]), renderStatusPage({ project: "beta", waves: [], parked: [] })]) {
     // The green live dots pulse whenever live — they track the stream, so there is no
     // per-element running-gate or live-state rule on the live-indicator any more.
     assert.match(html, /\.live-indicator::before \{[^}]*animation: chip-pulse/);
@@ -156,10 +138,7 @@ test("motion is a running/stream channel only: green live dots always pulse whil
     // no root [data-paused] flag and the live dots pulse for as long as the page is open.
     assert.doesNotMatch(html, /\[data-paused="true"\]/);
     // The only colour-bearing animation anywhere is chip-pulse — nothing else animates (§5).
-    assert.deepEqual(
-      [...new Set([...html.matchAll(/@keyframes ([\w-]+)/g)].map((m) => m[1]))],
-      ["chip-pulse"],
-    );
+    assert.deepEqual([...new Set([...html.matchAll(/@keyframes ([\w-]+)/g)].map((m) => m[1]))], ["chip-pulse"]);
   }
 });
 test("both pages share one set of status-dot rules, scoped to .dot so a state never tints a whole card or row (#81, #83)", () => {
@@ -179,14 +158,8 @@ test("both pages share one set of status-dot rules, scoped to .dot so a state ne
     { prune: true },
   );
   // The dot rules are one generated source, included verbatim by both surfaces.
-  assert.ok(
-    landing.includes(STATE_DOT_CSS),
-    "landing includes the shared dot rules",
-  );
-  assert.ok(
-    campaign.includes(STATE_DOT_CSS),
-    "campaign page includes the shared dot rules",
-  );
+  assert.ok(landing.includes(STATE_DOT_CSS), "landing includes the shared dot rules");
+  assert.ok(campaign.includes(STATE_DOT_CSS), "campaign page includes the shared dot rules");
   // Every lifecycle colour is scoped to `.dot`, and each dot's colour is `stateColor` (asserted
   // by value there): the shared rules are generated from it, so one check proves the wiring for
   // the whole family. The dot reads the lifecycle only (ADR 0019) — the retired held/
@@ -210,10 +183,7 @@ test("both pages share one set of status-dot rules, scoped to .dot so a state ne
 });
 test("failure renders in its own red on every surface, never the risky action's red (#83)", () => {
   const landing = renderLandingShell(["alpha"]);
-  const campaign = renderStatusPage(
-    { project: "beta", waves: [], parked: [] },
-    { prune: true },
-  );
+  const campaign = renderStatusPage({ project: "beta", waves: [], parked: [] }, { prune: true });
   // The failed state derives --color-failure from stateColor, distinct from the risky action's own
   // --color-red (the value distinction is asserted in the stateColor test). Here we confirm each
   // surface splices that failed colour in — the feed dot (the log-view's `failure` dot-state), the
@@ -222,19 +192,12 @@ test("failure renders in its own red on every surface, never the risky action's 
   assert.notEqual(failed, "var(--color-red)");
   assert.ok(landing.includes(`.lv-dot.failure { background: ${stateColor("failure")}; }`));
   assert.ok(landing.includes(`.card.failed { border-top-color: ${failed}; }`));
-  assert.ok(
-    landing.includes(`.run-state.failed { border-color: ${failed}; color: ${failed}; }`),
-  );
-  assert.ok(
-    ISSUE_DETAIL_SHEET_STYLES.includes(`.turn-num.failed { color: ${failed}; }`),
-  );
+  assert.ok(landing.includes(`.run-state.failed { border-color: ${failed}; color: ${failed}; }`));
+  assert.ok(ISSUE_DETAIL_SHEET_STYLES.includes(`.turn-num.failed { color: ${failed}; }`));
   // The prune confirm/cancel keep --color-red — a control's own red, never the failure state.
   // (Prune is a risky action, so its enabled button wears the risky-action coral too, #328; the
   // red here marks the destructive confirm step.)
-  assert.match(
-    ISSUE_DETAIL_SHEET_STYLES,
-    /\.prune-confirm-btn[^{]*\{[^}]*var\(--color-red\)/,
-  );
+  assert.match(ISSUE_DETAIL_SHEET_STYLES, /\.prune-confirm-btn[^{]*\{[^}]*var\(--color-red\)/);
   assert.ok(campaign.includes(`.turn-num.failed { color: ${failed}; }`));
 });
 test("renderHostLog renders a gear entry point, a hidden badge, and a hidden host-log pane with a filter (#180)", () => {
@@ -285,20 +248,14 @@ test("renderLandingShell seats the host-log gear at the end of the top-right liv
   const html = renderLandingShell(["alpha", "beta"]);
   // The gear rides the end of the live-bar, immediately after the "last activity Ns ago" readout:
   // the bar reads live dot → "last activity Ns ago" → gear. Its pane travels with it (popover).
-  assert.match(
-    html,
-    /<span class="updated" data-updated>[^<]*<\/span><section class="host-log" data-host-log>/,
-  );
+  assert.match(html, /<span class="updated" data-updated>[^<]*<\/span><section class="host-log" data-host-log>/);
   // The gear no longer floats as a detached section under the top bar — the host-log
   // opens only from within the live-bar.
   assert.doesNotMatch(html, /<\/div>\s*<section class="host-log"/);
   // The gear now rides the campaign page's live-bar too, in the very same seat — after the
   // "last activity Ns ago" readout — so settings are one click away on every page (#215).
   const campaign = renderStatusPage({ project: "demo", waves: [], parked: [] });
-  assert.match(
-    campaign,
-    /<span class="updated" data-updated>[^<]*<\/span><section class="host-log" data-host-log>/,
-  );
+  assert.match(campaign, /<span class="updated" data-updated>[^<]*<\/span><section class="host-log" data-host-log>/);
 });
 test("the settings gear rides the live-bar header on both the landing and the campaign page (#215)", () => {
   const landing = renderLandingShell(["alpha", "beta"]);
@@ -332,25 +289,16 @@ test("archiveRowMatches filters an archived-run row case-insensitively over its 
 test("archiveRunHref carries the open run as a deep link, and clears run= when none is open (#333)", () => {
   // An open run is written into the URL — this is the deep link the server honours so a
   // reload or share opens that run.
-  assert.equal(
-    archiveRunHref("vetinari", "2026-08-30T06-57-20-736Z", ""),
-    "?project=vetinari&run=2026-08-30T06-57-20-736Z",
-  );
+  assert.equal(archiveRunHref("vetinari", "2026-08-30T06-57-20-736Z", ""), "?project=vetinari&run=2026-08-30T06-57-20-736Z");
   // No open run (a null/empty run) yields the bare project URL — closing the open row clears
   // run= so a reload renders the list collapsed.
   assert.equal(archiveRunHref("vetinari", null, ""), "?project=vetinari");
   assert.equal(archiveRunHref("vetinari", "", ""), "?project=vetinari");
   // The location hash survives both the open and the close rewrite.
-  assert.equal(
-    archiveRunHref("vetinari", "2026-08-30T06-57-20-736Z", "#waves"),
-    "?project=vetinari&run=2026-08-30T06-57-20-736Z#waves",
-  );
+  assert.equal(archiveRunHref("vetinari", "2026-08-30T06-57-20-736Z", "#waves"), "?project=vetinari&run=2026-08-30T06-57-20-736Z#waves");
   assert.equal(archiveRunHref("vetinari", null, "#waves"), "?project=vetinari#waves");
   // The project and run are URL-encoded.
-  assert.equal(
-    archiveRunHref("a b", "r/1", ""),
-    "?project=a%20b&run=r%2F1",
-  );
+  assert.equal(archiveRunHref("a b", "r/1", ""), "?project=a%20b&run=r%2F1");
 });
 test("no status/category word is ever a bare top-level CSS class, so a component base can't inherit a modifier's layout (#91)", () => {
   // The convention (ADR 0007's status vocabulary): a status word (ADR 0007's
@@ -403,28 +351,20 @@ test("no status/category word is ever a bare top-level CSS class, so a component
   }
 });
 test("the updated readout ages 'last activity Ns ago' from the last activity, on both pages (§5, #210, #337)", () => {
-  for (const html of [
-    renderLandingShell(["alpha"]),
-    renderStatusPage({ project: "beta", waves: [], parked: [] }),
-  ]) {
+  for (const html of [renderLandingShell(["alpha"]), renderStatusPage({ project: "beta", waves: [], parked: [] })]) {
     // The "last activity Ns ago" readout is `freezeIntent`'s `updatedText` (dashboard-visual-state.ts,
     // asserted directly there: live⇒"last activity Ns ago", null⇒"—"),
     // single-sourced into both pages and written onto the readout. With the page-level pause
     // gone (#210) there is no "Paused" branch — the clock always ages.
     assert.match(html, /function freezeIntent/);
-    assert.match(
-      html,
-      /updatedEl\.textContent = freezeIntent\(\{ lastUpdate, now: Date\.now\(\) \}\)\.updatedText/,
-    );
+    assert.match(html, /updatedEl\.textContent = freezeIntent\(\{ lastUpdate, now: Date\.now\(\) \}\)\.updatedText/);
     // No page-level pause machinery survives (#210): no pause button, no paused state.
     assert.doesNotMatch(html, /id="pause"/);
     assert.doesNotMatch(html, /let paused/);
   }
 });
 test("both pages wire the repo dropdown's keyboard, scope-switch, and scoped click-outside behavior (#88)", () => {
-  const landing = renderLandingShell([
-    { project: "jjforge/tidepool", runState: "running" },
-  ]);
+  const landing = renderLandingShell([{ project: "jjforge/tidepool", runState: "running" }]);
   const campaign = renderStatusPage(
     { project: "beta", waves: [], parked: [] },
     {
@@ -437,44 +377,23 @@ test("both pages wire the repo dropdown's keyboard, scope-switch, and scoped cli
   );
   // One shared script, emitted by both pages so they can't drift.
   for (const page of [landing, campaign])
-    assert.ok(
-      page.includes(REPO_DROPDOWN_SCRIPT),
-      "every page includes the shared repo-dropdown script",
-    );
+    assert.ok(page.includes(REPO_DROPDOWN_SCRIPT), "every page includes the shared repo-dropdown script");
 
   const js = REPO_DROPDOWN_SCRIPT;
   // Trigger toggles the menu (aria-expanded + hidden).
-  assert.match(
-    js,
-    /repoTrigger\.addEventListener\("click", \(\) => \(repoIsOpen\(\) \? repoClose\(\) : repoOpen\(\)\)\)/,
-  );
-  assert.match(
-    js,
-    /setAttribute\("aria-expanded", "true"\); repoMenu\.hidden = false;/,
-  );
+  assert.match(js, /repoTrigger\.addEventListener\("click", \(\) => \(repoIsOpen\(\) \? repoClose\(\) : repoOpen\(\)\)\)/);
+  assert.match(js, /setAttribute\("aria-expanded", "true"\); repoMenu\.hidden = false;/);
   // Choosing a different scope navigates (the switch); the current scope is a no-op that just closes.
-  assert.match(
-    js,
-    /if \(option\.getAttribute\("aria-selected"\) === "true"\) \{ repoClose\(\); return; \}/,
-  );
-  assert.match(
-    js,
-    /location\.href = project \? "\/\?project=" \+ encodeURIComponent\(project\) : "\/";/,
-  );
+  assert.match(js, /if \(option\.getAttribute\("aria-selected"\) === "true"\) \{ repoClose\(\); return; \}/);
+  assert.match(js, /location\.href = project \? "\/\?project=" \+ encodeURIComponent\(project\) : "\/";/);
   // Keyboard: Enter/Space/↑↓ open+move, Enter selects, Escape closes and restores focus to the trigger, Tab is trapped.
   assert.match(js, /event\.key === "Escape".*repoClose\(\);/);
   assert.match(js, /event\.key === "ArrowDown".*repoFocus\(repoActive \+ 1\)/);
   assert.match(js, /event\.key === "ArrowUp".*repoFocus\(repoActive - 1\)/);
-  assert.match(
-    js,
-    /event\.key === "Tab".*repoFocus\(repoActive \+ \(event\.shiftKey \? -1 : 1\)\)/,
-  );
+  assert.match(js, /event\.key === "Tab".*repoFocus\(repoActive \+ \(event\.shiftKey \? -1 : 1\)\)/);
   assert.match(js, /if \(restore !== false\) repoTrigger\.focus\(\);/);
   // Click-outside closes, scoped to the dropdown's own subtree — not "any non-button".
-  assert.match(
-    js,
-    /if \(repoIsOpen\(\) && !repoRoot\.contains\(event\.target\)\) repoClose\(false\);/,
-  );
+  assert.match(js, /if \(repoIsOpen\(\) && !repoRoot\.contains\(event\.target\)\) repoClose\(false\);/);
 });
 test("formatStatusText summarizes waves, issue chips (with names), and the parked section", () => {
   const text = formatStatusText({
@@ -565,25 +484,16 @@ test("formatStatusText omits the parked section when nothing is parked", () => {
 });
 test("both pages render one shared top-bar control: a dot-only live indicator, no pause (#81, #210)", () => {
   const landing = renderLandingShell(["alpha", "beta"]);
-  const campaign = renderStatusPage(
-    { project: "beta", waves: [], parked: [] },
-    { projects: ["alpha", "beta"], selected: "beta" },
-  );
+  const campaign = renderStatusPage({ project: "beta", waves: [], parked: [] }, { projects: ["alpha", "beta"], selected: "beta" });
 
   // The live-bar's controls are one shared definition, emitted verbatim by every page so
   // the two can no longer drift (the "Live"-word vs LIVE divergence). The host view seats
   // its settings gear at the end of the bar (#201, renderTopBar's trailing slot), so the
   // shared, drift-proof span runs from the bar open through the readout; anything after it
   // is a per-page trailing control.
-  const liveBarControls = renderTopBar("").match(
-    /<div class="live-bar".*<span class="updated" data-updated>[^<]*<\/span>/s,
-  )?.[0];
+  const liveBarControls = renderTopBar("").match(/<div class="live-bar".*<span class="updated" data-updated>[^<]*<\/span>/s)?.[0];
   assert.ok(liveBarControls, "renderTopBar emits the shared live-bar controls");
-  for (const page of [landing, campaign])
-    assert.ok(
-      page.includes(liveBarControls),
-      "every page includes the shared live-bar controls",
-    );
+  for (const page of [landing, campaign]) assert.ok(page.includes(liveBarControls), "every page includes the shared live-bar controls");
 
   // The indicator is a dot only — no visible "Live" word; its state is an accessible label
   // instead. The page-level pause is gone (#210), so no page renders a pause button.
@@ -591,25 +501,16 @@ test("both pages render one shared top-bar control: a dot-only live indicator, n
     assert.doesNotMatch(page, /<span class="live-indicator"[^>]*>Live<\/span>/);
     assert.doesNotMatch(page, /id="pause"/);
     assert.doesNotMatch(page, /class="pause"/);
-    assert.match(
-      page,
-      /<span class="live-indicator" data-live-state="live" aria-label="Live"><\/span>/,
-    );
+    assert.match(page, /<span class="live-indicator" data-live-state="live" aria-label="Live"><\/span>/);
   }
 
   // The pause icon CSS is gone with the button (#210): no `.pause` rules remain.
   assert.doesNotMatch(TOP_BAR_STYLES, /\.pause/);
   assert.doesNotMatch(TOP_BAR_STYLES, /data-paused/);
-  for (const page of [landing, campaign])
-    assert.ok(
-      page.includes(TOP_BAR_STYLES),
-      "every page includes the shared top-bar styles",
-    );
+  for (const page of [landing, campaign]) assert.ok(page.includes(TOP_BAR_STYLES), "every page includes the shared top-bar styles");
 });
 test("highlightJsonLine colours JSON keys, strings, numbers and literals distinctly, escaping content", () => {
-  const html = highlightJsonLine(
-    '{"event":"green","turn":3,"ok":true,"x":null}',
-  );
+  const html = highlightJsonLine('{"event":"green","turn":3,"ok":true,"x":null}');
   // A key (string followed by a colon) reads distinct from a plain string value;
   // the quote characters are HTML-escaped in the source.
   assert.match(html, /<span class="jkey">&quot;event&quot;<\/span>:/);
@@ -619,10 +520,7 @@ test("highlightJsonLine colours JSON keys, strings, numbers and literals distinc
   assert.match(html, /<span class="jnull">null<\/span>/);
   // HTML inside string content is escaped, never injected as live markup.
   const esc = highlightJsonLine('{"t":"<b>&x</b>"}');
-  assert.match(
-    esc,
-    /<span class="jstr">&quot;&lt;b&gt;&amp;x&lt;\/b&gt;&quot;<\/span>/,
-  );
+  assert.match(esc, /<span class="jstr">&quot;&lt;b&gt;&amp;x&lt;\/b&gt;&quot;<\/span>/);
   assert.doesNotMatch(esc, /<b>/);
 });
 test("cappedRawRows caps the rendered rows and reports the hidden remainder, keeping 1-based line numbers", () => {
@@ -638,9 +536,7 @@ test("cappedRawRows caps the rendered rows and reports the hidden remainder, kee
 });
 test("cappedRawRows filters before the cap and lets expandedCount reveal more", () => {
   // Every 10th line matches "gate"; the rest don't.
-  const lines = Array.from({ length: 1200 }, (_, i) =>
-    i % 10 === 0 ? `{"event":"gate","i":${i}}` : `{"event":"turn","i":${i}}`,
-  );
+  const lines = Array.from({ length: 1200 }, (_, i) => (i % 10 === 0 ? `{"event":"gate","i":${i}}` : `{"event":"turn","i":${i}}`));
   // Filter narrows to 120 matches — fewer than the cap, so all show, nothing hidden.
   const filtered = cappedRawRows(lines, "gate", 500, 0);
   assert.equal(filtered.total, 120, "total is the filtered match count");
@@ -682,7 +578,11 @@ test("tailFresh treats a restarted stream (max index below the mark) as new and 
   const restarted = tailFresh([tln("1", 0), tln("1", 1), tln("1", 2)], grown.seen);
   assert.deepEqual(
     restarted.fresh.map((r) => [r.issue, r.n]),
-    [["1", 0], ["1", 1], ["1", 2]],
+    [
+      ["1", 0],
+      ["1", 1],
+      ["1", 2],
+    ],
     "the restarted stream's lines are delivered, not suppressed",
   );
   assert.deepEqual(restarted.seen, { "1": 2 }, "the mark is re-based on the new stream");
@@ -692,7 +592,11 @@ test("tailFresh treats a restarted stream (max index below the mark) as new and 
 // growing file (max at or above the mark) is untouched (#353).
 test("tailFresh still dedupes a growing file — only lines past the mark are fresh", () => {
   const res = tailFresh([tln("1", 3), tln("1", 4), tln("1", 5)], { "1": 4 });
-  assert.deepEqual(res.fresh.map((r) => r.n), [5], "only the line past the mark is fresh");
+  assert.deepEqual(
+    res.fresh.map((r) => r.n),
+    [5],
+    "only the line past the mark is fresh",
+  );
   assert.deepEqual(res.seen, { "1": 5 });
 });
 
@@ -705,7 +609,10 @@ test("tailFresh re-sends a window below the mark without duplicating, and stays 
   assert.deepEqual(resent.seen, { "1": 5 }, "the mark is unchanged");
   // Same window plus one genuinely new line — only that line is fresh.
   const advanced = tailFresh([tln("1", 3), tln("1", 4), tln("1", 5), tln("1", 6)], { "1": 5 });
-  assert.deepEqual(advanced.fresh.map((r) => r.n), [6]);
+  assert.deepEqual(
+    advanced.fresh.map((r) => r.n),
+    [6],
+  );
 });
 
 // Per-issue isolation: one issue restarting must not reset another issue's mark (#353).
@@ -714,7 +621,11 @@ test("tailFresh isolates a restart to its own issue", () => {
   const res = tailFresh([tln("1", 0), tln("1", 1), tln("2", 8)], { "1": 5, "2": 7 });
   assert.deepEqual(
     res.fresh.map((r) => [r.issue, r.n]),
-    [["1", 0], ["1", 1], ["2", 8]],
+    [
+      ["1", 0],
+      ["1", 1],
+      ["2", 8],
+    ],
     "issue 1's restart is delivered and issue 2's forward line is delivered once",
   );
   assert.deepEqual(res.seen, { "1": 1, "2": 8 }, "issue 2's mark advances normally, unaffected by issue 1's restart");

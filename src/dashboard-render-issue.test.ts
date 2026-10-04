@@ -3,11 +3,22 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DASHBOARD_PALETTE_CSS, ISSUE_DETAIL_SHEET_STYLES, ISSUE_DETAIL_SHEET_SCRIPT } from "./dashboard-assets.ts";
-import { issueDetailSheetMarkup, renderAggregatedGraftRejection, renderAggregatedPrunePreview, renderLandingShell, renderStatusPage } from "./status.ts";
+import {
+  issueDetailSheetMarkup,
+  renderAggregatedGraftRejection,
+  renderAggregatedPrunePreview,
+  renderLandingShell,
+  renderStatusPage,
+} from "./status.ts";
 
 test("the aggregated prune-preview and graft-rejection pages draw from the shared palette, never a hand-authored hex (Appendix A, #317)", () => {
   const prunePage = renderAggregatedPrunePreview("demo", "42", "would drop #42, #43");
-  const graftPage = renderAggregatedGraftRejection("demo", { ids: ["42"], placement: [], remaining: [], rejected: [{ id: "42", reason: "unknown" }] });
+  const graftPage = renderAggregatedGraftRejection("demo", {
+    ids: ["42"],
+    placement: [],
+    remaining: [],
+    rejected: [{ id: "42", reason: "unknown" }],
+  });
   for (const page of [prunePage, graftPage]) {
     // The one palette, not a local :root — so a token can never drift between pages.
     assert.ok(page.includes(DASHBOARD_PALETTE_CSS), "the page inlines the shared palette CSS");
@@ -28,10 +39,7 @@ test("the issue-detail sheet markup, CSS, and script are defined once and shared
   const landing = renderLandingShell(["alpha", "beta"]);
   // The campaign page renders the sheet with its prune panel when prune is on and
   // without it otherwise; the landing always hosts the prune-enabled sheet.
-  const campaignPrune = renderStatusPage(
-    { project: "beta", waves: [], parked: [] },
-    { prune: true },
-  );
+  const campaignPrune = renderStatusPage({ project: "beta", waves: [], parked: [] }, { prune: true });
   const campaignPlain = renderStatusPage({
     project: "beta",
     waves: [],
@@ -57,11 +65,7 @@ test("the issue-detail sheet markup, CSS, and script are defined once and shared
 
   // Script: one definition of the sheet behaviour (openIssue/renderDetail/
   // renderMoves/closeSheet/prune wiring), included by both pages verbatim.
-  assert.ok(
-    ISSUE_DETAIL_SHEET_SCRIPT.includes(
-      "const openIssue = async (project, issue, prunable, run)",
-    ),
-  );
+  assert.ok(ISSUE_DETAIL_SHEET_SCRIPT.includes("const openIssue = async (project, issue, prunable, run)"));
   assert.ok(ISSUE_DETAIL_SHEET_SCRIPT.includes("const closeSheet = () =>"));
   assert.ok(landing.includes(ISSUE_DETAIL_SHEET_SCRIPT));
   assert.ok(campaignPrune.includes(ISSUE_DETAIL_SHEET_SCRIPT));

@@ -50,7 +50,9 @@ export async function tgSend(conn: TgConn | undefined, text: string, logger: Log
  * sent BEFORE a question was asked is never mistaken for its answer.
  */
 export async function tgDrain(conn: TgConn): Promise<number> {
-  const j: any = await fetch(`${api(conn)}/getUpdates?offset=-1`).then((r) => r.json()).catch(() => null);
+  const j: any = await fetch(`${api(conn)}/getUpdates?offset=-1`)
+    .then((r) => r.json())
+    .catch(() => null);
   return j?.ok && j.result.length ? j.result[j.result.length - 1].update_id + 1 : 0;
 }
 
@@ -63,7 +65,9 @@ export type TgMsg = { text: string; replyToId?: number };
  * process may poll: a second poller silently steals messages from the first.
  */
 export async function tgPoll(conn: TgConn, offset: number): Promise<{ offset: number; messages: TgMsg[] }> {
-  const j: any = await fetch(`${api(conn)}/getUpdates?timeout=50&offset=${offset}`).then((r) => r.json()).catch(() => null);
+  const j: any = await fetch(`${api(conn)}/getUpdates?timeout=50&offset=${offset}`)
+    .then((r) => r.json())
+    .catch(() => null);
   if (!j?.ok) {
     await sleep(5000);
     return { offset, messages: [] };

@@ -64,15 +64,10 @@ export function reasonWord(reason: string): string {
  * so the node test asserts the very function the browser runs. The `reason` param is a plain
  * string here (the `ParkReason` values) so the shipped `.toString()` carries no type import.
  */
-export function issueMoves({
-  status,
-  reason,
-  archived,
-}: {
-  status: string;
-  reason?: string;
-  archived?: boolean;
-}): { reply: boolean; prune: boolean } {
+export function issueMoves({ status, reason, archived }: { status: string; reason?: string; archived?: boolean }): {
+  reply: boolean;
+  prune: boolean;
+} {
   if (archived) return { reply: false, prune: false };
   if (status === "parked") {
     const answerable = !reason || reason === "question" || reason === "stalled";
@@ -154,13 +149,7 @@ export function graftCarry(captured: { ids: string; error: string; busy: boolean
  * Self-contained and browser-safe: single-sourced into both page scripts via
  * `${resumeIntent.toString()}`, so the node test asserts the very function the browser runs.
  */
-export function resumeIntent({
-  hiddenAt,
-  now,
-}: {
-  hiddenAt: number | null;
-  now: number;
-}): { reconnect: boolean } {
+export function resumeIntent({ hiddenAt, now }: { hiddenAt: number | null; now: number }): { reconnect: boolean } {
   // Reconnect only past this hidden-duration. A reconnect is not free — the new connection
   // trips #331's connect ring, costing a full page re-fetch and a tail re-seed (worst over
   // the tailnet, ADR 0008) — so a brief desktop tab-flick must not pay it. Sized below the
@@ -194,15 +183,7 @@ export function tallyDotClass({ kind, count }: { kind: string; count: number }):
  * Self-contained and browser-safe: single-sourced into the pane scripts via
  * `${paneActivity.toString()}`, so the node test asserts the very function they run.
  */
-export function paneActivity({
-  appended,
-  open,
-  following,
-}: {
-  appended: number;
-  open: boolean;
-  following: boolean;
-}): boolean {
+export function paneActivity({ appended, open, following }: { appended: number; open: boolean; following: boolean }): boolean {
   return appended > 0 && open && following;
 }
 
@@ -221,15 +202,9 @@ export function paneActivity({
  * and browser-safe: single-sourced into the pane script via `${tailCollapseIntent.toString()}`, so
  * the node test asserts the very function the browser runs.
  */
-export function tailCollapseIntent({
-  agents,
-  open,
-  manualCollapse,
-}: {
-  agents: number;
+export function tailCollapseIntent({ agents, open, manualCollapse }: { agents: number; open: boolean; manualCollapse: boolean }): {
   open: boolean;
-  manualCollapse: boolean;
-}): { open: boolean } {
+} {
   if (agents === 0) return { open: false };
   if (!open && !manualCollapse) return { open: true };
   return { open };
@@ -249,17 +224,8 @@ export function tailCollapseIntent({
  * `${freezeIntent.toString()}`, so the node test asserts the very function the browser
  * runs. The glue keeps the DOM write (`updatedEl.textContent = …`) — this only decides.
  */
-export function freezeIntent({
-  lastUpdate,
-  now,
-}: {
-  lastUpdate: number | null;
-  now: number;
-}): { updatedText: string } {
+export function freezeIntent({ lastUpdate, now }: { lastUpdate: number | null; now: number }): { updatedText: string } {
   return {
-    updatedText:
-      lastUpdate == null
-        ? "—"
-        : "last activity " + Math.round((now - lastUpdate) / 1000) + "s ago",
+    updatedText: lastUpdate == null ? "—" : "last activity " + Math.round((now - lastUpdate) / 1000) + "s ago",
   };
 }

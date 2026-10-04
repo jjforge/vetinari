@@ -34,8 +34,7 @@ export const MODES: Mode[] = [
       "the TDD loop: agent turn → gate → resume on red. Banks its commits on agent/<task> and MERGES NOTHING — integration (the merge onto the base and the merged-base gate) is the campaign's, so a green run leaves work on its branch, not on the base; `campaign <task>` is the one-issue campaign that lands it. --agent picks the provider (claude | pi | codex, default claude or cfg.agent.provider; copilot | cursor | opencode are experimental — non-resumable, so a parked question needs postComment to be answered); --model/--effort override that provider's defaults, effort in the provider's own vocabulary. A bad provider/effort or missing provider credentials fails fast before the container (ADR 0016). --json streams the raw event log to stdout for tooling; without it the terminal shows human-readable lines only and no JSON reaches stdout (design §11)",
   },
   {
-    signature:
-      'campaign [--dry-run] [--override] [--name "…"] [--auto-prune] [--agent <name>] <ids-or-labels…>',
+    signature: 'campaign [--dry-run] [--override] [--name "…"] [--auto-prune] [--agent <name>] <ids-or-labels…>',
     blurb:
       "select issues, plan them into dependency-ordered file-disjoint waves, then run them (run a wave, merge greens → gate base → next). A numeric token is an issue id; a NON-numeric token is a label expanded to the open issues carrying it (needs a listByLabel resolver — githubIssuesByLabel(repo) — else a label fails fast). --dry-run plans only, printing the wave plan + provenance + suggested --name and running nothing. --override skips the planner and runs each positional as one literal wave (labels inside still expand). --on-underspecified=drop|fail pre-decides the planner's not-confident halt for non-interactive runs. --name labels the run; --agent (with --model/--effort) selects the provider for the whole campaign and every child wave (claude | pi | codex; copilot | cursor | opencode experimental; ADR 0016). If a merge conflict parks an issue whose dependents sit in later waves the campaign pauses for a human by default; --auto-prune prunes the stranded closure and runs on (ADR 0013). The terminal shows human-readable lines — the plan, per-wave progress, the one-line stop reason and the exact recovery command; --json streams the raw event log to stdout for tooling instead, and without it no JSON reaches stdout (design §11)",
   },
@@ -67,7 +66,7 @@ export const MODES: Mode[] = [
   {
     signature: 'changelog collect [--title "…"]',
     blurb:
-      'fold this repo\'s changelog.d/*.md fragments into CHANGELOG.md under today\'s milestone (append to the top milestone if it is dated today, else start one), then delete the consumed fragments. What the orchestrator runs per wave at merge; a human may run it directly. --title sets a fresh milestone\'s title (default: "Collected changes")',
+      "fold this repo's changelog.d/*.md fragments into CHANGELOG.md under today's milestone (append to the top milestone if it is dated today, else start one), then delete the consumed fragments. What the orchestrator runs per wave at merge; a human may run it directly. --title sets a fresh milestone's title (default: \"Collected changes\")",
   },
   {
     signature: "tidy [--apply] [--all]",
@@ -109,7 +108,7 @@ export const MODES: Mode[] = [
   {
     signature: "host log [-n <count>] [--tail] [--json]",
     blurb:
-      "read the persistent host log (<gatewayConfigDir>/logs/host.jsonl) at the terminal — the host/gateway diagnostics that land nowhere a per-project feed shows. Prints the most recent events newest-first, one human-readable line each; -n bounds the window (default 50). --json passes the raw JSONL through untouched (for jq/grep); --tail (or -f) follows live, printing new events as they append. Reads the file directly, so no daemon need be running — a missing host.jsonl prints \"no host log yet\" and exits clean",
+      'read the persistent host log (<gatewayConfigDir>/logs/host.jsonl) at the terminal — the host/gateway diagnostics that land nowhere a per-project feed shows. Prints the most recent events newest-first, one human-readable line each; -n bounds the window (default 50). --json passes the raw JSONL through untouched (for jq/grep); --tail (or -f) follows live, printing new events as they append. Reads the file directly, so no daemon need be running — a missing host.jsonl prints "no host log yet" and exits clean',
   },
   {
     signature: "parked",
@@ -132,8 +131,7 @@ export const MODES: Mode[] = [
   },
   {
     signature: "statusline",
-    blurb:
-      "one compact line for the Claude Code status bar (reads Claude Code's JSON on stdin; wire into settings.json)",
+    blurb: "one compact line for the Claude Code status bar (reads Claude Code's JSON on stdin; wire into settings.json)",
   },
   {
     signature: 'statusline install [--run-command "<cmd>"] [--dry-run]',
@@ -178,9 +176,7 @@ function escapeCell(text: string): string {
  * pipes escaped so the table survives.
  */
 export function renderModesReference(): string {
-  const rows = MODES.map(
-    (m) => `| \`${m.signature}\` | ${escapeCell(m.blurb)} |`,
-  ).join("\n");
+  const rows = MODES.map((m) => `| \`${m.signature}\` | ${escapeCell(m.blurb)} |`).join("\n");
   return `${MODES_REFERENCE_BEGIN}
 | Mode | What it does |
 | --- | --- |

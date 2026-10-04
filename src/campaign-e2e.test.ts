@@ -122,8 +122,7 @@ const inRepo = async <T>(dir: string, fn: () => Promise<T>): Promise<T> => {
   }
 };
 
-const gitOut = (dir: string, args: string[]) =>
-  execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" }).trim();
+const gitOut = (dir: string, args: string[]) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" }).trim();
 
 /**
  * The container boundary, faked in the two sanctioned ways and NOTHING else (ADR 0018):
@@ -145,9 +144,7 @@ const localCampaignDeps = (
     spawns.push(taskId);
     // A crash redrive hands the crashed session id (design §7): the child `run` resumes it on the
     // existing branch with the continue-where-you-left-off prompt. Every other spawn gets none.
-    const entry = resumeSession
-      ? { resumeSessionId: resumeSession, answerPrompt: crashResumePrompt() }
-      : undefined;
+    const entry = resumeSession ? { resumeSessionId: resumeSession, answerPrompt: crashResumePrompt() } : undefined;
     try {
       const outcome = await runLoop(cfg, taskId, undefined, entry, loopDepsFor(scriptFor(taskId)));
       // Mirror the real child `run`'s exit code (cli-dispatch's `exitCodeFor`): 0 green, 2
@@ -181,11 +178,13 @@ const localCampaignDeps = (
 
 // An issue's agent writes a disjoint impl file and commits on agent/<id> — file-disjoint,
 // so co-wave greens merge clean.
-const implScript = (id: string): LocalAgentScript => (turn) => {
-  turn.write(`impl-${id}.txt`, `impl for ${id}\n`);
-  turn.commit(`implement ${id}`);
-  return { signal: DONE, stdout: `<turn-summary>implemented ${id}</turn-summary>` };
-};
+const implScript =
+  (id: string): LocalAgentScript =>
+  (turn) => {
+    turn.write(`impl-${id}.txt`, `impl for ${id}\n`);
+    turn.commit(`implement ${id}`);
+    return { signal: DONE, stdout: `<turn-summary>implemented ${id}</turn-summary>` };
+  };
 
 // An issue whose turn hits an unrecoverable error — a crashed run. Its child `run` would
 // exit non-zero; here the thrown turn surfaces as exit 1 through spawnRun (design §3 step 9).
@@ -197,14 +196,15 @@ const failingScript = (): LocalAgentScript => () => {
 // green. The answer arrives one of two ways, both of which this recognises: a resumable provider
 // resumes the parked session with an answer prompt (`turn.opts.prompt`), and a non-resumable one
 // re-reads the issue body the answer was appended to (`ANSWER:` in the TASK — design §3 step 9).
-const answerGatedScript = (id: string): LocalAgentScript => (turn) => {
-  const task = (turn.opts.promptArgs?.TASK as string) ?? "";
-  const resumePrompt = (turn.opts.prompt as string) ?? "";
-  const answered = task.includes("ANSWER:") || resumePrompt.includes("Answer from the human");
-  if (!answered)
-    return { signal: BLOCKED, stdout: `<question><summary>which approach for ${id}?</summary></question>` };
-  return implScript(id)(turn);
-};
+const answerGatedScript =
+  (id: string): LocalAgentScript =>
+  (turn) => {
+    const task = (turn.opts.promptArgs?.TASK as string) ?? "";
+    const resumePrompt = (turn.opts.prompt as string) ?? "";
+    const answered = task.includes("ANSWER:") || resumePrompt.includes("Answer from the human");
+    if (!answered) return { signal: BLOCKED, stdout: `<question><summary>which approach for ${id}?</summary></question>` };
+    return implScript(id)(turn);
+  };
 
 // Seed `conflict.txt` so two branches that both rewrite it collide at merge.
 function seedConflictRepo(): string {
@@ -217,11 +217,13 @@ function seedConflictRepo(): string {
 
 // Each issue rewrites the shared file to its own content — file-conflicting, so the loser
 // cannot merge onto a base already carrying the winner.
-const conflictScript = (id: string): LocalAgentScript => (turn) => {
-  turn.write("conflict.txt", `resolved by ${id}\n`);
-  turn.commit(`rewrite conflict.txt in ${id}`);
-  return { signal: DONE, stdout: `<turn-summary>rewrote conflict.txt in ${id}</turn-summary>` };
-};
+const conflictScript =
+  (id: string): LocalAgentScript =>
+  (turn) => {
+    turn.write("conflict.txt", `resolved by ${id}\n`);
+    turn.commit(`rewrite conflict.txt in ${id}`);
+    return { signal: DONE, stdout: `<turn-summary>rewrote conflict.txt in ${id}</turn-summary>` };
+  };
 
 const host = (dir: string): HostBudget => ({ configDir: join(dir, "host"), ceiling: 2, weight: 1 });
 
@@ -245,8 +247,15 @@ test("scenario 5: a merge conflict with no dependents holds the wave — the cam
     assert.equal((q as any)?.taskId, "102");
     assert.equal(gitOut(dir, ["branch", "--list", "agent/102"]), "agent/102", "the conflicted member's work is preserved");
     // The wave never closed and the campaign did not finish — the stop marker carries reason conflict.
-    assert.equal(events.some((e) => e.event === "wave-done"), false, "the held wave is not closed");
-    assert.equal(events.some((e) => e.event === "campaign-done"), false);
+    assert.equal(
+      events.some((e) => e.event === "wave-done"),
+      false,
+      "the held wave is not closed",
+    );
+    assert.equal(
+      events.some((e) => e.event === "campaign-done"),
+      false,
+    );
     const parked = events.filter((e) => e.event === "campaign-parked") as any[];
     assert.equal(parked.length, 1);
     assert.equal(parked[0].reason, "conflict", "the wave's reason is conflict");
@@ -277,19 +286,27 @@ test("scenario 5: a merge conflict with no dependents holds the wave — the cam
     // 102's resolved work is on the base, and the campaign completed.
     assert.equal(gitOut(dir, ["show", "base:conflict.txt"]), "resolved by 101 and 102");
     const events = readEventLog(cfg);
-    assert.ok(events.some((e) => e.event === "merged" && (e as any).taskId === "102"), "102 was merged on the redrive");
-    assert.ok(events.some((e) => e.event === "campaign-done"), "the campaign advanced to done");
+    assert.ok(
+      events.some((e) => e.event === "merged" && (e as any).taskId === "102"),
+      "102 was merged on the redrive",
+    );
+    assert.ok(
+      events.some((e) => e.event === "campaign-done"),
+      "the campaign advanced to done",
+    );
   });
 });
 
 // Two branches each green alone but red together (both present) — an emergent red base. The
 // merged-base gate passes when at most one of a.txt/b.txt is present.
-const abScript = (id: string): LocalAgentScript => (turn) => {
-  const file = id === "101" ? "a.txt" : "b.txt";
-  turn.write(file, `${id}\n`);
-  turn.commit(`add ${file} in ${id}`);
-  return { signal: DONE, stdout: `<turn-summary>added ${file}</turn-summary>` };
-};
+const abScript =
+  (id: string): LocalAgentScript =>
+  (turn) => {
+    const file = id === "101" ? "a.txt" : "b.txt";
+    turn.write(file, `${id}\n`);
+    turn.commit(`add ${file} in ${id}`);
+    return { signal: DONE, stdout: `<turn-summary>added ${file}</turn-summary>` };
+  };
 
 test("scenario 6: a red base parks the wave; a fix-forward then a redrive RE-GATES the base even though nothing new merges (design §7)", async () => {
   const dir = seedRepo();
@@ -307,7 +324,10 @@ test("scenario 6: a red base parks the wave; a fix-forward then a redrive RE-GAT
     // Both greens are merged on the base (never rolled back), the base sitting red.
     assert.equal(gitOut(dir, ["show", "base:a.txt"]), "101");
     assert.equal(gitOut(dir, ["show", "base:b.txt"]), "102");
-    assert.equal(events.some((e) => e.event === "wave-done"), false);
+    assert.equal(
+      events.some((e) => e.event === "wave-done"),
+      false,
+    );
   });
 
   // Fix forward on the base: drop b.txt so the base gate goes green again.
@@ -331,13 +351,20 @@ test("scenario 6: a red base parks the wave; a fix-forward then a redrive RE-GAT
     // The re-entry runs a second wave-start; the merged-base gate (gate-result, no taskId) fires
     // during that wave's integration even though nothing new merged.
     const secondWaveStart = events.map((e) => e.event).lastIndexOf("wave-start");
-    const gatesAfterRedrive = events
-      .slice(secondWaveStart)
-      .filter((e) => e.event === "gate-result" && !(e as any).taskId) as any[];
+    const gatesAfterRedrive = events.slice(secondWaveStart).filter((e) => e.event === "gate-result" && !(e as any).taskId) as any[];
     assert.ok(gatesAfterRedrive.length > 0, "the merged base was re-gated after the redrive");
-    assert.ok(gatesAfterRedrive.every((g) => g.exitCode === 0), "the re-gated base passed");
-    assert.ok(events.some((e) => e.event === "wave-done"), "the re-gated wave closed");
-    assert.ok(events.some((e) => e.event === "campaign-done"), "the campaign advanced to done");
+    assert.ok(
+      gatesAfterRedrive.every((g) => g.exitCode === 0),
+      "the re-gated base passed",
+    );
+    assert.ok(
+      events.some((e) => e.event === "wave-done"),
+      "the re-gated wave closed",
+    );
+    assert.ok(
+      events.some((e) => e.event === "campaign-done"),
+      "the campaign advanced to done",
+    );
   });
 });
 
@@ -371,8 +398,14 @@ test("scenario 4: a redrive integrates a green-but-unmerged member — landed wi
     assert.equal(gitOut(dir, ["show", "base:impl-102.txt"]), "impl for 102");
     const events = readEventLog(cfg);
     const integrated = events.filter((e: any) => e.event === "campaign-integrated");
-    assert.ok(integrated.some((e: any) => e.merged.includes("102")), "102 was integrated on the redrive");
-    assert.ok(events.some((e) => e.event === "campaign-done"), "the campaign advanced to done");
+    assert.ok(
+      integrated.some((e: any) => e.merged.includes("102")),
+      "102 was integrated on the redrive",
+    );
+    assert.ok(
+      events.some((e) => e.event === "campaign-done"),
+      "the campaign advanced to done",
+    );
   });
 });
 
@@ -400,11 +433,28 @@ test("scenario 2b: an answer delivered mid-wave (the grace window) re-admits the
     assert.equal(gitOut(dir, ["show", "base:impl-101.txt"]), "impl for 101");
     assert.equal(gitOut(dir, ["show", "base:impl-102.txt"]), "impl for 102");
     const events = readEventLog(cfg);
-    assert.ok(events.some((e) => e.event === "grace-wait"), "the wave held open for the answer");
-    assert.ok(events.some((e) => e.event === "wave-done"), "the wave closed with both members merged");
-    assert.ok(events.some((e) => e.event === "campaign-done"), "the campaign finished");
-    assert.equal(events.some((e) => e.event === "campaign-parked"), false, "the answered member never parked the wave");
-    assert.equal(listParked(cfg).some((r) => r.taskId === "102"), false, "the answered record was consumed by the re-run");
+    assert.ok(
+      events.some((e) => e.event === "grace-wait"),
+      "the wave held open for the answer",
+    );
+    assert.ok(
+      events.some((e) => e.event === "wave-done"),
+      "the wave closed with both members merged",
+    );
+    assert.ok(
+      events.some((e) => e.event === "campaign-done"),
+      "the campaign finished",
+    );
+    assert.equal(
+      events.some((e) => e.event === "campaign-parked"),
+      false,
+      "the answered member never parked the wave",
+    );
+    assert.equal(
+      listParked(cfg).some((r) => r.taskId === "102"),
+      false,
+      "the answered record was consumed by the re-run",
+    );
   });
 });
 
@@ -413,7 +463,9 @@ test("scenario 1: two all-green waves merge in order, the base is gated between 
   const tracker = fakeTracker();
   const cfg = repoCfg(dir, tracker);
 
-  const ok = await inRepo(dir, () => campaign(cfg, [["101"], ["102"]], host(dir), "two-waves", {}, localCampaignDeps(cfg, dir, implScript)));
+  const ok = await inRepo(dir, () =>
+    campaign(cfg, [["101"], ["102"]], host(dir), "two-waves", {}, localCampaignDeps(cfg, dir, implScript)),
+  );
   assert.equal(ok, "done", "both waves ran green and the campaign completed");
 
   const events = readEventLog(cfg);
@@ -430,13 +482,19 @@ test("scenario 1: two all-green waves merge in order, the base is gated between 
   // ran for each wave's integration and passed both times.
   const baseGates = events.filter((e: any) => e.event === "gate-result" && !e.taskId);
   assert.equal(baseGates.length, 2, "the merged base was gated once per wave");
-  assert.ok(baseGates.every((r: any) => r.exitCode === 0), "each merged-base gate passed");
+  assert.ok(
+    baseGates.every((r: any) => r.exitCode === 0),
+    "each merged-base gate passed",
+  );
 
   // The merges are real and cumulative: both impl files are on the base, wave 1 having
   // been cut from a base that already carried wave 0's work.
   assert.equal(gitOut(dir, ["show", "base:impl-101.txt"]), "impl for 101");
   assert.equal(gitOut(dir, ["show", "base:impl-102.txt"]), "impl for 102");
-  assert.ok(events.some((e) => e.event === "campaign-done"), "the campaign advanced to done");
+  assert.ok(
+    events.some((e) => e.event === "campaign-done"),
+    "the campaign advanced to done",
+  );
 });
 
 test("scenario 3: a failed member drains its wave — the sibling merges — then holds the wave: no next wave starts and the campaign stops failed (design §5)", async () => {
@@ -446,7 +504,9 @@ test("scenario 3: a failed member drains its wave — the sibling merges — the
   // 101 implements green; 102's turn crashes (a failed member). 201 is a later wave.
   const scriptFor = (id: string) => (id === "102" ? failingScript() : implScript(id));
 
-  const ok = await inRepo(dir, () => campaign(cfg, [["101", "102"], ["201"]], host(dir), "fail", {}, localCampaignDeps(cfg, dir, scriptFor)));
+  const ok = await inRepo(dir, () =>
+    campaign(cfg, [["101", "102"], ["201"]], host(dir), "fail", {}, localCampaignDeps(cfg, dir, scriptFor)),
+  );
   assert.equal(ok, "failed", "a failed member stops the campaign non-zero");
 
   const events = readEventLog(cfg);
@@ -473,8 +533,15 @@ test("scenario 3: a failed member drains its wave — the sibling merges — the
   const mergedMembers = events.filter((e) => e.event === "merged").map((e: any) => e.taskId);
   assert.deepEqual(mergedMembers, ["101"], "the green stayed merged on the base");
   // The wave holds, it does not close.
-  assert.equal(events.some((e) => e.event === "wave-done"), false, "the failed wave is not logged done");
-  assert.equal(events.some((e) => e.event === "campaign-done"), false);
+  assert.equal(
+    events.some((e) => e.event === "wave-done"),
+    false,
+    "the failed wave is not logged done",
+  );
+  assert.equal(
+    events.some((e) => e.event === "campaign-done"),
+    false,
+  );
 });
 
 test("scenario 2: a question park drains its wave, campaign parks and exits; an answer rejoins the member, which re-runs green and merges, and the campaign continues to done (design §7)", async () => {
@@ -494,7 +561,10 @@ test("scenario 2: a question park drains its wave, campaign parks and exits; an 
     assert.equal(gitOut(dir, ["branch", "--list", "agent/101"]), "");
     // 102's parked record survives so it stays answerable, and its branch (created when it
     // parked) is preserved — the re-run must re-enter it, not fail trying to recreate it.
-    assert.ok(listParked(cfg).some((r) => r.taskId === "102"), "102 stayed parked and answerable");
+    assert.ok(
+      listParked(cfg).some((r) => r.taskId === "102"),
+      "102 stayed parked and answerable",
+    );
     assert.equal(gitOut(dir, ["branch", "--list", "agent/102"]), "agent/102", "the parked member's branch is preserved");
   });
 
@@ -510,12 +580,19 @@ test("scenario 2: a question park drains its wave, campaign parks and exits; an 
     const doneOk = await campaign(cfg, [], host(dir), undefined, { resume: true }, localCampaignDeps(cfg, dir, scriptFor, spawns));
     assert.equal(doneOk, "done", "the answered member rejoined and the campaign finished");
     assert.deepEqual(spawns, ["102"], "only the answered member re-ran; the banked sibling did not");
-    assert.equal(listParked(cfg).some((r) => r.taskId === "102"), false, "the answered record was consumed by the re-run");
+    assert.equal(
+      listParked(cfg).some((r) => r.taskId === "102"),
+      false,
+      "the answered record was consumed by the re-run",
+    );
 
     // 102's work is now on the base, and the campaign completed.
     assert.equal(gitOut(dir, ["show", "base:impl-102.txt"]), "impl for 102");
     const events = readEventLog(cfg);
-    assert.ok(events.some((e) => e.event === "campaign-done"), "the campaign advanced to done");
+    assert.ok(
+      events.some((e) => e.event === "campaign-done"),
+      "the campaign advanced to done",
+    );
   });
 });
 
@@ -523,18 +600,21 @@ test("scenario 2: a question park drains its wave, campaign parks and exits; an 
 // branch banks a commit and a session lands on the log), then the process dies before a verdict.
 // On resume it observes the crash prompt and greens with the already-banked commit. `seen` records
 // the session id each resume was driven on, so the test can prove it resumed vs re-ran fresh.
-const crashThenResumeScript = (seen: string[]) => (id: string): LocalAgentScript => (turn) => {
-  const resume = turn.opts.resumeSession as string | undefined;
-  if (resume) {
-    seen.push(resume);
-    return { signal: DONE, stdout: `<turn-summary>resumed ${id} from a crash</turn-summary>` };
-  }
-  turn.write(`impl-${id}.txt`, `impl for ${id}\n`);
-  turn.commit(`implement ${id}`);
-  // The process vanishes here — a parked question stands in for the crash, then the test deletes
-  // the on-disk record to leave the recordless shape §7 reconciles to parked{crash}.
-  return { signal: BLOCKED, stdout: `<question><summary>crash point for ${id}</summary></question>` };
-};
+const crashThenResumeScript =
+  (seen: string[]) =>
+  (id: string): LocalAgentScript =>
+  (turn) => {
+    const resume = turn.opts.resumeSession as string | undefined;
+    if (resume) {
+      seen.push(resume);
+      return { signal: DONE, stdout: `<turn-summary>resumed ${id} from a crash</turn-summary>` };
+    }
+    turn.write(`impl-${id}.txt`, `impl for ${id}\n`);
+    turn.commit(`implement ${id}`);
+    // The process vanishes here — a parked question stands in for the crash, then the test deletes
+    // the on-disk record to leave the recordless shape §7 reconciles to parked{crash}.
+    return { signal: BLOCKED, stdout: `<question><summary>crash point for ${id}</summary></question>` };
+  };
 
 test("scenario 7: a crashed member with commits on its branch resumes its session on redrive; no record, but the banked work and session drive a resume, not a fresh run (design §7)", async () => {
   const dir = seedRepo();
@@ -555,7 +635,11 @@ test("scenario 7: a crashed member with commits on its branch resumes its sessio
   // The crash leaves NO on-disk record (a dead process wrote no park record): drop it, leaving the
   // recordless shape §7 reconciles to parked{crash}. Its committed branch and logged session remain.
   clearParked(cfg, "102");
-  assert.equal(listParked(cfg).some((r) => r.taskId === "102"), false, "the crash left no record");
+  assert.equal(
+    listParked(cfg).some((r) => r.taskId === "102"),
+    false,
+    "the crash left no record",
+  );
 
   await inRepo(dir, async () => {
     const spawns: string[] = [];
@@ -565,6 +649,9 @@ test("scenario 7: a crashed member with commits on its branch resumes its sessio
     // The proof of §7: the resume was driven on the member's recorded session, not a fresh start.
     assert.deepEqual(seen, ["local-102-0"], "the crashed session was resumed, not re-run fresh");
     assert.equal(gitOut(dir, ["show", "base:impl-102.txt"]), "impl for 102", "the banked work landed on the base");
-    assert.ok(readEventLog(cfg).some((e) => e.event === "campaign-done"), "the campaign advanced to done");
+    assert.ok(
+      readEventLog(cfg).some((e) => e.event === "campaign-done"),
+      "the campaign advanced to done",
+    );
   });
 });

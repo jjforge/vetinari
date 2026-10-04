@@ -118,7 +118,12 @@ function runBaseCommand(command: string, stdin: string): string {
 /** Current branch of `dir`, or undefined (detached HEAD, not a repo, git error). */
 function gitBranch(dir: string): string | undefined {
   try {
-    return execFileSync("git", ["-C", dir, "symbolic-ref", "--quiet", "--short", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || undefined;
+    return (
+      execFileSync("git", ["-C", dir, "symbolic-ref", "--quiet", "--short", "HEAD"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim() || undefined
+    );
   } catch {
     return undefined;
   }

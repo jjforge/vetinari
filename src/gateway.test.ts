@@ -190,7 +190,11 @@ test("pendingAnnouncements skips a record already announced this session via the
 
 test("rebuildIndex re-announces nothing but still routes a reply to a persisted question", () => {
   const projects = [
-    project({ project: "alpha", conn: { token: "botA", chat: "-1" }, parked: [parked({ taskId: "A1", parkedAt: "t1", tgMessageId: 100 })] }),
+    project({
+      project: "alpha",
+      conn: { token: "botA", chat: "-1" },
+      parked: [parked({ taskId: "A1", parkedAt: "t1", tgMessageId: 100 })],
+    }),
   ];
   const index = rebuildIndex(projects);
 
@@ -369,10 +373,7 @@ test("pollLoop hands a prune command to onPrune and a confirming yes to onConfir
     served = true;
     return {
       offset: 1,
-      messages: [
-        { text: "prune 641" },
-        { text: "yes", replyToId: 500 },
-      ],
+      messages: [{ text: "prune 641" }, { text: "yes", replyToId: 500 }],
     };
   };
 
@@ -465,7 +466,12 @@ test("supervisePolls starts one loop per initial target", async () => {
   const { started, start } = recordingStart();
 
   await supervisePolls(
-    scriptedTargets([[{ token: "botA", chat: "-1" }, { token: "botB", chat: "-2" }]]),
+    scriptedTargets([
+      [
+        { token: "botA", chat: "-1" },
+        { token: "botB", chat: "-2" },
+      ],
+    ]),
     start,
     ticksThenStop(0),
   );
@@ -482,7 +488,10 @@ test("supervisePolls begins polling a newly-registered bot on a later tick witho
   await supervisePolls(
     scriptedTargets([
       [{ token: "botA", chat: "-1" }],
-      [{ token: "botA", chat: "-1" }, { token: "botB", chat: "-2" }],
+      [
+        { token: "botA", chat: "-1" },
+        { token: "botB", chat: "-2" },
+      ],
     ]),
     start,
     ticksThenStop(1),
@@ -498,11 +507,7 @@ test("supervisePolls begins polling a newly-registered bot on a later tick witho
 test("supervisePolls tears down a rotated-away token's loop and starts its replacement", async () => {
   const { started, start } = recordingStart();
 
-  await supervisePolls(
-    scriptedTargets([[{ token: "old", chat: "-1" }], [{ token: "new", chat: "-1" }]]),
-    start,
-    ticksThenStop(1),
-  );
+  await supervisePolls(scriptedTargets([[{ token: "old", chat: "-1" }], [{ token: "new", chat: "-1" }]]), start, ticksThenStop(1));
 
   assert.deepEqual(
     started.map((s) => s.token),
@@ -556,7 +561,10 @@ test("formatParkAnnouncement leaves a non-matching question as its trimmed text 
   const plain = formatParkAnnouncement("jjforge", parked({ taskId: "640", reason: "question", question: "  Which approach?  " }));
   assert.match(plain.split("\n")[1], /^Which approach\?$/, "a non-matching question stays its full trimmed text");
 
-  const detailFallback = formatParkAnnouncement("jjforge", parked({ taskId: "641", reason: "stalled", question: "", detail: "no commit in budget" }));
+  const detailFallback = formatParkAnnouncement(
+    "jjforge",
+    parked({ taskId: "641", reason: "stalled", question: "", detail: "no commit in budget" }),
+  );
   assert.match(detailFallback, /no commit in budget/, "an empty question still falls back to the detail");
 });
 
@@ -592,7 +600,10 @@ const campaignStatus = (over: Partial<CampaignStatus> = {}): CampaignStatus => (
 
 test("formatGatewayStatus lists each served project with its parked queue and reasons", () => {
   const text = formatGatewayStatus([
-    campaignStatus({ project: "alpha", parked: [parkedIssue({ issueNumber: "A1", reason: "question" }), parkedIssue({ issueNumber: "A2", reason: "stalled" })] }),
+    campaignStatus({
+      project: "alpha",
+      parked: [parkedIssue({ issueNumber: "A1", reason: "question" }), parkedIssue({ issueNumber: "A2", reason: "stalled" })],
+    }),
     campaignStatus({ project: "beta", parked: [] }),
   ]);
 
@@ -644,7 +655,9 @@ test("formatGatewayStatus excludes pruned members from the per-state counts", ()
   const text = formatGatewayStatus([
     campaignStatus({
       project: "gamma",
-      waves: [statusWave(0, "completed", [statusIssue({ status: "completed" }), statusIssue({ status: "unstarted", membership: "pruned" })])],
+      waves: [
+        statusWave(0, "completed", [statusIssue({ status: "completed" }), statusIssue({ status: "unstarted", membership: "pruned" })]),
+      ],
     }),
   ]);
 
@@ -690,7 +703,9 @@ test("formatGatewayStatus names a conflict/crash hold from a parked member with 
 });
 
 test("formatGatewayStatus advises replying only when an answerable park exists (#391)", () => {
-  const answerable = formatGatewayStatus([campaignStatus({ project: "alpha", parked: [parkedIssue({ issueNumber: "A1", reason: "question" })] })]);
+  const answerable = formatGatewayStatus([
+    campaignStatus({ project: "alpha", parked: [parkedIssue({ issueNumber: "A1", reason: "question" })] }),
+  ]);
   assert.match(answerable, /Reply to a question message to answer and resume it\./);
 
   // A genuinely idle project: nothing parked, and nothing to reply to.
@@ -723,7 +738,11 @@ test("loadGatewayProjects reads each live project's connection and parked record
 
 test("loadGatewayProjects skips a stale registration whose base location is gone", () => {
   const configDir = join(tmpdir(), `vetinari-gw-stale-${Date.now()}-${gwCounter++}`);
-  register(configDir, { project: "ghost", projectRoot: "/gone", baseLocation: join(tmpdir(), `vetinari-gw-missing-${Date.now()}-${gwCounter++}`) });
+  register(configDir, {
+    project: "ghost",
+    projectRoot: "/gone",
+    baseLocation: join(tmpdir(), `vetinari-gw-missing-${Date.now()}-${gwCounter++}`),
+  });
 
   assert.deepEqual(loadGatewayProjects(configDir), []);
 });
@@ -782,10 +801,10 @@ test("resolvePruneTarget rejects as ambiguous when several campaigns run on the 
 });
 
 test("resolvePruneTarget rejects with none when nothing is running on the bot", () => {
-  const res = resolvePruneTarget(
-    [candidate({ project: "alpha", conn: { token: "botA", chat: "-1" } }, false)],
-    { token: "botA", chat: "-1" },
-  );
+  const res = resolvePruneTarget([candidate({ project: "alpha", conn: { token: "botA", chat: "-1" } }, false)], {
+    token: "botA",
+    chat: "-1",
+  });
 
   assert.equal(res.kind, "none");
 });
@@ -1072,7 +1091,11 @@ test("drainOutbox keeps the named destination on a record its notify map routes"
   const { send } = recordingSend();
   const results = await drainOutbox(routed(base), send, memoryLogger()); // notify maps failure → alerts
 
-  assert.deepEqual(results.map((r) => r.destination), ["alerts"], "a mapped record keeps its resolved destination name");
+  assert.deepEqual(
+    results.map((r) => r.destination),
+    ["alerts"],
+    "a mapped record keeps its resolved destination name",
+  );
   assert.equal(listOutboxIn(outboxDirOf(base))[0].destination, "alerts");
 });
 

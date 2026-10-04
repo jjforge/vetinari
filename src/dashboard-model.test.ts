@@ -7,7 +7,45 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { appendedEvents, archiveStatusConfig, archivedRunState, buildAllStatus, buildFeed, buildLanding, buildStatus, buildStatusWithIssueNames, campaignRunning, campaignSettled, campaignState, cardState, describeEvent, event, extractParkedDetails, festiveOffsetFor, formatFeedEvent, issueLifecycle, issueMembership, issuePhase, issueStateFromTask, lastEventText, listArchivedRuns, ownerRepoFromRemote, parkedReplyFor, parsePruneClosure, parseRunTimestamp, reconstructIssueDetail, reduceCampaign, festiveFromCookie, viewRelevantEvents, waveLabel, waveState, selectStatus, summarizeRun, type CampaignStatus, type OrchestratorEvent } from "./status.ts";
+import {
+  appendedEvents,
+  archiveStatusConfig,
+  archivedRunState,
+  buildAllStatus,
+  buildFeed,
+  buildLanding,
+  buildStatus,
+  buildStatusWithIssueNames,
+  campaignRunning,
+  campaignSettled,
+  campaignState,
+  cardState,
+  describeEvent,
+  event,
+  extractParkedDetails,
+  festiveOffsetFor,
+  formatFeedEvent,
+  issueLifecycle,
+  issueMembership,
+  issuePhase,
+  issueStateFromTask,
+  lastEventText,
+  listArchivedRuns,
+  ownerRepoFromRemote,
+  parkedReplyFor,
+  parsePruneClosure,
+  parseRunTimestamp,
+  reconstructIssueDetail,
+  reduceCampaign,
+  festiveFromCookie,
+  viewRelevantEvents,
+  waveLabel,
+  waveState,
+  selectStatus,
+  summarizeRun,
+  type CampaignStatus,
+  type OrchestratorEvent,
+} from "./status.ts";
 import { festiveWaveName } from "./festive-names.ts";
 import type { ParkedRecord } from "./state.ts";
 import type { ProjectPointer } from "./registry.ts";
@@ -29,8 +67,7 @@ const cfgFor = (dir: string): ResolvedConfig =>
     fetchTask: (id: string) => id,
   }) as ResolvedConfig;
 
-const writeJsonl = (path: string, events: unknown[]) =>
-  writeFileSync(path, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
+const writeJsonl = (path: string, events: unknown[]) => writeFileSync(path, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
 
 const pointerFor = (project: string, dir: string): ProjectPointer => ({
   project,
@@ -51,24 +88,12 @@ const noise = (row: Record<string, unknown> & { event: string }): OrchestratorEv
 
 test("ownerRepoFromRemote parses SSH and HTTPS GitHub remotes to owner/name, and rejects garbage", () => {
   // SSH form, with the .git suffix stripped.
-  assert.equal(
-    ownerRepoFromRemote("git@github.com:jjforge/vetinari.git"),
-    "jjforge/vetinari",
-  );
+  assert.equal(ownerRepoFromRemote("git@github.com:jjforge/vetinari.git"), "jjforge/vetinari");
   // HTTPS form, with and without the .git suffix.
-  assert.equal(
-    ownerRepoFromRemote("https://github.com/jjforge/vetinari.git"),
-    "jjforge/vetinari",
-  );
-  assert.equal(
-    ownerRepoFromRemote("https://github.com/acme/tidepool"),
-    "acme/tidepool",
-  );
+  assert.equal(ownerRepoFromRemote("https://github.com/jjforge/vetinari.git"), "jjforge/vetinari");
+  assert.equal(ownerRepoFromRemote("https://github.com/acme/tidepool"), "acme/tidepool");
   // Trailing whitespace (as `git remote get-url` prints a newline) and a trailing slash.
-  assert.equal(
-    ownerRepoFromRemote("https://github.com/acme/tidepool/\n"),
-    "acme/tidepool",
-  );
+  assert.equal(ownerRepoFromRemote("https://github.com/acme/tidepool/\n"), "acme/tidepool");
   // Garbage — not a recognizable remote — is undefined so the caller falls back to the bare key.
   assert.equal(ownerRepoFromRemote("not-a-remote"), undefined);
   assert.equal(ownerRepoFromRemote(""), undefined);
@@ -88,8 +113,7 @@ test("buildLanding's card carries owner/name from the project's git remote, and 
     }),
   ]);
   mkdirSync(root, { recursive: true });
-  const git = (args: string[]) =>
-    execFileSync("git", ["-C", root, ...args], { encoding: "utf8" });
+  const git = (args: string[]) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8" });
   git(["init", "-q"]);
   git(["remote", "add", "origin", "git@github.com:jjforge/vetinari.git"]);
   // A project with no git remote (the demo) → no repo, so the display falls back to the bare key.
@@ -149,10 +173,7 @@ test("buildLanding builds a per-project card for a live campaign", () => {
     }),
   ]);
 
-  const { projects } = buildLanding(
-    [pointerFor("demo", dir)],
-    new Date("2025-01-02T12:00:00.000Z"),
-  );
+  const { projects } = buildLanding([pointerFor("demo", dir)], new Date("2025-01-02T12:00:00.000Z"));
   assert.equal(projects.length, 1);
   const card = projects[0];
   assert.equal(card.project, "demo");
@@ -204,10 +225,7 @@ test("buildLanding's card counts the live plan, not pruned chips", () => {
     }),
   ]);
 
-  const [card] = buildLanding(
-    [pointerFor("demo", dir)],
-    new Date("2025-01-02T12:00:00.000Z"),
-  ).projects;
+  const [card] = buildLanding([pointerFor("demo", dir)], new Date("2025-01-02T12:00:00.000Z")).projects;
 
   // Two live waves remain (101 closed, 201 running); the pruned-out 301 wave and its
   // chip do not inflate the count, the "queued" tally, or drag down percent merged.
@@ -242,10 +260,7 @@ test("buildLanding counts grafted issues as queued but still excludes pruned (#2
     event("graft", { ts: "2025-01-02T08:07:00.000Z", ids: ["305", "306"], blockedBy: {}, fileKeys: {} }),
   ]);
 
-  const { counters, projects } = buildLanding(
-    [pointerFor("demo", dir)],
-    new Date("2025-01-02T12:00:00.000Z"),
-  );
+  const { counters, projects } = buildLanding([pointerFor("demo", dir)], new Date("2025-01-02T12:00:00.000Z"));
   const [card] = projects;
   // 101 banked, 201 running; the two grafted issues fold to unstarted → queued 2,
   // not 0. The pruned-out 301 stays excluded from every bucket.
@@ -281,30 +296,23 @@ test("buildLanding sums the counters, reads an idle project's last campaign, and
   // Beta has no live run, only an archived campaign — it must read idle with that campaign.
   seedState(betaDir, []);
   mkdirSync(join(betaDir, "logs", "archive"), { recursive: true });
-  writeJsonl(
-    join(betaDir, "logs", "archive", "orchestrator-2025-06-10T00-00-00.jsonl"),
-    [
-      event("campaign-start", {
-        ts: "2025-06-10T00:00:00.000Z",
-        waves: [["501"]],
-        name: "old work",
-        slots: 1,
-      }),
-      event("wave-done", {
-        ts: "2025-06-10T00:05:00.000Z",
-        index: 0,
-        merged: ["501"],
-      }),
-      event("campaign-done", { ts: "2025-06-10T00:06:00.000Z", waves: 1 }),
-    ],
-  );
+  writeJsonl(join(betaDir, "logs", "archive", "orchestrator-2025-06-10T00-00-00.jsonl"), [
+    event("campaign-start", {
+      ts: "2025-06-10T00:00:00.000Z",
+      waves: [["501"]],
+      name: "old work",
+      slots: 1,
+    }),
+    event("wave-done", {
+      ts: "2025-06-10T00:05:00.000Z",
+      index: 0,
+      merged: ["501"],
+    }),
+    event("campaign-done", { ts: "2025-06-10T00:06:00.000Z", waves: 1 }),
+  ]);
 
   const { counters, projects } = buildLanding(
-    [
-      pointerFor("alpha", alphaDir),
-      pointerFor("beta", betaDir),
-      pointerFor("ghost", join(base, "gone")),
-    ],
+    [pointerFor("alpha", alphaDir), pointerFor("beta", betaDir), pointerFor("ghost", join(base, "gone"))],
     new Date("2025-06-15T12:00:00.000Z"),
   );
 
@@ -337,33 +345,27 @@ test("an idle project's merged % and merged-today read its latest archived run, 
   seedState(dir, []);
   mkdirSync(join(dir, "logs", "archive"), { recursive: true });
   // A completed run that merged both its issues today.
-  writeJsonl(
-    join(dir, "logs", "archive", "orchestrator-2026-06-15T00-00-00-000Z.jsonl"),
-    [
-      event("campaign-start", {
-        ts: "2026-06-15T09:00:00.000Z",
-        waves: [["501"], ["502"]],
-        name: "shipped",
-        slots: 1,
-      }),
-      event("wave-done", {
-        ts: "2026-06-15T09:05:00.000Z",
-        index: 0,
-        merged: ["501"],
-      }),
-      event("wave-done", {
-        ts: "2026-06-15T09:10:00.000Z",
-        index: 1,
-        merged: ["502"],
-      }),
-      event("campaign-done", { ts: "2026-06-15T09:11:00.000Z", waves: 2 }),
-    ],
-  );
+  writeJsonl(join(dir, "logs", "archive", "orchestrator-2026-06-15T00-00-00-000Z.jsonl"), [
+    event("campaign-start", {
+      ts: "2026-06-15T09:00:00.000Z",
+      waves: [["501"], ["502"]],
+      name: "shipped",
+      slots: 1,
+    }),
+    event("wave-done", {
+      ts: "2026-06-15T09:05:00.000Z",
+      index: 0,
+      merged: ["501"],
+    }),
+    event("wave-done", {
+      ts: "2026-06-15T09:10:00.000Z",
+      index: 1,
+      merged: ["502"],
+    }),
+    event("campaign-done", { ts: "2026-06-15T09:11:00.000Z", waves: 2 }),
+  ]);
 
-  const { counters, projects } = buildLanding(
-    [pointerFor("beta", dir)],
-    new Date("2026-06-15T12:00:00.000Z"),
-  );
+  const { counters, projects } = buildLanding([pointerFor("beta", dir)], new Date("2026-06-15T12:00:00.000Z"));
   const [card] = projects;
   assert.equal(card.runState, "idle");
   // Both issues merged, so the idle card reads 100% — not the hardcoded 0%.
@@ -377,23 +379,20 @@ test("an idle project's card exposes lastRun — its newest archived run's outco
   const dir = join(base, "beta");
   seedState(dir, []);
   mkdirSync(join(dir, "logs", "archive"), { recursive: true });
-  writeJsonl(
-    join(dir, "logs", "archive", "orchestrator-2026-06-15T00-00-00-000Z.jsonl"),
-    [
-      event("campaign-start", {
-        ts: "2026-06-15T09:00:00.000Z",
-        waves: [["501"]],
-        name: "shipped",
-        slots: 1,
-      }),
-      event("wave-done", {
-        ts: "2026-06-15T09:05:00.000Z",
-        index: 0,
-        merged: ["501"],
-      }),
-      event("campaign-done", { ts: "2026-06-15T09:06:00.000Z", waves: 1 }),
-    ],
-  );
+  writeJsonl(join(dir, "logs", "archive", "orchestrator-2026-06-15T00-00-00-000Z.jsonl"), [
+    event("campaign-start", {
+      ts: "2026-06-15T09:00:00.000Z",
+      waves: [["501"]],
+      name: "shipped",
+      slots: 1,
+    }),
+    event("wave-done", {
+      ts: "2026-06-15T09:05:00.000Z",
+      index: 0,
+      merged: ["501"],
+    }),
+    event("campaign-done", { ts: "2026-06-15T09:06:00.000Z", waves: 1 }),
+  ]);
 
   const [card] = buildLanding([pointerFor("beta", dir)], new Date("2026-06-16T12:00:00.000Z")).projects;
   assert.equal(card.runState, "idle");
@@ -413,21 +412,18 @@ test("a stalled idle run's card lastRun reads its stalled outcome, and an unname
   seedState(dir, []);
   mkdirSync(join(dir, "logs", "archive"), { recursive: true });
   // A run that stopped mid-wave: it logged no campaign-done, so it reads stalled.
-  writeJsonl(
-    join(dir, "logs", "archive", "orchestrator-2026-06-14T00-00-00-000Z.jsonl"),
-    [
-      event("campaign-start", {
-        ts: "2026-06-14T09:00:00.000Z",
-        waves: [["601"]],
-        slots: 1,
-      }),
-      event("wave-done", {
-        ts: "2026-06-14T09:05:00.000Z",
-        index: 0,
-        merged: ["601"],
-      }),
-    ],
-  );
+  writeJsonl(join(dir, "logs", "archive", "orchestrator-2026-06-14T00-00-00-000Z.jsonl"), [
+    event("campaign-start", {
+      ts: "2026-06-14T09:00:00.000Z",
+      waves: [["601"]],
+      slots: 1,
+    }),
+    event("wave-done", {
+      ts: "2026-06-14T09:05:00.000Z",
+      index: 0,
+      merged: ["601"],
+    }),
+  ]);
 
   const [card] = buildLanding([pointerFor("beta", dir)], new Date("2026-06-16T12:00:00.000Z")).projects;
   assert.equal(card.runState, "idle");
@@ -456,22 +452,19 @@ test("an archived run whose parked record survived reads parked, not idle — it
   // disk. The archived-card branch must consult the surviving park, not fold to idle.
   seedState(dir, []);
   mkdirSync(join(dir, "logs", "archive"), { recursive: true });
-  writeJsonl(
-    join(dir, "logs", "archive", "orchestrator-2026-06-15T00-00-00-000Z.jsonl"),
-    [
-      event("campaign-start", {
-        ts: "2026-06-15T09:00:00.000Z",
-        waves: [["501"], ["601"]],
-        name: "shipped",
-        slots: 1,
-      }),
-      event("wave-done", {
-        ts: "2026-06-15T09:05:00.000Z",
-        index: 0,
-        merged: ["501"],
-      }),
-    ],
-  );
+  writeJsonl(join(dir, "logs", "archive", "orchestrator-2026-06-15T00-00-00-000Z.jsonl"), [
+    event("campaign-start", {
+      ts: "2026-06-15T09:00:00.000Z",
+      waves: [["501"], ["601"]],
+      name: "shipped",
+      slots: 1,
+    }),
+    event("wave-done", {
+      ts: "2026-06-15T09:05:00.000Z",
+      index: 0,
+      merged: ["501"],
+    }),
+  ]);
   writeFileSync(
     join(dir, "parked", "601.json"),
     JSON.stringify({
@@ -483,10 +476,7 @@ test("an archived run whose parked record survived reads parked, not idle — it
     }),
   );
 
-  const { counters, projects, parked } = buildLanding(
-    [pointerFor("beta", dir)],
-    new Date("2026-06-15T12:00:00.000Z"),
-  );
+  const { counters, projects, parked } = buildLanding([pointerFor("beta", dir)], new Date("2026-06-15T12:00:00.000Z"));
   const [card] = projects;
   // The card surfaces the outstanding park rather than reading a clean idle/complete.
   assert.equal(card.runState, "parked");
@@ -522,10 +512,7 @@ test("a finished run lingering in the live log whose parked record survived read
     }),
   );
 
-  const { counters, projects, parked } = buildLanding(
-    [pointerFor("demo", dir)],
-    new Date("2026-06-15T12:00:00.000Z"),
-  );
+  const { counters, projects, parked } = buildLanding([pointerFor("demo", dir)], new Date("2026-06-15T12:00:00.000Z"));
   const [card] = projects;
   assert.equal(card.runState, "parked");
   assert.ok(card.tally.parked >= 1, `expected tally.parked >= 1, got ${card.tally.parked}`);
@@ -564,10 +551,7 @@ test("buildLanding folds a finished campaign still in the live log to idle, disp
   const logFile = join(dir, "logs", "orchestrator.jsonl");
   const before = readFileSync(logFile);
 
-  const [card] = buildLanding(
-    [pointerFor("demo", dir)],
-    new Date("2026-06-15T12:00:00.000Z"),
-  ).projects;
+  const [card] = buildLanding([pointerFor("demo", dir)], new Date("2026-06-15T12:00:00.000Z")).projects;
 
   // The finished run fades to idle rather than lingering green forever …
   assert.equal(card.runState, "idle");
@@ -620,10 +604,7 @@ test("buildLanding folds a finished single-wave live log to idle too (#208)", ()
     event("wave-done", { ts: "2026-06-15T08:02:00.000Z", index: 0, merged: ["101"] }),
   ]);
 
-  const [card] = buildLanding(
-    [pointerFor("demo", dir)],
-    new Date("2026-06-15T12:00:00.000Z"),
-  ).projects;
+  const [card] = buildLanding([pointerFor("demo", dir)], new Date("2026-06-15T12:00:00.000Z")).projects;
   assert.equal(card.runState, "idle");
   assert.match(card.lastEvent, /^Last run: campaign · 1 issue · complete$/);
 });
@@ -680,28 +661,22 @@ test("an idle project whose latest archived run merged on an earlier day counts 
   const dir = join(base, "beta");
   seedState(dir, []);
   mkdirSync(join(dir, "logs", "archive"), { recursive: true });
-  writeJsonl(
-    join(dir, "logs", "archive", "orchestrator-2026-06-10T00-00-00-000Z.jsonl"),
-    [
-      event("campaign-start", {
-        ts: "2026-06-10T09:00:00.000Z",
-        waves: [["501"]],
-        name: "older",
-        slots: 1,
-      }),
-      event("wave-done", {
-        ts: "2026-06-10T09:05:00.000Z",
-        index: 0,
-        merged: ["501"],
-      }),
-      event("campaign-done", { ts: "2026-06-10T09:06:00.000Z", waves: 1 }),
-    ],
-  );
+  writeJsonl(join(dir, "logs", "archive", "orchestrator-2026-06-10T00-00-00-000Z.jsonl"), [
+    event("campaign-start", {
+      ts: "2026-06-10T09:00:00.000Z",
+      waves: [["501"]],
+      name: "older",
+      slots: 1,
+    }),
+    event("wave-done", {
+      ts: "2026-06-10T09:05:00.000Z",
+      index: 0,
+      merged: ["501"],
+    }),
+    event("campaign-done", { ts: "2026-06-10T09:06:00.000Z", waves: 1 }),
+  ]);
 
-  const { counters, projects } = buildLanding(
-    [pointerFor("beta", dir)],
-    new Date("2026-06-15T12:00:00.000Z"),
-  );
+  const { counters, projects } = buildLanding([pointerFor("beta", dir)], new Date("2026-06-15T12:00:00.000Z"));
   // Fully merged run → 100% on the card, but merged five days ago → nothing today.
   assert.equal(projects[0].percentMerged, 100);
   assert.equal(counters.mergedToday, 0);
@@ -714,46 +689,37 @@ test("merged-today sums every archived run merged today, not just the latest (#9
   seedState(dir, []);
   mkdirSync(join(dir, "logs", "archive"), { recursive: true });
   // Earlier run today merged 501.
-  writeJsonl(
-    join(dir, "logs", "archive", "orchestrator-2026-06-15T08-00-00-000Z.jsonl"),
-    [
-      event("campaign-start", {
-        ts: "2026-06-15T08:00:00.000Z",
-        waves: [["501"]],
-        name: "morning",
-        slots: 1,
-      }),
-      event("wave-done", {
-        ts: "2026-06-15T08:05:00.000Z",
-        index: 0,
-        merged: ["501"],
-      }),
-      event("campaign-done", { ts: "2026-06-15T08:06:00.000Z", waves: 1 }),
-    ],
-  );
+  writeJsonl(join(dir, "logs", "archive", "orchestrator-2026-06-15T08-00-00-000Z.jsonl"), [
+    event("campaign-start", {
+      ts: "2026-06-15T08:00:00.000Z",
+      waves: [["501"]],
+      name: "morning",
+      slots: 1,
+    }),
+    event("wave-done", {
+      ts: "2026-06-15T08:05:00.000Z",
+      index: 0,
+      merged: ["501"],
+    }),
+    event("campaign-done", { ts: "2026-06-15T08:06:00.000Z", waves: 1 }),
+  ]);
   // Later run today (the latest archive) merged 502.
-  writeJsonl(
-    join(dir, "logs", "archive", "orchestrator-2026-06-15T10-00-00-000Z.jsonl"),
-    [
-      event("campaign-start", {
-        ts: "2026-06-15T10:00:00.000Z",
-        waves: [["502"]],
-        name: "afternoon",
-        slots: 1,
-      }),
-      event("wave-done", {
-        ts: "2026-06-15T10:05:00.000Z",
-        index: 0,
-        merged: ["502"],
-      }),
-      event("campaign-done", { ts: "2026-06-15T10:06:00.000Z", waves: 1 }),
-    ],
-  );
+  writeJsonl(join(dir, "logs", "archive", "orchestrator-2026-06-15T10-00-00-000Z.jsonl"), [
+    event("campaign-start", {
+      ts: "2026-06-15T10:00:00.000Z",
+      waves: [["502"]],
+      name: "afternoon",
+      slots: 1,
+    }),
+    event("wave-done", {
+      ts: "2026-06-15T10:05:00.000Z",
+      index: 0,
+      merged: ["502"],
+    }),
+    event("campaign-done", { ts: "2026-06-15T10:06:00.000Z", waves: 1 }),
+  ]);
 
-  const { counters } = buildLanding(
-    [pointerFor("beta", dir)],
-    new Date("2026-06-15T12:00:00.000Z"),
-  );
+  const { counters } = buildLanding([pointerFor("beta", dir)], new Date("2026-06-15T12:00:00.000Z"));
   // Both runs merged today — the earlier archive is no longer ignored.
   assert.equal(counters.mergedToday, 2);
 });
@@ -779,28 +745,22 @@ test("merged-today combines the live run's merges with the archives' (#97)", () 
   ]);
   // An earlier completed run today, archived, merged 701.
   mkdirSync(join(dir, "logs", "archive"), { recursive: true });
-  writeJsonl(
-    join(dir, "logs", "archive", "orchestrator-2026-06-15T08-00-00-000Z.jsonl"),
-    [
-      event("campaign-start", {
-        ts: "2026-06-15T08:00:00.000Z",
-        waves: [["701"]],
-        name: "earlier",
-        slots: 1,
-      }),
-      event("wave-done", {
-        ts: "2026-06-15T08:05:00.000Z",
-        index: 0,
-        merged: ["701"],
-      }),
-      event("campaign-done", { ts: "2026-06-15T08:06:00.000Z", waves: 1 }),
-    ],
-  );
+  writeJsonl(join(dir, "logs", "archive", "orchestrator-2026-06-15T08-00-00-000Z.jsonl"), [
+    event("campaign-start", {
+      ts: "2026-06-15T08:00:00.000Z",
+      waves: [["701"]],
+      name: "earlier",
+      slots: 1,
+    }),
+    event("wave-done", {
+      ts: "2026-06-15T08:05:00.000Z",
+      index: 0,
+      merged: ["701"],
+    }),
+    event("campaign-done", { ts: "2026-06-15T08:06:00.000Z", waves: 1 }),
+  ]);
 
-  const { counters } = buildLanding(
-    [pointerFor("beta", dir)],
-    new Date("2026-06-15T12:00:00.000Z"),
-  );
+  const { counters } = buildLanding([pointerFor("beta", dir)], new Date("2026-06-15T12:00:00.000Z"));
   // The live run's 601 and the archive's 701 both count.
   assert.equal(counters.mergedToday, 2);
 });
@@ -825,28 +785,22 @@ test("merged-today counts an issue merged in more than one run only once (#97)",
   ]);
   // ...and the same 801 was already merged in an earlier archived run today.
   mkdirSync(join(dir, "logs", "archive"), { recursive: true });
-  writeJsonl(
-    join(dir, "logs", "archive", "orchestrator-2026-06-15T08-00-00-000Z.jsonl"),
-    [
-      event("campaign-start", {
-        ts: "2026-06-15T08:00:00.000Z",
-        waves: [["801"]],
-        name: "earlier",
-        slots: 1,
-      }),
-      event("wave-done", {
-        ts: "2026-06-15T08:05:00.000Z",
-        index: 0,
-        merged: ["801"],
-      }),
-      event("campaign-done", { ts: "2026-06-15T08:06:00.000Z", waves: 1 }),
-    ],
-  );
+  writeJsonl(join(dir, "logs", "archive", "orchestrator-2026-06-15T08-00-00-000Z.jsonl"), [
+    event("campaign-start", {
+      ts: "2026-06-15T08:00:00.000Z",
+      waves: [["801"]],
+      name: "earlier",
+      slots: 1,
+    }),
+    event("wave-done", {
+      ts: "2026-06-15T08:05:00.000Z",
+      index: 0,
+      merged: ["801"],
+    }),
+    event("campaign-done", { ts: "2026-06-15T08:06:00.000Z", waves: 1 }),
+  ]);
 
-  const { counters } = buildLanding(
-    [pointerFor("beta", dir)],
-    new Date("2026-06-15T12:00:00.000Z"),
-  );
+  const { counters } = buildLanding([pointerFor("beta", dir)], new Date("2026-06-15T12:00:00.000Z"));
   // One issue, two runs — counted once.
   assert.equal(counters.mergedToday, 1);
 });
@@ -876,10 +830,7 @@ test("merged-today counts against the operator's LOCAL day, not the UTC day (#97
       event("campaign-done", { ts: "2026-08-23T20:01:00.000Z", waves: 1 }),
     ]);
 
-    const { counters } = buildLanding(
-      [pointerFor("beta", dir)],
-      new Date("2026-08-24T02:24:00.000Z"),
-    );
+    const { counters } = buildLanding([pointerFor("beta", dir)], new Date("2026-08-24T02:24:00.000Z"));
     // Same local day (Aug 23 PDT) as `now`, so it counts — even though its UTC day
     // (Aug 23) differs from `now`'s UTC day (Aug 24).
     assert.equal(counters.mergedToday, 1);
@@ -913,22 +864,14 @@ test("buildFeed merges every project's narratable events into one newest-first, 
   ]);
 
   const feed = buildFeed(
-    [
-      pointerFor("alpha", alphaDir),
-      pointerFor("beta", betaDir),
-      pointerFor("ghost", join(base, "gone")),
-    ],
+    [pointerFor("alpha", alphaDir), pointerFor("beta", betaDir), pointerFor("ghost", join(base, "gone"))],
     new Date("2025-03-01T09:00:00.000Z"),
   );
 
   // Newest-first across projects; the stale registration and the machine-noise event are both absent.
   assert.deepEqual(
     feed.map((f) => f.text),
-    [
-      "alpha — #101 merged",
-      "beta — #201 parked: question",
-      "alpha — Campaign “alpha work” started",
-    ],
+    ["alpha — #101 merged", "beta — #201 parked: question", "alpha — Campaign “alpha work” started"],
   );
   // Each row carries the time and the event kind alongside the sentence.
   assert.equal(feed[0].ts, "2025-03-01T08:02:00.000Z");
@@ -955,7 +898,13 @@ test("buildFeed carries each row's underlying event as raw NDJSON, alongside the
     assert.deepEqual(JSON.parse(feed[0].raw), green);
     // …and each row carries the shared log-view parts (#216): the repo leads the message as the
     // actor, the narration is one plain span, and the dot reads the event's state (a merge → green).
-    assert.deepEqual(feed[0].humanized, { time: "00:02:00", actor: "acme", verb: "", spans: [{ text: "#101 merged", kind: "plain" }], dot: "merged" });
+    assert.deepEqual(feed[0].humanized, {
+      time: "00:02:00",
+      actor: "acme",
+      verb: "",
+      spans: [{ text: "#101 merged", kind: "plain" }],
+      dot: "merged",
+    });
   } finally {
     if (origTZ === undefined) delete process.env.TZ;
     else process.env.TZ = origTZ;
@@ -1076,10 +1025,7 @@ test("buildLanding collects every parked question across repos, oldest first", (
     }),
   );
 
-  const { parked } = buildLanding(
-    [pointerFor("alpha", alphaDir), pointerFor("beta", betaDir)],
-    new Date("2025-06-15T12:00:00.000Z"),
-  );
+  const { parked } = buildLanding([pointerFor("alpha", alphaDir), pointerFor("beta", betaDir)], new Date("2025-06-15T12:00:00.000Z"));
 
   // Oldest-first across repos: beta (yesterday) before alpha (this morning).
   assert.deepEqual(
@@ -1124,7 +1070,13 @@ test("the landing parked counter equals the cross-repo parked queue length, even
   ]);
   writeFileSync(
     join(dir, "parked", "102.json"),
-    JSON.stringify({ taskId: "102", parkedAt: "2025-01-01T00:05:00.000Z", reason: "question", branch: "agent/102", question: "Which approach?" }),
+    JSON.stringify({
+      taskId: "102",
+      parkedAt: "2025-01-01T00:05:00.000Z",
+      reason: "question",
+      branch: "agent/102",
+      question: "Which approach?",
+    }),
   );
 
   const { counters, parked } = buildLanding([pointerFor("acme", dir)], new Date("2025-01-01T12:00:00.000Z"));
@@ -1187,10 +1139,7 @@ test("buildAllStatus routes a stale-registration skip to the injected logger, no
   const base = join(tmpdir(), `vetinari-all-status-log-${Date.now()}`);
   const logger = memoryLogger();
 
-  buildAllStatus(
-    [pointerFor("ghost", join(base, "gone"))],
-    logger,
-  );
+  buildAllStatus([pointerFor("ghost", join(base, "gone"))], logger);
 
   // The skip diagnostic is captured by the host logger the reader was handed —
   // it no longer writes to the process-global event log.
@@ -1281,15 +1230,7 @@ test("issue lifecycle + wave/campaign folds are one FSM, tested by replaying eve
 
   // The wave fold: failure outranks parked outranks running (#262). A red member makes the
   // wave read `failed`, never `running`.
-  assert.equal(
-    waveState([
-      { status: "completed" },
-      { status: "parked" },
-      { status: "failed" },
-      { status: "running" },
-    ]),
-    "failed",
-  );
+  assert.equal(waveState([{ status: "completed" }, { status: "parked" }, { status: "failed" }, { status: "running" }]), "failed");
   assert.equal(waveState([{ status: "completed" }, { status: "parked" }, { status: "running" }]), "parked");
   assert.equal(waveState([{ status: "completed" }, { status: "running" }]), "running");
   assert.equal(waveState([{ status: "completed" }, { status: "completed" }]), "completed");
@@ -1395,7 +1336,10 @@ test("reduceCampaign: completed (merged) is terminal — a stale parked/failed/s
   const staleParked = reduceCampaign([...base, event("parked", { ts: "2026-08-30T16:48:28.000Z", taskId: "313", reason: "stalled" })]);
   assert.equal(staleParked.outcomes.get("313"), "completed", "a stale parked never flips a merged issue back to parked");
   assert.deepEqual(issueLifecycle(staleParked, "313"), { state: "completed" });
-  assert.ok(staleParked.anomalies.some((a) => a.includes("313")), "the ignored stale event is recorded as an anomaly");
+  assert.ok(
+    staleParked.anomalies.some((a) => a.includes("313")),
+    "the ignored stale event is recorded as an anomaly",
+  );
 
   const staleFailed = reduceCampaign([...base, event("failed", { ts: "2026-08-30T16:48:28.000Z", taskId: "313" })]);
   assert.equal(staleFailed.outcomes.get("313"), "completed", "a stale failed never flips a merged issue to failure");
@@ -1609,10 +1553,7 @@ test("describeEvent narrates festively when given a campaign's reserved offset (
   // festive offset 11 → wave 1 (index 0) draws pool[11] = "Granny Weatherwax". The one-line
   // narration lists the member issue numbers inline (no member rows on a line).
   assert.equal(
-    describeEvent(
-      event("wave-start", { index: 0, tasks: ["1234", "145", "234"] }),
-      { festive: { offset: 11 } },
-    ),
+    describeEvent(event("wave-start", { index: 0, tasks: ["1234", "145", "234"] }), { festive: { offset: 11 } }),
     "Wave 1 · Granny Weatherwax · #1234, #145, #234 started",
   );
   // wave-done carries just its merged list (every member merged, design §2.1), names
@@ -1639,10 +1580,12 @@ test("describeEvent narrates the operator-facing events in plain words", () => {
   // member issue by title (issue #179), not the lead title + "+M" collapse. Titles are
   // threaded in via `titles` (recorded once on campaign-start), not carried on the event.
   assert.equal(
-    describeEvent(
-      event("wave-start", { index: 1, tasks: ["201", "202"] }),
-      { titles: new Map([["201", "cache eviction"], ["202", "warm the cache"]]) },
-    ),
+    describeEvent(event("wave-start", { index: 1, tasks: ["201", "202"] }), {
+      titles: new Map([
+        ["201", "cache eviction"],
+        ["202", "warm the cache"],
+      ]),
+    }),
     "Wave 2 — cache eviction, warm the cache started",
   );
   // A resolved title names the wave member.
@@ -1651,62 +1594,30 @@ test("describeEvent narrates the operator-facing events in plain words", () => {
     "Wave 2 — cache eviction started",
   );
   // An id whose title hasn't resolved still shows, as its `#id`, so every member appears.
+  assert.equal(describeEvent(event("wave-start", { index: 1, tasks: ["201"] })), "Wave 2 — #201 started");
   assert.equal(
-    describeEvent(event("wave-start", { index: 1, tasks: ["201"] })),
-    "Wave 2 — #201 started",
-  );
-  assert.equal(
-    describeEvent(
-      event("wave-done", { index: 1, merged: ["101"] }),
-      { titles: new Map([["101", "cache eviction"]]) },
-    ),
+    describeEvent(event("wave-done", { index: 1, merged: ["101"] }), { titles: new Map([["101", "cache eviction"]]) }),
     "Wave 2 — cache eviction merged #101",
   );
-  assert.equal(
-    describeEvent(event("wave-done", { index: 0, merged: ["101", "102"] })),
-    "Wave 1 — #101, #102 merged #101, #102",
-  );
-  assert.equal(
-    describeEvent(event("wave-done", { index: 2, merged: [] })),
-    "Wave 3 merged nothing",
-  );
-  assert.equal(
-    describeEvent(event("campaign-done", { waves: 3, name: "gateway work" })),
-    "Campaign “gateway work” complete (3 waves)",
-  );
+  assert.equal(describeEvent(event("wave-done", { index: 0, merged: ["101", "102"] })), "Wave 1 — #101, #102 merged #101, #102");
+  assert.equal(describeEvent(event("wave-done", { index: 2, merged: [] })), "Wave 3 merged nothing");
+  assert.equal(describeEvent(event("campaign-done", { waves: 3, name: "gateway work" })), "Campaign “gateway work” complete (3 waves)");
   assert.equal(describeEvent(event("campaign-done", { waves: 1 })), "Campaign complete (1 wave)");
-  assert.equal(
-    describeEvent(event("green", { taskId: "#101", branch: "agent/101", commits: [] })),
-    "#101 merged",
-  );
+  assert.equal(describeEvent(event("green", { taskId: "#101", branch: "agent/101", commits: [] })), "#101 merged");
   // A parked event narrates its one-enum reason (design §2.3).
-  assert.equal(
-    describeEvent(event("parked", { taskId: "202", reason: "question" })),
-    "#202 parked: question",
-  );
-  assert.equal(
-    describeEvent(event("prune", { target: "303", removed: ["303", "304"], dropped: ["303", "304"] })),
-    "Pruned #303, #304",
-  );
-  assert.equal(
-    describeEvent(event("graft", { ids: ["305", "306"], blockedBy: {}, fileKeys: {} })),
-    "Grafted #305, #306",
-  );
+  assert.equal(describeEvent(event("parked", { taskId: "202", reason: "question" })), "#202 parked: question");
+  assert.equal(describeEvent(event("prune", { target: "303", removed: ["303", "304"], dropped: ["303", "304"] })), "Pruned #303, #304");
+  assert.equal(describeEvent(event("graft", { ids: ["305", "306"], blockedBy: {}, fileKeys: {} })), "Grafted #305, #306");
   // A turn renders its agent-authored summary verbatim (ADR 0009), falling back when absent.
   assert.equal(
     describeEvent(event("turn", { taskId: "101", turn: 3, summary: "Added a failing test for the counter" })),
     "Added a failing test for the counter",
   );
   // An empty summary is the pre-summary case: the mechanical fallback line stands in.
-  assert.equal(
-    describeEvent(event("turn", { taskId: "101", turn: 3, summary: "" })),
-    "#101 — turn 3",
-  );
+  assert.equal(describeEvent(event("turn", { taskId: "101", turn: 3, summary: "" })), "#101 — turn 3");
   // An un-notifiable project reads as a plain-words warning (issue #116), not machine noise.
   assert.equal(
-    describeEvent(
-      event("telegram-unconfigured", { project: "myapp", baseLocation: "/x/.vetinari.local" }),
-    ),
+    describeEvent(event("telegram-unconfigured", { project: "myapp", baseLocation: "/x/.vetinari.local" })),
     "⚠ Telegram not configured — parked questions won't be announced",
   );
   // A merge conflict parked one issue mid-wave (reason conflict); it reads as an attention
@@ -1717,27 +1628,18 @@ test("describeEvent narrates the operator-facing events in plain words", () => {
   );
   // A red merged base parked the campaign at the wave boundary — a run-level held state,
   // narrated from its detail (ADR 0013).
-  assert.equal(
-    describeEvent(event("campaign-parked", { index: 0, detail: "npm test failed" })),
-    "Campaign parked — npm test failed",
-  );
+  assert.equal(describeEvent(event("campaign-parked", { index: 0, detail: "npm test failed" })), "Campaign parked — npm test failed");
 });
 
 test("formatFeedEvent prefixes an event's plain-words sentence with its repo, and drops machine noise", () => {
   // A narratable event reads as one repo-prefixed sentence.
-  assert.equal(
-    formatFeedEvent("alpha", event("green", { taskId: "101", branch: "agent/101", commits: [] })),
-    "alpha — #101 merged",
-  );
+  assert.equal(formatFeedEvent("alpha", event("green", { taskId: "101", branch: "agent/101", commits: [] })), "alpha — #101 merged");
   assert.equal(
     formatFeedEvent("beta", event("turn", { taskId: "201", turn: 2, summary: "Wrote a failing test" })),
     "beta — Wrote a failing test",
   );
   // An event describeEvent can't narrate (machine noise) yields no feed line.
-  assert.equal(
-    formatFeedEvent("alpha", noise({ event: "sandbox", taskId: "102" })),
-    "",
-  );
+  assert.equal(formatFeedEvent("alpha", noise({ event: "sandbox", taskId: "102" })), "");
 });
 
 test("lastEventText picks the most recent operator-facing event, ignoring machine noise", () => {
@@ -1825,10 +1727,7 @@ test("reduceCampaign derives the festive offset from the latest campaign-start t
   // No presentation state is written to the log (design §2.1): the offset is derived by
   // hashing the campaign-start timestamp, not read off a stamped field.
   const ts1 = "2025-01-01T00:00:00.000Z";
-  assert.equal(
-    reduceCampaign([event("campaign-start", { ts: ts1, waves: [["101"]], slots: 1 })]).festiveOffset,
-    festiveOffsetFor(ts1),
-  );
+  assert.equal(reduceCampaign([event("campaign-start", { ts: ts1, waves: [["101"]], slots: 1 })]).festiveOffset, festiveOffsetFor(ts1));
   // The latest campaign-start's ts wins, so a fresh run rederives its own offset.
   const ts2 = "2025-02-02T00:00:00.000Z";
   assert.equal(
@@ -1921,25 +1820,15 @@ test("reduceCampaign derives failure from an issue that errored, not a campaign-
 
 test("campaignRunning is true for a started campaign that has not finished", () => {
   assert.equal(
-    campaignRunning([
-      event("campaign-start", { waves: [["101"], ["201"]], slots: 1 }),
-      event("wave-start", { index: 0, tasks: ["101"] }),
-    ]),
+    campaignRunning([event("campaign-start", { waves: [["101"], ["201"]], slots: 1 }), event("wave-start", { index: 0, tasks: ["101"] })]),
     true,
   );
 });
 
 test("campaignRunning is false with no campaign, and once it completes", () => {
+  assert.equal(campaignRunning([event("spawn", { taskId: "101" })]), false, "a run with no campaign-start is not a campaign");
   assert.equal(
-    campaignRunning([event("spawn", { taskId: "101" })]),
-    false,
-    "a run with no campaign-start is not a campaign",
-  );
-  assert.equal(
-    campaignRunning([
-      event("campaign-start", { waves: [["101"]], slots: 1 }),
-      event("campaign-done", { waves: 1 }),
-    ]),
+    campaignRunning([event("campaign-start", { waves: [["101"]], slots: 1 }), event("campaign-done", { waves: 1 })]),
     false,
     "a completed campaign is not running",
   );
@@ -2228,8 +2117,7 @@ test("buildStatus shows campaign waves with issue chips and statuses", () => {
       reason: "question",
       branch: "agent/102",
       sessionId: "s",
-      question:
-        "Need a choice.\n\nOptions:\n- A: do the simple thing\n- B: do the robust thing",
+      question: "Need a choice.\n\nOptions:\n- A: do the simple thing\n- B: do the robust thing",
     }),
   );
 
@@ -2249,10 +2137,7 @@ test("buildStatus shows campaign waves with issue chips and statuses", () => {
     ],
   );
   assert.equal(status.parked[0].issueNumber, "102");
-  assert.deepEqual(status.parked[0].options, [
-    "A: do the simple thing",
-    "B: do the robust thing",
-  ]);
+  assert.deepEqual(status.parked[0].options, ["A: do the simple thing", "B: do the robust thing"]);
 });
 
 test("buildStatus marks a display wave `closed` only once it actually closed, not when its members merge (#362)", () => {
@@ -2333,7 +2218,10 @@ test("buildStatus collapses a wave that had a member pruned and a member grafted
   // The grafted 401 landed in wave 1 alongside 201; 301's pruned chip stays but is skipped.
   const wave = status.waves.find((w) => w.issues.some((i) => i.issueNumber === "401"));
   assert.ok(wave, "the grafted member should land in a display wave");
-  assert.ok(wave!.issues.some((i) => i.issueNumber === "301" && i.membership === "pruned"), "the pruned chip stays");
+  assert.ok(
+    wave!.issues.some((i) => i.issueNumber === "301" && i.membership === "pruned"),
+    "the pruned chip stays",
+  );
   assert.equal(wave!.status, "completed");
   assert.equal(wave!.closed, true);
 });
@@ -2643,10 +2531,7 @@ test("buildStatus renders a merge-conflict-quarantined issue as parked with reas
     ],
   );
   // Its detail names the human's next move.
-  assert.equal(
-    status.waves[0].issues.find((i) => i.issueNumber === "640")?.detail,
-    "Parked on a merge conflict — resolve the conflict",
-  );
+  assert.equal(status.waves[0].issues.find((i) => i.issueNumber === "640")?.detail, "Parked on a merge conflict — resolve the conflict");
 });
 
 test("buildStatus clears the quarantine once the issue merges on resume", () => {
@@ -2811,10 +2696,7 @@ test("buildStatusWithIssueNames adds issue names from fetchTask when available",
 
   const status = await buildStatusWithIssueNames({
     ...cfgFor(dir),
-    fetchTask: async (id: string) =>
-      id === "101"
-        ? JSON.stringify({ title: "Add login flow" })
-        : "no structured title",
+    fetchTask: async (id: string) => (id === "101" ? JSON.stringify({ title: "Add login flow" }) : "no structured title"),
   });
 
   assert.equal(status.waves[0].issues[0].name, "Add login flow");
@@ -2876,12 +2758,7 @@ test("parsePruneClosure reads the structured closure line the dry-run prints", (
   );
   // No structured line (e.g. an install predating E2) → null, so the route can 502
   // rather than half-render a closure it cannot vouch for.
-  assert.equal(
-    parsePruneClosure(
-      "prune #201 → nothing to drop\nremaining campaign: (nothing left to run)",
-    ),
-    null,
-  );
+  assert.equal(parsePruneClosure("prune #201 → nothing to drop\nremaining campaign: (nothing left to run)"), null);
 });
 
 test("listArchivedRuns lists a project's archived runs newest-first with summaries, skipping a malformed file", () => {
@@ -2898,10 +2775,7 @@ test("listArchivedRuns lists a project's archived runs newest-first with summari
   ]);
   // A malformed archive (no reconstructable run) is skipped, not fatal — even
   // though its timestamp is the newest.
-  writeFileSync(
-    join(archiveDir, "orchestrator-2026-03-01T00-00-00-000Z.jsonl"),
-    "not json at all\n{broken",
-  );
+  writeFileSync(join(archiveDir, "orchestrator-2026-03-01T00-00-00-000Z.jsonl"), "not json at all\n{broken");
 
   const runs = listArchivedRuns(dir);
 
@@ -2916,9 +2790,7 @@ test("listArchivedRuns lists a project's archived runs newest-first with summari
   assert.equal(runs[0].name, undefined);
   assert.equal(runs[1].name, undefined);
   // The file path is resolved from the listing, never joined from request input.
-  assert.ok(
-    runs[0].file.endsWith("orchestrator-2026-02-01T00-00-00-000Z.jsonl"),
-  );
+  assert.ok(runs[0].file.endsWith("orchestrator-2026-02-01T00-00-00-000Z.jsonl"));
 });
 
 test("listArchivedRuns carries a named run's --name for the list's primary label", () => {
@@ -2935,23 +2807,14 @@ test("listArchivedRuns carries a named run's --name for the list's primary label
 });
 
 test("listArchivedRuns returns nothing when a project has no archive directory", () => {
-  assert.deepEqual(
-    listArchivedRuns(join(tmpdir(), `vetinari-archive-none-${Date.now()}`)),
-    [],
-  );
+  assert.deepEqual(listArchivedRuns(join(tmpdir(), `vetinari-archive-none-${Date.now()}`)), []);
 });
 
 test("parseRunTimestamp reverses an archive run token to an ISO timestamp, tolerating older tokens", () => {
   // The token `archiveRun` writes: `toISOString().replace(/[:.]/g, "-")`.
-  assert.equal(
-    parseRunTimestamp("2026-08-23T22-22-36-267Z"),
-    "2026-08-23T22:22:36.267Z",
-  );
+  assert.equal(parseRunTimestamp("2026-08-23T22-22-36-267Z"), "2026-08-23T22:22:36.267Z");
   // Older archives were written without milliseconds and/or the trailing Z.
-  assert.equal(
-    parseRunTimestamp("2025-06-10T00-00-00"),
-    "2025-06-10T00:00:00.000Z",
-  );
+  assert.equal(parseRunTimestamp("2025-06-10T00-00-00"), "2025-06-10T00:00:00.000Z");
   // A token that isn't a timestamp yields undefined, so the row falls back to it verbatim.
   assert.equal(parseRunTimestamp("not-a-stamp"), undefined);
 });
@@ -2976,10 +2839,7 @@ test("listArchivedRuns carries each run's state, startedAt and issue count, deri
 
   assert.equal(byRun["2026-01-01T00-00-00-000Z"].state, "complete");
   assert.equal(byRun["2026-01-01T00-00-00-000Z"].issues, 3);
-  assert.equal(
-    byRun["2026-01-01T00-00-00-000Z"].startedAt,
-    "2026-01-01T00:00:00.000Z",
-  );
+  assert.equal(byRun["2026-01-01T00-00-00-000Z"].startedAt, "2026-01-01T00:00:00.000Z");
   assert.equal(byRun["2026-02-01T00-00-00-000Z"].state, "stalled");
   assert.equal(byRun["2026-02-01T00-00-00-000Z"].issues, 2);
 });
@@ -2987,18 +2847,12 @@ test("listArchivedRuns carries each run's state, startedAt and issue count, deri
 test("summarizeRun folds an archived log into a one-line mode/issue-count/outcome summary", () => {
   // A finished campaign of two waves (three issues total) that completed.
   assert.equal(
-    summarizeRun([
-      event("campaign-start", { waves: [["101", "102"], ["201"]], slots: 1 }),
-      event("campaign-done", { waves: 2 }),
-    ]),
+    summarizeRun([event("campaign-start", { waves: [["101", "102"], ["201"]], slots: 1 }), event("campaign-done", { waves: 2 })]),
     "campaign · 3 issues · complete",
   );
   // A campaign whose one issue failed (the agent could not make it green) — singular noun.
   assert.equal(
-    summarizeRun([
-      event("campaign-start", { waves: [["101"]], slots: 1 }),
-      event("failed", { taskId: "101" }),
-    ]),
+    summarizeRun([event("campaign-start", { waves: [["101"]], slots: 1 }), event("failed", { taskId: "101" })]),
     "campaign · 1 issue · failed",
   );
   // A run with no campaign frame reads as a queue of its task ids.
@@ -3051,10 +2905,7 @@ test("extractParkedDetails separates description from Options section", () => {
   );
 
   assert.equal(details.description, "I am parked on the API choice.");
-  assert.deepEqual(details.options, [
-    "Return raw JSON",
-    "Render HTML server-side",
-  ]);
+  assert.deepEqual(details.options, ["Return raw JSON", "Render HTML server-side"]);
 });
 
 test("parkedReplyFor returns the matching record's question and parsed options for the issue-detail sheet", () => {
@@ -3125,10 +2976,7 @@ test("extractParkedDetails XML shape tolerates a missing detail and still lists 
 
 test("appendedEvents returns the whole log and its end offset from a zero offset", () => {
   const log =
-    JSON.stringify(event("campaign-start", { waves: [], slots: 1 })) +
-    "\n" +
-    JSON.stringify(event("spawn", { taskId: "101" })) +
-    "\n";
+    JSON.stringify(event("campaign-start", { waves: [], slots: 1 })) + "\n" + JSON.stringify(event("spawn", { taskId: "101" })) + "\n";
   const { events, offset } = appendedEvents(log, 0);
   assert.deepEqual(
     events.map((e) => e.event),
@@ -3160,10 +3008,7 @@ test("appendedEvents leaves a partial trailing line unconsumed until it is compl
   );
   assert.equal(mid.offset, complete.length);
   // Once the line is finished, resuming from the same offset yields it whole.
-  const done = appendedEvents(
-    complete + partial + ',"taskId":"101"}\n',
-    mid.offset,
-  );
+  const done = appendedEvents(complete + partial + ',"taskId":"101"}\n', mid.offset);
   assert.deepEqual(
     done.events.map((e) => e.event),
     ["turn"],
@@ -3459,7 +3304,11 @@ test("reconstructIssueDetail carries a live running issue's phase for the sheet 
   assert.deepEqual(reconstructIssueDetail(events, "101").phase, { label: "testing · npm-test", steady: false });
 
   // A completed (merged) issue is not running, so the sheet carries no phase.
-  const merged = [...events, event("green", { ts: "2025-01-01T00:05:00.000Z", taskId: "101", branch: "agent/101", commits: [] }), event("merged", { ts: "2025-01-01T00:06:00.000Z", taskId: "101", branch: "agent/101" })];
+  const merged = [
+    ...events,
+    event("green", { ts: "2025-01-01T00:05:00.000Z", taskId: "101", branch: "agent/101", commits: [] }),
+    event("merged", { ts: "2025-01-01T00:06:00.000Z", taskId: "101", branch: "agent/101" }),
+  ];
   assert.equal(reconstructIssueDetail(merged, "101").phase, undefined);
 });
 

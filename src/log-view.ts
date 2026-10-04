@@ -82,7 +82,12 @@ export function splitOverflow(spans: MessageSpan[]): { spans: MessageSpan[]; ove
     const first = spans.slice(0, i);
     const head = spans[i].text.slice(0, nl);
     if (head) first.push({ text: head, kind: spans[i].kind });
-    const overflow = spans[i].text.slice(nl + 1) + spans.slice(i + 1).map((s) => s.text).join("");
+    const overflow =
+      spans[i].text.slice(nl + 1) +
+      spans
+        .slice(i + 1)
+        .map((s) => s.text)
+        .join("");
     if (!overflow) return { spans: first, overflow: "" };
     return { spans: first, overflow };
   }
@@ -149,7 +154,13 @@ export function humanizeLogLine(raw: string): HumanizedRow {
   const code = (text: string): MessageSpan => ({ text, kind: "code" });
   const strong = (text: string): MessageSpan => ({ text, kind: "strong" });
   // A run-level kind narrated by `describeEvent`: one plain span, no actor, no verb.
-  const narrated = (dot: LogDotState): HumanizedRow => ({ time, actor: "", verb: "", spans: [plain(describeEvent(e as unknown as OrchestratorEvent))], dot });
+  const narrated = (dot: LogDotState): HumanizedRow => ({
+    time,
+    actor: "",
+    verb: "",
+    spans: [plain(describeEvent(e as unknown as OrchestratorEvent))],
+    dot,
+  });
   // A generic-but-readable summary for a kind the registry does not narrate (#221): the event
   // kind (hyphens/underscores → spaces) as the strong key term, then each salient scalar field as
   // `· key value`. Object/array fields are dropped so the line stays prose, never a raw JSON dump.
@@ -171,7 +182,14 @@ export function humanizeLogLine(raw: string): HumanizedRow {
     case "tool": {
       const name = String(e.name);
       const size = typeof e.size === "number" ? [plain(" (" + e.size + " bytes)")] : [];
-      if (e.path) return { time, actor: actorOf(e.taskId), verb: EDIT_TOOLS.has(name) ? "edited" : "ran", spans: [code(String(e.path)), ...size], dot: "running" };
+      if (e.path)
+        return {
+          time,
+          actor: actorOf(e.taskId),
+          verb: EDIT_TOOLS.has(name) ? "edited" : "ran",
+          spans: [code(String(e.path)), ...size],
+          dot: "running",
+        };
       return { time, actor: actorOf(e.taskId), verb: "ran", spans: [strong(name)], dot: "running" };
     }
     case "sandbox-exec":
@@ -179,11 +197,23 @@ export function humanizeLogLine(raw: string): HumanizedRow {
     case "commit": {
       const files = Array.isArray(e.files) ? e.files.length : 0;
       const sha = typeof e.sha === "string" ? e.sha.slice(0, 7) : "";
-      return { time, actor: actorOf(e.taskId), verb: "committed", spans: [code(sha), plain(" · " + files + " file" + (files === 1 ? "" : "s"))], dot: "running" };
+      return {
+        time,
+        actor: actorOf(e.taskId),
+        verb: "committed",
+        spans: [code(sha), plain(" · " + files + " file" + (files === 1 ? "" : "s"))],
+        dot: "running",
+      };
     }
     case "gate": {
       const n = Array.isArray(e.cmds) ? e.cmds.length : 0;
-      return { time, actor: actorOf(e.taskId), verb: "gate", spans: [plain("— "), strong(n + " check" + (n === 1 ? "" : "s"))], dot: "running" };
+      return {
+        time,
+        actor: actorOf(e.taskId),
+        verb: "gate",
+        spans: [plain("— "), strong(n + " check" + (n === 1 ? "" : "s"))],
+        dot: "running",
+      };
     }
     // A gate check that is *starting* — the newest row names the command running now, so a slow
     // suite reads as a live agent, not a wedged one (#332). Reuses `sandbox-exec`'s row shape
@@ -194,7 +224,13 @@ export function humanizeLogLine(raw: string): HumanizedRow {
     case "gate-result": {
       const ok = e.exitCode === 0;
       const tail = ok ? " (" + e.seconds + "s)" : " — exit " + e.exitCode + " (" + e.seconds + "s)";
-      return { time, actor: actorOf(e.taskId), verb: ok ? "gate passed" : "gate failed", spans: [code(String(e.cmd)), plain(tail)], dot: ok ? "merged" : "failure" };
+      return {
+        time,
+        actor: actorOf(e.taskId),
+        verb: ok ? "gate passed" : "gate failed",
+        spans: [code(String(e.cmd)), plain(tail)],
+        dot: ok ? "merged" : "failure",
+      };
     }
     case "turn": {
       const summary = typeof e.summary === "string" ? e.summary.trim() : "";
@@ -275,7 +311,8 @@ export function humanizeHostLine(raw: string): HumanizedRow {
   const strong = (text: string): MessageSpan => ({ text, kind: "strong" });
   // The shared notable rule (isNotableHostEvent), inlined so this function stays shippable:
   // a fail/error kind, a non-null `error`, or `ok:false` is a failure the operator sees red.
-  const failed = !!e && ((typeof e.event === "string" && /fail|error/i.test(e.event)) || (e.error !== undefined && e.error !== null) || e.ok === false);
+  const failed =
+    !!e && ((typeof e.event === "string" && /fail|error/i.test(e.event)) || (e.error !== undefined && e.error !== null) || e.ok === false);
   // A generic-but-readable summary for a kind with no purpose-built line (#221): the event kind
   // (hyphens/underscores → spaces) as the strong key term, then each salient scalar field as
   // `· key value`. Object/array fields are dropped so the line stays prose, never a raw JSON dump;
@@ -298,10 +335,22 @@ export function humanizeHostLine(raw: string): HumanizedRow {
     // Routine gateway/registry lifecycle — a neutral dot, the project (or host) as actor.
     case "gateway-start": {
       const bots = typeof e.bots === "number" ? e.bots : 0;
-      return { time, actor: "host", verb: "gateway up", spans: bots ? [plain(" · " + bots + " bot" + (bots === 1 ? "" : "s"))] : [], dot: "neutral" };
+      return {
+        time,
+        actor: "host",
+        verb: "gateway up",
+        spans: bots ? [plain(" · " + bots + " bot" + (bots === 1 ? "" : "s"))] : [],
+        dot: "neutral",
+      };
     }
     case "gateway-routed":
-      return { time, actor: project, verb: "routed", spans: [code(String(e.category)), plain(" → "), code(String(e.destination))], dot: "neutral" };
+      return {
+        time,
+        actor: project,
+        verb: "routed",
+        spans: [code(String(e.category)), plain(" → "), code(String(e.destination))],
+        dot: "neutral",
+      };
     case "gateway-announced":
       return { time, actor: project, verb: "announced", spans: [code(hash(e.task))], dot: "neutral" };
     // Held-attention (amber) diagnostics — not a hard failure, but the operator should see them.
@@ -311,7 +360,13 @@ export function humanizeHostLine(raw: string): HumanizedRow {
       return { time, actor: project, verb: "", spans: [plain("stale registration")], dot: "parked" };
     // The named failure kinds — a red line naming what broke.
     case "telegram-send-failed":
-      return { time, actor: "host", verb: "Telegram send failed", spans: [plain(" ("), code(String(e.status)), plain(")")], dot: "failure" };
+      return {
+        time,
+        actor: "host",
+        verb: "Telegram send failed",
+        spans: [plain(" ("), code(String(e.status)), plain(")")],
+        dot: "failure",
+      };
     case "registry-register-failed":
       return { time, actor: project, verb: "registration failed", spans: [plain(": "), code(String(e.error))], dot: "failure" };
     case "registry-routing-unreadable":

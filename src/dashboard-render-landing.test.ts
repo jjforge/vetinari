@@ -4,17 +4,24 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { stateColor, counterColor, STATE_DOT_CSS, LIVE_TAIL_STYLES } from "./dashboard-assets.ts";
-import { event, highlightJsonLine, renderLandingShell, feedFresh, feedKindLabel, feedProjects, feedRowMatches, feedView, followView } from "./status.ts";
+import {
+  event,
+  highlightJsonLine,
+  renderLandingShell,
+  feedFresh,
+  feedKindLabel,
+  feedProjects,
+  feedRowMatches,
+  feedView,
+  followView,
+} from "./status.ts";
 
 test("renderLandingShell's card heading shows owner/name, but links and keys on the bare project", () => {
   const html = renderLandingShell(["alpha"]);
   // The card heading reads the card's owner/name, falling back to the bare key when absent.
   assert.match(html, /"card-project", p\.repo \?\? p\.project/);
   // Routing stays keyed on the bare project: the card href is the bare project key.
-  assert.match(
-    html,
-    /card\.href = "\/\?project=" \+ encodeURIComponent\(p\.project\)/,
-  );
+  assert.match(html, /card\.href = "\/\?project=" \+ encodeURIComponent\(p\.project\)/);
 });
 test("renderLandingShell is single-column on mobile with 44px tap targets", () => {
   const html = renderLandingShell(["alpha", "beta"]);
@@ -45,15 +52,10 @@ test("renderLandingShell mounts the cross-project feed under the cards on every 
   // The feed container sits after the cards and is client-rendered off /api/feed.
   assert.match(html, /id="feed"/);
   assert.match(html, /\/api\/feed/);
-  assert.ok(
-    html.indexOf('id="cards"') < html.indexOf('id="feed"'),
-    "the feed renders after the cards",
-  );
+  assert.ok(html.indexOf('id="cards"') < html.indexOf('id="feed"'), "the feed renders after the cards");
   // The event log now shows on a phone too (#125): the mobile block no longer
   // hides `.feed`, so iOS Safari at an iPhone width renders it under the cards.
-  const mobileBlock = html.match(
-    /@media \(max-width: 640px\) \{[\s\S]*?\n  \}/,
-  );
+  const mobileBlock = html.match(/@media \(max-width: 640px\) \{[\s\S]*?\n  \}/);
   assert.ok(mobileBlock, "the landing has a ≤640px mobile media block");
   assert.doesNotMatch(mobileBlock[0], /\.feed \{ display: none; \}/);
 });
@@ -70,17 +72,11 @@ test("renderLandingShell parked counter expands a cross-repo parked queue in pla
   // The parked counter is an interactive toggle, unlike the other three counters —
   // a button controlling the queue panel, inert (disabled) until the client learns
   // there is at least one parked question.
-  assert.match(
-    html,
-    /<button[^>]*class="counter counter-toggle"[^>]*data-counter="parked"[^>]*disabled[^>]*aria-controls="parked-queue"/,
-  );
+  assert.match(html, /<button[^>]*class="counter counter-toggle"[^>]*data-counter="parked"[^>]*disabled[^>]*aria-controls="parked-queue"/);
   // The queue panel sits between the counters and the cards, so expanding it pushes
   // the cards down while keeping them visible; it starts hidden.
   assert.match(html, /<section id="parked-queue"[^>]*hidden/);
-  assert.ok(
-    html.indexOf('id="parked-queue"') < html.indexOf('id="cards"'),
-    "parked queue renders above the cards",
-  );
+  assert.ok(html.indexOf('id="parked-queue"') < html.indexOf('id="cards"'), "parked queue renders above the cards");
   // The client renders one row per parked question, oldest first from data.parked,
   // each opening that repo's issue detail, showing repo, issue number, the full
   // question and how long it has waited.
@@ -257,17 +253,26 @@ test("feedFresh dedups a re-fetched newest-first window, returning only genuinel
   const window1 = [fe("2026-08-28T00:00:02Z", "c"), fe("2026-08-28T00:00:01Z", "b"), fe("2026-08-28T00:00:00Z", "a")];
   const first = feedFresh(window1, {});
   // Fresh is oldest-first so it appends to the oldest→newest buffer in chronological order.
-  assert.deepEqual(first.fresh.map((r) => r.text), ["a", "b", "c"]);
+  assert.deepEqual(
+    first.fresh.map((r) => r.text),
+    ["a", "b", "c"],
+  );
 
   // Next fetch re-sends the window plus one newer row; only the new row is fresh.
   const window2 = [fe("2026-08-28T00:00:03Z", "d"), ...window1];
   const second = feedFresh(window2, first.seen);
-  assert.deepEqual(second.fresh.map((r) => r.text), ["d"]);
+  assert.deepEqual(
+    second.fresh.map((r) => r.text),
+    ["d"],
+  );
 
   // Two rows with the same ts but different text are distinct events, both fresh.
   const window3 = [fe("2026-08-28T00:00:03Z", "d2"), ...window2];
   const third = feedFresh(window3, second.seen);
-  assert.deepEqual(third.fresh.map((r) => r.text), ["d2"]);
+  assert.deepEqual(
+    third.fresh.map((r) => r.text),
+    ["d2"],
+  );
 });
 test("the feed drives the shared followView with its (kind, text) filter — same view-model as the tail (#196)", () => {
   // The feed client accumulates an oldest→newest buffer and drives followView with feedRowMatches,
@@ -277,18 +282,27 @@ test("the feed drives the shared followView with its (kind, text) filter — sam
 
   // Following, no filter: newest-first, backlog zero, following true.
   const all = followView({ buffer, mark: 0, live: true, cap: 160, match: (e) => feedRowMatches(e, "") });
-  assert.deepEqual(all.rows.map((r) => r.text), ["acme — #3 parked", "acme — #2 merged", "acme — #1 took a turn"]);
+  assert.deepEqual(
+    all.rows.map((r) => r.text),
+    ["acme — #3 parked", "acme — #2 merged", "acme — #1 took a turn"],
+  );
   assert.equal(all.backlog, 0);
   assert.equal(all.following, true);
 
   // The filter narrows to rows whose kind label or prose text matches — "merged" hits both the
   // remapped label (issue.merged) and the prose of the green row.
   const filtered = followView({ buffer, mark: 0, live: true, cap: 160, match: (e) => feedRowMatches(e, "merged") });
-  assert.deepEqual(filtered.rows.map((r) => r.text), ["acme — #2 merged"]);
+  assert.deepEqual(
+    filtered.rows.map((r) => r.text),
+    ["acme — #2 merged"],
+  );
 
   // Paused at mark=2 freezes the first two; the parked row that arrived after counts as backlog.
   const paused = followView({ buffer, mark: 2, live: false, cap: 160, match: (e) => feedRowMatches(e, "") });
-  assert.deepEqual(paused.rows.map((r) => r.text), ["acme — #2 merged", "acme — #1 took a turn"]);
+  assert.deepEqual(
+    paused.rows.map((r) => r.text),
+    ["acme — #2 merged", "acme — #1 took a turn"],
+  );
   assert.equal(paused.backlog, 1);
   assert.equal(paused.following, false);
 });
@@ -321,19 +335,31 @@ test("feedView composes the project dropdown and the (kind, text) filter as AND 
 
   // Both cleared: everything, newest-first (the default all-repos, no-text state).
   const both = feedView({ buffer, mark: 0, live: true, project: "", query: "", cap: 160 });
-  assert.deepEqual(both.rows.map((r) => r.text), ["acme — #3 merged", "beta — #2 merged", "acme — #1 took a turn"]);
+  assert.deepEqual(
+    both.rows.map((r) => r.text),
+    ["acme — #3 merged", "beta — #2 merged", "acme — #1 took a turn"],
+  );
 
   // Project only narrows to that project's rows; the text filter is widened (cleared).
   const byProject = feedView({ buffer, mark: 0, live: true, project: "acme", query: "", cap: 160 });
-  assert.deepEqual(byProject.rows.map((r) => r.text), ["acme — #3 merged", "acme — #1 took a turn"]);
+  assert.deepEqual(
+    byProject.rows.map((r) => r.text),
+    ["acme — #3 merged", "acme — #1 took a turn"],
+  );
 
   // Text only narrows by substring across every project; the project is widened (cleared).
   const byText = feedView({ buffer, mark: 0, live: true, project: "", query: "merged", cap: 160 });
-  assert.deepEqual(byText.rows.map((r) => r.text), ["acme — #3 merged", "beta — #2 merged"]);
+  assert.deepEqual(
+    byText.rows.map((r) => r.text),
+    ["acme — #3 merged", "beta — #2 merged"],
+  );
 
   // Both set compose as AND — a chosen project AND the text substring.
   const both2 = feedView({ buffer, mark: 0, live: true, project: "acme", query: "merged", cap: 160 });
-  assert.deepEqual(both2.rows.map((r) => r.text), ["acme — #3 merged"]);
+  assert.deepEqual(
+    both2.rows.map((r) => r.text),
+    ["acme — #3 merged"],
+  );
 
   // The composed predicate reaches the backlog count too: paused at mark=2, the later acme green
   // is backlog only while it matches both criteria; a non-matching project would not count it.
@@ -396,9 +422,7 @@ test("renderLandingShell draws each card a run-state-coloured progress bar sized
   // The fill is coloured by run state (idle stays grey via the base rule). Each state's colour
   // is `stateColor` (asserted by value there); one structural check confirms the rendered output
   // carries those fill rules verbatim, proven once rather than re-pinned per state.
-  const fillCss = ["running", "parked", "completed"]
-    .map((s) => `.progress-fill.${s} { background: ${stateColor(s)}; }`)
-    .join(" ");
+  const fillCss = ["running", "parked", "completed"].map((s) => `.progress-fill.${s} { background: ${stateColor(s)}; }`).join(" ");
   assert.ok(html.includes(fillCss), "landing carries the stateColor-derived progress fills");
 });
 test("renderLandingShell renders the card tally as status-dot chips, not plain text (#80)", () => {
@@ -423,15 +447,9 @@ test("renderLandingShell colours the counter values and highlights the parked co
   const counterValueCss = ["working", "parked", "mergedToday"]
     .map((k) => `[data-counter="${k}"] .counter-value { color: ${counterColor(k)}; }`)
     .join(" ");
-  assert.ok(
-    html.includes(counterValueCss),
-    "landing carries the counterColor-derived counter-value rules",
-  );
+  assert.ok(html.includes(counterValueCss), "landing carries the counterColor-derived counter-value rules");
   // The parked counter carries a gold border only while it is actionable — enabled, i.e. parked > 0.
-  assert.match(
-    html,
-    /\.counter-toggle\[data-counter="parked"\]:not\(:disabled\) \{[^}]*border-color: var\(--color-yellow\)/,
-  );
+  assert.match(html, /\.counter-toggle\[data-counter="parked"\]:not\(:disabled\) \{[^}]*border-color: var\(--color-yellow\)/);
 });
 test("renderLandingShell gives each counter a payload-derived sublabel (#80)", () => {
   const html = renderLandingShell(["alpha"]);
@@ -456,27 +474,16 @@ test("renderLandingShell stacks each counter label on top of an inline value + s
   // POC layout: the uppercase label sits on top, then the value and sublabel share
   // one inline row (a .counter-line), rather than value → label → sublabel stacked.
   for (const key of ["working", "parked", "queued", "mergedToday"]) {
-    const counter = html.match(
-      new RegExp(`data-counter="${key}"[^>]*>(.*?)counter-sub`),
-    );
+    const counter = html.match(new RegExp(`data-counter="${key}"[^>]*>(.*?)counter-sub`));
     assert.ok(counter, `counter ${key} present`);
     const body = counter[1];
     // Label markup comes before the value markup for this counter.
-    assert.ok(
-      body.indexOf("counter-label") < body.indexOf("counter-value"),
-      `counter ${key} renders label above value`,
-    );
+    assert.ok(body.indexOf("counter-label") < body.indexOf("counter-value"), `counter ${key} renders label above value`);
     // The value and sublabel are wrapped together in the inline row.
-    assert.ok(
-      body.includes("counter-line"),
-      `counter ${key} wraps value + sub in an inline row`,
-    );
+    assert.ok(body.includes("counter-line"), `counter ${key} wraps value + sub in an inline row`);
   }
   // The inline row lays value + sublabel out on one baseline-aligned line.
-  assert.match(
-    html,
-    /\.counter-line \{[^}]*display: flex[^}]*align-items: baseline/,
-  );
+  assert.match(html, /\.counter-line \{[^}]*display: flex[^}]*align-items: baseline/);
 });
 test("renderLandingShell wires live SSE updates and an updated-ago readout, no page-level pause (#210)", () => {
   const html = renderLandingShell(["alpha", "beta"]);
@@ -497,10 +504,7 @@ test("renderLandingShell's repo dropdown is the All-repos heading, replacing the
 
   // The aggregate scope reads "All repos" as the trigger label — the heading itself.
   assert.match(html, /<span class="repo-label">All repos<\/span>/);
-  assert.match(
-    html,
-    /<button type="button" class="repo-trigger"[^>]*aria-haspopup="listbox"/,
-  );
+  assert.match(html, /<button type="button" class="repo-trigger"[^>]*aria-haspopup="listbox"/);
   // The old separate <h1>All repos</h1> title is gone — the trigger is the heading now.
   assert.doesNotMatch(html, /<h1>All repos<\/h1>/);
 });
@@ -517,8 +521,5 @@ test("the repo dropdown's All-repos row uses the teal accent dot and the repo co
     /<li class="repo-option selected" role="option" aria-selected="true" data-project="" tabindex="-1"><span class="repo-dot all" aria-hidden="true"><\/span><span class="repo-optlabel">All repos<\/span><span class="repo-note">2 repos<\/span><\/li>/,
   );
   // The teal accent is the product accent, so the `all` dot reads --color-primary.
-  assert.match(
-    landing,
-    /\.repo-dot\.all \{ background: var\(--color-primary\); \}/,
-  );
+  assert.match(landing, /\.repo-dot\.all \{ background: var\(--color-primary\); \}/);
 });

@@ -22,9 +22,7 @@ export default defineConfig({
   // The gate the orchestrator runs after every agent turn. REPLACE these with
   // your project's real build/test commands; each must exit non-zero on failure.
   // Both must pass green on baseBranch before you trust them here.
-  gates: [
-    { cmd: "echo 'replace me with your test command' && false", label: "test" },
-  ],
+  gates: [{ cmd: "echo 'replace me with your test command' && false", label: "test" }],
 
   // Commands run once per sandbox before the agent starts (install deps, etc.).
   setup: [],

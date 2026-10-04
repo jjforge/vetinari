@@ -35,8 +35,7 @@ const drainFrames = (buf: string): { payloads: EventPayload[]; rest: string } =>
   return { payloads, rest: buf };
 };
 
-const writeJsonl = (path: string, events: unknown[]) =>
-  writeFileSync(path, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
+const writeJsonl = (path: string, events: unknown[]) => writeFileSync(path, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
 
 const seedState = (dir: string, events: unknown[]) => {
   mkdirSync(join(dir, "logs"), { recursive: true });
@@ -126,9 +125,7 @@ test("serveAllStatus serves the aggregated site, selecting the project from the 
     assert.match(root, /<option value="alpha">/);
     assert.match(root, /<option value="beta">/);
 
-    const beta = await (
-      await fetch(`http://127.0.0.1:${port}/?project=beta`)
-    ).text();
+    const beta = await (await fetch(`http://127.0.0.1:${port}/?project=beta`)).text();
     assert.match(beta, /<option value="beta" selected>/);
     // Beta's own campaign (issue 201) renders in the body, not alpha's issue 101.
     assert.match(beta, /#201 <small>/);
@@ -225,9 +222,7 @@ test("serveAllStatus GET / serves the all-repos landing shell, not a server-rend
     assert.doesNotMatch(root, /#201 <small>/);
 
     // Selecting a project opens that project's campaign view (server-rendered for now).
-    const alpha = await (
-      await fetch(`http://127.0.0.1:${port}/?project=alpha`)
-    ).text();
+    const alpha = await (await fetch(`http://127.0.0.1:${port}/?project=alpha`)).text();
     assert.match(alpha, /#101 <small>/);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -286,12 +281,7 @@ test("serveAllStatus GET /api/landing serves the all-repos landing model as JSON
     );
     assert.equal(landing.projects[0].campaignName, "alpha work");
     assert.equal(landing.projects[0].runState, "running");
-    assert.deepEqual(Object.keys(landing.counters).sort(), [
-      "mergedToday",
-      "parked",
-      "queued",
-      "working",
-    ]);
+    assert.deepEqual(Object.keys(landing.counters).sort(), ["mergedToday", "parked", "queued", "working"]);
     // Alpha's issue 101 is running; alpha's 201 and beta's 301 are still queued — summed.
     assert.equal(landing.counters.working, 1);
     assert.equal(landing.counters.queued, 2);
@@ -347,11 +337,7 @@ test("serveAllStatus GET /api/feed serves the cross-project event feed as JSON",
     // The feed merges both projects newest-first, each row repo-prefixed.
     assert.deepEqual(
       feed.map((f: { text: string }) => f.text),
-      [
-        "alpha — #101 merged",
-        "beta — #201 parked: question",
-        "alpha — Campaign “alpha work” started",
-      ],
+      ["alpha — #101 merged", "beta — #201 parked: question", "alpha — Campaign “alpha work” started"],
     );
     assert.equal(feed[0].kind, "green");
   } finally {
@@ -394,9 +380,7 @@ test("serveAllStatus GET /api/issue serves one issue's reconstructed detail as J
   });
   const { port } = server.address() as AddressInfo;
   try {
-    const res = await fetch(
-      `http://127.0.0.1:${port}/api/issue?project=alpha&issue=101`,
-    );
+    const res = await fetch(`http://127.0.0.1:${port}/api/issue?project=alpha&issue=101`);
     assert.equal(res.status, 200);
     assert.match(res.headers.get("content-type") ?? "", /application\/json/);
     const detail = await res.json();
@@ -408,21 +392,11 @@ test("serveAllStatus GET /api/issue serves one issue's reconstructed detail as J
     assert.equal(detail.turns, 1);
     assert.equal(detail.elapsedMs, 5 * 60 * 1000);
     assert.deepEqual(
-      detail.turnLog.map((t: { turn: number; summary: string }) => [
-        t.turn,
-        t.summary,
-      ]),
+      detail.turnLog.map((t: { turn: number; summary: string }) => [t.turn, t.summary]),
       [[0, "Sketched the grammar and a red test."]],
     );
     // An unknown project is a 404, never a path joined from request input.
-    assert.equal(
-      (
-        await fetch(
-          `http://127.0.0.1:${port}/api/issue?project=ghost&issue=101`,
-        )
-      ).status,
-      404,
-    );
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/issue?project=ghost&issue=101`)).status, 404);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -458,8 +432,7 @@ test("serveAllStatus GET /api/issue carries the parked question and options for 
       reason: "question",
       branch: "agent/101",
       sessionId: "s",
-      question:
-        "Which parser?\n\nOptions:\n- Recursive descent\n- Parser combinator",
+      question: "Which parser?\n\nOptions:\n- Recursive descent\n- Parser combinator",
     }),
   );
   register(configDir, {
@@ -474,9 +447,7 @@ test("serveAllStatus GET /api/issue carries the parked question and options for 
   });
   const { port } = server.address() as AddressInfo;
   try {
-    const detail = await (
-      await fetch(`http://127.0.0.1:${port}/api/issue?project=alpha&issue=101`)
-    ).json();
+    const detail = await (await fetch(`http://127.0.0.1:${port}/api/issue?project=alpha&issue=101`)).json();
     assert.equal(detail.status, "parked");
     // The sheet's reply block reads the question (its Options tail split off) and the parsed options.
     assert.deepEqual(detail.parked, {
@@ -516,9 +487,7 @@ test("serveAllStatus GET /api/issue omits parked reply data for a non-parked iss
   });
   const { port } = server.address() as AddressInfo;
   try {
-    const detail = await (
-      await fetch(`http://127.0.0.1:${port}/api/issue?project=alpha&issue=101`)
-    ).json();
+    const detail = await (await fetch(`http://127.0.0.1:${port}/api/issue?project=alpha&issue=101`)).json();
     // An unmerged green reads running with a pending green (§2.2); it is a non-parked issue,
     // so the reply data is still omitted.
     assert.equal(detail.status, "running");
@@ -592,12 +561,7 @@ test("serveAllStatus GET /api/events streams a project's log appends as SSE fram
     while (!buf.includes("\n\n")) {
       const chunk = await Promise.race([
         reader.read(),
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () => reject(new Error("timed out waiting for SSE frame")),
-            4000,
-          ),
-        ),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timed out waiting for SSE frame")), 4000)),
       ]);
       if (chunk.done) throw new Error("stream closed before a frame arrived");
       buf += decoder.decode(chunk.value, { stream: true });
@@ -652,7 +616,11 @@ test("serveAllStatus GET /api/events debounces a burst of appends into one frame
     // Read well past the burst + debounce window so a second frame, if one were emitted, would show.
     const frames = (await collect(3000)).filter((p) => p.events?.length);
     assert.equal(frames.length, 1, "a burst within the debounce window coalesces to a single frame");
-    assert.deepEqual((frames[0].events ?? []).map((e) => e.turn), [0, 1, 2], "the single frame carries every appended event, in order");
+    assert.deepEqual(
+      (frames[0].events ?? []).map((e) => e.turn),
+      [0, 1, 2],
+      "the single frame carries every appended event, in order",
+    );
   } finally {
     await reader.cancel();
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -679,7 +647,11 @@ test("serveAllStatus GET /api/events emits no frame for a pure machine-noise app
     }, 250);
     const frames = (await collect(3000)).filter((p) => p.events?.length);
     assert.equal(frames.length, 1, "only the view-relevant append surfaces a frame");
-    assert.deepEqual((frames[0].events ?? []).map((e) => e.event), ["green"], "the denylisted noise event never reaches the client");
+    assert.deepEqual(
+      (frames[0].events ?? []).map((e) => e.event),
+      ["green"],
+      "the denylisted noise event never reaches the client",
+    );
   } finally {
     await reader.cancel();
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -721,23 +693,15 @@ test("serveAllStatus renders a single registered project as a one-entry dropdown
   const { port } = server.address() as AddressInfo;
   try {
     // A no-gateway, single-project user opens that project's campaign view (ADR 0006).
-    const solo = await (
-      await fetch(`http://127.0.0.1:${port}/?project=solo`)
-    ).text();
+    const solo = await (await fetch(`http://127.0.0.1:${port}/?project=solo`)).text();
     assert.match(solo, /<select name="project"/);
     assert.match(solo, /<option value="solo" selected>/);
     // Its own campaign wave and parked card render intact; the reply happens in the
     // sheet, whose /answer form is present.
     assert.match(solo, /#101 <small>/);
     assert.match(solo, /Parked · <span class="parked-count">1<\/span>/);
-    assert.match(
-      solo,
-      /<a class="parked-card"[^>]*data-issue="101" data-project="solo"/,
-    );
-    assert.match(
-      solo,
-      /<form method="post" action="\/answer" id="reply-form">/,
-    );
+    assert.match(solo, /<a class="parked-card"[^>]*data-issue="101" data-project="solo"/);
+    assert.match(solo, /<form method="post" action="\/answer" id="reply-form">/);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -809,9 +773,7 @@ test("serveAllStatus POST /redrive shells redrive in the selected project's root
   const betaDir = join(configDir, "state-beta");
   // Beta campaign-parked (greens merged, base gated red, campaign paused) — the state the
   // Redrive control acts on. Alpha is a plain running campaign, untouched.
-  seedState(alphaDir, [
-    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["101"]], slots: 1 }),
-  ]);
+  seedState(alphaDir, [event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["101"]], slots: 1 })]);
   seedState(betaDir, [
     event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["201", "202"], ["401"]], slots: 1 }),
     event("wave-start", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["201", "202"] }),
@@ -868,9 +830,7 @@ test("serveAllStatus POST /redrive shells redrive in the selected project's root
 test("serveAllStatus POST /redrive validates the project (400 missing, 404 unknown)", async () => {
   const configDir = join(tmpdir(), `vetinari-agg-redrive-guard-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
-  seedState(betaDir, [
-    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["201"]], slots: 1 }),
-  ]);
+  seedState(betaDir, [event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["201"]], slots: 1 })]);
   register(configDir, {
     project: "beta",
     projectRoot: join(configDir, "beta-root"),
@@ -960,18 +920,14 @@ test("serveAllStatus GET /prune?preview returns the selected project's structure
   });
   const { port } = server.address() as AddressInfo;
   try {
-    const res = await fetch(
-      `http://127.0.0.1:${port}/prune?preview&taskId=201&project=beta`,
-    );
+    const res = await fetch(`http://127.0.0.1:${port}/prune?preview&taskId=201&project=beta`);
     assert.equal(res.status, 200);
     assert.match(res.headers.get("content-type") ?? "", /application\/json/);
     // The endpoint returns the full structured closure the panel discloses —
     // dropped, kept-banked, and remaining all reach the client verbatim.
     assert.deepEqual(await res.json(), structured);
     // The closure came from the selected project's install (beta's root), not alpha's.
-    assert.deepEqual(closures, [
-      { projectRoot: join(configDir, "beta-root"), taskId: "201" },
-    ]);
+    assert.deepEqual(closures, [{ projectRoot: join(configDir, "beta-root"), taskId: "201" }]);
     // A preview computes nothing destructive — no prune is spawned.
     assert.equal(spawned.length, 0);
   } finally {
@@ -1009,20 +965,9 @@ test("serveAllStatus GET /prune?preview validates params and the project", async
   const { port } = server.address() as AddressInfo;
   try {
     // Missing taskId/project → 400.
-    assert.equal(
-      (await fetch(`http://127.0.0.1:${port}/prune?preview&project=beta`))
-        .status,
-      400,
-    );
+    assert.equal((await fetch(`http://127.0.0.1:${port}/prune?preview&project=beta`)).status, 400);
     // Unknown project → 404.
-    assert.equal(
-      (
-        await fetch(
-          `http://127.0.0.1:${port}/prune?preview&taskId=201&project=ghost`,
-        )
-      ).status,
-      404,
-    );
+    assert.equal((await fetch(`http://127.0.0.1:${port}/prune?preview&taskId=201&project=ghost`)).status, 404);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -1067,9 +1012,7 @@ test("serveAllStatus POST /prune previews the selected project's closure without
     // which computes the closure against that project's real blockedBy graph.
     prunePreview: (projectRoot, taskId) => {
       previews.push({ projectRoot, taskId });
-      return Promise.resolve(
-        `prune #201 → dropping #201, #401\nremaining campaign: (nothing left to run)`,
-      );
+      return Promise.resolve(`prune #201 → dropping #201, #401\nremaining campaign: (nothing left to run)`);
     },
   });
   const { port } = server.address() as AddressInfo;
@@ -1082,15 +1025,10 @@ test("serveAllStatus POST /prune previews the selected project's closure without
     assert.equal(res.status, 200);
     const html = await res.text();
     // The preview came from the selected project's install (beta's root), not alpha's.
-    assert.deepEqual(previews, [
-      { projectRoot: join(configDir, "beta-root"), taskId: "201" },
-    ]);
+    assert.deepEqual(previews, [{ projectRoot: join(configDir, "beta-root"), taskId: "201" }]);
     // It shows the shelled closure and a confirm affordance carrying the project.
     assert.match(html, /#401/);
-    assert.match(
-      html,
-      /<form method="post" action="\/prune"[\s\S]*?name="confirm"/,
-    );
+    assert.match(html, /<form method="post" action="\/prune"[\s\S]*?name="confirm"/);
     assert.match(html, /name="project" value="beta"/);
     assert.match(html, /name="taskId" value="201"/);
     // Nothing has been pruned yet — preview executes nothing.
@@ -1104,12 +1042,8 @@ test("serveAllStatus POST /graft shells graft directly for a clean batch — no 
   const configDir = join(tmpdir(), `vetinari-agg-graft-direct-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
-  seedState(alphaDir, [
-    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["101"]], slots: 1 }),
-  ]);
-  seedState(betaDir, [
-    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["201"]], slots: 1 }),
-  ]);
+  seedState(alphaDir, [event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["101"]], slots: 1 })]);
+  seedState(betaDir, [event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["201"]], slots: 1 })]);
   register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
   register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
 
@@ -1154,12 +1088,8 @@ test("serveAllStatus GET /graft?preview returns the selected project's structure
   const configDir = join(tmpdir(), `vetinari-agg-graft-json-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");
   const betaDir = join(configDir, "state-beta");
-  seedState(alphaDir, [
-    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["101"]], slots: 1 }),
-  ]);
-  seedState(betaDir, [
-    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["201"]], slots: 1 }),
-  ]);
+  seedState(alphaDir, [event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["101"]], slots: 1 })]);
+  seedState(betaDir, [event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["201"]], slots: 1 })]);
   register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
   register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
 
@@ -1204,9 +1134,7 @@ test("serveAllStatus GET /graft?preview returns the selected project's structure
 test("serveAllStatus GET /graft?preview validates params and the project", async () => {
   const configDir = join(tmpdir(), `vetinari-agg-graft-json-guard-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
-  seedState(betaDir, [
-    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["201"]], slots: 1 }),
-  ]);
+  seedState(betaDir, [event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["201"]], slots: 1 })]);
   register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
 
   const server = await serveAllStatus(configDir, {
@@ -1219,10 +1147,7 @@ test("serveAllStatus GET /graft?preview validates params and the project", async
     // Missing ids/project → 400.
     assert.equal((await fetch(`http://127.0.0.1:${port}/graft?preview&project=beta`)).status, 400);
     // Unknown project → 404.
-    assert.equal(
-      (await fetch(`http://127.0.0.1:${port}/graft?preview&ids=640&project=ghost`)).status,
-      404,
-    );
+    assert.equal((await fetch(`http://127.0.0.1:${port}/graft?preview&ids=640&project=ghost`)).status, 404);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -1231,9 +1156,7 @@ test("serveAllStatus GET /graft?preview validates params and the project", async
 test("serveAllStatus GET /graft?preview 502s when the project emits no closure line", async () => {
   const configDir = join(tmpdir(), `vetinari-agg-graft-502-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
-  seedState(betaDir, [
-    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["201"]], slots: 1 }),
-  ]);
+  seedState(betaDir, [event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["201"]], slots: 1 })]);
   register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
 
   const server = await serveAllStatus(configDir, {
@@ -1244,10 +1167,7 @@ test("serveAllStatus GET /graft?preview 502s when the project emits no closure l
   });
   const { port } = server.address() as AddressInfo;
   try {
-    assert.equal(
-      (await fetch(`http://127.0.0.1:${port}/graft?preview&ids=640&project=beta`)).status,
-      502,
-    );
+    assert.equal((await fetch(`http://127.0.0.1:${port}/graft?preview&ids=640&project=beta`)).status, 502);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -1256,9 +1176,7 @@ test("serveAllStatus GET /graft?preview 502s when the project emits no closure l
 test("serveAllStatus POST /graft rejects a whole batch with per-id verdicts and grafts nothing (#202)", async () => {
   const configDir = join(tmpdir(), `vetinari-agg-graft-reject-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");
-  seedState(betaDir, [
-    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["201"]], slots: 1 }),
-  ]);
+  seedState(betaDir, [event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["201"]], slots: 1 })]);
   register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
 
   const children: { projectRoot: string; args: string[] }[] = [];
@@ -1337,15 +1255,10 @@ test("serveAllStatus flags the selected project's prunable chips with its projec
   });
   const { port } = server.address() as AddressInfo;
   try {
-    const html = await (
-      await fetch(`http://127.0.0.1:${port}/?project=beta`)
-    ).text();
+    const html = await (await fetch(`http://127.0.0.1:${port}/?project=beta`)).text();
     // The unstarted future-wave row is flagged prunable and carries beta, so the
     // panel's Prune routes preview and confirm to beta's own install.
-    assert.match(
-      html,
-      /class="wave-member [a-z]+"[^>]*data-issue="401"[^>]*data-project="beta"[^>]*data-prunable="1"/,
-    );
+    assert.match(html, /class="wave-member [a-z]+"[^>]*data-issue="401"[^>]*data-project="beta"[^>]*data-prunable="1"/);
     // No inline prune control on the row itself.
     assert.doesNotMatch(html, /✂️/);
   } finally {
@@ -1375,10 +1288,7 @@ test("serveAllStatus lists a project's archived runs and renders one read-only w
     event("campaign-start", { waves: [["111"]], slots: 1 }),
     event("wave-start", { index: 0, tasks: ["111"] }),
   ]);
-  writeFileSync(
-    join(archiveDir, "orchestrator-2026-03-01T00-00-00-000Z.jsonl"),
-    "garbage\n{",
-  );
+  writeFileSync(join(archiveDir, "orchestrator-2026-03-01T00-00-00-000Z.jsonl"), "garbage\n{");
   register(configDir, {
     project: "beta",
     projectRoot: join(configDir, "beta-root"),
@@ -1391,9 +1301,7 @@ test("serveAllStatus lists a project's archived runs and renders one read-only w
   });
   const { port } = server.address() as AddressInfo;
   try {
-    const root = await (
-      await fetch(`http://127.0.0.1:${port}/?project=beta`)
-    ).text();
+    const root = await (await fetch(`http://127.0.0.1:${port}/?project=beta`)).text();
     // The collapsible archived-runs list shows both good runs, newest-first; the live
     // run (201) still renders at the top.
     assert.match(root, /#201 <small>/);
@@ -1401,20 +1309,11 @@ test("serveAllStatus lists a project's archived runs and renders one read-only w
     // Each row carries its token, state (a stalled run stopped short — a campaign-start
     // with no terminal event, ADR 0019) and issue count; unnamed runs fall back to the
     // token as the label.
-    assert.match(
-      root,
-      /<li data-run="2026-02-01T00-00-00-000Z">/,
-    );
+    assert.match(root, /<li data-run="2026-02-01T00-00-00-000Z">/);
     assert.match(root, /<span class="lv-verb">stalled · 1 issue<\/span>/);
-    assert.match(
-      root,
-      /<li data-run="2026-01-01T00-00-00-000Z">/,
-    );
+    assert.match(root, /<li data-run="2026-01-01T00-00-00-000Z">/);
     assert.match(root, /<span class="lv-verb">complete · 2 issues<\/span>/);
-    assert.ok(
-      root.indexOf("2026-02-01") < root.indexOf("2026-01-01"),
-      "newest-first",
-    );
+    assert.ok(root.indexOf("2026-02-01") < root.indexOf("2026-01-01"), "newest-first");
     // The malformed run is skipped, never listed.
     assert.doesNotMatch(root, /2026-03-01/);
     // No run selected → every row starts collapsed.
@@ -1424,16 +1323,9 @@ test("serveAllStatus lists a project's archived runs and renders one read-only w
     assert.doesNotMatch(root, /data-pane=/);
 
     // Selecting a run opens that row on load (a ?run= deep-link).
-    const withRun = await (
-      await fetch(
-        `http://127.0.0.1:${port}/?project=beta&run=2026-01-01T00-00-00-000Z`,
-      )
-    ).text();
+    const withRun = await (await fetch(`http://127.0.0.1:${port}/?project=beta&run=2026-01-01T00-00-00-000Z`)).text();
     assert.match(withRun, /#201 <small>/); // live run still on top
-    assert.match(
-      withRun,
-      /<li class="open" data-run="2026-01-01T00-00-00-000Z">/,
-    );
+    assert.match(withRun, /<li class="open" data-run="2026-01-01T00-00-00-000Z">/);
     assert.match(withRun, /#101 <small>/); // the archived run's own issues, in its body
     // Read-only: the archived run's chips are never prunable (a finished run has
     // nothing to prune).
@@ -1441,22 +1333,15 @@ test("serveAllStatus lists a project's archived runs and renders one read-only w
 
     // A stale ?mode=raw param no longer means anything — the run opens normally, no
     // error and no raw pane (#222).
-    const staleMode = await fetch(
-      `http://127.0.0.1:${port}/?project=beta&run=2026-01-01T00-00-00-000Z&mode=raw`,
-    );
+    const staleMode = await fetch(`http://127.0.0.1:${port}/?project=beta&run=2026-01-01T00-00-00-000Z&mode=raw`);
     assert.equal(staleMode.status, 200);
     const staleModeHtml = await staleMode.text();
-    assert.match(
-      staleModeHtml,
-      /<li class="open" data-run="2026-01-01T00-00-00-000Z">/,
-    );
+    assert.match(staleModeHtml, /<li class="open" data-run="2026-01-01T00-00-00-000Z">/);
     assert.match(staleModeHtml, /#101 <small>/); // wave cards, as normal
     assert.doesNotMatch(staleModeHtml, /archive-raw/);
 
     // A run not present in the archive listing is rejected — no row opens.
-    const bogus = await fetch(
-      `http://127.0.0.1:${port}/?project=beta&run=..%2F..%2Forchestrator`,
-    );
+    const bogus = await fetch(`http://127.0.0.1:${port}/?project=beta&run=..%2F..%2Forchestrator`);
     assert.equal(bogus.status, 200);
     assert.doesNotMatch(await bogus.text(), /<li class="open" data-run=/);
   } finally {
@@ -1513,11 +1398,7 @@ test("serveAllStatus reconstructs a pruned issue in a selected archived run, rea
   });
   const { port } = server.address() as AddressInfo;
   try {
-    const html = await (
-      await fetch(
-        `http://127.0.0.1:${port}/?project=beta&run=2026-04-01T00-00-00-000Z`,
-      )
-    ).text();
+    const html = await (await fetch(`http://127.0.0.1:${port}/?project=beta&run=2026-04-01T00-00-00-000Z`)).text();
     // The archived run renders under its --name in the collapsible list…
     assert.match(html, /<span class="lv-lead">spring cleanup<\/span>/);
     // …and its campaign pane reconstructs the pruned-out 201 as a chip in the wave it
@@ -1564,11 +1445,7 @@ test("serveAllStatus GET /api/issue reads an archived run's own log when a run t
   try {
     // With the run token, the detail is reconstructed from the archived log: its
     // title, completed status, and the archived turn appear, flagged read-only.
-    const withRun = await (
-      await fetch(
-        `http://127.0.0.1:${port}/api/issue?project=beta&issue=101&run=2026-01-01T00-00-00-000Z`,
-      )
-    ).json();
+    const withRun = await (await fetch(`http://127.0.0.1:${port}/api/issue?project=beta&issue=101&run=2026-01-01T00-00-00-000Z`)).json();
     assert.equal(withRun.status, "completed");
     assert.equal(withRun.title, "old work");
     assert.equal(withRun.archived, true);
@@ -1576,21 +1453,12 @@ test("serveAllStatus GET /api/issue reads an archived run's own log when a run t
     assert.equal(withRun.turnLog[0].summary, "did the thing");
 
     // Without a run token it reads the live log, where 101 is unknown → unstarted.
-    const live = await (
-      await fetch(`http://127.0.0.1:${port}/api/issue?project=beta&issue=101`)
-    ).json();
+    const live = await (await fetch(`http://127.0.0.1:${port}/api/issue?project=beta&issue=101`)).json();
     assert.equal(live.status, "unstarted");
     assert.equal(live.turnLog.length, 0);
 
     // An unlisted run token is rejected, never a path to traverse.
-    assert.equal(
-      (
-        await fetch(
-          `http://127.0.0.1:${port}/api/issue?project=beta&issue=101&run=..%2F..%2Forchestrator`,
-        )
-      ).status,
-      404,
-    );
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/issue?project=beta&issue=101&run=..%2F..%2Forchestrator`)).status, 404);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -1603,16 +1471,10 @@ test("serveAllStatus no longer serves GET /archive/log — the route is removed 
   const archiveDir = join(betaDir, "logs", "archive");
   mkdirSync(archiveDir, { recursive: true });
   const raw =
-    [
-      event("campaign-start", { waves: [["101"], ["102"]], slots: 1 }),
-      event("campaign-done", { waves: 2 }),
-    ]
+    [event("campaign-start", { waves: [["101"], ["102"]], slots: 1 }), event("campaign-done", { waves: 2 })]
       .map((e) => JSON.stringify(e))
       .join("\n") + "\n";
-  writeFileSync(
-    join(archiveDir, "orchestrator-2026-01-01T00-00-00-000Z.jsonl"),
-    raw,
-  );
+  writeFileSync(join(archiveDir, "orchestrator-2026-01-01T00-00-00-000Z.jsonl"), raw);
   register(configDir, {
     project: "beta",
     projectRoot: join(configDir, "beta-root"),
@@ -1627,9 +1489,7 @@ test("serveAllStatus no longer serves GET /archive/log — the route is removed 
   try {
     // The archive raw pane was the endpoint's only consumer; with it gone the route is
     // deleted, so even a listed run's log path is now an unhandled 404 (#222).
-    const gone = await fetch(
-      `http://127.0.0.1:${port}/archive/log?project=beta&run=2026-01-01T00-00-00-000Z`,
-    );
+    const gone = await fetch(`http://127.0.0.1:${port}/archive/log?project=beta&run=2026-01-01T00-00-00-000Z`);
     assert.equal(gone.status, 404);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -1637,8 +1497,5 @@ test("serveAllStatus no longer serves GET /archive/log — the route is removed 
 });
 
 test("serveAllStatus can bind to a non-localhost host for tailnet access", () => {
-  assert.match(
-    String(serveAllStatus),
-    /server\.listen\(opts\.port,\s*opts\.host,/,
-  );
+  assert.match(String(serveAllStatus), /server\.listen\(opts\.port,\s*opts\.host,/);
 });

@@ -26,13 +26,7 @@ import type { DisplayStatus, Membership, RunState } from "./dashboard-model.ts";
 // assertions below reject a *missing* one — so adding a member to
 // `DisplayStatus`/`Membership`/`RunState` is a typecheck error here, and then a red
 // coverage test, until the seed renders it.
-export const ALL_DISPLAY_STATUSES = [
-  "completed",
-  "parked",
-  "failed",
-  "running",
-  "unstarted",
-] as const satisfies readonly DisplayStatus[];
+export const ALL_DISPLAY_STATUSES = ["completed", "parked", "failed", "running", "unstarted"] as const satisfies readonly DisplayStatus[];
 
 export const ALL_MEMBERSHIPS = ["member", "grafted", "pruned"] as const satisfies readonly Membership[];
 
@@ -149,10 +143,32 @@ const DEMO_SPECS: DemoProjectSpec[] = [
   {
     project: DEMO_PARKED_PROJECT,
     live: (at) => [
-      { ts: at(0), event: "campaign-start", waves: [["201", "202"], ["203", "204", "205"], ["206", "207", "208"]], name: "guest checkout", titles: TITLES_PARKED },
+      {
+        ts: at(0),
+        event: "campaign-start",
+        waves: [
+          ["201", "202"],
+          ["203", "204", "205"],
+          ["206", "207", "208"],
+        ],
+        name: "guest checkout",
+        titles: TITLES_PARKED,
+      },
       { ts: at(1), event: "wave-start", index: 0, tasks: ["201", "202"] },
-      { ts: at(2), event: "turn", taskId: "201", turn: 0, summary: "Wrote a failing test for cart persistence across a fresh session, then backed it with a keyed store." },
-      { ts: at(2), event: "turn", taskId: "202", turn: 0, summary: "Pinned add-to-cart against a sold-out fixture so it returns 409 instead of silently overselling." },
+      {
+        ts: at(2),
+        event: "turn",
+        taskId: "201",
+        turn: 0,
+        summary: "Wrote a failing test for cart persistence across a fresh session, then backed it with a keyed store.",
+      },
+      {
+        ts: at(2),
+        event: "turn",
+        taskId: "202",
+        turn: 0,
+        summary: "Pinned add-to-cart against a sold-out fixture so it returns 409 instead of silently overselling.",
+      },
       { ts: at(4), event: "green", taskId: "201", branch: "agent/201" },
       { ts: at(4), event: "green", taskId: "202", branch: "agent/202" },
       { ts: at(5), event: "merged", taskId: "201", branch: "agent/201" },
@@ -162,21 +178,58 @@ const DEMO_SPECS: DemoProjectSpec[] = [
       { ts: at(7), event: "spawn", taskId: "203", running: 1, left: 2 },
       { ts: at(7), event: "spawn", taskId: "204", running: 2, left: 1 },
       { ts: at(7), event: "spawn", taskId: "205", running: 3, left: 0 },
-      { ts: at(8), event: "turn", taskId: "203", turn: 0, summary: "Added the /checkout/guest route; green, but it collides with the session guard on merge." },
+      {
+        ts: at(8),
+        event: "turn",
+        taskId: "203",
+        turn: 0,
+        summary: "Added the /checkout/guest route; green, but it collides with the session guard on merge.",
+      },
       { ts: at(9), event: "green", taskId: "203", branch: "agent/203" },
       // 203 passed its own gate but hit a merge conflict on integration — a parked(conflict)
       // hold (design §2.3). The run already reads parked (205 question), so this adds the reason.
       { ts: at(10), event: "parked", taskId: "203", reason: "conflict", detail: "merge conflict" },
-      { ts: at(8), event: "turn", taskId: "204", turn: 0, summary: "Red test: an expired session should redirect to /login, not 500 — it currently 500s." },
-      { ts: at(10), event: "turn", taskId: "204", turn: 1, summary: "Extracted the guard into middleware; the redirect passes but two existing route tests now fail." },
-      { ts: at(12), event: "turn", taskId: "204", turn: 2, summary: "Fixed the two callers to mount the middleware; full suite green, tidying names before I signal." },
-      { ts: at(8), event: "turn", taskId: "205", turn: 0, summary: "Provider-selection test in place; blocked on which providers to offer at launch." },
+      {
+        ts: at(8),
+        event: "turn",
+        taskId: "204",
+        turn: 0,
+        summary: "Red test: an expired session should redirect to /login, not 500 — it currently 500s.",
+      },
+      {
+        ts: at(10),
+        event: "turn",
+        taskId: "204",
+        turn: 1,
+        summary: "Extracted the guard into middleware; the redirect passes but two existing route tests now fail.",
+      },
+      {
+        ts: at(12),
+        event: "turn",
+        taskId: "204",
+        turn: 2,
+        summary: "Fixed the two callers to mount the middleware; full suite green, tidying names before I signal.",
+      },
+      {
+        ts: at(8),
+        event: "turn",
+        taskId: "205",
+        turn: 0,
+        summary: "Provider-selection test in place; blocked on which providers to offer at launch.",
+      },
       { ts: at(11), event: "parked", taskId: "205", reason: "question" },
       { ts: at(11), event: "worktree-preserved", taskId: "205", path: ".vetinari.local/wt/205" },
       { ts: at(13), event: "prune", target: "208", removed: ["208"] },
     ],
     parked: (at) => ({
-      "205": { taskId: "205", parkedAt: at(11), reason: "question", branch: "agent/205", sessionId: "sess-205", question: DEMO_PARKED_QUESTION },
+      "205": {
+        taskId: "205",
+        parkedAt: at(11),
+        reason: "question",
+        branch: "agent/205",
+        sessionId: "sess-205",
+        question: DEMO_PARKED_QUESTION,
+      },
     }),
   },
 
@@ -189,8 +242,20 @@ const DEMO_SPECS: DemoProjectSpec[] = [
     live: (at) => [
       { ts: at(0), event: "campaign-start", waves: [["301", "302"], ["303", "304"], ["305"]], name: "settlement", titles: TITLES_RUNNING },
       { ts: at(1), event: "wave-start", index: 0, tasks: ["301", "302"] },
-      { ts: at(2), event: "turn", taskId: "301", turn: 0, summary: "Modelled the ledger as append-only double-entry rows; a balance test drove the schema." },
-      { ts: at(2), event: "turn", taskId: "302", turn: 0, summary: "Made capture idempotent on the provider reference so a retried webhook can't double-charge." },
+      {
+        ts: at(2),
+        event: "turn",
+        taskId: "301",
+        turn: 0,
+        summary: "Modelled the ledger as append-only double-entry rows; a balance test drove the schema.",
+      },
+      {
+        ts: at(2),
+        event: "turn",
+        taskId: "302",
+        turn: 0,
+        summary: "Made capture idempotent on the provider reference so a retried webhook can't double-charge.",
+      },
       { ts: at(4), event: "green", taskId: "301", branch: "agent/301" },
       { ts: at(4), event: "green", taskId: "302", branch: "agent/302" },
       { ts: at(5), event: "merged", taskId: "301", branch: "agent/301" },
@@ -199,9 +264,21 @@ const DEMO_SPECS: DemoProjectSpec[] = [
       { ts: at(6), event: "wave-start", index: 1, tasks: ["303", "304"] },
       { ts: at(7), event: "spawn", taskId: "303", running: 1, left: 1 },
       { ts: at(7), event: "spawn", taskId: "304", running: 2, left: 0 },
-      { ts: at(8), event: "turn", taskId: "303", turn: 0, summary: "Reconciled refunds against the original capture; green and merged clean." },
+      {
+        ts: at(8),
+        event: "turn",
+        taskId: "303",
+        turn: 0,
+        summary: "Reconciled refunds against the original capture; green and merged clean.",
+      },
       { ts: at(9), event: "green", taskId: "303", branch: "agent/303" },
-      { ts: at(8), event: "turn", taskId: "304", turn: 0, summary: "Verifying the HMAC signature on inbound webhooks before we trust the payload." },
+      {
+        ts: at(8),
+        event: "turn",
+        taskId: "304",
+        turn: 0,
+        summary: "Verifying the HMAC signature on inbound webhooks before we trust the payload.",
+      },
       // A graft adds a dispute-evidence issue; it lands in the unstarted later wave, so it reads `grafted`.
       { ts: at(11), event: "graft", ids: ["306"], blockedBy: {}, fileKeys: { "306": ["disputes.ts"] } },
     ],
@@ -215,8 +292,20 @@ const DEMO_SPECS: DemoProjectSpec[] = [
     live: (at) => [
       { ts: at(0), event: "campaign-start", waves: [["401", "402"], ["403"]], name: "offline mode", titles: TITLES_FAILURE },
       { ts: at(1), event: "wave-start", index: 0, tasks: ["401", "402"] },
-      { ts: at(2), event: "turn", taskId: "401", turn: 0, summary: "Backed the offline queue with an IndexedDB store behind a durability test." },
-      { ts: at(2), event: "turn", taskId: "402", turn: 0, summary: "Last-write-wins conflict resolver, pinned by a divergent-edit fixture." },
+      {
+        ts: at(2),
+        event: "turn",
+        taskId: "401",
+        turn: 0,
+        summary: "Backed the offline queue with an IndexedDB store behind a durability test.",
+      },
+      {
+        ts: at(2),
+        event: "turn",
+        taskId: "402",
+        turn: 0,
+        summary: "Last-write-wins conflict resolver, pinned by a divergent-edit fixture.",
+      },
       { ts: at(4), event: "green", taskId: "401", branch: "agent/401" },
       { ts: at(4), event: "green", taskId: "402", branch: "agent/402" },
       { ts: at(5), event: "merged", taskId: "401", branch: "agent/401" },
@@ -224,7 +313,13 @@ const DEMO_SPECS: DemoProjectSpec[] = [
       { ts: at(5), event: "wave-done", index: 0, merged: ["401", "402"] },
       { ts: at(6), event: "wave-start", index: 1, tasks: ["403"] },
       { ts: at(7), event: "spawn", taskId: "403", running: 1, left: 0 },
-      { ts: at(7), event: "turn", taskId: "403", turn: 0, summary: "Background sync worker never went green — the durability test keeps failing after every retry." },
+      {
+        ts: at(7),
+        event: "turn",
+        taskId: "403",
+        turn: 0,
+        summary: "Background sync worker never went green — the durability test keeps failing after every retry.",
+      },
       { ts: at(9), event: "failed", taskId: "403", detail: "error(3)" },
       { ts: at(9), event: "campaign-failed", index: 1, detail: "403 failed" },
     ],
@@ -238,8 +333,20 @@ const DEMO_SPECS: DemoProjectSpec[] = [
     live: (at) => [
       { ts: at(0), event: "campaign-start", waves: [["501", "502"]], name: "nightly ETL", titles: TITLES_COMPLETED },
       { ts: at(1), event: "wave-start", index: 0, tasks: ["501", "502"] },
-      { ts: at(2), event: "turn", taskId: "501", turn: 0, summary: "Extract job reads the change-feed cursor and continues from the last watermark." },
-      { ts: at(2), event: "turn", taskId: "502", turn: 0, summary: "Load step upserts into the warehouse in batches, idempotent on the natural key." },
+      {
+        ts: at(2),
+        event: "turn",
+        taskId: "501",
+        turn: 0,
+        summary: "Extract job reads the change-feed cursor and continues from the last watermark.",
+      },
+      {
+        ts: at(2),
+        event: "turn",
+        taskId: "502",
+        turn: 0,
+        summary: "Load step upserts into the warehouse in batches, idempotent on the natural key.",
+      },
       { ts: at(4), event: "green", taskId: "501", branch: "agent/501" },
       { ts: at(4), event: "green", taskId: "502", branch: "agent/502" },
       { ts: at(5), event: "merged", taskId: "501", branch: "agent/501" },

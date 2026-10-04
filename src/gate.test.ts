@@ -81,7 +81,10 @@ const gateSandbox = (exits: Record<string, number>): Sandbox =>
 const readActivity = (cfg: ResolvedConfig, taskId: string): OrchestratorEvent[] => {
   const file = activityLogPath(cfg.stateDir, taskId);
   if (!existsSync(file)) return [];
-  return readFileSync(file, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  return readFileSync(file, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((l) => JSON.parse(l));
 };
 
 test("runGates announces each check as it starts — a gate-check before every gate-result", async () => {
@@ -106,7 +109,10 @@ test("a gate that fails its first check stops there — the failing result, not 
   assert.equal(green, false);
   const stream = readActivity(cfg, "204");
   // The start line for the first check, then its failing result — and nothing for the second check.
-  assert.deepEqual(stream.map((e) => e.event), ["gate", "gate-check", "gate-result"]);
+  assert.deepEqual(
+    stream.map((e) => e.event),
+    ["gate", "gate-check", "gate-result"],
+  );
   const last = stream[stream.length - 1] as { event: string; exitCode?: number };
   assert.equal(last.event, "gate-result");
   assert.equal(last.exitCode, 1);

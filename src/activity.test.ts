@@ -10,14 +10,11 @@ const TS = "2026-08-27T00:00:00.000Z";
 const TASK = "182";
 
 // A single assistant stream-json line carrying one `tool_use` block.
-const assistantLine = (block: unknown): string =>
-  JSON.stringify({ type: "assistant", message: { content: [block] } });
+const assistantLine = (block: unknown): string => JSON.stringify({ type: "assistant", message: { content: [block] } });
 
 test("projects a Read tool_use into a `tool` event with its name and path", () => {
   const line = assistantLine({ type: "tool_use", name: "Read", input: { file_path: "/repo/src/loop.ts" } });
-  assert.deepEqual(projectRawLine(line, TASK, TS), [
-    { event: "tool", taskId: TASK, ts: TS, name: "Read", path: "/repo/src/loop.ts" },
-  ]);
+  assert.deepEqual(projectRawLine(line, TASK, TS), [{ event: "tool", taskId: TASK, ts: TS, name: "Read", path: "/repo/src/loop.ts" }]);
 });
 
 test("projects an Edit tool_use into a `tool` event with a byte size from the new content", () => {
@@ -33,23 +30,17 @@ test("projects an Edit tool_use into a `tool` event with a byte size from the ne
 
 test("projects a Write tool_use with the byte size of its content", () => {
   const line = assistantLine({ type: "tool_use", name: "Write", input: { file_path: "/repo/new.ts", content: "abcd" } });
-  assert.deepEqual(projectRawLine(line, TASK, TS), [
-    { event: "tool", taskId: TASK, ts: TS, name: "Write", path: "/repo/new.ts", size: 4 },
-  ]);
+  assert.deepEqual(projectRawLine(line, TASK, TS), [{ event: "tool", taskId: TASK, ts: TS, name: "Write", path: "/repo/new.ts", size: 4 }]);
 });
 
 test("projects a Bash tool_use into a `sandbox-exec` event carrying the command", () => {
   const line = assistantLine({ type: "tool_use", name: "Bash", input: { command: "npm test" } });
-  assert.deepEqual(projectRawLine(line, TASK, TS), [
-    { event: "sandbox-exec", taskId: TASK, ts: TS, cmd: "npm test" },
-  ]);
+  assert.deepEqual(projectRawLine(line, TASK, TS), [{ event: "sandbox-exec", taskId: TASK, ts: TS, cmd: "npm test" }]);
 });
 
 test("projects a Grep tool_use using its `path` target (not `file_path`)", () => {
   const line = assistantLine({ type: "tool_use", name: "Grep", input: { pattern: "TODO", path: "/repo/src" } });
-  assert.deepEqual(projectRawLine(line, TASK, TS), [
-    { event: "tool", taskId: TASK, ts: TS, name: "Grep", path: "/repo/src" },
-  ]);
+  assert.deepEqual(projectRawLine(line, TASK, TS), [{ event: "tool", taskId: TASK, ts: TS, name: "Grep", path: "/repo/src" }]);
 });
 
 test("projects every tool_use block in a multi-tool assistant line, dropping the text block", () => {
@@ -99,7 +90,10 @@ test("appendActivity writes one stamped JSON event per line, each carrying event
   appendActivity(stateDir, TASK, event("tool", { taskId: TASK, name: "Read", path: "/a.ts" }));
   appendActivity(stateDir, TASK, event("commit", { taskId: TASK, branch: "agent/182", sha: "abc123", files: ["src/a.ts"] }));
 
-  const rows = readFileSync(activityLogPath(stateDir, TASK), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  const rows = readFileSync(activityLogPath(stateDir, TASK), "utf8")
+    .trim()
+    .split("\n")
+    .map((l) => JSON.parse(l));
   assert.equal(rows.length, 2);
   for (const r of rows) {
     assert.equal(r.taskId, TASK);

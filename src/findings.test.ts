@@ -43,7 +43,10 @@ test("reportFindings files every finding and isolates a failure to its own findi
     return `https://example/issues/${calls.length}`;
   };
 
-  const results = await reportFindings(reporter, [{ summary: "one" }, { summary: "boom" }, { summary: "three" }], { taskId: "640", project: "demo" });
+  const results = await reportFindings(reporter, [{ summary: "one" }, { summary: "boom" }, { summary: "three" }], {
+    taskId: "640",
+    project: "demo",
+  });
 
   assert.deepEqual(calls, ["one", "boom", "three"]); // all three attempted despite the middle failure
   assert.equal(results[0].url, "https://example/issues/1");

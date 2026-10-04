@@ -1,4 +1,14 @@
-import { archiveRowMatches, archiveRunHref, cappedRawRows, followView, humanizedRow, isNotableHostEvent, tailAppend, tailFresh, tailView } from "./dashboard-render.ts";
+import {
+  archiveRowMatches,
+  archiveRunHref,
+  cappedRawRows,
+  followView,
+  humanizedRow,
+  isNotableHostEvent,
+  tailAppend,
+  tailFresh,
+  tailView,
+} from "./dashboard-render.ts";
 import { issueMoves, paneActivity, reasonWord, tailCollapseIntent } from "./dashboard-visual-state.ts";
 import { humanizeHostLine, LOG_DOT_STATE_COLOR, splitOverflow } from "./log-view.ts";
 
@@ -113,7 +123,9 @@ export const STATE_DOT_CSS =
  * each member row carries a matching status class. Tally counts (not states) are
  * deliberately left out — they keep a neutral edge (§7).
  */
-export const STATE_CHIP_BORDER_CSS = ["running", "parked", "failed", "completed", "unstarted"].map((s) => `.wave-member.${s} { border-color: ${stateBorderColor(s)}; }`).join(" ");
+export const STATE_CHIP_BORDER_CSS = ["running", "parked", "failed", "completed", "unstarted"]
+  .map((s) => `.wave-member.${s} { border-color: ${stateBorderColor(s)}; }`)
+  .join(" ");
 
 /**
  * The mono treatment for the repo dropdown's label (#88). The dashboard loads no
@@ -688,7 +700,9 @@ export const LIVE_TAIL_STYLES = `  .live-tail { background: var(--color-card); b
   .lv-row:hover { background: var(--color-card); }
   .lv-t { color: var(--color-dim); font-variant-numeric: tabular-nums; }
   .lv-dot { width: .6rem; height: .6rem; align-self: center; background: var(--color-dim); }
-  ${Object.entries(LOG_DOT_STATE_COLOR).map(([s, token]) => `.lv-dot.${s} { background: ${stateColor(token)}; }`).join(" ")}
+  ${Object.entries(LOG_DOT_STATE_COLOR)
+    .map(([s, token]) => `.lv-dot.${s} { background: ${stateColor(token)}; }`)
+    .join(" ")}
   .lv-msg { min-width: 0; white-space: pre-wrap; word-break: break-word; color: var(--color-text); }
   .lv-lead { font-family: ${MONO_FONT}; color: var(--color-text-light-2); font-weight: 600; margin-right: .4rem; }
   .lv-verb { color: var(--color-text-light-2); margin-right: .35rem; }

@@ -25,11 +25,7 @@ export interface ChildResult {
  * while the child runs on. `shellGraftPreview` folds into this (it was a second copy of the
  * same spawn-collect-resolve); `shellPrunePreview` adopts it separately under its own ticket.
  */
-export function runChild(
-  projectRoot: string,
-  args: string[],
-  opts: { timeoutMs: number },
-): Promise<ChildResult> {
+export function runChild(projectRoot: string, args: string[], opts: { timeoutMs: number }): Promise<ChildResult> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [...process.execArgv, process.argv[1], ...args], {
       cwd: projectRoot,

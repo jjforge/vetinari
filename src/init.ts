@@ -137,8 +137,12 @@ export function describeInit(plan: InitPlan, provider: AgentProviderName = DEFAU
     lines.push("");
     lines.push("Next steps:");
     lines.push(`  1. Add your toolchain to ${DOCKERFILE_DEST} and your gates to ${CONFIG_DEST}.`);
-    lines.push(`  2. Put your agent credential in ${LOCAL_DIR}/.env as ${keys} — the key(s) the \`${provider}\` provider reads (set \`agent\` in ${CONFIG_DEST} to pick another). The container reads it there, and the first real \`run\` is the first thing that needs it.`);
-    lines.push(`  3. Wire this project's Telegram bot connection with \`vetinari tg-connect\` — it collects the bot token and chat into ${LOCAL_DIR}/host.env (host-side, never the container gate) so parked questions are announced. Optional; skip it to run without notifications.`);
+    lines.push(
+      `  2. Put your agent credential in ${LOCAL_DIR}/.env as ${keys} — the key(s) the \`${provider}\` provider reads (set \`agent\` in ${CONFIG_DEST} to pick another). The container reads it there, and the first real \`run\` is the first thing that needs it.`,
+    );
+    lines.push(
+      `  3. Wire this project's Telegram bot connection with \`vetinari tg-connect\` — it collects the bot token and chat into ${LOCAL_DIR}/host.env (host-side, never the container gate) so parked questions are announced. Optional; skip it to run without notifications.`,
+    );
     lines.push("  4. Build the image, then run `vetinari baseline` to prove every gate green.");
   }
 

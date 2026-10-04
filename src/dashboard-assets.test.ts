@@ -4,7 +4,20 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { DASHBOARD_PALETTE_CSS, stateColor, stateBorderColor, counterColor, TOP_BAR_STYLES, ISSUE_DETAIL_SHEET_STYLES, ISSUE_DETAIL_SHEET_SCRIPT, HOST_LOG_STYLES, HOST_LOG_SCRIPT, LIVE_TAIL_STYLES, REDRIVE_SCRIPT, GRAFT_SCRIPT } from "./dashboard-assets.ts";
+import {
+  DASHBOARD_PALETTE_CSS,
+  stateColor,
+  stateBorderColor,
+  counterColor,
+  TOP_BAR_STYLES,
+  ISSUE_DETAIL_SHEET_STYLES,
+  ISSUE_DETAIL_SHEET_SCRIPT,
+  HOST_LOG_STYLES,
+  HOST_LOG_SCRIPT,
+  LIVE_TAIL_STYLES,
+  REDRIVE_SCRIPT,
+  GRAFT_SCRIPT,
+} from "./dashboard-assets.ts";
 import type { GraftRejection } from "./plan.ts";
 import { cappedRawRows, isNotableHostEvent, renderLandingShell } from "./status.ts";
 
@@ -12,15 +25,9 @@ test("graftVerdicts maps every graft rejection reason — no key renders undefin
   // The reason map lives in browser JS, where an unmapped key renders `undefined` to
   // the operator. This list is typed as the whole `GraftRejection` union, so adding a
   // reason without a rendering fails to compile here rather than shipping `undefined`.
-  const reasons: GraftRejection["reason"][] = [
-    "malformed",
-    "unknown",
-    "closed",
-    "already-in-campaign",
-  ];
+  const reasons: GraftRejection["reason"][] = ["malformed", "unknown", "closed", "already-in-campaign"];
   const map = GRAFT_SCRIPT.match(/const reason = \{[^}]*\}/)?.[0] ?? "";
-  for (const r of reasons)
-    assert.ok(map.includes(r), `graftVerdicts must map the "${r}" reason`);
+  for (const r of reasons) assert.ok(map.includes(r), `graftVerdicts must map the "${r}" reason`);
   // The internal token names what is true of the input; the rendering says what the
   // operator must do.
   assert.match(map, /malformed: "not an issue id"/);
@@ -29,22 +36,9 @@ test("graftVerdicts maps every graft rejection reason — no key renders undefin
 test("the card/chip colour rules are landed as a normative doc that pins the palette (#83)", () => {
   // The colour rules live as appendix A of the design doc (#304 folded the standalone
   // dashboard-color-rules.md into it): the palette, the edge rule and the precedence.
-  const doc = readFileSync(
-    join(import.meta.dirname, "..", "docs", "design.md"),
-    "utf8",
-  );
+  const doc = readFileSync(join(import.meta.dirname, "..", "docs", "design.md"), "utf8");
   // The appendix is the reference: it carries the palette at the exact hexes the code uses.
-  for (const hex of [
-    "#6cb6ff",
-    "#c8a24e",
-    "#f85149",
-    "#5f6b78",
-    "#3fb984",
-    "#a371f7",
-    "#f79287",
-    "#10151b",
-    "#0b0e12",
-  ]) {
+  for (const hex of ["#6cb6ff", "#c8a24e", "#f85149", "#5f6b78", "#3fb984", "#a371f7", "#f79287", "#10151b", "#0b0e12"]) {
     assert.ok(doc.includes(hex), `the design appendix pins ${hex}`);
   }
   // And it states the roll-up precedence (§2.4's `failed > parked` order — the risky
@@ -111,10 +105,7 @@ test("only the running dot and the live indicator animate — nothing else pulse
 test("the issue-detail sheet carries the issue's state on its top edge only (§2, #83)", () => {
   // The sheet is a stateful card, so its state reads on a 2px top border, derived
   // from stateColor — the other three edges stay the neutral 1px.
-  assert.match(
-    ISSUE_DETAIL_SHEET_STYLES,
-    /\.issue-detail-sheet \{[^}]*border-top: 2px solid/,
-  );
+  assert.match(ISSUE_DETAIL_SHEET_STYLES, /\.issue-detail-sheet \{[^}]*border-top: 2px solid/);
   // The per-state top-edge colour is `stateColor` (asserted by value there); one structural
   // check confirms the shared sheet CSS splices those rules in, proven once not per state.
   assert.ok(
@@ -130,10 +121,7 @@ test("the issue-detail sheet carries the issue's state on its top edge only (§2
   assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /"issue-detail-sheet " \+ d\.status/);
   // The parked-question / reply block is part of the human-action queue, so it carries
   // the 3px amber left edge (§2) — the block only shows for a parked issue.
-  assert.match(
-    ISSUE_DETAIL_SHEET_STYLES,
-    /\.issue-detail-reply \{[^}]*border-left: 3px solid var\(--color-yellow\)/,
-  );
+  assert.match(ISSUE_DETAIL_SHEET_STYLES, /\.issue-detail-reply \{[^}]*border-left: 3px solid var\(--color-yellow\)/);
 });
 
 test("the reply block can shrink and scroll so the sheet-actions Reply button stays reachable (#370)", () => {
@@ -172,14 +160,8 @@ test("the issue sheet prints the park reason as a word beside the state, single-
 test("the issue sheet shows a live running issue's phase in place of the word, controlling the pulse (#359)", () => {
   // A running issue's phase replaces the state word; a steady phase stills the dot via the
   // shared `.dot.running.idle` rule (no new colour). An archived (read-only) sheet shows none.
-  assert.match(
-    ISSUE_DETAIL_SHEET_SCRIPT,
-    /const phase = d\.status === "running" && !d\.archived \? d\.phase : null/,
-  );
-  assert.match(
-    ISSUE_DETAIL_SHEET_SCRIPT,
-    /detailStatusDot\.className = "dot " \+ d\.status \+ \(phase && phase\.steady \? " idle" : ""\)/,
-  );
+  assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /const phase = d\.status === "running" && !d\.archived \? d\.phase : null/);
+  assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /detailStatusDot\.className = "dot " \+ d\.status \+ \(phase && phase\.steady \? " idle" : ""\)/);
 });
 
 test("stateColor is the single state→colour derivation, failure distinct from the risky action (#83)", () => {
@@ -222,10 +204,7 @@ test("the repo dropdown's CSS matches the spec: mono heading, borderless trigger
   // The CSS is shared by both pages via TOP_BAR_STYLES, so assert it there once.
   const css = TOP_BAR_STYLES;
   // Trigger: no border, no background, no padding — just text + chevron.
-  assert.match(
-    css,
-    /\.repo-trigger \{[^}]*border: 0;[^}]*background: none;[^}]*padding: 0;/,
-  );
+  assert.match(css, /\.repo-trigger \{[^}]*border: 0;[^}]*background: none;[^}]*padding: 0;/);
   // Label: system-monospace stack (no web font), 600, 17px, tight tracking, truncates, never wraps.
   assert.match(
     css,
@@ -234,23 +213,11 @@ test("the repo dropdown's CSS matches the spec: mono heading, borderless trigger
   // No IBM Plex Mono (the POC face) is added or referenced anywhere.
   assert.doesNotMatch(css, /Plex Mono/i);
   // Hover turns the label teal; the chevron is 13px, muted, and rotates 180° over 180ms when open.
-  assert.match(
-    css,
-    /\.repo-trigger:hover \.repo-label \{ color: var\(--color-primary\); \}/,
-  );
-  assert.match(
-    css,
-    /\.repo-chevron \{[^}]*font-size: 13px;[^}]*color: var\(--color-text-light-2\);[^}]*transition: transform 180ms;/,
-  );
-  assert.match(
-    css,
-    /\.repo-trigger\[aria-expanded="true"\] \.repo-chevron \{ transform: rotate\(180deg\); \}/,
-  );
+  assert.match(css, /\.repo-trigger:hover \.repo-label \{ color: var\(--color-primary\); \}/);
+  assert.match(css, /\.repo-chevron \{[^}]*font-size: 13px;[^}]*color: var\(--color-text-light-2\);[^}]*transition: transform 180ms;/);
+  assert.match(css, /\.repo-trigger\[aria-expanded="true"\] \.repo-chevron \{ transform: rotate\(180deg\); \}/);
   // A visible focus ring — the trigger has no border to hang one on.
-  assert.match(
-    css,
-    /\.repo-trigger:focus-visible, \.repo-option:focus-visible \{ outline: 2px solid var\(--color-primary\);/,
-  );
+  assert.match(css, /\.repo-trigger:focus-visible, \.repo-option:focus-visible \{ outline: 2px solid var\(--color-primary\);/);
   // The menu is a popover: 8px below the trigger, 260px min, layered above cards (z 5)
   // but below the issue sheet (z 10), on the box surface with the spec border/radius/shadow.
   assert.match(
@@ -262,33 +229,18 @@ test("the repo dropdown's CSS matches the spec: mono heading, borderless trigger
   assert.match(ISSUE_DETAIL_SHEET_STYLES, /\.issue-detail \{[^}]*z-index: 10/);
   // Rows: flex, selected and hovered share the fill; the note is muted, the label mono.
   assert.match(css, /\.repo-option \{[^}]*display: flex;/);
-  assert.match(
-    css,
-    /\.repo-option:hover, \.repo-option\.selected \{ background: var\(--color-chip-hover\); \}/,
-  );
-  assert.match(
-    css,
-    /\.repo-note \{[^}]*font-size: 11px;[^}]*color: var\(--color-dim\);/,
-  );
+  assert.match(css, /\.repo-option:hover, \.repo-option\.selected \{ background: var\(--color-chip-hover\); \}/);
+  assert.match(css, /\.repo-note \{[^}]*font-size: 11px;[^}]*color: var\(--color-dim\);/);
   // Touch rows are ≥44px; the label steps to 15px on a phone.
-  assert.match(
-    css,
-    /@media \(pointer: coarse\) \{ \.repo-option \{ min-height: 44px; \} \}/,
-  );
-  assert.match(
-    css,
-    /@media \(max-width: 640px\) \{ \.repo-label \{ font-size: 15px; \} \}/,
-  );
+  assert.match(css, /@media \(pointer: coarse\) \{ \.repo-option \{ min-height: 44px; \} \}/);
+  assert.match(css, /@media \(max-width: 640px\) \{ \.repo-label \{ font-size: 15px; \} \}/);
 });
 
 test("under 640px the shared .tail-head drops the .tail-summary so the title stays one line and the filter isn't clipped (#336)", () => {
   // Option (c): the summary ("2 agents") duplicates the agent dropdown, so on a phone we hide it
   // to reclaim the row's width — pinned alongside the three existing 640px rules. CSS-only; every
   // pane sharing .tail-head (live tail, archived runs, landing event-log feed) inherits it.
-  assert.match(
-    LIVE_TAIL_STYLES,
-    /@media \(max-width: 640px\) \{ \.tail-summary \{ display: none; \} \}/,
-  );
+  assert.match(LIVE_TAIL_STYLES, /@media \(max-width: 640px\) \{ \.tail-summary \{ display: none; \} \}/);
 });
 
 test("REDRIVE_SCRIPT opens the confirm dialog on click and closes it on Cancel — only enabled, no double-bind (#325)", () => {
@@ -298,7 +250,10 @@ test("REDRIVE_SCRIPT opens the confirm dialog on click and closes it on Cancel �
   // Only wires an enabled control — a disabled button (no dialog) is left inert.
   assert.match(REDRIVE_SCRIPT, /open\.disabled/);
   // Opening shows the modal dialog; only Confirm (a submit in the /redrive form) sends it.
-  assert.match(REDRIVE_SCRIPT, /open\.addEventListener\("click", \(\) => \{ if \(typeof dialog\.showModal === "function"\) dialog\.showModal\(\); \}\)/);
+  assert.match(
+    REDRIVE_SCRIPT,
+    /open\.addEventListener\("click", \(\) => \{ if \(typeof dialog\.showModal === "function"\) dialog\.showModal\(\); \}\)/,
+  );
   // Cancel closes the dialog (no POST); Escape/backdrop close it natively.
   assert.match(REDRIVE_SCRIPT, /cancel\.addEventListener\("click", \(\) => dialog\.close\(\)\)/);
   // Guarded against a re-bind so re-running over the same node (a soft-refresh) adds no second listener.
@@ -385,10 +340,7 @@ test("openIssue clears the reply draft only when the sheet binds a different iss
   assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /const issueKey = project \+ "#" \+ issue/);
   // The clear is conditional on the key changing — closing and reopening the SAME issue
   // keeps the draft; only a switch to a different issue empties the box.
-  assert.match(
-    ISSUE_DETAIL_SHEET_SCRIPT,
-    /if \(boundIssueKey !== issueKey\) replyText\.value = ""/,
-  );
+  assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /if \(boundIssueKey !== issueKey\) replyText\.value = ""/);
   // closeSheet stays a pure dismiss (class + hidden) — clearing there would drop a draft
   // when the operator closes to check something and reopens the same issue.
   assert.match(

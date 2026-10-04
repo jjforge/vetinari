@@ -2,13 +2,7 @@
 // The package name self-resolves to this repo (package.json "exports"), so the
 // same import a consuming project uses works here too.
 import { resolve } from "node:path";
-import {
-  defineConfig,
-  githubBlockedBy,
-  githubFetchTask,
-  githubIssuesByLabel,
-  githubMarkPendingVerify,
-} from "vetinari";
+import { defineConfig, githubBlockedBy, githubFetchTask, githubIssuesByLabel, githubMarkPendingVerify } from "vetinari";
 
 export default defineConfig({
   project: "vetinari",
@@ -51,8 +45,7 @@ export default defineConfig({
   // their basename, and validates them against the tree — so this repo runs on the
   // one shared resolver rather than a second one that can drift from it.
 
-  toolchainProbe:
-    "node --version && npm --version && claude --version && git --version",
+  toolchainProbe: "node --version && npm --version && claude --version && git --version",
 
   // safe.directory host-side write needs a writable global git config; the real
   // one is a read-only nix symlink. Kept OUT of .env (which is injected into the

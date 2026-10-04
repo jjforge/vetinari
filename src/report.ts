@@ -18,8 +18,7 @@ export function issueLabel(id: string, titles: Record<string, string>): string {
 }
 
 /** A comma-joined run of issue labels — the shared body of the plan/wave lines. */
-const issueList = (ids: string[], titles: Record<string, string>): string =>
-  ids.map((id) => issueLabel(id, titles)).join(", ");
+const issueList = (ids: string[], titles: Record<string, string>): string => ids.map((id) => issueLabel(id, titles)).join(", ");
 
 /** `N wave` / `N waves`, and the "M wave(s) not started" tail a stop reports. */
 const waves = (n: number): string => `${n} ${n === 1 ? "wave" : "waves"}`;
@@ -28,31 +27,19 @@ const waves = (n: number): string => `${n} ${n === 1 ? "wave" : "waves"}`;
 const named = (name?: string): string => (name ? ` “${name}”` : "");
 
 /** The plan: the waves with their ids and titles, headed by the campaign name when set. */
-export function formatPlan(
-  batches: string[][],
-  titles: Record<string, string>,
-  name?: string,
-): string {
+export function formatPlan(batches: string[][], titles: Record<string, string>, name?: string): string {
   const header = `plan${named(name)} · ${waves(batches.length)}`;
-  const rows = batches.map(
-    (wave, i) => `  wave ${i + 1} — ${issueList(wave, titles)}`,
-  );
+  const rows = batches.map((wave, i) => `  wave ${i + 1} — ${issueList(wave, titles)}`);
   return [header, ...rows].join("\n");
 }
 
 /** A wave started: its position and the issues it drains. */
-export function formatWaveStart(
-  index: number,
-  total: number,
-  tasks: string[],
-  titles: Record<string, string>,
-): string {
+export function formatWaveStart(index: number, total: number, tasks: string[], titles: Record<string, string>): string {
   return `▶ wave ${index + 1}/${total} — ${issueList(tasks, titles)}`;
 }
 
 /** Map a queue outcome to the terminal word: an `error(n)` is a `failed`, else itself. */
-const outcomeWord = (outcome: string | undefined): string =>
-  outcome?.startsWith("error") ? "failed" : (outcome ?? "?");
+const outcomeWord = (outcome: string | undefined): string => (outcome?.startsWith("error") ? "failed" : (outcome ?? "?"));
 
 /** A wave closed: what merged. A wave-done fires only when every member merged (design §2.1),
  * so there is no held or conflict-parked member to annotate — the `merged` list is the wave. */
@@ -61,19 +48,12 @@ export function formatWaveDone(index: number, total: number, d: { merged: string
 }
 
 /** The per-issue outcome, one indented line each, `error(n)` mapped to the `failed` vocabulary. */
-export function formatOutcomes(
-  taskIds: string[],
-  outcomes: Record<string, string>,
-): string {
+export function formatOutcomes(taskIds: string[], outcomes: Record<string, string>): string {
   return taskIds.map((id) => `  #${id} ${outcomeWord(outcomes[id])}`).join("\n");
 }
 
 /** The whole campaign finished cleanly: the wave count and the base it landed on. */
-export function formatComplete(
-  batches: number,
-  baseBranch: string,
-  name?: string,
-): string {
+export function formatComplete(batches: number, baseBranch: string, name?: string): string {
   return `🏆 campaign${named(name)} complete · ${waves(batches)} onto ${baseBranch}`;
 }
 

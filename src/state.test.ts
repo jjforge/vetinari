@@ -153,7 +153,13 @@ test("writeParkedRecord writes the record only — no event log, no Telegram, no
   mkdirSync(join(dir, "parked"), { recursive: true });
   const cfg = cfgFor(dir);
 
-  writeParkedRecord(cfg, { taskId: "B", reason: "conflict", detail: "CONFLICT (content): Merge conflict in f.txt", branch: "agent/B", question: "Merge conflict on agent/B — resolve on the base, then redrive." });
+  writeParkedRecord(cfg, {
+    taskId: "B",
+    reason: "conflict",
+    detail: "CONFLICT (content): Merge conflict in f.txt",
+    branch: "agent/B",
+    question: "Merge conflict on agent/B — resolve on the base, then redrive.",
+  });
 
   const rec = listParked(cfg).find((p) => p.taskId === "B");
   assert.ok(rec, "the record is written to disk");

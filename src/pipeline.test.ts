@@ -88,8 +88,7 @@ const inRepo = async <T>(dir: string, fn: () => Promise<T>): Promise<T> => {
   }
 };
 
-const gitOut = (dir: string, args: string[]) =>
-  execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" }).trim();
+const gitOut = (dir: string, args: string[]) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" }).trim();
 
 test("a green agent turn commits on its branch and the real gate runs via the local sandbox's exec → runLoop green", async () => {
   const dir = seedRepo();
@@ -148,21 +147,29 @@ test("a deliberately red gate yields a real non-zero exit via exec and parks —
   assert.equal(parked[0].detail, "budget:2");
 
   const events = readEventLog(cfg);
-  assert.equal(events.some((e) => e.event === "green"), false);
+  assert.equal(
+    events.some((e) => e.event === "green"),
+    false,
+  );
   // The gate ran for real and its non-zero exit was seen — not a stubbed green read.
   const reds = events.filter((e) => e.event === "gate-result") as { exitCode: number }[];
   assert.ok(reds.length > 0, "expected gate-result events");
-  assert.ok(reds.every((r) => r.exitCode !== 0), "every gate run went red for real");
+  assert.ok(
+    reds.every((r) => r.exitCode !== 0),
+    "every gate run went red for real",
+  );
 });
 
 // Each issue's agent-script writes a disjoint impl file + its own changelog fragment
 // and commits on agent/<id> — file-disjoint, so both greens merge clean.
-const implScript = (id: string): LocalAgentScript => (turn) => {
-  turn.write(`impl-${id}.txt`, `impl for ${id}\n`);
-  turn.write(`changelog.d/${id}.md`, `section: New features\n- [user] feature from ${id} (#${id}).\n`);
-  turn.commit(`implement ${id}`);
-  return { signal: DONE, stdout: `<turn-summary>implemented ${id}</turn-summary>` };
-};
+const implScript =
+  (id: string): LocalAgentScript =>
+  (turn) => {
+    turn.write(`impl-${id}.txt`, `impl for ${id}\n`);
+    turn.write(`changelog.d/${id}.md`, `section: New features\n- [user] feature from ${id} (#${id}).\n`);
+    turn.commit(`implement ${id}`);
+    return { signal: DONE, stdout: `<turn-summary>implemented ${id}</turn-summary>` };
+  };
 
 /**
  * The container boundary, faked in the two sanctioned ways and NOTHING else (ADR 0018):
@@ -173,11 +180,7 @@ const implScript = (id: string): LocalAgentScript => (turn) => {
  * integrateGreens, collectWaveChangelog and currentBranch are the production effects,
  * unswapped.
  */
-const localCampaignDeps = (
-  cfg: ResolvedConfig,
-  dir: string,
-  scriptFor: (id: string) => LocalAgentScript = implScript,
-): CampaignDeps => {
+const localCampaignDeps = (cfg: ResolvedConfig, dir: string, scriptFor: (id: string) => LocalAgentScript = implScript): CampaignDeps => {
   const spawnRun: RunSpawner = async (taskId) => {
     const outcome = await runLoop(cfg, taskId, undefined, undefined, loopDepsFor(scriptFor(taskId)));
     return outcome === "green" ? 0 : outcome === "parked" ? 2 : 1;
@@ -220,7 +223,10 @@ test("a campaign wave of two issues spans agent → gate → merge → advance t
   // AC1: both issues ran on real agent/<id> branches carrying real commits, each gated green.
   const greens = events.filter((e) => e.event === "green") as { branch: string; commits: string[] }[];
   assert.deepEqual(greens.map((g) => g.branch).sort(), ["agent/101", "agent/102"]);
-  assert.ok(greens.every((g) => g.commits.length === 1), "each green carries its real commit");
+  assert.ok(
+    greens.every((g) => g.commits.length === 1),
+    "each green carries its real commit",
+  );
 
   // AC2: both greens merged through the real integrateGreens; the real merged-base gate ran…
   const merged = events.find((e: any) => e.event === "campaign-integrated") as { merged: string[] } | undefined;
@@ -229,9 +235,15 @@ test("a campaign wave of two issues spans agent → gate → merge → advance t
   // …the merged-base gate is the gate-result with no taskId (all:true, no single issue).
   const baseGate = events.filter((e) => e.event === "gate-result" && !(e as any).taskId) as { exitCode: number }[];
   assert.ok(baseGate.length > 0, "expected a merged-base gate-result");
-  assert.ok(baseGate.every((r) => r.exitCode === 0), "the merged base gated green");
+  assert.ok(
+    baseGate.every((r) => r.exitCode === 0),
+    "the merged base gated green",
+  );
   // …and the wave advanced to done.
-  assert.ok(events.some((e) => e.event === "campaign-done"), "the wave advanced to campaign-done");
+  assert.ok(
+    events.some((e) => e.event === "campaign-done"),
+    "the wave advanced to campaign-done",
+  );
 
   // The merges are real: both impl files are on the base, the agent branches are GC'd.
   assert.equal(gitOut(dir, ["show", "base:impl-101.txt"]), "impl for 101");
@@ -246,8 +258,14 @@ test("a campaign wave of two issues spans agent → gate → merge → advance t
 
   // The operator feed reports the merged wave and the completed campaign.
   const outbox = listOutbox(cfg);
-  assert.ok(outbox.find((m) => m.event === "wave-done"), "wave-done went out");
-  assert.ok(outbox.find((m) => m.event === "campaign-done"), "campaign-done went out");
+  assert.ok(
+    outbox.find((m) => m.event === "wave-done"),
+    "wave-done went out",
+  );
+  assert.ok(
+    outbox.find((m) => m.event === "campaign-done"),
+    "campaign-done went out",
+  );
 });
 
 // ── Span 1: merge conflict → quarantine (ADR 0013) ───────────────────────────
@@ -268,11 +286,13 @@ function seedConflictRepo(): string {
 
 // Each issue rewrites the shared file to its own content and commits — file-conflicting,
 // so the loser cannot merge onto a base already carrying the winner.
-const conflictScript = (id: string): LocalAgentScript => (turn) => {
-  turn.write("conflict.txt", `resolved by ${id}\n`);
-  turn.commit(`rewrite conflict.txt in ${id}`);
-  return { signal: DONE, stdout: `<turn-summary>rewrote conflict.txt in ${id}</turn-summary>` };
-};
+const conflictScript =
+  (id: string): LocalAgentScript =>
+  (turn) => {
+    turn.write("conflict.txt", `resolved by ${id}\n`);
+    turn.commit(`rewrite conflict.txt in ${id}`);
+    return { signal: DONE, stdout: `<turn-summary>rewrote conflict.txt in ${id}</turn-summary>` };
+  };
 
 test("a merge conflict quarantines the losing green (work preserved) while the winner stays merged, and — with a stranded dependent — quarantine-pauses the campaign", async () => {
   const dir = seedConflictRepo();
@@ -310,15 +330,30 @@ test("a merge conflict quarantines the losing green (work preserved) while the w
 
   // The wave neither rolled back nor advanced past the boundary: no campaign-done, and the
   // stranded dependent's wave never started (no agent/103, no green for it).
-  assert.equal(events.some((e) => e.event === "campaign-done"), false);
+  assert.equal(
+    events.some((e) => e.event === "campaign-done"),
+    false,
+  );
   assert.equal(gitOut(dir, ["branch", "--list", "agent/103"]), "");
-  assert.equal(events.some((e) => e.event === "green" && (e as any).branch === "agent/103"), false);
+  assert.equal(
+    events.some((e) => e.event === "green" && (e as any).branch === "agent/103"),
+    false,
+  );
 
   // Blast-radius handling per config: default (no --auto-prune) pauses for a human.
   const outbox = listOutbox(cfg);
-  assert.ok(outbox.find((m) => m.event === "campaign-parked"), "the quarantine-pause notice (campaign-parked) went out");
-  assert.equal(outbox.some((m) => m.event === "prune"), false);
-  assert.equal(events.some((e) => e.event === "prune"), false);
+  assert.ok(
+    outbox.find((m) => m.event === "campaign-parked"),
+    "the quarantine-pause notice (campaign-parked) went out",
+  );
+  assert.equal(
+    outbox.some((m) => m.event === "prune"),
+    false,
+  );
+  assert.equal(
+    events.some((e) => e.event === "prune"),
+    false,
+  );
 });
 
 test("a merge conflict under --auto-prune quarantines the loser and prunes the stranded dependent, but the conflict still holds the wave (design §5 step 5, #314)", async () => {
@@ -350,15 +385,25 @@ test("a merge conflict under --auto-prune quarantines the loser and prunes the s
   assert.ok(prune, "expected a prune event");
   assert.equal(prune!.target, "102");
   assert.deepEqual(prune!.dropped, ["103"]);
-  assert.equal(events.some((e) => e.event === "campaign-done"), false, "the campaign did not advance to done");
+  assert.equal(
+    events.some((e) => e.event === "campaign-done"),
+    false,
+    "the campaign did not advance to done",
+  );
   // The conflict hold is an explicit campaign-parked with reason conflict (§2.1 rule 2).
   const parked = events.filter((e) => e.event === "campaign-parked") as any[];
   assert.equal(parked.length, 1);
   assert.equal(parked[0].reason, "conflict");
 
   const outbox = listOutbox(cfg);
-  assert.ok(outbox.find((m) => m.event === "prune"), "the auto-prune notice (prune) went out");
-  assert.ok(outbox.some((m) => m.event === "campaign-parked"), "the conflict-park notice went out");
+  assert.ok(
+    outbox.find((m) => m.event === "prune"),
+    "the auto-prune notice (prune) went out",
+  );
+  assert.ok(
+    outbox.some((m) => m.event === "campaign-parked"),
+    "the conflict-park notice went out",
+  );
 });
 
 // ── Span 2: per-issue park → drain → wave-park (ADR 0017) ────────────────────
@@ -369,10 +414,10 @@ test("a merge conflict under --auto-prune quarantines the loser and prunes the s
 // no succeeding wave starts.
 
 // 202 asks a question and parks; every other issue implements green.
-const parkOneScript = (blockedId: string) => (id: string): LocalAgentScript =>
-  id === blockedId
-    ? () => ({ signal: BLOCKED, stdout: "<question><summary>which approach?</summary></question>" })
-    : implScript(id);
+const parkOneScript =
+  (blockedId: string) =>
+  (id: string): LocalAgentScript =>
+    id === blockedId ? () => ({ signal: BLOCKED, stdout: "<question><summary>which approach?</summary></question>" }) : implScript(id);
 
 test("a per-issue BLOCKED park drains its wave's greens, then wave-parks — the parked record survives and no succeeding wave starts", async () => {
   const dir = seedRepo();
@@ -408,12 +453,21 @@ test("a per-issue BLOCKED park drains its wave's greens, then wave-parks — the
   assert.equal(p202!.reason, "question");
 
   // No succeeding wave starts: the campaign did not advance to done and 203 never ran.
-  assert.equal(events.some((e) => e.event === "campaign-done"), false);
+  assert.equal(
+    events.some((e) => e.event === "campaign-done"),
+    false,
+  );
   assert.equal(gitOut(dir, ["branch", "--list", "agent/203"]), "");
-  assert.equal(events.some((e) => e.event === "green" && (e as any).branch === "agent/203"), false);
+  assert.equal(
+    events.some((e) => e.event === "green" && (e as any).branch === "agent/203"),
+    false,
+  );
 
   // The operator feed drew a human with the wave-park notice.
-  assert.ok(listOutbox(cfg).find((m) => m.event === "campaign-parked"), "the wave-park notice (campaign-parked) went out");
+  assert.ok(
+    listOutbox(cfg).find((m) => m.event === "campaign-parked"),
+    "the wave-park notice (campaign-parked) went out",
+  );
 });
 
 // ── Span 3: red merged base → Gate-2 wave-park (ADR 0013) ────────────────────
@@ -430,9 +484,7 @@ test("each green passes its own gate but the merged base fails the combined gate
   const cfg = repoCfg(dir, { gates: [{ cmd: 'test "$(ls impl-*.txt 2>/dev/null | wc -l)" -le 1' }] });
   const host: HostBudget = { configDir: join(dir, "host"), ceiling: 2, weight: 1 };
 
-  const ok = await inRepo(dir, () =>
-    campaign(cfg, [["301", "302"]], host, "red-base", {}, localCampaignDeps(cfg, dir)),
-  );
+  const ok = await inRepo(dir, () => campaign(cfg, [["301", "302"]], host, "red-base", {}, localCampaignDeps(cfg, dir)));
 
   // An unattributable red base pauses the campaign for a human — never done.
   assert.equal(ok, "parked");
@@ -448,14 +500,20 @@ test("each green passes its own gate but the merged base fails the combined gate
   // The combined base gated RED for real — the merged-base gate-result (no taskId) is non-zero.
   const baseGate = events.filter((e) => e.event === "gate-result" && !(e as any).taskId) as { exitCode: number }[];
   assert.ok(baseGate.length > 0, "expected a merged-base gate-result");
-  assert.ok(baseGate.some((r) => r.exitCode !== 0), "the merged base gated red");
+  assert.ok(
+    baseGate.some((r) => r.exitCode !== 0),
+    "the merged base gated red",
+  );
 
   // Wave-park (ADR 0013): the greens stayed MERGED on the base — no rollback — over the two
   // branches. The campaign-parked stop marker records the pause, and each landed green is on
   // the log as a `merged` event; both impl files are on the base.
   const cp = events.find((e) => e.event === "campaign-parked");
   assert.ok(cp, "expected a campaign-parked event");
-  const mergedEvents = events.filter((e) => e.event === "merged").map((e) => (e as any).taskId).sort();
+  const mergedEvents = events
+    .filter((e) => e.event === "merged")
+    .map((e) => (e as any).taskId)
+    .sort();
   assert.deepEqual(mergedEvents, ["301", "302"]);
   assert.equal(gitOut(dir, ["show", "base:impl-301.txt"]), "impl for 301");
   assert.equal(gitOut(dir, ["show", "base:impl-302.txt"]), "impl for 302");
@@ -466,11 +524,17 @@ test("each green passes its own gate but the merged base fails the combined gate
   assert.equal(gitOut(dir, ["branch", "--list", "agent/302"]), "agent/302");
 
   // A red base verifies nothing: no changelog fold (fragments left for the retry) and no done.
-  assert.equal(events.some((e) => e.event === "campaign-done"), false);
+  assert.equal(
+    events.some((e) => e.event === "campaign-done"),
+    false,
+  );
   assert.ok(existsSync(join(dir, "changelog.d", "301.md")), "301's fragment left unfolded");
   const changelog = readFileSync(join(dir, "CHANGELOG.md"), "utf8");
   assert.equal(changelog.includes("feature from 301"), false);
 
   // The operator feed drew a human with the wave-park notice.
-  assert.ok(listOutbox(cfg).find((m) => m.event === "campaign-parked"), "the wave-park notice (campaign-parked) went out");
+  assert.ok(
+    listOutbox(cfg).find((m) => m.event === "campaign-parked"),
+    "the wave-park notice (campaign-parked) went out",
+  );
 });

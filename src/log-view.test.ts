@@ -30,7 +30,9 @@ test("a tool event humanizes to `edited` + a code-styled path, running dot", () 
 });
 
 test("a tool event with a byte size appends it; a pathless tool names the tool as the key term", () => {
-  const wrote = humanizeLogLine(raw(event("tool", { taskId: "9", name: "Write", path: "a.ts", size: 128, ts: "2026-08-28T00:00:00.000Z" })));
+  const wrote = humanizeLogLine(
+    raw(event("tool", { taskId: "9", name: "Write", path: "a.ts", size: 128, ts: "2026-08-28T00:00:00.000Z" })),
+  );
   assert.equal(wrote.verb, "edited");
   assert.deepEqual(wrote.spans, [code("a.ts"), p(" (128 bytes)")]);
   const search = humanizeLogLine(raw(event("tool", { taskId: "9", name: "Grep", ts: "2026-08-28T00:00:00.000Z" })));
@@ -48,20 +50,28 @@ test("a sandbox-exec event humanizes to `ran` + a code-styled command, running d
 });
 
 test("a commit event reads `committed` + a code-styled short sha and file count, running dot", () => {
-  const one = humanizeLogLine(raw(event("commit", { taskId: "204", branch: "agent/204", sha: "abcdef1234567", files: ["src/x.ts"], ts: "2026-08-28T00:00:00.000Z" })));
+  const one = humanizeLogLine(
+    raw(event("commit", { taskId: "204", branch: "agent/204", sha: "abcdef1234567", files: ["src/x.ts"], ts: "2026-08-28T00:00:00.000Z" })),
+  );
   assert.equal(one.verb, "committed");
   assert.deepEqual(one.spans, [code("abcdef1"), p(" · 1 file")]);
   assert.equal(one.dot, "running");
-  const many = humanizeLogLine(raw(event("commit", { taskId: "204", branch: "agent/204", sha: "abcdef1234567", files: ["a", "b"], ts: "2026-08-28T00:00:00.000Z" })));
+  const many = humanizeLogLine(
+    raw(event("commit", { taskId: "204", branch: "agent/204", sha: "abcdef1234567", files: ["a", "b"], ts: "2026-08-28T00:00:00.000Z" })),
+  );
   assert.deepEqual(many.spans, [code("abcdef1"), p(" · 2 files")]);
 });
 
 test("a gate-result event reads `gate passed` green and `gate failed` red, code-styled cmd", () => {
-  const pass = humanizeLogLine(raw(event("gate-result", { taskId: "204", cmd: "npm test", exitCode: 0, seconds: 12, outFile: "o", ts: "2026-08-28T00:00:00.000Z" })));
+  const pass = humanizeLogLine(
+    raw(event("gate-result", { taskId: "204", cmd: "npm test", exitCode: 0, seconds: 12, outFile: "o", ts: "2026-08-28T00:00:00.000Z" })),
+  );
   assert.equal(pass.verb, "gate passed");
   assert.deepEqual(pass.spans, [code("npm test"), p(" (12s)")]);
   assert.equal(pass.dot, "merged");
-  const fail = humanizeLogLine(raw(event("gate-result", { taskId: "204", cmd: "npm test", exitCode: 1, seconds: 3, outFile: "o", ts: "2026-08-28T00:00:00.000Z" })));
+  const fail = humanizeLogLine(
+    raw(event("gate-result", { taskId: "204", cmd: "npm test", exitCode: 1, seconds: 3, outFile: "o", ts: "2026-08-28T00:00:00.000Z" })),
+  );
   assert.equal(fail.verb, "gate failed");
   assert.deepEqual(fail.spans, [code("npm test"), p(" — exit 1 (3s)")]);
   assert.equal(fail.dot, "failure");
@@ -77,7 +87,9 @@ test("a gate event reads `gate` + how many checks it selected as the key term, r
 test("a gate-check event names the command running now — sandbox-exec's row shape, distinct verb, running dot", () => {
   // Reuses sandbox-exec's shape (actor · monospace command · running dot) but a distinct
   // verb, so a gate check in flight is attributed to the gate, not the agent's own run (#332).
-  const row = humanizeLogLine(raw(event("gate-check", { taskId: "204", cmd: "npx tsx --test src/*.test.ts", ts: "2026-08-28T09:15:00.000Z" })));
+  const row = humanizeLogLine(
+    raw(event("gate-check", { taskId: "204", cmd: "npx tsx --test src/*.test.ts", ts: "2026-08-28T09:15:00.000Z" })),
+  );
   assert.equal(row.time, "02:15:00");
   assert.equal(row.actor, "#204");
   assert.equal(row.verb, "gate running");
@@ -88,7 +100,9 @@ test("a gate-check event names the command running now — sandbox-exec's row sh
 // Per-issue outcome kinds: the actor is split out to `#issue`, the verb leads the message,
 // and the dot reads the outcome's colour.
 test("a turn event reads `turn N` + the agent summary as the strong key term, running dot", () => {
-  const row = humanizeLogLine(raw(event("turn", { taskId: "204", turn: 3, summary: "Wired the humanizer registry", ts: "2026-08-28T00:00:00.000Z" })));
+  const row = humanizeLogLine(
+    raw(event("turn", { taskId: "204", turn: 3, summary: "Wired the humanizer registry", ts: "2026-08-28T00:00:00.000Z" })),
+  );
   assert.equal(row.actor, "#204");
   assert.equal(row.verb, "turn 3");
   assert.deepEqual(row.spans, [strong("Wired the humanizer registry")]);
@@ -119,7 +133,9 @@ test("a quarantined event reads as a parked (amber) merge-conflict hold, not the
   // An archived line in the retired `quarantined` name still humanizes: the alias table
   // normalizes it to `parked{conflict}` before the switch, so a legacy raw line renders the
   // same amber merge-conflict hold as the live `parked` name (design §13.2).
-  const row = humanizeLogLine(raw({ event: "quarantined", taskId: "204", branch: "agent/204", detail: "conflict", ts: "2026-08-28T00:00:00.000Z" }));
+  const row = humanizeLogLine(
+    raw({ event: "quarantined", taskId: "204", branch: "agent/204", detail: "conflict", ts: "2026-08-28T00:00:00.000Z" }),
+  );
   assert.equal(row.actor, "#204");
   assert.equal(row.verb, "parked");
   assert.deepEqual(row.spans, [p("— merge conflict, resolve it")]);
@@ -173,7 +189,9 @@ test("an unknown event kind renders a readable generic summary, never a raw JSON
 });
 
 test("a generic summary skips object/array fields and reads its scalar fields in prose", () => {
-  const row = humanizeLogLine(raw({ event: "status-archive-skipped", file: "/runs/x.jsonl", extras: { a: 1 }, ids: ["7"], ts: "2026-08-28T00:00:00.000Z" }));
+  const row = humanizeLogLine(
+    raw({ event: "status-archive-skipped", file: "/runs/x.jsonl", extras: { a: 1 }, ids: ["7"], ts: "2026-08-28T00:00:00.000Z" }),
+  );
   assert.equal(row.verb, "");
   // The kind leads as the strong term; only the scalar `file` field follows — the nested
   // object and the array are dropped so the line stays readable, never a raw dump.
@@ -194,7 +212,9 @@ test("an unparseable line dumps its raw text as a plain span, no crash, never bl
 // plainText flattens a structured row back to a single string (verb + span texts) — the
 // filter/title/accessibility fallback the client and tests read when they need flat text.
 test("plainText flattens verb + spans to a single readable string", () => {
-  const commit = humanizeLogLine(raw(event("commit", { taskId: "204", branch: "agent/204", sha: "abcdef1234567", files: ["a"], ts: "2026-08-28T00:00:00.000Z" })));
+  const commit = humanizeLogLine(
+    raw(event("commit", { taskId: "204", branch: "agent/204", sha: "abcdef1234567", files: ["a"], ts: "2026-08-28T00:00:00.000Z" })),
+  );
   assert.equal(plainText(commit), "committed abcdef1 · 1 file");
   const edit = humanizeLogLine(raw(event("tool", { taskId: "204", name: "Edit", path: "src/x.ts", ts: "2026-08-28T00:00:00.000Z" })));
   assert.equal(plainText(edit), "edited src/x.ts");
@@ -256,7 +276,16 @@ test("each dot state maps to a stateColor token so the chrome can paint all five
 // and humanizes the fetched window and each live frame in-browser.
 
 test("a gateway-routed line reads verb `routed` + code category → destination, project actor, neutral dot", () => {
-  const row = humanizeHostLine(raw({ event: "gateway-routed", project: "alpha", id: "12", category: "question", destination: "telegram", ts: "2026-08-28T14:01:23.000Z" }));
+  const row = humanizeHostLine(
+    raw({
+      event: "gateway-routed",
+      project: "alpha",
+      id: "12",
+      category: "question",
+      destination: "telegram",
+      ts: "2026-08-28T14:01:23.000Z",
+    }),
+  );
   assert.equal(row.time, "07:01:23");
   assert.equal(row.actor, "alpha");
   assert.equal(row.verb, "routed");
@@ -265,7 +294,9 @@ test("a gateway-routed line reads verb `routed` + code category → destination,
 });
 
 test("a gateway-announced line reads verb `announced` + a code-styled #task, project actor, neutral dot", () => {
-  const row = humanizeHostLine(raw({ event: "gateway-announced", project: "beta", task: "204", messageId: 7, ts: "2026-08-28T09:15:00.000Z" }));
+  const row = humanizeHostLine(
+    raw({ event: "gateway-announced", project: "beta", task: "204", messageId: 7, ts: "2026-08-28T09:15:00.000Z" }),
+  );
   assert.equal(row.actor, "beta");
   assert.equal(row.verb, "announced");
   assert.deepEqual(row.spans, [code("#204")]);
@@ -285,7 +316,9 @@ test("a gateway-start line reads verb `gateway up` with its bot count, host acto
 });
 
 test("a telegram-unconfigured line reads a parked (amber) warning, project actor", () => {
-  const row = humanizeHostLine(raw({ event: "telegram-unconfigured", project: "alpha", baseLocation: "/a", ts: "2026-08-28T00:00:00.000Z" }));
+  const row = humanizeHostLine(
+    raw({ event: "telegram-unconfigured", project: "alpha", baseLocation: "/a", ts: "2026-08-28T00:00:00.000Z" }),
+  );
   assert.equal(row.actor, "alpha");
   assert.equal(plainText(row), "⚠ Telegram not configured");
   assert.equal(row.dot, "parked");
@@ -307,7 +340,9 @@ test("a telegram-send-failed line reads red (failure dot) and names the status",
 });
 
 test("a registry-register-failed line reads red (failure dot) and names the error, project actor", () => {
-  const row = humanizeHostLine(raw({ event: "registry-register-failed", project: "alpha", error: "EACCES", ts: "2026-08-28T00:00:00.000Z" }));
+  const row = humanizeHostLine(
+    raw({ event: "registry-register-failed", project: "alpha", error: "EACCES", ts: "2026-08-28T00:00:00.000Z" }),
+  );
   assert.equal(row.actor, "alpha");
   assert.equal(row.verb, "registration failed");
   assert.deepEqual(row.spans, [p(": "), code("EACCES")]);

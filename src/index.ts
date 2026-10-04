@@ -1,18 +1,5 @@
-export {
-  defineConfig,
-  loadConfig,
-  resolveDestination,
-  questionDestinations,
-} from "./config.ts";
-export type {
-  VetinariConfig,
-  ResolvedConfig,
-  GateSpec,
-  MountSpec,
-  Destination,
-  NotifyMap,
-  MessageCategory,
-} from "./config.ts";
+export { defineConfig, loadConfig, resolveDestination, questionDestinations } from "./config.ts";
+export type { VetinariConfig, ResolvedConfig, GateSpec, MountSpec, Destination, NotifyMap, MessageCategory } from "./config.ts";
 export { runLoop, answerPromptFor, DONE, BLOCKED } from "./loop.ts";
 export type { Outcome, ResumeEntry } from "./loop.ts";
 export { runGates } from "./gate.ts";
@@ -52,21 +39,9 @@ export type {
   PruneHandlerDeps,
 } from "./gateway.ts";
 export { computePrune, restrictBlockers } from "./prune.ts";
-export {
-  formatContextLine,
-  formatStatusLine,
-  runStatusLine,
-  trimModelName,
-} from "./statusline.ts";
+export { formatContextLine, formatStatusLine, runStatusLine, trimModelName } from "./statusline.ts";
 export type { PruneResult, BlockedByOf, RestrictedBlockers } from "./prune.ts";
-export {
-  layerWaves,
-  partitionWaves,
-  waveArgs,
-  describePlan,
-  planCampaign,
-  underspecifiedPromptFor,
-} from "./plan.ts";
+export { layerWaves, partitionWaves, waveArgs, describePlan, planCampaign, underspecifiedPromptFor } from "./plan.ts";
 export type {
   WavePlan,
   Placement,
@@ -89,25 +64,10 @@ export type { FileSet, FileSetOf } from "./fileset.ts";
 export { parseFindings, reportFindings } from "./findings.ts";
 export { archiveRun } from "./archive.ts";
 export type { ArchiveResult } from "./archive.ts";
-export {
-  computeLayoutMigration,
-  applyLayoutMigration,
-  scanLayout,
-  describeMigration,
-} from "./migrate.ts";
-export type {
-  LayoutScan,
-  LayoutMigrationPlan,
-  Move,
-  ApplyResult,
-} from "./migrate.ts";
+export { computeLayoutMigration, applyLayoutMigration, scanLayout, describeMigration } from "./migrate.ts";
+export type { LayoutScan, LayoutMigrationPlan, Move, ApplyResult } from "./migrate.ts";
 export { computeInit, applyInit, scanInit, describeInit } from "./init.ts";
-export type {
-  InitScan,
-  InitPlan,
-  FileCreate,
-  ApplyInitResult,
-} from "./init.ts";
+export type { InitScan, InitPlan, FileCreate, ApplyInitResult } from "./init.ts";
 export {
   parseFragment,
   collectFragments,
@@ -132,37 +92,11 @@ export {
   writeSettings,
 } from "./statusline-install.ts";
 export type { Settings, StatusLineBlock } from "./statusline-install.ts";
-export type {
-  Finding,
-  FindingReporter,
-  FindingContext,
-  FindingResult,
-} from "./findings.ts";
-export {
-  listParked,
-  readParked,
-  hasParked,
-  answerParked,
-  isAnswered,
-  clearParked,
-  park,
-} from "./state.ts";
+export type { Finding, FindingReporter, FindingContext, FindingResult } from "./findings.ts";
+export { listParked, readParked, hasParked, answerParked, isAnswered, clearParked, park } from "./state.ts";
 export type { ParkedRecord, ParkReason } from "./state.ts";
 export { tgSend, tgWaitReply, tgConfigured } from "./telegram.ts";
-export {
-  register,
-  listProjects,
-  readProject,
-  readProjects,
-  pointerFor,
-  autoRegister,
-  gatewayConfigDir,
-} from "./registry.ts";
+export { register, listProjects, readProject, readProjects, pointerFor, autoRegister, gatewayConfigDir } from "./registry.ts";
 export type { ProjectPointer, ReadProject } from "./registry.ts";
-export {
-  loggerForRun,
-  hostLogger,
-  hostLogTarget,
-  memoryLogger,
-} from "./log.ts";
+export { loggerForRun, hostLogger, hostLogTarget, memoryLogger } from "./log.ts";
 export type { Logger, MemoryLogger } from "./log.ts";

@@ -108,7 +108,11 @@ export const handleEvents: RouteHandler = (req, res, url, deps) => {
     const buffered = pending.get(project) ?? [];
     buffered.push(...relevant);
     pending.set(project, buffered);
-    if (!timers.has(project)) timers.set(project, setTimeout(() => flush(project), DEBOUNCE_MS));
+    if (!timers.has(project))
+      timers.set(
+        project,
+        setTimeout(() => flush(project), DEBOUNCE_MS),
+      );
   };
 
   // Recompute a project's live-tail snapshot and push it as a named `tail` frame when it
@@ -133,7 +137,11 @@ export const handleEvents: RouteHandler = (req, res, url, deps) => {
   };
   const pushTail = (project: string, pointer: ProjectPointer) => {
     if (res.writableEnded) return;
-    if (!tailTimers.has(project)) tailTimers.set(project, setTimeout(() => flushTail(project, pointer), DEBOUNCE_MS));
+    if (!tailTimers.has(project))
+      tailTimers.set(
+        project,
+        setTimeout(() => flushTail(project, pointer), DEBOUNCE_MS),
+      );
   };
 
   // Flush the host log's debounced newly-appended lines as one named `host` frame. Emits

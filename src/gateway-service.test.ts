@@ -1,12 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {
-  gatewayServiceArgv,
-  isGatewayServiceVerb,
-  runGatewayService,
-  type GatewayServiceIO,
-  type RunResult,
-} from "./gateway-service.ts";
+import { gatewayServiceArgv, isGatewayServiceVerb, runGatewayService, type GatewayServiceIO, type RunResult } from "./gateway-service.ts";
 
 /**
  * A fake IO that records every argv (verb runs and probes alike, in call order)
@@ -78,14 +72,8 @@ test("start when stopped starts it, confirms active, and reports it — exit 0",
   const io = fakeIo({ probes: [{ code: 3 }, { code: 0 }], results: [{ code: 0 }] });
   const code = await runGatewayService("start", io);
   assert.equal(code, 0);
-  assert.deepEqual(io.calls, [
-    gatewayServiceArgv("is-active"),
-    gatewayServiceArgv("start"),
-    gatewayServiceArgv("is-active"),
-  ]);
-  assert.deepEqual(io.logs, [
-    "started vetinari-gateway — now active.\nlogs: journalctl --user -u vetinari-gateway",
-  ]);
+  assert.deepEqual(io.calls, [gatewayServiceArgv("is-active"), gatewayServiceArgv("start"), gatewayServiceArgv("is-active")]);
+  assert.deepEqual(io.logs, ["started vetinari-gateway — now active.\nlogs: journalctl --user -u vetinari-gateway"]);
 });
 
 test("start when already running is a no-op: reports it and skips the resulting-state probe — exit 0", async () => {
@@ -93,18 +81,14 @@ test("start when already running is a no-op: reports it and skips the resulting-
   const code = await runGatewayService("start", io);
   assert.equal(code, 0);
   assert.deepEqual(io.calls, [gatewayServiceArgv("is-active"), gatewayServiceArgv("start")]);
-  assert.deepEqual(io.logs, [
-    "vetinari-gateway was already running — nothing to do.\nlogs: journalctl --user -u vetinari-gateway",
-  ]);
+  assert.deepEqual(io.logs, ["vetinari-gateway was already running — nothing to do.\nlogs: journalctl --user -u vetinari-gateway"]);
 });
 
 test("start that comes up not active says so honestly rather than claiming success — exit still the verb's 0", async () => {
   const io = fakeIo({ probes: [{ code: 3 }, { code: 3 }], results: [{ code: 0 }] });
   const code = await runGatewayService("start", io);
   assert.equal(code, 0);
-  assert.deepEqual(io.logs, [
-    "started vetinari-gateway — but it is not active; see journalctl --user -u vetinari-gateway",
-  ]);
+  assert.deepEqual(io.logs, ["started vetinari-gateway — but it is not active; see journalctl --user -u vetinari-gateway"]);
 });
 
 test("stop when running stops it and reports inactive — exit 0", async () => {
@@ -112,9 +96,7 @@ test("stop when running stops it and reports inactive — exit 0", async () => {
   const code = await runGatewayService("stop", io);
   assert.equal(code, 0);
   assert.deepEqual(io.calls, [gatewayServiceArgv("is-active"), gatewayServiceArgv("stop")]);
-  assert.deepEqual(io.logs, [
-    "stopped vetinari-gateway — now inactive.\nlogs: journalctl --user -u vetinari-gateway",
-  ]);
+  assert.deepEqual(io.logs, ["stopped vetinari-gateway — now inactive.\nlogs: journalctl --user -u vetinari-gateway"]);
 });
 
 test("stop when not running is a no-op: reports it, no resulting-state probe — exit 0", async () => {
@@ -122,9 +104,7 @@ test("stop when not running is a no-op: reports it, no resulting-state probe —
   const code = await runGatewayService("stop", io);
   assert.equal(code, 0);
   assert.deepEqual(io.calls, [gatewayServiceArgv("is-active"), gatewayServiceArgv("stop")]);
-  assert.deepEqual(io.logs, [
-    "vetinari-gateway wasn't running — nothing to do.\nlogs: journalctl --user -u vetinari-gateway",
-  ]);
+  assert.deepEqual(io.logs, ["vetinari-gateway wasn't running — nothing to do.\nlogs: journalctl --user -u vetinari-gateway"]);
 });
 
 test("a probe spawn-error falls back to a plain confirmation without changing the outcome", async () => {
@@ -142,9 +122,7 @@ test("restart runs restart then a captured is-active, reports active, and return
   const code = await runGatewayService("restart", io);
   assert.equal(code, 0);
   assert.deepEqual(io.calls, [gatewayServiceArgv("restart"), gatewayServiceArgv("is-active")]);
-  assert.deepEqual(io.logs, [
-    "restarted vetinari-gateway — now active.\nlogs: journalctl --user -u vetinari-gateway",
-  ]);
+  assert.deepEqual(io.logs, ["restarted vetinari-gateway — now active.\nlogs: journalctl --user -u vetinari-gateway"]);
 });
 
 test("restart reports a service that came back inactive honestly and exits non-zero (is-active's code)", async () => {
@@ -152,9 +130,7 @@ test("restart reports a service that came back inactive honestly and exits non-z
   const code = await runGatewayService("restart", io);
   assert.equal(code, 3);
   assert.deepEqual(io.calls, [gatewayServiceArgv("restart"), gatewayServiceArgv("is-active")]);
-  assert.deepEqual(io.logs, [
-    "restarted vetinari-gateway — but it is not active; see journalctl --user -u vetinari-gateway",
-  ]);
+  assert.deepEqual(io.logs, ["restarted vetinari-gateway — but it is not active; see journalctl --user -u vetinari-gateway"]);
 });
 
 test("a failed restart propagates its own code and never probes is-active", async () => {

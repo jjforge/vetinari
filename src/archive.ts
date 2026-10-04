@@ -46,9 +46,7 @@ export function archiveRun(cfg: ResolvedConfig): ArchiveResult {
  * concatenate the prior run into the new run's log. A missing or empty log reads false.
  */
 export function hasUnarchivedRun(cfg: Pick<ResolvedConfig, "logFile">): boolean {
-  return readEventLog(cfg).some(
-    (e) => e.event === "campaign-start" || e.event === "spawn",
-  );
+  return readEventLog(cfg).some((e) => e.event === "campaign-start" || e.event === "spawn");
 }
 
 /**
@@ -60,10 +58,7 @@ export function hasUnarchivedRun(cfg: Pick<ResolvedConfig, "logFile">): boolean 
  * plan to re-derive, so the campaign stops after wave 0 (#150). A child never
  * archives; a top-level run archives a genuine leftover as before (#141).
  */
-export function shouldArchiveLeftover(
-  cfg: Pick<ResolvedConfig, "logFile">,
-  opts: { isChild: boolean },
-): boolean {
+export function shouldArchiveLeftover(cfg: Pick<ResolvedConfig, "logFile">, opts: { isChild: boolean }): boolean {
   return !opts.isChild && hasUnarchivedRun(cfg);
 }
 
@@ -86,10 +81,7 @@ export function shouldArchiveLeftover(
  * once, as before. A standalone `run`/`answer` (never a `campaign-start`) is decided
  * by the parked check alone, unchanged.
  */
-export function shouldArchiveIdle(
-  events: OrchestratorEvent[],
-  opts: { parked: number },
-): boolean {
+export function shouldArchiveIdle(events: OrchestratorEvent[], opts: { parked: number }): boolean {
   if (opts.parked > 0) return false;
   if (campaignStarted(events) && !campaignSettled(events)) return false;
   return true;

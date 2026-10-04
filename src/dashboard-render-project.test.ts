@@ -6,8 +6,24 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { stateColor, STATE_DOT_CSS, ISSUE_DETAIL_SHEET_SCRIPT, REPO_DROPDOWN_SCRIPT, ARCHIVE_LIST_SCRIPT, GRAFT_SCRIPT } from "./dashboard-assets.ts";
-import { archiveRowMatches, buildStatus, buildStatusWithIssueNames, cappedRawRows, event, highlightJsonLine, renderStatusPage, type CampaignStatus } from "./status.ts";
+import {
+  stateColor,
+  STATE_DOT_CSS,
+  ISSUE_DETAIL_SHEET_SCRIPT,
+  REPO_DROPDOWN_SCRIPT,
+  ARCHIVE_LIST_SCRIPT,
+  GRAFT_SCRIPT,
+} from "./dashboard-assets.ts";
+import {
+  archiveRowMatches,
+  buildStatus,
+  buildStatusWithIssueNames,
+  cappedRawRows,
+  event,
+  highlightJsonLine,
+  renderStatusPage,
+  type CampaignStatus,
+} from "./status.ts";
 
 const cfgFor = (dir: string): ResolvedConfig =>
   ({
@@ -25,8 +41,7 @@ const cfgFor = (dir: string): ResolvedConfig =>
     fetchTask: (id: string) => id,
   }) as ResolvedConfig;
 
-const writeJsonl = (path: string, events: unknown[]) =>
-  writeFileSync(path, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
+const writeJsonl = (path: string, events: unknown[]) => writeFileSync(path, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
 
 const seedState = (dir: string, events: unknown[]) => {
   mkdirSync(join(dir, "logs"), { recursive: true });
@@ -79,14 +94,8 @@ test("status dots never shrink under flex fill pressure — one shared base give
   // dependent amount, rendering as a pill or bar instead of a circle (#234). The four
   // status dots share one base rule so the "small solid circle that never shrinks"
   // invariant — border-radius + flex:none — is written once, not four times.
-  assert.match(
-    campaign,
-    /\.dot, \.repo-dot, \.tail-dot, \.lv-dot \{[^}]*flex: none[^}]*\}/,
-  );
-  assert.match(
-    campaign,
-    /\.dot, \.repo-dot, \.tail-dot, \.lv-dot \{[^}]*border-radius: 999px[^}]*\}/,
-  );
+  assert.match(campaign, /\.dot, \.repo-dot, \.tail-dot, \.lv-dot \{[^}]*flex: none[^}]*\}/);
+  assert.match(campaign, /\.dot, \.repo-dot, \.tail-dot, \.lv-dot \{[^}]*border-radius: 999px[^}]*\}/);
 });
 test("renderStatusPage greys the Redrive campaign control with a one-line reason while a campaign process is live (#325)", () => {
   // Redrive picks up the whole campaign (design §7, §11): a campaign control on the project
@@ -118,7 +127,15 @@ test("renderStatusPage enables the Redrive control with a naming confirm dialog 
       name: "checkout revamp",
       waves: [
         { index: 0, status: "completed", issues: [{ issueNumber: "101", status: "completed" }] },
-        { index: 1, status: "parked", reason: "red-base", issues: [{ issueNumber: "201", status: "completed" }, { issueNumber: "202", status: "completed" }] },
+        {
+          index: 1,
+          status: "parked",
+          reason: "red-base",
+          issues: [
+            { issueNumber: "201", status: "completed" },
+            { issueNumber: "202", status: "completed" },
+          ],
+        },
       ],
       parked: [],
     },
@@ -132,7 +149,10 @@ test("renderStatusPage enables the Redrive control with a naming confirm dialog 
   assert.match(parked, /Redrive <strong>checkout revamp<\/strong>: re-enters wave 2 — #201, #202 — on <code>main<\/code>/);
   // Only Confirm POSTs /redrive (project-scoped, no taskId); Cancel is the default (autofocus)
   // and does not submit.
-  assert.match(parked, /<form method="post" action="\/redrive" class="redrive-dialog-actions" data-redrive-form><input type="hidden" name="project" value="beta" \/>/);
+  assert.match(
+    parked,
+    /<form method="post" action="\/redrive" class="redrive-dialog-actions" data-redrive-form><input type="hidden" name="project" value="beta" \/>/,
+  );
   assert.match(parked, /<button type="button" class="redrive-cancel" data-redrive-cancel autofocus>Cancel<\/button>/);
   assert.match(parked, /<button type="submit" class="redrive-confirm" data-redrive-confirm>Redrive<\/button>/);
   // The page ships the dialog's open/cancel wiring, re-run on live refresh like graft.
@@ -227,7 +247,11 @@ test("renderStatusPage marks a freshly-grafted wave with a static teal edge, not
     project: "beta",
     waves: [
       { index: 0, status: "running" as const, issues: [{ issueNumber: "201", status: "running" as const }] },
-      { index: 1, status: "unstarted" as const, issues: [{ issueNumber: "305", status: "unstarted" as const, membership: "grafted" as const }] },
+      {
+        index: 1,
+        status: "unstarted" as const,
+        issues: [{ issueNumber: "305", status: "unstarted" as const, membership: "grafted" as const }],
+      },
     ],
     parked: [],
   };
@@ -239,10 +263,7 @@ test("renderStatusPage marks a freshly-grafted wave with a static teal edge, not
   // §5 reserves motion for the work/stream channels — the mockup's teal pulse is
   // translated to this static emphasis (CLAUDE.md rule 5). No new colour animation: the
   // only @keyframes on the page stays chip-pulse (the §5 invariant test #100 also pins).
-  assert.deepEqual(
-    [...new Set([...html.matchAll(/@keyframes ([\w-]+)/g)].map((m) => m[1]))],
-    ["chip-pulse"],
-  );
+  assert.deepEqual([...new Set([...html.matchAll(/@keyframes ([\w-]+)/g)].map((m) => m[1]))], ["chip-pulse"]);
 });
 test("renderStatusPage mutes the graft input's placeholder so it reads as an example, not a value (#236)", () => {
   const running = {
@@ -302,7 +323,10 @@ test("renderStatusPage's graft control reads as in-flight during its POST — ar
   // On submit the control enters the in-flight state: aria-busy="true" on the form and the
   // button relabelled `grafting…` and held disabled — a signal that is not colour/text-only
   // and differs from the at-rest disabled rendering.
-  assert.match(html, /const enterFlight = \(\) => \{[^}]*form\.setAttribute\("aria-busy", "true"\)[^}]*submit\.textContent = "grafting…"[^}]*submit\.disabled = true[^}]*\}/);
+  assert.match(
+    html,
+    /const enterFlight = \(\) => \{[^}]*form\.setAttribute\("aria-busy", "true"\)[^}]*submit\.textContent = "grafting…"[^}]*submit\.disabled = true[^}]*\}/,
+  );
 
   // Re-submitting while a graft is in flight is impossible — the busy guard returns before
   // any second /graft POST is shelled against the same ids.
@@ -454,10 +478,7 @@ test("wave labels read from tmp-log issue titles, resolved through buildStatusWi
 
   // Many-issue wave (closed): a compact "Wave N" toggle chip with its merged tally; the
   // lead title + "+N" now reads on the full card the chip reveals in the grid.
-  assert.match(
-    html,
-    /<span class="check" aria-hidden="true">✓<\/span> Wave 1 <span class="completed-wave-tally">3\/3<\/span><\/button>/,
-  );
+  assert.match(html, /<span class="check" aria-hidden="true">✓<\/span> Wave 1 <span class="completed-wave-tally">3\/3<\/span><\/button>/);
   assert.match(
     html,
     /<section class="wave completed" id="closed-wave-0" hidden><div class="wave-head"><h2 class="wave-label">Wave 1 — config resolution \+2<\/h2><div class="wave-meta"><span class="wave-tally">3\/3<\/span><span class="wave-status completed">completed<\/span>/,
@@ -553,10 +574,7 @@ test("wave labels and chip hovers render from the log's titles, with no fetchTas
 
   // Many-issue wave (closed): a compact "Wave N" toggle chip with its merged tally; the
   // lead title + "+N" now reads on the full card the chip reveals in the grid.
-  assert.match(
-    html,
-    /<span class="check" aria-hidden="true">✓<\/span> Wave 1 <span class="completed-wave-tally">3\/3<\/span><\/button>/,
-  );
+  assert.match(html, /<span class="check" aria-hidden="true">✓<\/span> Wave 1 <span class="completed-wave-tally">3\/3<\/span><\/button>/);
   assert.match(
     html,
     /<section class="wave completed" id="closed-wave-0" hidden><div class="wave-head"><h2 class="wave-label">Wave 1 — config resolution \+2<\/h2><div class="wave-meta"><span class="wave-tally">3\/3<\/span><span class="wave-status completed">completed<\/span>/,
@@ -598,14 +616,8 @@ test("renderStatusPage shows a merged/total tally on an open wave card", () => {
 
   // Each open wave card's head carries its merged/total — one of two done in the
   // running wave, none in the unstarted one — ahead of its state pill in the meta group.
-  assert.match(
-    html,
-    /<span class="wave-tally">1\/2<\/span><span class="wave-status running">running<\/span>/,
-  );
-  assert.match(
-    html,
-    /<span class="wave-tally">0\/2<\/span><span class="wave-status unstarted">unstarted<\/span>/,
-  );
+  assert.match(html, /<span class="wave-tally">1\/2<\/span><span class="wave-status running">running<\/span>/);
+  assert.match(html, /<span class="wave-tally">0\/2<\/span><span class="wave-status unstarted">unstarted<\/span>/);
 });
 test("renderStatusPage renders one stable wave-head row: label · merged/total · state · pruned, with the pill outside the label", () => {
   const html = renderStatusPage({
@@ -637,10 +649,7 @@ test("renderStatusPage renders one stable wave-head row: label · merged/total �
     /<div class="wave-head"><h2 class="wave-label">Wave 2 — Guest checkout entry point \+2<\/h2><div class="wave-meta"><span class="wave-tally">1\/3<\/span><span class="wave-status running">running<\/span><span class="wave-pruned">1 pruned<\/span><\/div><\/div>/,
   );
   // The state pill is no longer nested inside the <h2> label.
-  assert.doesNotMatch(
-    html,
-    /<span class="wave-status running">running<\/span><\/h2>/,
-  );
+  assert.doesNotMatch(html, /<span class="wave-status running">running<\/span><\/h2>/);
 });
 test("renderStatusPage renders one interactive member row per issue, merging the old chip + title blocks", () => {
   const html = renderStatusPage(
@@ -678,10 +687,7 @@ test("renderStatusPage renders one interactive member row per issue, merging the
   );
   // The row carries its issue+project so a tap opens the detail sheet, and is flagged
   // prunable when prunable (202 is an unstarted future-wave remainder).
-  assert.match(
-    html,
-    /class="wave-member unstarted" title="[^"]*" data-issue="202" data-project="beta" data-prunable="1"/,
-  );
+  assert.match(html, /class="wave-member unstarted" title="[^"]*" data-issue="202" data-project="beta" data-prunable="1"/);
   // The old dual blocks are retired — no chip row (`.chips`/`.chip`) and no title list.
   assert.doesNotMatch(html, /class="chips"/);
   assert.doesNotMatch(html, /class="wave-issues"/);
@@ -710,10 +716,7 @@ test("renderStatusPage colours a pruned chip and pulses a running one", () => {
     html,
     /<button type="button" class="wave-member unstarted pruned"[^>]*><span class="dot unstarted"><\/span>#202 <span class="wave-member-title">pruned one<\/span><span class="member-badge pruned">pruned<\/span><small>unstarted<\/small><\/button>/,
   );
-  assert.match(
-    html,
-    /\.wave-member\.pruned \{ color: var\(--color-text-light-2\); text-decoration: line-through; \}/,
-  );
+  assert.match(html, /\.wave-member\.pruned \{ color: var\(--color-text-light-2\); text-decoration: line-through; \}/);
   // …and the wave it left gains a pruned tally in its header, so the prune reads
   // at a glance without counting struck-through chips (one of two issues pruned).
   assert.match(html, /<span class="wave-pruned">1 pruned<\/span>/);
@@ -835,20 +838,11 @@ test("renderStatusPage renders the repo dropdown (with a no-JS select fallback) 
   );
 
   // The primary control is the repo dropdown trigger stating the current scope.
-  assert.match(
-    html,
-    /<button type="button" class="repo-trigger"[^>]*aria-haspopup="listbox"/,
-  );
+  assert.match(html, /<button type="button" class="repo-trigger"[^>]*aria-haspopup="listbox"/);
   assert.match(html, /<span class="repo-label">beta<\/span>/);
   // The native <select> lives on inside <noscript> as the no-JS switch (posts back to GET /).
-  assert.match(
-    html,
-    /<noscript><form[^>]*method="get"[^>]*action="\/"[^>]*class="project-picker">/,
-  );
-  assert.match(
-    html,
-    /<select name="project" onchange="this\.form\.submit\(\)">/,
-  );
+  assert.match(html, /<noscript><form[^>]*method="get"[^>]*action="\/"[^>]*class="project-picker">/);
+  assert.match(html, /<select name="project" onchange="this\.form\.submit\(\)">/);
   assert.match(html, /<option value="">All repos<\/option>/);
   assert.match(html, /<option value="beta" selected>beta<\/option>/);
   assert.match(html, /<option value="gamma">gamma<\/option>/);
@@ -915,10 +909,7 @@ test("the repo dropdown shows owner/name from repo while data-project stays the 
   );
 
   // The trigger heading reads the selected repo's owner/name, not its bare key.
-  assert.match(
-    html,
-    /<span class="repo-label">jjforge\/vetinari<\/span>/,
-  );
+  assert.match(html, /<span class="repo-label">jjforge\/vetinari<\/span>/);
   // Its row shows owner/name too, but routing stays keyed on the bare project key.
   assert.match(
     html,
@@ -948,10 +939,7 @@ test("the repo dropdown menu rows carry a run-state dot, the owner/name label, a
 
   // The menu is a listbox; each repo is an option with a dot in its run-state colour,
   // the full owner/name label, and its run state as the note.
-  assert.match(
-    html,
-    /<ul class="repo-menu" id="repo-menu" role="listbox" aria-label="Switch repo" tabindex="-1" hidden>/,
-  );
+  assert.match(html, /<ul class="repo-menu" id="repo-menu" role="listbox" aria-label="Switch repo" tabindex="-1" hidden>/);
   assert.match(
     html,
     /<li class="repo-option" role="option" aria-selected="false" data-project="jjforge\/tidepool" tabindex="-1"><span class="repo-dot parked" aria-hidden="true"><\/span><span class="repo-optlabel">jjforge\/tidepool<\/span><span class="repo-note">parked<\/span><\/li>/,
@@ -987,17 +975,11 @@ test("switching scope resets the view: it navigates (fresh sheet) and closed-wav
   );
   // A scope switch is a navigation, so the target page loads fresh — the issue sheet
   // starts hidden and nothing is pre-opened.
-  assert.match(
-    REPO_DROPDOWN_SCRIPT,
-    /location\.href = project \? "\/\?project=" \+ encodeURIComponent\(project\) : "\/";/,
-  );
+  assert.match(REPO_DROPDOWN_SCRIPT, /location\.href = project \? "\/\?project=" \+ encodeURIComponent\(project\) : "\/";/);
   assert.match(html, /<div id="issue-detail" class="issue-detail"[^>]*hidden>/);
   // Expanded closed-waves are persisted per-repo, so a different scope reads its own
   // (collapsed) set — wave labels aren't unique across repos, so this can't expand the wrong wave.
-  assert.match(
-    html,
-    /const storeKey = "vetinari:closed-waves:" \+ waveBar\.dataset\.project;/,
-  );
+  assert.match(html, /const storeKey = "vetinari:closed-waves:" \+ waveBar\.dataset\.project;/);
 });
 test("renderStatusPage renders archived runs as a collapsible list of wave cards, with no mode control or raw pane (#222)", () => {
   // Pin the timezone so the local-rendered when-clock is deterministic here (the
@@ -1005,96 +987,86 @@ test("renderStatusPage renders archived runs as a collapsible list of wave cards
   const origTZ = process.env.TZ;
   process.env.TZ = "UTC";
   try {
-  const html = renderStatusPage(
-    {
-      project: "beta",
-      waves: [
-        {
-          index: 0,
-          status: "running",
-          issues: [{ issueNumber: "201", status: "unstarted" }],
-        },
-      ],
-      parked: [],
-    },
-    {
-      selected: "beta",
-      archivedRuns: [
-        {
-          run: "2026-02-01T22-22-36-267Z",
-          name: "comms + dashboard",
-          startedAt: "2026-02-01T22:22:36.267Z",
-          state: "complete",
-          issues: 3,
-          status: archStatus("101"),
-        },
-        {
-          run: "2026-01-01T00-00-00-000Z",
-          startedAt: "2026-01-01T00:00:00.000Z",
-          state: "stalled",
-          issues: 1,
-          status: archStatus("111"),
-        },
-      ],
-    },
-  );
+    const html = renderStatusPage(
+      {
+        project: "beta",
+        waves: [
+          {
+            index: 0,
+            status: "running",
+            issues: [{ issueNumber: "201", status: "unstarted" }],
+          },
+        ],
+        parked: [],
+      },
+      {
+        selected: "beta",
+        archivedRuns: [
+          {
+            run: "2026-02-01T22-22-36-267Z",
+            name: "comms + dashboard",
+            startedAt: "2026-02-01T22:22:36.267Z",
+            state: "complete",
+            issues: 3,
+            status: archStatus("101"),
+          },
+          {
+            run: "2026-01-01T00-00-00-000Z",
+            startedAt: "2026-01-01T00:00:00.000Z",
+            state: "stalled",
+            issues: 1,
+            status: archStatus("111"),
+          },
+        ],
+      },
+    );
 
-  // The shared log-view chrome header (#256) — the .tail-head control bar the
-  // live-tail/feed/host-log carry, an "Archived runs" static title and a filter
-  // input — replaces the bespoke <h2>Archived runs</h2>.
-  assert.doesNotMatch(html, /<h2>Archived runs<\/h2>/);
-  assert.match(
-    html,
-    /<section class="archived-runs"><div class="tail-head"><span class="tail-title tail-title-static">Archived runs<\/span><span class="tail-gap"><\/span><span class="tail-controls"><input type="text" class="tail-filter" placeholder="filter runs…" aria-label="Filter archived runs" data-archive-filter \/><\/span><\/div>/,
-  );
-  assert.match(html, /<ul class="archive-list" data-project="beta">/);
-  // No download/pause .lv-ico buttons on this static, non-downloadable surface (#256).
-  const section = html.slice(
-    html.indexOf('<section class="archived-runs">'),
-    html.indexOf("</section>", html.indexOf('<section class="archived-runs">')),
-  );
-  assert.doesNotMatch(section, /lv-ico/);
-  // A collapsed row renders through the shared `.lv-row` control (not bespoke
-  // `.archive-*` chrome): the when-time in the dim `.lv-t` tier, a mapped `.lv-dot`
-  // (complete → merged/green), the run name as the brightest `.lv-lead`, and the
-  // disposition `state · N issues` as the dim `.lv-verb`.
-  assert.match(html, /<li data-run="2026-02-01T22-22-36-267Z">/);
-  assert.match(
-    html,
-    /<button type="button" class="lv-row" aria-expanded="false" aria-controls="archive-body-2026-02-01T22-22-36-267Z"><span class="lv-t">Feb 1, 2026 · 22:22:36<\/span><span class="lv-dot merged"><\/span><span class="lv-msg"><span class="lv-lead">comms \+ dashboard<\/span><span class="lv-verb">complete · 3 issues<\/span><\/span><\/button>/,
-  );
-  // An unnamed run falls back to its token as the label; issue count pluralizes;
-  // stalled maps to the parked (amber) dot (ADR 0019).
-  assert.match(
-    html,
-    /<span class="lv-dot parked"><\/span><span class="lv-msg"><span class="lv-lead">2026-01-01T00-00-00-000Z<\/span><span class="lv-verb">stalled · 1 issue<\/span><\/span>/,
-  );
-  // The bespoke `.archive-*` chrome is gone.
-  assert.doesNotMatch(html, /archive-name|archive-when|archive-state|archive-dot|archive-toggle|archive-chevron/);
-  // No mode control at all — an archived run is a single expandable line (#222).
-  assert.doesNotMatch(html, /class="archive-modes"/);
-  assert.doesNotMatch(html, /class="archive-mode/);
-  assert.doesNotMatch(html, /data-mode=/);
-  // …and no run-level raw/log pane — the expanded body is the wave-card grid only.
-  assert.doesNotMatch(html, /archive-raw/);
-  assert.doesNotMatch(html, /data-pane=/);
-  // The expanded body reuses the live wave renderer directly — the run's own chip renders.
-  assert.match(
-    html,
-    /<div class="archive-body" id="archive-body-2026-02-01T22-22-36-267Z" hidden>[\s\S]*#101 <small>/,
-  );
-  // Bodies start collapsed (hidden) and rows render newest-first (order preserved).
-  assert.match(
-    html,
-    /<div class="archive-body" id="archive-body-2026-02-01T22-22-36-267Z" hidden>/,
-  );
-  assert.ok(
-    html.indexOf("2026-02-01T22-22-36-267Z") <
-      html.indexOf("2026-01-01T00-00-00-000Z"),
-    "newest-first",
-  );
-  // A short list has no show-older control.
-  assert.doesNotMatch(html, /<button[^>]*class="archive-show-older"/);
+    // The shared log-view chrome header (#256) — the .tail-head control bar the
+    // live-tail/feed/host-log carry, an "Archived runs" static title and a filter
+    // input — replaces the bespoke <h2>Archived runs</h2>.
+    assert.doesNotMatch(html, /<h2>Archived runs<\/h2>/);
+    assert.match(
+      html,
+      /<section class="archived-runs"><div class="tail-head"><span class="tail-title tail-title-static">Archived runs<\/span><span class="tail-gap"><\/span><span class="tail-controls"><input type="text" class="tail-filter" placeholder="filter runs…" aria-label="Filter archived runs" data-archive-filter \/><\/span><\/div>/,
+    );
+    assert.match(html, /<ul class="archive-list" data-project="beta">/);
+    // No download/pause .lv-ico buttons on this static, non-downloadable surface (#256).
+    const section = html.slice(
+      html.indexOf('<section class="archived-runs">'),
+      html.indexOf("</section>", html.indexOf('<section class="archived-runs">')),
+    );
+    assert.doesNotMatch(section, /lv-ico/);
+    // A collapsed row renders through the shared `.lv-row` control (not bespoke
+    // `.archive-*` chrome): the when-time in the dim `.lv-t` tier, a mapped `.lv-dot`
+    // (complete → merged/green), the run name as the brightest `.lv-lead`, and the
+    // disposition `state · N issues` as the dim `.lv-verb`.
+    assert.match(html, /<li data-run="2026-02-01T22-22-36-267Z">/);
+    assert.match(
+      html,
+      /<button type="button" class="lv-row" aria-expanded="false" aria-controls="archive-body-2026-02-01T22-22-36-267Z"><span class="lv-t">Feb 1, 2026 · 22:22:36<\/span><span class="lv-dot merged"><\/span><span class="lv-msg"><span class="lv-lead">comms \+ dashboard<\/span><span class="lv-verb">complete · 3 issues<\/span><\/span><\/button>/,
+    );
+    // An unnamed run falls back to its token as the label; issue count pluralizes;
+    // stalled maps to the parked (amber) dot (ADR 0019).
+    assert.match(
+      html,
+      /<span class="lv-dot parked"><\/span><span class="lv-msg"><span class="lv-lead">2026-01-01T00-00-00-000Z<\/span><span class="lv-verb">stalled · 1 issue<\/span><\/span>/,
+    );
+    // The bespoke `.archive-*` chrome is gone.
+    assert.doesNotMatch(html, /archive-name|archive-when|archive-state|archive-dot|archive-toggle|archive-chevron/);
+    // No mode control at all — an archived run is a single expandable line (#222).
+    assert.doesNotMatch(html, /class="archive-modes"/);
+    assert.doesNotMatch(html, /class="archive-mode/);
+    assert.doesNotMatch(html, /data-mode=/);
+    // …and no run-level raw/log pane — the expanded body is the wave-card grid only.
+    assert.doesNotMatch(html, /archive-raw/);
+    assert.doesNotMatch(html, /data-pane=/);
+    // The expanded body reuses the live wave renderer directly — the run's own chip renders.
+    assert.match(html, /<div class="archive-body" id="archive-body-2026-02-01T22-22-36-267Z" hidden>[\s\S]*#101 <small>/);
+    // Bodies start collapsed (hidden) and rows render newest-first (order preserved).
+    assert.match(html, /<div class="archive-body" id="archive-body-2026-02-01T22-22-36-267Z" hidden>/);
+    assert.ok(html.indexOf("2026-02-01T22-22-36-267Z") < html.indexOf("2026-01-01T00-00-00-000Z"), "newest-first");
+    // A short list has no show-older control.
+    assert.doesNotMatch(html, /<button[^>]*class="archive-show-older"/);
   } finally {
     if (origTZ === undefined) delete process.env.TZ;
     else process.env.TZ = origTZ;
@@ -1123,10 +1095,7 @@ test("renderStatusPage renders an archived run's when-time in the operator's LOC
         ],
       },
     );
-    assert.match(
-      html,
-      /<span class="lv-t">Feb 1, 2026 · 14:22:36<\/span>/,
-    );
+    assert.match(html, /<span class="lv-t">Feb 1, 2026 · 14:22:36<\/span>/);
     assert.doesNotMatch(html, /lv-t">[^<]*UTC/);
   } finally {
     if (origTZ === undefined) delete process.env.TZ;
@@ -1200,19 +1169,10 @@ test("renderStatusPage opens the archived row named by archivedRun, showing its 
   );
 
   // The named row opens: its `.lv-row` toggle expanded, its body shown.
-  assert.match(
-    html,
-    /<li class="open" data-run="2026-02-01T00-00-00-000Z">/,
-  );
-  assert.match(
-    html,
-    /<button type="button" class="lv-row" aria-expanded="true" aria-controls="archive-body-2026-02-01T00-00-00-000Z"/,
-  );
+  assert.match(html, /<li class="open" data-run="2026-02-01T00-00-00-000Z">/);
+  assert.match(html, /<button type="button" class="lv-row" aria-expanded="true" aria-controls="archive-body-2026-02-01T00-00-00-000Z"/);
   // The body shows and holds the wave-card grid directly — no mode toggle, no raw pane.
-  assert.match(
-    html,
-    /<div class="archive-body" id="archive-body-2026-02-01T00-00-00-000Z">[\s\S]*#101 <small>/,
-  );
+  assert.match(html, /<div class="archive-body" id="archive-body-2026-02-01T00-00-00-000Z">[\s\S]*#101 <small>/);
   assert.doesNotMatch(html, /archive-mode/);
   assert.doesNotMatch(html, /archive-raw/);
   assert.doesNotMatch(html, /data-pane=/);
@@ -1275,10 +1235,7 @@ test("renderStatusPage ships the archived-list client wiring: expand/collapse (o
   assert.match(ARCHIVE_LIST_SCRIPT, /closeRow = \(row\) => \{[\s\S]*syncUrl\(null\);/);
   // …and opening records the newly-opened run *after* closing the others, so opening B while A
   // is open leaves the URL naming only B — the ordering invariant closeRow-then-syncUrl relies on.
-  assert.match(
-    ARCHIVE_LIST_SCRIPT,
-    /openRow = \(row\) => \{[\s\S]*closeRow\(other\);[\s\S]*syncUrl\(row\.dataset\.run\);/,
-  );
+  assert.match(ARCHIVE_LIST_SCRIPT, /openRow = \(row\) => \{[\s\S]*closeRow\(other\);[\s\S]*syncUrl\(row\.dataset\.run\);/);
   // …and typing in the shared filter hides the non-matching li[data-run] rows over
   // their visible summary text (archiveRowMatches — the feed/host-log filter contract).
   assert.match(ARCHIVE_LIST_SCRIPT, /function archiveRowMatches/);
@@ -1327,17 +1284,11 @@ test("renderStatusPage makes archived campaign chips open the issue sheet agains
   );
   // The chip carries its issue, project and the run token, so the shared sheet reads
   // the archived run's own log (its turn log lives there, not in the live log).
-  assert.match(
-    html,
-    /data-issue="101" data-project="beta" data-run="2026-02-01T00-00-00-000Z"/,
-  );
+  assert.match(html, /data-issue="101" data-project="beta" data-run="2026-02-01T00-00-00-000Z"/);
   // Read-only: an archived chip is never prunable (a finished run has nothing to prune).
   assert.doesNotMatch(html, /data-issue="101"[^>]*data-prunable/);
   // The shared sheet forwards a run token to /api/issue so it can read the archive.
-  assert.match(
-    ISSUE_DETAIL_SHEET_SCRIPT,
-    /run \? "&run=" \+ encodeURIComponent\(run\) : ""/,
-  );
+  assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /run \? "&run=" \+ encodeURIComponent\(run\) : ""/);
 });
 test("renderStatusPage renders every archived run in the scrollable pane, no show-older cap (#256)", () => {
   const runs = Array.from({ length: 22 }, (_, i) => {
@@ -1350,16 +1301,10 @@ test("renderStatusPage renders every archived run in the scrollable pane, no sho
       status: archStatus(String(100 + i)),
     };
   });
-  const html = renderStatusPage(
-    { project: "beta", waves: [], parked: [] },
-    { selected: "beta", archivedRuns: runs },
-  );
+  const html = renderStatusPage({ project: "beta", waves: [], parked: [] }, { selected: "beta", archivedRuns: runs });
 
   // Every row renders — a list longer than the old cap is not truncated…
-  assert.equal(
-    [...html.matchAll(/<li(?: class="open")? data-run=/g)].length,
-    22,
-  );
+  assert.equal([...html.matchAll(/<li(?: class="open")? data-run=/g)].length, 22);
   // …none render hidden (the cap is gone; the pane scrolls instead)…
   assert.doesNotMatch(html, /<li data-run="[^"]*" hidden>/);
   // …and there is no show-older control or its row.
@@ -1378,10 +1323,7 @@ test("renderStatusPage omits the campaign name from the meta line for an unnamed
   assert.match(html, /<p class="campaign-meta">0 issues · 1 wave<\/p>/);
 });
 test("renderStatusPage renders no archived-runs section when a project has none", () => {
-  const html = renderStatusPage(
-    { project: "demo", waves: [], parked: [] },
-    { selected: "demo" },
-  );
+  const html = renderStatusPage({ project: "demo", waves: [], parked: [] }, { selected: "demo" });
   assert.doesNotMatch(html, /class="archived-runs"/);
   assert.doesNotMatch(html, /class="archived-run"/);
 });
@@ -1430,14 +1372,8 @@ test("renderStatusPage makes issue chips tap-friendly for touch devices", () => 
   });
 
   // The chip keeps its hover title and now carries the ids the sheet fetches with.
-  assert.match(
-    html,
-    /title="Add login flow&#10;Agent turn 2 finished; waiting for verification\/redrive"/,
-  );
-  assert.match(
-    html,
-    /class="wave-member [a-z]+"[^>]*data-issue="101"[^>]*data-project="demo"/,
-  );
+  assert.match(html, /title="Add login flow&#10;Agent turn 2 finished; waiting for verification\/redrive"/);
+  assert.match(html, /class="wave-member [a-z]+"[^>]*data-issue="101"[^>]*data-project="demo"/);
   assert.match(html, /id="issue-detail"/);
   assert.match(html, /el\.addEventListener\("click"/);
 });
@@ -1448,9 +1384,7 @@ test("renderStatusPage opens the issue-detail sheet from a chip, fetching /api/i
       {
         index: 0,
         status: "running",
-        issues: [
-          { issueNumber: "101", status: "running", name: "Add login flow" },
-        ],
+        issues: [{ issueNumber: "101", status: "running", name: "Add login flow" }],
       },
     ],
     parked: [],
@@ -1471,20 +1405,14 @@ test("renderStatusPage opens the issue-detail sheet from a chip, fetching /api/i
   assert.match(html, /fetch\("\/api\/issue\?project="/);
   // Dismissible, and reveal keys off a `show` class over the hidden default.
   assert.match(html, /\.issue-detail\.show \{ display: flex; \}/);
-  assert.match(
-    html,
-    /getElementById\("issue-detail-close"\)\.addEventListener\("click"/,
-  );
+  assert.match(html, /getElementById\("issue-detail-close"\)\.addEventListener\("click"/);
 });
 test("renderStatusPage gives the sheet a WORKTREE tile and turns-with-duration meta (#90)", () => {
   const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
 
   // A third meta tile carrying the agent's real worktree path — hidden until a
   // fetched detail carries one, so a run without a preserved worktree shows nothing.
-  assert.match(
-    html,
-    /<div class="meta-tile[^"]*" id="issue-detail-worktree-tile" hidden>/,
-  );
+  assert.match(html, /<div class="meta-tile[^"]*" id="issue-detail-worktree-tile" hidden>/);
   assert.match(html, /<span class="meta-label">Worktree<\/span>/);
   assert.match(html, /id="issue-detail-worktree"/);
   // A meta-tile is a flex box, so its display would defeat the UA [hidden] rule;
@@ -1515,10 +1443,7 @@ test("renderStatusPage makes the issue-detail sheet a full-width bottom sheet on
   const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
 
   // Desktop: a centred sheet. Mobile: pinned full-width to the bottom.
-  assert.match(
-    html,
-    /@media \(max-width: [^)]+\) \{[^}]*\.issue-detail-sheet \{[^}]*width: 100%;/,
-  );
+  assert.match(html, /@media \(max-width: [^)]+\) \{[^}]*\.issue-detail-sheet \{[^}]*width: 100%;/);
   assert.match(html, /\.issue-detail-sheet/);
 });
 test("renderStatusPage hosts the prune affordance and inline confirm in the tap-detail panel", () => {
@@ -1539,28 +1464,13 @@ test("renderStatusPage hosts the prune affordance and inline confirm in the tap-
 
   // The panel — not the chip — carries a Prune button (in the one shared move-button style)
   // and a hidden inline confirm.
-  assert.match(
-    html,
-    /<button type="button" id="prune-start" class="sheet-btn prune-start">Prune<\/button>/,
-  );
-  assert.match(
-    html,
-    /<form method="post" action="\/prune" id="prune-confirm"[^>]*hidden>/,
-  );
+  assert.match(html, /<button type="button" id="prune-start" class="sheet-btn prune-start">Prune<\/button>/);
+  assert.match(html, /<form method="post" action="\/prune" id="prune-confirm"[^>]*hidden>/);
   assert.match(html, /<span class="prune-confirm-text"><\/span>/);
   // The confirm POSTs the existing /prune with confirm=1, carrying taskId+project.
-  assert.match(
-    html,
-    /id="prune-confirm"[\s\S]*?name="taskId"[\s\S]*?name="project"[\s\S]*?name="confirm" value="1"/,
-  );
-  assert.match(
-    html,
-    /<button type="submit" class="prune-confirm-btn">Confirm<\/button>/,
-  );
-  assert.match(
-    html,
-    /<button type="button" id="prune-cancel" class="prune-cancel">Cancel<\/button>/,
-  );
+  assert.match(html, /id="prune-confirm"[\s\S]*?name="taskId"[\s\S]*?name="project"[\s\S]*?name="confirm" value="1"/);
+  assert.match(html, /<button type="submit" class="prune-confirm-btn">Confirm<\/button>/);
+  assert.match(html, /<button type="button" id="prune-cancel" class="prune-cancel">Cancel<\/button>/);
   // The script keys off the prune data: it fetches the JSON preview, discloses the
   // removed list, POSTs the confirm, then shows a transient "pruning…".
   assert.match(html, /\/prune\?preview/);
@@ -1573,23 +1483,14 @@ test("renderStatusPage hosts a parked reply block with a Reply submit and no she
   const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
 
   // The sheet carries a reply block, hidden until the opened issue is parked.
-  assert.match(
-    html,
-    /<div id="issue-detail-reply" class="issue-detail-reply" hidden>/,
-  );
+  assert.match(html, /<div id="issue-detail-reply" class="issue-detail-reply" hidden>/);
   assert.match(html, /id="reply-question"/);
   assert.match(html, /id="reply-options"/);
   // A free-text reply field posts through the existing /answer path, carrying taskId+project.
   assert.match(html, /<form method="post" action="\/answer" id="reply-form">/);
-  assert.match(
-    html,
-    /id="reply-form"[\s\S]*?name="taskId"[\s\S]*?name="project"[\s\S]*?<textarea name="text"/,
-  );
+  assert.match(html, /id="reply-form"[\s\S]*?name="taskId"[\s\S]*?name="project"[\s\S]*?<textarea name="text"/);
   // Reply submits that form; it is associated by `form=` so it can sit outside the form, beside Prune.
-  assert.match(
-    html,
-    /<button type="submit" form="reply-form" id="reply-send" class="sheet-btn" hidden>Reply<\/button>/,
-  );
+  assert.match(html, /<button type="submit" form="reply-form" id="reply-send" class="sheet-btn" hidden>Reply<\/button>/);
   // The sheet has no Redrive form of its own — redrive is a whole-campaign control on the page (#325).
   assert.doesNotMatch(html, /id="redrive-form"/);
 });
@@ -1601,10 +1502,7 @@ test("renderStatusPage caps the reply textarea so it stays within the sheet/card
   assert.match(html, /\btextarea \{[^}]*max-width: 100%/);
 });
 test("renderStatusPage places Reply and Prune in one sheet-actions row, sized for touch (#307, #325)", () => {
-  const html = renderStatusPage(
-    { project: "demo", waves: [], parked: [] },
-    { prune: true },
-  );
+  const html = renderStatusPage({ project: "demo", waves: [], parked: [] }, { prune: true });
 
   // The issue-level move controls live in the same actions row so they are reachable together;
   // Redrive is no longer among them — it is a campaign control on the page (#325).
@@ -1661,10 +1559,7 @@ test("renderStatusPage renders reply options as full-width lettered rows (#92)",
   const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
 
   // The options stack one per line as full-width rows, not inline wrapping pills.
-  assert.match(
-    html,
-    /\.reply-options \{[^}]*flex-direction: column;/,
-  );
+  assert.match(html, /\.reply-options \{[^}]*flex-direction: column;/);
   // Each row is a flex row: a fixed letter margin on the left, the label filling the rest.
   assert.match(html, /\.reply-option \{[^}]*display: flex;/);
   assert.match(html, /\.reply-option-letter \{/);
@@ -1707,10 +1602,7 @@ test("renderStatusPage falls back to a no-JS prune form per prunable issue", () 
     html,
     /<noscript>[\s\S]*<form method="post" action="\/prune"[\s\S]*?name="taskId" value="301"[\s\S]*?name="project" value="demo"[\s\S]*<\/noscript>/,
   );
-  assert.match(
-    html,
-    /<noscript>[\s\S]*name="taskId" value="302"[\s\S]*<\/noscript>/,
-  );
+  assert.match(html, /<noscript>[\s\S]*name="taskId" value="302"[\s\S]*<\/noscript>/);
   // Never a fallback form for a running (in-flight) issue.
   assert.doesNotMatch(html, /name="taskId" value="201"/);
 });
@@ -1752,15 +1644,9 @@ test("renderStatusPage leads with parked issues above the waves when any are par
     ],
   });
 
-  assert.match(
-    html,
-    /<section class="parked-issues"><h2>Parked · <span class="parked-count">1<\/span><\/h2>/,
-  );
+  assert.match(html, /<section class="parked-issues"><h2>Parked · <span class="parked-count">1<\/span><\/h2>/);
   // Parked section comes before the wave grid.
-  assert.ok(
-    html.indexOf('class="parked-issues"') < html.indexOf('class="waves-grid"'),
-    "parked should render above the waves",
-  );
+  assert.ok(html.indexOf('class="parked-issues"') < html.indexOf('class="waves-grid"'), "parked should render above the waves");
   // The parked-dot color rule must stay background-only; the section styling must not
   // bleed onto <span class="dot parked"> and inflate the chip height.
   assert.match(html, /\.parked \{ background: var\(--color-yellow\); \}/);
@@ -1789,10 +1675,7 @@ test("renderStatusPage opens the issue-detail sheet from a parked row too", () =
     html,
     /<a class="parked-card" href="\/\?project=demo" data-issue="102" data-project="demo"><div class="parked-card-title"><span class="parked-issue">#102<\/span> Need a choice\.<\/div>/,
   );
-  assert.match(
-    html,
-    /querySelectorAll\("\.wave-member\[data-issue\], \.parked-card\[data-issue\]"\)/,
-  );
+  assert.match(html, /querySelectorAll\("\.wave-member\[data-issue\], \.parked-card\[data-issue\]"\)/);
   assert.match(html, /event\.preventDefault\(\); openIssue\(/);
 });
 test("renderStatusPage omits the parked section entirely when nothing is parked", () => {
@@ -1832,14 +1715,10 @@ test("renderStatusPage orders the top of the page: Parked → campaign-meta → 
   // Top→bottom order per the design (#81): the Parked section leads, then the
   // campaign-meta line, then the waves — the meta line no longer sits above Parked.
   assert.ok(
-    html.indexOf('class="parked-issues"') <
-      html.indexOf('class="campaign-meta"'),
+    html.indexOf('class="parked-issues"') < html.indexOf('class="campaign-meta"'),
     "Parked should render above the campaign-meta line",
   );
-  assert.ok(
-    html.indexOf('class="campaign-meta"') < html.indexOf('class="waves-grid"'),
-    "campaign-meta should render above the waves",
-  );
+  assert.ok(html.indexOf('class="campaign-meta"') < html.indexOf('class="waves-grid"'), "campaign-meta should render above the waves");
 });
 test("a parked card spells its reason with reasonWord, so red-base reads as two words (#317)", () => {
   // The parked card's meta prints the park reason the same way every other surface does —
@@ -1880,26 +1759,17 @@ test("renderStatusPage collapses closed waves into expandable completed wave chi
     parked: [],
   });
 
-  assert.match(
-    html,
-    /<div class="completed-waves"><div class="completed-wave-bar" data-project="demo">/,
-  );
+  assert.match(html, /<div class="completed-waves"><div class="completed-wave-bar" data-project="demo">/);
   assert.doesNotMatch(html, /Completed:/);
   // The chip is a toggle button, not a native <details>/<summary>.
   assert.match(
     html,
     /<button type="button" class="completed-wave-chip" aria-expanded="false" aria-controls="closed-wave-0" data-wave="0"><span class="check" aria-hidden="true">✓<\/span> Wave 1 <span class="completed-wave-tally">1\/1<\/span><\/button>/,
   );
-  assert.match(
-    html,
-    /\.completed-wave-chip \.check \{ color: var\(--color-green\);/,
-  );
+  assert.match(html, /\.completed-wave-chip \.check \{ color: var\(--color-green\);/);
   // The closed-wave toggle bar must not stretch: the first wrapped line was rendering
   // taller in Safari.
-  assert.match(
-    html,
-    /\.completed-wave-bar \{ display: flex; flex-wrap: wrap; align-items: flex-start; align-content: flex-start;/,
-  );
+  assert.match(html, /\.completed-wave-bar \{ display: flex; flex-wrap: wrap; align-items: flex-start; align-content: flex-start;/);
   // The open wave still renders its own card in the grid.
   assert.match(
     html,
@@ -2002,9 +1872,7 @@ test("renderStatusPage labels a single-issue wave with that issue's resolved tit
       {
         index: 1,
         status: "running",
-        issues: [
-          { issueNumber: "201", status: "running", name: "config resolution" },
-        ],
+        issues: [{ issueNumber: "201", status: "running", name: "config resolution" }],
       },
     ],
     parked: [],
@@ -2096,10 +1964,7 @@ test("renderStatusPage escapes a wave name derived from an issue title", () => {
     parked: [],
   });
 
-  assert.match(
-    html,
-    /<h2 class="wave-label">Wave 1 — fix &lt;script&gt; &amp; things<\/h2>/,
-  );
+  assert.match(html, /<h2 class="wave-label">Wave 1 — fix &lt;script&gt; &amp; things<\/h2>/);
 });
 test("renderStatusPage keeps the bare wave index when no issue title is resolved yet", () => {
   const html = renderStatusPage({
@@ -2142,10 +2007,7 @@ test("renderStatusPage renders a campaign meta line of name · issues · waves, 
     parked: [],
   });
   // Three issues across two waves, under the named campaign.
-  assert.match(
-    html,
-    /<p class="campaign-meta"><span class="campaign-name">gateway work<\/span> · 3 issues · 2 waves<\/p>/,
-  );
+  assert.match(html, /<p class="campaign-meta"><span class="campaign-name">gateway work<\/span> · 3 issues · 2 waves<\/p>/);
 
   // With no campaign at all (no waves), the meta line is omitted entirely.
   const empty = renderStatusPage({ project: "demo", waves: [], parked: [] });
@@ -2170,16 +2032,10 @@ test("renderStatusPage lays open waves out in a grid, accenting the running wave
   });
   // Open wave cards sit in a responsive grid.
   assert.match(html, /<div class="waves-grid"><section class="wave running">/);
-  assert.match(
-    html,
-    /\.waves-grid \{ display: grid; grid-template-columns: repeat\(auto-fill, minmax\(20rem, 1fr\)\);/,
-  );
+  assert.match(html, /\.waves-grid \{ display: grid; grid-template-columns: repeat\(auto-fill, minmax\(20rem, 1fr\)\);/);
   // A running wave carries the status-coloured (blue) top accent; an unstarted one the dim default (§3).
   assert.match(html, /\.wave \{[^}]*border-top: 3px solid var\(--color-dim\);/);
-  assert.match(
-    html,
-    /\.wave\.running \{ border-top-color: var\(--color-blue\); \}/,
-  );
+  assert.match(html, /\.wave\.running \{ border-top-color: var\(--color-blue\); \}/);
   assert.match(html, /<section class="wave unstarted">/);
 });
 test("renderStatusPage's parked card carries no inline reply form — the reply is in the sheet (#79)", () => {
@@ -2199,15 +2055,9 @@ test("renderStatusPage's parked card carries no inline reply form — the reply 
   });
   // The card is a single clickable anchor with a meta line — no <form>, no <textarea>,
   // no per-issue "Send response" button. The only /answer form on the page is the sheet's.
-  const card = html.slice(
-    html.indexOf('class="parked-card"'),
-    html.indexOf("</a>", html.indexOf('class="parked-card"')),
-  );
+  const card = html.slice(html.indexOf('class="parked-card"'), html.indexOf("</a>", html.indexOf('class="parked-card"')));
   assert.doesNotMatch(card, /<form|<textarea|Send response/);
-  assert.match(
-    html,
-    /waiting <span class="parked-waited" data-parked-at="2025-06-15T09:00:00.000Z">…<\/span> · question/,
-  );
+  assert.match(html, /waiting <span class="parked-waited" data-parked-at="2025-06-15T09:00:00.000Z">…<\/span> · question/);
   // Exactly one /answer form remains — the sheet's reply-form.
   assert.equal(html.match(/action="\/answer"/g)?.length, 1);
 });
@@ -2234,10 +2084,7 @@ test("renderStatusPage renders the landing live-bar top-right, not the old refre
   assert.doesNotMatch(html, /class="refresh"/);
   assert.doesNotMatch(html, /sandcastle-status-refresh/);
   // The h1 drops the " status" wording; with no dropdown it is just the project name.
-  assert.match(
-    html,
-    /<div class="page-top"><h1>demo<\/h1><div class="live-bar"/,
-  );
+  assert.match(html, /<div class="page-top"><h1>demo<\/h1><div class="live-bar"/);
   assert.match(html, /\.page-top \{ display: flex;/);
 });
 test("renderStatusPage updates live off /api/events, soft-refreshing on a ping unless composing (#79, #131)", () => {
@@ -2265,10 +2112,7 @@ test("renderStatusPage updates live off /api/events, soft-refreshing on a ping u
   // The "last activity Ns ago" readout is `freezeIntent`'s `updatedText` (dashboard-visual-state.ts,
   // asserted directly there), single-sourced into this page and written onto the readout.
   assert.match(html, /function freezeIntent/);
-  assert.match(
-    html,
-    /updatedEl\.textContent = freezeIntent\(\{ lastUpdate, now: Date\.now\(\) \}\)\.updatedText/,
-  );
+  assert.match(html, /updatedEl\.textContent = freezeIntent\(\{ lastUpdate, now: Date\.now\(\) \}\)\.updatedText/);
 });
 test("renderStatusPage marks prunable chips with prune data and never puts a prune control on a chip", () => {
   const html = renderStatusPage(
@@ -2301,14 +2145,8 @@ test("renderStatusPage marks prunable chips with prune data and never puts a pru
 
   // Each member row carries its issue and project; only a still-prunable one is flagged
   // prunable, so the tap-detail panel knows whether to offer a Prune button.
-  assert.match(
-    html,
-    /class="wave-member [a-z]+"[^>]*data-issue="301"[^>]*data-project="demo"[^>]*data-prunable="1"/,
-  );
-  assert.match(
-    html,
-    /class="wave-member [a-z]+"[^>]*data-issue="302"[^>]*data-project="demo"[^>]*data-prunable="1"/,
-  );
+  assert.match(html, /class="wave-member [a-z]+"[^>]*data-issue="301"[^>]*data-project="demo"[^>]*data-prunable="1"/);
+  assert.match(html, /class="wave-member [a-z]+"[^>]*data-issue="302"[^>]*data-project="demo"[^>]*data-prunable="1"/);
   // The completed (banked) and current-wave-in-flight (running) rows are not prunable.
   assert.doesNotMatch(html, /data-issue="101"[^>]*data-prunable/);
   assert.doesNotMatch(html, /data-issue="201"[^>]*data-prunable/);
@@ -2375,9 +2213,7 @@ test("renderStatusPage renders each expanded closed wave's full card in the grid
         index: 0,
         status: "completed",
         closed: true,
-        issues: [
-          { issueNumber: "101", status: "completed", name: "cart persists" },
-        ],
+        issues: [{ issueNumber: "101", status: "completed", name: "cart persists" }],
       },
       {
         index: 1,
@@ -2400,10 +2236,7 @@ test("renderStatusPage renders each expanded closed wave's full card in the grid
     /<div class="waves-grid">([\s\S]*?)<\/div>\s*(?:<section class="archived|<div id="issue-detail"|<noscript|<script)/,
   );
   assert.ok(grid, "expected a waves-grid");
-  assert.ok(
-    grid[1].indexOf('id="closed-wave-0"') < grid[1].indexOf("Wave 2"),
-    "closed card should precede the open wave",
-  );
+  assert.ok(grid[1].indexOf('id="closed-wave-0"') < grid[1].indexOf("Wave 2"), "closed card should precede the open wave");
 });
 test("renderStatusPage gives the closed-wave chip a chevron and a green accent when expanded", () => {
   const html = renderStatusPage({
@@ -2422,14 +2255,8 @@ test("renderStatusPage gives the closed-wave chip a chevron and a green accent w
   // The chevron is CSS keyed off aria-expanded (collapsed › → expanded ⌄), and an
   // expanded chip takes a green accent border.
   assert.match(html, /\.completed-wave-chip::after \{[^}]*content: "›"/);
-  assert.match(
-    html,
-    /\.completed-wave-chip\[aria-expanded="true"\]::after \{[^}]*content: "⌄"/,
-  );
-  assert.match(
-    html,
-    /\.completed-wave-chip\[aria-expanded="true"\] \{[^}]*border-color: var\(--color-green\)/,
-  );
+  assert.match(html, /\.completed-wave-chip\[aria-expanded="true"\]::after \{[^}]*content: "⌄"/);
+  assert.match(html, /\.completed-wave-chip\[aria-expanded="true"\] \{[^}]*border-color: var\(--color-green\)/);
 });
 test("renderStatusPage persists the expanded closed-wave set across a live reload", () => {
   const html = renderStatusPage({
@@ -2468,10 +2295,7 @@ test("renderStatusPage degrades the closed-wave toggle without JS", () => {
 
   // Without JS the cards can never be toggled open, so a <noscript> reveals every
   // closed card in the grid and hides the inert toggle bar — the content stays reachable.
-  assert.match(
-    html,
-    /<noscript><style>[^<]*\.completed-wave-bar \{ display: none;[^<]*\.wave\.completed\[hidden\] \{ display: block;/,
-  );
+  assert.match(html, /<noscript><style>[^<]*\.completed-wave-bar \{ display: none;[^<]*\.wave\.completed\[hidden\] \{ display: block;/);
 });
 test("renderStatusPage renders an archived run's closed waves as full cards, not colliding toggle ids", () => {
   const html = renderStatusPage(
@@ -2502,9 +2326,7 @@ test("renderStatusPage renders an archived run's closed waves as full cards, not
               {
                 index: 0,
                 status: "completed",
-                issues: [
-                  { issueNumber: "101", status: "completed", name: "old work" },
-                ],
+                issues: [{ issueNumber: "101", status: "completed", name: "old work" }],
               },
             ],
             parked: [],

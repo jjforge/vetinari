@@ -54,7 +54,9 @@ test("a lv-row is the three-tier grid: time, dot, then the message cell in that 
 });
 
 test("the actor leads the message as .lv-lead, then the dim .lv-verb, then the spans", () => {
-  const row = build(event("commit", { taskId: "204", branch: "agent/204", sha: "abcdef1234567", files: ["a"], ts: "2026-08-28T00:00:00.000Z" }));
+  const row = build(
+    event("commit", { taskId: "204", branch: "agent/204", sha: "abcdef1234567", files: ["a"], ts: "2026-08-28T00:00:00.000Z" }),
+  );
   const msg = row.children[2];
   assert.equal(msg.className, "lv-msg");
   assert.deepEqual(
@@ -110,7 +112,11 @@ test("a multiline row shows the first line + a bare chevron, the remainder in a 
   // The styled first line survives (the strong summary, now just its first line).
   assert.deepEqual(
     msg.children.filter((c) => c.className !== "lv-chev").map((c) => [c.tag, c.textContent]),
-    [["span", "#204"], ["span", "turn 3"], ["strong", "first line"]],
+    [
+      ["span", "#204"],
+      ["span", "turn 3"],
+      ["strong", "first line"],
+    ],
   );
   // The remainder is a sibling .lv-overflow block, hidden until the chevron is clicked.
   const overflow = row.children.find((c) => c.className === "lv-overflow");

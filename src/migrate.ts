@@ -185,10 +185,7 @@ export function scanLayout(baseDir: string): LayoutScan {
     oldState: listDir(OLD_DIR),
     localState: listDir(LOCAL_DIR),
     gitignore: readOrUndef(resolve(baseDir, ".gitignore")),
-    existing: [
-      ...listDir(CANONICAL_DIR).map((e) => `${CANONICAL_DIR}/${e}`),
-      ...listDir(LOCAL_DIR).map((e) => `${LOCAL_DIR}/${e}`),
-    ],
+    existing: [...listDir(CANONICAL_DIR).map((e) => `${CANONICAL_DIR}/${e}`), ...listDir(LOCAL_DIR).map((e) => `${LOCAL_DIR}/${e}`)],
   };
 }
 

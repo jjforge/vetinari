@@ -19,7 +19,13 @@ let counter = 0;
 const postReq = (body: string) => Object.assign(Readable.from([body]), { method: "POST", url: "/graft", headers: {} });
 
 const resSpy = () => {
-  const res: { statusCode?: number; headers?: unknown; body?: string; writeHead(s: number, h?: unknown): typeof res; end(b?: string): void } = {
+  const res: {
+    statusCode?: number;
+    headers?: unknown;
+    body?: string;
+    writeHead(s: number, h?: unknown): typeof res;
+    end(b?: string): void;
+  } = {
     writeHead(status, headers) {
       res.statusCode = status;
       res.headers = headers;
@@ -59,10 +65,20 @@ const depsFor = (configDir: string, outcome: ChildResult) => {
     },
     graftTimeoutMs: 60_000,
   };
-  return { deps, calls, get graftClosureCalls() { return graftClosureCalls; }, get spawns() { return spawns; } };
+  return {
+    deps,
+    calls,
+    get graftClosureCalls() {
+      return graftClosureCalls;
+    },
+    get spawns() {
+      return spawns;
+    },
+  };
 };
 
-const graftClosureLine = (closure: unknown) => `graft rejected — nothing added (already in the campaign: #202).\ngraft-closure ${JSON.stringify(closure)}`;
+const graftClosureLine = (closure: unknown) =>
+  `graft rejected — nothing added (already in the campaign: #202).\ngraft-closure ${JSON.stringify(closure)}`;
 
 test("POST /graft with missing ids or project is a 400", async () => {
   const { configDir } = seed();
@@ -97,7 +113,13 @@ test("POST /graft shells the real `graft <ids…> --json` once, awaits it, and 3
 
 test("POST /graft on a rejected batch (non-zero exit with a closure line) 422s with the per-id verdicts and keeps the ids", async () => {
   const { configDir } = seed();
-  const closure = { project: "beta", ids: ["640", "202"], placement: [], remaining: [["201"]], rejected: [{ id: "202", reason: "already-in-campaign" }] };
+  const closure = {
+    project: "beta",
+    ids: ["640", "202"],
+    placement: [],
+    remaining: [["201"]],
+    rejected: [{ id: "202", reason: "already-in-campaign" }],
+  };
   const bundle = depsFor(configDir, { code: 1, stdout: graftClosureLine(closure), stderr: "", timedOut: false });
   const res = resSpy();
   await handleGraft(postReq("ids=640 202&project=beta") as never, res as never, new URL("http://x/graft"), bundle.deps);

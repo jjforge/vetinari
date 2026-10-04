@@ -26,16 +26,21 @@ import { crashResumePrompt, type runLoop, type Outcome } from "./loop.ts";
 import type { answerParked, hasParked, listParked, ParkReason } from "./state.ts";
 import type { archiveRun } from "./archive.ts";
 import type { Exclusion, UnderspecifiedPrompt } from "./plan.ts";
-import type {
-  expandSelection,
-  runCampaignPlan,
-} from "./plan.ts";
+import type { expandSelection, runCampaignPlan } from "./plan.ts";
 import { resumeIndex, type runPrune } from "./prune.ts";
 import { isIssueToken } from "./issue-id.ts";
 import type { runGraft } from "./graft.ts";
 import { GraftRejectedError, describeGraftRejections } from "./graft.ts";
 import type { readEventLog } from "./event-log.ts";
-import { campaignStarted, campaignState, extractParkedDetails, issueLifecycle, reduceCampaign, waveState, type ReducedCampaign } from "./dashboard-model.ts";
+import {
+  campaignStarted,
+  campaignState,
+  extractParkedDetails,
+  issueLifecycle,
+  reduceCampaign,
+  waveState,
+  type ReducedCampaign,
+} from "./dashboard-model.ts";
 import { parkRecoveryMove, REDRIVE_ONLY_REASONS } from "./gateway.ts";
 import { makeReporter } from "./report.ts";
 import { Refusal } from "./refusal.ts";
@@ -250,8 +255,7 @@ export function parseArgs(argv: string[]): Command {
         else if (a === "--dry-run") dryRun = true;
         else if (a === "--override") override = true;
         else if (a === "--json") json = true;
-        else if (a.startsWith("--on-underspecified="))
-          onUnderspecified = a.slice("--on-underspecified=".length);
+        else if (a.startsWith("--on-underspecified=")) onUnderspecified = a.slice("--on-underspecified=".length);
         else if (a === "--on-underspecified") onUnderspecified = campaignArgs[++i];
         else positional.push(a);
       }
@@ -408,9 +412,7 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
       // A crash redrive spawned this child to resume a crashed session on the existing branch
       // (design §7, `VETINARI_RESUME_SESSION`): re-enter the loop on that session with a
       // continue-where-you-left-off prompt rather than a fresh fetch. Absent → a fresh run.
-      const resumeEntry = deps.resumeSession
-        ? { resumeSessionId: deps.resumeSession, answerPrompt: crashResumePrompt() }
-        : undefined;
+      const resumeEntry = deps.resumeSession ? { resumeSessionId: deps.resumeSession, answerPrompt: crashResumePrompt() } : undefined;
       // Exit code is the queue's slot signal (design §3): 0 green, 2 parked, 1 failed. The loop
       // holds one host slot around the container (design §3 step 1, §8) — `deps.host` carries the
       // budget; a campaign child skips the slot itself (its parent holds one for it).
@@ -475,9 +477,7 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
         // clickable option, so list the parsed choices as plain text below the description.
         const { description, options } = extractParkedDetails(r.question);
         const optionLines = options.length ? `\n${options.map((o) => `  - ${o}`).join("\n")}` : "";
-        deps.log(
-          `\n=== ${r.taskId} (${r.reason}, ${r.parkedAt}) branch ${r.branch}\n${description}${optionLines}\n`,
-        );
+        deps.log(`\n=== ${r.taskId} (${r.reason}, ${r.parkedAt}) branch ${r.branch}\n${description}${optionLines}\n`);
       }
       return;
     }
@@ -491,23 +491,14 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
         archivedLog: r.archivedLog ?? null,
         clearedOutbound: r.clearedOutbound,
       });
-      deps.log(
-        r.archivedLog
-          ? `archived run log → ${r.archivedLog}`
-          : "no run log to archive",
-      );
-      deps.log(
-        "live log reset — any parked records are kept (answer/redrive to resume, or `prune --purge` to drop)",
-      );
+      deps.log(r.archivedLog ? `archived run log → ${r.archivedLog}` : "no run log to archive");
+      deps.log("live log reset — any parked records are kept (answer/redrive to resume, or `prune --purge` to drop)");
       return;
     }
     case "tgTest": {
       // Resolve creds from this project's host.env the way the gateway does, so a
       // green tg-test guarantees the gateway can send (issue #117).
-      const conn = deps.requireTelegram(
-        "tg-test",
-        resolve(process.cwd(), cfg.stateDir),
-      );
+      const conn = deps.requireTelegram("tg-test", resolve(process.cwd(), cfg.stateDir));
       await deps.tgTest(cfg, conn);
       return;
     }
@@ -545,10 +536,7 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
  * `report.ts` reporter that falls silent under `--json` (where the run logger streams the
  * raw events instead); the `--dry-run` previews stay on `deps.log`, as they run nothing.
  */
-async function dispatchCampaign(
-  cmd: Extract<Command, { kind: "campaign" }>,
-  deps: DispatchDeps,
-): Promise<void> {
+async function dispatchCampaign(cmd: Extract<Command, { kind: "campaign" }>, deps: DispatchDeps): Promise<void> {
   const { cfg, host } = deps;
   // Lock in the agent selection first (ADR 0016): validates it and preflights its
   // credentials before any container, and stamps VETINARI_AGENT so every child wave
@@ -567,9 +555,7 @@ async function dispatchCampaign(
   if (cmd.resume) {
     // `campaign --resume` is the retained one-release alias for `redrive` (ADR 0020, design
     // §7): still honoured, but point the operator at the verb the docs now use.
-    reporter.line(
-      "note: `campaign --resume` is now `redrive` — run `vetinari redrive` instead (this alias is kept for one release).",
-    );
+    reporter.line("note: `campaign --resume` is now `redrive` — run `vetinari redrive` instead (this alias is kept for one release).");
     // Under --resume, --override re-runs a failed member instead of stopping as failed
     // again (design §7); the literal-waves meaning of --override below never applies here
     // (resume takes no batch args and returns before reaching it).
@@ -597,10 +583,7 @@ async function dispatchCampaign(
       const ids = await deps.expandSelection(tokens, cfg.listByLabel);
       if (ids.length) batches.push(ids);
     }
-    if (!batches.length)
-      throw new Refusal(
-        "campaign --override: no issues to run — every wave expanded to nothing.",
-      );
+    if (!batches.length) throw new Refusal("campaign --override: no issues to run — every wave expanded to nothing.");
     if (cmd.dryRun) {
       // --dry-run runs nothing, even with the planner skipped: print the literal waves.
       deps.log(batches.map((w) => `"${w.join(" ")}"`).join(" "));
@@ -634,13 +617,10 @@ async function dispatchCampaign(
   if (cmd.dryRun) {
     // The full `campaign-plan` replacement: the bare wave args, the provenance report,
     // and a suggested --name — printed to read or paste, nothing run.
-    deps.log(
-      report.waveArgs || "(nothing schedulable — every ticket is unreachable)",
-    );
+    deps.log(report.waveArgs || "(nothing schedulable — every ticket is unreachable)");
     deps.log("");
     deps.log(report.report);
-    if (report.suggestedName)
-      deps.log(`\nsuggested name: --name "${report.suggestedName}"`);
+    if (report.suggestedName) deps.log(`\nsuggested name: --name "${report.suggestedName}"`);
     return;
   }
 
@@ -668,10 +648,7 @@ async function dispatchCampaign(
  * (the from-scratch reduced-launch batch form is retired — design §12). The orchestration
  * lives in `runPrune`; this only parses (done in `parseArgs`) and renders.
  */
-async function dispatchPrune(
-  cmd: Extract<Command, { kind: "prune" }>,
-  deps: DispatchDeps,
-): Promise<void> {
+async function dispatchPrune(cmd: Extract<Command, { kind: "prune" }>, deps: DispatchDeps): Promise<void> {
   const { cfg, host } = deps;
   const result = await deps.runPrune(cfg, cmd.target!, {
     project: cmd.project,
@@ -689,9 +666,7 @@ async function dispatchPrune(
   deps.log(identityLine(result.project, result.repo, tgt, result.title));
   deps.log(
     `prune #${tgt} → ${result.dropped.length ? `dropping ${result.dropped.map((i) => `#${i}`).join(", ")}` : "nothing to drop"}` +
-      (result.kept.length
-        ? ` (keeping banked ${result.kept.map((i) => `#${i}`).join(", ")})`
-        : ""),
+      (result.kept.length ? ` (keeping banked ${result.kept.map((i) => `#${i}`).join(", ")})` : ""),
   );
   deps.log(
     `remaining campaign: ${result.remaining.length ? result.remaining.map((w) => `"${w.join(" ")}"`).join(" ") : "(nothing left to run)"}`,
@@ -727,19 +702,14 @@ async function dispatchPrune(
     if (cmd.json) deps.log(`prune-closure ${JSON.stringify(result.closure)}`);
     return;
   }
-  deps.log(
-    "prune event appended — the running campaign will prune future waves at the next wave boundary.",
-  );
+  deps.log("prune event appended — the running campaign will prune future waves at the next wave boundary.");
 }
 
 /**
  * The graft command: add issues to a running (or resumable) campaign, the additive
  * mirror of prune (ADR 0014). The orchestration lives in `runGraft`; this renders.
  */
-async function dispatchGraft(
-  cmd: Extract<Command, { kind: "graft" }>,
-  deps: DispatchDeps,
-): Promise<void> {
+async function dispatchGraft(cmd: Extract<Command, { kind: "graft" }>, deps: DispatchDeps): Promise<void> {
   let result;
   try {
     result = await deps.runGraft(deps.cfg, cmd.ids, { project: cmd.project, dryRun: cmd.dryRun });
@@ -772,21 +742,15 @@ async function dispatchGraft(
   if (result.rejected.length) {
     // A `--dry-run` discloses a whole-batch rejection instead of throwing, so the
     // aggregated dashboard's preview can name the offenders off the closure line.
-    deps.log(
-      `graft rejected — nothing added (${describeGraftRejections(result.rejected)}).`,
-    );
+    deps.log(`graft rejected — nothing added (${describeGraftRejections(result.rejected)}).`);
   } else {
     // Lead with the identity of each grafted id — the project, the derived repo, and the
     // issue title — so a human recognizes an id that belongs to the wrong repo.
-    for (const id of result.ids)
-      deps.log(identityLine(result.project, result.repo, id, result.titles[id]));
+    for (const id of result.ids) deps.log(identityLine(result.project, result.repo, id, result.titles[id]));
     deps.log(
-      `graft ${result.ids.map((i) => `#${i}`).join(", ")} → ` +
-        result.placement.map((p) => `#${p.id} in wave ${p.wave}`).join(", "),
+      `graft ${result.ids.map((i) => `#${i}`).join(", ")} → ` + result.placement.map((p) => `#${p.id} in wave ${p.wave}`).join(", "),
     );
-    deps.log(
-      `resulting campaign: ${result.remaining.map((w) => `"${w.join(" ")}"`).join(" ")}`,
-    );
+    deps.log(`resulting campaign: ${result.remaining.map((w) => `"${w.join(" ")}"`).join(" ")}`);
   }
   if (result.closure) {
     // Dry-run preview: the human prose already printed above. Emit the structured closure
@@ -797,9 +761,7 @@ async function dispatchGraft(
     return;
   }
   if (result.applied)
-    deps.log(
-      "graft event appended — the running campaign will add these issues to future waves at the next wave boundary.",
-    );
+    deps.log("graft event appended — the running campaign will add these issues to future waves at the next wave boundary.");
 }
 
 /**
@@ -811,13 +773,9 @@ async function dispatchGraft(
  * campaign is re-admitted by the redrive, and a standalone park (no campaign) re-runs directly.
  * An answer for an issue that is not parked is reported and ignored — idempotent (§7).
  */
-async function dispatchAnswer(
-  cmd: Extract<Command, { kind: "answer" }>,
-  deps: DispatchDeps,
-): Promise<void> {
+async function dispatchAnswer(cmd: Extract<Command, { kind: "answer" }>, deps: DispatchDeps): Promise<void> {
   const { cfg, host } = deps;
-  if (!cmd.taskId || !cmd.text.length)
-    throw new Refusal('answer needs a task id and text: answer <task> "<answer>"');
+  if (!cmd.taskId || !cmd.text.length) throw new Refusal('answer needs a task id and text: answer <task> "<answer>"');
   const taskId = cmd.taskId;
 
   // Same preflight as `run` (design §3 step 1, §15): validate the provider and check its

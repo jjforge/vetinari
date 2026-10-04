@@ -29,33 +29,20 @@ import type { Exclusion } from "./plan.ts";
 // A fake OPEN-blocked-by resolver from a plain edge map: id -> its open blockers.
 // (Closed blockers never reach the resolver — they are filtered at the edge — so
 // anything listed here is, by contract, an open prerequisite still in flight.)
-const openBlockedByFrom = (edges: Record<string, string[]>) => (id: string) =>
-  edges[id] ?? [];
+const openBlockedByFrom = (edges: Record<string, string[]>) => (id: string) => edges[id] ?? [];
 
 test("expandSelection keeps numeric tokens as ids and normalizes a leading #", async () => {
-  assert.deepEqual(await expandSelection(["436", "#611", "640"]), [
-    "436",
-    "611",
-    "640",
-  ]);
+  assert.deepEqual(await expandSelection(["436", "#611", "640"]), ["436", "611", "640"]);
 });
 
 test("expandSelection expands a label token to the open issues carrying it", async () => {
-  const listByLabel = async (label: string) =>
-    label === "ready-for-agent" ? ["436", "611", "640"] : [];
-  assert.deepEqual(await expandSelection(["ready-for-agent"], listByLabel), [
-    "436",
-    "611",
-    "640",
-  ]);
+  const listByLabel = async (label: string) => (label === "ready-for-agent" ? ["436", "611", "640"] : []);
+  assert.deepEqual(await expandSelection(["ready-for-agent"], listByLabel), ["436", "611", "640"]);
 });
 
 test("expandSelection unions mixed id and label tokens, de-duplicated in first-seen order", async () => {
   const listByLabel = async () => ["611", "640"];
-  assert.deepEqual(
-    await expandSelection(["436", "ready-for-agent", "640"], listByLabel),
-    ["436", "611", "640"],
-  );
+  assert.deepEqual(await expandSelection(["436", "ready-for-agent", "640"], listByLabel), ["436", "611", "640"]);
 });
 
 test("expandSelection reports the resolver's label exclusions to the onExcluded sink, keeping the work (#343)", async () => {
@@ -69,11 +56,7 @@ test("expandSelection reports the resolver's label exclusions to the onExcluded 
     ]);
   const listByLabel = githubIssuesByLabel("jjforge/vetinari", run, () => {});
   const excluded: Exclusion[] = [];
-  const ids = await expandSelection(
-    ["campaign:vocabulary"],
-    listByLabel,
-    (e) => excluded.push(e),
-  );
+  const ids = await expandSelection(["campaign:vocabulary"], listByLabel, (e) => excluded.push(e));
 
   assert.deepEqual(ids, ["611"]);
   assert.deepEqual(excluded, [
@@ -96,18 +79,12 @@ test("runCampaignPlan folds expansion exclusions into the provenance's Excluded 
 });
 
 test("expandSelection fails naming the missing seam when a label is passed without listByLabel", async () => {
-  await assert.rejects(
-    () => expandSelection(["436", "ready-for-agent"]),
-    /listByLabel/,
-  );
+  await assert.rejects(() => expandSelection(["436", "ready-for-agent"]), /listByLabel/);
 });
 
 test("layerWaves orders the set by its in-set blockedBy graph", async () => {
   // 701 is blocked by 640; 640 is blocked by 611; 623 is free.
-  const plan = await layerWaves(
-    ["611", "623", "640", "701"],
-    openBlockedByFrom({ "701": ["640"], "640": ["611"] }),
-  );
+  const plan = await layerWaves(["611", "623", "640", "701"], openBlockedByFrom({ "701": ["640"], "640": ["611"] }));
 
   assert.deepEqual(plan.waves, [
     ["611", "623"], // wave 0: nothing open in the set blocks them
@@ -120,10 +97,7 @@ test("layerWaves orders the set by its in-set blockedBy graph", async () => {
 test("layerWaves puts a ticket whose blockers are all closed on the frontier", async () => {
   // 640's blocker already merged, so the resolver returns no open blocker for it:
   // it belongs in wave 0 next to the unblocked 611, not held back.
-  const plan = await layerWaves(
-    ["611", "640"],
-    openBlockedByFrom({ "640": [] }),
-  );
+  const plan = await layerWaves(["611", "640"], openBlockedByFrom({ "640": [] }));
 
   assert.deepEqual(plan.waves, [["611", "640"]]);
   assert.deepEqual(plan.unreachable, []);
@@ -131,24 +105,16 @@ test("layerWaves puts a ticket whose blockers are all closed on the frontier", a
 
 test("layerWaves drops a ticket held by an open blocker outside the set, and reports why", async () => {
   // 701's open blocker 555 is not in the selected set, so 701 cannot run here.
-  const plan = await layerWaves(
-    ["611", "701"],
-    openBlockedByFrom({ "701": ["555"] }),
-  );
+  const plan = await layerWaves(["611", "701"], openBlockedByFrom({ "701": ["555"] }));
 
   assert.deepEqual(plan.waves, [["611"]]);
-  assert.deepEqual(plan.unreachable, [
-    { id: "701", external: ["555"], via: [] },
-  ]);
+  assert.deepEqual(plan.unreachable, [{ id: "701", external: ["555"], via: [] }]);
 });
 
 test("layerWaves carries unreachability down the dependent chain", async () => {
   // 701 is unreachable (open out-of-set blocker 555); 712 is blocked by 701, so
   // it cannot run either — it is dropped as a dependent, not silently scheduled.
-  const plan = await layerWaves(
-    ["611", "701", "712"],
-    openBlockedByFrom({ "701": ["555"], "712": ["701"] }),
-  );
+  const plan = await layerWaves(["611", "701", "712"], openBlockedByFrom({ "701": ["555"], "712": ["701"] }));
 
   assert.deepEqual(plan.waves, [["611"]]);
   assert.deepEqual(plan.unreachable, [
@@ -158,17 +124,13 @@ test("layerWaves carries unreachability down the dependent chain", async () => {
 });
 
 // id -> the fileKeys it touches, for the file-disjoint partition.
-const fileKeysFrom = (files: Record<string, string[]>) =>
-  new Map(Object.entries(files).map(([id, names]) => [id, new Set(names)]));
+const fileKeysFrom = (files: Record<string, string[]>) => new Map(Object.entries(files).map(([id, names]) => [id, new Set(names)]));
 
 test("partitionWaves keeps distinct files with a shared basename in the same wave (#386)", async () => {
   // Two resolved paths that merely share a basename — `a/b/c/foo.md` and `a/c/foo.md`
   // — are distinct files, so they must NOT read as a collision: both stay in wave 0.
   const layered = await layerWaves(["a", "b"], openBlockedByFrom({}));
-  const plan = partitionWaves(
-    layered,
-    fileKeysFrom({ a: ["a/b/c/foo.md"], b: ["a/c/foo.md"] }),
-  );
+  const plan = partitionWaves(layered, fileKeysFrom({ a: ["a/b/c/foo.md"], b: ["a/c/foo.md"] }));
 
   assert.deepEqual(plan.waves, [["a", "b"]]);
 });
@@ -177,10 +139,7 @@ test("partitionWaves collides an ambiguous bare basename with any same-named pat
   // 'a' resolved `src/foo.md`; 'b' kept a bare `foo.md` (its cite was ambiguous). A
   // bare basename collides with any file of that name, so they cannot share a wave.
   const layered = await layerWaves(["a", "b"], openBlockedByFrom({}));
-  const plan = partitionWaves(
-    layered,
-    fileKeysFrom({ a: ["src/foo.md"], b: ["foo.md"] }),
-  );
+  const plan = partitionWaves(layered, fileKeysFrom({ a: ["src/foo.md"], b: ["foo.md"] }));
 
   assert.deepEqual(plan.waves, [["a"], ["b"]]);
 });
@@ -189,10 +148,7 @@ test("partitionWaves spills a basename-colliding ticket into a later sub-wave", 
   // One dependency layer of three; 'a' and 'c' both touch x, so they cannot share
   // a wave. Greedy first-fit packs a+b (disjoint), then spills c past them.
   const layered = await layerWaves(["a", "b", "c"], openBlockedByFrom({}));
-  const plan = partitionWaves(
-    layered,
-    fileKeysFrom({ a: ["x"], b: ["y"], c: ["x"] }),
-  );
+  const plan = partitionWaves(layered, fileKeysFrom({ a: ["x"], b: ["y"], c: ["x"] }));
 
   assert.deepEqual(plan.waves, [["a", "b"], ["c"]]);
   // c is placed in wave 1 and records the collision that spilled it.
@@ -315,68 +271,41 @@ const FIXTURE_2026_08_19: Issue[] = [
 
 test("2026-08-19 fixture: the partition is DAG-consistent and crossover-safe", async () => {
   const ids = FIXTURE_2026_08_19.map((i) => i.id);
-  const edges = Object.fromEntries(
-    FIXTURE_2026_08_19.map((i) => [i.id, i.blockedBy ?? []]),
-  );
-  const files = new Map(
-    FIXTURE_2026_08_19.map((i) => [i.id, new Set(i.files)]),
-  );
+  const edges = Object.fromEntries(FIXTURE_2026_08_19.map((i) => [i.id, i.blockedBy ?? []]));
+  const files = new Map(FIXTURE_2026_08_19.map((i) => [i.id, new Set(i.files)]));
 
   const layered = await layerWaves(ids, openBlockedByFrom(edges));
   const plan = partitionWaves(layered, files);
 
   assert.equal(ids.length, 41, "fixture is at campaign scale");
-  assert.deepEqual(
-    plan.unreachable,
-    [],
-    "every blocker is in-set, so nothing is dropped",
-  );
+  assert.deepEqual(plan.unreachable, [], "every blocker is in-set, so nothing is dropped");
 
   // Crossover-safe: no basename appears twice within any wave.
   for (const [w, wave] of plan.waves.entries()) {
     const names = wave.flatMap((id) => [...files.get(id)!]);
-    assert.equal(
-      new Set(names).size,
-      names.length,
-      `wave ${w} shares a file: ${wave.join(", ")}`,
-    );
+    assert.equal(new Set(names).size, names.length, `wave ${w} shares a file: ${wave.join(", ")}`);
   }
 
   // DAG-consistent: every in-set blocker sits in a strictly earlier wave.
   const waveOf = new Map(plan.placements.map((p) => [p.id, p.wave]));
   for (const issue of FIXTURE_2026_08_19) {
     for (const b of issue.blockedBy ?? []) {
-      assert.ok(
-        waveOf.get(b)! < waveOf.get(issue.id)!,
-        `#${issue.id} must run after its blocker #${b}`,
-      );
+      assert.ok(waveOf.get(b)! < waveOf.get(issue.id)!, `#${issue.id} must run after its blocker #${b}`);
     }
   }
 
   // The named regression: #461 must not share a wave with any template sibling —
   // and since all four touch the file, the partition puts them in four waves.
   const cluster = ["378", "688", "400", "461"];
-  assert.equal(
-    new Set(cluster.map((id) => waveOf.get(id))).size,
-    4,
-    "the four stack_strip.tmpl tickets are all separated",
-  );
+  assert.equal(new Set(cluster.map((id) => waveOf.get(id))).size, 4, "the four stack_strip.tmpl tickets are all separated");
 
   // The pure-DAG planner (layering alone) really does collide: all four share the
   // one dependency layer that the partition then has to break apart.
   const layerOf = new Map(layered.placements.map((p) => [p.id, p.wave]));
-  assert.equal(
-    new Set(cluster.map((id) => layerOf.get(id))).size,
-    1,
-    "pre-partition, all four sit in one layer and collide",
-  );
+  assert.equal(new Set(cluster.map((id) => layerOf.get(id))).size, 1, "pre-partition, all four sit in one layer and collide");
 
   // Spilling works past the frontier too: the deeper-layer pair is separated.
-  assert.notEqual(
-    waveOf.get("911"),
-    waveOf.get("912"),
-    "the layer-1 dup_layer.tmpl pair is separated",
-  );
+  assert.notEqual(waveOf.get("911"), waveOf.get("912"), "the layer-1 dup_layer.tmpl pair is separated");
 });
 
 test("partitionWaves only blames earlier sub-waves — a frontier ticket is never marked spilled", async () => {
@@ -384,22 +313,11 @@ test("partitionWaves only blames earlier sub-waves — a frontier ticket is neve
   // d touches only z: it collides with c, but c was itself spilled to a later
   // sub-wave, so d still fits the frontier and must NOT be reported as spilled.
   const layered = await layerWaves(["a", "b", "c", "d"], openBlockedByFrom({}));
-  const plan = partitionWaves(
-    layered,
-    fileKeysFrom({ a: ["x"], b: ["x"], c: ["x", "z"], d: ["z"] }),
-  );
+  const plan = partitionWaves(layered, fileKeysFrom({ a: ["x"], b: ["x"], c: ["x", "z"], d: ["z"] }));
 
   const d = plan.placements.find((p) => p.id === "d")!;
-  assert.equal(
-    d.wave,
-    0,
-    "d shares nothing with sub-wave 0, so it stays on the frontier",
-  );
-  assert.deepEqual(
-    d.sharesFilesWith,
-    [],
-    "the collider c sits in a later sub-wave, so it is not a spill reason",
-  );
+  assert.equal(d.wave, 0, "d shares nothing with sub-wave 0, so it stays on the frontier");
+  assert.deepEqual(d.sharesFilesWith, [], "the collider c sits in a later sub-wave, so it is not a spill reason");
 });
 
 // id -> its resolved file-set, for the under-specified halt tests. A missing id
@@ -446,22 +364,10 @@ test("planCampaign drops an under-specified ticket and its dependents, then plan
     },
   });
 
-  assert.deepEqual(
-    asked,
-    [["640"]],
-    "asked once, in bulk, about the under-specified ticket",
-  );
+  assert.deepEqual(asked, [["640"]], "asked once, in bulk, about the under-specified ticket");
   assert.deepEqual(plan.underspecified, ["640"]);
-  assert.deepEqual(
-    plan.pruned,
-    ["640", "701"],
-    "the ticket and its dependent are pruned",
-  );
-  assert.deepEqual(
-    plan.waves,
-    [["611", "623"]],
-    "the confident remainder is planned",
-  );
+  assert.deepEqual(plan.pruned, ["640", "701"], "the ticket and its dependent are pruned");
+  assert.deepEqual(plan.waves, [["611", "623"]], "the confident remainder is planned");
 });
 
 test("planCampaign refuses (a Refusal) when the decision is to fail, naming the under-specified ticket and the flag", async () => {
@@ -475,10 +381,7 @@ test("planCampaign refuses (a Refusal) when the decision is to fail, naming the 
         }),
         onUnderspecified: () => "fail",
       }),
-    (err: Error) =>
-      err instanceof Refusal &&
-      /#640.*confident/i.test(err.message) &&
-      /--on-underspecified=drop/.test(err.message),
+    (err: Error) => err instanceof Refusal && /#640.*confident/i.test(err.message) && /--on-underspecified=drop/.test(err.message),
   );
 });
 
@@ -516,7 +419,10 @@ test("makeAskUnderspecified: re-prompts on an unrecognized answer before the ope
     ask: async () => answers[i++],
   });
   assert.equal(await prompt(["133"]), "drop");
-  assert.ok(logged.some((l) => /please answer/.test(l)), "it nudged the operator on the bad answer");
+  assert.ok(
+    logged.some((l) => /please answer/.test(l)),
+    "it nudged the operator on the bad answer",
+  );
 });
 
 test("planCampaign does not ask about a ticket that is already unreachable", async () => {
@@ -532,9 +438,7 @@ test("planCampaign does not ask about a ticket that is already unreachable", asy
 
   assert.deepEqual(plan.waves, [["611"]]);
   assert.deepEqual(plan.underspecified, []);
-  assert.deepEqual(plan.unreachable, [
-    { id: "640", external: ["555"], via: [] },
-  ]);
+  assert.deepEqual(plan.unreachable, [{ id: "640", external: ["555"], via: [] }]);
 });
 
 test("planCampaign skips the file-set check for a one-issue selection, planning without a file-set or a prompt (#356)", async () => {
@@ -649,8 +553,7 @@ test("describePlan reports exactly what an under-specified drop pruned", async (
 });
 
 // id -> the labels on it, for the campaign-name suggestion.
-const labelsFrom = (labels: Record<string, string[]>) => (id: string) =>
-  labels[id] ?? [];
+const labelsFrom = (labels: Record<string, string[]>) => (id: string) => labels[id] ?? [];
 
 test("suggestCampaignName joins the distinct area labels the selected issues span", async () => {
   // Three issues span gateway, comms and dashboard; non-area labels (bug, P2) are
@@ -682,27 +585,18 @@ test("suggestCampaignName lists areas in a stable order regardless of input orde
 });
 
 test("suggestCampaignName returns undefined when the set spans no area label", async () => {
-  const name = await suggestCampaignName(
-    ["22", "25"],
-    labelsFrom({ "22": ["bug"], "25": [] }),
-  );
+  const name = await suggestCampaignName(["22", "25"], labelsFrom({ "22": ["bug"], "25": [] }));
   assert.equal(name, undefined);
 });
 
 test("waveArgs emits the bare quoted wave args, ready to paste after `campaign`", async () => {
-  const plan = await layerWaves(
-    ["611", "623", "640", "701"],
-    openBlockedByFrom({ "701": ["640"], "640": ["611"] }),
-  );
+  const plan = await layerWaves(["611", "623", "640", "701"], openBlockedByFrom({ "701": ["640"], "640": ["611"] }));
 
   assert.equal(waveArgs(plan), '"611 623" "640" "701"');
 });
 
 test("describePlan explains each ticket's wave and lists what was dropped", async () => {
-  const plan = await layerWaves(
-    ["611", "640", "701", "712"],
-    openBlockedByFrom({ "640": ["611"], "701": ["555"], "712": ["701"] }),
-  );
+  const plan = await layerWaves(["611", "640", "701", "712"], openBlockedByFrom({ "640": ["611"], "701": ["555"], "712": ["701"] }));
   const report = describePlan(plan);
 
   // Each scheduled ticket names its wave and why it is there.
@@ -775,10 +669,7 @@ test("describePlan omits the Excluded section when nothing was excluded", () => 
 
 test("describePlan explains why a ticket was spilled to a later sub-wave", async () => {
   const layered = await layerWaves(["a", "b", "c"], openBlockedByFrom({}));
-  const plan = partitionWaves(
-    layered,
-    fileKeysFrom({ a: ["x"], b: ["y"], c: ["x"] }),
-  );
+  const plan = partitionWaves(layered, fileKeysFrom({ a: ["x"], b: ["y"], c: ["x"] }));
   const report = describePlan(plan);
 
   // c spilled because it shares a file with a — the report must say so.
@@ -874,10 +765,7 @@ test("validateGraftTargets rejects a token that does not look like an issue id a
 });
 
 test("validateGraftTargets returns nothing when every id is open and new (#166)", () => {
-  assert.deepEqual(
-    validateGraftTargets(["301", "302"], { inCampaign: new Set(["101"]), state: () => "open" }),
-    [],
-  );
+  assert.deepEqual(validateGraftTargets(["301", "302"], { inCampaign: new Set(["101"]), state: () => "open" }), []);
 });
 
 // A fake config for `runCampaignPlan`: `fetchTask` yields per-id GitHub-style JSON,
@@ -1008,10 +896,7 @@ test("a pending-verify blocker outside the selection is named in the provenance,
   const report = await runCampaignPlan(
     {
       blockedBy,
-      fetchTask: (id: string) =>
-        id === "316"
-          ? JSON.stringify({ body: "Touches: a.ts" })
-          : JSON.stringify({ body: "Touches: b.ts" }),
+      fetchTask: (id: string) => (id === "316" ? JSON.stringify({ body: "Touches: a.ts" }) : JSON.stringify({ body: "Touches: b.ts" })),
       fileSet: (ticket: string): FileSet => {
         const m = ticket.match(/Touches: (\S+)/);
         return { files: m ? [m[1]] : [], confident: Boolean(m) };
@@ -1031,28 +916,16 @@ test("a pending-verify blocker outside the selection is named in the provenance,
   assert.match(report.report, /#313.*pending-verify.*satisfied/);
   // The stderr edge log may stay; it still names the drop, never silently.
   assert.equal(logs.length, 1);
-  assert.match(
-    logs[0],
-    /#316 — blocker #313 pending-verify, treated as satisfied/,
-  );
+  assert.match(logs[0], /#316 — blocker #313 pending-verify, treated as satisfied/);
 });
 
 test("runCampaignPlan rejects an empty id set", async () => {
-  await assert.rejects(
-    () => runCampaignPlan(cfgFrom({}), [], {}, { isTTY: false, ask: () => "fail" }),
-    /at least one issue id or label/,
-  );
+  await assert.rejects(() => runCampaignPlan(cfgFrom({}), [], {}, { isTTY: false, ask: () => "fail" }), /at least one issue id or label/);
 });
 
 test("runCampaignPlan requires a blockedBy resolver for a multi-issue selection", async () => {
   await assert.rejects(
-    () =>
-      runCampaignPlan(
-        { fetchTask: () => "" },
-        ["611", "640"],
-        {},
-        { isTTY: false, ask: () => "fail" },
-      ),
+    () => runCampaignPlan({ fetchTask: () => "" }, ["611", "640"], {}, { isTTY: false, ask: () => "fail" }),
     /blockedBy/,
   );
 });
@@ -1171,9 +1044,6 @@ test("describeFilesetCheck renders a confident line and a would-halt line per id
 });
 
 test("labelsFromTask reads GitHub label objects and is best-effort on non-JSON", () => {
-  assert.deepEqual(
-    labelsFromTask(JSON.stringify({ labels: [{ name: "gateway" }, { name: "P2" }] })),
-    ["gateway", "P2"],
-  );
+  assert.deepEqual(labelsFromTask(JSON.stringify({ labels: [{ name: "gateway" }, { name: "P2" }] })), ["gateway", "P2"]);
   assert.deepEqual(labelsFromTask("not json at all"), []);
 });

@@ -20,7 +20,13 @@ const postReq = (body: string) => Object.assign(Readable.from([body]), { method:
 
 // A response spy capturing the status, headers and body the handler writes.
 const resSpy = () => {
-  const res: { statusCode?: number; headers?: unknown; body?: string; writeHead(s: number, h?: unknown): typeof res; end(b?: string): void } = {
+  const res: {
+    statusCode?: number;
+    headers?: unknown;
+    body?: string;
+    writeHead(s: number, h?: unknown): typeof res;
+    end(b?: string): void;
+  } = {
     writeHead(status, headers) {
       res.statusCode = status;
       res.headers = headers;
@@ -72,7 +78,12 @@ test("POST /redrive refuses with 409 and the reason while a campaign process hol
   seedLiveLease(configDir, project);
   let spawned = 0;
   const res = resSpy();
-  const handled = await handleRedrive(postReq(`project=${project}`) as never, res as never, new URL("http://x/redrive"), depsFor(configDir, () => (spawned++, undefined)));
+  const handled = await handleRedrive(
+    postReq(`project=${project}`) as never,
+    res as never,
+    new URL("http://x/redrive"),
+    depsFor(configDir, () => (spawned++, undefined)),
+  );
   assert.equal(handled, true);
   assert.equal(res.statusCode, 409);
   assert.equal(res.body, "a campaign process is still running");

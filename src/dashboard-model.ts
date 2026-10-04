@@ -28,7 +28,10 @@ import { humanizeLogLine, localTime, type HumanizedRow } from "./log-view.ts";
  */
 export function baseBranchForProject(projectRoot: string): string | undefined {
   try {
-    const branch = execFileSync("git", ["-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const branch = execFileSync("git", ["-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
     return branch && branch !== "HEAD" ? branch : undefined;
   } catch {
     return undefined;
@@ -201,7 +204,10 @@ export const parkReasonFromEvent = (reason: string | undefined): ParkReason =>
  * (design §2.3) whose members all merged clean (each `completed`), so nothing in the fold
  * would otherwise read `parked` — it lands at the `parked` rank, still below `failed` (#288).
  */
-export function waveState(issues: readonly { status: DisplayStatus; membership?: Membership }[], opts: { redBase?: boolean } = {}): WaveStatus {
+export function waveState(
+  issues: readonly { status: DisplayStatus; membership?: Membership }[],
+  opts: { redBase?: boolean } = {},
+): WaveStatus {
   const live = issues.filter((i) => i.membership !== "pruned");
   if (!live.length) return "unstarted";
   if (live.some((i) => i.status === "failed")) return "failed";
@@ -386,7 +392,10 @@ export function describeEvent(e: OrchestratorEvent, opts: { festive?: { offset: 
       const tasks = e.tasks ?? [];
       const label = festive
         ? festiveLine(e.index ?? 0, tasks.map(String))
-        : waveMembersLabel(e.index ?? 0, tasks.map((id) => named(id)));
+        : waveMembersLabel(
+            e.index ?? 0,
+            tasks.map((id) => named(id)),
+          );
       return `${label} started`;
     }
     case "wave-done": {
@@ -396,7 +405,10 @@ export function describeEvent(e: OrchestratorEvent, opts: { festive?: { offset: 
       const members = [...(e.merged ?? [])];
       const label = festive
         ? festiveLine(e.index ?? 0, members.map(String))
-        : waveMembersLabel(e.index ?? 0, members.map((id) => named(id)));
+        : waveMembersLabel(
+            e.index ?? 0,
+            members.map((id) => named(id)),
+          );
       const hashes = (e.merged ?? []).length ? (e.merged as unknown[]).map(hash).join(", ") : "nothing";
       return `${label} merged ${hashes}`;
     }
@@ -449,7 +461,11 @@ const festiveFor = (events: OrchestratorEvent[], festive: boolean): { offset: nu
  * can skip past it, exactly as `lastEventText` does. `festive` (its run's reserved
  * offset, resolved by the caller) names the wave after a character (#193).
  */
-export function formatFeedEvent(project: string, e: OrchestratorEvent, opts: { festive?: { offset: number }; titles?: Map<string, string> } = {}): string {
+export function formatFeedEvent(
+  project: string,
+  e: OrchestratorEvent,
+  opts: { festive?: { offset: number }; titles?: Map<string, string> } = {},
+): string {
   const sentence = describeEvent(e, opts);
   return sentence ? `${project} — ${sentence}` : "";
 }
@@ -568,7 +584,10 @@ export function extractParkedDetails(question: string): { description: string; o
       if (optionLines.length) break;
       continue;
     }
-    const cleaned = line.replace(/^[-*]\s*/, "").replace(/^\d+[.)]\s*/, "").trim();
+    const cleaned = line
+      .replace(/^[-*]\s*/, "")
+      .replace(/^\d+[.)]\s*/, "")
+      .trim();
     if (cleaned) optionLines.push(cleaned);
   }
   return { description, options: optionLines };
@@ -698,8 +717,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
     }
     // Remember the latest durable session id an event carried for a member (`turn`, `parked`),
     // so a crash redrive can resume that session on the existing branch (design §7).
-    if ("sessionId" in e && e.sessionId && e.taskId)
-      sessions.set(normalizeIssue(String(e.taskId)), String(e.sessionId));
+    if ("sessionId" in e && e.sessionId && e.taskId) sessions.set(normalizeIssue(String(e.taskId)), String(e.sessionId));
     if (e.event === "campaign-start" && Array.isArray(e.waves)) {
       waves = e.waves.map((wave: unknown[]) => wave.map(String).map(normalizeIssue));
       layout = waves.map((wave) => [...wave]);
@@ -830,7 +848,10 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       // as a chip in the wave it joined, and mark it `grafted` while it stays unstarted.
       // The persisted `fileKeys` wire field maps into the pure fold's `fileKeys`; a log
       // written before the rename carried the same value under `basenames`, read as a fallback.
-      const applied = applyGraft({ waves, outcomes, currentWave }, { ids: e.ids.map(String), blockedBy: e.blockedBy ?? {}, fileKeys: e.fileKeys ?? e.basenames ?? {} });
+      const applied = applyGraft(
+        { waves, outcomes, currentWave },
+        { ids: e.ids.map(String), blockedBy: e.blockedBy ?? {}, fileKeys: e.fileKeys ?? e.basenames ?? {} },
+      );
       const placeOf = new Map<string, number>();
       applied.remaining.forEach((wave, i) => wave.forEach((id) => placeOf.set(id, i)));
       const survivors: number[] = [];
@@ -879,7 +900,27 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
     }
   }
 
-  return { waves, layout, pruned, grafted, conflictParked, name, festiveOffset, outcomes, sessions, pendingGreen, details, titles, mergedAt, closedWaves, currentWave, parkedWave, parkReasons, redBase, anomalies };
+  return {
+    waves,
+    layout,
+    pruned,
+    grafted,
+    conflictParked,
+    name,
+    festiveOffset,
+    outcomes,
+    sessions,
+    pendingGreen,
+    details,
+    titles,
+    mergedAt,
+    closedWaves,
+    currentWave,
+    parkedWave,
+    parkReasons,
+    redBase,
+    anomalies,
+  };
 }
 
 /**
@@ -1068,7 +1109,8 @@ const eventNamesIssue = (e: OrchestratorEvent, id: string): boolean => {
   if ("taskId" in e && e.taskId != null && normalizeIssue(String(e.taskId)) === id) return true;
   const inArray = (a: unknown) => Array.isArray(a) && a.map(String).map(normalizeIssue).includes(id);
   if (("taskIds" in e && inArray(e.taskIds)) || ("merged" in e && inArray(e.merged)) || ("removed" in e && inArray(e.removed))) return true;
-  if ("outcomes" in e && e.outcomes && typeof e.outcomes === "object" && Object.keys(e.outcomes).map(normalizeIssue).includes(id)) return true;
+  if ("outcomes" in e && e.outcomes && typeof e.outcomes === "object" && Object.keys(e.outcomes).map(normalizeIssue).includes(id))
+    return true;
   return false;
 };
 
@@ -1106,7 +1148,19 @@ export function reconstructIssueDetail(events: OrchestratorEvent[], issueNumber:
   // read-only archived sheet (an archived run renders no phases).
   const phase = life.state === "running" ? issuePhase(events, id) : undefined;
 
-  return { issueNumber: id, status: life.state, ...(life.reason ? { reason: life.reason } : {}), membership, ...(phase ? { phase } : {}), title: titles.get(id), campaignName: name, turns: turnLog.length, elapsedMs, turnLog: turnLog.reverse(), ...(worktree ? { worktree } : {}) };
+  return {
+    issueNumber: id,
+    status: life.state,
+    ...(life.reason ? { reason: life.reason } : {}),
+    membership,
+    ...(phase ? { phase } : {}),
+    title: titles.get(id),
+    campaignName: name,
+    turns: turnLog.length,
+    elapsedMs,
+    turnLog: turnLog.reverse(),
+    ...(worktree ? { worktree } : {}),
+  };
 }
 
 /**
@@ -1633,8 +1687,21 @@ export function buildFeed(pointers: ProjectPointer[], now: Date = new Date(), lo
         // The feed is cross-repo, so the repo leads the message as the actor; the narration is
         // one plain span and the dot borrows the event's state from the shared log-view registry.
         const dot = humanizeLogLine(raw).dot;
-        const humanized: HumanizedRow = { time: localTime(typeof e.ts === "string" ? e.ts : ""), actor: pointer.project, verb: "", spans: [{ text: sentence, kind: "plain" }], dot };
-        entries.push({ project: pointer.project, ts: String(e.ts), kind: String(e.event ?? ""), text: formatFeedEvent(pointer.project, e, { festive: festiveArg, titles }), raw, humanized });
+        const humanized: HumanizedRow = {
+          time: localTime(typeof e.ts === "string" ? e.ts : ""),
+          actor: pointer.project,
+          verb: "",
+          spans: [{ text: sentence, kind: "plain" }],
+          dot,
+        };
+        entries.push({
+          project: pointer.project,
+          ts: String(e.ts),
+          kind: String(e.event ?? ""),
+          text: formatFeedEvent(pointer.project, e, { festive: festiveArg, titles }),
+          raw,
+          humanized,
+        });
       }
     }
   }
@@ -1747,11 +1814,7 @@ export const cardState = (status: CampaignStatus): RunState => {
  * getters read it in the process timezone, the same one `now` is read in. */
 const sameLocalDay = (iso: string, day: Date) => {
   const merged = new Date(iso);
-  return (
-    merged.getFullYear() === day.getFullYear() &&
-    merged.getMonth() === day.getMonth() &&
-    merged.getDate() === day.getDate()
-  );
+  return merged.getFullYear() === day.getFullYear() && merged.getMonth() === day.getMonth() && merged.getDate() === day.getDate();
 };
 
 /**
@@ -1781,7 +1844,14 @@ const mergedTodayForProject = (baseLocation: string, liveEvents: OrchestratorEve
   return merged.size;
 };
 
-const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, events: OrchestratorEvent[], parked: ParkedRecord[], logger: Logger, festive = false): ProjectCard => {
+const buildProjectCard = (
+  pointer: ProjectPointer,
+  status: CampaignStatus,
+  events: OrchestratorEvent[],
+  parked: ParkedRecord[],
+  logger: Logger,
+  festive = false,
+): ProjectCard => {
   // The card heading shows owner/name, read live off the checkout's git remote;
   // undefined for a project with none (the demo), so the display falls back to the key.
   const repo = repoForProject(pointer.projectRoot);
@@ -1811,7 +1881,9 @@ const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, event
       // The card opens onto its newest archived run: its outcome, name and finish time,
       // plus the token the card links to so the project page expands it at the top of the
       // archived list (design §11). Absent when the project has never archived a run.
-      ...(latest ? { lastRun: { run: latest.run, outcome: latest.state, name: latest.name ?? latest.run, finishedAt: latest.startedAt } } : {}),
+      ...(latest
+        ? { lastRun: { run: latest.run, outcome: latest.state, name: latest.name ?? latest.run, finishedAt: latest.startedAt } }
+        : {}),
     };
   }
   // A finished campaign still lingering in the live log folds to idle at render time
@@ -1889,7 +1961,13 @@ const buildProjectCard = (pointer: ProjectPointer, status: CampaignStatus, event
  * verdict folds to `parked{crash}`, so its card never reads idle or running. Omitted, the
  * live default holds — the same optional probe `buildAllStatus` takes.
  */
-export function buildLanding(pointers: ProjectPointer[], now: Date = new Date(), logger: Logger = hostLogger(), festive = false, configDir?: string): LandingView {
+export function buildLanding(
+  pointers: ProjectPointer[],
+  now: Date = new Date(),
+  logger: Logger = hostLogger(),
+  festive = false,
+  configDir?: string,
+): LandingView {
   const projects: ProjectCard[] = [];
   const parked: ParkedQuestion[] = [];
   let mergedToday = 0;

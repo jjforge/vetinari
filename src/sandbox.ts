@@ -13,13 +13,7 @@ import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { resolve, sep } from "node:path";
-import {
-  AGENT_ENV_VAR,
-  parseAgentOverride,
-  resolveAgentSelection,
-  type AgentSelection,
-  type ResolvedConfig,
-} from "./config.ts";
+import { AGENT_ENV_VAR, parseAgentOverride, resolveAgentSelection, type AgentSelection, type ResolvedConfig } from "./config.ts";
 
 /**
  * The token-usage snapshot the loop folds per iteration (a subset of sandcastle's

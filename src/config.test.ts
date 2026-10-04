@@ -214,15 +214,10 @@ test("resolveDestination returns undefined for an unmapped category with no wild
   assert.equal(resolveDestination(notify, "progress", "prune"), undefined);
 });
 
-const withNotify = (notify: string) =>
-  CONFIG_BODY.replace("fetchTask:", `notify: ${notify},\n  fetchTask:`);
+const withNotify = (notify: string) => CONFIG_BODY.replace("fetchTask:", `notify: ${notify},\n  fetchTask:`);
 
 test("loadConfig rejects a notify map that fans the interactive question category out to two destinations", async () => {
-  const cfgPath = writeConfig(
-    scratch(),
-    "vetinari/config.mts",
-    withNotify(`{ question: "alerts", "question:urgent": "ops" }`),
-  );
+  const cfgPath = writeConfig(scratch(), "vetinari/config.mts", withNotify(`{ question: "alerts", "question:urgent": "ops" }`));
 
   await assert.rejects(loadConfig(cfgPath), (err: Error) => {
     assert.match(err.message, /question/);
@@ -234,11 +229,7 @@ test("loadConfig rejects a notify map that fans the interactive question categor
 
 test("loadConfig rejects question fan-out that comes via the wildcard catching unlisted question events", async () => {
   // `question:urgent` -> ops, but every other question event falls to `*` -> alerts.
-  const cfgPath = writeConfig(
-    scratch(),
-    "vetinari/config.mts",
-    withNotify(`{ "question:urgent": "ops", "*": "alerts" }`),
-  );
+  const cfgPath = writeConfig(scratch(), "vetinari/config.mts", withNotify(`{ "question:urgent": "ops", "*": "alerts" }`));
 
   await assert.rejects(loadConfig(cfgPath), /question/);
 });
@@ -274,26 +265,32 @@ test("resolveAgentSelection takes the provider default from cfg.agent, falling b
 });
 
 test("resolveAgentSelection honors an explicit model/effort on cfg.agent", () => {
-  assert.deepEqual(
-    resolveAgentSelection({ provider: "pi", model: "claude-sonnet-4-6", effort: "xhigh" }),
-    { provider: "pi", model: "claude-sonnet-4-6", effort: "xhigh", resumable: true },
-  );
+  assert.deepEqual(resolveAgentSelection({ provider: "pi", model: "claude-sonnet-4-6", effort: "xhigh" }), {
+    provider: "pi",
+    model: "claude-sonnet-4-6",
+    effort: "xhigh",
+    resumable: true,
+  });
 });
 
 test("resolveAgentSelection lets a CLI override win over the cfg default (precedence: override > cfg > default)", () => {
-  assert.deepEqual(
-    resolveAgentSelection({ provider: "claude", effort: "low" }, { provider: "codex", effort: "high" }),
-    { provider: "codex", model: AGENT_PROVIDERS.codex.defaultModel, effort: "high", resumable: true },
-  );
+  assert.deepEqual(resolveAgentSelection({ provider: "claude", effort: "low" }, { provider: "codex", effort: "high" }), {
+    provider: "codex",
+    model: AGENT_PROVIDERS.codex.defaultModel,
+    effort: "high",
+    resumable: true,
+  });
 });
 
 test("resolveAgentSelection does not leak the cfg's model/effort across a provider switch — they belonged to the other provider", () => {
   // cfg is claude with a claude model + a claude-only effort; overriding to codex must
   // fall to codex's own defaults, not carry the claude model or the (invalid-for-codex) effort.
-  assert.deepEqual(
-    resolveAgentSelection({ provider: "claude", model: "claude-opus-4-8", effort: "max" }, { provider: "codex" }),
-    { provider: "codex", model: AGENT_PROVIDERS.codex.defaultModel, effort: "high", resumable: true },
-  );
+  assert.deepEqual(resolveAgentSelection({ provider: "claude", model: "claude-opus-4-8", effort: "max" }, { provider: "codex" }), {
+    provider: "codex",
+    model: AGENT_PROVIDERS.codex.defaultModel,
+    effort: "high",
+    resumable: true,
+  });
 });
 
 test("resolveAgentSelection validates effort against the SELECTED provider's own vocabulary, failing fast with the valid set", () => {
@@ -326,8 +323,7 @@ test("resolveAgentSelection accepts the non-resumable providers, flagging them r
 });
 
 test("resolveAgentSelection flags the resumable providers resumable:true", () => {
-  for (const provider of ["claude", "pi", "codex"] as const)
-    assert.equal(resolveAgentSelection({ provider }).resumable, true);
+  for (const provider of ["claude", "pi", "codex"] as const) assert.equal(resolveAgentSelection({ provider }).resumable, true);
 });
 
 test("nonResumableAnswerWarning names the provider as experimental, what happens on a park, and postComment as the fix", () => {
@@ -372,27 +368,13 @@ test("resolveAgentSelection rejects an unknown provider naming the supported set
 });
 
 test("parseAgentFlags pulls --agent/--model/--effort out of the args, leaving the rest untouched and in order", () => {
-  const { override, rest } = parseAgentFlags([
-    "623",
-    "--agent",
-    "pi",
-    "--effort",
-    "xhigh",
-    "--model",
-    "claude-sonnet-4-6",
-  ]);
+  const { override, rest } = parseAgentFlags(["623", "--agent", "pi", "--effort", "xhigh", "--model", "claude-sonnet-4-6"]);
   assert.deepEqual(override, { provider: "pi", effort: "xhigh", model: "claude-sonnet-4-6" });
   assert.deepEqual(rest, ["623"]);
 });
 
 test("parseAgentFlags accepts the --flag=value form and preserves other flags/positionals", () => {
-  const { override, rest } = parseAgentFlags([
-    "--name",
-    "gateway work",
-    "--agent=codex",
-    "436 611",
-    "--auto-prune",
-  ]);
+  const { override, rest } = parseAgentFlags(["--name", "gateway work", "--agent=codex", "436 611", "--auto-prune"]);
   assert.deepEqual(override, { provider: "codex" });
   assert.deepEqual(rest, ["--name", "gateway work", "436 611", "--auto-prune"]);
 });
@@ -452,8 +434,7 @@ test("loadConfig honors an explicit stateDir over the flipped default", async ()
   assert.equal(cfg.logFile, "custom-state/logs/orchestrator.jsonl");
 });
 
-const git = (dir: string, args: string[]) =>
-  execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });
+const git = (dir: string, args: string[]) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });
 
 // A temp git repo whose realpathed root is returned, so comparisons hold on
 // platforms (macOS) where tmpdir is itself a symlink.
@@ -485,10 +466,7 @@ test("resolveProjectRoot refuses outside a git repo, naming the directory", () =
   const notARepo = realpathSync(mkdtempSync(join(tmpdir(), "vetinari-norepo-")));
   assert.throws(
     () => resolveProjectRoot(notARepo),
-    (e: Error) =>
-      e instanceof Refusal &&
-      e.message.includes("not a git repository") &&
-      e.message.includes(notARepo),
+    (e: Error) => e instanceof Refusal && e.message.includes("not a git repository") && e.message.includes(notARepo),
   );
 });
 
@@ -513,9 +491,7 @@ test("assertProjectQualifier allows a matching qualifier and the bare (no-qualif
 test("assertProjectQualifier refuses a qualifier naming a different project", () => {
   assert.throws(
     () => assertProjectQualifier("vetinari", "jjforge", "jjforge/vetinari"),
-    (e: Error) =>
-      e instanceof Refusal &&
-      /refusing: this project is "jjforge", but the qualifier names "vetinari"/.test(e.message),
+    (e: Error) => e instanceof Refusal && /refusing: this project is "jjforge", but the qualifier names "vetinari"/.test(e.message),
   );
 });
 

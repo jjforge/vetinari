@@ -14,13 +14,22 @@ const cfgFor = (): ResolvedConfig => {
   const dir = join(tmpdir(), `vetinari-archive-${Date.now()}-${counter++}`);
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
-  return { project: "demo", stateDir: dir, logFile: join(dir, "logs", "orchestrator.jsonl"), parkedDir: join(dir, "parked"), log: memoryLogger() } as unknown as ResolvedConfig;
+  return {
+    project: "demo",
+    stateDir: dir,
+    logFile: join(dir, "logs", "orchestrator.jsonl"),
+    parkedDir: join(dir, "parked"),
+    log: memoryLogger(),
+  } as unknown as ResolvedConfig;
 };
 
 test("archiveRun moves the log aside and resets it, but leaves parked records alone (design §2.5)", () => {
   const cfg = cfgFor();
   writeFileSync(cfg.logFile, '{"event":"campaign-start","batches":[["101"]]}\n{"event":"green","taskId":"101"}\n');
-  writeFileSync(join(cfg.parkedDir, "202.json"), JSON.stringify({ taskId: "202", reason: "question", branch: "agent/202", sessionId: "s", question: "?" }));
+  writeFileSync(
+    join(cfg.parkedDir, "202.json"),
+    JSON.stringify({ taskId: "202", reason: "question", branch: "agent/202", sessionId: "s", question: "?" }),
+  );
 
   const result = archiveRun(cfg);
 
@@ -65,7 +74,10 @@ test("hasUnarchivedRun is false for a missing, empty, or marker-only live log", 
 
 test("hasUnarchivedRun is true when a prior campaign or queue run still sits in the live log", () => {
   const campaignCfg = cfgFor();
-  writeFileSync(campaignCfg.logFile, '{"event":"archived"}\n{"event":"campaign-start","batches":[["101"]]}\n{"event":"campaign-done","batches":1}\n');
+  writeFileSync(
+    campaignCfg.logFile,
+    '{"event":"archived"}\n{"event":"campaign-start","batches":[["101"]]}\n{"event":"campaign-done","batches":1}\n',
+  );
   assert.equal(hasUnarchivedRun(campaignCfg), true);
 
   const queueCfg = cfgFor();
@@ -92,8 +104,7 @@ test("shouldArchiveLeftover: a top-level run still archives a genuine leftover (
   assert.equal(shouldArchiveLeftover(fresh, { isChild: false }), false);
 });
 
-const ev = (event: string, extra: Record<string, unknown> = {}): OrchestratorEvent =>
-  ({ event, ...extra }) as unknown as OrchestratorEvent;
+const ev = (event: string, extra: Record<string, unknown> = {}): OrchestratorEvent => ({ event, ...extra }) as unknown as OrchestratorEvent;
 
 test("shouldArchiveIdle: a campaign that ended failed (nothing parked) is not idle — stays in the live log for redrive (#383)", () => {
   // A member's agent could not go green; the campaign logs campaign-failed and stops.
@@ -152,7 +163,10 @@ test("shouldArchiveIdle: a standalone run/answer (never a campaign-start) is dec
 
 test("archiveRun handles a missing or empty log without creating an archive, and still leaves records alone", () => {
   const cfg = cfgFor();
-  writeFileSync(join(cfg.parkedDir, "1.json"), JSON.stringify({ taskId: "1", reason: "question", branch: "b", sessionId: "s", question: "?" }));
+  writeFileSync(
+    join(cfg.parkedDir, "1.json"),
+    JSON.stringify({ taskId: "1", reason: "question", branch: "b", sessionId: "s", question: "?" }),
+  );
 
   const result = archiveRun(cfg);
 

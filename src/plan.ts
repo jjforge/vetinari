@@ -103,10 +103,7 @@ export const isIssueId = (token: string): boolean => /^#?\d+$/.test(token);
  */
 export async function expandSelection(
   tokens: string[],
-  listByLabel?: (
-    label: string,
-    onExcluded?: (e: Exclusion) => void,
-  ) => string[] | Promise<string[]>,
+  listByLabel?: (label: string, onExcluded?: (e: Exclusion) => void) => string[] | Promise<string[]>,
   onExcluded?: (e: Exclusion) => void,
 ): Promise<string[]> {
   const ids: string[] = [];
@@ -132,10 +129,7 @@ export async function expandSelection(
  * argument is assignable to it, so the wrap below is a no-op for resolvers that never
  * exclude anything.
  */
-type ExcludingBlockedBy = (
-  id: string,
-  onExcluded?: (e: Exclusion) => void,
-) => string[] | Promise<string[]>;
+type ExcludingBlockedBy = (id: string, onExcluded?: (e: Exclusion) => void) => string[] | Promise<string[]>;
 
 export async function layerWaves(ids: string[], blockedByOf: BlockedByOf): Promise<WavePlan> {
   const order = uniqueOrder(ids);
@@ -144,8 +138,7 @@ export async function layerWaves(ids: string[], blockedByOf: BlockedByOf): Promi
   // the provenance is the resolver naming it here (§4 step 2). Wrapping keeps
   // `restrictBlockers` (shared with `prune`) untouched: it still calls a one-arg fn.
   const excluded: Exclusion[] = [];
-  const collecting: BlockedByOf = (id) =>
-    (blockedByOf as ExcludingBlockedBy)(id, (e) => excluded.push(e));
+  const collecting: BlockedByOf = (id) => (blockedByOf as ExcludingBlockedBy)(id, (e) => excluded.push(e));
   const { inSet, external } = await restrictBlockers(order, collecting);
 
   // Unreachable closure. Seed with any ticket held by an open blocker outside the
@@ -154,7 +147,7 @@ export async function layerWaves(ids: string[], blockedByOf: BlockedByOf): Promi
   // prerequisite can, so an unreachable prerequisite takes its dependents with it.
   const dropped = new Set<string>();
   for (const id of order) if (external.get(id)!.size) dropped.add(id);
-  for (let changed = true; changed; ) {
+  for (let changed = true; changed;) {
     changed = false;
     for (const id of order) {
       if (dropped.has(id)) continue;
@@ -249,8 +242,7 @@ const keyBasename = (k: string) => k.slice(k.lastIndexOf("/") + 1);
  * `Creates:` basename) collides with any key of the same basename, since it names no
  * one path — exactly today's basename semantics for that one cite.
  */
-const keysCollide = (a: string, b: string) =>
-  a === b || (keyBasename(a) === keyBasename(b) && (isBareKey(a) || isBareKey(b)));
+const keysCollide = (a: string, b: string) => a === b || (keyBasename(a) === keyBasename(b) && (isBareKey(a) || isBareKey(b)));
 
 /** True when no fileKey in `a` collides with any in `b`. */
 const disjoint = (a: Set<string>, b: Set<string>) => {
@@ -297,7 +289,10 @@ export function partitionWaves(plan: WavePlan, fileKeysOf: Map<string, Set<strin
       // Why it landed here and not earlier: the already-placed tickets in strictly
       // earlier sub-waves it shares a file with. Empty when it stayed on the
       // frontier — greedy first-fit means every earlier sub-wave holds a collider.
-      const sharesFilesWith = subWaves.slice(0, idx).flatMap((sw) => sw.ids).filter((prior) => !disjoint(keysOf(prior), keys));
+      const sharesFilesWith = subWaves
+        .slice(0, idx)
+        .flatMap((sw) => sw.ids)
+        .filter((prior) => !disjoint(keysOf(prior), keys));
 
       placements.push({ id, wave: waves.length + idx, after: afterOf.get(id) ?? [], sharesFilesWith });
     }
@@ -468,9 +463,11 @@ export type LabelsOf = (id: string) => string[] | Promise<string[]>;
  */
 export async function suggestCampaignName(ids: string[], labelsOf: LabelsOf): Promise<string | undefined> {
   const spanned = new Set<string>();
-  await Promise.all(uniqueOrder(ids).map(async (id) => {
-    for (const label of await labelsOf(id)) spanned.add(label);
-  }));
+  await Promise.all(
+    uniqueOrder(ids).map(async (id) => {
+      for (const label of await labelsOf(id)) spanned.add(label);
+    }),
+  );
   const areas = AREA_LABELS.filter((area) => spanned.has(area));
   return areas.length ? areas.join(" + ") : undefined;
 }
@@ -673,8 +670,7 @@ export function makeAskUnderspecified(io: UnderspecifiedPromptIO): Underspecifie
     for (;;) {
       const answer = (await io.ask("drop or stop? [d/s] ")).trim().toLowerCase();
       if (answer === "d" || answer === "drop") return "drop";
-      if (answer === "s" || answer === "stop")
-        throw new Refusal(`stopped — add Touches:/Creates: lines to ${list} and re-run`);
+      if (answer === "s" || answer === "stop") throw new Refusal(`stopped — add Touches:/Creates: lines to ${list} and re-run`);
       io.log('please answer "d" (drop) or "s" (stop).');
     }
   };
@@ -759,10 +755,7 @@ export async function runCampaignPlan(
   deps: CampaignPlanRunDeps,
   expandExcluded: Exclusion[] = [],
 ): Promise<CampaignPlanReport> {
-  if (!ids.length)
-    throw new Refusal(
-      "campaign needs at least one issue id or label: campaign 436 611 640",
-    );
+  if (!ids.length) throw new Refusal("campaign needs at least one issue id or label: campaign 436 611 640");
   // A selection that resolves to a single issue layers into one trivial wave, so the
   // blockedBy *requirement* guards nothing — stand it down (§356). The check itself is
   // not skipped: a configured resolver still runs below and still drops a lone ticket
@@ -789,9 +782,7 @@ export async function runCampaignPlan(
 
   // A suggested --name from the area labels the selected issues span — the same
   // fetchTask the plan uses, read for its labels.
-  const suggestedName = await suggestCampaignName(ids, async (id) =>
-    labelsFromTask(String(await cfg.fetchTask(id))),
-  );
+  const suggestedName = await suggestCampaignName(ids, async (id) => labelsFromTask(String(await cfg.fetchTask(id))));
 
   // Fold the label-expansion exclusions in front of the planner's own so the
   // provenance's Excluded section names every edge drop, expansion then layering.
@@ -819,20 +810,12 @@ export interface FilesetCheckResult {
  * resolves. Pure over the injected `fetchTask`/`fileSet`; the tree read lives in the
  * resolver.
  */
-export async function runFilesetCheck(
-  cfg: CampaignPlanConfig,
-  ids: string[],
-): Promise<FilesetCheckResult[]> {
-  if (!ids.length)
-    throw new Refusal(
-      "fileset-check needs at least one ticket id: fileset-check 201 173",
-    );
+export async function runFilesetCheck(cfg: CampaignPlanConfig, ids: string[]): Promise<FilesetCheckResult[]> {
+  if (!ids.length) throw new Refusal("fileset-check needs at least one ticket id: fileset-check 201 173");
   const resolveFileSet = cfg.fileSet ?? defaultFileSet();
   return Promise.all(
     uniqueOrder(ids).map(async (id) => {
-      const { files, confident } = await resolveFileSet(
-        ticketProse(String(await cfg.fetchTask(id))),
-      );
+      const { files, confident } = await resolveFileSet(ticketProse(String(await cfg.fetchTask(id))));
       return { id, confident, files };
     }),
   );
@@ -850,8 +833,7 @@ export function describeFilesetCheck(results: FilesetCheckResult[]): string {
       const cites = r.files.map((f) => `\`${f}\``).join(", ");
       return r.confident
         ? `#${r.id}  confident — ${cites}`
-        : `#${r.id}  NOT confident — campaign would halt (planning)` +
-            (r.files.length ? ` (resolved so far: ${cites})` : "");
+        : `#${r.id}  NOT confident — campaign would halt (planning)` + (r.files.length ? ` (resolved so far: ${cites})` : "");
     })
     .join("\n");
 }

@@ -34,10 +34,7 @@ export function notice(spec: {
   category: MessageCategory;
   event?: string;
 }): Notice {
-  const lines = [
-    `${spec.emoji} ${spec.project} · ${spec.state} · ${spec.context}`,
-    spec.signal,
-  ];
+  const lines = [`${spec.emoji} ${spec.project} · ${spec.state} · ${spec.context}`, spec.signal];
   if (spec.recover) lines.push(`Recover: ${spec.recover}`);
   let text = lines.join("\n");
   if (spec.detail) text += `\n\n${spec.detail}`;

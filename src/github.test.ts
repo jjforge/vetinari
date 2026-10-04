@@ -23,9 +23,7 @@ test("githubBlockedBy queries the blocked_by endpoint and returns blocker number
 
   const blockers = githubBlockedBy("jjforge/jjforge", run)("#782");
 
-  assert.deepEqual(calls, [
-    ["api", "repos/jjforge/jjforge/issues/782/dependencies/blocked_by"],
-  ]);
+  assert.deepEqual(calls, [["api", "repos/jjforge/jjforge/issues/782/dependencies/blocked_by"]]);
   assert.deepEqual(blockers, ["191", "200"]);
 });
 
@@ -79,33 +77,20 @@ test("githubBlockedBy drops a pending-verify blocker and names it — merged-but
       },
     ]);
 
-  const blockers = githubBlockedBy(
-    "jjforge/vetinari",
-    run,
-    (line) => logs.push(line),
-  )("#316");
+  const blockers = githubBlockedBy("jjforge/vetinari", run, (line) => logs.push(line))("#316");
 
   // the still-open, merely-ready blocker gates; the pending-verify one — merged on
   // the base, awaiting only a human close — is treated as satisfied and dropped.
   assert.deepEqual(blockers, ["314"]);
   // named, never silently: the dependent and the satisfied blocker both appear.
   assert.equal(logs.length, 1);
-  assert.match(
-    logs[0],
-    /#316 — blocker #313 pending-verify, treated as satisfied/,
-  );
+  assert.match(logs[0], /#316 — blocker #313 pending-verify, treated as satisfied/);
 });
 
 test("githubBlockedBy keeps an open ready-for-agent blocker — an untouched prerequisite still gates (#326)", () => {
-  const run = () =>
-    JSON.stringify([
-      { number: 314, state: "open", labels: [{ name: "ready-for-agent" }] },
-    ]);
+  const run = () => JSON.stringify([{ number: 314, state: "open", labels: [{ name: "ready-for-agent" }] }]);
 
-  assert.deepEqual(
-    githubBlockedBy("jjforge/vetinari", run, () => {})("316"),
-    ["314"],
-  );
+  assert.deepEqual(githubBlockedBy("jjforge/vetinari", run, () => {})("316"), ["314"]);
 });
 
 test("githubIssuesByLabel lists the OPEN issues carrying a label and returns their numbers", () => {
@@ -144,11 +129,7 @@ test("githubIssuesByLabel drops a pending-verify row — merged work awaiting cl
       { number: 611, labels: [{ name: "ready-for-agent" }] },
     ]);
 
-  const ids = githubIssuesByLabel(
-    "jjforge/vetinari",
-    run,
-    (line) => logs.push(line),
-  )("campaign:audit");
+  const ids = githubIssuesByLabel("jjforge/vetinari", run, (line) => logs.push(line))("campaign:audit");
 
   // the still-open work stays; the merged, pending-verify issue is gone.
   assert.deepEqual(ids, ["611"]);
@@ -159,8 +140,7 @@ test("githubIssuesByLabel drops a pending-verify row — merged work awaiting cl
 
 test("the readiness axis is label-expansion only — an explicitly named pending-verify id is kept (#322)", async () => {
   // The same seam a real campaign wires: a stub gh returning #322 as pending-verify.
-  const run = () =>
-    JSON.stringify([{ number: 322, labels: [{ name: "pending-verify" }] }]);
+  const run = () => JSON.stringify([{ number: 322, labels: [{ name: "pending-verify" }] }]);
   const listByLabel = githubIssuesByLabel("jjforge/vetinari", run, () => {});
 
   // Via label expansion: #322 is dropped as merged-already work.
@@ -170,10 +150,7 @@ test("the readiness axis is label-expansion only — an explicitly named pending
 });
 
 test("githubIssuesByLabel returns an empty list when no open issue carries the label", () => {
-  assert.deepEqual(
-    githubIssuesByLabel("jjforge/vetinari", () => "[]")("nonexistent"),
-    [],
-  );
+  assert.deepEqual(githubIssuesByLabel("jjforge/vetinari", () => "[]")("nonexistent"), []);
 });
 
 test("githubIssuesByLabel drops an Epic carrying the label — it owns no work, is never scheduled (#322)", () => {
@@ -184,11 +161,7 @@ test("githubIssuesByLabel drops an Epic carrying the label — it owns no work, 
       { number: 611, issueType: { name: "Task" } },
     ]);
 
-  const ids = githubIssuesByLabel(
-    "jjforge/vetinari",
-    run,
-    (line) => logs.push(line),
-  )("campaign:vocabulary");
+  const ids = githubIssuesByLabel("jjforge/vetinari", run, (line) => logs.push(line))("campaign:vocabulary");
 
   // the task stays; the epic is gone.
   assert.deepEqual(ids, ["611"]);
@@ -205,25 +178,14 @@ test("githubIssuesByLabel matches the Epic type case-insensitively", () => {
       { number: 611, issueType: { name: "Bug" } },
     ]);
 
-  assert.deepEqual(
-    githubIssuesByLabel("jjforge/vetinari", run, () => {})("campaign:vocabulary"),
-    ["611"],
-  );
+  assert.deepEqual(githubIssuesByLabel("jjforge/vetinari", run, () => {})("campaign:vocabulary"), ["611"]);
 });
 
 test("githubIssuesByLabel keeps a row with no issueType — an untyped issue is work", () => {
   const logs: string[] = [];
-  const run = () =>
-    JSON.stringify([
-      { number: 611, issueType: null },
-      { number: 640 },
-    ]);
+  const run = () => JSON.stringify([{ number: 611, issueType: null }, { number: 640 }]);
 
-  const ids = githubIssuesByLabel(
-    "jjforge/vetinari",
-    run,
-    (line) => logs.push(line),
-  )("campaign:vocabulary");
+  const ids = githubIssuesByLabel("jjforge/vetinari", run, (line) => logs.push(line))("campaign:vocabulary");
 
   assert.deepEqual(ids, ["611", "640"]);
   assert.deepEqual(logs, []);
@@ -248,14 +210,8 @@ test("githubFetchTask fetches an issue asking for state and closedAt, not just t
   assert.deepEqual(calls[0].slice(0, 4), ["issue", "view", "165", "--repo"]);
   const fields = calls[0][calls[0].indexOf("--json") + 1].split(",");
   // state is the whole point — without it, issueStateFromTask always reads open (#175).
-  assert.ok(
-    fields.includes("state"),
-    `--json fields must include state, got ${fields.join(",")}`,
-  );
-  assert.ok(
-    fields.includes("closedAt"),
-    `--json fields must include closedAt, got ${fields.join(",")}`,
-  );
+  assert.ok(fields.includes("state"), `--json fields must include state, got ${fields.join(",")}`);
+  assert.ok(fields.includes("closedAt"), `--json fields must include closedAt, got ${fields.join(",")}`);
 });
 
 test("githubFetchTask surfaces closed state so issueStateFromTask resolves a closed issue to closed (#175)", () => {
@@ -303,14 +259,7 @@ test("githubFindingReporter creates a labeled issue cross-referenced to the task
   );
 
   assert.equal(url, "https://github.com/jjforge/jjforge/issues/901");
-  assert.deepEqual(captured.slice(0, 6), [
-    "issue",
-    "create",
-    "--repo",
-    "jjforge/jjforge",
-    "--title",
-    "Sidecar leaks a file handle",
-  ]);
+  assert.deepEqual(captured.slice(0, 6), ["issue", "create", "--repo", "jjforge/jjforge", "--title", "Sidecar leaks a file handle"]);
   const body = captured[captured.indexOf("--body") + 1];
   assert.match(body, /Repro:.*start then SIGTERM/);
   assert.match(body, /Location:.*sidecar\/src\/db\.rs/);
@@ -331,17 +280,7 @@ test("githubMarkPendingVerify relabels ready-for-agent → pending-verify on the
   githubMarkPendingVerify("jjforge/jjforge", run)("#640");
 
   assert.deepEqual(calls, [
-    [
-      "issue",
-      "edit",
-      "640",
-      "--repo",
-      "jjforge/jjforge",
-      "--add-label",
-      "pending-verify",
-      "--remove-label",
-      "ready-for-agent",
-    ],
+    ["issue", "edit", "640", "--repo", "jjforge/jjforge", "--add-label", "pending-verify", "--remove-label", "ready-for-agent"],
   ]);
 });
 

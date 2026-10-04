@@ -72,7 +72,10 @@ const DEFAULT_REFRESH_INTERVAL = 5;
  * ours is already installed the plan is a no-op that reports the still-wrapped base.
  * Returns a fresh settings object — the input is never mutated. Pure.
  */
-export function computeInstall(settings: Settings, opts: { runCommand: string; inheritedBase?: string; shadowedByLocal?: boolean }): { settings: Settings; base?: string; alreadyInstalled: boolean; shadowedByLocal: boolean } {
+export function computeInstall(
+  settings: Settings,
+  opts: { runCommand: string; inheritedBase?: string; shadowedByLocal?: boolean },
+): { settings: Settings; base?: string; alreadyInstalled: boolean; shadowedByLocal: boolean } {
   // A statusLine in the higher-precedence `.claude/settings.local.json` owns the
   // rendered block wholesale, so any write here would be inert. Skip it rather
   // than leave a shadowed entry that has no effect (see docs/operations.md).
@@ -106,7 +109,10 @@ export function computeInstall(settings: Settings, opts: { runCommand: string; i
  * that is not ours is left untouched. Returns a fresh settings object — the input
  * is never mutated. Pure.
  */
-export function computeUninstall(settings: Settings, opts: { inheritedBase?: string; shadowedByLocal?: boolean } = {}): { settings: Settings; restored?: string; wasInstalled: boolean; shadowedByLocal: boolean } {
+export function computeUninstall(
+  settings: Settings,
+  opts: { inheritedBase?: string; shadowedByLocal?: boolean } = {},
+): { settings: Settings; restored?: string; wasInstalled: boolean; shadowedByLocal: boolean } {
   // Symmetric to install: while `.claude/settings.local.json` owns a statusLine it
   // renders that block, so removing ours here would not be visible. Report the
   // shadow and change nothing.

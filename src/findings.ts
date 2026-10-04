@@ -68,7 +68,12 @@ export function parseFindings(stdout: string): Finding[] {
     if (!inner || inner.toLowerCase() === "none") continue;
     // A well-formed block has a <summary>; a loosely-formatted one still counts,
     // with its whole text as the summary, rather than being silently dropped.
-    const summary = field(inner, "summary") ?? inner.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    const summary =
+      field(inner, "summary") ??
+      inner
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
     if (!summary) continue;
     findings.push({ summary, location: field(inner, "location"), repro: field(inner, "repro") });
   }

@@ -163,8 +163,7 @@ test("describeInit's next steps name the agent credential file and every key of 
   assert.match(text, /\.vetinari\.local\/\.env/);
   // Both of the default provider's credential keys are printed from AGENT_PROVIDERS (any one
   // satisfies the preflight), not one hard-coded key — so `init` tracks the provider table (§13.1).
-  for (const key of AGENT_PROVIDERS[DEFAULT_PROVIDER].credentialKeys)
-    assert.match(text, new RegExp(key));
+  for (const key of AGENT_PROVIDERS[DEFAULT_PROVIDER].credentialKeys) assert.match(text, new RegExp(key));
   // The next-steps name the `agent` config option, so a project picking another provider knows what to set.
   assert.match(text, /`agent`/);
 });

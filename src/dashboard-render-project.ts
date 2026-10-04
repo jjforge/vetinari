@@ -26,21 +26,8 @@ import {
   TOP_BAR_STYLES,
 } from "./dashboard-assets.ts";
 import { dotClass, freezeIntent, graftCarry, reasonWord, redriveAllowed, resumeIntent } from "./dashboard-visual-state.ts";
-import {
-  escapeHtml,
-  escapeTitle,
-  type RepoOption,
-  renderHostLog,
-  renderRepoDropdown,
-  renderTopBar,
-} from "./dashboard-render.ts";
-import {
-  hasConflict,
-  isPrunable,
-  issueDetailSheetMarkup,
-  renderConflictNote,
-  renderGraftInline,
-} from "./dashboard-render-issue.ts";
+import { escapeHtml, escapeTitle, type RepoOption, renderHostLog, renderRepoDropdown, renderTopBar } from "./dashboard-render.ts";
+import { hasConflict, isPrunable, issueDetailSheetMarkup, renderConflictNote, renderGraftInline } from "./dashboard-render-issue.ts";
 
 const chipTitle = (issue: StatusIssue) => [issue.name, issue.detail].filter(Boolean).join("\n");
 
@@ -65,7 +52,10 @@ export const renderRedriveControl = (status: CampaignStatus, gate: { allowed: bo
   // The resume wave is the first not-fully-completed wave (design §7); its non-pruned members
   // are what a redrive re-enters. The name falls back to the project key for an unnamed run.
   const resume = status.waves.find((wave) => wave.status !== "completed");
-  const members = (resume?.issues ?? []).filter((issue) => issue.membership !== "pruned").map((issue) => `#${escapeHtml(issue.issueNumber)}`).join(", ");
+  const members = (resume?.issues ?? [])
+    .filter((issue) => issue.membership !== "pruned")
+    .map((issue) => `#${escapeHtml(issue.issueNumber)}`)
+    .join(", ");
   const text = `Redrive <strong>${escapeHtml(status.name || status.project)}</strong>: re-enters wave ${(resume?.index ?? 0) + 1} — ${members} — on <code>${escapeHtml(baseBranch ?? "the base branch")}</code>`;
   const dialog = `<dialog class="redrive-dialog" data-redrive-dialog><p class="redrive-dialog-text">${text}</p><form method="post" action="/redrive" class="redrive-dialog-actions" data-redrive-form><input type="hidden" name="project" value="${escapeHtml(status.project)}" /><button type="button" class="redrive-cancel" data-redrive-cancel autofocus>Cancel</button><button type="submit" class="redrive-confirm" data-redrive-confirm>Redrive</button></form></dialog>`;
   return `<div class="redrive-control">${openBtn}${dialog}</div>`;
@@ -86,7 +76,10 @@ export const renderRedriveControl = (status: CampaignStatus, gate: { allowed: bo
  */
 const renderWaveMember = (issue: StatusIssue, project: string, prune: boolean, interactive: boolean, run?: string) => {
   const detail = chipTitle(issue) || `#${issue.issueNumber}: ${issue.status}`;
-  const openData = interactive || prune ? ` data-issue="${escapeHtml(issue.issueNumber)}" data-project="${escapeHtml(project)}"${run ? ` data-run="${escapeHtml(run)}"` : ""}` : "";
+  const openData =
+    interactive || prune
+      ? ` data-issue="${escapeHtml(issue.issueNumber)}" data-project="${escapeHtml(project)}"${run ? ` data-run="${escapeHtml(run)}"` : ""}`
+      : "";
   const pruneData = prune && isPrunable(issue) ? ` data-prunable="1"` : "";
   const title = issue.name ? `<span class="wave-member-title">${escapeHtml(issue.name)}</span>` : "";
   // Compose the two orthogonal axes (ADR 0019): the lifecycle class colours the left
@@ -123,7 +116,12 @@ const renderWaveLabel = (wave: StatusWave, festiveName?: string) => {
   const lead = wave.issues[0];
   // The title is escaped before it reaches the shared `waveLabel`, whose output lands in HTML.
   // A resolved festive name (the gear toggle on) switches the label to `index · name`.
-  return waveLabel(wave.index, lead?.name ? escapeHtml(lead.name) : undefined, wave.issues.length - 1, festiveName ? { name: festiveName, surface: "card" } : undefined);
+  return waveLabel(
+    wave.index,
+    lead?.name ? escapeHtml(lead.name) : undefined,
+    wave.issues.length - 1,
+    festiveName ? { name: festiveName, surface: "card" } : undefined,
+  );
 };
 
 /** The festive name for a wave when the gear toggle is on and the run reserved an offset
@@ -148,7 +146,15 @@ const waveMerged = (wave: StatusWave) => wave.issues.filter((issue) => issue.sta
  * closed one the green, and an unstarted one a neutral edge. `extraAttrs` lets a
  * closed card carry the id + `hidden` its toggle chip drives.
  */
-const renderWaveCard = (wave: StatusWave, project: string, prune: boolean, interactive: boolean, extraAttrs = "", run?: string, festiveName?: string) => {
+const renderWaveCard = (
+  wave: StatusWave,
+  project: string,
+  prune: boolean,
+  interactive: boolean,
+  extraAttrs = "",
+  run?: string,
+  festiveName?: string,
+) => {
   // A pruned tally folded into the head's meta group beside the merged count, so a wave
   // a prune pruned reads at a glance — the pruned rows are a display overlay (ADR 0007),
   // and this counts them. The label sits in its own element so a long one wraps within
@@ -179,7 +185,8 @@ const renderClosedWaveChip = (wave: StatusWave, festiveName?: string) =>
  * detail sheet and, under prune, route a prune; the archived run passes it `false`. */
 const renderWaves = (status: CampaignStatus, prune: boolean, interactive: boolean, collapsible = true, run?: string, festive = false) => {
   if (!status.waves.length) return "<p>No active campaign or queue found.</p>";
-  if (!collapsible) return `<div class="waves-grid">${status.waves.map((wave) => renderWaveCard(wave, status.project, prune, interactive, "", run, festiveNameFor(status, wave, festive))).join("")}</div>`;
+  if (!collapsible)
+    return `<div class="waves-grid">${status.waves.map((wave) => renderWaveCard(wave, status.project, prune, interactive, "", run, festiveNameFor(status, wave, festive))).join("")}</div>`;
   const closedWaves = status.waves.filter((wave) => wave.closed);
   const openWaves = status.waves.filter((wave) => !wave.closed);
   const toggleRow = closedWaves.length
@@ -188,8 +195,20 @@ const renderWaves = (status: CampaignStatus, prune: boolean, interactive: boolea
   // The grid holds every closed card (hidden until its chip toggles it open) before
   // the open ones, in wave order; it renders whenever there is any wave to show.
   const cards = [
-    ...closedWaves.map((wave) => renderWaveCard(wave, status.project, prune, interactive, ` id="closed-wave-${wave.index}" hidden`, undefined, festiveNameFor(status, wave, festive))),
-    ...openWaves.map((wave) => renderWaveCard(wave, status.project, prune, interactive, "", undefined, festiveNameFor(status, wave, festive))),
+    ...closedWaves.map((wave) =>
+      renderWaveCard(
+        wave,
+        status.project,
+        prune,
+        interactive,
+        ` id="closed-wave-${wave.index}" hidden`,
+        undefined,
+        festiveNameFor(status, wave, festive),
+      ),
+    ),
+    ...openWaves.map((wave) =>
+      renderWaveCard(wave, status.project, prune, interactive, "", undefined, festiveNameFor(status, wave, festive)),
+    ),
   ];
   return `${toggleRow}${cards.length ? `<div class="waves-grid">${cards.join("")}</div>` : ""}`;
 };
@@ -382,8 +401,12 @@ export const renderLiveTail = (status: CampaignStatus, streaming = true) => {
   const agentsJson = escapeHtml(JSON.stringify(running.map((issue) => ({ issue: issue.issueNumber, status: issue.status }))));
   // A streaming source follows/pauses and its dot pulses live; a static (archived) source has no
   // stream to follow, so the play/pause control is omitted and the dot is seeded idle (#203).
-  const playBtn = streaming ? `<button type="button" class="lv-ico lv-pause" data-tail-play data-following="true" aria-label="Pause"></button>` : "";
-  const dot = streaming ? `<span class="tail-dot" data-tail-dot aria-hidden="true"></span>` : `<span class="tail-dot" data-tail-dot data-state="idle" aria-hidden="true"></span>`;
+  const playBtn = streaming
+    ? `<button type="button" class="lv-ico lv-pause" data-tail-play data-following="true" aria-label="Pause"></button>`
+    : "";
+  const dot = streaming
+    ? `<span class="tail-dot" data-tail-dot aria-hidden="true"></span>`
+    : `<span class="tail-dot" data-tail-dot data-state="idle" aria-hidden="true"></span>`;
   return (
     `<section class="live-tail" data-live-tail data-project="${escapeHtml(status.project)}" data-agents="${agentsJson}">` +
     `<div class="tail-head">` +
@@ -585,7 +608,8 @@ ${renderTopBar(opts.projects?.length ? renderRepoDropdown(opts.projects, opts.se
           // happens there — no inline /answer form). The href to the campaign view is
           // the no-JS fallback; parked issues are always prunable, so under prune the
           // card carries data-prunable so the sheet offers Prune (ADR 0005).
-          (p) => `<a class="parked-card" href="/?project=${encodeURIComponent(status.project)}" data-issue="${escapeHtml(p.issueNumber)}" data-project="${escapeHtml(status.project)}"${opts.prune ? ` data-prunable="1"` : ""}><div class="parked-card-title"><span class="parked-issue">#${escapeHtml(p.issueNumber)}</span> ${escapeHtml(p.description)}</div><div class="parked-card-meta">waiting <span class="parked-waited" data-parked-at="${escapeHtml(p.parkedAt)}">…</span> · ${escapeHtml(reasonWord(p.reason))}</div></a>`,
+          (p) =>
+            `<a class="parked-card" href="/?project=${encodeURIComponent(status.project)}" data-issue="${escapeHtml(p.issueNumber)}" data-project="${escapeHtml(status.project)}"${opts.prune ? ` data-prunable="1"` : ""}><div class="parked-card-title"><span class="parked-issue">#${escapeHtml(p.issueNumber)}</span> ${escapeHtml(p.description)}</div><div class="parked-card-meta">waiting <span class="parked-waited" data-parked-at="${escapeHtml(p.parkedAt)}">…</span> · ${escapeHtml(reasonWord(p.reason))}</div></a>`,
         )
         .join("")}</section>`
     : ""
@@ -793,4 +817,3 @@ ${HOST_LOG_SCRIPT}
 </script>
 </body>
 </html>`;
-

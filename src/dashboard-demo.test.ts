@@ -40,10 +40,11 @@ function coverageFromModel(configDir: string): { statuses: Set<DisplayStatus>; m
   const memberships = new Set<Membership>();
   const runStates = new Set<RunState>();
   const collect = (waves: { issues: { status: DisplayStatus; membership?: Membership }[] }[]) => {
-    for (const wave of waves) for (const issue of wave.issues) {
-      statuses.add(issue.status);
-      memberships.add(issue.membership ?? "member");
-    }
+    for (const wave of waves)
+      for (const issue of wave.issues) {
+        statuses.add(issue.status);
+        memberships.add(issue.membership ?? "member");
+      }
   };
   for (const pointer of listProjects(configDir)) {
     const live = buildStatus(statusConfigFromPointer(pointer));
@@ -83,7 +84,10 @@ test("the parked demo project writes the `parked` event a real park writes — p
   try {
     createDemo(configDir, root, new Date());
     const log = readFileSync(join(demoBaseLocation(root, DEMO_PARKED_PROJECT), "logs", "orchestrator.jsonl"), "utf8");
-    const events = log.split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    const events = log
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => JSON.parse(l));
     const parked = events.filter((e) => e.event === "parked");
     // A real question park (state.ts `park`) logs exactly { event:"parked", taskId, reason }
     // (a ts stamp, no detail). The demo must emit that, not merely materialize a record file.
@@ -92,7 +96,9 @@ test("the parked demo project writes the `parked` event a real park writes — p
     assert.equal(question.event, "parked");
     assert.ok(question.taskId, "the parked event carries its taskId");
     assert.deepEqual(
-      Object.keys(question).filter((k) => k !== "ts").sort(),
+      Object.keys(question)
+        .filter((k) => k !== "ts")
+        .sort(),
       ["event", "reason", "taskId"],
       "the question park event has exactly the keys a real park writes",
     );
@@ -131,7 +137,11 @@ test("demo remove unregisters exactly the demo projects and leaves a real one un
     assert.equal(existsSync(root), false, "the demo root is gone");
 
     const left = listProjects(configDir);
-    assert.deepEqual(left.map((p) => p.project), ["real-project"], "the real project survives");
+    assert.deepEqual(
+      left.map((p) => p.project),
+      ["real-project"],
+      "the real project survives",
+    );
 
     // A second remove finds nothing under the (now absent) root — a clean no-op.
     assert.deepEqual(removeDemo(configDir, root).removed, []);

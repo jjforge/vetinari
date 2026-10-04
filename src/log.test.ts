@@ -52,7 +52,10 @@ test("a Logger's kind is authoritative — a data.event key can't override it", 
   // enqueueOutbound passes `event: rec.event` (the outbound record's kind, e.g. "green")
   // as payload; the persisted line's kind must stay the true emit kind, not the payload's.
   logger.log("outbound-enqueued", { id: "abc", category: "success", event: "green" });
-  const rows = readFileSync(logFile, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const rows = readFileSync(logFile, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((l) => JSON.parse(l));
   assert.equal(rows.length, 1);
   assert.equal(rows[0].event, "outbound-enqueued");
 });

@@ -12,8 +12,7 @@ import { Refusal, handleCliError } from "./refusal.ts";
 // is actually registered for a throw raised before command dispatch.
 const CLI = fileURLToPath(new URL("./cli.mts", import.meta.url));
 const TSX = fileURLToPath(new URL("../node_modules/.bin/tsx", import.meta.url));
-const runCli = (args: string[], cwd: string) =>
-  spawnSync(TSX, [CLI, ...args], { cwd, encoding: "utf8" });
+const runCli = (args: string[], cwd: string) => spawnSync(TSX, [CLI, ...args], { cwd, encoding: "utf8" });
 
 test("Refusal is an Error subclass so existing catch sites keep working", () => {
   const r = new Refusal("nope");
@@ -26,18 +25,12 @@ test("Refusal is an Error subclass so existing catch sites keep working", () => 
 test("handleCliError writes a Refusal's message alone on stderr (no stack frames) and exits 4", () => {
   const out: string[] = [];
   const exits: number[] = [];
-  handleCliError(
-    new Refusal(
-      "not a git repository: /tmp — run this from inside your project's checkout.",
-    ),
-    { writeStderr: (s) => out.push(s), exit: (c) => exits.push(c) },
-  );
+  handleCliError(new Refusal("not a git repository: /tmp — run this from inside your project's checkout."), {
+    writeStderr: (s) => out.push(s),
+    exit: (c) => exits.push(c),
+  });
   const text = out.join("");
-  assert.equal(
-    text,
-    "not a git repository: /tmp — run this from inside your project's checkout.\n",
-    "exactly the message, nothing else",
-  );
+  assert.equal(text, "not a git repository: /tmp — run this from inside your project's checkout.\n", "exactly the message, nothing else");
   assert.ok(!/\n\s+at /.test(text), "no `    at …` stack frames");
   assert.deepEqual(exits, [4]);
 });

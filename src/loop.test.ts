@@ -132,17 +132,12 @@ test("extractTurnSummary does not mistake the <summary> nested in a <question> f
 
 test("parkedAnswerComment marks the relay, echoes the parked question, then carries the answer", () => {
   const body = parkedAnswerComment("Which base branch should the prune target?", "Use main.");
-  assert.equal(
-    body,
-    "> *Parked-question answer relayed by vetinari.*\n**Q:** Which base branch should the prune target?\nUse main.",
-  );
+  assert.equal(body, "> *Parked-question answer relayed by vetinari.*\n**Q:** Which base branch should the prune target?\nUse main.");
 });
 
 test("runLoop parks (question) when a turn emits the BLOCKED signal", async () => {
   const cfg = harnessCfg();
-  const sbx = fakeSandbox([
-    { run: { completionSignal: BLOCKED, stdout: "<question><summary>Which base?</summary></question>" } },
-  ]);
+  const sbx = fakeSandbox([{ run: { completionSignal: BLOCKED, stdout: "<question><summary>Which base?</summary></question>" } }]);
 
   const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
 
@@ -165,7 +160,10 @@ test("runLoop parks (stalled: no-commit) when the gate passes but the branch has
   assert.equal(parked[0].reason, "stalled");
   assert.equal(parked[0].detail, "no-commit");
   // The empty-green guard fired — no green event, no success outbound.
-  assert.equal(readEventLog(cfg).some((e) => e.event === "green"), false);
+  assert.equal(
+    readEventLog(cfg).some((e) => e.event === "green"),
+    false,
+  );
 });
 
 test("runLoop's no-commit park precedes the gates (design §3 step 6): a COMPLETE with nothing ahead parks stalled/no-commit without spending a gate run", async () => {
@@ -183,7 +181,10 @@ test("runLoop's no-commit park precedes the gates (design §3 step 6): a COMPLET
   assert.equal(parked[0].reason, "stalled");
   assert.equal(parked[0].detail, "no-commit");
   // No gate run was spent — the no-commit check short-circuits ahead of step 7.
-  assert.equal(readEventLog(cfg).some((e) => e.event === "gate"), false);
+  assert.equal(
+    readEventLog(cfg).some((e) => e.event === "gate"),
+    false,
+  );
 });
 
 test("runLoop logs a failed verdict and returns failed when a turn throws a non-Idle error (design §3 step 9)", async () => {
@@ -231,7 +232,9 @@ test("runLoop folds a Refusal to a failed verdict and returns failed — the loo
   const sbx = fakeSandbox([]);
   const deps = depsFor(sbx, {
     makeSandbox: async () => {
-      throw new Refusal("agent/T-1 is already checked out at /somewhere — remove that worktree before running this issue (one run per issue).");
+      throw new Refusal(
+        "agent/T-1 is already checked out at /somewhere — remove that worktree before running this issue (one run per issue).",
+      );
     },
   });
 
@@ -365,7 +368,10 @@ test("runLoop counts a null commitsAhead (git failed) as a real change, not an e
   const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { commitsAhead: () => null })));
 
   assert.equal(outcome, "green");
-  assert.ok(readEventLog(cfg).some((e) => e.event === "green"), "null commitsAhead must still be green");
+  assert.ok(
+    readEventLog(cfg).some((e) => e.event === "green"),
+    "null commitsAhead must still be green",
+  );
   assert.equal(listParked(cfg).length, 0);
 });
 
@@ -528,7 +534,8 @@ const capturingReporter = () => {
   return { calls, reportFinding };
 };
 
-const ONE_FINDING = "<finding><summary>Cache extracted corrupt</summary><location>vendor/hex</location></finding><promise>COMPLETE</promise>";
+const ONE_FINDING =
+  "<finding><summary>Cache extracted corrupt</summary><location>vendor/hex</location></finding><promise>COMPLETE</promise>";
 
 test("runLoop harvests a budget-exhausted park on the still-live session, filing findings marked with the exit", async () => {
   const rep = capturingReporter();
@@ -609,7 +616,10 @@ test("runLoop's idle stall with no recoverable session skips the harvest cleanly
   assert.equal(outcome, "parked");
   assert.equal(listParked(cfg)[0].detail, "idle");
   // No session to resume, so no harvest turn ran and nothing was filed — silently skipped.
-  assert.equal(sbx.runCalls.some((c) => c.prompt === HARVEST_PROMPT), false);
+  assert.equal(
+    sbx.runCalls.some((c) => c.prompt === HARVEST_PROMPT),
+    false,
+  );
   assert.equal(rep.calls.length, 0);
 });
 
@@ -621,17 +631,18 @@ test("runLoop does not harvest a thrown terminal failure", async () => {
   const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
 
   assert.equal(outcome, "failed");
-  assert.equal(sbx.runCalls.some((c) => c.prompt === HARVEST_PROMPT), false, "a thrown failure never harvests");
+  assert.equal(
+    sbx.runCalls.some((c) => c.prompt === HARVEST_PROMPT),
+    false,
+    "a thrown failure never harvests",
+  );
   assert.equal(rep.calls.length, 0);
 });
 
 test("runLoop's green harvest is unmarked — a verified finding carries no source", async () => {
   const rep = capturingReporter();
   const cfg = harnessCfg({ reportFinding: rep.reportFinding });
-  const sbx = fakeSandbox([
-    { run: { completionSignal: DONE, commits: [{ sha: "abc" }] }, green: true },
-    { run: { stdout: ONE_FINDING } },
-  ]);
+  const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc" }] }, green: true }, { run: { stdout: ONE_FINDING } }]);
 
   const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
 
@@ -665,7 +676,13 @@ test("runLoop resumes the parked session on the answer path without re-fetching 
 
 test("runLoop consumes an answered parked record for a resumable provider — resumes the session with the answer and clears the record", async () => {
   let fetched = 0;
-  const cfg = harnessCfg({ agent: { provider: "claude" }, fetchTask: async () => { fetched++; return "task text"; } });
+  const cfg = harnessCfg({
+    agent: { provider: "claude" },
+    fetchTask: async () => {
+      fetched++;
+      return "task text";
+    },
+  });
   await park(cfg, { taskId: "T-1", reason: "question", sessionId: "prev-sess", branch: "agent/T-1", question: "Which approach?" });
   answerParked(cfg, "T-1", "use approach A");
   const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc123" }] }, green: true }]);
@@ -687,8 +704,13 @@ test("runLoop consumes an answered parked record for a non-resumable provider �
   const cfg = harnessCfg({
     agent: { provider: "copilot" },
     promptFile: "/prompts/tdd.md",
-    postComment: async (taskId: string, body: string) => { posted.push({ taskId, body }); },
-    fetchTask: async () => { fetched++; return "task text"; },
+    postComment: async (taskId: string, body: string) => {
+      posted.push({ taskId, body });
+    },
+    fetchTask: async () => {
+      fetched++;
+      return "task text";
+    },
   });
   await park(cfg, { taskId: "T-1", reason: "question", branch: "agent/T-1", question: "Which approach?" });
   answerParked(cfg, "T-1", "use approach A");
@@ -714,7 +736,9 @@ const leaseObservingSandbox = (configDir: string, project: string) => {
   const sbx: Sandbox = {
     branch: "agent/T-1",
     async run() {
-      observed.runHeld = readLeases(configDir).filter((l) => l.project === project).reduce((s, l) => s + l.held, 0);
+      observed.runHeld = readLeases(configDir)
+        .filter((l) => l.project === project)
+        .reduce((s, l) => s + l.held, 0);
       observed.liveCampaign = projectHasLiveCampaign(configDir, project);
       return { iterations: [{ sessionId: "s" }], commits: [{ sha: "abc123" }], completionSignal: DONE, stdout: "" };
     },

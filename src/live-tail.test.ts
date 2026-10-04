@@ -82,7 +82,13 @@ test("buildLiveTail attaches each line's humanized parts for the log-view compon
 
   // The server humanizes each raw line once so the client renders pre-humanized rows and
   // keeps `raw` for the Raw toggle and the download.
-  assert.deepEqual(tail.lines[0].humanized, { time: "02:15:00", actor: "#204", verb: "edited", spans: [{ text: "src/x.ts", kind: "code" }], dot: "running" });
+  assert.deepEqual(tail.lines[0].humanized, {
+    time: "02:15:00",
+    actor: "#204",
+    verb: "edited",
+    spans: [{ text: "src/x.ts", kind: "code" }],
+    dot: "running",
+  });
 });
 
 test("buildLiveTail interleaves two running agents by ts and excludes finished ones", () => {
@@ -101,7 +107,11 @@ test("buildLiveTail interleaves two running agents by ts and excludes finished o
   initActivityLog(dir, "303");
   appendActivity(dir, "301", event("tool", { taskId: "301", name: "Read", ts: "2026-08-27T00:00:01.000Z" }));
   appendActivity(dir, "302", event("tool", { taskId: "302", name: "Edit", ts: "2026-08-27T00:00:02.000Z" }));
-  appendActivity(dir, "301", event("commit", { taskId: "301", branch: "agent/301", sha: "abc", files: ["x"], ts: "2026-08-27T00:00:03.000Z" }));
+  appendActivity(
+    dir,
+    "301",
+    event("commit", { taskId: "301", branch: "agent/301", sha: "abc", files: ["x"], ts: "2026-08-27T00:00:03.000Z" }),
+  );
   appendActivity(dir, "303", event("tool", { taskId: "303", name: "Read", ts: "2026-08-27T00:00:04.000Z" }));
 
   const tail = buildLiveTail(cfgFor(dir));
@@ -133,7 +143,10 @@ test("buildLiveTail follows the wave in flight: a running agent from a wave not 
   const tail = buildLiveTail(cfgFor(dir));
 
   assert.deepEqual(tail.agents, [{ issue: "301", status: "running" }]);
-  assert.deepEqual(tail.lines.map((l) => l.issue), ["301"]);
+  assert.deepEqual(
+    tail.lines.map((l) => l.issue),
+    ["301"],
+  );
 });
 
 test("buildLiveTail re-subscribes to the new wave on advance: the prior wave's stale-running ghost is dropped (#309)", () => {
@@ -157,7 +170,10 @@ test("buildLiveTail re-subscribes to the new wave on advance: the prior wave's s
   const tail = buildLiveTail(cfgFor(dir));
 
   assert.deepEqual(tail.agents, [{ issue: "302", status: "running" }]);
-  assert.deepEqual(tail.lines.map((l) => l.issue), ["302"]);
+  assert.deepEqual(
+    tail.lines.map((l) => l.issue),
+    ["302"],
+  );
 });
 
 // A small line factory for the pure client reducers (issue/raw are all they read).
@@ -167,7 +183,10 @@ test("tailView (following) shows the newest `cap` lines, newest-first, after the
   const buffer = [ln("1", 0, "alpha"), ln("2", 1, "beta"), ln("1", 2, "gamma"), ln("2", 3, "alpha-two")];
   // No filter, cap 2 → the newest two of four, following, newest at the head.
   const all = tailView({ buffer, mark: 0, live: true, issue: "", query: "", cap: 2 });
-  assert.deepEqual(all.rows.map((r) => r.raw), ["alpha-two", "gamma"]);
+  assert.deepEqual(
+    all.rows.map((r) => r.raw),
+    ["alpha-two", "gamma"],
+  );
   assert.equal(all.visible, 2);
   assert.equal(all.total, 4);
   assert.equal(all.backlog, 0);
@@ -176,7 +195,10 @@ test("tailView (following) shows the newest `cap` lines, newest-first, after the
 
   // Issue filter composes with a case-insensitive substring filter on the whole raw line.
   const filtered = tailView({ buffer, mark: 0, live: true, issue: "2", query: "ALPHA", cap: 10 });
-  assert.deepEqual(filtered.rows.map((r) => r.raw), ["alpha-two"]);
+  assert.deepEqual(
+    filtered.rows.map((r) => r.raw),
+    ["alpha-two"],
+  );
   assert.equal(filtered.visible, 1);
   assert.equal(filtered.total, 4);
 
@@ -191,7 +213,10 @@ test("tailView (paused) freezes the visible set at the mark and counts the rest 
   const buffer = [ln("1", 0, "a"), ln("1", 1, "b"), ln("1", 2, "c"), ln("2", 3, "d")];
   const paused = tailView({ buffer, mark: 2, live: false, issue: "", query: "", cap: 10 });
   // Visible is frozen at the first two, rendered newest-first; the two newer lines are held as backlog.
-  assert.deepEqual(paused.rows.map((r) => r.raw), ["b", "a"]);
+  assert.deepEqual(
+    paused.rows.map((r) => r.raw),
+    ["b", "a"],
+  );
   assert.equal(paused.backlog, 2);
   assert.equal(paused.total, 4);
   assert.equal(paused.following, false);
@@ -206,21 +231,37 @@ test("tailAppend caps the buffer while following but lets it grow while paused",
   const incoming = [ln("1", 2), ln("1", 3)];
   // Following, cap 3 → keeps the newest 3, oldest discarded.
   const followed = tailAppend(start, incoming, true, 3);
-  assert.deepEqual(followed.map((r) => r.n), [1, 2, 3]);
+  assert.deepEqual(
+    followed.map((r) => r.n),
+    [1, 2, 3],
+  );
   // Paused → grows past the cap so a piling backlog survives.
   const grown = tailAppend(start, incoming, false, 3);
-  assert.deepEqual(grown.map((r) => r.n), [0, 1, 2, 3]);
+  assert.deepEqual(
+    grown.map((r) => r.n),
+    [0, 1, 2, 3],
+  );
 });
 
 test("tailFresh treats a re-sent snapshot line as new only when its per-file index advances", () => {
   const snapshot = [ln("1", 0), ln("1", 1), ln("2", 0)];
   const first = tailFresh(snapshot, {});
-  assert.deepEqual(first.fresh.map((r) => [r.issue, r.n]), [["1", 0], ["1", 1], ["2", 0]]);
+  assert.deepEqual(
+    first.fresh.map((r) => [r.issue, r.n]),
+    [
+      ["1", 0],
+      ["1", 1],
+      ["2", 0],
+    ],
+  );
   assert.deepEqual(first.seen, { "1": 1, "2": 0 });
 
   // Next snapshot re-sends the window plus one new line for issue 1; only the new one is fresh.
   const next = tailFresh([ln("1", 1), ln("2", 0), ln("1", 2)], first.seen);
-  assert.deepEqual(next.fresh.map((r) => [r.issue, r.n]), [["1", 2]]);
+  assert.deepEqual(
+    next.fresh.map((r) => [r.issue, r.n]),
+    [["1", 2]],
+  );
   assert.deepEqual(next.seen, { "1": 2, "2": 0 });
 });
 
@@ -460,11 +501,7 @@ test("GET /api/events pushes a named `host` frame when host.jsonl gains a row (#
         !host!.data.lines.some((l: string) => l.includes("gateway-routed")),
         "the connect backlog row is not re-pushed within the frame",
       );
-      assert.equal(
-        stream.frames.filter((f) => f.event === "host").length,
-        1,
-        "the connect backlog never surfaced a host frame of its own",
-      );
+      assert.equal(stream.frames.filter((f) => f.event === "host").length, 1, "the connect backlog never surfaced a host frame of its own");
     } finally {
       await stream.close();
       await new Promise<void>((r) => server.close(() => r()));
@@ -476,12 +513,24 @@ test("GET /api/events pushes a named `host` frame when host.jsonl gains a row (#
 
 const statusWith = (issues: Array<[string, string]>): CampaignStatus => ({
   project: "acme",
-  waves: [{ index: 0, status: "running", issues: issues.map(([issueNumber, status]) => ({ issueNumber, status: status as CampaignStatus["waves"][0]["issues"][0]["status"] })) }],
+  waves: [
+    {
+      index: 0,
+      status: "running",
+      issues: issues.map(([issueNumber, status]) => ({ issueNumber, status: status as CampaignStatus["waves"][0]["issues"][0]["status"] })),
+    },
+  ],
   parked: [],
 });
 
 test("renderLiveTail draws the pane only when a repo has a running agent, one dropdown row each", () => {
-  const html = renderLiveTail(statusWith([["204", "running"], ["205", "running"], ["203", "completed"]]));
+  const html = renderLiveTail(
+    statusWith([
+      ["204", "running"],
+      ["205", "running"],
+      ["203", "completed"],
+    ]),
+  );
   assert.match(html, /data-live-tail/);
   assert.match(html, /Live tail · agent logs/);
   // Summary counts the running agents (not the completed one).
@@ -522,7 +571,12 @@ test("renderLiveTail omits follow/pause and renders the dot idle for a static (n
 });
 
 test("renderLiveTail renders the pane collapsed (present, not hidden) when no agent is running (#330)", () => {
-  const html = renderLiveTail(statusWith([["203", "completed"], ["205", "parked"]]));
+  const html = renderLiveTail(
+    statusWith([
+      ["203", "completed"],
+      ["205", "parked"],
+    ]),
+  );
   // The pane holds its space at all times now — never removed from the layout, so no `hidden`
   // on the section (that would drop it and reflow everything below).
   assert.doesNotMatch(html, /data-live-tail[^>]*\shidden/);
@@ -567,7 +621,7 @@ test("renderStatusPage places the live tail between the wave grid and the archiv
   // The pane sits after the #live-region close (so a soft-refresh that swaps live-region
   // never blows away the tail's client state) — i.e. the tail markup follows </div> that
   // closes live-region.
-  const liveRegionClose = html.indexOf('</div>\n');
+  const liveRegionClose = html.indexOf("</div>\n");
   const tailAt = html.indexOf("data-live-tail");
   assert.ok(tailAt > -1, "tail is rendered");
   const regionOpen = html.indexOf('id="live-region"');

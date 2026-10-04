@@ -69,11 +69,9 @@ export const handleGraft: RouteHandler = async (req, res, url, deps) => {
     return true;
   }
   // Shell the real graft in the project's own root and wait for it to exit — no dry-run.
-  const { code, stdout, stderr, timedOut } = await deps.runChild(
-    pointer.projectRoot,
-    ["graft", ...ids, "--json"],
-    { timeoutMs: deps.graftTimeoutMs },
-  );
+  const { code, stdout, stderr, timedOut } = await deps.runChild(pointer.projectRoot, ["graft", ...ids, "--json"], {
+    timeoutMs: deps.graftTimeoutMs,
+  });
   if (timedOut) {
     // Still running at the cap: the child is NOT killed (it may be about to append its
     // event, decision 6). A refusal would have printed its closure and exited, so all
@@ -96,7 +94,13 @@ export const handleGraft: RouteHandler = async (req, res, url, deps) => {
   }
   // No closure line: the child broke. Surface its own last non-empty stderr line — `graft`
   // throws in the operator's own language, and that sentence is what makes it actionable.
-  const lastLine = stderr.split("\n").map((l) => l.trim()).filter(Boolean).at(-1);
-  res.writeHead(502, { "content-type": "text/plain; charset=utf-8" }).end(lastLine || `Couldn't graft ${ids.map((i) => `#${i}`).join(", ")} for ${project} — is a campaign still running?`);
+  const lastLine = stderr
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .at(-1);
+  res
+    .writeHead(502, { "content-type": "text/plain; charset=utf-8" })
+    .end(lastLine || `Couldn't graft ${ids.map((i) => `#${i}`).join(", ")} for ${project} — is a campaign still running?`);
   return true;
 };

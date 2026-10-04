@@ -42,7 +42,6 @@ test("tallyDotClass stills a 0-running tally dot with idle but keeps the blue (�
   assert.equal(tallyDotClass({ kind: "parked", count: 3 }), "parked");
 });
 
-
 test("freezeIntent ages the 'last activity Ns ago' readout from now (#210, #337)", () => {
   // The readout means page liveness — the last time any live surface visibly appended —
   // so its word names that event, never grid freshness (#337).

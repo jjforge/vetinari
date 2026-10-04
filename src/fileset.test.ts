@@ -7,8 +7,7 @@ import { defaultFileSet, ticketProse } from "./fileset.ts";
 
 let counter = 0;
 /** A fresh, not-yet-created throwaway tree path. */
-const freshRoot = (): string =>
-  join(tmpdir(), `vetinari-fileset-${Date.now()}-${counter++}`);
+const freshRoot = (): string => join(tmpdir(), `vetinari-fileset-${Date.now()}-${counter++}`);
 /** Create the given repo-relative files (each empty) under `root`. */
 const populate = (root: string, ...files: string[]): void => {
   for (const rel of files) {
@@ -29,14 +28,9 @@ test("defaultFileSet resolves the body's cites to their real repo-relative paths
   const root = treeWith("src/plan.ts", "templates/repo/stack_strip.tmpl");
   const fileSet = defaultFileSet(root);
 
-  const res = fileSet(
-    "Touches `src/plan.ts` and templates/repo/stack_strip.tmpl for the strip.",
-  );
+  const res = fileSet("Touches `src/plan.ts` and templates/repo/stack_strip.tmpl for the strip.");
 
-  assert.deepEqual(res.files.sort(), [
-    "src/plan.ts",
-    "templates/repo/stack_strip.tmpl",
-  ]);
+  assert.deepEqual(res.files.sort(), ["src/plan.ts", "templates/repo/stack_strip.tmpl"]);
   assert.equal(res.confident, true);
 });
 
@@ -45,9 +39,7 @@ test("defaultFileSet resolves the same file cited via different paths to one ent
   const fileSet = defaultFileSet(root);
 
   // Cited twice under two different paths — both resolve to the one real path.
-  const res = fileSet(
-    "Edits `src/plan.ts`, and also referenced as a/b/plan.ts elsewhere.",
-  );
+  const res = fileSet("Edits `src/plan.ts`, and also referenced as a/b/plan.ts elsewhere.");
 
   assert.deepEqual(res.files, ["src/plan.ts"]);
   assert.equal(res.confident, true);
@@ -56,9 +48,7 @@ test("defaultFileSet resolves the same file cited via different paths to one ent
 test("defaultFileSet is not confident when the ticket cites no path at all", () => {
   const root = treeWith("src/plan.ts");
 
-  const res = defaultFileSet(root)(
-    "Refactor the planner for clarity. No file mentioned.",
-  );
+  const res = defaultFileSet(root)("Refactor the planner for clarity. No file mentioned.");
 
   assert.deepEqual(res.files, []);
   assert.equal(res.confident, false);
@@ -95,9 +85,7 @@ test("defaultFileSet snapshots the tree once: a mutation between two resolutions
 test("defaultFileSet never walks the tree when the built resolver is never invoked (§356)", () => {
   // The single-issue path builds a resolver, then decides to resolve no file-sets
   // at all. A root that would throw if walked must not be read at construction.
-  assert.doesNotThrow(() =>
-    defaultFileSet("/vetinari-nonexistent-root-that-would-throw-if-walked"),
-  );
+  assert.doesNotThrow(() => defaultFileSet("/vetinari-nonexistent-root-that-would-throw-if-walked"));
 });
 
 test("defaultFileSet snapshots on first use, not at construction", () => {
@@ -203,9 +191,7 @@ test("ticketProse falls back to an anchored marker line found only in a comment"
   const task = JSON.stringify({
     title: "Fix the resolver",
     body: "Reworks the resolver, per the brief below.",
-    comments: [
-      { body: "Agent brief.\n\nTouches (existing files): `fileset.ts`\n" },
-    ],
+    comments: [{ body: "Agent brief.\n\nTouches (existing files): `fileset.ts`\n" }],
   });
 
   const res = fileSet(ticketProse(task));
@@ -263,10 +249,7 @@ test("ticketProse unions marker lines across several comments when the body has 
   const task = JSON.stringify({
     title: "Fix",
     body: "No marker here.",
-    comments: [
-      { body: "Touches (existing files): `fileset.ts`\n" },
-      { body: "Touches (existing files): `plan.ts`\n" },
-    ],
+    comments: [{ body: "Touches (existing files): `fileset.ts`\n" }, { body: "Touches (existing files): `plan.ts`\n" }],
   });
 
   const res = fileSet(ticketProse(task));
@@ -281,9 +264,7 @@ test("defaultFileSet recovers a slash-path cite fenced by backslash-escaped back
   // #249's shape: `\`src/dashboard-render.ts\`` — a slash path fenced by stray
   // backslashes. The escape is a delimiter artifact orthogonal to tree-presence, so
   // the resolver strips it and recovers the clean path rather than halting.
-  const res = defaultFileSet(root)(
-    "Touches (existing files): \\`src/dashboard-render.ts\\`\n",
-  );
+  const res = defaultFileSet(root)("Touches (existing files): \\`src/dashboard-render.ts\\`\n");
 
   assert.deepEqual(res.files, ["src/dashboard-render.ts"]);
   assert.equal(res.confident, true);
@@ -305,9 +286,7 @@ test("defaultFileSet recovers a #201-shaped bare-filename cite fenced by escaped
 
   // #201's shape: `\`fileset.ts\`` — a bare name wrapped in stray backslashes. The
   // escape is stripped, so the bare name is recovered just like the slash path.
-  const res = defaultFileSet(root)(
-    "Touches (existing files): \\`fileset.ts\\`\n",
-  );
+  const res = defaultFileSet(root)("Touches (existing files): \\`fileset.ts\\`\n");
 
   assert.deepEqual(res.files, ["src/fileset.ts"]);
   assert.equal(res.confident, true);
@@ -410,9 +389,7 @@ test("defaultFileSet still ignores a :line prose cite beside a clean marker line
 
   // The marker line wins outright; the prose cite (even now that its suffix would
   // strip cleanly) stays ignored because a marker line is present.
-  const res = fileSet(
-    "prose cites `src/modes.ts:335`\n\nTouches: `src/host-slots.ts`\n",
-  );
+  const res = fileSet("prose cites `src/modes.ts:335`\n\nTouches: `src/host-slots.ts`\n");
 
   assert.deepEqual(res.files, ["src/host-slots.ts"]);
   assert.equal(res.confident, true);
@@ -425,9 +402,7 @@ test("defaultFileSet anchors the marker at a line start — an inline prose ment
   // The prose mentions the phrase mid-sentence (with an empty-looking inline
   // `Touches:`); the real marker line at line start is what must be read.
   const res = fileSet(
-    "The reader must anchor on an actual `Touches:` marker line, not a mention.\n" +
-      "\n" +
-      "Touches (existing files): `src/plan.ts`\n",
+    "The reader must anchor on an actual `Touches:` marker line, not a mention.\n" + "\n" + "Touches (existing files): `src/plan.ts`\n",
   );
 
   assert.deepEqual(res.files, ["src/plan.ts"]);
@@ -451,9 +426,7 @@ test("defaultFileSet is not confident when the marker line cites nothing", () =>
 
   // A marker line is present but empty — that is a genuine "cites nothing", so the
   // halt path is preserved even though `src/plan.ts` is named off the marker line.
-  const res = fileSet(
-    "Reworks `src/plan.ts` for clarity.\n\nTouches (existing files):\n",
-  );
+  const res = fileSet("Reworks `src/plan.ts` for clarity.\n\nTouches (existing files):\n");
 
   assert.deepEqual(res.files, []);
   assert.equal(res.confident, false);
@@ -465,9 +438,7 @@ test("defaultFileSet is confident about a ticket that only creates new files, ab
 
   // #108's shape: the ticket creates event-log.ts + its test, neither in the tree
   // yet. A `Creates:` cite is legitimately absent, so absence must not read as a typo.
-  const res = fileSet(
-    "Creates (new files): `event-log.ts`, `event-log.test.ts`\n",
-  );
+  const res = fileSet("Creates (new files): `event-log.ts`, `event-log.test.ts`\n");
 
   assert.deepEqual(res.files.sort(), ["event-log.test.ts", "event-log.ts"]);
   assert.equal(res.confident, true);
@@ -477,9 +448,7 @@ test("defaultFileSet unions a Touches line (existing) with a Creates line (new)"
   const root = treeWith("src/status.ts");
   const fileSet = defaultFileSet(root);
 
-  const res = fileSet(
-    "Touches: `status.ts`\nCreates (new files): `event-log.ts`\n",
-  );
+  const res = fileSet("Touches: `status.ts`\nCreates (new files): `event-log.ts`\n");
 
   assert.deepEqual(res.files.sort(), ["event-log.ts", "src/status.ts"]);
   assert.equal(res.confident, true);
@@ -491,9 +460,7 @@ test("defaultFileSet keeps Touches strictness even alongside a Creates line", ()
 
   // `ghost.ts` under Touches is absent from the tree — a stale existing-file note.
   // A valid Creates line must not launder that miss into confidence.
-  const res = fileSet(
-    "Touches: `status.ts`, `ghost.ts`\nCreates: `event-log.ts`\n",
-  );
+  const res = fileSet("Touches: `status.ts`, `ghost.ts`\nCreates: `event-log.ts`\n");
 
   assert.deepEqual(res.files.sort(), ["event-log.ts", "src/status.ts"]);
   assert.equal(res.confident, false);

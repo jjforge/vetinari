@@ -1,28 +1,11 @@
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import type {
-  CampaignDoneEvent,
-  CampaignStartEvent,
-  WaveDoneEvent,
-  WaveStartEvent,
-} from "./event-log.ts";
+import type { CampaignDoneEvent, CampaignStartEvent, WaveDoneEvent, WaveStartEvent } from "./event-log.ts";
 import { runGates } from "./gate.ts";
 import { agentSelectionFor, makeSandbox } from "./sandbox.ts";
-import {
-  branchHasCommits,
-  collectWaveChangelog,
-  currentBranch,
-  integrateGreens,
-} from "./merge.ts";
-import {
-  clearParked,
-  enqueueOutbound,
-  hasParked,
-  isAnswered,
-  listParked,
-  type ParkReason,
-} from "./state.ts";
+import { branchHasCommits, collectWaveChangelog, currentBranch, integrateGreens } from "./merge.ts";
+import { clearParked, enqueueOutbound, hasParked, isAnswered, listParked, type ParkReason } from "./state.ts";
 import { strandedByConflict, resumeIndex, type StrandedImpact } from "./prune.ts";
 import { notice, type Notice } from "./notice.ts";
 import { Refusal } from "./refusal.ts";
@@ -41,13 +24,7 @@ import {
   makeReporter,
   type Reporter,
 } from "./report.ts";
-import {
-  acquireSlot,
-  deregisterProject,
-  registerProject,
-  releaseSlot,
-  type HostBudget,
-} from "./host-slots.ts";
+import { acquireSlot, deregisterProject, registerProject, releaseSlot, type HostBudget } from "./host-slots.ts";
 
 /**
  * A campaign's terminal verdict (design §5 step 6, §15): `done` only when the last wave
@@ -80,8 +57,7 @@ const named = (name?: string): string => (name ? ` “${name}”` : "");
  * echo keys on, so the screen is one or the other, never both. Read at call time so a child
  * spawn (which inherits the env) reports the same way its parent does (#299).
  */
-const envReporter = (): Reporter =>
-  makeReporter({ json: process.env.VETINARI_JSON === "1" });
+const envReporter = (): Reporter => makeReporter({ json: process.env.VETINARI_JSON === "1" });
 
 /**
  * Resolve each issue's title through the orchestrator's `fetchTask`, keyed by
@@ -91,10 +67,7 @@ const envReporter = (): Reporter =>
  * is simply absent from the map — its chip then falls back to `number:status` and
  * its wave to the bare index, and the whole run still starts (no throw).
  */
-export async function resolveTitles(
-  cfg: Pick<ResolvedConfig, "fetchTask">,
-  ids: string[],
-): Promise<Record<string, string>> {
+export async function resolveTitles(cfg: Pick<ResolvedConfig, "fetchTask">, ids: string[]): Promise<Record<string, string>> {
   const titles: Record<string, string> = {};
   await Promise.all(
     [...new Set(ids.map((id) => id.replace(/^#/, "")))].map(async (id) => {
@@ -144,10 +117,7 @@ export type RunSpawner = (taskId: string, resumeSession?: string) => Promise<num
  * crashed session id through to the child as `VETINARI_RESUME_SESSION` so it resumes (design §7). */
 const selfSpawnRun: RunSpawner = (taskId, resumeSession) =>
   new Promise((resolve) => {
-    selfSpawn(["run", taskId], resumeSession ? { VETINARI_RESUME_SESSION: resumeSession } : undefined).on(
-      "exit",
-      (code) => resolve(code),
-    );
+    selfSpawn(["run", taskId], resumeSession ? { VETINARI_RESUME_SESSION: resumeSession } : undefined).on("exit", (code) => resolve(code));
   });
 
 /**
@@ -172,13 +142,7 @@ export interface BuildCommand {
   program: string;
   args: string[];
 }
-export function buildImageCommand(
-  image: string,
-  dockerfile: string,
-  context: string,
-  uid?: number,
-  gid?: number,
-): BuildCommand {
+export function buildImageCommand(image: string, dockerfile: string, context: string, uid?: number, gid?: number): BuildCommand {
   const buildArgs: string[] = [];
   if (uid !== undefined) buildArgs.push("--build-arg", `AGENT_UID=${uid}`);
   if (gid !== undefined) buildArgs.push("--build-arg", `AGENT_GID=${gid}`);
@@ -201,8 +165,7 @@ export async function baseline(cfg: ResolvedConfig) {
         exitCode: probe.exitCode,
         out: (probe.stdout ?? "").trim(),
       });
-      if (probe.exitCode !== 0)
-        throw new Error(`toolchain probe failed: ${probe.stderr}`);
+      if (probe.exitCode !== 0) throw new Error(`toolchain probe failed: ${probe.stderr}`);
     }
     const { green, report } = await runGates(cfg, sbx, { all: true });
     cfg.log.log("baseline", { green });
@@ -233,13 +196,7 @@ export interface BuildDeps {
  */
 const runBuildImage = (image: string, dockerfile: string): Promise<number> =>
   new Promise((done) => {
-    const { program, args } = buildImageCommand(
-      image,
-      dockerfile,
-      process.cwd(),
-      process.getuid?.(),
-      process.getgid?.(),
-    );
+    const { program, args } = buildImageCommand(image, dockerfile, process.cwd(), process.getuid?.(), process.getgid?.());
     const child = spawn(program, args, { stdio: ["ignore", "inherit", "inherit"] });
     child.on("error", (err) => {
       console.error(`build: could not launch docker — ${err.message}`);
@@ -257,11 +214,7 @@ const defaultBuildDeps: BuildDeps = { buildImage: runBuildImage, baseline };
  * baseline probe. Returns false on a build failure (baseline is skipped) or a
  * red baseline; the CLI maps that to a non-zero exit.
  */
-export async function build(
-  cfg: ResolvedConfig,
-  opts: { baseline: boolean },
-  deps: BuildDeps = defaultBuildDeps,
-): Promise<boolean> {
+export async function build(cfg: ResolvedConfig, opts: { baseline: boolean }, deps: BuildDeps = defaultBuildDeps): Promise<boolean> {
   const code = await deps.buildImage(cfg.image, DOCKERFILE);
   cfg.log.log("build", { image: cfg.image, dockerfile: DOCKERFILE, exitCode: code });
   if (code !== 0) return false;
@@ -279,9 +232,7 @@ export async function build(
  * and warn on stderr, naming the file to fix. Warn and continue — the run is still
  * useful; the operator is simply told parks won't ping.
  */
-export function warnIfTelegramUnconfigured(
-  cfg: Pick<ResolvedConfig, "project" | "stateDir" | "log">,
-): void {
+export function warnIfTelegramUnconfigured(cfg: Pick<ResolvedConfig, "project" | "stateDir" | "log">): void {
   const baseLocation = resolve(process.cwd(), cfg.stateDir);
   if (tgConnForBaseLocation(baseLocation)) return;
   cfg.log.log("telegram-unconfigured", { project: cfg.project, baseLocation });
@@ -362,10 +313,7 @@ export async function queue(
         registerProject(host.configDir, cfg.project, host.weight, "campaign", running + pending.length);
         // No per-run cap: spawn as long as work remains and the cooperative lease
         // grants a slot — the fair share (and the ceiling) is the only bound.
-        while (
-          pending.length &&
-          acquireSlot(host.configDir, host.ceiling, cfg.project, host.weight)
-        ) {
+        while (pending.length && acquireSlot(host.configDir, host.ceiling, cfg.project, host.weight)) {
           const next = pending.shift()!;
           running++;
           cfg.log.log("spawn", { taskId: next, running, left: pending.length });
@@ -374,16 +322,13 @@ export async function queue(
           spawnRun(next, resumeSessions[next]).then((code) => {
             running--;
             releaseSlot(host.configDir);
-            outcomes[next] =
-              code === 0 ? "green" : code === 2 ? "parked" : `error(${code})`;
+            outcomes[next] = code === 0 ? "green" : code === 2 ? "parked" : `error(${code})`;
             // A member the agent could not make green (a non-zero, non-park exit) is a terminal
             // failure (design §2.1): record it so the reducer folds the wave to `failed` even
             // though the run itself logged no verdict.
-            if (outcomes[next].startsWith("error"))
-              cfg.log.log("failed", { taskId: next, detail: outcomes[next] });
+            if (outcomes[next].startsWith("error")) cfg.log.log("failed", { taskId: next, detail: outcomes[next] });
             // A park with a live record is re-admittable if that record is later answered.
-            if (outcomes[next] === "parked" && hasParked(cfg, next))
-              parkedWithRecord.add(next);
+            if (outcomes[next] === "parked" && hasParked(cfg, next)) parkedWithRecord.add(next);
             fill();
           });
         }
@@ -422,10 +367,7 @@ export async function queue(
  * rest. Only the green `merged` set is passed in, so parked/pruned/failed issues
  * are excluded by construction.
  */
-export async function markMergedIssues(
-  cfg: Pick<ResolvedConfig, "onIssueMerged" | "log">,
-  merged: string[],
-): Promise<void> {
+export async function markMergedIssues(cfg: Pick<ResolvedConfig, "onIssueMerged" | "log">, merged: string[]): Promise<void> {
   if (!cfg.onIssueMerged) return;
   for (const taskId of merged) {
     try {
@@ -449,13 +391,7 @@ export async function markMergedIssues(
  * for the plain question/stall hold. Pure, so the wording and routing are checkable without
  * running a campaign.
  */
-export function campaignParkedNotice(
-  project: string,
-  waveNumber: number,
-  merged: string[],
-  baseBranch: string,
-  detail: string,
-): Notice {
+export function campaignParkedNotice(project: string, waveNumber: number, merged: string[], baseBranch: string, detail: string): Notice {
   return notice({
     emoji: "🅿️",
     project,
@@ -477,13 +413,7 @@ export function campaignParkedNotice(
  * The failed issue's branch and worktree are kept (only the merged greens were cleaned up), so the human
  * can fix it forward or prune it. Pure, so the wording and routing are checkable without a campaign.
  */
-export function campaignFailedNotice(
-  project: string,
-  waveNumber: number,
-  merged: string[],
-  failed: string[],
-  baseBranch: string,
-): Notice {
+export function campaignFailedNotice(project: string, waveNumber: number, merged: string[], failed: string[], baseBranch: string): Notice {
   return notice({
     emoji: "❌",
     project,
@@ -502,9 +432,7 @@ export function campaignFailedNotice(
  * blast radius whether the campaign paused or pruned on.
  */
 function describeConflictImpacts(impacts: StrandedImpact[]): string {
-  return impacts
-    .map((i) => `  #${i.target} → ${i.dropped.map((d) => `#${d}`).join(", ")}`)
-    .join("\n");
+  return impacts.map((i) => `  #${i.target} → ${i.dropped.map((d) => `#${d}`).join(", ")}`).join("\n");
 }
 
 /**
@@ -516,12 +444,7 @@ function describeConflictImpacts(impacts: StrandedImpact[]): string {
  * conflict and resume, or re-run with `--auto-prune` to prune the stranded dependents
  * and continue. Pure, so the wording and routing are checkable without a campaign.
  */
-export function strandedConflictNotice(
-  project: string,
-  waveNumber: number,
-  impacts: StrandedImpact[],
-  baseBranch: string,
-): Notice {
+export function strandedConflictNotice(project: string, waveNumber: number, impacts: StrandedImpact[], baseBranch: string): Notice {
   return notice({
     emoji: "🅿️",
     project,
@@ -590,11 +513,7 @@ export function waveParkReason(
  * rides the `progress` channel, naming each conflict-parked issue and the dependents its
  * prune pruned. Pure, checkable without a campaign.
  */
-export function autoPruneNotice(
-  project: string,
-  waveNumber: number,
-  impacts: StrandedImpact[],
-): Notice {
+export function autoPruneNotice(project: string, waveNumber: number, impacts: StrandedImpact[]): Notice {
   return notice({
     emoji: "✂️",
     project,
@@ -626,11 +545,7 @@ const GRACE_POLL_MS = 1000;
  * time; the default polls the records. The caller re-checks the records afterwards to decide
  * which members to re-admit, so this resolves `void` whichever way the window ended.
  */
-export type GraceWaiter = (
-  cfg: ResolvedConfig,
-  parkedIds: string[],
-  seconds: number,
-) => Promise<void>;
+export type GraceWaiter = (cfg: ResolvedConfig, parkedIds: string[], seconds: number) => Promise<void>;
 
 /** The production grace waiter: poll `parkedIds`' records until one is answered or the window ends. */
 export const graceWaitForAnswer: GraceWaiter = (cfg, parkedIds, seconds) =>
@@ -811,24 +726,25 @@ export async function campaign(
     // the plan is whatever the running campaign's `campaign-start` (minus any prune) reduced to.
     const reduced = reduceCampaign(readEventLog(cfg));
     if (!reduced.waves.length)
-      throw new Refusal(
-        "redrive: no campaign found in the event log to pick up. Launch one with `campaign <ids…>`.",
-      );
+      throw new Refusal("redrive: no campaign found in the event log to pick up. Launch one with `campaign <ids…>`.");
     titles = Object.fromEntries(reduced.titles);
     campaignName = reduced.name;
     index = resumeIndex(reduced);
     if (index >= reduced.waves.length) {
       // Nothing left to run — every wave already banked. The redrive landed and skipped nothing.
       cfg.log.log("redrive", { fromWave: index, landed: 0, skipped: 0 });
-      enqueueOutbound(cfg, notice({
-        emoji: "↩️",
-        project: cfg.project,
-        state: "REDRIVE",
-        context: `${reduced.waves.length} waves`,
-        signal: `nothing to run — all ${reduced.waves.length} waves already merged`,
-        category: "progress",
-        event: "redrive",
-      }));
+      enqueueOutbound(
+        cfg,
+        notice({
+          emoji: "↩️",
+          project: cfg.project,
+          state: "REDRIVE",
+          context: `${reduced.waves.length} waves`,
+          signal: `nothing to run — all ${reduced.waves.length} waves already merged`,
+          category: "progress",
+          event: "redrive",
+        }),
+      );
       reporter.line(formatResumeNothing(reduced.waves.length));
       return "done";
     }
@@ -836,15 +752,18 @@ export async function campaign(
     // the resume wave integrates — so it is logged there (see `pendingRedriveFromWave`). The
     // operator notice and terminal line go out now, at pickup.
     pendingRedriveFromWave = index;
-    enqueueOutbound(cfg, notice({
-      emoji: "↩️",
-      project: cfg.project,
-      state: "REDRIVE",
-      context: `wave ${index + 1}/${reduced.waves.length}`,
-      signal: `on ${cfg.baseBranch} — continuing unrun waves`,
-      category: "progress",
-      event: "redrive",
-    }));
+    enqueueOutbound(
+      cfg,
+      notice({
+        emoji: "↩️",
+        project: cfg.project,
+        state: "REDRIVE",
+        context: `wave ${index + 1}/${reduced.waves.length}`,
+        signal: `on ${cfg.baseBranch} — continuing unrun waves`,
+        category: "progress",
+        event: "redrive",
+      }),
+    );
     reporter.line(formatResume(index, reduced.waves.length));
   } else {
     // Resolve the run's issue titles up front (the orchestrator has `fetchTask`) and
@@ -865,15 +784,18 @@ export async function campaign(
     if (name) startEvent.name = name;
     if (Object.keys(titles).length) startEvent.titles = titles;
     cfg.log.log("campaign-start", startEvent);
-    enqueueOutbound(cfg, notice({
-      emoji: "🎬",
-      project: cfg.project,
-      state: "CAMPAIGN",
-      context: `${batches.length} waves${named(name)}`,
-      signal: batches.map((b) => b.join(",")).join(" | "),
-      category: "progress",
-      event: "campaign-start",
-    }));
+    enqueueOutbound(
+      cfg,
+      notice({
+        emoji: "🎬",
+        project: cfg.project,
+        state: "CAMPAIGN",
+        context: `${batches.length} waves${named(name)}`,
+        signal: batches.map((b) => b.join(",")).join(" | "),
+        category: "progress",
+        event: "campaign-start",
+      }),
+    );
     // The plan, on the terminal: the waves with their ids and titles (design §11).
     reporter.line(formatPlan(batches, titles, campaignName));
   }
@@ -894,15 +816,18 @@ export async function campaign(
     const total = waves.length;
     const waveEvent: Omit<WaveStartEvent, "ts" | "event"> = { index, tasks };
     cfg.log.log("wave-start", waveEvent);
-    enqueueOutbound(cfg, notice({
-      emoji: "▶️",
-      project: cfg.project,
-      state: "WAVE",
-      context: `${index + 1}/${total}${named(campaignName)}`,
-      signal: tasks.join(", "),
-      category: "progress",
-      event: "wave-start",
-    }));
+    enqueueOutbound(
+      cfg,
+      notice({
+        emoji: "▶️",
+        project: cfg.project,
+        state: "WAVE",
+        context: `${index + 1}/${total}${named(campaignName)}`,
+        signal: tasks.join(", "),
+        category: "progress",
+        event: "wave-start",
+      }),
+    );
     reporter.line(formatWaveStart(index, total, tasks, titles));
 
     let outcomes: Record<string, string>;
@@ -959,8 +884,7 @@ export async function campaign(
       cfg.log.log("grace-wait", { seconds: graceSeconds, tasks: parkedNow });
       await deps.grace(cfg, parkedNow, graceSeconds);
       const revived = parkedNow.filter((t) => isAnswered(cfg, t));
-      if (revived.length)
-        outcomes = { ...outcomes, ...(await queue(cfg, revived, host, titles, deps.spawnRun, reporter)) };
+      if (revived.length) outcomes = { ...outcomes, ...(await queue(cfg, revived, host, titles, deps.spawnRun, reporter)) };
     }
 
     const greens = tasks.filter((t) => outcomes[t] === "green");
@@ -985,9 +909,7 @@ export async function campaign(
       // editing the shared changelog, so co-wave branches never conflict on it.
       const collected = deps.collectChangelog(index, cfg.log);
       if (collected.committed)
-        reporter.line(
-          `wave ${index + 1}/${total}: collected changelog fragments — ${collected.collected.join(", ")}`,
-        );
+        reporter.line(`wave ${index + 1}/${total}: collected changelog fragments — ${collected.collected.join(", ")}`);
       // Green path only: advance each merged issue to `pending-verify` via the configured
       // `onIssueMerged` seam (issue #103). Best-effort — a failing write is logged and never
       // touches a stop path. Only the green `merged` set is passed.
@@ -1046,8 +968,7 @@ export async function campaign(
       }
       const autoPruned = orphaning.length > 0 && !!opts.autoPrune;
       if (autoPruned) {
-        for (const impact of orphaning)
-          cfg.log.log("prune", { target: impact.target, removed: impact.removed, dropped: impact.dropped });
+        for (const impact of orphaning) cfg.log.log("prune", { target: impact.target, removed: impact.removed, dropped: impact.dropped });
         enqueueOutbound(cfg, autoPruneNotice(cfg.project, index + 1, orphaning));
         reporter.line(
           `wave ${index + 1}/${total}: auto-pruned ${orphaning.map((i) => `#${i.target}→${i.dropped.map((d) => `#${d}`).join(",")}`).join("; ")}.`,
@@ -1081,43 +1002,43 @@ export async function campaign(
     // no held or conflict-parked member to record.
     const waveDoneEvent: Omit<WaveDoneEvent, "ts" | "event"> = { index, merged };
     cfg.log.log("wave-done", waveDoneEvent);
-    enqueueOutbound(cfg, notice({
-      emoji: "✅",
-      project: cfg.project,
-      state: "WAVE",
-      context: `${index + 1} merged${named(campaignName)}`,
-      signal: merged.join(", ") || "nothing",
-      category: "success",
-      event: "wave-done",
-    }));
+    enqueueOutbound(
+      cfg,
+      notice({
+        emoji: "✅",
+        project: cfg.project,
+        state: "WAVE",
+        context: `${index + 1} merged${named(campaignName)}`,
+        signal: merged.join(", ") || "nothing",
+        category: "success",
+        event: "wave-done",
+      }),
+    );
     reporter.line(formatWaveDone(index, total, { merged }));
   }
 
   const doneEvent: Omit<CampaignDoneEvent, "ts" | "event"> = { waves: index };
   if (campaignName) doneEvent.name = campaignName;
   cfg.log.log("campaign-done", doneEvent);
-  enqueueOutbound(cfg, notice({
-    emoji: "🏆",
-    project: cfg.project,
-    state: "COMPLETE",
-    context: `campaign${named(campaignName)}`,
-    signal: `${index} waves merged onto ${cfg.baseBranch}`,
-    category: "success",
-    event: "campaign-done",
-  }));
+  enqueueOutbound(
+    cfg,
+    notice({
+      emoji: "🏆",
+      project: cfg.project,
+      state: "COMPLETE",
+      context: `campaign${named(campaignName)}`,
+      signal: `${index} waves merged onto ${cfg.baseBranch}`,
+      category: "success",
+      event: "campaign-done",
+    }),
+  );
   reporter.line(formatComplete(index, cfg.baseBranch, campaignName));
   return "done";
 }
 
 export async function tgTest(cfg: ResolvedConfig, conn: TgConn) {
-  const msgId = await tgSend(
-    conn,
-    `🔧 ${cfg.project} orchestrator test — reply to this message and I'll echo it back.`,
-  );
-  if (msgId == null)
-    throw new Refusal(
-      "sendMessage failed — token rejected or chat id wrong (see telegram-send-failed in the log)",
-    );
+  const msgId = await tgSend(conn, `🔧 ${cfg.project} orchestrator test — reply to this message and I'll echo it back.`);
+  if (msgId == null) throw new Refusal("sendMessage failed — token rejected or chat id wrong (see telegram-send-failed in the log)");
   console.log(`sent (message_id ${msgId}); waiting for your reply…`);
   const reply = await tgWaitReply(conn, msgId);
   await tgSend(conn, `✅ round-trip works — got: "${reply.slice(0, 200)}"`);
@@ -1134,9 +1055,7 @@ export async function tgTest(cfg: ResolvedConfig, conn: TgConn) {
 export function requireTelegram(mode: string, baseLocation: string): TgConn {
   const conn = tgConnForBaseLocation(baseLocation);
   if (!conn) {
-    throw new Refusal(
-      `${mode} needs VETINARI_TELEGRAM_BOT_TOKEN and VETINARI_TELEGRAM_CHAT_ID in ${hostSecretsPath(baseLocation)}`,
-    );
+    throw new Refusal(`${mode} needs VETINARI_TELEGRAM_BOT_TOKEN and VETINARI_TELEGRAM_CHAT_ID in ${hostSecretsPath(baseLocation)}`);
   }
   return conn;
 }

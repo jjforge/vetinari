@@ -1,13 +1,4 @@
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { hostLogger, type Logger } from "./log.ts";
@@ -67,11 +58,7 @@ export function autoRegister(
     // deliver one project's replies into the other's tree. Keep the incumbent, name
     // both roots on stderr, and let the command run on (registration is best-effort).
     const incumbent = readPointer(configDir, cfg.project);
-    if (
-      incumbent &&
-      normalizeProjectRoot(incumbent.projectRoot) !==
-        normalizeProjectRoot(projectRoot)
-    ) {
+    if (incumbent && normalizeProjectRoot(incumbent.projectRoot) !== normalizeProjectRoot(projectRoot)) {
       console.error(
         `vetinari: project name "${cfg.project}" is already registered to ${incumbent.projectRoot}; ` +
           `refusing to overwrite it from ${projectRoot} — rename one project's \`project\` to disambiguate.`,
@@ -99,11 +86,7 @@ export function autoRegister(
  * the state dir resolved to an absolute path under the root. Pure, so the run
  * entry point can hand it straight to `register`.
  */
-export function pointerFor(
-  cfg: Pick<ResolvedConfig, "project" | "stateDir">,
-  projectRoot: string,
-  repo?: string,
-): ProjectPointer {
+export function pointerFor(cfg: Pick<ResolvedConfig, "project" | "stateDir">, projectRoot: string, repo?: string): ProjectPointer {
   return {
     project: cfg.project,
     projectRoot,
@@ -133,8 +116,7 @@ function writeFileAtomic(path: string, data: string): void {
 
 /** One pointer file per project, keyed by project name — like `parked/`. */
 const registryDir = (configDir: string) => join(configDir, "registry");
-const pointerFile = (configDir: string, project: string) =>
-  join(registryDir(configDir), `${project}.json`);
+const pointerFile = (configDir: string, project: string) => join(registryDir(configDir), `${project}.json`);
 
 /**
  * Upsert a project's pointer under the gateway's config directory. Idempotent: a
@@ -143,10 +125,7 @@ const pointerFile = (configDir: string, project: string) =>
  */
 export function register(configDir: string, pointer: ProjectPointer): void {
   mkdirSync(registryDir(configDir), { recursive: true });
-  writeFileAtomic(
-    pointerFile(configDir, pointer.project),
-    JSON.stringify(pointer, null, 2),
-  );
+  writeFileAtomic(pointerFile(configDir, pointer.project), JSON.stringify(pointer, null, 2));
 }
 
 /**
@@ -154,10 +133,7 @@ export function register(configDir: string, pointer: ProjectPointer): void {
  * file is unreadable). The single-pointer read-side counterpart to `listProjects`,
  * used by `autoRegister` to spot a name collision before overwriting an incumbent.
  */
-export function readPointer(
-  configDir: string,
-  project: string,
-): ProjectPointer | undefined {
+export function readPointer(configDir: string, project: string): ProjectPointer | undefined {
   const file = pointerFile(configDir, project);
   if (!existsSync(file)) return undefined;
   try {
@@ -206,15 +182,9 @@ export function normalizeProjectRoot(root: string): string {
 }
 
 /** True when a pointer's base location is the canonical `<projectRoot>/.vetinari.local`. */
-function hasCanonicalBase(
-  pointer: ProjectPointer,
-  normalizedRoot: string,
-): boolean {
+function hasCanonicalBase(pointer: ProjectPointer, normalizedRoot: string): boolean {
   const base = pointer.baseLocation.replace(/\/+$/, "");
-  return (
-    basename(base) === CANONICAL_BASE_DIR &&
-    normalizeProjectRoot(dirname(base)) === normalizedRoot
-  );
+  return basename(base) === CANONICAL_BASE_DIR && normalizeProjectRoot(dirname(base)) === normalizedRoot;
 }
 
 /** One duplicate-`projectRoot` pointer `tidy` would drop, naming the canonical pointer it kept. */
@@ -236,9 +206,7 @@ export interface PointerDrop {
  * issue #163). Singletons and distinct-root pointers are never touched, so a real
  * project — even one whose root is gone or whose base is a temp dir — is never dropped.
  */
-export function computeRegistryDedup(
-  pointers: ProjectPointer[],
-): PointerDrop[] {
+export function computeRegistryDedup(pointers: ProjectPointer[]): PointerDrop[] {
   const groups = new Map<string, ProjectPointer[]>();
   for (const p of pointers) {
     const key = normalizeProjectRoot(p.projectRoot);
@@ -274,10 +242,7 @@ export function computeRegistryDedup(
  * `readRouting`/`readPointer` already give. Takes the logger the way
  * `readProjects` does, so no caller changes.
  */
-export function listProjects(
-  configDir: string,
-  logger: Logger = hostLogger(),
-): ProjectPointer[] {
+export function listProjects(configDir: string, logger: Logger = hostLogger()): ProjectPointer[] {
   const dir = registryDir(configDir);
   mkdirSync(dir, { recursive: true });
   const pointers: ProjectPointer[] = [];
@@ -319,10 +284,7 @@ interface Routing {
 /** Write the project's routing into its base location for the gateway to read live. Idempotent — a re-run just refreshes it. */
 export function writeRouting(baseLocation: string, routing: Routing): void {
   mkdirSync(baseLocation, { recursive: true });
-  writeFileAtomic(
-    join(baseLocation, ROUTING_FILE),
-    JSON.stringify(routing, null, 2),
-  );
+  writeFileAtomic(join(baseLocation, ROUTING_FILE), JSON.stringify(routing, null, 2));
 }
 
 /** Read a project's materialized routing, or an empty routing when it configured none. */
@@ -350,8 +312,7 @@ function readRouting(baseLocation: string, logger: Logger): Routing {
 const SECRETS_FILE = "host.env";
 
 /** The absolute path to a base location's host-side secrets file. */
-export const hostSecretsPath = (baseLocation: string): string =>
-  join(baseLocation, SECRETS_FILE);
+export const hostSecretsPath = (baseLocation: string): string => join(baseLocation, SECRETS_FILE);
 
 /**
  * Parse a shell env file (`KEY=VALUE`, optional `export`, optional quotes, `#`
@@ -387,9 +348,7 @@ function parseEnvFile(text: string): Record<string, string> {
 const tgConnFromEnv = (env: Record<string, string>): TgConn | undefined => {
   const token = env.VETINARI_TELEGRAM_BOT_TOKEN;
   const chat = env.VETINARI_TELEGRAM_CHAT_ID;
-  return token && chat
-    ? { token, chat, thread: env.VETINARI_TELEGRAM_THREAD_ID }
-    : undefined;
+  return token && chat ? { token, chat, thread: env.VETINARI_TELEGRAM_THREAD_ID } : undefined;
 };
 
 /**
@@ -399,13 +358,9 @@ const tgConnFromEnv = (env: Record<string, string>): TgConn | undefined => {
  * divergence). `undefined` when the file or the required keys are absent. Reads
  * only the file, never `process.env`.
  */
-export function tgConnForBaseLocation(
-  baseLocation: string,
-): TgConn | undefined {
+export function tgConnForBaseLocation(baseLocation: string): TgConn | undefined {
   const secretsPath = hostSecretsPath(baseLocation);
-  const env = existsSync(secretsPath)
-    ? parseEnvFile(readFileSync(secretsPath, "utf8"))
-    : {};
+  const env = existsSync(secretsPath) ? parseEnvFile(readFileSync(secretsPath, "utf8")) : {};
   return tgConnFromEnv(env);
 }
 
@@ -416,10 +371,7 @@ export function tgConnForBaseLocation(
  * skipped (logged, `undefined` returned) rather than throwing — one stale
  * registration must never take the gateway down (ADR 0002).
  */
-export function readProject(
-  pointer: ProjectPointer,
-  logger: Logger = hostLogger(),
-): ReadProject | undefined {
+export function readProject(pointer: ProjectPointer, logger: Logger = hostLogger()): ReadProject | undefined {
   if (!existsSync(pointer.baseLocation)) {
     logger.log("registry-stale", {
       project: pointer.project,
@@ -441,10 +393,7 @@ export function readProject(
  * Stale pointers (base location gone) are dropped, so a caller iterating the
  * registry gets only projects it can actually serve.
  */
-export function readProjects(
-  configDir: string,
-  logger: Logger = hostLogger(),
-): ReadProject[] {
+export function readProjects(configDir: string, logger: Logger = hostLogger()): ReadProject[] {
   return listProjects(configDir, logger)
     .map((pointer) => readProject(pointer, logger))
     .filter((r): r is ReadProject => r !== undefined);

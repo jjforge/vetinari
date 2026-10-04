@@ -5,7 +5,17 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { applyTidy, collectWaveChangelog, computeTidy, describeBranchPurge, describeRegistryDedup, integrateGreens, purgeBranches, scanTidy, type TidySnapshot } from "./merge.ts";
+import {
+  applyTidy,
+  collectWaveChangelog,
+  computeTidy,
+  describeBranchPurge,
+  describeRegistryDedup,
+  integrateGreens,
+  purgeBranches,
+  scanTidy,
+  type TidySnapshot,
+} from "./merge.ts";
 import { listParkedIn } from "./state.ts";
 import { memoryLogger } from "./log.ts";
 
@@ -199,7 +209,12 @@ test("integrateGreens wave-parks a red merged base: leaves the greens merged, do
 
 test("integrateGreens skips the merged-base gate when every green conflicts", async () => {
   const { dir } = repoWithConflictingGreens();
-  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir: join(dir, "parked"), log: memoryLogger() } as unknown as ResolvedConfig;
+  const cfg = {
+    branchPrefix: "agent/",
+    baseBranch: "main",
+    parkedDir: join(dir, "parked"),
+    log: memoryLogger(),
+  } as unknown as ResolvedConfig;
   const prevCwd = process.cwd();
   process.chdir(dir);
   let gateRan = false;
@@ -310,7 +325,10 @@ test("integrateGreens recognises an already-merged green — logs `merged` and r
     assert.deepEqual(result.merged, ["B"], "only the genuinely-unmerged B is freshly merged");
     assert.deepEqual(result.alreadyMerged, ["A"], "A is recognised as already on the base");
     // Both are logged `merged` — A so a redrive marks it completed / clears its conflict hold.
-    const merged = log.events.filter((e) => e.event === "merged").map((e) => (e as any).taskId).sort();
+    const merged = log.events
+      .filter((e) => e.event === "merged")
+      .map((e) => (e as any).taskId)
+      .sort();
     assert.deepEqual(merged, ["A", "B"]);
   } finally {
     process.chdir(prevCwd);
@@ -331,7 +349,12 @@ test("integrateGreens re-gates a wave with no fresh merges when regate is set �
     const result = await integrateGreens(
       cfg,
       ["A"],
-      { gate: async () => { gateRan = true; return { green: false, report: "still red" }; } },
+      {
+        gate: async () => {
+          gateRan = true;
+          return { green: false, report: "still red" };
+        },
+      },
       0,
       { regate: true },
     );
@@ -355,7 +378,12 @@ test("integrateGreens with regate set and a green base does not park — the fix
     const result = await integrateGreens(
       cfg,
       ["A"],
-      { gate: async () => { gateRan = true; return { green: true, report: "" }; } },
+      {
+        gate: async () => {
+          gateRan = true;
+          return { green: true, report: "" };
+        },
+      },
       0,
       { regate: true },
     );
@@ -482,7 +510,10 @@ test("scanTidy reads reachability, fragments, and parked records; applyTidy fold
   // by hand, so the record is orphaned (no `agent/50` head remains).
   const parkedDir = join(dir, "parked");
   mkdirSync(parkedDir);
-  writeFileSync(join(parkedDir, "50.json"), JSON.stringify({ taskId: "50", branch: "agent/50", reason: "question", parkedAt: "x", question: "?" }));
+  writeFileSync(
+    join(parkedDir, "50.json"),
+    JSON.stringify({ taskId: "50", branch: "agent/50", reason: "question", parkedAt: "x", question: "?" }),
+  );
 
   const target = {
     project: "demo",
@@ -498,7 +529,10 @@ test("scanTidy reads reachability, fragments, and parked records; applyTidy fold
   const snap = scanTidy(target);
   assert.deepEqual(
     snap.branches.sort((a, b) => a.id.localeCompare(b.id)),
-    [{ id: "42", reachable: true }, { id: "43", reachable: false }],
+    [
+      { id: "42", reachable: true },
+      { id: "43", reachable: false },
+    ],
   );
   assert.deepEqual(snap.fragments, ["42"]);
   assert.deepEqual(snap.parked, ["50"]);
@@ -587,9 +621,7 @@ test("scanTidy reads wave-parked issues from the event log so their reachable br
 test("describeRegistryDedup renders one drop line per duplicate, or empty when none", () => {
   assert.equal(describeRegistryDedup([]), "");
 
-  const report = describeRegistryDedup([
-    { drop: "verify150", kept: "vetinari", projectRoot: "/home/zach/Code/vetinari" },
-  ]);
+  const report = describeRegistryDedup([{ drop: "verify150", kept: "vetinari", projectRoot: "/home/zach/Code/vetinari" }]);
 
   assert.deepEqual(report.split("\n"), [
     "tidy registry:",

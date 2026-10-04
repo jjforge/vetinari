@@ -37,10 +37,7 @@ export interface BotConnectionValues {
  * Returns the new content (one trailing newline) and whether it differs from the input,
  * so the caller can skip an inert write. Writes nothing.
  */
-export function planHostEnv(
-  current: string | undefined,
-  values: BotConnectionValues,
-): { content: string; changed: boolean } {
+export function planHostEnv(current: string | undefined, values: BotConnectionValues): { content: string; changed: boolean } {
   const updates = new Map<string, string>([
     [TOKEN_KEY, values.token],
     [CHAT_KEY, values.chat],
@@ -148,15 +145,11 @@ export async function runTgConnect(
   const existing = tgConnForBaseLocation(baseLocation);
   if (existing && !opts.force) {
     if (!deps.isTTY) {
-      deps.log(
-        `a bot connection is already configured (chat ${existing.chat}) — pass --force to replace it.`,
-      );
+      deps.log(`a bot connection is already configured (chat ${existing.chat}) — pass --force to replace it.`);
       return { ok: false, written: false };
     }
     // Show the current chat id — never the token — and ask whether to replace it.
-    const answer = (
-      await deps.ask(`a bot connection is already configured (chat ${existing.chat}). Replace it? [y/N] `)
-    )
+    const answer = (await deps.ask(`a bot connection is already configured (chat ${existing.chat}). Replace it? [y/N] `))
       .trim()
       .toLowerCase();
     if (answer !== "y" && answer !== "yes") {
@@ -189,23 +182,16 @@ export async function runTgConnect(
         deps.log("both a bot token and a chat id are required.");
         continue;
       }
-      deps.log(
-        `tg-connect needs ${missing.join(" and ")} — supply them as flags or run on a terminal to be prompted.`,
-      );
+      deps.log(`tg-connect needs ${missing.join(" and ")} — supply them as flags or run on a terminal to be prompted.`);
       return { ok: false, written: false };
     }
 
     const conn: TgConn = { token: token!, chat: chat! };
 
     if (!opts.noVerify) {
-      const msgId = await deps.send(
-        conn,
-        `🔧 ${deps.label ?? "vetinari"} bot connection check — you can ignore this message.`,
-      );
+      const msgId = await deps.send(conn, `🔧 ${deps.label ?? "vetinari"} bot connection check — you can ignore this message.`);
       if (msgId == null) {
-        deps.log(
-          "Telegram rejected the send — the token or chat id is wrong (see telegram-send-failed in the log). Nothing was written.",
-        );
+        deps.log("Telegram rejected the send — the token or chat id is wrong (see telegram-send-failed in the log). Nothing was written.");
         if (prompting) {
           // Re-prompt for BOTH values on a TTY so a bad flag value is corrected too, not
           // just a mistyped prompt — clearing the flags forces the next pass to ask again.

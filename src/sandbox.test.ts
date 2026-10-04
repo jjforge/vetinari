@@ -10,8 +10,7 @@ import type { ResolvedConfig } from "./config.ts";
 
 // agentFor only reads `cfg.agent` and the VETINARI_AGENT env var — a bare object
 // with an `agent` field structurally satisfies what it touches.
-const cfgWith = (agent?: ResolvedConfig["agent"]): ResolvedConfig =>
-  ({ agent }) as ResolvedConfig;
+const cfgWith = (agent?: ResolvedConfig["agent"]): ResolvedConfig => ({ agent }) as ResolvedConfig;
 
 const withAgentEnv = <T>(value: string | undefined, fn: () => T): T => {
   const prev = process.env[AGENT_ENV_VAR];
@@ -69,7 +68,14 @@ test("agentFor reads a non-resumable provider back from the env override", () =>
 // The sandbox options only read a handful of scalar config fields; a bare object with
 // those satisfies what makeSandboxOptions touches (docker() is pure construction).
 const sandboxCfg = (over: Partial<ResolvedConfig> = {}): ResolvedConfig =>
-  ({ branchPrefix: "agent/", baseBranch: "main", stateDir: ".vetinari.local", image: "img", mounts: [], ...over }) as unknown as ResolvedConfig;
+  ({
+    branchPrefix: "agent/",
+    baseBranch: "main",
+    stateDir: ".vetinari.local",
+    image: "img",
+    mounts: [],
+    ...over,
+  }) as unknown as ResolvedConfig;
 
 test("makeSandboxOptions forks agent/<id> from cfg.baseBranch, not the checked-out HEAD (design §3 step 2)", () => {
   const opts = makeSandboxOptions(sandboxCfg({ baseBranch: "release" }), "436");

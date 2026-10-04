@@ -1,15 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  realpathSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
@@ -75,12 +67,7 @@ test("listProjects logs an unparseable pointer as registry-pointer-unreadable, n
 
   assert.deepEqual(
     logger.events.map((e) => [e.event, (e as { file?: string }).file]),
-    [
-      [
-        "registry-pointer-unreadable",
-        join(configDir, "registry", "broken.json"),
-      ],
-    ],
+    [["registry-pointer-unreadable", join(configDir, "registry", "broken.json")]],
   );
 });
 
@@ -93,9 +80,7 @@ test("register replaces a pointer without leaving a temp file the listing would 
   // left behind, and none of what remains is a stray *.json the listing reads.
   const files = readdirSync(join(configDir, "registry"));
   assert.deepEqual(files, ["jjforge.json"]);
-  assert.deepEqual(listProjects(configDir), [
-    pointer({ baseLocation: "/new/.vetinari.local" }),
-  ]);
+  assert.deepEqual(listProjects(configDir), [pointer({ baseLocation: "/new/.vetinari.local" })]);
 });
 
 test("removePointer drops the named pointer and leaves live ones — a stale entry stops rendering", () => {
@@ -136,9 +121,7 @@ const baseLocationWith = (env: string): string => {
 
 test("readProject loads the project's Telegram connection live from its base location", () => {
   const baseLocation = baseLocationWith(
-    "export VETINARI_TELEGRAM_BOT_TOKEN=123:abc\n" +
-      "VETINARI_TELEGRAM_CHAT_ID=-1001\n" +
-      'VETINARI_TELEGRAM_THREAD_ID="42"\n',
+    "export VETINARI_TELEGRAM_BOT_TOKEN=123:abc\n" + "VETINARI_TELEGRAM_CHAT_ID=-1001\n" + 'VETINARI_TELEGRAM_THREAD_ID="42"\n',
   );
   const read = readProject(pointer({ baseLocation }));
 
@@ -170,10 +153,7 @@ test("readProject strips inline comments from host.env values (shell semantics)"
 test("readProject loads the project's notify map and destinations live from its base location", () => {
   const base = join(tmpConfigDir(), ".vetinari.local");
   mkdirSync(base, { recursive: true });
-  writeFileSync(
-    join(base, "host.env"),
-    "VETINARI_TELEGRAM_BOT_TOKEN=t\nVETINARI_TELEGRAM_CHAT_ID=c\n",
-  );
+  writeFileSync(join(base, "host.env"), "VETINARI_TELEGRAM_BOT_TOKEN=t\nVETINARI_TELEGRAM_CHAT_ID=c\n");
   writeRouting(base, {
     notify: { "*": "ops", failure: "alerts" },
     destinations: {
@@ -198,16 +178,11 @@ test("writeRouting refreshes routing.json without leaving a temp file behind", (
 
   // The atomic write leaves only the final routing.json — no half-written residue.
   assert.deepEqual(readdirSync(base), ["routing.json"]);
-  assert.deepEqual(
-    JSON.parse(readFileSync(join(base, "routing.json"), "utf8")),
-    { notify: { "*": "alerts" } },
-  );
+  assert.deepEqual(JSON.parse(readFileSync(join(base, "routing.json"), "utf8")), { notify: { "*": "alerts" } });
 });
 
 test("readProject leaves notify/destinations undefined when the project materialized no routing", () => {
-  const baseLocation = baseLocationWith(
-    "VETINARI_TELEGRAM_BOT_TOKEN=t\nVETINARI_TELEGRAM_CHAT_ID=c\n",
-  );
+  const baseLocation = baseLocationWith("VETINARI_TELEGRAM_BOT_TOKEN=t\nVETINARI_TELEGRAM_CHAT_ID=c\n");
 
   const read = readProject(pointer({ baseLocation }));
 
@@ -216,9 +191,7 @@ test("readProject leaves notify/destinations undefined when the project material
 });
 
 test("tgConnForBaseLocation reads the Telegram connection from the base location's host.env", () => {
-  const baseLocation = baseLocationWith(
-    "VETINARI_TELEGRAM_BOT_TOKEN=123:abc\nVETINARI_TELEGRAM_CHAT_ID=-1001\n",
-  );
+  const baseLocation = baseLocationWith("VETINARI_TELEGRAM_BOT_TOKEN=123:abc\nVETINARI_TELEGRAM_CHAT_ID=-1001\n");
 
   assert.deepEqual(tgConnForBaseLocation(baseLocation), {
     token: "123:abc",
@@ -235,9 +208,7 @@ test("tgConnForBaseLocation is undefined when host.env is absent", () => {
 });
 
 test("tgConnForBaseLocation is undefined when host.env lacks the required keys", () => {
-  const baseLocation = baseLocationWith(
-    "VETINARI_TELEGRAM_BOT_TOKEN=123:abc\n",
-  );
+  const baseLocation = baseLocationWith("VETINARI_TELEGRAM_BOT_TOKEN=123:abc\n");
 
   assert.equal(tgConnForBaseLocation(baseLocation), undefined);
 });
@@ -259,10 +230,7 @@ test("tgConnForBaseLocation reads only host.env, never process.env", () => {
 });
 
 test("hostSecretsPath names host.env under the base location", () => {
-  assert.equal(
-    hostSecretsPath("/home/me/code/jjforge/.vetinari.local"),
-    "/home/me/code/jjforge/.vetinari.local/host.env",
-  );
+  assert.equal(hostSecretsPath("/home/me/code/jjforge/.vetinari.local"), "/home/me/code/jjforge/.vetinari.local/host.env");
 });
 
 test("readProject returns undefined for a pointer whose base location is gone", () => {
@@ -277,9 +245,7 @@ test("readProject returns undefined for a pointer whose base location is gone", 
 
 test("readProjects skips a stale pointer and never throws on it", () => {
   const configDir = tmpConfigDir();
-  const live = baseLocationWith(
-    "VETINARI_TELEGRAM_BOT_TOKEN=t\nVETINARI_TELEGRAM_CHAT_ID=c\n",
-  );
+  const live = baseLocationWith("VETINARI_TELEGRAM_BOT_TOKEN=t\nVETINARI_TELEGRAM_CHAT_ID=c\n");
   register(configDir, pointer({ project: "live", baseLocation: live }));
   register(
     configDir,
@@ -300,9 +266,7 @@ test("readProjects skips a stale pointer and never throws on it", () => {
 test("readProjects survives an unparseable pointer mid-registry, serving the rest — the reconcile-tick path", () => {
   const configDir = tmpConfigDir();
   const logger = memoryLogger();
-  const live = baseLocationWith(
-    "VETINARI_TELEGRAM_BOT_TOKEN=t\nVETINARI_TELEGRAM_CHAT_ID=c\n",
-  );
+  const live = baseLocationWith("VETINARI_TELEGRAM_BOT_TOKEN=t\nVETINARI_TELEGRAM_CHAT_ID=c\n");
   register(configDir, pointer({ project: "live", baseLocation: live }));
   // A zero-byte pointer appears mid-run, exactly as a torn write leaves it.
   writeFileSync(join(configDir, "registry", "torn.json"), "");
@@ -380,10 +344,7 @@ test("computeRegistryDedup removes nothing when no member has the canonical base
 
 test("computeRegistryDedup removes nothing when two members share the canonical base", () => {
   // Two canonical winners is ambiguous (can't happen on disk, but never guess) — leave both.
-  const drops = computeRegistryDedup([
-    pointer({ project: "a" }),
-    pointer({ project: "b" }),
-  ]);
+  const drops = computeRegistryDedup([pointer({ project: "a" }), pointer({ project: "b" })]);
 
   assert.deepEqual(drops, []);
 });
@@ -404,10 +365,7 @@ test("computeRegistryDedup leaves singletons and distinct-root pointers untouche
 });
 
 test("computeRegistryDedup groups by NORMALIZED root — a trailing slash is one group", () => {
-  const drops = computeRegistryDedup([
-    pointer(),
-    dupPointer({ projectRoot: "/home/me/code/jjforge/" }),
-  ]);
+  const drops = computeRegistryDedup([pointer(), dupPointer({ projectRoot: "/home/me/code/jjforge/" })]);
 
   assert.deepEqual(drops, [
     {
@@ -419,10 +377,7 @@ test("computeRegistryDedup groups by NORMALIZED root — a trailing slash is one
 });
 
 test("normalizeProjectRoot strips a trailing slash", () => {
-  assert.equal(
-    normalizeProjectRoot("/home/me/code/jjforge/"),
-    "/home/me/code/jjforge",
-  );
+  assert.equal(normalizeProjectRoot("/home/me/code/jjforge/"), "/home/me/code/jjforge");
 });
 
 test("normalizeProjectRoot realpath-resolves a symlinked root so path variants dedup", () => {
@@ -437,34 +392,24 @@ test("normalizeProjectRoot realpath-resolves a symlinked root so path variants d
 const withEnv = (over: Record<string, string | undefined>, fn: () => void) => {
   const keys = Object.keys(over);
   const prev = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
-  for (const k of keys)
-    over[k] === undefined ? delete process.env[k] : (process.env[k] = over[k]);
+  for (const k of keys) over[k] === undefined ? delete process.env[k] : (process.env[k] = over[k]);
   try {
     fn();
   } finally {
-    for (const k of keys)
-      prev[k] === undefined
-        ? delete process.env[k]
-        : (process.env[k] = prev[k]);
+    for (const k of keys) prev[k] === undefined ? delete process.env[k] : (process.env[k] = prev[k]);
   }
 };
 
 test("gatewayConfigDir honours VETINARI_GATEWAY_HOME above all else", () => {
-  withEnv(
-    { VETINARI_GATEWAY_HOME: "/opt/gw", XDG_CONFIG_HOME: "/home/me/.config" },
-    () => {
-      assert.equal(gatewayConfigDir(), "/opt/gw");
-    },
-  );
+  withEnv({ VETINARI_GATEWAY_HOME: "/opt/gw", XDG_CONFIG_HOME: "/home/me/.config" }, () => {
+    assert.equal(gatewayConfigDir(), "/opt/gw");
+  });
 });
 
 test("gatewayConfigDir falls back to XDG_CONFIG_HOME/vetinari", () => {
-  withEnv(
-    { VETINARI_GATEWAY_HOME: undefined, XDG_CONFIG_HOME: "/home/me/.config" },
-    () => {
-      assert.equal(gatewayConfigDir(), join("/home/me/.config", "vetinari"));
-    },
-  );
+  withEnv({ VETINARI_GATEWAY_HOME: undefined, XDG_CONFIG_HOME: "/home/me/.config" }, () => {
+    assert.equal(gatewayConfigDir(), join("/home/me/.config", "vetinari"));
+  });
 });
 
 test("autoRegister writes the current project's pointer and is idempotent on re-run", () => {
@@ -496,9 +441,7 @@ test("autoRegister materializes the project's routing so the gateway reads it li
     notify: { "*": "ops" },
     destinations: { ops: { chat: "-100" } },
   } as unknown as ResolvedConfig;
-  withEnv({ VETINARI_GATEWAY_HOME: configDir }, () =>
-    autoRegister(cfg, projectRoot),
-  );
+  withEnv({ VETINARI_GATEWAY_HOME: configDir }, () => autoRegister(cfg, projectRoot));
 
   const [read] = readProjects(configDir);
   assert.deepEqual(read.notify, { "*": "ops" });
@@ -511,18 +454,13 @@ test("re-registering a project refreshes its pointer in place", () => {
   register(configDir, pointer({ baseLocation: "/new/.vetinari.local" }));
 
   // One project, not two — the same name upserts rather than duplicating.
-  assert.deepEqual(listProjects(configDir), [
-    pointer({ baseLocation: "/new/.vetinari.local" }),
-  ]);
+  assert.deepEqual(listProjects(configDir), [pointer({ baseLocation: "/new/.vetinari.local" })]);
 });
 
 test("readPointer reads one pointer by name, and is undefined when unregistered", () => {
   const configDir = tmpConfigDir();
   register(configDir, pointer({ project: "here" }));
-  assert.deepEqual(
-    readPointer(configDir, "here"),
-    pointer({ project: "here" }),
-  );
+  assert.deepEqual(readPointer(configDir, "here"), pointer({ project: "here" }));
   assert.equal(readPointer(configDir, "absent"), undefined);
 });
 
@@ -538,25 +476,14 @@ test("pointerFor carries the derived repo when given one, and omits the key when
     repo: "jjforge/vetinari",
   });
   // A degraded derivation leaves the key off entirely — no explicit `undefined`.
-  assert.deepEqual(Object.keys(pointerFor(cfg, "/root")), [
-    "project",
-    "projectRoot",
-    "baseLocation",
-  ]);
+  assert.deepEqual(Object.keys(pointerFor(cfg, "/root")), ["project", "projectRoot", "baseLocation"]);
 });
 
 test("autoRegister fills the pointer's repo from the root's git origin", () => {
   const configDir = tmpConfigDir();
   const root = realpathSync(mkdtempSync(join(tmpdir(), "vetinari-reporoot-")));
   execFileSync("git", ["-C", root, "init", "-q"]);
-  execFileSync("git", [
-    "-C",
-    root,
-    "remote",
-    "add",
-    "origin",
-    "git@github.com:jjforge/vetinari.git",
-  ]);
+  execFileSync("git", ["-C", root, "remote", "add", "origin", "git@github.com:jjforge/vetinari.git"]);
   const cfg = {
     project: "jjforge",
     stateDir: ".vetinari.local",

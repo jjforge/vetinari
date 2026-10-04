@@ -161,9 +161,7 @@ function hasMarkerLine(text: string): boolean {
 function commentMarkerLines(comments: unknown): string {
   if (!Array.isArray(comments)) return "";
   const text = comments
-    .map((c) =>
-      c && typeof c === "object" ? (c as { body?: unknown }).body : undefined,
-    )
+    .map((c) => (c && typeof c === "object" ? (c as { body?: unknown }).body : undefined))
     .filter((b): b is string => typeof b === "string")
     .join("\n\n");
 
@@ -201,14 +199,8 @@ export function ticketProse(task: string): string {
       body?: unknown;
       comments?: unknown;
     };
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      (typeof parsed.body === "string" || typeof parsed.title === "string")
-    ) {
-      const prose = [parsed.title, parsed.body]
-        .filter((s): s is string => typeof s === "string")
-        .join("\n\n");
+    if (parsed && typeof parsed === "object" && (typeof parsed.body === "string" || typeof parsed.title === "string")) {
+      const prose = [parsed.title, parsed.body].filter((s): s is string => typeof s === "string").join("\n\n");
       if (hasMarkerLine(prose)) return prose;
       const fromComments = commentMarkerLines(parsed.comments);
       return fromComments ? `${prose}\n\n${fromComments}` : prose;
@@ -302,9 +294,7 @@ function resolveCite(cite: string, index: Map<string, string[]>): string | null 
  * `Creates:` cite never forces `confident: false`. Exported alongside
  * `githubBlockedBy` as a ready implementation a project can use or wrap.
  */
-export const defaultFileSet = (
-  root: string = process.cwd(),
-): ((ticket: string) => FileSet) => {
+export const defaultFileSet = (root: string = process.cwd()): ((ticket: string) => FileSet) => {
   // Snapshot the tree lazily, on the first ticket resolved — not at construction.
   // `campaign-plan` builds a resolver even for a single-issue selection it then
   // resolves nothing against (§356), so a resolver that is never invoked must
@@ -333,8 +323,7 @@ export const defaultFileSet = (
     const resolved = touchesCites.map((c) => resolveCite(c, tree));
     const validTouches = resolved.filter((k): k is string => k !== null);
     const files = [...new Set([...validTouches, ...(creates ?? [])])];
-    const confident =
-      files.length > 0 && validTouches.length === touchesCites.length;
+    const confident = files.length > 0 && validTouches.length === touchesCites.length;
     return { files, confident };
   };
 };

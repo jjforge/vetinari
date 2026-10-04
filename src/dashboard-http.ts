@@ -46,12 +46,7 @@ export interface DashboardDeps {
  * false untouched so the composer can try the next one. Keeping the match inside
  * each handler is what lets the composer stay a thin, order-only router.
  */
-export type RouteHandler = (
-  req: IncomingMessage,
-  res: ServerResponse,
-  url: URL,
-  deps: DashboardDeps,
-) => boolean | Promise<boolean>;
+export type RouteHandler = (req: IncomingMessage, res: ServerResponse, url: URL, deps: DashboardDeps) => boolean | Promise<boolean>;
 
 export const readBody = (req: NodeJS.ReadableStream) =>
   new Promise<string>((resolve, reject) => {

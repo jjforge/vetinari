@@ -6,8 +6,22 @@ test("formatStatusLine summarizes the running wave and status counts on one line
   const line = formatStatusLine({
     project: "jjforge",
     waves: [
-      { index: 0, status: "completed", issues: [{ issueNumber: "436", status: "completed" }, { issueNumber: "611", status: "completed" }] },
-      { index: 1, status: "running", issues: [{ issueNumber: "640", status: "running" }, { issueNumber: "655", status: "parked" }] },
+      {
+        index: 0,
+        status: "completed",
+        issues: [
+          { issueNumber: "436", status: "completed" },
+          { issueNumber: "611", status: "completed" },
+        ],
+      },
+      {
+        index: 1,
+        status: "running",
+        issues: [
+          { issueNumber: "640", status: "running" },
+          { issueNumber: "655", status: "parked" },
+        ],
+      },
       { index: 2, status: "unstarted", issues: [{ issueNumber: "720", status: "unstarted" }] },
     ],
     parked: [],
@@ -28,9 +42,30 @@ test("formatStatusLine counts a grafted issue by its lifecycle (unstarted âšª) â
   const line = formatStatusLine({
     project: "jjforge",
     waves: [
-      { index: 0, status: "running", issues: [{ issueNumber: "186", status: "running" }, { issueNumber: "171", status: "running" }] },
-      { index: 1, status: "unstarted", issues: [{ issueNumber: "168", status: "unstarted" }, { issueNumber: "193", status: "unstarted" }] },
-      { index: 2, status: "unstarted", issues: [{ issueNumber: "195", status: "unstarted", membership: "grafted" }, { issueNumber: "196", status: "unstarted", membership: "grafted" }] },
+      {
+        index: 0,
+        status: "running",
+        issues: [
+          { issueNumber: "186", status: "running" },
+          { issueNumber: "171", status: "running" },
+        ],
+      },
+      {
+        index: 1,
+        status: "unstarted",
+        issues: [
+          { issueNumber: "168", status: "unstarted" },
+          { issueNumber: "193", status: "unstarted" },
+        ],
+      },
+      {
+        index: 2,
+        status: "unstarted",
+        issues: [
+          { issueNumber: "195", status: "unstarted", membership: "grafted" },
+          { issueNumber: "196", status: "unstarted", membership: "grafted" },
+        ],
+      },
     ],
     parked: [],
   });

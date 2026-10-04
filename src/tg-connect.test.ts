@@ -68,10 +68,7 @@ test("planHostEnv merges into an existing file, preserving every other key", () 
 });
 
 test("planHostEnv replaces both keys in place when the file already carries them", () => {
-  const current =
-    "SOME_OTHER_KEY=keep-me\n" +
-    "VETINARI_TELEGRAM_BOT_TOKEN=old-token\n" +
-    "VETINARI_TELEGRAM_CHAT_ID=old-chat\n";
+  const current = "SOME_OTHER_KEY=keep-me\n" + "VETINARI_TELEGRAM_BOT_TOKEN=old-token\n" + "VETINARI_TELEGRAM_CHAT_ID=old-chat\n";
   const { content, changed } = planHostEnv(current, VALUES);
   assert.equal(changed, true);
   // Exactly one assignment of each key — replaced, not duplicated.
@@ -85,9 +82,7 @@ test("planHostEnv replaces both keys in place when the file already carries them
 });
 
 test("planHostEnv reports no change when both keys already carry the same values", () => {
-  const current =
-    "VETINARI_TELEGRAM_BOT_TOKEN=123456:ABC-tok\n" +
-    "VETINARI_TELEGRAM_CHAT_ID=-1001234567890\n";
+  const current = "VETINARI_TELEGRAM_BOT_TOKEN=123456:ABC-tok\n" + "VETINARI_TELEGRAM_CHAT_ID=-1001234567890\n";
   const { content, changed } = planHostEnv(current, VALUES);
   assert.equal(changed, false);
   assert.equal(content, current);
@@ -140,7 +135,10 @@ test("runTgConnect non-interactively with a value missing does not block — it 
   const { deps: d, logged } = deps();
   const r = await runTgConnect(base, { token: VALUES.token, chat: undefined, noVerify: false, force: false }, d);
   assert.deepEqual(r, { ok: false, written: false });
-  assert.ok(logged.some((l) => l.includes("--chat")), "names the missing flag");
+  assert.ok(
+    logged.some((l) => l.includes("--chat")),
+    "names the missing flag",
+  );
   assert.ok(!existsSync(hostSecretsPath(base)), "nothing written");
 });
 
@@ -151,7 +149,10 @@ test("runTgConnect: a verify failure non-interactively writes nothing and return
   const r = await runTgConnect(base, { token: VALUES.token, chat: VALUES.chat, noVerify: false, force: false }, d);
   assert.deepEqual(r, { ok: false, written: false });
   assert.ok(!existsSync(hostSecretsPath(base)), "nothing written on a failed verify");
-  assert.ok(logged.some((l) => /rejected|wrong/i.test(l)), "the telegram error is reported");
+  assert.ok(
+    logged.some((l) => /rejected|wrong/i.test(l)),
+    "the telegram error is reported",
+  );
 });
 
 test("runTgConnect: a verify failure on a TTY re-prompts, then writes once the send succeeds", async () => {
@@ -179,10 +180,7 @@ test("runTgConnect --no-verify skips the send and writes directly", async () => 
 
 test("runTgConnect re-run guard: on a TTY it shows the chat (never the token) and keeps the connection on a no", async () => {
   const base = tmpBase();
-  writeFileSync(
-    hostSecretsPath(base),
-    "VETINARI_TELEGRAM_BOT_TOKEN=secret-existing\nVETINARI_TELEGRAM_CHAT_ID=999\n",
-  );
+  writeFileSync(hostSecretsPath(base), "VETINARI_TELEGRAM_BOT_TOKEN=secret-existing\nVETINARI_TELEGRAM_CHAT_ID=999\n");
   const ask = fakeAsk(["n"]);
   const { deps: d, logged } = deps({ isTTY: true, ask });
   const r = await runTgConnect(base, { noVerify: false, force: false }, d);
@@ -196,23 +194,20 @@ test("runTgConnect re-run guard: on a TTY it shows the chat (never the token) an
 
 test("runTgConnect re-run guard: non-interactively it refuses unless --force", async () => {
   const base = tmpBase();
-  writeFileSync(
-    hostSecretsPath(base),
-    "VETINARI_TELEGRAM_BOT_TOKEN=secret-existing\nVETINARI_TELEGRAM_CHAT_ID=999\n",
-  );
+  writeFileSync(hostSecretsPath(base), "VETINARI_TELEGRAM_BOT_TOKEN=secret-existing\nVETINARI_TELEGRAM_CHAT_ID=999\n");
   const { deps: d, logged } = deps();
   const r = await runTgConnect(base, { token: VALUES.token, chat: VALUES.chat, noVerify: false, force: false }, d);
   assert.deepEqual(r, { ok: false, written: false });
-  assert.ok(logged.some((l) => l.includes("--force")), "points at --force");
+  assert.ok(
+    logged.some((l) => l.includes("--force")),
+    "points at --force",
+  );
   assert.match(readFileSync(hostSecretsPath(base), "utf8"), /secret-existing/, "left untouched");
 });
 
 test("runTgConnect --force replaces an existing bot connection without asking", async () => {
   const base = tmpBase();
-  writeFileSync(
-    hostSecretsPath(base),
-    "VETINARI_TELEGRAM_BOT_TOKEN=old\nVETINARI_TELEGRAM_CHAT_ID=old\n",
-  );
+  writeFileSync(hostSecretsPath(base), "VETINARI_TELEGRAM_BOT_TOKEN=old\nVETINARI_TELEGRAM_CHAT_ID=old\n");
   const ask = fakeAsk([]); // must not be consulted
   const send = fakeSend([1]);
   const { deps: d } = deps({ isTTY: true, ask, send });
@@ -251,6 +246,9 @@ test("runTgConnect on a TTY with a bad --token flag re-prompts for both values r
   assert.deepEqual(r, { ok: true, written: true });
   assert.equal(send.calls.length, 2);
   // The re-prompt re-asked for the token (not only the prompted chat), so the bad flag was fixable.
-  assert.ok(ask.asked.some((q) => /token/i.test(q)), "the token is re-prompted after a bad flag");
+  assert.ok(
+    ask.asked.some((q) => /token/i.test(q)),
+    "the token is re-prompted after a bad flag",
+  );
   assert.match(readFileSync(hostSecretsPath(base), "utf8"), /VETINARI_TELEGRAM_BOT_TOKEN=123456:ABC-tok/);
 });

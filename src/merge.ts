@@ -141,7 +141,13 @@ export async function integrateGreens(
       // parks") so the card stays off idle and the gateway can announce/redrive it after the
       // run's log is archived — the event alone vanishes with the log. `conflict` redrives,
       // never resumes by reply, so the record carries no session; `question` names the move.
-      writeParkedRecord(cfg, { taskId, reason: "conflict", detail, branch, question: `Merge conflict on ${branch} — resolve it on the base, then redrive.` });
+      writeParkedRecord(cfg, {
+        taskId,
+        reason: "conflict",
+        detail,
+        branch,
+        question: `Merge conflict on ${branch} — resolve it on the base, then redrive.`,
+      });
       cfg.log.log("parked", { taskId, reason: "conflict", detail });
       conflictParked.push(taskId);
       continue;
@@ -196,7 +202,11 @@ export async function integrateGreens(
  * with none is opting out: its fragments are left on the base and one line is logged,
  * rather than a changelog being materialised no one asked for.
  */
-export function collectWaveChangelog(waveIndex: number, log: Logger, root: string = process.cwd()): { collected: string[]; committed: boolean } {
+export function collectWaveChangelog(
+  waveIndex: number,
+  log: Logger,
+  root: string = process.cwd(),
+): { collected: string[]; committed: boolean } {
   const { collected, skipped } = applyCollect({
     fragmentsDir: join(root, FRAGMENT_DIR),
     changelogPath: join(root, "CHANGELOG.md"),
@@ -314,9 +324,7 @@ export function computeTidy(snap: TidySnapshot): TidyPlan {
   // branch is already gone (cleaned by hand) yet an artifact for it still lingers.
   const isMerged = (id: string) => !present.has(id) || reachable.get(id) === true;
 
-  const deleteBranches = snap.branches
-    .map((b) => normalizeTidyId(b.id))
-    .filter((id) => reachable.get(id) === true && !protectedId.has(id));
+  const deleteBranches = snap.branches.map((b) => normalizeTidyId(b.id)).filter((id) => reachable.get(id) === true && !protectedId.has(id));
 
   const fold = fragments.filter((id) => isMerged(id) && !protectedId.has(id));
   const clearParked = [...parked].filter(isMerged);
@@ -501,9 +509,7 @@ export function describeRegistryDedup(drops: PointerDrop[]): string {
   if (!drops.length) return "";
   return [
     "tidy registry:",
-    ...drops.map(
-      (d) => `  registry: drop duplicate pointer '${d.drop}' — projectRoot ${d.projectRoot} also held by '${d.kept}'`,
-    ),
+    ...drops.map((d) => `  registry: drop duplicate pointer '${d.drop}' — projectRoot ${d.projectRoot} also held by '${d.kept}'`),
   ].join("\n");
 }
 

@@ -49,7 +49,9 @@ const file = (cfg: Pick<ResolvedConfig, "parkedDir">, taskId: string) => `${cfg.
 export async function park(cfg: ResolvedConfig, rec: Omit<ParkedRecord, "parkedAt" | "tgMessageId">) {
   writeParkedRecord(cfg, rec);
   cfg.log.log("parked", { taskId: rec.taskId, reason: rec.reason, ...(rec.detail ? { detail: rec.detail } : {}) });
-  console.log(`\n*** PARKED (${rec.reason}) — the gateway will announce this question; or answer directly with:\n    vetinari answer ${rec.taskId} "<answer>"\n`);
+  console.log(
+    `\n*** PARKED (${rec.reason}) — the gateway will announce this question; or answer directly with:\n    vetinari answer ${rec.taskId} "<answer>"\n`,
+  );
 }
 
 /**
@@ -166,7 +168,10 @@ export const outboxDirOf = (baseLocation: string) => join(baseLocation, "outbox"
  * keyed by a fresh id so records written within the same tick never collide.
  * Silent by design — the gateway drains and routes it per the notify map.
  */
-export function enqueueOutbound(cfg: Pick<ResolvedConfig, "stateDir" | "log">, msg: Omit<OutboundRecord, "id" | "enqueuedAt" | "sentAt" | "destination">): void {
+export function enqueueOutbound(
+  cfg: Pick<ResolvedConfig, "stateDir" | "log">,
+  msg: Omit<OutboundRecord, "id" | "enqueuedAt" | "sentAt" | "destination">,
+): void {
   const dir = outboxDirOf(cfg.stateDir);
   mkdirSync(dir, { recursive: true });
   const rec: OutboundRecord = { id: randomUUID(), enqueuedAt: new Date().toISOString(), ...msg };

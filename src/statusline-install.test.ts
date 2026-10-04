@@ -1,6 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildInstalledCommand, composeStatusLine, computeInstall, computeUninstall, DEFAULT_RUN_COMMAND, parseInstalledCommand, describeInstall, describeUninstall, type Settings } from "./statusline-install.ts";
+import {
+  buildInstalledCommand,
+  composeStatusLine,
+  computeInstall,
+  computeUninstall,
+  DEFAULT_RUN_COMMAND,
+  parseInstalledCommand,
+  describeInstall,
+  describeUninstall,
+  type Settings,
+} from "./statusline-install.ts";
 
 test("buildInstalledCommand + parseInstalledCommand round-trips a wrapped base command", () => {
   const cmd = buildInstalledCommand("npx vetinari statusline", "my-fancy-bar --color");
@@ -101,7 +111,10 @@ test("uninstall is a no-op when no status line is configured at all", () => {
 });
 
 test("uninstall does not mutate the settings it was given", () => {
-  const installed = computeInstall({ statusLine: { type: "command", command: "my-fancy-bar" } }, { runCommand: DEFAULT_RUN_COMMAND }).settings;
+  const installed = computeInstall(
+    { statusLine: { type: "command", command: "my-fancy-bar" } },
+    { runCommand: DEFAULT_RUN_COMMAND },
+  ).settings;
   const snapshot = JSON.parse(JSON.stringify(installed));
   computeUninstall(installed);
   assert.deepEqual(installed, snapshot);
@@ -149,7 +162,10 @@ test("describeUninstall warns and names settings.local.json when the local layer
 test("describeUninstall distinguishes a restore, a plain removal, and a no-op", () => {
   assert.match(describeUninstall({ restored: "my-fancy-bar", wasInstalled: true }, ".claude/settings.json"), /restor/i);
   assert.match(describeUninstall({ restored: undefined, wasInstalled: true }, ".claude/settings.json"), /Uninstalled|removed/i);
-  assert.match(describeUninstall({ restored: undefined, wasInstalled: false }, ".claude/settings.json"), /No Vetinari status line|nothing/i);
+  assert.match(
+    describeUninstall({ restored: undefined, wasInstalled: false }, ".claude/settings.json"),
+    /No Vetinari status line|nothing/i,
+  );
 });
 
 test("computeUninstall reports a shadow and changes nothing when settings.local.json owns a statusLine", () => {
@@ -166,13 +182,22 @@ test("computeInstall wraps a status line inherited from user settings when the p
   // Reproduces the 'colors vanish on line 1' bug: the user's colored status line
   // lives in ~/.claude/settings.json; installing at project level must wrap it
   // (not shadow it with vetinari's plain line).
-  const { settings, base } = computeInstall({}, { runCommand: DEFAULT_RUN_COMMAND, inheritedBase: "bash '/home/me/.claude/statusline.sh'" });
+  const { settings, base } = computeInstall(
+    {},
+    { runCommand: DEFAULT_RUN_COMMAND, inheritedBase: "bash '/home/me/.claude/statusline.sh'" },
+  );
   assert.equal(base, "bash '/home/me/.claude/statusline.sh'");
-  assert.deepEqual(parseInstalledCommand(settings.statusLine!.command!), { runCommand: DEFAULT_RUN_COMMAND, base: "bash '/home/me/.claude/statusline.sh'" });
+  assert.deepEqual(parseInstalledCommand(settings.statusLine!.command!), {
+    runCommand: DEFAULT_RUN_COMMAND,
+    base: "bash '/home/me/.claude/statusline.sh'",
+  });
 });
 
 test("a project's own status line takes precedence over an inherited one as the base", () => {
-  const { base } = computeInstall({ statusLine: { type: "command", command: "proj-bar" } }, { runCommand: DEFAULT_RUN_COMMAND, inheritedBase: "user-bar" });
+  const { base } = computeInstall(
+    { statusLine: { type: "command", command: "proj-bar" } },
+    { runCommand: DEFAULT_RUN_COMMAND, inheritedBase: "user-bar" },
+  );
   assert.equal(base, "proj-bar");
 });
 
@@ -180,7 +205,10 @@ test("computeInstall does not write a shadowed line when settings.local.json own
   // A statusLine in the higher-precedence settings.local.json makes any write to
   // settings.json inert — Claude Code renders the local layer's whole block.
   const before: Settings = { model: "opus" };
-  const { settings, shadowedByLocal, alreadyInstalled } = computeInstall(before, { runCommand: DEFAULT_RUN_COMMAND, shadowedByLocal: true });
+  const { settings, shadowedByLocal, alreadyInstalled } = computeInstall(before, {
+    runCommand: DEFAULT_RUN_COMMAND,
+    shadowedByLocal: true,
+  });
   assert.equal(shadowedByLocal, true);
   assert.equal(alreadyInstalled, false);
   assert.equal("statusLine" in settings, false); // no shadowed write planned
@@ -195,7 +223,10 @@ test("uninstall drops the project status line when it wrapped an inherited one (
 });
 
 test("uninstall restores a project-owned wrapped line rather than dropping it", () => {
-  const installed = computeInstall({ statusLine: { type: "command", command: "proj-bar" } }, { runCommand: DEFAULT_RUN_COMMAND, inheritedBase: "user-bar" }).settings;
+  const installed = computeInstall(
+    { statusLine: { type: "command", command: "proj-bar" } },
+    { runCommand: DEFAULT_RUN_COMMAND, inheritedBase: "user-bar" },
+  ).settings;
   const { settings } = computeUninstall(installed, { inheritedBase: "user-bar" });
   assert.equal(settings.statusLine?.command, "proj-bar");
 });

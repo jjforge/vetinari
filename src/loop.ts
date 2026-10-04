@@ -18,9 +18,7 @@ import { withHostSlot, type HostBudget } from "./host-slots.ts";
  */
 function filesInCommit(sha: string, log: Logger): string[] {
   try {
-    return execFileSync("git", ["diff-tree", "--no-commit-id", "--name-only", "-r", sha], { encoding: "utf8" })
-      .split("\n")
-      .filter(Boolean);
+    return execFileSync("git", ["diff-tree", "--no-commit-id", "--name-only", "-r", sha], { encoding: "utf8" }).split("\n").filter(Boolean);
   } catch (e: any) {
     log.log("commit-files-failed", { sha, error: String(e?.message ?? e) });
     return [];
@@ -150,7 +148,14 @@ const usageOf = (r: any) =>
  * into an error, nor convert a park into a failure. No-op unless a reporter is
  * configured and a session id is in hand (an idle stall may have neither).
  */
-async function harvestFindings(cfg: ResolvedConfig, sbx: Sandbox, sessionId: string | undefined, common: any, taskId: string, source?: string) {
+async function harvestFindings(
+  cfg: ResolvedConfig,
+  sbx: Sandbox,
+  sessionId: string | undefined,
+  common: any,
+  taskId: string,
+  source?: string,
+) {
   if (!cfg.reportFinding || !sessionId) return;
   try {
     const hr = await sbx.run({ ...common, maxIterations: 1, resumeSession: sessionId, prompt: HARVEST_PROMPT });
@@ -165,14 +170,17 @@ async function harvestFindings(cfg: ResolvedConfig, sbx: Sandbox, sessionId: str
     }
     const filed = results.filter((r) => !r.error).length;
     if (filed)
-      enqueueOutbound(cfg, notice({
-        emoji: "🔎",
-        project: cfg.project,
-        state: "FINDING",
-        context: taskId,
-        signal: `filed ${filed} incidental finding(s)${filed !== results.length ? ` (${results.length - filed} failed — see log)` : ""}`,
-        category: "finding",
-      }));
+      enqueueOutbound(
+        cfg,
+        notice({
+          emoji: "🔎",
+          project: cfg.project,
+          state: "FINDING",
+          context: taskId,
+          signal: `filed ${filed} incidental finding(s)${filed !== results.length ? ` (${results.length - filed} failed — see log)` : ""}`,
+          category: "finding",
+        }),
+      );
   } catch (e: any) {
     cfg.log.log("harvest-failed", { taskId, error: String(e?.message ?? e) });
   }
@@ -191,191 +199,223 @@ async function harvestFindings(cfg: ResolvedConfig, sbx: Sandbox, sessionId: str
  * probe count it. A campaign child (`VETINARI_CHILD`) never does — its parent already holds a
  * slot for it. Omitted only by in-process tests that drive the loop without a lease.
  */
-export async function runLoop(cfg: ResolvedConfig, taskId: string, host?: HostBudget, entry?: ResumeEntry, deps: LoopDeps = defaultLoopDeps): Promise<Outcome> {
- try {
-  // Whether the loop resumes a session between turns (claude/pi/codex) or re-enters each
-  // turn as a fresh run (copilot/cursor/opencode carry no durable session) — ADR 0016 / #212.
-  const { resumable, provider } = agentSelectionFor(cfg);
+export async function runLoop(
+  cfg: ResolvedConfig,
+  taskId: string,
+  host?: HostBudget,
+  entry?: ResumeEntry,
+  deps: LoopDeps = defaultLoopDeps,
+): Promise<Outcome> {
+  try {
+    // Whether the loop resumes a session between turns (claude/pi/codex) or re-enters each
+    // turn as a fresh run (copilot/cursor/opencode carry no durable session) — ADR 0016 / #212.
+    const { resumable, provider } = agentSelectionFor(cfg);
 
-  // An answered parked record re-admits this member with the human's answer (design §5 step 3,
-  // §7): consume it here, as the run starts — resume the session with the answer (resumable) or
-  // relay it as an issue comment and re-enter fresh (non-resumable) — then clear the record so the
-  // gateway never re-announces and no re-admit fires twice. An explicit `entry` (a direct resume)
-  // already carries its prompt and skips this.
-  if (!entry && hasParked(cfg, taskId)) {
-    const rec = readParked(cfg, taskId, { requireSession: false });
-    if (rec.answer != null) {
-      if (resumable) {
-        if (!rec.sessionId)
-          throw new Error(`parked record for ${taskId} has no sessionId — cannot resume the answer`);
-        entry = { resumeSessionId: rec.sessionId, answerPrompt: answerPromptFor(rec.answer) };
-      } else {
-        if (!cfg.postComment) throw new Refusal(nonResumableAnswerWarning(provider));
-        await cfg.postComment(taskId, parkedAnswerComment(rec.question, rec.answer));
+    // An answered parked record re-admits this member with the human's answer (design §5 step 3,
+    // §7): consume it here, as the run starts — resume the session with the answer (resumable) or
+    // relay it as an issue comment and re-enter fresh (non-resumable) — then clear the record so the
+    // gateway never re-announces and no re-admit fires twice. An explicit `entry` (a direct resume)
+    // already carries its prompt and skips this.
+    if (!entry && hasParked(cfg, taskId)) {
+      const rec = readParked(cfg, taskId, { requireSession: false });
+      if (rec.answer != null) {
+        if (resumable) {
+          if (!rec.sessionId) throw new Error(`parked record for ${taskId} has no sessionId — cannot resume the answer`);
+          entry = { resumeSessionId: rec.sessionId, answerPrompt: answerPromptFor(rec.answer) };
+        } else {
+          if (!cfg.postComment) throw new Refusal(nonResumableAnswerWarning(provider));
+          await cfg.postComment(taskId, parkedAnswerComment(rec.question, rec.answer));
+        }
+        clearParked(cfg, taskId);
       }
-      clearParked(cfg, taskId);
     }
-  }
 
-  const task = entry ? "" : await cfg.fetchTask(taskId);
-  // Preflight (design §3 step 1): a non-resumable provider with no `postComment` cannot have
-  // a parked question answered — surface it up front rather than only when a park is stranded.
-  if (!resumable && !cfg.postComment) console.warn(nonResumableAnswerWarning(provider));
+    const task = entry ? "" : await cfg.fetchTask(taskId);
+    // Preflight (design §3 step 1): a non-resumable provider with no `postComment` cannot have
+    // a parked question answered — surface it up front rather than only when a park is stranded.
+    if (!resumable && !cfg.postComment) console.warn(nonResumableAnswerWarning(provider));
 
-  const runContainer = async (): Promise<Outcome> => {
-    const sbx = await deps.makeSandbox(cfg, taskId);
-    // Start the per-task activity stream fresh — live-only scratch, overwritten per run (ADR 0015).
-    initActivityLog(cfg.stateDir, taskId);
-    try {
-      const common = {
-        agent: agentFor(cfg),
-        completionSignal: [DONE, BLOCKED],
-        idleTimeoutSeconds: cfg.idleTimeoutSeconds,
-        // Additive to the human-readable agent log: projects the raw run stream into
-        // activity-<taskId>.jsonl per tool-use, so the live-tail pane has a structured source (ADR 0015).
-        logging: activityLoggingSink(cfg.stateDir, taskId),
-      };
-      let r: any;
+    const runContainer = async (): Promise<Outcome> => {
+      const sbx = await deps.makeSandbox(cfg, taskId);
+      // Start the per-task activity stream fresh — live-only scratch, overwritten per run (ADR 0015).
+      initActivityLog(cfg.stateDir, taskId);
       try {
-        r = entry
-          ? await sbx.run({ ...common, maxIterations: 1, resumeSession: entry.resumeSessionId, prompt: entry.answerPrompt })
-          : await sbx.run({ ...common, promptFile: cfg.promptFile, promptArgs: { TASK: task, PROJECT: cfg.project } });
+        const common = {
+          agent: agentFor(cfg),
+          completionSignal: [DONE, BLOCKED],
+          idleTimeoutSeconds: cfg.idleTimeoutSeconds,
+          // Additive to the human-readable agent log: projects the raw run stream into
+          // activity-<taskId>.jsonl per tool-use, so the live-tail pane has a structured source (ADR 0015).
+          logging: activityLoggingSink(cfg.stateDir, taskId),
+        };
+        let r: any;
+        try {
+          r = entry
+            ? await sbx.run({ ...common, maxIterations: 1, resumeSession: entry.resumeSessionId, prompt: entry.answerPrompt })
+            : await sbx.run({ ...common, promptFile: cfg.promptFile, promptArgs: { TASK: task, PROJECT: cfg.project } });
 
-        for (let turn = 0; turn < cfg.maxTurns; turn++) {
-          const sessionId = r.iterations.at(-1)?.sessionId;
-          const turnFields = { taskId, turn, signal: r.completionSignal, sessionId, usage: usageOf(r), commits: r.commits?.length ?? 0, summary: extractTurnSummary(r.stdout ?? "") ?? "" };
-          cfg.log.log("turn", turnFields);
-          // Fold the loop's own events into the per-task activity stream so the pane tails one merged
-          // record (ADR 0015): the turn, then a per-`commit` line for each commit this turn landed.
-          appendActivity(cfg.stateDir, taskId, event("turn", turnFields));
-          for (const c of r.commits ?? [])
-            appendActivity(cfg.stateDir, taskId, event("commit", { taskId, branch: sbx.branch, sha: c.sha, files: deps.filesInCommit(c.sha, cfg.log) }));
+          for (let turn = 0; turn < cfg.maxTurns; turn++) {
+            const sessionId = r.iterations.at(-1)?.sessionId;
+            const turnFields = {
+              taskId,
+              turn,
+              signal: r.completionSignal,
+              sessionId,
+              usage: usageOf(r),
+              commits: r.commits?.length ?? 0,
+              summary: extractTurnSummary(r.stdout ?? "") ?? "",
+            };
+            cfg.log.log("turn", turnFields);
+            // Fold the loop's own events into the per-task activity stream so the pane tails one merged
+            // record (ADR 0015): the turn, then a per-`commit` line for each commit this turn landed.
+            appendActivity(cfg.stateDir, taskId, event("turn", turnFields));
+            for (const c of r.commits ?? [])
+              appendActivity(
+                cfg.stateDir,
+                taskId,
+                event("commit", { taskId, branch: sbx.branch, sha: c.sha, files: deps.filesInCommit(c.sha, cfg.log) }),
+              );
 
-          if (r.completionSignal === BLOCKED) {
-            await park(cfg, { taskId, reason: "question", sessionId, branch: sbx.branch, question: extractQuestion(r.stdout ?? "") });
-            return "parked";
+            if (r.completionSignal === BLOCKED) {
+              await park(cfg, { taskId, reason: "question", sessionId, branch: sbx.branch, question: extractQuestion(r.stdout ?? "") });
+              return "parked";
+            }
+
+            // No-commit park (design §3 step 6): a COMPLETE that left no commit beyond the
+            // base is not green — a no-op agent that says done and changed nothing. This runs
+            // BEFORE the gates (step 7), so nothing-ahead parks `stalled/no-commit` without
+            // spending a gate run or a turn — and a `when`-scoped gate never trivially greens
+            // an empty diff. null (git couldn't tell) is NOT zero, so a transient failure falls
+            // through to the gate rather than falsely parking.
+            const ahead = deps.commitsAhead(cfg.baseBranch, sbx.branch, cfg.log);
+            if (ahead === 0) {
+              cfg.log.log("empty-green", { taskId, branch: sbx.branch });
+              await park(cfg, {
+                taskId,
+                reason: "stalled",
+                detail: "no-commit",
+                sessionId,
+                branch: sbx.branch,
+                question: `COMPLETE but ${sbx.branch} has no commit beyond ${cfg.baseBranch} — the agent produced no change. Likely a no-op, or the task needs clarification before it can be done.`,
+              });
+              return "parked";
+            }
+
+            const { green, report } = await runGates(cfg, sbx, { taskId });
+            if (green) {
+              cfg.log.log("green", { taskId, branch: sbx.branch, commits: (r.commits ?? []).map((c: any) => c.sha) });
+              // The human GREEN banner is the terminal view (design §11); under --json the screen is
+              // the raw event stream alone, so keep it out to leave the JSONL clean for tooling (#299).
+              if (process.env.VETINARI_JSON !== "1") {
+                console.log(`\n*** GREEN — commits on ${sbx.branch}\n`);
+                // A run banks work on its branch and merges nothing — integration (the merge and the
+                // merged-base gate) is the campaign's, so say so lest the branch read as a finished
+                // issue (#339). Suppressed for a campaign's OWN child run: telling a wave member to go
+                // run `campaign` is nonsense. The child marker is the same VETINARI_CHILD the host-lease
+                // exemption reads a few lines below — one discriminator, not two.
+                if (!process.env.VETINARI_CHILD)
+                  console.log(`Not merged — the commits are banked on ${sbx.branch}. Integrate them with: campaign ${taskId}\n`);
+              }
+              enqueueOutbound(
+                cfg,
+                notice({
+                  emoji: "✅",
+                  project: cfg.project,
+                  state: "GREEN",
+                  context: taskId,
+                  signal: `orchestrator-verified, commits on ${sbx.branch}`,
+                  category: "success",
+                  event: "green",
+                }),
+              );
+              clearParked(cfg, taskId);
+              // Harvest incidental findings on the still-live session before teardown.
+              await harvestFindings(cfg, sbx, sessionId, common, taskId);
+              return "green";
+            }
+
+            if (resumable) {
+              // Resume via resumeSession + inline prompt — the SAME path the park→answer
+              // resume uses (above). `r.resume()` inherits the turn-0 promptArgs, which the
+              // library rejects alongside an inline prompt ("promptArgs is only supported
+              // with promptFile"), so a red gate errored instead of resuming (#3).
+              const resumeSessionId = r.iterations.at(-1)?.sessionId;
+              if (!resumeSessionId) throw new Error("no session id to resume — cannot drive the TDD loop");
+              r = await sbx.run({ ...common, maxIterations: 1, resumeSession: resumeSessionId, prompt: redResumePrompt(report) });
+            } else {
+              // Non-resumable provider: there is no session to resume, so the next turn is a
+              // FRESH run through the same promptFile path turn 0 uses — re-reading the issue
+              // via fetchTask, its prior work visible as commits already on the branch, with the
+              // gate report + most-recent turn summary carried in the prompt (#212). Don't spin a
+              // fresh run on the final turn: it would never be gated. Fall through to the budget park.
+              if (turn + 1 >= cfg.maxTurns) break;
+              const freshTask = await cfg.fetchTask(taskId);
+              r = await sbx.run({
+                ...common,
+                promptFile: cfg.promptFile,
+                promptArgs: { TASK: `${freshTask}\n\n${freshRedReentry(report, turnFields.summary)}`, PROJECT: cfg.project },
+              });
+            }
           }
 
-          // No-commit park (design §3 step 6): a COMPLETE that left no commit beyond the
-          // base is not green — a no-op agent that says done and changed nothing. This runs
-          // BEFORE the gates (step 7), so nothing-ahead parks `stalled/no-commit` without
-          // spending a gate run or a turn — and a `when`-scoped gate never trivially greens
-          // an empty diff. null (git couldn't tell) is NOT zero, so a transient failure falls
-          // through to the gate rather than falsely parking.
-          const ahead = deps.commitsAhead(cfg.baseBranch, sbx.branch, cfg.log);
-          if (ahead === 0) {
-            cfg.log.log("empty-green", { taskId, branch: sbx.branch });
+          // Budget park (design §3 step 8): `detail` carries the specifics (`budget:<maxTurns>`)
+          // per §2.3, not the bare reason. This is the richest session the loop produces —
+          // maxTurns genuine attempts against a real gate — so harvest it before teardown,
+          // marked with the exit so triage weighs it as weaker evidence than a green run.
+          const budgetSessionId = r.iterations.at(-1)?.sessionId;
+          const budgetDetail = `budget:${cfg.maxTurns}`;
+          await harvestFindings(cfg, sbx, budgetSessionId, common, taskId, budgetDetail);
+          await park(cfg, {
+            taskId,
+            reason: "stalled",
+            detail: budgetDetail,
+            sessionId: budgetSessionId,
+            branch: sbx.branch,
+            question: `Turn budget exhausted (${cfg.maxTurns} gate cycles).`,
+          });
+          return "parked";
+        } catch (err: any) {
+          // An agent that emits NEITHER signal dies on the idle timeout as a thrown
+          // error, not a result. Without this catch the slot leaves no parked
+          // record and the work is unrecoverable.
+          if (String(err?.name ?? err?.constructor?.name).includes("Idle")) {
+            // Harvest when the error carries a recoverable session; harvestFindings no-ops when
+            // it does not, so an unrecoverable idle stall skips cleanly (design §3 step 9).
+            await harvestFindings(cfg, sbx, err?.sessionId, common, taskId, "idle");
             await park(cfg, {
               taskId,
               reason: "stalled",
-              detail: "no-commit",
-              sessionId,
+              detail: "idle",
+              sessionId: err?.sessionId,
               branch: sbx.branch,
-              question: `COMPLETE but ${sbx.branch} has no commit beyond ${cfg.baseBranch} — the agent produced no change. Likely a no-op, or the task needs clarification before it can be done.`,
+              question: "Agent stalled without emitting a signal.",
             });
             return "parked";
           }
-
-          const { green, report } = await runGates(cfg, sbx, { taskId });
-          if (green) {
-            cfg.log.log("green", { taskId, branch: sbx.branch, commits: (r.commits ?? []).map((c: any) => c.sha) });
-            // The human GREEN banner is the terminal view (design §11); under --json the screen is
-            // the raw event stream alone, so keep it out to leave the JSONL clean for tooling (#299).
-            if (process.env.VETINARI_JSON !== "1") {
-              console.log(`\n*** GREEN — commits on ${sbx.branch}\n`);
-              // A run banks work on its branch and merges nothing — integration (the merge and the
-              // merged-base gate) is the campaign's, so say so lest the branch read as a finished
-              // issue (#339). Suppressed for a campaign's OWN child run: telling a wave member to go
-              // run `campaign` is nonsense. The child marker is the same VETINARI_CHILD the host-lease
-              // exemption reads a few lines below — one discriminator, not two.
-              if (!process.env.VETINARI_CHILD)
-                console.log(`Not merged — the commits are banked on ${sbx.branch}. Integrate them with: campaign ${taskId}\n`);
-            }
-            enqueueOutbound(cfg, notice({
-              emoji: "✅",
-              project: cfg.project,
-              state: "GREEN",
-              context: taskId,
-              signal: `orchestrator-verified, commits on ${sbx.branch}`,
-              category: "success",
-              event: "green",
-            }));
-            clearParked(cfg, taskId);
-            // Harvest incidental findings on the still-live session before teardown.
-            await harvestFindings(cfg, sbx, sessionId, common, taskId);
-            return "green";
-          }
-
-          if (resumable) {
-            // Resume via resumeSession + inline prompt — the SAME path the park→answer
-            // resume uses (above). `r.resume()` inherits the turn-0 promptArgs, which the
-            // library rejects alongside an inline prompt ("promptArgs is only supported
-            // with promptFile"), so a red gate errored instead of resuming (#3).
-            const resumeSessionId = r.iterations.at(-1)?.sessionId;
-            if (!resumeSessionId) throw new Error("no session id to resume — cannot drive the TDD loop");
-            r = await sbx.run({ ...common, maxIterations: 1, resumeSession: resumeSessionId, prompt: redResumePrompt(report) });
-          } else {
-            // Non-resumable provider: there is no session to resume, so the next turn is a
-            // FRESH run through the same promptFile path turn 0 uses — re-reading the issue
-            // via fetchTask, its prior work visible as commits already on the branch, with the
-            // gate report + most-recent turn summary carried in the prompt (#212). Don't spin a
-            // fresh run on the final turn: it would never be gated. Fall through to the budget park.
-            if (turn + 1 >= cfg.maxTurns) break;
-            const freshTask = await cfg.fetchTask(taskId);
-            r = await sbx.run({
-              ...common,
-              promptFile: cfg.promptFile,
-              promptArgs: { TASK: `${freshTask}\n\n${freshRedReentry(report, turnFields.summary)}`, PROJECT: cfg.project },
-            });
-          }
+          // Anything else thrown is a terminal failure, not a park (design §3 step 9): re-throw
+          // so the single outer catch logs one `failed` verdict — the same verdict a throw before
+          // the container (preflight, fetchTask, sandbox creation) now gets.
+          throw err;
         }
-
-        // Budget park (design §3 step 8): `detail` carries the specifics (`budget:<maxTurns>`)
-        // per §2.3, not the bare reason. This is the richest session the loop produces —
-        // maxTurns genuine attempts against a real gate — so harvest it before teardown,
-        // marked with the exit so triage weighs it as weaker evidence than a green run.
-        const budgetSessionId = r.iterations.at(-1)?.sessionId;
-        const budgetDetail = `budget:${cfg.maxTurns}`;
-        await harvestFindings(cfg, sbx, budgetSessionId, common, taskId, budgetDetail);
-        await park(cfg, { taskId, reason: "stalled", detail: budgetDetail, sessionId: budgetSessionId, branch: sbx.branch, question: `Turn budget exhausted (${cfg.maxTurns} gate cycles).` });
-        return "parked";
-      } catch (err: any) {
-        // An agent that emits NEITHER signal dies on the idle timeout as a thrown
-        // error, not a result. Without this catch the slot leaves no parked
-        // record and the work is unrecoverable.
-        if (String(err?.name ?? err?.constructor?.name).includes("Idle")) {
-          // Harvest when the error carries a recoverable session; harvestFindings no-ops when
-          // it does not, so an unrecoverable idle stall skips cleanly (design §3 step 9).
-          await harvestFindings(cfg, sbx, err?.sessionId, common, taskId, "idle");
-          await park(cfg, { taskId, reason: "stalled", detail: "idle", sessionId: err?.sessionId, branch: sbx.branch, question: "Agent stalled without emitting a signal." });
-          return "parked";
-        }
-        // Anything else thrown is a terminal failure, not a park (design §3 step 9): re-throw
-        // so the single outer catch logs one `failed` verdict — the same verdict a throw before
-        // the container (preflight, fetchTask, sandbox creation) now gets.
-        throw err;
+      } finally {
+        const closed = await sbx.close();
+        if (closed?.preservedWorktreePath) cfg.log.log("worktree-preserved", { taskId, path: closed.preservedWorktreePath });
       }
-    } finally {
-      const closed = await sbx.close();
-      if (closed?.preservedWorktreePath) cfg.log.log("worktree-preserved", { taskId, path: closed.preservedWorktreePath });
-    }
-  };
+    };
 
-  // A standalone run or answer holds one host slot around the container's life (design §3
-  // step 1, §8); a campaign child never does — its parent already holds a slot for it.
-  // `await` so a rejection lands in the outer catch below rather than escaping as an
-  // unlogged promise (design §3 step 9).
-  return await (host && !process.env.VETINARI_CHILD
-    ? withHostSlot(host, cfg.project, runContainer)
-    : runContainer());
- } catch (err: any) {
-  // Design §3 step 9 — any throw logs `failed` and exits 1. This one outer catch covers every
-  // path before and around the container: the parked-answer preflight, `fetchTask`, sandbox
-  // creation (a worktree-preflight throw), and a container turn re-thrown from the inner handler.
-  // So even a standalone run leaves one `failed` verdict with `detail` on the log rather than
-  // exiting with a bare stack trace; cli-dispatch maps `failed` to exit 1, and under a campaign
-  // the child's non-zero exit is what the parent folds to `campaign-failed`.
-  cfg.log.log("failed", { taskId, detail: String(err?.message ?? err) });
-  return "failed";
- }
+    // A standalone run or answer holds one host slot around the container's life (design §3
+    // step 1, §8); a campaign child never does — its parent already holds a slot for it.
+    // `await` so a rejection lands in the outer catch below rather than escaping as an
+    // unlogged promise (design §3 step 9).
+    return await (host && !process.env.VETINARI_CHILD ? withHostSlot(host, cfg.project, runContainer) : runContainer());
+  } catch (err: any) {
+    // Design §3 step 9 — any throw logs `failed` and exits 1. This one outer catch covers every
+    // path before and around the container: the parked-answer preflight, `fetchTask`, sandbox
+    // creation (a worktree-preflight throw), and a container turn re-thrown from the inner handler.
+    // So even a standalone run leaves one `failed` verdict with `detail` on the log rather than
+    // exiting with a bare stack trace; cli-dispatch maps `failed` to exit 1, and under a campaign
+    // the child's non-zero exit is what the parent folds to `campaign-failed`.
+    cfg.log.log("failed", { taskId, detail: String(err?.message ?? err) });
+    return "failed";
+  }
 }

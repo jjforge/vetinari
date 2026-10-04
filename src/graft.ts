@@ -16,18 +16,8 @@
 import { assertProjectQualifier, repoForProject, type ResolvedConfig } from "./config.ts";
 import { Refusal } from "./refusal.ts";
 import { isIssueToken, normalize } from "./issue-id.ts";
-import {
-  applyGraft,
-  validateGraftTargets,
-  type GraftRejection,
-} from "./plan.ts";
-import {
-  campaignSettled,
-  campaignStarted,
-  issueNameFromTask,
-  issueStateFromTask,
-  reduceCampaign,
-} from "./dashboard-model.ts";
+import { applyGraft, validateGraftTargets, type GraftRejection } from "./plan.ts";
+import { campaignSettled, campaignStarted, issueNameFromTask, issueStateFromTask, reduceCampaign } from "./dashboard-model.ts";
 import { readEventLog } from "./event-log.ts";
 import { enqueueOutbound } from "./state.ts";
 import { notice, type Notice } from "./notice.ts";
@@ -143,9 +133,7 @@ export interface GraftResult {
  *  `--dry-run` prose use — the offenders named per reason, in a stable order. */
 export function describeGraftRejections(rejections: GraftRejection[]): string {
   const group = (reason: GraftRejection["reason"], label: string) => {
-    const hit = rejections
-      .filter((r) => r.reason === reason)
-      .map((r) => `#${r.id}`);
+    const hit = rejections.filter((r) => r.reason === reason).map((r) => `#${r.id}`);
     return hit.length ? `${label}: ${hit.join(", ")}` : "";
   };
   return [
@@ -172,12 +160,9 @@ export async function runGraft(
   deps: GraftDeps = defaultGraftDeps,
 ): Promise<GraftResult> {
   const normalized = ids.map(normalize).filter(Boolean);
-  if (!normalized.length)
-    throw new Refusal("graft needs at least one issue id: graft 640 655");
+  if (!normalized.length) throw new Refusal("graft needs at least one issue id: graft 640 655");
   if (!cfg.blockedBy)
-    throw new Refusal(
-      'graft needs a "blockedBy" resolver in your config — e.g. blockedBy: githubBlockedBy("owner/repo").',
-    );
+    throw new Refusal('graft needs a "blockedBy" resolver in your config — e.g. blockedBy: githubBlockedBy("owner/repo").');
 
   // Derive the project's identity and, when a project qualifier was asserted, verify it
   // before anything is written — an assertion, never a dispatch (see `assertProjectQualifier`).
@@ -269,10 +254,7 @@ export async function runGraft(
       };
     // A real graft still rejects whole — but carries the closure so the awaiting caller
     // (the dashboard route) and `dispatchGraft` read the offenders as data, not prose.
-    throw new GraftRejectedError(
-      `graft rejected — nothing added (${describeGraftRejections(rejections)}).`,
-      closure,
-    );
+    throw new GraftRejectedError(`graft rejected — nothing added (${describeGraftRejections(rejections)}).`, closure);
   }
 
   // The layering inputs the pure reducer folds with (ADR 0012): each grafted id's
@@ -286,9 +268,7 @@ export async function runGraft(
       blockedBy[id] = raw.filter((b) => campaignPlusGrafted.has(b));
     }),
   );
-  const unstarted = reduced.waves
-    .flat()
-    .filter((m) => !reduced.outcomes.has(m));
+  const unstarted = reduced.waves.flat().filter((m) => !reduced.outcomes.has(m));
   const fileKeys: Record<string, string[]> = {};
   await Promise.all(
     [...new Set([...normalized, ...unstarted])].map(async (id) => {
@@ -307,9 +287,7 @@ export async function runGraft(
     { ids: normalized, blockedBy, fileKeys },
   );
   const placeOf = new Map<string, number>();
-  applied.remaining.forEach((wave, i) =>
-    wave.forEach((m) => placeOf.set(m, i)),
-  );
+  applied.remaining.forEach((wave, i) => wave.forEach((m) => placeOf.set(m, i)));
   const placement = normalized.map((id) => ({
     id,
     wave: placeOf.get(id)! + 1,

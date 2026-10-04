@@ -13,50 +13,18 @@ import {
   resolveProjectRoot,
   type ResolvedConfig,
 } from "./config.ts";
-import {
-  dispatch,
-  parseArgs,
-  type AgentOverride,
-} from "./cli-dispatch.ts";
-import {
-  applyCollect,
-  formatMilestoneDate,
-  FRAGMENT_DIR,
-} from "./changelog.ts";
-import {
-  hostLogger,
-  hostLogTarget,
-  readHostLog,
-  readHostLogLines,
-  renderHostEvent,
-} from "./log.ts";
+import { dispatch, parseArgs, type AgentOverride } from "./cli-dispatch.ts";
+import { applyCollect, formatMilestoneDate, FRAGMENT_DIR } from "./changelog.ts";
+import { hostLogger, hostLogTarget, readHostLog, readHostLogLines, renderHostEvent } from "./log.ts";
 import { runLoop } from "./loop.ts";
-import {
-  baseline,
-  build,
-  campaign,
-  requireTelegram,
-  tgTest,
-} from "./modes.ts";
+import { baseline, build, campaign, requireTelegram, tgTest } from "./modes.ts";
 import { runTgConnect } from "./tg-connect.ts";
 import { tgSend } from "./telegram.ts";
-import {
-  applyTidy,
-  computeTidy,
-  describeRegistryDedup,
-  describeTidy,
-  scanTidy,
-  tidyIsEmpty,
-  type TidyTarget,
-} from "./merge.ts";
+import { applyTidy, computeTidy, describeRegistryDedup, describeTidy, scanTidy, tidyIsEmpty, type TidyTarget } from "./merge.ts";
 import { gateway } from "./gateway.ts";
 import { defaultGatewayServiceIO, isGatewayServiceVerb, runGatewayService } from "./gateway-service.ts";
 import { runPrune } from "./prune.ts";
-import {
-  expandSelection,
-  makeAskUnderspecified,
-  runCampaignPlan,
-} from "./plan.ts";
+import { expandSelection, makeAskUnderspecified, runCampaignPlan } from "./plan.ts";
 import { runGraft } from "./graft.ts";
 import { renderUsage } from "./help.ts";
 import { Refusal, handleCliError } from "./refusal.ts";
@@ -71,19 +39,9 @@ import {
 } from "./migrate.ts";
 import { applyInit, computeInit, describeInit, LOCAL_DIR, scanInit } from "./init.ts";
 import { archiveRun, shouldArchiveIdle, shouldArchiveLeftover } from "./archive.ts";
-import {
-  answerParked,
-  hasParked,
-  listParked,
-} from "./state.ts";
+import { answerParked, hasParked, listParked } from "./state.ts";
 import { readEventLog } from "./event-log.ts";
-import {
-  autoRegister,
-  computeRegistryDedup,
-  gatewayConfigDir,
-  listProjects,
-  removePointer,
-} from "./registry.ts";
+import { autoRegister, computeRegistryDedup, gatewayConfigDir, listProjects, removePointer } from "./registry.ts";
 import { projectHasLiveCampaign, resolveHostCeiling, type HostBudget } from "./host-slots.ts";
 import { containerShareWeight } from "./config.ts";
 import { serveAllStatus } from "./status.ts";
@@ -165,8 +123,7 @@ if (mode === "statusline") {
   if (sub === "install" || sub === "uninstall") {
     const dryRun = rest.includes("--dry-run");
     const rcIdx = rest.indexOf("--run-command");
-    const runCommand =
-      rcIdx >= 0 && rest[rcIdx + 1] ? rest[rcIdx + 1] : DEFAULT_RUN_COMMAND;
+    const runCommand = rcIdx >= 0 && rest[rcIdx + 1] ? rest[rcIdx + 1] : DEFAULT_RUN_COMMAND;
     const dir = process.cwd();
     const settings = readSettings(dir);
     // The line the project inherits from ~/.claude/settings.json — wrapped as line 1
@@ -185,8 +142,7 @@ if (mode === "statusline") {
       });
       console.log(describeInstall(plan, SETTINGS_REL));
       if (dryRun) console.log("\n(dry run — nothing was written)");
-      else if (!plan.alreadyInstalled && !plan.shadowedByLocal)
-        writeSettings(dir, plan.settings);
+      else if (!plan.alreadyInstalled && !plan.shadowedByLocal) writeSettings(dir, plan.settings);
     } else {
       const plan = computeUninstall(settings, {
         inheritedBase,
@@ -203,10 +159,7 @@ if (mode === "statusline") {
   // command (a status line that was already configured when we installed), which
   // install encodes into the command string; we run it for line 1.
   const bIdx = rest.indexOf("--base-b64");
-  const baseCommand =
-    bIdx >= 0 && rest[bIdx + 1]
-      ? Buffer.from(rest[bIdx + 1], "base64").toString("utf8")
-      : undefined;
+  const baseCommand = bIdx >= 0 && rest[bIdx + 1] ? Buffer.from(rest[bIdx + 1], "base64").toString("utf8") : undefined;
   await runStatusLine(cfgPath, { baseCommand });
   process.exit(0);
 }
@@ -224,10 +177,8 @@ if (mode === "init") {
   }
   const result = applyInit(process.cwd(), plan);
   const did: string[] = [];
-  if (result.created.length)
-    did.push(`created ${result.created.length} file(s)`);
-  if (result.dirsCreated.length)
-    did.push(`created ${result.dirsCreated.length} dir(s)`);
+  if (result.created.length) did.push(`created ${result.created.length} file(s)`);
+  if (result.dirsCreated.length) did.push(`created ${result.dirsCreated.length} dir(s)`);
   if (result.gitignoreUpdated) did.push("updated .gitignore");
   if (did.length) console.log(`\nDone: ${did.join(", ")}.`);
 
@@ -237,9 +188,7 @@ if (mode === "init") {
   // above still points at `tg-connect`. A non-interactive init never reaches this — it
   // prompts and sends nothing, by design (ADR 0002; init requires no network today).
   if (process.stdin.isTTY && result.created.length) {
-    const answer = (await ask("\nWire this project's Telegram bot connection now? [y/N] "))
-      .trim()
-      .toLowerCase();
+    const answer = (await ask("\nWire this project's Telegram bot connection now? [y/N] ")).trim().toLowerCase();
     if (answer === "y" || answer === "yes") {
       await runTgConnect(
         resolve(process.cwd(), LOCAL_DIR),
@@ -257,16 +206,11 @@ if (mode === "init") {
 // (applyCollect) directly per wave; this is the human-facing entry point.
 if (mode === "changelog") {
   if (rest[0] !== "collect") {
-    console.error(
-      'changelog needs a subcommand: `vetinari changelog collect [--title "…"]`',
-    );
+    console.error('changelog needs a subcommand: `vetinari changelog collect [--title "…"]`');
     process.exit(4);
   }
   const titleIdx = rest.indexOf("--title");
-  const title =
-    titleIdx >= 0 && rest[titleIdx + 1]
-      ? rest[titleIdx + 1]
-      : "Collected changes";
+  const title = titleIdx >= 0 && rest[titleIdx + 1] ? rest[titleIdx + 1] : "Collected changes";
   const dir = process.cwd();
   const { collected, skipped } = applyCollect({
     fragmentsDir: join(dir, FRAGMENT_DIR),
@@ -353,9 +297,7 @@ if (mode === "gateway") {
 // the whole point is to reach for it when a host daemon is the thing that's broken.
 if (mode === "host") {
   if (rest[0] !== "log") {
-    console.error(
-      "host needs a subcommand: `vetinari host log [-n <count>] [--tail] [--json]`",
-    );
+    console.error("host needs a subcommand: `vetinari host log [-n <count>] [--tail] [--json]`");
     process.exit(4);
   }
   const opts = rest.slice(1);
@@ -363,8 +305,7 @@ if (mode === "host") {
   const follow = opts.includes("--tail") || opts.includes("-f");
   const nIdx = opts.indexOf("-n");
   const limit = nIdx >= 0 ? Number(opts[nIdx + 1]) : 50;
-  if (!Number.isInteger(limit) || limit < 0)
-    throw new Refusal("host log -n needs a non-negative integer count");
+  if (!Number.isInteger(limit) || limit < 0) throw new Refusal("host log -n needs a non-negative integer count");
 
   // Render a batch of raw JSONL lines to stdout: `--json` passes them through
   // untouched (byte-faithful for jq/grep); otherwise each parses to a row and
@@ -381,8 +322,7 @@ if (mode === "host") {
       } catch {
         continue;
       }
-      if (!row || typeof (row as { event?: unknown }).event !== "string")
-        continue;
+      if (!row || typeof (row as { event?: unknown }).event !== "string") continue;
       console.log(renderHostEvent(row as { ts: string; event: string }));
     }
   };
@@ -433,18 +373,10 @@ if (mode === "host") {
 if (mode === "status") {
   const portIdx = rest.indexOf("--port");
   const hostIdx = rest.indexOf("--host");
-  const port =
-    portIdx >= 0
-      ? Number(rest[portIdx + 1])
-      : Number(process.env.VETINARI_STATUS_PORT ?? 8765);
-  const host =
-    hostIdx >= 0
-      ? rest[hostIdx + 1]
-      : (process.env.VETINARI_STATUS_HOST ?? "127.0.0.1");
-  if (!Number.isInteger(port) || port < 0)
-    throw new Refusal("status --port needs a non-negative integer");
-  if (!host)
-    throw new Refusal("status --host needs a host, e.g. 127.0.0.1 or 0.0.0.0");
+  const port = portIdx >= 0 ? Number(rest[portIdx + 1]) : Number(process.env.VETINARI_STATUS_PORT ?? 8765);
+  const host = hostIdx >= 0 ? rest[hostIdx + 1] : (process.env.VETINARI_STATUS_HOST ?? "127.0.0.1");
+  if (!Number.isInteger(port) || port < 0) throw new Refusal("status --port needs a non-negative integer");
+  if (!host) throw new Refusal("status --host needs a host, e.g. 127.0.0.1 or 0.0.0.0");
   await serveAllStatus(gatewayConfigDir(), { port, host });
   // serveAllStatus resolves once it is listening; the process must then stay up
   // to serve, so park here instead of exiting (an exit would kill the server the
@@ -459,9 +391,7 @@ if (mode === "status") {
 // in cwd is required to prune a stale pointer).
 if (mode === "registry") {
   if (rest[0] !== "remove" || !rest[1]) {
-    console.error(
-      "registry needs a subcommand: `vetinari registry remove <name>`",
-    );
+    console.error("registry needs a subcommand: `vetinari registry remove <name>`");
     process.exit(4);
   }
   const name = rest[1];
@@ -590,8 +520,7 @@ const doArchive = () => {
 // campaign has started but not settled (a `failed` or `red-base` stop writes no
 // per-issue parked record), so `redrive` can still find it in the live log (#383).
 const archiveIfIdle = () => {
-  if (!shouldArchiveIdle(readEventLog(cfg), { parked: listParked(cfg).length }))
-    return;
+  if (!shouldArchiveIdle(readEventLog(cfg), { parked: listParked(cfg).length })) return;
   doArchive();
 };
 
@@ -634,8 +563,7 @@ function selectAgent(cfg: ResolvedConfig, override: AgentOverride): void {
       `agent provider "${selection.provider}" has no credentials in ${envPath} — ` +
         `set ${missing.join(" or ")} there before launching (preflight, ADR 0016).`,
     );
-  if (Object.keys(merged).length)
-    process.env[AGENT_ENV_VAR] = encodeAgentOverride(merged);
+  if (Object.keys(merged).length) process.env[AGENT_ENV_VAR] = encodeAgentOverride(merged);
 }
 
 // The post-config command family (build/baseline/run/campaign/redrive/prune/graft/
@@ -680,4 +608,3 @@ await dispatch(parseArgs([mode, ...rest]), {
   ask,
   tgSend,
 });
-

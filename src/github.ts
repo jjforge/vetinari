@@ -30,17 +30,10 @@ const gh = (args: string[]) => execFileSync("gh", args, { encoding: "utf8" });
  * the real console.
  */
 export const githubBlockedBy =
-  (
-    repo: string,
-    run: (args: string[]) => string = gh,
-    log: (line: string) => void = console.error,
-  ) =>
+  (repo: string, run: (args: string[]) => string = gh, log: (line: string) => void = console.error) =>
   (id: string, onExcluded?: (e: Exclusion) => void): string[] => {
     const num = id.replace(/^#/, "").trim();
-    const out = run([
-      "api",
-      `repos/${repo}/issues/${num}/dependencies/blocked_by`,
-    ]);
+    const out = run(["api", `repos/${repo}/issues/${num}/dependencies/blocked_by`]);
     const rows: Array<{
       number?: number;
       state?: string;
@@ -53,9 +46,7 @@ export const githubBlockedBy =
       if (r.repository?.full_name && r.repository.full_name !== repo) continue;
       if (r.state === "closed") continue;
       if (r.labels?.some((l) => l?.name === "pending-verify")) {
-        log(
-          `[vetinari] #${num} — blocker #${r.number} pending-verify, treated as satisfied`,
-        );
+        log(`[vetinari] #${num} — blocker #${r.number} pending-verify, treated as satisfied`);
         onExcluded?.({
           id: String(r.number),
           reason: `pending-verify blocker of #${num}, treated as satisfied`,
@@ -84,15 +75,7 @@ export const githubFetchTask =
   (repo: string, run: (args: string[]) => string = gh) =>
   (id: string): string => {
     const num = id.replace(/^#/, "").trim();
-    return run([
-      "issue",
-      "view",
-      num,
-      "--repo",
-      repo,
-      "--json",
-      "title,body,comments,labels,state,closedAt",
-    ]);
+    return run(["issue", "view", num, "--repo", repo, "--json", "title,body,comments,labels,state,closedAt"]);
   };
 
 /**
@@ -122,24 +105,9 @@ export const githubFetchTask =
  * invoking `gh` or writing to the real console.
  */
 export const githubIssuesByLabel =
-  (
-    repo: string,
-    run: (args: string[]) => string = gh,
-    log: (line: string) => void = console.error,
-  ) =>
+  (repo: string, run: (args: string[]) => string = gh, log: (line: string) => void = console.error) =>
   (label: string, onExcluded?: (e: Exclusion) => void): string[] => {
-    const out = run([
-      "issue",
-      "list",
-      "--repo",
-      repo,
-      "--label",
-      label,
-      "--state",
-      "open",
-      "--json",
-      "number,issueType,labels",
-    ]);
+    const out = run(["issue", "list", "--repo", repo, "--label", label, "--state", "open", "--json", "number,issueType,labels"]);
     const rows: Array<{
       number?: number;
       issueType?: { name?: string } | null;
@@ -180,17 +148,7 @@ export const githubMarkPendingVerify =
   (repo: string, run: (args: string[]) => string = gh) =>
   (id: string): void => {
     const num = id.replace(/^#/, "").trim();
-    run([
-      "issue",
-      "edit",
-      num,
-      "--repo",
-      repo,
-      "--add-label",
-      "pending-verify",
-      "--remove-label",
-      "ready-for-agent",
-    ]);
+    run(["issue", "edit", num, "--repo", repo, "--add-label", "pending-verify", "--remove-label", "ready-for-agent"]);
   };
 
 /**
@@ -215,11 +173,7 @@ export const githubIssueComment =
  * injected only so the argument building can be tested without invoking `gh`.
  */
 export const githubFindingReporter =
-  (
-    repo: string,
-    opts: { labels?: string[] } = {},
-    run: (args: string[]) => string = gh,
-  ) =>
+  (repo: string, opts: { labels?: string[] } = {}, run: (args: string[]) => string = gh) =>
   (finding: Finding, ctx: FindingContext): string => {
     const body = [
       finding.repro ? `**Repro:** ${finding.repro}` : "",
@@ -228,16 +182,7 @@ export const githubFindingReporter =
     ]
       .filter(Boolean)
       .join("\n\n");
-    const args = [
-      "issue",
-      "create",
-      "--repo",
-      repo,
-      "--title",
-      finding.summary,
-      "--body",
-      body,
-    ];
+    const args = ["issue", "create", "--repo", repo, "--title", finding.summary, "--body", body];
     for (const label of opts.labels ?? []) args.push("--label", label);
     return run(args).trim();
   };

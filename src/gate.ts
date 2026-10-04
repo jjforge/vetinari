@@ -58,11 +58,7 @@ export function tapFailures(stdout: string): string | null {
   return shown.join("\n");
 }
 
-export function selectGates(
-  gates: GateSpec[],
-  changedFiles: string,
-  opts: { all?: boolean } = {},
-): GateSpec[] {
+export function selectGates(gates: GateSpec[], changedFiles: string, opts: { all?: boolean } = {}): GateSpec[] {
   if (opts.all) return gates;
   return gates.filter((g) => !g.when || g.when.test(changedFiles));
 }
@@ -79,7 +75,11 @@ export async function runGates(
     files = changed.stdout ?? "";
   }
   const selected = selectGates(cfg.gates, files, { all: opts.all });
-  const gateFields = { ...(taskId ? { taskId } : {}), cmds: selected.map((g) => g.label ?? g.cmd), skipped: cfg.gates.length - selected.length };
+  const gateFields = {
+    ...(taskId ? { taskId } : {}),
+    cmds: selected.map((g) => g.label ?? g.cmd),
+    skipped: cfg.gates.length - selected.length,
+  };
   cfg.log.log("gate", gateFields);
   // Mirror the gate into the per-task activity stream so the live-tail pane tails one merged
   // record (ADR 0015). The wave-merge gate has no single task and skips this.
@@ -93,7 +93,13 @@ export async function runGates(
     const t0 = Date.now();
     const res = await sbx.exec(g.cmd);
     const outFile = writeGateLog(cfg.stateDir, g.cmd, res);
-    const resultFields = { ...(taskId ? { taskId } : {}), cmd: g.cmd, exitCode: res.exitCode, seconds: Math.round((Date.now() - t0) / 1000), outFile };
+    const resultFields = {
+      ...(taskId ? { taskId } : {}),
+      cmd: g.cmd,
+      exitCode: res.exitCode,
+      seconds: Math.round((Date.now() - t0) / 1000),
+      outFile,
+    };
     cfg.log.log("gate-result", resultFields);
     if (taskId) appendActivity(cfg.stateDir, taskId, event("gate-result", resultFields));
     if (res.exitCode !== 0) {

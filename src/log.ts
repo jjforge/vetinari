@@ -123,7 +123,10 @@ export function memoryLogger(): MemoryLogger {
 export function writeGateLog(stateDir: string, cmd: string, res: { stdout?: string; stderr?: string; exitCode: number }) {
   const outFile = `${stateDir}/logs/gate-${Date.now()}.log`;
   mkdirSync(dirname(outFile), { recursive: true });
-  writeFileSync(outFile, `$ ${cmd}\n--- stdout ---\n${res.stdout ?? ""}\n--- stderr ---\n${res.stderr ?? ""}\n--- exit: ${res.exitCode} ---\n`);
+  writeFileSync(
+    outFile,
+    `$ ${cmd}\n--- stdout ---\n${res.stdout ?? ""}\n--- stderr ---\n${res.stderr ?? ""}\n--- exit: ${res.exitCode} ---\n`,
+  );
   return outFile;
 }
 

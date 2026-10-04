@@ -40,16 +40,11 @@ import {
 import { archiveRun, shouldArchiveLeftover } from "./archive.ts";
 import { readLeases, type HostBudget } from "./host-slots.ts";
 
-const cfgWith = (fetchTask: ResolvedConfig["fetchTask"]): ResolvedConfig =>
-  ({ fetchTask }) as ResolvedConfig;
+const cfgWith = (fetchTask: ResolvedConfig["fetchTask"]): ResolvedConfig => ({ fetchTask }) as ResolvedConfig;
 
 let counter = 0;
 const baseLocationWith = (env?: string): string => {
-  const base = join(
-    tmpdir(),
-    `vetinari-modes-${Date.now()}-${counter++}`,
-    ".vetinari.local",
-  );
+  const base = join(tmpdir(), `vetinari-modes-${Date.now()}-${counter++}`, ".vetinari.local");
   mkdirSync(base, { recursive: true });
   if (env !== undefined) writeFileSync(join(base, "host.env"), env);
   return base;
@@ -58,22 +53,16 @@ const baseLocationWith = (env?: string): string => {
 const withEnv = (over: Record<string, string | undefined>, fn: () => void) => {
   const keys = Object.keys(over);
   const prev = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
-  for (const k of keys)
-    over[k] === undefined ? delete process.env[k] : (process.env[k] = over[k]);
+  for (const k of keys) over[k] === undefined ? delete process.env[k] : (process.env[k] = over[k]);
   try {
     fn();
   } finally {
-    for (const k of keys)
-      prev[k] === undefined
-        ? delete process.env[k]
-        : (process.env[k] = prev[k]);
+    for (const k of keys) prev[k] === undefined ? delete process.env[k] : (process.env[k] = prev[k]);
   }
 };
 
 test("requireTelegram resolves the connection from the base location's host.env — the path the gateway sends on", () => {
-  const baseLocation = baseLocationWith(
-    "VETINARI_TELEGRAM_BOT_TOKEN=123:abc\nVETINARI_TELEGRAM_CHAT_ID=-1001\n",
-  );
+  const baseLocation = baseLocationWith("VETINARI_TELEGRAM_BOT_TOKEN=123:abc\nVETINARI_TELEGRAM_CHAT_ID=-1001\n");
 
   assert.deepEqual(requireTelegram("tg-test", baseLocation), {
     token: "123:abc",
@@ -95,8 +84,7 @@ test("requireTelegram fails naming host.env and the base location when creds are
       assert.throws(
         () => requireTelegram("tg-test", baseLocation),
         (e: Error) =>
-          e.message ===
-          `tg-test needs VETINARI_TELEGRAM_BOT_TOKEN and VETINARI_TELEGRAM_CHAT_ID in ${join(baseLocation, "host.env")}`,
+          e.message === `tg-test needs VETINARI_TELEGRAM_BOT_TOKEN and VETINARI_TELEGRAM_CHAT_ID in ${join(baseLocation, "host.env")}`,
       );
     },
   );
@@ -132,15 +120,10 @@ test("warnIfTelegramUnconfigured warns naming host.env and logs telegram-unconfi
 
   // The operator is told, on stderr, that parks won't ping and which file to fix.
   assert.match(stderr, /Telegram/);
-  assert.match(
-    stderr,
-    new RegExp(join(baseLocation, "host.env").replace(/[.\\/]/g, "\\$&")),
-  );
+  assert.match(stderr, new RegExp(join(baseLocation, "host.env").replace(/[.\\/]/g, "\\$&")));
 
   // …and the same fact is logged so the dashboard can narrate it.
-  const logged = eventsOf(cfg).filter(
-    (e) => e.event === "telegram-unconfigured",
-  );
+  const logged = eventsOf(cfg).filter((e) => e.event === "telegram-unconfigured");
   assert.equal(logged.length, 1);
   assert.deepEqual(
     {
@@ -152,27 +135,18 @@ test("warnIfTelegramUnconfigured warns naming host.env and logs telegram-unconfi
 });
 
 test("warnIfTelegramUnconfigured is silent when the base location's host.env resolves a conn", () => {
-  const baseLocation = baseLocationWith(
-    "VETINARI_TELEGRAM_BOT_TOKEN=123:abc\nVETINARI_TELEGRAM_CHAT_ID=-1001\n",
-  );
+  const baseLocation = baseLocationWith("VETINARI_TELEGRAM_BOT_TOKEN=123:abc\nVETINARI_TELEGRAM_CHAT_ID=-1001\n");
   const cfg = unnotifiableCfg(baseLocation);
 
   const stderr = captureStderr(() => warnIfTelegramUnconfigured(cfg));
 
   assert.equal(stderr, "");
-  assert.equal(
-    eventsOf(cfg).filter((e) => e.event === "telegram-unconfigured").length,
-    0,
-  );
+  assert.equal(eventsOf(cfg).filter((e) => e.event === "telegram-unconfigured").length, 0);
 });
 
 test("markMergedIssues calls the configured onIssueMerged seam with exactly the merged ids", async () => {
   const seen: string[] = [];
-  await markMergedIssues({ onIssueMerged: (id) => void seen.push(id), log: memoryLogger() }, [
-    "101",
-    "102",
-    "103",
-  ]);
+  await markMergedIssues({ onIssueMerged: (id) => void seen.push(id), log: memoryLogger() }, ["101", "102", "103"]);
   assert.deepEqual(seen, ["101", "102", "103"]);
 });
 
@@ -197,12 +171,7 @@ test("campaignParkedNotice draws attention to a paused campaign whose greens sta
 });
 
 test("strandedConflictNotice draws a human to a campaign paused by a quarantine that orphaned later-wave dependents", () => {
-  const notice = strandedConflictNotice(
-    "acme",
-    1,
-    [{ target: "640", removed: ["640", "701"], dropped: ["701"] }],
-    "main",
-  );
+  const notice = strandedConflictNotice("acme", 1, [{ target: "640", removed: ["640", "701"], dropped: ["701"] }], "main");
   // Routed to the alerting channel — a paused campaign demands a human, like a wave-park.
   assert.equal(notice.category, "failure");
   assert.equal(notice.event, "campaign-parked");
@@ -218,9 +187,7 @@ test("strandedConflictNotice draws a human to a campaign paused by a quarantine 
 });
 
 test("autoPruneNotice reports the pruned dependents and that the campaign ran on", () => {
-  const notice = autoPruneNotice("acme", 1, [
-    { target: "640", removed: ["640", "701"], dropped: ["701"] },
-  ]);
+  const notice = autoPruneNotice("acme", 1, [{ target: "640", removed: ["640", "701"], dropped: ["701"] }]);
   // Informational — the campaign continued, so it rides the progress channel.
   assert.equal(notice.category, "progress");
   assert.equal(notice.event, "prune");
@@ -244,8 +211,7 @@ test("no notice builder renders a retired word — the settled vocabulary reache
     conflictParkedNotice("acme", 1, ["640"], ["101"], "main"),
     autoPruneNotice("acme", 1, [{ target: "640", removed: ["640", "701"], dropped: ["701"] }]),
   ];
-  for (const n of built)
-    assert.ok(!RETIRED_IN_NOTICES.test(n.text), `retired word in: ${n.text}`);
+  for (const n of built) assert.ok(!RETIRED_IN_NOTICES.test(n.text), `retired word in: ${n.text}`);
 });
 
 test("a green campaign's outbound notices carry no retired word (§10, §13.1)", async () => {
@@ -255,12 +221,18 @@ test("a green campaign's outbound notices carry no retired word (§10, §13.1)",
   // A two-wave green campaign emits campaign-start, wave-start ×2, wave-done ×2, campaign-done —
   // every inline campaign notice — so grepping the outbox proves the whole set uses the skeleton.
   await silenceConsole(() =>
-    campaign(cfg, [["101"], ["201"]], host, "vocab work", {}, gitFreeDeps(cfg, async () => 0)),
+    campaign(
+      cfg,
+      [["101"], ["201"]],
+      host,
+      "vocab work",
+      {},
+      gitFreeDeps(cfg, async () => 0),
+    ),
   );
   const outbox = listOutbox(cfg);
   assert.ok(outbox.length >= 6, "the campaign emitted its inline notices");
-  for (const rec of outbox)
-    assert.ok(!RETIRED_IN_NOTICES.test(rec.text), `retired word in notice: ${rec.text}`);
+  for (const rec of outbox) assert.ok(!RETIRED_IN_NOTICES.test(rec.text), `retired word in notice: ${rec.text}`);
 });
 
 test("markMergedIssues is a no-op when onIssueMerged is unconfigured — core names no labels", async () => {
@@ -317,9 +289,7 @@ test("resolveTitles normalizes #-prefixed ids and dedupes", async () => {
 
 test("resolveTitles omits an id whose task carries no structured title", async () => {
   const map = await resolveTitles(
-    cfgWith(async (id) =>
-      id === "101" ? JSON.stringify({ title: "Real title" }) : "just a body",
-    ),
+    cfgWith(async (id) => (id === "101" ? JSON.stringify({ title: "Real title" }) : "just a body")),
     ["101", "102"],
   );
   assert.deepEqual(map, { "101": "Real title" });
@@ -337,13 +307,7 @@ test("resolveTitles degrades gracefully when a fetch throws — the id is simply
 });
 
 test("buildImageCommand runs `docker` with the image tag, both uid/gid build args, the absolute Dockerfile and the project-root context", () => {
-  const cmd = buildImageCommand(
-    "vetinari-myapp",
-    "/proj/vetinari/Dockerfile",
-    "/proj",
-    1001,
-    1002,
-  );
+  const cmd = buildImageCommand("vetinari-myapp", "/proj/vetinari/Dockerfile", "/proj", 1001, 1002);
   // The spawned program is docker itself — never npx/sandcastle, whose CLI guard refuses
   // without a .sandcastle/ (#396).
   assert.equal(cmd.program, "docker");
@@ -364,14 +328,7 @@ test("buildImageCommand runs `docker` with the image tag, both uid/gid build arg
 test("buildImageCommand leaves the --build-args out when no uid/gid is available (a platform without them)", () => {
   const cmd = buildImageCommand("vetinari-myapp", "/proj/vetinari/Dockerfile", "/proj");
   assert.equal(cmd.program, "docker");
-  assert.deepEqual(cmd.args, [
-    "build",
-    "-t",
-    "vetinari-myapp",
-    "-f",
-    "/proj/vetinari/Dockerfile",
-    "/proj",
-  ]);
+  assert.deepEqual(cmd.args, ["build", "-t", "vetinari-myapp", "-f", "/proj/vetinari/Dockerfile", "/proj"]);
 });
 
 test("childSpawnEnv marks a spawned child so its `run` skips leftover-archiving, keeping the parent env (#150)", () => {
@@ -396,8 +353,7 @@ test("childSpawnEnv threads the selected agent (VETINARI_AGENT) to a spawned chi
   assert.equal(child.VETINARI_CHILD, "1");
 });
 
-const buildCfg = (): ResolvedConfig =>
-  ({ image: "vetinari-myapp", log: memoryLogger() }) as unknown as ResolvedConfig;
+const buildCfg = (): ResolvedConfig => ({ image: "vetinari-myapp", log: memoryLogger() }) as unknown as ResolvedConfig;
 
 test("build builds the image, then runs baseline by default, returning its result", async () => {
   const calls: string[] = [];
@@ -416,10 +372,7 @@ test("build builds the image, then runs baseline by default, returning its resul
     },
   );
   assert.equal(ok, true);
-  assert.deepEqual(calls, [
-    "build vetinari-myapp vetinari/Dockerfile",
-    "baseline",
-  ]);
+  assert.deepEqual(calls, ["build vetinari-myapp vetinari/Dockerfile", "baseline"]);
 });
 
 test("build with --no-baseline builds only, skipping the probe", async () => {
@@ -525,10 +478,7 @@ const captureLines = async <T>(fn: () => Promise<T>): Promise<string[]> => {
 // The container-bound effects a campaign would otherwise run, stubbed git-free:
 // greens merge as-is, no changelog fold, and the base-branch guard passes. Only
 // `spawnRun` varies per test — it stands in for the spawned child `run`.
-const gitFreeDeps = (
-  cfg: ResolvedConfig,
-  spawnRun: CampaignDeps["spawnRun"],
-): CampaignDeps => ({
+const gitFreeDeps = (cfg: ResolvedConfig, spawnRun: CampaignDeps["spawnRun"]): CampaignDeps => ({
   spawnRun,
   integrate: async (_cfg, greens) => ({ merged: greens, conflictParked: [] }),
   collectChangelog: () => ({ collected: [], committed: false }),
@@ -550,9 +500,7 @@ test("a wave declares its want as held-plus-pending and refreshes it as the wave
     seen[id] = readLeases(host.configDir).find((l) => l.project === cfg.project)?.want;
     return 0;
   };
-  await silenceConsole(() =>
-    campaign(cfg, [["101", "102", "103"]], host, "drain", {}, gitFreeDeps(cfg, childRun)),
-  );
+  await silenceConsole(() => campaign(cfg, [["101", "102", "103"]], host, "drain", {}, gitFreeDeps(cfg, childRun)));
   const wants = Object.values(seen).filter((w): w is number => w !== undefined);
   assert.equal(wants.length, 3, "every child observed a declared want");
   // The wave opens declaring it wants all three; by the time the last-admitted ticket
@@ -570,9 +518,7 @@ test("a one-ticket wave declares it wants exactly one slot — the reservation b
     seen = readLeases(host.configDir).find((l) => l.project === cfg.project)?.want;
     return 0;
   };
-  await silenceConsole(() =>
-    campaign(cfg, [["101"]], host, "one", {}, gitFreeDeps(cfg, childRun)),
-  );
+  await silenceConsole(() => campaign(cfg, [["101"]], host, "one", {}, gitFreeDeps(cfg, childRun)));
   // A single-ticket wave wants one slot, not its weight-derived cut of the ceiling.
   assert.equal(seen, 1);
 });
@@ -584,7 +530,14 @@ test("campaign prints human-readable plan/wave/complete lines and NO event JSON 
   const prev = process.env.VETINARI_JSON;
   delete process.env.VETINARI_JSON;
   const lines = await captureLines(() =>
-    campaign(cfg, [["101"], ["201"]], host, "vocab", {}, gitFreeDeps(cfg, async () => 0)),
+    campaign(
+      cfg,
+      [["101"], ["201"]],
+      host,
+      "vocab",
+      {},
+      gitFreeDeps(cfg, async () => 0),
+    ),
   );
   if (prev !== undefined) process.env.VETINARI_JSON = prev;
   const text = lines.join("\n");
@@ -609,7 +562,14 @@ test("campaign under --json streams the raw event stream and suppresses the huma
   const prev = process.env.VETINARI_JSON;
   process.env.VETINARI_JSON = "1";
   const lines = await captureLines(() =>
-    campaign(cfg, [["101"], ["201"]], host, "vocab", {}, gitFreeDeps(cfg, async () => 0)),
+    campaign(
+      cfg,
+      [["101"], ["201"]],
+      host,
+      "vocab",
+      {},
+      gitFreeDeps(cfg, async () => 0),
+    ),
   );
   if (prev === undefined) delete process.env.VETINARI_JSON;
   else process.env.VETINARI_JSON = prev;
@@ -621,7 +581,10 @@ test("campaign under --json streams the raw event stream and suppresses the huma
       return [];
     }
   });
-  assert.ok(events.some((e) => e.event === "campaign-start"), "raw events reach stdout under --json");
+  assert.ok(
+    events.some((e) => e.event === "campaign-start"),
+    "raw events reach stdout under --json",
+  );
   // …and none of the human report lines do.
   assert.ok(!lines.some((l) => l.includes("plan “vocab”")), "human plan line suppressed under --json");
   assert.ok(!lines.some((l) => l.includes("🏆")), "human completion line suppressed under --json");
@@ -643,15 +606,11 @@ test("campaign drives every wave with no Docker — the per-wave re-derive survi
     return 0;
   };
 
-  const ok = await silenceConsole(() =>
-    campaign(cfg, [["101"], ["102"], ["103"]], host, "harness", {}, gitFreeDeps(cfg, childRun)),
-  );
+  const ok = await silenceConsole(() => campaign(cfg, [["101"], ["102"], ["103"]], host, "harness", {}, gitFreeDeps(cfg, childRun)));
 
   assert.equal(ok, "done");
   const events = readEventLog(cfg);
-  const batches = events.filter(
-    (e): e is WaveStartEvent => e.event === "wave-start",
-  );
+  const batches = events.filter((e): e is WaveStartEvent => e.event === "wave-start");
   // Every wave in the plan re-derived and ran, in order — the log was never stranded.
   assert.deepEqual(
     batches.map((b) => b.index),
@@ -677,17 +636,12 @@ test("the harness has teeth — a child that archives the parent log (the #150 b
     return 0;
   };
 
-  await silenceConsole(() =>
-    campaign(cfg, [["101"], ["102"], ["103"]], host, "harness", {}, gitFreeDeps(cfg, archivingChild)),
-  );
+  await silenceConsole(() => campaign(cfg, [["101"], ["102"], ["103"]], host, "harness", {}, gitFreeDeps(cfg, archivingChild)));
 
   // With the plan stranded, waves 1 and 2 never start — proof the harness would go
   // red against pre-#150 code, so the faithful-child test above genuinely pins it.
   const batches = readEventLog(cfg).filter((e) => e.event === "wave-start");
-  assert.ok(
-    batches.length < 3,
-    `expected the archive to strand the plan, but ${batches.length} waves ran`,
-  );
+  assert.ok(batches.length < 3, `expected the archive to strand the plan, but ${batches.length} waves ran`);
 });
 
 test("campaign stamps its name and titles once on campaign-start, names the completion, and names the operator notes (#174)", async () => {
@@ -698,7 +652,14 @@ test("campaign stamps its name and titles once on campaign-start, names the comp
   const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
 
   const ok = await silenceConsole(() =>
-    campaign(cfg, [["101", "102"]], host, "gateway work", {}, gitFreeDeps(cfg, async () => 0)),
+    campaign(
+      cfg,
+      [["101", "102"]],
+      host,
+      "gateway work",
+      {},
+      gitFreeDeps(cfg, async () => 0),
+    ),
   );
   assert.equal(ok, "done");
 
@@ -723,7 +684,16 @@ test("campaign writes no festive-name offset on campaign-start — the name is d
   // One shared host cursor across both campaigns (same configDir) — nothing should consume it.
   const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
 
-  await silenceConsole(() => campaign(cfg, [["101"], ["102"], ["103"]], host, "first", {}, gitFreeDeps(cfg, async () => 0)));
+  await silenceConsole(() =>
+    campaign(
+      cfg,
+      [["101"], ["102"], ["103"]],
+      host,
+      "first",
+      {},
+      gitFreeDeps(cfg, async () => 0),
+    ),
+  );
   const firstStart = readEventLog(cfg).find((e): e is CampaignStartEvent => e.event === "campaign-start");
   // No presentation state is written: the festive wave name is derived at render from this
   // event's timestamp, so campaign-start carries no reserved offset.
@@ -732,7 +702,16 @@ test("campaign writes no festive-name offset on campaign-start — the name is d
   // A second campaign in the same project/host writes no offset either — nothing was reserved,
   // so nothing was consumed off the host cursor.
   const cfg2 = harnessCfg(join(dir, "run2"));
-  await silenceConsole(() => campaign(cfg2, [["201"]], host, "second", {}, gitFreeDeps(cfg2, async () => 0)));
+  await silenceConsole(() =>
+    campaign(
+      cfg2,
+      [["201"]],
+      host,
+      "second",
+      {},
+      gitFreeDeps(cfg2, async () => 0),
+    ),
+  );
   const secondStart = readEventLog(cfg2).find((e): e is CampaignStartEvent => e.event === "campaign-start");
   assert.equal((secondStart as { festiveOffset?: number } | undefined)?.festiveOffset, undefined);
 });
@@ -752,14 +731,19 @@ test("campaign --resume recovers the run's name from the log, not the ignored pa
   cfg.log.log("green", { taskId: "101", branch: "agent/101", commits: ["abc"] });
 
   const ok = await silenceConsole(() =>
-    campaign(cfg, [], host, "ignored param", { resume: true }, gitFreeDeps(cfg, async () => 0)),
+    campaign(
+      cfg,
+      [],
+      host,
+      "ignored param",
+      { resume: true },
+      gitFreeDeps(cfg, async () => 0),
+    ),
   );
   assert.equal(ok, "done");
 
   // The redrive re-entered wave 1 and ran 102 (read off the wave-start it re-logged).
-  const resumed = readEventLog(cfg).find(
-    (e): e is WaveStartEvent => e.event === "wave-start" && e.index === 1,
-  );
+  const resumed = readEventLog(cfg).find((e): e is WaveStartEvent => e.event === "wave-start" && e.index === 1);
   assert.deepEqual(resumed?.tasks, ["102"]);
 
   // The run's name is recovered from campaign-start (design §2.1), never the ignored param: it
@@ -813,9 +797,7 @@ test("redrive re-enters the parked wave and integrates a green-but-unmerged memb
 
   const spawned: string[] = [];
   const integrated: string[][] = [];
-  const ok = await silenceConsole(() =>
-    campaign(cfg, [], host, undefined, { resume: true }, recordingDeps(cfg, spawned, integrated)),
-  );
+  const ok = await silenceConsole(() => campaign(cfg, [], host, undefined, { resume: true }, recordingDeps(cfg, spawned, integrated)));
 
   assert.equal(ok, "done");
   assert.deepEqual(spawned, [], "no member of the parked wave was respawned");
@@ -863,12 +845,25 @@ test("resolve reads only the wave's members — a stray parked record for a non-
   seedParkedRecord(cfg, "999");
 
   const ok = await silenceConsole(() =>
-    campaign(cfg, [["101", "102"]], host, "harness", {}, gitFreeDeps(cfg, async () => 0)),
+    campaign(
+      cfg,
+      [["101", "102"]],
+      host,
+      "harness",
+      {},
+      gitFreeDeps(cfg, async () => 0),
+    ),
   );
 
   assert.equal(ok, "done", "the stray non-member parked record never held the wave");
-  assert.ok(readEventLog(cfg).some((e) => e.event === "wave-done"), "the wave closed");
-  assert.ok(readEventLog(cfg).some((e) => e.event === "campaign-done"), "the campaign finished");
+  assert.ok(
+    readEventLog(cfg).some((e) => e.event === "wave-done"),
+    "the wave closed",
+  );
+  assert.ok(
+    readEventLog(cfg).some((e) => e.event === "campaign-done"),
+    "the campaign finished",
+  );
 });
 
 test("redrive re-runs a parked member whose parked record is gone (a crash, no record), and lands the rest", async () => {
@@ -880,9 +875,7 @@ test("redrive re-runs a parked member whose parked record is gone (a crash, no r
 
   const spawned: string[] = [];
   const integrated: string[][] = [];
-  const ok = await silenceConsole(() =>
-    campaign(cfg, [], host, undefined, { resume: true }, recordingDeps(cfg, spawned, integrated)),
-  );
+  const ok = await silenceConsole(() => campaign(cfg, [], host, undefined, { resume: true }, recordingDeps(cfg, spawned, integrated)));
 
   assert.equal(ok, "done");
   assert.deepEqual(spawned, ["102"], "the recordless park re-ran — 101 was banked, not respawned");
@@ -945,7 +938,11 @@ test("reconcileResumeWave never resumes an answered park or a --override failed 
   );
 
   assert.deepEqual(toRun.sort(), ["201", "202"], "both re-run");
-  assert.deepEqual(resume, { "201": "SHOULD-NOT-BE-USED" }, "the resolver alone gates: the campaign returns undefined for an answered park, never the failed re-run");
+  assert.deepEqual(
+    resume,
+    { "201": "SHOULD-NOT-BE-USED" },
+    "the resolver alone gates: the campaign returns undefined for an answered park, never the failed re-run",
+  );
 });
 
 // Seed a wave-0 crash for 102 that recorded a session before the process died: 101 merged green,
@@ -986,7 +983,14 @@ test("redrive resumes a crashed member's session when the provider is resumable 
 
   const spawns: { id: string; resume?: string }[] = [];
   const ok = await silenceConsole(() =>
-    campaign(cfg, [], host, undefined, { resume: true }, resumeCapturingDeps(cfg, spawns, () => true)),
+    campaign(
+      cfg,
+      [],
+      host,
+      undefined,
+      { resume: true },
+      resumeCapturingDeps(cfg, spawns, () => true),
+    ),
   );
 
   assert.equal(ok, "done");
@@ -1001,7 +1005,14 @@ test("redrive runs a crashed member fresh when its branch has no commits (design
 
   const spawns: { id: string; resume?: string }[] = [];
   const ok = await silenceConsole(() =>
-    campaign(cfg, [], host, undefined, { resume: true }, resumeCapturingDeps(cfg, spawns, () => false)),
+    campaign(
+      cfg,
+      [],
+      host,
+      undefined,
+      { resume: true },
+      resumeCapturingDeps(cfg, spawns, () => false),
+    ),
   );
 
   assert.equal(ok, "done");
@@ -1017,7 +1028,14 @@ test("redrive runs a crashed member fresh when the provider is non-resumable, ev
 
   const spawns: { id: string; resume?: string }[] = [];
   const ok = await silenceConsole(() =>
-    campaign(cfg, [], host, undefined, { resume: true }, resumeCapturingDeps(cfg, spawns, () => true)),
+    campaign(
+      cfg,
+      [],
+      host,
+      undefined,
+      { resume: true },
+      resumeCapturingDeps(cfg, spawns, () => true),
+    ),
   );
 
   assert.equal(ok, "done");
@@ -1065,18 +1083,12 @@ test("redrive does not spawn a parked member whose record remains; the wave park
 
   const spawned: string[] = [];
   const integrated: string[][] = [];
-  const ok = await silenceConsole(() =>
-    campaign(cfg, [], host, undefined, { resume: true }, recordingDeps(cfg, spawned, integrated)),
-  );
+  const ok = await silenceConsole(() => campaign(cfg, [], host, undefined, { resume: true }, recordingDeps(cfg, spawned, integrated)));
 
   assert.equal(ok, "parked", "the unresolved park re-parks the wave and stops the campaign");
   assert.deepEqual(spawned, [], "the still-parked member was not respawned");
   // A fresh campaign-park was recorded on the redrive (the second one in the log).
-  assert.equal(
-    readEventLog(cfg).filter((e) => e.event === "campaign-parked").length,
-    2,
-    "the redrive re-parked the wave",
-  );
+  assert.equal(readEventLog(cfg).filter((e) => e.event === "campaign-parked").length, 2, "the redrive re-parked the wave");
 });
 
 test("redrive resumes at the parked wave, not past it — a closed earlier wave is skipped", async () => {
@@ -1099,9 +1111,7 @@ test("redrive resumes at the parked wave, not past it — a closed earlier wave 
 
   const spawned: string[] = [];
   const integrated: string[][] = [];
-  const ok = await silenceConsole(() =>
-    campaign(cfg, [], host, undefined, { resume: true }, recordingDeps(cfg, spawned, integrated)),
-  );
+  const ok = await silenceConsole(() => campaign(cfg, [], host, undefined, { resume: true }, recordingDeps(cfg, spawned, integrated)));
 
   assert.equal(ok, "parked", "the parked wave 1 stops the redrive again");
   assert.deepEqual(spawned, [], "neither the closed wave 0 nor the still-parked wave 1 respawned");
@@ -1129,9 +1139,7 @@ test("redrive stops as failed again on a failed member, but re-runs it under --o
   // No override: the failed member holds the wave and the campaign stops as failed again.
   const spawned: string[] = [];
   const integrated: string[][] = [];
-  const stopped = await silenceConsole(() =>
-    campaign(cfg, [], host, undefined, { resume: true }, recordingDeps(cfg, spawned, integrated)),
-  );
+  const stopped = await silenceConsole(() => campaign(cfg, [], host, undefined, { resume: true }, recordingDeps(cfg, spawned, integrated)));
   assert.equal(stopped, "failed", "the failed member stops the redrive as failed");
   assert.deepEqual(spawned, [], "a failed member is not silently re-run without an override");
 
@@ -1162,9 +1170,7 @@ test("a graft appended mid-wave lands in a future wave; the loop re-derives and 
     return 0;
   };
 
-  const ok = await silenceConsole(() =>
-    campaign(cfg, [["101"], ["201"]], host, "harness", {}, gitFreeDeps(cfg, childRun)),
-  );
+  const ok = await silenceConsole(() => campaign(cfg, [["101"], ["201"]], host, "harness", {}, gitFreeDeps(cfg, childRun)));
 
   assert.equal(ok, "done");
   const batches = readEventLog(cfg)
@@ -1189,9 +1195,7 @@ test("Gate 1 (ADR 0017): a per-issue park drains its wave, merges the greens, th
     return taskId === "102" ? 2 : 0;
   };
 
-  const ok = await silenceConsole(() =>
-    campaign(cfg, [["101", "102"], ["201"]], host, "harness", {}, gitFreeDeps(cfg, childRun)),
-  );
+  const ok = await silenceConsole(() => campaign(cfg, [["101", "102"], ["201"]], host, "harness", {}, gitFreeDeps(cfg, childRun)));
 
   // The wave wave-parks, so the campaign returns false and never runs the next wave.
   assert.equal(ok, "parked");
@@ -1199,7 +1203,11 @@ test("Gate 1 (ADR 0017): a per-issue park drains its wave, merges the greens, th
 
   const events = readEventLog(cfg);
   const batches = events.filter((e): e is WaveStartEvent => e.event === "wave-start");
-  assert.deepEqual(batches.map((b) => b.index), [0], "only wave 0 ran — no succeeding wave started");
+  assert.deepEqual(
+    batches.map((b) => b.index),
+    [0],
+    "only wave 0 ran — no succeeding wave started",
+  );
 
   // The wave parked at index 0, the in-flight parked wave.
   const parked = events.filter((e): e is CampaignParkedEvent => e.event === "campaign-parked");
@@ -1213,10 +1221,7 @@ test("Gate 1 (ADR 0017): a per-issue park drains its wave, merges the greens, th
   assert.ok(notice?.text.includes("101"), "the green stayed merged on the base");
 
   // No wave-done closed the wave — it stays the in-flight parked wave, not a completed one.
-  assert.ok(
-    !events.some((e) => e.event === "wave-done"),
-    "the parked wave is not logged done",
-  );
+  assert.ok(!events.some((e) => e.event === "wave-done"), "the parked wave is not logged done");
 });
 
 test("Gate 1: a parked record survives the wave boundary — the boundary clears nothing (design §2.5)", async () => {
@@ -1232,9 +1237,7 @@ test("Gate 1: a parked record survives the wave boundary — the boundary clears
 
   const childRun: CampaignDeps["spawnRun"] = async (taskId) => (taskId === "102" ? 2 : 0);
 
-  await silenceConsole(() =>
-    campaign(cfg, [["101", "102"]], host, "harness", {}, gitFreeDeps(cfg, childRun)),
-  );
+  await silenceConsole(() => campaign(cfg, [["101", "102"]], host, "harness", {}, gitFreeDeps(cfg, childRun)));
 
   assert.ok(existsSync(parkedRecord), "the parked record survives the wave boundary — resumable, dashboard-visible, answerable");
 });
@@ -1276,9 +1279,7 @@ test("re-admit: a parked member answered while the wave still drains re-runs and
     return Promise.resolve(0);
   };
 
-  const ok = await silenceConsole(() =>
-    campaign(cfg, [["101", "102"]], host, "harness", {}, gitFreeDeps(cfg, spawnRun)),
-  );
+  const ok = await silenceConsole(() => campaign(cfg, [["101", "102"]], host, "harness", {}, gitFreeDeps(cfg, spawnRun)));
 
   assert.equal(ok, "done", "the wave completed once the answered park re-ran green");
   const done = readEventLog(cfg).find((e): e is WaveDoneEvent => e.event === "wave-done");
@@ -1445,9 +1446,7 @@ test("Gate 2 unchanged: an all-green wave whose combined base gates red still wa
     }),
   };
 
-  const ok = await silenceConsole(() =>
-    campaign(cfg, [["101", "102"], ["201"]], host, "harness", {}, deps),
-  );
+  const ok = await silenceConsole(() => campaign(cfg, [["101", "102"], ["201"]], host, "harness", {}, deps));
 
   assert.equal(ok, "parked", "the red combined base wave-parks");
   assert.ok(!spawned.includes("201"), "no succeeding wave starts on a red base");
@@ -1476,30 +1475,33 @@ test("a failed member drains its wave, integrates the greens, then stops the cam
     return taskId === "102" ? 1 : 0;
   };
 
-  const ok = await silenceConsole(() =>
-    campaign(cfg, [["101", "102"], ["201"]], host, "harness", {}, gitFreeDeps(cfg, childRun)),
-  );
+  const ok = await silenceConsole(() => campaign(cfg, [["101", "102"], ["201"]], host, "harness", {}, gitFreeDeps(cfg, childRun)));
 
   assert.equal(ok, "failed", "a failed member stops the campaign non-zero");
   assert.ok(!spawned.includes("201"), "the succeeding wave never starts once a member failed");
 
   const events = readEventLog(cfg);
   const batches = events.filter((e): e is WaveStartEvent => e.event === "wave-start");
-  assert.deepEqual(batches.map((b) => b.index), [0], "only wave 0 ran — no succeeding wave started");
+  assert.deepEqual(
+    batches.map((b) => b.index),
+    [0],
+    "only wave 0 ran — no succeeding wave started",
+  );
 
   // The failed member is named on its own `failed` event (logged by queue), and the campaign
   // stop marker carries the failed wave's index.
   const perTaskFailed = events.filter((e): e is FailedEvent => e.event === "failed");
-  assert.deepEqual(perTaskFailed.map((f) => f.taskId), ["102"], "the failed member is named on its own failed event");
+  assert.deepEqual(
+    perTaskFailed.map((f) => f.taskId),
+    ["102"],
+    "the failed member is named on its own failed event",
+  );
   const failed = events.filter((e): e is CampaignFailedEvent => e.event === "campaign-failed");
   assert.equal(failed.length, 1, "exactly one campaign-failed stop marker");
   assert.equal(failed[0].index, 0, "the stop marker carries the failed wave's index");
 
   // The wave is never logged done — it holds, it does not close.
-  assert.ok(
-    !events.some((e) => e.event === "wave-done"),
-    "the failed wave is not logged done",
-  );
+  assert.ok(!events.some((e) => e.event === "wave-done"), "the failed wave is not logged done");
 
   // The operator notice went out on the failure channel, naming the green sibling kept merged —
   // a failure never aborts or un-merges a sibling.
@@ -1527,9 +1529,7 @@ test("a quarantine that strands later-wave dependents wave-parks the campaign �
     integrate: async (_cfg, _greens) => ({ merged: [], conflictParked: ["640"] }),
   };
 
-  const ok = await silenceConsole(() =>
-    campaign(cfg, [["640"], ["701"]], host, "harness", {}, deps),
-  );
+  const ok = await silenceConsole(() => campaign(cfg, [["640"], ["701"]], host, "harness", {}, deps));
 
   assert.equal(ok, "parked", "the stranded quarantine pauses the campaign");
   assert.ok(!spawned.includes("701"), "the stranded later wave never starts");
@@ -1580,9 +1580,18 @@ test("queue fills to the host ceiling, then writes a spawn per task with climbin
   // No durable queue-start event frames the drain (design §2.1): each task announces itself
   // with a `spawn`, reporting the running count climbing to the ceiling and the queue draining.
   const spawns = events.filter((e): e is SpawnEvent => e.event === "spawn");
-  assert.deepEqual(spawns.map((s) => s.taskId), taskIds);
-  assert.deepEqual(spawns.map((s) => s.running), [1, 2, 3]);
-  assert.deepEqual(spawns.map((s) => s.left), [2, 1, 0]);
+  assert.deepEqual(
+    spawns.map((s) => s.taskId),
+    taskIds,
+  );
+  assert.deepEqual(
+    spawns.map((s) => s.running),
+    [1, 2, 3],
+  );
+  assert.deepEqual(
+    spawns.map((s) => s.left),
+    [2, 1, 0],
+  );
 });
 
 test("queue returns and logs a per-task outcome map translating each child's exit code (#190)", async () => {
@@ -1604,6 +1613,10 @@ test("queue returns and logs a per-task outcome map translating each child's exi
   // `failed` event (design §2.1) so the reducer holds its wave; green/parked members carry their
   // own rows from the run loop.
   const failed = readEventLog(cfg).filter((e): e is FailedEvent => e.event === "failed");
-  assert.deepEqual(failed.map((f) => f.taskId), ["103"], "only the errored member is folded to a failed event");
+  assert.deepEqual(
+    failed.map((f) => f.taskId),
+    ["103"],
+    "only the errored member is folded to a failed event",
+  );
   assert.equal(failed[0].detail, "error(7)", "the failed event carries the translated exit code");
 });

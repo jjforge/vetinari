@@ -58,10 +58,7 @@ export const isStatusCommand = (text: string) => STATUS_COMMANDS.has(text.trim()
  * prune. Kept to whole, unambiguous tokens — an issue must be numeric — so a
  * one-word answer like "640" or "A" is never mistaken for a command.
  */
-export type GatewayCommand =
-  | { kind: "status" }
-  | { kind: "prune"; project?: string; issue: string }
-  | { kind: "confirm" };
+export type GatewayCommand = { kind: "status" } | { kind: "prune"; project?: string; issue: string } | { kind: "confirm" };
 
 export function parseGatewayCommand(text: string): GatewayCommand | null {
   const trimmed = text.trim();
@@ -139,9 +136,7 @@ export interface PruneCandidate {
  * project name resolves straight to that project when it is running on the bot.
  */
 export type PruneResolution =
-  | { kind: "target"; project: GatewayProject }
-  | { kind: "ambiguous"; candidates: GatewayProject[] }
-  | { kind: "none" };
+  { kind: "target"; project: GatewayProject } | { kind: "ambiguous"; candidates: GatewayProject[] } | { kind: "none" };
 
 /**
  * Resolve a prune command to a project, pure over the candidates and the bot the
@@ -455,8 +450,7 @@ export function routeReply(index: ReplyIndex, pending: PendingConfirms, conn: Tg
 export function formatPruneAmbiguity(candidates: GatewayProject[], issue: string): string {
   const names = candidates.map((c) => c.project);
   return (
-    `Several projects on this bot have a running campaign: ${names.join(", ")}.\n` +
-    `Say which one — e.g. \`prune ${names[0]} ${issue}\`.`
+    `Several projects on this bot have a running campaign: ${names.join(", ")}.\n` + `Say which one — e.g. \`prune ${names[0]} ${issue}\`.`
   );
 }
 
@@ -614,7 +608,10 @@ export function formatGatewayStatus(statuses: CampaignStatus[]): string {
   for (const s of statuses) {
     const state = campaignState(s.waves.map((w) => w.status));
     const running = s.waves.find((w) => w.status === "running");
-    lines.push("", running ? `${s.project} · ${state.toUpperCase()} · wave ${running.index + 1} in flight` : `${s.project} · ${state.toUpperCase()}`);
+    lines.push(
+      "",
+      running ? `${s.project} · ${state.toUpperCase()} · wave ${running.index + 1} in flight` : `${s.project} · ${state.toUpperCase()}`,
+    );
     const counts = stateCounts(s);
     const countLine = STATE_ORDER.filter((k) => counts[k] > 0)
       .map((k) => `${STATE_WORD[k]} ${counts[k]}`)
@@ -647,7 +644,13 @@ export function formatGatewayStatus(statuses: CampaignStatus[]): string {
 // The five issue states in the user guide's display order — the reducer and the guide now
 // speak one word, `failed` (design §13.1: one vocabulary).
 const STATE_ORDER: readonly IssueStatus[] = ["unstarted", "running", "parked", "failed", "completed"];
-const STATE_WORD: Record<IssueStatus, string> = { unstarted: "unstarted", running: "running", parked: "parked", failed: "failed", completed: "completed" };
+const STATE_WORD: Record<IssueStatus, string> = {
+  unstarted: "unstarted",
+  running: "running",
+  parked: "parked",
+  failed: "failed",
+  completed: "completed",
+};
 
 /** Tally a project's issues by state for the `/status` counts, skipping pruned
  * members — they left the plan, so they never count toward the live state totals. */
@@ -946,11 +949,20 @@ export async function gateway(configDir: string = gatewayConfigDir()): Promise<v
         await tgSend(c, formatGatewayStatus(buildAllStatus(pointers, log, configDir)));
       },
       onPrune: (c, command) =>
-        handlePruneCommand({ candidates: () => pruneCandidates(configDir), preview: (t) => prunePreview(t, log), send: tgSend }, pending, c, command),
+        handlePruneCommand(
+          { candidates: () => pruneCandidates(configDir), preview: (t) => prunePreview(t, log), send: tgSend },
+          pending,
+          c,
+          command,
+        ),
       onConfirm: (confirm) => spawnPrune(confirm, log),
       onUnrouted: async (c, msg) => {
         // Only answer a genuine misdirected reply; stay quiet for plain chatter.
-        if (msg.replyToId != null) await tgSend(c, "That question isn't tracked anymore (already answered, or from before I started). Reply to a current question message.");
+        if (msg.replyToId != null)
+          await tgSend(
+            c,
+            "That question isn't tracked anymore (already answered, or from before I started). Reply to a current question message.",
+          );
       },
       signal,
     }).catch((e) => log.log("gateway-poll-error", { token: conn.token, error: String(e) }));

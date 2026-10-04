@@ -3,7 +3,19 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { cpus, tmpdir } from "node:os";
 import { join } from "node:path";
-import { acquireSlot, deregisterProject, fairShare, machineDefaultCeiling, projectHasLiveCampaign, readLeases, registerProject, releaseSlot, resolveHostCeiling, withHostSlot, type HostBudget } from "./host-slots.ts";
+import {
+  acquireSlot,
+  deregisterProject,
+  fairShare,
+  machineDefaultCeiling,
+  projectHasLiveCampaign,
+  readLeases,
+  registerProject,
+  releaseSlot,
+  resolveHostCeiling,
+  withHostSlot,
+  type HostBudget,
+} from "./host-slots.ts";
 
 const freshDir = () => mkdtempSync(join(tmpdir(), "vetinari-slots-"));
 const alive = () => true;
@@ -277,13 +289,18 @@ test("withHostSlot registers and holds one slot for the life of fn, then release
   const opts = { pid: 42, isAlive: alive };
   let leaseDuring: { held: number; kind: string } | undefined;
   let campaignDuring = true;
-  const out = await withHostSlot(budget(dir, 4), "solo", async () => {
-    const l = readLeases(dir).find((l) => l.pid === 42);
-    leaseDuring = l && { held: l.held, kind: l.kind };
-    // A standalone run holds a slot, but its lease is `kind: "run"` — never a live campaign.
-    campaignDuring = projectHasLiveCampaign(dir, "solo", { isAlive: alive });
-    return "green";
-  }, opts);
+  const out = await withHostSlot(
+    budget(dir, 4),
+    "solo",
+    async () => {
+      const l = readLeases(dir).find((l) => l.pid === 42);
+      leaseDuring = l && { held: l.held, kind: l.kind };
+      // A standalone run holds a slot, but its lease is `kind: "run"` — never a live campaign.
+      campaignDuring = projectHasLiveCampaign(dir, "solo", { isAlive: alive });
+      return "green";
+    },
+    opts,
+  );
   assert.equal(out, "green", "it returns fn's value");
   assert.deepEqual(leaseDuring, { held: 1, kind: "run" }, "it holds one slot as a run lease during the run");
   assert.equal(campaignDuring, false, "a standalone run is not a live campaign");
@@ -293,9 +310,14 @@ test("withHostSlot registers and holds one slot for the life of fn, then release
 test("withHostSlot releases and deregisters even when fn throws", async () => {
   const dir = freshDir();
   await assert.rejects(
-    withHostSlot(budget(dir, 4), "solo", async () => {
-      throw new Error("boom");
-    }, { pid: 42, isAlive: alive }),
+    withHostSlot(
+      budget(dir, 4),
+      "solo",
+      async () => {
+        throw new Error("boom");
+      },
+      { pid: 42, isAlive: alive },
+    ),
     /boom/,
   );
   assert.deepEqual(readLeases(dir), [], "a throw still returns the slot and the lease");
@@ -314,9 +336,14 @@ test("withHostSlot waits first-come when the ceiling is full, then proceeds once
     if (waits++ === 0) releaseSlot(dir, other);
   };
   let ran = false;
-  await withHostSlot(budget(dir, 1), "mine", async () => {
-    ran = true;
-  }, { pid: 42, isAlive: alive, wait });
+  await withHostSlot(
+    budget(dir, 1),
+    "mine",
+    async () => {
+      ran = true;
+    },
+    { pid: 42, isAlive: alive, wait },
+  );
   assert.equal(ran, true, "fn runs once the ceiling frees");
   assert.ok(waits >= 1, "it waited rather than exceeding the ceiling");
 });

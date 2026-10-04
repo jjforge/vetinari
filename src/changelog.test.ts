@@ -57,7 +57,12 @@ const CHANGELOG = `# Changelog
 `;
 
 test("collectFragments starts a new milestone at the top when the top milestone is not dated today", () => {
-  const out = collectFragments(CHANGELOG, [{ section: "New features", bullets: ["- [user] a shiny thing (#2)."] }], "August 26, 2026", "A brand new theme");
+  const out = collectFragments(
+    CHANGELOG,
+    [{ section: "New features", bullets: ["- [user] a shiny thing (#2)."] }],
+    "August 26, 2026",
+    "A brand new theme",
+  );
   const lines = out.split("\n");
   // The new milestone leads, dated today, with the given title.
   assert.equal(lines[4], "### A brand new theme — August 26, 2026");
@@ -131,8 +136,18 @@ test("collectFragments keeps a consuming project's extra section labels in their
 test("collectFragments folds two same-day collects into one block per label, not a second header", () => {
   // Two collects in one day: the second must fold into the first's milestone, not
   // add a second **Bug fixes:** block — one block per label per milestone.
-  const once = collectFragments("# Changelog\n\n### Older — August 1, 2026\n\n**Bug fixes:**\n- [user] old (#1)\n", [{ section: "Bug fixes", bullets: ["- [user] fix one (#2)."] }], "August 26, 2026", "Wave collection");
-  const twice = collectFragments(once, [{ section: "Bug fixes", bullets: ["- [user] fix two (#3)."] }], "August 26, 2026", "Wave collection");
+  const once = collectFragments(
+    "# Changelog\n\n### Older — August 1, 2026\n\n**Bug fixes:**\n- [user] old (#1)\n",
+    [{ section: "Bug fixes", bullets: ["- [user] fix one (#2)."] }],
+    "August 26, 2026",
+    "Wave collection",
+  );
+  const twice = collectFragments(
+    once,
+    [{ section: "Bug fixes", bullets: ["- [user] fix two (#3)."] }],
+    "August 26, 2026",
+    "Wave collection",
+  );
   assert.equal(twice.match(/\*\*Bug fixes:\*\*/g)?.length, 2); // one per milestone, not two in one
   // Both of today's fixes live under today's single block.
   assert.ok(twice.includes("- [user] fix one (#2).\n- [user] fix two (#3)."));
@@ -175,10 +190,9 @@ test("foldFragments folds only the named fragments, leaving the rest on disk", (
   writeFileSync(join(fragDir, "42.md"), "section: New features\n- [user] feature from 42 (#42).\n");
   writeFileSync(join(fragDir, "7.md"), "section: Bug fixes\n- [user] fix from 7 (#7).\n");
 
-  const result = foldFragments(
-    { fragmentsDir: fragDir, changelogPath: changelog, today: "August 26, 2026", title: "Collected changes" },
-    ["42.md"],
-  );
+  const result = foldFragments({ fragmentsDir: fragDir, changelogPath: changelog, today: "August 26, 2026", title: "Collected changes" }, [
+    "42.md",
+  ]);
 
   assert.deepEqual(result.collected, ["42.md"]);
   const written = readFileSync(changelog, "utf8");
@@ -198,10 +212,9 @@ test("foldFragments is a no-op when the named set is empty or unmatched", () => 
   writeFileSync(join(fragDir, "42.md"), "section: New features\n- [user] feature from 42 (#42).\n");
   const before = readFileSync(changelog, "utf8");
 
-  const result = foldFragments(
-    { fragmentsDir: fragDir, changelogPath: changelog, today: "August 26, 2026", title: "Collected changes" },
-    ["999.md"],
-  );
+  const result = foldFragments({ fragmentsDir: fragDir, changelogPath: changelog, today: "August 26, 2026", title: "Collected changes" }, [
+    "999.md",
+  ]);
 
   assert.deepEqual(result.collected, []);
   assert.equal(readFileSync(changelog, "utf8"), before); // untouched

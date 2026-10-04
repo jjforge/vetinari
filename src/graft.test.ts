@@ -14,9 +14,7 @@ import { GraftRejectedError, defaultGraftDeps, describeGraftRejections, runGraft
 // re-derive reads and what `enqueueOutbound`/`cfg.log` write — so the seam is
 // exercised for real; only the tracker edges (`fetchTask`/`blockedBy`/`fileSet`)
 // are stubbed per test.
-const harnessCfg = (
-  overrides: Partial<ResolvedConfig> = {},
-): ResolvedConfig => {
+const harnessCfg = (overrides: Partial<ResolvedConfig> = {}): ResolvedConfig => {
   const stateDir = mkdtempSync(join(tmpdir(), "vetinari-graft-"));
   const logFile = join(stateDir, "orchestrator.jsonl");
   return {
@@ -50,18 +48,12 @@ const launch = (cfg: ResolvedConfig, batches: string[][]) => {
 
 test("graft with no ids is rejected before any campaign lookup", async () => {
   const cfg = harnessCfg();
-  await assert.rejects(
-    () => runGraft(cfg, [], {}),
-    /graft needs at least one issue id/,
-  );
+  await assert.rejects(() => runGraft(cfg, [], {}), /graft needs at least one issue id/);
 });
 
 test("graft with no campaign launched (empty log) is rejected by the precondition guard", async () => {
   const cfg = harnessCfg();
-  await assert.rejects(
-    () => runGraft(cfg, ["301"], {}),
-    /no campaign to graft/,
-  );
+  await assert.rejects(() => runGraft(cfg, ["301"], {}), /no campaign to graft/);
 });
 
 test("graft onto a settled campaign (every member merged) is rejected", async () => {
@@ -155,9 +147,7 @@ test("--dry-run discloses a whole-batch rejection in the closure without throwin
 
   const result = await runGraft(cfg, ["202", "303"], { dryRun: true }, depsWithRepo(undefined));
 
-  assert.deepEqual(result.rejected, [
-    { id: "202", reason: "already-in-campaign" },
-  ]);
+  assert.deepEqual(result.rejected, [{ id: "202", reason: "already-in-campaign" }]);
   assert.deepEqual(result.closure, {
     project: "harness",
     repo: undefined,
@@ -237,10 +227,7 @@ test("a malformed graft token is rejected whole without ever reaching fetchTask 
   });
   launch(cfg, [["101"]]);
 
-  await assert.rejects(
-    () => runGraft(cfg, ['"875"', '"876"'], {}),
-    /graft rejected — nothing added \(not an issue id: #"875", #"876"\)/,
-  );
+  await assert.rejects(() => runGraft(cfg, ['"875"', '"876"'], {}), /graft rejected — nothing added \(not an issue id: #"875", #"876"\)/);
   assert.equal(fetched, 0, "a malformed token must never reach fetchTask");
 });
 
@@ -249,15 +236,13 @@ test("the graft event carries the grafted ids' titles so the dashboard renders t
   // and file-set); the event stamps the parsed title so the reducer's title-folding
   // gives the grafted wave a real header and its row a real title (#197).
   const cfg = harnessCfg({
-    fetchTask: async (id: string) =>
-      JSON.stringify({ state: "OPEN", title: `Issue ${id} title` }),
+    fetchTask: async (id: string) => JSON.stringify({ state: "OPEN", title: `Issue ${id} title` }),
   });
   launch(cfg, [["101"]]);
 
   await runGraft(cfg, ["301"], {});
 
-  const graftEvent = readEventLog(cfg).find((e) => e.event === "graft") as
-    { titles?: Record<string, string> } | undefined;
+  const graftEvent = readEventLog(cfg).find((e) => e.event === "graft") as { titles?: Record<string, string> } | undefined;
   assert.ok(graftEvent, "expected a graft event on the log");
   assert.deepEqual(graftEvent!.titles, { "301": "Issue 301 title" });
 });
@@ -282,8 +267,7 @@ test("the graft event records only in-campaign/co-grafted blockers, and placemen
 test("graft names the project, repo and each id's title, and carries project+repo into the closure", async () => {
   const cfg = harnessCfg({
     project: "vetinari",
-    fetchTask: async (id: string) =>
-      JSON.stringify({ state: "OPEN", title: `Issue ${id} title` }),
+    fetchTask: async (id: string) => JSON.stringify({ state: "OPEN", title: `Issue ${id} title` }),
   });
   launch(cfg, [["101"]]);
 
@@ -327,7 +311,10 @@ test("graft refuses a project qualifier that names a different project, adding n
     () => runGraft(cfg, ["301"], { project: "vetinari" }, depsWithRepo("jjforge/jjforge")),
     /refusing: this project is "jjforge", but the qualifier names "vetinari"/,
   );
-  assert.equal(readEventLog(cfg).some((e) => e.event === "graft"), false);
+  assert.equal(
+    readEventLog(cfg).some((e) => e.event === "graft"),
+    false,
+  );
   assert.equal(listOutbox(cfg).length, 0);
 });
 
@@ -339,7 +326,10 @@ test("graft refuses a qualified target when the repo identity is not derivable",
     () => runGraft(cfg, ["301"], { project: "vetinari" }, depsWithRepo(undefined)),
     /cannot derive this project's repo to verify the "vetinari" qualifier/,
   );
-  assert.equal(readEventLog(cfg).some((e) => e.event === "graft"), false);
+  assert.equal(
+    readEventLog(cfg).some((e) => e.event === "graft"),
+    false,
+  );
 });
 
 test("graft's bare form still works when the repo identity is not derivable", async () => {
@@ -356,10 +346,7 @@ test("an id already in the campaign is rejected whole — nothing appended", asy
   const cfg = harnessCfg();
   launch(cfg, [["101"], ["202"]]);
 
-  await assert.rejects(
-    () => runGraft(cfg, ["202"], {}),
-    /graft rejected — nothing added \(already in the campaign: #202\)/,
-  );
+  await assert.rejects(() => runGraft(cfg, ["202"], {}), /graft rejected — nothing added \(already in the campaign: #202\)/);
   assert.equal(
     readEventLog(cfg).some((e) => e.event === "graft"),
     false,
@@ -407,10 +394,7 @@ test("an unknown id (a throwing fetchTask) is rejected whole — nothing appende
   });
   launch(cfg, [["101"]]);
 
-  await assert.rejects(
-    () => runGraft(cfg, ["999"], {}),
-    /graft rejected — nothing added \(unknown\/missing: #999\)/,
-  );
+  await assert.rejects(() => runGraft(cfg, ["999"], {}), /graft rejected — nothing added \(unknown\/missing: #999\)/);
   assert.equal(
     readEventLog(cfg).some((e) => e.event === "graft"),
     false,

@@ -27,10 +27,7 @@ test("issueLabel is the bare #id when no title was resolved", () => {
 
 test("formatPlan lists each wave with its ids and titles, headed by the name", () => {
   const out = formatPlan([["101", "102"], ["201"]], { "101": "Foo", "201": "Baz" }, "vocab");
-  assert.equal(
-    out,
-    "plan “vocab” · 2 waves\n  wave 1 — #101 Foo, #102\n  wave 2 — #201 Baz",
-  );
+  assert.equal(out, "plan “vocab” · 2 waves\n  wave 1 — #101 Foo, #102\n  wave 2 — #201 Baz");
 });
 
 test("formatPlan omits the name segment when the campaign is unnamed", () => {
@@ -41,24 +38,15 @@ test("formatPlan omits the name segment when the campaign is unnamed", () => {
 // --- formatWaveStart / formatWaveDone: per-wave progress -----------------------
 
 test("formatWaveStart names the wave, its position, and its issues", () => {
-  assert.equal(
-    formatWaveStart(0, 2, ["101", "102"], { "101": "Foo" }),
-    "▶ wave 1/2 — #101 Foo, #102",
-  );
+  assert.equal(formatWaveStart(0, 2, ["101", "102"], { "101": "Foo" }), "▶ wave 1/2 — #101 Foo, #102");
 });
 
 test("formatWaveDone reports what merged", () => {
-  assert.equal(
-    formatWaveDone(0, 2, { merged: ["101"] }),
-    "✔ wave 1/2 merged #101",
-  );
+  assert.equal(formatWaveDone(0, 2, { merged: ["101"] }), "✔ wave 1/2 merged #101");
 });
 
 test("formatWaveDone says nothing merged when the wave banked none", () => {
-  assert.equal(
-    formatWaveDone(0, 1, { merged: [] }),
-    "✔ wave 1/1 merged nothing",
-  );
+  assert.equal(formatWaveDone(0, 1, { merged: [] }), "✔ wave 1/1 merged nothing");
 });
 
 // --- formatOutcomes: the per-issue outcome, error mapped to the vocabulary -----

@@ -36,12 +36,9 @@ const withEnvAsync = async (env: Record<string, string | undefined>, fn: () => P
 };
 
 test("tgEnvConn builds a connection from the orchestrator env", () => {
-  withEnv(
-    { VETINARI_TELEGRAM_BOT_TOKEN: "tok", VETINARI_TELEGRAM_CHAT_ID: "chat", VETINARI_TELEGRAM_THREAD_ID: "7" },
-    () => {
-      assert.deepEqual(tgEnvConn(), { token: "tok", chat: "chat", thread: "7" });
-    },
-  );
+  withEnv({ VETINARI_TELEGRAM_BOT_TOKEN: "tok", VETINARI_TELEGRAM_CHAT_ID: "chat", VETINARI_TELEGRAM_THREAD_ID: "7" }, () => {
+    assert.deepEqual(tgEnvConn(), { token: "tok", chat: "chat", thread: "7" });
+  });
 });
 
 test("tgEnvConn omits the thread when unset", () => {
@@ -67,17 +64,19 @@ const withFetch = async (impl: typeof fetch, fn: () => Promise<void>) => {
   }
 };
 
-const okResponse = (result: unknown) =>
-  ({ json: async () => ({ ok: true, result }), status: 200 }) as unknown as Response;
+const okResponse = (result: unknown) => ({ json: async () => ({ ok: true, result }), status: 200 }) as unknown as Response;
 
 test("tgSend is a no-op returning undefined when the connection is undefined", async () => {
   let called = false;
-  await withFetch((async () => {
-    called = true;
-    return okResponse({ message_id: 1 });
-  }) as typeof fetch, async () => {
-    assert.equal(await tgSend(undefined, "hi"), undefined);
-  });
+  await withFetch(
+    (async () => {
+      called = true;
+      return okResponse({ message_id: 1 });
+    }) as typeof fetch,
+    async () => {
+      assert.equal(await tgSend(undefined, "hi"), undefined);
+    },
+  );
   assert.equal(called, false);
 });
 
@@ -106,8 +105,7 @@ test("tgSend addresses the explicit connection, not process env", async () => {
 test("tgSend routes a send failure to the injected logger, not the process-global", async () => {
   const logger = memoryLogger();
   // Telegram's not-ok envelope: the send fails and the diagnostic must be captured.
-  const failing = (async () =>
-    ({ json: async () => ({ ok: false }), status: 400 }) as unknown as Response) as typeof fetch;
+  const failing = (async () => ({ json: async () => ({ ok: false }), status: 400 }) as unknown as Response) as typeof fetch;
   await withFetch(failing, async () => {
     const id = await tgSend({ token: "t", chat: "c" }, "hello", logger);
     assert.equal(id, undefined);
@@ -119,13 +117,19 @@ test("tgSend routes a send failure to the injected logger, not the process-globa
 });
 
 test("tgPoll keeps only messages from the connection's chat", async () => {
-  await withFetch((async () =>
-    okResponse([
-      { update_id: 10, message: { text: "mine", chat: { id: "CONN_CHAT" } } },
-      { update_id: 11, message: { text: "theirs", chat: { id: "OTHER" } } },
-    ])) as typeof fetch, async () => {
-    const r = await tgPoll({ token: "t", chat: "CONN_CHAT" }, 0);
-    assert.deepEqual(r.messages.map((m) => m.text), ["mine"]);
-    assert.equal(r.offset, 12);
-  });
+  await withFetch(
+    (async () =>
+      okResponse([
+        { update_id: 10, message: { text: "mine", chat: { id: "CONN_CHAT" } } },
+        { update_id: 11, message: { text: "theirs", chat: { id: "OTHER" } } },
+      ])) as typeof fetch,
+    async () => {
+      const r = await tgPoll({ token: "t", chat: "CONN_CHAT" }, 0);
+      assert.deepEqual(
+        r.messages.map((m) => m.text),
+        ["mine"],
+      );
+      assert.equal(r.offset, 12);
+    },
+  );
 });

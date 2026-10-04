@@ -236,7 +236,14 @@ function liveLeases(configDir: string, isAlive: (pid: number) => boolean): SlotL
  * once: call this again when a wave grows or drains so a project that no longer wants
  * the surplus releases its claim on it, or the reservation bug returns one level up.
  */
-export function registerProject(configDir: string, project: string, weight: number, kind: LeaseKind, want: number, opts: LeaseOpts = {}): void {
+export function registerProject(
+  configDir: string,
+  project: string,
+  weight: number,
+  kind: LeaseKind,
+  want: number,
+  opts: LeaseOpts = {},
+): void {
   const pid = opts.pid ?? process.pid;
   const isAlive = opts.isAlive ?? pidAlive;
   withLock(slotsDir(configDir), isAlive, () => {
@@ -324,8 +331,7 @@ export async function withHostSlot<T>(
   // It wants exactly one slot, for the single container it holds for the life of `fn`.
   registerProject(host.configDir, project, host.weight, "run", 1, opts);
   try {
-    while (!acquireSlot(host.configDir, host.ceiling, project, host.weight, opts))
-      await wait(SLOT_POLL_MS);
+    while (!acquireSlot(host.configDir, host.ceiling, project, host.weight, opts)) await wait(SLOT_POLL_MS);
     try {
       return await fn();
     } finally {

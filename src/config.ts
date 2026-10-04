@@ -13,8 +13,7 @@ import { Refusal } from "./refusal.ts";
  * why `question` is a `notify` key but not a category here. Adding categories is
  * out of scope.
  */
-export type MessageCategory =
-  "success" | "failure" | "progress" | "finding";
+export type MessageCategory = "success" | "failure" | "progress" | "finding";
 
 /**
  * A named Telegram target a project routes categories to. One bot per project
@@ -41,11 +40,7 @@ export type NotifyMap = Record<string, string>;
  * wildcard — an explicit "no destination" the caller must handle, never a silent
  * drop.
  */
-export function resolveDestination(
-  notify: NotifyMap,
-  category: MessageCategory,
-  event?: string,
-): string | undefined {
+export function resolveDestination(notify: NotifyMap, category: MessageCategory, event?: string): string | undefined {
   if (event !== undefined) {
     const exact = notify[`${category}:${event}`];
     if (exact !== undefined) return exact;
@@ -69,8 +64,7 @@ export function questionDestinations(notify: NotifyMap): Set<string> {
   for (const [key, dest] of Object.entries(notify)) {
     if (key === "question" || key.startsWith("question:")) dests.add(dest);
   }
-  if (notify["question"] === undefined && notify["*"] !== undefined)
-    dests.add(notify["*"]);
+  if (notify["question"] === undefined && notify["*"] !== undefined) dests.add(notify["*"]);
   return dests;
 }
 
@@ -175,8 +169,7 @@ const NON_RESUMABLE_PROVIDERS: readonly AgentProviderName[] = ["copilot", "curso
 const SUPPORTED_LIST = "claude, pi, codex, copilot, cursor, opencode";
 
 /** Whether the loop can resume this provider's session between turns, or must re-enter each turn fresh. */
-export const isResumableProvider = (provider: AgentProviderName): boolean =>
-  !NON_RESUMABLE_PROVIDERS.includes(provider);
+export const isResumableProvider = (provider: AgentProviderName): boolean => !NON_RESUMABLE_PROVIDERS.includes(provider);
 
 /**
  * The one line the non-resumable park→answer gap turns on (design §3, §12 / #212).
@@ -218,8 +211,7 @@ export function resolveAgentSelection(
   override: { provider?: string; model?: string; effort?: string } = {},
 ): AgentSelection {
   const providerRaw = override.provider ?? base?.provider ?? DEFAULT_PROVIDER;
-  if (!(providerRaw in AGENT_PROVIDERS))
-    throw new Refusal(`unknown agent provider "${providerRaw}". Supported: ${SUPPORTED_LIST}.`);
+  if (!(providerRaw in AGENT_PROVIDERS)) throw new Refusal(`unknown agent provider "${providerRaw}". Supported: ${SUPPORTED_LIST}.`);
   const provider = providerRaw as AgentProviderName;
   const spec = AGENT_PROVIDERS[provider];
 
@@ -236,9 +228,7 @@ export function resolveAgentSelection(
     throw new Refusal(`agent provider "${provider}" takes no effort setting (its CLI exposes no reasoning-effort dial).`);
   const effort = supportsEffort ? (requestedEffort ?? DEFAULT_EFFORT) : undefined;
   if (effort !== undefined && !spec.efforts.includes(effort))
-    throw new Refusal(
-      `agent effort "${effort}" is not valid for provider "${provider}". Valid: ${spec.efforts.join(", ")}.`,
-    );
+    throw new Refusal(`agent effort "${effort}" is not valid for provider "${provider}". Valid: ${spec.efforts.join(", ")}.`);
 
   return { provider, model, effort, resumable: isResumableProvider(provider) };
 }
@@ -284,11 +274,7 @@ export function parseAgentFlags(args: string[]): {
 }
 
 /** Encode a partial CLI agent override into the `VETINARI_AGENT` env string. */
-export function encodeAgentOverride(over: {
-  provider?: string;
-  model?: string;
-  effort?: string;
-}): string {
+export function encodeAgentOverride(over: { provider?: string; model?: string; effort?: string }): string {
   return JSON.stringify(over);
 }
 
@@ -548,15 +534,12 @@ export function defineConfig(c: VetinariConfig): VetinariConfig {
 export function resolveProjectRoot(cwd: string = process.cwd()): string {
   let commonDir: string;
   try {
-    commonDir = execFileSync(
-      "git",
-      ["-C", cwd, "rev-parse", "--git-common-dir"],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
-    ).trim();
+    commonDir = execFileSync("git", ["-C", cwd, "rev-parse", "--git-common-dir"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
   } catch {
-    throw new Refusal(
-      `not a git repository: ${cwd} — run this from inside your project's checkout.`,
-    );
+    throw new Refusal(`not a git repository: ${cwd} — run this from inside your project's checkout.`);
   }
   // `--git-common-dir` is relative (`.git`) in a main checkout and absolute in a
   // linked worktree; `resolve` handles both, then the parent is the project root.
@@ -587,7 +570,10 @@ export function ownerRepoFromRemote(url: string): string | undefined {
  */
 export function repoForProject(projectRoot: string): string | undefined {
   try {
-    const url = execFileSync("git", ["-C", projectRoot, "remote", "get-url", "origin"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    const url = execFileSync("git", ["-C", projectRoot, "remote", "get-url", "origin"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
     return ownerRepoFromRemote(url);
   } catch {
     return undefined;
@@ -605,11 +591,7 @@ export function repoForProject(projectRoot: string): string | undefined {
  * It sits beside `repoForProject` — the project-identity value it checks a qualifier
  * against — because it is about *project identity*, not how an id is spelled.
  */
-export function assertProjectQualifier(
-  qualifier: string | undefined,
-  project: string,
-  repo: string | undefined,
-): void {
+export function assertProjectQualifier(qualifier: string | undefined, project: string, repo: string | undefined): void {
   if (qualifier === undefined) return;
   if (qualifier !== project)
     throw new Refusal(
@@ -652,28 +634,22 @@ export interface ResolvedConfigPath {
  * under `baseDir`, reporting a legacy origin when the winner is deprecated.
  * Existence checks only — no module import or execution.
  */
-export function resolveConfigPath(
-  baseDir: string,
-): ResolvedConfigPath | undefined {
+export function resolveConfigPath(baseDir: string): ResolvedConfigPath | undefined {
   for (const { rel, deprecated } of CANDIDATES) {
     const path = resolve(baseDir, rel);
-    if (existsSync(path))
-      return deprecated ? { path, deprecatedFrom: rel } : { path };
+    if (existsSync(path)) return deprecated ? { path, deprecatedFrom: rel } : { path };
   }
   return undefined;
 }
 
 /** Load the consuming project's config from cwd (or an explicit path). */
-export async function loadConfig(
-  explicitPath?: string,
-): Promise<ResolvedConfig> {
+export async function loadConfig(explicitPath?: string): Promise<ResolvedConfig> {
   let path = explicitPath;
   if (!path) {
     const resolved = resolveConfigPath(process.cwd());
     if (!resolved) {
       throw new Refusal(
-        `No config found. Create ${CANONICAL_CONFIG} in the project root (or pass --config <path>). ` +
-          `See the README for a template.`,
+        `No config found. Create ${CANONICAL_CONFIG} in the project root (or pass --config <path>). ` + `See the README for a template.`,
       );
     }
     path = resolved.path;
@@ -687,20 +663,10 @@ export async function loadConfig(
   const mod = await import(resolve(path));
   const c: VetinariConfig = mod.default ?? mod.config;
   if (!c) throw new Refusal(`${path} has no default export`);
-  for (const required of [
-    "project",
-    "image",
-    "baseBranch",
-    "gates",
-    "fetchTask",
-  ] as const) {
-    if (c[required] == null)
-      throw new Refusal(`${path}: missing required field "${required}"`);
+  for (const required of ["project", "image", "baseBranch", "gates", "fetchTask"] as const) {
+    if (c[required] == null) throw new Refusal(`${path}: missing required field "${required}"`);
   }
-  if (!c.gates.length)
-    throw new Refusal(
-      `${path}: "gates" is empty — the orchestrator would verify nothing`,
-    );
+  if (!c.gates.length) throw new Refusal(`${path}: "gates" is empty — the orchestrator would verify nothing`);
   if (c.notify) {
     const qDests = questionDestinations(c.notify);
     if (qDests.size > 1) {
@@ -725,8 +691,7 @@ export async function loadConfig(
     parkGraceSeconds: 0,
     ...c,
     stateDir,
-    promptFile:
-      c.promptFile ?? new URL("../prompts/tdd.md", import.meta.url).pathname,
+    promptFile: c.promptFile ?? new URL("../prompts/tdd.md", import.meta.url).pathname,
     parkedDir: `${stateDir}/parked`,
     logFile,
     log: loggerForRun({ logFile }),

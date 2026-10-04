@@ -10,11 +10,13 @@ import { escapeHtml } from "./dashboard-render.ts";
  * (ADR 0005). A completed issue is banked and a running one is in flight, so
  * prune would do nothing useful there and gets no control (story 20).
  */
-export const isPrunable = (issue: StatusIssue) => issue.membership !== "pruned" && (issue.status === "unstarted" || issue.status === "parked");
+export const isPrunable = (issue: StatusIssue) =>
+  issue.membership !== "pruned" && (issue.status === "unstarted" || issue.status === "parked");
 
 /** Whether any issue is held on a merge conflict — the `conflict` park reason (ADR 0019),
  * a passed green pulled out of integration awaiting a manual resolve. Gates the note. */
-export const hasConflict = (status: CampaignStatus) => status.waves.some((wave) => wave.issues.some((issue) => issue.reason === "conflict"));
+export const hasConflict = (status: CampaignStatus) =>
+  status.waves.some((wave) => wave.issues.some((issue) => issue.reason === "conflict"));
 
 // `renderRedriveControl` renders only on the project page, so it lives in
 // `dashboard-render-project.ts`; re-exported here so the historical import path stays valid.
@@ -168,4 +170,3 @@ export const issueDetailSheetMarkup = (prune: boolean) =>
       ? `<div id="prune-panel" class="prune-panel" hidden><button type="button" id="prune-start" class="sheet-btn prune-start">Prune</button><span id="prune-explainer" class="prune-explainer" hidden>Removes this issue and everything blocked by it from the running campaign; merged and mergeable work is kept.</span><form method="post" action="/prune" id="prune-confirm" class="prune-confirm" hidden><span class="prune-confirm-text"></span><input type="hidden" name="taskId" value="" /><input type="hidden" name="project" value="" /><input type="hidden" name="confirm" value="1" /><button type="submit" class="prune-confirm-btn">Confirm</button><button type="button" id="prune-cancel" class="prune-cancel">Cancel</button></form><span id="prune-note" class="prune-note"></span></div>`
       : ""
   }</div></div></div>`;
-

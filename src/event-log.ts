@@ -440,9 +440,7 @@ export function normalizeLegacyEvent(row: Row): OrchestratorEvent[] {
  * parses to something without a string `event`, is skipped rather than crashing the read or emitting
  * a junk row. A missing log file reads empty.
  */
-export function readEventLog(
-  cfg: Pick<ResolvedConfig, "logFile">,
-): OrchestratorEvent[] {
+export function readEventLog(cfg: Pick<ResolvedConfig, "logFile">): OrchestratorEvent[] {
   if (!existsSync(cfg.logFile)) return [];
   return readFileSync(cfg.logFile, "utf8")
     .split("\n")
@@ -454,12 +452,7 @@ export function readEventLog(
       } catch {
         return [];
       }
-      if (
-        !parsed ||
-        typeof parsed !== "object" ||
-        typeof (parsed as { event?: unknown }).event !== "string"
-      )
-        return [];
+      if (!parsed || typeof parsed !== "object" || typeof (parsed as { event?: unknown }).event !== "string") return [];
       return normalizeLegacyEvent(parsed as Row);
     });
 }
@@ -475,8 +468,5 @@ export function event<K extends OrchestratorEvent["event"]>(
     ts?: string;
   },
 ): Extract<OrchestratorEvent, { event: K }> {
-  return { ts: new Date().toISOString(), ...fields, event: kind } as Extract<
-    OrchestratorEvent,
-    { event: K }
-  >;
+  return { ts: new Date().toISOString(), ...fields, event: kind } as Extract<OrchestratorEvent, { event: K }>;
 }

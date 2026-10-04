@@ -17,6 +17,7 @@
 import { computePrune, restrictBlockers, type BlockedByOf } from "./prune.ts";
 import { isIssueToken, normalize } from "./issue-id.ts";
 import { defaultFileSet, ticketProse, type FileSet, type FileSetOf } from "./fileset.ts";
+import { Refusal } from "./refusal.ts";
 
 export interface Placement {
   id: string;
@@ -115,7 +116,7 @@ export async function expandSelection(
       continue;
     }
     if (!listByLabel)
-      throw new Error(
+      throw new Refusal(
         `campaign: "${token}" is a label, but no "listByLabel" resolver is configured — ` +
           `add e.g. listByLabel: githubIssuesByLabel("owner/repo") to your config to select issues by label.`,
       );
@@ -177,7 +178,7 @@ export async function layerWaves(ids: string[], blockedByOf: BlockedByOf): Promi
   while (remaining.length) {
     const layer = remaining.filter((id) => [...inSet.get(id)!].every((b) => waveOf.has(b)));
     if (!layer.length) {
-      throw new Error(`campaign: blockedBy cycle among ${remaining.map((i) => `#${i}`).join(", ")}.`);
+      throw new Refusal(`campaign: blockedBy cycle among ${remaining.map((i) => `#${i}`).join(", ")}.`);
     }
     for (const id of layer) waveOf.set(id, waves.length);
     waves.push(layer);
@@ -582,9 +583,12 @@ export async function planCampaign(ids: string[], deps: CampaignPlanDeps): Promi
   if (underspecified.length) {
     const decision = await deps.onUnderspecified(underspecified);
     if (decision === "fail") {
+      // The non-interactive fail (an explicit `--on-underspecified=fail`, or a non-terminal
+      // run that defaults to fail): a refusal whose message names the flag. The interactive
+      // stop raises its OWN refusal from `makeAskUnderspecified` before it ever returns here.
       const list = underspecified.map((i) => `#${i}`).join(", ");
       const [subj, obj] = underspecified.length === 1 ? ["has", "it"] : ["have", "them"];
-      throw new Error(
+      throw new Refusal(
         `campaign: ${list} ${subj} no confident file-set. Add the file data to the issue(s) ` +
           `and re-run, or pass --on-underspecified=drop to prune ${obj} and plan the rest.`,
       );
@@ -631,13 +635,49 @@ export async function planCampaign(ids: string[], deps: CampaignPlanDeps): Promi
 export function underspecifiedPromptFor(opts: { flag?: string; isTTY: boolean; ask: UnderspecifiedPrompt }): UnderspecifiedPrompt {
   if (opts.flag !== undefined) {
     if (opts.flag !== "drop" && opts.flag !== "fail") {
-      throw new Error(`--on-underspecified must be "drop" or "fail" (got "${opts.flag}").`);
+      throw new Refusal(`--on-underspecified must be "drop" or "fail" (got "${opts.flag}").`);
     }
     const decided = opts.flag;
     return () => decided;
   }
   if (opts.isTTY) return opts.ask;
   return () => "fail";
+}
+
+/** The terminal IO `makeAskUnderspecified` drives — injected so the choice is driven without a real TTY. */
+export interface UnderspecifiedPromptIO {
+  log: (msg: string) => void;
+  ask: (question: string) => Promise<string>;
+}
+
+/**
+ * The interactive under-specified halt (terminal only — the flag/TTY gate is
+ * `underspecifiedPromptFor`, which hands this in as its `ask`). Prints the two choices,
+ * then reads the answer through the injected `ask`: `d`/`drop` returns `"drop"` (prune the
+ * under-specified tickets and their dependents, plan the rest); `s`/`stop` is the operator's
+ * *chosen* outcome, so it is raised as a `Refusal` that names the tickets and the fix — add
+ * `Touches:`/`Creates:` lines and re-run — with no `--on-underspecified` hint (that belongs to
+ * the non-interactive path, where no prompt was shown). The interactive path never returns
+ * `"fail"`; `UnderspecifiedDecision` is unchanged. This is the ONE place that knows a prompt
+ * was shown, so the stop wording lives here and not in `planCampaign`.
+ */
+export function makeAskUnderspecified(io: UnderspecifiedPromptIO): UnderspecifiedPrompt {
+  return async (underspecified: string[]): Promise<UnderspecifiedDecision> => {
+    const list = underspecified.map((i) => `#${i}`).join(", ");
+    const [subj, obj] = underspecified.length === 1 ? ["has", "it"] : ["have", "them"];
+    io.log(
+      `\ncampaign: ${list} ${subj} no confident file-set.\n` +
+        `  [d] drop ${obj} and ${underspecified.length === 1 ? "its" : "their"} dependents, and plan the rest\n` +
+        `  [s] stop so you can add the file data to the issue(s) and re-run`,
+    );
+    for (;;) {
+      const answer = (await io.ask("drop or stop? [d/s] ")).trim().toLowerCase();
+      if (answer === "d" || answer === "drop") return "drop";
+      if (answer === "s" || answer === "stop")
+        throw new Refusal(`stopped — add Touches:/Creates: lines to ${list} and re-run`);
+      io.log('please answer "d" (drop) or "s" (stop).');
+    }
+  };
 }
 
 /**
@@ -720,7 +760,7 @@ export async function runCampaignPlan(
   expandExcluded: Exclusion[] = [],
 ): Promise<CampaignPlanReport> {
   if (!ids.length)
-    throw new Error(
+    throw new Refusal(
       "campaign needs at least one issue id or label: campaign 436 611 640",
     );
   // A selection that resolves to a single issue layers into one trivial wave, so the
@@ -730,7 +770,7 @@ export async function runCampaignPlan(
   // throw is lifted, so bare `campaign <id>` runs without a resolver wired in.
   const single = uniqueOrder(ids).length === 1;
   if (!cfg.blockedBy && !single)
-    throw new Error(
+    throw new Refusal(
       'campaign needs a "blockedBy" resolver in your config to plan waves — e.g. blockedBy: githubBlockedBy("owner/repo") (or pass --override to run hand-crafted waves).',
     );
 
@@ -784,7 +824,7 @@ export async function runFilesetCheck(
   ids: string[],
 ): Promise<FilesetCheckResult[]> {
   if (!ids.length)
-    throw new Error(
+    throw new Refusal(
       "fileset-check needs at least one ticket id: fileset-check 201 173",
     );
   const resolveFileSet = cfg.fileSet ?? defaultFileSet();

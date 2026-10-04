@@ -54,8 +54,8 @@ import { defaultGatewayServiceIO, isGatewayServiceVerb, runGatewayService } from
 import { runPrune } from "./prune.ts";
 import {
   expandSelection,
+  makeAskUnderspecified,
   runCampaignPlan,
-  type UnderspecifiedDecision,
 } from "./plan.ts";
 import { runGraft } from "./graft.ts";
 import { renderUsage } from "./help.ts";
@@ -116,38 +116,6 @@ const cliErrorIO = {
 };
 process.on("uncaughtException", (err) => handleCliError(err, cliErrorIO));
 process.on("unhandledRejection", (err) => handleCliError(err, cliErrorIO));
-
-/**
- * The interactive under-specified halt: shown only on a terminal (the flag/TTY
- * gate lives in `underspecifiedPromptFor`). Offers the two choices from the spec —
- * drop the under-specified tickets and their dependents and plan the rest, or stop
- * so the requestor can put the file data on the issue and re-run.
- */
-async function askUnderspecified(
-  underspecified: string[],
-): Promise<UnderspecifiedDecision> {
-  const list = underspecified.map((i) => `#${i}`).join(", ");
-  const [subj, obj] =
-    underspecified.length === 1 ? ["has", "it"] : ["have", "them"];
-  console.log(
-    `\ncampaign: ${list} ${subj} no confident file-set.\n` +
-      `  [d] drop ${obj} and ${underspecified.length === 1 ? "its" : "their"} dependents, and plan the rest\n` +
-      `  [s] stop so you can add the file data to the issue(s) and re-run`,
-  );
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    for (;;) {
-      const answer = (await rl.question("drop or stop? [d/s] "))
-        .trim()
-        .toLowerCase();
-      if (answer === "d" || answer === "drop") return "drop";
-      if (answer === "s" || answer === "stop") return "fail";
-      console.log('please answer "d" (drop) or "s" (stop).');
-    }
-  } finally {
-    rl.close();
-  }
-}
 
 /**
  * A one-shot readline prompt — the injected `ask` seam the bot-connection collector
@@ -689,7 +657,9 @@ await dispatch(parseArgs([mode, ...rest]), {
   resumeSession: process.env.VETINARI_RESUME_SESSION,
   archiveLeftoverRun,
   archiveIfIdle,
-  askUnderspecified,
+  // The interactive under-specified halt (terminal only): drop and plan the rest, or stop —
+  // the stop is the operator's chosen outcome, raised as a Refusal from inside the prompt.
+  askUnderspecified: makeAskUnderspecified({ log: (m) => console.log(m), ask }),
   build,
   baseline,
   runLoop,

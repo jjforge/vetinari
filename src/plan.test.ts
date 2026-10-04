@@ -7,6 +7,7 @@ import {
   expandSelection,
   labelsFromTask,
   layerWaves,
+  makeAskUnderspecified,
   partitionWaves,
   planCampaign,
   runCampaignPlan,
@@ -16,6 +17,7 @@ import {
   underspecifiedPromptFor,
   waveArgs,
 } from "./plan.ts";
+import { Refusal } from "./refusal.ts";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -462,7 +464,7 @@ test("planCampaign drops an under-specified ticket and its dependents, then plan
   );
 });
 
-test("planCampaign errors when the decision is to fail, naming the under-specified ticket", async () => {
+test("planCampaign refuses (a Refusal) when the decision is to fail, naming the under-specified ticket and the flag", async () => {
   await assert.rejects(
     () =>
       planCampaign(["611", "640"], {
@@ -473,8 +475,48 @@ test("planCampaign errors when the decision is to fail, naming the under-specifi
         }),
         onUnderspecified: () => "fail",
       }),
-    /#640.*confident/i,
+    (err: Error) =>
+      err instanceof Refusal &&
+      /#640.*confident/i.test(err.message) &&
+      /--on-underspecified=drop/.test(err.message),
   );
+});
+
+test("makeAskUnderspecified: answering `s` (stop) raises a Refusal naming the tickets and the Touches:/Creates: fix, with no --on-underspecified hint", async () => {
+  const logged: string[] = [];
+  const prompt = makeAskUnderspecified({
+    log: (m) => logged.push(m),
+    ask: async () => "s",
+  });
+  await assert.rejects(
+    () => Promise.resolve(prompt(["133", "131"])),
+    (err: Error) => {
+      assert.ok(err instanceof Refusal, "the operator's stop is a refusal, not a crash");
+      assert.match(err.message, /stop/i);
+      assert.match(err.message, /#133/);
+      assert.match(err.message, /#131/);
+      assert.match(err.message, /Touches:\/Creates:/);
+      assert.ok(!/--on-underspecified/.test(err.message), "no flag hint on the interactive path");
+      return true;
+    },
+  );
+});
+
+test("makeAskUnderspecified: answering `d` (drop) returns the drop decision", async () => {
+  const prompt = makeAskUnderspecified({ log: () => {}, ask: async () => "d" });
+  assert.equal(await prompt(["133"]), "drop");
+});
+
+test("makeAskUnderspecified: re-prompts on an unrecognized answer before the operator decides", async () => {
+  const answers = ["maybe", "d"];
+  let i = 0;
+  const logged: string[] = [];
+  const prompt = makeAskUnderspecified({
+    log: (m) => logged.push(m),
+    ask: async () => answers[i++],
+  });
+  assert.equal(await prompt(["133"]), "drop");
+  assert.ok(logged.some((l) => /please answer/.test(l)), "it nudged the operator on the bad answer");
 });
 
 test("planCampaign does not ask about a ticket that is already unreachable", async () => {

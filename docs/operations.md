@@ -9,17 +9,17 @@ keeping an install healthy over time.
 
 ## Putting the CLI on PATH
 
-`npx vetinari` resolves only inside a project whose `node_modules` holds the
-package, and `npm link` / `npm install -g` need a writable global prefix (on a nix
-host it is the read-only store). A `node_modules/.bin` shim does not help either:
-`src/cli.mts`'s `#!/usr/bin/env -S npx tsx` shebang looks for `tsx` in the
-*calling* project. So put a wrapper on PATH, once per machine, from where the
-package is installed:
+Vetinari is one shared checkout per machine (ADR 0003), not a project
+dependency, so `npx` finds nothing to run in a project, and `npm link` /
+`npm install -g` need a writable global prefix (on a nix host it is the read-only
+store). A `node_modules/.bin` shim does not help either: `src/cli.mts`'s
+`#!/usr/bin/env -S npx tsx` shebang looks for `tsx` in the *calling* project. So
+put a wrapper on PATH, once per machine, from the vetinari checkout:
 
 ```bash
-npx vetinari install                     # writes ~/.local/bin/vetinari
-npx vetinari install --dir ~/bin         # a different directory
-npx vetinari install --dry-run           # print the wrapper, write nothing
+npm run vetinari -- install                  # writes ~/.local/bin/vetinari
+npm run vetinari -- install --dir ~/bin      # a different directory
+npm run vetinari -- install --dry-run        # print the wrapper, write nothing
 ```
 
 The wrapper is a `/bin/sh` script that runs `node` with this checkout's tsx loader
@@ -201,7 +201,7 @@ daemon — ADR 0006.)
 Run the daemon:
 
 ```bash
-npx vetinari gateway
+vetinari gateway
 ```
 
 It rebuilds its reply index from persisted parked records (so a restart
@@ -222,7 +222,7 @@ always-on daemon, restarted on crash, brought back at boot. Write the unit for
 this install with `gateway install`:
 
 ```bash
-npx vetinari gateway install          # --dry-run to print the unit and write nothing
+vetinari gateway install          # --dry-run to print the unit and write nothing
 
 systemctl --user daemon-reload
 systemctl --user enable --now vetinari-gateway   # start now + at every login
@@ -266,7 +266,7 @@ base location, but `tg-test` is a standalone check):
 
 ```bash
 set -a; source .vetinari.local/host.env; set +a
-npx vetinari tg-test
+vetinari tg-test
 ```
 
 It sends a message, waits for your reply, and echoes it back — a green round-trip
@@ -332,9 +332,9 @@ Bind the dashboard to the tailnet address, or to `0.0.0.0` on a host whose only
 non-loopback reachability is the tailnet:
 
 ```bash
-npx vetinari status --host 0.0.0.0
+vetinari status --host 0.0.0.0
 # or, for the gateway's dashboard:
-VETINARI_GATEWAY_STATUS_HOST=0.0.0.0 npx vetinari gateway
+VETINARI_GATEWAY_STATUS_HOST=0.0.0.0 vetinari gateway
 ```
 
 Opening it by tailnet IP (`http://100.x.y.z:8765`) needs nothing more. Opening it
@@ -413,7 +413,6 @@ piece just narrows what prints.
 
 ```bash
 vetinari statusline install                      # default: vetinari statusline
-vetinari statusline install --run-command ".vetinari.local/run statusline"
 vetinari statusline install --dry-run            # print the plan, write nothing
 vetinari statusline uninstall                    # restore what it wrapped
 ```
@@ -421,12 +420,10 @@ vetinari statusline uninstall                    # restore what it wrapped
 `install` edits the project's committed `.claude/settings.json`. It is
 idempotent, and `--dry-run` prints the plan and writes nothing.
 
-Pass `--run-command` to match however you invoke the CLI in your project, so the
-`vetinari` import and the config both resolve. The default is `vetinari
-statusline` — the wrapper [`vetinari install`](#putting-the-cli-on-path) puts on
-PATH once per machine. It lands in the committed settings, so it reads the same on
-every machine. An in-repo launcher such as `.vetinari.local/run statusline` is the
-common override.
+The default is `vetinari statusline` — the wrapper
+[`vetinari install`](#putting-the-cli-on-path) puts on PATH once per machine. It
+lands in the committed settings, so it reads the same on every machine. Pass
+`--run-command` only if you invoke the CLI some other way.
 
 **Wrapping a status line you already have.** Install **respects a status line you
 already have**, including one set at the user level in
@@ -458,7 +455,7 @@ symmetrically.
 
 ```json
 {
-  "statusLine": { "type": "command", "command": ".vetinari.local/run statusline", "refreshInterval": 5 }
+  "statusLine": { "type": "command", "command": "vetinari statusline", "refreshInterval": 5 }
 }
 ```
 
@@ -473,32 +470,28 @@ refresh.
 
 Two things update independently: this package (the orchestrator) and
 `@ai-hero/sandcastle` (the library it runs on). Both come down to the same habit
-afterwards: re-run `baseline` in each consuming project, because that is what
+afterwards: re-run `baseline` in each project, because that is what
 proves the image, gates, and config an update has to keep working, and it costs
 no agent.
 
 ### Update this package
 
-**Installed from git** (`github:jjforge/vetinari`): npm copies the repo at a
-commit, so updates are explicit:
+Every project on the machine runs the one vetinari checkout (ADR 0003), so
+updating it updates them all at once:
 
 ```bash
-npm update vetinari                          # move to the tip of main
-npm install github:jjforge/vetinari#<sha>    # or pin to a commit
+cd ~/Code/vetinari            # wherever you cloned it
+git pull && npm ci            # or check out a tag or sha to pin a version
+vetinari gateway restart      # a running gateway picks up the new code
 ```
 
-Then re-run `npx vetinari baseline` in that project. Its image, gates, and config
+Then re-run `vetinari baseline` in each project. Its image, gates, and config
 are what an update has to keep working, and `baseline` exercises all three
 without agent cost.
 
-**Installed from a local path** (`file:../vetinari`): npm creates a **symlink**,
-so the consuming project always runs your working tree and a `git pull` in the
-package directory takes effect immediately with no reinstall. Convenient while
-developing the orchestrator, and worth knowing when debugging: a consuming
-project has no pinned version to blame, because it has no pin.
-
-Config changes are the other update path. `defineConfig` is typed, so `npx tsc
---noEmit` in the consuming project catches a renamed or dropped field.
+Re-run [`vetinari install`](#putting-the-cli-on-path) only if the checkout moved,
+and [`vetinari gateway install`](#installing-the-gateway-as-a-service) after a node
+or tsx upgrade.
 
 ### The shims `migrate` no longer carries
 
@@ -549,10 +542,10 @@ changes; pinning to patches lets us adopt a minor deliberately, after
 re-verifying the integration points below, rather than by surprise.
 
 ```bash
-npm install @ai-hero/sandcastle@latest   # here, and in each consuming project
+npm install @ai-hero/sandcastle@latest   # in the vetinari checkout
 npm run check-contract                   # ~1s, no Docker: is the surface intact?
-npx vetinari baseline                    # container + gate path still work
-npx vetinari run <small task>            # agent + session + resume still work
+vetinari baseline                        # container + gate path still work
+vetinari run <small task>                # agent + session + resume still work
 ```
 
 Climb all four rungs, because each sees what the one below cannot.
@@ -575,9 +568,6 @@ any minor bump:
 4. **Session capture writes host-side JSONL, and re-creating a sandbox on an
    existing branch reuses that worktree**: together, what make park→answer
    survive a fresh process.
-
-Consuming projects pin the library themselves (it's a peer in practice), so bump
-it there too and re-run that project's `baseline`.
 
 ## Reconciliation tools
 

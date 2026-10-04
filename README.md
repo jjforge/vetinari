@@ -49,15 +49,19 @@ each one asks of you, and a campaign start to finish — is
 ## Quickstart
 
 ```bash
-npm install github:jjforge/vetinari
-npx vetinari install     # once per machine, from where the package is installed
+git clone https://github.com/jjforge/vetinari ~/Code/vetinari   # anywhere; one per machine
+cd ~/Code/vetinari && npm ci
+npm run vetinari -- install       # puts `vetinari` on PATH
 ```
 
-`vetinari install` puts a `vetinari` wrapper on your PATH (default `~/.local/bin`),
-so the CLI runs in every project, with or without a `node_modules`. The rest of
-this page calls it as `vetinari`.
+Clone it wherever you like. Vetinari is **one shared install per machine** (ADR
+0003): every project on the machine runs this checkout, so a project needs no
+install of its own and keeps vetinari out of its `package.json`. `vetinari install`
+puts a `vetinari` wrapper on your PATH (default `~/.local/bin`), so the CLI runs in
+every project, with or without a `node_modules`. The rest of this page calls it as
+`vetinari`.
 
-Needs Docker, Node 22+, and one agent-provider credential. Vetinari is
+Needs Docker, Node 22.15+, and one agent-provider credential. Vetinari is
 **provider-agnostic** (ADR 0016): a run or campaign executes on **Claude Code**
 (the default), **pi**, or **Codex** — all resumable, so a parked question resumes
 the same session — or on the experimental Copilot / Cursor / OpenCode. Put the

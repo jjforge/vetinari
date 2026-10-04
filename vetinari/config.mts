@@ -2,7 +2,14 @@
 // The package name self-resolves to this repo (package.json "exports"), so the
 // same import a consuming project uses works here too.
 import { resolve } from "node:path";
-import { defineConfig, githubBlockedBy, githubFetchTask, githubIssuesByLabel, githubMarkPendingVerify } from "vetinari";
+import {
+  defineConfig,
+  githubBlockedBy,
+  githubFetchTask,
+  githubFindingReporter,
+  githubIssuesByLabel,
+  githubMarkPendingVerify,
+} from "vetinari";
 
 export default defineConfig({
   project: "vetinari",
@@ -33,6 +40,13 @@ export default defineConfig({
   // Expands a label selector (`campaign ready-for-agent`) into its open issues, so
   // a campaign can be launched by label rather than an explicit id list.
   listByLabel: githubIssuesByLabel("jjforge/vetinari"),
+
+  // After a green run, harvest the defects an agent noticed but did not fix and file
+  // them as issues — the container has no gh login, so without this the harvest turn
+  // never runs and that context dies with the sandbox. Labels follow this repo's issue
+  // conventions: `needs-triage` plus a priority (`P2`); issue type is a native field, so
+  // there is no `bug` label to add.
+  reportFinding: githubFindingReporter("jjforge/vetinari", { labels: ["needs-triage", "P2"] }),
 
   // After a wave merges an issue's green and the merged-base gate passes, advance it
   // to the first hop of merge→pending-verify→close: add `pending-verify`, drop

@@ -140,6 +140,7 @@ the container is `.vetinari.local/.env` (design §9, ADR 0011).
 | `VETINARI_TELEGRAM_BOT_TOKEN` | `.vetinari.local/host.env` | this project's Telegram bot token — host-only, never crosses into the container |
 | `VETINARI_TELEGRAM_CHAT_ID` | `.vetinari.local/host.env` | this project's default Telegram chat |
 | `GIT_CONFIG_GLOBAL` | `hostEnv` (host-side only) | sandcastle's host-side `safe.directory`; must **not** reach the container, where it would override the agent's `HOME` (see the operating rules) |
+| `GIT_TERMINAL_PROMPT` | set to `0` by vetinari on its own process when the config loads (host-side only) | host-side git — sandcastle's fetch before worktree creation — fails fast when it needs a credential instead of prompting on the terminal until the worktree timeout; set it in `hostEnv` to override |
 | `TZ` | process env | the zone the CLI renders timestamps in (the log stores ISO-8601 UTC only; the dashboard uses the browser's zone) |
 
 ## Event kinds

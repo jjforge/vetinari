@@ -12,6 +12,7 @@ import {
   campaignFailedNotice,
   childSpawnEnv,
   conflictParkedNotice,
+  memberParkedNotice,
   markMergedIssues,
   reconcileResumeWave,
   strandedConflictNotice,
@@ -188,6 +189,23 @@ test("campaignParkedNotice draws attention to a paused campaign whose greens sta
   assert.ok(notice.text.includes("GATE FAILED"));
 });
 
+test("memberParkedNotice names the members awaiting a human and points at answering them, not at a red base", () => {
+  const notice = memberParkedNotice("acme", 2, ["102"], ["101"], "main");
+  // Routed like every other campaign park — a paused campaign demands a human.
+  assert.equal(notice.category, "failure");
+  assert.equal(notice.event, "campaign-parked");
+  assert.ok(notice.text.startsWith("🅿️ acme · PARKED · wave 2"));
+  // Names the parked member, the green kept merged, and the base it stays on.
+  assert.ok(notice.text.includes("#102"));
+  assert.ok(notice.text.includes("101"));
+  assert.ok(notice.text.includes("main"));
+  // The move is to answer the member (an answer redrives), or prune it and redrive.
+  assert.ok(notice.text.includes("vetinari answer"));
+  assert.ok(notice.text.includes("vetinari redrive"));
+  // The base gated green — no red-base wording, nothing to fix forward.
+  assert.ok(!/gated red|attributable|fix-forward/i.test(notice.text), notice.text);
+});
+
 test("strandedConflictNotice draws a human to a campaign paused by a quarantine that orphaned later-wave dependents", () => {
   const notice = strandedConflictNotice("acme", 1, [{ target: "640", removed: ["640", "701"], dropped: ["701"] }], "main");
   // Routed to the alerting channel — a paused campaign demands a human, like a wave-park.
@@ -227,6 +245,7 @@ test("no notice builder renders a retired word — the settled vocabulary reache
     campaignFailedNotice("acme", 3, ["101"], ["102"], "main"),
     strandedConflictNotice("acme", 1, [{ target: "640", removed: ["640", "701"], dropped: ["701"] }], "main"),
     conflictParkedNotice("acme", 1, ["640"], ["101"], "main"),
+    memberParkedNotice("acme", 2, ["102"], ["101"], "main"),
     autoPruneNotice("acme", 1, [{ target: "640", removed: ["640", "701"], dropped: ["701"] }]),
   ];
   for (const n of built) assert.ok(!RETIRED_IN_NOTICES.test(n.text), `retired word in: ${n.text}`);
@@ -1346,6 +1365,9 @@ test("Gate 1 (ADR 0017): a per-issue park drains its wave, merges the greens, th
   assert.ok(notice, "a campaignParkedNotice was enqueued for the operator");
   assert.equal(notice?.category, "failure");
   assert.ok(notice?.text.includes("101"), "the green stayed merged on the base");
+  // It names the member awaiting a human — not the red-base wording (the base gated green).
+  assert.ok(notice?.text.includes("#102"), "the parked member is named");
+  assert.ok(!/gated red/i.test(notice?.text ?? ""), `member park told as a red base: ${notice?.text}`);
 
   // No wave-done closed the wave — it stays the in-flight parked wave, not a completed one.
   assert.ok(!events.some((e) => e.event === "wave-done"), "the parked wave is not logged done");
@@ -1579,6 +1601,7 @@ test("Gate 2 unchanged: an all-green wave whose combined base gates red still wa
   assert.ok(!spawned.includes("201"), "no succeeding wave starts on a red base");
   const notice = listOutbox(cfg).find((r) => r.event === "campaign-parked");
   assert.ok(notice, "the existing campaignParkedNotice still goes out");
+  assert.ok(/gated red/i.test(notice?.text ?? ""), "the red base keeps the red-base wording");
   // The loop logs exactly one campaign-parked for the red-base park; Gate 1 (the per-issue
   // park path) must not add a second — no issue parked here.
   assert.equal(

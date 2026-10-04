@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { dispatch, identityLine, parseArgs, type Command, type DispatchDeps } from "./cli-dispatch.ts";
 import { projectHasLiveCampaign, registerProject } from "./host-slots.ts";
 import { GraftRejectedError } from "./graft.ts";
+import { Refusal } from "./refusal.ts";
 
 // A spy that records each call's arguments and returns a canned value.
 function spy<T>(ret?: T) {
@@ -114,6 +115,12 @@ test("parseArgs reads tg-connect's --token/--chat (both `--flag value` and `--fl
 test("parseArgs maps an unknown mode, and no mode at all, to usage", () => {
   assert.deepEqual(parseArgs(["wat"]), { kind: "usage" });
   assert.deepEqual(parseArgs([]), { kind: "usage" });
+});
+
+test("parseArgs maps --help, -h and help to the help command", () => {
+  assert.deepEqual(parseArgs(["--help"]), { kind: "help" });
+  assert.deepEqual(parseArgs(["-h"]), { kind: "help" });
+  assert.deepEqual(parseArgs(["help"]), { kind: "help" });
 });
 
 test("parseArgs pulls the agent override out of `run`, leaving the task id as the positional", () => {
@@ -455,19 +462,28 @@ test("dispatch tg-connect resolves the base location from cfg.stateDir and runs 
   assert.deepEqual(exitCodes, []);
 });
 
-test("dispatch tg-connect exits non-zero when the collector returns not-ok", async () => {
+test("dispatch tg-connect sets exit 4 (refused) when the collector returns not-ok", async () => {
   const { deps, exitCodes } = makeDeps({
     runTgConnect: spy(Promise.resolve({ ok: false, written: false })) as any,
   });
   await dispatch({ kind: "tgConnect", token: undefined, chat: undefined, noVerify: false, force: false }, deps);
-  assert.deepEqual(exitCodes, [1]);
+  assert.deepEqual(exitCodes, [4]);
 });
 
-test("dispatch usage prints the usage and exits non-zero", async () => {
-  const { deps, logged, exitCodes } = makeDeps();
+test("dispatch usage reports the usage on stderr and sets exit 4 (an unknown mode is refused)", async () => {
+  const { deps, logged, errored, exitCodes } = makeDeps();
   await dispatch({ kind: "usage" }, deps);
-  assert.ok(logged.length >= 1);
-  assert.deepEqual(exitCodes, [1]);
+  assert.ok(errored.length >= 1, "usage goes to stderr");
+  assert.equal(logged.length, 0, "not on stdout");
+  assert.deepEqual(exitCodes, [4]);
+});
+
+test("dispatch help prints the usage on stdout and sets no exit code (help is not a refusal)", async () => {
+  const { deps, logged, errored, exitCodes } = makeDeps();
+  await dispatch({ kind: "help" }, deps);
+  assert.ok(logged.length >= 1, "help goes to stdout");
+  assert.equal(errored.length, 0, "not on stderr");
+  assert.deepEqual(exitCodes, [], "help sets no exit code (defaults to 0)");
 });
 
 test("dispatch run selects the agent, archives the leftover, runs the loop, maps green to exit 0", async () => {
@@ -490,18 +506,35 @@ test("dispatch run resumes a crashed session when spawned with one (design §7):
   assert.match(call[3].answerPrompt, /interrupted before it reported a result/);
 });
 
-test("dispatch run refuses with one line naming the project and exits non-zero when a campaign lease is live (§5 step 3, §8)", async () => {
-  const { deps, logged, exitCodes } = makeDeps({
+test("dispatch run refuses on stderr with one line naming the project and exits 4 (refused) when a campaign lease is live (§5 step 3, §8)", async () => {
+  const { deps, logged, errored, exitCodes } = makeDeps({
     projectHasLiveCampaign: spy(true) as any,
   });
   await dispatch({ kind: "run", agent: {}, args: ["436"], json: false }, deps);
   // Nothing is mutated: no leftover archived, no container started, no slot consumed.
   assert.equal((deps.archiveLeftoverRun as any).calls.length, 0, "the live log is not archived");
   assert.equal((deps.runLoop as any).calls.length, 0, "no second process runs the issue");
-  // One line naming the project, and a non-zero exit.
-  assert.equal(logged.length, 1, "exactly one refusal line");
-  assert.ok(/demo/.test(logged[0]), "the refusal names the project");
-  assert.ok(exitCodes.length === 1 && exitCodes[0] !== 0, "it exits non-zero");
+  // One line naming the project, on stderr (a refusal), and exit 4.
+  assert.equal(errored.length, 1, "exactly one refusal line, on stderr");
+  assert.equal(logged.length, 0, "nothing on stdout");
+  assert.ok(/demo/.test(errored[0]), "the refusal names the project");
+  assert.deepEqual(exitCodes, [4]);
+});
+
+test("dispatch run rejects with a Refusal when the task id is missing (a required-argument refusal)", async () => {
+  const { deps } = makeDeps();
+  await assert.rejects(
+    () => dispatch({ kind: "run", agent: {}, args: [], json: false }, deps),
+    (err: Error) => err instanceof Refusal && /run needs a task id/.test(err.message),
+  );
+});
+
+test("dispatch answer rejects with a Refusal when the task id/text is missing", async () => {
+  const { deps } = makeDeps();
+  await assert.rejects(
+    () => dispatch({ kind: "answer", taskId: undefined, text: [] }, deps),
+    (err: Error) => err instanceof Refusal && /answer needs a task id/.test(err.message),
+  );
 });
 
 test("dispatch run consults the lease with the host config dir and the project", async () => {
@@ -530,13 +563,13 @@ test("dispatch run is not refused by a standalone run's own lease — only a liv
 
   // A campaign lease for the same project, by contrast, does refuse the run.
   registerProject(configDir, "demo", 1, "campaign", 1, { pid: process.pid });
-  const { deps: deps2, logged } = makeDeps({
+  const { deps: deps2, errored } = makeDeps({
     host: { configDir } as any,
     projectHasLiveCampaign: projectHasLiveCampaign as any,
   });
   await dispatch({ kind: "run", agent: {}, args: ["611"], json: false }, deps2);
   assert.equal((deps2.runLoop as any).calls.length, 0, "a live campaign lease refuses the standalone run");
-  assert.ok(logged.some((l) => /campaign is already running/.test(l)), "the refusal names a live campaign");
+  assert.ok(errored.some((l) => /campaign is already running/.test(l)), "the refusal names a live campaign, on stderr");
 });
 
 test("dispatch run for a campaign's own child (VETINARI_CHILD) runs even while the lease is live", async () => {
@@ -850,17 +883,27 @@ test("dispatch graft on a real (non-dry-run) rejection prints the prose, emits t
   assert.deepEqual(withJson.exitCodes, [1]);
 });
 
-test("dispatch graft on a broken graft (a non-rejection throw) surfaces the message cleanly on stderr and exits non-zero — no stack-trace footer", async () => {
-  // A precondition throw ("no campaign", "settled", bad config) is NOT a rejection — it
-  // carries no closure. The operator (via the dashboard route lifting the child's last
-  // stderr line, #367) needs runGraft's sentence, not a Node stack ending in "Node.js vX",
-  // so dispatchGraft prints just the message to stderr and exits non-zero.
-  const broken = (): Promise<never> =>
-    Promise.reject(new Error("graft adds to an open campaign, but the latest one is settled — every member merged."));
-  const { deps, logged, errored, exitCodes } = makeDeps({ runGraft: (() => broken()) as unknown as DispatchDeps["runGraft"] });
+test("dispatch graft on a Refusal (a precondition throw) reports the message on stderr and exits 4 — no stack-trace footer", async () => {
+  // A precondition throw ("no campaign", "settled", bad config) is a Refusal, NOT a rejection —
+  // it carries no closure. The operator (via the dashboard route lifting the child's last stderr
+  // line, #367) needs runGraft's sentence, not a Node stack ending in "Node.js vX", so dispatchGraft
+  // prints just the message to stderr and exits 4 (refused), like every other refusal.
+  const refusing = (): Promise<never> =>
+    Promise.reject(new Refusal("graft adds to an open campaign, but the latest one is settled — every member merged."));
+  const { deps, logged, errored, exitCodes } = makeDeps({ runGraft: (() => refusing()) as unknown as DispatchDeps["runGraft"] });
   await dispatch({ kind: "graft", ids: ["640"], dryRun: false, json: false }, deps);
   assert.deepEqual(errored, ["graft adds to an open campaign, but the latest one is settled — every member merged."]);
-  assert.ok(!logged.some((l) => l.startsWith("graft-closure")), "a broken child prints no closure line");
+  assert.ok(!logged.some((l) => l.startsWith("graft-closure")), "a refused graft prints no closure line");
+  assert.deepEqual(exitCodes, [4]);
+});
+
+test("dispatch graft on an unexpected defect (a non-Refusal, non-rejection throw) keeps its clean-message exit-1 fallback", async () => {
+  // Genuine defects keep today's graft behavior (message on stderr, exit 1) — this ticket only
+  // moves refusals to exit 4; how defects are reported is unchanged.
+  const broken = (): Promise<never> => Promise.reject(new Error("unexpected kaboom"));
+  const { deps, errored, exitCodes } = makeDeps({ runGraft: (() => broken()) as unknown as DispatchDeps["runGraft"] });
+  await dispatch({ kind: "graft", ids: ["640"], dryRun: false, json: false }, deps);
+  assert.deepEqual(errored, ["unexpected kaboom"]);
   assert.deepEqual(exitCodes, [1]);
 });
 

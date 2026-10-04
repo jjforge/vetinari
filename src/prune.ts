@@ -15,6 +15,7 @@
  */
 
 import { assertProjectQualifier, repoForProject, resolveProjectRoot, type ResolvedConfig } from "./config.ts";
+import { Refusal } from "./refusal.ts";
 import { describeBranchPurge, purgeBranches, type BranchPurge, type PurgeTarget } from "./merge.ts";
 import type { HostBudget } from "./host-slots.ts";
 import { normalize } from "./issue-id.ts";
@@ -363,11 +364,11 @@ export async function runPrune(
   deps: PruneDeps = defaultPruneDeps,
 ): Promise<RunPruneResult> {
   if (!target)
-    throw new Error(
+    throw new Refusal(
       'prune needs an issue: `prune 640` prunes the running campaign, `prune 640 "611 640" "623 701"` launches a reduced one.',
     );
   if (!cfg.blockedBy)
-    throw new Error(
+    throw new Refusal(
       'prune needs a "blockedBy" resolver in your config — e.g. blockedBy: githubBlockedBy("owner/repo").',
     );
   const blockedBy = cfg.blockedBy;
@@ -398,12 +399,12 @@ export async function runPrune(
   // event the loop honors at its next wave boundary (ADR 0005).
   const events = deps.readEventLog(cfg);
   if (!campaignStarted(events))
-    throw new Error(
+    throw new Refusal(
       "prune <issue> prunes an open campaign, but no campaign to prune has been launched here. To launch a reduced campaign from a plan you supply, pass the waves: " +
         'prune <issue> "611 640" "623 701".',
     );
   if (campaignSettled(events))
-    throw new Error(
+    throw new Refusal(
       "prune <issue> adjusts an open campaign, but the latest one is settled — every member merged, nothing to prune. To launch a reduced campaign from a plan you supply, pass the waves: " +
         'prune <issue> "611 640" "623 701".',
     );
@@ -545,7 +546,7 @@ export async function computePrune(waves: string[][], target: string, blockedByO
   const tgt = normalize(target);
 
   if (!campaign.has(tgt)) {
-    throw new Error(`prune target #${tgt} is not in the campaign (${[...campaign].map((i) => `#${i}`).join(", ")}).`);
+    throw new Refusal(`prune target #${tgt} is not in the campaign (${[...campaign].map((i) => `#${i}`).join(", ")}).`);
   }
 
   // Each issue's blockers, restricted to the campaign — edges to issues we are

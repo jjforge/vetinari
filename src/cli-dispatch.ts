@@ -38,6 +38,7 @@ import type { readEventLog } from "./event-log.ts";
 import { campaignStarted, campaignState, extractParkedDetails, issueLifecycle, reduceCampaign, waveState, type ReducedCampaign } from "./dashboard-model.ts";
 import { parkRecoveryMove, REDRIVE_ONLY_REASONS } from "./gateway.ts";
 import { makeReporter } from "./report.ts";
+import { Refusal } from "./refusal.ts";
 
 const USAGE = renderUsage();
 
@@ -130,6 +131,7 @@ export type Command =
   | { kind: "clear" }
   | { kind: "tgTest" }
   | { kind: "tgConnect"; token?: string; chat?: string; noVerify: boolean; force: boolean }
+  | { kind: "help" }
   | { kind: "usage" };
 
 /**
@@ -141,6 +143,11 @@ export type Command =
 export function parseArgs(argv: string[]): Command {
   const [mode, ...rest] = argv;
   switch (mode) {
+    case "--help":
+    case "-h":
+    case "help":
+      // Help is not a refusal (the handler): it prints usage on stdout and exits 0.
+      return { kind: "help" };
     case "build":
       return { kind: "build", baseline: !rest.includes("--no-baseline") };
     case "baseline":
@@ -382,7 +389,7 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
       // Lock in the agent selection first (ADR 0016): validates it and preflights
       // its credentials before the container, and stamps VETINARI_AGENT.
       deps.selectAgent(cfg, cmd.agent);
-      if (!cmd.args[0]) throw new Error("run needs a task id");
+      if (!cmd.args[0]) throw new Refusal("run needs a task id");
       // A standalone `run` refuses while a campaign process for the project is live
       // (design §5 step 3, §8): that campaign owns the issue and its worktree, so a second
       // process must not run it — it would archive the campaign's live log out from under it
@@ -392,8 +399,8 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
       // A campaign's OWN child `run` (VETINARI_CHILD) is exempt: its parent holds the lease
       // FOR it, so it must run (the archive-leftover step already skips children too).
       if (!deps.isCampaignChild && deps.projectHasLiveCampaign(deps.host.configDir, cfg.project)) {
-        deps.log(`a campaign is already running for ${cfg.project} — it owns this issue; run refused.`);
-        deps.setExitCode(1);
+        deps.error(`a campaign is already running for ${cfg.project} — it owns this issue; run refused.`);
+        deps.setExitCode(4);
         return;
       }
       enableJson(cmd.json);
@@ -515,12 +522,18 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
         { token: cmd.token, chat: cmd.chat, noVerify: cmd.noVerify, force: cmd.force },
         { isTTY: deps.isTTY, ask: deps.ask, send: deps.tgSend, log: deps.log, label: cfg.project },
       );
-      if (!result.ok) deps.setExitCode(1);
+      if (!result.ok) deps.setExitCode(4);
+      return;
+    }
+    case "help": {
+      // Help is not a refusal: usage on stdout, no exit code set (defaults to 0).
+      deps.log(USAGE);
       return;
     }
     case "usage": {
-      deps.log(USAGE);
-      deps.setExitCode(1);
+      // An unknown mode is a usage refusal: usage on stderr, exit 4.
+      deps.error(USAGE);
+      deps.setExitCode(4);
       return;
     }
   }
@@ -571,7 +584,7 @@ async function dispatchCampaign(
   }
 
   if (!cmd.positional.length)
-    throw new Error(
+    throw new Refusal(
       "campaign needs at least one issue id or label: campaign 436 611 640, campaign ready-for-agent (or --resume to continue a paused campaign)",
     );
 
@@ -585,7 +598,7 @@ async function dispatchCampaign(
       if (ids.length) batches.push(ids);
     }
     if (!batches.length)
-      throw new Error(
+      throw new Refusal(
         "campaign --override: no issues to run — every wave expanded to nothing.",
       );
     if (cmd.dryRun) {
@@ -741,10 +754,17 @@ async function dispatchGraft(
       deps.setExitCode(1);
       return;
     }
-    // A broken graft — a precondition throw (no campaign, settled, degraded config), not a
+    // A precondition throw (no campaign, settled, degraded config) is a Refusal — not a
     // whole-batch rejection, so it carries no closure. Surface its message on stderr as a
-    // clean last line (the dashboard route lifts it, #367) and exit non-zero, rather than
-    // letting it bubble to an unhandled rejection whose stack buries the sentence.
+    // clean last line (the dashboard route lifts it, #367) and exit 4 (refused), like every
+    // other refusal, rather than letting it bubble to a stack that buries the sentence.
+    if (err instanceof Refusal) {
+      deps.error(err.message);
+      deps.setExitCode(4);
+      return;
+    }
+    // An unexpected defect keeps graft's existing clean-message, exit-1 fallback (this ticket
+    // only moves refusals to exit 4; how defects are reported is out of scope).
     deps.error(err instanceof Error ? err.message : String(err));
     deps.setExitCode(1);
     return;
@@ -797,7 +817,7 @@ async function dispatchAnswer(
 ): Promise<void> {
   const { cfg, host } = deps;
   if (!cmd.taskId || !cmd.text.length)
-    throw new Error('answer needs a task id and text: answer <task> "<answer>"');
+    throw new Refusal('answer needs a task id and text: answer <task> "<answer>"');
   const taskId = cmd.taskId;
 
   // Same preflight as `run` (design §3 step 1, §15): validate the provider and check its

@@ -25,6 +25,7 @@ import {
 } from "./state.ts";
 import { strandedByConflict, resumeIndex, type StrandedImpact } from "./prune.ts";
 import { notice, type Notice } from "./notice.ts";
+import { Refusal } from "./refusal.ts";
 import { tgSend, tgWaitReply, type TgConn } from "./telegram.ts";
 import { hostSecretsPath, tgConnForBaseLocation } from "./registry.ts";
 import { issueNameFromTask, readEventLog, reduceCampaign } from "./status.ts";
@@ -778,7 +779,7 @@ export async function campaign(
   // base branch the campaign would merge into, and build on, the wrong place.
   const branch = deps.currentBranch();
   if (branch !== cfg.baseBranch) {
-    throw new Error(
+    throw new Refusal(
       `campaign merges into the checked-out branch, but the working tree is on "${branch}", not baseBranch "${cfg.baseBranch}". Run \`git checkout ${cfg.baseBranch}\` first (a clean tree — the merges land here).`,
     );
   }
@@ -810,7 +811,7 @@ export async function campaign(
     // the plan is whatever the running campaign's `campaign-start` (minus any prune) reduced to.
     const reduced = reduceCampaign(readEventLog(cfg));
     if (!reduced.waves.length)
-      throw new Error(
+      throw new Refusal(
         "redrive: no campaign found in the event log to pick up. Launch one with `campaign <ids…>`.",
       );
     titles = Object.fromEntries(reduced.titles);
@@ -1114,7 +1115,7 @@ export async function tgTest(cfg: ResolvedConfig, conn: TgConn) {
     `🔧 ${cfg.project} orchestrator test — reply to this message and I'll echo it back.`,
   );
   if (msgId == null)
-    throw new Error(
+    throw new Refusal(
       "sendMessage failed — token rejected or chat id wrong (see telegram-send-failed in the log)",
     );
   console.log(`sent (message_id ${msgId}); waiting for your reply…`);
@@ -1133,7 +1134,7 @@ export async function tgTest(cfg: ResolvedConfig, conn: TgConn) {
 export function requireTelegram(mode: string, baseLocation: string): TgConn {
   const conn = tgConnForBaseLocation(baseLocation);
   if (!conn) {
-    throw new Error(
+    throw new Refusal(
       `${mode} needs VETINARI_TELEGRAM_BOT_TOKEN and VETINARI_TELEGRAM_CHAT_ID in ${hostSecretsPath(baseLocation)}`,
     );
   }

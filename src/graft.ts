@@ -14,6 +14,7 @@
  * the observable effects without re-parsing prose.
  */
 import { assertProjectQualifier, repoForProject, type ResolvedConfig } from "./config.ts";
+import { Refusal } from "./refusal.ts";
 import { isIssueToken, normalize } from "./issue-id.ts";
 import {
   applyGraft,
@@ -172,9 +173,9 @@ export async function runGraft(
 ): Promise<GraftResult> {
   const normalized = ids.map(normalize).filter(Boolean);
   if (!normalized.length)
-    throw new Error("graft needs at least one issue id: graft 640 655");
+    throw new Refusal("graft needs at least one issue id: graft 640 655");
   if (!cfg.blockedBy)
-    throw new Error(
+    throw new Refusal(
       'graft needs a "blockedBy" resolver in your config — e.g. blockedBy: githubBlockedBy("owner/repo").',
     );
 
@@ -185,12 +186,12 @@ export async function runGraft(
 
   const events = deps.readEventLog(cfg);
   if (!campaignStarted(events))
-    throw new Error(
+    throw new Refusal(
       "graft adds to an open campaign, but no campaign to graft into has been launched here. " +
         "Launch one with `campaign <ids…>`, or pick a paused one back up with `redrive`.",
     );
   if (campaignSettled(events))
-    throw new Error(
+    throw new Refusal(
       "graft adds to an open campaign, but the latest one is settled — every member merged, nothing to graft into. " +
         "Launch a new campaign with `campaign <ids…>`.",
     );

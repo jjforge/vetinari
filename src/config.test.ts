@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { Refusal } from "./refusal.ts";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -362,6 +363,7 @@ test("resolveAgentSelection rejects an unknown provider naming the supported set
   assert.throws(
     () => resolveAgentSelection(undefined, { provider: "gpt" }),
     (e: Error) => {
+      assert.ok(e instanceof Refusal, "an unknown provider is a refusal");
       assert.match(e.message, /gpt/);
       assert.match(e.message, /claude, pi, codex/);
       return true;
@@ -483,7 +485,10 @@ test("resolveProjectRoot refuses outside a git repo, naming the directory", () =
   const notARepo = realpathSync(mkdtempSync(join(tmpdir(), "vetinari-norepo-")));
   assert.throws(
     () => resolveProjectRoot(notARepo),
-    (e: Error) => e.message.includes("not a git repository") && e.message.includes(notARepo),
+    (e: Error) =>
+      e instanceof Refusal &&
+      e.message.includes("not a git repository") &&
+      e.message.includes(notARepo),
   );
 });
 
@@ -508,7 +513,9 @@ test("assertProjectQualifier allows a matching qualifier and the bare (no-qualif
 test("assertProjectQualifier refuses a qualifier naming a different project", () => {
   assert.throws(
     () => assertProjectQualifier("vetinari", "jjforge", "jjforge/vetinari"),
-    /refusing: this project is "jjforge", but the qualifier names "vetinari"/,
+    (e: Error) =>
+      e instanceof Refusal &&
+      /refusing: this project is "jjforge", but the qualifier names "vetinari"/.test(e.message),
   );
 });
 

@@ -256,6 +256,79 @@ Once a run is fully idle, its already-sent outbox records are cleared as part of
 archiving; a record left **unsent** is deliberately kept so a message emitted
 while the gateway was down is still sent when it comes back.
 
+## Exposing the dashboard
+
+The dashboard — `vetinari status`, or the one the gateway hosts — is
+**unauthenticated by design** ([ADR 0021](adr/0021-dashboard-is-unauthenticated-private-network-only.md)).
+Several of its routes start a process: a reply to a parked issue resumes an agent
+that holds commit rights with the text you typed, and prune, graft and redrive
+reshape a campaign. Anyone who can reach its port can do the same. So:
+
+- **Never bind it to a public interface.** It binds `127.0.0.1` by default
+  (`status --host`, `VETINARI_STATUS_HOST`, `VETINARI_GATEWAY_STATUS_HOST`).
+- **Reach it remotely only over a private overlay network** (Tailscale,
+  WireGuard) **or behind an authenticating reverse proxy** you run. There is no
+  token or login to fall back on.
+
+Binding anything other than loopback (`127.0.0.0/8`, `::1`, `localhost`) prints
+a warning line after the URL line. The bind still goes ahead; the line is a
+reminder, and under the gateway it lands in its stdout (the systemd journal), not
+`host.jsonl`.
+
+### What the server refuses
+
+Even on loopback, a page open in your browser could otherwise reach the dashboard.
+Every request passes two checks before any route runs; either failure is a `403`
+with a one-line plain-text reason:
+
+- **Host.** The `Host` header, port ignored, must be an IP address literal
+  (`127.0.0.1`, `[::1]`, `100.64.1.2`), `localhost`, or a name listed in
+  **`VETINARI_STATUS_ALLOWED_HOSTS`** — comma-separated, case-insensitive, read by
+  both `status` and the gateway. This is what defeats DNS rebinding, which always
+  arrives under a DNS name.
+- **Origin.** A browser's `Origin` header, when present (`null` included), must be
+  `http://<Host>` or `https://<Host>` for the request's own `Host`, port included.
+  This is what stops another site's page POSTing to `/answer`. A request with no
+  `Origin` — curl, a script — passes.
+
+### Over a tailnet
+
+Bind the dashboard to the tailnet address, or to `0.0.0.0` on a host whose only
+non-loopback reachability is the tailnet:
+
+```bash
+npx vetinari status --host 0.0.0.0
+# or, for the gateway's dashboard:
+VETINARI_GATEWAY_STATUS_HOST=0.0.0.0 npx vetinari gateway
+```
+
+Opening it by tailnet IP (`http://100.x.y.z:8765`) needs nothing more. Opening it
+by MagicDNS name needs that name listed:
+
+```bash
+VETINARI_STATUS_ALLOWED_HOSTS=myhost.tailnet.ts.net
+```
+
+The gateway's unit carries no environment of its own, and `gateway install`
+rewrites it, so set the variables in a drop-in, which survives a re-install:
+
+```bash
+systemctl --user edit vetinari-gateway
+# [Service]
+# Environment=VETINARI_GATEWAY_STATUS_HOST=0.0.0.0
+# Environment=VETINARI_STATUS_ALLOWED_HOSTS=myhost.tailnet.ts.net
+vetinari gateway restart
+```
+
+### Behind a reverse proxy
+
+A reverse proxy that authenticates you is the other supported path. It must
+**pass the original `Host` header through** to the dashboard — the Origin check
+compares the browser's `Origin` against it — and that public name must be listed
+in `VETINARI_STATUS_ALLOWED_HOSTS`. A proxy that rewrites `Host` to `127.0.0.1`
+will see every browser `POST` refused, because the browser's `Origin` names the
+proxy's host, not the rewritten one.
+
 ## Capping containers on the host
 
 Two knobs bound how many agent containers a machine runs at once (design §8):

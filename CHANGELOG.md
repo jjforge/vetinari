@@ -20,11 +20,24 @@ Within a milestone each bold section label appears at most once.
 
 ### Log-review skill and a code formatter — October 4, 2026
 
+**Breaking changes:**
+- [api] The exported `github*` resolvers (`githubBlockedBy`, `githubFetchTask`, `githubIssuesByLabel`, `githubMarkPendingVerify`, `githubIssueComment`, `githubFindingReporter`) now return promises, and their injectable `run` is `(args) => Promise<string>` instead of `(args) => string`. The `VetinariConfig` seams are unchanged — they already accept a promise — so a hand-written synchronous `blockedBy`/`fetchTask` in a project config keeps working (#368).
+
 **New features:**
 - [ops] `/review-logs` operator skill: reads the project's own `.vetinari.local/logs/` (`digest.sh` boils event, activity and gate logs down to per-task outcomes, turns, tool calls, minutes, failing gates and the files agents touch most) and hunts for where agents struggled — stops, recurring red gates, hotspot files, churn, orientation every agent repeats, brief and doc faults agents report in passing — then checks each against today's code and the tracker and reports ranked, evidence-backed changes to the project. It files only the ones you choose (#412–#418 came from its first run).
+- [user] A `vetinari run` that gets SIGINT or SIGTERM now stops its container, keeps its work, and parks itself with a new `stopped` park reason instead of dying with no record — it exits `2`. This covers a standalone run and a campaign's child run. A `stopped` park is never announced on Telegram and cannot be answered: `vetinari run <id>` continues a standalone run, a redrive continues a campaign (#431).
+- [internal] Added `stopped` to the `ParkReason` enum and every place that lists park reasons (gateway recovery/announce/index, the dashboard sheet's fix-forward map and issue moves, the wave-park fold, and the docs). `runLoop` installs a SIGINT/SIGTERM handler for its own life via a new `LoopDeps.onStop` seam, and `DispatchDeps.exit` lets a stopped `run` exit `2` without waiting on the abandoned agent call (#431).
 
 **Improvements:**
 - [internal] The codebase is formatted with Prettier (pinned dev dependency, `.prettierrc.json` with a 140-column width, the closest to the existing style): `npm run format` writes, `npm run format:check` checks, and `CLAUDE.md` names the command, so campaign agents stop hunting for a formatter that wasn't there. The whole tree was reformatted once (#414).
+- [ops] The default agent prompt (`prompts/tdd.md`) now lists the valid changelog `section:` labels and the four audience tags inline, instead of pointing at `docs/changelog-conventions.md` — which does not exist in consuming projects, so the pointer led nowhere there and cost an extra lookup on almost every run here. A drift test pins the prompt's label list to `SECTION_ORDER` (#415).
+- [ops] `/check-brief` now flags line-number cites in a brief (they go stale before the run, suggesting a symbol-naming rewrite), reports as a blocker a brief that builds on an open issue with no native `blocked_by` edge (read from `gh api .../dependencies/blocked_by`), and names README/`docs/*` files the change must update that the `Touches:` marker leaves out. `docs/issue-conventions.md` and `/fileset` now say doc files a change updates belong on the `Touches:` line like any source file, so co-wave tickets don't collide on an unmarked doc at merge (#418).
+
+**Bug fixes:**
+- [ops] The wave changelog-collect commit now stages only `CHANGELOG.md` and the fragments it collected, so a campaign running alongside your work can no longer swallow unrelated edits in your checkout (#364).
+- [user] `graft`, campaign planning, `prune` and the dashboard's graft/prune previews now make their per-id GitHub calls concurrently. The shipped `gh` resolvers ran synchronously, so a `Promise.all` fan-out over them actually ran one `gh` after another — a 12-id graft took ~7s (24 serial `gh` invocations). The default runner is now promise-based, so the fan-outs overlap as written (#368).
+- [ops] vetinari's own project config now wires `reportFinding`, so the harvest turn runs on a green campaign run and incidental findings are filed as `jjforge/vetinari` issues (labelled `needs-triage`, `P2`). It was never set, so the loop skipped the harvest entirely and agents' findings died with the sandbox — the container has no `gh` login for them to fall back on (#413).
+- [user] `campaign <label>` now considers every open issue carrying the label. It used to select at most 30, because the label lookup never raised `gh issue list`'s default limit, so a larger label silently lost its oldest issues while the plan still said "0 unreachable". The lookup now fetches up to 1000, and a label that fills that limit prints a line saying some issues may be missing (#434).
 
 ### Collected changes — October 4, 2026
 

@@ -314,6 +314,17 @@ An optional human label for a run, passed as `campaign --name` and recorded on
 for. Absent, a run falls back to its timestamp.
 _Avoid_: run title.
 
+### Changelog
+
+**Fragment**:
+A `.md` file in `changelog.d/` with at least one `section: <label>` line starting at
+column 0 — an indented `section:` (a README's code-block example) is not a header.
+A collect folds only fragments that contribute a bullet, and deletes only those. Every
+other file is left in place: a **near-miss** — bullets with no `section:` header, or a
+`section:` header with no bullets — is named in the collect's output; anything else
+(a prose README) is left alone silently.
+_Avoid_: entry file, changelog note.
+
 ### CLI outcomes
 
 **Refusal**:

@@ -701,6 +701,29 @@ test("campaign prints human-readable plan/wave/complete lines and NO event JSON 
   assert.equal(jsonLeaked, false, "no event JSON reaches stdout without --json");
 });
 
+test("campaign prints the changelog near-miss line through the reporter even when the wave collected nothing (#357)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-report-nearmiss-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const prev = process.env.VETINARI_JSON;
+  delete process.env.VETINARI_JSON;
+  const deps: CampaignDeps = {
+    ...gitFreeDeps(cfg, async () => 0),
+    collectChangelog: () => ({
+      collected: [],
+      committed: false,
+      nearMisses: [{ name: "90.md", reason: "bullets but no section: header" }],
+    }),
+  };
+  const lines = await captureLines(() => campaign(cfg, [["101"]], host, "vocab", {}, deps));
+  if (prev !== undefined) process.env.VETINARI_JSON = prev;
+  assert.ok(
+    lines.some((l) => l.includes("wave 1/1") && l.includes("90.md (bullets but no section: header)")),
+    `near-miss line printed:\n${lines.join("\n")}`,
+  );
+  assert.ok(!lines.some((l) => l.includes("collected changelog fragments")), "nothing was committed");
+});
+
 test("campaign under --json streams the raw event stream and suppresses the human lines (#299)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-report-json-"));
   const cfg = harnessCfg(dir);

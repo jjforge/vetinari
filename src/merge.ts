@@ -5,7 +5,7 @@ import type { ResolvedConfig } from "./config.ts";
 import type { Logger } from "./log.ts";
 import { runGates } from "./gate.ts";
 import { makeSandbox } from "./sandbox.ts";
-import { applyCollect, foldFragments, formatMilestoneDate, FRAGMENT_DIR } from "./changelog.ts";
+import { applyCollect, foldFragments, formatMilestoneDate, FRAGMENT_DIR, type FragmentNearMiss } from "./changelog.ts";
 import { listParkedIn, writeParkedRecord } from "./state.ts";
 import { readEventLog } from "./event-log.ts";
 import { reduceCampaign } from "./dashboard-model.ts";
@@ -201,13 +201,16 @@ export async function integrateGreens(
  * The fold runs only when the project keeps a `CHANGELOG.md` (design §12). A project
  * with none is opting out: its fragments are left on the base and one line is logged,
  * rather than a changelog being materialised no one asked for.
+ *
+ * `nearMisses` names the `changelog.d/` files that looked like fragments but folded
+ * nothing (left in place, never committed); the campaign loop prints them.
  */
 export function collectWaveChangelog(
   waveIndex: number,
   log: Logger,
   root: string = process.cwd(),
-): { collected: string[]; committed: boolean } {
-  const { collected, skipped } = applyCollect({
+): { collected: string[]; committed: boolean; nearMisses?: FragmentNearMiss[] } {
+  const { collected, skipped, nearMisses } = applyCollect({
     fragmentsDir: join(root, FRAGMENT_DIR),
     changelogPath: join(root, "CHANGELOG.md"),
     today: formatMilestoneDate(new Date()),
@@ -218,8 +221,8 @@ export function collectWaveChangelog(
     return { collected, committed: false };
   }
   if (!collected.length) {
-    log.log("campaign-changelog-empty", { wave: waveIndex });
-    return { collected, committed: false };
+    log.log("campaign-changelog-empty", { wave: waveIndex, nearMisses });
+    return { collected, committed: false, nearMisses };
   }
   // Stage only what the fold touched — never `git add -A`, which would sweep any
   // unrelated edit in the operator's checkout into this commit (issue #364). The
@@ -231,8 +234,8 @@ export function collectWaveChangelog(
   // deleted untracked path exits 128 — so tolerate the failure rather than abort.
   for (const name of collected) gitTry(["-C", root, "add", "-A", "--", join(FRAGMENT_DIR, name)]);
   execFileSync("git", ["-C", root, "commit", "-m", `campaign: collect changelog (wave ${waveIndex + 1})`], { encoding: "utf8" });
-  log.log("campaign-changelog-collected", { wave: waveIndex, collected });
-  return { collected, committed: true };
+  log.log("campaign-changelog-collected", { wave: waveIndex, collected, nearMisses });
+  return { collected, committed: true, nearMisses };
 }
 
 /**
@@ -429,11 +432,12 @@ export function describeTidy(project: string, plan: TidyPlan): string {
  * GC each provably-merged branch (removing its worktree first, then pruning), and
  * clear the stale parked records. Only ever called on `--apply`; the changelog fold
  * and fragment deletions are left uncommitted for the human to review, mirroring
- * `changelog collect`.
+ * `changelog collect`. Returns the near-miss fragments the fold left in place.
  */
-export function applyTidy(target: TidyTarget, plan: TidyPlan): void {
+export function applyTidy(target: TidyTarget, plan: TidyPlan): FragmentNearMiss[] {
+  let nearMisses: FragmentNearMiss[] = [];
   if (plan.fold.length) {
-    foldFragments(
+    ({ nearMisses } = foldFragments(
       {
         fragmentsDir: target.fragmentsDir,
         changelogPath: target.changelogPath,
@@ -441,12 +445,13 @@ export function applyTidy(target: TidyTarget, plan: TidyPlan): void {
         title: "Collected changes",
       },
       plan.fold.map((id) => `${id}.md`),
-    );
+    ));
   }
 
   purgeBranches(target, plan.deleteBranches);
 
   for (const id of plan.clearParked) rmSync(join(target.parkedDir, `${id}.json`), { force: true });
+  return nearMisses;
 }
 
 /** The git edge a branch/worktree true-drop acts in — the fields `purgeBranches` needs. */

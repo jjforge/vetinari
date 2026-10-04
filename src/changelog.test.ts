@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { applyCollect, collectFragments, foldFragments, formatMilestoneDate, parseFragment } from "./changelog.ts";
 
 test("parseFragment reads a single section and its bullets", () => {
@@ -34,9 +36,23 @@ test("parseFragment splits multiple section blocks in one fragment", () => {
   ]);
 });
 
-test("parseFragment tolerates blank lines and trailing whitespace around the section header", () => {
-  const frag = ["", "  section:   Improvements  ", "- [user] tidier output (#7).", ""].join("\n");
+test("parseFragment tolerates blank lines and trailing whitespace around a column-0 section header", () => {
+  const frag = ["", "section:   Improvements  ", "- [user] tidier output (#7).", ""].join("\n");
   assert.deepEqual(parseFragment(frag), [{ section: "Improvements", bullets: ["- [user] tidier output (#7)."] }]);
+});
+
+test("parseFragment ignores a section: line with leading whitespace — a README's indented example is not a fragment", () => {
+  const readme = [
+    "# changelog.d",
+    "",
+    "Each task writes one fragment here, in this format:",
+    "",
+    "    section: Bug fixes",
+    "    - [user] What changed, and what it means for whoever it reaches (#123).",
+    "",
+    "Fold by hand with `npx vetinari changelog collect`.",
+  ].join("\n");
+  assert.deepEqual(parseFragment(readme), []);
 });
 
 test("parseFragment on a fragment with no section header yields nothing", () => {
@@ -264,4 +280,101 @@ test("applyCollect is a no-op when there are no fragments", () => {
 
   assert.deepEqual(result.collected, []);
   assert.equal(readFileSync(changelog, "utf8"), before); // untouched
+});
+
+test("applyCollect folds only real fragments, leaves every other file byte-for-byte, and names the near-misses", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-collect-mixed-"));
+  const fragDir = join(dir, "changelog.d");
+  mkdirSync(fragDir);
+  const changelog = join(dir, "CHANGELOG.md");
+  writeFileSync(changelog, "# Changelog\n\n### Older — August 1, 2026\n\n**Bug fixes:**\n- [user] old (#1)\n");
+  writeFileSync(join(fragDir, "42.md"), "section: New features\n- [user] feature from 42 (#42).\n");
+  const readme = [
+    "# changelog.d",
+    "",
+    "One fragment per task, in this format:",
+    "",
+    "    section: Bug fixes",
+    "    - [user] What changed (#123).",
+    "",
+    "Fold by hand with `npx vetinari changelog collect`.",
+    "",
+  ].join("\n");
+  const headerless = "- [internal] headerless bullet (#90).\n";
+  const headerOnly = "section: Bug fixes\n\n";
+  writeFileSync(join(fragDir, "README.md"), readme);
+  writeFileSync(join(fragDir, "90.md"), headerless);
+  writeFileSync(join(fragDir, "91.md"), headerOnly);
+
+  const result = applyCollect({ fragmentsDir: fragDir, changelogPath: changelog, today: "August 26, 2026", title: "Wave collection" });
+
+  assert.deepEqual(result.collected, ["42.md"]);
+  assert.equal(existsSync(join(fragDir, "42.md")), false);
+  assert.equal(readFileSync(join(fragDir, "README.md"), "utf8"), readme);
+  assert.equal(readFileSync(join(fragDir, "90.md"), "utf8"), headerless);
+  assert.equal(readFileSync(join(fragDir, "91.md"), "utf8"), headerOnly);
+  assert.equal(
+    readFileSync(changelog, "utf8"),
+    "# Changelog\n\n### Wave collection — August 26, 2026\n\n**New features:**\n- [user] feature from 42 (#42).\n\n### Older — August 1, 2026\n\n**Bug fixes:**\n- [user] old (#1)\n",
+  );
+  assert.deepEqual(result.nearMisses, [
+    { name: "90.md", reason: "bullets but no section: header" },
+    { name: "91.md", reason: "section: header but no bullets" },
+  ]);
+});
+
+test("foldFragments never deletes a named file that contributed no bullets, and names it when it is a near-miss", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-fold-nearmiss-"));
+  const fragDir = join(dir, "changelog.d");
+  mkdirSync(fragDir);
+  const changelog = join(dir, "CHANGELOG.md");
+  writeFileSync(changelog, "# Changelog\n\n### Older — August 1, 2026\n\n**Bug fixes:**\n- [user] old (#1)\n");
+  writeFileSync(join(fragDir, "90.md"), "- [internal] headerless bullet (#90).\n");
+  writeFileSync(join(fragDir, "91.md"), "Just some prose, no fragment here.\n");
+  const before = readFileSync(changelog, "utf8");
+
+  const result = foldFragments({ fragmentsDir: fragDir, changelogPath: changelog, today: "August 26, 2026", title: "Collected changes" }, [
+    "90.md",
+    "91.md",
+  ]);
+
+  assert.deepEqual(result.collected, []);
+  assert.deepEqual(result.nearMisses, [{ name: "90.md", reason: "bullets but no section: header" }]);
+  assert.equal(readFileSync(changelog, "utf8"), before); // nothing folded
+  assert.equal(existsSync(join(fragDir, "90.md")), true);
+  assert.equal(existsSync(join(fragDir, "91.md")), true);
+});
+
+// Spawn the real CLI so `changelog collect`'s printed output is exercised end to end.
+const CLI = fileURLToPath(new URL("./cli.mts", import.meta.url));
+const TSX = fileURLToPath(new URL("../node_modules/.bin/tsx", import.meta.url));
+
+test("changelog collect prints the near-miss line alongside its usual output", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-collect-cli-"));
+  const fragDir = join(dir, "changelog.d");
+  mkdirSync(fragDir);
+  writeFileSync(join(dir, "CHANGELOG.md"), "# Changelog\n\n### Older — August 1, 2026\n\n**Bug fixes:**\n- [user] old (#1)\n");
+  writeFileSync(join(fragDir, "42.md"), "section: New features\n- [user] feature from 42 (#42).\n");
+  writeFileSync(join(fragDir, "91.md"), "section: Bug fixes\n");
+
+  const run = spawnSync(TSX, [CLI, "changelog", "collect"], { cwd: dir, encoding: "utf8" });
+
+  assert.equal(run.status, 0, run.stderr);
+  assert.deepEqual(run.stdout.trim().split("\n"), [
+    "collected 1 fragment(s) into CHANGELOG.md: 42.md",
+    "changelog.d: left in place, not folded — 91.md (section: header but no bullets)",
+  ]);
+});
+
+test("changelog collect prints no near-miss line when there are none", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-collect-cli-clean-"));
+  const fragDir = join(dir, "changelog.d");
+  mkdirSync(fragDir);
+  writeFileSync(join(dir, "CHANGELOG.md"), "# Changelog\n");
+  writeFileSync(join(fragDir, "README.md"), "Fragments go here.\n");
+
+  const run = spawnSync(TSX, [CLI, "changelog", "collect"], { cwd: dir, encoding: "utf8" });
+
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(run.stdout, "nothing to collect — changelog.d/ has no fragments.\n");
 });

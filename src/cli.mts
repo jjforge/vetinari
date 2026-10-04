@@ -14,7 +14,7 @@ import {
   type ResolvedConfig,
 } from "./config.ts";
 import { dispatch, parseArgs, type AgentOverride } from "./cli-dispatch.ts";
-import { applyCollect, formatMilestoneDate, FRAGMENT_DIR } from "./changelog.ts";
+import { applyCollect, describeFragmentNearMisses, formatMilestoneDate, FRAGMENT_DIR } from "./changelog.ts";
 import { hostLogger, hostLogTarget, readHostLog, readHostLogLines, renderHostEvent } from "./log.ts";
 import { runLoop } from "./loop.ts";
 import { baseline, build, campaign, requireTelegram, tgTest } from "./modes.ts";
@@ -212,7 +212,7 @@ if (mode === "changelog") {
   const titleIdx = rest.indexOf("--title");
   const title = titleIdx >= 0 && rest[titleIdx + 1] ? rest[titleIdx + 1] : "Collected changes";
   const dir = process.cwd();
-  const { collected, skipped } = applyCollect({
+  const { collected, skipped, nearMisses } = applyCollect({
     fragmentsDir: join(dir, FRAGMENT_DIR),
     changelogPath: join(dir, "CHANGELOG.md"),
     today: formatMilestoneDate(new Date()),
@@ -225,6 +225,7 @@ if (mode === "changelog") {
         ? `collected ${collected.length} fragment(s) into CHANGELOG.md: ${collected.join(", ")}`
         : `nothing to collect — ${FRAGMENT_DIR}/ has no fragments.`,
   );
+  if (nearMisses.length) console.log(describeFragmentNearMisses(nearMisses));
   process.exit(0);
 }
 
@@ -464,8 +465,9 @@ if (mode === "tidy") {
     const plan = computeTidy(scanTidy(target));
     console.log(describeTidy(target.project, plan));
     if (apply && !tidyIsEmpty(plan)) {
-      applyTidy(target, plan);
+      const nearMisses = applyTidy(target, plan);
       console.log(plan.fold.length ? "  → applied — review the CHANGELOG.md fold and commit it." : "  → applied.");
+      if (nearMisses.length) console.log(`  ${describeFragmentNearMisses(nearMisses)}`);
     }
   }
   if (!apply) console.log("\n(dry run — nothing changed; pass --apply to act)");

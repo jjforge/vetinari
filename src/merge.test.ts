@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -629,6 +629,68 @@ test("describeRegistryDedup renders one drop line per duplicate, or empty when n
   ]);
 });
 
+/** A git repo on `main` whose `agent/42` branch landed a headerless `changelog.d/42.md` by hand. */
+function repoWithMergedNearMissFragment(): string {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-tidy-nearmiss-"));
+  const git = (args: string[]) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" }).trim();
+  execFileSync("git", ["-C", dir, "-c", "init.defaultBranch=main", "init", "-q"]);
+  git(["config", "user.email", "test@example.com"]);
+  git(["config", "user.name", "test"]);
+  writeFileSync(join(dir, "CHANGELOG.md"), "# Changelog\n\n### Older — August 1, 2026\n\n**Bug fixes:**\n- [user] old (#1)\n");
+  git(["add", "-A"]);
+  git(["commit", "-qm", "seed"]);
+  git(["checkout", "-q", "-b", "agent/42"]);
+  mkdirSync(join(dir, "changelog.d"));
+  writeFileSync(join(dir, "changelog.d", "42.md"), "- [user] headerless bullet (#42).\n");
+  git(["add", "-A"]);
+  git(["commit", "-qm", "42"]);
+  git(["checkout", "-q", "main"]);
+  git(["merge", "--no-ff", "-q", "agent/42", "-m", "by-hand merge 42"]);
+  return dir;
+}
+
+test("applyTidy leaves a near-miss fragment in place and returns it", () => {
+  const dir = repoWithMergedNearMissFragment();
+  const target = {
+    project: "demo",
+    root: dir,
+    baseBranch: "main",
+    branchPrefix: "agent/",
+    parkedDir: join(dir, "parked"),
+    logFile: join(dir, "orchestrator.jsonl"),
+    fragmentsDir: join(dir, "changelog.d"),
+    changelogPath: join(dir, "CHANGELOG.md"),
+  };
+  const before = readFileSync(target.changelogPath, "utf8");
+  const plan = computeTidy(scanTidy(target));
+  assert.deepEqual(plan.fold, ["42"]);
+
+  const nearMisses = applyTidy(target, plan);
+
+  assert.deepEqual(nearMisses, [{ name: "42.md", reason: "bullets but no section: header" }]);
+  assert.equal(existsSync(join(dir, "changelog.d", "42.md")), true);
+  assert.equal(readFileSync(target.changelogPath, "utf8"), before);
+});
+
+test("tidy --apply prints the near-miss line after its applied line", () => {
+  const dir = repoWithMergedNearMissFragment();
+  mkdirSync(join(dir, "vetinari"));
+  writeFileSync(
+    join(dir, "vetinari", "config.mts"),
+    'export default { project: "demo", image: "x", baseBranch: "main", gates: [{ cmd: "true" }], fetchTask: () => "" };\n',
+  );
+  const cli = new URL("./cli.mts", import.meta.url).pathname;
+  const tsx = new URL("../node_modules/.bin/tsx", import.meta.url).pathname;
+
+  const run = spawnSync(tsx, [cli, "tidy", "--apply"], { cwd: dir, encoding: "utf8" });
+
+  assert.equal(run.status, 0, run.stderr);
+  const lines = run.stdout.split("\n");
+  const applied = lines.findIndex((l) => l.startsWith("  → applied"));
+  assert.ok(applied >= 0, run.stdout);
+  assert.equal(lines[applied + 1], "  changelog.d: left in place, not folded — 42.md (bullets but no section: header)");
+});
+
 test("collectWaveChangelog makes no commit when the wave left no fragments", () => {
   const dir = repoWithChangelog("# Changelog\n\n### Older — August 1, 2026\n\n**Bug fixes:**\n- [user] old (#1)\n");
   const before = headSha(dir);
@@ -737,6 +799,27 @@ test("collectWaveChangelog leaves fragments in place and logs one line when the 
   // One line logged for the skip, distinct from the empty case. (These campaign-changelog-*
   // rows ride the logger's untyped catch-all, so `event` is compared as a plain string.)
   assert.equal(log.events.filter((e) => (e.event as string) === "campaign-changelog-skipped").length, 1);
+});
+
+test("collectWaveChangelog returns the near-misses it left in place and records them on its event", () => {
+  const dir = repoWithChangelog("# Changelog\n\n### Older — August 1, 2026\n\n**Bug fixes:**\n- [user] old (#1)\n");
+  const fragDir = join(dir, "changelog.d");
+  mkdirSync(fragDir);
+  writeFileSync(join(fragDir, "90.md"), "- [internal] headerless bullet (#90).\n");
+  execFileSync("git", ["-C", dir, "add", "-A"]);
+  execFileSync("git", ["-C", dir, "commit", "-qm", "merge agent branch"]);
+  const before = headSha(dir);
+  const log = memoryLogger();
+
+  const result = collectWaveChangelog(0, log, dir);
+
+  const nearMisses = [{ name: "90.md", reason: "bullets but no section: header" }];
+  assert.equal(result.committed, false);
+  assert.deepEqual(result.nearMisses, nearMisses);
+  assert.equal(headSha(dir), before); // nothing folded, nothing committed
+  assert.equal(existsSync(join(fragDir, "90.md")), true); // left in place
+  const event = log.events.find((e) => (e.event as string) === "campaign-changelog-empty");
+  assert.deepEqual((event as Record<string, unknown> | undefined)?.nearMisses, nearMisses);
 });
 
 // A repo with one agent branch carrying unmerged commits and a worktree checked out on

@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import type { CampaignDoneEvent, CampaignStartEvent, WaveDoneEvent, WaveStartEvent } from "./event-log.ts";
+import { describeFragmentNearMisses } from "./changelog.ts";
 import { runGates } from "./gate.ts";
 import { agentSelectionFor, makeSandbox } from "./sandbox.ts";
 import { branchHasCommits, collectWaveChangelog, currentBranch, integrateGreens } from "./merge.ts";
@@ -951,6 +952,8 @@ export async function campaign(
         const collected = deps.collectChangelog(index, cfg.log);
         if (collected.committed)
           reporter.line(`wave ${index + 1}/${total}: collected changelog fragments — ${collected.collected.join(", ")}`);
+        // Near-misses (a botched fragment left on the base) print whether or not anything committed.
+        if (collected.nearMisses?.length) reporter.line(`wave ${index + 1}/${total}: ${describeFragmentNearMisses(collected.nearMisses)}`);
         // Green path only: advance each merged issue to `pending-verify` via the configured
         // `onIssueMerged` seam (issue #103). Best-effort — a failing write is logged and never
         // touches a stop path. Only the green `merged` set is passed — plus, on a green re-gate of a

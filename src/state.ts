@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { MessageCategory, ResolvedConfig } from "./config.ts";
+import { hostLogger, type Logger } from "./log.ts";
 
 /**
  * The one park-reason enum (design §2.3), the reason on the parked record, the
@@ -68,12 +69,25 @@ export function writeParkedRecord(cfg: Pick<ResolvedConfig, "parkedDir">, rec: O
 /** A project's parked directory under a base location (its `.vetinari.local/`). */
 export const parkedDirOf = (baseLocation: string) => join(baseLocation, "parked");
 
-/** Every parked record under an explicit parked directory — the gateway reads a project's live. */
-export function listParkedIn(parkedDir: string): ParkedRecord[] {
+/**
+ * Every parked record under an explicit parked directory — the gateway reads a project's live.
+ * A record that will not parse (a zero-byte or torn write) is skipped and logged
+ * `parked-record-unreadable`, naming the file, rather than throwing out of the whole listing —
+ * the guarantee `listProjects` gives registry pointers: one torn record must not take down a
+ * project's dashboard or the gateway.
+ */
+export function listParkedIn(parkedDir: string, logger: Logger = hostLogger()): ParkedRecord[] {
   if (!existsSync(parkedDir)) return [];
-  return readdirSync(parkedDir)
-    .filter((f) => f.endsWith(".json"))
-    .map((f) => JSON.parse(readFileSync(join(parkedDir, f), "utf8")) as ParkedRecord);
+  const recs: ParkedRecord[] = [];
+  for (const f of readdirSync(parkedDir).filter((f) => f.endsWith(".json"))) {
+    const file = join(parkedDir, f);
+    try {
+      recs.push(JSON.parse(readFileSync(file, "utf8")) as ParkedRecord);
+    } catch (e) {
+      logger.log("parked-record-unreadable", { file, error: String(e) });
+    }
+  }
+  return recs;
 }
 
 /**
@@ -133,11 +147,9 @@ export function clearParkedForTasks(cfg: ResolvedConfig, taskIds: string[]) {
   for (const taskId of taskIds) clearParked(cfg, taskId);
 }
 
-export function listParked(cfg: ResolvedConfig): ParkedRecord[] {
+export function listParked(cfg: ResolvedConfig, logger: Logger = hostLogger()): ParkedRecord[] {
   mkdirSync(cfg.parkedDir, { recursive: true });
-  return readdirSync(cfg.parkedDir)
-    .filter((f) => f.endsWith(".json"))
-    .map((f) => JSON.parse(readFileSync(`${cfg.parkedDir}/${f}`, "utf8")));
+  return listParkedIn(cfg.parkedDir, logger);
 }
 
 /**

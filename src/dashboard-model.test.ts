@@ -50,7 +50,7 @@ import {
 import { festiveWaveName } from "./festive-names.ts";
 import type { ParkedRecord } from "./state.ts";
 import type { ProjectPointer } from "./registry.ts";
-import { memoryLogger } from "./log.ts";
+import { hostLogTarget, memoryLogger } from "./log.ts";
 
 const cfgFor = (dir: string): ResolvedConfig =>
   ({
@@ -2231,6 +2231,36 @@ test("buildStatus marks a wave `closed` when its surviving member merged, even t
   // The pruned chip still renders in the wave it left (ADR 0007) — only the fold changed.
   const chip = status.waves[0].issues.find((i) => i.issueNumber === "999");
   assert.equal(chip?.membership, "pruned");
+});
+
+test("buildStatus survives an unparseable parked record and still shows the valid park beside it", () => {
+  // A writer killed mid-write leaves a torn record under `parked/`; it must not take the
+  // project's dashboard down. `buildStatus` takes no logger, so the lister falls back to the
+  // host logger — point the gateway home at a temp dir so nothing reaches the real host log.
+  const dir = join(tmpdir(), `vetinari-status-torn-parked-${Date.now()}`);
+  const prev = process.env.VETINARI_GATEWAY_HOME;
+  process.env.VETINARI_GATEWAY_HOME = join(dir, "gw-home");
+  try {
+    seedState(dir, [
+      event("campaign-start", { ts: "2026-09-02T04:00:00.000Z", waves: [["701"]], slots: 1 }),
+      event("wave-start", { ts: "2026-09-02T04:10:00.000Z", index: 0, tasks: ["701"] }),
+    ]);
+    writeFileSync(
+      join(dir, "parked", "701.json"),
+      JSON.stringify({ taskId: "701", parkedAt: "2026-09-02T04:12:00.000Z", reason: "question", branch: "agent/701", question: "Which?" }),
+    );
+    writeFileSync(join(dir, "parked", "bad.json"), '{ "taskId": "7');
+
+    const status = buildStatus(cfgFor(dir));
+
+    assert.deepEqual(
+      status.parked.map((p) => p.issueNumber),
+      ["701"],
+    );
+    assert.ok(readFileSync(hostLogTarget(), "utf8").includes('"event":"parked-record-unreadable"'));
+  } finally {
+    prev === undefined ? delete process.env.VETINARI_GATEWAY_HOME : (process.env.VETINARI_GATEWAY_HOME = prev);
+  }
 });
 
 test("buildStatus collapses a wave that had a member pruned and a member grafted once its wave-done lands (#363)", () => {

@@ -16,6 +16,8 @@ These govern every change — yours interactively and every campaign agent's (th
 
 **5. Defined vocabulary wins over mockups.** A POC, prototype, mockup, or design handoff may use the wrong word for a thing we have already named — our defined vocabulary (the ADRs, the domain model) is the correct one, so translate the artifact's words into ours rather than adopting the artifact's. A word that conflicts with a defined term is not a naming decision, it is a translation; only a genuinely _net-new_ concept our vocabulary has no word for is a decision — and there you **ask** (rule 1's `BLOCKED` in a headless run). This keeps the UI, the logs, and the code speaking one language rather than drifting toward whatever the last handoff called things.
 
+**Commands.** Typecheck with `npm run typecheck`; run the whole suite with `npm test` (the same runner as the gate); run one file with `npx tsx --test src/<file>.test.ts`. Use `tsx`, not bare `node --test` — Node's type stripping rewrites type annotations to whitespace, which false-reds source-text assertions.
+
 **Formatting.** Format with `npm run format` (Prettier, configured in `.prettierrc.json`) before each commit; `npm run format:check` verifies.
 
 ## Work tracking — GitHub issues are the single source of truth

@@ -301,7 +301,7 @@ test("renderStatusPage ships the graft input's client wiring, re-run on live ref
   // decision to wireGraft. This asserts the wiring is present, not the rule (that is the
   // reducer's own node test, per ADR 0012); a rule-source-text match here would pass whether
   // or not the rule is correct.
-  assert.match(html, /function graftCarry\(captured\)/);
+  assert.match(html, /function graftCarry\(\s*captured\b/);
   assert.match(html, /pendingGraftCarry = graftCarry\(/);
   assert.match(html, /if \(pendingGraftCarry\)/);
 });

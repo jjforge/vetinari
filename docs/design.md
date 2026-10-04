@@ -335,7 +335,7 @@ Deferred — wanted, not now:
 
 Described by behaviour; the tracker holds the numbers (`gh issue list --label campaign:audit`). Re-audited 2026-08-31 claim by claim against §2–§11 after the audit campaign landed; everything not listed here was verified to hold, including the whole of §5–§7 resolve/redrive, §10 comms, §11 dashboard and appendix A.
 
-- **A throw before the sandbox logs no `failed`.** The run loop's catch covers the container's life; a worktree-preflight or tracker-fetch throw exits 1 with a stack trace and leaves no verdict in the log.
+- **A throw before the sandbox logs no `failed`.** The run loop's outer catch now covers the whole loop — the parked-answer preflight, `fetchTask` and sandbox creation included — so a worktree-preflight or tracker-fetch throw logs one `failed` verdict and the run exits `1`, no stack trace. (A refusal raised *outside* the run loop — a precondition, a usage error — is not folded to a verdict: the process-wide CLI handler prints its message alone on stderr and exits `4`.)
 - **A crash redrive never resumes the session.** §7 says "treat as unstarted if no commits, else resume the session"; the reconciler re-runs a crashed member fresh on its branch in every case, and a code comment overstates this.
 
 ---

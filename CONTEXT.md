@@ -302,3 +302,27 @@ An optional human label for a run, passed as `campaign --name` and recorded on
 `campaign-start`, so the dashboard and the [[archived-run]] list say what a run was
 for. Absent, a run falls back to its timestamp.
 _Avoid_: run title.
+
+### CLI outcomes
+
+**Refusal**:
+A deliberate "no" from a command — the CLI understood the request and is declining it
+on purpose, because of the operator's input or state — whose message names the fix.
+"not a git repository", an unknown mode, a missing required argument, a project
+qualifier that names another project. A refusal is delivered as its message **alone on
+stderr** with **exit 4**, never a stack trace (the `Refusal` type and the process-wide
+handler in `refusal.ts`). Distinct from a **defect** and a **no-op** below.
+_Avoid_: error, crash, failure.
+
+**Defect**:
+A broken invariant — a "can't happen" — not caused by the operator and with no fix the
+operator can apply. A defect keeps its stack trace and exits 1, so a bug is never
+disguised as a [[refusal]]. The default: a `throw` is a defect unless it is a refusal.
+_Avoid_: refusal (a defect is not one).
+
+**No-op**:
+A request that is already satisfied, or that someone else will carry out — "#42 is not
+parked — nothing to answer", "the live campaign will pick up the work; redrive refused".
+A no-op reports on **stdout** and exits **0** (design §7's idempotent answer); it is not
+a [[refusal]], even when its wording contains the word "refused".
+_Avoid_: refusal, failure.

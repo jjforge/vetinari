@@ -50,6 +50,22 @@ applies to every mode and is not itself a mode.
 | `tg-connect [--token <t>] [--chat <c>] [--no-verify] [--force]` | collect this project's Telegram bot connection — its bot token and default chat — into its own .vetinari.local/host.env (host-side, never the container gate; ADR 0002/0011). On a terminal with no flags it prompts for the two values; --token/--chat supply them for a scripted run and then it never prompts (non-interactively, a missing value exits non-zero naming it). Before writing it sends one message to verify the token and chat; on failure nothing is written (a terminal re-prompts, non-interactive exits non-zero) — --no-verify skips the send. A host.env that already carries a connection is left alone unless you confirm (terminal) or pass --force; re-running is safe and other keys in the file are preserved. `init` offers this same step after its scaffold |
 <!-- END GENERATED MODES -->
 
+## Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | green / done — or a no-op (a request already satisfied, or one someone else will carry out), or `--help` |
+| `1` | failed — a run or campaign the agent could not make green; also a genuine **defect**, which still prints its stack trace |
+| `2` | parked — a run or campaign stopped on a question or a stall, awaiting a human |
+| `4` | refused — a **refusal**: the command understood the request and declined it on purpose (e.g. "not a git repository", an unknown mode, a missing required argument, a project qualifier that names another project). The message is printed **alone on stderr**, never wrapped in a stack trace |
+
+`--help`, `-h` and `help` print the usage text on **stdout** and exit `0` — help is
+not a refusal. An unknown mode prints the usage text on **stderr** and exits `4`.
+
+**Exception:** `gateway status|start|stop|restart` pass `systemctl`'s own exit code
+straight through (which can be `3`), so those verbs do not follow this table — which is
+why a refusal is `4` and not `3`.
+
 ## Configuration fields
 
 Declared in the committed `vetinari/config.mts` via `defineConfig`. Placement of a

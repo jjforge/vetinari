@@ -1,6 +1,7 @@
 #!/usr/bin/env -S npx tsx
 import { createInterface } from "node:readline/promises";
 import { mkdirSync, watch } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
   AGENT_ENV_VAR,
@@ -47,6 +48,7 @@ import {
   writeGatewayUnit,
 } from "./migrate.ts";
 import { applyInit, computeInit, describeInit, LOCAL_DIR, scanInit } from "./init.ts";
+import { applyPathInstall, describePathInstall, planPathInstall, readExistingWrapper, resolvedWrapper } from "./path-install.ts";
 import { archiveRun, shouldArchiveIdle, shouldArchiveLeftover } from "./archive.ts";
 import { answerParked, hasParked, listParked } from "./state.ts";
 import { readEventLog } from "./event-log.ts";
@@ -257,6 +259,28 @@ if (mode === "migrate") {
   if (result.moved.length) did.push(`moved ${result.moved.length} path(s)`);
   if (result.gitignoreUpdated) did.push("updated .gitignore");
   if (did.length) console.log(`\nMigrated: ${did.join(", ")}.`);
+  process.exit(0);
+}
+
+// `install` puts this CLI on PATH for every project on the host: a `vetinari` wrapper
+// script in --dir (default ~/.local/bin) execing PATH's node with this checkout's tsx
+// loader + cli — gateway install's launch resolution, minus the pinned node. Host-level,
+// so it runs BEFORE the strict config load and works in any directory.
+if (mode === "install") {
+  const dryRun = rest.includes("--dry-run");
+  const dirIdx = rest.indexOf("--dir");
+  const dir = resolve(dirIdx >= 0 && rest[dirIdx + 1] ? rest[dirIdx + 1] : join(homedir(), ".local", "bin"));
+  const plan = planPathInstall({
+    dir,
+    content: resolvedWrapper(),
+    existing: readExistingWrapper(dir),
+    force: rest.includes("--force"),
+    env: { PATH: process.env.PATH, SHELL: process.env.SHELL },
+  });
+  // A foreign file refuses even on a dry run, as migrate's conflicts do.
+  if (plan.refusal) throw new Refusal(plan.refusal);
+  if (!dryRun) applyPathInstall(plan);
+  console.log(describePathInstall(plan, { dryRun }));
   process.exit(0);
 }
 

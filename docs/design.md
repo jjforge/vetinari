@@ -10,6 +10,8 @@ The document has three parts: the system as it should be (§1–§11), the surfa
 
 One process per CLI invocation; the working directory selects the project. A campaign is a parent process that spawns one child `run` per issue. Two long-lived host processes exist: the gateway (Telegram) and the dashboard (HTTP), and neither holds state of its own — both read every project live from a pointer registry. A project's config imports `vetinari`, and the CLI resolves that import to the running install, so a project needs no install of its own or any link to it.
 
+The CLI reaches PATH through the wrapper `vetinari install` writes once per machine: a `/bin/sh` script that runs `node` from PATH with the install's absolute tsx loader and `src/cli.mts` — the `gateway install` launch, minus the pinned node — so `vetinari …` works in any directory and needs no `npx`, `npm link`, or global prefix. `src/cli.mts` keeps its `#!/usr/bin/env -S npx tsx` shebang as the in-repo convenience only; it resolves `tsx` from the calling project, so it is not how another project reaches the CLI.
+
 ```
                     ┌─────────────── host (~/.config/vetinari/) ───────────────┐
                     │  registry/   (project pointers)     slots  (lease file)  │
@@ -262,7 +264,7 @@ The user guide names three properties as the value. This table sorts every curre
 
 | Surface | Verdict | Reason |
 | --- | --- | --- |
-| `init`, `build`, `baseline`, `run`, `answer`, `campaign`, `redrive`, `prune <issue>`, `graft`, `parked`, `clear` | **core** | the loop and the five moves |
+| `init`, `install`, `build`, `baseline`, `run`, `answer`, `campaign`, `redrive`, `prune <issue>`, `graft`, `parked`, `clear` | **core** | the loop and the five moves |
 | `gateway` (+ `install/status/start/stop/restart`), `tg-test`, `status` | **core** | where the user sees and answers things |
 | `campaign --dry-run`, `--name`, `--on-underspecified` | core | planning is the safety net |
 | `--auto-prune` | optional | a policy flag on one park reason |

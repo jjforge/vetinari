@@ -60,6 +60,11 @@ export const MODES: Mode[] = [
       "scaffold a NEW project onto the layout: create the committed vetinari/ (a defineConfig skeleton + a Dockerfile template), the excluded .vetinari.local/, and add .vetinari.local/ to .gitignore. Idempotent and non-clobbering — an existing vetinari/ config is never overwritten (--dry-run to print the plan and write nothing). Installs and vendors nothing",
   },
   {
+    signature: "install [--dir <d>] [--force] [--dry-run]",
+    blurb:
+      "put the CLI on PATH for every project on this host: write a `vetinari` wrapper script to --dir (default ~/.local/bin) that runs this checkout's cli with PATH's node and the absolute tsx loader — no npx, so it works in a project with no node_modules. Idempotent: a wrapper it wrote before is rewritten; any other file there refuses unless --force. Installs even when the dir is off PATH, then prints the profile line that adds it. Re-run after moving the checkout (a node upgrade needs none; --dry-run to print the wrapper and write nothing)",
+  },
+  {
     signature: "migrate [--dry-run]",
     blurb:
       "move this project onto the vetinari/ + .vetinari.local/ layout: config → vetinari/, old .sandcastle/ state → .vetinari.local/, .gitignore updated, and the host-side orchestrator.env renamed to host.env. A one-time layout move — it carries no other rename shims (--dry-run to print the plan and change nothing)",
@@ -137,7 +142,7 @@ export const MODES: Mode[] = [
   {
     signature: 'statusline install [--run-command "<cmd>"] [--dry-run]',
     blurb:
-      "wire the status line into the project's committed .claude/settings.json. A status line already configured there is kept as line 1 with the 🏰 campaign line added under it (never replaced). Idempotent. --run-command sets how the CLI is invoked (default: npx vetinari statusline)",
+      "wire the status line into the project's committed .claude/settings.json. A status line already configured there is kept as line 1 with the 🏰 campaign line added under it (never replaced). Idempotent. --run-command sets how the CLI is invoked (default: vetinari statusline — the wrapper `vetinari install` puts on PATH, the same on every machine)",
   },
   {
     signature: "statusline uninstall [--dry-run]",

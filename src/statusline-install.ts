@@ -30,8 +30,13 @@ export interface Settings {
   [key: string]: unknown;
 }
 
-/** The default command a fresh install points at, per the README. */
-export const DEFAULT_RUN_COMMAND = "npx vetinari statusline";
+/**
+ * The default command a fresh install points at: the bare `vetinari` the PATH wrapper
+ * (`vetinari install`, once per machine) answers. Not `npx` — that fails in a project
+ * that is not this checkout — and not detected per host, since it lands in the
+ * committed settings and must read the same on every machine.
+ */
+export const DEFAULT_RUN_COMMAND = "vetinari statusline";
 
 /** The flag that carries the wrapped base command, base64-encoded, in the installed command. */
 const BASE_FLAG = "--base-b64";

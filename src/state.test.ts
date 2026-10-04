@@ -148,16 +148,14 @@ test("park writes its record silently — the gateway is the only sender, so par
   assert.equal(rec!.tgMessageId, undefined, "no message id yet — the gateway announces and fills it in");
 });
 
-test("park's `stopped` line names `vetinari run <id>` standalone, and `vetinari redrive` under VETINARI_CHILD", async () => {
+test("park() writes the record and logs the event but prints no banner — the run loop owns the terminal banner now (#355)", async () => {
   const dir = join(tmpdir(), `vetinari-park-stopped-${Date.now()}`);
   mkdirSync(join(dir, "parked"), { recursive: true });
 
   const lines: string[] = [];
   const realLog = console.log;
   console.log = (...a: unknown[]) => lines.push(a.join(" "));
-  const prevChild = process.env.VETINARI_CHILD;
   try {
-    delete process.env.VETINARI_CHILD;
     await park(cfgFor(dir), {
       taskId: "701",
       reason: "stopped",
@@ -166,26 +164,9 @@ test("park's `stopped` line names `vetinari run <id>` standalone, and `vetinari 
       branch: "agent/701",
       question: "Stopped.",
     });
-    const standalone = lines.join("\n");
-    assert.match(standalone, /vetinari run 701/, "a standalone stopped run names `vetinari run <id>`");
-    assert.doesNotMatch(standalone, /vetinari answer/, "a stopped run cannot be answered");
-
-    lines.length = 0;
-    process.env.VETINARI_CHILD = "1";
-    await park(cfgFor(dir), {
-      taskId: "702",
-      reason: "stopped",
-      detail: "SIGTERM",
-      sessionId: "s",
-      branch: "agent/702",
-      question: "Stopped.",
-    });
-    const child = lines.join("\n");
-    assert.match(child, /vetinari redrive/, "a campaign child's stopped run names `vetinari redrive`");
+    assert.equal(lines.length, 0, "park() prints nothing — the banner moved to the run loop's parked paths (#355)");
   } finally {
     console.log = realLog;
-    if (prevChild === undefined) delete process.env.VETINARI_CHILD;
-    else process.env.VETINARI_CHILD = prevChild;
   }
 });
 

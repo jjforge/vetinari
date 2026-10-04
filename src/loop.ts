@@ -56,6 +56,38 @@ class StopRequested extends Error {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+/** The first non-empty, trimmed line of a possibly-multi-line string — what a verdict's `***` line
+ * carries, with the full text left to the event log and the parked record. Empty when none. */
+const firstLine = (s: string): string =>
+  s
+    .split("\n")
+    .map((l) => l.trim())
+    .find(Boolean) ?? "";
+
+/**
+ * The human verdict banner a standalone run prints on the terminal, mirroring GREEN (design §11):
+ * a `*** <reason>` line, then a next-step line. Same screen rules as GREEN — nothing under `--json`
+ * (where the screen is the raw event stream alone, #299), and the next-step line is suppressed for a
+ * campaign's own child run (`VETINARI_CHILD`), whose parent prints its own resume command. Called
+ * once per verdict from the run loop's failed/parked paths, so a park never prints twice.
+ */
+function printVerdict(reason: string, nextStep: string) {
+  if (process.env.VETINARI_JSON === "1") return;
+  console.log(`\n*** ${reason}\n`);
+  if (!process.env.VETINARI_CHILD) console.log(`${nextStep}\n`);
+}
+
+/**
+ * The PARKED banner for a written record (this issue): `*** PARKED (<reason>) — <question>` and the
+ * move that clears it. A `stopped` park kept its work and cannot be answered, so it names the resume
+ * run; every other reason names the answer command. Printed from the run loop once a record is
+ * written — `park()` no longer prints, so the banner is not doubled.
+ */
+function printParked(taskId: string, reason: string, question: string) {
+  const nextStep = reason === "stopped" ? `Continue it with: vetinari run ${taskId}` : `Answer with: vetinari answer ${taskId} "…"`;
+  printVerdict(`PARKED (${reason}) — ${firstLine(question)}`, nextStep);
+}
+
 export interface ResumeEntry {
   resumeSessionId: string;
   answerPrompt: string;
@@ -283,14 +315,16 @@ export async function runLoop(
   // a later `run <id>` can resume it, and a one-line question). The sandbox was already closed by
   // the container's `finally` on the way here. `park()` logs the `parked{stopped}` event.
   const parkStopped = async (): Promise<Outcome> => {
+    const question = "The run was stopped before it reached a verdict.";
     await park(cfg, {
       taskId,
       reason: "stopped",
       detail: stopSignal,
       sessionId: lastSessionId,
       branch: sbx?.branch ?? `${cfg.branchPrefix}${taskId}`,
-      question: "The run was stopped before it reached a verdict.",
+      question,
     });
+    printParked(taskId, "stopped", question);
     return "parked";
   };
 
@@ -381,7 +415,9 @@ export async function runLoop(
               );
 
             if (r.completionSignal === BLOCKED) {
-              await park(cfg, { taskId, reason: "question", sessionId, branch: sbx.branch, question: extractQuestion(r.stdout ?? "") });
+              const question = extractQuestion(r.stdout ?? "");
+              await park(cfg, { taskId, reason: "question", sessionId, branch: sbx.branch, question });
+              printParked(taskId, "question", question);
               return "parked";
             }
 
@@ -394,14 +430,9 @@ export async function runLoop(
             const ahead = deps.commitsAhead(cfg.baseBranch, sbx.branch, cfg.log);
             if (ahead === 0) {
               cfg.log.log("empty-green", { taskId, branch: sbx.branch });
-              await park(cfg, {
-                taskId,
-                reason: "stalled",
-                detail: "no-commit",
-                sessionId,
-                branch: sbx.branch,
-                question: `COMPLETE but ${sbx.branch} has no commit beyond ${cfg.baseBranch} — the agent produced no change. Likely a no-op, or the task needs clarification before it can be done.`,
-              });
+              const question = `COMPLETE but ${sbx.branch} has no commit beyond ${cfg.baseBranch} — the agent produced no change. Likely a no-op, or the task needs clarification before it can be done.`;
+              await park(cfg, { taskId, reason: "stalled", detail: "no-commit", sessionId, branch: sbx.branch, question });
+              printParked(taskId, "stalled", question);
               return "parked";
             }
 
@@ -477,14 +508,16 @@ export async function runLoop(
           // A stop that landed during the harvest above parks `stopped` instead of the budget stall —
           // the loop logs no second verdict (design: no `failed`, no `stalled`, no double park).
           if (stopped()) throw new StopRequested();
+          const budgetQuestion = `Turn budget exhausted (${cfg.maxTurns} gate cycles).`;
           await park(cfg, {
             taskId,
             reason: "stalled",
             detail: budgetDetail,
             sessionId: budgetSessionId,
             branch: sbx.branch,
-            question: `Turn budget exhausted (${cfg.maxTurns} gate cycles).`,
+            question: budgetQuestion,
           });
+          printParked(taskId, "stalled", budgetQuestion);
           return "parked";
         } catch (err: any) {
           // A stop unwinds straight through — rethrow so the outer handler closes the sandbox
@@ -499,14 +532,16 @@ export async function runLoop(
             await harvestFindings(cfg, sbx, err?.sessionId, common, taskId, "idle");
             // A stop during the idle harvest parks `stopped`, not `stalled` — same guard as budget.
             if (stopped()) throw new StopRequested();
+            const idleQuestion = "Agent stalled without emitting a signal.";
             await park(cfg, {
               taskId,
               reason: "stalled",
               detail: "idle",
               sessionId: err?.sessionId,
               branch: sbx.branch,
-              question: "Agent stalled without emitting a signal.",
+              question: idleQuestion,
             });
+            printParked(taskId, "stalled", idleQuestion);
             return "parked";
           }
           // Anything else thrown is a terminal failure, not a park (design §3 step 9): re-throw
@@ -538,7 +573,12 @@ export async function runLoop(
     // So even a standalone run leaves one `failed` verdict with `detail` on the log rather than
     // exiting with a bare stack trace; cli-dispatch maps `failed` to exit 1, and under a campaign
     // the child's non-zero exit is what the parent folds to `campaign-failed`.
-    cfg.log.log("failed", { taskId, detail: String(err?.message ?? err) });
+    const detail = String(err?.message ?? err);
+    cfg.log.log("failed", { taskId, detail });
+    // The human FAILED banner is this run's terminal view (design §11, #355): the same `detail` the
+    // event carries, then the re-run move. Mirrors GREEN's screen rules — nothing under --json, and
+    // the next-step line suppressed for a campaign child, whose parent prints its own resume command.
+    printVerdict(`FAILED — ${firstLine(detail)}`, `Fix that, then re-run: vetinari run ${taskId}`);
     return "failed";
   } finally {
     // Remove the SIGINT/SIGTERM handler whichever way the run ended — green, parked, failed, or

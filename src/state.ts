@@ -51,27 +51,11 @@ const file = (cfg: Pick<ResolvedConfig, "parkedDir">, taskId: string) => `${cfg.
 export async function park(cfg: ResolvedConfig, rec: Omit<ParkedRecord, "parkedAt" | "tgMessageId">) {
   writeParkedRecord(cfg, rec);
   cfg.log.log("parked", { taskId: rec.taskId, reason: rec.reason, ...(rec.detail ? { detail: rec.detail } : {}) });
-  console.log(`\n*** PARKED (${rec.reason}) — ${parkConsoleMove(rec)}\n`);
-}
-
-/**
- * The console tail `park()` prints for a reason. A `stopped` park cannot be answered — a person
- * stopped the run before it reached a verdict and its work is kept — so it names the resume move
- * instead: `vetinari redrive` for a campaign child (`VETINARI_CHILD`), else `vetinari run <id>` for
- * a standalone run. Every other reason keeps today's answer-or-announce line.
- */
-function parkConsoleMove(rec: Pick<ParkedRecord, "reason" | "taskId">): string {
-  if (rec.reason === "stopped") {
-    return process.env.VETINARI_CHILD
-      ? `the run was stopped; \`vetinari redrive\` resumes the campaign.`
-      : `the run was stopped; continue it with:\n    vetinari run ${rec.taskId}`;
-  }
-  return `the gateway will announce this question; or answer directly with:\n    vetinari answer ${rec.taskId} "<answer>"`;
 }
 
 /**
  * Write (or overwrite) the on-disk parked record only — no `parked` event, no console
- * notice. `park` is the parking *transition* (it also logs the event and prints); this is
+ * notice. `park` is the parking *transition* (it also logs the event); this is
  * the record-write half, for a parker that logs its own event separately: the integrator
  * writing a `conflict` record beside the `parked{conflict}` it already logs (design §2.5,
  * "written by whatever parks"). `parkedAt` is stamped here.

@@ -196,6 +196,11 @@ _Avoid_: unresolved ticket, ambiguous ticket.
 
 ### Project layout & configuration
 
+**Install**:
+The one vetinari checkout a machine runs, shared by every [[project]] on it. A
+project has no install of its own; its [[vetinari]] config imports from the install.
+_Avoid_: package, dependency, global install, runtime, the checkout (when meaning the role).
+
 **`vetinari/`**:
 The project's committed vetinari configuration — config module, `Dockerfile`,
 prompt overrides — versioned in the project's own repo.

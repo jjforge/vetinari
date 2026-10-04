@@ -48,7 +48,7 @@ test("expandSelection unions mixed id and label tokens, de-duplicated in first-s
 test("expandSelection reports the resolver's label exclusions to the onExcluded sink, keeping the work (#343)", async () => {
   // Composed with the REAL githubIssuesByLabel: an Epic and a pending-verify row are
   // dropped at the edge; each surfaces to the sink as data, not only a stderr log.
-  const run = () =>
+  const run = async () =>
     JSON.stringify([
       { number: 282, issueType: { name: "Epic" } },
       { number: 322, labels: [{ name: "pending-verify" }] },
@@ -882,7 +882,7 @@ test("a pending-verify blocker outside the selection is named in the provenance,
   // as satisfied at the edge — so #316 is reachable (after #314), not stranded — and the
   // drop is named on the provenance sink rather than the dependent vanishing silently.
   const logs: string[] = [];
-  const run = (args: string[]) => {
+  const run = async (args: string[]) => {
     const num = args[1]?.match(/issues\/(\d+)\/dependencies/)?.[1];
     if (num === "316")
       return JSON.stringify([

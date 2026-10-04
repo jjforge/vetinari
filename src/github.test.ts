@@ -9,11 +9,29 @@ import {
   githubMarkPendingVerify,
 } from "./github.ts";
 import { issueStateFromTask } from "./dashboard-model.ts";
-import { expandSelection } from "./plan.ts";
+import { expandSelection, layerWaves } from "./plan.ts";
+import { restrictBlockers } from "./prune.ts";
 
-test("githubBlockedBy queries the blocked_by endpoint and returns blocker numbers", () => {
+/**
+ * An injectable `run` that resolves after a real (short) delay while tracking how
+ * many calls are in flight at once — the peak is the proof the fan-out overlaps.
+ * Returns whatever `reply(args)` yields for each call.
+ */
+function concurrencyProbe(reply: (args: string[]) => string) {
+  const state = { inFlight: 0, maxInFlight: 0 };
+  const run = async (args: string[]): Promise<string> => {
+    state.inFlight++;
+    state.maxInFlight = Math.max(state.maxInFlight, state.inFlight);
+    await new Promise((r) => setTimeout(r, 10));
+    state.inFlight--;
+    return reply(args);
+  };
+  return { run, state };
+}
+
+test("githubBlockedBy queries the blocked_by endpoint and returns blocker numbers", async () => {
   const calls: string[][] = [];
-  const run = (args: string[]) => {
+  const run = async (args: string[]) => {
     calls.push(args);
     return JSON.stringify([
       { number: 191, repository: { full_name: "jjforge/jjforge" } },
@@ -21,28 +39,28 @@ test("githubBlockedBy queries the blocked_by endpoint and returns blocker number
     ]);
   };
 
-  const blockers = githubBlockedBy("jjforge/jjforge", run)("#782");
+  const blockers = await githubBlockedBy("jjforge/jjforge", run)("#782");
 
   assert.deepEqual(calls, [["api", "repos/jjforge/jjforge/issues/782/dependencies/blocked_by"]]);
   assert.deepEqual(blockers, ["191", "200"]);
 });
 
-test("githubBlockedBy drops cross-repo blockers", () => {
-  const run = () =>
+test("githubBlockedBy drops cross-repo blockers", async () => {
+  const run = async () =>
     JSON.stringify([
       { number: 191, repository: { full_name: "jjforge/jjforge" } },
       { number: 5, repository: { full_name: "someone/other" } },
     ]);
 
-  assert.deepEqual(githubBlockedBy("jjforge/jjforge", run)("782"), ["191"]);
+  assert.deepEqual(await githubBlockedBy("jjforge/jjforge", run)("782"), ["191"]);
 });
 
-test("githubBlockedBy handles an empty dependency list", () => {
-  assert.deepEqual(githubBlockedBy("jjforge/jjforge", () => "[]")("782"), []);
+test("githubBlockedBy handles an empty dependency list", async () => {
+  assert.deepEqual(await githubBlockedBy("jjforge/jjforge", async () => "[]")("782"), []);
 });
 
-test("githubBlockedBy drops closed blockers — only OPEN prerequisites gate", () => {
-  const run = () =>
+test("githubBlockedBy drops closed blockers — only OPEN prerequisites gate", async () => {
+  const run = async () =>
     JSON.stringify([
       {
         number: 191,
@@ -56,12 +74,12 @@ test("githubBlockedBy drops closed blockers — only OPEN prerequisites gate", (
       },
     ]);
 
-  assert.deepEqual(githubBlockedBy("jjforge/jjforge", run)("782"), ["191"]);
+  assert.deepEqual(await githubBlockedBy("jjforge/jjforge", run)("782"), ["191"]);
 });
 
-test("githubBlockedBy drops a pending-verify blocker and names it — merged-but-unclosed work is satisfied (#326)", () => {
+test("githubBlockedBy drops a pending-verify blocker and names it — merged-but-unclosed work is satisfied (#326)", async () => {
   const logs: string[] = [];
-  const run = () =>
+  const run = async () =>
     JSON.stringify([
       {
         number: 314,
@@ -77,7 +95,7 @@ test("githubBlockedBy drops a pending-verify blocker and names it — merged-but
       },
     ]);
 
-  const blockers = githubBlockedBy("jjforge/vetinari", run, (line) => logs.push(line))("#316");
+  const blockers = await githubBlockedBy("jjforge/vetinari", run, (line) => logs.push(line))("#316");
 
   // the still-open, merely-ready blocker gates; the pending-verify one — merged on
   // the base, awaiting only a human close — is treated as satisfied and dropped.
@@ -87,20 +105,52 @@ test("githubBlockedBy drops a pending-verify blocker and names it — merged-but
   assert.match(logs[0], /#316 — blocker #313 pending-verify, treated as satisfied/);
 });
 
-test("githubBlockedBy keeps an open ready-for-agent blocker — an untouched prerequisite still gates (#326)", () => {
-  const run = () => JSON.stringify([{ number: 314, state: "open", labels: [{ name: "ready-for-agent" }] }]);
+test("githubBlockedBy keeps an open ready-for-agent blocker — an untouched prerequisite still gates (#326)", async () => {
+  const run = async () => JSON.stringify([{ number: 314, state: "open", labels: [{ name: "ready-for-agent" }] }]);
 
-  assert.deepEqual(githubBlockedBy("jjforge/vetinari", run, () => {})("316"), ["314"]);
+  assert.deepEqual(await githubBlockedBy("jjforge/vetinari", run, () => {})("316"), ["314"]);
 });
 
-test("githubIssuesByLabel lists the OPEN issues carrying a label and returns their numbers", () => {
+test("githubBlockedBy fans out concurrently under restrictBlockers — every id's gh call is in flight at once (#368)", async () => {
+  const ids = ["611", "640", "701", "712"];
+  const { run, state } = concurrencyProbe(() => "[]");
+
+  await restrictBlockers(ids, githubBlockedBy("jjforge/vetinari", run));
+
+  // A synchronous resolver would run the ids one after another (peak 1); the async
+  // resolver lets Promise.all overlap them, so all four gh calls are live together.
+  assert.equal(state.maxInFlight, ids.length);
+});
+
+test("restrictBlockers works with a hand-written synchronous blockedBy — the config seam is unchanged (#368)", async () => {
+  // A project that wired a plain, non-promise blockedBy keeps working: restrictBlockers
+  // awaits a value just the same, so the restricted graph is identical.
+  const syncBlockedBy = (id: string): string[] => ({ "701": ["640"], "640": ["611"] })[id] ?? [];
+
+  const { inSet, external } = await restrictBlockers(["611", "640", "701"], syncBlockedBy);
+
+  assert.deepEqual(inSet.get("701"), new Set(["640"]));
+  assert.deepEqual(inSet.get("640"), new Set(["611"]));
+  assert.deepEqual(external.get("701"), new Set());
+});
+
+test("layerWaves works with a hand-written synchronous blockedBy — same waves as before (#368)", async () => {
+  const syncBlockedBy = (id: string): string[] => ({ "701": ["640"], "640": ["611"] })[id] ?? [];
+
+  const plan = await layerWaves(["611", "640", "701"], syncBlockedBy);
+
+  assert.deepEqual(plan.waves, [["611"], ["640"], ["701"]]);
+  assert.deepEqual(plan.unreachable, []);
+});
+
+test("githubIssuesByLabel lists the OPEN issues carrying a label and returns their numbers", async () => {
   const calls: string[][] = [];
-  const run = (args: string[]) => {
+  const run = async (args: string[]) => {
     calls.push(args);
     return JSON.stringify([{ number: 436 }, { number: 611 }, { number: 640 }]);
   };
 
-  const ids = githubIssuesByLabel("jjforge/vetinari", run)("ready-for-agent");
+  const ids = await githubIssuesByLabel("jjforge/vetinari", run)("ready-for-agent");
 
   assert.deepEqual(calls, [
     [
@@ -124,15 +174,15 @@ test("githubIssuesByLabel lists the OPEN issues carrying a label and returns the
   assert.deepEqual(ids, ["436", "611", "640"]);
 });
 
-test("githubIssuesByLabel drops a pending-verify row — merged work awaiting close is not work (#322)", () => {
+test("githubIssuesByLabel drops a pending-verify row — merged work awaiting close is not work (#322)", async () => {
   const logs: string[] = [];
-  const run = () =>
+  const run = async () =>
     JSON.stringify([
       { number: 322, labels: [{ name: "pending-verify" }] },
       { number: 611, labels: [{ name: "ready-for-agent" }] },
     ]);
 
-  const ids = githubIssuesByLabel("jjforge/vetinari", run, (line) => logs.push(line))("campaign:audit");
+  const ids = await githubIssuesByLabel("jjforge/vetinari", run, (line) => logs.push(line))("campaign:audit");
 
   // the still-open work stays; the merged, pending-verify issue is gone.
   assert.deepEqual(ids, ["611"]);
@@ -143,7 +193,7 @@ test("githubIssuesByLabel drops a pending-verify row — merged work awaiting cl
 
 test("the readiness axis is label-expansion only — an explicitly named pending-verify id is kept (#322)", async () => {
   // The same seam a real campaign wires: a stub gh returning #322 as pending-verify.
-  const run = () => JSON.stringify([{ number: 322, labels: [{ name: "pending-verify" }] }]);
+  const run = async () => JSON.stringify([{ number: 322, labels: [{ name: "pending-verify" }] }]);
   const listByLabel = githubIssuesByLabel("jjforge/vetinari", run, () => {});
 
   // Via label expansion: #322 is dropped as merged-already work.
@@ -152,13 +202,13 @@ test("the readiness axis is label-expansion only — an explicitly named pending
   assert.deepEqual(await expandSelection(["322"], listByLabel), ["322"]);
 });
 
-test("githubIssuesByLabel warns when a label fills the fetch limit — a shortfall is never silent (#434)", () => {
+test("githubIssuesByLabel warns when a label fills the fetch limit — a shortfall is never silent (#434)", async () => {
   const logs: string[] = [];
   const rows = Array.from({ length: 1000 }, (_, i) => ({ number: i + 1 }));
 
-  const ids = githubIssuesByLabel(
+  const ids = await githubIssuesByLabel(
     "jjforge/vetinari",
-    () => JSON.stringify(rows),
+    async () => JSON.stringify(rows),
     (line) => logs.push(line),
   )("ready-for-agent");
 
@@ -168,28 +218,28 @@ test("githubIssuesByLabel warns when a label fills the fetch limit — a shortfa
   assert.deepEqual(logs, [`[vetinari] label "ready-for-agent" returned 1000 issues — the fetch limit; some may be missing`]);
 });
 
-test("githubIssuesByLabel logs nothing for a label under the fetch limit (#434)", () => {
+test("githubIssuesByLabel logs nothing for a label under the fetch limit (#434)", async () => {
   const logs: string[] = [];
-  const run = () => JSON.stringify([{ number: 436 }, { number: 611 }, { number: 640 }]);
+  const run = async () => JSON.stringify([{ number: 436 }, { number: 611 }, { number: 640 }]);
 
-  githubIssuesByLabel("jjforge/vetinari", run, (line) => logs.push(line))("ready-for-agent");
+  await githubIssuesByLabel("jjforge/vetinari", run, (line) => logs.push(line))("ready-for-agent");
 
   assert.deepEqual(logs, []);
 });
 
-test("githubIssuesByLabel returns an empty list when no open issue carries the label", () => {
-  assert.deepEqual(githubIssuesByLabel("jjforge/vetinari", () => "[]")("nonexistent"), []);
+test("githubIssuesByLabel returns an empty list when no open issue carries the label", async () => {
+  assert.deepEqual(await githubIssuesByLabel("jjforge/vetinari", async () => "[]")("nonexistent"), []);
 });
 
-test("githubIssuesByLabel drops an Epic carrying the label — it owns no work, is never scheduled (#322)", () => {
+test("githubIssuesByLabel drops an Epic carrying the label — it owns no work, is never scheduled (#322)", async () => {
   const logs: string[] = [];
-  const run = () =>
+  const run = async () =>
     JSON.stringify([
       { number: 282, issueType: { name: "Epic" } },
       { number: 611, issueType: { name: "Task" } },
     ]);
 
-  const ids = githubIssuesByLabel("jjforge/vetinari", run, (line) => logs.push(line))("campaign:vocabulary");
+  const ids = await githubIssuesByLabel("jjforge/vetinari", run, (line) => logs.push(line))("campaign:vocabulary");
 
   // the task stays; the epic is gone.
   assert.deepEqual(ids, ["611"]);
@@ -198,30 +248,30 @@ test("githubIssuesByLabel drops an Epic carrying the label — it owns no work, 
   assert.match(logs[0], /#282 — epic, not work/);
 });
 
-test("githubIssuesByLabel matches the Epic type case-insensitively", () => {
-  const run = () =>
+test("githubIssuesByLabel matches the Epic type case-insensitively", async () => {
+  const run = async () =>
     JSON.stringify([
       { number: 282, issueType: { name: "EPIC" } },
       { number: 283, issueType: { name: "epic" } },
       { number: 611, issueType: { name: "Bug" } },
     ]);
 
-  assert.deepEqual(githubIssuesByLabel("jjforge/vetinari", run, () => {})("campaign:vocabulary"), ["611"]);
+  assert.deepEqual(await githubIssuesByLabel("jjforge/vetinari", run, () => {})("campaign:vocabulary"), ["611"]);
 });
 
-test("githubIssuesByLabel keeps a row with no issueType — an untyped issue is work", () => {
+test("githubIssuesByLabel keeps a row with no issueType — an untyped issue is work", async () => {
   const logs: string[] = [];
-  const run = () => JSON.stringify([{ number: 611, issueType: null }, { number: 640 }]);
+  const run = async () => JSON.stringify([{ number: 611, issueType: null }, { number: 640 }]);
 
-  const ids = githubIssuesByLabel("jjforge/vetinari", run, (line) => logs.push(line))("campaign:vocabulary");
+  const ids = await githubIssuesByLabel("jjforge/vetinari", run, (line) => logs.push(line))("campaign:vocabulary");
 
   assert.deepEqual(ids, ["611", "640"]);
   assert.deepEqual(logs, []);
 });
 
-test("githubFetchTask fetches an issue asking for state and closedAt, not just title/body/comments/labels", () => {
+test("githubFetchTask fetches an issue asking for state and closedAt, not just title/body/comments/labels", async () => {
   const calls: string[][] = [];
-  const run = (args: string[]) => {
+  const run = async (args: string[]) => {
     calls.push(args);
     return JSON.stringify({
       title: "t",
@@ -232,7 +282,7 @@ test("githubFetchTask fetches an issue asking for state and closedAt, not just t
     });
   };
 
-  githubFetchTask("jjforge/vetinari", run)("#165");
+  await githubFetchTask("jjforge/vetinari", run)("#165");
 
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0].slice(0, 4), ["issue", "view", "165", "--repo"]);
@@ -242,7 +292,7 @@ test("githubFetchTask fetches an issue asking for state and closedAt, not just t
   assert.ok(fields.includes("closedAt"), `--json fields must include closedAt, got ${fields.join(",")}`);
 });
 
-test("githubFetchTask surfaces closed state so issueStateFromTask resolves a closed issue to closed (#175)", () => {
+test("githubFetchTask surfaces closed state so issueStateFromTask resolves a closed issue to closed (#175)", async () => {
   // A gh stub that behaves like the real `gh issue view --json <fields>`: it projects
   // ONLY the requested fields. So a resolver that forgets to ask for `state` never
   // hands the closed signal to issueStateFromTask — the exact pre-fix blind spot.
@@ -254,26 +304,37 @@ test("githubFetchTask surfaces closed state so issueStateFromTask resolves a clo
     state: "CLOSED",
     closedAt: "2026-08-01T00:00:00Z",
   };
-  const run = (args: string[]) => {
+  const run = async (args: string[]) => {
     const fields = args[args.indexOf("--json") + 1].split(",");
     const projected: Record<string, unknown> = {};
     for (const f of fields) if (f in closed) projected[f] = closed[f];
     return JSON.stringify(projected);
   };
 
-  const task = githubFetchTask("jjforge/vetinari", run)("165");
+  const task = await githubFetchTask("jjforge/vetinari", run)("165");
 
   assert.equal(issueStateFromTask(task), "closed");
 });
 
-test("githubFindingReporter creates a labeled issue cross-referenced to the task", () => {
+test("githubFetchTask fans out concurrently under Promise.all — every id's gh call is in flight at once (#368)", async () => {
+  const ids = ["611", "640", "701", "712"];
+  const { run, state } = concurrencyProbe(() => JSON.stringify({ title: "t", state: "OPEN" }));
+  const fetchTask = githubFetchTask("jjforge/vetinari", run);
+
+  await Promise.all(ids.map((id) => fetchTask(id)));
+
+  // Serial under a sync resolver (peak 1); overlapped once the resolver awaits gh.
+  assert.equal(state.maxInFlight, ids.length);
+});
+
+test("githubFindingReporter creates a labeled issue cross-referenced to the task", async () => {
   let captured: string[] = [];
-  const run = (args: string[]) => {
+  const run = async (args: string[]) => {
     captured = args;
     return "https://github.com/jjforge/jjforge/issues/901\n";
   };
 
-  const url = githubFindingReporter(
+  const url = await githubFindingReporter(
     "jjforge/jjforge",
     { labels: ["P2", "bug", "needs-triage"] },
     run,
@@ -298,14 +359,14 @@ test("githubFindingReporter creates a labeled issue cross-referenced to the task
   );
 });
 
-test("githubMarkPendingVerify relabels ready-for-agent → pending-verify on the issue", () => {
+test("githubMarkPendingVerify relabels ready-for-agent → pending-verify on the issue", async () => {
   const calls: string[][] = [];
-  const run = (args: string[]) => {
+  const run = async (args: string[]) => {
     calls.push(args);
     return "";
   };
 
-  githubMarkPendingVerify("jjforge/jjforge", run)("#640");
+  await githubMarkPendingVerify("jjforge/jjforge", run)("#640");
 
   assert.deepEqual(calls, [
     ["issue", "edit", "640", "--repo", "jjforge/jjforge", "--add-label", "pending-verify", "--remove-label", "ready-for-agent"],
@@ -314,7 +375,7 @@ test("githubMarkPendingVerify relabels ready-for-agent → pending-verify on the
 
 test("githubIssueComment posts a comment body to the given issue, stripping a leading #", async () => {
   const calls: string[][] = [];
-  const run = (args: string[]) => {
+  const run = async (args: string[]) => {
     calls.push(args);
     return "";
   };
@@ -335,4 +396,12 @@ test("githubIssueComment posts a comment body to the given issue, stripping a le
       "> *Parked-question answer relayed by vetinari.*\n**Q:** which format?\nuse JSON",
     ],
   ]);
+});
+
+test("githubIssueComment rejects when the gh write fails — a lost tracker write is never swallowed (#368)", async () => {
+  const run = async () => {
+    throw new Error("gh issue comment: not found");
+  };
+
+  await assert.rejects(() => githubIssueComment("jjforge/jjforge", run)("#226", "the answer"), /not found/);
 });

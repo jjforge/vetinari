@@ -599,16 +599,45 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
       updateFoot();
     });
     document.getElementById("prune-cancel").addEventListener("click", resetPrune);
+    // The route awaits the prune child (#365), so the confirm is in flight for as long as the
+    // prune runs: the form is aria-busy and Confirm reads pruning…, held disabled, as graft's.
+    const pruneConfirmBtn = pruneConfirm.querySelector(".prune-confirm-btn");
+    const pruneNote = document.getElementById("prune-note");
+    let confirmBusy = false;
+    const enterConfirmFlight = () => { pruneConfirm.setAttribute("aria-busy", "true"); pruneConfirmBtn.textContent = "pruning…"; pruneConfirmBtn.disabled = true; };
+    const clearConfirmFlight = () => { pruneConfirm.removeAttribute("aria-busy"); pruneConfirmBtn.textContent = "Confirm"; pruneConfirmBtn.disabled = false; };
     pruneConfirm.addEventListener("submit", async (event) => {
       event.preventDefault();
-      if (!pruneTaskId.value) return;
-      await fetch("/prune", {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ taskId: pruneTaskId.value, project: pruneProject.value, confirm: "1" }),
-      });
-      prunePanel.hidden = true;
-      document.getElementById("prune-note").textContent = "pruning… #" + pruneTaskId.value + " will drop from the plan on the next refresh";
+      if (confirmBusy || !pruneTaskId.value) return;
+      confirmBusy = true;
+      enterConfirmFlight();
+      try {
+        const res = await fetch("/prune", {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ taskId: pruneTaskId.value, project: pruneProject.value, confirm: "1" }),
+        });
+        if (res.status === 202) {
+          // Still running at the cap, left running: a persistent note in the panel, which
+          // stays shown (the note lives inside it) with the confirm put away.
+          pruneConfirm.hidden = true;
+          pruneNote.textContent = (await res.text()).trim();
+          return;
+        }
+        if (!res.ok) {
+          // A failed prune (502/400/404) is not a done one: show the route's own words in
+          // place of the closure and never claim the issue will drop from the plan.
+          pruneConfirmText.textContent = (await res.text()).trim() || "Couldn't prune #" + pruneTaskId.value + " — the prune did not run.";
+          return;
+        }
+        prunePanel.hidden = true;
+        pruneNote.textContent = "pruning… #" + pruneTaskId.value + " will drop from the plan on the next refresh";
+      } catch {
+        pruneConfirmText.textContent = "Couldn't reach the dashboard — the prune did not run.";
+      } finally {
+        confirmBusy = false;
+        clearConfirmFlight();
+      }
     });
   }`;
 

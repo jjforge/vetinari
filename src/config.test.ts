@@ -259,7 +259,16 @@ test("loadConfig accepts a notify map where question resolves to one destination
 test("resolveAgentSelection defaults to claude, its default model, and effort high when nothing is set (today's behavior)", () => {
   assert.deepEqual(resolveAgentSelection(undefined), {
     provider: "claude",
-    model: "claude-opus-4-8",
+    model: "claude-opus-5-5",
+    effort: "high",
+    resumable: true,
+  });
+});
+
+test("resolveAgentSelection takes pi's default model (claude-sonnet-5-5) when cfg names the provider but no model", () => {
+  assert.deepEqual(resolveAgentSelection({ provider: "pi" }), {
+    provider: "pi",
+    model: "claude-sonnet-5-5",
     effort: "high",
     resumable: true,
   });
@@ -275,9 +284,9 @@ test("resolveAgentSelection takes the provider default from cfg.agent, falling b
 });
 
 test("resolveAgentSelection honors an explicit model/effort on cfg.agent", () => {
-  assert.deepEqual(resolveAgentSelection({ provider: "pi", model: "claude-sonnet-4-6", effort: "xhigh" }), {
+  assert.deepEqual(resolveAgentSelection({ provider: "pi", model: "claude-sonnet-5-5", effort: "xhigh" }), {
     provider: "pi",
-    model: "claude-sonnet-4-6",
+    model: "claude-sonnet-5-5",
     effort: "xhigh",
     resumable: true,
   });
@@ -295,7 +304,7 @@ test("resolveAgentSelection lets a CLI override win over the cfg default (preced
 test("resolveAgentSelection does not leak the cfg's model/effort across a provider switch — they belonged to the other provider", () => {
   // cfg is claude with a claude model + a claude-only effort; overriding to codex must
   // fall to codex's own defaults, not carry the claude model or the (invalid-for-codex) effort.
-  assert.deepEqual(resolveAgentSelection({ provider: "claude", model: "claude-opus-4-8", effort: "max" }, { provider: "codex" }), {
+  assert.deepEqual(resolveAgentSelection({ provider: "claude", model: "claude-opus-5-5", effort: "max" }, { provider: "codex" }), {
     provider: "codex",
     model: AGENT_PROVIDERS.codex.defaultModel,
     effort: "high",
@@ -378,8 +387,8 @@ test("resolveAgentSelection rejects an unknown provider naming the supported set
 });
 
 test("parseAgentFlags pulls --agent/--model/--effort out of the args, leaving the rest untouched and in order", () => {
-  const { override, rest } = parseAgentFlags(["623", "--agent", "pi", "--effort", "xhigh", "--model", "claude-sonnet-4-6"]);
-  assert.deepEqual(override, { provider: "pi", effort: "xhigh", model: "claude-sonnet-4-6" });
+  const { override, rest } = parseAgentFlags(["623", "--agent", "pi", "--effort", "xhigh", "--model", "claude-sonnet-5-5"]);
+  assert.deepEqual(override, { provider: "pi", effort: "xhigh", model: "claude-sonnet-5-5" });
   assert.deepEqual(rest, ["623"]);
 });
 

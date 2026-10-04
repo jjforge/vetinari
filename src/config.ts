@@ -119,13 +119,13 @@ export const AGENT_PROVIDERS: Record<
 > = {
   // claude: today's behavior, unchanged — opus by default, Claude's low..max effort scale.
   claude: {
-    defaultModel: "claude-opus-4-8",
+    defaultModel: "claude-opus-5-5",
     efforts: ["low", "medium", "high", "xhigh", "max"],
     credentialKeys: ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"],
   },
   // pi drives Anthropic models; its effort maps to the CLI's --thinking (off..xhigh).
   pi: {
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: "claude-sonnet-5-5",
     efforts: ["off", "minimal", "low", "medium", "high", "xhigh"],
     credentialKeys: ["ANTHROPIC_API_KEY"],
   },

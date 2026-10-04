@@ -1482,6 +1482,33 @@ test("renderStatusPage hosts the prune affordance and inline confirm in the tap-
   assert.match(html, /method: "POST"/);
   assert.match(html, /pruning/);
 });
+test("prune's preview leg reads as in-flight while `prune --dry-run` shells — aria-busy + `previewing…`, guarded, cleared in a finally (#365)", () => {
+  const preview = ISSUE_DETAIL_SHEET_SCRIPT.slice(
+    ISSUE_DETAIL_SHEET_SCRIPT.indexOf('const prunePanel = document.getElementById("prune-panel")'),
+  );
+
+  // Entering flight marks the Prune button busy (a non-visual signal), relabels it and holds it disabled.
+  assert.match(
+    preview,
+    /const enterPreviewFlight = \(\) => \{[^}]*pruneStart\.setAttribute\("aria-busy", "true"\)[^}]*pruneStart\.textContent = "previewing…"[^}]*pruneStart\.disabled = true[^}]*\}/,
+  );
+  // A repeat click while the preview is in flight returns before a second fetch.
+  assert.match(
+    preview,
+    /pruneStart\.addEventListener\("click", async \(\) => \{\s*if \(previewBusy\) return;\s*previewBusy = true;\s*enterPreviewFlight\(\);[\s\S]*?fetch\("\/prune\?preview/,
+  );
+  // The clear runs in a finally, so a failed or thrown preview never leaves the button stuck.
+  assert.match(
+    preview,
+    /const clearPreviewFlight = \(\) => \{[^}]*pruneStart\.removeAttribute\("aria-busy"\)[^}]*pruneStart\.textContent = "Prune"[^}]*pruneStart\.disabled = false[^}]*\}/,
+  );
+  assert.match(preview, /fetch\("\/prune\?preview[\s\S]*?\} finally \{[^}]*previewBusy = false;[^}]*clearPreviewFlight\(\);[^}]*\}/);
+  // A failed preview shows the route's own text in place of the closure.
+  assert.match(
+    preview,
+    /fetch\("\/prune\?preview[\s\S]*?if \(!res\.ok\) \{[\s\S]*?pruneConfirmText\.textContent = \(await res\.text\(\)\)\.trim\(\)/,
+  );
+});
 test("renderStatusPage hosts a parked reply block with a Reply submit and no sheet Redrive form (#307, #325)", () => {
   const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
 

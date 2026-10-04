@@ -557,25 +557,42 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
         resetPrune();
       }
     };
+    // The preview shells prune --dry-run for seconds; while it is in flight the Prune
+    // button must read as working (#365), as graft's does: aria-busy, relabelled
+    // previewing… and held disabled, with a guard against a second fetch.
+    let previewBusy = false;
+    const enterPreviewFlight = () => { pruneStart.setAttribute("aria-busy", "true"); pruneStart.textContent = "previewing…"; pruneStart.disabled = true; };
+    const clearPreviewFlight = () => { pruneStart.removeAttribute("aria-busy"); pruneStart.textContent = "Prune"; pruneStart.disabled = false; };
     pruneStart.addEventListener("click", async () => {
+      if (previewBusy) return;
+      previewBusy = true;
+      enterPreviewFlight();
       try {
         const res = await fetch("/prune?preview&taskId=" + encodeURIComponent(pruneTarget) + "&project=" + encodeURIComponent(pruneProj));
-        if (!res.ok) throw new Error(String(res.status));
-        // The structured closure (E2): the dependents that would leave (dropped)
-        // and the banked work kept (keptBanked). Name each so a confirm discloses
-        // the exact closure and never implies merged/mergeable work is discarded.
-        const { target, dropped, keptBanked } = await res.json();
-        const drops = (dropped || []).filter((id) => id !== target);
-        const kept = keptBanked || [];
-        pruneConfirmText.textContent =
-          "Prune #" + target +
-          (drops.length ? " — also drops " + drops.map((id) => "#" + id).join(", ") : " — no dependents") +
-          (kept.length ? ". Keeps banked (merged or mergeable) " + kept.map((id) => "#" + id).join(", ") : "");
-        pruneTaskId.value = target;
-        pruneProject.value = pruneProj;
+        if (!res.ok) {
+          // A failed preview shows the route's own words in place of the closure.
+          pruneConfirmText.textContent = (await res.text()).trim() || "Couldn't preview this prune — is a campaign still running?";
+          pruneTaskId.value = "";
+        } else {
+          // The structured closure (E2): the dependents that would leave (dropped)
+          // and the banked work kept (keptBanked). Name each so a confirm discloses
+          // the exact closure and never implies merged/mergeable work is discarded.
+          const { target, dropped, keptBanked } = await res.json();
+          const drops = (dropped || []).filter((id) => id !== target);
+          const kept = keptBanked || [];
+          pruneConfirmText.textContent =
+            "Prune #" + target +
+            (drops.length ? " — also drops " + drops.map((id) => "#" + id).join(", ") : " — no dependents") +
+            (kept.length ? ". Keeps banked (merged or mergeable) " + kept.map((id) => "#" + id).join(", ") : "");
+          pruneTaskId.value = target;
+          pruneProject.value = pruneProj;
+        }
       } catch {
         pruneConfirmText.textContent = "Couldn't preview this prune — is a campaign still running?";
         pruneTaskId.value = "";
+      } finally {
+        previewBusy = false;
+        clearPreviewFlight();
       }
       pruneStart.hidden = true;
       pruneConfirm.hidden = false;

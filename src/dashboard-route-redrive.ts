@@ -3,6 +3,7 @@ import { buildStatus, campaignState, statusConfigFromPointer } from "./dashboard
 import { projectHasLiveCampaign } from "./host-slots.ts";
 import { redriveAllowed } from "./dashboard-visual-state.ts";
 import { readBody, type RouteHandler } from "./dashboard-http.ts";
+import { respondWithStartedChild } from "./dashboard-child.ts";
 
 /**
  * `POST /redrive` — the campaign redrive action (design §7, §11). Redrive picks up the
@@ -16,6 +17,10 @@ import { readBody, type RouteHandler } from "./dashboard-http.ts";
  * with a 409 and the one-line reason when the campaign is not stopped or a campaign process
  * still holds the host lease. The CLI's own refusal (§7) is the last line of defence, not the
  * first. Mirrors the `/prune` and `/answer` shell-the-CLI routes.
+ *
+ * Redrive runs until the campaign parks or finishes, so the route cannot await its exit
+ * (#369): it waits only the startup window, reporting a child that refuses or dies inside it
+ * and answering 202 "started" for one still running (see {@link respondWithStartedChild}).
  */
 export const handleRedrive: RouteHandler = async (req, res, url, deps) => {
   if (!(req.method === "POST" && url.pathname === "/redrive")) return false;
@@ -40,10 +45,6 @@ export const handleRedrive: RouteHandler = async (req, res, url, deps) => {
     res.writeHead(409).end(gate.reason);
     return true;
   }
-  deps.spawn(process.execPath, [...process.execArgv, process.argv[1], "redrive"], {
-    cwd: pointer.projectRoot,
-    stdio: ["ignore", "inherit", "inherit"],
-  });
-  res.writeHead(303, { location: `/?project=${encodeURIComponent(project)}` }).end();
+  await respondWithStartedChild(res, deps, pointer, ["redrive"]);
   return true;
 };

@@ -84,6 +84,9 @@ test("the issue sheet foot carries a reply-send button but no Redrive control â€
   // Reply submits the answer form; it shares the one move-button style with Prune.
   assert.match(markup, /<button type="submit" form="reply-form" id="reply-send" class="sheet-btn" hidden>Reply<\/button>/);
   assert.match(markup, /class="sheet-btn prune-start"/);
+  // Next to the reply form sits its inline status element â€” where a failed answer or the
+  // "started" note lands once the reply is sent by fetch (#369). Hidden until it has words.
+  assert.match(markup, /<\/form><p id="reply-status" class="reply-status" role="status" hidden><\/p><\/div>/);
   // The reply panel hoists the issue title and the elapsed time above the answer box.
   assert.match(markup, /<span class="reply-title" id="reply-title">/);
   assert.match(markup, /<span class="reply-elapsed" id="reply-elapsed">/);

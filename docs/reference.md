@@ -121,6 +121,7 @@ the container is `.vetinari.local/.env` (design §9, ADR 0011).
 | `.vetinari.local/routing.json` | this project's `destinations`/`notify` materialized for the gateway to read |
 | `.vetinari.local/logs/orchestrator.jsonl` | the event log — one JSON object per line, append-only for the life of a run (design §2.1) |
 | `.vetinari.local/logs/gate-<ts>.log` | full stdout/stderr of one gate run |
+| `.vetinari.local/logs/dashboard/<verb>-<ts>.log` | full stdout/stderr of one `redrive` or `answer` the dashboard started — a 202 "started" response names the file (not rotated) |
 | `.vetinari.local/logs/archive/orchestrator-<ts>.jsonl` | a finished run's log, moved aside on clean completion or `clear` (kept, never deleted) |
 | host config dir | the registry, the container lease, the `max-concurrent-containers` file, and the host log — beside each other, not per-project (e.g. `~/.config/vetinari/`) |
 | `<host config dir>/logs/host.jsonl` | host-level diagnostics: the `gateway`/`status` daemon's own events, appended across restarts |

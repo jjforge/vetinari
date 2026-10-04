@@ -267,6 +267,8 @@ export const ISSUE_DETAIL_SHEET_STYLES = `  .prune-panel { display: flex; align-
   .reply-option:hover { border-color: var(--color-primary); background: var(--color-primary-alpha-20); }
   .reply-option-letter { flex: none; width: 1.4em; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--color-text-light-2); }
   .reply-option-label { flex: 1; min-width: 0; }
+  .reply-status { margin: .4rem 0 0; color: var(--color-red); font-size: .85rem; }
+  .reply-status.reply-note { color: var(--color-blue); }
   .issue-detail-reply textarea { min-height: 5rem; margin: 0; }
   .sheet-actions { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; padding: .9rem 1.15rem; border-top: 1px solid var(--color-light-border); }
   /* A flex display beats the UA [hidden] rule, so these need it back explicitly. */
@@ -301,6 +303,7 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
   const replyOptions = document.getElementById("reply-options");
   const replyText = document.getElementById("reply-text");
   const replyForm = document.getElementById("reply-form");
+  const replyStatus = document.getElementById("reply-status");
   const sheetActions = document.querySelector(".sheet-actions");
   // The single moves rule (dashboard-visual-state.ts, #307), single-sourced into the
   // browser via .toString() so the node test and this script run the same function.
@@ -461,6 +464,8 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
     // one issue can never post as another's answer (#349).
     const issueKey = project + "#" + issue;
     if (boundIssueKey !== issueKey) replyText.value = "";
+    // A different issue's reply note or error goes with its draft.
+    if (boundIssueKey !== issueKey) replyStatus.hidden = true;
     boundIssueKey = issueKey;
     issueDetail.hidden = false;
     issueDetail.classList.add("show");
@@ -489,6 +494,45 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
       detailContext.textContent = project;
     }
   };
+  // The reply is sent by fetch so the route's answer reaches the sheet (#369): /answer waits a
+  // short startup window, so a refusal (409) or a child that dies starting (502) — an offline
+  // tracker write that would otherwise drop the answer silently — shows under the reply box in
+  // its own words with the typed reply kept for a retry; a child still running is a 202 note
+  // and the reply is cleared (it is in the parked record); a followed 303 goes to the board.
+  let replyBusy = false;
+  const enterReplyFlight = () => { replyForm.setAttribute("aria-busy", "true"); replySend.textContent = "sending…"; replySend.disabled = true; };
+  const clearReplyFlight = () => { replyForm.removeAttribute("aria-busy"); replySend.textContent = "Reply"; replySend.disabled = false; };
+  const showReplyErr = (text) => { replyStatus.classList.remove("reply-note"); replyStatus.textContent = text; replyStatus.hidden = false; };
+  const showReplyNote = (text) => { replyStatus.classList.add("reply-note"); replyStatus.textContent = text; replyStatus.hidden = false; };
+  replyForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (replyBusy) return;
+    replyBusy = true;
+    replyStatus.hidden = true;
+    enterReplyFlight();
+    try {
+      const res = await fetch("/answer", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams(new FormData(replyForm)),
+      });
+      if (res.status === 202) {
+        replyText.value = "";
+        showReplyNote((await res.text()).trim());
+        return;
+      }
+      if (!res.ok) {
+        showReplyErr((await res.text()).trim() || "The answer was not delivered.");
+        return;
+      }
+      location.assign(res.url);
+    } catch {
+      showReplyErr("Couldn't reach the dashboard — the answer was not delivered.");
+    } finally {
+      replyBusy = false;
+      clearReplyFlight();
+    }
+  });
   const prunePanel = document.getElementById("prune-panel");
   if (prunePanel) {
     const pruneStart = document.getElementById("prune-start");
@@ -1184,7 +1228,8 @@ export const GRAFT_SCRIPT = `  function graftVerdicts(closure) {
  * and closed by Escape/backdrop for free — closes without POSTing. Lives inside `#live-region`
  * (its enabled/disabled state tracks the live fold), so `wireRedrive` re-binds the fresh nodes
  * on every soft-refresh; a disabled button (no dialog rendered) is a no-op. Guarded against a
- * double bind so a re-run over the same node adds no second listener.
+ * double bind so a re-run over the same node adds no second listener. Confirm POSTs by fetch
+ * and reports the route's answer inside the dialog (#369).
  */
 export const REDRIVE_SCRIPT = `  function wireRedrive() {
     const open = document.querySelector("[data-redrive-open]");
@@ -1194,4 +1239,47 @@ export const REDRIVE_SCRIPT = `  function wireRedrive() {
     open.addEventListener("click", () => { if (typeof dialog.showModal === "function") dialog.showModal(); });
     const cancel = dialog.querySelector("[data-redrive-cancel]");
     if (cancel) cancel.addEventListener("click", () => dialog.close());
+    // Confirm is sent by fetch so the route's answer reaches the dialog (#369): it waits a
+    // short startup window, so a refusal (409) or a child that dies starting (502) shows here
+    // in its own words, a child still running is a 202 note, and a clean exit (a followed 303)
+    // goes to the board as the native form did. In flight the form is aria-busy and Confirm
+    // reads redriving…; after a 202 Confirm stays disabled so no second redrive fires from here.
+    const form = dialog.querySelector("[data-redrive-form]");
+    const confirm = dialog.querySelector("[data-redrive-confirm]");
+    const status = dialog.querySelector("[data-redrive-status]");
+    const showErr = (text) => { status.classList.remove("redrive-note"); status.textContent = text; status.hidden = false; };
+    const showNote = (text) => { status.classList.add("redrive-note"); status.textContent = text; status.hidden = false; };
+    let busy = false;
+    let started = false;
+    const enterFlight = () => { form.setAttribute("aria-busy", "true"); confirm.textContent = "redriving…"; confirm.disabled = true; };
+    const clearFlight = () => { form.removeAttribute("aria-busy"); confirm.textContent = "Redrive"; confirm.disabled = started; };
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (busy || started) return;
+      busy = true;
+      status.hidden = true;
+      enterFlight();
+      try {
+        const res = await fetch("/redrive", {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams(new FormData(form)),
+        });
+        if (res.status === 202) {
+          started = true;
+          showNote((await res.text()).trim());
+          return;
+        }
+        if (!res.ok) {
+          showErr((await res.text()).trim() || "The redrive did not start.");
+          return;
+        }
+        location.assign(res.url);
+      } catch {
+        showErr("Couldn't reach the dashboard — the redrive did not start.");
+      } finally {
+        busy = false;
+        clearFlight();
+      }
+    });
   }`;

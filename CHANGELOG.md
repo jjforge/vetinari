@@ -42,8 +42,16 @@ Within a milestone each bold section label appears at most once.
 - [user] The landing card and the cross-repo parked queue now count parked records by the same rule as the project page: a record for an issue outside the current campaign's plan, in a closed wave, or from a superseded campaign no longer makes a finished project read PARKED. When the live log is empty, every surviving record still counts (#379).
 - [user] The dashboard's Redrive control and `POST /redrive` now allow a redrive for a campaign stopped between waves — a wave completed and a later wave not yet entered, as pruning a wave's last parked issue leaves it — instead of greying out with "no campaign to redrive" (#366).
 
+**Security:**
+- [user] The dashboard now refuses browser-borne requests before any route runs: a `Host` that is not an IP literal, `localhost`, or an allowlisted name gets a 403 (closing DNS rebinding), and a request whose `Origin` is not the dashboard's own `http(s)://<Host>` gets a 403 (closing a cross-site POST to `/answer`, `/prune`, `/graft` or `/redrive`). Requests with no `Origin`, such as curl, are unaffected (#361).
+- [ops] New `VETINARI_STATUS_ALLOWED_HOSTS` (comma-separated, case-insensitive) admits a MagicDNS or reverse-proxy name for both `vetinari status` and the gateway's dashboard; a reverse proxy must pass the original `Host` through (#361).
+- [ops] Binding the dashboard to a non-loopback address now prints a warning line after the URL line that it is unauthenticated and must be reached only over a private overlay network or an authenticating reverse proxy; the bind still proceeds (#361).
+
 **Code quality:**
 - [internal] Every copy of the issue-id normalizer now calls the shared `normalize` in `issue-id.ts`, which also gains a shared `hash` (render an id as `#n`). Ids with surrounding whitespace now normalize the same way at every call site. The browser-shipped `humanizeHostLine` keeps its own inlined `hash` (#377).
+
+**Documentation:**
+- [internal] ADR 0021 records the dashboard's posture — unauthenticated by design, private network or reverse proxy only — with design §11 and a new `docs/operations.md` section on exposing the dashboard (#361).
 
 ### Log-review skill and a code formatter — October 4, 2026
 

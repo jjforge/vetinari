@@ -55,14 +55,15 @@ Waves, campaigns and the project card roll up from their issues in this order: f
 | `crash` | the run died with no verdict | redrive |
 | `stopped` | you stopped the run (Ctrl-C / SIGTERM) before it reached a verdict; its work is kept | `vetinari run <id>` for a standalone run, or redrive a campaign |
 
-**Your five moves.** These are the only things a human ever does to a campaign:
+**Your six moves.** These are the only things a human ever does to a campaign:
 
 1. **Answer** a question. The answer is delivered to the parked issue; the campaign — live, or picked up by the answer — puts the issue back to work with it and continues on its own. You do not answer and then separately ask it to continue.
 2. **Prune** an issue — and everything that depends on it — out of the plan. Against a running campaign it takes effect at the next wave boundary; the wave in flight finishes. Work already merged is never undone; a pruned issue's branch is kept.
 3. **Graft** issues in. Each one lands in the **earliest unstarted wave** that comes after its blockers and whose members touch none of its files — only a `blocked_by` link or a shared file ever pushes it later. The wave in flight is never touched.
 
 4. **Fix forward** by hand on the base (resolve a conflict, repair a red base).
-5. **Redrive** the campaign: pick it up where it stopped. A redrive never redoes work that already merged, and it lands work that is green but not yet merged instead of re-running it. After a prune, a graft, a fix-forward, a crash, or a failure, redrive is how the campaign moves again.
+5. **Redrive** the campaign: pick it up where it stopped. A redrive never redoes work that already merged, and it lands work that is green but not yet merged instead of re-running it. After a prune, a graft, a fix-forward, a crash, a failure, or a stop, redrive is how the campaign moves again.
+6. **Stop** a running campaign: pause it. The wave in flight finishes (or, with `--now`, its runs stop at once and keep their work), and a redrive resumes it.
 
 ## A campaign, start to finish
 
@@ -75,7 +76,15 @@ Waves, campaigns and the project card roll up from their issues in this order: f
 6. **Next wave** starts from the advanced base. Repeat.
 7. **Done.** The run is archived and the project card reads idle, showing the last run's outcome, its campaign name and when it finished; tap the card and that run is at the top of the project's archived list. Pushing the base is yours.
 
-When something stops the campaign, you take one of the five moves. An answer continues it by itself; the other moves are followed by a redrive.
+When something stops the campaign, you take one of the six moves. An answer continues it by itself; the other moves are followed by a redrive.
+
+## Stopping a campaign
+
+`vetinari stop` (or Ctrl-C in the campaign's terminal) stops it **gracefully**: no new wave starts, but the wave in flight finishes — its runs go on to their verdicts and its greens still merge and gate as normal. The campaign then parks with reason `stopped` before the next wave and exits `2`. If that wave parks or fails on its own, that reason stands instead; if it was the last wave, the campaign simply completes.
+
+`vetinari stop --now` (or a second Ctrl-C, or closing the campaign's terminal) stops it **at once**: every run in flight stops and parks itself `stopped`, keeping its branch and worktree, the wave skips integration, and the campaign parks `stopped` on that wave. No child `run` or sandbox container outlives the stop. Running `vetinari stop` again while a graceful stop is pending only tells you so; `--now` still upgrades it.
+
+Either way the dashboard shows the campaign parked (`stopped`), not crashed, and the terminal prints the command that picks it up: `vetinari redrive`. The redrive merges the stopped wave's banked greens without re-running them, re-runs the members a `--now` stop interrupted (resuming their sessions where it can), and carries on with the waves that never started.
 
 ## Where you see things
 

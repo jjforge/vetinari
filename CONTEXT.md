@@ -142,7 +142,7 @@ A person stopped the run (SIGINT/SIGTERM) before it reached a verdict; its work 
 kept. It cannot be answered: `vetinari run <id>` continues a standalone run,
 [[redrive]] continues a campaign.
 
-### The five moves
+### The six moves
 
 The only things a human does to a [[campaign]].
 
@@ -171,6 +171,12 @@ Pick an unfinished [[campaign]] back up where it stopped: reconcile the log, the
 continue. Never redoes merged work, and lands green-but-unmerged work rather than
 re-running it. Resume is one path through it, not a synonym.
 _Avoid_: restart, recover, re-run, resume (as the umbrella).
+
+**Stop**:
+Pause a running [[campaign]]: the [[wave]] in flight finishes (or, with `--now`,
+its runs stop at once and keep their work), and a [[redrive]] resumes it. A
+stopped campaign is [[parked]] with reason [[stopped]].
+_Avoid_: kill, abort, cancel, halt.
 
 ### Roll-ups
 

@@ -145,7 +145,7 @@ the Telegram gateway.
 The README stops at your first hour.
 
 - **[`docs/user-guide.md`](docs/user-guide.md)** — the operator's model: what
-  vetinari is for, the issue states and park reasons, your five moves, and how to
+  vetinari is for, the issue states and park reasons, your six moves, and how to
   write an issue that can run unattended.
 - **[`docs/design.md`](docs/design.md)** — current implementation truth: the data
   model, the run and campaign loops, integration, redrive, and where the code

@@ -82,11 +82,12 @@ The event vocabulary after consolidation (§13.2) is small and uses the user's w
 | `base-gate` | `index`, `green`, `detail` | integrator |
 | `wave-done` | `index`, `merged` | campaign — only when every member is `completed` |
 | `grace-wait` | `seconds`, `tasks` | campaign (§5 step 3) |
-| `campaign-parked` / `campaign-failed` | `index`, `reason` (`red-base`, `question`, `stalled`, `conflict` — the wave's reason, written by the code that stopped), `detail` | campaign — the two stop markers |
+| `campaign-parked` / `campaign-failed` | `index`, `reason` (`red-base`, `question`, `stalled`, `conflict`, `stopped` — the wave's reason, written by the code that stopped; `stopped` is an operator stop, §5), `detail` | campaign — the two stop markers |
 | `campaign-done` | `waves` | campaign |
 | `prune` | `target`, `removed`, `dropped` | prune |
 | `graft` | `ids`, `blockedBy`, `basenames`, `titles?` | graft |
 | `redrive` | `fromWave`, `landed`, `skipped` | campaign |
+| `stop-requested` | `index` (the wave in flight) | campaign (§5) — the first stop request it took; the reducer ignores it, `vetinari stop` reads it to tell a stop already pending (one after the latest `campaign-start` with no stop marker after it) |
 
 Diagnostic rows (`gate`, `gate-check`, `gate-result`, `commit`, `tool`, `sandbox-exec`, sandbox setup, hook failures) are activity, not state: the reducer ignores them, the issue sheet and live tail read them. Two rules:
 
@@ -185,6 +186,13 @@ For each wave:
    - otherwise log `wave-done` and continue.
 6. On the last wave: log `campaign-done`, notify, archive the run, exit zero. Once the campaign is running, every exit code is set by its outcome: zero only for `campaign-done`. A campaign refused before it runs (no ids, the interactive under-specified stop, a missing resolver) has no outcome and exits `4`.
 
+**Stopping.** An operator stops a running campaign with `vetinari stop` (which signals the campaign process the project's lease names) or a signal on the campaign itself; the campaign's handler decides, and each child `run` sits in its own process group so a terminal's Ctrl-C or hang-up reaches only the campaign. The first stop request logs `stop-requested`.
+
+- **Graceful** (`stop`, a first SIGINT): no wave starts after the one in flight. That wave drains, integrates, gates and resolves exactly as above (skipping only the grace wait), so a failure, red base or member park stands with its own reason. If the wave closes and was the last, `campaign-done` as normal; otherwise log `campaign-parked { index: <next wave>, reason: stopped }` before its `wave-start`, notify, exit `2`. A request outside a drain is handled the same way.
+- **Now** (`stop --now` → SIGTERM, a second SIGINT, or SIGHUP): spawn and re-admit nothing more, SIGTERM every child `run` (each parks itself `stopped` with its worktree kept, exiting `2`) and wait for them all; skip the grace wait, integration, the changelog fold and the labels; then log `campaign-parked { index: <in-flight wave>, reason: stopped }`, unless a member `failed`, which still outranks it (`campaign-failed`). A now-stop never breaks into integration — outside a drain it is a graceful one.
+
+A `campaign-parked{stopped}` is a wave-level hold on the wave it names (like `red-base`), so the campaign reads `parked`, not idle or crashed; that wave's next `wave-start` clears it. A `vetinari redrive` resumes it (§7).
+
 The exit is deliberate: a paused campaign holds no container budget and no state that is not on disk, so keeping a process alive to wait for a human buys latency, not correctness. The durable path (§7) is the mechanism; the grace window (`parkGraceSeconds`, §9) is an optimization on top of it — a fast answer means the wave never parked at all — and is part of this plan, not a maybe.
 
 ## 6. Integration
@@ -197,7 +205,7 @@ For a wave's greens, in order:
 
 ## 7. Redrive
 
-Redrive is the umbrella act of picking an unfinished campaign back up: reconcile what the log says, then continue. `answer` triggers it implicitly for a `question` or `stalled` park; `vetinari redrive` triggers it explicitly after a prune, graft, fix-forward, crash, or failure. Resume-from-here is one path through it, not a separate concept — the CLI, dashboard, notices and glossary all say _redrive_.
+Redrive is the umbrella act of picking an unfinished campaign back up: reconcile what the log says, then continue. `answer` triggers it implicitly for a `question` or `stalled` park; `vetinari redrive` triggers it explicitly after a prune, graft, fix-forward, crash, failure, or stop (§5). Resume-from-here is one path through it, not a separate concept — the CLI, dashboard, notices and glossary all say _redrive_.
 
 Reconciliation, per member of the first wave that is not fully `completed`:
 
@@ -209,6 +217,7 @@ Reconciliation, per member of the first wave that is not fully `completed`:
 | `parked(conflict)` after the human resolved it on the base | integrate |
 | `parked(red-base)` after a fix-forward | re-gate the base — even when nothing new merges — then continue; when the re-gate is green, every member of the wave merged onto the base (including those merged before the park) gets the merged hook (`onIssueMerged`) once |
 | `parked(crash)` | treat as unstarted if no commits, else resume the session |
+| `parked(stopped)` | re-run — a stopped record never holds the wave; the child consumes it, resuming the session when it can |
 | `failed` | refused — prune it or fix it first; redrive names it. `redrive --override` re-runs it instead (the only meaning `--override` has on redrive) |
 | `pruned` membership | skipped |
 | `unstarted` / `grafted` | run |
@@ -266,7 +275,7 @@ The user guide names three properties as the value. This table sorts every curre
 
 | Surface | Verdict | Reason |
 | --- | --- | --- |
-| `init`, `install`, `build`, `baseline`, `run`, `answer`, `campaign`, `redrive`, `prune <issue>`, `graft`, `parked`, `clear` | **core** | the loop and the five moves |
+| `init`, `install`, `build`, `baseline`, `run`, `answer`, `campaign`, `redrive`, `prune <issue>`, `graft`, `stop`, `parked`, `clear` | **core** | the loop and the six moves |
 | `gateway` (+ `install/status/start/stop/restart`), `tg-test`, `status` | **core** | where the user sees and answers things |
 | `campaign --dry-run`, `--name`, `--on-underspecified` | core | planning is the safety net |
 | `--auto-prune` | optional | a policy flag on one park reason |

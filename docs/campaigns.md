@@ -3,7 +3,7 @@
 vetinari runs `ready-for-agent` tickets through its own `campaign` mode in
 dependency-ordered waves. This is the repo-specific companion to the operator's
 model in [`user-guide.md`](user-guide.md) — "A campaign, start to finish" and the
-five moves — and the mechanism in [`design.md`](design.md) §4–§7. It names the
+six moves — and the mechanism in [`design.md`](design.md) §4–§7. It names the
 moves and the invariants; for the exhaustive flag and mode list see
 [`reference.md`](reference.md).
 
@@ -74,7 +74,7 @@ campaign park or stop as failed.
 Integration is **non-atomic** (ADR 0013): a stopped wave is never rolled back.
 Work stops in one of the settled states — a member `failed` (it could not go
 green, terminal until you change something), or a member `parked` with the
-**reason** that says what happened and which of the five moves it asks of you:
+**reason** that says what happened and which of the six moves it asks of you:
 
 - **`conflict`** — a green branch conflicts with the base at merge. That one issue
   is parked with its branch, worktree and session intact; every green already
@@ -94,8 +94,9 @@ green, terminal until you change something), or a member `parked` with the
   investigates a park and prints the move it recommends.
 
 A parked or failed campaign holds no live state — everything is on disk. You take
-one of the **five moves** — answer, prune, graft, fix forward, redrive
-([`user-guide.md`](user-guide.md)) — and continue. An answer resumes the campaign
+one of the **six moves** — answer, prune, graft, fix forward, redrive, stop
+([`user-guide.md`](user-guide.md)) — and continue. A campaign you stopped
+(`vetinari stop`, Ctrl-C) is parked `stopped` and resumes with `vetinari redrive`. An answer resumes the campaign
 by itself; the other moves are followed by `vetinari redrive`, which picks the
 campaign up where it stopped, redoing no already-merged issue and integrating work
 that is green but not yet merged rather than re-running it. A parked wave folds no

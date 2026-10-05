@@ -106,6 +106,8 @@ export async function runGates(
       exitCode: res.exitCode,
       seconds: Math.round((Date.now() - t0) / 1000),
       outFile,
+      // Logged so slow-gate detection and the dashboard read the budget off the log, never config (#445).
+      ...(g.budgetSeconds !== undefined ? { budgetSeconds: g.budgetSeconds } : {}),
     };
     cfg.log.log("gate-result", resultFields);
     if (taskId) appendActivity(cfg.stateDir, taskId, event("gate-result", resultFields));

@@ -89,7 +89,7 @@ exported for custom wiring.
 | `project` | this project's name in the host registry, dashboard, and notices |
 | `image` | the agent image name — built from `vetinari/Dockerfile`, used by `build`/`baseline`/`run`/`campaign` alike |
 | `baseBranch` | the branch merges land on (the base a campaign advances) |
-| `gates` | the test commands that decide green; `{ cmd, label?, when? }` — `when` scopes a gate to branches that touched matching files |
+| `gates` | the test commands that decide green; `{ cmd, label?, when?, budgetSeconds? }` — `when` scopes a gate to branches that touched matching files; `budgetSeconds` is how long the gate should take, and a run over it (green or red) is flagged as a [slow gate](user-guide.md#where-you-see-things) — information only, never a verdict |
 | `setup` | commands run once per sandbox, before the agent starts (e.g. `npm ci`) |
 | `mounts` | host paths mounted into the container — shared package caches, never build outputs |
 | `agent` | the default provider selection (`provider`, `model`, `effort`); a per-invocation `--agent`/`--model`/`--effort` overrides it |
@@ -180,6 +180,7 @@ The event log (`logs/orchestrator.jsonl`) is one JSON object per line,
 | `graft` | `ids`, `blockedBy`, `fileKeys`, `titles?` | graft |
 | `redrive` | `fromWave`, `landed?`, `skipped?` | campaign |
 | `stop-requested` | `index` (the wave in flight) | campaign — an operator asked it to stop; the reducer ignores it, `vetinari stop` reads it to tell a stop already pending |
+| `gate-result` | `taskId?` (absent on the merged-base gate), `cmd`, `exitCode`, `seconds`, `outFile`, `budgetSeconds?` (the gate's budget, when it sets one) | the gate — a diagnostic row (below): the reducer ignores it; slow-gate detection reads `seconds` and `budgetSeconds` off it |
 
 Diagnostic rows — `gate`, `gate-check`, `gate-result`, `commit`, `tool`, `sandbox-exec`,
 sandbox setup, hook failures — are activity, not state: the reducer ignores them;

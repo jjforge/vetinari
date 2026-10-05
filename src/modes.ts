@@ -4,6 +4,7 @@ import type { ResolvedConfig } from "./config.ts";
 import type { CampaignDoneEvent, CampaignStartEvent, WaveDoneEvent, WaveStartEvent } from "./event-log.ts";
 import { describeFragmentNearMisses } from "./changelog.ts";
 import { runGates } from "./gate.ts";
+import { readSlowGateLogs, slowGatesAtSettle } from "./slow-gates.ts";
 import { agentSelectionFor, makeSandbox } from "./sandbox.ts";
 import { branchHasCommits, collectWaveChangelog, currentBranch, integrateGreens } from "./merge.ts";
 import { clearParked, enqueueOutbound, hasParked, isAnswered, listParked, park, readParked, type ParkReason } from "./state.ts";
@@ -20,6 +21,7 @@ import {
   formatPlan,
   formatResume,
   formatResumeNothing,
+  formatSlowGates,
   formatStop,
   formatWaveDone,
   formatWaveStart,
@@ -60,6 +62,16 @@ const named = (name?: string): string => (name ? ` “${name}”` : "");
  * spawn (which inherits the env) reports the same way its parent does (#299).
  */
 const envReporter = (): Reporter => makeReporter({ json: process.env.VETINARI_JSON === "1" });
+
+/**
+ * Print a settling wave's slow-gate lines (#445) beside its settle line — the wave-done or the stop.
+ * Read off the project's whole gate history (every archive, then the live log) after the settle marker
+ * is logged; information only, so nothing a campaign decides reads it.
+ */
+const reportSlowGates = (cfg: ResolvedConfig, reporter: Reporter): void => {
+  const { archives, live } = readSlowGateLogs(cfg.stateDir, cfg.logFile);
+  for (const line of formatSlowGates(slowGatesAtSettle([...archives.flat(), ...live]))) reporter.line(line);
+};
 
 /**
  * Resolve each issue's title through the orchestrator's `fetchTask`, keyed by
@@ -1172,6 +1184,7 @@ export async function campaign(
         cfg.log.log("campaign-failed", { index, detail: `${failed.join(", ")} failed` });
         enqueueOutbound(cfg, campaignFailedNotice(cfg.project, index + 1, merged, failed, cfg.baseBranch));
         reporter.line(formatStop({ kind: "failed", index, total, failed, merged }));
+        reportSlowGates(cfg, reporter);
         return "failed";
       }
 
@@ -1182,6 +1195,7 @@ export async function campaign(
         cfg.log.log("campaign-parked", { index, reason: "red-base", detail: parked!.detail });
         enqueueOutbound(cfg, campaignParkedNotice(cfg.project, index + 1, merged, cfg.baseBranch, parked!.detail));
         reporter.line(formatStop({ kind: "red-base", index, total, merged }));
+        reportSlowGates(cfg, reporter);
         return "parked";
       }
 
@@ -1197,6 +1211,7 @@ export async function campaign(
         });
         enqueueOutbound(cfg, campaignStoppedNotice(cfg.project, index + 1, merged, cfg.baseBranch));
         reporter.line(formatStop({ kind: "stopped", index, total, merged }));
+        reportSlowGates(cfg, reporter);
         return "parked";
       }
 
@@ -1257,6 +1272,7 @@ export async function campaign(
             reporter.line(formatStop({ kind: "issue-parked", index, total, parked: parkedTasks, merged }));
           }
         }
+        reportSlowGates(cfg, reporter);
         return "parked";
       }
 
@@ -1278,6 +1294,7 @@ export async function campaign(
         }),
       );
       reporter.line(formatWaveDone(index, total, { merged }));
+      reportSlowGates(cfg, reporter);
     }
 
     const doneEvent: Omit<CampaignDoneEvent, "ts" | "event"> = { waves: index };

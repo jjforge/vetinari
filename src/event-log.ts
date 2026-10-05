@@ -236,7 +236,9 @@ export interface GateCheckEvent extends BaseEvent {
 
 /** `gate-result` — one gate command finished: its cmd, exit code, wall-clock seconds, and the captured
  * output file. Carries `taskId` when a per-task run drove it (loop.ts); the wave-merge gate omits it.
- * Part of the shared union for the live-tail activity stream (ADR 0015) (gate.ts). */
+ * Carries the gate's `budgetSeconds` when it sets one, so slow-gate detection reads the budget from the
+ * log, never from config (slow-gates.ts). Part of the shared union for the live-tail activity stream
+ * (ADR 0015) (gate.ts). */
 export interface GateResultEvent extends BaseEvent {
   event: "gate-result";
   taskId?: string;
@@ -244,6 +246,7 @@ export interface GateResultEvent extends BaseEvent {
   exitCode: number;
   seconds: number;
   outFile: string;
+  budgetSeconds?: number;
 }
 
 /** `tool` — a file-operation tool-use the agent invoked, recovered by projecting the raw run stream

@@ -8,7 +8,7 @@ import type { Sandbox } from "./sandbox.ts";
 import { runGates, selectGates, tapFailures } from "./gate.ts";
 import { activityLogPath } from "./activity.ts";
 import { loggerForRun, tail } from "./log.ts";
-import type { OrchestratorEvent } from "./event-log.ts";
+import { readEventLog, type GateResultEvent, type OrchestratorEvent } from "./event-log.ts";
 
 // Fixtures mirror the scoped gates the field actually sees (issue #240): the
 // example config's `rust` gate scoped to the sidecar/vendored-jj tree, and the
@@ -124,6 +124,20 @@ test("the wave-merge gate (no taskId) writes no per-task activity — not even a
   const sbx = gateSandbox({ "tsc --noEmit": 0 });
   await runGates(cfg, sbx, { all: true });
   assert.equal(existsSync(activityLogPath(cfg.stateDir, "any")), false);
+});
+
+test("a gate-result carries the gate's budgetSeconds when the gate sets one, and omits it otherwise (#445)", async () => {
+  const cfg = gateCfg([{ cmd: "tsc --noEmit" }, { cmd: "run-tests", budgetSeconds: 300 }]);
+  await runGates(cfg, gateSandbox({}), { all: true });
+  const results = readEventLog(cfg).filter((e): e is GateResultEvent => e.event === "gate-result");
+  assert.deepEqual(
+    results.map((e) => [e.cmd, e.budgetSeconds]),
+    [
+      ["tsc --noEmit", undefined],
+      ["run-tests", 300],
+    ],
+  );
+  assert.equal("budgetSeconds" in results[0], false, "no budgetSeconds key on a gate without a budget");
 });
 
 test("a stop while a check runs: runGates resolves, runs no further check and records nothing for either (#474)", async () => {

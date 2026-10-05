@@ -6,6 +6,7 @@ import {
   formatPlan,
   formatResume,
   formatResumeNothing,
+  formatSlowGates,
   formatStop,
   formatWaveDone,
   formatWaveStart,
@@ -173,4 +174,21 @@ test("a --json reporter suppresses human lines (raw events go to the log echo in
 test("a stopped stop names the wave, the stop, and `vetinari redrive` (#403)", () => {
   const out = formatStop({ kind: "stopped", index: 1, total: 3, merged: ["101"] });
   assert.equal(out, "🅿 campaign parked at wave 2/3 — stopped; merged #101 kept, 1 wave not started\n" + "recover: `vetinari redrive`");
+});
+
+test("formatSlowGates names a history flag's gate, both medians and the runs behind each (#445)", () => {
+  const lines = formatSlowGates({
+    history: [{ cmd: "make test", earlierMedian: 60, earlierRuns: 40, currentMedian: 228.5, currentRuns: 3 }],
+    budget: [],
+  });
+  assert.deepEqual(lines, ["🐢 slow gate `make test` — median 229s over 3 runs this campaign, up from 60s over 40 earlier runs"]);
+});
+
+test("formatSlowGates names a budget overrun's gate, its budget and how many of the wave's runs went over (#445)", () => {
+  const lines = formatSlowGates({ history: [], budget: [{ cmd: "make test", budgetSeconds: 300, over: 2, runs: 5 }] });
+  assert.deepEqual(lines, ["🐢 slow gate `make test` — 2 of 5 runs this wave went over its 300s budget"]);
+});
+
+test("formatSlowGates prints nothing when no gate is slow", () => {
+  assert.deepEqual(formatSlowGates({ history: [], budget: [] }), []);
 });

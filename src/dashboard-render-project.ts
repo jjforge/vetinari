@@ -8,6 +8,7 @@ import {
   waveLabel,
 } from "./dashboard-model.ts";
 import { festiveWaveName } from "./festive-names.ts";
+import type { SlowGates } from "./slow-gates.ts";
 import type { LogDotState } from "./log-view.ts";
 import {
   ARCHIVE_LIST_SCRIPT,
@@ -307,6 +308,27 @@ const renderArchiveRow = (run: ArchivedRunView, open: boolean, festive = false) 
 };
 
 /**
+ * The "Slow gates" section (CONTEXT.md → Slow gate, #445): one line per flag on the latest
+ * campaign — the same facts the terminal prints at a wave settle, over the whole campaign. Empty
+ * when no gate is flagged, so the section shows only when there is something to see. Rendered at
+ * page load only; it is not part of the live region an SSE flush redraws.
+ */
+const renderSlowGates = (slow?: SlowGates) => {
+  if (!slow || (!slow.history.length && !slow.budget.length)) return "";
+  const items = [
+    ...slow.history.map(
+      (h) =>
+        `<li><code>${escapeHtml(h.cmd)}</code> — median ${Math.round(h.currentMedian)}s over ${h.currentRuns} runs this campaign, up from ${Math.round(h.earlierMedian)}s over ${h.earlierRuns} earlier runs</li>`,
+    ),
+    ...slow.budget.map(
+      (b) =>
+        `<li><code>${escapeHtml(b.cmd)}</code> — ${b.over} of ${b.runs} ${b.runs === 1 ? "run" : "runs"} this campaign went over its ${b.budgetSeconds}s budget</li>`,
+    ),
+  ];
+  return `<section class="slow-gates"><h2>Slow gates</h2><ul>${items.join("")}</ul></section>`;
+};
+
+/**
  * The archived-runs list under the shared log-view chrome (#256): the same `.tail-head`
  * control bar the live-tail / feed / host-log carry — an "Archived runs" static title and
  * a substring filter (`data-archive-filter`) — over a scrollable pane of one `.lv-row`
@@ -376,6 +398,9 @@ export interface StatusPageOptions {
   /** The base branch a redrive lands on, read live from the project checkout by the page —
    * named in the Redrive confirm dialog. Absent leaves the dialog saying "the base branch". */
   baseBranch?: string;
+  /** The latest campaign's slow gates (#445), computed by the page from the project's whole gate
+   * history; the "Slow gates" section renders only when one is flagged. Absent renders none. */
+  slowGates?: SlowGates;
 }
 
 /**
@@ -608,6 +633,7 @@ ${ISSUE_DETAIL_SHEET_STYLES}
      wave picks the issue up, ADR 0007) — the "fade" is that lifecycle, not an animation. */
   .wave.has-grafted { border-top-color: var(--color-primary); }
   .parked-issues { margin: 1rem 0 2rem; }
+  .slow-gates { margin: 1.5rem 0; }
   .parked-issues > h2 { display: flex; align-items: baseline; flex-wrap: wrap; gap: .35rem; }
   .parked-count { color: var(--color-yellow); }
   .parked-card { display: block; text-decoration: none; color: inherit; background: var(--color-card); border: 1px solid var(--color-secondary); border-left: 3px solid var(--color-yellow); border-radius: var(--border-radius-medium); padding: .8rem 1rem; margin: .5rem 0; box-shadow: 0 8px 22px #0004; }
@@ -674,6 +700,7 @@ ${
 }
 ${renderWaves(status, Boolean(opts.prune), true, true, undefined, Boolean(opts.festive))}</div>
 ${renderLiveTail(status)}
+${renderSlowGates(opts.slowGates)}
 ${opts.archivedRuns?.length ? renderArchivedRuns(opts.selected ?? status.project, opts.archivedRuns, opts.archivedRun, Boolean(opts.festive)) : ""}
 ${issueDetailSheetMarkup(Boolean(opts.prune))}${
   // No-JS fallback: a plain server-side form per prunable issue that reaches

@@ -45,8 +45,11 @@ export type FileSetOf = (ticket: string) => FileSet | Promise<FileSet>;
 
 /**
  * A cited path in an issue body: either a backtick-wrapped token or a bare
- * slash-separated path. Prose in backticks (e.g. `campaign`) is rejected below
- * unless it also looks like a filename, so ordinary words do not become cites.
+ * slash-separated path. On a marker line every backticked token is a cite — the
+ * marker already says "these are files", so an extensionless `Makefile` or a dotfile
+ * `.gitignore` counts (#477). Off a marker line (the whole-body fallback), prose in
+ * backticks (e.g. `campaign`) is rejected below unless it is path-shaped, so ordinary
+ * words do not become cites.
  */
 const CITE_RE = /`([^`\n]+)`|((?:[\w.\-]+\/)+[\w.\-]+)/g;
 /** A bare filename with an alphabetic extension, e.g. `stack_strip.tmpl`. */
@@ -59,8 +62,12 @@ const FILENAME_RE = /^[\w.\-]+\.[A-Za-z][\w-]*$/;
  */
 const LINE_SUFFIX_RE = /:\d+(?::\d+)?$/;
 
-/** The cited paths in a body, cleaned but not reduced (deduped by path, in order). */
-function citedPaths(body: string): string[] {
+/**
+ * The cited paths in a body, cleaned but not reduced (deduped by path, in order).
+ * `onMarkerLine` takes every backticked token as a cite; without it a token counts
+ * only if it is path-shaped (a `/`, or a name with an extension).
+ */
+function citedPaths(body: string, onMarkerLine = false): string[] {
   const seen = new Set<string>();
   // Authoring tools sometimes fence the marker's cites in backslash-escaped backticks
   // (`\`src/foo.ts\``), which render as plain backticks but leave a stray `\` the
@@ -72,18 +79,19 @@ function citedPaths(body: string): string[] {
     // is path-shaped and resolves to the real file rather than an unmatchable
     // `host-slots.ts:329` the tree never contains (#388).
     const raw = (m[1] ?? m[2]).trim().replace(LINE_SUFFIX_RE, "");
-    // A backtick token counts only if it is path-shaped, not just any word.
-    if (!raw.includes("/") && !FILENAME_RE.test(raw)) continue;
+    if (!raw) continue;
+    // Off a marker line, a backtick token counts only if it is path-shaped, not just any word.
+    if (!onMarkerLine && !raw.includes("/") && !FILENAME_RE.test(raw)) continue;
     seen.add(raw);
   }
   return [...seen];
 }
 
-/** The cited paths in a body, each reduced to its basename (deduped, in order). Used
- *  for `Creates:` cites, which name files not yet in the tree and so cannot resolve to
- *  a real path — they stay basenames and collide by basename, as they always have. */
-function citedBasenames(body: string): string[] {
-  return [...new Set(citedPaths(body).map((raw) => basename(raw)))];
+/** The cited paths on a marker tail, each reduced to its basename (deduped, in order).
+ *  Used for `Creates:` cites, which name files not yet in the tree and so cannot resolve
+ *  to a real path — they stay basenames and collide by basename, as they always have. */
+function citedBasenames(tail: string): string[] {
+  return [...new Set(citedPaths(tail, true).map((raw) => basename(raw)))];
 }
 
 /**
@@ -121,7 +129,7 @@ function markerTail(body: string, marker: RegExp): string | null {
  */
 function markerPaths(body: string, marker: RegExp): string[] | null {
   const tail = markerTail(body, marker);
-  return tail === null ? null : citedPaths(tail);
+  return tail === null ? null : citedPaths(tail, true);
 }
 
 /**
@@ -138,10 +146,13 @@ function markerCites(body: string, marker: RegExp): string[] | null {
  * True when `text` carries an anchored `Touches:`/`Files:`/`Creates:` marker line
  * from which the resolver would extract at least one cite. Reuses the same parser
  * the resolver reads with, so "has a marker" here means exactly what the resolver
- * would act on — an anchored line present but whose cites do not parse (only non-path
- * prose, e.g. a bare `campaign` word) yields `[]`, not a real marker, so it does NOT
- * shadow a resolvable marker the ticket carries in a comment. (Escaped backticks are
- * normalized away before tokenizing, so they now parse to a real cite — see #249.)
+ * would act on. Every backticked token on a marker line is a cite, so a line citing
+ * only a non-file word (e.g. `campaign`) IS a marker: it shadows any marker the ticket
+ * carries in a comment, and the ticket resolves not confident — the author's explicit
+ * declaration cites a non-file, which should halt the planner, not be quietly
+ * overridden (#477). Only an anchored line with no cite at all (no backticked token,
+ * no slash path) is not a marker here. (Escaped backticks are normalized away before
+ * tokenizing, so they parse to a real cite — see #249.)
  */
 function hasMarkerLine(text: string): boolean {
   const touches = markerCites(text, TOUCHES_RE);

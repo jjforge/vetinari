@@ -362,13 +362,13 @@ test("ticketProse resolves an escaped-backtick body marker directly, no comment 
   assert.equal(res.confident, true);
 });
 
-test("ticketProse still falls back to a comment marker when the body's marker cites only prose", () => {
+test("ticketProse lets a body marker citing only a non-file word shadow a comment marker (#477)", () => {
   const root = treeWith("src/fileset.ts");
   const fileSet = defaultFileSet(root);
 
-  // The body marker cites only a non-path word (`campaign`), which is not a cite even
-  // after normalization, so it is not a marker the resolver would act on and must not
-  // shadow the resolvable marker living in the comment.
+  // Every backticked token on a marker line is a cite, so the body's `campaign` is a
+  // real marker: the author's explicit declaration wins over the comment, and since it
+  // cites a non-file the planner must halt rather than quietly take the comment's.
   const task = JSON.stringify({
     title: "Fix",
     body: "Touches (existing files): the `campaign` planner",
@@ -377,8 +377,8 @@ test("ticketProse still falls back to a comment marker when the body's marker ci
 
   const res = fileSet(ticketProse(task));
 
-  assert.deepEqual(res.files, ["src/fileset.ts"]);
-  assert.equal(res.confident, true);
+  assert.deepEqual(res.files, []);
+  assert.equal(res.confident, false);
 });
 
 test("defaultFileSet strips a trailing :line off a cite before resolving it (#388)", () => {
@@ -519,5 +519,73 @@ test("defaultFileSet reads only the marker line's cites, ignoring incidental pro
   );
 
   assert.deepEqual(res.files.sort(), ["src/cli.mts", "src/fileset.ts"]);
+  assert.equal(res.confident, true);
+});
+
+test("defaultFileSet resolves extensionless and dotfile marker cites against the tree (#477)", () => {
+  const root = treeWith("Makefile", ".gitignore", "CLAUDE.md");
+
+  // A marker line already says "these are files", so `Makefile` (no dot) and
+  // `.gitignore` (nothing before its dot) are cites, not prose to skip.
+  const res = defaultFileSet(root)("Touches (existing files): `Makefile`, `.gitignore`, `CLAUDE.md`\n");
+
+  assert.deepEqual(res.files.sort(), [".gitignore", "CLAUDE.md", "Makefile"]);
+  assert.equal(res.confident, true);
+});
+
+test("defaultFileSet is not confident when an extensionless marker cite is absent from the tree (#477)", () => {
+  const root = treeWith("CLAUDE.md");
+  const fileSet = defaultFileSet(root);
+
+  // Beside a resolvable cite, the absent `Nosuchfile` must still forbid confidence.
+  const mixed = fileSet("Touches: `Nosuchfile`, `CLAUDE.md`\n");
+  assert.deepEqual(mixed.files, ["CLAUDE.md"]);
+  assert.equal(mixed.confident, false);
+
+  const alone = fileSet("Touches: `Nosuchfile`\n");
+  assert.deepEqual(alone.files, []);
+  assert.equal(alone.confident, false);
+});
+
+test("defaultFileSet's whole-body fallback still ignores a backticked prose word (#477)", () => {
+  const root = treeWith("src/plan.ts");
+
+  // No marker line, so the path-shape filter stays: `campaign` is prose, not a file.
+  const res = defaultFileSet(root)("Reworks the `campaign` planner in `src/plan.ts`.");
+
+  assert.deepEqual(res.files, ["src/plan.ts"]);
+  assert.equal(res.confident, true);
+});
+
+test("defaultFileSet counts an extensionless Creates: cite, tree-exempt (#477)", () => {
+  const root = treeWith("src/plan.ts");
+
+  const res = defaultFileSet(root)("Creates (new files): `Dockerfile`\n");
+
+  assert.deepEqual(res.files, ["Dockerfile"]);
+  assert.equal(res.confident, true);
+});
+
+test("ticketProse + defaultFileSet resolve an extensionless cite on a comment marker line (#477)", () => {
+  const root = treeWith("Makefile", "src/plan.ts");
+
+  const task = JSON.stringify({
+    title: "Fix the build",
+    body: "The build target is wrong.",
+    comments: [{ body: "Touches: `Makefile`\n" }],
+  });
+
+  const res = defaultFileSet(root)(ticketProse(task));
+
+  assert.deepEqual(res.files, ["Makefile"]);
+  assert.equal(res.confident, true);
+});
+
+test("defaultFileSet recovers an extensionless marker cite fenced by escaped backticks (#477)", () => {
+  const root = treeWith("Makefile");
+
+  const res = defaultFileSet(root)("Touches (existing files): \\`Makefile\\`\n");
+
+  assert.deepEqual(res.files, ["Makefile"]);
   assert.equal(res.confident, true);
 });

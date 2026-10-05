@@ -62,6 +62,7 @@ Within a milestone each bold section label appears at most once.
 - [ops] The per-wave changelog collect commit no longer sweeps in a file the operator had already staged: it commits only `CHANGELOG.md` and the collected fragments, and anything else in the index stays staged (#459, #364).
 - [user] On phones the live-tail header's controls row now shrinks to fit the pane: at ~375–400px the download button was still pushed out of view and clipped (#460, #336).
 - [user] A `--now` stop (a second Ctrl-C, SIGTERM or SIGHUP) now signals a member re-admitted after the grace window, and the wave parks `stopped` instead of the campaign hanging on that run; a stop requested during the grace wait now ends the wait at once (#461, #403).
+- [user] A run that is stopped while its gate is running now parks `stopped` at once instead of waiting for the gate, and a gate that would have gone green no longer swallows the stop; a stopped run also starts no further turn (no nudge, no red-gate resume) (#462, #431).
 
 **Security:**
 - [user] The dashboard now refuses browser-borne requests before any route runs: a `Host` that is not an IP literal, `localhost`, or an allowlisted name gets a 403 (closing DNS rebinding), and a request whose `Origin` is not the dashboard's own `http(s)://<Host>` gets a 403 (closing a cross-site POST to `/answer`, `/prune`, `/graft` or `/redrive`). Requests with no `Origin`, such as curl, are unaffected (#361).

@@ -1436,6 +1436,65 @@ test("defaultLoopDeps.onStop adds exactly one SIGINT and one SIGTERM listener fo
   assert.equal(process.listenerCount("SIGTERM"), beforeTerm, "the SIGTERM listener is removed after runLoop returns");
 });
 
+// A stop-capable sandbox whose gate fires the stop while it runs, then takes `gateMs` to finish.
+const stopInGateSandbox = (script: StopTurn[], control: ReturnType<typeof makeStopControl>, gateMs: number) => {
+  const sbx = stopSandbox(script, control);
+  const exec = sbx.exec.bind(sbx);
+  sbx.exec = async (cmd) => {
+    if (cmd.startsWith("git ")) return exec(cmd);
+    control.fire("SIGTERM");
+    await sleepMs(gateMs);
+    return exec(cmd);
+  };
+  return sbx;
+};
+
+test("a stop during a green gate parks `stopped`: the gate is not awaited and no green is logged (#462)", async () => {
+  const cfg = harnessCfg();
+  const control = makeStopControl();
+  const sbx = stopInGateSandbox([{ run: { completionSignal: "<promise>COMPLETE</promise>" }, green: true }], control, 2000);
+
+  const t0 = Date.now();
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { onStop: control.onStop })));
+
+  assert.equal(outcome, "parked");
+  assert.ok(Date.now() - t0 < 1500, "the stop did not wait out the gate");
+  const events = readEventLog(cfg);
+  assert.equal(
+    events.some((e) => e.event === "green"),
+    false,
+    "a stopped run never logs green",
+  );
+  assert.equal(events.filter((e) => e.event === "parked" && (e as any).reason === "stopped").length, 1);
+  assert.ok(sbx.state.closeCalled >= 1, "the sandbox was closed");
+});
+
+test("a stop during a red gate starts no further turn (#462)", async () => {
+  const cfg = { ...harnessCfg(), maxTurns: 6 };
+  const control = makeStopControl();
+  const sbx = stopInGateSandbox([{ run: { completionSignal: "<promise>COMPLETE</promise>" }, green: false }], control, 0);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { onStop: control.onStop })));
+
+  assert.equal(outcome, "parked");
+  assert.equal(sbx.runCalls.length, 1, "no turn started after the stop");
+  const events = readEventLog(cfg);
+  assert.equal(events.filter((e) => e.event === "turn").length, 1);
+  assert.equal(events.filter((e) => e.event === "parked" && (e as any).reason === "stopped").length, 1);
+});
+
+test("a stop during a no-signal turn sends no nudge (#462)", async () => {
+  const cfg = { ...harnessCfg(), maxTurns: 6 };
+  const control = makeStopControl();
+  const sbx = stopSandbox([{ fireStop: "SIGTERM", run: { completionSignal: undefined } }], control);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { onStop: control.onStop })));
+
+  assert.equal(outcome, "parked");
+  assert.equal(sbx.runCalls.length, 1, "the nudge turn was never started");
+  assert.equal(listParked(cfg)[0].reason, "stopped");
+});
+
 test("a `stopped` record resumes its session (crashResumePrompt) when resumable + sessionId + commitsAhead>0", async () => {
   const cfg = harnessCfg({ agent: { provider: "claude" }, promptFile: "/prompts/tdd.md" } as any);
   await park(cfg, { taskId: "T-1", reason: "stopped", detail: "SIGINT", sessionId: "prev-sess", branch: "agent/T-1", question: "stopped" });

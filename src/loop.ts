@@ -421,6 +421,9 @@ export async function runLoop(
         // the same promptFile path turn 0 uses — re-reading the issue via fetchTask, its prior work
         // visible as commits already on the branch, with `reentry` appended to the issue text (#212).
         const nextTurn = async (sessionId: string | undefined, prompt: string, reentry: string) => {
+          // A stop that landed since the last turn starts no new one — not the nudge, not a red
+          // resume (#462). `stoppable` alone would race only after the turn had already begun.
+          if (stopped()) throw new StopRequested();
           if (resumable) {
             if (!sessionId) throw new Error("no session id to resume — cannot drive the TDD loop");
             return stoppable(sbx!.run({ ...common, maxIterations: 1, resumeSession: sessionId, prompt }));
@@ -500,7 +503,9 @@ export async function runLoop(
               return "parked";
             }
 
-            const { green, report } = await runGates(cfg, sbx, { taskId });
+            // Raced against the stop like a turn (#462): a stop mid-gate parks `stopped` at once rather
+            // than waiting out the gate, and a gate that would have gone green never logs a verdict.
+            const { green, report } = await stoppable(runGates(cfg, sbx, { taskId }));
             if (green) {
               cfg.log.log("green", { taskId, branch: sbx.branch, commits: (r.commits ?? []).map((c: any) => c.sha) });
               // The human GREEN banner is the terminal view (design §11); under --json the screen is

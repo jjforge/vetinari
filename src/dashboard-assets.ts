@@ -540,6 +540,7 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
     const pruneConfirmText = pruneConfirm.querySelector(".prune-confirm-text");
     const pruneTaskId = pruneConfirm.querySelector('input[name="taskId"]');
     const pruneProject = pruneConfirm.querySelector('input[name="project"]');
+    const pruneNote = document.getElementById("prune-note");
     let pruneTarget = null;
     let pruneProj = null;
     const resetPrune = () => {
@@ -551,6 +552,8 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
     // the issue the sheet just opened (ADR 0005); a non-prunable issue hides it.
     onOpenIssue = (prunable, project, issue) => {
       prunePanel.hidden = !prunable;
+      // A note written for one issue never carries over to the next one opened (#448).
+      pruneNote.textContent = "";
       if (prunable) {
         pruneTarget = issue;
         pruneProj = project;
@@ -602,7 +605,6 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
     // The route awaits the prune child (#365), so the confirm is in flight for as long as the
     // prune runs: the form is aria-busy and Confirm reads pruning…, held disabled, as graft's.
     const pruneConfirmBtn = pruneConfirm.querySelector(".prune-confirm-btn");
-    const pruneNote = document.getElementById("prune-note");
     let confirmBusy = false;
     const enterConfirmFlight = () => { pruneConfirm.setAttribute("aria-busy", "true"); pruneConfirmBtn.textContent = "pruning…"; pruneConfirmBtn.disabled = true; };
     const clearConfirmFlight = () => { pruneConfirm.removeAttribute("aria-busy"); pruneConfirmBtn.textContent = "Confirm"; pruneConfirmBtn.disabled = false; };
@@ -630,8 +632,12 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
           pruneConfirmText.textContent = (await res.text()).trim() || "Couldn't prune #" + pruneTaskId.value + " — the prune did not run.";
           return;
         }
-        prunePanel.hidden = true;
+        // Done: as the 202, the panel stays shown so its note is seen (#448), with the confirm
+        // and Prune put away so no second prune starts from this sheet.
+        pruneConfirm.hidden = true;
+        pruneStart.hidden = true;
         pruneNote.textContent = "pruning… #" + pruneTaskId.value + " will drop from the plan on the next refresh";
+        updateFoot();
       } catch {
         pruneConfirmText.textContent = "Couldn't reach the dashboard — the prune did not run.";
       } finally {

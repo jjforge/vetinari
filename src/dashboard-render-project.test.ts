@@ -1661,6 +1661,34 @@ test("prune's confirm branches on res.ok — a failed prune shows the route's te
     "failure returns before the success note",
   );
 });
+test("prune's confirm success keeps the panel (which holds the note) shown, puts away the confirm and Prune, then updates the foot (#448)", () => {
+  // The bug: the success branch hid #prune-panel and then wrote the note into #prune-note,
+  // a child of that panel, so the acknowledgement was never seen.
+  const submit = ISSUE_DETAIL_SHEET_SCRIPT.slice(ISSUE_DETAIL_SHEET_SCRIPT.indexOf('fetch("/prune", {'));
+  const success = submit.slice(submit.indexOf("if (!res.ok)"), submit.indexOf("} catch {"));
+  const afterFailure = success.slice(success.indexOf("return;"));
+
+  // The success branch never hides the panel, before or after the note.
+  assert.doesNotMatch(afterFailure, /prunePanel\.hidden = true/);
+  // It writes the note, puts away the confirm and the Prune button so no second prune starts…
+  assert.match(
+    afterFailure,
+    /pruneNote\.textContent = "pruning… #" \+ pruneTaskId\.value \+ " will drop from the plan on the next refresh";/,
+  );
+  assert.match(afterFailure, /pruneConfirm\.hidden = true;/);
+  assert.match(afterFailure, /pruneStart\.hidden = true;/);
+  // …and only then updates the foot, so it reflects what is on screen.
+  const foot = afterFailure.indexOf("updateFoot();");
+  assert.ok(foot > afterFailure.indexOf("pruneConfirm.hidden = true;"), "updateFoot after the confirm is hidden");
+  assert.ok(foot > afterFailure.indexOf("pruneStart.hidden = true;"), "updateFoot after Prune is hidden");
+});
+test("opening an issue clears the prune note, prunable or not, so no earlier issue's note carries over (#448)", () => {
+  const open = ISSUE_DETAIL_SHEET_SCRIPT.slice(ISSUE_DETAIL_SHEET_SCRIPT.indexOf("onOpenIssue = (prunable, project, issue) => {"));
+  const body = open.slice(0, open.indexOf("\n    };"));
+  // The clear sits outside the prunable branch, so a non-prunable open clears it too.
+  const outsideBranch = body.slice(0, body.indexOf("if (prunable)")) + body.slice(body.lastIndexOf("}"));
+  assert.match(outsideBranch, /pruneNote\.textContent = "";/);
+});
 test("renderStatusPage hosts a parked reply block with a Reply submit and no sheet Redrive form (#307, #325)", () => {
   const html = renderStatusPage({ project: "demo", waves: [], parked: [] });
 

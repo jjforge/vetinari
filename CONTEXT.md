@@ -33,6 +33,11 @@ Your test commands. The orchestrator runs them after every COMPLETE and again on
 the merged base; green is the only signal that an issue is done. A red gate
 resumes the same agent with the output.
 
+**Slow gate**:
+A [[gate]] whose recent green runs take well over its historical median, or that
+ran over its budget. Information only — it never changes a verdict.
+_Avoid_: regression (that is a test that broke), perf alert.
+
 **Campaign**:
 A set of [[issue]]s planned into [[wave]]s and run wave by wave — the unit you
 launch, watch and pick back up.

@@ -90,9 +90,6 @@ export function waveMembersLabel(index: number, titles: string[]): string {
   return titles.length ? `${base} — ${titles.join(", ")}` : base;
 }
 
-/** The `Campaign “X” — ` prefix a named campaign/wave event leads with, so an unnamed run
- * (or an old log row) degrades to the nameless wording rather than rendering `Campaign “” —`. */
-
 /**
  * Narrate one event log entry as the single plain-words line the landing card
  * shows for "the last event". A `turn` renders its agent-authored summary verbatim

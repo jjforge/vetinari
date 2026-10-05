@@ -258,13 +258,6 @@ export async function buildStatusWithIssueNames(cfg: ResolvedConfig): Promise<Ca
   return status;
 }
 
-/**
- * The slice of a `ResolvedConfig` that `buildStatus` actually reads, synthesized
- * from a registry pointer's base location. The gateway is a dumb router (ADR
- * 0002): it never imports a project's TS config, it reads the same state files
- * (`logs/`, `parked/`) the run wrote under the base location — the paths a full
- * config's `loadConfig` would have derived from `stateDir`.
- */
 /** The orchestrator event log inside a project's base location — the file the
  * gateway reads to reconstruct a project's campaign without its TS config. */
 export const logFileOf = (baseLocation: string) => join(baseLocation, "logs", "orchestrator.jsonl");
@@ -284,7 +277,9 @@ export const archiveStatusConfig = (project: string, archiveFile: string): Resol
   }) as ResolvedConfig;
 
 /** The `ResolvedConfig` slice a registry pointer resolves to — the paths a full config's
- * `loadConfig` would derive from its base location (ADR 0002). Exported so the live-update
+ * `loadConfig` would derive from its base location (ADR 0002). The gateway never imports a
+ * project's TS config; it reads the same state files (`logs/`, `parked/`) the run wrote under
+ * the base location. Exported so the live-update
  * route can build a project's `buildLiveTail`/`buildStatus` off its pointer without its TS
  * config, exactly as `buildAllStatus` does internally. */
 export const statusConfigFromPointer = (pointer: ProjectPointer): ResolvedConfig =>

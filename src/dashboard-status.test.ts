@@ -908,6 +908,27 @@ test("stopPending reads a stop-requested after the latest campaign-start with no
   assert.equal(stopPending([start, wave]), false);
 });
 
+test("stopPending drops a stale stop-requested from a campaign that died once a redrive logs a wave-start (#463)", () => {
+  const start = event("campaign-start", { waves: [["201"], ["202"]], slots: 1 });
+  const wave = event("wave-start", { index: 0, tasks: ["201"] });
+  const spawn = event("spawn", { taskId: "201", running: 1, left: 1 });
+  const request = event("stop-requested", { index: 0 });
+  // The campaign took the request and died with no stop marker; a redrive is a new process.
+  const stale = [start, wave, spawn, request, wave, spawn];
+  assert.equal(stopPending(stale), false);
+  assert.equal(
+    stopPending([
+      ...stale,
+      event("wave-done", { index: 0, merged: ["201"] }),
+      event("redrive", { fromWave: 0 }),
+      event("wave-start", { index: 1, tasks: ["202"] }),
+    ]),
+    false,
+  );
+  // A request on the redriven run is that run's stop.
+  assert.equal(stopPending([start, wave, request, wave, request]), true);
+});
+
 test("buildStatus carries the stop pending flag off the event log (#432)", () => {
   const dir = join(tmpdir(), `vetinari-stop-pending-${Date.now()}`);
   const start = event("campaign-start", { waves: [["201"]], slots: 1 });

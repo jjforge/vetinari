@@ -259,6 +259,37 @@ test("under 640px the shared .tail-head wraps so the title keeps one line and th
   );
 });
 
+// The base (outside any @media) declarations of one LIVE_TAIL_STYLES rule: base rules each open
+// their own line, while the 640px overrides sit inside an `@media (…) {` line.
+function baseTailRule(selector: string): string {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const m = LIVE_TAIL_STYLES.match(new RegExp(`^  ${escaped} \\{([^}]*)\\}`, "m"));
+  assert.ok(m, `no base ${selector} rule`);
+  return m[1];
+}
+
+test("above 640px the shared .tail-head wraps too, so the title never wraps just above the breakpoint (#475)", () => {
+  // At ~641–760px the one-row head (title, summary, dropdown, filter, pause, download) didn't fit
+  // and the title wrapped to two lines. The base head now wraps at every width instead.
+  assert.match(baseTailRule(".tail-head"), /flex-wrap: wrap;/);
+});
+
+test("the shared .tail-title keeps to one line at every width (#475)", () => {
+  // The head wraps instead of the title — not only under 640px.
+  assert.match(baseTailRule(".tail-title"), /white-space: nowrap;/);
+});
+
+test("the shared agent/project dropdown trigger keeps to one line at every width (#475)", () => {
+  // Just above 640px the .tail-issue-trigger wrapped alongside the title.
+  assert.match(baseTailRule(".tail-issue-trigger"), /white-space: nowrap;/);
+});
+
+test("the shared .tail-controls stay right-aligned when the head wraps them to a second row (#475)", () => {
+  // On a wrapped row the .tail-gap spacer is left behind on the first line, so the controls push
+  // themselves right.
+  assert.match(baseTailRule(".tail-controls"), /margin-left: auto;/);
+});
+
 test("REDRIVE_SCRIPT opens the confirm dialog on click and closes it on Cancel — only enabled, no double-bind (#325)", () => {
   // The greyed-until-safe Redrive control (design §11): enabled, its button opens the native
   // <dialog> (Cancel the default); Cancel closes without POSTing. It is a no-op when disabled.

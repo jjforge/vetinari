@@ -17,8 +17,18 @@ import { hostLogger, type Logger } from "./log.ts";
  * - `crash`    — reconciliation found a dead run with no stop marker since the latest `wave-start`; redrive.
  * - `stopped`  — a person stopped the run (SIGINT/SIGTERM) before it reached a verdict; its work is
  *   kept. It cannot be answered — `vetinari run <id>` continues a standalone run, a redrive a campaign.
+ * - `outdated-agent` — the image's agent CLI is too old for the model; rebuild the image (`vetinari
+ *   build`), then redrive. Like `stopped`, it cannot be answered.
  */
-export type ParkReason = "question" | "stalled" | "conflict" | "red-base" | "crash" | "stopped";
+export type ParkReason = "question" | "stalled" | "conflict" | "red-base" | "crash" | "stopped" | "outdated-agent";
+
+/**
+ * The park reasons that ask nothing (#444): a record that is never announced per issue, cannot be
+ * answered, holds no grace wait, and is consumed when the run next starts — a redrive (or
+ * `vetinari run <id>`) re-runs it. `stopped` (a person stopped it) and `outdated-agent` (rebuild
+ * the image first).
+ */
+export const UNASKED_PARK_REASONS: ReadonlySet<ParkReason> = new Set(["stopped", "outdated-agent"]);
 
 export interface ParkedRecord {
   taskId: string;

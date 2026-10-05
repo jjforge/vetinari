@@ -1585,3 +1585,106 @@ test("a `stopped` record runs fresh on the kept branch when commitsAhead is 0 at
   assert.equal(sbx.runCalls[0].promptFile, "/prompts/tdd.md", "a fresh promptFile run on the kept branch");
   assert.equal(hasParked(cfg, "T-1"), false, "no stopped record remains");
 });
+
+// Claude Code's own refusal when the image's CLI is older than the model needs, in sandcastle's
+// `AgentError` shape: a `claude-code exited …:` first line, the API error on the second (#444).
+const OUTDATED_CLAUDE =
+  "claude-code exited with code 1:\nAPI Error: 400 Claude Code 2.1.239 does not support this model; version 2.1.280 or newer is required. Run 'claude update', or reinstall.\n";
+
+test("a claude run whose agent call throws the outdated-CLI error parks `outdated-agent`, not failed — detail the matched API Error line (#444)", async () => {
+  const cfg = harnessCfg({ agent: { provider: "claude" } } as any);
+  const sbx = fakeSandbox([{ throwGeneric: OUTDATED_CLAUDE }]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+
+  assert.equal(outcome, "parked");
+  const events = readEventLog(cfg);
+  assert.equal(events.filter((e) => e.event === "parked" && (e as any).reason === "outdated-agent").length, 1);
+  assert.equal(
+    events.some((e) => e.event === "failed"),
+    false,
+  );
+  const [rec] = listParked(cfg);
+  assert.equal(rec.reason, "outdated-agent");
+  assert.equal(
+    rec.detail,
+    "API Error: 400 Claude Code 2.1.239 does not support this model; version 2.1.280 or newer is required. Run 'claude update', or reinstall.",
+  );
+  assert.equal(rec.branch, "agent/T-1");
+  assert.match(rec.question, /vetinari build/);
+});
+
+test("an outdated-agent park records the last finished turn's session (#444)", async () => {
+  const cfg = harnessCfg({ agent: { provider: "claude" } } as any);
+  const sbx = fakeSandbox([
+    { run: { completionSignal: DONE, commits: [{ sha: "abc" }] }, green: false },
+    { throwGeneric: OUTDATED_CLAUDE },
+  ]);
+
+  await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+
+  assert.equal(listParked(cfg)[0].sessionId, "sess-0");
+});
+
+test("the outdated-CLI error text under a provider with no pattern (pi, codex) still logs failed (#444)", async () => {
+  for (const provider of ["pi", "codex"]) {
+    const cfg = harnessCfg({ agent: { provider } } as any);
+    const sbx = fakeSandbox([{ throwGeneric: OUTDATED_CLAUDE }]);
+
+    const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+
+    assert.equal(outcome, "failed", provider);
+    assert.equal(listParked(cfg).length, 0, provider);
+  }
+});
+
+test("a standalone outdated-agent park prints `vetinari build`, then `vetinari run <id>` as its next step (#444)", async () => {
+  const cfg = harnessCfg({ agent: { provider: "claude" } } as any);
+  const sbx = fakeSandbox([{ throwGeneric: OUTDATED_CLAUDE }]);
+
+  const prevChild = process.env.VETINARI_CHILD;
+  delete process.env.VETINARI_CHILD;
+  let captured: { result: string; lines: string[] };
+  try {
+    captured = await captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+  } finally {
+    if (prevChild === undefined) delete process.env.VETINARI_CHILD;
+    else process.env.VETINARI_CHILD = prevChild;
+  }
+
+  const banner = captured.lines.join("\n");
+  assert.match(banner, /\*\*\* PARKED \(outdated-agent\)/);
+  assert.match(banner, /vetinari build[\s\S]*vetinari run T-1/);
+  assert.doesNotMatch(banner, /vetinari answer/);
+});
+
+test("an `outdated-agent` record is consumed at start like a `stopped` one — resumes its session when it can (#444)", async () => {
+  const cfg = harnessCfg({ agent: { provider: "claude" }, promptFile: "/prompts/tdd.md" } as any);
+  await park(cfg, {
+    taskId: "T-1",
+    reason: "outdated-agent",
+    detail: "API Error",
+    sessionId: "prev-sess",
+    branch: "agent/T-1",
+    question: "rebuild",
+  });
+  const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc" }] }, green: true }]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { commitsAhead: () => 1 })));
+
+  assert.equal(outcome, "green");
+  assert.equal(sbx.runCalls[0].resumeSession, "prev-sess");
+  assert.equal(hasParked(cfg, "T-1"), false, "the outdated-agent record is consumed and cleared");
+});
+
+test("an `outdated-agent` record with no session runs fresh and is cleared (#444)", async () => {
+  const cfg = harnessCfg({ agent: { provider: "claude" }, promptFile: "/prompts/tdd.md" } as any);
+  await park(cfg, { taskId: "T-1", reason: "outdated-agent", detail: "API Error", branch: "agent/T-1", question: "rebuild" });
+  const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc" }] }, green: true }]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+
+  assert.equal(outcome, "green");
+  assert.equal(sbx.runCalls[0].resumeSession, undefined);
+  assert.equal(hasParked(cfg, "T-1"), false);
+});

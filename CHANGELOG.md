@@ -26,6 +26,7 @@ Within a milestone each bold section label appears at most once.
 
 **Improvements:**
 - [ops] The issue conventions now say a ticket that adds, removes or renames a command or flag, or changes its `--help` text, lists the CLI files on its `Touches:` line: `src/help.ts`, `docs/reference.md` when the `MODES` table changes, and `src/cli-dispatch.ts` (post-config command) or `src/cli.mts` (host-level command, or a new dependency handed to `dispatch`). `/fileset` infers those files for such a change, and `/check-brief` reports a marker missing them under Other findings, so co-wave tickets that both edit the help file no longer collide at merge unannounced (#468).
+- [user] `campaign --dry-run` now closes with every selected ticket's resolved file-set and `confident` verdict — one line per ticket, for a one-issue selection too, and printed before the refusal when the plan halts on an under-specified ticket — so a triager can check what the planner will read without running a campaign (#476).
 
 **Bug fixes:**
 - [ops] The per-wave changelog collect no longer throws on a fragment that was staged but never committed; that case broke with the staged-file fix, after the wave had merged (#473, #459).
@@ -45,6 +46,7 @@ Within a milestone each bold section label appears at most once.
 - [ops] The config template and the user guide now say to order gates cheapest first (generate/format, lint, then tests) and how to keep a test gate fast (#446).
 - [internal] The design doc's risky-control rule (§11 and appendix A) now records that for Stop only the Stop now button wears the risky-action coral; the Stop button and Stop's shared confirm dialog stay neutral, matching the dashboard (#471).
 - [api] The event-kind tables in `docs/reference.md` and design §2.1 now match what the event log writes: `taskId` (not `task`), `slots` on `campaign-start`, `merged?` on `wave-done`, `fileKeys` (not `basenames`) on `graft`, `name?` on `campaign-done`, a `grace-wait` row, separate `campaign-parked`/`campaign-failed` rows, optional fields marked `?`, and corrected emitters for `parked`, `failed`, and `prune` (#454).
+- [user] New `docs/ticket-contract.md`: the one consumer-facing page on what vetinari reads from a ticket (where the file-set marker is read, its syntax, dependencies, labels read and written, what the agent sees) and how to self-check it with `campaign --dry-run`; `docs/issue-conventions.md` and the `/fileset` and `/check-brief` skills now link to it instead of restating it (#476).
 
 ### Agents told how findings reach the host — October 4, 2026
 

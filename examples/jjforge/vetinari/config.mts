@@ -1,6 +1,5 @@
 // Real config from the project this harness was extracted from — a Go fork plus
 // a Rust sidecar, tasks sourced from GitHub issues.
-import { resolve } from "node:path";
 import { defineConfig, githubTracker } from "vetinari";
 
 export default defineConfig({
@@ -48,11 +47,4 @@ export default defineConfig({
   ...githubTracker({ findingLabels: ["P2", "bug", "needs-triage"] }),
 
   toolchainProbe: "go version && cargo --version && sccache --version && claude --version && git --version",
-
-  // Sandcastle writes safe.directory host-side and needs a writable global git
-  // config; this machine's real one is a read-only nix store symlink. It must
-  // stay OUT of .vetinari.local/.env — that file is injected into the container,
-  // where any GIT_CONFIG_GLOBAL overrides the HOME the fork's own git tests
-  // depend on, failing modules/git and models/asymkey.
-  hostEnv: { GIT_CONFIG_GLOBAL: resolve(".vetinari.local/gitconfig") },
 });

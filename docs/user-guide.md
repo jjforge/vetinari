@@ -162,7 +162,7 @@ The agent can reach only its branch. Everything else goes through the orchestrat
   - **Throwaway test databases need no durability.** Turn fsync off for them.
   - **Migrate once, copy per test.** Build a migrated test database once per run and copy it for each test instead of migrating per test.
   - **Run tests in parallel, and enforce it.** Add a lint rule that requires it, so new tests do not drift back to running serially.
-- **Only `.env` reaches the container.** Anything the host needs but the agent must not see — a bot token, `GIT_CONFIG_GLOBAL` — lives in `host.env` or `hostEnv`.
+- **Only `.env` reaches the container.** Anything the host needs but the agent must not see — a bot token, a `GIT_TERMINAL_PROMPT` override — lives in `host.env` or `hostEnv`.
 - **Cap containers at the host level.** Gates are CPU-bound and agents share your account's rate limits. A lone project fills the ceiling; contending projects share it, with a floor of one. Mark a project's importance with `containerShare: high | medium | low` in its `config.mts` — that sets its share of the ceiling when projects contend (weights 7:2:1).
 - **Waves need disjoint files and no hidden dependencies.** A shared file shows up as a conflict you can see; a dependency the tracker does not know about does not show up at all — the second issue merges green against the pre-change contract.
 

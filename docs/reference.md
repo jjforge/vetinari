@@ -97,7 +97,7 @@ exported for custom wiring.
 | `idleTimeoutSeconds` | idle-stall ceiling before a `stalled` park (default 600) |
 | `parkGraceSeconds` | grace before a no-commit turn parks `stalled` (default 0) |
 | `containerShare` | this project's cut of the container ceiling when projects contend — `high` \| `medium` \| `low` (default `medium`; weights 7:2:1) |
-| `hostEnv` | host-only, non-secret env values (e.g. `GIT_CONFIG_GLOBAL`) — set host-side, never crosses into the container |
+| `hostEnv` | host-only, non-secret env values (e.g. a `GIT_TERMINAL_PROMPT` override) — set host-side, never crosses into the container |
 | `promptFile` | override the TDD prompt handed to the agent |
 | `fetchTask` | tracker seam: fetch an issue's title/body/comments/labels **and** state/closedAt (`githubFetchTask()`) |
 | `blockedBy` | tracker seam: an issue's blockers, for wave layering (`githubBlockedBy()`, closed blockers filtered at the edge) |
@@ -151,7 +151,6 @@ the container is `.vetinari.local/.env` (design §9, ADR 0011).
 | `VETINARI_TELEGRAM_BOT_TOKEN` | `.vetinari.local/host.env` | this project's Telegram bot token — host-only, never crosses into the container |
 | `VETINARI_TELEGRAM_CHAT_ID` | `.vetinari.local/host.env` | this project's default Telegram chat |
 | `VETINARI_STATUS_ALLOWED_HOSTS` | host env (`status` and the gateway) | comma-separated, case-insensitive DNS names the dashboard admits as a `Host` beyond IP literals and `localhost` — a MagicDNS or reverse-proxy name; any other name is a 403 (see the operations guide's exposure section) |
-| `GIT_CONFIG_GLOBAL` | `hostEnv` (host-side only) | sandcastle's host-side `safe.directory`; must **not** reach the container, where it would override the agent's `HOME` (see the operating rules) |
 | `GIT_TERMINAL_PROMPT` | set to `0` by vetinari on its own process when the config loads (host-side only) | host-side git — sandcastle's fetch before worktree creation — fails fast when it needs a credential instead of prompting on the terminal until the worktree timeout; set it in `hostEnv` to override |
 | `TZ` | process env | the zone the CLI renders timestamps in (the log stores ISO-8601 UTC only; the dashboard uses the browser's zone) |
 

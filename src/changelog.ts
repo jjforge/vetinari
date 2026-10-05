@@ -114,9 +114,13 @@ function parseMilestoneSections(body: string[]): Map<string, string[]> {
   return sections;
 }
 
-/** Merge fragment sections into a milestone's section map, one block per label. */
+/**
+ * Merge fragment sections into a milestone's section map, one block per label. A
+ * bullet-less section contributes nothing — no bare label (issue #452).
+ */
 function mergeSections(into: Map<string, string[]>, additions: FragmentSection[]): void {
   for (const { section, bullets } of additions) {
+    if (!bullets.length) continue;
     const existing = into.get(section) ?? [];
     existing.push(...bullets);
     into.set(section, existing);
@@ -155,7 +159,7 @@ function splitMilestones(text: string): { header: string; milestones: { heading:
  * single block per milestone (never two blocks of one label).
  */
 export function collectFragments(changelogText: string, sections: FragmentSection[], today: string, title: string): string {
-  if (!sections.length) return changelogText;
+  if (!sections.some((s) => s.bullets.length)) return changelogText;
   const { header, milestones } = splitMilestones(changelogText);
 
   let rendered: string[];

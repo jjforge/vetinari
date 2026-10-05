@@ -74,19 +74,20 @@ The event vocabulary after consolidation (§13.2) is small and uses the user's w
 | `campaign-start` | `waves`, `slots`, `name?`, `titles?` (id → title, recorded once) | campaign |
 | `wave-start` | `index`, `tasks` | campaign |
 | `spawn` | `taskId` | campaign |
-| `turn` | `taskId`, `turn`, `summary`, `signal`, `sessionId?`, `commits?` | run |
+| `turn` | `taskId`, `turn`, `summary`, `signal?`, `sessionId?`, `commits?` | run |
 | `green` | `taskId`, `branch`, `commits` | run |
-| `parked` | `taskId`, `reason`, `detail` | run (question/stalled), integrator (conflict). A red base is the *wave's* reason and is written, not inferred: `campaign-parked` carries `reason: red-base` for that wave index; no per-member `parked` event is written |
-| `failed` | `taskId`, `detail` | whichever process observes it: the run loop on a throw, the campaign on a child's non-zero exit |
+| `parked` | `taskId`, `reason`, `detail?` | run (question/stalled/stopped), integrator (conflict). A red base is the *wave's* reason and is written, not inferred: `campaign-parked` carries `reason: red-base` for that wave index; no per-member `parked` event is written |
+| `failed` | `taskId`, `detail?` | whichever process observes it: the run loop on a throw, the campaign on a child's non-zero exit |
 | `merged` | `taskId` | integrator |
-| `base-gate` | `index`, `green`, `detail` | integrator |
-| `wave-done` | `index`, `merged` | campaign — only when every member is `completed` |
+| `base-gate` | `index?`, `green`, `detail?` | integrator |
+| `wave-done` | `index`, `merged?` | campaign — only when every member is `completed` |
 | `grace-wait` | `seconds`, `tasks` | campaign (§5 step 3) |
-| `campaign-parked` / `campaign-failed` | `index`, `reason` (`red-base`, `question`, `stalled`, `conflict`, `stopped` — the wave's reason, written by the code that stopped; `stopped` is an operator stop, §5), `detail` | campaign — the two stop markers |
-| `campaign-done` | `waves` | campaign |
-| `prune` | `target`, `removed`, `dropped` | prune |
-| `graft` | `ids`, `blockedBy`, `basenames`, `titles?` | graft |
-| `redrive` | `fromWave`, `landed`, `skipped` | campaign |
+| `campaign-parked` | `index?`, `reason?` (`red-base`, `question`, `stalled`, `conflict`, `stopped` — the wave's reason, written by the code that stopped; `stopped` is an operator stop, §5), `detail?` | campaign — a stop marker |
+| `campaign-failed` | `index?`, `detail?` | campaign — the other stop marker |
+| `campaign-done` | `waves`, `name?` | campaign |
+| `prune` | `target`, `removed`, `dropped` | the `prune` command; the campaign under `--auto-prune` |
+| `graft` | `ids`, `blockedBy`, `fileKeys`, `titles?` | graft |
+| `redrive` | `fromWave`, `landed?`, `skipped?` | campaign |
 | `stop-requested` | `index` (the wave in flight) | campaign (§5) — the first stop request it took; the reducer ignores it, `vetinari stop` reads it to tell a stop already pending (one after the later of the latest `campaign-start` and the latest `wave-start`, with no stop marker after it — a redrive logs no `campaign-start`, so its `wave-start` drops a request from a process that died) |
 
 Diagnostic rows (`gate`, `gate-check`, `gate-result`, `commit`, `tool`, `sandbox-exec`, sandbox setup, hook failures) are activity, not state: the reducer ignores them, the issue sheet and live tail read them. Two rules:

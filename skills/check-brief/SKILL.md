@@ -5,7 +5,7 @@ description: "Check an issue's brief against the code before it goes ready-for-a
 
 # Check a brief before it goes ready-for-agent
 
-A vetinari agent works from the issue alone — body and comments — and parks with a question when the brief asks for something the code can't give: a column the format doesn't have, an event the database doesn't record, a criterion its own out-of-scope list rules out, a line-number cite that went stale before the run, or behaviour another open issue hasn't landed yet with no `blocked_by` edge to hold it back. Each such park costs a person's answer and a stalled campaign. This skill catches those mistakes while the brief is still a draft. It **only reports**: it changes nothing on GitHub and nothing in the repo; the person decides what to rewrite.
+A vetinari agent works from the issue alone — its title, body, comments and labels, and nothing linked from it ([ticket contract](https://github.com/jjforge/vetinari/blob/main/docs/ticket-contract.md)) — and parks with a question when the brief asks for something the code can't give: a column the format doesn't have, an event the database doesn't record, a criterion its own out-of-scope list rules out, a line-number cite that went stale before the run, or behaviour another open issue hasn't landed yet with no `blocked_by` edge to hold it back. Each such park costs a person's answer and a stalled campaign. This skill catches those mistakes while the brief is still a draft. It **only reports**: it changes nothing on GitHub and nothing in the repo; the person decides what to rewrite.
 
 ## Steps
 

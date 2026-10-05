@@ -34,7 +34,7 @@ import {
 import { gateway } from "./gateway.ts";
 import { defaultGatewayServiceIO, isGatewayServiceVerb, runGatewayService } from "./gateway-service.ts";
 import { runPrune } from "./prune.ts";
-import { expandSelection, makeAskUnderspecified, runCampaignPlan } from "./plan.ts";
+import { expandSelection, makeAskUnderspecified, runCampaignPlan, runFilesetCheck } from "./plan.ts";
 import { runGraft } from "./graft.ts";
 import { renderUsage } from "./help.ts";
 import { Refusal, handleCliError } from "./refusal.ts";
@@ -638,6 +638,7 @@ await dispatch(parseArgs([mode, ...rest]), {
   campaign,
   expandSelection,
   runCampaignPlan,
+  runFilesetCheck,
   findMergeCommit,
   runPrune,
   runGraft,

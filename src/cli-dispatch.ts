@@ -25,8 +25,9 @@ import type { tgSend } from "./telegram.ts";
 import { crashResumePrompt, type runLoop, type Outcome } from "./loop.ts";
 import type { answerParked, hasParked, listParked, ParkReason } from "./state.ts";
 import type { archiveRun } from "./archive.ts";
-import type { Exclusion, UnderspecifiedPrompt } from "./plan.ts";
-import type { expandSelection, runCampaignPlan } from "./plan.ts";
+import type { CampaignPlanReport, Exclusion, UnderspecifiedPrompt } from "./plan.ts";
+import type { expandSelection, runCampaignPlan, runFilesetCheck } from "./plan.ts";
+import { describeFilesetCheck } from "./plan.ts";
 import type { findMergeCommit } from "./merge.ts";
 import { resumeIndex, type runPrune } from "./prune.ts";
 import { isIssueToken, normalize } from "./issue-id.ts";
@@ -366,6 +367,9 @@ export interface DispatchDeps {
   campaign: typeof campaign;
   expandSelection: typeof expandSelection;
   runCampaignPlan: typeof runCampaignPlan;
+  /** Resolve each selected ticket's file-set through the planner's own resolver path — what
+   *  `campaign --dry-run` prints per ticket as the triager's self-check (#476). */
+  runFilesetCheck: typeof runFilesetCheck;
   /** The sha of an issue's campaign merge commit on the base — what lets the planner skip a
    *  selected issue that already merged though its label has not caught up (design §4). */
   findMergeCommit: typeof findMergeCommit;
@@ -694,13 +698,28 @@ async function dispatchCampaign(cmd: Extract<Command, { kind: "campaign" }>, dep
     reporter.line("campaign: nothing to run — the selection expanded to no open issues.");
     return;
   }
-  const report = await deps.runCampaignPlan(
-    cfg,
-    ids,
-    { onUnderspecified: cmd.onUnderspecified, includeMerged: cmd.includeMerged },
-    { isTTY: deps.isTTY, ask: deps.askUnderspecified, mergeCommitOf: (id) => deps.findMergeCommit(cfg, id) },
-    excluded,
-  );
+  // A dry run is the triager's self-check (docs/ticket-contract.md): it closes with every
+  // selected ticket's resolved file-set and verdict — the one-issue selection the planner skips
+  // included — and a non-dry-run never resolves it.
+  const logFilesetCheck = async () => {
+    deps.log("\nFile-sets (each selected ticket's resolved files and confident verdict):");
+    deps.log(describeFilesetCheck(await deps.runFilesetCheck(cfg, ids)));
+  };
+  let report: CampaignPlanReport;
+  try {
+    report = await deps.runCampaignPlan(
+      cfg,
+      ids,
+      { onUnderspecified: cmd.onUnderspecified, includeMerged: cmd.includeMerged },
+      { isTTY: deps.isTTY, ask: deps.askUnderspecified, mergeCommitOf: (id) => deps.findMergeCommit(cfg, id) },
+      excluded,
+    );
+  } catch (err) {
+    // A refused dry run (an under-specified halt, most often) still shows the verdicts —
+    // they are what the triager needs to fix the ticket — then refuses unchanged.
+    if (cmd.dryRun && err instanceof Refusal) await logFilesetCheck();
+    throw err;
+  }
 
   if (cmd.dryRun) {
     // The full `campaign-plan` replacement: the bare wave args, the provenance report,
@@ -709,6 +728,7 @@ async function dispatchCampaign(cmd: Extract<Command, { kind: "campaign" }>, dep
     deps.log("");
     deps.log(report.report);
     if (report.suggestedName) deps.log(`\nsuggested name: --name "${report.suggestedName}"`);
+    await logFilesetCheck();
     return;
   }
 

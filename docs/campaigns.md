@@ -17,7 +17,9 @@ moves and the invariants; for the exhaustive flag and mode list see
 - **Plan** — the selection is layered by tracker dependencies, then each layer is
   split so no two issues in a wave touch the same file (the two invariants below).
   `campaign --dry-run <selection>` prints the plan and runs nothing — the way to
-  inspect a plan before committing to it.
+  inspect a plan before committing to it. It closes with each selected issue's
+  resolved file-set and `confident` verdict, so a triager sees what the planner reads
+  ([`ticket-contract.md`](ticket-contract.md)).
 - **Run** — the campaign drains each wave, merges its greens, gates the merged
   base, then advances to the next wave.
 

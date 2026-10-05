@@ -196,8 +196,9 @@ _Avoid_: done, empty, inactive.
 
 **File-set resolver** (`fileSet`):
 A project config function, `fileSet(ticket) → { files, confident }`, naming the
-files an [[issue]] touches (by basename; the default reads the `Touches:`/
-`Creates:` line) so co-[[wave]] issues stay file-disjoint.
+files an [[issue]] touches (as repo paths, or a bare basename where a cite names
+no one path; the default reads the `Touches:`/`Creates:` line) so co-[[wave]]
+issues stay file-disjoint.
 _Avoid_: file matcher, crossover detector.
 
 **Under-specified ticket**:
@@ -289,7 +290,7 @@ _Avoid_: telegram config, bot creds, the project's telegram.
 **Destination**:
 A named place on the project's [[bot connection]] — a chat, optionally a forum
 thread under it — that a [[message-category]] routes to. It names no bot and
-carries no secret; it only picks *where* on that one bot a message lands.
+carries no secret; it only picks _where_ on that one bot a message lands.
 _Avoid_: channel, target, route.
 
 **Routing rule** (`notify`):

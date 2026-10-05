@@ -377,7 +377,7 @@ test("the outbox writers leave only <id>.json records behind, each round-trippin
   const dir = outboxDir();
   enqueueOutbound(cfgFor(dir), { category: "success", event: "green", text: "GREEN on 26" });
   enqueueOutbound(cfgFor(dir), { category: "finding", text: "filed 2 findings" });
-  const [first] = listOutboxIn(outboxDirOf(dir));
+  const first = listOutboxIn(outboxDirOf(dir)).find((r) => r.text === "GREEN on 26")!;
   markOutboundSent(outboxDirOf(dir), first.id, "ops");
 
   const files = readdirSync(outboxDirOf(dir));

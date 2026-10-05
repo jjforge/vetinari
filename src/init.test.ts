@@ -3,11 +3,15 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { applyInit, computeInit, describeInit, scanInit } from "./init.ts";
+import { execFileSync } from "node:child_process";
+import { applyInit, computeInit, describeInit, isGithubComRemote, scanInit } from "./init.ts";
 import { AGENT_PROVIDERS, DEFAULT_PROVIDER } from "./config.ts";
 
 const TEMPLATES = {
   configTemplate: "CONFIG SKELETON\n",
+  githubConfigTemplate: "GITHUB CONFIG\n",
+  // The non-GitHub default; the GitHub-origin tests override it.
+  githubOrigin: false,
   dockerfileTemplate: "FROM node:22-bookworm\n",
   tsconfigTemplate: "TSCONFIG\n",
 };
@@ -42,6 +46,22 @@ test("computeInit plans the full scaffold for a fresh directory", () => {
   assert.ok(plan.dirs.includes(".vetinari.local"));
   // ...and .gitignore gains its entry (the file was absent, so it is created).
   assert.match(plan.gitignore!, /^\.vetinari\.local\/$/m);
+});
+
+test("computeInit writes the githubTracker config when origin is a GitHub remote", () => {
+  const plan = computeInit({
+    hasConfig: false,
+    hasTsconfig: false,
+    hasLocalDir: false,
+    gitignore: undefined,
+    ...TEMPLATES,
+    githubOrigin: true,
+  });
+
+  assert.deepEqual(
+    plan.creates.find((c) => c.path === "vetinari/config.mts"),
+    { path: "vetinari/config.mts", content: "GITHUB CONFIG\n" },
+  );
 });
 
 test("computeInit yields an empty plan for an already-initialized directory", () => {
@@ -215,6 +235,16 @@ test("describeInit's next steps name the Telegram bot connection step and the tg
   assert.match(text, /host\.env/);
 });
 
+test("describeInit says which config it writes, and why", () => {
+  const fresh = { hasConfig: false, hasTsconfig: false, hasLocalDir: false, gitignore: undefined, ...TEMPLATES };
+
+  const github = describeInit(computeInit({ ...fresh, githubOrigin: true }));
+  assert.match(github, /\+ vetinari\/config\.mts — the githubTracker\(\) config, because origin is a github\.com remote/);
+
+  const skeleton = describeInit(computeInit(fresh));
+  assert.match(skeleton, /\+ vetinari\/config\.mts — the skeleton with TODO stubs, because origin is missing or not a github\.com remote/);
+});
+
 test("describeInit leads with a clear refusal when a config already exists", () => {
   const text = describeInit(
     computeInit({ hasConfig: true, hasTsconfig: true, hasLocalDir: false, gitignore: "node_modules/\n", ...TEMPLATES }),
@@ -275,4 +305,53 @@ test("scanInit detects an existing canonical config and the excluded dir off dis
   const plan = computeInit(scan);
   assert.equal(plan.refused, true);
   assert.match(plan.gitignore!, /^\.vetinari\.local\/$/m);
+});
+
+test("isGithubComRemote accepts only an origin whose host is exactly github.com, over SSH or HTTPS", () => {
+  assert.equal(isGithubComRemote("git@github.com:acme/widgets.git"), true);
+  assert.equal(isGithubComRemote("https://github.com/acme/widgets.git"), true);
+  assert.equal(isGithubComRemote("https://github.com/acme/widgets\n"), true);
+  // An SSH host alias and a GitHub Enterprise host are not github.com.
+  assert.equal(isGithubComRemote("git@github.com-work:acme/widgets.git"), false);
+  assert.equal(isGithubComRemote("https://github.acme.corp/acme/widgets.git"), false);
+  assert.equal(isGithubComRemote("git@github.acme.corp:acme/widgets.git"), false);
+  assert.equal(isGithubComRemote("https://github.com.evil.example/acme/widgets"), false);
+  // A non-GitHub host, and a github.com URL with no owner/name, get the skeleton.
+  assert.equal(isGithubComRemote("git@gitlab.com:acme/widgets.git"), false);
+  assert.equal(isGithubComRemote("https://github.com/"), false);
+});
+
+const gitProject = (origin?: string) => {
+  const dir = tmpProject();
+  execFileSync("git", ["init", "-q", dir]);
+  if (origin) execFileSync("git", ["-C", dir, "remote", "add", "origin", origin]);
+  return dir;
+};
+
+test("scanInit plans the githubTracker config from the install for a project whose origin is on github.com", () => {
+  const scan = scanInit(gitProject("git@github.com:acme/widgets.git"));
+
+  assert.equal(scan.githubOrigin, true);
+  const config = computeInit(scan).creates.find((c) => c.path === "vetinari/config.mts")!.content;
+  assert.match(config, /import \{ defineConfig, githubTracker \} from "vetinari";/);
+  assert.match(config, /^\s*\.\.\.githubTracker\(\),/m);
+  // No fetchTask stub and no commented-out github* resolver lines.
+  assert.doesNotMatch(config, /fetchTask:/);
+  assert.doesNotMatch(config, /^\s*\/\/.*github(BlockedBy|IssuesByLabel)/m);
+});
+
+test("scanInit plans today's skeleton for a project with no origin, or a non-GitHub one", () => {
+  for (const dir of [
+    tmpProject(),
+    gitProject(),
+    gitProject("git@github.com-work:acme/widgets.git"),
+    gitProject("https://gitlab.com/acme/widgets.git"),
+  ]) {
+    const scan = scanInit(dir);
+
+    assert.equal(scan.githubOrigin, false);
+    const config = computeInit(scan).creates.find((c) => c.path === "vetinari/config.mts")!.content;
+    assert.match(config, /fetchTask: \(id\) => `TODO/);
+    assert.doesNotMatch(config, /^\s*\.\.\.githubTracker\(\)/m);
+  }
 });

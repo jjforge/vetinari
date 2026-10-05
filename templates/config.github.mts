@@ -6,7 +6,7 @@
 //
 // Machine-local state (logs, parked tasks, secrets) lives in .vetinari.local/,
 // which is gitignored — never committed. `stateDir` below points run state there.
-import { defineConfig } from "vetinari";
+import { defineConfig, githubTracker } from "vetinari";
 
 export default defineConfig({
   // Name shown in notifications.
@@ -41,20 +41,9 @@ export default defineConfig({
   // provider's default model/effort. Override per run with `--agent`.
   // agent: { provider: "claude" },
 
-  // Fetch the task text for an id — a GitHub issue body, a spec file, anything.
-  // Tracking work in GitHub issues? Replace this and the resolvers below with
-  // `...githubTracker()` (import it from "vetinari"; pass { repo: "owner/repo" }
-  // when your tracker is not this project's `origin`).
-  fetchTask: (id) => `TODO: fetch the task text for ${id}`,
-
-  // Optional: wire your tracker's blocked-by edges to enable prune / campaign planning.
-  // With no argument the repo is derived from this project's git `origin`; pass
-  // "owner/repo" only when your tracker is NOT the project's `origin`.
-  // import { githubBlockedBy } from "vetinari";
-  // blockedBy: githubBlockedBy(),
-
-  // Optional: list open issues by label, so `campaign <label>` (e.g.
-  // `campaign ready-for-agent`) selects its issue set from the tracker.
-  // import { githubIssuesByLabel } from "vetinari";
-  // listByLabel: githubIssuesByLabel(),
+  // Every GitHub tracker seam — fetchTask, blockedBy, listByLabel, postComment,
+  // onIssueMerged, reportFinding — with the repo derived from this project's git
+  // `origin`. Pass { repo: "owner/repo" } only when your tracker is NOT `origin`;
+  // a field set after the spread overrides that one seam.
+  ...githubTracker(),
 });

@@ -17,10 +17,11 @@
  * disturbing what already exists.
  */
 
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { Refusal } from "./refusal.ts";
 import { dirname, resolve } from "node:path";
-import { AGENT_PROVIDERS, DEFAULT_PROVIDER, type AgentProviderName } from "./config.ts";
+import { AGENT_PROVIDERS, DEFAULT_PROVIDER, ownerRepoFromRemote, type AgentProviderName } from "./config.ts";
 
 const CANONICAL_DIR = "vetinari";
 /** The excluded machine-local base location init lays down and knows by its own constant
@@ -50,8 +51,12 @@ export interface InitScan {
   hasLocalDir: boolean;
   /** Current `.gitignore` content, or undefined when there is no `.gitignore`. */
   gitignore?: string;
-  /** The `defineConfig` skeleton to write, shipped with the install. */
+  /** Whether the project's `origin` is a github.com remote (→ the githubTracker config). */
+  githubOrigin: boolean;
+  /** The `defineConfig` skeleton to write when `origin` is not on GitHub, shipped with the install. */
   configTemplate: string;
+  /** The config that spreads `...githubTracker()`, written when `origin` is on GitHub. */
+  githubConfigTemplate: string;
   /** The Dockerfile template to write, shipped with the install. */
   dockerfileTemplate: string;
   /** The committed tsconfig that extends `.vetinari.local/tsconfig.json`, shipped with the install. */
@@ -72,6 +77,8 @@ export interface InitPlan {
    * predate — and the machine-local pieces are still filled in.
    */
   refused: boolean;
+  /** Whether the config written is the githubTracker one (origin on github.com) rather than the skeleton. */
+  githubConfig: boolean;
 }
 
 /**
@@ -102,7 +109,7 @@ export function computeInit(scan: InitScan): InitPlan {
   const refused = scan.hasConfig;
 
   if (!refused) {
-    creates.push({ path: CONFIG_DEST, content: scan.configTemplate });
+    creates.push({ path: CONFIG_DEST, content: scan.githubOrigin ? scan.githubConfigTemplate : scan.configTemplate });
     creates.push({ path: DOCKERFILE_DEST, content: scan.dockerfileTemplate });
   }
   if (!scan.hasTsconfig) creates.push({ path: TSCONFIG_DEST, content: scan.tsconfigTemplate });
@@ -110,7 +117,7 @@ export function computeInit(scan: InitScan): InitPlan {
 
   const gitignore = planGitignore(scan.gitignore);
 
-  return { creates, dirs, gitignore, refused };
+  return { creates, dirs, gitignore, refused, githubConfig: scan.githubOrigin };
 }
 
 /**
@@ -132,7 +139,10 @@ export function describeInit(plan: InitPlan, provider: AgentProviderName = DEFAU
     lines.push("Scaffolding this project onto the vetinari/ + .vetinari.local/ layout:");
   }
 
-  for (const c of plan.creates) lines.push(`  + ${c.path}`);
+  const configWhy = plan.githubConfig
+    ? " — the githubTracker() config, because origin is a github.com remote"
+    : " — the skeleton with TODO stubs, because origin is missing or not a github.com remote";
+  for (const c of plan.creates) lines.push(`  + ${c.path}${c.path === CONFIG_DEST ? configWhy : ""}`);
   for (const d of plan.dirs) lines.push(`  + ${d}/ (excluded machine-local dir)`);
   if (plan.gitignore !== undefined) lines.push(`  ~ .gitignore — exclude ${LOCAL_DIR}/`);
 
@@ -210,11 +220,32 @@ const readOrUndef = (path: string): string | undefined => {
 const templatePath = (name: string) => new URL(`../templates/${name}`, import.meta.url).pathname;
 
 /**
+ * Whether a remote URL points at an `owner/name` on github.com itself — the SSH
+ * (`git@github.com:`) or HTTPS (`https://github.com/`) form, host matched exactly. An
+ * SSH host alias (`github.com-work`) or a GitHub Enterprise host does not count:
+ * `ownerRepoFromRemote` parses any host, so this host check is init's own. Pure.
+ */
+export function isGithubComRemote(url: string): boolean {
+  const u = url.trim();
+  return (u.startsWith("git@github.com:") || u.startsWith("https://github.com/")) && ownerRepoFromRemote(u) !== undefined;
+}
+
+/** The project's `origin` URL, or undefined when it is not a git repo or has no `origin`. */
+const originUrl = (baseDir: string): string | undefined => {
+  try {
+    return execFileSync("git", ["-C", baseDir, "remote", "get-url", "origin"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  } catch {
+    return undefined;
+  }
+};
+
+/**
  * Probe `baseDir` into an `InitScan` — the filesystem read that lives at the edge
  * so the planner stays pure. A canonical `vetinari/config.{mts,ts}` counts as an
  * existing config (the refusal trigger); the deprecated locations do not, since
  * init is for a greenfield project (a legacy layout is `migrate`'s job). The
- * config skeleton, Dockerfile and tsconfig templates are read from the shared install.
+ * config templates (the skeleton and the githubTracker one), Dockerfile and tsconfig
+ * are read from the shared install, and `origin` is checked for a github.com remote.
  */
 export function scanInit(baseDir: string): InitScan {
   return {
@@ -222,7 +253,9 @@ export function scanInit(baseDir: string): InitScan {
     hasTsconfig: existsSync(resolve(baseDir, TSCONFIG_DEST)),
     hasLocalDir: existsSync(resolve(baseDir, LOCAL_DIR)),
     gitignore: readOrUndef(resolve(baseDir, ".gitignore")),
+    githubOrigin: isGithubComRemote(originUrl(baseDir) ?? ""),
     configTemplate: readFileSync(templatePath("config.mts"), "utf8"),
+    githubConfigTemplate: readFileSync(templatePath("config.github.mts"), "utf8"),
     dockerfileTemplate: readFileSync(templatePath("Dockerfile"), "utf8"),
     tsconfigTemplate: readFileSync(templatePath("tsconfig.json"), "utf8"),
   };

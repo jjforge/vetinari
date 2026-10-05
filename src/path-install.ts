@@ -47,6 +47,26 @@ export function resolvedWrapper(launch: LaunchSelf = currentLaunchSelf()): strin
   return renderWrapper({ ...launch, argv1: realpathSync(launch.argv1) });
 }
 
+/** The `vetinari install` flags, parsed. */
+export interface PathInstallArgs {
+  /** The absolute directory the wrapper goes in (default `<home>/.local/bin`). */
+  dir: string;
+  force: boolean;
+  dryRun: boolean;
+}
+
+/**
+ * Parse `vetinari install`'s args (`[--dir <d>] [--force] [--dry-run]`), or the
+ * refusal when `--dir` has no value or another flag as its value — so `--dir
+ * --dry-run` neither installs into `./--dry-run` nor falls back to the default. Pure.
+ */
+export function parsePathInstallArgs(args: string[], home: string): PathInstallArgs | { refusal: string } {
+  const dirIdx = args.indexOf("--dir");
+  const dirArg = dirIdx >= 0 ? args[dirIdx + 1] : join(home, ".local", "bin");
+  if (!dirArg || dirArg.startsWith("--")) return { refusal: "install --dir needs a directory, e.g. --dir ~/bin" };
+  return { dir: resolve(dirArg), force: args.includes("--force"), dryRun: args.includes("--dry-run") };
+}
+
 /**
  * What `vetinari install` does to `<dir>/vetinari`: `write` (nothing there), `rewrite`
  * (a wrapper it wrote before — always rewritten, so a rerun after moving the checkout

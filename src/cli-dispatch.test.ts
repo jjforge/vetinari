@@ -1333,7 +1333,7 @@ const pausedCampaignAfterGreen = () => [
   { event: "campaign-start", waves: [["436"]] },
   { event: "wave-start", index: 0, tasks: ["436"] },
   { event: "parked", taskId: "436", reason: "question" },
-  { event: "campaign-parked", index: 0, detail: "parked: 436" },
+  { event: "campaign-parked", index: 0, reason: "question", detail: "parked: 436" },
 ];
 
 test("dispatch answer on an unparked issue reports it and exits 0 — never runs or redrives (§7)", async () => {

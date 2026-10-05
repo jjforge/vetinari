@@ -78,11 +78,13 @@ const keptTail = (merged: string[], index: number, total: number): string => {
  * A campaign stop — the one situation the loop pauses or stops on — plus the wave it happened
  * in and the greens already merged. Each maps to a one-line reason and the exact recovery
  * command (`redrive`, `answer <id>`, `prune <id>`) the user-guide promises. `stopped` is an operator
- * stop (`vetinari stop`, Ctrl-C), resumed by a plain `redrive`.
+ * stop (`vetinari stop`, Ctrl-C), resumed by a plain `redrive`; `member-stopped` is a wave held by a
+ * member whose run was signalled outside an operator stop — redrive-only, never answerable.
  */
 export type Stop =
   | { kind: "failed"; index: number; total: number; failed: string[]; merged: string[] }
   | { kind: "issue-parked"; index: number; total: number; parked: string[]; merged: string[] }
+  | { kind: "member-stopped"; index: number; total: number; parked: string[]; merged: string[] }
   | { kind: "red-base"; index: number; total: number; merged: string[] }
   | { kind: "conflict"; index: number; total: number; conflicted: string[]; merged: string[] }
   | { kind: "stranded-conflict"; index: number; total: number; stranded: string[]; merged: string[] }
@@ -105,6 +107,13 @@ export function formatStop(stop: Stop): string {
       return (
         `🅿 campaign parked at ${pos} — ${stop.parked.map((p) => `#${p}`).join(", ")} awaiting a human; ${tail}\n` +
         `recover: \`vetinari answer ${id} "…"\` (or resolve) or \`vetinari prune ${id}\`, then \`vetinari redrive\``
+      );
+    }
+    case "member-stopped": {
+      const tail = keptTail(stop.merged, stop.index, stop.total);
+      return (
+        `🅿 campaign parked at ${pos} — ${stop.parked.map((p) => `#${p}`).join(", ")} stopped mid-run (stopped); ${tail}\n` +
+        `recover: \`vetinari redrive\` (or \`vetinari prune ${stop.parked[0]}\`)`
       );
     }
     case "red-base": {

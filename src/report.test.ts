@@ -108,6 +108,21 @@ test("an issue-parked stop offers answer/prune, then redrive", () => {
   );
 });
 
+test("a member-stopped stop names every held member and points at redrive, never at answering (#441)", () => {
+  const out = formatStop({
+    kind: "member-stopped",
+    index: 0,
+    total: 2,
+    parked: ["102", "103"],
+    merged: ["101"],
+  });
+  assert.equal(
+    out,
+    "🅿 campaign parked at wave 1/2 — #102, #103 stopped mid-run (stopped); merged #101 kept, 1 wave not started\n" +
+      "recover: `vetinari redrive` (or `vetinari prune 102`)",
+  );
+});
+
 test("a red-base stop points at fix-forward then redrive", () => {
   const out = formatStop({
     kind: "red-base",

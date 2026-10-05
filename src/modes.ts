@@ -576,6 +576,26 @@ export function memberParkedNotice(project: string, waveNumber: number, parked: 
 }
 
 /**
+ * The operator-facing notice a member park enqueues when the wave's reason is `stopped` (#441): a held
+ * member's run was signalled while the campaign itself was not halting (its container killed outside
+ * vetinari, say). A stopped park is redrive-only — there is no question to answer — and no operator
+ * stopped the campaign, so it says neither. Pure, so the wording and routing are checkable without a
+ * campaign.
+ */
+export function memberStoppedNotice(project: string, waveNumber: number, parked: string[], merged: string[], baseBranch: string): Notice {
+  return notice({
+    emoji: "🅿️",
+    project,
+    state: "PARKED",
+    context: `wave ${waveNumber}`,
+    signal: `${parked.map((p) => `#${p}`).join(", ")} stopped mid-run — greens (${merged.join(", ") || "none"}) kept on ${baseBranch}, campaign paused.`,
+    recover: "`vetinari redrive` (or `prune <issue>`)",
+    category: "failure",
+    event: "campaign-parked",
+  });
+}
+
+/**
  * The wave-level reason a `campaign-parked` carries when a member holds the wave (design §2.1
  * rule 2 — written, never inferred): a held member's own `question`/`stalled` reason wins over a
  * conflict (an answerable hold is the more actionable one to surface), else `conflict` for a
@@ -1185,8 +1205,13 @@ export async function campaign(
         } else {
           const detail = `parked, awaiting a human: ${parkedTasks.join(", ")}`;
           cfg.log.log("campaign-parked", { index, reason, detail });
-          enqueueOutbound(cfg, memberParkedNotice(cfg.project, index + 1, parkedTasks, merged, cfg.baseBranch));
-          reporter.line(formatStop({ kind: "issue-parked", index, total, parked: parkedTasks, merged }));
+          if (reason === "stopped") {
+            enqueueOutbound(cfg, memberStoppedNotice(cfg.project, index + 1, parkedTasks, merged, cfg.baseBranch));
+            reporter.line(formatStop({ kind: "member-stopped", index, total, parked: parkedTasks, merged }));
+          } else {
+            enqueueOutbound(cfg, memberParkedNotice(cfg.project, index + 1, parkedTasks, merged, cfg.baseBranch));
+            reporter.line(formatStop({ kind: "issue-parked", index, total, parked: parkedTasks, merged }));
+          }
         }
         return "parked";
       }

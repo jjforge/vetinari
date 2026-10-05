@@ -2255,6 +2255,46 @@ test("campaignStoppedNotice is a campaign-park notice whose recovery is a plain 
   assert.equal(n.category, campaignParkedNotice("demo", 2, [], "main", "").category);
 });
 
+test("a wave held by a `stopped` member (no operator stop) points at redrive, never at answering it (#441)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-member-stopped-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  // 102's run was signalled outside vetinari: it parked itself `stopped` and exited 2; 101 went green.
+  const childRun: CampaignDeps["spawnRun"] = async (id) => {
+    if (id === "102") {
+      writeStoppedRecord(cfg, "102");
+      return 2;
+    }
+    return 0;
+  };
+
+  let outcome: string | undefined;
+  const lines = await captureLines(async () => {
+    outcome = await campaign(cfg, [["101", "102"], ["201"]], host, undefined, {}, gitFreeDeps(cfg, childRun));
+  });
+
+  assert.equal(outcome, "parked");
+  const parked = readEventLog(cfg).filter((e): e is CampaignParkedEvent => e.event === "campaign-parked");
+  assert.deepEqual(
+    parked.map((p) => [p.index, p.reason]),
+    [[0, "stopped"]],
+  );
+  const stopLine = lines.find((l) => l.includes("campaign parked at wave 1/2"));
+  assert.ok(stopLine, `no stop line printed: ${lines.join("\n")}`);
+  assert.match(stopLine, /#102/);
+  assert.match(stopLine, /`vetinari redrive`/);
+  assert.ok(!stopLine.includes("vetinari answer"), stopLine);
+  assert.ok(!stopLine.includes("awaiting a human"), stopLine);
+
+  const notice = listOutbox(cfg).find((n) => n.event === "campaign-parked");
+  assert.ok(notice, "a campaign-parked notice was enqueued");
+  assert.equal(notice.category, "failure");
+  assert.match(notice.text, /#102/);
+  assert.match(notice.text, /Recover:.*`vetinari redrive`/);
+  assert.ok(!/answer/i.test(notice.text), notice.text);
+  assert.ok(!/by an operator/i.test(notice.text), notice.text);
+});
+
 test("redrive after a stop re-runs the stopped member and lands the banked green without rerunning it (#403)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-stop-redrive-"));
   const cfg = harnessCfg(dir);

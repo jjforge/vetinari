@@ -2,14 +2,7 @@
 // The package name self-resolves to this repo (package.json "exports"), so the
 // same import a consuming project uses works here too.
 import { resolve } from "node:path";
-import {
-  defineConfig,
-  githubBlockedBy,
-  githubFetchTask,
-  githubFindingReporter,
-  githubIssuesByLabel,
-  githubMarkPendingVerify,
-} from "vetinari";
+import { defineConfig, githubTracker } from "vetinari";
 
 export default defineConfig({
   project: "vetinari",
@@ -28,30 +21,11 @@ export default defineConfig({
   // so both gates have their toolchain. Runs as an onSandboxReady hook.
   setup: ["npm ci"],
 
-  // Fetches title/body/comments/labels for the prompt AND state/closedAt so
-  // `issueStateFromTask` can reject a closed graft target (#175) — the shared helper
-  // fixes that field set once so this config can't silently re-drop `state`.
-  fetchTask: githubFetchTask(),
-
-  // Powers carve/campaign: reads GitHub's native blocked_by edges — the ones set
-  // on #31–#35.
-  blockedBy: githubBlockedBy(),
-
-  // Expands a label selector (`campaign ready-for-agent`) into its open issues, so
-  // a campaign can be launched by label rather than an explicit id list.
-  listByLabel: githubIssuesByLabel(),
-
-  // After a green run, harvest the defects an agent noticed but did not fix and file
-  // them as issues — the container has no gh login, so without this the harvest turn
-  // never runs and that context dies with the sandbox. Labels follow this repo's issue
-  // conventions: `needs-triage` plus a priority (`P2`); issue type is a native field, so
-  // there is no `bug` label to add.
-  reportFinding: githubFindingReporter(undefined, { labels: ["needs-triage", "P2"] }),
-
-  // After a wave merges an issue's green and the merged-base gate passes, advance it
-  // to the first hop of merge→pending-verify→close: add `pending-verify`, drop
-  // `ready-for-agent`. Best-effort (a failed label write never fails the run).
-  onIssueMerged: githubMarkPendingVerify(),
+  // The GitHub tracker preset: fetchTask, blockedBy, listByLabel, postComment,
+  // onIssueMerged and reportFinding, all against this repo's `origin`. Findings an agent
+  // noticed but did not fix are filed with this repo's issue conventions: `needs-triage`
+  // plus a priority (`P2`); issue type is a native field, so there is no `bug` label.
+  ...githubTracker({ findingLabels: ["needs-triage", "P2"] }),
 
   // No `fileSet` override: the shipped `defaultFileSet` reads the explicit
   // "Touches (existing files): `a.ts`, `b.ts`" marker line each ticket body

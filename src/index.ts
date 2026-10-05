@@ -58,6 +58,7 @@ export {
   githubIssueComment,
   githubIssuesByLabel,
   githubMarkPendingVerify,
+  githubTracker,
 } from "./github.ts";
 export { defaultFileSet } from "./fileset.ts";
 export type { FileSet, FileSetOf } from "./fileset.ts";

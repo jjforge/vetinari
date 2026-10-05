@@ -82,7 +82,7 @@ ignored `.vetinari.local/` for machine-local state (logs, parked tasks, and the
 editing:
 
 ```ts
-import { defineConfig, githubFetchTask } from "vetinari";
+import { defineConfig, githubTracker } from "vetinari";
 
 export default defineConfig({
   project: "myapp",
@@ -97,14 +97,18 @@ export default defineConfig({
   ],
 
   setup: ["npm ci"],                   // once per sandbox, before the agent starts
-  fetchTask: githubFetchTask(),        // repo derived from origin; title/body/comments/labels + state
+  ...githubTracker(),                  // every GitHub tracker seam, repo derived from origin
 });
 ```
 
-Every `github*` resolver takes an optional `owner/repo`. Called with no argument —
-`githubFetchTask()`, `githubBlockedBy()`, … — it derives the repo from this
-project's git `origin`, so you never repeat it per resolver. Pass an explicit
-`"owner/repo"` only when your tracker is **not** the project's `origin`.
+`githubTracker()` wires all six tracker seams — `fetchTask`, `blockedBy`,
+`listByLabel`, `postComment`, `onIssueMerged`, `reportFinding` — deriving the repo
+from this project's git `origin`. Pass `{ repo: "owner/repo" }` only when your
+tracker is **not** the project's `origin`, and `{ findingLabels: [...] }` to label
+filed findings (default `["needs-triage"]`). A field set after the spread wins, so
+`onIssueMerged: undefined` turns one hook off. For custom wiring, the individual
+factories it is built from — `githubFetchTask()`, `githubBlockedBy()`, … — stay
+exported as the building blocks.
 
 Build the image and prove it before spending anything on an agent:
 

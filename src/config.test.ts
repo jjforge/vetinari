@@ -102,9 +102,25 @@ test("loadConfig over vetinari's own committed config wires reportFinding as a f
   // them — pin them on the config's source text instead.
   const source = readFileSync(cfgPath, "utf8").replace(/\s+/g, "");
   assert.ok(
-    source.includes('reportFinding:githubFindingReporter(undefined,{labels:["needs-triage","P2"]})'),
+    source.includes('...githubTracker({findingLabels:["needs-triage","P2"]})'),
     "vetinari's config no longer files findings with the needs-triage and P2 labels",
   );
+});
+
+test("vetinari's own config spreads the githubTracker preset rather than hand-wiring the github factories", () => {
+  // A loaded config cannot tell preset-built functions from hand-wired ones, so pin the source text.
+  const source = readFileSync(new URL("../vetinari/config.mts", import.meta.url), "utf8");
+
+  assert.ok(source.includes("...githubTracker("), "vetinari's config does not spread githubTracker()");
+  for (const factory of [
+    "githubFetchTask(",
+    "githubBlockedBy(",
+    "githubIssuesByLabel(",
+    "githubIssueComment(",
+    "githubMarkPendingVerify(",
+    "githubFindingReporter(",
+  ])
+    assert.ok(!source.includes(factory), `vetinari's config still hand-wires ${factory}…)`);
 });
 
 test("containerShareWeight maps the three tiers to internal fair-share weights (~7:2:1)", () => {

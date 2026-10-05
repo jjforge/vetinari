@@ -37,6 +37,8 @@ Within a milestone each bold section label appears at most once.
 - [ops] Outbox records are now written atomically, and the outbox listing skips and logs an unreadable record as `outbox-record-unreadable` instead of throwing — one torn record no longer breaks the gateway tick for every project (#442).
 - [user] The dashboard issue sheet now shows the "pruning… #N will drop from the plan on the next refresh" note after a successful prune, instead of hiding it with the prune panel; the Prune button and confirm are put away so no second prune starts, and the note no longer carries over to the next issue opened (#448).
 - [user] A merged issue whose parked record survived in a still-open wave no longer reads parked on the project page, the landing card, the parked counter or the cross-repo parked queue (#465).
+- [user] A campaign wave held by a member whose run was stopped (signalled outside `vetinari stop`, e.g. its container killed) now says to `vetinari redrive` — both the terminal stop line and the operator notice — instead of telling the operator to `vetinari answer` a park that has no question (#441).
+- [user] A stop request from a campaign that died before parking no longer reads as pending on every later redrive: `vetinari stop` sends the stop again instead of reporting one already pending, and the dashboard's Stop control no longer shows "Stop pending" on a campaign that is not stopping (#463).
 
 **Documentation:**
 - [user] The default TDD prompt no longer sends campaign agents to the README's Modes table, which no longer exists; it points them at the project's command reference instead (in vetinari, `docs/reference.md`, generated from `MODES` in `src/help.ts`) (#437).

@@ -75,6 +75,15 @@ value across the config *files* (which layer holds a secret, which crosses into 
 container) is the on-disk layout below and design §9; this table is the fields of
 the config object itself.
 
+On GitHub, spread the **`githubTracker()` preset** in to wire all six tracker
+seams at once — `fetchTask`, `blockedBy`, `listByLabel`, `postComment`,
+`onIssueMerged`, `reportFinding` — as `...githubTracker({ repo?, findingLabels? })`.
+With no `repo` each seam derives it from the project's `origin` on first call (a
+refusal when it cannot); `findingLabels` defaults to `["needs-triage"]`. A field set
+after the spread wins (`onIssueMerged: undefined` turns that hook off). The
+individual factories named in the table below are the preset's building blocks,
+exported for custom wiring.
+
 | Field | Purpose |
 | --- | --- |
 | `project` | this project's name in the host registry, dashboard, and notices |

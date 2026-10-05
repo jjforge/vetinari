@@ -290,3 +290,31 @@ export const githubFindingReporter = (
     return (await run(args)).trim();
   };
 };
+
+/**
+ * The GitHub tracker preset: all six tracker seams — `fetchTask`, `blockedBy`,
+ * `listByLabel`, `postComment`, `onIssueMerged`, `reportFinding` — built from the
+ * factories above, so a config spreads one call instead of hand-wiring six and an
+ * improvement reaches every project on upgrade. Drop it into a config as
+ * `...githubTracker()` — the repo is derived from the project's `origin` (deferred to
+ * first call, a `Refusal` when underivable, exactly as each factory does); pass
+ * `githubTracker({ repo: "owner/repo" })` only when the tracker is not the project's
+ * `origin`. Findings are filed with `findingLabels`, `["needs-triage"]` by default.
+ *
+ * A field set after the spread wins, so a project overrides or turns off one seam
+ * (`{ ...githubTracker(), onIssueMerged: undefined }`); the factories stay exported as
+ * the building blocks for custom wiring. `run`/`deriveRepo` are injected only so the
+ * wiring can be tested without invoking `gh` or reading a real remote.
+ */
+export const githubTracker = (
+  opts: { repo?: string; findingLabels?: string[] } = {},
+  run: (args: string[]) => Promise<string> = gh,
+  deriveRepo = deriveRepoFromProject,
+) => ({
+  fetchTask: githubFetchTask(opts.repo, run, deriveRepo),
+  blockedBy: githubBlockedBy(opts.repo, run, undefined, deriveRepo),
+  listByLabel: githubIssuesByLabel(opts.repo, run, undefined, deriveRepo),
+  postComment: githubIssueComment(opts.repo, run, deriveRepo),
+  onIssueMerged: githubMarkPendingVerify(opts.repo, run, deriveRepo),
+  reportFinding: githubFindingReporter(opts.repo, { labels: opts.findingLabels ?? ["needs-triage"] }, run, deriveRepo),
+});

@@ -1,7 +1,7 @@
 // Real config from the project this harness was extracted from — a Go fork plus
 // a Rust sidecar, tasks sourced from GitHub issues.
 import { resolve } from "node:path";
-import { defineConfig, githubBlockedBy, githubFetchTask, githubFindingReporter, githubIssueComment } from "vetinari";
+import { defineConfig, githubTracker } from "vetinari";
 
 export default defineConfig({
   project: "jjforge",
@@ -41,25 +41,11 @@ export default defineConfig({
     { hostPath: ".vetinari.local/cache/sccache", sandboxPath: "/home/agent/.cache/sccache" },
   ],
 
-  // The shared helper fetches the full field set — title/body/comments/labels for
-  // the prompt, plus state/closedAt so `issueStateFromTask` can reject a closed graft
-  // target (#175). Hand-rolling the `--json` list here would silently re-drop those.
-  fetchTask: githubFetchTask(),
-
-  // Powers `carve`: native GitHub "blocked by" links tell it which issues fall
-  // when one is pulled from a campaign.
-  blockedBy: githubBlockedBy(),
-
-  // After a green run, harvest defects the agent noticed but did not fix and file
-  // them as issues — otherwise that context dies with the container. Same label
-  // discipline the interactive /fix-issue command uses.
-  reportFinding: githubFindingReporter(undefined, { labels: ["P2", "bug", "needs-triage"] }),
-
-  // Relays a parked question's answer to a non-resumable agent (copilot/cursor/opencode):
-  // `answer` posts the human's reply as an issue comment, then re-runs fresh so the next
-  // turn's fetchTask re-reads it. Resumable agents resume their session instead and never
-  // call this (#212).
-  postComment: githubIssueComment(),
+  // The GitHub tracker preset: fetchTask, blockedBy, listByLabel, postComment,
+  // onIssueMerged and reportFinding, all against this repo's `origin`. Findings an agent
+  // noticed but did not fix are filed with the same label discipline the interactive
+  // /fix-issue command uses.
+  ...githubTracker({ findingLabels: ["P2", "bug", "needs-triage"] }),
 
   toolchainProbe: "go version && cargo --version && sccache --version && claude --version && git --version",
 

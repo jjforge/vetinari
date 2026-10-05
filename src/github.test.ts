@@ -7,6 +7,7 @@ import {
   githubIssueComment,
   githubIssuesByLabel,
   githubMarkPendingVerify,
+  githubTracker,
 } from "./github.ts";
 import { Refusal } from "./refusal.ts";
 import { issueStateFromTask } from "./dashboard-model.ts";
@@ -689,4 +690,107 @@ test("githubIssueComment rejects when the gh write fails — a lost tracker writ
   };
 
   await assert.rejects(() => githubIssueComment("jjforge/jjforge", run)("#226", "the answer"), /not found/);
+});
+
+/** A `run` that records every `gh` call and answers each with an empty-but-valid reply. */
+function recordingRun() {
+  const calls: string[][] = [];
+  const run = async (args: string[]): Promise<string> => {
+    calls.push(args);
+    return args[0] === "api" || args[1] === "list" ? "[]" : "";
+  };
+  return { run, calls };
+}
+
+/** Invokes every seam of a `githubTracker()` once, in a fixed order. */
+async function invokeAllSeams(tracker: ReturnType<typeof githubTracker>) {
+  await tracker.fetchTask("#1");
+  await tracker.blockedBy("#1");
+  await tracker.listByLabel("ready-for-agent");
+  await tracker.postComment("#1", "hi");
+  await tracker.onIssueMerged("#1");
+  await tracker.reportFinding({ summary: "a bug" }, { taskId: "1", project: "p" });
+}
+
+test("githubTracker bundles exactly the six GitHub tracker seams", () => {
+  assert.deepEqual(Object.keys(githubTracker()).sort(), [
+    "blockedBy",
+    "fetchTask",
+    "listByLabel",
+    "onIssueMerged",
+    "postComment",
+    "reportFinding",
+  ]);
+});
+
+test("githubTracker passes an explicit repo to all six seams — the deriver never runs", async () => {
+  const { run, calls } = recordingRun();
+  const tracker = githubTracker({ repo: "x/y" }, run, () => assert.fail("deriver must not run with an explicit repo"));
+
+  await invokeAllSeams(tracker);
+
+  assert.equal(calls.length, 6);
+  assert.equal(calls[1][1], "repos/x/y/issues/1/dependencies/blocked_by");
+  for (const c of [calls[0], ...calls.slice(2)]) assert.equal(c[c.indexOf("--repo") + 1], "x/y");
+});
+
+test("githubTracker with no repo derives it on first call, not at construction, and uses it in every seam", async () => {
+  const { run, calls } = recordingRun();
+  let derivations = 0;
+  const tracker = githubTracker({}, run, () => {
+    derivations++;
+    return "o/r";
+  });
+  assert.equal(derivations, 0);
+
+  await invokeAllSeams(tracker);
+
+  assert.equal(calls[1][1], "repos/o/r/issues/1/dependencies/blocked_by");
+  for (const c of [calls[0], ...calls.slice(2)]) assert.equal(c[c.indexOf("--repo") + 1], "o/r");
+});
+
+test("githubTracker refuses in every seam when the repo cannot be derived — calls no gh", async () => {
+  const { run, calls } = recordingRun();
+  const tracker = githubTracker(undefined, run, () => undefined);
+
+  for (const call of [
+    () => tracker.fetchTask("#1"),
+    () => tracker.blockedBy("#1"),
+    () => tracker.listByLabel("ready-for-agent"),
+    () => tracker.postComment("#1", "hi"),
+    () => tracker.onIssueMerged("#1"),
+    () => tracker.reportFinding({ summary: "a bug" }, { taskId: "1", project: "p" }),
+  ])
+    await assert.rejects(call, Refusal);
+  assert.equal(calls.length, 0);
+});
+
+const labelsOf = (args: string[]) => args.filter((_, i) => args[i - 1] === "--label");
+
+test("githubTracker files findings with needs-triage when findingLabels is omitted", async () => {
+  const { run, calls } = recordingRun();
+
+  await githubTracker({ repo: "x/y" }, run).reportFinding({ summary: "a bug" }, { taskId: "1", project: "p" });
+
+  assert.deepEqual(labelsOf(calls[0]), ["needs-triage"]);
+});
+
+test("githubTracker files findings with the given findingLabels", async () => {
+  const { run, calls } = recordingRun();
+
+  await githubTracker({ repo: "x/y", findingLabels: ["P2", "bug", "needs-triage"] }, run).reportFinding(
+    { summary: "a bug" },
+    { taskId: "1", project: "p" },
+  );
+
+  assert.deepEqual(labelsOf(calls[0]), ["P2", "bug", "needs-triage"]);
+});
+
+test("a field set after spreading githubTracker wins — onIssueMerged: undefined turns that hook off", () => {
+  const custom = async () => "";
+  const cfg = { ...githubTracker(), onIssueMerged: undefined, fetchTask: custom };
+
+  assert.equal(cfg.onIssueMerged, undefined);
+  assert.equal(cfg.fetchTask, custom);
+  assert.equal(typeof cfg.blockedBy, "function");
 });

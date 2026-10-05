@@ -113,7 +113,7 @@ _Avoid_: step, stage, substate as the surface word.
 **Park reason**:
 Why a [[parked]] issue or wave is held, and which recovery it offers — metadata on
 the park, not a status. One enum: `question | stalled | conflict | red-base |
-crash | stopped`.
+crash | stopped | outdated-agent`.
 _Avoid_: quarantined, interrupted (those were reasons masquerading as statuses).
 
 **question**:
@@ -141,6 +141,12 @@ _Avoid_: interrupted.
 A person stopped the run (SIGINT/SIGTERM) before it reached a verdict; its work is
 kept. It cannot be answered: `vetinari run <id>` continues a standalone run,
 [[redrive]] continues a campaign.
+
+**outdated-agent**:
+The image's [[agent]] CLI is too old for the configured model, so no run can
+start until the image is rebuilt — an environment fault, not the issue's. Rebuild
+the image, then [[redrive]].
+_Avoid_: stale image (that is an image older than its Dockerfile, a warning only).
 
 ### The six moves
 

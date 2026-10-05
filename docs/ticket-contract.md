@@ -8,10 +8,10 @@ It describes the **shipped defaults**: the `defaultFileSet` resolver and the `gi
 
 The planner keeps co-wave tickets file-disjoint, so it needs to know which files each ticket touches. It reads that from the ticket's text (`ticketProse`):
 
-- **Title + body first.** When the title or body carries a marker line from which at least one cite parses, the comments are ignored entirely. "Carries a marker" means a cite _parses_, not that it exists in the tree: a body marker naming an absent file still shadows every comment, and the ticket resolves not confident.
-- **Otherwise, the comments' marker lines.** The marker lines across all comments are joined into one: the union of their cites. This is how a brief posted as a comment is read.
+- **Title + body first.** When the title or body carries a marker line from which at least one cite parses, the comments are ignored entirely. Any such line counts, even one a later line supersedes. "Carries a marker" means a cite _parses_, not that it exists in the tree: a body marker naming an absent file still shadows every comment, and the ticket resolves not confident.
+- **Otherwise, the comments' marker lines.** The marker lines across all comments are joined into one: the union of their cites. This is how a brief posted as a comment is read. A title + body whose marker lines cite nothing (only `Touches: none`, say) carry no marker, so the comments' marker lines are read.
 - **Comment prose is never scanned.** Only anchored marker lines are read from a comment; a filename mentioned elsewhere in a comment is ignored.
-- **Within title + body, the last marker line of each kind wins.** A later, corrected line supersedes an earlier one. This holds even when the last line cites nothing: a closing `Touches: none` leaves the ticket with no files and not confident.
+- **Within title + body, the last marker line of each kind wins.** A later, corrected line supersedes an earlier one. This holds even when the last line cites nothing: a closing cite-less line (`Touches: none`) after a cited one leaves the ticket with no files and not confident.
 - **No marker line of either kind anywhere** → a whole-body scan of title + body is the fallback. Every path-shaped token counts and every one must exist in the tree, so an incidental filename in the prose forbids confidence. It is far likelier to resolve not confident; add a marker line.
 - **A one-issue selection skips the file-set check.** It has no co-wave to collide with, so `campaign <id>` runs a lone ticket with no marker at all.
 

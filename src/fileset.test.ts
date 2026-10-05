@@ -381,6 +381,74 @@ test("ticketProse lets a body marker citing only a non-file word shadow a commen
   assert.equal(res.confident, false);
 });
 
+test("ticketProse lets a body's closing cite-less Touches line after a cited one shadow a comment marker (#483)", () => {
+  const root = treeWith("src/a.ts", "src/b.ts");
+  const fileSet = defaultFileSet(root);
+
+  // The body carries a cited marker, so it is authoritative and the comment is never
+  // read; within the body the closing `Touches: none` wins, leaving no files.
+  const task = JSON.stringify({
+    title: "Fix",
+    body: "Touches (existing files): `src/a.ts`\n\nTouches: none",
+    comments: [{ body: "Touches (existing files): `src/b.ts`\n" }],
+  });
+
+  const res = fileSet(ticketProse(task));
+
+  assert.deepEqual(res.files, []);
+  assert.equal(res.confident, false);
+});
+
+test("ticketProse lets a body's closing cite-less Creates line after a cited one shadow a comment marker (#483)", () => {
+  const root = treeWith("src/b.ts");
+  const fileSet = defaultFileSet(root);
+
+  const task = JSON.stringify({
+    title: "Fix",
+    body: "Creates (new files): `src/c.ts`\n\nCreates: none",
+    comments: [{ body: "Touches (existing files): `src/b.ts`\n" }],
+  });
+
+  const res = fileSet(ticketProse(task));
+
+  assert.deepEqual(res.files, []);
+  assert.equal(res.confident, false);
+});
+
+test("ticketProse reads a comment marker when the body's only marker line cites nothing (#483)", () => {
+  const root = treeWith("src/b.ts");
+  const fileSet = defaultFileSet(root);
+
+  // A cite-less marker line is not a marker, so a body carrying only `Touches: none`
+  // has none and the comment's marker line is read.
+  const task = JSON.stringify({
+    title: "Fix",
+    body: "Touches: none",
+    comments: [{ body: "Touches (existing files): `src/b.ts`\n" }],
+  });
+
+  const res = fileSet(ticketProse(task));
+
+  assert.deepEqual(res.files, ["src/b.ts"]);
+  assert.equal(res.confident, true);
+});
+
+test("a body's closing cite-less Touches line after a cited one leaves no files when there are no comments (#483)", () => {
+  const root = treeWith("src/a.ts");
+  const fileSet = defaultFileSet(root);
+
+  const task = JSON.stringify({
+    title: "Fix",
+    body: "Touches (existing files): `src/a.ts`\n\nTouches: none",
+    comments: [],
+  });
+
+  const res = fileSet(ticketProse(task));
+
+  assert.deepEqual(res.files, []);
+  assert.equal(res.confident, false);
+});
+
 test("defaultFileSet strips a trailing :line off a cite before resolving it (#388)", () => {
   const root = treeWith("src/host-slots.ts");
 

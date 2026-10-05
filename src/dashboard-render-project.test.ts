@@ -2562,3 +2562,28 @@ test("renderStatusPage renders an archived run's closed waves as full cards, not
   // Exactly one element carries the toggle id across the whole page (no duplicate ids).
   assert.equal(html.split('id="closed-wave-0"').length - 1, 1);
 });
+
+// --- Slow gates (#445): a project-page section, shown only when a gate is flagged ----------------
+
+test("the project page shows a Slow gates section naming each flag's facts when a gate is flagged (#445)", () => {
+  const page = renderStatusPage(archStatus("1"), {
+    slowGates: {
+      history: [{ cmd: "make test", earlierMedian: 60, earlierRuns: 40, currentMedian: 228, currentRuns: 3 }],
+      budget: [{ cmd: "go test <pkg>", budgetSeconds: 300, over: 2, runs: 5 }],
+    },
+  });
+  const section = page.slice(
+    page.indexOf('<section class="slow-gates">'),
+    page.indexOf("</section>", page.indexOf('<section class="slow-gates">')),
+  );
+  assert.match(section, /<h2>Slow gates<\/h2>/);
+  assert.match(section, /<code>make test<\/code> — median 228s over 3 runs this campaign, up from 60s over 40 earlier runs/);
+  assert.match(section, /<code>go test &lt;pkg&gt;<\/code> — 2 of 5 runs this campaign went over its 300s budget/);
+  // Rendered at page load outside the live region (after the live tail), so an SSE flush never redraws it away.
+  assert.ok(page.indexOf('<section class="slow-gates">') > page.indexOf('<section class="live-tail"'));
+});
+
+test("the project page shows no Slow gates section when no gate is flagged (#445)", () => {
+  assert.doesNotMatch(renderStatusPage(archStatus("1")), /<section class="slow-gates">/);
+  assert.doesNotMatch(renderStatusPage(archStatus("1"), { slowGates: { history: [], budget: [] } }), /<section class="slow-gates">/);
+});

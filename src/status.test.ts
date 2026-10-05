@@ -136,6 +136,29 @@ test("serveAllStatus serves the aggregated site, selecting the project from the 
   }
 });
 
+test("the project page flags a budget overrun read from the log alone, and shows no Slow gates section when none is flagged (#445)", async () => {
+  const configDir = join(tmpdir(), `vetinari-slow-gates-page-${Date.now()}`);
+  const slowDir = join(configDir, "state-slow");
+  const calmDir = join(configDir, "state-calm");
+  const start = event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["101"]], slots: 1 });
+  // The budget lives only on the logged gate-result — the gateway never loads the project config.
+  seedState(slowDir, [start, event("gate-result", { cmd: "make test", exitCode: 2, seconds: 601, outFile: "o", budgetSeconds: 300 })]);
+  seedState(calmDir, [start, event("gate-result", { cmd: "make test", exitCode: 0, seconds: 60, outFile: "o", budgetSeconds: 300 })]);
+  register(configDir, { project: "slow", projectRoot: join(configDir, "slow-root"), baseLocation: slowDir });
+  register(configDir, { project: "calm", projectRoot: join(configDir, "calm-root"), baseLocation: calmDir });
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const { port } = server.address() as AddressInfo;
+  try {
+    const slow = await (await fetch(`http://127.0.0.1:${port}/?project=slow`)).text();
+    assert.match(slow, /<h2>Slow gates<\/h2>/);
+    assert.match(slow, /<code>make test<\/code> — 1 of 1 run this campaign went over its 300s budget/);
+    const calm = await (await fetch(`http://127.0.0.1:${port}/?project=calm`)).text();
+    assert.doesNotMatch(calm, /<section class="slow-gates">/);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
 test("GET /api/host-log serves the host log newest-first as raw JSONL lines; a missing file reads empty (#180)", async () => {
   const configDir = join(tmpdir(), `vetinari-hostlog-route-${Date.now()}`);
   const gwHome = join(configDir, "gw-home");

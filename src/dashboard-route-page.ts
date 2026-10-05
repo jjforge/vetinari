@@ -7,11 +7,13 @@ import {
   cardState,
   festiveFromCookie,
   listArchivedRuns,
+  logFileOf,
   repoForProject,
   selectStatus,
 } from "./dashboard-model.ts";
 import { renderLandingShell, renderStatusPage } from "./dashboard-render.ts";
 import { projectHasLiveCampaign } from "./host-slots.ts";
+import { latestCampaignSlowGates, readSlowGateLogs } from "./slow-gates.ts";
 import type { RouteHandler } from "./dashboard-http.ts";
 
 /**
@@ -66,6 +68,11 @@ export const handlePage: RouteHandler = (req, res, url, deps) => {
   // host lease — the same live-lease probe crash detection reads — gates it, and the base
   // branch it would land on is read live from the checkout for its confirm dialog.
   const leaseLive = pointer ? projectHasLiveCampaign(deps.configDir, selected.project) : false;
+  // The latest campaign's slow gates (#445), from the project's whole gate history — every archive
+  // plus the live log. Computed here, for the project page only, never inside `buildStatus` (which
+  // runs on every landing render and live-tail flush and must not re-read every archive).
+  const gateLogs = pointer ? readSlowGateLogs(pointer.baseLocation, logFileOf(pointer.baseLocation)) : undefined;
+  const slowGates = gateLogs && latestCampaignSlowGates(gateLogs.archives, gateLogs.live);
   res.end(
     renderStatusPage(selected, {
       projects: repos,
@@ -77,6 +84,7 @@ export const handlePage: RouteHandler = (req, res, url, deps) => {
       festive: festiveFromCookie(req.headers.cookie),
       leaseLive,
       baseBranch: pointer ? baseBranchForProject(pointer.projectRoot) : undefined,
+      slowGates,
     }),
   );
   return true;

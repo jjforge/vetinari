@@ -1510,6 +1510,41 @@ test("a gate abandoned by a stop runs no further check and logs no gate-result a
   assert.equal(execCalls.includes("g2"), false, "the second gate never runs");
 });
 
+test("a stop during the gate's changed-files diff logs no gate event after the stopped park (#484)", async () => {
+  const cfg = harnessCfg();
+  const control = makeStopControl();
+  const sbx = stopSandbox([{ run: { completionSignal: "<promise>COMPLETE</promise>" }, green: true }], control);
+  const execCalls: string[] = [];
+  const exec = sbx.exec.bind(sbx);
+  sbx.exec = async (cmd) => {
+    execCalls.push(cmd);
+    if (cmd.startsWith("git diff --name-only")) {
+      control.fire("SIGTERM"); // the stop lands while the diff is in flight
+      await sleepMs(100);
+    }
+    return exec(cmd);
+  };
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { onStop: control.onStop })));
+  // Let the abandoned gate settle — the bug logged its `gate` event after `runLoop` had returned.
+  await sleepMs(300);
+
+  assert.equal(outcome, "parked");
+  const events = readEventLog(cfg);
+  const parkedAt = events.findIndex((e) => e.event === "parked" && (e as any).reason === "stopped");
+  assert.ok(parkedAt >= 0, "the run parked stopped");
+  assert.deepEqual(
+    events.slice(parkedAt + 1).map((e) => e.event),
+    [],
+    "nothing is logged after the stopped park",
+  );
+  assert.deepEqual(
+    execCalls.filter((c) => !c.startsWith("git ")),
+    [],
+    "no gate command runs",
+  );
+});
+
 test("a stop during a no-signal turn sends no nudge (#462)", async () => {
   const cfg = { ...harnessCfg(), maxTurns: 6 };
   const control = makeStopControl();

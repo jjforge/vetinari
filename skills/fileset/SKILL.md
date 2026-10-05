@@ -109,6 +109,14 @@ documents the flag, command, config field or behaviour being changed — goes on
 `Touches:` line like any source file. The planner schedules co-wave tickets by the marker
 alone, so two tickets editing the same doc that neither marked collide at merge.
 
+**So do the CLI files.** A change that adds, removes or renames a command or flag, or
+changes its `--help` text, lists `src/help.ts` (the `MODES` table drives `--help`), and
+`docs/reference.md` too whenever it touches `MODES` (the reference's modes block is
+generated from it and a test pins the two together; a help-footer-only change leaves the
+reference alone). Add `src/cli-dispatch.ts` for a post-config command (parsed by
+`parseArgs`, run by `dispatch`), or `src/cli.mts` for a host-level command handled inline
+in the entry point, or when the change hands a new dependency to `dispatch`.
+
 A ticket that only edits existing files carries just a `Touches:` line; one that only
 adds a new module carries just a `Creates:` line; one that does both carries both. A
 `Touches:` cite resolves by matching the tail of its path against the tree, so a bare

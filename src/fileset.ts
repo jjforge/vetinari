@@ -147,14 +147,15 @@ function markerCites(body: string, marker: RegExp): string[] | null {
  * least one cite — not only the last of each kind, which is what the resolver reads.
  * So a cited line followed by a cite-less `Touches: none` still counts: the body is
  * authoritative, the comments are dropped, and the closing line leaves the ticket with
- * no files and not confident (#483). Reuses the parser the resolver reads with. Every backticked token on a marker line is a cite, so a line citing
- * only a non-file word (e.g. `campaign`) IS a marker: it shadows any marker the ticket
- * carries in a comment, and the ticket resolves not confident — the author's explicit
- * declaration cites a non-file, which should halt the planner, not be quietly
- * overridden (#477). An anchored line with no cite at all (no backticked token, no
- * slash path) is not a marker here, so text whose marker lines all cite nothing has
- * none and the comments' marker lines are read. (Escaped backticks are normalized away before
- * tokenizing, so they parse to a real cite — see #249.)
+ * no files and not confident (#483). Reuses the parser the resolver reads with. Every
+ * backticked token on a marker line is a cite, so a line citing only a non-file word
+ * (e.g. `campaign`) IS a marker: it shadows any marker the ticket carries in a comment,
+ * and the ticket resolves not confident — the author's explicit declaration cites a
+ * non-file, which should halt the planner, not be quietly overridden (#477). An
+ * anchored line with no cite at all (no backticked token, no slash path) is not a
+ * marker here, so text whose marker lines all cite nothing has none and the comments'
+ * marker lines are read. (Escaped backticks are normalized away before tokenizing, so
+ * they parse to a real cite — see #249.)
  */
 function hasMarkerLine(text: string): boolean {
   const cites = (marker: RegExp): boolean => {

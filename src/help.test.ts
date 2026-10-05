@@ -105,3 +105,9 @@ test("renderUsage shows every mode's signature — --help is produced from MODES
   const usage = renderUsage();
   for (const m of MODES) assert.ok(usage.includes(m.signature), `--help is missing the "${m.signature}" mode`);
 });
+
+test("init's entry mentions its GitHub label step — the labels githubTracker() relies on", () => {
+  const init = MODES.find((m) => m.signature.startsWith("init"))!;
+  assert.match(init.blurb, /label/);
+  for (const name of ["ready-for-agent", "pending-verify", "needs-triage"]) assert.ok(init.blurb.includes(name), name);
+});

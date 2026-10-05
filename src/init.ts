@@ -22,6 +22,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { Refusal } from "./refusal.ts";
 import { dirname, resolve } from "node:path";
 import { AGENT_PROVIDERS, DEFAULT_PROVIDER, ownerRepoFromRemote, type AgentProviderName } from "./config.ts";
+import { GITHUB_TRACKER_LABELS } from "./github.ts";
 
 const CANONICAL_DIR = "vetinari";
 /** The excluded machine-local base location init lays down and knows by its own constant
@@ -259,4 +260,78 @@ export function scanInit(baseDir: string): InitScan {
     dockerfileTemplate: readFileSync(templatePath("Dockerfile"), "utf8"),
     tsconfigTemplate: readFileSync(templatePath("tsconfig.json"), "utf8"),
   };
+}
+
+/** What the label step needs from the edge — the CLI's prompt, a `gh` runner and its console. */
+export interface GithubLabelStepDeps {
+  isTTY: boolean;
+  dryRun: boolean;
+  ask: (question: string) => Promise<string>;
+  run: (args: string[]) => Promise<string>;
+  log: (message: string) => void;
+}
+
+type TrackerLabel = (typeof GITHUB_TRACKER_LABELS)[number];
+
+/** `gh` arguments that create one of the preset's labels with its fixed colour and description. */
+const labelCreateArgs = (repo: string, l: TrackerLabel) => [
+  "label",
+  "create",
+  l.name,
+  "--repo",
+  repo,
+  "--color",
+  l.color,
+  "--description",
+  l.description,
+];
+
+/** The same create as a command to paste — the description single-quoted for the shell. */
+const labelCreateCommand = (repo: string, l: TrackerLabel) =>
+  ["gh", ...labelCreateArgs(repo, l).slice(0, -1), `'${l.description}'`].join(" ");
+
+/**
+ * `init`'s missing-labels step. The `githubTracker()` config `init` writes relies on the
+ * `GITHUB_TRACKER_LABELS`, and a fresh GitHub repo has none of them — so without this the
+ * merge relabel silently does nothing and a finding fails to file. Runs only when the
+ * githubTracker config was actually laid down.
+ *
+ * On a terminal it reads the repo's labels (read-only) and, if any are missing, names them
+ * and offers to create them; yes creates each (a failed create prints its command and
+ * carries on), no prints the commands. All present prints nothing. Off a terminal, or with
+ * `--dry-run`, it makes no `gh` call — `init` stays network-free there — and prints the
+ * commands for all three; so does a terminal run whose `gh label list` fails (gh missing,
+ * not logged in). Never throws: a label problem is never `init`'s failure. `ask`/`run`/`log`
+ * are the CLI's prompt, a `gh` runner and its console, injected so this is testable.
+ */
+export async function offerGithubLabels(plan: InitPlan, repo: string | undefined, deps: GithubLabelStepDeps): Promise<void> {
+  // computeInit sets githubConfig even on a refused plan, so both gate every path. A
+  // github.com origin always parses to a repo; the check only narrows its type.
+  if (!plan.githubConfig || plan.refused || repo === undefined) return;
+  const commands = (labels: readonly TrackerLabel[]) => labels.map((l) => `  ${labelCreateCommand(repo, l)}`);
+  const printAll = (why: string) => deps.log(["", `${why} — create any your repo lacks:`, ...commands(GITHUB_TRACKER_LABELS)].join("\n"));
+
+  if (!deps.isTTY || deps.dryRun) return printAll("The githubTracker() config relies on these GitHub labels");
+
+  let present: Set<string>;
+  try {
+    const out = await deps.run(["label", "list", "--repo", repo, "--json", "name", "--limit", "1000"]);
+    present = new Set((JSON.parse(out) as Array<{ name: string }>).map((l) => l.name));
+  } catch {
+    return printAll("Couldn't read this repo's labels with `gh` (not installed, not logged in, or the call failed)");
+  }
+  const missing = GITHUB_TRACKER_LABELS.filter((l) => !present.has(l.name));
+  if (!missing.length) return;
+
+  deps.log(`\nThe githubTracker() config relies on GitHub labels this repo lacks: ${missing.map((l) => l.name).join(", ")}.`);
+  const answer = (await deps.ask("Create them now? [y/N] ")).trim().toLowerCase();
+  if (answer !== "y" && answer !== "yes") return deps.log(["Create them with:", ...commands(missing)].join("\n"));
+  for (const l of missing) {
+    try {
+      await deps.run(labelCreateArgs(repo, l));
+      deps.log(`  created ${l.name}`);
+    } catch {
+      deps.log(`  couldn't create ${l.name} — create it with:\n  ${labelCreateCommand(repo, l)}`);
+    }
+  }
 }

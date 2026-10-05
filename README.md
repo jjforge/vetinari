@@ -82,6 +82,9 @@ ignored `.vetinari.local/` for machine-local state (logs, parked tasks, and the
 spreads `...githubTracker()`, wiring every tracker seam; otherwise (no `origin`, an
 SSH host alias, GitHub Enterprise, another host) it is a skeleton with a `TODO`
 `fetchTask` stub to fill in. `init --dry-run` says which it would write and why.
+The GitHub config needs the `ready-for-agent`, `pending-verify` and `needs-triage`
+labels; on a terminal `init` offers to create any the repo lacks, and otherwise
+prints the `gh label create` commands.
 Put everything project-specific in the config; nothing else needs editing:
 
 ```ts

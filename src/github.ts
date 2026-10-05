@@ -11,7 +11,8 @@ const execFileAsync = promisify(execFile);
 // Promise-based so the `Promise.all` fan-outs in graft, campaign planning, prune and
 // the dashboard previews actually overlap their `gh` calls instead of running one id
 // after another (#368). A non-zero exit rejects, as the former `execFileSync` threw.
-const gh = async (args: string[]): Promise<string> => (await execFileAsync("gh", args, { encoding: "utf8" })).stdout;
+// Exported as the runner `init`'s label step is handed.
+export const gh = async (args: string[]): Promise<string> => (await execFileAsync("gh", args, { encoding: "utf8" })).stdout;
 
 /** The default repo deriver every shipped resolver falls back to when no explicit
  * `owner/repo` is wired: the same live read of the project's `origin` remote that
@@ -290,6 +291,22 @@ export const githubFindingReporter = (
     return (await run(args)).trim();
   };
 };
+
+/**
+ * The GitHub labels the `githubTracker()` preset relies on — `githubMarkPendingVerify` adds
+ * `pending-verify` and drops `ready-for-agent`, and findings are filed with `needs-triage` by
+ * default — with the colour and description `init` creates each with when a fresh repo lacks
+ * it (a new GitHub repo carries none of them). The one place this table lives.
+ */
+export const GITHUB_TRACKER_LABELS: ReadonlyArray<{ name: string; color: string; description: string }> = [
+  { name: "ready-for-agent", color: "FEF2C0", description: "Fully specified, ready for an AFK agent" },
+  {
+    name: "pending-verify",
+    color: "fbca04",
+    description: "Fix on main, not yet verified end-to-end; remove & close after the check",
+  },
+  { name: "needs-triage", color: "E99695", description: "Maintainer needs to evaluate this issue" },
+];
 
 /**
  * The GitHub tracker preset: all six tracker seams — `fetchTask`, `blockedBy`,

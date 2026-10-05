@@ -9,6 +9,7 @@ import {
   loadConfig,
   missingCredentials,
   parseAgentOverride,
+  repoForProject,
   resolveAgentSelection,
   resolveConfigPath,
   resolveProjectRoot,
@@ -21,6 +22,7 @@ import { runLoop } from "./loop.ts";
 import { baseline, build, campaign, requireTelegram, tgTest } from "./modes.ts";
 import { runTgConnect } from "./tg-connect.ts";
 import { tgSend } from "./telegram.ts";
+import { gh } from "./github.ts";
 import {
   applyTidy,
   computeTidy,
@@ -47,7 +49,7 @@ import {
   systemdUnitPath,
   writeGatewayUnit,
 } from "./migrate.ts";
-import { applyInit, computeInit, describeInit, LOCAL_DIR, scanInit } from "./init.ts";
+import { applyInit, computeInit, describeInit, LOCAL_DIR, offerGithubLabels, scanInit } from "./init.ts";
 import {
   applyPathInstall,
   describePathInstall,
@@ -189,7 +191,19 @@ if (mode === "init") {
   const dryRun = rest.includes("--dry-run");
   const plan = computeInit(scanInit(process.cwd()));
   console.log(describeInit(plan));
+  // The githubTracker() config relies on GitHub labels a fresh repo lacks: on a terminal,
+  // offer to create the missing ones; off one (or with --dry-run) just print the commands,
+  // making no gh call. Run after the scaffold is laid down; --dry-run lays nothing down.
+  const labelStep = () =>
+    offerGithubLabels(plan, repoForProject(process.cwd()), {
+      isTTY: Boolean(process.stdin.isTTY),
+      dryRun,
+      ask,
+      run: gh,
+      log: (m) => console.log(m),
+    });
   if (dryRun) {
+    await labelStep();
     console.log("\n(dry run — nothing was written)");
     process.exit(0);
   }
@@ -199,6 +213,7 @@ if (mode === "init") {
   if (result.dirsCreated.length) did.push(`created ${result.dirsCreated.length} dir(s)`);
   if (result.gitignoreUpdated) did.push("updated .gitignore");
   if (did.length) console.log(`\nDone: ${did.join(", ")}.`);
+  await labelStep();
 
   // On a terminal, offer to wire this project's Telegram bot connection right after the
   // scaffold (only when the committed scaffold was actually laid down — a re-run on an

@@ -748,10 +748,15 @@ export const ARCHIVE_LIST_SCRIPT = `  const archiveList = document.querySelector
  */
 export const LIVE_TAIL_STYLES = `  .live-tail { background: var(--color-card); border: 1px solid var(--color-secondary); border-radius: var(--border-radius-medium); overflow: hidden; margin: 1rem 0; }
   .live-tail[hidden] { display: none; }
-  .tail-head { display: flex; align-items: center; gap: .5rem; padding: 10px 13px; }
+  /* The head wraps rather than the title, at every width: just above 640px the one-row head
+     (title, summary, dropdown, filter, pause, download) didn't fit and the title wrapped to two
+     lines (#475). So .tail-head wraps, .tail-title and .tail-issue-trigger keep to one line, and
+     .tail-controls (margin-left: auto) drops to a right-aligned second row when the row is too
+     narrow — where the row fits, nothing changes. */
+  .tail-head { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; padding: 10px 13px; }
   .tail-dot { width: .6rem; height: .6rem; background: var(--color-dim); }
   .tail-dot[data-state="live"] { background: var(--color-primary); }
-  .tail-title { display: inline-flex; align-items: center; gap: .4rem; border: 0; background: none; padding: 0; color: var(--color-text); font: inherit; font-weight: 600; cursor: pointer; }
+  .tail-title { display: inline-flex; align-items: center; gap: .4rem; border: 0; background: none; padding: 0; color: var(--color-text); font: inherit; font-weight: 600; white-space: nowrap; cursor: pointer; }
   .tail-caret::before { content: "▾"; color: var(--color-text-light-2); display: inline-block; transition: transform 150ms; }
   .tail-title[aria-expanded="false"] .tail-caret::before { transform: rotate(-90deg); }
   /* A non-disclosing pane title (the event-log feed heads its own pane but has no collapse):
@@ -759,10 +764,10 @@ export const LIVE_TAIL_STYLES = `  .live-tail { background: var(--color-card); b
   .tail-title-static { cursor: default; }
   .tail-summary { color: var(--color-text-light-2); font-size: .85rem; white-space: nowrap; }
   .tail-gap { flex: 1; }
-  .tail-controls { display: inline-flex; align-items: center; gap: .4rem; }
+  .tail-controls { display: inline-flex; align-items: center; gap: .4rem; margin-left: auto; }
   .tail-controls[hidden] { display: none; }
   .tail-issue-dd { position: relative; }
-  .tail-issue-trigger { display: inline-flex; align-items: center; gap: .35rem; border: 1px solid var(--color-secondary); border-radius: 999px; background: var(--color-chip); color: var(--color-text); font: inherit; font-size: .8rem; padding: .25rem .6rem; cursor: pointer; }
+  .tail-issue-trigger { display: inline-flex; align-items: center; gap: .35rem; border: 1px solid var(--color-secondary); border-radius: 999px; background: var(--color-chip); color: var(--color-text); font: inherit; font-size: .8rem; padding: .25rem .6rem; white-space: nowrap; cursor: pointer; }
   .tail-issue-trigger:hover { border-color: var(--color-primary); }
   .tail-issue-caret { color: var(--color-text-light-2); font-size: .7rem; }
   .tail-issue-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 5; list-style: none; margin: 0; padding: .25rem; min-width: 9rem; background: var(--color-box-header); border: 1px solid var(--color-secondary); border-radius: var(--border-radius); box-shadow: 0 8px 22px #0006; }

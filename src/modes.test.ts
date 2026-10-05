@@ -728,6 +728,107 @@ test("campaign prints the changelog near-miss line through the reporter even whe
   assert.ok(!lines.some((l) => l.includes("collected changelog fragments")), "nothing was committed");
 });
 
+// Slow gates (#445): each wave settle prints a slow-gate line after its own settle line. A fake child
+// logs the gate-results its run would have, and earlier campaigns are seeded as an archive.
+const seedGateArchive = (cfg: ResolvedConfig, ...seconds: number[]) => {
+  const dir = join(cfg.stateDir, "logs", "archive");
+  mkdirSync(dir, { recursive: true });
+  const rows = [
+    { ts: "2026-10-01T00:00:00Z", event: "campaign-start", waves: [["1"]], slots: 1 },
+    ...seconds.map((s) => ({ ts: "2026-10-01T00:00:01Z", event: "gate-result", cmd: "make test", exitCode: 0, seconds: s, outFile: "o" })),
+  ];
+  writeFileSync(join(dir, "orchestrator-2026-10-01T00-00-00-000Z.jsonl"), rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+};
+const logGateResult = (cfg: ResolvedConfig, taskId: string, seconds: number, extra: { exitCode?: number; budgetSeconds?: number } = {}) =>
+  cfg.log.log("gate-result", { taskId, cmd: "make test", exitCode: extra.exitCode ?? 0, seconds, outFile: "o", ...extra });
+const slowLines = (lines: string[]) => lines.filter((l) => l.includes("slow gate"));
+
+test("a wave-done is followed by its slow-gate lines: a budget overrun at each wave that had one, a history flag once (#445)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-slow-gates-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  seedGateArchive(cfg, 60, 60, 60, 60, 60);
+  const spawnRun: CampaignDeps["spawnRun"] = async (taskId) => {
+    for (const s of [200, 200, 400]) logGateResult(cfg, taskId, s, { budgetSeconds: 300 });
+    return 0;
+  };
+  const prev = process.env.VETINARI_JSON;
+  delete process.env.VETINARI_JSON;
+  let outcome: unknown;
+  const lines = await captureLines(async () => {
+    outcome = await campaign(cfg, [["101"], ["201"]], host, "slow", {}, gitFreeDeps(cfg, spawnRun));
+  });
+  if (prev !== undefined) process.env.VETINARI_JSON = prev;
+  assert.equal(outcome, "done", "a slow gate never changes the campaign's outcome");
+  const done1 = lines.findIndex((l) => l.startsWith("✔ wave 1/2"));
+  const done2 = lines.findIndex((l) => l.startsWith("✔ wave 2/2"));
+  assert.deepEqual(lines.slice(done1 + 1, done1 + 3), [
+    "🐢 slow gate `make test` — median 200s over 3 runs this campaign, up from 60s over 5 earlier runs",
+    "🐢 slow gate `make test` — 1 of 3 runs this wave went over its 300s budget",
+  ]);
+  // Wave 2: the budget overrun again, the history flag not again.
+  assert.deepEqual(slowLines(lines.slice(done2)), ["🐢 slow gate `make test` — 1 of 3 runs this wave went over its 300s budget"]);
+  assert.equal(slowLines(lines).length, 3);
+});
+
+test("a wave that fails or parks prints its slow-gate lines beside the stop, not only a wave-done (#445)", async () => {
+  for (const [exit, stopLine, expected] of [
+    [1, "✖ campaign failed", "failed"],
+    [2, "🅿 campaign parked", "parked"],
+  ] as const) {
+    const dir = mkdtempSync(join(tmpdir(), "vetinari-slow-gates-stop-"));
+    const cfg = harnessCfg(dir);
+    const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+    const spawnRun: CampaignDeps["spawnRun"] = async (taskId) => {
+      // The gate hit its runner's timeout: red, and over budget.
+      logGateResult(cfg, taskId, 601, { exitCode: 2, budgetSeconds: 300 });
+      if (exit === 2) seedParkedRecord(cfg, taskId);
+      return exit;
+    };
+    const prev = process.env.VETINARI_JSON;
+    delete process.env.VETINARI_JSON;
+    let outcome: unknown;
+    const lines = await captureLines(async () => {
+      outcome = await campaign(cfg, [["101"]], host, "slow", {}, gitFreeDeps(cfg, spawnRun));
+    });
+    if (prev !== undefined) process.env.VETINARI_JSON = prev;
+    assert.equal(outcome, expected, "the slow gate leaves the outcome as it was");
+    const stop = lines.findIndex((l) => l.startsWith(stopLine));
+    assert.ok(stop >= 0, `stop line printed:\n${lines.join("\n")}`);
+    assert.deepEqual(slowLines(lines.slice(stop)), ["🐢 slow gate `make test` — 1 of 1 run this wave went over its 300s budget"]);
+  }
+});
+
+test("a redrive of a campaign does not reprint a history flag an earlier settle already printed (#445)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-slow-gates-redrive-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  seedGateArchive(cfg, 60, 60, 60, 60, 60);
+  // First run: wave 1's member is slow and parks, so the flag prints beside the park.
+  const parking: CampaignDeps["spawnRun"] = async (taskId) => {
+    for (const s of [200, 200, 200]) logGateResult(cfg, taskId, s);
+    seedParkedRecord(cfg, taskId);
+    return 2;
+  };
+  const prev = process.env.VETINARI_JSON;
+  delete process.env.VETINARI_JSON;
+  const first = await captureLines(() => campaign(cfg, [["101"]], host, "slow", {}, gitFreeDeps(cfg, parking)));
+  assert.equal(slowLines(first).length, 1, `history flag printed once:\n${first.join("\n")}`);
+  // The redrive — a new process on the same log — re-runs it, still slow, and it goes green.
+  answerParked(cfg, "101", "go on");
+  const green: CampaignDeps["spawnRun"] = async (taskId) => {
+    logGateResult(cfg, taskId, 210);
+    return 0;
+  };
+  const second = await captureLines(() => campaign(cfg, [], host, undefined, { resume: true }, gitFreeDeps(cfg, green)));
+  if (prev !== undefined) process.env.VETINARI_JSON = prev;
+  assert.ok(
+    second.some((l) => l.startsWith("✔ wave 1/1")),
+    `the redrive settled the wave:\n${second.join("\n")}`,
+  );
+  assert.deepEqual(slowLines(second), [], "already printed at the park — not again");
+});
+
 test("campaign under --json streams the raw event stream and suppresses the human lines (#299)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-report-json-"));
   const cfg = harnessCfg(dir);

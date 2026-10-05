@@ -10,6 +10,7 @@
  * one vocabulary (CONTEXT.md): waves (never batches), parked/failed/merged, and the recovery
  * verbs `redrive`/`answer`/`prune` — never the retired `campaign --resume`.
  */
+import type { SlowGates } from "./slow-gates.ts";
 
 /** How the terminal renders one issue: `#<id>`, plus the resolved title when the run has one. */
 export function issueLabel(id: string, titles: Record<string, string>): string {
@@ -45,6 +46,26 @@ const outcomeWord = (outcome: string | undefined): string => (outcome?.startsWit
  * so there is no held or conflict-parked member to annotate — the `merged` list is the wave. */
 export function formatWaveDone(index: number, total: number, d: { merged: string[] }): string {
   return `✔ wave ${index + 1}/${total} merged ${d.merged.map((id) => `#${id}`).join(", ") || "nothing"}`;
+}
+
+/**
+ * The slow-gate lines a wave settle prints (CONTEXT.md → Slow gate), one per flag, empty when no gate
+ * is slow. A history flag names both medians and the runs behind each; a budget overrun names the
+ * budget and how many of the wave's runs went over it. Information only — printed beside the wave's
+ * own settle line, never in place of it.
+ */
+export function formatSlowGates(slow: SlowGates): string[] {
+  return [
+    ...slow.history.map(
+      (h) =>
+        `🐢 slow gate \`${h.cmd}\` — median ${Math.round(h.currentMedian)}s over ${h.currentRuns} runs this campaign, ` +
+        `up from ${Math.round(h.earlierMedian)}s over ${h.earlierRuns} earlier runs`,
+    ),
+    ...slow.budget.map(
+      (b) =>
+        `🐢 slow gate \`${b.cmd}\` — ${b.over} of ${b.runs} ${b.runs === 1 ? "run" : "runs"} this wave went over its ${b.budgetSeconds}s budget`,
+    ),
+  ];
 }
 
 /** The per-issue outcome, one indented line each, `error(n)` mapped to the `failed` vocabulary. */

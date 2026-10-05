@@ -44,6 +44,7 @@ Within a milestone each bold section label appears at most once.
 - [user] The default TDD prompt no longer sends campaign agents to the README's Modes table, which no longer exists; it points them at the project's command reference instead (in vetinari, `docs/reference.md`, generated from `MODES` in `src/help.ts`) (#437).
 - [ops] The config template and the user guide now say to order gates cheapest first (generate/format, lint, then tests) and how to keep a test gate fast (#446).
 - [internal] The design doc's risky-control rule (§11 and appendix A) now records that for Stop only the Stop now button wears the risky-action coral; the Stop button and Stop's shared confirm dialog stay neutral, matching the dashboard (#471).
+- [api] The event-kind tables in `docs/reference.md` and design §2.1 now match what the event log writes: `taskId` (not `task`), `slots` on `campaign-start`, `merged?` on `wave-done`, `fileKeys` (not `basenames`) on `graft`, `name?` on `campaign-done`, a `grace-wait` row, separate `campaign-parked`/`campaign-failed` rows, optional fields marked `?`, and corrected emitters for `parked`, `failed`, and `prune` (#454).
 
 ### Agents told how findings reach the host — October 4, 2026
 

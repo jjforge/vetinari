@@ -637,16 +637,17 @@ const GRACE_POLL_MS = 1000;
  * record vanishing — resolving as soon as one does, or when the window elapses. Injected on
  * `CampaignDeps` so the wave-boundary grace window (design §5 step 5) is drivable without real
  * time; the default polls the records. The caller re-checks the records afterwards to decide
- * which members to re-admit, so this resolves `void` whichever way the window ended.
+ * which members to re-admit, so this resolves `void` whichever way the window ended. `stopping`
+ * reports a stop request: the campaign is going to park anyway, so the wait ends early (#461).
  */
-export type GraceWaiter = (cfg: ResolvedConfig, parkedIds: string[], seconds: number) => Promise<void>;
+export type GraceWaiter = (cfg: ResolvedConfig, parkedIds: string[], seconds: number, stopping: () => boolean) => Promise<void>;
 
 /** The production grace waiter: poll `parkedIds`' records until one is answered or the window ends. */
-export const graceWaitForAnswer: GraceWaiter = (cfg, parkedIds, seconds) =>
+export const graceWaitForAnswer: GraceWaiter = (cfg, parkedIds, seconds, stopping) =>
   new Promise((resolve) => {
     const deadline = Date.now() + seconds * 1000;
     const tick = () => {
-      if (parkedIds.some((id) => isAnswered(cfg, id))) return resolve();
+      if (stopping() || parkedIds.some((id) => isAnswered(cfg, id))) return resolve();
       const left = deadline - Date.now();
       if (left <= 0) return resolve();
       setTimeout(tick, Math.min(GRACE_POLL_MS, left));
@@ -1029,10 +1030,6 @@ export async function campaign(
         outcomes = await queue(cfg, tasks, host, titles, deps.spawnRun, reporter, {}, halted);
         draining = false;
       }
-      // A `--now` stop landed during this drain: its runs were signalled and have exited. The wave
-      // skips the grace wait, integration, the changelog fold and the labels (#403).
-      const stoppedNow = halted();
-
       // Grace window at the wave boundary (design §5 step 5): a member parked as question/stalled
       // may still be answered. Hold the drained wave open up to `parkGraceSeconds`; an answer that
       // lands (its parked record cleared) re-admits the member so it re-runs and merges in THIS
@@ -1040,14 +1037,24 @@ export async function campaign(
       // parks are integration-time states, decided after this point, so they never wait here.
       const graceSeconds = cfg.parkGraceSeconds ?? 0;
       const parkedNow = tasks.filter((t) => outcomes[t] === "parked");
-      // A pending stop skips the wait (#403): the campaign is going to park anyway.
+      // A pending stop skips the wait (#403), and one requested during it ends it (#461): the
+      // campaign is going to park anyway.
       if (parkedNow.length && graceSeconds > 0 && !stop) {
         cfg.log.log("grace-wait", { seconds: graceSeconds, tasks: parkedNow });
-        await deps.grace(cfg, parkedNow, graceSeconds);
+        await deps.grace(cfg, parkedNow, graceSeconds, () => stop !== undefined);
         const revived = parkedNow.filter((t) => isAnswered(cfg, t));
         // A stop requested during the wait re-admits nothing: the campaign parks with the member held.
-        if (revived.length && !stop) outcomes = { ...outcomes, ...(await queue(cfg, revived, host, titles, deps.spawnRun, reporter)) };
+        // The re-admit is a drain like any other, so a `--now` during it signals the re-run (#461).
+        if (revived.length && !stop) {
+          draining = true;
+          outcomes = { ...outcomes, ...(await queue(cfg, revived, host, titles, deps.spawnRun, reporter, {}, halted)) };
+          draining = false;
+        }
       }
+
+      // A `--now` stop landed during this wave's drain or its re-admit: its runs were signalled and
+      // have exited. The wave skips integration, the changelog fold and the labels (#403).
+      const stoppedNow = halted();
 
       const greens = tasks.filter((t) => outcomes[t] === "green");
 

@@ -12,6 +12,7 @@ import {
   campaignFailedNotice,
   campaignStoppedNotice,
   childSpawnEnv,
+  graceWaitForAnswer,
   childSpawnOptions,
   conflictParkedNotice,
   memberParkedNotice,
@@ -2093,6 +2094,91 @@ test("a --now stop spawns no queued member — with a ceiling of one the second 
   assert.equal(await running, "parked");
   assert.deepEqual(kids.spawned, ["101"]);
   assert.ok(!readEventLog(cfg).some((e) => e.event === "spawn" && (e as SpawnEvent).taskId === "102"));
+});
+
+test("a --now stop while an answered member re-runs after the grace window signals it and parks `stopped` (#461)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-stop-now-readmit-"));
+  const cfg = harnessCfg(dir);
+  cfg.parkGraceSeconds = 30;
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  let readmitted: (() => void) | undefined;
+  const spawnRun: RunSpawner = (id) => {
+    if (id === "101") return Promise.resolve(0);
+    if (!readmitted && !hasParked(cfg, "102")) {
+      seedParkedRecord(cfg, "102"); // the first run parks on a question
+      return Promise.resolve(2);
+    }
+    // The re-admitted run stays in flight until it is signalled, then parks itself `stopped`.
+    return new Promise((resolve) => {
+      readmitted = () => {
+        writeStoppedRecord(cfg, "102");
+        resolve(2);
+      };
+    });
+  };
+  const integrated: string[][] = [];
+  const stop = stopDeps(
+    {
+      ...gitFreeDeps(cfg, spawnRun),
+      integrate: async (_cfg, greens) => {
+        integrated.push(greens);
+        return { merged: greens, conflictParked: [] };
+      },
+      grace: async (c, ids) => {
+        for (const id of ids) answerParked(c, id, "use approach A");
+      },
+    },
+    () => setImmediate(() => readmitted?.()),
+  );
+  const running = silenceConsole(() => campaign(cfg, [["101", "102"], ["103"]], host, undefined, {}, stop.deps));
+  while (!readmitted) await tick();
+  stop.h.fire("SIGTERM");
+
+  assert.equal(await running, "parked");
+  assert.deepEqual(stop.h.signalled, ["SIGTERM"], "the re-admitted run was signalled");
+  assert.deepEqual(integrated, [], "a --now stop never integrates the wave");
+  const parked = readEventLog(cfg).filter((e): e is CampaignParkedEvent => e.event === "campaign-parked");
+  assert.deepEqual(
+    parked.map((p) => [p.index, p.reason]),
+    [[0, "stopped"]],
+  );
+});
+
+test("a graceful stop during the grace window ends the wait: the waiter is told the campaign is stopping (#461)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-stop-grace-"));
+  const cfg = harnessCfg(dir);
+  cfg.parkGraceSeconds = 30;
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const spawnRun: RunSpawner = async (id) => {
+    if (id === "102") {
+      seedParkedRecord(cfg, "102");
+      return 2;
+    }
+    return 0;
+  };
+  const seen: boolean[] = [];
+  const stop = stopDeps({
+    ...gitFreeDeps(cfg, spawnRun),
+    grace: async (_c, _ids, _s, stopping) => {
+      seen.push(stopping());
+      stop.h.fire("SIGINT");
+      seen.push(stopping());
+    },
+  });
+
+  assert.equal(await silenceConsole(() => campaign(cfg, [["101", "102"], ["103"]], host, undefined, {}, stop.deps)), "parked");
+  assert.deepEqual(seen, [false, true]);
+});
+
+test("graceWaitForAnswer resolves as soon as the campaign is stopping, without waiting out the window (#461)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-grace-stopping-"));
+  const cfg = harnessCfg(dir);
+  seedParkedRecord(cfg, "102");
+  let stopping = false;
+  setTimeout(() => (stopping = true), 50);
+  const t0 = Date.now();
+  await graceWaitForAnswer(cfg, ["102"], 30, () => stopping);
+  assert.ok(Date.now() - t0 < 5000, "the 30s window was cut short");
 });
 
 test("childSpawnOptions puts a child run in its own process group and carries VETINARI_CHILD (#403)", () => {

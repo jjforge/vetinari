@@ -58,9 +58,8 @@ const seedLiveLease = (configDir: string, project: string) => {
   writeFileSync(join(slotsDir(configDir), `${process.pid}.json`), JSON.stringify({ project, weight: 1, held: 1, pid: process.pid }));
 };
 
-const depsFor = (configDir: string, spawn: DashboardDeps["spawn"]): DashboardDeps => ({
+const depsFor = (configDir: string): DashboardDeps => ({
   configDir,
-  spawn,
   prunePreview: async () => null,
   pruneClosure: async () => null,
   graftClosure: async () => null,
@@ -77,17 +76,17 @@ test("POST /redrive refuses with 409 and the reason while a campaign process hol
     event("spawn", { ts: "2026-08-01T00:02:00.000Z", taskId: "201", running: 1, left: 0 }),
   ]);
   seedLiveLease(configDir, project);
-  let spawned = 0;
+  let started = 0;
   const res = resSpy();
   const handled = await handleRedrive(postReq(`project=${project}`) as never, res as never, new URL("http://x/redrive"), {
-    ...depsFor(configDir, () => (spawned++, undefined)),
-    startChild: async () => (spawned++, { code: 0, lastLine: "", running: false }),
+    ...depsFor(configDir),
+    startChild: async () => (started++, { code: 0, lastLine: "", running: false }),
   });
   assert.equal(handled, true);
   assert.equal(res.statusCode, 409);
   assert.equal(res.body, "a campaign process is still running");
   // It refused before shelling anything — no second campaign process.
-  assert.equal(spawned, 0);
+  assert.equal(started, 0);
 });
 
 // A campaign parked on a red base with no live lease: the fold is stopped and no process holds
@@ -108,7 +107,7 @@ const redriveWith = async (outcome: StartedChild) => {
   const calls: { projectRoot: string; args: string[]; opts: { logFile: string; startupMs: number } }[] = [];
   const res = resSpy();
   const handled = await handleRedrive(postReq(`project=${project}`) as never, res as never, new URL("http://x/redrive"), {
-    ...depsFor(configDir, () => undefined),
+    ...depsFor(configDir),
     childStartupMs: 7,
     startChild: async (projectRoot, args, opts) => (calls.push({ projectRoot, args, opts }), outcome),
   });
@@ -176,7 +175,7 @@ test("POST /redrive spawns redrive for a campaign stopped between waves after it
   const calls: string[][] = [];
   const res = resSpy();
   const handled = await handleRedrive(postReq(`project=${project}`) as never, res as never, new URL("http://x/redrive"), {
-    ...depsFor(configDir, () => undefined),
+    ...depsFor(configDir),
     startChild: async (_projectRoot, args) => (calls.push(args), { code: 0, lastLine: "", running: false }),
   });
   assert.equal(handled, true);

@@ -900,7 +900,8 @@ test("serveAllStatus GET /prune?preview returns the selected project's structure
   });
 
   const closures: { projectRoot: string; taskId: string }[] = [];
-  const spawned: unknown[] = [];
+  const ran: unknown[] = [];
+  const started: unknown[] = [];
   // The structured closure (E2) the confirmation renders: the target and dropped
   // dependents that would leave, the banked work kept, and the remaining waves.
   const structured = {
@@ -912,7 +913,8 @@ test("serveAllStatus GET /prune?preview returns the selected project's structure
   const server = await serveAllStatus(configDir, {
     port: 0,
     host: "127.0.0.1",
-    spawn: (...a) => spawned.push(a),
+    runChild: async (...a) => (ran.push(a), { code: 0, stdout: "", stderr: "", timedOut: false }),
+    startChild: async (...a) => (started.push(a), { code: 0, lastLine: "", running: false }),
     // The dumb router routes the closure to the selected project's own install,
     // which computes it against that project's real blockedBy graph.
     pruneClosure: (projectRoot, taskId) => {
@@ -930,8 +932,9 @@ test("serveAllStatus GET /prune?preview returns the selected project's structure
     assert.deepEqual(await res.json(), structured);
     // The closure came from the selected project's install (beta's root), not alpha's.
     assert.deepEqual(closures, [{ projectRoot: join(configDir, "beta-root"), taskId: "201" }]);
-    // A preview computes nothing destructive — no prune is spawned.
-    assert.equal(spawned.length, 0);
+    // A preview computes nothing destructive — no child is run or started.
+    assert.equal(ran.length, 0);
+    assert.equal(started.length, 0);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -1005,11 +1008,13 @@ test("serveAllStatus POST /prune previews the selected project's closure without
   });
 
   const previews: { projectRoot: string; taskId: string }[] = [];
-  const spawned: unknown[] = [];
+  const ran: unknown[] = [];
+  const started: unknown[] = [];
   const server = await serveAllStatus(configDir, {
     port: 0,
     host: "127.0.0.1",
-    spawn: (...a) => spawned.push(a),
+    runChild: async (...a) => (ran.push(a), { code: 0, stdout: "", stderr: "", timedOut: false }),
+    startChild: async (...a) => (started.push(a), { code: 0, lastLine: "", running: false }),
     // The dumb router routes the preview to the selected project's own install,
     // which computes the closure against that project's real blockedBy graph.
     prunePreview: (projectRoot, taskId) => {
@@ -1034,7 +1039,8 @@ test("serveAllStatus POST /prune previews the selected project's closure without
     assert.match(html, /name="project" value="beta"/);
     assert.match(html, /name="taskId" value="201"/);
     // Nothing has been pruned yet — preview executes nothing.
-    assert.equal(spawned.length, 0);
+    assert.equal(ran.length, 0);
+    assert.equal(started.length, 0);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -1096,7 +1102,8 @@ test("serveAllStatus GET /graft?preview returns the selected project's structure
   register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
 
   const closures: { projectRoot: string; taskIds: string[] }[] = [];
-  const spawned: unknown[] = [];
+  const ran: unknown[] = [];
+  const started: unknown[] = [];
   // The structured closure the confirmation renders: the requested ids, where each
   // lands, the resulting waves, and any rejection.
   const structured = {
@@ -1111,7 +1118,8 @@ test("serveAllStatus GET /graft?preview returns the selected project's structure
   const server = await serveAllStatus(configDir, {
     port: 0,
     host: "127.0.0.1",
-    spawn: (...a) => spawned.push(a),
+    runChild: async (...a) => (ran.push(a), { code: 0, stdout: "", stderr: "", timedOut: false }),
+    startChild: async (...a) => (started.push(a), { code: 0, lastLine: "", running: false }),
     graftClosure: (projectRoot, taskIds) => {
       closures.push({ projectRoot, taskIds });
       return Promise.resolve(structured);
@@ -1126,8 +1134,9 @@ test("serveAllStatus GET /graft?preview returns the selected project's structure
     // The closure came from the selected project's install (beta's root), carrying the
     // full set of ids parsed off the query — not alpha's.
     assert.deepEqual(closures, [{ projectRoot: join(configDir, "beta-root"), taskIds: ["640", "655"] }]);
-    // A preview computes nothing destructive — no graft is spawned.
-    assert.equal(spawned.length, 0);
+    // A preview computes nothing destructive — no child is run or started.
+    assert.equal(ran.length, 0);
+    assert.equal(started.length, 0);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

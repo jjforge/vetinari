@@ -3,25 +3,15 @@ import type { PruneClosure } from "./dashboard-prune.ts";
 import type { GraftClosure } from "./dashboard-graft.ts";
 import type { ChildResult, StartedChild } from "./dashboard-child.ts";
 
-/** How the dumb-router shells a project's own CLI (`answer`, `prune`, `graft`) in its
- * root — the injectable seam every route that spawns a child shares, so tests can
- * capture the spawn instead of running it. */
-export type SpawnDashboardChild = (
-  command: string,
-  args: string[],
-  options: { cwd: string; stdio: readonly (string | number)[] },
-) => unknown;
-
 /**
  * The shared dependencies every dashboard route handler is wired with by the
  * composer (`serveAllStatus`): the host config dir the registry lives in, and the
- * dumb-router seams for spawning a project's CLI and computing a prune closure or
- * preview against its own install (ADR 0002). The composer resolves the defaults
+ * dumb-router seams for computing a prune or graft closure or preview against a
+ * project's own install and for running or starting its CLI as a child (ADR 0002). The composer resolves the defaults
  * once and passes this to each handler.
  */
 export interface DashboardDeps {
   configDir: string;
-  spawn: SpawnDashboardChild;
   prunePreview: (projectRoot: string, taskId: string) => Promise<string | null>;
   pruneClosure: (projectRoot: string, taskId: string) => Promise<PruneClosure | null>;
   /** The graft closure — variadic (a set of ids), routed to the project's own
@@ -30,10 +20,9 @@ export interface DashboardDeps {
   graftClosure: (projectRoot: string, taskIds: string[]) => Promise<GraftClosure | null>;
   /**
    * Shell a project's own CLI in its root and *await* it — the seam a route adopts when its
-   * response must mean "recorded in the log", not "spawned" (#367). It sits beside the
-   * fire-and-forget `spawn`: `graft`'s POST awaits it so the wave card is in the log by the
-   * time the client hears back, and reads the child's exit code + captured output to decide
-   * the response. Caps the wait at `graftTimeoutMs` without killing the child.
+   * response must mean "recorded in the log", not "spawned" (#367): `graft`'s POST awaits it
+   * so the wave card is in the log by the time the client hears back, and reads the child's
+   * exit code + captured output to decide the response. Caps the wait at `graftTimeoutMs` without killing the child.
    */
   runChild: (projectRoot: string, args: string[], opts: { timeoutMs: number }) => Promise<ChildResult>;
   /** The cap POST /graft passes to `runChild` — injectable so a test need not wait it out. */

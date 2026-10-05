@@ -21,9 +21,9 @@ export interface ChildResult {
 /**
  * Shell the project's own CLI (`process.argv[1]`, the dumb-router routing every dashboard
  * child uses — ADR 0002) in its root, await it, and return its outcome. The shared seam a
- * route injects and awaits `beside` the fire-and-forget `deps.spawn`: it owns the two
- * things every awaiting adopter needs — stderr capture (piped, not inherited, so a broken
- * child's own words reach the operator, decision 5) and a hard cap on the wait (decision 6).
+ * route injects and awaits as `deps.runChild`: it owns the two things every awaiting adopter
+ * needs — stderr capture (piped, not inherited, so a broken child's own words reach the
+ * operator, decision 5) and a hard cap on the wait (decision 6).
  *
  * On the cap it resolves `{ timedOut: true }` but does **not** kill the child — a killed
  * child could die between reading the log and appending its event, so the wait gives up

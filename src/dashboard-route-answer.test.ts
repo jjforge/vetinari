@@ -49,7 +49,6 @@ const answerWith = async (body: string, outcome: StartedChild = { code: 0, lastL
   const calls: { projectRoot: string; args: string[]; opts: { logFile: string; startupMs: number } }[] = [];
   const deps: DashboardDeps = {
     configDir,
-    spawn: () => undefined,
     prunePreview: async () => null,
     pruneClosure: async () => null,
     graftClosure: async () => null,

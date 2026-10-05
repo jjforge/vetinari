@@ -18,6 +18,11 @@ and each entry opens with a tag saying who it reaches:
 `**Breaking changes:**` sorts first in a milestone and names the contract it broke.
 Within a milestone each bold section label appears at most once.
 
+### Collected changes — October 5, 2026
+
+**Bug fixes:**
+- [ops] The per-wave changelog collect no longer throws on a fragment that was staged but never committed; that case broke with the staged-file fix, after the wave had merged (#473, #459).
+
 ### Agents told how findings reach the host — October 4, 2026
 
 **New features:**

@@ -796,6 +796,22 @@ test("collectWaveChangelog commits CHANGELOG.md and does not throw when a collec
   assert.ok(readFileSync(join(dir, "CHANGELOG.md"), "utf8").includes("feature from 42"));
 });
 
+test("collectWaveChangelog commits CHANGELOG.md and does not throw when a collected fragment was staged but never committed (#473)", () => {
+  const dir = repoWithChangelog("# Changelog\n\n### Older — August 1, 2026\n\n**Bug fixes:**\n- [user] old (#1)\n");
+  const fragDir = join(dir, "changelog.d");
+  mkdirSync(fragDir);
+  // In the index but not in HEAD: once the fold deletes it, `git add -A` drops the index entry and
+  // the path is known to neither, so it must stay out of the commit's pathspec.
+  writeFileSync(join(fragDir, "42.md"), "section: New features\n- [user] feature from 42 (#42).\n");
+  execFileSync("git", ["-C", dir, "add", "changelog.d/42.md"]);
+
+  const result = collectWaveChangelog(0, memoryLogger(), dir);
+
+  assert.equal(result.committed, true);
+  assert.deepEqual(headChanges(dir), ["M\tCHANGELOG.md"]);
+  assert.ok(readFileSync(join(dir, "CHANGELOG.md"), "utf8").includes("feature from 42"));
+});
+
 test("collectWaveChangelog leaves fragments in place and logs one line when the project has no CHANGELOG.md", () => {
   // A repo that keeps no changelog — the fold is opting out, not folding into nothing.
   const dir = mkdtempSync(join(tmpdir(), "vetinari-merge-nocl-"));

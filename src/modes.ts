@@ -1,4 +1,5 @@
-import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess, type ExecFileSyncOptionsWithStringEncoding, type SpawnOptions } from "node:child_process";
+import { statSync } from "node:fs";
 import { resolve } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import type { CampaignDoneEvent, CampaignStartEvent, WaveDoneEvent, WaveStartEvent } from "./event-log.ts";
@@ -283,6 +284,48 @@ export async function build(cfg: ResolvedConfig, opts: { baseline: boolean }, de
   if (code !== 0) return false;
   if (!opts.baseline) return true;
   return deps.baseline(cfg);
+}
+
+/**
+ * What the stale-image warning compares (#444): the image's `Created`, and the Dockerfile's mtime
+ * and last commit time. Each read is best-effort — undefined when it could not be made (no such
+ * image, docker absent, an untracked Dockerfile).
+ */
+export interface ImageFreshness {
+  imageCreated?: Date;
+  dockerfileModified?: Date;
+  dockerfileCommitted?: Date;
+}
+
+/** The real reads behind `ImageFreshness`: `docker image inspect`, a stat, and `git log -1`. */
+export function readImageFreshness(image: string, dockerfile: string): ImageFreshness {
+  const read = (f: () => string | Date): Date | undefined => {
+    try {
+      const v = f();
+      return v instanceof Date ? v : v.trim() ? new Date(v.trim()) : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const quiet: ExecFileSyncOptionsWithStringEncoding = { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] };
+  return {
+    imageCreated: read(() => execFileSync("docker", ["image", "inspect", "--format", "{{.Created}}", image], quiet)),
+    dockerfileModified: read(() => statSync(dockerfile).mtime),
+    dockerfileCommitted: read(() => execFileSync("git", ["log", "-1", "--format=%cI", "--", dockerfile], quiet)),
+  };
+}
+
+const validDate = (d: Date | undefined): d is Date => d !== undefined && !Number.isNaN(d.getTime());
+
+/**
+ * The one-line warning when the image is older than its Dockerfile — the newer of its mtime and its
+ * last commit (#444): an edit that was never built. Undefined when the image is newer, or when a
+ * time is missing (a missing image is the existing failure path's to report). Warning only.
+ */
+export function staleImageWarning(image: string, dockerfile: string, f: ImageFreshness): string | undefined {
+  const changed = [f.dockerfileModified, f.dockerfileCommitted].filter(validDate).sort((a, b) => b.getTime() - a.getTime())[0];
+  if (!validDate(f.imageCreated) || !changed || f.imageCreated >= changed) return undefined;
+  return `⚠ image ${image} (created ${f.imageCreated.toISOString()}) is older than ${dockerfile} (changed ${changed.toISOString()}) — rebuild it with \`vetinari build\``;
 }
 
 /**

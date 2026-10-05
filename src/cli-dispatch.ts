@@ -19,7 +19,8 @@ import type { ResolvedConfig } from "./config.ts";
 import { parseAgentFlags } from "./config.ts";
 import { renderUsage } from "./help.ts";
 import type { HostBudget, liveCampaignPid, projectHasLiveCampaign } from "./host-slots.ts";
-import type { build, baseline, campaign, tgTest, requireTelegram, CampaignOutcome } from "./modes.ts";
+import { DOCKERFILE, staleImageWarning } from "./modes.ts";
+import type { build, baseline, campaign, tgTest, requireTelegram, readImageFreshness, CampaignOutcome } from "./modes.ts";
 import type { runTgConnect } from "./tg-connect.ts";
 import type { tgSend } from "./telegram.ts";
 import { crashResumePrompt, type runLoop, type Outcome } from "./loop.ts";
@@ -404,6 +405,16 @@ export interface DispatchDeps {
   ask: (question: string) => Promise<string>;
   /** One `sendMessage`, the collector's verification of a bot connection before it writes. */
   tgSend: typeof tgSend;
+  /** The image's `Created` and the Dockerfile's mtime and last commit — what the stale-image
+   *  warning at `campaign`/`redrive`/`run`/`baseline` start compares (#444). */
+  readImageFreshness: typeof readImageFreshness;
+}
+
+/** Warn (stderr, never refusing) when `cfg.image` is older than its Dockerfile (#444). */
+function warnIfImageStale(deps: DispatchDeps): void {
+  const { image } = deps.cfg;
+  const warning = staleImageWarning(image, DOCKERFILE, deps.readImageFreshness(image, DOCKERFILE));
+  if (warning) deps.error(warning);
 }
 
 /**
@@ -421,6 +432,7 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
       return;
     }
     case "baseline": {
+      warnIfImageStale(deps);
       deps.setExitCode((await deps.baseline(cfg)) ? 0 : 1);
       return;
     }
@@ -443,6 +455,8 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
         return;
       }
       enableJson(cmd.json);
+      // A campaign child skips it: its campaign warned once at start, not once per member.
+      if (!deps.isCampaignChild) warnIfImageStale(deps);
       deps.archiveLeftoverRun();
       // A crash redrive spawned this child to resume a crashed session on the existing branch
       // (design §7, `VETINARI_RESUME_SESSION`): re-enter the loop on that session with a
@@ -480,6 +494,7 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
       // the leftover it would reconstruct from, only archive once idle.
       deps.selectAgent(cfg, cmd.agent);
       enableJson(cmd.json);
+      warnIfImageStale(deps);
       const outcome = await deps.campaign(cfg, [], deps.host, undefined, {
         autoPrune: cmd.autoPrune,
         resume: true,
@@ -620,6 +635,8 @@ async function dispatchCampaign(cmd: Extract<Command, { kind: "campaign" }>, dep
   // credentials before any container, and stamps VETINARI_AGENT so every child wave
   // `run` drives the chosen provider, not a silent claude.
   deps.selectAgent(cfg, cmd.agent);
+  // A dry run starts nothing, so it is not warned.
+  if (!cmd.dryRun) warnIfImageStale(deps);
 
   // `--json` streams raw events to stdout (below, via the run logger) and — through this
   // reporter — silences every human line, so tooling reads clean JSONL. Without it the

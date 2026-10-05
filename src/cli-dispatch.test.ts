@@ -83,6 +83,7 @@ function makeDeps(overrides: Partial<DispatchDeps> = {}) {
     findMergeCommit: spy(undefined) as unknown as DispatchDeps["findMergeCommit"],
     liveCampaignPid: spy(undefined) as unknown as DispatchDeps["liveCampaignPid"],
     signalProcess: spy() as unknown as DispatchDeps["signalProcess"],
+    readImageFreshness: spy({}) as unknown as DispatchDeps["readImageFreshness"],
     ...overrides,
   };
   return { deps, logged, errored, exitCodes, cfg };
@@ -1684,4 +1685,77 @@ test("dispatch parked over a campaign stopped between waves names `vetinari redr
   assert.match(out, /campaign parked \(stopped\)/);
   assert.match(out, /vetinari redrive/);
   assert.doesNotMatch(out, /vetinari run/);
+});
+
+// An image built Aug 21, a Dockerfile edited (mtime) Oct 3 and committed Oct 4 — the image is stale (#444).
+const STALE_IMAGE = {
+  imageCreated: new Date("2026-08-21T10:00:00Z"),
+  dockerfileModified: new Date("2026-10-03T09:00:00Z"),
+  dockerfileCommitted: new Date("2026-10-04T12:00:00Z"),
+};
+
+const startCommands: [string, Command][] = [
+  ["campaign", parseArgs(["campaign", "101", "--override"])],
+  ["redrive", parseArgs(["redrive"])],
+  ["run", parseArgs(["run", "101"])],
+  ["baseline", parseArgs(["baseline"])],
+];
+
+for (const [name, cmd] of startCommands) {
+  test(`dispatch ${name} warns when the image is older than its Dockerfile, naming both times and \`vetinari build\` (#444)`, async () => {
+    const { deps, errored, exitCodes } = makeDeps({
+      readImageFreshness: spy(STALE_IMAGE) as unknown as DispatchDeps["readImageFreshness"],
+      expandSelection: spy(Promise.resolve(["101"])) as unknown as DispatchDeps["expandSelection"],
+    });
+    await dispatch(cmd, deps);
+    const warnings = errored.filter((e) => /vetinari build/.test(e));
+    assert.equal(warnings.length, 1, errored.join("\n"));
+    // Both times are named — the image's Created, and the newer of the Dockerfile's mtime and commit.
+    assert.match(warnings[0], /2026-08-21T10:00:00/);
+    assert.match(warnings[0], /2026-10-04T12:00:00/);
+    assert.ok(!exitCodes.some((c) => c !== 0), `exit codes: ${exitCodes}`);
+  });
+
+  test(`dispatch ${name} prints no stale-image warning when the image is newer than its Dockerfile (#444)`, async () => {
+    const { deps, errored } = makeDeps({
+      readImageFreshness: spy({
+        ...STALE_IMAGE,
+        imageCreated: new Date("2026-10-05T00:00:00Z"),
+      }) as unknown as DispatchDeps["readImageFreshness"],
+      expandSelection: spy(Promise.resolve(["101"])) as unknown as DispatchDeps["expandSelection"],
+    });
+    await dispatch(cmd, deps);
+    assert.ok(!errored.some((e) => /vetinari build/.test(e)), errored.join("\n"));
+  });
+}
+
+test("the stale-image warning compares against the newer of the Dockerfile's mtime and last commit (#444)", async () => {
+  // Image built between the commit and a later uncommitted edit: the edit (mtime) is the newer change.
+  const { deps, errored } = makeDeps({
+    readImageFreshness: spy({
+      imageCreated: new Date("2026-10-04T13:00:00Z"),
+      dockerfileCommitted: new Date("2026-10-04T12:00:00Z"),
+      dockerfileModified: new Date("2026-10-04T14:00:00Z"),
+    }) as unknown as DispatchDeps["readImageFreshness"],
+  });
+  await dispatch(parseArgs(["baseline"]), deps);
+  assert.ok(
+    errored.some((e) => /vetinari build/.test(e) && /2026-10-04T14:00:00/.test(e)),
+    errored.join("\n"),
+  );
+});
+
+test("a missing image or a failed inspect prints no stale-image warning (#444)", async () => {
+  const { deps, errored } = makeDeps({
+    readImageFreshness: spy({ ...STALE_IMAGE, imageCreated: undefined }) as unknown as DispatchDeps["readImageFreshness"],
+  });
+  await dispatch(parseArgs(["baseline"]), deps);
+  assert.ok(!errored.some((e) => /vetinari build/.test(e)));
+});
+
+test("a campaign child `run` never prints the stale-image warning — the campaign printed it once (#444)", async () => {
+  const freshness = spy(STALE_IMAGE) as unknown as DispatchDeps["readImageFreshness"];
+  const { deps, errored } = makeDeps({ isCampaignChild: true, readImageFreshness: freshness });
+  await dispatch(parseArgs(["run", "101"]), deps);
+  assert.ok(!errored.some((e) => /vetinari build/.test(e)), errored.join("\n"));
 });

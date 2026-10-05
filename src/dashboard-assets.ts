@@ -319,6 +319,7 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
     "red-base": "Every issue passed alone; the merged base fails together. Fix forward on the base, then redrive.",
     crash: "The run died with no verdict. Redrive to pick the campaign back up.",
     stopped: "The run was stopped by an operator. Redrive to pick the campaign back up, or vetinari run <id> for a standalone run.",
+    "outdated-agent": "The image's agent CLI is too old for the model. Rebuild the image with vetinari build, then redrive.",
   };
   // The foot (reply + actions) shows only while it holds a live control — a reply to
   // send or a prune to offer — so a plain issue's sheet grows no empty bar.

@@ -74,6 +74,17 @@ test("parkReasonFromEvent recognizes `stopped`, and a member parked{stopped} fol
   assert.deepEqual(issueLifecycle(reduced, "501"), { state: "parked", reason: "stopped" });
 });
 
+test("parkReasonFromEvent recognizes `outdated-agent`, and a member parked{outdated-agent} folds to parked/outdated-agent (#444)", () => {
+  assert.equal(parkReasonFromEvent("outdated-agent"), "outdated-agent");
+  const reduced = reduceCampaign([
+    event("campaign-start", { ts: "t0", waves: [["501"]], slots: 1 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["501"] }),
+    event("spawn", { ts: "t2", taskId: "501" }),
+    event("parked", { ts: "t3", taskId: "501", reason: "outdated-agent", detail: "API Error: 400" }),
+  ]);
+  assert.deepEqual(issueLifecycle(reduced, "501"), { state: "parked", reason: "outdated-agent" });
+});
+
 test("issueLifecycle reads a running issue live, and its crash reconciliation off the reducer (ADR 0019, design §7)", () => {
   const events = [
     event("campaign-start", { ts: "t0", waves: [["301"]], slots: 1 }),

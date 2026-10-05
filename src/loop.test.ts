@@ -1483,6 +1483,33 @@ test("a stop during a red gate starts no further turn (#462)", async () => {
   assert.equal(events.filter((e) => e.event === "parked" && (e as any).reason === "stopped").length, 1);
 });
 
+test("a gate abandoned by a stop runs no further check and logs no gate-result after the stopped park (#474)", async () => {
+  const cfg = harnessCfg({ gates: [{ cmd: "g1" }, { cmd: "g2" }] } as any);
+  const control = makeStopControl();
+  const sbx = stopInGateSandbox([{ run: { completionSignal: "<promise>COMPLETE</promise>" }, green: true }], control, 100);
+  const execCalls: string[] = [];
+  const exec = sbx.exec.bind(sbx);
+  sbx.exec = async (cmd) => {
+    execCalls.push(cmd);
+    return exec(cmd);
+  };
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { onStop: control.onStop })));
+  // Let the abandoned gate settle — the bug logged its results after `runLoop` had returned.
+  await sleepMs(300);
+
+  assert.equal(outcome, "parked");
+  const events = readEventLog(cfg);
+  const parkedAt = events.findIndex((e) => e.event === "parked" && (e as any).reason === "stopped");
+  assert.ok(parkedAt >= 0, "the run parked stopped");
+  assert.deepEqual(
+    events.slice(parkedAt + 1).map((e) => e.event),
+    [],
+    "nothing is logged after the stopped park",
+  );
+  assert.equal(execCalls.includes("g2"), false, "the second gate never runs");
+});
+
 test("a stop during a no-signal turn sends no nudge (#462)", async () => {
   const cfg = { ...harnessCfg(), maxTurns: 6 };
   const control = makeStopControl();

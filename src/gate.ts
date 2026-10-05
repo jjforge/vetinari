@@ -66,9 +66,9 @@ export function selectGates(gates: GateSpec[], changedFiles: string, opts: { all
 export async function runGates(
   cfg: ResolvedConfig,
   sbx: Sandbox,
-  opts: { all?: boolean; taskId?: string } = {},
+  opts: { all?: boolean; taskId?: string; stopped?: () => boolean } = {},
 ): Promise<{ green: boolean; report: string }> {
-  const { taskId } = opts;
+  const { taskId, stopped = () => false } = opts;
   let files = "";
   if (!opts.all) {
     const changed = await sbx.exec(`git diff --name-only ${cfg.baseBranch}...HEAD`);
@@ -86,12 +86,17 @@ export async function runGates(
   if (taskId) appendActivity(cfg.stateDir, taskId, event("gate", gateFields));
 
   for (const g of selected) {
+    // A stop abandons the gate (#474): its caller has already parked `stopped`, so run no further
+    // check and record nothing for one in flight. Resolves rather than rejects — the result goes
+    // to an abandoned race.
+    if (stopped()) return { green: false, report: "" };
     // Announce the check as it starts (before it runs), so the live tail's newest row names the
     // command in flight rather than sitting on the gate-start summary for the check's whole duration
     // (#332). Live-only, per-task: the wave-merge gate has no `taskId` and skips it, as above.
     if (taskId) appendActivity(cfg.stateDir, taskId, event("gate-check", { taskId, cmd: g.cmd }));
     const t0 = Date.now();
     const res = await sbx.exec(g.cmd);
+    if (stopped()) return { green: false, report: "" };
     const outFile = writeGateLog(cfg.stateDir, g.cmd, res);
     const resultFields = {
       ...(taskId ? { taskId } : {}),

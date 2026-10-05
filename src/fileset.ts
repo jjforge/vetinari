@@ -143,21 +143,25 @@ function markerCites(body: string, marker: RegExp): string[] | null {
 }
 
 /**
- * True when `text` carries an anchored `Touches:`/`Files:`/`Creates:` marker line
- * from which the resolver would extract at least one cite. Reuses the same parser
- * the resolver reads with, so "has a marker" here means exactly what the resolver
- * would act on. Every backticked token on a marker line is a cite, so a line citing
+ * True when ANY anchored `Touches:`/`Files:`/`Creates:` marker line in `text` yields at
+ * least one cite — not only the last of each kind, which is what the resolver reads.
+ * So a cited line followed by a cite-less `Touches: none` still counts: the body is
+ * authoritative, the comments are dropped, and the closing line leaves the ticket with
+ * no files and not confident (#483). Reuses the parser the resolver reads with. Every backticked token on a marker line is a cite, so a line citing
  * only a non-file word (e.g. `campaign`) IS a marker: it shadows any marker the ticket
  * carries in a comment, and the ticket resolves not confident — the author's explicit
  * declaration cites a non-file, which should halt the planner, not be quietly
- * overridden (#477). Only an anchored line with no cite at all (no backticked token,
- * no slash path) is not a marker here. (Escaped backticks are normalized away before
+ * overridden (#477). An anchored line with no cite at all (no backticked token, no
+ * slash path) is not a marker here, so text whose marker lines all cite nothing has
+ * none and the comments' marker lines are read. (Escaped backticks are normalized away before
  * tokenizing, so they parse to a real cite — see #249.)
  */
 function hasMarkerLine(text: string): boolean {
-  const touches = markerCites(text, TOUCHES_RE);
-  const creates = markerCites(text, CREATES_RE);
-  return Boolean(touches?.length) || Boolean(creates?.length);
+  const cites = (marker: RegExp): boolean => {
+    for (const m of text.matchAll(marker)) if (citedPaths(m[1], true).length > 0) return true;
+    return false;
+  };
+  return cites(TOUCHES_RE) || cites(CREATES_RE);
 }
 
 /**

@@ -737,6 +737,27 @@ test("collectWaveChangelog commits only CHANGELOG.md and the collected fragment,
   assert.ok(status.includes("?? untracked.txt"), `untracked.txt still untracked:\n${status}`);
 });
 
+test("collectWaveChangelog leaves a file the operator already staged out of the commit, still staged (#459)", () => {
+  const dir = repoWithChangelog("# Changelog\n\n### Older — August 1, 2026\n\n**Bug fixes:**\n- [user] old (#1)\n");
+  const git = (args: string[]) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });
+  const fragDir = join(dir, "changelog.d");
+  mkdirSync(fragDir);
+  writeFileSync(join(fragDir, "42.md"), "section: New features\n- [user] feature from 42 (#42).\n");
+  writeFileSync(join(dir, "tracked.txt"), "original\n");
+  git(["add", "-A"]);
+  git(["commit", "-qm", "merge agent branches"]);
+  // The operator has an unrelated edit already in the index when the collect step runs.
+  writeFileSync(join(dir, "tracked.txt"), "operator edit\n");
+  git(["add", "tracked.txt"]);
+
+  const result = collectWaveChangelog(0, memoryLogger(), dir);
+
+  assert.equal(result.committed, true);
+  assert.deepEqual(headChanges(dir), ["D\tchangelog.d/42.md", "M\tCHANGELOG.md"]);
+  const status = execFileSync("git", ["-C", dir, "status", "--porcelain"], { encoding: "utf8" });
+  assert.ok(status.includes("M  tracked.txt"), `tracked.txt still staged, uncommitted:\n${status}`);
+});
+
 test("collectWaveChangelog leaves a non-collected file in changelog.d out of the commit", () => {
   const dir = repoWithChangelog("# Changelog\n\n### Older — August 1, 2026\n\n**Bug fixes:**\n- [user] old (#1)\n");
   const git = (args: string[]) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });

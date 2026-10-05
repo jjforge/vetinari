@@ -253,8 +253,16 @@ export function collectWaveChangelog(
   // Stage each collected fragment's deletion by explicit path. A fragment that was
   // never committed (untracked) has nothing to stage once deleted — `git add` of a
   // deleted untracked path exits 128 — so tolerate the failure rather than abort.
-  for (const name of collected) gitTry(["-C", root, "add", "-A", "--", join(FRAGMENT_DIR, name)]);
-  execFileSync("git", ["-C", root, "commit", "-m", `campaign: collect changelog (wave ${waveIndex + 1})`], { encoding: "utf8" });
+  const staged = ["CHANGELOG.md"];
+  for (const name of collected) {
+    const path = join(FRAGMENT_DIR, name);
+    if (gitTry(["-C", root, "add", "-A", "--", path]).code === 0) staged.push(path);
+  }
+  // Commit only those paths: a bare `git commit` would also take anything the operator
+  // had already staged (#459). With a pathspec, their index entries are left staged.
+  execFileSync("git", ["-C", root, "commit", "-m", `campaign: collect changelog (wave ${waveIndex + 1})`, "--", ...staged], {
+    encoding: "utf8",
+  });
   log.log("campaign-changelog-collected", { wave: waveIndex, collected, nearMisses });
   return { collected, committed: true, nearMisses };
 }

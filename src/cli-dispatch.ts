@@ -25,7 +25,7 @@ import type { tgSend } from "./telegram.ts";
 import { crashResumePrompt, type runLoop, type Outcome } from "./loop.ts";
 import type { answerParked, hasParked, listParked, ParkReason } from "./state.ts";
 import type { archiveRun } from "./archive.ts";
-import type { Exclusion, UnderspecifiedPrompt } from "./plan.ts";
+import type { CampaignPlanReport, Exclusion, UnderspecifiedPrompt } from "./plan.ts";
 import type { expandSelection, runCampaignPlan, runFilesetCheck } from "./plan.ts";
 import { describeFilesetCheck } from "./plan.ts";
 import type { findMergeCommit } from "./merge.ts";
@@ -705,7 +705,7 @@ async function dispatchCampaign(cmd: Extract<Command, { kind: "campaign" }>, dep
     deps.log("\nFile-sets (each selected ticket's resolved files and confident verdict):");
     deps.log(describeFilesetCheck(await deps.runFilesetCheck(cfg, ids)));
   };
-  let report: Awaited<ReturnType<typeof runCampaignPlan>>;
+  let report: CampaignPlanReport;
   try {
     report = await deps.runCampaignPlan(
       cfg,

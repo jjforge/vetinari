@@ -231,6 +231,55 @@ test("resolver → partition: a bare cite and a path cite of one file still coll
   assert.deepEqual(plan.waves, [["a"], ["b"]]);
 });
 
+test("resolver → partition: same-named Creates: files in distinct tree directories share a wave (#480)", async () => {
+  // Both tickets create an `index.ts`, but in different directories the tree already
+  // holds — distinct files that can never conflict, so they must NOT be spilled apart.
+  const root = join(tmpdir(), `vetinari-480-${Date.now()}`);
+  for (const rel of ["src/a/util.ts", "src/b/util.ts"]) {
+    mkdirSync(join(root, rel, ".."), { recursive: true });
+    writeFileSync(join(root, rel), "");
+  }
+  const fileSet = defaultFileSet(root);
+  const a = fileSet("Creates: `src/a/index.ts`\n");
+  const b = fileSet("Creates: `src/b/index.ts`\n");
+
+  const layered = await layerWaves(["a", "b"], openBlockedByFrom({}));
+  const plan = partitionWaves(
+    layered,
+    new Map([
+      ["a", new Set(a.files)],
+      ["b", new Set(b.files)],
+    ]),
+  );
+
+  assert.deepEqual(plan.waves, [["a", "b"]]);
+});
+
+test("resolver → partition: a Creates: cite resolved under its tree directory collides with a Touches: of that path (#480)", async () => {
+  // `a/foo.ts` is not the path as written in the tree, but its directory suffix-matches
+  // `src/a` — so it keys to `src/a/foo.ts` and must still collide with a ticket whose
+  // Touches: resolves there: resolving the directory closes the normalization hole.
+  const root = join(tmpdir(), `vetinari-480t-${Date.now()}`);
+  mkdirSync(join(root, "src/a"), { recursive: true });
+  writeFileSync(join(root, "src/a/foo.ts"), "");
+  const fileSet = defaultFileSet(root);
+  const a = fileSet("Creates: `a/foo.ts`\n");
+  const b = fileSet("Touches: `src/a/foo.ts`\n");
+  assert.deepEqual(a.files, ["src/a/foo.ts"]);
+  assert.deepEqual(b.files, ["src/a/foo.ts"]);
+
+  const layered = await layerWaves(["a", "b"], openBlockedByFrom({}));
+  const plan = partitionWaves(
+    layered,
+    new Map([
+      ["a", new Set(a.files)],
+      ["b", new Set(b.files)],
+    ]),
+  );
+
+  assert.deepEqual(plan.waves, [["a"], ["b"]]);
+});
+
 // Regression: the 2026-08-19 campaign (~41 issues). The spec fixes the invariant,
 // not the raw graph, so this reconstructs its shape: #461 has NO blockedBy edge yet
 // shares `stack_strip.tmpl` with #378/#688/#400, so a pure-DAG planner drops all

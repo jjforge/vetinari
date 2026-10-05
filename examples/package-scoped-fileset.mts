@@ -21,11 +21,12 @@ import { defaultFileSet, type FileSetOf } from "vetinari";
  * de-duplicated; `confident` is passed through unchanged. `root` is forwarded to
  * `defaultFileSet` (default: the cwd) so a test can point it at a temp tree.
  *
- * Note on `Creates:` and ambiguous `Touches:` cites: the resolver keeps these as
- * a bare basename — it has no tree path for a file that does not exist yet, nor
- * for a name the tree holds under several paths. Their `dirname` is `.`, so they
- * collide with every other bare key and every root-level file. That is
- * conservative: it serializes more, never less.
+ * Note on bare and ambiguous cites: the resolver keeps a bare basename for a bare
+ * `Creates:` cite, a `Creates:` cite whose directory matches several tree
+ * directories, and a name the tree holds under several paths. Their `dirname` is
+ * `.`, so they collide with every other bare key and every root-level file. That
+ * is conservative: it serializes more, never less. Any other `Creates:` cite keys
+ * under its resolved (or new) directory.
  */
 export function packageScopedFileSet(root?: string): FileSetOf {
   const base = defaultFileSet(root);

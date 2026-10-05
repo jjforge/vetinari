@@ -36,7 +36,8 @@ The planner enforces both — the `blocked_by` graph alone gives neither:
    unreachable, so it is reported and dropped with its dependents.
 2. **No two tickets in one wave edit the same file** — crossover is not in the
    DAG, so each layer is partitioned into **file-disjoint** sub-waves, collision
-   judged by **basename**. Each ticket declares its file-set with an explicit
+   judged by **resolved path** (a bare or ambiguous cite, which names no one path,
+   collides with every file of its name). Each ticket declares its file-set with an explicit
    marker **line** — `Touches:`/`Files:` for files it edits, `Creates:` for files
    it adds. See
    [`issue-conventions.md`](issue-conventions.md#declaring-a-tickets-file-set)

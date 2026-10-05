@@ -14,17 +14,22 @@
  * the one path and collide (user story 6, the authoring promise). A cite the tree
  * holds under several paths is genuinely ambiguous: it is kept as a bare basename
  * (still confident) and collides with any file of that name — today's semantics for
- * that one cite. `Creates:` cites name files not yet in the tree, so there is no
- * index to resolve them against; they stay bare basenames and collide by basename.
+ * that one cite. `Creates:` cites name files not yet in the tree, so their
+ * *directory* is resolved instead, by the same longest-suffix match against the
+ * tree's directories: `a/index.ts` with `src/a` in the tree keys to `src/a/index.ts`,
+ * so it collides with a `Touches:` of that file but not with an `index.ts` created in
+ * another directory. A directory the tree lacks keeps the cited path; one matching
+ * several tree directories, or a bare cite, keeps the bare basename.
  */
 import { readdirSync } from "node:fs";
-import { basename, join, relative, sep } from "node:path";
+import { join, posix, relative, sep } from "node:path";
 
 export interface FileSet {
   /**
    * the fileKeys this ticket will touch: each `Touches:` cite resolved to its real
-   * repo-relative path (or kept as a bare basename when the cite was ambiguous or
-   * names a `Creates:` file), never the raw cited path.
+   * repo-relative path, each `Creates:` cite to its resolved directory plus its
+   * basename (or the cited path, under a directory the tree lacks), or a bare
+   * basename when the cite was bare or ambiguous — never the raw cited path.
    */
   files: string[];
   /**
@@ -87,13 +92,6 @@ function citedPaths(body: string, onMarkerLine = false): string[] {
   return [...seen];
 }
 
-/** The cited paths on a marker tail, each reduced to its basename (deduped, in order).
- *  Used for `Creates:` cites, which name files not yet in the tree and so cannot resolve
- *  to a real path — they stay basenames and collide by basename, as they always have. */
-function citedBasenames(tail: string): string[] {
-  return [...new Set(citedPaths(tail, true).map((raw) => basename(raw)))];
-}
-
 /**
  * The explicit file-set marker LINES a ticket may carry, e.g.
  * `Touches (existing files): \`a.ts\`, b/c.ts` or `Creates (new files): \`d.ts\``.
@@ -104,8 +102,9 @@ function citedBasenames(tail: string): string[] {
  *
  * `TOUCHES_RE` names files the ticket edits — validated against the tree, since a
  * cited-but-absent existing file is a stale/typo'd note. `CREATES_RE` names files
- * the ticket creates — counted for wave-disjointness but NOT validated, since a new
- * file is legitimately absent from the tree.
+ * the ticket creates — counted for wave-disjointness (keyed through its directory,
+ * see {@link resolveCreatesCite}) but NOT validated, since a new file is legitimately
+ * absent from the tree.
  */
 const TOUCHES_RE = /^[ \t]*(?:[-*+]\s+)?\**(?:Touches|Files)\b[^:\n]*:(.*)$/gim;
 const CREATES_RE = /^[ \t]*(?:[-*+]\s+)?\**Creates\b[^:\n]*:(.*)$/gim;
@@ -125,21 +124,12 @@ function markerTail(body: string, marker: RegExp): string | null {
  * The cited paths on a body's marker line (cleaned, not reduced), or null when the
  * body carries no such marker line. An empty result (`[]`) means a marker line is
  * present but cites nothing; the caller keeps that distinct from "no marker line"
- * (null). Used for `Touches:`, whose cites are resolved against the tree.
+ * (null). Used for both markers: `Touches:` cites resolve against the tree's files,
+ * `Creates:` cites against its directories.
  */
 function markerPaths(body: string, marker: RegExp): string[] | null {
   const tail = markerTail(body, marker);
   return tail === null ? null : citedPaths(tail, true);
-}
-
-/**
- * The cited basenames on a body's marker line, or null when the body carries no such
- * marker line. Used for `Creates:`, whose cites name files not yet in the tree and so
- * compare by basename.
- */
-function markerCites(body: string, marker: RegExp): string[] | null {
-  const tail = markerTail(body, marker);
-  return tail === null ? null : citedBasenames(tail);
 }
 
 /**
@@ -258,6 +248,19 @@ function endsWithSegments(path: string, segments: string[]): boolean {
 }
 
 /**
+ * The `candidates` matching the longest trailing run of `segments` that any of them
+ * match, or `[]` when none match even the last segment. As the suffix shortens the
+ * match set only grows, so the first non-empty length decides.
+ */
+function longestSuffixMatches(segments: string[], candidates: string[]): string[] {
+  for (let len = segments.length; len >= 1; len--) {
+    const matches = candidates.filter((p) => endsWithSegments(p, segments.slice(segments.length - len)));
+    if (matches.length > 0) return matches;
+  }
+  return [];
+}
+
+/**
  * Resolve one cited path against the tree index to its fileKey, by **longest suffix
  * match** on path segments:
  *   - the tree holds exactly one file with the cite's basename -> that real path;
@@ -272,15 +275,48 @@ function resolveCite(cite: string, index: Map<string, string[]>): string | null 
   const base = segments[segments.length - 1];
   const candidates = index.get(base);
   if (!candidates || candidates.length === 0) return null;
-  // Longest suffix first: the most-specific match wins. As the suffix shortens the
-  // match set only grows, so the first non-empty length decides — one match resolves,
-  // more than one is ambiguous and degrades to the bare basename.
-  for (let len = segments.length; len >= 1; len--) {
-    const matches = candidates.filter((p) => endsWithSegments(p, segments.slice(segments.length - len)));
-    if (matches.length === 1) return matches[0];
-    if (matches.length > 1) return base;
+  // Longest suffix first: the most-specific match wins — one match resolves, more than
+  // one is ambiguous and degrades to the bare basename.
+  const matches = longestSuffixMatches(segments, candidates);
+  return matches.length === 1 ? matches[0] : base;
+}
+
+/**
+ * A directory-basename -> repo-relative directory paths index of the tree, derived from
+ * the file index: every indexed file's directory and each of its ancestors.
+ */
+function treeDirIndex(files: Map<string, string[]>): Map<string, string[]> {
+  const dirs = new Set<string>();
+  for (const paths of files.values()) for (const p of paths) for (let d = posix.dirname(p); d !== "."; d = posix.dirname(d)) dirs.add(d);
+  const index = new Map<string, string[]>();
+  for (const d of dirs) {
+    const name = posix.basename(d);
+    (index.get(name) ?? index.set(name, []).get(name)!).push(d);
   }
-  return base;
+  return index;
+}
+
+/**
+ * Resolve one `Creates:` cite to its fileKey. The file does not exist yet, so its
+ * *directory* is resolved instead, by longest suffix match against the tree's
+ * directories (a leading `./` dropped first):
+ *   - a bare cite (no directory) -> the bare basename;
+ *   - exactly one tree directory matches -> that directory + the basename, a full path
+ *     (`a/foo.ts` with `src/a` in the tree -> `src/a/foo.ts`);
+ *   - several match at the longest suffix reached -> the bare basename, ambiguous as an
+ *     ambiguous `Touches:` cite is;
+ *   - none matches (a new directory) -> the cited path as written.
+ * Never null: a new file is legitimately absent, so it never forbids confidence.
+ */
+function resolveCreatesCite(cite: string, dirIndex: Map<string, string[]>): string {
+  const path = cite.replace(/^(?:\.\/)+/, "");
+  const segments = path.split("/").filter(Boolean);
+  const base = segments[segments.length - 1];
+  if (segments.length === 1) return base;
+  const dirSegments = segments.slice(0, -1);
+  const matches = longestSuffixMatches(dirSegments, dirIndex.get(dirSegments[dirSegments.length - 1]) ?? []);
+  if (matches.length === 0) return path;
+  return matches.length === 1 ? `${matches[0]}/${base}` : base;
 }
 
 /**
@@ -316,10 +352,11 @@ export const defaultFileSet = (root: string = process.cwd()): ((ticket: string) 
   // resolves nothing against (§356), so a resolver that is never invoked must
   // never walk the tree; and every ticket in one plan shares this one snapshot.
   let index: Map<string, string[]> | undefined;
+  let dirIndex: Map<string, string[]> | undefined;
   return (ticket: string): FileSet => {
     const tree = (index ??= treePathIndex(root));
     const touches = markerPaths(ticket, TOUCHES_RE);
-    const creates = markerCites(ticket, CREATES_RE);
+    const creates = markerPaths(ticket, CREATES_RE);
 
     // No marker line of either kind — fall back to the all-or-nothing whole-body scan.
     if (touches === null && creates === null) {
@@ -334,11 +371,14 @@ export const defaultFileSet = (root: string = process.cwd()): ((ticket: string) 
 
     // `Touches:` cites are resolved against the tree (strict — a cite matching no tree
     // path forbids confidence); `Creates:` cites name files not yet in the tree, so
-    // they stay bare basenames, counted for disjointness but never validated.
+    // their directory is resolved against the tree's directories instead — counted for
+    // disjointness but never validated.
     const touchesCites = touches ?? [];
     const resolved = touchesCites.map((c) => resolveCite(c, tree));
     const validTouches = resolved.filter((k): k is string => k !== null);
-    const files = [...new Set([...validTouches, ...(creates ?? [])])];
+    const dirs = (dirIndex ??= treeDirIndex(tree));
+    const created = (creates ?? []).map((c) => resolveCreatesCite(c, dirs));
+    const files = [...new Set([...validTouches, ...created])];
     const confident = files.length > 0 && validTouches.length === touchesCites.length;
     return { files, confident };
   };

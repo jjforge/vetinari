@@ -591,6 +591,19 @@ test("dispatch answer refuses a `stopped` record — it cannot be answered, nami
   assert.equal((deps.runLoop as any).calls.length, 0, "no run is kicked off");
 });
 
+test("dispatch answer refuses an `outdated-agent` record like a `stopped` one, naming `vetinari build` (#444)", async () => {
+  const { deps } = makeDeps({
+    hasParked: spy(true) as any,
+    listParked: spy([{ taskId: "436", reason: "outdated-agent", branch: "agent/436", parkedAt: "t", question: "rebuild" }]) as any,
+  });
+  await assert.rejects(
+    () => dispatch({ kind: "answer", taskId: "436", text: ["do", "it"] }, deps),
+    (err: Error) => err instanceof Refusal && /vetinari build/.test(err.message) && /vetinari redrive/.test(err.message),
+  );
+  assert.equal((deps.answerParked as any).calls.length, 0);
+  assert.equal((deps.runLoop as any).calls.length, 0);
+});
+
 test("dispatch run rejects with a Refusal when the task id is missing (a required-argument refusal)", async () => {
   const { deps } = makeDeps();
   await assert.rejects(

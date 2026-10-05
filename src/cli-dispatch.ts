@@ -905,9 +905,15 @@ async function dispatchAnswer(cmd: Extract<Command, { kind: "answer" }>, deps: D
   // naming the moves (a redrive for a campaign, `vetinari run <id>` for a standalone run). Every
   // gateway reply ends up here, so this also refuses a reply to an old question message for a task
   // whose current record is `stopped`.
-  if (deps.listParked(cfg).some((r) => normalize(r.taskId) === normalize(taskId) && r.reason === "stopped"))
+  const reason = deps.listParked(cfg).find((r) => normalize(r.taskId) === normalize(taskId))?.reason;
+  if (reason === "stopped")
     throw new Refusal(
       `${taskId} was stopped before it reached a verdict — it cannot be answered. Resume it with \`vetinari redrive\` (a campaign) or \`vetinari run ${taskId}\` (a standalone run).`,
+    );
+  // An `outdated-agent` park (#444) asked nothing either: the image's agent CLI is too old for the model.
+  if (reason === "outdated-agent")
+    throw new Refusal(
+      `${taskId} parked because the image's agent CLI is too old for the model — it cannot be answered. Rebuild the image with \`vetinari build\`, then \`vetinari redrive\` (a campaign) or \`vetinari run ${taskId}\` (a standalone run).`,
     );
 
   // Deliver: write the answer into the parked record and mark it answered. The record and its

@@ -235,6 +235,16 @@ test("describeInit's next steps name the Telegram bot connection step and the tg
   assert.match(text, /host\.env/);
 });
 
+test("describeInit says which config it writes, and why", () => {
+  const fresh = { hasConfig: false, hasTsconfig: false, hasLocalDir: false, gitignore: undefined, ...TEMPLATES };
+
+  const github = describeInit(computeInit({ ...fresh, githubOrigin: true }));
+  assert.match(github, /\+ vetinari\/config\.mts — the githubTracker\(\) config, because origin is a github\.com remote/);
+
+  const skeleton = describeInit(computeInit(fresh));
+  assert.match(skeleton, /\+ vetinari\/config\.mts — the skeleton with TODO stubs, because origin is missing or not a github\.com remote/);
+});
+
 test("describeInit leads with a clear refusal when a config already exists", () => {
   const text = describeInit(
     computeInit({ hasConfig: true, hasTsconfig: true, hasLocalDir: false, gitignore: "node_modules/\n", ...TEMPLATES }),

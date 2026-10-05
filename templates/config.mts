@@ -42,6 +42,9 @@ export default defineConfig({
   // agent: { provider: "claude" },
 
   // Fetch the task text for an id — a GitHub issue body, a spec file, anything.
+  // Tracking work in GitHub issues? Replace this and the resolvers below with
+  // `...githubTracker()` (import it from "vetinari"; pass { repo: "owner/repo" }
+  // when your tracker is not this project's `origin`).
   fetchTask: (id) => `TODO: fetch the task text for ${id}`,
 
   // Optional: wire your tracker's blocked-by edges to enable prune / campaign planning.

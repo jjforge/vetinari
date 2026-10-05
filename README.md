@@ -78,8 +78,11 @@ vetinari init
 This writes a committed `vetinari/config.mts`, `vetinari/Dockerfile` and
 `vetinari/tsconfig.json` (editor and `tsc -p vetinari` types for the config), plus the
 ignored `.vetinari.local/` for machine-local state (logs, parked tasks, and the
-`.env` above). Put everything project-specific in the config; nothing else needs
-editing:
+`.env` above). When the project's `origin` is on github.com, the config already
+spreads `...githubTracker()`, wiring every tracker seam; otherwise (no `origin`, an
+SSH host alias, GitHub Enterprise, another host) it is a skeleton with a `TODO`
+`fetchTask` stub to fill in. `init --dry-run` says which it would write and why.
+Put everything project-specific in the config; nothing else needs editing:
 
 ```ts
 import { defineConfig, githubTracker } from "vetinari";

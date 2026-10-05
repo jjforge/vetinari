@@ -62,7 +62,7 @@ export const MODES: Mode[] = [
   {
     signature: "init [--dry-run]",
     blurb:
-      "scaffold a NEW project onto the layout: create the committed vetinari/ (a defineConfig skeleton + a Dockerfile template), the excluded .vetinari.local/, and add .vetinari.local/ to .gitignore. Idempotent and non-clobbering — an existing vetinari/ config is never overwritten (--dry-run to print the plan and write nothing). Installs and vendors nothing",
+      "scaffold a NEW project onto the layout: create the committed vetinari/ (a config + a Dockerfile template), the excluded .vetinari.local/, and add .vetinari.local/ to .gitignore. The config spreads `...githubTracker()` when the project's origin is on github.com (git@github.com: or https://github.com/ — not an SSH host alias or GitHub Enterprise), and is otherwise a defineConfig skeleton with TODO stubs. Idempotent and non-clobbering — an existing vetinari/ config is never overwritten (--dry-run to print the plan, including which config and why, and write nothing). Installs and vendors nothing",
   },
   {
     signature: "install [--dir <d>] [--force] [--dry-run]",

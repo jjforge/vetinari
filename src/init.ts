@@ -77,6 +77,8 @@ export interface InitPlan {
    * predate — and the machine-local pieces are still filled in.
    */
   refused: boolean;
+  /** Whether the config written is the githubTracker one (origin on github.com) rather than the skeleton. */
+  githubConfig: boolean;
 }
 
 /**
@@ -115,7 +117,7 @@ export function computeInit(scan: InitScan): InitPlan {
 
   const gitignore = planGitignore(scan.gitignore);
 
-  return { creates, dirs, gitignore, refused };
+  return { creates, dirs, gitignore, refused, githubConfig: scan.githubOrigin };
 }
 
 /**
@@ -137,7 +139,10 @@ export function describeInit(plan: InitPlan, provider: AgentProviderName = DEFAU
     lines.push("Scaffolding this project onto the vetinari/ + .vetinari.local/ layout:");
   }
 
-  for (const c of plan.creates) lines.push(`  + ${c.path}`);
+  const configWhy = plan.githubConfig
+    ? " — the githubTracker() config, because origin is a github.com remote"
+    : " — the skeleton with TODO stubs, because origin is missing or not a github.com remote";
+  for (const c of plan.creates) lines.push(`  + ${c.path}${c.path === CONFIG_DEST ? configWhy : ""}`);
   for (const d of plan.dirs) lines.push(`  + ${d}/ (excluded machine-local dir)`);
   if (plan.gitignore !== undefined) lines.push(`  ~ .gitignore — exclude ${LOCAL_DIR}/`);
 

@@ -87,7 +87,7 @@ The event vocabulary after consolidation (§13.2) is small and uses the user's w
 | `prune` | `target`, `removed`, `dropped` | prune |
 | `graft` | `ids`, `blockedBy`, `basenames`, `titles?` | graft |
 | `redrive` | `fromWave`, `landed`, `skipped` | campaign |
-| `stop-requested` | `index` (the wave in flight) | campaign (§5) — the first stop request it took; the reducer ignores it, `vetinari stop` reads it to tell a stop already pending (one after the latest `campaign-start` with no stop marker after it) |
+| `stop-requested` | `index` (the wave in flight) | campaign (§5) — the first stop request it took; the reducer ignores it, `vetinari stop` reads it to tell a stop already pending (one after the later of the latest `campaign-start` and the latest `wave-start`, with no stop marker after it — a redrive logs no `campaign-start`, so its `wave-start` drops a request from a process that died) |
 
 Diagnostic rows (`gate`, `gate-check`, `gate-result`, `commit`, `tool`, `sandbox-exec`, sandbox setup, hook failures) are activity, not state: the reducer ignores them, the issue sheet and live tail read them. Two rules:
 

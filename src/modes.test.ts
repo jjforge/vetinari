@@ -1197,29 +1197,34 @@ test("reconcileResumeWave never resumes an answered park or a --override failed 
 });
 
 // Seed a wave-0 crash for 102 that recorded a session before the process died: 101 merged green,
-// 102 spawned and finished a turn (session on the log) then the campaign process vanished — a
-// crash, reconciled to parked{crash} with no on-disk record.
+// 102 spawned and finished a turn (session on the log) then the campaign process vanished. A crash
+// kills the process before it can write anything, so the log carries no `campaign-parked` — the
+// redrive finds wave 0 as the first unclosed wave and reads 102 as still running.
 const seedCrashWithSession = (cfg: ResolvedConfig) => {
   cfg.log.log("campaign-start", { waves: [["101", "102"]], slots: 4 });
   cfg.log.log("wave-start", { index: 0, tasks: ["101", "102"] });
   cfg.log.log("green", { taskId: "101", branch: "agent/101", commits: ["a"] });
   cfg.log.log("spawn", { taskId: "102", running: 1, left: 0 });
   cfg.log.log("turn", { taskId: "102", turn: 0, sessionId: "sess-102", summary: "" });
-  cfg.log.log("campaign-parked", { index: 0, detail: "crash" });
 };
 
-// A recordingDeps whose spawnRun captures the resume session each spawn was handed, and whose
-// branch-commits probe is stubbed (no real git in the harness).
+// A recordingDeps whose spawnRun captures the resume session each spawn was handed, whose
+// integrate stub records the `regate` flag it was handed, and whose branch-commits probe is
+// stubbed (no real git in the harness).
 const resumeCapturingDeps = (
   cfg: ResolvedConfig,
   spawns: { id: string; resume?: string }[],
+  regates: (boolean | undefined)[],
   branchHasCommits: (cfg: ResolvedConfig, id: string) => boolean,
 ): CampaignDeps => ({
   spawnRun: async (id, resume) => {
     spawns.push({ id, resume });
     return 0;
   },
-  integrate: async (_cfg, greens) => ({ merged: greens, conflictParked: [] }),
+  integrate: async (_cfg, greens, _deps, _index, opts) => {
+    regates.push(opts?.regate);
+    return { merged: greens, conflictParked: [] };
+  },
   collectChangelog: () => ({ collected: [], committed: false }),
   currentBranch: () => cfg.baseBranch,
   grace: async () => {},
@@ -1233,6 +1238,7 @@ test("redrive resumes a crashed member's session when the provider is resumable 
   seedCrashWithSession(cfg);
 
   const spawns: { id: string; resume?: string }[] = [];
+  const regates: (boolean | undefined)[] = [];
   const ok = await silenceConsole(() =>
     campaign(
       cfg,
@@ -1240,12 +1246,13 @@ test("redrive resumes a crashed member's session when the provider is resumable 
       host,
       undefined,
       { resume: true },
-      resumeCapturingDeps(cfg, spawns, () => true),
+      resumeCapturingDeps(cfg, spawns, regates, () => true),
     ),
   );
 
   assert.equal(ok, "done");
   assert.deepEqual(spawns, [{ id: "102", resume: "sess-102" }], "the crash re-ran resuming its recorded session");
+  assert.deepEqual(regates, [false], "a crash redrive integrates without re-gating");
 });
 
 test("redrive runs a crashed member fresh when its branch has no commits (design §7)", async () => {
@@ -1255,6 +1262,7 @@ test("redrive runs a crashed member fresh when its branch has no commits (design
   seedCrashWithSession(cfg);
 
   const spawns: { id: string; resume?: string }[] = [];
+  const regates: (boolean | undefined)[] = [];
   const ok = await silenceConsole(() =>
     campaign(
       cfg,
@@ -1262,12 +1270,13 @@ test("redrive runs a crashed member fresh when its branch has no commits (design
       host,
       undefined,
       { resume: true },
-      resumeCapturingDeps(cfg, spawns, () => false),
+      resumeCapturingDeps(cfg, spawns, regates, () => false),
     ),
   );
 
   assert.equal(ok, "done");
   assert.deepEqual(spawns, [{ id: "102", resume: undefined }], "no commits on the branch → a fresh run, no session resumed");
+  assert.deepEqual(regates, [false], "a crash redrive integrates without re-gating");
 });
 
 test("redrive runs a crashed member fresh when the provider is non-resumable, even with commits (design §7)", async () => {
@@ -1278,6 +1287,7 @@ test("redrive runs a crashed member fresh when the provider is non-resumable, ev
   seedCrashWithSession(cfg);
 
   const spawns: { id: string; resume?: string }[] = [];
+  const regates: (boolean | undefined)[] = [];
   const ok = await silenceConsole(() =>
     campaign(
       cfg,
@@ -1285,12 +1295,13 @@ test("redrive runs a crashed member fresh when the provider is non-resumable, ev
       host,
       undefined,
       { resume: true },
-      resumeCapturingDeps(cfg, spawns, () => true),
+      resumeCapturingDeps(cfg, spawns, regates, () => true),
     ),
   );
 
   assert.equal(ok, "done");
   assert.deepEqual(spawns, [{ id: "102", resume: undefined }], "a non-resumable provider carries no session across a crash → a fresh run");
+  assert.deepEqual(regates, [false], "a crash redrive integrates without re-gating");
 });
 
 test("redrive re-runs a parked member whose record is ANSWERED, consuming the answer, and lands the rest (design §5 step 3, §7)", async () => {

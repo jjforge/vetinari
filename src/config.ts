@@ -330,6 +330,12 @@ export interface GateSpec {
    */
   when?: RegExp;
   label?: string;
+  /**
+   * Seconds this gate should finish within. Information only: a run over it (green or red — a
+   * timeout is red) is flagged as a slow gate at the wave settle and on the dashboard, never failed.
+   * Logged on each `gate-result`, so the dashboard reads it without loading this config.
+   */
+  budgetSeconds?: number;
 }
 
 export interface MountSpec {

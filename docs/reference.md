@@ -163,25 +163,26 @@ The event log (`logs/orchestrator.jsonl`) is one JSON object per line,
 
 | Event | Fields | Emitted by |
 | --- | --- | --- |
-| `campaign-start` | `waves`, `name?`, `titles?` (id → title, recorded once) | campaign |
+| `campaign-start` | `waves`, `slots`, `name?`, `titles?` (id → title, recorded once) | campaign |
 | `wave-start` | `index`, `tasks` | campaign |
-| `spawn` | `task` | campaign (queue) |
-| `turn` | `task`, `turn`, `summary`, `signal`, `sessionId?`, `commits?` | run |
-| `green` | `task`, `branch`, `commits` | run |
-| `parked` | `task`, `reason`, `detail` | run (question/stalled/stopped), integrator (conflict), campaign (red-base) |
-| `failed` | `task`, `detail` | run |
-| `merged` | `task` | integrator |
-| `base-gate` | `index`, `green`, `detail` | integrator |
-| `wave-done` | `index` | campaign — only when every member is `completed` |
-| `campaign-parked` | `index`, `reason` (`red-base`/`question`/`stalled`/`conflict`/`stopped`), `detail` | campaign — a stop marker; `stopped` is an operator stop (`vetinari stop`, Ctrl-C) |
-| `campaign-failed` | `index`, `detail` | campaign — the other stop marker |
-| `campaign-done` | `waves` | campaign |
-| `prune` | `target`, `removed`, `dropped` | prune |
-| `graft` | `ids`, `blockedBy`, `basenames`, `titles?` | graft |
-| `redrive` | `fromWave`, `landed`, `skipped` | campaign |
+| `spawn` | `taskId` | campaign (queue) |
+| `turn` | `taskId`, `turn`, `summary`, `signal?`, `sessionId?`, `commits?` | run |
+| `green` | `taskId`, `branch`, `commits` | run |
+| `parked` | `taskId`, `reason`, `detail?` | run (question/stalled/stopped), integrator (conflict) — never the campaign: a red base is carried only by `campaign-parked` |
+| `failed` | `taskId`, `detail?` | whichever process observes it: the run loop on a throw, the campaign on a child's non-zero exit |
+| `merged` | `taskId` | integrator |
+| `base-gate` | `index?`, `green`, `detail?` | integrator |
+| `wave-done` | `index`, `merged?` | campaign — only when every member is `completed` |
+| `grace-wait` | `seconds`, `tasks` | campaign |
+| `campaign-parked` | `index?`, `reason?` (`red-base`/`question`/`stalled`/`conflict`/`stopped`), `detail?` | campaign — a stop marker; `stopped` is an operator stop (`vetinari stop`, Ctrl-C) |
+| `campaign-failed` | `index?`, `detail?` | campaign — the other stop marker |
+| `campaign-done` | `waves`, `name?` | campaign |
+| `prune` | `target`, `removed`, `dropped` | the `prune` command; the campaign under `--auto-prune` |
+| `graft` | `ids`, `blockedBy`, `fileKeys`, `titles?` | graft |
+| `redrive` | `fromWave`, `landed?`, `skipped?` | campaign |
 | `stop-requested` | `index` (the wave in flight) | campaign — an operator asked it to stop; the reducer ignores it, `vetinari stop` reads it to tell a stop already pending |
 
-Diagnostic rows — `gate`, `gate-result`, `commit`, `tool`, `sandbox-exec`,
+Diagnostic rows — `gate`, `gate-check`, `gate-result`, `commit`, `tool`, `sandbox-exec`,
 sandbox setup, hook failures — are activity, not state: the reducer ignores them;
 the issue sheet and live tail read them.
 

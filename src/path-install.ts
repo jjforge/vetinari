@@ -63,7 +63,7 @@ export interface PathInstallArgs {
 export function parsePathInstallArgs(args: string[], home: string): PathInstallArgs | { refusal: string } {
   const dirIdx = args.indexOf("--dir");
   const dirArg = dirIdx >= 0 ? args[dirIdx + 1] : join(home, ".local", "bin");
-  if (dirArg === undefined || dirArg.startsWith("--")) return { refusal: "install --dir needs a directory, e.g. --dir ~/bin" };
+  if (!dirArg || dirArg.startsWith("--")) return { refusal: "install --dir needs a directory, e.g. --dir ~/bin" };
   return { dir: resolve(dirArg), force: args.includes("--force"), dryRun: args.includes("--dry-run") };
 }
 

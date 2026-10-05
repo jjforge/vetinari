@@ -125,6 +125,7 @@ test("parsePathInstallArgs refuses --dir with no value or another flag as its va
     ["--dir", "--dry-run"],
     ["--dir", "--force"],
     ["--force", "--dir"],
+    ["--dir", ""],
   ]) {
     assert.deepEqual(
       parsePathInstallArgs(args, "/home/z"),

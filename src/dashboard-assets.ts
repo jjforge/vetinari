@@ -814,11 +814,13 @@ export const LIVE_TAIL_STYLES = `  .live-tail { background: var(--color-card); b
   /* On a phone the .tail-head row can't fit title + summary + agent dropdown + filter on one line,
      so the title wrapped to four lines and the right-hand controls were clipped (#336). Under the
      640px breakpoint the head wraps: .tail-title keeps to one line and .tail-controls drops to a
-     full-width row of its own below it, with .tail-filter growing to fill that row. The summary
+     full-width row of its own below it, with .tail-filter growing to fill that row. Both drop flex's
+     min-width: auto floor so the row can shrink to the pane: otherwise it sized to its content and
+     clipped the download button at ~375–400px (#460). The summary
      ("2 agents") duplicates the agent dropdown, so it is dropped outright. Every pane sharing
      .tail-head (live tail, archived runs, landing event-log feed) inherits this. */
   @media (max-width: 640px) { .tail-summary { display: none; } }
-  @media (max-width: 640px) { .tail-head { flex-wrap: wrap; } .tail-title { white-space: nowrap; } .tail-controls { flex-basis: 100%; } .tail-filter { flex: 1; max-width: none; } }`;
+  @media (max-width: 640px) { .tail-head { flex-wrap: wrap; } .tail-title { white-space: nowrap; } .tail-controls { flex-basis: 100%; min-width: 0; } .tail-filter { flex: 1; min-width: 0; max-width: none; } }`;
 
 /**
  * The live-tail pane's client script (#124), inlined into the repo page after its shared

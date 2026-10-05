@@ -249,10 +249,13 @@ test("under 640px the shared .tail-head wraps so the title keeps one line and th
   // the right-hand controls were clipped. Under the 640px breakpoint the head now wraps: .tail-title
   // stays on one line (nowrap) and .tail-controls drops to a full-width row of its own below it, with
   // .tail-filter growing to fill that row. CSS-only; every pane sharing .tail-head (live tail,
-  // archived runs, landing event-log feed) inherits it, no renderer touched.
+  // archived runs, landing event-log feed) inherits it, no renderer touched. Both the controls row and
+  // the filter drop flex's default `min-width: auto` floor: without it the row sized to its content
+  // and the filter kept its intrinsic width, so at ~375–400px the download button was pushed out of
+  // the pane and clipped (#460).
   assert.match(
     LIVE_TAIL_STYLES,
-    /@media \(max-width: 640px\) \{ \.tail-head \{ flex-wrap: wrap; \} \.tail-title \{ white-space: nowrap; \} \.tail-controls \{ flex-basis: 100%; \} \.tail-filter \{ flex: 1; max-width: none; \} \}/,
+    /@media \(max-width: 640px\) \{ \.tail-head \{ flex-wrap: wrap; \} \.tail-title \{ white-space: nowrap; \} \.tail-controls \{ flex-basis: 100%; min-width: 0; \} \.tail-filter \{ flex: 1; min-width: 0; max-width: none; \} \}/,
   );
 });
 

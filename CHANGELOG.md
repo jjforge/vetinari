@@ -60,6 +60,7 @@ Within a milestone each bold section label appears at most once.
 - [user] The landing card and the cross-repo parked queue now count parked records by the same rule as the project page: a record for an issue outside the current campaign's plan, in a closed wave, or from a superseded campaign no longer makes a finished project read PARKED. When the live log is empty, every surviving record still counts (#379).
 - [user] The dashboard's Redrive control and `POST /redrive` now allow a redrive for a campaign stopped between waves — a wave completed and a later wave not yet entered, as pruning a wave's last parked issue leaves it — instead of greying out with "no campaign to redrive" (#366).
 - [ops] The per-wave changelog collect commit no longer sweeps in a file the operator had already staged: it commits only `CHANGELOG.md` and the collected fragments, and anything else in the index stays staged (#459, #364).
+- [user] On phones the live-tail header's controls row now shrinks to fit the pane: at ~375–400px the download button was still pushed out of view and clipped (#460, #336).
 
 **Security:**
 - [user] The dashboard now refuses browser-borne requests before any route runs: a `Host` that is not an IP literal, `localhost`, or an allowlisted name gets a 403 (closing DNS rebinding), and a request whose `Origin` is not the dashboard's own `http(s)://<Host>` gets a 403 (closing a cross-site POST to `/answer`, `/prune`, `/graft` or `/redrive`). Requests with no `Origin`, such as curl, are unaffected (#361).

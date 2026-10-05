@@ -73,6 +73,8 @@ export async function runGates(
   if (!opts.all) {
     const changed = await sbx.exec(`git diff --name-only ${cfg.baseBranch}...HEAD`);
     files = changed.stdout ?? "";
+    // A stop that lands during the diff abandons the gate before it is announced (#484), as below.
+    if (stopped()) return { green: false, report: "" };
   }
   const selected = selectGates(cfg.gates, files, { all: opts.all });
   const gateFields = {

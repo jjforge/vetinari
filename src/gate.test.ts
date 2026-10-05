@@ -64,8 +64,9 @@ const gateCfg = (gates: GateSpec[]): ResolvedConfig => {
   return { stateDir, logFile, baseBranch: "base", gates, log: loggerForRun({ logFile }) } as unknown as ResolvedConfig;
 };
 
-// A fake sandbox whose `exec` answers each gate command with a scripted exit code (the `git diff`
-// probe is never reached under `{ all: true }`). `cmds` are the gate commands, in order.
+// A fake sandbox whose `exec` answers each gate command with a scripted exit code. Under
+// `{ all: true }` the changed-files `git diff` probe is never reached; without it the probe is
+// answered like any other command (exit 0, `out`).
 const gateSandbox = (exits: Record<string, number>): Sandbox =>
   ({
     branch: "agent/T",
@@ -160,6 +161,33 @@ test("a stop while a check runs: runGates resolves, runs no further check and re
     false,
     "no gate log file is written",
   );
+});
+
+test("a stop during the changed-files git diff: runGates resolves before the gate event and runs no check (#484)", async () => {
+  const cfg = gateCfg([{ cmd: "tsc --noEmit" }]);
+  let stop = false;
+  const execCalls: string[] = [];
+  const sbx = {
+    ...gateSandbox({}),
+    async exec(cmd: string) {
+      execCalls.push(cmd);
+      if (cmd.startsWith("git diff")) stop = true; // the stop lands while the diff is in flight
+      return { stdout: "", stderr: "", exitCode: 0 };
+    },
+  } as unknown as Sandbox;
+
+  const result = await runGates(cfg, sbx, { taskId: "484", stopped: () => stop });
+
+  assert.deepEqual(result, { green: false, report: "" });
+  assert.deepEqual(execCalls, ["git diff --name-only base...HEAD"], "no gate command runs");
+  assert.deepEqual(readActivity(cfg, "484"), [], "no gate activity row");
+  const logged = existsSync(cfg.logFile)
+    ? readFileSync(cfg.logFile, "utf8")
+        .split("\n")
+        .filter(Boolean)
+        .map((l) => JSON.parse(l).event)
+    : [];
+  assert.equal(logged.includes("gate"), false, "no gate event in the event log");
 });
 
 // --- TAP failure selection (#389) ---

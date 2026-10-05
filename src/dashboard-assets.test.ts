@@ -477,3 +477,7 @@ test("the issue-sheet FIX_FORWARD map carries a `stopped` entry — a signalled 
   assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /stopped:/);
   assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /vetinari run/);
 });
+
+test("the issue-sheet FIX_FORWARD map carries an `outdated-agent` entry — rebuild the image, then redrive (#444)", () => {
+  assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /"outdated-agent": "[^"]*vetinari build[^"]*redrive[^"]*"/);
+});

@@ -58,7 +58,7 @@ applies to every mode and is not itself a mode.
 | --- | --- |
 | `0` | green / done — or a no-op (a request already satisfied, or one someone else will carry out), or `--help` |
 | `1` | failed — a run or campaign the agent could not make green; also a genuine **defect**, which still prints its stack trace |
-| `2` | parked — a run or campaign stopped on a question or a stall, awaiting a human; also a run a human stopped with SIGINT/SIGTERM, which parks `stopped` and exits `2` |
+| `2` | parked — a run or campaign stopped on a question or a stall, awaiting a human; also a run a human stopped with SIGINT/SIGTERM, which parks `stopped` and exits `2`, and a run whose agent CLI is too old for the model, which parks `outdated-agent` and exits `2` |
 | `4` | refused — a **refusal**: the command understood the request and declined it on purpose (e.g. "not a git repository", an unknown mode, a missing required argument, a project qualifier that names another project). The message is printed **alone on stderr**, never wrapped in a stack trace |
 
 `--help`, `-h` and `help` print the usage text on **stdout** and exit `0` — help is
@@ -167,13 +167,13 @@ The event log (`logs/orchestrator.jsonl`) is one JSON object per line,
 | `spawn` | `taskId` | campaign (queue) |
 | `turn` | `taskId`, `turn`, `summary`, `signal?`, `sessionId?`, `commits?` | run |
 | `green` | `taskId`, `branch`, `commits` | run |
-| `parked` | `taskId`, `reason`, `detail?` | run (question/stalled/stopped), integrator (conflict) — never the campaign: a red base is carried only by `campaign-parked` |
+| `parked` | `taskId`, `reason`, `detail?` | run (question/stalled/stopped/outdated-agent), integrator (conflict) — never the campaign: a red base is carried only by `campaign-parked` |
 | `failed` | `taskId`, `detail?` | whichever process observes it: the run loop on a throw, the campaign on a child's non-zero exit |
 | `merged` | `taskId` | integrator |
 | `base-gate` | `index?`, `green`, `detail?` | integrator |
 | `wave-done` | `index`, `merged?` | campaign — only when every member is `completed` |
 | `grace-wait` | `seconds`, `tasks` | campaign |
-| `campaign-parked` | `index?`, `reason?` (`red-base`/`question`/`stalled`/`conflict`/`stopped`), `detail?` | campaign — a stop marker; `stopped` is an operator stop (`vetinari stop`, Ctrl-C) |
+| `campaign-parked` | `index?`, `reason?` (`red-base`/`question`/`stalled`/`conflict`/`stopped`/`outdated-agent`), `detail?` | campaign — a stop marker; `stopped` is an operator stop (`vetinari stop`, Ctrl-C); `outdated-agent` outranks every other member reason |
 | `campaign-failed` | `index?`, `detail?` | campaign — the other stop marker |
 | `campaign-done` | `waves`, `name?` | campaign |
 | `prune` | `target`, `removed`, `dropped` | the `prune` command; the campaign under `--auto-prune` |
@@ -187,11 +187,13 @@ sandbox setup, hook failures — are activity, not state: the reducer ignores th
 the issue sheet and live tail read them.
 
 **Park reasons** (design §2.3) — the one enum on the parked record, the `parked`
-event, and the dashboard: `question | stalled | conflict | red-base | crash | stopped`.
+event, and the dashboard: `question | stalled | conflict | red-base | crash | stopped | outdated-agent`.
 `detail` carries the specifics. `question` and `stalled` are resumable by an
-answer; `conflict`, `red-base`, `crash`, and `stopped` need a redrive after a human
-move (a `stopped` standalone run also continues with `vetinari run <id>`). A `stopped`
-record is never announced and cannot be answered.
+answer; `conflict`, `red-base`, `crash`, `stopped`, and `outdated-agent` need a redrive after a human
+move (a `stopped` or `outdated-agent` standalone run also continues with `vetinari run <id>`). A `stopped`
+or `outdated-agent` record is never announced and cannot be answered. `outdated-agent` is the
+agent CLI in the image too old for the model (its `detail` is the CLI's error line): rebuild with
+`vetinari build`, then redrive.
 
 ## Telegram routing
 

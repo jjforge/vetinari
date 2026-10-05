@@ -55,7 +55,7 @@ export type WaveStatus = "completed" | "running" | "unstarted" | "parked" | "fai
  */
 export type CampaignState = "failed" | "parked" | "running" | "completed" | "unstarted";
 
-const PARK_REASONS: ReadonlySet<string> = new Set(["question", "stalled", "conflict", "red-base", "crash", "stopped"]);
+const PARK_REASONS: ReadonlySet<string> = new Set(["question", "stalled", "conflict", "red-base", "crash", "stopped", "outdated-agent"]);
 
 /**
  * Coerce a `parked` event/record's `reason` to the one enum (design §2.3). Writers emit the

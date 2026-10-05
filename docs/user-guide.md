@@ -54,6 +54,7 @@ Waves, campaigns and the project card roll up from their issues in this order: f
 | `red-base` | every issue passed alone; the merged base fails together | fix forward on the base, then redrive |
 | `crash` | the run died with no verdict | redrive |
 | `stopped` | you stopped the run (Ctrl-C / SIGTERM) before it reached a verdict; its work is kept | `vetinari run <id>` for a standalone run, or redrive a campaign |
+| `outdated-agent` | the image's agent CLI is too old for the model, so the run could not start | rebuild with `vetinari build`, then redrive (or `vetinari run <id>` for a standalone run) |
 
 **Your six moves.** These are the only things a human ever does to a campaign:
 
@@ -98,7 +99,7 @@ Either way the dashboard shows the campaign parked (`stopped`), not crashed, and
 
 1. `vetinari init` scaffolds `vetinari/` and `.vetinari.local/` and updates `.gitignore`. When `origin` is on github.com, the config uses `githubTracker()`, which needs the `ready-for-agent`, `pending-verify` and `needs-triage` labels. On a terminal, `init` checks the repo for them and offers to create any that are missing. Otherwise it prints the `gh label create` commands.
 2. Fill in `vetinari/config.mts`: the image, the gates, any setup commands, and how to fetch an issue and its blockers from your tracker. The config's `import … from "vetinari"` is resolved by the CLI itself, so it loads without the project installing or linking vetinari; `init` also writes `vetinari/tsconfig.json`, so your editor type-checks the config once any vetinari command has run on this machine, and `tsc -p vetinari` checks it from the shell. Fill in `vetinari/Dockerfile` with your toolchain.
-3. `vetinari build` builds the image and runs `baseline`: the toolchain probe and every gate, with no agent. A red baseline is the cheapest failure you will ever buy; do not run an agent until it is green.
+3. `vetinari build` builds the image and runs `baseline`: the toolchain probe and every gate, with no agent. A red baseline is the cheapest failure you will ever buy; do not run an agent until it is green. Whenever you edit `vetinari/Dockerfile`, rebuild: `campaign`, `redrive`, `run` and `baseline` warn when the image is older than the Dockerfile's last change (its mtime or last commit, whichever is newer). The warning never stops the command.
 4. Pick the agent in `config.mts` and put its provider key in `.vetinari.local/.env` — the one file that crosses into the container. `claude`, `pi` and `codex` keep their session, so an answer resumes the same agent with everything it had. `copilot`, `cursor` and `opencode` cannot: an answer is posted to the issue as a comment (`postComment` must be configured) and a fresh agent starts from the issue. Put the Telegram bot token and chat in `.vetinari.local/host.env` — which never crosses.
 5. `vetinari run <issue>` once, to see a single loop go green or park. A run proves the loop; it banks its commits on the issue's branch and merges nothing.
 6. Then `vetinari campaign …` — the same loop plus integration: it merges each green onto the base and gates the merged base, which is how work actually lands.

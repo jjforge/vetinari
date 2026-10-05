@@ -20,6 +20,7 @@ import {
   outboxDirOf,
   parkedDirOf,
   setParkedMessageId,
+  UNASKED_PARK_REASONS,
   type OutboundRecord,
   type ParkedRecord,
   type ParkReason,
@@ -332,9 +333,9 @@ export function pendingAnnouncements(projects: GatewayProject[], index: ReplyInd
     const conn = resolveQuestionConn(p);
     if (!conn) continue;
     for (const record of p.parked) {
-      // A `stopped` record is never announced (and cannot be answered) — only the campaign-level
-      // park notice goes out; its resume move is a redrive or `vetinari run <id>` (#403).
-      if (record.reason === "stopped") continue;
+      // A `stopped` or `outdated-agent` record is never announced (and cannot be answered) — only
+      // the campaign-level park notice goes out; its resume move is a redrive or `vetinari run <id>` (#403, #444).
+      if (UNASKED_PARK_REASONS.has(record.reason)) continue;
       if (record.tgMessageId != null) continue;
       if (isAnnounced(index, p.project, record.taskId, record.parkedAt)) continue;
       out.push({ project: p.project, projectRoot: p.projectRoot, baseLocation: p.baseLocation, conn, record });
@@ -542,6 +543,8 @@ export function parkRecoveryMove(reason: ParkReason, issue: string): string {
       return "`redrive`.";
     case "stopped":
       return `The run was stopped. \`redrive\` to resume the campaign, or \`vetinari run ${issue}\` for a standalone run.`;
+    case "outdated-agent":
+      return "The image's agent CLI is too old for the model. Rebuild it with `vetinari build`, then `vetinari redrive`.";
   }
 }
 
@@ -586,11 +589,11 @@ export function formatParkAnnouncement(project: string, record: ParkedRecord): s
  * The park reasons the user guide marks *not answerable* (design §10, §13.1): a redrive-only
  * hold recovered by a `redrive` after the human's fix, never by replying to a question.
  * `red-base`/`conflict`/`crash` write no per-issue parked record (`src/archive.ts`), so a
- * records-only reading of "what is parked?" misses them. `stopped` is the exception: it DOES
- * write a parked record, but that record is never announced and cannot be answered — a redrive
+ * records-only reading of "what is parked?" misses them. `stopped` and `outdated-agent` are the
+ * exception: they DO write a parked record, but it is never announced and cannot be answered — a redrive
  * (or `vetinari run <id>` for a standalone run) resumes it, never a reply.
  */
-export const REDRIVE_ONLY_REASONS: ReadonlySet<ParkReason> = new Set(["red-base", "conflict", "crash", "stopped"]);
+export const REDRIVE_ONLY_REASONS: ReadonlySet<ParkReason> = new Set(["red-base", "conflict", "crash", "stopped", "outdated-agent"]);
 
 /**
  * The redrive-only reason a campaign is parked on when it has no answerable per-issue record —
@@ -759,9 +762,9 @@ export function rebuildIndex(projects: GatewayProject[]): ReplyIndex {
   for (const p of projects) {
     if (!p.conn) continue;
     for (const record of p.parked) {
-      // A `stopped` record was never announced, so there is no reply to route back to it — skip
-      // it on rebuild too, mirroring `pendingAnnouncements`.
-      if (record.reason === "stopped") continue;
+      // A `stopped`/`outdated-agent` record was never announced, so there is no reply to route back
+      // to it — skip it on rebuild too, mirroring `pendingAnnouncements`.
+      if (UNASKED_PARK_REASONS.has(record.reason)) continue;
       if (record.tgMessageId == null) continue;
       recordSend(index, p.conn.token, record.tgMessageId, {
         project: p.project,

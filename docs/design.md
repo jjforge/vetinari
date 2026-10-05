@@ -76,13 +76,13 @@ The event vocabulary after consolidation (§13.2) is small and uses the user's w
 | `spawn` | `taskId` | campaign |
 | `turn` | `taskId`, `turn`, `summary`, `signal?`, `sessionId?`, `commits?` | run |
 | `green` | `taskId`, `branch`, `commits` | run |
-| `parked` | `taskId`, `reason`, `detail?` | run (question/stalled/stopped), integrator (conflict). A red base is the *wave's* reason and is written, not inferred: `campaign-parked` carries `reason: red-base` for that wave index; no per-member `parked` event is written |
+| `parked` | `taskId`, `reason`, `detail?` | run (question/stalled/stopped/outdated-agent), integrator (conflict). A red base is the *wave's* reason and is written, not inferred: `campaign-parked` carries `reason: red-base` for that wave index; no per-member `parked` event is written |
 | `failed` | `taskId`, `detail?` | whichever process observes it: the run loop on a throw, the campaign on a child's non-zero exit |
 | `merged` | `taskId` | integrator |
 | `base-gate` | `index?`, `green`, `detail?` | integrator |
 | `wave-done` | `index`, `merged?` | campaign — only when every member is `completed` |
 | `grace-wait` | `seconds`, `tasks` | campaign (§5 step 3) |
-| `campaign-parked` | `index?`, `reason?` (`red-base`, `question`, `stalled`, `conflict`, `stopped` — the wave's reason, written by the code that stopped; `stopped` is an operator stop, §5), `detail?` | campaign — a stop marker |
+| `campaign-parked` | `index?`, `reason?` (`red-base`, `question`, `stalled`, `conflict`, `stopped`, `outdated-agent` — the wave's reason, written by the code that stopped; `stopped` is an operator stop, §5; `outdated-agent` outranks every other member reason), `detail?` | campaign — a stop marker |
 | `campaign-failed` | `index?`, `detail?` | campaign — the other stop marker |
 | `campaign-done` | `waves`, `name?` | campaign |
 | `prune` | `target`, `removed`, `dropped` | the `prune` command; the campaign under `--auto-prune` |
@@ -115,7 +115,7 @@ Membership is an orthogonal axis — `member | grafted | pruned` — so a chip s
 
 ### 2.3 Park reasons — one enum
 
-`question | stalled | conflict | red-base | crash | stopped`. This is the reason on the parked record, the reason on the `parked` event, the reason the reducer exposes, and the reason the dashboard and the docs use. `detail` carries the specifics (which budget, idle vs no-commit, the conflict output, the gate tail, or the stop signal name). The reason selects the recovery affordance:
+`question | stalled | conflict | red-base | crash | stopped | outdated-agent`. This is the reason on the parked record, the reason on the `parked` event, the reason the reducer exposes, and the reason the dashboard and the docs use. `detail` carries the specifics (which budget, idle vs no-commit, the conflict output, the gate tail, or the stop signal name). The reason selects the recovery affordance:
 
 | Reason | Set by | Resumable by an answer | Needs a redrive |
 | --- | --- | --- | --- |
@@ -125,6 +125,7 @@ Membership is an orthogonal axis — `member | grafted | pruned` — so a chip s
 | `red-base` | campaign on a red merged base — the wave's reason, carried by `campaign-parked` | no | yes, after fix-forward or prune |
 | `crash` | reconciliation (dead process, no stop marker since the latest wave-start) | no | yes |
 | `stopped` | run loop on SIGINT/SIGTERM before a verdict (its work is kept) | no | yes — a redrive, or `vetinari run <id>` for a standalone run |
+| `outdated-agent` | run loop when the agent call throws the provider's "CLI too old for this model" error (`detail` is that line; only `claude` has a pattern) | no | yes — after `vetinari build`; a redrive, or `vetinari run <id>` for a standalone run |
 
 ### 2.4 Roll-ups
 
@@ -178,12 +179,12 @@ For each wave:
 
 1. Log `wave-start`; notify.
 2. **Drain.** Spawn a child `run` per issue as the host lease allows (§8). A park or failure frees its slot at once and never aborts a sibling. The wave is drained when every member has an outcome.
-3. **Re-admit.** An answer is *delivered*, not run: `answer` writes the text into the parked record and marks it answered. While a campaign process is live, it is the campaign that re-admits the member — re-queued with the answer as its prompt, spawning when a slot frees, its earlier outcome discarded — so no second process ever runs the issue beside the campaign. With no live campaign, `answer` runs the redrive (§7), which does the same. A parked member may be re-admitted more than once; a second park is a park, not a loop. At the end of the drain, a member parked as `question` or `stalled` holds the wave open for up to `parkGraceSeconds` (`grace-wait` is logged); an answer in that window re-admits it into *this* wave, expiry falls through.
+3. **Re-admit.** An answer is *delivered*, not run: `answer` writes the text into the parked record and marks it answered. While a campaign process is live, it is the campaign that re-admits the member — re-queued with the answer as its prompt, spawning when a slot frees, its earlier outcome discarded — so no second process ever runs the issue beside the campaign. With no live campaign, `answer` runs the redrive (§7), which does the same. A parked member may be re-admitted more than once; a second park is a park, not a loop. At the end of the drain, a member parked as `question` or `stalled` holds the wave open for up to `parkGraceSeconds` (`grace-wait` is logged; an `outdated-agent` member never does — it has nothing to answer); an answer in that window re-admits it into *this* wave, expiry falls through.
 4. **Integrate** the greens (§6).
 5. **Resolve.** The wave is done only when every member is `completed`, in this order:
    - any member `failed` → log `campaign-failed`, notify, exit non-zero (failure outranks a red base or a park, §2.4);
    - the merged base red → log `campaign-parked` (the wave's reason `red-base`), notify, exit non-zero;
-   - any member `parked` (question, stalled, conflict) → log `campaign-parked`, notify, exit non-zero. A conflict that strands dependents in later waves is named in the notice; `--auto-prune` prunes the stranded closure instead of stopping — it decides what happens to the *dependents*, never whether the conflicted member itself holds the wave;
+   - any member `parked` (question, stalled, conflict, stopped, outdated-agent) → log `campaign-parked`, notify, exit non-zero. An `outdated-agent` member outranks every other member reason: the wave's reason is `outdated-agent` and the notice names `vetinari build`, then `vetinari redrive`. A conflict that strands dependents in later waves is named in the notice; `--auto-prune` prunes the stranded closure instead of stopping — it decides what happens to the *dependents*, never whether the conflicted member itself holds the wave;
    - otherwise log `wave-done` and continue.
 6. On the last wave: log `campaign-done`, notify, archive the run, exit zero. Once the campaign is running, every exit code is set by its outcome: zero only for `campaign-done`. A campaign refused before it runs (no ids, the interactive under-specified stop, a missing resolver) has no outcome and exits `4`.
 
@@ -219,6 +220,7 @@ Reconciliation, per member of the first wave that is not fully `completed`:
 | `parked(red-base)` after a fix-forward | re-gate the base — even when nothing new merges — then continue; when the re-gate is green, every member of the wave merged onto the base (including those merged before the park) gets the merged hook (`onIssueMerged`) once |
 | `parked(crash)` | treat as unstarted if no commits, else resume the session |
 | `parked(stopped)` | re-run — a stopped record never holds the wave; the child consumes it, resuming the session when it can |
+| `parked(outdated-agent)` | re-run, exactly as `parked(stopped)` — without a rebuild it parks `outdated-agent` again |
 | `failed` | refused — prune it or fix it first; redrive names it. `redrive --override` re-runs it instead (the only meaning `--override` has on redrive) |
 | `pruned` membership | skipped |
 | `unstarted` / `grafted` | run |

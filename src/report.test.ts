@@ -124,6 +124,15 @@ test("a member-stopped stop names every held member and points at redrive, never
   );
 });
 
+test("an outdated-agent stop names the held members and points at `vetinari build`, then redrive — never at answering (#444)", () => {
+  const out = formatStop({ kind: "outdated-agent", index: 0, total: 2, parked: ["102", "103"], merged: ["101"] });
+  assert.equal(
+    out,
+    "🅿 campaign parked at wave 1/2 — #102, #103: the image's agent CLI is too old for the model (outdated-agent); merged #101 kept, 1 wave not started\n" +
+      "recover: `vetinari build`, then `vetinari redrive`",
+  );
+});
+
 test("a red-base stop points at fix-forward then redrive", () => {
   const out = formatStop({
     kind: "red-base",

@@ -1,10 +1,10 @@
 import { execFileSync } from "node:child_process";
 import { Refusal } from "./refusal.ts";
-import { nonResumableAnswerWarning, type ResolvedConfig } from "./config.ts";
+import { AGENT_PROVIDERS, nonResumableAnswerWarning, type AgentProviderName, type ResolvedConfig } from "./config.ts";
 import type { Logger } from "./log.ts";
 import { runGates } from "./gate.ts";
 import { agentFor, agentSelectionFor, makeSandbox, type Sandbox } from "./sandbox.ts";
-import { clearParked, enqueueOutbound, hasParked, park, readParked } from "./state.ts";
+import { UNASKED_PARK_REASONS, clearParked, enqueueOutbound, hasParked, park, readParked } from "./state.ts";
 import { notice } from "./notice.ts";
 import { HARVEST_PROMPT, parseFindings, reportFindings } from "./findings.ts";
 import { activityLoggingSink, appendActivity, initActivityLog } from "./activity.ts";
@@ -84,8 +84,27 @@ function printVerdict(reason: string, nextStep: string) {
  * written — `park()` no longer prints, so the banner is not doubled.
  */
 function printParked(taskId: string, reason: string, question: string) {
-  const nextStep = reason === "stopped" ? `Continue it with: vetinari run ${taskId}` : `Answer with: vetinari answer ${taskId} "…"`;
+  const nextStep =
+    reason === "stopped"
+      ? `Continue it with: vetinari run ${taskId}`
+      : reason === "outdated-agent"
+        ? `Rebuild the image with: vetinari build\nThen continue it with: vetinari run ${taskId}`
+        : `Answer with: vetinari answer ${taskId} "…"`;
   printVerdict(`PARKED (${reason}) — ${firstLine(question)}`, nextStep);
+}
+
+/**
+ * The line of a thrown agent error that matches the provider's outdated-agent pattern (#444), or
+ * undefined. Searched line by line, never anchored at the start: sandcastle's `AgentError` opens
+ * with `claude-code exited with code 1:` and carries the API error on a later line.
+ */
+function outdatedAgentLine(provider: AgentProviderName, message: string): string | undefined {
+  const pattern = AGENT_PROVIDERS[provider].outdatedAgentPattern;
+  if (!pattern) return undefined;
+  return message
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => pattern.test(l));
 }
 
 export interface ResumeEntry {
@@ -305,6 +324,9 @@ export async function runLoop(
   // unwinds the in-flight turn as a `StopRequested`; the sole outer handler then parks `stopped`.
   let sbx: Sandbox | undefined;
   let lastSessionId: string | undefined;
+  // The selected provider, hoisted out of the `try` so the outer catch can match a thrown agent
+  // error against its outdated-agent pattern (#444). Undefined if the selection itself threw.
+  let selectedProvider: AgentProviderName | undefined;
   let stopSignal: "SIGINT" | "SIGTERM" | undefined;
   let resolveStop!: (signal: "SIGINT" | "SIGTERM") => void;
   const stopPromise = new Promise<"SIGINT" | "SIGTERM">((r) => (resolveStop = r));
@@ -358,10 +380,27 @@ export async function runLoop(
     return "parked";
   };
 
+  // Park a run whose agent CLI is too old for the model (#444): `detail` the matched error line, the
+  // conventional branch, the last session if any. Redrive-only like `stopped` — nothing to answer.
+  const parkOutdatedAgent = async (detail: string): Promise<Outcome> => {
+    const question = "The image's agent CLI is too old for the model — rebuild the image (vetinari build), then redrive.";
+    await park(cfg, {
+      taskId,
+      reason: "outdated-agent",
+      detail,
+      sessionId: lastSessionId,
+      branch: sbx?.branch ?? `${cfg.branchPrefix}${taskId}`,
+      question,
+    });
+    printParked(taskId, "outdated-agent", question);
+    return "parked";
+  };
+
   try {
     // Whether the loop resumes a session between turns (claude/pi/codex) or re-enters each
     // turn as a fresh run (copilot/cursor/opencode carry no durable session) — ADR 0016 / #212.
     const { resumable, provider } = agentSelectionFor(cfg);
+    selectedProvider = provider;
 
     // An answered parked record re-admits this member with the human's answer (design §5 step 3,
     // §7): consume it here, as the run starts — resume the session with the answer (resumable) or
@@ -379,11 +418,12 @@ export async function runLoop(
           await cfg.postComment(taskId, parkedAnswerComment(rec.question, rec.answer));
         }
         clearParked(cfg, taskId);
-      } else if (rec.reason === "stopped") {
+      } else if (UNASKED_PARK_REASONS.has(rec.reason)) {
         // A `stopped` record continues a signalled run (this issue): `vetinari run <id>` resumes
         // the recorded session when the provider is resumable, the record kept a session id, and
         // the kept branch already carries work (commitsAhead > 0) — otherwise it runs fresh on the
-        // kept branch. Consume the record either way so the next run starts clean.
+        // kept branch. Consume the record either way so the next run starts clean. An
+        // `outdated-agent` record (#444) is redrive-only in the same way and is consumed alike.
         if (resumable && rec.sessionId && (deps.commitsAhead(cfg.baseBranch, rec.branch, cfg.log) ?? 0) > 0)
           entry = { resumeSessionId: rec.sessionId, answerPrompt: crashResumePrompt() };
         clearParked(cfg, taskId);
@@ -622,6 +662,10 @@ export async function runLoop(
     // exiting with a bare stack trace; cli-dispatch maps `failed` to exit 1, and under a campaign
     // the child's non-zero exit is what the parent folds to `campaign-failed`.
     const detail = String(err?.message ?? err);
+    // The agent CLI too old for the model (#444) is an environment fault, not the issue's: park it
+    // `outdated-agent` (rebuild, then redrive) instead of failing the run.
+    const outdated = selectedProvider && outdatedAgentLine(selectedProvider, detail);
+    if (outdated) return await parkOutdatedAgent(outdated);
     cfg.log.log("failed", { taskId, detail });
     // The human FAILED banner is this run's terminal view (design §11, #355): the same `detail` the
     // event carries, then the re-run move. Mirrors GREEN's screen rules — nothing under --json, and

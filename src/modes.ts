@@ -1,4 +1,5 @@
-import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess, type ExecFileSyncOptionsWithStringEncoding, type SpawnOptions } from "node:child_process";
+import { statSync } from "node:fs";
 import { resolve } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import type { CampaignDoneEvent, CampaignStartEvent, WaveDoneEvent, WaveStartEvent } from "./event-log.ts";
@@ -7,7 +8,17 @@ import { runGates } from "./gate.ts";
 import { readSlowGateLogs, slowGatesAtSettle } from "./slow-gates.ts";
 import { agentSelectionFor, makeSandbox } from "./sandbox.ts";
 import { branchHasCommits, collectWaveChangelog, currentBranch, integrateGreens } from "./merge.ts";
-import { clearParked, enqueueOutbound, hasParked, isAnswered, listParked, park, readParked, type ParkReason } from "./state.ts";
+import {
+  UNASKED_PARK_REASONS,
+  clearParked,
+  enqueueOutbound,
+  hasParked,
+  isAnswered,
+  listParked,
+  park,
+  readParked,
+  type ParkReason,
+} from "./state.ts";
 import { strandedByConflict, resumeIndex, type StrandedImpact } from "./prune.ts";
 import { normalize } from "./issue-id.ts";
 import { notice, type Notice } from "./notice.ts";
@@ -273,6 +284,48 @@ export async function build(cfg: ResolvedConfig, opts: { baseline: boolean }, de
   if (code !== 0) return false;
   if (!opts.baseline) return true;
   return deps.baseline(cfg);
+}
+
+/**
+ * What the stale-image warning compares (#444): the image's `Created`, and the Dockerfile's mtime
+ * and last commit time. Each read is best-effort — undefined when it could not be made (no such
+ * image, docker absent, an untracked Dockerfile).
+ */
+export interface ImageFreshness {
+  imageCreated?: Date;
+  dockerfileModified?: Date;
+  dockerfileCommitted?: Date;
+}
+
+/** The real reads behind `ImageFreshness`: `docker image inspect`, a stat, and `git log -1`. */
+export function readImageFreshness(image: string, dockerfile: string): ImageFreshness {
+  const read = (f: () => string | Date): Date | undefined => {
+    try {
+      const v = f();
+      return v instanceof Date ? v : v.trim() ? new Date(v.trim()) : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const quiet: ExecFileSyncOptionsWithStringEncoding = { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] };
+  return {
+    imageCreated: read(() => execFileSync("docker", ["image", "inspect", "--format", "{{.Created}}", image], quiet)),
+    dockerfileModified: read(() => statSync(dockerfile).mtime),
+    dockerfileCommitted: read(() => execFileSync("git", ["log", "-1", "--format=%cI", "--", dockerfile], quiet)),
+  };
+}
+
+const validDate = (d: Date | undefined): d is Date => d !== undefined && !Number.isNaN(d.getTime());
+
+/**
+ * The one-line warning when the image is older than its Dockerfile — the newer of its mtime and its
+ * last commit (#444): an edit that was never built. Undefined when the image is newer, or when a
+ * time is missing (a missing image is the existing failure path's to report). Warning only.
+ */
+export function staleImageWarning(image: string, dockerfile: string, f: ImageFreshness): string | undefined {
+  const changed = [f.dockerfileModified, f.dockerfileCommitted].filter(validDate).sort((a, b) => b.getTime() - a.getTime())[0];
+  if (!validDate(f.imageCreated) || !changed || f.imageCreated >= changed) return undefined;
+  return `⚠ image ${image} (created ${f.imageCreated.toISOString()}) is older than ${dockerfile} (changed ${changed.toISOString()}) — rebuild it with \`vetinari build\``;
 }
 
 /**
@@ -651,17 +704,45 @@ export function memberStoppedNotice(project: string, waveNumber: number, parked:
 }
 
 /**
+ * The operator-facing notice a member park enqueues when the wave's reason is `outdated-agent` (#444):
+ * the image's agent CLI is too old for the model, so no member can run until it is rebuilt. Redrive-only
+ * — the per-issue records are never announced, so this is the announcement. Pure.
+ */
+export function memberOutdatedAgentNotice(
+  project: string,
+  waveNumber: number,
+  parked: string[],
+  merged: string[],
+  baseBranch: string,
+): Notice {
+  return notice({
+    emoji: "🅿️",
+    project,
+    state: "PARKED",
+    context: `wave ${waveNumber}`,
+    signal: `${parked.map((p) => `#${p}`).join(", ")}: the image's agent CLI is too old for the model — greens (${merged.join(", ") || "none"}) kept on ${baseBranch}, campaign paused.`,
+    recover: "`vetinari build`, then `vetinari redrive`",
+    category: "failure",
+    event: "campaign-parked",
+  });
+}
+
+/**
  * The wave-level reason a `campaign-parked` carries when a member holds the wave (design §2.1
  * rule 2 — written, never inferred): a held member's own `question`/`stalled` reason wins over a
  * conflict (an answerable hold is the more actionable one to surface), else `conflict` for a
  * conflict-only hold. Reads the reason off the on-disk parked records; a member with no record
  * (a stub, or a race) defaults to `question`, the answerable hold. Pure over the record set.
+ * An `outdated-agent` member outranks them all (#444): no member can run until the image is
+ * rebuilt, so answering a question first would only park again.
  */
 export function waveParkReason(
   parkedTasks: string[],
   conflictParked: string[],
   records: { taskId: string; reason: ParkReason }[],
 ): ParkReason {
+  if (parkedTasks.some((t) => records.find((r) => normalize(r.taskId) === normalize(t))?.reason === "outdated-agent"))
+    return "outdated-agent";
   for (const t of parkedTasks) {
     const rec = records.find((r) => normalize(r.taskId) === normalize(t));
     if (rec?.reason === "stalled") return "stalled";
@@ -1081,7 +1162,7 @@ export async function campaign(
         };
         const stoppedIds = new Set(
           listParked(cfg)
-            .filter((r) => r.reason === "stopped")
+            .filter((r) => UNASKED_PARK_REASONS.has(r.reason))
             .map((r) => normalize(r.taskId)),
         );
         const { toRun, pre, resume } = reconcileResumeWave(
@@ -1091,6 +1172,7 @@ export async function campaign(
           // record re-runs (the child consumes the answer), and a recordless park (a crash) re-runs
           // too — design §5 step 3, §7. A `stopped` record (an operator stop, #403) never holds the
           // wave: the member re-runs, and the child consumes the record, resuming when it can (#431).
+          // An `outdated-agent` record (#444) re-runs alike: a redrive after `vetinari build` retries it.
           (id) => hasParked(cfg, id) && !isAnswered(cfg, id) && !stoppedIds.has(normalize(id)),
           !!opts.override,
           reduced.pendingGreen,
@@ -1111,7 +1193,13 @@ export async function campaign(
       // wave, and expiry falls through to the normal park-and-stop below. `conflict`/`red-base`
       // parks are integration-time states, decided after this point, so they never wait here.
       const graceSeconds = cfg.parkGraceSeconds ?? 0;
-      const parkedNow = tasks.filter((t) => outcomes[t] === "parked");
+      // An `outdated-agent` member (#444) has nothing to answer, so it is never waited on.
+      const outdatedAgentIds = new Set(
+        listParked(cfg)
+          .filter((r) => r.reason === "outdated-agent")
+          .map((r) => normalize(r.taskId)),
+      );
+      const parkedNow = tasks.filter((t) => outcomes[t] === "parked" && !outdatedAgentIds.has(normalize(t)));
       // A pending stop skips the wait (#403), and one requested during it ends it (#461): the
       // campaign is going to park anyway.
       if (parkedNow.length && graceSeconds > 0 && !stop) {
@@ -1229,7 +1317,8 @@ export async function campaign(
       // stranded-dependents check + `--auto-prune` decide the DEPENDENTS' fate on top of this —
       // never whether the campaign stops.
       if (parkedTasks.length || conflictParked.length) {
-        const reason = waveParkReason(parkedTasks, conflictParked, listParked(cfg));
+        const records = listParked(cfg);
+        const reason = waveParkReason(parkedTasks, conflictParked, records);
 
         // A merge conflict that strands dependents in later, unstarted waves is a blast-radius call.
         // `--auto-prune` prunes the stranded closure (ADR 0005) so a later redrive skips the doomed
@@ -1267,6 +1356,12 @@ export async function campaign(
           if (reason === "stopped") {
             enqueueOutbound(cfg, memberStoppedNotice(cfg.project, index + 1, parkedTasks, merged, cfg.baseBranch));
             reporter.line(formatStop({ kind: "member-stopped", index, total, parked: parkedTasks, merged }));
+          } else if (reason === "outdated-agent") {
+            const outdated = parkedTasks.filter(
+              (t) => records.find((r) => normalize(r.taskId) === normalize(t))?.reason === "outdated-agent",
+            );
+            enqueueOutbound(cfg, memberOutdatedAgentNotice(cfg.project, index + 1, outdated, merged, cfg.baseBranch));
+            reporter.line(formatStop({ kind: "outdated-agent", index, total, parked: outdated, merged }));
           } else {
             enqueueOutbound(cfg, memberParkedNotice(cfg.project, index + 1, parkedTasks, merged, cfg.baseBranch));
             reporter.line(formatStop({ kind: "issue-parked", index, total, parked: parkedTasks, merged }));

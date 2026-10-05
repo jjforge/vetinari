@@ -117,13 +117,22 @@ export interface AgentConfig {
  */
 export const AGENT_PROVIDERS: Record<
   AgentProviderName,
-  { defaultModel: string; efforts: readonly string[]; credentialKeys: readonly string[] }
+  {
+    defaultModel: string;
+    efforts: readonly string[];
+    credentialKeys: readonly string[];
+    /** The agent CLI's own "too old for this model" error. A run whose agent call throws a message
+     * matching it parks `outdated-agent` (rebuild the image) rather than logging `failed`. Matched
+     * against each line of the message, so it is never anchored to the first. */
+    outdatedAgentPattern?: RegExp;
+  }
 > = {
   // claude: today's behavior, unchanged — opus by default, Claude's low..max effort scale.
   claude: {
     defaultModel: "claude-opus-5-5",
     efforts: ["low", "medium", "high", "xhigh", "max"],
     credentialKeys: ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"],
+    outdatedAgentPattern: /does not support this model; version \S+ or newer is required/,
   },
   // pi drives Anthropic models; its effort maps to the CLI's --thinking (off..xhigh).
   pi: {

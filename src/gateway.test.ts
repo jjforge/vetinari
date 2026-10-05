@@ -17,6 +17,7 @@ import {
   loadGatewayProjects,
   newPendingConfirms,
   newReplyIndex,
+  campaignParkMove,
   parkRecoveryMove,
   parseGatewayCommand,
   pendingAnnouncements,
@@ -201,6 +202,31 @@ test("rebuildIndex adds no index entry for a `stopped` record that carries a tgM
   const index = rebuildIndex(projects);
 
   assert.equal(resolveReply(index, "botA", 100), null, "a stopped record is not re-indexed, so a reply to it routes nowhere");
+});
+
+test("an `outdated-agent` record is neither announced nor re-indexed — the campaign notice is its announcement (#444)", () => {
+  const pend = pendingAnnouncements(
+    [
+      project({
+        project: "alpha",
+        parked: [parked({ taskId: "A1" }), parked({ taskId: "A2", reason: "outdated-agent", detail: "API Error: 400" })],
+      }),
+    ],
+    newReplyIndex(),
+  );
+  assert.deepEqual(
+    pend.map((a) => a.record.taskId),
+    ["A1"],
+  );
+
+  const index = rebuildIndex([
+    project({
+      project: "alpha",
+      conn: { token: "botA", chat: "-1" },
+      parked: [parked({ taskId: "A2", reason: "outdated-agent", parkedAt: "t1", tgMessageId: 100 })],
+    }),
+  ]);
+  assert.equal(resolveReply(index, "botA", 100), null);
 });
 
 test("pendingAnnouncements skips a project with no destination to announce to", () => {
@@ -569,6 +595,14 @@ test("parkRecoveryMove: `stopped` is redrive-only and names the standalone `run`
   assert.match(parkRecoveryMove("stopped", "12"), /vetinari run 12/);
   assert.doesNotMatch(parkRecoveryMove("stopped", "12"), /reply/i);
   assert.ok(REDRIVE_ONLY_REASONS.has("stopped"), "a stopped record cannot be answered, so it is redrive-only");
+});
+
+test("parkRecoveryMove: `outdated-agent` is redrive-only and names `vetinari build`, then redrive (#444)", () => {
+  const move = parkRecoveryMove("outdated-agent", "12");
+  assert.match(move, /vetinari build[\s\S]*redrive/);
+  assert.doesNotMatch(move, /reply/i);
+  assert.ok(REDRIVE_ONLY_REASONS.has("outdated-agent"));
+  assert.match(campaignParkMove("outdated-agent"), /vetinari build[\s\S]*redrive/);
 });
 
 test("formatParkAnnouncement uses the notice skeleton: header, question, exact recovery move", () => {

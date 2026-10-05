@@ -20,8 +20,21 @@ Within a milestone each bold section label appears at most once.
 
 ### Collected changes — October 5, 2026
 
+**Improvements:**
+- [ops] The issue conventions now say a ticket that adds, removes or renames a command or flag, or changes its `--help` text, lists the CLI files on its `Touches:` line: `src/help.ts`, `docs/reference.md` when the `MODES` table changes, and `src/cli-dispatch.ts` (post-config command) or `src/cli.mts` (host-level command, or a new dependency handed to `dispatch`). `/fileset` infers those files for such a change, and `/check-brief` reports a marker missing them under Other findings, so co-wave tickets that both edit the help file no longer collide at merge unannounced (#468).
+
 **Bug fixes:**
 - [ops] The per-wave changelog collect no longer throws on a fragment that was staged but never committed; that case broke with the staged-file fix, after the wave had merged (#473, #459).
+- [user] `vetinari changelog collect` no longer writes a bare bold label for a fragment section that has no bullets under it (#452).
+- [user] `vetinari install --dir` with no value, or with another flag as its value (`--dir --dry-run`, `--dir --force`), now refuses (exit 4) with `install --dir needs a directory, e.g. --dir ~/bin` — it no longer installs into `./--dry-run/vetinari` or silently falls back to `~/.local/bin` (#467).
+- [api] `runGates` takes an optional `stopped` check, and `runLoop` passes its own: a gate abandoned by a stop runs no further gate command against the closed sandbox, and records nothing (no gate log, `gate-result` event or activity entry) after the `stopped` park (#474).
+- [user] The log-view header (live tail, archived runs, landing event-log feed) no longer wraps its title to two lines at widths just above 640px; the controls drop to a right-aligned second row instead (#475).
+- [user] A `Touches:`/`Files:`/`Creates:` marker line now takes every backticked token as a file cite, so an extensionless or dotfile cite such as `Makefile`, `.gitignore` or `Dockerfile` resolves against the tree (or, when absent, makes the ticket not confident) instead of being silently dropped while the ticket still resolved confident. A body marker line that cites only a non-file word now shadows a comment's marker and halts the planner rather than deferring to the comment. The whole-body fallback still ignores backticked prose words (#477).
+
+**Documentation:**
+- [user] The default TDD prompt no longer sends campaign agents to the README's Modes table, which no longer exists; it points them at the project's command reference instead (in vetinari, `docs/reference.md`, generated from `MODES` in `src/help.ts`) (#437).
+- [ops] The config template and the user guide now say to order gates cheapest first (generate/format, lint, then tests) and how to keep a test gate fast (#446).
+- [internal] The design doc's risky-control rule (§11 and appendix A) now records that for Stop only the Stop now button wears the risky-action coral; the Stop button and Stop's shared confirm dialog stay neutral, matching the dashboard (#471).
 
 ### Agents told how findings reach the host — October 4, 2026
 

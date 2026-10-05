@@ -271,14 +271,23 @@ function longestSuffixMatches(segments: string[], candidates: string[]): string[
  *   - no file carries the basename at all -> null (absent — forbids confidence).
  */
 function resolveCite(cite: string, index: Map<string, string[]>): string | null {
+  const matches = citeMatches(cite, index);
+  if (matches === null) return null;
+  // One match resolves; more than one is ambiguous and degrades to the bare basename.
+  return matches.length === 1 ? matches[0] : posix.basename(matches[0]);
+}
+
+/**
+ * The tree paths one cited path may name: those carrying its basename that match the
+ * longest trailing run of its segments (one when the cite pins a path, several when it
+ * is ambiguous), or null when no file carries the basename at all.
+ */
+function citeMatches(cite: string, index: Map<string, string[]>): string[] | null {
   const segments = cite.split("/").filter(Boolean);
-  const base = segments[segments.length - 1];
-  const candidates = index.get(base);
+  const candidates = index.get(segments[segments.length - 1]);
   if (!candidates || candidates.length === 0) return null;
-  // Longest suffix first: the most-specific match wins — one match resolves, more than
-  // one is ambiguous and degrades to the bare basename.
-  const matches = longestSuffixMatches(segments, candidates);
-  return matches.length === 1 ? matches[0] : base;
+  // Longest suffix first: the most-specific match wins.
+  return longestSuffixMatches(segments, candidates);
 }
 
 /**
@@ -320,6 +329,25 @@ function resolveCreatesCite(cite: string, dirIndex: Map<string, string[]>): stri
 }
 
 /**
+ * The package directories a `Creates:` cite may land in, read from the **raw** cite: a
+ * bare cite (no `/`) names no directory -> null; `./x.go` -> `.`; otherwise its directory
+ * (a leading `./` dropped) resolved by longest suffix match against the tree's
+ * directories -> every match at the longest suffix reached, or the cited directory as
+ * written when none matches (a new package).
+ */
+function createsCiteDirs(cite: string, dirIndex: Map<string, string[]>): string[] | null {
+  if (!cite.includes("/")) return null;
+  const dirSegments = cite
+    .replace(/^(?:\.\/)+/, "")
+    .split("/")
+    .filter(Boolean)
+    .slice(0, -1);
+  if (dirSegments.length === 0) return ["."];
+  const matches = longestSuffixMatches(dirSegments, dirIndex.get(dirSegments[dirSegments.length - 1]) ?? []);
+  return matches.length > 0 ? matches : [dirSegments.join("/")];
+}
+
+/**
  * The shipped generic `fileSet` resolver, resolving each cite against the tree at
  * `root` (the cwd by default — the tree the campaign will actually run on,
  * snapshotted once on first use and reused for every later ticket, so one plan
@@ -355,31 +383,64 @@ export const defaultFileSet = (root: string = process.cwd()): ((ticket: string) 
   let dirIndex: Map<string, string[]> | undefined;
   return (ticket: string): FileSet => {
     const tree = (index ??= treePathIndex(root));
-    const touches = markerPaths(ticket, TOUCHES_RE);
-    const creates = markerPaths(ticket, CREATES_RE);
-
-    // No marker line of either kind — fall back to the all-or-nothing whole-body scan.
-    if (touches === null && creates === null) {
-      const cited = citedPaths(ticket);
-      const resolved = cited.map((c) => resolveCite(c, tree));
-      const files = [...new Set(resolved.filter((k): k is string => k !== null))];
-      return {
-        files,
-        confident: cited.length > 0 && resolved.every((k) => k !== null),
-      };
-    }
+    const { touches, creates } = ticketCites(ticket);
 
     // `Touches:` cites are resolved against the tree (strict — a cite matching no tree
     // path forbids confidence); `Creates:` cites name files not yet in the tree, so
     // their directory is resolved against the tree's directories instead — counted for
     // disjointness but never validated.
-    const touchesCites = touches ?? [];
-    const resolved = touchesCites.map((c) => resolveCite(c, tree));
+    const resolved = touches.map((c) => resolveCite(c, tree));
     const validTouches = resolved.filter((k): k is string => k !== null);
-    const dirs = (dirIndex ??= treeDirIndex(tree));
-    const created = (creates ?? []).map((c) => resolveCreatesCite(c, dirs));
+    const created = creates.length ? creates.map((c) => resolveCreatesCite(c, (dirIndex ??= treeDirIndex(tree)))) : [];
     const files = [...new Set([...validTouches, ...created])];
-    const confident = files.length > 0 && validTouches.length === touchesCites.length;
+    const confident = files.length > 0 && validTouches.length === touches.length;
+    return { files, confident };
+  };
+};
+
+/**
+ * A ticket's cites, split by how they resolve: `touches` name files the tree must hold,
+ * `creates` new files. With a marker line of either kind only the marker lines' cites
+ * count; with none, every cite in the whole body is a `touches` cite (the all-or-nothing
+ * fallback, so an incidental token in an unmarked body still forbids confidence).
+ */
+function ticketCites(ticket: string): { touches: string[]; creates: string[] } {
+  const touches = markerPaths(ticket, TOUCHES_RE);
+  const creates = markerPaths(ticket, CREATES_RE);
+  if (touches === null && creates === null) return { touches: citedPaths(ticket), creates: [] };
+  return { touches: touches ?? [], creates: creates ?? [] };
+}
+
+/**
+ * A `fileSet` resolver for package-scoped languages (Go and similar), where every file
+ * in one directory shares a single package namespace. The planner keeps a wave's
+ * members file-disjoint, but there two tickets touching *different* files in the *same*
+ * package can each add the same package-level identifier: each goes green alone, and
+ * merged they do not compile. So each fileKey here is a **package** — a directory — and
+ * two tickets in one directory collide and land in separate waves:
+ *   - a `Touches:` cite -> the directory of the path it resolves to, or of every path it
+ *     may name when ambiguous (still matching at the longest suffix it reaches);
+ *   - a `Creates:` cite with a directory -> that directory, resolved against the tree's
+ *     directories by the same longest-suffix match (every match when several tie), or
+ *     the cited directory when the tree lacks it (a new package); `./x.go` -> `.`;
+ *   - a bare `Creates:` cite (`x.go`) -> no key, and the ticket is not confident: its
+ *     package is unknowable, so the planner halts it as under-specified.
+ * Otherwise `confident` is what {@link defaultFileSet} returns. Same lazy, once-per-plan
+ * tree snapshot at `root` (the cwd by default).
+ */
+export const packageScopedFileSet = (root: string = process.cwd()): FileSetOf => {
+  let index: Map<string, string[]> | undefined;
+  let dirIndex: Map<string, string[]> | undefined;
+  return (ticket: string): FileSet => {
+    const tree = (index ??= treePathIndex(root));
+    const { touches, creates } = ticketCites(ticket);
+    const matched = touches.map((c) => citeMatches(c, tree));
+    const valid = matched.filter((m): m is string[] => m !== null);
+    const created = creates.map((c) => createsCiteDirs(c, (dirIndex ??= treeDirIndex(tree))));
+    const placed = created.filter((d): d is string[] => d !== null);
+    const files = [...new Set([...valid.flat().map((p) => posix.dirname(p)), ...placed.flat()])];
+    // As defaultFileSet, plus: a bare `Creates:` cite (no package) forbids confidence.
+    const confident = (valid.length > 0 || creates.length > 0) && valid.length === touches.length && placed.length === creates.length;
     return { files, confident };
   };
 };

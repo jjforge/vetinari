@@ -101,11 +101,14 @@ const keptTail = (merged: string[], index: number, total: number): string => {
  * command (`redrive`, `answer <id>`, `prune <id>`) the user-guide promises. `stopped` is an operator
  * stop (`vetinari stop`, Ctrl-C), resumed by a plain `redrive`; `member-stopped` is a wave held by a
  * member whose run was signalled outside an operator stop — redrive-only, never answerable.
+ * `outdated-agent` is a wave held by members whose agent CLI is too old for the model (#444):
+ * rebuild the image, then redrive.
  */
 export type Stop =
   | { kind: "failed"; index: number; total: number; failed: string[]; merged: string[] }
   | { kind: "issue-parked"; index: number; total: number; parked: string[]; merged: string[] }
   | { kind: "member-stopped"; index: number; total: number; parked: string[]; merged: string[] }
+  | { kind: "outdated-agent"; index: number; total: number; parked: string[]; merged: string[] }
   | { kind: "red-base"; index: number; total: number; merged: string[] }
   | { kind: "conflict"; index: number; total: number; conflicted: string[]; merged: string[] }
   | { kind: "stranded-conflict"; index: number; total: number; stranded: string[]; merged: string[] }
@@ -135,6 +138,13 @@ export function formatStop(stop: Stop): string {
       return (
         `🅿 campaign parked at ${pos} — ${stop.parked.map((p) => `#${p}`).join(", ")} stopped mid-run (stopped); ${tail}\n` +
         `recover: \`vetinari redrive\` (or \`vetinari prune ${stop.parked[0]}\`)`
+      );
+    }
+    case "outdated-agent": {
+      const tail = keptTail(stop.merged, stop.index, stop.total);
+      return (
+        `🅿 campaign parked at ${pos} — ${stop.parked.map((p) => `#${p}`).join(", ")}: the image's agent CLI is too old for the model (outdated-agent); ${tail}\n` +
+        "recover: `vetinari build`, then `vetinari redrive`"
       );
     }
     case "red-base": {

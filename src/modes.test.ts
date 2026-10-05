@@ -167,6 +167,23 @@ test("waveParkReason surfaces a `stopped` member, but an answerable question/sta
   );
 });
 
+test("waveParkReason: an `outdated-agent` member outranks every other member reason — question, stalled, stopped (#444)", () => {
+  for (const other of ["question", "stalled", "stopped"] as const) {
+    assert.equal(
+      waveParkReason(
+        ["701", "702"],
+        ["703"],
+        [
+          { taskId: "701", reason: other },
+          { taskId: "702", reason: "outdated-agent" },
+        ],
+      ),
+      "outdated-agent",
+      other,
+    );
+  }
+});
+
 test("markMergedIssues calls the configured onIssueMerged seam with exactly the merged ids", async () => {
   const seen: string[] = [];
   await markMergedIssues({ onIssueMerged: (id) => void seen.push(id), log: memoryLogger() }, ["101", "102", "103"]);
@@ -2612,4 +2629,118 @@ test("redrive after a stop re-runs the stopped member and lands the banked green
   assert.equal(ok, "done");
   assert.deepEqual(spawned, ["101"], "the stopped member re-runs; the green one does not");
   assert.deepEqual(integrated, [["101", "102"]]);
+});
+
+const writeOutdatedAgentRecord = (cfg: ResolvedConfig, taskId: string) => {
+  mkdirSync(cfg.parkedDir, { recursive: true });
+  writeFileSync(
+    join(cfg.parkedDir, `${taskId}.json`),
+    JSON.stringify({
+      taskId,
+      reason: "outdated-agent",
+      detail: "API Error: 400 Claude Code 2.1.239 does not support this model; version 2.1.280 or newer is required.",
+      branch: `agent/${taskId}`,
+      question: "rebuild",
+      parkedAt: "2026-10-04T00:00:00Z",
+    }),
+  );
+};
+
+test("a wave held by an `outdated-agent` member parks `outdated-agent` — even beside a question — and points at `vetinari build`, then redrive (#444)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-outdated-agent-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const childRun: CampaignDeps["spawnRun"] = async (id) => {
+    if (id === "102") writeOutdatedAgentRecord(cfg, "102");
+    if (id === "103") seedParkedRecord(cfg, "103");
+    return id === "101" ? 0 : 2;
+  };
+
+  let outcome: string | undefined;
+  const lines = await captureLines(async () => {
+    outcome = await campaign(cfg, [["101", "102", "103"], ["201"]], host, undefined, {}, gitFreeDeps(cfg, childRun));
+  });
+
+  assert.equal(outcome, "parked");
+  const parked = readEventLog(cfg).filter((e): e is CampaignParkedEvent => e.event === "campaign-parked");
+  assert.deepEqual(
+    parked.map((p) => [p.index, p.reason]),
+    [[0, "outdated-agent"]],
+  );
+  const stopLine = lines.find((l) => l.includes("campaign parked at wave 1/2"));
+  assert.ok(stopLine, `no stop line printed: ${lines.join("\n")}`);
+  assert.match(stopLine, /#102/);
+  assert.match(stopLine, /`vetinari build`, then `vetinari redrive`/);
+  assert.ok(!stopLine.includes("vetinari answer"), stopLine);
+
+  const notice = listOutbox(cfg).find((n) => n.event === "campaign-parked");
+  assert.ok(notice, "a campaign-parked notice was enqueued");
+  assert.match(notice.text, /#102/);
+  assert.match(notice.text, /too old for the model/);
+  assert.match(notice.text, /Recover:.*`vetinari build`.*`vetinari redrive`/);
+});
+
+test("grace window: a wave whose only parked member is `outdated-agent` skips the wait (#444)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-outdated-agent-grace-"));
+  const cfg = harnessCfg(dir);
+  cfg.parkGraceSeconds = 30;
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  let graceCalls = 0;
+  const deps: CampaignDeps = {
+    ...gitFreeDeps(cfg, async (id) => {
+      if (id === "102") {
+        writeOutdatedAgentRecord(cfg, "102");
+        return 2;
+      }
+      return 0;
+    }),
+    grace: async () => {
+      graceCalls++;
+    },
+  };
+
+  const ok = await silenceConsole(() => campaign(cfg, [["101", "102"]], host, "harness", {}, deps));
+
+  assert.equal(ok, "parked");
+  assert.equal(graceCalls, 0, "nothing answerable to wait for");
+  assert.ok(!readEventLog(cfg).some((e) => e.event === "grace-wait"));
+});
+
+test("a redrive re-runs an `outdated-agent` member rather than holding the wave on its record (#444)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-outdated-agent-redrive-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  cfg.log.log("campaign-start", { waves: [["101", "102"]], slots: 4 });
+  cfg.log.log("wave-start", { index: 0, tasks: ["101", "102"] });
+  cfg.log.log("green", { taskId: "102", branch: "agent/102", commits: ["b"] });
+  cfg.log.log("parked", { taskId: "101", reason: "outdated-agent", detail: "API Error: 400" });
+  writeOutdatedAgentRecord(cfg, "101");
+  cfg.log.log("campaign-parked", { index: 0, reason: "outdated-agent", detail: "parked, awaiting a human: 101" });
+
+  const spawned: string[] = [];
+  const integrated: string[][] = [];
+  const ok = await silenceConsole(() => campaign(cfg, [], host, undefined, { resume: true }, recordingDeps(cfg, spawned, integrated)));
+  assert.equal(ok, "done");
+  assert.deepEqual(spawned, ["101"], "the outdated-agent member re-runs; the green one does not");
+  assert.deepEqual(integrated, [["101", "102"]]);
+});
+
+test("a wave with a failed member still ends campaign-failed beside an `outdated-agent` member (#444)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-outdated-agent-failed-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const childRun: CampaignDeps["spawnRun"] = async (id) => {
+    if (id === "102") {
+      writeOutdatedAgentRecord(cfg, "102");
+      return 2;
+    }
+    return 1;
+  };
+
+  const ok = await silenceConsole(() => campaign(cfg, [["101", "102"]], host, undefined, {}, gitFreeDeps(cfg, childRun)));
+
+  assert.equal(ok, "failed");
+  const events = readEventLog(cfg);
+  assert.ok(events.some((e) => e.event === "campaign-failed"));
+  assert.ok(!events.some((e) => e.event === "campaign-parked"));
 });

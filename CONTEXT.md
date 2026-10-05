@@ -243,8 +243,8 @@ _Avoid_: orchestrator.env.
 
 **`hostEnv`**:
 A committed, non-secret map in [[vetinari]] applied to the orchestrator process
-only (e.g. `GIT_CONFIG_GLOBAL`). A secret the host needs goes in [[host.env]],
-never here.
+only (e.g. a `GIT_TERMINAL_PROMPT` override). A secret the host needs goes in
+[[host.env]], never here.
 
 ### Host & concurrency
 

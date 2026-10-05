@@ -8,6 +8,7 @@ import {
   githubIssuesByLabel,
   githubMarkPendingVerify,
   githubTracker,
+  GITHUB_TRACKER_LABELS,
 } from "./github.ts";
 import { Refusal } from "./refusal.ts";
 import { issueStateFromTask } from "./dashboard-model.ts";
@@ -793,4 +794,22 @@ test("a field set after spreading githubTracker wins — onIssueMerged: undefine
   assert.equal(cfg.onIssueMerged, undefined);
   assert.equal(cfg.fetchTask, custom);
   assert.equal(typeof cfg.blockedBy, "function");
+});
+
+test("GITHUB_TRACKER_LABELS names exactly the labels the githubTracker preset adds, removes or files with", async () => {
+  const { run, calls } = recordingRun();
+  const tracker = githubTracker({ repo: "x/y" }, run);
+  await tracker.onIssueMerged("#1");
+  await tracker.reportFinding({ summary: "a bug" }, { taskId: "1", project: "p" });
+
+  const used = calls.flatMap((c) => c.filter((_, i) => ["--label", "--add-label", "--remove-label"].includes(c[i - 1])));
+  assert.deepEqual(GITHUB_TRACKER_LABELS.map((l) => l.name).sort(), [...new Set(used)].sort());
+  assert.deepEqual(
+    GITHUB_TRACKER_LABELS.find((l) => l.name === "pending-verify"),
+    {
+      name: "pending-verify",
+      color: "fbca04",
+      description: "Fix on main, not yet verified end-to-end; remove & close after the check",
+    },
+  );
 });

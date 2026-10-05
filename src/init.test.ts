@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { applyInit, computeInit, describeInit, isGithubComRemote, scanInit } from "./init.ts";
+import { applyInit, computeInit, describeInit, isGithubComRemote, offerGithubLabels, scanInit, type InitPlan } from "./init.ts";
 import { AGENT_PROVIDERS, DEFAULT_PROVIDER } from "./config.ts";
 
 const TEMPLATES = {
@@ -354,4 +354,160 @@ test("scanInit plans today's skeleton for a project with no origin, or a non-Git
     assert.match(config, /fetchTask: \(id\) => `TODO/);
     assert.doesNotMatch(config, /^\s*\.\.\.githubTracker\(\)/m);
   }
+});
+
+// ── the GitHub label step (offerGithubLabels) ──
+
+const githubPlan: InitPlan = { creates: [], dirs: [], refused: false, githubConfig: true };
+
+const CREATE_READY = `gh label create ready-for-agent --repo o/r --color FEF2C0 --description 'Fully specified, ready for an AFK agent'`;
+const CREATE_PENDING = `gh label create pending-verify --repo o/r --color fbca04 --description 'Fix on main, not yet verified end-to-end; remove & close after the check'`;
+const CREATE_TRIAGE = `gh label create needs-triage --repo o/r --color E99695 --description 'Maintainer needs to evaluate this issue'`;
+
+/** A label-step harness: a fake `gh` that records calls, a scripted `ask`, a captured log. */
+const labelStep = (opts: { isTTY?: boolean; dryRun?: boolean; answer?: string; gh?: (args: string[]) => Promise<string> } = {}) => {
+  const calls: string[][] = [];
+  const asked: string[] = [];
+  const lines: string[] = [];
+  const deps = {
+    isTTY: opts.isTTY ?? true,
+    dryRun: opts.dryRun ?? false,
+    ask: async (q: string) => {
+      asked.push(q);
+      return opts.answer ?? "";
+    },
+    run: async (args: string[]) => {
+      calls.push(args);
+      return opts.gh ? opts.gh(args) : "[]";
+    },
+    log: (m: string) => lines.push(m),
+  };
+  return { deps, calls, asked, out: () => lines.join("\n") };
+};
+
+test("offerGithubLabels off a terminal makes no gh call and prints the three create commands", async () => {
+  const h = labelStep({ isTTY: false });
+
+  await offerGithubLabels(githubPlan, "o/r", h.deps);
+
+  assert.equal(h.calls.length, 0);
+  assert.equal(h.asked.length, 0);
+  assert.match(h.out(), /create any your repo lacks/);
+  for (const cmd of [CREATE_READY, CREATE_PENDING, CREATE_TRIAGE]) assert.ok(h.out().includes(cmd), cmd);
+});
+
+test("offerGithubLabels does nothing for a non-GitHub origin or a refused plan — on a terminal or not", async () => {
+  for (const plan of [
+    { ...githubPlan, githubConfig: false },
+    { ...githubPlan, refused: true },
+  ])
+    for (const isTTY of [true, false]) {
+      const h = labelStep({ isTTY });
+
+      await offerGithubLabels(plan, "o/r", h.deps);
+
+      assert.equal(h.calls.length, 0);
+      assert.equal(h.asked.length, 0);
+      assert.equal(h.out(), "");
+    }
+});
+
+const labelList = (...names: string[]) => JSON.stringify(names.map((name) => ({ name })));
+
+test("offerGithubLabels on a terminal with all three labels present prints nothing and creates nothing", async () => {
+  const h = labelStep({ gh: async () => labelList("bug", "needs-triage", "pending-verify", "ready-for-agent") });
+
+  await offerGithubLabels(githubPlan, "o/r", h.deps);
+
+  // One read-only list, with a limit past gh's default of 30 so a present label is never misreported.
+  assert.deepEqual(h.calls, [["label", "list", "--repo", "o/r", "--json", "name", "--limit", "1000"]]);
+  assert.equal(h.asked.length, 0);
+  assert.equal(h.out(), "");
+});
+
+test("offerGithubLabels on a terminal names exactly the missing labels and, on yes, creates each with its colour and description", async () => {
+  const h = labelStep({ answer: "y", gh: async (args) => (args[1] === "list" ? labelList("bug", "ready-for-agent") : "") });
+
+  await offerGithubLabels(githubPlan, "o/r", h.deps);
+
+  assert.equal(h.asked.length, 1);
+  assert.match(h.asked[0], /Create them now\? \[y\/N\]/);
+  assert.match(h.out(), /pending-verify, needs-triage/);
+  assert.doesNotMatch(h.out(), /ready-for-agent/);
+  assert.deepEqual(h.calls.slice(1), [
+    [
+      "label",
+      "create",
+      "pending-verify",
+      "--repo",
+      "o/r",
+      "--color",
+      "fbca04",
+      "--description",
+      "Fix on main, not yet verified end-to-end; remove & close after the check",
+    ],
+    ["label", "create", "needs-triage", "--repo", "o/r", "--color", "E99695", "--description", "Maintainer needs to evaluate this issue"],
+  ]);
+});
+
+test("offerGithubLabels on a terminal, on no, prints a create command per missing label and creates nothing", async () => {
+  const h = labelStep({ answer: "", gh: async () => labelList("ready-for-agent") });
+
+  await offerGithubLabels(githubPlan, "o/r", h.deps);
+
+  assert.equal(h.calls.length, 1);
+  assert.ok(h.out().includes(CREATE_PENDING));
+  assert.ok(h.out().includes(CREATE_TRIAGE));
+  assert.ok(!h.out().includes(CREATE_READY));
+});
+
+test("offerGithubLabels prints a failed create's command and carries on with the rest", async () => {
+  const h = labelStep({
+    answer: "yes",
+    gh: async (args) => {
+      if (args[1] === "list") return labelList();
+      if (args[2] === "pending-verify") throw new Error("HTTP 403");
+      return "";
+    },
+  });
+
+  await offerGithubLabels(githubPlan, "o/r", h.deps);
+
+  assert.deepEqual(
+    h.calls.slice(1).map((c) => c[2]),
+    ["ready-for-agent", "pending-verify", "needs-triage"],
+  );
+  assert.ok(h.out().includes(CREATE_PENDING));
+  assert.ok(!h.out().includes(CREATE_READY));
+  assert.ok(!h.out().includes(CREATE_TRIAGE));
+});
+
+test("offerGithubLabels, when gh is missing or `gh label list` fails, prints a note and all three commands", async () => {
+  const enoent = Object.assign(new Error("spawn gh ENOENT"), { code: "ENOENT" });
+  for (const fail of [enoent, new Error("gh auth login required")]) {
+    const h = labelStep({
+      gh: async () => {
+        throw fail;
+      },
+    });
+
+    await offerGithubLabels(githubPlan, "o/r", h.deps);
+
+    assert.equal(h.calls.length, 1);
+    assert.equal(h.asked.length, 0);
+    assert.match(h.out(), /couldn't read/i);
+    assert.match(h.out(), /create any your repo lacks/);
+    for (const cmd of [CREATE_READY, CREATE_PENDING, CREATE_TRIAGE]) assert.ok(h.out().includes(cmd), cmd);
+  }
+});
+
+test("offerGithubLabels with --dry-run on a terminal makes no gh call and prints the three create commands", async () => {
+  const h = labelStep({ isTTY: true, dryRun: true });
+
+  await offerGithubLabels(githubPlan, "o/r", h.deps);
+
+  assert.equal(h.calls.length, 0);
+  assert.equal(h.asked.length, 0);
+  assert.match(h.out(), /create any your repo lacks/);
+  for (const cmd of [CREATE_READY, CREATE_PENDING, CREATE_TRIAGE]) assert.ok(h.out().includes(cmd), cmd);
 });

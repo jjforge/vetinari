@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSyn
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { planPathInstall, renderWrapper, resolvedWrapper, WRAPPER_MARKER } from "./path-install.ts";
+import { parsePathInstallArgs, planPathInstall, renderWrapper, resolvedWrapper, WRAPPER_MARKER } from "./path-install.ts";
 
 // The same fixed launch the resolveGatewayExecStart tests use (migrate.test.ts).
 const APP_LAUNCH = {
@@ -108,6 +108,32 @@ test("planPathInstall gives fish_add_path when the shell is fish", () => {
   assert.equal(planWithEnv({ PATH: "/usr/bin", SHELL: "/usr/bin/fish" }).profileLine, "fish_add_path /home/me/.local/bin");
 });
 
+test("parsePathInstallArgs reads --dir as a resolved directory, and --force and --dry-run", () => {
+  assert.deepEqual(parsePathInstallArgs(["--dir", "/x/bin/", "--force", "--dry-run"], "/home/z"), {
+    dir: "/x/bin",
+    force: true,
+    dryRun: true,
+  });
+});
+
+test("parsePathInstallArgs defaults the directory to <home>/.local/bin, with force and dry run off", () => {
+  assert.deepEqual(parsePathInstallArgs([], "/home/z"), { dir: "/home/z/.local/bin", force: false, dryRun: false });
+});
+
+test("parsePathInstallArgs refuses --dir with no value or another flag as its value, naming the flag with an example", () => {
+  for (const args of [
+    ["--dir", "--dry-run"],
+    ["--dir", "--force"],
+    ["--force", "--dir"],
+  ]) {
+    assert.deepEqual(
+      parsePathInstallArgs(args, "/home/z"),
+      { refusal: "install --dir needs a directory, e.g. --dir ~/bin" },
+      args.join(" "),
+    );
+  }
+});
+
 // End to end: spawn the real CLI through the local tsx bin (as refusal.test.ts does), in
 // a tmp cwd that is not a vetinari project — `install` is host-level and needs no config.
 const CLI = fileURLToPath(new URL("./cli.mts", import.meta.url));
@@ -146,6 +172,14 @@ test("`vetinari install --dry-run` prints the target and the wrapper and writes 
   assert.ok(r.stdout.startsWith(`vetinari install → ${target}\n\n#!/bin/sh\n${WRAPPER_MARKER}\nexec node `), r.stdout);
   assert.match(r.stdout, /"\$@"\n\n\(dry run — nothing was written\)/);
   assert.equal(existsSync(join(cwd, "bin")), false);
+});
+
+test("`vetinari install --dir --dry-run` refuses (exit 4, naming --dir) rather than installing into ./--dry-run", () => {
+  const cwd = tmp();
+  const r = runCli(["install", "--dir", "--dry-run"], cwd);
+  assert.equal(r.status, 4, r.stdout);
+  assert.equal(r.stderr.trim(), "install --dir needs a directory, e.g. --dir ~/bin");
+  assert.equal(existsSync(join(cwd, "--dry-run")), false);
 });
 
 test("`vetinari install` refuses a foreign file at the target (exit 4, naming it) unless --force", () => {

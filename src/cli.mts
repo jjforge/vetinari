@@ -48,7 +48,14 @@ import {
   writeGatewayUnit,
 } from "./migrate.ts";
 import { applyInit, computeInit, describeInit, LOCAL_DIR, scanInit } from "./init.ts";
-import { applyPathInstall, describePathInstall, planPathInstall, readExistingWrapper, resolvedWrapper } from "./path-install.ts";
+import {
+  applyPathInstall,
+  describePathInstall,
+  parsePathInstallArgs,
+  planPathInstall,
+  readExistingWrapper,
+  resolvedWrapper,
+} from "./path-install.ts";
 import { archiveRun, shouldArchiveIdle, shouldArchiveLeftover } from "./archive.ts";
 import { answerParked, hasParked, listParked } from "./state.ts";
 import { readEventLog } from "./event-log.ts";
@@ -268,14 +275,14 @@ if (mode === "migrate") {
 // loader + cli — gateway install's launch resolution, minus the pinned node. Host-level,
 // so it runs BEFORE the strict config load and works in any directory.
 if (mode === "install") {
-  const dryRun = rest.includes("--dry-run");
-  const dirIdx = rest.indexOf("--dir");
-  const dir = resolve(dirIdx >= 0 && rest[dirIdx + 1] ? rest[dirIdx + 1] : join(homedir(), ".local", "bin"));
+  const args = parsePathInstallArgs(rest, homedir());
+  if ("refusal" in args) throw new Refusal(args.refusal);
+  const { dir, force, dryRun } = args;
   const plan = planPathInstall({
     dir,
     content: resolvedWrapper(),
     existing: readExistingWrapper(dir),
-    force: rest.includes("--force"),
+    force,
     env: { PATH: process.env.PATH, SHELL: process.env.SHELL },
   });
   // A foreign file refuses even on a dry run, as migrate's conflicts do.

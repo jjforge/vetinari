@@ -9,9 +9,10 @@ disable-model-invocation: true
 `vetinari campaign` keeps co-wave tickets file-disjoint by reading a `Touches:` /
 `Files:` / `Creates:` **marker line** from each ticket. A ticket whose file-set can't
 be resolved makes the planner **halt**. Nothing else *produces* those markers, so
-`ready-for-agent` tickets routinely arrive without one and stall the planner. The
-convention is vetinari's `docs/issue-conventions.md`, "Declaring a ticket's file-set";
-this skill restates what it needs from it.
+`ready-for-agent` tickets routinely arrive without one and stall the planner. What
+the planner reads — where a marker is read from, its syntax, which cites resolve — is
+vetinari's [ticket contract](https://github.com/jjforge/vetinari/blob/main/docs/ticket-contract.md) (`docs/ticket-contract.md`); this skill applies it
+and does not restate it.
 
 This skill closes that gap: it finds marker-less tickets, works out which files each
 will touch — the same judgement a human makes reading a ticket against the tree — and
@@ -29,36 +30,19 @@ judgement of whether a ticket is usable is your own read of it, not a command's 
 
 ## What counts as a "valid marker"
 
-A ticket has a valid marker only when, reading its **title, body, and comments**, you
-find an anchored marker line whose cites actually resolve. Deciding that is your job —
-make the same read the planner makes and mark exactly the tickets it would otherwise
-halt on.
+A ticket has a valid marker when the planner would resolve it **confident**, by the
+rules in the [ticket contract](https://github.com/jjforge/vetinari/blob/main/docs/ticket-contract.md): an anchored marker line, read from the title and
+body or — when those carry none — from the comments, whose cites all check out. Make
+the same read the planner makes and mark exactly the tickets it would otherwise halt on.
 
-An **anchored marker line** is a line that, ignoring a leading list bullet (`-`/`*`/`+`)
-and surrounding `**bold**`, begins with `Touches:`, `Files:`, or `Creates:`
-(case-insensitive). That is **necessary but not sufficient** — the line's cites must
-actually **resolve**:
+An anchored line is **necessary but not sufficient**. A ticket whose marker line cites
+nothing that resolves — a `Touches:` cite the tree lacks, a backticked non-file word,
+an unbackticked bare name — is **selected**, not skipped. A ticket whose only resolvable
+marker lives in a comment is **already usable**, and this skill skips it: its write-back
+is for tickets that have no resolvable marker anywhere.
 
-- a real backticked cite (`` `report.go` ``) or a bare `dir/name.ext` path;
-- for `Touches:`/`Files:`, a file the working tree actually has;
-- for `Creates:`, a new path that is legitimately absent from the tree.
-
-A line that is anchored but whose cites don't parse or don't check out is **not** a
-valid marker, and the ticket must be **selected**, not skipped. The shapes that fail:
-
-- **Backslash-escaped backticks** — `` \`report.go\` `` instead of
-  `` `report.go` ``: the anchored line is present, but nothing parses out of it as
-  a cite, so it does not resolve.
-- **A bare non-path token** — `Touches: report` (no extension, no directory): not a
-  backticked cite and not a `dir/name.ext` path, so it does not resolve.
-- **A tree-absent `Touches:` cite** — a `Touches:` cite naming a file the tree lacks is
-  read as a stale or typo'd note and forbids confidence.
-
-Markers may live in a ticket's **comments** as well as its title+body — a resolvable
-marker in the body or title wins, and a comment is the fallback. So a ticket whose only
-*resolvable* marker lives in a comment is **already usable** and this skill skips it.
-This skill's write-back is the fallback for tickets that have no resolvable marker
-anywhere.
+When in doubt, ask the planner: `vetinari campaign --dry-run <ids>` prints each
+ticket's resolved file-set and `confident` verdict (the contract's self-check).
 
 ## Process
 
@@ -74,7 +58,7 @@ anywhere.
 
   Keep the ids with no resolvable marker — those are exactly what `campaign` would halt
   on, whether they carry no marker at all or an anchored marker whose cites don't
-  resolve (escaped backticks, a bare non-path token, a tree-absent `Touches:` cite).
+  resolve (a bare non-path token, a tree-absent `Touches:` cite).
   Drop the ones that already have a resolvable marker — the planner already accepts them
   (including a ticket whose only resolvable marker lives in a comment).
 - **Explicit ids** (`/fileset 173 176`) — operate only on those, in order. Still guard:
@@ -118,18 +102,13 @@ reference alone). Add `src/cli-dispatch.ts` for a post-config command (parsed by
 in the entry point, or when the change hands a new dependency to `dispatch`.
 
 A ticket that only edits existing files carries just a `Touches:` line; one that only
-adds a new module carries just a `Creates:` line; one that does both carries both. A
-`Touches:` cite resolves by matching the tail of its path against the tree, so a bare
-`main.go` and a full `cmd/app/main.go` both work, but a bare name the tree holds several
-times collides with every file of that name; cite enough of the path to make it unique.
-`Creates:` cites have no tree to resolve against and collide by basename.
+adds a new module carries just a `Creates:` line; one that does both carries both. How
+each cite resolves — and why a bare name the tree holds several times needs more of its
+path — is in the [ticket contract](https://github.com/jjforge/vetinari/blob/main/docs/ticket-contract.md).
 
-**Never cite the changelog fragment.** The `changelog.d/<issue>.md` a campaign agent
-writes is per-issue by construction, so it cannot collide and the planner gains nothing
-from hearing about it. Citing it does harm: the marker carries the literal placeholder,
-so every such ticket shares the basename `<issue>.md`, every pair collides, and the
-planner runs one ticket per wave. A ticket whose only new file is its fragment carries
-**no** `Creates:` line; it still writes the fragment when the work lands.
+**Never cite the changelog fragment** (the contract says why). A ticket whose only new
+file is its fragment carries **no** `Creates:` line; it still writes the fragment when
+the work lands.
 
 **When a ticket names no resolvable files** — the work is too vague to pin to a
 file-set, or names only things absent from the tree that aren't plausibly new files — do
@@ -170,17 +149,16 @@ Summarise what happened per ticket: **marked** (with the marker written), **skip
 operator now has a paste-ready starting point to fill in by hand). The unmarked ones are
 exactly what `campaign` would still halt on, surfaced early.
 
-To confirm the markers now resolve, run the planner over the selected ids with the halt
-pre-decided to a drop rather than an interactive stop:
+To confirm the markers now resolve, dry-run the planner over the selected ids:
 
 ```
-vetinari campaign --dry-run --on-underspecified=drop <ids>
+vetinari campaign --dry-run <ids>
 ```
 
-It plans without running anything and drops (rather than halts on) any id still
-underspecified, so the printed plan shows exactly which markers the planner now accepts
-and which it would still skip — the machine confirmation that a freshly written marker
-resolves.
+It runs nothing and, after the plan, prints each ticket's resolved file-set or a
+`NOT confident` line — even when the plan refuses on a ticket that is still
+under-specified. That is the machine confirmation that a freshly written marker
+resolves. Add `--on-underspecified=drop` only to also see the plan for the rest.
 
 ## Out of scope
 

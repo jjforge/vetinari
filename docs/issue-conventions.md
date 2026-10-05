@@ -27,7 +27,7 @@ Type is set via the **API**, not a label: `gh api --method PATCH repos/jjforge/v
 
 ## Declaring a ticket's file-set
 
-The planner keeps co-wave tickets file-disjoint so a wave never collides at integration ([`campaigns.md`](campaigns.md)), and it reads which files a ticket touches from the body. Give every `ready-for-agent` ticket an explicit marker **line** — start a line with `Touches:` or `Files:` and list the files it touches, each in backticks:
+The planner keeps co-wave tickets file-disjoint so a wave never collides at integration ([`campaigns.md`](campaigns.md)), and it reads which files a ticket touches from a marker line in the title or body — or, when those carry none, from the marker lines in its comments (comment prose is never read). The full rules — where the marker is read, its syntax, and how to check a ticket with `campaign --dry-run` — are the consumer-facing [ticket contract](ticket-contract.md); this section is the vetinari-specific guidance on top of it. Give every `ready-for-agent` ticket an explicit marker **line** — start a line with `Touches:` or `Files:` and list the files it touches, each in backticks:
 
 ```
 Touches (existing files): `fileset.ts`, `src/cli.mts`

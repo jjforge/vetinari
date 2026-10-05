@@ -282,7 +282,7 @@ The user guide names three properties as the value. This table sorts every curre
 | `--auto-prune` | optional | a policy flag on one park reason |
 | `campaign --override` (hand-typed waves, invariants skipped) | optional, advanced | an escape hatch; out of the guide |
 | `prune <issue> <batch…>` (launch a fresh reduced campaign) | **retire** | a second meaning on one verb; `campaign --dry-run` + editing the selection covers it |
-| `fileset-check` | **retire** as a mode | `campaign --dry-run` already reports NOT-confident issues; keep the function for the sweep skill |
+| `fileset-check` | **retire** as a mode | `campaign --dry-run` now reports every selected issue's resolved file-set and `confident` verdict (not only NOT-confident ones), through the same function |
 | Festive wave names (`festiveWaveNames`, cookie, host cursor, `festiveOffset` on the event) | **optional**, rework and remove bugs | cosmetics that reached the durable log and the host lease |
 | `demo create/remove` | **retire** as CLI modes | a dev fixture; becomes `make demo-create` / `make demo-remove` calling the same `demo.ts` functions — out of `--help` and the Modes table |
 | `host log` | optional | diagnostics; reference only |

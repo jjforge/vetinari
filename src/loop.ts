@@ -505,7 +505,7 @@ export async function runLoop(
 
             // Raced against the stop like a turn (#462): a stop mid-gate parks `stopped` at once rather
             // than waiting out the gate, and a gate that would have gone green never logs a verdict.
-            const { green, report } = await stoppable(runGates(cfg, sbx, { taskId }));
+            const { green, report } = await stoppable(runGates(cfg, sbx, { taskId, stopped }));
             if (green) {
               cfg.log.log("green", { taskId, branch: sbx.branch, commits: (r.commits ?? []).map((c: any) => c.sha) });
               // The human GREEN banner is the terminal view (design §11); under --json the screen is

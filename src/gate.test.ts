@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { GateSpec, ResolvedConfig } from "./config.ts";
@@ -123,6 +123,43 @@ test("the wave-merge gate (no taskId) writes no per-task activity — not even a
   const sbx = gateSandbox({ "tsc --noEmit": 0 });
   await runGates(cfg, sbx, { all: true });
   assert.equal(existsSync(activityLogPath(cfg.stateDir, "any")), false);
+});
+
+test("a stop while a check runs: runGates resolves, runs no further check and records nothing for either (#474)", async () => {
+  const cfg = gateCfg([{ cmd: "tsc --noEmit" }, { cmd: "run-tests" }]);
+  let stop = false;
+  const execCalls: string[] = [];
+  const sbx = {
+    ...gateSandbox({}),
+    async exec(cmd: string) {
+      execCalls.push(cmd);
+      stop = true; // the stop lands while this check is in flight
+      return { stdout: "out", stderr: "err", exitCode: 0 };
+    },
+  } as unknown as Sandbox;
+
+  const result = await runGates(cfg, sbx, { all: true, taskId: "474", stopped: () => stop });
+
+  assert.deepEqual(result, { green: false, report: "" });
+  assert.deepEqual(execCalls, ["tsc --noEmit"], "the second check never runs");
+  assert.deepEqual(
+    readActivity(cfg, "474").map((e) => [e.event, (e as { cmd?: string }).cmd]),
+    [
+      ["gate", undefined],
+      ["gate-check", "tsc --noEmit"],
+    ],
+    "no gate-result for the in-flight check, no gate-check for the next",
+  );
+  const logged = readFileSync(cfg.logFile, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((l) => JSON.parse(l).event);
+  assert.equal(logged.includes("gate-result"), false, "no gate-result in the event log");
+  assert.equal(
+    readdirSync(join(cfg.stateDir, "logs")).some((f) => f.startsWith("gate-")),
+    false,
+    "no gate log file is written",
+  );
 });
 
 // --- TAP failure selection (#389) ---

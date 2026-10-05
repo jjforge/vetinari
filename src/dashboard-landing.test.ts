@@ -507,6 +507,22 @@ test("a live, in-plan park counts on both surfaces (#379)", () => {
   assertParkedAgree("demo", dir, ["102"]);
 });
 
+test("open wave, merged member, surviving record → counts on neither surface (#465)", () => {
+  const dir = join(tmpdir(), `vetinari-landing-merged-parked-${Date.now()}`, "demo");
+  // 101 merged in a still-open wave, but its durable record survived (an integration
+  // conflict park later redriven and merged with no child run to clear it). Merged is
+  // terminal, so the straggler record counts nowhere.
+  seedState(dir, [
+    event("campaign-start", { ts: "2026-06-15T08:00:00.000Z", waves: [["101", "102"]], name: "work", slots: 2 }),
+    event("wave-start", { ts: "2026-06-15T08:01:00.000Z", index: 0, tasks: ["101", "102"] }),
+    event("spawn", { ts: "2026-06-15T08:01:30.000Z", taskId: "101" }),
+    event("spawn", { ts: "2026-06-15T08:01:40.000Z", taskId: "102" }),
+    event("merged", { ts: "2026-06-15T08:03:00.000Z", taskId: "101" }),
+  ]);
+  writeParkedRecord(dir, "101", "2026-06-15T08:02:00.000Z");
+  assertParkedAgree("demo", dir, []);
+});
+
 test("buildLanding folds a finished campaign still in the live log to idle, display-only, keeping its summary (#208)", () => {
   const base = join(tmpdir(), `vetinari-landing-done-live-${Date.now()}`);
   const dir = join(base, "demo");

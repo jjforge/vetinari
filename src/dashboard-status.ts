@@ -125,16 +125,25 @@ const issueNameCache = new Map<string, string | undefined>();
  * the landing (its card and cross-repo queue, off `status.parked`) both read it, so the two
  * surfaces never disagree. A record counts when its issue is in the current campaign's plan
  * (the reducer's pruned loop-facing `waves`, folded from the latest `campaign-start` only, so a
- * superseded campaign's records drop out) and not in a closed wave. An empty plan — the live
+ * superseded campaign's records drop out), not in a closed wave, and its issue has not merged —
+ * `completed` is terminal (design §2.2), so a record that outlived a since-merged issue is a
+ * stale straggler, not a park (#465). An empty plan — the live
  * log archived or emptied — keeps every surviving record, so a park that outlived its log
  * still counts (#232).
  */
-const parkedInCurrentPlan = (records: ParkedRecord[], plan: { waves: string[][]; closedWaves: Set<number> }): ParkedRecord[] => {
+const parkedInCurrentPlan = (
+  records: ParkedRecord[],
+  plan: { waves: string[][]; closedWaves: Set<number>; outcomes: Map<string, string> },
+): ParkedRecord[] => {
   const activeIssueNumbers = new Set(plan.waves.flat());
   const closedIssueNumbers = new Set([...plan.closedWaves].flatMap((index) => plan.waves[index] ?? []));
   return records.filter((parked) => {
     const issueNumber = normalize(parked.taskId);
-    return (!activeIssueNumbers.size || activeIssueNumbers.has(issueNumber)) && !closedIssueNumbers.has(issueNumber);
+    return (
+      (!activeIssueNumbers.size || activeIssueNumbers.has(issueNumber)) &&
+      !closedIssueNumbers.has(issueNumber) &&
+      plan.outcomes.get(issueNumber) !== "completed"
+    );
   });
 };
 
@@ -159,13 +168,9 @@ export function buildStatus(cfg: ResolvedConfig, opts: { dead?: boolean; alive?:
   const { waves, layout, name, festiveOffset, outcomes, details, titles, closedWaves } = reduced;
 
   const closedIssueNumbers = new Set([...closedWaves].flatMap((index) => waves[index] ?? []));
-  const parkedRecords = parkedInCurrentPlan(listParked(cfg), { waves, closedWaves });
+  const parkedRecords = parkedInCurrentPlan(listParked(cfg), { waves, closedWaves, outcomes });
   for (const parked of parkedRecords) {
     const taskId = normalize(parked.taskId);
-    // `completed` (merged) is terminal (design §2.2): a record that outlived a since-merged issue
-    // (durable records are only cleared on re-admit/redrive or `prune --purge`, §2.5) must not flip
-    // the merged card back to parked. Leave the outcome; the surviving record is a stale straggler.
-    if (outcomes.get(taskId) === "completed") continue;
     outcomes.set(taskId, "parked");
     reduced.parkReasons.set(taskId, parkReasonFromEvent(parked.reason));
     details.set(taskId, `Parked: ${parked.reason}`);

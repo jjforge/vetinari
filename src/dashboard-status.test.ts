@@ -628,6 +628,28 @@ test("buildStatus does not show parked interaction cards for closed wave issues"
   );
 });
 
+test("buildStatus keeps a merged member of an open wave completed and out of parked despite a surviving record (#465)", () => {
+  const dir = join(tmpdir(), `vetinari-status-merged-parked-${Date.now()}`);
+  mkdirSync(join(dir, "logs"), { recursive: true });
+  mkdirSync(join(dir, "parked"), { recursive: true });
+  writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["101", "102"]], slots: 2 }),
+    event("wave-start", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["101", "102"] }),
+    event("spawn", { ts: "2025-01-01T00:01:30.000Z", taskId: "101" }),
+    event("spawn", { ts: "2025-01-01T00:01:40.000Z", taskId: "102" }),
+    event("merged", { ts: "2025-01-01T00:03:00.000Z", taskId: "101" }),
+  ]);
+  writeFileSync(
+    join(dir, "parked", "101.json"),
+    JSON.stringify({ taskId: "101", parkedAt: "now", reason: "conflict", branch: "agent/101", question: "Conflict" }),
+  );
+
+  const status = buildStatus(cfgFor(dir));
+
+  assert.equal(status.waves[0].issues.find((i) => i.issueNumber === "101")?.status, "completed");
+  assert.deepEqual(status.parked, []);
+});
+
 test("buildStatus only shows parked cards for issues in the active campaign", () => {
   const dir = join(tmpdir(), `vetinari-status-filter-${Date.now()}`);
   mkdirSync(join(dir, "logs"), { recursive: true });

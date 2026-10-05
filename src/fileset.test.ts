@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { defaultFileSet, ticketProse } from "./fileset.ts";
-import { packageScopedFileSet } from "../examples/package-scoped-fileset.mts";
+import { defaultFileSet, packageScopedFileSet, ticketProse } from "./fileset.ts";
+import { planCampaign } from "./plan.ts";
 
 let counter = 0;
 /** A fresh, not-yet-created throwaway tree path. */
@@ -162,26 +162,110 @@ test("packageScopedFileSet maps two files in one directory to the same key, so s
   assert.deepEqual(api.files, ["internal/api"]); // different dir -> different key
 });
 
-test("packageScopedFileSet keys a Creates:-only ticket under '.' (a bare basename has no tree path)", async () => {
-  const root = treeWith("internal/web/checkins.templ");
+/** The waves `planCampaign` puts the given tickets (id -> ticket text) into, through `fileSet`. */
+const wavesOf = async (fileSet: ReturnType<typeof packageScopedFileSet>, tickets: Record<string, string>): Promise<string[][]> =>
+  (
+    await planCampaign(Object.keys(tickets), {
+      blockedBy: () => [],
+      fileSet: (id) => fileSet(tickets[id]),
+      onUnderspecified: () => {
+        throw new Error("must not prompt a confident set");
+      },
+    })
+  ).waves;
+
+test("packageScopedFileSet keys an ambiguous Touches: cite to the directory of every path it may name", async () => {
+  const root = treeWith("a/foo.md", "b/foo.md", "c/other.md");
   const fileSet = packageScopedFileSet(root);
 
-  // A bare Creates: cite stays a bare basename (it carries no directory to resolve
-  // against the tree), whose dirname is ".". Conservative: it collides with
-  // every other bare key and every root-level file, so it serializes more, never less.
-  const res = await fileSet("Creates (new files): `reports.templ`\n");
+  const res = await fileSet("Touches: `foo.md`\n");
+  assert.deepEqual([...res.files].sort(), ["a", "b"]);
+  assert.equal(res.confident, true);
+
+  // It collides with a ticket in either directory, but not with one elsewhere.
+  assert.deepEqual(await wavesOf(fileSet, { "1": "Touches: `foo.md`\n", "2": "Touches: `b/foo.md`\n" }), [["1"], ["2"]]);
+  assert.deepEqual(await wavesOf(fileSet, { "1": "Touches: `foo.md`\n", "2": "Touches: `c/other.md`\n" }), [["1", "2"]]);
+});
+
+test("packageScopedFileSet keys an ambiguous Touches: cite to the paths still matching at its longest suffix", async () => {
+  const root = treeWith("x/web/foo.go", "y/web/foo.go", "z/api/foo.go");
+
+  const res = await packageScopedFileSet(root)("Touches: `web/foo.go`\n");
+
+  assert.deepEqual([...res.files].sort(), ["x/web", "y/web"]);
+});
+
+test("packageScopedFileSet puts a Creates: and a Touches: in one package into separate waves", async () => {
+  const fileSet = packageScopedFileSet(treeWith("internal/web/checkins.templ"));
+
+  const waves = await wavesOf(fileSet, {
+    "1": "Touches: `internal/web/checkins.templ`\n",
+    "2": "Creates (new files): `internal/web/health.go`\n",
+  });
+
+  assert.deepEqual(waves, [["1"], ["2"]]);
+});
+
+test("packageScopedFileSet keys a Creates: cite to the tree directory its directory suffix-matches", async () => {
+  const fileSet = packageScopedFileSet(treeWith("internal/web/checkins.templ"));
+
+  assert.deepEqual((await fileSet("Creates: `web/health.go`\n")).files, ["internal/web"]);
+  // A leading ./ is dropped before matching.
+  assert.deepEqual((await fileSet("Creates: `./internal/web/health.go`\n")).files, ["internal/web"]);
+});
+
+test("packageScopedFileSet keys a Creates: cite whose directory matches several tree directories to every one", async () => {
+  const fileSet = packageScopedFileSet(treeWith("internal/web/server.go", "cmd/web/main.go", "pkg/api/api.go"));
+
+  const res = await fileSet("Creates: `web/health.go`\n");
+
+  assert.deepEqual([...res.files].sort(), ["cmd/web", "internal/web"]);
+  assert.equal(res.confident, true);
+});
+
+test("packageScopedFileSet keys a Creates: cite under a directory the tree lacks to the cited directory", async () => {
+  const fileSet = packageScopedFileSet(treeWith("internal/web/checkins.templ"));
+
+  const res = await fileSet("Creates: `pkg/health/health.go`\n");
+
+  assert.deepEqual(res.files, ["pkg/health"]);
+  assert.equal(res.confident, true);
+});
+
+test("packageScopedFileSet keys a ./-rooted Creates: cite to the root package '.'", async () => {
+  const fileSet = packageScopedFileSet(treeWith("internal/web/checkins.templ", "main.go"));
+
+  const res = await fileSet("Creates: `./x.go`\n");
 
   assert.deepEqual(res.files, ["."]);
   assert.equal(res.confident, true);
 });
 
-test("packageScopedFileSet passes confident through from the wrapped defaultFileSet unchanged", async () => {
+test("packageScopedFileSet is not confident about a bare Creates: cite, whose package is unknowable", async () => {
+  const fileSet = packageScopedFileSet(treeWith("internal/web/checkins.templ"));
+
+  const res = await fileSet("Touches: `internal/web/checkins.templ`\nCreates: `x.go`\n");
+
+  assert.deepEqual(res.files, ["internal/web"]);
+  assert.equal(res.confident, false);
+});
+
+test("packageScopedFileSet otherwise keeps defaultFileSet's confident verdict", async () => {
   const root = treeWith("internal/web/checkins.templ");
   const fileSet = packageScopedFileSet(root);
 
-  // A resolvable cite is confident; a cite absent from the tree forbids confidence —
-  // widening the key to the directory must not alter either verdict.
-  assert.equal((await fileSet("Touches: `internal/web/checkins.templ`\n")).confident, true);
+  // A resolvable cite is confident; a cite absent from the tree, or no cite at all,
+  // forbids confidence — widening the key to the directory alters neither verdict.
+  for (const ticket of [
+    "Touches: `internal/web/checkins.templ`\n",
+    "Touches: `internal/web/ghost.templ`\n",
+    "Touches: `internal/web/checkins.templ`\nCreates: `pkg/new/x.go`\n",
+    "Creates: `pkg/new/x.go`\n",
+    "Edit internal/web/checkins.templ\n",
+    "No files here.\n",
+  ]) {
+    assert.equal((await fileSet(ticket)).confident, defaultFileSet(root)(ticket).confident, ticket);
+  }
   assert.equal((await fileSet("Touches: `internal/web/ghost.templ`\n")).confident, false);
 });
 

@@ -123,28 +123,22 @@ Once per machine: put the CLI on PATH with `vetinari install` (bootstrap it as `
 
 The planner keeps a wave's members file-disjoint, and that is its only co-wave guard. In Go — and any language where a directory is one namespace — **file-disjoint is not compile-disjoint**: two tickets that touch *different* files in the *same* package still share one package namespace, so each can add the same package-level identifier. Each goes green alone; merged, they do not compile, and the merged-base gate goes red. Separate agents in separate sandboxes cannot see each other's new helpers.
 
-To make same-package tickets land in separate waves, widen each file-set to its directory. The [`packageScopedFileSet`](../examples/package-scoped-fileset.mts) recipe wraps the shipped `defaultFileSet`, maps each resolved fileKey to its directory, de-duplicates, and passes `confident` through unchanged — so two tickets in one directory collide on the same key and the planner serializes them. Wire it into `vetinari/config.mts`:
+To make same-package tickets land in separate waves, key each file-set by package. vetinari ships `packageScopedFileSet` beside `defaultFileSet`: it reads the same `Touches:`/`Creates:` marker lines against the same tree, but each key is a directory, so two tickets in one directory collide and the planner serializes them. Wire it into `vetinari/config.mts`:
 
 ```ts
-import { dirname } from "node:path";
-import { defaultFileSet, type FileSetOf } from "vetinari";
-
-export function packageScopedFileSet(root?: string): FileSetOf {
-  const base = defaultFileSet(root);
-  return (ticket: string) => {
-    const { files, confident } = base(ticket);
-    return { files: [...new Set(files.map((f) => dirname(f)))], confident };
-  };
-}
+import { packageScopedFileSet } from "vetinari";
 
 // ...then in defineConfig({ ... }):
 //   fileSet: packageScopedFileSet(),
 ```
 
-Two things to know:
+How each cite keys:
 
-- **The cost is wave count.** Widening the key means fewer, larger-grained waves — same-directory tickets now serialize that otherwise ran together. That is the price of never leaving the base red on a duplicate symbol.
-- **Bare and ambiguous cites key under `.`.** The resolver keeps a bare basename for a bare `Creates:` cite, a `Creates:` cite whose directory matches several tree directories, and a `Touches:` cite the tree holds under several paths; its `dirname` is `.`. These collide with every other bare key and every root-level file. That is conservative: it serializes more, never less. Any other `Creates:` cite keys under its resolved (or new) directory.
+- **A `Touches:` cite** keys to the directory of the file it resolves to. An ambiguous one — a name the tree holds under several paths the cite can't narrow to one — keys to the directory of every path it may name, so it collides with tickets in each.
+- **A `Creates:` cite with a directory** keys to that directory, matched against the tree's directories by suffix as a `Touches:` cite is: `web/health.go` keys to `internal/web` when that is the only `web` directory, and to every match when several tie (`internal/web` and `cmd/web`). A directory the tree lacks keys as written — a new directory is a new package.
+- **Cite a `Creates:` with its directory, or `./` for the root.** `./x.go` keys to the root package `.`. A bare `x.go` names no package, so the ticket resolves not confident and the planner halts it as under-specified.
+
+Otherwise `confident` is what `defaultFileSet` returns. **The cost is wave count**: keying by package means fewer, larger-grained waves — same-directory tickets now serialize that otherwise ran together. That is the price of never leaving the base red on a duplicate symbol.
 
 ## How work leaves the container
 

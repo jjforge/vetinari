@@ -30,8 +30,9 @@ root); it overrides anything here that conflicts. Absent one, follow the
 conventions the surrounding code already shows.
 
 Before adding a command, flag, or capability, check it does not already exist and
-is not already named: the README's **Modes** table is the command reference and
-`CONTEXT.md` is the domain glossary. Reuse an existing seam or term rather than
+is not already named: the project's command reference (in vetinari: `docs/reference.md`,
+generated from `MODES` in `src/help.ts`) lists what exists, and `CONTEXT.md` is the
+domain glossary. Reuse an existing seam or term rather than
 reinventing one under a new name — a new word that collides with a defined one is a
 translation error, not a naming choice.
 

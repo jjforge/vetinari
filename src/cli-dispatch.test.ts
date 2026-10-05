@@ -52,6 +52,7 @@ function makeDeps(overrides: Partial<DispatchDeps> = {}) {
     runCampaignPlan: spy(
       Promise.resolve({ waves: [], waveArgs: "", report: "", suggestedName: "" }),
     ) as unknown as DispatchDeps["runCampaignPlan"],
+    runFilesetCheck: spy(Promise.resolve([])) as unknown as DispatchDeps["runFilesetCheck"],
     runPrune: spy(
       Promise.resolve({
         mode: "prune",
@@ -894,6 +895,75 @@ test("dispatch campaign --dry-run is never refused by a live campaign — it onl
   await dispatch(campaignCmd({ dryRun: true }), deps);
   assert.equal((deps.runCampaignPlan as any).calls.length, 1, "the dry-run planned rather than refusing");
   assert.equal((deps.campaign as any).calls.length, 0, "a dry-run still runs no campaign");
+});
+
+// `campaign --dry-run` is the triager's self-check (docs/ticket-contract.md): after the plan
+// output it prints every selected ticket's resolved file-set and `confident` verdict, through
+// the same resolver path the planner uses (#476).
+const twoTicketVerdicts = [
+  { id: "101", confident: true, files: ["src/a.ts", "docs/b.md"] },
+  { id: "102", confident: false, files: [] },
+];
+
+test("dispatch campaign --dry-run logs each selected ticket's file-set verdict after the plan output (#476)", async () => {
+  const { deps, logged } = makeDeps({
+    expandSelection: spy(Promise.resolve(["101", "102"])) as any,
+    runCampaignPlan: spy(
+      Promise.resolve({ waves: [["101", "102"]], waveArgs: '"101 102"', report: "the plan", suggestedName: "gateway", alreadyMerged: [] }),
+    ) as any,
+    runFilesetCheck: spy(Promise.resolve(twoTicketVerdicts)) as any,
+  });
+  await dispatch(campaignCmd({ positional: ["101", "102"], dryRun: true }), deps);
+  assert.deepEqual((deps.runFilesetCheck as any).calls, [[deps.cfg, ["101", "102"]]], "checks exactly the ids handed to the planner");
+  assert.equal(logged[0], '"101 102"', "the wave args stay the first logged line");
+  const out = logged.join("\n");
+  const confident = out.indexOf("#101  confident — `src/a.ts`, `docs/b.md`");
+  const notConfident = out.indexOf("#102  NOT confident — campaign would halt (planning)");
+  assert.ok(confident > out.indexOf('suggested name: --name "gateway"'), "the confident line follows the plan output");
+  assert.ok(notConfident > confident, "one line per id, in selection order");
+});
+
+test("dispatch campaign --dry-run over a single id still logs that ticket's file-set line, though the plan skips the check (#476)", async () => {
+  const { deps, logged } = makeDeps({
+    expandSelection: spy(Promise.resolve(["101"])) as any,
+    runCampaignPlan: spy(Promise.resolve({ waves: [["101"]], waveArgs: '"101"', report: "the plan", alreadyMerged: [] })) as any,
+    runFilesetCheck: spy(Promise.resolve([twoTicketVerdicts[0]])) as any,
+  });
+  await dispatch(campaignCmd({ positional: ["101"], dryRun: true }), deps);
+  assert.deepEqual((deps.runFilesetCheck as any).calls, [[deps.cfg, ["101"]]]);
+  assert.ok(logged.join("\n").includes("#101  confident — `src/a.ts`, `docs/b.md`"));
+});
+
+test("dispatch campaign without --dry-run never resolves the file-set check, even when its plan refuses (#476)", async () => {
+  const ran = makeDeps({
+    expandSelection: spy(Promise.resolve(["101", "102"])) as any,
+    runCampaignPlan: spy(Promise.resolve({ waves: [["101", "102"]], waveArgs: '"101 102"', report: "the plan", alreadyMerged: [] })) as any,
+  });
+  await dispatch(campaignCmd({ positional: ["101", "102"] }), ran.deps);
+  assert.equal((ran.deps.campaign as any).calls.length, 1, "the campaign ran");
+  assert.equal((ran.deps.runFilesetCheck as any).calls.length, 0);
+
+  const refusal = new Refusal("campaign: #102 has no confident file-set.");
+  const refused = makeDeps({
+    expandSelection: spy(Promise.resolve(["101", "102"])) as any,
+    runCampaignPlan: (() => Promise.reject(refusal)) as any,
+  });
+  await assert.rejects(dispatch(campaignCmd({ positional: ["101", "102"] }), refused.deps), (err) => err === refusal);
+  assert.equal((refused.deps.runFilesetCheck as any).calls.length, 0);
+});
+
+test("dispatch campaign --dry-run whose plan refuses (no TTY, no flag) logs each file-set line, then rejects with that same Refusal (#476)", async () => {
+  const refusal = new Refusal("campaign: #102 has no confident file-set. Add the file data to the issue(s) and re-run.");
+  const { deps, logged } = makeDeps({
+    isTTY: false,
+    expandSelection: spy(Promise.resolve(["101", "102"])) as any,
+    runCampaignPlan: (() => Promise.reject(refusal)) as any,
+    runFilesetCheck: spy(Promise.resolve(twoTicketVerdicts)) as any,
+  });
+  await assert.rejects(dispatch(campaignCmd({ positional: ["101", "102"], dryRun: true }), deps), (err) => err === refusal);
+  const out = logged.join("\n");
+  assert.ok(out.includes("#101  confident — `src/a.ts`, `docs/b.md`"));
+  assert.ok(out.includes("#102  NOT confident — campaign would halt (planning)"));
 });
 
 test("dispatch campaign --resume refuses like redrive while a campaign is live — one line, no campaign, no exit code (#424)", async () => {

@@ -842,7 +842,7 @@ export async function runCampaignPlan(
   return { waves: plan.waves, waveArgs: waveArgs(plan), report, suggestedName, alreadyMerged };
 }
 
-/** One ticket's resolver verdict, as `fileset-check` reports it. */
+/** One ticket's resolver verdict, as `campaign --dry-run` reports it. */
 export interface FilesetCheckResult {
   /** the ticket id (normalized, no leading #). */
   id: string;
@@ -856,14 +856,14 @@ export interface FilesetCheckResult {
  * Resolve each ticket's file-set through the **same** path `campaign-plan` uses —
  * `cfg.fileSet ?? defaultFileSet()` over `ticketProse ∘ fetchTask` — and report the
  * resolver's verdict per id. Because it calls the identical resolver rather than a
- * restatement of it, `fileset-check` and the planner agree by construction: a ticket
+ * restatement of it, `campaign --dry-run` and the planner agree by construction: a ticket
  * this reports `confident: false` is exactly one the planner would halt on. Used by
  * the `/fileset` sweep to decide "already marked" (skip) only when the marker truly
  * resolves. Pure over the injected `fetchTask`/`fileSet`; the tree read lives in the
  * resolver.
  */
 export async function runFilesetCheck(cfg: CampaignPlanConfig, ids: string[]): Promise<FilesetCheckResult[]> {
-  if (!ids.length) throw new Refusal("fileset-check needs at least one ticket id: fileset-check 201 173");
+  if (!ids.length) throw new Refusal("campaign --dry-run needs at least one ticket id: campaign --dry-run 201 173");
   const resolveFileSet = cfg.fileSet ?? defaultFileSet();
   return Promise.all(
     uniqueOrder(ids).map(async (id) => {

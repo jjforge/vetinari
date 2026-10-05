@@ -98,6 +98,13 @@ test("loadConfig over vetinari's own committed config wires reportFinding as a f
   const cfg = await loadConfig(cfgPath);
 
   assert.equal(typeof cfg.reportFinding, "function");
+  // The labels live inside the reporter's closure, so the loaded config cannot expose
+  // them — pin them on the config's source text instead.
+  const source = readFileSync(cfgPath, "utf8").replace(/\s+/g, "");
+  assert.ok(
+    source.includes('reportFinding:githubFindingReporter(undefined,{labels:["needs-triage","P2"]})'),
+    "vetinari's config no longer files findings with the needs-triage and P2 labels",
+  );
 });
 
 test("containerShareWeight maps the three tiers to internal fair-share weights (~7:2:1)", () => {

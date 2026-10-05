@@ -7,6 +7,9 @@ import { SECTION_ORDER } from "./changelog.ts";
 // (`../prompts/tdd.md` from src/). Read the same artifact the loop injects into
 // each agent container so this pins the prompt agents actually receive.
 const prompt = readFileSync(new URL("../prompts/tdd.md", import.meta.url), "utf8");
+// The prompt hard-wraps its prose, so a pinned phrase may span a line break; match
+// those against this whitespace-collapsed copy.
+const promptFlat = prompt.replace(/\s+/g, " ");
 
 // Markers bracketing the inline section-label list in the prompt, so the drift
 // test reads the same delimited block agents do — and the fragment example's
@@ -59,6 +62,14 @@ test("the TDD prompt lists the four audience tags with a project-neutral meaning
   for (const tag of ["[user]", "[ops]", "[api]", "[internal]"]) {
     assert.ok(prompt.includes("`" + tag + "`"), `prompt is missing the ${tag} audience tag`);
   }
+  for (const pair of [
+    "`[user]` someone using the tool",
+    "`[ops]` someone running or configuring it",
+    "`[api]` a programmatic contract",
+    "`[internal]` nothing externally observable",
+  ]) {
+    assert.ok(promptFlat.includes(pair), `prompt does not pair the audience tag with its meaning: ${pair}`);
+  }
 });
 
 test("the TDD prompt no longer sends agents to docs/changelog-conventions.md for labels or tags (#415)", () => {
@@ -86,4 +97,13 @@ test("the TDD prompt tells the agent it has no GitHub login and how a finding re
     assert.ok(prompt.includes(tag), `prompt is missing the ${tag} tag the harvest parser reads`);
   }
   assert.match(prompt, /final message/i, "prompt does not say where a finding goes when no harvest turn comes");
+  assert.ok(
+    promptFlat.includes("When you notice a defect that is **unrelated to your task**, do not fix it"),
+    "prompt does not tell the agent to leave an unrelated defect unfixed",
+  );
+  assert.ok(
+    promptFlat.includes("**A follow-up or deferred part of your own task is not a finding.**"),
+    "prompt does not tell the agent its own follow-ups are not a finding",
+  );
+  assert.ok(promptFlat.includes('"Noticed, not fixed" heading'), "prompt does not name the Noticed, not fixed heading");
 });

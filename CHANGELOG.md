@@ -20,6 +20,10 @@ Within a milestone each bold section label appears at most once.
 
 ### Collected changes — October 5, 2026
 
+**New features:**
+- [ops] `githubTracker({ repo?, findingLabels? })` is a config preset that wires all six GitHub tracker seams (`fetchTask`, `blockedBy`, `listByLabel`, `postComment`, `onIssueMerged`, `reportFinding`) in one spread — `...githubTracker()` — so an improvement to the GitHub wiring reaches every project when vetinari upgrades. The repo is derived from `origin` unless given; findings are filed with `findingLabels` (default `needs-triage`); a field set after the spread wins (`onIssueMerged: undefined` turns that hook off). The individual `github*` factories stay exported for custom wiring (#449).
+- [ops] vetinari's own config and the jjforge example now spread the preset: vetinari gains `postComment`, and jjforge gains `listByLabel` and `onIssueMerged` (#449).
+
 **Improvements:**
 - [ops] The issue conventions now say a ticket that adds, removes or renames a command or flag, or changes its `--help` text, lists the CLI files on its `Touches:` line: `src/help.ts`, `docs/reference.md` when the `MODES` table changes, and `src/cli-dispatch.ts` (post-config command) or `src/cli.mts` (host-level command, or a new dependency handed to `dispatch`). `/fileset` infers those files for such a change, and `/check-brief` reports a marker missing them under Other findings, so co-wave tickets that both edit the help file no longer collide at merge unannounced (#468).
 
@@ -30,6 +34,9 @@ Within a milestone each bold section label appears at most once.
 - [api] `runGates` takes an optional `stopped` check, and `runLoop` passes its own: a gate abandoned by a stop runs no further gate command against the closed sandbox, and records nothing (no gate log, `gate-result` event or activity entry) after the `stopped` park (#474).
 - [user] The log-view header (live tail, archived runs, landing event-log feed) no longer wraps its title to two lines at widths just above 640px; the controls drop to a right-aligned second row instead (#475).
 - [user] A `Touches:`/`Files:`/`Creates:` marker line now takes every backticked token as a file cite, so an extensionless or dotfile cite such as `Makefile`, `.gitignore` or `Dockerfile` resolves against the tree (or, when absent, makes the ticket not confident) instead of being silently dropped while the ticket still resolved confident. A body marker line that cites only a non-file word now shadows a comment's marker and halts the planner rather than deferring to the comment. The whole-body fallback still ignores backticked prose words (#477).
+- [ops] Outbox records are now written atomically, and the outbox listing skips and logs an unreadable record as `outbox-record-unreadable` instead of throwing — one torn record no longer breaks the gateway tick for every project (#442).
+- [user] The dashboard issue sheet now shows the "pruning… #N will drop from the plan on the next refresh" note after a successful prune, instead of hiding it with the prune panel; the Prune button and confirm are put away so no second prune starts, and the note no longer carries over to the next issue opened (#448).
+- [user] A merged issue whose parked record survived in a still-open wave no longer reads parked on the project page, the landing card, the parked counter or the cross-repo parked queue (#465).
 
 **Documentation:**
 - [user] The default TDD prompt no longer sends campaign agents to the README's Modes table, which no longer exists; it points them at the project's command reference instead (in vetinari, `docs/reference.md`, generated from `MODES` in `src/help.ts`) (#437).

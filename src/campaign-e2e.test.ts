@@ -9,7 +9,7 @@ import { loggerForRun } from "./log.ts";
 import { readEventLog } from "./event-log.ts";
 import { answerParked, clearParked, listParked } from "./state.ts";
 import { BLOCKED, crashResumePrompt, DONE, defaultLoopDeps, runLoop, type LoopDeps } from "./loop.ts";
-import { campaign, type CampaignDeps, type RunSpawner } from "./modes.ts";
+import { campaign, type CampaignDeps, type RunSpawner, type StopSignal } from "./modes.ts";
 import { collectWaveChangelog, currentBranch, integrateGreens } from "./merge.ts";
 import { runGates } from "./gate.ts";
 import type { HostBudget } from "./host-slots.ts";
@@ -406,6 +406,63 @@ test("scenario 4: a redrive integrates a green-but-unmerged member — landed wi
       events.some((e) => e.event === "campaign-done"),
       "the campaign advanced to done",
     );
+  });
+});
+
+test("scenario 8: a --now stop that kills one member before its run started and another after it logged green parks the campaign `stopped`; a redrive lands the green and re-runs the other (#464)", async () => {
+  const dir = seedRepo();
+  const cfg = repoCfg(dir, fakeTracker());
+
+  await inRepo(dir, async () => {
+    // The stop signal kills each child by the default disposition: 102 still booting (its stop
+    // handler not yet installed), 101 in the tail after its runLoop logged green and returned.
+    const base = localCampaignDeps(cfg, dir, implScript);
+    let fire!: (signal: StopSignal) => void;
+    let signalled!: () => void;
+    const killed = new Promise<void>((r) => (signalled = r));
+    const stopped = await campaign(
+      cfg,
+      [["101", "102"]],
+      host(dir),
+      undefined,
+      {},
+      {
+        ...base,
+        onStop: (cb) => {
+          fire = cb;
+          return () => {};
+        },
+        signalRuns: () => signalled(),
+        spawnRun: async (id, resume) => {
+          if (id === "102") {
+            await killed;
+            return "SIGTERM";
+          }
+          assert.equal(await base.spawnRun(id, resume), 0);
+          fire("SIGTERM");
+          return "SIGTERM";
+        },
+      },
+    );
+    assert.equal(stopped, "parked", "the stopped campaign pauses rather than failing");
+    const events = readEventLog(cfg);
+    assert.ok(!events.some((e) => e.event === "campaign-failed"));
+    assert.deepEqual(
+      events.filter((e: any) => e.event === "campaign-parked").map((e: any) => e.reason),
+      ["stopped"],
+    );
+    assert.deepEqual(
+      listParked(cfg).map((r) => [r.taskId, r.reason]),
+      [["102", "stopped"]],
+    );
+
+    // The redrive lands 101's banked green without re-running it, and re-runs the stopped 102.
+    const spawns: string[] = [];
+    const doneOk = await campaign(cfg, [], host(dir), undefined, { resume: true }, localCampaignDeps(cfg, dir, implScript, spawns));
+    assert.equal(doneOk, "done");
+    assert.deepEqual(spawns, ["102"]);
+    assert.equal(gitOut(dir, ["show", "base:impl-101.txt"]), "impl for 101");
+    assert.equal(gitOut(dir, ["show", "base:impl-102.txt"]), "impl for 102");
   });
 });
 

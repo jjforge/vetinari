@@ -6,7 +6,7 @@ import { describeFragmentNearMisses } from "./changelog.ts";
 import { runGates } from "./gate.ts";
 import { agentSelectionFor, makeSandbox } from "./sandbox.ts";
 import { branchHasCommits, collectWaveChangelog, currentBranch, integrateGreens } from "./merge.ts";
-import { clearParked, enqueueOutbound, hasParked, isAnswered, listParked, type ParkReason } from "./state.ts";
+import { clearParked, enqueueOutbound, hasParked, isAnswered, listParked, park, readParked, type ParkReason } from "./state.ts";
 import { strandedByConflict, resumeIndex, type StrandedImpact } from "./prune.ts";
 import { normalize } from "./issue-id.ts";
 import { notice, type Notice } from "./notice.ts";
@@ -141,8 +141,8 @@ const onProcessStop = (cb: (signal: StopSignal) => void): (() => void) => {
 };
 
 /**
- * How `queue` runs one task: spawn a child `run` and resolve to its exit code
- * (`null` when the child was killed without one). Injected so the wave-loop can be
+ * How `queue` runs one task: spawn a child `run` and resolve to how it exited — its exit
+ * code, or the name of the signal that killed it (#464). Injected so the wave-loop can be
  * driven Docker-free in a test with a fake child that never touches a container —
  * the default spawns the real containerized `run` (#151). The exit-code contract is
  * `run`'s: `0` green, `2` parked, anything else an error.
@@ -150,13 +150,15 @@ const onProcessStop = (cb: (signal: StopSignal) => void): (() => void) => {
  * `resumeSession` is the crashed session a redrive re-enters this member on (design §7): when
  * set, the child `run` resumes that session on its existing branch instead of a fresh start.
  */
-export type RunSpawner = (taskId: string, resumeSession?: string) => Promise<number | null>;
+export type RunSpawner = (taskId: string, resumeSession?: string) => Promise<number | NodeJS.Signals>;
 
 /** The production spawner: a real child `run`, resolving on its exit. A crash redrive passes the
  * crashed session id through to the child as `VETINARI_RESUME_SESSION` so it resumes (design §7). */
 const selfSpawnRun: RunSpawner = (taskId, resumeSession) =>
   new Promise((resolve) => {
-    selfSpawn(["run", taskId], resumeSession ? { VETINARI_RESUME_SESSION: resumeSession } : undefined).on("exit", (code) => resolve(code));
+    selfSpawn(["run", taskId], resumeSession ? { VETINARI_RESUME_SESSION: resumeSession } : undefined).on("exit", (code, signal) =>
+      resolve(code ?? signal!),
+    );
   });
 
 /**
@@ -281,6 +283,40 @@ export function warnIfTelegramUnconfigured(cfg: Pick<ResolvedConfig, "project" |
 }
 
 /**
+ * The outcome of a child `run` a `--now` stop killed by signal (#464). A child installs its stop
+ * handler only once `runLoop` starts and drops it when `runLoop` returns, so the signal can land
+ * outside that span and kill it outright. The log is complete once the child has exited, so a
+ * verdict the run logged since this spawn (`green`, `parked`, `failed`) stands — a `failed` still
+ * outranks the stop. With none, the run never parked itself `stopped`, so the campaign parks it
+ * instead. A member still holding a parked record was killed before `runLoop` consumed it (an
+ * answered re-admit, a redrive of a `stopped` member): that record is left exactly as it is and
+ * only its `parked` event is logged. Otherwise the member is parked `stopped`, as `runLoop`'s
+ * `parkStopped` would with no sandbox — the conventional branch, the session this spawn was
+ * resuming, the signal as the `detail`.
+ */
+async function stoppedRunOutcome(cfg: ResolvedConfig, taskId: string, signal: NodeJS.Signals, resumeSession?: string): Promise<string> {
+  const events = readEventLog(cfg).filter((e) => "taskId" in e && e.taskId === taskId);
+  const sinceSpawn = events.slice(events.findLastIndex((e) => e.event === "spawn") + 1);
+  const verdict = sinceSpawn.findLast((e) => e.event === "green" || e.event === "parked" || e.event === "failed")?.event;
+  if (verdict === "green" || verdict === "parked") return verdict;
+  if (verdict === "failed") return `error(${signal})`;
+  if (hasParked(cfg, taskId)) {
+    const { reason, detail } = readParked(cfg, taskId, { requireSession: false });
+    cfg.log.log("parked", { taskId, reason, ...(detail ? { detail } : {}) });
+    return "parked";
+  }
+  await park(cfg, {
+    taskId,
+    reason: "stopped",
+    detail: signal,
+    sessionId: resumeSession,
+    branch: `${cfg.branchPrefix}${taskId}`,
+    question: "The run was stopped before it reached a verdict.",
+  });
+  return "parked";
+}
+
+/**
  * Fair-share pool: spawns runs up to this project's current fair share of the
  * host container ceiling (ADR 0011) — there is no per-run cap, so a lone project
  * fills the whole ceiling. A park frees its slot immediately. Returns the per-task
@@ -365,10 +401,17 @@ export async function queue(
           cfg.log.log("spawn", { taskId: next, running, left: pending.length });
           // A crash redrive passes the crashed session id so the child resumes on its existing
           // branch (design §7); every other spawn (fresh, answered re-admit) passes none.
-          spawnRun(next, resumeSessions[next]).then((code) => {
+          spawnRun(next, resumeSessions[next]).then(async (exit) => {
             running--;
             releaseSlot(host.configDir);
-            outcomes[next] = code === 0 ? "green" : code === 2 ? "parked" : `error(${code})`;
+            outcomes[next] =
+              typeof exit === "string" && halted()
+                ? await stoppedRunOutcome(cfg, next, exit, resumeSessions[next])
+                : exit === 0
+                  ? "green"
+                  : exit === 2
+                    ? "parked"
+                    : `error(${exit})`;
             // A member the agent could not make green (a non-zero, non-park exit) is a terminal
             // failure (design §2.1): record it so the reducer folds the wave to `failed` even
             // though the run itself logged no verdict.
@@ -1142,8 +1185,9 @@ export async function campaign(
         return "parked";
       }
 
-      // (2b) A `--now` stop (#403): the runs it signalled parked themselves `stopped`, keeping their
-      // work on their branches. Failure (1) still outranked it; otherwise the wave parks `stopped`.
+      // (2b) A `--now` stop (#403): the runs it signalled parked themselves `stopped` — or, killed
+      // before they could, were parked by `queue` (#464) — keeping their work on their branches.
+      // Failure (1) still outranked it; otherwise the wave parks `stopped`.
       if (stoppedNow) {
         const interrupted = tasks.filter((t) => outcomes[t] !== "green");
         cfg.log.log("campaign-parked", {

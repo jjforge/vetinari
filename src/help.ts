@@ -47,7 +47,7 @@ export const MODES: Mode[] = [
   {
     signature: "stop [--now]",
     blurb:
-      "stop this project's running campaign. By default it stops gracefully: the wave in flight finishes — its members run to their verdicts, then integration, the merged-base gate, the changelog fold and the labels run as normal — and the campaign parks `stopped` before the next wave and exits 2. --now stops it at once: every run in flight stops and parks itself `stopped`, keeping its branch and worktree, and the wave skips integration. Ctrl-C on the campaign is a graceful stop, a second Ctrl-C (or closing its terminal) is --now. A second `stop` while one is pending says so and sends nothing. `vetinari redrive` resumes it. Refuses when no campaign is running for the project",
+      "stop this project's running campaign. By default it stops gracefully: the wave in flight finishes — its members run to their verdicts, then integration, the merged-base gate, the changelog fold and the labels run as normal — and the campaign parks `stopped` before the next wave and exits 2. --now stops it at once: every run in flight stops and parks itself `stopped`, keeping its branch and worktree (a run killed before it can park itself is parked `stopped` by the campaign; a run that already reached a verdict keeps it), and the wave skips integration. Ctrl-C on the campaign is a graceful stop, a second Ctrl-C (or closing its terminal) is --now. A second `stop` while one is pending says so and sends nothing. `vetinari redrive` resumes it. Refuses when no campaign is running for the project",
   },
   {
     signature: "prune [<project>] <issue>",

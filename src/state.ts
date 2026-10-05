@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { writeFileAtomic } from "./atomic-write.ts";
 import type { MessageCategory, ResolvedConfig } from "./config.ts";
@@ -187,17 +187,27 @@ export function enqueueOutbound(
   const dir = outboxDirOf(cfg.stateDir);
   mkdirSync(dir, { recursive: true });
   const rec: OutboundRecord = { id: randomUUID(), enqueuedAt: new Date().toISOString(), ...msg };
-  writeFileSync(join(dir, `${rec.id}.json`), JSON.stringify(rec, null, 2));
+  writeFileAtomic(join(dir, `${rec.id}.json`), JSON.stringify(rec, null, 2));
   cfg.log.log("outbound-enqueued", { id: rec.id, category: rec.category, event: rec.event });
 }
 
-/** Every outbound record under an explicit outbox directory, oldest first — the gateway drains a project's live. */
-export function listOutboxIn(outboxDir: string): OutboundRecord[] {
+/**
+ * Every outbound record under an explicit outbox directory, oldest first — the gateway drains a project's live.
+ * A record that will not parse is skipped and logged `outbox-record-unreadable`, naming the file, as
+ * `listParkedIn` does: one torn record must not take down the gateway tick for every project.
+ */
+export function listOutboxIn(outboxDir: string, logger: Logger = hostLogger()): OutboundRecord[] {
   if (!existsSync(outboxDir)) return [];
-  return readdirSync(outboxDir)
-    .filter((f) => f.endsWith(".json"))
-    .map((f) => JSON.parse(readFileSync(join(outboxDir, f), "utf8")) as OutboundRecord)
-    .sort((a, b) => a.enqueuedAt.localeCompare(b.enqueuedAt));
+  const recs: OutboundRecord[] = [];
+  for (const f of readdirSync(outboxDir).filter((f) => f.endsWith(".json"))) {
+    const file = join(outboxDir, f);
+    try {
+      recs.push(JSON.parse(readFileSync(file, "utf8")) as OutboundRecord);
+    } catch (e) {
+      logger.log("outbox-record-unreadable", { file, error: String(e) });
+    }
+  }
+  return recs.sort((a, b) => a.enqueuedAt.localeCompare(b.enqueuedAt));
 }
 
 /** A run's own outbox (for tests and archival), resolved from its state dir. */
@@ -213,7 +223,7 @@ export function markOutboundSent(outboxDir: string, id: string, destination?: st
   const path = join(outboxDir, `${id}.json`);
   if (!existsSync(path)) return;
   const rec = JSON.parse(readFileSync(path, "utf8")) as OutboundRecord;
-  writeFileSync(path, JSON.stringify({ ...rec, sentAt: new Date().toISOString(), destination }, null, 2));
+  writeFileAtomic(path, JSON.stringify({ ...rec, sentAt: new Date().toISOString(), destination }, null, 2));
 }
 
 /**

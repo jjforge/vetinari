@@ -478,9 +478,7 @@ export interface VetinariConfig {
   stateDir?: string;
   /**
    * Env for the ORCHESTRATOR PROCESS ONLY. Use this for anything that must not
-   * reach the container — notably GIT_CONFIG_GLOBAL, which sandcastle needs
-   * host-side for its safe.directory writes but which, injected into a
-   * container, overrides the HOME that a project's own git tests rely on.
+   * reach the container — e.g. overriding GIT_TERMINAL_PROMPT for host-side git.
    */
   hostEnv?: Record<string, string>;
   /** Probe `baseline` runs to prove the image has the toolchain. */

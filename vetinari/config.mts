@@ -1,7 +1,6 @@
 // Dogfood config: run vetinari against its OWN GitHub backlog.
 // The package name self-resolves to this repo (package.json "exports"), so the
 // same import a consuming project uses works here too.
-import { resolve } from "node:path";
 import { defineConfig, githubTracker } from "vetinari";
 
 export default defineConfig({
@@ -34,9 +33,4 @@ export default defineConfig({
   // one shared resolver rather than a second one that can drift from it.
 
   toolchainProbe: "node --version && npm --version && claude --version && git --version",
-
-  // safe.directory host-side write needs a writable global git config; the real
-  // one is a read-only nix symlink. Kept OUT of .env (which is injected into the
-  // container). Mirrors jjforge's setup.
-  hostEnv: { GIT_CONFIG_GLOBAL: resolve(".vetinari.local/gitconfig") },
 });

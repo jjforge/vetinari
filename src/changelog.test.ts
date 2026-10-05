@@ -169,6 +169,36 @@ test("collectFragments folds two same-day collects into one block per label, not
   assert.ok(twice.includes("- [user] fix one (#2).\n- [user] fix two (#3)."));
 });
 
+/** A fragment with one filled section and one header-only section (issue #452). */
+const MIXED_FRAGMENT = "section: Bug fixes\n- [user] a fix (#1).\n\nsection: Documentation\n\n";
+
+test("collectFragments adds no label for a bullet-less section when starting a new milestone", () => {
+  const out = collectFragments(CHANGELOG, parseFragment(MIXED_FRAGMENT), "August 26, 2026", "A brand new theme");
+  assert.ok(out.includes("### A brand new theme — August 26, 2026\n\n**Bug fixes:**\n- [user] a fix (#1).\n\n### An earlier theme"));
+  assert.ok(!out.includes("**Documentation:**"));
+});
+
+test("collectFragments adds no label for a bullet-less section when folding into today's milestone", () => {
+  const today = "# Changelog\n\n### Today's work — August 26, 2026\n\n**New features:**\n- [user] a feature (#2)\n";
+  const out = collectFragments(today, parseFragment(MIXED_FRAGMENT), "August 26, 2026", "ignored");
+  assert.ok(out.includes("**Bug fixes:**\n- [user] a fix (#1)."));
+  assert.ok(!out.includes("**Documentation:**"));
+});
+
+test("collectFragments leaves today's existing block untouched for a bullet-less section of its label", () => {
+  const today = "# Changelog\n\n### Today's work — August 26, 2026\n\n**Documentation:**\n- [internal] a doc (#2)\n";
+  const out = collectFragments(today, parseFragment(MIXED_FRAGMENT), "August 26, 2026", "ignored");
+  assert.equal(
+    out,
+    "# Changelog\n\n### Today's work — August 26, 2026\n\n**Bug fixes:**\n- [user] a fix (#1).\n\n**Documentation:**\n- [internal] a doc (#2)\n",
+  );
+});
+
+test("collectFragments given only bullet-less sections returns the changelog unchanged", () => {
+  const out = collectFragments(CHANGELOG, parseFragment("section: Documentation\n\n"), "August 26, 2026", "A brand new theme");
+  assert.equal(out, CHANGELOG);
+});
+
 test("formatMilestoneDate renders a UTC date as the milestone's Month DD, YYYY", () => {
   assert.equal(formatMilestoneDate(new Date("2026-08-26T09:30:00Z")), "August 26, 2026");
   assert.equal(formatMilestoneDate(new Date("2026-01-05T23:59:59Z")), "January 5, 2026");

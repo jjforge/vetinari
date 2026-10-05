@@ -52,10 +52,8 @@ const seed = () => {
 const depsFor = (configDir: string, outcome: ChildResult) => {
   const calls: { projectRoot: string; args: string[]; timeoutMs: number }[] = [];
   let graftClosureCalls = 0;
-  let spawns = 0;
   const deps: DashboardDeps = {
     configDir,
-    spawn: () => (spawns++, undefined),
     prunePreview: async () => null,
     pruneClosure: async () => null,
     graftClosure: async () => (graftClosureCalls++, null),
@@ -70,9 +68,6 @@ const depsFor = (configDir: string, outcome: ChildResult) => {
     calls,
     get graftClosureCalls() {
       return graftClosureCalls;
-    },
-    get spawns() {
-      return spawns;
     },
   };
 };
@@ -105,7 +100,6 @@ test("POST /graft shells the real `graft <ids…> --json` once, awaits it, and 3
   // Awaited a single real graft (not a dry-run) in the project's own root, with the cap.
   assert.deepEqual(bundle.calls, [{ projectRoot, args: ["graft", "640", "655", "--json"], timeoutMs: 60_000 }]);
   assert.equal(bundle.graftClosureCalls, 0, "no pre-validation dry-run child on the POST path");
-  assert.equal(bundle.spawns, 0, "the fire-and-forget spawn is not used");
   // The response means recorded-in-the-log: redirect to the board where the wave appears.
   assert.equal(res.statusCode, 303);
   assert.equal((res.headers as { location: string }).location, "/?project=beta");

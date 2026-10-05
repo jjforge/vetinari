@@ -44,14 +44,11 @@ const seed = () => {
   return { configDir, projectRoot: join(configDir, "beta-root") };
 };
 
-// Deps whose runChild returns a canned outcome and records how it was called; spawn is a
-// tripwire — the confirm leg no longer fires and forgets.
+// Deps whose runChild returns a canned outcome and records how it was called.
 const depsFor = (configDir: string, outcome: ChildResult) => {
   const calls: { projectRoot: string; args: string[]; timeoutMs: number }[] = [];
-  let spawns = 0;
   const deps: DashboardDeps = {
     configDir,
-    spawn: () => (spawns++, undefined),
     prunePreview: async () => null,
     pruneClosure: async () => null,
     graftClosure: async () => null,
@@ -64,9 +61,6 @@ const depsFor = (configDir: string, outcome: ChildResult) => {
   return {
     deps,
     calls,
-    get spawns() {
-      return spawns;
-    },
   };
 };
 
@@ -79,7 +73,6 @@ test("POST /prune confirm awaits `prune <id>` in the project's root, capped at t
   const handled = await handlePrune(postReq(confirm) as never, res as never, new URL("http://x/prune"), bundle.deps);
   assert.equal(handled, true);
   assert.deepEqual(bundle.calls, [{ projectRoot, args: ["prune", "401"], timeoutMs: 60_000 }]);
-  assert.equal(bundle.spawns, 0, "the fire-and-forget spawn is not used");
   assert.equal(res.statusCode, 303);
   assert.equal((res.headers as { location: string }).location, "/?project=beta");
 });

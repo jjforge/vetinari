@@ -52,7 +52,6 @@ const resSpy = () => {
 
 const depsFor = (configDir: string): DashboardDeps => ({
   configDir,
-  spawn: () => undefined,
   prunePreview: async () => null,
   pruneClosure: async () => null,
   graftClosure: async () => null,

@@ -14,7 +14,7 @@ import { hostLogger, type Logger } from "./log.ts";
  * - `stalled`  — turn budget, idle timeout, or an empty `COMPLETE`; an answer guides it.
  * - `conflict` — the integrator hit a merge conflict; a human resolves and redrives.
  * - `red-base` — the merged base gated red; fix-forward or prune, then redrive.
- * - `crash`    — reconciliation found a dead run with no stop marker; redrive.
+ * - `crash`    — reconciliation found a dead run with no stop marker since the latest `wave-start`; redrive.
  * - `stopped`  — a person stopped the run (SIGINT/SIGTERM) before it reached a verdict; its work is
  *   kept. It cannot be answered — `vetinari run <id>` continues a standalone run, a redrive a campaign.
  */

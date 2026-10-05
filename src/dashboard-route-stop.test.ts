@@ -60,7 +60,6 @@ const depsFor = (configDir: string, outcome: ChildResult) => {
   const calls: { projectRoot: string; args: string[]; timeoutMs: number }[] = [];
   const deps: DashboardDeps = {
     configDir,
-    spawn: () => undefined,
     prunePreview: async () => null,
     pruneClosure: async () => null,
     graftClosure: async () => null,

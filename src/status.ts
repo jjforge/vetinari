@@ -1,12 +1,11 @@
 import { createServer } from "node:http";
-import { spawn } from "node:child_process";
 import { isIP, type AddressInfo } from "node:net";
 import type { PruneClosure } from "./dashboard-prune.ts";
 import { shellPruneClosure, shellPrunePreview } from "./dashboard-prune.ts";
 import type { GraftClosure } from "./dashboard-graft.ts";
 import { shellGraftClosure } from "./dashboard-graft.ts";
 import { runChild, startChild } from "./dashboard-child.ts";
-import type { DashboardDeps, RouteHandler, SpawnDashboardChild } from "./dashboard-http.ts";
+import type { DashboardDeps, RouteHandler } from "./dashboard-http.ts";
 import { handleApiStatus } from "./dashboard-route-api-status.ts";
 import { handleApiIssue } from "./dashboard-route-api-issue.ts";
 import { handleLanding } from "./dashboard-route-landing.ts";
@@ -90,7 +89,6 @@ export async function serveAllStatus(
   opts: {
     port: number;
     host: string;
-    spawn?: (command: string, args: string[], options: { cwd: string; stdio: readonly (string | number)[] }) => unknown;
     prunePreview?: (projectRoot: string, taskId: string) => Promise<string | null>;
     pruneClosure?: (projectRoot: string, taskId: string) => Promise<PruneClosure | null>;
     graftClosure?: (projectRoot: string, taskIds: string[]) => Promise<GraftClosure | null>;
@@ -102,7 +100,6 @@ export async function serveAllStatus(
 ) {
   const deps: DashboardDeps = {
     configDir,
-    spawn: opts.spawn ?? (spawn as SpawnDashboardChild),
     prunePreview: opts.prunePreview ?? shellPrunePreview,
     pruneClosure: opts.pruneClosure ?? shellPruneClosure,
     graftClosure: opts.graftClosure ?? shellGraftClosure,

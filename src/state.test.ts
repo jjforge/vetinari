@@ -354,3 +354,54 @@ test("the parked writers leave only <id>.json records behind, each parsing with 
   assert.equal(b.reason, "conflict");
   assert.equal(b.detail, "both modified");
 });
+
+test("listOutboxIn skips a zero-byte record and logs it as outbox-record-unreadable, naming the file", () => {
+  const dir = outboxDir();
+  enqueueOutbound(cfgFor(dir), { category: "progress", event: "wave-start", text: "batch 1 started" });
+  writeFileSync(join(outboxDirOf(dir), "bad.json"), "");
+  const logger = memoryLogger();
+
+  const recs = listOutboxIn(outboxDirOf(dir), logger);
+
+  assert.deepEqual(
+    recs.map((r) => r.text),
+    ["batch 1 started"],
+  );
+  assert.deepEqual(
+    logger.events.map((e) => [e.event, (e as { file?: string }).file]),
+    [["outbox-record-unreadable", join(outboxDirOf(dir), "bad.json")]],
+  );
+});
+
+test("the outbox writers leave only <id>.json records behind, each round-tripping with its fields", () => {
+  const dir = outboxDir();
+  enqueueOutbound(cfgFor(dir), { category: "success", event: "green", text: "GREEN on 26" });
+  enqueueOutbound(cfgFor(dir), { category: "finding", text: "filed 2 findings" });
+  const first = listOutboxIn(outboxDirOf(dir)).find((r) => r.text === "GREEN on 26")!;
+  markOutboundSent(outboxDirOf(dir), first.id, "ops");
+
+  const files = readdirSync(outboxDirOf(dir));
+  assert.equal(files.length, 2);
+  assert.ok(
+    files.every((f) => /^[0-9a-f-]+\.json$/.test(f)),
+    `only record files remain: ${files}`,
+  );
+  const recs = listOutboxIn(outboxDirOf(dir));
+  const sent = recs.find((r) => r.id === first.id);
+  assert.ok(sent?.sentAt, "sentAt is stamped");
+  assert.equal(sent?.destination, "ops");
+  const unsent = recs.find((r) => r.id !== first.id);
+  assert.equal(unsent?.text, "filed 2 findings");
+  assert.equal(unsent?.sentAt, undefined);
+});
+
+test("neither outbox writer writes its record with a plain writeFileSync — both go through writeFileAtomic", () => {
+  const src = readFileSync(join(import.meta.dirname, "state.ts"), "utf8");
+  for (const fn of ["enqueueOutbound", "markOutboundSent"]) {
+    const start = src.indexOf(`export function ${fn}(`);
+    assert.ok(start >= 0, `${fn} is defined in state.ts`);
+    const body = src.slice(start, src.indexOf("\n}\n", start));
+    assert.match(body, /writeFileAtomic\(/, `${fn} writes through writeFileAtomic`);
+    assert.doesNotMatch(body, /writeFileSync\(/, `${fn} does not call a plain writeFileSync`);
+  }
+});

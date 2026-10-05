@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
@@ -29,7 +29,7 @@ import {
   type RunSpawner,
 } from "./modes.ts";
 import { loggerForRun, memoryLogger, type MemoryLogger } from "./log.ts";
-import { answerParked, clearParked, hasParked, listOutbox } from "./state.ts";
+import { answerParked, clearParked, hasParked, listOutbox, listParked, readParked } from "./state.ts";
 import {
   readEventLog,
   type CampaignDoneEvent,
@@ -38,6 +38,7 @@ import {
   type CampaignStartEvent,
   type FailedEvent,
   type GraceWaitEvent,
+  type ParkedEvent,
   type SpawnEvent,
   type WaveDoneEvent,
   type WaveStartEvent,
@@ -1932,6 +1933,24 @@ test("queue returns and logs a per-task outcome map translating each child's exi
   assert.equal(failed[0].detail, "error(7)", "the failed event carries the translated exit code");
 });
 
+test("a child killed by a signal with no stop requested is still a failure, named by the signal (#464)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-queue-sigkill-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 3, weight: 1 };
+  // The OOM killer took the child: it exits on SIGKILL, and no stop was ever requested.
+  const spawnRun: RunSpawner = async () => "SIGKILL";
+
+  const outcomes = await silenceConsole(() => queue(cfg, ["101"], host, undefined, spawnRun));
+
+  assert.deepEqual(outcomes, { "101": "error(SIGKILL)" });
+  const failed = readEventLog(cfg).filter((e): e is FailedEvent => e.event === "failed");
+  assert.deepEqual(
+    failed.map((f) => [f.taskId, f.detail]),
+    [["101", "error(SIGKILL)"]],
+  );
+  assert.equal(hasParked(cfg, "101"), false);
+});
+
 // ---- `vetinari stop` / Ctrl-C (#403) ----------------------------------------------------------
 // The campaign's stop handler is driven through its injected seams — no real signal, no real child.
 // `stopDeps` captures the callback `campaign()` registers on `onStop` (so a test fires SIGINT/SIGTERM/
@@ -2135,6 +2154,184 @@ test("a --now stop where a member fails outright stops the campaign failed — f
   const events = readEventLog(cfg);
   assert.ok(events.some((e) => e.event === "campaign-failed"));
   assert.ok(!events.some((e) => e.event === "campaign-parked"));
+});
+
+// Children that die by the signal before their stop handler is installed (#464): held open until the
+// stop signals them, then exit on the signal itself — no verdict logged, no record written.
+const killedChildren = () => {
+  const spawned: string[] = [];
+  const release: Array<() => void> = [];
+  const spawnRun: RunSpawner = (id) => {
+    spawned.push(id);
+    return new Promise((resolve) => release.push(() => resolve("SIGTERM")));
+  };
+  return { spawned, spawnRun, releaseAll: () => release.splice(0).forEach((r) => r()) };
+};
+
+test("a --now stop that kills a child before it reached a verdict parks the member `stopped`, not failed (#464)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-stop-now-killed-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const kids = killedChildren();
+  const stop = stopDeps(gitFreeDeps(cfg, kids.spawnRun), () => setImmediate(kids.releaseAll));
+  const running = silenceConsole(() => campaign(cfg, [["101"]], host, undefined, {}, stop.deps));
+  while (kids.spawned.length < 1) await tick();
+  stop.h.fire("SIGTERM");
+
+  assert.equal(await running, "parked");
+  const events = readEventLog(cfg);
+  assert.ok(!events.some((e) => e.event === "campaign-failed" || e.event === "failed"));
+  assert.deepEqual(
+    events.filter((e): e is CampaignParkedEvent => e.event === "campaign-parked").map((p) => p.reason),
+    ["stopped"],
+  );
+  const parked = events.filter((e): e is ParkedEvent => e.event === "parked");
+  assert.deepEqual(
+    parked.map((p) => [p.taskId, p.reason, p.detail]),
+    [["101", "stopped", "SIGTERM"]],
+  );
+  const rec = listParked(cfg).find((r) => r.taskId === "101");
+  assert.ok(rec, "the campaign wrote the member's parked record");
+  assert.equal(rec.reason, "stopped");
+  assert.equal(rec.branch, "agent/101");
+  assert.equal(rec.detail, "SIGTERM");
+  assert.equal(rec.sessionId, undefined);
+  assert.equal(rec.question, "The run was stopped before it reached a verdict.");
+});
+
+// Drive `queue` with one child that a `--now` stop kills by `signal` once it has run `child` —
+// the stop lands while it is in flight, so `halted()` is already true when it exits (#464).
+const queueKilledByStop = (
+  cfg: ResolvedConfig,
+  signal: NodeJS.Signals,
+  child: () => void = () => {},
+  resumeSessions: Record<string, string> = {},
+) => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-queue-killed-"));
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  let stopped = false;
+  const spawnRun: RunSpawner = async () => {
+    child();
+    stopped = true;
+    return signal;
+  };
+  return silenceConsole(() => queue(cfg, ["101"], host, undefined, spawnRun, undefined, resumeSessions, () => stopped));
+};
+
+test("a crash-redrive child a --now stop kills before its verdict is parked `stopped` with the session it was resuming (#464)", async () => {
+  const cfg = harnessCfg(mkdtempSync(join(tmpdir(), "vetinari-stop-now-killed-resume-")));
+  const outcomes = await queueKilledByStop(cfg, "SIGTERM", undefined, { "101": "sess-crashed" });
+
+  assert.deepEqual(outcomes, { "101": "parked" });
+  const rec = listParked(cfg).find((r) => r.taskId === "101");
+  assert.equal(rec?.reason, "stopped");
+  assert.equal(rec?.sessionId, "sess-crashed");
+});
+
+test("an answered re-admit a --now stop kills before it consumed its record keeps the record as it is and logs its park (#464)", async () => {
+  const cfg = harnessCfg(mkdtempSync(join(tmpdir(), "vetinari-stop-now-killed-answered-")));
+  // The first run parked on a question (session recorded); the answer has since been delivered.
+  const record = {
+    taskId: "101",
+    reason: "question",
+    sessionId: "sess-q",
+    branch: "agent/101",
+    question: "A or B?",
+    parkedAt: "2026-10-04T00:00:00Z",
+  };
+  mkdirSync(cfg.parkedDir, { recursive: true });
+  writeFileSync(join(cfg.parkedDir, "101.json"), JSON.stringify(record));
+  answerParked(cfg, "101", "use A");
+  const before = readFileSync(join(cfg.parkedDir, "101.json"), "utf8");
+
+  const outcomes = await queueKilledByStop(cfg, "SIGTERM");
+
+  assert.deepEqual(outcomes, { "101": "parked" });
+  assert.equal(readFileSync(join(cfg.parkedDir, "101.json"), "utf8"), before, "the record is untouched — still answered");
+  const parked = readEventLog(cfg).filter((e): e is ParkedEvent => e.event === "parked");
+  assert.deepEqual(
+    parked.map((p) => [p.taskId, p.reason]),
+    [["101", "question"]],
+  );
+});
+
+test("a redrive of a `stopped` member a --now stop kills before it consumed its record keeps that record and its session (#464)", async () => {
+  const cfg = harnessCfg(mkdtempSync(join(tmpdir(), "vetinari-stop-now-killed-stopped-")));
+  mkdirSync(cfg.parkedDir, { recursive: true });
+  const before = JSON.stringify({
+    taskId: "101",
+    reason: "stopped",
+    detail: "SIGINT",
+    sessionId: "sess-s",
+    branch: "agent/101",
+    question: "The run was stopped before it reached a verdict.",
+    parkedAt: "2026-10-04T00:00:00Z",
+  });
+  writeFileSync(join(cfg.parkedDir, "101.json"), before);
+
+  const outcomes = await queueKilledByStop(cfg, "SIGTERM");
+
+  assert.deepEqual(outcomes, { "101": "parked" });
+  assert.equal(readFileSync(join(cfg.parkedDir, "101.json"), "utf8"), before);
+  const parked = readEventLog(cfg).filter((e): e is ParkedEvent => e.event === "parked");
+  assert.deepEqual(
+    parked.map((p) => [p.taskId, p.reason]),
+    [["101", "stopped"]],
+  );
+});
+
+test("a child a --now stop kills after it logged green keeps its green (#464)", async () => {
+  const cfg = harnessCfg(mkdtempSync(join(tmpdir(), "vetinari-stop-now-killed-green-")));
+  const outcomes = await queueKilledByStop(cfg, "SIGTERM", () => cfg.log.log("green", { taskId: "101", branch: "agent/101", commits: [] }));
+
+  assert.deepEqual(outcomes, { "101": "green" });
+  assert.equal(hasParked(cfg, "101"), false, "no parked record is written for a green");
+  assert.ok(!readEventLog(cfg).some((e) => e.event === "parked" || e.event === "failed"));
+});
+
+test("a child a --now stop kills after it parked keeps that park (#464)", async () => {
+  const cfg = harnessCfg(mkdtempSync(join(tmpdir(), "vetinari-stop-now-killed-parked-")));
+  const outcomes = await queueKilledByStop(cfg, "SIGTERM", () => {
+    seedParkedRecord(cfg, "101");
+    cfg.log.log("parked", { taskId: "101", reason: "question" });
+  });
+
+  assert.deepEqual(outcomes, { "101": "parked" });
+  assert.equal(readParked(cfg, "101", { requireSession: false }).reason, "question");
+  assert.equal(readEventLog(cfg).filter((e) => e.event === "parked").length, 1, "the child's own park is the only one");
+});
+
+test("a verdict logged before the member's latest spawn does not decide a child a --now stop kills (#464)", async () => {
+  const cfg = harnessCfg(mkdtempSync(join(tmpdir(), "vetinari-stop-now-killed-stale-")));
+  // An earlier run of 101 went green and was not landed; this spawn is a fresh run of it.
+  cfg.log.log("spawn", { taskId: "101", running: 1, left: 0 });
+  cfg.log.log("green", { taskId: "101", branch: "agent/101", commits: [] });
+  const outcomes = await queueKilledByStop(cfg, "SIGTERM");
+
+  assert.deepEqual(outcomes, { "101": "parked" });
+  assert.equal(readParked(cfg, "101", { requireSession: false }).reason, "stopped");
+});
+
+test("a --now stop that kills a child after it logged failed still ends the campaign failed (#464)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-stop-now-killed-failed-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const kids = killedChildren();
+  const spawnRun: RunSpawner = (id) => {
+    cfg.log.log("failed", { taskId: id, detail: "agent error" });
+    return kids.spawnRun(id);
+  };
+  const stop = stopDeps(gitFreeDeps(cfg, spawnRun), () => setImmediate(kids.releaseAll));
+  const running = silenceConsole(() => campaign(cfg, [["101"]], host, undefined, {}, stop.deps));
+  while (kids.spawned.length < 1) await tick();
+  stop.h.fire("SIGTERM");
+
+  assert.equal(await running, "failed");
+  const events = readEventLog(cfg);
+  assert.ok(events.some((e) => e.event === "campaign-failed"));
+  assert.ok(!events.some((e) => e.event === "campaign-parked"));
+  assert.ok(events.some((e): e is FailedEvent => e.event === "failed" && e.detail === "error(SIGTERM)"));
+  assert.equal(hasParked(cfg, "101"), false);
 });
 
 test("a --now stop spawns no queued member — with a ceiling of one the second member never starts (#403)", async () => {

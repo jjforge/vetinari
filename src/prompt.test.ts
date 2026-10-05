@@ -107,3 +107,13 @@ test("the TDD prompt tells the agent it has no GitHub login and how a finding re
   );
   assert.ok(promptFlat.includes('"Noticed, not fixed" heading'), "prompt does not name the Noticed, not fixed heading");
 });
+
+test("the TDD prompt points at the real command reference, not the README Modes table it no longer has (#437)", () => {
+  // The README lost its Modes table to docs/reference.md (generated from MODES in
+  // src/help.ts), so the prompt must not send every agent hunting for it — and must
+  // word the pointer so it still reads in a consuming project.
+  assert.ok(!/README's \*\*Modes\*\* table/.test(prompt), "prompt still sends agents to the README's Modes table");
+  assert.match(prompt, /the project's command reference/);
+  assert.ok(prompt.includes("`docs/reference.md`"), "prompt does not name docs/reference.md as vetinari's command reference");
+  assert.ok(prompt.includes("`MODES` in `src/help.ts`"), "prompt does not say docs/reference.md is generated from MODES in src/help.ts");
+});

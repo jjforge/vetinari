@@ -238,14 +238,14 @@ export interface CampaignPlan extends WavePlan {
 }
 
 /** A fileKey is bare — carries no path, only a basename — when it has no separator:
- *  an ambiguous cite kept as a basename, or a `Creates:` cite (never resolved). */
+ *  an ambiguous cite kept as a basename, or a bare `Creates:` cite. */
 const isBareKey = (k: string) => !k.includes("/");
 const keyBasename = (k: string) => k.slice(k.lastIndexOf("/") + 1);
 
 /**
  * Whether two fileKeys collide. Two resolved paths collide only when equal — distinct
  * files at `a/b/c/foo.md` and `a/c/foo.md` do not. A bare key (an ambiguous cite, or a
- * `Creates:` basename) collides with any key of the same basename, since it names no
+ * bare `Creates:` cite) collides with any key of the same basename, since it names no
  * one path — exactly today's basename semantics for that one cite.
  */
 const keysCollide = (a: string, b: string) => a === b || (keyBasename(a) === keyBasename(b) && (isBareKey(a) || isBareKey(b)));
@@ -267,7 +267,7 @@ const disjoint = (a: Set<string>, b: Set<string>) => {
  * collides, it spills into a new one. Spilling can add a wave or two — the intended
  * trade for a wave that never collides at integration. Collisions are judged by
  * fileKey (`fileKeysOf`) — a resolved path, or a bare basename for an ambiguous or
- * `Creates:` cite — never by the raw cited path.
+ * bare cite — never by the raw cited path.
  *
  * A ticket with no known fileKeys (empty set) collides with nothing and stays on
  * the frontier of its layer. The DAG ordering is preserved: a ticket's blockers

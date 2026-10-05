@@ -166,8 +166,8 @@ test("packageScopedFileSet keys a Creates:-only ticket under '.' (a bare basenam
   const root = treeWith("internal/web/checkins.templ");
   const fileSet = packageScopedFileSet(root);
 
-  // A Creates: cite stays a bare basename (the resolver has no tree path for a file
-  // that does not exist yet), whose dirname is ".". Conservative: it collides with
+  // A bare Creates: cite stays a bare basename (it carries no directory to resolve
+  // against the tree), whose dirname is ".". Conservative: it collides with
   // every other bare key and every root-level file, so it serializes more, never less.
   const res = await fileSet("Creates (new files): `reports.templ`\n");
 
@@ -338,9 +338,10 @@ test("defaultFileSet counts an escaped-backtick Creates: cite for disjointness, 
 
   // A Creates: cite names a not-yet-existing file, so it is absent from the tree —
   // escaped or not, it is recovered, counted, and exempt from the tree-presence check.
+  // Its directory `src` is in the tree, so it keys to the resolved path (#480).
   const res = fileSet("Creates (new files): \\`src/new-thing.ts\\`\n");
 
-  assert.deepEqual(res.files, ["new-thing.ts"]);
+  assert.deepEqual(res.files, ["src/new-thing.ts"]);
   assert.equal(res.confident, true);
 });
 
@@ -623,6 +624,54 @@ test("defaultFileSet's whole-body fallback still ignores a backticked prose word
 
   assert.deepEqual(res.files, ["src/plan.ts"]);
   assert.equal(res.confident, true);
+});
+
+test("defaultFileSet keys a Creates: cite under a tree directory to that directory's full path (#480)", () => {
+  const root = treeWith("src/a/util.ts", "src/b/util.ts");
+  const fileSet = defaultFileSet(root);
+
+  assert.deepEqual(fileSet("Creates: `src/a/index.ts`\n").files, ["src/a/index.ts"]);
+  assert.deepEqual(fileSet("Creates: `src/b/index.ts`\n").files, ["src/b/index.ts"]);
+  // A partial directory resolves by suffix, as a Touches: cite does.
+  assert.deepEqual(fileSet("Creates: `a/index.ts`\n").files, ["src/a/index.ts"]);
+});
+
+test("defaultFileSet falls back to shorter directory suffixes for a Creates: cite (#480)", () => {
+  // No tree directory ends in `x/a`, but `src/a` ends in `a` — the cite is a new
+  // directory only when no suffix of its directory matches.
+  const root = treeWith("src/a/util.ts");
+
+  const res = defaultFileSet(root)("Creates: `x/a/index.ts`\n");
+
+  assert.deepEqual(res.files, ["src/a/index.ts"]);
+  assert.equal(res.confident, true);
+});
+
+test("defaultFileSet keys a Creates: cite under a new directory to its cited path, leading ./ dropped (#480)", () => {
+  const root = treeWith("src/plan.ts");
+  const fileSet = defaultFileSet(root);
+
+  assert.deepEqual(fileSet("Creates: `./pkg/new/index.ts`\n").files, ["pkg/new/index.ts"]);
+  const res = fileSet("Creates: `pkg/new/index.ts`\n");
+  assert.deepEqual(res.files, ["pkg/new/index.ts"]);
+  assert.equal(res.confident, true);
+});
+
+test("defaultFileSet keys a Creates: cite whose directory matches several tree directories to the bare basename (#480)", () => {
+  const root = treeWith("internal/web/server.go", "cmd/web/main.go");
+
+  const res = defaultFileSet(root)("Creates: `web/health.go`\n");
+
+  assert.deepEqual(res.files, ["health.go"]);
+  assert.equal(res.confident, true);
+});
+
+test("defaultFileSet keeps a bare Creates: cite (and a ./-prefixed one) as its basename (#480)", () => {
+  const root = treeWith("src/a/x.ts");
+  const fileSet = defaultFileSet(root);
+
+  assert.deepEqual(fileSet("Creates: `x.ts`\n").files, ["x.ts"]);
+  assert.deepEqual(fileSet("Creates: `./x.ts`\n").files, ["x.ts"]);
 });
 
 test("defaultFileSet counts an extensionless Creates: cite, tree-exempt (#477)", () => {

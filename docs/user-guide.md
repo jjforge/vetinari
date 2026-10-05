@@ -68,7 +68,7 @@ Waves, campaigns and the project card roll up from their issues in this order: f
 ## A campaign, start to finish
 
 1. **Select.** `vetinari campaign 436 611 640` or `vetinari campaign ready-for-agent` — ids, or a label expanded to its open issues.
-2. **Plan.** The issues are layered by their tracker dependencies, then each layer is split so no two issues in a wave touch the same file (by basename, from the `Touches:`/`Creates:` line on the issue). An issue that cites no files, or one whose only open blocker is outside the selection, is reported and left out — never scheduled silently. `--dry-run` prints the plan and stops.
+2. **Plan.** The issues are layered by their tracker dependencies, then each layer is split so no two issues in a wave touch the same file (by resolved path, from the `Touches:`/`Creates:` line on the issue; a bare or ambiguous cite collides with every file of that name). An issue that cites no files, or one whose only open blocker is outside the selection, is reported and left out — never scheduled silently. `--dry-run` prints the plan and stops.
 3. **Run a wave.** Agents start as container slots allow. Each one loops: turn → gate → fix → gate, until green, parked, or failed. A park frees its slot immediately.
 4. **Integrate the wave.** Greens merge onto the base one at a time; a merge conflict parks that one issue (`conflict`) and the rest keep merging. The merged base is gated as a whole; if it is red, the wave parks (`red-base`) with everything left merged and the base sitting red — never pushed, never built on.
 5. **Resolve or stop.** A wave is done only when every issue in it is `completed`. One issue parking or failing never stops its siblings: the wave drains, every green still merges, and only then does the campaign park (an issue parked) or stop as failed (an issue failed). A merge conflict parks only the issue that conflicted; nothing merged is rolled back. Either way the state is on disk and the dashboard and Telegram both show it until you act.
@@ -144,7 +144,7 @@ export function packageScopedFileSet(root?: string): FileSetOf {
 Two things to know:
 
 - **The cost is wave count.** Widening the key means fewer, larger-grained waves — same-directory tickets now serialize that otherwise ran together. That is the price of never leaving the base red on a duplicate symbol.
-- **`Creates:` cites (and ambiguous `Touches:` cites) key under `.`.** A `Creates:` cite names a file not yet in the tree, so the resolver has no path for it and keeps it a bare basename; its `dirname` is `.`, as is that of a `Touches:` cite the tree holds under several paths. These collide with every other bare key and every root-level file. That is conservative: it serializes more, never less.
+- **Bare and ambiguous cites key under `.`.** The resolver keeps a bare basename for a bare `Creates:` cite, a `Creates:` cite whose directory matches several tree directories, and a `Touches:` cite the tree holds under several paths; its `dirname` is `.`. These collide with every other bare key and every root-level file. That is conservative: it serializes more, never less. Any other `Creates:` cite keys under its resolved (or new) directory.
 
 ## How work leaves the container
 

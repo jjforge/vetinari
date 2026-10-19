@@ -350,6 +350,13 @@ export interface GateSpec {
 export interface MountSpec {
   /** Host path, relative to the project root or absolute. */
   hostPath: string;
+  /**
+   * Container path. Its parent directories must already exist in the image, owned by the
+   * agent user: docker creates any missing parent as root, and the agent then cannot write
+   * beside the mount (Go's `~/go/pkg/sumdb` next to a mounted `~/go/pkg/mod`). The template
+   * Dockerfile pre-creates `~/go/pkg`, `~/.cache` and `~/.cargo`; add a `mkdir -p` after its
+   * `USER` line for any other root.
+   */
   sandboxPath: string;
   readonly?: boolean;
 }

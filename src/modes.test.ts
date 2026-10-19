@@ -2051,6 +2051,40 @@ test("queue returns and logs a per-task outcome map translating each child's exi
   assert.equal(failed[0].detail, "error(7)", "the failed event carries the translated exit code");
 });
 
+test("an answered park re-admits on the slot poll while a long sibling still runs and nothing is queued (#497)", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-queue-readmit-poll-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+
+  // 101 is the long-running sibling, held open until the test releases it; 102 parks with a record.
+  let release101!: (code: number) => void;
+  const spawns: string[] = [];
+  const spawnRun: RunSpawner = (taskId) => {
+    spawns.push(taskId);
+    if (taskId === "101") return new Promise<number>((r) => (release101 = r));
+    if (spawns.filter((s) => s === "102").length === 1) {
+      seedParkedRecord(cfg, "102");
+      return Promise.resolve(2);
+    }
+    clearParked(cfg, "102"); // the re-admitted child consumes the answered record
+    return Promise.resolve(0);
+  };
+
+  const draining = silenceConsole(() => queue(cfg, ["101", "102"], host, undefined, spawnRun));
+  while (!hasParked(cfg, "102")) await tick();
+  await tick();
+  // The answer lands while 101 still runs and nothing is queued: no sibling exit will drive `fill`.
+  answerParked(cfg, "102", "use approach A");
+  t.mock.timers.tick(1000);
+  for (let i = 0; i < 10; i++) await tick();
+  assert.deepEqual(spawns, ["101", "102", "102"], "102 was re-admitted before the long sibling exited");
+
+  release101(0);
+  const outcomes = await draining;
+  assert.deepEqual(outcomes, { "101": "green", "102": "green" });
+});
+
 test("a child killed by a signal with no stop requested is still a failure, named by the signal (#464)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-queue-sigkill-"));
   const cfg = harnessCfg(dir);

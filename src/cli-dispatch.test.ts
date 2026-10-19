@@ -467,6 +467,17 @@ test("dispatch parked leaves the Markdown `options:` form parsed and a non-match
   assert.match(out, /Just a plain question, no structure\./, "a non-matching question falls back to its full trimmed text");
 });
 
+test("dispatch parked marks an answered record as awaiting re-admit, distinct from an unanswered one (#497)", async () => {
+  const answered = { ...xmlParked, taskId: "643", answer: "Redis", answeredAt: "2026-08-22T01:00:00.000Z" };
+  const { deps, logged } = makeDeps({
+    listParked: spy([xmlParked, answered]) as unknown as DispatchDeps["listParked"],
+  });
+  await dispatch({ kind: "parked" }, deps);
+  const [unanswered, ans] = logged;
+  assert.doesNotMatch(unanswered, /answered/);
+  assert.match(ans, /=== 643 \(question, 2026-08-22T00:00:00.000Z, answered 2026-08-22T01:00:00.000Z — awaiting re-admit\)/);
+});
+
 test("dispatch clear archives the run and reports the reset", async () => {
   const { deps, logged } = makeDeps();
   await dispatch({ kind: "clear" }, deps);

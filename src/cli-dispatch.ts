@@ -536,7 +536,9 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
         // clickable option, so list the parsed choices as plain text below the description.
         const { description, options } = extractParkedDetails(r.question);
         const optionLines = options.length ? `\n${options.map((o) => `  - ${o}`).join("\n")}` : "";
-        deps.log(`\n=== ${r.taskId} (${r.reason}, ${r.parkedAt}) branch ${r.branch}\n${description}${optionLines}\n`);
+        // An answered record is delivered but not yet consumed by a re-admitted run (#497).
+        const answered = r.answeredAt ? `, answered ${r.answeredAt} — awaiting re-admit` : "";
+        deps.log(`\n=== ${r.taskId} (${r.reason}, ${r.parkedAt}${answered}) branch ${r.branch}\n${description}${optionLines}\n`);
       }
       return;
     }

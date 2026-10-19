@@ -487,9 +487,11 @@ export async function queue(
           });
         }
         // Blocked by the ceiling or the fair share with work still queued: poll for
-        // a slot another project frees (we have no event for that). Otherwise an
-        // exit callback re-drives fill, so no poll is needed.
-        if (pending.length) {
+        // a slot another project frees (we have no event for that). Also poll while a
+        // sibling runs and a parked-with-record member waits: `answer` sends no event, so
+        // without the poll its re-admit would wait for that sibling to exit (#497).
+        // Otherwise an exit callback re-drives fill, so no poll is needed.
+        if (pending.length || (running > 0 && parkedWithRecord.size)) {
           if (!poll) poll = setInterval(fill, HOST_SLOT_POLL_MS);
         } else if (running === 0) {
           stopPoll();

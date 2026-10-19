@@ -106,7 +106,8 @@ _Avoid_: added, appended, injected.
 **phase**:
 The step an [[issue]] is currently in — `starting`, `coding`, `testing · <cmd>`
 (naming the [[gate]] command running now), `filing findings`, `waiting to merge`
-(a green awaiting integration). A sub-axis of [[running]], never a sixth state:
+(a green awaiting integration), `answered` (an [[answer]] delivered, the live
+campaign not yet re-admitted it). A sub-axis of [[running]], never a sixth state:
 derived at render from the issue's latest event (nothing stored), orthogonal to
 status and never rolled up to a [[wave]] or campaign. It shows on the issue row
 and sheet in place of the word `running`; the other four states keep their word
@@ -160,6 +161,9 @@ The only things a human does to a [[campaign]].
 **Answer**:
 Reply to a [[parked]] question; the [[issue]] goes back to work and the campaign
 continues by itself. You do not answer and then separately ask it to continue.
+Once answered the issue is no longer [[parked]] but [[running]] in the `answered`
+[[phase]] — while a live campaign owns its re-admit; with none, it stays parked,
+noted as answered, until a [[redrive]].
 
 **Prune**:
 Drop an [[issue]] and everything that depends on it from a running campaign. It

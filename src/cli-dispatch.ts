@@ -922,7 +922,8 @@ async function dispatchAnswer(cmd: Extract<Command, { kind: "answer" }>, deps: D
   // naming the moves (a redrive for a campaign, `vetinari run <id>` for a standalone run). Every
   // gateway reply ends up here, so this also refuses a reply to an old question message for a task
   // whose current record is `stopped`.
-  const reason = deps.listParked(cfg).find((r) => normalize(r.taskId) === normalize(taskId))?.reason;
+  const rec = deps.listParked(cfg).find((r) => normalize(r.taskId) === normalize(taskId));
+  const reason = rec?.reason;
   if (reason === "stopped")
     throw new Refusal(
       `${taskId} was stopped before it reached a verdict — it cannot be answered. Resume it with \`vetinari redrive\` (a campaign) or \`vetinari run ${taskId}\` (a standalone run).`,
@@ -931,6 +932,13 @@ async function dispatchAnswer(cmd: Extract<Command, { kind: "answer" }>, deps: D
   if (reason === "outdated-agent")
     throw new Refusal(
       `${taskId} parked because the image's agent CLI is too old for the model — it cannot be answered. Rebuild the image with \`vetinari build\`, then \`vetinari redrive\` (a campaign) or \`vetinari run ${taskId}\` (a standalone run).`,
+    );
+
+  // A session-less park (an idle stall can save one) re-runs fresh with the answer relayed as a
+  // comment, so with no `postComment` it could never be consumed — refuse now, not at re-admit (#496).
+  if (rec && !rec.sessionId && !cfg.postComment)
+    throw new Refusal(
+      `${taskId} parked with no session to resume, so its answer must be relayed as an issue comment — but no postComment is configured. Configure \`postComment\` (e.g. githubIssueComment(repo)) to answer it.`,
     );
 
   // Deliver: write the answer into the parked record and mark it answered. The record and its

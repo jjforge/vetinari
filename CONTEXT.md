@@ -119,7 +119,7 @@ _Avoid_: step, stage, substate as the surface word.
 **Park reason**:
 Why a [[parked]] issue or wave is held, and which recovery it offers — metadata on
 the park, not a status. One enum: `question | stalled | conflict | red-base |
-crash | stopped | outdated-agent | tampered`.
+crash | stopped | outdated-agent`.
 _Avoid_: quarantined, interrupted (those were reasons masquerading as statuses).
 
 **question**:
@@ -153,13 +153,6 @@ The image's [[agent]] CLI is too old for the configured model, so no run can
 start until the image is rebuilt — an environment fault, not the issue's. Rebuild
 the image, then [[redrive]].
 _Avoid_: stale image (that is an image older than its Dockerfile, a warning only).
-
-**tampered**:
-A container moved a protected ref in the host repo — the [[base]], a tag, or any
-ref outside the agents' own branches — and vetinari put it back. A campaign-level
-hold: the wave in flight is stopped, since which [[agent]] did it is unknowable.
-Check the members it names, then [[redrive]].
-_Avoid_: violation, breach, escape.
 
 ### The six moves
 

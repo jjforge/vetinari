@@ -88,6 +88,8 @@ export interface ParkedIssue {
   issueNumber: string;
   reason: string;
   parkedAt: string;
+  /** set once an answer is delivered into the record, until a re-admitted run consumes it. */
+  answeredAt?: string;
   branch: string;
   description: string;
   options: string[];
@@ -329,6 +331,7 @@ const toParkedIssue = (rec: ParkedRecord): ParkedIssue => {
     issueNumber: normalize(rec.taskId),
     reason: rec.reason,
     parkedAt: rec.parkedAt,
+    ...(rec.answeredAt ? { answeredAt: rec.answeredAt } : {}),
     branch: rec.branch,
     ...details,
   };

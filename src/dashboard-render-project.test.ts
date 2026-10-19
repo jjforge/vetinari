@@ -2271,6 +2271,25 @@ test("renderStatusPage's parked card carries no inline reply form — the reply 
   // Exactly one /answer form remains — the sheet's reply-form.
   assert.equal(html.match(/action="\/answer"/g)?.length, 1);
 });
+test("renderStatusPage marks an answered parked card as awaiting re-admit, not waiting (#497)", () => {
+  const html = renderStatusPage({
+    project: "demo",
+    waves: [],
+    parked: [
+      {
+        issueNumber: "102",
+        reason: "question",
+        parkedAt: "2025-06-15T09:00:00.000Z",
+        answeredAt: "2025-06-15T09:30:00.000Z",
+        branch: "agent/102",
+        description: "Need a choice.",
+        options: [],
+      },
+    ],
+  });
+  assert.match(html, /<div class="parked-card-meta">answered — awaiting re-admit · question<\/div>/);
+  assert.doesNotMatch(html, /waiting <span class="parked-waited"/);
+});
 test("renderStatusPage renders the landing live-bar top-right, not the old refresh widget (#79)", () => {
   const html = renderStatusPage({
     project: "demo",

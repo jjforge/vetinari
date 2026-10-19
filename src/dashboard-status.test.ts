@@ -254,6 +254,36 @@ test("buildStatus survives an unparseable parked record and still shows the vali
   }
 });
 
+test("buildStatus carries a parked record's answeredAt so an answered park reads distinctly (#497)", () => {
+  const dir = join(tmpdir(), `vetinari-status-answered-parked-${Date.now()}`);
+  const prev = process.env.VETINARI_GATEWAY_HOME;
+  process.env.VETINARI_GATEWAY_HOME = join(dir, "gw-home");
+  try {
+    seedState(dir, [
+      event("campaign-start", { ts: "2026-09-02T04:00:00.000Z", waves: [["701", "702"]], slots: 1 }),
+      event("wave-start", { ts: "2026-09-02T04:10:00.000Z", index: 0, tasks: ["701", "702"] }),
+    ]);
+    const rec = { parkedAt: "2026-09-02T04:12:00.000Z", reason: "question", question: "Which?" };
+    writeFileSync(join(dir, "parked", "701.json"), JSON.stringify({ ...rec, taskId: "701", branch: "agent/701" }));
+    writeFileSync(
+      join(dir, "parked", "702.json"),
+      JSON.stringify({ ...rec, taskId: "702", branch: "agent/702", answer: "A", answeredAt: "2026-09-02T04:20:00.000Z" }),
+    );
+
+    const status = buildStatus(cfgFor(dir));
+
+    assert.deepEqual(
+      status.parked.map((p) => [p.issueNumber, p.answeredAt]),
+      [
+        ["701", undefined],
+        ["702", "2026-09-02T04:20:00.000Z"],
+      ],
+    );
+  } finally {
+    prev === undefined ? delete process.env.VETINARI_GATEWAY_HOME : (process.env.VETINARI_GATEWAY_HOME = prev);
+  }
+});
+
 test("buildStatus collapses a wave that had a member pruned and a member grafted once its wave-done lands (#363)", () => {
   // A grafted id lands in both `waves` and `layout`, so it satisfies the `closed` fold like a
   // plain member; a pruned id lands only in `layout` and is skipped. The two overlays must not

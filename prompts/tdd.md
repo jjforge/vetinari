@@ -116,13 +116,16 @@ as you go: what is wrong, where (a file path or area), and how to see it. Filing
 the orchestrator's job, from the host:
 
 - **When the run ends you may be asked, in one more turn, for those defects.** Answer
-  with one block per defect, then the COMPLETE signal. Each block becomes an issue:
+  with one block per defect, then the COMPLETE signal. Each block becomes an issue,
+  or a "seen again" comment on one already filed; rate it honestly — minor ones are
+  batched into a digest rather than filed:
 
   ```
   <finding>
     <summary>one line</summary>
     <location>file path or area</location>
     <repro>how to see it</repro>
+    <severity>P0 data loss | P1 blocks work | P2 major | P3 minor</severity>
   </finding>
   ```
 

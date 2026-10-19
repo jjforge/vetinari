@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { Finding, FindingContext } from "./findings.ts";
+import { findingKey, type Finding, type FindingContext } from "./findings.ts";
 import type { Exclusion } from "./plan.ts";
 import { repoForProject } from "./config.ts";
 import { Refusal } from "./refusal.ts";
@@ -293,6 +293,37 @@ export const githubFindingReporter = (
 };
 
 /**
+ * A ready `findOpenIssue` handler: the open issue in `repo` whose title is `title`, compared
+ * by `findingKey` (case, punctuation and the `[unverified: …]` mark ignored), found through
+ * GitHub search. Search lags a fresh `issue create` by seconds, which is why the harvest also
+ * dedupes against the campaign's own filings. Repo derivation as `githubFindingReporter`.
+ */
+export const githubFindOpenIssue = (repo?: string, run: (args: string[]) => Promise<string> = gh, deriveRepo = deriveRepoFromProject) => {
+  const repoOf = repoAccessor("githubFindOpenIssue", repo, deriveRepo);
+  return async (title: string): Promise<string | undefined> => {
+    const r = repoOf();
+    const key = findingKey(title);
+    const out = await run([
+      "issue",
+      "list",
+      "--repo",
+      r,
+      "--state",
+      "open",
+      "--search",
+      `${key} in:title`,
+      "--limit",
+      "30",
+      "--json",
+      "number,title",
+    ]);
+    const rows: Array<{ number?: number; title?: string }> = JSON.parse(out || "[]");
+    const hit = rows.find((row) => row.number != null && findingKey(row.title ?? "") === key);
+    return hit ? String(hit.number) : undefined;
+  };
+};
+
+/**
  * The GitHub labels the `githubTracker()` preset relies on — `githubMarkPendingVerify` adds
  * `pending-verify` and drops `ready-for-agent`, and findings are filed with `needs-triage` by
  * default — with the colour and description `init` creates each with when a fresh repo lacks
@@ -309,9 +340,9 @@ export const GITHUB_TRACKER_LABELS: ReadonlyArray<{ name: string; color: string;
 ];
 
 /**
- * The GitHub tracker preset: all six tracker seams — `fetchTask`, `blockedBy`,
- * `listByLabel`, `postComment`, `onIssueMerged`, `reportFinding` — built from the
- * factories above, so a config spreads one call instead of hand-wiring six and an
+ * The GitHub tracker preset: all seven tracker seams — `fetchTask`, `blockedBy`,
+ * `listByLabel`, `postComment`, `onIssueMerged`, `reportFinding`, `findOpenIssue` — built
+ * from the factories above, so a config spreads one call instead of hand-wiring seven and an
  * improvement reaches every project on upgrade. Drop it into a config as
  * `...githubTracker()` — the repo is derived from the project's `origin` (deferred to
  * first call, a `Refusal` when underivable, exactly as each factory does); pass
@@ -334,4 +365,5 @@ export const githubTracker = (
   postComment: githubIssueComment(opts.repo, run, deriveRepo),
   onIssueMerged: githubMarkPendingVerify(opts.repo, run, deriveRepo),
   reportFinding: githubFindingReporter(opts.repo, { labels: opts.findingLabels ?? ["needs-triage"] }, run, deriveRepo),
+  findOpenIssue: githubFindOpenIssue(opts.repo, run, deriveRepo),
 });

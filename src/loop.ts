@@ -6,9 +6,9 @@ import { runGates } from "./gate.ts";
 import { agentFor, agentSelectionFor, makeSandbox, type Sandbox } from "./sandbox.ts";
 import { UNASKED_PARK_REASONS, clearParked, enqueueOutbound, hasParked, park, readParked } from "./state.ts";
 import { notice } from "./notice.ts";
-import { HARVEST_PROMPT, parseFindings, reportFindings } from "./findings.ts";
+import { HARVEST_PROMPT, findingKey, parseFindings, triageFindings } from "./findings.ts";
 import { activityLoggingSink, appendActivity, initActivityLog } from "./activity.ts";
-import { event } from "./event-log.ts";
+import { event, readEventLog } from "./event-log.ts";
 import { withHostSlot, type HostBudget } from "./host-slots.ts";
 
 /**
@@ -275,12 +275,34 @@ async function harvestFindings(
     cfg.log.log("findings", { taskId, count: findings.length });
     if (!findings.length) return;
 
-    const results = await reportFindings(cfg.reportFinding, findings, { taskId, project: cfg.project, source });
-    for (const r of results) {
-      if (r.error) cfg.log.log("finding-report-failed", { taskId, summary: r.finding.summary, error: r.error });
-      else cfg.log.log("finding-filed", { taskId, summary: r.finding.summary, url: r.url });
-    }
-    const filed = results.filter((r) => !r.error).length;
+    const results = await triageFindings(
+      findings,
+      { taskId, project: cfg.project, source },
+      {
+        reporter: cfg.reportFinding,
+        findOpenIssue: cfg.findOpenIssue,
+        postComment: cfg.postComment,
+        // This campaign's earlier filings: the live event log is archived per campaign.
+        filedSoFar: () =>
+          new Map(
+            readEventLog(cfg).flatMap((e: any) =>
+              e.event === "finding-filed" && e.url ? [[findingKey(String(e.summary)), String(e.url)] as [string, string]] : [],
+            ),
+          ),
+        record: (r) => {
+          const summary = r.finding.summary;
+          if (r.error) cfg.log.log("finding-report-failed", { taskId, summary, error: r.error });
+          else if (r.action === "seen-again") cfg.log.log("finding-seen-again", { taskId, summary, url: r.url });
+          else if (r.action === "digest") cfg.log.log("finding-digested", { taskId, summary, severity: r.finding.severity });
+          else cfg.log.log("finding-filed", { taskId, summary, url: r.url });
+        },
+        maxPerRun: cfg.maxFindingsPerRun ?? 2,
+        severityFloor: cfg.findingSeverityFloor ?? "P2",
+        lockFile: `${cfg.stateDir}/findings.lock`,
+      },
+    );
+    const failed = results.filter((r) => r.error).length;
+    const filed = results.filter((r) => !r.error && r.action === "filed").length;
     if (filed)
       enqueueOutbound(
         cfg,
@@ -289,7 +311,7 @@ async function harvestFindings(
           project: cfg.project,
           state: "FINDING",
           context: taskId,
-          signal: `filed ${filed} incidental finding(s)${filed !== results.length ? ` (${results.length - filed} failed — see log)` : ""}`,
+          signal: `filed ${filed} incidental finding(s)${failed ? ` (${failed} failed — see log)` : ""}`,
           category: "finding",
         }),
       );

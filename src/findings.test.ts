@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseFindings, reportFindings, type Finding } from "./findings.ts";
+import { findingKey, parseFindings, reportFindings, type Finding } from "./findings.ts";
 
 test("parseFindings extracts each finding block with its sub-fields", () => {
   const stdout = `working... here is what I noticed.
@@ -90,4 +90,20 @@ test("reportFindings leaves a green-run finding untouched — no source in conte
   await reportFindings(reporter, [original], { taskId: "640", project: "demo" });
 
   assert.deepEqual(received[0], original);
+});
+
+test("parseFindings reads an agent-rated severity (P0–P3) and omits it when absent or unrecognised", () => {
+  const [rated, unrated, junk] = parseFindings(
+    "<finding><summary>a</summary><severity>p1 — blocks a gate</severity></finding>" +
+      "<finding><summary>b</summary></finding>" +
+      "<finding><summary>c</summary><severity>high</severity></finding>",
+  );
+  assert.equal(rated.severity, "P1");
+  assert.equal("severity" in unrated, false);
+  assert.equal("severity" in junk, false);
+});
+
+test("findingKey matches the same finding across case, punctuation and the unverified mark", () => {
+  assert.equal(findingKey("[unverified: budget:2] `make fmt` fails: gofumpt sumdb!"), findingKey("make fmt fails — gofumpt sumdb"));
+  assert.notEqual(findingKey("make fmt fails"), findingKey("make lint fails"));
 });

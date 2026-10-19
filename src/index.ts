@@ -55,6 +55,7 @@ export {
   githubBlockedBy,
   githubFetchTask,
   githubFindingReporter,
+  githubFindOpenIssue,
   githubIssueComment,
   githubIssuesByLabel,
   githubMarkPendingVerify,
@@ -93,7 +94,7 @@ export {
   writeSettings,
 } from "./statusline-install.ts";
 export type { Settings, StatusLineBlock } from "./statusline-install.ts";
-export type { Finding, FindingReporter, FindingContext, FindingResult } from "./findings.ts";
+export type { Finding, FindingReporter, FindingContext, FindingResult, Severity } from "./findings.ts";
 export { listParked, readParked, hasParked, answerParked, isAnswered, clearParked, park } from "./state.ts";
 export type { ParkedRecord, ParkReason } from "./state.ts";
 export { tgSend, tgWaitReply, tgConfigured } from "./telegram.ts";

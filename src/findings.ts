@@ -1,3 +1,7 @@
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { hash } from "./issue-id.ts";
+
 /**
  * Incidental findings: defects an agent notices while working a task but does
  * not fix, because fixing them is out of scope. That knowledge lives only in the
@@ -9,7 +13,11 @@ export interface Finding {
   summary: string;
   location?: string;
   repro?: string;
+  /** The agent's own rating, `P0`–`P3`; absent when it gave none (or an unrecognised one). */
+  severity?: Severity;
 }
+
+export type Severity = "P0" | "P1" | "P2" | "P3";
 
 export interface FindingContext {
   taskId: string;
@@ -47,6 +55,7 @@ For each such defect, emit one block:
   <summary>one line</summary>
   <location>file path or area</location>
   <repro>how to see it</repro>
+  <severity>P0 data loss | P1 blocks work | P2 major | P3 minor</severity>
 </finding>
 
 If you noticed nothing, emit exactly:
@@ -75,7 +84,12 @@ export function parseFindings(stdout: string): Finding[] {
         .replace(/\s+/g, " ")
         .trim();
     if (!summary) continue;
-    findings.push({ summary, location: field(inner, "location"), repro: field(inner, "repro") });
+    const finding: Finding = { summary, location: field(inner, "location"), repro: field(inner, "repro") };
+    const severity = field(inner, "severity")
+      ?.match(/\bP[0-3]\b/i)?.[0]
+      .toUpperCase() as Severity | undefined;
+    if (severity) finding.severity = severity;
+    findings.push(finding);
   }
   return findings;
 }
@@ -107,4 +121,144 @@ export async function reportFindings(reporter: FindingReporter, findings: Findin
     }
   }
   return results;
+}
+
+/**
+ * The identity two findings share when they describe the same thing: the summary
+ * lowercased, punctuation collapsed, and the non-green `[unverified: …]` mark dropped —
+ * so the title a filed issue carries matches the summary the next agent writes.
+ */
+export const findingKey = (title: string): string =>
+  title
+    .replace(/^\[unverified:[^\]]*\]\s*/i, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+/** Where a harvested finding went: filed as a new issue, commented on an existing one, or digested. */
+export interface TriagedFinding extends FindingResult {
+  action: "filed" | "seen-again" | "digest";
+}
+
+export interface FindingPolicy {
+  reporter: FindingReporter;
+  /** An open tracker issue whose title is this finding's, if one exists (`githubFindOpenIssue`). */
+  findOpenIssue?: (title: string) => string | undefined | Promise<string | undefined>;
+  /** The comment hook: "seen again" on a duplicate, and the run's one digest. */
+  postComment?: (issueRef: string, body: string) => void | Promise<void>;
+  /** This campaign's filings so far, `findingKey(summary)` → issue ref — read under the lock. */
+  filedSoFar: () => Map<string, string>;
+  /** Record one outcome; called under the lock, so the next run's `filedSoFar` sees a filing. */
+  record: (r: TriagedFinding) => void;
+  maxPerRun: number;
+  severityFloor: Severity;
+  /** The cross-process lock serializing dedupe-then-file across a campaign's parallel runs. */
+  lockFile: string;
+}
+
+const rank = (s: Severity | undefined) => (s ? Number(s[1]) : 2);
+
+/**
+ * File a run's findings without flooding the tracker: a finding this campaign already
+ * filed, or one matching an open issue, gets a "seen again" comment instead of a new
+ * issue; of the rest, only those at or above `severityFloor` are filed — most severe
+ * first, at most `maxPerRun` — and everything else goes into ONE digest comment on the
+ * run's own issue. An unrated finding counts as P2, so a loosely-formatted block is
+ * neither dropped nor demoted. Parallel runs serialize on `lockFile` across the whole
+ * check-then-file, because the tracker's search cannot see an issue filed seconds ago.
+ * A failure is isolated to its own finding, as `reportFindings` does.
+ */
+export async function triageFindings(findings: Finding[], ctx: FindingContext, p: FindingPolicy): Promise<TriagedFinding[]> {
+  const out: TriagedFinding[] = [];
+  const digest: Finding[] = [];
+  await withFileLock(p.lockFile, async () => {
+    const filed = p.filedSoFar();
+    let fresh = 0;
+    const ordered = [...findings].sort((a, b) => rank(a.severity) - rank(b.severity));
+    for (const finding of ordered) {
+      const key = findingKey(finding.summary);
+      let r: TriagedFinding;
+      try {
+        const seen = filed.get(key) ?? (await p.findOpenIssue?.(finding.summary));
+        if (seen) {
+          await p.postComment?.(
+            seen,
+            `Seen again while working on ${hash(ctx.taskId)}${ctx.source ? ` (unverified: ${ctx.source})` : ""}.`,
+          );
+          r = { finding, url: seen, action: "seen-again" };
+        } else if (rank(finding.severity) > rank(p.severityFloor) || fresh >= p.maxPerRun) {
+          digest.push(finding);
+          r = { finding, action: "digest" };
+        } else {
+          const url = await p.reporter(markForSource(finding, ctx.source), ctx);
+          fresh++;
+          r = { finding, url: typeof url === "string" ? url : undefined, action: "filed" };
+          if (r.url) filed.set(key, r.url);
+        }
+      } catch (e: any) {
+        r = { finding, error: String(e?.message ?? e), action: "filed" };
+      }
+      p.record(r);
+      out.push(r);
+    }
+  });
+  if (digest.length && p.postComment) {
+    const lines = digest.map((f) => `- ${f.severity ? `**${f.severity}** ` : ""}${f.summary}${f.location ? ` — \`${f.location}\`` : ""}`);
+    await p.postComment(
+      ctx.taskId,
+      [`Findings noticed during this run, not filed (below the severity floor or over the per-run cap):`, "", ...lines].join("\n"),
+    );
+  }
+  return out;
+}
+
+/** Is `pid` a live process? EPERM means it exists but we may not signal it. */
+const pidAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e: any) {
+    return e?.code === "EPERM";
+  }
+};
+
+/**
+ * Hold an exclusively-created lock file (`wx`) across an async `fn` — the async
+ * twin of host-slots' lock. A lock whose recorded holder pid is dead is reclaimed.
+ */
+async function withFileLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
+  mkdirSync(dirname(path), { recursive: true });
+  for (let attempt = 0; ; attempt++) {
+    try {
+      writeFileSync(path, String(process.pid), { flag: "wx" });
+      break;
+    } catch (e: any) {
+      if (e?.code !== "EEXIST") throw e;
+      let holder = NaN;
+      try {
+        holder = Number(readFileSync(path, "utf8").trim());
+      } catch {
+        // Released between our open and read — retry.
+      }
+      if (Number.isInteger(holder) && holder > 0 && !pidAlive(holder)) {
+        try {
+          unlinkSync(path);
+        } catch {
+          // Someone else reclaimed it first.
+        }
+        continue;
+      }
+      if (attempt > 6000) throw new Error(`findings: could not acquire lock ${path} (holder pid ${holder})`);
+      await new Promise((r) => setTimeout(r, 20));
+    }
+  }
+  try {
+    return await fn();
+  } finally {
+    try {
+      unlinkSync(path);
+    } catch {
+      // Best-effort.
+    }
+  }
 }

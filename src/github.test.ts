@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   githubBlockedBy,
   githubFetchTask,
+  githubFindOpenIssue,
   githubFindingReporter,
   githubIssueComment,
   githubIssuesByLabel,
@@ -711,12 +712,14 @@ async function invokeAllSeams(tracker: ReturnType<typeof githubTracker>) {
   await tracker.postComment("#1", "hi");
   await tracker.onIssueMerged("#1");
   await tracker.reportFinding({ summary: "a bug" }, { taskId: "1", project: "p" });
+  await tracker.findOpenIssue("a bug");
 }
 
-test("githubTracker bundles exactly the six GitHub tracker seams", () => {
+test("githubTracker bundles exactly the seven GitHub tracker seams", () => {
   assert.deepEqual(Object.keys(githubTracker()).sort(), [
     "blockedBy",
     "fetchTask",
+    "findOpenIssue",
     "listByLabel",
     "onIssueMerged",
     "postComment",
@@ -724,13 +727,13 @@ test("githubTracker bundles exactly the six GitHub tracker seams", () => {
   ]);
 });
 
-test("githubTracker passes an explicit repo to all six seams — the deriver never runs", async () => {
+test("githubTracker passes an explicit repo to all seven seams — the deriver never runs", async () => {
   const { run, calls } = recordingRun();
   const tracker = githubTracker({ repo: "x/y" }, run, () => assert.fail("deriver must not run with an explicit repo"));
 
   await invokeAllSeams(tracker);
 
-  assert.equal(calls.length, 6);
+  assert.equal(calls.length, 7);
   assert.equal(calls[1][1], "repos/x/y/issues/1/dependencies/blocked_by");
   for (const c of [calls[0], ...calls.slice(2)]) assert.equal(c[c.indexOf("--repo") + 1], "x/y");
 });
@@ -761,6 +764,7 @@ test("githubTracker refuses in every seam when the repo cannot be derived — ca
     () => tracker.postComment("#1", "hi"),
     () => tracker.onIssueMerged("#1"),
     () => tracker.reportFinding({ summary: "a bug" }, { taskId: "1", project: "p" }),
+    () => tracker.findOpenIssue("a bug"),
   ])
     await assert.rejects(call, Refusal);
   assert.equal(calls.length, 0);
@@ -812,4 +816,19 @@ test("GITHUB_TRACKER_LABELS names exactly the labels the githubTracker preset ad
       description: "Fix on main, not yet verified end-to-end; remove & close after the check",
     },
   );
+});
+
+test("githubFindOpenIssue returns the open issue whose normalised title matches, and nothing for a near miss", async () => {
+  let captured: string[] = [];
+  const run = async (args: string[]) => {
+    captured = args;
+    return JSON.stringify([
+      { number: 7, title: "make fmt fails in the container (and more)" },
+      { number: 9, title: "Make fmt fails in the container!" },
+    ]);
+  };
+  const find = githubFindOpenIssue("x/y", run);
+  assert.equal(await find("make fmt fails in the container"), "9");
+  assert.deepEqual(captured.slice(0, 6), ["issue", "list", "--repo", "x/y", "--state", "open"]);
+  assert.equal(await find("something else entirely"), undefined);
 });

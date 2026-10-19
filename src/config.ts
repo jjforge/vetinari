@@ -3,7 +3,7 @@ import { basename, dirname, resolve } from "node:path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { registerHooks } from "node:module";
-import type { FindingReporter } from "./findings.ts";
+import type { FindingReporter, Severity } from "./findings.ts";
 import type { FileSetOf } from "./fileset.ts";
 import { loggerForRun, type Logger } from "./log.ts";
 import { Refusal } from "./refusal.ts";
@@ -431,6 +431,25 @@ export interface VetinariConfig {
    * Absent, no harvest turn runs and no findings are collected.
    */
   reportFinding?: FindingReporter;
+  /**
+   * The open tracker issue (its ref) whose title is this finding's summary, if any — so a
+   * harvested finding that is already tracked gets a "seen again" comment through
+   * `postComment` instead of a duplicate issue. `githubFindOpenIssue()` ships as a GitHub
+   * implementation. Absent, only this campaign's own earlier filings are deduped.
+   */
+  findOpenIssue?: (title: string) => string | undefined | Promise<string | undefined>;
+  /**
+   * At most this many NEW issues filed from one run's harvested findings, most severe
+   * first; the overflow goes into the run's one digest comment (via `postComment`).
+   * Default 2.
+   */
+  maxFindingsPerRun?: number;
+  /**
+   * The least severe agent rating (`P0`–`P3`) still filed as an issue; a finding rated
+   * below it goes into the run's digest comment instead. An unrated finding counts as
+   * P2. Default `"P2"`.
+   */
+  findingSeverityFloor?: Severity;
   /**
    * Fires once per issue merged into the base with a GREEN merged-base gate — the
    * first hop of the merge→`pending-verify`→close lifecycle

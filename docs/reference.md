@@ -75,9 +75,9 @@ value across the config *files* (which layer holds a secret, which crosses into 
 container) is the on-disk layout below and design §9; this table is the fields of
 the config object itself.
 
-On GitHub, spread the **`githubTracker()` preset** in to wire all six tracker
+On GitHub, spread the **`githubTracker()` preset** in to wire all seven tracker
 seams at once — `fetchTask`, `blockedBy`, `listByLabel`, `postComment`,
-`onIssueMerged`, `reportFinding` — as `...githubTracker({ repo?, findingLabels? })`.
+`onIssueMerged`, `reportFinding`, `findOpenIssue` — as `...githubTracker({ repo?, findingLabels? })`.
 With no `repo` each seam derives it from the project's `origin` on first call (a
 refusal when it cannot); `findingLabels` defaults to `["needs-triage"]`. A field set
 after the spread wins (`onIssueMerged: undefined` turns that hook off). The
@@ -104,6 +104,9 @@ exported for custom wiring.
 | `listByLabel` | tracker seam: expand a label token to its open issues (`githubIssuesByLabel()`) |
 | `fileSet` | seam: the files an issue touches/creates, for keeping a wave file-disjoint |
 | `reportFinding` | hook: file a finding harvested from a green run (`githubFindingReporter(undefined, opts)`); absent → no harvest turn |
+| `findOpenIssue` | seam: the open issue whose title matches a harvested finding (`githubFindOpenIssue()`); a match — or a finding this campaign already filed — gets a "seen again" comment via `postComment` instead of a new issue |
+| `maxFindingsPerRun` | most new issues one run's harvest files, most severe first (default 2); the overflow goes into one digest comment on the run's issue via `postComment` |
+| `findingSeverityFloor` | least severe agent rating (`P0`–`P3`) still filed (default `"P2"`; an unrated finding counts as P2); below it, a finding goes into the run's digest comment |
 | `onIssueMerged` | hook: advance a merged issue's label (`githubMarkPendingVerify()`); absent → no-op |
 | `postComment` | hook: post a comment to the tracker (`githubIssueComment()`, used to answer a non-resumable provider's park) |
 | `destinations` | named Telegram targets `{ chat, thread? }` on the project's one bot |

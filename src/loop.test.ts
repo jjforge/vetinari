@@ -974,6 +974,87 @@ test("runLoop's green harvest is unmarked — a verified finding carries no sour
   assert.equal(rep.calls[0].finding.summary, "Cache extracted corrupt");
 });
 
+// A fake tracker for the dedupe/throttle tests: filing is slow (a real `gh issue create`
+// takes seconds), and search is blind to issues filed moments ago — GitHub's search index
+// lags — so only the campaign's own record of its filings can catch a parallel duplicate.
+const fakeTracker = (open: { ref: string; title: string }[] = []) => {
+  const filed: Finding[] = [];
+  const comments: { ref: string; body: string }[] = [];
+  return {
+    filed,
+    comments,
+    reportFinding: async (finding: Finding) => {
+      await new Promise((r) => setTimeout(r, 20));
+      filed.push(finding);
+      return `https://example/issues/${100 + filed.length}`;
+    },
+    findOpenIssue: async (title: string) => open.find((o) => o.title === title)?.ref,
+    postComment: async (ref: string, body: string) => {
+      comments.push({ ref, body });
+    },
+  };
+};
+
+const greenThen = (harvest: string) =>
+  fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc" }] }, green: true }, { run: { stdout: harvest } }]);
+
+const ENV_FAILURE =
+  "<finding><summary>make fmt fails in the agent container: gofumpt sumdb check</summary><severity>P1</severity></finding><promise>COMPLETE</promise>";
+
+test("three parallel runs harvesting the same finding file it once and comment 'seen again' twice", async () => {
+  const tr = fakeTracker();
+  const cfg = harnessCfg(tr);
+
+  await silence(() =>
+    Promise.all(["T-1", "T-2", "T-3"].map((id) => runLoop(cfg, id, undefined, undefined, depsFor(greenThen(ENV_FAILURE))))),
+  );
+
+  assert.equal(tr.filed.length, 1, "one issue for one environment failure");
+  assert.equal(tr.comments.length, 2);
+  for (const c of tr.comments) {
+    assert.equal(c.ref, "https://example/issues/101");
+    assert.match(c.body, /seen again/i);
+  }
+  assert.equal(readEventLog(cfg).filter((e) => (e as { event: string }).event === "finding-seen-again").length, 2);
+});
+
+test("a finding matching an already-open issue comments on it instead of filing", async () => {
+  const tr = fakeTracker([{ ref: "42", title: "make fmt fails in the agent container: gofumpt sumdb check" }]);
+  const cfg = harnessCfg(tr);
+
+  await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(greenThen(ENV_FAILURE))));
+
+  assert.equal(tr.filed.length, 0);
+  assert.deepEqual(
+    tr.comments.map((c) => c.ref),
+    ["42"],
+  );
+  assert.match(tr.comments[0].body, /seen again.*#T-1/i);
+});
+
+test("findings below the severity floor or over the per-run cap go into one digest comment on the run's issue", async () => {
+  const tr = fakeTracker();
+  const cfg = harnessCfg({ ...tr, maxFindingsPerRun: 1 });
+  const harvest =
+    "<finding><summary>stale doc line</summary><severity>P3</severity></finding>" +
+    "<finding><summary>gate flakes on slow disks</summary><severity>P2</severity></finding>" +
+    "<finding><summary>merge queue drops a commit</summary><severity>P0</severity></finding>" +
+    "<promise>COMPLETE</promise>";
+
+  await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(greenThen(harvest))));
+
+  assert.deepEqual(
+    tr.filed.map((f) => f.summary),
+    ["merge queue drops a commit"],
+    "the cap spends its one slot on the most severe finding",
+  );
+  assert.equal(tr.comments.length, 1, "one digest, not one comment per finding");
+  assert.equal(tr.comments[0].ref, "T-1");
+  assert.match(tr.comments[0].body, /stale doc line/);
+  assert.match(tr.comments[0].body, /gate flakes on slow disks/);
+  assert.doesNotMatch(tr.comments[0].body, /merge queue/);
+});
+
 test("runLoop resumes the parked session on the answer path without re-fetching the task", async () => {
   let fetched = 0;
   const cfg = harnessCfg({

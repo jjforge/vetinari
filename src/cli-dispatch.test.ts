@@ -605,6 +605,20 @@ test("dispatch answer refuses an `outdated-agent` record like a `stopped` one, n
   assert.equal((deps.runLoop as any).calls.length, 0);
 });
 
+test("dispatch answer refuses a session-less park when no postComment is configured — the answer could not be relayed (#496)", async () => {
+  const { deps } = makeDeps({
+    hasParked: spy(true) as any,
+    listParked: spy([{ taskId: "436", reason: "stalled", branch: "agent/436", parkedAt: "t", question: "stalled" }]) as any,
+  });
+  (deps.cfg as any).postComment = undefined;
+  await assert.rejects(
+    () => dispatch({ kind: "answer", taskId: "436", text: ["do", "it"] }, deps),
+    (err: Error) => err instanceof Refusal && /no session/.test(err.message) && /postComment/.test(err.message),
+  );
+  assert.equal((deps.answerParked as any).calls.length, 0, "nothing is delivered");
+  assert.equal((deps.runLoop as any).calls.length, 0);
+});
+
 test("dispatch run rejects with a Refusal when the task id is missing (a required-argument refusal)", async () => {
   const { deps } = makeDeps();
   await assert.rejects(

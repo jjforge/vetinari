@@ -1048,6 +1048,28 @@ test("runLoop consumes an answered parked record for a non-resumable provider �
   assert.equal(hasParked(cfg, "T-1"), false, "the answered record is cleared once the run starts");
 });
 
+test("runLoop re-runs an answered session-less park fresh for a resumable provider — relays the answer, clears the record (#496)", async () => {
+  const posted: { taskId: string; body: string }[] = [];
+  const cfg = harnessCfg({
+    agent: { provider: "claude" },
+    postComment: async (taskId: string, body: string) => {
+      posted.push({ taskId, body });
+    },
+  });
+  // An idle stall can park with no session id; the answer must still be consumed.
+  await park(cfg, { taskId: "T-1", reason: "stalled", detail: "idle", branch: "agent/T-1", question: "stalled" });
+  answerParked(cfg, "T-1", "try the other approach");
+  const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc" }] }, green: true }]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+
+  assert.equal(outcome, "green");
+  assert.equal(posted.length, 1, "the answer is relayed as a comment");
+  assert.match(posted[0].body, /try the other approach/);
+  assert.equal(sbx.runCalls[0].resumeSession, undefined, "no session to resume — a fresh run");
+  assert.equal(hasParked(cfg, "T-1"), false, "the answered record is cleared");
+});
+
 // A fake sandbox whose `run()` observes the host lease mid-container, so a test can assert
 // the run is holding a slot exactly while the agent works. It records both the run's own
 // held lease and whether the project reads as a live *campaign* — a standalone run holds a

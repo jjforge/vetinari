@@ -410,8 +410,9 @@ export async function runLoop(
     if (!entry && hasParked(cfg, taskId)) {
       const rec = readParked(cfg, taskId, { requireSession: false });
       if (rec.answer != null) {
-        if (resumable) {
-          if (!rec.sessionId) throw new Error(`parked record for ${taskId} has no sessionId — cannot resume the answer`);
+        // A session-less record (an idle stall can park without one) degrades like a
+        // non-resumable provider: relay the answer and re-enter fresh (#496).
+        if (resumable && rec.sessionId) {
           entry = { resumeSessionId: rec.sessionId, answerPrompt: answerPromptFor(rec.answer) };
         } else {
           if (!cfg.postComment) throw new Refusal(nonResumableAnswerWarning(provider));

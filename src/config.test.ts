@@ -718,3 +718,17 @@ test("after a load, tsc -p vetinari type-checks a project's config against this 
   assert.notEqual(misspelled.status, 0);
   assert.match(misspelled.stdout, /TS2561/);
 });
+
+// A bind mount whose sandboxPath's parents are missing from the image makes docker create them
+// root-owned, so the agent cannot write beside the mount (Go's ~/go/pkg/sumdb beside a mounted
+// ~/go/pkg/mod). Both shipped Dockerfiles must pre-create the cache roots as the agent user.
+for (const dockerfile of ["../templates/Dockerfile", "../examples/jjforge/vetinari/Dockerfile"]) {
+  test(`${dockerfile} pre-creates the agent's home cache roots as the agent user`, () => {
+    const text = readFileSync(new URL(dockerfile, import.meta.url), "utf8");
+    const afterUser = text.slice(text.indexOf("USER ${AGENT_UID}"));
+    const mkdir = afterUser.split("\n").find((l) => /^RUN mkdir -p /.test(l)) ?? "";
+    for (const root of ["/home/agent/go/pkg", "/home/agent/.cache", "/home/agent/.cargo"]) {
+      assert.ok(mkdir.split(/\s+/).includes(root), `${dockerfile}: no agent-user mkdir of ${root}`);
+    }
+  });
+}

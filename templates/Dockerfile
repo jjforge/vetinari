@@ -48,6 +48,12 @@ ARG AGENT_GID=1000
 RUN groupmod -o -g $AGENT_GID node && usermod -o -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
 USER ${AGENT_UID}:${AGENT_GID}
 
+# Pre-create the home cache roots as the agent user. A bind mount whose parents are
+# missing from the image makes docker create them root-owned, so the agent could not
+# write beside the mount (e.g. Go's ~/go/pkg/sumdb next to a mounted ~/go/pkg/mod).
+# Mount caches beneath one of these, or add your own root here.
+RUN mkdir -p /home/agent/go/pkg /home/agent/.cache /home/agent/.cargo
+
 RUN curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH="/home/agent/.local/bin:$PATH"
 

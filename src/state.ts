@@ -175,6 +175,8 @@ export interface OutboundRecord {
   event?: string;
   text: string;
   enqueuedAt: string;
+  /** This process's enqueue counter — breaks `enqueuedAt` ties; absent on records written before it existed (read as 0). */
+  seq?: number;
   /** ISO timestamp the gateway routed it, absent until then — the idempotence marker. */
   sentAt?: string;
   /** The destination name the notify map resolved it to, stamped alongside `sentAt`. */
@@ -184,25 +186,29 @@ export interface OutboundRecord {
 /** A project's outbox under a base location (its `.vetinari.local/`). */
 export const outboxDirOf = (baseLocation: string) => join(baseLocation, "outbox");
 
+/** Per-process enqueue counter, so records written within the same millisecond still list in enqueue order. */
+let outboundSeq = 0;
+
 /**
  * Drop a category-tagged outbound record into the project's outbox instead of
  * sending it (ADR 0002: the gateway is the sole sender). One file per record,
- * keyed by a fresh id so records written within the same tick never collide.
+ * keyed by a fresh id so records written within the same tick never collide,
+ * and stamped with a `seq` so they still list in enqueue order.
  * Silent by design — the gateway drains and routes it per the notify map.
  */
 export function enqueueOutbound(
   cfg: Pick<ResolvedConfig, "stateDir" | "log">,
-  msg: Omit<OutboundRecord, "id" | "enqueuedAt" | "sentAt" | "destination">,
+  msg: Omit<OutboundRecord, "id" | "enqueuedAt" | "seq" | "sentAt" | "destination">,
 ): void {
   const dir = outboxDirOf(cfg.stateDir);
   mkdirSync(dir, { recursive: true });
-  const rec: OutboundRecord = { id: randomUUID(), enqueuedAt: new Date().toISOString(), ...msg };
+  const rec: OutboundRecord = { id: randomUUID(), enqueuedAt: new Date().toISOString(), seq: ++outboundSeq, ...msg };
   writeFileAtomic(join(dir, `${rec.id}.json`), JSON.stringify(rec, null, 2));
   cfg.log.log("outbound-enqueued", { id: rec.id, category: rec.category, event: rec.event });
 }
 
 /**
- * Every outbound record under an explicit outbox directory, oldest first — the gateway drains a project's live.
+ * Every outbound record under an explicit outbox directory, oldest first (`enqueuedAt`, then `seq`) — the gateway drains a project's live.
  * A record that will not parse is skipped and logged `outbox-record-unreadable`, naming the file, as
  * `listParkedIn` does: one torn record must not take down the gateway tick for every project.
  */
@@ -217,7 +223,7 @@ export function listOutboxIn(outboxDir: string, logger: Logger = hostLogger()): 
       logger.log("outbox-record-unreadable", { file, error: String(e) });
     }
   }
-  return recs.sort((a, b) => a.enqueuedAt.localeCompare(b.enqueuedAt));
+  return recs.sort((a, b) => a.enqueuedAt.localeCompare(b.enqueuedAt) || (a.seq ?? 0) - (b.seq ?? 0));
 }
 
 /** A run's own outbox (for tests and archival), resolved from its state dir. */

@@ -405,3 +405,14 @@ test("neither outbox writer writes its record with a plain writeFileSync — bot
     assert.doesNotMatch(body, /writeFileSync\(/, `${fn} does not call a plain writeFileSync`);
   }
 });
+
+test("listOutboxIn lists records enqueued in the same millisecond in enqueue order", (t) => {
+  const dir = outboxDir();
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-01-01T00:00:00.000Z") });
+  for (let i = 0; i < 20; i++) enqueueOutbound(cfgFor(dir), { category: "progress", text: `msg ${i}` });
+
+  assert.deepEqual(
+    listOutboxIn(outboxDirOf(dir)).map((r) => r.text),
+    Array.from({ length: 20 }, (_, i) => `msg ${i}`),
+  );
+});

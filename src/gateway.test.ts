@@ -1096,7 +1096,7 @@ test("drainOutbox routes each record to the destination its category resolves an
 
   // success:green → wildcard ops (-100); failure → alerts (-200);
   // progress:prune → alerts (-200); progress:wave-start → wildcard ops (-100).
-  // Intra-tick order is unspecified, so assert each message's destination by text.
+  // Send order is pinned by its own test; here assert each message's destination by text.
   const chatOf = new Map(sends.map((s) => [s.text, s.chat]));
   assert.equal(sends.length, 4, "every record is sent exactly once");
   assert.equal(chatOf.get("GREEN on 26"), "-100");
@@ -1109,6 +1109,39 @@ test("drainOutbox routes each record to the destination its category resolves an
   assert.ok(
     after.every((r) => r.sentAt),
     "every routed record is marked sent",
+  );
+});
+
+test("drainOutbox hands records enqueued in the same millisecond to send in enqueue order", async (t) => {
+  const base = outboxBase();
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-01-01T00:00:00.000Z") });
+  for (let i = 0; i < 20; i++) enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "progress", text: `msg ${i}` });
+
+  const { sends, send } = recordingSend();
+  await drainOutbox(routed(base), send, memoryLogger());
+
+  assert.deepEqual(
+    sends.map((s) => s.text),
+    Array.from({ length: 20 }, (_, i) => `msg ${i}`),
+  );
+});
+
+test("drainOutbox still sends a record written before seq existed, ordered by enqueuedAt", async (t) => {
+  const base = outboxBase();
+  mkdirSync(outboxDirOf(base), { recursive: true });
+  const legacy = (id: string, enqueuedAt: string, text: string) =>
+    writeFileSync(join(outboxDirOf(base), `${id}.json`), JSON.stringify({ id, category: "progress", text, enqueuedAt }));
+  legacy("old-early", "2026-01-01T00:00:00.000Z", "legacy early");
+  legacy("old-late", "2026-01-01T00:00:02.000Z", "legacy late");
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-01-01T00:00:01.000Z") });
+  enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "progress", text: "current" });
+
+  const { sends, send } = recordingSend();
+  await drainOutbox(routed(base), send, memoryLogger());
+
+  assert.deepEqual(
+    sends.map((s) => s.text),
+    ["legacy early", "current", "legacy late"],
   );
 });
 

@@ -119,15 +119,28 @@ export function memoryLogger(): MemoryLogger {
   return { log: write, events } as MemoryLogger;
 }
 
-/** Persist a gate's full output; the event log carries only the path. */
+/** A per-process sequence for gate-log names, so two gates finishing in the same millisecond differ. */
+let gateLogSeq = 0;
+
+/**
+ * Persist a gate's full output; the event log carries only the path. The name is
+ * `gate-<ts>-<n>.log`: `<n>` disambiguates gates within this process, and the exclusive create
+ * (`wx`) — retrying with the next `<n>` on `EEXIST` — keeps a parallel task's process from ever
+ * overwriting another's log (#478).
+ */
 export function writeGateLog(stateDir: string, cmd: string, res: { stdout?: string; stderr?: string; exitCode: number }) {
-  const outFile = `${stateDir}/logs/gate-${Date.now()}.log`;
-  mkdirSync(dirname(outFile), { recursive: true });
-  writeFileSync(
-    outFile,
-    `$ ${cmd}\n--- stdout ---\n${res.stdout ?? ""}\n--- stderr ---\n${res.stderr ?? ""}\n--- exit: ${res.exitCode} ---\n`,
-  );
-  return outFile;
+  const body = `$ ${cmd}\n--- stdout ---\n${res.stdout ?? ""}\n--- stderr ---\n${res.stderr ?? ""}\n--- exit: ${res.exitCode} ---\n`;
+  const ts = Date.now();
+  mkdirSync(`${stateDir}/logs`, { recursive: true });
+  for (;;) {
+    const outFile = `${stateDir}/logs/gate-${ts}-${gateLogSeq++}.log`;
+    try {
+      writeFileSync(outFile, body, { flag: "wx" });
+      return outFile;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    }
+  }
 }
 
 export const tail = (s: string, lines: number) => s.split("\n").slice(-lines).join("\n");

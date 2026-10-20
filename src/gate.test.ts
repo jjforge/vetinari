@@ -1,13 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { GateSpec, ResolvedConfig } from "./config.ts";
 import type { Sandbox } from "./sandbox.ts";
 import { runGates, selectGates, tapFailures } from "./gate.ts";
 import { activityLogPath } from "./activity.ts";
-import { loggerForRun, tail } from "./log.ts";
+import { loggerForRun, tail, writeGateLog } from "./log.ts";
 import { readEventLog, type GateResultEvent, type OrchestratorEvent } from "./event-log.ts";
 
 // Fixtures mirror the scoped gates the field actually sees (issue #240): the
@@ -278,4 +278,42 @@ test("a red TAP gate's report names the failure instead of tailing passing lines
   assert.match(report, /\$ run-tests/);
   assert.match(report, /not ok 1 - the widget explodes/);
   assert.match(report, /location: '\/src\/widget\.test\.ts:42:3'/);
+});
+
+test("two gate commands get two distinct gate logs, each holding its own command's output (#478)", async () => {
+  const cfg = gateCfg([{ cmd: "tsc --noEmit" }, { cmd: "run-tests" }]);
+  await runGates(cfg, gateSandbox({}), { all: true });
+  const results = readEventLog(cfg).filter((e): e is GateResultEvent => e.event === "gate-result");
+  assert.equal(results.length, 2);
+  assert.notEqual(results[0].outFile, results[1].outFile);
+  for (const r of results) {
+    assert.match(r.outFile, /\/logs\/gate-[^/]*\.log$/);
+    assert.ok(readFileSync(r.outFile, "utf8").startsWith(`$ ${r.cmd}\n`), `${r.outFile} holds ${r.cmd}`);
+  }
+});
+
+test("two writeGateLog calls in the same millisecond get different paths, and both files survive (#478)", (t) => {
+  t.mock.method(Date, "now", () => 1_700_000_000_000);
+  const stateDir = mkdtempSync(join(tmpdir(), "vetinari-gatelog-"));
+  const a = writeGateLog(stateDir, "first", { stdout: "", stderr: "", exitCode: 0 });
+  const b = writeGateLog(stateDir, "second", { stdout: "", stderr: "", exitCode: 0 });
+  assert.notEqual(a, b);
+  assert.ok(readFileSync(a, "utf8").startsWith("$ first\n"));
+  assert.ok(readFileSync(b, "utf8").startsWith("$ second\n"));
+  assert.equal(readdirSync(join(stateDir, "logs")).filter((f) => /^gate-.*\.log$/.test(f)).length, 2);
+});
+
+test("writeGateLog never overwrites a gate log another process already wrote at its next path (#478)", (t) => {
+  t.mock.method(Date, "now", () => 1_700_000_000_000);
+  const stateDir = mkdtempSync(join(tmpdir(), "vetinari-gatelog-"));
+  const first = writeGateLog(stateDir, "first", { exitCode: 0 });
+  // Simulate another process's write landing at the very path this process would pick next.
+  const n = Number(/-(\d+)\.log$/.exec(first)![1]);
+  const theirs = join(stateDir, "logs", `gate-1700000000000-${n + 1}.log`);
+  writeFileSync(theirs, "$ another process\n");
+  const ours = writeGateLog(stateDir, "ours", { exitCode: 0 });
+  assert.notEqual(ours, theirs);
+  assert.equal(readFileSync(theirs, "utf8"), "$ another process\n");
+  assert.ok(readFileSync(ours, "utf8").startsWith("$ ours\n"));
+  assert.match(ours, /\/logs\/gate-.*\.log$/);
 });

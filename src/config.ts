@@ -443,13 +443,16 @@ export interface VetinariConfig {
    * The open tracker issue (its ref) whose title is this finding's summary, if any — so a
    * harvested finding that is already tracked gets a "seen again" comment through
    * `postComment` instead of a duplicate issue. `githubFindOpenIssue()` ships as a GitHub
-   * implementation. Absent, only this campaign's own earlier filings are deduped.
+   * implementation. Absent, only this campaign's own earlier filings are deduped. A
+   * search that throws counts as no match — the finding is still filed or digested, and
+   * the error is logged as `finding-search-failed`.
    */
   findOpenIssue?: (title: string) => string | undefined | Promise<string | undefined>;
   /**
    * At most this many NEW issues filed from one run's harvested findings, most severe
    * first; the overflow goes into the run's one digest comment (via `postComment`).
-   * Default 2.
+   * With no `postComment` the digest is not posted; the run logs `finding-digest-dropped`
+   * with its count and summaries instead. Default 2.
    */
   maxFindingsPerRun?: number;
   /**

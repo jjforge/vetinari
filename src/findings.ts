@@ -138,6 +138,8 @@ export const findingKey = (title: string): string =>
 /** Where a harvested finding went: filed as a new issue, commented on an existing one, or digested. */
 export interface TriagedFinding extends FindingResult {
   action: "filed" | "seen-again" | "digest";
+  /** The open-issue search failed with this; the finding was triaged as unmatched. */
+  searchError?: string;
 }
 
 export interface FindingPolicy {
@@ -166,7 +168,8 @@ const rank = (s: Severity | undefined) => (s ? Number(s[1]) : 2);
  * run's own issue. An unrated finding counts as P2, so a loosely-formatted block is
  * neither dropped nor demoted. Parallel runs serialize on `lockFile` across the whole
  * check-then-file, because the tracker's search cannot see an issue filed seconds ago.
- * A failure is isolated to its own finding, as `reportFindings` does.
+ * A failure is isolated to its own finding, as `reportFindings` does; a failed open-issue
+ * search counts as no match, so the finding is still filed or digested.
  */
 export async function triageFindings(findings: Finding[], ctx: FindingContext, p: FindingPolicy): Promise<TriagedFinding[]> {
   const out: TriagedFinding[] = [];
@@ -178,8 +181,17 @@ export async function triageFindings(findings: Finding[], ctx: FindingContext, p
     for (const finding of ordered) {
       const key = findingKey(finding.summary);
       let r: TriagedFinding;
+      // A failed search is no match: the finding is triaged as fresh rather than lost.
+      let seen = filed.get(key);
+      let searchError: string | undefined;
+      if (!seen) {
+        try {
+          seen = await p.findOpenIssue?.(finding.summary);
+        } catch (e: any) {
+          searchError = String(e?.message ?? e);
+        }
+      }
       try {
-        const seen = filed.get(key) ?? (await p.findOpenIssue?.(finding.summary));
         if (seen) {
           await p.postComment?.(
             seen,
@@ -198,6 +210,7 @@ export async function triageFindings(findings: Finding[], ctx: FindingContext, p
       } catch (e: any) {
         r = { finding, error: String(e?.message ?? e), action: "filed" };
       }
+      if (searchError) r.searchError = searchError;
       p.record(r);
       out.push(r);
     }

@@ -818,17 +818,19 @@ test("GITHUB_TRACKER_LABELS names exactly the labels the githubTracker preset ad
   );
 });
 
-test("githubFindOpenIssue returns the open issue whose normalised title matches, and nothing for a near miss", async () => {
-  let captured: string[] = [];
+test("githubFindOpenIssue lists open issues once and returns the best match for a reworded title, nothing for an unrelated one", async () => {
+  const calls: string[][] = [];
   const run = async (args: string[]) => {
-    captured = args;
+    calls.push(args);
     return JSON.stringify([
-      { number: 7, title: "make fmt fails in the container (and more)" },
-      { number: 9, title: "Make fmt fails in the container!" },
+      { number: 7, title: "README links to a removed flag" },
+      { number: 9, title: "make fmt fails in the agent container: gofumpt sumdb check" },
+      { number: 11, title: "make fmt fails in the agent container" },
     ]);
   };
   const find = githubFindOpenIssue("x/y", run);
-  assert.equal(await find("make fmt fails in the container"), "9");
-  assert.deepEqual(captured.slice(0, 6), ["issue", "list", "--repo", "x/y", "--state", "open"]);
-  assert.equal(await find("something else entirely"), undefined);
+  assert.equal(await find("make fmt fails: gofumpt sumdb verification error in container"), "9");
+  assert.deepEqual(calls[0], ["issue", "list", "--repo", "x/y", "--state", "open", "--limit", "200", "--json", "number,title"]);
+  assert.equal(await find("merge queue drops a commit"), undefined);
+  assert.equal(calls.length, 2, "one listing per call");
 });

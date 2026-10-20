@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { findingKey, type Finding, type FindingContext } from "./findings.ts";
+import { bestFindingMatch, type Finding, type FindingContext } from "./findings.ts";
 import type { Exclusion } from "./plan.ts";
 import { repoForProject } from "./config.ts";
 import { Refusal } from "./refusal.ts";
@@ -293,32 +293,22 @@ export const githubFindingReporter = (
 };
 
 /**
- * A ready `findOpenIssue` handler: the open issue in `repo` whose title is `title`, compared
- * by `findingKey` (case, punctuation and the `[unverified: …]` mark ignored), found through
- * GitHub search. Search lags a fresh `issue create` by seconds, which is why the harvest also
- * dedupes against the campaign's own filings. Repo derivation as `githubFindingReporter`.
+ * A ready `findOpenIssue` handler: the open issue in `repo` whose title best matches `title`
+ * by `findingSimilarity` (score >= 0.5), from one listing of up to 200 open issues per call —
+ * GitHub search requires every word, so it never finds a reworded title. The harvest also
+ * dedupes against the campaign's own filings first, so a listing that misses an issue filed
+ * moments ago loses nothing. Repo derivation as `githubFindingReporter`.
  */
 export const githubFindOpenIssue = (repo?: string, run: (args: string[]) => Promise<string> = gh, deriveRepo = deriveRepoFromProject) => {
   const repoOf = repoAccessor("githubFindOpenIssue", repo, deriveRepo);
   return async (title: string): Promise<string | undefined> => {
-    const r = repoOf();
-    const key = findingKey(title);
-    const out = await run([
-      "issue",
-      "list",
-      "--repo",
-      r,
-      "--state",
-      "open",
-      "--search",
-      `${key} in:title`,
-      "--limit",
-      "30",
-      "--json",
-      "number,title",
-    ]);
+    const out = await run(["issue", "list", "--repo", repoOf(), "--state", "open", "--limit", "200", "--json", "number,title"]);
     const rows: Array<{ number?: number; title?: string }> = JSON.parse(out || "[]");
-    const hit = rows.find((row) => row.number != null && findingKey(row.title ?? "") === key);
+    const hit = bestFindingMatch(
+      title,
+      rows.filter((row) => row.number != null),
+      (row) => row.title ?? "",
+    );
     return hit ? String(hit.number) : undefined;
   };
 };

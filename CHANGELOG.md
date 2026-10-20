@@ -23,6 +23,10 @@ Within a milestone each bold section label appears at most once.
 **New features:**
 - [user] Harvested findings are throttled and deduped (#499): a finding this campaign already filed, or one matching an open issue (new `findOpenIssue` seam, `githubFindOpenIssue()`, included in `githubTracker()`), gets a "seen again" comment instead of a new issue; the harvest prompt asks for a `<severity>` (P0–P3), only findings at or above `findingSeverityFloor` (default `P2`) are filed, at most `maxFindingsPerRun` (default 2) per run, most severe first, and the rest go into one digest comment on the run's issue via `postComment`.
 
+**Improvements:**
+- [user] A wave whose every issue was pruned no longer sits among the live waves on the dashboard: it renders greyed out, after every other wave, collapsed to a ✂️ chip you can open to see what was pruned (an archived run shows it greyed and last, expanded) (#502).
+- [user] `campaign`, `redrive`, `run` and `baseline` now refuse to start when a `mounts[].sandboxPath` under `/home/agent` has a parent dir missing from the image, or not agent-owned there — docker would create it as root and the agent could not write beside the mount (e.g. Go's sumdb beside a mounted `~/go/pkg/mod`). The refusal names each mount and parent and the `RUN mkdir -p` line to add after the Dockerfile's `USER` line, then `vetinari build`. A probe that cannot run (no Docker, no `stat` in the image) never refuses (#512).
+
 **Bug fixes:**
 - [user] The gateway now sends outbox messages a run enqueues within the same millisecond in the order they were enqueued, rather than in random order; each outbound record carries a `seq` tie-breaker, and records written before this change still drain by time (#479).
 - [user] The dashboard's slow-gates section no longer pools an archived standalone `vetinari run`'s gate results into the campaign before it: with no `campaign-start` in the live log, only the newest archive's own campaign counts, and the section is empty when that archive has none (#488).
@@ -33,10 +37,13 @@ Within a milestone each bold section label appears at most once.
 - [user] Running `git worktree prune` inside one agent container no longer deletes every concurrent agent's worktree entry. Each sandbox now mounts the host's `<stateDir>/worktrees` directory read-only at its own host path, so the `gitdir` paths git recorded resolve inside the container. Sibling worktrees stay read-only to the agent (#506).
 - [user] `answer` on a campaign member whose last outcome is `failed` now delivers the answer and names `vetinari redrive --override`, instead of starting a redrive that fails the campaign again at once (#513).
 - [user] `answer` on a `conflict` park is now refused with the conflict move — resolve on the base, then `vetinari redrive` — instead of the session-less refusal, or, with `postComment` set, a fresh re-run that skipped integration (#513).
+- [user] `vetinari init` no longer reports a GitHub label as missing (and offers to create it) when the repo already has it under different case, such as `Needs-Triage` (#490).
+- [user] A wave whose every issue was pruned no longer counts in any roll-up: a finished campaign now reads completed on the landing card ("Last run"), the gateway `/status` and the Redrive gate ("settled"), drops the graft input, and the wave counts in the meta line, status line and chat `/status` leave it out; the Stop and Redrive dialogs name the real wave in flight (#502).
 
 **Documentation:**
 - [user] `docs/ticket-contract.md` no longer says a backticked non-file word always forbids confidence: it does on a `Touches:`/`Files:` line, but on a `Creates:` line it becomes a bare `Creates:` key and the ticket stays confident (#487).
 - [user] The GitHub config template, the README, and the user guide catch up with the findings throttle (#511): the `githubTracker()` seam lists name `findOpenIssue` (seven seams), the GitHub template offers commented-out `maxFindingsPerRun` and `findingSeverityFloor` lines, and the user guide's Findings bullet covers dedupe, the severity floor, the per-run cap, and the digest comment.
+- [user] The ticket contract and user guide now tell ticket writers to cite a new directory (or new package) in `Creates:` by its full path from the repo root — a partial path such as `newdir/a.ts` keys differently from `src/newdir/a.ts` and does not collide, so both tickets would land in one wave (#489).
 
 ### Collected changes — October 5, 2026
 

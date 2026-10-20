@@ -91,7 +91,7 @@ exported for custom wiring.
 | `baseBranch` | the branch merges land on (the base a campaign advances) |
 | `gates` | the test commands that decide green; `{ cmd, label?, when?, budgetSeconds? }` — `when` scopes a gate to branches that touched matching files; `budgetSeconds` is how long the gate should take, and a run over it (green or red) is flagged as a [slow gate](user-guide.md#where-you-see-things) — information only, never a verdict |
 | `setup` | commands run once per sandbox, before the agent starts (e.g. `npm ci`) |
-| `mounts` | host paths mounted into the container — shared package caches, never build outputs |
+| `mounts` | host paths mounted into the container — shared package caches, never build outputs. A mount under `/home/agent` needs every parent dir in the image, agent-owned (docker creates a missing one as root): `campaign`/`redrive`/`run`/`baseline` refuse to start when one is missing from the image or not agent-owned there, naming the `RUN mkdir -p` line to add after the Dockerfile's `USER` line |
 | `agent` | the default provider selection (`provider`, `model`, `effort`); a per-invocation `--agent`/`--model`/`--effort` overrides it |
 | `maxTurns` | turn budget per task before a `stalled` park (default 6) |
 | `idleTimeoutSeconds` | idle-stall ceiling before a `stalled` park (default 600) |

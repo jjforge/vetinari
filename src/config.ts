@@ -355,7 +355,8 @@ export interface MountSpec {
    * agent user: docker creates any missing parent as root, and the agent then cannot write
    * beside the mount (Go's `~/go/pkg/sumdb` next to a mounted `~/go/pkg/mod`). The template
    * Dockerfile pre-creates `~/go/pkg`, `~/.cache` and `~/.cargo`; add a `mkdir -p` after its
-   * `USER` line for any other root.
+   * `USER` line for any other root. vetinari refuses to start `campaign`/`redrive`/`run`/`baseline`
+   * when a `/home/agent` mount's parent is missing from the image, or not agent-owned there.
    */
   sandboxPath: string;
   readonly?: boolean;

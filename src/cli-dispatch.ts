@@ -48,6 +48,7 @@ import {
 import { campaignParkMove, REDRIVE_ONLY_REASONS } from "./gateway.ts";
 import { makeReporter } from "./report.ts";
 import { Refusal } from "./refusal.ts";
+import { mountParentPaths, mountParentProblems, type readMountParentOwners } from "./sandbox.ts";
 
 const USAGE = renderUsage();
 
@@ -408,6 +409,9 @@ export interface DispatchDeps {
   /** The image's `Created` and the Dockerfile's mtime and last commit — what the stale-image
    *  warning at `campaign`/`redrive`/`run`/`baseline` start compares (#444). */
   readImageFreshness: typeof readImageFreshness;
+  /** Who owns each path inside the image, from one `stat` container — what the mount-parent
+   *  refusal at `campaign`/`redrive`/`run`/`baseline` start checks (#512). Undefined: no probe. */
+  readMountParentOwners: typeof readMountParentOwners;
 }
 
 /** Warn (stderr, never refusing) when `cfg.image` is older than its Dockerfile (#444). */
@@ -415,6 +419,29 @@ function warnIfImageStale(deps: DispatchDeps): void {
   const { image } = deps.cfg;
   const warning = staleImageWarning(image, DOCKERFILE, deps.readImageFreshness(image, DOCKERFILE));
   if (warning) deps.error(warning);
+}
+
+/**
+ * Refuse when a `/home/agent` mount's parent is missing from `cfg.image` or not owned there by the
+ * uid sandcastle runs the container as (#512): docker creates a missing parent as root, and the
+ * agent then cannot write beside the mount. A probe that could not run never refuses.
+ */
+function refuseIfMountParentsUnwritable(deps: DispatchDeps): void {
+  const { image, mounts = [] } = deps.cfg;
+  const uid = process.getuid?.();
+  const paths = [...new Set(mounts.flatMap((m) => mountParentPaths(m.sandboxPath)))];
+  if (uid === undefined || !paths.length) return;
+  const owners = deps.readMountParentOwners(image, paths);
+  const problems = owners ? mountParentProblems(mounts, owners, uid) : [];
+  if (!problems.length) return;
+  throw new Refusal(
+    [
+      `image ${image} lacks an agent-owned parent for a mount — docker creates a missing one as root, and the agent cannot write beside the mount:`,
+      ...problems.map((p) => `  ${p.mount}: ${p.parent}`),
+      "Add this line after your Dockerfile's USER line, then run `vetinari build`:",
+      `  RUN mkdir -p ${[...new Set(problems.map((p) => p.parent))].join(" ")}`,
+    ].join("\n"),
+  );
 }
 
 /**
@@ -433,6 +460,7 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
     }
     case "baseline": {
       warnIfImageStale(deps);
+      refuseIfMountParentsUnwritable(deps);
       deps.setExitCode((await deps.baseline(cfg)) ? 0 : 1);
       return;
     }
@@ -455,8 +483,11 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
         return;
       }
       enableJson(cmd.json);
-      // A campaign child skips it: its campaign warned once at start, not once per member.
-      if (!deps.isCampaignChild) warnIfImageStale(deps);
+      // A campaign child skips both: its campaign checked once at start, not once per member.
+      if (!deps.isCampaignChild) {
+        warnIfImageStale(deps);
+        refuseIfMountParentsUnwritable(deps);
+      }
       deps.archiveLeftoverRun();
       // A crash redrive spawned this child to resume a crashed session on the existing branch
       // (design §7, `VETINARI_RESUME_SESSION`): re-enter the loop on that session with a
@@ -495,6 +526,7 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
       deps.selectAgent(cfg, cmd.agent);
       enableJson(cmd.json);
       warnIfImageStale(deps);
+      refuseIfMountParentsUnwritable(deps);
       const outcome = await deps.campaign(cfg, [], deps.host, undefined, {
         autoPrune: cmd.autoPrune,
         resume: true,
@@ -638,7 +670,10 @@ async function dispatchCampaign(cmd: Extract<Command, { kind: "campaign" }>, dep
   // `run` drives the chosen provider, not a silent claude.
   deps.selectAgent(cfg, cmd.agent);
   // A dry run starts nothing, so it is not warned.
-  if (!cmd.dryRun) warnIfImageStale(deps);
+  if (!cmd.dryRun) {
+    warnIfImageStale(deps);
+    refuseIfMountParentsUnwritable(deps);
+  }
 
   // `--json` streams raw events to stdout (below, via the run logger) and — through this
   // reporter — silences every human line, so tooling reads clean JSONL. Without it the

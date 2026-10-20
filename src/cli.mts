@@ -19,6 +19,7 @@ import { dispatch, parseArgs, type AgentOverride } from "./cli-dispatch.ts";
 import { applyCollect, describeFragmentNearMisses, formatMilestoneDate, FRAGMENT_DIR } from "./changelog.ts";
 import { hostLogger, hostLogTarget, readHostLog, readHostLogLines, renderHostEvent } from "./log.ts";
 import { runLoop } from "./loop.ts";
+import { readMountParentOwners } from "./sandbox.ts";
 import { baseline, build, campaign, readImageFreshness, requireTelegram, tgTest } from "./modes.ts";
 import { runTgConnect } from "./tg-connect.ts";
 import { tgSend } from "./telegram.ts";
@@ -673,4 +674,5 @@ await dispatch(parseArgs([mode, ...rest]), {
   ask,
   tgSend,
   readImageFreshness,
+  readMountParentOwners,
 });

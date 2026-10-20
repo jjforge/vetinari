@@ -1,11 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AGENT_ENV_VAR } from "./config.ts";
-import { agentFor, ensureMountSources, foreignWorktreeFor, makeSandboxOptions, parseForeignWorktree, sandboxMounts } from "./sandbox.ts";
+import {
+  agentFor,
+  ensureMountSources,
+  foreignWorktreeFor,
+  makeSandboxOptions,
+  mountParentProblems,
+  parseForeignWorktree,
+  parseStatOwners,
+  readMountParentOwners,
+  sandboxMounts,
+} from "./sandbox.ts";
 import type { ResolvedConfig } from "./config.ts";
 
 // agentFor only reads `cfg.agent` and the VETINARI_AGENT env var — a bare object
@@ -148,4 +158,94 @@ test("foreignWorktreeFor reads the real git worktree list, naming a checkout of 
   const review = join(repo, "review-436");
   git("worktree", "add", "-q", "-b", "agent/436", review, "main");
   assert.equal(foreignWorktreeFor("agent/436", ".vetinari.local", repo), review);
+});
+
+// Docker creates a bind mount's missing parents as root, so the agent cannot write beside the
+// mount (#512). `owners` maps each ancestor that exists in the image to its owning uid.
+const AGENT_UID = 1000;
+const mount = (sandboxPath: string) => ({ hostPath: "/cache", sandboxPath });
+
+test("mountParentProblems names a parent missing from the image", () => {
+  assert.deepEqual(mountParentProblems([mount("/home/agent/.npm/_cacache")], new Map(), AGENT_UID), [
+    { mount: "/home/agent/.npm/_cacache", parent: "/home/agent/.npm" },
+  ]);
+});
+
+test("mountParentProblems accepts parents that exist and are agent-owned", () => {
+  const owners = new Map([
+    ["/home/agent/go", AGENT_UID],
+    ["/home/agent/go/pkg", AGENT_UID],
+  ]);
+  assert.deepEqual(mountParentProblems([mount("/home/agent/go/pkg/mod")], owners, AGENT_UID), []);
+});
+
+test("mountParentProblems names a parent that exists but is root-owned", () => {
+  const owners = new Map([
+    ["/home/agent/go", AGENT_UID],
+    ["/home/agent/go/pkg", 0],
+  ]);
+  assert.deepEqual(mountParentProblems([mount("/home/agent/go/pkg/mod")], owners, AGENT_UID), [
+    { mount: "/home/agent/go/pkg/mod", parent: "/home/agent/go/pkg" },
+  ]);
+});
+
+test("mountParentProblems expands ~ to /home/agent, as sandcastle does", () => {
+  assert.deepEqual(mountParentProblems([mount("~/go/pkg/mod")], new Map([["/home/agent/go", AGENT_UID]]), AGENT_UID), [
+    { mount: "~/go/pkg/mod", parent: "/home/agent/go/pkg" },
+  ]);
+});
+
+test("mountParentProblems skips a mount outside /home/agent — the worktrees mount's parents are root-owned by design", () => {
+  assert.deepEqual(mountParentProblems([mount("/r/.vetinari.local/worktrees")], new Map(), AGENT_UID), []);
+});
+
+test("parseStatOwners turns `stat -c '%u %n'` stdout into a path → uid map", () => {
+  assert.deepEqual(
+    parseStatOwners("1000 /home/agent/go\n0 /home/agent/go/pkg\n1000 /home/agent/my cache\n"),
+    new Map([
+      ["/home/agent/go", 1000],
+      ["/home/agent/go/pkg", 0],
+      ["/home/agent/my cache", 1000],
+    ]),
+  );
+});
+
+// A stand-in `docker` that records its argv and answers like `stat` with one path missing:
+// the found path on stdout, the missing one on stderr, and a non-zero exit.
+const fakeDocker = (script: string): { bin: string; argvFile: string } => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-docker-"));
+  const bin = join(dir, "docker");
+  const argvFile = join(dir, "argv");
+  writeFileSync(bin, `#!/bin/sh\nprintf '%s\\n' "$@" > ${argvFile}\n${script}\n`);
+  chmodSync(bin, 0o755);
+  return { bin, argvFile };
+};
+
+test("readMountParentOwners probes the image with stat and reads stdout despite a missing path's non-zero exit", () => {
+  const { bin, argvFile } = fakeDocker(
+    "echo '1000 /home/agent/go'; echo \"stat: cannot statx '/home/agent/go/pkg': No such file or directory\" >&2; exit 1",
+  );
+  assert.deepEqual(readMountParentOwners("img", ["/home/agent/go", "/home/agent/go/pkg"], bin), new Map([["/home/agent/go", 1000]]));
+  // --entrypoint: the shipped Dockerfiles' ENTRYPOINT is `sleep infinity`, which would ignore stat.
+  assert.deepEqual(readFileSync(argvFile, "utf8").trim().split("\n"), [
+    "run",
+    "--rm",
+    "--entrypoint",
+    "stat",
+    "img",
+    "-c",
+    "%u %n",
+    "/home/agent/go",
+    "/home/agent/go/pkg",
+  ]);
+});
+
+test("readMountParentOwners returns undefined, never throwing, when docker cannot be spawned", () => {
+  assert.equal(readMountParentOwners("img", ["/home/agent/go"], "/nonexistent/docker"), undefined);
+});
+
+test("readMountParentOwners returns undefined when docker itself fails (no image, no stat in it)", () => {
+  // docker run exits 125 for a daemon/image error, 127 when the entrypoint is not found.
+  assert.equal(readMountParentOwners("img", ["/home/agent/go"], fakeDocker("exit 125").bin), undefined);
+  assert.equal(readMountParentOwners("img", ["/home/agent/go"], fakeDocker("exit 127").bin), undefined);
 });

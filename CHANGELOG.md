@@ -47,6 +47,7 @@ Within a milestone each bold section label appears at most once.
 - [ops] A findings digest with no `postComment` wired is now logged as `finding-digest-dropped` with its count and summaries, instead of vanishing silently (#510).
 - [user] An answered parked issue no longer keeps reading **parked** everywhere but its card: while a live campaign owns the re-admit it reads `running` in a new steady `answered` phase — on its wave row, the wave and campaign roll-ups and the landing card — and leaves the parked panel and every PARKED count. With no live campaign it stays parked, noted "answered — awaiting re-admit", with Redrive offered (#503).
 - [user] The issue sheet shows a delivered answer read-only in place of the reply box, so an answered issue is not answered twice; `vetinari answer` can still replace it (#503).
+- [user] Gate logs are now named `gate-<ts>-<n>.log` and created exclusively, so two gate commands (or two tasks gating in parallel) that finish in the same millisecond no longer overwrite each other's log — each `gate-result` points at its own output (#478).
 
 **Documentation:**
 - [user] `docs/ticket-contract.md` no longer says a backticked non-file word always forbids confidence: it does on a `Touches:`/`Files:` line, but on a `Creates:` line it becomes a bare `Creates:` key and the ticket stays confident (#487).

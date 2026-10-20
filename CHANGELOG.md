@@ -26,6 +26,9 @@ Within a milestone each bold section label appears at most once.
 **Improvements:**
 - [user] A wave whose every issue was pruned no longer sits among the live waves on the dashboard: it renders greyed out, after every other wave, collapsed to a ✂️ chip you can open to see what was pruned (an archived run shows it greyed and last, expanded) (#502).
 - [user] `campaign`, `redrive`, `run` and `baseline` now refuse to start when a `mounts[].sandboxPath` under `/home/agent` has a parent dir missing from the image, or not agent-owned there — docker would create it as root and the agent could not write beside the mount (e.g. Go's sumdb beside a mounted `~/go/pkg/mod`). The refusal names each mount and parent and the `RUN mkdir -p` line to add after the Dockerfile's `USER` line, then `vetinari build`. A probe that cannot run (no Docker, no `stat` in the image) never refuses (#512).
+- [user] Harvested findings are deduped by word similarity, not exact title: separate agents' rewordings of one defect now file one issue and comment "seen again" on it, both within a campaign and against open issues (#509).
+- [user] When one issue is seen again in 3 runs of a campaign, the operator gets one `finding` notice, "#N seen again in 3 runs — fix the root cause" (#509).
+- [api] `githubFindOpenIssue` lists up to 200 open issues and returns the best match by `findingSimilarity` (score ≥ 0.5), in place of a GitHub title search (#509).
 
 **Bug fixes:**
 - [user] The gateway now sends outbox messages a run enqueues within the same millisecond in the order they were enqueued, rather than in random order; each outbound record carries a `seq` tie-breaker, and records written before this change still drain by time (#479).

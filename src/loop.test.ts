@@ -1055,6 +1055,78 @@ test("findings below the severity floor or over the per-run cap go into one dige
   assert.doesNotMatch(tr.comments[0].body, /merge queue/);
 });
 
+test("a failed tracker search counts as unmatched — the finding is still filed, and the search error is logged", async () => {
+  const tr = fakeTracker();
+  const cfg = harnessCfg({
+    ...tr,
+    findOpenIssue: async () => {
+      throw new Error("gh: API rate limit exceeded");
+    },
+  });
+
+  await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(greenThen(ENV_FAILURE))));
+
+  assert.equal(tr.filed.length, 1, "the search failure falls through to filing");
+  const events = readEventLog(cfg) as { event: string; taskId?: string; summary?: string; url?: string; error?: string }[];
+  const filed = events.filter((e) => e.event === "finding-filed");
+  assert.equal(filed.length, 1);
+  assert.equal(filed[0].url, "https://example/issues/101");
+  assert.equal(events.filter((e) => e.event === "finding-report-failed").length, 0, "a search failure is not a report failure");
+  const searchFailed = events.filter((e) => e.event === "finding-search-failed");
+  assert.equal(searchFailed.length, 1);
+  assert.equal(searchFailed[0].taskId, "T-1");
+  assert.equal(searchFailed[0].summary, "make fmt fails in the agent container: gofumpt sumdb check");
+  assert.match(String(searchFailed[0].error), /rate limit/);
+});
+
+test("a failed tracker search still sends findings below the floor or over the cap into the one digest comment", async () => {
+  const tr = fakeTracker();
+  const cfg = harnessCfg({
+    ...tr,
+    maxFindingsPerRun: 1,
+    findOpenIssue: async () => {
+      throw new Error("gh: API rate limit exceeded");
+    },
+  });
+  const harvest =
+    "<finding><summary>stale doc line</summary><severity>P3</severity></finding>" +
+    "<finding><summary>gate flakes on slow disks</summary><severity>P2</severity></finding>" +
+    "<finding><summary>merge queue drops a commit</summary><severity>P0</severity></finding>" +
+    "<promise>COMPLETE</promise>";
+
+  await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(greenThen(harvest))));
+
+  assert.deepEqual(
+    tr.filed.map((f) => f.summary),
+    ["merge queue drops a commit"],
+  );
+  assert.equal(tr.comments.length, 1, "one digest comment");
+  assert.equal(tr.comments[0].ref, "T-1");
+  assert.match(tr.comments[0].body, /stale doc line/);
+  assert.match(tr.comments[0].body, /gate flakes on slow disks/);
+  assert.equal(readEventLog(cfg).filter((e) => (e as { event: string }).event === "finding-search-failed").length, 3);
+});
+
+test("a digest with no postComment wired is logged as dropped, naming the count and summaries", async () => {
+  const { postComment: _unwired, ...tr } = fakeTracker();
+  const cfg = harnessCfg({ ...tr, maxFindingsPerRun: 0 });
+  const harvest =
+    "<finding><summary>stale doc line</summary><severity>P3</severity></finding>" +
+    "<finding><summary>gate flakes on slow disks</summary><severity>P2</severity></finding>" +
+    "<promise>COMPLETE</promise>";
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(greenThen(harvest))));
+
+  assert.equal(outcome, "green");
+  const dropped = (readEventLog(cfg) as { event: string; taskId?: string; count?: number; summaries?: string[] }[]).filter(
+    (e) => e.event === "finding-digest-dropped",
+  );
+  assert.equal(dropped.length, 1, "one event for the whole digest");
+  assert.equal(dropped[0].taskId, "T-1");
+  assert.equal(dropped[0].count, 2);
+  assert.deepEqual(dropped[0].summaries, ["gate flakes on slow disks", "stale doc line"]);
+});
+
 test("runLoop resumes the parked session on the answer path without re-fetching the task", async () => {
   let fetched = 0;
   const cfg = harnessCfg({

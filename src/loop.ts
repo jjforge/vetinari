@@ -291,6 +291,7 @@ async function harvestFindings(
           ),
         record: (r) => {
           const summary = r.finding.summary;
+          if (r.searchError) cfg.log.log("finding-search-failed", { taskId, summary, error: r.searchError });
           if (r.error) cfg.log.log("finding-report-failed", { taskId, summary, error: r.error });
           else if (r.action === "seen-again") cfg.log.log("finding-seen-again", { taskId, summary, url: r.url });
           else if (r.action === "digest") cfg.log.log("finding-digested", { taskId, summary, severity: r.finding.severity });
@@ -301,6 +302,9 @@ async function harvestFindings(
         lockFile: `${cfg.stateDir}/findings.lock`,
       },
     );
+    // With no comment hook the digest has nowhere to go: say so rather than lose it silently.
+    const digested = results.filter((r) => r.action === "digest").map((r) => r.finding.summary);
+    if (digested.length && !cfg.postComment) cfg.log.log("finding-digest-dropped", { taskId, count: digested.length, summaries: digested });
     const failed = results.filter((r) => r.error).length;
     const filed = results.filter((r) => !r.error && r.action === "filed").length;
     if (filed)

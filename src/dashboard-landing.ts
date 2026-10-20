@@ -17,7 +17,7 @@ import {
   runTokenFor,
   summarizeRun,
 } from "./dashboard-archived-runs.ts";
-import { type CampaignStatus, buildStatus, statusConfigFromPointer } from "./dashboard-status.ts";
+import { type CampaignStatus, buildStatus, liveWaves, statusConfigFromPointer } from "./dashboard-status.ts";
 
 /** One row of the cross-project event feed: which project it came from, when it
  * happened (the event's ISO `ts`), the raw event kind, the repo-prefixed
@@ -193,7 +193,7 @@ export interface LandingView {
  * the fold is the single derivation, so a card can never disagree with its waves.
  */
 export const cardState = (status: CampaignStatus): RunState => {
-  const campaign = campaignState(status.waves.map((wave) => wave.status));
+  const campaign = campaignState(liveWaves(status).map((wave) => wave.status));
   if (campaign === "failed") return "failed";
   if (campaign === "parked" || status.parked.length) return "parked";
   if (campaign === "running") return "running";
@@ -288,7 +288,9 @@ const buildProjectCard = (
   // summary. A counted parked record still wins (parked over idle, #232); the fold's
   // `failed`/`parked`/`running` never reach here, so no attention state ever fades. The
   // live log is left byte-for-byte untouched — this is display-only.
-  if (campaignState(status.waves.map((wave) => wave.status)) === "completed") {
+  // The fold reads the live waves only: a pruned wave is out of the plan and its empty fold
+  // (`unstarted`) must not keep a finished campaign off this branch.
+  if (campaignState(liveWaves(status).map((wave) => wave.status)) === "completed") {
     const { waves, outcomes } = reduceCampaign(events);
     const finishedIssues = waves.flat();
     const merged = finishedIssues.filter((n) => outcomes.get(n) === "completed").length;
@@ -316,13 +318,13 @@ const buildProjectCard = (
   // The card reflects the live plan, not the display's pruned ghosts: drop pruned
   // chips (and any wave left wholly pruned) so wave counts and progress match what
   // is actually still running (ADR 0007/0019's pruned is a membership overlay only).
-  const liveWaves = status.waves
+  const planWaves = status.waves
     .map((wave) => ({ ...wave, issues: wave.issues.filter((i) => i.membership !== "pruned") }))
     .filter((wave) => wave.issues.length);
-  const issues = liveWaves.flatMap((wave) => wave.issues);
-  const total = liveWaves.length;
-  const closed = liveWaves.filter((wave) => wave.status === "completed").length;
-  const runningWave = liveWaves.findIndex((wave) => wave.status === "running");
+  const issues = planWaves.flatMap((wave) => wave.issues);
+  const total = planWaves.length;
+  const closed = planWaves.filter((wave) => wave.status === "completed").length;
+  const runningWave = planWaves.findIndex((wave) => wave.status === "running");
   const completed = issues.filter((i) => i.status === "completed").length;
   return {
     project: status.project,

@@ -32,6 +32,7 @@ import {
   campaignRunning,
   campaignState,
   extractParkedDetails,
+  liveWaves,
   logFileOf,
   readEventLog,
   serveAllStatus,
@@ -607,10 +608,12 @@ export const REDRIVE_ONLY_REASONS: ReadonlySet<ParkReason> = new Set(["red-base"
  */
 export function redriveOnlyPark(status: CampaignStatus): ParkReason | undefined {
   if (status.parked.length) return undefined;
-  if (campaignState(status.waves.map((w) => w.status)) !== "parked") return undefined;
-  const waveReason = status.waves.find((w) => w.reason && REDRIVE_ONLY_REASONS.has(w.reason))?.reason;
+  // A pruned wave is out of the plan, so neither the fold nor the reason lookup reads it.
+  const waves = liveWaves(status);
+  if (campaignState(waves.map((w) => w.status)) !== "parked") return undefined;
+  const waveReason = waves.find((w) => w.reason && REDRIVE_ONLY_REASONS.has(w.reason))?.reason;
   if (waveReason) return waveReason;
-  for (const w of status.waves)
+  for (const w of waves)
     for (const i of w.issues) if (i.status === "parked" && i.reason && REDRIVE_ONLY_REASONS.has(i.reason)) return i.reason;
   return undefined;
 }
@@ -626,11 +629,14 @@ export function redriveOnlyPark(status: CampaignStatus): ParkReason | undefined 
 export function formatGatewayStatus(statuses: CampaignStatus[]): string {
   const lines: string[] = ["📊 Gateway status"];
   for (const s of statuses) {
-    const state = campaignState(s.waves.map((w) => w.status));
-    const running = s.waves.find((w) => w.status === "running");
+    // A pruned wave is out of the plan: it neither folds into the state nor counts toward the
+    // in-flight wave's position.
+    const waves = liveWaves(s);
+    const state = campaignState(waves.map((w) => w.status));
+    const running = waves.findIndex((w) => w.status === "running");
     lines.push(
       "",
-      running ? `${s.project} · ${state.toUpperCase()} · wave ${running.index + 1} in flight` : `${s.project} · ${state.toUpperCase()}`,
+      running >= 0 ? `${s.project} · ${state.toUpperCase()} · wave ${running + 1} in flight` : `${s.project} · ${state.toUpperCase()}`,
     );
     const counts = stateCounts(s);
     const countLine = STATE_ORDER.filter((k) => counts[k] > 0)

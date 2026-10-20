@@ -182,3 +182,25 @@ test("POST /redrive spawns redrive for a campaign stopped between waves after it
   assert.equal(res.statusCode, 303);
   assert.deepEqual(calls, [["redrive"]]);
 });
+
+test("POST /redrive refuses a finished campaign whose wave 0 a prune emptied as settled, not as never-run", async () => {
+  // The pruned wave folds `unstarted` on its own; it is out of the plan, so the campaign reads
+  // `completed` and the refusal names the right reason.
+  const { configDir, project } = seed([
+    event("campaign-start", { ts: "2026-08-01T00:00:00.000Z", waves: [["1"], ["2"]], slots: 1 }),
+    event("prune", { ts: "2026-08-01T00:01:00.000Z", target: "1", removed: ["1"], dropped: [] }),
+    event("wave-start", { ts: "2026-08-01T00:02:00.000Z", index: 0, tasks: ["2"] }),
+    event("green", { ts: "2026-08-01T00:03:00.000Z", taskId: "2", commits: ["abc123"], branch: "agent/2" }),
+    event("merged", { ts: "2026-08-01T00:04:00.000Z", taskId: "2", branch: "agent/2" }),
+    event("wave-done", { ts: "2026-08-01T00:05:00.000Z", index: 0, merged: ["2"] }),
+  ]);
+  let started = 0;
+  const res = resSpy();
+  await handleRedrive(postReq(`project=${project}`) as never, res as never, new URL("http://x/redrive"), {
+    ...depsFor(configDir),
+    startChild: async () => (started++, { code: 0, lastLine: "", running: false }),
+  });
+  assert.equal(res.statusCode, 409);
+  assert.equal(res.body, "the campaign is settled — nothing to redrive");
+  assert.equal(started, 0);
+});

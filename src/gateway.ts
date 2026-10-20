@@ -588,10 +588,11 @@ export function formatParkAnnouncement(project: string, record: ParkedRecord): s
 /**
  * The park reasons the user guide marks *not answerable* (design §10, §13.1): a redrive-only
  * hold recovered by a `redrive` after the human's fix, never by replying to a question.
- * `red-base`/`conflict`/`crash` write no per-issue parked record (`src/archive.ts`), so a
- * records-only reading of "what is parked?" misses them. `stopped` and `outdated-agent` are the
- * exception: they DO write a parked record, but it is never announced and cannot be answered — a redrive
- * (or `vetinari run <id>` for a standalone run) resumes it, never a reply.
+ * `red-base`/`crash` write no per-issue parked record (`src/archive.ts`), so a records-only
+ * reading of "what is parked?" misses them. `conflict`, `stopped` and `outdated-agent` DO write a
+ * parked record (`conflict` from the integrate loop in `src/merge.ts`, with no session), but it
+ * cannot be answered — a redrive (or `vetinari run <id>` for a standalone `stopped`/`outdated-agent`
+ * run) resumes it, never a reply. `stopped` and `outdated-agent` records are also never announced.
  */
 export const REDRIVE_ONLY_REASONS: ReadonlySet<ParkReason> = new Set(["red-base", "conflict", "crash", "stopped", "outdated-agent"]);
 

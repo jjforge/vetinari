@@ -2606,3 +2606,58 @@ test("the project page shows no Slow gates section when no gate is flagged (#445
   assert.doesNotMatch(renderStatusPage(archStatus("1")), /<section class="slow-gates">/);
   assert.doesNotMatch(renderStatusPage(archStatus("1"), { slowGates: { history: [], budget: [] } }), /<section class="slow-gates">/);
 });
+
+// A *pruned wave* — every member pruned — stays on the page for its ✂️ chips (ADR 0007) but is
+// out of the plan: no control, count or fold reads it, and it renders greyed, last and collapsed.
+const prunedWave = (index: number, issueNumber: string) => ({
+  index,
+  status: "unstarted" as const,
+  closed: false,
+  pruned: true,
+  issues: [{ issueNumber, status: "unstarted" as const, membership: "pruned" as const }],
+});
+test("renderStatusPage's meta line counts only the surviving waves of a finished campaign a prune emptied wave 0 of", () => {
+  const dir = join(tmpdir(), `vetinari-pruned-wave-meta-${Date.now()}`);
+  seedState(dir, [
+    event("campaign-start", { ts: "2026-09-03T04:00:00.000Z", waves: [["1"], ["2"]], slots: 1 }),
+    event("prune", { ts: "2026-09-03T04:01:00.000Z", target: "1", removed: ["1"], dropped: [] }),
+    event("wave-start", { ts: "2026-09-03T04:02:00.000Z", index: 0, tasks: ["2"] }),
+    event("green", { ts: "2026-09-03T04:03:00.000Z", taskId: "2", branch: "agent/2", commits: [] }),
+    event("merged", { ts: "2026-09-03T04:04:00.000Z", taskId: "2" }),
+    event("wave-done", { ts: "2026-09-03T04:05:00.000Z", index: 0, merged: ["2"] }),
+  ]);
+  const html = renderStatusPage(buildStatus(cfgFor(dir)), { prune: true, graft: true, leaseLive: false });
+  assert.match(html, /<p class="campaign-meta">[^<]* · 1 wave<\/p>/);
+  // The page's own Redrive gate folds the same live waves, so it reads the campaign settled.
+  assert.match(html, /class="redrive-reason">the campaign is settled — nothing to redrive</);
+  assert.doesNotMatch(html, /class="graft-inline"/);
+});
+test("the Stop control names the running wave, not a pruned wave ahead of it", () => {
+  const html = campaignControls(
+    renderStatusPage(
+      {
+        project: "beta",
+        waves: [prunedWave(0, "101"), { index: 1, status: "running", issues: [{ issueNumber: "201", status: "running" }] }],
+        parked: [],
+      },
+      { prune: true, graft: true, leaseLive: true },
+    ),
+  );
+  const text = html.slice(html.indexOf('class="stop-dialog-text"'), html.indexOf("data-stop-form"));
+  assert.match(text, /with wave 2 in flight/);
+  assert.doesNotMatch(text, /wave 1\b/);
+});
+test("the Redrive control re-enters the parked wave, not a pruned wave ahead of it", () => {
+  const html = renderStatusPage(
+    {
+      project: "beta",
+      waves: [
+        prunedWave(0, "101"),
+        { index: 1, status: "parked", reason: "red-base", issues: [{ issueNumber: "201", status: "completed" }] },
+      ],
+      parked: [],
+    },
+    { prune: true, graft: true, leaseLive: false, baseBranch: "main" },
+  );
+  assert.match(html, /re-enters wave 2 — #201 — on <code>main<\/code>/);
+});

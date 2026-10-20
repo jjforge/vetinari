@@ -3,6 +3,7 @@ import {
   type CampaignStatus,
   campaignState,
   inFlightRunning,
+  liveWaves,
   type StatusIssue,
   type StatusWave,
   waveLabel,
@@ -51,9 +52,10 @@ export const renderRedriveControl = (status: CampaignStatus, gate: { allowed: bo
   if (!status.waves.length) return "";
   const openBtn = `<button type="button" class="redrive-btn" data-redrive-open${gate.allowed ? "" : " disabled"}>Redrive</button>`;
   if (!gate.allowed) return `<div class="redrive-control">${openBtn}<span class="redrive-reason">${escapeHtml(gate.reason)}</span></div>`;
-  // The resume wave is the first not-fully-completed wave (design §7); its non-pruned members
-  // are what a redrive re-enters. The name falls back to the project key for an unnamed run.
-  const resume = status.waves.find((wave) => wave.status !== "completed");
+  // The resume wave is the first not-fully-completed live wave (design §7) — a pruned wave is out
+  // of the plan; its non-pruned members are what a redrive re-enters. The name falls back to the
+  // project key for an unnamed run.
+  const resume = liveWaves(status).find((wave) => wave.status !== "completed");
   const members = (resume?.issues ?? [])
     .filter((issue) => issue.membership !== "pruned")
     .map((issue) => `#${escapeHtml(issue.issueNumber)}`)
@@ -80,7 +82,7 @@ export const renderStopControl = (status: CampaignStatus, gate: { allowed: boole
   const pending = gate.allowed && Boolean(status.stopPending);
   const openBtn = `<button type="button" class="stop-btn" data-stop-open${gate.allowed ? "" : " disabled"}>${pending ? "Stop pending" : "Stop"}</button>`;
   if (!gate.allowed) return `<div class="stop-control">${openBtn}<span class="stop-reason">${escapeHtml(gate.reason)}</span></div>`;
-  const wave = (status.waves.find((w) => w.status !== "completed")?.index ?? 0) + 1;
+  const wave = (liveWaves(status).find((w) => w.status !== "completed")?.index ?? 0) + 1;
   const name = `<strong>${escapeHtml(status.name || status.project)}</strong>`;
   const text = pending
     ? `${name} will stop once wave ${wave} finishes and merges. Stop now stops the running agents mid-turn instead and keeps their work for a redrive.`
@@ -245,9 +247,12 @@ const renderWaves = (status: CampaignStatus, prune: boolean, interactive: boolea
 
 /** The `<name> · N issues · M waves` campaign summary line. Split out so the graft
  * affordance (1a) can ride alongside it on the summary row without disturbing the exact
- * `<p class="campaign-meta">` string every non-graft surface renders. */
-const renderCampaignMeta = (status: CampaignStatus) =>
-  `<p class="campaign-meta">${status.name ? `<span class="campaign-name">${escapeHtml(status.name)}</span> · ` : ""}${campaignIssueCount(status)} issue${campaignIssueCount(status) === 1 ? "" : "s"} · ${status.waves.length} wave${status.waves.length === 1 ? "" : "s"}</p>`;
+ * `<p class="campaign-meta">` string every non-graft surface renders. M counts the live
+ * waves only — a pruned wave is out of the plan. */
+const renderCampaignMeta = (status: CampaignStatus) => {
+  const waveCount = liveWaves(status).length;
+  return `<p class="campaign-meta">${status.name ? `<span class="campaign-name">${escapeHtml(status.name)}</span> · ` : ""}${campaignIssueCount(status)} issue${campaignIssueCount(status) === 1 ? "" : "s"} · ${waveCount} wave${waveCount === 1 ? "" : "s"}</p>`;
+};
 
 const ARCHIVE_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -694,7 +699,7 @@ ${
   // control, design §11/#325, and the Stop control), laid out as one summary row.
   status.waves.length
     ? opts.graft
-      ? `<div class="campaign-summary">${renderCampaignMeta(status)}<div class="campaign-controls">${renderGraftInline(status)}${renderRedriveControl(status, redriveAllowed(campaignState(status.waves.map((wave) => wave.status)), Boolean(opts.leaseLive), status.waves), opts.baseBranch)}${renderStopControl(status, stopAllowed(Boolean(opts.leaseLive)))}</div></div>`
+      ? `<div class="campaign-summary">${renderCampaignMeta(status)}<div class="campaign-controls">${renderGraftInline(status)}${renderRedriveControl(status, redriveAllowed(campaignState(liveWaves(status).map((wave) => wave.status)), Boolean(opts.leaseLive), liveWaves(status)), opts.baseBranch)}${renderStopControl(status, stopAllowed(Boolean(opts.leaseLive)))}</div></div>`
       : renderCampaignMeta(status)
     : ""
 }

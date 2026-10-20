@@ -107,12 +107,12 @@ export default defineConfig({
 });
 ```
 
-`githubTracker()` wires all six tracker seams — `fetchTask`, `blockedBy`,
-`listByLabel`, `postComment`, `onIssueMerged`, `reportFinding` — deriving the repo
-from this project's git `origin`. Pass `{ repo: "owner/repo" }` only when your
-tracker is **not** the project's `origin`, and `{ findingLabels: [...] }` to label
-filed findings (default `["needs-triage"]`). A field set after the spread wins, so
-`onIssueMerged: undefined` turns one hook off. For custom wiring, the individual
+`githubTracker()` wires all seven tracker seams — `fetchTask`, `blockedBy`,
+`listByLabel`, `postComment`, `onIssueMerged`, `reportFinding`, `findOpenIssue` —
+deriving the repo from this project's git `origin`. Pass `{ repo: "owner/repo" }`
+only when your tracker is **not** the project's `origin`, and
+`{ findingLabels: [...] }` to label filed findings (default `["needs-triage"]`). A
+field set after the spread wins, so `onIssueMerged: undefined` turns one hook off. For custom wiring, the individual
 factories it is built from — `githubFetchTask()`, `githubBlockedBy()`, … — stay
 exported as the building blocks.
 

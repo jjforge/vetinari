@@ -148,7 +148,7 @@ The agent can reach only its branch. Everything else goes through the orchestrat
 
 - **Code** is the branch, `agent/<id>`. Merging it onto the base is the orchestrator's job (step 4 above).
 - **Changelog entries** are a fragment the agent commits on its branch, `changelog.d/<issue>.md`. When a wave merges, the orchestrator folds the wave's fragments into `CHANGELOG.md` in one commit. This is what keeps parallel issues from all editing the same file and conflicting on it.
-- **Findings** — things the agent noticed but did not fix — are harvested from the session after it goes green and filed by the orchestrator through your tracker seam (`reportFinding`). The container never holds tracker credentials.
+- **Findings** — things the agent noticed but did not fix — are harvested from the session after it goes green and filed by the orchestrator through your tracker seam (`reportFinding`). The container never holds tracker credentials. Filing is deduped and throttled: a finding matching an open issue (`findOpenIssue`), or one already filed this campaign, gets a "seen again" comment instead of a new issue; findings rated below `findingSeverityFloor` aren't filed; at most `maxFindingsPerRun` new issues are filed per run, most severe first; and the overflow and below-floor findings go into one digest comment on the run's issue.
 
 ## Rules that were paid for
 

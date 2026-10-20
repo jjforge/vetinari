@@ -84,6 +84,7 @@ function makeDeps(overrides: Partial<DispatchDeps> = {}) {
     liveCampaignPid: spy(undefined) as unknown as DispatchDeps["liveCampaignPid"],
     signalProcess: spy() as unknown as DispatchDeps["signalProcess"],
     readImageFreshness: spy({}) as unknown as DispatchDeps["readImageFreshness"],
+    readMountParentOwners: spy(undefined) as unknown as DispatchDeps["readMountParentOwners"],
     ...overrides,
   };
   return { deps, logged, errored, exitCodes, cfg };
@@ -1817,4 +1818,64 @@ test("a campaign child `run` never prints the stale-image warning — the campai
   const { deps, errored } = makeDeps({ isCampaignChild: true, readImageFreshness: freshness });
   await dispatch(parseArgs(["run", "101"]), deps);
   assert.ok(!errored.some((e) => /vetinari build/.test(e)), errored.join("\n"));
+});
+
+// A mount's parent dirs must exist in the image, agent-owned — docker creates a missing one as
+// root and the agent cannot write beside the mount (#512). Probed once at command start.
+const UID = process.getuid!();
+const goModMount = { hostPath: "/cache/go", sandboxPath: "~/go/pkg/mod" };
+const withMounts = (deps: DispatchDeps, mounts: DispatchDeps["cfg"]["mounts"]): DispatchDeps => ({
+  ...deps,
+  cfg: { ...deps.cfg, image: "img", mounts },
+});
+
+for (const [name, cmd] of startCommands) {
+  test(`dispatch ${name} refuses when a mount's parent is not agent-owned in the image, naming the \`RUN mkdir -p\` fix (#512)`, async () => {
+    const { deps } = makeDeps({
+      readMountParentOwners: spy(new Map([["/home/agent/go", UID]])) as unknown as DispatchDeps["readMountParentOwners"],
+      expandSelection: spy(Promise.resolve(["101"])) as unknown as DispatchDeps["expandSelection"],
+    });
+    const d = withMounts(deps, [goModMount]);
+    await assert.rejects(dispatch(cmd, d), (err: Error) => {
+      assert.ok(err instanceof Refusal);
+      assert.match(err.message, /~\/go\/pkg\/mod/);
+      assert.match(err.message, /RUN mkdir -p \/home\/agent\/go\/pkg\b/);
+      assert.match(err.message, /vetinari build/);
+      return true;
+    });
+    assert.equal((d.runLoop as unknown as { calls: unknown[] }).calls.length, 0);
+    assert.equal((d.campaign as unknown as { calls: unknown[] }).calls.length, 0);
+    assert.equal((d.baseline as unknown as { calls: unknown[] }).calls.length, 0);
+  });
+}
+
+test("dispatch run proceeds silently when every mount parent is agent-owned in the image, probing each once (#512)", async () => {
+  const probe = spy(
+    new Map([
+      ["/home/agent/go", UID],
+      ["/home/agent/go/pkg", UID],
+    ]),
+  );
+  const { deps, errored } = makeDeps({ readMountParentOwners: probe as unknown as DispatchDeps["readMountParentOwners"] });
+  const d = withMounts(deps, [goModMount, { hostPath: "/cache/sum", sandboxPath: "/home/agent/go/pkg/sumdb" }]);
+  await dispatch(parseArgs(["run", "101"]), d);
+  assert.deepEqual(probe.calls, [["img", ["/home/agent/go", "/home/agent/go/pkg"]]]);
+  assert.equal((d.runLoop as unknown as { calls: unknown[] }).calls.length, 1);
+  assert.deepEqual(errored, []);
+});
+
+test("dispatch run proceeds when the mount-parent probe could not run — a failed probe never refuses (#512)", async () => {
+  const { deps, errored } = makeDeps({ readMountParentOwners: spy(undefined) as unknown as DispatchDeps["readMountParentOwners"] });
+  const d = withMounts(deps, [goModMount]);
+  await dispatch(parseArgs(["run", "101"]), d);
+  assert.equal((d.runLoop as unknown as { calls: unknown[] }).calls.length, 1);
+  assert.deepEqual(errored, []);
+});
+
+test("dispatch run never probes the image when no mount sits under /home/agent (#512)", async () => {
+  const probe = spy(new Map());
+  const { deps } = makeDeps({ readMountParentOwners: probe as unknown as DispatchDeps["readMountParentOwners"] });
+  await dispatch(parseArgs(["run", "101"]), withMounts(deps, [{ hostPath: "/c", sandboxPath: "/opt/cache" }]));
+  await dispatch(parseArgs(["run", "101"]), withMounts(deps, undefined));
+  assert.deepEqual(probe.calls, []);
 });

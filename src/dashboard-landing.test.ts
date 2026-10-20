@@ -12,6 +12,7 @@ import { buildStatus, statusConfigFromPointer } from "./dashboard-status.ts";
 import { event } from "./event-log.ts";
 import { festiveWaveName } from "./festive-names.ts";
 import type { ProjectPointer } from "./registry.ts";
+import { slotsDir } from "./host-slots.ts";
 
 const writeJsonl = (path: string, events: unknown[]) => writeFileSync(path, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
 
@@ -505,6 +506,50 @@ test("a live, in-plan park counts on both surfaces (#379)", () => {
   ]);
   writeParkedRecord(dir, "102", "2026-06-15T08:02:00.000Z");
   assertParkedAgree("demo", dir, ["102"]);
+});
+
+test("an answered park a live campaign will re-admit reads running on the landing card, not PARKED", () => {
+  const root = join(tmpdir(), `vetinari-landing-answered-${Date.now()}`);
+  const dir = join(root, "demo");
+  seedState(dir, [
+    event("campaign-start", { ts: "2026-06-15T08:00:00.000Z", waves: [["101", "102"]], name: "work", slots: 2 }),
+    event("wave-start", { ts: "2026-06-15T08:01:00.000Z", index: 0, tasks: ["101", "102"] }),
+    event("spawn", { ts: "2026-06-15T08:01:30.000Z", taskId: "101" }),
+    event("spawn", { ts: "2026-06-15T08:01:31.000Z", taskId: "102" }),
+    event("parked", { ts: "2026-06-15T08:02:00.000Z", taskId: "102", reason: "question", detail: "Which?" }),
+    event("answered", { ts: "2026-06-15T08:03:00.000Z", taskId: "102", source: "ui" }),
+  ]);
+  writeFileSync(
+    join(dir, "parked", "102.json"),
+    JSON.stringify({
+      taskId: "102",
+      parkedAt: "2026-06-15T08:02:00.000Z",
+      reason: "question",
+      branch: "agent/102",
+      question: "Which?",
+      answer: "Redis",
+      answeredAt: "2026-06-15T08:03:00.000Z",
+    }),
+  );
+  // The project holds a live campaign lease, owned by this (alive) process.
+  const configDir = join(root, "gw");
+  mkdirSync(slotsDir(configDir), { recursive: true });
+  writeFileSync(
+    join(slotsDir(configDir), `${process.pid}.json`),
+    JSON.stringify({ project: "demo", weight: 1, held: 1, pid: process.pid, kind: "campaign" }),
+  );
+  const { counters, projects, parked } = buildLanding(
+    [pointerFor("demo", dir)],
+    new Date("2026-06-15T12:00:00.000Z"),
+    undefined,
+    false,
+    configDir,
+  );
+  const [card] = projects;
+  assert.equal(card.runState, "running");
+  assert.equal(card.tally.parked, 0);
+  assert.equal(counters.parked, 0);
+  assert.deepEqual(parked, []);
 });
 
 test("open wave, merged member, surviving record → counts on neither surface (#465)", () => {

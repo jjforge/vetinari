@@ -10,9 +10,9 @@ import type {
   PiOptions,
 } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
-import { resolve, sep } from "node:path";
+import { posix, resolve, sep } from "node:path";
 import {
   AGENT_ENV_VAR,
   parseAgentOverride,
@@ -158,6 +158,68 @@ export function sandboxMounts(cfg: ResolvedConfig, cwd: string = process.cwd()):
  */
 export function ensureMountSources(cfg: ResolvedConfig, cwd: string = process.cwd()): void {
   for (const m of sandboxMounts(cfg, cwd)) mkdirSync(resolve(cwd, m.hostPath), { recursive: true });
+}
+
+/** The image's home dir — where sandcastle runs the agent and resolves a `~` in a `sandboxPath`. */
+const SANDBOX_HOME = "/home/agent";
+
+/**
+ * The ancestors of a mount's `sandboxPath` strictly between `/home/agent` and the mount, nearest
+ * the home first (`~` expanded as sandcastle does). Empty for a mount outside `/home/agent`: only
+ * the agent's home must be agent-writable, and the worktrees mount's parents are root by design.
+ */
+export function mountParentPaths(sandboxPath: string): string[] {
+  const p = posix.normalize(sandboxPath === "~" || sandboxPath.startsWith("~/") ? SANDBOX_HOME + sandboxPath.slice(1) : sandboxPath);
+  if (!p.startsWith(SANDBOX_HOME + "/")) return [];
+  const parents: string[] = [];
+  for (let dir = posix.dirname(p); dir !== SANDBOX_HOME; dir = posix.dirname(dir)) parents.unshift(dir);
+  return parents;
+}
+
+/** A mount whose parent the agent cannot write beside it — missing from the image, or not agent-owned there. */
+export interface MountParentProblem {
+  mount: string;
+  parent: string;
+}
+
+/**
+ * Every parent of a `/home/agent` mount that is missing from the image (absent from `owners`, the
+ * uid owning each parent that exists) or not owned by `uid` (#512). Docker creates a missing parent
+ * as root, so the agent then cannot write beside the mount — `go` cannot write `~/go/pkg/sumdb`
+ * beside a mounted `~/go/pkg/mod`. `uid` is the host uid sandcastle runs the container as.
+ */
+export function mountParentProblems(mounts: MountSpec[], owners: Map<string, number>, uid: number): MountParentProblem[] {
+  return mounts.flatMap((m) =>
+    mountParentPaths(m.sandboxPath)
+      .filter((parent) => owners.get(parent) !== uid)
+      .map((parent) => ({ mount: m.sandboxPath, parent })),
+  );
+}
+
+/** `stat -c '%u %n'` stdout → each listed path's owning uid. A path stat could not find is simply absent. */
+export function parseStatOwners(stdout: string): Map<string, number> {
+  const owners = new Map<string, number>();
+  for (const line of stdout.split("\n")) {
+    const m = /^(\d+) (.+)$/.exec(line);
+    if (m) owners.set(m[2], Number(m[1]));
+  }
+  return owners;
+}
+
+/**
+ * Look inside `image` for who owns each of `paths` — image metadata says nothing about its
+ * filesystem — with one short-lived `stat` container (#512). `--entrypoint` because the shipped
+ * Dockerfiles' ENTRYPOINT is `sleep infinity`. A missing path exits `stat` non-zero, so stdout is
+ * read regardless; only docker's own failures (125 daemon/image, 126/127 no `stat`) or a failed
+ * spawn yield undefined, so the caller proceeds rather than refusing on a probe it could not run.
+ */
+export function readMountParentOwners(image: string, paths: string[], docker = "docker"): Map<string, number> | undefined {
+  const r = spawnSync(docker, ["run", "--rm", "--entrypoint", "stat", image, "-c", "%u %n", ...paths], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (r.error || r.status === null || [125, 126, 127].includes(r.status)) return undefined;
+  return parseStatOwners(r.stdout);
 }
 
 /** True when `p` resolves to `root` or a path beneath it. */

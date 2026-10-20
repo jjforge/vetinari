@@ -13,7 +13,14 @@ import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { resolve, sep } from "node:path";
-import { AGENT_ENV_VAR, parseAgentOverride, resolveAgentSelection, type AgentSelection, type ResolvedConfig } from "./config.ts";
+import {
+  AGENT_ENV_VAR,
+  parseAgentOverride,
+  resolveAgentSelection,
+  type AgentSelection,
+  type MountSpec,
+  type ResolvedConfig,
+} from "./config.ts";
 
 /**
  * The token-usage snapshot the loop folds per iteration (a subset of sandcastle's
@@ -91,10 +98,7 @@ declare module "@ai-hero/sandcastle" {
  * (a manual review worktree on an agent branch blocks its resume).
  */
 export async function makeSandbox(cfg: ResolvedConfig, taskId: string) {
-  const mounts = cfg.mounts ?? [];
-  // Bind sources must pre-exist: docker creates a missing one as root-owned,
-  // and the container's non-root agent user then cannot write it.
-  for (const m of mounts) mkdirSync(m.hostPath, { recursive: true });
+  ensureMountSources(cfg);
 
   const branch = `${cfg.branchPrefix}${taskId}`;
   // Preflight (design §3 step 1): git refuses a second worktree on a branch already
@@ -107,7 +111,7 @@ export async function makeSandbox(cfg: ResolvedConfig, taskId: string) {
       `${branch} is already checked out at ${foreign} — remove that worktree before running this issue (one run per issue).`,
     );
 
-  cfg.log.log("sandbox", { taskId, branch, mounts: mounts.map((m) => m.hostPath) });
+  cfg.log.log("sandbox", { taskId, branch, mounts: sandboxMounts(cfg).map((m) => m.hostPath) });
 
   return sandcastle.createSandbox(makeSandboxOptions(cfg, taskId));
 }
@@ -119,7 +123,6 @@ export async function makeSandbox(cfg: ResolvedConfig, taskId: string) {
  * a reused branch keeps its commits regardless of what HEAD is currently on.
  */
 export function makeSandboxOptions(cfg: ResolvedConfig, taskId: string): sandcastle.CreateSandboxOptions {
-  const mounts = cfg.mounts ?? [];
   return {
     branch: `${cfg.branchPrefix}${taskId}`,
     baseBranch: cfg.baseBranch,
@@ -128,11 +131,33 @@ export function makeSandboxOptions(cfg: ResolvedConfig, taskId: string): sandcas
     // `.sandcastle/`, so all ephemeral state lives under one place (default
     // `.vetinari.local/`). Relative to the host repo (cwd), like the orchestrator's.
     stateDir: cfg.stateDir,
-    sandbox: docker({ imageName: cfg.image, mounts }),
+    sandbox: docker({ imageName: cfg.image, mounts: sandboxMounts(cfg) }),
     hooks: cfg.setup?.length
       ? { sandbox: { onSandboxReady: cfg.setup.map((command) => ({ command, timeoutMs: cfg.setupTimeoutMs ?? 300_000 })) } }
       : undefined,
   };
+}
+
+/**
+ * The bind mounts for this run's container: `cfg.mounts`, then the host worktrees dir
+ * (`<stateDir>/worktrees`, where sandcastle creates every agent's worktree) read-only at its
+ * own host path. sandcastle mounts the host `.git` read-write, and each `.git/worktrees/<name>/gitdir`
+ * records a host path — without this mount none of them exist in the container, so a
+ * `git worktree prune` there deletes every sibling's entry. Read-only keeps siblings untouchable.
+ */
+export function sandboxMounts(cfg: ResolvedConfig, cwd: string = process.cwd()): MountSpec[] {
+  const worktrees = resolve(cwd, cfg.stateDir, "worktrees");
+  return [...(cfg.mounts ?? []), { hostPath: worktrees, sandboxPath: worktrees, readonly: true }];
+}
+
+/**
+ * Create every bind source in `sandboxMounts` that is missing. They must pre-exist: docker
+ * creates a missing one as root-owned, which the container's non-root agent user then cannot
+ * write — and `docker()` itself throws on a missing source before sandcastle's `create` would
+ * make the worktrees dir on a first run.
+ */
+export function ensureMountSources(cfg: ResolvedConfig, cwd: string = process.cwd()): void {
+  for (const m of sandboxMounts(cfg, cwd)) mkdirSync(resolve(cwd, m.hostPath), { recursive: true });
 }
 
 /** True when `p` resolves to `root` or a path beneath it. */

@@ -313,14 +313,15 @@ export async function offerGithubLabels(plan: InitPlan, repo: string | undefined
 
   if (!deps.isTTY || deps.dryRun) return printAll("The githubTracker() config relies on these GitHub labels");
 
+  // GitHub label names are case-insensitive, so `Needs-Triage` already is `needs-triage`.
   let present: Set<string>;
   try {
     const out = await deps.run(["label", "list", "--repo", repo, "--json", "name", "--limit", "1000"]);
-    present = new Set((JSON.parse(out) as Array<{ name: string }>).map((l) => l.name));
+    present = new Set((JSON.parse(out) as Array<{ name: string }>).map((l) => l.name.toLowerCase()));
   } catch {
     return printAll("Couldn't read this repo's labels with `gh` (not installed, not logged in, or the call failed)");
   }
-  const missing = GITHUB_TRACKER_LABELS.filter((l) => !present.has(l.name));
+  const missing = GITHUB_TRACKER_LABELS.filter((l) => !present.has(l.name.toLowerCase()));
   if (!missing.length) return;
 
   deps.log(`\nThe githubTracker() config relies on GitHub labels this repo lacks: ${missing.map((l) => l.name).join(", ")}.`);

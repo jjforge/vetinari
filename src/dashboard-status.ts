@@ -81,8 +81,17 @@ export interface StatusWave {
    * this, not on the status word, so a still-integrating wave stays an expanded card. Absent
    * on a hand-built status (reads as not-closed). */
   closed?: boolean;
+  /** true when every member of this display wave was pruned — a *pruned wave*. It stays in
+   * `waves` so its ✂️ chips still show which issues left (ADR 0007), but it is out of the plan:
+   * its `status`/`closed` are left as the fold gives them, and every roll-up reads
+   * {@link liveWaves} instead so it is never counted. Absent on any wave with a surviving member. */
+  pruned?: boolean;
   issues: StatusIssue[];
 }
+
+/** The campaign's display waves minus its pruned waves ({@link StatusWave.pruned}) — what every
+ * fold, count, lookup and index over the waves reads, so a wave a prune emptied never counts. */
+export const liveWaves = (status: Pick<CampaignStatus, "waves">): StatusWave[] => status.waves.filter((wave) => !wave.pruned);
 
 export interface ParkedIssue {
   issueNumber: string;
@@ -217,7 +226,17 @@ export function buildStatus(cfg: ResolvedConfig, opts: { dead?: boolean; alive?:
     // surviving members all closed could never satisfy the fold (ADR 0007, #363).
     const live = issues.filter((i) => i.membership !== "pruned");
     const closed = live.length > 0 && live.every((i) => closedIssueNumbers.has(i.issueNumber));
-    return { index, status: waveState(issues, { redBase, stopped }), ...(waveReason ? { reason: waveReason } : {}), closed, issues };
+    // A wave the prune emptied entirely is a pruned wave: kept for its chips, flagged so the
+    // roll-ups skip it ({@link liveWaves}) and the renderer greys it out and stacks it last.
+    const prunedWave = issues.length > 0 && live.length === 0;
+    return {
+      index,
+      status: waveState(issues, { redBase, stopped }),
+      ...(waveReason ? { reason: waveReason } : {}),
+      closed,
+      ...(prunedWave ? { pruned: true } : {}),
+      issues,
+    };
   });
 
   return {

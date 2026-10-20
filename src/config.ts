@@ -440,7 +440,7 @@ export interface VetinariConfig {
    */
   reportFinding?: FindingReporter;
   /**
-   * The open tracker issue (its ref) whose title is this finding's summary, if any — so a
+   * The open tracker issue (its ref) whose title matches this finding's summary, if any — so a
    * harvested finding that is already tracked gets a "seen again" comment through
    * `postComment` instead of a duplicate issue. `githubFindOpenIssue()` ships as a GitHub
    * implementation. Absent, only this campaign's own earlier filings are deduped. A

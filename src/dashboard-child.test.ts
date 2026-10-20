@@ -24,6 +24,7 @@ if (mode === "noisy") {
   process.exit(3);
 }
 if (mode === "silent") process.exit(0);
+if (mode === "env") { process.stdout.write(process.env.VETINARI_ANSWER_SOURCE + " " + process.env.VETINARI_CHILD_INHERITED + "\\n"); process.exit(0); }
 if (mode === "long") {
   const marker = process.argv[3];
   process.stdout.write("started\\n");
@@ -125,4 +126,18 @@ test("startChild creates logs/dashboard/ under a fresh base directory and writes
   assert.equal(existsSync(join(base, "logs")), false);
   await withEntry(entry, () => startChild(dir, ["noisy"], { logFile, startupMs: 5_000 }));
   assert.match(readFileSync(logFile, "utf8"), /the last words/);
+});
+
+test("startChild layers its optional env over the inherited process.env", async () => {
+  const { dir, entry } = fixtureEntry();
+  const logFile = join(dir, "logs", "dashboard", "answer-env.log");
+  process.env.VETINARI_CHILD_INHERITED = "kept";
+  try {
+    const result = await withEntry(entry, () =>
+      startChild(dir, ["env"], { logFile, startupMs: 5_000, env: { VETINARI_ANSWER_SOURCE: "ui" } }),
+    );
+    assert.deepEqual(result, { code: 0, lastLine: "ui kept", running: false });
+  } finally {
+    delete process.env.VETINARI_CHILD_INHERITED;
+  }
 });

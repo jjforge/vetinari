@@ -30,6 +30,7 @@ import {
   supervisePolls,
   resolvePruneTarget,
   resolveReply,
+  resumeEnv,
   routeReply,
   type GatewayProject,
   type PendingConfirm,
@@ -1263,6 +1264,10 @@ test("drainOutbox leaves a record unsent when the send fails, so the next tick r
   await drainOutbox(routed(base), failingSend, memoryLogger());
 
   assert.equal(listOutboxIn(outboxDirOf(base))[0].sentAt, undefined, "a failed send is not marked sent");
+});
+
+test("resumeEnv stamps VETINARI_ANSWER_SOURCE=telegram over the inherited env, so a Telegram reply's `answered` event names its source", () => {
+  assert.deepEqual(resumeEnv({ PATH: "/bin", VETINARI_ANSWER_SOURCE: "cli" }), { PATH: "/bin", VETINARI_ANSWER_SOURCE: "telegram" });
 });
 
 // Repo-wide guard (#311): a raw NUL byte in a source file makes grep, rg and

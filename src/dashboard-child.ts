@@ -74,15 +74,21 @@ export interface StartedChild {
  * to `logFile` (file descriptors, not pipes — nothing grows in the dashboard's memory), and
  * the wait is only a short startup window. A child that exits inside it resolves with its
  * code and the log's last non-empty line; one still running at `startupMs` resolves
- * `running: true` and is left running, never killed.
+ * `running: true` and is left running, never killed. `env` is layered over the inherited
+ * `process.env` (the answer route stamps `VETINARI_ANSWER_SOURCE` with it).
  */
-export function startChild(projectRoot: string, args: string[], opts: { logFile: string; startupMs: number }): Promise<StartedChild> {
+export function startChild(
+  projectRoot: string,
+  args: string[],
+  opts: { logFile: string; startupMs: number; env?: Record<string, string> },
+): Promise<StartedChild> {
   mkdirSync(dirname(opts.logFile), { recursive: true });
   const fd = openSync(opts.logFile, "a");
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [...process.execArgv, process.argv[1], ...args], {
       cwd: projectRoot,
       stdio: ["ignore", fd, fd],
+      env: { ...process.env, ...opts.env },
     });
     // The child holds its own copy of the descriptor; the dashboard needs none.
     closeSync(fd);
@@ -114,12 +120,14 @@ export function startChild(projectRoot: string, args: string[], opts: { logFile:
  * and answer with what the startup window saw. Exit 0 or 2 (green or parked) redirects to the
  * board; exit 4 (a refusal) is a 409 carrying its sentence; any other exit or a spawn error is
  * a 502 carrying the child's last line; a child still running is a 202 naming its log file.
+ * `env`, if given, is layered over the child's inherited environment.
  */
 export async function respondWithStartedChild(
   res: ServerResponse,
   deps: DashboardDeps,
   pointer: ProjectPointer,
   args: string[],
+  env?: Record<string, string>,
 ): Promise<void> {
   const verb = args[0];
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -127,6 +135,7 @@ export async function respondWithStartedChild(
   const { code, lastLine, running } = await (deps.startChild ?? startChild)(pointer.projectRoot, args, {
     logFile,
     startupMs: deps.childStartupMs ?? 5_000,
+    env,
   });
   const text = { "content-type": "text/plain; charset=utf-8" };
   if (running) res.writeHead(202, text).end(`${verb} started — output in ${logFile}`);

@@ -11,7 +11,7 @@
 
 import { spawn } from "node:child_process";
 import { isIssueToken, normalize } from "./issue-id.ts";
-import { questionDestinations, resolveDestination, type Destination, type NotifyMap } from "./config.ts";
+import { ANSWER_SOURCE_ENV_VAR, questionDestinations, resolveDestination, type Destination, type NotifyMap } from "./config.ts";
 import { hostLogger, type Logger } from "./log.ts";
 import {
   listOutboxIn,
@@ -892,6 +892,11 @@ function spawnPrune(target: PendingConfirm, logger: Logger = hostLogger()): void
     .on("error", (err) => logger.log("gateway-prune-failed", { project: target.project, issue: target.issue, error: String(err) }));
 }
 
+/** The env a Telegram reply's `answer` child runs with: the inherited env, its answer source stamped `telegram`. */
+export function resumeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return { ...env, [ANSWER_SOURCE_ENV_VAR]: "telegram" };
+}
+
 /**
  * Resume an answered task via the shared install in that project's root, so it
  * runs with the project's own config and gates (ADR 0003). Fire-and-forget: the
@@ -903,6 +908,7 @@ function spawnResume(ref: SendRef, text: string, logger: Logger = hostLogger()):
   spawn(process.execPath, [...process.execArgv, process.argv[1], "answer", ref.task, text], {
     cwd: ref.projectRoot,
     stdio: ["ignore", "inherit", "inherit"],
+    env: resumeEnv(process.env),
   })
     .on("exit", (code) => logger.log("gateway-resume-done", { project: ref.project, task: ref.task, code }))
     // A stale projectRoot (moved/deleted since registration) surfaces here as an

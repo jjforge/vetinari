@@ -1,11 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AGENT_ENV_VAR } from "./config.ts";
-import { agentFor, foreignWorktreeFor, makeSandboxOptions, parseForeignWorktree } from "./sandbox.ts";
+import { agentFor, ensureMountSources, foreignWorktreeFor, makeSandboxOptions, parseForeignWorktree, sandboxMounts } from "./sandbox.ts";
 import type { ResolvedConfig } from "./config.ts";
 
 // agentFor only reads `cfg.agent` and the VETINARI_AGENT env var — a bare object
@@ -66,7 +66,8 @@ test("agentFor reads a non-resumable provider back from the env override", () =>
 });
 
 // The sandbox options only read a handful of scalar config fields; a bare object with
-// those satisfies what makeSandboxOptions touches (docker() is pure construction).
+// those satisfies what makeSandboxOptions touches. docker() also checks every mount source
+// exists, so a test that builds options needs `<stateDir>/worktrees` on disk.
 const sandboxCfg = (over: Partial<ResolvedConfig> = {}): ResolvedConfig =>
   ({
     branchPrefix: "agent/",
@@ -78,11 +79,36 @@ const sandboxCfg = (over: Partial<ResolvedConfig> = {}): ResolvedConfig =>
   }) as unknown as ResolvedConfig;
 
 test("makeSandboxOptions forks agent/<id> from cfg.baseBranch, not the checked-out HEAD (design §3 step 2)", () => {
-  const opts = makeSandboxOptions(sandboxCfg({ baseBranch: "release" }), "436");
+  const stateDir = mkdtempSync(join(tmpdir(), "vetinari-state-"));
+  mkdirSync(join(stateDir, "worktrees"));
+  const opts = makeSandboxOptions(sandboxCfg({ baseBranch: "release", stateDir }), "436");
   assert.equal(opts.branch, "agent/436");
   // baseBranch is the fork point sandcastle uses only for a NEW branch (ignored on reuse),
   // so a fresh agent/436 follows `release` regardless of what is currently checked out.
   assert.equal(opts.baseBranch, "release");
+});
+
+test("sandboxMounts appends the host worktrees dir, read-only at its own host path, so an in-container prune sees live worktrees", () => {
+  const m = { hostPath: "/cache/go", sandboxPath: "/home/agent/go/pkg/mod" };
+  assert.deepEqual(sandboxMounts(sandboxCfg({ stateDir: ".vetinari.local", mounts: [m] }), "/r"), [
+    m,
+    { hostPath: "/r/.vetinari.local/worktrees", sandboxPath: "/r/.vetinari.local/worktrees", readonly: true },
+  ]);
+  // An absolute stateDir is taken as-is, as sandcastle does.
+  assert.deepEqual(sandboxMounts(sandboxCfg({ stateDir: "/s" }), "/r"), [
+    { hostPath: "/s/worktrees", sandboxPath: "/s/worktrees", readonly: true },
+  ]);
+});
+
+test("ensureMountSources creates every mount source, the worktrees dir included, before docker() checks they exist", () => {
+  const root = mkdtempSync(join(tmpdir(), "vetinari-mounts-"));
+  const cache = join(root, "cache", "go");
+  const cfg = sandboxCfg({ stateDir: ".vetinari.local", mounts: [{ hostPath: cache, sandboxPath: "/home/agent/go" }] });
+  ensureMountSources(cfg, root);
+  assert.ok(existsSync(join(root, ".vetinari.local", "worktrees")));
+  assert.ok(existsSync(cache));
+  // A second run finds them already there and still succeeds.
+  ensureMountSources(cfg, root);
 });
 
 // `git worktree list --porcelain` blocks: a `worktree <path>` line then a `branch <ref>`

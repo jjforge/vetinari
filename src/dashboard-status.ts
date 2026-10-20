@@ -14,6 +14,7 @@ import {
   type IssuePhase,
   type Membership,
   type WaveStatus,
+  answeredAwaitingReadmit,
   issueLifecycle,
   issueMembership,
   issuePhase,
@@ -187,6 +188,9 @@ export function buildStatus(cfg: ResolvedConfig, opts: { dead?: boolean; alive?:
     reduced.parkReasons.set(taskId, parkReasonFromEvent(parked.reason));
     details.set(taskId, `Parked: ${parked.reason}`);
   }
+  // An answered park a live campaign will re-admit is no longer held on a human: it reads
+  // `running` (the lifecycle overlay below) and leaves the parked panel and every PARKED count.
+  const shownParked = parkedRecords.filter((parked) => !answeredAwaitingReadmit(reduced, normalize(parked.taskId), alive));
 
   // Display waves render off `layout` (the pre-prune membership) so a pruned issue still
   // shows as a chip in the wave it left (ADR 0007). Each chip carries both axes; the wave's
@@ -194,7 +198,7 @@ export function buildStatus(cfg: ResolvedConfig, opts: { dead?: boolean; alive?:
   // crashed run's in-flight issues already read `parked{crash}` off the reducer above.
   const displayWaves = layout.map((wave, index) => {
     const issues = wave.map((issueNumber): StatusIssue => {
-      const life = issueLifecycle(reduced, issueNumber);
+      const life = issueLifecycle(reduced, issueNumber, { alive });
       // A live `running` issue carries its phase (design §11, #359) — the step it is in, derived
       // from its latest event. An archived read (`dead`) renders no phases, so it is skipped there.
       const phase = !opts.dead && life.state === "running" ? issuePhase(events, issueNumber) : undefined;
@@ -244,7 +248,7 @@ export function buildStatus(cfg: ResolvedConfig, opts: { dead?: boolean; alive?:
     name,
     festiveOffset,
     waves: displayWaves,
-    parked: parkedRecords.map(toParkedIssue),
+    parked: shownParked.map(toParkedIssue),
     // The wave in flight is the reducer's `currentWave` (design §11); its members are what the
     // live tail follows. Always an array (empty when none is in flight) so the tail scopes rather
     // than falling back to every runner across the plan.

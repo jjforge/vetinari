@@ -966,6 +966,19 @@ test("issuePhase derives a running issue's phase from its latest own event (desi
   assert.deepEqual(issuePhase(turned, "301"), { label: "coding", steady: false });
 });
 
+test("issuePhase reads an answered park as the steady `answered` phase until the re-admit's spawn starts it", () => {
+  const answered = [
+    event("campaign-start", { ts: "t0", waves: [["301"]], slots: 1 }),
+    event("spawn", { ts: "t1", taskId: "301", running: 1, left: 0 }),
+    event("parked", { ts: "t2", taskId: "301", reason: "question" }),
+    event("answered", { ts: "t3", taskId: "301", source: "ui" }),
+  ];
+  assert.deepEqual(issuePhase(answered, "301"), { label: "answered", steady: true });
+
+  const readmitted = [...answered, event("spawn", { ts: "t4", taskId: "301", running: 1, left: 0 })];
+  assert.deepEqual(issuePhase(readmitted, "301"), { label: "starting", steady: false });
+});
+
 test("issuePhase names the running gate command, advancing as the gate progresses (#332)", () => {
   const base = [
     event("campaign-start", { ts: "t0", waves: [["301"]], slots: 1 }),

@@ -50,7 +50,7 @@ export default defineConfig({
 
   // Every GitHub tracker seam — fetchTask, blockedBy, listByLabel, postComment,
   // onIssueMerged, reportFinding, findOpenIssue — with the repo derived from this
-  // project's git `origin`. Pass { repo: "owner/repo" } only when your tracker is NOT `origin`;
-  // a field set after the spread overrides that one seam.
+  // project's git `origin`. Pass { repo: "owner/repo" } only when your tracker is
+  // NOT `origin`; a field set after the spread overrides that one seam.
   ...githubTracker(),
 });

@@ -23,6 +23,7 @@ export {
   issueStateFromTask,
   issueNameFromTask,
   parkedReplyFor,
+  parkedAnswerFor,
   extractParkedDetails,
 } from "./dashboard-event-text.ts";
 // Re-exported by name (not `export *`) so every importer of the lifecycle through this module

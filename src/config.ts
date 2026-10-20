@@ -252,6 +252,21 @@ export function resolveAgentSelection(
  */
 export const AGENT_ENV_VAR = "VETINARI_AGENT";
 
+/** Who delivered an answer — the `source` an `answered` event carries. */
+export type AnswerSource = "cli" | "ui" | "telegram";
+
+/**
+ * The env var a spawned `vetinari answer` reads its {@link AnswerSource} from, following the
+ * `VETINARI_AGENT` precedent rather than a flag: the dashboard spawns with `ui`, the gateway with
+ * `telegram`, and a human at the shell leaves it unset (`cli`).
+ */
+export const ANSWER_SOURCE_ENV_VAR = "VETINARI_ANSWER_SOURCE";
+
+/** Read `VETINARI_ANSWER_SOURCE` back into an {@link AnswerSource}; junk/unset → `cli`. */
+export function parseAnswerSource(raw: string | undefined): AnswerSource {
+  return raw === "ui" || raw === "telegram" ? raw : "cli";
+}
+
 /**
  * Pull the `--agent <name>` / `--model <m>` / `--effort <e>` override out of a
  * mode's args (both `--flag value` and `--flag=value` forms), returning the parsed

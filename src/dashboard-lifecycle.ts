@@ -153,6 +153,10 @@ export interface ReducedCampaign {
    * green (design §2.2). Cleared when the id merges (`merged`, or a `wave-done`'s merged list).
    * The chip reads `running`; this set drives the distinct "pending merge" chip detail. */
   pendingGreen: Set<string>;
+  /** parked issues whose latest lifecycle event is `answered` — an answer delivered, no re-admit
+   * `spawn` yet. A display overlay, never an outcome: `outcomes` keeps them `parked` (prune and
+   * the CLI read that), and {@link issueLifecycle} reads them `running` only under a live campaign. */
+  answered: Set<string>;
   details: Map<string, string>;
   /** issue id → title, captured onto the run's start event at launch by the
    * orchestrator (which has `fetchTask`) so the dumb-router dashboard renders
@@ -190,6 +194,9 @@ export interface ReducedCampaign {
   anomalies: string[];
 }
 
+/** The lifecycle events that settle a delivered answer — after any of them it no longer awaits re-admit. */
+const ANSWER_SETTLING_EVENTS: ReadonlySet<string> = new Set(["spawn", "parked", "failed", "green", "merged"]);
+
 /**
  * Reduce a project's event log to its current campaign's plan — pure, no I/O.
  * Only the latest `campaign-start` and everything after it is folded (a fresh
@@ -216,6 +223,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
   const outcomes = new Map<string, IssueStatus>();
   const sessions = new Map<string, string>();
   const pendingGreen = new Set<string>();
+  const answered = new Set<string>();
   const details = new Map<string, string>();
   const titles = new Map<string, string>();
   const mergedAt = new Map<string, string>();
@@ -239,6 +247,8 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
     // Remember the latest durable session id an event carried for a member (`turn`, `parked`),
     // so a crash redrive can resume that session on the existing branch (design §7).
     if ("sessionId" in e && e.sessionId && e.taskId) sessions.set(normalize(String(e.taskId)), String(e.sessionId));
+    // An answer awaits its re-admit until the issue's next lifecycle event (the re-admit's `spawn`).
+    if (ANSWER_SETTLING_EVENTS.has(e.event) && "taskId" in e && e.taskId) answered.delete(normalize(String(e.taskId)));
     if (e.event === "campaign-start" && Array.isArray(e.waves)) {
       waves = e.waves.map((wave: unknown[]) => wave.map(String).map(normalize));
       layout = waves.map((wave) => [...wave]);
@@ -308,6 +318,9 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
         parkReasons.set(taskId, reason);
         details.set(taskId, `Parked: ${e.detail ?? reason}`);
       }
+    } else if (e.event === "answered" && e.taskId) {
+      const taskId = normalize(String(e.taskId));
+      if (outcomes.get(taskId) === "parked") answered.add(taskId);
     } else if (e.event === "failed" && e.taskId) {
       // A member the agent could not make green (design §2.1, §5 step 5): a terminal failure
       // that holds its wave — the wave lands no `wave-done`, so it stays out of `closedWaves`
@@ -364,6 +377,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       const applied = applyPrune({ waves, outcomes }, e.removed.map(String));
       for (const id of applied.dropped) {
         pruned.add(id);
+        answered.delete(id);
         details.set(id, "Pruned out of the campaign");
       }
       waves = applied.remaining;
@@ -448,6 +462,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
     outcomes,
     sessions,
     pendingGreen,
+    answered,
     details,
     titles,
     mergedAt,
@@ -472,14 +487,24 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
  * does not appear here, so a member holds its own reason (a merged member stays
  * `completed`, a question stays `parked{question}` with its reply box). Membership is the
  * orthogonal axis (`issueMembership`) and never appears here.
+ *
+ * `opts.alive === true` (the project holds a live campaign lease) applies the one display overlay:
+ * an answered park ({@link answeredAwaitingReadmit}) reads `running` — the live campaign owns its
+ * re-admit, so it is no longer held on a human. With no live campaign it stays `parked`.
  */
-export function issueLifecycle(r: ReducedCampaign, id: string): IssueLifecycle {
+export function issueLifecycle(r: ReducedCampaign, id: string, opts: { alive?: boolean } = {}): IssueLifecycle {
   const base = r.outcomes.get(id) ?? "unstarted";
   if (base === "failed") return { state: "failed" };
   if (r.conflictParked.has(id)) return { state: "parked", reason: "conflict" };
+  if (base === "parked" && answeredAwaitingReadmit(r, id, opts.alive)) return { state: "running" };
   if (base === "parked") return { state: "parked", reason: r.parkReasons.get(id) ?? "question" };
   return { state: base };
 }
+
+/** Is `id` an answered park a live campaign will re-admit — shown `running` in the `answered`
+ * phase and left out of the parked panel? Only under a live lease (`alive === true`). */
+export const answeredAwaitingReadmit = (r: ReducedCampaign, id: string, alive: boolean | undefined): boolean =>
+  alive === true && r.answered.has(id);
 
 /**
  * An issue's membership axis (ADR 0019): `pruned` (dropped from the plan), `grafted`
@@ -514,6 +539,7 @@ const STARTING: IssuePhase = { label: "starting", steady: false };
 const CODING: IssuePhase = { label: "coding", steady: false };
 const FILING: IssuePhase = { label: "filing findings", steady: false };
 const WAITING_TO_MERGE: IssuePhase = { label: "waiting to merge", steady: true };
+const ANSWERED: IssuePhase = { label: "answered", steady: true };
 const testingPhase = (cmd: string | undefined): IssuePhase => ({ label: cmd ? `testing · ${cmd}` : "testing", steady: false });
 
 /** The `taskId` a phase-relevant event names, normalized — or undefined when it carries none
@@ -541,6 +567,8 @@ const eventTaskId = (e: OrchestratorEvent): string | undefined => {
  *   `waiting to merge` once all are filed (so a long wait for the wave never reads as filing).
  * - `green` → `waiting to merge` (a pending green: banked-but-unmerged, its slot already freed,
  *   nothing executing — a steady dot).
+ * - `answered` → `answered` (an answer delivered to a park, waiting for the live campaign's
+ *   re-admit — a wait, so a steady dot); the re-admit's `spawn` replaces it with `starting`.
  */
 export function issuePhase(events: OrchestratorEvent[], issueNumber: string): IssuePhase | undefined {
   const id = normalize(issueNumber);
@@ -577,6 +605,8 @@ export function issuePhase(events: OrchestratorEvent[], issueNumber: string): Is
       }
     } else if (kind === "green") {
       phase = WAITING_TO_MERGE;
+    } else if (kind === "answered") {
+      phase = ANSWERED;
     } else if (kind === "findings") {
       // The harvest runs after the green; it files `count` findings, then teardown → merge.
       filingLeft = Number((e as { count?: unknown }).count ?? 0);
@@ -659,12 +689,14 @@ const eventNamesIssue = (e: OrchestratorEvent, id: string): boolean => {
  * (from its `campaign-start`) is considered, mirroring `reduceCampaign`, so an
  * issue re-run in a fresh campaign shows that run's turns — a queue-only log with
  * no campaign frame is folded whole.
+ * `opts.alive` is the live-lease probe {@link issueLifecycle} reads for its answered overlay — only
+ * that; it never crash-folds here.
  */
-export function reconstructIssueDetail(events: OrchestratorEvent[], issueNumber: string): IssueDetail {
+export function reconstructIssueDetail(events: OrchestratorEvent[], issueNumber: string, opts: { alive?: boolean } = {}): IssueDetail {
   const id = normalize(issueNumber);
   const reduced = reduceCampaign(events);
   const { titles, name } = reduced;
-  const life = issueLifecycle(reduced, id);
+  const life = issueLifecycle(reduced, id, opts);
   const membership = issueMembership(reduced, id);
 
   const latestCampaignIndex = events.findLastIndex((e) => e.event === "campaign-start" && Array.isArray(e.waves));

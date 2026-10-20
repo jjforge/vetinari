@@ -1490,6 +1490,55 @@ test("dispatch answer delivers to the record and, with a live campaign lease, st
   assert.equal((deps.campaign as any).calls.length, 0, "no second process redrives over a live campaign");
 });
 
+// The `answered` rows a dispatch wrote through `cfg.log.log`.
+const answeredRows = (cfg: DispatchDeps["cfg"]) => ((cfg.log.log as any).calls as unknown[][]).filter(([event]) => event === "answered");
+
+test("dispatch answer appends one `answered` event with its task id and source once delivered (defaults to cli)", async () => {
+  const { deps, cfg } = makeDeps({ projectHasLiveCampaign: spy(true) as any });
+  const prior = process.env.VETINARI_ANSWER_SOURCE;
+  delete process.env.VETINARI_ANSWER_SOURCE;
+  try {
+    await dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps);
+  } finally {
+    if (prior !== undefined) process.env.VETINARI_ANSWER_SOURCE = prior;
+  }
+  assert.deepEqual(answeredRows(cfg), [["answered", { taskId: "436", source: "cli" }]]);
+});
+
+for (const source of ["ui", "telegram"] as const) {
+  test(`dispatch answer's \`answered\` event takes its source from VETINARI_ANSWER_SOURCE (${source})`, async () => {
+    const { deps, cfg } = makeDeps({ projectHasLiveCampaign: spy(true) as any });
+    const prior = process.env.VETINARI_ANSWER_SOURCE;
+    process.env.VETINARI_ANSWER_SOURCE = source;
+    try {
+      await dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps);
+    } finally {
+      if (prior === undefined) delete process.env.VETINARI_ANSWER_SOURCE;
+      else process.env.VETINARI_ANSWER_SOURCE = prior;
+    }
+    assert.deepEqual(answeredRows(cfg), [["answered", { taskId: "436", source }]]);
+  });
+}
+
+test("dispatch answer appends no `answered` event for a not-parked no-op or a refused answer", async () => {
+  const notParked = makeDeps({ hasParked: spy(false) as any });
+  await dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, notParked.deps);
+  assert.deepEqual(answeredRows(notParked.cfg), []);
+  for (const reason of ["stopped", "outdated-agent", "conflict"]) {
+    const refused = makeDeps({
+      listParked: spy([{ taskId: "436", reason, branch: "agent/436", parkedAt: "t", question: "?" }]) as any,
+    });
+    await assert.rejects(() => dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, refused.deps));
+    assert.deepEqual(answeredRows(refused.cfg), [], `a refused ${reason} answer logs nothing`);
+  }
+  const sessionless = makeDeps({
+    listParked: spy([{ taskId: "436", reason: "stalled", branch: "agent/436", parkedAt: "t", question: "?" }]) as any,
+  });
+  (sessionless.cfg as any).postComment = undefined;
+  await assert.rejects(() => dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, sessionless.deps));
+  assert.deepEqual(answeredRows(sessionless.cfg), [], "a refused session-less answer logs nothing");
+});
+
 test("dispatch answer delivers then redrives the paused campaign when no campaign is live (§5 step 3, §7)", async () => {
   const { deps } = makeDeps({
     readEventLog: spy(pausedCampaignAfterGreen()) as any,

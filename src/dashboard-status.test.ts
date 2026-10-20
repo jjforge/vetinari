@@ -3,7 +3,7 @@
 // (dashboard-status.ts).
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
@@ -283,6 +283,96 @@ test("buildStatus carries a parked record's answeredAt so an answered park reads
   } finally {
     prev === undefined ? delete process.env.VETINARI_GATEWAY_HOME : (process.env.VETINARI_GATEWAY_HOME = prev);
   }
+});
+
+// A live wave of 801 (parked on a question, then answered) beside 802, still running; 801's record
+// stays on disk, answered, until the re-admit consumes it.
+const seedAnsweredPark = (dir: string, extra: unknown[] = []) => {
+  seedState(dir, [
+    event("campaign-start", { ts: "2026-09-02T04:00:00.000Z", waves: [["801", "802"], ["803"]], slots: 2 }),
+    event("wave-start", { ts: "2026-09-02T04:01:00.000Z", index: 0, tasks: ["801", "802"] }),
+    event("spawn", { ts: "2026-09-02T04:02:00.000Z", taskId: "801", running: 1, left: 1 }),
+    event("spawn", { ts: "2026-09-02T04:02:01.000Z", taskId: "802", running: 2, left: 0 }),
+    event("parked", { ts: "2026-09-02T04:10:00.000Z", taskId: "801", reason: "question", detail: "Which?" }),
+    event("answered", { ts: "2026-09-02T04:20:00.000Z", taskId: "801", source: "ui" }),
+    ...extra,
+  ]);
+  writeFileSync(
+    join(dir, "parked", "801.json"),
+    JSON.stringify({
+      taskId: "801",
+      parkedAt: "2026-09-02T04:10:00.000Z",
+      reason: "question",
+      branch: "agent/801",
+      question: "Which?",
+      answer: "Redis",
+      answeredAt: "2026-09-02T04:20:00.000Z",
+    }),
+  );
+};
+
+const withGatewayHome = (dir: string, fn: () => void) => {
+  const prev = process.env.VETINARI_GATEWAY_HOME;
+  process.env.VETINARI_GATEWAY_HOME = join(dir, "gw-home");
+  try {
+    fn();
+  } finally {
+    prev === undefined ? delete process.env.VETINARI_GATEWAY_HOME : (process.env.VETINARI_GATEWAY_HOME = prev);
+  }
+};
+
+test("buildStatus shows an answered park running in the `answered` phase while a live campaign owns its re-admit", () => {
+  const dir = join(tmpdir(), `vetinari-status-answered-live-${Date.now()}`);
+  withGatewayHome(dir, () => {
+    seedAnsweredPark(dir);
+    const status = buildStatus(cfgFor(dir), { alive: true });
+    const issue = status.waves[0].issues.find((i) => i.issueNumber === "801");
+    assert.equal(issue?.status, "running");
+    assert.equal(issue?.reason, undefined);
+    assert.deepEqual(issue?.phase, { label: "answered", steady: true });
+    assert.equal(status.waves[0].status, "running");
+    assert.deepEqual(status.parked, [], "an answered park awaiting a live re-admit leaves the parked panel");
+  });
+});
+
+test("buildStatus keeps an answered park parked, answeredAt and all, when no campaign is live", () => {
+  for (const alive of [undefined, false]) {
+    const dir = join(tmpdir(), `vetinari-status-answered-idle-${alive}-${Date.now()}`);
+    withGatewayHome(dir, () => {
+      seedAnsweredPark(dir);
+      const status = buildStatus(cfgFor(dir), { alive });
+      const issue = status.waves[0].issues.find((i) => i.issueNumber === "801");
+      assert.equal(issue?.status, "parked");
+      assert.equal(issue?.reason, "question");
+      assert.equal(issue?.phase, undefined);
+      assert.deepEqual(
+        status.parked.map((p) => [p.issueNumber, p.answeredAt]),
+        [["801", "2026-09-02T04:20:00.000Z"]],
+      );
+    });
+  }
+});
+
+test("buildStatus reads an answered park `starting` once the live campaign's re-admit spawns it", () => {
+  const dir = join(tmpdir(), `vetinari-status-answered-readmit-${Date.now()}`);
+  withGatewayHome(dir, () => {
+    seedAnsweredPark(dir, [event("spawn", { ts: "2026-09-02T04:21:00.000Z", taskId: "801", running: 2, left: 0 })]);
+    rmSync(join(dir, "parked", "801.json")); // the re-admitted run consumes the answered record
+    const issue = buildStatus(cfgFor(dir), { alive: true }).waves[0].issues.find((i) => i.issueNumber === "801");
+    assert.equal(issue?.status, "running");
+    assert.deepEqual(issue?.phase, { label: "starting", steady: false });
+  });
+});
+
+test("buildStatus shows a pruned answered park `pruned`, never running, under a live campaign", () => {
+  const dir = join(tmpdir(), `vetinari-status-answered-pruned-${Date.now()}`);
+  withGatewayHome(dir, () => {
+    seedAnsweredPark(dir, [event("prune", { ts: "2026-09-02T04:22:00.000Z", target: "801", removed: ["801"], dropped: ["801"] })]);
+    const issue = buildStatus(cfgFor(dir), { alive: true }).waves[0].issues.find((i) => i.issueNumber === "801");
+    assert.equal(issue?.membership, "pruned");
+    assert.notEqual(issue?.status, "running");
+    assert.equal(issue?.phase, undefined);
+  });
 });
 
 test("buildStatus collapses a wave that had a member pruned and a member grafted once its wave-done lands (#363)", () => {

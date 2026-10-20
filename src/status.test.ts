@@ -9,6 +9,7 @@ import type { AddressInfo } from "node:net";
 import { request } from "node:http";
 import { register } from "./registry.ts";
 import { registerProject } from "./host-slots.ts";
+import { issueMoves } from "./dashboard-visual-state.ts";
 
 // The parsed payload the dashboard SSE stream carries in each `data:` frame.
 type EventPayload = { project?: string; events?: { event: string; turn?: number }[] };
@@ -478,10 +479,59 @@ test("serveAllStatus GET /api/issue carries the parked question and options for 
       question: "Which parser?",
       options: ["Recursive descent", "Parser combinator"],
     });
+    // Unanswered: no answer on the payload, and the sheet still offers its reply.
+    assert.equal(detail.answer, undefined);
+    assert.equal(issueMoves(detail).reply, true);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+for (const live of [true, false]) {
+  test(`serveAllStatus GET /api/issue carries an answered issue's answer and answeredAt, so the sheet offers no reply (${live ? "live campaign: reads running · answered" : "no live campaign: reads parked"})`, async () => {
+    const configDir = join(tmpdir(), `vetinari-issue-answered-${live}-${Date.now()}`);
+    const alphaDir = join(configDir, "state-alpha");
+    seedState(alphaDir, [
+      event("campaign-start", { ts: "2025-05-01T08:00:00.000Z", waves: [["101"]], slots: 1 }),
+      event("spawn", { ts: "2025-05-01T08:00:30.000Z", taskId: "101", running: 1, left: 0 }),
+      event("parked", { ts: "2025-05-01T08:06:00.000Z", taskId: "101", reason: "question" }),
+      event("answered", { ts: "2025-05-01T08:09:00.000Z", taskId: "101", source: "ui" }),
+    ]);
+    writeFileSync(
+      join(alphaDir, "parked", "101.json"),
+      JSON.stringify({
+        taskId: "101",
+        parkedAt: "2025-05-01T08:06:00.000Z",
+        reason: "question",
+        branch: "agent/101",
+        sessionId: "s",
+        question: "Which parser?",
+        answer: "Recursive descent",
+        answeredAt: "2025-05-01T08:09:00.000Z",
+      }),
+    );
+    register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: alphaDir });
+    if (live) registerProject(configDir, "alpha", 1, "campaign", 1, { pid: process.pid });
+
+    const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+    const { port } = server.address() as AddressInfo;
+    try {
+      const detail = await (await fetch(`http://127.0.0.1:${port}/api/issue?project=alpha&issue=101`)).json();
+      assert.equal(detail.answer, "Recursive descent");
+      assert.equal(detail.answeredAt, "2025-05-01T08:09:00.000Z");
+      if (live) {
+        assert.equal(detail.status, "running");
+        assert.deepEqual(detail.phase, { label: "answered", steady: true });
+      } else {
+        assert.equal(detail.status, "parked");
+        assert.equal(detail.reason, "question");
+      }
+      assert.equal(issueMoves(detail).reply, false);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+}
 
 test("serveAllStatus GET /api/issue omits parked reply data for a non-parked issue", async () => {
   const configDir = join(tmpdir(), `vetinari-issue-unparked-${Date.now()}`);

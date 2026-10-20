@@ -46,7 +46,7 @@ const seed = () => {
 // POST /answer with `startChild` stubbed to the given outcome, recording what it was called with.
 const answerWith = async (body: string, outcome: StartedChild = { code: 0, lastLine: "", running: false }) => {
   const configDir = seed();
-  const calls: { projectRoot: string; args: string[]; opts: { logFile: string; startupMs: number } }[] = [];
+  const calls: { projectRoot: string; args: string[]; opts: { logFile: string; startupMs: number; env?: Record<string, string> } }[] = [];
   const deps: DashboardDeps = {
     configDir,
     prunePreview: async () => null,
@@ -75,6 +75,11 @@ test("POST /answer starts answer in the project root, logging under logs/dashboa
   assert.equal(calls[0].opts.startupMs, 7);
   assert.equal(dirname(calls[0].opts.logFile), join(configDir, "base", "logs", "dashboard"));
   assert.match(basename(calls[0].opts.logFile), /^answer-.+\.log$/);
+});
+
+test("POST /answer starts answer with VETINARI_ANSWER_SOURCE=ui so its `answered` event names the dashboard", async () => {
+  const { calls } = await answerWith(REPLY);
+  assert.deepEqual(calls[0].opts.env, { VETINARI_ANSWER_SOURCE: "ui" });
 });
 
 test("POST /answer redirects when the child parks inside the window (exit 2) (#369)", async () => {

@@ -21,6 +21,7 @@ import {
 } from "./dashboard-assets.ts";
 import type { GraftRejection } from "./plan.ts";
 import { cappedRawRows, isNotableHostEvent, renderLandingShell } from "./status.ts";
+import { issueDetailSheetMarkup } from "./dashboard-render-issue.ts";
 
 test("graftVerdicts maps every graft rejection reason — no key renders undefined (#374)", () => {
   // The reason map lives in browser JS, where an unmapped key renders `undefined` to
@@ -469,6 +470,21 @@ test("openIssue clears the reply draft only when the sheet binds a different iss
     ISSUE_DETAIL_SHEET_SCRIPT,
     /const closeSheet = \(\) => \{ issueDetail\.classList\.remove\("show"\); issueDetail\.hidden = true; \};/,
   );
+});
+
+test("the issue sheet shows a delivered answer read-only — no reply box, no options — gated on answeredAt", () => {
+  // issueMoves sees the detail's answeredAt, so an answered issue gets no reply move.
+  assert.match(
+    ISSUE_DETAIL_SHEET_SCRIPT,
+    /issueMoves\(\{ status: d\.status, reason: d\.reason, archived: d\.archived, answeredAt: d\.answeredAt \}\)/,
+  );
+  // The answer lands in its own read-only element; the form and options are hidden.
+  assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /const replyAnswer = document\.getElementById\("reply-answer"\)/);
+  assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /replyAnswer\.textContent = d\.answer \|\| ""/);
+  const answeredBranch = ISSUE_DETAIL_SHEET_SCRIPT.slice(ISSUE_DETAIL_SHEET_SCRIPT.indexOf("} else if (answered) {"));
+  assert.match(answeredBranch, /^[^]*?replyForm\.hidden = true;[^]*?replyOptions\.hidden = true;/);
+  // The static shell holds the element.
+  assert.match(issueDetailSheetMarkup(false), /<p class="reply-answer" id="reply-answer" hidden><\/p>/);
 });
 
 test("the issue-sheet FIX_FORWARD map carries a `stopped` entry — a signalled run is redriven, not answered", () => {

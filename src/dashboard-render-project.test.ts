@@ -880,6 +880,51 @@ test("renderStatusPage shows a running member's phase in place of the word, cont
   );
   assert.doesNotMatch(html, /<small>running<\/small>/);
 });
+// A wave of 301 (parked on a question, then answered — its record still on disk) beside 302, running.
+const seedAnsweredPark = (dir: string) => {
+  seedState(dir, [
+    event("campaign-start", { ts: "2026-09-02T04:00:00.000Z", waves: [["301", "302"]], slots: 2 }),
+    event("wave-start", { ts: "2026-09-02T04:01:00.000Z", index: 0, tasks: ["301", "302"] }),
+    event("spawn", { ts: "2026-09-02T04:02:00.000Z", taskId: "301", running: 1, left: 1 }),
+    event("spawn", { ts: "2026-09-02T04:02:01.000Z", taskId: "302", running: 2, left: 0 }),
+    event("parked", { ts: "2026-09-02T04:10:00.000Z", taskId: "301", reason: "question", detail: "Which?" }),
+    event("answered", { ts: "2026-09-02T04:20:00.000Z", taskId: "301", source: "cli" }),
+  ]);
+  writeFileSync(
+    join(dir, "parked", "301.json"),
+    JSON.stringify({
+      taskId: "301",
+      parkedAt: "2026-09-02T04:10:00.000Z",
+      reason: "question",
+      branch: "agent/301",
+      question: "Which?",
+      answer: "Redis",
+      answeredAt: "2026-09-02T04:20:00.000Z",
+    }),
+  );
+};
+
+test("an answered park under a live campaign renders as a steady `answered` row with no parked card", () => {
+  const dir = join(tmpdir(), `vetinari-render-answered-live-${Date.now()}`);
+  seedAnsweredPark(dir);
+  const html = renderStatusPage(buildStatus(cfgFor(dir), { alive: true }), { leaseLive: true });
+  assert.match(
+    html,
+    /<button type="button" class="wave-member running"[^>]*><span class="dot running idle"><\/span>#301 [^]*?<small>answered<\/small><\/button>/,
+  );
+  assert.match(html, /<section class="wave running">/);
+  assert.doesNotMatch(html, /class="parked-card"/);
+});
+
+test("an answered park with no live campaign stays a parked card awaiting re-admit, with Redrive offered", () => {
+  const dir = join(tmpdir(), `vetinari-render-answered-idle-${Date.now()}`);
+  seedAnsweredPark(dir);
+  const html = renderStatusPage(buildStatus(cfgFor(dir), { alive: false }), { prune: true, graft: true, leaseLive: false });
+  assert.match(html, /<button type="button" class="wave-member parked"[^>]*>[^]*?#301 /);
+  assert.match(html, /<div class="parked-card-meta">answered — awaiting re-admit · question<\/div>/);
+  assert.match(html, /<button type="button" class="redrive-btn" data-redrive-open>Redrive<\/button>/);
+});
+
 test("renderStatusPage renders a grafted member row's status dot alongside its grafted badge (#307)", () => {
   // A grafted issue composes the two axes (ADR 0019): its lifecycle dot reads its own
   // status (here running), and the `grafted` membership badge rides alongside — the dot is

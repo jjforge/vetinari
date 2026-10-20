@@ -1,6 +1,7 @@
 import { listProjects } from "./registry.ts";
 import { readBody, type RouteHandler } from "./dashboard-http.ts";
 import { respondWithStartedChild } from "./dashboard-child.ts";
+import { ANSWER_SOURCE_ENV_VAR } from "./config.ts";
 
 /**
  * `POST /answer` — a parked issue's reply. The redrive runs in the project's own
@@ -27,6 +28,7 @@ export const handleAnswer: RouteHandler = async (req, res, url, deps) => {
     res.writeHead(404).end(`unknown project: ${project}`);
     return true;
   }
-  await respondWithStartedChild(res, deps, pointer, ["answer", taskId, text]);
+  // Stamp the source so the child's `answered` event names the dashboard, not the CLI.
+  await respondWithStartedChild(res, deps, pointer, ["answer", taskId, text], { [ANSWER_SOURCE_ENV_VAR]: "ui" });
   return true;
 };

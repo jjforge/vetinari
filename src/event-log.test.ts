@@ -49,6 +49,8 @@ const describe = (e: OrchestratorEvent): string => {
       return `merged ${e.taskId}`;
     case "parked":
       return `parked ${e.taskId}: ${e.reason}${e.detail ? ` (${e.detail})` : ""}`;
+    case "answered":
+      return `answered ${e.taskId} via ${e.source}`;
     case "failed":
       return `failed ${e.taskId}`;
     case "base-gate":
@@ -97,6 +99,7 @@ test("a switch over the §2.1 narrowed kinds reads each member's fields", () => 
   assert.equal(describe(event("wave-start", { index: 0, tasks: ["1", "2"] })), "wave 0: 1,2");
   assert.equal(describe(event("merged", { taskId: "8", branch: "agent/8" })), "merged 8");
   assert.equal(describe(event("parked", { taskId: "8", reason: "conflict", detail: "CONFLICT" })), "parked 8: conflict (CONFLICT)");
+  assert.equal(describe(event("answered", { taskId: "8", source: "ui" })), "answered 8 via ui");
   assert.equal(describe(event("failed", { taskId: "2", detail: "error(1)" })), "failed 2");
   assert.equal(describe(event("base-gate", { index: 1, green: false, detail: "boom" })), "base-gate 1 green=false");
   assert.equal(describe(event("wave-done", { index: 1, merged: ["1"] })), "done 1 merged 1");

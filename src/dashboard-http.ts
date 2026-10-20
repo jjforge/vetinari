@@ -34,7 +34,11 @@ export interface DashboardDeps {
    * wait only its startup window (#369) — the route's 2xx then means "started and survived the
    * window", not merely "spawned". Optional: the routes fall back to the real `startChild`.
    */
-  startChild?: (projectRoot: string, args: string[], opts: { logFile: string; startupMs: number }) => Promise<StartedChild>;
+  startChild?: (
+    projectRoot: string,
+    args: string[],
+    opts: { logFile: string; startupMs: number; env?: Record<string, string> },
+  ) => Promise<StartedChild>;
   /** The startup window POST /redrive and POST /answer wait — default 5000ms, injectable for tests. */
   childStartupMs?: number;
 }

@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import type { ResolvedConfig } from "./config.ts";
+import type { AnswerSource, ResolvedConfig } from "./config.ts";
 import type { ParkReason } from "./state.ts";
 
 /**
@@ -95,6 +95,15 @@ export interface ParkedEvent extends BaseEvent {
   taskId: string;
   reason: ParkReason;
   detail?: string;
+}
+
+/** `answered` — an answer was delivered into a parked task's record (cli-dispatch.ts): the task and
+ * who answered it. Until the re-admit's `spawn`, a live campaign shows the task `running` in the
+ * `answered` phase rather than `parked` (dashboard-lifecycle.ts). */
+export interface AnsweredEvent extends BaseEvent {
+  event: "answered";
+  taskId: string;
+  source: AnswerSource;
 }
 
 /** `failed` — a task the agent could not make green (its child `run` exited non-zero): a terminal
@@ -315,6 +324,7 @@ export type OrchestratorEvent =
   | GreenEvent
   | MergedEvent
   | ParkedEvent
+  | AnsweredEvent
   | FailedEvent
   | BaseGateEvent
   | WaveDoneEvent

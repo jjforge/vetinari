@@ -47,7 +47,7 @@ Creates (new files): `src/report-format.ts`, `src/report-format.test.ts`
 **`Creates:`** cites name files the ticket will add, so they are never checked against the tree. The cite's directory is resolved instead, by longest-suffix match against the tree's directories, after dropping a leading `./`:
 
 - One directory matches: the key is that directory plus the file name. `a/index.ts` with `src/a` in the tree keys to `src/a/index.ts`, so it collides with a `Touches:` of that file but not with an `index.ts` created elsewhere.
-- No directory matches (a new directory): the key is the cited path as written.
+- No directory matches (a new directory): the key is the cited path as written. So cite a new directory by its full path from the repo root: `newdir/a.ts` and `src/newdir/a.ts` key differently and do not collide, so two tickets that mean the same new file land in one wave.
 - Several directories match, or the cite is a bare name: the key is the bare file name, which collides with **every** file of that name.
 
 **Don't cite the changelog fragment.** Each ticket's `changelog.d/<issue>.md` is unique to that ticket, so it can never collide. Citing the placeholder gives every ticket the same `<issue>.md` basename, so they all collide and the planner runs one ticket per wave.

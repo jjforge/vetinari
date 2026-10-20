@@ -1001,12 +1001,19 @@ const greenThen = (harvest: string) =>
 const ENV_FAILURE =
   "<finding><summary>make fmt fails in the agent container: gofumpt sumdb check</summary><severity>P1</severity></finding><promise>COMPLETE</promise>";
 
-test("three parallel runs harvesting the same finding file it once and comment 'seen again' twice", async () => {
+const ENV_FAILURE_REWORDED =
+  "<finding><summary>make fmt fails: gofumpt sumdb verification error in container</summary><severity>P1</severity></finding><promise>COMPLETE</promise>";
+
+test("three parallel runs harvesting the same finding — reworded or not — file it once and comment 'seen again' twice", async () => {
   const tr = fakeTracker();
   const cfg = harnessCfg(tr);
 
   await silence(() =>
-    Promise.all(["T-1", "T-2", "T-3"].map((id) => runLoop(cfg, id, undefined, undefined, depsFor(greenThen(ENV_FAILURE))))),
+    Promise.all(
+      [ENV_FAILURE, ENV_FAILURE_REWORDED, ENV_FAILURE].map((harvest, i) =>
+        runLoop(cfg, `T-${i + 1}`, undefined, undefined, depsFor(greenThen(harvest))),
+      ),
+    ),
   );
 
   assert.equal(tr.filed.length, 1, "one issue for one environment failure");

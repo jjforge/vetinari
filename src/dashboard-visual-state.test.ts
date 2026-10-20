@@ -154,6 +154,14 @@ test("issueMoves drops reply for a `stopped` park — prune only (a signalled ru
   assert.deepEqual(issueMoves({ status: "parked", reason: "stopped" }), { reply: false, prune: true });
 });
 
+test("issueMoves offers no reply once an answer is delivered — parked with no live campaign, or running while one re-admits it", () => {
+  const answeredAt = "2026-09-02T04:20:00.000Z";
+  assert.deepEqual(issueMoves({ status: "parked", reason: "question", answeredAt }), { reply: false, prune: true });
+  assert.deepEqual(issueMoves({ status: "running", answeredAt }), { reply: false, prune: true });
+  // An unanswered question still wants its reply.
+  assert.deepEqual(issueMoves({ status: "parked", reason: "question" }), { reply: true, prune: true });
+});
+
 test("issueMoves offers prune for a failed issue (#325)", () => {
   // The wire status is `failed` (the `IssueStatus` enum), the string `/api/issue` ships and the
   // sheet's move rule keys on — one word now (design §13.1), so a failed issue gets its Prune move.

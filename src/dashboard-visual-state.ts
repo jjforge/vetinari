@@ -58,19 +58,32 @@ export function reasonWord(reason: string): string {
  *   one is banked and offers nothing. `failed` is the wire word `/api/issue` ships (the
  *   `IssueStatus` enum, now the design's own word), so the rule keys on it directly.
  * - An archived (read-only) issue offers nothing — no move mutates a finished run's log.
+ * - An answered issue (`answeredAt` set) offers no reply — the answer is delivered and shown
+ *   read-only; `vetinari answer` can still replace it. It reads `running` under a live campaign
+ *   (which never offers a reply) and `parked` without one, where only prune remains.
  *
  * A legacy park with no reason reads as an answerable question (mirroring `renderMoves`).
  * Self-contained and browser-safe: single-sourced into the sheet script via `.toString()`,
  * so the node test asserts the very function the browser runs. The `reason` param is a plain
  * string here (the `ParkReason` values) so the shipped `.toString()` carries no type import.
  */
-export function issueMoves({ status, reason, archived }: { status: string; reason?: string; archived?: boolean }): {
+export function issueMoves({
+  status,
+  reason,
+  archived,
+  answeredAt,
+}: {
+  status: string;
+  reason?: string;
+  archived?: boolean;
+  answeredAt?: string;
+}): {
   reply: boolean;
   prune: boolean;
 } {
   if (archived) return { reply: false, prune: false };
   if (status === "parked") {
-    const answerable = !reason || reason === "question" || reason === "stalled";
+    const answerable = !answeredAt && (!reason || reason === "question" || reason === "stalled");
     return { reply: answerable, prune: true };
   }
   if (status === "failed") return { reply: false, prune: true };

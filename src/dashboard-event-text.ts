@@ -273,6 +273,17 @@ export function parkedReplyFor(records: ParkedRecord[], issueNumber: string): { 
   return { question: description, options };
 }
 
+/**
+ * The delivered answer on an issue's parked record, for the issue-detail sheet to show read-only
+ * in place of its reply box. Undefined when no record names the issue or its record is unanswered.
+ */
+export function parkedAnswerFor(records: ParkedRecord[], issueNumber: string): { answer: string; answeredAt: string } | undefined {
+  const id = normalize(issueNumber);
+  const rec = records.find((r) => normalize(r.taskId) === id);
+  if (!rec?.answeredAt) return undefined;
+  return { answer: rec.answer ?? "", answeredAt: rec.answeredAt };
+}
+
 /** Pull one tag's trimmed inner text out of a loosely-structured agent block, mirroring
  *  the `field` convention the harvest turn uses over `<finding>` stdout (findings.ts). */
 const parkedField = (block: string, tag: string): string | undefined => {

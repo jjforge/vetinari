@@ -689,12 +689,14 @@ const eventNamesIssue = (e: OrchestratorEvent, id: string): boolean => {
  * (from its `campaign-start`) is considered, mirroring `reduceCampaign`, so an
  * issue re-run in a fresh campaign shows that run's turns — a queue-only log with
  * no campaign frame is folded whole.
+ * `opts.alive` is the live-lease probe {@link issueLifecycle} reads for its answered overlay — only
+ * that; it never crash-folds here.
  */
-export function reconstructIssueDetail(events: OrchestratorEvent[], issueNumber: string): IssueDetail {
+export function reconstructIssueDetail(events: OrchestratorEvent[], issueNumber: string, opts: { alive?: boolean } = {}): IssueDetail {
   const id = normalize(issueNumber);
   const reduced = reduceCampaign(events);
   const { titles, name } = reduced;
-  const life = issueLifecycle(reduced, id);
+  const life = issueLifecycle(reduced, id, opts);
   const membership = issueMembership(reduced, id);
 
   const latestCampaignIndex = events.findLastIndex((e) => e.event === "campaign-start" && Array.isArray(e.waves));

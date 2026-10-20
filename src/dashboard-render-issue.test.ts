@@ -103,7 +103,10 @@ test("the issue sheet gates its moves through the single issueMoves rule, single
   // a question/stall gets reply, a conflict/red-base/crash gets a fix-forward notice, and
   // every non-completed state prunes per the rule. No redrive: it is a campaign control now.
   assert.ok(ISSUE_DETAIL_SHEET_SCRIPT.includes("function issueMoves("));
-  assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /issueMoves\(\{ status: d\.status, reason: d\.reason, archived: d\.archived \}\)/);
+  assert.match(
+    ISSUE_DETAIL_SHEET_SCRIPT,
+    /issueMoves\(\{ status: d\.status, reason: d\.reason, archived: d\.archived, answeredAt: d\.answeredAt \}\)/,
+  );
   assert.doesNotMatch(ISSUE_DETAIL_SHEET_SCRIPT, /redriveForm/);
   assert.doesNotMatch(ISSUE_DETAIL_SHEET_SCRIPT, /moves\.redrive/);
 });

@@ -260,6 +260,8 @@ export const ISSUE_DETAIL_SHEET_STYLES = `  .prune-panel { display: flex; align-
   .reply-title { color: var(--color-text); font-weight: 600; min-width: 0; }
   .reply-elapsed { color: var(--color-text-light-2); font-size: .85rem; white-space: nowrap; }
   .reply-question { margin: 0 0 .6rem; color: var(--color-text-light); white-space: pre-wrap; max-height: 30vh; overflow-y: auto; }
+  /* A delivered answer, shown read-only in place of the box until the re-admit consumes it. */
+  .reply-answer { margin: 0 0 .6rem; padding: .4rem .7rem; color: var(--color-text); white-space: pre-wrap; max-height: 30vh; overflow-y: auto; border-left: 3px solid var(--color-blue); }
   /* Options stack one per line as full-width bordered rows (POC), not inline pills:
      the A/B/C letter sits in a fixed left margin, the label fills the rest. */
   .reply-options { display: flex; flex-direction: column; gap: .4rem; margin-bottom: .6rem; }
@@ -301,6 +303,7 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
   const replySend = document.getElementById("reply-send");
   const replyQuestion = document.getElementById("reply-question");
   const replyOptions = document.getElementById("reply-options");
+  const replyAnswer = document.getElementById("reply-answer");
   const replyText = document.getElementById("reply-text");
   const replyForm = document.getElementById("reply-form");
   const replyStatus = document.getElementById("reply-status");
@@ -359,15 +362,19 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
   //   posts it through /answer to answer-and-continue the parked task.
   // - a redrive-only park (conflict/red-base/crash): the same block shows a fix-forward
   //   notice instead of the box; the redrive itself is the whole-campaign control on the page.
+  // - an answered issue (answeredAt, whether it reads parked or running · answered): the block
+  //   shows the delivered answer read-only — no box, no options, no Reply.
   // - prune gates its own control; a completed or archived issue offers none.
   const renderMoves = (d) => {
-    const moves = issueMoves({ status: d.status, reason: d.reason, archived: d.archived });
+    const moves = issueMoves({ status: d.status, reason: d.reason, archived: d.archived, answeredAt: d.answeredAt });
+    const answered = Boolean(d.answeredAt) && !d.archived;
     // The reply block shows the answer UI for a question/stall, or a fix-forward notice for
     // a conflict/red-base/crash park; every other state hides it.
     const notice = !moves.reply && d.status === "parked" && !d.archived ? (FIX_FORWARD[d.reason] || "") : "";
-    detailReply.hidden = !(moves.reply || notice);
+    detailReply.hidden = !(moves.reply || notice || answered);
     replySend.hidden = !moves.reply;
-    if (moves.reply || notice) {
+    replyAnswer.hidden = !answered;
+    if (moves.reply || notice || answered) {
       // The hoisted facts above the box: the issue title and how long it has waited.
       replyTitle.textContent = d.title || ("Issue #" + d.issueNumber);
       replyElapsed.textContent = fmtElapsed(d.elapsedMs);
@@ -401,6 +408,15 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
         return button;
       }));
       replyOptions.hidden = !options.length;
+    } else if (answered) {
+      replyHeading.textContent = "ANSWERED — AWAITING RE-ADMIT";
+      replyForm.hidden = true;
+      const question = d.parked && d.parked.question;
+      replyQuestion.textContent = question || "";
+      replyQuestion.hidden = !question;
+      replyOptions.replaceChildren();
+      replyOptions.hidden = true;
+      replyAnswer.textContent = d.answer || "";
     } else if (notice) {
       replyHeading.textContent = "PARKED — FIX FORWARD";
       replyForm.hidden = true;

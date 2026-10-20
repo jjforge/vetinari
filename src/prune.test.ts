@@ -514,6 +514,24 @@ test("runPrune clears a dropped parked member's record by default, touching no b
   assert.equal(result.mode === "prune" && result.purged, undefined);
 });
 
+test("runPrune drops an answered park like an unanswered one, clearing its record answer and all", async () => {
+  // An answered member awaiting re-admit has not started: the `answered` event never reaches
+  // `outcomes`, so the prune still sees it `parked`.
+  const cfg = harnessCfg();
+  cfg.log.log("campaign-start", { waves: [["101", "701"]], slots: 4 });
+  cfg.log.log("wave-start", { index: 0, tasks: ["101", "701"] });
+  cfg.log.log("spawn", { taskId: "701", running: 1, left: 0 });
+  cfg.log.log("parked", { taskId: "701", reason: "question" });
+  cfg.log.log("answered", { taskId: "701", source: "cli" });
+
+  const cleared: string[][] = [];
+  const result = await runPrune(cfg, "701", {}, { ...defaultPruneDeps, clearParkedForTasks: (_cfg, ids) => cleared.push(ids) });
+
+  assert.deepEqual(result.mode === "prune" && result.dropped, ["701"]);
+  assert.deepEqual(result.mode === "prune" && result.parkedDropped, ["701"]);
+  assert.deepEqual(cleared, [["701"]]);
+});
+
 test("runPrune --purge deletes each dropped member's branch + worktree after disclosing them", async () => {
   const cfg = harnessCfg();
   cfg.log.log("campaign-start", { waves: [["101"], ["701"]], slots: 4 });

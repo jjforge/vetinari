@@ -111,7 +111,7 @@ unstarted ──spawn──► running ──green+merged──► completed
 
 Membership is an orthogonal axis — `member | grafted | pruned` — so a chip shows its lifecycle as the dot and its membership as a badge, with no precedence between them.
 
-**Phase** is a sub-axis of `running`, never a sixth state, so the five words and the `failed > parked > running > completed` roll-up are untouched. One word ("running") otherwise collapses every distinct thing a running issue can be doing, so an operator cannot tell an agent mid-gate from a green waiting for its wave to integrate. The phase — `starting` (`spawn`), `coding` (`sandbox`/`turn`), `testing · <cmd>` (the `gate` command running now, advancing with each `gate-result`), `filing findings` (the post-green harvest), `waiting to merge` (a pending green) — is derived at render from the issue's latest event (§2.1 forbids storing presentation state), shown on the issue row and sheet **in place of** the word `running` (never beside it). The other four states keep their word and carry no phase. It is issue-only: a wave has no single phase, so it is never rolled up, and an archived run renders none.
+**Phase** is a sub-axis of `running`, never a sixth state, so the five words and the `failed > parked > running > completed` roll-up are untouched. One word ("running") otherwise collapses every distinct thing a running issue can be doing, so an operator cannot tell an agent mid-gate from a green waiting for its wave to integrate. The phase — `starting` (`spawn`), `coding` (`sandbox`/`turn`), `testing · <cmd>` (the `gate` command running now, advancing with each `gate-result`), `filing findings` (the post-green harvest), `waiting to merge` (a pending green), `answered` (an `answered` event: an answer delivered to a park, awaiting the live campaign's re-admit — shown only while the project holds a live campaign lease; with none the issue stays `parked`) — is derived at render from the issue's latest event (§2.1 forbids storing presentation state), shown on the issue row and sheet **in place of** the word `running` (never beside it). The other four states keep their word and carry no phase. It is issue-only: a wave has no single phase, so it is never rolled up, and an archived run renders none.
 
 ### 2.3 Park reasons — one enum
 
@@ -365,7 +365,7 @@ Six states, one accent, and one action colour; colour is derived from state by o
 
 | State          | Hex       | Note                                               |
 | -------------- | --------- | -------------------------------------------------- |
-| running        | `#6cb6ff` | blue; dot pulses while work is in flight — a `running` phase where nothing executes (`waiting to merge`) holds it steady (the existing `.dot.running.idle` rule), no extra channel |
+| running        | `#6cb6ff` | blue; dot pulses while work is in flight — a `running` phase where nothing executes (`waiting to merge`, `answered`) holds it steady (the existing `.dot.running.idle` rule), no extra channel |
 | parked         | `#c8a24e` | amber; the only colour a "needs you" left edge takes |
 | failed         | `#f85149` | red (Primer `danger.fg`); distinct from the risky action's red |
 | unstarted      | `#5f6b78` | grey; also `idle`                                  |

@@ -171,6 +171,7 @@ The event log (`logs/orchestrator.jsonl`) is one JSON object per line,
 | `turn` | `taskId`, `turn`, `summary`, `signal?`, `sessionId?`, `commits?` | run |
 | `green` | `taskId`, `branch`, `commits` | run |
 | `parked` | `taskId`, `reason`, `detail?` | run (question/stalled/stopped/outdated-agent), integrator (conflict) — never the campaign: a red base is carried only by `campaign-parked` |
+| `answered` | `taskId`, `source` (`cli`/`ui`/`telegram`, from `VETINARI_ANSWER_SOURCE`, default `cli`) | the `answer` command, only once it delivers into the parked record — never for a not-parked no-op or a refused answer. Under a live campaign the issue then reads `running` in the `answered` phase until the re-admit's `spawn` |
 | `failed` | `taskId`, `detail?` | whichever process observes it: the run loop on a throw, the campaign on a child's non-zero exit |
 | `merged` | `taskId` | integrator |
 | `base-gate` | `index?`, `green`, `detail?` | integrator |

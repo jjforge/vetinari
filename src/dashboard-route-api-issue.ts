@@ -1,8 +1,9 @@
 import { listProjects } from "./registry.ts";
-import { listArchivedRuns, logFileOf, parkedReplyFor, reconstructIssueDetail } from "./dashboard-model.ts";
+import { listArchivedRuns, logFileOf, parkedAnswerFor, parkedReplyFor, reconstructIssueDetail } from "./dashboard-model.ts";
 import { readEventLog } from "./event-log.ts";
 import { listParkedIn, parkedDirOf } from "./state.ts";
 import type { RouteHandler } from "./dashboard-http.ts";
+import { projectHasLiveCampaign } from "./host-slots.ts";
 
 /**
  * `GET /api/issue?project=<name>&issue=<number>[&run=<token>]` — one issue's
@@ -41,12 +42,17 @@ export const handleApiIssue: RouteHandler = (req, res, url, deps) => {
     res.end(JSON.stringify({ project: pointer.project, ...detail, archived: true }));
     return true;
   }
-  const detail = reconstructIssueDetail(readEventLog({ logFile: logFileOf(pointer.baseLocation) }), issue);
+  // A live campaign lease shows an answered park `running` in the `answered` phase, as the board does.
+  const alive = projectHasLiveCampaign(deps.configDir, pointer.project);
+  const detail = reconstructIssueDetail(readEventLog({ logFile: logFileOf(pointer.baseLocation) }), issue, { alive });
   // A parked issue also carries its reply payload — the full question and the
   // agent's offered options — so the sheet can draw its reply block (story:
   // parked-question reply). Read live from the project's own parked records.
-  const parked = detail.status === "parked" ? parkedReplyFor(listParkedIn(parkedDirOf(pointer.baseLocation)), issue) : undefined;
+  const records = listParkedIn(parkedDirOf(pointer.baseLocation));
+  const parked = detail.status === "parked" ? parkedReplyFor(records, issue) : undefined;
+  // An answered record — live or not — carries its delivered answer, which the sheet shows read-only.
+  const answered = parkedAnswerFor(records, issue);
   res.setHeader("content-type", "application/json");
-  res.end(JSON.stringify({ project: pointer.project, ...detail, ...(parked ? { parked } : {}) }));
+  res.end(JSON.stringify({ project: pointer.project, ...detail, ...(parked ? { parked } : {}), ...answered }));
   return true;
 };

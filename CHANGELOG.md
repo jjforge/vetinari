@@ -22,6 +22,7 @@ Within a milestone each bold section label appears at most once.
 
 **New features:**
 - [user] Harvested findings are throttled and deduped (#499): a finding this campaign already filed, or one matching an open issue (new `findOpenIssue` seam, `githubFindOpenIssue()`, included in `githubTracker()`), gets a "seen again" comment instead of a new issue; the harvest prompt asks for a `<severity>` (P0–P3), only findings at or above `findingSeverityFloor` (default `P2`) are filed, at most `maxFindingsPerRun` (default 2) per run, most severe first, and the rest go into one digest comment on the run's issue via `postComment`.
+- [api] `vetinari answer` appends an `answered` event `{ taskId, source }` once it delivers, with `source` read from `VETINARI_ANSWER_SOURCE` (`cli` by default; the dashboard sets `ui`, the Telegram gateway `telegram`). `/api/issue` carries the record's `answer` and `answeredAt` (#503).
 
 **Improvements:**
 - [user] A wave whose every issue was pruned no longer sits among the live waves on the dashboard: it renders greyed out, after every other wave, collapsed to a ✂️ chip you can open to see what was pruned (an archived run shows it greyed and last, expanded) (#502).
@@ -44,6 +45,8 @@ Within a milestone each bold section label appears at most once.
 - [user] A wave whose every issue was pruned no longer counts in any roll-up: a finished campaign now reads completed on the landing card ("Last run"), the gateway `/status` and the Redrive gate ("settled"), drops the graft input, and the wave counts in the meta line, status line and chat `/status` leave it out; the Stop and Redrive dialogs name the real wave in flight (#502).
 - [ops] A harvested finding is no longer lost when the tracker search (`findOpenIssue`) fails: the finding counts as unmatched and is filed or digested as usual, and the search error is logged as `finding-search-failed` (#510).
 - [ops] A findings digest with no `postComment` wired is now logged as `finding-digest-dropped` with its count and summaries, instead of vanishing silently (#510).
+- [user] An answered parked issue no longer keeps reading **parked** everywhere but its card: while a live campaign owns the re-admit it reads `running` in a new steady `answered` phase — on its wave row, the wave and campaign roll-ups and the landing card — and leaves the parked panel and every PARKED count. With no live campaign it stays parked, noted "answered — awaiting re-admit", with Redrive offered (#503).
+- [user] The issue sheet shows a delivered answer read-only in place of the reply box, so an answered issue is not answered twice; `vetinari answer` can still replace it (#503).
 
 **Documentation:**
 - [user] `docs/ticket-contract.md` no longer says a backticked non-file word always forbids confidence: it does on a `Touches:`/`Files:` line, but on a `Creates:` line it becomes a bare `Creates:` key and the ticket stays confident (#487).

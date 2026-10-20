@@ -52,6 +52,7 @@ Within a milestone each bold section label appears at most once.
 - [user] `docs/ticket-contract.md` no longer says a backticked non-file word always forbids confidence: it does on a `Touches:`/`Files:` line, but on a `Creates:` line it becomes a bare `Creates:` key and the ticket stays confident (#487).
 - [user] The GitHub config template, the README, and the user guide catch up with the findings throttle (#511): the `githubTracker()` seam lists name `findOpenIssue` (seven seams), the GitHub template offers commented-out `maxFindingsPerRun` and `findingSeverityFloor` lines, and the user guide's Findings bullet covers dedupe, the severity floor, the per-run cap, and the digest comment.
 - [user] The ticket contract and user guide now tell ticket writers to cite a new directory (or new package) in `Creates:` by its full path from the repo root — a partial path such as `newdir/a.ts` keys differently from `src/newdir/a.ts` and does not collide, so both tickets would land in one wave (#489).
+- [user] `vetinari help` and the command reference now say `graft` re-layers added issues file-disjoint rather than basename-disjoint, matching how fileKeys are compared as resolved paths; ADR 0014 is updated to match (#485).
 
 ### Collected changes — October 5, 2026
 

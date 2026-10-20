@@ -168,6 +168,16 @@ test("with no campaign-start in the live log, the dashboard reads the newest arc
   assert.deepEqual(latestCampaignSlowGates([campaignOf(60, 60, 60, 60, 60), campaignOf(60, 60, 60)], []), { history: [], budget: [] });
 });
 
+test("with no campaign-start in the live log or the newest archive (an archived standalone run), the dashboard shows no slow gates", () => {
+  // Reading an older archive's campaign as current would pool the standalone run's 200s results into it.
+  const archives = [
+    campaignOf(60, 60, 60, 60, 60),
+    campaignOf(60, 60, 60),
+    [result(200), result(200), result(200), result(200, { budgetSeconds: 100 })],
+  ];
+  assert.deepEqual(latestCampaignSlowGates(archives, []), { history: [], budget: [] });
+});
+
 test("readSlowGateLogs reads every archived orchestrator log oldest-first, plus the live log", () => {
   const stateDir = mkdtempSync(join(tmpdir(), "vetinari-slow-gates-"));
   const archive = join(stateDir, "logs", "archive");

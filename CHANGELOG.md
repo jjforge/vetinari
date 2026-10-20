@@ -23,6 +23,8 @@ Within a milestone each bold section label appears at most once.
 **New features:**
 - [user] Harvested findings are throttled and deduped (#499): a finding this campaign already filed, or one matching an open issue (new `findOpenIssue` seam, `githubFindOpenIssue()`, included in `githubTracker()`), gets a "seen again" comment instead of a new issue; the harvest prompt asks for a `<severity>` (P0–P3), only findings at or above `findingSeverityFloor` (default `P2`) are filed, at most `maxFindingsPerRun` (default 2) per run, most severe first, and the rest go into one digest comment on the run's issue via `postComment`.
 - [api] `vetinari answer` appends an `answered` event `{ taskId, source }` once it delivers, with `source` read from `VETINARI_ANSWER_SOURCE` (`cli` by default; the dashboard sets `ui`, the Telegram gateway `telegram`). `/api/issue` carries the record's `answer` and `answeredAt` (#503).
+- [user] Answering a parked question by replying on Telegram is now acknowledged with a reply to the question's message — "answered — #N will resume", or the `vetinari redrive --override` move when the issue failed earlier (#504).
+- [api] `OutboundRecord` gains an optional `replyTo` message id: the gateway sends such a record as a reply on the project's question connection, skipping the notify map; `tgSend` takes an optional reply target (#504).
 
 **Improvements:**
 - [user] A wave whose every issue was pruned no longer sits among the live waves on the dashboard: it renders greyed out, after every other wave, collapsed to a ✂️ chip you can open to see what was pruned (an archived run shows it greyed and last, expanded) (#502).

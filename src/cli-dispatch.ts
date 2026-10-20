@@ -935,6 +935,12 @@ async function dispatchAnswer(cmd: Extract<Command, { kind: "answer" }>, deps: D
     throw new Refusal(
       `${taskId} parked because the image's agent CLI is too old for the model — it cannot be answered. Rebuild the image with \`vetinari build\`, then \`vetinari redrive\` (a campaign) or \`vetinari run ${taskId}\` (a standalone run).`,
     );
+  // A `conflict` park asked nothing either: the member is green and only its merge conflicted, so
+  // an answer would re-run it fresh instead of integrating it. Refused whether or not postComment is set.
+  if (reason === "conflict")
+    throw new Refusal(
+      `${taskId} parked on a merge conflict — it cannot be answered. Resolve the conflict on the base, then \`vetinari redrive\`.`,
+    );
 
   // A session-less park (an idle stall can save one) re-runs fresh with the answer relayed as a
   // comment, so with no `postComment` it could never be consumed — refuse now, not at re-admit (#496).
@@ -957,7 +963,15 @@ async function dispatchAnswer(cmd: Extract<Command, { kind: "answer" }>, deps: D
   // No live campaign. A member of a paused campaign is re-admitted by the redrive (design §7):
   // it reconciles the answered park into a re-run-with-answer and integrates it, then archives
   // once idle. The redrive carries the campaign's own verdict out (0 done / 2 parked / 1 failed).
-  if (issueAwaitsRedrive(deps.readEventLog(cfg), taskId)) {
+  const events = deps.readEventLog(cfg);
+  if (issueAwaitsRedrive(events, taskId)) {
+    // A member whose last outcome is `failed` is refused by a plain redrive, and `--override` is
+    // campaign-wide (it re-runs every failed member of the wave), so the answer only delivers and
+    // names the move — the override consumes it.
+    if (reduceCampaign(events).outcomes.get(normalize(taskId)) === "failed") {
+      deps.log(`${taskId} answered — it failed on a prior run, so re-run it with \`vetinari redrive --override\`.`);
+      return;
+    }
     const outcome = await deps.campaign(cfg, [], host, undefined, { resume: true });
     deps.archiveIfIdle();
     deps.setExitCode(exitCodeFor(outcome));

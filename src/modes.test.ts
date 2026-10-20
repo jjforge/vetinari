@@ -29,7 +29,7 @@ import {
   type RunSpawner,
 } from "./modes.ts";
 import { loggerForRun, memoryLogger, type MemoryLogger } from "./log.ts";
-import { answerParked, clearParked, hasParked, listOutbox, listParked, readParked } from "./state.ts";
+import { answerParked, clearParked, hasParked, isAnswered, listOutbox, listParked, readParked, writeParkedRecord } from "./state.ts";
 import {
   readEventLog,
   type CampaignDoneEvent,
@@ -1577,6 +1577,35 @@ test("redrive stops as failed again on a failed member, but re-runs it under --o
   );
   assert.equal(ok, "done", "the overridden failed member re-ran to green and the wave closed");
   assert.deepEqual(spawned2, ["102"], "only the failed member re-ran; 101 stayed banked");
+});
+
+test("redrive --override re-runs a failed member that holds an answered record, leaving the answer for the child to consume", async () => {
+  // An `answer` to a member whose last outcome is `failed` only delivers (the plain redrive would
+  // refuse it): the override re-runs it, and the child's run loop consumes the answered record.
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-failed-answered-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  cfg.log.log("campaign-start", { waves: [["102"]], slots: 4 });
+  cfg.log.log("wave-start", { index: 0, tasks: ["102"] });
+  cfg.log.log("parked", { taskId: "102", reason: "question" });
+  cfg.log.log("failed", { taskId: "102", detail: "error(1)" });
+  cfg.log.log("campaign-failed", { index: 0, detail: "102 failed" });
+  writeParkedRecord(cfg, { taskId: "102", reason: "question", branch: "agent/102", question: "which way?" });
+  answerParked(cfg, "102", "the left one");
+
+  const spawned: string[] = [];
+  const answeredAtSpawn: boolean[] = [];
+  const spawnRun: CampaignDeps["spawnRun"] = async (id) => {
+    spawned.push(id);
+    answeredAtSpawn.push(isAnswered(cfg, id));
+    return 0;
+  };
+  const ok = await silenceConsole(() =>
+    campaign(cfg, [], host, undefined, { resume: true, override: true }, recordingDeps(cfg, spawned, [], { spawnRun })),
+  );
+  assert.equal(ok, "done");
+  assert.deepEqual(spawned, ["102"], "the failed member re-runs under --override");
+  assert.deepEqual(answeredAtSpawn, [true], "the answered record survives to the child, which consumes it");
 });
 
 test("a graft appended mid-wave lands in a future wave; the loop re-derives and runs it (#166)", async () => {

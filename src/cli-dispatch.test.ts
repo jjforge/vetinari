@@ -616,6 +616,24 @@ test("dispatch answer refuses an `outdated-agent` record like a `stopped` one, n
   assert.equal((deps.runLoop as any).calls.length, 0);
 });
 
+for (const postComment of [undefined, async () => {}]) {
+  test(`dispatch answer refuses a \`conflict\` record, naming resolve on the base then \`vetinari redrive\` (postComment ${postComment ? "set" : "unset"})`, async () => {
+    const { deps } = makeDeps({
+      hasParked: spy(true) as any,
+      listParked: spy([{ taskId: "436", reason: "conflict", branch: "agent/436", parkedAt: "t", question: "conflict" }]) as any,
+    });
+    (deps.cfg as any).postComment = postComment;
+    await assert.rejects(
+      () => dispatch({ kind: "answer", taskId: "436", text: ["do", "it"] }, deps),
+      (err: Error) =>
+        err instanceof Refusal && /resolve the conflict on the base/i.test(err.message) && /vetinari redrive/.test(err.message),
+    );
+    assert.equal((deps.answerParked as any).calls.length, 0, "nothing is delivered to a conflict record");
+    assert.equal((deps.campaign as any).calls.length, 0);
+    assert.equal((deps.runLoop as any).calls.length, 0);
+  });
+}
+
 test("dispatch answer refuses a session-less park when no postComment is configured — the answer could not be relayed (#496)", async () => {
   const { deps } = makeDeps({
     hasParked: spy(true) as any,
@@ -1482,6 +1500,22 @@ test("dispatch answer delivers then redrives the paused campaign when no campaig
   assert.equal((deps.campaign as any).calls.length, 1);
   assert.deepEqual((deps.campaign as any).calls[0][4], { resume: true });
   assert.equal((deps.archiveIfIdle as any).calls.length, 1, "the answer→redrive path archives once idle");
+});
+
+test("dispatch answer on a member whose last outcome is `failed` delivers, skips the redrive and names `vetinari redrive --override`", async () => {
+  // The re-admit of the answered park threw and logged `failed`: a plain redrive refuses to re-run
+  // a failed member, and `--override` is campaign-wide, so the answer only delivers and hints.
+  const failedAfterAnswer = [...pausedCampaignAfterGreen(), { event: "failed", taskId: "436" }];
+  const { deps, logged, exitCodes } = makeDeps({ readEventLog: spy(failedAfterAnswer) as any });
+  await dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps);
+  assert.deepEqual((deps.answerParked as any).calls, [[deps.cfg, "436", "ok"]], "the answer is on the record for the override to consume");
+  assert.equal((deps.campaign as any).calls.length, 0, "no redrive starts — it would fail the campaign again at once");
+  assert.equal((deps.runLoop as any).calls.length, 0);
+  assert.ok(
+    logged.some((l) => l.includes("vetinari redrive --override")),
+    "the hint names the override",
+  );
+  assert.deepEqual(exitCodes, [], "exit stays 0");
 });
 
 test("dispatch answer redrive refuses to start while a campaign lease is live (§7)", async () => {

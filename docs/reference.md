@@ -194,7 +194,10 @@ event, and the dashboard: `question | stalled | conflict | red-base | crash | st
 `detail` carries the specifics. `question` and `stalled` are resumable by an
 answer; `conflict`, `red-base`, `crash`, `stopped`, and `outdated-agent` need a redrive after a human
 move (a `stopped` or `outdated-agent` standalone run also continues with `vetinari run <id>`). A `stopped`
-or `outdated-agent` record is never announced and cannot be answered. `outdated-agent` is the
+or `outdated-agent` record is never announced and cannot be answered. A `conflict` record is
+announced but cannot be answered either: resolve the conflict on the base, then `vetinari redrive`.
+An answer to a campaign member whose last outcome is `failed` is delivered but starts no redrive — a
+plain redrive refuses a failed member — so re-run it with `vetinari redrive --override`. `outdated-agent` is the
 agent CLI in the image too old for the model (its `detail` is the CLI's error line): rebuild with
 `vetinari build`, then redrive.
 

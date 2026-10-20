@@ -39,6 +39,8 @@ Within a milestone each bold section label appears at most once.
 - [user] `answer` on a `conflict` park is now refused with the conflict move — resolve on the base, then `vetinari redrive` — instead of the session-less refusal, or, with `postComment` set, a fresh re-run that skipped integration (#513).
 - [user] `vetinari init` no longer reports a GitHub label as missing (and offers to create it) when the repo already has it under different case, such as `Needs-Triage` (#490).
 - [user] A wave whose every issue was pruned no longer counts in any roll-up: a finished campaign now reads completed on the landing card ("Last run"), the gateway `/status` and the Redrive gate ("settled"), drops the graft input, and the wave counts in the meta line, status line and chat `/status` leave it out; the Stop and Redrive dialogs name the real wave in flight (#502).
+- [ops] A harvested finding is no longer lost when the tracker search (`findOpenIssue`) fails: the finding counts as unmatched and is filed or digested as usual, and the search error is logged as `finding-search-failed` (#510).
+- [ops] A findings digest with no `postComment` wired is now logged as `finding-digest-dropped` with its count and summaries, instead of vanishing silently (#510).
 
 **Documentation:**
 - [user] `docs/ticket-contract.md` no longer says a backticked non-file word always forbids confidence: it does on a `Touches:`/`Files:` line, but on a `Creates:` line it becomes a bare `Creates:` key and the ticket stays confident (#487).

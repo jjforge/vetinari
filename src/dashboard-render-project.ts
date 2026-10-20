@@ -196,7 +196,10 @@ const renderWaveCard = (
   // A wave holding a freshly-grafted issue (#202) is marked so its edge pulses the teal
   // accent once when it appears — the graft confirming on the wave (option 1a).
   const grafted = wave.issues.some((issue) => issue.membership === "grafted") ? " has-grafted" : "";
-  return `<section class="wave ${wave.status}${grafted}"${extraAttrs}><div class="wave-head"><h2 class="wave-label">${renderWaveLabel(wave, festiveName)}</h2><div class="wave-meta"><span class="wave-tally">${waveMerged(wave)}/${wave.issues.length}</span><span class="wave-status ${wave.status}">${wave.status}</span>${tally}</div></div>${renderWaveMembers(wave, project, prune, interactive, run)}</section>`;
+  // A pruned wave (every member pruned) is out of the plan: its card and pill read `pruned`,
+  // greyed, rather than the `unstarted` its empty fold gives.
+  const state = wave.pruned ? "pruned" : wave.status;
+  return `<section class="wave ${state}${grafted}"${extraAttrs}><div class="wave-head"><h2 class="wave-label">${renderWaveLabel(wave, festiveName)}</h2><div class="wave-meta"><span class="wave-tally">${waveMerged(wave)}/${wave.issues.length}</span><span class="wave-status ${state}">${state}</span>${tally}</div></div>${renderWaveMembers(wave, project, prune, interactive, run)}</section>`;
 };
 
 /** A closed wave's compact toggle chip — the affordance that reveals its full card in
@@ -207,6 +210,12 @@ const renderWaveCard = (
 const renderClosedWaveChip = (wave: StatusWave, festiveName?: string) =>
   `<button type="button" class="completed-wave-chip" aria-expanded="false" aria-controls="closed-wave-${wave.index}" data-wave="${wave.index}"><span class="check" aria-hidden="true">✓</span> ${waveLabel(wave.index, undefined, 0, festiveName ? { name: festiveName, surface: "card" } : undefined)} <span class="completed-wave-tally">${waveMerged(wave)}/${wave.issues.length}</span></button>`;
 
+/** A pruned wave's compact toggle chip — ✂️ and the wave label, greyed. It rides its own group
+ * after the open waves, never the closed-wave bar (that row means "merged"), so it carries
+ * neither the `completed-wave-chip` class nor a ✓; like that chip it reveals its hidden card. */
+const renderPrunedWaveChip = (wave: StatusWave, festiveName?: string) =>
+  `<button type="button" class="pruned-wave-chip" aria-expanded="false" aria-controls="pruned-wave-${wave.index}" data-wave="${wave.index}"><span class="scissors" aria-hidden="true">✂️</span> ${waveLabel(wave.index, undefined, 0, festiveName ? { name: festiveName, surface: "card" } : undefined)}</button>`;
+
 /** The wave/issue body a status renders. On the live run (`collapsible`), closed waves
  * show as a compact toggle row of chips directly above the wave grid; each chip reveals
  * that wave's full card — the same card an open wave renders — in the grid, before the
@@ -214,13 +223,18 @@ const renderClosedWaveChip = (wave: StatusWave, festiveName?: string) =>
  * across a live reload). The read-only archived run passes `collapsible: false`: it has
  * no live toggle script (and would collide on the `closed-wave-N` ids), so it renders
  * every wave as a full card, expanded. `interactive` (the live run) makes chips open the
- * detail sheet and, under prune, route a prune; the archived run passes it `false`. */
+ * detail sheet and, under prune, route a prune; the archived run passes it `false`.
+ *
+ * A pruned wave (every member pruned) is stacked last on both: the live run collapses each
+ * into a greyed chip in its own group after the open waves, its card hidden in a grid below
+ * until the chip opens it; the archived run renders it as a greyed card after every other. */
 const renderWaves = (status: CampaignStatus, prune: boolean, interactive: boolean, collapsible = true, run?: string, festive = false) => {
   if (!status.waves.length) return "<p>No active campaign or queue found.</p>";
+  const prunedWaves = status.waves.filter((wave) => wave.pruned);
   if (!collapsible)
-    return `<div class="waves-grid">${status.waves.map((wave) => renderWaveCard(wave, status.project, prune, interactive, "", run, festiveNameFor(status, wave, festive))).join("")}</div>`;
-  const closedWaves = status.waves.filter((wave) => wave.closed);
-  const openWaves = status.waves.filter((wave) => !wave.closed);
+    return `<div class="waves-grid">${[...liveWaves(status), ...prunedWaves].map((wave) => renderWaveCard(wave, status.project, prune, interactive, "", run, festiveNameFor(status, wave, festive))).join("")}</div>`;
+  const closedWaves = liveWaves(status).filter((wave) => wave.closed);
+  const openWaves = liveWaves(status).filter((wave) => !wave.closed);
   const toggleRow = closedWaves.length
     ? `<div class="completed-waves"><div class="completed-wave-bar" data-project="${escapeHtml(status.project)}">${closedWaves.map((wave) => renderClosedWaveChip(wave, festiveNameFor(status, wave, festive))).join("")}</div></div>`
     : "";
@@ -242,7 +256,22 @@ const renderWaves = (status: CampaignStatus, prune: boolean, interactive: boolea
       renderWaveCard(wave, status.project, prune, interactive, "", undefined, festiveNameFor(status, wave, festive)),
     ),
   ];
-  return `${toggleRow}${cards.length ? `<div class="waves-grid">${cards.join("")}</div>` : ""}`;
+  const prunedGroup = prunedWaves.length
+    ? `<div class="pruned-waves"><div class="pruned-wave-bar" data-project="${escapeHtml(status.project)}">${prunedWaves.map((wave) => renderPrunedWaveChip(wave, festiveNameFor(status, wave, festive))).join("")}</div></div><div class="waves-grid">${prunedWaves
+        .map((wave) =>
+          renderWaveCard(
+            wave,
+            status.project,
+            prune,
+            interactive,
+            ` id="pruned-wave-${wave.index}" hidden`,
+            undefined,
+            festiveNameFor(status, wave, festive),
+          ),
+        )
+        .join("")}</div>`
+    : "";
+  return `${toggleRow}${cards.length ? `<div class="waves-grid">${cards.join("")}</div>` : ""}${prunedGroup}`;
 };
 
 /** The `<name> · N issues · M waves` campaign summary line. Split out so the graft
@@ -513,8 +542,11 @@ ${HOST_LOG_STYLES}
   .wave.parked { border-top-color: var(--color-yellow); }
   /* A failed wave — a member the agent could not make green — reads the failure red (§2). */
   .wave.failed { border-top-color: var(--color-failure); }
+  /* A pruned wave — every member pruned, out of the plan — reads greyed: the dim neutral edge, muted. */
+  .wave.pruned { border-top-color: var(--color-dim); opacity: .65; }
   /* A flex-grid item beats the UA [hidden] rule, so a collapsed completed card needs it back explicitly. */
   .wave.completed[hidden] { display: none; }
+  .wave.pruned[hidden] { display: none; }
   /* One stable head row: the label takes the slack and wraps within itself, the meta
      group (merged/total · state · pruned) stays a nowrap unit on the right so the state
      pill never drops onto its own line in one card while it stays inline in a neighbour. */
@@ -532,6 +564,14 @@ ${HOST_LOG_STYLES}
   .completed-wave-chip[aria-expanded="true"]::after { content: "⌄"; }
   /* An expanded chip takes a green accent (its card is open); collapsed chips stay neutral (§6). */
   .completed-wave-chip[aria-expanded="true"] { border-color: var(--color-green); }
+  /* The pruned-wave chips: their own group after the open waves, greyed and neutral — no
+     green accent when expanded (that is the merged row's), just the same CSS chevron. */
+  .pruned-waves, .pruned-wave-bar { display: flex; flex-wrap: wrap; align-items: flex-start; align-content: flex-start; gap: .5rem; }
+  .pruned-waves { margin: 1rem 0; }
+  .pruned-wave-chip { display: inline-flex; align-items: center; gap: .4rem; border: 1px solid var(--color-secondary); border-radius: 999px; padding: .3rem .65rem; background: var(--color-chip); color: var(--color-text-light-2); cursor: pointer; font: inherit; }
+  .pruned-wave-chip:hover { background: var(--color-chip-hover); }
+  .pruned-wave-chip::after { content: "›"; }
+  .pruned-wave-chip[aria-expanded="true"]::after { content: "⌄"; }
   .wave-status, .completed-wave-chip { display: inline-flex; align-items: center; gap: .4rem; border: 1px solid var(--color-secondary); border-radius: 999px; padding: .3rem .65rem; background: var(--color-chip); color: var(--color-text); }
   /* Each member row is a full-width button — a flat list line, not a pill: dot · #NNN ·
      title (truncating) · status word pushed to the right. Its status reads at 40% alpha
@@ -555,6 +595,7 @@ ${HOST_LOG_STYLES}
   .wave-status.unstarted { border-color: var(--color-dim); color: var(--color-dim); background: rgb(95 107 120 / 12%); }
   .wave-status.parked { border-color: var(--color-yellow); color: var(--color-yellow); background: rgb(200 162 78 / 12%); }
   .wave-status.failed { border-color: var(--color-failure); color: var(--color-failure); background: rgb(248 81 73 / 12%); }
+  .wave-status.pruned { border-color: var(--color-dim); color: var(--color-dim); background: rgb(95 107 120 / 12%); }
   .wave-pruned { font-size: .78rem; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: var(--color-pruned); border: 1px solid var(--color-pruned); background: rgb(163 113 247 / 12%); border-radius: 999px; padding: .1rem .5rem; }
   /* Status dot colours, generated once from stateColor and shared with the landing
      (§3), scoped to .dot so a state never tints a whole chip, card, or list row (#81). */
@@ -663,12 +704,12 @@ ${ISSUE_DETAIL_SHEET_STYLES}
   .archive-body { padding: 0 1rem 1rem; }
   .archive-body[hidden] { display: none; }
 </style>${
-  // No-JS fallback for the closed-wave toggles: the cards are hidden and the chips
-  // inert without JS, so reveal every closed card in the grid and hide the toggle bar,
+  // No-JS fallback for the closed- and pruned-wave toggles: the cards are hidden and the
+  // chips inert without JS, so reveal every collapsed card and hide the toggle bars,
   // keeping the content reachable (the old <details> degraded the same way). Emitted
-  // only when there are closed waves to fall back for.
-  status.waves.some((wave) => wave.closed)
-    ? `\n<noscript><style>.completed-wave-bar { display: none; } .wave.completed[hidden] { display: block; }</style></noscript>`
+  // only when there are closed or pruned waves to fall back for.
+  status.waves.some((wave) => wave.closed || wave.pruned)
+    ? `\n<noscript><style>.completed-wave-bar { display: none; } .wave.completed[hidden] { display: block; } .pruned-wave-bar { display: none; } .wave.pruned[hidden] { display: block; }</style></noscript>`
     : ""
 }
 </head>
@@ -861,12 +902,21 @@ ${ARCHIVE_LIST_SCRIPT}
     // is harmless.
     document.querySelectorAll(".wave-member[data-issue], .parked-card[data-issue]").forEach((el) =>
       el.addEventListener("click", (event) => { event.preventDefault(); openIssue(el.dataset.project, el.dataset.issue, el.dataset.prunable === "1", el.dataset.run); }));
-    // Closed-wave toggles: each chip reveals/hides its own wave card in the grid. The set
-    // of open waves is persisted per project so a soft-refresh — which re-renders the grid
-    // collapsed — does not silently collapse everything the operator opened.
-    const waveBar = document.querySelector(".completed-wave-bar");
+    // Closed- and pruned-wave toggles: each chip reveals/hides its own wave card. The set of
+    // open waves is persisted per project (one set per bar) so a soft-refresh — which
+    // re-renders the cards collapsed — does not silently collapse everything the operator opened.
+    wireWaveToggles(".completed-wave-bar", ".completed-wave-chip", "vetinari:closed-waves:");
+    wireWaveToggles(".pruned-wave-bar", ".pruned-wave-chip", "vetinari:pruned-waves:");
+    // The summary-line graft input and the Redrive and Stop controls are inside #live-region
+    // too, so rebind them each refresh (their nodes are replaced on every soft-refresh).
+    wireGraft();
+    wireRedrive();
+    wireStop();
+  }
+  function wireWaveToggles(barSelector, chipSelector, storePrefix) {
+    const waveBar = document.querySelector(barSelector);
     if (waveBar) {
-      const storeKey = "vetinari:closed-waves:" + waveBar.dataset.project;
+      const storeKey = storePrefix + waveBar.dataset.project;
       const readOpen = () => { try { return new Set(JSON.parse(sessionStorage.getItem(storeKey) || "[]")); } catch { return new Set(); } };
       const open = readOpen();
       const setOpen = (chip, isOpen) => {
@@ -874,7 +924,7 @@ ${ARCHIVE_LIST_SCRIPT}
         const card = document.getElementById(chip.getAttribute("aria-controls"));
         if (card) card.hidden = !isOpen;
       };
-      for (const chip of waveBar.querySelectorAll(".completed-wave-chip")) {
+      for (const chip of waveBar.querySelectorAll(chipSelector)) {
         if (open.has(chip.dataset.wave)) setOpen(chip, true);
         chip.addEventListener("click", () => {
           const isOpen = chip.getAttribute("aria-expanded") !== "true";
@@ -884,11 +934,6 @@ ${ARCHIVE_LIST_SCRIPT}
         });
       }
     }
-    // The summary-line graft input and the Redrive and Stop controls are inside #live-region
-    // too, so rebind them each refresh (their nodes are replaced on every soft-refresh).
-    wireGraft();
-    wireRedrive();
-    wireStop();
   }
 ${GRAFT_SCRIPT}
 ${REDRIVE_SCRIPT}

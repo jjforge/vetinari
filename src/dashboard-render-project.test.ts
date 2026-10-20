@@ -1095,7 +1095,8 @@ test("switching scope resets the view: it navigates (fresh sheet) and closed-wav
   assert.match(html, /<div id="issue-detail" class="issue-detail"[^>]*hidden>/);
   // Expanded closed-waves are persisted per-repo, so a different scope reads its own
   // (collapsed) set — wave labels aren't unique across repos, so this can't expand the wrong wave.
-  assert.match(html, /const storeKey = "vetinari:closed-waves:" \+ waveBar\.dataset\.project;/);
+  assert.match(html, /wireWaveToggles\(".completed-wave-bar", ".completed-wave-chip", "vetinari:closed-waves:"\)/);
+  assert.match(html, /const storeKey = storePrefix \+ waveBar\.dataset\.project;/);
 });
 test("renderStatusPage renders archived runs as a collapsible list of wave cards, with no mode control or raw pane (#222)", () => {
   // Pin the timezone so the local-rendered when-clock is deterministic here (the
@@ -2660,4 +2661,106 @@ test("the Redrive control re-enters the parked wave, not a pruned wave ahead of 
     { prune: true, graft: true, leaseLive: false, baseBranch: "main" },
   );
   assert.match(html, /re-enters wave 2 — #201 — on <code>main<\/code>/);
+});
+// A pruned wave 0 ahead of a running wave 1 — the live page's render of the pruned wave.
+const prunedAheadOfRunning = (): CampaignStatus => ({
+  project: "demo",
+  waves: [prunedWave(0, "101"), { index: 1, status: "running", issues: [{ issueNumber: "201", status: "running" }] }],
+  parked: [],
+});
+test("renderStatusPage stacks a pruned wave after the open waves as a collapsed chip in its own group, its card hidden", () => {
+  const html = renderStatusPage(prunedAheadOfRunning());
+  const running = html.indexOf('<section class="wave running">');
+  const chip = html.indexOf('class="pruned-wave-chip"');
+  assert.ok(running >= 0 && chip > running, "the running wave's card comes first, the pruned wave's chip after it");
+  assert.match(
+    html,
+    /<div class="pruned-waves"><div class="pruned-wave-bar" data-project="demo"><button type="button" class="pruned-wave-chip" aria-expanded="false" aria-controls="pruned-wave-0" data-wave="0"><span class="scissors" aria-hidden="true">✂️<\/span> Wave 1<\/button><\/div><\/div>/,
+  );
+  // Collapsed by default: the card is rendered hidden, for the chip to toggle open.
+  assert.match(html, /<section class="wave pruned" id="pruned-wave-0" hidden>/);
+  // Not in the merged row above the grid — that row means "merged".
+  assert.doesNotMatch(html, /class="completed-wave-bar"/);
+});
+test("a pruned wave's chip and card read greyed and neutral — no merged chip class, no ✓, no completed section, a `pruned` pill", () => {
+  const html = renderStatusPage(prunedAheadOfRunning());
+  const chip = html.slice(
+    html.indexOf('<div class="pruned-wave-bar"'),
+    html.indexOf("</div></div>", html.indexOf('<div class="pruned-wave-bar"')),
+  );
+  assert.doesNotMatch(chip, /completed-wave-chip/);
+  assert.doesNotMatch(chip, /class="check"|✓/);
+  const card = html.slice(
+    html.indexOf('<section class="wave pruned"'),
+    html.indexOf("</section>", html.indexOf('<section class="wave pruned"')),
+  );
+  assert.doesNotMatch(card, /class="wave[^"]*completed/);
+  assert.match(card, /<span class="wave-status pruned">pruned<\/span>/);
+  assert.doesNotMatch(card, /class="wave-status unstarted"/);
+  // The muted, neutral style: the chip, the card's edge and its pill all read the dim neutral.
+  assert.match(html, /\.wave\.pruned \{[^}]*border-top-color: var\(--color-dim\)/);
+  assert.match(html, /\.wave-status\.pruned \{[^}]*color: var\(--color-dim\)/);
+  assert.match(html, /\.pruned-wave-chip \{[^}]*color: var\(--color-text-light-2\)/);
+  assert.match(html, /\.wave\.pruned\[hidden\] \{ display: none; \}/);
+});
+test("renderStatusPage wires the pruned-wave chips to toggle their cards, persisting the open set across a live reload", () => {
+  const html = renderStatusPage(prunedAheadOfRunning());
+  assert.match(html, /wireWaveToggles\("\.completed-wave-bar", "\.completed-wave-chip", "vetinari:closed-waves:"\)/);
+  assert.match(html, /wireWaveToggles\("\.pruned-wave-bar", "\.pruned-wave-chip", "vetinari:pruned-waves:"\)/);
+  assert.match(html, /sessionStorage\.setItem\(storeKey/);
+});
+test("renderStatusPage's no-JS fallback reveals a pruned wave's card and hides its chip group", () => {
+  const html = renderStatusPage(prunedAheadOfRunning());
+  assert.match(
+    html,
+    /<noscript><style>[^<]*\.pruned-wave-bar \{ display: none; \}[^<]*\.wave\.pruned\[hidden\] \{ display: block; \}[^<]*<\/style><\/noscript>/,
+  );
+});
+test("a wave with one member pruned and one surviving stays in place, expanded, both rows rendered", () => {
+  const html = renderStatusPage({
+    project: "demo",
+    waves: [
+      {
+        index: 0,
+        status: "running",
+        issues: [
+          { issueNumber: "101", status: "unstarted", membership: "pruned" },
+          { issueNumber: "102", status: "running" },
+        ],
+      },
+      { index: 1, status: "unstarted", issues: [{ issueNumber: "201", status: "unstarted" }] },
+    ],
+    parked: [],
+  });
+  assert.doesNotMatch(html, /class="pruned-wave-chip"/);
+  assert.ok(html.indexOf('<section class="wave running">') < html.indexOf('<section class="wave unstarted">'));
+  assert.match(html, /class="wave-member unstarted pruned"[^>]*>[^]*?#101/);
+  assert.match(html, /class="wave-member running"[^>]*>[^]*?#102/);
+});
+test("an archived run renders a pruned wave last and greyed, expanded", () => {
+  const html = renderStatusPage(
+    { project: "beta", waves: [], parked: [] },
+    {
+      archivedRuns: [
+        {
+          run: "2026-09-03T04-00-00-000Z",
+          state: "complete",
+          issues: 1,
+          status: {
+            project: "beta",
+            waves: [
+              prunedWave(0, "101"),
+              { index: 1, status: "completed", closed: true, issues: [{ issueNumber: "201", status: "completed" }] },
+            ],
+            parked: [],
+          },
+        },
+      ],
+    },
+  );
+  const body = html.slice(html.indexOf('class="archive-body"'));
+  const completed = body.indexOf('<section class="wave completed">');
+  const pruned = body.indexOf('<section class="wave pruned">');
+  assert.ok(completed >= 0 && pruned > completed, "the pruned wave renders after the surviving one, as an expanded card");
+  assert.doesNotMatch(body, /class="pruned-wave-chip"/);
 });

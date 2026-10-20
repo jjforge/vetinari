@@ -41,9 +41,16 @@ export default defineConfig({
   // provider's default model/effort. Override per run with `--agent`.
   // agent: { provider: "claude" },
 
+  // Optional: throttle the findings a green run's harvest files. The overflow and
+  // below-floor findings go into one digest comment on the run's issue.
+  // Most new issues one run's harvest files, most severe first (default 2).
+  // maxFindingsPerRun: 2,
+  // Least severe rating (P0–P3) still filed (default "P2"; unrated counts as P2).
+  // findingSeverityFloor: "P2",
+
   // Every GitHub tracker seam — fetchTask, blockedBy, listByLabel, postComment,
-  // onIssueMerged, reportFinding — with the repo derived from this project's git
-  // `origin`. Pass { repo: "owner/repo" } only when your tracker is NOT `origin`;
+  // onIssueMerged, reportFinding, findOpenIssue — with the repo derived from this
+  // project's git `origin`. Pass { repo: "owner/repo" } only when your tracker is NOT `origin`;
   // a field set after the spread overrides that one seam.
   ...githubTracker(),
 });

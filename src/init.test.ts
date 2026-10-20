@@ -338,6 +338,12 @@ test("scanInit plans the githubTracker config from the install for a project who
   // No fetchTask stub and no commented-out github* resolver lines.
   assert.doesNotMatch(config, /fetchTask:/);
   assert.doesNotMatch(config, /^\s*\/\/.*github(BlockedBy|IssuesByLabel)/m);
+  // The seam comment names all seven seams the preset wires, and the findings throttle is offered.
+  for (const seam of ["fetchTask", "blockedBy", "listByLabel", "postComment", "onIssueMerged", "reportFinding", "findOpenIssue"]) {
+    assert.match(config, new RegExp(`^\\s*//.*\\b${seam}\\b`, "m"), `seam comment omits ${seam}`);
+  }
+  assert.match(config, /^\s*\/\/ maxFindingsPerRun: 2,$/m);
+  assert.match(config, /^\s*\/\/ findingSeverityFloor: "P2",$/m);
 });
 
 test("scanInit plans today's skeleton for a project with no origin, or a non-GitHub one", () => {

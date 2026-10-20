@@ -28,10 +28,20 @@ const api = (conn: TgConn) => `https://api.telegram.org/bot${conn.token}`;
 export const tgConfigured = () => Boolean(tgEnvConn());
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export async function tgSend(conn: TgConn | undefined, text: string, logger: Logger = hostLogger()): Promise<number | undefined> {
+/**
+ * One `sendMessage` on `conn`, returning the sent message's id. `replyTo` threads it as a reply to
+ * that message; a deleted target still gets the message, unthreaded.
+ */
+export async function tgSend(
+  conn: TgConn | undefined,
+  text: string,
+  logger: Logger = hostLogger(),
+  replyTo?: number,
+): Promise<number | undefined> {
   if (!conn) return undefined;
   const body: Record<string, unknown> = { chat_id: conn.chat, text: text.slice(0, 3900) };
   if (conn.thread) body.message_thread_id = Number(conn.thread);
+  if (replyTo != null) body.reply_parameters = { message_id: replyTo, allow_sending_without_reply: true };
   const res = await fetch(`${api(conn)}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

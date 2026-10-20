@@ -1,5 +1,5 @@
 import { listProjects } from "./registry.ts";
-import { buildStatus, campaignState, statusConfigFromPointer } from "./dashboard-model.ts";
+import { buildStatus, campaignState, liveWaves, statusConfigFromPointer } from "./dashboard-model.ts";
 import { projectHasLiveCampaign } from "./host-slots.ts";
 import { redriveAllowed } from "./dashboard-visual-state.ts";
 import { readBody, type RouteHandler } from "./dashboard-http.ts";
@@ -40,7 +40,10 @@ export const handleRedrive: RouteHandler = async (req, res, url, deps) => {
   // reads (design §8), folded through the campaign state so a crash reads as stopped.
   const leaseLive = projectHasLiveCampaign(deps.configDir, project);
   const status = buildStatus(statusConfigFromPointer(pointer), { alive: leaseLive });
-  const gate = redriveAllowed(campaignState(status.waves.map((wave) => wave.status)), leaseLive, status.waves);
+  // The fold reads the live waves only — a pruned wave is out of the plan (its empty fold
+  // `unstarted` would otherwise misread a finished campaign as never-run).
+  const waves = liveWaves(status);
+  const gate = redriveAllowed(campaignState(waves.map((wave) => wave.status)), leaseLive, waves);
   if (!gate.allowed) {
     res.writeHead(409).end(gate.reason);
     return true;

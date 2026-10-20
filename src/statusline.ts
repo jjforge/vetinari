@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { basename } from "node:path";
 import { loadConfig } from "./config.ts";
-import { buildStatus, type CampaignStatus, type IssueStatus } from "./status.ts";
+import { buildStatus, type CampaignStatus, type IssueStatus, liveWaves } from "./status.ts";
 import { reasonWord } from "./dashboard-visual-state.ts";
 import { composeStatusLine } from "./statusline-install.ts";
 
@@ -57,8 +57,10 @@ export function formatStatusLine(status: CampaignStatus): string {
   }
 
   const parts: string[] = [];
-  const running = status.waves.find((wave) => wave.status === "running");
-  if (running) parts.push(`wave ${running.index + 1}/${status.waves.length}`);
+  // A pruned wave is out of the plan, so the position and total count only the live waves.
+  const waves = liveWaves(status);
+  const running = waves.findIndex((wave) => wave.status === "running");
+  if (running >= 0) parts.push(`wave ${running + 1}/${waves.length}`);
 
   const segs = COUNT_EMOJI.filter(([status]) => counts.get(status)).map(([status, emoji]) => `${emoji}${counts.get(status)}`);
   if (segs.length) parts.push(segs.join(" "));

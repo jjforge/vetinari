@@ -3,6 +3,7 @@ import {
   buildStatusWithIssueNames,
   type CampaignStatus,
   type DisplayStatus,
+  liveWaves,
   type Membership,
   type RunState,
   type WaveStatus,
@@ -41,14 +42,16 @@ const WAVE_EMOJI: Record<WaveStatus, string> = {
 export function formatStatusText(status: CampaignStatus): string {
   const lines: string[] = [`📊 ${status.project} — status`];
 
-  if (!status.waves.length) {
+  // A pruned wave is out of the plan, so it is neither listed nor counted in the total.
+  const waves = liveWaves(status);
+  if (!waves.length) {
     lines.push("", "No active run right now. Start a queue or campaign and it'll show up here.");
     return lines.join("\n");
   }
 
-  const total = status.waves.length;
-  for (const wave of status.waves) {
-    lines.push("", `Wave ${wave.index + 1}/${total} ${WAVE_EMOJI[wave.status]} ${wave.status}`);
+  const total = waves.length;
+  for (const [position, wave] of waves.entries()) {
+    lines.push("", `Wave ${position + 1}/${total} ${WAVE_EMOJI[wave.status]} ${wave.status}`);
     for (const issue of wave.issues) {
       const name = issue.name ? ` ${issue.name}` : "";
       const badge = issue.membership && issue.membership !== "member" ? ` ${MEMBERSHIP_EMOJI[issue.membership]}` : "";

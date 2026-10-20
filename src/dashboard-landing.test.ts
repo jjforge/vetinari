@@ -591,6 +591,26 @@ test("a finished campaign lingering in the live log exposes lastRun too, so the 
   assert.equal(parseRunTimestamp(card.lastRun!.run), card.lastRun!.finishedAt);
 });
 
+test("a finished campaign whose wave 0 a prune emptied still takes the finished-campaign branch — the pruned wave counts for nothing", () => {
+  const base = join(tmpdir(), `vetinari-landing-done-pruned-wave-${Date.now()}`);
+  const dir = join(base, "demo");
+  seedState(dir, [
+    event("campaign-start", { ts: "2026-06-15T08:00:00.000Z", waves: [["1"], ["2"]], name: "gateway work", slots: 1 }),
+    event("prune", { ts: "2026-06-15T08:01:00.000Z", target: "1", removed: ["1"], dropped: [] }),
+    event("wave-start", { ts: "2026-06-15T08:02:00.000Z", index: 0, tasks: ["2"] }),
+    event("green", { ts: "2026-06-15T08:03:00.000Z", taskId: "2", branch: "agent/2", commits: [] }),
+    event("merged", { ts: "2026-06-15T08:04:00.000Z", taskId: "2" }),
+    event("wave-done", { ts: "2026-06-15T08:05:00.000Z", index: 0, merged: ["2"] }),
+  ]);
+
+  const [card] = buildLanding([pointerFor("demo", dir)], new Date("2026-06-15T12:00:00.000Z")).projects;
+  assert.equal(card.runState, "idle");
+  assert.match(card.lastEvent, /^Last run: /);
+  assert.equal(card.lastRun?.name, "gateway work");
+  assert.equal(card.lastRun?.finishedAt, "2026-06-15T08:05:00.000Z");
+  assert.equal(card.percentMerged, 100);
+});
+
 test("buildLanding folds a finished single-wave live log to idle too (#208)", () => {
   const base = join(tmpdir(), `vetinari-landing-done-queue-${Date.now()}`);
   const dir = join(base, "demo");

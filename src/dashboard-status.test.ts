@@ -12,6 +12,7 @@ import {
   buildAllStatus,
   buildStatus,
   buildStatusWithIssueNames,
+  liveWaves,
   selectStatus,
   stopPending,
   type CampaignStatus,
@@ -334,6 +335,89 @@ test("buildStatus never reads a wholly-pruned display wave as `closed` (#363)", 
   const ghost = status.waves.find((w) => w.issues.every((i) => i.membership === "pruned"));
   assert.ok(ghost, "the wholly-pruned wave still renders as a ghost");
   assert.notEqual(ghost!.closed, true);
+});
+
+/** The ticket's fixture: a prune empties layout wave 0 before the surviving wave runs and closes
+ * (as loop-facing index 0, since the prune dropped the emptied wave from the plan). */
+const prunedWaveFinishedLog = [
+  event("campaign-start", { ts: "2026-09-03T04:00:00.000Z", waves: [["1"], ["2"]], slots: 1 }),
+  event("prune", { ts: "2026-09-03T04:01:00.000Z", target: "1", removed: ["1"], dropped: [] }),
+  event("wave-start", { ts: "2026-09-03T04:02:00.000Z", index: 0, tasks: ["2"] }),
+  event("green", { ts: "2026-09-03T04:03:00.000Z", taskId: "2", branch: "agent/2", commits: [] }),
+  event("merged", { ts: "2026-09-03T04:04:00.000Z", taskId: "2" }),
+  event("wave-done", { ts: "2026-09-03T04:05:00.000Z", index: 0, merged: ["2"] }),
+];
+
+test("buildStatus flags a wave whose every member was pruned as `pruned`, leaving its status and `closed` alone", () => {
+  const dir = join(tmpdir(), `vetinari-status-pruned-wave-${Date.now()}`);
+  seedState(dir, prunedWaveFinishedLog);
+  const status = buildStatus(cfgFor(dir));
+  assert.equal(status.waves.length, 2, "the pruned wave is kept, not dropped (ADR 0007)");
+  assert.equal(status.waves[0].pruned, true);
+  assert.equal(status.waves[0].status, "unstarted");
+  assert.notEqual(status.waves[0].closed, true);
+  assert.deepEqual(
+    status.waves[0].issues.map((i) => [i.issueNumber, i.membership]),
+    [["1", "pruned"]],
+  );
+  assert.equal(status.waves[1].status, "completed");
+  assert.equal(status.waves[1].closed, true);
+  assert.equal(status.waves[1].pruned, undefined);
+});
+
+test("liveWaves drops the pruned waves, so a campaign whose only surviving wave merged folds `completed`", () => {
+  const dir = join(tmpdir(), `vetinari-status-live-waves-${Date.now()}`);
+  seedState(dir, prunedWaveFinishedLog);
+  const status = buildStatus(cfgFor(dir));
+  assert.deepEqual(
+    liveWaves(status).map((w) => w.index),
+    [1],
+  );
+  assert.equal(campaignState(liveWaves(status).map((w) => w.status)), "completed");
+});
+
+test("a wave with one member pruned and one surviving is not a pruned wave", () => {
+  const dir = join(tmpdir(), `vetinari-status-part-pruned-wave-${Date.now()}`);
+  seedState(dir, [
+    event("campaign-start", { ts: "2026-09-03T04:00:00.000Z", waves: [["1", "2"]], slots: 1 }),
+    event("prune", { ts: "2026-09-03T04:01:00.000Z", target: "1", removed: ["1"], dropped: [] }),
+    event("wave-start", { ts: "2026-09-03T04:02:00.000Z", index: 0, tasks: ["2"] }),
+  ]);
+  const [wave] = buildStatus(cfgFor(dir)).waves;
+  assert.equal(wave.pruned, undefined);
+  assert.equal(wave.status, "unstarted");
+  assert.equal(wave.closed, false);
+  assert.deepEqual(
+    wave.issues.map((i) => [i.issueNumber, i.membership]),
+    [
+      ["1", "pruned"],
+      ["2", "member"],
+    ],
+  );
+});
+
+test("a graft after a prune emptied layout wave 0 lands in its target wave, and wave 0 stays `pruned`", () => {
+  const dir = join(tmpdir(), `vetinari-status-pruned-then-graft-${Date.now()}`);
+  seedState(dir, [
+    event("campaign-start", { ts: "2026-09-03T04:00:00.000Z", waves: [["1"], ["2"]], slots: 1 }),
+    event("prune", { ts: "2026-09-03T04:01:00.000Z", target: "1", removed: ["1"], dropped: [] }),
+    // Loop-facing index 0 is now layout wave 1 — the `layoutOf` survivor mapping places it there.
+    event("graft", { ts: "2026-09-03T04:02:00.000Z", ids: ["3"], blockedBy: {}, fileKeys: {} }),
+  ]);
+  const status = buildStatus(cfgFor(dir));
+  assert.equal(status.waves[0].pruned, true);
+  assert.deepEqual(
+    status.waves[0].issues.map((i) => i.issueNumber),
+    ["1"],
+  );
+  assert.deepEqual(
+    status.waves[1].issues.map((i) => [i.issueNumber, i.membership]),
+    [
+      ["2", "member"],
+      ["3", "grafted"],
+    ],
+  );
+  assert.equal(status.waves[1].pruned, undefined);
 });
 
 test("buildStatus surfaces the campaign name from the start event", () => {

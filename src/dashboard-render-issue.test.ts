@@ -10,6 +10,7 @@ import {
   renderLandingShell,
   renderStatusPage,
 } from "./status.ts";
+import { renderGraftInline } from "./dashboard-render-issue.ts";
 
 test("the aggregated prune-preview and graft-rejection pages draw from the shared palette, never a hand-authored hex (Appendix A, #317)", () => {
   const prunePage = renderAggregatedPrunePreview("demo", "42", "would drop #42, #43");
@@ -114,4 +115,24 @@ test("the issue sheet carries a fix-forward notice keyed by reason for a conflic
   for (const reason of ["conflict", '"red-base"', "crash"]) {
     assert.ok(ISSUE_DETAIL_SHEET_SCRIPT.includes(reason));
   }
+});
+
+test("renderGraftInline offers no graft once the only surviving wave merged — a pruned wave does not keep the campaign unsettled", () => {
+  // A prune emptied wave 0; the surviving wave closed, so the campaign is settled and the
+  // engine (`campaignSettled`) would refuse a graft — the input must not render.
+  const finished = {
+    project: "demo",
+    waves: [
+      {
+        index: 0,
+        status: "unstarted" as const,
+        closed: false,
+        pruned: true,
+        issues: [{ issueNumber: "1", status: "unstarted" as const, membership: "pruned" as const }],
+      },
+      { index: 1, status: "completed" as const, closed: true, issues: [{ issueNumber: "2", status: "completed" as const }] },
+    ],
+    parked: [],
+  };
+  assert.equal(renderGraftInline(finished), "");
 });

@@ -1,4 +1,4 @@
-import type { CampaignStatus, StatusIssue } from "./dashboard-model.ts";
+import { type CampaignStatus, campaignState, liveWaves, type StatusIssue } from "./dashboard-model.ts";
 import type { StructuredGraftClosure } from "./graft.ts";
 import type { GraftRejection } from "./plan.ts";
 import { DASHBOARD_PALETTE_CSS } from "./dashboard-assets.ts";
@@ -57,8 +57,10 @@ export const renderGraftInline = (status: CampaignStatus) =>
 
 /** Whether the campaign can still accept a graft: it is live-or-resumable (unsettled) while
  * any wave is not yet closed. A wholly-closed campaign is settled — nothing left to layer
- * into, which the graft engine refuses (ADR 0014) — so the affordance renders nothing (#307). */
-const isGraftable = (status: CampaignStatus) => status.waves.some((wave) => wave.status !== "completed");
+ * into, which the graft engine refuses (ADR 0014) — so the affordance renders nothing (#307).
+ * The fold reads the live waves only, as the engine's `campaignSettled` does: a pruned wave is
+ * out of the plan and never keeps a finished campaign unsettled. */
+const isGraftable = (status: CampaignStatus) => campaignState(liveWaves(status).map((wave) => wave.status)) !== "completed";
 
 /**
  * The aggregated site's prune preview: it is a dumb router (ADR 0002) with no

@@ -463,6 +463,27 @@ test("formatStatusText labels a held wave and its merge-conflict-held issue as p
   // The merge-conflict-held issue reads the parked emoji + word, no retired status word.
   assert.match(text, /⏸ #640 Add prune-out/);
 });
+test("formatStatusText leaves a pruned wave out of the list and the total", () => {
+  // The finished campaign a prune emptied wave 0 of: only the surviving, merged wave counts.
+  const text = formatStatusText({
+    project: "demo",
+    waves: [
+      {
+        index: 0,
+        status: "unstarted",
+        closed: false,
+        pruned: true,
+        issues: [{ issueNumber: "1", status: "unstarted", membership: "pruned" }],
+      },
+      { index: 1, status: "completed", closed: true, issues: [{ issueNumber: "2", status: "completed", membership: "member" }] },
+    ],
+    parked: [],
+  });
+
+  assert.match(text, /^Wave 1\/1 ✅ completed$/m);
+  assert.doesNotMatch(text, /unstarted/);
+  assert.doesNotMatch(text, /#1\b/);
+});
 test("formatStatusText reports when nothing is running", () => {
   const text = formatStatusText({ project: "demo", waves: [], parked: [] });
   assert.match(text, /demo — status/);

@@ -36,6 +36,21 @@ test("formatStatusLine summarizes the running wave and status counts on one line
   assert.equal(line.includes("\n"), false, "must be a single line");
 });
 
+test("formatStatusLine leaves a pruned wave out of the wave count and position", () => {
+  // A wave whose every member was pruned is out of the plan, so the running wave behind it
+  // is the first and only wave the bar counts.
+  const line = formatStatusLine({
+    project: "jjforge",
+    waves: [
+      { index: 0, status: "unstarted", pruned: true, issues: [{ issueNumber: "1", status: "unstarted", membership: "pruned" }] },
+      { index: 1, status: "running", issues: [{ issueNumber: "2", status: "running" }] },
+    ],
+    parked: [],
+  });
+
+  assert.match(line, /wave 1\/1/);
+});
+
 test("formatStatusLine counts a grafted issue by its lifecycle (unstarted ⚪) — the reported graft case", () => {
   // A grafted issue is `unstarted` on the lifecycle axis with a `grafted` membership badge
   // (ADR 0019), so the compact bar counts it as ⚪ queued work, not a separate glyph.

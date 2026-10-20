@@ -431,6 +431,36 @@ test("offerGithubLabels on a terminal with all three labels present prints nothi
   assert.equal(h.out(), "");
 });
 
+test("offerGithubLabels on a terminal counts a label present under any case as present", async () => {
+  // GitHub label names are case-insensitive: `gh label create needs-triage` fails on a repo with `Needs-Triage`.
+  const h = labelStep({ gh: async () => labelList("Needs-Triage", "Pending-Verify", "READY-FOR-AGENT") });
+
+  await offerGithubLabels(githubPlan, "o/r", h.deps);
+
+  assert.deepEqual(h.calls, [["label", "list", "--repo", "o/r", "--json", "name", "--limit", "1000"]]);
+  assert.equal(h.asked.length, 0);
+  assert.equal(h.out(), "");
+});
+
+test("offerGithubLabels on a terminal, with one label present under another case, names and creates only the other two", async () => {
+  const h = labelStep({ answer: "y", gh: async (args) => (args[1] === "list" ? labelList("Needs-Triage", "bug") : "") });
+
+  await offerGithubLabels(githubPlan, "o/r", h.deps);
+
+  const named = h
+    .out()
+    .match(/relies on GitHub labels this repo lacks: (.*)\./)?.[1]
+    .split(", ");
+  assert.deepEqual(named?.sort(), ["pending-verify", "ready-for-agent"]);
+  assert.deepEqual(
+    h.calls.slice(1).map((args) => args.slice(0, 3)),
+    [
+      ["label", "create", "ready-for-agent"],
+      ["label", "create", "pending-verify"],
+    ],
+  );
+});
+
 test("offerGithubLabels on a terminal names exactly the missing labels and, on yes, creates each with its colour and description", async () => {
   const h = labelStep({ answer: "y", gh: async (args) => (args[1] === "list" ? labelList("bug", "ready-for-agent") : "") });
 

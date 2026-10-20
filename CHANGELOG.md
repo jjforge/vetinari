@@ -18,6 +18,26 @@ and each entry opens with a tag saying who it reaches:
 `**Breaking changes:**` sorts first in a milestone and names the contract it broke.
 Within a milestone each bold section label appears at most once.
 
+### Collected changes — October 20, 2026
+
+**New features:**
+- [user] Harvested findings are throttled and deduped (#499): a finding this campaign already filed, or one matching an open issue (new `findOpenIssue` seam, `githubFindOpenIssue()`, included in `githubTracker()`), gets a "seen again" comment instead of a new issue; the harvest prompt asks for a `<severity>` (P0–P3), only findings at or above `findingSeverityFloor` (default `P2`) are filed, at most `maxFindingsPerRun` (default 2) per run, most severe first, and the rest go into one digest comment on the run's issue via `postComment`.
+
+**Bug fixes:**
+- [user] The gateway now sends outbox messages a run enqueues within the same millisecond in the order they were enqueued, rather than in random order; each outbound record carries a `seq` tie-breaker, and records written before this change still drain by time (#479).
+- [user] The dashboard's slow-gates section no longer pools an archived standalone `vetinari run`'s gate results into the campaign before it: with no `campaign-start` in the live log, only the newest archive's own campaign counts, and the section is empty when that archive has none (#488).
+- [user] An answered park saved with no session id (an idle stall) now re-runs fresh with the answer relayed as an issue comment instead of failing the member; `vetinari answer` refuses such a park up front when no `postComment` is configured (#496).
+- [user] An answer delivered while a wave drains with nothing queued now re-admits the parked member within a slot-poll interval, instead of waiting for a running sibling to exit (#497).
+- [user] `vetinari parked` and the dashboard's parked cards show an answered record as "answered — awaiting re-admit", distinct from an unanswered park (#497).
+- [user] The template and example Dockerfiles pre-create `~/go/pkg`, `~/.cache` and `~/.cargo` as the agent user, so a cache mount beneath them no longer leaves root-owned parents; the example Go module mount no longer breaks `go run pkg@version` (#500).
+- [user] Running `git worktree prune` inside one agent container no longer deletes every concurrent agent's worktree entry. Each sandbox now mounts the host's `<stateDir>/worktrees` directory read-only at its own host path, so the `gitdir` paths git recorded resolve inside the container. Sibling worktrees stay read-only to the agent (#506).
+- [user] `answer` on a campaign member whose last outcome is `failed` now delivers the answer and names `vetinari redrive --override`, instead of starting a redrive that fails the campaign again at once (#513).
+- [user] `answer` on a `conflict` park is now refused with the conflict move — resolve on the base, then `vetinari redrive` — instead of the session-less refusal, or, with `postComment` set, a fresh re-run that skipped integration (#513).
+
+**Documentation:**
+- [user] `docs/ticket-contract.md` no longer says a backticked non-file word always forbids confidence: it does on a `Touches:`/`Files:` line, but on a `Creates:` line it becomes a bare `Creates:` key and the ticket stays confident (#487).
+- [user] The GitHub config template, the README, and the user guide catch up with the findings throttle (#511): the `githubTracker()` seam lists name `findOpenIssue` (seven seams), the GitHub template offers commented-out `maxFindingsPerRun` and `findingSeverityFloor` lines, and the user guide's Findings bullet covers dedupe, the severity floor, the per-run cap, and the digest comment.
+
 ### Collected changes — October 5, 2026
 
 **New features:**

@@ -31,7 +31,7 @@ Creates (new files): `src/report-format.ts`, `src/report-format.test.ts`
 
 **Cites on a marker line.** Everything after the colon is read for cites:
 
-- Every backticked token is a cite, so an extensionless `` `Makefile` `` or a dotfile `` `.gitignore` `` counts. A backticked non-file word (`` `campaign` ``) is a cite too, so it forbids confidence.
+- Every backticked token is a cite, so an extensionless `` `Makefile` `` or a dotfile `` `.gitignore` `` counts. A backticked non-file word (`` `campaign` ``) is a cite too, so on a `Touches:`/`Files:` line it forbids confidence. On a `Creates:` line the same word becomes a bare `Creates:` key and the ticket stays confident, because `Creates:` cites are never checked against the tree.
 - An unbackticked token counts only as a slash path (`src/report.ts`). An unbackticked `Makefile` or `report.ts` is not a cite.
 - Backslash-escaped backticks (`` \`src/report.ts\` ``) are read as plain backticks.
 - A trailing `:line` or `:line:col` is stripped, so `` `src/report.ts:42` `` cites `src/report.ts`.

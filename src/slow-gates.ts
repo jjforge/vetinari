@@ -120,14 +120,19 @@ export function slowGatesAtSettle(events: OrchestratorEvent[]): SlowGates {
  * The slow gates of a project's latest campaign, for the dashboard's project page: every history flag
  * and budget overrun across the whole campaign (the page has no settles to dedupe against). The latest
  * campaign is the live log's, from its latest `campaign-start`; with none there (a settled, archived
- * campaign) it is the newest archive's, measured against everything older. `archives` is oldest-first.
+ * campaign) it is the newest archive's own — none when that archive has no `campaign-start` (an archived
+ * standalone run) — measured against everything older. `archives` is oldest-first.
  */
 export function latestCampaignSlowGates(archives: OrchestratorEvent[][], live: OrchestratorEvent[]): SlowGates {
-  const events = live.some((e) => e.event === "campaign-start") ? [...archives.flat(), ...live] : archives.flat();
-  const start = events.findLastIndex((e) => e.event === "campaign-start");
+  // Only the chosen log's own `campaign-start` counts — never an older archive's, or an archived
+  // standalone run (which has none) would be pooled into the campaign before it.
+  const inLive = live.some((e) => e.event === "campaign-start");
+  const latest = inLive ? live : (archives.at(-1) ?? []);
+  const older = (inLive ? archives : archives.slice(0, -1)).flat();
+  const start = latest.findLastIndex((e) => e.event === "campaign-start");
   if (start < 0) return { history: [], budget: [] };
-  const current = gateResults(events.slice(start));
-  return { history: historyFlags(gateResults(events.slice(0, start)), current), budget: budgetFlags(current) };
+  const current = gateResults(latest.slice(start));
+  return { history: historyFlags(gateResults([...older, ...latest.slice(0, start)]), current), budget: budgetFlags(current) };
 }
 
 /**

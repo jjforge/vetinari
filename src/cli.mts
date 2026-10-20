@@ -60,7 +60,7 @@ import {
   resolvedWrapper,
 } from "./path-install.ts";
 import { archiveRun, shouldArchiveIdle, shouldArchiveLeftover } from "./archive.ts";
-import { answerParked, hasParked, listParked } from "./state.ts";
+import { answerParked, enqueueOutbound, hasParked, listParked } from "./state.ts";
 import { readEventLog } from "./event-log.ts";
 import { autoRegister, computeRegistryDedup, gatewayConfigDir, listProjects, removePointer } from "./registry.ts";
 import { liveCampaignPid, projectHasLiveCampaign, resolveHostCeiling, type HostBudget } from "./host-slots.ts";
@@ -661,6 +661,7 @@ await dispatch(parseArgs([mode, ...rest]), {
   listParked,
   hasParked,
   answerParked,
+  enqueueOutbound,
   projectHasLiveCampaign,
   liveCampaignPid,
   signalProcess: (pid, signal) => {

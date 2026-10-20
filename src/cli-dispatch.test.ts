@@ -72,6 +72,7 @@ function makeDeps(overrides: Partial<DispatchDeps> = {}) {
     listParked: spy([]) as unknown as DispatchDeps["listParked"],
     hasParked: spy(true) as unknown as DispatchDeps["hasParked"],
     answerParked: spy() as unknown as DispatchDeps["answerParked"],
+    enqueueOutbound: spy() as unknown as DispatchDeps["enqueueOutbound"],
     projectHasLiveCampaign: spy(false) as unknown as DispatchDeps["projectHasLiveCampaign"],
     readEventLog: spy([]) as unknown as DispatchDeps["readEventLog"],
     archiveRun: spy({ archivedLog: null, clearedOutbound: 0 }) as unknown as DispatchDeps["archiveRun"],
@@ -1537,6 +1538,105 @@ test("dispatch answer appends no `answered` event for a not-parked no-op or a re
   (sessionless.cfg as any).postComment = undefined;
   await assert.rejects(() => dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, sessionless.deps));
   assert.deepEqual(answeredRows(sessionless.cfg), [], "a refused session-less answer logs nothing");
+});
+
+// Run `fn` with VETINARI_ANSWER_SOURCE set to `source` (unset when undefined), restoring it after.
+async function withAnswerSource(source: string | undefined, fn: () => Promise<unknown>) {
+  const prior = process.env.VETINARI_ANSWER_SOURCE;
+  if (source === undefined) delete process.env.VETINARI_ANSWER_SOURCE;
+  else process.env.VETINARI_ANSWER_SOURCE = source;
+  try {
+    await fn();
+  } finally {
+    if (prior === undefined) delete process.env.VETINARI_ANSWER_SOURCE;
+    else process.env.VETINARI_ANSWER_SOURCE = prior;
+  }
+}
+
+// A parked question for 436 the gateway announced as Telegram message 42.
+const announcedQuestion = {
+  taskId: "436",
+  reason: "question",
+  sessionId: "s",
+  branch: "agent/436",
+  parkedAt: "t",
+  question: "?",
+  tgMessageId: 42,
+};
+
+// The `answer-ack` records a dispatch enqueued.
+const answerAcks = (deps: DispatchDeps) =>
+  ((deps.enqueueOutbound as any).calls as unknown[][]).map(([, msg]) => msg as any).filter((m) => m.event === "answer-ack");
+
+test("dispatch answer from Telegram acknowledges a delivered answer as a reply to the question's message (live campaign)", async () => {
+  const { deps } = makeDeps({
+    listParked: spy([announcedQuestion]) as any,
+    projectHasLiveCampaign: spy(true) as any,
+  });
+  await withAnswerSource("telegram", () => dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps));
+  assert.deepEqual(answerAcks(deps), [{ category: "progress", event: "answer-ack", replyTo: 42, text: "answered — #436 will resume" }]);
+  assert.equal((deps.enqueueOutbound as any).calls[0][0], deps.cfg);
+});
+
+test("dispatch answer from Telegram acknowledges before the redrive it starts itself", async () => {
+  let acksAtRedrive = -1;
+  const { deps } = makeDeps({
+    listParked: spy([announcedQuestion]) as any,
+    readEventLog: spy(pausedCampaignAfterGreen()) as any,
+    campaign: (async () => {
+      acksAtRedrive = answerAcks(deps).length;
+      return "done";
+    }) as any,
+  });
+  await withAnswerSource("telegram", () => dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps));
+  assert.equal(acksAtRedrive, 1, "the acknowledgement is enqueued before the redrive starts");
+  assert.deepEqual(
+    answerAcks(deps).map((m) => m.text),
+    ["answered — #436 will resume"],
+  );
+});
+
+test("dispatch answer from Telegram on a failed member acknowledges with the `redrive --override` move", async () => {
+  const failedAfterAnswer = [...pausedCampaignAfterGreen(), { event: "failed", taskId: "436" }];
+  const { deps } = makeDeps({ listParked: spy([announcedQuestion]) as any, readEventLog: spy(failedAfterAnswer) as any });
+  await withAnswerSource("telegram", () => dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps));
+  assert.deepEqual(answerAcks(deps), [
+    {
+      category: "progress",
+      event: "answer-ack",
+      replyTo: 42,
+      text: "answered — #436 failed earlier; run `vetinari redrive --override` to resume it",
+    },
+  ]);
+});
+
+test("dispatch answer enqueues no acknowledgement for a cli/ui source, an unannounced record, a not-parked no-op or a refused answer", async () => {
+  for (const source of [undefined, "cli", "ui"]) {
+    const { deps } = makeDeps({ listParked: spy([announcedQuestion]) as any, projectHasLiveCampaign: spy(true) as any });
+    await withAnswerSource(source, () => dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps));
+    assert.deepEqual(answerAcks(deps), [], `no acknowledgement for source ${source}`);
+  }
+  const { tgMessageId: _, ...unannounced } = announcedQuestion;
+  const noMessage = makeDeps({ listParked: spy([unannounced]) as any, projectHasLiveCampaign: spy(true) as any });
+  await withAnswerSource("telegram", () => dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, noMessage.deps));
+  assert.deepEqual(answerAcks(noMessage.deps), [], "no acknowledgement for a record with no tgMessageId");
+
+  const notParked = makeDeps({ hasParked: spy(false) as any, listParked: spy([announcedQuestion]) as any });
+  await withAnswerSource("telegram", () => dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, notParked.deps));
+  assert.deepEqual(answerAcks(notParked.deps), [], "no acknowledgement for a not-parked no-op");
+
+  for (const reason of ["stopped", "outdated-agent", "conflict"]) {
+    const refused = makeDeps({ listParked: spy([{ ...announcedQuestion, reason }]) as any });
+    await withAnswerSource("telegram", () => assert.rejects(() => dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, refused.deps)));
+    assert.deepEqual(answerAcks(refused.deps), [], `no acknowledgement for a refused ${reason} answer`);
+  }
+  const { sessionId: __, ...sessionlessRec } = announcedQuestion;
+  const sessionless = makeDeps({ listParked: spy([sessionlessRec]) as any });
+  (sessionless.cfg as any).postComment = undefined;
+  await withAnswerSource("telegram", () =>
+    assert.rejects(() => dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, sessionless.deps)),
+  );
+  assert.deepEqual(answerAcks(sessionless.deps), [], "no acknowledgement for a refused session-less answer");
 });
 
 test("dispatch answer delivers then redrives the paused campaign when no campaign is live (§5 step 3, §7)", async () => {

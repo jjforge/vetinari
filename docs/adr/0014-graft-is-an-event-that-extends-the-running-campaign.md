@@ -19,12 +19,13 @@ At each boundary the loop pins the in-flight wave — its not-yet-completed issu
 only `unstarted ∪ grafted` into *later* waves. Placement is a **stable-insert**:
 existing `unstarted` wave assignments are preserved, and each grafted issue drops
 into the earliest later wave that satisfies its `blockedBy` dependencies and keeps
-the wave basename-disjoint, appending new waves only as needed. Because a grafted
-issue can never join the pinned in-flight wave, a basename collision with an
-in-flight issue is safe by construction — file-disjointness is only enforced
-*within* a wave, and the wave boundary serializes them. Dependencies fall out for
-free: `blocked_by` an already-merged issue → eligible in the next wave;
-`blocked_by` an unrun issue → layered after it.
+the wave file-disjoint (no two of its issues share a fileKey — a resolved
+repo-relative path), appending new waves only as needed. Because a grafted issue
+can never join the pinned in-flight wave, a file collision with an in-flight issue
+is safe by construction — file-disjointness is only enforced *within* a wave, and
+the wave boundary serializes them. Dependencies fall out for free: `blocked_by` an
+already-merged issue → eligible in the next wave; `blocked_by` an unrun issue →
+layered after it.
 
 Graft is allowed against any run that is not yet `campaign-done` — live (honored at
 the next wave boundary) or paused/wave-parked/resumable (honored on the next
@@ -37,9 +38,9 @@ operator often wants to add work.
 `reduceCampaign` is a pure reducer with no tracker or filesystem access (ADR 0012),
 so — exactly as the prune event stores its resolved closure — the **graft event
 stores the resolved layering inputs** (the added ids plus their `blockedBy` graph
-and basenames), computed by the CLI at append time via the same resolvers
-`campaign-plan` uses. The fold is then a pure `layerWaves`/`partitionWaves` call
-over data already in the log.
+and `fileKeys` — the resolved repo-relative paths each will touch), computed by
+the CLI at append time via the same resolvers `campaign-plan` uses. The fold is
+then a pure `layerWaves`/`partitionWaves` call over data already in the log.
 
 ## Considered Options
 
@@ -50,7 +51,7 @@ over data already in the log.
 - **Full re-optimize of the unstarted waves on every graft** — rejected in favour
   of stable-insert: churning already-planned wave assignments surprises an operator
   watching the plan, for negligible gain over inserting the added issues.
-- **Storing only the ids and re-resolving `blockedBy`/basenames in the fold** —
+- **Storing only the ids and re-resolving `blockedBy`/`fileKeys` in the fold** —
   rejected: it breaks the purity `reduceCampaign` relies on to also run in the
   dashboard (ADR 0012).
 

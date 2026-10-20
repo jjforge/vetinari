@@ -1001,12 +1001,19 @@ const greenThen = (harvest: string) =>
 const ENV_FAILURE =
   "<finding><summary>make fmt fails in the agent container: gofumpt sumdb check</summary><severity>P1</severity></finding><promise>COMPLETE</promise>";
 
-test("three parallel runs harvesting the same finding file it once and comment 'seen again' twice", async () => {
+const ENV_FAILURE_REWORDED =
+  "<finding><summary>make fmt fails: gofumpt sumdb verification error in container</summary><severity>P1</severity></finding><promise>COMPLETE</promise>";
+
+test("three parallel runs harvesting the same finding — reworded or not — file it once and comment 'seen again' twice", async () => {
   const tr = fakeTracker();
   const cfg = harnessCfg(tr);
 
   await silence(() =>
-    Promise.all(["T-1", "T-2", "T-3"].map((id) => runLoop(cfg, id, undefined, undefined, depsFor(greenThen(ENV_FAILURE))))),
+    Promise.all(
+      [ENV_FAILURE, ENV_FAILURE_REWORDED, ENV_FAILURE].map((harvest, i) =>
+        runLoop(cfg, `T-${i + 1}`, undefined, undefined, depsFor(greenThen(harvest))),
+      ),
+    ),
   );
 
   assert.equal(tr.filed.length, 1, "one issue for one environment failure");
@@ -1030,6 +1037,38 @@ test("a finding matching an already-open issue comments on it instead of filing"
     ["42"],
   );
   assert.match(tr.comments[0].body, /seen again.*#T-1/i);
+});
+
+test("the third 'seen again' for one issue in a campaign sends one 'fix the root cause' notice, and a fourth sends none", async () => {
+  const tr = fakeTracker([{ ref: "42", title: "make fmt fails in the agent container: gofumpt sumdb check" }]);
+  const cfg = harnessCfg(tr);
+  const repeatNotices = () => listOutbox(cfg).filter((m) => m.category === "finding" && /root cause/.test(m.text));
+
+  for (const id of ["T-1", "T-2"]) await silence(() => runLoop(cfg, id, undefined, undefined, depsFor(greenThen(ENV_FAILURE))));
+  assert.equal(repeatNotices().length, 0, "two sightings are not yet a pattern");
+
+  await silence(() => runLoop(cfg, "T-3", undefined, undefined, depsFor(greenThen(ENV_FAILURE))));
+  const notices = repeatNotices();
+  assert.equal(notices.length, 1);
+  assert.match(notices[0].text, /#42 seen again in 3 runs — fix the root cause/);
+
+  await silence(() => runLoop(cfg, "T-4", undefined, undefined, depsFor(greenThen(ENV_FAILURE))));
+  assert.equal(repeatNotices().length, 1, "the fourth sighting sends no second notice");
+});
+
+test("the repeat-offender count starts at the latest campaign-start — an earlier campaign's sightings do not count", async () => {
+  const tr = fakeTracker([{ ref: "42", title: "make fmt fails in the agent container: gofumpt sumdb check" }]);
+  const cfg = harnessCfg(tr);
+  const repeatNotices = () => listOutbox(cfg).filter((m) => m.category === "finding" && /root cause/.test(m.text));
+  cfg.log.log("finding-seen-again", { taskId: "T-0", summary: "make fmt fails", url: "42" });
+  cfg.log.log("finding-seen-again", { taskId: "T-0", summary: "make fmt fails", url: "42" });
+  cfg.log.log("campaign-start", { waves: [["T-1", "T-2", "T-3"]], slots: 3 });
+
+  for (const id of ["T-1", "T-2"]) await silence(() => runLoop(cfg, id, undefined, undefined, depsFor(greenThen(ENV_FAILURE))));
+  assert.equal(repeatNotices().length, 0);
+
+  await silence(() => runLoop(cfg, "T-3", undefined, undefined, depsFor(greenThen(ENV_FAILURE))));
+  assert.equal(repeatNotices().length, 1);
 });
 
 test("findings below the severity floor or over the per-run cap go into one digest comment on the run's issue", async () => {

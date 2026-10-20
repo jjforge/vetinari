@@ -135,6 +135,43 @@ export const findingKey = (title: string): string =>
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
 
+const SIMILARITY_STOP_WORDS = new Set("a an the in of to for on is are fails failed with and or".split(" "));
+
+/** Two findings at or above this `findingSimilarity` score are the same finding. */
+export const FINDING_MATCH_THRESHOLD = 0.5;
+
+/**
+ * How alike two finding titles are, 0–1: the Jaccard score of their `findingKey` words,
+ * stop words dropped — so separate agents' own wordings of one defect still match.
+ */
+export function findingSimilarity(a: string, b: string): number {
+  const words = (title: string) =>
+    new Set(
+      findingKey(title)
+        .split(" ")
+        .filter((w) => w && !SIMILARITY_STOP_WORDS.has(w)),
+    );
+  const wa = words(a);
+  const wb = words(b);
+  const shared = [...wa].filter((w) => wb.has(w)).length;
+  const either = wa.size + wb.size - shared;
+  return either ? shared / either : Number(findingKey(a) === findingKey(b));
+}
+
+/** The best-scoring candidate whose title matches `title` (score ≥ `FINDING_MATCH_THRESHOLD`), if any. */
+export function bestFindingMatch<T>(title: string, candidates: Iterable<T>, titleOf: (c: T) => string): T | undefined {
+  let best: T | undefined;
+  let bestScore = FINDING_MATCH_THRESHOLD;
+  for (const c of candidates) {
+    const score = findingSimilarity(title, titleOf(c));
+    if (score >= bestScore && (best === undefined || score > bestScore)) {
+      best = c;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
 /** Where a harvested finding went: filed as a new issue, commented on an existing one, or digested. */
 export interface TriagedFinding extends FindingResult {
   action: "filed" | "seen-again" | "digest";
@@ -144,11 +181,11 @@ export interface TriagedFinding extends FindingResult {
 
 export interface FindingPolicy {
   reporter: FindingReporter;
-  /** An open tracker issue whose title is this finding's, if one exists (`githubFindOpenIssue`). */
+  /** An open tracker issue whose title matches this finding's, if one exists (`githubFindOpenIssue`). */
   findOpenIssue?: (title: string) => string | undefined | Promise<string | undefined>;
   /** The comment hook: "seen again" on a duplicate, and the run's one digest. */
   postComment?: (issueRef: string, body: string) => void | Promise<void>;
-  /** This campaign's filings so far, `findingKey(summary)` → issue ref — read under the lock. */
+  /** This campaign's filings so far, `findingKey(summary)` → issue ref — read under the lock, matched by `findingSimilarity`. */
   filedSoFar: () => Map<string, string>;
   /** Record one outcome; called under the lock, so the next run's `filedSoFar` sees a filing. */
   record: (r: TriagedFinding) => void;
@@ -162,8 +199,8 @@ const rank = (s: Severity | undefined) => (s ? Number(s[1]) : 2);
 
 /**
  * File a run's findings without flooding the tracker: a finding this campaign already
- * filed, or one matching an open issue, gets a "seen again" comment instead of a new
- * issue; of the rest, only those at or above `severityFloor` are filed — most severe
+ * filed, or one matching an open issue — by `findingSimilarity`, so a rewording still
+ * matches — gets a "seen again" comment instead of a new issue; of the rest, only those at or above `severityFloor` are filed — most severe
  * first, at most `maxPerRun` — and everything else goes into ONE digest comment on the
  * run's own issue. An unrated finding counts as P2, so a loosely-formatted block is
  * neither dropped nor demoted. Parallel runs serialize on `lockFile` across the whole
@@ -182,7 +219,7 @@ export async function triageFindings(findings: Finding[], ctx: FindingContext, p
       const key = findingKey(finding.summary);
       let r: TriagedFinding;
       // A failed search is no match: the finding is triaged as fresh rather than lost.
-      let seen = filed.get(key);
+      let seen = bestFindingMatch(finding.summary, filed, ([k]) => k)?.[1];
       let searchError: string | undefined;
       if (!seen) {
         try {

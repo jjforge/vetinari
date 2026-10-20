@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { findingKey, parseFindings, reportFindings, type Finding } from "./findings.ts";
+import { findingKey, findingSimilarity, parseFindings, reportFindings, type Finding } from "./findings.ts";
 
 test("parseFindings extracts each finding block with its sub-fields", () => {
   const stdout = `working... here is what I noticed.
@@ -106,4 +106,14 @@ test("parseFindings reads an agent-rated severity (P0–P3) and omits it when ab
 test("findingKey matches the same finding across case, punctuation and the unverified mark", () => {
   assert.equal(findingKey("[unverified: budget:2] `make fmt` fails: gofumpt sumdb!"), findingKey("make fmt fails — gofumpt sumdb"));
   assert.notEqual(findingKey("make fmt fails"), findingKey("make lint fails"));
+});
+
+test("findingSimilarity scores two rewordings of one finding as a match, and unrelated findings as not", () => {
+  const a = "make fmt fails in the agent container: gofumpt sumdb check";
+  const b = "make fmt fails: gofumpt sumdb verification error in container";
+  // {make fmt agent container gofumpt sumdb check} vs {make fmt gofumpt sumdb verification error container}: 5 shared of 9.
+  assert.equal(findingSimilarity(a, b), 5 / 9);
+  assert.ok(findingSimilarity(a, "README links to a removed flag") < 0.5);
+  assert.equal(findingSimilarity(a, a), 1);
+  assert.equal(findingSimilarity(`[unverified: idle] ${a}`, a), 1, "the unverified mark is not part of the finding");
 });

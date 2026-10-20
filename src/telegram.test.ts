@@ -102,6 +102,20 @@ test("tgSend addresses the explicit connection, not process env", async () => {
   assert.equal(body.message_thread_id, 3);
 });
 
+test("tgSend sends a reply target as reply_parameters that still sends if the target is gone", async () => {
+  const bodies: any[] = [];
+  const record = (async (_u: any, init: any) => {
+    bodies.push(JSON.parse(init.body));
+    return okResponse({ message_id: 43 });
+  }) as typeof fetch;
+  await withFetch(record, async () => {
+    await tgSend({ token: "t", chat: "c" }, "answered", undefined, 42);
+    await tgSend({ token: "t", chat: "c" }, "plain");
+  });
+  assert.deepEqual(bodies[0].reply_parameters, { message_id: 42, allow_sending_without_reply: true });
+  assert.equal("reply_parameters" in bodies[1], false, "no reply target → no reply_parameters");
+});
+
 test("tgSend routes a send failure to the injected logger, not the process-global", async () => {
   const logger = memoryLogger();
   // Telegram's not-ok envelope: the send fails and the diagnostic must be captured.

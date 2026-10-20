@@ -181,6 +181,9 @@ export interface OutboundRecord {
   sentAt?: string;
   /** The destination name the notify map resolved it to, stamped alongside `sentAt`. */
   destination?: string;
+  /** A Telegram message id to send this as a reply to — a question's announcement. The gateway
+   *  routes it to the project's question connection, skipping the notify map. */
+  replyTo?: number;
 }
 
 /** A project's outbox under a base location (its `.vetinari.local/`). */

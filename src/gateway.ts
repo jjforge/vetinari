@@ -314,10 +314,15 @@ export interface Announcement {
  */
 export function resolveQuestionConn(project: GatewayProject): TgConn | undefined {
   if (!project.conn) return undefined;
-  const dests = questionDestinations(project.notify ?? {});
-  const name = dests.size === 1 ? [...dests][0] : undefined;
+  const name = questionDestinationName(project);
   const named = name ? project.destinations?.[name] : undefined;
   return named ? { token: project.conn.token, chat: named.chat, thread: named.thread } : project.conn;
+}
+
+/** The single destination name a project's `question` key resolves to, if any. */
+function questionDestinationName(project: GatewayProject): string | undefined {
+  const dests = questionDestinations(project.notify ?? {});
+  return dests.size === 1 ? [...dests][0] : undefined;
 }
 
 /**
@@ -354,7 +359,10 @@ export function pendingAnnouncements(projects: GatewayProject[], index: ReplyInd
  * drain's routing decision is testable without a send.
  */
 export function resolveRecordDestination(project: GatewayProject, record: OutboundRecord): { destination?: string; conn?: TgConn } {
-  const resolved = resolveDestination(project.notify ?? {}, record.category, record.event);
+  // A reply (an answer's acknowledgement) must land in the chat of the message it replies to —
+  // the question's — so it skips the notify map.
+  const resolved =
+    record.replyTo != null ? questionDestinationName(project) : resolveDestination(project.notify ?? {}, record.category, record.event);
   if (!project.conn) return { destination: resolved };
   const named = resolved ? project.destinations?.[resolved] : undefined;
   // A named destination overrides the chat/thread but rides the project's bot
@@ -388,7 +396,7 @@ export interface DrainResult {
  */
 export async function drainOutbox(
   project: GatewayProject,
-  send: (conn: TgConn, text: string) => Promise<number | undefined>,
+  send: (conn: TgConn, text: string, replyTo?: number) => Promise<number | undefined>,
   logger: Logger = hostLogger(),
 ): Promise<DrainResult[]> {
   const results: DrainResult[] = [];
@@ -396,7 +404,7 @@ export async function drainOutbox(
     if (record.sentAt != null) continue;
     const { destination, conn } = resolveRecordDestination(project, record);
     if (!conn) continue;
-    const messageId = await send(conn, record.text);
+    const messageId = await send(conn, record.text, record.replyTo);
     if (messageId == null) {
       logger.log("gateway-route-failed", { project: project.project, id: record.id, category: record.category, event: record.event });
       results.push({ record, destination, sent: false });
@@ -842,7 +850,7 @@ async function announcePending(configDir: string, index: ReplyIndex, logger: Log
 async function drainOutboxes(configDir: string, logger: Logger = hostLogger()): Promise<void> {
   for (const p of loadGatewayProjects(configDir)) {
     if (!p.outbox.some((r) => r.sentAt == null)) continue;
-    await drainOutbox(p, (conn, text) => tgSend(conn, text), logger);
+    await drainOutbox(p, (conn, text, replyTo) => tgSend(conn, text, undefined, replyTo), logger);
   }
 }
 

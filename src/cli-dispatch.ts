@@ -24,14 +24,14 @@ import type { build, baseline, campaign, tgTest, requireTelegram, readImageFresh
 import type { runTgConnect } from "./tg-connect.ts";
 import type { tgSend } from "./telegram.ts";
 import { crashResumePrompt, type runLoop, type Outcome } from "./loop.ts";
-import type { answerParked, hasParked, listParked, ParkReason } from "./state.ts";
+import type { answerParked, enqueueOutbound, hasParked, listParked, ParkReason } from "./state.ts";
 import type { archiveRun } from "./archive.ts";
 import type { CampaignPlanReport, Exclusion, UnderspecifiedPrompt } from "./plan.ts";
 import type { expandSelection, runCampaignPlan, runFilesetCheck } from "./plan.ts";
 import { describeFilesetCheck } from "./plan.ts";
 import type { findMergeCommit } from "./merge.ts";
 import { resumeIndex, type runPrune } from "./prune.ts";
-import { isIssueToken, normalize } from "./issue-id.ts";
+import { hash, isIssueToken, normalize } from "./issue-id.ts";
 import type { runGraft } from "./graft.ts";
 import { GraftRejectedError, describeGraftRejections } from "./graft.ts";
 import type { OrchestratorEvent, readEventLog } from "./event-log.ts";
@@ -384,6 +384,9 @@ export interface DispatchDeps {
   /** Deliver a human's answer into the parked record — the answer is delivered, not run
    *  (design §5 step 3). */
   answerParked: typeof answerParked;
+  /** Drop a record into the project's outbox for the gateway to send — how a Telegram answer is
+   *  acknowledged as a reply to its question's message (ADR 0002: the gateway is the sole sender). */
+  enqueueOutbound: typeof enqueueOutbound;
   /** Does a live campaign process hold this project's lease (design §8)? When it does, an
    *  `answer` only delivers and a `redrive` refuses — the live campaign owns the re-admit,
    *  so no second process runs the member beside it. */
@@ -988,11 +991,30 @@ async function dispatchAnswer(cmd: Extract<Command, { kind: "answer" }>, deps: D
   // `tgMessageId` are kept so the gateway does not re-announce; the re-admit consumes it.
   deps.answerParked(cfg, taskId, cmd.text.join(" "));
   // Record the delivery so the dashboard can show the issue answered rather than still parked.
-  cfg.log.log("answered", { taskId, source: parseAnswerSource(process.env[ANSWER_SOURCE_ENV_VAR]) });
+  const source = parseAnswerSource(process.env[ANSWER_SOURCE_ENV_VAR]);
+  cfg.log.log("answered", { taskId, source });
+
+  // Who re-admits: a live campaign, else the redrive (unless the member failed), else a direct run.
+  const live = deps.projectHasLiveCampaign(host.configDir, cfg.project);
+  const events = live ? [] : deps.readEventLog(cfg);
+  const awaitsRedrive = !live && issueAwaitsRedrive(events, taskId);
+  const failedMember = awaitsRedrive && reduceCampaign(events).outcomes.get(normalize(taskId)) === "failed";
+
+  // A Telegram answer is acknowledged as a reply to the question's message, before any redrive
+  // starts — the record still holds `tgMessageId` now; the re-admit clears it.
+  if (source === "telegram" && rec?.tgMessageId != null)
+    deps.enqueueOutbound(cfg, {
+      category: "progress",
+      event: "answer-ack",
+      replyTo: rec.tgMessageId,
+      text: failedMember
+        ? `answered — ${hash(taskId)} failed earlier; run \`vetinari redrive --override\` to resume it`
+        : `answered — ${hash(taskId)} will resume`,
+    });
 
   // A live campaign owns the re-admit (design §5 step 3, §8): stop here so no second process
   // runs the member beside it — the campaign's drain/grace picks up the answered record next tick.
-  if (deps.projectHasLiveCampaign(host.configDir, cfg.project)) {
+  if (live) {
     deps.log(`${taskId} answered — the live campaign will re-admit it.`);
     return;
   }
@@ -1000,12 +1022,11 @@ async function dispatchAnswer(cmd: Extract<Command, { kind: "answer" }>, deps: D
   // No live campaign. A member of a paused campaign is re-admitted by the redrive (design §7):
   // it reconciles the answered park into a re-run-with-answer and integrates it, then archives
   // once idle. The redrive carries the campaign's own verdict out (0 done / 2 parked / 1 failed).
-  const events = deps.readEventLog(cfg);
-  if (issueAwaitsRedrive(events, taskId)) {
+  if (awaitsRedrive) {
     // A member whose last outcome is `failed` is refused by a plain redrive, and `--override` is
     // campaign-wide (it re-runs every failed member of the wave), so the answer only delivers and
     // names the move — the override consumes it.
-    if (reduceCampaign(events).outcomes.get(normalize(taskId)) === "failed") {
+    if (failedMember) {
       deps.log(`${taskId} answered — it failed on a prior run, so re-run it with \`vetinari redrive --override\`.`);
       return;
     }

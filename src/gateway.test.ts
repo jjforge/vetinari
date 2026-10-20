@@ -1266,6 +1266,47 @@ test("drainOutbox leaves a record unsent when the send fails, so the next tick r
   assert.equal(listOutboxIn(outboxDirOf(base))[0].sentAt, undefined, "a failed send is not marked sent");
 });
 
+test("drainOutbox sends a replyTo record as a reply on the question's connection, skipping the notify map, once", async () => {
+  const base = outboxBase();
+  enqueueOutbound(
+    { stateDir: base, log: memoryLogger() },
+    { category: "progress", event: "answer-ack", replyTo: 42, text: "answered — #436 will resume" },
+  );
+  // progress → ops (-100) by the notify map; questions are announced on asks (-300, thread 7).
+  const project = () =>
+    routed(base, {
+      destinations: { ops: { chat: "-100" }, asks: { chat: "-300", thread: "7" } },
+      notify: { "*": "ops", question: "asks" },
+    });
+  const sends: Array<{ conn: TgConn; text: string; replyTo?: number }> = [];
+  const send = async (conn: TgConn, text: string, replyTo?: number) => {
+    sends.push({ conn, text, replyTo });
+    return 100;
+  };
+
+  await drainOutbox(project(), send, memoryLogger());
+  assert.deepEqual(sends, [{ conn: { token: "tok", chat: "-300", thread: "7" }, text: "answered — #436 will resume", replyTo: 42 }]);
+  assert.ok(listOutboxIn(outboxDirOf(base))[0].sentAt, "the acknowledgement is stamped sent");
+
+  await drainOutbox(project(), send, memoryLogger());
+  assert.equal(sends.length, 1, "a second drain sends nothing");
+});
+
+test("drainOutbox sends a record without replyTo with no reply target, routed by the notify map", async () => {
+  const base = outboxBase();
+  enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "progress", event: "wave-start", text: "batch 1" });
+  const sends: Array<{ chat: string; replyTo?: number }> = [];
+  await drainOutbox(
+    routed(base, { notify: { "*": "ops", question: "alerts" } }),
+    async (conn, _text, replyTo) => {
+      sends.push({ chat: conn.chat, replyTo });
+      return 100;
+    },
+    memoryLogger(),
+  );
+  assert.deepEqual(sends, [{ chat: "-100", replyTo: undefined }]);
+});
+
 test("resumeEnv stamps VETINARI_ANSWER_SOURCE=telegram over the inherited env, so a Telegram reply's `answered` event names its source", () => {
   assert.deepEqual(resumeEnv({ PATH: "/bin", VETINARI_ANSWER_SOURCE: "cli" }), { PATH: "/bin", VETINARI_ANSWER_SOURCE: "telegram" });
 });

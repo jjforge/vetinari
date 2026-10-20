@@ -16,7 +16,7 @@
  */
 import { resolve } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { parseAgentFlags } from "./config.ts";
+import { ANSWER_SOURCE_ENV_VAR, parseAgentFlags, parseAnswerSource } from "./config.ts";
 import { renderUsage } from "./help.ts";
 import type { HostBudget, liveCampaignPid, projectHasLiveCampaign } from "./host-slots.ts";
 import { DOCKERFILE, staleImageWarning } from "./modes.ts";
@@ -987,6 +987,8 @@ async function dispatchAnswer(cmd: Extract<Command, { kind: "answer" }>, deps: D
   // Deliver: write the answer into the parked record and mark it answered. The record and its
   // `tgMessageId` are kept so the gateway does not re-announce; the re-admit consumes it.
   deps.answerParked(cfg, taskId, cmd.text.join(" "));
+  // Record the delivery so the dashboard can show the issue answered rather than still parked.
+  cfg.log.log("answered", { taskId, source: parseAnswerSource(process.env[ANSWER_SOURCE_ENV_VAR]) });
 
   // A live campaign owns the re-admit (design §5 step 3, §8): stop here so no second process
   // runs the member beside it — the campaign's drain/grace picks up the answered record next tick.

@@ -23,7 +23,7 @@
     "format:check": "prettier --check \"**/*.{ts,mts,js,mjs}\""
   },
   "dependencies": {
-    "@ai-hero/sandcastle": "git+https://github.com/zachthieme/sandcastle.git#76c8459e01ab5dcda750c98459e3d010bdcc0076",
+    "@ai-hero/sandcastle": "git+https://github.com/zachthieme/sandcastle.git#8da12d1e96d7c6510a59c3a9f7e68703d6bcf6a7",
     "tsx": "^4.23.10"
   },
   "devDependencies": {

@@ -1,9 +1,10 @@
 # Changelog
 
-_**v0.1.0** — August 16, 2026: the first tagged release. Every change since is
-grouped into a dated `### <what changed> — <date>` milestone below, newest first;
-a future tagged release will fold the milestones above it under a `### vX.Y.Z`
-heading._
+_**v0.2.0** — October 21, 2026: the latest tagged release, marking a known-good
+working version; it ships every milestone from **v0.1.0** (August 16, 2026, the first
+tagged release) up to it. Every change is grouped into a dated
+`### <what changed> — <date>` milestone below, newest first; a tagged release marks
+its place with a `### vX.Y.Z — <date>` heading._
 
 **Reading this file.** Every change that ships is logged, internal work included,
 and each entry opens with a tag saying who it reaches:
@@ -17,6 +18,14 @@ and each entry opens with a tag saying who it reaches:
 
 `**Breaking changes:**` sorts first in a milestone and names the contract it broke.
 Within a milestone each bold section label appears at most once.
+
+### v0.2.0 — October 21, 2026
+
+Tags a known-good working version: typecheck clean and the full suite green. It
+ships every milestone below, back to v0.1.0.
+
+**Improvements:**
+- [internal] `package.json` version bumped to `0.2.0` to match the tag.
 
 ### Collected changes — October 20, 2026
 
@@ -1125,4 +1134,5 @@ Within a milestone each bold section label appears at most once.
 **Documentation:**
 - [internal] Team walkthrough deck.
 
+[0.2.0]: https://github.com/jjforge/vetinari/releases/tag/v0.2.0
 [0.1.0]: https://github.com/jjforge/vetinari/releases/tag/v0.1.0

@@ -1,6 +1,6 @@
 {
   "name": "vetinari",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Parallel TDD agent orchestrator on @ai-hero/sandcastle: the orchestrator owns the test gate, blocked agents park instead of guessing, and questions round-trip through Telegram.",

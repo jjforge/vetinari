@@ -238,6 +238,41 @@ test("serveAllStatus answers a POST body over 64 KiB with a plain 413, not a 500
   }
 });
 
+test("serveAllStatus sends nosniff, no-referrer and one inline-only CSP on HTML, JSON and SSE responses, keeping each content-type", async () => {
+  const configDir = join(tmpdir(), `vetinari-security-headers-${Date.now()}`);
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const { port } = server.address() as AddressInfo;
+  try {
+    for (const [path, type] of [
+      ["/", "text/html; charset=utf-8"],
+      ["/api/landing", "application/json"],
+      ["/api/events", "text/event-stream; charset=utf-8"],
+    ]) {
+      const res = await fetch(`http://127.0.0.1:${port}${path}`);
+      assert.equal(res.headers.get("content-type"), type, path);
+      assert.equal(res.headers.get("x-content-type-options"), "nosniff", path);
+      assert.equal(res.headers.get("referrer-policy"), "no-referrer", path);
+      // fetch joins repeated headers with ", "; a CSP holds none, so a comma means two were sent.
+      const csp = res.headers.get("content-security-policy") ?? "";
+      assert.ok(csp && !csp.includes(","), `${path}: exactly one CSP, got ${JSON.stringify(csp)}`);
+      const directives = csp.split(";").map((d) => d.trim().split(/\s+/));
+      const sources = directives.flatMap(([, ...s]) => s);
+      assert.ok(
+        directives.some(([name, ...s]) => name === "frame-ancestors" && s.join(" ") === "'none'"),
+        path,
+      );
+      assert.ok(!sources.some((s) => s === "*" || /^https?:/.test(s)), `${path}: no external source in ${csp}`);
+      // script-src governs scripts, falling back to default-src when it is absent.
+      const scripts = directives.find(([name]) => name === "script-src") ?? directives.find(([name]) => name === "default-src") ?? [];
+      assert.deepEqual(scripts.slice(1), ["'unsafe-inline'"], `${path}: scripts only inline`);
+      await res.body?.cancel();
+    }
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});
+
 test("serveAllStatus GET / serves the all-repos landing shell, not a server-rendered campaign", async () => {
   const configDir = join(tmpdir(), `vetinari-landing-shell-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");

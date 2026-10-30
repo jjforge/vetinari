@@ -1,8 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import { loggerForRun } from "./log.ts";
@@ -16,6 +15,7 @@ import { runGates } from "./gate.ts";
 import { listOutbox } from "./state.ts";
 import type { HostBudget } from "./host-slots.ts";
 import { makeLocalSandbox, type LocalAgentScript } from "./sandbox-local.ts";
+import { gitOut, seedConflictRepo, seedRepo } from "./test-support.ts";
 
 // ── The local-sandbox integration harness (ADR 0018) ─────────────────────────
 //
@@ -24,20 +24,6 @@ import { makeLocalSandbox, type LocalAgentScript } from "./sandbox-local.ts";
 // the per-issue loop's `makeSandbox` (→ `makeLocalSandbox`). Everything downstream
 // of the agent turn — the gate, its exit code, the on-disk event log/parked dir,
 // the `commitsAhead`/`filesInCommit` git reads — runs against real state.
-
-/** A fresh repo on `base` whose seed commits `README.md` + a `CHANGELOG.md`. */
-function seedRepo(): string {
-  const dir = mkdtempSync(join(tmpdir(), "vetinari-pipeline-"));
-  const git = (args: string[]) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });
-  execFileSync("git", ["-C", dir, "-c", "init.defaultBranch=base", "init", "-q"]);
-  git(["config", "user.email", "test@example.com"]);
-  git(["config", "user.name", "test"]);
-  writeFileSync(join(dir, "README.md"), "seed\n");
-  writeFileSync(join(dir, "CHANGELOG.md"), "# Changelog\n\n### Older — August 1, 2026\n\n**Bug fixes:**\n- [user] old (#1)\n");
-  git(["add", "-A"]);
-  git(["commit", "-qm", "seed"]);
-  return dir;
-}
 
 // A cfg over a real temp-dir repo: a real on-disk event log/parked dir/outbox under
 // its stateDir driven by a real logger, real gates, resumable (claude) agent. Only
@@ -87,8 +73,6 @@ const inRepo = async <T>(dir: string, fn: () => Promise<T>): Promise<T> => {
     console.error = realErr;
   }
 };
-
-const gitOut = (dir: string, args: string[]) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" }).trim();
 
 test("a green agent turn commits on its branch and the real gate runs via the local sandbox's exec → runLoop green", async () => {
   const dir = seedRepo();
@@ -275,15 +259,6 @@ test("a campaign wave of two issues spans agent → gate → merge → advance t
 // each passes its own gate alone, but the second cannot merge onto a base already
 // carrying the first. integrateGreens attributes the conflict to that one branch,
 // quarantines it (work preserved), and keeps the first green merged.
-
-/** Seed `conflict.txt` on the base so two branches that both rewrite it collide at merge. */
-function seedConflictRepo(): string {
-  const dir = seedRepo();
-  writeFileSync(join(dir, "conflict.txt"), "base\n");
-  execFileSync("git", ["-C", dir, "add", "-A"]);
-  execFileSync("git", ["-C", dir, "commit", "-qm", "seed conflict.txt"]);
-  return dir;
-}
 
 // Each issue rewrites the shared file to its own content and commits — file-conflicting,
 // so the loser cannot merge onto a base already carrying the winner.

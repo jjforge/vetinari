@@ -16,6 +16,7 @@ import { buildStatus } from "./dashboard-status.ts";
 import { inFlightRunning } from "./dashboard-live-tail.ts";
 import type { HostBudget } from "./host-slots.ts";
 import { makeLocalSandbox, type LocalAgentScript } from "./sandbox-local.ts";
+import { gitOut, seedConflictRepo, seedRepo } from "./test-support.ts";
 
 // ── End-to-end campaign through the local sandbox (design §3–§7, §13.4) ────────
 //
@@ -33,20 +34,6 @@ import { makeLocalSandbox, type LocalAgentScript } from "./sandbox-local.ts";
 // Note on vocabulary: the design's §13.2 rename (`campaign-batch`→`wave-start`,
 // `quarantined`→`parked{conflict}`, the `campaign-*` stop markers) has landed;
 // the events asserted here are that current §2.1 vocabulary.
-
-/** A fresh repo on `base` seeding README.md + a CHANGELOG.md the folder folds into. */
-function seedRepo(): string {
-  const dir = mkdtempSync(join(tmpdir(), "vetinari-e2e-"));
-  const git = (args: string[]) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });
-  execFileSync("git", ["-C", dir, "-c", "init.defaultBranch=base", "init", "-q"]);
-  git(["config", "user.email", "test@example.com"]);
-  git(["config", "user.name", "test"]);
-  writeFileSync(join(dir, "README.md"), "seed\n");
-  writeFileSync(join(dir, "CHANGELOG.md"), "# Changelog\n\n### Older — August 1, 2026\n\n**Bug fixes:**\n- [user] old (#1)\n");
-  git(["add", "-A"]);
-  git(["commit", "-qm", "seed"]);
-  return dir;
-}
 
 /** Strip a leading `#` so a tracker id matches an `agent/<id>` branch suffix. */
 const norm = (id: string) => id.replace(/^#/, "");
@@ -123,8 +110,6 @@ const inRepo = async <T>(dir: string, fn: () => Promise<T>): Promise<T> => {
     console.error = realErr;
   }
 };
-
-const gitOut = (dir: string, args: string[]) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" }).trim();
 
 /**
  * The container boundary, faked in the two sanctioned ways and NOTHING else (ADR 0018):
@@ -209,15 +194,6 @@ const answerGatedScript =
     if (!answered) return { signal: BLOCKED, stdout: `<question><summary>which approach for ${id}?</summary></question>` };
     return implScript(id)(turn);
   };
-
-// Seed `conflict.txt` so two branches that both rewrite it collide at merge.
-function seedConflictRepo(): string {
-  const dir = seedRepo();
-  writeFileSync(join(dir, "conflict.txt"), "base\n");
-  execFileSync("git", ["-C", dir, "add", "-A"]);
-  execFileSync("git", ["-C", dir, "commit", "-qm", "seed conflict.txt"]);
-  return dir;
-}
 
 // Each issue rewrites the shared file to its own content — file-conflicting, so the loser
 // cannot merge onto a base already carrying the winner. A merge-conflict retry (its prompt names

@@ -1457,6 +1457,25 @@ const stopSandbox = (script: StopTurn[], control: ReturnType<typeof makeStopCont
 
 const sleepMs = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+// A promise the test settles by hand: a stub awaits `held` and stays in flight until `release()`.
+const heldUntilReleased = () => {
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  return { held, release };
+};
+
+// One macrotask turn: enough for work resumed by a released `held` to drain its synchronous tail.
+const nextMacrotask = () => new Promise<void>((r) => setImmediate(r));
+
+// Poll `pred` until it holds; throw if it has not within the bound rather than racing on.
+const waitFor = async (pred: () => boolean, what: string): Promise<void> => {
+  const deadline = Date.now() + 10_000;
+  while (!pred()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await sleepMs(10);
+  }
+};
+
 test("a stop mid-turn parks `stopped` (signal detail + branch), one parked event, no failed, closes the sandbox", async () => {
   const cfg = harnessCfg();
   const control = makeStopControl();
@@ -1614,7 +1633,8 @@ test("a standalone run signalled while waiting first-come for a slot parks `stop
         }),
       ),
     );
-    await sleepMs(150); // let the run enter the first-come slot wait
+    // Once the lease is visible the run is already inside the stoppable first-come wait.
+    await waitFor(() => readLeases(configDir).some((l) => l.pid === process.pid), "the run to register its lease");
     control.fire("SIGINT");
     const outcome = await p;
     assert.equal(outcome, "parked");
@@ -1706,14 +1726,15 @@ test("defaultLoopDeps.onStop adds exactly one SIGINT and one SIGTERM listener fo
   assert.equal(process.listenerCount("SIGTERM"), beforeTerm, "the SIGTERM listener is removed after runLoop returns");
 });
 
-// A stop-capable sandbox whose gate fires the stop while it runs, then takes `gateMs` to finish.
-const stopInGateSandbox = (script: StopTurn[], control: ReturnType<typeof makeStopControl>, gateMs: number) => {
+// A stop-capable sandbox whose gate fires the stop while it runs, then takes `gate` ms to finish —
+// or, given a promise, stays in flight until the test settles it.
+const stopInGateSandbox = (script: StopTurn[], control: ReturnType<typeof makeStopControl>, gate: number | Promise<void>) => {
   const sbx = stopSandbox(script, control);
   const exec = sbx.exec.bind(sbx);
   sbx.exec = async (cmd) => {
     if (cmd.startsWith("git ")) return exec(cmd);
     control.fire("SIGTERM");
-    await sleepMs(gateMs);
+    await (typeof gate === "number" ? sleepMs(gate) : gate);
     return exec(cmd);
   };
   return sbx;
@@ -1756,7 +1777,8 @@ test("a stop during a red gate starts no further turn (#462)", async () => {
 test("a gate abandoned by a stop runs no further check and logs no gate-result after the stopped park (#474)", async () => {
   const cfg = harnessCfg({ gates: [{ cmd: "g1" }, { cmd: "g2" }] } as any);
   const control = makeStopControl();
-  const sbx = stopInGateSandbox([{ run: { completionSignal: "<promise>COMPLETE</promise>" }, green: true }], control, 100);
+  const gate = heldUntilReleased();
+  const sbx = stopInGateSandbox([{ run: { completionSignal: "<promise>COMPLETE</promise>" }, green: true }], control, gate.held);
   const execCalls: string[] = [];
   const exec = sbx.exec.bind(sbx);
   sbx.exec = async (cmd) => {
@@ -1765,8 +1787,9 @@ test("a gate abandoned by a stop runs no further check and logs no gate-result a
   };
 
   const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { onStop: control.onStop })));
-  // Let the abandoned gate settle — the bug logged its results after `runLoop` had returned.
-  await sleepMs(300);
+  // Only now let the abandoned gate settle — the bug logged its results after `runLoop` had returned.
+  gate.release();
+  await nextMacrotask();
 
   assert.equal(outcome, "parked");
   const events = readEventLog(cfg);
@@ -1784,20 +1807,22 @@ test("a stop during the gate's changed-files diff logs no gate event after the s
   const cfg = harnessCfg();
   const control = makeStopControl();
   const sbx = stopSandbox([{ run: { completionSignal: "<promise>COMPLETE</promise>" }, green: true }], control);
+  const diff = heldUntilReleased();
   const execCalls: string[] = [];
   const exec = sbx.exec.bind(sbx);
   sbx.exec = async (cmd) => {
     execCalls.push(cmd);
     if (cmd.startsWith("git diff --name-only")) {
       control.fire("SIGTERM"); // the stop lands while the diff is in flight
-      await sleepMs(100);
+      await diff.held;
     }
     return exec(cmd);
   };
 
   const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { onStop: control.onStop })));
-  // Let the abandoned gate settle — the bug logged its `gate` event after `runLoop` had returned.
-  await sleepMs(300);
+  // Only now let the abandoned diff settle — the bug logged its `gate` event after `runLoop` had returned.
+  diff.release();
+  await nextMacrotask();
 
   assert.equal(outcome, "parked");
   const events = readEventLog(cfg);

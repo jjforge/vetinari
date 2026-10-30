@@ -308,7 +308,7 @@ function placeEarliestDisjoint(waves: string[][], waveKeys: Set<string>[], id: s
  * collides with nothing. The walk decides placement only: each wave, and
  * `placements`, list ids in wave-then-`order` order.
  */
-function placeByCollisions(plan: WavePlan, order: string[], fileKeysOf: Map<string, Set<string>>): WavePlan {
+export function placeByCollisions(plan: WavePlan, order: string[], fileKeysOf: Map<string, Set<string>>): WavePlan {
   const keysOf = (id: string) => fileKeysOf.get(id) ?? new Set<string>();
   const afterOf = new Map(plan.placements.map((p) => [p.id, p.after]));
   const ids = order.filter((id) => afterOf.has(id));

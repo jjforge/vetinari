@@ -200,6 +200,9 @@ export interface GraftEvent extends BaseEvent {
 export interface ReplanEvent extends BaseEvent {
   event: "replan";
   waves: string[][];
+  /** how many unstarted waves the replan replaced — narration only (`replanned: N waves
+   * remaining (was M)`); the fold never reads it. */
+  was?: number;
 }
 
 /** `redrive` — a paused campaign was redriven on the current base (design §2.1, §7): the wave it

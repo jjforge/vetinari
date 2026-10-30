@@ -173,6 +173,11 @@ export interface ReducedCampaign {
    * `campaign-parked` event, which lands on the in-flight wave with no `wave-done`
    * to close it, so this holds `currentWave` at the point the wave-park was logged. */
   parkedWave: number;
+  /** how many leading `waves` have started — every wave up to the highest that has had a
+   * `wave-start` (or closed). The prefix a `replan` keeps at its index (ADR 0022); the waves
+   * after it are the unstarted remainder. A graceful stop's `parkedWave` is not counted: it
+   * names the next wave, which never started. */
+  startedWaves: number;
   /** issue id → the structured `ParkReason` its `parked` event carried (ADR 0019),
    * folded so the lifecycle can surface *why* an issue is held. Absent for an issue
    * parked only by a surviving on-disk record (the reason is read from the record). */
@@ -511,6 +516,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
     closedWaves,
     currentWave,
     parkedWave,
+    startedWaves: Math.min(lastStarted + 1, waves.length),
     parkReasons,
     redBase,
     stopped,

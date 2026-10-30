@@ -19,6 +19,11 @@ and each entry opens with a tag saying who it reaches:
 `**Breaking changes:**` sorts first in a milestone and names the contract it broke.
 Within a milestone each bold section label appears at most once.
 
+### Collected changes — October 30, 2026
+
+**Improvements:**
+- [user] `/check-brief` reports a shared file: one that a third or more of the open `ready-for-agent` issues cite. Planning keeps every pair of those tickets in separate waves, so such a file can put each ticket in a wave of its own (#611). The check reads which files the project's `fileSet` resolver waives, says whether the shared file is probably safe to share (a prose doc edited in different sections) or a real collision (tests appended at the end of a file, a route table, generated code), and never suggests dropping a file from the marker.
+
 ### v0.2.0 — October 21, 2026
 
 Tags a known-good working version: typecheck clean and the full suite green. It

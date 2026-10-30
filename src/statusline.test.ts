@@ -1,5 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { formatContextLine, formatStatusLine, trimModelName } from "./statusline.ts";
 
 test("formatStatusLine summarizes the running wave and status counts on one line", () => {
@@ -187,4 +192,59 @@ test("trimModelName drops a trailing context-window parenthetical", () => {
   assert.equal(trimModelName("Opus 4.8"), "Opus 4.8");
   assert.equal(trimModelName("Sonnet 4.5 (Beta)"), "Sonnet 4.5 (Beta)"); // only context parentheticals are stripped
   assert.equal(trimModelName(undefined), undefined);
+});
+
+// Spawn the real CLI: `runStatusLine` reads `process.stdin` directly, and Claude Code
+// blanks the status bar on a non-zero exit, so the exit status is the contract.
+const STATUSLINE_CLI = fileURLToPath(new URL("./cli.mts", import.meta.url));
+const STATUSLINE_TSX = fileURLToPath(new URL("../node_modules/.bin/tsx", import.meta.url));
+
+function runStatuslineCli(input: string, opts: { cwd?: string; args?: string[] } = {}) {
+  const cwd = opts.cwd ?? mkdtempSync(join(tmpdir(), "vetinari-statusline-"));
+  return spawnSync(STATUSLINE_TSX, [STATUSLINE_CLI, "statusline", ...(opts.args ?? [])], { cwd, input, encoding: "utf8" });
+}
+
+test("statusline exits 0 when the model name is not a string", () => {
+  const run = runStatuslineCli(`{"model":{"display_name":5}}`);
+  assert.equal(run.status, 0, run.stderr);
+});
+
+test("statusline still trims a real model name to line 1", () => {
+  const run = runStatuslineCli(`{"model":{"display_name":"Opus 4.8 (1M context)"}}`);
+  assert.equal(run.status, 0, run.stderr);
+  const line1 = run.stdout.split("\n")[0];
+  assert.match(line1, /Opus 4\.8/);
+  assert.doesNotMatch(line1, /1M context/);
+});
+
+test("statusline exits 0 on malformed or hostile stdin", () => {
+  const inputs = [
+    `{}`,
+    `not json`,
+    `null`,
+    `[]`,
+    `{"model":null}`,
+    `{"workspace":{"current_dir":42}}`,
+    `{"cwd":"/nonexistent/dir"}`,
+    `{"context_window":{"used_percentage":"x"}}`,
+  ];
+  for (const input of inputs) {
+    const run = runStatuslineCli(input);
+    assert.equal(run.status, 0, `stdin ${input}: ${run.stderr}`);
+  }
+});
+
+test("statusline exits 0 when the project's config fails to load", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vetinari-statusline-"));
+  mkdirSync(join(cwd, "vetinari"));
+  writeFileSync(join(cwd, "vetinari", "config.mts"), "export default {{{ not valid typescript\n");
+  const run = runStatuslineCli(`{"model":{"display_name":"Opus"}}`, { cwd });
+  assert.equal(run.status, 0, run.stderr);
+});
+
+test("statusline exits 0 and falls back to its own line 1 when the wrapped base command fails", () => {
+  const base = Buffer.from("exit 3").toString("base64");
+  const run = runStatuslineCli(`{"model":{"display_name":"Opus"}}`, { args: ["--base-b64", base] });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(run.stdout.split("\n")[0], "Opus");
 });

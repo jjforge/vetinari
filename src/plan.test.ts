@@ -8,7 +8,6 @@ import {
   labelsFromTask,
   layerWaves,
   makeAskUnderspecified,
-  partitionWaves,
   planCampaign,
   runCampaignPlan,
   runFilesetCheck,
@@ -123,32 +122,97 @@ test("layerWaves carries unreachability down the dependent chain", async () => {
   ]);
 });
 
-// id -> the fileKeys it touches, for the file-disjoint partition.
-const fileKeysFrom = (files: Record<string, string[]>) => new Map(Object.entries(files).map(([id, names]) => [id, new Set(names)]));
+// Plan a confident set through `planCampaign`: id -> its open in-set blockers, id -> its fileKeys.
+const planWith = (ids: string[], edges: Record<string, string[]>, files: Record<string, string[]>) =>
+  planCampaign(ids, {
+    blockedBy: openBlockedByFrom(edges),
+    fileSet: (id) => ({ files: files[id] ?? [], confident: true }),
+    onUnderspecified: () => {
+      throw new Error("must not prompt a confident set");
+    },
+  });
 
-test("partitionWaves keeps distinct files with a shared basename in the same wave (#386)", async () => {
+// The two placement invariants: every ticket lands strictly after each in-set blocker,
+// and no two co-wave tickets share a fileKey.
+const assertPlacementInvariants = (plan: { waves: string[][] }, edges: Record<string, string[]>, files: Record<string, string[]>) => {
+  const waveOf = new Map(plan.waves.flatMap((wave, w) => wave.map((id) => [id, w] as const)));
+  for (const [id, blockers] of Object.entries(edges)) {
+    for (const b of blockers) assert.ok(waveOf.get(b)! < waveOf.get(id)!, `#${id} must land after its blocker #${b}`);
+  }
+  for (const [w, wave] of plan.waves.entries()) {
+    const keys = wave.flatMap((id) => files[id] ?? []);
+    assert.equal(new Set(keys).size, keys.length, `wave ${w} shares a file: ${wave.join(", ")}`);
+  }
+};
+
+test("planCampaign places the most-colliding ticket first, one wave shorter than input-order first-fit", async () => {
+  // Input-order first-fit packs a+b into wave 0, spills c (p) to 1 and d (q, r) to 2.
+  // c and d collide most, so placing them first fits the four into two waves.
+  const files = { a: ["p"], b: ["q"], c: ["p", "r"], d: ["q", "r"] };
+  const plan = await planWith(["a", "b", "c", "d"], {}, files);
+
+  assert.deepEqual(plan.waves, [
+    ["b", "c"],
+    ["a", "d"],
+  ]);
+  assertPlacementInvariants(plan, {}, files);
+});
+
+test("planCampaign lets a dependent share a wave with a spilled ticket of its blocker's layer — no layer barrier", async () => {
+  // a and b share x, so they take waves 0 and 1. c waits only on a and touches y, so it
+  // joins b in wave 1 rather than queueing behind the whole first layer in wave 2.
+  const edges = { c: ["a"] };
+  const files = { a: ["x"], b: ["x"], c: ["y"] };
+  const plan = await planWith(["a", "b", "c"], edges, files);
+
+  assert.deepEqual(plan.waves, [["a"], ["b", "c"]]);
+  assertPlacementInvariants(plan, edges, files);
+});
+
+test("planCampaign breaks a collision tie by selection order, and plans the same input identically", async () => {
+  const files = { a: ["x"], b: ["x"] };
+  const first = await planWith(["a", "b"], {}, files);
+
+  assert.deepEqual(first.waves, [["a"], ["b"]]);
+  assert.deepEqual((await planWith(["b", "a"], {}, files)).waves, [["b"], ["a"]]);
+  assert.deepEqual(await planWith(["a", "b"], {}, files), first);
+});
+
+test("planCampaign lists placements and each wave's ids in wave-then-input order, not placement order", async () => {
+  // c collides most so it is placed first, yet it is listed after b within wave 0.
+  const plan = await planWith(["a", "b", "c", "d"], {}, { a: ["p"], b: ["q"], c: ["p", "r"], d: ["q", "r"] });
+
+  assert.deepEqual(
+    plan.placements.map((p) => [p.wave, p.id]),
+    [
+      [0, "b"],
+      [0, "c"],
+      [1, "a"],
+      [1, "d"],
+    ],
+  );
+});
+
+test("planCampaign keeps distinct files with a shared basename in the same wave (#386)", async () => {
   // Two resolved paths that merely share a basename — `a/b/c/foo.md` and `a/c/foo.md`
   // — are distinct files, so they must NOT read as a collision: both stay in wave 0.
-  const layered = await layerWaves(["a", "b"], openBlockedByFrom({}));
-  const plan = partitionWaves(layered, fileKeysFrom({ a: ["a/b/c/foo.md"], b: ["a/c/foo.md"] }));
+  const plan = await planWith(["a", "b"], {}, { a: ["a/b/c/foo.md"], b: ["a/c/foo.md"] });
 
   assert.deepEqual(plan.waves, [["a", "b"]]);
 });
 
-test("partitionWaves collides an ambiguous bare basename with any same-named path (#386)", async () => {
+test("planCampaign collides an ambiguous bare basename with any same-named path (#386)", async () => {
   // 'a' resolved `src/foo.md`; 'b' kept a bare `foo.md` (its cite was ambiguous). A
   // bare basename collides with any file of that name, so they cannot share a wave.
-  const layered = await layerWaves(["a", "b"], openBlockedByFrom({}));
-  const plan = partitionWaves(layered, fileKeysFrom({ a: ["src/foo.md"], b: ["foo.md"] }));
+  const plan = await planWith(["a", "b"], {}, { a: ["src/foo.md"], b: ["foo.md"] });
 
   assert.deepEqual(plan.waves, [["a"], ["b"]]);
 });
 
-test("partitionWaves spills a basename-colliding ticket into a later sub-wave", async () => {
+test("planCampaign spills a basename-colliding ticket into a later wave", async () => {
   // One dependency layer of three; 'a' and 'c' both touch x, so they cannot share
-  // a wave. Greedy first-fit packs a+b (disjoint), then spills c past them.
-  const layered = await layerWaves(["a", "b", "c"], openBlockedByFrom({}));
-  const plan = partitionWaves(layered, fileKeysFrom({ a: ["x"], b: ["y"], c: ["x"] }));
+  // a wave. a is placed first (a tie with c, kept in input order), b joins it, c spills.
+  const plan = await planWith(["a", "b", "c"], {}, { a: ["x"], b: ["y"], c: ["x"] });
 
   assert.deepEqual(plan.waves, [["a", "b"], ["c"]]);
   // c is placed in wave 1 and records the collision that spilled it.
@@ -170,14 +234,7 @@ test("Creates-cited new files feed wave-disjointness: two tickets creating one f
   assert.equal(a.confident, true);
   assert.equal(b.confident, true);
 
-  const layered = await layerWaves(["a", "b"], openBlockedByFrom({}));
-  const plan = partitionWaves(
-    layered,
-    new Map([
-      ["a", new Set(a.files)],
-      ["b", new Set(b.files)],
-    ]),
-  );
+  const plan = await planWith(["a", "b"], {}, { a: a.files, b: b.files });
 
   assert.deepEqual(plan.waves, [["a"], ["b"]]);
 });
@@ -197,14 +254,7 @@ test("resolver → partition: distinct files sharing a basename land in the same
   assert.deepEqual(a.files, ["a/b/c/foo.md"]);
   assert.deepEqual(b.files, ["a/c/foo.md"]);
 
-  const layered = await layerWaves(["a", "b"], openBlockedByFrom({}));
-  const plan = partitionWaves(
-    layered,
-    new Map([
-      ["a", new Set(a.files)],
-      ["b", new Set(b.files)],
-    ]),
-  );
+  const plan = await planWith(["a", "b"], {}, { a: a.files, b: b.files });
 
   assert.deepEqual(plan.waves, [["a", "b"]]);
 });
@@ -219,14 +269,7 @@ test("resolver → partition: a bare cite and a path cite of one file still coll
   const a = fileSet("Touches: `src/fileset.ts`\n");
   const b = fileSet("Touches: `fileset.ts`\n");
 
-  const layered = await layerWaves(["a", "b"], openBlockedByFrom({}));
-  const plan = partitionWaves(
-    layered,
-    new Map([
-      ["a", new Set(a.files)],
-      ["b", new Set(b.files)],
-    ]),
-  );
+  const plan = await planWith(["a", "b"], {}, { a: a.files, b: b.files });
 
   assert.deepEqual(plan.waves, [["a"], ["b"]]);
 });
@@ -243,14 +286,7 @@ test("resolver → partition: same-named Creates: files in distinct tree directo
   const a = fileSet("Creates: `src/a/index.ts`\n");
   const b = fileSet("Creates: `src/b/index.ts`\n");
 
-  const layered = await layerWaves(["a", "b"], openBlockedByFrom({}));
-  const plan = partitionWaves(
-    layered,
-    new Map([
-      ["a", new Set(a.files)],
-      ["b", new Set(b.files)],
-    ]),
-  );
+  const plan = await planWith(["a", "b"], {}, { a: a.files, b: b.files });
 
   assert.deepEqual(plan.waves, [["a", "b"]]);
 });
@@ -268,14 +304,7 @@ test("resolver → partition: a Creates: cite resolved under its tree directory 
   assert.deepEqual(a.files, ["src/a/foo.ts"]);
   assert.deepEqual(b.files, ["src/a/foo.ts"]);
 
-  const layered = await layerWaves(["a", "b"], openBlockedByFrom({}));
-  const plan = partitionWaves(
-    layered,
-    new Map([
-      ["a", new Set(a.files)],
-      ["b", new Set(b.files)],
-    ]),
-  );
+  const plan = await planWith(["a", "b"], {}, { a: a.files, b: b.files });
 
   assert.deepEqual(plan.waves, [["a"], ["b"]]);
 });
@@ -321,17 +350,17 @@ const FIXTURE_2026_08_19: Issue[] = [
 test("2026-08-19 fixture: the partition is DAG-consistent and crossover-safe", async () => {
   const ids = FIXTURE_2026_08_19.map((i) => i.id);
   const edges = Object.fromEntries(FIXTURE_2026_08_19.map((i) => [i.id, i.blockedBy ?? []]));
-  const files = new Map(FIXTURE_2026_08_19.map((i) => [i.id, new Set(i.files)]));
+  const files = Object.fromEntries(FIXTURE_2026_08_19.map((i) => [i.id, i.files]));
 
   const layered = await layerWaves(ids, openBlockedByFrom(edges));
-  const plan = partitionWaves(layered, files);
+  const plan = await planWith(ids, edges, files);
 
   assert.equal(ids.length, 41, "fixture is at campaign scale");
   assert.deepEqual(plan.unreachable, [], "every blocker is in-set, so nothing is dropped");
 
   // Crossover-safe: no basename appears twice within any wave.
   for (const [w, wave] of plan.waves.entries()) {
-    const names = wave.flatMap((id) => [...files.get(id)!]);
+    const names = wave.flatMap((id) => files[id]);
     assert.equal(new Set(names).size, names.length, `wave ${w} shares a file: ${wave.join(", ")}`);
   }
 
@@ -357,16 +386,25 @@ test("2026-08-19 fixture: the partition is DAG-consistent and crossover-safe", a
   assert.notEqual(waveOf.get("911"), waveOf.get("912"), "the layer-1 dup_layer.tmpl pair is separated");
 });
 
-test("partitionWaves only blames earlier sub-waves — a frontier ticket is never marked spilled", async () => {
-  // a,b,c all touch x so they fan out across three sub-waves; c also touches z.
-  // d touches only z: it collides with c, but c was itself spilled to a later
-  // sub-wave, so d still fits the frontier and must NOT be reported as spilled.
-  const layered = await layerWaves(["a", "b", "c", "d"], openBlockedByFrom({}));
-  const plan = partitionWaves(layered, fileKeysFrom({ a: ["x"], b: ["x"], c: ["x", "z"], d: ["z"] }));
+test("planCampaign only blames tickets between a ticket's floor and its wave — one placed at its floor is never marked spilled", async () => {
+  // a,b,c all touch x; c also touches z, so it collides most and is placed first, in
+  // wave 0. a (x) and d (z) each collide with c and spill to wave 1; b collides with
+  // both c and a, so it spills to wave 2.
+  const plan = await planWith(["a", "b", "c", "d"], {}, { a: ["x"], b: ["x"], c: ["x", "z"], d: ["z"] });
 
-  const d = plan.placements.find((p) => p.id === "d")!;
-  assert.equal(d.wave, 0, "d shares nothing with sub-wave 0, so it stays on the frontier");
-  assert.deepEqual(d.sharesFilesWith, [], "the collider c sits in a later sub-wave, so it is not a spill reason");
+  assert.deepEqual(plan.waves, [["c"], ["a", "d"], ["b"]]);
+  const placed = new Map(plan.placements.map((p) => [p.id, p]));
+  assert.deepEqual(placed.get("c")!.sharesFilesWith, [], "c landed at its floor, so it is not spilled");
+  assert.deepEqual(placed.get("d")!.sharesFilesWith, ["c"]);
+  assert.deepEqual(placed.get("b")!.sharesFilesWith, ["a", "c"], "every earlier collider, in input order");
+});
+
+test("planCampaign does not blame a collider below a ticket's floor — its blocker's wave already holds it back", async () => {
+  // b waits on a and shares its file, but a sits before b's floor, so b landed at its floor.
+  const plan = await planWith(["a", "b"], { b: ["a"] }, { a: ["x"], b: ["x"] });
+
+  assert.deepEqual(plan.waves, [["a"], ["b"]]);
+  assert.deepEqual(plan.placements.find((p) => p.id === "b")!.sharesFilesWith, []);
 });
 
 // id -> its resolved file-set, for the under-specified halt tests. A missing id
@@ -716,9 +754,8 @@ test("describePlan omits the Excluded section when nothing was excluded", () => 
   assert.doesNotMatch(report, /Excluded/);
 });
 
-test("describePlan explains why a ticket was spilled to a later sub-wave", async () => {
-  const layered = await layerWaves(["a", "b", "c"], openBlockedByFrom({}));
-  const plan = partitionWaves(layered, fileKeysFrom({ a: ["x"], b: ["y"], c: ["x"] }));
+test("describePlan explains why a ticket was spilled to a later wave", async () => {
+  const plan = await planWith(["a", "b", "c"], {}, { a: ["x"], b: ["y"], c: ["x"] });
   const report = describePlan(plan);
 
   // c spilled because it shares a file with a — the report must say so.
@@ -726,17 +763,20 @@ test("describePlan explains why a ticket was spilled to a later sub-wave", async
 });
 
 test("describePlan's spilled line names the shared file, then its tickets in input order", async () => {
-  const layered = await layerWaves(["686", "685", "684"], openBlockedByFrom({}));
-  const plan = partitionWaves(layered, fileKeysFrom({ "686": ["DESIGN.md"], "685": ["DESIGN.md"], "684": ["DESIGN.md"] }));
+  const plan = await planWith(["686", "685", "684"], {}, { "686": ["DESIGN.md"], "685": ["DESIGN.md"], "684": ["DESIGN.md"] });
   const report = describePlan(plan);
 
   assert.match(report, /wave 2\s+#684 .*; spilled — shares DESIGN\.md with #686, #685$/m);
 });
 
 test("describePlan's spilled line lists each shared file with its own colliding ticket", async () => {
-  // c collides with a on A.md and with b on B.md — one group per file.
-  const layered = await layerWaves(["a", "b", "c"], openBlockedByFrom({}));
-  const plan = partitionWaves(layered, fileKeysFrom({ a: ["src/A.md"], b: ["src/B.md"], c: ["src/A.md", "src/B.md"] }));
+  // c collides with a on A.md and with b on B.md — one group per file. e and f lift a
+  // and b to c's collision count, so the tie keeps input order and c is the one spilled.
+  const plan = await planWith(
+    ["a", "b", "c", "e", "f"],
+    {},
+    { a: ["src/A.md", "P.md"], b: ["src/B.md", "Q.md"], c: ["src/A.md", "src/B.md"], e: ["P.md"], f: ["Q.md"] },
+  );
   const line = describePlan(plan)
     .split("\n")
     .find((l) => l.includes("#c"))!;
@@ -747,23 +787,25 @@ test("describePlan's spilled line lists each shared file with its own colliding 
 
 test("describePlan's spilled line names the spilled ticket's own bare key, not the path it hit", async () => {
   // a resolved `src/foo.md`; b kept a bare `foo.md` (an ambiguous cite) — b's key is shown.
-  const layered = await layerWaves(["a", "b"], openBlockedByFrom({}));
-  const plan = partitionWaves(layered, fileKeysFrom({ a: ["src/foo.md"], b: ["foo.md"] }));
+  const plan = await planWith(["a", "b"], {}, { a: ["src/foo.md"], b: ["foo.md"] });
 
   assert.match(describePlan(plan), /#b .*; spilled — shares foo\.md with #a$/m);
 });
 
 test("describePlan's spilled line puts the file shared with the most tickets first", async () => {
   // d's first collision is with a on Y.md, but X.md holds two tickets (b, c), so it leads.
-  const layered = await layerWaves(["a", "b", "c", "d"], openBlockedByFrom({}));
-  const plan = partitionWaves(layered, fileKeysFrom({ a: ["Y.md"], b: ["X.md"], c: ["X.md"], d: ["X.md", "Y.md"] }));
+  // P.md lifts a, b and c to d's collision count, so the tie keeps input order and d spills.
+  const plan = await planWith(
+    ["a", "b", "c", "d"],
+    {},
+    { a: ["Y.md", "P.md"], b: ["X.md", "P.md"], c: ["X.md", "P.md"], d: ["X.md", "Y.md"] },
+  );
 
   assert.match(describePlan(plan), /#d .*; spilled — shares X\.md with #b, #c; Y\.md with #a$/m);
 });
 
 test("describePlan prints no spilled reason for a ticket that collides with nothing", async () => {
-  const layered = await layerWaves(["a", "b"], openBlockedByFrom({}));
-  const plan = partitionWaves(layered, fileKeysFrom({ a: ["x"], b: ["y"] }));
+  const plan = await planWith(["a", "b"], {}, { a: ["x"], b: ["y"] });
 
   assert.doesNotMatch(describePlan(plan), /spilled/);
 });

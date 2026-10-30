@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { event, type OrchestratorEvent } from "./event-log.ts";
-import { latestCampaignSlowGates, readSlowGateLogs, slowGatesAtSettle } from "./slow-gates.ts";
+import { latestCampaignSlowGates, pastBaseGates, readSlowGateLogs, slowGatesAtSettle } from "./slow-gates.ts";
 
 const result = (seconds: number, opts: { cmd?: string; exitCode?: number; budgetSeconds?: number; taskId?: string } = {}) =>
   event("gate-result", {
@@ -197,4 +197,30 @@ test("readSlowGateLogs reads every archived orchestrator log oldest-first, plus 
     live.map((e) => (e as { seconds?: number }).seconds),
     [3],
   );
+});
+
+// --- the median past merged-base gate the dry-run estimate reads (#615) -----------------------
+
+/** A wave's integration: a member merges, then the merged base gates on `seconds` (taskId-less results). */
+const baseGateOf = (...seconds: number[]): OrchestratorEvent[] => [
+  event("merged", { taskId: "1" }),
+  ...seconds.map((s) => result(s)),
+  event("base-gate", { green: true }),
+];
+
+test("pastBaseGates is the median merged-base gate over the whole history, and how many it was taken over", () => {
+  const history = [
+    ...campaignOf(),
+    ...baseGateOf(50, 20),
+    ...baseGateOf(90),
+    result(999), // a `vetinari baseline` run: no base-gate follows it
+    ...campaignOf(300, 300), // agent branch gates and more baseline-shaped noise, never a base gate
+    result(500, { taskId: "1" }),
+    ...baseGateOf(60, 6),
+  ];
+  assert.deepEqual(pastBaseGates(history), { median: 70, runs: 3 });
+});
+
+test("pastBaseGates is undefined when the history holds no merged-base gate", () => {
+  assert.equal(pastBaseGates([...campaignOf(60, 60), result(400)]), undefined);
 });

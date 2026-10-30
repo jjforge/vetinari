@@ -12,7 +12,13 @@ import {
   formatWaveStart,
   issueLabel,
   makeReporter,
+  campaignBaseGates,
+  formatBaseGateEstimate,
+  formatCampaignBaseGates,
+  formatWaveTimeSplit,
+  waveTimeSplit,
 } from "./report.ts";
+import type { OrchestratorEvent } from "./event-log.ts";
 
 // --- issueLabel: an id, plus its title when the run resolved one ---------------
 
@@ -200,4 +206,117 @@ test("formatSlowGates names a budget overrun's gate, its budget and how many of 
 
 test("formatSlowGates prints nothing when no gate is slow", () => {
   assert.deepEqual(formatSlowGates({ history: [], budget: [] }), []);
+});
+
+// --- the wave time split: where a wave's time went, read off its events (#615) ---------------
+
+/** An event `at` seconds after a fixed epoch — fixture logs are written in whole seconds. */
+const at = (seconds: number, event: string, fields: Record<string, unknown> = {}): OrchestratorEvent =>
+  ({ ts: new Date(Date.UTC(2026, 9, 30, 12, 0, seconds)).toISOString(), event, ...fields }) as unknown as OrchestratorEvent;
+
+/** A clean wave of two members: #102 is the slower one (398s spawn→green, 79s of it in branch gates). */
+const twoMemberWave: OrchestratorEvent[] = [
+  at(0, "wave-start", { index: 2, tasks: ["101", "102"] }),
+  at(1, "spawn", { taskId: "101" }),
+  at(2, "spawn", { taskId: "102" }),
+  at(200, "gate-result", { taskId: "101", cmd: "make test", exitCode: 0, seconds: 30, outFile: "a" }),
+  at(210, "green", { taskId: "101", branch: "agent/101", commits: [] }),
+  at(350, "gate-result", { taskId: "102", cmd: "make test", exitCode: 1, seconds: 50, outFile: "b" }),
+  at(380, "gate-result", { taskId: "102", cmd: "make test", exitCode: 0, seconds: 29, outFile: "c" }),
+  at(400, "green", { taskId: "102", branch: "agent/102", commits: [] }),
+  at(410, "merged", { taskId: "101" }),
+  at(411, "merged", { taskId: "102" }),
+  at(470, "gate-result", { cmd: "make test", exitCode: 0, seconds: 52, outFile: "d" }),
+  at(490, "gate-result", { cmd: "make e2e", exitCode: 0, seconds: 20, outFile: "e" }),
+  at(491, "base-gate", { index: 2, green: true }),
+  at(492, "wave-done", { index: 2, merged: ["101", "102"] }),
+];
+
+test("waveTimeSplit splits a wave into agent, branch gates, integration + base gate and post-merge, off its slower member", () => {
+  assert.deepEqual(waveTimeSplit(twoMemberWave), { total: 492, agent: 319, branchGates: 79, integration: 91, postMerge: 1 });
+});
+
+test("waveTimeSplit leaves the agent and branch-gate phases undefined when a member ran twice in the wave (a re-admit)", () => {
+  const readmitted = [
+    ...twoMemberWave.slice(0, 8),
+    at(401, "re-admit", { taskId: "102", reason: "conflict", paths: ["a.ts"], base: "abc" }),
+    at(402, "spawn", { taskId: "102" }),
+    at(405, "green", { taskId: "102", branch: "agent/102", commits: [] }),
+    ...twoMemberWave.slice(8),
+  ];
+  const split = waveTimeSplit(readmitted);
+  assert.equal(split.agent, undefined);
+  assert.equal(split.branchGates, undefined);
+  assert.deepEqual(split, { total: 492, integration: 86, postMerge: 1 });
+});
+
+test("waveTimeSplit keeps only the total when a redriven wave banked its members and merged nothing new", () => {
+  const redriven = [
+    at(0, "wave-start", { index: 2, tasks: ["101", "102"] }),
+    at(3, "redrive", { fromWave: 2, landed: 0, skipped: 2 }),
+    at(5, "wave-done", { index: 2, merged: [] }),
+  ];
+  const split = waveTimeSplit(redriven);
+  assert.equal(split.total, 5);
+  for (const phase of ["agent", "branchGates", "integration", "postMerge"] as const) assert.equal(split[phase], undefined, phase);
+});
+
+test("formatWaveTimeSplit prints the wave's total, then each phase", () => {
+  assert.equal(
+    formatWaveTimeSplit({ total: 504, agent: 333, branchGates: 79, integration: 91, postMerge: 1 }),
+    "8m24s — agent 5m33s · branch gates 1m19s · integration + base gate 1m31s · post-merge 1s",
+  );
+});
+
+test("formatWaveTimeSplit prints — for a phase it could not derive, and the rest still print", () => {
+  assert.equal(
+    formatWaveTimeSplit({ total: 3725, integration: 65 }),
+    "1h2m5s — agent — · branch gates — · integration + base gate 1m5s · post-merge —",
+  );
+});
+
+// --- the campaign's merged-base gates: how many, and their total time (#615) ------------------
+
+/** A wave's integration: its members merge, then the merged base gates on `seconds` (taskId-less rows). */
+const integration = (t: number, taskId: string, seconds: number[]): OrchestratorEvent[] => [
+  at(t, "merged", { taskId }),
+  ...seconds.map((s, i) => at(t + 1 + i, "gate-result", { cmd: `gate ${i}`, exitCode: 0, seconds: s, outFile: "x" })),
+  at(t + 1 + seconds.length, "base-gate", { green: true }),
+];
+
+const campaignLog: OrchestratorEvent[] = [
+  // an earlier campaign — not this one's
+  at(0, "campaign-start", { waves: [["90"]], slots: 1 }),
+  ...integration(10, "90", [500]),
+  // a `vetinari baseline` run: taskId-less results no base-gate follows
+  at(30, "gate-result", { cmd: "make test", exitCode: 0, seconds: 400, outFile: "x" }),
+  at(40, "campaign-start", { waves: [["101"], ["102"], ["103"]], slots: 1 }),
+  at(41, "wave-start", { index: 0, tasks: ["101"] }),
+  at(42, "gate-result", { taskId: "101", cmd: "make test", exitCode: 0, seconds: 300, outFile: "x" }),
+  ...integration(50, "101", [52, 20]),
+  at(60, "wave-start", { index: 1, tasks: ["102"] }),
+  ...integration(70, "102", [40, 18]),
+  at(80, "wave-start", { index: 2, tasks: ["103"] }),
+  ...integration(90, "103", [60]),
+];
+
+test("campaignBaseGates totals this campaign's merged-base gates — never a branch gate, a baseline run or an earlier campaign's", () => {
+  assert.deepEqual(campaignBaseGates(campaignLog), { count: 3, seconds: 190 });
+});
+
+test("formatCampaignBaseGates names the total merged-base gate time and how many gates it was", () => {
+  assert.equal(formatCampaignBaseGates({ count: 13, seconds: 936 }), "⏱ base gates: 15m36s over 13 merged-base gates this campaign");
+  assert.equal(formatCampaignBaseGates({ count: 1, seconds: 72 }), "⏱ base gates: 1m12s over 1 merged-base gate this campaign");
+});
+
+test("formatBaseGateEstimate reads a plan's wave count as base-gate time, naming the median and its sample size", () => {
+  assert.equal(formatBaseGateEstimate(13, { median: 72, runs: 24 }), "base gates: ~13 × 1m12s (median of 24 past base gates) ≈ 16m");
+  assert.equal(formatBaseGateEstimate(1, { median: 40, runs: 1 }), "base gates: ~1 × 40s (median of 1 past base gate) ≈ 40s");
+  assert.equal(formatBaseGateEstimate(60, { median: 65, runs: 3 }), "base gates: ~60 × 1m5s (median of 3 past base gates) ≈ 1h5m");
+});
+
+test("formatBaseGateEstimate says there is no history, and prints no number, when no merged-base gate ever ran", () => {
+  const line = formatBaseGateEstimate(13, undefined);
+  assert.equal(line, "base gates: no estimate — no merged-base gate in this project's history yet");
+  assert.doesNotMatch(line, /\d/);
 });

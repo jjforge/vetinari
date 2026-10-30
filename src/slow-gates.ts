@@ -1,6 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { readEventLog, type GateResultEvent, type OrchestratorEvent } from "./event-log.ts";
+import { mergedBaseGateSeconds } from "./report.ts";
 
 /**
  * Slow-gate detection (CONTEXT.md → Slow gate): a gate whose recent green runs take well over its
@@ -133,6 +134,16 @@ export function latestCampaignSlowGates(archives: OrchestratorEvent[][], live: O
   if (start < 0) return { history: [], budget: [] };
   const current = gateResults(latest.slice(start));
   return { history: historyFlags(gateResults([...older, ...latest.slice(0, start)]), current), budget: budgetFlags(current) };
+}
+
+/**
+ * The median merged-base gate over a project's whole history (`events`: every archive oldest-first,
+ * then the live log), and how many it was taken over — what `campaign --dry-run` multiplies its wave
+ * count by (#615). Undefined when no merged-base gate was ever logged. Information only.
+ */
+export function pastBaseGates(events: OrchestratorEvent[]): { median: number; runs: number } | undefined {
+  const durations = mergedBaseGateSeconds(events);
+  return durations.length ? { median: median(durations), runs: durations.length } : undefined;
 }
 
 /**

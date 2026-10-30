@@ -154,9 +154,32 @@ the container is `.vetinari.local/.env` (design §9, ADR 0011).
 | `OPENCODE_API_KEY` | `.vetinari.local/.env` | OpenCode credential (experimental provider) |
 | `VETINARI_TELEGRAM_BOT_TOKEN` | `.vetinari.local/host.env` | this project's Telegram bot token — host-only, never crosses into the container |
 | `VETINARI_TELEGRAM_CHAT_ID` | `.vetinari.local/host.env` | this project's default Telegram chat |
+| `VETINARI_TELEGRAM_THREAD_ID` | `.vetinari.local/host.env` | optional forum thread (topic) for the default chat, read alongside the bot token and chat id; unset posts to the chat itself |
 | `VETINARI_STATUS_ALLOWED_HOSTS` | host env (`status` and the gateway) | comma-separated, case-insensitive DNS names the dashboard admits as a `Host` beyond IP literals and `localhost` — a MagicDNS or reverse-proxy name; any other name is a 403 (see the operations guide's exposure section) |
+| `VETINARI_STATUS_PORT` / `VETINARI_STATUS_HOST` | host env (`status`) | the port and bind address `status` serves on when `--port` / `--host` are not given; default `8765` / `127.0.0.1` |
+| `VETINARI_GATEWAY_STATUS_PORT` / `VETINARI_GATEWAY_STATUS_HOST` | host env (the gateway) | the port and bind address of the gateway's aggregated dashboard; default `8765` / `127.0.0.1` |
+| `VETINARI_GATEWAY_ANNOUNCE_MS` | host env (the gateway) | the gateway's tick, in milliseconds — how often it announces parked questions, drains the project outboxes, and re-reads the registry for its Telegram pollers; default `5000`, floor `1000` |
+| `VETINARI_GATEWAY_HOME` | host env | overrides the host config dir; default `$XDG_CONFIG_HOME/vetinari`, or `~/.config/vetinari` |
+| `VETINARI_SYSTEMD_UNIT` | host env | overrides the gateway's systemd unit path; default `$XDG_CONFIG_HOME/systemd/user/vetinari-gateway.service`, or under `~/.config/systemd/user/` |
+| `XDG_CONFIG_HOME` | host env | the base of the host config dir and the gateway unit path defaults when the two overrides above are unset; unset falls back to `~/.config` |
 | `GIT_TERMINAL_PROMPT` | set to `0` by vetinari on its own process when the config loads (host-side only) | host-side git — sandcastle's fetch before worktree creation — fails fast when it needs a credential instead of prompting on the terminal until the worktree timeout; set it in `hostEnv` to override |
 | `TZ` | process env | the zone the CLI renders timestamps in (the log stores ISO-8601 UTC only; the dashboard uses the browser's zone) |
+
+### Internal
+
+Plumbing between vetinari's own processes — set on the child processes it spawns (or by the
+dashboard and the gateway on the `vetinari answer` they spawn) — plus the demo fixture's root.
+None is project or host configuration; do not set the plumbing ones yourself.
+
+| Variable | Set by | Meaning |
+| --- | --- | --- |
+| `VETINARI_CHILD` | a queue/campaign, on every child `run` it spawns (`childSpawnEnv`) | marks the run as a campaign child: it does not archive the parent's in-flight log as a leftover, is exempt from `run`'s live-campaign refusal (its parent holds the lease), and leaves the resume hint to its parent |
+| `VETINARI_JSON` | `--json` on `campaign`/`run`/`redrive`, set to `1` on the CLI's own process; child `run`s inherit it | streams the raw event JSONL to stdout; unset, stdout carries the human lines only |
+| `VETINARI_RESUME_SESSION` | a campaign redrive of a crashed member (`selfSpawnRun`) | the crashed session id the child `run` resumes on the existing branch instead of starting fresh |
+| `VETINARI_RESUME_PROMPT` | a campaign's merge-conflict retry (`selfSpawnRun`) | the conflict prompt the child `run` resumes with — or, on a non-resumable provider, re-enters fresh on the kept branch with it added to the issue text |
+| `VETINARI_AGENT` | `run`/`campaign` with `--agent`/`--model`/`--effort` | the CLI agent override, re-stamped so every child `run` drives the same agent as its parent; layered over the config's `agent` |
+| `VETINARI_ANSWER_SOURCE` | the dashboard (`ui`) and the gateway (`telegram`) on the `vetinari answer` they spawn | the `source` the `answered` event records; unset or unrecognised reads as `cli` |
+| `VETINARI_DEMO_DIR` | nothing in vetinari — whoever runs the `make demo-create` / `make demo-remove` dev tool and wants the fixture elsewhere | the root the demo dashboard fixture's projects seed under, and the only root `demo-remove` deletes; default `~/.cache/vetinari-demo` |
 
 ## Event kinds
 

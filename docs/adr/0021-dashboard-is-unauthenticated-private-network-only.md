@@ -61,6 +61,10 @@ the bind.
   browser's `Origin` against it.
 - No CORS headers and no cross-origin access: a page on another origin cannot use the
   dashboard's API, by design.
+- The dashboard refuses to be framed (`X-Frame-Options: DENY` and CSP
+  `frame-ancestors 'none'` on every response, set at the same request entry): a click
+  inside a framed dashboard carries the dashboard's own `Origin`, so the Origin check
+  alone would admit a clickjacked Redrive, Stop or Prune.
 - Reachability is the operator's responsibility. Binding the dashboard to a public
   interface is unsupported and, with these checks alone, still open to anyone who can
   reach the port with curl.

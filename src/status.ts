@@ -142,6 +142,9 @@ export async function serveAllStatus(
     // Defence in depth on every response (#526): the pages load only their own inline assets and
     // talk only to this origin, so any future escaping slip cannot reach out or be framed.
     res.setHeader("content-security-policy", DASHBOARD_CSP);
+    // A framed click carries the dashboard's own Origin and so passes the ADR 0021 Origin check;
+    // refusing to be framed (CSP frame-ancestors, and this for older browsers) stops clickjacking (#525).
+    res.setHeader("x-frame-options", "DENY");
     res.setHeader("x-content-type-options", "nosniff");
     res.setHeader("referrer-policy", "no-referrer");
     // Error bodies echo request input; type them as plain text. JSON, HTML and SSE routes set their own.

@@ -479,7 +479,16 @@ export function normalizeLegacyEvent(row: Row): OrchestratorEvent[] {
  */
 export function readEventLog(cfg: Pick<ResolvedConfig, "logFile">): OrchestratorEvent[] {
   if (!existsSync(cfg.logFile)) return [];
-  return readFileSync(cfg.logFile, "utf8")
+  return parseEventLogText(readFileSync(cfg.logFile, "utf8"));
+}
+
+/**
+ * The line parser behind {@link readEventLog}, for a reader that already holds the log's text
+ * (the live tail's appended lines): every non-empty line parsed and translated by
+ * {@link normalizeLegacyEvent}, with the same skip rules for unparseable or `event`-less lines.
+ */
+export function parseEventLogText(text: string): OrchestratorEvent[] {
+  return text
     .split("\n")
     .filter(Boolean)
     .flatMap((line) => {

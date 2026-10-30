@@ -3,7 +3,7 @@
 // machine noise.
 import { existsSync, readFileSync } from "node:fs";
 import { type ResolvedConfig } from "./config.ts";
-import { type OrchestratorEvent } from "./event-log.ts";
+import { type OrchestratorEvent, parseEventLogText } from "./event-log.ts";
 import { activityLogPath } from "./activity.ts";
 import { humanizeLogLine, type HumanizedRow } from "./log-view.ts";
 import { type IssueStatus } from "./dashboard-lifecycle.ts";
@@ -14,8 +14,8 @@ import { type CampaignStatus, type StatusIssue, buildStatus } from "./dashboard-
  * offset to resume from next time. Pure — the tail-reading half of the live
  * watcher (ADR 0008), split out so it can be unit-tested without a file or a
  * running server: given the log's full text and where we last stopped, it returns
- * only the newly-appended *complete* lines (parsed, bad lines skipped like
- * `readEventLog`) and the new offset — the length of text consumed up to and
+ * only the newly-appended *complete* lines (parsed and legacy-translated exactly
+ * as `readEventLog` does, via `parseEventLogText`) and the new offset — the length of text consumed up to and
  * including the last newline. A partial trailing line (an append caught
  * mid-write) is left unconsumed so it is read whole next time, and a `content`
  * shorter than `offset` means the log was truncated or rotated, so it is re-read
@@ -27,19 +27,7 @@ export function appendedEvents(content: string, offset: number): { events: Orche
   const lastNewline = tail.lastIndexOf("\n");
   if (lastNewline === -1) return { events: [], offset: from };
   const complete = tail.slice(0, lastNewline + 1);
-  const events = complete
-    .split("\n")
-    .filter(Boolean)
-    .flatMap((line): OrchestratorEvent[] => {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(line);
-      } catch {
-        return [];
-      }
-      if (!parsed || typeof parsed !== "object" || typeof (parsed as { event?: unknown }).event !== "string") return [];
-      return [parsed as OrchestratorEvent];
-    });
+  const events = parseEventLogText(complete);
   return { events, offset: from + complete.length };
 }
 

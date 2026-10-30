@@ -18,6 +18,16 @@ const DEBOUNCE_MS = 300;
  * handed one; it constructs its own, exactly as the other host readers default to. */
 const logger = hostLogger();
 
+/** The most live-update connections open at once in a dashboard process. Each one arms
+ * its own watchers and re-reads every appended-to log, so an unbounded count (many tabs,
+ * a misbehaving client) multiplies that work without limit; past the cap a connection is
+ * refused with `503`. Fixed, not configurable. */
+export const MAX_EVENT_CONNECTIONS = 16;
+
+/** The live-update connections currently open — process-wide, since a process runs one
+ * dashboard server. Counted from admission until the request's `close`. */
+let openEventConnections = 0;
+
 /**
  * `GET /api/events` — the live update stream (ADR 0008). The server `fs.watch`es
  * every registered project's live-run log and, on a change, pushes the events
@@ -41,6 +51,14 @@ const logger = hostLogger();
  */
 export const handleEvents: RouteHandler = (req, res, url, deps) => {
   if (!(req.method === "GET" && url.pathname === "/api/events")) return false;
+  // Refuse past the cap before any SSE header goes out, so a refused client never sees a
+  // `200`, and before any watcher arms; a refusal neither takes nor frees a slot.
+  if (openEventConnections >= MAX_EVENT_CONNECTIONS) {
+    res.writeHead(503, { "content-type": "text/plain; charset=utf-8" });
+    res.end(`too many live-update connections (max ${MAX_EVENT_CONNECTIONS})`);
+    return true;
+  }
+  openEventConnections++;
   res.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-cache",
@@ -221,7 +239,10 @@ export const handleEvents: RouteHandler = (req, res, url, deps) => {
   // `{ project, events }` shape is kept, sent empty since nothing reads it.
   if (!res.writableEnded) res.write(`data: ${JSON.stringify({ project: null, events: [] })}\n\n`);
 
-  req.on("close", () => {
+  // `once`, so a repeated `close` can't release the slot twice and drift the count below
+  // the connections actually open.
+  req.once("close", () => {
+    openEventConnections--;
     for (const watcher of watchers) watcher.close();
     for (const timer of timers.values()) clearTimeout(timer);
     for (const timer of tailTimers.values()) clearTimeout(timer);

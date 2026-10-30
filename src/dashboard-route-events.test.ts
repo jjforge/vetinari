@@ -11,7 +11,7 @@ import { register } from "./registry.ts";
 import { logFileOf } from "./dashboard-model.ts";
 import { event } from "./event-log.ts";
 import type { DashboardDeps } from "./dashboard-http.ts";
-import { handleEvents } from "./dashboard-route-events.ts";
+import { handleEvents, MAX_EVENT_CONNECTIONS } from "./dashboard-route-events.ts";
 
 let counter = 0;
 
@@ -30,20 +30,27 @@ const seed = (events: unknown[]): { configDir: string; project: string; base: st
 // test can fire it to tear the watchers down.
 const connReq = () => Object.assign(new EventEmitter(), { method: "GET", url: "/api/events", headers: {} });
 
-// A response spy capturing every SSE chunk the handler writes.
+// A response spy capturing the status line, headers, every SSE chunk the handler writes, and
+// the body it ends with.
 const resSpy = () => {
   const chunks: string[] = [];
   const res = {
     writableEnded: false,
     chunks,
-    writeHead() {
+    statusCode: undefined as number | undefined,
+    headers: undefined as Record<string, string> | undefined,
+    body: undefined as string | undefined,
+    writeHead(statusCode: number, headers?: Record<string, string>) {
+      res.statusCode = statusCode;
+      res.headers = headers;
       return res;
     },
     write(chunk: string) {
       chunks.push(chunk);
       return true;
     },
-    end() {
+    end(body?: string) {
+      res.body = body;
       res.writableEnded = true;
     },
   };
@@ -130,4 +137,61 @@ test("a burst of denylisted noise after connect emits no further unnamed frame (
     ["turn"],
     "only the view-relevant event surfaces; the denylisted noise beside it is stripped",
   );
+});
+
+// Open one connection through the handler, closing it when the test ends: the open-connection
+// count is process-wide, so a connection left open would leak into every later test.
+const openConn = (t: { after: (fn: () => void) => void }, configDir: string) => {
+  const req = connReq();
+  const res = resSpy();
+  t.after(() => req.emit("close"));
+  handleEvents(req as never, res as never, new URL("http://x/api/events"), depsFor(configDir));
+  return { req, res };
+};
+
+const assertRefused = (res: ReturnType<typeof resSpy>) => {
+  assert.equal(res.statusCode, 503);
+  assert.equal(res.headers?.["content-type"], "text/plain; charset=utf-8");
+  assert.equal(res.body, "too many live-update connections (max 16)");
+  assert.equal(res.writableEnded, true);
+  assert.ok(!res.chunks.some((c) => c.includes("retry:") || c.includes("data:")), "a refused request gets no SSE handshake or frame");
+};
+
+test("the live-update connection cap is 16", () => {
+  assert.equal(MAX_EVENT_CONNECTIONS, 16);
+});
+
+test("a 17th concurrent live-update connection is refused with 503", (t) => {
+  const { configDir } = seed([]);
+  for (let i = 0; i < 16; i++) assert.equal(openConn(t, configDir).res.statusCode, 200);
+
+  assertRefused(openConn(t, configDir).res);
+});
+
+test("closing an open live-update connection frees its slot for the next client", (t) => {
+  const { configDir } = seed([]);
+  const open = Array.from({ length: 16 }, () => openConn(t, configDir));
+  assertRefused(openConn(t, configDir).res);
+
+  open[0].req.emit("close");
+  const { res } = openConn(t, configDir);
+
+  assert.equal(res.statusCode, 200);
+  assert.ok(
+    res.chunks.some((c) => c.includes(": connected")),
+    "the readmitted client gets the SSE handshake",
+  );
+});
+
+test("a refused live-update request neither takes nor frees a slot", (t) => {
+  const { configDir } = seed([]);
+  const open = Array.from({ length: 16 }, () => openConn(t, configDir));
+  const refused = openConn(t, configDir);
+  assertRefused(refused.res);
+  refused.req.emit("close");
+
+  for (const { req } of open) req.emit("close");
+  for (let i = 0; i < 16; i++) assert.equal(openConn(t, configDir).res.statusCode, 200, `fresh connection ${i + 1} is admitted`);
+
+  assertRefused(openConn(t, configDir).res);
 });

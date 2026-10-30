@@ -2,10 +2,15 @@ import { listProjects } from "./registry.ts";
 import { readBody, type RouteHandler } from "./dashboard-http.ts";
 import { renderAggregatedGraftRejection } from "./dashboard-render.ts";
 import { parseGraftClosure } from "./dashboard-graft.ts";
+import { isIssueToken } from "./issue-id.ts";
 
 /** `graft` is variadic, so both routes carry a *set* of ids rather than prune's
  *  single target — parsed off the same whitespace/comma split the CLI uses. */
 const parseIds = (raw: string | null) => (raw ?? "").split(/[\s,]+/).filter(Boolean);
+
+/** The ids that would reach the child's argv but are not issue tokens — any one rejects the
+ *  whole request, so caller text such as `--config` never becomes a CLI option (#524). */
+const nonIssueIds = (ids: string[]) => ids.filter((id) => !isIssueToken(id));
 
 /**
  * `GET /graft?preview` — the lightweight JSON closure the inline panel fetches
@@ -20,6 +25,10 @@ export const handleGraftPreview: RouteHandler = async (req, res, url, deps) => {
   const project = url.searchParams.get("project");
   if (!ids.length || !project) {
     res.writeHead(400).end("ids and project are required");
+    return true;
+  }
+  if (nonIssueIds(ids).length) {
+    res.writeHead(400).end(`not an issue id: ${nonIssueIds(ids).join(", ")}`);
     return true;
   }
   const pointer = listProjects(deps.configDir).find((p) => p.project === project);
@@ -61,6 +70,10 @@ export const handleGraft: RouteHandler = async (req, res, url, deps) => {
   const project = form.get("project");
   if (!ids.length || !project) {
     res.writeHead(400).end("ids and project are required");
+    return true;
+  }
+  if (nonIssueIds(ids).length) {
+    res.writeHead(400).end(`not an issue id: ${nonIssueIds(ids).join(", ")}`);
     return true;
   }
   const pointer = listProjects(deps.configDir).find((p) => p.project === project);

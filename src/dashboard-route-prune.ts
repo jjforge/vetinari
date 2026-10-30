@@ -1,6 +1,7 @@
 import { listProjects } from "./registry.ts";
 import { readBody, type RouteHandler } from "./dashboard-http.ts";
 import { renderAggregatedPrunePreview } from "./dashboard-render.ts";
+import { isIssueToken } from "./issue-id.ts";
 
 /**
  * `GET /prune?preview` — the lightweight JSON closure the inline panel fetches
@@ -14,6 +15,11 @@ export const handlePrunePreview: RouteHandler = async (req, res, url, deps) => {
   const project = url.searchParams.get("project");
   if (!taskId || !project) {
     res.writeHead(400).end("taskId and project are required");
+    return true;
+  }
+  // The taskId lands in the child's argv — refuse anything that is not an issue token (#524).
+  if (!isIssueToken(taskId)) {
+    res.writeHead(400).end(`not an issue id: ${taskId}`);
     return true;
   }
   const pointer = listProjects(deps.configDir).find((p) => p.project === project);
@@ -49,6 +55,11 @@ export const handlePrune: RouteHandler = async (req, res, url, deps) => {
   const project = form.get("project");
   if (!taskId || !project) {
     res.writeHead(400).end("taskId and project are required");
+    return true;
+  }
+  // The taskId lands in the child's argv — refuse anything that is not an issue token (#524).
+  if (!isIssueToken(taskId)) {
+    res.writeHead(400).end(`not an issue id: ${taskId}`);
     return true;
   }
   const pointer = listProjects(deps.configDir).find((p) => p.project === project);

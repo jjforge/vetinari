@@ -147,3 +147,24 @@ test("POST /graft on a child still running at the cap 202s (child left running) 
   assert.equal(res.statusCode, 202);
   assert.match(res.body ?? "", /wave will appear when it lands/i);
 });
+
+test("POST /graft with any id that is not an issue token is a 400 and shells nothing (#524)", async () => {
+  const { configDir } = seed();
+  const bundle = depsFor(configDir, { code: 0, stdout: "", stderr: "", timedOut: false });
+  const res = resSpy();
+  await handleGraft(postReq("ids=1,--config,/tmp/x.mjs&project=beta") as never, res as never, new URL("http://x/graft"), bundle.deps);
+  assert.equal(res.statusCode, 400);
+  assert.deepEqual(bundle.calls, [], "no graft child is run for a bad id");
+  assert.equal(bundle.graftClosureCalls, 0);
+});
+
+test("POST /graft passes `#`-prefixed issue ids through to the child unchanged (#524)", async () => {
+  const { configDir } = seed();
+  const bundle = depsFor(configDir, { code: 0, stdout: "", stderr: "", timedOut: false });
+  const res = resSpy();
+  await handleGraft(postReq("ids=%2312,13&project=beta") as never, res as never, new URL("http://x/graft"), bundle.deps);
+  assert.deepEqual(
+    bundle.calls.map((c) => c.args),
+    [["graft", "#12", "13", "--json"]],
+  );
+});

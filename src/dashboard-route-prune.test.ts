@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { register } from "./registry.ts";
 import type { ChildResult } from "./dashboard-child.ts";
 import type { DashboardDeps } from "./dashboard-http.ts";
-import { handlePrune } from "./dashboard-route-prune.ts";
+import { handlePrune, handlePrunePreview } from "./dashboard-route-prune.ts";
 
 let counter = 0;
 
@@ -107,4 +107,50 @@ test("POST /prune confirm on a child still running at the cap 202s (child left r
   await handlePrune(postReq(confirm) as never, res as never, new URL("http://x/prune"), bundle.deps);
   assert.equal(res.statusCode, 202);
   assert.equal(res.body, "pruning… #401 will drop from the plan when it lands");
+});
+
+// A taskId that is not an issue token would land in the child's argv as an option (`--config
+// <path>` imports a module), so every prune leg refuses it before any spawn seam runs (#524).
+const tripwireDeps = (configDir: string) => {
+  const spawned: string[] = [];
+  const deps: DashboardDeps = {
+    configDir,
+    prunePreview: async () => (spawned.push("prunePreview"), null),
+    pruneClosure: async () => (spawned.push("pruneClosure"), null),
+    graftClosure: async () => (spawned.push("graftClosure"), null),
+    runChild: async () => (spawned.push("runChild"), { code: 0, stdout: "", stderr: "", timedOut: false }),
+    graftTimeoutMs: 60_000,
+  };
+  return { deps, spawned };
+};
+
+test("GET /prune?preview with a taskId that is not an issue token is a 400 and shells nothing (#524)", async () => {
+  const { configDir } = seed();
+  const { deps, spawned } = tripwireDeps(configDir);
+  const res = resSpy();
+  const url = new URL("http://x/prune?preview&taskId=--config&project=beta");
+  await handlePrunePreview({ method: "GET", url: url.pathname + url.search, headers: {} } as never, res as never, url, deps);
+  assert.equal(res.statusCode, 400);
+  assert.deepEqual(spawned, []);
+});
+
+test("POST /prune (preview and confirm legs) with a taskId that is not an issue token is a 400 and shells nothing (#524)", async () => {
+  for (const body of ["taskId=--config&project=beta", "taskId=--config&project=beta&confirm=1"]) {
+    const { configDir } = seed();
+    const { deps, spawned } = tripwireDeps(configDir);
+    const res = resSpy();
+    await handlePrune(postReq(body) as never, res as never, new URL("http://x/prune"), deps);
+    assert.equal(res.statusCode, 400, body);
+    assert.deepEqual(spawned, [], body);
+  }
+});
+
+test("POST /prune confirm passes a `#`-prefixed issue id through to the child unchanged (#524)", async () => {
+  const { configDir } = seed();
+  const bundle = depsFor(configDir, { code: 0, stdout: "", stderr: "", timedOut: false });
+  await handlePrune(postReq("taskId=%2312&project=beta&confirm=1") as never, resSpy() as never, new URL("http://x/prune"), bundle.deps);
+  assert.deepEqual(
+    bundle.calls.map((c) => c.args),
+    [["prune", "#12"]],
+  );
 });

@@ -122,3 +122,14 @@ test("POST /answer answers 404 on an unknown project and starts no child", async
   assert.equal(res.statusCode, 404);
   assert.equal(calls.length, 0);
 });
+
+test("POST /answer answers 400 on a taskId that is not an issue token and starts no child (#524)", async () => {
+  const { res, calls } = await answerWith("taskId=--config&text=hi&project=beta");
+  assert.equal(res.statusCode, 400);
+  assert.equal(calls.length, 0);
+});
+
+test("POST /answer passes a `#`-prefixed issue id through to the child unchanged (#524)", async () => {
+  const { calls } = await answerWith("taskId=%23201&text=hi&project=beta");
+  assert.deepEqual(calls[0].args, ["answer", "#201", "hi"]);
+});

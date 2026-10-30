@@ -15,6 +15,7 @@ import {
   githubMarkPendingVerify,
   githubTracker,
   GITHUB_TRACKER_LABELS,
+  withRetry,
 } from "./github.ts";
 import { Refusal } from "./refusal.ts";
 import { issueStateFromTask } from "./dashboard-model.ts";
@@ -892,4 +893,61 @@ test("gh kills a call that runs past its timeout and rejects — a stalled gh ne
     await assert.rejects(gh([], { ...GH_LIMITS, timeout: 200 }));
     assert.ok(Date.now() - started < 5000, `took ${Date.now() - started} ms`);
   });
+});
+
+/** A `run` that rejects its first `failures` calls, then resolves "ok"; plus a recording `sleep`. */
+function flakyRun(failures: number) {
+  const state = { calls: 0, waits: [] as number[] };
+  const run = async (): Promise<string> => {
+    state.calls++;
+    if (state.calls <= failures) throw new Error(`attempt ${state.calls} failed`);
+    return "ok";
+  };
+  const sleep = async (ms: number) => {
+    state.waits.push(ms);
+  };
+  return { run, sleep, state };
+}
+
+const within = (ms: number, lo: number, hi: number) => assert.ok(ms >= lo && ms < hi, `${ms} not in [${lo}, ${hi})`);
+
+test("withRetry retries a rejected read and resolves with the attempt that succeeds, backing off ~1 s then ~2 s", async () => {
+  const { run, sleep, state } = flakyRun(2);
+
+  assert.equal(await withRetry(run, sleep)(["issue", "view", "1"]), "ok");
+
+  assert.equal(state.calls, 3);
+  assert.equal(state.waits.length, 2);
+  within(state.waits[0], 500, 1500);
+  within(state.waits[1], 1000, 3000);
+});
+
+test("withRetry gives up after 4 attempts and rejects with the last attempt's error", async () => {
+  const { run, sleep, state } = flakyRun(Infinity);
+
+  await assert.rejects(withRetry(run, sleep)([]), /attempt 4 failed/);
+
+  assert.equal(state.calls, 4);
+  assert.equal(state.waits.length, 3);
+  within(state.waits[2], 2000, 6000);
+});
+
+test("withRetry never retries or sleeps on a call that resolves", async () => {
+  const { run, sleep, state } = flakyRun(0);
+
+  assert.equal(await withRetry(run, sleep)([]), "ok");
+
+  assert.equal(state.calls, 1);
+  assert.deepEqual(state.waits, []);
+});
+
+test("withRetry scales each backoff by the random factor — 0.5x at the floor, just under 1.5x at the top", async () => {
+  for (const [random, first] of [
+    [() => 0, 500],
+    [() => 0.999, 1499],
+  ] as const) {
+    const { run, sleep, state } = flakyRun(1);
+    await withRetry(run, sleep, random)([]);
+    assert.equal(Math.round(state.waits[0]), first);
+  }
 });

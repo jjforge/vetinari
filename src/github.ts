@@ -20,6 +20,31 @@ export const GH_LIMITS = { timeout: 60_000, maxBuffer: 64 * 1024 * 1024 };
 export const gh = async (args: string[], limits: { timeout: number; maxBuffer: number } = GH_LIMITS): Promise<string> =>
   (await execFileAsync("gh", args, { encoding: "utf8", ...limits })).stdout;
 
+/** A real `setTimeout` sleep — `withRetry`'s and `githubTracker`'s default between attempts. */
+const sleepMs = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Wraps a `gh` runner so a rejected call is retried up to 3 times (4 attempts) before
+ * rejecting with the last attempt's error (#560). The wait before retry n is
+ * `1000 · 2^(n-1)` ms scaled by a random factor in [0.5, 1.5) — about 1 s, 2 s, 4 s — so
+ * one transient failure (a 5xx, a dropped connection) no longer fails planning outright.
+ * Any rejection is retried, so wrap only idempotent reads: a retried `issue create` can
+ * double-file, which is why the write seams take the bare runner. `sleep`/`random` are
+ * injected only so the backoff can be tested without waiting.
+ */
+export const withRetry =
+  (run: (args: string[]) => Promise<string>, sleep: (ms: number) => Promise<void> = sleepMs, random: () => number = Math.random) =>
+  async (args: string[]): Promise<string> => {
+    for (let retry = 1; ; retry++) {
+      try {
+        return await run(args);
+      } catch (err) {
+        if (retry > 3) throw err;
+        await sleep(1000 * 2 ** (retry - 1) * (0.5 + random()));
+      }
+    }
+  };
+
 /** The default repo deriver every shipped resolver falls back to when no explicit
  * `owner/repo` is wired: the same live read of the project's `origin` remote that
  * `prune`/`graft` use (#338). */

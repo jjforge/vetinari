@@ -60,10 +60,10 @@ export function formatStatusLine(status: CampaignStatus): string {
   }
 
   const parts: string[] = [];
-  // A pruned wave is out of the plan, so the position and total count only the live waves.
-  const waves = liveWaves(status);
-  const running = waves.findIndex((wave) => wave.status === "running");
-  if (running >= 0) parts.push(`wave ${running + 1}/${waves.length}`);
+  // A pruned wave is out of the plan, so it is never the running one; but the wave is numbered
+  // by its display index over every display wave, as the dashboard and event log number it.
+  const running = liveWaves(status).find((wave) => wave.status === "running");
+  if (running) parts.push(`wave ${running.index + 1}/${status.waves.length}`);
 
   const segs = COUNT_EMOJI.filter(([status]) => counts.get(status)).map(([status, emoji]) => `${emoji}${counts.get(status)}`);
   if (segs.length) parts.push(segs.join(" "));

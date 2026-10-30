@@ -97,7 +97,8 @@ export interface StatusWave {
 }
 
 /** The campaign's display waves minus its pruned waves ({@link StatusWave.pruned}) — what every
- * fold, count, lookup and index over the waves reads, so a wave a prune emptied never counts. */
+ * fold, count and lookup over the waves reads, so a wave a prune emptied never counts. A wave's
+ * number is still its {@link StatusWave.index} over every display wave, never its position here. */
 export const liveWaves = (status: Pick<CampaignStatus, "waves">): StatusWave[] => status.waves.filter((wave) => !wave.pruned);
 
 export interface ParkedIssue {

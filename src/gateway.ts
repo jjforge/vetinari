@@ -659,14 +659,14 @@ export function redriveOnlyPark(status: CampaignStatus): ParkReason | undefined 
 export function formatGatewayStatus(statuses: CampaignStatus[]): string {
   const lines: string[] = ["📊 Gateway status"];
   for (const s of statuses) {
-    // A pruned wave is out of the plan: it neither folds into the state nor counts toward the
-    // in-flight wave's position.
+    // A pruned wave is out of the plan, so it does not fold into the state; the in-flight wave
+    // is numbered by its display index, as the dashboard and event log number it.
     const waves = liveWaves(s);
     const state = campaignState(waves.map((w) => w.status));
-    const running = waves.findIndex((w) => w.status === "running");
+    const running = waves.find((w) => w.status === "running");
     lines.push(
       "",
-      running >= 0 ? `${s.project} · ${state.toUpperCase()} · wave ${running + 1} in flight` : `${s.project} · ${state.toUpperCase()}`,
+      running ? `${s.project} · ${state.toUpperCase()} · wave ${running.index + 1} in flight` : `${s.project} · ${state.toUpperCase()}`,
     );
     const counts = stateCounts(s);
     const countLine = STATE_ORDER.filter((k) => counts[k] > 0)

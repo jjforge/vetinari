@@ -833,7 +833,7 @@ test("formatGatewayStatus excludes pruned members from the per-state counts", ()
   assert.doesNotMatch(text, /unstarted/, "a pruned member left the plan and is not counted");
 });
 
-test("formatGatewayStatus leaves a pruned wave out of the campaign fold and the wave in flight", () => {
+test("formatGatewayStatus leaves a pruned wave out of the campaign fold but numbers the wave in flight by display index", () => {
   const prunedWave: StatusWave = {
     ...statusWave(0, "unstarted", [statusIssue({ issueNumber: "1", status: "unstarted", membership: "pruned" })]),
     pruned: true,
@@ -852,8 +852,8 @@ test("formatGatewayStatus leaves a pruned wave out of the campaign fold and the 
       waves: [prunedWave, statusWave(1, "running", [statusIssue({ issueNumber: "2", status: "running" })])],
     }),
   ]);
-  // The running wave is the first wave of the plan once the pruned wave drops out.
-  assert.match(running, /alpha · RUNNING · wave 1 in flight/);
+  // The running wave keeps its display index, the number the dashboard and event log give it.
+  assert.match(running, /alpha · RUNNING · wave 2 in flight/);
 });
 
 test("formatGatewayStatus reports when no served project has anything parked", () => {

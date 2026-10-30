@@ -249,6 +249,12 @@ export interface CampaignPlan extends WavePlan {
    * waived (and on a one-issue selection, which resolves no file-sets).
    */
   waived?: Record<string, number>;
+  /**
+   * each scheduled ticket's fileKeys exactly as the partition judged collisions on (less
+   * any waived files), so the report's lower bound and most-shared files match the waves.
+   * Absent on a one-issue selection, which resolves no file-sets.
+   */
+  fileKeys?: Record<string, string[]>;
 }
 
 /** A fileKey is bare — carries no path, only a basename — when it has no separator:
@@ -519,6 +525,30 @@ export function waveArgs(plan: WavePlan): string {
   return plan.waves.map((wave) => `"${wave.join(" ")}"`).join(" ");
 }
 
+/** The number of dependency layers the placements form: the tickets in the longest
+ *  in-set blocker chain. Placements list every blocker in an earlier wave, so one pass. */
+function dependencyDepth(placements: Placement[]): number {
+  const depth = new Map<string, number>();
+  for (const p of placements) depth.set(p.id, 1 + Math.max(0, ...p.after.map((b) => depth.get(b) ?? 0)));
+  return Math.max(0, ...depth.values());
+}
+
+/**
+ * The file groups a plan cannot beat: per cited fileKey, how many tickets cite a key that
+ * collides with it (`keysCollide`) — every pair in a group collides, so each needs its own
+ * wave. A resolved path's group takes in bare cites of its basename; a bare key stands as
+ * its own group only when no resolved path of that basename is cited. Largest first; ties
+ * keep the order the keys were first cited.
+ */
+function fileGroups(fileKeys: Record<string, string[]>): { file: string; tickets: number }[] {
+  const keySets = Object.values(fileKeys);
+  const cited = [...new Set(keySets.flat())];
+  return cited
+    .filter((k) => !isBareKey(k) || !cited.some((o) => o !== k && keysCollide(o, k)))
+    .map((file) => ({ file, tickets: keySets.filter((keys) => keys.some((k) => keysCollide(k, file))).length }))
+    .sort((a, b) => b.tickets - a.tickets);
+}
+
 /**
  * A human-readable provenance report: each scheduled ticket with its wave and
  * why it is there, then every dropped ticket with the reason it cannot run
@@ -527,7 +557,8 @@ export function waveArgs(plan: WavePlan): string {
  * does not run it.
  */
 export function describePlan(
-  plan: WavePlan & Partial<Pick<CampaignPlan, "pruned" | "underspecified" | "filesetCheckSkipped" | "alreadyMerged" | "waived">>,
+  plan: WavePlan &
+    Partial<Pick<CampaignPlan, "pruned" | "underspecified" | "filesetCheckSkipped" | "alreadyMerged" | "waived" | "fileKeys">>,
 ): string {
   const scheduled = plan.placements.length;
   const pruned = plan.pruned ?? [];
@@ -551,6 +582,24 @@ export function describePlan(
       reasons.push(`spilled — shares a file with ${tags(p.sharesFilesWith)}`);
     }
     lines.push(`  wave ${p.wave}  #${p.id}  — ${reasons.join("; ")}`);
+  }
+
+  // How close the wave count is to the fewest possible, and which files hold it there:
+  // the larger of the dependency depth and the largest file group (a file wins a tie).
+  if (scheduled) {
+    const depth = dependencyDepth(plan.placements);
+    const groups = fileGroups(plan.fileKeys ?? {}).filter((g) => g.tickets >= 2);
+    const top = groups[0];
+    const waves = (n: number) => `${n} wave${n === 1 ? "" : "s"}`;
+    lines.push(
+      "",
+      top && top.tickets >= depth
+        ? `lower bound: ${waves(top.tickets)} — ${top.tickets} tickets share ${top.file} (dependency depth ${depth})`
+        : `lower bound: ${waves(depth)} — set by the dependency chain, ${depth} ticket${depth === 1 ? "" : "s"} deep` +
+            (top ? ` (largest file group: ${top.tickets} tickets share ${top.file})` : ""),
+    );
+    const mostShared = groups.filter((g) => g.tickets * 4 >= scheduled);
+    if (mostShared.length) lines.push("", "Most-shared files:", ...mostShared.map((g) => `  ${g.file}  ${g.tickets} tickets`));
   }
 
   if (plan.filesetCheckSkipped) {
@@ -677,6 +726,7 @@ export async function planCampaign(ids: string[], deps: CampaignPlanDeps): Promi
     underspecified,
     pruned,
     ...(Object.keys(waived).length ? { waived } : {}),
+    fileKeys: Object.fromEntries([...fileKeys].map(([id, keys]) => [id, [...keys]])),
   };
 }
 

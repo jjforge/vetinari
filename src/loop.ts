@@ -279,20 +279,23 @@ const usageOf = (r: any) =>
     { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 },
   );
 
-/** A finding seen again in this many runs of one campaign is a root cause to fix, not a ticket. */
+/** A finding seen again in this many distinct runs of one campaign is a root cause to fix, not a ticket. */
 const REPEAT_OFFENDER_RUNS = 3;
 
 /**
- * Tell the operator, once per campaign, when one issue's `finding-seen-again` count since the
- * latest `campaign-start` reaches `REPEAT_OFFENDER_RUNS`. Called under the findings lock right
- * after the row is logged, so parallel runs count in turn and exactly one sees the threshold.
+ * Tell the operator, once per campaign, when one issue has been seen again in `REPEAT_OFFENDER_RUNS`
+ * distinct runs (task ids) since the latest `campaign-start`; several sightings in one run count
+ * once. Called under the findings lock right after the row is logged, so parallel runs count in
+ * turn and exactly one — the first sighting from the run that reaches the threshold — notifies.
  */
 function notifyRepeatOffender(cfg: ResolvedConfig, taskId: string, ref: string) {
   const events = readEventLog(cfg);
-  const seen = events
+  const earlier = events
     .slice(events.findLastIndex((e) => e.event === "campaign-start") + 1)
-    .filter((e: any) => e.event === "finding-seen-again" && e.url === ref).length;
-  if (seen !== REPEAT_OFFENDER_RUNS) return;
+    .filter((e: any) => e.event === "finding-seen-again" && e.url === ref)
+    .slice(0, -1);
+  if (earlier.some((e: any) => e.taskId === taskId)) return;
+  if (new Set(earlier.map((e: any) => e.taskId)).size + 1 !== REPEAT_OFFENDER_RUNS) return;
   // A tracker ref is an issue number or its url; the notice names it by number either way.
   const number = ref.match(/(\d+)\/?$/)?.[1] ?? ref;
   enqueueOutbound(

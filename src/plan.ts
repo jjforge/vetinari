@@ -26,9 +26,10 @@ export interface Placement {
   /** its in-set open blockers — all in earlier waves; empty in wave 0. */
   after: string[];
   /**
-   * the earlier tickets in this ticket's dependency layer it shares a file with
-   * — the crossover that spilled it into a later sub-wave. Empty (or absent
-   * before `partitionWaves`) when no file collision moved it.
+   * the already-placed tickets it shares a file with in the waves from its floor
+   * (the wave after its last in-set blocker, or wave 0) up to its own — the
+   * crossover that spilled it past its floor. Empty (or absent on a `layerWaves`
+   * plan) when it landed at its floor.
    */
   sharesFilesWith?: string[];
   /**
@@ -264,63 +265,81 @@ const disjoint = (a: Set<string>, b: Set<string>) => {
 };
 
 /**
- * Split each dependency layer of a `layerWaves` plan into file-disjoint sub-waves,
- * so no two tickets in a wave touch the same file (user story 5). Cross-layer pairs
- * are already serialized by the DAG, so crossover only has to be resolved *within* a
- * layer.
- *
- * Greedy first-fit: walk the layer in order and drop each ticket into the earliest
- * sub-wave whose fileKeys none of its own collide with; if every existing sub-wave
- * collides, it spills into a new one. Spilling can add a wave or two — the intended
- * trade for a wave that never collides at integration. Collisions are judged by
- * fileKey (`fileKeysOf`) — a resolved path, or a bare basename for an ambiguous or
- * bare cite — never by the raw cited path.
- *
- * A ticket with no known fileKeys (empty set) collides with nothing and stays on
- * the frontier of its layer. The DAG ordering is preserved: a ticket's blockers
- * sit in strictly earlier layers, hence in strictly earlier sub-waves.
+ * The one placement rule the planner and `applyGraft` share: put `id` into the
+ * earliest wave at or after `floor` whose fileKeys are disjoint from its own,
+ * appending a wave when none fits. Existing members are never moved. Grows `waves`
+ * and the parallel `waveKeys` in place and returns the wave it landed in.
  */
-export function partitionWaves(plan: WavePlan, fileKeysOf: Map<string, Set<string>>): WavePlan {
+function placeEarliestDisjoint(waves: string[][], waveKeys: Set<string>[], id: string, keys: Set<string>, floor: number): number {
+  let target = floor;
+  while (target < waves.length && !disjoint(waveKeys[target], keys)) target++;
+  while (waves.length <= target) {
+    waves.push([]);
+    waveKeys.push(new Set());
+  }
+  waves[target].push(id);
+  for (const k of keys) waveKeys[target].add(k);
+  return target;
+}
+
+/**
+ * Place a `layerWaves` plan's tickets into file-disjoint waves, so no two tickets in
+ * a wave touch the same file (user story 5), with no layer barrier: a dependent may
+ * share a wave with a ticket of an earlier dependency layer.
+ *
+ * Walk in dependency order: among the tickets whose in-set blockers are all placed,
+ * take the one that collides with the most others in the selection (ties keep `order`,
+ * the selection order), and place it by `placeEarliestDisjoint` from its floor — the
+ * wave after its last in-set blocker, or wave 0. Placing the most-colliding first
+ * keeps the colliders from each claiming a wave of their own late in the walk.
+ * Collisions are judged by fileKey (`keysCollide`); a ticket with no known fileKeys
+ * collides with nothing. The walk decides placement only: each wave, and
+ * `placements`, list ids in wave-then-`order` order.
+ */
+function placeByCollisions(plan: WavePlan, order: string[], fileKeysOf: Map<string, Set<string>>): WavePlan {
   const keysOf = (id: string) => fileKeysOf.get(id) ?? new Set<string>();
   const afterOf = new Map(plan.placements.map((p) => [p.id, p.after]));
+  const ids = order.filter((id) => afterOf.has(id));
+  const rank = new Map(ids.map((id, i) => [id, i]));
+  const collisions = new Map(ids.map((id) => [id, ids.filter((o) => o !== id && !disjoint(keysOf(o), keysOf(id))).length]));
 
   const waves: string[][] = [];
+  const waveKeys: Set<string>[] = [];
+  const waveOf = new Map<string, number>();
   const placements: Placement[] = [];
-  for (const layer of plan.waves) {
-    const subWaves: { ids: string[]; keys: Set<string> }[] = [];
-    for (const id of layer) {
-      const keys = keysOf(id);
+  for (let unplaced = ids; unplaced.length;) {
+    // `layerWaves` already refused a cycle, so some unplaced ticket is always ready.
+    const ready = unplaced.filter((id) => afterOf.get(id)!.every((b) => waveOf.has(b)));
+    const id = ready.reduce((best, c) => (collisions.get(c)! > collisions.get(best)! ? c : best));
+    unplaced = unplaced.filter((u) => u !== id);
 
-      let idx = subWaves.findIndex((sw) => disjoint(sw.keys, keys));
-      if (idx === -1) {
-        idx = subWaves.push({ ids: [], keys: new Set() }) - 1;
+    const keys = keysOf(id);
+    const floor = Math.max(0, ...afterOf.get(id)!.map((b) => waveOf.get(b)! + 1));
+    const wave = placeEarliestDisjoint(waves, waveKeys, id, keys, floor);
+    waveOf.set(id, wave);
+
+    // Why it did not land at its floor: the already-placed tickets in the waves from
+    // its floor up to its own that it shares a file with. Empty when it landed there.
+    const sharesFilesWith = ids.filter((prior) => {
+      const w = waveOf.get(prior);
+      return prior !== id && w !== undefined && w >= floor && w < wave && !disjoint(keysOf(prior), keys);
+    });
+
+    const byFile = new Map<string, string[]>();
+    for (const prior of sharesFilesWith) {
+      for (const k of keys) {
+        if (![...keysOf(prior)].some((pk) => keysCollide(k, pk))) continue;
+        byFile.set(k, [...(byFile.get(k) ?? []), prior]);
       }
-      const slot = subWaves[idx];
-      slot.ids.push(id);
-      for (const k of keys) slot.keys.add(k);
-
-      // Why it landed here and not earlier: the already-placed tickets in strictly
-      // earlier sub-waves it shares a file with. Empty when it stayed on the
-      // frontier — greedy first-fit means every earlier sub-wave holds a collider.
-      const sharesFilesWith = subWaves
-        .slice(0, idx)
-        .flatMap((sw) => sw.ids)
-        .filter((prior) => !disjoint(keysOf(prior), keys));
-
-      const byFile = new Map<string, string[]>();
-      for (const prior of layer.filter((l) => sharesFilesWith.includes(l))) {
-        for (const k of keys) {
-          if (![...keysOf(prior)].some((pk) => keysCollide(k, pk))) continue;
-          byFile.set(k, [...(byFile.get(k) ?? []), prior]);
-        }
-      }
-      const sharedFiles = [...byFile].map(([file, ids]) => ({ file, with: ids })).sort((a, b) => b.with.length - a.with.length);
-
-      placements.push({ id, wave: waves.length + idx, after: afterOf.get(id) ?? [], sharesFilesWith, sharedFiles });
     }
-    for (const sw of subWaves) waves.push(sw.ids);
+    const sharedFiles = [...byFile].map(([file, ids]) => ({ file, with: ids })).sort((a, b) => b.with.length - a.with.length);
+
+    placements.push({ id, wave, after: afterOf.get(id)!, sharesFilesWith, sharedFiles });
   }
 
+  const byInput = (a: string, b: string) => rank.get(a)! - rank.get(b)!;
+  for (const wave of waves) wave.sort(byInput);
+  placements.sort((a, b) => a.wave - b.wave || byInput(a.id, b.id));
   return { waves, placements, unreachable: plan.unreachable, excluded: plan.excluded };
 }
 
@@ -406,17 +425,8 @@ export function applyGraft(
       const bw = waveOf.get(b);
       if (bw !== undefined) earliest = Math.max(earliest, bw + 1);
     }
-    const keys = keysOf(id);
     // `earliest` is at least `firstFree` (>= 0), so it never indexes a pinned wave.
-    let target = earliest;
-    while (target < result.length && !disjoint(waveKeys[target], keys)) target++;
-    while (result.length <= target) {
-      result.push([]);
-      waveKeys.push(new Set());
-    }
-    result[target].push(id);
-    for (const k of keys) waveKeys[target].add(k);
-    waveOf.set(id, target);
+    waveOf.set(id, placeEarliestDisjoint(result, waveKeys, id, keysOf(id), earliest));
     grafted.push(id);
   }
 
@@ -644,7 +654,7 @@ export async function planCampaign(ids: string[], deps: CampaignPlanDeps): Promi
   }
 
   const fileKeys = new Map(survivorPlan.placements.map((p) => [p.id, new Set(sets.get(p.id)?.files ?? [])]));
-  const partitioned = partitionWaves(survivorPlan, fileKeys);
+  const partitioned = placeByCollisions(survivorPlan, uniqueOrder(ids), fileKeys);
 
   return {
     ...partitioned,

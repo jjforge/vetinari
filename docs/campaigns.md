@@ -31,11 +31,12 @@ The planner is the safety net: it refuses to guess. See
 The planner enforces both — the `blocked_by` graph alone gives neither:
 
 1. **Maintain the ticket DAG** — a ticket's wave comes after every open
-   in-campaign blocker's wave (waves are the DAG's topological layers). A closed
+   in-campaign blocker's wave. A closed
    blocker does not gate; a blocker outside the selection makes the ticket
    unreachable, so it is reported and dropped with its dependents.
 2. **No two tickets in one wave edit the same file** — crossover is not in the
-   DAG, so each layer is partitioned into **file-disjoint** sub-waves, collision
+   DAG, so each ticket goes into the earliest wave after its blockers that is
+   **file-disjoint** from it — the most-colliding tickets placed first — collision
    judged by **resolved path** (a bare or ambiguous cite, which names no one path,
    collides with every file of its name). Each ticket declares its file-set with an explicit
    marker **line** — `Touches:`/`Files:` for files it edits, `Creates:` for files

@@ -41,7 +41,7 @@ export type {
 export { computePrune, restrictBlockers } from "./prune.ts";
 export { formatContextLine, formatStatusLine, runStatusLine, trimModelName } from "./statusline.ts";
 export type { PruneResult, BlockedByOf, RestrictedBlockers } from "./prune.ts";
-export { layerWaves, partitionWaves, waveArgs, describePlan, planCampaign, underspecifiedPromptFor } from "./plan.ts";
+export { layerWaves, waveArgs, describePlan, planCampaign, underspecifiedPromptFor } from "./plan.ts";
 export type {
   WavePlan,
   Placement,

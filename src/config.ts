@@ -383,6 +383,13 @@ export interface GateSpec {
    * Logged on each `gate-result`, so the dashboard reads it without loading this config.
    */
   budgetSeconds?: number;
+  /**
+   * Also run this gate on the base after each wave member's merge, not only once the whole wave
+   * has merged. A red check undoes just that member's merge and retries it as for a merge
+   * collision, so a co-wave break is attributed to one member rather than parking the wave `red-base`.
+   * Suits a fast check (a typecheck or lint that compiles the tests); the full gate still runs at wave end.
+   */
+  perMerge?: boolean;
 }
 
 export interface MountSpec {
@@ -815,6 +822,10 @@ export async function loadConfig(explicitPath?: string): Promise<ResolvedConfig>
     if (c[required] == null) throw new Refusal(`${path}: missing required field "${required}"`);
   }
   if (!c.gates.length) throw new Refusal(`${path}: "gates" is empty — the orchestrator would verify nothing`);
+  for (const g of c.gates) {
+    if (g.perMerge !== undefined && typeof g.perMerge !== "boolean")
+      throw new Refusal(`${path}: gate "${g.label ?? g.cmd}": "perMerge" must be true or false, got ${JSON.stringify(g.perMerge)}`);
+  }
   // Shape only: there is no tree here to check an entry against, and a command that never
   // plans must not refuse over one — the directory check lives in `waiveFileSet`.
   if (c.waivedFiles !== undefined && !(Array.isArray(c.waivedFiles) && c.waivedFiles.every((f) => typeof f === "string")))

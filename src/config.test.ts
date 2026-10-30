@@ -809,6 +809,22 @@ test("loadConfig refuses a waivedFiles that is not a string[], and accepts any s
   assert.deepEqual(cfg.waivedFiles, ["DESIGN.md", "src"]);
 });
 
+test("loadConfig refuses a non-boolean perMerge on a gate, naming the gate, and accepts a boolean (#617)", async () => {
+  const withGates = (gates: string) => CONFIG_BODY.replace(`gates: [{ cmd: "true" }],`, `gates: ${gates},`);
+  const cfgPath = writeConfig(
+    scratch(),
+    "vetinari/config.mts",
+    withGates(`[{ cmd: "true" }, { cmd: "make lint", label: "lint", perMerge: "yes" }]`),
+  );
+  await assert.rejects(loadConfig(cfgPath), (err: Error) => {
+    assert.ok(err instanceof Refusal);
+    assert.equal(err.message, `${cfgPath}: gate "lint": "perMerge" must be true or false, got "yes"`);
+    return true;
+  });
+  const cfg = await loadConfig(writeConfig(scratch(), "vetinari/config.mts", withGates(`[{ cmd: "make lint", perMerge: true }]`)));
+  assert.equal(cfg.gates[0].perMerge, true);
+});
+
 const withContainerShare = (share: string) => CONFIG_BODY.replace("fetchTask:", `containerShare: ${share},\n  fetchTask:`);
 
 test("loadConfig refuses an unknown containerShare tier, naming the field and the value", async () => {

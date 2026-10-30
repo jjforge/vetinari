@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import type { ResolvedConfig } from "./config.ts";
+import type { GateSpec, ResolvedConfig } from "./config.ts";
 import type { Logger } from "./log.ts";
 import { runGates } from "./gate.ts";
 import { makeSandbox } from "./sandbox.ts";
@@ -93,18 +93,21 @@ export function findMergeCommit(cfg: { baseBranch: string; branchPrefix: string 
 }
 
 /**
- * A green whose merge collided with the base — `git merge` stopped with unmerged paths (design §6).
+ * A green whose merge collided with the base — `git merge` stopped with unmerged paths, or the
+ * merge went through but a `perMerge` gate went red on it and the merge was undone (design §6).
  * `integrateGreens` reports it and parks nothing; the campaign re-admits it for one retry by its own
  * agent, and only a second collision parks it (`parkMergeConflict`).
  */
 export interface MergeConflict {
   taskId: string;
-  /** the paths git left unmerged — what the retry's prompt names. */
+  /** the paths git left unmerged — what the retry's prompt names. Empty for a failed check. */
   paths: string[];
   /** the base commit the retry merges into its branch: HEAD once this pass's merges have landed. */
   base: string;
-  /** the tail of the merge output, the `detail` a park would carry. */
+  /** the tail of the merge output (or of the failed check's output), the `detail` a park would carry. */
   detail: string;
+  /** set when a per-merge check failed rather than the merge: that gate's label, or its `cmd`. */
+  gate?: string;
 }
 
 export interface IntegrateResult {
@@ -157,19 +160,27 @@ export function parkMergeConflict(cfg: ResolvedConfig, conflict: MergeConflict):
     reason: "conflict",
     detail: conflict.detail,
     branch,
-    question: `Merge conflict on ${branch}. ${recoverySentence(PARK_RECOVERY.conflict, conflict.taskId)}`,
+    question: conflict.gate
+      ? `Merge of ${branch} fails ${conflict.gate} — fix it on the base, then redrive.`
+      : `Merge conflict on ${branch}. ${recoverySentence(PARK_RECOVERY.conflict, conflict.taskId)}`,
   });
   cfg.log.log("parked", { taskId: conflict.taskId, reason: "conflict", detail: conflict.detail });
 }
 
 /**
- * The merged-base gate, injected so `integrateGreens`'s merge/conflict control flow
- * is unit-testable without a Docker sandbox. The default runs the real gate.
+ * The merged-base gate and the per-merge check, injected so `integrateGreens`'s merge/conflict
+ * control flow is unit-testable without a Docker sandbox. The defaults run the real gates.
  */
 export interface IntegrateDeps {
   gate: (cfg: ResolvedConfig, index?: number) => Promise<{ green: boolean; report: string }>;
+  /**
+   * Run the `perMerge` gates (`flagged`) on the base just after one member's merge, `failed`
+   * naming the red one. Optional so a test that flags no gate may omit it; absent falls back to
+   * the real check.
+   */
+  perMergeGate?: (cfg: ResolvedConfig, flagged: GateSpec[]) => Promise<{ green: boolean; report: string; failed?: GateSpec }>;
 }
-const defaultIntegrateDeps: IntegrateDeps = { gate: gateMergedBase };
+const defaultIntegrateDeps: IntegrateDeps = { gate: gateMergedBase, perMergeGate: gatePerMerge };
 
 /**
  * Merge each green task's branch into the checked-out base, then prove the COMBINED
@@ -189,6 +200,15 @@ const defaultIntegrateDeps: IntegrateDeps = { gate: gateMergedBase };
  * a conflict the agent could resolve: any merge in progress is aborted, the member is
  * logged `failed` with the merge output and returned in `mergeFailed`, and its wave
  * resolves as for any failed member. It is never retried or parked.
+ *
+ * The **per-merge check**: when a gate is flagged `perMerge`, each merge that succeeds is
+ * checked by running the flagged gates on the base (`deps.perMergeGate`). A red check undoes
+ * that merge only — `git reset --keep` to the commit recorded just before it, which is the
+ * newest commit then, so it never resets past the member being integrated and keeps the
+ * operator's unrelated local edits — and the member is returned in `conflicts` with no paths,
+ * the failing `gate` and its output tail, for the same one retry as a conflict. `merged` is
+ * logged only after a green check. A green already on the base gets no check and no undo (its
+ * merge may no longer be the newest commit); with a flagged gate it forces the merged-base gate.
  *
  * A **red merged base** has no single culprit, so it is NOT rolled back either: the
  * greens stay merged, the branches are left intact, and the result carries `parked` so
@@ -213,6 +233,8 @@ export async function integrateGreens(
   const alreadyMerged: string[] = [];
   const collided: Omit<MergeConflict, "base">[] = [];
   const mergeFailed: string[] = [];
+  const flagged = cfg.gates?.filter((g) => g.perMerge) ?? [];
+  const perMergeGate = deps.perMergeGate ?? gatePerMerge;
   for (const taskId of greens) {
     const branch = `${cfg.branchPrefix}${taskId}`;
     // Redrive idempotency + hand-merge recognition (design §7): a green already banked on the
@@ -227,6 +249,7 @@ export async function integrateGreens(
       alreadyMerged.push(taskId);
       continue;
     }
+    const preMerge = git(["rev-parse", "HEAD"]);
     const r = gitTry(["merge", "--no-ff", branch, "-m", `campaign: merge ${branch}`]);
     if (r.code !== 0) {
       // Attributable failure (design §6): abort ONLY this merge — a `reset --hard` to the wave
@@ -244,6 +267,19 @@ export async function integrateGreens(
       }
       continue;
     }
+    if (flagged.length) {
+      const check = await perMergeGate(cfg, flagged);
+      if (!check.green) {
+        // Attributable to this member: undo ONLY its merge — the newest commit, so this never
+        // resets past it. `--keep`, never `--hard`: integration runs in the operator's checkout,
+        // and `--keep` keeps unrelated local edits (refusing rather than clobbering them).
+        const undo = gitTry(["reset", "--keep", preMerge]);
+        if (undo.code !== 0) throw new Error(`could not undo the merge of ${branch}: ${undo.stderr.trim()}`);
+        const failed = check.failed ?? flagged[0];
+        collided.push({ taskId, paths: [], gate: failed.label ?? failed.cmd, detail: check.report.split("\n").slice(-40).join("\n") });
+        continue;
+      }
+    }
     cfg.log.log("merged", { taskId, branch });
     clearParked(cfg, taskId);
     merged.push(taskId);
@@ -255,8 +291,10 @@ export async function integrateGreens(
 
   // Gate the merged base when something new merged, OR when re-entering a red-base-parked
   // wave (`regate`, design §7) where nothing new merges but the base must be re-proven: a
-  // fix-forward may have turned it green, or it may still be red and re-park.
-  if (merged.length || opts.regate) {
+  // fix-forward may have turned it green, or it may still be red and re-park. With a `perMerge`
+  // gate, an already-merged green forces it too: a crash may have left its merge on the base
+  // unchecked, and that merge is never undone (it may no longer be the newest commit).
+  if (merged.length || opts.regate || (flagged.length && alreadyMerged.length)) {
     const { green, report } = await deps.gate(cfg, index);
     if (!green) {
       // Emergent, unattributable failure (ADR 0013): every green passed alone, the
@@ -344,6 +382,22 @@ export function collectWaveChangelog(
   });
   log.log("campaign-changelog-collected", { wave: waveIndex, collected, nearMisses });
   return { collected, committed: true, nearMisses };
+}
+
+/**
+ * Run the `perMerge` gates against the base just after one member's merge — the per-merge check.
+ * Like `gateMergedBase` it gates a throwaway sandbox cut from HEAD, but it logs no `base-gate`:
+ * that event stays the full gate against a wave's merged base.
+ */
+async function gatePerMerge(cfg: ResolvedConfig, flagged: GateSpec[]): Promise<{ green: boolean; report: string; failed?: GateSpec }> {
+  const sbx = await makeSandbox(cfg, "campaign-integrate");
+  try {
+    return await runGates({ ...cfg, gates: flagged }, sbx, { all: true });
+  } finally {
+    await sbx.close();
+    gitTry(["branch", "-D", `${cfg.branchPrefix}campaign-integrate`]);
+    gitTry(["worktree", "prune"]);
+  }
 }
 
 /**

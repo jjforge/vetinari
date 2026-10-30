@@ -4,7 +4,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ResolvedConfig } from "./config.ts";
+import type { GateSpec, ResolvedConfig } from "./config.ts";
 import {
   applyTidy,
   collectWaveChangelog,
@@ -518,6 +518,133 @@ test("integrateGreens with regate set and a green base does not park — the fix
     );
     assert.equal(gateRan, true, "the base is re-gated");
     assert.equal(result.parked, undefined, "a green base clears the red-base hold");
+  } finally {
+    process.chdir(prevCwd);
+  }
+});
+
+// ── the per-merge check (#617) ──
+// A gate flagged `perMerge` runs on the base after each member's merge; a red check undoes only
+// that merge and hands the member back as a check-failure collision for #624's retry.
+
+/** A per-merge check over the checkout that is red only once both a.txt and b.txt carry a green's edit. */
+const bothEditedCheck = (dir: string, calls: GateSpec[][]) => async (_cfg: ResolvedConfig, flagged: GateSpec[]) => {
+  calls.push(flagged);
+  const both = readFileSync(join(dir, "a.txt"), "utf8") === "A\n" && readFileSync(join(dir, "b.txt"), "utf8") === "B\n";
+  return both ? { green: false, report: "$ make lint\nb.txt: healthClass redeclared", failed: flagged[0] } : { green: true, report: "" };
+};
+
+test("integrateGreens undoes only the merge whose per-merge check is red and reports it as a check-failure collision (#617)", async () => {
+  const { dir, git } = repoWithCleanGreens();
+  const log = memoryLogger();
+  const lint = { cmd: "make lint", label: "lint", perMerge: true };
+  const cfg = {
+    branchPrefix: "agent/",
+    baseBranch: "main",
+    parkedDir: join(dir, "parked"),
+    gates: [{ cmd: "npm test" }, lint],
+    log,
+  } as unknown as ResolvedConfig;
+  // An unrelated uncommitted edit in the operator's checkout.
+  writeFileSync(join(dir, "notes.txt"), "seed notes\n");
+  git(["add", "notes.txt"]);
+  git(["commit", "-qm", "notes"]);
+  writeFileSync(join(dir, "notes.txt"), "operator's local edit\n");
+  const prevCwd = process.cwd();
+  process.chdir(dir);
+  const calls: GateSpec[][] = [];
+  const baseGates: number[] = [];
+  try {
+    const result = await integrateGreens(cfg, ["A", "B"], {
+      gate: async () => {
+        baseGates.push(1);
+        return { green: true, report: "" };
+      },
+      perMergeGate: bothEditedCheck(dir, calls),
+    });
+
+    // The check ran after each merge, over the flagged gates only.
+    assert.deepEqual(calls, [[lint], [lint]]);
+    // A stays merged; B's merge is undone — HEAD is B's pre-merge commit, A's merge.
+    assert.deepEqual(result.merged, ["A"]);
+    assert.equal(headSubject(dir), "campaign: merge agent/A");
+    assert.equal(readFileSync(join(dir, "b.txt"), "utf8"), "base\n");
+    assert.deepEqual(result.conflicts, [
+      { taskId: "B", paths: [], gate: "lint", detail: "$ make lint\nb.txt: healthClass redeclared", base: headSha(dir) },
+    ]);
+    // The undo kept the operator's local edit.
+    assert.equal(readFileSync(join(dir, "notes.txt"), "utf8"), "operator's local edit\n");
+    // B's branch is preserved for the retry; the end-of-wave gate still ran once.
+    assert.equal(git(["branch", "--list", "agent/B"]).length > 0, true);
+    assert.equal(baseGates.length, 1);
+  } finally {
+    process.chdir(prevCwd);
+  }
+  // The log never says `merged` for the undone merge.
+  assert.deepEqual(
+    log.events.filter((e) => e.event === "merged").map((e) => (e as any).taskId),
+    ["A"],
+  );
+});
+
+test("integrateGreens runs no per-merge check when no gate is flagged perMerge (#617)", async () => {
+  const { dir } = repoWithCleanGreens();
+  const log = memoryLogger();
+  const cfg = {
+    branchPrefix: "agent/",
+    baseBranch: "main",
+    parkedDir: join(dir, "parked"),
+    gates: [{ cmd: "make lint" }],
+    log,
+  } as unknown as ResolvedConfig;
+  const prevCwd = process.cwd();
+  process.chdir(dir);
+  const calls: GateSpec[][] = [];
+  try {
+    const result = await integrateGreens(cfg, ["A", "B"], {
+      gate: async () => ({ green: true, report: "" }),
+      perMergeGate: bothEditedCheck(dir, calls),
+    });
+    assert.deepEqual(result.merged, ["A", "B"]);
+    assert.deepEqual(calls, []);
+  } finally {
+    process.chdir(prevCwd);
+  }
+});
+
+test("integrateGreens on a redrive whose only green is already on the base runs no per-merge check and no undo, but runs the end-of-wave gate (#617)", async () => {
+  // A crash between A's merge and its check left the merge on the base, unchecked.
+  const { dir } = repoWithOneBankedGreen();
+  const log = memoryLogger();
+  const lint = { cmd: "make lint", perMerge: true };
+  const cfg = {
+    branchPrefix: "agent/",
+    baseBranch: "main",
+    parkedDir: join(dir, "parked"),
+    gates: [lint],
+    log,
+  } as unknown as ResolvedConfig;
+  const prevCwd = process.cwd();
+  process.chdir(dir);
+  const before = headSha(dir);
+  const calls: GateSpec[][] = [];
+  let baseGates = 0;
+  try {
+    const result = await integrateGreens(cfg, ["A"], {
+      gate: async () => {
+        baseGates++;
+        return { green: false, report: "a.txt: healthClass redeclared" };
+      },
+      perMergeGate: async (_c, flagged) => {
+        calls.push(flagged);
+        return { green: false, report: "red", failed: flagged[0] };
+      },
+    });
+    assert.deepEqual(result.alreadyMerged, ["A"]);
+    assert.deepEqual(calls, [], "no per-merge check for a merge that may no longer be the newest commit");
+    assert.equal(headSha(dir), before, "nothing undone");
+    assert.equal(baseGates, 1, "the end-of-wave full gate still checks the tree");
+    assert.equal(result.parked?.reason, "red-base");
   } finally {
     process.chdir(prevCwd);
   }

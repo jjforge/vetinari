@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ResolvedConfig } from "./config.ts";
+import type { GateSpec, ResolvedConfig } from "./config.ts";
 import { loggerForRun } from "./log.ts";
 import { readEventLog } from "./event-log.ts";
 import { answerParked, clearParked, listOutbox, listParked } from "./state.ts";
@@ -13,6 +13,7 @@ import { campaign, type CampaignDeps, type RunSpawner, type StopSignal } from ".
 import { collectWaveChangelog, currentBranch, integrateGreens } from "./merge.ts";
 import { runGates } from "./gate.ts";
 import { buildStatus } from "./dashboard-status.ts";
+import { describeEvent } from "./dashboard-event-text.ts";
 import { inFlightRunning } from "./dashboard-live-tail.ts";
 import type { HostBudget } from "./host-slots.ts";
 import { makeLocalSandbox, type LocalAgentScript } from "./sandbox-local.ts";
@@ -154,11 +155,13 @@ const localCampaignDeps = (
       execFileSync("git", ["-C", dir, "worktree", "prune"], { stdio: "ignore" });
     }
   };
+  // The per-merge check (#617): the real runGates over the flagged gates, through the same local sandbox.
+  const perMergeGate = (c: ResolvedConfig, flagged: GateSpec[]) => mergedBaseGate({ ...c, gates: flagged });
   return {
     spawnRun,
     // Forward `index` and `opts` (the redrive re-gate flag) so integration behaves exactly as it
-    // does in production; only the gate's sandbox is swapped for the local one.
-    integrate: (c, greens, _deps, index, opts) => integrateGreens(c, greens, { gate: mergedBaseGate }, index, opts),
+    // does in production; only the gates' sandbox is swapped for the local one.
+    integrate: (c, greens, _deps, index, opts) => integrateGreens(c, greens, { gate: mergedBaseGate, perMergeGate }, index, opts),
     collectChangelog: collectWaveChangelog,
     currentBranch,
     grace: async () => {},
@@ -388,6 +391,80 @@ test("scenario 12: a red first-pass merged base outranks a collision — the wav
     assert.equal(stop.reason, "red-base");
     assert.deepEqual([...spawns].sort(), ["101", "102", "103"], "no retry was spawned");
     assert.equal(events.filter((e) => e.event === "re-admit").length, 0);
+  });
+});
+
+test("scenario 13: a co-wave build break is caught per member — only the second merge is undone, retried once with the check-failure prompt, then parked `conflict` (#617)", async () => {
+  const dir = seedRepo();
+  // Each green passes alone; a.txt and b.txt together fail the flagged check.
+  const clash = {
+    cmd: `if [ -f a.txt ] && [ -f b.txt ]; then echo "a.txt and b.txt clash"; exit 1; fi`,
+    label: "clash-check",
+    perMerge: true,
+  };
+  const cfg = repoCfg(dir, fakeTracker(), { gates: [{ cmd: "test -f README.md" }, clash] });
+  const retries: string[] = [];
+  const scriptFor =
+    (id: string): LocalAgentScript =>
+    (turn) => {
+      const text = retryPromptOf(turn);
+      // The retry reports done without fixing anything, so its merge fails the check again.
+      if (text.includes("clash-check")) {
+        retries.push(text);
+        return { signal: DONE, stdout: `<turn-summary>left ${id} as it was</turn-summary>` };
+      }
+      turn.write(id === "101" ? "a.txt" : "b.txt", `${id}\n`);
+      turn.commit(`implement ${id}`);
+      return { signal: DONE, stdout: `<turn-summary>implemented ${id}</turn-summary>` };
+    };
+  // An unrelated uncommitted edit in the operator's checkout.
+  writeFileSync(join(dir, "README.md"), "operator's local edit\n");
+
+  await inRepo(dir, async () => {
+    const outcome = await campaign(cfg, [["101", "102"]], host(dir), "clash", {}, localCampaignDeps(cfg, dir, scriptFor));
+    assert.equal(outcome, "parked", "the second failure parks the member and the campaign stops");
+
+    const events = readEventLog(cfg);
+    // 101 stays merged; 102's merge is undone both times, so the base sits on 101's merge.
+    assert.equal(gitOut(dir, ["log", "-1", "--format=%s", "base"]), "campaign: merge agent/101");
+    assert.equal(gitOut(dir, ["show", "base:a.txt"]), "101");
+    assert.deepEqual(
+      events.filter((e) => e.event === "merged").map((e: any) => e.taskId),
+      ["101"],
+      "no `merged` for an undone merge",
+    );
+    assert.equal(readFileSync(join(dir, "README.md"), "utf8"), "operator's local edit\n", "the undo kept the local edit");
+
+    // The re-admit carries the gate, its output tail, no paths, and the base it must merge.
+    const readmits = events.filter((e) => e.event === "re-admit") as any[];
+    assert.equal(readmits.length, 1);
+    assert.equal(readmits[0].taskId, "102");
+    assert.equal(readmits[0].reason, "conflict");
+    assert.equal(readmits[0].gate, "clash-check");
+    assert.match(readmits[0].detail, /a\.txt and b\.txt clash/);
+    assert.deepEqual(readmits[0].paths, []);
+    assert.equal(readmits[0].base, gitOut(dir, ["rev-parse", "base"]), "the base is the undone merge's pre-merge commit");
+    assert.equal(describeEvent(readmits[0]), "#102 retrying failed check — clash-check");
+
+    // The retried agent got the check-failure prompt: the gate, its output tail and the base commit.
+    assert.equal(retries.length, 1);
+    assert.match(retries[0], /fails clash-check/);
+    assert.match(retries[0], /a\.txt and b\.txt clash/);
+    assert.ok(retries[0].includes(readmits[0].base));
+
+    // The retry failed the check again: 102 parks `conflict` with the output and the gate's question.
+    const parks = events.filter((e) => e.event === "parked") as any[];
+    assert.deepEqual(
+      parks.map((e) => [e.taskId, e.reason]),
+      [["102", "conflict"]],
+    );
+    assert.match(parks[0].detail, /a\.txt and b\.txt clash/);
+    const record = listParked(cfg).find((r) => r.taskId === "102")!;
+    assert.equal(record.reason, "conflict");
+    assert.match(record.detail ?? "", /a\.txt and b\.txt clash/);
+    assert.equal(record.question, "Merge of agent/102 fails clash-check — fix it on the base, then redrive.");
+    assert.equal(gitOut(dir, ["branch", "--list", "agent/102"]), "agent/102", "the member's work is preserved");
+    assert.equal((events.find((e) => e.event === "campaign-parked") as any).reason, "conflict");
   });
 });
 

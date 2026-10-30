@@ -8,7 +8,7 @@ import { runGates } from "./gate.ts";
 import { readSlowGateLogs, slowGatesAtSettle } from "./slow-gates.ts";
 import { agentSelectionFor, makeSandbox } from "./sandbox.ts";
 import { branchHasCommits, collectWaveChangelog, currentBranch, integrateGreens, parkMergeConflict } from "./merge.ts";
-import { mergeConflictPrompt } from "./loop.ts";
+import { mergeConflictPrompt, perMergeCheckPrompt } from "./loop.ts";
 import {
   UNASKED_PARK_REASONS,
   clearParked,
@@ -1291,10 +1291,14 @@ export async function campaign(
         const retrySessions: Record<string, string> = {};
         const retryPrompts: Record<string, string> = {};
         for (const c of first.conflicts) {
-          cfg.log.log("re-admit", { taskId: c.taskId, reason: "conflict", paths: c.paths, base: c.base });
+          // A merge undone because a `perMerge` gate went red on it (#617) carries the gate and its output.
+          const check = c.gate ? { gate: c.gate, detail: c.detail } : {};
+          cfg.log.log("re-admit", { taskId: c.taskId, reason: "conflict", paths: c.paths, base: c.base, ...check });
           const sid = resumable ? sessions.get(normalize(c.taskId)) : undefined;
           if (sid) retrySessions[c.taskId] = sid;
-          retryPrompts[c.taskId] = mergeConflictPrompt(c.paths, c.base, cfg.baseBranch);
+          retryPrompts[c.taskId] = c.gate
+            ? perMergeCheckPrompt(c.gate, c.detail, c.base, cfg.baseBranch)
+            : mergeConflictPrompt(c.paths, c.base, cfg.baseBranch);
         }
         draining = true;
         outcomes = {

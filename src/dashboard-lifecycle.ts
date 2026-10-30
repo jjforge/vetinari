@@ -293,7 +293,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       // holds a slot again, so it is no longer a pending green and the live tail follows it.
       const taskId = normalize(String(e.taskId));
       pendingGreen.delete(taskId);
-      details.set(taskId, `Retrying a merge conflict — ${(e.paths ?? []).join(", ")}`);
+      details.set(taskId, e.gate ? `Retrying a failed check — ${e.gate}` : `Retrying a merge conflict — ${(e.paths ?? []).join(", ")}`);
     } else if (e.event === "merged" && e.taskId) {
       // The integrator landed this green on the base (design §2.1). Completion, and the
       // resolution of any earlier conflict hold or red-base hold on the same id.

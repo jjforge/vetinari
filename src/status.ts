@@ -17,6 +17,7 @@ import { handleGraft, handleGraftPreview } from "./dashboard-route-graft.ts";
 import { handleRedrive } from "./dashboard-route-redrive.ts";
 import { handleStop } from "./dashboard-route-stop.ts";
 import { handleHostLog } from "./dashboard-route-host-log.ts";
+import { handleHealthz } from "./dashboard-route-healthz.ts";
 import { handlePage } from "./dashboard-route-page.ts";
 import { hostLogger } from "./log.ts";
 
@@ -40,6 +41,7 @@ const routes: RouteHandler[] = [
   handleFeed,
   handleEvents,
   handleHostLog,
+  handleHealthz,
   handlePrunePreview,
   handleGraftPreview,
   handleAnswer,
@@ -97,6 +99,7 @@ export async function serveAllStatus(
     graftTimeoutMs?: number;
     startChild?: DashboardDeps["startChild"];
     childStartupMs?: number;
+    health?: DashboardDeps["health"];
   },
 ) {
   const deps: DashboardDeps = {
@@ -108,6 +111,7 @@ export async function serveAllStatus(
     graftTimeoutMs: opts.graftTimeoutMs ?? 60_000,
     startChild: opts.startChild ?? startChild,
     childStartupMs: opts.childStartupMs ?? 5_000,
+    health: opts.health,
   };
   const allowedHosts = (process.env.VETINARI_STATUS_ALLOWED_HOSTS ?? "")
     .split(",")

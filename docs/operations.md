@@ -215,6 +215,36 @@ question's message in Telegram and the gateway resumes that exact task; send
 `/status` for a text summary; send `prune <issue>` (or `prune <project> <issue>`
 when several campaigns share a bot) to preview and, on a `yes` reply, prune.
 
+**Checking it is alive.** The gateway's dashboard answers `GET /healthz` with
+when each of its loops last completed a pass — so a hung announce or poll loop
+shows up even while the process and dashboard stay up:
+
+```bash
+curl -s 127.0.0.1:8765/healthz
+```
+
+```json
+{
+  "stale": false,
+  "announce": { "lastTick": "2026-10-21T12:00:00.000Z", "stale": false },
+  "bots": [{ "bot": "123456789", "lastPoll": "2026-10-21T12:00:40.000Z", "stale": false }]
+}
+```
+
+- `announce.lastTick` — when the announce loop last finished a pass (announce
+  and outbox drain) without an error; `null` before the first.
+- `bots` — one entry per bot currently polled. `bot` is the bot's numeric id
+  (the token's part before the first `:`; the token itself is never shown).
+  `lastPoll` is when that loop's last long-poll returned — a failed poll counts,
+  so this reports a live loop, not a working token; `null` before the first.
+- A `stale` flag is set when a loop has not ticked for more than **3× its
+  interval** — 3× the announce interval for `announce`, 3× the 50 s long-poll
+  timeout for a bot — counted from the gateway's (or that loop's) start before
+  its first tick. The top-level `stale` is set when any of them is.
+
+The status is always `200`; the `stale` flag carries the verdict. The standalone
+`vetinari status` server has no gateway loops, so `/healthz` there is a `404`.
+
 ### Installing the gateway as a service
 
 A backgrounded `gateway &` dies with its shell, so a park raised after you close

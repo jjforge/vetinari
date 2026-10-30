@@ -40,7 +40,7 @@ import {
   type CampaignStatus,
   type IssueStatus,
 } from "./status.ts";
-import { tgPoll, tgSend, type TgConn, type TgMsg } from "./telegram.ts";
+import { TG_POLL_TIMEOUT_S, tgPoll, tgSend, type TgConn, type TgMsg } from "./telegram.ts";
 
 /**
  * A read-only status query, not an answer to a parked question: `/status` (bare,
@@ -815,11 +815,67 @@ export function rebuildIndex(projects: GatewayProject[]): ReplyIndex {
   return index;
 }
 
+/**
+ * When the gateway's loops last completed a pass — the mutable record `/healthz` reads.
+ * `announce` is the last announce pass that did not throw; `polls` holds one entry per
+ * running poll loop, keyed by token, dropped when the supervisor tears the loop down.
+ * Times are epoch ms; `null` means "not yet".
+ */
+export interface GatewayTicks {
+  startedAt: number;
+  announce: number | null;
+  polls: Map<string, { startedAt: number; lastPoll: number | null }>;
+}
+
+export const newGatewayTicks = (startedAt: number): GatewayTicks => ({ startedAt, announce: null, polls: new Map() });
+
+const isoOrNull = (ms: number | null) => (ms == null ? null : new Date(ms).toISOString());
+
+/**
+ * The `GET /healthz` body: each loop's last tick and whether it is stale. Each bot is
+ * named by its numeric id (the token's part before the first `:`) — never the token,
+ * since the dashboard is unauthenticated.
+ */
+export function gatewayHealth(ticks: GatewayTicks, now: number) {
+  const announce = {
+    lastTick: isoOrNull(ticks.announce),
+    stale: now - (ticks.announce ?? ticks.startedAt) > 3 * ANNOUNCE_INTERVAL_MS,
+  };
+  const bots = [...ticks.polls].map(([token, t]) => ({
+    bot: token.split(":")[0],
+    lastPoll: isoOrNull(t.lastPoll),
+    stale: now - (t.lastPoll ?? t.startedAt) > 3 * TG_POLL_TIMEOUT_S * 1000,
+  }));
+  return { stale: announce.stale || bots.some((b) => b.stale), announce, bots };
+}
+
+/**
+ * Wire one poll loop into `ticks`: record its start now, wrap its `poll` so every
+ * returned cycle (a failed poll included — `tgPoll` swallows it as an empty batch)
+ * stamps `lastPoll`, and drop its entry when the supervisor aborts the loop.
+ */
+export function trackPollTicks(
+  ticks: GatewayTicks,
+  conn: TgConn,
+  signal: AbortSignal,
+  poll: PollDeps["poll"],
+  now: () => number = Date.now,
+): PollDeps["poll"] {
+  const entry = { startedAt: now(), lastPoll: null as number | null };
+  ticks.polls.set(conn.token, entry);
+  signal.addEventListener("abort", () => ticks.polls.delete(conn.token), { once: true });
+  return async (c, offset) => {
+    const r = await poll(c, offset);
+    entry.lastPoll = now();
+    return r;
+  };
+}
+
 // --- The daemon: impure glue wiring the pure routing above to real Telegram and
 // the shared install. Telegram send/poll and the resume shell-out are the only
 // side effects here; everything they decide comes from the pure functions.
 
-const ANNOUNCE_INTERVAL_MS = Math.max(1000, Number(process.env.VETINARI_GATEWAY_ANNOUNCE_MS ?? 5000));
+export const ANNOUNCE_INTERVAL_MS = Math.max(1000, Number(process.env.VETINARI_GATEWAY_ANNOUNCE_MS ?? 5000));
 // How often the poll supervisor re-derives its targets from the live registry so
 // a rotated or newly-registered bot is picked up without a restart. Shares the
 // announce cadence — the same "read everything fresh each tick" beat.
@@ -982,7 +1038,10 @@ export async function gateway(configDir: string = gatewayConfigDir()): Promise<v
   // Host the one aggregated status site over every registered project (E5). The
   // server reads the registry live per request, so it needs no restart when a
   // project registers; it runs alongside the Telegram loops below.
-  await serveAllStatus(configDir, { port: STATUS_PORT, host: STATUS_HOST });
+  // When each loop last completed a pass, served as `GET /healthz` so a hung loop is
+  // visible from outside even while the process and dashboard stay up.
+  const ticks = newGatewayTicks(Date.now());
+  await serveAllStatus(configDir, { port: STATUS_PORT, host: STATUS_HOST, health: () => gatewayHealth(ticks, Date.now()) });
 
   // Projects already reported as having no connection, for this daemon run only —
   // so each logs its skip once, not every tick, and a restart reports it again.
@@ -993,6 +1052,7 @@ export async function gateway(configDir: string = gatewayConfigDir()): Promise<v
         logNoConnectionSkips(loadGatewayProjects(configDir), skippedNoConn, log);
         await announcePending(configDir, index, log);
         await drainOutboxes(configDir, log);
+        ticks.announce = Date.now();
       } catch (e) {
         log.log("gateway-announce-error", { error: String(e) });
       }
@@ -1007,7 +1067,7 @@ export async function gateway(configDir: string = gatewayConfigDir()): Promise<v
   // the live connection rather than the one captured at startup.
   const startPollLoop = (conn: TgConn, signal: AbortSignal) => {
     pollLoop(conn, index, pending, {
-      poll: (c, o) => tgPoll(c, o),
+      poll: trackPollTicks(ticks, conn, signal, (c, o) => tgPoll(c, o)),
       resume: (ref, text) => spawnResume(ref, text, log),
       onStatus: async (c) => {
         // Reconstruct each served project's campaign from its base location (the same

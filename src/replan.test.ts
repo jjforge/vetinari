@@ -168,3 +168,12 @@ test("describeReplan prints both remaining plans' wave counts and every issue wh
     "plan unchanged",
   ]);
 });
+
+test("replan leaves waived files out of collisions, so two unstarted issues sharing only a waived file join one wave", async () => {
+  const cfg = harnessCfg({ "101": "a.ts", "102": "DESIGN.md b.ts", "103": "DESIGN.md c.ts" }, { waivedFiles: ["DESIGN.md"] });
+  launch(cfg, [["101"], ["102"], ["103"]]);
+
+  const result = await runReplan(cfg, {});
+
+  assert.deepEqual(result.next, [["102", "103"]]);
+});

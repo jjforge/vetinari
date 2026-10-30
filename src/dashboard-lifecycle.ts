@@ -199,6 +199,12 @@ export interface ReducedCampaign {
   anomalies: string[];
 }
 
+/** The display `layout` index of each loop-facing wave, in order: the layout waves still holding
+ * a member no prune dropped. A wave a prune emptied stays in `layout` for its chips but is gone
+ * from `waves`, so `waves[i]` is shown at `layout[liveLayoutWaves(...)[i]]`. */
+const liveLayoutWaves = (layout: string[][], pruned: Set<string>): number[] =>
+  layout.flatMap((wave, i) => (wave.some((id) => !pruned.has(id)) ? [i] : []));
+
 /** The lifecycle events that settle a delivered answer — after any of them it no longer awaits re-admit. */
 const ANSWER_SETTLING_EVENTS: ReadonlySet<string> = new Set(["spawn", "parked", "failed", "green", "merged"]);
 
@@ -414,10 +420,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       );
       const placeOf = new Map<string, number>();
       applied.remaining.forEach((wave, i) => wave.forEach((id) => placeOf.set(id, i)));
-      const survivors: number[] = [];
-      layout.forEach((wave, i) => {
-        if (wave.some((id) => !pruned.has(id))) survivors.push(i);
-      });
+      const survivors = liveLayoutWaves(layout, pruned);
       const layoutOf = new Map<number, number>();
       survivors.forEach((layoutIndex, prunedIndex) => layoutOf.set(prunedIndex, layoutIndex));
       for (const id of applied.grafted) {
@@ -444,10 +447,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
         { waves, started },
         e.waves.map((wave: unknown[]) => wave.map(String)),
       );
-      const survivors: number[] = [];
-      layout.forEach((wave, i) => {
-        if (wave.some((id) => !pruned.has(id))) survivors.push(i);
-      });
+      const survivors = liveLayoutWaves(layout, pruned);
       const layoutStarted = started ? (survivors[started - 1] ?? layout.length - 1) + 1 : 0;
       const prunedOut = layout
         .slice(layoutStarted)

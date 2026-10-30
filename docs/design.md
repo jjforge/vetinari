@@ -88,6 +88,7 @@ The event vocabulary after consolidation (§13.2) is small and uses the user's w
 | `campaign-done` | `waves`, `name?` | campaign |
 | `prune` | `target`, `removed`, `dropped` | the `prune` command; the campaign under `--auto-prune` |
 | `graft` | `ids`, `blockedBy`, `fileKeys`, `titles?` | graft |
+| `replan` | `waves` (the new waves for the unstarted remainder — the result, not the inputs), `was?` (how many unstarted waves it replaced, for narration) | replan (§5) |
 | `redrive` | `fromWave`, `landed?`, `skipped?` | campaign |
 | `stop-requested` | `index` (the wave in flight) | campaign (§5) — the first stop request it took; the reducer ignores it, `vetinari stop` reads it to tell a stop already pending (one after the later of the latest `campaign-start` and the latest `wave-start`, with no stop marker after it — a redrive logs no `campaign-start`, so its `wave-start` drops a request from a process that died) |
 
@@ -174,7 +175,9 @@ The planner is pure over injected resolvers, and `graft` places with the same ru
 
 ## 5. The campaign loop
 
-The loop runs on the checked-out base branch and refuses to start anywhere else. At every wave boundary it re-folds the log to get the remaining waves, which is how prune and graft events take effect without a mutable plan.
+The loop runs on the checked-out base branch and refuses to start anywhere else. At every wave boundary it re-folds the log to get the remaining waves, which is how prune, graft and replan events take effect without a mutable plan.
+
+**Re-planning.** `vetinari replan` recomputes the waves of the campaign's *unstarted* members from the current config and tracker (ADR 0022) — a fixed file marker, a better `fileSet`, a new `waivedFiles` entry — without a stop and relaunch. Started is wave-level: every member of a wave that has had a `wave-start` is started, so completed, in-flight, parked and failed members keep their waves; a graceful stop's parked wave never started and is re-planned. It reads each unstarted issue's current file set (less waived files) and open blockers — a blocker that has started or merged in the campaign is satisfied, a closed or `pending-verify` one too — and places them with the planner's rule (§4 steps 2–3). It never adds or removes an issue. It refuses whole, logging nothing, if any unstarted issue has no confident file set or an open blocker outside the campaign (naming each, with the `graft`/`prune` that fixes it), and if a `graft`, `prune`, `wave-start` or `replan` was logged while it computed. An unchanged result logs nothing; `--dry-run` prints both plans and logs nothing. Otherwise it logs `replan { waves }`, which the fold applies by keeping every started wave at its index and replacing the tail — skipping a named member that has started or left since, and putting an unstarted member it does not name (grafted since) in a trailing wave. A pruned member of a replaced display wave moves to a trailing display-only wave, and a graceful-stop hold is recomputed from the new wave it names. A live loop runs the new waves from its next boundary; a stopped campaign's next redrive runs them.
 
 For each wave:
 
@@ -284,7 +287,7 @@ The user guide names three properties as the value. This table sorts every curre
 
 | Surface | Verdict | Reason |
 | --- | --- | --- |
-| `init`, `install`, `build`, `baseline`, `run`, `answer`, `campaign`, `redrive`, `prune <issue>`, `graft`, `stop`, `parked`, `clear` | **core** | the loop and the six moves |
+| `init`, `install`, `build`, `baseline`, `run`, `answer`, `campaign`, `redrive`, `prune <issue>`, `graft`, `replan`, `stop`, `parked`, `clear` | **core** | the loop, the six moves, and re-planning the unstarted waves |
 | `gateway` (+ `install/status/start/stop/restart`), `tg-test`, `status` | **core** | where the user sees and answers things |
 | `campaign --dry-run`, `--name`, `--on-underspecified` | core | planning is the safety net |
 | `--auto-prune` | optional | a policy flag on one park reason |

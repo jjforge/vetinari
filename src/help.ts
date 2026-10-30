@@ -128,7 +128,7 @@ export const MODES: Mode[] = [
   {
     signature: "clear",
     blurb:
-      "archive the run log + clear parked, resetting the dashboard/status line to idle (automatic on clean campaign completion; this forces it now)",
+      "archive the run log (parked records are kept), resetting the dashboard/status line to idle (automatic on clean campaign completion; this forces it now)",
   },
   {
     signature: "status [--port <port>] [--host <host>]",

@@ -634,14 +634,16 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
       // Force a reset of the live log now, even mid-run — the manual escape hatch,
       // unlike the automatic archive that waits for an idle queue. Parked records are
       // left intact (design §2.5): a surviving record keeps its card parked until the
-      // issue is answered/redriven or explicitly dropped with `prune --purge`.
+      // issue is answered/redriven, or — once its issue has merged — cleared by `tidy --apply`.
       const r = deps.archiveRun(cfg);
       cfg.log.log("archived", {
         archivedLog: r.archivedLog ?? null,
         clearedOutbound: r.clearedOutbound,
       });
       deps.log(r.archivedLog ? `archived run log → ${r.archivedLog}` : "no run log to archive");
-      deps.log("live log reset — any parked records are kept (answer/redrive to resume, or `prune --purge` to drop)");
+      deps.log(
+        "live log reset — any parked records are kept (answer/redrive to resume, or `vetinari tidy --apply` to drop records whose issue already merged)",
+      );
       return;
     }
     case "tgTest": {

@@ -490,6 +490,14 @@ test("dispatch clear archives the run and reports the reset", async () => {
   assert.ok(logged.some((l) => /reset/.test(l) && /parked records are kept/.test(l)));
 });
 
+test("dispatch clear names `tidy --apply` as the way to drop a merged issue's stale record, not `prune --purge`", async () => {
+  const { deps, logged } = makeDeps();
+  await dispatch({ kind: "clear" }, deps);
+  const line = logged.find((l) => /parked records are kept/.test(l)) ?? "";
+  assert.match(line, /vetinari tidy --apply/);
+  assert.doesNotMatch(line, /prune --purge/);
+});
+
 test("dispatch tg-test resolves creds and proves the round-trip", async () => {
   const { deps } = makeDeps();
   await dispatch({ kind: "tgTest" }, deps);

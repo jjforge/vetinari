@@ -11,8 +11,39 @@ const execFileAsync = promisify(execFile);
 // Promise-based so the `Promise.all` fan-outs in graft, campaign planning, prune and
 // the dashboard previews actually overlap their `gh` calls instead of running one id
 // after another (#368). A non-zero exit rejects, as the former `execFileSync` threw.
+/** The limits every `gh` call runs under (#560): killed and rejected past 60 s, so one
+ * stalled call cannot hang planning or harvest, and up to 64 MB of output returned whole
+ * rather than Node's 1 MB default. A timeout or overflow rejects like a non-zero exit. */
+export const GH_LIMITS = { timeout: 60_000, maxBuffer: 64 * 1024 * 1024 };
+
 // Exported as the runner `init`'s label step is handed.
-export const gh = async (args: string[]): Promise<string> => (await execFileAsync("gh", args, { encoding: "utf8" })).stdout;
+export const gh = async (args: string[], limits: { timeout: number; maxBuffer: number } = GH_LIMITS): Promise<string> =>
+  (await execFileAsync("gh", args, { encoding: "utf8", ...limits })).stdout;
+
+/** A real `setTimeout` sleep — `withRetry`'s and `githubTracker`'s default between attempts. */
+const sleepMs = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Wraps a `gh` runner so a rejected call is retried up to 3 times (4 attempts) before
+ * rejecting with the last attempt's error (#560). The wait before retry n is
+ * `1000 · 2^(n-1)` ms scaled by a random factor in [0.5, 1.5) — about 1 s, 2 s, 4 s — so
+ * one transient failure (a 5xx, a dropped connection) no longer fails planning outright.
+ * Any rejection is retried, so wrap only idempotent reads: a retried `issue create` can
+ * double-file, which is why the write seams take the bare runner. `sleep`/`random` are
+ * injected only so the backoff can be tested without waiting.
+ */
+export const withRetry =
+  (run: (args: string[]) => Promise<string>, sleep: (ms: number) => Promise<void> = sleepMs, random: () => number = Math.random) =>
+  async (args: string[]): Promise<string> => {
+    for (let retry = 1; ; retry++) {
+      try {
+        return await run(args);
+      } catch (err) {
+        if (retry > 3) throw err;
+        await sleep(1000 * 2 ** (retry - 1) * (0.5 + random()));
+      }
+    }
+  };
 
 /** The default repo deriver every shipped resolver falls back to when no explicit
  * `owner/repo` is wired: the same live read of the project's `origin` remote that
@@ -74,7 +105,7 @@ const repoAccessor = (factory: string, repo: string | undefined, deriveRepo: () 
  */
 export const githubBlockedBy = (
   repo?: string,
-  run: (args: string[]) => Promise<string> = gh,
+  run: (args: string[]) => Promise<string> = withRetry(gh),
   log: (line: string) => void = console.error,
   deriveRepo = deriveRepoFromProject,
 ) => {
@@ -123,7 +154,11 @@ export const githubBlockedBy = (
  * list (#175). `run` is injected only so the argument building can be tested without
  * invoking `gh`.
  */
-export const githubFetchTask = (repo?: string, run: (args: string[]) => Promise<string> = gh, deriveRepo = deriveRepoFromProject) => {
+export const githubFetchTask = (
+  repo?: string,
+  run: (args: string[]) => Promise<string> = withRetry(gh),
+  deriveRepo = deriveRepoFromProject,
+) => {
   const repoOf = repoAccessor("githubFetchTask", repo, deriveRepo);
   return async (id: string): Promise<string> => {
     const r = repoOf();
@@ -168,7 +203,7 @@ const LABEL_FETCH_LIMIT = 1000;
  */
 export const githubIssuesByLabel = (
   repo?: string,
-  run: (args: string[]) => Promise<string> = gh,
+  run: (args: string[]) => Promise<string> = withRetry(gh),
   log: (line: string) => void = console.error,
   deriveRepo = deriveRepoFromProject,
 ) => {
@@ -300,7 +335,11 @@ export const githubFindingReporter = (
  * moments ago loses nothing. The URL, not the bare number, so a match carries a link and its ref
  * is the same one the campaign's own filings carry (#549). Repo derivation as `githubFindingReporter`.
  */
-export const githubFindOpenIssue = (repo?: string, run: (args: string[]) => Promise<string> = gh, deriveRepo = deriveRepoFromProject) => {
+export const githubFindOpenIssue = (
+  repo?: string,
+  run: (args: string[]) => Promise<string> = withRetry(gh),
+  deriveRepo = deriveRepoFromProject,
+) => {
   const repoOf = repoAccessor("githubFindOpenIssue", repo, deriveRepo);
   return async (title: string): Promise<string | undefined> => {
     const out = await run(["issue", "list", "--repo", repoOf(), "--state", "open", "--limit", "200", "--json", "number,title,url"]);
@@ -342,19 +381,25 @@ export const GITHUB_TRACKER_LABELS: ReadonlyArray<{ name: string; color: string;
  *
  * A field set after the spread wins, so a project overrides or turns off one seam
  * (`{ ...githubTracker(), onIssueMerged: undefined }`); the factories stay exported as
- * the building blocks for custom wiring. `run`/`deriveRepo` are injected only so the
- * wiring can be tested without invoking `gh` or reading a real remote.
+ * the building blocks for custom wiring. The four read seams retry a failed `gh` call
+ * (`withRetry`); the three write seams get the bare runner and never retry (#560).
+ * `run`/`deriveRepo`/`sleep` are injected only so the wiring can be tested without
+ * invoking `gh`, reading a real remote or waiting out the backoff.
  */
 export const githubTracker = (
   opts: { repo?: string; findingLabels?: string[] } = {},
   run: (args: string[]) => Promise<string> = gh,
   deriveRepo = deriveRepoFromProject,
-) => ({
-  fetchTask: githubFetchTask(opts.repo, run, deriveRepo),
-  blockedBy: githubBlockedBy(opts.repo, run, undefined, deriveRepo),
-  listByLabel: githubIssuesByLabel(opts.repo, run, undefined, deriveRepo),
-  postComment: githubIssueComment(opts.repo, run, deriveRepo),
-  onIssueMerged: githubMarkPendingVerify(opts.repo, run, deriveRepo),
-  reportFinding: githubFindingReporter(opts.repo, { labels: opts.findingLabels ?? ["needs-triage"] }, run, deriveRepo),
-  findOpenIssue: githubFindOpenIssue(opts.repo, run, deriveRepo),
-});
+  sleep = sleepMs,
+) => {
+  const read = withRetry(run, sleep);
+  return {
+    fetchTask: githubFetchTask(opts.repo, read, deriveRepo),
+    blockedBy: githubBlockedBy(opts.repo, read, undefined, deriveRepo),
+    listByLabel: githubIssuesByLabel(opts.repo, read, undefined, deriveRepo),
+    postComment: githubIssueComment(opts.repo, run, deriveRepo),
+    onIssueMerged: githubMarkPendingVerify(opts.repo, run, deriveRepo),
+    reportFinding: githubFindingReporter(opts.repo, { labels: opts.findingLabels ?? ["needs-triage"] }, run, deriveRepo),
+    findOpenIssue: githubFindOpenIssue(opts.repo, read, deriveRepo),
+  };
+};

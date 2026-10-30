@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
 import {
+  gh,
+  GH_LIMITS,
   githubBlockedBy,
   githubFetchTask,
   githubFindOpenIssue,
@@ -10,6 +15,7 @@ import {
   githubMarkPendingVerify,
   githubTracker,
   GITHUB_TRACKER_LABELS,
+  withRetry,
 } from "./github.ts";
 import { Refusal } from "./refusal.ts";
 import { issueStateFromTask } from "./dashboard-model.ts";
@@ -852,4 +858,153 @@ test("githubFindOpenIssue never returns a listed row that lacks a url", async ()
   assert.equal(await find(title), undefined, "a url-less row is not a candidate");
   listing.push({ number: 11, title, url: "https://github.com/x/y/issues/11" });
   assert.equal(await find(title), "https://github.com/x/y/issues/11", "the row that carries a url wins");
+});
+
+/** Runs `body` with a stub executable named `gh` (the given shell script) first on PATH. */
+async function withStubGh(script: string, body: () => Promise<void>) {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-stub-gh-"));
+  const path = process.env.PATH;
+  try {
+    writeFileSync(join(dir, "gh"), `#!/bin/sh\n${script}\n`);
+    chmodSync(join(dir, "gh"), 0o755);
+    process.env.PATH = `${dir}${delimiter}${path}`;
+    await body();
+  } finally {
+    process.env.PATH = path;
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("GH_LIMITS caps every gh call at 60 s and 64 MB of output", () => {
+  assert.deepEqual(GH_LIMITS, { timeout: 60_000, maxBuffer: 67_108_864 });
+});
+
+test("gh returns output past the old 1 MB default whole — 2 MiB of stdout resolves intact", async () => {
+  await withStubGh("head -c 2097152 /dev/zero | tr '\\0' x", async () => {
+    const out = await gh([]);
+    assert.equal(out.length, 2 * 1024 * 1024);
+    assert.ok(out.length > 1024 * 1024);
+  });
+});
+
+test("gh kills a call that runs past its timeout and rejects — a stalled gh never hangs", async () => {
+  await withStubGh("sleep 10", async () => {
+    const started = Date.now();
+    await assert.rejects(gh([], { ...GH_LIMITS, timeout: 200 }));
+    assert.ok(Date.now() - started < 5000, `took ${Date.now() - started} ms`);
+  });
+});
+
+/** A `run` that rejects its first `failures` calls, then resolves "ok"; plus a recording `sleep`. */
+function flakyRun(failures: number) {
+  const state = { calls: 0, waits: [] as number[] };
+  const run = async (): Promise<string> => {
+    state.calls++;
+    if (state.calls <= failures) throw new Error(`attempt ${state.calls} failed`);
+    return "ok";
+  };
+  const sleep = async (ms: number) => {
+    state.waits.push(ms);
+  };
+  return { run, sleep, state };
+}
+
+const within = (ms: number, lo: number, hi: number) => assert.ok(ms >= lo && ms < hi, `${ms} not in [${lo}, ${hi})`);
+
+test("withRetry retries a rejected read and resolves with the attempt that succeeds, backing off ~1 s then ~2 s", async () => {
+  const { run, sleep, state } = flakyRun(2);
+
+  assert.equal(await withRetry(run, sleep)(["issue", "view", "1"]), "ok");
+
+  assert.equal(state.calls, 3);
+  assert.equal(state.waits.length, 2);
+  within(state.waits[0], 500, 1500);
+  within(state.waits[1], 1000, 3000);
+});
+
+test("withRetry gives up after 4 attempts and rejects with the last attempt's error", async () => {
+  const { run, sleep, state } = flakyRun(Infinity);
+
+  await assert.rejects(withRetry(run, sleep)([]), /attempt 4 failed/);
+
+  assert.equal(state.calls, 4);
+  assert.equal(state.waits.length, 3);
+  within(state.waits[2], 2000, 6000);
+});
+
+test("withRetry never retries or sleeps on a call that resolves", async () => {
+  const { run, sleep, state } = flakyRun(0);
+
+  assert.equal(await withRetry(run, sleep)([]), "ok");
+
+  assert.equal(state.calls, 1);
+  assert.deepEqual(state.waits, []);
+});
+
+test("withRetry scales each backoff by the random factor — 0.5x at the floor, just under 1.5x at the top", async () => {
+  for (const [random, first] of [
+    [() => 0, 500],
+    [() => 0.999, 1499],
+  ] as const) {
+    const { run, sleep, state } = flakyRun(1);
+    await withRetry(run, sleep, random)([]);
+    assert.equal(Math.round(state.waits[0]), first);
+  }
+});
+
+/** A `run` that rejects the first call each seam makes (keyed on its leading args) and
+ * then answers with parseable JSON, counting calls per key. */
+function failOncePerSeam() {
+  const calls = new Map<string, number>();
+  const run = async (args: string[]): Promise<string> => {
+    const key = args[0] === "api" ? "api" : args.slice(0, 2).join(" ");
+    const n = (calls.get(key) ?? 0) + 1;
+    calls.set(key, n);
+    if (n === 1) throw new Error(`${key} failed`);
+    return key === "issue view" ? "{}" : "[]";
+  };
+  return { run, calls };
+}
+const noSleep = async () => {};
+
+test("githubTracker retries a failed gh read in each read seam — fetchTask, blockedBy, listByLabel, findOpenIssue resolve (#560)", async () => {
+  const fetch = failOncePerSeam();
+  await githubTracker({ repo: "o/r" }, fetch.run, undefined, noSleep).fetchTask("#1");
+  const blocked = failOncePerSeam();
+  assert.deepEqual(await githubTracker({ repo: "o/r" }, blocked.run, undefined, noSleep).blockedBy("#1"), []);
+  const listed = failOncePerSeam();
+  assert.deepEqual(await githubTracker({ repo: "o/r" }, listed.run, undefined, noSleep).listByLabel("ready-for-agent"), []);
+  const found = failOncePerSeam();
+  assert.equal(await githubTracker({ repo: "o/r" }, found.run, undefined, noSleep).findOpenIssue("a bug"), undefined);
+
+  for (const { calls } of [fetch, blocked, listed, found]) assert.deepEqual([...calls.values()], [2]);
+});
+
+test("githubTracker never retries a gh write — postComment, onIssueMerged, reportFinding reject after one call (#560)", async () => {
+  for (const invoke of [
+    (t: ReturnType<typeof githubTracker>) => t.postComment("#1", "hi"),
+    (t: ReturnType<typeof githubTracker>) => t.onIssueMerged("#1"),
+    (t: ReturnType<typeof githubTracker>) => t.reportFinding({ summary: "a bug" }, { taskId: "1", project: "p" }),
+  ]) {
+    const { run, calls } = failOncePerSeam();
+    await assert.rejects(invoke(githubTracker({ repo: "o/r" }, run, undefined, noSleep)));
+    assert.deepEqual([...calls.values()], [1]);
+  }
+});
+
+test("each write factory calls gh exactly once and rejects on its failure — a retried create could double-file (#560)", async () => {
+  for (const invoke of [
+    (run: (args: string[]) => Promise<string>) => githubIssueComment("o/r", run)("#1", "hi"),
+    (run: (args: string[]) => Promise<string>) =>
+      githubFindingReporter("o/r", {}, run)({ summary: "a bug" }, { taskId: "1", project: "p" }),
+    (run: (args: string[]) => Promise<string>) => githubMarkPendingVerify("o/r", run)("#1"),
+  ]) {
+    let calls = 0;
+    const run = async () => {
+      calls++;
+      throw new Error("gh failed");
+    };
+    await assert.rejects(invoke(run), /gh failed/);
+    assert.equal(calls, 1);
+  }
 });

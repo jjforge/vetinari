@@ -80,7 +80,10 @@ seams at once — `fetchTask`, `blockedBy`, `listByLabel`, `postComment`,
 `onIssueMerged`, `reportFinding`, `findOpenIssue` — as `...githubTracker({ repo?, findingLabels? })`.
 With no `repo` each seam derives it from the project's `origin` on first call (a
 refusal when it cannot); `findingLabels` defaults to `["needs-triage"]`. A field set
-after the spread wins (`onIssueMerged: undefined` turns that hook off). The
+after the spread wins (`onIssueMerged: undefined` turns that hook off). Every `gh`
+call is capped at 60 s and 64 MB of output, and the four read seams (`fetchTask`,
+`blockedBy`, `listByLabel`, `findOpenIssue`) retry a failed call up to 3 times with
+backoff, while the write seams never retry. The
 individual factories named in the table below are the preset's building blocks,
 exported for custom wiring.
 

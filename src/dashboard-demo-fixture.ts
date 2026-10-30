@@ -49,15 +49,6 @@ export const DEMO_FAILURE_PROJECT = "mobile-app";
 export const DEMO_COMPLETED_PROJECT = "data-pipeline";
 export const DEMO_IDLE_PROJECT = "legacy-portal";
 
-/** Every demo project's name, in the order `demo create` seeds them. */
-export const DEMO_PROJECTS: readonly string[] = [
-  DEMO_PARKED_PROJECT,
-  DEMO_RUNNING_PROJECT,
-  DEMO_FAILURE_PROJECT,
-  DEMO_COMPLETED_PROJECT,
-  DEMO_IDLE_PROJECT,
-];
-
 export const DEMO_PARKED_QUESTION =
   "Which payment providers should guest checkout offer at launch?\n\nOptions:\n- A: Stripe only\n- B: Stripe + PayPal\n- C: Stripe + PayPal + Apple Pay";
 

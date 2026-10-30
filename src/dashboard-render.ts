@@ -243,14 +243,6 @@ export interface TailRow {
   ts?: string;
 }
 
-/** The live tail's following-buffer cap: while following, the per-repo buffer keeps only
- * the newest this-many lines, oldest discarded (#124). A paused buffer grows past it. */
-export const TAIL_FOLLOW_CAP = 260;
-
-/** How many matching lines the tail body renders — the newest this-many, so a long
- * stream can't build an unbounded DOM (the pane's counterpart to `cappedRawRows`, #124). */
-export const TAIL_RENDER_CAP = 160;
-
 /**
  * Fold a fresh server snapshot's lines into the client's dedup state (#124): a snapshot
  * re-sends its whole window each push, so a line counts as *new* only when its per-file

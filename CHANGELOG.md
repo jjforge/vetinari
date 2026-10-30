@@ -66,6 +66,8 @@ Within a milestone each bold section label appears at most once.
 - [ops] `vetinari gateway` refuses to start on a `VETINARI_GATEWAY_STATUS_PORT` that is not a port number (0–65535), naming the variable, instead of binding `NaN`; a `VETINARI_STATUS_PORT` set in the gateway's environment (which it ignores) now gets a startup warning and a `gateway-status-port-env-ignored` host-log row (#584).
 - [ops] A `MAX_CONCURRENT_CONTAINERS` env value or `max-concurrent-containers` file that is not a positive integer is now warned about on stderr before falling back, rather than ignored silently (#584).
 - [user] `loadConfig` refuses an unknown `containerShare` tier (e.g. `"hgih"`) instead of silently running it as `low` (#584).
+- [user] A stalled `gh` call no longer hangs campaign planning, `graft`/`prune --dry-run` or the findings harvest: every `gh` call is killed after 60 s and may return up to 64 MB of output, and the four tracker read seams (`fetchTask`, `blockedBy`, `listByLabel`, `findOpenIssue`) retry a failed call up to 3 times with jittered backoff (about 1 s, 2 s, 4 s). The write seams (`postComment`, `onIssueMerged`, `reportFinding`) never retry, so a finding is never double-filed (#560).
+- [api] `src/github.ts` exports `withRetry` and `GH_LIMITS`; `gh` takes optional `execFile` limits, and `githubTracker` takes an optional 4th `sleep` argument for tests (#560).
 
 **Security:**
 - [user] The dashboard caps every POST body (answer, graft, prune, redrive, stop) at 64 KiB and answers a larger one with a plain `413` instead of reading it without limit (#564).
@@ -74,6 +76,8 @@ Within a milestone each bold section label appears at most once.
 - [user] When a dashboard route fails, the client now gets a generic `500` with no stack trace, the failure is logged once to the host log as `dashboard-request-failed` (method, path, error), and a failure after a streamed response has started cuts that response off instead of crashing the gateway hosting the dashboard (#538).
 - [user] `run`, `campaign`, `redrive` and `answer` now refuse (exit 4, before any container launches) when `.vetinari.local/.env` names `VETINARI_TELEGRAM_BOT_TOKEN` or `VETINARI_TELEGRAM_CHAT_ID` — even with an empty value, which the sandbox would otherwise fill from the orchestrator's environment and carry into the agent container (#568).
 - [user] Every dashboard response now carries a Content-Security-Policy that admits only the dashboard's own inline scripts and styles and same-origin requests (and forbids framing), plus `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`; error bodies are sent as `text/plain; charset=utf-8` (#526).
+- [user] The dashboard now sends `X-Frame-Options: DENY` on every response, alongside its CSP `frame-ancestors 'none'`, so no page can frame it and clickjack Redrive, Stop or Prune (#525).
+- [user] `run`, `campaign`, `redrive` and `baseline` warn once on stderr when the project's `.vetinari.local/.env` or `host.env` is readable by group or others, naming each file and its mode; the gateway warns the same way at start for every registered project. Warn only — nothing refuses and no file mode is changed (#563).
 
 **Infrastructure:**
 - [internal] A GitHub Actions workflow (`.github/workflows/ci.yml`) runs `npm ci`, `npm run typecheck`, `npm run format:check` and `npm test` on every push and pull request to `main`, across Node 22.x, 24.x and 26.x — so a commit pushed straight to `main` is gated, and the Node version the gateway unit runs is tested (#530).

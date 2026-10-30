@@ -17,6 +17,8 @@ import {
   ownerRepoFromRemote,
   parseAgentFlags,
   missingCredentials,
+  VETINARI_SECRET_KEYS,
+  refuseVetinariSecretsInEnv,
   nonResumableAnswerWarning,
   parseAgentOverride,
   registerVetinariResolve,
@@ -513,6 +515,53 @@ test("missingCredentials treats a present-but-empty assignment as absent", () =>
   const envPath = join(dir, ".env");
   writeFileSync(envPath, "OPENAI_API_KEY=\n");
   assert.deepEqual(missingCredentials("codex", envPath), AGENT_PROVIDERS.codex.credentialKeys);
+});
+
+test("refuseVetinariSecretsInEnv refuses a .env naming the bot token, even with an empty value", () => {
+  const envPath = join(scratch(), ".env");
+  writeFileSync(envPath, "CLAUDE_CODE_OAUTH_TOKEN=x\nVETINARI_TELEGRAM_BOT_TOKEN=\n");
+  assert.throws(
+    () => refuseVetinariSecretsInEnv(envPath),
+    (e: unknown) =>
+      e instanceof Refusal &&
+      e.message ===
+        `${envPath} names vetinari's own secret VETINARI_TELEGRAM_BOT_TOKEN — remove it: ` +
+          `the container gate must never carry it (it belongs in host.env) (preflight).`,
+  );
+});
+
+test("refuseVetinariSecretsInEnv refuses an exported, quoted chat id", () => {
+  const envPath = join(scratch(), ".env");
+  writeFileSync(envPath, 'export VETINARI_TELEGRAM_CHAT_ID="-100123"\n');
+  assert.throws(
+    () => refuseVetinariSecretsInEnv(envPath),
+    (e: unknown) => e instanceof Refusal && e.message.includes("secret VETINARI_TELEGRAM_CHAT_ID —"),
+  );
+});
+
+test("refuseVetinariSecretsInEnv names every secret in one refusal, in file order", () => {
+  const envPath = join(scratch(), ".env");
+  writeFileSync(envPath, "VETINARI_TELEGRAM_CHAT_ID=1\nCLAUDE_CODE_OAUTH_TOKEN=x\nVETINARI_TELEGRAM_BOT_TOKEN=t\n");
+  assert.throws(
+    () => refuseVetinariSecretsInEnv(envPath),
+    (e: unknown) =>
+      e instanceof Refusal &&
+      e.message.startsWith(`${envPath} names vetinari's own secret VETINARI_TELEGRAM_CHAT_ID, VETINARI_TELEGRAM_BOT_TOKEN — `),
+  );
+});
+
+test("refuseVetinariSecretsInEnv passes a credential-only, commented-out, thread-id-only, or missing .env", () => {
+  const dir = scratch();
+  const envPath = join(dir, ".env");
+  refuseVetinariSecretsInEnv(envPath); // missing file
+  for (const body of ["CLAUDE_CODE_OAUTH_TOKEN=x\n", "# VETINARI_TELEGRAM_BOT_TOKEN=x\n", "VETINARI_TELEGRAM_THREAD_ID=42\n"]) {
+    writeFileSync(envPath, body);
+    refuseVetinariSecretsInEnv(envPath);
+  }
+});
+
+test("VETINARI_SECRET_KEYS is exactly the bot connection", () => {
+  assert.deepEqual(VETINARI_SECRET_KEYS, ["VETINARI_TELEGRAM_BOT_TOKEN", "VETINARI_TELEGRAM_CHAT_ID"]);
 });
 
 test("loadConfig honors an explicit stateDir over the flipped default", async () => {

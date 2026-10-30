@@ -8,6 +8,7 @@ import {
   encodeAgentOverride,
   loadConfig,
   missingCredentials,
+  refuseVetinariSecretsInEnv,
   parseAgentOverride,
   repoForProject,
   resolveAgentSelection,
@@ -607,9 +608,9 @@ const archiveLeftoverRun = () => {
  * which hands the parsed `--agent`/`--model`/`--effort` override in as `override`). Merge
  * it over one already inherited via `VETINARI_AGENT` (a campaign/queue child inherits its
  * parent's), validate it (an unknown provider or an out-of-vocabulary effort fails fast
- * HERE, before any container), and preflight the selected provider's credentials against
- * the container `.env` so a missing key is a helpful message rather than a death inside
- * the container. Re-stamp `VETINARI_AGENT` so every spawned child wave drives the same
+ * HERE, before any container), refuse a container `.env` naming vetinari's own secrets, and
+ * preflight the selected provider's credentials against the container `.env` so a missing
+ * key is a helpful message rather than a death inside the container. Re-stamp `VETINARI_AGENT` so every spawned child wave drives the same
  * agent. This is `dispatch`'s `selectAgent` dep.
  */
 function selectAgent(cfg: ResolvedConfig, override: AgentOverride): void {
@@ -617,6 +618,7 @@ function selectAgent(cfg: ResolvedConfig, override: AgentOverride): void {
   const merged = { ...inherited, ...override };
   const selection = resolveAgentSelection(cfg.agent, merged); // throws on bad provider/effort
   const envPath = resolve(process.cwd(), cfg.stateDir, ".env");
+  refuseVetinariSecretsInEnv(envPath); // before the credential check, so a secret is reported first
   const missing = missingCredentials(selection.provider, envPath);
   if (missing.length)
     throw new Refusal(

@@ -59,11 +59,17 @@ Within a milestone each bold section label appears at most once.
 - [user] A finding that matches an already-open tracker issue is now recorded against that issue's URL, so the "seen again … fix the root cause" notice links the issue, and those sightings count together with the campaign's own filings of the same issue instead of splitting between a bare number and a URL (#549).
 - [ops] The gateway no longer holds an unanswered prune-confirm preview in memory for the life of the daemon: expired previews are swept each time a new one is recorded (#586).
 - [ops] Read-only git calls on the host (branch and ref checks, commit counts, worktree listings, `origin` lookups, the status line's branch read) are now capped at 60 s and 64 MB of output through a shared `gitRead` helper, so a stalled git read fails like any git error instead of hanging the campaign; mutating git calls (merge, commit, add, worktree add/remove/prune, branch -D) stay uncapped so none is killed mid-write (#561).
+- [user] The file-set resolver now indexes the files git tracks or would track (`git ls-files`, tracked plus untracked-not-ignored) rather than walking the whole working directory, so a gitignored cache such as `.vetinari.local/`'s Go module cache no longer degrades a pinned cite like `e2e/README.md` (or a `Creates:` cite under `e2e/`) to a bare basename, and a `Touches:` cite of a gitignored file no longer counts as present. Outside a git repository the walk is kept, now skipping `.vetinari.local` (#498).
+- [user] The "#N seen again in 3 runs — fix the root cause" notice now counts distinct runs, not sightings: one run that sees the same issue several times counts once, so it can no longer trip the notice alone (#548).
+- [user] `campaign --dry-run` no longer claims the campaign would halt on a NOT-confident ticket when it is the only issue selected; the line now says the file-set check is skipped for a one-issue selection (and would halt beside other tickets) (#557).
+- [user] Every surface now gives the same recovery move for each park reason, read from one shared table: a merge conflict is resolved on the base, then `vetinari redrive` — the campaign stop line and the conflict-park notice no longer say "on the branch". Telegram and `vetinari parked` now spell redrive as `vetinari redrive`, the outdated-agent stop line reads "rebuild the image with `vetinari build`, then `vetinari redrive`", and the dashboard's issue sheet notice uses the same wording (#578).
 
 **Security:**
 - [user] The dashboard caps every POST body (answer, graft, prune, redrive, stop) at 64 KiB and answers a larger one with a plain `413` instead of reading it without limit (#564).
 - [user] The dashboard landing page escapes `<` in the repo-label JSON it inlines into its script, so a project name or repo containing `</script>` can no longer close the script early and break the page or inject markup (#567).
 - [user] `vetinari answer` (and the dashboard's answer form) refuses a task id that could escape the parked directory — empty, `.`/`..`, or carrying `/`, `\` or a NUL — so an id like `../../routing` can no longer rewrite or delete an arbitrary `.json` file; every parked-record read, write and delete is guarded the same way (#566).
+- [user] When a dashboard route fails, the client now gets a generic `500` with no stack trace, the failure is logged once to the host log as `dashboard-request-failed` (method, path, error), and a failure after a streamed response has started cuts that response off instead of crashing the gateway hosting the dashboard (#538).
+- [user] `run`, `campaign`, `redrive` and `answer` now refuse (exit 4, before any container launches) when `.vetinari.local/.env` names `VETINARI_TELEGRAM_BOT_TOKEN` or `VETINARI_TELEGRAM_CHAT_ID` — even with an empty value, which the sandbox would otherwise fill from the orchestrator's environment and carry into the agent container (#568).
 
 **Infrastructure:**
 - [internal] A GitHub Actions workflow (`.github/workflows/ci.yml`) runs `npm ci`, `npm run typecheck`, `npm run format:check` and `npm test` on every push and pull request to `main`, across Node 22.x, 24.x and 26.x — so a commit pushed straight to `main` is gated, and the Node version the gateway unit runs is tested (#530).
@@ -71,11 +77,15 @@ Within a milestone each bold section label appears at most once.
 - [ops] `npm run typecheck` now also compiles the TypeScript under `scripts/` (`scripts/demo.ts`, `scripts/gen-reference.ts`) with the same compiler options as `src/`, so a type error in a script fails the typecheck instead of surfacing only when the script runs (#593).
 - [internal] vetinari's own campaigns now gate on `npm run format:check` between typecheck and test, so an unformatted change can no longer go green and merge (#602).
 
+**Testing:**
+- [internal] A test collects every environment variable `src/` reads or sets and fails, naming it, when `docs/reference.md` does not document it (#588).
+
 **Documentation:**
 - [ops] `docs/operations.md` now says to bind the dashboard to the host's tailnet IP rather than `0.0.0.0` when exposing it over a tailnet, because a `0.0.0.0` bind also listens on the Docker bridge and so exposes the dashboard to every agent container on the host; the `status --host`, gateway env, and systemd drop-in examples use a tailnet-IP placeholder (#590).
 - [internal] The `spawnResume` comment in `src/gateway.ts` no longer claims the `answer` child runs detached; it describes the resume as fire-and-forget and un-awaited (#590).
 - [user] `docs/ticket-contract.md` now says a cite-less marker line (`Touches: none`) still counts as a marker line: it lets the comments' marker lines be read, but it suppresses the whole-body fallback, so a ticket whose only marker line cites nothing and whose comments carry none resolves no files and is not confident (#556).
 - [user] The `/fileset` skill no longer says a backticked non-file word always fails to resolve: that holds on a `Touches:`/`Files:` line, but on a `Creates:` line it becomes a bare `Creates:` key and the ticket stays confident (#556).
+- [ops] `docs/reference.md`'s environment-variable table now lists every variable vetinari reads — the `status` and gateway dashboard port/host, the gateway tick, the Telegram forum thread, the host config dir and systemd unit overrides, and `XDG_CONFIG_HOME`, each with its default — and an `Internal` table names the variables vetinari sets for its own child processes (#588).
 
 ### v0.2.0 — October 21, 2026
 

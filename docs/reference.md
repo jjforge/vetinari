@@ -96,7 +96,7 @@ exported for custom wiring.
 | `maxTurns` | turn budget per task before a `stalled` park (default 6) |
 | `idleTimeoutSeconds` | idle-stall ceiling before a `stalled` park (default 600) |
 | `parkGraceSeconds` | grace before a no-commit turn parks `stalled` (default 0) |
-| `containerShare` | this project's cut of the container ceiling when projects contend — `high` \| `medium` \| `low` (default `medium`; weights 7:2:1) |
+| `containerShare` | this project's cut of the container ceiling when projects contend — `high` \| `medium` \| `low` (default `medium`; weights 7:2:1); any other value is refused at config load |
 | `hostEnv` | host-only, non-secret env values (e.g. a `GIT_TERMINAL_PROMPT` override) — set host-side, never crosses into the container |
 | `promptFile` | override the TDD prompt handed to the agent |
 | `fetchTask` | tracker seam: fetch an issue's title/body/comments/labels **and** state/closedAt (`githubFetchTask()`) |
@@ -145,7 +145,7 @@ the container is `.vetinari.local/.env` (design §9, ADR 0011).
 
 | Variable | Where | Meaning |
 | --- | --- | --- |
-| `MAX_CONCURRENT_CONTAINERS` | host env, or a `max-concurrent-containers` file in the host config dir | caps live containers across **all** projects; unset resolves to a machine-derived default (never unbounded) |
+| `MAX_CONCURRENT_CONTAINERS` | host env, or a `max-concurrent-containers` file in the host config dir | caps live containers across **all** projects; unset resolves to a machine-derived default (never unbounded); a value that is not a positive integer is warned about on stderr and ignored |
 | `CLAUDE_CODE_OAUTH_TOKEN` | `.vetinari.local/.env` | Claude Code credential (from `claude setup-token`) — runs on your subscription |
 | `ANTHROPIC_API_KEY` | `.vetinari.local/.env` | Claude (drop-in alternative, per-run cost attribution) or `pi` credential |
 | `OPENAI_API_KEY` | `.vetinari.local/.env` | Codex credential |

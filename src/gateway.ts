@@ -27,6 +27,7 @@ import {
 } from "./state.ts";
 import { gatewayConfigDir, readProjects } from "./registry.ts";
 import { notice } from "./notice.ts";
+import { Refusal } from "./refusal.ts";
 import { PARK_RECOVERY, recoverySentence } from "./park-recovery.ts";
 import {
   buildAllStatus,
@@ -883,7 +884,25 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // registered project, a dropdown to pick between them. Defaults to the same
 // 8765 the standalone per-project server uses (they don't run together on one
 // host — the gateway supersedes running one project standalone).
-const STATUS_PORT = Number(process.env.VETINARI_GATEWAY_STATUS_PORT ?? 8765);
+// Read when the gateway starts, never at import: a bad value refuses the start
+// with the variable named rather than handing `NaN` to the dashboard bind.
+export function gatewayStatusPort(env: NodeJS.ProcessEnv, logger: Logger): number {
+  const raw = env.VETINARI_GATEWAY_STATUS_PORT;
+  if (raw !== undefined && !(/^\d+$/.test(raw) && Number(raw) <= 65535)) {
+    throw new Refusal(`VETINARI_GATEWAY_STATUS_PORT must be a port number (0–65535), got "${raw}"`);
+  }
+  const port = raw === undefined ? 8765 : Number(raw);
+  // `VETINARI_STATUS_PORT` is `vetinari status`'s variable; set under the gateway
+  // it is a near-miss for the one above, so name it rather than ignore it silently.
+  const statusPort = env.VETINARI_STATUS_PORT;
+  if (statusPort !== undefined) {
+    console.warn(
+      `[vetinari] VETINARI_STATUS_PORT is set but the gateway ignores it — set VETINARI_GATEWAY_STATUS_PORT to choose the gateway's dashboard port (using ${port})`,
+    );
+    logger.log("gateway-status-port-env-ignored", { value: statusPort, port });
+  }
+  return port;
+}
 const STATUS_HOST = process.env.VETINARI_GATEWAY_STATUS_HOST ?? "127.0.0.1";
 
 const announceText = (a: Announcement) => formatParkAnnouncement(a.project, a.record);
@@ -1038,7 +1057,11 @@ export async function gateway(configDir: string = gatewayConfigDir()): Promise<v
   // When each loop last completed a pass, served as `GET /healthz` so a hung loop is
   // visible from outside even while the process and dashboard stay up.
   const ticks = newGatewayTicks(Date.now());
-  await serveAllStatus(configDir, { port: STATUS_PORT, host: STATUS_HOST, health: () => gatewayHealth(ticks, Date.now()) });
+  await serveAllStatus(configDir, {
+    port: gatewayStatusPort(process.env, log),
+    host: STATUS_HOST,
+    health: () => gatewayHealth(ticks, Date.now()),
+  });
 
   // Projects already reported as having no connection, for this daemon run only —
   // so each logs its skip once, not every tick, and a restart reports it again.

@@ -211,7 +211,11 @@ re-announces nothing and still routes a reply that arrived while it was down),
 announces newly parked questions, drains every registered project's outbox on a
 timer, and runs one poll loop per distinct bot. It also hosts the aggregated
 status dashboard (default `127.0.0.1:8765`; override with
-`VETINARI_GATEWAY_STATUS_PORT` / `VETINARI_GATEWAY_STATUS_HOST`). Reply to a
+`VETINARI_GATEWAY_STATUS_PORT` / `VETINARI_GATEWAY_STATUS_HOST`). A
+`VETINARI_GATEWAY_STATUS_PORT` that is not a port number (0–65535) refuses to
+start, naming the variable. The gateway does not read `VETINARI_STATUS_PORT`
+(that is `vetinari status`'s variable); if it is set in the gateway's
+environment, a startup warning names it and the port actually in use. Reply to a
 question's message in Telegram and the gateway resumes that exact task; send
 `/status` for a text summary; send `prune <issue>` (or `prune <project> <issue>`
 when several campaigns share a bot) to preview and, on a `yes` reply, prune.

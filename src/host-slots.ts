@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, openSync, closeSync, writeSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { cpus } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { writeFileAtomic } from "./atomic-write.ts";
 
 /**
@@ -83,21 +83,31 @@ export function machineDefaultCeiling(cpuCount: number): number {
  * default rather than "unbounded" — so the ceiling is always in effect and a lone
  * project fills it while the host is never swamped.
  */
-export function resolveHostCeiling(configDir: string): number {
-  const parse = (raw: string | undefined): number | undefined => {
-    if (raw === undefined) return undefined;
+export function resolveHostCeiling(configDir: string, warn: (message: string) => void = console.warn): number {
+  const parse = (raw: string): number | undefined => {
     const n = Number(raw.trim());
     return Number.isInteger(n) && n > 0 ? n : undefined;
   };
-  const fromEnv = parse(process.env.MAX_CONCURRENT_CONTAINERS);
-  if (fromEnv !== undefined) return fromEnv;
-  const file = join(configDir, CEILING_FILE);
+  // A present-but-bad source is named on stderr before falling through, so a typo
+  // doesn't silently run at a different ceiling.
+  const envRaw = process.env.MAX_CONCURRENT_CONTAINERS;
+  if (envRaw !== undefined) {
+    const fromEnv = parse(envRaw);
+    if (fromEnv !== undefined) return fromEnv;
+    warn(`[vetinari] MAX_CONCURRENT_CONTAINERS="${envRaw}" is not a positive integer — ignoring it`);
+  }
+  const file = resolve(configDir, CEILING_FILE);
   if (existsSync(file)) {
+    let contents: string | undefined;
     try {
-      const fromFile = parse(readFileSync(file, "utf8"));
-      if (fromFile !== undefined) return fromFile;
+      contents = readFileSync(file, "utf8");
     } catch {
       // Unreadable file — fall through to the machine-derived default.
+    }
+    if (contents !== undefined) {
+      const fromFile = parse(contents);
+      if (fromFile !== undefined) return fromFile;
+      warn(`[vetinari] ${file}: "${contents.trim()}" is not a positive integer — ignoring it`);
     }
   }
   return machineDefaultCeiling(cpus().length);

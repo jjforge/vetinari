@@ -5,6 +5,9 @@
   "type": "module",
   "description": "Parallel TDD agent orchestrator on @ai-hero/sandcastle: the orchestrator owns the test gate, blocked agents park instead of guessing, and questions round-trip through Telegram.",
   "license": "MIT",
+  "engines": {
+    "node": ">=22.15"
+  },
   "bin": {
     "vetinari": "./src/cli.mts"
   },
@@ -24,7 +27,7 @@
   },
   "dependencies": {
     "@ai-hero/sandcastle": "git+https://github.com/zachthieme/sandcastle.git#8da12d1e96d7c6510a59c3a9f7e68703d6bcf6a7",
-    "tsx": "^4.23.10"
+    "tsx": "4.23.12"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

@@ -329,6 +329,11 @@ with a one-line plain-text reason:
   This is what stops another site's page POSTing to `/answer`. A request with no
   `Origin` — curl, a script — passes.
 
+Every `POST` to the dashboard — refused, rejected or run — is recorded in
+`host.jsonl` as one `dashboard-request` row with its method, path (no query
+string), the status it was sent, and the remote address, so `vetinari host log`
+shows who replied, pruned, grafted, redrove or stopped, and what they got back.
+
 ### Over a tailnet
 
 Bind the dashboard to the host's tailnet IP. Every vetinari host runs Docker for

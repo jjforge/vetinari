@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { dashboardRequestDenial, event, serveAllStatus, type OrchestratorEvent } from "./status.ts";
@@ -1755,4 +1755,88 @@ test("serveAllStatus warns, after its URL line, that a non-loopback bind is unau
   const loopback = await linesFor("127.0.0.1");
   assert.equal(loopback.length, 1);
   assert.match(loopback[0], /^vetinari status: http:\/\//);
+});
+
+// Start a port-0 dashboard with its host log in a fresh temp gateway home, hand `body` the port and a
+// reader of the `dashboard-request` rows that waits for `n` of them (the row is written once the
+// response closes, which can land a tick after the client has read it), then restore the env (#582).
+async function withAccessLog(
+  body: (port: number, accessRows: (n: number) => Promise<Record<string, unknown>[]>) => Promise<void>,
+): Promise<void> {
+  const configDir = mkdtempSync(join(tmpdir(), "vetinari-access-log-"));
+  const prev = process.env.VETINARI_GATEWAY_HOME;
+  process.env.VETINARI_GATEWAY_HOME = join(configDir, "gw-home");
+  const logFile = join(configDir, "gw-home", "logs", "host.jsonl");
+  const read = (): Record<string, unknown>[] =>
+    existsSync(logFile)
+      ? readFileSync(logFile, "utf8")
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => JSON.parse(line))
+          .filter((r) => r.event === "dashboard-request")
+      : [];
+  const accessRows = async (n: number) => {
+    for (let i = 0; i < 100 && read().length < n; i++) await new Promise((r) => setTimeout(r, 10));
+    return read();
+  };
+  try {
+    const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+    try {
+      await body((server.address() as AddressInfo).port, accessRows);
+    } finally {
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  } finally {
+    prev === undefined ? delete process.env.VETINARI_GATEWAY_HOME : (process.env.VETINARI_GATEWAY_HOME = prev);
+  }
+}
+
+test("serveAllStatus logs a POST no route owns as one dashboard-request host-log row with method, path, status and remote (#582)", async () => {
+  await withAccessLog(async (port, accessRows) => {
+    const res = await fetch(`http://127.0.0.1:${port}/nope`, { method: "POST" });
+    assert.equal(res.status, 404);
+    await res.text();
+    const rows = await accessRows(1);
+    assert.equal(rows.length, 1);
+    const { method, path, status, remote } = rows[0];
+    assert.deepEqual({ method, path, status }, { method: "POST", path: "/nope", status: 404 });
+    assert.match(String(remote), /^(::ffff:)?127\.0\.0\.1$/);
+  });
+});
+
+test("serveAllStatus logs the status a POST was actually sent: a 403 denial and a route's 400 (#582)", async () => {
+  await withAccessLog(async (port, accessRows) => {
+    const refused = await fetch(`http://127.0.0.1:${port}/answer`, { method: "POST", headers: { origin: "http://evil.example" } });
+    assert.equal(refused.status, 403);
+    await refused.text();
+    const rejected = await fetch(`http://127.0.0.1:${port}/prune`, { method: "POST" });
+    assert.equal(rejected.status, 400);
+    await rejected.text();
+    const rows = await accessRows(2);
+    assert.deepEqual(
+      rows.map(({ path, status }) => ({ path, status })),
+      [
+        { path: "/answer", status: 403 },
+        { path: "/prune", status: 400 },
+      ],
+    );
+  });
+});
+
+test("serveAllStatus logs a POST's path without its query string, and logs no GET (#582)", async () => {
+  await withAccessLog(async (port, accessRows) => {
+    for (const path of ["/", "/api/landing"]) {
+      const res = await fetch(`http://127.0.0.1:${port}${path}`);
+      assert.equal(res.status, 200);
+      await res.text();
+    }
+    const posted = await fetch(`http://127.0.0.1:${port}/nope?project=solo&secret=1`, { method: "POST" });
+    await posted.text();
+    // The POST's row is written after the GETs', so once it is there any GET row would be too.
+    const rows = await accessRows(1);
+    assert.deepEqual(
+      rows.map(({ method, path }) => ({ method, path })),
+      [{ method: "POST", path: "/nope" }],
+    );
+  });
 });

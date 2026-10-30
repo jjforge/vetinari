@@ -18,6 +18,7 @@ import { handleRedrive } from "./dashboard-route-redrive.ts";
 import { handleStop } from "./dashboard-route-stop.ts";
 import { handleHostLog } from "./dashboard-route-host-log.ts";
 import { handlePage } from "./dashboard-route-page.ts";
+import { hostLogger } from "./log.ts";
 
 // The dashboard is split into a reconstruction/model, presentation renders, prune
 // shelling, and one module per HTTP surface (ADR 0006). This file is the thin
@@ -112,7 +113,15 @@ export async function serveAllStatus(
     .split(",")
     .map((h) => h.trim())
     .filter(Boolean);
+  const logger = hostLogger();
   const server = createServer((req, res) => {
+    // One access row per POST — every one starts a process or reshapes a campaign — written once
+    // the response closes (sent or aborted), so `status` is the code actually sent (#582).
+    if (req.method === "POST") {
+      const path = URL.parse(req.url ?? "/", "http://localhost")?.pathname ?? null;
+      const remote = req.socket.remoteAddress ?? null;
+      res.once("close", () => logger.log("dashboard-request", { method: "POST", path, status: res.statusCode, remote }));
+    }
     void (async () => {
       const denial = dashboardRequestDenial(req.headers.host, req.headers.origin, allowedHosts);
       if (denial) {

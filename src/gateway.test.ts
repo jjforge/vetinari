@@ -20,6 +20,7 @@ import {
   isStatusCommand,
   loadGatewayProjects,
   logNoConnectionSkips,
+  logPollLoopError,
   newGatewayTicks,
   newOutboxBackoff,
   newPendingConfirms,
@@ -509,6 +510,62 @@ test("pollLoop advances the offset it passes to the poller across cycles", async
   assert.deepEqual(offsets, [2, 5, 9]);
 });
 
+test("pollLoop survives a throwing handler: logs it by bot id, handles the next message, and keeps polling", async () => {
+  const botConn: TgConn = { token: "123456789:SECRET", chat: "-1" };
+  const logger = memoryLogger();
+  const handled: string[] = [];
+  const offsets: number[] = [];
+  const results = [
+    { offset: 1, messages: [{ text: "/status" }, { text: "prune 641" }] },
+    { offset: 2, messages: [] },
+  ];
+  const poll = async (_c: TgConn, offset: number) => {
+    offsets.push(offset);
+    return results.shift() ?? null;
+  };
+
+  await pollLoop(botConn, newReplyIndex(), noPending(), {
+    poll,
+    resume: () => {},
+    onStatus: () => {
+      throw new Error("EACCES: events.jsonl");
+    },
+    onPrune: (_c, command) => {
+      handled.push(command.issue);
+    },
+    logger,
+  });
+
+  assert.deepEqual(handled, ["641"], "the message after the throwing one is still handled");
+  assert.deepEqual(offsets, [0, 1, 2], "the loop keeps polling after the throw");
+  const rows = (logger.events as unknown as Record<string, unknown>[]).filter((e) => e.event === "gateway-handler-error");
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].bot, "123456789");
+  assert.match(String(rows[0].error), /EACCES/);
+  assert.doesNotMatch(JSON.stringify(logger.events), /SECRET/, "no row carries the full token");
+});
+
+test("logPollLoopError logs a gateway-poll-error row naming the bot id, never the token", () => {
+  const logger = memoryLogger();
+
+  logPollLoopError(logger, { token: "123456789:SECRET", chat: "-1" }, new Error("boom"));
+
+  const rows = logger.events as unknown as Record<string, unknown>[];
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].event, "gateway-poll-error");
+  assert.equal(rows[0].bot, "123456789");
+  assert.match(String(rows[0].error), /boom/);
+  assert.equal("token" in rows[0], false);
+  assert.doesNotMatch(JSON.stringify(rows), /SECRET/);
+});
+
+// A source-text pin: no gateway log call hands a log row a `token` field.
+test("no log row written by gateway.ts carries a token field", () => {
+  const src = readFileSync(join(import.meta.dirname, "gateway.ts"), "utf8");
+  const offenders = src.match(/\.log\(\s*"[^"]+",\s*\{[^}]*\btoken\b[^}]*\}/g) ?? [];
+  assert.deepEqual(offenders, []);
+});
+
 // --- The poll supervisor: keeps the running poll loops in sync with the live
 // targets across ticks. `targets` (live compute), `start` (spin up a loop), and
 // `tick` (sleep one interval, or stop) are injected so the reconcile behaviour is
@@ -525,10 +582,124 @@ const ticksThenStop = (n: number) => {
   return async () => left-- > 0;
 };
 
+// Each started loop runs until the test ends it: `end(offset)` resolves it with
+// the offset it reached, `fail(error)` rejects it.
 const recordingStart = () => {
-  const started: Array<{ token: string; signal: AbortSignal }> = [];
-  return { started, start: (conn: TgConn, signal: AbortSignal) => started.push({ token: conn.token, signal }) };
+  const started: Array<{
+    token: string;
+    signal: AbortSignal;
+    offset: number;
+    end: (offset: number) => void;
+    fail: (error: Error) => void;
+  }> = [];
+  const start = (conn: TgConn, signal: AbortSignal, offset: number) =>
+    new Promise<number>((end, fail) => started.push({ token: conn.token, signal, offset, end, fail }));
+  return { started, start };
 };
+
+// `tick` that runs `steps[i]` on pass i (then lets the loop's settle land) and stops after the last.
+const ticksDoing = (...steps: Array<() => void>) => {
+  let i = 0;
+  return async () => {
+    if (i >= steps.length) return false;
+    steps[i++]();
+    await new Promise((r) => setImmediate(r));
+    return true;
+  };
+};
+
+test("supervisePolls restarts a loop that ended on its own, and leaves a still-running one alone", async () => {
+  const { started, start } = recordingStart();
+  const both = [
+    { token: "botA", chat: "-1" },
+    { token: "botB", chat: "-2" },
+  ];
+
+  await supervisePolls(
+    scriptedTargets([both]),
+    start,
+    ticksDoing(() => started[0].end(7)),
+  );
+
+  assert.deepEqual(
+    started.map((s) => s.token),
+    ["botA", "botB", "botA"],
+    "botA's ended loop is started again on the next tick; botB's running loop is not",
+  );
+});
+
+test("supervisePolls restarts an ended loop from the offset it reached, so no message is routed twice", async () => {
+  const { started, start } = recordingStart();
+
+  await supervisePolls(
+    scriptedTargets([[{ token: "botA", chat: "-1" }]]),
+    start,
+    ticksDoing(
+      () => started[0].end(7),
+      () => started[1].end(12),
+    ),
+  );
+
+  assert.deepEqual(
+    started.map((s) => s.offset),
+    [0, 7, 12],
+  );
+});
+
+test("supervisePolls does not restart a loop it stopped for a rotated-away token", async () => {
+  const { started, start } = recordingStart();
+
+  await supervisePolls(
+    scriptedTargets([[{ token: "old", chat: "-1" }], [{ token: "new", chat: "-1" }]]),
+    start,
+    ticksDoing(
+      () => {},
+      () => started[0].end(3),
+    ),
+  );
+
+  assert.deepEqual(
+    started.map((s) => s.token),
+    ["old", "new"],
+  );
+});
+
+test("supervisePolls keeps a token's current loop when a loop it stopped for that token settles late", async () => {
+  const { started, start } = recordingStart();
+  const botA = { token: "botA", chat: "-1" };
+
+  // botA leaves (its loop is stopped), comes back (a fresh loop starts), then the
+  // stopped loop finally settles — that must not unseat the fresh one.
+  await supervisePolls(
+    scriptedTargets([[botA], [], [botA], [botA]]),
+    start,
+    ticksDoing(
+      () => {},
+      () => {},
+      () => started[0].end(5),
+    ),
+  );
+
+  assert.deepEqual(
+    started.map((s) => s.token),
+    ["botA", "botA"],
+  );
+});
+
+test("supervisePolls restarts a loop that rejected", async () => {
+  const { started, start } = recordingStart();
+
+  await supervisePolls(
+    scriptedTargets([[{ token: "botA", chat: "-1" }]]),
+    start,
+    ticksDoing(() => started[0].fail(new Error("boom"))),
+  );
+
+  assert.deepEqual(
+    started.map((s) => s.token),
+    ["botA", "botA"],
+  );
+});
 
 test("supervisePolls starts one loop per initial target", async () => {
   const { started, start } = recordingStart();

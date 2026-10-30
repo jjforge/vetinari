@@ -42,7 +42,7 @@ const tgFailureOf = (res: Response | null, j: any): TgFailure => ({
 });
 
 /** A bot's numeric id — the token's part before the first `:` — so a log row names the bot without carrying its secret. */
-const botId = (conn: TgConn) => conn.token.split(":")[0];
+export const botId = (conn: TgConn) => conn.token.split(":")[0];
 
 /**
  * One `sendMessage` on `conn`, returning the sent message's id. `replyTo` threads it as a reply to

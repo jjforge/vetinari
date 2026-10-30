@@ -1215,6 +1215,51 @@ test("a digest with no postComment wired is logged as dropped, naming the count 
   assert.deepEqual(dropped[0].summaries, ["gate flakes on slow disks", "stale doc line"]);
 });
 
+test("a digest comment that throws is logged as failed, and the run's FINDING notice still goes out", async () => {
+  const tr = fakeTracker();
+  const cfg = harnessCfg({
+    ...tr,
+    maxFindingsPerRun: 1,
+    postComment: async () => {
+      throw new Error("gh: comment rejected");
+    },
+  });
+  const harvest =
+    "<finding><summary>stale doc line</summary><severity>P3</severity></finding>" +
+    "<finding><summary>merge queue drops a commit</summary><severity>P0</severity></finding>" +
+    "<promise>COMPLETE</promise>";
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(greenThen(harvest))));
+
+  assert.equal(outcome, "green");
+  const events = readEventLog(cfg) as {
+    event: string;
+    taskId?: string;
+    summary?: string;
+    count?: number;
+    summaries?: string[];
+    error?: string;
+  }[];
+  assert.deepEqual(
+    events.filter((e) => e.event === "finding-filed").map((e) => e.summary),
+    ["merge queue drops a commit"],
+  );
+  assert.deepEqual(
+    events.filter((e) => e.event === "finding-digested").map((e) => e.summary),
+    ["stale doc line"],
+  );
+  const failed = events.filter((e) => e.event === "finding-digest-failed");
+  assert.equal(failed.length, 1, "one event for the whole digest");
+  assert.equal(failed[0].taskId, "T-1");
+  assert.equal(failed[0].count, 1);
+  assert.deepEqual(failed[0].summaries, ["stale doc line"]);
+  assert.match(String(failed[0].error), /comment rejected/);
+  assert.equal(events.filter((e) => e.event === "harvest-failed").length, 0, "a failed digest is not a failed harvest");
+  const notices = listOutbox(cfg).filter((m) => m.category === "finding" && /FINDING/.test(m.text));
+  assert.equal(notices.length, 1);
+  assert.match(notices[0].text, /filed 1 incidental finding\(s\)/);
+});
+
 test("runLoop resumes the parked session on the answer path without re-fetching the task", async () => {
   let fetched = 0;
   const cfg = harnessCfg({

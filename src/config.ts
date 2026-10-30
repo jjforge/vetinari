@@ -499,7 +499,8 @@ export interface VetinariConfig {
    * At most this many NEW issues filed from one run's harvested findings, most severe
    * first; the overflow goes into the run's one digest comment (via `postComment`).
    * With no `postComment` the digest is not posted; the run logs `finding-digest-dropped`
-   * with its count and summaries instead. Default 2.
+   * with its count and summaries instead. A digest comment that throws is logged
+   * `finding-digest-failed` with its count, summaries and error, and the harvest carries on. Default 2.
    */
   maxFindingsPerRun?: number;
   /**

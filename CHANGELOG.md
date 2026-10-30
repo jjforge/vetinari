@@ -23,6 +23,7 @@ Within a milestone each bold section label appears at most once.
 
 **Breaking changes:**
 - [api] `partitionWaves` is no longer exported — wave placement now happens inside `planCampaign`, which needs the selection order a `layerWaves` plan no longer carries; call `planCampaign` instead (#622).
+- [user] `--config <path>` is now read only before the mode (`vetinari --config x.mts statusline`); after the mode it is no longer treated as a config and is never imported. Move any `vetinari <mode> … --config x` invocation — a status-bar command such as `vetinari statusline --config x` included — so `--config` comes first (#524).
 
 **New features:**
 - [user] Each wave that closes now prints where its time went — `wave 3/13: 8m24s — agent 5m33s · branch gates 1m19s · integration + base gate 1m31s · post-merge 1s`, with `—` for a phase the event log cannot show — and a campaign's end (completion, park or failure) prints its total merged-base gate time and how many base gates that was. Both are silent under `--json` (#615).
@@ -76,6 +77,7 @@ Within a milestone each bold section label appears at most once.
 - [ops] A failed Telegram poll is no longer silent: the gateway logs `telegram-poll-failed` with the HTTP status (or `"network"`) and Telegram's `description`, once per distinct failure per 5 minutes per bot, and backs off 5 s doubling to 5 min (at least a 429's `retry_after`), so a revoked token (401) or a second poller (409) shows up in the host log (#535).
 - [ops] `telegram-send-failed` now carries Telegram's `description` and, on a 429, `retryAfter`; a failing outbox record is retried on a 5 s → 5 min backoff instead of every tick, and a 429 holds off that bot's other outbox records until `retry_after` has passed (#535).
 - [ops] A digest comment that fails to post no longer turns the run's harvest into `harvest-failed`: it is logged `finding-digest-failed` (count, summaries, error), and filed findings still send their 🔎 FINDING notice (#547).
+- [ops] The gateway no longer goes deaf when a handler throws: a failing message (e.g. a `/status` whose event-log read fails) is logged as `gateway-handler-error` and the bot keeps polling, and a poll loop that does end is restarted on the next reconcile tick from the offset it reached, so no reply is routed twice (#534).
 
 **Security:**
 - [user] The dashboard caps every POST body (answer, graft, prune, redrive, stop) at 64 KiB and answers a larger one with a plain `413` instead of reading it without limit (#564).
@@ -86,6 +88,9 @@ Within a milestone each bold section label appears at most once.
 - [user] Every dashboard response now carries a Content-Security-Policy that admits only the dashboard's own inline scripts and styles and same-origin requests (and forbids framing), plus `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`; error bodies are sent as `text/plain; charset=utf-8` (#526).
 - [user] The dashboard now sends `X-Frame-Options: DENY` on every response, alongside its CSP `frame-ancestors 'none'`, so no page can frame it and clickjack Redrive, Stop or Prune (#525).
 - [user] `run`, `campaign`, `redrive` and `baseline` warn once on stderr when the project's `.vetinari.local/.env` or `host.env` is readable by group or others, naming each file and its mode; the gateway warns the same way at start for every registered project. Warn only — nothing refuses and no file mode is changed (#563).
+- [user] The dashboard's graft, prune and answer routes answer 400 to any id that is not an issue number (`12` or `#12`) and spawn nothing, so request text can no longer reach a child's argv as an option (#524).
+- [user] The dashboard's graft and prune previews (`GET /graft?preview`, `GET /prune?preview`) refuse with 403 a browser request whose `Sec-Fetch-Site` is not `same-origin`, so a page on another site can no longer start a preview child; curl and scripts, which send no `Sec-Fetch-Site`, are unaffected (#524).
+- [ops] Gateway log rows (`gateway-poll-error`, `gateway-handler-error`) name the bot by its id instead of carrying the bot token, which the dashboard's host-log pane served (#534).
 
 **Infrastructure:**
 - [internal] A GitHub Actions workflow (`.github/workflows/ci.yml`) runs `npm ci`, `npm run typecheck`, `npm run format:check` and `npm test` on every push and pull request to `main`, across Node 22.x, 24.x and 26.x — so a commit pushed straight to `main` is gated, and the Node version the gateway unit runs is tested (#530).

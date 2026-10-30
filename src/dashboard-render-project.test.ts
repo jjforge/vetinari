@@ -17,6 +17,7 @@ import {
 } from "./dashboard-assets.ts";
 import {
   archiveRowMatches,
+  archiveStatusConfig,
   buildStatus,
   buildStatusWithIssueNames,
   cappedRawRows,
@@ -2827,4 +2828,100 @@ test("an archived run renders a pruned wave last and greyed, expanded", () => {
   const pruned = body.indexOf('<section class="wave pruned">');
   assert.ok(completed >= 0 && pruned > completed, "the pruned wave renders after the surviving one, as an expanded card");
   assert.doesNotMatch(body, /class="pruned-wave-chip"/);
+});
+
+/** A campaign whose first, two-member wave closed with every phase boundary logged (#619) — 754 the
+ * slower member (5m agent, 1m branch gates), its base gate 30s after the last green and 9s long,
+ * the wave-done 5s later — and whose second wave is still in flight. */
+const timedCampaignLog = [
+  event("campaign-start", { ts: "2026-10-30T00:00:00.000Z", waves: [["753", "754"], ["755"]], slots: 2 }),
+  event("wave-start", { ts: "2026-10-30T00:00:00.000Z", index: 0, tasks: ["753", "754"] }),
+  event("spawn", { ts: "2026-10-30T00:01:00.000Z", taskId: "753" }),
+  event("spawn", { ts: "2026-10-30T00:01:00.000Z", taskId: "754" }),
+  event("green", { ts: "2026-10-30T00:04:00.000Z", taskId: "753", branch: "agent/753", commits: [] }),
+  event("gate-result", { ts: "2026-10-30T00:06:59.000Z", taskId: "754", cmd: "npm test", exitCode: 0, seconds: 60, outFile: "o" }),
+  event("green", { ts: "2026-10-30T00:07:00.000Z", taskId: "754", branch: "agent/754", commits: [] }),
+  event("merged", { ts: "2026-10-30T00:07:10.000Z", taskId: "753" }),
+  event("merged", { ts: "2026-10-30T00:07:20.000Z", taskId: "754" }),
+  event("gate-result", { ts: "2026-10-30T00:07:29.000Z", cmd: "npm test", exitCode: 0, seconds: 9, outFile: "o" }),
+  event("base-gate", { ts: "2026-10-30T00:07:30.000Z", index: 0, green: true }),
+  event("wave-done", { ts: "2026-10-30T00:07:35.000Z", index: 0, merged: ["753", "754"] }),
+  event("wave-start", { ts: "2026-10-30T00:08:00.000Z", index: 1, tasks: ["755"] }),
+  event("spawn", { ts: "2026-10-30T00:08:01.000Z", taskId: "755" }),
+];
+
+/** The `<section class="wave …">` card holding the given member's chip. */
+const waveCardHolding = (html: string, issueNumber: string): string => {
+  const at = html.indexOf(`data-issue="${issueNumber}"`);
+  const start = html.lastIndexOf('<section class="wave ', at);
+  return html.slice(start, html.indexOf("</section>", at) + "</section>".length);
+};
+
+test("a closed wave's card shows its time split in the terminal's wording; an in-flight wave's shows none (#619)", () => {
+  const dir = join(tmpdir(), `vetinari-render-time-split-${Date.now()}`);
+  seedState(dir, timedCampaignLog);
+  const html = renderStatusPage(buildStatus(cfgFor(dir)));
+  assert.match(
+    waveCardHolding(html, "753"),
+    /<p class="wave-time-split">7m35s — agent 5m0s · branch gates 1m0s · integration \+ base gate 30s · post-merge 5s<\/p><\/section>$/,
+  );
+  assert.doesNotMatch(waveCardHolding(html, "755"), /wave-time-split/);
+});
+
+test("a closed wave's phase the log cannot split renders as a `—` carrying why; the total's separator `—` stays plain (#619)", () => {
+  // No base gate logged — the wave merged nothing new — so integration and post-merge are unknown.
+  const dir = join(tmpdir(), `vetinari-render-time-split-unknown-${Date.now()}`);
+  seedState(
+    dir,
+    timedCampaignLog.filter((e) => e.event !== "base-gate"),
+  );
+  const unknown = '<span title="not derivable from the log: redriven wave, re-admitted member, or nothing new merged">—</span>';
+  assert.match(
+    waveCardHolding(renderStatusPage(buildStatus(cfgFor(dir))), "753"),
+    new RegExp(
+      `<p class="wave-time-split">7m35s — agent 5m0s · branch gates 1m0s · integration \\+ base gate ${unknown} · post-merge ${unknown}</p>`,
+    ),
+  );
+});
+
+test("the campaign-meta line ends with the campaign's base-gate total, and is unchanged with no base gate yet (#619)", () => {
+  const dir = join(tmpdir(), `vetinari-render-base-gates-${Date.now()}`);
+  seedState(dir, [
+    ...timedCampaignLog,
+    event("merged", { ts: "2026-10-30T00:10:00.000Z", taskId: "755" }),
+    event("gate-result", { ts: "2026-10-30T00:12:00.000Z", cmd: "npm test", exitCode: 0, seconds: 111, outFile: "o" }),
+    event("base-gate", { ts: "2026-10-30T00:12:01.000Z", index: 1, green: true }),
+    event("wave-done", { ts: "2026-10-30T00:12:02.000Z", index: 1, merged: ["755"] }),
+  ]);
+  assert.match(renderStatusPage(buildStatus(cfgFor(dir))), /<p class="campaign-meta">3 issues · 2 waves · base gates: 2 runs, 2m0s<\/p>/);
+
+  seedState(dir, timedCampaignLog.slice(0, 9));
+  assert.match(renderStatusPage(buildStatus(cfgFor(dir))), /<p class="campaign-meta">3 issues · 2 waves<\/p>/);
+});
+
+test("an archived run's row ends with its base-gate total and its expanded waves show their time splits, from the archived log (#619)", () => {
+  const dir = join(tmpdir(), `vetinari-render-archived-time-split-${Date.now()}`);
+  mkdirSync(dir, { recursive: true });
+  const archiveFile = join(dir, "orchestrator-2026-10-30T00-00-00-000Z.jsonl");
+  writeJsonl(archiveFile, timedCampaignLog.slice(0, 12));
+  const html = renderStatusPage(
+    { project: "beta", waves: [], parked: [] },
+    {
+      selected: "beta",
+      archivedRuns: [
+        {
+          run: "2026-10-30T00-00-00-000Z",
+          startedAt: "2026-10-30T00:00:00.000Z",
+          state: "stalled",
+          issues: 3,
+          status: buildStatus(archiveStatusConfig("beta", archiveFile), { dead: true }),
+        },
+      ],
+    },
+  );
+  assert.match(html, /<span class="lv-verb">stalled · 3 issues · base gates: 1 run, 9s<\/span>/);
+  assert.match(
+    waveCardHolding(html, "753"),
+    /<p class="wave-time-split">7m35s — agent 5m0s · branch gates 1m0s · integration \+ base gate 30s · post-merge 5s<\/p>/,
+  );
 });

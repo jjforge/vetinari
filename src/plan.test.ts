@@ -1175,6 +1175,14 @@ test("describeFilesetCheck renders a confident line and a would-halt line per id
   ]);
   assert.match(out, /#611.*confident.*a\.ts/);
   assert.match(out, /#640.*(not confident|halt)/i);
+  assert.ok(out.split("\n").includes("#640  NOT confident — campaign would halt (planning)"));
+});
+
+test("describeFilesetCheck says the check is skipped, not that the campaign would halt, for a one-issue selection (#557)", () => {
+  const skipped = "#640  NOT confident — check skipped for a one-issue selection (would halt beside other tickets)";
+  assert.equal(describeFilesetCheck([{ id: "640", confident: false, files: [] }]), skipped);
+  assert.equal(describeFilesetCheck([{ id: "640", confident: false, files: ["a.ts"] }]), skipped + " (resolved so far: `a.ts`)");
+  assert.equal(describeFilesetCheck([{ id: "611", confident: true, files: ["a.ts"] }]), "#611  confident — `a.ts`");
 });
 
 test("labelsFromTask reads GitHub label objects and is best-effort on non-JSON", () => {

@@ -972,16 +972,20 @@ export async function runFilesetCheck(cfg: CampaignPlanConfig, ids: string[]): P
 /**
  * Render `runFilesetCheck`'s results one line per ticket: a confident ticket lists
  * the fileKeys the resolver pinned down; a not-confident one says `campaign-plan`
- * would halt on it (naming any partial cites resolved so far). Plain text for the
- * terminal and for the `/fileset` sweep to read.
+ * would halt on it (naming any partial cites resolved so far). A one-issue selection
+ * (a single result) says the check is skipped instead, since `planCampaign` runs a
+ * lone ticket without it. Plain text for the terminal and for the `/fileset` sweep to
+ * read.
  */
 export function describeFilesetCheck(results: FilesetCheckResult[]): string {
+  const unconfident =
+    results.length === 1 ? "check skipped for a one-issue selection (would halt beside other tickets)" : "campaign would halt (planning)";
   return results
     .map((r) => {
       const cites = r.files.map((f) => `\`${f}\``).join(", ");
       return r.confident
         ? `#${r.id}  confident — ${cites}`
-        : `#${r.id}  NOT confident — campaign would halt (planning)` + (r.files.length ? ` (resolved so far: ${cites})` : "");
+        : `#${r.id}  NOT confident — ${unconfident}` + (r.files.length ? ` (resolved so far: ${cites})` : "");
     })
     .join("\n");
 }

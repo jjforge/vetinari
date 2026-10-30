@@ -198,6 +198,25 @@ test("GET /api/host-log serves the host log newest-first as raw JSONL lines; a m
   }
 });
 
+test("GET /healthz serves the health source's object as JSON with a 200; with no health source it is a 404", async () => {
+  const configDir = join(tmpdir(), `vetinari-healthz-${Date.now()}`);
+  const body = { stale: true, announce: { lastTick: null, stale: true }, bots: [] };
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1", health: () => body });
+  const bare = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  try {
+    const res = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/healthz`);
+    assert.equal(res.status, 200, "200 even when stale — the flag carries the verdict");
+    assert.equal(res.headers.get("content-type"), "application/json; charset=utf-8");
+    assert.deepEqual(await res.json(), body);
+
+    const missing = await fetch(`http://127.0.0.1:${(bare.address() as AddressInfo).port}/healthz`);
+    assert.equal(missing.status, 404, "the standalone status server has no health source");
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+    await new Promise<void>((r) => bare.close(() => r()));
+  }
+});
+
 test("serveAllStatus answers a POST body over 64 KiB with a plain 413, not a 500 with a stack", async () => {
   const configDir = join(tmpdir(), `vetinari-body-cap-${Date.now()}`);
   const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });

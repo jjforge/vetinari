@@ -68,6 +68,9 @@ export async function tgDrain(conn: TgConn): Promise<number> {
 
 export type TgMsg = { text: string; replyToId?: number };
 
+/** How long one `getUpdates` long-poll holds open, in seconds — also the gateway's poll-staleness unit. */
+export const TG_POLL_TIMEOUT_S = 50;
+
 /**
  * One long-poll cycle, text messages from the configured chat only.
  *
@@ -75,7 +78,7 @@ export type TgMsg = { text: string; replyToId?: number };
  * process may poll: a second poller silently steals messages from the first.
  */
 export async function tgPoll(conn: TgConn, offset: number): Promise<{ offset: number; messages: TgMsg[] }> {
-  const j: any = await fetch(`${api(conn)}/getUpdates?timeout=50&offset=${offset}`)
+  const j: any = await fetch(`${api(conn)}/getUpdates?timeout=${TG_POLL_TIMEOUT_S}&offset=${offset}`)
     .then((r) => r.json())
     .catch(() => null);
   if (!j?.ok) {

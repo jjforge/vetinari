@@ -6,16 +6,19 @@ import { join } from "node:path";
 import { register } from "./registry.ts";
 import { enqueueOutbound, listOutboxIn, outboxDirOf, type ParkedRecord } from "./state.ts";
 import { memoryLogger } from "./log.ts";
-import type { TgConn } from "./telegram.ts";
+import { TG_POLL_TIMEOUT_S, type TgConn } from "./telegram.ts";
 import {
+  ANNOUNCE_INTERVAL_MS,
   drainOutbox,
   formatGatewayStatus,
   formatParkAnnouncement,
   formatPrunePreview,
+  gatewayHealth,
   handlePruneCommand,
   isStatusCommand,
   loadGatewayProjects,
   logNoConnectionSkips,
+  newGatewayTicks,
   newPendingConfirms,
   newReplyIndex,
   campaignParkMove,
@@ -29,6 +32,7 @@ import {
   reconcilePollTargets,
   recordSend,
   supervisePolls,
+  trackPollTicks,
   resolvePruneTarget,
   resolveReply,
   resumeEnv,
@@ -574,6 +578,92 @@ test("supervisePolls tears down a rotated-away token's loop and starts its repla
   );
   assert.equal(started[0].signal.aborted, true, "the rotated-away loop's signal is aborted so it tears down");
   assert.equal(started[1].signal.aborted, false, "the replacement loop keeps running");
+});
+
+const HEALTH_NOW = Date.parse("2026-10-21T12:01:00.000Z");
+
+test("gatewayHealth reports recent announce and poll ticks as fresh, with their ISO times", () => {
+  const ticks = newGatewayTicks(HEALTH_NOW - 60_000);
+  ticks.announce = HEALTH_NOW - 1_000;
+  ticks.polls.set("123456789:SECRET", { startedAt: HEALTH_NOW - 60_000, lastPoll: HEALTH_NOW - 10_000 });
+
+  assert.deepEqual(gatewayHealth(ticks, HEALTH_NOW), {
+    stale: false,
+    announce: { lastTick: "2026-10-21T12:00:59.000Z", stale: false },
+    bots: [{ bot: "123456789", lastPoll: "2026-10-21T12:00:50.000Z", stale: false }],
+  });
+});
+
+test("gatewayHealth flags the announce loop stale once its last tick is older than 3× the announce interval", () => {
+  const ticks = newGatewayTicks(HEALTH_NOW - 3_600_000);
+  ticks.announce = HEALTH_NOW - 3 * ANNOUNCE_INTERVAL_MS - 1;
+
+  const health = gatewayHealth(ticks, HEALTH_NOW);
+  assert.equal(health.announce.stale, true);
+  assert.equal(health.stale, true);
+});
+
+test("gatewayHealth flags only the bot whose last poll is older than 3× the long-poll timeout", () => {
+  const ticks = newGatewayTicks(HEALTH_NOW - 3_600_000);
+  ticks.announce = HEALTH_NOW - 1_000;
+  ticks.polls.set("111:hung", { startedAt: HEALTH_NOW - 3_600_000, lastPoll: HEALTH_NOW - 3 * TG_POLL_TIMEOUT_S * 1000 - 1 });
+  ticks.polls.set("222:live", { startedAt: HEALTH_NOW - 3_600_000, lastPoll: HEALTH_NOW - 10_000 });
+
+  const health = gatewayHealth(ticks, HEALTH_NOW);
+  assert.deepEqual(
+    health.bots.map((b) => [b.bot, b.stale]),
+    [
+      ["111", true],
+      ["222", false],
+    ],
+  );
+  assert.equal(health.announce.stale, false);
+  assert.equal(health.stale, true);
+});
+
+test("gatewayHealth judges a loop with no tick yet from its start: fresh just after, stale past 3× the interval", () => {
+  const started = HEALTH_NOW;
+  const ticks = newGatewayTicks(started);
+  ticks.polls.set("123:tok", { startedAt: started, lastPoll: null });
+
+  const fresh = gatewayHealth(ticks, started + 1_000);
+  assert.deepEqual(fresh, {
+    stale: false,
+    announce: { lastTick: null, stale: false },
+    bots: [{ bot: "123", lastPoll: null, stale: false }],
+  });
+
+  const announceLate = gatewayHealth(ticks, started + 3 * ANNOUNCE_INTERVAL_MS + 1);
+  assert.equal(announceLate.announce.stale, true);
+  const pollLate = gatewayHealth(ticks, started + 3 * TG_POLL_TIMEOUT_S * 1000 + 1);
+  assert.equal(pollLate.bots[0].stale, true);
+});
+
+test("trackPollTicks records a poll loop's start and each returned cycle, and drops the loop once it is torn down", async () => {
+  let clock = HEALTH_NOW;
+  const ticks = newGatewayTicks(clock);
+  const emptyPoll = async (_c: TgConn, offset: number) => ({ offset, messages: [] });
+  const old = { token: "111:OLD-SECRET", chat: "-1" };
+  const kept = { token: "222:KEPT-SECRET", chat: "-1" };
+  const oldLoop = new AbortController();
+  trackPollTicks(ticks, old, oldLoop.signal, emptyPoll, () => clock);
+  const keptPoll = trackPollTicks(ticks, kept, new AbortController().signal, emptyPoll, () => clock);
+
+  assert.deepEqual(
+    gatewayHealth(ticks, clock).bots.map((b) => [b.bot, b.lastPoll]),
+    [
+      ["111", null],
+      ["222", null],
+    ],
+  );
+
+  clock += 5_000;
+  await keptPoll(kept, 0);
+  oldLoop.abort();
+
+  const health = gatewayHealth(ticks, clock);
+  assert.deepEqual(health.bots, [{ bot: "222", lastPoll: new Date(clock).toISOString(), stale: false }]);
+  assert.doesNotMatch(JSON.stringify(health), /SECRET/, "no field carries a token");
 });
 
 test("parkRecoveryMove prints the exact move each reason asks of the human", () => {

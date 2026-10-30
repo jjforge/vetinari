@@ -41,6 +41,8 @@ export interface DashboardDeps {
   ) => Promise<StartedChild>;
   /** The startup window POST /redrive and POST /answer wait — default 5000ms, injectable for tests. */
   childStartupMs?: number;
+  /** The gateway's loop health `GET /healthz` serves — absent on the standalone `status` server, where the route 404s. */
+  health?: () => unknown;
 }
 
 /**

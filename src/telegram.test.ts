@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { tgEnvConn, tgSend, tgPoll } from "./telegram.ts";
+import { TG_POLL_TIMEOUT_S, tgEnvConn, tgSend, tgPoll } from "./telegram.ts";
 import { memoryLogger } from "./log.ts";
 
 const TG_ENV = ["VETINARI_TELEGRAM_BOT_TOKEN", "VETINARI_TELEGRAM_CHAT_ID", "VETINARI_TELEGRAM_THREAD_ID"];
@@ -128,6 +128,21 @@ test("tgSend routes a send failure to the injected logger, not the process-globa
     logger.events.map((e) => [e.event, (e as { status?: unknown }).status]),
     [["telegram-send-failed", 400]],
   );
+});
+
+test("tgPoll long-polls getUpdates for TG_POLL_TIMEOUT_S seconds — the unit the gateway's staleness is judged in", async () => {
+  const urls: string[] = [];
+  await withFetch(
+    (async (url: string) => {
+      urls.push(String(url));
+      return okResponse([]);
+    }) as typeof fetch,
+    async () => {
+      await tgPoll({ token: "t", chat: "c" }, 7);
+    },
+  );
+  assert.equal(new URL(urls[0]).searchParams.get("timeout"), "50");
+  assert.equal(TG_POLL_TIMEOUT_S, 50);
 });
 
 test("tgPoll keeps only messages from the connection's chat", async () => {

@@ -4,7 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { dispatch, identityLine, parseArgs, type Command, type DispatchDeps } from "./cli-dispatch.ts";
-import { projectHasLiveCampaign, registerProject } from "./host-slots.ts";
+import { LiveCampaignRefusal, projectHasLiveCampaign, registerProject } from "./host-slots.ts";
 import { GraftRejectedError } from "./graft.ts";
 import { Refusal } from "./refusal.ts";
 
@@ -921,6 +921,21 @@ test("dispatch redrive refuses with one line when a campaign lease for the proje
   );
 });
 
+// The campaign lease is the authoritative guard (#527): a campaign that started between the early
+// `projectHasLiveCampaign` probe and this process's own lease makes `campaign()` throw at registration.
+const losesLeaseRace = () =>
+  (async () => {
+    throw new LiveCampaignRefusal("demo");
+  }) as unknown as DispatchDeps["campaign"];
+
+test("dispatch redrive that loses the lease race to a live campaign refuses like the early check — no archive, no exit code (#527)", async () => {
+  const { deps, logged, exitCodes } = makeDeps({ campaign: losesLeaseRace() });
+  await dispatch({ kind: "redrive", agent: {}, autoPrune: false, override: false, json: false }, deps);
+  assert.deepEqual(logged, ["a campaign is already running for demo — it will pick up the work; redrive refused."]);
+  assert.equal((deps.archiveIfIdle as any).calls.length, 0, "the live campaign's log is not archived");
+  assert.deepEqual(exitCodes, []);
+});
+
 test("dispatch redrive --override forwards the failed-member override", async () => {
   const { deps } = makeDeps();
   await dispatch({ kind: "redrive", agent: {}, autoPrune: false, override: true, json: false }, deps);
@@ -1111,6 +1126,27 @@ test("dispatch campaign --resume refuses like redrive while a campaign is live �
     logged.some((l) => l === "a campaign is already running for demo — it will pick up the work; redrive refused."),
     "it logs redrive's existing refusal line",
   );
+});
+
+test("dispatch campaign --resume that loses the lease race to a live campaign refuses like redrive — no archive, no exit code (#527)", async () => {
+  const { deps, logged, exitCodes } = makeDeps({ campaign: losesLeaseRace() });
+  await dispatch(campaignCmd({ positional: [], resume: true }), deps);
+  assert.equal(logged.at(-1), "a campaign is already running for demo — it will pick up the work; redrive refused.");
+  assert.equal((deps.archiveIfIdle as any).calls.length, 0, "the live campaign's log is not archived");
+  assert.deepEqual(exitCodes, []);
+});
+
+test("dispatch campaign that loses the lease race to a live campaign surfaces the Refusal (#527)", async () => {
+  const { deps } = makeDeps({
+    campaign: losesLeaseRace(),
+    expandSelection: spy(Promise.resolve(["101"])) as any,
+    runCampaignPlan: spy(Promise.resolve({ waves: [["101"]], waveArgs: '"101"', report: "the plan", suggestedName: "" })) as any,
+  });
+  await assert.rejects(
+    () => dispatch(campaignCmd(), deps),
+    (err: Error) => err instanceof Refusal && err.message === "a campaign is already running for demo — campaign refused.",
+  );
+  assert.equal((deps.archiveIfIdle as any).calls.length, 0);
 });
 
 test("dispatch campaign with an empty selection throws the needs-an-issue message", async () => {
@@ -1755,6 +1791,18 @@ test("dispatch answer delivers then redrives the paused campaign when no campaig
   assert.equal((deps.campaign as any).calls.length, 1);
   assert.deepEqual((deps.campaign as any).calls[0][4], { resume: true });
   assert.equal((deps.archiveIfIdle as any).calls.length, 1, "the answer→redrive path archives once idle");
+});
+
+test("dispatch answer whose redrive loses the lease race to a live campaign leaves the re-admit to it — no archive, no exit code (#527)", async () => {
+  const { deps, logged, exitCodes } = makeDeps({
+    readEventLog: spy(pausedCampaignAfterGreen()) as any,
+    campaign: losesLeaseRace(),
+  });
+  await dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps);
+  assert.deepEqual((deps.answerParked as any).calls, [[deps.cfg, "436", "ok"]], "the answer is already delivered");
+  assert.equal(logged.at(-1), "436 answered — the live campaign will re-admit it.");
+  assert.equal((deps.archiveIfIdle as any).calls.length, 0, "the live campaign's log is not archived");
+  assert.deepEqual(exitCodes, []);
 });
 
 test("dispatch answer on a member whose last outcome is `failed` delivers, skips the redrive and names `vetinari redrive --override`", async () => {

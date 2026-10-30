@@ -18,7 +18,7 @@ import { resolve } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import { ANSWER_SOURCE_ENV_VAR, parseAgentFlags, parseAnswerSource } from "./config.ts";
 import { renderUsage } from "./help.ts";
-import type { HostBudget, liveCampaignPid, projectHasLiveCampaign } from "./host-slots.ts";
+import { LiveCampaignRefusal, type HostBudget, type liveCampaignPid, type projectHasLiveCampaign } from "./host-slots.ts";
 import { DOCKERFILE, staleImageWarning } from "./modes.ts";
 import type { build, baseline, campaign, tgTest, requireTelegram, readImageFreshness, CampaignOutcome } from "./modes.ts";
 import type { runTgConnect } from "./tg-connect.ts";
@@ -440,6 +440,21 @@ export interface DispatchDeps {
   credentialsExposureWarning: typeof credentialsExposureWarning;
 }
 
+/**
+ * Start a resume campaign, or return `undefined` when it loses the lease race to a live campaign
+ * (#527): the early `projectHasLiveCampaign` probe reads without the host lock, so a campaign that
+ * started since makes `campaign()` refuse at registration. The caller then reports the same refusal
+ * its early check gives and runs no further step — no `archiveIfIdle` of the live campaign's log.
+ */
+async function resumeUnlessLive(start: () => Promise<CampaignOutcome>): Promise<CampaignOutcome | undefined> {
+  try {
+    return await start();
+  } catch (e) {
+    if (e instanceof LiveCampaignRefusal) return undefined;
+    throw e;
+  }
+}
+
 /** Warn (stderr, never refusing) when `cfg.image` is older than its Dockerfile (#444). */
 function warnIfImageStale(deps: DispatchDeps): void {
   const { image } = deps.cfg;
@@ -564,11 +579,17 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
       warnIfImageStale(deps);
       warnIfCredentialsExposed(deps);
       refuseIfMountParentsUnwritable(deps);
-      const outcome = await deps.campaign(cfg, [], deps.host, undefined, {
-        autoPrune: cmd.autoPrune,
-        resume: true,
-        override: cmd.override,
-      });
+      const outcome = await resumeUnlessLive(() =>
+        deps.campaign(cfg, [], deps.host, undefined, {
+          autoPrune: cmd.autoPrune,
+          resume: true,
+          override: cmd.override,
+        }),
+      );
+      if (outcome === undefined) {
+        deps.log(`a campaign is already running for ${cfg.project} — it will pick up the work; redrive refused.`);
+        return;
+      }
       deps.archiveIfIdle();
       // Exit with the campaign's verdict (design §5 step 6): 0 done, 2 parked, 1 failed.
       deps.setExitCode(exitCodeFor(outcome));
@@ -731,11 +752,17 @@ async function dispatchCampaign(cmd: Extract<Command, { kind: "campaign" }>, dep
     // Under --resume, --override re-runs a failed member instead of stopping as failed
     // again (design §7); the literal-waves meaning of --override below never applies here
     // (resume takes no batch args and returns before reaching it).
-    const outcome = await deps.campaign(cfg, [], host, cmd.name, {
-      autoPrune: cmd.autoPrune,
-      resume: true,
-      override: cmd.override,
-    });
+    const outcome = await resumeUnlessLive(() =>
+      deps.campaign(cfg, [], host, cmd.name, {
+        autoPrune: cmd.autoPrune,
+        resume: true,
+        override: cmd.override,
+      }),
+    );
+    if (outcome === undefined) {
+      deps.log(`a campaign is already running for ${cfg.project} — it will pick up the work; redrive refused.`);
+      return;
+    }
     deps.archiveIfIdle();
     deps.setExitCode(exitCodeFor(outcome));
     return;
@@ -1074,7 +1101,11 @@ async function dispatchAnswer(cmd: Extract<Command, { kind: "answer" }>, deps: D
       deps.log(`${taskId} answered — it failed on a prior run, so re-run it with \`vetinari redrive --override\`.`);
       return;
     }
-    const outcome = await deps.campaign(cfg, [], host, undefined, { resume: true });
+    const outcome = await resumeUnlessLive(() => deps.campaign(cfg, [], host, undefined, { resume: true }));
+    if (outcome === undefined) {
+      deps.log(`${taskId} answered — the live campaign will re-admit it.`);
+      return;
+    }
     deps.archiveIfIdle();
     deps.setExitCode(exitCodeFor(outcome));
     return;

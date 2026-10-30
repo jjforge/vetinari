@@ -7,6 +7,7 @@ import {
   acquireSlot,
   deregisterProject,
   fairShare,
+  LiveCampaignRefusal,
   machineDefaultCeiling,
   liveCampaignPid,
   projectHasLiveCampaign,
@@ -18,6 +19,7 @@ import {
   withHostSlot,
   type HostBudget,
 } from "./host-slots.ts";
+import { Refusal } from "./refusal.ts";
 
 const freshDir = () => mkdtempSync(join(tmpdir(), "vetinari-slots-"));
 const alive = () => true;
@@ -469,4 +471,46 @@ test("a temp file stranded by a crashed lease write is not read as a lease", () 
     readLeases(dir).map((l) => l.pid),
     [1],
   );
+});
+
+test("a second live campaign for one project is refused at lease time and writes nothing — the authoritative single-campaign guard", () => {
+  const dir = freshDir();
+  registerProject(dir, "P", 1, "campaign", 0, { pid: 1, isAlive: alive });
+
+  assert.throws(
+    () => registerProject(dir, "P", 1, "campaign", 0, { pid: 2, isAlive: alive }),
+    (e: unknown) =>
+      e instanceof LiveCampaignRefusal && e instanceof Refusal && e.message === "a campaign is already running for P — campaign refused.",
+  );
+  assert.deepEqual(
+    readLeases(dir).map((l) => l.pid),
+    [1],
+  );
+});
+
+test("the campaign lease guard refuses only a different live campaign for the same project", () => {
+  const dir = freshDir();
+  const dead = new Set<number>();
+  const isAlive = (pid: number) => !dead.has(pid);
+
+  // The holder's own per-wave demand refresh re-registers its lease and updates `want`.
+  registerProject(dir, "P", 1, "campaign", 0, { pid: 1, isAlive });
+  registerProject(dir, "P", 1, "campaign", 3, { pid: 1, isAlive });
+  assert.equal(readLeases(dir).find((l) => l.pid === 1)!.want, 3);
+
+  // A live campaign for another project, and any `run` registration, are not blocked.
+  registerProject(dir, "Q", 1, "campaign", 0, { pid: 2, isAlive });
+  registerProject(dir, "P", 1, "run", 1, { pid: 3, isAlive });
+
+  // The holder dies: its lingering lease does not block a new campaign for P.
+  dead.add(1);
+  registerProject(dir, "P", 1, "campaign", 0, { pid: 4, isAlive });
+  assert.equal(liveCampaignPid(dir, "P", { isAlive }), 4);
+});
+
+test("a live standalone run's lease does not block a campaign registration for its project", () => {
+  const dir = freshDir();
+  registerProject(dir, "P", 1, "run", 1, { pid: 1, isAlive: alive });
+  registerProject(dir, "P", 1, "campaign", 0, { pid: 2, isAlive: alive });
+  assert.equal(liveCampaignPid(dir, "P", { isAlive: alive }), 2);
 });

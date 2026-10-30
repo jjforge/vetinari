@@ -409,7 +409,7 @@ test("dispatch parked names a redrive-only park and its recovery when no per-iss
   const out = logged.join("\n");
   assert.doesNotMatch(out, /nothing parked/i, "a parked campaign is not idle");
   assert.match(out, /red-base/);
-  assert.match(out, /Fix forward on the base, then `redrive`\./);
+  assert.match(out, /Fix forward on the base, then `vetinari redrive`\./);
   assert.doesNotMatch(out, /reply/i, "a red-base park is not answered by a reply");
 });
 
@@ -654,7 +654,9 @@ for (const postComment of [undefined, async () => {}]) {
     await assert.rejects(
       () => dispatch({ kind: "answer", taskId: "436", text: ["do", "it"] }, deps),
       (err: Error) =>
-        err instanceof Refusal && /resolve the conflict on the base/i.test(err.message) && /vetinari redrive/.test(err.message),
+        err instanceof Refusal &&
+        err.message ===
+          "436 parked on a merge conflict — it cannot be answered. Resolve the conflict on the base, then `vetinari redrive`.",
     );
     assert.equal((deps.answerParked as any).calls.length, 0, "nothing is delivered to a conflict record");
     assert.equal((deps.campaign as any).calls.length, 0);

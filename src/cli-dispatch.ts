@@ -56,6 +56,7 @@ import { campaignParkMove, REDRIVE_ONLY_REASONS } from "./gateway.ts";
 import { formatBaseGateEstimate, makeReporter } from "./report.ts";
 import { pastBaseGates } from "./slow-gates.ts";
 import { Refusal } from "./refusal.ts";
+import { PARK_RECOVERY, recoverySentence } from "./park-recovery.ts";
 import { mountParentPaths, mountParentProblems, type readMountParentOwners } from "./sandbox.ts";
 
 const USAGE = renderUsage();
@@ -1005,9 +1006,7 @@ async function dispatchAnswer(cmd: Extract<Command, { kind: "answer" }>, deps: D
   // A `conflict` park asked nothing either: the member is green and only its merge conflicted, so
   // an answer would re-run it fresh instead of integrating it. Refused whether or not postComment is set.
   if (reason === "conflict")
-    throw new Refusal(
-      `${taskId} parked on a merge conflict — it cannot be answered. Resolve the conflict on the base, then \`vetinari redrive\`.`,
-    );
+    throw new Refusal(`${taskId} parked on a merge conflict — it cannot be answered. ${recoverySentence(PARK_RECOVERY.conflict, taskId)}`);
 
   // A session-less park (an idle stall can save one) re-runs fresh with the answer relayed as a
   // comment, so with no `postComment` it could never be consumed — refuse now, not at re-admit (#496).

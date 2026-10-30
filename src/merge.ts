@@ -7,6 +7,7 @@ import { runGates } from "./gate.ts";
 import { makeSandbox } from "./sandbox.ts";
 import { applyCollect, foldFragments, formatMilestoneDate, FRAGMENT_DIR, type FragmentNearMiss } from "./changelog.ts";
 import { listParkedIn, writeParkedRecord } from "./state.ts";
+import { PARK_RECOVERY, recoverySentence } from "./park-recovery.ts";
 import { readEventLog } from "./event-log.ts";
 import { reduceCampaign } from "./dashboard-model.ts";
 import type { PointerDrop } from "./registry.ts";
@@ -156,7 +157,7 @@ export function parkMergeConflict(cfg: ResolvedConfig, conflict: MergeConflict):
     reason: "conflict",
     detail: conflict.detail,
     branch,
-    question: `Merge conflict on ${branch} — resolve it on the base, then redrive.`,
+    question: `Merge conflict on ${branch}. ${recoverySentence(PARK_RECOVERY.conflict, conflict.taskId)}`,
   });
   cfg.log.log("parked", { taskId: conflict.taskId, reason: "conflict", detail: conflict.detail });
 }

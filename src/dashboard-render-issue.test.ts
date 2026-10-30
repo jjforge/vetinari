@@ -11,6 +11,7 @@ import {
   renderStatusPage,
 } from "./status.ts";
 import { renderGraftInline } from "./dashboard-render-issue.ts";
+import { PARK_RECOVERY, recoverySentence } from "./park-recovery.ts";
 
 test("the aggregated prune-preview and graft-rejection pages draw from the shared palette, never a hand-authored hex (Appendix A, #317)", () => {
   const prunePage = renderAggregatedPrunePreview("demo", "42", "would drop #42, #43");
@@ -111,13 +112,26 @@ test("the issue sheet gates its moves through the single issueMoves rule, single
   assert.doesNotMatch(ISSUE_DETAIL_SHEET_SCRIPT, /moves\.redrive/);
 });
 
-test("the issue sheet carries a fix-forward notice keyed by reason for a conflict/red-base/crash park (#307)", () => {
-  // The redrive-only parks read a fix-forward instruction in the sheet notice, keyed by the
-  // park reason (user-guide park reasons); a question/stall shows the answer box instead.
-  assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /const FIX_FORWARD = \{/);
-  for (const reason of ["conflict", '"red-base"', "crash"]) {
-    assert.ok(ISSUE_DETAIL_SHEET_SCRIPT.includes(reason));
-  }
+test("the issue sheet reads its recovery notice from the shared PARK_RECOVERY table, single-sourced into the script (#307, #578)", () => {
+  // The redrive-only parks read the shared park-reason move in the sheet notice — the table
+  // and its sentence renderer are inlined from the module, so the sheet cannot drift from the
+  // CLI, gateway and report; the old hand-written FIX_FORWARD copy is gone.
+  assert.ok(ISSUE_DETAIL_SHEET_SCRIPT.includes("const PARK_RECOVERY = " + JSON.stringify(PARK_RECOVERY)));
+  assert.ok(ISSUE_DETAIL_SHEET_SCRIPT.includes(recoverySentence.toString()));
+  assert.ok(!ISSUE_DETAIL_SHEET_SCRIPT.includes("FIX_FORWARD"));
+  // The notice is plain textContent, so the move's backticks are stripped.
+  assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /recoverySentence\(PARK_RECOVERY\[d\.reason\], d\.issueNumber\)\.split\("`"\)\.join\(""\)/);
+});
+
+test("the issue sheet shows no recovery notice for a parked question or stall, answered or not (#578)", () => {
+  // PARK_RECOVERY has entries for question/stalled, but those parks get the reply box (or the
+  // delivered answer) — never a redrive notice. The notice is gated to the redrive-only reasons.
+  const noticeLine = ISSUE_DETAIL_SHEET_SCRIPT.split("\n").find((l) => l.includes("const notice ="));
+  assert.ok(noticeLine, "the sheet computes a notice");
+  assert.match(noticeLine!, /!moves\.reply && d\.status === "parked" && !d\.archived && REDRIVE_ONLY\.includes\(d\.reason\)/);
+  const redriveOnly = ISSUE_DETAIL_SHEET_SCRIPT.match(/const REDRIVE_ONLY = (\[[^\]]*\]);/);
+  assert.ok(redriveOnly, "the sheet names the redrive-only reasons");
+  assert.deepEqual(JSON.parse(redriveOnly![1]).sort(), ["conflict", "crash", "outdated-agent", "red-base", "stopped"]);
 });
 
 test("renderGraftInline offers no graft once the only surviving wave merged — a pruned wave does not keep the campaign unsettled", () => {

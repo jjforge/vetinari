@@ -42,6 +42,7 @@ import {
   type SendRef,
 } from "./gateway.ts";
 import type { CampaignStatus, StatusWave, StatusIssue } from "./status.ts";
+import { PARK_RECOVERY, recoverySentence } from "./park-recovery.ts";
 
 let gwCounter = 0;
 
@@ -667,17 +668,15 @@ test("trackPollTicks records a poll loop's start and each returned cycle, and dr
 });
 
 test("parkRecoveryMove prints the exact move each reason asks of the human", () => {
-  assert.match(parkRecoveryMove("question", "640"), /reply .* answer/i);
-  // stalled: answer with guidance, or prune — carries the prune command for the issue.
-  assert.match(parkRecoveryMove("stalled", "640"), /reply/i);
-  assert.match(parkRecoveryMove("stalled", "640"), /prune #640/);
-  // conflict / red-base / crash are not answerable — they redrive, never resume by reply.
-  for (const reason of ["conflict", "red-base", "crash"] as const) {
-    assert.match(parkRecoveryMove(reason, "640"), /redrive/);
-    assert.doesNotMatch(parkRecoveryMove(reason, "640"), /reply/i);
+  // question/stalled keep their Telegram framing — the reply is a Telegram action.
+  assert.equal(parkRecoveryMove("question", "640"), "Reply to this message to answer.");
+  assert.equal(parkRecoveryMove("stalled", "640"), "Reply to this message with guidance, or `prune #640`.");
+  // The redrive-only reasons read the shared table's move as a sentence (#578).
+  assert.equal(parkRecoveryMove("conflict", "640"), "Resolve the conflict on the base, then `vetinari redrive`.");
+  for (const reason of ["red-base", "crash", "stopped", "outdated-agent"] as const) {
+    assert.equal(parkRecoveryMove(reason, "640"), recoverySentence(PARK_RECOVERY[reason], "640"));
   }
-  assert.match(parkRecoveryMove("conflict", "640"), /resolve/i);
-  assert.match(parkRecoveryMove("red-base", "640"), /fix forward/i);
+  assert.match(parkRecoveryMove("stopped", "640"), /`vetinari run 640`/);
 });
 
 test("parkRecoveryMove: `stopped` is redrive-only and names the standalone `run` move", () => {
@@ -738,7 +737,7 @@ test("formatParkAnnouncement names the reason and its recovery move for a non-an
   const text = formatParkAnnouncement("jjforge", parked({ taskId: "641", reason: "red-base", question: "" }));
 
   assert.match(text, /^⏸ jjforge · PARKED · #641 \(red-base\)/);
-  assert.match(text, /Fix forward on the base, then `redrive`\./);
+  assert.match(text, /Fix forward on the base, then `vetinari redrive`\./);
   assert.doesNotMatch(text, /reply/i, "a red-base park is not resolved by a reply");
 });
 
@@ -873,7 +872,7 @@ test("formatGatewayStatus names a redrive-only park and its recovery, never 'not
 
   assert.match(text, /vetinari · PARKED/);
   assert.doesNotMatch(text, /nothing parked/i, "a parked campaign is not idle");
-  assert.match(text, /⏸ red-base — Fix forward on the base, then `redrive`\./);
+  assert.match(text, /⏸ red-base — Fix forward on the base, then `vetinari redrive`\./);
   assert.doesNotMatch(text, /reply/i, "a red-base park is not resolved by a reply, so no reply advice appears");
 });
 
@@ -887,7 +886,7 @@ test("formatGatewayStatus names a conflict/crash hold from a parked member with 
   ]);
 
   assert.doesNotMatch(text, /nothing parked/i);
-  assert.match(text, /⏸ conflict — Resolve the conflict on the base, then `redrive`\./);
+  assert.match(text, /⏸ conflict — Resolve the conflict on the base, then `vetinari redrive`\./);
   assert.doesNotMatch(text, /reply/i);
 });
 

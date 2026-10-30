@@ -27,6 +27,7 @@ import {
 } from "./state.ts";
 import { gatewayConfigDir, readProjects } from "./registry.ts";
 import { notice } from "./notice.ts";
+import { PARK_RECOVERY, recoverySentence } from "./park-recovery.ts";
 import {
   buildAllStatus,
   campaignRunning,
@@ -553,12 +554,12 @@ export async function handlePruneCommand(
 }
 
 /**
- * The exact recovery move a park reason asks of the human, taken verbatim from the
- * user guide's park-reason table (design §10, §13.1). A `question`/`stalled` hold is
- * answerable — replying to the announcement resumes the task (a `stalled` one may
- * instead be pruned) — while `conflict`/`red-base`/`crash` are not answerable and
- * need a `redrive` after the human's fix. One line, ending in the exact command
- * where the table names one; the enum is the single `ParkReason`.
+ * The exact recovery move a park reason asks of the human (design §10, §13.1). A
+ * `question`/`stalled` hold is answerable — replying to the announcement resumes the task
+ * (a `stalled` one may instead be pruned), so those two keep their Telegram reply framing —
+ * while every other reason is not answerable and reads the shared `PARK_RECOVERY` move as
+ * a sentence. One line, ending in the exact command where the move names one; the enum is
+ * the single `ParkReason`.
  */
 export function parkRecoveryMove(reason: ParkReason, issue: string): string {
   switch (reason) {
@@ -567,15 +568,11 @@ export function parkRecoveryMove(reason: ParkReason, issue: string): string {
     case "stalled":
       return `Reply to this message with guidance, or \`prune #${issue}\`.`;
     case "conflict":
-      return "Resolve the conflict on the base, then `redrive`.";
     case "red-base":
-      return "Fix forward on the base, then `redrive`.";
     case "crash":
-      return "`redrive`.";
     case "stopped":
-      return `The run was stopped. \`redrive\` to resume the campaign, or \`vetinari run ${issue}\` for a standalone run.`;
     case "outdated-agent":
-      return "The image's agent CLI is too old for the model. Rebuild it with `vetinari build`, then `vetinari redrive`.";
+      return recoverySentence(PARK_RECOVERY[reason], issue);
   }
 }
 

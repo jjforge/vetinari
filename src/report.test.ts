@@ -135,7 +135,7 @@ test("an outdated-agent stop names the held members and points at `vetinari buil
   assert.equal(
     out,
     "🅿 campaign parked at wave 1/2 — #102, #103: the image's agent CLI is too old for the model (outdated-agent); merged #101 kept, 1 wave not started\n" +
-      "recover: `vetinari build`, then `vetinari redrive`",
+      "recover: rebuild the image with `vetinari build`, then `vetinari redrive`",
   );
 });
 
@@ -150,6 +150,15 @@ test("a red-base stop points at fix-forward then redrive", () => {
     out,
     "🅿 campaign parked at wave 2/3 — merged base is red (red-base); merged #201 kept, 1 wave not started\n" +
       "recover: fix forward on the base, then `vetinari redrive` — or `vetinari prune <id>`",
+  );
+});
+
+test("a conflict stop resolves on the base, then redrives — or prunes the first conflicted issue (#578)", () => {
+  const out = formatStop({ kind: "conflict", index: 0, total: 2, conflicted: ["102"], merged: ["101"] });
+  assert.equal(
+    out,
+    "🅿 campaign parked at wave 1/2 — merge conflict on #102 (conflict); merged #101 kept, 1 wave not started\n" +
+      "recover: resolve the conflict on the base, then `vetinari redrive` (or `vetinari prune 102`)",
   );
 });
 

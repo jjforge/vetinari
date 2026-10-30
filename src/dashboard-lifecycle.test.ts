@@ -1084,3 +1084,71 @@ test("issuePhase re-establishes a phase after a park is re-admitted (design §5 
   ];
   assert.deepEqual(issuePhase(events, "301"), { label: "coding", steady: false });
 });
+
+test("reduceCampaign folds a replan event, replacing the unstarted waves and keeping the started ones at their index (#614)", () => {
+  const reduced = reduceCampaign([
+    event("campaign-start", { ts: "t0", waves: [["101"], ["201"], ["202"], ["203"]], slots: 2 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["101"] }),
+    event("wave-done", { ts: "t2", index: 0, merged: ["101"] }),
+    event("wave-start", { ts: "t3", index: 1, tasks: ["201"] }),
+    // Mid-wave-1 a re-plan puts the two unstarted members side by side.
+    event("replan", { ts: "t4", waves: [["202", "203"]] }),
+  ]);
+  // The completed wave 0 and the in-flight wave 1 keep their index; only the tail changes.
+  assert.deepEqual(reduced.waves, [["101"], ["201"], ["202", "203"]]);
+  assert.deepEqual(reduced.layout, [["101"], ["201"], ["202", "203"]]);
+  assert.equal(reduced.currentWave, 1);
+  assert.deepEqual([...reduced.closedWaves], [0]);
+});
+
+test("a replan folds by the race rule: started-since members stay put, grafted-since ones trail, pruned-since ones are skipped (#614)", () => {
+  // The replan read the log while wave 0 was in flight and planned [202, 201] then [203]; by
+  // the time it lands, wave 1 (201) has started — so 201 keeps its wave and is not moved.
+  const startedSince = reduceCampaign([
+    event("campaign-start", { ts: "t0", waves: [["101"], ["201"], ["202"], ["203"]], slots: 2 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["101"] }),
+    event("wave-done", { ts: "t2", index: 0, merged: ["101"] }),
+    event("wave-start", { ts: "t3", index: 1, tasks: ["201"] }),
+    event("replan", { ts: "t4", waves: [["202", "201"], ["203"]] }),
+  ]);
+  assert.deepEqual(startedSince.waves, [["101"], ["201"], ["202"], ["203"]]);
+
+  // A graft precedes the replan and the replan does not name it: the grafted id lands in a
+  // trailing wave of its own. A pruned id the replan names is skipped.
+  const graftAndPrune = reduceCampaign([
+    event("campaign-start", { ts: "t0", waves: [["101"], ["201"], ["202"], ["203"]], slots: 2 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["101"] }),
+    event("graft", { ts: "t2", ids: ["301"], blockedBy: {}, fileKeys: {} }),
+    event("prune", { ts: "t3", target: "203", removed: ["203"], dropped: ["203"] }),
+    event("replan", { ts: "t4", waves: [["201", "202", "203"]] }),
+  ]);
+  assert.deepEqual(graftAndPrune.waves, [["101"], ["201", "202"], ["301"]]);
+  assert.equal(graftAndPrune.grafted.has("301"), true);
+});
+
+test("after a replan a pruned member of a replaced wave still shows, in a trailing display-only wave (#614, ADR 0007)", () => {
+  const reduced = reduceCampaign([
+    event("campaign-start", { ts: "t0", waves: [["101"], ["201", "202"], ["203"]], slots: 2 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["101"] }),
+    event("prune", { ts: "t2", target: "202", removed: ["202"], dropped: ["202"] }),
+    event("replan", { ts: "t3", waves: [["201", "203"]] }),
+  ]);
+  assert.deepEqual(reduced.waves, [["101"], ["201", "203"]]);
+  // The started wave keeps its display slot; the new tail follows; 202 trails, still pruned.
+  assert.deepEqual(reduced.layout, [["101"], ["201", "203"], ["202"]]);
+  assert.equal(issueMembership(reduced, "202"), "pruned");
+});
+
+test("after a replan a graceful-stop marker names the members of the new waves[parkedWave] (#614)", () => {
+  const reduced = reduceCampaign([
+    event("campaign-start", { ts: "t0", waves: [["101"], ["201"], ["202"]], slots: 2 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["101"] }),
+    event("wave-done", { ts: "t2", index: 0, merged: ["101"] }),
+    // A graceful stop parks before wave 1 starts — wave 1 is still unstarted.
+    event("campaign-parked", { ts: "t3", index: 1, reason: "stopped" }),
+    event("replan", { ts: "t4", waves: [["202", "201"]] }),
+  ]);
+  assert.deepEqual(reduced.waves, [["101"], ["202", "201"]]);
+  assert.deepEqual([...reduced.stopped].sort(), ["201", "202"]);
+  assert.equal(reduced.parkedWave, 1);
+});

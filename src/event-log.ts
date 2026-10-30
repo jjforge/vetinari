@@ -193,6 +193,15 @@ export interface GraftEvent extends BaseEvent {
   titles?: Record<string, string>;
 }
 
+/** `replan` — the unstarted remainder of a running (or resumable) campaign was re-planned from the
+ * current config and tracker: the new waves for that remainder, the result rather than the inputs,
+ * so a replay after a future planner change still folds the plan the campaign ran (replan.ts,
+ * ADR 0022/0012). The fold keeps every started wave at its index and replaces only the tail. */
+export interface ReplanEvent extends BaseEvent {
+  event: "replan";
+  waves: string[][];
+}
+
 /** `redrive` — a paused campaign was redriven on the current base (design §2.1, §7): the wave it
  * re-entered, and how many banked greens it landed without a rerun vs skipped as already merged
  * (modes.ts). */
@@ -352,6 +361,7 @@ export type OrchestratorEvent =
   | CampaignDoneEvent
   | PruneEvent
   | GraftEvent
+  | ReplanEvent
   | RedriveEvent
   | GraceWaitEvent
   | ReAdmitEvent

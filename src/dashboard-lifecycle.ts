@@ -1,6 +1,6 @@
 import { type ParkReason } from "./state.ts";
 import { applyPrune } from "./prune.ts";
-import { applyGraft } from "./plan.ts";
+import { applyGraft, applyReplan } from "./plan.ts";
 import { type OrchestratorEvent } from "./event-log.ts";
 import { normalize } from "./issue-id.ts";
 import { festiveOffsetFor } from "./dashboard-event-text.ts";
@@ -234,6 +234,10 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
   let stopped = new Set<string>();
   let currentWave = -1;
   let parkedWave = -1;
+  // The highest wave index that has had a `wave-start` (or closed) — `currentWave` resets at
+  // `wave-done`, and a graceful stop's `parkedWave` names a wave that never started, so the
+  // started prefix a `replan` keeps is tracked on its own.
+  let lastStarted = -1;
 
   for (const e of relevant) {
     // Any start event may carry an id→title map (`campaign` writes it on
@@ -255,8 +259,10 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       name = typeof e.name === "string" && e.name.trim() ? e.name : undefined;
       festiveOffset = festiveOffsetFor(typeof e.ts === "string" ? e.ts : undefined);
       currentWave = -1;
+      lastStarted = -1;
     } else if (e.event === "wave-start" && Number.isInteger(e.index)) {
       currentWave = e.index;
+      lastStarted = Math.max(lastStarted, e.index);
       // A wave-start after an operator stop is the redrive picking the campaign back up.
       stopped = new Set();
     } else if (e.event === "spawn" && e.taskId) {
@@ -355,6 +361,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       // wave, whose members would otherwise fold to `unstarted` and the campaign to idle.
       stopped = e.reason === "stopped" ? new Set(waves[parkedWave] ?? []) : new Set();
     } else if (e.event === "wave-done" && Number.isInteger(e.index)) {
+      lastStarted = Math.max(lastStarted, e.index);
       for (const taskId of e.merged ?? []) {
         const issueNumber = normalize(String(taskId));
         outcomes.set(issueNumber, "completed");
@@ -420,6 +427,35 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
         layout[target].push(id);
       }
       waves = applied.remaining;
+    } else if (e.event === "replan" && Array.isArray(e.waves)) {
+      // Re-plan the unstarted remainder at the point the replan was issued (ADR 0022): every
+      // started wave keeps its index, the tail is replaced by the event's waves (the result,
+      // not the inputs, so a replay after a planner change still gives the plan the run ran).
+      // The display `layout` keeps the display waves the started prefix occupies and follows
+      // the new tail past it; a pruned member of a replaced display wave moves to one trailing
+      // display-only wave, so the dashboard never loses a member (ADR 0007).
+      const started = Math.min(lastStarted + 1, waves.length);
+      const replanned = applyReplan(
+        { waves, started },
+        e.waves.map((wave: unknown[]) => wave.map(String)),
+      );
+      const survivors: number[] = [];
+      layout.forEach((wave, i) => {
+        if (wave.some((id) => !pruned.has(id))) survivors.push(i);
+      });
+      const layoutStarted = started ? (survivors[started - 1] ?? layout.length - 1) + 1 : 0;
+      const prunedOut = layout
+        .slice(layoutStarted)
+        .flat()
+        .filter((id) => pruned.has(id));
+      layout = [
+        ...layout.slice(0, layoutStarted),
+        ...replanned.slice(started).map((wave) => [...wave]),
+        ...(prunedOut.length ? [prunedOut] : []),
+      ];
+      waves = replanned;
+      // A graceful stop names the next, unstarted wave — which the replan just rewrote.
+      if (stopped.size) stopped = new Set(waves[parkedWave] ?? []);
     }
   }
   // `grafted` is transient (ADR 0014): an id reads `grafted` only while unstarted, and

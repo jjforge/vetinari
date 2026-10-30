@@ -445,6 +445,31 @@ export function applyGraft(
   return { remaining: result.filter((wave) => wave.length), grafted };
 }
 
+/**
+ * Pure rule folding a `replan` into a running campaign (ADR 0022): the first `started`
+ * waves — every wave that has had a `wave-start` — stay at their index, since the
+ * `campaign` loop is index-based, and the tail after them is replaced by the re-planned
+ * waves. The race rule keeps the fold honest about what changed since the replan read the
+ * log: a re-planned id that has started by now, or is no longer in the plan (pruned since),
+ * is skipped; an unstarted member the replan does not name (grafted since) goes in a
+ * trailing wave of its own. Waves left empty are dropped. Never adds or removes a member.
+ */
+export function applyReplan(campaign: { waves: string[][]; started: number }, replanned: string[][]): string[][] {
+  const prefix = campaign.waves.slice(0, campaign.started);
+  const tail = campaign.waves.slice(campaign.started).flat();
+  const unstarted = new Set(tail);
+  const named = new Set<string>();
+  const waves = replanned.map((wave) =>
+    wave.map(normalize).filter((id) => {
+      if (!unstarted.has(id) || named.has(id)) return false;
+      named.add(id);
+      return true;
+    }),
+  );
+  waves.push(tail.filter((id) => !named.has(id)));
+  return [...prefix, ...waves.filter((wave) => wave.length)];
+}
+
 /** Why a candidate graft id was rejected: it does not look like an issue id at all
  * (`malformed`, decided from the input before any tracker fetch), it names no open
  * issue (`unknown` / `closed`), or it is already part of this campaign

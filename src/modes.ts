@@ -28,6 +28,8 @@ import { tgSend, tgWaitReply, type TgConn } from "./telegram.ts";
 import { hostSecretsPath, tgConnForBaseLocation } from "./registry.ts";
 import { issueNameFromTask, readEventLog, reduceCampaign } from "./status.ts";
 import {
+  campaignBaseGates,
+  formatCampaignBaseGates,
   formatComplete,
   formatOutcomes,
   formatPlan,
@@ -37,8 +39,10 @@ import {
   formatStop,
   formatWaveDone,
   formatWaveStart,
+  formatWaveTimeSplit,
   makeReporter,
   type Reporter,
+  waveTimeSplit,
 } from "./report.ts";
 import { acquireSlot, deregisterProject, registerProject, releaseSlot, type HostBudget } from "./host-slots.ts";
 
@@ -84,6 +88,28 @@ const reportSlowGates = (cfg: ResolvedConfig, reporter: Reporter): void => {
   const { archives, live } = readSlowGateLogs(cfg.stateDir, cfg.logFile);
   for (const line of formatSlowGates(slowGatesAtSettle([...archives.flat(), ...live]))) reporter.line(line);
 };
+
+/**
+ * Print a closed wave's time split (#615) — agent, branch gates, integration + base gate, post-merge —
+ * read off the live log from the wave's `wave-start` to the `wave-done` just logged. Information only.
+ */
+const reportWaveTimeSplit = (cfg: ResolvedConfig, reporter: Reporter, index: number, total: number): void => {
+  const events = readEventLog(cfg);
+  const wave = events.slice(
+    Math.max(
+      events.findLastIndex((e) => e.event === "wave-start"),
+      0,
+    ),
+  );
+  reporter.line(`wave ${index + 1}/${total}: ${formatWaveTimeSplit(waveTimeSplit(wave))}`);
+};
+
+/**
+ * Print the campaign's merged-base gate total (#615) once it ends — beside the completion line or the
+ * stop line: how long its merged-base gates took and how many there were. Information only.
+ */
+const reportBaseGates = (cfg: ResolvedConfig, reporter: Reporter): void =>
+  reporter.line(formatCampaignBaseGates(campaignBaseGates(readEventLog(cfg))));
 
 /**
  * Resolve each issue's title through the orchestrator's `fetchTask`, keyed by
@@ -1129,6 +1155,7 @@ export async function campaign(
         });
         enqueueOutbound(cfg, campaignStoppedNotice(cfg.project, index + 1, [], cfg.baseBranch));
         reporter.line(formatStop({ kind: "stopped", index, total, merged: [] }));
+        reportBaseGates(cfg, reporter);
         return "parked";
       }
       const waveEvent: Omit<WaveStartEvent, "ts" | "event"> = { index, tasks };
@@ -1338,6 +1365,7 @@ export async function campaign(
         enqueueOutbound(cfg, campaignFailedNotice(cfg.project, index + 1, merged, failed, cfg.baseBranch));
         reporter.line(formatStop({ kind: "failed", index, total, failed, merged }));
         reportSlowGates(cfg, reporter);
+        reportBaseGates(cfg, reporter);
         return "failed";
       }
 
@@ -1349,6 +1377,7 @@ export async function campaign(
         enqueueOutbound(cfg, campaignParkedNotice(cfg.project, index + 1, merged, cfg.baseBranch, parked!.detail));
         reporter.line(formatStop({ kind: "red-base", index, total, merged }));
         reportSlowGates(cfg, reporter);
+        reportBaseGates(cfg, reporter);
         return "parked";
       }
 
@@ -1365,6 +1394,7 @@ export async function campaign(
         enqueueOutbound(cfg, campaignStoppedNotice(cfg.project, index + 1, merged, cfg.baseBranch));
         reporter.line(formatStop({ kind: "stopped", index, total, merged }));
         reportSlowGates(cfg, reporter);
+        reportBaseGates(cfg, reporter);
         return "parked";
       }
 
@@ -1433,6 +1463,7 @@ export async function campaign(
           }
         }
         reportSlowGates(cfg, reporter);
+        reportBaseGates(cfg, reporter);
         return "parked";
       }
 
@@ -1455,6 +1486,7 @@ export async function campaign(
       );
       reporter.line(formatWaveDone(index, total, { merged }));
       reportSlowGates(cfg, reporter);
+      reportWaveTimeSplit(cfg, reporter, index, total);
     }
 
     const doneEvent: Omit<CampaignDoneEvent, "ts" | "event"> = { waves: index };
@@ -1473,6 +1505,7 @@ export async function campaign(
       }),
     );
     reporter.line(formatComplete(index, cfg.baseBranch, campaignName));
+    reportBaseGates(cfg, reporter);
     return "done";
   } finally {
     unsubscribeStop();

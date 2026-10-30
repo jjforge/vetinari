@@ -846,6 +846,85 @@ test("a redrive of a campaign does not reprint a history flag an earlier settle 
   assert.deepEqual(slowLines(second), [], "already printed at the park — not again");
 });
 
+// Wave cost (#615): a wave-done prints the wave's time split, and the campaign's end prints the total
+// merged-base gate time. A fake child logs its branch gate and green; a fake integrate logs what the
+// real one would — the merges, the merged base's gate-results (no taskId), then the base-gate.
+const integrateLoggingBaseGate =
+  (cfg: ResolvedConfig, ...seconds: number[]): CampaignDeps["integrate"] =>
+  async (_cfg, greens) => {
+    if (!greens.length) return { merged: [], conflicts: [] }; // nothing new merged: no base gate (merge.ts)
+    for (const taskId of greens) cfg.log.log("merged", { taskId, branch: `agent/${taskId}` });
+    for (const s of seconds) cfg.log.log("gate-result", { cmd: "make test", exitCode: 0, seconds: s, outFile: "o" });
+    cfg.log.log("base-gate", { green: true });
+    return { merged: greens, conflicts: [] };
+  };
+const greenAfterGate: (cfg: ResolvedConfig) => CampaignDeps["spawnRun"] = (cfg) => async (taskId) => {
+  logGateResult(cfg, taskId, 30);
+  cfg.log.log("green", { taskId, branch: `agent/${taskId}`, commits: [] });
+  return 0;
+};
+const costLines = (lines: string[]) => lines.filter((l) => /^wave \d+\/\d+: .* — agent /.test(l) || l.startsWith("⏱ base gates"));
+
+test("each wave-done prints the wave's time split, and the campaign's end its merged-base gate total (#615)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-wave-cost-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const deps = { ...gitFreeDeps(cfg, greenAfterGate(cfg)), integrate: integrateLoggingBaseGate(cfg, 52, 20) };
+  const prev = process.env.VETINARI_JSON;
+  delete process.env.VETINARI_JSON;
+  const lines = await captureLines(() => campaign(cfg, [["101"], ["201"]], host, "cost", {}, deps));
+  if (prev !== undefined) process.env.VETINARI_JSON = prev;
+  const split = /^wave (\d)\/2: \d+s — agent \d+s · branch gates 30s · integration \+ base gate \d+s · post-merge \d+s$/;
+  const cost = costLines(lines);
+  assert.equal(cost.length, 3, `two wave splits and one total:\n${lines.join("\n")}`);
+  assert.match(cost[0], split);
+  assert.ok(lines.indexOf(cost[0]) > lines.findIndex((l) => l.startsWith("✔ wave 1/2")), "the split follows its wave-done");
+  assert.match(cost[1], split);
+  assert.equal(cost[2], "⏱ base gates: 2m24s over 2 merged-base gates this campaign");
+  assert.ok(lines.indexOf(cost[2]) > lines.findIndex((l) => l.startsWith("🏆")), "the total follows the completion line");
+});
+
+test("a campaign that fails or parks prints its merged-base gate total beside the stop line (#615)", async () => {
+  for (const [exit, stopLine] of [
+    [1, "✖ campaign failed"],
+    [2, "🅿 campaign parked"],
+  ] as const) {
+    const dir = mkdtempSync(join(tmpdir(), "vetinari-wave-cost-stop-"));
+    const cfg = harnessCfg(dir);
+    const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+    // Wave 1 merges and gates its base; wave 2's member fails or parks.
+    const spawnRun: CampaignDeps["spawnRun"] = async (taskId) => {
+      if (taskId === "101") return greenAfterGate(cfg)(taskId);
+      if (exit === 2) seedParkedRecord(cfg, taskId);
+      return exit;
+    };
+    const deps = { ...gitFreeDeps(cfg, spawnRun), integrate: integrateLoggingBaseGate(cfg, 45) };
+    const prev = process.env.VETINARI_JSON;
+    delete process.env.VETINARI_JSON;
+    const lines = await captureLines(() => campaign(cfg, [["101"], ["201"]], host, "cost", {}, deps));
+    if (prev !== undefined) process.env.VETINARI_JSON = prev;
+    const stop = lines.findIndex((l) => l.startsWith(stopLine));
+    assert.ok(stop >= 0, `stop line printed:\n${lines.join("\n")}`);
+    assert.deepEqual(
+      lines.slice(stop).filter((l) => l.startsWith("⏱ base gates")),
+      ["⏱ base gates: 45s over 1 merged-base gate this campaign"],
+    );
+  }
+});
+
+test("under --json the wave splits and the merged-base gate total are silent (#615)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-wave-cost-json-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const deps = { ...gitFreeDeps(cfg, greenAfterGate(cfg)), integrate: integrateLoggingBaseGate(cfg, 52) };
+  const prev = process.env.VETINARI_JSON;
+  process.env.VETINARI_JSON = "1";
+  const lines = await captureLines(() => campaign(cfg, [["101"]], host, "cost", {}, deps));
+  if (prev === undefined) delete process.env.VETINARI_JSON;
+  else process.env.VETINARI_JSON = prev;
+  assert.deepEqual(costLines(lines), []);
+});
+
 test("campaign under --json streams the raw event stream and suppresses the human lines (#299)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-report-json-"));
   const cfg = harnessCfg(dir);

@@ -1003,6 +1003,53 @@ test("pendingConfirms drops a confirmation older than its TTL", () => {
   assert.equal(store.resolve("botA", 100), null, "an expired confirmation is not honored");
 });
 
+test("pendingConfirms sweeps an unanswered, expired preview on the next record", () => {
+  let clock = 0;
+  const store = newPendingConfirms(() => clock, 60_000);
+  store.record("botA", 100, pendingConfirm({ issue: "640" }));
+
+  clock = 60_001; // past the first preview's TTL; nobody replied
+  store.record("botA", 101, pendingConfirm({ issue: "641" }));
+
+  assert.equal(store.size(), 1, "the expired preview is no longer held");
+  assert.deepEqual(store.resolve("botA", 101), pendingConfirm({ issue: "641" }));
+});
+
+test("pendingConfirms keeps a still-live preview when another is recorded", () => {
+  let clock = 0;
+  const store = newPendingConfirms(() => clock, 60_000);
+  store.record("botA", 100, pendingConfirm({ issue: "640" }));
+
+  clock = 30_000; // the first preview is still live
+  store.record("botA", 101, pendingConfirm({ issue: "641" }));
+
+  assert.equal(store.size(), 2, "a live preview survives the sweep");
+  assert.deepEqual(store.resolve("botA", 100), pendingConfirm({ issue: "640" }));
+  assert.deepEqual(store.resolve("botA", 101), pendingConfirm({ issue: "641" }));
+});
+
+test("pendingConfirms sweeps a preview whose expiry is exactly now", () => {
+  let clock = 0;
+  const store = newPendingConfirms(() => clock, 60_000);
+  store.record("botA", 100, pendingConfirm());
+
+  clock = 60_000; // exactly at expiry — no longer live
+  store.record("botA", 101, pendingConfirm());
+
+  assert.equal(store.size(), 1, "an entry expiring at now() is swept");
+  assert.equal(store.resolve("botA", 100), null);
+});
+
+test("pendingConfirms holds one fewer entry once a confirm is resolved", () => {
+  const store = newPendingConfirms(() => 0);
+  store.record("botA", 100, pendingConfirm());
+  store.record("botA", 101, pendingConfirm());
+  assert.equal(store.size(), 2);
+
+  store.resolve("botA", 100);
+  assert.equal(store.size(), 1, "resolve consumes the entry it answers");
+});
+
 // --- The prune-command handler: resolve → preview → record. The closure preview
 // (which shells `prune --dry-run`) and the Telegram send are injected, so the
 // resolve/preview/record flow is testable without a bot or a spawned process.

@@ -262,11 +262,14 @@ export interface PendingConfirm {
  * non-durable — a gateway restart drops it and re-sending `prune 640` is the
  * recovery (ADR 0002). The clock is injected so expiry is testable without real
  * time; `resolve` is one-shot (a confirm fires at most once) and drops an entry
- * older than the TTL, so a stray or stale `yes` resolves to nothing.
+ * older than the TTL, so a stray or stale `yes` resolves to nothing. `record`
+ * first sweeps every expired entry, so a preview nobody answers is not held for
+ * the life of the daemon; `size` counts the entries currently held.
  */
 export interface PendingConfirms {
   record(token: string, messageId: number, confirm: PendingConfirm): void;
   resolve(token: string, messageId: number): PendingConfirm | null;
+  size(): number;
 }
 
 // A short TTL: long enough to read the preview and reply, short enough that a
@@ -277,7 +280,9 @@ export function newPendingConfirms(now: () => number, ttlMs: number = CONFIRM_TT
   const entries = new Map<string, { confirm: PendingConfirm; expiresAt: number }>();
   return {
     record(token, messageId, confirm) {
-      entries.set(messageKey(token, messageId), { confirm, expiresAt: now() + ttlMs });
+      const at = now();
+      for (const [key, entry] of entries) if (entry.expiresAt <= at) entries.delete(key);
+      entries.set(messageKey(token, messageId), { confirm, expiresAt: at + ttlMs });
     },
     resolve(token, messageId) {
       const key = messageKey(token, messageId);
@@ -285,6 +290,9 @@ export function newPendingConfirms(now: () => number, ttlMs: number = CONFIRM_TT
       if (!entry) return null;
       entries.delete(key); // one-shot: consumed whether or not it is still live
       return entry.expiresAt > now() ? entry.confirm : null;
+    },
+    size() {
+      return entries.size;
     },
   };
 }

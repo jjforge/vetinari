@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { register } from "./registry.ts";
 import { enqueueOutbound, listOutboxIn, outboxDirOf, type ParkedRecord } from "./state.ts";
 import { memoryLogger } from "./log.ts";
-import { TG_POLL_TIMEOUT_S, type TgConn } from "./telegram.ts";
+import { TG_POLL_TIMEOUT_S, type TgConn, type TgFailure } from "./telegram.ts";
 import {
   ANNOUNCE_INTERVAL_MS,
   drainOutbox,
@@ -21,6 +21,7 @@ import {
   loadGatewayProjects,
   logNoConnectionSkips,
   newGatewayTicks,
+  newOutboxBackoff,
   newPendingConfirms,
   newReplyIndex,
   campaignParkMove,
@@ -1451,6 +1452,80 @@ test("drainOutbox leaves a record unsent when the send fails, so the next tick r
   await drainOutbox(routed(base), failingSend, memoryLogger());
 
   assert.equal(listOutboxIn(outboxDirOf(base))[0].sentAt, undefined, "a failed send is not marked sent");
+});
+
+test("drainOutbox retries a record whose send keeps failing at backing-off intervals, not every tick, and never marks it sent", async () => {
+  const base = outboxBase();
+  enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "success", event: "green", text: "GREEN" });
+  let t = 0;
+  const backoff = newOutboxBackoff({ now: () => t });
+  const attempts: number[] = [];
+  const failingSend = async () => {
+    attempts.push(t);
+    return undefined;
+  };
+  // One drain per second for 21 minutes — without the backoff every drain would retry it.
+  for (; t <= 21 * 60_000; t += 1000) await drainOutbox(routed(base), failingSend, memoryLogger(), backoff);
+
+  const s = 1000;
+  assert.deepEqual(attempts, [0, 5 * s, 15 * s, 35 * s, 75 * s, 155 * s, 315 * s, 615 * s, 915 * s, 1215 * s]);
+  assert.equal(listOutboxIn(outboxDirOf(base))[0].sentAt, undefined, "a failing record stays unsent");
+});
+
+test("drainOutbox marks a record sent once its send succeeds after failures, and clears its failure state", async () => {
+  const base = outboxBase();
+  enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "success", event: "green", text: "GREEN" });
+  let t = 0;
+  const backoff = newOutboxBackoff({ now: () => t });
+  let ok = false;
+  let calls = 0;
+  const send = async () => {
+    calls++;
+    return ok ? 100 : undefined;
+  };
+  await drainOutbox(routed(base), send, memoryLogger(), backoff); // fails at 0 → next at 5 s
+  await drainOutbox(routed(base), send, memoryLogger(), backoff); // not due yet
+  assert.equal(calls, 1);
+  ok = true;
+  t = 5000;
+  const results = await drainOutbox(routed(base), send, memoryLogger(), backoff);
+  assert.equal(calls, 2);
+  assert.deepEqual(
+    results.map((r) => r.sent),
+    [true],
+  );
+  assert.ok(listOutboxIn(outboxDirOf(base))[0].sentAt, "the record is stamped sent");
+  assert.equal(backoff.failing.size, 0, "a sent record leaves no failure state behind");
+});
+
+test("drainOutbox defers a 429'd record and every later record on that connection until retry_after has passed", async () => {
+  const base = outboxBase();
+  for (const text of ["one", "two", "three"]) enqueueOutbound({ stateDir: base, log: memoryLogger() }, { category: "progress", text });
+  let t = 0;
+  const backoff = newOutboxBackoff({ now: () => t });
+  const sent: string[] = [];
+  let attempts = 0;
+  let limited = true;
+  const send = async (_conn: TgConn, text: string, _replyTo?: number, onFailure?: (f: TgFailure) => void) => {
+    attempts++;
+    if (limited) {
+      onFailure?.({ status: 429, description: "Too Many Requests: retry after 30", retryAfter: 30 });
+      return undefined;
+    }
+    sent.push(text);
+    return 100;
+  };
+
+  await drainOutbox(routed(base), send, memoryLogger(), backoff);
+  assert.equal(attempts, 1, "the 429 holds off the rest of the drain on that connection");
+  limited = false;
+  t = 29_999;
+  await drainOutbox(routed(base), send, memoryLogger(), backoff);
+  assert.deepEqual(sent, [], "nothing on the connection is sent before retry_after has passed");
+
+  t = 30_000;
+  await drainOutbox(routed(base), send, memoryLogger(), backoff);
+  assert.deepEqual(sent, ["one", "two", "three"]);
 });
 
 test("drainOutbox sends a replyTo record as a reply on the question's connection, skipping the notify map, once", async () => {

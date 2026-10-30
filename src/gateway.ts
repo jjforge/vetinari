@@ -42,7 +42,7 @@ import {
   type CampaignStatus,
   type IssueStatus,
 } from "./status.ts";
-import { TG_POLL_TIMEOUT_S, tgPoll, tgSend, type TgConn, type TgMsg } from "./telegram.ts";
+import { TG_POLL_TIMEOUT_S, newPollBackoff, tgPoll, tgSend, type TgConn, type TgFailure, type TgMsg } from "./telegram.ts";
 
 /**
  * A read-only status query, not an answer to a parked question: `/status` (bare,
@@ -410,30 +410,63 @@ export interface DrainResult {
   sent: boolean;
 }
 
+const OUTBOX_BACKOFF_BASE_MS = 5000;
+const OUTBOX_BACKOFF_CAP_MS = 5 * 60_000;
+
+/**
+ * The outbox drain's in-memory failure state, carried across announce ticks (and lost on a
+ * gateway restart, which only means an early retry): each failing record's next-attempt time and
+ * the wait its next failure doubles, and until when a 429 holds off each bot. `now` is injectable
+ * so a test drives it on a fake clock.
+ */
+export interface OutboxBackoff {
+  failing: Map<string, { nextAttemptAt: number; intervalMs: number }>;
+  deferredUntil: Map<string, number>;
+  now: () => number;
+}
+
+export const newOutboxBackoff = (opts: { now?: () => number } = {}): OutboxBackoff => ({
+  failing: new Map(),
+  deferredUntil: new Map(),
+  now: opts.now ?? Date.now,
+});
+
 /**
  * Drain one project's outbox: route each not-yet-sent record via its notify map
  * and hand it to the injected `send`, then stamp it sent so a later drain (or a
  * gateway restart) neither re-sends nor drops it. Idempotent — a record carrying
- * a `sentAt` is skipped; a send that fails is left unsent for the next tick. A
- * project with no connection is skipped whole (nowhere to send). The send is
- * injected so the routing is testable without a live bot.
+ * a `sentAt` is skipped. A send that fails leaves the record unsent and backs it
+ * off in `backoff`: it is not retried before 5 s, doubling per failure to a 5 min
+ * cap, or a 429's `retry_after` if longer — and a 429 also holds off every later
+ * record on that bot until `retry_after` has passed. A project with no connection
+ * is skipped whole (nowhere to send). The send is injected so the routing is
+ * testable without a live bot.
  */
 export async function drainOutbox(
   project: GatewayProject,
-  send: (conn: TgConn, text: string, replyTo?: number) => Promise<number | undefined>,
+  send: (conn: TgConn, text: string, replyTo?: number, onFailure?: (failure: TgFailure) => void) => Promise<number | undefined>,
   logger: Logger = hostLogger(),
+  backoff: OutboxBackoff = newOutboxBackoff(),
 ): Promise<DrainResult[]> {
   const results: DrainResult[] = [];
   for (const record of project.outbox) {
     if (record.sentAt != null) continue;
     const { destination, conn } = resolveRecordDestination(project, record);
     if (!conn) continue;
-    const messageId = await send(conn, record.text, record.replyTo);
+    const now = backoff.now();
+    const failing = backoff.failing.get(record.id);
+    if ((backoff.deferredUntil.get(conn.token) ?? 0) > now || (failing && failing.nextAttemptAt > now)) continue;
+    let retryAfterMs = 0;
+    const messageId = await send(conn, record.text, record.replyTo, (f) => (retryAfterMs = (f.retryAfter ?? 0) * 1000));
     if (messageId == null) {
+      const intervalMs = failing ? Math.min(failing.intervalMs * 2, OUTBOX_BACKOFF_CAP_MS) : OUTBOX_BACKOFF_BASE_MS;
+      backoff.failing.set(record.id, { intervalMs, nextAttemptAt: now + intervalMs });
+      if (retryAfterMs > 0) backoff.deferredUntil.set(conn.token, now + retryAfterMs);
       logger.log("gateway-route-failed", { project: project.project, id: record.id, category: record.category, event: record.event });
       results.push({ record, destination, sent: false });
       continue;
     }
+    backoff.failing.delete(record.id);
     markOutboundSent(outboxDirOf(project.baseLocation), record.id, destination);
     logger.log("gateway-routed", { project: project.project, id: record.id, category: record.category, event: record.event, destination });
     results.push({ record, destination, sent: true });
@@ -851,7 +884,7 @@ export function gatewayHealth(ticks: GatewayTicks, now: number) {
 
 /**
  * Wire one poll loop into `ticks`: record its start now, wrap its `poll` so every
- * returned cycle (a failed poll included — `tgPoll` swallows it as an empty batch)
+ * returned cycle (a failed poll included — `tgPoll` logs it, backs off, and returns an empty batch)
  * stamps `lastPoll`, and drop its entry when the supervisor aborts the loop.
  */
 export function trackPollTicks(
@@ -943,10 +976,10 @@ async function announcePending(configDir: string, index: ReplyIndex, logger: Log
  * the sole-sender path for broadcast messages — the announce loop above is the
  * same thing for the interactive `question` category.
  */
-async function drainOutboxes(configDir: string, logger: Logger = hostLogger()): Promise<void> {
+async function drainOutboxes(configDir: string, backoff: OutboxBackoff, logger: Logger = hostLogger()): Promise<void> {
   for (const p of loadGatewayProjects(configDir)) {
     if (!p.outbox.some((r) => r.sentAt == null)) continue;
-    await drainOutbox(p, (conn, text, replyTo) => tgSend(conn, text, undefined, replyTo), logger);
+    await drainOutbox(p, (conn, text, replyTo, onFailure) => tgSend(conn, text, undefined, replyTo, onFailure), logger, backoff);
   }
 }
 
@@ -1071,12 +1104,14 @@ export async function gateway(configDir: string = gatewayConfigDir()): Promise<v
   // Projects already reported as having no connection, for this daemon run only —
   // so each logs its skip once, not every tick, and a restart reports it again.
   const skippedNoConn = new Set<string>();
+  // Failing outbox records' backoff, kept across ticks so a failed send is not retried every tick.
+  const outboxBackoff = newOutboxBackoff();
   const announcing = (async () => {
     for (;;) {
       try {
         logNoConnectionSkips(loadGatewayProjects(configDir), skippedNoConn, log);
         await announcePending(configDir, index, log);
-        await drainOutboxes(configDir, log);
+        await drainOutboxes(configDir, outboxBackoff, log);
         ticks.announce = Date.now();
       } catch (e) {
         log.log("gateway-announce-error", { error: String(e) });
@@ -1091,8 +1126,9 @@ export async function gateway(configDir: string = gatewayConfigDir()): Promise<v
   // supervisor handed it, so a rotated token's replies and in-loop sends both ride
   // the live connection rather than the one captured at startup.
   const startPollLoop = (conn: TgConn, signal: AbortSignal) => {
+    const backoff = newPollBackoff();
     pollLoop(conn, index, pending, {
-      poll: trackPollTicks(ticks, conn, signal, (c, o) => tgPoll(c, o)),
+      poll: trackPollTicks(ticks, conn, signal, (c, o) => tgPoll(c, o, log, backoff)),
       resume: (ref, text) => spawnResume(ref, text, log),
       onStatus: async (c) => {
         // Reconstruct each served project's campaign from its base location (the same

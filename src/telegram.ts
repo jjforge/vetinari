@@ -131,6 +131,12 @@ export const TG_POLL_TIMEOUT_S = 50;
  *
  * Telegram allows exactly ONE consumer of a bot's updates, so at most one
  * process may poll: a second poller silently steals messages from the first.
+ *
+ * A failed poll (Telegram's not-ok, or a network error) returns an empty batch after
+ * logging `telegram-poll-failed` — once per (status, description) per 5 min — and
+ * sleeping `backoff`'s interval: 5 s doubling to 5 min, at least a 429's
+ * `retry_after`, reset by the next ok poll. Pass one `backoff` per connection across
+ * calls; without one, a shared default per bot token is used.
  */
 export async function tgPoll(
   conn: TgConn,

@@ -243,7 +243,9 @@ curl -s 127.0.0.1:8765/healthz
 - `bots` — one entry per bot currently polled. `bot` is the bot's numeric id
   (the token's part before the first `:`; the token itself is never shown).
   `lastPoll` is when that loop's last long-poll returned — a failed poll counts,
-  so this reports a live loop, not a working token; `null` before the first.
+  so this reports a live loop, not a working token; `null` before the first. A
+  bot whose polls keep failing backs off up to 5 min between polls, so it reads
+  `stale` while it waits — `telegram-poll-failed` in the host log says why.
 - A `stale` flag is set when a loop has not ticked for more than **3× its
   interval** — 3× the announce interval for `announce`, 3× the 50 s long-poll
   timeout for a bot — counted from the gateway's (or that loop's) start before
@@ -326,6 +328,21 @@ start a small campaign (or trigger any parked question); a `campaign-start` /
   stamp is the idempotence marker, so a restart neither re-sends nor drops it. A
   record still missing `sentAt` after a tick has not been sent: check the project
   has credentials (a connection) and that the gateway is up.
+- A send Telegram rejected logs `telegram-send-failed` with the HTTP `status`
+  (or `"network"`) and Telegram's `description` — `Bad Request: chat not found`
+  is a wrong chat id — plus `retryAfter` (seconds) on a `429`. A failed outbox
+  record stays unsent and is retried on a backoff, not every tick: 5 s, doubling
+  per failure to a 5 min cap. A `429` also holds off every other record on that
+  bot until its `retryAfter` has passed. The backoff lives in memory, so a
+  gateway restart retries at once.
+
+**When replies never arrive.** A poll Telegram rejects logs
+`telegram-poll-failed` with the bot's numeric id, `status` and `description`,
+once per distinct failure per 5 min, and the loop backs off (5 s doubling to
+5 min, or a `429`'s `retryAfter` if longer; the next good poll resets it). A
+`401` means the token was revoked or rotated; a `409` (`Conflict: terminated by
+other getUpdates request`) means a second process is polling the same bot —
+find and stop it (an inline `gateway &` beside the service, or a `tg-test`).
 
 Once a run is fully idle, its already-sent outbox records are cleared as part of
 archiving; a record left **unsent** is deliberately kept so a message emitted

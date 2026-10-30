@@ -58,6 +58,7 @@ import { pastBaseGates } from "./slow-gates.ts";
 import { Refusal } from "./refusal.ts";
 import { PARK_RECOVERY, recoverySentence } from "./park-recovery.ts";
 import { mountParentPaths, mountParentProblems, type readMountParentOwners } from "./sandbox.ts";
+import type { credentialsExposureWarning } from "./registry.ts";
 
 const USAGE = renderUsage();
 
@@ -434,12 +435,21 @@ export interface DispatchDeps {
   /** Who owns each path inside the image, from one `stat` container — what the mount-parent
    *  refusal at `campaign`/`redrive`/`run`/`baseline` start checks (#512). Undefined: no probe. */
   readMountParentOwners: typeof readMountParentOwners;
+  /** The one-line warning naming a group/world-readable `.env` or `host.env` under the given base
+   *  locations — what `campaign`/`redrive`/`run`/`baseline` start prints (#563). */
+  credentialsExposureWarning: typeof credentialsExposureWarning;
 }
 
 /** Warn (stderr, never refusing) when `cfg.image` is older than its Dockerfile (#444). */
 function warnIfImageStale(deps: DispatchDeps): void {
   const { image } = deps.cfg;
   const warning = staleImageWarning(image, DOCKERFILE, deps.readImageFreshness(image, DOCKERFILE));
+  if (warning) deps.error(warning);
+}
+
+/** Warn (stderr, never refusing) when this project's `.env` or `host.env` is group/world-readable (#563). */
+function warnIfCredentialsExposed(deps: DispatchDeps): void {
+  const warning = deps.credentialsExposureWarning([resolve(process.cwd(), deps.cfg.stateDir)]);
   if (warning) deps.error(warning);
 }
 
@@ -482,6 +492,7 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
     }
     case "baseline": {
       warnIfImageStale(deps);
+      warnIfCredentialsExposed(deps);
       refuseIfMountParentsUnwritable(deps);
       deps.setExitCode((await deps.baseline(cfg)) ? 0 : 1);
       return;
@@ -508,6 +519,7 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
       // A campaign child skips both: its campaign checked once at start, not once per member.
       if (!deps.isCampaignChild) {
         warnIfImageStale(deps);
+        warnIfCredentialsExposed(deps);
         refuseIfMountParentsUnwritable(deps);
       }
       deps.archiveLeftoverRun();
@@ -550,6 +562,7 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
       deps.selectAgent(cfg, cmd.agent);
       enableJson(cmd.json);
       warnIfImageStale(deps);
+      warnIfCredentialsExposed(deps);
       refuseIfMountParentsUnwritable(deps);
       const outcome = await deps.campaign(cfg, [], deps.host, undefined, {
         autoPrune: cmd.autoPrune,
@@ -696,6 +709,7 @@ async function dispatchCampaign(cmd: Extract<Command, { kind: "campaign" }>, dep
   // A dry run starts nothing, so it is not warned.
   if (!cmd.dryRun) {
     warnIfImageStale(deps);
+    warnIfCredentialsExposed(deps);
     refuseIfMountParentsUnwritable(deps);
   }
 

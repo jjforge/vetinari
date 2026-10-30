@@ -25,7 +25,7 @@ import {
   type ParkedRecord,
   type ParkReason,
 } from "./state.ts";
-import { gatewayConfigDir, readProjects } from "./registry.ts";
+import { credentialsExposureWarning, gatewayConfigDir, readProjects } from "./registry.ts";
 import { notice } from "./notice.ts";
 import { Refusal } from "./refusal.ts";
 import { PARK_RECOVERY, recoverySentence } from "./park-recovery.ts";
@@ -1049,6 +1049,9 @@ export async function gateway(configDir: string = gatewayConfigDir()): Promise<v
   // Just for the startup line — the supervisor below re-derives targets live.
   const startupBots = pollTargets(loadGatewayProjects(configDir)).length;
   log.log("gateway-start", { configDir, bots: startupBots });
+  // Once at start, never per tick (#563): warn, never refuse, on a group/world-readable credentials file.
+  const exposed = credentialsExposureWarning(loadGatewayProjects(configDir).map((p) => p.baseLocation));
+  if (exposed) console.error(exposed);
   if (!startupBots) console.log("gateway up — no project defines a Telegram bot yet; announcing silently.");
 
   // Host the one aggregated status site over every registered project (E5). The

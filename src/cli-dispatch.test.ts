@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { dispatch, identityLine, parseArgs, type Command, type DispatchDeps } from "./cli-dispatch.ts";
 import { projectHasLiveCampaign, registerProject } from "./host-slots.ts";
 import { GraftRejectedError } from "./graft.ts";
@@ -87,6 +87,7 @@ function makeDeps(overrides: Partial<DispatchDeps> = {}) {
     signalProcess: spy() as unknown as DispatchDeps["signalProcess"],
     readImageFreshness: spy({}) as unknown as DispatchDeps["readImageFreshness"],
     readMountParentOwners: spy(undefined) as unknown as DispatchDeps["readMountParentOwners"],
+    credentialsExposureWarning: spy(undefined) as unknown as DispatchDeps["credentialsExposureWarning"],
     ...overrides,
   };
   return { deps, logged, errored, exitCodes, cfg };
@@ -2063,6 +2064,48 @@ test("a campaign child `run` never prints the stale-image warning — the campai
   const { deps, errored } = makeDeps({ isCampaignChild: true, readImageFreshness: freshness });
   await dispatch(parseArgs(["run", "101"]), deps);
   assert.ok(!errored.some((e) => /vetinari build/.test(e)), errored.join("\n"));
+});
+
+const EXPOSED = "⚠ credentials readable by group or others: /p/.vetinari.local/.env (mode 644) — chmod 600 them";
+
+for (const [name, cmd] of startCommands) {
+  test(`dispatch ${name} warns once that .env/host.env is group- or world-readable, checking this project's base location, and keeps its exit code (#563)`, async () => {
+    const exposure = spy(EXPOSED);
+    const { deps, errored, exitCodes } = makeDeps({
+      credentialsExposureWarning: exposure as unknown as DispatchDeps["credentialsExposureWarning"],
+      expandSelection: spy(Promise.resolve(["101"])) as unknown as DispatchDeps["expandSelection"],
+    });
+    await dispatch(cmd, deps);
+    assert.deepEqual(
+      errored.filter((e) => e === EXPOSED),
+      [EXPOSED],
+    );
+    assert.deepEqual(exposure.calls, [[[resolve(process.cwd(), ".vetinari.local")]]]);
+    assert.ok(!exitCodes.some((c) => c !== 0), `exit codes: ${exitCodes}`);
+  });
+}
+
+test("a campaign child `run` and `campaign --dry-run` never check credentials exposure (#563)", async () => {
+  for (const [cmd, child] of [
+    [parseArgs(["run", "101"]), true],
+    [parseArgs(["campaign", "101", "--override", "--dry-run"]), false],
+  ] as const) {
+    const exposure = spy(EXPOSED);
+    const { deps, errored } = makeDeps({
+      isCampaignChild: child,
+      credentialsExposureWarning: exposure as unknown as DispatchDeps["credentialsExposureWarning"],
+      expandSelection: spy(Promise.resolve(["101"])) as unknown as DispatchDeps["expandSelection"],
+    });
+    await dispatch(cmd, deps);
+    assert.equal(exposure.calls.length, 0);
+    assert.ok(!errored.includes(EXPOSED));
+  }
+});
+
+test("no credentials warning prints when no file is exposed (#563)", async () => {
+  const { deps, errored } = makeDeps();
+  await dispatch(parseArgs(["baseline"]), deps);
+  assert.deepEqual(errored, []);
 });
 
 // A mount's parent dirs must exist in the image, agent-owned — docker creates a missing one as

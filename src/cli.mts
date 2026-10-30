@@ -62,6 +62,7 @@ import {
 import { archiveRun, shouldArchiveIdle, shouldArchiveLeftover } from "./archive.ts";
 import { answerParked, enqueueOutbound, hasParked, listParked } from "./state.ts";
 import { readEventLog } from "./event-log.ts";
+import { readSlowGateLogs } from "./slow-gates.ts";
 import { autoRegister, computeRegistryDedup, gatewayConfigDir, listProjects, removePointer } from "./registry.ts";
 import { liveCampaignPid, projectHasLiveCampaign, resolveHostCeiling, type HostBudget } from "./host-slots.ts";
 import { containerShareWeight } from "./config.ts";
@@ -669,6 +670,10 @@ await dispatch(parseArgs([mode, ...rest]), {
     process.kill(pid, signal);
   },
   readEventLog,
+  readGateHistory: (c) => {
+    const { archives, live } = readSlowGateLogs(c.stateDir, c.logFile);
+    return [...archives.flat(), ...live];
+  },
   archiveRun,
   requireTelegram,
   tgTest,

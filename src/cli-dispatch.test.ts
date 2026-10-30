@@ -75,6 +75,7 @@ function makeDeps(overrides: Partial<DispatchDeps> = {}) {
     enqueueOutbound: spy() as unknown as DispatchDeps["enqueueOutbound"],
     projectHasLiveCampaign: spy(false) as unknown as DispatchDeps["projectHasLiveCampaign"],
     readEventLog: spy([]) as unknown as DispatchDeps["readEventLog"],
+    readGateHistory: spy([]) as unknown as DispatchDeps["readGateHistory"],
     archiveRun: spy({ archivedLog: null, clearedOutbound: 0 }) as unknown as DispatchDeps["archiveRun"],
     requireTelegram: spy({}) as unknown as DispatchDeps["requireTelegram"],
     tgTest: spy(Promise.resolve()) as unknown as DispatchDeps["tgTest"],
@@ -1006,6 +1007,45 @@ test("dispatch campaign --dry-run over a single id still logs that ticket's file
   await dispatch(campaignCmd({ positional: ["101"], dryRun: true }), deps);
   assert.deepEqual((deps.runFilesetCheck as any).calls, [[deps.cfg, ["101"]]]);
   assert.ok(logged.join("\n").includes("#101  confident — `src/a.ts`, `docs/b.md`"));
+});
+
+// `campaign --dry-run` reads its wave count as time (#615): the waves times the median past
+// merged-base gate, read from the project's gate history (archives, then the live log).
+const pastIntegration = (seconds: number[]) => [
+  { ts: "2026-10-01T00:00:00Z", event: "merged", taskId: "1" },
+  ...seconds.map((s) => ({ ts: "2026-10-01T00:00:01Z", event: "gate-result", cmd: "make test", exitCode: 0, seconds: s, outFile: "o" })),
+  { ts: "2026-10-01T00:00:02Z", event: "base-gate", green: true },
+];
+
+test("dispatch campaign --dry-run estimates the plan's base-gate time from the median past merged-base gate, after the plan (#615)", async () => {
+  const history = [
+    ...pastIntegration([52, 20]),
+    ...pastIntegration([60]),
+    // a `vetinari baseline` run and a branch gate: never a merged-base gate
+    { ts: "2026-10-01T00:01:00Z", event: "gate-result", cmd: "make test", exitCode: 0, seconds: 900, outFile: "o" },
+    { ts: "2026-10-01T00:01:01Z", event: "gate-result", taskId: "2", cmd: "make test", exitCode: 0, seconds: 900, outFile: "o" },
+    ...pastIntegration([80]),
+  ];
+  const { deps, logged } = makeDeps({
+    expandSelection: spy(Promise.resolve(["101", "102", "103"])) as any,
+    runCampaignPlan: spy(
+      Promise.resolve({ waves: [["101"], ["102"], ["103"]], waveArgs: '"101" "102" "103"', report: "the plan", alreadyMerged: [] }),
+    ) as any,
+    readGateHistory: spy(history) as any,
+  });
+  await dispatch(campaignCmd({ positional: ["101", "102", "103"], dryRun: true }), deps);
+  assert.deepEqual((deps.readGateHistory as any).calls, [[deps.cfg]]);
+  const estimate = logged.indexOf("base gates: ~3 × 1m12s (median of 3 past base gates) ≈ 4m");
+  assert.ok(estimate > logged.indexOf("the plan"), `the estimate follows the provenance report:\n${logged.join("\n")}`);
+});
+
+test("dispatch campaign --dry-run with no past merged-base gate says there is no history, and gives no number (#615)", async () => {
+  const { deps, logged } = makeDeps({
+    expandSelection: spy(Promise.resolve(["101"])) as any,
+    runCampaignPlan: spy(Promise.resolve({ waves: [["101"]], waveArgs: '"101"', report: "the plan", alreadyMerged: [] })) as any,
+  });
+  await dispatch(campaignCmd({ positional: ["101"], dryRun: true }), deps);
+  assert.ok(logged.includes("base gates: no estimate — no merged-base gate in this project's history yet"), logged.join("\n"));
 });
 
 test("dispatch campaign without --dry-run never resolves the file-set check, even when its plan refuses (#476)", async () => {

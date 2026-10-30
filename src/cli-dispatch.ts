@@ -46,7 +46,8 @@ import {
   type ReducedCampaign,
 } from "./dashboard-model.ts";
 import { campaignParkMove, REDRIVE_ONLY_REASONS } from "./gateway.ts";
-import { makeReporter } from "./report.ts";
+import { formatBaseGateEstimate, makeReporter } from "./report.ts";
+import { pastBaseGates } from "./slow-gates.ts";
 import { Refusal } from "./refusal.ts";
 import { mountParentPaths, mountParentProblems, type readMountParentOwners } from "./sandbox.ts";
 
@@ -407,6 +408,9 @@ export interface DispatchDeps {
   /** Read this project's event log — the source a green `answer` checks to decide
    *  whether the issue belongs to a paused campaign it should redrive (design §7). */
   readEventLog: typeof readEventLog;
+  /** Read the project's whole gate history — every archived log oldest-first, then the live log, as
+   *  slow-gate detection reads it — the past merged-base gates `campaign --dry-run` estimates from (#615). */
+  readGateHistory: (cfg: ResolvedConfig) => OrchestratorEvent[];
   archiveRun: typeof archiveRun;
   requireTelegram: typeof requireTelegram;
   tgTest: typeof tgTest;
@@ -794,6 +798,8 @@ async function dispatchCampaign(cmd: Extract<Command, { kind: "campaign" }>, dep
     deps.log("");
     deps.log(report.report);
     if (report.suggestedName) deps.log(`\nsuggested name: --name "${report.suggestedName}"`);
+    // The plan's wave count read as time: each wave pays one merged-base gate (#615).
+    deps.log(formatBaseGateEstimate(report.waves.length, pastBaseGates(deps.readGateHistory(cfg))));
     await logFilesetCheck();
     return;
   }

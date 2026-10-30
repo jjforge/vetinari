@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
 import {
+  gh,
+  GH_LIMITS,
   githubBlockedBy,
   githubFetchTask,
   githubFindOpenIssue,
@@ -852,4 +857,39 @@ test("githubFindOpenIssue never returns a listed row that lacks a url", async ()
   assert.equal(await find(title), undefined, "a url-less row is not a candidate");
   listing.push({ number: 11, title, url: "https://github.com/x/y/issues/11" });
   assert.equal(await find(title), "https://github.com/x/y/issues/11", "the row that carries a url wins");
+});
+
+/** Runs `body` with a stub executable named `gh` (the given shell script) first on PATH. */
+async function withStubGh(script: string, body: () => Promise<void>) {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-stub-gh-"));
+  const path = process.env.PATH;
+  try {
+    writeFileSync(join(dir, "gh"), `#!/bin/sh\n${script}\n`);
+    chmodSync(join(dir, "gh"), 0o755);
+    process.env.PATH = `${dir}${delimiter}${path}`;
+    await body();
+  } finally {
+    process.env.PATH = path;
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("GH_LIMITS caps every gh call at 60 s and 64 MB of output", () => {
+  assert.deepEqual(GH_LIMITS, { timeout: 60_000, maxBuffer: 67_108_864 });
+});
+
+test("gh returns output past the old 1 MB default whole — 2 MiB of stdout resolves intact", async () => {
+  await withStubGh("head -c 2097152 /dev/zero | tr '\\0' x", async () => {
+    const out = await gh([]);
+    assert.equal(out.length, 2 * 1024 * 1024);
+    assert.ok(out.length > 1024 * 1024);
+  });
+});
+
+test("gh kills a call that runs past its timeout and rejects — a stalled gh never hangs", async () => {
+  await withStubGh("sleep 10", async () => {
+    const started = Date.now();
+    await assert.rejects(gh([], { ...GH_LIMITS, timeout: 200 }));
+    assert.ok(Date.now() - started < 5000, `took ${Date.now() - started} ms`);
+  });
 });

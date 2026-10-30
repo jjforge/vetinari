@@ -11,8 +11,14 @@ const execFileAsync = promisify(execFile);
 // Promise-based so the `Promise.all` fan-outs in graft, campaign planning, prune and
 // the dashboard previews actually overlap their `gh` calls instead of running one id
 // after another (#368). A non-zero exit rejects, as the former `execFileSync` threw.
+/** The limits every `gh` call runs under (#560): killed and rejected past 60 s, so one
+ * stalled call cannot hang planning or harvest, and up to 64 MB of output returned whole
+ * rather than Node's 1 MB default. A timeout or overflow rejects like a non-zero exit. */
+export const GH_LIMITS = { timeout: 60_000, maxBuffer: 64 * 1024 * 1024 };
+
 // Exported as the runner `init`'s label step is handed.
-export const gh = async (args: string[]): Promise<string> => (await execFileAsync("gh", args, { encoding: "utf8" })).stdout;
+export const gh = async (args: string[], limits: { timeout: number; maxBuffer: number } = GH_LIMITS): Promise<string> =>
+  (await execFileAsync("gh", args, { encoding: "utf8", ...limits })).stdout;
 
 /** The default repo deriver every shipped resolver falls back to when no explicit
  * `owner/repo` is wired: the same live read of the project's `origin` remote that

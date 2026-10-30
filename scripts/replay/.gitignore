@@ -1,0 +1,4 @@
+*.json
+out.txt
+repos/
+__pycache__/

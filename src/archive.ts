@@ -29,7 +29,9 @@ export function archiveRun(cfg: ResolvedConfig): ArchiveResult {
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     archivedLog = `${dir}/orchestrator-${stamp}.jsonl`;
     renameSync(cfg.logFile, archivedLog);
-    writeFileSync(cfg.logFile, ""); // fresh, empty — buildStatus reads the log as idle
+    // Fresh, empty — buildStatus reads the log as idle. Append mode creates it without
+    // truncating, so a row another process appended since the move survives.
+    writeFileSync(cfg.logFile, "", { flag: "a" });
   }
 
   const clearedOutbound = clearSentOutbound(cfg);

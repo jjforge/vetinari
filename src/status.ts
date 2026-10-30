@@ -156,6 +156,15 @@ export async function serveAllStatus(
         return;
       }
       const url = new URL(req.url ?? "/", "http://localhost");
+      // The two GETs that shell a child (ADR 0021): a cross-site <img>/<iframe> GET carries no
+      // Origin, so the Origin check admits it — refuse any Sec-Fetch-Site but same-origin (#524).
+      const fetchSite = req.headers["sec-fetch-site"];
+      const spawningPreview =
+        req.method === "GET" && (url.pathname === "/graft" || url.pathname === "/prune") && url.searchParams.has("preview");
+      if (spawningPreview && fetchSite !== undefined && fetchSite !== "same-origin") {
+        res.writeHead(403, { "content-type": "text/plain; charset=utf-8" }).end(`cross-site request refused: Sec-Fetch-Site ${fetchSite}`);
+        return;
+      }
       for (const handle of handlers) {
         if (await handle(req, res, url, deps)) return;
       }

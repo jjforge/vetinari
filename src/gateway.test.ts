@@ -1550,17 +1550,19 @@ test("gatewayStatusPort warns and host-logs when VETINARI_STATUS_PORT is set, si
   assert.deepEqual(warnings, [
     "[vetinari] VETINARI_STATUS_PORT is set but the gateway ignores it — set VETINARI_GATEWAY_STATUS_PORT to choose the gateway's dashboard port (using 8765)",
   ]);
-  const rows = logger.events.filter((e) => e.event === "gateway-status-port-env-ignored");
+  const rows = logger.events.filter((e) => (e.event as string) === "gateway-status-port-env-ignored") as unknown as Array<
+    Record<string, unknown>
+  >;
   assert.equal(rows.length, 1);
-  assert.equal((rows[0] as Record<string, unknown>).value, "9000");
-  assert.equal((rows[0] as Record<string, unknown>).port, 8765);
+  assert.equal(rows[0].value, "9000");
+  assert.equal(rows[0].port, 8765);
 });
 
 test("gatewayStatusPort stays quiet when VETINARI_STATUS_PORT is unset", () => {
   const logger = memoryLogger();
   const { warnings } = captureWarnings(() => gatewayStatusPort({ VETINARI_GATEWAY_STATUS_PORT: "9001" }, logger));
   assert.deepEqual(warnings, []);
-  assert.equal(logger.events.filter((e) => e.event === "gateway-status-port-env-ignored").length, 0);
+  assert.equal(logger.events.filter((e) => (e.event as string) === "gateway-status-port-env-ignored").length, 0);
 });
 
 test("importing gateway.ts with a bad VETINARI_GATEWAY_STATUS_PORT does not throw — the check runs only at gateway start", () => {

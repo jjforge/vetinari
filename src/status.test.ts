@@ -1803,3 +1803,40 @@ test("serveAllStatus logs a POST no route owns as one dashboard-request host-log
     assert.match(String(remote), /^(::ffff:)?127\.0\.0\.1$/);
   });
 });
+
+test("serveAllStatus logs the status a POST was actually sent: a 403 denial and a route's 400 (#582)", async () => {
+  await withAccessLog(async (port, accessRows) => {
+    const refused = await fetch(`http://127.0.0.1:${port}/answer`, { method: "POST", headers: { origin: "http://evil.example" } });
+    assert.equal(refused.status, 403);
+    await refused.text();
+    const rejected = await fetch(`http://127.0.0.1:${port}/prune`, { method: "POST" });
+    assert.equal(rejected.status, 400);
+    await rejected.text();
+    const rows = await accessRows(2);
+    assert.deepEqual(
+      rows.map(({ path, status }) => ({ path, status })),
+      [
+        { path: "/answer", status: 403 },
+        { path: "/prune", status: 400 },
+      ],
+    );
+  });
+});
+
+test("serveAllStatus logs a POST's path without its query string, and logs no GET (#582)", async () => {
+  await withAccessLog(async (port, accessRows) => {
+    for (const path of ["/", "/api/landing"]) {
+      const res = await fetch(`http://127.0.0.1:${port}${path}`);
+      assert.equal(res.status, 200);
+      await res.text();
+    }
+    const posted = await fetch(`http://127.0.0.1:${port}/nope?project=solo&secret=1`, { method: "POST" });
+    await posted.text();
+    // The POST's row is written after the GETs', so once it is there any GET row would be too.
+    const rows = await accessRows(1);
+    assert.deepEqual(
+      rows.map(({ method, path }) => ({ method, path })),
+      [{ method: "POST", path: "/nope" }],
+    );
+  });
+});

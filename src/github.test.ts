@@ -951,3 +951,60 @@ test("withRetry scales each backoff by the random factor — 0.5x at the floor, 
     assert.equal(Math.round(state.waits[0]), first);
   }
 });
+
+/** A `run` that rejects the first call each seam makes (keyed on its leading args) and
+ * then answers with parseable JSON, counting calls per key. */
+function failOncePerSeam() {
+  const calls = new Map<string, number>();
+  const run = async (args: string[]): Promise<string> => {
+    const key = args[0] === "api" ? "api" : args.slice(0, 2).join(" ");
+    const n = (calls.get(key) ?? 0) + 1;
+    calls.set(key, n);
+    if (n === 1) throw new Error(`${key} failed`);
+    return key === "issue view" ? "{}" : "[]";
+  };
+  return { run, calls };
+}
+const noSleep = async () => {};
+
+test("githubTracker retries a failed gh read in each read seam — fetchTask, blockedBy, listByLabel, findOpenIssue resolve (#560)", async () => {
+  const fetch = failOncePerSeam();
+  await githubTracker({ repo: "o/r" }, fetch.run, undefined, noSleep).fetchTask("#1");
+  const blocked = failOncePerSeam();
+  assert.deepEqual(await githubTracker({ repo: "o/r" }, blocked.run, undefined, noSleep).blockedBy("#1"), []);
+  const listed = failOncePerSeam();
+  assert.deepEqual(await githubTracker({ repo: "o/r" }, listed.run, undefined, noSleep).listByLabel("ready-for-agent"), []);
+  const found = failOncePerSeam();
+  assert.equal(await githubTracker({ repo: "o/r" }, found.run, undefined, noSleep).findOpenIssue("a bug"), undefined);
+
+  for (const { calls } of [fetch, blocked, listed, found]) assert.deepEqual([...calls.values()], [2]);
+});
+
+test("githubTracker never retries a gh write — postComment, onIssueMerged, reportFinding reject after one call (#560)", async () => {
+  for (const invoke of [
+    (t: ReturnType<typeof githubTracker>) => t.postComment("#1", "hi"),
+    (t: ReturnType<typeof githubTracker>) => t.onIssueMerged("#1"),
+    (t: ReturnType<typeof githubTracker>) => t.reportFinding({ summary: "a bug" }, { taskId: "1", project: "p" }),
+  ]) {
+    const { run, calls } = failOncePerSeam();
+    await assert.rejects(invoke(githubTracker({ repo: "o/r" }, run, undefined, noSleep)));
+    assert.deepEqual([...calls.values()], [1]);
+  }
+});
+
+test("each write factory calls gh exactly once and rejects on its failure — a retried create could double-file (#560)", async () => {
+  for (const invoke of [
+    (run: (args: string[]) => Promise<string>) => githubIssueComment("o/r", run)("#1", "hi"),
+    (run: (args: string[]) => Promise<string>) =>
+      githubFindingReporter("o/r", {}, run)({ summary: "a bug" }, { taskId: "1", project: "p" }),
+    (run: (args: string[]) => Promise<string>) => githubMarkPendingVerify("o/r", run)("#1"),
+  ]) {
+    let calls = 0;
+    const run = async () => {
+      calls++;
+      throw new Error("gh failed");
+    };
+    await assert.rejects(invoke(run), /gh failed/);
+    assert.equal(calls, 1);
+  }
+});

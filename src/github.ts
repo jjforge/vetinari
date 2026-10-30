@@ -105,7 +105,7 @@ const repoAccessor = (factory: string, repo: string | undefined, deriveRepo: () 
  */
 export const githubBlockedBy = (
   repo?: string,
-  run: (args: string[]) => Promise<string> = gh,
+  run: (args: string[]) => Promise<string> = withRetry(gh),
   log: (line: string) => void = console.error,
   deriveRepo = deriveRepoFromProject,
 ) => {
@@ -154,7 +154,11 @@ export const githubBlockedBy = (
  * list (#175). `run` is injected only so the argument building can be tested without
  * invoking `gh`.
  */
-export const githubFetchTask = (repo?: string, run: (args: string[]) => Promise<string> = gh, deriveRepo = deriveRepoFromProject) => {
+export const githubFetchTask = (
+  repo?: string,
+  run: (args: string[]) => Promise<string> = withRetry(gh),
+  deriveRepo = deriveRepoFromProject,
+) => {
   const repoOf = repoAccessor("githubFetchTask", repo, deriveRepo);
   return async (id: string): Promise<string> => {
     const r = repoOf();
@@ -199,7 +203,7 @@ const LABEL_FETCH_LIMIT = 1000;
  */
 export const githubIssuesByLabel = (
   repo?: string,
-  run: (args: string[]) => Promise<string> = gh,
+  run: (args: string[]) => Promise<string> = withRetry(gh),
   log: (line: string) => void = console.error,
   deriveRepo = deriveRepoFromProject,
 ) => {
@@ -331,7 +335,11 @@ export const githubFindingReporter = (
  * moments ago loses nothing. The URL, not the bare number, so a match carries a link and its ref
  * is the same one the campaign's own filings carry (#549). Repo derivation as `githubFindingReporter`.
  */
-export const githubFindOpenIssue = (repo?: string, run: (args: string[]) => Promise<string> = gh, deriveRepo = deriveRepoFromProject) => {
+export const githubFindOpenIssue = (
+  repo?: string,
+  run: (args: string[]) => Promise<string> = withRetry(gh),
+  deriveRepo = deriveRepoFromProject,
+) => {
   const repoOf = repoAccessor("githubFindOpenIssue", repo, deriveRepo);
   return async (title: string): Promise<string | undefined> => {
     const out = await run(["issue", "list", "--repo", repoOf(), "--state", "open", "--limit", "200", "--json", "number,title,url"]);
@@ -373,19 +381,25 @@ export const GITHUB_TRACKER_LABELS: ReadonlyArray<{ name: string; color: string;
  *
  * A field set after the spread wins, so a project overrides or turns off one seam
  * (`{ ...githubTracker(), onIssueMerged: undefined }`); the factories stay exported as
- * the building blocks for custom wiring. `run`/`deriveRepo` are injected only so the
- * wiring can be tested without invoking `gh` or reading a real remote.
+ * the building blocks for custom wiring. The four read seams retry a failed `gh` call
+ * (`withRetry`); the three write seams get the bare runner and never retry (#560).
+ * `run`/`deriveRepo`/`sleep` are injected only so the wiring can be tested without
+ * invoking `gh`, reading a real remote or waiting out the backoff.
  */
 export const githubTracker = (
   opts: { repo?: string; findingLabels?: string[] } = {},
   run: (args: string[]) => Promise<string> = gh,
   deriveRepo = deriveRepoFromProject,
-) => ({
-  fetchTask: githubFetchTask(opts.repo, run, deriveRepo),
-  blockedBy: githubBlockedBy(opts.repo, run, undefined, deriveRepo),
-  listByLabel: githubIssuesByLabel(opts.repo, run, undefined, deriveRepo),
-  postComment: githubIssueComment(opts.repo, run, deriveRepo),
-  onIssueMerged: githubMarkPendingVerify(opts.repo, run, deriveRepo),
-  reportFinding: githubFindingReporter(opts.repo, { labels: opts.findingLabels ?? ["needs-triage"] }, run, deriveRepo),
-  findOpenIssue: githubFindOpenIssue(opts.repo, run, deriveRepo),
-});
+  sleep = sleepMs,
+) => {
+  const read = withRetry(run, sleep);
+  return {
+    fetchTask: githubFetchTask(opts.repo, read, deriveRepo),
+    blockedBy: githubBlockedBy(opts.repo, read, undefined, deriveRepo),
+    listByLabel: githubIssuesByLabel(opts.repo, read, undefined, deriveRepo),
+    postComment: githubIssueComment(opts.repo, run, deriveRepo),
+    onIssueMerged: githubMarkPendingVerify(opts.repo, run, deriveRepo),
+    reportFinding: githubFindingReporter(opts.repo, { labels: opts.findingLabels ?? ["needs-triage"] }, run, deriveRepo),
+    findOpenIssue: githubFindOpenIssue(opts.repo, read, deriveRepo),
+  };
+};

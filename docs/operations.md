@@ -328,13 +328,14 @@ with a one-line plain-text reason:
 
 ### Over a tailnet
 
-Bind the dashboard to the tailnet address, or to `0.0.0.0` on a host whose only
-non-loopback reachability is the tailnet:
+Bind the dashboard to the host's tailnet IP. Every vetinari host runs Docker for
+its agent containers, so do not bind `0.0.0.0`: it also binds the Docker bridge
+(`docker0`), and every agent container on the host could reach the dashboard.
 
 ```bash
-vetinari status --host 0.0.0.0
+vetinari status --host 100.x.y.z
 # or, for the gateway's dashboard:
-VETINARI_GATEWAY_STATUS_HOST=0.0.0.0 vetinari gateway
+VETINARI_GATEWAY_STATUS_HOST=100.x.y.z vetinari gateway
 ```
 
 Opening it by tailnet IP (`http://100.x.y.z:8765`) needs nothing more. Opening it
@@ -350,7 +351,7 @@ rewrites it, so set the variables in a drop-in, which survives a re-install:
 ```bash
 systemctl --user edit vetinari-gateway
 # [Service]
-# Environment=VETINARI_GATEWAY_STATUS_HOST=0.0.0.0
+# Environment=VETINARI_GATEWAY_STATUS_HOST=100.x.y.z
 # Environment=VETINARI_STATUS_ALLOWED_HOSTS=myhost.tailnet.ts.net
 vetinari gateway restart
 ```

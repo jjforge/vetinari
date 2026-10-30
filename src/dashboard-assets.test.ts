@@ -15,6 +15,9 @@ import {
   HOST_LOG_STYLES,
   HOST_LOG_SCRIPT,
   LIVE_TAIL_STYLES,
+  LIVE_TAIL_SCRIPT,
+  TAIL_FOLLOW_CAP,
+  TAIL_RENDER_CAP,
   REDRIVE_SCRIPT,
   STOP_SCRIPT,
   GRAFT_SCRIPT,
@@ -22,6 +25,10 @@ import {
 import type { GraftRejection } from "./plan.ts";
 import { cappedRawRows, isNotableHostEvent, renderLandingShell } from "./status.ts";
 import { issueDetailSheetMarkup } from "./dashboard-render-issue.ts";
+
+test("the live tail script takes its follow and render caps from the exported constants (#594)", () => {
+  assert.ok(LIVE_TAIL_SCRIPT.includes(`const FOLLOW_CAP = ${TAIL_FOLLOW_CAP}, RENDER_CAP = ${TAIL_RENDER_CAP};`));
+});
 
 test("graftVerdicts maps every graft rejection reason — no key renders undefined (#374)", () => {
   // The reason map lives in browser JS, where an unmapped key renders `undefined` to

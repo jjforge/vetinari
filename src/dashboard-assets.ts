@@ -850,6 +850,14 @@ export const LIVE_TAIL_STYLES = `  .live-tail { background: var(--color-card); b
   @media (max-width: 640px) { .tail-summary { display: none; } }
   @media (max-width: 640px) { .tail-head { flex-wrap: wrap; } .tail-title { white-space: nowrap; } .tail-controls { flex-basis: 100%; min-width: 0; } .tail-filter { flex: 1; min-width: 0; max-width: none; } }`;
 
+/** The live tail's following-buffer cap: while following, the per-repo buffer keeps only
+ * the newest this-many lines, oldest discarded (#124). A paused buffer grows past it. */
+export const TAIL_FOLLOW_CAP = 260;
+
+/** How many matching lines the tail body renders — the newest this-many, so a long
+ * stream can't build an unbounded DOM (the pane's counterpart to `cappedRawRows`, #124). */
+export const TAIL_RENDER_CAP = 160;
+
 /**
  * The live-tail pane's client script (#124), inlined into the repo page after its shared
  * `EventSource` so it can subscribe to the named `tail` frames the SSE pushes. Everything
@@ -875,7 +883,7 @@ export const LIVE_TAIL_SCRIPT = `  const tailEl = document.querySelector("[data-
     ${tailView.toString()}
     ${paneActivity.toString()}
     ${tailCollapseIntent.toString()}
-    const FOLLOW_CAP = 260, RENDER_CAP = 160;
+    const FOLLOW_CAP = ${TAIL_FOLLOW_CAP}, RENDER_CAP = ${TAIL_RENDER_CAP};
     const project = tailEl.dataset.project;
     let agents = []; try { agents = JSON.parse(tailEl.dataset.agents || "[]"); } catch (e) {}
     // The pane holds its space and rests collapsed with no agents (#330), so \`open\` starts from

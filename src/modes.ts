@@ -23,6 +23,7 @@ import {
 import { strandedByConflict, resumeIndex, type StrandedImpact } from "./prune.ts";
 import { normalize } from "./issue-id.ts";
 import { notice, type Notice } from "./notice.ts";
+import { PARK_RECOVERY } from "./park-recovery.ts";
 import { Refusal } from "./refusal.ts";
 import { gitRead } from "./git-read.ts";
 import { tgSend, tgWaitReply, type TgConn } from "./telegram.ts";
@@ -676,7 +677,7 @@ export function strandedConflictNotice(project: string, waveNumber: number, impa
  * The operator-facing notice a merge-conflict park enqueues when it holds the wave
  * (design §5 step 5). One or more greens conflicted at merge, again after their retry, and are parked as `conflict`,
  * their branches/worktrees/sessions intact; the wave's other greens stay merged on the base
- * and the campaign parks for a human to resolve the conflict on the branch and redrive.
+ * and the campaign parks for a human to resolve the conflict on the base and redrive.
  * `category: "failure"` routes it to the alert channel a red base uses. Pure, so the wording
  * and routing are checkable without a campaign.
  */
@@ -693,7 +694,7 @@ export function conflictParkedNotice(
     state: "PARKED",
     context: `wave ${waveNumber}`,
     signal: `Merge conflict on ${conflictParked.map((q) => `#${q}`).join(", ")} — greens (${merged.join(", ") || "none"}) kept on ${baseBranch}, campaign paused.`,
-    recover: "resolve the conflict on the branch then `vetinari redrive` (or `prune <issue>`)",
+    recover: `${PARK_RECOVERY.conflict} (or \`prune <issue>\`)`,
     category: "failure",
     event: "campaign-parked",
   });

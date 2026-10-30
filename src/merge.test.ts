@@ -167,6 +167,7 @@ test("parkMergeConflict writes a durable parked{conflict} record and event for a
   assert.ok(rec, "a parked record for B is written to disk");
   assert.equal(rec!.reason, "conflict");
   assert.equal(rec!.branch, "agent/B");
+  assert.equal(rec!.question, "Merge conflict on agent/B. Resolve the conflict on the base, then `vetinari redrive`.");
   assert.match(rec!.detail ?? "", /Merge conflict in f\.txt/);
   assert.ok(rec!.parkedAt, "parkedAt is stamped");
   const q = log.events.filter((e) => e.event === "parked" && (e as any).reason === "conflict");

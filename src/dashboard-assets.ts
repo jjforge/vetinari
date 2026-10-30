@@ -11,6 +11,7 @@ import {
 } from "./dashboard-render.ts";
 import { issueMoves, paneActivity, reasonWord, tailCollapseIntent } from "./dashboard-visual-state.ts";
 import { humanizeHostLine, LOG_DOT_STATE_COLOR, splitOverflow } from "./log-view.ts";
+import { PARK_RECOVERY, recoverySentence } from "./park-recovery.ts";
 
 /**
  * The dashboard's inert browser payloads — the CSS and client-side JavaScript
@@ -314,16 +315,14 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
   // The one park-reason → word mapping (dashboard-visual-state.ts), single-sourced the same
   // way so the sheet spells a reason exactly as the status line and the parked card do (#317).
   ${reasonWord.toString()}
-  // The fix-forward instruction each redrive-only park reads in the sheet notice (design
-  // §11, user-guide park reasons): a conflict/red-base/crash is fixed forward on the base
-  // and redriven, never answered per-issue.
-  const FIX_FORWARD = {
-    conflict: "This green branch conflicts with the base at merge. Resolve the conflict on the base, then redrive.",
-    "red-base": "Every issue passed alone; the merged base fails together. Fix forward on the base, then redrive.",
-    crash: "The run died with no verdict. Redrive to pick the campaign back up.",
-    stopped: "The run was stopped by an operator. Redrive to pick the campaign back up, or vetinari run <id> for a standalone run.",
-    "outdated-agent": "The image's agent CLI is too old for the model. Rebuild the image with vetinari build, then redrive.",
-  };
+  // The move each park reason asks of the human (park-recovery.ts, #578) — the one table the
+  // CLI, gateway and report read, inlined with its sentence renderer the same way. Only the
+  // redrive-only parks read it in the sheet notice: a conflict/red-base/crash is fixed
+  // forward on the base and redriven, never answered per-issue; a question/stall gets the
+  // reply box (or its delivered answer) instead.
+  const PARK_RECOVERY = ${JSON.stringify(PARK_RECOVERY)};
+  ${recoverySentence.toString()}
+  const REDRIVE_ONLY = ["conflict", "red-base", "crash", "stopped", "outdated-agent"];
   // The foot (reply + actions) shows only while it holds a live control — a reply to
   // send or a prune to offer — so a plain issue's sheet grows no empty bar.
   const updateFoot = () => {
@@ -370,7 +369,9 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
     const answered = Boolean(d.answeredAt) && !d.archived;
     // The reply block shows the answer UI for a question/stall, or a fix-forward notice for
     // a conflict/red-base/crash park; every other state hides it.
-    const notice = !moves.reply && d.status === "parked" && !d.archived ? (FIX_FORWARD[d.reason] || "") : "";
+    const notice = !moves.reply && d.status === "parked" && !d.archived && REDRIVE_ONLY.includes(d.reason)
+      ? recoverySentence(PARK_RECOVERY[d.reason], d.issueNumber).split("\`").join("")
+      : "";
     detailReply.hidden = !(moves.reply || notice || answered);
     replySend.hidden = !moves.reply;
     replyAnswer.hidden = !answered;

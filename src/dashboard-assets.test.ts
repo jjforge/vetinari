@@ -494,13 +494,12 @@ test("the issue sheet shows a delivered answer read-only — no reply box, no op
   assert.match(issueDetailSheetMarkup(false), /<p class="reply-answer" id="reply-answer" hidden><\/p>/);
 });
 
-test("the issue-sheet FIX_FORWARD map carries a `stopped` entry — a signalled run is redriven, not answered", () => {
+test("the issue sheet's PARK_RECOVERY table carries a `stopped` entry — a signalled run is redriven, not answered", () => {
   // A stopped park is redrive-only (dashboard-visual-state issueMoves), so the sheet shows a
-  // fix-forward notice rather than a reply box. The notice text comes from FIX_FORWARD[stopped].
-  assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /stopped:/);
-  assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /vetinari run/);
+  // recovery notice rather than a reply box. The notice text comes from PARK_RECOVERY[stopped].
+  assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /"stopped":"[^"]*vetinari redrive[^"]*vetinari run <id>[^"]*"/);
 });
 
-test("the issue-sheet FIX_FORWARD map carries an `outdated-agent` entry — rebuild the image, then redrive (#444)", () => {
-  assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /"outdated-agent": "[^"]*vetinari build[^"]*redrive[^"]*"/);
+test("the issue sheet's PARK_RECOVERY table carries an `outdated-agent` entry — rebuild the image, then redrive (#444)", () => {
+  assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /"outdated-agent":"[^"]*vetinari build[^"]*redrive[^"]*"/);
 });

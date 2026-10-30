@@ -227,6 +227,12 @@ test("memberParkedNotice names the members awaiting a human and points at answer
   assert.ok(!/gated red|attributable|fix-forward/i.test(notice.text), notice.text);
 });
 
+test("conflictParkedNotice asks for the conflict to be resolved on the base, then a redrive (#578)", () => {
+  const n = conflictParkedNotice("acme", 1, ["640"], ["101"], "main");
+  assert.ok(n.text.includes("resolve the conflict on the base, then `vetinari redrive` (or `prune <issue>`)"), n.text);
+  assert.ok(!n.text.includes("on the branch"), n.text);
+});
+
 test("strandedConflictNotice draws a human to a campaign paused by a quarantine that orphaned later-wave dependents", () => {
   const notice = strandedConflictNotice("acme", 1, [{ target: "640", removed: ["640", "701"], dropped: ["701"] }], "main");
   // Routed to the alerting channel — a paused campaign demands a human, like a wave-park.

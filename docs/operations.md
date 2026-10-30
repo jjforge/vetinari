@@ -106,7 +106,8 @@ it to poll and send for that project. A project with **no** token/chat has no
 connection: the gateway skips it — its outbox never drains and its questions are
 never announced. Credentials must never go in `.vetinari.local/.env` or any file
 injected into an agent container — a bot token must not ride along into a
-sandbox.
+sandbox. The agent preflight refuses a `.env` that names `VETINARI_TELEGRAM_BOT_TOKEN`
+or `VETINARI_TELEGRAM_CHAT_ID`, even with an empty value.
 
 ### Bots are per project
 

@@ -332,6 +332,29 @@ export function missingCredentials(provider: AgentProviderName, envPath: string)
   return anyPresent ? [] : [...keys];
 }
 
+/**
+ * vetinari's own secrets — the bot connection read from `host.env` — which the container
+ * gate (`.vetinari.local/.env`) must never name: the sandbox env resolver fills a named key
+ * from the orchestrator's `process.env` when the `.env` leaves it empty, so naming one at
+ * all can carry it into the container. `VETINARI_TELEGRAM_THREAD_ID` is a destination
+ * property, not a secret.
+ */
+export const VETINARI_SECRET_KEYS: readonly string[] = ["VETINARI_TELEGRAM_BOT_TOKEN", "VETINARI_TELEGRAM_CHAT_ID"];
+
+/**
+ * The preflight secret check: refuse a container `.env` that assigns any of
+ * {@link VETINARI_SECRET_KEYS}, whatever the value (empty included). A missing file passes.
+ */
+export function refuseVetinariSecretsInEnv(envPath: string): void {
+  if (!existsSync(envPath)) return;
+  const named = Object.keys(parseEnvAssignments(readFileSync(envPath, "utf8"))).filter((k) => VETINARI_SECRET_KEYS.includes(k));
+  if (named.length)
+    throw new Refusal(
+      `${envPath} names vetinari's own secret ${named.join(", ")} — remove it: ` +
+        `the container gate must never carry it (it belongs in host.env) (preflight).`,
+    );
+}
+
 /** Minimal `KEY=value` reader for a container `.env` — presence detection only, no shell semantics. */
 function parseEnvAssignments(text: string): Record<string, string> {
   const env: Record<string, string> = {};

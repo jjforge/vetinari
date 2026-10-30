@@ -36,9 +36,11 @@ body or — when those carry none — from the comments, whose cites all check o
 the same read the planner makes and mark exactly the tickets it would otherwise halt on.
 
 An anchored line is **necessary but not sufficient**. A ticket whose marker line cites
-nothing that resolves — a `Touches:` cite the tree lacks, a backticked non-file word,
-an unbackticked bare name — is **selected**, not skipped. A ticket whose only resolvable
-marker lives in a comment is **already usable**, and this skill skips it: its write-back
+nothing that resolves — a `Touches:` cite the tree lacks, a backticked non-file word on
+a `Touches:`/`Files:` line, an unbackticked bare name — is **selected**, not skipped. (On
+a `Creates:` line the same non-file word becomes a bare `Creates:` key and the ticket
+stays confident, because `Creates:` cites are never checked against the tree.) A ticket
+whose only resolvable marker lives in a comment is **already usable**, and this skill skips it: its write-back
 is for tickets that have no resolvable marker anywhere.
 
 When in doubt, ask the planner: `vetinari campaign --dry-run <ids>` prints each

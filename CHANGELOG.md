@@ -21,6 +21,14 @@ Within a milestone each bold section label appears at most once.
 
 ### Collected changes — October 30, 2026
 
+**Breaking changes:**
+- [api] `partitionWaves` is no longer exported — wave placement now happens inside `planCampaign`, which needs the selection order a `layerWaves` plan no longer carries; call `planCampaign` instead (#622).
+
+**New features:**
+- [user] Each wave that closes now prints where its time went — `wave 3/13: 8m24s — agent 5m33s · branch gates 1m19s · integration + base gate 1m31s · post-merge 1s`, with `—` for a phase the event log cannot show — and a campaign's end (completion, park or failure) prints its total merged-base gate time and how many base gates that was. Both are silent under `--json` (#615).
+- [user] `campaign --dry-run` estimates the base-gate time the plan will spend — its wave count × the median past merged-base gate from the project's archived and live logs, naming the median and sample size — or says there is no history yet (#615).
+- [api] `src/report.ts` exports the pure derivations behind them: `waveTimeSplit` (a wave's phases in seconds, `undefined` for one it cannot derive) with `formatWaveTimeSplit`, and `mergedBaseGateSeconds`/`campaignBaseGates` for the merged-base gate totals (#615).
+
 **Improvements:**
 - [user] `/check-brief` reports a shared file: one that a third or more of the open `ready-for-agent` issues cite. Planning keeps every pair of those tickets in separate waves, so such a file can put each ticket in a wave of its own (#611). The check reads which files the project's `fileSet` resolver waives, says whether the shared file is probably safe to share (a prose doc edited in different sections) or a real collision (tests appended at the end of a file, a route table, generated code), and never suggests dropping a file from the marker.
 - [user] The dashboard now caps concurrent live-update (`GET /api/events`) connections at 16; a connection past the cap is answered `503` with `too many live-update connections (max 16)` instead of arming another set of log watchers. A slot frees as soon as an open connection closes (#565).
@@ -29,6 +37,7 @@ Within a milestone each bold section label appears at most once.
 - [user] A green whose merge collides with the base is no longer parked on the spot: the campaign re-admits it into the same wave for one retry by its own agent, which merges the base into its branch and resolves the conflict. Only a second collision parks it `conflict`; a retry that asks a question or stalls parks for that reason instead (#624).
 - [ops] A new `re-admit` event (`taskId`, `reason: "conflict"`, `paths`, `base`) is logged just before the retry's `spawn`; the dashboard narrates it as `#<id> retrying merge conflict — <paths>` and the live tail follows the retried agent (#624).
 - [api] A child `run` takes a merge-conflict retry's prompt from `VETINARI_RESUME_PROMPT`: it resumes `VETINARI_RESUME_SESSION` with it in place of the crash prompt, or re-enters fresh on the kept branch with it added to the issue text (#624).
+- [user] `campaign` plans can be shorter: the planner places the tickets that share files with the most others first, and a dependent can now join an earlier wave its blocker's layer-mates spilled into instead of waiting behind the whole layer. Each ticket still lands after its blockers and never shares a file with a co-wave ticket; a `spilled` line now blames only the tickets between its earliest possible wave and the one it landed in (#622).
 
 **Bug fixes:**
 - [user] Host-slot lease files are now written atomically (temp file, then rename), so a reader can no longer catch a lease half-written and decide a live campaign is gone. Before, that could let a second `run`/`redrive`/`campaign` through, show a live campaign as crashed on the dashboard, or make `stop` say no campaign was running (#528).
@@ -36,6 +45,12 @@ Within a milestone each bold section label appears at most once.
 - [user] Archiving a run no longer drops an event another process (the gateway, an `answer`) appended to the live log while it was being moved aside — the fresh live log is created without truncating (#572).
 - [user] `vetinari statusline` no longer exits non-zero (blanking the Claude Code status bar) when Claude Code reports a non-string model name; it now omits the model instead (#598).
 - [user] A merge that fails with no unmerged paths (a dirty tree, a held `.git/index.lock`) is no longer parked as a `conflict` a human must resolve: the member is logged `failed` with the merge output and the campaign ends `campaign-failed` (#624, #581).
+- [user] The Claude Code status line no longer counts an answered issue as parked (⏸, with its `question` reason) while a live campaign owns its re-admit; it counts it as running, as the dashboard does. With no live campaign it still shows the issue parked (#516).
+- [ops] `npm test` no longer appends fixture rows (`registry-stale`, `status-project-skipped`, …) naming `/tmp/vetinari-*` paths to the real host log: the `test` script preloads `src/test-setup.ts`, which points each test process's `VETINARI_GATEWAY_HOME` at a fresh temp dir unless one is already set. A single-file `npx tsx --test` run does not get the preload (#539).
+- [user] The dashboard no longer blocks on git for every page load: the repo dropdown and landing cards read the `owner/name` captured at registration (a project that changes its `origin` shows the registered value until it re-registers), and the Redrive dialog's base branch is read asynchronously with a 60 s cap (#562).
+- [user] The dashboard's prune preview now gives up after 60 s, like the graft preview, instead of waiting forever on a hung child (#562).
+- [user] The dashboard's live-update stream now translates legacy event-log rows (retired event kinds and park reasons, such as a `blocked` park now reading `question`) exactly as every other dashboard view does, instead of streaming them untranslated (#579).
+- [ops] The gateway now logs a `gateway-skip-no-credentials` row (with `project` and `baseLocation`) for each registered project that has no Telegram connection, once per gateway start, instead of skipping it silently — the skip line `docs/operations.md` already promised (#589).
 
 **Security:**
 - [user] The dashboard caps every POST body (answer, graft, prune, redrive, stop) at 64 KiB and answers a larger one with a plain `413` instead of reading it without limit (#564).
@@ -50,6 +65,8 @@ Within a milestone each bold section label appears at most once.
 **Documentation:**
 - [ops] `docs/operations.md` now says to bind the dashboard to the host's tailnet IP rather than `0.0.0.0` when exposing it over a tailnet, because a `0.0.0.0` bind also listens on the Docker bridge and so exposes the dashboard to every agent container on the host; the `status --host`, gateway env, and systemd drop-in examples use a tailnet-IP placeholder (#590).
 - [internal] The `spawnResume` comment in `src/gateway.ts` no longer claims the `answer` child runs detached; it describes the resume as fire-and-forget and un-awaited (#590).
+- [user] `docs/ticket-contract.md` now says a cite-less marker line (`Touches: none`) still counts as a marker line: it lets the comments' marker lines be read, but it suppresses the whole-body fallback, so a ticket whose only marker line cites nothing and whose comments carry none resolves no files and is not confident (#556).
+- [user] The `/fileset` skill no longer says a backticked non-file word always fails to resolve: that holds on a `Touches:`/`Files:` line, but on a `Creates:` line it becomes a bare `Creates:` key and the ticket stays confident (#556).
 
 ### v0.2.0 — October 21, 2026
 

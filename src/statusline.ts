@@ -153,7 +153,7 @@ export async function runStatusLine(cfgPath?: string, opts: { baseCommand?: stri
   }
 
   const line1 = formatContextLine({
-    model: trimModelName(input?.model?.display_name),
+    model: typeof input?.model?.display_name === "string" ? trimModelName(input.model.display_name) : undefined,
     dir: typeof dir === "string" ? basename(dir) : undefined,
     branch: gitBranch(typeof dir === "string" ? dir : "."),
     contextPct: typeof input?.context_window?.used_percentage === "number" ? input.context_window.used_percentage : undefined,

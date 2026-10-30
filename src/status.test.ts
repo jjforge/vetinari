@@ -197,6 +197,25 @@ test("GET /api/host-log serves the host log newest-first as raw JSONL lines; a m
   }
 });
 
+test("serveAllStatus answers a POST body over 64 KiB with a plain 413, not a 500 with a stack", async () => {
+  const configDir = join(tmpdir(), `vetinari-body-cap-${Date.now()}`);
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const { port } = server.address() as AddressInfo;
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/answer`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: `text=${"a".repeat(70000)}`,
+    });
+    assert.equal(res.status, 413);
+    const text = await res.text();
+    assert.match(text, /too large/);
+    assert.doesNotMatch(text, /\n\s+at /, "no stack trace in the response");
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});
+
 test("serveAllStatus GET / serves the all-repos landing shell, not a server-rendered campaign", async () => {
   const configDir = join(tmpdir(), `vetinari-landing-shell-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");

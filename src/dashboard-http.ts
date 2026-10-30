@@ -51,11 +51,37 @@ export interface DashboardDeps {
  */
 export type RouteHandler = (req: IncomingMessage, res: ServerResponse, url: URL, deps: DashboardDeps) => boolean | Promise<boolean>;
 
+/** The most a dashboard POST body may carry — 64 KiB, counted in bytes. */
+export const MAX_DASHBOARD_BODY_BYTES = 65536;
+
+/** Thrown by `readBody` when a body exceeds `MAX_DASHBOARD_BODY_BYTES`; the composer answers it with a 413. */
+export class BodyTooLargeError extends Error {
+  constructor() {
+    super(`request body exceeds ${MAX_DASHBOARD_BODY_BYTES} bytes`);
+  }
+}
+
+/**
+ * Read a request body as utf8, rejecting with `BodyTooLargeError` once it passes
+ * `MAX_DASHBOARD_BODY_BYTES`. The rest of an oversize body is drained and discarded,
+ * not accumulated, so the client can still read the 413.
+ */
 export const readBody = (req: NodeJS.ReadableStream) =>
   new Promise<string>((resolve, reject) => {
     let body = "";
+    let bytes = 0;
     req.setEncoding("utf8");
-    req.on("data", (chunk) => (body += chunk));
+    const onData = (chunk: string) => {
+      bytes += Buffer.byteLength(chunk);
+      if (bytes > MAX_DASHBOARD_BODY_BYTES) {
+        req.removeListener("data", onData);
+        req.resume();
+        reject(new BodyTooLargeError());
+        return;
+      }
+      body += chunk;
+    };
+    req.on("data", onData);
     req.on("end", () => resolve(body));
     req.on("error", reject);
   });

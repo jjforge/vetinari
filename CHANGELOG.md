@@ -23,6 +23,33 @@ Within a milestone each bold section label appears at most once.
 
 **Improvements:**
 - [user] `/check-brief` reports a shared file: one that a third or more of the open `ready-for-agent` issues cite. Planning keeps every pair of those tickets in separate waves, so such a file can put each ticket in a wave of its own (#611). The check reads which files the project's `fileSet` resolver waives, says whether the shared file is probably safe to share (a prose doc edited in different sections) or a real collision (tests appended at the end of a file, a route table, generated code), and never suggests dropping a file from the marker.
+- [user] The dashboard now caps concurrent live-update (`GET /api/events`) connections at 16; a connection past the cap is answered `503` with `too many live-update connections (max 16)` instead of arming another set of log watchers. A slot frees as soon as an open connection closes (#565).
+- [user] The plan's `spilled` line now names the file a ticket collided on, grouping the colliding tickets by file — `spilled — shares DESIGN.md with #686, #685; internal/web/styles_test.go with #684` — instead of only `shares a file with …` (#620).
+- [api] `Placement` gains a `sharedFiles` field: the collisions that spilled a ticket, grouped by the file key they were on (#620).
+- [user] A green whose merge collides with the base is no longer parked on the spot: the campaign re-admits it into the same wave for one retry by its own agent, which merges the base into its branch and resolves the conflict. Only a second collision parks it `conflict`; a retry that asks a question or stalls parks for that reason instead (#624).
+- [ops] A new `re-admit` event (`taskId`, `reason: "conflict"`, `paths`, `base`) is logged just before the retry's `spawn`; the dashboard narrates it as `#<id> retrying merge conflict — <paths>` and the live tail follows the retried agent (#624).
+- [api] A child `run` takes a merge-conflict retry's prompt from `VETINARI_RESUME_PROMPT`: it resumes `VETINARI_RESUME_SESSION` with it in place of the crash prompt, or re-enters fresh on the kept branch with it added to the issue text (#624).
+
+**Bug fixes:**
+- [user] Host-slot lease files are now written atomically (temp file, then rename), so a reader can no longer catch a lease half-written and decide a live campaign is gone. Before, that could let a second `run`/`redrive`/`campaign` through, show a live campaign as crashed on the dashboard, or make `stop` say no campaign was running (#528).
+- [user] The project page's `N issues · M waves` line no longer counts pruned issues, matching the landing card (#551).
+- [user] Archiving a run no longer drops an event another process (the gateway, an `answer`) appended to the live log while it was being moved aside — the fresh live log is created without truncating (#572).
+- [user] `vetinari statusline` no longer exits non-zero (blanking the Claude Code status bar) when Claude Code reports a non-string model name; it now omits the model instead (#598).
+- [user] A merge that fails with no unmerged paths (a dirty tree, a held `.git/index.lock`) is no longer parked as a `conflict` a human must resolve: the member is logged `failed` with the merge output and the campaign ends `campaign-failed` (#624, #581).
+
+**Security:**
+- [user] The dashboard caps every POST body (answer, graft, prune, redrive, stop) at 64 KiB and answers a larger one with a plain `413` instead of reading it without limit (#564).
+- [user] The dashboard landing page escapes `<` in the repo-label JSON it inlines into its script, so a project name or repo containing `</script>` can no longer close the script early and break the page or inject markup (#567).
+
+**Infrastructure:**
+- [internal] A GitHub Actions workflow (`.github/workflows/ci.yml`) runs `npm ci`, `npm run typecheck`, `npm run format:check` and `npm test` on every push and pull request to `main`, across Node 22.x, 24.x and 26.x — so a commit pushed straight to `main` is gated, and the Node version the gateway unit runs is tested (#530).
+- [ops] `package.json` now declares the supported Node floor (`engines.node` `>=22.15`, matching the README) and pins `tsx` to the exact version the lockfile resolves (`4.23.12`), so a fresh install no longer drifts to a newer `tsx` (#585).
+- [ops] `npm run typecheck` now also compiles the TypeScript under `scripts/` (`scripts/demo.ts`, `scripts/gen-reference.ts`) with the same compiler options as `src/`, so a type error in a script fails the typecheck instead of surfacing only when the script runs (#593).
+- [internal] vetinari's own campaigns now gate on `npm run format:check` between typecheck and test, so an unformatted change can no longer go green and merge (#602).
+
+**Documentation:**
+- [ops] `docs/operations.md` now says to bind the dashboard to the host's tailnet IP rather than `0.0.0.0` when exposing it over a tailnet, because a `0.0.0.0` bind also listens on the Docker bridge and so exposes the dashboard to every agent container on the host; the `status --host`, gateway env, and systemd drop-in examples use a tailnet-IP placeholder (#590).
+- [internal] The `spawnResume` comment in `src/gateway.ts` no longer claims the `answer` child runs detached; it describes the resume as fire-and-forget and un-awaited (#590).
 
 ### v0.2.0 — October 21, 2026
 

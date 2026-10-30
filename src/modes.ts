@@ -984,7 +984,7 @@ export async function campaign(
   batches: string[][],
   host: HostBudget,
   name?: string,
-  opts: { autoPrune?: boolean; resume?: boolean; override?: boolean } = {},
+  opts: { autoPrune?: boolean; resume?: boolean; override?: boolean; waived?: Record<string, number> } = {},
   deps: CampaignDeps = defaultCampaignDeps,
 ): Promise<CampaignOutcome> {
   // Every green branch merges into whatever the main tree has checked out, and
@@ -1113,6 +1113,7 @@ export async function campaign(
       };
       if (name) startEvent.name = name;
       if (Object.keys(titles).length) startEvent.titles = titles;
+      if (opts.waived && Object.keys(opts.waived).length) startEvent.waived = opts.waived;
       cfg.log.log("campaign-start", startEvent);
       enqueueOutbound(
         cfg,

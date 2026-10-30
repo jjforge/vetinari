@@ -1048,6 +1048,30 @@ test("campaign stamps its name and titles once on campaign-start, names the comp
   assert.ok(outbox.find((m) => m.event === "wave-done")?.text.includes("gateway work"));
 });
 
+test("campaign records the plan's waived files on campaign-start, and omits the field when none were waived", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-waived-"));
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const startOf = async (cfg: ReturnType<typeof harnessCfg>, opts: { waived?: Record<string, number> }) => {
+    await silenceConsole(() =>
+      campaign(
+        cfg,
+        [["101", "102"]],
+        host,
+        undefined,
+        opts,
+        gitFreeDeps(cfg, async () => 0),
+      ),
+    );
+    return readEventLog(cfg).find((e): e is CampaignStartEvent => e.event === "campaign-start");
+  };
+
+  const waived = await startOf(harnessCfg(join(dir, "waived")), { waived: { "DESIGN.md": 2 } });
+  assert.deepEqual(waived?.waived, { "DESIGN.md": 2 });
+
+  const plain = await startOf(harnessCfg(join(dir, "plain")), {});
+  assert.ok(plain && !("waived" in plain), "no waived field when nothing was waived");
+});
+
 test("campaign writes no festive-name offset on campaign-start — the name is derived at render, never reserved on a host cursor (#193)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-festive-"));
   const cfg = harnessCfg(dir);

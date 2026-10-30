@@ -2673,10 +2673,29 @@ test("renderStatusPage's meta line counts only the surviving waves of a finished
     event("wave-done", { ts: "2026-09-03T04:05:00.000Z", index: 0, merged: ["2"] }),
   ]);
   const html = renderStatusPage(buildStatus(cfgFor(dir)), { prune: true, graft: true, leaseLive: false });
-  assert.match(html, /<p class="campaign-meta">[^<]* · 1 wave<\/p>/);
+  // N leaves the pruned issue out, as the landing card does.
+  assert.match(html, /<p class="campaign-meta">1 issue · 1 wave<\/p>/);
   // The page's own Redrive gate folds the same live waves, so it reads the campaign settled.
   assert.match(html, /class="redrive-reason">the campaign is settled — nothing to redrive</);
   assert.doesNotMatch(html, /class="graft-inline"/);
+});
+test("renderStatusPage's meta line leaves a pruned chip in a live wave out of the issue count", () => {
+  const html = renderStatusPage({
+    project: "beta",
+    waves: [
+      {
+        index: 0,
+        status: "running",
+        issues: [
+          { issueNumber: "101", status: "running" },
+          { issueNumber: "102", status: "unstarted", membership: "pruned" },
+          { issueNumber: "103", status: "unstarted", membership: "grafted" },
+        ],
+      },
+    ],
+    parked: [],
+  });
+  assert.match(html, /<p class="campaign-meta">2 issues · 1 wave<\/p>/);
 });
 test("the Stop control names the running wave, not a pruned wave ahead of it", () => {
   const html = campaignControls(

@@ -164,7 +164,8 @@ const festiveNameFor = (status: CampaignStatus, wave: StatusWave, festive: boole
 
 /** How many issues the campaign spans, across every wave — the count in the
  * `<name> · N issues · M waves` meta line. */
-const campaignIssueCount = (status: CampaignStatus) => status.waves.reduce((total, wave) => total + wave.issues.length, 0);
+const campaignIssueCount = (status: CampaignStatus) =>
+  status.waves.reduce((total, wave) => total + wave.issues.filter((issue) => issue.membership !== "pruned").length, 0);
 
 /** A wave's merged tally — how many of its issues have completed, out of its total —
  * shown on the right of an open wave card's head and on a closed wave's chip. */
@@ -279,8 +280,9 @@ const renderWaves = (status: CampaignStatus, prune: boolean, interactive: boolea
  * `<p class="campaign-meta">` string every non-graft surface renders. M counts the live
  * waves only — a pruned wave is out of the plan. */
 const renderCampaignMeta = (status: CampaignStatus) => {
+  const issueCount = campaignIssueCount(status);
   const waveCount = liveWaves(status).length;
-  return `<p class="campaign-meta">${status.name ? `<span class="campaign-name">${escapeHtml(status.name)}</span> · ` : ""}${campaignIssueCount(status)} issue${campaignIssueCount(status) === 1 ? "" : "s"} · ${waveCount} wave${waveCount === 1 ? "" : "s"}</p>`;
+  return `<p class="campaign-meta">${status.name ? `<span class="campaign-name">${escapeHtml(status.name)}</span> · ` : ""}${issueCount} issue${issueCount === 1 ? "" : "s"} · ${waveCount} wave${waveCount === 1 ? "" : "s"}</p>`;
 };
 
 const ARCHIVE_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

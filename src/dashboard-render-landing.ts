@@ -142,6 +142,10 @@ const feedRepoLabelMap = (repos: readonly (string | RepoOption)[]): Record<strin
   return map;
 };
 
+/** JSON for inlining in a `<script>`: every `<` as its `\u003c` escape, so no operator-supplied
+ * value can close the element early; the parsed value is unchanged. */
+const scriptSafeJson = (value: unknown): string => JSON.stringify(value).replace(/</g, "\\u003c");
+
 /**
  * The all-repos landing shell: a client-rendered (vanilla, no build step) page the
  * aggregated server serves at `GET /`, replacing the old server-rendered status
@@ -318,7 +322,7 @@ ${REPO_DROPDOWN_SCRIPT}
   // param (that is the repo switcher's ?project=), resets on reload.
   const feedProjectDd = fq("[data-feed-project-dd]"), feedProjectTrigger = fq("[data-feed-project-trigger]");
   const feedProjectMenu = fq("[data-feed-project-menu]"), feedProjectLabel = fq("[data-feed-project-label]");
-  const feedRepoLabels = ${JSON.stringify(feedRepoLabelMap(projects))};
+  const feedRepoLabels = ${scriptSafeJson(feedRepoLabelMap(projects))};
   let feedBuffer = [], feedSeen = {}, feedLive = true, feedMark = 0, feedQuery = "", feedProject = "", feedLoaded = false, feedError = false;
   function feedRender() {
     const view = feedView({ buffer: feedBuffer, mark: feedMark, live: feedLive, project: feedProject, query: feedQuery, cap: FEED_RENDER_CAP });

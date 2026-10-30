@@ -363,6 +363,8 @@ async function harvestFindings(
           } else if (r.action === "digest") cfg.log.log("finding-digested", { taskId, summary, severity: r.finding.severity });
           else cfg.log.log("finding-filed", { taskId, summary, url: r.url });
         },
+        digestFailed: (error, digested) =>
+          cfg.log.log("finding-digest-failed", { taskId, count: digested.length, summaries: digested.map((f) => f.summary), error }),
         maxPerRun: cfg.maxFindingsPerRun ?? 2,
         severityFloor: cfg.findingSeverityFloor ?? "P2",
         lockFile: `${cfg.stateDir}/findings.lock`,

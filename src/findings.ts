@@ -189,6 +189,8 @@ export interface FindingPolicy {
   filedSoFar: () => Map<string, string>;
   /** Record one outcome; called under the lock, so the next run's `filedSoFar` sees a filing. */
   record: (r: TriagedFinding) => void;
+  /** The run's digest comment threw: told the error and the findings it carried, so the throw stays isolated. */
+  digestFailed: (error: string, digested: Finding[]) => void;
   maxPerRun: number;
   severityFloor: Severity;
   /** The cross-process lock serializing dedupe-then-file across a campaign's parallel runs. */
@@ -206,7 +208,8 @@ const rank = (s: Severity | undefined) => (s ? Number(s[1]) : 2);
  * neither dropped nor demoted. Parallel runs serialize on `lockFile` across the whole
  * check-then-file, because the tracker's search cannot see an issue filed seconds ago.
  * A failure is isolated to its own finding, as `reportFindings` does; a failed open-issue
- * search counts as no match, so the finding is still filed or digested.
+ * search counts as no match, so the finding is still filed or digested; a failed digest
+ * comment goes to `digestFailed` rather than rejecting.
  */
 export async function triageFindings(findings: Finding[], ctx: FindingContext, p: FindingPolicy): Promise<TriagedFinding[]> {
   const out: TriagedFinding[] = [];
@@ -254,10 +257,14 @@ export async function triageFindings(findings: Finding[], ctx: FindingContext, p
   });
   if (digest.length && p.postComment) {
     const lines = digest.map((f) => `- ${f.severity ? `**${f.severity}** ` : ""}${f.summary}${f.location ? ` — \`${f.location}\`` : ""}`);
-    await p.postComment(
-      ctx.taskId,
-      [`Findings noticed during this run, not filed (below the severity floor or over the per-run cap):`, "", ...lines].join("\n"),
-    );
+    try {
+      await p.postComment(
+        ctx.taskId,
+        [`Findings noticed during this run, not filed (below the severity floor or over the per-run cap):`, "", ...lines].join("\n"),
+      );
+    } catch (e: any) {
+      p.digestFailed(String(e?.message ?? e), digest);
+    }
   }
   return out;
 }

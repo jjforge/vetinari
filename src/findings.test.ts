@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { findingKey, findingSimilarity, parseFindings, reportFindings, type Finding } from "./findings.ts";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { findingKey, findingSimilarity, parseFindings, reportFindings, triageFindings, type Finding } from "./findings.ts";
 
 test("parseFindings extracts each finding block with its sub-fields", () => {
   const stdout = `working... here is what I noticed.
@@ -116,4 +119,38 @@ test("findingSimilarity scores two rewordings of one finding as a match, and unr
   assert.ok(findingSimilarity(a, "README links to a removed flag") < 0.5);
   assert.equal(findingSimilarity(a, a), 1);
   assert.equal(findingSimilarity(`[unverified: idle] ${a}`, a), 1, "the unverified mark is not part of the finding");
+});
+
+test("triageFindings resolves with every finding's result when only the digest comment throws, handing the error to digestFailed", async () => {
+  const failures: { error: string; digested: string[] }[] = [];
+  const findings: Finding[] = [
+    { summary: "stale doc line", severity: "P3" },
+    { summary: "merge queue drops a commit", severity: "P0" },
+  ];
+
+  const results = await triageFindings(
+    findings,
+    { taskId: "T-1", project: "vetinari" },
+    {
+      reporter: () => "https://example/issues/1",
+      postComment: async () => {
+        throw new Error("gh: comment rejected");
+      },
+      filedSoFar: () => new Map(),
+      record: () => {},
+      digestFailed: (error, digested) => failures.push({ error, digested: digested.map((f) => f.summary) }),
+      maxPerRun: 1,
+      severityFloor: "P2",
+      lockFile: join(mkdtempSync(join(tmpdir(), "vetinari-triage-")), "findings.lock"),
+    },
+  );
+
+  assert.deepEqual(
+    results.map((r) => [r.finding.summary, r.action, r.url]),
+    [
+      ["merge queue drops a commit", "filed", "https://example/issues/1"],
+      ["stale doc line", "digest", undefined],
+    ],
+  );
+  assert.deepEqual(failures, [{ error: "gh: comment rejected", digested: ["stale doc line"] }]);
 });

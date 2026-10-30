@@ -626,13 +626,15 @@ export function formatParkAnnouncement(project: string, record: ParkedRecord): s
 export const REDRIVE_ONLY_REASONS: ReadonlySet<ParkReason> = new Set(["red-base", "conflict", "crash", "stopped", "outdated-agent"]);
 
 /**
- * The redrive-only reason a campaign is parked on when it has no answerable per-issue record —
- * `red-base`/`conflict`/`crash`. Such a park writes no record (`src/archive.ts`), so a surface that
- * lists only the records reports "nothing parked" while the campaign sits parked; this reads the
- * campaign's own fold instead. Returns the reason only when the campaign folds to `parked` and no
- * record exists (an answerable question/stalled hold carries a record the caller lists), so the
- * surface can name the recovery that applies instead of the answer-a-question dead end. The reason
- * is the wave-level hold (`red-base`) or, failing that, a parked member's own (`conflict`/`crash`).
+ * The redrive-only reason a campaign is parked on when it has no per-issue parked record —
+ * `red-base`/`crash`, which write no record (`src/archive.ts`), so a surface that lists only the
+ * records reports "nothing parked" while the campaign sits parked; this reads the campaign's own
+ * fold instead. Returns the reason only when the campaign folds to `parked` and no record is listed:
+ * an answerable question/stalled hold carries a record the caller lists, and so does a `conflict`
+ * park — unanswerable, resumed only by a redrive (see `REDRIVE_ONLY_REASONS`) — so for either this
+ * returns nothing. The surface can then name the recovery that applies instead of the
+ * answer-a-question dead end. The reason is the wave-level hold (`red-base`) or, failing that, a
+ * parked member's own (`crash`).
  */
 export function redriveOnlyPark(status: CampaignStatus): ParkReason | undefined {
   if (status.parked.length) return undefined;
@@ -675,10 +677,10 @@ export function formatGatewayStatus(statuses: CampaignStatus[]): string {
       lines.push("  parked queue:");
       for (const p of s.parked) lines.push(`    ⏸ #${p.issueNumber} — ${p.reason}`);
     } else {
-      // A redrive-only park (red-base/conflict/crash) leaves no per-issue record, so "nothing
-      // parked" would misreport the parked campaign as idle and point at a reply that cannot
-      // resolve it. Name the hold and the recovery it actually needs; a truly idle project still
-      // reads "nothing parked".
+      // A red-base/crash park leaves no per-issue record (a conflict park writes one, listed in
+      // the parked queue above), so "nothing parked" would misreport the parked campaign as idle
+      // and point at a reply that cannot resolve it. Name the hold and the recovery it actually
+      // needs; a truly idle project still reads "nothing parked".
       const redrive = redriveOnlyPark(s);
       lines.push(redrive ? `  ⏸ ${redrive} — ${campaignParkMove(redrive)}` : "  nothing parked");
     }

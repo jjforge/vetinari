@@ -38,7 +38,7 @@ Creates (new files): `src/report-format.ts`, `src/report-format.test.ts`
 - A trailing `:line` or `:line:col` is stripped, so `` `src/report.ts:42` `` cites `src/report.ts`.
 - Off a marker line (the whole-body fallback), a backticked token counts only if it contains a `/` or has an alphabetic extension (`report.ts`). This keeps ordinary words in backticks from becoming cites.
 
-**`Touches:` and `Files:`** are one kind, so a later `Files:` line supersedes an earlier `Touches:`. Their cites are checked against the tree: the working directory the campaign runs in, minus `.git` and `node_modules`.
+**`Touches:` and `Files:`** are one kind, so a later `Files:` line supersedes an earlier `Touches:`. Their cites are checked against the tree: the files git tracks or would track in the working directory the campaign runs in — tracked files plus untracked files that aren't ignored — so a gitignored file (vetinari's own `.vetinari.local/` cache, build output, `.env`) is never a cite target. Resolving against a plain directory that isn't a git repository falls back to walking it, minus `.git`, `node_modules` and `.vetinari.local`.
 
 - A cite resolves by longest-suffix match on path segments. A bare `report.ts` and a full `src/report.ts` find the same file.
 - A cite whose basename the tree lacks forbids confidence; the planner reads it as a stale or mistyped note.

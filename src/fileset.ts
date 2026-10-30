@@ -23,6 +23,7 @@
  */
 import { readdirSync, statSync } from "node:fs";
 import { join, posix, relative, sep } from "node:path";
+import { gitRead } from "./git-read.ts";
 import { Refusal } from "./refusal.ts";
 
 export interface FileSet {
@@ -224,25 +225,53 @@ export function ticketProse(task: string): string {
 }
 
 /**
- * A basename -> repo-relative paths index of the tree, skipping `.git`/`node_modules`.
- * Keeping the basename as the index (not the comparison key) is what lets a cite
- * resolve to its real path while a bare filename still finds the file it names.
+ * A basename -> repo-relative paths index of the tree: the files git tracks or would
+ * track (`git ls-files` — tracked plus untracked-not-ignored), so a gitignored cache
+ * such as `.vetinari.local/` never yields a cite match. Outside a git work tree, or when
+ * the git call fails, the directory is walked instead, skipping `.git`, `node_modules`
+ * and `.vetinari.local`. Keeping the basename as the index (not the comparison key) is
+ * what lets a cite resolve to its real path while a bare filename still finds the file
+ * it names.
  */
 function treePathIndex(root: string): Map<string, string[]> {
   const index = new Map<string, string[]>();
+  for (const rel of gitTreeFiles(root) ?? walkTreeFiles(root)) {
+    const name = posix.basename(rel);
+    (index.get(name) ?? index.set(name, []).get(name)!).push(rel);
+  }
+  return index;
+}
+
+/**
+ * The root-relative files `git ls-files` lists at `root`, or null when `root` is not in
+ * a git work tree (or git fails). `-z` keeps non-ASCII paths unquoted; a trailing-`/`
+ * entry is an untracked nested repository, whose files are not cite targets.
+ */
+function gitTreeFiles(root: string): string[] | null {
+  try {
+    const out = gitRead(["ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
+      cwd: root,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out.split("\0").filter((p) => p !== "" && !p.endsWith("/"));
+  } catch {
+    return null;
+  }
+}
+
+/** The root-relative files under `root`, walked, skipping `.git`/`node_modules`/`.vetinari.local`. */
+function walkTreeFiles(root: string): string[] {
+  const files: string[] = [];
   const walk = (dir: string) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (entry.name === ".git" || entry.name === "node_modules") continue;
+      if (entry.name === ".git" || entry.name === "node_modules" || entry.name === ".vetinari.local") continue;
       const full = join(dir, entry.name);
       if (entry.isDirectory()) walk(full);
-      else {
-        const rel = relative(root, full).split(sep).join("/");
-        (index.get(entry.name) ?? index.set(entry.name, []).get(entry.name)!).push(rel);
-      }
+      else files.push(relative(root, full).split(sep).join("/"));
     }
   };
   walk(root);
-  return index;
+  return files;
 }
 
 /** True when repo-relative `path` ends with the given trailing path `segments`. */

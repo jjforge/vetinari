@@ -293,23 +293,24 @@ export const githubFindingReporter = (
 };
 
 /**
- * A ready `findOpenIssue` handler: the open issue in `repo` whose title best matches `title`
- * by `findingSimilarity` (score >= 0.5), from one listing of up to 200 open issues per call —
+ * A ready `findOpenIssue` handler: the URL of the open issue in `repo` whose title best matches
+ * `title` by `findingSimilarity` (score >= 0.5), from one listing of up to 200 open issues per call —
  * GitHub search requires every word, so it never finds a reworded title. The harvest also
  * dedupes against the campaign's own filings first, so a listing that misses an issue filed
- * moments ago loses nothing. Repo derivation as `githubFindingReporter`.
+ * moments ago loses nothing. The URL, not the bare number, so a match carries a link and its ref
+ * is the same one the campaign's own filings carry (#549). Repo derivation as `githubFindingReporter`.
  */
 export const githubFindOpenIssue = (repo?: string, run: (args: string[]) => Promise<string> = gh, deriveRepo = deriveRepoFromProject) => {
   const repoOf = repoAccessor("githubFindOpenIssue", repo, deriveRepo);
   return async (title: string): Promise<string | undefined> => {
-    const out = await run(["issue", "list", "--repo", repoOf(), "--state", "open", "--limit", "200", "--json", "number,title"]);
-    const rows: Array<{ number?: number; title?: string }> = JSON.parse(out || "[]");
+    const out = await run(["issue", "list", "--repo", repoOf(), "--state", "open", "--limit", "200", "--json", "number,title,url"]);
+    const rows: Array<{ number?: number; title?: string; url?: string }> = JSON.parse(out || "[]");
     const hit = bestFindingMatch(
       title,
-      rows.filter((row) => row.number != null),
+      rows.filter((row) => row.url != null),
       (row) => row.title ?? "",
     );
-    return hit ? String(hit.number) : undefined;
+    return hit?.url;
   };
 };
 

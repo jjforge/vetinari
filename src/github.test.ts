@@ -686,6 +686,16 @@ test("githubIssueComment posts a comment body to the given issue, stripping a le
   ]);
 });
 
+test("githubIssueComment passes an issue URL ref through to gh as the issue argument (#549)", async () => {
+  const calls: string[][] = [];
+  const run = async (args: string[]) => {
+    calls.push(args);
+    return "";
+  };
+  await githubIssueComment("x/y", run)("https://github.com/x/y/issues/9", "body");
+  assert.deepEqual(calls, [["issue", "comment", "https://github.com/x/y/issues/9", "--repo", "x/y", "--body", "body"]]);
+});
+
 test("githubIssueComment rejects when the gh write fails — a lost tracker write is never swallowed (#368)", async () => {
   const run = async () => {
     throw new Error("gh issue comment: not found");
@@ -823,14 +833,23 @@ test("githubFindOpenIssue lists open issues once and returns the best match for 
   const run = async (args: string[]) => {
     calls.push(args);
     return JSON.stringify([
-      { number: 7, title: "README links to a removed flag" },
-      { number: 9, title: "make fmt fails in the agent container: gofumpt sumdb check" },
-      { number: 11, title: "make fmt fails in the agent container" },
+      { number: 7, title: "README links to a removed flag", url: "https://github.com/x/y/issues/7" },
+      { number: 9, title: "make fmt fails in the agent container: gofumpt sumdb check", url: "https://github.com/x/y/issues/9" },
+      { number: 11, title: "make fmt fails in the agent container", url: "https://github.com/x/y/issues/11" },
     ]);
   };
   const find = githubFindOpenIssue("x/y", run);
-  assert.equal(await find("make fmt fails: gofumpt sumdb verification error in container"), "9");
-  assert.deepEqual(calls[0], ["issue", "list", "--repo", "x/y", "--state", "open", "--limit", "200", "--json", "number,title"]);
+  assert.equal(await find("make fmt fails: gofumpt sumdb verification error in container"), "https://github.com/x/y/issues/9");
+  assert.deepEqual(calls[0], ["issue", "list", "--repo", "x/y", "--state", "open", "--limit", "200", "--json", "number,title,url"]);
   assert.equal(await find("merge queue drops a commit"), undefined);
   assert.equal(calls.length, 2, "one listing per call");
+});
+
+test("githubFindOpenIssue never returns a listed row that lacks a url", async () => {
+  const title = "make fmt fails in the agent container: gofumpt sumdb check";
+  const listing: Array<{ number: number; title: string; url?: string }> = [{ number: 9, title }];
+  const find = githubFindOpenIssue("x/y", async () => JSON.stringify(listing));
+  assert.equal(await find(title), undefined, "a url-less row is not a candidate");
+  listing.push({ number: 11, title, url: "https://github.com/x/y/issues/11" });
+  assert.equal(await find(title), "https://github.com/x/y/issues/11", "the row that carries a url wins");
 });

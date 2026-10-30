@@ -23,6 +23,7 @@ import {
 } from "./loop.ts";
 import { HARVEST_PROMPT, type Finding, type FindingContext } from "./findings.ts";
 import { Refusal } from "./refusal.ts";
+import { githubFindOpenIssue } from "./github.ts";
 
 // A temp-dir `cfg` mirroring graft.test/modes.test's `harnessCfg`: a real on-disk
 // event log, parked dir and outbox under a throwaway state dir, driven by a real
@@ -1065,6 +1066,22 @@ test("the third 'seen again' for one issue in a campaign sends one 'fix the root
 
   await silence(() => runLoop(cfg, "T-4", undefined, undefined, depsFor(greenThen(ENV_FAILURE))));
   assert.equal(repeatNotices().length, 1, "the fourth sighting sends no second notice");
+});
+
+test("a repeat-offender notice for an open-issue match found through githubFindOpenIssue links the issue (#549)", async () => {
+  const tr = fakeTracker();
+  const stubRun = async () =>
+    JSON.stringify([
+      { number: 42, title: "make fmt fails in the agent container: gofumpt sumdb check", url: "https://github.com/x/y/issues/42" },
+    ]);
+  const cfg = harnessCfg({ ...tr, findOpenIssue: githubFindOpenIssue("x/y", stubRun) });
+
+  for (const id of ["T-1", "T-2", "T-3"]) await silence(() => runLoop(cfg, id, undefined, undefined, depsFor(greenThen(ENV_FAILURE))));
+
+  const notices = listOutbox(cfg).filter((m) => m.category === "finding" && /root cause/.test(m.text));
+  assert.equal(notices.length, 1);
+  assert.match(notices[0].text, /#42 seen again in 3 runs — fix the root cause/);
+  assert.match(notices[0].text, /https:\/\/github\.com\/x\/y\/issues\/42/);
 });
 
 test("the repeat-offender count starts at the latest campaign-start — an earlier campaign's sightings do not count", async () => {

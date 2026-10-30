@@ -26,17 +26,35 @@ export const tgEnvConn = (): TgConn | undefined => {
 const api = (conn: TgConn) => `https://api.telegram.org/bot${conn.token}`;
 
 export const tgConfigured = () => Boolean(tgEnvConn());
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** Why a Telegram call failed: the HTTP status (or `"network"`), and Telegram's own `description` / `retry_after` when it sent them. */
+export interface TgFailure {
+  status: number | "network";
+  description?: string;
+  retryAfter?: number;
+}
+
+const tgFailureOf = (res: Response | null, j: any): TgFailure => ({
+  status: res?.status ?? "network",
+  ...(typeof j?.description === "string" && { description: j.description }),
+  ...(typeof j?.parameters?.retry_after === "number" && { retryAfter: j.parameters.retry_after }),
+});
+
+/** A bot's numeric id — the token's part before the first `:` — so a log row names the bot without carrying its secret. */
+const botId = (conn: TgConn) => conn.token.split(":")[0];
 
 /**
  * One `sendMessage` on `conn`, returning the sent message's id. `replyTo` threads it as a reply to
- * that message; a deleted target still gets the message, unthreaded.
+ * that message; a deleted target still gets the message, unthreaded. A failed send returns
+ * `undefined` and hands why to `onFailure` — the outbox drain reads a 429's `retryAfter` from it.
  */
 export async function tgSend(
   conn: TgConn | undefined,
   text: string,
   logger: Logger = hostLogger(),
   replyTo?: number,
+  onFailure?: (failure: TgFailure) => void,
 ): Promise<number | undefined> {
   if (!conn) return undefined;
   const body: Record<string, unknown> = { chat_id: conn.chat, text: text.slice(0, 3900) };
@@ -49,7 +67,9 @@ export async function tgSend(
   }).catch(() => null);
   const j: any = res ? await res.json().catch(() => null) : null;
   if (!j?.ok) {
-    logger.log("telegram-send-failed", { status: res?.status ?? "network" });
+    const failure = tgFailureOf(res, j);
+    logger.log("telegram-send-failed", { ...failure });
+    onFailure?.(failure);
     return undefined;
   }
   return j.result.message_id as number;
@@ -59,12 +79,47 @@ export async function tgSend(
  * Offset past everything already queued. Called before listening so a message
  * sent BEFORE a question was asked is never mistaken for its answer.
  */
-export async function tgDrain(conn: TgConn): Promise<number> {
-  const j: any = await fetch(`${api(conn)}/getUpdates?offset=-1`)
-    .then((r) => r.json())
-    .catch(() => null);
-  return j?.ok && j.result.length ? j.result[j.result.length - 1].update_id + 1 : 0;
+export async function tgDrain(conn: TgConn, logger: Logger = hostLogger()): Promise<number> {
+  const res = await fetch(`${api(conn)}/getUpdates?offset=-1`).catch(() => null);
+  const j: any = res ? await res.json().catch(() => null) : null;
+  if (!j?.ok) {
+    logger.log("telegram-poll-failed", { bot: botId(conn), ...tgFailureOf(res, j) });
+    return 0;
+  }
+  return j.result.length ? j.result[j.result.length - 1].update_id + 1 : 0;
 }
+
+/** How long one (status, description) poll failure stays quiet after it is logged. */
+const POLL_FAIL_LOG_WINDOW_MS = 5 * 60_000;
+const POLL_BACKOFF_BASE_MS = 5000;
+const POLL_BACKOFF_CAP_MS = 5 * 60_000;
+
+/**
+ * One bot connection's poll-failure state, carried across `tgPoll` calls: the wait before the
+ * next poll after a failure, and until when each (status, description) failure is already logged.
+ * `now`/`sleep` are injectable so a test drives it on a fake clock.
+ */
+export interface PollBackoff {
+  intervalMs: number;
+  loggedUntil: Map<string, number>;
+  now: () => number;
+  sleep: (ms: number) => Promise<void>;
+}
+
+export const newPollBackoff = (opts: { now?: () => number; sleep?: (ms: number) => Promise<void> } = {}): PollBackoff => ({
+  intervalMs: POLL_BACKOFF_BASE_MS,
+  loggedUntil: new Map(),
+  now: opts.now ?? Date.now,
+  sleep: opts.sleep ?? sleep,
+});
+
+// The backoff a caller that passes none shares, one per bot token.
+const defaultPollBackoffs = new Map<string, PollBackoff>();
+const defaultPollBackoff = (conn: TgConn): PollBackoff => {
+  let b = defaultPollBackoffs.get(conn.token);
+  if (!b) defaultPollBackoffs.set(conn.token, (b = newPollBackoff()));
+  return b;
+};
 
 export type TgMsg = { text: string; replyToId?: number };
 
@@ -77,14 +132,27 @@ export const TG_POLL_TIMEOUT_S = 50;
  * Telegram allows exactly ONE consumer of a bot's updates, so at most one
  * process may poll: a second poller silently steals messages from the first.
  */
-export async function tgPoll(conn: TgConn, offset: number): Promise<{ offset: number; messages: TgMsg[] }> {
-  const j: any = await fetch(`${api(conn)}/getUpdates?timeout=${TG_POLL_TIMEOUT_S}&offset=${offset}`)
-    .then((r) => r.json())
-    .catch(() => null);
+export async function tgPoll(
+  conn: TgConn,
+  offset: number,
+  logger: Logger = hostLogger(),
+  backoff: PollBackoff = defaultPollBackoff(conn),
+): Promise<{ offset: number; messages: TgMsg[] }> {
+  const res = await fetch(`${api(conn)}/getUpdates?timeout=${TG_POLL_TIMEOUT_S}&offset=${offset}`).catch(() => null);
+  const j: any = res ? await res.json().catch(() => null) : null;
   if (!j?.ok) {
-    await sleep(5000);
+    const failure = tgFailureOf(res, j);
+    const key = `${failure.status}|${failure.description ?? ""}`;
+    if ((backoff.loggedUntil.get(key) ?? 0) <= backoff.now()) {
+      backoff.loggedUntil.set(key, backoff.now() + POLL_FAIL_LOG_WINDOW_MS);
+      logger.log("telegram-poll-failed", { bot: botId(conn), ...failure });
+    }
+    const wait = Math.max(backoff.intervalMs, (failure.retryAfter ?? 0) * 1000);
+    backoff.intervalMs = Math.min(backoff.intervalMs * 2, POLL_BACKOFF_CAP_MS);
+    await backoff.sleep(wait);
     return { offset, messages: [] };
   }
+  backoff.intervalMs = POLL_BACKOFF_BASE_MS;
   const messages: TgMsg[] = [];
   for (const u of j.result) {
     offset = u.update_id + 1;
@@ -99,8 +167,9 @@ export async function tgPoll(conn: TgConn, offset: number): Promise<{ offset: nu
 /** Single-question wait: a reply to `parkMsgId`, or any plain (non-reply) text. */
 export async function tgWaitReply(conn: TgConn, parkMsgId: number | undefined): Promise<string> {
   let offset = await tgDrain(conn);
+  const backoff = newPollBackoff();
   for (;;) {
-    const r = await tgPoll(conn, offset);
+    const r = await tgPoll(conn, offset, undefined, backoff);
     offset = r.offset;
     for (const m of r.messages) {
       if (m.replyToId && parkMsgId && m.replyToId !== parkMsgId) continue;

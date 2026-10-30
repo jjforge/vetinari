@@ -137,6 +137,8 @@ test("describeEvent narrates the operator-facing events in plain words", () => {
   assert.equal(describeEvent(event("parked", { taskId: "202", reason: "question" })), "#202 parked: question");
   assert.equal(describeEvent(event("prune", { target: "303", removed: ["303", "304"], dropped: ["303", "304"] })), "Pruned #303, #304");
   assert.equal(describeEvent(event("graft", { ids: ["305", "306"], blockedBy: {}, fileKeys: {} })), "Grafted #305, #306");
+  assert.equal(describeEvent(event("replan", { waves: [["305", "306"], ["307"]], was: 3 })), "replanned: 2 waves remaining (was 3)");
+  assert.equal(describeEvent(event("replan", { waves: [["305"]] })), "replanned: 1 wave remaining");
   // A turn renders its agent-authored summary verbatim (ADR 0009), falling back when absent.
   assert.equal(
     describeEvent(event("turn", { taskId: "101", turn: 3, summary: "Added a failing test for the counter" })),

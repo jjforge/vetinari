@@ -262,6 +262,7 @@ export function humanizeLogLine(raw: string): HumanizedRow {
       return narrated("running");
     case "prune":
     case "graft":
+    case "replan":
     case "telegram-unconfigured":
       return narrated("neutral");
     default:

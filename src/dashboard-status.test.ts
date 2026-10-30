@@ -227,6 +227,29 @@ test("buildStatus marks a wave `closed` when its surviving member merged, even t
   assert.equal(chip?.membership, "pruned");
 });
 
+test("buildStatus after a replan keeps the started waves' numbers, numbers the new waves after them, and keeps a pruned member (#614)", () => {
+  const dir = join(tmpdir(), `vetinari-replan-status-${Date.now()}`);
+  seedState(dir, [
+    event("campaign-start", { ts: "2026-10-30T04:00:00.000Z", waves: [["101"], ["201"], ["202"], ["203"]], slots: 2 }),
+    event("wave-start", { ts: "2026-10-30T04:01:00.000Z", index: 0, tasks: ["101"] }),
+    event("wave-done", { ts: "2026-10-30T04:02:00.000Z", index: 0, merged: ["101"] }),
+    event("wave-start", { ts: "2026-10-30T04:03:00.000Z", index: 1, tasks: ["201"] }),
+    event("prune", { ts: "2026-10-30T04:04:00.000Z", target: "202", removed: ["202"], dropped: ["202"] }),
+    event("replan", { ts: "2026-10-30T04:05:00.000Z", waves: [["203"]], was: 1 }),
+  ]);
+  const status = buildStatus(cfgFor(dir));
+  const shape = status.waves.map((w) => [w.index, w.issues.map((i) => i.issueNumber), w.status]);
+  assert.deepEqual(shape, [
+    [0, ["101"], "completed"],
+    [1, ["201"], "unstarted"],
+    [2, ["203"], "unstarted"],
+    // The pruned member of a replaced wave trails, display-only, still a chip.
+    [3, ["202"], "unstarted"],
+  ]);
+  assert.equal(status.waves[3].pruned, true);
+  assert.deepEqual(status.inFlight, ["201"]);
+});
+
 test("buildStatus survives an unparseable parked record and still shows the valid park beside it", () => {
   // A writer killed mid-write leaves a torn record under `parked/`; it must not take the
   // project's dashboard down. `buildStatus` takes no logger, so the lister falls back to the

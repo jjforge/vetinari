@@ -8,6 +8,7 @@ import { type ProjectPointer } from "./registry.ts";
 import { listParked, parkedDirOf, type ParkedRecord, type ParkReason } from "./state.ts";
 import { projectHasLiveCampaign } from "./host-slots.ts";
 import { readEventLog, type OrchestratorEvent } from "./event-log.ts";
+import { campaignBaseGates, waveTimeSplit, type WaveTimeSplit } from "./report.ts";
 import { normalize } from "./issue-id.ts";
 import { extractParkedDetails, issueNameFromTask } from "./dashboard-event-text.ts";
 import {
@@ -93,6 +94,9 @@ export interface StatusWave {
    * its `status`/`closed` are left as the fold gives them, and every roll-up reads
    * {@link liveWaves} instead so it is never counted. Absent on any wave with a surviving member. */
   pruned?: boolean;
+  /** where the wave's time went (#615's {@link waveTimeSplit}) — set once the wave has a
+   * `wave-done`, absent on a wave still in flight or not yet started. */
+  timeSplit?: WaveTimeSplit;
   issues: StatusIssue[];
 }
 
@@ -134,11 +138,39 @@ export interface CampaignStatus {
    * from a process that died before a redrive's `wave-start` is not pending. Absent reads as false, like
    * `inFlight` on a hand-built status. */
   stopPending?: boolean;
+  /** the campaign's merged-base gates — how many ran and their total seconds (#615's
+   * {@link campaignBaseGates}). Absent on a hand-built status. */
+  baseGates?: { count: number; seconds: number };
 }
 
 // Issue titles rarely change during a campaign, so we cache them for the process
 // lifetime; a rename won't surface until the status server restarts.
 const issueNameCache = new Map<string, string | undefined>();
+
+/**
+ * Each closed wave's time split (#615), keyed by every member its `wave-start` drained, so a display
+ * wave finds its own by member id: `wave-start`/`wave-done` indices name the loop-facing waves, which
+ * diverge from the display `layout` after a prune. Read from the latest `campaign-start` on, and a
+ * wave's events run from the latest `wave-start` before its `wave-done` — the slice the terminal
+ * splits — so a redrive's restart is the one measured.
+ */
+const closedWaveTimeSplits = (events: OrchestratorEvent[]): Map<string, WaveTimeSplit> => {
+  const splits = new Map<string, WaveTimeSplit>();
+  let waveStart = -1;
+  events.forEach((e, i) => {
+    if (e.event === "campaign-start") {
+      splits.clear();
+      waveStart = -1;
+    } else if (e.event === "wave-start") waveStart = i;
+    else if (e.event === "wave-done" && waveStart >= 0) {
+      const wave = events.slice(waveStart, i + 1);
+      const split = waveTimeSplit(wave);
+      if (wave[0].event === "wave-start") for (const taskId of wave[0].tasks) splits.set(normalize(taskId), split);
+      waveStart = -1;
+    }
+  });
+  return splits;
+};
 
 /**
  * The one rule for which parked records count (#379) — the project page (`buildStatus`) and
@@ -188,6 +220,7 @@ export function buildStatus(cfg: ResolvedConfig, opts: { dead?: boolean; alive?:
   const { waves, layout, name, festiveOffset, outcomes, details, titles, closedWaves } = reduced;
 
   const closedIssueNumbers = new Set([...closedWaves].flatMap((index) => waves[index] ?? []));
+  const timeSplits = closedWaveTimeSplits(events);
   const parkedRecords = parkedInCurrentPlan(listParked(cfg), { waves, closedWaves, outcomes });
   for (const parked of parkedRecords) {
     const taskId = normalize(parked.taskId);
@@ -240,12 +273,15 @@ export function buildStatus(cfg: ResolvedConfig, opts: { dead?: boolean; alive?:
     // A wave the prune emptied entirely is a pruned wave: kept for its chips, flagged so the
     // roll-ups skip it ({@link liveWaves}) and the renderer greys it out and stacks it last.
     const prunedWave = issues.length > 0 && live.length === 0;
+    // The wave's time split, found by member id (never by index — see `closedWaveTimeSplits`).
+    const timeSplit = wave.map((issueNumber) => timeSplits.get(issueNumber)).find((split) => split !== undefined);
     return {
       index,
       status: waveState(issues, { redBase, stopped }),
       ...(waveReason ? { reason: waveReason } : {}),
       closed,
       ...(prunedWave ? { pruned: true } : {}),
+      ...(timeSplit ? { timeSplit } : {}),
       issues,
     };
   });
@@ -261,6 +297,7 @@ export function buildStatus(cfg: ResolvedConfig, opts: { dead?: boolean; alive?:
     // than falling back to every runner across the plan.
     inFlight: reduced.currentWave >= 0 ? [...(reduced.waves[reduced.currentWave] ?? [])] : [],
     stopPending: stopPending(events),
+    baseGates: campaignBaseGates(events),
   };
 }
 

@@ -1161,3 +1161,58 @@ test("baseBranchForProject resolves the checkout's branch asynchronously, and un
   git("checkout", "-q", "--detach");
   assert.equal(await baseBranchForProject(root), undefined);
 });
+
+/** A closed two-member wave with every phase boundary logged (#619): 754 is the slower member —
+ * spawn 00:01:00 → green 00:07:00, 60s of it branch gates — and the base gate lands 30s after the
+ * last green, the wave-done 5s after that. */
+const closedTimedWaveLog = [
+  event("campaign-start", { ts: "2026-10-30T00:00:00.000Z", waves: [["753", "754"], ["755"]], slots: 2 }),
+  event("wave-start", { ts: "2026-10-30T00:00:00.000Z", index: 0, tasks: ["753", "754"] }),
+  event("spawn", { ts: "2026-10-30T00:01:00.000Z", taskId: "753" }),
+  event("spawn", { ts: "2026-10-30T00:01:00.000Z", taskId: "754" }),
+  event("green", { ts: "2026-10-30T00:04:00.000Z", taskId: "753", branch: "agent/753", commits: [] }),
+  event("gate-result", { ts: "2026-10-30T00:06:59.000Z", taskId: "754", cmd: "npm test", exitCode: 0, seconds: 60, outFile: "o" }),
+  event("green", { ts: "2026-10-30T00:07:00.000Z", taskId: "754", branch: "agent/754", commits: [] }),
+  event("merged", { ts: "2026-10-30T00:07:10.000Z", taskId: "753" }),
+  event("merged", { ts: "2026-10-30T00:07:20.000Z", taskId: "754" }),
+  event("gate-result", { ts: "2026-10-30T00:07:29.000Z", cmd: "npm test", exitCode: 0, seconds: 9, outFile: "o" }),
+  event("base-gate", { ts: "2026-10-30T00:07:30.000Z", index: 0, green: true }),
+  event("wave-done", { ts: "2026-10-30T00:07:35.000Z", index: 0, merged: ["753", "754"] }),
+];
+
+test("buildStatus attaches a closed wave's time split to the wave holding its members (#619)", () => {
+  const dir = join(tmpdir(), `vetinari-status-time-split-${Date.now()}`);
+  seedState(dir, closedTimedWaveLog);
+  const status = buildStatus(cfgFor(dir));
+  assert.deepEqual(status.waves[0].timeSplit, { total: 455, agent: 300, branchGates: 60, integration: 30, postMerge: 5 });
+  assert.equal(status.waves[1].timeSplit, undefined);
+});
+
+test("after a prune shifts the wave indices, each time split still lands on the wave holding its members (#619)", () => {
+  // The prune empties layout wave 0, so the surviving wave runs and closes as loop-facing index 0
+  // while it renders as display wave 1 — an index match would land its split on the pruned wave.
+  const dir = join(tmpdir(), `vetinari-status-time-split-pruned-${Date.now()}`);
+  seedState(dir, prunedWaveFinishedLog);
+  const status = buildStatus(cfgFor(dir));
+  assert.equal(status.waves[0].timeSplit, undefined);
+  assert.deepEqual(status.waves[1].timeSplit, { total: 180 });
+});
+
+test("a wave started but not yet done carries no time split (#619)", () => {
+  const dir = join(tmpdir(), `vetinari-status-time-split-inflight-${Date.now()}`);
+  seedState(dir, closedTimedWaveLog.slice(0, -1));
+  assert.equal(buildStatus(cfgFor(dir)).waves[0].timeSplit, undefined);
+});
+
+test("buildStatus carries the campaign's merged-base gate total across its closed waves (#619)", () => {
+  const dir = join(tmpdir(), `vetinari-status-base-gates-${Date.now()}`);
+  seedState(dir, [
+    ...closedTimedWaveLog,
+    event("wave-start", { ts: "2026-10-30T00:08:00.000Z", index: 1, tasks: ["755"] }),
+    event("merged", { ts: "2026-10-30T00:10:00.000Z", taskId: "755" }),
+    event("gate-result", { ts: "2026-10-30T00:12:00.000Z", cmd: "npm test", exitCode: 0, seconds: 111, outFile: "o" }),
+    event("base-gate", { ts: "2026-10-30T00:12:01.000Z", index: 1, green: true }),
+    event("wave-done", { ts: "2026-10-30T00:12:02.000Z", index: 1, merged: ["755"] }),
+  ]);
+  assert.deepEqual(buildStatus(cfgFor(dir)).baseGates, { count: 2, seconds: 120 });
+});

@@ -10,6 +10,7 @@ import {
 } from "./dashboard-model.ts";
 import { festiveWaveName } from "./festive-names.ts";
 import type { SlowGates } from "./slow-gates.ts";
+import { formatDuration, formatWaveTimeSplit } from "./report.ts";
 import type { LogDotState } from "./log-view.ts";
 import {
   ARCHIVE_LIST_SCRIPT,
@@ -200,8 +201,16 @@ const renderWaveCard = (
   // A pruned wave (every member pruned) is out of the plan: its card and pill read `pruned`,
   // greyed, rather than the `unstarted` its empty fold gives.
   const state = wave.pruned ? "pruned" : wave.status;
-  return `<section class="wave ${state}${grafted}"${extraAttrs}><div class="wave-head"><h2 class="wave-label">${renderWaveLabel(wave, festiveName)}</h2><div class="wave-meta"><span class="wave-tally">${waveMerged(wave)}/${wave.issues.length}</span><span class="wave-status ${state}">${state}</span>${tally}</div></div>${renderWaveMembers(wave, project, prune, interactive, run)}</section>`;
+  return `<section class="wave ${state}${grafted}"${extraAttrs}><div class="wave-head"><h2 class="wave-label">${renderWaveLabel(wave, festiveName)}</h2><div class="wave-meta"><span class="wave-tally">${waveMerged(wave)}/${wave.issues.length}</span><span class="wave-status ${state}">${state}</span>${tally}</div></div>${renderWaveMembers(wave, project, prune, interactive, run)}${renderWaveTimeSplit(wave)}</section>`;
 };
+
+/** A phase the log cannot split (#615 leaves it `undefined`): a `—` whose tooltip says why. */
+const UNKNOWN_WAVE_PHASE = '<span title="not derivable from the log: redriven wave, re-admitted member, or nothing new merged">—</span>';
+
+/** A closed wave's time split (#619) under its card — #615's phase text, in the terminal's order and
+ * wording without its `wave i/n:` prefix. Empty on a wave with no split (one still in flight). */
+const renderWaveTimeSplit = (wave: StatusWave) =>
+  wave.timeSplit ? `<p class="wave-time-split">${formatWaveTimeSplit(wave.timeSplit, UNKNOWN_WAVE_PHASE)}</p>` : "";
 
 /** A closed wave's compact toggle chip — the affordance that reveals its full card in
  * the grid. `aria-controls`/`aria-expanded` (+ the client script) make it keyboard-
@@ -282,7 +291,15 @@ const renderWaves = (status: CampaignStatus, prune: boolean, interactive: boolea
 const renderCampaignMeta = (status: CampaignStatus) => {
   const issueCount = campaignIssueCount(status);
   const waveCount = liveWaves(status).length;
-  return `<p class="campaign-meta">${status.name ? `<span class="campaign-name">${escapeHtml(status.name)}</span> · ` : ""}${issueCount} issue${issueCount === 1 ? "" : "s"} · ${waveCount} wave${waveCount === 1 ? "" : "s"}</p>`;
+  return `<p class="campaign-meta">${status.name ? `<span class="campaign-name">${escapeHtml(status.name)}</span> · ` : ""}${issueCount} issue${issueCount === 1 ? "" : "s"} · ${waveCount} wave${waveCount === 1 ? "" : "s"}${baseGatesSuffix(status)}</p>`;
+};
+
+/** The campaign's merged-base gate total (#619) as a ` · base gates: N runs, <duration>` suffix —
+ * the campaign-meta line and an archived row's summary both end with it. Empty until a base gate ran. */
+const baseGatesSuffix = (status: CampaignStatus) => {
+  const total = status.baseGates;
+  if (!total?.count) return "";
+  return ` · base gates: ${total.count} run${total.count === 1 ? "" : "s"}, ${formatDuration(total.seconds)}`;
 };
 
 const ARCHIVE_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -313,7 +330,7 @@ const ARCHIVE_DOT_STATE: Record<ArchivedRunState, LogDotState> = {
  * One archived-run row rendered through the shared log-view control (#248): a collapsed
  * `.lv-row` head — the when-time in the dim `.lv-t` tier, a mapped `.lv-dot` (see
  * `ARCHIVE_DOT_STATE`), the run name as the brightest `.lv-lead` and the disposition
- * `state · N issues` as the dim `.lv-verb` — over a hidden body. The `.lv-row` is emitted
+ * `state · N issues` (and its base-gate total, once one ran) as the dim `.lv-verb` — over a hidden body. The `.lv-row` is emitted
  * as the clickable `<button>` head of the expandable row (`aria-expanded`/`aria-controls`
  * wiring keeps it keyboard-operable), so an archived run reads as the same component the
  * live tail / feed / host-log use rather than bespoke `.archive-*` chrome. An archived run
@@ -336,7 +353,7 @@ const renderArchiveRow = (run: ArchivedRunView, open: boolean, festive = false) 
     `<button type="button" class="lv-row" aria-expanded="${open}" aria-controls="${bodyId}">` +
     `<span class="lv-t">${escapeHtml(when)}</span>` +
     `<span class="lv-dot ${ARCHIVE_DOT_STATE[run.state]}"></span>` +
-    `<span class="lv-msg"><span class="lv-lead">${escapeHtml(label)}</span><span class="lv-verb">${run.state} · ${count}</span></span>` +
+    `<span class="lv-msg"><span class="lv-lead">${escapeHtml(label)}</span><span class="lv-verb">${run.state} · ${count}${baseGatesSuffix(run.status)}</span></span>` +
     `</button>` +
     `<div class="archive-body" id="${bodyId}"${open ? "" : " hidden"}>${body}</div>` +
     `</li>`
@@ -556,6 +573,7 @@ ${HOST_LOG_STYLES}
   .wave-label { margin: 0; font-size: 1.1rem; flex: 1 1 12rem; min-width: 0; }
   .wave-meta { display: flex; align-items: baseline; gap: .5rem; flex: 0 0 auto; margin-left: auto; }
   .wave-tally { color: var(--color-text-light-2); font-variant-numeric: tabular-nums; font-size: .9rem; white-space: nowrap; }
+  .wave-time-split { margin: .6rem 0 0; color: var(--color-text-light-2); font-size: .85rem; font-variant-numeric: tabular-nums; }
   .completed-waves { display: flex; align-items: flex-start; flex-wrap: wrap; gap: .5rem; margin: 1rem 0; color: var(--color-text-light); }
   .completed-wave-chip .check { color: var(--color-green); font-weight: 700; }
   .completed-wave-bar { display: flex; flex-wrap: wrap; align-items: flex-start; align-content: flex-start; gap: .5rem; }

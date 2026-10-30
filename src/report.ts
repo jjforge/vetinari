@@ -142,10 +142,11 @@ export function formatDuration(seconds: number): string {
   return m ? `${m}m${s % 60}s` : `${s}s`;
 }
 
-/** A wave's time split as the terminal prints it, `—` for a phase that could not be derived. The
- * `wave i/n:` prefix is the caller's, so the dashboard can reuse the phase text. */
-export function formatWaveTimeSplit(split: WaveTimeSplit): string {
-  const phase = (label: string, seconds?: number) => `${label} ${seconds === undefined ? "—" : formatDuration(seconds)}`;
+/** A wave's time split as the terminal prints it, `unknown` (`—`) for a phase that could not be
+ * derived. The `wave i/n:` prefix is the caller's, so the dashboard can reuse the phase text, passing
+ * its own marker for an unknown phase. */
+export function formatWaveTimeSplit(split: WaveTimeSplit, unknown = "—"): string {
+  const phase = (label: string, seconds?: number) => `${label} ${seconds === undefined ? unknown : formatDuration(seconds)}`;
   return (
     `${formatDuration(split.total)} — ` +
     [

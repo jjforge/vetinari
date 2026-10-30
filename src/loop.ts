@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
 import { Refusal } from "./refusal.ts";
+import { gitRead } from "./git-read.ts";
 import { AGENT_PROVIDERS, nonResumableAnswerWarning, type AgentProviderName, type ResolvedConfig } from "./config.ts";
 import type { Logger } from "./log.ts";
 import { runGates } from "./gate.ts";
@@ -18,7 +18,7 @@ import { withHostSlot, type HostBudget } from "./host-slots.ts";
  */
 function filesInCommit(sha: string, log: Logger): string[] {
   try {
-    return execFileSync("git", ["diff-tree", "--no-commit-id", "--name-only", "-r", sha], { encoding: "utf8" }).split("\n").filter(Boolean);
+    return gitRead(["diff-tree", "--no-commit-id", "--name-only", "-r", sha]).split("\n").filter(Boolean);
   } catch (e: any) {
     log.log("commit-files-failed", { sha, error: String(e?.message ?? e) });
     return [];
@@ -32,7 +32,7 @@ function filesInCommit(sha: string, log: Logger): string[] {
  */
 function commitsAhead(base: string, branch: string, log: Logger): number | null {
   try {
-    return Number(execFileSync("git", ["rev-list", "--count", `${base}..${branch}`], { encoding: "utf8" }).trim());
+    return Number(gitRead(["rev-list", "--count", `${base}..${branch}`]).trim());
   } catch (e: any) {
     log.log("commits-ahead-failed", { base, branch, error: String(e?.message ?? e) });
     return null;

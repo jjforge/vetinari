@@ -1,6 +1,7 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { basename } from "node:path";
 import { loadConfig, type ResolvedConfig } from "./config.ts";
+import { gitRead } from "./git-read.ts";
 import { projectHasLiveCampaign } from "./host-slots.ts";
 import { gatewayConfigDir } from "./registry.ts";
 import { buildStatus, type CampaignStatus, type IssueStatus, liveWaves } from "./status.ts";
@@ -138,12 +139,7 @@ function runBaseCommand(command: string, stdin: string): string {
 /** Current branch of `dir`, or undefined (detached HEAD, not a repo, git error). */
 function gitBranch(dir: string): string | undefined {
   try {
-    return (
-      execFileSync("git", ["-C", dir, "symbolic-ref", "--quiet", "--short", "HEAD"], {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-      }).trim() || undefined
-    );
+    return gitRead(["-C", dir, "symbolic-ref", "--quiet", "--short", "HEAD"], { stdio: ["ignore", "pipe", "ignore"] }).trim() || undefined;
   } catch {
     return undefined;
   }

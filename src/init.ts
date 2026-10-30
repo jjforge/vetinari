@@ -17,9 +17,9 @@
  * disturbing what already exists.
  */
 
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { Refusal } from "./refusal.ts";
+import { gitRead } from "./git-read.ts";
 import { dirname, resolve } from "node:path";
 import { AGENT_PROVIDERS, DEFAULT_PROVIDER, ownerRepoFromRemote, type AgentProviderName } from "./config.ts";
 import { GITHUB_TRACKER_LABELS } from "./github.ts";
@@ -234,7 +234,7 @@ export function isGithubComRemote(url: string): boolean {
 /** The project's `origin` URL, or undefined when it is not a git repo or has no `origin`. */
 const originUrl = (baseDir: string): string | undefined => {
   try {
-    return execFileSync("git", ["-C", baseDir, "remote", "get-url", "origin"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    return gitRead(["-C", baseDir, "remote", "get-url", "origin"], { stdio: ["ignore", "pipe", "ignore"] });
   } catch {
     return undefined;
   }

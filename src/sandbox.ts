@@ -1,5 +1,6 @@
 import * as sandcastle from "@ai-hero/sandcastle";
 import { Refusal } from "./refusal.ts";
+import { gitRead } from "./git-read.ts";
 import type {
   AgentProvider,
   ClaudeCodeOptions,
@@ -10,7 +11,7 @@ import type {
   PiOptions,
 } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { posix, resolve, sep } from "node:path";
 import {
@@ -256,7 +257,7 @@ export function parseForeignWorktree(porcelain: string, branch: string, stateRoo
 export function foreignWorktreeFor(branch: string, stateDir: string, cwd: string = process.cwd()): string | undefined {
   let porcelain: string;
   try {
-    porcelain = execFileSync("git", ["worktree", "list", "--porcelain"], { cwd, encoding: "utf8" });
+    porcelain = gitRead(["worktree", "list", "--porcelain"], { cwd });
   } catch {
     return undefined;
   }

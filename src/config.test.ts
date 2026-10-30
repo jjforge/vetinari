@@ -123,6 +123,20 @@ test("vetinari's own config spreads the githubTracker preset rather than hand-wi
     assert.ok(!source.includes(factory), `vetinari's config still hand-wires ${factory}…)`);
 });
 
+test("vetinari's own config gates on format:check between typecheck and test, so a campaign cannot merge unformatted code", async () => {
+  const cfg = await loadConfig(new URL("../vetinari/config.mts", import.meta.url).pathname);
+
+  assert.deepEqual(
+    cfg.gates.map(({ cmd, label }) => ({ cmd, label })),
+    [
+      { cmd: "npm run typecheck", label: "typecheck" },
+      { cmd: "npm run format:check", label: "format" },
+      { cmd: "npx tsx --test src/*.test.ts", label: "test" },
+    ],
+  );
+  assert.equal(cfg.gates.find((g) => g.label === "format")?.when, undefined, "the format gate is scoped by `when`");
+});
+
 test("containerShareWeight maps the three tiers to internal fair-share weights (~7:2:1)", () => {
   assert.equal(containerShareWeight("high"), 7);
   assert.equal(containerShareWeight("medium"), 2);

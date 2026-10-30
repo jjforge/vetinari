@@ -49,7 +49,20 @@ export interface ParkedRecord {
   answeredAt?: string;
 }
 
-const file = (cfg: Pick<ResolvedConfig, "parkedDir">, taskId: string) => `${cfg.parkedDir}/${taskId}.json`;
+/**
+ * Whether a task id could leave the parked directory once joined into a record path — empty, `.`
+ * or `..`, or carrying a path separator or NUL. Ids need not be issue numbers (`fetchTask` is
+ * pluggable, so `A1` is fine); only path escape is refused.
+ */
+export const isPathEscapingTaskId = (taskId: string) => taskId === "" || taskId === "." || taskId === ".." || /[/\\\0]/.test(taskId);
+
+/** The one place a parked-record path is built — it throws on an id that could escape `parkedDir`. */
+function parkedRecordPath(parkedDir: string, taskId: string): string {
+  if (isPathEscapingTaskId(taskId)) throw new Error(`unsafe task id ${JSON.stringify(taskId)} — it could escape the parked directory`);
+  return join(parkedDir, `${taskId}.json`);
+}
+
+const file = (cfg: Pick<ResolvedConfig, "parkedDir">, taskId: string) => parkedRecordPath(cfg.parkedDir, taskId);
 
 /**
  * Parking is a TERMINAL state for the slot, not a blocking wait: the record and
@@ -108,7 +121,7 @@ export function listParkedIn(parkedDir: string, logger: Logger = hostLogger()): 
  * that has since vanished (answered and cleared) is left alone.
  */
 export function setParkedMessageId(parkedDir: string, taskId: string, tgMessageId: number): void {
-  const path = join(parkedDir, `${taskId}.json`);
+  const path = parkedRecordPath(parkedDir, taskId);
   if (!existsSync(path)) return;
   const rec = JSON.parse(readFileSync(path, "utf8")) as ParkedRecord;
   writeFileAtomic(path, JSON.stringify({ ...rec, tgMessageId }, null, 2));

@@ -31,6 +31,13 @@ export interface Placement {
    * before `partitionWaves`) when no file collision moved it.
    */
   sharesFilesWith?: string[];
+  /**
+   * the same collisions grouped by the file they were on: each of this ticket's own
+   * fileKeys that collided, with the earlier tickets (input order) it collided with
+   * there. Most tickets first; ties keep the order the keys first collided. A ticket
+   * colliding on several keys is listed under each.
+   */
+  sharedFiles?: { file: string; with: string[] }[];
 }
 
 export interface UnreachableTicket {
@@ -300,7 +307,16 @@ export function partitionWaves(plan: WavePlan, fileKeysOf: Map<string, Set<strin
         .flatMap((sw) => sw.ids)
         .filter((prior) => !disjoint(keysOf(prior), keys));
 
-      placements.push({ id, wave: waves.length + idx, after: afterOf.get(id) ?? [], sharesFilesWith });
+      const byFile = new Map<string, string[]>();
+      for (const prior of layer.filter((l) => sharesFilesWith.includes(l))) {
+        for (const k of keys) {
+          if (![...keysOf(prior)].some((pk) => keysCollide(k, pk))) continue;
+          byFile.set(k, [...(byFile.get(k) ?? []), prior]);
+        }
+      }
+      const sharedFiles = [...byFile].map(([file, ids]) => ({ file, with: ids })).sort((a, b) => b.with.length - a.with.length);
+
+      placements.push({ id, wave: waves.length + idx, after: afterOf.get(id) ?? [], sharesFilesWith, sharedFiles });
     }
     for (const sw of subWaves) waves.push(sw.ids);
   }
@@ -510,8 +526,11 @@ export function describePlan(
 
   for (const p of plan.placements) {
     const reasons = [p.after.length ? `after ${p.after.map((b) => `#${b}`).join(", ")}` : "no open blocker in the selected set"];
-    if (p.sharesFilesWith?.length) {
-      reasons.push(`spilled — shares a file with ${p.sharesFilesWith.map((b) => `#${b}`).join(", ")}`);
+    const tags = (ids: string[]) => ids.map((b) => `#${b}`).join(", ");
+    if (p.sharedFiles?.length) {
+      reasons.push(`spilled — shares ${p.sharedFiles.map((g) => `${g.file} with ${tags(g.with)}`).join("; ")}`);
+    } else if (p.sharesFilesWith?.length) {
+      reasons.push(`spilled — shares a file with ${tags(p.sharesFilesWith)}`);
     }
     lines.push(`  wave ${p.wave}  #${p.id}  — ${reasons.join("; ")}`);
   }

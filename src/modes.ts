@@ -647,7 +647,7 @@ export function strandedConflictNotice(project: string, waveNumber: number, impa
 
 /**
  * The operator-facing notice a merge-conflict park enqueues when it holds the wave
- * (design §5 step 5). One or more greens conflicted at merge and are parked as `conflict`,
+ * (design §5 step 5). One or more greens conflicted at merge, again after their retry, and are parked as `conflict`,
  * their branches/worktrees/sessions intact; the wave's other greens stay merged on the base
  * and the campaign parks for a human to resolve the conflict on the branch and redrive.
  * `category: "failure"` routes it to the alert channel a red base uses. Pure, so the wording
@@ -932,7 +932,8 @@ export function reconcileResumeWave(
  * stays answerable, dashboard-visible, and resumable until a human resolves it — a
  * record is cleared only when its issue goes back to running (a re-admit/redrive run
  * consuming it) or by an explicit `prune --purge`. Integration is non-atomic (ADR 0013): a merge conflict
- * parks just the conflicting green and the wave carries on with the rest,
+ * pulls just the conflicting green and the wave carries on with the rest — that green is retried
+ * once in the wave by its own agent and parks `conflict` only if it collides again (design §6) —
  * while a red merged base — with no single culprit — parks the campaign: the wave's greens
  * stay merged on the base and the campaign pauses for a human, with no changelog fold
  * and no `pending-verify` labels (a red base verifies nothing).

@@ -115,7 +115,9 @@ export const TAIL_SNAPSHOT_CAP = 500;
  */
 export function inFlightRunning(status: CampaignStatus): StatusIssue[] {
   // A pending green reads `running` (design §2.2) but its slot is already freed, so it is not an
-  // in-flight runner the tail should follow — exclude it, leaving only slot-holding runners.
+  // in-flight runner the tail should follow — exclude it, leaving only slot-holding runners. A
+  // green re-admitted to retry its merge conflict holds a slot again (its `re-admit` clears the
+  // pending green, design §6), so the tail follows the retry.
   const running = status.waves.flatMap((wave) => wave.issues).filter((issue) => issue.status === "running" && !issue.pendingGreen);
   if (status.inFlight === undefined) return running;
   const ids = new Set(status.inFlight);

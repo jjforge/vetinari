@@ -170,13 +170,14 @@ The event log (`logs/orchestrator.jsonl`) is one JSON object per line,
 | `spawn` | `taskId` | campaign (queue) |
 | `turn` | `taskId`, `turn`, `summary`, `signal?`, `sessionId?`, `commits?` | run |
 | `green` | `taskId`, `branch`, `commits` | run |
-| `parked` | `taskId`, `reason`, `detail?` | run (question/stalled/stopped/outdated-agent), integrator (conflict) — never the campaign: a red base is carried only by `campaign-parked` |
+| `parked` | `taskId`, `reason`, `detail?` | run (question/stalled/stopped/outdated-agent), campaign (conflict — only when a green's retried merge collides again). A red base is carried only by `campaign-parked` |
 | `answered` | `taskId`, `source` (`cli`/`ui`/`telegram`, from `VETINARI_ANSWER_SOURCE`, default `cli`) | the `answer` command, only once it delivers into the parked record — never for a not-parked no-op or a refused answer. Under a live campaign the issue then reads `running` in the `answered` phase until the re-admit's `spawn` |
-| `failed` | `taskId`, `detail?` | whichever process observes it: the run loop on a throw, the campaign on a child's non-zero exit |
+| `failed` | `taskId`, `detail?` | whichever process observes it: the run loop on a throw, the campaign on a child's non-zero exit, the integrator on a merge that fails with no unmerged paths (a dirty tree, a held `index.lock`) |
 | `merged` | `taskId` | integrator |
 | `base-gate` | `index?`, `green`, `detail?` | integrator |
 | `wave-done` | `index`, `merged?` | campaign — only when every member is `completed` |
 | `grace-wait` | `seconds`, `tasks` | campaign |
+| `re-admit` | `taskId`, `reason` (`conflict`), `paths`, `base` | campaign — a green whose merge collided with the base, re-admitted into its wave for one retry by its own agent, just before the retry's `spawn` (design §6). Not a park; the issue reads in flight and the live tail follows it |
 | `campaign-parked` | `index?`, `reason?` (`red-base`/`question`/`stalled`/`conflict`/`stopped`/`outdated-agent`), `detail?` | campaign — a stop marker; `stopped` is an operator stop (`vetinari stop`, Ctrl-C); `outdated-agent` outranks every other member reason |
 | `campaign-failed` | `index?`, `detail?` | campaign — the other stop marker |
 | `campaign-done` | `waves`, `name?` | campaign |

@@ -76,12 +76,13 @@ The event vocabulary after consolidation (§13.2) is small and uses the user's w
 | `spawn` | `taskId` | campaign |
 | `turn` | `taskId`, `turn`, `summary`, `signal?`, `sessionId?`, `commits?` | run |
 | `green` | `taskId`, `branch`, `commits` | run |
-| `parked` | `taskId`, `reason`, `detail?` | run (question/stalled/stopped/outdated-agent), integrator (conflict). A red base is the *wave's* reason and is written, not inferred: `campaign-parked` carries `reason: red-base` for that wave index; no per-member `parked` event is written |
-| `failed` | `taskId`, `detail?` | whichever process observes it: the run loop on a throw, the campaign on a child's non-zero exit |
+| `parked` | `taskId`, `reason`, `detail?` | run (question/stalled/stopped/outdated-agent), campaign (conflict — a retried merge that collided again, §6). A red base is the *wave's* reason and is written, not inferred: `campaign-parked` carries `reason: red-base` for that wave index; no per-member `parked` event is written |
+| `failed` | `taskId`, `detail?` | whichever process observes it: the run loop on a throw, the campaign on a child's non-zero exit, the integrator on a merge that fails with no unmerged paths (§6) |
 | `merged` | `taskId` | integrator |
 | `base-gate` | `index?`, `green`, `detail?` | integrator |
 | `wave-done` | `index`, `merged?` | campaign — only when every member is `completed` |
 | `grace-wait` | `seconds`, `tasks` | campaign (§5 step 3) |
+| `re-admit` | `taskId`, `reason` (`conflict`), `paths`, `base` | campaign (§6) — a green whose merge collided, re-admitted into its wave for one retry by its own agent; logged just before the retry's `spawn`. Not a park: no parked record, no notice. The reducer clears the issue's pending green, so it reads in flight and the live tail follows it |
 | `campaign-parked` | `index?`, `reason?` (`red-base`, `question`, `stalled`, `conflict`, `stopped`, `outdated-agent` — the wave's reason, written by the code that stopped; `stopped` is an operator stop, §5; `outdated-agent` outranks every other member reason), `detail?` | campaign — a stop marker |
 | `campaign-failed` | `index?`, `detail?` | campaign — the other stop marker |
 | `campaign-done` | `waves`, `name?` | campaign |
@@ -121,7 +122,7 @@ Membership is an orthogonal axis — `member | grafted | pruned` — so a chip s
 | --- | --- | --- | --- |
 | `question` | run loop on BLOCKED | yes | no — the answer continues |
 | `stalled` | run loop on turn budget, idle timeout, or an empty COMPLETE | yes (an answer is guidance) | no |
-| `conflict` | integrator on merge conflict | no | yes, after the human resolves it |
+| `conflict` | campaign when a green's retried merge collides again (§6) — the first collision is retried, never parked | no | yes, after the human resolves it |
 | `red-base` | campaign on a red merged base — the wave's reason, carried by `campaign-parked` | no | yes, after fix-forward or prune |
 | `crash` | reconciliation (dead process, no stop marker since the latest wave-start) | no | yes |
 | `stopped` | run loop on SIGINT/SIGTERM before a verdict (its work is kept) | no | yes — a redrive, or `vetinari run <id>` for a standalone run |
@@ -180,7 +181,7 @@ For each wave:
 1. Log `wave-start`; notify.
 2. **Drain.** Spawn a child `run` per issue as the host lease allows (§8). A park or failure frees its slot at once and never aborts a sibling. The wave is drained when every member has an outcome.
 3. **Re-admit.** An answer is *delivered*, not run: `answer` writes the text into the parked record and marks it answered. While a campaign process is live, it is the campaign that re-admits the member — re-queued with the answer as its prompt, spawning when a slot frees, its earlier outcome discarded — so no second process ever runs the issue beside the campaign. With no live campaign, `answer` runs the redrive (§7), which does the same. A parked member may be re-admitted more than once; a second park is a park, not a loop. At the end of the drain, a member parked as `question` or `stalled` holds the wave open for up to `parkGraceSeconds` (`grace-wait` is logged; an `outdated-agent` member never does — it has nothing to answer); an answer in that window re-admits it into *this* wave, expiry falls through.
-4. **Integrate** the greens (§6).
+4. **Integrate** the greens (§6), including the one in-wave retry of a merge collision.
 5. **Resolve.** The wave is done only when every member is `completed`, in this order:
    - any member `failed` → log `campaign-failed`, notify, exit non-zero (failure outranks a red base or a park, §2.4);
    - the merged base red → log `campaign-parked` (the wave's reason `red-base`), notify, exit non-zero;
@@ -190,8 +191,8 @@ For each wave:
 
 **Stopping.** An operator stops a running campaign with `vetinari stop` (which signals the campaign process the project's lease names) or a signal on the campaign itself; the campaign's handler decides, and each child `run` sits in its own process group so a terminal's Ctrl-C or hang-up reaches only the campaign. The first stop request logs `stop-requested`.
 
-- **Graceful** (`stop`, a first SIGINT): no wave starts after the one in flight. That wave drains, integrates, gates and resolves exactly as above (skipping only the grace wait), so a failure, red base or member park stands with its own reason. If the wave closes and was the last, `campaign-done` as normal; otherwise log `campaign-parked { index: <next wave>, reason: stopped }` before its `wave-start`, notify, exit `2`. A request outside a drain is handled the same way.
-- **Now** (`stop --now` → SIGTERM, a second SIGINT, or SIGHUP): spawn and re-admit nothing more, SIGTERM every child `run` (each parks itself `stopped` with its worktree kept, exiting `2`) and wait for them all — a run the signal kills before it can park itself (still booting, or exiting after its verdict) is parked `stopped` by the campaign, unless it already reached a verdict (`green`, `parked`, `failed`), which it keeps; skip the grace wait, integration, the changelog fold and the labels; then log `campaign-parked { index: <in-flight wave>, reason: stopped }`, unless a member `failed`, which still outranks it (`campaign-failed`). A now-stop never breaks into integration — outside a drain it is a graceful one.
+- **Graceful** (`stop`, a first SIGINT): no wave starts after the one in flight. That wave drains, integrates (a merge-conflict retry runs to its verdict as part of the drain, §6), gates and resolves exactly as above (skipping only the grace wait), so a failure, red base or member park stands with its own reason. If the wave closes and was the last, `campaign-done` as normal; otherwise log `campaign-parked { index: <next wave>, reason: stopped }` before its `wave-start`, notify, exit `2`. A request outside a drain is handled the same way.
+- **Now** (`stop --now` → SIGTERM, a second SIGINT, or SIGHUP): spawn and re-admit nothing more, SIGTERM every child `run` (each parks itself `stopped` with its worktree kept, exiting `2`) and wait for them all — a run the signal kills before it can park itself (still booting, or exiting after its verdict) is parked `stopped` by the campaign, unless it already reached a verdict (`green`, `parked`, `failed`), which it keeps; skip the grace wait, integration, the changelog fold and the labels (a now-stop during a merge-conflict retry stops that retrying child the same way, and the second integration pass is skipped); then log `campaign-parked { index: <in-flight wave>, reason: stopped }`, unless a member `failed`, which still outranks it (`campaign-failed`). A now-stop never breaks into integration — outside a drain it is a graceful one.
 
 A `campaign-parked{stopped}` is a wave-level hold on the wave it names (like `red-base`), so the campaign reads `parked`, not idle or crashed; that wave's next `wave-start` clears it. A `vetinari redrive` resumes it (§7).
 
@@ -201,9 +202,12 @@ The exit is deliberate: a paused campaign holds no container budget and no state
 
 For a wave's greens, in order:
 
-1. `git merge --no-ff agent/<id>` onto the base. A conflict aborts **that merge only**: the issue is parked as `conflict` with its branch, worktree and session intact, and integration continues with the next green. Merged work stays merged.
-2. When all greens are merged, run every gate on the base. Red → the wave is parked as `red-base`: everything stays merged, the base sits red and is never pushed or built on, and the campaign stops. The machine never guesses a culprit — none is knowable when every branch was green alone.
-3. Green → post-merge steps on the green path only: delete merged branches and worktrees, run the configured post-merge hooks (advance a tracker label; fold changelog fragments — §12 makes both optional hooks), log `merged` per issue.
+1. `git merge --no-ff agent/<id>` onto the base. A failed merge aborts **that merge only** (any merge in progress is aborted; merged work stays merged) and integration continues with the next green. The unmerged paths, read before the abort, say what it was:
+   - **A conflict** (unmerged paths present): the issue is a collision — its branch, worktree and session intact, nothing parked yet.
+   - **Any other failure** (no unmerged paths — a dirty tree, a held `index.lock`): not something the agent can resolve. The member is logged `failed` with the merge output and the wave resolves as for any failed member (§5 step 5). It is never retried and never parked.
+2. When all greens are merged, run every gate on the base. Red → the wave is parked as `red-base`: everything stays merged, the base sits red and is never pushed or built on, and the campaign stops. The machine never guesses a culprit — none is knowable when every branch was green alone. A red base outranks a collision: no retry starts.
+3. **Retry each collision once** (base green, or nothing merged to gate). Each collided issue is re-admitted into the same wave by its own agent: log `re-admit { taskId, reason: conflict, paths, base }` (`base` is the base commit once this pass's merges have landed), then spawn it — a resumable provider resumes the green's last session with a conflict prompt, a non-resumable one re-enters fresh on the kept branch with the prompt added to the issue text. The prompt names the paths and the base commit: merge the base into the branch, resolve the conflicts, keep the issue's acceptance criteria satisfied. A retry is not a park — no parked record, no `parked` event, no notice. The retry's own verdict stands (a question parks `question` with the usual grace wait, a stall `stalled`, an error is `failed`); a green retry goes through a second pass of steps 1–2. Only a **second collision** parks the issue as `conflict` (the parked record, `parked{conflict}`, the notice, the `redrive` path and the stranded-dependents handling of §5), and a red base on the second pass parks the wave `red-base`. There is one retry per integration and no config switch. A crash mid-retry leaves the issue's green work on its branch, unmerged; the redrive reconciles it as a crash (§7) — the `re-admit` put it back in flight — resuming its session on that branch, and integrates the green it reaches, where a fresh collision gets its own single retry.
+4. Green → post-merge steps on the green path only, once, after the last integration pass: delete merged branches and worktrees, run the configured post-merge hooks (advance a tracker label; fold changelog fragments — §12 makes both optional hooks), log `merged` per issue. A retried issue that merged gets them like any other.
 
 ## 7. Redrive
 

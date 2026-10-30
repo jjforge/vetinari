@@ -28,7 +28,7 @@ export interface ChildResult {
  * On the cap it resolves `{ timedOut: true }` but does **not** kill the child — a killed
  * child could die between reading the log and appending its event, so the wait gives up
  * while the child runs on. `shellGraftPreview` folds into this (it was a second copy of the
- * same spawn-collect-resolve); `shellPrunePreview` adopts it separately under its own ticket.
+ * same spawn-collect-resolve), and `shellPrunePreview` adopts it the same way.
  */
 export function runChild(projectRoot: string, args: string[], opts: { timeoutMs: number }): Promise<ChildResult> {
   return new Promise((resolve) => {

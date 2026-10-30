@@ -28,15 +28,26 @@ const seedState = (dir: string, events: unknown[]) => {
   writeJsonl(join(dir, "logs", "orchestrator.jsonl"), events);
 };
 
-test("buildLanding's card carries owner/name from the project's git remote, and omits it when there is none", () => {
+test("buildLanding's card carries the registered owner/name, and reads no git remote", () => {
   const base = join(tmpdir(), `vetinari-landing-repo-${Date.now()}`);
-  // A project whose root is a git repo with a GitHub origin → the card carries owner/name.
-  const withRemote = join(base, "with-remote");
-  const root = join(withRemote, "root");
-  seedState(withRemote, [
+  // A pointer registered with `repo` whose root is not a git repo → the card carries it.
+  const registered = join(base, "registered");
+  seedState(registered, [
     event("campaign-start", {
       ts: "2025-01-02T08:00:00.000Z",
       waves: [["101"]],
+      name: "work",
+      slots: 1,
+    }),
+  ]);
+  // A pointer with no `repo` whose root is a git repo with a GitHub origin → no repo:
+  // the card never reads the remote, so the display falls back to the bare key.
+  const unregistered = join(base, "unregistered");
+  const root = join(unregistered, "root");
+  seedState(unregistered, [
+    event("campaign-start", {
+      ts: "2025-01-02T08:00:00.000Z",
+      waves: [["102"]],
       name: "work",
       slots: 1,
     }),
@@ -45,25 +56,15 @@ test("buildLanding's card carries owner/name from the project's git remote, and 
   const git = (args: string[]) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8" });
   git(["init", "-q"]);
   git(["remote", "add", "origin", "git@github.com:jjforge/vetinari.git"]);
-  // A project with no git remote (the demo) → no repo, so the display falls back to the bare key.
-  const noRemote = join(base, "no-remote");
-  seedState(noRemote, [
-    event("campaign-start", {
-      ts: "2025-01-02T08:00:00.000Z",
-      waves: [["102"]],
-      name: "work",
-      slots: 1,
-    }),
-  ]);
 
   const { projects } = buildLanding(
-    [pointerFor("with-remote", withRemote), pointerFor("no-remote", noRemote)],
+    [{ ...pointerFor("registered", registered), repo: "o/r" }, pointerFor("unregistered", unregistered)],
     new Date("2025-01-02T12:00:00.000Z"),
   );
   const [a, b] = projects;
-  assert.equal(a.repo, "jjforge/vetinari");
+  assert.equal(a.repo, "o/r");
   // The bare project key is unchanged — repo is display-only.
-  assert.equal(a.project, "with-remote");
+  assert.equal(a.project, "registered");
   assert.equal(b.repo, undefined);
 });
 

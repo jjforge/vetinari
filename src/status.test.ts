@@ -1,7 +1,8 @@
 // Tests for the aggregated status server and its HTTP routes (status.ts).
 import test from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { dashboardRequestDenial, event, serveAllStatus, type OrchestratorEvent } from "./status.ts";
@@ -268,6 +269,52 @@ test("serveAllStatus GET / serves the all-repos landing shell, not a server-rend
     // Selecting a project opens that project's campaign view (server-rendered for now).
     const alpha = await (await fetch(`http://127.0.0.1:${port}/?project=alpha`)).text();
     assert.match(alpha, /#101 <small>/);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serveAllStatus GET / labels the repo dropdown with the registered owner/name, reading no git remote", async () => {
+  const configDir = join(tmpdir(), `vetinari-dropdown-repo-${Date.now()}`);
+  const stateDir = join(configDir, "state-alpha");
+  seedState(stateDir, [event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["101"]], slots: 1 })]);
+  // The root is not a git repo, so the label can only come from the registered pointer.
+  register(configDir, { project: "alpha", projectRoot: join(configDir, "alpha-root"), baseLocation: stateDir, repo: "o/r" });
+
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const { port } = server.address() as AddressInfo;
+  try {
+    for (const path of ["/", "/?project=alpha"]) {
+      const page = await (await fetch(`http://127.0.0.1:${port}${path}`)).text();
+      assert.match(page, /data-project="alpha"[^>]*>.*?<span class="repo-optlabel">o\/r<\/span>/, path);
+    }
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serveAllStatus GET /?project= names the checkout's branch in the Redrive confirm dialog", async () => {
+  const configDir = mkdtempSync(join(tmpdir(), "vetinari-redrive-base-"));
+  const stateDir = join(configDir, "state-alpha");
+  // A gracefully stopped campaign with no live lease — the only time the Redrive dialog renders.
+  seedState(stateDir, [
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["101"], ["201"]], slots: 1 }),
+    event("wave-done", { ts: "2025-01-01T01:00:00.000Z", index: 0, merged: ["101"] }),
+    event("campaign-parked", { ts: "2025-01-01T01:00:01.000Z", index: 1, reason: "stopped" }),
+  ]);
+  const projectRoot = join(configDir, "alpha-root");
+  mkdirSync(projectRoot);
+  const git = (...args: string[]) => execFileSync("git", ["-C", projectRoot, ...args], { encoding: "utf8" });
+  git("init", "-q", "-b", "trunk");
+  git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "one");
+  register(configDir, { project: "alpha", projectRoot, baseLocation: stateDir });
+
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const { port } = server.address() as AddressInfo;
+  try {
+    const page = await (await fetch(`http://127.0.0.1:${port}/?project=alpha`)).text();
+    assert.match(page, /<dialog class="redrive-dialog" data-redrive-dialog>/);
+    assert.match(page, /on <code>trunk<\/code>/);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

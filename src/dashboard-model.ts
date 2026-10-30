@@ -3,7 +3,7 @@
 // `dashboard-status.ts`, `dashboard-live-tail.ts` and `dashboard-landing.ts` — and re-exported
 // here by name, so every importer (and `status.ts`'s `export *`) compiles unchanged.
 import { ownerRepoFromRemote, repoForProject } from "./config.ts";
-// Re-exported so `status.ts`'s `export *` and `dashboard-route-page.ts` keep
+// Re-exported so `status.ts`'s `export *` keeps
 // reaching them here; the definitions moved to config.ts once the registry and CLI
 // came to depend on this project-identity edge (an odd fit under dashboard-model).
 export { ownerRepoFromRemote, repoForProject };

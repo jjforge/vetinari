@@ -1,7 +1,6 @@
 // The all-repos landing and the cross-project feed: one card per registered project, the four
 // summed counters, the cross-repo parked queue, and the rolling 48h event feed.
 import { existsSync } from "node:fs";
-import { repoForProject } from "./config.ts";
 import { hostLogger, type Logger } from "./log.ts";
 import { type ProjectPointer } from "./registry.ts";
 import { projectHasLiveCampaign } from "./host-slots.ts";
@@ -244,9 +243,9 @@ const buildProjectCard = (
   logger: Logger,
   festive = false,
 ): ProjectCard => {
-  // The card heading shows owner/name, read live off the checkout's git remote;
-  // undefined for a project with none (the demo), so the display falls back to the key.
-  const repo = repoForProject(pointer.projectRoot);
+  // The card heading shows owner/name as captured at registration — no git call on the
+  // request path; undefined for a pointer with none (the demo), so the display falls back to the key.
+  const repo = pointer.repo;
   // The idle branches count `status.parked` — the project page's own filter
   // (`parkedInCurrentPlan`), so the card and the page never disagree (#379). A park that
   // outlived its run's log (the log archived — a killed process, an out-of-band archive —

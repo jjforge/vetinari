@@ -1,28 +1,28 @@
-import { spawn } from "node:child_process";
+import { runChild } from "./dashboard-child.ts";
 import type { StructuredPruneClosure } from "./prune.ts";
+
+/** The cap on the prune preview's wait — the same as the graft preview's. */
+export const PRUNE_PREVIEW_TIMEOUT_MS = 60_000;
 
 /**
  * Preview a prune by shelling the project's own `prune <issue> --dry-run` via the
  * shared install in its root (ADR 0003): it computes the closure against that
  * project's real `blockedBy` graph and prints it, changing nothing. Returns the
- * printed closure, or null when the child fails. Mirrors the Telegram gateway's
- * `prunePreview` — the same dumb-router routing the aggregated dashboard uses.
+ * printed closure, or null when the child fails or outlives `timeoutMs` (left
+ * running, per `runChild`). Mirrors the Telegram gateway's `prunePreview` — the
+ * same dumb-router routing the aggregated dashboard uses.
  */
-export function shellPrunePreview(projectRoot: string, taskId: string, opts: { json?: boolean } = {}): Promise<string | null> {
-  return new Promise((resolve) => {
-    // The human-prose preview shells without `--json` (its prose renders in the confirm
-    // HTML); the structured-closure path (`shellPruneClosure`) passes `--json` so the child
-    // also emits the machine `prune-closure {json}` line to parse. No JSON to stdout otherwise (§11).
-    const args = ["prune", taskId, "--dry-run", ...(opts.json ? ["--json"] : [])];
-    const child = spawn(process.execPath, [...process.execArgv, process.argv[1], ...args], {
-      cwd: projectRoot,
-      stdio: ["ignore", "pipe", "inherit"],
-    });
-    let out = "";
-    child.stdout?.on("data", (chunk) => (out += chunk));
-    child.on("error", () => resolve(null));
-    child.on("exit", (code) => resolve(code === 0 ? out.trim() || null : null));
-  });
+export async function shellPrunePreview(
+  projectRoot: string,
+  taskId: string,
+  opts: { json?: boolean; timeoutMs?: number } = {},
+): Promise<string | null> {
+  // The human-prose preview shells without `--json` (its prose renders in the confirm
+  // HTML); the structured-closure path (`shellPruneClosure`) passes `--json` so the child
+  // also emits the machine `prune-closure {json}` line to parse. No JSON to stdout otherwise (§11).
+  const args = ["prune", taskId, "--dry-run", ...(opts.json ? ["--json"] : [])];
+  const { code, stdout, timedOut } = await runChild(projectRoot, args, { timeoutMs: opts.timeoutMs ?? PRUNE_PREVIEW_TIMEOUT_MS });
+  return !timedOut && code === 0 ? stdout.trim() || null : null;
 }
 
 /**

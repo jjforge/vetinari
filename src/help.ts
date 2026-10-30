@@ -202,7 +202,8 @@ const HEADER = "vetinari <mode> [args]";
  * The fixed footer under the mode list: the global `--config` option and the
  * host-ceiling note, neither of which is a mode.
  */
-const FOOTER = `Options: --config <path>   (default: vetinari/config.mts in cwd)
+const FOOTER = `Options: --config <path>   (default: vetinari/config.mts in cwd) — goes before the mode:
+         vetinari --config <path> <mode> [args]. After the mode it is not read as a config.
 
 Host container ceiling: set MAX_CONCURRENT_CONTAINERS (or a max-concurrent-containers
 file in the gateway config dir) to cap live containers across ALL projects; every

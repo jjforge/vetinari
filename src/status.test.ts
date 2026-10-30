@@ -1422,6 +1422,66 @@ test("serveAllStatus GET /graft?preview validates params and the project", async
   }
 });
 
+test("serveAllStatus GET /graft?preview 400s on any id that is not an issue token and shells no preview (#524)", async () => {
+  const configDir = join(tmpdir(), `vetinari-agg-graft-badid-${Date.now()}`);
+  const betaDir = join(configDir, "state-beta");
+  seedState(betaDir, [event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["201"]], slots: 1 })]);
+  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+
+  let closures = 0;
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+    graftClosure: () => (closures++, Promise.resolve({ ids: [], placement: [], remaining: [], rejected: [] })),
+  });
+  const { port } = server.address() as AddressInfo;
+  try {
+    // One bad id in the set rejects the whole request — it would otherwise land in the child's argv.
+    const res = await fetch(`http://127.0.0.1:${port}/graft?preview&ids=${encodeURIComponent("1,--config,/tmp/x.mjs")}&project=beta`);
+    assert.equal(res.status, 400);
+    assert.equal(closures, 0, "no preview child is shelled for a bad id");
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("serveAllStatus GET /graft?preview and /prune?preview refuse a cross-site Sec-Fetch-Site with 403 and shell nothing (#524)", async () => {
+  const configDir = join(tmpdir(), `vetinari-agg-preview-fetch-site-${Date.now()}`);
+  const betaDir = join(configDir, "state-beta");
+  seedState(betaDir, [event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["201"]], slots: 1 })]);
+  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+
+  const shelled: string[] = [];
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+    graftClosure: () => (shelled.push("graft"), Promise.resolve({ ids: ["640"], placement: [], remaining: [], rejected: [] })),
+    pruneClosure: () => (shelled.push("prune"), Promise.resolve({ target: "201", dropped: ["201"], keptBanked: [], remaining: [] })),
+  });
+  const { port } = server.address() as AddressInfo;
+  const previews = [`/graft?preview&ids=640&project=beta`, `/prune?preview&taskId=201&project=beta`];
+  try {
+    // An <img>/<iframe> GET from another site carries no Origin, so only Sec-Fetch-Site tells it apart.
+    for (const site of ["cross-site", "same-site", "none"]) {
+      for (const path of previews) {
+        assert.equal(
+          (await fetch(`http://127.0.0.1:${port}${path}`, { headers: { "sec-fetch-site": site } })).status,
+          403,
+          `${site} ${path}`,
+        );
+      }
+    }
+    assert.deepEqual(shelled, [], "no preview child is shelled for a cross-site request");
+    // The dashboard's own same-origin fetch, and a header-less curl/script, behave as before.
+    for (const headers of [{ "sec-fetch-site": "same-origin" }, {}] as Record<string, string>[]) {
+      for (const path of previews) assert.equal((await fetch(`http://127.0.0.1:${port}${path}`, { headers })).status, 200, path);
+    }
+    assert.deepEqual(shelled, ["graft", "prune", "graft", "prune"]);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
 test("serveAllStatus GET /graft?preview 502s when the project emits no closure line", async () => {
   const configDir = join(tmpdir(), `vetinari-agg-graft-502-${Date.now()}`);
   const betaDir = join(configDir, "state-beta");

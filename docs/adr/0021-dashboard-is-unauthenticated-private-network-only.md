@@ -33,6 +33,12 @@ request entry, ahead of the route table, so every current and future route is co
   the request is a 403. No `Origin` passes: curl and scripts send none and are not the
   browser threat. It applies to every request, not only the spawning ones, because
   that is simpler and the dashboard's own requests already pass.
+- **Fetch-site check on the spawning GETs.** `GET /graft?preview` and `GET /prune?preview`
+  shell a dry run, and a cross-site `<img>` or `<iframe>` GET carries no `Origin`, so the
+  Origin check admits it. These two routes alone refuse with a 403 any request whose
+  `Sec-Fetch-Site` is present and not `same-origin`; no `Sec-Fetch-Site` (curl, scripts)
+  passes as before. Every other route keeps admitting it, so top-level navigation to the
+  board from another site still works.
 
 A bind to anything but loopback prints one warning line after the URL line, saying the
 dashboard is unauthenticated and pointing at `docs/operations.md`. It never refuses

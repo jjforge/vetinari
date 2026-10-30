@@ -2,6 +2,7 @@ import { listProjects } from "./registry.ts";
 import { readBody, type RouteHandler } from "./dashboard-http.ts";
 import { respondWithStartedChild } from "./dashboard-child.ts";
 import { ANSWER_SOURCE_ENV_VAR } from "./config.ts";
+import { isIssueToken } from "./issue-id.ts";
 
 /**
  * `POST /answer` — a parked issue's reply. The redrive runs in the project's own
@@ -21,6 +22,11 @@ export const handleAnswer: RouteHandler = async (req, res, url, deps) => {
   const project = form.get("project");
   if (!taskId || !text || !project) {
     res.writeHead(400).end("taskId, text and project are required");
+    return true;
+  }
+  // The taskId lands in the child's argv — refuse anything that is not an issue token (#524).
+  if (!isIssueToken(taskId)) {
+    res.writeHead(400).end(`not an issue id: ${taskId}`);
     return true;
   }
   const pointer = listProjects(deps.configDir).find((p) => p.project === project);

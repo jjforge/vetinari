@@ -15,7 +15,9 @@ in `src/help.ts`, then run `npm run gen-reference`; `help.test.ts` fails until t
 block below matches. Do not hand-edit between the markers.
 
 The global option `--config <path>` (default `vetinari/config.mts` in the cwd)
-applies to every mode and is not itself a mode.
+applies to every mode and is not itself a mode. It goes **before the mode**
+(`vetinari --config <path> <mode> [args]`); after the mode it is not read as a
+config, but left to the mode's own arguments like any other token.
 
 <!-- BEGIN GENERATED MODES — from src/help.ts (MODES); regenerate with `npm run gen-reference`, do not hand-edit -->
 | Mode | What it does |

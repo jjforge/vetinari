@@ -24,7 +24,14 @@ import type { build, baseline, campaign, tgTest, requireTelegram, readImageFresh
 import type { runTgConnect } from "./tg-connect.ts";
 import type { tgSend } from "./telegram.ts";
 import { childRunEntry, type runLoop, type Outcome } from "./loop.ts";
-import type { answerParked, enqueueOutbound, hasParked, listParked, ParkReason } from "./state.ts";
+import {
+  isPathEscapingTaskId,
+  type answerParked,
+  type enqueueOutbound,
+  type hasParked,
+  type listParked,
+  type ParkReason,
+} from "./state.ts";
 import type { archiveRun } from "./archive.ts";
 import type { CampaignPlanReport, Exclusion, UnderspecifiedPrompt } from "./plan.ts";
 import type { expandSelection, runCampaignPlan, runFilesetCheck } from "./plan.ts";
@@ -962,6 +969,9 @@ async function dispatchAnswer(cmd: Extract<Command, { kind: "answer" }>, deps: D
   const { cfg, host } = deps;
   if (!cmd.taskId || !cmd.text.length) throw new Refusal('answer needs a task id and text: answer <task> "<answer>"');
   const taskId = cmd.taskId;
+  // The id becomes a parked-record path; refuse one that could leave the parked dir before touching
+  // anything, so `POST /answer` with `../../routing` gets a clean refusal rather than a stack (#566).
+  if (isPathEscapingTaskId(taskId)) throw new Refusal(`answer refused: task id ${JSON.stringify(taskId)} is not a valid task id`);
 
   // Same preflight as `run` (design §3 step 1, §15): validate the provider and check its
   // credentials before anything, so a gateway-spawned answer fails fast with a helpful line

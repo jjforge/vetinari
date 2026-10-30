@@ -607,6 +607,16 @@ test("dispatch run on a non-stopped park sets exit 2 but does NOT force-exit", a
   assert.deepEqual((deps.exit as any).calls, [], "a question park never force-exits");
 });
 
+test("dispatch answer refuses a path-escaping task id, naming it, before reading or writing any parked record (#566)", async () => {
+  const { deps } = makeDeps();
+  await assert.rejects(
+    () => dispatch({ kind: "answer", taskId: "../../routing", text: ["x"] }, deps),
+    (err: Error) => err instanceof Refusal && err.message.includes("../../routing"),
+  );
+  assert.equal((deps.hasParked as any).calls.length, 0, "the parked dir is not probed");
+  assert.equal((deps.answerParked as any).calls.length, 0, "nothing is written");
+});
+
 test("dispatch answer refuses a `stopped` record — it cannot be answered, naming redrive and `vetinari run <id>`", async () => {
   const { deps } = makeDeps({
     hasParked: spy(true) as any,

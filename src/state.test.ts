@@ -6,8 +6,10 @@ import { tmpdir } from "node:os";
 import type { ResolvedConfig } from "./config.ts";
 import {
   answerParked,
+  clearParked,
   clearParkedForTasks,
   enqueueOutbound,
+  hasParked,
   isAnswered,
   listOutbox,
   listOutboxIn,
@@ -418,3 +420,55 @@ test("listOutboxIn lists records enqueued in the same millisecond in enqueue ord
     Array.from({ length: 20 }, (_, i) => `msg ${i}`),
   );
 });
+
+// A task id is joined into the parked-record path, so one that could leave `parkedDir` must be
+// refused before any read, write or delete — `answer ../../routing` once rewrote a sibling file.
+const unsafeTaskIds = ["../x", "a/b", "a\\b", "..", ""];
+
+const escapeFixture = () => {
+  const dir = join(tmpdir(), `vetinari-unsafe-id-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(join(dir, "parked"), { recursive: true });
+  const sibling = join(dir, "x.json");
+  const original = JSON.stringify({ taskId: "x", parkedAt: "now", reason: "question", branch: "agent/x", sessionId: "s", question: "?" });
+  writeFileSync(sibling, original);
+  return { dir, sibling, original };
+};
+
+const parkedPathUsers: Record<string, (dir: string, taskId: string) => unknown> = {
+  answerParked: (dir, taskId) => answerParked(cfgFor(dir), taskId, "pwned"),
+  hasParked: (dir, taskId) => hasParked(cfgFor(dir), taskId),
+  readParked: (dir, taskId) => readParked(cfgFor(dir), taskId, { requireSession: false }),
+  isAnswered: (dir, taskId) => isAnswered(cfgFor(dir), taskId),
+  clearParked: (dir, taskId) => clearParked(cfgFor(dir), taskId),
+  writeParkedRecord: (dir, taskId) => writeParkedRecord(cfgFor(dir), { taskId, reason: "question", branch: "agent/x", question: "pwned" }),
+  setParkedMessageId: (dir, taskId) => setParkedMessageId(join(dir, "parked"), taskId, 1),
+};
+
+for (const [name, call] of Object.entries(parkedPathUsers)) {
+  for (const taskId of [...unsafeTaskIds, "x\0"]) {
+    test(`${name} refuses the unsafe task id ${JSON.stringify(taskId)} and leaves a file beside parkedDir unchanged`, () => {
+      const { dir, sibling, original } = escapeFixture();
+      assert.throws(() => call(dir, taskId), /unsafe task id/);
+      assert.equal(readFileSync(sibling, "utf8"), original, "the sibling record is neither rewritten nor deleted");
+    });
+  }
+}
+
+for (const taskId of ["101", "#101", "A1"]) {
+  test(`the parked-record functions still round-trip the safe task id ${JSON.stringify(taskId)}`, () => {
+    const { dir } = escapeFixture();
+    const cfg = cfgFor(dir);
+    writeParkedRecord(cfg, { taskId, reason: "question", branch: `agent/${taskId}`, sessionId: "s", question: "?" });
+    assert.equal(hasParked(cfg, taskId), true);
+    setParkedMessageId(cfg.parkedDir, taskId, 5);
+    assert.equal(isAnswered(cfg, taskId), false);
+    answerParked(cfg, taskId, "go");
+    const rec = readParked(cfg, taskId);
+    assert.equal(rec.taskId, taskId);
+    assert.equal(rec.tgMessageId, 5);
+    assert.equal(rec.answer, "go");
+    assert.equal(isAnswered(cfg, taskId), true);
+    clearParked(cfg, taskId);
+    assert.equal(hasParked(cfg, taskId), false);
+  });
+}

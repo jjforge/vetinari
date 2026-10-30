@@ -103,6 +103,7 @@ exported for custom wiring.
 | `blockedBy` | tracker seam: an issue's blockers, for wave layering (`githubBlockedBy()`, closed blockers filtered at the edge) |
 | `listByLabel` | tracker seam: expand a label token to its open issues (`githubIssuesByLabel()`) |
 | `fileSet` | seam: the files an issue touches/creates, for keeping a wave file-disjoint |
+| `waivedFiles` | repo-relative paths co-wave issues may both edit (a large, sectioned doc most issues update) — a fileKey exactly equal to an entry is left out of collision checks (no globs, no basename matching), and the plan prints `` `<path>` waived for N tickets ``; issues still cite it on `Touches:`. An entry that is a directory refuses `campaign`, `campaign --dry-run` and `graft`; one the tree lacks is ignored. A repo-root entry also waives an ambiguous cite kept as that bare basename. Under `packageScopedFileSet` a fileKey is the package directory, so waiving a single `.go` file has no effect (default: none) |
 | `reportFinding` | hook: file a finding harvested from a green run (`githubFindingReporter(undefined, opts)`); absent → no harvest turn |
 | `findOpenIssue` | seam: the open issue whose title matches a harvested finding by word similarity — the Jaccard score of the two titles' words, stop words dropped, best match at 0.5 or above, so a reworded title still matches (`githubFindOpenIssue()` lists up to 200 open issues per call); a match — or a finding this campaign already filed — gets a "seen again" comment via `postComment` instead of a new issue; a failed search counts as no match (logged `finding-search-failed`), so the finding is still filed or digested |
 | `maxFindingsPerRun` | most new issues one run's harvest files, most severe first (default 2); the overflow goes into one digest comment on the run's issue via `postComment` — with no `postComment` wired the digest is not posted and the run logs `finding-digest-dropped` with its count and summaries |
@@ -165,7 +166,7 @@ The event log (`logs/orchestrator.jsonl`) is one JSON object per line,
 
 | Event | Fields | Emitted by |
 | --- | --- | --- |
-| `campaign-start` | `waves`, `slots`, `name?`, `titles?` (id → title, recorded once) | campaign |
+| `campaign-start` | `waves`, `slots`, `name?`, `titles?` (id → title, recorded once), `waived?` (waived file → how many scheduled issues cited it; absent when nothing was waived) | campaign |
 | `wave-start` | `index`, `tasks` | campaign |
 | `spawn` | `taskId` | campaign (queue) |
 | `turn` | `taskId`, `turn`, `summary`, `signal?`, `sessionId?`, `commits?` | run |

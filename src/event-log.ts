@@ -38,6 +38,9 @@ export interface CampaignStartEvent extends BaseEvent {
   slots: number;
   name?: string;
   titles?: Record<string, string>;
+  /** each waived file (`waivedFiles`) the plan left out of collision checks, with how many
+   *  scheduled tickets cited it — absent when nothing was waived (and under `--override`). */
+  waived?: Record<string, number>;
 }
 
 /** `wave-start` — a wave started: its zero-based index and the tasks it drains (modes.ts). */

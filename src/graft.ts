@@ -21,7 +21,7 @@ import { campaignSettled, campaignStarted, issueNameFromTask, issueStateFromTask
 import { readEventLog } from "./event-log.ts";
 import { enqueueOutbound } from "./state.ts";
 import { notice, type Notice } from "./notice.ts";
-import { defaultFileSet, ticketProse } from "./fileset.ts";
+import { defaultFileSet, ticketProse, waiveFileSet } from "./fileset.ts";
 
 export interface GraftOptions {
   /**
@@ -187,8 +187,9 @@ export async function runGraft(
   const inCampaign = new Set(reduced.waves.flat());
 
   // Resolve each candidate id's task text once, reused for its open/closed state and
-  // its file-set. A `fetchTask` that throws (no such issue) reads `unknown`.
-  const resolveFileSet = cfg.fileSet ?? defaultFileSet();
+  // its file-set — less its waived files, so the event's fileKeys hold only the keys
+  // compared. A `fetchTask` that throws (no such issue) reads `unknown`.
+  const resolveFileSet = waiveFileSet(cfg.fileSet ?? defaultFileSet(), cfg.waivedFiles);
   const taskText = new Map<string, string | undefined>();
   await Promise.all(
     normalized.map(async (id) => {

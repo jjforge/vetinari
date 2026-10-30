@@ -447,6 +447,15 @@ export interface VetinariConfig {
    */
   fileSet?: FileSetOf;
   /**
+   * **Waived files**: repo-relative paths co-wave tickets may both edit — a large,
+   * sectioned doc most tickets update. A ticket's fileKey equal to an entry (exact
+   * match, no globs) is left out of the planner's collision checks; tickets still
+   * cite it on `Touches:`, and the plan names what it waived. An entry that is a
+   * directory in the tree is refused when a plan resolves file-sets; one the tree
+   * lacks is ignored. Default: none.
+   */
+  waivedFiles?: string[];
+  /**
    * When set, a green run ends with a "harvest" turn asking the agent for any
    * defect it noticed but did not fix — context that would otherwise vanish with
    * the container — and this files each one somewhere durable.
@@ -788,6 +797,10 @@ export async function loadConfig(explicitPath?: string): Promise<ResolvedConfig>
     if (c[required] == null) throw new Refusal(`${path}: missing required field "${required}"`);
   }
   if (!c.gates.length) throw new Refusal(`${path}: "gates" is empty — the orchestrator would verify nothing`);
+  // Shape only: there is no tree here to check an entry against, and a command that never
+  // plans must not refuse over one — the directory check lives in `waiveFileSet`.
+  if (c.waivedFiles !== undefined && !(Array.isArray(c.waivedFiles) && c.waivedFiles.every((f) => typeof f === "string")))
+    throw new Refusal(`${path}: "waivedFiles" must be an array of repo-relative paths (strings)`);
   if (c.notify) {
     const qDests = questionDestinations(c.notify);
     if (qDests.size > 1) {

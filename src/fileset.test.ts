@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { defaultFileSet, packageScopedFileSet, ticketProse } from "./fileset.ts";
+import { defaultFileSet, packageScopedFileSet, ticketProse, waiveFileSet } from "./fileset.ts";
+import { Refusal } from "./refusal.ts";
 import { planCampaign } from "./plan.ts";
 
 let counter = 0;
@@ -789,4 +790,40 @@ test("defaultFileSet recovers an extensionless marker cite fenced by escaped bac
 
   assert.deepEqual(res.files, ["Makefile"]);
   assert.equal(res.confident, true);
+});
+
+test("waiveFileSet drops a fileKey exactly equal to a waived entry and names it, keeping confidence", async () => {
+  const root = treeWith("DESIGN.md", "docs/guide/DESIGN.md", "src/plan.ts");
+  const fileSet = waiveFileSet(defaultFileSet(root), ["DESIGN.md"], root);
+
+  assert.deepEqual(await fileSet("Touches: `src/plan.ts`, `DESIGN.md`"), {
+    files: ["src/plan.ts"],
+    confident: true,
+    waived: ["DESIGN.md"],
+  });
+  // Exact match only: `docs/guide/DESIGN.md` shares the basename but is not the waived entry.
+  assert.deepEqual(await fileSet("Touches: `guide/DESIGN.md`"), { files: ["docs/guide/DESIGN.md"], confident: true, waived: [] });
+  // A ticket citing only the waived file keeps the resolver's confident verdict.
+  assert.deepEqual(await fileSet("Touches: `DESIGN.md`"), { files: [], confident: true, waived: ["DESIGN.md"] });
+});
+
+test("waiveFileSet refuses an entry that is a directory in the tree, naming it; ignores one the tree lacks", async () => {
+  const root = treeWith("DESIGN.md", "pkg/a.go");
+  assert.throws(
+    () => waiveFileSet(packageScopedFileSet(root), ["DESIGN.md", "pkg"], root),
+    (err: unknown) => err instanceof Refusal && /"pkg" is a directory/.test(err.message),
+  );
+  const fileSet = waiveFileSet(defaultFileSet(root), ["gone.md"], root);
+  assert.deepEqual(await fileSet("Touches: `DESIGN.md`"), { files: ["DESIGN.md"], confident: true, waived: [] });
+});
+
+test("waiveFileSet cannot waive a .go file under packageScopedFileSet — the fileKey is its package", async () => {
+  const root = treeWith("pkg/a.go", "pkg/b.go");
+  const fileSet = waiveFileSet(packageScopedFileSet(root), ["pkg/a.go"], root);
+  const plan = await planCampaign(["1", "2"], {
+    blockedBy: () => [],
+    fileSet: (id) => fileSet(id === "1" ? "Touches: `pkg/a.go`" : "Touches: `pkg/b.go`"),
+    onUnderspecified: () => "fail",
+  });
+  assert.deepEqual(plan.waves, [["1"], ["2"]]);
 });

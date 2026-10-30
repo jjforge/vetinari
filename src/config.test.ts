@@ -746,3 +746,16 @@ for (const dockerfile of ["../templates/Dockerfile", "../examples/jjforge/vetina
     }
   });
 }
+
+test("loadConfig refuses a waivedFiles that is not a string[], and accepts any string[] — even a directory", async () => {
+  const withWaived = (value: string) => CONFIG_BODY.replace("fetchTask: (id) => id,", `fetchTask: (id) => id,\n  waivedFiles: ${value},`);
+  await assert.rejects(loadConfig(writeConfig(scratch(), "vetinari/config.mts", withWaived(`"DESIGN.md"`))), (err: unknown) => {
+    assert.ok(err instanceof Refusal);
+    assert.match(err.message, /"waivedFiles" must be an array of repo-relative paths/);
+    return true;
+  });
+  await assert.rejects(loadConfig(writeConfig(scratch(), "vetinari/config.mts", withWaived(`["DESIGN.md", 3]`))), Refusal);
+  // Shape only: config load has no tree to check against, so a directory entry loads.
+  const cfg = await loadConfig(writeConfig(scratch(), "vetinari/config.mts", withWaived(`["DESIGN.md", "src"]`)));
+  assert.deepEqual(cfg.waivedFiles, ["DESIGN.md", "src"]);
+});

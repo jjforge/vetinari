@@ -53,6 +53,8 @@ Creates (new files): `src/report-format.ts`, `src/report-format.test.ts`
 
 **Don't cite the changelog fragment.** Each ticket's `changelog.d/<issue>.md` is unique to that ticket, so it can never collide. Citing the placeholder gives every ticket the same `<issue>.md` basename, so they all collide and the planner runs one ticket per wave.
 
+**Waived files still go on `Touches:`.** A project may list files in `waivedFiles` — a large, sectioned doc most tickets update — and the planner then leaves a key exactly equal to an entry out of its collision checks, so tickets sharing only that file can share a wave; the plan names each waived file and how many tickets cited it. Matching is exact on the resolved key, so waiving a repo-root `README.md` also waives an ambiguous `README.md` cite kept as that bare name. An entry that is a directory is refused. Under `packageScopedFileSet` a key is the package directory, not the file, so waiving a single `.go` file has no effect there.
+
 ## Dependencies
 
 Read by `blockedBy` (`githubBlockedBy`):

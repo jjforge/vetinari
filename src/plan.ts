@@ -16,7 +16,7 @@
  */
 import { computePrune, restrictBlockers, type BlockedByOf } from "./prune.ts";
 import { isIssueToken, normalize } from "./issue-id.ts";
-import { defaultFileSet, ticketProse, type FileSet, type FileSetOf } from "./fileset.ts";
+import { defaultFileSet, ticketProse, waiveFileSet, type FileSet, type FileSetOf } from "./fileset.ts";
 import { Refusal } from "./refusal.ts";
 
 export interface Placement {
@@ -243,6 +243,12 @@ export interface CampaignPlan extends WavePlan {
    * merge commit's sha so the provenance can name the proof. Absent/empty when none was.
    */
   alreadyMerged?: { id: string; sha: string }[];
+  /**
+   * each waived file (`waivedFiles`) a scheduled ticket cited, with how many scheduled
+   * tickets cited it — counted after any under-specified prune. Absent when nothing was
+   * waived (and on a one-issue selection, which resolves no file-sets).
+   */
+  waived?: Record<string, number>;
 }
 
 /** A fileKey is bare — carries no path, only a basename — when it has no separator:
@@ -521,7 +527,7 @@ export function waveArgs(plan: WavePlan): string {
  * does not run it.
  */
 export function describePlan(
-  plan: WavePlan & Partial<Pick<CampaignPlan, "pruned" | "underspecified" | "filesetCheckSkipped" | "alreadyMerged">>,
+  plan: WavePlan & Partial<Pick<CampaignPlan, "pruned" | "underspecified" | "filesetCheckSkipped" | "alreadyMerged" | "waived">>,
 ): string {
   const scheduled = plan.placements.length;
   const pruned = plan.pruned ?? [];
@@ -531,6 +537,8 @@ export function describePlan(
       (pruned.length ? `, ${pruned.length} pruned` : "") +
       (alreadyMerged.length ? `, ${alreadyMerged.length} already merged` : "") +
       ".",
+    // The waived files the planner left out of its collision checks — provenance, not a drop.
+    ...Object.entries(plan.waived ?? {}).map(([file, n]) => `\`${file}\` waived for ${n} ticket${n === 1 ? "" : "s"}`),
     "",
   ];
 
@@ -656,6 +664,9 @@ export async function planCampaign(ids: string[], deps: CampaignPlanDeps): Promi
   const fileKeys = new Map(survivorPlan.placements.map((p) => [p.id, new Set(sets.get(p.id)?.files ?? [])]));
   const partitioned = placeByCollisions(survivorPlan, uniqueOrder(ids), fileKeys);
 
+  const waived: Record<string, number> = {};
+  for (const p of survivorPlan.placements) for (const k of sets.get(p.id)?.waived ?? []) waived[k] = (waived[k] ?? 0) + 1;
+
   return {
     ...partitioned,
     // The unreachable list and the edge exclusions both belong to the original
@@ -665,6 +676,7 @@ export async function planCampaign(ids: string[], deps: CampaignPlanDeps): Promi
     excluded: layered.excluded,
     underspecified,
     pruned,
+    ...(Object.keys(waived).length ? { waived } : {}),
   };
 }
 
@@ -750,6 +762,8 @@ export interface CampaignPlanConfig {
   fetchTask: (id: string) => string | Promise<string>;
   blockedBy?: (id: string) => string[] | Promise<string[]>;
   fileSet?: FileSetOf;
+  /** the project's waived files — left out of collision checks via `waiveFileSet`. */
+  waivedFiles?: string[];
 }
 
 /** The parsed `--on-underspecified` flag, if the caller passed one. */
@@ -788,13 +802,15 @@ export interface CampaignPlanReport {
   suggestedName?: string;
   /** the selected issues skipped as already merged, with their merge commit sha (design §4). */
   alreadyMerged: { id: string; sha: string }[];
+  /** each waived file a scheduled ticket cited and how many cited it — absent when none was. */
+  waived?: Record<string, number>;
 }
 
 /**
  * The planning assembly `campaign` runs before it executes (and `campaign --dry-run`
  * stops after), lifted out of `cli.mts`'s inline switch so the composition is drivable
- * with stubs. It builds the file-set resolver (`cfg.fileSet ?? defaultFileSet()`,
- * composed with `ticketProse ∘ fetchTask`), wires the under-specified prompt off the
+ * with stubs. It builds the file-set resolver (`cfg.fileSet ?? defaultFileSet()`, less
+ * the waived files via `waiveFileSet`, composed with `ticketProse ∘ fetchTask`), wires the under-specified prompt off the
  * injected `isTTY`/`ask`, runs `planCampaign`, and returns the layered waves alongside
  * the rendered wave args, provenance report, and suggested `--name`. No side effects:
  * it reads the tracker and computes the plan; running the waves is the caller's job.
@@ -840,8 +856,8 @@ export async function runCampaignPlan(
     );
 
   // Which files each ticket touches: the project's resolver, or the shipped
-  // cites-from-body default, over the ticket's ticketProse'd text.
-  const resolveFileSet = cfg.fileSet ?? defaultFileSet();
+  // cites-from-body default, over the ticket's ticketProse'd text — less its waived files.
+  const resolveFileSet = waiveFileSet(cfg.fileSet ?? defaultFileSet(), cfg.waivedFiles);
   // A skipped issue is a satisfied blocker, like a merged (pending-verify) one: it is still
   // open, so the resolver still returns it — strip it so it never gates or strands a
   // dependent. The resolver's `onExcluded` sink is forwarded so its own drops still report.
@@ -868,7 +884,7 @@ export async function runCampaignPlan(
   // Fold the label-expansion exclusions in front of the planner's own so the
   // provenance's Excluded section names every edge drop, expansion then layering.
   const report = describePlan({ ...plan, excluded: [...expandExcluded, ...plan.excluded], alreadyMerged });
-  return { waves: plan.waves, waveArgs: waveArgs(plan), report, suggestedName, alreadyMerged };
+  return { waves: plan.waves, waveArgs: waveArgs(plan), report, suggestedName, alreadyMerged, ...(plan.waived && { waived: plan.waived }) };
 }
 
 /** One ticket's resolver verdict, as `campaign --dry-run` reports it. */
@@ -883,7 +899,8 @@ export interface FilesetCheckResult {
 
 /**
  * Resolve each ticket's file-set through the **same** path `campaign-plan` uses —
- * `cfg.fileSet ?? defaultFileSet()` over `ticketProse ∘ fetchTask` — and report the
+ * `cfg.fileSet ?? defaultFileSet()` less its waived files (`waiveFileSet`), over
+ * `ticketProse ∘ fetchTask` — and report the
  * resolver's verdict per id. Because it calls the identical resolver rather than a
  * restatement of it, `campaign --dry-run` and the planner agree by construction: a ticket
  * this reports `confident: false` is exactly one the planner would halt on. Used by
@@ -893,7 +910,7 @@ export interface FilesetCheckResult {
  */
 export async function runFilesetCheck(cfg: CampaignPlanConfig, ids: string[]): Promise<FilesetCheckResult[]> {
   if (!ids.length) throw new Refusal("campaign --dry-run needs at least one ticket id: campaign --dry-run 201 173");
-  const resolveFileSet = cfg.fileSet ?? defaultFileSet();
+  const resolveFileSet = waiveFileSet(cfg.fileSet ?? defaultFileSet(), cfg.waivedFiles);
   return Promise.all(
     uniqueOrder(ids).map(async (id) => {
       const { files, confident } = await resolveFileSet(ticketProse(String(await cfg.fetchTask(id))));

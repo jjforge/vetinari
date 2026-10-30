@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, openSync, closeSync, writeSync, readdirSync, rea
 import { cpus } from "node:os";
 import { join, resolve } from "node:path";
 import { writeFileAtomic } from "./atomic-write.ts";
+import { Refusal } from "./refusal.ts";
 
 /**
  * The host slot budget (ADR 0010): a cooperative filesystem lease every
@@ -250,6 +251,19 @@ function liveLeases(configDir: string, isAlive: (pid: number) => boolean): SlotL
 }
 
 /**
+ * Thrown by {@link registerProject} when a second process tries to take a campaign lease for a
+ * project another live campaign already holds — the lease is the authoritative single-campaign
+ * guard, because the early `projectHasLiveCampaign` probe reads without the lock and two launches
+ * that start close together can both pass it.
+ */
+export class LiveCampaignRefusal extends Refusal {
+  constructor(project: string) {
+    super(`a campaign is already running for ${project} — campaign refused.`);
+    this.name = "LiveCampaignRefusal";
+  }
+}
+
+/**
  * Announce this run as active, and refresh its declared demand, by writing its lease
  * (held preserved, idempotent). A run registers before it acquires so other projects
  * see it as active and drain toward their smaller share, even while it is waiting
@@ -257,6 +271,9 @@ function liveLeases(configDir: string, isAlive: (pid: number) => boolean): SlotL
  * (held plus still-queued work) — must be refreshed as demand changes, not written
  * once: call this again when a wave grows or drains so a project that no longer wants
  * the surplus releases its claim on it, or the reservation bug returns one level up.
+ * A `campaign` registration throws {@link LiveCampaignRefusal}, writing nothing, when a different
+ * live pid already holds a campaign lease for the project — checked under the lock, so of two
+ * racing launches exactly one takes the lease. The holder re-registering (a demand refresh) passes.
  */
 export function registerProject(
   configDir: string,
@@ -269,6 +286,11 @@ export function registerProject(
   const pid = opts.pid ?? process.pid;
   const isAlive = opts.isAlive ?? pidAlive;
   withLock(slotsDir(configDir), isAlive, () => {
+    if (
+      kind === "campaign" &&
+      readLeases(configDir).some((l) => l.project === project && l.kind === "campaign" && l.pid !== pid && isAlive(l.pid))
+    )
+      throw new LiveCampaignRefusal(project);
     const file = leaseFile(configDir, pid);
     const existing = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as SlotLease).held : 0;
     writeFileAtomic(file, JSON.stringify({ project, weight, held: existing || 0, want, pid, kind }));

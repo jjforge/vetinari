@@ -1262,3 +1262,77 @@ test("runCampaignPlan returns empty waves, without throwing, when every selected
   assert.match(report.report, /#611 looks already merged \(merge commit sha611\)/);
   assert.match(report.report, /#640 looks already merged \(merge commit sha640\)/);
 });
+
+// A fake config whose `fileSet` reads every space-separated key after `Touches:`, plus
+// the project's `waivedFiles` — the plan applies the waiver over this resolver.
+const waivedCfgFrom = (tasks: Record<string, string>, waivedFiles?: string[]) => ({
+  blockedBy: () => [],
+  fetchTask: (id: string) => JSON.stringify({ body: tasks[id] ?? "" }),
+  fileSet: (ticket: string): FileSet => {
+    const files = ticket.match(/Touches: (.*)/)?.[1].split(" ") ?? [];
+    return { files, confident: files.length > 0 && !ticket.includes("(unsure)") };
+  },
+  waivedFiles,
+});
+
+test("runCampaignPlan co-waves two tickets sharing only a waived file, and the report names the waiver", async () => {
+  const report = await runCampaignPlan(
+    waivedCfgFrom({ "1": "Touches: DESIGN.md a.ts", "2": "Touches: DESIGN.md b.ts", "3": "Touches: c.ts" }, ["DESIGN.md"]),
+    ["1", "2", "3"],
+    {},
+    { isTTY: false, ask: () => "fail" },
+  );
+
+  assert.deepEqual(report.waves, [["1", "2", "3"]]);
+  assert.deepEqual(report.waived, { "DESIGN.md": 2 });
+  assert.match(report.report, /^`DESIGN.md` waived for 2 tickets$/m);
+});
+
+test("runCampaignPlan still splits two tickets sharing a waived file and a non-waived one", async () => {
+  const report = await runCampaignPlan(
+    waivedCfgFrom({ "1": "Touches: DESIGN.md a.ts", "2": "Touches: DESIGN.md a.ts" }, ["DESIGN.md"]),
+    ["1", "2"],
+    {},
+    { isTTY: false, ask: () => "fail" },
+  );
+
+  assert.deepEqual(report.waves, [["1"], ["2"]]);
+  assert.match(report.report, /spilled — shares a\.ts with #1$/m);
+});
+
+test("runCampaignPlan counts a waived file only over the tickets left after an under-specified prune", async () => {
+  const report = await runCampaignPlan(
+    waivedCfgFrom({ "1": "Touches: DESIGN.md a.ts", "2": "Touches: DESIGN.md b.ts", "3": "(unsure) Touches: DESIGN.md" }, ["DESIGN.md"]),
+    ["1", "2", "3"],
+    { onUnderspecified: "drop" },
+    { isTTY: false, ask: () => "fail" },
+  );
+
+  assert.deepEqual(report.waived, { "DESIGN.md": 2 });
+});
+
+test("runCampaignPlan names no waiver when no scheduled ticket cites a waived file", async () => {
+  const report = await runCampaignPlan(
+    waivedCfgFrom({ "1": "Touches: a.ts", "2": "Touches: b.ts" }, ["DESIGN.md"]),
+    ["1", "2"],
+    {},
+    { isTTY: false, ask: () => "fail" },
+  );
+
+  assert.equal(report.waived, undefined);
+  assert.doesNotMatch(report.report, /waived/);
+});
+
+test("runFilesetCheck lists a ticket's keys less its waived files, agreeing with the planner", async () => {
+  const results = await runFilesetCheck(waivedCfgFrom({ "1": "Touches: DESIGN.md a.ts" }, ["DESIGN.md"]), ["1"]);
+
+  assert.deepEqual(results, [{ id: "1", confident: true, files: ["a.ts"] }]);
+});
+
+test("runFilesetCheck refuses a waivedFiles entry that is a directory in the tree, naming it", async () => {
+  // The tree is the cwd the shipped resolvers walk — this repo, where `src` is a directory.
+  await assert.rejects(
+    runFilesetCheck(waivedCfgFrom({ "1": "Touches: a.ts" }, ["src"]), ["1"]),
+    (err: unknown) => err instanceof Refusal && /"src" is a directory/.test(err.message),
+  );
+});

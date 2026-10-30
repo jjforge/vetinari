@@ -5,7 +5,7 @@ import { shellPruneClosure, shellPrunePreview } from "./dashboard-prune.ts";
 import type { GraftClosure } from "./dashboard-graft.ts";
 import { shellGraftClosure } from "./dashboard-graft.ts";
 import { runChild, startChild } from "./dashboard-child.ts";
-import type { DashboardDeps, RouteHandler } from "./dashboard-http.ts";
+import { BodyTooLargeError, type DashboardDeps, type RouteHandler } from "./dashboard-http.ts";
 import { handleApiStatus } from "./dashboard-route-api-status.ts";
 import { handleApiIssue } from "./dashboard-route-api-issue.ts";
 import { handleLanding } from "./dashboard-route-landing.ts";
@@ -125,6 +125,10 @@ export async function serveAllStatus(
       }
       res.writeHead(404).end("not found");
     })().catch((err) => {
+      if (err instanceof BodyTooLargeError) {
+        res.writeHead(413, { "content-type": "text/plain; charset=utf-8" }).end("request body too large");
+        return;
+      }
       res.writeHead(500).end(String(err?.stack ?? err));
     });
   });

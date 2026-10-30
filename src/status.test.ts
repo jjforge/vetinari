@@ -6,6 +6,8 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, write
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { dashboardRequestDenial, event, serveAllStatus, type OrchestratorEvent } from "./status.ts";
+import type { RouteHandler } from "./dashboard-http.ts";
+import { memoryLogger } from "./log.ts";
 import type { AddressInfo } from "node:net";
 import { request } from "node:http";
 import { register } from "./registry.ts";
@@ -1858,4 +1860,69 @@ test("serveAllStatus logs a POST's path without its query string, and logs no GE
       [{ method: "POST", path: "/nope" }],
     );
   });
+});
+
+test("serveAllStatus answers a route that throws before its head with a generic 500 and logs one dashboard-request-failed row (#538)", async () => {
+  const configDir = mkdtempSync(join(tmpdir(), "vetinari-route-throws-"));
+  const logger = memoryLogger();
+  const boom: RouteHandler = () => {
+    throw new Error("secret detail");
+  };
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1", logger, routes: [boom] });
+  try {
+    const res = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/boom?x=1`);
+    assert.equal(res.status, 500);
+    const text = await res.text();
+    assert.doesNotMatch(text, /\n\s+at /, "no stack trace in the response");
+    assert.doesNotMatch(text, /secret detail/, "no error message in the response");
+    const failed = logger.events.filter((e) => (e.event as string) === "dashboard-request-failed");
+    assert.equal(failed.length, 1);
+    const { method, path, error } = failed[0] as unknown as Record<string, unknown>;
+    assert.deepEqual({ method, path, error }, { method: "GET", path: "/boom", error: "Error: secret detail" });
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});
+
+test("serveAllStatus destroys a response whose route throws after its head, logs it once, and stays up (#538)", async () => {
+  const configDir = mkdtempSync(join(tmpdir(), "vetinari-route-throws-late-"));
+  const logger = memoryLogger();
+  const late: RouteHandler = async (_req, res, url) => {
+    if (url.pathname !== "/late") return false;
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write("data: first\n\n");
+    await new Promise((r) => setTimeout(r, 20));
+    throw new Error("mid-stream failure");
+  };
+  const ok: RouteHandler = (_req, res) => (res.writeHead(200).end("ok"), true);
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => unhandled.push(reason);
+  process.on("unhandledRejection", onUnhandled);
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1", logger, routes: [late, ok] });
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    const res = await fetch(`${base}/late`);
+    assert.equal(res.status, 200);
+    // Race the body read so a response left hanging fails the test instead of stalling it.
+    const read = await Promise.race([
+      res.text().then(
+        () => "completed",
+        () => "errored",
+      ),
+      new Promise((r) => setTimeout(() => r("hung"), 2000)),
+    ]);
+    assert.equal(read, "errored", "the half-sent stream is cut off, not rewritten");
+    const failed = logger.events.filter((e) => (e.event as string) === "dashboard-request-failed");
+    assert.equal(failed.length, 1);
+    const { method, path } = failed[0] as unknown as Record<string, unknown>;
+    assert.deepEqual({ method, path }, { method: "GET", path: "/late" });
+    const after = await fetch(`${base}/next`);
+    assert.equal(after.status, 200);
+    assert.equal(await after.text(), "ok");
+    assert.deepEqual(unhandled, [], "the error path rejects nothing");
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+    server.closeAllConnections();
+    await new Promise<void>((r) => server.close(() => r()));
+  }
 });

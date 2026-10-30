@@ -908,7 +908,7 @@ export function resumeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 /**
  * Resume an answered task via the shared install in that project's root, so it
  * runs with the project's own config and gates (ADR 0003). Fire-and-forget: the
- * child runs detached and several resumes proceed concurrently — one slow resume
+ * child is not awaited, so several resumes proceed concurrently — one slow resume
  * never holds up the others.
  */
 function spawnResume(ref: SendRef, text: string, logger: Logger = hostLogger()): void {

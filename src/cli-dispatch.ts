@@ -41,6 +41,7 @@ import { resumeIndex, type runPrune } from "./prune.ts";
 import { hash, isIssueToken, normalize } from "./issue-id.ts";
 import type { runGraft } from "./graft.ts";
 import { GraftRejectedError, describeGraftRejections } from "./graft.ts";
+import { describeReplan, type runReplan } from "./replan.ts";
 import type { OrchestratorEvent, readEventLog } from "./event-log.ts";
 import {
   campaignStarted,
@@ -151,6 +152,7 @@ export type Command =
   | { kind: "redrive"; agent: AgentOverride; autoPrune: boolean; override: boolean; json: boolean }
   | { kind: "prune"; project?: string; target?: string; dryRun: boolean; purge: boolean; json: boolean }
   | { kind: "graft"; project?: string; ids: string[]; dryRun: boolean; json: boolean }
+  | { kind: "replan"; dryRun: boolean }
   | { kind: "answer"; taskId?: string; text: string[] }
   | { kind: "parked" }
   | { kind: "stop"; now: boolean }
@@ -240,6 +242,8 @@ export function parseArgs(argv: string[]): Command {
         json: rest.includes("--json"),
       };
     }
+    case "replan":
+      return { kind: "replan", dryRun: rest.includes("--dry-run") };
     case "redrive": {
       // Redrive picks an unfinished campaign back up (design §7) — the umbrella verb
       // (ADR 0020). It takes no issue selection; strip the agent, then read only its
@@ -394,6 +398,7 @@ export interface DispatchDeps {
   findMergeCommit: typeof findMergeCommit;
   runPrune: typeof runPrune;
   runGraft: typeof runGraft;
+  runReplan: typeof runReplan;
   listParked: typeof listParked;
   /** Is the issue parked (a record on disk)? An `answer` delivers to it; an unparked
    *  issue is reported and ignored (design §7). */
@@ -601,6 +606,15 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
     }
     case "graft": {
       await dispatchGraft(cmd, deps);
+      return;
+    }
+    case "replan": {
+      // Re-plan the unstarted remainder (ADR 0022); a refusal bubbles to the CLI's one handler.
+      const result = await deps.runReplan(cfg, { dryRun: cmd.dryRun });
+      for (const line of describeReplan(result)) deps.log(line);
+      if (result.applied)
+        deps.log("replan event appended — the campaign runs the new waves from its next wave boundary (or its next `redrive`).");
+      else if (!result.unchanged) deps.log("dry run — nothing logged");
       return;
     }
     case "answer": {

@@ -163,6 +163,10 @@ export function describeEvent(e: OrchestratorEvent, opts: { festive?: { offset: 
       return `Pruned ${(e.removed ?? []).map(hash).join(", ")}`;
     case "graft":
       return `Grafted ${(e.ids ?? []).map(hash).join(", ")}`;
+    case "replan": {
+      const n = (e.waves ?? []).length;
+      return `replanned: ${n} wave${n === 1 ? "" : "s"} remaining${typeof e.was === "number" ? ` (was ${e.was})` : ""}`;
+    }
     case "telegram-unconfigured":
       return "⚠ Telegram not configured — parked questions won't be announced";
     case "turn":

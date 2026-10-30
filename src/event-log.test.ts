@@ -67,6 +67,8 @@ const describe = (e: OrchestratorEvent): string => {
       return `prune ${e.target} dropped ${e.dropped.join(",")}`;
     case "graft":
       return `graft ${e.ids.join(",")}`;
+    case "replan":
+      return `replan ${e.waves.length}w`;
     case "redrive":
       return `redrive from ${e.fromWave}`;
     case "grace-wait":
@@ -113,6 +115,7 @@ test("a switch over the §2.1 narrowed kinds reads each member's fields", () => 
     "re-admit 8 (conflict) on a.ts,b.ts at abc",
   );
   assert.equal(describe(event("graft", { ids: ["305", "306"], blockedBy: {}, fileKeys: {} })), "graft 305,306");
+  assert.equal(describe(event("replan", { waves: [["305", "306"]] })), "replan 1w");
   assert.equal(describe(event("gate", { taskId: "9", cmds: ["typecheck", "test"], skipped: 1 })), "gate typecheck,test skip 1");
   assert.equal(describe(event("gate-check", { taskId: "9", cmd: "run-tests" })), "gate-check run-tests");
   assert.equal(describe(event("tool", { taskId: "9", name: "Read", path: "/a.ts" })), "tool Read /a.ts");

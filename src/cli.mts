@@ -40,6 +40,7 @@ import { defaultGatewayServiceIO, isGatewayServiceVerb, runGatewayService } from
 import { runPrune } from "./prune.ts";
 import { expandSelection, makeAskUnderspecified, runCampaignPlan, runFilesetCheck } from "./plan.ts";
 import { runGraft } from "./graft.ts";
+import { runReplan } from "./replan.ts";
 import { renderUsage } from "./help.ts";
 import { Refusal, handleCliError } from "./refusal.ts";
 import {
@@ -637,7 +638,7 @@ function selectAgent(cfg: ResolvedConfig, override: AgentOverride): void {
   if (Object.keys(merged).length) process.env[AGENT_ENV_VAR] = encodeAgentOverride(merged);
 }
 
-// The post-config command family (build/baseline/run/campaign/redrive/prune/graft/
+// The post-config command family (build/baseline/run/campaign/redrive/prune/graft/replan/
 // answer/parked/stop/clear/tg-test) is parsed into a discriminated Command and routed through
 // injected deps (src/cli-dispatch.ts) — the pure seam that makes command routing testable
 // without spawning the process (#243). The host-level modes above run BEFORE the strict
@@ -671,6 +672,7 @@ await dispatch(parseArgs([mode, ...rest]), {
   findMergeCommit,
   runPrune,
   runGraft,
+  runReplan,
   listParked,
   hasParked,
   answerParked,

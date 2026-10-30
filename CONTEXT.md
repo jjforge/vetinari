@@ -230,6 +230,13 @@ what the tree lacks. The planner never schedules it silently: it halts and asks 
 [[prune]] it out or fix the issue.
 _Avoid_: unresolved ticket, ambiguous ticket.
 
+**Replan**:
+Recompute the remaining waves of a running campaign from the current config and
+tracker — `vetinari replan`, after a fixed file marker or a new [[waived file]].
+Only unstarted [[wave]]s move; every wave that has started keeps its number. It
+never adds or removes an [[issue]] — that is [[graft]] and [[prune]].
+_Avoid_: re-layer, reshuffle.
+
 ### Project layout & configuration
 
 **Install**:

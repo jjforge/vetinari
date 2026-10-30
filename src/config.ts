@@ -818,6 +818,9 @@ export async function loadConfig(explicitPath?: string): Promise<ResolvedConfig>
   // plans must not refuse over one — the directory check lives in `waiveFileSet`.
   if (c.waivedFiles !== undefined && !(Array.isArray(c.waivedFiles) && c.waivedFiles.every((f) => typeof f === "string")))
     throw new Refusal(`${path}: "waivedFiles" must be an array of repo-relative paths (strings)`);
+  // An unknown tier would otherwise map to the `low` weight silently.
+  if (c.containerShare !== undefined && !["high", "medium", "low"].includes(c.containerShare))
+    throw new Refusal(`${path}: "containerShare" must be "high", "medium" or "low", got ${JSON.stringify(c.containerShare)}`);
   if (c.notify) {
     const qDests = questionDestinations(c.notify);
     if (qDests.size > 1) {

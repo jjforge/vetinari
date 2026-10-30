@@ -808,3 +808,28 @@ test("loadConfig refuses a waivedFiles that is not a string[], and accepts any s
   const cfg = await loadConfig(writeConfig(scratch(), "vetinari/config.mts", withWaived(`["DESIGN.md", "src"]`)));
   assert.deepEqual(cfg.waivedFiles, ["DESIGN.md", "src"]);
 });
+
+const withContainerShare = (share: string) => CONFIG_BODY.replace("fetchTask:", `containerShare: ${share},\n  fetchTask:`);
+
+test("loadConfig refuses an unknown containerShare tier, naming the field and the value", async () => {
+  const cfgPath = writeConfig(scratch(), "vetinari/config.mts", withContainerShare(`"hgih"`));
+  await assert.rejects(loadConfig(cfgPath), (err: Error) => {
+    assert.ok(err instanceof Refusal);
+    assert.ok(err.message.endsWith(`"containerShare" must be "high", "medium" or "low", got "hgih"`), err.message);
+    return true;
+  });
+  const numPath = writeConfig(scratch(), "vetinari/config.mts", withContainerShare("3"));
+  await assert.rejects(
+    loadConfig(numPath),
+    (err: Error) => err.message === `${numPath}: "containerShare" must be "high", "medium" or "low", got 3`,
+  );
+});
+
+test("loadConfig accepts each containerShare tier, and defaults an absent one to medium", async () => {
+  for (const share of ["high", "medium", "low"]) {
+    const cfg = await loadConfig(writeConfig(scratch(), "vetinari/config.mts", withContainerShare(`"${share}"`)));
+    assert.equal(cfg.containerShare, share);
+  }
+  const cfg = await loadConfig(writeConfig(scratch(), "vetinari/config.mts"));
+  assert.equal(cfg.containerShare, "medium");
+});

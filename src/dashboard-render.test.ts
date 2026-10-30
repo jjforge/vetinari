@@ -26,9 +26,13 @@ import {
   renderHostLog,
   renderLandingShell,
   renderStatusPage,
+  renderStopControl,
   renderTopBar,
   tailFresh,
+  type CampaignStatus,
 } from "./status.ts";
+import { formatStatusLine } from "./statusline.ts";
+import { formatGatewayStatus } from "./gateway.ts";
 
 // The set of palette tokens defined by a `:root { … }` block, and the set of
 // `var(--token)` references anywhere in a page — the two must agree, or a surface
@@ -463,8 +467,9 @@ test("formatStatusText labels a held wave and its merge-conflict-held issue as p
   // The merge-conflict-held issue reads the parked emoji + word, no retired status word.
   assert.match(text, /⏸ #640 Add prune-out/);
 });
-test("formatStatusText leaves a pruned wave out of the list and the total", () => {
-  // The finished campaign a prune emptied wave 0 of: only the surviving, merged wave counts.
+test("formatStatusText leaves a pruned wave out of the list but numbers by display index", () => {
+  // The finished campaign a prune emptied wave 0 of: only the surviving, merged wave is listed,
+  // numbered 2 of 2 as the dashboard and event log number it.
   const text = formatStatusText({
     project: "demo",
     waves: [
@@ -480,9 +485,26 @@ test("formatStatusText leaves a pruned wave out of the list and the total", () =
     parked: [],
   });
 
-  assert.match(text, /^Wave 1\/1 ✅ completed$/m);
+  assert.match(text, /^Wave 2\/2 ✅ completed$/m);
   assert.doesNotMatch(text, /unstarted/);
   assert.doesNotMatch(text, /#1\b/);
+});
+test("every text surface numbers the wave in flight past a pruned wave as the Stop dialog does", () => {
+  // Wave 0 was pruned and wave 1 runs: the dashboard's Stop dialog calls it wave 2, so the
+  // status line, chat /status and gateway /status must too.
+  const status: CampaignStatus = {
+    project: "alpha",
+    waves: [
+      { index: 0, status: "unstarted", pruned: true, issues: [{ issueNumber: "1", status: "unstarted", membership: "pruned" }] },
+      { index: 1, status: "running", issues: [{ issueNumber: "2", status: "running", membership: "member" }] },
+    ],
+    parked: [],
+  };
+
+  assert.match(renderStopControl(status, { allowed: true, reason: "" }), /with wave 2 in flight/);
+  assert.match(formatStatusLine(status), /wave 2\/2/);
+  assert.match(formatStatusText(status), /^Wave 2\/2 ▶️ running$/m);
+  assert.match(formatGatewayStatus([status]), /alpha · RUNNING · wave 2 in flight/);
 });
 test("formatStatusText reports when nothing is running", () => {
   const text = formatStatusText({ project: "demo", waves: [], parked: [] });

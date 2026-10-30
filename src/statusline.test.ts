@@ -44,9 +44,9 @@ test("formatStatusLine summarizes the running wave and status counts on one line
   assert.equal(line.includes("\n"), false, "must be a single line");
 });
 
-test("formatStatusLine leaves a pruned wave out of the wave count and position", () => {
-  // A wave whose every member was pruned is out of the plan, so the running wave behind it
-  // is the first and only wave the bar counts.
+test("formatStatusLine numbers the running wave by its display index past a pruned wave", () => {
+  // A wave whose every member was pruned stays a display wave, so the running wave behind it
+  // reads as wave 2 of 2 — the number the dashboard and event log give it.
   const line = formatStatusLine({
     project: "jjforge",
     waves: [
@@ -56,7 +56,7 @@ test("formatStatusLine leaves a pruned wave out of the wave count and position",
     parked: [],
   });
 
-  assert.match(line, /wave 1\/1/);
+  assert.match(line, /wave 2\/2/);
 });
 
 test("formatStatusLine counts a grafted issue by its lifecycle (unstarted ⚪) — the reported graft case", () => {

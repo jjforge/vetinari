@@ -77,6 +77,14 @@ export function dashboardRequestDenial(host: string | undefined, origin: string 
 }
 
 /**
+ * The one Content-Security-Policy every dashboard response carries: its pages' inline scripts
+ * (including the project picker's `onchange`) and styles, same-origin fetch/EventSource and form
+ * posts, and nothing external — nor may any other page frame it.
+ */
+const DASHBOARD_CSP =
+  "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
+
+/**
  * The gateway's aggregated status site: one port fronting every registered
  * project. It reads the registry live each request (so a newly run project shows
  * up with no restart), builds each project's status from its base location, and
@@ -131,6 +139,13 @@ export async function serveAllStatus(
       const remote = req.socket.remoteAddress ?? null;
       res.once("close", () => logger.log("dashboard-request", { method: "POST", path, status: res.statusCode, remote }));
     }
+    // Defence in depth on every response (#526): the pages load only their own inline assets and
+    // talk only to this origin, so any future escaping slip cannot reach out or be framed.
+    res.setHeader("content-security-policy", DASHBOARD_CSP);
+    res.setHeader("x-content-type-options", "nosniff");
+    res.setHeader("referrer-policy", "no-referrer");
+    // Error bodies echo request input; type them as plain text. JSON, HTML and SSE routes set their own.
+    res.setHeader("content-type", "text/plain; charset=utf-8");
     void (async () => {
       const denial = dashboardRequestDenial(req.headers.host, req.headers.origin, allowedHosts);
       if (denial) {

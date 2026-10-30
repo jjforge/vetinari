@@ -42,7 +42,7 @@ import {
   type CampaignStatus,
   type IssueStatus,
 } from "./status.ts";
-import { TG_POLL_TIMEOUT_S, newPollBackoff, tgPoll, tgSend, type TgConn, type TgFailure, type TgMsg } from "./telegram.ts";
+import { TG_POLL_TIMEOUT_S, botId, newPollBackoff, tgPoll, tgSend, type TgConn, type TgFailure, type TgMsg } from "./telegram.ts";
 
 /**
  * A read-only status query, not an answer to a parked question: `/status` (bare,
@@ -764,6 +764,8 @@ export interface PollDeps {
   onUnrouted?: (conn: TgConn, msg: TgMsg) => void | Promise<void>;
   /** Tears the loop down when it fires — the supervisor aborts a token that was rotated away or deregistered. */
   signal?: AbortSignal;
+  /** Where a message whose routing or handler threw is logged (`gateway-handler-error`) before the loop moves on. */
+  logger?: Logger;
 }
 
 /**
@@ -771,23 +773,35 @@ export interface PollDeps {
  * Because Telegram allows exactly one consumer per bot, exactly one of these runs
  * per distinct token (see `pollTargets`). It never routes work itself — it maps
  * each message through `routeReply` and hands the decision to the injected seams,
- * so several answered tasks resume concurrently through `resume`.
+ * so several answered tasks resume concurrently through `resume`. A throw while
+ * routing or handling one message is logged and skipped, so one bad message (or a
+ * failing file read behind `/status`) never deafens the bot. Resolves with the
+ * offset it reached, so a restarted loop resumes past what this one routed.
  */
-export async function pollLoop(conn: TgConn, index: ReplyIndex, pending: PendingConfirms, deps: PollDeps, offset = 0): Promise<void> {
+export async function pollLoop(conn: TgConn, index: ReplyIndex, pending: PendingConfirms, deps: PollDeps, offset = 0): Promise<number> {
   for (;;) {
-    if (deps.signal?.aborted) return;
+    if (deps.signal?.aborted) return offset;
     const r = await deps.poll(conn, offset);
-    if (!r) return;
+    if (!r) return offset;
     offset = r.offset;
     for (const msg of r.messages) {
-      const action = routeReply(index, pending, conn, msg);
-      if (action.kind === "resume") deps.resume(action.ref, action.text);
-      else if (action.kind === "status") await deps.onStatus?.(conn);
-      else if (action.kind === "prune") await deps.onPrune?.(conn, action.command);
-      else if (action.kind === "confirm") await deps.onConfirm?.(action.confirm);
-      else await deps.onUnrouted?.(conn, msg);
+      try {
+        const action = routeReply(index, pending, conn, msg);
+        if (action.kind === "resume") deps.resume(action.ref, action.text);
+        else if (action.kind === "status") await deps.onStatus?.(conn);
+        else if (action.kind === "prune") await deps.onPrune?.(conn, action.command);
+        else if (action.kind === "confirm") await deps.onConfirm?.(action.confirm);
+        else await deps.onUnrouted?.(conn, msg);
+      } catch (e) {
+        deps.logger?.log("gateway-handler-error", { bot: botId(conn), error: String(e) });
+      }
     }
   }
+}
+
+/** Log a poll loop that died, naming its bot by id — never the token, since the host log is served by the dashboard. */
+export function logPollLoopError(log: Logger, conn: TgConn, e: unknown): void {
+  log.log("gateway-poll-error", { bot: botId(conn), error: String(e) });
 }
 
 /**
@@ -796,16 +810,21 @@ export async function pollLoop(conn: TgConn, index: ReplyIndex, pending: Pending
  * not already running, and aborts the loop for every token that vanished — so a
  * rotated or newly-registered bot is polled without a restart, and a token a
  * project rotated away from or deregistered stops being polled. A token present
- * across passes keeps its one loop, so its update offset is preserved. `targets`,
+ * across passes keeps its one loop, so its update offset is preserved. A loop that
+ * ends on its own (resolves or rejects) is dropped, so the next pass restarts it
+ * from the offset it reached rather than leaving the bot deaf. `targets`,
  * `start`, and `tick` are injected; the real daemon reads targets live and `tick`
  * sleeps one reconcile interval (never returning false, so it supervises forever).
  */
 export async function supervisePolls(
   targets: () => TgConn[],
-  start: (conn: TgConn, signal: AbortSignal) => void,
+  start: (conn: TgConn, signal: AbortSignal, offset: number) => Promise<number>,
   tick: () => Promise<boolean>,
 ): Promise<void> {
   const active = new Map<string, AbortController>();
+  // The update offset each token's loop last reached, handed to its next loop so a
+  // restart resumes past what its predecessor already routed. Offsets only grow.
+  const offsets = new Map<string, number>();
   do {
     const { start: toStart, stop: toStop } = reconcilePollTargets(active.keys(), targets());
     for (const token of toStop) {
@@ -815,7 +834,14 @@ export async function supervisePolls(
     for (const conn of toStart) {
       const controller = new AbortController();
       active.set(conn.token, controller);
-      start(conn, controller.signal);
+      // A loop that ends on its own leaves `active`, so the next pass restarts it.
+      const ended = () => {
+        if (active.get(conn.token) === controller) active.delete(conn.token);
+      };
+      start(conn, controller.signal, offsets.get(conn.token) ?? 0).then((reached) => {
+        offsets.set(conn.token, Math.max(offsets.get(conn.token) ?? 0, reached));
+        ended();
+      }, ended);
     }
   } while (await tick());
 }
@@ -1125,37 +1151,47 @@ export async function gateway(configDir: string = gatewayConfigDir()): Promise<v
   // token vanished. Each loop reads its send connection fresh from the token the
   // supervisor handed it, so a rotated token's replies and in-loop sends both ride
   // the live connection rather than the one captured at startup.
-  const startPollLoop = (conn: TgConn, signal: AbortSignal) => {
+  const startPollLoop = (conn: TgConn, signal: AbortSignal, offset: number) => {
     const backoff = newPollBackoff();
-    pollLoop(conn, index, pending, {
-      poll: trackPollTicks(ticks, conn, signal, (c, o) => tgPoll(c, o, log, backoff)),
-      resume: (ref, text) => spawnResume(ref, text, log),
-      onStatus: async (c) => {
-        // Reconstruct each served project's campaign from its base location (the same
-        // read the dashboard does) so the summary carries state, wave in flight and
-        // per-state counts — not just the parked queue. Filtered to the replying bot.
-        const served = loadGatewayProjects(configDir).filter((p) => p.conn?.token === c.token);
-        const pointers = served.map((p) => ({ project: p.project, projectRoot: p.projectRoot, baseLocation: p.baseLocation }));
-        await tgSend(c, formatGatewayStatus(buildAllStatus(pointers, log, configDir)));
-      },
-      onPrune: (c, command) =>
-        handlePruneCommand(
-          { candidates: () => pruneCandidates(configDir), preview: (t) => prunePreview(t, log), send: tgSend },
-          pending,
-          c,
-          command,
-        ),
-      onConfirm: (confirm) => spawnPrune(confirm, log),
-      onUnrouted: async (c, msg) => {
-        // Only answer a genuine misdirected reply; stay quiet for plain chatter.
-        if (msg.replyToId != null)
-          await tgSend(
+    return pollLoop(
+      conn,
+      index,
+      pending,
+      {
+        poll: trackPollTicks(ticks, conn, signal, (c, o) => tgPoll(c, o, log, backoff)),
+        resume: (ref, text) => spawnResume(ref, text, log),
+        onStatus: async (c) => {
+          // Reconstruct each served project's campaign from its base location (the same
+          // read the dashboard does) so the summary carries state, wave in flight and
+          // per-state counts — not just the parked queue. Filtered to the replying bot.
+          const served = loadGatewayProjects(configDir).filter((p) => p.conn?.token === c.token);
+          const pointers = served.map((p) => ({ project: p.project, projectRoot: p.projectRoot, baseLocation: p.baseLocation }));
+          await tgSend(c, formatGatewayStatus(buildAllStatus(pointers, log, configDir)));
+        },
+        onPrune: (c, command) =>
+          handlePruneCommand(
+            { candidates: () => pruneCandidates(configDir), preview: (t) => prunePreview(t, log), send: tgSend },
+            pending,
             c,
-            "That question isn't tracked anymore (already answered, or from before I started). Reply to a current question message.",
-          );
+            command,
+          ),
+        onConfirm: (confirm) => spawnPrune(confirm, log),
+        onUnrouted: async (c, msg) => {
+          // Only answer a genuine misdirected reply; stay quiet for plain chatter.
+          if (msg.replyToId != null)
+            await tgSend(
+              c,
+              "That question isn't tracked anymore (already answered, or from before I started). Reply to a current question message.",
+            );
+        },
+        signal,
+        logger: log,
       },
-      signal,
-    }).catch((e) => log.log("gateway-poll-error", { token: conn.token, error: String(e) }));
+      offset,
+    ).catch((e) => {
+      logPollLoopError(log, conn, e);
+      throw e;
+    });
   };
 
   const polling = supervisePolls(

@@ -217,6 +217,13 @@ no one path; the default reads the `Touches:`/`Creates:` line) so co-[[wave]]
 issues stay file-disjoint.
 _Avoid_: file matcher, crossover detector.
 
+**Waived file** (`waivedFiles`):
+A file named in the project's `waivedFiles` config that co-[[wave]] issues may
+both edit — a large, sectioned doc most issues update. Issues still cite it on
+`Touches:`; the planner leaves it out of its collision checks and names it in the
+plan, and integration catches the rare real conflict.
+_Avoid_: shared file, exempt file, ignored file.
+
 **Under-specified ticket**:
 An [[issue]] whose file-set resolves `confident: false` — cites nothing, or cites
 what the tree lacks. The planner never schedules it silently: it halts and asks to

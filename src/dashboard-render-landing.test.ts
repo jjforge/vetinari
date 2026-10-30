@@ -523,3 +523,16 @@ test("the repo dropdown's All-repos row uses the teal accent dot and the repo co
   // The teal accent is the product accent, so the `all` dot reads --color-primary.
   assert.match(landing, /\.repo-dot\.all \{ background: var\(--color-primary\); \}/);
 });
+test("renderLandingShell escapes < in the inlined feedRepoLabels JSON so a name cannot close the script", () => {
+  const project = "x</script><b>";
+  const repo = "o/r</script><i>";
+  const html = renderLandingShell([{ project, repo, runState: "idle" }]);
+  const pageOwn = (renderLandingShell(["alpha"]).match(/<\/script>/g) ?? []).length;
+
+  // The only </script> left are the page's own closing tags.
+  assert.equal((html.match(/<\/script>/g) ?? []).length, pageOwn);
+  // The emitted literal still evaluates to the original strings.
+  const literal = html.match(/const feedRepoLabels = (.*);\n/)?.[1];
+  assert.ok(literal);
+  assert.deepEqual(JSON.parse(literal), { [project]: repo });
+});

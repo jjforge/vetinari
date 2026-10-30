@@ -70,6 +70,9 @@ Within a milestone each bold section label appears at most once.
 - [api] `src/github.ts` exports `withRetry` and `GH_LIMITS`; `gh` takes optional `execFile` limits, and `githubTracker` takes an optional 4th `sleep` argument for tests (#560).
 - [user] A parked member that later merges — a conflict-parked green landing on a redrive, or one recognised as already on the base — now has its parked record cleared, so `vetinari parked` no longer lists it indefinitely (#558).
 - [user] `vetinari clear` now points at `vetinari tidy --apply` to drop records whose issue already merged, instead of `prune --purge` (which refuses with no campaign running); `--help` no longer claims `clear` clears parked records (#558).
+- [user] Two campaigns can no longer start on one project when launches race — two Telegram answers in one batch, a double-submitted Redrive, or a redrive racing an answer. Taking the campaign lease now refuses a second live campaign for the project under the host lock; a `redrive`, `campaign --resume` or `answer` that loses the race reports the same line its early check gives (and leaves the live campaign's log unarchived), and a fresh `campaign` is refused (exit 4) (#527).
+- [user] After a pruned wave, the status line, chat `/status` and gateway `/status` now give a wave the same number the dashboard and event log do — e.g. `wave 2/2`, not `wave 1/1` (#552).
+- [user] The mount-parent ownership check at the start of `campaign`/`redrive`/`run`/`baseline` no longer hangs the command when Docker does not answer (it gives up after 30 seconds and the command proceeds) and never pulls the image from a registry — an image missing locally skips the check (#554).
 
 **Security:**
 - [user] The dashboard caps every POST body (answer, graft, prune, redrive, stop) at 64 KiB and answers a larger one with a plain `413` instead of reading it without limit (#564).

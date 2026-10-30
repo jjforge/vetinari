@@ -5,7 +5,10 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { formatContextLine, formatStatusLine, trimModelName } from "./statusline.ts";
+import type { ResolvedConfig } from "./config.ts";
+import { event } from "./event-log.ts";
+import { registerProject } from "./host-slots.ts";
+import { campaignStatusLine, formatContextLine, formatStatusLine, trimModelName } from "./statusline.ts";
 
 test("formatStatusLine summarizes the running wave and status counts on one line", () => {
   const line = formatStatusLine({
@@ -247,4 +250,63 @@ test("statusline exits 0 and falls back to its own line 1 when the wrapped base 
   const run = runStatuslineCli(`{"model":{"display_name":"Opus"}}`, { args: ["--base-b64", base] });
   assert.equal(run.status, 0, run.stderr);
   assert.equal(run.stdout.split("\n")[0], "Opus");
+});
+
+// Line 2 off a real log: a `parked` question then `answered` for 801, with 802 still running.
+const answeredParkCfg = (): { cfg: ResolvedConfig; configDir: string } => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-statusline-answered-"));
+  mkdirSync(join(dir, "logs"), { recursive: true });
+  mkdirSync(join(dir, "parked"), { recursive: true });
+  const events = [
+    event("campaign-start", { ts: "2026-09-02T04:00:00.000Z", waves: [["801", "802"], ["803"]], slots: 2 }),
+    event("wave-start", { ts: "2026-09-02T04:01:00.000Z", index: 0, tasks: ["801", "802"] }),
+    event("spawn", { ts: "2026-09-02T04:02:00.000Z", taskId: "801", running: 1, left: 1 }),
+    event("spawn", { ts: "2026-09-02T04:02:01.000Z", taskId: "802", running: 2, left: 0 }),
+    event("parked", { ts: "2026-09-02T04:10:00.000Z", taskId: "801", reason: "question", detail: "Which?" }),
+    event("answered", { ts: "2026-09-02T04:20:00.000Z", taskId: "801", source: "ui" }),
+  ];
+  writeFileSync(join(dir, "logs", "orchestrator.jsonl"), events.map((e) => JSON.stringify(e)).join("\n") + "\n");
+  writeFileSync(
+    join(dir, "parked", "801.json"),
+    JSON.stringify({
+      taskId: "801",
+      parkedAt: "2026-09-02T04:10:00.000Z",
+      reason: "question",
+      branch: "agent/801",
+      question: "Which?",
+      answer: "Redis",
+      answeredAt: "2026-09-02T04:20:00.000Z",
+    }),
+  );
+  const cfg = {
+    project: "demo",
+    stateDir: dir,
+    parkedDir: join(dir, "parked"),
+    logFile: join(dir, "logs", "orchestrator.jsonl"),
+  } as ResolvedConfig;
+  return { cfg, configDir: join(dir, "gw-home") };
+};
+
+test("campaignStatusLine reads an answered park as running while a live campaign owns its re-admit", () => {
+  const { cfg, configDir } = answeredParkCfg();
+  registerProject(configDir, cfg.project, 1, "campaign", 0, { pid: process.pid });
+
+  const line = campaignStatusLine(cfg, configDir);
+  assert.match(line, /🔄2/);
+  assert.doesNotMatch(line, /⏸/);
+  assert.doesNotMatch(line, /question/);
+});
+
+test("campaignStatusLine keeps an answered park parked, and a running issue running, with no live campaign lease", () => {
+  const { cfg, configDir } = answeredParkCfg();
+
+  // `alive` is left undefined, never `false`: 802 still reads 🔄, not crash-folded to parked.
+  assert.equal(campaignStatusLine(cfg, configDir), "🏰 🔄1 ⏸1 ⚪1 · question");
+});
+
+test("campaignStatusLine does not count a standalone run's lease as a live campaign", () => {
+  const { cfg, configDir } = answeredParkCfg();
+  registerProject(configDir, cfg.project, 1, "run", 0, { pid: process.pid });
+
+  assert.equal(campaignStatusLine(cfg, configDir), "🏰 🔄1 ⏸1 ⚪1 · question");
 });

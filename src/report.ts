@@ -94,8 +94,11 @@ export function waveTimeSplit(events: OrchestratorEvent[]): WaveTimeSplit {
     split.branchGates = slowest.gates;
   }
   const baseGate = events.findLast((e) => e.event === "base-gate");
-  if (baseGate && tasks.length && greens.every((g) => g !== undefined))
-    split.integration = tsSeconds(baseGate) - Math.max(...greens.map((g) => tsSeconds(g!)));
+  if (baseGate && tasks.length && greens.every((g) => g !== undefined)) {
+    // A base gate logged before the last green gated an earlier pass, not this one.
+    const integration = tsSeconds(baseGate) - Math.max(...greens.map((g) => tsSeconds(g!)));
+    if (integration >= 0) split.integration = integration;
+  }
   if (baseGate && done?.event === "wave-done") split.postMerge = tsSeconds(done) - tsSeconds(baseGate);
   return split;
 }

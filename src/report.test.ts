@@ -320,3 +320,12 @@ test("formatBaseGateEstimate says there is no history, and prints no number, whe
   assert.equal(line, "base gates: no estimate — no merged-base gate in this project's history yet");
   assert.doesNotMatch(line, /\d/);
 });
+
+test("waveTimeSplit leaves integration undefined when the wave's base gate came before its last green", () => {
+  const regreened = [
+    ...twoMemberWave.slice(0, -1),
+    at(495, "green", { taskId: "102", branch: "agent/102", commits: [] }),
+    twoMemberWave.at(-1)!,
+  ];
+  assert.equal(waveTimeSplit(regreened).integration, undefined);
+});

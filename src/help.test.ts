@@ -106,6 +106,11 @@ test("renderUsage shows every mode's signature — --help is produced from MODES
   for (const m of MODES) assert.ok(usage.includes(m.signature), `--help is missing the "${m.signature}" mode`);
 });
 
+test("--help says the global --config option goes before the mode — it is ignored after it (#524)", () => {
+  assert.match(renderUsage(), /vetinari --config <path> <mode>/);
+  assert.match(renderUsage(), /before the mode/);
+});
+
 test("clear's entry says it keeps parked records — it never clears them (design §2.5)", () => {
   const clear = MODES.find((m) => m.signature === "clear")!;
   assert.match(clear.blurb, /parked records are kept/);

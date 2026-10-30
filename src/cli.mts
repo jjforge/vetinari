@@ -120,11 +120,13 @@ async function ask(question: string): Promise<string> {
   }
 }
 
+// `--config <path>` is `import()`ed, so it is honoured only before the mode (#524): after
+// the mode it is just another token for the mode's own parsing, so text a dashboard route
+// forwards into a child's argv can never name a module to import.
 const argv = process.argv.slice(2);
-const cfgIdx = argv.indexOf("--config");
-const cfgPath = cfgIdx >= 0 ? argv[cfgIdx + 1] : undefined;
-if (cfgIdx >= 0) argv.splice(cfgIdx, 2);
-const [mode, ...rest] = argv;
+const hasCfg = argv[0] === "--config";
+const cfgPath = hasCfg ? argv[1] : undefined;
+const [mode, ...rest] = hasCfg ? argv.slice(2) : argv;
 
 // Help is not a refusal (ADR: CLI exit codes): `--help`/`-h`/`help` print usage on
 // stdout and exit 0. Handled here, before config load, so help works outside a project.

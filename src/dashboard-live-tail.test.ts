@@ -2,8 +2,11 @@
 // machine-noise filter (dashboard-live-tail.ts). `buildLiveTail` is tested in live-tail.test.ts.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { appendedEvents, viewRelevantEvents } from "./dashboard-live-tail.ts";
-import { event, type OrchestratorEvent } from "./event-log.ts";
+import { event, readEventLog, type OrchestratorEvent } from "./event-log.ts";
 
 // A raw orchestrator-log row of a kind the dashboard does not narrate — the machine
 // noise `readEventLog` carries as a cast-and-trusted `OrchestratorEvent` (event-log.ts).
@@ -68,6 +71,35 @@ test("appendedEvents skips an unparseable line the way readEventLog does", () =>
     events.map((e) => e.event),
     ["spawn"],
   );
+});
+
+// What `readEventLog` — the single parse site — returns for the same text, read off a real file.
+function readEventLogOf(content: string): OrchestratorEvent[] {
+  const dir = mkdtempSync(join(tmpdir(), "live-tail-"));
+  const logFile = join(dir, "orchestrator.jsonl");
+  writeFileSync(logFile, content);
+  try {
+    return readEventLog({ logFile });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("appendedEvents translates a legacy row exactly as readEventLog does", () => {
+  const log = '{"event":"parked","reason":"blocked","taskId":"1"}\n';
+  const { events } = appendedEvents(log, 0);
+  assert.equal((events[0] as { reason?: string }).reason, "question");
+  assert.deepEqual(events, readEventLogOf(log));
+});
+
+test("appendedEvents fans out a legacy row into the same multiple rows readEventLog does", () => {
+  const log = '{"ts":"2026-01-01T00:00:00Z","event":"queue-start","taskIds":["1","2"]}\n';
+  const { events } = appendedEvents(log, 0);
+  assert.deepEqual(
+    events.map((e) => e.event),
+    ["spawn", "spawn"],
+  );
+  assert.deepEqual(events, readEventLogOf(log));
 });
 
 test("viewRelevantEvents drops known machine-noise the live view never shows, fail-open on the rest (#131)", () => {

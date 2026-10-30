@@ -1099,6 +1099,27 @@ test("the repeat-offender count starts at the latest campaign-start — an earli
   assert.equal(repeatNotices().length, 1);
 });
 
+test("the repeat-offender count is distinct runs — several sightings from one task count once", async () => {
+  const tr = fakeTracker([{ ref: "42", title: "make fmt fails in the agent container: gofumpt sumdb check" }]);
+  const cfg = harnessCfg(tr);
+  const repeatNotices = () => listOutbox(cfg).filter((m) => m.category === "finding" && /root cause/.test(m.text));
+  cfg.log.log("campaign-start", { waves: [["T-1", "T-2", "T-3"]], slots: 3 });
+  for (let i = 0; i < 3; i++) cfg.log.log("finding-seen-again", { taskId: "T-0", summary: "make fmt fails", url: "42" });
+
+  await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(greenThen(ENV_FAILURE))));
+  assert.equal(repeatNotices().length, 0, "four sightings across two runs are not yet a pattern");
+
+  await silence(() => runLoop(cfg, "T-2", undefined, undefined, depsFor(greenThen(ENV_FAILURE))));
+  const notices = repeatNotices();
+  assert.equal(notices.length, 1, "the third distinct run sends the notice");
+  assert.match(notices[0].text, /#42 seen again in 3 runs — fix the root cause/);
+
+  await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(greenThen(ENV_FAILURE))));
+  assert.equal(repeatNotices().length, 1, "a run already counted sends no second notice");
+  await silence(() => runLoop(cfg, "T-3", undefined, undefined, depsFor(greenThen(ENV_FAILURE))));
+  assert.equal(repeatNotices().length, 1, "a fourth run sends no second notice");
+});
+
 test("findings below the severity floor or over the per-run cap go into one digest comment on the run's issue", async () => {
   const tr = fakeTracker();
   const cfg = harnessCfg({ ...tr, maxFindingsPerRun: 1 });

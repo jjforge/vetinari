@@ -24,6 +24,7 @@ import { strandedByConflict, resumeIndex, type StrandedImpact } from "./prune.ts
 import { normalize } from "./issue-id.ts";
 import { notice, type Notice } from "./notice.ts";
 import { Refusal } from "./refusal.ts";
+import { gitRead } from "./git-read.ts";
 import { tgSend, tgWaitReply, type TgConn } from "./telegram.ts";
 import { hostSecretsPath, tgConnForBaseLocation } from "./registry.ts";
 import { issueNameFromTask, readEventLog, reduceCampaign } from "./status.ts";
@@ -343,7 +344,7 @@ export function readImageFreshness(image: string, dockerfile: string): ImageFres
   return {
     imageCreated: read(() => execFileSync("docker", ["image", "inspect", "--format", "{{.Created}}", image], quiet)),
     dockerfileModified: read(() => statSync(dockerfile).mtime),
-    dockerfileCommitted: read(() => execFileSync("git", ["log", "-1", "--format=%cI", "--", dockerfile], quiet)),
+    dockerfileCommitted: read(() => gitRead(["log", "-1", "--format=%cI", "--", dockerfile], { stdio: quiet.stdio })),
   };
 }
 

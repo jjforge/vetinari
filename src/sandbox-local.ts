@@ -2,6 +2,7 @@ import { execFileSync, execSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
+import { gitRead } from "./git-read.ts";
 import type { Sandbox, SandboxRunOptions, SandboxRunResult } from "./sandbox.ts";
 
 /**
@@ -17,16 +18,17 @@ import type { Sandbox, SandboxRunOptions, SandboxRunResult } from "./sandbox.ts"
  * gate, the on-disk event log) is exercised, not stubbed.
  */
 
-/** Run git in `dir`, returning trimmed stdout (throws its stderr on a non-zero exit). */
+/** Run git in `dir`, returning trimmed stdout (throws its stderr on a non-zero exit). Uncapped: it serves the writes. */
 const gitIn = (dir: string, args: string[]): string =>
   execFileSync("git", ["-C", dir, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+
+/** `gitIn` for a read-only git call, capped by `GIT_READ_LIMITS`. */
+const gitReadIn = (dir: string, args: string[]): string => gitRead(["-C", dir, ...args], { stdio: ["ignore", "pipe", "pipe"] }).trim();
 
 /** Does `branch` already exist in `dir`? True when a run re-enters a branch it left behind. */
 const branchExists = (dir: string, branch: string): boolean => {
   try {
-    execFileSync("git", ["-C", dir, "rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], {
-      stdio: ["ignore", "ignore", "ignore"],
-    });
+    gitRead(["-C", dir, "rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], { stdio: ["ignore", "ignore", "ignore"] });
     return true;
   } catch {
     return false;
@@ -115,7 +117,7 @@ export async function makeLocalSandbox(cfg: ResolvedConfig, taskId: string, scri
     branch,
     async run(opts: SandboxRunOptions): Promise<SandboxRunResult> {
       turn++;
-      const before = gitIn(worktreeDir, ["rev-parse", "HEAD"]);
+      const before = gitReadIn(worktreeDir, ["rev-parse", "HEAD"]);
       const result = await script({
         taskId,
         branch,
@@ -132,15 +134,15 @@ export async function makeLocalSandbox(cfg: ResolvedConfig, taskId: string, scri
           // dirty paths are the ones this turn produced — never an operator's checkout.
           gitIn(worktreeDir, ["add", "-A"]);
           gitIn(worktreeDir, ["commit", "-qm", message]);
-          return gitIn(worktreeDir, ["rev-parse", "HEAD"]);
+          return gitReadIn(worktreeDir, ["rev-parse", "HEAD"]);
         },
       });
-      const after = gitIn(worktreeDir, ["rev-parse", "HEAD"]);
+      const after = gitReadIn(worktreeDir, ["rev-parse", "HEAD"]);
       // The commits this turn landed, oldest-first — what the loop logs and gates on.
       const commits =
         after === before
           ? []
-          : gitIn(worktreeDir, ["rev-list", "--reverse", `${before}..HEAD`])
+          : gitReadIn(worktreeDir, ["rev-list", "--reverse", `${before}..HEAD`])
               .split("\n")
               .filter(Boolean)
               .map((sha) => ({ sha }));

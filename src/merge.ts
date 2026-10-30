@@ -11,16 +11,37 @@ import { readEventLog } from "./event-log.ts";
 import { reduceCampaign } from "./dashboard-model.ts";
 import type { PointerDrop } from "./registry.ts";
 import { normalize } from "./issue-id.ts";
+import { gitRead } from "./git-read.ts";
 
-/** Run git in the host project root, throwing its stderr on a non-zero exit. */
-const git = (args: string[]) => execFileSync("git", args, { encoding: "utf8" }).trim();
+/** Run a read-only git command in the host project root, throwing its stderr on a non-zero exit. */
+const git = (args: string[]) => gitRead(args).trim();
 
-/** Run git without throwing — the caller decides what a non-zero exit means. */
-function gitTry(args: string[]): { code: number; stdout: string; stderr: string } {
+type GitTryResult = { code: number; stdout: string; stderr: string };
+const gitTryFailure = (e: any): GitTryResult => ({
+  code: e.status ?? 1,
+  stdout: String(e.stdout ?? ""),
+  stderr: String(e.stderr ?? e.message ?? ""),
+});
+
+/**
+ * Run git without throwing — the caller decides what a non-zero exit means. Uncapped:
+ * it serves the writes (merge, branch -D, worktree prune/remove), and killing one
+ * mid-write can leave the index locked. Read-only calls use `gitTryRead`.
+ */
+function gitTry(args: string[]): GitTryResult {
   try {
     return { code: 0, stdout: execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), stderr: "" };
   } catch (e: any) {
-    return { code: e.status ?? 1, stdout: String(e.stdout ?? ""), stderr: String(e.stderr ?? e.message ?? "") };
+    return gitTryFailure(e);
+  }
+}
+
+/** `gitTry` for a read-only git call, capped by `GIT_READ_LIMITS` — a timeout returns a non-zero `code`. */
+function gitTryRead(args: string[]): GitTryResult {
+  try {
+    return { code: 0, stdout: gitRead(args, { stdio: ["ignore", "pipe", "pipe"] }), stderr: "" };
+  } catch (e: any) {
+    return gitTryFailure(e);
   }
 }
 
@@ -33,8 +54,8 @@ export const currentBranch = () => git(["rev-parse", "--abbrev-ref", "HEAD"]);
  * Lets `integrateGreens` skip banked greens on a redrive re-entry (design §7).
  */
 function branchAlreadyMerged(branch: string): boolean {
-  if (gitTry(["rev-parse", "--verify", "--quiet", branch]).code !== 0) return true;
-  return gitTry(["merge-base", "--is-ancestor", branch, "HEAD"]).code === 0;
+  if (gitTryRead(["rev-parse", "--verify", "--quiet", branch]).code !== 0) return true;
+  return gitTryRead(["merge-base", "--is-ancestor", branch, "HEAD"]).code === 0;
 }
 
 /**
@@ -46,7 +67,7 @@ function branchAlreadyMerged(branch: string): boolean {
  */
 export function branchHasCommits(cfg: { baseBranch: string; branchPrefix: string }, taskId: string): boolean {
   const branch = `${cfg.branchPrefix}${taskId}`;
-  const r = gitTry(["rev-list", "--count", `${cfg.baseBranch}..${branch}`]);
+  const r = gitTryRead(["rev-list", "--count", `${cfg.baseBranch}..${branch}`]);
   return r.code === 0 && Number(r.stdout.trim()) > 0;
 }
 
@@ -61,7 +82,7 @@ export function branchHasCommits(cfg: { baseBranch: string; branchPrefix: string
  */
 export function findMergeCommit(cfg: { baseBranch: string; branchPrefix: string }, taskId: string): string | undefined {
   const subject = `campaign: merge ${cfg.branchPrefix}${taskId}`;
-  const r = gitTry(["log", cfg.baseBranch, "--fixed-strings", `--grep=${subject}`, "--format=%h %s", "--"]);
+  const r = gitTryRead(["log", cfg.baseBranch, "--fixed-strings", `--grep=${subject}`, "--format=%h %s", "--"]);
   if (r.code !== 0) return undefined;
   for (const line of r.stdout.split("\n")) {
     const space = line.indexOf(" ");
@@ -207,8 +228,8 @@ export async function integrateGreens(
       // The unmerged paths are read BEFORE the abort, which clears them: they are what tells a real
       // conflict (the agent can resolve it) from any other failed merge (it cannot).
       const detail = `${r.stdout}\n${r.stderr}`.trim().split("\n").slice(-12).join("\n");
-      const paths = gitTry(["diff", "--name-only", "--diff-filter=U"]).stdout.split("\n").filter(Boolean);
-      if (gitTry(["rev-parse", "-q", "--verify", "MERGE_HEAD"]).code === 0) gitTry(["merge", "--abort"]);
+      const paths = gitTryRead(["diff", "--name-only", "--diff-filter=U"]).stdout.split("\n").filter(Boolean);
+      if (gitTryRead(["rev-parse", "-q", "--verify", "MERGE_HEAD"]).code === 0) gitTry(["merge", "--abort"]);
       if (paths.length) {
         collided.push({ taskId, paths, detail });
       } else {
@@ -307,7 +328,7 @@ export function collectWaveChangelog(
   for (const name of collected) {
     const path = join(FRAGMENT_DIR, name);
     gitTry(["-C", root, "add", "-A", "--", path]);
-    if (gitTry(["-C", root, "cat-file", "-e", `HEAD:${path}`]).code === 0) staged.push(path);
+    if (gitTryRead(["-C", root, "cat-file", "-e", `HEAD:${path}`]).code === 0) staged.push(path);
   }
   // Commit only those paths: a bare `git commit` would also take anything the operator
   // had already staged (#459). With a pathspec, their index entries are left staged.
@@ -457,7 +478,7 @@ export interface TidyTarget {
 
 /** Every `agent/<id>` head present, paired with whether it is fully merged into the base. */
 function scanBranches(root: string, baseBranch: string, branchPrefix: string): TidyBranch[] {
-  const listed = gitTry(["-C", root, "for-each-ref", "--format=%(refname:short)", `refs/heads/${branchPrefix}*`]);
+  const listed = gitTryRead(["-C", root, "for-each-ref", "--format=%(refname:short)", `refs/heads/${branchPrefix}*`]);
   return listed.stdout
     .split("\n")
     .map((l) => l.trim())
@@ -466,7 +487,7 @@ function scanBranches(root: string, baseBranch: string, branchPrefix: string): T
       id: branch.slice(branchPrefix.length),
       // `merge-base --is-ancestor <branch> <base>` exits 0 iff every commit on the
       // branch is already in the base — the provable-reachability rule (ADR 0013).
-      reachable: gitTry(["-C", root, "merge-base", "--is-ancestor", branch, baseBranch]).code === 0,
+      reachable: gitTryRead(["-C", root, "merge-base", "--is-ancestor", branch, baseBranch]).code === 0,
     }));
 }
 
@@ -563,7 +584,7 @@ export interface BranchPurge {
 export function describeBranchPurge(target: PurgeTarget, ids: string[]): BranchPurge[] {
   return ids.map((id) => {
     const branch = `${target.branchPrefix}${id}`;
-    const r = gitTry(["-C", target.root, "rev-list", "--count", `${target.baseBranch}..${branch}`]);
+    const r = gitTryRead(["-C", target.root, "rev-list", "--count", `${target.baseBranch}..${branch}`]);
     return {
       id,
       branch,
@@ -604,7 +625,7 @@ export function describeRegistryDedup(drops: PointerDrop[]): string {
 
 /** The path of the worktree checked out on `branch`, or undefined when none is. */
 function worktreePathFor(root: string, branch: string): string | undefined {
-  const porcelain = gitTry(["-C", root, "worktree", "list", "--porcelain"]).stdout;
+  const porcelain = gitTryRead(["-C", root, "worktree", "list", "--porcelain"]).stdout;
   // Blocks are separated by blank lines: `worktree <path>` … `branch refs/heads/<name>`.
   for (const block of porcelain.split("\n\n")) {
     const p = block.match(/^worktree (.+)$/m)?.[1];

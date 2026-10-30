@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { basename, dirname, resolve } from "node:path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -7,6 +6,7 @@ import type { FindingReporter, Severity } from "./findings.ts";
 import type { FileSetOf } from "./fileset.ts";
 import { loggerForRun, type Logger } from "./log.ts";
 import { Refusal } from "./refusal.ts";
+import { gitRead } from "./git-read.ts";
 
 /**
  * The four fixed categories a piece of outbound communication carries, used to
@@ -603,10 +603,7 @@ export function defineConfig(c: VetinariConfig): VetinariConfig {
 export function resolveProjectRoot(cwd: string = process.cwd()): string {
   let commonDir: string;
   try {
-    commonDir = execFileSync("git", ["-C", cwd, "rev-parse", "--git-common-dir"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
+    commonDir = gitRead(["-C", cwd, "rev-parse", "--git-common-dir"], { stdio: ["ignore", "pipe", "ignore"] }).trim();
   } catch {
     throw new Refusal(`not a git repository: ${cwd} — run this from inside your project's checkout.`);
   }
@@ -639,10 +636,7 @@ export function ownerRepoFromRemote(url: string): string | undefined {
  */
 export function repoForProject(projectRoot: string): string | undefined {
   try {
-    const url = execFileSync("git", ["-C", projectRoot, "remote", "get-url", "origin"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
+    const url = gitRead(["-C", projectRoot, "remote", "get-url", "origin"], { stdio: ["ignore", "pipe", "ignore"] });
     return ownerRepoFromRemote(url);
   } catch {
     return undefined;

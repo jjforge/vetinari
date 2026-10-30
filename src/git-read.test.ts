@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { GIT_READ_LIMITS, gitRead } from "./git-read.ts";
 import { seedRepo } from "./test-support.ts";
+import { repoForProject, resolveProjectRoot } from "./config.ts";
+import { Refusal } from "./refusal.ts";
 
 /** Run `body` with an executable `git` (a shell script) at the front of `PATH`, restoring it after. */
 function withStubGit<T>(script: string, body: () => T): T {
@@ -39,4 +41,12 @@ test("gitRead kills and throws on a read that runs past its timeout", () => {
   const started = Date.now();
   assert.throws(() => withStubGit("exec sleep 10", () => gitRead([], { limits: { ...GIT_READ_LIMITS, timeout: 200 } })));
   assert.ok(Date.now() - started < 5_000, `took ${Date.now() - started} ms`);
+});
+
+test("a failing git read keeps each call site's failure handling: repoForProject degrades, resolveProjectRoot refuses", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-git-read-site-"));
+  withStubGit("exit 1", () => {
+    assert.equal(repoForProject(dir), undefined);
+    assert.throws(() => resolveProjectRoot(dir), Refusal);
+  });
 });

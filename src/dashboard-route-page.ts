@@ -8,7 +8,6 @@ import {
   festiveFromCookie,
   listArchivedRuns,
   logFileOf,
-  repoForProject,
   selectStatus,
 } from "./dashboard-model.ts";
 import { renderLandingShell, renderStatusPage } from "./dashboard-render.ts";
@@ -26,17 +25,18 @@ import type { RouteHandler } from "./dashboard-http.ts";
  * The archived body resolves the token by matching the listing, never by joining
  * request input into a path, so an unknown token is rejected.
  */
-export const handlePage: RouteHandler = (req, res, url, deps) => {
+export const handlePage: RouteHandler = async (req, res, url, deps) => {
   if (!(req.method === "GET" && (url.pathname === "/" || req.url === undefined))) return false;
   res.setHeader("content-type", "text/html; charset=utf-8");
   const pointers = listProjects(deps.configDir);
   const statuses = buildAllStatus(pointers, undefined, deps.configDir);
   // The repo dropdown, on both pages, is one option per registered project carrying
   // its rolled-up run state (ADR 0007) so each menu row can dot + note it, and its
-  // owner/name (from the git remote) so it reads that instead of the bare key.
+  // owner/name (captured at registration — no git call per request) so it reads that
+  // instead of the bare key.
   const repos = statuses.map((s) => {
     const pointer = pointers.find((p) => p.project === s.project);
-    return { project: s.project, runState: cardState(s), repo: pointer ? repoForProject(pointer.projectRoot) : undefined };
+    return { project: s.project, runState: cardState(s), repo: pointer?.repo };
   });
   // No project selected → the all-repos landing shell. Also the empty-registry
   // fallback, so a fresh host lands on the (empty) landing rather than a stub page.
@@ -73,6 +73,7 @@ export const handlePage: RouteHandler = (req, res, url, deps) => {
   // runs on every landing render and live-tail flush and must not re-read every archive).
   const gateLogs = pointer ? readSlowGateLogs(pointer.baseLocation, logFileOf(pointer.baseLocation)) : undefined;
   const slowGates = gateLogs && latestCampaignSlowGates(gateLogs.archives, gateLogs.live);
+  const baseBranch = pointer ? await baseBranchForProject(pointer.projectRoot) : undefined;
   res.end(
     renderStatusPage(selected, {
       projects: repos,
@@ -83,7 +84,7 @@ export const handlePage: RouteHandler = (req, res, url, deps) => {
       archivedRun: match?.run,
       festive: festiveFromCookie(req.headers.cookie),
       leaseLive,
-      baseBranch: pointer ? baseBranchForProject(pointer.projectRoot) : undefined,
+      baseBranch,
       slowGates,
     }),
   );

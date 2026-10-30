@@ -3,12 +3,14 @@
 // (dashboard-status.ts).
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import {
   archiveStatusConfig,
+  baseBranchForProject,
   buildAllStatus,
   buildStatus,
   buildStatusWithIssueNames,
@@ -1141,4 +1143,21 @@ test("buildStatus carries the stop pending flag off the event log (#432)", () =>
   assert.equal(buildStatus(cfgFor(dir)).stopPending, false);
   seedState(dir, [start, wave, event("stop-requested", { index: 0 })]);
   assert.equal(buildStatus(cfgFor(dir)).stopPending, true);
+});
+
+test("baseBranchForProject resolves the checkout's branch asynchronously, and undefined off a branch", async () => {
+  const root = mkdtempSync(join(tmpdir(), "vetinari-base-branch-"));
+  const git = (...args: string[]) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8" });
+  // A non-repo root → undefined, and the read is a Promise (off the event loop).
+  const pending = baseBranchForProject(root);
+  assert.ok(pending instanceof Promise);
+  assert.equal(await pending, undefined);
+
+  git("init", "-q", "-b", "trunk");
+  git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "one");
+  assert.equal(await baseBranchForProject(root), "trunk");
+
+  // A detached HEAD reads as `HEAD` → undefined, so the dialog never names a broken value.
+  git("checkout", "-q", "--detach");
+  assert.equal(await baseBranchForProject(root), undefined);
 });

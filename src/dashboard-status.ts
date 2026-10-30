@@ -1,4 +1,5 @@
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type ResolvedConfig } from "./config.ts";
@@ -23,21 +24,26 @@ import {
   waveState,
 } from "./dashboard-lifecycle.ts";
 
+const execFileAsync = promisify(execFile);
+
 /**
  * The base branch a redrive would land on, read live from the project checkout's current
  * branch (design §7, §11) — the impure git edge the Redrive confirm dialog names. The dumb
  * router (ADR 0002) holds no project config to read `baseBranch` from, so it reads the tree:
  * a stopped campaign — the only time Redrive enables — sits on its base (the loop merges onto
  * and refuses off base, §5), so HEAD is the base at rest. A non-repo root or a detached/failed
- * read yields `undefined` (the git call is silenced and never throws), and the dialog then
- * says "the base branch" rather than a broken value.
+ * read — a timeout included — yields `undefined` (the git call never rejects), and the dialog
+ * then says "the base branch" rather than a broken value. Async and capped, so a slow or hung
+ * checkout never blocks the dashboard's event loop.
  */
-export function baseBranchForProject(projectRoot: string): string | undefined {
+export async function baseBranchForProject(projectRoot: string): Promise<string | undefined> {
   try {
-    const branch = execFileSync("git", ["-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD"], {
+    const { stdout } = await execFileAsync("git", ["-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD"], {
       encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
+      timeout: 60_000,
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    const branch = stdout.trim();
     return branch && branch !== "HEAD" ? branch : undefined;
   } catch {
     return undefined;

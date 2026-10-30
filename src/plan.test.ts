@@ -725,6 +725,49 @@ test("describePlan explains why a ticket was spilled to a later sub-wave", async
   assert.match(report, /wave 1\s+#c.*spill.*#a/i);
 });
 
+test("describePlan's spilled line names the shared file, then its tickets in input order", async () => {
+  const layered = await layerWaves(["686", "685", "684"], openBlockedByFrom({}));
+  const plan = partitionWaves(layered, fileKeysFrom({ "686": ["DESIGN.md"], "685": ["DESIGN.md"], "684": ["DESIGN.md"] }));
+  const report = describePlan(plan);
+
+  assert.match(report, /wave 2\s+#684 .*; spilled — shares DESIGN\.md with #686, #685$/m);
+});
+
+test("describePlan's spilled line lists each shared file with its own colliding ticket", async () => {
+  // c collides with a on A.md and with b on B.md — one group per file.
+  const layered = await layerWaves(["a", "b", "c"], openBlockedByFrom({}));
+  const plan = partitionWaves(layered, fileKeysFrom({ a: ["src/A.md"], b: ["src/B.md"], c: ["src/A.md", "src/B.md"] }));
+  const line = describePlan(plan)
+    .split("\n")
+    .find((l) => l.includes("#c"))!;
+
+  const groups = line.split("spilled — shares ")[1].split("; ");
+  assert.deepEqual(groups.sort(), ["src/A.md with #a", "src/B.md with #b"]);
+});
+
+test("describePlan's spilled line names the spilled ticket's own bare key, not the path it hit", async () => {
+  // a resolved `src/foo.md`; b kept a bare `foo.md` (an ambiguous cite) — b's key is shown.
+  const layered = await layerWaves(["a", "b"], openBlockedByFrom({}));
+  const plan = partitionWaves(layered, fileKeysFrom({ a: ["src/foo.md"], b: ["foo.md"] }));
+
+  assert.match(describePlan(plan), /#b .*; spilled — shares foo\.md with #a$/m);
+});
+
+test("describePlan's spilled line puts the file shared with the most tickets first", async () => {
+  // d's first collision is with a on Y.md, but X.md holds two tickets (b, c), so it leads.
+  const layered = await layerWaves(["a", "b", "c", "d"], openBlockedByFrom({}));
+  const plan = partitionWaves(layered, fileKeysFrom({ a: ["Y.md"], b: ["X.md"], c: ["X.md"], d: ["X.md", "Y.md"] }));
+
+  assert.match(describePlan(plan), /#d .*; spilled — shares X\.md with #b, #c; Y\.md with #a$/m);
+});
+
+test("describePlan prints no spilled reason for a ticket that collides with nothing", async () => {
+  const layered = await layerWaves(["a", "b"], openBlockedByFrom({}));
+  const plan = partitionWaves(layered, fileKeysFrom({ a: ["x"], b: ["y"] }));
+
+  assert.doesNotMatch(describePlan(plan), /spilled/);
+});
+
 // A reduced campaign's outcomes as a plain map: id -> its current status.
 const graftOutcomes = (o: Record<string, string>) => new Map(Object.entries(o));
 

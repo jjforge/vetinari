@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { writeFileAtomic } from "./atomic-write.ts";
@@ -298,6 +298,27 @@ const SECRETS_FILE = "host.env";
 
 /** The absolute path to a base location's host-side secrets file. */
 export const hostSecretsPath = (baseLocation: string): string => join(baseLocation, SECRETS_FILE);
+
+/**
+ * One warning line naming every `.env` (the container gate) and `host.env` under the given base
+ * locations that group or others can read, or `undefined` when none can. Warn-only: vetinari never
+ * changes a file's mode. A missing or unstattable file is skipped, never thrown.
+ */
+export function credentialsExposureWarning(baseLocations: string[]): string | undefined {
+  const exposed: string[] = [];
+  for (const base of baseLocations) {
+    for (const path of [join(base, ".env"), hostSecretsPath(base)]) {
+      let mode: number;
+      try {
+        mode = statSync(path).mode & 0o777;
+      } catch {
+        continue;
+      }
+      if (mode & 0o044) exposed.push(`${path} (mode ${mode.toString(8).padStart(3, "0")})`);
+    }
+  }
+  return exposed.length ? `⚠ credentials readable by group or others: ${exposed.join(", ")} — chmod 600 them` : undefined;
+}
 
 /**
  * Parse a shell env file (`KEY=VALUE`, optional `export`, optional quotes, `#`

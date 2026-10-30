@@ -64,7 +64,14 @@ import { archiveRun, shouldArchiveIdle, shouldArchiveLeftover } from "./archive.
 import { answerParked, enqueueOutbound, hasParked, listParked } from "./state.ts";
 import { readEventLog } from "./event-log.ts";
 import { readSlowGateLogs } from "./slow-gates.ts";
-import { autoRegister, computeRegistryDedup, gatewayConfigDir, listProjects, removePointer } from "./registry.ts";
+import {
+  autoRegister,
+  computeRegistryDedup,
+  credentialsExposureWarning,
+  gatewayConfigDir,
+  listProjects,
+  removePointer,
+} from "./registry.ts";
 import { liveCampaignPid, projectHasLiveCampaign, resolveHostCeiling, type HostBudget } from "./host-slots.ts";
 import { containerShareWeight } from "./config.ts";
 import { serveAllStatus } from "./status.ts";
@@ -684,4 +691,5 @@ await dispatch(parseArgs([mode, ...rest]), {
   tgSend,
   readImageFreshness,
   readMountParentOwners,
+  credentialsExposureWarning,
 });

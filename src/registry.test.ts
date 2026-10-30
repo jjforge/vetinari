@@ -1,13 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import {
   autoRegister,
   computeRegistryDedup,
+  credentialsExposureWarning,
   gatewayConfigDir,
   hostSecretsPath,
   listProjects,
@@ -231,6 +232,51 @@ test("tgConnForBaseLocation reads only host.env, never process.env", () => {
 
 test("hostSecretsPath names host.env under the base location", () => {
   assert.equal(hostSecretsPath("/home/me/code/jjforge/.vetinari.local"), "/home/me/code/jjforge/.vetinari.local/host.env");
+});
+
+// A base location holding `.env` and/or `host.env` at the given modes; an omitted mode writes no file.
+const credsBase = (modes: { env?: number; host?: number }): string => {
+  const base = mkdtempSync(join(tmpdir(), "vetinari-creds-"));
+  if (modes.env !== undefined) {
+    writeFileSync(join(base, ".env"), "ANTHROPIC_API_KEY=x\n");
+    chmodSync(join(base, ".env"), modes.env);
+  }
+  if (modes.host !== undefined) {
+    writeFileSync(hostSecretsPath(base), "VETINARI_TELEGRAM_BOT_TOKEN=x\n");
+    chmodSync(hostSecretsPath(base), modes.host);
+  }
+  return base;
+};
+
+test("credentialsExposureWarning names a group/world-readable .env with its mode and the chmod fix", () => {
+  const base = credsBase({ env: 0o644, host: 0o600 });
+  assert.equal(credentialsExposureWarning([base]), `⚠ credentials readable by group or others: ${base}/.env (mode 644) — chmod 600 them`);
+});
+
+test("credentialsExposureWarning names both files, .env first, when each is readable by group or others", () => {
+  const base = credsBase({ env: 0o640, host: 0o604 });
+  assert.equal(
+    credentialsExposureWarning([base]),
+    `⚠ credentials readable by group or others: ${base}/.env (mode 640), ${base}/host.env (mode 604) — chmod 600 them`,
+  );
+});
+
+test("credentialsExposureWarning is undefined when both files are 0600, or neither exists", () => {
+  assert.equal(credentialsExposureWarning([credsBase({ env: 0o600, host: 0o600 })]), undefined);
+  assert.equal(credentialsExposureWarning([credsBase({})]), undefined);
+});
+
+test("credentialsExposureWarning names exposed files across several base locations in one line", () => {
+  const a = credsBase({ env: 0o644 });
+  const b = credsBase({ host: 0o644 });
+  assert.equal(
+    credentialsExposureWarning([a, b]),
+    `⚠ credentials readable by group or others: ${a}/.env (mode 644), ${b}/host.env (mode 644) — chmod 600 them`,
+  );
+});
+
+test("credentialsExposureWarning does not flag group-write without read (0620)", () => {
+  assert.equal(credentialsExposureWarning([credsBase({ env: 0o620, host: 0o620 })]), undefined);
 });
 
 test("readProject returns undefined for a pointer whose base location is gone", () => {

@@ -6,7 +6,7 @@ import type { Logger } from "./log.ts";
 import { runGates } from "./gate.ts";
 import { makeSandbox } from "./sandbox.ts";
 import { applyCollect, foldFragments, formatMilestoneDate, FRAGMENT_DIR, type FragmentNearMiss } from "./changelog.ts";
-import { listParkedIn, writeParkedRecord } from "./state.ts";
+import { clearParked, listParkedIn, writeParkedRecord } from "./state.ts";
 import { PARK_RECOVERY, recoverySentence } from "./park-recovery.ts";
 import { readEventLog } from "./event-log.ts";
 import { reduceCampaign } from "./dashboard-model.ts";
@@ -195,6 +195,10 @@ const defaultIntegrateDeps: IntegrateDeps = { gate: gateMergedBase };
  * the caller wave-parks — a resumable pause for a human to fix forward or prune a
  * suspect (never a machine-guessed culprit).
  *
+ * Every member logged `merged` (fresh or already on the base) has its parked record cleared,
+ * whatever its reason — merged is terminal, even if the merged base then gates red (a
+ * `red-base` park writes no per-issue record), design §2.5.
+ *
  * Assumes the main working tree is already on `cfg.baseBranch` (campaign ensures it) so
  * a merge advances HEAD in place and the next batch cuts from it.
  */
@@ -219,6 +223,7 @@ export async function integrateGreens(
     // — no second merge commit — so the caller can count it as "skipped as already merged".
     if (branchAlreadyMerged(branch)) {
       cfg.log.log("merged", { taskId, branch });
+      clearParked(cfg, taskId);
       alreadyMerged.push(taskId);
       continue;
     }
@@ -240,6 +245,7 @@ export async function integrateGreens(
       continue;
     }
     cfg.log.log("merged", { taskId, branch });
+    clearParked(cfg, taskId);
     merged.push(taskId);
   }
 

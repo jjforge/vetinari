@@ -106,6 +106,12 @@ test("renderUsage shows every mode's signature — --help is produced from MODES
   for (const m of MODES) assert.ok(usage.includes(m.signature), `--help is missing the "${m.signature}" mode`);
 });
 
+test("clear's entry says it keeps parked records — it never clears them (design §2.5)", () => {
+  const clear = MODES.find((m) => m.signature === "clear")!;
+  assert.match(clear.blurb, /parked records are kept/);
+  assert.doesNotMatch(clear.blurb, /clear parked/);
+});
+
 test("init's entry mentions its GitHub label step — the labels githubTracker() relies on", () => {
   const init = MODES.find((m) => m.signature.startsWith("init"))!;
   assert.match(init.blurb, /label/);

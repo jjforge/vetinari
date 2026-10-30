@@ -18,7 +18,7 @@ import {
   scanTidy,
   type TidySnapshot,
 } from "./merge.ts";
-import { listParkedIn } from "./state.ts";
+import { listParkedIn, writeParkedRecord } from "./state.ts";
 import { memoryLogger } from "./log.ts";
 
 /** A fresh git repo with a CHANGELOG.md committed, standing in for a campaign base. */
@@ -208,7 +208,7 @@ function repoWithCleanGreens(): { dir: string; git: (args: string[]) => string }
 test("integrateGreens wave-parks a red merged base: leaves the greens merged, does not reset, preserves branches", async () => {
   const { dir, git } = repoWithCleanGreens();
   const log = memoryLogger();
-  const cfg = { branchPrefix: "agent/", baseBranch: "main", log } as unknown as ResolvedConfig;
+  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir: join(dir, "parked"), log } as unknown as ResolvedConfig;
   const prevCwd = process.cwd();
   process.chdir(dir);
   const preSha = git(["rev-parse", "HEAD"]);
@@ -309,7 +309,7 @@ function repoWithOneBankedGreen(): { dir: string; git: (args: string[]) => strin
 test("integrateGreens skips an already-merged green and lands only the unmerged one (redrive idempotency)", async () => {
   const { dir, git } = repoWithOneBankedGreen();
   const log = memoryLogger();
-  const cfg = { branchPrefix: "agent/", baseBranch: "main", log } as unknown as ResolvedConfig;
+  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir: join(dir, "parked"), log } as unknown as ResolvedConfig;
   const prevCwd = process.cwd();
   process.chdir(dir);
   try {
@@ -334,7 +334,7 @@ test("integrateGreens skips a green whose branch is already gone, never erroring
   const { dir, git } = repoWithOneBankedGreen();
   git(["branch", "-D", "agent/A"]); // banked and its branch already reclaimed
   const log = memoryLogger();
-  const cfg = { branchPrefix: "agent/", baseBranch: "main", log } as unknown as ResolvedConfig;
+  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir: join(dir, "parked"), log } as unknown as ResolvedConfig;
   const prevCwd = process.cwd();
   process.chdir(dir);
   try {
@@ -356,7 +356,7 @@ test("integrateGreens recognises an already-merged green — logs `merged` and r
   // freshly-merged `result.merged` (no second merge commit) and rides `result.alreadyMerged`.
   const { dir } = repoWithOneBankedGreen();
   const log = memoryLogger();
-  const cfg = { branchPrefix: "agent/", baseBranch: "main", log } as unknown as ResolvedConfig;
+  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir: join(dir, "parked"), log } as unknown as ResolvedConfig;
   const prevCwd = process.cwd();
   process.chdir(dir);
   try {
@@ -374,13 +374,103 @@ test("integrateGreens recognises an already-merged green — logs `merged` and r
   }
 });
 
+test("integrateGreens clears a merged green's parked record — a conflict-parked member that merges cleanly is no longer parked (design §2.5)", async () => {
+  const { dir } = repoWithCleanGreens();
+  const parkedDir = join(dir, "parked");
+  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir, log: memoryLogger() } as unknown as ResolvedConfig;
+  writeParkedRecord(cfg, {
+    taskId: "A",
+    reason: "conflict",
+    detail: "CONFLICT (content)",
+    branch: "agent/A",
+    question: "Merge conflict on agent/A.",
+  });
+  const prevCwd = process.cwd();
+  process.chdir(dir);
+  try {
+    const result = await integrateGreens(cfg, ["A"], { gate: async () => ({ green: true, report: "" }) });
+    assert.deepEqual(result.merged, ["A"]);
+  } finally {
+    process.chdir(prevCwd);
+  }
+  assert.equal(existsSync(join(parkedDir, "A.json")), false, "A's parked record is gone once it merged");
+});
+
+test("integrateGreens clears the parked record of a green recognised as already merged, whatever its reason (design §2.5, §7)", async () => {
+  const { dir } = repoWithOneBankedGreen();
+  const parkedDir = join(dir, "parked");
+  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir, log: memoryLogger() } as unknown as ResolvedConfig;
+  writeParkedRecord(cfg, { taskId: "A", reason: "question", branch: "agent/A", question: "Which way?" });
+  const prevCwd = process.cwd();
+  process.chdir(dir);
+  try {
+    const result = await integrateGreens(cfg, ["A"], { gate: async () => ({ green: true, report: "" }) });
+    assert.deepEqual(result.alreadyMerged, ["A"]);
+  } finally {
+    process.chdir(prevCwd);
+  }
+  assert.deepEqual(listParkedIn(parkedDir), [], "the hand-merged green's record is gone");
+});
+
+test("integrateGreens clears a merged green's record even when the merged base gates red — merged is terminal, red-base writes no per-issue record (design §2.5)", async () => {
+  const { dir } = repoWithCleanGreens();
+  const parkedDir = join(dir, "parked");
+  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir, log: memoryLogger() } as unknown as ResolvedConfig;
+  writeParkedRecord(cfg, {
+    taskId: "A",
+    reason: "conflict",
+    detail: "CONFLICT (content)",
+    branch: "agent/A",
+    question: "Merge conflict on agent/A.",
+  });
+  const prevCwd = process.cwd();
+  process.chdir(dir);
+  try {
+    const result = await integrateGreens(cfg, ["A", "B"], { gate: async () => ({ green: false, report: "GATE FAILED" }) });
+    assert.equal(result.parked?.reason, "red-base");
+  } finally {
+    process.chdir(prevCwd);
+  }
+  assert.deepEqual(listParkedIn(parkedDir), [], "no record for the merged greens");
+});
+
+test("integrateGreens keeps the conflict record of a green that collides again, while clearing the one that merged (design §2.5, §6)", async () => {
+  const { dir } = repoWithConflictingGreens();
+  const parkedDir = join(dir, "parked");
+  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir, log: memoryLogger() } as unknown as ResolvedConfig;
+  writeParkedRecord(cfg, { taskId: "A", reason: "stalled", branch: "agent/A", question: "Stalled." });
+  writeParkedRecord(cfg, {
+    taskId: "B",
+    reason: "conflict",
+    detail: "CONFLICT (content)",
+    branch: "agent/B",
+    question: "Merge conflict on agent/B.",
+  });
+  const prevCwd = process.cwd();
+  process.chdir(dir);
+  try {
+    const result = await integrateGreens(cfg, ["A", "B"], { gate: async () => ({ green: true, report: "" }) });
+    assert.deepEqual(result.merged, ["A"]);
+    assert.deepEqual(
+      result.conflicts.map((c) => c.taskId),
+      ["B"],
+    );
+  } finally {
+    process.chdir(prevCwd);
+  }
+  assert.deepEqual(
+    listParkedIn(parkedDir).map((r) => [r.taskId, r.reason]),
+    [["B", "conflict"]],
+  );
+});
+
 test("integrateGreens re-gates a wave with no fresh merges when regate is set — red base re-entry re-parks (design §7, #314)", async () => {
   // Re-entering a red-base-parked wave, every green is already merged, so nothing new merges.
   // The base gate must still run (a fix-forward may have made it green — or not): with regate
   // set, a still-red base re-parks with reason `red-base`.
   const { dir } = repoWithOneBankedGreen();
   const log = memoryLogger();
-  const cfg = { branchPrefix: "agent/", baseBranch: "main", log } as unknown as ResolvedConfig;
+  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir: join(dir, "parked"), log } as unknown as ResolvedConfig;
   const prevCwd = process.cwd();
   process.chdir(dir);
   let gateRan = false;
@@ -409,7 +499,7 @@ test("integrateGreens re-gates a wave with no fresh merges when regate is set �
 test("integrateGreens with regate set and a green base does not park — the fix-forward cleared it (design §7, #314)", async () => {
   const { dir } = repoWithOneBankedGreen();
   const log = memoryLogger();
-  const cfg = { branchPrefix: "agent/", baseBranch: "main", log } as unknown as ResolvedConfig;
+  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir: join(dir, "parked"), log } as unknown as ResolvedConfig;
   const prevCwd = process.cwd();
   process.chdir(dir);
   let gateRan = false;

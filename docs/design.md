@@ -140,7 +140,7 @@ A parked record of the **current** campaign's plan keeps the card out of `idle`.
 
 ### 2.5 Parked record
 
-`parked/<id>.json`: `{ taskId, parkedAt, reason, detail, branch, sessionId?, question, tgMessageId? }`. Written by whatever parks; never cleared at a wave boundary or at archive; cleared when the issue goes back to `running` (answer, redrive), when `tidy` finds its issue now merged, or when a `prune` drops it (the record only names the work — its branch, worktree and session survive the record's deletion, so a plain prune stays resumable; `--purge` is the rare true-drop that additionally deletes the branch and worktree). `tgMessageId` is stamped by the gateway when announced and is the announce-once guard across restarts; it also lets the gateway rebuild its reply index from disk.
+`parked/<id>.json`: `{ taskId, parkedAt, reason, detail, branch, sessionId?, question, tgMessageId? }`. Written by whatever parks; never cleared at a wave boundary or at archive; cleared when the issue goes back to `running` (answer, redrive), when the integrator merges it, when `tidy` finds its issue now merged, or when a `prune` drops it (the record only names the work — its branch, worktree and session survive the record's deletion, so a plain prune stays resumable; `--purge` is the rare true-drop that additionally deletes the branch and worktree). `tgMessageId` is stamped by the gateway when announced and is the announce-once guard across restarts; it also lets the gateway rebuild its reply index from disk.
 
 ### 2.6 Outbound record
 

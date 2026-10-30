@@ -183,9 +183,10 @@ chat.
 
 The genuinely silent no-delivery is **missing credentials**, not an empty routing
 map. With no `host.env` (no token/chat) a project has no connection at all, so
-the gateway skips it: the outbox fills and nothing is sent, with only a skip line
-in the gateway's log. When notifications aren't firing, check credentials and
-that the gateway is running first, and routing second.
+the gateway skips it: the outbox fills and nothing is sent, with only a
+`gateway-skip-no-credentials` row in the gateway's log — logged once per project
+per gateway start, not every tick. When notifications aren't firing, check
+credentials and that the gateway is running first, and routing second.
 
 ### Registration and running the daemon
 
@@ -280,6 +281,8 @@ start a small campaign (or trigger any parked question); a `campaign-start` /
 - The gateway logs one line per routed record — `gateway-routed` (broadcast
   categories) and `gateway-announced` (a parked `question`), plus
   `gateway-route-failed` / `gateway-announce-failed` on a send that didn't land.
+  A project with no credentials logs `gateway-skip-no-credentials` instead, once
+  per gateway start.
   For a systemd service these go to `journalctl --user -u vetinari-gateway`.
 - Each outbox record file under `.vetinari.local/outbox/<id>.json` gains a
   `sentAt` timestamp (and the `destination` it resolved to) once routed — that

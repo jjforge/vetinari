@@ -15,6 +15,7 @@ import {
   handlePruneCommand,
   isStatusCommand,
   loadGatewayProjects,
+  logNoConnectionSkips,
   newPendingConfirms,
   newReplyIndex,
   campaignParkMove,
@@ -1254,6 +1255,53 @@ test("drainOutbox skips a project with no connection, leaving its records unsent
 
   assert.equal(sends.length, 0, "nothing is sent when the project has no bot");
   assert.equal(listOutboxIn(outboxDirOf(base))[0].sentAt, undefined, "the record stays unsent");
+});
+
+// The skip row is a host-log event outside the typed `OrchestratorEvent` union — read it as a plain row.
+const skipRows = (logger: ReturnType<typeof memoryLogger>) =>
+  (logger.events as unknown as Record<string, unknown>[]).filter((e) => e.event === "gateway-skip-no-credentials");
+
+test("logNoConnectionSkips logs one gateway-skip-no-credentials row for the connection-less project only", () => {
+  const logger = memoryLogger();
+  const bare = project({ project: "bare", baseLocation: "/srv/bare/.vetinari.local", conn: undefined });
+  logNoConnectionSkips([bare, project()], new Set(), logger);
+
+  assert.deepEqual(
+    skipRows(logger).map((e) => ({ project: e.project, baseLocation: e.baseLocation })),
+    [{ project: "bare", baseLocation: "/srv/bare/.vetinari.local" }],
+  );
+});
+
+test("logNoConnectionSkips logs a project once per daemon run, not on every tick", () => {
+  const logger = memoryLogger();
+  const logged = new Set<string>();
+  const projects = [project({ project: "bare", conn: undefined }), project()];
+  logNoConnectionSkips(projects, logged, logger);
+  logNoConnectionSkips(projects, logged, logger);
+
+  assert.equal(skipRows(logger).length, 1, "the second tick logs nothing more");
+});
+
+test("logNoConnectionSkips gives a connection-less project registered on a later tick its own single row", () => {
+  const logger = memoryLogger();
+  const logged = new Set<string>();
+  const bare = project({ project: "bare", conn: undefined });
+  logNoConnectionSkips([bare], logged, logger);
+  logNoConnectionSkips([bare, project({ project: "newcomer", conn: undefined })], logged, logger);
+
+  assert.deepEqual(
+    skipRows(logger).map((e) => e.project),
+    ["bare", "newcomer"],
+  );
+});
+
+test("logNoConnectionSkips logs the project again on a fresh set (a gateway restart)", () => {
+  const logger = memoryLogger();
+  const projects = [project({ project: "bare", conn: undefined })];
+  logNoConnectionSkips(projects, new Set(), logger);
+  logNoConnectionSkips(projects, new Set(), logger);
+
+  assert.equal(skipRows(logger).length, 2);
 });
 
 test("drainOutbox leaves a record unsent when the send fails, so the next tick retries it", async () => {

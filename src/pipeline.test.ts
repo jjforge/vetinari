@@ -9,7 +9,7 @@ import { loggerForRun } from "./log.ts";
 import { readEventLog } from "./event-log.ts";
 import { listParked } from "./state.ts";
 import { readFileSync } from "node:fs";
-import { BLOCKED, DONE, defaultLoopDeps, runLoop, type LoopDeps } from "./loop.ts";
+import { BLOCKED, DONE, childRunEntry, defaultLoopDeps, runLoop, type LoopDeps } from "./loop.ts";
 import { campaign, graceWaitForAnswer, type CampaignDeps, type RunSpawner } from "./modes.ts";
 import { collectWaveChangelog, currentBranch, integrateGreens } from "./merge.ts";
 import { runGates } from "./gate.ts";
@@ -181,8 +181,9 @@ const implScript =
  * unswapped.
  */
 const localCampaignDeps = (cfg: ResolvedConfig, dir: string, scriptFor: (id: string) => LocalAgentScript = implScript): CampaignDeps => {
-  const spawnRun: RunSpawner = async (taskId) => {
-    const outcome = await runLoop(cfg, taskId, undefined, undefined, loopDepsFor(scriptFor(taskId)));
+  // Enters the loop as the child `run` does: a merge-conflict retry carries its prompt (design §6).
+  const spawnRun: RunSpawner = async (taskId, resumeSession, resumePrompt) => {
+    const outcome = await runLoop(cfg, taskId, undefined, childRunEntry(resumeSession, resumePrompt), loopDepsFor(scriptFor(taskId)));
     return outcome === "green" ? 0 : outcome === "parked" ? 2 : 1;
   };
   // The merged-base gate: real runGates over the merged base through the local sandbox
@@ -286,9 +287,13 @@ function seedConflictRepo(): string {
 
 // Each issue rewrites the shared file to its own content and commits — file-conflicting,
 // so the loser cannot merge onto a base already carrying the winner.
+// A merge-conflict retry (its prompt names conflict.txt) leaves the branch as it was, so its
+// merge collides again and the loser parks `conflict` (design §6).
 const conflictScript =
   (id: string): LocalAgentScript =>
   (turn) => {
+    if (String(turn.opts.prompt ?? "").includes("conflict.txt"))
+      return { signal: DONE, stdout: `<turn-summary>left ${id} as it was</turn-summary>` };
     turn.write("conflict.txt", `resolved by ${id}\n`);
     turn.commit(`rewrite conflict.txt in ${id}`);
     return { signal: DONE, stdout: `<turn-summary>rewrote conflict.txt in ${id}</turn-summary>` };
@@ -314,9 +319,10 @@ test("a merge conflict quarantines the losing green (work preserved) while the w
 
   const events = readEventLog(cfg);
 
-  // Both branches went green on their own gate (each rewrite passed `test -f README.md`).
+  // Both branches went green on their own gate (each rewrite passed `test -f README.md`), and
+  // 102 went green again on its merge-conflict retry, which left the branch as it was.
   const greens = events.filter((e) => e.event === "green") as { branch: string }[];
-  assert.deepEqual(greens.map((g) => g.branch).sort(), ["agent/101", "agent/102"]);
+  assert.deepEqual(greens.map((g) => g.branch).sort(), ["agent/101", "agent/102", "agent/102"]);
 
   // 101 merged first and stays merged: its content is on the base, its branch GC'd.
   assert.equal(gitOut(dir, ["show", "base:conflict.txt"]), "resolved by 101");

@@ -229,6 +229,31 @@ test("buildLiveTail leaves out a re-run member that reached a pending green afte
   );
 });
 
+test("buildLiveTail follows a green re-admitted to retry its merge conflict — the re-admit clears its pending green (#624)", () => {
+  const dir = tmp();
+  // 6 went green, its merge collided with the base, and the campaign re-admitted it into the same
+  // wave for one retry by its own agent. While that retry runs it is an in-flight runner, so the
+  // tail follows it — a pending green would have dropped it from the tail.
+  writeJsonl(cfgFor(dir).logFile, [
+    event("campaign-start", { waves: [["6"]], slots: 1, ts: "2026-08-27T00:00:00.000Z" }),
+    event("wave-start", { index: 0, tasks: ["6"], ts: "2026-08-27T00:00:00.000Z" }),
+    event("spawn", { taskId: "6", ts: "2026-08-27T00:00:00.000Z" }),
+    event("green", { taskId: "6", branch: "agent/6", commits: ["a"], ts: "2026-08-27T00:00:05.000Z" }),
+    event("re-admit", { taskId: "6", reason: "conflict", paths: ["src/x.ts"], base: "abc1234", ts: "2026-08-27T00:00:06.000Z" }),
+    event("spawn", { taskId: "6", ts: "2026-08-27T00:00:06.000Z" }),
+  ]);
+  initActivityLog(dir, "6");
+  appendActivity(dir, "6", event("tool", { taskId: "6", name: "Read", path: "src/x.ts", ts: "2026-08-27T00:00:07.000Z" }));
+
+  const tail = buildLiveTail(cfgFor(dir));
+
+  assert.deepEqual(tail.agents, [{ issue: "6", status: "running" }]);
+  assert.deepEqual(
+    tail.lines.map((l) => l.issue),
+    ["6"],
+  );
+});
+
 // A small line factory for the pure client reducers (issue/raw are all they read).
 const ln = (issue: string, n: number, raw = `{"issue":"${issue}","n":${n}}`) => ({ issue, status: "running", ts: "", n, raw });
 

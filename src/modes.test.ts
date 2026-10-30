@@ -538,7 +538,7 @@ const captureLines = async <T>(fn: () => Promise<T>): Promise<string[]> => {
 // `spawnRun` varies per test — it stands in for the spawned child `run`.
 const gitFreeDeps = (cfg: ResolvedConfig, spawnRun: CampaignDeps["spawnRun"]): CampaignDeps => ({
   spawnRun,
-  integrate: async (_cfg, greens) => ({ merged: greens, conflictParked: [] }),
+  integrate: async (_cfg, greens) => ({ merged: greens, conflicts: [] }),
   collectChangelog: () => ({ collected: [], committed: false }),
   currentBranch: () => cfg.baseBranch,
   // Default grace is a no-op that resolves at once — a wave never blocks a test on real time.
@@ -595,7 +595,7 @@ test("the campaign lease spans the whole campaign — it is live during integrat
     integrate: async (_cfg, greens) => {
       liveAtIntegrate.push(projectHasLiveCampaign(host.configDir, cfg.project));
       leaseAtIntegrate.push(readLeases(host.configDir).find((l) => l.pid === process.pid));
-      return { merged: greens, conflictParked: [] };
+      return { merged: greens, conflicts: [] };
     },
   };
 
@@ -1065,7 +1065,7 @@ const recordingDeps = (
   integrate: async (_cfg, greens, _deps, _index, opts) => {
     integrated.push(greens);
     regates.push(opts?.regate);
-    return { merged: greens, conflictParked: [] };
+    return { merged: greens, conflicts: [] };
   },
   collectChangelog: () => ({ collected: [], committed: false }),
   currentBranch: () => cfg.baseBranch,
@@ -1127,7 +1127,7 @@ test("the redrive event carries fromWave, landed, and skipped (design §2.1, §7
       return {
         merged: greens.filter((g) => g !== "101"),
         alreadyMerged: greens.filter((g) => g === "101"),
-        conflictParked: [],
+        conflicts: [],
       };
     },
     collectChangelog: () => ({ collected: [], committed: false }),
@@ -1180,7 +1180,7 @@ test("a green re-gate of a red-base wave fires onIssueMerged for every member al
   seedRedBaseParkedWave(cfg);
 
   const regates: (boolean | undefined)[] = [];
-  const deps = regateDeps(cfg, { merged: [], alreadyMerged: ["101", "102"], conflictParked: [] }, regates);
+  const deps = regateDeps(cfg, { merged: [], alreadyMerged: ["101", "102"], conflicts: [] }, regates);
   await silenceConsole(() => campaign(cfg, [], host, undefined, { resume: true }, deps));
 
   assert.deepEqual(regates, [true], "the red-base wave was re-entered with regate set");
@@ -1197,7 +1197,7 @@ test("a re-gate of a red-base wave that is still red fires onIssueMerged for no 
   const regates: (boolean | undefined)[] = [];
   const deps = regateDeps(
     cfg,
-    { merged: [], alreadyMerged: ["101", "102"], conflictParked: [], parked: { reason: "red-base", detail: "GATE FAILED" } },
+    { merged: [], alreadyMerged: ["101", "102"], conflicts: [], parked: { reason: "red-base", detail: "GATE FAILED" } },
     regates,
   );
   await silenceConsole(() => campaign(cfg, [], host, undefined, { resume: true }, deps));
@@ -1215,7 +1215,7 @@ test("a redrive of a non-red-base park relabels only the freshly merged members,
   cfg.log.log("green", { taskId: "102", branch: "agent/102", commits: ["b"] }); // the answer landed
 
   const regates: (boolean | undefined)[] = [];
-  const deps = regateDeps(cfg, { merged: ["102"], alreadyMerged: ["101"], conflictParked: [] }, regates);
+  const deps = regateDeps(cfg, { merged: ["102"], alreadyMerged: ["101"], conflicts: [] }, regates);
   await silenceConsole(() => campaign(cfg, [], host, undefined, { resume: true }, deps));
 
   assert.deepEqual(regates, [false], "a question park is not re-gated");
@@ -1230,7 +1230,7 @@ test("a redrive of a legacy wave park — a campaign-parked with no reason — r
   cfg.log.log("green", { taskId: "102", branch: "agent/102", commits: ["b"] });
 
   const regates: (boolean | undefined)[] = [];
-  const deps = regateDeps(cfg, { merged: ["102"], alreadyMerged: ["101"], conflictParked: [] }, regates);
+  const deps = regateDeps(cfg, { merged: ["102"], alreadyMerged: ["101"], conflicts: [] }, regates);
   const ok = await silenceConsole(() => campaign(cfg, [], host, undefined, { resume: true }, deps));
 
   assert.equal(ok, "done");
@@ -1377,7 +1377,7 @@ const resumeCapturingDeps = (
   },
   integrate: async (_cfg, greens, _deps, _index, opts) => {
     regates.push(opts?.regate);
-    return { merged: greens, conflictParked: [] };
+    return { merged: greens, conflicts: [] };
   },
   collectChangelog: () => ({ collected: [], committed: false }),
   currentBranch: () => cfg.baseBranch,
@@ -1835,7 +1835,11 @@ test("grace window: a conflict (quarantine) never triggers the wait, even with p
   let graceCalls = 0;
   const deps: CampaignDeps = {
     ...gitFreeDeps(cfg, async () => 0),
-    integrate: async (_cfg, greens) => ({ merged: greens.filter((g) => g !== "102"), conflictParked: ["102"] }),
+    // 102 collides on the first pass and again on its retry's pass, so it parks `conflict` (design §6).
+    integrate: async (_cfg, greens) => ({
+      merged: greens.filter((g) => g !== "102"),
+      conflicts: greens.includes("102") ? [{ taskId: "102", paths: ["f.txt"], base: "abc1234", detail: "CONFLICT" }] : [],
+    }),
     grace: async () => {
       graceCalls++;
     },
@@ -1899,7 +1903,7 @@ test("Gate 2 unchanged: an all-green wave whose combined base gates red still wa
     }),
     integrate: async (_cfg, greens) => ({
       merged: greens,
-      conflictParked: [],
+      conflicts: [],
       parked: { reason: "red-base", detail: "GATE FAILED" },
     }),
   };
@@ -1985,7 +1989,11 @@ test("a quarantine that strands later-wave dependents wave-parks the campaign �
       spawned.push(taskId);
       return 0;
     }),
-    integrate: async (_cfg, _greens) => ({ merged: [], conflictParked: ["640"] }),
+    // 640 collides on the first pass and again on its retry's pass, so it parks `conflict` (design §6).
+    integrate: async (_cfg, _greens) => ({
+      merged: [],
+      conflicts: [{ taskId: "640", paths: ["f.txt"], base: "abc1234", detail: "CONFLICT" }],
+    }),
   };
 
   const ok = await silenceConsole(() => campaign(cfg, [["640"], ["701"]], host, "harness", {}, deps));
@@ -2183,7 +2191,7 @@ test("a graceful stop (SIGINT) lets the wave in flight drain and integrate, then
     ...gitFreeDeps(cfg, childRun),
     integrate: async (_cfg, greens) => {
       integrated.push(greens);
-      return { merged: greens, conflictParked: [] };
+      return { merged: greens, conflicts: [] };
     },
   });
 
@@ -2297,7 +2305,7 @@ for (const [label, signals] of [
         ...gitFreeDeps(cfg, kids.spawnRun),
         integrate: async (_cfg, greens) => {
           integrated.push(greens);
-          return { merged: greens, conflictParked: [] };
+          return { merged: greens, conflicts: [] };
         },
       },
       () => setImmediate(kids.releaseAll),
@@ -2556,7 +2564,7 @@ test("a --now stop while an answered member re-runs after the grace window signa
       ...gitFreeDeps(cfg, spawnRun),
       integrate: async (_cfg, greens) => {
         integrated.push(greens);
-        return { merged: greens, conflictParked: [] };
+        return { merged: greens, conflicts: [] };
       },
       grace: async (c, ids) => {
         for (const id of ids) answerParked(c, id, "use approach A");

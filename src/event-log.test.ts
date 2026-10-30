@@ -71,6 +71,8 @@ const describe = (e: OrchestratorEvent): string => {
       return `redrive from ${e.fromWave}`;
     case "grace-wait":
       return `grace-wait ${e.seconds}s on ${e.tasks.join(",")}`;
+    case "re-admit":
+      return `re-admit ${e.taskId} (${e.reason}) on ${e.paths.join(",")} at ${e.base}`;
     case "stop-requested":
       return `stop-requested at wave ${e.index}`;
     case "gate":
@@ -106,6 +108,10 @@ test("a switch over the §2.1 narrowed kinds reads each member's fields", () => 
   assert.equal(describe(event("campaign-parked", { index: 2, detail: "red base" })), "campaign-parked 2: red base");
   assert.equal(describe(event("campaign-failed", { index: 2, detail: "2 failed" })), "campaign-failed 2: 2 failed");
   assert.equal(describe(event("redrive", { fromWave: 1 })), "redrive from 1");
+  assert.equal(
+    describe(event("re-admit", { taskId: "8", reason: "conflict", paths: ["a.ts", "b.ts"], base: "abc" })),
+    "re-admit 8 (conflict) on a.ts,b.ts at abc",
+  );
   assert.equal(describe(event("graft", { ids: ["305", "306"], blockedBy: {}, fileKeys: {} })), "graft 305,306");
   assert.equal(describe(event("gate", { taskId: "9", cmds: ["typecheck", "test"], skipped: 1 })), "gate typecheck,test skip 1");
   assert.equal(describe(event("gate-check", { taskId: "9", cmd: "run-tests" })), "gate-check run-tests");

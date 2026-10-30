@@ -33,6 +33,13 @@ test("describeEvent narrates a campaign-failed stop marker so the feed shows why
   );
 });
 
+test("describeEvent narrates a re-admit as the issue retrying its merge conflict, naming the paths (#624)", () => {
+  assert.equal(
+    describeEvent(event("re-admit", { taskId: "102", reason: "conflict", paths: ["src/a.ts", "README.md"], base: "abc1234" })),
+    "#102 retrying merge conflict — src/a.ts, README.md",
+  );
+});
+
 test("festiveFromCookie reads the toggle out of the request's Cookie header (#193)", () => {
   // Absent header → the fallback (the config default; false at the host dashboard).
   assert.equal(festiveFromCookie(undefined, false), false);

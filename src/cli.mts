@@ -643,6 +643,7 @@ await dispatch(parseArgs([mode, ...rest]), {
   selectAgent,
   isCampaignChild: !!process.env.VETINARI_CHILD,
   resumeSession: process.env.VETINARI_RESUME_SESSION,
+  resumePrompt: process.env.VETINARI_RESUME_PROMPT,
   archiveLeftoverRun,
   archiveIfIdle,
   // The interactive under-specified halt (terminal only): drop and plan the rest, or stop —

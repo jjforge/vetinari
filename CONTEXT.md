@@ -131,8 +131,9 @@ The turn budget was spent, the [[agent]] went quiet, or a COMPLETE changed
 nothing. Read the turn log, then answer with guidance or [[prune]].
 
 **conflict**:
-A green branch conflicts with the [[base]] at merge; its branch, worktree and
-session are kept. Resolve on the base, then [[redrive]].
+A green branch conflicts with the [[base]] at merge, and again after one retry
+by its own [[agent]] in the same wave; its branch, worktree and session are kept.
+Resolve on the base, then [[redrive]].
 _Avoid_: quarantined.
 
 **red-base**:

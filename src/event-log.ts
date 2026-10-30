@@ -89,7 +89,7 @@ export interface MergedEvent extends BaseEvent {
 /** `parked` — a slot parked its task for a human (design §2.1, §2.3): the task, the one-enum
  * `reason`, and `detail` carrying the specifics (which `stalled`, the conflict output, the gate
  * tail, or the stop signal name). Written by the run loop (`question`/`stalled`/`stopped`) and the
- * integrator (`conflict`) (state.ts, merge.ts). */
+ * campaign when a retried merge collides again (`conflict`, design §6) (state.ts, merge.ts). */
 export interface ParkedEvent extends BaseEvent {
   event: "parked";
   taskId: string;
@@ -208,6 +208,18 @@ export interface GraceWaitEvent extends BaseEvent {
   event: "grace-wait";
   seconds: number;
   tasks: string[];
+}
+
+/** `re-admit` — a green whose merge collided with the base is re-admitted into its own wave for one
+ * retry by its own agent before it parks (design §6): the task, why (`conflict`), the conflicting
+ * `paths`, and the `base` commit the retry merges. Logged just before the retry's `spawn`; the
+ * reducer clears the task's pending green so the live tail follows the retried agent (modes.ts). */
+export interface ReAdmitEvent extends BaseEvent {
+  event: "re-admit";
+  taskId: string;
+  reason: "conflict";
+  paths: string[];
+  base: string;
 }
 
 /** `stop-requested` — an operator asked the running campaign to stop (`vetinari stop`, a SIGINT,
@@ -335,6 +347,7 @@ export type OrchestratorEvent =
   | GraftEvent
   | RedriveEvent
   | GraceWaitEvent
+  | ReAdmitEvent
   | StopRequestedEvent
   | GateEvent
   | GateCheckEvent

@@ -70,6 +70,21 @@ export function findMergeCommit(cfg: { baseBranch: string; branchPrefix: string 
   return undefined;
 }
 
+/**
+ * A green whose merge collided with the base — `git merge` stopped with unmerged paths (design §6).
+ * `integrateGreens` reports it and parks nothing; the campaign re-admits it for one retry by its own
+ * agent, and only a second collision parks it (`parkMergeConflict`).
+ */
+export interface MergeConflict {
+  taskId: string;
+  /** the paths git left unmerged — what the retry's prompt names. */
+  paths: string[];
+  /** the base commit the retry merges into its branch: HEAD once this pass's merges have landed. */
+  base: string;
+  /** the tail of the merge output, the `detail` a park would carry. */
+  detail: string;
+}
+
 export interface IntegrateResult {
   merged: string[];
   /**
@@ -82,12 +97,19 @@ export interface IntegrateResult {
    */
   alreadyMerged?: string[];
   /**
-   * Greens a merge conflict pulled from this wave's integration (ADR 0013). A conflict
-   * is attributable — git blames one branch — so only that merge is aborted; the issue
-   * is parked with reason `conflict`, its branch, worktree, and agent session left intact
-   * so it is resumable, and the wave neither rolls back nor halts.
+   * Greens whose merge collided with the base (design §6). A conflict is attributable — git
+   * blames one branch — so only that merge is aborted, its branch, worktree and agent session
+   * are left intact, and the wave neither rolls back nor halts. Nothing is parked here: the
+   * campaign retries each one once with its own agent and parks only a second collision.
    */
-  conflictParked: string[];
+  conflicts: MergeConflict[];
+  /**
+   * Greens whose merge failed with no unmerged paths — a dirty tree, a held `index.lock`, any
+   * other merge failure (design §6). Not a conflict, so never retried or parked: each is logged
+   * `failed` with the merge output and its wave resolves as for any failed member. Optional so a
+   * test stub may omit it (absent reads as none).
+   */
+  mergeFailed?: string[];
   /**
    * Set when the merged base gated red — the emergent, unattributable failure (each
    * green passed alone, together they are red). No branch is to blame, so the wave is
@@ -96,6 +118,26 @@ export interface IntegrateResult {
    * (ADR 0013). `detail` is the tail of the gate report.
    */
   parked?: { reason: "red-base"; detail: string };
+}
+
+/**
+ * Park a green whose retried merge collided again (design §6): an integrator park with reason
+ * `conflict`, its green still banked and its branch/worktree/session preserved. The durable parked
+ * record is written beside the event (design §2.5, "written by whatever parks") so the card stays
+ * off idle and the gateway can announce/redrive it after the run's log is archived — the event
+ * alone vanishes with the log. `conflict` redrives, never resumes by reply, so the record carries
+ * no session; `question` names the move.
+ */
+export function parkMergeConflict(cfg: ResolvedConfig, conflict: MergeConflict): void {
+  const branch = `${cfg.branchPrefix}${conflict.taskId}`;
+  writeParkedRecord(cfg, {
+    taskId: conflict.taskId,
+    reason: "conflict",
+    detail: conflict.detail,
+    branch,
+    question: `Merge conflict on ${branch} — resolve it on the base, then redrive.`,
+  });
+  cfg.log.log("parked", { taskId: conflict.taskId, reason: "conflict", detail: conflict.detail });
 }
 
 /**
@@ -113,10 +155,18 @@ const defaultIntegrateDeps: IntegrateDeps = { gate: gateMergedBase };
  * cannot see. Integration is non-atomic (ADR 0013): the two failures are handled by
  * whether blame is attributable.
  *
- * A **merge conflict** is attributable to one branch, so `git merge --abort`s only that
- * merge — never `reset --hard` to the wave start, which would un-merge the greens
- * already banked — parks the issue with reason `conflict` (branch/worktree/session
- * preserved, resumable) and continues integrating the rest of the wave.
+ * A **merge conflict** (git stops with unmerged paths) is attributable to one branch, so
+ * `git merge --abort`s only that merge — never `reset --hard` to the wave start, which
+ * would un-merge the greens already banked — and continues integrating the rest of the
+ * wave. It parks nothing: the collision is returned in `conflicts` with its unmerged paths
+ * and the base commit, and the campaign re-admits the issue for one retry by its own agent
+ * (a `re-admit` event, then a second pass through here), parking it `conflict` only if
+ * that retry collides again (`parkMergeConflict`, design §6).
+ *
+ * A merge that fails with **no unmerged paths** (a dirty tree, a held `index.lock`) is not
+ * a conflict the agent could resolve: any merge in progress is aborted, the member is
+ * logged `failed` with the merge output and returned in `mergeFailed`, and its wave
+ * resolves as for any failed member. It is never retried or parked.
  *
  * A **red merged base** has no single culprit, so it is NOT rolled back either: the
  * greens stay merged, the branches are left intact, and the result carries `parked` so
@@ -135,7 +185,8 @@ export async function integrateGreens(
 ): Promise<IntegrateResult> {
   const merged: string[] = [];
   const alreadyMerged: string[] = [];
-  const conflictParked: string[] = [];
+  const collided: Omit<MergeConflict, "base">[] = [];
+  const mergeFailed: string[] = [];
   for (const taskId of greens) {
     const branch = `${cfg.branchPrefix}${taskId}`;
     // Redrive idempotency + hand-merge recognition (design §7): a green already banked on the
@@ -151,31 +202,28 @@ export async function integrateGreens(
     }
     const r = gitTry(["merge", "--no-ff", branch, "-m", `campaign: merge ${branch}`]);
     if (r.code !== 0) {
-      // Attributable failure (ADR 0013): abort ONLY this merge — a `reset --hard` to
-      // the wave start here would discard the greens already merged this wave —
-      // park the issue with its work preserved, and carry on with the rest.
+      // Attributable failure (design §6): abort ONLY this merge — a `reset --hard` to the wave
+      // start here would discard the greens already merged this wave — and carry on with the rest.
+      // The unmerged paths are read BEFORE the abort, which clears them: they are what tells a real
+      // conflict (the agent can resolve it) from any other failed merge (it cannot).
       const detail = `${r.stdout}\n${r.stderr}`.trim().split("\n").slice(-12).join("\n");
-      gitTry(["merge", "--abort"]);
-      // A merge conflict is an integrator park with reason `conflict` (design §2.3): the
-      // issue's green stays banked, its branch/worktree/session preserved and resumable.
-      // Write the durable parked record beside the event (design §2.5, "written by whatever
-      // parks") so the card stays off idle and the gateway can announce/redrive it after the
-      // run's log is archived — the event alone vanishes with the log. `conflict` redrives,
-      // never resumes by reply, so the record carries no session; `question` names the move.
-      writeParkedRecord(cfg, {
-        taskId,
-        reason: "conflict",
-        detail,
-        branch,
-        question: `Merge conflict on ${branch} — resolve it on the base, then redrive.`,
-      });
-      cfg.log.log("parked", { taskId, reason: "conflict", detail });
-      conflictParked.push(taskId);
+      const paths = gitTry(["diff", "--name-only", "--diff-filter=U"]).stdout.split("\n").filter(Boolean);
+      if (gitTry(["rev-parse", "-q", "--verify", "MERGE_HEAD"]).code === 0) gitTry(["merge", "--abort"]);
+      if (paths.length) {
+        collided.push({ taskId, paths, detail });
+      } else {
+        cfg.log.log("failed", { taskId, detail });
+        mergeFailed.push(taskId);
+      }
       continue;
     }
     cfg.log.log("merged", { taskId, branch });
     merged.push(taskId);
   }
+
+  // The base a collided green's retry merges: HEAD with every merge this pass made already on it.
+  const base = collided.length ? git(["rev-parse", "HEAD"]) : "";
+  const conflicts = collided.map((c) => ({ ...c, base }));
 
   // Gate the merged base when something new merged, OR when re-entering a red-base-parked
   // wave (`regate`, design §7) where nothing new merges but the base must be re-proven: a
@@ -193,17 +241,17 @@ export async function integrateGreens(
       // stay merged and the campaign parks. The `base-gate` above already recorded the red
       // result; the caller logs the `campaign-parked` stop marker with the wave index.
       const detail = report.split("\n").slice(-40).join("\n");
-      return { merged, alreadyMerged, conflictParked, parked: { reason: "red-base", detail } };
+      return { merged, alreadyMerged, conflicts, mergeFailed, parked: { reason: "red-base", detail } };
     }
   }
 
   // Only once the combined result is green: drop the merged branches and let git
-  // reclaim their (already-removed) worktree entries. Conflict-parked and parked/non-green
-  // branches are never touched here — they stay resumable.
+  // reclaim their (already-removed) worktree entries. Collided and parked/non-green branches
+  // are never touched here — they stay resumable.
   for (const taskId of merged) gitTry(["branch", "-D", `${cfg.branchPrefix}${taskId}`]);
   gitTry(["worktree", "prune"]);
   cfg.log.log("campaign-integrated", { merged, headSha: git(["rev-parse", "HEAD"]) });
-  return { merged, alreadyMerged, conflictParked };
+  return { merged, alreadyMerged, conflicts, mergeFailed };
 }
 
 /**

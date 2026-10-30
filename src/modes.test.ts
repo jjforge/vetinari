@@ -1746,6 +1746,57 @@ test("a graft appended mid-wave lands in a future wave; the loop re-derives and 
   assert.ok(spawned.includes("301"), "the loop actually spawned the grafted issue");
 });
 
+test("a replan appended mid-wave rewrites the unstarted waves; the loop runs the new plan at the next boundary (#614)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-replan-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+
+  // While wave 0 (101) runs, a re-plan puts 201 and 202 — two waves at launch — side by side.
+  const childRun: CampaignDeps["spawnRun"] = async (taskId) => {
+    if (taskId === "101") cfg.log.log("replan", { waves: [["201", "202"]], was: 2 });
+    return 0;
+  };
+
+  const ok = await silenceConsole(() => campaign(cfg, [["101"], ["201"], ["202"]], host, "harness", {}, gitFreeDeps(cfg, childRun)));
+
+  assert.equal(ok, "done");
+  const batches = readEventLog(cfg)
+    .filter((e): e is WaveStartEvent => e.event === "wave-start")
+    .map((b) => b.tasks);
+  assert.deepEqual(batches, [["101"], ["201", "202"]]);
+});
+
+test("a replan logged on a stopped campaign is what the next redrive runs (#614)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-replan-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  cfg.log.log("campaign-start", { waves: [["101"], ["201"], ["202"]], slots: 4 });
+  cfg.log.log("wave-start", { index: 0, tasks: ["101"] });
+  cfg.log.log("wave-done", { index: 0, merged: ["101"] });
+  // A graceful stop parked the campaign before wave 1; a re-plan rewrote the waves it named.
+  cfg.log.log("campaign-parked", { index: 1, reason: "stopped", detail: "stopped by an operator" });
+  cfg.log.log("replan", { waves: [["202", "201"]], was: 2 });
+
+  const spawned: string[] = [];
+  const ok = await silenceConsole(() =>
+    campaign(
+      cfg,
+      [],
+      host,
+      undefined,
+      { resume: true },
+      gitFreeDeps(cfg, async (id) => (spawned.push(id), 0)),
+    ),
+  );
+
+  assert.equal(ok, "done");
+  const batches = readEventLog(cfg)
+    .filter((e): e is WaveStartEvent => e.event === "wave-start")
+    .map((b) => b.tasks);
+  assert.deepEqual(batches.slice(1), [["202", "201"]]);
+  assert.deepEqual(spawned.sort(), ["201", "202"]);
+});
+
 test("Gate 1 (ADR 0017): a per-issue park drains its wave, merges the greens, then wave-parks — no next wave starts", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-park-"));
   const cfg = harnessCfg(dir);

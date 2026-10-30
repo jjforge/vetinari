@@ -122,3 +122,32 @@ export async function runReplan(
   cfg.log.log("replan", { waves: next, was: current.length });
   return { started, current, next, unchanged, applied: true };
 }
+
+/**
+ * The report `replan` prints — the same for a `--dry-run` and an applied re-plan: the current
+ * and new remaining plans' wave counts, every issue whose wave changed, and the new remainder.
+ * Waves are numbered as the dashboard numbers them: the started waves keep theirs, and the
+ * remainder numbers after them. An unchanged plan says only `plan unchanged`.
+ */
+export function describeReplan(result: ReplanResult): string[] {
+  if (result.unchanged) return ["plan unchanged"];
+  const span = (waves: string[][]) => {
+    const count = `${waves.length} wave${waves.length === 1 ? "" : "s"} remaining`;
+    if (!waves.length) return count;
+    const first = result.started + 1;
+    const last = result.started + waves.length;
+    return `${count} (${first === last ? `wave ${first}` : `waves ${first}–${last}`})`;
+  };
+  const waveOf = (waves: string[][]) => new Map(waves.flatMap((wave, i) => wave.map((id) => [id, result.started + i + 1] as const)));
+  const before = waveOf(result.current);
+  const after = waveOf(result.next);
+  const moved = [...after]
+    .filter(([id, wave]) => before.get(id) !== wave)
+    .map(([id, wave]) => `  #${id} wave ${before.get(id)} → wave ${wave}`);
+  return [
+    `current: ${span(result.current)}`,
+    `new: ${span(result.next)}`,
+    ...moved,
+    `remaining campaign: ${result.next.map((wave) => `"${wave.join(" ")}"`).join(" ")}`,
+  ];
+}

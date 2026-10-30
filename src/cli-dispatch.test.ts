@@ -69,6 +69,9 @@ function makeDeps(overrides: Partial<DispatchDeps> = {}) {
     runGraft: spy(
       Promise.resolve({ project: "demo", repo: undefined, titles: {}, ids: [], rejected: [], placement: [], remaining: [], applied: true }),
     ) as unknown as DispatchDeps["runGraft"],
+    runReplan: spy(
+      Promise.resolve({ started: 1, current: [["102"], ["103"]], next: [["102", "103"]], unchanged: false, applied: true }),
+    ) as unknown as DispatchDeps["runReplan"],
     listParked: spy([]) as unknown as DispatchDeps["listParked"],
     hasParked: spy(true) as unknown as DispatchDeps["hasParked"],
     answerParked: spy() as unknown as DispatchDeps["answerParked"],
@@ -1370,6 +1373,34 @@ test("dispatch graft routes to runGraft with the parsed ids and flag", async () 
   const { deps } = makeDeps();
   await dispatch({ kind: "graft", ids: ["436", "611"], dryRun: false, json: false }, deps);
   assert.deepEqual((deps.runGraft as any).calls, [[deps.cfg, ["436", "611"], { project: undefined, dryRun: false }]]);
+});
+
+test("parseArgs maps `replan` and reads --dry-run", () => {
+  assert.deepEqual(parseArgs(["replan"]), { kind: "replan", dryRun: false });
+  assert.deepEqual(parseArgs(["replan", "--dry-run"]), { kind: "replan", dryRun: true });
+});
+
+test("dispatch replan routes to runReplan and prints the report and that the event was appended", async () => {
+  const { deps, logged } = makeDeps();
+  await dispatch({ kind: "replan", dryRun: false }, deps);
+  assert.deepEqual((deps.runReplan as any).calls, [[deps.cfg, { dryRun: false }]]);
+  assert.ok(logged.includes("new: 1 wave remaining (wave 2)"), logged.join("\n"));
+  assert.ok(
+    logged.some((l) => l.startsWith("replan event appended")),
+    logged.join("\n"),
+  );
+});
+
+test("dispatch replan --dry-run prints the report and says nothing was logged", async () => {
+  const { deps, logged } = makeDeps({
+    runReplan: spy(
+      Promise.resolve({ started: 1, current: [["102"], ["103"]], next: [["102", "103"]], unchanged: false, applied: false }),
+    ) as unknown as DispatchDeps["runReplan"],
+  });
+  await dispatch({ kind: "replan", dryRun: true }, deps);
+  assert.ok(logged.includes("current: 2 waves remaining (waves 2–3)"), logged.join("\n"));
+  assert.ok(logged.includes("dry run — nothing logged"), logged.join("\n"));
+  assert.ok(!logged.some((l) => l.startsWith("replan event appended")));
 });
 
 test("dispatch graft forwards a project qualifier to runGraft", async () => {

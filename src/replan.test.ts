@@ -7,7 +7,7 @@ import type { ResolvedConfig } from "./config.ts";
 import { loggerForRun } from "./log.ts";
 import { readEventLog } from "./event-log.ts";
 import { reduceCampaign } from "./dashboard-lifecycle.ts";
-import { defaultReplanDeps, runReplan } from "./replan.ts";
+import { defaultReplanDeps, describeReplan, runReplan } from "./replan.ts";
 
 // A temp-dir `cfg` mirroring graft.test's: a real on-disk event log under a throwaway state
 // dir is what `runReplan` reads and appends to, so the seam is exercised for real; only the
@@ -148,4 +148,23 @@ test("replan with no blockedBy resolver configured refuses, since it cannot keep
   const cfg = harnessCfg({ "101": "a.ts", "102": "b.ts" }, { blockedBy: undefined });
   launch(cfg, [["101"], ["102"]]);
   await assert.rejects(() => runReplan(cfg, {}), /replan needs a "blockedBy" resolver/);
+});
+
+test("describeReplan prints both remaining plans' wave counts and every issue whose wave changed, numbered after the started waves", () => {
+  const lines = describeReplan({
+    started: 1,
+    current: [["102"], ["103"], ["104"]],
+    next: [["102", "104"], ["103"]],
+    unchanged: false,
+    applied: false,
+  });
+  assert.deepEqual(lines, [
+    "current: 3 waves remaining (waves 2–4)",
+    "new: 2 waves remaining (waves 2–3)",
+    "  #104 wave 4 → wave 2",
+    'remaining campaign: "102 104" "103"',
+  ]);
+  assert.deepEqual(describeReplan({ started: 1, current: [["102"]], next: [["102"]], unchanged: true, applied: false }), [
+    "plan unchanged",
+  ]);
 });

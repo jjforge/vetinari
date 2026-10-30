@@ -19,7 +19,7 @@ import { handleStop } from "./dashboard-route-stop.ts";
 import { handleHostLog } from "./dashboard-route-host-log.ts";
 import { handleHealthz } from "./dashboard-route-healthz.ts";
 import { handlePage } from "./dashboard-route-page.ts";
-import { hostLogger } from "./log.ts";
+import { hostLogger, type Logger } from "./log.ts";
 
 // The dashboard is split into a reconstruction/model, presentation renders, prune
 // shelling, and one module per HTTP surface (ADR 0006). This file is the thin
@@ -100,6 +100,10 @@ export async function serveAllStatus(
     startChild?: DashboardDeps["startChild"];
     childStartupMs?: number;
     health?: DashboardDeps["health"];
+    /** Where the access and failure rows go; defaults to the host log. */
+    logger?: Logger;
+    /** Replaces the built-in route list (tests); the denial guard still runs first. */
+    routes?: RouteHandler[];
   },
 ) {
   const deps: DashboardDeps = {
@@ -117,12 +121,13 @@ export async function serveAllStatus(
     .split(",")
     .map((h) => h.trim())
     .filter(Boolean);
-  const logger = hostLogger();
+  const logger = opts.logger ?? hostLogger();
+  const handlers = opts.routes ?? routes;
   const server = createServer((req, res) => {
+    const path = URL.parse(req.url ?? "/", "http://localhost")?.pathname ?? null;
     // One access row per POST — every one starts a process or reshapes a campaign — written once
     // the response closes (sent or aborted), so `status` is the code actually sent (#582).
     if (req.method === "POST") {
-      const path = URL.parse(req.url ?? "/", "http://localhost")?.pathname ?? null;
       const remote = req.socket.remoteAddress ?? null;
       res.once("close", () => logger.log("dashboard-request", { method: "POST", path, status: res.statusCode, remote }));
     }
@@ -133,7 +138,7 @@ export async function serveAllStatus(
         return;
       }
       const url = new URL(req.url ?? "/", "http://localhost");
-      for (const handle of routes) {
+      for (const handle of handlers) {
         if (await handle(req, res, url, deps)) return;
       }
       res.writeHead(404).end("not found");
@@ -142,7 +147,12 @@ export async function serveAllStatus(
         res.writeHead(413, { "content-type": "text/plain; charset=utf-8" }).end("request body too large");
         return;
       }
-      res.writeHead(500).end(String(err?.stack ?? err));
+      // A head already sent (the SSE route sends its first) cannot be rewritten — and trying throws
+      // here, an unhandled rejection that exits the hosting gateway — so cut the response off instead.
+      if (res.headersSent) res.destroy();
+      else res.writeHead(500, { "content-type": "text/plain; charset=utf-8" }).end("internal server error");
+      // Log the failure, never send it: the stack is for the operator, not the client (#538).
+      logger.log("dashboard-request-failed", { method: req.method, path, error: String(err) });
     });
   });
   await new Promise<void>((resolve) => server.listen(opts.port, opts.host, resolve));

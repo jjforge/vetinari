@@ -192,6 +192,17 @@ export const mergeConflictPrompt = (paths: string[], base: string, baseBranch: s
   `Commit the merge. The signal contract is unchanged: ${DONE} when done, ${BLOCKED} if blocked — and end this turn with a <turn-summary> line as before.`;
 
 /**
+ * The prompt a failed per-merge check's retry hands the issue's own agent (design §6): its green
+ * merged into the base cleanly, but a `perMerge` gate went red on the result and the merge was
+ * undone. It names the gate, the tail of its output and the base commit.
+ */
+export const perMergeCheckPrompt = (gate: string, detail: string, base: string, baseBranch: string) =>
+  `Your merge into the current base, ${baseBranch} at ${base}, fails ${gate}. ` +
+  `Merge ${base} into your branch and fix it, keeping the issue's acceptance criteria satisfied — its tests must still pass. ` +
+  `Commit the merge. The signal contract is unchanged: ${DONE} when done, ${BLOCKED} if blocked — and end this turn with a <turn-summary> line as before.\n\n` +
+  `The tail of ${gate}'s output on the merged tree:\n${detail}`;
+
+/**
  * How a child `run` enters the loop from what its campaign passed it (design §6, §7): a session to
  * resume, with `prompt` when set (a merge-conflict retry) or the crash prompt otherwise (a crash
  * redrive); a `prompt` with no session (a non-resumable provider) is a fresh run on the kept branch

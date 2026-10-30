@@ -215,14 +215,18 @@ export interface GraceWaitEvent extends BaseEvent {
 
 /** `re-admit` — a green whose merge collided with the base is re-admitted into its own wave for one
  * retry by its own agent before it parks (design §6): the task, why (`conflict`), the conflicting
- * `paths`, and the `base` commit the retry merges. Logged just before the retry's `spawn`; the
- * reducer clears the task's pending green so the live tail follows the retried agent (modes.ts). */
+ * `paths`, and the `base` commit the retry merges. A merge undone because a `perMerge` gate went red
+ * on it is re-admitted the same way, with empty `paths`, the failing `gate` and the tail of its output
+ * as `detail`. Logged just before the retry's `spawn`; the reducer clears the task's pending green so
+ * the live tail follows the retried agent (modes.ts). */
 export interface ReAdmitEvent extends BaseEvent {
   event: "re-admit";
   taskId: string;
   reason: "conflict";
   paths: string[];
   base: string;
+  gate?: string;
+  detail?: string;
 }
 
 /** `stop-requested` — an operator asked the running campaign to stop (`vetinari stop`, a SIGINT,

@@ -40,6 +40,13 @@ test("describeEvent narrates a re-admit as the issue retrying its merge conflict
   );
 });
 
+test("describeEvent narrates a failed-check re-admit as the issue retrying its failed check, naming the gate (#617)", () => {
+  assert.equal(
+    describeEvent(event("re-admit", { taskId: "102", reason: "conflict", paths: [], base: "abc1234", gate: "lint", detail: "redeclared" })),
+    "#102 retrying failed check — lint",
+  );
+});
+
 test("festiveFromCookie reads the toggle out of the request's Cookie header (#193)", () => {
   // Absent header → the fallback (the config default; false at the host dashboard).
   assert.equal(festiveFromCookie(undefined, false), false);

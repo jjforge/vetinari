@@ -17,6 +17,7 @@ import {
   defaultLoopDeps,
   extractTurnSummary,
   mergeConflictPrompt,
+  perMergeCheckPrompt,
   parkedAnswerComment,
   runLoop,
   type LoopDeps,
@@ -1319,6 +1320,14 @@ test("a merge-conflict retry on a non-resumable provider re-enters fresh on the 
   const task = sbx.runCalls[0].promptArgs?.TASK ?? "";
   assert.match(task, /^task text/);
   assert.ok(task.includes(prompt), "the conflict prompt rides on the issue text");
+});
+
+test("a failed per-merge check's retry prompt names the gate, its output tail and the base commit, and asks the agent to merge the base and fix it (#617)", () => {
+  const prompt = perMergeCheckPrompt("lint", "b.go:12: healthClass redeclared in this block", "f00dfeed", "main");
+  assert.match(prompt, /^Your merge into the current base, main at f00dfeed, fails lint\./);
+  assert.match(prompt, /Merge f00dfeed into your branch and fix it/);
+  assert.ok(prompt.includes("b.go:12: healthClass redeclared in this block"), "the output tail rides along");
+  assert.match(prompt, /acceptance criteria/);
 });
 
 test("childRunEntry resumes a crashed session with the crash prompt when no conflict prompt is set, and is a fresh run with neither (#624)", () => {

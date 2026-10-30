@@ -209,6 +209,16 @@ test("reduceCampaign: a dead run's pending green is NOT crash-folded — it reac
   assert.deepEqual(issueLifecycle(dead, "301"), { state: "running" });
 });
 
+test("reduceCampaign: a failed-check re-admit's chip detail names the gate, not a merge conflict (#617)", () => {
+  const r = reduceCampaign([
+    event("campaign-start", { ts: "t0", waves: [["101"]], slots: 1 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["101"] }),
+    event("green", { ts: "t2", taskId: "101", branch: "agent/101", commits: [] }),
+    event("re-admit", { ts: "t3", taskId: "101", reason: "conflict", paths: [], base: "abc", gate: "lint", detail: "redeclared" }),
+  ]);
+  assert.equal(r.details.get("101"), "Retrying a failed check — lint");
+});
+
 test("reduceCampaign: a spawn re-admits a parked member back to running (design §5 step 3)", () => {
   const reduced = reduceCampaign([
     event("campaign-start", { ts: "t0", waves: [["101"]], slots: 1 }),

@@ -185,7 +185,9 @@ const localCampaignDeps = (cfg: ResolvedConfig, dir: string, scriptFor: (id: str
   };
   return {
     spawnRun,
-    integrate: (c, greens) => integrateGreens(c, greens, { gate: mergedBaseGate }),
+    // The per-merge check (#617) runs the flagged gates through the same local sandbox.
+    integrate: (c, greens) =>
+      integrateGreens(c, greens, { gate: mergedBaseGate, perMergeGate: (c2, flagged) => mergedBaseGate({ ...c2, gates: flagged }) }),
     collectChangelog: collectWaveChangelog,
     currentBranch,
     grace: graceWaitForAnswer,

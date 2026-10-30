@@ -227,9 +227,12 @@ test("readMountParentOwners probes the image with stat and reads stdout despite 
   );
   assert.deepEqual(readMountParentOwners("img", ["/home/agent/go", "/home/agent/go/pkg"], bin), new Map([["/home/agent/go", 1000]]));
   // --entrypoint: the shipped Dockerfiles' ENTRYPOINT is `sleep infinity`, which would ignore stat.
+  // --pull never: a locally missing image fails the probe rather than pulling it from a registry.
   assert.deepEqual(readFileSync(argvFile, "utf8").trim().split("\n"), [
     "run",
     "--rm",
+    "--pull",
+    "never",
     "--entrypoint",
     "stat",
     "img",
@@ -244,8 +247,15 @@ test("readMountParentOwners returns undefined, never throwing, when docker canno
   assert.equal(readMountParentOwners("img", ["/home/agent/go"], "/nonexistent/docker"), undefined);
 });
 
+test("readMountParentOwners returns undefined, never hanging, when docker does not answer in time", () => {
+  const started = Date.now();
+  assert.equal(readMountParentOwners("img", ["/home/agent/go"], fakeDocker("sleep 5").bin, 200), undefined);
+  assert.ok(Date.now() - started < 2000, `probe took ${Date.now() - started} ms`);
+});
+
 test("readMountParentOwners returns undefined when docker itself fails (no image, no stat in it)", () => {
-  // docker run exits 125 for a daemon/image error, 127 when the entrypoint is not found.
+  // docker run exits 125 for a daemon/image error (an image missing under --pull never), 127 when
+  // the entrypoint is not found.
   assert.equal(readMountParentOwners("img", ["/home/agent/go"], fakeDocker("exit 125").bin), undefined);
   assert.equal(readMountParentOwners("img", ["/home/agent/go"], fakeDocker("exit 127").bin), undefined);
 });

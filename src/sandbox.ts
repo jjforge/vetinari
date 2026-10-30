@@ -211,13 +211,21 @@ export function parseStatOwners(stdout: string): Map<string, number> {
  * Look inside `image` for who owns each of `paths` — image metadata says nothing about its
  * filesystem — with one short-lived `stat` container (#512). `--entrypoint` because the shipped
  * Dockerfiles' ENTRYPOINT is `sleep infinity`. A missing path exits `stat` non-zero, so stdout is
- * read regardless; only docker's own failures (125 daemon/image, 126/127 no `stat`) or a failed
- * spawn yield undefined, so the caller proceeds rather than refusing on a probe it could not run.
+ * read regardless; only docker's own failures (125 daemon/image, 126/127 no `stat`), a failed
+ * spawn or a probe killed at `timeoutMs` (a hung daemon) yield undefined, so the caller proceeds
+ * rather than refusing on a probe it could not run. `--pull never`: an image missing locally is a
+ * 125, never a registry pull (or a same-named public image probed in its place).
  */
-export function readMountParentOwners(image: string, paths: string[], docker = "docker"): Map<string, number> | undefined {
-  const r = spawnSync(docker, ["run", "--rm", "--entrypoint", "stat", image, "-c", "%u %n", ...paths], {
+export function readMountParentOwners(
+  image: string,
+  paths: string[],
+  docker = "docker",
+  timeoutMs = 30_000,
+): Map<string, number> | undefined {
+  const r = spawnSync(docker, ["run", "--rm", "--pull", "never", "--entrypoint", "stat", image, "-c", "%u %n", ...paths], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"],
+    timeout: timeoutMs,
   });
   if (r.error || r.status === null || [125, 126, 127].includes(r.status)) return undefined;
   return parseStatOwners(r.stdout);
@@ -265,15 +273,6 @@ export function foreignWorktreeFor(branch: string, stateDir: string, cwd: string
 }
 
 /**
- * Construct the sandcastle `AgentProvider` for this run (ADR 0016). The provider,
- * model and effort are resolved by `resolveAgentSelection` from the project default
- * (`cfg.agent`) with any CLI override read back from `VETINARI_AGENT` layered on top —
- * so a campaign/queue child `run` drives the same agent its parent was launched with,
- * not a silent claude. Then dispatch on the provider name to the matching resumable
- * factory, passing the (already-validated) effort in that provider's own vocabulary
- * (claude/codex `effort`, pi `--thinking`).
- */
-/**
  * The resolved agent choice for this run — the project default (`cfg.agent`) with any
  * CLI override read back from `VETINARI_AGENT` layered on top. The loop reads `.resumable`
  * off this to decide whether to resume a session between turns or re-enter each turn fresh
@@ -282,6 +281,15 @@ export function foreignWorktreeFor(branch: string, stateDir: string, cwd: string
 export const agentSelectionFor = (cfg: ResolvedConfig): AgentSelection =>
   resolveAgentSelection(cfg.agent, parseAgentOverride(process.env[AGENT_ENV_VAR]));
 
+/**
+ * Construct the sandcastle `AgentProvider` for this run (ADR 0016). The provider,
+ * model and effort are resolved by `resolveAgentSelection` from the project default
+ * (`cfg.agent`) with any CLI override read back from `VETINARI_AGENT` layered on top —
+ * so a campaign/queue child `run` drives the same agent its parent was launched with,
+ * not a silent claude. Then dispatch on the provider name to the matching resumable
+ * factory, passing the (already-validated) effort in that provider's own vocabulary
+ * (claude/codex `effort`, pi `--thinking`).
+ */
 export const agentFor = (cfg: ResolvedConfig) => {
   const sel = agentSelectionFor(cfg);
   switch (sel.provider) {

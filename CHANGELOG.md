@@ -68,6 +68,8 @@ Within a milestone each bold section label appears at most once.
 - [user] `loadConfig` refuses an unknown `containerShare` tier (e.g. `"hgih"`) instead of silently running it as `low` (#584).
 - [user] A stalled `gh` call no longer hangs campaign planning, `graft`/`prune --dry-run` or the findings harvest: every `gh` call is killed after 60 s and may return up to 64 MB of output, and the four tracker read seams (`fetchTask`, `blockedBy`, `listByLabel`, `findOpenIssue`) retry a failed call up to 3 times with jittered backoff (about 1 s, 2 s, 4 s). The write seams (`postComment`, `onIssueMerged`, `reportFinding`) never retry, so a finding is never double-filed (#560).
 - [api] `src/github.ts` exports `withRetry` and `GH_LIMITS`; `gh` takes optional `execFile` limits, and `githubTracker` takes an optional 4th `sleep` argument for tests (#560).
+- [user] A parked member that later merges — a conflict-parked green landing on a redrive, or one recognised as already on the base — now has its parked record cleared, so `vetinari parked` no longer lists it indefinitely (#558).
+- [user] `vetinari clear` now points at `vetinari tidy --apply` to drop records whose issue already merged, instead of `prune --purge` (which refuses with no campaign running); `--help` no longer claims `clear` clears parked records (#558).
 
 **Security:**
 - [user] The dashboard caps every POST body (answer, graft, prune, redrive, stop) at 64 KiB and answers a larger one with a plain `413` instead of reading it without limit (#564).

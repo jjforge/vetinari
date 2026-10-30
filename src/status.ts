@@ -144,6 +144,8 @@ export async function serveAllStatus(
     res.setHeader("content-security-policy", DASHBOARD_CSP);
     res.setHeader("x-content-type-options", "nosniff");
     res.setHeader("referrer-policy", "no-referrer");
+    // Error bodies echo request input; type them as plain text. JSON, HTML and SSE routes set their own.
+    res.setHeader("content-type", "text/plain; charset=utf-8");
     void (async () => {
       const denial = dashboardRequestDenial(req.headers.host, req.headers.origin, allowedHosts);
       if (denial) {

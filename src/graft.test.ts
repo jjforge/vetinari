@@ -401,3 +401,19 @@ test("an unknown id (a throwing fetchTask) is rejected whole — nothing appende
   );
   assert.equal(listOutbox(cfg).length, 0);
 });
+
+test("a graft whose only shared key with an unstarted member is waived lands in that member's wave, the waived key off the event", async () => {
+  const touches: Record<string, string> = { "101": "a.ts", "102": "DESIGN.md b.ts", "301": "DESIGN.md c.ts" };
+  const cfg = harnessCfg({
+    fetchTask: async (id: string) => JSON.stringify({ state: "OPEN", body: `Touches: ${touches[id]}` }),
+    fileSet: (ticket: string) => ({ files: ticket.match(/Touches: (.*)/)![1].split(" "), confident: true }),
+    waivedFiles: ["DESIGN.md"],
+  });
+  launch(cfg, [["101"], ["102"]]);
+
+  const result = await runGraft(cfg, ["301"], {});
+
+  // 102 sits in (1-based) wave 2, still unstarted; 301 shares only the waived file with it.
+  assert.deepEqual(result.placement, [{ id: "301", wave: 2 }]);
+  assert.deepEqual(result.event!.fileKeys, { "101": ["a.ts"], "102": ["b.ts"], "301": ["c.ts"] });
+});

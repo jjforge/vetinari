@@ -395,15 +395,17 @@ test("the outbox writers leave only <id>.json records behind, each round-trippin
   assert.equal(unsent?.sentAt, undefined);
 });
 
-test("neither outbox writer writes its record with a plain writeFileSync — both go through writeFileAtomic", () => {
-  const src = readFileSync(join(import.meta.dirname, "state.ts"), "utf8");
-  for (const fn of ["enqueueOutbound", "markOutboundSent"]) {
-    const start = src.indexOf(`export function ${fn}(`);
-    assert.ok(start >= 0, `${fn} is defined in state.ts`);
-    const body = src.slice(start, src.indexOf("\n}\n", start));
-    assert.match(body, /writeFileAtomic\(/, `${fn} writes through writeFileAtomic`);
-    assert.doesNotMatch(body, /writeFileSync\(/, `${fn} does not call a plain writeFileSync`);
-  }
+test("a failed markOutboundSent rewrite leaves the prior record byte-identical — never torn", () => {
+  const dir = outboxDir();
+  enqueueOutbound(cfgFor(dir), { category: "success", event: "green", text: "GREEN on 26" });
+  const [rec] = listOutboxIn(outboxDirOf(dir));
+  const path = join(outboxDirOf(dir), `${rec.id}.json`);
+  const before = readFileSync(path);
+  mkdirSync(`${path}.${process.pid}.tmp`);
+
+  assert.throws(() => markOutboundSent(outboxDirOf(dir), rec.id, "ops"));
+
+  assert.deepEqual(readFileSync(path), before);
 });
 
 test("listOutboxIn lists records enqueued in the same millisecond in enqueue order", (t) => {

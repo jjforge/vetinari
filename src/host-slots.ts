@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, openSync, closeSync, writeSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, closeSync, writeSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { cpus } from "node:os";
 import { join } from "node:path";
+import { writeFileAtomic } from "./atomic-write.ts";
 
 /**
  * The host slot budget (ADR 0010): a cooperative filesystem lease every
@@ -260,7 +261,7 @@ export function registerProject(
   withLock(slotsDir(configDir), isAlive, () => {
     const file = leaseFile(configDir, pid);
     const existing = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as SlotLease).held : 0;
-    writeFileSync(file, JSON.stringify({ project, weight, held: existing || 0, want, pid, kind }));
+    writeFileAtomic(file, JSON.stringify({ project, weight, held: existing || 0, want, pid, kind }));
   });
 }
 
@@ -314,7 +315,7 @@ export function acquireSlot(configDir: string, ceiling: number, project: string,
     // explicit kind here on its next acquire. Preserve the declared `want` too — acquiring a
     // slot does not change demand; `registerProject` owns refreshing it.
     const kind: LeaseKind = mine?.kind ?? "campaign";
-    writeFileSync(leaseFile(configDir, pid), JSON.stringify({ project, weight, held: myRunHeld + 1, want: mine?.want, pid, kind }));
+    writeFileAtomic(leaseFile(configDir, pid), JSON.stringify({ project, weight, held: myRunHeld + 1, want: mine?.want, pid, kind }));
     return true;
   });
 }
@@ -361,7 +362,7 @@ export function releaseSlot(configDir: string, opts: LeaseOpts = {}): void {
     const file = leaseFile(configDir, pid);
     if (!existsSync(file)) return;
     const l = JSON.parse(readFileSync(file, "utf8")) as SlotLease;
-    writeFileSync(file, JSON.stringify({ ...l, held: Math.max(0, l.held - 1) }));
+    writeFileAtomic(file, JSON.stringify({ ...l, held: Math.max(0, l.held - 1) }));
   });
 }
 

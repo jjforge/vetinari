@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { cpus, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -14,6 +14,7 @@ import {
   registerProject,
   releaseSlot,
   resolveHostCeiling,
+  slotsDir,
   withHostSlot,
   type HostBudget,
 } from "./host-slots.ts";
@@ -370,4 +371,57 @@ test("liveCampaignPid returns the live campaign's pid for the project — the `v
   // The campaign died: its lease lingers but its pid is gone.
   dead.add(500);
   assert.equal(liveCampaignPid(dir, "alpha", { isAlive }), undefined);
+});
+
+// A lock-free reader (`readLeases`) must never see a truncated lease, so every lease
+// write replaces the file by rename — a new inode — rather than rewriting it in place.
+const leaseInode = (dir: string, pid: number) => statSync(join(slotsDir(dir), `${pid}.json`)).ino;
+const strayTemps = (dir: string) => readdirSync(slotsDir(dir)).filter((n) => n.endsWith(".tmp"));
+
+test("re-registering replaces the lease file atomically rather than rewriting it in place", () => {
+  const dir = freshDir();
+  const A = { pid: 1, isAlive: alive };
+  registerProject(dir, "A", 1, "campaign", 2, A);
+  const before = leaseInode(dir, 1);
+  registerProject(dir, "A", 1, "campaign", 5, A);
+  assert.notEqual(leaseInode(dir, 1), before);
+  assert.deepEqual(readLeases(dir), [{ project: "A", weight: 1, held: 0, want: 5, pid: 1, kind: "campaign" }]);
+  assert.deepEqual(strayTemps(dir), []);
+});
+
+test("a successful acquire replaces the lease file atomically rather than rewriting it in place", () => {
+  const dir = freshDir();
+  const A = { pid: 1, isAlive: alive };
+  registerProject(dir, "A", 1, "campaign", 2, A);
+  const before = leaseInode(dir, 1);
+  assert.equal(acquireSlot(dir, 2, "A", 1, A), true);
+  assert.notEqual(leaseInode(dir, 1), before);
+  assert.deepEqual(readLeases(dir), [{ project: "A", weight: 1, held: 1, want: 2, pid: 1, kind: "campaign" }]);
+  assert.deepEqual(strayTemps(dir), []);
+});
+
+test("releasing a slot replaces the lease file atomically rather than rewriting it in place", () => {
+  const dir = freshDir();
+  const A = { pid: 1, isAlive: alive };
+  registerProject(dir, "A", 1, "campaign", 2, A);
+  assert.equal(acquireSlot(dir, 2, "A", 1, A), true);
+  const before = leaseInode(dir, 1);
+  releaseSlot(dir, A);
+  assert.notEqual(leaseInode(dir, 1), before);
+  assert.deepEqual(readLeases(dir), [{ project: "A", weight: 1, held: 0, want: 2, pid: 1, kind: "campaign" }]);
+  assert.deepEqual(strayTemps(dir), []);
+});
+
+test("a temp file stranded by a crashed lease write is not read as a lease", () => {
+  const dir = freshDir();
+  const A = { pid: 1, isAlive: alive };
+  registerProject(dir, "A", 1, "campaign", 2, A);
+  writeFileSync(
+    join(slotsDir(dir), "2.json.99.tmp"),
+    JSON.stringify({ project: "B", weight: 1, held: 0, want: 1, pid: 2, kind: "campaign" }),
+  );
+  assert.deepEqual(
+    readLeases(dir).map((l) => l.pid),
+    [1],
+  );
 });

@@ -242,7 +242,12 @@ test("resolveHostCeiling: with no env and no file it falls back to the machine-d
   const saved = process.env.MAX_CONCURRENT_CONTAINERS;
   delete process.env.MAX_CONCURRENT_CONTAINERS;
   try {
-    assert.equal(resolveHostCeiling(dir), machineDefaultCeiling(cpus().length));
+    const warnings: string[] = [];
+    assert.equal(
+      resolveHostCeiling(dir, (m) => warnings.push(m)),
+      machineDefaultCeiling(cpus().length),
+    );
+    assert.deepEqual(warnings, []);
   } finally {
     if (saved !== undefined) process.env.MAX_CONCURRENT_CONTAINERS = saved;
   }
@@ -254,9 +259,17 @@ test("resolveHostCeiling: reads the max-concurrent-containers file, and the env 
   const saved = process.env.MAX_CONCURRENT_CONTAINERS;
   delete process.env.MAX_CONCURRENT_CONTAINERS;
   try {
-    assert.equal(resolveHostCeiling(dir), 6);
+    const warnings: string[] = [];
+    assert.equal(
+      resolveHostCeiling(dir, (m) => warnings.push(m)),
+      6,
+    );
     process.env.MAX_CONCURRENT_CONTAINERS = "9";
-    assert.equal(resolveHostCeiling(dir), 9);
+    assert.equal(
+      resolveHostCeiling(dir, (m) => warnings.push(m)),
+      9,
+    );
+    assert.deepEqual(warnings, []);
   } finally {
     if (saved === undefined) delete process.env.MAX_CONCURRENT_CONTAINERS;
     else process.env.MAX_CONCURRENT_CONTAINERS = saved;
@@ -267,13 +280,45 @@ test("resolveHostCeiling: a non-numeric or non-positive setting falls back to th
   const dir = freshDir();
   const saved = process.env.MAX_CONCURRENT_CONTAINERS;
   try {
-    process.env.MAX_CONCURRENT_CONTAINERS = "nonsense";
-    assert.equal(resolveHostCeiling(dir), machineDefaultCeiling(cpus().length));
-    process.env.MAX_CONCURRENT_CONTAINERS = "0";
-    assert.equal(resolveHostCeiling(dir), machineDefaultCeiling(cpus().length));
+    for (const bad of ["abc", "0", "-2"]) {
+      const warnings: string[] = [];
+      process.env.MAX_CONCURRENT_CONTAINERS = bad;
+      assert.equal(
+        resolveHostCeiling(dir, (m) => warnings.push(m)),
+        machineDefaultCeiling(cpus().length),
+      );
+      assert.deepEqual(warnings, [`[vetinari] MAX_CONCURRENT_CONTAINERS="${bad}" is not a positive integer — ignoring it`]);
+    }
+    // A bad env still falls through to a valid file, warning only about the env.
+    writeFileSync(join(dir, "max-concurrent-containers"), "6\n");
+    const warnings: string[] = [];
+    process.env.MAX_CONCURRENT_CONTAINERS = "abc";
+    assert.equal(
+      resolveHostCeiling(dir, (m) => warnings.push(m)),
+      6,
+    );
+    assert.deepEqual(warnings, ['[vetinari] MAX_CONCURRENT_CONTAINERS="abc" is not a positive integer — ignoring it']);
   } finally {
     if (saved === undefined) delete process.env.MAX_CONCURRENT_CONTAINERS;
     else process.env.MAX_CONCURRENT_CONTAINERS = saved;
+  }
+});
+
+test("resolveHostCeiling: a non-positive-integer max-concurrent-containers file warns with its path and falls back to the machine default", () => {
+  const dir = freshDir();
+  const file = join(dir, "max-concurrent-containers");
+  writeFileSync(file, "nope\n");
+  const saved = process.env.MAX_CONCURRENT_CONTAINERS;
+  delete process.env.MAX_CONCURRENT_CONTAINERS;
+  try {
+    const warnings: string[] = [];
+    assert.equal(
+      resolveHostCeiling(dir, (m) => warnings.push(m)),
+      machineDefaultCeiling(cpus().length),
+    );
+    assert.deepEqual(warnings, [`[vetinari] ${file}: "nope" is not a positive integer — ignoring it`]);
+  } finally {
+    if (saved !== undefined) process.env.MAX_CONCURRENT_CONTAINERS = saved;
   }
 });
 

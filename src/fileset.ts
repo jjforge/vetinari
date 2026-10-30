@@ -21,8 +21,9 @@
  * another directory. A directory the tree lacks keeps the cited path; one matching
  * several tree directories, or a bare cite, keeps the bare basename.
  */
-import { readdirSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { join, posix, relative, sep } from "node:path";
+import { Refusal } from "./refusal.ts";
 
 export interface FileSet {
   /**
@@ -38,6 +39,11 @@ export interface FileSet {
    * `confident: false` ticket silently; it halts and asks the requestor.
    */
   confident: boolean;
+  /**
+   * the fileKeys {@link waiveFileSet} removed from `files` as **waived files** — set only
+   * by that wrapper, so the plan can name what it waived. Absent from a bare resolver.
+   */
+  waived?: string[];
 }
 
 /**
@@ -442,5 +448,31 @@ export const packageScopedFileSet = (root: string = process.cwd()): FileSetOf =>
     // As defaultFileSet, plus: a bare `Creates:` cite (no package) forbids confidence.
     const confident = (valid.length > 0 || creates.length > 0) && valid.length === touches.length && placed.length === creates.length;
     return { files, confident };
+  };
+};
+
+/**
+ * Wrap a `fileSet` resolver so the project's **waived files** (`waivedFiles` in config)
+ * never reach a collision check: a fileKey exactly equal to an entry (no globs, no
+ * basename matching) is moved from `files` to `waived`, and `confident` is the
+ * resolver's own verdict. The one helper every fileKey-resolution site applies —
+ * `campaign`, `campaign --dry-run` and `graft` — so they agree by construction.
+ *
+ * An entry that is a directory in the tree at `root` (the tree the shipped resolvers
+ * walk, the cwd by default) is refused here, not at config load: under
+ * `packageScopedFileSet` a fileKey is a package directory, which must never be
+ * waivable. An entry the tree lacks matches no key and is silently ignored. With no
+ * entries the resolver is returned unwrapped.
+ */
+export const waiveFileSet = (resolve: FileSetOf, waivedFiles: readonly string[] = [], root: string = process.cwd()): FileSetOf => {
+  if (!waivedFiles.length) return resolve;
+  for (const entry of waivedFiles) {
+    if (statSync(join(root, entry), { throwIfNoEntry: false })?.isDirectory())
+      throw new Refusal(`waivedFiles: "${entry}" is a directory — only single files can be waived (directories and globs cannot).`);
+  }
+  const waivable = new Set(waivedFiles);
+  return async (ticket: string): Promise<FileSet> => {
+    const { files, confident } = await resolve(ticket);
+    return { files: files.filter((k) => !waivable.has(k)), confident, waived: files.filter((k) => waivable.has(k)) };
   };
 };

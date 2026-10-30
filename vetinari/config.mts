@@ -8,16 +8,18 @@ export default defineConfig({
   image: "vetinari",
   baseBranch: "main",
 
-  // The gate. Both proven green on main before wiring them here: tsc --noEmit,
-  // then node's test runner over every src/*.test.ts via tsx. New test files a
-  // ticket adds land in src/ and are picked up by the glob.
+  // The gate. Each proven green on main before wiring it here, cheap checks
+  // first: tsc --noEmit, then prettier --check, then node's test runner over
+  // every src/*.test.ts via tsx. New test files a ticket adds land in src/ and
+  // are picked up by the glob.
   gates: [
     { cmd: "npm run typecheck", label: "typecheck" },
+    { cmd: "npm run format:check", label: "format" },
     { cmd: "npx tsx --test src/*.test.ts", label: "test" },
   ],
 
-  // Install devDeps (tsx, typescript) into the worktree before the agent runs,
-  // so both gates have their toolchain. Runs as an onSandboxReady hook.
+  // Install devDeps (tsx, typescript, prettier) into the worktree before the
+  // agent runs, so every gate has its toolchain. Runs as an onSandboxReady hook.
   setup: ["npm ci"],
 
   // The GitHub tracker preset: fetchTask, blockedBy, listByLabel, postComment,

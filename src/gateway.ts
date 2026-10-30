@@ -351,6 +351,20 @@ export function pendingAnnouncements(projects: GatewayProject[], index: ReplyInd
 }
 
 /**
+ * Log a `gateway-skip-no-credentials` row for each project with no connection —
+ * the one the announce and drain paths skip silently, since there is nowhere to
+ * send. Once per project per daemon run: `logged` is the daemon's lifetime set of
+ * projects already reported, so a later tick stays quiet and a restart reports again.
+ */
+export function logNoConnectionSkips(projects: GatewayProject[], logged: Set<string>, logger: Logger): void {
+  for (const p of projects) {
+    if (p.conn || logged.has(p.project)) continue;
+    logged.add(p.project);
+    logger.log("gateway-skip-no-credentials", { project: p.project, baseLocation: p.baseLocation });
+  }
+}
+
+/**
  * Where an outbound record routes: the destination name the notify map resolves
  * (undefined when unmapped and there is no wildcard), and the connection to send
  * on — the destination's chat/thread on the project's bot, or the project's
@@ -962,9 +976,13 @@ export async function gateway(configDir: string = gatewayConfigDir()): Promise<v
   // project registers; it runs alongside the Telegram loops below.
   await serveAllStatus(configDir, { port: STATUS_PORT, host: STATUS_HOST });
 
+  // Projects already reported as having no connection, for this daemon run only —
+  // so each logs its skip once, not every tick, and a restart reports it again.
+  const skippedNoConn = new Set<string>();
   const announcing = (async () => {
     for (;;) {
       try {
+        logNoConnectionSkips(loadGatewayProjects(configDir), skippedNoConn, log);
         await announcePending(configDir, index, log);
         await drainOutboxes(configDir, log);
       } catch (e) {

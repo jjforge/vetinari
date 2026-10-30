@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -826,4 +827,88 @@ test("waiveFileSet cannot waive a .go file under packageScopedFileSet — the fi
     onUnderspecified: () => "fail",
   });
   assert.deepEqual(plan.waves, [["1"], ["2"]]);
+});
+
+/**
+ * A throwaway git repository: `tracked` files committed, `untracked` files left
+ * untracked, and a `.gitignore` holding the `ignore` patterns (committed with them).
+ */
+const gitRepoWith = (spec: { tracked: string[]; untracked?: string[]; ignore?: string[] }): string => {
+  const root = treeWith(...spec.tracked);
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: root, stdio: "ignore" });
+  git("init", "-q");
+  if (spec.ignore) writeFileSync(join(root, ".gitignore"), spec.ignore.join("\n") + "\n");
+  git("add", "-A");
+  git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "init");
+  populate(root, ...(spec.untracked ?? []));
+  return root;
+};
+
+/** The #498 shape: a gitignored cache holding its own `e2e/README.md`. */
+const repoWithIgnoredCache = (): string => {
+  const root = gitRepoWith({ tracked: ["e2e/README.md", "README.md"], ignore: [".vetinari.local/"] });
+  populate(root, ".vetinari.local/cache/x/e2e/README.md");
+  return root;
+};
+
+test("defaultFileSet resolves a pinned cite against git's files, not a gitignored cache sharing its suffix (#498)", () => {
+  const res = defaultFileSet(repoWithIgnoredCache())("Touches (existing files): `e2e/README.md`\n");
+
+  assert.deepEqual(res.files, ["e2e/README.md"]);
+  assert.equal(res.confident, true);
+});
+
+test("defaultFileSet resolves a Creates: cite's directory against git's files, not a gitignored cache's directories (#498)", () => {
+  const res = defaultFileSet(repoWithIgnoredCache())("Creates: `e2e/new.spec.ts`\n");
+
+  assert.deepEqual(res.files, ["e2e/new.spec.ts"]);
+});
+
+test("defaultFileSet resolves a cite of an untracked, not-ignored file in a git repository (#498)", () => {
+  const root = gitRepoWith({ tracked: ["README.md"], untracked: ["src/draft.ts"] });
+
+  const res = defaultFileSet(root)("Touches: `draft.ts`\n");
+
+  assert.deepEqual(res.files, ["src/draft.ts"]);
+  assert.equal(res.confident, true);
+});
+
+test("defaultFileSet resolves a tracked non-ASCII filename to its real path (#498)", () => {
+  const root = gitRepoWith({ tracked: ["docs/über.md"] });
+
+  const res = defaultFileSet(root)("Touches: `über.md`\n");
+
+  assert.deepEqual(res.files, ["docs/über.md"]);
+  assert.equal(res.confident, true);
+});
+
+test("defaultFileSet does not resolve a cite of a gitignored file, so the ticket is not confident (#498)", () => {
+  const root = gitRepoWith({ tracked: ["src/plan.ts"], ignore: [".env"] });
+  populate(root, ".env");
+
+  const res = defaultFileSet(root)("Touches: `src/plan.ts`, `.env`\n");
+
+  assert.deepEqual(res.files, ["src/plan.ts"]);
+  assert.equal(res.confident, false);
+});
+
+test("defaultFileSet's walk of a plain directory skips .vetinari.local (#498)", () => {
+  const root = treeWith("e2e/README.md", "README.md", ".vetinari.local/cache/x/e2e/README.md");
+
+  const res = defaultFileSet(root)("Touches: `e2e/README.md`\n");
+
+  assert.deepEqual(res.files, ["e2e/README.md"]);
+  assert.equal(res.confident, true);
+});
+
+test("defaultFileSet indexes neither an untracked nested git repository nor its files (#498)", () => {
+  const root = gitRepoWith({ tracked: ["README.md"] });
+  populate(root, "nested/a.ts");
+  execFileSync("git", ["init", "-q"], { cwd: join(root, "nested") });
+
+  // git lists the nested repository as the single entry `nested/`, never its files.
+  const res = defaultFileSet(root)("Touches: `nested`, `nested/a.ts`\n");
+
+  assert.deepEqual(res.files, []);
+  assert.equal(res.confident, false);
 });

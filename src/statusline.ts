@@ -1,6 +1,8 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { basename } from "node:path";
-import { loadConfig } from "./config.ts";
+import { loadConfig, type ResolvedConfig } from "./config.ts";
+import { projectHasLiveCampaign } from "./host-slots.ts";
+import { gatewayConfigDir } from "./registry.ts";
 import { buildStatus, type CampaignStatus, type IssueStatus, liveWaves } from "./status.ts";
 import { reasonWord } from "./dashboard-visual-state.ts";
 import { composeStatusLine } from "./statusline-install.ts";
@@ -79,6 +81,22 @@ export function formatStatusLine(status: CampaignStatus): string {
   if (reasons.size) parts.push([...reasons].join(", "));
 
   return parts.length ? `🏰 ${parts.join(" · ")}` : "🏰 idle";
+}
+
+/**
+ * Line 2 off the project's log, read the way the dashboard reads it: while a live campaign
+ * holds the project's lease, an answered park awaiting its re-admit counts as running. With no
+ * live campaign `alive` stays undefined, never `false` — `false` turns on the dashboard's crash
+ * folding, which stays off the status line. A failed lease probe degrades to the same.
+ */
+export function campaignStatusLine(cfg: ResolvedConfig, configDir: string = gatewayConfigDir()): string {
+  let alive: true | undefined;
+  try {
+    if (projectHasLiveCampaign(configDir, cfg.project)) alive = true;
+  } catch {
+    // an unreadable lease dir reads as no live campaign
+  }
+  return formatStatusLine(buildStatus(cfg, { alive }));
 }
 
 /** Read Claude Code's raw JSON blob from stdin once — `""` on a TTY or read error. */
@@ -162,7 +180,7 @@ export async function runStatusLine(cfgPath?: string, opts: { baseCommand?: stri
   let line2 = "";
   try {
     const cfg = await loadConfig(cfgPath);
-    line2 = formatStatusLine(buildStatus(cfg));
+    line2 = campaignStatusLine(cfg);
   } catch {
     // No Vetinari config here: line 1 alone still describes the session.
   }

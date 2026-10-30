@@ -1336,3 +1336,80 @@ test("runFilesetCheck refuses a waivedFiles entry that is a directory in the tre
     (err: unknown) => err instanceof Refusal && /"src" is a directory/.test(err.message),
   );
 });
+
+test("runCampaignPlan's report bounds the waves by a file every ticket cites, and lists it most-shared first (#612)", async () => {
+  // Every ticket cites DESIGN.md, so no planner can do better than one wave per ticket;
+  // a.ts is shared by two of the four — a quarter or more, so it is listed too, after it.
+  const report = await runCampaignPlan(
+    waivedCfgFrom({
+      "1": "Touches: DESIGN.md a.ts",
+      "2": "Touches: DESIGN.md a.ts",
+      "3": "Touches: DESIGN.md c.ts",
+      "4": "Touches: DESIGN.md d.ts",
+    }),
+    ["1", "2", "3", "4"],
+    {},
+    { isTTY: false, ask: () => "fail" },
+  );
+
+  assert.equal(report.waves.length, 4);
+  assert.match(report.report, /^lower bound: 4 waves — 4 tickets share DESIGN\.md \(dependency depth 1\)$/m);
+  assert.match(report.report, /^Most-shared files:\n {2}DESIGN\.md {2}4 tickets\n {2}a\.ts {2}2 tickets$/m);
+});
+
+test("describePlan's lower bound is the dependency chain when it is longer than any file group (#612)", async () => {
+  // a → b → c → d is four tickets deep; x.md is shared by only two, so the chain sets the bound.
+  const edges = { b: ["a"], c: ["b"], d: ["c"] };
+  const plan = await planWith(["a", "b", "c", "d", "e"], edges, { a: ["x.md"], b: ["y.md"], c: ["z.md"], d: ["w.md"], e: ["x.md"] });
+
+  assert.equal(plan.waves.length, 4);
+  assert.match(
+    describePlan(plan),
+    /^lower bound: 4 waves — set by the dependency chain, 4 tickets deep \(largest file group: 2 tickets share x\.md\)$/m,
+  );
+});
+
+test("describePlan counts a bare cite toward each same-named path, never two paths as one group (#612)", async () => {
+  // a/foo.md and b/foo.md are distinct files; the bare foo.md collides with each. So the
+  // largest group is two tickets, never three — the plan itself needs only two waves.
+  const plan = await planWith(["1", "2", "3"], {}, { "1": ["a/foo.md"], "2": ["b/foo.md"], "3": ["foo.md"] });
+  const report = describePlan(plan);
+
+  assert.equal(plan.waves.length, 2);
+  assert.match(report, /^lower bound: 2 waves — 2 tickets share a\/foo\.md \(dependency depth 1\)$/m);
+  assert.match(report, /^Most-shared files:\n {2}a\/foo\.md {2}2 tickets\n {2}b\/foo\.md {2}2 tickets$/m);
+  assert.doesNotMatch(report, /^ {2}foo\.md/m);
+});
+
+test("describePlan groups bare cites of one basename on their own when no path of it is cited (#612)", async () => {
+  const plan = await planWith(["1", "2", "3"], {}, { "1": ["foo.md"], "2": ["foo.md"], "3": ["bar.md"] });
+
+  assert.match(describePlan(plan), /^lower bound: 2 waves — 2 tickets share foo\.md \(dependency depth 1\)$/m);
+});
+
+test("describePlan lists no file shared by fewer than a quarter of the tickets, or by only one (#612)", async () => {
+  // Nine tickets: x.md is shared by two (under a quarter); the rest each cite their own file.
+  const files: Record<string, string[]> = { "1": ["x.md"], "2": ["x.md"] };
+  for (const id of ["3", "4", "5", "6", "7", "8", "9"]) files[id] = [`only-${id}.md`];
+  const report = describePlan(await planWith(Object.keys(files), {}, files));
+
+  assert.doesNotMatch(report, /Most-shared/);
+  assert.doesNotMatch(report, /only-/);
+  // The quarter is inclusive: of eight tickets, two sharing a file is enough to list it.
+  delete files["9"];
+  assert.match(describePlan(await planWith(Object.keys(files), {}, files)), /^Most-shared files:\n {2}x\.md {2}2 tickets$/m);
+});
+
+test("runCampaignPlan: a one-issue selection's report bounds by the dependency chain, with no most-shared section (#612)", async () => {
+  const report = await runCampaignPlan(waivedCfgFrom({ "1": "Touches: DESIGN.md" }), ["1"], {}, { isTTY: false, ask: () => "fail" });
+
+  assert.match(report.report, /^lower bound: 1 wave — set by the dependency chain, 1 ticket deep$/m);
+  assert.doesNotMatch(report.report, /Most-shared/);
+});
+
+test("describePlan names the file when its group ties the dependency chain (#612)", async () => {
+  // a → b is two tickets deep, and x.md is shared by two: a tie, so the file is named.
+  const plan = await planWith(["a", "b", "c", "d"], { b: ["a"] }, { a: ["a.md"], b: ["b.md"], c: ["x.md"], d: ["x.md"] });
+
+  assert.match(describePlan(plan), /^lower bound: 2 waves — 2 tickets share x\.md \(dependency depth 2\)$/m);
+});

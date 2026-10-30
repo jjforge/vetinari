@@ -1,4 +1,5 @@
 import test from "node:test";
+import { spawnSync } from "node:child_process";
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,6 +15,7 @@ import {
   formatParkAnnouncement,
   formatPrunePreview,
   gatewayHealth,
+  gatewayStatusPort,
   handlePruneCommand,
   isStatusCommand,
   loadGatewayProjects,
@@ -43,6 +45,7 @@ import {
 } from "./gateway.ts";
 import type { CampaignStatus, StatusWave, StatusIssue } from "./status.ts";
 import { PARK_RECOVERY, recoverySentence } from "./park-recovery.ts";
+import { Refusal } from "./refusal.ts";
 
 let gwCounter = 0;
 
@@ -1506,4 +1509,68 @@ test("no source file under src/ contains a literal NUL byte", () => {
     .filter((f) => f.endsWith(".ts") || f.endsWith(".mts"))
     .filter((f) => readFileSync(join(srcDir, f)).includes(0x00));
   assert.deepEqual(offenders, [], `source files with a raw NUL byte: ${offenders.join(", ")}`);
+});
+
+test("gatewayStatusPort defaults to 8765 and takes a valid VETINARI_GATEWAY_STATUS_PORT", () => {
+  assert.equal(gatewayStatusPort({}, memoryLogger()), 8765);
+  assert.equal(gatewayStatusPort({ VETINARI_GATEWAY_STATUS_PORT: "9001" }, memoryLogger()), 9001);
+  assert.equal(gatewayStatusPort({ VETINARI_GATEWAY_STATUS_PORT: "0" }, memoryLogger()), 0);
+});
+
+test("gatewayStatusPort refuses a VETINARI_GATEWAY_STATUS_PORT that is not a port number, naming the variable and the value", () => {
+  assert.throws(
+    () => gatewayStatusPort({ VETINARI_GATEWAY_STATUS_PORT: "abc" }, memoryLogger()),
+    (err: unknown) => err instanceof Refusal && err.message === 'VETINARI_GATEWAY_STATUS_PORT must be a port number (0–65535), got "abc"',
+  );
+  for (const bad of ["", "-1", "80.5", "70000"]) {
+    assert.throws(
+      () => gatewayStatusPort({ VETINARI_GATEWAY_STATUS_PORT: bad }, memoryLogger()),
+      (err: unknown) =>
+        err instanceof Refusal && err.message === `VETINARI_GATEWAY_STATUS_PORT must be a port number (0–65535), got "${bad}"`,
+      bad,
+    );
+  }
+});
+
+const captureWarnings = <T>(fn: () => T): { result: T; warnings: string[] } => {
+  const warnings: string[] = [];
+  const origWarn = console.warn;
+  console.warn = (...args: unknown[]) => warnings.push(args.join(" "));
+  try {
+    return { result: fn(), warnings };
+  } finally {
+    console.warn = origWarn;
+  }
+};
+
+test("gatewayStatusPort warns and host-logs when VETINARI_STATUS_PORT is set, since the gateway ignores it", () => {
+  const logger = memoryLogger();
+  const { result, warnings } = captureWarnings(() => gatewayStatusPort({ VETINARI_STATUS_PORT: "9000" }, logger));
+  assert.equal(result, 8765);
+  assert.deepEqual(warnings, [
+    "[vetinari] VETINARI_STATUS_PORT is set but the gateway ignores it — set VETINARI_GATEWAY_STATUS_PORT to choose the gateway's dashboard port (using 8765)",
+  ]);
+  const rows = logger.events.filter((e) => e.event === "gateway-status-port-env-ignored");
+  assert.equal(rows.length, 1);
+  assert.equal((rows[0] as Record<string, unknown>).value, "9000");
+  assert.equal((rows[0] as Record<string, unknown>).port, 8765);
+});
+
+test("gatewayStatusPort stays quiet when VETINARI_STATUS_PORT is unset", () => {
+  const logger = memoryLogger();
+  const { warnings } = captureWarnings(() => gatewayStatusPort({ VETINARI_GATEWAY_STATUS_PORT: "9001" }, logger));
+  assert.deepEqual(warnings, []);
+  assert.equal(logger.events.filter((e) => e.event === "gateway-status-port-env-ignored").length, 0);
+});
+
+test("importing gateway.ts with a bad VETINARI_GATEWAY_STATUS_PORT does not throw — the check runs only at gateway start", () => {
+  const r = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "-e", `await import(${JSON.stringify(join(import.meta.dirname, "gateway.ts"))})`],
+    {
+      env: { ...process.env, VETINARI_GATEWAY_STATUS_PORT: "abc" },
+      encoding: "utf8",
+    },
+  );
+  assert.equal(r.status, 0, r.stderr);
 });

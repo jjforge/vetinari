@@ -151,6 +151,8 @@ export function describeEvent(e: OrchestratorEvent, opts: { festive?: { offset: 
         : `${hash(e.taskId)} parked${e.reason ? `: ${e.reason}` : ""}`;
     case "failed":
       return `${hash(e.taskId)} failed — could not be made green`;
+    case "re-admit":
+      return `${hash(e.taskId)} retrying merge conflict — ${(e.paths ?? []).join(", ")}`;
     case "campaign-parked":
       return `Campaign parked${e.detail ? ` — ${e.detail}` : " — merged base gated red"}`;
     case "campaign-failed":

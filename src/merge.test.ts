@@ -13,6 +13,7 @@ import {
   describeRegistryDedup,
   findMergeCommit,
   integrateGreens,
+  parkMergeConflict,
   purgeBranches,
   scanTidy,
   type TidySnapshot,
@@ -89,10 +90,11 @@ function repoWithConflictingGreens(): { dir: string; git: (args: string[]) => st
   return { dir, git };
 }
 
-test("integrateGreens quarantines a conflicting green, keeps the earlier green merged, and continues", async () => {
+test("integrateGreens reports a colliding green with its unmerged paths and the base, keeps the earlier green merged, and parks nothing (#624)", async () => {
   const { dir, git } = repoWithConflictingGreens();
+  const parkedDir = join(dir, "parked");
   const log = memoryLogger();
-  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir: join(dir, "parked"), log } as unknown as ResolvedConfig;
+  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir, log } as unknown as ResolvedConfig;
   const prevCwd = process.cwd();
   process.chdir(dir);
   try {
@@ -100,37 +102,64 @@ test("integrateGreens quarantines a conflicting green, keeps the earlier green m
       gate: async () => ({ green: true, report: "" }),
     });
 
-    // A stayed merged; only B was held — the wave neither rolled back nor parked.
+    // A stayed merged; B collided and is reported — the wave neither rolled back nor parked.
     assert.deepEqual(result.merged, ["A"]);
-    assert.deepEqual(result.conflictParked, ["B"]);
+    assert.deepEqual(
+      result.conflicts.map((c) => ({ taskId: c.taskId, paths: c.paths, base: c.base })),
+      [{ taskId: "B", paths: ["f.txt"], base: headSha(dir) }],
+      "the collision carries the real unmerged paths and the base it must merge",
+    );
+    assert.ok(result.conflicts[0].detail.length > 0, "the merge output rides along for a later park");
     assert.equal(result.parked, undefined);
-    // No `reset --hard` to the wave start: A's change is on the base (not "base").
+    // Only B's merge was aborted: A's change is on the base and no merge is left in progress.
     assert.equal(readFileSync(join(dir, "f.txt"), "utf8"), "A\n");
-    // B's branch is preserved (resumable); A's merged branch is reclaimed.
+    assert.equal(git(["status", "--porcelain"]), "");
+    // B's branch is preserved for the retry; A's merged branch is reclaimed.
     assert.equal(git(["branch", "--list", "agent/B"]).length > 0, true);
     assert.equal(git(["branch", "--list", "agent/A"]), "");
   } finally {
     process.chdir(prevCwd);
   }
 
-  // The conflict was recorded as an integrator `parked{conflict}` event naming B.
-  const q = log.events.filter((e) => e.event === "parked" && (e as any).reason === "conflict");
-  assert.equal(q.length, 1);
-  assert.equal((q[0] as any).taskId, "B");
+  // The campaign decides what a collision becomes: no parked event, no parked record here.
+  assert.equal(log.events.filter((e) => e.event === "parked").length, 0);
+  assert.deepEqual(listParkedIn(parkedDir), []);
 });
 
-test("integrateGreens writes a durable parked{conflict} record for the quarantined green (design §2.5)", async () => {
+test("integrateGreens fails a merge that stops with no unmerged paths — a held index.lock — rather than calling it a conflict (#624, #581)", async () => {
   const { dir } = repoWithConflictingGreens();
   const parkedDir = join(dir, "parked");
   const log = memoryLogger();
   const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir, log } as unknown as ResolvedConfig;
   const prevCwd = process.cwd();
   process.chdir(dir);
+  writeFileSync(join(dir, ".git", "index.lock"), "");
   try {
-    await integrateGreens(cfg, ["A", "B"], { gate: async () => ({ green: true, report: "" }) });
+    const result = await integrateGreens(cfg, ["A"], { gate: async () => ({ green: true, report: "" }) });
+
+    assert.deepEqual(result.merged, []);
+    assert.deepEqual(result.conflicts, [], "no unmerged paths — not a conflict, so nothing to retry");
+    assert.deepEqual(result.mergeFailed, ["A"]);
   } finally {
     process.chdir(prevCwd);
   }
+
+  // A `failed` for the member carrying the merge output; never a park.
+  const failed = log.events.filter((e) => e.event === "failed") as any[];
+  assert.equal(failed.length, 1);
+  assert.equal(failed[0].taskId, "A");
+  assert.match(failed[0].detail, /Unable to write index/, "the merge output rides on the failure");
+  assert.equal(log.events.filter((e) => e.event === "parked").length, 0);
+  assert.deepEqual(listParkedIn(parkedDir), []);
+});
+
+test("parkMergeConflict writes a durable parked{conflict} record and event for a green that collided again (design §2.5, §6)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-park-conflict-"));
+  const parkedDir = join(dir, "parked");
+  const log = memoryLogger();
+  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir, log } as unknown as ResolvedConfig;
+
+  parkMergeConflict(cfg, { taskId: "B", paths: ["f.txt"], base: "abc1234", detail: "CONFLICT (content): Merge conflict in f.txt" });
 
   // A per-member record on disk, not just the event: reason `conflict`, the conflict output
   // in `detail`, and B's branch — so the record outlives the run and keeps the card off idle.
@@ -138,8 +167,13 @@ test("integrateGreens writes a durable parked{conflict} record for the quarantin
   assert.ok(rec, "a parked record for B is written to disk");
   assert.equal(rec!.reason, "conflict");
   assert.equal(rec!.branch, "agent/B");
-  assert.ok(rec!.detail && rec!.detail.length > 0, "the conflict output rides in detail");
+  assert.match(rec!.detail ?? "", /Merge conflict in f\.txt/);
   assert.ok(rec!.parkedAt, "parkedAt is stamped");
+  const q = log.events.filter((e) => e.event === "parked" && (e as any).reason === "conflict");
+  assert.deepEqual(
+    q.map((e) => (e as any).taskId),
+    ["B"],
+  );
 });
 
 /**
@@ -184,7 +218,7 @@ test("integrateGreens wave-parks a red merged base: leaves the greens merged, do
 
     // AC1: both greens stay merged on the base — no rollback, no reset to the wave start.
     assert.deepEqual(result.merged, ["A", "B"]);
-    assert.deepEqual(result.conflictParked, []);
+    assert.deepEqual(result.conflicts, []);
     assert.equal(readFileSync(join(dir, "a.txt"), "utf8"), "A\n");
     assert.equal(readFileSync(join(dir, "b.txt"), "utf8"), "B\n");
     assert.notEqual(headSha(dir), preSha); // HEAD advanced past the wave start — merges are real
@@ -229,7 +263,10 @@ test("integrateGreens skips the merged-base gate when every green conflicts", as
       },
     });
     assert.deepEqual(result.merged, []);
-    assert.deepEqual(result.conflictParked, ["A"]);
+    assert.deepEqual(
+      result.conflicts.map((c) => c.taskId),
+      ["A"],
+    );
     assert.equal(result.parked, undefined);
     assert.equal(gateRan, false); // nothing merged → nothing to gate
   } finally {
@@ -282,7 +319,7 @@ test("integrateGreens skips an already-merged green and lands only the unmerged 
     // A was already banked (its branch is a reachable ancestor) → not re-merged; only
     // the genuinely-unmerged B is landed on this re-entry.
     assert.deepEqual(result.merged, ["B"]);
-    assert.deepEqual(result.conflictParked, []);
+    assert.deepEqual(result.conflicts, []);
     assert.equal(result.parked, undefined);
     assert.equal(readFileSync(join(dir, "b.txt"), "utf8"), "B\n");
     // No second merge commit for A (it is already an ancestor); B's merged branch is reclaimed.
@@ -305,7 +342,7 @@ test("integrateGreens skips a green whose branch is already gone, never erroring
     });
     // A's branch is gone → treated as already integrated (skipped, no throw); B lands.
     assert.deepEqual(result.merged, ["B"]);
-    assert.deepEqual(result.conflictParked, []);
+    assert.deepEqual(result.conflicts, []);
   } finally {
     process.chdir(prevCwd);
   }

@@ -112,6 +112,12 @@ export interface ResumeEntry {
   answerPrompt: string;
 }
 
+/** A fresh run on the kept branch with `reentry` appended to the issue text — how a non-resumable
+ * provider takes a prompt it cannot be resumed with (a merge-conflict retry, design §6). */
+export interface ReentryEntry {
+  reentry: string;
+}
+
 /**
  * The effectful edges `runLoop` leans on that escape a temp-dir harness — the
  * container factory and the two host-repo git reads — injected so the loop is
@@ -174,6 +180,31 @@ export const answerPromptFor = (text: string) =>
  */
 export const crashResumePrompt = () =>
   `Your previous session on this task was interrupted before it reported a result. Your earlier work is already committed on this branch — continue from where it left off. The signal contract is unchanged: ${DONE} when done, ${BLOCKED} if blocked — and end this turn with a <turn-summary> line as before.`;
+
+/**
+ * The prompt a merge-conflict retry hands the issue's own agent (design §6): its green collided with
+ * the base at integration, so it merges the current base into its branch, resolves the conflicts and
+ * keeps the issue's acceptance criteria satisfied. It names the conflicting paths and the base commit.
+ */
+export const mergeConflictPrompt = (paths: string[], base: string, baseBranch: string) =>
+  `Your green branch could not be merged: it conflicts with the current base, ${baseBranch} at ${base}, in ${paths.join(", ")}. ` +
+  `Merge ${base} into your branch, resolve the conflicts, and keep the issue's acceptance criteria satisfied — its tests must still pass. ` +
+  `Commit the merge. The signal contract is unchanged: ${DONE} when done, ${BLOCKED} if blocked — and end this turn with a <turn-summary> line as before.`;
+
+/**
+ * How a child `run` enters the loop from what its campaign passed it (design §6, §7): a session to
+ * resume, with `prompt` when set (a merge-conflict retry) or the crash prompt otherwise (a crash
+ * redrive); a `prompt` with no session (a non-resumable provider) is a fresh run on the kept branch
+ * with the prompt added to the issue text, as `freshRedReentry` does; neither is a fresh run.
+ */
+export function childRunEntry(resumeSession: string | undefined, prompt: string | undefined): ResumeEntry | ReentryEntry | undefined {
+  if (resumeSession) return { resumeSessionId: resumeSession, answerPrompt: prompt ?? crashResumePrompt() };
+  if (prompt)
+    return {
+      reentry: `---\n\n(Continuing earlier work on this task — a fresh run. Your prior commits are already on this branch.)\n\n${prompt}`,
+    };
+  return undefined;
+}
 
 /**
  * The `stalled/no-commit` park's question. No commit ahead of the base is not "no change": the
@@ -373,9 +404,12 @@ export async function runLoop(
   cfg: ResolvedConfig,
   taskId: string,
   host?: HostBudget,
-  entry?: ResumeEntry,
+  start?: ResumeEntry | ReentryEntry,
   deps: LoopDeps = defaultLoopDeps,
 ): Promise<Outcome> {
+  // A resume carries its own prompt; a re-entry is a fresh run with text added to the issue.
+  let entry = start && "resumeSessionId" in start ? start : undefined;
+  const startReentry = start && "reentry" in start ? start.reentry : undefined;
   // The per-run stop handler's shared state (this issue): the sandbox once created (so the stop
   // can close it and name its branch), the most recent session id a finished turn produced (so a
   // `stopped` park can resume it later), and the signal + its promise. A stop before a verdict
@@ -463,9 +497,9 @@ export async function runLoop(
     // An answered parked record re-admits this member with the human's answer (design §5 step 3,
     // §7): consume it here, as the run starts — resume the session with the answer (resumable) or
     // relay it as an issue comment and re-enter fresh (non-resumable) — then clear the record so the
-    // gateway never re-announces and no re-admit fires twice. An explicit `entry` (a direct resume)
-    // already carries its prompt and skips this.
-    if (!entry && hasParked(cfg, taskId)) {
+    // gateway never re-announces and no re-admit fires twice. An explicit `start` (a direct resume,
+    // or a merge-conflict retry's re-entry) already carries its prompt and skips this.
+    if (!start && hasParked(cfg, taskId)) {
       const rec = readParked(cfg, taskId, { requireSession: false });
       if (rec.answer != null) {
         // A session-less record (an idle stall can park without one) degrades like a
@@ -491,7 +525,8 @@ export async function runLoop(
 
     // A stop while the task is still being fetched (before any container) unwinds here — nothing
     // to close, and `makeSandbox` is never reached.
-    const task = entry ? "" : await stoppable(Promise.resolve(cfg.fetchTask(taskId)));
+    const fetched = entry ? "" : await stoppable(Promise.resolve(cfg.fetchTask(taskId)));
+    const task = startReentry ? `${fetched}\n\n${startReentry}` : fetched;
     // Preflight (design §3 step 1): a non-resumable provider with no `postComment` cannot have
     // a parked question answered — surface it up front rather than only when a park is stranded.
     if (!resumable && !cfg.postComment) console.warn(nonResumableAnswerWarning(provider));

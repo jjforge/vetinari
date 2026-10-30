@@ -9,7 +9,18 @@ import { loggerForRun } from "./log.ts";
 import { readEventLog } from "./event-log.ts";
 import { answerParked, hasParked, listOutbox, listParked, park } from "./state.ts";
 import { projectHasLiveCampaign, readLeases, type HostBudget } from "./host-slots.ts";
-import { BLOCKED, DONE, defaultLoopDeps, extractTurnSummary, parkedAnswerComment, runLoop, type LoopDeps } from "./loop.ts";
+import {
+  BLOCKED,
+  DONE,
+  childRunEntry,
+  crashResumePrompt,
+  defaultLoopDeps,
+  extractTurnSummary,
+  mergeConflictPrompt,
+  parkedAnswerComment,
+  runLoop,
+  type LoopDeps,
+} from "./loop.ts";
 import { HARVEST_PROMPT, type Finding, type FindingContext } from "./findings.ts";
 import { Refusal } from "./refusal.ts";
 
@@ -1185,6 +1196,51 @@ test("runLoop resumes the parked session on the answer path without re-fetching 
   assert.equal(fetched, 0);
   assert.equal(sbx.runCalls[0].resumeSession, "prev-sess");
   assert.equal(sbx.runCalls[0].prompt, "the human's answer");
+});
+
+test("a merge-conflict retry resumes the green's session with the conflict prompt, naming the paths and the base commit (#624)", async () => {
+  let fetched = 0;
+  const cfg = harnessCfg({
+    agent: { provider: "claude" },
+    fetchTask: async () => {
+      fetched++;
+      return "task text";
+    },
+  });
+  const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc123" }] }, green: true }]);
+  const prompt = mergeConflictPrompt(["src/a.ts", "README.md"], "f00dfeed", "main");
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, childRunEntry("prev-sess", prompt), depsFor(sbx)));
+
+  assert.equal(outcome, "green");
+  assert.equal(fetched, 0, "a resumed retry never re-fetches the task");
+  assert.equal(sbx.runCalls[0].resumeSession, "prev-sess");
+  const sent = String(sbx.runCalls[0].prompt);
+  assert.match(sent, /merge/i);
+  assert.match(sent, /src\/a\.ts/);
+  assert.match(sent, /README\.md/);
+  assert.match(sent, /f00dfeed/);
+  assert.match(sent, /acceptance criteria/);
+});
+
+test("a merge-conflict retry on a non-resumable provider re-enters fresh on the kept branch with the conflict prompt added to the issue text (#624)", async () => {
+  const cfg = harnessCfg({ agent: { provider: "copilot" }, promptFile: "/prompts/tdd.md", fetchTask: async () => "task text" });
+  const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc123" }] }, green: true }]);
+  const prompt = mergeConflictPrompt(["src/a.ts"], "f00dfeed", "main");
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, childRunEntry(undefined, prompt), depsFor(sbx)));
+
+  assert.equal(outcome, "green");
+  assert.equal(sbx.runCalls[0].resumeSession, undefined, "a fresh run, not a session resume");
+  assert.equal(sbx.runCalls[0].promptFile, "/prompts/tdd.md");
+  const task = sbx.runCalls[0].promptArgs?.TASK ?? "";
+  assert.match(task, /^task text/);
+  assert.ok(task.includes(prompt), "the conflict prompt rides on the issue text");
+});
+
+test("childRunEntry resumes a crashed session with the crash prompt when no conflict prompt is set, and is a fresh run with neither (#624)", () => {
+  assert.deepEqual(childRunEntry("sess-1", undefined), { resumeSessionId: "sess-1", answerPrompt: crashResumePrompt() });
+  assert.equal(childRunEntry(undefined, undefined), undefined);
 });
 
 test("runLoop consumes an answered parked record for a resumable provider — resumes the session with the answer and clears the record", async () => {

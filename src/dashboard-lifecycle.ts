@@ -288,6 +288,12 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       outcomes.set(taskId, "running");
       pendingGreen.add(taskId);
       details.set(taskId, e.branch ? `Green on ${e.branch} — pending merge onto the base` : "Green — pending merge onto the base");
+    } else if (e.event === "re-admit" && e.taskId) {
+      // A green whose merge collided is re-admitted for one retry by its own agent (design §6): it
+      // holds a slot again, so it is no longer a pending green and the live tail follows it.
+      const taskId = normalize(String(e.taskId));
+      pendingGreen.delete(taskId);
+      details.set(taskId, `Retrying a merge conflict — ${(e.paths ?? []).join(", ")}`);
     } else if (e.event === "merged" && e.taskId) {
       // The integrator landed this green on the base (design §2.1). Completion, and the
       // resolution of any earlier conflict hold or red-base hold on the same id.

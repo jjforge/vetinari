@@ -7,7 +7,8 @@ import { describeFragmentNearMisses } from "./changelog.ts";
 import { runGates } from "./gate.ts";
 import { readSlowGateLogs, slowGatesAtSettle } from "./slow-gates.ts";
 import { agentSelectionFor, makeSandbox } from "./sandbox.ts";
-import { branchHasCommits, collectWaveChangelog, currentBranch, integrateGreens } from "./merge.ts";
+import { branchHasCommits, collectWaveChangelog, currentBranch, integrateGreens, parkMergeConflict } from "./merge.ts";
+import { mergeConflictPrompt } from "./loop.ts";
 import {
   UNASKED_PARK_REASONS,
   clearParked,
@@ -172,16 +173,21 @@ const onProcessStop = (cb: (signal: StopSignal) => void): (() => void) => {
  *
  * `resumeSession` is the crashed session a redrive re-enters this member on (design §7): when
  * set, the child `run` resumes that session on its existing branch instead of a fresh start.
+ * `resumePrompt` is the prompt a merge-conflict retry runs with (design §6): the child resumes
+ * `resumeSession` with it in place of the crash prompt, or — with no session (a non-resumable
+ * provider) — re-enters fresh on the kept branch with it added to the issue text.
  */
-export type RunSpawner = (taskId: string, resumeSession?: string) => Promise<number | NodeJS.Signals>;
+export type RunSpawner = (taskId: string, resumeSession?: string, resumePrompt?: string) => Promise<number | NodeJS.Signals>;
 
 /** The production spawner: a real child `run`, resolving on its exit. A crash redrive passes the
- * crashed session id through to the child as `VETINARI_RESUME_SESSION` so it resumes (design §7). */
-const selfSpawnRun: RunSpawner = (taskId, resumeSession) =>
+ * crashed session id through to the child as `VETINARI_RESUME_SESSION` so it resumes (design §7);
+ * a merge-conflict retry passes its prompt as `VETINARI_RESUME_PROMPT` (design §6). */
+const selfSpawnRun: RunSpawner = (taskId, resumeSession, resumePrompt) =>
   new Promise((resolve) => {
-    selfSpawn(["run", taskId], resumeSession ? { VETINARI_RESUME_SESSION: resumeSession } : undefined).on("exit", (code, signal) =>
-      resolve(code ?? signal!),
-    );
+    selfSpawn(["run", taskId], {
+      ...(resumeSession ? { VETINARI_RESUME_SESSION: resumeSession } : {}),
+      ...(resumePrompt ? { VETINARI_RESUME_PROMPT: resumePrompt } : {}),
+    }).on("exit", (code, signal) => resolve(code ?? signal!));
   });
 
 /**
@@ -388,6 +394,8 @@ async function stoppedRunOutcome(cfg: ResolvedConfig, taskId: string, signal: No
  * outcome map so a caller (campaign) can act on the greens without re-deriving
  * them from the log. Once `halted()` (a `--now` stop, #403) it spawns and re-admits nothing more:
  * the drain ends when the runs in flight exit, and a member never spawned gets no outcome.
+ * `resumePrompts` carries a merge-conflict retry's prompt per member (design §6), passed to its
+ * spawn beside its `resumeSessions` entry.
  */
 export async function queue(
   cfg: ResolvedConfig,
@@ -398,6 +406,7 @@ export async function queue(
   reporter: Reporter = envReporter(),
   resumeSessions: Record<string, string> = {},
   halted: () => boolean = () => false,
+  resumePrompts: Record<string, string> = {},
 ): Promise<Record<string, string>> {
   const pending = [...taskIds];
   const outcomes: Record<string, string> = {};
@@ -465,8 +474,9 @@ export async function queue(
           running++;
           cfg.log.log("spawn", { taskId: next, running, left: pending.length });
           // A crash redrive passes the crashed session id so the child resumes on its existing
-          // branch (design §7); every other spawn (fresh, answered re-admit) passes none.
-          spawnRun(next, resumeSessions[next]).then(async (exit) => {
+          // branch (design §7), and a merge-conflict retry its prompt (design §6); every other
+          // spawn (fresh, answered re-admit) passes none.
+          spawnRun(next, resumeSessions[next], resumePrompts[next]).then(async (exit) => {
             running--;
             releaseSlot(host.configDir);
             outcomes[next] =
@@ -1193,18 +1203,20 @@ export async function campaign(
       // may still be answered. Hold the drained wave open up to `parkGraceSeconds`; an answer that
       // lands (its parked record cleared) re-admits the member so it re-runs and merges in THIS
       // wave, and expiry falls through to the normal park-and-stop below. `conflict`/`red-base`
-      // parks are integration-time states, decided after this point, so they never wait here.
+      // parks are integration-time states, decided after this point, so they never wait here. A
+      // merge-conflict retry that parks a question gets the same window (design §6).
       const graceSeconds = cfg.parkGraceSeconds ?? 0;
-      // An `outdated-agent` member (#444) has nothing to answer, so it is never waited on.
-      const outdatedAgentIds = new Set(
-        listParked(cfg)
-          .filter((r) => r.reason === "outdated-agent")
-          .map((r) => normalize(r.taskId)),
-      );
-      const parkedNow = tasks.filter((t) => outcomes[t] === "parked" && !outdatedAgentIds.has(normalize(t)));
-      // A pending stop skips the wait (#403), and one requested during it ends it (#461): the
-      // campaign is going to park anyway.
-      if (parkedNow.length && graceSeconds > 0 && !stop) {
+      const holdForAnswers = async (members: string[]) => {
+        // An `outdated-agent` member (#444) has nothing to answer, so it is never waited on.
+        const outdatedAgentIds = new Set(
+          listParked(cfg)
+            .filter((r) => r.reason === "outdated-agent")
+            .map((r) => normalize(r.taskId)),
+        );
+        const parkedNow = members.filter((t) => outcomes[t] === "parked" && !outdatedAgentIds.has(normalize(t)));
+        // A pending stop skips the wait (#403), and one requested during it ends it (#461): the
+        // campaign is going to park anyway.
+        if (!parkedNow.length || graceSeconds <= 0 || stop) return;
         cfg.log.log("grace-wait", { seconds: graceSeconds, tasks: parkedNow });
         await deps.grace(cfg, parkedNow, graceSeconds, () => stop !== undefined);
         const revived = parkedNow.filter((t) => isAnswered(cfg, t));
@@ -1215,36 +1227,86 @@ export async function campaign(
           outcomes = { ...outcomes, ...(await queue(cfg, revived, host, titles, deps.spawnRun, reporter, {}, halted)) };
           draining = false;
         }
-      }
+      };
+      await holdForAnswers(tasks);
 
       // A `--now` stop landed during this wave's drain or its re-admit: its runs were signalled and
       // have exited. The wave skips integration, the changelog fold and the labels (#403).
-      const stoppedNow = halted();
+      const stoppedBeforeIntegration = halted();
 
       const greens = tasks.filter((t) => outcomes[t] === "green");
 
-      const {
-        merged,
-        alreadyMerged = [],
-        conflictParked,
-        parked,
-      } = stoppedNow
-        ? { merged: [], conflictParked: [], parked: undefined }
+      const first = stoppedBeforeIntegration
+        ? { merged: [], conflicts: [], parked: undefined }
         : await deps.integrate(cfg, greens, undefined, index, { regate });
+      let merged = first.merged;
+      let alreadyMerged = first.alreadyMerged ?? [];
+      let parked = first.parked;
+      const mergeFailed = [...(first.mergeFailed ?? [])];
+      // The greens a retried merge collided with again — the only collisions that park (design §6).
+      const conflictParked: string[] = [];
+
+      // A merge collision is retried once by the issue's own agent before it parks (design §6). Only
+      // on a base the first pass left green — a red base outranks it and parks the wave below — and
+      // never once a `--now` stop has landed. Each collided green is re-admitted into this wave: a
+      // `re-admit` just before its spawn (no park, no record, no notice), its last session resumed
+      // with the conflict prompt on a resumable provider, else a fresh re-entry carrying the prompt.
+      // The retry's own verdict stands; a green goes through a second integration pass, where only
+      // a second collision parks `conflict`.
+      if (first.conflicts.length && !parked && !halted()) {
+        const retry = first.conflicts.map((c) => c.taskId);
+        const { resumable } = agentSelectionFor(cfg);
+        const { sessions } = reduceCampaign(readEventLog(cfg));
+        const retrySessions: Record<string, string> = {};
+        const retryPrompts: Record<string, string> = {};
+        for (const c of first.conflicts) {
+          cfg.log.log("re-admit", { taskId: c.taskId, reason: "conflict", paths: c.paths, base: c.base });
+          const sid = resumable ? sessions.get(normalize(c.taskId)) : undefined;
+          if (sid) retrySessions[c.taskId] = sid;
+          retryPrompts[c.taskId] = mergeConflictPrompt(c.paths, c.base, cfg.baseBranch);
+        }
+        draining = true;
+        outcomes = {
+          ...outcomes,
+          ...(await queue(cfg, retry, host, titles, deps.spawnRun, reporter, retrySessions, halted, retryPrompts)),
+        };
+        draining = false;
+        await holdForAnswers(retry);
+        const retriedGreens = retry.filter((t) => outcomes[t] === "green");
+        if (retriedGreens.length && !halted()) {
+          const second = await deps.integrate(cfg, retriedGreens, undefined, index);
+          merged = [...merged, ...second.merged];
+          alreadyMerged = [...alreadyMerged, ...(second.alreadyMerged ?? [])];
+          mergeFailed.push(...(second.mergeFailed ?? []));
+          parked = second.parked;
+          for (const c of second.conflicts) {
+            parkMergeConflict(cfg, c);
+            conflictParked.push(c.taskId);
+          }
+        }
+      }
+      // A merge that failed with no unmerged paths is a failed member (design §6): `integrateGreens`
+      // logged its `failed`, and its wave resolves as for any failed member below.
+      for (const t of mergeFailed) outcomes[t] = "error(merge failed)";
+
+      // A `--now` stop landed before integration, or during a merge-conflict retry: the wave parks
+      // `stopped` below once failure has had its say.
+      const stoppedNow = halted();
 
       // The reconciled resume wave has now integrated its banked greens — log the `redrive`
       // stop-to-continue event with what it landed (freshly merged) vs skipped (already on the
       // base), design §2.1, §7. Logged once, for the first wave a redrive re-enters.
-      if (pendingRedriveFromWave === index && !stoppedNow) {
+      if (pendingRedriveFromWave === index && !stoppedBeforeIntegration) {
         cfg.log.log("redrive", { fromWave: index, landed: merged.length, skipped: alreadyMerged.length });
         pendingRedriveFromWave = undefined;
       }
 
       // The base gated red (an emergent, unattributable failure): `integrateGreens` left the greens
       // merged (never a rollback). A red base verifies nothing, so the green-path steps below (fold
-      // the changelog, advance labels) are skipped while it is parked.
+      // the changelog, advance labels) are skipped while it is parked. They run once, after the last
+      // integration pass, so a retried green that merged gets them too (design §6).
       const baseRed = !!parked;
-      if (!baseRed && !stoppedNow) {
+      if (!baseRed && !stoppedBeforeIntegration) {
         // Green path only: fold this wave's merged `changelog.d/` fragments into CHANGELOG.md and
         // commit on the base in one commit (issue #123). Agents write per-task fragments instead of
         // editing the shared changelog, so co-wave branches never conflict on it.

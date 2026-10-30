@@ -210,6 +210,18 @@ export interface GraceWaitEvent extends BaseEvent {
   tasks: string[];
 }
 
+/** `re-admit` — a green whose merge collided with the base is re-admitted into its own wave for one
+ * retry by its own agent before it parks (design §6): the task, why (`conflict`), the conflicting
+ * `paths`, and the `base` commit the retry merges. Logged just before the retry's `spawn`; the
+ * reducer clears the task's pending green so the live tail follows the retried agent (modes.ts). */
+export interface ReAdmitEvent extends BaseEvent {
+  event: "re-admit";
+  taskId: string;
+  reason: "conflict";
+  paths: string[];
+  base: string;
+}
+
 /** `stop-requested` — an operator asked the running campaign to stop (`vetinari stop`, a SIGINT,
  * SIGTERM or SIGHUP): the wave `index` in flight when the first request landed. The reducer ignores
  * it; `vetinari stop` reads it to tell a stop already pending (one after the latest `campaign-start`
@@ -335,6 +347,7 @@ export type OrchestratorEvent =
   | GraftEvent
   | RedriveEvent
   | GraceWaitEvent
+  | ReAdmitEvent
   | StopRequestedEvent
   | GateEvent
   | GateCheckEvent

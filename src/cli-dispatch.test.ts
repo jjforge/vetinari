@@ -556,6 +556,21 @@ test("dispatch run resumes a crashed session when spawned with one (design §7):
   assert.match(call[3].answerPrompt, /interrupted before it reported a result/);
 });
 
+test("dispatch run resumes the session with the campaign's conflict prompt in place of the crash prompt when spawned with one (#624)", async () => {
+  const { deps } = makeDeps({ resumeSession: "sess-436", resumePrompt: "merge the base, resolve src/a.ts" });
+  await dispatch({ kind: "run", agent: {}, args: ["436"], json: false }, deps);
+  const call = (deps.runLoop as any).calls[0];
+  assert.deepEqual(call[3], { resumeSessionId: "sess-436", answerPrompt: "merge the base, resolve src/a.ts" });
+});
+
+test("dispatch run re-enters fresh with the conflict prompt on the issue text when spawned with a prompt and no session (#624)", async () => {
+  const { deps } = makeDeps({ resumePrompt: "merge the base, resolve src/a.ts" });
+  await dispatch({ kind: "run", agent: {}, args: ["436"], json: false }, deps);
+  const call = (deps.runLoop as any).calls[0];
+  assert.equal(call[3].resumeSessionId, undefined, "no session to resume — a fresh run");
+  assert.match(call[3].reentry, /merge the base, resolve src\/a\.ts/);
+});
+
 test("dispatch run refuses on stderr with one line naming the project and exits 4 (refused) when a campaign lease is live (§5 step 3, §8)", async () => {
   const { deps, logged, errored, exitCodes } = makeDeps({
     projectHasLiveCampaign: spy(true) as any,

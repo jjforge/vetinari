@@ -23,7 +23,7 @@ import { DOCKERFILE, staleImageWarning } from "./modes.ts";
 import type { build, baseline, campaign, tgTest, requireTelegram, readImageFreshness, CampaignOutcome } from "./modes.ts";
 import type { runTgConnect } from "./tg-connect.ts";
 import type { tgSend } from "./telegram.ts";
-import { crashResumePrompt, type runLoop, type Outcome } from "./loop.ts";
+import { childRunEntry, type runLoop, type Outcome } from "./loop.ts";
 import type { answerParked, enqueueOutbound, hasParked, listParked, ParkReason } from "./state.ts";
 import type { archiveRun } from "./archive.ts";
 import type { CampaignPlanReport, Exclusion, UnderspecifiedPrompt } from "./plan.ts";
@@ -357,6 +357,13 @@ export interface DispatchDeps {
    * existing branch instead of a fresh start. Undefined for a fresh run or an answered re-admit.
    */
   resumeSession?: string;
+  /**
+   * The prompt a campaign spawned this child to run with (design §6, `VETINARI_RESUME_PROMPT`): a
+   * merge-conflict retry's conflict prompt. With `resumeSession` it resumes that session in place of
+   * the crash prompt; without one (a non-resumable provider) it re-enters fresh on the kept branch
+   * with the prompt added to the issue text. Undefined for every other spawn.
+   */
+  resumePrompt?: string;
   /** Archive a prior run still sitting in the live log before a fresh run appends. */
   archiveLeftoverRun: () => void;
   /** Reset live state once a run is truly over (skipped while anything is parked). */
@@ -494,8 +501,10 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
       deps.archiveLeftoverRun();
       // A crash redrive spawned this child to resume a crashed session on the existing branch
       // (design §7, `VETINARI_RESUME_SESSION`): re-enter the loop on that session with a
-      // continue-where-you-left-off prompt rather than a fresh fetch. Absent → a fresh run.
-      const resumeEntry = deps.resumeSession ? { resumeSessionId: deps.resumeSession, answerPrompt: crashResumePrompt() } : undefined;
+      // continue-where-you-left-off prompt rather than a fresh fetch. A merge-conflict retry
+      // (design §6, `VETINARI_RESUME_PROMPT`) carries its own prompt in place of that one, or
+      // re-enters fresh with it when there is no session. Neither → a fresh run.
+      const resumeEntry = childRunEntry(deps.resumeSession, deps.resumePrompt);
       // Exit code is the queue's slot signal (design §3): 0 green, 2 parked, 1 failed. The loop
       // holds one host slot around the container (design §3 step 1, §8) — `deps.host` carries the
       // budget; a campaign child skips the slot itself (its parent holds one for it).

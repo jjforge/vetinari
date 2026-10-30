@@ -1,17 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import { loggerForRun } from "./log.ts";
 import { readEventLog } from "./event-log.ts";
-import { answerParked, clearParked, listParked } from "./state.ts";
-import { BLOCKED, crashResumePrompt, DONE, defaultLoopDeps, runLoop, type LoopDeps } from "./loop.ts";
+import { answerParked, clearParked, listOutbox, listParked } from "./state.ts";
+import { BLOCKED, childRunEntry, DONE, defaultLoopDeps, runLoop, type LoopDeps } from "./loop.ts";
 import { campaign, type CampaignDeps, type RunSpawner, type StopSignal } from "./modes.ts";
 import { collectWaveChangelog, currentBranch, integrateGreens } from "./merge.ts";
 import { runGates } from "./gate.ts";
+import { buildStatus } from "./dashboard-status.ts";
+import { inFlightRunning } from "./dashboard-live-tail.ts";
 import type { HostBudget } from "./host-slots.ts";
 import { makeLocalSandbox, type LocalAgentScript } from "./sandbox-local.ts";
 
@@ -140,11 +142,13 @@ const localCampaignDeps = (
   scriptFor: (id: string) => LocalAgentScript,
   spawns: string[] = [],
 ): CampaignDeps => {
-  const spawnRun: RunSpawner = async (taskId, resumeSession) => {
+  const spawnRun: RunSpawner = async (taskId, resumeSession, resumePrompt) => {
     spawns.push(taskId);
-    // A crash redrive hands the crashed session id (design §7): the child `run` resumes it on the
-    // existing branch with the continue-where-you-left-off prompt. Every other spawn gets none.
-    const entry = resumeSession ? { resumeSessionId: resumeSession, answerPrompt: crashResumePrompt() } : undefined;
+    // Enter the loop exactly as the child `run` does (cli-dispatch): a crash redrive resumes the
+    // crashed session with the continue-where-you-left-off prompt (design §7); a merge-conflict
+    // retry resumes with its conflict prompt, or re-enters fresh with it on a non-resumable
+    // provider (design §6). Every other spawn gets neither.
+    const entry = childRunEntry(resumeSession, resumePrompt);
     try {
       const outcome = await runLoop(cfg, taskId, undefined, entry, loopDepsFor(scriptFor(taskId)));
       // Mirror the real child `run`'s exit code (cli-dispatch's `exitCodeFor`): 0 green, 2
@@ -216,35 +220,239 @@ function seedConflictRepo(): string {
 }
 
 // Each issue rewrites the shared file to its own content — file-conflicting, so the loser
-// cannot merge onto a base already carrying the winner.
+// cannot merge onto a base already carrying the winner. A merge-conflict retry (its prompt names
+// conflict.txt) reports done without touching the branch, so its merge collides again.
 const conflictScript =
   (id: string): LocalAgentScript =>
   (turn) => {
+    if (retryPromptOf(turn).includes("conflict.txt")) return { signal: DONE, stdout: `<turn-summary>left ${id} as it was</turn-summary>` };
     turn.write("conflict.txt", `resolved by ${id}\n`);
+    turn.commit(`rewrite conflict.txt in ${id}`);
+    return { signal: DONE, stdout: `<turn-summary>rewrote conflict.txt in ${id}</turn-summary>` };
+  };
+
+/** The text a turn was driven with beyond the issue itself: a resumed session's prompt, or the
+ * issue text a fresh re-entry carries (design §6) — empty for a plain first run. */
+const retryPromptOf = (turn: { opts: { prompt?: unknown; promptArgs?: Record<string, unknown> } }): string =>
+  String(turn.opts.prompt ?? turn.opts.promptArgs?.TASK ?? "");
+
+// 101 and 102 both rewrite conflict.txt, so 102 collides at merge; 102 also writes its changelog
+// fragment. On the retry (its prompt names conflict.txt) 102's agent merges the base into its
+// branch and settles conflict.txt, keeping both sides. `retries` records each retry turn.
+const resolvingConflictScript =
+  (retries: { resumeSession?: string; text: string; tailed: string[] }[], cfg: ResolvedConfig) =>
+  (id: string): LocalAgentScript =>
+  (turn) => {
+    const text = retryPromptOf(turn);
+    if (text.includes("conflict.txt")) {
+      // What the live tail follows while this retry runs (design §6, item 8).
+      const tailed = inFlightRunning(buildStatus(cfg)).map((i) => i.issueNumber);
+      retries.push({ resumeSession: turn.opts.resumeSession as string | undefined, text, tailed });
+      try {
+        turn.git(["merge", "base"]); // stops on the conflict.txt conflict, settled next
+      } catch {
+        // expected: the merge stops on the conflict, which the agent resolves below.
+      }
+      turn.write("conflict.txt", "resolved by 101 and 102\n");
+      turn.commit(`merge the base into ${id}, resolve conflict.txt`);
+      return { signal: DONE, stdout: `<turn-summary>merged the base into ${id}</turn-summary>` };
+    }
+    turn.write("conflict.txt", `resolved by ${id}\n`);
+    if (id === "102") turn.write(`changelog.d/${id}.md`, `section: New features\n- [user] feature from ${id} (#${id}).\n`);
     turn.commit(`rewrite conflict.txt in ${id}`);
     return { signal: DONE, stdout: `<turn-summary>rewrote conflict.txt in ${id}</turn-summary>` };
   };
 
 const host = (dir: string): HostBudget => ({ configDir: join(dir, "host"), ceiling: 2, weight: 1 });
 
-test("scenario 5: a merge conflict with no dependents holds the wave — the campaign parks; a branch-side resolve then a redrive lands it (design §5 step 5, §7)", async () => {
+for (const provider of ["claude", "copilot"] as const) {
+  test(`scenario 9 (${provider}): a green whose merge collides is retried by its own agent in the same wave — it resolves, merges, and the wave completes with no park (#624)`, async () => {
+    const dir = seedConflictRepo();
+    const merged: string[] = [];
+    const cfg = repoCfg(dir, fakeTracker(), { agent: { provider }, onIssueMerged: (id: string) => void merged.push(id) });
+    const retries: { resumeSession?: string; text: string; tailed: string[] }[] = [];
+    const deps = localCampaignDeps(cfg, dir, resolvingConflictScript(retries, cfg));
+
+    await inRepo(dir, async () => {
+      const outcome = await campaign(cfg, [["101", "102"]], host(dir), "retry", {}, deps);
+      assert.equal(outcome, "done", "the retried collision merged and the campaign finished");
+
+      // 102 merged in the same wave, carrying both sides of the conflict.
+      assert.equal(gitOut(dir, ["show", "base:conflict.txt"]), "resolved by 101 and 102");
+      const events = readEventLog(cfg);
+      const waveDone = events.find((e) => e.event === "wave-done") as any;
+      assert.deepEqual([...waveDone.merged].sort(), ["101", "102"]);
+
+      // The event: one re-admit naming the real conflicting path and the base, logged just before
+      // the retry's spawn.
+      const readmits = events.filter((e) => e.event === "re-admit") as any[];
+      assert.equal(readmits.length, 1);
+      assert.equal(readmits[0].taskId, "102");
+      assert.equal(readmits[0].reason, "conflict");
+      assert.deepEqual(readmits[0].paths, ["conflict.txt"]);
+      const firstIntegrated = events.find((e: any) => e.event === "campaign-integrated") as any;
+      assert.equal(readmits[0].base, firstIntegrated.headSha, "the base is HEAD once the first pass's merges landed");
+      const at = events.indexOf(readmits[0]);
+      const next = events.slice(at + 1).find((e: any) => e.taskId === "102") as any;
+      assert.equal(next?.event, "spawn", "the re-admit is written just before the retry's spawn");
+
+      // The prompt reached the agent: on the resumed session (resumable) or as a fresh re-entry.
+      assert.equal(retries.length, 1);
+      if (provider === "claude") assert.equal(retries[0].resumeSession, "local-102-0", "the green's last session is resumed");
+      else assert.equal(retries[0].resumeSession, undefined, "a non-resumable provider re-enters fresh");
+      assert.ok(retries[0].text.includes(readmits[0].base), "the prompt names the base commit");
+      if (provider === "copilot") assert.match(retries[0].text, /^task 102/, "the prompt rides on the issue text");
+      // Live tail: while the retry ran, the retried issue was an in-flight runner.
+      assert.deepEqual(retries[0].tailed, ["102"]);
+
+      // A retry is not a park: no parked event, no parked record, no park notice.
+      assert.equal(events.filter((e) => e.event === "parked").length, 0);
+      assert.deepEqual(listParked(cfg), []);
+      assert.equal(listOutbox(cfg).filter((r) => r.event === "campaign-parked").length, 0);
+
+      // Post-merge steps ran after the retry pass: its fragment folded and its label advanced.
+      assert.match(gitOut(dir, ["show", "base:CHANGELOG.md"]), /feature from 102 \(#102\)/);
+      assert.deepEqual([...merged].sort(), ["101", "102"]);
+    });
+  });
+}
+
+test("scenario 10: a retried agent that asks a question parks `question`, not `conflict` — the retry's own verdict stands (#624)", async () => {
+  const dir = seedConflictRepo();
+  const cfg = repoCfg(dir, fakeTracker());
+  // 102 collides; its retry asks a question instead of resolving.
+  const scriptFor =
+    (id: string): LocalAgentScript =>
+    (turn) =>
+      retryPromptOf(turn).includes("conflict.txt")
+        ? { signal: BLOCKED, stdout: "<question><summary>keep both sides of conflict.txt?</summary></question>" }
+        : conflictScript(id)(turn);
+
+  await inRepo(dir, async () => {
+    const outcome = await campaign(cfg, [["101", "102"]], host(dir), "retry-question", {}, localCampaignDeps(cfg, dir, scriptFor));
+    assert.equal(outcome, "parked");
+
+    const events = readEventLog(cfg);
+    assert.equal(events.filter((e) => e.event === "re-admit").length, 1);
+    const parks = events.filter((e) => e.event === "parked") as any[];
+    assert.deepEqual(
+      parks.map((e) => [e.taskId, e.reason]),
+      [["102", "question"]],
+      "the retry parked on its question; nothing parked `conflict`",
+    );
+    assert.deepEqual(
+      listParked(cfg).map((r) => [r.taskId, r.reason]),
+      [["102", "question"]],
+    );
+    const stop = events.find((e) => e.event === "campaign-parked") as any;
+    assert.equal(stop.reason, "question");
+  });
+});
+
+test("scenario 11: a merge that fails with no unmerged paths — a held index.lock — fails the member: no retry, no park, the campaign fails (#624, #581)", async () => {
+  const dir = seedRepo();
+  const cfg = repoCfg(dir, fakeTracker());
+  const spawns: string[] = [];
+  const base = localCampaignDeps(cfg, dir, implScript, spawns);
+  const lock = join(dir, ".git", "index.lock");
+  // Something else holds the base's index while the wave integrates.
+  const deps: CampaignDeps = {
+    ...base,
+    integrate: async (...args) => {
+      writeFileSync(lock, "");
+      try {
+        return await base.integrate(...args);
+      } finally {
+        rmSync(lock, { force: true });
+      }
+    },
+  };
+
+  await inRepo(dir, async () => {
+    const outcome = await campaign(cfg, [["101"]], host(dir), "lock", {}, deps);
+    assert.equal(outcome, "failed", "the campaign ends campaign-failed");
+
+    const events = readEventLog(cfg);
+    const failed = events.filter((e) => e.event === "failed") as any[];
+    assert.deepEqual(
+      failed.map((e) => e.taskId),
+      ["101"],
+    );
+    assert.match(failed[0].detail, /Unable to write index/, "the failure carries the merge output");
+    assert.deepEqual(spawns, ["101"], "no retry was spawned");
+    assert.equal(events.filter((e) => e.event === "re-admit").length, 0);
+    assert.equal(events.filter((e) => e.event === "parked").length, 0);
+    assert.deepEqual(listParked(cfg), []);
+    assert.ok(events.some((e) => e.event === "campaign-failed"));
+  });
+});
+
+test("scenario 12: a red first-pass merged base outranks a collision — the wave parks `red-base` and no retry is spawned (#624)", async () => {
+  const dir = seedConflictRepo();
+  // Each green passes alone; a.txt and b.txt together are red.
+  const cfg = repoCfg(dir, fakeTracker(), { gates: [{ cmd: "[ ! -f a.txt ] || [ ! -f b.txt ]" }] });
+  // 101 writes a.txt and conflict.txt; 102 collides with it on conflict.txt; 103 writes b.txt.
+  const scriptFor =
+    (id: string): LocalAgentScript =>
+    (turn) => {
+      if (id !== "103") turn.write("conflict.txt", `resolved by ${id}\n`);
+      if (id === "101") turn.write("a.txt", "101\n");
+      if (id === "103") turn.write("b.txt", "103\n");
+      turn.commit(`implement ${id}`);
+      return { signal: DONE, stdout: `<turn-summary>implemented ${id}</turn-summary>` };
+    };
+  const spawns: string[] = [];
+
+  await inRepo(dir, async () => {
+    const outcome = await campaign(cfg, [["101", "102", "103"]], host(dir), "red", {}, localCampaignDeps(cfg, dir, scriptFor, spawns));
+    assert.equal(outcome, "parked");
+
+    const events = readEventLog(cfg);
+    const stop = events.find((e) => e.event === "campaign-parked") as any;
+    assert.equal(stop.reason, "red-base");
+    assert.deepEqual([...spawns].sort(), ["101", "102", "103"], "no retry was spawned");
+    assert.equal(events.filter((e) => e.event === "re-admit").length, 0);
+  });
+});
+
+test("scenario 5: a retried merge that collides again parks `conflict` and holds the wave — the campaign parks; a branch-side resolve then a redrive lands it (design §5 step 5, §6, §7)", async () => {
   const dir = seedConflictRepo();
   const tracker = fakeTracker(); // no blockers → the conflict strands nothing
   const cfg = repoCfg(dir, tracker);
 
   await inRepo(dir, async () => {
-    // 101 merges first; 102 conflicts at merge → quarantined. A conflict-parked green is
-    // unresolved work awaiting a human, so — even with nothing stranded — it holds the wave and
-    // the campaign parks (it no longer slips through to done, #310).
+    // 101 merges first; 102 collides at merge and is retried once by its own agent, which leaves
+    // the branch as it was — so the retry's merge collides again and 102 parks `conflict`. A
+    // conflict-parked green is unresolved work awaiting a human, so — even with nothing stranded —
+    // it holds the wave and the campaign parks (it no longer slips through to done, #310).
     const parkedOk = await campaign(cfg, [["101", "102"]], host(dir), "conflict", {}, localCampaignDeps(cfg, dir, conflictScript));
     assert.equal(parkedOk, "parked", "a conflict park holds the wave");
 
     const events = readEventLog(cfg);
-    // 101 merged and stays; 102 is the attributed loser — quarantined, its branch preserved.
+    // One retry, then the second collision parks: the re-admit comes before the park.
+    const readmits = events.filter((e) => e.event === "re-admit") as any[];
+    assert.deepEqual(
+      readmits.map((e) => e.taskId),
+      ["102"],
+      "exactly one retry per integration",
+    );
+    // 101 merged and stays; 102 is the attributed loser — parked, its branch preserved.
     assert.equal(gitOut(dir, ["show", "base:conflict.txt"]), "resolved by 101");
     assert.equal(gitOut(dir, ["branch", "--list", "agent/101"]), "");
-    const q = events.find((e: any) => e.event === "parked" && e.reason === "conflict");
-    assert.equal((q as any)?.taskId, "102");
+    const q = events.filter((e: any) => e.event === "parked" && e.reason === "conflict") as any[];
+    assert.deepEqual(
+      q.map((e) => e.taskId),
+      ["102"],
+    );
+    assert.ok(events.indexOf(q[0]) > events.indexOf(readmits[0]), "only the second collision parks");
+    assert.ok(
+      listParked(cfg).some((r) => r.taskId === "102" && r.reason === "conflict"),
+      "today's parked record is written",
+    );
+    assert.ok(
+      listOutbox(cfg).some((r) => r.event === "campaign-parked" && r.text.includes("Merge conflict on #102")),
+      "today's conflict notice is enqueued",
+    );
     assert.equal(gitOut(dir, ["branch", "--list", "agent/102"]), "agent/102", "the conflicted member's work is preserved");
     // The wave never closed and the campaign did not finish — the stop marker carries reason conflict.
     assert.equal(

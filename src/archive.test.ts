@@ -1,6 +1,7 @@
-import test from "node:test";
+import test, { mock } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import fs, { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
@@ -41,6 +42,28 @@ test("archiveRun moves the log aside and resets it, but leaves parked records al
   // reply index intact until the issue is answered/redriven or explicitly purged (§2.4, §2.5).
   assert.equal(readdirSync(cfg.parkedDir).filter((f) => f.endsWith(".json")).length, 1);
   assert.equal(existsSync(join(cfg.parkedDir, "202.json")), true);
+});
+
+test("archiveRun keeps a row another process appends to the live log between the move and the recreate", () => {
+  const cfg = cfgFor();
+  writeFileSync(cfg.logFile, '{"event":"campaign-start","batches":[["101"]]}\n');
+  const row = '{"event":"answer","taskId":"101"}\n';
+  // Interleave a concurrent logger's append (appendFileSync creates the file) right after the real rename.
+  const realRename = fs.renameSync;
+  const renameMock = mock.method(fs, "renameSync", (from: fs.PathLike, to: fs.PathLike) => {
+    realRename(from, to);
+    appendFileSync(cfg.logFile, row);
+  });
+  syncBuiltinESMExports();
+  try {
+    const result = archiveRun(cfg);
+
+    assert.equal(readFileSync(cfg.logFile, "utf8"), row); // the in-between row survives
+    assert.match(readFileSync(result.archivedLog!, "utf8"), /campaign-start/);
+  } finally {
+    renameMock.mock.restore();
+    syncBuiltinESMExports();
+  }
 });
 
 test("archiveRun clears sent outbound records but leaves unsent ones for the gateway", () => {

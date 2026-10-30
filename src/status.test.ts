@@ -273,6 +273,40 @@ test("serveAllStatus sends nosniff, no-referrer and one inline-only CSP on HTML,
   }
 });
 
+test("serveAllStatus refuses to be framed — X-Frame-Options DENY and CSP frame-ancestors 'none' — on page, API, SSE, 403 and 404 responses (#525)", async () => {
+  const configDir = join(tmpdir(), `vetinari-no-framing-${Date.now()}`);
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const { port } = server.address() as AddressInfo;
+  // `fetch` silently replaces a caller-set Host, so every request goes out by node:http; the
+  // response is read for its head only and then dropped, which also ends the SSE stream.
+  const headUnder = (path: string, host = `127.0.0.1:${port}`) =>
+    new Promise<{ status: number; frameOptions: unknown; csp: unknown }>((resolve, reject) => {
+      const req = request({ host: "127.0.0.1", port, path, headers: { host } }, (res) => {
+        resolve({ status: res.statusCode ?? 0, frameOptions: res.headers["x-frame-options"], csp: res.headers["content-security-policy"] });
+        req.destroy();
+      });
+      req.on("error", reject).end();
+    });
+  try {
+    for (const [path, status, host] of [
+      ["/", 200],
+      ["/api/landing", 200],
+      ["/api/events", 200],
+      ["/api/status", 403, `evil.example:${port}`],
+      ["/no-such-page", 404],
+    ] as const) {
+      const head = await headUnder(path, host);
+      assert.equal(head.status, status, path);
+      assert.equal(head.frameOptions, "DENY", `${path}: X-Frame-Options`);
+      assert.equal(typeof head.csp, "string", `${path}: exactly one CSP header`);
+      assert.match(head.csp as string, /(^|;)\s*frame-ancestors 'none'\s*(;|$)/, `${path}: CSP frame-ancestors`);
+    }
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});
+
 test("serveAllStatus sends error bodies that echo request input as text/plain, never untyped", async () => {
   const configDir = join(tmpdir(), `vetinari-error-type-${Date.now()}`);
   const alphaDir = join(configDir, "state-alpha");

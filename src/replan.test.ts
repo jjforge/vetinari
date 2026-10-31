@@ -126,6 +126,28 @@ test("replan keeps an unstarted issue after its in-campaign blocker, and reads a
   assert.deepEqual(reduceCampaign(readEventLog(cfg)).waves, [["101"], ["102", "104"], ["103"]]);
 });
 
+test("replan after a prune empties a started wave keeps the next wave's issue unstarted, ordered before what it blocks (#635)", async () => {
+  // 4 waits on 3. Wave 1 (#2) started and was pruned to nothing, so 3 moves into its position —
+  // but it never had a wave-start, so it is unstarted and must still precede 4.
+  const cfg = harnessCfg(
+    { "1": "a.ts", "2": "b.ts", "3": "c.ts", "4": "d.ts" },
+    { blockedBy: async (id: string) => ({ "4": ["3"] })[id] ?? [] },
+  );
+  launch(cfg, [["1"], ["2"], ["3"], ["4"]]);
+  cfg.log.log("wave-done", { index: 0, merged: ["1"] });
+  cfg.log.log("wave-start", { index: 1, tasks: ["2"] });
+  cfg.log.log("parked", { taskId: "2", reason: "question" });
+  cfg.log.log("campaign-parked", { reason: "question" });
+  cfg.log.log("prune", { target: "2", removed: ["2"], dropped: ["2"] });
+
+  const result = await runReplan(cfg, {});
+
+  const waveOf = (id: string) => result.next.findIndex((wave) => wave.includes(id));
+  assert.notEqual(waveOf("3"), -1);
+  assert.notEqual(waveOf("4"), -1);
+  assert.ok(waveOf("3") < waveOf("4"), `#3 before #4 in ${JSON.stringify(result.next)}`);
+});
+
 test("replan --dry-run reports both plans and logs nothing; an unchanged result logs nothing either", async () => {
   const cfg = harnessCfg({ "101": "a.ts", "102": "b.ts", "103": "c.ts" });
   launch(cfg, [["101"], ["102"], ["103"]]);

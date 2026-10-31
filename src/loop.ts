@@ -556,7 +556,7 @@ export async function runLoop(
       try {
         if (stopped()) throw new StopRequested();
         const common = {
-          agent: agentFor(cfg),
+          agent: agentFor(cfg, taskId),
           completionSignal: [DONE, BLOCKED],
           idleTimeoutSeconds: cfg.idleTimeoutSeconds,
           // Additive to the human-readable agent log: projects the raw run stream into

@@ -83,7 +83,7 @@ test("agentFor makes copilot resumable: it captures sessions and carries a sessi
 
 test("a fresh copilot turn starts a new session under a fresh --session-id uuid, never a reused one", () => {
   const agent = copilotFor();
-  const base = "copilot -p 'do it' --output-format json --model 'auto' --allow-all-tools --effort high";
+  const base = "copilot -p 'do it' --output-format json --model 'auto' --allow-all-tools";
   const a = agent.buildPrintCommand({ prompt: "do it", dangerouslySkipPermissions: true }).command;
   const b = agent.buildPrintCommand({ prompt: "do it", dangerouslySkipPermissions: true }).command;
   assert.match(sessionIdArg(a) ?? "", UUID);
@@ -95,7 +95,7 @@ test("a fresh copilot turn starts a new session under a fresh --session-id uuid,
 
 test("a resumed copilot turn continues the session with --resume and passes no --session-id", () => {
   const command = copilotFor().buildPrintCommand({ prompt: "do it", dangerouslySkipPermissions: true, resumeSession: "abc" }).command;
-  assert.equal(command, "copilot -p 'do it' --output-format json --model 'auto' --allow-all-tools --effort high --resume 'abc'");
+  assert.equal(command, "copilot -p 'do it' --output-format json --model 'auto' --allow-all-tools --resume 'abc'");
   assert.doesNotMatch(command, /--session-id/);
 });
 

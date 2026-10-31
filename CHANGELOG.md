@@ -31,6 +31,7 @@ Within a milestone each bold section label appears at most once.
 **Improvements:**
 - [user] On macOS, `vetinari gateway install` and `gateway status|start|stop|restart` now refuse (exit 4) with a pointer to running `vetinari gateway` in a terminal (or `vetinari status` for the dashboard alone), instead of writing a systemd unit nothing reads or failing on a missing `systemctl` (#647).
 - [user] The `copilot` provider's default model is now `auto`, so Copilot picks among the models your org allows instead of failing on an org that disables Claude models; a configured `agent.model` still wins (#646).
+- [user] The `copilot` provider's `auto` model now runs with no effort setting unless you set one: Copilot refuses any `--effort` for `auto`, so the default `high` made every out-of-the-box Copilot run fail before its first turn. A named model keeps the default `high` (#646, found verifying it).
 - [user] The `copilot` provider accepts the Copilot CLI's full effort list — `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` — instead of only `low`..`high`; the default stays `high` (#646).
 
 **Bug fixes:**

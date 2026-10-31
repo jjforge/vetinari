@@ -237,7 +237,10 @@ export function resolveAgentSelection(
   const supportsEffort = spec.efforts.length > 0;
   if (!supportsEffort && requestedEffort !== undefined)
     throw new Refusal(`agent provider "${provider}" takes no effort setting (its CLI exposes no reasoning-effort dial).`);
-  const effort = supportsEffort ? (requestedEffort ?? DEFAULT_EFFORT) : undefined;
+  // Copilot's `auto` model refuses any `--effort` ("does not support reasoning effort
+  // configuration"), so it gets no default effort; one asked for explicitly still passes through.
+  const defaultEffort = provider === "copilot" && model === "auto" ? undefined : DEFAULT_EFFORT;
+  const effort = supportsEffort ? (requestedEffort ?? defaultEffort) : undefined;
   if (effort !== undefined && !spec.efforts.includes(effort))
     throw new Refusal(`agent effort "${effort}" is not valid for provider "${provider}". Valid: ${spec.efforts.join(", ")}.`);
 

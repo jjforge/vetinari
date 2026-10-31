@@ -418,11 +418,11 @@ test("resolveAgentSelection accepts the non-resumable providers, flagging them r
 
 test("copilot is resumable: it keeps its session in the issue's mounted Copilot directory (ADR 0024)", () => {
   assert.equal(isResumableProvider("copilot"), true);
-  // copilot carries a real effort dial; its default falls to the provider's default model + effort high.
+  // copilot's default model is `auto`, which takes no effort setting, so none is defaulted.
   assert.deepEqual(resolveAgentSelection(undefined, { provider: "copilot" }), {
     provider: "copilot",
     model: AGENT_PROVIDERS.copilot.defaultModel,
-    effort: "high",
+    effort: undefined,
     resumable: true,
   });
 });
@@ -431,6 +431,13 @@ test("resolveAgentSelection defaults copilot's model to auto, so Copilot picks a
   assert.equal(resolveAgentSelection({ provider: "copilot" }).model, "auto");
   // A configured model still wins.
   assert.equal(resolveAgentSelection({ provider: "copilot", model: "gpt-5.4" }).model, "gpt-5.4");
+});
+
+test("resolveAgentSelection gives copilot's auto model no default effort, which Copilot would refuse", () => {
+  assert.equal(resolveAgentSelection({ provider: "copilot" }).effort, undefined);
+  assert.equal(resolveAgentSelection({ provider: "copilot", effort: "none" }).effort, "none");
+  // A named model keeps the default effort.
+  assert.equal(resolveAgentSelection({ provider: "copilot", model: "gpt-5.4" }).effort, "high");
 });
 
 test("resolveAgentSelection accepts the Copilot CLI's full effort list and refuses one outside it, listing all seven", () => {

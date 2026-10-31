@@ -53,7 +53,8 @@ export interface ReplanResult {
 /**
  * Re-plan the unstarted remainder of the open campaign. Throws a `Refusal` (nothing logged)
  * when no campaign is unfinished, when any unstarted issue's file set is no longer confident
- * or it has an open blocker outside the campaign, or when the plan changed while re-planning.
+ * or it has an open blocker outside the campaign, when unstarted issues' blockers form a cycle, or
+ * when the plan changed while re-planning.
  */
 export async function runReplan(
   cfg: ResolvedConfig,
@@ -77,7 +78,13 @@ export async function runReplan(
   // wave runs after it — so strip it before layering, or it would read as external.
   const startedIds = new Set(reduced.waves.slice(0, started).flat());
   const blockedBy = cfg.blockedBy;
-  const layered = await layerWaves(unstarted, async (id) => (await blockedBy(id)).filter((b) => !startedIds.has(normalize(b))));
+  // `layerWaves`' only Refusal is a blocker cycle, worded for `campaign`; re-word it as replan's.
+  const layered = await layerWaves(unstarted, async (id) => (await blockedBy(id)).filter((b) => !startedIds.has(normalize(b)))).catch(
+    (err: unknown) => {
+      if (!(err instanceof Refusal)) throw err;
+      throw new Refusal(`replan refused — nothing logged:\n  ${err.message.replace(/^campaign: /, "").replace(/\.$/, "")}`);
+    },
+  );
 
   const resolveFileSet = waiveFileSet(cfg.fileSet ?? defaultFileSet(), cfg.waivedFiles);
   const fileKeys = new Map<string, Set<string>>();

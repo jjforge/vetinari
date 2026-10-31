@@ -333,6 +333,13 @@ test("readMountParentOwners returns undefined, never hanging, when docker does n
   assert.ok(Date.now() - started < 2000, `probe took ${Date.now() - started} ms`);
 });
 
+test("readMountParentOwners returns undefined within about its timeout even when docker ignores SIGTERM", () => {
+  // The timeout is a hard kill: a child that traps TERM must not hold the probe past it.
+  const started = Date.now();
+  assert.equal(readMountParentOwners("img", ["/home/agent/go"], fakeDocker('trap "" TERM; sleep 5').bin, 200), undefined);
+  assert.ok(Date.now() - started < 2000, `probe took ${Date.now() - started} ms`);
+});
+
 test("readMountParentOwners returns undefined when docker itself fails (no image, no stat in it)", () => {
   // docker run exits 125 for a daemon/image error (an image missing under --pull never), 127 when
   // the entrypoint is not found.

@@ -1907,8 +1907,10 @@ function announceIntervalImportedWith(value: string): number {
   return Number(r.stdout);
 }
 
-test("VETINARI_GATEWAY_ANNOUNCE_MS: a non-numeric value falls back to the default 5000; a finite one keeps the 1000 floor", () => {
+test("VETINARI_GATEWAY_ANNOUNCE_MS: a non-numeric, empty or blank value falls back to the default 5000; a finite one keeps the 1000 floor", () => {
   assert.equal(announceIntervalImportedWith("abc"), 5000);
+  assert.equal(announceIntervalImportedWith(""), 5000);
+  assert.equal(announceIntervalImportedWith("  "), 5000);
   assert.equal(announceIntervalImportedWith("200"), 1000);
   assert.equal(announceIntervalImportedWith("7000"), 7000);
 });

@@ -1,11 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { chmodSync } from "node:fs";
 import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { defaultFileSet } from "./fileset.ts";
-import { replayOverlap, type OverlapTracker } from "./overlap-replay.ts";
+import { defaultFileSet, type FileSetOf } from "./fileset.ts";
+import { overlapVerdict, renderOverlapReport, replayOverlap, type OverlapTracker } from "./overlap-replay.ts";
 
 /** A scratch project: a git repo on `main` whose history the tests build merge by merge. */
 function scratchProject(files: Record<string, string>) {
@@ -234,4 +235,95 @@ test("a run that throws midway still removes its temporary clone and leaves the 
 
   assert.deepEqual(readdirSync(tmpRoot), [], "the temporary clone was left behind");
   assert.deepEqual(snapshot(p.dir), before, "the project's refs, objects or working tree changed");
+});
+
+test("a key needs 5 measured pairs to judge: 6 clean is a waive candidate, 2 collisions in 6 (33%) a hot spot, 3 pairs too few", () => {
+  const tally = (clean: number, collides: number, indeterminate = 0) => ({
+    key: "k",
+    pairs: clean + collides + indeterminate,
+    clean,
+    collides,
+    indeterminate,
+    rate: clean + collides ? collides / (clean + collides) : null,
+  });
+
+  assert.equal(overlapVerdict(tally(6, 0)), "waive-candidate");
+  assert.equal(overlapVerdict(tally(4, 2)), "hot-spot");
+  assert.equal(overlapVerdict(tally(3, 0)), "too-few");
+  // Indeterminate pairs are not measured: 3 clean plus 4 indeterminate is still too few.
+  assert.equal(overlapVerdict(tally(3, 0, 4)), "too-few");
+  // Between the two thresholds (1 in 6, 17%) is neither.
+  assert.equal(overlapVerdict(tally(5, 1)), "mixed");
+});
+
+test("end to end, overlap.mts loads the project's config, reads gh, and prints waive candidates and hot spots naming their waivedFiles entry and evidence", () => {
+  // Six tickets in one campaign, each rewriting its own line of notes.md and the same line of hot.ts.
+  const sections = (edit = 0) =>
+    lines(...[1, 2, 3, 4, 5, 6].flatMap((n) => [n === edit ? `section ${n}, edited` : `section ${n}`, "-", "-"]));
+  const p = scratchProject({
+    "notes.md": sections(),
+    "hot.ts": lines("export const owner = 0;", "", "export const other = 0;"),
+    "CHANGELOG.md": "# log\n",
+  });
+  mkdirSync(join(p.dir, "vetinari"));
+  writeFileSync(
+    join(p.dir, "vetinari", "config.mts"),
+    `export default { project: "demo", image: "img", baseBranch: "main", gates: [{ cmd: "true" }], fetchTask: (id) => id, waivedFiles: ["CHANGELOG.md"] };\n`,
+  );
+  p.git(["add", "-A"]);
+  p.git(["commit", "-qm", "config"]);
+  p.log(start("2026-01-01T00:00:00Z", [["1", "2", "3", "4", "5", "6"]]));
+  for (const n of [1, 2, 3, 4, 5, 6])
+    p.land(
+      String(n),
+      { "notes.md": sections(n), "hot.ts": lines(`export const owner = ${n};`, "", "export const other = 0;") },
+      `2026-01-01T0${n}:00:00Z`,
+      `main~${n - 1}`,
+    );
+  // A stub gh: every issue cites all three files, and none is blocked.
+  const bin = mkdtempSync(join(tmpdir(), "overlap-replay-bin-"));
+  writeFileSync(
+    join(bin, "gh"),
+    `#!/bin/sh\ncase "$1" in\n  api) echo '[]' ;;\n  issue) echo '{"title":"t","body":"Touches: \`notes.md\`, \`hot.ts\`, \`CHANGELOG.md\`","comments":[]}' ;;\nesac\n`,
+  );
+  chmodSync(join(bin, "gh"), 0o755);
+
+  const out = execFileSync(
+    join(import.meta.dirname, "..", "node_modules", ".bin", "tsx"),
+    [join(import.meta.dirname, "..", "skills", "review-logs", "overlap.mts"), p.dir],
+    {
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+    },
+  );
+
+  assert.match(out, /waive candidate.*≤ ?5%/is, "the thresholds head the report");
+  assert.match(out, /Waive candidates[\s\S]*add `notes\.md` to `waivedFiles` — 15 pairs[^\n]*0% /);
+  assert.match(out, /Hot spots[\s\S]*`hot\.ts` — leave it out of `waivedFiles`: 15 pairs[^\n]*100%/);
+  // Neither ticket changed CHANGELOG.md, so it can't have collided, whatever else made a pair indeterminate.
+  assert.match(out, /Already waived[\s\S]*`CHANGELOG\.md` \(already waived; waive candidate\) — 15 pairs: 15 clean/);
+});
+
+test("cites the project's own fileSet filters out are reported as unmeasurable, with how many tickets cited them", async () => {
+  const p = conflictingPair(start("2026-01-01T00:00:00Z", [["1", "2"]]));
+  const dflt = defaultFileSet(p.dir);
+  // Like goal-tracker's coWaveSafe set: other.txt never reaches the planner.
+  const coWaveSafe: FileSetOf = async (ticket) => {
+    const { files, confident } = await dflt(ticket);
+    return { files: files.filter((f) => f !== "other.txt"), confident };
+  };
+
+  const result = await replayOverlap({
+    root: p.dir,
+    fileSet: coWaveSafe,
+    unfilteredFileSet: defaultFileSet(p.dir),
+    tracker: tracker({ 1: ["k.txt", "other.txt"], 2: ["k.txt", "other.txt"] }),
+  });
+
+  assert.deepEqual(
+    result.keys.map(({ key }) => key),
+    ["k.txt"],
+  );
+  assert.deepEqual(result.filteredKeys, { "other.txt": 2 });
+  assert.match(renderOverlapReport(result), /not measurable[^\n]*\n- `other\.txt` — cited by 2 tickets/i);
 });

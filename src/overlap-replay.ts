@@ -13,15 +13,17 @@
  * Read-only toward the project: git is only read there, and every test-merge runs in a
  * temporary `git clone --shared` under the OS temp dir, removed when the run ends.
  */
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { execFile, spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
+import { CANONICAL_CONFIG, loadConfig, repoForProject } from "./config.ts";
 import { parseEventLogText, type OrchestratorEvent } from "./event-log.ts";
-import { ticketProse, type FileSetOf } from "./fileset.ts";
+import { defaultFileSet, ticketProse, type FileSetOf } from "./fileset.ts";
+import { GH_LIMITS, withRetry } from "./github.ts";
 import { gitRead } from "./git-read.ts";
 import { normalize } from "./issue-id.ts";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
 
 /** The tracker reads the replay makes, all read-only. */
 export interface OverlapTracker {
@@ -36,6 +38,9 @@ export interface OverlapReplayOptions {
   root: string;
   /** the project's file-set resolver, **without** `waiveFileSet`. */
   fileSet: FileSetOf;
+  /** when `fileSet` is the project's own, the shipped default to compare it with: a cite the
+   *  default keys and the project's resolver drops can't be measured, and is reported. */
+  unfilteredFileSet?: FileSetOf;
   tracker: OverlapTracker;
   /** agent branches are `${branchPrefix}${id}`; default `agent/`. */
   branchPrefix?: string;
@@ -55,10 +60,34 @@ export interface OverlapKeyTally {
 }
 
 export interface OverlapReplay {
+  /** campaigns replayed; tickets they scheduled; of those, how many matched a merge commit. */
+  campaigns: number;
+  scheduled: number;
+  landed: number;
   keys: OverlapKeyTally[];
   /** tickets whose keys came from today's issue text but whose cites no longer all resolve
    *  against today's tree (or cite nothing): they count with the keys that did resolve. */
   staleCiteTickets: string[];
+  /** keys the default resolver finds but the project's own `fileSet` filters out — unmeasurable —
+   *  with how many tickets cited each. */
+  filteredKeys: Record<string, number>;
+}
+
+/** A key needs at least this many measured pairs (clean + collides) to be judged. */
+export const OVERLAP_MIN_MEASURED_PAIRS = 5;
+/** A judged key colliding at most this often is a **waive candidate**. */
+export const OVERLAP_WAIVE_MAX_RATE = 0.05;
+/** A judged key colliding at least this often is a **hot spot**: evidence against waiving. */
+export const OVERLAP_HOT_SPOT_MIN_RATE = 0.25;
+
+export type OverlapVerdict = "waive-candidate" | "hot-spot" | "mixed" | "too-few";
+
+/** What a key's tally says about waiving it, by the module's thresholds. */
+export function overlapVerdict(t: OverlapKeyTally): OverlapVerdict {
+  if (t.clean + t.collides < OVERLAP_MIN_MEASURED_PAIRS || t.rate === null) return "too-few";
+  if (t.rate <= OVERLAP_WAIVE_MAX_RATE) return "waive-candidate";
+  if (t.rate >= OVERLAP_HOT_SPOT_MIN_RATE) return "hot-spot";
+  return "mixed";
 }
 
 /** A campaign as the logs record it: when it started and the tickets it scheduled. */
@@ -239,19 +268,23 @@ async function campaignBlockers(tickets: string[], blockedBy: (id: string) => Pr
 
 /** Replay the project's campaigns and tally, per declared file key, how its shared pairs merged. */
 export async function replayOverlap(opts: OverlapReplayOptions): Promise<OverlapReplay> {
-  const { root, fileSet, tracker, branchPrefix = "agent/", tmpRoot = tmpdir() } = opts;
+  const { root, fileSet, unfilteredFileSet, tracker, branchPrefix = "agent/", tmpRoot = tmpdir() } = opts;
   const campaigns = readCampaigns(root);
   const merges = landedMerges(root, branchPrefix);
   const tallies = new Map<string, Omit<OverlapKeyTally, "rate">>();
   const tally = (key: string) => tallies.get(key) ?? tallies.set(key, { key, pairs: 0, clean: 0, collides: 0, indeterminate: 0 }).get(key)!;
 
   const staleCiteTickets = new Set<string>();
+  const filteredKeys: Record<string, number> = {};
+  let scheduled = 0;
+  let landedCount = 0;
   const blockedByCache = new Map<string, Promise<string[]>>();
   const blockedBy = (id: string) => blockedByCache.get(id) ?? blockedByCache.set(id, tracker.blockedBy(id)).get(id)!;
 
   const clone = scratchClone(root, tmpRoot);
   try {
     for (const [i, c] of campaigns.entries()) {
+      scheduled += new Set(c.tickets).size;
       const lo = c.start - MINUTE;
       const hi = Math.min(campaigns[i + 1]?.start ?? Infinity, c.start + 4 * DAY);
       const landed = new Map<string, Landed>();
@@ -259,6 +292,7 @@ export async function replayOverlap(opts: OverlapReplayOptions): Promise<Overlap
         const inWindow = (merges.get(id) ?? []).filter((l) => l.at >= lo && l.at < hi).sort((x, y) => x.at - y.at);
         if (inWindow.length) landed.set(id, inWindow[0]);
       }
+      landedCount += landed.size;
       const keys = new Map<string, Set<string>>();
       for (const id of landed.keys()) {
         const recorded = c.fileKeys?.[id];
@@ -266,9 +300,12 @@ export async function replayOverlap(opts: OverlapReplayOptions): Promise<Overlap
           keys.set(id, new Set(recorded));
           continue;
         }
-        const { files, confident } = await fileSet(ticketProse(await tracker.issueText(id)));
+        const prose = ticketProse(await tracker.issueText(id));
+        const { files, confident } = await fileSet(prose);
         if (!confident) staleCiteTickets.add(id);
         keys.set(id, new Set(files));
+        for (const k of unfilteredFileSet ? (await unfilteredFileSet(prose)).files : [])
+          if (!files.some((f) => keyCoversPath(f, k))) filteredKeys[k] = (filteredKeys[k] ?? 0) + 1;
       }
       let blockers: ((id: string) => Set<string>) | undefined;
       const ids = [...landed.keys()].sort();
@@ -281,12 +318,15 @@ export async function replayOverlap(opts: OverlapReplayOptions): Promise<Overlap
           if (blockers(x).has(y) || blockers(y).has(x)) continue;
           let [a, b] = [landed.get(x)!, landed.get(y)!];
           if (a.at > b.at) [a, b] = [b, a];
-          const realOverlap = [...changedPaths(clone.git, a)].some((p) => changedPaths(clone.git, b).has(p));
-          const verdict: PairVerdict = realOverlap ? classifyPair(clone.git, a, b) : { kind: "clean" };
+          const changedB = changedPaths(clone.git, b);
+          const bothChanged = [...changedPaths(clone.git, a)].filter((p) => changedB.has(p));
+          const verdict: PairVerdict = bothChanged.length ? classifyPair(clone.git, a, b) : { kind: "clean" };
           for (const key of shared) {
             const t = tally(key);
             t.pairs++;
-            if (verdict.kind === "indeterminate") t.indeterminate++;
+            // A key neither real change touched can't have collided, whatever made the pair indeterminate.
+            if (!bothChanged.some((p) => keyCoversPath(key, p))) t.clean++;
+            else if (verdict.kind === "indeterminate") t.indeterminate++;
             else if (verdict.kind === "conflict" && verdict.paths.some((p) => keyCoversPath(key, p))) t.collides++;
             else t.clean++;
           }
@@ -297,5 +337,107 @@ export async function replayOverlap(opts: OverlapReplayOptions): Promise<Overlap
     rmSync(clone.dir, { recursive: true, force: true });
   }
   const keys = [...tallies.values()].map((t) => ({ ...t, rate: t.clean + t.collides ? t.collides / (t.clean + t.collides) : null }));
-  return { keys: keys.sort((a, b) => a.key.localeCompare(b.key)), staleCiteTickets: [...staleCiteTickets].sort() };
+  return {
+    campaigns: campaigns.length,
+    scheduled,
+    landed: landedCount,
+    keys: keys.sort((a, b) => a.key.localeCompare(b.key)),
+    staleCiteTickets: [...staleCiteTickets].sort(),
+    filteredKeys,
+  };
+}
+
+const VERDICT_WORDS: Record<OverlapVerdict, string> = {
+  "waive-candidate": "waive candidate",
+  "hot-spot": "hot spot",
+  mixed: "between the thresholds",
+  "too-few": "too few pairs to judge",
+};
+
+const pct = (rate: number | null) => (rate === null ? "n/a" : `${Math.round(rate * 100)}%`);
+
+/** A key's numbers, as every line of the report gives them. */
+const evidence = (t: OverlapKeyTally) =>
+  `${t.pairs} pairs: ${t.clean} clean, ${t.collides} collide, ${t.indeterminate} indeterminate; collision rate ${pct(t.rate)} (${t.collides} of ${t.clean + t.collides} measured)`;
+
+/** The config lens's report: thresholds first, then each key under what its numbers suggest. */
+export function renderOverlapReport(r: OverlapReplay, waivedFiles: readonly string[] = []): string {
+  const waived = new Set(waivedFiles);
+  const pick = (v: OverlapVerdict) => r.keys.filter((t) => !waived.has(t.key) && overlapVerdict(t) === v);
+  const section = (title: string, rows: string[]) => (rows.length ? [``, `## ${title}`, ...rows] : []);
+  return [
+    `# Config lens: how often tickets sharing a file really conflicted`,
+    ``,
+    `Thresholds: a key is judged at ${OVERLAP_MIN_MEASURED_PAIRS}+ measured pairs (clean + collide; indeterminate pairs are left out of the rate) — ` +
+      `a waive candidate at a collision rate ≤ ${pct(OVERLAP_WAIVE_MAX_RATE)}, a hot spot at ≥ ${pct(OVERLAP_HOT_SPOT_MIN_RATE)}.`,
+    `Campaigns replayed: ${r.campaigns}; ${r.landed} of ${r.scheduled} scheduled tickets matched a campaign merge commit in their campaign's window.`,
+    ...(r.staleCiteTickets.length
+      ? [
+          `${r.staleCiteTickets.length} tickets' cites no longer all resolve against today's tree (counted with the keys that do): ${r.staleCiteTickets.map((id) => `#${id}`).join(", ")}.`,
+        ]
+      : []),
+    ...section(
+      `Waive candidates`,
+      pick("waive-candidate").map((t) => `- add \`${t.key}\` to \`waivedFiles\` — ${evidence(t)}`),
+    ),
+    ...section(
+      `Hot spots — evidence against waiving; worth splitting`,
+      pick("hot-spot").map((t) => `- \`${t.key}\` — leave it out of \`waivedFiles\`: ${evidence(t)}`),
+    ),
+    ...section(
+      `Already waived`,
+      r.keys
+        .filter((t) => waived.has(t.key))
+        .map((t) => `- \`${t.key}\` (already waived; ${VERDICT_WORDS[overlapVerdict(t)]}) — ${evidence(t)}`),
+    ),
+    ...section(
+      `Between the thresholds`,
+      pick("mixed").map((t) => `- \`${t.key}\` — ${evidence(t)}`),
+    ),
+    ...section(
+      `Too few pairs to judge`,
+      pick("too-few").map((t) => `- \`${t.key}\` — ${evidence(t)}`),
+    ),
+    ...section(
+      `Not measurable — the project's own \`fileSet\` filters these cites out`,
+      Object.entries(r.filteredKeys)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, n]) => `- \`${key}\` — cited by ${n} tickets`),
+    ),
+  ].join("\n");
+}
+
+/** The replay's tracker over `gh`, run in the project root: issue text and native blockers, read-only. */
+export function ghOverlapTracker(root: string): OverlapTracker {
+  const run = withRetry(
+    async (args: string[]) => (await promisify(execFile)("gh", args, { cwd: root, encoding: "utf8", ...GH_LIMITS })).stdout,
+  );
+  const repo = repoForProject(root);
+  return {
+    issueText: (id) => run(["issue", "view", normalize(id), "--json", "title,body,comments"]),
+    blockedBy: async (id) => {
+      const rows: Array<{ number?: number; repository?: { full_name?: string } }> = JSON.parse(
+        (await run(["api", `repos/${repo ?? "{owner}/{repo}"}/issues/${normalize(id)}/dependencies/blocked_by`])) || "[]",
+      );
+      return rows
+        .filter((r) => r.number != null && (!repo || !r.repository?.full_name || r.repository.full_name === repo))
+        .map((r) => String(r.number));
+    },
+  };
+}
+
+/**
+ * The config lens end to end: load the project's config at `root`, replay its campaigns with
+ * its own file-set resolver (before waivers) over `gh`, and render the report.
+ */
+export async function runOverlapReplay(root: string, tracker: OverlapTracker = ghOverlapTracker(root)): Promise<string> {
+  const cfg = await loadConfig(join(root, CANONICAL_CONFIG));
+  const replay = await replayOverlap({
+    root,
+    fileSet: cfg.fileSet ?? defaultFileSet(root),
+    unfilteredFileSet: cfg.fileSet && defaultFileSet(root),
+    tracker,
+    branchPrefix: cfg.branchPrefix,
+  });
+  return renderOverlapReport(replay, cfg.waivedFiles);
 }

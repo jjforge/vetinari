@@ -197,6 +197,10 @@ export interface ReducedCampaign {
    * already merged. Recorded here — the reducer's log of what it ignored — never folded, so a
    * late stale event can never flip a merged card back to parked/failed/running. */
   anomalies: string[];
+  /** a real `merged` (one not marked `alreadyMerged`) comes after the last `base-gate` — or after
+   * `campaign-start` when there is none: the campaign died between a merge and its base gate, so
+   * the merged base was never proven and a redrive re-gates it (design §7). Derived, never stored. */
+  ungatedMerge: boolean;
 }
 
 /** The display `layout` index of each loop-facing wave, in order: the layout waves still holding
@@ -498,6 +502,10 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
     }
   }
 
+  // A redrive's re-log of an already-merged green made no merge, so only a real `merged` counts.
+  const lastBaseGate = relevant.findLastIndex((e) => e.event === "base-gate");
+  const ungatedMerge = relevant.slice(lastBaseGate + 1).some((e) => e.event === "merged" && !e.alreadyMerged);
+
   return {
     waves,
     layout,
@@ -521,6 +529,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
     redBase,
     stopped,
     anomalies,
+    ungatedMerge,
   };
 }
 

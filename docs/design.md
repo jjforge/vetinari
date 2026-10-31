@@ -78,7 +78,7 @@ The event vocabulary after consolidation (§13.2) is small and uses the user's w
 | `green` | `taskId`, `branch`, `commits` | run |
 | `parked` | `taskId`, `reason`, `detail?` | run (question/stalled/stopped/outdated-agent), campaign (conflict — a retried merge that collided again, §6). A red base is the *wave's* reason and is written, not inferred: `campaign-parked` carries `reason: red-base` for that wave index; no per-member `parked` event is written |
 | `failed` | `taskId`, `detail?` | whichever process observes it: the run loop on a throw, the campaign on a child's non-zero exit, the integrator on a merge that fails with no unmerged paths (§6) |
-| `merged` | `taskId` | integrator |
+| `merged` | `taskId`, `alreadyMerged?` (set on a redrive's re-log of a green already on the base, which made no merge) | integrator |
 | `base-gate` | `index?`, `green`, `detail?` | integrator |
 | `wave-done` | `index`, `merged?` | campaign — only when every member is `completed` |
 | `grace-wait` | `seconds`, `tasks` | campaign (§5 step 3) |
@@ -233,6 +233,8 @@ Reconciliation, per member of the first wave that is not fully `completed`:
 | `failed` | refused — prune it or fix it first; redrive names it. `redrive --override` re-runs it instead (the only meaning `--override` has on redrive) |
 | `pruned` membership | skipped |
 | `unstarted` / `grafted` | run |
+
+A redrive also re-gates the merged base when a real `merged` (one not marked `alreadyMerged`) has no `base-gate` after it — the campaign died between a merge and its base gate, so the merged work was never proven. The forced gate behaves as any merged-base gate (green completes the wave and fires the merged hook for its already-merged members, red parks it `red-base`), and the terminal prints a re-gating line before it.
 
 Then the loop continues from that wave as in §5. Redrive is idempotent against a human who answers twice or answers something a prune already removed: an answer for an issue that is not parked is reported and ignored. A redrive refuses to start while a campaign process for the project is live (the lease says so); an answer then only delivers (§5 step 3). Whichever process finishes the last wave archives the run. A fresh `campaign` (not `--dry-run`) over a leftover campaign parked `red-base` refuses, naming the parked wave and pointing at `vetinari redrive`: launching fresh would archive the park out from under the redrive and plan its merged members again. `--supersede` archives it and starts fresh anyway; every other leftover (failed, crashed, question/conflict-parked) is still superseded by a fresh campaign. Crash is recognised by liveness — a campaign process that is gone with no `campaign-*` stop marker since its latest `wave-start` — and is reconciled to `parked(crash)` on the next read, never stored as a separate status.
 

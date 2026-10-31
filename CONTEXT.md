@@ -184,8 +184,8 @@ Repair the [[base]] by hand — resolve a [[conflict]] or a [[red-base]] — the
 
 **Redrive**:
 Pick an unfinished [[campaign]] back up where it stopped: reconcile the log, then
-continue. Never redoes merged work, and lands green-but-unmerged work rather than
-re-running it. Resume is one path through it, not a synonym.
+continue. Never redoes merged work, lands green-but-unmerged work rather than
+re-running it, and re-gates merged work a crash left unproven. Resume is one path through it, not a synonym.
 _Avoid_: restart, recover, re-run, resume (as the umbrella).
 
 **Stop**:

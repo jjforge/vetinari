@@ -204,7 +204,7 @@ The event log (`logs/orchestrator.jsonl`) is one JSON object per line,
 | `parked` | `taskId`, `reason`, `detail?` | run (question/stalled/stopped/outdated-agent), campaign (conflict — only when a green's retried merge collides again). A red base is carried only by `campaign-parked` |
 | `answered` | `taskId`, `source` (`cli`/`ui`/`telegram`, from `VETINARI_ANSWER_SOURCE`, default `cli`) | the `answer` command, only once it delivers into the parked record — never for a not-parked no-op or a refused answer. Under a live campaign the issue then reads `running` in the `answered` phase until the re-admit's `spawn` |
 | `failed` | `taskId`, `detail?` | whichever process observes it: the run loop on a throw, the campaign on a child's non-zero exit, the integrator on a merge that fails with no unmerged paths (a dirty tree, a held `index.lock`) |
-| `merged` | `taskId` | integrator |
+| `merged` | `taskId`, `alreadyMerged?` (set on a redrive's re-log of a green already on the base, which made no merge) | integrator |
 | `base-gate` | `index?`, `green`, `detail?` | integrator |
 | `wave-done` | `index`, `merged?` | campaign — only when every member is `completed` |
 | `grace-wait` | `seconds`, `tasks` | campaign |

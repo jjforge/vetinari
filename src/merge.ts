@@ -243,8 +243,10 @@ export async function integrateGreens(
     // completed and clears any conflict hold (a human who hand-merges a conflict-parked green
     // onto the base, then redrives, must close the wave). It rides `alreadyMerged`, not `merged`
     // — no second merge commit — so the caller can count it as "skipped as already merged".
+    // The row is marked `alreadyMerged` so the reducer can tell this re-log from a real merge
+    // still awaiting its base gate (`ungatedMerge`, design §7).
     if (branchAlreadyMerged(branch)) {
-      cfg.log.log("merged", { taskId, branch });
+      cfg.log.log("merged", { taskId, branch, alreadyMerged: true });
       clearParked(cfg, taskId);
       alreadyMerged.push(taskId);
       continue;

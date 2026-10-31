@@ -1182,6 +1182,9 @@ export async function campaign(
       // merges (design §7): the fix-forward that resolves it lands on the base, not on any member
       // branch, so `redBase` being set for this reconciled wave is the signal to force the gate.
       let regate = false;
+      // A crash between a merge and its base gate left the merged base unproven (design §7): a real
+      // `merged` with no `base-gate` after it. Nothing new may merge on re-entry, so force the gate.
+      let regateUngated = false;
       if (reconcileResume) {
         // Redrive reconciliation (design §7): re-entering the parked wave, decide each
         // member's outcome from the log — a banked/green member is landed by integration
@@ -1190,7 +1193,8 @@ export async function campaign(
         // members that genuinely need to run. Fed back through the wave's ordinary resolve
         // logic below, so no park/fail/merge path is special-cased for a redrive.
         reconcileResume = false;
-        regate = reduced.redBase.size > 0 && reduced.parkedWave === index;
+        regateUngated = reduced.ungatedMerge;
+        regate = (reduced.redBase.size > 0 && reduced.parkedWave === index) || regateUngated;
         // A crashed member is resumed on its recorded session rather than re-run fresh only when the
         // provider keeps a durable session AND its branch carries committed work (design §7's "else
         // resume the session"); no commits, non-resumable, or an answered park (which re-runs via its
@@ -1267,6 +1271,8 @@ export async function campaign(
 
       const greens = tasks.filter((t) => outcomes[t] === "green");
 
+      if (regateUngated && !stoppedBeforeIntegration)
+        reporter.line(`wave ${index + 1}/${total}: re-gating — its merges were never gated (the campaign died before its base gate)`);
       const first = stoppedBeforeIntegration
         ? { merged: [], conflicts: [], parked: undefined }
         : await deps.integrate(cfg, greens, undefined, index, { regate });

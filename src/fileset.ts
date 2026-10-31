@@ -21,6 +21,10 @@
  * `src/a/index.ts`, so it collides with a `Touches:` of that file but not with an
  * `index.ts` created in another directory. A directory the tree lacks keeps the cited
  * path; one matching several tree directories, or a bare cite, keys to a bare key.
+ *
+ * A **rooted cite** — one starting with `./` — skips suffix matching: it names one path
+ * from the repository root and matches only that exact path, so a root file whose name
+ * recurs deeper (`./README.md`) can still be pinned. A bare `README.md` stays ambiguous.
  */
 import { readdirSync, statSync } from "node:fs";
 import { join, posix, relative, sep } from "node:path";
@@ -304,6 +308,16 @@ function longestSuffixMatches(segments: string[], candidates: string[]): string[
 }
 
 /**
+ * The path a **rooted cite** names from the repository root — the cite after its leading
+ * `./` — or null when the cite is not rooted. A rooted cite matches only that exact path:
+ * no suffix matching, no basename fallback, so a root file can be pinned even when its
+ * name recurs deeper in the tree.
+ */
+function rootedCitePath(cite: string): string | null {
+  return cite.startsWith("./") ? cite.slice(2) : null;
+}
+
+/**
  * Resolve one cited path against the tree index to its fileKey, by **longest suffix
  * match** on path segments:
  *   - the tree holds exactly one file with the cite's basename -> that real path;
@@ -312,6 +326,8 @@ function longestSuffixMatches(segments: string[], candidates: string[]): string[
  *   - several remain and the cite cannot narrow to one -> the bare key `*\/<name>`,
  *     which collides with any file of that name;
  *   - no file carries the basename at all -> null (absent — forbids confidence).
+ * A rooted cite (`./README.md`) skips all of that: it resolves to its exact path from the
+ * root when the tree holds it, and to null otherwise.
  */
 function resolveCite(cite: string, index: Map<string, string[]>): string | null {
   const matches = citeMatches(cite, index);
@@ -323,9 +339,12 @@ function resolveCite(cite: string, index: Map<string, string[]>): string | null 
 /**
  * The tree paths one cited path may name: those carrying its basename that match the
  * longest trailing run of its segments (one when the cite pins a path, several when it
- * is ambiguous), or null when no file carries the basename at all.
+ * is ambiguous), or null when no file carries the basename at all. A rooted cite names
+ * only its exact path, or null when the tree lacks it.
  */
 function citeMatches(cite: string, index: Map<string, string[]>): string[] | null {
+  const rooted = rootedCitePath(cite);
+  if (rooted !== null) return index.get(posix.basename(rooted))?.includes(rooted) ? [rooted] : null;
   const segments = cite.split("/").filter(Boolean);
   const candidates = index.get(segments[segments.length - 1]);
   if (!candidates || candidates.length === 0) return null;
@@ -351,7 +370,9 @@ function treeDirIndex(files: Map<string, string[]>): Map<string, string[]> {
 /**
  * Resolve one `Creates:` cite to its fileKey. The file does not exist yet, so its
  * *directory* is resolved instead, by longest suffix match against the tree's
- * directories (a leading `./` dropped first):
+ * directories:
+ *   - a rooted cite (`./a/foo.ts`) -> its exact path from the root (`a/foo.ts`), with no
+ *     suffix matching, whether or not the directory exists;
  *   - a bare cite (no directory) -> the bare key `*\/<name>`;
  *   - exactly one tree directory matches -> that directory + the basename, a full path
  *     (`a/foo.ts` with `src/a` in the tree -> `src/a/foo.ts`);
@@ -361,30 +382,30 @@ function treeDirIndex(files: Map<string, string[]>): Map<string, string[]> {
  * Never null: a new file is legitimately absent, so it never forbids confidence.
  */
 function resolveCreatesCite(cite: string, dirIndex: Map<string, string[]>): string {
-  const path = cite.replace(/^(?:\.\/)+/, "");
-  const segments = path.split("/").filter(Boolean);
+  const rooted = rootedCitePath(cite);
+  if (rooted !== null) return rooted;
+  const segments = cite.split("/").filter(Boolean);
   const base = segments[segments.length - 1];
   if (segments.length === 1) return bareKey(base);
   const dirSegments = segments.slice(0, -1);
   const matches = longestSuffixMatches(dirSegments, dirIndex.get(dirSegments[dirSegments.length - 1]) ?? []);
-  if (matches.length === 0) return path;
+  if (matches.length === 0) return cite;
   return matches.length === 1 ? `${matches[0]}/${base}` : bareKey(base);
 }
 
 /**
  * The package directories a `Creates:` cite may land in, read from the **raw** cite: a
- * bare cite (no `/`) names no directory -> null; `./x.go` -> `.`; otherwise its directory
- * (a leading `./` dropped) resolved by longest suffix match against the tree's
- * directories -> every match at the longest suffix reached, or the cited directory as
- * written when none matches (a new package).
+ * bare cite (no `/`) names no directory -> null; a rooted cite -> the exact directory of
+ * its path (`./x.go` -> `.`, `./a/x.go` -> `a`), unmatched; otherwise its directory
+ * resolved by longest suffix match against the tree's directories -> every match at the
+ * longest suffix reached, or the cited directory as written when none matches (a new
+ * package).
  */
 function createsCiteDirs(cite: string, dirIndex: Map<string, string[]>): string[] | null {
   if (!cite.includes("/")) return null;
-  const dirSegments = cite
-    .replace(/^(?:\.\/)+/, "")
-    .split("/")
-    .filter(Boolean)
-    .slice(0, -1);
+  const rooted = rootedCitePath(cite);
+  if (rooted !== null) return [posix.dirname(rooted)];
+  const dirSegments = cite.split("/").filter(Boolean).slice(0, -1);
   if (dirSegments.length === 0) return ["."];
   const matches = longestSuffixMatches(dirSegments, dirIndex.get(dirSegments[dirSegments.length - 1]) ?? []);
   return matches.length > 0 ? matches : [dirSegments.join("/")];
@@ -465,7 +486,9 @@ function ticketCites(ticket: string): { touches: string[]; creates: string[] } {
  *     may name when ambiguous (still matching at the longest suffix it reaches);
  *   - a `Creates:` cite with a directory -> that directory, resolved against the tree's
  *     directories by the same longest-suffix match (every match when several tie), or
- *     the cited directory when the tree lacks it (a new package); `./x.go` -> `.`;
+ *     the cited directory when the tree lacks it (a new package);
+ *   - a rooted cite (`./pkg/a.go`, `Touches:` or `Creates:`) -> the exact directory of
+ *     its path from the root, no suffix matching (`./x.go` -> `.`);
  *   - a bare `Creates:` cite (`x.go`) -> no key, and the ticket is not confident: its
  *     package is unknowable, so the planner halts it as under-specified.
  * Otherwise `confident` is what {@link defaultFileSet} returns. Same lazy, once-per-plan

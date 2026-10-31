@@ -867,6 +867,15 @@ test("loadConfig refuses a waivedFiles that is not a string[], and accepts any s
   assert.deepEqual(cfg.waivedFiles, ["DESIGN.md", "src"]);
 });
 
+test("loadConfig refuses a ./-prefixed waivedFiles entry, naming it and suggesting the file key (#627)", async () => {
+  const body = CONFIG_BODY.replace("fetchTask: (id) => id,", `fetchTask: (id) => id,\n  waivedFiles: ["README.md", "./docs/x.md"],`);
+  await assert.rejects(loadConfig(writeConfig(scratch(), "vetinari/config.mts", body)), (err: unknown) => {
+    assert.ok(err instanceof Refusal);
+    assert.match(err.message, /"waivedFiles" entry \.\/docs\/x\.md: entries are file keys, write docs\/x\.md/);
+    return true;
+  });
+});
+
 test("loadConfig refuses a non-boolean perMerge on a gate, naming the gate, and accepts a boolean (#617)", async () => {
   const withGates = (gates: string) => CONFIG_BODY.replace(`gates: [{ cmd: "true" }],`, `gates: ${gates},`);
   const cfgPath = writeConfig(

@@ -223,6 +223,11 @@ pinned to one path. It stands for that name in any directory, so it collides wit
 every file of that name. A file at the repository root is a path, not a bare key.
 _Avoid_: bare basename, ambiguous key.
 
+**Rooted cite**:
+A cite that starts with `./`, naming one path from the repository root; it
+matches only that exact path.
+_Avoid_: anchored cite, pinned cite, root-relative cite, absolute cite.
+
 **Waived file** (`waivedFiles`):
 A file named in the project's `waivedFiles` config that co-[[wave]] issues may
 both edit — a large, sectioned doc most issues update. Issues still cite it on

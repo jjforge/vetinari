@@ -16,6 +16,7 @@ import {
   formatBaseGateEstimate,
   formatCampaignBaseGates,
   formatWaveTimeSplit,
+  mergedBaseGateSeconds,
   waveTimeSplit,
 } from "./report.ts";
 import type { OrchestratorEvent } from "./event-log.ts";
@@ -311,6 +312,24 @@ const campaignLog: OrchestratorEvent[] = [
 
 test("campaignBaseGates totals this campaign's merged-base gates — never a branch gate, a baseline run or an earlier campaign's", () => {
   assert.deepEqual(campaignBaseGates(campaignLog), { count: 3, seconds: 190 });
+});
+
+/** A failed per-merge check on a wave's last member: its rows land after the last `merged` (#637). */
+const failedPerMergeCheck = (perMerge: Record<string, unknown>): OrchestratorEvent[] => [
+  at(0, "wave-start", { index: 0, tasks: ["101", "102"] }),
+  at(1, "gate-result", { cmd: "per-merge", exitCode: 0, seconds: 30, outFile: "x", ...perMerge }),
+  at(2, "merged", { taskId: "101" }),
+  at(3, "gate-result", { cmd: "per-merge", exitCode: 1, seconds: 40, outFile: "x", ...perMerge }),
+  at(4, "gate-result", { cmd: "make test", exitCode: 0, seconds: 50, outFile: "x" }),
+  at(5, "base-gate", { green: true }),
+];
+
+test("a per-merge check's gate-result rows are not merged-base gate time, even when that check failed (#637)", () => {
+  assert.deepEqual(mergedBaseGateSeconds(failedPerMergeCheck({ perMerge: true })), [50]);
+});
+
+test("a log written before per-merge rows were flagged reads as it always did (#637)", () => {
+  assert.deepEqual(mergedBaseGateSeconds(failedPerMergeCheck({})), [90]);
 });
 
 test("formatCampaignBaseGates names the total merged-base gate time and how many gates it was", () => {

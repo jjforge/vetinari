@@ -113,6 +113,7 @@ const BASE_GATE_WINDOW_OPENERS = new Set(["merged", "base-gate", "wave-start", "
  * the taskId-less `gate-result` seconds logged after the wave's last `merged` (or, for a re-gate that
  * merged nothing, its `wave-start`) and before the `base-gate`. A member's branch gate carries a
  * `taskId`, and a taskId-less result no `base-gate` closes (a `vetinari baseline` run) is never counted.
+ * A per-merge check's result (`perMerge: true`) is skipped: it neither adds to nor resets the sum.
  */
 export function mergedBaseGateSeconds(events: OrchestratorEvent[]): number[] {
   const out: number[] = [];
@@ -120,7 +121,8 @@ export function mergedBaseGateSeconds(events: OrchestratorEvent[]): number[] {
   for (const e of events) {
     if (e.event === "base-gate") out.push(pending);
     if (BASE_GATE_WINDOW_OPENERS.has(e.event)) pending = 0;
-    else if (e.event === "gate-result" && e.taskId === undefined) pending += e.seconds;
+    // A per-merge check's rows are not the base gate's, even when no `merged` follows a failed one (#637).
+    else if (e.event === "gate-result" && e.taskId === undefined && !e.perMerge) pending += e.seconds;
   }
   return out;
 }

@@ -389,12 +389,13 @@ export function collectWaveChangelog(
 /**
  * Run the `perMerge` gates against the base just after one member's merge — the per-merge check.
  * Like `gateMergedBase` it gates a throwaway sandbox cut from HEAD, but it logs no `base-gate`:
- * that event stays the full gate against a wave's merged base.
+ * that event stays the full gate against a wave's merged base. Its `gate-result` rows carry
+ * `perMerge: true`, so the merged-base gate total skips them (report.ts).
  */
 async function gatePerMerge(cfg: ResolvedConfig, flagged: GateSpec[]): Promise<{ green: boolean; report: string; failed?: GateSpec }> {
   const sbx = await makeSandbox(cfg, "campaign-integrate");
   try {
-    return await runGates({ ...cfg, gates: flagged }, sbx, { all: true });
+    return await runGates({ ...cfg, gates: flagged }, sbx, { all: true, perMerge: true });
   } finally {
     await sbx.close();
     gitTry(["branch", "-D", `${cfg.branchPrefix}campaign-integrate`]);

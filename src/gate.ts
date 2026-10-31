@@ -66,7 +66,7 @@ export function selectGates(gates: GateSpec[], changedFiles: string, opts: { all
 export async function runGates(
   cfg: ResolvedConfig,
   sbx: Sandbox,
-  opts: { all?: boolean; taskId?: string; stopped?: () => boolean } = {},
+  opts: { all?: boolean; taskId?: string; stopped?: () => boolean; perMerge?: boolean } = {},
 ): Promise<{ green: boolean; report: string; failed?: GateSpec }> {
   const { taskId, stopped = () => false } = opts;
   let files = "";
@@ -108,6 +108,8 @@ export async function runGates(
       outFile,
       // Logged so slow-gate detection and the dashboard read the budget off the log, never config (#445).
       ...(g.budgetSeconds !== undefined ? { budgetSeconds: g.budgetSeconds } : {}),
+      // Tagged so the merged-base gate total skips a per-merge check's rows (#637).
+      ...(opts.perMerge ? { perMerge: true as const } : {}),
     };
     cfg.log.log("gate-result", resultFields);
     if (taskId) appendActivity(cfg.stateDir, taskId, event("gate-result", resultFields));

@@ -140,6 +140,29 @@ test("a gate-result carries the gate's budgetSeconds when the gate sets one, and
   assert.equal("budgetSeconds" in results[0], false, "no budgetSeconds key on a gate without a budget");
 });
 
+test("runGates with perMerge stamps perMerge: true on every gate-result it logs, and only then (#637)", async () => {
+  const gates = [{ cmd: "tsc --noEmit" }, { cmd: "run-tests" }];
+  const results = (cfg: ResolvedConfig) => readEventLog(cfg).filter((e): e is GateResultEvent => e.event === "gate-result");
+
+  const flagged = gateCfg(gates);
+  await runGates(flagged, gateSandbox({}), { all: true, perMerge: true });
+  assert.deepEqual(
+    results(flagged).map((e) => [e.cmd, e.perMerge]),
+    [
+      ["tsc --noEmit", true],
+      ["run-tests", true],
+    ],
+  );
+
+  const plain = gateCfg(gates);
+  await runGates(plain, gateSandbox({}), { all: true });
+  assert.equal(results(plain).length, 2);
+  assert.ok(
+    results(plain).every((e) => !("perMerge" in e)),
+    "no perMerge key without the option",
+  );
+});
+
 test("a stop while a check runs: runGates resolves, runs no further check and records nothing for either (#474)", async () => {
   const cfg = gateCfg([{ cmd: "tsc --noEmit" }, { cmd: "run-tests" }]);
   let stop = false;

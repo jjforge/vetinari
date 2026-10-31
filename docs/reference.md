@@ -217,7 +217,7 @@ The event log (`logs/orchestrator.jsonl`) is one JSON object per line,
 | `replan` | `waves` (the new waves for the unstarted remainder), `was?` (how many unstarted waves it replaced) | replan — the reducer keeps every started wave at its index and replaces the tail (ADR 0022) |
 | `redrive` | `fromWave`, `landed?`, `skipped?` | campaign |
 | `stop-requested` | `index` (the wave in flight) | campaign — an operator asked it to stop; the reducer ignores it, `vetinari stop` reads it to tell a stop already pending |
-| `gate-result` | `taskId?` (absent on the merged-base gate), `cmd`, `exitCode`, `seconds`, `outFile`, `budgetSeconds?` (the gate's budget, when it sets one) | the gate — a diagnostic row (below): the reducer ignores it; slow-gate detection reads `seconds` and `budgetSeconds` off it |
+| `gate-result` | `taskId?` (absent on the merged-base gate), `cmd`, `exitCode`, `seconds`, `outFile`, `budgetSeconds?` (the gate's budget, when it sets one), `perMerge?` (`true` on a per-merge check's rows, which the merged-base gate total skips) | the gate — a diagnostic row (below): the reducer ignores it; slow-gate detection reads `seconds` and `budgetSeconds` off it |
 
 Diagnostic rows — `gate`, `gate-check`, `gate-result`, `commit`, `tool`, `sandbox-exec`,
 sandbox setup, hook failures — are activity, not state: the reducer ignores them;

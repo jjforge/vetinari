@@ -238,6 +238,8 @@ export function readMountParentOwners(
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"],
     timeout: timeoutMs,
+    // A hard cap: SIGTERM only asks, and spawnSync waits for the child to exit.
+    killSignal: "SIGKILL",
   });
   if (r.error || r.status === null || [125, 126, 127].includes(r.status)) return undefined;
   return parseStatOwners(r.stdout);

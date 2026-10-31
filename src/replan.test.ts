@@ -91,6 +91,26 @@ test("replan refuses whole, naming every offender, when an unstarted issue is un
   assert.equal(replans(cfg).length, 0);
 });
 
+test("replan refuses in its own words, logging nothing, when unstarted issues' blockers form a cycle", async () => {
+  // 3 and 4 block each other: no layering places either.
+  const cfg = harnessCfg(
+    { "1": "a.ts", "2": "b.ts", "3": "c.ts", "4": "d.ts" },
+    { blockedBy: async (id: string) => ({ "3": ["4"], "4": ["3"] })[id] ?? [] },
+  );
+  launch(cfg, [["1"], ["2"], ["3"], ["4"]]);
+  const before = readEventLog(cfg);
+
+  await assert.rejects(
+    () => runReplan(cfg, {}),
+    (err: Error) => {
+      assert.equal(err.name, "Refusal");
+      assert.match(err.message, /^replan refused — nothing logged:\n {2}blockedBy cycle among #3, #4$/);
+      return true;
+    },
+  );
+  assert.deepEqual(readEventLog(cfg), before);
+});
+
 test("replan keeps an unstarted issue after its in-campaign blocker, and reads a started blocker as satisfied", async () => {
   // All four are file-disjoint, so only blockers order them. 103 waits on the unstarted 102;
   // 104 waits on 101, which is in flight (started, not merged) — every unstarted wave runs after it.

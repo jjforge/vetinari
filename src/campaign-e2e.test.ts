@@ -157,11 +157,18 @@ const localCampaignDeps = (
   };
   // The per-merge check (#617): the real runGates over the flagged gates, through the same local sandbox.
   const perMergeGate = (c: ResolvedConfig, flagged: GateSpec[]) => mergedBaseGate({ ...c, gates: flagged });
+  // The merged-base gate logs `base-gate` as production's gateMergedBase does — the per-merge
+  // check above does not — so a redrive reads this log exactly as it would a real one.
+  const gate = async (c: ResolvedConfig, index?: number) => {
+    const r = await mergedBaseGate(c);
+    c.log.log("base-gate", { index, green: r.green });
+    return r;
+  };
   return {
     spawnRun,
     // Forward `index` and `opts` (the redrive re-gate flag) so integration behaves exactly as it
     // does in production; only the gates' sandbox is swapped for the local one.
-    integrate: (c, greens, _deps, index, opts) => integrateGreens(c, greens, { gate: mergedBaseGate, perMergeGate }, index, opts),
+    integrate: (c, greens, _deps, index, opts) => integrateGreens(c, greens, { gate, perMergeGate }, index, opts),
     collectChangelog: collectWaveChangelog,
     currentBranch,
     grace: async () => {},
@@ -667,6 +674,123 @@ test("scenario 4: a redrive integrates a green-but-unmerged member — landed wi
       events.some((e) => e.event === "campaign-done"),
       "the campaign advanced to done",
     );
+  });
+});
+
+// The campaign process dies after a wave's merges land and before its merged-base gate logs:
+// the injected gate throws, so the real `merged` rows are on disk and no `base-gate` is.
+const crashBeforeBaseGateDeps = (cfg: ResolvedConfig, dir: string): CampaignDeps => ({
+  ...localCampaignDeps(cfg, dir, implScript),
+  integrate: (c, greens, _deps, index, opts) =>
+    integrateGreens(
+      c,
+      greens,
+      {
+        gate: async () => {
+          throw new Error("killed before the base gate");
+        },
+      },
+      index,
+      opts,
+    ),
+});
+
+for (const variant of ["green", "red"] as const) {
+  test(`scenario 14 (${variant}): a redrive after a crash between a wave's merges and its base gate runs exactly one merged-base gate — ${variant === "green" ? "completing the wave" : "parking it red-base"} (#642)`, async () => {
+    const dir = seedRepo();
+    const cfg = repoCfg(dir, fakeTracker());
+
+    await inRepo(dir, async () => {
+      await assert.rejects(
+        campaign(cfg, [["101", "102"]], host(dir), "crash", {}, crashBeforeBaseGateDeps(cfg, dir)),
+        /killed before the base gate/,
+      );
+      const crashed = readEventLog(cfg);
+      assert.deepEqual(
+        crashed
+          .filter((e) => e.event === "merged")
+          .map((e: any) => e.taskId)
+          .sort(),
+        ["101", "102"],
+        "both merges landed",
+      );
+      assert.ok(!crashed.some((e) => e.event === "base-gate"), "the crash left the merges ungated");
+
+      // The red variant breaks the merged base between the runs (the gate's README is gone).
+      const redriveCfg = variant === "red" ? { ...cfg, gates: [{ cmd: "test -f MISSING.md" }] } : cfg;
+      const spawns: string[] = [];
+      const outcome = await campaign(
+        redriveCfg,
+        [],
+        host(dir),
+        undefined,
+        { resume: true },
+        localCampaignDeps(redriveCfg, dir, implScript, spawns),
+      );
+      assert.deepEqual(spawns, [], "nothing is re-run: every green is already on the base");
+
+      const events = readEventLog(cfg);
+      const gates = events.filter((e) => e.event === "base-gate") as any[];
+      assert.equal(gates.length, 1, "exactly one merged-base gate ran on the redrive");
+      assert.equal(gates[0].index, 0);
+      if (variant === "green") {
+        assert.equal(outcome, "done");
+        assert.ok(
+          events.some((e) => e.event === "wave-done"),
+          "the re-gated wave closed",
+        );
+      } else {
+        assert.equal(outcome, "parked");
+        const stop = events.findLast((e) => e.event === "campaign-parked") as any;
+        assert.equal(stop.reason, "red-base");
+      }
+    });
+  });
+}
+
+test("scenario 15: a question-park re-entry whose banked green re-logs merged(alreadyMerged) runs no merged-base gate; the later real merge runs exactly one, unforced (#642)", async () => {
+  const dir = seedRepo();
+  const cfg = repoCfg(dir, fakeTracker());
+  // 102 asks, is answered, asks again, and greens only on its second answer.
+  let asked102 = 0;
+  const scriptFor =
+    (id: string): LocalAgentScript =>
+    (turn) => {
+      if (id !== "102") return implScript(id)(turn);
+      if (asked102++ < 2) return { signal: BLOCKED, stdout: `<question><summary>which approach for ${id}?</summary></question>` };
+      return implScript(id)(turn);
+    };
+  const passDeps = (regates: (boolean | undefined)[]): CampaignDeps => {
+    const base = localCampaignDeps(cfg, dir, scriptFor);
+    return {
+      ...base,
+      integrate: (c, greens, d, index, opts) => {
+        regates.push(opts?.regate);
+        return base.integrate(c, greens, d, index, opts);
+      },
+    };
+  };
+  const baseGates = () => readEventLog(cfg).filter((e) => e.event === "base-gate").length;
+
+  await inRepo(dir, async () => {
+    assert.equal(await campaign(cfg, [["101", "102"]], host(dir), "ask-twice", {}, passDeps([])), "parked");
+    assert.equal(baseGates(), 1, "the first pass gated 101's merge green");
+
+    // Re-entry 1: the answered 102 re-runs and asks again; 101 re-logs merged(alreadyMerged).
+    answerParked(cfg, "102", "use approach A");
+    const first: (boolean | undefined)[] = [];
+    assert.equal(await campaign(cfg, [], host(dir), undefined, { resume: true }, passDeps(first)), "parked");
+    const relogged = readEventLog(cfg).findLast((e) => e.event === "merged") as any;
+    assert.deepEqual([relogged.taskId, relogged.alreadyMerged], ["101", true]);
+    assert.deepEqual(first, [false], "the re-log does not force a gate");
+    assert.equal(baseGates(), 1, "re-entry 1 merged nothing new and ran no merged-base gate");
+
+    // Re-entry 2: 102 greens and merges — exactly one gate, from the real merge alone.
+    answerParked(cfg, "102", "use approach B");
+    const second: (boolean | undefined)[] = [];
+    assert.equal(await campaign(cfg, [], host(dir), undefined, { resume: true }, passDeps(second)), "done");
+    assert.deepEqual(second, [false]);
+    assert.equal(baseGates(), 2, "re-entry 2 ran exactly one merged-base gate");
   });
 });
 

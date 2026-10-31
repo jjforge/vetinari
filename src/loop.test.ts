@@ -769,6 +769,48 @@ test("runLoop preflight does not warn for a resumable provider (its park→answe
   assert.equal(warnings.filter((w) => /postComment/.test(w)).length, 0);
 });
 
+// A fake sandbox that drives the provider the way sandcastle's run does: it builds the agent's
+// print command and feeds each stream line through the provider's own parser, taking the turn's
+// session id from the `session_id` events that parser yields. Each turn's lines are scripted.
+const streamingSandbox = (turns: { lines: string[]; green: boolean }[]): FakeSandbox & { commands: string[] } => {
+  const sbx = fakeSandbox(turns.map((t) => ({ green: t.green })));
+  const commands: string[] = [];
+  const run = sbx.run.bind(sbx);
+  return Object.assign(sbx, {
+    commands,
+    async run(opts: SandboxRunOptions) {
+      await run(opts);
+      const turn = turns[sbx.runCalls.length - 1];
+      commands.push(
+        opts.agent.buildPrintCommand({ prompt: opts.prompt ?? "task", dangerouslySkipPermissions: true, resumeSession: opts.resumeSession })
+          .command,
+      );
+      let sessionId: string | undefined;
+      for (const line of turn.lines)
+        for (const ev of opts.agent.parseStreamLine(line)) if (ev.type === "session_id") sessionId = ev.sessionId;
+      return { iterations: [{ sessionId }], commits: [{ sha: "abc" }], completionSignal: DONE, stdout: DONE };
+    },
+  });
+};
+
+test("a copilot turn cut off before its result event still resumes next turn with the --session-id it was started under (ADR 0024)", async () => {
+  const cfg = harnessCfg({ agent: { provider: "copilot" } });
+  // Turn 0 streams some text but never Copilot's final `result` event (sandcastle's completion timeout).
+  const delta = JSON.stringify({ type: "assistant.message_delta", data: { deltaContent: DONE } });
+  const sbx = streamingSandbox([
+    { lines: [delta], green: false },
+    { lines: [delta], green: true },
+  ]);
+
+  const outcome = await silence(() => runLoop(cfg, "42", undefined, undefined, depsFor(sbx)));
+
+  assert.equal(outcome, "green");
+  const started = / --session-id '([^']+)'$/.exec(sbx.commands[0])?.[1];
+  assert.ok(started, "turn 0 starts a session under a vetinari-chosen id");
+  assert.equal(sbx.runCalls[1].resumeSession, started);
+  assert.match(sbx.commands[1], new RegExp(` --resume '${started}'$`));
+});
+
 test("runLoop drives a non-resumable provider by a FRESH re-run each red turn — no resumeSession, no 'no session id' throw", async () => {
   let fetched = 0;
   const cfg = harnessCfg({

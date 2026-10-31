@@ -330,9 +330,12 @@ const shellQuote = (s: string): string => "'" + s.replace(/'/g, "'\\''") + "'";
  * `~/.copilot`, and that is the issue's Copilot directory mounted read-write, so the session
  * storage only looks there and transfers nothing. A fresh turn names its session with a fresh
  * `--session-id` uuid (create-or-resume, so never a reused one); a later turn `--resume`s it.
+ * Copilot only reports its session id in its final `result` event, so the turn's id is also
+ * announced on its first stream line: a turn cut off before that event still has a resumable id.
  */
 const resumableCopilot = (base: AgentProvider, copilotDir: string): AgentProvider => {
   const sessionDir = (id: string) => join(copilotDir, "session-state", id);
+  let unannounced: string | undefined;
   return {
     ...base,
     captureSessions: true,
@@ -349,8 +352,16 @@ const resumableCopilot = (base: AgentProvider, copilotDir: string): AgentProvide
     },
     buildPrintCommand(opts) {
       const cmd = base.buildPrintCommand(opts);
-      const session = opts.resumeSession ? ` --resume ${shellQuote(opts.resumeSession)}` : ` --session-id ${shellQuote(randomUUID())}`;
-      return { ...cmd, command: cmd.command + session };
+      unannounced = opts.resumeSession ?? randomUUID();
+      const flag = opts.resumeSession ? "--resume" : "--session-id";
+      return { ...cmd, command: `${cmd.command} ${flag} ${shellQuote(unannounced)}` };
+    },
+    parseStreamLine(line) {
+      const events = base.parseStreamLine(line);
+      if (unannounced === undefined) return events;
+      const sessionId = unannounced;
+      unannounced = undefined;
+      return [{ type: "session_id", sessionId }, ...events];
     },
   };
 };

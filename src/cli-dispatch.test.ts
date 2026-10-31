@@ -7,6 +7,7 @@ import { dispatch, identityLine, parseArgs, type Command, type DispatchDeps } fr
 import { LiveCampaignRefusal, projectHasLiveCampaign, registerProject } from "./host-slots.ts";
 import { GraftRejectedError } from "./graft.ts";
 import { Refusal } from "./refusal.ts";
+import { withEnv } from "./test-support.ts";
 
 // A spy that records each call's arguments and returns a canned value.
 function spy<T>(ret?: T) {
@@ -1287,28 +1288,26 @@ test("dispatch campaign default prints the plan provenance and streams no JSON w
     expandSelection: spy(Promise.resolve(["436"])) as any,
     runCampaignPlan: spy(Promise.resolve({ waves: [["436"]], waveArgs: '"436"', report: "the plan", suggestedName: "" })) as any,
   });
-  const prev = process.env.VETINARI_JSON;
-  delete process.env.VETINARI_JSON;
-  await dispatch(
-    {
-      kind: "campaign",
-      agent: {},
-      positional: ["436"],
-      name: "n",
-      autoPrune: false,
-      resume: false,
-      dryRun: false,
-      override: false,
-      supersede: false,
-      includeMerged: false,
-      onUnderspecified: undefined,
-      json: false,
-    },
-    deps,
-  );
-  const json = process.env.VETINARI_JSON;
-  if (prev === undefined) delete process.env.VETINARI_JSON;
-  else process.env.VETINARI_JSON = prev;
+  const json = await withEnv({ VETINARI_JSON: undefined }, async () => {
+    await dispatch(
+      {
+        kind: "campaign",
+        agent: {},
+        positional: ["436"],
+        name: "n",
+        autoPrune: false,
+        resume: false,
+        dryRun: false,
+        override: false,
+        supersede: false,
+        includeMerged: false,
+        onUnderspecified: undefined,
+        json: false,
+      },
+      deps,
+    );
+    return process.env.VETINARI_JSON;
+  });
   assert.ok(logged.includes("the plan"), "prints the plan provenance");
   assert.notEqual(json, "1", "does not switch on the JSON event stream");
 });
@@ -1318,40 +1317,36 @@ test("dispatch campaign --json switches on the raw event stream and suppresses t
     expandSelection: spy(Promise.resolve(["436"])) as any,
     runCampaignPlan: spy(Promise.resolve({ waves: [["436"]], waveArgs: '"436"', report: "the plan", suggestedName: "" })) as any,
   });
-  const prev = process.env.VETINARI_JSON;
-  delete process.env.VETINARI_JSON;
-  await dispatch(
-    {
-      kind: "campaign",
-      agent: {},
-      positional: ["436"],
-      name: "n",
-      autoPrune: false,
-      resume: false,
-      dryRun: false,
-      override: false,
-      supersede: false,
-      includeMerged: false,
-      onUnderspecified: undefined,
-      json: true,
-    },
-    deps,
-  );
-  const json = process.env.VETINARI_JSON;
-  if (prev === undefined) delete process.env.VETINARI_JSON;
-  else process.env.VETINARI_JSON = prev;
+  const json = await withEnv({ VETINARI_JSON: undefined }, async () => {
+    await dispatch(
+      {
+        kind: "campaign",
+        agent: {},
+        positional: ["436"],
+        name: "n",
+        autoPrune: false,
+        resume: false,
+        dryRun: false,
+        override: false,
+        supersede: false,
+        includeMerged: false,
+        onUnderspecified: undefined,
+        json: true,
+      },
+      deps,
+    );
+    return process.env.VETINARI_JSON;
+  });
   assert.equal(json, "1", "sets VETINARI_JSON so the run logger streams raw events to stdout");
   assert.ok(!logged.includes("the plan"), "the human plan provenance is suppressed under --json");
 });
 
 test("dispatch run --json switches on the raw event stream for the single loop (#299)", async () => {
   const { deps } = makeDeps();
-  const prev = process.env.VETINARI_JSON;
-  delete process.env.VETINARI_JSON;
-  await dispatch({ kind: "run", agent: {}, args: ["436"], json: true }, deps);
-  const json = process.env.VETINARI_JSON;
-  if (prev === undefined) delete process.env.VETINARI_JSON;
-  else process.env.VETINARI_JSON = prev;
+  const json = await withEnv({ VETINARI_JSON: undefined }, async () => {
+    await dispatch({ kind: "run", agent: {}, args: ["436"], json: true }, deps);
+    return process.env.VETINARI_JSON;
+  });
   assert.equal(json, "1");
 });
 
@@ -1668,27 +1663,18 @@ const answeredRows = (cfg: DispatchDeps["cfg"]) => ((cfg.log.log as any).calls a
 
 test("dispatch answer appends one `answered` event with its task id and source once delivered (defaults to cli)", async () => {
   const { deps, cfg } = makeDeps({ projectHasLiveCampaign: spy(true) as any });
-  const prior = process.env.VETINARI_ANSWER_SOURCE;
-  delete process.env.VETINARI_ANSWER_SOURCE;
-  try {
+  await withEnv({ VETINARI_ANSWER_SOURCE: undefined }, async () => {
     await dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps);
-  } finally {
-    if (prior !== undefined) process.env.VETINARI_ANSWER_SOURCE = prior;
-  }
+  });
   assert.deepEqual(answeredRows(cfg), [["answered", { taskId: "436", source: "cli" }]]);
 });
 
 for (const source of ["ui", "telegram"] as const) {
   test(`dispatch answer's \`answered\` event takes its source from VETINARI_ANSWER_SOURCE (${source})`, async () => {
     const { deps, cfg } = makeDeps({ projectHasLiveCampaign: spy(true) as any });
-    const prior = process.env.VETINARI_ANSWER_SOURCE;
-    process.env.VETINARI_ANSWER_SOURCE = source;
-    try {
+    await withEnv({ VETINARI_ANSWER_SOURCE: source }, async () => {
       await dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps);
-    } finally {
-      if (prior === undefined) delete process.env.VETINARI_ANSWER_SOURCE;
-      else process.env.VETINARI_ANSWER_SOURCE = prior;
-    }
+    });
     assert.deepEqual(answeredRows(cfg), [["answered", { taskId: "436", source }]]);
   });
 }
@@ -1713,16 +1699,8 @@ test("dispatch answer appends no `answered` event for a not-parked no-op or a re
 });
 
 // Run `fn` with VETINARI_ANSWER_SOURCE set to `source` (unset when undefined), restoring it after.
-async function withAnswerSource(source: string | undefined, fn: () => Promise<unknown>) {
-  const prior = process.env.VETINARI_ANSWER_SOURCE;
-  if (source === undefined) delete process.env.VETINARI_ANSWER_SOURCE;
-  else process.env.VETINARI_ANSWER_SOURCE = source;
-  try {
-    await fn();
-  } finally {
-    if (prior === undefined) delete process.env.VETINARI_ANSWER_SOURCE;
-    else process.env.VETINARI_ANSWER_SOURCE = prior;
-  }
+function withAnswerSource(source: string | undefined, fn: () => Promise<unknown>) {
+  return withEnv({ VETINARI_ANSWER_SOURCE: source }, fn);
 }
 
 // A parked question for 436 the gateway announced as Telegram message 42.

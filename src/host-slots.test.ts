@@ -20,6 +20,7 @@ import {
   type HostBudget,
 } from "./host-slots.ts";
 import { Refusal } from "./refusal.ts";
+import { withEnv } from "./test-support.ts";
 
 const freshDir = () => mkdtempSync(join(tmpdir(), "vetinari-slots-"));
 const alive = () => true;
@@ -241,26 +242,20 @@ test("machineDefaultCeiling derives a bounded ceiling from the CPU count, never 
 
 test("resolveHostCeiling: with no env and no file it falls back to the machine-derived default", () => {
   const dir = freshDir();
-  const saved = process.env.MAX_CONCURRENT_CONTAINERS;
-  delete process.env.MAX_CONCURRENT_CONTAINERS;
-  try {
+  withEnv({ MAX_CONCURRENT_CONTAINERS: undefined }, () => {
     const warnings: string[] = [];
     assert.equal(
       resolveHostCeiling(dir, (m) => warnings.push(m)),
       machineDefaultCeiling(cpus().length),
     );
     assert.deepEqual(warnings, []);
-  } finally {
-    if (saved !== undefined) process.env.MAX_CONCURRENT_CONTAINERS = saved;
-  }
+  });
 });
 
 test("resolveHostCeiling: reads the max-concurrent-containers file, and the env overrides it", () => {
   const dir = freshDir();
   writeFileSync(join(dir, "max-concurrent-containers"), "6\n");
-  const saved = process.env.MAX_CONCURRENT_CONTAINERS;
-  delete process.env.MAX_CONCURRENT_CONTAINERS;
-  try {
+  withEnv({ MAX_CONCURRENT_CONTAINERS: undefined }, () => {
     const warnings: string[] = [];
     assert.equal(
       resolveHostCeiling(dir, (m) => warnings.push(m)),
@@ -272,16 +267,12 @@ test("resolveHostCeiling: reads the max-concurrent-containers file, and the env 
       9,
     );
     assert.deepEqual(warnings, []);
-  } finally {
-    if (saved === undefined) delete process.env.MAX_CONCURRENT_CONTAINERS;
-    else process.env.MAX_CONCURRENT_CONTAINERS = saved;
-  }
+  });
 });
 
 test("resolveHostCeiling: a non-numeric or non-positive setting falls back to the machine default", () => {
   const dir = freshDir();
-  const saved = process.env.MAX_CONCURRENT_CONTAINERS;
-  try {
+  withEnv({ MAX_CONCURRENT_CONTAINERS: process.env.MAX_CONCURRENT_CONTAINERS }, () => {
     for (const bad of ["abc", "0", "-2"]) {
       const warnings: string[] = [];
       process.env.MAX_CONCURRENT_CONTAINERS = bad;
@@ -300,28 +291,21 @@ test("resolveHostCeiling: a non-numeric or non-positive setting falls back to th
       6,
     );
     assert.deepEqual(warnings, ['[vetinari] MAX_CONCURRENT_CONTAINERS="abc" is not a positive integer — ignoring it']);
-  } finally {
-    if (saved === undefined) delete process.env.MAX_CONCURRENT_CONTAINERS;
-    else process.env.MAX_CONCURRENT_CONTAINERS = saved;
-  }
+  });
 });
 
 test("resolveHostCeiling: a non-positive-integer max-concurrent-containers file warns with its path and falls back to the machine default", () => {
   const dir = freshDir();
   const file = join(dir, "max-concurrent-containers");
   writeFileSync(file, "nope\n");
-  const saved = process.env.MAX_CONCURRENT_CONTAINERS;
-  delete process.env.MAX_CONCURRENT_CONTAINERS;
-  try {
+  withEnv({ MAX_CONCURRENT_CONTAINERS: undefined }, () => {
     const warnings: string[] = [];
     assert.equal(
       resolveHostCeiling(dir, (m) => warnings.push(m)),
       machineDefaultCeiling(cpus().length),
     );
     assert.deepEqual(warnings, [`[vetinari] ${file}: "nope" is not a positive integer — ignoring it`]);
-  } finally {
-    if (saved !== undefined) process.env.MAX_CONCURRENT_CONTAINERS = saved;
-  }
+  });
 });
 
 test("deregister removes a run's lease entirely, returning its slots to the budget", () => {

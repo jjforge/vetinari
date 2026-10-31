@@ -4,7 +4,7 @@ import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { GIT_READ_LIMITS, gitRead } from "./git-read.ts";
-import { seedRepo } from "./test-support.ts";
+import { seedRepo, withEnv } from "./test-support.ts";
 import { repoForProject, resolveProjectRoot } from "./config.ts";
 import { Refusal } from "./refusal.ts";
 
@@ -13,13 +13,7 @@ function withStubGit<T>(script: string, body: () => T): T {
   const bin = mkdtempSync(join(tmpdir(), "vetinari-stub-git-"));
   writeFileSync(join(bin, "git"), `#!/bin/sh\n${script}\n`);
   chmodSync(join(bin, "git"), 0o755);
-  const saved = process.env.PATH;
-  process.env.PATH = `${bin}${delimiter}${saved ?? ""}`;
-  try {
-    return body();
-  } finally {
-    process.env.PATH = saved;
-  }
+  return withEnv({ PATH: `${bin}${delimiter}${process.env.PATH ?? ""}` }, body);
 }
 
 test("GIT_READ_LIMITS caps a git read at 60 s and 64 MiB of output", () => {

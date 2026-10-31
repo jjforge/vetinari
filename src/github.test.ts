@@ -21,6 +21,7 @@ import { Refusal } from "./refusal.ts";
 import { issueStateFromTask } from "./dashboard-model.ts";
 import { expandSelection, layerWaves } from "./plan.ts";
 import { restrictBlockers } from "./prune.ts";
+import { withEnv } from "./test-support.ts";
 
 /**
  * An injectable `run` that resolves after a real (short) delay while tracking how
@@ -863,14 +864,11 @@ test("githubFindOpenIssue never returns a listed row that lacks a url", async ()
 /** Runs `body` with a stub executable named `gh` (the given shell script) first on PATH. */
 async function withStubGh(script: string, body: () => Promise<void>) {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-stub-gh-"));
-  const path = process.env.PATH;
   try {
     writeFileSync(join(dir, "gh"), `#!/bin/sh\n${script}\n`);
     chmodSync(join(dir, "gh"), 0o755);
-    process.env.PATH = `${dir}${delimiter}${path}`;
-    await body();
+    await withEnv({ PATH: `${dir}${delimiter}${process.env.PATH}` }, body);
   } finally {
-    process.env.PATH = path;
     rmSync(dir, { recursive: true, force: true });
   }
 }

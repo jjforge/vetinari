@@ -26,6 +26,7 @@ import {
   renderStatusPage,
   type CampaignStatus,
 } from "./status.ts";
+import { withEnv } from "./test-support.ts";
 
 const cfgFor = (dir: string): ResolvedConfig =>
   ({
@@ -1147,9 +1148,7 @@ test("switching scope resets the view: it navigates (fresh sheet) and closed-wav
 test("renderStatusPage renders archived runs as a collapsible list of wave cards, with no mode control or raw pane (#222)", () => {
   // Pin the timezone so the local-rendered when-clock is deterministic here (the
   // dedicated #102 test covers the divergent-tz case); UTC keeps `22:22:36`.
-  const origTZ = process.env.TZ;
-  process.env.TZ = "UTC";
-  try {
+  withEnv({ TZ: "UTC" }, () => {
     const html = renderStatusPage(
       {
         project: "beta",
@@ -1230,18 +1229,13 @@ test("renderStatusPage renders archived runs as a collapsible list of wave cards
     assert.ok(html.indexOf("2026-02-01T22-22-36-267Z") < html.indexOf("2026-01-01T00-00-00-000Z"), "newest-first");
     // A short list has no show-older control.
     assert.doesNotMatch(html, /<button[^>]*class="archive-show-older"/);
-  } finally {
-    if (origTZ === undefined) delete process.env.TZ;
-    else process.env.TZ = origTZ;
-  }
+  });
 });
 test("renderStatusPage renders an archived run's when-time in the operator's LOCAL timezone, no UTC suffix (#102)", () => {
   // The gateway runs in the operator's timezone, so the displayed clock localizes.
   // PST is UTC−8 in February: `2026-02-01T22:22:36.267Z` reads `14:22:36` local,
   // and the hardcoded " UTC" suffix is gone (raw-log content, not this chrome, keeps UTC).
-  const origTZ = process.env.TZ;
-  process.env.TZ = "America/Los_Angeles";
-  try {
+  withEnv({ TZ: "America/Los_Angeles" }, () => {
     const html = renderStatusPage(
       { project: "beta", waves: [], parked: [] },
       {
@@ -1260,10 +1254,7 @@ test("renderStatusPage renders an archived run's when-time in the operator's LOC
     );
     assert.match(html, /<span class="lv-t">Feb 1, 2026 · 14:22:36<\/span>/);
     assert.doesNotMatch(html, /lv-t">[^<]*UTC/);
-  } finally {
-    if (origTZ === undefined) delete process.env.TZ;
-    else process.env.TZ = origTZ;
-  }
+  });
 });
 test("renderStatusPage shows a stalled run as stalled and still expands it to its partial waves", () => {
   const html = renderStatusPage(

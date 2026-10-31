@@ -24,6 +24,7 @@ import { archivedRunState } from "./dashboard-archived-runs.ts";
 import { event, type OrchestratorEvent } from "./event-log.ts";
 import type { ProjectPointer } from "./registry.ts";
 import { hostLogTarget, memoryLogger } from "./log.ts";
+import { withEnv } from "./test-support.ts";
 
 const cfgFor = (dir: string): ResolvedConfig =>
   ({
@@ -255,9 +256,7 @@ test("buildStatus survives an unparseable parked record and still shows the vali
   // project's dashboard down. `buildStatus` takes no logger, so the lister falls back to the
   // host logger — point the gateway home at a temp dir so nothing reaches the real host log.
   const dir = join(tmpdir(), `vetinari-status-torn-parked-${Date.now()}`);
-  const prev = process.env.VETINARI_GATEWAY_HOME;
-  process.env.VETINARI_GATEWAY_HOME = join(dir, "gw-home");
-  try {
+  withEnv({ VETINARI_GATEWAY_HOME: join(dir, "gw-home") }, () => {
     seedState(dir, [
       event("campaign-start", { ts: "2026-09-02T04:00:00.000Z", waves: [["701"]], slots: 1 }),
       event("wave-start", { ts: "2026-09-02T04:10:00.000Z", index: 0, tasks: ["701"] }),
@@ -275,16 +274,12 @@ test("buildStatus survives an unparseable parked record and still shows the vali
       ["701"],
     );
     assert.ok(readFileSync(hostLogTarget(), "utf8").includes('"event":"parked-record-unreadable"'));
-  } finally {
-    prev === undefined ? delete process.env.VETINARI_GATEWAY_HOME : (process.env.VETINARI_GATEWAY_HOME = prev);
-  }
+  });
 });
 
 test("buildStatus carries a parked record's answeredAt so an answered park reads distinctly (#497)", () => {
   const dir = join(tmpdir(), `vetinari-status-answered-parked-${Date.now()}`);
-  const prev = process.env.VETINARI_GATEWAY_HOME;
-  process.env.VETINARI_GATEWAY_HOME = join(dir, "gw-home");
-  try {
+  withEnv({ VETINARI_GATEWAY_HOME: join(dir, "gw-home") }, () => {
     seedState(dir, [
       event("campaign-start", { ts: "2026-09-02T04:00:00.000Z", waves: [["701", "702"]], slots: 1 }),
       event("wave-start", { ts: "2026-09-02T04:10:00.000Z", index: 0, tasks: ["701", "702"] }),
@@ -305,9 +300,7 @@ test("buildStatus carries a parked record's answeredAt so an answered park reads
         ["702", "2026-09-02T04:20:00.000Z"],
       ],
     );
-  } finally {
-    prev === undefined ? delete process.env.VETINARI_GATEWAY_HOME : (process.env.VETINARI_GATEWAY_HOME = prev);
-  }
+  });
 });
 
 // A live wave of 801 (parked on a question, then answered) beside 802, still running; 801's record
@@ -337,13 +330,9 @@ const seedAnsweredPark = (dir: string, extra: unknown[] = []) => {
 };
 
 const withGatewayHome = (dir: string, fn: () => void) => {
-  const prev = process.env.VETINARI_GATEWAY_HOME;
-  process.env.VETINARI_GATEWAY_HOME = join(dir, "gw-home");
-  try {
+  withEnv({ VETINARI_GATEWAY_HOME: join(dir, "gw-home") }, () => {
     fn();
-  } finally {
-    prev === undefined ? delete process.env.VETINARI_GATEWAY_HOME : (process.env.VETINARI_GATEWAY_HOME = prev);
-  }
+  });
 };
 
 test("buildStatus shows an answered park running in the `answered` phase while a live campaign owns its re-admit", () => {

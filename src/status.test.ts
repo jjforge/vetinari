@@ -13,6 +13,7 @@ import { request } from "node:http";
 import { register } from "./registry.ts";
 import { registerProject } from "./host-slots.ts";
 import { issueMoves } from "./dashboard-visual-state.ts";
+import { withEnv } from "./test-support.ts";
 
 // The parsed payload the dashboard SSE stream carries in each `data:` frame.
 type EventPayload = { project?: string; events?: { event: string; turn?: number }[] };
@@ -166,9 +167,7 @@ test("the project page flags a budget overrun read from the log alone, and shows
 test("GET /api/host-log serves the host log newest-first as raw JSONL lines; a missing file reads empty (#180)", async () => {
   const configDir = join(tmpdir(), `vetinari-hostlog-route-${Date.now()}`);
   const gwHome = join(configDir, "gw-home");
-  const prev = process.env.VETINARI_GATEWAY_HOME;
-  process.env.VETINARI_GATEWAY_HOME = gwHome;
-  try {
+  await withEnv({ VETINARI_GATEWAY_HOME: gwHome }, async () => {
     // No host.jsonl yet → a clean empty window (the daemon never ran), never an error.
     const server0 = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
     const port0 = (server0.address() as AddressInfo).port;
@@ -195,9 +194,7 @@ test("GET /api/host-log serves the host log newest-first as raw JSONL lines; a m
     } finally {
       await new Promise<void>((r) => server.close(() => r()));
     }
-  } finally {
-    prev === undefined ? delete process.env.VETINARI_GATEWAY_HOME : (process.env.VETINARI_GATEWAY_HOME = prev);
-  }
+  });
 });
 
 test("GET /healthz serves the health source's object as JSON with a 200; with no health source it is a 404", async () => {
@@ -1943,8 +1940,6 @@ async function withAccessLog(
   body: (port: number, accessRows: (n: number) => Promise<Record<string, unknown>[]>) => Promise<void>,
 ): Promise<void> {
   const configDir = mkdtempSync(join(tmpdir(), "vetinari-access-log-"));
-  const prev = process.env.VETINARI_GATEWAY_HOME;
-  process.env.VETINARI_GATEWAY_HOME = join(configDir, "gw-home");
   const logFile = join(configDir, "gw-home", "logs", "host.jsonl");
   const read = (): Record<string, unknown>[] =>
     existsSync(logFile)
@@ -1958,16 +1953,14 @@ async function withAccessLog(
     for (let i = 0; i < 100 && read().length < n; i++) await new Promise((r) => setTimeout(r, 10));
     return read();
   };
-  try {
+  await withEnv({ VETINARI_GATEWAY_HOME: join(configDir, "gw-home") }, async () => {
     const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
     try {
       await body((server.address() as AddressInfo).port, accessRows);
     } finally {
       await new Promise<void>((r) => server.close(() => r()));
     }
-  } finally {
-    prev === undefined ? delete process.env.VETINARI_GATEWAY_HOME : (process.env.VETINARI_GATEWAY_HOME = prev);
-  }
+  });
 }
 
 test("serveAllStatus logs a POST no route owns as one dashboard-request host-log row with method, path, status and remote (#582)", async () => {

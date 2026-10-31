@@ -23,6 +23,7 @@ import {
   writeParkedRecord,
 } from "./state.ts";
 import { memoryLogger } from "./log.ts";
+import { withEnv } from "./test-support.ts";
 
 const cfgFor = (dir: string): ResolvedConfig =>
   ({
@@ -128,9 +129,6 @@ test("park writes its record silently — the gateway is the only sender, so par
 
   // Telegram fully configured in the orchestrator env: park must STILL not send.
   const savedFetch = globalThis.fetch;
-  const savedEnv = { ...process.env };
-  process.env.VETINARI_TELEGRAM_BOT_TOKEN = "tok";
-  process.env.VETINARI_TELEGRAM_CHAT_ID = "chat";
   let fetchCalls = 0;
   globalThis.fetch = (async () => {
     fetchCalls++;
@@ -138,10 +136,11 @@ test("park writes its record silently — the gateway is the only sender, so par
   }) as typeof fetch;
 
   try {
-    await park(cfgFor(dir), { taskId: "301", reason: "question", sessionId: "s", branch: "agent/301", question: "Need a choice." });
+    await withEnv({ VETINARI_TELEGRAM_BOT_TOKEN: "tok", VETINARI_TELEGRAM_CHAT_ID: "chat" }, () =>
+      park(cfgFor(dir), { taskId: "301", reason: "question", sessionId: "s", branch: "agent/301", question: "Need a choice." }),
+    );
   } finally {
     globalThis.fetch = savedFetch;
-    process.env = savedEnv;
   }
 
   assert.equal(fetchCalls, 0, "park must not send to Telegram");

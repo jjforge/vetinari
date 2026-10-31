@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { runChild, startChild } from "./dashboard-child.ts";
+import { withEnv } from "./test-support.ts";
 
 // A throwaway node fixture standing in for the project's own CLI: `runChild` shells
 // `process.argv[1]` (the vetinari entry), so a test points that at this script instead.
@@ -131,13 +132,10 @@ test("startChild creates logs/dashboard/ under a fresh base directory and writes
 test("startChild layers its optional env over the inherited process.env", async () => {
   const { dir, entry } = fixtureEntry();
   const logFile = join(dir, "logs", "dashboard", "answer-env.log");
-  process.env.VETINARI_CHILD_INHERITED = "kept";
-  try {
+  await withEnv({ VETINARI_CHILD_INHERITED: "kept" }, async () => {
     const result = await withEntry(entry, () =>
       startChild(dir, ["env"], { logFile, startupMs: 5_000, env: { VETINARI_ANSWER_SOURCE: "ui" } }),
     );
     assert.deepEqual(result, { code: 0, lastLine: "ui kept", running: false });
-  } finally {
-    delete process.env.VETINARI_CHILD_INHERITED;
-  }
+  });
 });

@@ -827,6 +827,29 @@ test("runLoop builds its container as the issue's agent run, so a copilot provid
   assert.deepEqual(asked, [{ agentRun: true }]);
 });
 
+// A Claude Code (and Cursor) stream's first line: the init event naming the session.
+const INIT_LINE = JSON.stringify({ type: "system", subtype: "init", session_id: "abc", model: "opus" });
+
+test("runLoop parks a fresh claude turn's idle stall with the session id its stream's init line named", async () => {
+  const cfg = harnessCfg({ agent: { provider: "claude" } });
+  const sbx = streamingSandbox([{ lines: [INIT_LINE], throwIdle: true }]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+
+  assert.equal(outcome, "parked");
+  assert.equal(listParked(cfg)[0].sessionId, "abc");
+});
+
+test("runLoop still parks a fresh cursor turn's idle stall with no session id, though its stream names one the same way", async () => {
+  const cfg = harnessCfg({ agent: { provider: "cursor" }, promptFile: "/prompts/tdd.md" });
+  const sbx = streamingSandbox([{ lines: [INIT_LINE], throwIdle: true }]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+
+  assert.equal(outcome, "parked");
+  assert.equal(listParked(cfg)[0].sessionId, undefined);
+});
+
 test("a copilot turn cut off before its result event still resumes next turn with the --session-id it was started under (ADR 0024)", async () => {
   const cfg = harnessCfg({ agent: { provider: "copilot" } });
   // Turn 0 streams some text but never Copilot's final `result` event (sandcastle's completion timeout).

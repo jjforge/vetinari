@@ -555,13 +555,23 @@ export async function runLoop(
       initActivityLog(cfg.stateDir, taskId);
       try {
         if (stopped()) throw new StopRequested();
+        // The session id of the turn in flight, when the loop resumed it, and the one a fresh
+        // Claude turn's stream named in its init line — what an idle stall parks with, since
+        // sandcastle's idle-timeout error carries none. Cursor's stream names one the same way,
+        // so only a claude run listens for it.
+        let inFlightSessionId: string | undefined;
+        let claudeInitSessionId: string | undefined;
         const common = {
           agent: agentFor(cfg, taskId),
           completionSignal: [DONE, BLOCKED],
           idleTimeoutSeconds: cfg.idleTimeoutSeconds,
           // Additive to the human-readable agent log: projects the raw run stream into
           // activity-<taskId>.jsonl per tool-use, so the live-tail pane has a structured source (ADR 0015).
-          logging: activityLoggingSink(cfg.stateDir, taskId),
+          logging: activityLoggingSink(
+            cfg.stateDir,
+            taskId,
+            provider === "claude" ? (id: string) => (claudeInitSessionId ??= id) : undefined,
+          ),
         };
         // Start the next turn. A resumable provider resumes the live session with an inline
         // `prompt` — the SAME path the park→answer resume uses (above); `r.resume()` inherits the
@@ -570,11 +580,9 @@ export async function runLoop(
         // non-resumable provider has no session to resume, so the next turn is a FRESH run through
         // the same promptFile path turn 0 uses — re-reading the issue via fetchTask, its prior work
         // visible as commits already on the branch, with `reentry` appended to the issue text (#212).
-        // The session id of the turn in flight, when the loop resumed it — what an idle stall
-        // parks with, since sandcastle's idle-timeout error carries none.
-        let inFlightSessionId: string | undefined;
         const startTurn = (opts: Record<string, unknown>) => {
           inFlightSessionId = typeof opts.resumeSession === "string" ? opts.resumeSession : undefined;
+          claudeInitSessionId = undefined;
           return stoppable(sbx!.run({ ...common, ...opts }));
         };
         const nextTurn = async (sessionId: string | undefined, prompt: string, reentry: string) => {
@@ -732,9 +740,11 @@ export async function runLoop(
           if (String(err?.name ?? err?.constructor?.name).includes("Idle")) {
             // sandcastle's idle error carries no session id, so fall back to the one the turn in
             // flight is known by: the id it was resumed with, else the id a fresh turn's provider
-            // chose (Copilot's --session-id). Harvest when there is one; harvestFindings no-ops when there is
-            // not, so an unrecoverable idle stall skips cleanly (design §3 step 9).
-            const idleSessionId: string | undefined = err?.sessionId ?? inFlightSessionId ?? common.agent.turnSessionId?.();
+            // chose (Copilot's --session-id), else the one a fresh Claude turn streamed. Harvest
+            // when there is one; harvestFindings no-ops when there is not, so an unrecoverable
+            // idle stall skips cleanly (design §3 step 9).
+            const idleSessionId: string | undefined =
+              err?.sessionId ?? inFlightSessionId ?? common.agent.turnSessionId?.() ?? claudeInitSessionId;
             await harvestFindings(cfg, sbx, idleSessionId, common, taskId, "idle");
             // A stop during the idle harvest parks `stopped`, not `stalled` — same guard as budget.
             if (stopped()) throw new StopRequested();

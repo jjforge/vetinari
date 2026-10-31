@@ -71,7 +71,7 @@ The event vocabulary after consolidation (§13.2) is small and uses the user's w
 
 | Event | Fields | Emitted by |
 | --- | --- | --- |
-| `campaign-start` | `waves`, `slots`, `name?`, `titles?` (id → title, recorded once), `waived?` (waived file → how many scheduled issues cited it; absent when nothing was waived) | campaign |
+| `campaign-start` | `waves`, `slots`, `name?`, `titles?` (id → title, recorded once), `waived?` (waived file → how many scheduled issues cited it; absent when nothing was waived), `fileKeys?` (id → that issue's resolved file keys before the waiver, for replays; absent when the plan resolved no file-sets) | campaign |
 | `wave-start` | `index`, `tasks` | campaign |
 | `spawn` | `taskId` | campaign |
 | `turn` | `taskId`, `turn`, `summary`, `signal?`, `sessionId?`, `commits?` | run |

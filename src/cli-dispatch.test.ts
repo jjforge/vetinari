@@ -1257,6 +1257,46 @@ test("dispatch campaign passes the plan's waived summary on to campaign() to rec
   ]);
 });
 
+test("dispatch campaign passes the plan's resolved file keys on to campaign() to record on campaign-start (#658)", async () => {
+  const { deps } = makeDeps({
+    expandSelection: spy(Promise.resolve(["436", "611"])) as any,
+    runCampaignPlan: spy(
+      Promise.resolve({
+        waves: [["436", "611"]],
+        waveArgs: '"436 611"',
+        report: "the plan",
+        fileKeys: { "436": ["src/a.ts", "DESIGN.md"], "611": ["src/b.ts"] },
+      }),
+    ) as any,
+  });
+  await dispatch(
+    {
+      kind: "campaign",
+      agent: {},
+      positional: ["436", "611"],
+      name: undefined,
+      autoPrune: false,
+      resume: false,
+      dryRun: false,
+      override: false,
+      supersede: false,
+      includeMerged: false,
+      onUnderspecified: undefined,
+      json: false,
+    },
+    deps,
+  );
+  assert.deepEqual((deps.campaign as any).calls, [
+    [
+      deps.cfg,
+      [["436", "611"]],
+      deps.host,
+      undefined,
+      { autoPrune: false, fileKeys: { "436": ["src/a.ts", "DESIGN.md"], "611": ["src/b.ts"] } },
+    ],
+  ]);
+});
+
 test("dispatch campaign --dry-run plans but runs nothing", async () => {
   const { deps } = makeDeps({
     expandSelection: spy(Promise.resolve(["436"])) as any,

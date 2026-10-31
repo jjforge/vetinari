@@ -1377,6 +1377,23 @@ test("runCampaignPlan counts a waived file only over the tickets left after an u
   assert.deepEqual(report.waived, { "DESIGN.md": 2 });
 });
 
+test("runCampaignPlan reports each scheduled ticket's file keys before the waiver, keeping the waived file (#658)", async () => {
+  const report = await runCampaignPlan(
+    waivedCfgFrom({ "1": "Touches: a.ts DESIGN.md", "2": "Touches: b.ts" }, ["DESIGN.md"]),
+    ["1", "2"],
+    {},
+    { isTTY: false, ask: () => "fail" },
+  );
+
+  assert.deepEqual(report.fileKeys, { "1": ["a.ts", "DESIGN.md"], "2": ["b.ts"] });
+});
+
+test("runCampaignPlan reports no file keys for a one-issue selection, which resolves no file-sets (#658)", async () => {
+  const report = await runCampaignPlan(waivedCfgFrom({ "1": "Touches: a.ts" }), ["1"], {}, { isTTY: false, ask: () => "fail" });
+
+  assert.equal("fileKeys" in report, false);
+});
+
 test("runCampaignPlan names no waiver when no scheduled ticket cites a waived file", async () => {
   const report = await runCampaignPlan(
     waivedCfgFrom({ "1": "Touches: a.ts", "2": "Touches: b.ts" }, ["DESIGN.md"]),

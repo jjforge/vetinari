@@ -255,6 +255,12 @@ export interface CampaignPlan extends WavePlan {
    * Absent on a one-issue selection, which resolves no file-sets.
    */
   fileKeys?: Record<string, string[]>;
+  /**
+   * each scheduled ticket's resolved fileKeys **before** `waivedFiles` is applied — its
+   * `fileKeys` plus the waived files it cited — so a replay of the run can still measure
+   * already-waived files. Absent on a one-issue selection, which resolves no file-sets.
+   */
+  preWaiveFileKeys?: Record<string, string[]>;
 }
 
 /** A fileKey is a **bare key** — names a file only by its name, because its cite could not
@@ -755,6 +761,9 @@ export async function planCampaign(ids: string[], deps: CampaignPlanDeps): Promi
     pruned,
     ...(Object.keys(waived).length ? { waived } : {}),
     fileKeys: Object.fromEntries([...fileKeys].map(([id, keys]) => [id, [...keys]])),
+    preWaiveFileKeys: Object.fromEntries(
+      survivorPlan.placements.map((p) => [p.id, [...(sets.get(p.id)?.files ?? []), ...(sets.get(p.id)?.waived ?? [])]]),
+    ),
   };
 }
 
@@ -882,6 +891,11 @@ export interface CampaignPlanReport {
   alreadyMerged: { id: string; sha: string }[];
   /** each waived file a scheduled ticket cited and how many cited it — absent when none was. */
   waived?: Record<string, number>;
+  /**
+   * each scheduled ticket's resolved fileKeys before `waivedFiles` is applied, for the
+   * `campaign-start` event — absent when the plan resolved no file-sets (a one-issue selection).
+   */
+  fileKeys?: Record<string, string[]>;
 }
 
 /**
@@ -962,7 +976,15 @@ export async function runCampaignPlan(
   // Fold the label-expansion exclusions in front of the planner's own so the
   // provenance's Excluded section names every edge drop, expansion then layering.
   const report = describePlan({ ...plan, excluded: [...expandExcluded, ...plan.excluded], alreadyMerged });
-  return { waves: plan.waves, waveArgs: waveArgs(plan), report, suggestedName, alreadyMerged, ...(plan.waived && { waived: plan.waived }) };
+  return {
+    waves: plan.waves,
+    waveArgs: waveArgs(plan),
+    report,
+    suggestedName,
+    alreadyMerged,
+    ...(plan.waived && { waived: plan.waived }),
+    ...(plan.preWaiveFileKeys && { fileKeys: plan.preWaiveFileKeys }),
+  };
 }
 
 /** One ticket's resolver verdict, as `campaign --dry-run` reports it. */

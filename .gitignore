@@ -2,3 +2,7 @@ node_modules/
 .sandcastle/
 *.log
 .vetinari.local/
+
+# Local-only documents, never published (this repo is public)
+/Sandcastle Rust Clean-Room Spec.md
+/docs/reviews/

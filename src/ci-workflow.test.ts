@@ -49,5 +49,5 @@ test("CI runs on every supported Node version, without one failure cancelling th
   const text = jobText("gates");
   assert.match(text, /^\s+fail-fast: false$/m);
   assert.match(text, /^\s+node-version: \[22\.x, 24\.x, 26\.x\]$/m);
-  assert.match(text, /- uses: actions\/setup-node@v4\n\s+with:\n\s+node-version: \$\{\{ matrix\.node-version \}\}\n\s+cache: npm\n/);
+  assert.match(text, /- uses: actions\/setup-node@v7\n\s+with:\n\s+node-version: \$\{\{ matrix\.node-version \}\}\n\s+cache: npm\n/);
 });

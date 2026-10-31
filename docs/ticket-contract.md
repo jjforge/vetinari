@@ -32,7 +32,7 @@ Creates (new files): `src/report-format.ts`, `src/report-format.test.ts`
 
 **Cites on a marker line.** Everything after the colon is read for cites:
 
-- Every backticked token is a cite, so an extensionless `` `Makefile` `` or a dotfile `` `.gitignore` `` counts. A backticked non-file word (`` `campaign` ``) is a cite too, so on a `Touches:`/`Files:` line it forbids confidence. On a `Creates:` line the same word becomes a bare `Creates:` key and the ticket stays confident, because `Creates:` cites are never checked against the tree.
+- Every backticked token is a cite, so an extensionless `` `Makefile` `` or a dotfile `` `.gitignore` `` counts. A backticked non-file word (`` `campaign` ``) is a cite too, so on a `Touches:`/`Files:` line it forbids confidence. On a `Creates:` line the same word becomes a bare key (`*/campaign`) and the ticket stays confident, because `Creates:` cites are never checked against the tree.
 - An unbackticked token counts only as a slash path (`src/report.ts`). An unbackticked `Makefile` or `report.ts` is not a cite.
 - Backslash-escaped backticks (`` \`src/report.ts\` ``) are read as plain backticks.
 - A trailing `:line` or `:line:col` is stripped, so `` `src/report.ts:42` `` cites `src/report.ts`.
@@ -43,17 +43,18 @@ Creates (new files): `src/report-format.ts`, `src/report-format.test.ts`
 - A cite resolves by longest-suffix match on path segments. A bare `report.ts` and a full `src/report.ts` find the same file.
 - A cite whose basename the tree lacks forbids confidence; the planner reads it as a stale or mistyped note.
 - Absence is judged by basename, so a cite with the wrong directory still resolves to the file of that name.
-- A bare name the tree holds several times, with nothing in the cite to narrow it, stays confident. It collides with **every** file of that name, so cite enough of the path to make it unique.
+- A bare name the tree holds several times, with nothing in the cite to narrow it, stays confident. Its key is the **bare key** `*/<name>`, meaning "this name in any directory", and it collides with **every** file of that name, so cite enough of the path to make it unique.
+- A cite that resolves to one path keys to that exact path, a repo-root file included: `NOTES.md`, when the tree holds no other `NOTES.md`, does not collide with a `docs/NOTES.md`.
 
 **`Creates:`** cites name files the ticket will add, so they are never checked against the tree. The cite's directory is resolved instead, by longest-suffix match against the tree's directories, after dropping a leading `./`:
 
 - One directory matches: the key is that directory plus the file name. `a/index.ts` with `src/a` in the tree keys to `src/a/index.ts`, so it collides with a `Touches:` of that file but not with an `index.ts` created elsewhere.
 - No directory matches (a new directory): the key is the cited path as written. So cite a new directory by its full path from the repo root: `newdir/a.ts` and `src/newdir/a.ts` key differently and do not collide, so two tickets that mean the same new file land in one wave.
-- Several directories match, or the cite is a bare name: the key is the bare file name, which collides with **every** file of that name.
+- Several directories match, or the cite is a bare name: the key is the bare key `*/<name>`, which collides with **every** file of that name.
 
 **Don't cite the changelog fragment.** Each ticket's `changelog.d/<issue>.md` is unique to that ticket, so it can never collide. Citing the placeholder gives every ticket the same `<issue>.md` basename, so they all collide and the planner runs one ticket per wave.
 
-**Waived files still go on `Touches:`.** A project may list files in `waivedFiles` — a large, sectioned doc most tickets update — and the planner then leaves a key exactly equal to an entry out of its collision checks, so tickets sharing only that file can share a wave; the plan names each waived file and how many tickets cited it. Matching is exact on the resolved key, so waiving a repo-root `README.md` also waives an ambiguous `README.md` cite kept as that bare name. An entry that is a directory is refused. Under `packageScopedFileSet` a key is the package directory, not the file, so waiving a single `.go` file has no effect there.
+**Waived files still go on `Touches:`.** A project may list files in `waivedFiles` — a large, sectioned doc most tickets update — and the planner then leaves a key exactly equal to an entry out of its collision checks, so tickets sharing only that file can share a wave; the plan names each waived file and how many tickets cited it. Matching is exact on the resolved key, so `README.md` waives only the repo-root file, and an ambiguous `README.md` cite, kept as the bare key `*/README.md`, is waived only by an entry spelled `*/README.md`. An entry that is a directory is refused. Under `packageScopedFileSet` a key is the package directory, not the file, so waiving a single `.go` file has no effect there.
 
 ## Dependencies
 

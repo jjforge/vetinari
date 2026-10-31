@@ -212,10 +212,16 @@ _Avoid_: done, empty, inactive.
 
 **File-set resolver** (`fileSet`):
 A project config function, `fileSet(ticket) → { files, confident }`, naming the
-files an [[issue]] touches (as repo paths, or a bare basename where a cite names
+files an [[issue]] touches (as repo paths, or a [[bare key]] where a cite names
 no one path; the default reads the `Touches:`/`Creates:` line) so co-[[wave]]
 issues stay file-disjoint.
 _Avoid_: file matcher, crossover detector.
+
+**Bare key** (`*/<name>`):
+A file key that names a file only by its name, because its cite could not be
+pinned to one path. It stands for that name in any directory, so it collides with
+every file of that name. A file at the repository root is a path, not a bare key.
+_Avoid_: bare basename, ambiguous key.
 
 **Waived file** (`waivedFiles`):
 A file named in the project's `waivedFiles` config that co-[[wave]] issues may

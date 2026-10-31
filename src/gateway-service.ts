@@ -40,6 +40,22 @@ export function gatewayServiceArgv(command: string): string[] {
 }
 
 /**
+ * The refusal for a systemd-only gateway subcommand on a host without systemd, or
+ * `undefined` when it may run. Only macOS (`darwin`) refuses, and only `install`
+ * and the lifecycle verbs — bare `gateway` (the foreground daemon) and any other
+ * first token run on every platform.
+ */
+export function gatewayServiceUnsupported(platform: string, args: string[]): string | undefined {
+  if (platform !== "darwin") return undefined;
+  if (args[0] !== "install" && !isGatewayServiceVerb(args[0] ?? "")) return undefined;
+  return (
+    "vetinari gateway install/status/start/stop/restart need systemd, which macOS doesn't have. " +
+    "Run the gateway in a terminal instead: `vetinari gateway` (Telegram relay and dashboard), " +
+    "or `vetinari status` for the dashboard alone. It stops when that terminal closes."
+  );
+}
+
+/**
  * One `systemctl` invocation's outcome: its exit `code` (null when it never ran
  * because the binary is absent), and the `spawnError` in that case — so the
  * caller can tell "systemctl reported a non-zero" (a real service state) from

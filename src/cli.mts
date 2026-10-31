@@ -36,7 +36,7 @@ import {
   type TidyTarget,
 } from "./merge.ts";
 import { gateway } from "./gateway.ts";
-import { defaultGatewayServiceIO, isGatewayServiceVerb, runGatewayService } from "./gateway-service.ts";
+import { defaultGatewayServiceIO, gatewayServiceUnsupported, isGatewayServiceVerb, runGatewayService } from "./gateway-service.ts";
 import { runPrune } from "./prune.ts";
 import { expandSelection, makeAskUnderspecified, runCampaignPlan, runFilesetCheck } from "./plan.ts";
 import { runGraft } from "./graft.ts";
@@ -325,6 +325,10 @@ if (mode === "install") {
 // registry, so it must run BEFORE the strict cwd config load (which the gateway's
 // own directory need not satisfy).
 if (mode === "gateway") {
+  // macOS has no systemd: refuse install and the lifecycle verbs before resolving a
+  // unit path or spawning systemctl. Bare `gateway` (the foreground daemon) still runs.
+  const unsupported = gatewayServiceUnsupported(process.platform, rest);
+  if (unsupported) throw new Refusal(unsupported);
   // `gateway install` writes THIS host's resolved unit — a fully absolute node +
   // tsx-loader + cli invocation — to systemdUnitPath(). The unit can't be a static
   // committed file: the per-host absolute launch chain (and the crash-loop it fixes,

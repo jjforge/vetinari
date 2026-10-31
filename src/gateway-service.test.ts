@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { gatewayServiceArgv, isGatewayServiceVerb, runGatewayService, type GatewayServiceIO, type RunResult } from "./gateway-service.ts";
+import {
+  gatewayServiceArgv,
+  gatewayServiceUnsupported,
+  isGatewayServiceVerb,
+  runGatewayService,
+  type GatewayServiceIO,
+  type RunResult,
+} from "./gateway-service.ts";
 
 /**
  * A fake IO that records every argv (verb runs and probes alike, in call order)
@@ -153,4 +160,25 @@ test("an absent systemctl (spawn ENOENT) exits non-zero rather than crashing", a
   const io = fakeIo({ results: [{ code: null, spawnError: enoent }] });
   const code = await runGatewayService("status", io);
   assert.notEqual(code, 0);
+});
+
+// macOS has no systemd, so install and the lifecycle verbs refuse there with a pointer
+// to running the gateway in a terminal; bare `gateway` (the foreground daemon) never does.
+const MACOS_REFUSAL =
+  "vetinari gateway install/status/start/stop/restart need systemd, which macOS doesn't have. " +
+  "Run the gateway in a terminal instead: `vetinari gateway` (Telegram relay and dashboard), " +
+  "or `vetinari status` for the dashboard alone. It stops when that terminal closes.";
+const SERVICE_ARGS = [["install"], ["install", "--dry-run"], ["status"], ["start"], ["stop"], ["restart"]];
+
+test("gatewayServiceUnsupported: on darwin, install and every lifecycle verb refuse with the terminal pointer (#647)", () => {
+  for (const args of SERVICE_ARGS) assert.equal(gatewayServiceUnsupported("darwin", args), MACOS_REFUSAL, args.join(" "));
+});
+
+test("gatewayServiceUnsupported: on darwin, bare gateway and any other first token are not refused (#647)", () => {
+  assert.equal(gatewayServiceUnsupported("darwin", []), undefined);
+  assert.equal(gatewayServiceUnsupported("darwin", ["other"]), undefined);
+});
+
+test("gatewayServiceUnsupported: on linux nothing is refused (#647)", () => {
+  for (const args of [...SERVICE_ARGS, [], ["other"]]) assert.equal(gatewayServiceUnsupported("linux", args), undefined, args.join(" "));
 });

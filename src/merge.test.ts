@@ -758,6 +758,46 @@ test("integrateGreens on a redrive whose only green is already on the base runs 
   }
 });
 
+test("integrateGreens stops when `git reset --keep` refuses to undo a red-checked merge — a local edit touches a file the merge changed — logging no `merged` and leaving the edit as it was (#636)", async () => {
+  const { dir } = repoWithCleanGreens();
+  const log = memoryLogger();
+  const lint = { cmd: "make lint", label: "lint", perMerge: true };
+  const cfg = {
+    branchPrefix: "agent/",
+    baseBranch: "main",
+    parkedDir: join(dir, "parked"),
+    stateDir: join(dir, ".vetinari.local"),
+    gates: [lint],
+    log,
+  } as unknown as ResolvedConfig;
+  const prevCwd = process.cwd();
+  process.chdir(dir);
+  const before = headSha(dir);
+  try {
+    await assert.rejects(
+      integrateGreens(cfg, ["A"], {
+        gate: async () => ({ green: true, report: "" }),
+        // The operator edits a.txt — which A's merge changed — after the merge lands and before
+        // the undo; an edit made before the merge would make `git merge` itself refuse instead.
+        perMergeGate: async (_c, flagged) => {
+          writeFileSync(join(dir, "a.txt"), "operator's edit\n");
+          return { green: false, report: "red", failed: flagged[0] };
+        },
+      }),
+      /could not undo the merge of agent\/A/,
+    );
+  } finally {
+    process.chdir(prevCwd);
+  }
+  assert.notEqual(headSha(dir), before, "the refused undo left A's merge in place");
+  assert.equal(readFileSync(join(dir, "a.txt"), "utf8"), "operator's edit\n", "the local edit is untouched");
+  assert.deepEqual(
+    log.events.filter((e) => e.event === "merged"),
+    [],
+    "no `merged` for a merge whose check went red",
+  );
+});
+
 const emptySnapshot = (): TidySnapshot => ({ branches: [], fragments: [], parked: [], conflictParked: [], campaignParked: [] });
 
 test("computeTidy deletes a reachable branch and folds its fragment, keeps an unmerged one", () => {

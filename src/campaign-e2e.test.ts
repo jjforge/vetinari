@@ -469,7 +469,7 @@ test("scenario 13: a co-wave build break is caught per member — only the secon
     const record = listParked(cfg).find((r) => r.taskId === "102")!;
     assert.equal(record.reason, "conflict");
     assert.match(record.detail ?? "", /a\.txt and b\.txt clash/);
-    assert.equal(record.question, "Merge of agent/102 fails clash-check — fix it on the base, then redrive.");
+    assert.equal(record.question, "Merge of agent/102 fails clash-check — fix it on the base, then `vetinari redrive`.");
     assert.equal(gitOut(dir, ["branch", "--list", "agent/102"]), "agent/102", "the member's work is preserved");
     assert.equal((events.find((e) => e.event === "campaign-parked") as any).reason, "conflict");
   });
@@ -1094,6 +1094,127 @@ test("scenario 7: a crashed member with commits on its branch resumes its sessio
     assert.ok(
       readEventLog(cfg).some((e) => e.event === "campaign-done"),
       "the campaign advanced to done",
+    );
+  });
+});
+
+test("scenario 16: a campaign that dies during a merge-conflict retry leaves the green unmerged on its branch; the redrive reconciles it as a crash and resumes the retry's session there (design §6 step 3, §7, #636)", async () => {
+  const dir = seedConflictRepo();
+  const cfg = repoCfg(dir, fakeTracker());
+  const seen: string[] = [];
+  let retries = 0;
+  // 101 and 102 both rewrite conflict.txt, so 102 collides. Its retry commits nothing new and
+  // "dies" (a parked question stands in for the dead campaign process, as in scenario 7). The
+  // redrive's crash resume merges the base into the branch and settles conflict.txt.
+  const scriptFor =
+    (id: string): LocalAgentScript =>
+    (turn) => {
+      if (retryPromptOf(turn).includes("conflict.txt")) {
+        retries++;
+        return { signal: BLOCKED, stdout: `<question><summary>crash point for ${id}</summary></question>` };
+      }
+      const resume = turn.opts.resumeSession as string | undefined;
+      if (resume) {
+        seen.push(resume);
+        try {
+          turn.git(["merge", "base"]); // stops on the conflict.txt conflict, settled next
+        } catch {
+          // expected: the merge stops on the conflict, which the agent resolves below.
+        }
+        turn.write("conflict.txt", "resolved by 101 and 102\n");
+        turn.commit(`merge the base into ${id}, resolve conflict.txt`);
+        return { signal: DONE, stdout: `<turn-summary>resumed ${id} from a crash</turn-summary>` };
+      }
+      return conflictScript(id)(turn);
+    };
+
+  await inRepo(dir, async () => {
+    const outcome = await campaign(cfg, [["101", "102"]], host(dir), "retry-crash", {}, localCampaignDeps(cfg, dir, scriptFor));
+    assert.equal(outcome, "parked", "the crash-shaped park stops the campaign");
+    assert.equal(retries, 1, "102 was retried once");
+  });
+
+  // The dead campaign wrote no park record: drop it, leaving the recordless shape §7 reconciles to a crash.
+  clearParked(cfg, "102");
+  const events = readEventLog(cfg);
+  const readmitAt = events.findIndex((e) => e.event === "re-admit");
+  assert.ok(readmitAt >= 0, "102 was re-admitted for its retry");
+  // The session the retry's own turn recorded — what the redrive must resume.
+  const retrySession = (events.slice(readmitAt).find((e: any) => e.taskId === "102" && e.sessionId) as any)?.sessionId;
+  assert.ok(retrySession, "the retry recorded a session");
+  assert.deepEqual(
+    events.filter((e) => e.event === "merged").map((e: any) => e.taskId),
+    ["101"],
+    "102 is not merged",
+  );
+  assert.equal(gitOut(dir, ["show", "base:conflict.txt"]), "resolved by 101");
+  assert.equal(gitOut(dir, ["log", "-1", "--format=%s", "agent/102"]), "rewrite conflict.txt in 102", "agent/102 keeps the green commit");
+
+  await inRepo(dir, async () => {
+    const spawns: string[] = [];
+    const doneOk = await campaign(cfg, [], host(dir), undefined, { resume: true }, localCampaignDeps(cfg, dir, scriptFor, spawns));
+    assert.equal(doneOk, "done", "the redrive resumed the crashed retry, greened, merged, and finished");
+    assert.deepEqual(spawns, ["102"], "only the crashed member re-ran");
+    // The retry's recorded session was resumed on the branch — not a fresh run, not a second retry.
+    assert.deepEqual(seen, [retrySession], "the retry's session was resumed");
+    assert.equal(retries, 1, "the redrive did not re-enter as a conflict retry");
+    assert.equal(gitOut(dir, ["show", "base:conflict.txt"]), "resolved by 101 and 102", "the resumed green landed on the base");
+  });
+});
+
+test('scenario 17: a --now stop during a merge-conflict retry parks the retrying child `stopped` and skips the second integration pass (design §7 "Now", #636)', async () => {
+  const dir = seedConflictRepo();
+  const cfg = repoCfg(dir, fakeTracker());
+  const base = localCampaignDeps(cfg, dir, conflictScript);
+  let fire!: (signal: StopSignal) => void;
+  let integrations = 0;
+  const retried: string[] = [];
+
+  await inRepo(dir, async () => {
+    const outcome = await campaign(
+      cfg,
+      [["101", "102"]],
+      host(dir),
+      "retry-stop",
+      {},
+      {
+        ...base,
+        onStop: (cb) => {
+          fire = cb;
+          return () => {};
+        },
+        signalRuns: () => {},
+        integrate: (...args) => {
+          integrations++;
+          return base.integrate(...args);
+        },
+        // The first pass runs for real; the retry's child is killed by the stop as it starts.
+        spawnRun: async (id, resume, prompt) => {
+          if (prompt === undefined) return base.spawnRun(id, resume, prompt);
+          retried.push(id);
+          fire("SIGTERM");
+          return "SIGTERM";
+        },
+      },
+    );
+    assert.equal(outcome, "parked", "the stopped campaign pauses rather than failing");
+    assert.deepEqual(retried, ["102"], "the stop landed during 102's retry");
+
+    const events = readEventLog(cfg);
+    assert.deepEqual(
+      listParked(cfg).map((r) => [r.taskId, r.reason]),
+      [["102", "stopped"]],
+      "the retrying child parks `stopped`",
+    );
+    assert.equal(integrations, 1, "no second integration pass runs");
+    assert.deepEqual(
+      events.filter((e) => e.event === "merged").map((e: any) => e.taskId),
+      ["101"],
+      "no `merged` for the retried member",
+    );
+    assert.deepEqual(
+      events.filter((e: any) => e.event === "campaign-parked").map((e: any) => e.reason),
+      ["stopped"],
     );
   });
 });

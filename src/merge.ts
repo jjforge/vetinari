@@ -161,7 +161,7 @@ export function parkMergeConflict(cfg: ResolvedConfig, conflict: MergeConflict):
     detail: conflict.detail,
     branch,
     question: conflict.gate
-      ? `Merge of ${branch} fails ${conflict.gate} — fix it on the base, then redrive.`
+      ? `Merge of ${branch} fails ${conflict.gate} — fix it on the base, then \`vetinari redrive\`.`
       : `Merge conflict on ${branch}. ${recoverySentence(PARK_RECOVERY.conflict, conflict.taskId)}`,
   });
   cfg.log.log("parked", { taskId: conflict.taskId, reason: "conflict", detail: conflict.detail });

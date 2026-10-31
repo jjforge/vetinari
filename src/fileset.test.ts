@@ -1017,3 +1017,49 @@ test("packageScopedFileSet keys a rooted cite to the exact directory of its path
   assert.deepEqual((await fileSet("Touches: `./README.md`\n")).files, ["."]);
   assert.deepEqual((await fileSet("Creates: `./a/x.go`\n")).files, ["a"]);
 });
+
+test("defaultFileSet resolves a cite of a merge-conflicted file to its exact path, not an ambiguous key (#653)", () => {
+  const root = gitRepoWith({ tracked: ["f.ts", "src/b.ts"] });
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: root, stdio: "ignore" });
+  const commitF = (content: string) => {
+    writeFileSync(join(root, "f.ts"), content);
+    git("commit", "-q", "-am", content);
+  };
+  git("checkout", "-q", "-b", "side");
+  commitF("side\n");
+  git("checkout", "-q", "-");
+  commitF("base\n");
+  // The conflicting merge exits non-zero, leaving f.ts at index stages 1, 2 and 3.
+  assert.throws(() => git("merge", "-q", "side"));
+
+  const res = defaultFileSet(root)("Touches: `f.ts`\n");
+
+  assert.deepEqual(res.files, ["f.ts"]);
+  assert.equal(res.confident, true);
+});
+
+test("defaultFileSet strips a sentence period off an unbackticked cite in the whole-body fallback (#653)", () => {
+  const fileSet = defaultFileSet(treeWith("README.md", "docs/x.md"));
+
+  const rooted = fileSet("Change ./README.md.");
+  assert.deepEqual(rooted.files, ["README.md"]);
+  assert.equal(rooted.confident, true);
+
+  const unrooted = fileSet("See docs/x.md.");
+  assert.deepEqual(unrooted.files, ["docs/x.md"]);
+  assert.equal(unrooted.confident, true);
+});
+
+test("defaultFileSet keeps a backticked marker cite exactly as fenced, a trailing period included (#653)", () => {
+  const fileSet = defaultFileSet(treeWith("docs/x.md", "src/report.ts", "src/a.ts"));
+
+  const fenced = fileSet("Touches: `docs/x.md.`\n");
+  assert.deepEqual(fenced.files, []);
+  assert.equal(fenced.confident, false);
+
+  // The :line strip still applies on a marker line.
+  assert.deepEqual(fileSet("Touches: `src/report.ts:42`\n").files, ["src/report.ts"]);
+  // An unbackticked marker cite drops its sentence period like the fallback does.
+  assert.deepEqual(fileSet("Touches: src/a.ts.\n").files, ["src/a.ts"]);
+});

@@ -86,9 +86,14 @@ files the work will touch, the same way a human would. Then split the cites:
 Cite files in backticks:
 
 ```
-Touches (existing files): `cmd/app/main.go`, `Makefile`
+Touches (existing files): `cmd/app/main.go`, `./Makefile`
 Creates (new files): `internal/report/report.go`, `internal/report/report_test.go`
 ```
+
+**Write a repo-root file as `./<name>`** (`./Makefile`, `./README.md`, `./.gitignore`),
+whether or not the name exists deeper. The leading `./` makes it a rooted cite, which
+matches only the file at that exact path from the root; a bare `README.md` matches every
+`README.md` in the tree and collides with all of them.
 
 **Docs count as files.** A README or `docs/*` file the change must update — because it
 documents the flag, command, config field or behaviour being changed — goes on the

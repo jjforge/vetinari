@@ -42,11 +42,14 @@ Creates (new files): `src/report-format.ts`, `src/report-format.test.ts`
 
 - A cite resolves by longest-suffix match on path segments. A bare `report.ts` and a full `src/report.ts` find the same file.
 - A cite whose basename the tree lacks forbids confidence; the planner reads it as a stale or mistyped note.
-- Absence is judged by basename, so a cite with the wrong directory still resolves to the file of that name.
+- Absence is judged by basename, so a cite with the wrong directory still resolves to the file of that name. A rooted cite is the exception: it is judged by its exact path.
 - A bare name the tree holds several times, with nothing in the cite to narrow it, stays confident. Its key is the **bare key** `*/<name>`, meaning "this name in any directory", and it collides with **every** file of that name, so cite enough of the path to make it unique.
 - A cite that resolves to one path keys to that exact path, a repo-root file included: `NOTES.md`, when the tree holds no other `NOTES.md`, does not collide with a `docs/NOTES.md`.
+- A **rooted cite** starts with `./`. It names the path after `./` from the repository root and matches only a file at exactly that path: no suffix matching, no basename fallback. Its key is that path, so `./README.md` keys to the root `README.md` and `./docs/README.md` to `docs/README.md`. This is how to pin a root file whose name also exists deeper: a bare `README.md` stays ambiguous (the bare key `*/README.md`) whenever another `README.md` exists. A rooted cite with no file at exactly its path (`./READNE.md`, or `./wrong/report.ts` when only `src/report.ts` exists) forbids confidence. A rooted path in the whole-body fallback resolves the same way.
 
-**`Creates:`** cites name files the ticket will add, so they are never checked against the tree. The cite's directory is resolved instead, by longest-suffix match against the tree's directories, after dropping a leading `./`:
+**`Creates:`** cites name files the ticket will add, so they are never checked against the tree. The cite's directory is resolved instead, by longest-suffix match against the tree's directories:
+
+- A rooted cite (`./a/new.ts`): the key is the path after `./`, exactly, whether or not its directory exists, with no suffix matching. `./new.md` keys to the root file `new.md`, and `./a/new.ts` to `a/new.ts` even when the tree holds only `src/a`.
 
 - One directory matches: the key is that directory plus the file name. `a/index.ts` with `src/a` in the tree keys to `src/a/index.ts`, so it collides with a `Touches:` of that file but not with an `index.ts` created elsewhere.
 - No directory matches (a new directory): the key is the cited path as written. So cite a new directory by its full path from the repo root: `newdir/a.ts` and `src/newdir/a.ts` key differently and do not collide, so two tickets that mean the same new file land in one wave.

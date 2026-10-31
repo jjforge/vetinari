@@ -237,7 +237,7 @@ test("packageScopedFileSet keys a Creates: cite to the tree directory its direct
   const fileSet = packageScopedFileSet(treeWith("internal/web/checkins.templ"));
 
   assert.deepEqual((await fileSet("Creates: `web/health.go`\n")).files, ["internal/web"]);
-  // A leading ./ is dropped before matching.
+  // A rooted cite keys to its exact directory from the root.
   assert.deepEqual((await fileSet("Creates: `./internal/web/health.go`\n")).files, ["internal/web"]);
 });
 
@@ -758,7 +758,7 @@ test("defaultFileSet falls back to shorter directory suffixes for a Creates: cit
   assert.equal(res.confident, true);
 });
 
-test("defaultFileSet keys a Creates: cite under a new directory to its cited path, leading ./ dropped (#480)", () => {
+test("defaultFileSet keys a Creates: cite under a new directory to its cited path, rooted or not (#480, #627)", () => {
   const root = treeWith("src/plan.ts");
   const fileSet = defaultFileSet(root);
 
@@ -777,12 +777,12 @@ test("defaultFileSet keys a Creates: cite whose directory matches several tree d
   assert.equal(res.confident, true);
 });
 
-test("defaultFileSet keeps a bare Creates: cite (and a ./-prefixed one) as a bare key (#480, #486)", () => {
+test("defaultFileSet keeps a bare Creates: cite as a bare key, but keys a rooted one to the root file (#480, #486, #627)", () => {
   const root = treeWith("src/a/x.ts");
   const fileSet = defaultFileSet(root);
 
   assert.deepEqual(fileSet("Creates: `x.ts`\n").files, ["*/x.ts"]);
-  assert.deepEqual(fileSet("Creates: `./x.ts`\n").files, ["*/x.ts"]);
+  assert.deepEqual(fileSet("Creates: `./x.ts`\n").files, ["x.ts"]);
 });
 
 test("defaultFileSet counts an extensionless Creates: cite, tree-exempt (#477)", () => {
@@ -941,4 +941,56 @@ test("defaultFileSet indexes neither an untracked nested git repository nor its 
 
   assert.deepEqual(res.files, []);
   assert.equal(res.confident, false);
+});
+
+test("defaultFileSet resolves a rooted Touches: cite to the root file, beside same-named deeper files (#627)", async () => {
+  const root = treeWith("README.md", "docs/README.md", "e2e/README.md");
+  const fileSet = defaultFileSet(root);
+
+  const res = fileSet("Touches: `./README.md`\n");
+  assert.deepEqual(res.files, ["README.md"]);
+  assert.equal(res.confident, true);
+
+  // Pinned to the root file, it no longer collides with a ticket touching e2e/README.md.
+  assert.deepEqual(await wavesOf(fileSet, { "1": "Touches: `./README.md`\n", "2": "Touches: `e2e/README.md`\n" }), [["1", "2"]]);
+});
+
+test("defaultFileSet resolves a rooted cite to the root file where the bare name would be ambiguous (#627)", () => {
+  const root = treeWith("README.md", "a/README.md");
+  const fileSet = defaultFileSet(root);
+
+  assert.deepEqual(fileSet("Touches: `./README.md`\n").files, ["README.md"]);
+  // A bare cite of the same name keeps meaning "any README.md".
+  assert.deepEqual(fileSet("Touches: `README.md`\n").files, ["*/README.md"]);
+  // The whole-body fallback roots a cite the same way.
+  assert.deepEqual(fileSet("Reworks ./README.md for the release.").files, ["README.md"]);
+});
+
+test("defaultFileSet does not resolve a rooted cite with no file at exactly its path (#627)", () => {
+  const root = treeWith("README.md", "src/report.ts");
+  const fileSet = defaultFileSet(root);
+
+  for (const ticket of ["Touches: `./READNE.md`\n", "Touches: `./wrong/report.ts`\n"]) {
+    const res = fileSet(ticket);
+    assert.deepEqual(res.files, [], ticket);
+    assert.equal(res.confident, false, ticket);
+  }
+});
+
+test("defaultFileSet keys a rooted Creates: cite to its exact path from the root, with no directory suffix match (#627)", () => {
+  const root = treeWith("src/a/util.ts");
+  const fileSet = defaultFileSet(root);
+
+  assert.deepEqual(fileSet("Creates: `./new.md`\n").files, ["new.md"]);
+  const res = fileSet("Creates: `./a/new.ts`\n");
+  assert.deepEqual(res.files, ["a/new.ts"]);
+  assert.equal(res.confident, true);
+});
+
+test("packageScopedFileSet keys a rooted cite to the exact directory of its path (#627)", async () => {
+  const fileSet = packageScopedFileSet(treeWith("pkg/a.go", "internal/pkg/a.go", "src/a/util.go", "README.md"));
+
+  assert.deepEqual((await fileSet("Touches: `./pkg/a.go`\n")).files, ["pkg"]);
+  assert.deepEqual((await fileSet("Touches: `./README.md`\n")).files, ["."]);
+  assert.deepEqual((await fileSet("Creates: `./a/x.go`\n")).files, ["a"]);
 });

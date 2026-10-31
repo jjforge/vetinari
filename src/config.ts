@@ -832,10 +832,15 @@ export async function loadConfig(explicitPath?: string): Promise<ResolvedConfig>
     if (g.perMerge !== undefined && typeof g.perMerge !== "boolean")
       throw new Refusal(`${path}: gate "${g.label ?? g.cmd}": "perMerge" must be true or false, got ${JSON.stringify(g.perMerge)}`);
   }
-  // Shape only: there is no tree here to check an entry against, and a command that never
-  // plans must not refuse over one — the directory check lives in `waiveFileSet`.
+  // Shape and spelling only: there is no tree here to check an entry against, and a command
+  // that never plans must not refuse over one — the directory check lives in `waiveFileSet`.
+  // An entry is a file key, not a cite: a `./` rooted-cite spelling would match no key and
+  // silently waive nothing, so it is refused with the key to write instead.
   if (c.waivedFiles !== undefined && !(Array.isArray(c.waivedFiles) && c.waivedFiles.every((f) => typeof f === "string")))
     throw new Refusal(`${path}: "waivedFiles" must be an array of repo-relative paths (strings)`);
+  for (const entry of c.waivedFiles ?? []) {
+    if (entry.startsWith("./")) throw new Refusal(`${path}: "waivedFiles" entry ${entry}: entries are file keys, write ${entry.slice(2)}`);
+  }
   // An unknown tier would otherwise map to the `low` weight silently.
   if (c.containerShare !== undefined && !["high", "medium", "low"].includes(c.containerShare))
     throw new Refusal(`${path}: "containerShare" must be "high", "medium" or "low", got ${JSON.stringify(c.containerShare)}`);

@@ -52,6 +52,13 @@ Within a milestone each bold section label appears at most once.
 - [api] A redrive's re-logged `merged` row for a green already on the base carries `alreadyMerged: true` (#642).
 - [user] A Copilot run with an `agent.effort` (or `--effort`) other than `none` on the default `auto` model is now refused at preflight, naming the fix (pin `agent.model`, or drop the effort), instead of failing inside the container after its setup has run (#650).
 - [user] A turn that stalls on the idle timeout now parks with its session id whenever vetinari knows it (a resumed turn, a fresh Copilot turn, a fresh Claude turn), so answering the park resumes the agent's session and the idle findings harvest runs (#650).
+- [user] The credential preflight now reads `.vetinari.local/.env` the way the container does: `CLAUDE_CODE_OAUTH_TOKEN = x` counts as set, while `export CLAUDE_CODE_OAUTH_TOKEN=x` no longer passes the check and then fails to authenticate inside the container. The refusal tells you to drop `export` (#634).
+- [user] A `replan` after a `prune` empties a started wave no longer skips the next wave's issues: started waves are now decided by which members have started, so the next, unstarted wave no longer reads as started once the emptied wave drops out of the plan (#635).
+- [user] A green parked `conflict` after its retried merge failed a per-merge check now asks you to fix it on the base, then run `vetinari redrive` — the command spelled out as every other recovery hint spells it, instead of a bare "redrive" (#636).
+- [user] A `Touches:` cite of a submodule's path no longer resolves as if it were a file, and a project that doesn't gitignore `.vetinari.local/` no longer has its cache indexed, so a directory-qualified cite such as `e2e/README.md` stays resolved instead of degrading to `*/README.md` (#638).
+
+**Security:**
+- [user] The preflight now also refuses a `.vetinari.local/.env` that names `VETINARI_TELEGRAM_BOT_TOKEN` or `VETINARI_TELEGRAM_CHAT_ID` with whitespace before the `=` (`VETINARI_TELEGRAM_BOT_TOKEN =`), which the container still read as that key and filled from vetinari's own environment (#634).
 
 **Infrastructure:**
 - [internal] CI gains a `gates-macos` job (`macos-latest`, Node 22) running typecheck, format check and the suite, so host-side breakage on a Mac is caught (#647).
@@ -61,6 +68,7 @@ Within a milestone each bold section label appears at most once.
 
 **Documentation:**
 - [user] The user guide gains "Running with GitHub Copilot": the fine-grained token (Copilot Requests only, and why not `gh auth token`), the org's Copilot CLI policy, the `auto` model, and the config line; the config templates' `agent:` comment names `copilot` (#646).
+- [user] The user guide now tells you to `git worktree lock` any worktree you keep outside `.vetinari.local/worktrees`: an agent container sees the host's whole `.git`, so a `git worktree prune` run inside it can delete that worktree's entry (#555).
 
 ### Collected changes — October 30, 2026
 

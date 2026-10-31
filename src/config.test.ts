@@ -419,6 +419,27 @@ test("resolveAgentSelection accepts the non-resumable providers, flagging them r
   assert.equal(resolveAgentSelection(undefined, { provider: "opencode" }).resumable, false);
 });
 
+test("resolveAgentSelection defaults copilot's model to auto, so Copilot picks among the models the org allows", () => {
+  assert.equal(resolveAgentSelection({ provider: "copilot" }).model, "auto");
+  // A configured model still wins.
+  assert.equal(resolveAgentSelection({ provider: "copilot", model: "gpt-5.4" }).model, "gpt-5.4");
+});
+
+test("resolveAgentSelection accepts the Copilot CLI's full effort list and refuses one outside it, listing all seven", () => {
+  assert.equal(resolveAgentSelection({ provider: "copilot", effort: "xhigh" }).effort, "xhigh");
+  assert.equal(resolveAgentSelection({ provider: "copilot", effort: "none" }).effort, "none");
+  assert.throws(
+    () => resolveAgentSelection({ provider: "copilot", effort: "ultra" }),
+    (e: Error) => {
+      assert.equal(
+        e.message,
+        'agent effort "ultra" is not valid for provider "copilot". Valid: none, minimal, low, medium, high, xhigh, max.',
+      );
+      return true;
+    },
+  );
+});
+
 test("resolveAgentSelection flags the resumable providers resumable:true", () => {
   for (const provider of ["claude", "pi", "codex"] as const) assert.equal(resolveAgentSelection({ provider }).resumable, true);
 });
@@ -793,6 +814,28 @@ for (const dockerfile of ["../templates/Dockerfile", "../examples/jjforge/vetina
     for (const root of ["/home/agent/go/pkg", "/home/agent/.cache", "/home/agent/.cargo"]) {
       assert.ok(mkdir.split(/\s+/).includes(root), `${dockerfile}: no agent-user mkdir of ${root}`);
     }
+  });
+}
+
+// `provider: "copilot"` needs the Copilot CLI in the image: every shipped Dockerfile installs it
+// globally as root, before the drop to the agent user, and names its credential key.
+for (const dockerfile of ["../templates/Dockerfile", "../vetinari/Dockerfile", "../examples/jjforge/vetinari/Dockerfile"]) {
+  test(`${dockerfile} installs the Copilot CLI as root and names COPILOT_GITHUB_TOKEN`, () => {
+    const text = readFileSync(new URL(dockerfile, import.meta.url), "utf8");
+    const lines = text.split("\n");
+    const install = lines.findIndex((l) => /^RUN npm install -g /.test(l) && l.split(/\s+/).includes("@github/copilot"));
+    const user = lines.findIndex((l) => l.startsWith("USER ${AGENT_UID}"));
+    assert.ok(install >= 0, `${dockerfile}: no RUN npm install -g of @github/copilot`);
+    assert.ok(user >= 0 && install < user, `${dockerfile}: the Copilot CLI is not installed before the USER line`);
+    assert.match(text, /COPILOT_GITHUB_TOKEN/);
+  });
+}
+
+for (const template of ["../templates/config.mts", "../templates/config.github.mts"]) {
+  test(`${template}'s agent: comment names copilot among the providers`, () => {
+    const text = readFileSync(new URL(template, import.meta.url), "utf8");
+    const comment = /\/\/ Optional: the agent provider[\s\S]*?\/\/ agent: \{/.exec(text)?.[0] ?? "";
+    assert.match(comment, /`copilot`/, `${template}: the agent: comment does not name copilot`);
   });
 }
 

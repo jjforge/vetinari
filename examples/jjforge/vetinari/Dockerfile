@@ -1,8 +1,11 @@
 # Toolchain image for the #699 sandcastle prototype: the stock sandcastle
-# image (node + git + gh + claude CLI) plus everything `make forgejo-test-unit`
-# and `cargo test` need — Go 1.26 with cgo (go-sqlite3), rust stable via
-# rustup (rust-toolchain.toml resolves the channel), and the C build deps
-# jj-lib/sidecar crates link against.
+# image (node + git + gh + claude and GitHub Copilot CLIs) plus everything
+# `make forgejo-test-unit` and `cargo test` need — Go 1.26 with cgo
+# (go-sqlite3), rust stable via rustup (rust-toolchain.toml resolves the
+# channel), and the C build deps jj-lib/sidecar crates link against.
+#
+# Copilot's credential: COPILOT_GITHUB_TOKEN (or GH_TOKEN / GITHUB_TOKEN) in
+# .vetinari.local/.env.
 #
 # Build:  vetinari build   (builds vetinari-jjforge from this file)
 # (build-args AGENT_UID/AGENT_GID are supplied by `vetinari build` on Linux)
@@ -55,6 +58,9 @@ RUN set -eux; \
   install -m 0755 "/tmp/${scc_dir}/sccache" /usr/local/bin/sccache; \
   rm -rf "/tmp/${scc_dir}"; \
   sccache --version
+
+# GitHub Copilot CLI — installed globally as root, before the drop to the agent user.
+RUN npm install -g @github/copilot
 
 ARG AGENT_UID=1000
 ARG AGENT_GID=1000

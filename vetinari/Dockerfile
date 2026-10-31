@@ -1,12 +1,15 @@
-# Starting point for a vetinari task image: node + git + gh + the resumable agent
-# CLIs vetinari can drive — Claude Code, pi, and Codex (selectable per run with
-# `--agent`, ADR 0016) — running as a non-root `agent` user whose UID/GID match the
-# host's (`vetinari build` passes AGENT_UID/AGENT_GID when it builds).
+# Starting point for a vetinari task image: node + git + gh + the agent CLIs
+# vetinari can drive — Claude Code, pi, Codex, and the GitHub Copilot CLI
+# (experimental: non-resumable) — selectable per run with `--agent` (ADR 0016),
+# running as a non-root `agent` user whose UID/GID match the host's (`vetinari
+# build` passes AGENT_UID/AGENT_GID when it builds).
 #
 # Credentials stay per-provider and user-supplied in `.vetinari.local/.env`:
-#   claude → CLAUDE_CODE_OAUTH_TOKEN (or ANTHROPIC_API_KEY)
-#   pi     → ANTHROPIC_API_KEY
-#   codex  → OPENAI_API_KEY
+#   claude  → CLAUDE_CODE_OAUTH_TOKEN (or ANTHROPIC_API_KEY)
+#   pi      → ANTHROPIC_API_KEY
+#   codex   → OPENAI_API_KEY
+#   copilot → COPILOT_GITHUB_TOKEN (or GH_TOKEN / GITHUB_TOKEN) — a fine-grained
+#             PAT with only the Copilot Requests permission (see the user guide)
 # A run whose selected provider has no credential fails a preflight before launch.
 #
 # ADD YOUR PROJECT'S TOOLCHAIN — compilers, package managers, system libraries.
@@ -32,10 +35,11 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
   && apt-get update && apt-get install -y gh \
   && rm -rf /var/lib/apt/lists/*
 
-# pi and Codex agent CLIs — installed globally as root, before the drop to the
-# non-root agent user (Claude Code is installed below, as that user, via its own
-# installer). Any of the three can drive a run; `--agent` selects which (ADR 0016).
-RUN npm install -g @mariozechner/pi-coding-agent @openai/codex
+# pi, Codex, and GitHub Copilot agent CLIs — installed globally as root, before the
+# drop to the non-root agent user (Claude Code is installed below, as that user,
+# via its own installer). Any of the four can drive a run; `--agent` selects which
+# (ADR 0016).
+RUN npm install -g @mariozechner/pi-coding-agent @openai/codex @github/copilot
 
 # --- your toolchain goes here -------------------------------------------------
 # e.g. COPY --from=golang:1.26-bookworm /usr/local/go /usr/local/go

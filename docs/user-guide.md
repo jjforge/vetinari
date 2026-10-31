@@ -108,6 +108,19 @@ Either way the dashboard shows the campaign parked (`stopped`), not crashed, and
 
 Once per machine: put the CLI on PATH with `vetinari install` (bootstrap it as `npm run vetinari -- install` from the vetinari checkout) so `vetinari …` works in every project. Run the gateway as a service (`vetinari gateway install`) (Linux; on macOS run `vetinari gateway` in a terminal) so questions reach you when no terminal is open, and set `MAX_CONCURRENT_CONTAINERS` to what the host can carry. Every project on the machine shares that ceiling. Then run `scripts/install-skills.sh` from the vetinari checkout: it links the operator skills (`/ask-vetinari`, `/fileset`, `/triage-placement`, `/check-brief`, `/unpark`, `/verify-pending`) into `~/.claude/skills`, so every project sees one copy that tracks the checkout.
 
+## Running with GitHub Copilot
+
+For a team whose only agent is GitHub Copilot. The shipped image installs the Copilot CLI; rebuild with `vetinari build` if yours predates it. Copilot is experimental: it is non-resumable, so a park is answered through the issue (`postComment`), as setup step 4 says.
+
+- **The token.** Create a fine-grained personal access token with only the **Copilot Requests** permission and no repository access, and put it in `.vetinari.local/.env` as `COPILOT_GITHUB_TOKEN`. The token goes into the agent's container, so it must not carry repo scopes. `gh auth token` works for a quick local try-out, but that token carries your full `gh` scopes (repo and org access), so a container agent holding it could act on any repository you can. Don't use it for real runs.
+- **The org policy.** The organization or enterprise must enable the **Copilot CLI** policy for the account; without it, every run fails at the agent.
+- **The model.** The default `auto` lets Copilot pick among the models your org allows. Set `agent.model` to pin one your org enables.
+- **The config line**, in `vetinari/config.mts`:
+
+  ```ts
+  agent: { provider: "copilot" },
+  ```
+
 ## Writing an issue that can run unattended
 
 - Label it `ready-for-agent` only when the body is the whole spec: what to build, how you will know it is done, the edge cases.

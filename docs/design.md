@@ -302,7 +302,7 @@ The user guide names three properties as the value. This table sorts every curre
 | `changelog collect` + fragment fold at merge | **core** | the merge-conflict fix for a shared changelog: agents write `changelog.d/<id>.md`, the integrator folds a wave's fragments in one commit; enabled when the project has a `CHANGELOG.md`. The separate section-lint and its shell tests are what can go |
 | `onIssueMerged` (label hop), `reportFinding` (harvest), `postComment` | hook (as today) | tracker workflow stays behind seams |
 | Agent providers: `claude`, `pi`, `codex` | core seam | resumable; park → answer works |
-| Providers `copilot`, `cursor`, `opencode` | optional, **experimental** | non-resumable; a park cannot be answered without `postComment`; out of the guide until the loop is whole |
+| Providers `copilot`, `cursor`, `opencode` | optional, **experimental** | non-resumable; a park cannot be answered without `postComment`; Copilot's setup is in the guide, Cursor and OpenCode stay out of it until the loop is whole |
 | Telegram `destinations`/`notify` routing | optional | the one-chat default is the documented path; routing is reference |
 | Live tail / activity stream | core | answers "what is it doing right now" — the question every operator asks first; live-only |
 | Archived runs | core | "come back and see what happened" |

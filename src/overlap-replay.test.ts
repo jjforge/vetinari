@@ -122,3 +122,116 @@ test("the replay counts a clean, a conflicting and an un-appliable pair once eac
   assert.deepEqual(snapshot(p.dir), before, "the project's refs, objects or working tree changed");
   assert.deepEqual(readdirSync(tmpRoot), [], "the temporary clone was left behind");
 });
+
+test("a pair that conflicts only in b.ts counts as colliding on b.ts but clean on a.md, which both also declared", async () => {
+  const p = scratchProject({ "a.md": lines("intro", "-", "outro"), "b.ts": lines("const x = 0;") });
+  p.log(start("2026-01-01T00:00:00Z", [["1", "2"]]));
+  p.land("1", { "a.md": lines("INTRO", "-", "outro"), "b.ts": lines("const x = 1;") }, "2026-01-01T01:00:00Z");
+  p.land("2", { "a.md": lines("intro", "-", "OUTRO"), "b.ts": lines("const x = 2;") }, "2026-01-01T02:00:00Z", "main~1");
+
+  const result = await replayOverlap({
+    root: p.dir,
+    fileSet: defaultFileSet(p.dir),
+    tracker: tracker({ 1: ["a.md", "b.ts"], 2: ["a.md", "b.ts"] }),
+  });
+
+  assert.deepEqual(
+    result.keys.map(({ key, clean, collides }) => ({ key, clean, collides })),
+    [
+      { key: "a.md", clean: 1, collides: 0 },
+      { key: "b.ts", clean: 0, collides: 1 },
+    ],
+  );
+});
+
+test("a pair where one ticket is transitively blocked by the other is left out; a pair with disjoint real diffs is clean", async () => {
+  const p = scratchProject({ "k.txt": lines("one"), "x.txt": "x\n", "y.txt": "y\n", "z.txt": "z\n" });
+  p.log(start("2026-01-01T00:00:00Z", [["1", "4"], ["2"], ["3"]]));
+  // 3 is blocked by 2, which is blocked by 1: 1–3 are dependent, though 3 never names 1.
+  p.land("1", { "x.txt": "X\n" }, "2026-01-01T01:00:00Z");
+  p.land("2", { "y.txt": "Y\n" }, "2026-01-01T02:00:00Z");
+  p.land("3", { "z.txt": "Z\n" }, "2026-01-01T03:00:00Z");
+  // 4 declared k.txt too but its real change never met 1's.
+  p.land("4", { "k.txt": lines("four") }, "2026-01-01T04:00:00Z", "main~3");
+  const touches = { 1: ["k.txt"], 3: ["k.txt"], 4: ["k.txt"] };
+
+  const result = await replayOverlap({ root: p.dir, fileSet: defaultFileSet(p.dir), tracker: tracker(touches, { 3: ["2"], 2: ["1"] }) });
+
+  // 1–4 and 3–4 count (both clean: no real overlap); 1–3 does not.
+  assert.deepEqual(result.keys, [{ key: "k.txt", pairs: 2, clean: 2, collides: 0, indeterminate: 0, rate: 0 }]);
+});
+
+/** Two tickets that both rewrote line 1 of k.txt in one campaign. */
+function conflictingPair(campaignStart: object) {
+  const p = scratchProject({ "k.txt": lines("one"), "other.txt": "o\n" });
+  p.log(campaignStart);
+  p.land("1", { "k.txt": lines("uno") }, "2026-01-01T01:00:00Z");
+  p.land("2", { "k.txt": lines("eins") }, "2026-01-01T02:00:00Z", "main~1");
+  return p;
+}
+
+test("keys recorded on campaign-start are used as declared, and the issue is never read for that campaign", async () => {
+  const p = conflictingPair({ ...start("2026-01-01T00:00:00Z", [["1", "2"]]), fileKeys: { 1: ["k.txt"], 2: ["k.txt"] } });
+  const t = tracker({ 1: ["other.txt"], 2: ["other.txt"] });
+
+  const result = await replayOverlap({ root: p.dir, fileSet: defaultFileSet(p.dir), tracker: t });
+
+  assert.deepEqual(
+    result.keys.map(({ key, collides }) => ({ key, collides })),
+    [{ key: "k.txt", collides: 1 }],
+  );
+  assert.deepEqual(t.read, []);
+});
+
+test("with no recorded keys, a Touches: marker that lives only in a triage comment is found", async () => {
+  const p = conflictingPair(start("2026-01-01T00:00:00Z", [["1", "2"]]));
+  const t: OverlapTracker = {
+    issueText: async (id) =>
+      JSON.stringify({
+        title: `ticket ${id}`,
+        body: "Some prose about `other.txt`.",
+        comments: [{ body: "## Agent Brief\n\nTouches (existing files): `k.txt`" }],
+      }),
+    blockedBy: async () => [],
+  };
+
+  const result = await replayOverlap({ root: p.dir, fileSet: defaultFileSet(p.dir), tracker: t });
+
+  assert.deepEqual(
+    result.keys.map(({ key, collides }) => ({ key, collides })),
+    [{ key: "k.txt", collides: 1 }],
+  );
+});
+
+test("a ticket whose cites no longer all resolve contributes the keys that do, and is counted", async () => {
+  const p = conflictingPair(start("2026-01-01T00:00:00Z", [["1", "2"]]));
+
+  const result = await replayOverlap({
+    root: p.dir,
+    fileSet: defaultFileSet(p.dir),
+    tracker: tracker({ 1: ["k.txt", "gone.txt"], 2: ["k.txt"] }),
+  });
+
+  assert.deepEqual(
+    result.keys.map(({ key, collides }) => ({ key, collides })),
+    [{ key: "k.txt", collides: 1 }],
+  );
+  assert.deepEqual(result.staleCiteTickets, ["1"]);
+});
+
+test("a run that throws midway still removes its temporary clone and leaves the project's repo untouched", async () => {
+  const { p } = threePairProject();
+  const before = snapshot(p.dir);
+  const tmpRoot = mkdtempSync(join(tmpdir(), "overlap-replay-tmp-"));
+  const failing: OverlapTracker = {
+    issueText: async () => {
+      throw new Error("tracker down");
+    },
+    blockedBy: async () => [],
+  };
+
+  await assert.rejects(replayOverlap({ root: p.dir, fileSet: defaultFileSet(p.dir), tracker: failing, tmpRoot }), /tracker down/);
+
+  assert.deepEqual(readdirSync(tmpRoot), [], "the temporary clone was left behind");
+  assert.deepEqual(snapshot(p.dir), before, "the project's refs, objects or working tree changed");
+});

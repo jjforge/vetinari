@@ -56,6 +56,9 @@ export interface OverlapKeyTally {
 
 export interface OverlapReplay {
   keys: OverlapKeyTally[];
+  /** tickets whose keys came from today's issue text but whose cites no longer all resolve
+   *  against today's tree (or cite nothing): they count with the keys that did resolve. */
+  staleCiteTickets: string[];
 }
 
 /** A campaign as the logs record it: when it started and the tickets it scheduled. */
@@ -211,6 +214,29 @@ export function keyCoversPath(key: string, path: string): boolean {
 const changedPaths = (git: Git, l: Landed) =>
   new Set(git(["diff", "--name-only", "--no-renames", l.base, l.merge]).out.split("\n").filter(Boolean));
 
+/**
+ * The campaign's in-campaign dependency closure: for a ticket, every scheduled ticket it is
+ * transitively blocked by through other scheduled tickets, per native `blocked_by`.
+ */
+async function campaignBlockers(tickets: string[], blockedBy: (id: string) => Promise<string[]>): Promise<(id: string) => Set<string>> {
+  const scheduled = new Set(tickets);
+  const direct = new Map<string, string[]>();
+  for (const id of scheduled)
+    direct.set(
+      id,
+      (await blockedBy(id)).map(normalize).filter((b) => b !== id && scheduled.has(b)),
+    );
+  const closure = new Map<string, Set<string>>();
+  const of = (id: string): Set<string> => {
+    let seen = closure.get(id);
+    if (seen) return seen;
+    closure.set(id, (seen = new Set()));
+    for (const b of direct.get(id) ?? []) for (const x of [b, ...of(b)]) seen.add(x);
+    return seen;
+  };
+  return of;
+}
+
 /** Replay the project's campaigns and tally, per declared file key, how its shared pairs merged. */
 export async function replayOverlap(opts: OverlapReplayOptions): Promise<OverlapReplay> {
   const { root, fileSet, tracker, branchPrefix = "agent/", tmpRoot = tmpdir() } = opts;
@@ -218,6 +244,10 @@ export async function replayOverlap(opts: OverlapReplayOptions): Promise<Overlap
   const merges = landedMerges(root, branchPrefix);
   const tallies = new Map<string, Omit<OverlapKeyTally, "rate">>();
   const tally = (key: string) => tallies.get(key) ?? tallies.set(key, { key, pairs: 0, clean: 0, collides: 0, indeterminate: 0 }).get(key)!;
+
+  const staleCiteTickets = new Set<string>();
+  const blockedByCache = new Map<string, Promise<string[]>>();
+  const blockedBy = (id: string) => blockedByCache.get(id) ?? blockedByCache.set(id, tracker.blockedBy(id)).get(id)!;
 
   const clone = scratchClone(root, tmpRoot);
   try {
@@ -232,14 +262,23 @@ export async function replayOverlap(opts: OverlapReplayOptions): Promise<Overlap
       const keys = new Map<string, Set<string>>();
       for (const id of landed.keys()) {
         const recorded = c.fileKeys?.[id];
-        const files = recorded ?? (await fileSet(ticketProse(await tracker.issueText(id)))).files;
+        if (recorded) {
+          keys.set(id, new Set(recorded));
+          continue;
+        }
+        const { files, confident } = await fileSet(ticketProse(await tracker.issueText(id)));
+        if (!confident) staleCiteTickets.add(id);
         keys.set(id, new Set(files));
       }
+      let blockers: ((id: string) => Set<string>) | undefined;
       const ids = [...landed.keys()].sort();
       for (const [n, x] of ids.entries()) {
         for (const y of ids.slice(n + 1)) {
           const shared = [...keys.get(x)!].filter((k) => keys.get(y)!.has(k));
+          // A dependent pair never shares a wave, whatever is waived: nothing to measure.
           if (!shared.length) continue;
+          blockers ??= await campaignBlockers(c.tickets, blockedBy);
+          if (blockers(x).has(y) || blockers(y).has(x)) continue;
           let [a, b] = [landed.get(x)!, landed.get(y)!];
           if (a.at > b.at) [a, b] = [b, a];
           const realOverlap = [...changedPaths(clone.git, a)].some((p) => changedPaths(clone.git, b).has(p));
@@ -258,5 +297,5 @@ export async function replayOverlap(opts: OverlapReplayOptions): Promise<Overlap
     rmSync(clone.dir, { recursive: true, force: true });
   }
   const keys = [...tallies.values()].map((t) => ({ ...t, rate: t.clean + t.collides ? t.collides / (t.clean + t.collides) : null }));
-  return { keys: keys.sort((a, b) => a.key.localeCompare(b.key)) };
+  return { keys: keys.sort((a, b) => a.key.localeCompare(b.key)), staleCiteTickets: [...staleCiteTickets].sort() };
 }

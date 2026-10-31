@@ -79,6 +79,10 @@ export const escapeHtml = (value: string) =>
 
 export const escapeTitle = (value: string) => escapeHtml(value).replaceAll("\n", "&#10;");
 
+/** The ` nonce="…"` attribute an inline `<script>`/`<style>` needs to run under the dashboard's
+ * per-response CSP (#600) — empty when no nonce is given (a render outside a served response). */
+export const nonceAttr = (nonce: string | undefined) => (nonce ? ` nonce="${escapeHtml(nonce)}"` : "");
+
 /**
  * Is a host-log row one an operator should be alerted to (#180)? A pure, render-time
  * predicate over a parsed `host.jsonl` row — no new severity field on host emitters
@@ -372,7 +376,7 @@ export function tailView(state: { buffer: TailRow[]; mark: number; live: boolean
 }
 
 const renderProjectPicker = (projects: string[], selected: string | undefined) =>
-  `<form method="get" action="/" class="project-picker"><select name="project" onchange="this.form.submit()"><option value=""${selected ? "" : " selected"}>All repos</option>${projects
+  `<form method="get" action="/" class="project-picker"><select name="project"><option value=""${selected ? "" : " selected"}>All repos</option>${projects
     .map((p) => `<option value="${escapeHtml(p)}"${p === selected ? " selected" : ""}>${escapeHtml(p)}</option>`)
     .join("")}</select></form>`;
 

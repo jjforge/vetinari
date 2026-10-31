@@ -43,6 +43,9 @@ export interface DashboardDeps {
   childStartupMs?: number;
   /** The gateway's loop health `GET /healthz` serves — absent on the standalone `status` server, where the route 404s. */
   health?: () => unknown;
+  /** This response's CSP nonce (#600) — set per request by the composer on its copy of the deps;
+   *  a route rendering a page writes it on every inline `<script>`/`<style>`. */
+  nonce?: string;
 }
 
 /**

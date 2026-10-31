@@ -146,10 +146,10 @@ export const AGENT_PROVIDERS: Record<
     efforts: ["low", "medium", "high", "xhigh"],
     credentialKeys: ["OPENAI_API_KEY"],
   },
-  // copilot → GitHub Copilot CLI; low..high effort. Experimental — non-resumable, driven by fresh re-runs (§12).
+  // copilot → GitHub Copilot CLI; model `auto` (Copilot picks among the models the org allows); none..max effort. Experimental — non-resumable, driven by fresh re-runs (§12).
   copilot: {
-    defaultModel: "claude-sonnet-4.5",
-    efforts: ["low", "medium", "high"],
+    defaultModel: "auto",
+    efforts: ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
     credentialKeys: ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"],
   },
   // cursor → Cursor CLI; no effort dial (empty). Experimental — non-resumable (§12).

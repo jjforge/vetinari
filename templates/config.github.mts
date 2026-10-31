@@ -36,8 +36,9 @@ export default defineConfig({
   // no grace; park at once and recover with `answer` + `vetinari redrive`.
   parkGraceSeconds: 0,
 
-  // Optional: the agent provider driving each run — `claude` (default), `pi`, or
-  // `codex`. Selects which credential key the container reads from .env and the
+  // Optional: the agent provider driving each run — `claude` (default), `pi`,
+  // `codex`, or `copilot` (GitHub Copilot; see the user guide's "Running with GitHub
+  // Copilot"). Selects which credential key the container reads from .env and the
   // provider's default model/effort. Override per run with `--agent`.
   // agent: { provider: "claude" },
 

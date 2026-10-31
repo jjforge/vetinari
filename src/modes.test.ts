@@ -1331,6 +1331,48 @@ test("a redrive of a non-red-base park relabels only the freshly merged members,
   assert.deepEqual(seen, ["102"], "only the freshly merged member got the merged hook");
 });
 
+// Seed a crash mid-integration: 101 went green and merged, then the process died before the
+// merged-base gate logged — no `base-gate`, no stop marker.
+const seedCrashBeforeBaseGate = (cfg: ResolvedConfig) => {
+  cfg.log.log("campaign-start", { waves: [["101"]], slots: 4 });
+  cfg.log.log("wave-start", { index: 0, tasks: ["101"] });
+  cfg.log.log("green", { taskId: "101", branch: "agent/101", commits: ["a"] });
+  cfg.log.log("merged", { taskId: "101", branch: "agent/101" });
+};
+
+const REGATE_LINE = "wave 1/1: re-gating — its merges were never gated (the campaign died before its base gate)";
+
+test("a redrive after a crash between a wave's merges and its base gate re-gates the merged base, saying so (design §7)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-ungated-"));
+  const seen: string[] = [];
+  const cfg = { ...harnessCfg(dir), onIssueMerged: (id: string) => void seen.push(id) };
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  seedCrashBeforeBaseGate(cfg);
+
+  const regates: (boolean | undefined)[] = [];
+  const deps = regateDeps(cfg, { merged: [], alreadyMerged: ["101"], conflicts: [] }, regates);
+  const lines = await captureLines(() => campaign(cfg, [], host, undefined, { resume: true }, deps));
+
+  assert.deepEqual(regates, [true], "the ungated merge forces the merged-base gate");
+  assert.ok(lines.includes(REGATE_LINE), `the re-gate is announced:\n${lines.join("\n")}`);
+  assert.deepEqual(seen, ["101"], "the member the crash cut off from its merged hook gets it on the green re-gate");
+});
+
+test("a redrive of a question park prints no re-gate line (design §7)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-question-noregate-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  seedParkedWave(cfg, "question");
+  cfg.log.log("green", { taskId: "102", branch: "agent/102", commits: ["b"] });
+
+  const regates: (boolean | undefined)[] = [];
+  const deps = regateDeps(cfg, { merged: ["102"], alreadyMerged: ["101"], conflicts: [] }, regates);
+  const lines = await captureLines(() => campaign(cfg, [], host, undefined, { resume: true }, deps));
+
+  assert.deepEqual(regates, [false]);
+  assert.ok(!lines.some((l) => l.includes("re-gating")), "no re-gate line for a question park");
+});
+
 test("a redrive of a legacy wave park — a campaign-parked with no reason — re-gates the wave", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-legacy-park-"));
   const cfg = harnessCfg(dir);

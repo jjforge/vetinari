@@ -134,10 +134,15 @@ export async function serveAllStatus(
   const server = createServer((req, res) => {
     const path = URL.parse(req.url ?? "/", "http://localhost")?.pathname ?? null;
     // One access row per POST — every one starts a process or reshapes a campaign — written once
-    // the response closes (sent or aborted), so `status` is the code actually sent (#582).
+    // the response closes (sent or aborted), so `status` is the code actually sent (#582). A failed
+    // write is dropped: thrown from this listener it would be an uncaught exception (#632).
     if (req.method === "POST") {
       const remote = req.socket.remoteAddress ?? null;
-      res.once("close", () => logger.log("dashboard-request", { method: "POST", path, status: res.statusCode, remote }));
+      res.once("close", () => {
+        try {
+          logger.log("dashboard-request", { method: "POST", path, status: res.statusCode, remote });
+        } catch {}
+      });
     }
     // Defence in depth on every response (#526): the pages load only their own inline assets and
     // talk only to this origin, so any future escaping slip cannot reach out or be framed.
@@ -178,8 +183,11 @@ export async function serveAllStatus(
       // here, an unhandled rejection that exits the hosting gateway — so cut the response off instead.
       if (res.headersSent) res.destroy();
       else res.writeHead(500, { "content-type": "text/plain; charset=utf-8" }).end("internal server error");
-      // Log the failure, never send it: the stack is for the operator, not the client (#538).
-      logger.log("dashboard-request-failed", { method: req.method, path, error: String(err) });
+      // Log the failure, never send it: the stack is for the operator, not the client (#538). A log
+      // write that fails cannot be logged either — drop it, so the error path never rejects (#632).
+      try {
+        logger.log("dashboard-request-failed", { method: req.method, path, error: String(err) });
+      } catch {}
     });
   });
   await new Promise<void>((resolve) => server.listen(opts.port, opts.host, resolve));

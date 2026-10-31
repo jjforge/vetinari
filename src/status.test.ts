@@ -2026,6 +2026,9 @@ test("serveAllStatus answers a route that throws before its head with a generic 
   const boom: RouteHandler = () => {
     throw new Error("secret detail");
   };
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => unhandled.push(reason);
+  process.on("unhandledRejection", onUnhandled);
   const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1", logger, routes: [boom] });
   try {
     const res = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/boom?x=1`);
@@ -2037,7 +2040,9 @@ test("serveAllStatus answers a route that throws before its head with a generic 
     assert.equal(failed.length, 1);
     const { method, path, error } = failed[0] as unknown as Record<string, unknown>;
     assert.deepEqual({ method, path, error }, { method: "GET", path: "/boom", error: "Error: secret detail" });
+    assert.deepEqual(unhandled, [], "the error path rejects nothing");
   } finally {
+    process.off("unhandledRejection", onUnhandled);
     await new Promise<void>((r) => server.close(() => r()));
   }
 });
@@ -2081,6 +2086,116 @@ test("serveAllStatus destroys a response whose route throws after its head, logs
   } finally {
     process.off("unhandledRejection", onUnhandled);
     server.closeAllConnections();
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});
+
+// A logger whose every write fails, as `fileLogger` does when its retried append also fails (disk
+// full, EACCES on host.jsonl). It records each event name before it throws, so a test can wait for
+// a call that lands a tick after the client has its response (#632).
+function failingHostLogger632(): { log: (event: string) => never; calls: string[] } {
+  const calls: string[] = [];
+  return {
+    calls,
+    log: (event: string) => {
+      calls.push(event);
+      throw new Error("log append failed");
+    },
+  };
+}
+
+test("serveAllStatus still answers a route that throws before its head with the generic 500 when the failure log throws, and rejects nothing (#632)", async () => {
+  const configDir = mkdtempSync(join(tmpdir(), "vetinari-route-throws-log-fails-"));
+  const logger = failingHostLogger632();
+  const boom: RouteHandler = (_req, _res, url) => {
+    if (url.pathname !== "/boom") return false;
+    throw new Error("secret detail");
+  };
+  const ok: RouteHandler = (_req, res) => (res.writeHead(200).end("ok"), true);
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => unhandled.push(reason);
+  process.on("unhandledRejection", onUnhandled);
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1", logger, routes: [boom, ok] });
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    const res = await fetch(`${base}/boom`);
+    assert.equal(res.status, 500);
+    assert.equal(await res.text(), "internal server error");
+    const after = await fetch(`${base}/next`);
+    assert.equal(after.status, 200);
+    assert.equal(await after.text(), "ok");
+    assert.ok(logger.calls.includes("dashboard-request-failed"), "the failure log was attempted");
+    // An unhandled rejection is reported on a later tick; give it one before asserting none fired.
+    await new Promise((r) => setTimeout(r, 20));
+    assert.deepEqual(unhandled, [], "a throwing failure log rejects nothing");
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});
+
+test("serveAllStatus destroys a response whose route throws after its head when the failure log throws, rejects nothing, and stays up (#632)", async () => {
+  const configDir = mkdtempSync(join(tmpdir(), "vetinari-route-throws-late-log-fails-"));
+  const logger = failingHostLogger632();
+  const late: RouteHandler = async (_req, res, url) => {
+    if (url.pathname !== "/late") return false;
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write("data: first\n\n");
+    await new Promise((r) => setTimeout(r, 20));
+    throw new Error("mid-stream failure");
+  };
+  const ok: RouteHandler = (_req, res) => (res.writeHead(200).end("ok"), true);
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => unhandled.push(reason);
+  process.on("unhandledRejection", onUnhandled);
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1", logger, routes: [late, ok] });
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    const res = await fetch(`${base}/late`);
+    assert.equal(res.status, 200);
+    const read = await Promise.race([
+      res.text().then(
+        () => "completed",
+        () => "errored",
+      ),
+      new Promise((r) => setTimeout(() => r("hung"), 2000)),
+    ]);
+    assert.equal(read, "errored", "the half-sent stream is cut off");
+    const after = await fetch(`${base}/next`);
+    assert.equal(after.status, 200);
+    assert.equal(await after.text(), "ok");
+    assert.ok(logger.calls.includes("dashboard-request-failed"), "the failure log was attempted");
+    await new Promise((r) => setTimeout(r, 20));
+    assert.deepEqual(unhandled, [], "a throwing failure log rejects nothing");
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+    server.closeAllConnections();
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});
+
+test("serveAllStatus completes a POST a route answers when the access log throws, and throws nothing when the response closes (#632)", async () => {
+  const configDir = mkdtempSync(join(tmpdir(), "vetinari-access-log-fails-"));
+  const logger = failingHostLogger632();
+  const uncaught: unknown[] = [];
+  const onUncaught = (err: unknown) => uncaught.push(err);
+  process.on("uncaughtException", onUncaught);
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1", logger });
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    const rejected = await fetch(`${base}/prune`, { method: "POST" });
+    assert.equal(rejected.status, 400);
+    await rejected.text();
+    // The access log runs on the response's close, which can land a tick after the client has read
+    // it; wait until the logger was called, or the assertion below could run before it throws.
+    for (let i = 0; i < 100 && !logger.calls.includes("dashboard-request"); i++) await new Promise((r) => setTimeout(r, 10));
+    assert.ok(logger.calls.includes("dashboard-request"), "the access log was attempted");
+    assert.deepEqual(uncaught, [], "a throwing access log throws nothing out of the close listener");
+    const after = await fetch(`${base}/prune`, { method: "POST" });
+    assert.equal(after.status, 400);
+    await after.text();
+  } finally {
+    process.off("uncaughtException", onUncaught);
     await new Promise<void>((r) => server.close(() => r()));
   }
 });

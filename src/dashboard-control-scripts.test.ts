@@ -20,19 +20,18 @@ const runningCampaign: CampaignStatus = {
 };
 const runningPage = () => renderStatusPage(runningCampaign, { graft: true, leaseLive: true });
 
-test("the DOM harness runs the page script against the stubbed fetch, answering the host-log backfill itself", async () => {
-  const page = loadDashboardPage(runningPage(), () => undefined);
+test("the DOM harness runs the page script against the stubbed fetch, answering the host-log backfill itself", async (t) => {
+  const page = loadDashboardPage(t, runningPage(), () => undefined);
   await page.settle();
   // The host-log pane backfills on load; the harness answers it, so it is not unhandled.
   assert.deepEqual(
     page.calls.map((c) => c.url),
     ["/api/host-log"],
   );
-  await page.close();
 });
 
-test("the DOM harness fails close() on a fetch nothing handled, though the page swallows it", async () => {
-  const page = loadDashboardPage(runningPage(), () => undefined);
+test("the DOM harness fails close() on a fetch nothing handled, though the page swallows it", async (t) => {
+  const page = loadDashboardPage(t, runningPage(), () => undefined);
   await page.settle();
   page.window.fetch("/nowhere").catch(() => {});
   await page.settle();
@@ -51,8 +50,8 @@ const graftParts = (page: DashboardDomPage) => {
   };
 };
 
-test("graft: blurring typed ids previews them, and a rejected id names its verdict and disables the button", async () => {
-  const page = loadDashboardPage(runningPage(), (call) =>
+test("graft: blurring typed ids previews them, and a rejected id names its verdict and disables the button", async (t) => {
+  const page = loadDashboardPage(t, runningPage(), (call) =>
     call.url.startsWith("/graft?preview")
       ? dashboardReply(200, JSON.stringify({ ids: ["7", "8"], rejected: [{ id: "8", reason: "closed" }] }))
       : undefined,
@@ -68,11 +67,10 @@ test("graft: blurring typed ids previews them, and a rejected id names its verdi
   assert.equal(message.hidden, false);
   assert.equal(message.textContent, "#7 — would graft  ·  #8 — closed on GitHub");
   assert.equal(button.disabled, true);
-  await page.close();
 });
 
-test("graft: a clean preview shows nothing and leaves the button enabled", async () => {
-  const page = loadDashboardPage(runningPage(), (call) =>
+test("graft: a clean preview shows nothing and leaves the button enabled", async (t) => {
+  const page = loadDashboardPage(t, runningPage(), (call) =>
     call.url.startsWith("/graft?preview") ? dashboardReply(200, JSON.stringify({ ids: ["7"], rejected: [] })) : undefined,
   );
   const { input, button, message } = graftParts(page);
@@ -84,5 +82,46 @@ test("graft: a clean preview shows nothing and leaves the button enabled", async
   assert.equal(message.hidden, true);
   assert.equal(message.textContent, "");
   assert.equal(button.disabled, false);
-  await page.close();
+});
+
+test("graft: clicking graft POSTs the ids, and a 200 clears the input back to a disabled rest", async (t) => {
+  const page = loadDashboardPage(t, runningPage(), (call) => (call.url === "/graft" ? dashboardReply(200, "grafted") : undefined));
+  const { input, button, message } = graftParts(page);
+  page.typeInto(input, "7");
+  button.click();
+  await page.settle();
+  assert.deepEqual(page.calls.at(-1), { url: "/graft", method: "POST", body: "ids=7&project=beta" });
+  assert.equal(input.value, "");
+  assert.equal(button.disabled, true);
+  assert.equal(button.textContent, "graft");
+  assert.equal(message.hidden, true);
+});
+
+test("graft: a 422 shows the route's per-id verdicts and keeps the typed ids", async (t) => {
+  const rejection = `<!doctype html><ul data-graft-verdicts><li>#7 — would graft</li><li>#8 — not found</li></ul>`;
+  const page = loadDashboardPage(t, runningPage(), (call) => (call.url === "/graft" ? dashboardReply(422, rejection) : undefined));
+  const { input, button, message } = graftParts(page);
+  page.typeInto(input, "7 8");
+  button.click();
+  await page.settle();
+  assert.deepEqual(page.calls.at(-1), { url: "/graft", method: "POST", body: "ids=7+8&project=beta" });
+  assert.equal(message.hidden, false);
+  assert.equal(message.textContent, "#7 — would graft  ·  #8 — not found");
+  assert.equal(input.value, "7 8");
+  assert.equal(button.disabled, true, "a rejected batch holds the button until the ids change");
+});
+
+test("graft: any other failure shows the route's trimmed body and keeps the typed ids", async (t) => {
+  const page = loadDashboardPage(t, runningPage(), (call) =>
+    call.url === "/graft" ? dashboardReply(502, "  couldn't reach graft for beta\n") : undefined,
+  );
+  const { input, button, message } = graftParts(page);
+  page.typeInto(input, "7");
+  button.click();
+  await page.settle();
+  assert.equal(page.calls.at(-1)?.method, "POST");
+  assert.equal(message.hidden, false);
+  assert.equal(message.textContent, "couldn't reach graft for beta");
+  assert.equal(input.value, "7");
+  assert.equal(button.disabled, false);
 });

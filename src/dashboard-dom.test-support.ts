@@ -2,6 +2,7 @@
 // 0012's DOM-shim exception): the glue — fetch calls, dialogs, navigation — that no reducer
 // test can reach. The page loads against a stubbed fetch and a no-op EventSource, so it never
 // touches the network.
+import type { TestContext } from "node:test";
 import { Window } from "happy-dom";
 
 /** One fetch the page made: its URL as written, method, and body as sent (`String(init.body)`). */
@@ -24,7 +25,9 @@ export interface DashboardDomPage {
   typeInto: (input: HTMLInputElement, text: string) => void;
   /** Let the page's pending promises and microtasks run (a short real timer). */
   settle: (ms?: number) => Promise<void>;
-  /** Close the window — clearing its timers — and reject if any fetch went unhandled. */
+  /** Close the window — clearing its timers — and reject if any fetch went unhandled. Runs
+   * itself after the test (so a failed assertion still clears the page's interval) unless the
+   * test already called it. */
   close: () => Promise<void>;
 }
 
@@ -46,12 +49,18 @@ class SilentEventSource extends EventTarget {
 }
 
 /**
- * Load `html` (a renderer's page) into a happy-dom window at `url`, with `stub` as its fetch.
+ * Load `html` (a renderer's page) into a happy-dom window at `url`, with `stub` as its fetch,
+ * closed after test `t`.
  * `/api/host-log` — which the host-log pane backfills on every load — is answered with an empty
  * window unless `stub` answers it. A fetch `stub` leaves unhandled resolves to a 599 the page
  * swallows like any failure, and is recorded so `close()` fails the test.
  */
-export function loadDashboardPage(html: string, stub: DashboardFetchStub, url = "http://dashboard.test/beta"): DashboardDomPage {
+export function loadDashboardPage(
+  t: TestContext,
+  html: string,
+  stub: DashboardFetchStub,
+  url = "http://dashboard.test/beta",
+): DashboardDomPage {
   const window = new Window({
     url,
     settings: {
@@ -73,6 +82,12 @@ export function loadDashboardPage(html: string, stub: DashboardFetchStub, url = 
   // Both stubs go on before the write, so the inline script sees them as it runs.
   Object.assign(window, { fetch: fetchStub, EventSource: SilentEventSource });
   window.document.write(html);
+  let closing: Promise<void> | null = null;
+  const close = () =>
+    (closing ??= window.happyDOM.close().then(() => {
+      if (unhandled.length) throw new Error(unhandled.map((c) => `unhandled fetch: ${c.method} ${c.url}`).join("\n"));
+    }));
+  t.after(() => (closing ? undefined : close()));
   return {
     window,
     document: window.document as unknown as Document,
@@ -82,9 +97,6 @@ export function loadDashboardPage(html: string, stub: DashboardFetchStub, url = 
     },
     calls,
     settle: (ms = 20) => new Promise((resolve) => setTimeout(resolve, ms)),
-    close: async () => {
-      await window.happyDOM.close();
-      if (unhandled.length) throw new Error(unhandled.map((c) => `unhandled fetch: ${c.method} ${c.url}`).join("\n"));
-    },
+    close,
   };
 }

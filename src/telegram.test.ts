@@ -2,55 +2,30 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { TG_POLL_TIMEOUT_S, newPollBackoff, tgDrain, tgEnvConn, tgSend, tgPoll } from "./telegram.ts";
 import { memoryLogger } from "./log.ts";
+import { withEnv } from "./test-support.ts";
 
 const TG_ENV = ["VETINARI_TELEGRAM_BOT_TOKEN", "VETINARI_TELEGRAM_CHAT_ID", "VETINARI_TELEGRAM_THREAD_ID"];
 
-/** Run `fn` with the given Telegram env, restoring whatever was there before. */
-const withEnv = (env: Record<string, string | undefined>, fn: () => void) => {
-  const saved = Object.fromEntries(TG_ENV.map((k) => [k, process.env[k]]));
-  try {
-    for (const k of TG_ENV) delete process.env[k];
-    for (const [k, v] of Object.entries(env)) if (v !== undefined) process.env[k] = v;
-    fn();
-  } finally {
-    for (const k of TG_ENV) {
-      if (saved[k] === undefined) delete process.env[k];
-      else process.env[k] = saved[k]!;
-    }
-  }
-};
-
-/** Async `withEnv`: keeps the env in place across an awaited body. */
-const withEnvAsync = async (env: Record<string, string | undefined>, fn: () => Promise<void>) => {
-  const saved = Object.fromEntries(TG_ENV.map((k) => [k, process.env[k]]));
-  try {
-    for (const k of TG_ENV) delete process.env[k];
-    for (const [k, v] of Object.entries(env)) if (v !== undefined) process.env[k] = v;
-    await fn();
-  } finally {
-    for (const k of TG_ENV) {
-      if (saved[k] === undefined) delete process.env[k];
-      else process.env[k] = saved[k]!;
-    }
-  }
-};
+/** Run `fn` with every Telegram key cleared, then `env` applied, restoring whatever was there before. */
+const withTgEnv = <T>(env: Record<string, string | undefined>, fn: () => T): T =>
+  withEnv({ ...Object.fromEntries(TG_ENV.map((k) => [k, undefined])), ...env }, fn);
 
 test("tgEnvConn builds a connection from the orchestrator env", () => {
-  withEnv({ VETINARI_TELEGRAM_BOT_TOKEN: "tok", VETINARI_TELEGRAM_CHAT_ID: "chat", VETINARI_TELEGRAM_THREAD_ID: "7" }, () => {
+  withTgEnv({ VETINARI_TELEGRAM_BOT_TOKEN: "tok", VETINARI_TELEGRAM_CHAT_ID: "chat", VETINARI_TELEGRAM_THREAD_ID: "7" }, () => {
     assert.deepEqual(tgEnvConn(), { token: "tok", chat: "chat", thread: "7" });
   });
 });
 
 test("tgEnvConn omits the thread when unset", () => {
-  withEnv({ VETINARI_TELEGRAM_BOT_TOKEN: "tok", VETINARI_TELEGRAM_CHAT_ID: "chat" }, () => {
+  withTgEnv({ VETINARI_TELEGRAM_BOT_TOKEN: "tok", VETINARI_TELEGRAM_CHAT_ID: "chat" }, () => {
     assert.deepEqual(tgEnvConn(), { token: "tok", chat: "chat", thread: undefined });
   });
 });
 
 test("tgEnvConn is undefined when token or chat is missing", () => {
-  withEnv({ VETINARI_TELEGRAM_BOT_TOKEN: "tok" }, () => assert.equal(tgEnvConn(), undefined));
-  withEnv({ VETINARI_TELEGRAM_CHAT_ID: "chat" }, () => assert.equal(tgEnvConn(), undefined));
-  withEnv({}, () => assert.equal(tgEnvConn(), undefined));
+  withTgEnv({ VETINARI_TELEGRAM_BOT_TOKEN: "tok" }, () => assert.equal(tgEnvConn(), undefined));
+  withTgEnv({ VETINARI_TELEGRAM_CHAT_ID: "chat" }, () => assert.equal(tgEnvConn(), undefined));
+  withTgEnv({}, () => assert.equal(tgEnvConn(), undefined));
 });
 
 /** Swap global.fetch for a recorder that returns Telegram's ok envelope. */
@@ -89,7 +64,7 @@ test("tgSend addresses the explicit connection, not process env", async () => {
     return okResponse({ message_id: 42 });
   }) as typeof fetch;
   // Conflicting env set for the whole send: the helper must ignore it entirely.
-  await withEnvAsync(
+  await withTgEnv(
     { VETINARI_TELEGRAM_BOT_TOKEN: "ENV_TOKEN", VETINARI_TELEGRAM_CHAT_ID: "ENV_CHAT", VETINARI_TELEGRAM_THREAD_ID: "999" },
     () =>
       withFetch(record, async () => {

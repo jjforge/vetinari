@@ -45,6 +45,7 @@ import {
 } from "./event-log.ts";
 import { archiveRun, shouldArchiveLeftover } from "./archive.ts";
 import { projectHasLiveCampaign, readLeases, type HostBudget, type SlotLease } from "./host-slots.ts";
+import { withEnv } from "./test-support.ts";
 
 const cfgWith = (fetchTask: ResolvedConfig["fetchTask"]): ResolvedConfig => ({ fetchTask }) as ResolvedConfig;
 
@@ -54,17 +55,6 @@ const baseLocationWith = (env?: string): string => {
   mkdirSync(base, { recursive: true });
   if (env !== undefined) writeFileSync(join(base, "host.env"), env);
   return base;
-};
-
-const withEnv = (over: Record<string, string | undefined>, fn: () => void) => {
-  const keys = Object.keys(over);
-  const prev = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
-  for (const k of keys) over[k] === undefined ? delete process.env[k] : (process.env[k] = over[k]);
-  try {
-    fn();
-  } finally {
-    for (const k of keys) prev[k] === undefined ? delete process.env[k] : (process.env[k] = prev[k]);
-  }
 };
 
 test("requireTelegram resolves the connection from the base location's host.env — the path the gateway sends on", () => {
@@ -700,19 +690,18 @@ test("campaign prints human-readable plan/wave/complete lines and NO event JSON 
   const dir = mkdtempSync(join(tmpdir(), "vetinari-report-"));
   const cfg = harnessCfg(dir);
   const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
-  const prev = process.env.VETINARI_JSON;
-  delete process.env.VETINARI_JSON;
-  const lines = await captureLines(() =>
-    campaign(
-      cfg,
-      [["101"], ["201"]],
-      host,
-      "vocab",
-      {},
-      gitFreeDeps(cfg, async () => 0),
+  const lines = await withEnv({ VETINARI_JSON: undefined }, () =>
+    captureLines(() =>
+      campaign(
+        cfg,
+        [["101"], ["201"]],
+        host,
+        "vocab",
+        {},
+        gitFreeDeps(cfg, async () => 0),
+      ),
     ),
   );
-  if (prev !== undefined) process.env.VETINARI_JSON = prev;
   const text = lines.join("\n");
   assert.match(text, /plan “vocab” · 2 waves/, "the plan, with the campaign name");
   assert.match(text, /▶ wave 1\/2 — #101/, "per-wave progress");
@@ -732,8 +721,6 @@ test("campaign prints the changelog near-miss line through the reporter even whe
   const dir = mkdtempSync(join(tmpdir(), "vetinari-report-nearmiss-"));
   const cfg = harnessCfg(dir);
   const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
-  const prev = process.env.VETINARI_JSON;
-  delete process.env.VETINARI_JSON;
   const deps: CampaignDeps = {
     ...gitFreeDeps(cfg, async () => 0),
     collectChangelog: () => ({
@@ -742,8 +729,7 @@ test("campaign prints the changelog near-miss line through the reporter even whe
       nearMisses: [{ name: "90.md", reason: "bullets but no section: header" }],
     }),
   };
-  const lines = await captureLines(() => campaign(cfg, [["101"]], host, "vocab", {}, deps));
-  if (prev !== undefined) process.env.VETINARI_JSON = prev;
+  const lines = await withEnv({ VETINARI_JSON: undefined }, () => captureLines(() => campaign(cfg, [["101"]], host, "vocab", {}, deps)));
   assert.ok(
     lines.some((l) => l.includes("wave 1/1") && l.includes("90.md (bullets but no section: header)")),
     `near-miss line printed:\n${lines.join("\n")}`,
@@ -775,13 +761,12 @@ test("a wave-done is followed by its slow-gate lines: a budget overrun at each w
     for (const s of [200, 200, 400]) logGateResult(cfg, taskId, s, { budgetSeconds: 300 });
     return 0;
   };
-  const prev = process.env.VETINARI_JSON;
-  delete process.env.VETINARI_JSON;
   let outcome: unknown;
-  const lines = await captureLines(async () => {
-    outcome = await campaign(cfg, [["101"], ["201"]], host, "slow", {}, gitFreeDeps(cfg, spawnRun));
-  });
-  if (prev !== undefined) process.env.VETINARI_JSON = prev;
+  const lines = await withEnv({ VETINARI_JSON: undefined }, () =>
+    captureLines(async () => {
+      outcome = await campaign(cfg, [["101"], ["201"]], host, "slow", {}, gitFreeDeps(cfg, spawnRun));
+    }),
+  );
   assert.equal(outcome, "done", "a slow gate never changes the campaign's outcome");
   const done1 = lines.findIndex((l) => l.startsWith("✔ wave 1/2"));
   const done2 = lines.findIndex((l) => l.startsWith("✔ wave 2/2"));
@@ -808,13 +793,12 @@ test("a wave that fails or parks prints its slow-gate lines beside the stop, not
       if (exit === 2) seedParkedRecord(cfg, taskId);
       return exit;
     };
-    const prev = process.env.VETINARI_JSON;
-    delete process.env.VETINARI_JSON;
     let outcome: unknown;
-    const lines = await captureLines(async () => {
-      outcome = await campaign(cfg, [["101"]], host, "slow", {}, gitFreeDeps(cfg, spawnRun));
-    });
-    if (prev !== undefined) process.env.VETINARI_JSON = prev;
+    const lines = await withEnv({ VETINARI_JSON: undefined }, () =>
+      captureLines(async () => {
+        outcome = await campaign(cfg, [["101"]], host, "slow", {}, gitFreeDeps(cfg, spawnRun));
+      }),
+    );
     assert.equal(outcome, expected, "the slow gate leaves the outcome as it was");
     const stop = lines.findIndex((l) => l.startsWith(stopLine));
     assert.ok(stop >= 0, `stop line printed:\n${lines.join("\n")}`);
@@ -833,23 +817,22 @@ test("a redrive of a campaign does not reprint a history flag an earlier settle 
     seedParkedRecord(cfg, taskId);
     return 2;
   };
-  const prev = process.env.VETINARI_JSON;
-  delete process.env.VETINARI_JSON;
-  const first = await captureLines(() => campaign(cfg, [["101"]], host, "slow", {}, gitFreeDeps(cfg, parking)));
-  assert.equal(slowLines(first).length, 1, `history flag printed once:\n${first.join("\n")}`);
-  // The redrive — a new process on the same log — re-runs it, still slow, and it goes green.
-  answerParked(cfg, "101", "go on");
-  const green: CampaignDeps["spawnRun"] = async (taskId) => {
-    logGateResult(cfg, taskId, 210);
-    return 0;
-  };
-  const second = await captureLines(() => campaign(cfg, [], host, undefined, { resume: true }, gitFreeDeps(cfg, green)));
-  if (prev !== undefined) process.env.VETINARI_JSON = prev;
-  assert.ok(
-    second.some((l) => l.startsWith("✔ wave 1/1")),
-    `the redrive settled the wave:\n${second.join("\n")}`,
-  );
-  assert.deepEqual(slowLines(second), [], "already printed at the park — not again");
+  await withEnv({ VETINARI_JSON: undefined }, async () => {
+    const first = await captureLines(() => campaign(cfg, [["101"]], host, "slow", {}, gitFreeDeps(cfg, parking)));
+    assert.equal(slowLines(first).length, 1, `history flag printed once:\n${first.join("\n")}`);
+    // The redrive — a new process on the same log — re-runs it, still slow, and it goes green.
+    answerParked(cfg, "101", "go on");
+    const green: CampaignDeps["spawnRun"] = async (taskId) => {
+      logGateResult(cfg, taskId, 210);
+      return 0;
+    };
+    const second = await captureLines(() => campaign(cfg, [], host, undefined, { resume: true }, gitFreeDeps(cfg, green)));
+    assert.ok(
+      second.some((l) => l.startsWith("✔ wave 1/1")),
+      `the redrive settled the wave:\n${second.join("\n")}`,
+    );
+    assert.deepEqual(slowLines(second), [], "already printed at the park — not again");
+  });
 });
 
 // Wave cost (#615): a wave-done prints the wave's time split, and the campaign's end prints the total
@@ -876,10 +859,9 @@ test("each wave-done prints the wave's time split, and the campaign's end its me
   const cfg = harnessCfg(dir);
   const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   const deps = { ...gitFreeDeps(cfg, greenAfterGate(cfg)), integrate: integrateLoggingBaseGate(cfg, 52, 20) };
-  const prev = process.env.VETINARI_JSON;
-  delete process.env.VETINARI_JSON;
-  const lines = await captureLines(() => campaign(cfg, [["101"], ["201"]], host, "cost", {}, deps));
-  if (prev !== undefined) process.env.VETINARI_JSON = prev;
+  const lines = await withEnv({ VETINARI_JSON: undefined }, () =>
+    captureLines(() => campaign(cfg, [["101"], ["201"]], host, "cost", {}, deps)),
+  );
   const split = /^wave (\d)\/2: \d+s — agent \d+s · branch gates 30s · integration \+ base gate \d+s · post-merge \d+s$/;
   const cost = costLines(lines);
   assert.equal(cost.length, 3, `two wave splits and one total:\n${lines.join("\n")}`);
@@ -905,10 +887,9 @@ test("a campaign that fails or parks prints its merged-base gate total beside th
       return exit;
     };
     const deps = { ...gitFreeDeps(cfg, spawnRun), integrate: integrateLoggingBaseGate(cfg, 45) };
-    const prev = process.env.VETINARI_JSON;
-    delete process.env.VETINARI_JSON;
-    const lines = await captureLines(() => campaign(cfg, [["101"], ["201"]], host, "cost", {}, deps));
-    if (prev !== undefined) process.env.VETINARI_JSON = prev;
+    const lines = await withEnv({ VETINARI_JSON: undefined }, () =>
+      captureLines(() => campaign(cfg, [["101"], ["201"]], host, "cost", {}, deps)),
+    );
     const stop = lines.findIndex((l) => l.startsWith(stopLine));
     assert.ok(stop >= 0, `stop line printed:\n${lines.join("\n")}`);
     assert.deepEqual(
@@ -923,11 +904,7 @@ test("under --json the wave splits and the merged-base gate total are silent (#6
   const cfg = harnessCfg(dir);
   const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   const deps = { ...gitFreeDeps(cfg, greenAfterGate(cfg)), integrate: integrateLoggingBaseGate(cfg, 52) };
-  const prev = process.env.VETINARI_JSON;
-  process.env.VETINARI_JSON = "1";
-  const lines = await captureLines(() => campaign(cfg, [["101"]], host, "cost", {}, deps));
-  if (prev === undefined) delete process.env.VETINARI_JSON;
-  else process.env.VETINARI_JSON = prev;
+  const lines = await withEnv({ VETINARI_JSON: "1" }, () => captureLines(() => campaign(cfg, [["101"]], host, "cost", {}, deps)));
   assert.deepEqual(costLines(lines), []);
 });
 
@@ -935,20 +912,18 @@ test("campaign under --json streams the raw event stream and suppresses the huma
   const dir = mkdtempSync(join(tmpdir(), "vetinari-report-json-"));
   const cfg = harnessCfg(dir);
   const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
-  const prev = process.env.VETINARI_JSON;
-  process.env.VETINARI_JSON = "1";
-  const lines = await captureLines(() =>
-    campaign(
-      cfg,
-      [["101"], ["201"]],
-      host,
-      "vocab",
-      {},
-      gitFreeDeps(cfg, async () => 0),
+  const lines = await withEnv({ VETINARI_JSON: "1" }, () =>
+    captureLines(() =>
+      campaign(
+        cfg,
+        [["101"], ["201"]],
+        host,
+        "vocab",
+        {},
+        gitFreeDeps(cfg, async () => 0),
+      ),
     ),
   );
-  if (prev === undefined) delete process.env.VETINARI_JSON;
-  else process.env.VETINARI_JSON = prev;
   // Tooling reads clean JSONL: the campaign-start event is on stdout as a parseable line…
   const events = lines.flatMap((l) => {
     try {

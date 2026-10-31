@@ -15,6 +15,7 @@ import {
 } from "./log.ts";
 import { readEventLog, type BaseEvent } from "./event-log.ts";
 import { loadConfig } from "./config.ts";
+import { withEnv } from "./test-support.ts";
 
 /**
  * Compile-time contract: an injected `Logger` carries the same narrowed-kind typed overload the
@@ -65,9 +66,7 @@ test("memoryLogger captures typed events, writing nothing to disk and echoing no
 
 test("hostLogTarget is a persistent host log under the gateway config dir, not a temp fallback", () => {
   const gwDir = mkdtempSync(join(tmpdir(), "gw-home-"));
-  const prev = process.env.VETINARI_GATEWAY_HOME;
-  process.env.VETINARI_GATEWAY_HOME = gwDir;
-  try {
+  withEnv({ VETINARI_GATEWAY_HOME: gwDir }, () => {
     const target = hostLogTarget();
     // Persistent, mirroring a project's logs/orchestrator.jsonl: <gatewayConfigDir>/logs/host.jsonl.
     assert.equal(target, join(gwDir, "logs", "host.jsonl"), `host target must live under the gateway config dir, got ${target}`);
@@ -79,9 +78,7 @@ test("hostLogTarget is a persistent host log under the gateway config dir, not a
     assert.ok(existsSync(target), "hostLogger must write to its host target");
     const events = readEventLog({ logFile: target });
     assert.ok(events.some((e) => e.event === "prune"));
-  } finally {
-    prev === undefined ? delete process.env.VETINARI_GATEWAY_HOME : (process.env.VETINARI_GATEWAY_HOME = prev);
-  }
+  });
 });
 
 test("renderHostEvent renders a stamped row as one line: timestamp, event, then the salient fields as JSON", () => {
@@ -98,9 +95,7 @@ test("renderHostEvent renders a stamped row as one line: timestamp, event, then 
 
 test("readHostLog returns the host log newest-first, bounded to the most recent window; a missing file reads empty", () => {
   const gwDir = mkdtempSync(join(tmpdir(), "gw-home-"));
-  const prev = process.env.VETINARI_GATEWAY_HOME;
-  process.env.VETINARI_GATEWAY_HOME = gwDir;
-  try {
+  withEnv({ VETINARI_GATEWAY_HOME: gwDir }, () => {
     // No host.jsonl yet — the daemon never ran.
     assert.deepEqual(readHostLog(), [], "a missing host log reads empty");
 
@@ -120,16 +115,12 @@ test("readHostLog returns the host log newest-first, bounded to the most recent 
       recent.map((e) => (e as unknown as { i: number }).i),
       [4, 3],
     );
-  } finally {
-    prev === undefined ? delete process.env.VETINARI_GATEWAY_HOME : (process.env.VETINARI_GATEWAY_HOME = prev);
-  }
+  });
 });
 
 test("readHostLogLines returns the raw JSONL lines untouched, in file order, bounded to the most recent window", () => {
   const gwDir = mkdtempSync(join(tmpdir(), "gw-home-"));
-  const prev = process.env.VETINARI_GATEWAY_HOME;
-  process.env.VETINARI_GATEWAY_HOME = gwDir;
-  try {
+  withEnv({ VETINARI_GATEWAY_HOME: gwDir }, () => {
     // A missing host log yields no lines — the --json surface stays silent, not an error.
     assert.deepEqual(readHostLogLines(), [], "a missing host log reads empty");
 
@@ -153,9 +144,7 @@ test("readHostLogLines returns the raw JSONL lines untouched, in file order, bou
       readHostLogLines(2).map((l) => JSON.parse(l).i),
       [2, 3],
     );
-  } finally {
-    prev === undefined ? delete process.env.VETINARI_GATEWAY_HOME : (process.env.VETINARI_GATEWAY_HOME = prev);
-  }
+  });
 });
 
 const configBody = (stateDir: string) => `export default {

@@ -31,6 +31,7 @@ import {
   resolveProjectRoot,
   type Destination,
 } from "./config.ts";
+import { withEnv } from "./test-support.ts";
 
 const CONFIG_BODY = `export default {
   project: "demo",
@@ -164,20 +165,8 @@ test("loadConfig defaults containerShare to medium, and honors an explicit tier"
   assert.equal(cfg.containerShare, "high");
 });
 
-// Restores GIT_TERMINAL_PROMPT to its prior value (or absence) after fn runs.
-const withGitTerminalPromptRestored = async (fn: () => Promise<void>) => {
-  const prior = process.env.GIT_TERMINAL_PROMPT;
-  try {
-    await fn();
-  } finally {
-    if (prior === undefined) delete process.env.GIT_TERMINAL_PROMPT;
-    else process.env.GIT_TERMINAL_PROMPT = prior;
-  }
-};
-
 test("loadConfig sets GIT_TERMINAL_PROMPT=0 so host-side git fails fast instead of prompting", async () => {
-  await withGitTerminalPromptRestored(async () => {
-    delete process.env.GIT_TERMINAL_PROMPT;
+  await withEnv({ GIT_TERMINAL_PROMPT: undefined }, async () => {
     await loadConfig(writeConfig(scratch(), "vetinari/config.mts"));
     assert.equal(process.env.GIT_TERMINAL_PROMPT, "0");
   });
@@ -193,7 +182,8 @@ test("loadConfig lets hostEnv override GIT_TERMINAL_PROMPT", async () => {
   hostEnv: { GIT_TERMINAL_PROMPT: "1" },
 };
 `;
-  await withGitTerminalPromptRestored(async () => {
+  // Names the key only to restore it — loadConfig itself writes GIT_TERMINAL_PROMPT.
+  await withEnv({ GIT_TERMINAL_PROMPT: process.env.GIT_TERMINAL_PROMPT }, async () => {
     await loadConfig(writeConfig(scratch(), "vetinari/config.mts", withPrompt));
     assert.equal(process.env.GIT_TERMINAL_PROMPT, "1");
   });

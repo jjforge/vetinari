@@ -12,6 +12,7 @@ import { serveAllStatus } from "./status.ts";
 import { register } from "./registry.ts";
 import { event } from "./event-log.ts";
 import { appendActivity, initActivityLog } from "./activity.ts";
+import { withEnv } from "./test-support.ts";
 
 // Humanized row times render in the host's LOCAL timezone (#239); pin the process TZ to PDT
 // (UTC−7 in August) so the local slice is deterministic — a `…T09:15:00Z` line reads `02:15:00`.
@@ -554,12 +555,10 @@ test("GET /api/events re-subscribes the tail to the new wave on advance, without
 test("GET /api/events pushes a named `host` frame when host.jsonl gains a row (#180)", async () => {
   const configDir = tmp();
   const gwHome = join(configDir, "gw-home");
-  const prev = process.env.VETINARI_GATEWAY_HOME;
-  process.env.VETINARI_GATEWAY_HOME = gwHome;
   mkdirSync(join(gwHome, "logs"), { recursive: true });
   const hostFile = join(gwHome, "logs", "host.jsonl");
   writeFileSync(hostFile, '{"ts":"2026-08-28T00:00:00.000Z","event":"gateway-routed"}\n');
-  try {
+  await withEnv({ VETINARI_GATEWAY_HOME: gwHome }, async () => {
     const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
     const port = (server.address() as AddressInfo).port;
     const stream = await openStream(port);
@@ -584,9 +583,7 @@ test("GET /api/events pushes a named `host` frame when host.jsonl gains a row (#
       await stream.close();
       await new Promise<void>((r) => server.close(() => r()));
     }
-  } finally {
-    prev === undefined ? delete process.env.VETINARI_GATEWAY_HOME : (process.env.VETINARI_GATEWAY_HOME = prev);
-  }
+  });
 });
 
 const statusWith = (issues: Array<[string, string]>): CampaignStatus => ({

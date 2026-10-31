@@ -24,6 +24,7 @@ import {
   type ProjectPointer,
 } from "./registry.ts";
 import { memoryLogger } from "./log.ts";
+import { withEnv } from "./test-support.ts";
 
 let counter = 0;
 const tmpConfigDir = () => {
@@ -434,17 +435,6 @@ test("normalizeProjectRoot realpath-resolves a symlinked root so path variants d
 
   assert.equal(normalizeProjectRoot(link), realpathSync(real));
 });
-
-const withEnv = (over: Record<string, string | undefined>, fn: () => void) => {
-  const keys = Object.keys(over);
-  const prev = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
-  for (const k of keys) over[k] === undefined ? delete process.env[k] : (process.env[k] = over[k]);
-  try {
-    fn();
-  } finally {
-    for (const k of keys) prev[k] === undefined ? delete process.env[k] : (process.env[k] = prev[k]);
-  }
-};
 
 test("gatewayConfigDir honours VETINARI_GATEWAY_HOME above all else", () => {
   withEnv({ VETINARI_GATEWAY_HOME: "/opt/gw", XDG_CONFIG_HOME: "/home/me/.config" }, () => {

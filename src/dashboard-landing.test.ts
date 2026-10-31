@@ -13,6 +13,7 @@ import { event } from "./event-log.ts";
 import { festiveWaveName } from "./festive-names.ts";
 import type { ProjectPointer } from "./registry.ts";
 import { slotsDir } from "./host-slots.ts";
+import { withEnv } from "./test-support.ts";
 
 const writeJsonl = (path: string, events: unknown[]) => writeFileSync(path, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
 
@@ -875,9 +876,7 @@ test("merged-today counts against the operator's LOCAL day, not the UTC day (#97
   // 02:24 UTC — a different UTC day from a merge that happened earlier the same
   // local afternoon (Sun Aug 23 13:00 PDT = 20:00 UTC on Aug 23). UTC-day counts
   // it 0 (Aug-23-UTC ≠ Aug-24-UTC); the operator's local day counts it 1.
-  const origTZ = process.env.TZ;
-  process.env.TZ = "America/Los_Angeles";
-  try {
+  withEnv({ TZ: "America/Los_Angeles" }, () => {
     const base = join(tmpdir(), `vetinari-landing-merged-localday-${Date.now()}`);
     const dir = join(base, "beta");
     seedState(dir, [
@@ -899,10 +898,7 @@ test("merged-today counts against the operator's LOCAL day, not the UTC day (#97
     // Same local day (Aug 23 PDT) as `now`, so it counts — even though its UTC day
     // (Aug 23) differs from `now`'s UTC day (Aug 24).
     assert.equal(counters.mergedToday, 1);
-  } finally {
-    if (origTZ === undefined) delete process.env.TZ;
-    else process.env.TZ = origTZ;
-  }
+  });
 });
 
 test("buildFeed merges every project's narratable events into one newest-first, repo-prefixed feed", () => {
@@ -952,9 +948,7 @@ test("buildFeed carries each row's underlying event as raw NDJSON, alongside the
 
   // The humanized row `time` renders in the host's local timezone (#239); pin the process TZ to
   // PST (UTC−8 on Mar 1, pre-DST) so the local slice is deterministic — `08:02:00Z` → `00:02:00`.
-  const origTZ = process.env.TZ;
-  process.env.TZ = "America/Los_Angeles";
-  try {
+  withEnv({ TZ: "America/Los_Angeles" }, () => {
     const feed = buildFeed([pointerFor("acme", dir)], new Date("2025-03-01T09:00:00.000Z"));
 
     // The row's `raw` is the underlying event serialized — the bytes the Raw toggle highlights and
@@ -970,10 +964,7 @@ test("buildFeed carries each row's underlying event as raw NDJSON, alongside the
       spans: [{ text: "#101 merged", kind: "plain" }],
       dot: "merged",
     });
-  } finally {
-    if (origTZ === undefined) delete process.env.TZ;
-    else process.env.TZ = origTZ;
-  }
+  });
 });
 
 test("a merged event that names its issue only through its branch still renders the number, never #undefined", () => {

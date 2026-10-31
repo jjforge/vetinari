@@ -17,22 +17,13 @@ import {
   sandboxMounts,
 } from "./sandbox.ts";
 import type { ResolvedConfig } from "./config.ts";
+import { withEnv } from "./test-support.ts";
 
 // agentFor only reads `cfg.agent` and the VETINARI_AGENT env var — a bare object
 // with an `agent` field structurally satisfies what it touches.
 const cfgWith = (agent?: ResolvedConfig["agent"]): ResolvedConfig => ({ agent }) as ResolvedConfig;
 
-const withAgentEnv = <T>(value: string | undefined, fn: () => T): T => {
-  const prev = process.env[AGENT_ENV_VAR];
-  if (value === undefined) delete process.env[AGENT_ENV_VAR];
-  else process.env[AGENT_ENV_VAR] = value;
-  try {
-    return fn();
-  } finally {
-    if (prev === undefined) delete process.env[AGENT_ENV_VAR];
-    else process.env[AGENT_ENV_VAR] = prev;
-  }
-};
+const withAgentEnv = <T>(value: string | undefined, fn: () => T): T => withEnv({ [AGENT_ENV_VAR]: value }, fn);
 
 test("agentFor dispatches to Claude Code by default — the config's/CLI's absence is today's behavior", () => {
   withAgentEnv(undefined, () => {

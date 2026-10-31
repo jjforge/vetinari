@@ -25,6 +25,7 @@ import {
 import { HARVEST_PROMPT, type Finding, type FindingContext } from "./findings.ts";
 import { Refusal } from "./refusal.ts";
 import { githubFindOpenIssue } from "./github.ts";
+import { withEnv } from "./test-support.ts";
 
 // A temp-dir `cfg` mirroring graft.test/modes.test's `harnessCfg`: a real on-disk
 // event log, parked dir and outbox under a throwaway state dir, driven by a real
@@ -451,15 +452,9 @@ test("a standalone green run's banner says the commits are not merged and names 
   const cfg = harnessCfg();
   const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc123" }] }, green: true }], "agent/T-1");
 
-  const prevChild = process.env.VETINARI_CHILD;
-  delete process.env.VETINARI_CHILD;
-  let captured: { result: string; lines: string[] };
-  try {
-    captured = await captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
-  } finally {
-    if (prevChild === undefined) delete process.env.VETINARI_CHILD;
-    else process.env.VETINARI_CHILD = prevChild;
-  }
+  const captured = await withEnv({ VETINARI_CHILD: undefined }, () =>
+    captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx))),
+  );
 
   assert.equal(captured.result, "green");
   const banner = captured.lines.join("\n");
@@ -472,15 +467,7 @@ test("a campaign child's green run does not tell the operator to run campaign â€
   const cfg = harnessCfg();
   const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc123" }] }, green: true }], "agent/T-1");
 
-  const prevChild = process.env.VETINARI_CHILD;
-  process.env.VETINARI_CHILD = "1";
-  let captured: { result: string; lines: string[] };
-  try {
-    captured = await captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
-  } finally {
-    if (prevChild === undefined) delete process.env.VETINARI_CHILD;
-    else process.env.VETINARI_CHILD = prevChild;
-  }
+  const captured = await withEnv({ VETINARI_CHILD: "1" }, () => captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx))));
 
   assert.equal(captured.result, "green");
   const banner = captured.lines.join("\n");
@@ -493,19 +480,9 @@ test("under --json neither the green banner nor the new not-merged guidance reac
   const cfg = harnessCfg();
   const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc123" }] }, green: true }], "agent/T-1");
 
-  const prevJson = process.env.VETINARI_JSON;
-  const prevChild = process.env.VETINARI_CHILD;
-  process.env.VETINARI_JSON = "1";
-  delete process.env.VETINARI_CHILD;
-  let captured: { result: string; lines: string[] };
-  try {
-    captured = await captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
-  } finally {
-    if (prevJson === undefined) delete process.env.VETINARI_JSON;
-    else process.env.VETINARI_JSON = prevJson;
-    if (prevChild === undefined) delete process.env.VETINARI_CHILD;
-    else process.env.VETINARI_CHILD = prevChild;
-  }
+  const captured = await withEnv({ VETINARI_JSON: "1", VETINARI_CHILD: undefined }, () =>
+    captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx))),
+  );
 
   assert.equal(captured.result, "green");
   const banner = captured.lines.join("\n");
@@ -524,15 +501,7 @@ test("a run whose sandbox creation throws prints a FAILED banner and the re-run 
     },
   });
 
-  const prevChild = process.env.VETINARI_CHILD;
-  delete process.env.VETINARI_CHILD;
-  let captured: { result: string; lines: string[] };
-  try {
-    captured = await captureLog(() => runLoop(cfg, "T-1", undefined, undefined, deps));
-  } finally {
-    if (prevChild === undefined) delete process.env.VETINARI_CHILD;
-    else process.env.VETINARI_CHILD = prevChild;
-  }
+  const captured = await withEnv({ VETINARI_CHILD: undefined }, () => captureLog(() => runLoop(cfg, "T-1", undefined, undefined, deps)));
 
   assert.equal(captured.result, "failed");
   const banner = captured.lines.join("\n");
@@ -544,15 +513,9 @@ test("a parked (question) run prints a PARKED banner with the question and the a
   const cfg = harnessCfg();
   const sbx = fakeSandbox([{ run: { completionSignal: BLOCKED, stdout: "<question><summary>Which base?</summary></question>" } }]);
 
-  const prevChild = process.env.VETINARI_CHILD;
-  delete process.env.VETINARI_CHILD;
-  let captured: { result: string; lines: string[] };
-  try {
-    captured = await captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
-  } finally {
-    if (prevChild === undefined) delete process.env.VETINARI_CHILD;
-    else process.env.VETINARI_CHILD = prevChild;
-  }
+  const captured = await withEnv({ VETINARI_CHILD: undefined }, () =>
+    captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx))),
+  );
 
   assert.equal(captured.result, "parked");
   const banner = captured.lines.join("\n");
@@ -564,15 +527,9 @@ test("a stall park (no-commit) prints a PARKED (stalled) banner carrying the rec
   const cfg = harnessCfg();
   const sbx = fakeSandbox([{ run: { completionSignal: DONE } }], "agent/T-1");
 
-  const prevChild = process.env.VETINARI_CHILD;
-  delete process.env.VETINARI_CHILD;
-  let captured: { result: string; lines: string[] };
-  try {
-    captured = await captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { commitsAhead: () => 0 })));
-  } finally {
-    if (prevChild === undefined) delete process.env.VETINARI_CHILD;
-    else process.env.VETINARI_CHILD = prevChild;
-  }
+  const captured = await withEnv({ VETINARI_CHILD: undefined }, () =>
+    captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { commitsAhead: () => 0 }))),
+  );
 
   assert.equal(captured.result, "parked");
   const banner = captured.lines.join("\n");
@@ -594,15 +551,7 @@ test("under --json no FAILED/PARKED or next-step line prints, though the JSONL e
   const cfg = harnessCfg();
   const sbx = fakeSandbox([{ run: { completionSignal: BLOCKED, stdout: "<question><summary>Which base?</summary></question>" } }]);
 
-  const prevJson = process.env.VETINARI_JSON;
-  process.env.VETINARI_JSON = "1";
-  let captured: { result: string; lines: string[] };
-  try {
-    captured = await captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
-  } finally {
-    if (prevJson === undefined) delete process.env.VETINARI_JSON;
-    else process.env.VETINARI_JSON = prevJson;
-  }
+  const captured = await withEnv({ VETINARI_JSON: "1" }, () => captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx))));
 
   assert.equal(captured.result, "parked");
   const banner = captured.lines.join("\n");
@@ -618,15 +567,7 @@ test("a FAILED banner under --json prints neither the *** line nor the re-run li
   const cfg = harnessCfg();
   const sbx = fakeSandbox([{ throwGeneric: "container vanished" }]);
 
-  const prevJson = process.env.VETINARI_JSON;
-  process.env.VETINARI_JSON = "1";
-  let captured: { result: string; lines: string[] };
-  try {
-    captured = await captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
-  } finally {
-    if (prevJson === undefined) delete process.env.VETINARI_JSON;
-    else process.env.VETINARI_JSON = prevJson;
-  }
+  const captured = await withEnv({ VETINARI_JSON: "1" }, () => captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx))));
 
   assert.equal(captured.result, "failed");
   const banner = captured.lines.join("\n");
@@ -638,15 +579,7 @@ test("a campaign child prints the *** verdict line but suppresses the next-step 
   const cfg = harnessCfg();
   const sbx = fakeSandbox([{ throwGeneric: "container vanished" }]);
 
-  const prevChild = process.env.VETINARI_CHILD;
-  process.env.VETINARI_CHILD = "1";
-  let captured: { result: string; lines: string[] };
-  try {
-    captured = await captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
-  } finally {
-    if (prevChild === undefined) delete process.env.VETINARI_CHILD;
-    else process.env.VETINARI_CHILD = prevChild;
-  }
+  const captured = await withEnv({ VETINARI_CHILD: "1" }, () => captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx))));
 
   assert.equal(captured.result, "failed");
   const banner = captured.lines.join("\n");
@@ -658,15 +591,7 @@ test("a child's parked verdict prints the *** line but suppresses the answer lin
   const cfg = harnessCfg();
   const sbx = fakeSandbox([{ run: { completionSignal: BLOCKED, stdout: "<question><summary>Which base?</summary></question>" } }]);
 
-  const prevChild = process.env.VETINARI_CHILD;
-  process.env.VETINARI_CHILD = "1";
-  let captured: { result: string; lines: string[] };
-  try {
-    captured = await captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
-  } finally {
-    if (prevChild === undefined) delete process.env.VETINARI_CHILD;
-    else process.env.VETINARI_CHILD = prevChild;
-  }
+  const captured = await withEnv({ VETINARI_CHILD: "1" }, () => captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx))));
 
   assert.equal(captured.result, "parked");
   const banner = captured.lines.join("\n");
@@ -678,15 +603,9 @@ test("a FAILED banner collapses a multi-line detail to its first non-empty line 
   const cfg = harnessCfg();
   const sbx = fakeSandbox([{ throwGeneric: "first line of the failure\nsecond line with more detail" }]);
 
-  const prevChild = process.env.VETINARI_CHILD;
-  delete process.env.VETINARI_CHILD;
-  let captured: { result: string; lines: string[] };
-  try {
-    captured = await captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
-  } finally {
-    if (prevChild === undefined) delete process.env.VETINARI_CHILD;
-    else process.env.VETINARI_CHILD = prevChild;
-  }
+  const captured = await withEnv({ VETINARI_CHILD: undefined }, () =>
+    captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx))),
+  );
 
   assert.equal(captured.result, "failed");
   const banner = captured.lines.join("\n");
@@ -1569,15 +1488,10 @@ test("a standalone run holds one host slot around the container's life, but is n
   const cfg = harnessCfg({ project: "solo" });
   const { sbx, observed } = leaseObservingSandbox(configDir, "solo");
 
-  const prevChild = process.env.VETINARI_CHILD;
-  delete process.env.VETINARI_CHILD;
-  try {
+  await withEnv({ VETINARI_CHILD: undefined }, async () => {
     const outcome = await silence(() => runLoop(cfg, "T-1", host, undefined, depsFor(sbx)));
     assert.equal(outcome, "green");
-  } finally {
-    if (prevChild === undefined) delete process.env.VETINARI_CHILD;
-    else process.env.VETINARI_CHILD = prevChild;
-  }
+  });
 
   assert.equal(observed.runHeld, 1, "the run holds one slot while the container runs");
   assert.equal(observed.liveCampaign, false, "a standalone run's lease is not a live campaign");
@@ -1590,14 +1504,9 @@ test("a campaign child run takes no host slot â€” its parent already holds one f
   const cfg = harnessCfg({ project: "solo" });
   const { sbx, observed } = leaseObservingSandbox(configDir, "solo");
 
-  const prevChild = process.env.VETINARI_CHILD;
-  process.env.VETINARI_CHILD = "1";
-  try {
+  await withEnv({ VETINARI_CHILD: "1" }, async () => {
     await silence(() => runLoop(cfg, "T-1", host, undefined, depsFor(sbx)));
-  } finally {
-    if (prevChild === undefined) delete process.env.VETINARI_CHILD;
-    else process.env.VETINARI_CHILD = prevChild;
-  }
+  });
 
   assert.equal(observed.runHeld, 0, "a child never registers a second lease beside its parent's");
   assert.deepEqual(readLeases(configDir), [], "no lease is left behind");
@@ -1724,15 +1633,9 @@ test("a stopped run's banner prints from the run loop and names `vetinari run <i
   const control = makeStopControl();
   const sbx = stopSandbox([{ fireStop: "SIGINT", neverSettles: true }], control);
 
-  const prevChild = process.env.VETINARI_CHILD;
-  delete process.env.VETINARI_CHILD;
-  let captured: { result: string; lines: string[] };
-  try {
-    captured = await captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { onStop: control.onStop })));
-  } finally {
-    if (prevChild === undefined) delete process.env.VETINARI_CHILD;
-    else process.env.VETINARI_CHILD = prevChild;
-  }
+  const captured = await withEnv({ VETINARI_CHILD: undefined }, () =>
+    captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { onStop: control.onStop }))),
+  );
 
   assert.equal(captured.result, "parked");
   const parkedLines = captured.lines.filter((l) => l.includes("*** PARKED"));
@@ -1834,9 +1737,7 @@ test("a standalone run signalled while waiting first-come for a slot parks `stop
   let madeSandbox = false;
   const sbx = stopSandbox([], control);
 
-  const prevChild = process.env.VETINARI_CHILD;
-  delete process.env.VETINARI_CHILD;
-  try {
+  await withEnv({ VETINARI_CHILD: undefined }, async () => {
     const p = silence(() =>
       runLoop(
         cfg,
@@ -1857,10 +1758,7 @@ test("a standalone run signalled while waiting first-come for a slot parks `stop
     control.fire("SIGINT");
     const outcome = await p;
     assert.equal(outcome, "parked");
-  } finally {
-    if (prevChild === undefined) delete process.env.VETINARI_CHILD;
-    else process.env.VETINARI_CHILD = prevChild;
-  }
+  });
 
   assert.equal(madeSandbox, false, "a run that never acquired a slot never created a sandbox");
   assert.equal(listParked(cfg)[0].reason, "stopped");
@@ -2156,15 +2054,9 @@ test("a standalone outdated-agent park prints `vetinari build`, then `vetinari r
   const cfg = harnessCfg({ agent: { provider: "claude" } } as any);
   const sbx = fakeSandbox([{ throwGeneric: OUTDATED_CLAUDE }]);
 
-  const prevChild = process.env.VETINARI_CHILD;
-  delete process.env.VETINARI_CHILD;
-  let captured: { result: string; lines: string[] };
-  try {
-    captured = await captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
-  } finally {
-    if (prevChild === undefined) delete process.env.VETINARI_CHILD;
-    else process.env.VETINARI_CHILD = prevChild;
-  }
+  const captured = await withEnv({ VETINARI_CHILD: undefined }, () =>
+    captureLog(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx))),
+  );
 
   const banner = captured.lines.join("\n");
   assert.match(banner, /\*\*\* PARKED \(outdated-agent\)/);

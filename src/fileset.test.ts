@@ -531,8 +531,8 @@ test("ticketProse reads a comment marker when the body's only marker line cites 
   const root = treeWith("src/b.ts");
   const fileSet = defaultFileSet(root);
 
-  // A cite-less marker line is not a marker, so a body carrying only `Touches: none`
-  // has none and the comment's marker line is read.
+  // A body whose only marker line cites nothing (`Touches: none`) still has a marker line,
+  // but one with no cite does not shadow the comments, so the comment's marker line is read.
   const task = JSON.stringify({
     title: "Fix",
     body: "Touches: none",

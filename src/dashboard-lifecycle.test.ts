@@ -1153,6 +1153,24 @@ test("after a replan a graceful-stop marker names the members of the new waves[p
   assert.equal(reduced.parkedWave, 1);
 });
 
+test("a prune that empties a started wave does not make the next, unstarted wave read as started, so a replan keeps its issue (#635)", () => {
+  const events = [
+    event("campaign-start", { ts: "t0", waves: [["1"], ["2"], ["3"], ["4"]], slots: 2 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["1"] }),
+    event("wave-done", { ts: "t2", index: 0, merged: ["1"] }),
+    event("wave-start", { ts: "t3", index: 1, tasks: ["2"] }),
+    event("parked", { ts: "t4", taskId: "2", reason: "question" }),
+    event("campaign-parked", { ts: "t5", reason: "question" }),
+    event("prune", { ts: "t6", target: "2", removed: ["2"], dropped: ["2"] }),
+  ];
+  const pruned = reduceCampaign(events);
+  assert.deepEqual(pruned.waves, [["1"], ["3"], ["4"]]);
+  assert.equal(pruned.startedWaves, 1);
+
+  const replanned = reduceCampaign([...events, event("replan", { ts: "t7", waves: [["4", "3"]] })]);
+  assert.deepEqual(replanned.waves, [["1"], ["4", "3"]]);
+});
+
 // ungatedMerge (design §7): a real `merged` with no `base-gate` after it — the campaign died
 // between a wave's merges and its base gate, so a redrive must re-gate the merged base.
 const ungatedStart = [

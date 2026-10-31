@@ -173,10 +173,14 @@ export interface ReducedCampaign {
    * `campaign-parked` event, which lands on the in-flight wave with no `wave-done`
    * to close it, so this holds `currentWave` at the point the wave-park was logged. */
   parkedWave: number;
-  /** how many leading `waves` have started — every wave up to the highest that has had a
-   * `wave-start` (or closed). The prefix a `replan` keeps at its index (ADR 0022); the waves
-   * after it are the unstarted remainder. A graceful stop's `parkedWave` is not counted: it
-   * names the next wave, which never started. */
+  /** how many leading `waves` have started — one past the last wave in the current (post-prune)
+   * plan holding any started member, or 0 if none does. A member is started once a `wave-start`
+   * names it (or its wave has one with no `tasks`, or closes). Started is wave-level: one started
+   * member makes its whole wave started, slot-starved members included. Counting members on the
+   * current plan, not a recorded wave position, means a prune that empties a started wave never
+   * makes the next, unstarted one read as started. The prefix a `replan` keeps at its index
+   * (ADR 0022); the waves after it are the unstarted remainder. A graceful stop's `parkedWave` is
+   * not counted: it names the next wave, which never had a `wave-start`. */
   startedWaves: number;
   /** issue id → the structured `ParkReason` its `parked` event carried (ADR 0019),
    * folded so the lifecycle can surface *why* an issue is held. Absent for an issue
@@ -249,10 +253,11 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
   let stopped = new Set<string>();
   let currentWave = -1;
   let parkedWave = -1;
-  // The highest wave index that has had a `wave-start` (or closed) — `currentWave` resets at
-  // `wave-done`, and a graceful stop's `parkedWave` names a wave that never started, so the
-  // started prefix a `replan` keeps is tracked on its own.
-  let lastStarted = -1;
+  // The members whose wave has had a `wave-start` (or closed). Started is tracked by member, not
+  // by wave position: a prune that empties a wave drops it and shifts every later wave down, so a
+  // recorded index would land on the next, unstarted wave. `startedCount` counts on the current plan.
+  let startedMembers = new Set<string>();
+  const startedCount = () => waves.findLastIndex((wave) => wave.some((id) => startedMembers.has(id))) + 1;
 
   for (const e of relevant) {
     // Any start event may carry an id→title map (`campaign` writes it on
@@ -274,10 +279,13 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       name = typeof e.name === "string" && e.name.trim() ? e.name : undefined;
       festiveOffset = festiveOffsetFor(typeof e.ts === "string" ? e.ts : undefined);
       currentWave = -1;
-      lastStarted = -1;
+      startedMembers = new Set();
     } else if (e.event === "wave-start" && Number.isInteger(e.index)) {
       currentWave = e.index;
-      lastStarted = Math.max(lastStarted, e.index);
+      // An older log's `wave-start` (the legacy `campaign-batch` rename) names no tasks: read the
+      // wave's members off the plan as it stands here instead.
+      const tasks: unknown[] = Array.isArray(e.tasks) ? e.tasks : (waves[e.index] ?? []);
+      for (const id of tasks) startedMembers.add(normalize(String(id)));
       // A wave-start after an operator stop is the redrive picking the campaign back up.
       stopped = new Set();
     } else if (e.event === "spawn" && e.taskId) {
@@ -376,7 +384,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       // wave, whose members would otherwise fold to `unstarted` and the campaign to idle.
       stopped = e.reason === "stopped" ? new Set(waves[parkedWave] ?? []) : new Set();
     } else if (e.event === "wave-done" && Number.isInteger(e.index)) {
-      lastStarted = Math.max(lastStarted, e.index);
+      for (const id of waves[e.index] ?? []) startedMembers.add(id);
       for (const taskId of e.merged ?? []) {
         const issueNumber = normalize(String(taskId));
         outcomes.set(issueNumber, "completed");
@@ -446,7 +454,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       // The display `layout` keeps the display waves the started prefix occupies and follows
       // the new tail past it; a pruned member of a replaced display wave moves to one trailing
       // display-only wave, so the dashboard never loses a member (ADR 0007).
-      const started = Math.min(lastStarted + 1, waves.length);
+      const started = startedCount();
       const replanned = applyReplan(
         { waves, started },
         e.waves.map((wave: unknown[]) => wave.map(String)),
@@ -524,7 +532,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
     closedWaves,
     currentWave,
     parkedWave,
-    startedWaves: Math.min(lastStarted + 1, waves.length),
+    startedWaves: startedCount(),
     parkReasons,
     redBase,
     stopped,

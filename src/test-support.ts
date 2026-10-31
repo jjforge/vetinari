@@ -1,4 +1,4 @@
-// Shared home for test fixtures, built up in stages; only the git seeders live here so far.
+// Shared home for test fixtures, built up in stages: the git seeders and the env-restoring `withEnv`.
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

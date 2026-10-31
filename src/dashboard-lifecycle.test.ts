@@ -1152,3 +1152,42 @@ test("after a replan a graceful-stop marker names the members of the new waves[p
   assert.deepEqual([...reduced.stopped].sort(), ["201", "202"]);
   assert.equal(reduced.parkedWave, 1);
 });
+
+// ungatedMerge (design §7): a real `merged` with no `base-gate` after it — the campaign died
+// between a wave's merges and its base gate, so a redrive must re-gate the merged base.
+const ungatedStart = [
+  event("campaign-start", { ts: "t0", waves: [["A"]], slots: 1 }),
+  event("wave-start", { ts: "t1", index: 0, tasks: ["A"] }),
+  event("merged", { ts: "t2", taskId: "A", branch: "agent/A" }),
+];
+
+test("ungatedMerge is true when a real merged has no base-gate after it", () => {
+  assert.equal(reduceCampaign(ungatedStart).ungatedMerge, true);
+});
+
+test("ungatedMerge is false once a base-gate follows the merged", () => {
+  assert.equal(reduceCampaign([...ungatedStart, event("base-gate", { ts: "t3", index: 0, green: true })]).ungatedMerge, false);
+});
+
+test("ungatedMerge is false when only a redrive's alreadyMerged re-log follows the base-gate", () => {
+  const reduced = reduceCampaign([
+    ...ungatedStart,
+    event("base-gate", { ts: "t3", index: 0, green: true }),
+    event("merged", { ts: "t4", taskId: "A", branch: "agent/A", alreadyMerged: true }),
+  ]);
+  assert.equal(reduced.ungatedMerge, false);
+});
+
+test("ungatedMerge reads an unflagged re-logged merged after the base-gate as a real merge (old-log tolerance)", () => {
+  const reduced = reduceCampaign([
+    ...ungatedStart,
+    event("base-gate", { ts: "t3", index: 0, green: true }),
+    event("merged", { ts: "t4", taskId: "A", branch: "agent/A" }),
+  ]);
+  assert.equal(reduced.ungatedMerge, true);
+});
+
+test("ungatedMerge counts only events since the latest campaign-start", () => {
+  const reduced = reduceCampaign([...ungatedStart, event("campaign-start", { ts: "t5", waves: [["B"]], slots: 1 })]);
+  assert.equal(reduced.ungatedMerge, false);
+});

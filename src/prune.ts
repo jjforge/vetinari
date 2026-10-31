@@ -14,6 +14,7 @@
  * lives at the edge and this stays trivially testable.
  */
 
+import { resolve } from "node:path";
 import { assertProjectQualifier, repoForProject, resolveProjectRoot, type ResolvedConfig } from "./config.ts";
 import { Refusal } from "./refusal.ts";
 import { describeBranchPurge, purgeBranches, type BranchPurge, type PurgeTarget } from "./merge.ts";
@@ -245,7 +246,7 @@ export interface PruneDeps {
   /** disclose what `--purge` would destroy per dropped member, touching nothing (git edge). */
   describeBranchPurge: (target: PurgeTarget, ids: string[]) => BranchPurge[];
   /** delete each dropped member's agent branch + worktree, then prune — `--purge`'s true drop (git edge). */
-  purgeBranches: (target: Pick<PurgeTarget, "root" | "branchPrefix">, ids: string[]) => void;
+  purgeBranches: (target: Pick<PurgeTarget, "root" | "branchPrefix" | "stateDir">, ids: string[]) => void;
 }
 export const defaultPruneDeps: PruneDeps = {
   readEventLog,
@@ -411,7 +412,9 @@ export async function runPrune(
   let purgeTarget: PurgeTarget | undefined;
   let purged: BranchPurge[] | undefined;
   if (opts.purge) {
-    purgeTarget = { root: deps.rootOf(), baseBranch: cfg.baseBranch, branchPrefix: cfg.branchPrefix };
+    const root = deps.rootOf();
+    // Resolved against the project's root, as the config's relative `.vetinari.local/` is meant.
+    purgeTarget = { root, baseBranch: cfg.baseBranch, branchPrefix: cfg.branchPrefix, stateDir: resolve(root, cfg.stateDir) };
     purged = deps.describeBranchPurge(purgeTarget, dropped);
   }
 

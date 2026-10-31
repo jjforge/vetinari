@@ -94,7 +94,13 @@ test("integrateGreens reports a colliding green with its unmerged paths and the 
   const { dir, git } = repoWithConflictingGreens();
   const parkedDir = join(dir, "parked");
   const log = memoryLogger();
-  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir, log } as unknown as ResolvedConfig;
+  const cfg = {
+    branchPrefix: "agent/",
+    baseBranch: "main",
+    parkedDir,
+    stateDir: join(dir, ".vetinari.local"),
+    log,
+  } as unknown as ResolvedConfig;
   const prevCwd = process.cwd();
   process.chdir(dir);
   try {
@@ -130,7 +136,13 @@ test("integrateGreens fails a merge that stops with no unmerged paths — a held
   const { dir } = repoWithConflictingGreens();
   const parkedDir = join(dir, "parked");
   const log = memoryLogger();
-  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir, log } as unknown as ResolvedConfig;
+  const cfg = {
+    branchPrefix: "agent/",
+    baseBranch: "main",
+    parkedDir,
+    stateDir: join(dir, ".vetinari.local"),
+    log,
+  } as unknown as ResolvedConfig;
   const prevCwd = process.cwd();
   process.chdir(dir);
   writeFileSync(join(dir, ".git", "index.lock"), "");
@@ -157,7 +169,13 @@ test("parkMergeConflict writes a durable parked{conflict} record and event for a
   const dir = mkdtempSync(join(tmpdir(), "vetinari-park-conflict-"));
   const parkedDir = join(dir, "parked");
   const log = memoryLogger();
-  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir, log } as unknown as ResolvedConfig;
+  const cfg = {
+    branchPrefix: "agent/",
+    baseBranch: "main",
+    parkedDir,
+    stateDir: join(dir, ".vetinari.local"),
+    log,
+  } as unknown as ResolvedConfig;
 
   parkMergeConflict(cfg, { taskId: "B", paths: ["f.txt"], base: "abc1234", detail: "CONFLICT (content): Merge conflict in f.txt" });
 
@@ -208,7 +226,13 @@ function repoWithCleanGreens(): { dir: string; git: (args: string[]) => string }
 test("integrateGreens wave-parks a red merged base: leaves the greens merged, does not reset, preserves branches", async () => {
   const { dir, git } = repoWithCleanGreens();
   const log = memoryLogger();
-  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir: join(dir, "parked"), log } as unknown as ResolvedConfig;
+  const cfg = {
+    branchPrefix: "agent/",
+    baseBranch: "main",
+    parkedDir: join(dir, "parked"),
+    stateDir: join(dir, ".vetinari.local"),
+    log,
+  } as unknown as ResolvedConfig;
   const prevCwd = process.cwd();
   process.chdir(dir);
   const preSha = git(["rev-parse", "HEAD"]);
@@ -249,6 +273,7 @@ test("integrateGreens skips the merged-base gate when every green conflicts", as
     branchPrefix: "agent/",
     baseBranch: "main",
     parkedDir: join(dir, "parked"),
+    stateDir: join(dir, ".vetinari.local"),
     log: memoryLogger(),
   } as unknown as ResolvedConfig;
   const prevCwd = process.cwd();
@@ -309,7 +334,13 @@ function repoWithOneBankedGreen(): { dir: string; git: (args: string[]) => strin
 test("integrateGreens skips an already-merged green and lands only the unmerged one (redrive idempotency)", async () => {
   const { dir, git } = repoWithOneBankedGreen();
   const log = memoryLogger();
-  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir: join(dir, "parked"), log } as unknown as ResolvedConfig;
+  const cfg = {
+    branchPrefix: "agent/",
+    baseBranch: "main",
+    parkedDir: join(dir, "parked"),
+    stateDir: join(dir, ".vetinari.local"),
+    log,
+  } as unknown as ResolvedConfig;
   const prevCwd = process.cwd();
   process.chdir(dir);
   try {
@@ -334,7 +365,13 @@ test("integrateGreens skips a green whose branch is already gone, never erroring
   const { dir, git } = repoWithOneBankedGreen();
   git(["branch", "-D", "agent/A"]); // banked and its branch already reclaimed
   const log = memoryLogger();
-  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir: join(dir, "parked"), log } as unknown as ResolvedConfig;
+  const cfg = {
+    branchPrefix: "agent/",
+    baseBranch: "main",
+    parkedDir: join(dir, "parked"),
+    stateDir: join(dir, ".vetinari.local"),
+    log,
+  } as unknown as ResolvedConfig;
   const prevCwd = process.cwd();
   process.chdir(dir);
   try {
@@ -356,7 +393,13 @@ test("integrateGreens recognises an already-merged green — logs `merged` and r
   // freshly-merged `result.merged` (no second merge commit) and rides `result.alreadyMerged`.
   const { dir } = repoWithOneBankedGreen();
   const log = memoryLogger();
-  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir: join(dir, "parked"), log } as unknown as ResolvedConfig;
+  const cfg = {
+    branchPrefix: "agent/",
+    baseBranch: "main",
+    parkedDir: join(dir, "parked"),
+    stateDir: join(dir, ".vetinari.local"),
+    log,
+  } as unknown as ResolvedConfig;
   const prevCwd = process.cwd();
   process.chdir(dir);
   try {
@@ -377,7 +420,13 @@ test("integrateGreens recognises an already-merged green — logs `merged` and r
 test("integrateGreens clears a merged green's parked record — a conflict-parked member that merges cleanly is no longer parked (design §2.5)", async () => {
   const { dir } = repoWithCleanGreens();
   const parkedDir = join(dir, "parked");
-  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir, log: memoryLogger() } as unknown as ResolvedConfig;
+  const cfg = {
+    branchPrefix: "agent/",
+    baseBranch: "main",
+    parkedDir,
+    stateDir: join(dir, ".vetinari.local"),
+    log: memoryLogger(),
+  } as unknown as ResolvedConfig;
   writeParkedRecord(cfg, {
     taskId: "A",
     reason: "conflict",
@@ -399,7 +448,13 @@ test("integrateGreens clears a merged green's parked record — a conflict-parke
 test("integrateGreens clears the parked record of a green recognised as already merged, whatever its reason (design §2.5, §7)", async () => {
   const { dir } = repoWithOneBankedGreen();
   const parkedDir = join(dir, "parked");
-  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir, log: memoryLogger() } as unknown as ResolvedConfig;
+  const cfg = {
+    branchPrefix: "agent/",
+    baseBranch: "main",
+    parkedDir,
+    stateDir: join(dir, ".vetinari.local"),
+    log: memoryLogger(),
+  } as unknown as ResolvedConfig;
   writeParkedRecord(cfg, { taskId: "A", reason: "question", branch: "agent/A", question: "Which way?" });
   const prevCwd = process.cwd();
   process.chdir(dir);
@@ -415,7 +470,13 @@ test("integrateGreens clears the parked record of a green recognised as already 
 test("integrateGreens clears a merged green's record even when the merged base gates red — merged is terminal, red-base writes no per-issue record (design §2.5)", async () => {
   const { dir } = repoWithCleanGreens();
   const parkedDir = join(dir, "parked");
-  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir, log: memoryLogger() } as unknown as ResolvedConfig;
+  const cfg = {
+    branchPrefix: "agent/",
+    baseBranch: "main",
+    parkedDir,
+    stateDir: join(dir, ".vetinari.local"),
+    log: memoryLogger(),
+  } as unknown as ResolvedConfig;
   writeParkedRecord(cfg, {
     taskId: "A",
     reason: "conflict",
@@ -437,7 +498,13 @@ test("integrateGreens clears a merged green's record even when the merged base g
 test("integrateGreens keeps the conflict record of a green that collides again, while clearing the one that merged (design §2.5, §6)", async () => {
   const { dir } = repoWithConflictingGreens();
   const parkedDir = join(dir, "parked");
-  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir, log: memoryLogger() } as unknown as ResolvedConfig;
+  const cfg = {
+    branchPrefix: "agent/",
+    baseBranch: "main",
+    parkedDir,
+    stateDir: join(dir, ".vetinari.local"),
+    log: memoryLogger(),
+  } as unknown as ResolvedConfig;
   writeParkedRecord(cfg, { taskId: "A", reason: "stalled", branch: "agent/A", question: "Stalled." });
   writeParkedRecord(cfg, {
     taskId: "B",
@@ -470,7 +537,13 @@ test("integrateGreens re-gates a wave with no fresh merges when regate is set �
   // set, a still-red base re-parks with reason `red-base`.
   const { dir } = repoWithOneBankedGreen();
   const log = memoryLogger();
-  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir: join(dir, "parked"), log } as unknown as ResolvedConfig;
+  const cfg = {
+    branchPrefix: "agent/",
+    baseBranch: "main",
+    parkedDir: join(dir, "parked"),
+    stateDir: join(dir, ".vetinari.local"),
+    log,
+  } as unknown as ResolvedConfig;
   const prevCwd = process.cwd();
   process.chdir(dir);
   let gateRan = false;
@@ -499,7 +572,13 @@ test("integrateGreens re-gates a wave with no fresh merges when regate is set �
 test("integrateGreens with regate set and a green base does not park — the fix-forward cleared it (design §7, #314)", async () => {
   const { dir } = repoWithOneBankedGreen();
   const log = memoryLogger();
-  const cfg = { branchPrefix: "agent/", baseBranch: "main", parkedDir: join(dir, "parked"), log } as unknown as ResolvedConfig;
+  const cfg = {
+    branchPrefix: "agent/",
+    baseBranch: "main",
+    parkedDir: join(dir, "parked"),
+    stateDir: join(dir, ".vetinari.local"),
+    log,
+  } as unknown as ResolvedConfig;
   const prevCwd = process.cwd();
   process.chdir(dir);
   let gateRan = false;
@@ -542,6 +621,7 @@ test("integrateGreens undoes only the merge whose per-merge check is red and rep
     branchPrefix: "agent/",
     baseBranch: "main",
     parkedDir: join(dir, "parked"),
+    stateDir: join(dir, ".vetinari.local"),
     gates: [{ cmd: "npm test" }, lint],
     log,
   } as unknown as ResolvedConfig;
@@ -594,6 +674,7 @@ test("integrateGreens runs no per-merge check when no gate is flagged perMerge (
     branchPrefix: "agent/",
     baseBranch: "main",
     parkedDir: join(dir, "parked"),
+    stateDir: join(dir, ".vetinari.local"),
     gates: [{ cmd: "make lint" }],
     log,
   } as unknown as ResolvedConfig;
@@ -621,6 +702,7 @@ test("integrateGreens on a redrive whose only green is already on the base runs 
     branchPrefix: "agent/",
     baseBranch: "main",
     parkedDir: join(dir, "parked"),
+    stateDir: join(dir, ".vetinari.local"),
     gates: [lint],
     log,
   } as unknown as ResolvedConfig;
@@ -780,6 +862,7 @@ test("scanTidy reads reachability, fragments, and parked records; applyTidy fold
     logFile: join(dir, "orchestrator.jsonl"),
     fragmentsDir: join(dir, "changelog.d"),
     changelogPath: join(dir, "CHANGELOG.md"),
+    stateDir: join(dir, ".vetinari.local"),
   };
 
   const snap = scanTidy(target);
@@ -862,6 +945,7 @@ test("scanTidy reads wave-parked issues from the event log so their reachable br
     logFile,
     fragmentsDir: join(dir, "changelog.d"),
     changelogPath: join(dir, "CHANGELOG.md"),
+    stateDir: join(dir, ".vetinari.local"),
   };
 
   const snap = scanTidy(target);
@@ -916,6 +1000,7 @@ test("applyTidy leaves a near-miss fragment in place and returns it", () => {
     logFile: join(dir, "orchestrator.jsonl"),
     fragmentsDir: join(dir, "changelog.d"),
     changelogPath: join(dir, "CHANGELOG.md"),
+    stateDir: join(dir, ".vetinari.local"),
   };
   const before = readFileSync(target.changelogPath, "utf8");
   const plan = computeTidy(scanTidy(target));
@@ -1118,6 +1203,81 @@ test("collectWaveChangelog returns the near-misses it left in place and records 
 // A repo with one agent branch carrying unmerged commits and a worktree checked out on
 // it — the state a parked, still-unmerged campaign member leaves behind. `--purge` (and
 // `tidy`) run their branch/worktree true-drop over exactly this.
+// An absolute stateDir outside the repo holding a Copilot directory for each of `ids` (ADR 0024).
+const copilotDirs = (...ids: string[]): string => {
+  const stateDir = mkdtempSync(join(tmpdir(), "vetinari-copilot-state-"));
+  for (const id of ids) mkdirSync(join(stateDir, "copilot", id, "session-state", "s"), { recursive: true });
+  return stateDir;
+};
+
+test("integrateGreens removes the Copilot directory of each merged and already-merged green once the base gates green, leaving others alone (ADR 0024)", async () => {
+  const { dir } = repoWithOneBankedGreen();
+  // A is already merged, B merges now (its directory is missing: a claude run), P is parked elsewhere.
+  const stateDir = copilotDirs("A", "P");
+  const cfg = {
+    branchPrefix: "agent/",
+    baseBranch: "main",
+    parkedDir: join(dir, "parked"),
+    stateDir,
+    log: memoryLogger(),
+  } as unknown as ResolvedConfig;
+  const prevCwd = process.cwd();
+  process.chdir(dir);
+  try {
+    const result = await integrateGreens(cfg, ["A", "B"], { gate: async () => ({ green: true, report: "" }) });
+    assert.deepEqual(result.merged, ["B"]);
+    assert.deepEqual(result.alreadyMerged, ["A"]);
+  } finally {
+    process.chdir(prevCwd);
+  }
+  assert.equal(existsSync(join(stateDir, "copilot", "A")), false);
+  assert.equal(existsSync(join(stateDir, "copilot", "P")), true);
+});
+
+test("integrateGreens keeps a collided green's Copilot directory — its retry resumes the session (ADR 0024)", async () => {
+  const { dir } = repoWithConflictingGreens();
+  const stateDir = copilotDirs("A", "B");
+  const cfg = {
+    branchPrefix: "agent/",
+    baseBranch: "main",
+    parkedDir: join(dir, "parked"),
+    stateDir,
+    log: memoryLogger(),
+  } as unknown as ResolvedConfig;
+  const prevCwd = process.cwd();
+  process.chdir(dir);
+  try {
+    const result = await integrateGreens(cfg, ["A", "B"], { gate: async () => ({ green: true, report: "" }) });
+    assert.deepEqual(result.merged, ["A"]);
+  } finally {
+    process.chdir(prevCwd);
+  }
+  assert.equal(existsSync(join(stateDir, "copilot", "A")), false);
+  assert.equal(existsSync(join(stateDir, "copilot", "B")), true);
+});
+
+test("integrateGreens keeps the merged greens' Copilot directories when the merged base gates red (ADR 0024)", async () => {
+  const { dir } = repoWithCleanGreens();
+  const stateDir = copilotDirs("A", "B");
+  const cfg = {
+    branchPrefix: "agent/",
+    baseBranch: "main",
+    parkedDir: join(dir, "parked"),
+    stateDir,
+    log: memoryLogger(),
+  } as unknown as ResolvedConfig;
+  const prevCwd = process.cwd();
+  process.chdir(dir);
+  try {
+    const result = await integrateGreens(cfg, ["A", "B"], { gate: async () => ({ green: false, report: "red" }) });
+    assert.equal(result.parked?.reason, "red-base");
+  } finally {
+    process.chdir(prevCwd);
+  }
+  assert.equal(existsSync(join(stateDir, "copilot", "A")), true);
+  assert.equal(existsSync(join(stateDir, "copilot", "B")), true);
+});
+
 function repoWithUnmergedAgentBranch(): { dir: string; git: (args: string[]) => string } {
   // Resolved: git lists worktrees by real path, and macOS's tmpdir sits behind a /var symlink.
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "vetinari-purge-")));
@@ -1143,7 +1303,7 @@ function repoWithUnmergedAgentBranch(): { dir: string; git: (args: string[]) => 
 
 test("describeBranchPurge discloses the branch, its unmerged commit count, and its worktree", () => {
   const { dir } = repoWithUnmergedAgentBranch();
-  const target = { root: dir, baseBranch: "main", branchPrefix: "agent/" };
+  const target = { root: dir, baseBranch: "main", branchPrefix: "agent/", stateDir: join(dir, ".vetinari.local") };
 
   const [disclosed] = describeBranchPurge(target, ["701"]);
   assert.equal(disclosed.id, "701");
@@ -1154,7 +1314,7 @@ test("describeBranchPurge discloses the branch, its unmerged commit count, and i
 
 test("describeBranchPurge is a clean no-op for a member with no branch (zero commits, no worktree)", () => {
   const { dir } = repoWithUnmergedAgentBranch();
-  const target = { root: dir, baseBranch: "main", branchPrefix: "agent/" };
+  const target = { root: dir, baseBranch: "main", branchPrefix: "agent/", stateDir: join(dir, ".vetinari.local") };
 
   const [disclosed] = describeBranchPurge(target, ["999"]);
   assert.equal(disclosed.branch, "agent/999");
@@ -1164,7 +1324,7 @@ test("describeBranchPurge is a clean no-op for a member with no branch (zero com
 
 test("purgeBranches deletes the branch and its worktree, then prunes", () => {
   const { dir, git } = repoWithUnmergedAgentBranch();
-  const target = { root: dir, baseBranch: "main", branchPrefix: "agent/" };
+  const target = { root: dir, baseBranch: "main", branchPrefix: "agent/", stateDir: join(dir, ".vetinari.local") };
   assert.ok(git(["branch", "--list", "agent/701"]).length > 0);
   assert.ok(existsSync(join(dir, "wt-701")));
 
@@ -1175,9 +1335,17 @@ test("purgeBranches deletes the branch and its worktree, then prunes", () => {
   assert.ok(!git(["worktree", "list", "--porcelain"]).includes("wt-701")); // pruned
 });
 
+test("purgeBranches removes each purged id's Copilot directory under the target's stateDir, tolerating a missing one (ADR 0024)", () => {
+  const { dir } = repoWithUnmergedAgentBranch();
+  const stateDir = copilotDirs("701", "702");
+  purgeBranches({ root: dir, branchPrefix: "agent/", stateDir }, ["701", "999"]);
+  assert.equal(existsSync(join(stateDir, "copilot", "701")), false);
+  assert.equal(existsSync(join(stateDir, "copilot", "702")), true);
+});
+
 test("purgeBranches on a member with no branch or worktree is a clean no-op, not an error", () => {
   const { dir, git } = repoWithUnmergedAgentBranch();
-  const target = { root: dir, baseBranch: "main", branchPrefix: "agent/" };
+  const target = { root: dir, baseBranch: "main", branchPrefix: "agent/", stateDir: join(dir, ".vetinari.local") };
 
   assert.doesNotThrow(() => purgeBranches(target, ["999"]));
   assert.ok(git(["branch", "--list", "agent/701"]).length > 0); // untouched member survives

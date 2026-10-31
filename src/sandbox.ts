@@ -13,7 +13,7 @@ import type {
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join, posix, resolve, sep } from "node:path";
 import {
   AGENT_ENV_VAR,
@@ -158,7 +158,7 @@ export function sandboxMounts(cfg: ResolvedConfig, cwd: string = process.cwd(), 
   const worktrees = resolve(cwd, cfg.stateDir, "worktrees");
   const copilot =
     agentTaskId !== undefined && agentSelectionFor(cfg).provider === "copilot"
-      ? [{ hostPath: copilotDirFor(cfg, agentTaskId, cwd), sandboxPath: `${SANDBOX_HOME}/.copilot` }]
+      ? [{ hostPath: copilotDirFor(cfg.stateDir, agentTaskId, cwd), sandboxPath: `${SANDBOX_HOME}/.copilot` }]
       : [];
   return [...(cfg.mounts ?? []), { hostPath: worktrees, sandboxPath: worktrees, readonly: true }, ...copilot];
 }
@@ -315,7 +315,7 @@ export const agentFor = (cfg: ResolvedConfig, taskId: string): AgentProvider => 
     case "copilot":
       return resumableCopilot(
         sandcastle.copilot(sel.model, { effort: sel.effort as CopilotOptions["effort"] }),
-        copilotDirFor(cfg, taskId),
+        copilotDirFor(cfg.stateDir, taskId),
       );
     // Cursor's CLI exposes no effort dial, so `sel.effort` is absent — pass none.
     case "cursor":
@@ -330,8 +330,12 @@ export const agentFor = (cfg: ResolvedConfig, taskId: string): AgentProvider => 
  * mounted as the agent container's `~/.copilot` (ADR 0024). Resolved against `cwd` as
  * `sandboxMounts` does, since the config's `stateDir` is relative by default.
  */
-export const copilotDirFor = (cfg: ResolvedConfig, taskId: string, cwd: string = process.cwd()): string =>
-  resolve(cwd, cfg.stateDir, "copilot", taskId);
+export const copilotDirFor = (stateDir: string, taskId: string, cwd: string = process.cwd()): string =>
+  resolve(cwd, stateDir, "copilot", taskId);
+
+/** Remove the issue's Copilot directory — once its branch is dropped (ADR 0024). A missing one is fine. */
+export const removeCopilotDir = (stateDir: string, taskId: string): void =>
+  rmSync(copilotDirFor(stateDir, taskId), { recursive: true, force: true });
 
 /** Single-quote `s` for a POSIX shell, as sandcastle quotes its own command arguments. */
 const shellQuote = (s: string): string => "'" + s.replace(/'/g, "'\\''") + "'";

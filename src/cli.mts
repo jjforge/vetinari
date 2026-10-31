@@ -495,6 +495,7 @@ if (mode === "tidy") {
     baseBranch: c.baseBranch,
     branchPrefix: c.branchPrefix,
     parkedDir: resolve(root, c.parkedDir),
+    stateDir: resolve(root, c.stateDir),
     logFile: resolve(root, c.logFile),
     fragmentsDir: resolve(root, FRAGMENT_DIR),
     changelogPath: resolve(root, "CHANGELOG.md"),

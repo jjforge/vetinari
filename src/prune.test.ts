@@ -562,6 +562,34 @@ test("runPrune --purge deletes each dropped member's branch + worktree after dis
   assert.deepEqual(result.mode === "prune" && result.purged, disclosure);
 });
 
+test("runPrune --purge hands purgeBranches the project's .vetinari.local/ resolved against its root, so the Copilot directories go too (ADR 0024)", async () => {
+  const cfg = harnessCfg();
+  cfg.log.log("campaign-start", { waves: [["101"], ["701"]], slots: 4 });
+  cfg.log.log("wave-start", { index: 0, tasks: ["101"] });
+  cfg.log.log("parked", { taskId: "701", reason: "question" });
+  const relative = { ...cfg, stateDir: ".vetinari.local" } as ResolvedConfig;
+
+  const targets: { stateDir: string }[] = [];
+  await runPrune(
+    relative,
+    "701",
+    { purge: true },
+    {
+      ...defaultPruneDeps,
+      enqueueOutbound: () => {},
+      clearParkedForTasks: () => {},
+      rootOf: () => "/root",
+      describeBranchPurge: () => [],
+      purgeBranches: (t) => void targets.push(t),
+    },
+  );
+
+  assert.deepEqual(
+    targets.map((t) => t.stateDir),
+    ["/root/.vetinari.local"],
+  );
+});
+
 test("runPrune --purge --dry-run discloses the true drop but deletes nothing", async () => {
   const cfg = harnessCfg();
   cfg.log.log("campaign-start", { waves: [["101"], ["701"]], slots: 4 });

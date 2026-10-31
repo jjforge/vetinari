@@ -32,18 +32,33 @@ export function appendActivity(stateDir: string, taskId: string, ev: Orchestrato
  * human-readable transcript at its usual `agent-<taskId>.log` path (so the `tail -f` hint is
  * unchanged) and *additionally* forwards each `raw` stream line through the projector, appending the
  * per-tool-use activity events to `activity-<taskId>.jsonl` as they happen. Callback errors are
- * swallowed by the runner, so a malformed line can never fault a run.
+ * swallowed by the runner, so a malformed line can never fault a run. `onInitSessionId`, when given,
+ * hears the session id a stream's init line names — the loop's channel to a fresh Claude turn's id.
  */
-export function activityLoggingSink(stateDir: string, taskId: string): LoggingOption {
+export function activityLoggingSink(stateDir: string, taskId: string, onInitSessionId?: (sessionId: string) => void): LoggingOption {
   return {
     type: "file",
     path: agentLogPath(stateDir, taskId),
     onAgentStreamEvent: (e: AgentStreamEvent) => {
       if (e.type !== "raw") return;
+      if (onInitSessionId) {
+        const sessionId = initSessionId(e.line);
+        if (sessionId) onInitSessionId(sessionId);
+      }
       for (const ev of projectRawLine(e.line, taskId, e.timestamp.toISOString())) appendActivity(stateDir, taskId, ev);
     },
   };
 }
+
+/** The `session_id` a stream's `{"type":"system","subtype":"init",…}` line names, else undefined. */
+const initSessionId = (line: string): string | undefined => {
+  try {
+    const obj = JSON.parse(line);
+    return obj?.type === "system" && obj.subtype === "init" && typeof obj.session_id === "string" ? obj.session_id : undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 /** The tools whose activity we recover from the raw stream. `Bash` becomes a `sandbox-exec`; the rest
  * are file ops projected to `tool`. A `tool_use` for any other name (e.g. `WebFetch`, an MCP tool) is

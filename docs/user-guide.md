@@ -114,7 +114,7 @@ For a team whose only agent is GitHub Copilot. The shipped image installs the Co
 
 - **The token.** Create a fine-grained personal access token with only the **Copilot Requests** permission and no repository access, and put it in `.vetinari.local/.env` as `COPILOT_GITHUB_TOKEN`. The token goes into the agent's container, so it must not carry repo scopes. `gh auth token` works for a quick local try-out, but that token carries your full `gh` scopes (repo and org access), so a container agent holding it could act on any repository you can. Don't use it for real runs.
 - **The org policy.** The organization or enterprise must enable the **Copilot CLI** policy for the account; without it, every run fails at the agent.
-- **The model.** The default `auto` lets Copilot pick among the models your org allows. Set `agent.model` to pin one your org enables.
+- **The model.** The default `auto` lets Copilot pick among the models your org allows. Set `agent.model` to pin one your org enables. `auto` takes no effort setting; to set `agent.effort`, pin a model.
 - **The config line**, in `vetinari/config.mts`:
 
   ```ts

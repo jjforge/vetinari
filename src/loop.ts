@@ -555,13 +555,23 @@ export async function runLoop(
       initActivityLog(cfg.stateDir, taskId);
       try {
         if (stopped()) throw new StopRequested();
+        // The session id of the turn in flight, when the loop resumed it, and the one a fresh
+        // Claude turn's stream named in its init line — what an idle stall parks with, since
+        // sandcastle's idle-timeout error carries none. Cursor's stream names one the same way,
+        // so only a claude run listens for it.
+        let inFlightSessionId: string | undefined;
+        let claudeInitSessionId: string | undefined;
         const common = {
           agent: agentFor(cfg, taskId),
           completionSignal: [DONE, BLOCKED],
           idleTimeoutSeconds: cfg.idleTimeoutSeconds,
           // Additive to the human-readable agent log: projects the raw run stream into
           // activity-<taskId>.jsonl per tool-use, so the live-tail pane has a structured source (ADR 0015).
-          logging: activityLoggingSink(cfg.stateDir, taskId),
+          logging: activityLoggingSink(
+            cfg.stateDir,
+            taskId,
+            provider === "claude" ? (id: string) => (claudeInitSessionId ??= id) : undefined,
+          ),
         };
         // Start the next turn. A resumable provider resumes the live session with an inline
         // `prompt` — the SAME path the park→answer resume uses (above); `r.resume()` inherits the
@@ -570,24 +580,27 @@ export async function runLoop(
         // non-resumable provider has no session to resume, so the next turn is a FRESH run through
         // the same promptFile path turn 0 uses — re-reading the issue via fetchTask, its prior work
         // visible as commits already on the branch, with `reentry` appended to the issue text (#212).
+        const startTurn = (opts: Record<string, unknown>) => {
+          inFlightSessionId = typeof opts.resumeSession === "string" ? opts.resumeSession : undefined;
+          claudeInitSessionId = undefined;
+          return stoppable(sbx!.run({ ...common, ...opts }));
+        };
         const nextTurn = async (sessionId: string | undefined, prompt: string, reentry: string) => {
           // A stop that landed since the last turn starts no new one — not the nudge, not a red
           // resume (#462). `stoppable` alone would race only after the turn had already begun.
           if (stopped()) throw new StopRequested();
           if (resumable) {
             if (!sessionId) throw new Error("no session id to resume — cannot drive the TDD loop");
-            return stoppable(sbx!.run({ ...common, maxIterations: 1, resumeSession: sessionId, prompt }));
+            return startTurn({ maxIterations: 1, resumeSession: sessionId, prompt });
           }
           const freshTask = await stoppable(Promise.resolve(cfg.fetchTask(taskId)));
-          return stoppable(
-            sbx!.run({ ...common, promptFile: cfg.promptFile, promptArgs: { TASK: `${freshTask}\n\n${reentry}`, PROJECT: cfg.project } }),
-          );
+          return startTurn({ promptFile: cfg.promptFile, promptArgs: { TASK: `${freshTask}\n\n${reentry}`, PROJECT: cfg.project } });
         };
         let r: any;
         try {
           r = entry
-            ? await stoppable(sbx.run({ ...common, maxIterations: 1, resumeSession: entry.resumeSessionId, prompt: entry.answerPrompt }))
-            : await stoppable(sbx.run({ ...common, promptFile: cfg.promptFile, promptArgs: { TASK: task, PROJECT: cfg.project } }));
+            ? await startTurn({ maxIterations: 1, resumeSession: entry.resumeSessionId, prompt: entry.answerPrompt })
+            : await startTurn({ promptFile: cfg.promptFile, promptArgs: { TASK: task, PROJECT: cfg.project } });
 
           // At most one no-signal nudge per run (design §3 step 5).
           let nudged = false;
@@ -725,9 +738,14 @@ export async function runLoop(
           // error, not a result. Without this catch the slot leaves no parked
           // record and the work is unrecoverable.
           if (String(err?.name ?? err?.constructor?.name).includes("Idle")) {
-            // Harvest when the error carries a recoverable session; harvestFindings no-ops when
-            // it does not, so an unrecoverable idle stall skips cleanly (design §3 step 9).
-            await harvestFindings(cfg, sbx, err?.sessionId, common, taskId, "idle");
+            // sandcastle's idle error carries no session id, so fall back to the one the turn in
+            // flight is known by: the id it was resumed with, else the id a fresh turn's provider
+            // chose (Copilot's --session-id), else the one a fresh Claude turn streamed. Harvest
+            // when there is one; harvestFindings no-ops when there is not, so an unrecoverable
+            // idle stall skips cleanly (design §3 step 9).
+            const idleSessionId: string | undefined =
+              err?.sessionId ?? inFlightSessionId ?? common.agent.turnSessionId?.() ?? claudeInitSessionId;
+            await harvestFindings(cfg, sbx, idleSessionId, common, taskId, "idle");
             // A stop during the idle harvest parks `stopped`, not `stalled` — same guard as budget.
             if (stopped()) throw new StopRequested();
             const idleQuestion = "Agent stalled without emitting a signal.";
@@ -735,7 +753,7 @@ export async function runLoop(
               taskId,
               reason: "stalled",
               detail: "idle",
-              sessionId: err?.sessionId,
+              sessionId: idleSessionId,
               branch: sbx.branch,
               question: idleQuestion,
             });

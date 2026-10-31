@@ -770,28 +770,46 @@ test("runLoop preflight does not warn for a resumable provider (its park→answe
 });
 
 // A fake sandbox that drives the provider the way sandcastle's run does: it builds the agent's
-// print command and feeds each stream line through the provider's own parser, taking the turn's
-// session id from the `session_id` events that parser yields. Each turn's lines are scripted.
-const streamingSandbox = (turns: { lines: string[]; green: boolean }[]): FakeSandbox & { commands: string[] } => {
-  const sbx = fakeSandbox(turns.map((t) => ({ green: t.green })));
+// print command and, for each stream line, emits it raw to the run's logging sink and then feeds
+// it through the provider's own parser, taking the turn's session id from the `session_id`
+// events that parser yields. Each turn's lines are scripted; a `throwIdle` turn then dies on the
+// idle timeout, as sandcastle's does after streaming.
+const streamingSandbox = (turns: { lines: string[]; green?: boolean; throwIdle?: boolean }[]): FakeSandbox & { commands: string[] } => {
+  const sbx = fakeSandbox(turns.map((t) => ({ green: t.green, throwIdle: t.throwIdle })));
   const commands: string[] = [];
   const run = sbx.run.bind(sbx);
   return Object.assign(sbx, {
     commands,
     async run(opts: SandboxRunOptions) {
-      await run(opts);
-      const turn = turns[sbx.runCalls.length - 1];
+      const turn = turns[sbx.runCalls.length] ?? { lines: [] };
       commands.push(
         opts.agent.buildPrintCommand({ prompt: opts.prompt ?? "task", dangerouslySkipPermissions: true, resumeSession: opts.resumeSession })
           .command,
       );
       let sessionId: string | undefined;
-      for (const line of turn.lines)
+      const onEvent = (opts.logging as any)?.onAgentStreamEvent;
+      for (const line of turn.lines) {
+        onEvent?.({ type: "raw", line, iteration: 1, timestamp: new Date() });
         for (const ev of opts.agent.parseStreamLine(line)) if (ev.type === "session_id") sessionId = ev.sessionId;
+      }
+      await run(opts);
       return { iterations: [{ sessionId }], commits: [{ sha: "abc" }], completionSignal: DONE, stdout: DONE };
     },
   });
 };
+
+test("runLoop parks a fresh copilot turn's idle stall with the --session-id vetinari started it under", async () => {
+  const cfg = harnessCfg({ agent: { provider: "copilot" } });
+  const delta = JSON.stringify({ type: "assistant.message_delta", data: { deltaContent: "working" } });
+  const sbx = streamingSandbox([{ lines: [delta], throwIdle: true }]);
+
+  const outcome = await silence(() => runLoop(cfg, "42", undefined, undefined, depsFor(sbx)));
+
+  assert.equal(outcome, "parked");
+  const started = / --session-id '([^']+)'$/.exec(sbx.commands[0])?.[1];
+  assert.ok(started, "the fresh turn started under a vetinari-chosen id");
+  assert.equal(listParked(cfg)[0].sessionId, started);
+});
 
 test("runLoop builds its container as the issue's agent run, so a copilot provider gets its Copilot directory (ADR 0024)", async () => {
   const cfg = harnessCfg();
@@ -807,6 +825,29 @@ test("runLoop builds its container as the issue's agent run, so a copilot provid
   await silence(() => runLoop(cfg, "T-1", undefined, undefined, deps));
 
   assert.deepEqual(asked, [{ agentRun: true }]);
+});
+
+// A Claude Code (and Cursor) stream's first line: the init event naming the session.
+const INIT_LINE = JSON.stringify({ type: "system", subtype: "init", session_id: "abc", model: "opus" });
+
+test("runLoop parks a fresh claude turn's idle stall with the session id its stream's init line named", async () => {
+  const cfg = harnessCfg({ agent: { provider: "claude" } });
+  const sbx = streamingSandbox([{ lines: [INIT_LINE], throwIdle: true }]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+
+  assert.equal(outcome, "parked");
+  assert.equal(listParked(cfg)[0].sessionId, "abc");
+});
+
+test("runLoop still parks a fresh cursor turn's idle stall with no session id, though its stream names one the same way", async () => {
+  const cfg = harnessCfg({ agent: { provider: "cursor" }, promptFile: "/prompts/tdd.md" });
+  const sbx = streamingSandbox([{ lines: [INIT_LINE], throwIdle: true }]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+
+  assert.equal(outcome, "parked");
+  assert.equal(listParked(cfg)[0].sessionId, undefined);
 });
 
 test("a copilot turn cut off before its result event still resumes next turn with the --session-id it was started under (ADR 0024)", async () => {
@@ -996,6 +1037,34 @@ test("runLoop harvests an idle stall when the error carries a recoverable sessio
   assert.equal(rep.calls.length, 1);
   assert.equal(rep.calls[0].ctx.source, "idle");
   assert.match(rep.calls[0].finding.summary, /idle/);
+});
+
+test("runLoop parks a resumed turn's idle stall with the session it was resumed with, and harvests on it", async () => {
+  const rep = capturingReporter();
+  const cfg = harnessCfg({ reportFinding: rep.reportFinding });
+  // Turn 0 goes red (session sess-0); the red resume of sess-0 dies idle; then the harvest turn.
+  const sbx = fakeSandbox([{ run: { completionSignal: DONE }, green: false }, { throwIdle: true }, { run: { stdout: ONE_FINDING } }]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+
+  assert.equal(outcome, "parked");
+  const parked = listParked(cfg);
+  assert.equal(parked[0].detail, "idle");
+  assert.equal(parked[0].sessionId, "sess-0");
+  const harvestCall = sbx.runCalls.find((c) => c.prompt === HARVEST_PROMPT);
+  assert.equal(harvestCall?.resumeSession, "sess-0");
+  assert.equal(rep.calls.length, 1);
+});
+
+test("runLoop parks an answered park's resume that stalls idle with the session it resumed", async () => {
+  const cfg = harnessCfg();
+  const sbx = fakeSandbox([{ throwIdle: true }]);
+
+  const entry = { resumeSessionId: "sess-answered", answerPrompt: "Use main." };
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, entry, depsFor(sbx)));
+
+  assert.equal(outcome, "parked");
+  assert.equal(listParked(cfg)[0].sessionId, "sess-answered");
 });
 
 test("runLoop's idle stall with no recoverable session skips the harvest cleanly", async () => {

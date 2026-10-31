@@ -99,6 +99,16 @@ test("a resumed copilot turn continues the session with --resume and passes no -
   assert.doesNotMatch(command, /--session-id/);
 });
 
+test("a copilot provider reports the session id of the turn it last built, even after the stream announced it", () => {
+  const agent = copilotFor();
+  assert.equal(agent.turnSessionId?.(), undefined, "no turn built yet");
+  const fresh = sessionIdArg(agent.buildPrintCommand({ prompt: "do it", dangerouslySkipPermissions: true }).command);
+  agent.parseStreamLine(JSON.stringify({ type: "assistant.message_delta", data: { deltaContent: "hi" } }));
+  assert.equal(agent.turnSessionId?.(), fresh);
+  agent.buildPrintCommand({ prompt: "do it", dangerouslySkipPermissions: true, resumeSession: "abc" });
+  assert.equal(agent.turnSessionId?.(), "abc");
+});
+
 test("copilot's stream parser is sandcastle's: a result line yields its session id", () => {
   const agent = copilotFor();
   assert.deepEqual(agent.parseStreamLine(JSON.stringify({ type: "result", sessionId: "abc", exitCode: 0 })), [

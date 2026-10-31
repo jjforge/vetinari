@@ -296,6 +296,13 @@ export const agentSelectionFor = (cfg: ResolvedConfig): AgentSelection =>
   resolveAgentSelection(cfg.agent, parseAgentOverride(process.env[AGENT_ENV_VAR]));
 
 /**
+ * A sandcastle `AgentProvider` that may also know the session id of the turn it last built —
+ * Copilot does, since vetinari chooses it (`--session-id`). The loop reads it when an idle
+ * timeout cuts a fresh turn off, as sandcastle's idle error carries no session id.
+ */
+export type TurnSessionAgent = AgentProvider & { turnSessionId?: () => string | undefined };
+
+/**
  * Construct the sandcastle `AgentProvider` for this run (ADR 0016). The provider,
  * model and effort are resolved by `resolveAgentSelection` from the project default
  * (`cfg.agent`) with any CLI override read back from `VETINARI_AGENT` layered on top —
@@ -305,7 +312,7 @@ export const agentSelectionFor = (cfg: ResolvedConfig): AgentSelection =>
  * (claude/codex `effort`, pi `--thinking`). `taskId` names the issue whose Copilot
  * directory a copilot provider resumes from (ADR 0024); the other providers ignore it.
  */
-export const agentFor = (cfg: ResolvedConfig, taskId: string): AgentProvider => {
+export const agentFor = (cfg: ResolvedConfig, taskId: string): TurnSessionAgent => {
   const sel = agentSelectionFor(cfg);
   switch (sel.provider) {
     case "claude":
@@ -350,8 +357,11 @@ const shellQuote = (s: string): string => "'" + s.replace(/'/g, "'\\''") + "'";
  * Copilot only reports its session id in its final `result` event, so the turn's id is also
  * announced on its first stream line: a turn cut off before that event still has a resumable id.
  */
-const resumableCopilot = (base: AgentProvider, copilotDir: string): AgentProvider => {
+const resumableCopilot = (base: AgentProvider, copilotDir: string): TurnSessionAgent => {
   const sessionDir = (id: string) => join(copilotDir, "session-state", id);
+  // The id of the turn last built, kept for the whole turn (`unannounced` clears on the first
+  // stream line): what an idle-stalled turn parks with, since sandcastle's idle error carries none.
+  let turnId: string | undefined;
   let unannounced: string | undefined;
   return {
     ...base,
@@ -369,7 +379,7 @@ const resumableCopilot = (base: AgentProvider, copilotDir: string): AgentProvide
     },
     buildPrintCommand(opts) {
       const cmd = base.buildPrintCommand(opts);
-      unannounced = opts.resumeSession ?? randomUUID();
+      unannounced = turnId = opts.resumeSession ?? randomUUID();
       const flag = opts.resumeSession ? "--resume" : "--session-id";
       return { ...cmd, command: `${cmd.command} ${flag} ${shellQuote(unannounced)}` };
     },
@@ -380,5 +390,6 @@ const resumableCopilot = (base: AgentProvider, copilotDir: string): AgentProvide
       unannounced = undefined;
       return [{ type: "session_id", sessionId }, ...events];
     },
+    turnSessionId: () => turnId,
   };
 };

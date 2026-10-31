@@ -237,12 +237,18 @@ export function resolveAgentSelection(
   const supportsEffort = spec.efforts.length > 0;
   if (!supportsEffort && requestedEffort !== undefined)
     throw new Refusal(`agent provider "${provider}" takes no effort setting (its CLI exposes no reasoning-effort dial).`);
-  // Copilot's `auto` model refuses any `--effort` ("does not support reasoning effort
-  // configuration"), so it gets no default effort; one asked for explicitly still passes through.
-  const defaultEffort = provider === "copilot" && model === "auto" ? undefined : DEFAULT_EFFORT;
+  // Copilot's `auto` model refuses any `--effort` but `none` ("does not support reasoning effort
+  // configuration"), so it gets no default effort, and one asked for explicitly is refused here
+  // at preflight rather than inside the container.
+  const copilotAuto = provider === "copilot" && model === "auto";
+  const defaultEffort = copilotAuto ? undefined : DEFAULT_EFFORT;
   const effort = supportsEffort ? (requestedEffort ?? defaultEffort) : undefined;
   if (effort !== undefined && !spec.efforts.includes(effort))
     throw new Refusal(`agent effort "${effort}" is not valid for provider "${provider}". Valid: ${spec.efforts.join(", ")}.`);
+  if (copilotAuto && effort !== undefined && effort !== "none")
+    throw new Refusal(
+      `agent effort "${effort}" can't be used with copilot's "auto" model (Copilot refuses it). Set agent.model to a named model, or drop the effort.`,
+    );
 
   return { provider, model, effort, resumable: isResumableProvider(provider) };
 }

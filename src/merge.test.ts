@@ -417,6 +417,32 @@ test("integrateGreens recognises an already-merged green — logs `merged` and r
   }
 });
 
+test("integrateGreens marks the re-logged `merged` row of an already-merged green alreadyMerged, and leaves a real merge's row unflagged", async () => {
+  // A redrive re-logs `merged` for a green already on the base. The flag is what lets the
+  // reducer tell that re-log from a real merge still awaiting its base gate (ungatedMerge).
+  const { dir } = repoWithOneBankedGreen();
+  const log = memoryLogger();
+  const cfg = {
+    branchPrefix: "agent/",
+    baseBranch: "main",
+    parkedDir: join(dir, "parked"),
+    stateDir: join(dir, ".vetinari.local"),
+    log,
+  } as unknown as ResolvedConfig;
+  const prevCwd = process.cwd();
+  process.chdir(dir);
+  try {
+    await integrateGreens(cfg, ["A", "B"], { gate: async () => ({ green: true, report: "" }) });
+    const rows = log.events.filter((e) => e.event === "merged").map(({ ts: _ts, ...rest }: any) => rest);
+    assert.deepEqual(rows, [
+      { event: "merged", taskId: "A", branch: "agent/A", alreadyMerged: true },
+      { event: "merged", taskId: "B", branch: "agent/B" },
+    ]);
+  } finally {
+    process.chdir(prevCwd);
+  }
+});
+
 test("integrateGreens clears a merged green's parked record — a conflict-parked member that merges cleanly is no longer parked (design §2.5)", async () => {
   const { dir } = repoWithCleanGreens();
   const parkedDir = join(dir, "parked");

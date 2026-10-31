@@ -82,11 +82,14 @@ export interface GreenEvent extends BaseEvent {
   commits: string[];
 }
 
-/** `merged` — the integrator merged a task's green branch onto the base (design §2.1) (merge.ts). */
+/** `merged` — the integrator merged a task's green branch onto the base (design §2.1) (merge.ts).
+ * `alreadyMerged` marks a redrive's re-log of a green already on the base: no merge was made, so
+ * it never counts as a merge awaiting its base gate (`ungatedMerge`, design §7). */
 export interface MergedEvent extends BaseEvent {
   event: "merged";
   taskId: string;
   branch?: string;
+  alreadyMerged?: true;
 }
 
 /** `parked` — a slot parked its task for a human (design §2.1, §2.3): the task, the one-enum

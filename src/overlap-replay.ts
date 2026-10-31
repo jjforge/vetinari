@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { CANONICAL_CONFIG, loadConfig, repoForProject } from "./config.ts";
-import { parseEventLogText, type OrchestratorEvent } from "./event-log.ts";
+import { parseEventLogText } from "./event-log.ts";
 import { defaultFileSet, ticketProse, type FileSetOf } from "./fileset.ts";
 import { GH_LIMITS, withRetry } from "./github.ts";
 import { gitRead } from "./git-read.ts";
@@ -124,7 +124,7 @@ function readCampaigns(root: string): ReplayCampaign[] {
   const campaigns: ReplayCampaign[] = [];
   for (const file of files) {
     let current: ReplayCampaign | undefined;
-    for (const e of parseEventLogText(readFileSync(file, "utf8")) as OrchestratorEvent[]) {
+    for (const e of parseEventLogText(readFileSync(file, "utf8"))) {
       if (e.event === "campaign-start") {
         // `fileKeys` is read untyped: older logs never carry it.
         const fileKeys = (e as unknown as { fileKeys?: Record<string, string[]> }).fileKeys;
@@ -234,14 +234,10 @@ function classifyPair(git: Git, a: Landed, b: Landed): PairVerdict {
 
 /** True when a conflicted `path` falls under file key `key`: the path itself, a path under a
  *  directory key, or any file of a bare key's name. */
-export function keyCoversPath(key: string, path: string): boolean {
+function keyCoversPath(key: string, path: string): boolean {
   if (key.startsWith("*/")) return path === key.slice(2) || path.endsWith(`/${key.slice(2)}`);
   return path === key || path.startsWith(`${key}/`);
 }
-
-/** The repo-relative paths a landed change touched. */
-const changedPaths = (git: Git, l: Landed) =>
-  new Set(git(["diff", "--name-only", "--no-renames", l.base, l.merge]).out.split("\n").filter(Boolean));
 
 /**
  * The campaign's in-campaign dependency closure: for a ticket, every scheduled ticket it is
@@ -282,6 +278,13 @@ export async function replayOverlap(opts: OverlapReplayOptions): Promise<Overlap
   const blockedBy = (id: string) => blockedByCache.get(id) ?? blockedByCache.set(id, tracker.blockedBy(id)).get(id)!;
 
   const clone = scratchClone(root, tmpRoot);
+  /** The repo-relative paths a landed change touched, read once per merge. */
+  const changed = new Map<string, Set<string>>();
+  const changedPaths = (l: Landed) =>
+    changed.get(l.merge) ??
+    changed
+      .set(l.merge, new Set(clone.git(["diff", "--name-only", "--no-renames", l.base, l.merge]).out.split("\n").filter(Boolean)))
+      .get(l.merge)!;
   try {
     for (const [i, c] of campaigns.entries()) {
       scheduled += new Set(c.tickets).size;
@@ -312,14 +315,13 @@ export async function replayOverlap(opts: OverlapReplayOptions): Promise<Overlap
       for (const [n, x] of ids.entries()) {
         for (const y of ids.slice(n + 1)) {
           const shared = [...keys.get(x)!].filter((k) => keys.get(y)!.has(k));
-          // A dependent pair never shares a wave, whatever is waived: nothing to measure.
           if (!shared.length) continue;
+          // A dependent pair never shares a wave, whatever is waived: nothing to measure.
           blockers ??= await campaignBlockers(c.tickets, blockedBy);
           if (blockers(x).has(y) || blockers(y).has(x)) continue;
           let [a, b] = [landed.get(x)!, landed.get(y)!];
           if (a.at > b.at) [a, b] = [b, a];
-          const changedB = changedPaths(clone.git, b);
-          const bothChanged = [...changedPaths(clone.git, a)].filter((p) => changedB.has(p));
+          const bothChanged = [...changedPaths(a)].filter((p) => changedPaths(b).has(p));
           const verdict: PairVerdict = bothChanged.length ? classifyPair(clone.git, a, b) : { kind: "clean" };
           for (const key of shared) {
             const t = tally(key);

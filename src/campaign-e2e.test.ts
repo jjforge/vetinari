@@ -145,18 +145,19 @@ const localCampaignDeps = (
       return 1; // a still-thrown turn → the child `run` would exit non-zero → a failed member
     }
   };
-  const mergedBaseGate = async (c: ResolvedConfig) => {
+  const mergedBaseGate = async (c: ResolvedConfig, perMerge = false) => {
     const sbx = await makeLocalSandbox(c, "campaign-integrate", () => ({ signal: DONE }));
     try {
-      return await runGates(c, sbx, { all: true });
+      return await runGates(c, sbx, { all: true, perMerge });
     } finally {
       await sbx.close();
       execFileSync("git", ["-C", dir, "branch", "-D", `${c.branchPrefix}campaign-integrate`], { stdio: "ignore" });
       execFileSync("git", ["-C", dir, "worktree", "prune"], { stdio: "ignore" });
     }
   };
-  // The per-merge check (#617): the real runGates over the flagged gates, through the same local sandbox.
-  const perMergeGate = (c: ResolvedConfig, flagged: GateSpec[]) => mergedBaseGate({ ...c, gates: flagged });
+  // The per-merge check (#617): the real runGates over the flagged gates, through the same local
+  // sandbox, its rows tagged `perMerge` as production's gatePerMerge tags them (#652).
+  const perMergeGate = (c: ResolvedConfig, flagged: GateSpec[]) => mergedBaseGate({ ...c, gates: flagged }, true);
   // The merged-base gate logs `base-gate` as production's gateMergedBase does — the per-merge
   // check above does not — so a redrive reads this log exactly as it would a real one.
   const gate = async (c: ResolvedConfig, index?: number) => {
@@ -472,6 +473,21 @@ test("scenario 13: a co-wave build break is caught per member — only the secon
     assert.equal(record.question, "Merge of agent/102 fails clash-check — fix it on the base, then `vetinari redrive`.");
     assert.equal(gitOut(dir, ["branch", "--list", "agent/102"]), "agent/102", "the member's work is preserved");
     assert.equal((events.find((e) => e.event === "campaign-parked") as any).reason, "conflict");
+
+    // Each untasked gate-result is tagged as production tags it (#652): a per-merge check's rows
+    // (its `gate` ran only clash-check) carry `perMerge: true`; the merged-base gate's rows do not.
+    const tags: Record<string, boolean[]> = {};
+    let cmds = "";
+    for (const e of events as any[]) {
+      if (e.taskId !== undefined) continue;
+      if (e.event === "gate") cmds = e.cmds.join(" && ");
+      if (e.event === "gate-result") (tags[cmds] ??= []).push(e.perMerge === true);
+    }
+    const perMergeTags = tags["clash-check"] ?? [];
+    const baseGateTags = tags["test -f README.md && clash-check"] ?? [];
+    assert.deepEqual(Object.keys(tags).sort(), ["clash-check", "test -f README.md && clash-check"]);
+    assert.ok(perMergeTags.length >= 2 && perMergeTags.every(Boolean), `per-merge rows tagged: ${perMergeTags}`);
+    assert.ok(baseGateTags.length >= 1 && !baseGateTags.some(Boolean), `merged-base rows untagged: ${baseGateTags}`);
   });
 });
 

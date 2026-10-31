@@ -77,7 +77,7 @@ For each selected issue, read the whole ticket — **title + body + every commen
 files the work will touch, the same way a human would. Then split the cites:
 
 - **Files that already exist in the tree → `Touches:`.** Validate each against the
-  working tree (`git ls-files` / a direct path check); a `Touches:` cite the tree lacks
+  tree the planner reads (`git ls-files --cached --others --exclude-standard`); a `Touches:` cite the tree lacks
   is read as a stale or typo'd note and forbids confidence, so only cite existing paths
   here.
 - **Files the ticket will create → `Creates:`.** New paths that are legitimately absent

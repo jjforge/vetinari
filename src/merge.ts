@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { GateSpec, ResolvedConfig } from "./config.ts";
 import type { Logger } from "./log.ts";
 import { runGates } from "./gate.ts";
-import { makeSandbox } from "./sandbox.ts";
+import { makeSandbox, removeCopilotDir } from "./sandbox.ts";
 import { applyCollect, foldFragments, formatMilestoneDate, FRAGMENT_DIR, type FragmentNearMiss } from "./changelog.ts";
 import { clearParked, listParkedIn, writeParkedRecord } from "./state.ts";
 import { PARK_RECOVERY, recoverySentence } from "./park-recovery.ts";
@@ -313,8 +313,10 @@ export async function integrateGreens(
 
   // Only once the combined result is green: drop the merged branches and let git
   // reclaim their (already-removed) worktree entries. Collided and parked/non-green branches
-  // are never touched here — they stay resumable.
+  // are never touched here — they stay resumable. Every landed green's Copilot directory
+  // (ADR 0024) goes with it: its session has nothing left to resume.
   for (const taskId of merged) gitTry(["branch", "-D", `${cfg.branchPrefix}${taskId}`]);
+  for (const taskId of [...merged, ...alreadyMerged]) removeCopilotDir(cfg.stateDir, taskId);
   gitTry(["worktree", "prune"]);
   cfg.log.log("campaign-integrated", { merged, headSha: git(["rev-parse", "HEAD"]) });
   return { merged, alreadyMerged, conflicts, mergeFailed };
@@ -529,6 +531,8 @@ export interface TidyTarget {
   branchPrefix: string;
   /** absolute path to the project's parked-records directory. */
   parkedDir: string;
+  /** absolute path to the project's `.vetinari.local/`, where each issue's Copilot directory lives. */
+  stateDir: string;
   /** absolute path to the project's orchestrator event log. */
   logFile: string;
   /** absolute path to the project's `changelog.d/` fragment directory. */
@@ -621,6 +625,8 @@ export interface PurgeTarget {
   baseBranch: string;
   /** agent branches are `${branchPrefix}${taskId}`. */
   branchPrefix: string;
+  /** absolute path to the project's `.vetinari.local/`, where each issue's Copilot directory lives. */
+  stateDir: string;
 }
 
 /** What dropping one agent branch destroys — disclosed before `--purge` acts. */
@@ -658,14 +664,15 @@ export function describeBranchPurge(target: PurgeTarget, ids: string[]): BranchP
 /**
  * Delete each id's `${branchPrefix}${id}` branch and its worktree, then prune — the
  * true-drop `tidy` runs on provably-merged branches (`applyTidy`) and `prune --purge`
- * runs on the branches an operator deliberately drops unmerged. A missing branch or
- * worktree is a clean no-op, never an error.
+ * runs on the branches an operator deliberately drops unmerged. Each id's Copilot directory
+ * (ADR 0024) goes too. A missing branch, worktree or directory is a clean no-op, never an error.
  */
-export function purgeBranches(target: Pick<PurgeTarget, "root" | "branchPrefix">, ids: string[]): void {
+export function purgeBranches(target: Pick<PurgeTarget, "root" | "branchPrefix" | "stateDir">, ids: string[]): void {
   for (const id of ids) {
     const branch = `${target.branchPrefix}${id}`;
     removeWorktreeFor(target.root, branch);
     gitTry(["-C", target.root, "branch", "-D", branch]);
+    removeCopilotDir(target.stateDir, id);
   }
   if (ids.length) gitTry(["-C", target.root, "worktree", "prune"]);
 }

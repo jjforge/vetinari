@@ -12,8 +12,9 @@ import type {
 } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { spawnSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
-import { posix, resolve, sep } from "node:path";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { join, posix, resolve, sep } from "node:path";
 import {
   AGENT_ENV_VAR,
   parseAgentOverride,
@@ -97,9 +98,13 @@ declare module "@ai-hero/sandcastle" {
  * lets a parked task resume with its uncommitted work intact — and why git
  * refuses to run when something else already has that branch checked out
  * (a manual review worktree on an agent branch blocks its resume).
+ *
+ * `agentRun` marks the container an issue's agent runs in, as opposed to a gate or baseline
+ * sandbox: only an agent run of a copilot provider mounts that issue's Copilot directory (ADR 0024).
  */
-export async function makeSandbox(cfg: ResolvedConfig, taskId: string) {
-  ensureMountSources(cfg);
+export async function makeSandbox(cfg: ResolvedConfig, taskId: string, { agentRun = false }: { agentRun?: boolean } = {}) {
+  const agentTaskId = agentRun ? taskId : undefined;
+  ensureMountSources(cfg, process.cwd(), agentTaskId);
 
   const branch = `${cfg.branchPrefix}${taskId}`;
   // Preflight (design §3 step 1): git refuses a second worktree on a branch already
@@ -112,9 +117,9 @@ export async function makeSandbox(cfg: ResolvedConfig, taskId: string) {
       `${branch} is already checked out at ${foreign} — remove that worktree before running this issue (one run per issue).`,
     );
 
-  cfg.log.log("sandbox", { taskId, branch, mounts: sandboxMounts(cfg).map((m) => m.hostPath) });
+  cfg.log.log("sandbox", { taskId, branch, mounts: sandboxMounts(cfg, process.cwd(), agentTaskId).map((m) => m.hostPath) });
 
-  return sandcastle.createSandbox(makeSandboxOptions(cfg, taskId));
+  return sandcastle.createSandbox(makeSandboxOptions(cfg, taskId, agentTaskId));
 }
 
 /**
@@ -123,7 +128,7 @@ export async function makeSandbox(cfg: ResolvedConfig, taskId: string) {
  * from `cfg.baseBranch` — sandcastle ignores `baseBranch` when the branch already exists, so
  * a reused branch keeps its commits regardless of what HEAD is currently on.
  */
-export function makeSandboxOptions(cfg: ResolvedConfig, taskId: string): sandcastle.CreateSandboxOptions {
+export function makeSandboxOptions(cfg: ResolvedConfig, taskId: string, agentTaskId?: string): sandcastle.CreateSandboxOptions {
   return {
     branch: `${cfg.branchPrefix}${taskId}`,
     baseBranch: cfg.baseBranch,
@@ -132,7 +137,7 @@ export function makeSandboxOptions(cfg: ResolvedConfig, taskId: string): sandcas
     // `.sandcastle/`, so all ephemeral state lives under one place (default
     // `.vetinari.local/`). Relative to the host repo (cwd), like the orchestrator's.
     stateDir: cfg.stateDir,
-    sandbox: docker({ imageName: cfg.image, mounts: sandboxMounts(cfg) }),
+    sandbox: docker({ imageName: cfg.image, mounts: sandboxMounts(cfg, process.cwd(), agentTaskId) }),
     hooks: cfg.setup?.length
       ? { sandbox: { onSandboxReady: cfg.setup.map((command) => ({ command, timeoutMs: cfg.setupTimeoutMs ?? 300_000 })) } }
       : undefined,
@@ -145,10 +150,17 @@ export function makeSandboxOptions(cfg: ResolvedConfig, taskId: string): sandcas
  * own host path. sandcastle mounts the host `.git` read-write, and each `.git/worktrees/<name>/gitdir`
  * records a host path — without this mount none of them exist in the container, so a
  * `git worktree prune` there deletes every sibling's entry. Read-only keeps siblings untouchable.
+ *
+ * `agentTaskId` names the issue whose agent the container runs (absent for a gate or baseline
+ * sandbox); with a copilot provider its Copilot directory is mounted read-write as `~/.copilot`.
  */
-export function sandboxMounts(cfg: ResolvedConfig, cwd: string = process.cwd()): MountSpec[] {
+export function sandboxMounts(cfg: ResolvedConfig, cwd: string = process.cwd(), agentTaskId?: string): MountSpec[] {
   const worktrees = resolve(cwd, cfg.stateDir, "worktrees");
-  return [...(cfg.mounts ?? []), { hostPath: worktrees, sandboxPath: worktrees, readonly: true }];
+  const copilot =
+    agentTaskId !== undefined && agentSelectionFor(cfg).provider === "copilot"
+      ? [{ hostPath: copilotDirFor(cfg.stateDir, agentTaskId, cwd), sandboxPath: `${SANDBOX_HOME}/.copilot` }]
+      : [];
+  return [...(cfg.mounts ?? []), { hostPath: worktrees, sandboxPath: worktrees, readonly: true }, ...copilot];
 }
 
 /**
@@ -157,8 +169,8 @@ export function sandboxMounts(cfg: ResolvedConfig, cwd: string = process.cwd()):
  * write — and `docker()` itself throws on a missing source before sandcastle's `create` would
  * make the worktrees dir on a first run.
  */
-export function ensureMountSources(cfg: ResolvedConfig, cwd: string = process.cwd()): void {
-  for (const m of sandboxMounts(cfg, cwd)) mkdirSync(resolve(cwd, m.hostPath), { recursive: true });
+export function ensureMountSources(cfg: ResolvedConfig, cwd: string = process.cwd(), agentTaskId?: string): void {
+  for (const m of sandboxMounts(cfg, cwd, agentTaskId)) mkdirSync(resolve(cwd, m.hostPath), { recursive: true });
 }
 
 /** The image's home dir — where sandcastle runs the agent and resolves a `~` in a `sandboxPath`. */
@@ -288,9 +300,10 @@ export const agentSelectionFor = (cfg: ResolvedConfig): AgentSelection =>
  * so a campaign/queue child `run` drives the same agent its parent was launched with,
  * not a silent claude. Then dispatch on the provider name to the matching resumable
  * factory, passing the (already-validated) effort in that provider's own vocabulary
- * (claude/codex `effort`, pi `--thinking`).
+ * (claude/codex `effort`, pi `--thinking`). `taskId` names the issue whose Copilot
+ * directory a copilot provider resumes from (ADR 0024); the other providers ignore it.
  */
-export const agentFor = (cfg: ResolvedConfig) => {
+export const agentFor = (cfg: ResolvedConfig, taskId: string): AgentProvider => {
   const sel = agentSelectionFor(cfg);
   switch (sel.provider) {
     case "claude":
@@ -300,11 +313,70 @@ export const agentFor = (cfg: ResolvedConfig) => {
     case "codex":
       return sandcastle.codex(sel.model, { effort: sel.effort as CodexOptions["effort"] });
     case "copilot":
-      return sandcastle.copilot(sel.model, { effort: sel.effort as CopilotOptions["effort"] });
+      return resumableCopilot(
+        sandcastle.copilot(sel.model, { effort: sel.effort as CopilotOptions["effort"] }),
+        copilotDirFor(cfg.stateDir, taskId),
+      );
     // Cursor's CLI exposes no effort dial, so `sel.effort` is absent — pass none.
     case "cursor":
       return sandcastle.cursor(sel.model);
     case "opencode":
       return sandcastle.opencode(sel.model, { variant: sel.effort as OpenCodeOptions["variant"] });
   }
+};
+
+/**
+ * The issue's Copilot directory on the host — `.vetinari.local/copilot/<task-id>/` by default —
+ * mounted as the agent container's `~/.copilot` (ADR 0024). Resolved against `cwd` as
+ * `sandboxMounts` does, since the config's `stateDir` is relative by default.
+ */
+export const copilotDirFor = (stateDir: string, taskId: string, cwd: string = process.cwd()): string =>
+  resolve(cwd, stateDir, "copilot", taskId);
+
+/** Remove the issue's Copilot directory — once its branch is dropped (ADR 0024). A missing one is fine. */
+export const removeCopilotDir = (stateDir: string, taskId: string): void =>
+  rmSync(copilotDirFor(stateDir, taskId), { recursive: true, force: true });
+
+/** Single-quote `s` for a POSIX shell, as sandcastle quotes its own command arguments. */
+const shellQuote = (s: string): string => "'" + s.replace(/'/g, "'\\''") + "'";
+
+/**
+ * sandcastle's `copilot()` made resumable (ADR 0024). A session is a whole directory tree under
+ * `~/.copilot`, and that is the issue's Copilot directory mounted read-write, so the session
+ * storage only looks there and transfers nothing. A fresh turn names its session with a fresh
+ * `--session-id` uuid (create-or-resume, so never a reused one); a later turn `--resume`s it.
+ * Copilot only reports its session id in its final `result` event, so the turn's id is also
+ * announced on its first stream line: a turn cut off before that event still has a resumable id.
+ */
+const resumableCopilot = (base: AgentProvider, copilotDir: string): AgentProvider => {
+  const sessionDir = (id: string) => join(copilotDir, "session-state", id);
+  let unannounced: string | undefined;
+  return {
+    ...base,
+    captureSessions: true,
+    sessionStorage: {
+      captureToHost: async () => {},
+      resumeIntoSandbox: async () => {},
+      readHostSession: async () => undefined,
+      existsOnHost: async (_cwd, id) => existsSync(sessionDir(id)),
+      hostSessionFilePath: (_cwd, id) => sessionDir(id),
+      findByIdOnHost: async (id) => ({
+        path: existsSync(sessionDir(id)) ? sessionDir(id) : undefined,
+        searchedRoot: join(copilotDir, "session-state"),
+      }),
+    },
+    buildPrintCommand(opts) {
+      const cmd = base.buildPrintCommand(opts);
+      unannounced = opts.resumeSession ?? randomUUID();
+      const flag = opts.resumeSession ? "--resume" : "--session-id";
+      return { ...cmd, command: `${cmd.command} ${flag} ${shellQuote(unannounced)}` };
+    },
+    parseStreamLine(line) {
+      const events = base.parseStreamLine(line);
+      if (unannounced === undefined) return events;
+      const sessionId = unannounced;
+      unannounced = undefined;
+      return [{ type: "session_id", sessionId }, ...events];
+    },
+  };
 };

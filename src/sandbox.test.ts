@@ -36,42 +36,91 @@ const withAgentEnv = <T>(value: string | undefined, fn: () => T): T => {
 
 test("agentFor dispatches to Claude Code by default — the config's/CLI's absence is today's behavior", () => {
   withAgentEnv(undefined, () => {
-    assert.equal(agentFor(cfgWith()).name, "claude-code");
+    assert.equal(agentFor(cfgWith(), "42").name, "claude-code");
   });
 });
 
 test("agentFor dispatches on cfg.agent.provider to the matching sandcastle provider", () => {
   withAgentEnv(undefined, () => {
-    assert.equal(agentFor(cfgWith({ provider: "pi" })).name, "pi");
-    assert.equal(agentFor(cfgWith({ provider: "codex" })).name, "codex");
-    assert.equal(agentFor(cfgWith({ provider: "claude" })).name, "claude-code");
+    assert.equal(agentFor(cfgWith({ provider: "pi" }), "42").name, "pi");
+    assert.equal(agentFor(cfgWith({ provider: "codex" }), "42").name, "codex");
+    assert.equal(agentFor(cfgWith({ provider: "claude" }), "42").name, "claude-code");
   });
 });
 
 test("agentFor reads a VETINARI_AGENT override back, winning over the cfg default — the child-propagation path", () => {
   // cfg says claude, but the parent invocation stamped `--agent pi` onto the env.
   withAgentEnv(JSON.stringify({ provider: "pi" }), () => {
-    assert.equal(agentFor(cfgWith({ provider: "claude" })).name, "pi");
+    assert.equal(agentFor(cfgWith({ provider: "claude" }), "42").name, "pi");
   });
 });
 
 test("agentFor fails fast on an invalid effort for the selected provider (validated before any container)", () => {
   withAgentEnv(undefined, () => {
-    assert.throws(() => agentFor(cfgWith({ provider: "codex", effort: "max" })), /effort/);
+    assert.throws(() => agentFor(cfgWith({ provider: "codex", effort: "max" }), "42"), /effort/);
   });
 });
 
 test("agentFor dispatches to the non-resumable providers too — the loop drives them by fresh re-runs (#212)", () => {
   withAgentEnv(undefined, () => {
-    assert.equal(agentFor(cfgWith({ provider: "copilot" })).name, "copilot");
-    assert.equal(agentFor(cfgWith({ provider: "cursor" })).name, "cursor");
-    assert.equal(agentFor(cfgWith({ provider: "opencode" })).name, "opencode");
+    assert.equal(agentFor(cfgWith({ provider: "cursor" }), "42").name, "cursor");
+    assert.equal(agentFor(cfgWith({ provider: "opencode" }), "42").name, "opencode");
   });
+});
+
+// The Copilot provider for task 42 under an absolute stateDir (ADR 0024).
+const copilotFor = (stateDir = mkdtempSync(join(tmpdir(), "vetinari-copilot-"))) =>
+  withAgentEnv(undefined, () => agentFor({ agent: { provider: "copilot" }, stateDir } as ResolvedConfig, "42"));
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const sessionIdArg = (command: string): string | undefined => / --session-id '([^']*)'$/.exec(command)?.[1];
+
+test("agentFor makes copilot resumable: it captures sessions and carries a sessionStorage (ADR 0024)", () => {
+  const agent = copilotFor();
+  assert.equal(agent.name, "copilot");
+  assert.equal(agent.captureSessions, true);
+  assert.ok(agent.sessionStorage);
+});
+
+test("a fresh copilot turn starts a new session under a fresh --session-id uuid, never a reused one", () => {
+  const agent = copilotFor();
+  const base = "copilot -p 'do it' --output-format json --model 'auto' --allow-all-tools --effort high";
+  const a = agent.buildPrintCommand({ prompt: "do it", dangerouslySkipPermissions: true }).command;
+  const b = agent.buildPrintCommand({ prompt: "do it", dangerouslySkipPermissions: true }).command;
+  assert.match(sessionIdArg(a) ?? "", UUID);
+  assert.match(sessionIdArg(b) ?? "", UUID);
+  assert.notEqual(sessionIdArg(a), sessionIdArg(b));
+  assert.equal(a, `${base} --session-id '${sessionIdArg(a)}'`);
+  assert.doesNotMatch(a, /--resume/);
+});
+
+test("a resumed copilot turn continues the session with --resume and passes no --session-id", () => {
+  const command = copilotFor().buildPrintCommand({ prompt: "do it", dangerouslySkipPermissions: true, resumeSession: "abc" }).command;
+  assert.equal(command, "copilot -p 'do it' --output-format json --model 'auto' --allow-all-tools --effort high --resume 'abc'");
+  assert.doesNotMatch(command, /--session-id/);
+});
+
+test("copilot's stream parser is sandcastle's: a result line yields its session id", () => {
+  const agent = copilotFor();
+  assert.deepEqual(agent.parseStreamLine(JSON.stringify({ type: "result", sessionId: "abc", exitCode: 0 })), [
+    { type: "session_id", sessionId: "abc" },
+  ]);
+});
+
+test("copilot's sessionStorage finds a session only once its session-state dir exists in .vetinari.local/copilot/<task-id>/", async () => {
+  const stateDir = mkdtempSync(join(tmpdir(), "vetinari-copilot-"));
+  const storage = copilotFor(stateDir).sessionStorage!;
+  const dir = join(stateDir, "copilot", "42", "session-state", "abc");
+  assert.equal(await storage.existsOnHost("/elsewhere", "abc"), false);
+  assert.equal(storage.hostSessionFilePath("/elsewhere", "abc"), dir);
+  assert.equal((await storage.findByIdOnHost("abc")).path, undefined);
+  mkdirSync(dir, { recursive: true });
+  assert.equal(await storage.existsOnHost("/elsewhere", "abc"), true);
+  assert.equal((await storage.findByIdOnHost("abc")).path, dir);
 });
 
 test("agentFor reads a non-resumable provider back from the env override", () => {
   withAgentEnv(JSON.stringify({ provider: "cursor" }), () => {
-    assert.equal(agentFor(cfgWith()).name, "cursor");
+    assert.equal(agentFor(cfgWith(), "42").name, "cursor");
   });
 });
 
@@ -119,6 +168,36 @@ test("ensureMountSources creates every mount source, the worktrees dir included,
   assert.ok(existsSync(cache));
   // A second run finds them already there and still succeeds.
   ensureMountSources(cfg, root);
+});
+
+test("a copilot agent run mounts the issue's Copilot directory read-write at ~/.copilot, and creates it first (ADR 0024)", () => {
+  const root = mkdtempSync(join(tmpdir(), "vetinari-mounts-"));
+  const cfg = sandboxCfg({ stateDir: "/s", agent: { provider: "copilot" } });
+  assert.deepEqual(
+    withAgentEnv(undefined, () => sandboxMounts(cfg, "/r", "42")),
+    [
+      { hostPath: "/s/worktrees", sandboxPath: "/s/worktrees", readonly: true },
+      { hostPath: "/s/copilot/42", sandboxPath: "/home/agent/.copilot" },
+    ],
+  );
+  // A relative stateDir resolves against the project root, as the worktrees mount does.
+  const rel = sandboxCfg({ stateDir: ".vetinari.local", agent: { provider: "copilot" } });
+  withAgentEnv(undefined, () => ensureMountSources(rel, root, "42"));
+  assert.ok(existsSync(join(root, ".vetinari.local", "copilot", "42")));
+});
+
+test("only a copilot agent run gets a Copilot directory: not a claude run, nor a gate or baseline sandbox", () => {
+  const root = mkdtempSync(join(tmpdir(), "vetinari-mounts-"));
+  const claude = sandboxCfg({ stateDir: ".vetinari.local", agent: { provider: "claude" } });
+  const copilot = sandboxCfg({ stateDir: ".vetinari.local", agent: { provider: "copilot" } });
+  withAgentEnv(undefined, () => {
+    assert.ok(!sandboxMounts(claude, root, "42").some((m) => m.sandboxPath === "/home/agent/.copilot"));
+    // The gate and baseline sandboxes are not agent runs, so they name no issue.
+    assert.ok(!sandboxMounts(copilot, root).some((m) => m.sandboxPath === "/home/agent/.copilot"));
+    ensureMountSources(claude, root, "42");
+    ensureMountSources(copilot, root);
+  });
+  assert.ok(!existsSync(join(root, ".vetinari.local", "copilot")));
 });
 
 // `git worktree list --porcelain` blocks: a `worktree <path>` line then a `branch <ref>`

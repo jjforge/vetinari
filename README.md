@@ -63,8 +63,8 @@ every project, with or without a `node_modules`. The rest of this page calls it 
 
 Needs Docker, Node 22.15+, and one agent-provider credential. Vetinari is
 **provider-agnostic** (ADR 0016): a run or campaign executes on **Claude Code**
-(the default), **pi**, or **Codex** — all resumable, so a parked question resumes
-the same session — or on the experimental Copilot / Cursor / OpenCode. Put the
+(the default), **pi**, **Codex**, or **GitHub Copilot** — all resumable, so a parked
+question resumes the same session — or on the experimental Cursor / OpenCode. Put the
 selected provider's key in `.vetinari.local/.env`, the one file that crosses into
 the agent container; the exhaustive key list is in
 [`docs/reference.md`](docs/reference.md).

@@ -234,7 +234,7 @@ test("runLoop nudges a no-signal turn once on the same session instead of parkin
 });
 
 test("runLoop nudges a non-resumable provider's no-signal turn as a fresh run carrying the issue text and the nudge", async () => {
-  const cfg = harnessCfg({ agent: { provider: "copilot" }, promptFile: "/prompts/tdd.md", postComment: async () => {} });
+  const cfg = harnessCfg({ agent: { provider: "cursor" }, promptFile: "/prompts/tdd.md", postComment: async () => {} });
   const sbx = fakeSandbox([{ run: {} }, { run: { completionSignal: DONE, commits: [{ sha: "abc123" }] }, green: true }]);
 
   const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
@@ -740,19 +740,19 @@ const captureWarn = async <T>(fn: () => Promise<T>): Promise<{ result: T; warnin
 };
 
 test("runLoop preflight warns once when a non-resumable provider has no postComment (a park could not be answered)", async () => {
-  const cfg = harnessCfg({ agent: { provider: "copilot" }, promptFile: "/prompts/tdd.md" });
+  const cfg = harnessCfg({ agent: { provider: "cursor" }, promptFile: "/prompts/tdd.md" });
   const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc" }] }, green: true }]);
 
   const { warnings } = await captureWarn(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
 
   const preflight = warnings.filter((w) => /postComment/.test(w));
   assert.equal(preflight.length, 1, "the preflight warning is printed exactly once");
-  assert.match(preflight[0], /copilot/);
+  assert.match(preflight[0], /cursor/);
   assert.match(preflight[0], /park/);
 });
 
 test("runLoop preflight does not warn when a non-resumable provider HAS postComment configured (the answer path works)", async () => {
-  const cfg = harnessCfg({ agent: { provider: "copilot" }, promptFile: "/prompts/tdd.md", postComment: async () => {} });
+  const cfg = harnessCfg({ agent: { provider: "cursor" }, promptFile: "/prompts/tdd.md", postComment: async () => {} });
   const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc" }] }, green: true }]);
 
   const { warnings } = await captureWarn(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
@@ -769,10 +769,68 @@ test("runLoop preflight does not warn for a resumable provider (its parkâ†’answe
   assert.equal(warnings.filter((w) => /postComment/.test(w)).length, 0);
 });
 
+// A fake sandbox that drives the provider the way sandcastle's run does: it builds the agent's
+// print command and feeds each stream line through the provider's own parser, taking the turn's
+// session id from the `session_id` events that parser yields. Each turn's lines are scripted.
+const streamingSandbox = (turns: { lines: string[]; green: boolean }[]): FakeSandbox & { commands: string[] } => {
+  const sbx = fakeSandbox(turns.map((t) => ({ green: t.green })));
+  const commands: string[] = [];
+  const run = sbx.run.bind(sbx);
+  return Object.assign(sbx, {
+    commands,
+    async run(opts: SandboxRunOptions) {
+      await run(opts);
+      const turn = turns[sbx.runCalls.length - 1];
+      commands.push(
+        opts.agent.buildPrintCommand({ prompt: opts.prompt ?? "task", dangerouslySkipPermissions: true, resumeSession: opts.resumeSession })
+          .command,
+      );
+      let sessionId: string | undefined;
+      for (const line of turn.lines)
+        for (const ev of opts.agent.parseStreamLine(line)) if (ev.type === "session_id") sessionId = ev.sessionId;
+      return { iterations: [{ sessionId }], commits: [{ sha: "abc" }], completionSignal: DONE, stdout: DONE };
+    },
+  });
+};
+
+test("runLoop builds its container as the issue's agent run, so a copilot provider gets its Copilot directory (ADR 0024)", async () => {
+  const cfg = harnessCfg();
+  const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc" }] }, green: true }]);
+  const asked: unknown[] = [];
+  const deps = depsFor(sbx, {
+    makeSandbox: async (_cfg, _taskId, opts) => {
+      asked.push(opts);
+      return sbx;
+    },
+  });
+
+  await silence(() => runLoop(cfg, "T-1", undefined, undefined, deps));
+
+  assert.deepEqual(asked, [{ agentRun: true }]);
+});
+
+test("a copilot turn cut off before its result event still resumes next turn with the --session-id it was started under (ADR 0024)", async () => {
+  const cfg = harnessCfg({ agent: { provider: "copilot" } });
+  // Turn 0 streams some text but never Copilot's final `result` event (sandcastle's completion timeout).
+  const delta = JSON.stringify({ type: "assistant.message_delta", data: { deltaContent: DONE } });
+  const sbx = streamingSandbox([
+    { lines: [delta], green: false },
+    { lines: [delta], green: true },
+  ]);
+
+  const outcome = await silence(() => runLoop(cfg, "42", undefined, undefined, depsFor(sbx)));
+
+  assert.equal(outcome, "green");
+  const started = / --session-id '([^']+)'$/.exec(sbx.commands[0])?.[1];
+  assert.ok(started, "turn 0 starts a session under a vetinari-chosen id");
+  assert.equal(sbx.runCalls[1].resumeSession, started);
+  assert.match(sbx.commands[1], new RegExp(` --resume '${started}'$`));
+});
+
 test("runLoop drives a non-resumable provider by a FRESH re-run each red turn â€” no resumeSession, no 'no session id' throw", async () => {
   let fetched = 0;
   const cfg = harnessCfg({
-    agent: { provider: "copilot" },
+    agent: { provider: "cursor" },
     promptFile: "/prompts/tdd.md",
     fetchTask: async () => {
       fetched++;
@@ -800,7 +858,7 @@ test("runLoop drives a non-resumable provider by a FRESH re-run each red turn â€
 });
 
 test("runLoop's fresh re-run carries only the most-recent turn summary, not the full history", async () => {
-  const cfg = harnessCfg({ agent: { provider: "copilot" }, promptFile: "/prompts/tdd.md" });
+  const cfg = harnessCfg({ agent: { provider: "cursor" }, promptFile: "/prompts/tdd.md" });
   const sbx = fakeSandbox([
     { run: { completionSignal: DONE, stdout: "<turn-summary>First slice.</turn-summary>" }, green: false },
     { run: { completionSignal: DONE, stdout: "<turn-summary>Second slice.</turn-summary>" }, green: false },
@@ -815,7 +873,7 @@ test("runLoop's fresh re-run carries only the most-recent turn summary, not the 
 });
 
 test("runLoop parks (stalled: budget) for a one-shot non-resumable run (maxTurns 1) whose only turn is red", async () => {
-  const cfg = harnessCfg({ agent: { provider: "copilot" }, maxTurns: 1, promptFile: "/prompts/tdd.md" });
+  const cfg = harnessCfg({ agent: { provider: "cursor" }, maxTurns: 1, promptFile: "/prompts/tdd.md" });
   const sbx = fakeSandbox([{ run: { completionSignal: DONE }, green: false }]);
 
   const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
@@ -1308,7 +1366,7 @@ test("a merge-conflict retry resumes the green's session with the conflict promp
 });
 
 test("a merge-conflict retry on a non-resumable provider re-enters fresh on the kept branch with the conflict prompt added to the issue text (#624)", async () => {
-  const cfg = harnessCfg({ agent: { provider: "copilot" }, promptFile: "/prompts/tdd.md", fetchTask: async () => "task text" });
+  const cfg = harnessCfg({ agent: { provider: "cursor" }, promptFile: "/prompts/tdd.md", fetchTask: async () => "task text" });
   const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc123" }] }, green: true }]);
   const prompt = mergeConflictPrompt(["src/a.ts"], "f00dfeed", "main");
 
@@ -1363,7 +1421,7 @@ test("runLoop consumes an answered parked record for a non-resumable provider â€
   const posted: { taskId: string; body: string }[] = [];
   let fetched = 0;
   const cfg = harnessCfg({
-    agent: { provider: "copilot" },
+    agent: { provider: "cursor" },
     promptFile: "/prompts/tdd.md",
     postComment: async (taskId: string, body: string) => {
       posted.push({ taskId, body });

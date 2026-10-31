@@ -1545,7 +1545,7 @@ test("redrive runs a crashed member fresh when its branch has no commits (design
 test("redrive runs a crashed member fresh when the provider is non-resumable, even with commits (design §7)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-nonresumable-"));
   const cfg = harnessCfg(dir);
-  (cfg as { agent?: unknown }).agent = { provider: "copilot" }; // non-resumable
+  (cfg as { agent?: unknown }).agent = { provider: "cursor" }; // non-resumable
   const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   seedCrashWithSession(cfg);
 

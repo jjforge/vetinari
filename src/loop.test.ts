@@ -770,28 +770,46 @@ test("runLoop preflight does not warn for a resumable provider (its park→answe
 });
 
 // A fake sandbox that drives the provider the way sandcastle's run does: it builds the agent's
-// print command and feeds each stream line through the provider's own parser, taking the turn's
-// session id from the `session_id` events that parser yields. Each turn's lines are scripted.
-const streamingSandbox = (turns: { lines: string[]; green: boolean }[]): FakeSandbox & { commands: string[] } => {
-  const sbx = fakeSandbox(turns.map((t) => ({ green: t.green })));
+// print command and, for each stream line, emits it raw to the run's logging sink and then feeds
+// it through the provider's own parser, taking the turn's session id from the `session_id`
+// events that parser yields. Each turn's lines are scripted; a `throwIdle` turn then dies on the
+// idle timeout, as sandcastle's does after streaming.
+const streamingSandbox = (turns: { lines: string[]; green?: boolean; throwIdle?: boolean }[]): FakeSandbox & { commands: string[] } => {
+  const sbx = fakeSandbox(turns.map((t) => ({ green: t.green, throwIdle: t.throwIdle })));
   const commands: string[] = [];
   const run = sbx.run.bind(sbx);
   return Object.assign(sbx, {
     commands,
     async run(opts: SandboxRunOptions) {
-      await run(opts);
-      const turn = turns[sbx.runCalls.length - 1];
+      const turn = turns[sbx.runCalls.length] ?? { lines: [] };
       commands.push(
         opts.agent.buildPrintCommand({ prompt: opts.prompt ?? "task", dangerouslySkipPermissions: true, resumeSession: opts.resumeSession })
           .command,
       );
       let sessionId: string | undefined;
-      for (const line of turn.lines)
+      const onEvent = (opts.logging as any)?.onAgentStreamEvent;
+      for (const line of turn.lines) {
+        onEvent?.({ type: "raw", line, iteration: 1, timestamp: new Date() });
         for (const ev of opts.agent.parseStreamLine(line)) if (ev.type === "session_id") sessionId = ev.sessionId;
+      }
+      await run(opts);
       return { iterations: [{ sessionId }], commits: [{ sha: "abc" }], completionSignal: DONE, stdout: DONE };
     },
   });
 };
+
+test("runLoop parks a fresh copilot turn's idle stall with the --session-id vetinari started it under", async () => {
+  const cfg = harnessCfg({ agent: { provider: "copilot" } });
+  const delta = JSON.stringify({ type: "assistant.message_delta", data: { deltaContent: "working" } });
+  const sbx = streamingSandbox([{ lines: [delta], throwIdle: true }]);
+
+  const outcome = await silence(() => runLoop(cfg, "42", undefined, undefined, depsFor(sbx)));
+
+  assert.equal(outcome, "parked");
+  const started = / --session-id '([^']+)'$/.exec(sbx.commands[0])?.[1];
+  assert.ok(started, "the fresh turn started under a vetinari-chosen id");
+  assert.equal(listParked(cfg)[0].sessionId, started);
+});
 
 test("runLoop builds its container as the issue's agent run, so a copilot provider gets its Copilot directory (ADR 0024)", async () => {
   const cfg = harnessCfg();

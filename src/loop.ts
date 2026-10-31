@@ -731,9 +731,10 @@ export async function runLoop(
           // record and the work is unrecoverable.
           if (String(err?.name ?? err?.constructor?.name).includes("Idle")) {
             // sandcastle's idle error carries no session id, so fall back to the one the turn in
-            // flight is known by. Harvest when there is one; harvestFindings no-ops when there is
+            // flight is known by: the id it was resumed with, else the id a fresh turn's provider
+            // chose (Copilot's --session-id). Harvest when there is one; harvestFindings no-ops when there is
             // not, so an unrecoverable idle stall skips cleanly (design §3 step 9).
-            const idleSessionId: string | undefined = err?.sessionId ?? inFlightSessionId;
+            const idleSessionId: string | undefined = err?.sessionId ?? inFlightSessionId ?? common.agent.turnSessionId?.();
             await harvestFindings(cfg, sbx, idleSessionId, common, taskId, "idle");
             // A stop during the idle harvest parks `stopped`, not `stalled` — same guard as budget.
             if (stopped()) throw new StopRequested();

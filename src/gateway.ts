@@ -834,8 +834,11 @@ export async function supervisePolls(
     for (const conn of toStart) {
       const controller = new AbortController();
       active.set(conn.token, controller);
-      // A loop that ends on its own leaves `active`, so the next pass restarts it.
+      // A loop that ends on its own leaves `active`, so the next pass restarts it, and
+      // its signal fires, so whatever it registered (its `/healthz` entry) is dropped
+      // even if its token is gone before that pass.
       const ended = () => {
+        controller.abort();
         if (active.get(conn.token) === controller) active.delete(conn.token);
       };
       start(conn, controller.signal, offsets.get(conn.token) ?? 0).then((reached) => {

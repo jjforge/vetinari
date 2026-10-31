@@ -842,6 +842,23 @@ test("trackPollTicks records a poll loop's start and each returned cycle, and dr
   assert.doesNotMatch(JSON.stringify(health), /SECRET/, "no field carries a token");
 });
 
+test("a poll loop that ends on its own leaves /healthz once its token is deregistered before the next pass", async () => {
+  const ticks = newGatewayTicks(HEALTH_NOW);
+  const { started, start } = recordingStart();
+  const tracked = (conn: TgConn, signal: AbortSignal, offset: number) => {
+    trackPollTicks(ticks, conn, signal, async (_c, o) => ({ offset: o, messages: [] }));
+    return start(conn, signal, offset);
+  };
+
+  await supervisePolls(
+    scriptedTargets([[{ token: "111:SECRET", chat: "-1" }], []]),
+    tracked,
+    ticksDoing(() => started[0].fail(new Error("boom"))),
+  );
+
+  assert.deepEqual([...ticks.polls.keys()], [], "the crashed loop's bot is no longer reported");
+});
+
 test("parkRecoveryMove prints the exact move each reason asks of the human", () => {
   // question/stalled keep their Telegram framing — the reply is a Telegram action.
   assert.equal(parkRecoveryMove("question", "640"), "Reply to this message to answer.");

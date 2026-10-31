@@ -25,6 +25,7 @@ import {
   newOutboxBackoff,
   newPendingConfirms,
   newReplyIndex,
+  outboxSend,
   campaignParkMove,
   parkRecoveryMove,
   parseGatewayCommand,
@@ -1617,6 +1618,26 @@ test("drainOutbox skips a project with no connection, leaving its records unsent
 
   assert.equal(sends.length, 0, "nothing is sent when the project has no bot");
   assert.equal(listOutboxIn(outboxDirOf(base))[0].sentAt, undefined, "the record stays unsent");
+});
+
+test("outboxSend logs a failed send's telegram-send-failed row to the logger it was given", async (t) => {
+  const saved = globalThis.fetch;
+  globalThis.fetch = (async () => ({
+    status: 500,
+    json: async () => ({ ok: false, error_code: 500, description: "down" }),
+  })) as unknown as typeof fetch;
+  t.after(() => {
+    globalThis.fetch = saved;
+  });
+  const logger = memoryLogger();
+
+  const sent = await outboxSend(logger)({ token: "111:SECRET", chat: "-1" }, "GREEN");
+
+  assert.equal(sent, undefined);
+  assert.deepEqual(
+    (logger.events as unknown as Record<string, unknown>[]).map((e) => e.event),
+    ["telegram-send-failed"],
+  );
 });
 
 // The skip row is a host-log event outside the typed `OrchestratorEvent` union — read it as a plain row.

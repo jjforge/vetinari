@@ -887,7 +887,8 @@ export function rebuildIndex(projects: GatewayProject[]): ReplyIndex {
 /**
  * When the gateway's loops last completed a pass — the mutable record `/healthz` reads.
  * `announce` is the last announce pass that did not throw; `polls` holds one entry per
- * running poll loop, keyed by token, dropped when the supervisor tears the loop down.
+ * running poll loop, keyed by token, dropped when the loop's signal fires — the supervisor
+ * aborts it both when it tears the loop down and when the loop ends on its own.
  * Times are epoch ms; `null` means "not yet".
  */
 export interface GatewayTicks {
@@ -921,7 +922,8 @@ export function gatewayHealth(ticks: GatewayTicks, now: number) {
 /**
  * Wire one poll loop into `ticks`: record its start now, wrap its `poll` so every
  * returned cycle (a failed poll included — `tgPoll` logs it, backs off, and returns an empty batch)
- * stamps `lastPoll`, and drop its entry when the supervisor aborts the loop.
+ * stamps `lastPoll`, and drop its entry when the loop's signal fires (the supervisor aborts it
+ * on teardown and when the loop ends on its own, so a crashed loop's bot never lingers).
  */
 export function trackPollTicks(
   ticks: GatewayTicks,
@@ -1015,9 +1017,15 @@ async function announcePending(configDir: string, index: ReplyIndex, logger: Log
 async function drainOutboxes(configDir: string, backoff: OutboxBackoff, logger: Logger = hostLogger()): Promise<void> {
   for (const p of loadGatewayProjects(configDir)) {
     if (!p.outbox.some((r) => r.sentAt == null)) continue;
-    await drainOutbox(p, (conn, text, replyTo, onFailure) => tgSend(conn, text, undefined, replyTo, onFailure), logger, backoff);
+    await drainOutbox(p, outboxSend(logger), logger, backoff);
   }
 }
+
+/** The outbox drain's real send: `tgSend` with the drain's own logger, so a failed send's `telegram-send-failed` row lands beside the drain's rows. */
+export const outboxSend =
+  (logger: Logger): Parameters<typeof drainOutbox>[1] =>
+  (conn, text, replyTo, onFailure) =>
+    tgSend(conn, text, logger, replyTo, onFailure);
 
 /**
  * Every registered project paired with whether it currently has a running

@@ -150,6 +150,7 @@ export function makeSandboxOptions(cfg: ResolvedConfig, taskId: string, agentTas
  * own host path. sandcastle mounts the host `.git` read-write, and each `.git/worktrees/<name>/gitdir`
  * records a host path — without this mount none of them exist in the container, so a
  * `git worktree prune` there deletes every sibling's entry. Read-only keeps siblings untouchable.
+ * Worktrees outside `<stateDir>/worktrees` are not mounted, so only `git worktree lock` protects them.
  *
  * `agentTaskId` names the issue whose agent the container runs (absent for a gate or baseline
  * sandbox); with a copilot provider its Copilot directory is mounted read-write as `~/.copilot`.

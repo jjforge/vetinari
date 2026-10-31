@@ -168,7 +168,7 @@ The agent can reach only its branch. Everything else goes through the orchestrat
 
 ## Rules that were paid for
 
-- **Never two runs of one issue.** One branch, one worktree. A review worktree you leave on `agent/<id>` blocks that issue's resume until you remove it.
+- **Never two runs of one issue.** One branch, one worktree. A review worktree you leave on `agent/<id>` blocks that issue's resume until you remove it. Lock any worktree you keep outside `.vetinari.local/worktrees` with `git worktree lock <path>`: an agent container sees the host's whole `.git`, and a `git worktree prune` run there deletes the entry of every worktree whose path it can't see. A locked entry survives.
 - **Share package caches; never share build outputs.** Caches are safe to mount into every container and are the single biggest speed-up. A shared build directory turns parallelism back into lock contention.
 - **Keep the gates fast, cheapest first.** List gates from cheapest to most expensive — generate/format, then lint, then tests: the first failing command stops the gate and goes back to the agent, so a lint error found in seconds should not wait behind a full test run. Every second a gate takes is paid on every turn of every agent and again on every merged-base gate, and vetinari tells you when a gate has slowed down (a [slow gate](#where-you-see-things)). Fast usually means:
   - **Throwaway test databases need no durability.** Turn fsync off for them.

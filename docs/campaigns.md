@@ -14,8 +14,9 @@ moves and the invariants; for the exhaustive flag and mode list see
 - **Select** — a numeric token is an issue id; a non-numeric token is a **label**,
   expanded to the open issues carrying it. Tokens mix freely, so
   `campaign 436 ready-for-agent` unions the explicit id with the label's issues.
-- **Plan** — the selection is layered by tracker dependencies, then each layer is
-  split so no two issues in a wave touch the same file (the two invariants below).
+- **Plan** — the issues are placed one at a time, most-colliding first, each in
+  the earliest wave after its blockers that shares no file with it (the two
+  invariants below).
   `campaign --dry-run <selection>` prints the plan and runs nothing — the way to
   inspect a plan before committing to it. It closes with each selected issue's
   resolved file-set and `confident` verdict, so a triager sees what the planner reads

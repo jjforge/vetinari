@@ -4,9 +4,9 @@
  * waves; `campaign --dry-run` stops after and prints the plan.
  *
  * Waves come from the `blockedBy` graph restricted to the selected set (the
- * shared `restrictBlockers` foundation `prune` also uses): wave 0 is the tickets
- * with no OPEN in-set blocker, and a ticket enters wave W once all its blockers
- * sit in earlier waves. A closed blocker never reaches the resolver, so it does
+ * shared `restrictBlockers` foundation `prune` also uses) and the tickets' file
+ * keys: a ticket goes in the earliest wave after all its blockers' waves that
+ * shares no file key with it, most-colliding tickets placed first. A closed blocker never reaches the resolver, so it does
  * not gate. An OPEN blocker outside the selected set makes its dependent
  * unreachable — it is reported and dropped (along with everything that in turn
  * depends on it), never scheduled silently.

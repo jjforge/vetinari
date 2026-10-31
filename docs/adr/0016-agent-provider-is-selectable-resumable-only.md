@@ -27,6 +27,8 @@ the `maxTurns` ceiling, host budget, and the green / empty-green / `BLOCKED` /
 budget-park outcomes — is identical to a resumable run. A one-shot agent is simply
 `maxTurns 1`, not a separate mode.
 
+Copilot has since become resumable through a mounted per-issue Copilot directory (ADR 0024).
+
 One gap remains: a non-resumable run that `BLOCKED`-parks has no session to resume,
 so its question cannot yet be **answered** — the park→answer path for these
 providers (posting the human's reply as an issue comment) is a separable follow-up.

@@ -257,7 +257,7 @@ Every item is placed by three questions — scope (host / project / run), secret
 
 `vetinari/tsconfig.json` (committed) extends `.vetinari.local/tsconfig.json` (machine-local, kept pointing at the running install by the CLI), so a project's config type-checks with no install of its own.
 
-Invariants: the container gate is exactly one file; the gateway persists none of the project layers; `hostEnv` values are non-secret. `init` scaffolds the layout; `migrate` moves a pre-layout project once and does not accumulate shims for later renames (§13.1).
+Invariants: the container gate is exactly one file; the gateway persists none of the project layers; `hostEnv` values are non-secret. A Copilot agent run also mounts its issue's `.vetinari.local/copilot/<task-id>/` read-write at `~/.copilot`: the agent's own session state, like its worktree, holding no credential (ADR 0024). It is removed when the issue's branch is dropped (merged, or purged by `prune --purge` / `tidy --apply`). `init` scaffolds the layout; `migrate` moves a pre-layout project once and does not accumulate shims for later renames (§13.1).
 
 ## 10. Communications
 
@@ -301,8 +301,8 @@ The user guide names three properties as the value. This table sorts every curre
 | `statusline`, `statusline install/uninstall` | optional | an editor integration; its own doc |
 | `changelog collect` + fragment fold at merge | **core** | the merge-conflict fix for a shared changelog: agents write `changelog.d/<id>.md`, the integrator folds a wave's fragments in one commit; enabled when the project has a `CHANGELOG.md`. The separate section-lint and its shell tests are what can go |
 | `onIssueMerged` (label hop), `reportFinding` (harvest), `postComment` | hook (as today) | tracker workflow stays behind seams |
-| Agent providers: `claude`, `pi`, `codex` | core seam | resumable; park → answer works |
-| Providers `copilot`, `cursor`, `opencode` | optional, **experimental** | non-resumable; a park cannot be answered without `postComment`; Copilot's setup is in the guide, Cursor and OpenCode stay out of it until the loop is whole |
+| Agent providers: `claude`, `pi`, `codex`, `copilot` | core seam | resumable; park → answer works. Copilot keeps its session in the issue's `.vetinari.local/copilot/<task-id>/`, mounted at `~/.copilot` (ADR 0024); its setup is in the guide |
+| Providers `cursor`, `opencode` | optional, **experimental** | non-resumable; a park cannot be answered without `postComment`; they stay out of the guide until the loop is whole |
 | Telegram `destinations`/`notify` routing | optional | the one-chat default is the documented path; routing is reference |
 | Live tail / activity stream | core | answers "what is it doing right now" — the question every operator asks first; live-only |
 | Archived runs | core | "come back and see what happened" |

@@ -59,17 +59,6 @@ export const handleEvents: RouteHandler = (req, res, url, deps) => {
     return true;
   }
   openEventConnections++;
-  res.writeHead(200, {
-    "content-type": "text/event-stream; charset=utf-8",
-    "cache-control": "no-cache",
-    connection: "keep-alive",
-  });
-  // Opening handshake: flush the headers so the client's stream opens, carry the
-  // reconnect hint, and — because it runs before the watchers are armed below in
-  // the same synchronous pass — guarantee a client that has seen a frame is
-  // watching a live stream.
-  res.write("retry: 3000\n: connected\n\n");
-
   const watchers: FSWatcher[] = [];
   // Per-project character offset into its live log — where this connection last read.
   const offsets = new Map<string, number>();
@@ -94,6 +83,31 @@ export const handleEvents: RouteHandler = (req, res, url, deps) => {
   let hostOffset = 0;
   let hostPending: string[] = [];
   let hostTimer: ReturnType<typeof setTimeout> | undefined;
+
+  // Release the slot on `close` however the handler exits — registered before any work that can
+  // throw (the headers, the registry read, a malformed pointer, a watcher arming), so a throw
+  // after admission can't hold its slot for good. Teardown covers only what was set up by then:
+  // the collections start empty, so a part never reached closes nothing. `once`, so a repeated
+  // `close` can't release the slot twice and drift the count below the connections actually open.
+  req.once("close", () => {
+    openEventConnections--;
+    for (const watcher of watchers) watcher.close();
+    for (const timer of timers.values()) clearTimeout(timer);
+    for (const timer of tailTimers.values()) clearTimeout(timer);
+    if (hostTimer) clearTimeout(hostTimer);
+    res.end();
+  });
+
+  res.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+  });
+  // Opening handshake: flush the headers so the client's stream opens, carry the
+  // reconnect hint, and — because it runs before the watchers are armed below in
+  // the same synchronous pass — guarantee a client that has seen a frame is
+  // watching a live stream.
+  res.write("retry: 3000\n: connected\n\n");
 
   const readLog = (logFile: string): string => {
     try {
@@ -239,15 +253,5 @@ export const handleEvents: RouteHandler = (req, res, url, deps) => {
   // `{ project, events }` shape is kept, sent empty since nothing reads it.
   if (!res.writableEnded) res.write(`data: ${JSON.stringify({ project: null, events: [] })}\n\n`);
 
-  // `once`, so a repeated `close` can't release the slot twice and drift the count below
-  // the connections actually open.
-  req.once("close", () => {
-    openEventConnections--;
-    for (const watcher of watchers) watcher.close();
-    for (const timer of timers.values()) clearTimeout(timer);
-    for (const timer of tailTimers.values()) clearTimeout(timer);
-    if (hostTimer) clearTimeout(hostTimer);
-    res.end();
-  });
   return true;
 };

@@ -13,7 +13,8 @@ not its *behaviour*: they pass whether or not the rule is correct.
 
 We model that mapping as **pure TS reducers in `dashboard-visual-state.ts`, unit-
 tested in node** with real assertions. The gate stays node-only (`npx tsx --test
-src/*.test.ts`) — no jsdom, no CDP, no browser. A reducer takes state and returns
+src/*.test.ts`) — no jsdom, no CDP, no browser, with one exception: a DOM shim run
+in node (`happy-dom`, see below) may test the client glue. A reducer takes state and returns
 the visual intent (a class fragment, or an `{updatedText}` object); the render code
 and the browser glue call it and apply the result, but never re-decide. Today:
 `dotClass` and `tallyDotClass` (the dot/idle class decisions), `hiddenPastCap` (the
@@ -31,6 +32,17 @@ scope, browser-safe JS only — so `.toString()` yields a runnable definition. E
 inlining carries the one-line `__name = (fn) => fn` shim in case a bundling build
 ever leaves esbuild's `keepNames` wrapper on the source (a no-op under the current
 `tsx` runtime, which emits clean source).
+
+**The exception: a DOM shim in node tests the client glue.** Some client behaviour is
+not a state→visual decision at all — it is wiring: which `fetch` a click or a blur
+sends, with what body; whether a native `<dialog>` opens and what lands in it; where
+the page navigates on the route's answer. No reducer can reach that, so it went
+unverified while tests only searched the scripts' text. A `happy-dom` window run in
+node (`src/dashboard-dom.test-support.ts`) loads a rendered page with a stubbed
+`fetch` and runs its real inline script, so a test drives real clicks and reads the
+calls, the navigation and the DOM. It is still the node gate — no browser, no CDP —
+and it never replaces a reducer test: a state→visual rule still lives in a reducer
+and is asserted there; the shim covers only the glue around it.
 
 ## Consequences
 

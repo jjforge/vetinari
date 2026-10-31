@@ -16,21 +16,19 @@ python3 summary.py # aggregates
 
 Blockers and file keys are rebuilt from **today's** issue bodies, because `campaign-start` records only wave ids. The simulated wave model matched real wall clock (gaps removed) within 5% in 88 of 102 campaigns.
 
-## 2. `collide/`: would tickets that share a file really have conflicted?
+## 2. Would tickets that share a file really have conflicted? — now the `/review-logs` config lens
 
-Needs a mirror clone of each project in `collide/repos/<project>.git`:
+The `collide/` scripts that answered this were ported to TypeScript and removed (commit `41835a6`). The method lives in `src/overlap-replay.ts`, parametrised to one project, with no mirror clone: it test-merges in a temporary `git clone --shared`. `/review-logs` runs it as its **config lens** through `skills/review-logs/overlap.mts`; run it by hand with:
 
 ```sh
-cd scripts/replay/collide
-git clone --mirror --shared ~/Code/<project> repos/<project>.git
-python3 collide.py   # test-merges each overlapping pair's real changes → pairs.json
-python3 analyze.py   # joins dependencies, models parks per 100 merges → pairs_annot.json
-python3 show.py <project> <campaign-start> <a> <b>   # print one pair's conflict hunks
+npx tsx skills/review-logs/overlap.mts <projectRoot>
 ```
 
-`semantic.py` typechecks combined trees of cleanly merged vetinari pairs (slow). The weakest part of the method: a ticket that branched after the other merged and can't apply without it is counted as "entangled", which is a proxy for a collision.
+Unlike `collide/`, a ticket that branched after the other merged and can't apply without it is counted as **indeterminate** and left out of the collision rate, instead of being counted as an "entangled" collision.
 
 ## 3. `retrysim/`: savings once each collision gets one in-wave retry
+
+`retrysim/` can't run any more: it reads `collide/`'s `pairs_annot.json`, and `collide/` was removed in commit `41835a6`. Check that commit out to rerun it:
 
 ```sh
 python3 scripts/replay/retrysim/retrysim.py   # reads ../replay and ../collide outputs
@@ -38,4 +36,4 @@ python3 scripts/replay/retrysim/retrysim.py   # reads ../replay and ../collide o
 
 ## Using it for a project's config
 
-To decide whether a project should waive a file (`waivedFiles`) or opt in to looser overlap, run 1 → 2 → 3 on that project's archive. Then read its collision rate by path from `pairs_annot.json` and its saving from `retrysim`.
+To decide whether a project should waive a file (`waivedFiles`), run `/review-logs` in that project: its config lens measures each shared file key's collision rate from the project's own history and suggests waive candidates and hot spots. Whether a project should opt in to looser overlap is not covered yet.

@@ -441,7 +441,7 @@ test("resolveAgentSelection gives copilot's auto model no default effort, which 
 });
 
 test("resolveAgentSelection accepts the Copilot CLI's full effort list and refuses one outside it, listing all seven", () => {
-  assert.equal(resolveAgentSelection({ provider: "copilot", effort: "xhigh" }).effort, "xhigh");
+  assert.equal(resolveAgentSelection({ provider: "copilot", model: "gpt-5.4", effort: "xhigh" }).effort, "xhigh");
   assert.equal(resolveAgentSelection({ provider: "copilot", effort: "none" }).effort, "none");
   assert.throws(
     () => resolveAgentSelection({ provider: "copilot", effort: "ultra" }),
@@ -453,6 +453,27 @@ test("resolveAgentSelection accepts the Copilot CLI's full effort list and refus
       return true;
     },
   );
+});
+
+test("resolveAgentSelection refuses an effort other than none with copilot's auto model, naming the fix", () => {
+  for (const effort of ["high", "low", "max"]) {
+    assert.throws(
+      () => resolveAgentSelection({ provider: "copilot", effort }),
+      (e: Error) => {
+        assert.ok(e instanceof Refusal);
+        assert.equal(
+          e.message,
+          `agent effort "${effort}" can't be used with copilot's "auto" model (Copilot refuses it). Set agent.model to a named model, or drop the effort.`,
+        );
+        return true;
+      },
+    );
+  }
+  // An explicit override of the model to auto refuses too.
+  assert.throws(() => resolveAgentSelection({ provider: "copilot", model: "gpt-5.4" }, { model: "auto", effort: "high" }), Refusal);
+  assert.equal(resolveAgentSelection({ provider: "copilot", effort: "none" }).effort, "none");
+  assert.equal(resolveAgentSelection({ provider: "copilot" }).effort, undefined);
+  assert.equal(resolveAgentSelection({ provider: "copilot", model: "gpt-5.4", effort: "high" }).effort, "high");
 });
 
 test("resolveAgentSelection flags the resumable providers resumable:true", () => {

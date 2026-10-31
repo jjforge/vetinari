@@ -21,8 +21,12 @@ Within a milestone each bold section label appears at most once.
 
 ### Collected changes — October 31, 2026
 
+**Breaking changes:**
+- [api] `agentFor(cfg, taskId)` now takes the task id: a Copilot provider backs its session storage with that issue's `.vetinari.local/copilot/<task-id>/`. A caller of the exported `agentFor(cfg)` passes the issue id it runs (#645).
+
 **New features:**
 - [user] The shipped images now install the GitHub Copilot CLI (`@github/copilot`), so `agent: { provider: "copilot" }` runs in a container built from the `vetinari init` Dockerfile, this repo's own, or the jjforge example (#646). Rebuild with `vetinari build` to pick it up.
+- [user] GitHub Copilot now keeps its session, like Claude: gate fixes continue the conversation, an answered park resumes it with no `postComment` needed, a crash with commits resumes on its branch, and its findings are harvested and filed. Each issue's Copilot state lives in `.vetinari.local/copilot/<task-id>/`, mounted at `~/.copilot` into that issue's agent container (it holds no credential), and is removed when the issue merges or is purged by `prune --purge` / `tidy --apply` (#645, ADR 0024).
 
 **Improvements:**
 - [user] On macOS, `vetinari gateway install` and `gateway status|start|stop|restart` now refuse (exit 4) with a pointer to running `vetinari gateway` in a terminal (or `vetinari status` for the dashboard alone), instead of writing a systemd unit nothing reads or failing on a missing `systemctl` (#647).

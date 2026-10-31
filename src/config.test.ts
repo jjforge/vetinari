@@ -17,6 +17,7 @@ import {
   ownerRepoFromRemote,
   parseAgentFlags,
   missingCredentials,
+  missingCredentialsRefusal,
   VETINARI_SECRET_KEYS,
   refuseVetinariSecretsInEnv,
   nonResumableAnswerWarning,
@@ -574,6 +575,33 @@ test("missingCredentials treats a present-but-empty assignment as absent", () =>
   assert.deepEqual(missingCredentials("codex", envPath), AGENT_PROVIDERS.codex.credentialKeys);
 });
 
+test("missingCredentials reads keys as the container does: a spaced key counts, an exported one does not", () => {
+  const envPath = join(scratch(), ".env");
+  writeFileSync(envPath, "CLAUDE_CODE_OAUTH_TOKEN = x\n");
+  assert.deepEqual(missingCredentials("claude", envPath), []);
+  writeFileSync(envPath, "export CLAUDE_CODE_OAUTH_TOKEN=x\n");
+  assert.deepEqual(missingCredentials("claude", envPath), AGENT_PROVIDERS.claude.credentialKeys);
+  writeFileSync(envPath, "CLAUDE_CODE_OAUTH_TOKEN=\n");
+  assert.deepEqual(missingCredentials("claude", envPath), AGENT_PROVIDERS.claude.credentialKeys);
+});
+
+test("missingCredentialsRefusal names the provider's keys and the .env path", () => {
+  assert.equal(
+    missingCredentialsRefusal("claude", "/w/.vetinari.local/.env", "OPENAI_API_KEY=sk\n"),
+    `agent provider "claude" has no credentials in /w/.vetinari.local/.env — ` +
+      `set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY there before launching (preflight, ADR 0016).`,
+  );
+});
+
+test("missingCredentialsRefusal tells the user to drop `export` from a credential the container reads as a different key", () => {
+  assert.equal(
+    missingCredentialsRefusal("claude", "/w/.vetinari.local/.env", "export CLAUDE_CODE_OAUTH_TOKEN=x\n"),
+    `agent provider "claude" has no credentials in /w/.vetinari.local/.env — ` +
+      `set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY there before launching (preflight, ADR 0016). ` +
+      "`.env` writes CLAUDE_CODE_OAUTH_TOKEN with `export`, which the container reads as a different key — drop `export`.",
+  );
+});
+
 test("refuseVetinariSecretsInEnv refuses a .env naming the bot token, even with an empty value", () => {
   const envPath = join(scratch(), ".env");
   writeFileSync(envPath, "CLAUDE_CODE_OAUTH_TOKEN=x\nVETINARI_TELEGRAM_BOT_TOKEN=\n");
@@ -594,6 +622,18 @@ test("refuseVetinariSecretsInEnv refuses an exported, quoted chat id", () => {
     () => refuseVetinariSecretsInEnv(envPath),
     (e: unknown) => e instanceof Refusal && e.message.includes("secret VETINARI_TELEGRAM_CHAT_ID —"),
   );
+});
+
+test("refuseVetinariSecretsInEnv refuses a secret key written with a space or tab before =", () => {
+  const envPath = join(scratch(), ".env");
+  for (const body of ["VETINARI_TELEGRAM_BOT_TOKEN =\n", "VETINARI_TELEGRAM_BOT_TOKEN\t=x\n"]) {
+    writeFileSync(envPath, body);
+    assert.throws(
+      () => refuseVetinariSecretsInEnv(envPath),
+      (e: unknown) => e instanceof Refusal && e.message.includes("secret VETINARI_TELEGRAM_BOT_TOKEN —"),
+      JSON.stringify(body),
+    );
+  }
 });
 
 test("refuseVetinariSecretsInEnv names every secret in one refusal, in file order", () => {

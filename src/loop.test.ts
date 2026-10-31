@@ -998,6 +998,34 @@ test("runLoop harvests an idle stall when the error carries a recoverable sessio
   assert.match(rep.calls[0].finding.summary, /idle/);
 });
 
+test("runLoop parks a resumed turn's idle stall with the session it was resumed with, and harvests on it", async () => {
+  const rep = capturingReporter();
+  const cfg = harnessCfg({ reportFinding: rep.reportFinding });
+  // Turn 0 goes red (session sess-0); the red resume of sess-0 dies idle; then the harvest turn.
+  const sbx = fakeSandbox([{ run: { completionSignal: DONE }, green: false }, { throwIdle: true }, { run: { stdout: ONE_FINDING } }]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+
+  assert.equal(outcome, "parked");
+  const parked = listParked(cfg);
+  assert.equal(parked[0].detail, "idle");
+  assert.equal(parked[0].sessionId, "sess-0");
+  const harvestCall = sbx.runCalls.find((c) => c.prompt === HARVEST_PROMPT);
+  assert.equal(harvestCall?.resumeSession, "sess-0");
+  assert.equal(rep.calls.length, 1);
+});
+
+test("runLoop parks an answered park's resume that stalls idle with the session it resumed", async () => {
+  const cfg = harnessCfg();
+  const sbx = fakeSandbox([{ throwIdle: true }]);
+
+  const entry = { resumeSessionId: "sess-answered", answerPrompt: "Use main." };
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, entry, depsFor(sbx)));
+
+  assert.equal(outcome, "parked");
+  assert.equal(listParked(cfg)[0].sessionId, "sess-answered");
+});
+
 test("runLoop's idle stall with no recoverable session skips the harvest cleanly", async () => {
   const rep = capturingReporter();
   const cfg = harnessCfg({ reportFinding: rep.reportFinding });

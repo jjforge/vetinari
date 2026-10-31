@@ -3,7 +3,7 @@
 // a gap it slept through, and pure machine-noise after connect must still push nothing (#331).
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync, appendFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, appendFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EventEmitter } from "node:events";
@@ -194,4 +194,27 @@ test("a refused live-update request neither takes nor frees a slot", (t) => {
   for (let i = 0; i < 16; i++) assert.equal(openConn(t, configDir).res.statusCode, 200, `fresh connection ${i + 1} is admitted`);
 
   assertRefused(openConn(t, configDir).res);
+});
+
+test("a live-update connection that throws after admission still frees its slot on close", (t) => {
+  const { configDir } = seed([]);
+  // A pointer that parses but isn't an object: `listProjects` returns it unchecked, so the
+  // handler throws on `pointer.baseLocation` after the connection has been admitted.
+  const badPointer = join(configDir, "registry", "bad.json");
+  writeFileSync(badPointer, "null");
+  for (let i = 0; i < 16; i++) {
+    const req = connReq();
+    assert.throws(() => handleEvents(req as never, resSpy() as never, new URL("http://x/api/events"), depsFor(configDir)));
+    // The real server's route-error path destroys the response, which fires the request's `close`.
+    req.emit("close");
+  }
+  rmSync(badPointer);
+
+  const { res } = openConn(t, configDir);
+
+  assert.equal(res.statusCode, 200);
+  assert.ok(
+    res.chunks.some((c) => c.includes(": connected")),
+    "the healthy client gets the SSE handshake",
+  );
 });

@@ -38,11 +38,11 @@ config, but left to the mode's own arguments like any other token.
 | `tidy [--apply] [--all]` | reconcile the drift a by-hand fix-forward or merge leaks (ADR 0013): fold orphaned changelog.d/ fragments whose issue is merged, GC agent/<id> branches + worktrees that are PROVABLY reachable from the base, and clear parked records for issues now merged. Never touches an unmerged, parked, or conflicted branch. Dry-run by default (prints what it would do); --apply acts. --all sweeps every registered project, not just this one, and drops duplicate-projectRoot registry pointers (keeping the canonical .vetinari.local one) |
 | `answer <task> <text>` | resume a parked task with a human answer |
 | `gateway` | the host daemon fronting every registered project: the sole Telegram consumer and sender — announces parked questions, routes replies to the right project+task, and resumes them concurrently via the shared install. Also recognizes `prune <issue>` (and `prune <project> <issue>` when several campaigns run on one bot): previews the closure and prunes the resolved project on a `yes` reply to the preview |
-| `gateway install [--dry-run]` | write the host-level systemd unit for THIS install to ~/.config/systemd/user/vetinari-gateway.service, with a fully absolute node + tsx-loader + cli ExecStart — no bash -lc, env, npx, or PATH dependency, so it starts under systemd's clean environment (fixes the nvm/fnm/mise/asdf crash-loop). Re-run after a node/tsx upgrade (--dry-run to print the unit and write nothing) |
-| `gateway status` | show whether the host gateway service is running — wraps `systemctl --user status vetinari-gateway --no-pager` and propagates its exit code. A missing/uninstalled service (or absent systemctl) points you at `gateway install` rather than a raw failure |
-| `gateway start` | start the host gateway service — `systemctl --user start vetinari-gateway` (the unit `gateway install` wrote) |
-| `gateway stop` | stop the host gateway service — `systemctl --user stop vetinari-gateway` |
-| `gateway restart` | restart the host gateway service so it serves the current code (tsx compiles at startup, so a restart is how merged changes go live) — `systemctl --user restart vetinari-gateway`, then reports is-active |
+| `gateway install [--dry-run]` | write the host-level systemd unit for THIS install to ~/.config/systemd/user/vetinari-gateway.service, with a fully absolute node + tsx-loader + cli ExecStart — no bash -lc, env, npx, or PATH dependency, so it starts under systemd's clean environment (fixes the nvm/fnm/mise/asdf crash-loop). Re-run after a node/tsx upgrade (--dry-run to print the unit and write nothing). Linux (systemd) only — on macOS it refuses with a pointer to running `vetinari gateway` in a terminal |
+| `gateway status` | show whether the host gateway service is running — wraps `systemctl --user status vetinari-gateway --no-pager` and propagates its exit code. A missing/uninstalled service (or absent systemctl) points you at `gateway install` rather than a raw failure. Linux (systemd) only — refuses on macOS |
+| `gateway start` | start the host gateway service — `systemctl --user start vetinari-gateway` (the unit `gateway install` wrote). Linux (systemd) only — refuses on macOS |
+| `gateway stop` | stop the host gateway service — `systemctl --user stop vetinari-gateway`. Linux (systemd) only — refuses on macOS |
+| `gateway restart` | restart the host gateway service so it serves the current code (tsx compiles at startup, so a restart is how merged changes go live) — `systemctl --user restart vetinari-gateway`, then reports is-active. Linux (systemd) only — refuses on macOS |
 | `host log [-n <count>] [--tail] [--json]` | read the persistent host log (<gatewayConfigDir>/logs/host.jsonl) at the terminal — the host/gateway diagnostics that land nowhere a per-project feed shows. Prints the most recent events newest-first, one human-readable line each; -n bounds the window (default 50). --json passes the raw JSONL through untouched (for jq/grep); --tail (or -f) follows live, printing new events as they append. Reads the file directly, so no daemon need be running — a missing host.jsonl prints "no host log yet" and exits clean |
 | `parked` | list parked tasks and their questions |
 | `clear` | archive the run log (parked records are kept), resetting the dashboard/status line to idle (automatic on clean campaign completion; this forces it now) |
@@ -68,7 +68,7 @@ config, but left to the mode's own arguments like any other token.
 not a refusal. An unknown mode prints the usage text on **stderr** and exits `4`.
 
 **Exception:** `gateway status|start|stop|restart` pass `systemctl`'s own exit code
-straight through (which can be `3`), so those verbs do not follow this table — which is
+straight through (which can be `3`) (on Linux; on macOS they refuse with exit 4), so those verbs do not follow this table — which is
 why a refusal is `4` and not `3`.
 
 ## Configuration fields

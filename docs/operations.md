@@ -297,6 +297,11 @@ These wrap `systemctl --user … vetinari-gateway`; gateway detail goes to
 `journalctl --user -u vetinari-gateway`. Do not also run an inline `gateway &`,
 or the two consumers fight over the bot's updates.
 
+**On macOS** there is no systemd, so `gateway install` and the `status|start|stop|restart`
+verbs refuse (exit `4`) with a pointer instead of writing a unit nothing reads. Run
+`vetinari gateway` in a terminal (Telegram relay and dashboard), or `vetinari status` for
+the dashboard alone; either stops when that terminal closes.
+
 ### Verifying the round-trip
 
 **Prove the credentials** with `tg-test`. It reads `VETINARI_TELEGRAM_BOT_TOKEN`

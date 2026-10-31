@@ -1171,6 +1171,43 @@ test("a prune that empties a started wave does not make the next, unstarted wave
   assert.deepEqual(replanned.waves, [["1"], ["4", "3"]]);
 });
 
+test("a wave whose wave-start named members that have not spawned yet (slot-starved) counts as started (#635)", () => {
+  const reduced = reduceCampaign([
+    event("campaign-start", { ts: "t0", waves: [["1"], ["2", "3"], ["4"]], slots: 1 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["1"] }),
+    event("wave-done", { ts: "t2", index: 0, merged: ["1"] }),
+    event("wave-start", { ts: "t3", index: 1, tasks: ["2", "3"] }),
+    // Only one slot: 2 is waiting for it and 3 never spawned.
+    event("spawn", { ts: "t4", taskId: "2", running: 1, left: 1 }),
+  ]);
+  assert.equal(reduced.startedWaves, 2);
+});
+
+test("a graceful stop's held wave, with no wave-start, is not counted as started (#635)", () => {
+  const reduced = reduceCampaign([
+    event("campaign-start", { ts: "t0", waves: [["1"], ["2"], ["3"]], slots: 2 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["1"] }),
+    event("wave-done", { ts: "t2", index: 0, merged: ["1"] }),
+    event("campaign-parked", { ts: "t3", index: 1, reason: "stopped" }),
+  ]);
+  assert.equal(reduced.startedWaves, 1);
+});
+
+test("an older log's wave-start with no tasks still marks its wave's members started (#635)", () => {
+  // The legacy `campaign-batch` rename yields a `wave-start` with no `tasks` array.
+  const legacyWaveStart = { ...event("wave-start", { ts: "t3", index: 1, tasks: [] }), tasks: undefined } as never;
+  const events = [
+    event("campaign-start", { ts: "t0", waves: [["1"], ["2"], ["3"]], slots: 2 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["1"] }),
+    event("wave-done", { ts: "t2", index: 0, merged: ["1"] }),
+    legacyWaveStart,
+  ];
+  assert.equal(reduceCampaign(events).startedWaves, 2);
+  // A replan keeps the legacy-started wave in its fixed prefix.
+  const reduced = reduceCampaign([...events, event("replan", { ts: "t4", waves: [["3"]] })]);
+  assert.deepEqual(reduced.waves, [["1"], ["2"], ["3"]]);
+});
+
 // ungatedMerge (design §7): a real `merged` with no `base-gate` after it — the campaign died
 // between a wave's merges and its base gate, so a redrive must re-gate the merged base.
 const ungatedStart = [

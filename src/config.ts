@@ -469,20 +469,23 @@ export interface VetinariConfig {
    * Which files a ticket will touch, so `campaign-plan` can keep co-wave tickets
    * file-disjoint (a wave that shares a file collides as a merge conflict at
    * integration). `ticket` is the ticket's text; return `{ files, confident }` where
-   * `files` are fileKeys — resolved repo-relative paths, or a bare basename where a
-   * cite was ambiguous — and `confident: false` means the file-set could not be
-   * pinned down (the planner then halts rather than guess). A config seam beside
-   * `blockedBy`/`fetchTask` — `defaultFileSet()` ships as a generic cites-from-body
-   * implementation you can use or wrap.
+   * `files` are fileKeys — resolved repo-relative paths, compared exactly (a key with no
+   * `/` is a repo-root path), or a **bare key** spelled `*\/<name>` where a cite names no
+   * one path, which collides with every file of that name. A resolver of your own must
+   * spell its bare keys so, or they read as exact paths. `confident: false` means the
+   * file-set could not be pinned down (the planner then halts rather than guess). A
+   * config seam beside `blockedBy`/`fetchTask` — `defaultFileSet()` ships as a generic
+   * cites-from-body implementation you can use or wrap.
    */
   fileSet?: FileSetOf;
   /**
    * **Waived files**: repo-relative paths co-wave tickets may both edit — a large,
    * sectioned doc most tickets update. A ticket's fileKey equal to an entry (exact
-   * match, no globs) is left out of the planner's collision checks; tickets still
-   * cite it on `Touches:`, and the plan names what it waived. An entry that is a
-   * directory in the tree is refused when a plan resolves file-sets; one the tree
-   * lacks is ignored. Default: none.
+   * match, no globs: `README.md` waives only the root file, `*\/README.md` only the bare
+   * key) is left out of the planner's collision checks; tickets still cite it on
+   * `Touches:`, and the plan names what it waived. An entry that is a directory in the
+   * tree is refused when a plan resolves file-sets; one the tree lacks is ignored.
+   * Default: none.
    */
   waivedFiles?: string[];
   /**

@@ -202,9 +202,9 @@ test("planCampaign keeps distinct files with a shared basename in the same wave 
 });
 
 test("planCampaign collides an ambiguous bare basename with any same-named path (#386)", async () => {
-  // 'a' resolved `src/foo.md`; 'b' kept a bare `foo.md` (its cite was ambiguous). A
-  // bare basename collides with any file of that name, so they cannot share a wave.
-  const plan = await planWith(["a", "b"], {}, { a: ["src/foo.md"], b: ["foo.md"] });
+  // 'a' resolved `src/foo.md`; 'b' kept the bare key `*/foo.md` (its cite was ambiguous).
+  // A bare key collides with any file of that name, so they cannot share a wave.
+  const plan = await planWith(["a", "b"], {}, { a: ["src/foo.md"], b: ["*/foo.md"] });
 
   assert.deepEqual(plan.waves, [["a"], ["b"]]);
 });
@@ -272,6 +272,55 @@ test("resolver → partition: a bare cite and a path cite of one file still coll
   const plan = await planWith(["a", "b"], {}, { a: a.files, b: b.files });
 
   assert.deepEqual(plan.waves, [["a"], ["b"]]);
+});
+
+/** A throwaway tree with the given repo-relative files, and `defaultFileSet` over it. */
+const defaultFileSetOver = (...files: string[]) => {
+  const root = join(tmpdir(), `vetinari-486-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  for (const rel of files) {
+    mkdirSync(join(root, rel, ".."), { recursive: true });
+    writeFileSync(join(root, rel), "");
+  }
+  return defaultFileSet(root);
+};
+
+test("resolver → partition: a repo-root file unique in the tree shares a wave with a same-named file elsewhere (#486)", async () => {
+  // Root NOTES.md is the only NOTES.md, so its cite resolves to the exact path `NOTES.md` —
+  // a path with no `/`, not a bare key — and it does not collide with `docs/NOTES.md`.
+  const fileSet = defaultFileSetOver("NOTES.md", "docs/guide.md");
+  const a = fileSet("Touches: `NOTES.md`\n");
+  const b = fileSet("Creates: `docs/NOTES.md`\n");
+
+  const plan = await planWith(["a", "b"], {}, { a: a.files, b: b.files });
+
+  assert.deepEqual(plan.waves, [["a", "b"]]);
+});
+
+test("resolver → partition: an ambiguous cite is a bare key colliding with each same-named path (#486)", async () => {
+  const fileSet = defaultFileSetOver("a/foo.md", "b/foo.md");
+  const bare = fileSet("Touches: `foo.md`\n");
+  assert.deepEqual(bare.files, ["*/foo.md"]);
+  const files = { bare: bare.files, a: fileSet("Touches: `a/foo.md`\n").files, b: fileSet("Touches: `b/foo.md`\n").files };
+
+  assert.deepEqual((await planWith(["bare", "a"], {}, files)).waves, [["bare"], ["a"]]);
+  assert.deepEqual((await planWith(["bare", "b"], {}, files)).waves, [["bare"], ["b"]]);
+  // The two exact paths still never collide with each other.
+  assert.deepEqual((await planWith(["a", "b"], {}, files)).waves, [["a", "b"]]);
+});
+
+test("resolver → partition: a Creates: cite whose directory matches several tree directories collides as a bare key (#486)", async () => {
+  const fileSet = defaultFileSetOver("internal/web/server.go", "cmd/web/main.go", "pkg/health.go");
+  const created = fileSet("Creates: `web/health.go`\n");
+  assert.deepEqual(created.files, ["*/health.go"]);
+
+  const plan = await planWith(["a", "b"], {}, { a: created.files, b: fileSet("Touches: `pkg/health.go`\n").files });
+
+  assert.deepEqual(plan.waves, [["a"], ["b"]]);
+});
+
+test("planCampaign collides two bare keys of one name, never two of different names (#486)", async () => {
+  assert.deepEqual((await planWith(["a", "b"], {}, { a: ["*/foo.md"], b: ["*/foo.md"] })).waves, [["a"], ["b"]]);
+  assert.deepEqual((await planWith(["a", "b"], {}, { a: ["*/foo.md"], b: ["*/bar.md"] })).waves, [["a", "b"]]);
 });
 
 test("resolver → partition: same-named Creates: files in distinct tree directories share a wave (#480)", async () => {
@@ -786,10 +835,10 @@ test("describePlan's spilled line lists each shared file with its own colliding 
 });
 
 test("describePlan's spilled line names the spilled ticket's own bare key, not the path it hit", async () => {
-  // a resolved `src/foo.md`; b kept a bare `foo.md` (an ambiguous cite) — b's key is shown.
-  const plan = await planWith(["a", "b"], {}, { a: ["src/foo.md"], b: ["foo.md"] });
+  // a resolved `src/foo.md`; b kept the bare key `*/foo.md` (an ambiguous cite) — b's key is shown.
+  const plan = await planWith(["a", "b"], {}, { a: ["src/foo.md"], b: ["*/foo.md"] });
 
-  assert.match(describePlan(plan), /#b .*; spilled — shares foo\.md with #a$/m);
+  assert.match(describePlan(plan), /#b .*; spilled — shares \*\/foo\.md with #a$/m);
 });
 
 test("describePlan's spilled line puts the file shared with the most tickets first", async () => {
@@ -1164,6 +1213,15 @@ test("runFilesetCheck runs the same resolver campaign-plan uses, reporting confi
   ]);
 });
 
+test("the dry run's file-set listing prints a bare key with its */ marker (#486)", async () => {
+  const fileSet = defaultFileSetOver("a/foo.md", "b/foo.md");
+  const tasks: Record<string, string> = { "1": JSON.stringify({ body: "Touches: `foo.md`, `a/foo.md`" }) };
+
+  const results = await runFilesetCheck({ ...cfgFrom(tasks), fileSet }, ["1"]);
+
+  assert.equal(describeFilesetCheck(results), "#1  confident — `*/foo.md`, `a/foo.md`");
+});
+
 test("runFilesetCheck rejects an empty id set", async () => {
   await assert.rejects(() => runFilesetCheck(cfgFrom({}), []), /at least one ticket id/);
 });
@@ -1380,19 +1438,19 @@ test("describePlan's lower bound is the dependency chain when it is longer than 
 test("describePlan counts a bare cite toward each same-named path, never two paths as one group (#612)", async () => {
   // a/foo.md and b/foo.md are distinct files; the bare foo.md collides with each. So the
   // largest group is two tickets, never three — the plan itself needs only two waves.
-  const plan = await planWith(["1", "2", "3"], {}, { "1": ["a/foo.md"], "2": ["b/foo.md"], "3": ["foo.md"] });
+  const plan = await planWith(["1", "2", "3"], {}, { "1": ["a/foo.md"], "2": ["b/foo.md"], "3": ["*/foo.md"] });
   const report = describePlan(plan);
 
   assert.equal(plan.waves.length, 2);
   assert.match(report, /^lower bound: 2 waves — 2 tickets share a\/foo\.md \(dependency depth 1\)$/m);
   assert.match(report, /^Most-shared files:\n {2}a\/foo\.md {2}2 tickets\n {2}b\/foo\.md {2}2 tickets$/m);
-  assert.doesNotMatch(report, /^ {2}foo\.md/m);
+  assert.doesNotMatch(report, /^ {2}\*\/foo\.md/m);
 });
 
 test("describePlan groups bare cites of one basename on their own when no path of it is cited (#612)", async () => {
-  const plan = await planWith(["1", "2", "3"], {}, { "1": ["foo.md"], "2": ["foo.md"], "3": ["bar.md"] });
+  const plan = await planWith(["1", "2", "3"], {}, { "1": ["*/foo.md"], "2": ["*/foo.md"], "3": ["*/bar.md"] });
 
-  assert.match(describePlan(plan), /^lower bound: 2 waves — 2 tickets share foo\.md \(dependency depth 1\)$/m);
+  assert.match(describePlan(plan), /^lower bound: 2 waves — 2 tickets share \*\/foo\.md \(dependency depth 1\)$/m);
 });
 
 test("describePlan lists no file shared by fewer than a quarter of the tickets, or by only one (#612)", async () => {

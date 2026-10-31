@@ -36,6 +36,7 @@ Creates (new files): `src/report-format.ts`, `src/report-format.test.ts`
 - An unbackticked token counts only as a slash path (`src/report.ts`). An unbackticked `Makefile` or `report.ts` is not a cite.
 - Backslash-escaped backticks (`` \`src/report.ts\` ``) are read as plain backticks.
 - A trailing `:line` or `:line:col` is stripped, so `` `src/report.ts:42` `` cites `src/report.ts`.
+- A trailing `.` on an unbackticked token is stripped, so `docs/x.md.` cites `docs/x.md`.
 - Off a marker line (the whole-body fallback), a backticked token counts only if it contains a `/` or has an alphabetic extension (`report.ts`). This keeps ordinary words in backticks from becoming cites.
 
 **`Touches:` and `Files:`** are one kind, so a later `Files:` line supersedes an earlier `Touches:`. Their cites are checked against the tree: the files git tracks or would track in the working directory the campaign runs in — tracked files plus untracked files that aren't ignored — so a gitignored file (build output, `.env`) is never a cite target. A submodule is not indexed — neither its gitlink path nor its files — and nor is anything under `.vetinari.local/`, vetinari's own cache, whether or not the project gitignores it. Resolving against a plain directory that isn't a git repository falls back to walking it, minus `.git`, `node_modules` and `.vetinari.local`.
@@ -50,7 +51,6 @@ Creates (new files): `src/report-format.ts`, `src/report-format.test.ts`
 **`Creates:`** cites name files the ticket will add, so they are never checked against the tree. The cite's directory is resolved instead, by longest-suffix match against the tree's directories:
 
 - A rooted cite (`./a/new.ts`): the key is the path after `./`, exactly, whether or not its directory exists, with no suffix matching. `./new.md` keys to the root file `new.md`, and `./a/new.ts` to `a/new.ts` even when the tree holds only `src/a`.
-
 - One directory matches: the key is that directory plus the file name. `a/index.ts` with `src/a` in the tree keys to `src/a/index.ts`, so it collides with a `Touches:` of that file but not with an `index.ts` created elsewhere.
 - No directory matches (a new directory): the key is the cited path as written. So cite a new directory by its full path from the repo root: `newdir/a.ts` and `src/newdir/a.ts` key differently and do not collide, so two tickets that mean the same new file land in one wave.
 - Several directories match, or the cite is a bare name: the key is the bare key `*/<name>`, which collides with **every** file of that name.

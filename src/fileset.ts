@@ -102,7 +102,9 @@ function citedPaths(body: string, onMarkerLine = false): string[] {
     // Strip a trailing `:line[:col]` before anything else, so a line-numbered cite
     // is path-shaped and resolves to the real file rather than an unmatchable
     // `host-slots.ts:329` the tree never contains (#388).
-    const raw = (m[1] ?? m[2]).trim().replace(LINE_SUFFIX_RE, "");
+    // An unbackticked token also drops a trailing sentence period (`See docs/x.md.`),
+    // which the bare branch takes in; a backticked token is exactly what was fenced (#653).
+    const raw = (m[1] ?? m[2].replace(/\.+$/, "")).trim().replace(LINE_SUFFIX_RE, "");
     if (!raw) continue;
     // Off a marker line, a backtick token counts only if it is path-shaped, not just any word.
     if (!onMarkerLine && !raw.includes("/") && !FILENAME_RE.test(raw)) continue;
@@ -268,15 +270,17 @@ function gitTreeFiles(root: string): string[] | null {
       cwd: root,
       stdio: ["ignore", "pipe", "ignore"],
     });
-    const files: string[] = [];
+    // A set, not a list: mid-merge, the index lists a conflicted path once per stage
+    // (up to three times), and a repeated path would read as ambiguous (#653).
+    const files = new Set<string>();
     for (const entry of out.split("\0")) {
       const staged = /^(\d{6}) [0-9a-f]+ \d\t(.*)$/s.exec(entry);
       const path = staged ? staged[2] : entry;
       if (path === "" || path.endsWith("/") || staged?.[1] === "160000") continue;
       if (path.split("/").includes(".vetinari.local")) continue;
-      files.push(path);
+      files.add(path);
     }
-    return files;
+    return [...files];
   } catch {
     return null;
   }

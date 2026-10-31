@@ -27,6 +27,7 @@ Within a milestone each bold section label appears at most once.
 **New features:**
 - [user] The shipped images now install the GitHub Copilot CLI (`@github/copilot`), so `agent: { provider: "copilot" }` runs in a container built from the `vetinari init` Dockerfile, this repo's own, or the jjforge example (#646). Rebuild with `vetinari build` to pick it up.
 - [user] GitHub Copilot now keeps its session, like Claude: gate fixes continue the conversation, an answered park resumes it with no `postComment` needed, a crash with commits resumes on its branch, and its findings are harvested and filed. Each issue's Copilot state lives in `.vetinari.local/copilot/<task-id>/`, mounted at `~/.copilot` into that issue's agent container (it holds no credential), and is removed when the issue merges or is purged by `prune --purge` / `tidy --apply` (#645, ADR 0024).
+- [ops] `/review-logs` has a config lens that measures how often tickets sharing a file really conflicted, and suggests `waivedFiles` entries and hot spots from that history (#625).
 
 **Improvements:**
 - [user] On macOS, `vetinari gateway install` and `gateway status|start|stop|restart` now refuse (exit 4) with a pointer to running `vetinari gateway` in a terminal (or `vetinari status` for the dashboard alone), instead of writing a systemd unit nothing reads or failing on a missing `systemctl` (#647).
@@ -57,6 +58,8 @@ Within a milestone each bold section label appears at most once.
 - [user] A started issue that is pruned and then grafted back no longer makes its new wave, and every wave before it, read as started, which froze those waves out of a `replan` (#635, found verifying it).
 - [user] A green parked `conflict` after its retried merge failed a per-merge check now asks you to fix it on the base, then run `vetinari redrive` — the command spelled out as every other recovery hint spells it, instead of a bare "redrive" (#636).
 - [user] A `Touches:` cite of a submodule's path no longer resolves as if it were a file, and a project that doesn't gitignore `.vetinari.local/` no longer has its cache indexed, so a directory-qualified cite such as `e2e/README.md` stays resolved instead of degrading to `*/README.md` (#638).
+- [ops] An empty or blank `VETINARI_GATEWAY_ANNOUNCE_MS` now falls back to the default `5000` ms tick instead of the `1000` floor (#652).
+- [user] The file-set resolver no longer reads a file with an unresolved merge conflict as ambiguous, and an unbackticked cite followed by a sentence period (`Change ./README.md.`) now resolves (#653).
 
 **Security:**
 - [user] The preflight now also refuses a `.vetinari.local/.env` that names `VETINARI_TELEGRAM_BOT_TOKEN` or `VETINARI_TELEGRAM_CHAT_ID` with whitespace before the `=` (`VETINARI_TELEGRAM_BOT_TOKEN =`), which the container still read as that key and filled from vetinari's own environment (#634).

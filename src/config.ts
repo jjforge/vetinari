@@ -89,9 +89,9 @@ export function containerShareWeight(share: ContainerShare): number {
 
 /**
  * The agent providers vetinari can drive (ADR 0016). The resumable ones (Claude
- * Code, pi, Codex) drive the loop by resuming a session each turn; the
- * non-resumable ones (copilot, cursor, opencode) carry no durable session, so the
- * loop drives them by re-entering each turn as a fresh run (ADR 0016 / #212).
+ * Code, pi, Codex, Copilot) drive the loop by resuming a session each turn; the
+ * non-resumable ones (cursor, opencode) carry no durable session, so the loop
+ * drives them by re-entering each turn as a fresh run (ADR 0016 / #212).
  */
 export type AgentProviderName = "claude" | "pi" | "codex" | "copilot" | "cursor" | "opencode";
 
@@ -146,7 +146,7 @@ export const AGENT_PROVIDERS: Record<
     efforts: ["low", "medium", "high", "xhigh"],
     credentialKeys: ["OPENAI_API_KEY"],
   },
-  // copilot → GitHub Copilot CLI; model `auto` (Copilot picks among the models the org allows); none..max effort. Experimental — non-resumable, driven by fresh re-runs (§12).
+  // copilot → GitHub Copilot CLI; model `auto` (Copilot picks among the models the org allows); none..max effort. Resumable through the issue's mounted Copilot directory, .vetinari.local/copilot/<task-id>/ (ADR 0024).
   copilot: {
     defaultModel: "auto",
     efforts: ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
@@ -176,7 +176,7 @@ export const DEFAULT_EFFORT = "high";
  * `resumable` flag. They carry no durable session, so the loop drives them by
  * re-entering each turn as a fresh run rather than resuming a session (#212).
  */
-const NON_RESUMABLE_PROVIDERS: readonly AgentProviderName[] = ["copilot", "cursor", "opencode"];
+const NON_RESUMABLE_PROVIDERS: readonly AgentProviderName[] = ["cursor", "opencode"];
 const SUPPORTED_LIST = "claude, pi, codex, copilot, cursor, opencode";
 
 /** Whether the loop can resume this provider's session between turns, or must re-enter each turn fresh. */
@@ -184,7 +184,7 @@ export const isResumableProvider = (provider: AgentProviderName): boolean => !NO
 
 /**
  * The one line the non-resumable park→answer gap turns on (design §3, §12 / #212).
- * The experimental providers (copilot/cursor/opencode) keep no session across a park, so
+ * The experimental providers (cursor/opencode) keep no session across a park, so
  * an answer can only reach a fresh run through the issue text — which needs `postComment`.
  * Preflight prints it as a warning when the selected provider is non-resumable and
  * `postComment` is unset; `answer` fails fast with the SAME line rather than silently
@@ -533,7 +533,7 @@ export interface VetinariConfig {
   onIssueMerged?: (id: string) => void | Promise<void>;
   /**
    * Post a comment on a tracker issue — the tracker-write seam the non-resumable
-   * park→answer path uses (ADR 0004 / #212). A copilot/cursor/opencode provider
+   * park→answer path uses (ADR 0004 / #212). A cursor/opencode provider
    * carries no session to resume, so `answer` posts the human's reply as an issue
    * comment and re-enters as a FRESH run whose `fetchTask` re-reads it; the answer
    * is delivered purely through "read the issue". Fail-loud: `answer` errors and

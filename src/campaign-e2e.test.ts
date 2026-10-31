@@ -244,7 +244,7 @@ const resolvingConflictScript =
 
 const host = (dir: string): HostBudget => ({ configDir: join(dir, "host"), ceiling: 2, weight: 1 });
 
-for (const provider of ["claude", "copilot"] as const) {
+for (const provider of ["claude", "cursor"] as const) {
   test(`scenario 9 (${provider}): a green whose merge collides is retried by its own agent in the same wave — it resolves, merges, and the wave completes with no park (#624)`, async () => {
     const dir = seedConflictRepo();
     const merged: string[] = [];
@@ -280,7 +280,7 @@ for (const provider of ["claude", "copilot"] as const) {
       if (provider === "claude") assert.equal(retries[0].resumeSession, "local-102-0", "the green's last session is resumed");
       else assert.equal(retries[0].resumeSession, undefined, "a non-resumable provider re-enters fresh");
       assert.ok(retries[0].text.includes(readmits[0].base), "the prompt names the base commit");
-      if (provider === "copilot") assert.match(retries[0].text, /^task 102/, "the prompt rides on the issue text");
+      if (provider === "cursor") assert.match(retries[0].text, /^task 102/, "the prompt rides on the issue text");
       // Live tail: while the retry ran, the retried issue was an in-flight runner.
       assert.deepEqual(retries[0].tailed, ["102"]);
 

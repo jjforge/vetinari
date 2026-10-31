@@ -24,6 +24,7 @@ import {
   registerVetinariResolve,
   repoForProject,
   resolveAgentSelection,
+  isResumableProvider,
   resolveConfigPath,
   resolveDestination,
   resolveProjectRoot,
@@ -408,15 +409,22 @@ test("resolveAgentSelection validates effort against the SELECTED provider's own
 });
 
 test("resolveAgentSelection accepts the non-resumable providers, flagging them resumable:false (they drive the loop by fresh re-runs)", () => {
+  // opencode maps effort onto its `variant`; high is a valid variant.
+  assert.equal(resolveAgentSelection(undefined, { provider: "opencode" }).resumable, false);
+  assert.equal(resolveAgentSelection(undefined, { provider: "cursor" }).resumable, false);
+  assert.equal(isResumableProvider("cursor"), false);
+  assert.equal(isResumableProvider("opencode"), false);
+});
+
+test("copilot is resumable: it keeps its session in the issue's mounted Copilot directory (ADR 0024)", () => {
+  assert.equal(isResumableProvider("copilot"), true);
   // copilot carries a real effort dial; its default falls to the provider's default model + effort high.
   assert.deepEqual(resolveAgentSelection(undefined, { provider: "copilot" }), {
     provider: "copilot",
     model: AGENT_PROVIDERS.copilot.defaultModel,
     effort: "high",
-    resumable: false,
+    resumable: true,
   });
-  // opencode maps effort onto its `variant`; high is a valid variant.
-  assert.equal(resolveAgentSelection(undefined, { provider: "opencode" }).resumable, false);
 });
 
 test("resolveAgentSelection defaults copilot's model to auto, so Copilot picks among the models the org allows", () => {
@@ -445,10 +453,10 @@ test("resolveAgentSelection flags the resumable providers resumable:true", () =>
 });
 
 test("nonResumableAnswerWarning names the provider as experimental, what happens on a park, and postComment as the fix", () => {
-  const line = nonResumableAnswerWarning("copilot");
+  const line = nonResumableAnswerWarning("cursor");
   // One line: no embedded newline splitting it into paragraphs.
   assert.ok(!line.includes("\n"), "the warning is a single line");
-  assert.match(line, /copilot/); // the selected provider
+  assert.match(line, /cursor/); // the selected provider
   assert.match(line, /experimental/); // §12 marks the three experimental
   assert.match(line, /park/); // what will happen on a park
   assert.match(line, /postComment/); // what to configure

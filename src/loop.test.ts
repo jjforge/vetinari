@@ -793,6 +793,22 @@ const streamingSandbox = (turns: { lines: string[]; green: boolean }[]): FakeSan
   });
 };
 
+test("runLoop builds its container as the issue's agent run, so a copilot provider gets its Copilot directory (ADR 0024)", async () => {
+  const cfg = harnessCfg();
+  const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc" }] }, green: true }]);
+  const asked: unknown[] = [];
+  const deps = depsFor(sbx, {
+    makeSandbox: async (_cfg, _taskId, opts) => {
+      asked.push(opts);
+      return sbx;
+    },
+  });
+
+  await silence(() => runLoop(cfg, "T-1", undefined, undefined, deps));
+
+  assert.deepEqual(asked, [{ agentRun: true }]);
+});
+
 test("a copilot turn cut off before its result event still resumes next turn with the --session-id it was started under (ADR 0024)", async () => {
   const cfg = harnessCfg({ agent: { provider: "copilot" } });
   // Turn 0 streams some text but never Copilot's final `result` event (sandcastle's completion timeout).

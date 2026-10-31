@@ -98,9 +98,13 @@ declare module "@ai-hero/sandcastle" {
  * lets a parked task resume with its uncommitted work intact — and why git
  * refuses to run when something else already has that branch checked out
  * (a manual review worktree on an agent branch blocks its resume).
+ *
+ * `agentRun` marks the container an issue's agent runs in, as opposed to a gate or baseline
+ * sandbox: only an agent run of a copilot provider mounts that issue's Copilot directory (ADR 0024).
  */
-export async function makeSandbox(cfg: ResolvedConfig, taskId: string) {
-  ensureMountSources(cfg);
+export async function makeSandbox(cfg: ResolvedConfig, taskId: string, { agentRun = false }: { agentRun?: boolean } = {}) {
+  const agentTaskId = agentRun ? taskId : undefined;
+  ensureMountSources(cfg, process.cwd(), agentTaskId);
 
   const branch = `${cfg.branchPrefix}${taskId}`;
   // Preflight (design §3 step 1): git refuses a second worktree on a branch already
@@ -113,9 +117,9 @@ export async function makeSandbox(cfg: ResolvedConfig, taskId: string) {
       `${branch} is already checked out at ${foreign} — remove that worktree before running this issue (one run per issue).`,
     );
 
-  cfg.log.log("sandbox", { taskId, branch, mounts: sandboxMounts(cfg).map((m) => m.hostPath) });
+  cfg.log.log("sandbox", { taskId, branch, mounts: sandboxMounts(cfg, process.cwd(), agentTaskId).map((m) => m.hostPath) });
 
-  return sandcastle.createSandbox(makeSandboxOptions(cfg, taskId));
+  return sandcastle.createSandbox(makeSandboxOptions(cfg, taskId, agentTaskId));
 }
 
 /**
@@ -124,7 +128,7 @@ export async function makeSandbox(cfg: ResolvedConfig, taskId: string) {
  * from `cfg.baseBranch` — sandcastle ignores `baseBranch` when the branch already exists, so
  * a reused branch keeps its commits regardless of what HEAD is currently on.
  */
-export function makeSandboxOptions(cfg: ResolvedConfig, taskId: string): sandcastle.CreateSandboxOptions {
+export function makeSandboxOptions(cfg: ResolvedConfig, taskId: string, agentTaskId?: string): sandcastle.CreateSandboxOptions {
   return {
     branch: `${cfg.branchPrefix}${taskId}`,
     baseBranch: cfg.baseBranch,
@@ -133,7 +137,7 @@ export function makeSandboxOptions(cfg: ResolvedConfig, taskId: string): sandcas
     // `.sandcastle/`, so all ephemeral state lives under one place (default
     // `.vetinari.local/`). Relative to the host repo (cwd), like the orchestrator's.
     stateDir: cfg.stateDir,
-    sandbox: docker({ imageName: cfg.image, mounts: sandboxMounts(cfg) }),
+    sandbox: docker({ imageName: cfg.image, mounts: sandboxMounts(cfg, process.cwd(), agentTaskId) }),
     hooks: cfg.setup?.length
       ? { sandbox: { onSandboxReady: cfg.setup.map((command) => ({ command, timeoutMs: cfg.setupTimeoutMs ?? 300_000 })) } }
       : undefined,
@@ -146,10 +150,17 @@ export function makeSandboxOptions(cfg: ResolvedConfig, taskId: string): sandcas
  * own host path. sandcastle mounts the host `.git` read-write, and each `.git/worktrees/<name>/gitdir`
  * records a host path — without this mount none of them exist in the container, so a
  * `git worktree prune` there deletes every sibling's entry. Read-only keeps siblings untouchable.
+ *
+ * `agentTaskId` names the issue whose agent the container runs (absent for a gate or baseline
+ * sandbox); with a copilot provider its Copilot directory is mounted read-write as `~/.copilot`.
  */
-export function sandboxMounts(cfg: ResolvedConfig, cwd: string = process.cwd()): MountSpec[] {
+export function sandboxMounts(cfg: ResolvedConfig, cwd: string = process.cwd(), agentTaskId?: string): MountSpec[] {
   const worktrees = resolve(cwd, cfg.stateDir, "worktrees");
-  return [...(cfg.mounts ?? []), { hostPath: worktrees, sandboxPath: worktrees, readonly: true }];
+  const copilot =
+    agentTaskId !== undefined && agentSelectionFor(cfg).provider === "copilot"
+      ? [{ hostPath: copilotDirFor(cfg, agentTaskId, cwd), sandboxPath: `${SANDBOX_HOME}/.copilot` }]
+      : [];
+  return [...(cfg.mounts ?? []), { hostPath: worktrees, sandboxPath: worktrees, readonly: true }, ...copilot];
 }
 
 /**
@@ -158,8 +169,8 @@ export function sandboxMounts(cfg: ResolvedConfig, cwd: string = process.cwd()):
  * write — and `docker()` itself throws on a missing source before sandcastle's `create` would
  * make the worktrees dir on a first run.
  */
-export function ensureMountSources(cfg: ResolvedConfig, cwd: string = process.cwd()): void {
-  for (const m of sandboxMounts(cfg, cwd)) mkdirSync(resolve(cwd, m.hostPath), { recursive: true });
+export function ensureMountSources(cfg: ResolvedConfig, cwd: string = process.cwd(), agentTaskId?: string): void {
+  for (const m of sandboxMounts(cfg, cwd, agentTaskId)) mkdirSync(resolve(cwd, m.hostPath), { recursive: true });
 }
 
 /** The image's home dir — where sandcastle runs the agent and resolves a `~` in a `sandboxPath`. */

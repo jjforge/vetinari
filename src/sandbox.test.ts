@@ -170,6 +170,36 @@ test("ensureMountSources creates every mount source, the worktrees dir included,
   ensureMountSources(cfg, root);
 });
 
+test("a copilot agent run mounts the issue's Copilot directory read-write at ~/.copilot, and creates it first (ADR 0024)", () => {
+  const root = mkdtempSync(join(tmpdir(), "vetinari-mounts-"));
+  const cfg = sandboxCfg({ stateDir: "/s", agent: { provider: "copilot" } });
+  assert.deepEqual(
+    withAgentEnv(undefined, () => sandboxMounts(cfg, "/r", "42")),
+    [
+      { hostPath: "/s/worktrees", sandboxPath: "/s/worktrees", readonly: true },
+      { hostPath: "/s/copilot/42", sandboxPath: "/home/agent/.copilot" },
+    ],
+  );
+  // A relative stateDir resolves against the project root, as the worktrees mount does.
+  const rel = sandboxCfg({ stateDir: ".vetinari.local", agent: { provider: "copilot" } });
+  withAgentEnv(undefined, () => ensureMountSources(rel, root, "42"));
+  assert.ok(existsSync(join(root, ".vetinari.local", "copilot", "42")));
+});
+
+test("only a copilot agent run gets a Copilot directory: not a claude run, nor a gate or baseline sandbox", () => {
+  const root = mkdtempSync(join(tmpdir(), "vetinari-mounts-"));
+  const claude = sandboxCfg({ stateDir: ".vetinari.local", agent: { provider: "claude" } });
+  const copilot = sandboxCfg({ stateDir: ".vetinari.local", agent: { provider: "copilot" } });
+  withAgentEnv(undefined, () => {
+    assert.ok(!sandboxMounts(claude, root, "42").some((m) => m.sandboxPath === "/home/agent/.copilot"));
+    // The gate and baseline sandboxes are not agent runs, so they name no issue.
+    assert.ok(!sandboxMounts(copilot, root).some((m) => m.sandboxPath === "/home/agent/.copilot"));
+    ensureMountSources(claude, root, "42");
+    ensureMountSources(copilot, root);
+  });
+  assert.ok(!existsSync(join(root, ".vetinari.local", "copilot")));
+});
+
 // `git worktree list --porcelain` blocks: a `worktree <path>` line then a `branch <ref>`
 // line (or `detached`), separated by blank lines.
 const porcelain = (entries: Array<[path: string, ref: string]>): string =>

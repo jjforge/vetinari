@@ -128,7 +128,7 @@ export interface ReentryEntry {
  * and the fake sandbox's `exec` already controls the gate's green/red.
  */
 export interface LoopDeps {
-  makeSandbox: (cfg: ResolvedConfig, taskId: string) => Promise<Sandbox>;
+  makeSandbox: (cfg: ResolvedConfig, taskId: string, opts?: { agentRun?: boolean }) => Promise<Sandbox>;
   commitsAhead: (base: string, branch: string, log: Logger) => number | null;
   filesInCommit: (sha: string, log: Logger) => string[];
   /**
@@ -550,7 +550,7 @@ export async function runLoop(
     const runContainer = async (): Promise<Outcome> => {
       // A stop during sandbox creation waits for it to settle (so the container is never leaked),
       // then unwinds — the `finally` below closes it and no turn is started.
-      sbx = await deps.makeSandbox(cfg, taskId);
+      sbx = await deps.makeSandbox(cfg, taskId, { agentRun: true });
       // Start the per-task activity stream fresh — live-only scratch, overwritten per run (ADR 0015).
       initActivityLog(cfg.stateDir, taskId);
       try {

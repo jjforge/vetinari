@@ -469,7 +469,7 @@ test("scenario 13: a co-wave build break is caught per member — only the secon
     const record = listParked(cfg).find((r) => r.taskId === "102")!;
     assert.equal(record.reason, "conflict");
     assert.match(record.detail ?? "", /a\.txt and b\.txt clash/);
-    assert.equal(record.question, "Merge of agent/102 fails clash-check — fix it on the base, then redrive.");
+    assert.equal(record.question, "Merge of agent/102 fails clash-check — fix it on the base, then `vetinari redrive`.");
     assert.equal(gitOut(dir, ["branch", "--list", "agent/102"]), "agent/102", "the member's work is preserved");
     assert.equal((events.find((e) => e.event === "campaign-parked") as any).reason, "conflict");
   });

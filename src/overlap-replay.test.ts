@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync } from "node:fs";
+import { chmodSync, readFileSync } from "node:fs";
 import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -326,4 +326,11 @@ test("cites the project's own fileSet filters out are reported as unmeasurable, 
   );
   assert.deepEqual(result.filteredKeys, { "other.txt": 2 });
   assert.match(renderOverlapReport(result), /not measurable[^\n]*\n- `other\.txt` — cited by 2 tickets/i);
+});
+
+test("the review-logs skill documents a config lens that runs overlap.mts with vetinari's own tsx", () => {
+  const skill = readFileSync(join(import.meta.dirname, "..", "skills", "review-logs", "SKILL.md"), "utf8");
+
+  assert.match(skill, /\*\*Config\*\*/);
+  assert.ok(skill.includes(`"$(realpath <skill dir>)/../../node_modules/.bin/tsx" "$(realpath <skill dir>)/overlap.mts" <projectRoot>`));
 });

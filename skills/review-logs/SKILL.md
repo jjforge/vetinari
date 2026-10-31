@@ -34,6 +34,13 @@ Event schemas drift between versions: older logs lack fields newer ones carry. T
    - **Churn** — the slowest and most tool-heavy tasks. Read their activity log for the same command or file read over and over, long exploration before the first edit, a slow suite re-run after every small change. Name what in the project caused it.
    - **Repeated orientation** — commands most agents run at the start of every task (`jq -r 'select(.event=="sandbox-exec").cmd'` across activity logs, normalised and counted). A fact every agent rediscovers belongs in `CLAUDE.md`/`AGENTS.md`; a slow lookup belongs in a script.
    - **Agent accounts** — the `summary` of each `turn` and the agent log's closing account. Agents report faults in passing ("in the touches hint but needed no change", "the brief named a field that doesn't exist", "the docs say X but the code does Y"): these are brief-quality, file-set and stale-doc findings.
+   - **Config** — how often tickets that declared the same file really conflicted, measured rather than guessed. Run the overlap replay from this skill's directory (it is a symlink into vetinari's repo, whose `tsx` it uses):
+
+     ```sh
+     "$(realpath <skill dir>)/../../node_modules/.bin/tsx" "$(realpath <skill dir>)/overlap.mts" <projectRoot>
+     ```
+
+     For each campaign in the logs it pairs the tickets whose declared file keys overlap (before `waivedFiles`, so waived files are measured too; dependent pairs are left out), finds each ticket's real change from its `campaign: merge <branchPrefix><id>` commit, and test-merges each pair in a temporary clone. Per key it prints the pairs, how many were clean, collided or were indeterminate (no common base to test-merge on, left out of the rate), and the collision rate, sorted into **waive candidates** (enough pairs, almost never collide — the `waivedFiles` entry to add), **hot spots** (enough pairs, often collide — evidence against waiving, and a file worth splitting), keys already waived, and keys with too few pairs to judge. The thresholds head its output. Keys come from `campaign-start` when it recorded them, otherwise from today's issue text, so it reads the tracker (`gh issue view`, `gh api …/blocked_by`) — read-only. It writes nothing to the project, its config, its git refs or GitHub. Cites the project's own `fileSet` filters out are listed as not measurable.
 
 4. **Verify.** Logs are history; the project has moved since. For each candidate, check that the cause still exists on the current base — read the file, test or doc, and `git log` for a fix since the run's date. Search the project's tracker (`gh issue list --state all --search "<terms>"`) for an existing issue. Drop what is already fixed; attach the issue number to what is already filed. Done when every surviving suggestion rests on evidence you checked against today's code.
 
@@ -43,5 +50,7 @@ Event schemas drift between versions: older logs lack fields newer ones carry. T
    - the cause in the project — the file, test, doc line, brief convention or config entry;
    - the change you suggest, as small as fixes it;
    - the existing issue, or a one-line title for a new one.
+
+   Then a **config** section from the config lens: each waive candidate as the `waivedFiles` entry to add, each hot spot as a file to keep out of `waivedFiles` (and perhaps split), each already-waived key whose numbers now say otherwise — every one with its pairs, clean/collide/indeterminate counts and collision rate as the evidence. Suggest; never edit the config.
 
    Then, briefly, any finding about vetinari itself, and the signals you explained away, one line each, so the next review does not re-chase them. Ask which suggestions to file; file the chosen ones per the project's issue conventions.

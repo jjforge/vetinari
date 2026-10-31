@@ -165,7 +165,7 @@ the container is `.vetinari.local/.env` (design §9, ADR 0011).
 | `VETINARI_STATUS_ALLOWED_HOSTS` | host env (`status` and the gateway) | comma-separated, case-insensitive DNS names the dashboard admits as a `Host` beyond IP literals and `localhost` — a MagicDNS or reverse-proxy name; any other name is a 403 (see the operations guide's exposure section) |
 | `VETINARI_STATUS_PORT` / `VETINARI_STATUS_HOST` | host env (`status`) | the port and bind address `status` serves on when `--port` / `--host` are not given; default `8765` / `127.0.0.1` |
 | `VETINARI_GATEWAY_STATUS_PORT` / `VETINARI_GATEWAY_STATUS_HOST` | host env (the gateway) | the port and bind address of the gateway's aggregated dashboard; default `8765` / `127.0.0.1` |
-| `VETINARI_GATEWAY_ANNOUNCE_MS` | host env (the gateway) | the gateway's tick, in milliseconds — how often it announces parked questions, drains the project outboxes, and re-reads the registry for its Telegram pollers; default `5000`, floor `1000` |
+| `VETINARI_GATEWAY_ANNOUNCE_MS` | host env (the gateway) | the gateway's tick, in milliseconds — how often it announces parked questions, drains the project outboxes, and re-reads the registry for its Telegram pollers; default `5000`, floor `1000`; a non-numeric value falls back to `5000` |
 | `VETINARI_GATEWAY_HOME` | host env | overrides the host config dir; default `$XDG_CONFIG_HOME/vetinari`, or `~/.config/vetinari` |
 | `VETINARI_SYSTEMD_UNIT` | host env | overrides the gateway's systemd unit path; default `$XDG_CONFIG_HOME/systemd/user/vetinari-gateway.service`, or under `~/.config/systemd/user/` |
 | `XDG_CONFIG_HOME` | host env | the base of the host config dir and the gateway unit path defaults when the two overrides above are unset; unset falls back to `~/.config` |

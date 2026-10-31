@@ -405,7 +405,7 @@ test("a failed markOutboundSent rewrite leaves the prior record byte-identical â
   const before = readFileSync(path);
   mkdirSync(`${path}.${process.pid}.tmp`);
 
-  assert.throws(() => markOutboundSent(outboxDirOf(dir), rec.id, "ops"));
+  assert.throws(() => markOutboundSent(outboxDirOf(dir), rec.id, "ops"), { code: "EISDIR" });
 
   assert.deepEqual(readFileSync(path), before);
 });

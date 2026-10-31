@@ -1894,3 +1894,21 @@ test("importing gateway.ts with a bad VETINARI_GATEWAY_STATUS_PORT does not thro
   );
   assert.equal(r.status, 0, r.stderr);
 });
+
+/** `ANNOUNCE_INTERVAL_MS` as a fresh import of gateway.ts reads it with `VETINARI_GATEWAY_ANNOUNCE_MS=value`. */
+function announceIntervalImportedWith(value: string): number {
+  const gateway = JSON.stringify(join(import.meta.dirname, "gateway.ts"));
+  const r = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "-e", `const g = await import(${gateway}); process.stdout.write(String(g.ANNOUNCE_INTERVAL_MS));`],
+    { env: { ...process.env, VETINARI_GATEWAY_ANNOUNCE_MS: value }, encoding: "utf8" },
+  );
+  assert.equal(r.status, 0, r.stderr);
+  return Number(r.stdout);
+}
+
+test("VETINARI_GATEWAY_ANNOUNCE_MS: a non-numeric value falls back to the default 5000; a finite one keeps the 1000 floor", () => {
+  assert.equal(announceIntervalImportedWith("abc"), 5000);
+  assert.equal(announceIntervalImportedWith("200"), 1000);
+  assert.equal(announceIntervalImportedWith("7000"), 7000);
+});

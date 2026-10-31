@@ -881,7 +881,7 @@ const repoWithIgnoredCache = (): string => {
   return root;
 };
 
-test("defaultFileSet resolves a pinned cite against git's files, not a gitignored cache sharing its suffix (#498)", () => {
+test("defaultFileSet resolves a directory-qualified cite against git's files, not a gitignored cache sharing its suffix (#498)", () => {
   const res = defaultFileSet(repoWithIgnoredCache())("Touches (existing files): `e2e/README.md`\n");
 
   assert.deepEqual(res.files, ["e2e/README.md"]);
@@ -941,6 +941,29 @@ test("defaultFileSet indexes neither an untracked nested git repository nor its 
 
   assert.deepEqual(res.files, []);
   assert.equal(res.confident, false);
+});
+
+test("defaultFileSet ignores an un-ignored .vetinari.local, so a directory-qualified cite stays resolved (#638)", () => {
+  const root = gitRepoWith({ tracked: ["e2e/README.md", "README.md"], untracked: [".vetinari.local/x/e2e/README.md"] });
+
+  const res = defaultFileSet(root)("Touches: `e2e/README.md`\n");
+
+  assert.deepEqual(res.files, ["e2e/README.md"]);
+  assert.equal(res.confident, true);
+});
+
+test("defaultFileSet does not index a submodule's gitlink path, so a cite of it is not confident (#638)", () => {
+  const root = gitRepoWith({ tracked: ["a.ts"] });
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  git("update-index", "--add", "--cacheinfo", `160000,${git("rev-parse", "HEAD")},vendor/sub`);
+  const fileSet = defaultFileSet(root);
+
+  const res = fileSet("Touches: `vendor/sub`\n");
+  assert.deepEqual(res.files, []);
+  assert.equal(res.confident, false);
+
+  // A tracked regular file beside it still resolves.
+  assert.deepEqual(fileSet("Touches: `a.ts`\n").files, ["a.ts"]);
 });
 
 test("defaultFileSet resolves a rooted Touches: cite to the root file, beside same-named deeper files (#627)", async () => {

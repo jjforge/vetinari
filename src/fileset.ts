@@ -256,16 +256,27 @@ function treePathIndex(root: string): Map<string, string[]> {
 
 /**
  * The root-relative files `git ls-files` lists at `root`, or null when `root` is not in
- * a git work tree (or git fails). `-z` keeps non-ASCII paths unquoted; a trailing-`/`
- * entry is an untracked nested repository, whose files are not cite targets.
+ * a git work tree (or git fails). `-z` keeps non-ASCII paths unquoted. `--stage` prefixes
+ * each tracked entry with `<mode> <sha> <stage>\t`, which marks a submodule's gitlink
+ * (mode 160000); untracked entries come bare. Not cite targets: a gitlink, a trailing-`/`
+ * entry (an untracked nested repository), and anything under a `.vetinari.local`
+ * directory, even when the project does not gitignore it.
  */
 function gitTreeFiles(root: string): string[] | null {
   try {
-    const out = gitRead(["ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
+    const out = gitRead(["ls-files", "-z", "--stage", "--cached", "--others", "--exclude-standard"], {
       cwd: root,
       stdio: ["ignore", "pipe", "ignore"],
     });
-    return out.split("\0").filter((p) => p !== "" && !p.endsWith("/"));
+    const files: string[] = [];
+    for (const entry of out.split("\0")) {
+      const staged = /^(\d{6}) [0-9a-f]+ \d\t(.*)$/s.exec(entry);
+      const path = staged ? staged[2] : entry;
+      if (path === "" || path.endsWith("/") || staged?.[1] === "160000") continue;
+      if (path.split("/").includes(".vetinari.local")) continue;
+      files.push(path);
+    }
+    return files;
   } catch {
     return null;
   }

@@ -34,5 +34,9 @@ export default defineConfig({
   // their basename, and validates them against the tree — so this repo runs on the
   // one shared resolver rather than a second one that can drift from it.
 
+  // A long, sectioned reference most tickets touch one row of: co-wave edits to
+  // different rows merge cleanly, so it does not split tickets into waves.
+  waivedFiles: ["docs/reference.md"],
+
   toolchainProbe: "node --version && npm --version && claude --version && git --version",
 });

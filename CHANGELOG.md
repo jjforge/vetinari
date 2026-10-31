@@ -21,11 +21,17 @@ Within a milestone each bold section label appears at most once.
 
 ### Collected changes — October 31, 2026
 
+**Improvements:**
+- [user] On macOS, `vetinari gateway install` and `gateway status|start|stop|restart` now refuse (exit 4) with a pointer to running `vetinari gateway` in a terminal (or `vetinari status` for the dashboard alone), instead of writing a systemd unit nothing reads or failing on a missing `systemctl` (#647).
+
 **Bug fixes:**
 - [user] The planner no longer serializes tickets whose only overlap is a file at the repo root or a top-level directory. A key with no `/` (a root `NOTES.md` unique in the tree, or `packageScopedFileSet`'s package `pkg`) is now an exact path, so it no longer collides with `docs/NOTES.md` or `internal/pkg`. A cite that names no one path is now spelled as the bare key `*/<name>`, which still collides with every file of that name, and the dry run's file-set listing shows the marker (#486).
 - [ops] `waivedFiles` entries match the new spelling: `README.md` waives only the repo-root file, and an ambiguous `README.md` cite is waived only by `*/README.md` (#486).
 - [ops] Finish or re-launch a campaign that has grafts before upgrading: a `graft` event logged before this change stores its bare keys without the `*/` marker, and they are now read as exact paths (#486).
 - [api] A project's own `fileSet` resolver that emits slash-free bare basenames must now spell them `*/<name>`, or they read as exact paths. A resolver wrapping `defaultFileSet` is unaffected (#486).
+
+**Infrastructure:**
+- [internal] CI gains a `gates-macos` job (`macos-latest`, Node 22) running typecheck, format check and the suite, so host-side breakage on a Mac is caught (#647).
 
 ### Collected changes — October 30, 2026
 

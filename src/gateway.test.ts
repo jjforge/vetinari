@@ -510,6 +510,20 @@ test("pollLoop advances the offset it passes to the poller across cycles", async
   assert.deepEqual(offsets, [2, 5, 9]);
 });
 
+test("pollLoop reports each offset it advances to before polling again, so a later poll throw keeps that progress", async () => {
+  const reported: number[] = [];
+  const results = [{ offset: 7, messages: [] }];
+  const poll = async () => {
+    const r = results.shift();
+    if (!r) throw new Error("network down");
+    return r;
+  };
+
+  await assert.rejects(pollLoop(conn, newReplyIndex(), noPending(), { poll, resume: () => {}, onOffset: (o) => reported.push(o) }));
+
+  assert.deepEqual(reported, [7]);
+});
+
 test("pollLoop survives a throwing handler: logs it by bot id, handles the next message, and keeps polling", async () => {
   const botConn: TgConn = { token: "123456789:SECRET", chat: "-1" };
   const logger = memoryLogger();
@@ -583,17 +597,19 @@ const ticksThenStop = (n: number) => {
 };
 
 // Each started loop runs until the test ends it: `end(offset)` resolves it with
-// the offset it reached, `fail(error)` rejects it.
+// the offset it reached, `fail(error)` rejects it, and `advance(offset)` reports
+// progress while it is still running.
 const recordingStart = () => {
   const started: Array<{
     token: string;
     signal: AbortSignal;
     offset: number;
+    advance: (offset: number) => void;
     end: (offset: number) => void;
     fail: (error: Error) => void;
   }> = [];
-  const start = (conn: TgConn, signal: AbortSignal, offset: number) =>
-    new Promise<number>((end, fail) => started.push({ token: conn.token, signal, offset, end, fail }));
+  const start = (conn: TgConn, signal: AbortSignal, offset: number, advance: (offset: number) => void) =>
+    new Promise<number>((end, fail) => started.push({ token: conn.token, signal, offset, advance, end, fail }));
   return { started, start };
 };
 
@@ -698,6 +714,24 @@ test("supervisePolls restarts a loop that rejected", async () => {
   assert.deepEqual(
     started.map((s) => s.token),
     ["botA", "botA"],
+  );
+});
+
+test("supervisePolls restarts a loop that rejected from the offset it had advanced to", async () => {
+  const { started, start } = recordingStart();
+
+  await supervisePolls(
+    scriptedTargets([[{ token: "botA", chat: "-1" }]]),
+    start,
+    ticksDoing(() => {
+      started[0].advance(7);
+      started[0].fail(new Error("boom"));
+    }),
+  );
+
+  assert.deepEqual(
+    started.map((s) => s.offset),
+    [0, 7],
   );
 });
 
@@ -845,9 +879,9 @@ test("trackPollTicks records a poll loop's start and each returned cycle, and dr
 test("a poll loop that ends on its own leaves /healthz once its token is deregistered before the next pass", async () => {
   const ticks = newGatewayTicks(HEALTH_NOW);
   const { started, start } = recordingStart();
-  const tracked = (conn: TgConn, signal: AbortSignal, offset: number) => {
+  const tracked = (conn: TgConn, signal: AbortSignal, offset: number, advance: (offset: number) => void) => {
     trackPollTicks(ticks, conn, signal, async (_c, o) => ({ offset: o, messages: [] }));
-    return start(conn, signal, offset);
+    return start(conn, signal, offset, advance);
   };
 
   await supervisePolls(

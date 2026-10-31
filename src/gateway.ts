@@ -766,6 +766,8 @@ export interface PollDeps {
   signal?: AbortSignal;
   /** Where a message whose routing or handler threw is logged (`gateway-handler-error`) before the loop moves on. */
   logger?: Logger;
+  /** Told the offset the loop has routed past after each batch — the supervisor's `advance`, so a loop that later rejects still hands its progress on. */
+  onOffset?: (offset: number) => void;
 }
 
 /**
@@ -775,8 +777,9 @@ export interface PollDeps {
  * each message through `routeReply` and hands the decision to the injected seams,
  * so several answered tasks resume concurrently through `resume`. A throw while
  * routing or handling one message is logged and skipped, so one bad message (or a
- * failing file read behind `/status`) never deafens the bot. Resolves with the
- * offset it reached, so a restarted loop resumes past what this one routed.
+ * failing file read behind `/status`) never deafens the bot. Reports the offset it
+ * reached after each batch (`onOffset`) and resolves with it, so a restarted loop
+ * resumes past what this one routed — even when this one died on a poll throw.
  */
 export async function pollLoop(conn: TgConn, index: ReplyIndex, pending: PendingConfirms, deps: PollDeps, offset = 0): Promise<number> {
   for (;;) {
@@ -796,6 +799,7 @@ export async function pollLoop(conn: TgConn, index: ReplyIndex, pending: Pending
         deps.logger?.log("gateway-handler-error", { bot: botId(conn), error: String(e) });
       }
     }
+    deps.onOffset?.(offset);
   }
 }
 
@@ -811,14 +815,16 @@ export function logPollLoopError(log: Logger, conn: TgConn, e: unknown): void {
  * rotated or newly-registered bot is polled without a restart, and a token a
  * project rotated away from or deregistered stops being polled. A token present
  * across passes keeps its one loop, so its update offset is preserved. A loop that
- * ends on its own (resolves or rejects) is dropped, so the next pass restarts it
- * from the offset it reached rather than leaving the bot deaf. `targets`,
+ * ends on its own (resolves or rejects) is dropped and its signal aborted, so the
+ * next pass restarts it from the offset it reached rather than leaving the bot
+ * deaf. A loop reports that offset through `advance` as it goes (and by resolving
+ * with it), so a loop that rejects still hands its progress on. `targets`,
  * `start`, and `tick` are injected; the real daemon reads targets live and `tick`
  * sleeps one reconcile interval (never returning false, so it supervises forever).
  */
 export async function supervisePolls(
   targets: () => TgConn[],
-  start: (conn: TgConn, signal: AbortSignal, offset: number) => Promise<number>,
+  start: (conn: TgConn, signal: AbortSignal, offset: number, advance: (offset: number) => void) => Promise<number>,
   tick: () => Promise<boolean>,
 ): Promise<void> {
   const active = new Map<string, AbortController>();
@@ -841,8 +847,9 @@ export async function supervisePolls(
         controller.abort();
         if (active.get(conn.token) === controller) active.delete(conn.token);
       };
-      start(conn, controller.signal, offsets.get(conn.token) ?? 0).then((reached) => {
-        offsets.set(conn.token, Math.max(offsets.get(conn.token) ?? 0, reached));
+      const advance = (reached: number) => offsets.set(conn.token, Math.max(offsets.get(conn.token) ?? 0, reached));
+      start(conn, controller.signal, offsets.get(conn.token) ?? 0, advance).then((reached) => {
+        advance(reached);
         ended();
       }, ended);
     }
@@ -1154,7 +1161,7 @@ export async function gateway(configDir: string = gatewayConfigDir()): Promise<v
   // token vanished. Each loop reads its send connection fresh from the token the
   // supervisor handed it, so a rotated token's replies and in-loop sends both ride
   // the live connection rather than the one captured at startup.
-  const startPollLoop = (conn: TgConn, signal: AbortSignal, offset: number) => {
+  const startPollLoop = (conn: TgConn, signal: AbortSignal, offset: number, advance: (offset: number) => void) => {
     const backoff = newPollBackoff();
     return pollLoop(
       conn,
@@ -1189,6 +1196,7 @@ export async function gateway(configDir: string = gatewayConfigDir()): Promise<v
         },
         signal,
         logger: log,
+        onOffset: advance,
       },
       offset,
     ).catch((e) => {

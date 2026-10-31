@@ -946,7 +946,9 @@ export function trackPollTicks(
 // the shared install. Telegram send/poll and the resume shell-out are the only
 // side effects here; everything they decide comes from the pure functions.
 
-export const ANNOUNCE_INTERVAL_MS = Math.max(1000, Number(process.env.VETINARI_GATEWAY_ANNOUNCE_MS ?? 5000));
+const announceIntervalEnvMs = Number(process.env.VETINARI_GATEWAY_ANNOUNCE_MS ?? 5000);
+// A value that is not a finite number falls back to the default; a finite one is floored at 1000.
+export const ANNOUNCE_INTERVAL_MS = Number.isFinite(announceIntervalEnvMs) ? Math.max(1000, announceIntervalEnvMs) : 5000;
 // How often the poll supervisor re-derives its targets from the live registry so
 // a rotated or newly-registered bot is picked up without a restart. Shares the
 // announce cadence — the same "read everything fresh each tick" beat.

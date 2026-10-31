@@ -4,15 +4,17 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**
- * Every environment variable name a source text reads or sets: each `process.env.NAME`, each
- * `process.env["NAME"]`, and each string assigned to an exported `*_ENV_VAR` constant (read
+ * Every environment variable name a source text reads or sets: each `process.env.NAME` and
+ * `process.env["NAME"]`, the same reads through an injected env object (`env.NAME`,
+ * `env["NAME"]`), and each string assigned to an exported `*_ENV_VAR` constant (read
  * back through `process.env[CONST]`).
  */
 function envVarsInSource(src: string): Set<string> {
   const names = new Set<string>();
   const patterns = [
-    /process\.env\.([A-Z_][A-Z0-9_]*)/g,
-    /process\.env\[\s*["'`]([A-Z_][A-Z0-9_]*)["'`]\s*\]/g,
+    // `process.env.X` and an injected `env.X` alike — `\b` admits the `.` before `env`.
+    /\benv\.([A-Z_][A-Z0-9_]*)/g,
+    /\benv\[\s*["'`]([A-Z_][A-Z0-9_]*)["'`]\s*\]/g,
     /export\s+const\s+[A-Z0-9_]*_ENV_VAR\s*=\s*["'`]([A-Z_][A-Z0-9_]*)["'`]/g,
   ];
   for (const re of patterns) for (const m of src.matchAll(re)) names.add(m[1]);
@@ -32,6 +34,15 @@ test("the env collector finds process.env reads, bracket reads and exported *_EN
     `process.env[k] = v; // dynamic — not a name`,
   ].join("\n");
   assert.deepEqual([...envVarsInSource(src)].sort(), ["BAZ", "FOO_BAR", "QUX_1"]);
+});
+
+test("the env collector finds reads through an injected env object, dotted and bracketed", () => {
+  const src = [
+    `const port = env.FOO ?? env.STATUS_PORT;`,
+    `const token = env["BAR_2"];`,
+    `const lower = env.notAVar; // lower-case — not an env name`,
+  ].join("\n");
+  assert.deepEqual([...envVarsInSource(src)].sort(), ["BAR_2", "FOO", "STATUS_PORT"]);
 });
 
 test("a variable the source reads but the section omits is named as undocumented", () => {

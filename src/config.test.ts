@@ -897,6 +897,21 @@ for (const dockerfile of ["../templates/Dockerfile", "../vetinari/Dockerfile", "
   });
 }
 
+// `cursor` and `opencode` are selectable but their CLIs are not shipped (#521): the comment above
+// the agent-CLI install says so, naming both binaries, so a project knows to add the one it uses.
+for (const dockerfile of ["../templates/Dockerfile", "../vetinari/Dockerfile"]) {
+  test(`${dockerfile}'s agent-CLI comment says cursor-agent and opencode are not installed`, () => {
+    const lines = readFileSync(new URL(dockerfile, import.meta.url), "utf8").split("\n");
+    const install = lines.findIndex((l) => /^RUN npm install -g /.test(l) && l.includes("@github/copilot"));
+    let start = install;
+    while (start > 0 && lines[start - 1].startsWith("#")) start--;
+    const comment = lines.slice(start, install).join("\n");
+    assert.match(comment, /`cursor-agent`/, `${dockerfile}: the agent-CLI comment does not name cursor-agent`);
+    assert.match(comment, /`opencode`/, `${dockerfile}: the agent-CLI comment does not name opencode`);
+    assert.match(comment, /not installed/, `${dockerfile}: the agent-CLI comment does not say they are not installed`);
+  });
+}
+
 for (const template of ["../templates/config.mts", "../templates/config.github.mts"]) {
   test(`${template}'s agent: comment names copilot among the providers`, () => {
     const text = readFileSync(new URL(template, import.meta.url), "utf8");

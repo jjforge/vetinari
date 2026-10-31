@@ -33,7 +33,7 @@ export interface DashboardDomPage {
 
 /** A stubbed Response, with `url` set as a followed redirect would leave it (the page navigates to it). */
 export const dashboardReply = (status: number, body = "", url = "") => {
-  const res = new Response(status === 204 ? null : body, { status });
+  const res = new Response(body, { status });
   Object.defineProperty(res, "url", { value: url });
   return res;
 };

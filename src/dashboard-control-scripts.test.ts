@@ -44,7 +44,6 @@ const graftParts = (page: DashboardDomPage) => {
   const form = input.closest("form")!;
   return {
     input,
-    form,
     button: form.querySelector<HTMLButtonElement>("button[type=submit]")!,
     message: form.querySelector<HTMLElement>("[data-graft-error]")!,
   };
@@ -124,4 +123,123 @@ test("graft: any other failure shows the route's trimmed body and keeps the type
   assert.equal(message.textContent, "couldn't reach graft for beta");
   assert.equal(input.value, "7");
   assert.equal(button.disabled, false);
+});
+
+// A campaign parked on a red base with no live process — the Redrive control enables.
+const parkedCampaign: CampaignStatus = {
+  project: "beta",
+  name: "checkout revamp",
+  waves: [
+    { index: 0, status: "completed", issues: [{ issueNumber: "101", status: "completed" }] },
+    { index: 1, status: "parked", reason: "red-base", issues: [{ issueNumber: "201", status: "completed" }] },
+  ],
+  parked: [],
+};
+const parkedPage = () => renderStatusPage(parkedCampaign, { graft: true, leaseLive: false, baseBranch: "main" });
+// Open the Redrive confirm dialog by a real click on its button, returning its parts.
+const openRedrive = (page: DashboardDomPage) => {
+  page.document.querySelector<HTMLButtonElement>("[data-redrive-open]")!.click();
+  const dialog = page.document.querySelector<HTMLDialogElement>("dialog[data-redrive-dialog]")!;
+  return {
+    dialog,
+    confirm: dialog.querySelector<HTMLButtonElement>("[data-redrive-confirm]")!,
+    status: dialog.querySelector<HTMLElement>('[role="status"]')!,
+  };
+};
+
+test("redrive: confirming the dialog POSTs the project, and a 2xx navigates to the response URL", async (t) => {
+  const page = loadDashboardPage(t, parkedPage(), (call) =>
+    call.url === "/redrive" ? dashboardReply(200, "", "http://dashboard.test/beta?redriven") : undefined,
+  );
+  const { dialog, confirm } = openRedrive(page);
+  assert.equal(dialog.open, true, "the Redrive button opens the confirm dialog");
+  confirm.click();
+  await page.settle();
+  assert.deepEqual(page.calls.at(-1), { url: "/redrive", method: "POST", body: "project=beta" });
+  assert.equal(page.window.location.href, "http://dashboard.test/beta?redriven");
+});
+
+test("redrive: Cancel closes the dialog without sending anything", async (t) => {
+  const page = loadDashboardPage(t, parkedPage(), () => undefined);
+  const { dialog } = openRedrive(page);
+  dialog.querySelector<HTMLButtonElement>("[data-redrive-cancel]")!.click();
+  await page.settle();
+  assert.equal(dialog.open, false);
+  assert.deepEqual(
+    page.calls.map((c) => c.url),
+    ["/api/host-log"],
+  );
+});
+
+test("redrive: a 202 shows the route's note in the dialog's status and holds Confirm disabled", async (t) => {
+  const page = loadDashboardPage(t, parkedPage(), (call) =>
+    call.url === "/redrive" ? dashboardReply(202, "redrive started — still starting up\n") : undefined,
+  );
+  const { confirm, status } = openRedrive(page);
+  confirm.click();
+  await page.settle();
+  assert.equal(status.hidden, false);
+  assert.equal(status.textContent, "redrive started — still starting up");
+  assert.equal(confirm.disabled, true);
+  assert.equal(page.window.location.href, "http://dashboard.test/beta", "a 202 does not navigate");
+});
+
+test("redrive: a refusal shows the route's words, or the fallback when it sent none", async (t) => {
+  for (const [body, shown] of [
+    ["a campaign is still running in beta", "a campaign is still running in beta"],
+    ["", "The redrive did not start."],
+  ]) {
+    const page = loadDashboardPage(t, parkedPage(), (call) => (call.url === "/redrive" ? dashboardReply(409, body) : undefined));
+    const { confirm, status } = openRedrive(page);
+    confirm.click();
+    await page.settle();
+    assert.equal(status.hidden, false);
+    assert.equal(status.textContent, shown);
+    assert.equal(confirm.disabled, false, "a refusal leaves Confirm to try again");
+    assert.equal(page.window.location.href, "http://dashboard.test/beta");
+  }
+});
+
+// Open the Stop confirm dialog by a real click on its button, returning its parts.
+const openStop = (page: DashboardDomPage) => {
+  page.document.querySelector<HTMLButtonElement>("[data-stop-open]")!.click();
+  const dialog = page.document.querySelector<HTMLDialogElement>("dialog[data-stop-dialog]")!;
+  const button = (label: string) => Array.from(dialog.querySelectorAll("button")).find((b) => b.textContent === label)!;
+  return { dialog, button, status: dialog.querySelector<HTMLElement>('[role="status"]')! };
+};
+
+test("stop: Stop after this wave POSTs the project alone, and a 2xx navigates to the response URL", async (t) => {
+  const page = loadDashboardPage(t, runningPage(), (call) =>
+    call.url === "/stop" ? dashboardReply(200, "", "http://dashboard.test/beta?stopped") : undefined,
+  );
+  const { dialog, button } = openStop(page);
+  assert.equal(dialog.open, true, "the Stop button opens the confirm dialog");
+  button("Stop after this wave").click();
+  await page.settle();
+  assert.deepEqual(page.calls.at(-1), { url: "/stop", method: "POST", body: "project=beta" });
+  assert.equal(page.window.location.href, "http://dashboard.test/beta?stopped");
+});
+
+test("stop: Stop now carries now=1 in the body", async (t) => {
+  const page = loadDashboardPage(t, runningPage(), (call) =>
+    call.url === "/stop" ? dashboardReply(200, "", "http://dashboard.test/beta?stopped") : undefined,
+  );
+  openStop(page).button("Stop now").click();
+  await page.settle();
+  assert.deepEqual(page.calls.at(-1), { url: "/stop", method: "POST", body: "project=beta&now=1" });
+  assert.equal(page.window.location.href, "http://dashboard.test/beta?stopped");
+});
+
+test("stop: a failure shows the route's words in the dialog and restores both stop buttons", async (t) => {
+  const page = loadDashboardPage(t, runningPage(), (call) =>
+    call.url === "/stop" ? dashboardReply(409, "no campaign is running in beta\n") : undefined,
+  );
+  const { button, status } = openStop(page);
+  button("Stop now").click();
+  await page.settle();
+  assert.equal(status.hidden, false);
+  assert.equal(status.textContent, "no campaign is running in beta");
+  assert.equal(button("Stop now").disabled, false);
+  assert.equal(button("Stop after this wave").disabled, false);
+  assert.equal(page.window.location.href, "http://dashboard.test/beta");
 });

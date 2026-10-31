@@ -135,17 +135,32 @@ test("defaultFileSet resolves a bare filename to its real path when the tree hol
   assert.equal(bare.confident, true);
 });
 
-test("defaultFileSet keeps an ambiguous bare cite as a basename, still confident", () => {
+test("defaultFileSet keeps an ambiguous bare cite as a bare key, still confident", () => {
   const root = treeWith("a/foo.md", "b/foo.md", "c/foo.md");
   const fileSet = defaultFileSet(root);
 
   // Three files named foo.md and only a bare `foo.md` to go on — genuinely
   // ambiguous. It must NOT flip the ticket to not-confident (halting a ticket that
-  // plans fine today); it stays a bare basename that collides with any foo.md.
+  // plans fine today); it stays a bare key, `*/foo.md`, that collides with any foo.md.
   const res = fileSet("Touches: `foo.md`\n");
 
-  assert.deepEqual(res.files, ["foo.md"]);
+  assert.deepEqual(res.files, ["*/foo.md"]);
   assert.equal(res.confident, true);
+});
+
+test("defaultFileSet's whole-body fallback keeps an ambiguous cite as a bare key (#486)", () => {
+  const root = treeWith("a/foo.md", "b/foo.md");
+
+  const res = defaultFileSet(root)("Reworks `foo.md` throughout.");
+
+  assert.deepEqual(res.files, ["*/foo.md"]);
+  assert.equal(res.confident, true);
+});
+
+test("defaultFileSet keys a repo-root file unique in the tree to its exact, unmarked path (#486)", () => {
+  const root = treeWith("NOTES.md", "docs/guide.md");
+
+  assert.deepEqual(defaultFileSet(root)("Touches: `NOTES.md`\n").files, ["NOTES.md"]);
 });
 
 test("packageScopedFileSet maps two files in one directory to the same key, so same-package tickets serialize", async () => {
@@ -206,6 +221,16 @@ test("packageScopedFileSet puts a Creates: and a Touches: in one package into se
   });
 
   assert.deepEqual(waves, [["1"], ["2"]]);
+});
+
+test("packageScopedFileSet keeps a top-level package and a same-named nested one in one wave (#486)", async () => {
+  // `pkg` and `internal/pkg` are different packages. The top-level key has no `/`, but it
+  // is a resolved path, not a bare key, so it must not collide with every `pkg`.
+  const fileSet = packageScopedFileSet(treeWith("pkg/a.go", "internal/pkg/b.go"));
+
+  const waves = await wavesOf(fileSet, { "1": "Touches: `pkg/a.go`\n", "2": "Touches: `internal/pkg/b.go`\n" });
+
+  assert.deepEqual(waves, [["1", "2"]]);
 });
 
 test("packageScopedFileSet keys a Creates: cite to the tree directory its directory suffix-matches", async () => {
@@ -635,7 +660,7 @@ test("defaultFileSet is confident about a ticket that only creates new files, ab
   // yet. A `Creates:` cite is legitimately absent, so absence must not read as a typo.
   const res = fileSet("Creates (new files): `event-log.ts`, `event-log.test.ts`\n");
 
-  assert.deepEqual(res.files.sort(), ["event-log.test.ts", "event-log.ts"]);
+  assert.deepEqual(res.files.sort(), ["*/event-log.test.ts", "*/event-log.ts"]);
   assert.equal(res.confident, true);
 });
 
@@ -645,7 +670,7 @@ test("defaultFileSet unions a Touches line (existing) with a Creates line (new)"
 
   const res = fileSet("Touches: `status.ts`\nCreates (new files): `event-log.ts`\n");
 
-  assert.deepEqual(res.files.sort(), ["event-log.ts", "src/status.ts"]);
+  assert.deepEqual(res.files.sort(), ["*/event-log.ts", "src/status.ts"]);
   assert.equal(res.confident, true);
 });
 
@@ -657,7 +682,7 @@ test("defaultFileSet keeps Touches strictness even alongside a Creates line", ()
   // A valid Creates line must not launder that miss into confidence.
   const res = fileSet("Touches: `status.ts`, `ghost.ts`\nCreates: `event-log.ts`\n");
 
-  assert.deepEqual(res.files.sort(), ["event-log.ts", "src/status.ts"]);
+  assert.deepEqual(res.files.sort(), ["*/event-log.ts", "src/status.ts"]);
   assert.equal(res.confident, false);
 });
 
@@ -743,21 +768,21 @@ test("defaultFileSet keys a Creates: cite under a new directory to its cited pat
   assert.equal(res.confident, true);
 });
 
-test("defaultFileSet keys a Creates: cite whose directory matches several tree directories to the bare basename (#480)", () => {
+test("defaultFileSet keys a Creates: cite whose directory matches several tree directories to a bare key (#480, #486)", () => {
   const root = treeWith("internal/web/server.go", "cmd/web/main.go");
 
   const res = defaultFileSet(root)("Creates: `web/health.go`\n");
 
-  assert.deepEqual(res.files, ["health.go"]);
+  assert.deepEqual(res.files, ["*/health.go"]);
   assert.equal(res.confident, true);
 });
 
-test("defaultFileSet keeps a bare Creates: cite (and a ./-prefixed one) as its basename (#480)", () => {
+test("defaultFileSet keeps a bare Creates: cite (and a ./-prefixed one) as a bare key (#480, #486)", () => {
   const root = treeWith("src/a/x.ts");
   const fileSet = defaultFileSet(root);
 
-  assert.deepEqual(fileSet("Creates: `x.ts`\n").files, ["x.ts"]);
-  assert.deepEqual(fileSet("Creates: `./x.ts`\n").files, ["x.ts"]);
+  assert.deepEqual(fileSet("Creates: `x.ts`\n").files, ["*/x.ts"]);
+  assert.deepEqual(fileSet("Creates: `./x.ts`\n").files, ["*/x.ts"]);
 });
 
 test("defaultFileSet counts an extensionless Creates: cite, tree-exempt (#477)", () => {
@@ -765,7 +790,7 @@ test("defaultFileSet counts an extensionless Creates: cite, tree-exempt (#477)",
 
   const res = defaultFileSet(root)("Creates (new files): `Dockerfile`\n");
 
-  assert.deepEqual(res.files, ["Dockerfile"]);
+  assert.deepEqual(res.files, ["*/Dockerfile"]);
   assert.equal(res.confident, true);
 });
 
@@ -794,18 +819,23 @@ test("defaultFileSet recovers an extensionless marker cite fenced by escaped bac
 });
 
 test("waiveFileSet drops a fileKey exactly equal to a waived entry and names it, keeping confidence", async () => {
+  // `DESIGN.md` is ambiguous in this tree, so it resolves to the bare key `*/DESIGN.md` —
+  // and only an entry spelled with the marker waives it (#486).
   const root = treeWith("DESIGN.md", "docs/guide/DESIGN.md", "src/plan.ts");
-  const fileSet = waiveFileSet(defaultFileSet(root), ["DESIGN.md"], root);
+  const fileSet = waiveFileSet(defaultFileSet(root), ["*/DESIGN.md"], root);
 
   assert.deepEqual(await fileSet("Touches: `src/plan.ts`, `DESIGN.md`"), {
     files: ["src/plan.ts"],
     confident: true,
-    waived: ["DESIGN.md"],
+    waived: ["*/DESIGN.md"],
   });
   // Exact match only: `docs/guide/DESIGN.md` shares the basename but is not the waived entry.
   assert.deepEqual(await fileSet("Touches: `guide/DESIGN.md`"), { files: ["docs/guide/DESIGN.md"], confident: true, waived: [] });
   // A ticket citing only the waived file keeps the resolver's confident verdict.
-  assert.deepEqual(await fileSet("Touches: `DESIGN.md`"), { files: [], confident: true, waived: ["DESIGN.md"] });
+  assert.deepEqual(await fileSet("Touches: `DESIGN.md`"), { files: [], confident: true, waived: ["*/DESIGN.md"] });
+  // An unmarked entry is an exact path, so it no longer waives the bare key.
+  const unmarked = waiveFileSet(defaultFileSet(root), ["DESIGN.md"], root);
+  assert.deepEqual(await unmarked("Touches: `DESIGN.md`"), { files: ["*/DESIGN.md"], confident: true, waived: [] });
 });
 
 test("waiveFileSet refuses an entry that is a directory in the tree, naming it; ignores one the tree lacks", async () => {

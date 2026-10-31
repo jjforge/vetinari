@@ -12,26 +12,34 @@
  * path, so two distinct files at `a/b/c/foo.md` and `a/c/foo.md` no longer read as a
  * collision, while a bare `fileset.ts` and a path `src/fileset.ts` still resolve to
  * the one path and collide (user story 6, the authoring promise). A cite the tree
- * holds under several paths is genuinely ambiguous: it is kept as a bare basename
- * (still confident) and collides with any file of that name — today's semantics for
- * that one cite. `Creates:` cites name files not yet in the tree, so their
- * *directory* is resolved instead, by the same longest-suffix match against the
- * tree's directories: `a/index.ts` with `src/a` in the tree keys to `src/a/index.ts`,
- * so it collides with a `Touches:` of that file but not with an `index.ts` created in
- * another directory. A directory the tree lacks keeps the cited path; one matching
- * several tree directories, or a bare cite, keeps the bare basename.
+ * holds under several paths is genuinely ambiguous: it is kept as a **bare key**,
+ * spelled `*\/<name>` ("this name in any directory", still confident), which collides
+ * with any file of that name. A key that resolved to one path stays an unmarked path —
+ * a repo-root file included, though it has no `/`. `Creates:` cites name files not yet
+ * in the tree, so their *directory* is resolved instead, by the same longest-suffix
+ * match against the tree's directories: `a/index.ts` with `src/a` in the tree keys to
+ * `src/a/index.ts`, so it collides with a `Touches:` of that file but not with an
+ * `index.ts` created in another directory. A directory the tree lacks keeps the cited
+ * path; one matching several tree directories, or a bare cite, keys to a bare key.
  */
 import { readdirSync, statSync } from "node:fs";
 import { join, posix, relative, sep } from "node:path";
 import { gitRead } from "./git-read.ts";
 import { Refusal } from "./refusal.ts";
 
+/** The prefix that spells a **bare key**: `*\/<name>`, "this name in any directory". */
+export const BARE_KEY_MARKER = "*/";
+
+/** The bare key for a file `name`: the name marked as standing for any directory. */
+const bareKey = (name: string): string => `${BARE_KEY_MARKER}${name}`;
+
 export interface FileSet {
   /**
    * the fileKeys this ticket will touch: each `Touches:` cite resolved to its real
    * repo-relative path, each `Creates:` cite to its resolved directory plus its
-   * basename (or the cited path, under a directory the tree lacks), or a bare
-   * basename when the cite was bare or ambiguous — never the raw cited path.
+   * basename (or the cited path, under a directory the tree lacks), or a bare key
+   * `*\/<name>` ({@link BARE_KEY_MARKER}) when the cite was bare or ambiguous — never the
+   * raw cited path. An unmarked key is an exact path, even with no `/`.
    */
   files: string[];
   /**
@@ -301,15 +309,15 @@ function longestSuffixMatches(segments: string[], candidates: string[]): string[
  *   - the tree holds exactly one file with the cite's basename -> that real path;
  *   - several share the basename but the cite's trailing segments pin exactly one ->
  *     that path (`a/b/c/foo.md` picks the `…/b/c/foo.md` of two `foo.md`s);
- *   - several remain and the cite cannot narrow to one -> the bare basename, kept as
- *     an ambiguous fileKey that collides with any file of that name;
+ *   - several remain and the cite cannot narrow to one -> the bare key `*\/<name>`,
+ *     which collides with any file of that name;
  *   - no file carries the basename at all -> null (absent — forbids confidence).
  */
 function resolveCite(cite: string, index: Map<string, string[]>): string | null {
   const matches = citeMatches(cite, index);
   if (matches === null) return null;
-  // One match resolves; more than one is ambiguous and degrades to the bare basename.
-  return matches.length === 1 ? matches[0] : posix.basename(matches[0]);
+  // One match resolves; more than one is ambiguous and degrades to a bare key.
+  return matches.length === 1 ? matches[0] : bareKey(posix.basename(matches[0]));
 }
 
 /**
@@ -344,10 +352,10 @@ function treeDirIndex(files: Map<string, string[]>): Map<string, string[]> {
  * Resolve one `Creates:` cite to its fileKey. The file does not exist yet, so its
  * *directory* is resolved instead, by longest suffix match against the tree's
  * directories (a leading `./` dropped first):
- *   - a bare cite (no directory) -> the bare basename;
+ *   - a bare cite (no directory) -> the bare key `*\/<name>`;
  *   - exactly one tree directory matches -> that directory + the basename, a full path
  *     (`a/foo.ts` with `src/a` in the tree -> `src/a/foo.ts`);
- *   - several match at the longest suffix reached -> the bare basename, ambiguous as an
+ *   - several match at the longest suffix reached -> the bare key, ambiguous as an
  *     ambiguous `Touches:` cite is;
  *   - none matches (a new directory) -> the cited path as written.
  * Never null: a new file is legitimately absent, so it never forbids confidence.
@@ -356,11 +364,11 @@ function resolveCreatesCite(cite: string, dirIndex: Map<string, string[]>): stri
   const path = cite.replace(/^(?:\.\/)+/, "");
   const segments = path.split("/").filter(Boolean);
   const base = segments[segments.length - 1];
-  if (segments.length === 1) return base;
+  if (segments.length === 1) return bareKey(base);
   const dirSegments = segments.slice(0, -1);
   const matches = longestSuffixMatches(dirSegments, dirIndex.get(dirSegments[dirSegments.length - 1]) ?? []);
   if (matches.length === 0) return path;
-  return matches.length === 1 ? `${matches[0]}/${base}` : base;
+  return matches.length === 1 ? `${matches[0]}/${base}` : bareKey(base);
 }
 
 /**

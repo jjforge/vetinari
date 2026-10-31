@@ -16,7 +16,7 @@
  */
 import { computePrune, restrictBlockers, type BlockedByOf } from "./prune.ts";
 import { isIssueToken, normalize } from "./issue-id.ts";
-import { defaultFileSet, ticketProse, waiveFileSet, type FileSet, type FileSetOf } from "./fileset.ts";
+import { BARE_KEY_MARKER, defaultFileSet, ticketProse, waiveFileSet, type FileSet, type FileSetOf } from "./fileset.ts";
 import { Refusal } from "./refusal.ts";
 
 export interface Placement {
@@ -257,16 +257,19 @@ export interface CampaignPlan extends WavePlan {
   fileKeys?: Record<string, string[]>;
 }
 
-/** A fileKey is bare — carries no path, only a basename — when it has no separator:
- *  an ambiguous cite kept as a basename, or a bare `Creates:` cite. */
-const isBareKey = (k: string) => !k.includes("/");
+/** A fileKey is a **bare key** — names a file only by its name, because its cite could not
+ *  be pinned to one path — when it carries the `*\/` marker ({@link BARE_KEY_MARKER}). A key
+ *  with no `/` and no marker (a repo-root file, a top-level package) is an exact path. */
+const isBareKey = (k: string) => k.startsWith(BARE_KEY_MARKER);
 const keyBasename = (k: string) => k.slice(k.lastIndexOf("/") + 1);
 
 /**
- * Whether two fileKeys collide. Two resolved paths collide only when equal — distinct
- * files at `a/b/c/foo.md` and `a/c/foo.md` do not. A bare key (an ambiguous cite, or a
- * bare `Creates:` cite) collides with any key of the same basename, since it names no
- * one path — exactly today's basename semantics for that one cite.
+ * Whether two fileKeys collide. Two exact paths collide only when equal — distinct files
+ * at `a/b/c/foo.md` and `a/c/foo.md` do not, nor do a repo-root `foo.md` and `docs/foo.md`,
+ * nor top-level package `pkg` and `internal/pkg`. A bare key `*\/<name>` — an ambiguous
+ * `Touches:`/`Files:` or whole-body cite, a `Creates:` cite whose directory matches several
+ * tree directories, or a bare `Creates:` cite — collides with every key of that name,
+ * bare or not, since it names no one path.
  */
 const keysCollide = (a: string, b: string) => a === b || (keyBasename(a) === keyBasename(b) && (isBareKey(a) || isBareKey(b)));
 

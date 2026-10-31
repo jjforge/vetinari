@@ -21,8 +21,13 @@ Within a milestone each bold section label appears at most once.
 
 ### Collected changes — October 31, 2026
 
+**New features:**
+- [user] The shipped images now install the GitHub Copilot CLI (`@github/copilot`), so `agent: { provider: "copilot" }` runs in a container built from the `vetinari init` Dockerfile, this repo's own, or the jjforge example (#646). Rebuild with `vetinari build` to pick it up.
+
 **Improvements:**
 - [user] On macOS, `vetinari gateway install` and `gateway status|start|stop|restart` now refuse (exit 4) with a pointer to running `vetinari gateway` in a terminal (or `vetinari status` for the dashboard alone), instead of writing a systemd unit nothing reads or failing on a missing `systemctl` (#647).
+- [user] The `copilot` provider's default model is now `auto`, so Copilot picks among the models your org allows instead of failing on an org that disables Claude models; a configured `agent.model` still wins (#646).
+- [user] The `copilot` provider accepts the Copilot CLI's full effort list — `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` — instead of only `low`..`high`; the default stays `high` (#646).
 
 **Bug fixes:**
 - [user] The planner no longer serializes tickets whose only overlap is a file at the repo root or a top-level directory. A key with no `/` (a root `NOTES.md` unique in the tree, or `packageScopedFileSet`'s package `pkg`) is now an exact path, so it no longer collides with `docs/NOTES.md` or `internal/pkg`. A cite that names no one path is now spelled as the bare key `*/<name>`, which still collides with every file of that name, and the dry run's file-set listing shows the marker (#486).
@@ -32,6 +37,9 @@ Within a milestone each bold section label appears at most once.
 
 **Infrastructure:**
 - [internal] CI gains a `gates-macos` job (`macos-latest`, Node 22) running typecheck, format check and the suite, so host-side breakage on a Mac is caught (#647).
+
+**Documentation:**
+- [user] The user guide gains "Running with GitHub Copilot": the fine-grained token (Copilot Requests only, and why not `gh auth token`), the org's Copilot CLI policy, the `auto` model, and the config line; the config templates' `agent:` comment names `copilot` (#646).
 
 ### Collected changes — October 30, 2026
 

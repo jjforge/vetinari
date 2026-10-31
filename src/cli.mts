@@ -1,6 +1,6 @@
 #!/usr/bin/env -S npx tsx
 import { createInterface } from "node:readline/promises";
-import { mkdirSync, watch } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, watch } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -8,6 +8,7 @@ import {
   encodeAgentOverride,
   loadConfig,
   missingCredentials,
+  missingCredentialsRefusal,
   refuseVetinariSecretsInEnv,
   parseAgentOverride,
   repoForProject,
@@ -636,10 +637,7 @@ function selectAgent(cfg: ResolvedConfig, override: AgentOverride): void {
   refuseVetinariSecretsInEnv(envPath); // before the credential check, so a secret is reported first
   const missing = missingCredentials(selection.provider, envPath);
   if (missing.length)
-    throw new Refusal(
-      `agent provider "${selection.provider}" has no credentials in ${envPath} — ` +
-        `set ${missing.join(" or ")} there before launching (preflight, ADR 0016).`,
-    );
+    throw new Refusal(missingCredentialsRefusal(selection.provider, envPath, existsSync(envPath) ? readFileSync(envPath, "utf8") : ""));
   if (Object.keys(merged).length) process.env[AGENT_ENV_VAR] = encodeAgentOverride(merged);
 }
 

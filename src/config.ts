@@ -331,14 +331,33 @@ export function parseAgentOverride(raw: string | undefined): {
 /**
  * The preflight credential check (ADR 0016): the provider's `.env` credential keys
  * that are absent (or present-but-empty) in `envPath`, or `[]` when at least one is
- * satisfied. Reads only the simple `KEY=value` assignments a container `.env` carries.
+ * satisfied. Reads keys as the container does ({@link readEnvLikeSandcastle}).
  * A non-empty result is what the CLI fails fast on, before any container launches.
  */
 export function missingCredentials(provider: AgentProviderName, envPath: string): string[] {
   const keys = AGENT_PROVIDERS[provider].credentialKeys;
-  const env = existsSync(envPath) ? parseEnvAssignments(readFileSync(envPath, "utf8")) : {};
+  const env = existsSync(envPath) ? readEnvLikeSandcastle(readFileSync(envPath, "utf8")) : {};
   const anyPresent = keys.some((k) => (env[k] ?? "").length > 0);
   return anyPresent ? [] : [...keys];
+}
+
+/**
+ * The preflight refusal for a provider {@link missingCredentials} found unsatisfied, given
+ * the `.env` path and its text (empty when the file is missing). Pure, so the CLI only
+ * throws what it returns.
+ */
+export function missingCredentialsRefusal(provider: AgentProviderName, envPath: string, envText: string): string {
+  const keys = AGENT_PROVIDERS[provider].credentialKeys;
+  // A credential written `export KEY=…` reaches the container as the key `export KEY`.
+  const exported = Object.keys(readEnvLikeSandcastle(envText))
+    .filter((k) => /^export\s/.test(k))
+    .map((k) => k.replace(/^export\s+/, ""))
+    .filter((k) => keys.includes(k));
+  return [
+    `agent provider "${provider}" has no credentials in ${envPath} — ` +
+      `set ${keys.join(" or ")} there before launching (preflight, ADR 0016).`,
+    ...exported.map((k) => `\`.env\` writes ${k} with \`export\`, which the container reads as a different key — drop \`export\`.`),
+  ].join(" ");
 }
 
 /**
@@ -356,7 +375,10 @@ export const VETINARI_SECRET_KEYS: readonly string[] = ["VETINARI_TELEGRAM_BOT_T
  */
 export function refuseVetinariSecretsInEnv(envPath: string): void {
   if (!existsSync(envPath)) return;
-  const named = Object.keys(parseEnvAssignments(readFileSync(envPath, "utf8"))).filter((k) => VETINARI_SECRET_KEYS.includes(k));
+  // Refuse if either reading names a secret: sandcastle's trimmed key, or that key with
+  // `export ` stripped (the shell reading). Refusing too much is the safe side.
+  const keys = Object.keys(readEnvLikeSandcastle(readFileSync(envPath, "utf8")));
+  const named = [...new Set(keys.flatMap((k) => [k, k.replace(/^export\s+/, "")]))].filter((k) => VETINARI_SECRET_KEYS.includes(k));
   if (named.length)
     throw new Refusal(
       `${envPath} names vetinari's own secret ${named.join(", ")} — remove it: ` +
@@ -364,14 +386,25 @@ export function refuseVetinariSecretsInEnv(envPath: string): void {
     );
 }
 
-/** Minimal `KEY=value` reader for a container `.env` — presence detection only, no shell semantics. */
-function parseEnvAssignments(text: string): Record<string, string> {
+/**
+ * Read a container `.env` exactly as the sandbox does — mirrors sandcastle's `parseEnvFile`,
+ * which is what actually carries `.env` into the container. Blank lines, `#` comments and
+ * lines with no `=` are skipped; the key is everything before the first `=`, trimmed
+ * (`export` is NOT stripped, so `export KEY=x` is the key `export KEY`); one pair of
+ * matching quotes around the value is stripped (its escape handling inside double quotes is
+ * not mirrored — it never changes a key or whether a value is empty). Keys keep file order.
+ * No shell semantics.
+ */
+function readEnvLikeSandcastle(text: string): Record<string, string> {
   const env: Record<string, string> = {};
   for (const raw of text.split("\n")) {
     const line = raw.trim();
     if (!line || line.startsWith("#")) continue;
-    const m = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);
-    if (m) env[m[1]] = m[2].trim().replace(/^["']|["']$/g, "");
+    const eq = line.indexOf("=");
+    if (eq === -1) continue;
+    let value = line.slice(eq + 1).trim();
+    if (value.length >= 2 && (value[0] === '"' || value[0] === "'") && value.at(-1) === value[0]) value = value.slice(1, -1);
+    env[line.slice(0, eq).trim()] = value;
   }
   return env;
 }

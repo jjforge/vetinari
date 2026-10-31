@@ -4,7 +4,6 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { Readable } from "node:stream";
 import { register } from "./registry.ts";
 import { logFileOf } from "./dashboard-model.ts";
 import { slotsDir } from "./host-slots.ts";
@@ -12,33 +11,9 @@ import { event } from "./event-log.ts";
 import type { DashboardDeps } from "./dashboard-http.ts";
 import type { StartedChild } from "./dashboard-child.ts";
 import { handleRedrive } from "./dashboard-route-redrive.ts";
+import { postReq, resSpy } from "./test-support.ts";
 
 let counter = 0;
-
-// A POST request whose body is the given form-encoded string — a readable stream so
-// `readBody` can drain it, carrying the method and pathname the handler matches on.
-const postReq = (body: string) => Object.assign(Readable.from([body]), { method: "POST", url: "/redrive", headers: {} });
-
-// A response spy capturing the status, headers and body the handler writes.
-const resSpy = () => {
-  const res: {
-    statusCode?: number;
-    headers?: unknown;
-    body?: string;
-    writeHead(s: number, h?: unknown): typeof res;
-    end(b?: string): void;
-  } = {
-    writeHead(status, headers) {
-      res.statusCode = status;
-      res.headers = headers;
-      return res;
-    },
-    end(b) {
-      res.body = b;
-    },
-  };
-  return res;
-};
 
 // A config dir with one registered project whose log holds the given events.
 const seed = (events: unknown[]): { configDir: string; project: string } => {
@@ -78,7 +53,7 @@ test("POST /redrive refuses with 409 and the reason while a campaign process hol
   seedLiveLease(configDir, project);
   let started = 0;
   const res = resSpy();
-  const handled = await handleRedrive(postReq(`project=${project}`) as never, res as never, new URL("http://x/redrive"), {
+  const handled = await handleRedrive(postReq("/redrive", `project=${project}`) as never, res as never, new URL("http://x/redrive"), {
     ...depsFor(configDir),
     startChild: async () => (started++, { code: 0, lastLine: "", running: false }),
   });
@@ -106,7 +81,7 @@ const redriveWith = async (outcome: StartedChild) => {
   const { configDir, project } = seedStopped();
   const calls: { projectRoot: string; args: string[]; opts: { logFile: string; startupMs: number } }[] = [];
   const res = resSpy();
-  const handled = await handleRedrive(postReq(`project=${project}`) as never, res as never, new URL("http://x/redrive"), {
+  const handled = await handleRedrive(postReq("/redrive", `project=${project}`) as never, res as never, new URL("http://x/redrive"), {
     ...depsFor(configDir),
     childStartupMs: 7,
     startChild: async (projectRoot, args, opts) => (calls.push({ projectRoot, args, opts }), outcome),
@@ -174,7 +149,7 @@ test("POST /redrive spawns redrive for a campaign stopped between waves after it
   ]);
   const calls: string[][] = [];
   const res = resSpy();
-  const handled = await handleRedrive(postReq(`project=${project}`) as never, res as never, new URL("http://x/redrive"), {
+  const handled = await handleRedrive(postReq("/redrive", `project=${project}`) as never, res as never, new URL("http://x/redrive"), {
     ...depsFor(configDir),
     startChild: async (_projectRoot, args) => (calls.push(args), { code: 0, lastLine: "", running: false }),
   });
@@ -196,7 +171,7 @@ test("POST /redrive refuses a finished campaign whose wave 0 a prune emptied as 
   ]);
   let started = 0;
   const res = resSpy();
-  await handleRedrive(postReq(`project=${project}`) as never, res as never, new URL("http://x/redrive"), {
+  await handleRedrive(postReq("/redrive", `project=${project}`) as never, res as never, new URL("http://x/redrive"), {
     ...depsFor(configDir),
     startChild: async () => (started++, { code: 0, lastLine: "", running: false }),
   });

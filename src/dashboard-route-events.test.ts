@@ -12,6 +12,7 @@ import { logFileOf } from "./dashboard-model.ts";
 import { event } from "./event-log.ts";
 import type { DashboardDeps } from "./dashboard-http.ts";
 import { handleEvents, MAX_EVENT_CONNECTIONS } from "./dashboard-route-events.ts";
+import { resSpy } from "./test-support.ts";
 
 let counter = 0;
 
@@ -29,33 +30,6 @@ const seed = (events: unknown[]): { configDir: string; project: string; base: st
 // A GET /api/events request: an emitter so the handler can bind `req.on("close")` and the
 // test can fire it to tear the watchers down.
 const connReq = () => Object.assign(new EventEmitter(), { method: "GET", url: "/api/events", headers: {} });
-
-// A response spy capturing the status line, headers, every SSE chunk the handler writes, and
-// the body it ends with.
-const resSpy = () => {
-  const chunks: string[] = [];
-  const res = {
-    writableEnded: false,
-    chunks,
-    statusCode: undefined as number | undefined,
-    headers: undefined as Record<string, string> | undefined,
-    body: undefined as string | undefined,
-    writeHead(statusCode: number, headers?: Record<string, string>) {
-      res.statusCode = statusCode;
-      res.headers = headers;
-      return res;
-    },
-    write(chunk: string) {
-      chunks.push(chunk);
-      return true;
-    },
-    end(body?: string) {
-      res.body = body;
-      res.writableEnded = true;
-    },
-  };
-  return res;
-};
 
 const depsFor = (configDir: string): DashboardDeps => ({
   configDir,

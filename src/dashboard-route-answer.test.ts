@@ -1,51 +1,15 @@
 // Tests for the /answer route's startup-window contract (dashboard-route-answer.ts).
 import test from "node:test";
 import assert from "node:assert/strict";
-import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { Readable } from "node:stream";
-import { register } from "./registry.ts";
 import type { DashboardDeps } from "./dashboard-http.ts";
 import type { StartedChild } from "./dashboard-child.ts";
 import { handleAnswer } from "./dashboard-route-answer.ts";
-
-let counter = 0;
-
-// A POST request whose body is the given form-encoded string — a readable stream so
-// `readBody` can drain it, carrying the method and pathname the handler matches on.
-const postReq = (body: string) => Object.assign(Readable.from([body]), { method: "POST", url: "/answer", headers: {} });
-
-// A response spy capturing the status, headers and body the handler writes.
-const resSpy = () => {
-  const res: {
-    statusCode?: number;
-    headers?: unknown;
-    body?: string;
-    writeHead(s: number, h?: unknown): typeof res;
-    end(b?: string): void;
-  } = {
-    writeHead(status, headers) {
-      res.statusCode = status;
-      res.headers = headers;
-      return res;
-    },
-    end(b) {
-      res.body = b;
-    },
-  };
-  return res;
-};
-
-// A config dir with one registered project, `beta`.
-const seed = () => {
-  const configDir = join(tmpdir(), `vetinari-answer-route-${Date.now()}-${counter++}`);
-  register(configDir, { project: "beta", projectRoot: join(configDir, "root"), baseLocation: join(configDir, "base") });
-  return configDir;
-};
+import { postReq, resSpy, seedProject } from "./test-support.ts";
 
 // POST /answer with `startChild` stubbed to the given outcome, recording what it was called with.
 const answerWith = async (body: string, outcome: StartedChild = { code: 0, lastLine: "", running: false }) => {
-  const configDir = seed();
+  const { configDir } = seedProject();
   const calls: { projectRoot: string; args: string[]; opts: { logFile: string; startupMs: number; env?: Record<string, string> } }[] = [];
   const deps: DashboardDeps = {
     configDir,
@@ -58,7 +22,7 @@ const answerWith = async (body: string, outcome: StartedChild = { code: 0, lastL
     startChild: async (projectRoot, args, opts) => (calls.push({ projectRoot, args, opts }), outcome),
   };
   const res = resSpy();
-  const handled = await handleAnswer(postReq(body) as never, res as never, new URL("http://x/answer"), deps);
+  const handled = await handleAnswer(postReq("/answer", body) as never, res as never, new URL("http://x/answer"), deps);
   assert.equal(handled, true);
   return { configDir, res, calls };
 };

@@ -47,9 +47,17 @@ Within a milestone each bold section label appears at most once.
 - [ops] The gateway's poll supervisor now tidies up after a poll loop that crashes or ends on its own: `/healthz` no longer reports a bot as `stale` forever when its loop died and its token was deregistered before the restart, and a loop that dies on a failed poll restarts from the update offset it had reached instead of an earlier one, so already-routed replies are not routed again (#639).
 - [ops] The outbox drain now sends through its own logger, so a failed send's `telegram-send-failed` row is written wherever the drain's other rows go, not always to a fresh default host logger (#639).
 - [user] `replan` now refuses a blocker cycle among the unstarted issues in its own words — `replan refused — nothing logged:` then `blockedBy cycle among #…` — instead of the `campaign` planner's message (#641).
+- [ops] A non-numeric `VETINARI_GATEWAY_ANNOUNCE_MS` now falls back to the default `5000` ms tick instead of `NaN`; a numeric value still keeps the `1000` floor (#640).
+- [user] A redrive after a crash mid-integration — the campaign died after a wave's merges but before its merged-base gate — now gates the merged base before completing the wave, printing a re-gating line; it no longer completes the wave with its merges never gated (#642).
+- [api] A redrive's re-logged `merged` row for a green already on the base carries `alreadyMerged: true` (#642).
+- [user] A Copilot run with an `agent.effort` (or `--effort`) other than `none` on the default `auto` model is now refused at preflight, naming the fix (pin `agent.model`, or drop the effort), instead of failing inside the container after its setup has run (#650).
+- [user] A turn that stalls on the idle timeout now parks with its session id whenever vetinari knows it (a resumed turn, a fresh Copilot turn, a fresh Claude turn), so answering the park resumes the agent's session and the idle findings harvest runs (#650).
 
 **Infrastructure:**
 - [internal] CI gains a `gates-macos` job (`macos-latest`, Node 22) running typecheck, format check and the suite, so host-side breakage on a Mac is caught (#647).
+
+**Testing:**
+- [internal] The env-var drift guard also sees reads through an injected env object (`env.NAME`, `env["NAME"]`); the blocked-temp-path `markOutboundSent` test now matches the error it expects; a stale `fileset.test.ts` comment and duplicated `pipeline.test.ts` imports are fixed (#640).
 
 **Documentation:**
 - [user] The user guide gains "Running with GitHub Copilot": the fine-grained token (Copilot Requests only, and why not `gh auth token`), the org's Copilot CLI policy, the `auto` model, and the config line; the config templates' `agent:` comment names `copilot` (#646).

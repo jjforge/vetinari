@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AGENT_ENV_VAR } from "./config.ts";
@@ -148,7 +148,8 @@ test("parseForeignWorktree returns undefined when the branch is checked out nowh
 });
 
 test("foreignWorktreeFor reads the real git worktree list, naming a checkout of agent/<id> outside stateDir", () => {
-  const repo = mkdtempSync(join(tmpdir(), "vetinari-wt-"));
+  // Resolved: git lists worktrees by real path, and macOS's tmpdir sits behind a /var symlink.
+  const repo = realpathSync(mkdtempSync(join(tmpdir(), "vetinari-wt-")));
   const git = (...args: string[]) => execFileSync("git", args, { cwd: repo, encoding: "utf8" });
   git("init", "-q", "-b", "main");
   git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "root");

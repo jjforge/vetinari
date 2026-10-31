@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { GateSpec, ResolvedConfig } from "./config.ts";
@@ -1119,7 +1119,8 @@ test("collectWaveChangelog returns the near-misses it left in place and records 
 // it — the state a parked, still-unmerged campaign member leaves behind. `--purge` (and
 // `tidy`) run their branch/worktree true-drop over exactly this.
 function repoWithUnmergedAgentBranch(): { dir: string; git: (args: string[]) => string } {
-  const dir = mkdtempSync(join(tmpdir(), "vetinari-purge-"));
+  // Resolved: git lists worktrees by real path, and macOS's tmpdir sits behind a /var symlink.
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "vetinari-purge-")));
   const git = (args: string[]) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" }).trim();
   execFileSync("git", ["-C", dir, "-c", "init.defaultBranch=main", "init", "-q"]);
   git(["config", "user.email", "test@example.com"]);

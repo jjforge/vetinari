@@ -246,6 +246,44 @@ const isAnnounced = (index: ReplyIndex, project: string, task: string, parkedAt:
   index.announced.has(announceKey(project, task, parkedAt));
 
 /**
+ * Drop every index entry whose parked record is gone or was re-parked, so the
+ * running index holds no more than `rebuildIndex` would build from `projects`
+ * (ADR 0002) — a reply to an evicted question is `unrouted`, as after a restart.
+ *
+ * `projects` is the set loaded at the start of the tick, before this tick's own
+ * announcements stamped their message ids, so a record with no `tgMessageId` yet
+ * keeps its entries. A project absent from `projects` (unreadable pointer, vanished
+ * base location) keeps all its entries until the next restart.
+ */
+export function reconcileReplyIndex(index: ReplyIndex, projects: GatewayProject[]): void {
+  const loaded = new Map(projects.map((p) => [p.project, p]));
+  const recordFor = (p: GatewayProject, task: string, parkedAt: string) =>
+    p.parked.find((r) => r.taskId === task && r.parkedAt === parkedAt);
+
+  for (const [key, ref] of index.byMessage) {
+    const p = loaded.get(ref.project);
+    if (!p) continue;
+    const sep = key.lastIndexOf("\0");
+    const token = key.slice(0, sep);
+    const messageId = Number(key.slice(sep + 1));
+    const record = recordFor(p, ref.task, ref.parkedAt);
+    const live =
+      p.conn?.token === token &&
+      record != null &&
+      !UNASKED_PARK_REASONS.has(record.reason) &&
+      (record.tgMessageId == null || record.tgMessageId === messageId);
+    if (!live) index.byMessage.delete(key);
+  }
+
+  for (const key of index.announced) {
+    const [project, task, parkedAt] = key.split("\0");
+    const p = loaded.get(project);
+    if (!p) continue;
+    if (!p.conn || !recordFor(p, task, parkedAt)) index.announced.delete(key);
+  }
+}
+
+/**
  * A prune awaiting its confirming `yes`: the resolved project and the issue to
  * prune. Recorded when the gateway previews a prune and read back to execute it
  * on a reply to the preview. Carries only pointers — the project-side `prune`
@@ -988,11 +1026,11 @@ const announceText = (a: Announcement) => formatParkAnnouncement(a.project, a.re
  * Announce every parked question not yet sent to its project's destination, then
  * stamp the returned message id back into the record (which persists "announced"
  * and feeds a later index rebuild) and into the live index (which routes the
- * reply). Reads projects fresh so questions parked since the last tick are picked
- * up. Idempotent: a record that already has a message id is never re-announced.
+ * reply). The caller loads `projects` fresh each tick so questions parked since the
+ * last tick are picked up. Idempotent: a record that already has a message id is never re-announced.
  */
-async function announcePending(configDir: string, index: ReplyIndex, logger: Logger = hostLogger()): Promise<void> {
-  for (const a of pendingAnnouncements(loadGatewayProjects(configDir), index)) {
+async function announcePending(projects: GatewayProject[], index: ReplyIndex, logger: Logger = hostLogger()): Promise<void> {
+  for (const a of pendingAnnouncements(projects, index)) {
     const messageId = await tgSend(a.conn, announceText(a));
     if (messageId == null) {
       logger.log("gateway-announce-failed", { project: a.project, task: a.record.taskId });
@@ -1157,8 +1195,12 @@ export async function gateway(configDir: string = gatewayConfigDir()): Promise<v
   const announcing = (async () => {
     for (;;) {
       try {
-        logNoConnectionSkips(loadGatewayProjects(configDir), skippedNoConn, log);
-        await announcePending(configDir, index, log);
+        // One load per tick, shared by the announce and the reconcile that follows it: the
+        // reconcile must see the same pre-announce set (see `reconcileReplyIndex`).
+        const projects = loadGatewayProjects(configDir);
+        logNoConnectionSkips(projects, skippedNoConn, log);
+        await announcePending(projects, index, log);
+        reconcileReplyIndex(index, projects);
         await drainOutboxes(configDir, outboxBackoff, log);
         ticks.announce = Date.now();
       } catch (e) {

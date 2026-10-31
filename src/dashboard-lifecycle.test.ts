@@ -1171,6 +1171,22 @@ test("a prune that empties a started wave does not make the next, unstarted wave
   assert.deepEqual(replanned.waves, [["1"], ["4", "3"]]);
 });
 
+test("a started member pruned and grafted back does not make its new, never-started wave read as started (#635)", () => {
+  const reduced = reduceCampaign([
+    event("campaign-start", { ts: "t0", waves: [["1"], ["2"], ["3"], ["4"], ["5"]], slots: 2 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["1"] }),
+    event("wave-done", { ts: "t2", index: 0, merged: ["1"] }),
+    event("wave-start", { ts: "t3", index: 1, tasks: ["2"] }),
+    event("parked", { ts: "t4", taskId: "2", reason: "question" }),
+    event("campaign-parked", { ts: "t5", reason: "question" }),
+    event("prune", { ts: "t6", target: "2", removed: ["2"], dropped: ["2"] }),
+    event("graft", { ts: "t7", ids: ["2"], blockedBy: {}, fileKeys: { "2": ["b.ts"] } }),
+  ]);
+  assert.deepEqual(reduced.waves.flat().sort(), ["1", "2", "3", "4", "5"]);
+  // Only wave 0 (#1) ever started; the re-grafted #2 sits in a wave no `wave-start` named.
+  assert.equal(reduced.startedWaves, 1);
+});
+
 test("a wave whose wave-start named members that have not spawned yet (slot-starved) counts as started (#635)", () => {
   const reduced = reduceCampaign([
     event("campaign-start", { ts: "t0", waves: [["1"], ["2", "3"], ["4"]], slots: 1 }),

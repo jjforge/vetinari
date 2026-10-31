@@ -414,6 +414,9 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       for (const id of applied.dropped) {
         pruned.add(id);
         answered.delete(id);
+        // A pruned member is out of the plan; if it is grafted back, its new wave has had no
+        // `wave-start`, so it must not count as started there (#635).
+        startedMembers.delete(id);
         details.set(id, "Pruned out of the campaign");
       }
       waves = applied.remaining;

@@ -62,7 +62,7 @@ test("issue sheet: clicking a wave member fetches its detail and shows the title
   await page.settle();
   assert.deepEqual(page.calls.at(-1), { url: "/api/issue?project=beta&issue=201", method: "GET", body: "" });
   assert.equal(sheet.hidden, false);
-  assert.match(sheet.querySelector("h2")!.textContent!, /^Add a coupon field$/);
+  assert.equal(sheet.querySelector("h2")!.textContent, "Add a coupon field");
   assert.equal(page.document.getElementById("issue-detail-turns")!.textContent, "2 turns · 5m");
   const turnLog = page.document.getElementById("issue-detail-turnlog")!.textContent!;
   assert.match(turnLog, /wired the coupon input/);

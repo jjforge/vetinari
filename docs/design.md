@@ -65,7 +65,7 @@ Two rules hold this shape together:
 
 ### 2.1 Event log
 
-`logs/orchestrator.jsonl`, one JSON object per line, `{ ts, event, … }`, append-only for the life of a run, moved to `logs/archive/orchestrator-<ts>.jsonl` when the run finishes clean (or on `clear`). Archived logs are kept, never deleted, and render in the dashboard read-only through the same reducer. `ts` is ISO-8601 UTC; nothing on disk holds a local time. Display converts to the viewer's zone — the browser's for the dashboard, the process `TZ` for the CLI.
+`logs/orchestrator.jsonl`, one JSON object per line, `{ ts, event, … }`, append-only for the life of a run, moved to `logs/archive/orchestrator-<ts>.jsonl` when the run finishes clean (or on `clear`). Archived logs are kept, never deleted, and render in the dashboard read-only through the same reducer. Gate, agent, activity and dashboard-action logs unwritten for 30 days are swept when a run is archived (not on `clear`), and the `archived` row counts them in `sweptLogs`. `ts` is ISO-8601 UTC; nothing on disk holds a local time. Display converts to the viewer's zone — the browser's for the dashboard, the process `TZ` for the CLI.
 
 The event vocabulary after consolidation (§13.2) is small and uses the user's words:
 

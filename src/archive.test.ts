@@ -1,11 +1,11 @@
 import test, { mock } from "node:test";
 import assert from "node:assert/strict";
-import fs, { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import fs, { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, utimesSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { archiveRun, hasUnarchivedRun, shouldArchiveIdle, shouldArchiveLeftover } from "./archive.ts";
+import { archiveRun, hasUnarchivedRun, shouldArchiveIdle, shouldArchiveLeftover, sweepOldLogs } from "./archive.ts";
 import { enqueueOutbound, listOutbox, markOutboundSent, outboxDirOf } from "./state.ts";
 import type { OrchestratorEvent } from "./event-log.ts";
 import { memoryLogger } from "./log.ts";
@@ -195,4 +195,48 @@ test("archiveRun handles a missing or empty log without creating an archive, and
 
   assert.equal(result.archivedLog, undefined); // nothing to archive
   assert.equal(existsSync(join(cfg.parkedDir, "1.json")), true); // the record is untouched (§2.5)
+});
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const SWEEP_NOW = Date.parse("2026-06-01T00:00:00.000Z");
+/** Write `path` (creating its directory) and set its mtime `days` before SWEEP_NOW. */
+const writeAged = (path: string, days: number): void => {
+  mkdirSync(join(path, ".."), { recursive: true });
+  writeFileSync(path, "x");
+  const t = new Date(SWEEP_NOW - days * DAY_MS);
+  utimesSync(path, t, t);
+};
+
+test("sweepOldLogs deletes gate, agent and activity logs unwritten for over 30 days and keeps younger ones", () => {
+  const { stateDir } = cfgFor();
+  const logs = join(stateDir, "logs");
+  for (const name of ["gate-1-0.log", "agent-7.log", "activity-7.jsonl"]) writeAged(join(logs, name), 31);
+  for (const name of ["gate-2-1.log", "agent-8.log", "activity-8.jsonl"]) writeAged(join(logs, name), 29);
+
+  assert.equal(sweepOldLogs(stateDir, SWEEP_NOW), 3);
+
+  assert.deepEqual(readdirSync(logs).sort(), ["activity-8.jsonl", "agent-8.log", "gate-2-1.log"]);
+});
+
+test("sweepOldLogs keeps the live log, archives and unrecognised logs, but sweeps old dashboard-action logs", () => {
+  const { stateDir } = cfgFor();
+  const logs = join(stateDir, "logs");
+  const kept = [
+    join(logs, "orchestrator.jsonl"),
+    join(logs, "archive", "orchestrator-2026-01-01T00-00-00-000Z.jsonl"),
+    join(logs, "image-build.log"),
+  ];
+  for (const path of kept) writeAged(path, 31);
+  writeAged(join(logs, "dashboard", "redrive-1.log"), 31);
+  writeAged(join(logs, "dashboard", "answer-2.log"), 1);
+
+  assert.equal(sweepOldLogs(stateDir, SWEEP_NOW), 1);
+
+  for (const path of kept) assert.equal(existsSync(path), true, path);
+  assert.deepEqual(readdirSync(join(logs, "dashboard")), ["answer-2.log"]);
+});
+
+test("sweepOldLogs returns 0 for a missing logs directory", () => {
+  const stateDir = join(tmpdir(), `vetinari-archive-missing-${Date.now()}-${counter++}`);
+  assert.equal(sweepOldLogs(stateDir, SWEEP_NOW), 0);
 });

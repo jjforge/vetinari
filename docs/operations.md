@@ -732,6 +732,19 @@ anywhere and needs no project config in the current directory. Removing a pointe
 whose project you have since deleted keeps a moved-or-gone project from lingering
 on the dashboard.
 
+## Log retention
+
+When a run is archived — on clean completion, or when a new run archives a leftover —
+vetinari deletes the project's gate (`gate-*.log`), agent (`agent-*.log`), activity
+(`activity-*.jsonl`) and dashboard-action (`logs/dashboard/*.log`) logs that have not been
+written for 30 days. The `archived` row in `orchestrator.jsonl` counts them in
+`sweptLogs`. `clear` does not sweep, since it can run while a campaign is live. The window
+is fixed; there is no config field or env var for it.
+
+Run archives under `logs/archive/` are kept forever. The live `orchestrator.jsonl`,
+`host.jsonl`, and any other file in `logs/` whose name matches none of the patterns above
+(an image build log of your own, say) are never swept.
+
 ## `host log` — the host-level diagnostics reader
 
 Host and gateway diagnostics are written to a persistent host log

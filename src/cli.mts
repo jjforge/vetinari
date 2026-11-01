@@ -62,7 +62,7 @@ import {
   readExistingWrapper,
   resolvedWrapper,
 } from "./path-install.ts";
-import { archiveRun, shouldArchiveIdle, shouldArchiveLeftover } from "./archive.ts";
+import { archiveRun, shouldArchiveIdle, shouldArchiveLeftover, sweepOldLogs } from "./archive.ts";
 import { answerParked, enqueueOutbound, hasParked, listParked } from "./state.ts";
 import { readEventLog } from "./event-log.ts";
 import { readSlowGateLogs } from "./slow-gates.ts";
@@ -586,9 +586,12 @@ const hostBudget: HostCeiling = {
 // archive gates below — each decides *whether* to run it; this is the *how*.
 const doArchive = () => {
   const r = archiveRun(cfg);
+  // Sweep stale per-run logs here, not in `clear`: no campaign is live on these paths (#536).
+  const sweptLogs = sweepOldLogs(cfg.stateDir);
   cfg.log.log("archived", {
     archivedLog: r.archivedLog ?? null,
     clearedOutbound: r.clearedOutbound,
+    sweptLogs,
   });
   if (r.archivedLog) console.log(`archived run log → ${r.archivedLog}`);
 };

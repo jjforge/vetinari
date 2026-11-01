@@ -1,4 +1,4 @@
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -2353,6 +2353,63 @@ test("an answered park re-admits on the slot poll while a long sibling still run
   assert.deepEqual(outcomes, { "101": "green", "102": "green" });
 });
 
+// Drive `queue` so member 102 parks with a record while sibling 101 runs, is answered before 101
+// exits, and is re-admitted on the slot poll; returns every spawn's (id, session, prompt) (#629).
+const queueReadmitRecordingSpawns = async (
+  t: TestContext,
+  resumeSessions: Record<string, string>,
+  resumePrompts: Record<string, string>,
+) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-queue-readmit-resume-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  let release101!: (code: number) => void;
+  const spawns: Array<[string, string | undefined, string | undefined]> = [];
+  const spawnRun: RunSpawner = (taskId, resumeSession, resumePrompt) => {
+    spawns.push([taskId, resumeSession, resumePrompt]);
+    if (taskId === "101") return new Promise<number>((r) => (release101 = r));
+    if (spawns.filter(([s]) => s === "102").length === 1) {
+      seedParkedRecord(cfg, "102");
+      return Promise.resolve(2);
+    }
+    clearParked(cfg, "102"); // the re-admitted child consumes the answered record
+    return Promise.resolve(0);
+  };
+
+  const draining = silenceConsole(() =>
+    queue(cfg, ["101", "102"], host, undefined, spawnRun, undefined, resumeSessions, undefined, resumePrompts),
+  );
+  while (!hasParked(cfg, "102")) await tick();
+  await tick();
+  answerParked(cfg, "102", "use approach A");
+  t.mock.timers.tick(1000);
+  for (let i = 0; i < 10; i++) await tick();
+  release101(0);
+  const outcomes = await draining;
+  return { outcomes, spawns: spawns.filter(([id]) => id === "102") };
+};
+
+test("an answered park re-admitted mid-drain spawns without the crash session its first spawn resumed (#629)", async (t) => {
+  const { outcomes, spawns } = await queueReadmitRecordingSpawns(t, { "102": "crash-sess" }, {});
+
+  assert.deepEqual(spawns, [
+    ["102", "crash-sess", undefined],
+    ["102", undefined, undefined],
+  ]);
+  assert.deepEqual(outcomes, { "101": "green", "102": "green" });
+});
+
+test("an answered park re-admitted mid-drain spawns without the conflict prompt its first spawn retried with (#629)", async (t) => {
+  const { outcomes, spawns } = await queueReadmitRecordingSpawns(t, {}, { "102": "conflict prompt" });
+
+  assert.deepEqual(spawns, [
+    ["102", undefined, "conflict prompt"],
+    ["102", undefined, undefined],
+  ]);
+  assert.deepEqual(outcomes, { "101": "green", "102": "green" });
+});
+
 test("a child killed by a signal with no stop requested is still a failure, named by the signal (#464)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-queue-sigkill-"));
   const cfg = harnessCfg(dir);
@@ -2637,6 +2694,46 @@ const queueKilledByStop = (
   };
   return silenceConsole(() => queue(cfg, ["101"], host, undefined, spawnRun, undefined, resumeSessions, () => stopped));
 };
+
+test("an answered re-admit of a crash-redrive member a --now stop kills after it consumed its record is parked `stopped` without the crash session (#629)", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-stop-now-killed-readmit-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  // 101 runs on while 102 — a crash redrive — parks with a record and is answered mid-drain. The
+  // re-admitted 102 consumes the answered record, then a --now stop kills it before its verdict.
+  let release101!: (code: number) => void;
+  let stopped = false;
+  let spawns102 = 0;
+  const spawnRun: RunSpawner = (taskId) => {
+    if (taskId === "101") return new Promise<number>((r) => (release101 = r));
+    if (++spawns102 === 1) {
+      seedParkedRecord(cfg, "102");
+      return Promise.resolve(2);
+    }
+    clearParked(cfg, "102");
+    stopped = true;
+    return Promise.resolve("SIGTERM");
+  };
+
+  const draining = silenceConsole(() =>
+    queue(cfg, ["101", "102"], host, undefined, spawnRun, undefined, { "102": "crash-sess" }, () => stopped),
+  );
+  while (!hasParked(cfg, "102")) await tick();
+  await tick();
+  answerParked(cfg, "102", "use approach A");
+  t.mock.timers.tick(1000);
+  while (!stopped) await tick();
+  for (let i = 0; i < 10; i++) await tick();
+  release101(0);
+  const outcomes = await draining;
+
+  assert.equal(spawns102, 2, "102 was re-admitted");
+  assert.equal(outcomes["102"], "parked");
+  const rec = listParked(cfg).find((r) => r.taskId === "102");
+  assert.equal(rec?.reason, "stopped");
+  assert.equal(rec?.sessionId, undefined, "judged as an answered re-admit, not as the crash resume");
+});
 
 test("a crash-redrive child a --now stop kills before its verdict is parked `stopped` with the session it was resuming (#464)", async () => {
   const cfg = harnessCfg(mkdtempSync(join(tmpdir(), "vetinari-stop-now-killed-resume-")));

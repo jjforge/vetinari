@@ -409,6 +409,9 @@ a warning line after the URL line. The bind still goes ahead; the line is a
 reminder, and under the gateway it lands in its stdout (the systemd journal), not
 `host.jsonl`.
 
+The read-only API for outside consumers ([`docs/api.md`](api.md)) is served under
+`/api/v1/` on the same port, under the same refusals below.
+
 ### What the server refuses
 
 Even on loopback, a page open in your browser could otherwise reach the dashboard,

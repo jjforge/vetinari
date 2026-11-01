@@ -166,5 +166,8 @@ The README stops at your first hour.
   variable, event kind, and Telegram routing rule.
 - **[`docs/operations.md`](docs/operations.md)** — running it on a host: the
   gateway as a systemd service, the status line, upgrading, and `tidy`.
+- **[`docs/api.md`](docs/api.md)** — the stable, read-only `/api/v1/` API an
+  outside agent or script uses to watch campaigns: its shapes, its change
+  doorbell, and its compatibility promise.
 
 Built on [`@ai-hero/sandcastle`](https://github.com/mattpocock/sandcastle).

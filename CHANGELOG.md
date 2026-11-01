@@ -21,6 +21,9 @@ Within a milestone each bold section label appears at most once.
 
 ### Collected changes — November 1, 2026
 
+**New features:**
+- [ops] Projects can opt in with `fileOverlap: "allow"` to let tickets that share a file run in the same wave — `campaign`, `graft` and `replan` lay out waves by dependencies alone, `campaign --dry-run` lists each overlap it did not enforce (`overlap allowed: #<a> and #<b> share <file>`) and bounds the waves by dependency depth, and a collision is retried at merge; the default stays `"strict"`, unchanged, and any other value is refused at config load (#623).
+
 **Improvements:**
 - [api] `campaign-start` now records each scheduled issue's resolved file keys (`fileKeys`), so a replay of an archived campaign reads the keys the planner used (#658).
 
@@ -36,6 +39,7 @@ Within a milestone each bold section label appears at most once.
 
 **Security:**
 - [ops] The dashboard's Content-Security-Policy no longer allows inline scripts or styles without a per-response nonce: every response carries a fresh nonce, every inline `<script>`/`<style>` the pages render carries it, and the no-JS project picker's dead inline `onchange` is gone — so an injected inline script can't run (#600).
+- [ops] In a Telegram group chat, the gateway now acts only on messages from `VETINARI_TELEGRAM_ALLOWED_SENDERS` (shared across projects on one bot) and logs the rest as `telegram-sender-refused`; private chats are unchanged (#606).
 
 **Infrastructure:**
 - [internal] eslint now runs `no-floating-promises` and `no-misused-promises` in CI and the campaign gates, as `npm run lint` (#592).

@@ -23,9 +23,12 @@ Within a milestone each bold section label appears at most once.
 
 **New features:**
 - [ops] Projects can opt in with `fileOverlap: "allow"` to let tickets that share a file run in the same wave — `campaign`, `graft` and `replan` lay out waves by dependencies alone, `campaign --dry-run` lists each overlap it did not enforce (`overlap allowed: #<a> and #<b> share <file>`) and bounds the waves by dependency depth, and a collision is retried at merge; the default stays `"strict"`, unchanged, and any other value is refused at config load (#623).
+- [api] A new optional `sandbox` config field, a factory `(cfg, { mounts }) => SandboxProvider`, picks the sandcastle sandbox provider that agent turns, gates, `baseline` and integration gates run in. It defaults to Docker on `image`, which is now required only without it; with it set, `build` refuses (there is no image to build) and the stale-image and mount-parent checks are skipped (#491).
 
 **Improvements:**
 - [api] `campaign-start` now records each scheduled issue's resolved file keys (`fileKeys`), so a replay of an archived campaign reads the keys the planner used (#658).
+- [ops] Gate, agent, activity and dashboard-action logs not written for 30 days are now deleted when a run is archived (not on `clear`), the `archived` row counts them in `sweptLogs`, and run archives are still kept forever (#536).
+- [ops] A stale registry pointer logs `registry-stale` once per process instead of on every gateway tick, and the dashboard stops re-reading unchanged run archives and the whole event log on each update (#669).
 
 **Bug fixes:**
 - [ops] A lock holder killed mid-write no longer wedges the host-slots or findings lock (a later run used to give up after about ten seconds), and two processes reclaiming a dead holder's lock can no longer both end up holding it; a lock's release now removes only its own lock (#569, #655).
@@ -36,6 +39,10 @@ Within a milestone each bold section label appears at most once.
 - [user] An answer given while the wave is still running is no longer ignored when the parked issue was resuming from a crash or retrying a merge collision: the re-admitted run now picks up the answer instead of resuming with the crash or conflict prompt, and the answered record no longer stays on disk (#629).
 - [ops] A parked record left unreadable by a crash or power loss now stops vetinari with a message naming the file and how to recover (delete it, then `vetinari redrive` or `vetinari run <id>`), instead of a raw JSON parse error (#574).
 - [user] `prune <issue>` on an issue parked on a merge conflict now removes it from the campaign (its branch is kept unless `--purge`), as the conflict notice already suggests. Before, it did nothing and a redrive retried the conflicting merge (#559).
+- [user] A member whose gate exits 126 or 127 is told the gate's command isn't on its branch and to merge the base branch in, rather than recreate it (#501).
+- [user] A member pruned and then grafted back now shows once on the dashboard, as grafted, rather than twice as pruned (#662).
+- [ops] A failed issue read during the vetinari-paths check no longer leaves the agent's `vetinari/` change merged on the base: the merge is undone before the error ends the campaign, so a redrive checks it again (#663).
+- [user] The dashboard's prune confirm no longer says "no dependents" while listing members it keeps: when the prune drops nothing besides its target it reads "drops nothing else" (#665).
 
 **Security:**
 - [ops] The dashboard's Content-Security-Policy no longer allows inline scripts or styles without a per-response nonce: every response carries a fresh nonce, every inline `<script>`/`<style>` the pages render carries it, and the no-JS project picker's dead inline `onchange` is gone — so an injected inline script can't run (#600).
@@ -49,6 +56,8 @@ Within a milestone each bold section label appears at most once.
 
 **Documentation:**
 - [user] The user guide, README and template Dockerfile now say that the `cursor-agent` and `opencode` CLIs are not in the shipped image: a project selecting `--agent cursor` or `--agent opencode` must add that CLI to its `vetinari/Dockerfile` and run `vetinari build` (#521).
+- [ops] `docs/operations.md` now says how to upgrade vetinari when a campaign exists — stop it and wait, or upgrade under a parked one — and how to roll back to an earlier version (#577).
+- [ops] The operations guide now says which vetinari state to back up, which is disposable, and how to restore it (#591).
 
 ### Collected changes — October 31, 2026
 

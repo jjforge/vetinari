@@ -37,7 +37,7 @@ import type { CampaignPlanReport, Exclusion, UnderspecifiedPrompt } from "./plan
 import type { expandSelection, runCampaignPlan, runFilesetCheck } from "./plan.ts";
 import { describeFilesetCheck } from "./plan.ts";
 import type { findMergeCommit } from "./merge.ts";
-import { resumeIndex, type runPrune } from "./prune.ts";
+import { resumeIndex, stillRunningInWave, type runPrune } from "./prune.ts";
 import { hash, isIssueToken, normalize } from "./issue-id.ts";
 import type { runGraft } from "./graft.ts";
 import { GraftRejectedError, describeGraftRejections } from "./graft.ts";
@@ -907,6 +907,9 @@ async function dispatchPrune(cmd: Extract<Command, { kind: "prune" }>, deps: Dis
     dryRun: cmd.dryRun,
     purge: cmd.purge,
     host,
+    // A live campaign runs its in-flight wave as-is, so the prune keeps that wave's unstarted
+    // members rather than reporting them dropped and shifting the plan under the loop (#651).
+    liveCampaign: deps.projectHasLiveCampaign(host.configDir, cfg.project),
   });
   const tgt = result.target;
   // The CLI only drives the running-campaign path now; `runPrune`'s retired launch mode
@@ -918,7 +921,8 @@ async function dispatchPrune(cmd: Extract<Command, { kind: "prune" }>, deps: Dis
   deps.log(identityLine(result.project, result.repo, tgt, result.title));
   deps.log(
     `prune #${tgt} → ${result.dropped.length ? `dropping ${result.dropped.map((i) => `#${i}`).join(", ")}` : "nothing to drop"}` +
-      (result.kept.length ? ` (keeping banked ${result.kept.map((i) => `#${i}`).join(", ")})` : ""),
+      (result.kept.length ? ` (keeping banked ${result.kept.map((i) => `#${i}`).join(", ")})` : "") +
+      stillRunningInWave(result.keptInFlight, result.inFlightWave),
   );
   deps.log(
     `remaining campaign: ${result.remaining.length ? result.remaining.map((w) => `"${w.join(" ")}"`).join(" ") : "(nothing left to run)"}`,

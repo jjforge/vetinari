@@ -173,6 +173,10 @@ export interface ReducedCampaign {
    * `campaign-parked` event, which lands on the in-flight wave with no `wave-done`
    * to close it, so this holds `currentWave` at the point the wave-park was logged. */
   parkedWave: number;
+  /** the wave a running loop is in: `currentWave` when no `campaign-parked` has been logged
+   * since the latest `wave-start`, else -1. Whether the loop is actually live is not in the
+   * log — a crashed campaign reads the same — so a prune checks liveness itself (#651). */
+  inFlightWave: number;
   /** how many leading `waves` have started — one past the last wave in the current (post-prune)
    * plan holding any started member, or 0 if none does. A member is started once a `wave-start`
    * names it (or its wave has one with no `tasks`, or closes). Started is wave-level: one started
@@ -253,6 +257,10 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
   let stopped = new Set<string>();
   let currentWave = -1;
   let parkedWave = -1;
+  // Whether a `campaign-parked` landed since the latest `wave-start`: `parkedWave` is only ever
+  // set, so it cannot tell a parked wave from one a redrive re-entered (#651).
+  let parkedSinceWaveStart = false;
+  const inFlightWave = () => (currentWave >= 0 && !parkedSinceWaveStart ? currentWave : -1);
   // The members whose wave has had a `wave-start` (or closed). Started is tracked by member, not
   // by wave position: a prune that empties a wave drops it and shifts every later wave down, so a
   // recorded index would land on the next, unstarted wave. `startedCount` counts on the current plan.
@@ -282,6 +290,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       startedMembers = new Set();
     } else if (e.event === "wave-start" && Number.isInteger(e.index)) {
       currentWave = e.index;
+      parkedSinceWaveStart = false;
       // An older log's `wave-start` (the legacy `campaign-batch` rename) names no tasks: read the
       // wave's members off the plan as it stands here instead.
       const tasks: unknown[] = Array.isArray(e.tasks) ? e.tasks : (waves[e.index] ?? []);
@@ -379,6 +388,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       // members keep their own lifecycle and the wave carries no wave-level reason. A reason-absent
       // event is a legacy/aliased wave-park (historically red-base), kept back-compatible.
       parkedWave = Number.isInteger(e.index) ? (e.index as number) : currentWave;
+      parkedSinceWaveStart = true;
       redBase = e.reason === undefined || e.reason === "red-base" ? new Set(waves[parkedWave] ?? []) : new Set();
       // An operator stop is the other wave-level hold: a graceful stop names the next, unstarted
       // wave, whose members would otherwise fold to `unstarted` and the campaign to idle.
@@ -410,7 +420,11 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       // prune saw, so the same rule replays deterministically. The dropped members
       // are remembered (not just removed) so the display can render them `pruned`
       // in the wave they left, while `waves` stays the pruned loop-facing plan.
-      const applied = applyPrune({ waves, outcomes }, e.removed.map(String));
+      // A prune issued against a live in-flight wave carries `keepInFlight`, so it kept that
+      // wave's unstarted members (#651); replay it the same way, off the in-flight wave here.
+      const applied = applyPrune({ waves, outcomes }, e.removed.map(String), {
+        keepInFlight: e.keepInFlight === true ? inFlightWave() : -1,
+      });
       for (const id of applied.dropped) {
         pruned.add(id);
         answered.delete(id);
@@ -535,6 +549,7 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
     closedWaves,
     currentWave,
     parkedWave,
+    inFlightWave: inFlightWave(),
     startedWaves: startedCount(),
     parkReasons,
     redBase,

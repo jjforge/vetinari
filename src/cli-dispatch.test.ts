@@ -63,6 +63,7 @@ function makeDeps(overrides: Partial<DispatchDeps> = {}) {
         target: "436",
         dropped: [],
         kept: [],
+        keptInFlight: [],
         remaining: [],
         parkedDropped: [],
       }),
@@ -1393,14 +1394,40 @@ test("dispatch run --json switches on the raw event stream for the single loop (
 test("dispatch prune routes to runPrune with the parsed target and flags", async () => {
   const { deps } = makeDeps();
   await dispatch({ kind: "prune", target: "436", dryRun: true, purge: false, json: false }, deps);
-  assert.deepEqual((deps.runPrune as any).calls, [[deps.cfg, "436", { project: undefined, dryRun: true, purge: false, host: deps.host }]]);
+  assert.deepEqual((deps.runPrune as any).calls, [
+    [deps.cfg, "436", { project: undefined, dryRun: true, purge: false, host: deps.host, liveCampaign: false }],
+  ]);
+});
+
+test("dispatch prune tells runPrune whether a live campaign holds the project (#651)", async () => {
+  const { deps } = makeDeps({ projectHasLiveCampaign: spy(true) as any });
+  await dispatch({ kind: "prune", target: "436", dryRun: false, purge: false, json: false }, deps);
+  assert.deepEqual((deps.projectHasLiveCampaign as any).calls, [[deps.host.configDir, deps.cfg.project]]);
+  assert.equal((deps.runPrune as any).calls[0][2].liveCampaign, true);
+});
+
+test("dispatch prune names kept in-flight members as still running, never as banked (#651)", async () => {
+  const result = {
+    mode: "prune",
+    project: "demo",
+    target: "101",
+    dropped: [],
+    kept: ["99"],
+    keptInFlight: ["101", "102"],
+    inFlightWave: 0,
+    remaining: [["101", "102"], ["103"]],
+    parkedDropped: [],
+  };
+  const { deps, logged } = makeDeps({ runPrune: spy(Promise.resolve(result)) as any });
+  await dispatch({ kind: "prune", target: "101", dryRun: false, purge: false, json: false }, deps);
+  assert.ok(logged.includes("prune #101 → nothing to drop (keeping banked #99) (still running in wave 1: #101, #102)"), logged.join("\n"));
 });
 
 test("dispatch prune forwards a project qualifier to runPrune", async () => {
   const { deps } = makeDeps();
   await dispatch({ kind: "prune", project: "vetinari", target: "436", dryRun: false, purge: false, json: false }, deps);
   assert.deepEqual((deps.runPrune as any).calls, [
-    [deps.cfg, "436", { project: "vetinari", dryRun: false, purge: false, host: deps.host }],
+    [deps.cfg, "436", { project: "vetinari", dryRun: false, purge: false, host: deps.host, liveCampaign: false }],
   ]);
 });
 
@@ -1456,6 +1483,7 @@ test("dispatch prune --dry-run emits the machine closure line only under --json"
     target: "436",
     dropped: [],
     kept: [],
+    keptInFlight: [],
     remaining: [],
     parkedDropped: [],
     closure: { project: "demo", repo: undefined, target: "436", dropped: [], keptBanked: [], remaining: [] },
@@ -1570,6 +1598,7 @@ test("dispatch prune leads with the project/repo/title identity line", async () 
     target: "42",
     dropped: ["42"],
     kept: [],
+    keptInFlight: [],
     remaining: [["101"]],
     parkedDropped: [],
   };
@@ -1589,6 +1618,7 @@ test("dispatch prune --dry-run reports the parked record in the future tense (wo
     target: "101",
     dropped: ["101"],
     kept: [],
+    keptInFlight: [],
     remaining: [["102", "103"]],
     parkedDropped: ["101"],
     closure: { project: "demo", repo: undefined, target: "101", dropped: ["101"], keptBanked: [], remaining: [["102", "103"]] },
@@ -1611,6 +1641,7 @@ test("dispatch prune --purge --dry-run reports the parked record in the future t
     target: "101",
     dropped: ["101"],
     kept: [],
+    keptInFlight: [],
     remaining: [["102", "103"]],
     parkedDropped: ["101"],
     closure: { project: "demo", repo: undefined, target: "101", dropped: ["101"], keptBanked: [], remaining: [["102", "103"]] },
@@ -1631,6 +1662,7 @@ test("dispatch prune (applied) reports the parked record as cleared, past tense"
     target: "101",
     dropped: ["101"],
     kept: [],
+    keptInFlight: [],
     remaining: [["102", "103"]],
     parkedDropped: ["101"],
   };

@@ -1232,6 +1232,7 @@ test("serveAllStatus GET /prune?preview returns the selected project's structure
     target: "201",
     dropped: ["201", "401"],
     keptBanked: ["301"],
+    keptInFlight: [] as string[],
     remaining: [] as string[][],
   };
   const server = await serveAllStatus(configDir, {
@@ -1288,6 +1289,7 @@ test("serveAllStatus GET /prune?preview validates params and the project", async
         target: "201",
         dropped: ["201"],
         keptBanked: [],
+        keptInFlight: [],
         remaining: [],
       }),
   });
@@ -1522,7 +1524,10 @@ test("serveAllStatus GET /graft?preview and /prune?preview refuse a cross-site S
     port: 0,
     host: "127.0.0.1",
     graftClosure: () => (shelled.push("graft"), Promise.resolve({ ids: ["640"], placement: [], remaining: [], rejected: [] })),
-    pruneClosure: () => (shelled.push("prune"), Promise.resolve({ target: "201", dropped: ["201"], keptBanked: [], remaining: [] })),
+    pruneClosure: () => (
+      shelled.push("prune"),
+      Promise.resolve({ target: "201", dropped: ["201"], keptBanked: [], keptInFlight: [], remaining: [] })
+    ),
   });
   const { port } = server.address() as AddressInfo;
   const previews = [`/graft?preview&ids=640&project=beta`, `/prune?preview&taskId=201&project=beta`];

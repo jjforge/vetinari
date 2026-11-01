@@ -500,6 +500,6 @@ test("the issue sheet's PARK_RECOVERY table carries a `stopped` entry — a sign
   assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /"stopped":"[^"]*vetinari redrive[^"]*vetinari run <id>[^"]*"/);
 });
 
-test("the issue sheet's PARK_RECOVERY table carries an `outdated-agent` entry — rebuild the image, then redrive (#444)", () => {
+test("the issue sheet's PARK_RECOVERY table carries an `outdated-agent` entry — update the agent CLI, then redrive (#444)", () => {
   assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /"outdated-agent":"[^"]*vetinari build[^"]*redrive[^"]*"/);
 });

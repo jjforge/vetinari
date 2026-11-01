@@ -240,8 +240,8 @@ or `outdated-agent` record is never announced and cannot be answered. A `conflic
 announced but cannot be answered either: resolve the conflict on the base, then `vetinari redrive`.
 An answer to a campaign member whose last outcome is `failed` is delivered but starts no redrive — a
 plain redrive refuses a failed member — so re-run it with `vetinari redrive --override`. `outdated-agent` is the
-agent CLI in the image too old for the model (its `detail` is the CLI's error line): rebuild with
-`vetinari build`, then redrive.
+agent CLI too old for the model (its `detail` is the CLI's error line): update the agent CLI in the
+project's sandbox (`vetinari build` for the default Docker image), then redrive.
 
 ## Telegram routing
 

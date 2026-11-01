@@ -262,7 +262,7 @@ sends it (design §10).
   project's default chat (`VETINARI_TELEGRAM_CHAT_ID`). `question` **must** resolve
   to exactly one destination, because the gateway watches it for the reply.
 - **Replies and commands** — a reply to a question message routes by
-  `(bot, messageId)` to the project and issue, and the gateway shells `answer` in
+  `(bot, chat, messageId)` to the project and issue, and the gateway shells `answer` in
   that project's root. `/status` (a live summary) and `prune <issue>` (preview,
   then `yes`) are the only recognized commands.
 - **Notice skeleton** — every notice is header (`<emoji> <project> · <STATE> ·

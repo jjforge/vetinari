@@ -17,7 +17,7 @@ that project's rules, and route inbound replies back to the right project's park
 task by reply-to-message id.
 
 Because the gateway is the sender, it resolves replies with a **send-time index**
-`(botToken, messageId) → (project, task, baseLocation)`, not by scanning every
+`(botToken, chat, messageId) → (project, task, baseLocation)`, not by scanning every
 project's `parked/`. On a matching reply it resumes by running `answer <task>
 "<text>"` for that project (the shared install, ADR 0003) in that base location.
 The old `attend` mode (a single task inline-polling its own answers) is retired:

@@ -46,7 +46,9 @@ to.
 
 The **gateway** is one host-level daemon that fronts every project on the
 machine. It is the **single Telegram consumer** (one poll per bot, so Telegram's
-one-consumer-per-bot rule is never violated) and the **sole sender** — a run
+one-consumer-per-bot rule is never violated; each bot's poll hears every chat its
+projects use — each project's default chat and every named destination) and the
+**sole sender** — a run
 never talks to Telegram itself. When a run parks or emits a notice it writes a
 record into its own `.vetinari.local/` and moves on; the gateway drains that
 record and sends it. So until the gateway is running, **notifications do not
@@ -116,8 +118,8 @@ or `VETINARI_TELEGRAM_CHAT_ID`, even with an empty value.
 Each project names its own bot and chat in its `host.env`; **projects may share a
 bot or each have their own**. The gateway is the one process that consumes each
 bot and the sole sender, so any number of projects and bots share one gateway. A
-reply routes by `(bot, messageId)` back to the exact project and issue that
-asked, and the gateway shells `answer` in that project's root.
+reply routes by `(bot, chat, messageId)` back to the exact project and issue that
+asked (a Telegram message id is unique only within a chat), and the gateway shells `answer` in that project's root.
 
 Where a project's messages land is declared in its committed
 `vetinari/config.mts` with two maps:
@@ -196,7 +198,9 @@ credentials and that the gateway is running first, and routing second.
 In a **private** chat (a positive chat id) the chat *is* the other person, so
 only they can reply — nothing to configure. In a **group** chat (a negative id:
 group, supergroup or channel) every member could answer a parked agent or run
-`prune`, so the gateway acts only on messages from senders you list:
+`prune`, so the gateway acts only on messages from senders you list. A bot's
+poll hears every chat its projects use (each default chat and every named
+destination), and the allowlist applies to each group chat among them:
 
 ```bash
 # <project>/.vetinari.local/host.env
@@ -241,7 +245,9 @@ re-announces nothing already stamped with its `tgMessageId` and still routes a
 reply that arrived while it was down — a question announced but not yet stamped
 when the gateway died is announced again),
 announces newly parked questions, drains every registered project's outbox on a
-timer, and runs one poll loop per distinct bot. It also hosts the aggregated
+timer, and runs one poll loop per distinct bot, which hears every chat that bot's
+projects use (each default chat and every named destination) and answers a
+command in the chat it came from. It also hosts the aggregated
 status dashboard (default `127.0.0.1:8765`; override with
 `VETINARI_GATEWAY_STATUS_PORT` / `VETINARI_GATEWAY_STATUS_HOST`). A
 `VETINARI_GATEWAY_STATUS_PORT` that is not a port number (0–65535) refuses to

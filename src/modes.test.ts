@@ -2289,6 +2289,26 @@ test("queue returns and logs a per-task outcome map translating each child's exi
   assert.equal(failed[0].detail, "error(7)", "the failed event carries the translated exit code");
 });
 
+test("a member whose spawn rejects folds to a failed outcome and frees its slot, not an unhandled rejection that hangs the drain (#592)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-queue-reject-"));
+  const cfg = harnessCfg(dir);
+  // One slot: 102 can only spawn once 101's rejected spawn has released it.
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 1, weight: 1 };
+  const spawnRun: RunSpawner = async (taskId) => {
+    if (taskId === "101") throw new Error("spawn failed");
+    return 0;
+  };
+
+  const outcomes = await silenceConsole(() => queue(cfg, ["101", "102"], host, undefined, spawnRun));
+
+  assert.deepEqual(outcomes, { "101": "error(spawn failed)", "102": "green" });
+  const failed = readEventLog(cfg).filter((e): e is FailedEvent => e.event === "failed");
+  assert.deepEqual(
+    failed.map((f) => [f.taskId, f.detail]),
+    [["101", "error(spawn failed)"]],
+  );
+});
+
 test("an answered park re-admits on the slot poll while a long sibling still runs and nothing is queued (#497)", async (t) => {
   t.mock.timers.enable({ apis: ["setInterval"] });
   const dir = mkdtempSync(join(tmpdir(), "vetinari-queue-readmit-poll-"));

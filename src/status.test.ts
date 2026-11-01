@@ -932,12 +932,13 @@ test("serveAllStatus GET /api/events debounces a burst of appends into one frame
     const logPath = join(alphaDir, "logs", "orchestrator.jsonl");
     // One continuous read; the burst is scheduled to land after the watcher has armed but
     // well inside one debounce window (three separate appends, each a distinct fs.watch trigger).
-    setTimeout(async () => {
+    const burst = async () => {
       for (let i = 0; i < 3; i++) {
         appendFileSync(logPath, JSON.stringify(event("turn", { taskId: "101", turn: i, summary: "" })) + "\n");
         await new Promise((r) => setTimeout(r, 30));
       }
-    }, 250);
+    };
+    setTimeout(() => void burst(), 250);
     // Read well past the burst + debounce window so a second frame, if one were emitted, would show.
     const frames = (await collect(3000)).filter((p) => p.events?.length);
     assert.equal(frames.length, 1, "a burst within the debounce window coalesces to a single frame");
@@ -965,11 +966,12 @@ test("serveAllStatus GET /api/events emits no frame for a pure machine-noise app
     // A noise line then a real one in the same window: the read that the `green` guarantees
     // also sees the noise line, so the surviving frame proves the noise was stripped — a
     // deterministic check that doesn't hinge on whether fs.watch fired for the noise alone.
-    setTimeout(async () => {
+    const noiseThenGreen = async () => {
       appendFileSync(logPath, JSON.stringify(noise({ event: "telegram-send-failed", chatId: "42" })) + "\n");
       await new Promise((r) => setTimeout(r, 30));
       appendFileSync(logPath, JSON.stringify(event("green", { taskId: "101", branch: "agent/101", commits: [] })) + "\n");
-    }, 250);
+    };
+    setTimeout(() => void noiseThenGreen(), 250);
     const frames = (await collect(3000)).filter((p) => p.events?.length);
     assert.equal(frames.length, 1, "only the view-relevant append surfaces a frame");
     assert.deepEqual(

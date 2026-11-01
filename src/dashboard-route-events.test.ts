@@ -86,7 +86,8 @@ test("a burst of denylisted noise after connect emits no further unnamed frame (
   const res = resSpy();
   t.after(() => req.emit("close")); // tear the watchers down even if an assertion throws
 
-  handleEvents(req as never, res as never, new URL("http://x/api/events"), depsFor(configDir));
+  // `handleEvents` answers synchronously; `void` drops the `Promise` half of `RouteHandler`'s type.
+  void handleEvents(req as never, res as never, new URL("http://x/api/events"), depsFor(configDir));
   const afterConnect = unnamedFrames(res.chunks).length;
   assert.equal(afterConnect, 1, "the connect ring is the only unnamed frame so far");
 
@@ -119,7 +120,7 @@ const openConn = (t: { after: (fn: () => void) => void }, configDir: string) => 
   const req = connReq();
   const res = resSpy();
   t.after(() => req.emit("close"));
-  handleEvents(req as never, res as never, new URL("http://x/api/events"), depsFor(configDir));
+  void handleEvents(req as never, res as never, new URL("http://x/api/events"), depsFor(configDir)); // synchronous, as above
   return { req, res };
 };
 

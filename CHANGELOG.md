@@ -20,15 +20,22 @@ and each entry opens with a tag saying who it reaches:
 `**Breaking changes:**` sorts first in a milestone and names the contract it broke.
 Within a milestone each bold section label appears at most once.
 
-### v0.3.0 — November 1, 2026
-
-**Improvements:**
-- [internal] `package.json` version bumped to `0.3.0` to match the tag.
+### Collected changes — November 1, 2026
 
 **Bug fixes:**
 - [ops] sandcastle's host git guard now protects vetinari's worktrees too. It refuses to run git on the host in a worktree whose `.git` no longer leads to its own repo, but it recognised only `.sandcastle/worktrees/`, so worktrees under `.vetinari.local/worktrees/` skipped that check. The fork is now at `v0.12.0-statedir.4`; upstream PR #961 carries the same fix (#680).
 - [ops] `vetinari baseline` (and `build`'s baseline) now gates the base branch's current tip. It used to reuse whatever `agent/baseline` the first baseline had cut (#681).
 - [user] An answer given while a campaign is running is now picked up by that campaign before it parks, even with no grace window (`parkGraceSeconds` unset or `0`) or when the answer lands after the window, during integration. Before, the campaign could park listing the answered issue as awaiting a human (#683).
+
+### v0.3.0 — November 1, 2026
+
+Tags a known-good working version: typecheck and lint clean, the full suite
+green, and sandcastle synced to upstream (`v0.12.0-statedir.3`). It ships every
+milestone below, back to v0.2.0, including **Breaking changes** to the exported
+Telegram reply helpers (#660).
+
+**Improvements:**
+- [internal] `package.json` version bumped to `0.3.0` to match the tag.
 
 ### Collected changes — November 1, 2026
 

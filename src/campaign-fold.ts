@@ -472,6 +472,17 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       );
       const placeOf = new Map<string, number>();
       applied.remaining.forEach((wave, i) => wave.forEach((id) => placeOf.set(id, i)));
+      // A graft of an id a prune dropped brings it back unstarted (#662): its prune mark and its
+      // leftover `parked` outcome leave, and its chip moves out of the display wave it left
+      // (dropping that wave if it empties) — before `survivors`, so the old wave is not counted live.
+      const regrafted = new Set(applied.grafted.filter((id) => pruned.delete(id)));
+      for (const id of regrafted) outcomes.delete(id);
+      if (regrafted.size) {
+        layout = layout.flatMap((wave) => {
+          const kept = wave.filter((id) => !regrafted.has(id));
+          return kept.length || kept.length === wave.length ? [kept] : [];
+        });
+      }
       const survivors = liveLayoutWaves(layout, pruned);
       const layoutOf = new Map<number, number>();
       survivors.forEach((layoutIndex, prunedIndex) => layoutOf.set(prunedIndex, layoutIndex));

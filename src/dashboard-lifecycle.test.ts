@@ -1227,6 +1227,40 @@ test("a started member pruned and grafted back does not make its new, never-star
   assert.equal(reduced.startedWaves, 1);
 });
 
+test("a question-parked member pruned and grafted back reads grafted and unstarted, shown once in the wave it joined (#662)", () => {
+  const reduced = reduceCampaign([
+    event("campaign-start", { ts: "t0", waves: [["1"], ["2"], ["3"]], slots: 2 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["1"] }),
+    event("wave-done", { ts: "t2", index: 0, merged: ["1"] }),
+    event("wave-start", { ts: "t3", index: 1, tasks: ["2"] }),
+    event("parked", { ts: "t4", taskId: "2", reason: "question" }),
+    event("campaign-parked", { ts: "t5", reason: "question" }),
+    event("prune", { ts: "t6", target: "2", removed: ["2"], dropped: ["2"] }),
+    event("graft", { ts: "t7", ids: ["2"], blockedBy: {}, fileKeys: {} }),
+  ]);
+  assert.equal(reduced.pruned.has("2"), false);
+  assert.equal(reduced.grafted.has("2"), true);
+  assert.equal(reduced.outcomes.has("2"), false);
+  assert.equal(issueMembership(reduced, "2"), "grafted");
+  assert.equal(issueLifecycle(reduced, "2").state, "unstarted");
+  // The chip moved rather than being copied: once in the layout, in the display wave that
+  // holds the rest of its loop-facing wave.
+  assert.deepEqual(
+    reduced.layout.flat().filter((id) => id === "2"),
+    ["2"],
+  );
+  const loopWave = reduced.waves.find((wave) => wave.includes("2"))!;
+  const displayWave = reduced.layout.find((wave) => wave.includes("2"))!;
+  assert.deepEqual([...displayWave].sort(), [...loopWave].sort());
+  // The display wave #2 left held only #2, so it is gone rather than left empty.
+  assert.equal(
+    reduced.layout.some((wave) => wave.length === 0),
+    false,
+  );
+  // Only wave 0 (#1) ever started (#635).
+  assert.equal(reduced.startedWaves, 1);
+});
+
 test("a wave whose wave-start named members that have not spawned yet (slot-starved) counts as started (#635)", () => {
   const reduced = reduceCampaign([
     event("campaign-start", { ts: "t0", waves: [["1"], ["2", "3"], ["4"]], slots: 1 }),
@@ -1323,6 +1357,11 @@ test("reduceCampaign: a grafted-back conflict-parked target a manual prune dropp
   assert.equal(reduced.outcomes.has("701"), false);
   assert.equal(reduced.grafted.has("701"), true);
   assert.notEqual(issueLifecycle(reduced, "701").state, "running");
+  assert.equal(issueMembership(reduced, "701"), "grafted");
+  assert.deepEqual(
+    reduced.layout.flat().filter((id) => id === "701"),
+    ["701"],
+  );
 });
 
 test("reduceCampaign: an auto-prune's unmarked event keeps its conflict-parked target holding the wave (#559)", () => {

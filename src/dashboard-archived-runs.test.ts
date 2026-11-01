@@ -1,12 +1,14 @@
 // Tests for the dashboard's archived-run listing — listing a project's archived runs, their
 // one-line summaries, terminal state and run-token timestamps (dashboard-archived-runs.ts).
-import test from "node:test";
+import test, { mock } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import fs, { mkdirSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { listArchivedRuns, parseRunTimestamp, summarizeRun } from "./dashboard-archived-runs.ts";
 import { event } from "./event-log.ts";
+import { memoryLogger } from "./log.ts";
 
 const writeJsonl = (path: string, events: unknown[]) => writeFileSync(path, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
 
@@ -40,6 +42,72 @@ test("listArchivedRuns lists a project's archived runs newest-first with summari
   assert.equal(runs[1].name, undefined);
   // The file path is resolved from the listing, never joined from request input.
   assert.ok(runs[0].file.endsWith("orchestrator-2026-02-01T00-00-00-000Z.jsonl"));
+});
+
+/** Run `fn` while recording every path `fs.readFileSync` is called on. */
+const readsDuring = <T>(fn: () => T): { result: T; reads: string[] } => {
+  const reads: string[] = [];
+  const real = fs.readFileSync;
+  const spy = mock.method(fs, "readFileSync", ((path: fs.PathOrFileDescriptor, ...rest: unknown[]) => {
+    reads.push(String(path));
+    return (real as (...a: unknown[]) => unknown)(path, ...rest);
+  }) as typeof fs.readFileSync);
+  syncBuiltinESMExports();
+  try {
+    return { result: fn(), reads };
+  } finally {
+    spy.mock.restore();
+    syncBuiltinESMExports();
+  }
+};
+
+test("listArchivedRuns serves an unchanged archive from its cache: no re-read, no repeat skip row", () => {
+  const dir = join(tmpdir(), `vetinari-archive-cache-${Date.now()}`);
+  const archiveDir = join(dir, "logs", "archive");
+  mkdirSync(archiveDir, { recursive: true });
+  writeJsonl(join(archiveDir, "orchestrator-2026-01-01T00-00-00-000Z.jsonl"), [
+    event("campaign-start", { waves: [["101"]], slots: 1 }),
+    event("campaign-done", { waves: 1 }),
+  ]);
+  writeJsonl(join(archiveDir, "orchestrator-2026-02-01T00-00-00-000Z.jsonl"), [
+    event("campaign-start", { waves: [["201"], ["202"]], slots: 1 }),
+    event("campaign-done", { waves: 2 }),
+  ]);
+  writeFileSync(join(archiveDir, "orchestrator-2026-03-01T00-00-00-000Z.jsonl"), "not json at all\n{broken");
+  const logger = memoryLogger();
+
+  const first = listArchivedRuns(dir, logger);
+  assert.deepEqual(
+    logger.events.map((e) => e.event),
+    ["status-archive-skipped"],
+  );
+
+  const { result: second, reads } = readsDuring(() => listArchivedRuns(dir, logger));
+
+  assert.deepEqual(second, first);
+  assert.deepEqual(
+    reads.filter((p) => p.startsWith(archiveDir)),
+    [],
+  );
+  assert.deepEqual(
+    logger.events.map((e) => e.event),
+    ["status-archive-skipped"],
+  );
+});
+
+test("listArchivedRuns re-reads an archive whose content changed", () => {
+  const dir = join(tmpdir(), `vetinari-archive-changed-${Date.now()}`);
+  const archiveDir = join(dir, "logs", "archive");
+  mkdirSync(archiveDir, { recursive: true });
+  const file = join(archiveDir, "orchestrator-2026-01-01T00-00-00-000Z.jsonl");
+  writeJsonl(file, [event("campaign-start", { waves: [["101"]], slots: 1 }), event("campaign-done", { waves: 1 })]);
+  assert.equal(listArchivedRuns(dir)[0].summary, "campaign · 1 issue · complete");
+
+  writeJsonl(file, [event("campaign-start", { waves: [["101", "102"], ["103"]], slots: 1 }), event("campaign-done", { waves: 2 })]);
+
+  const [run] = listArchivedRuns(dir);
+  assert.equal(run.summary, "campaign · 3 issues · complete");
+  assert.equal(run.issues, 3);
 });
 
 test("listArchivedRuns carries a named run's --name for the list's primary label", () => {

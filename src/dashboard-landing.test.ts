@@ -1,8 +1,9 @@
 // Tests for the all-repos landing and the cross-project feed (dashboard-landing.ts).
-import test from "node:test";
+import test, { mock } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import fs, { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildFeed, buildLanding, cardState } from "./dashboard-landing.ts";
@@ -788,6 +789,55 @@ test("merged-today sums every archived run merged today, not just the latest (#9
   const { counters } = buildLanding([pointerFor("beta", dir)], new Date("2026-06-15T12:00:00.000Z"));
   // Both runs merged today — the earlier archive is no longer ignored.
   assert.equal(counters.mergedToday, 2);
+});
+
+test("merged-today reads each unchanged archive once, serving later landings from the cache", () => {
+  const base = join(tmpdir(), `vetinari-landing-merged-cache-${Date.now()}`);
+  const dir = join(base, "beta");
+  // A running live campaign, so the card reads no archive of its own.
+  seedState(dir, [
+    event("campaign-start", { ts: "2026-06-15T11:00:00.000Z", waves: [["901"]], name: "live", slots: 1 }),
+    event("wave-start", { ts: "2026-06-15T11:01:00.000Z", index: 0, tasks: [] }),
+    event("spawn", { ts: "2026-06-15T11:02:00.000Z", taskId: "901" }),
+  ]);
+  const archiveDir = join(dir, "logs", "archive");
+  mkdirSync(archiveDir, { recursive: true });
+  // Two archived runs today; 911 merged in both, so the per-issue dedupe counts it once.
+  writeJsonl(join(archiveDir, "orchestrator-2026-06-15T08-00-00-000Z.jsonl"), [
+    event("campaign-start", { ts: "2026-06-15T08:00:00.000Z", waves: [["911", "912"]], name: "morning", slots: 1 }),
+    event("wave-done", { ts: "2026-06-15T08:05:00.000Z", index: 0, merged: ["911", "912"] }),
+    event("campaign-done", { ts: "2026-06-15T08:06:00.000Z", waves: 1 }),
+  ]);
+  writeJsonl(join(archiveDir, "orchestrator-2026-06-15T10-00-00-000Z.jsonl"), [
+    event("campaign-start", { ts: "2026-06-15T10:00:00.000Z", waves: [["911"], ["913"]], name: "afternoon", slots: 1 }),
+    event("wave-done", { ts: "2026-06-15T10:05:00.000Z", index: 0, merged: ["911"] }),
+    event("wave-done", { ts: "2026-06-15T10:06:00.000Z", index: 1, merged: ["913"] }),
+    event("campaign-done", { ts: "2026-06-15T10:07:00.000Z", waves: 2 }),
+  ]);
+  const now = new Date("2026-06-15T12:00:00.000Z");
+
+  const first = buildLanding([pointerFor("beta", dir)], now).counters.mergedToday;
+  const reads: string[] = [];
+  const real = fs.readFileSync;
+  const spy = mock.method(fs, "readFileSync", ((path: fs.PathOrFileDescriptor, ...rest: unknown[]) => {
+    reads.push(String(path));
+    return (real as (...a: unknown[]) => unknown)(path, ...rest);
+  }) as typeof fs.readFileSync);
+  syncBuiltinESMExports();
+  let second: number;
+  try {
+    second = buildLanding([pointerFor("beta", dir)], now).counters.mergedToday;
+  } finally {
+    spy.mock.restore();
+    syncBuiltinESMExports();
+  }
+
+  assert.equal(first, 3);
+  assert.equal(second, 3);
+  assert.deepEqual(
+    reads.filter((p) => p.startsWith(archiveDir)),
+    [],
+  );
 });
 
 test("merged-today combines the live run's merges with the archives' (#97)", () => {

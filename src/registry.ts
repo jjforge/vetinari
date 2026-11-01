@@ -372,19 +372,28 @@ export function tgConnForBaseLocation(baseLocation: string): TgConn | undefined 
   return tgConnFromEnv(env);
 }
 
+/** Stale pointers (project + base location) already logged in this process. */
+const staleLoggedOnce = new Set<string>();
+
 /**
  * Load a project live from its base location: its Telegram connection and
  * secrets, read fresh every call so an edit to the project's config takes effect
  * with no re-register. A pointer whose base location has moved or been deleted is
- * skipped (logged, `undefined` returned) rather than throwing — one stale
+ * skipped (logged once per process, `undefined` returned) rather than throwing — one stale
  * registration must never take the gateway down (ADR 0002).
  */
 export function readProject(pointer: ProjectPointer, logger: Logger = hostLogger()): ReadProject | undefined {
   if (!existsSync(pointer.baseLocation)) {
-    logger.log("registry-stale", {
-      project: pointer.project,
-      baseLocation: pointer.baseLocation,
-    });
+    // The gateway reads every pointer on every tick, so log a stale one once per
+    // process rather than flooding the host log with the same row.
+    const key = JSON.stringify([pointer.project, pointer.baseLocation]);
+    if (!staleLoggedOnce.has(key)) {
+      staleLoggedOnce.add(key);
+      logger.log("registry-stale", {
+        project: pointer.project,
+        baseLocation: pointer.baseLocation,
+      });
+    }
     return undefined;
   }
   const { notify, destinations } = readRouting(pointer.baseLocation, logger);

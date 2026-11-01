@@ -3,7 +3,7 @@
 // a gap it slept through, and pure machine-noise after connect must still push nothing (#331).
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync, appendFileSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, appendFileSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EventEmitter } from "node:events";
@@ -111,6 +111,35 @@ test("a burst of denylisted noise after connect emits no further unnamed frame (
     framePayload(frame).events.map((e) => e.event),
     ["turn"],
     "only the view-relevant event surfaces; the denylisted noise beside it is stripped",
+  );
+});
+
+test("a log archived and recreated longer than before pushes every row of the new log", async (t) => {
+  const { configDir, base } = seed([event("campaign-start", { ts: "2026-08-01T00:00:00.000Z", waves: [["1"]], slots: 1 })]);
+  const req = connReq();
+  const res = resSpy();
+  t.after(() => req.emit("close"));
+
+  void handleEvents(req as never, res as never, new URL("http://x/api/events"), depsFor(configDir));
+  const afterConnect = unnamedFrames(res.chunks).length;
+
+  // `archiveRun`'s move-aside and recreate, synchronously: the new log outgrows the old one,
+  // so a stale offset into the old file would land mid-line in the new.
+  mkdirSync(join(base, "logs", "archive"), { recursive: true });
+  renameSync(logFileOf(base), join(base, "logs", "archive", "orchestrator-2026-08-01T00-00-00-000Z.jsonl"));
+  writeFileSync(
+    logFileOf(base),
+    JSON.stringify(event("campaign-start", { ts: "2026-08-01T01:00:00.000Z", waves: [["2"], ["3"]], name: "the next run", slots: 1 })) +
+      "\n" +
+      JSON.stringify(event("turn", { taskId: "2", turn: 0, summary: "the first turn", ts: "2026-08-01T01:01:00.000Z" })) +
+      "\n",
+  );
+
+  const frame = await waitFor(() => unnamedFrames(res.chunks)[afterConnect]);
+  assert.ok(frame, "the recreated log surfaces a frame");
+  assert.deepEqual(
+    framePayload(frame).events.map((e) => e.event),
+    ["campaign-start", "turn"],
   );
 });
 

@@ -352,6 +352,32 @@ test("readProjects routes a stale pointer's skip to the injected logger, not the
   );
 });
 
+test("readProjects logs a stale pointer's registry-stale once per process, not on every read", () => {
+  const configDir = tmpConfigDir();
+  const logger = memoryLogger();
+  const staleBase = join(tmpdir(), `vetinari-gone-${Date.now()}-${counter++}`);
+  register(configDir, pointer({ project: "stale", baseLocation: staleBase }));
+
+  for (let i = 0; i < 3; i++) {
+    assert.deepEqual(
+      readProjects(configDir, logger).map((r) => r.pointer.project),
+      [],
+    );
+  }
+  const otherBase = join(tmpdir(), `vetinari-gone-${Date.now()}-${counter++}`);
+  register(configDir, pointer({ project: "other", baseLocation: otherBase }));
+  readProjects(configDir, logger);
+  readProjects(configDir, logger);
+
+  assert.deepEqual(
+    logger.events.map((e) => [e.event, (e as { project?: string }).project]),
+    [
+      ["registry-stale", "stale"],
+      ["registry-stale", "other"],
+    ],
+  );
+});
+
 test("pointerFor derives the base location as the state dir under the project root", () => {
   const cfg = {
     project: "jjforge",

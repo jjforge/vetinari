@@ -37,3 +37,18 @@ export function handleCliError(err: unknown, io: CliErrorIO): void {
   io.writeStderr(detail + "\n");
   io.exit(1);
 }
+
+/**
+ * The refusal for native Windows (`process.platform === "win32"`), or `undefined` on
+ * every other platform. Native Windows breaks vetinari in several places (host paths used
+ * as container paths, no `process.getuid()`, a systemd-only gateway, …), so the CLI
+ * refuses at entry rather than failing later. Inside WSL2 the platform is `linux`, which
+ * passes — that is the supported Windows path.
+ */
+export function nativeWindowsRefusal(platform: string): string | undefined {
+  if (platform !== "win32") return undefined;
+  return (
+    "vetinari doesn't run on native Windows. Run it inside WSL2 with Docker Desktop's WSL integration " +
+    "turned on, with both the repo and vetinari inside the WSL filesystem (e.g. ~/src), not under /mnt/c."
+  );
+}

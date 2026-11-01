@@ -5,7 +5,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Refusal, handleCliError } from "./refusal.ts";
+import { Refusal, handleCliError, nativeWindowsRefusal } from "./refusal.ts";
 
 // Spawn the real CLI (through the local tsx bin) so the process-wide handler and the
 // pre-dispatch exit codes are exercised end to end — the only way to prove the handler
@@ -13,6 +13,11 @@ import { Refusal, handleCliError } from "./refusal.ts";
 const CLI = fileURLToPath(new URL("./cli.mts", import.meta.url));
 const TSX = fileURLToPath(new URL("../node_modules/.bin/tsx", import.meta.url));
 const runCli = (args: string[], cwd: string) => spawnSync(TSX, [CLI, ...args], { cwd, encoding: "utf8" });
+// A variant that passes node flags (e.g. `--import`) before the script path, so a preload
+// can fake the host platform for the whole CLI process.
+const runCliWithNodeFlags = (nodeFlags: string[], args: string[], cwd: string) =>
+  spawnSync(TSX, [...nodeFlags, CLI, ...args], { cwd, encoding: "utf8" });
+const FAKE_WIN32 = ["--import", "data:text/javascript,Object.defineProperty(process,'platform',{value:'win32'})"];
 
 test("Refusal is an Error subclass so existing catch sites keep working", () => {
   const r = new Refusal("nope");
@@ -82,4 +87,22 @@ test("`vetinari --help` is not a refusal: usage on stdout, exit 0, outside any p
   const r = runCli(["--help"], dir);
   assert.equal(r.status, 0);
   assert.match(r.stdout, /vetinari <mode> \[args\]/);
+});
+
+test("nativeWindowsRefusal refuses win32 with a pointer to WSL2 + Docker Desktop, and passes Linux and macOS", () => {
+  const msg = nativeWindowsRefusal("win32");
+  assert.ok(msg, "win32 refuses");
+  assert.match(msg, /WSL2/);
+  assert.match(msg, /Docker Desktop/);
+  assert.equal(nativeWindowsRefusal("linux"), undefined);
+  assert.equal(nativeWindowsRefusal("darwin"), undefined);
+});
+
+test("on native Windows every command refuses at entry, even `--help`: the message alone on stderr, exit 4", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-win32-"));
+  const r = runCliWithNodeFlags(FAKE_WIN32, ["--help"], dir);
+  assert.equal(r.status, 4, "a native-Windows refusal exits 4");
+  assert.equal(r.stderr, nativeWindowsRefusal("win32") + "\n", "exactly the refusal message");
+  assert.ok(!/\n\s+at /.test(r.stderr), "no `    at …` stack frames");
+  assert.doesNotMatch(r.stdout, /vetinari <mode> \[args\]/, "no usage text on stdout");
 });

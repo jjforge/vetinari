@@ -43,7 +43,7 @@ import { expandSelection, makeAskUnderspecified, runCampaignPlan, runFilesetChec
 import { runGraft } from "./graft.ts";
 import { runReplan } from "./replan.ts";
 import { renderUsage } from "./help.ts";
-import { Refusal, handleCliError } from "./refusal.ts";
+import { Refusal, handleCliError, nativeWindowsRefusal } from "./refusal.ts";
 import {
   applyLayoutMigration,
   computeLayoutMigration,
@@ -107,6 +107,11 @@ const cliErrorIO = {
 };
 process.on("uncaughtException", (err) => handleCliError(err, cliErrorIO));
 process.on("unhandledRejection", (err) => handleCliError(err, cliErrorIO));
+
+// Native Windows refuses at entry — before the argv parse, so `--help` and a bare
+// `vetinari` refuse too. WSL2 reports `linux` and passes.
+const nativeWindows = nativeWindowsRefusal(process.platform);
+if (nativeWindows !== undefined) throw new Refusal(nativeWindows);
 
 /**
  * A one-shot readline prompt — the injected `ask` seam the bot-connection collector

@@ -972,6 +972,29 @@ test("loadConfig refuses a non-boolean perMerge on a gate, naming the gate, and 
   assert.equal(cfg.gates[0].perMerge, true);
 });
 
+test("loadConfig refuses a timeoutSeconds that is not a positive whole number, naming the gate, and accepts one (#531)", async () => {
+  const withGates = (gates: string) => CONFIG_BODY.replace(`gates: [{ cmd: "true" }],`, `gates: ${gates},`);
+  for (const [bad, shown] of [
+    ["0", "0"],
+    ["-5", "-5"],
+    ["1.5", "1.5"],
+    [`"60"`, `"60"`],
+  ]) {
+    const cfgPath = writeConfig(
+      scratch(),
+      "vetinari/config.mts",
+      withGates(`[{ cmd: "true" }, { cmd: "make test", label: "test", timeoutSeconds: ${bad} }]`),
+    );
+    await assert.rejects(loadConfig(cfgPath), (err: Error) => {
+      assert.ok(err instanceof Refusal);
+      assert.equal(err.message, `${cfgPath}: gate "test": "timeoutSeconds" must be a positive whole number of seconds, got ${shown}`);
+      return true;
+    });
+  }
+  const cfg = await loadConfig(writeConfig(scratch(), "vetinari/config.mts", withGates(`[{ cmd: "make test", timeoutSeconds: 60 }]`)));
+  assert.equal(cfg.gates[0].timeoutSeconds, 60);
+});
+
 const withContainerShare = (share: string) => CONFIG_BODY.replace("fetchTask:", `containerShare: ${share},\n  fetchTask:`);
 
 test("loadConfig refuses an unknown containerShare tier, naming the field and the value", async () => {

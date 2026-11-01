@@ -434,6 +434,12 @@ export interface GateSpec {
    */
   budgetSeconds?: number;
   /**
+   * Seconds this gate may run before it is killed and read as red, its report saying it timed out.
+   * Defaults to 3600. Runs under the image's `timeout` binary (GNU coreutils). Independent of
+   * `budgetSeconds`, which stays information only.
+   */
+  timeoutSeconds?: number;
+  /**
    * Also run this gate on the base after each wave member's merge, not only once the whole wave
    * has merged. A red check undoes just that member's merge and retries it as for a merge
    * collision, so a co-wave break is attributed to one member rather than parking the wave `red-base`.
@@ -897,6 +903,10 @@ export async function loadConfig(explicitPath?: string): Promise<ResolvedConfig>
   for (const g of c.gates) {
     if (g.perMerge !== undefined && typeof g.perMerge !== "boolean")
       throw new Refusal(`${path}: gate "${g.label ?? g.cmd}": "perMerge" must be true or false, got ${JSON.stringify(g.perMerge)}`);
+    if (g.timeoutSeconds !== undefined && !(Number.isInteger(g.timeoutSeconds) && g.timeoutSeconds > 0))
+      throw new Refusal(
+        `${path}: gate "${g.label ?? g.cmd}": "timeoutSeconds" must be a positive whole number of seconds, got ${JSON.stringify(g.timeoutSeconds)}`,
+      );
   }
   // Shape and spelling only: there is no tree here to check an entry against, and a command
   // that never plans must not refuse over one — the directory check lives in `waiveFileSet`.

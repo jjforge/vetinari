@@ -7,7 +7,7 @@
  *
  * The offset is not stored (design §2.1: no cosmetic naming state on the durable
  * log). It is derived at render from the campaign's `campaign-start` timestamp
- * (`festiveOffsetFor`, dashboard-model.ts), so it is stable across every SSE
+ * (`festiveOffsetFor`, dashboard-event-text.ts), so it is stable across every SSE
  * re-render and disjoint between campaigns started at different times.
  *
  * The pool is **fixed order** (never re-shuffled per render): a wave's name is

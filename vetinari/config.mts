@@ -35,9 +35,11 @@ export default defineConfig({
   // their basename, and validates them against the tree — so this repo runs on the
   // one shared resolver rather than a second one that can drift from it.
 
-  // A long, sectioned reference most tickets touch one row of: co-wave edits to
-  // different rows merge cleanly, so it does not split tickets into waves.
-  waivedFiles: ["docs/reference.md"],
+  // Long, sectioned docs that most tickets touch one row or paragraph of: co-wave
+  // edits to different sections merge cleanly, so they do not split tickets into
+  // waves. Each was measured with review-logs' overlap replay before it was waived:
+  // no collision in any measured pair.
+  waivedFiles: ["docs/reference.md", "docs/design.md", "docs/operations.md", "docs/user-guide.md", "docs/ticket-contract.md"],
 
   toolchainProbe: "node --version && npm --version && claude --version && git --version",
 });

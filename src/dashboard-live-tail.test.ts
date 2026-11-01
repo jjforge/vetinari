@@ -235,3 +235,73 @@ test("tailEventLog yields nothing and a zero position for a missing log", () => 
     at: { offset: 0, ino: 0 },
   });
 });
+
+/** Run `fn` with `fs[name]` replaced by `impl`, restoring it (and the ESM bindings) after. */
+function withFsSpy<K extends "openSync" | "readSync" | "closeSync", T>(
+  name: K,
+  impl: (typeof fs)[K],
+  fn: (spy: ReturnType<typeof mock.method>) => T,
+): T {
+  const spy = mock.method(fs, name, impl);
+  syncBuiltinESMExports();
+  try {
+    return fn(spy as unknown as ReturnType<typeof mock.method>);
+  } finally {
+    spy.mock.restore();
+    syncBuiltinESMExports();
+  }
+}
+
+const enoent = () => Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" });
+
+test("tailEventLog yields nothing and keeps its position when the log vanishes before it is opened", () => {
+  const file = tailLogFile();
+  writeFileSync(file, row(event("campaign-start", { waves: [["101"]], slots: 1 })));
+  const { at } = tailEventLog(file, { offset: 0, ino: 0 });
+  appendFileSync(file, row(event("spawn", { taskId: "101" })));
+
+  const result = withFsSpy(
+    "openSync",
+    (() => {
+      throw enoent();
+    }) as typeof fs.openSync,
+    () => tailEventLog(file, at),
+  );
+
+  assert.deepEqual(result, { events: [], at });
+});
+
+test("tailEventLog yields nothing, keeps its position and closes the log when a read fails", () => {
+  const file = tailLogFile();
+  writeFileSync(file, row(event("campaign-start", { waves: [["101"]], slots: 1 })));
+  const { at } = tailEventLog(file, { offset: 0, ino: 0 });
+  appendFileSync(file, row(event("spawn", { taskId: "101" })));
+
+  const opened: number[] = [];
+  const realOpen = fs.openSync;
+  const realClose = fs.closeSync;
+  const { result, closed } = withFsSpy(
+    "openSync",
+    ((...a: Parameters<typeof fs.openSync>) => {
+      const fd = realOpen(...a);
+      opened.push(fd);
+      return fd;
+    }) as typeof fs.openSync,
+    () =>
+      withFsSpy(
+        "readSync",
+        (() => {
+          throw enoent();
+        }) as typeof fs.readSync,
+        () =>
+          withFsSpy("closeSync", ((fd: number) => realClose(fd)) as typeof fs.closeSync, (close) => ({
+            result: tailEventLog(file, at),
+            closed: close.mock.calls.map((c) => c.arguments[0]),
+          })),
+      ),
+  );
+
+  assert.deepEqual(result, { events: [], at });
+  assert.equal(opened.length, 1);
+  assert.deepEqual(closed, opened);
+});

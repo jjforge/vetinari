@@ -93,9 +93,19 @@ const archiveCache = new Map<string, ArchiveCacheEntry>();
 
 /** The cache entry for one archive file, read and reduced only when it is new or its
  * mtime/size moved. A malformed archive logs `status-archive-skipped` on that (re)read,
- * never on a cache hit. */
+ * never on a cache hit. An archive that can no longer be stat'd (removed by hand
+ * mid-listing) is treated as gone: its cache entry is dropped, it logs
+ * `status-archive-skipped`, and it yields no run and no merges. */
 function archiveEntry(file: string, token: string, logger: Logger): ArchiveCacheEntry {
-  const { mtimeMs, size } = statSync(file);
+  let stat;
+  try {
+    stat = statSync(file);
+  } catch {
+    archiveCache.delete(file);
+    logger.log("status-archive-skipped", { file });
+    return { mtimeMs: 0, size: 0, merges: [] };
+  }
+  const { mtimeMs, size } = stat;
   const cached = archiveCache.get(file);
   if (cached && cached.mtimeMs === mtimeMs && cached.size === size) return cached;
   const events = readEventLog({ logFile: file });

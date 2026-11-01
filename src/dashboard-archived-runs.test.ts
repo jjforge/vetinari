@@ -6,7 +6,7 @@ import fs, { mkdirSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { listArchivedRuns, parseRunTimestamp, summarizeRun } from "./dashboard-archived-runs.ts";
+import { archivedRunMerges, listArchivedRuns, parseRunTimestamp, summarizeRun } from "./dashboard-archived-runs.ts";
 import { event } from "./event-log.ts";
 import { memoryLogger } from "./log.ts";
 
@@ -93,6 +93,43 @@ test("listArchivedRuns serves an unchanged archive from its cache: no re-read, n
     logger.events.map((e) => e.event),
     ["status-archive-skipped"],
   );
+});
+
+test("listArchivedRuns skips and logs an archive removed between the directory read and its stat", () => {
+  const dir = join(tmpdir(), `vetinari-archive-vanished-${Date.now()}`);
+  const archiveDir = join(dir, "logs", "archive");
+  mkdirSync(archiveDir, { recursive: true });
+  const kept = join(archiveDir, "orchestrator-2026-01-01T00-00-00-000Z.jsonl");
+  const vanished = join(archiveDir, "orchestrator-2026-02-01T00-00-00-000Z.jsonl");
+  writeJsonl(kept, [event("campaign-start", { waves: [["101"]], slots: 1 }), event("campaign-done", { waves: 1 })]);
+  writeJsonl(vanished, [event("campaign-start", { waves: [["201"]], slots: 1 }), event("campaign-done", { waves: 1 })]);
+  const logger = memoryLogger();
+
+  const real = fs.statSync;
+  const spy = mock.method(fs, "statSync", ((path: fs.PathLike, ...rest: unknown[]) => {
+    if (String(path) === vanished) throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" });
+    return (real as (...a: unknown[]) => unknown)(path, ...rest);
+  }) as typeof fs.statSync);
+  syncBuiltinESMExports();
+  let runs: ReturnType<typeof listArchivedRuns>;
+  let merges: ReturnType<typeof archivedRunMerges>;
+  try {
+    runs = listArchivedRuns(dir, logger);
+    merges = archivedRunMerges(vanished, memoryLogger());
+  } finally {
+    spy.mock.restore();
+    syncBuiltinESMExports();
+  }
+
+  assert.deepEqual(
+    runs.map((r) => r.file),
+    [kept],
+  );
+  assert.deepEqual(
+    logger.events.map((e) => [e.event, (e as { file?: string }).file]),
+    [["status-archive-skipped", vanished]],
+  );
+  assert.deepEqual(merges, []);
 });
 
 test("listArchivedRuns re-reads an archive whose content changed", () => {

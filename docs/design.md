@@ -145,7 +145,7 @@ A parked record of the **current** campaign's plan keeps the card out of `idle`.
 
 ### 2.6 Outbound record
 
-`outbox/<uuid>.json`: `{ id, category, event?, text, enqueuedAt, sentAt?, destination? }`, `category` one of `success | failure | progress | finding`. A question is never an outbound record — it is the parked record (§2.5), which the gateway announces. A run writes; the gateway drains, routes by the project's notify map, and stamps `sentAt`. Unsent records survive a gateway outage and an archive; sent ones are cleared at archive.
+`outbox/<uuid>.json`: `{ id, category, event?, text, enqueuedAt, sentAt?, destination? }`, `category` one of `success | failure | progress | finding`. A question is never an outbound record — it is the parked record (§2.5), which the gateway announces. A run writes; the gateway drains, routes by the project's notify map, and stamps `sentAt`. The stamp follows the send, so delivery is at-least-once: a gateway that dies between the two re-sends the record on restart, because a duplicate is preferred over a lost message. The same holds for a parked record's `tgMessageId` (§2.5): a question announced but not yet stamped is announced again. Unsent records survive a gateway outage and an archive; sent ones are cleared at archive.
 
 ## 3. The run loop
 

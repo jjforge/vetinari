@@ -237,7 +237,9 @@ vetinari gateway
 ```
 
 It rebuilds its reply index from persisted parked records (so a restart
-re-announces nothing and still routes a reply that arrived while it was down),
+re-announces nothing already stamped with its `tgMessageId` and still routes a
+reply that arrived while it was down — a question announced but not yet stamped
+when the gateway died is announced again),
 announces newly parked questions, drains every registered project's outbox on a
 timer, and runs one poll loop per distinct bot. It also hosts the aggregated
 status dashboard (default `127.0.0.1:8765`; override with
@@ -360,10 +362,14 @@ start a small campaign (or trigger any parked question); a `campaign-start` /
   per gateway start.
   For a systemd service these go to `journalctl --user -u vetinari-gateway`.
 - Each outbox record file under `.vetinari.local/outbox/<id>.json` gains a
-  `sentAt` timestamp (and the `destination` it resolved to) once routed — that
-  stamp is the idempotence marker, so a restart neither re-sends nor drops it. A
-  record still missing `sentAt` after a tick has not been sent: check the project
-  has credentials (a connection) and that the gateway is up.
+  `sentAt` timestamp (and the `destination` it resolved to) once routed. Delivery
+  is at-least-once, so a restart never drops a record: the stamp follows the send,
+  and if the gateway dies after Telegram accepted a message but before stamping it
+  (`sentAt`, or a question's `tgMessageId`), the restarted gateway sends it again,
+  because a duplicate is preferred over a lost message. For a repeated question,
+  reply to the newer copy. A record still missing `sentAt` after a tick has not
+  been sent: check the project has credentials (a connection) and that the
+  gateway is up.
 - A send Telegram rejected logs `telegram-send-failed` with the HTTP `status`
   (or `"network"`) and Telegram's `description` — `Bad Request: chat not found`
   is a wrong chat id — plus `retryAfter` (seconds) on a `429`. A failed outbox

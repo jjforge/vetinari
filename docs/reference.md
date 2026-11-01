@@ -162,6 +162,7 @@ the container is `.vetinari.local/.env` (design §9, ADR 0011).
 | `OPENCODE_API_KEY` | `.vetinari.local/.env` | OpenCode credential (experimental provider) |
 | `VETINARI_TELEGRAM_BOT_TOKEN` | `.vetinari.local/host.env` | this project's Telegram bot token — host-only, never crosses into the container |
 | `VETINARI_TELEGRAM_CHAT_ID` | `.vetinari.local/host.env` | this project's default Telegram chat |
+| `VETINARI_TELEGRAM_ALLOWED_SENDERS` | `.vetinari.local/host.env` | comma-separated Telegram user ids allowed to send into a group chat (a negative chat id); unset refuses every group-chat message, logged as `telegram-sender-refused`. Unioned across the projects sharing a bot, read live. Private chats are never gated |
 | `VETINARI_TELEGRAM_THREAD_ID` | `.vetinari.local/host.env` | optional forum thread (topic) for the default chat, read alongside the bot token and chat id; unset posts to the chat itself |
 | `VETINARI_STATUS_ALLOWED_HOSTS` | host env (`status` and the gateway) | comma-separated, case-insensitive DNS names the dashboard admits as a `Host` beyond IP literals and `localhost` — a MagicDNS or reverse-proxy name; any other name is a 403 (see the operations guide's exposure section) |
 | `VETINARI_STATUS_PORT` / `VETINARI_STATUS_HOST` | host env (`status`) | the port and bind address `status` serves on when `--port` / `--host` are not given; default `8765` / `127.0.0.1` |

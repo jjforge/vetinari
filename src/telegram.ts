@@ -9,7 +9,25 @@ export interface TgConn {
   token: string;
   chat: string;
   thread?: string;
+  /**
+   * Telegram user ids allowed to send into a group chat on this bot (`VETINARI_TELEGRAM_ALLOWED_SENDERS`).
+   * Absent means none: a group chat's messages are all refused. A private chat needs no allowlist.
+   */
+  allowedSenders?: ReadonlySet<string>;
 }
+
+/**
+ * Parse `VETINARI_TELEGRAM_ALLOWED_SENDERS` — comma-separated user ids, whitespace trimmed, empty
+ * entries ignored — into the `allowedSenders` key of a connection: `{}` when unset or empty, so an
+ * unconfigured connection carries no key at all.
+ */
+export const allowedSendersOf = (raw: string | undefined): { allowedSenders?: ReadonlySet<string> } => {
+  const ids = (raw ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return ids.length ? { allowedSenders: new Set(ids) } : {};
+};
 
 // The ONE place a Telegram connection is read from process env. Credentials come
 // from the ORCHESTRATOR's environment, never from the sandcastle .env file — that
@@ -20,7 +38,14 @@ export interface TgConn {
 export const tgEnvConn = (): TgConn | undefined => {
   const token = process.env.VETINARI_TELEGRAM_BOT_TOKEN;
   const chat = process.env.VETINARI_TELEGRAM_CHAT_ID;
-  return token && chat ? { token, chat, thread: process.env.VETINARI_TELEGRAM_THREAD_ID } : undefined;
+  return token && chat
+    ? {
+        token,
+        chat,
+        thread: process.env.VETINARI_TELEGRAM_THREAD_ID,
+        ...allowedSendersOf(process.env.VETINARI_TELEGRAM_ALLOWED_SENDERS),
+      }
+    : undefined;
 };
 
 const api = (conn: TgConn) => `https://api.telegram.org/bot${conn.token}`;
@@ -121,13 +146,18 @@ const defaultPollBackoff = (conn: TgConn): PollBackoff => {
   return b;
 };
 
-export type TgMsg = { text: string; replyToId?: number };
+export type TgMsg = { text: string; replyToId?: number; senderId?: string };
 
 /** How long one `getUpdates` long-poll holds open, in seconds — also the gateway's poll-staleness unit. */
 export const TG_POLL_TIMEOUT_S = 50;
 
 /**
  * One long-poll cycle, text messages from the configured chat only.
+ *
+ * In a group chat (a negative chat id: group, supergroup or channel) only a sender in the
+ * connection's `allowedSenders` gets through; anyone else — or a message with no sender — is
+ * dropped unanswered and logged as one `telegram-sender-refused` row (bot id, chat, sender; never
+ * the text). A private chat (a positive id) is the other person, so it is never gated.
  *
  * Telegram allows exactly ONE consumer of a bot's updates, so at most one
  * process may poll: a second poller silently steals messages from the first.
@@ -165,7 +195,13 @@ export async function tgPoll(
     const m = u.message;
     if (!m?.text) continue;
     if (String(m.chat?.id) !== String(conn.chat)) continue;
-    messages.push({ text: m.text as string, replyToId: m.reply_to_message?.message_id });
+    const chat = String(m.chat.id);
+    const senderId = m.from?.id != null ? String(m.from.id) : undefined;
+    if (Number(chat) < 0 && !(senderId && conn.allowedSenders?.has(senderId))) {
+      logger.log("telegram-sender-refused", { bot: botId(conn), chat, sender: senderId });
+      continue;
+    }
+    messages.push({ text: m.text as string, replyToId: m.reply_to_message?.message_id, senderId });
   }
   return { offset, messages };
 }

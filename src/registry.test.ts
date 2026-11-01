@@ -202,6 +202,14 @@ test("tgConnForBaseLocation reads the Telegram connection from the base location
   });
 });
 
+test("tgConnForBaseLocation carries the host.env's allowed senders", () => {
+  const baseLocation = baseLocationWith(
+    "VETINARI_TELEGRAM_BOT_TOKEN=123:abc\nVETINARI_TELEGRAM_CHAT_ID=-1001\nVETINARI_TELEGRAM_ALLOWED_SENDERS=7, 8\n",
+  );
+
+  assert.deepEqual(tgConnForBaseLocation(baseLocation)?.allowedSenders, new Set(["7", "8"]));
+});
+
 test("tgConnForBaseLocation is undefined when host.env is absent", () => {
   const baseLocation = join(tmpConfigDir(), ".vetinari.local");
   mkdirSync(baseLocation, { recursive: true });

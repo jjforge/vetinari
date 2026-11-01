@@ -191,6 +191,34 @@ the gateway skips it: the outbox fills and nothing is sent, with only a
 per gateway start, not every tick. When notifications aren't firing, check
 credentials and that the gateway is running first, and routing second.
 
+### Group chats — allowlisting senders
+
+In a **private** chat (a positive chat id) the chat *is* the other person, so
+only they can reply — nothing to configure. In a **group** chat (a negative id:
+group, supergroup or channel) every member could answer a parked agent or run
+`prune`, so the gateway acts only on messages from senders you list:
+
+```bash
+# <project>/.vetinari.local/host.env
+VETINARI_TELEGRAM_ALLOWED_SENDERS=123456789, 987654321   # Telegram user ids
+```
+
+- **No allowlist, no group routing.** With none set, every message from a group
+  chat is refused. The gateway warns at start, once per project with a group chat
+  (default or a named destination) and no allowlist on its bot; outbound notices
+  still go out.
+- **Refusals are silent.** Nothing is sent back to the chat; the host log gets one
+  `telegram-sender-refused` row with the bot id, chat and sender id — never the
+  message text. An anonymous group admin arrives as Telegram's anonymous-admin
+  bot, so it is refused unless that id is listed.
+- **A shared bot shares its allowlist.** The allowed senders on a bot are the
+  union of `VETINARI_TELEGRAM_ALLOWED_SENDERS` across every project on that token —
+  which project a message belongs to is only known after routing.
+- **Edits take effect live**, on the next poll, with no gateway restart.
+
+**Finding a user id:** have the person send a message in the group, then read the
+`sender` field of its `telegram-sender-refused` row in `vetinari host log`.
+
 ### Registration and running the daemon
 
 **Registration is automatic.** Every run entry point (`run`, `campaign`,
@@ -317,6 +345,9 @@ vetinari tg-test
 It sends a message, waits for your reply, and echoes it back — a green round-trip
 confirms the token and chat id are right. A `sendMessage failed` means the token
 was rejected or the chat id is wrong (see `telegram-send-failed` in the log).
+In a group chat with no `VETINARI_TELEGRAM_ALLOWED_SENDERS`, `tg-test` waits
+forever: your reply is refused (look for `telegram-sender-refused` in
+`vetinari host log`) — see "Group chats" above.
 
 **Confirm the outbox is draining** with a real message. With the gateway running,
 start a small campaign (or trigger any parked question); a `campaign-start` /

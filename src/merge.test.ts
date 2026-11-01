@@ -1461,3 +1461,49 @@ test("findMergeCommit returns undefined when git fails, so an unreadable repo sk
     process.chdir(prevCwd);
   }
 });
+
+/** A tidy target over a bare temp dir (no git work planned), for the parked-record removal alone. */
+function parkedOnlyTidyTarget(dir: string) {
+  return {
+    project: "demo",
+    root: dir,
+    baseBranch: "main",
+    branchPrefix: "agent/",
+    parkedDir: join(dir, "parked"),
+    logFile: join(dir, "orchestrator.jsonl"),
+    fragmentsDir: join(dir, "changelog.d"),
+    changelogPath: join(dir, "CHANGELOG.md"),
+    stateDir: join(dir, ".vetinari.local"),
+  };
+}
+const clearOnlyPlan = (ids: string[]) => ({ fold: [], deleteBranches: [], clearParked: ids, warnNoChangelog: [], keep: [] });
+
+test("applyTidy removes a planned parked record through the parked lock — and gives up on a held one (#570)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-tidy-parked-lock-"));
+  const target = parkedOnlyTidyTarget(dir);
+  writeParkedRecord(target, { taskId: "60", reason: "question", branch: "agent/60", question: "?" });
+  writeParkedRecord(target, { taskId: "61", reason: "question", branch: "agent/61", question: "?" });
+
+  applyTidy(target, clearOnlyPlan(["60"]));
+  assert.equal(existsSync(join(target.parkedDir, "60.json")), false, "the planned record is removed");
+
+  const lock = join(target.parkedDir, ".lock");
+  writeFileSync(lock, `${process.pid}:not-mine`);
+  const before = readFileSync(join(target.parkedDir, "61.json"));
+  const started = Date.now();
+  assert.throws(
+    () => applyTidy(target, clearOnlyPlan(["61"])),
+    (e: unknown) => e instanceof Error && e.message.includes("parked:") && e.message.includes(lock),
+  );
+  assert.ok(Date.now() - started < 5000, "gives up in under 5s");
+  assert.deepEqual(readFileSync(join(target.parkedDir, "61.json")), before, "the record is untouched");
+});
+
+test("applyTidy with no parked directory clears nothing and creates no parked directory (#570)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-tidy-no-parked-"));
+  const target = parkedOnlyTidyTarget(dir);
+
+  applyTidy(target, clearOnlyPlan(["62"]));
+
+  assert.equal(existsSync(target.parkedDir), false);
+});

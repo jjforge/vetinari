@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { writeFileAtomic } from "./atomic-write.ts";
+import { withFileLockSync } from "./file-lock.ts";
 import type { MessageCategory, ResolvedConfig } from "./config.ts";
 import { hostLogger, type Logger } from "./log.ts";
 
@@ -65,6 +66,15 @@ function parkedRecordPath(parkedDir: string, taskId: string): string {
 const file = (cfg: Pick<ResolvedConfig, "parkedDir">, taskId: string) => parkedRecordPath(cfg.parkedDir, taskId);
 
 /**
+ * Run `fn` holding the parked directory's one lock (`<parkedDir>/.lock`), so the gateway's stamp,
+ * an `answer` child's delivery and the campaign's writes and clears never interleave. Every parked
+ * write takes it; readers stay lock-free, since every write is an atomic rename. The lock's own
+ * files (`.lock`, `.lock.reclaim`, `*.tmp`) do not end in `.json`, so `listParkedIn` skips them.
+ */
+const withParkedLock = <T>(parkedDir: string, fn: () => T): T =>
+  withFileLockSync(join(parkedDir, ".lock"), fn, { retryMs: 5, maxAttempts: 400, label: "parked" });
+
+/**
  * Parking is a TERMINAL state for the slot, not a blocking wait: the record and
  * the agent's session survive on the host, the container goes away, and the
  * slot is freed. One blocked task must never hold up the others.
@@ -86,8 +96,9 @@ export async function park(cfg: ResolvedConfig, rec: Omit<ParkedRecord, "parkedA
  * "written by whatever parks"). `parkedAt` is stamped here.
  */
 export function writeParkedRecord(cfg: Pick<ResolvedConfig, "parkedDir">, rec: Omit<ParkedRecord, "parkedAt" | "tgMessageId">): void {
+  const path = file(cfg, rec.taskId);
   mkdirSync(cfg.parkedDir, { recursive: true });
-  writeFileAtomic(file(cfg, rec.taskId), JSON.stringify({ parkedAt: new Date().toISOString(), ...rec }, null, 2));
+  withParkedLock(cfg.parkedDir, () => writeFileAtomic(path, JSON.stringify({ parkedAt: new Date().toISOString(), ...rec }, null, 2)));
 }
 
 /** A project's parked directory under a base location (its `.vetinari.local/`). */
@@ -118,13 +129,17 @@ export function listParkedIn(parkedDir: string, logger: Logger = hostLogger()): 
  * Stamp a parked record with the message id the gateway announced it as. This is
  * what marks the record announced and, on a later restart, feeds the reply
  * index's rebuild — parked records stay the source of truth (ADR 0002). A record
- * that has since vanished (answered and cleared) is left alone.
+ * that has since vanished (answered and cleared) is left alone — checked under the parked lock, so
+ * a clear racing the stamp can never be written back.
  */
 export function setParkedMessageId(parkedDir: string, taskId: string, tgMessageId: number): void {
   const path = parkedRecordPath(parkedDir, taskId);
-  if (!existsSync(path)) return;
-  const rec = JSON.parse(readFileSync(path, "utf8")) as ParkedRecord;
-  writeFileAtomic(path, JSON.stringify({ ...rec, tgMessageId }, null, 2));
+  if (!existsSync(parkedDir)) return;
+  withParkedLock(parkedDir, () => {
+    if (!existsSync(path)) return;
+    const rec = JSON.parse(readFileSync(path, "utf8")) as ParkedRecord;
+    writeFileAtomic(path, JSON.stringify({ ...rec, tgMessageId }, null, 2));
+  });
 }
 
 /**
@@ -149,10 +164,18 @@ export const hasParked = (cfg: ResolvedConfig, taskId: string) => existsSync(fil
  * gateway does not re-announce) and `sessionId` (so a resumable re-admit can resume). An answer
  * is *delivered*, not run: whoever re-admits the member (a live campaign, or a redrive) consumes
  * this record and runs it with the answer as its prompt. Idempotent against a re-delivered answer.
+ * The record is re-read under the parked lock, so a stamp a moment earlier survives; returns
+ * whether it delivered — false when the record (or the whole parked directory) is gone.
  */
-export function answerParked(cfg: ResolvedConfig, taskId: string, answer: string): void {
-  const rec = JSON.parse(readFileSync(file(cfg, taskId), "utf8")) as ParkedRecord;
-  writeFileAtomic(file(cfg, taskId), JSON.stringify({ ...rec, answer, answeredAt: new Date().toISOString() }, null, 2));
+export function answerParked(cfg: ResolvedConfig, taskId: string, answer: string): boolean {
+  const path = file(cfg, taskId);
+  if (!existsSync(cfg.parkedDir)) return false;
+  return withParkedLock(cfg.parkedDir, () => {
+    if (!existsSync(path)) return false;
+    const rec = JSON.parse(readFileSync(path, "utf8")) as ParkedRecord;
+    writeFileAtomic(path, JSON.stringify({ ...rec, answer, answeredAt: new Date().toISOString() }, null, 2));
+    return true;
+  });
 }
 
 /**
@@ -165,11 +188,22 @@ export function isAnswered(cfg: ResolvedConfig, taskId: string): boolean {
   return (JSON.parse(readFileSync(file(cfg, taskId), "utf8")) as ParkedRecord).answer != null;
 }
 
-export const clearParked = (cfg: ResolvedConfig, taskId: string) => rmSync(file(cfg, taskId), { force: true });
-
-export function clearParkedForTasks(cfg: ResolvedConfig, taskIds: string[]) {
-  for (const taskId of taskIds) clearParked(cfg, taskId);
+/**
+ * Remove the parked records for `taskIds` under an explicit parked directory, holding the parked
+ * lock once for all of them. A parked directory that does not exist is a no-op that creates
+ * nothing — no directory and no lock — since there is no record to race on.
+ */
+export function clearParkedIn(parkedDir: string, taskIds: string[]): void {
+  const paths = taskIds.map((taskId) => parkedRecordPath(parkedDir, taskId));
+  if (!existsSync(parkedDir)) return;
+  withParkedLock(parkedDir, () => {
+    for (const path of paths) rmSync(path, { force: true });
+  });
 }
+
+export const clearParked = (cfg: ResolvedConfig, taskId: string) => clearParkedIn(cfg.parkedDir, [taskId]);
+
+export const clearParkedForTasks = (cfg: ResolvedConfig, taskIds: string[]) => clearParkedIn(cfg.parkedDir, taskIds);
 
 export function listParked(cfg: ResolvedConfig, logger: Logger = hostLogger()): ParkedRecord[] {
   mkdirSync(cfg.parkedDir, { recursive: true });

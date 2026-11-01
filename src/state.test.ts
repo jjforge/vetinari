@@ -1,13 +1,16 @@
 import test from "node:test";
+import { spawn } from "node:child_process";
 import assert from "node:assert/strict";
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import type { ResolvedConfig } from "./config.ts";
 import {
   answerParked,
   clearParked,
   clearParkedForTasks,
+  clearParkedIn,
   enqueueOutbound,
   hasParked,
   isAnswered,
@@ -471,3 +474,141 @@ for (const taskId of ["101", "#101", "A1"]) {
     assert.equal(hasParked(cfg, taskId), false);
   });
 }
+
+// The parked directory's one lock (#570): plant it held by a live pid with a token that is not the
+// writer's, so every writer must wait on it and give up with the `parked:` error, writing nothing.
+const plantHeldParkedLock = (parkedDir: string) => {
+  const lock = join(parkedDir, ".lock");
+  writeFileSync(lock, `${process.pid}:not-mine`);
+  return lock;
+};
+
+test("every parked-record writer waits on a held parked lock and gives up without touching the record", () => {
+  const dir = join(tmpdir(), `vetinari-parked-lock-held-${Date.now()}`);
+  const parkedDir = join(dir, "parked");
+  mkdirSync(parkedDir, { recursive: true });
+  parkFixture(dir, "701");
+  const recordPath = join(parkedDir, "701.json");
+  const before = readFileSync(recordPath);
+  const lock = plantHeldParkedLock(parkedDir);
+  const lockError = (e: unknown) => e instanceof Error && e.message.includes("parked:") && e.message.includes(lock);
+
+  const writers: [string, () => unknown][] = [
+    ["answerParked", () => answerParked(cfgFor(dir), "701", "an answer")],
+    ["setParkedMessageId", () => setParkedMessageId(parkedDir, "701", 77)],
+    ["clearParked", () => clearParked(cfgFor(dir), "701")],
+    ["clearParkedForTasks", () => clearParkedForTasks(cfgFor(dir), ["701"])],
+    ["writeParkedRecord", () => writeParkedRecord(cfgFor(dir), { taskId: "701", reason: "question", branch: "agent/701", question: "?" })],
+  ];
+  for (const [name, write] of writers) {
+    const started = Date.now();
+    assert.throws(write, lockError, `${name} gives up with the parked lock's error`);
+    assert.ok(Date.now() - started < 5000, `${name} gives up in under 5s`);
+    assert.deepEqual(readFileSync(recordPath), before, `${name} leaves the record byte-for-byte unchanged`);
+  }
+});
+
+test("with no parked directory every parked writer is a no-op that creates neither the directory nor a lock", () => {
+  const dir = join(tmpdir(), `vetinari-parked-no-dir-${Date.now()}`);
+  const parkedDir = join(dir, "parked");
+
+  clearParked(cfgFor(dir), "702");
+  clearParkedForTasks(cfgFor(dir), ["702", "703"]);
+  clearParkedIn(parkedDir, ["702"]);
+  setParkedMessageId(parkedDir, "702", 5);
+  assert.equal(answerParked(cfgFor(dir), "702", "an answer"), false, "nothing to deliver to");
+
+  assert.equal(existsSync(parkedDir), false, "no parked/ directory appears as a side effect");
+});
+
+test("setParkedMessageId on a task with no record writes nothing — a stamp never revives a cleared record", () => {
+  const dir = join(tmpdir(), `vetinari-stamp-no-revive-${Date.now()}`);
+  const parkedDir = join(dir, "parked");
+  mkdirSync(parkedDir, { recursive: true });
+
+  setParkedMessageId(parkedDir, "704", 9);
+
+  assert.equal(existsSync(join(parkedDir, "704.json")), false);
+});
+
+test("answerParked on a vanished record returns false and writes nothing", () => {
+  const dir = join(tmpdir(), `vetinari-answer-vanished-${Date.now()}`);
+  const parkedDir = join(dir, "parked");
+  mkdirSync(parkedDir, { recursive: true });
+
+  assert.equal(answerParked(cfgFor(dir), "705", "an answer"), false);
+  assert.deepEqual(readdirSync(parkedDir), [], "no record and no lock left behind");
+});
+
+test("answerParked on a present record returns true and keeps every other field", async () => {
+  const dir = join(tmpdir(), `vetinari-answer-present-${Date.now()}`);
+  const parkedDir = join(dir, "parked");
+  await park(cfgFor(dir), { taskId: "706", reason: "question", sessionId: "s", branch: "agent/706", question: "Which?" });
+  setParkedMessageId(parkedDir, "706", 31);
+  const before = JSON.parse(readFileSync(join(parkedDir, "706.json"), "utf8"));
+
+  assert.equal(answerParked(cfgFor(dir), "706", "B"), true);
+
+  const { answer, answeredAt, ...rest } = JSON.parse(readFileSync(join(parkedDir, "706.json"), "utf8"));
+  assert.equal(answer, "B");
+  assert.ok(answeredAt);
+  assert.deepEqual(rest, before, "every other field, tgMessageId included, is kept");
+});
+
+test("listParkedIn ignores the parked lock's own files", () => {
+  const dir = join(tmpdir(), `vetinari-list-lock-files-${Date.now()}`);
+  const parkedDir = join(dir, "parked");
+  mkdirSync(parkedDir, { recursive: true });
+  parkFixture(dir, "707");
+  writeFileSync(join(parkedDir, ".lock"), `${process.pid}:abc`);
+  writeFileSync(join(parkedDir, ".lock.reclaim"), `${process.pid}:abc`);
+  writeFileSync(join(parkedDir, ".lock.x.tmp"), `${process.pid}:abc`);
+  const logger = memoryLogger();
+
+  const recs = listParkedIn(parkedDir, logger);
+
+  assert.deepEqual(
+    recs.map((r) => r.taskId),
+    ["707"],
+  );
+  assert.deepEqual(logger.events, [], "no parked-record-unreadable for a lock file");
+});
+
+// Spawn real processes (through the local tsx bin, as `refusal.test.ts` does) so the parked lock is
+// exercised across processes — the gateway's stamp and an `answer` child racing on one record.
+const TSX = fileURLToPath(new URL("../node_modules/.bin/tsx", import.meta.url));
+const STATE_MODULE = new URL("./state.ts", import.meta.url).href;
+
+test("concurrent stamps and answers from separate processes both land on the record", { timeout: 10_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-parked-contention-"));
+  const parkedDir = join(dir, "parked");
+  writeParkedRecord({ parkedDir }, { taskId: "708", reason: "question", sessionId: "s", branch: "agent/708", question: "?" });
+  const script = join(dir, "writer.mts");
+  writeFileSync(
+    script,
+    [
+      `import { answerParked, setParkedMessageId } from ${JSON.stringify(STATE_MODULE)};`,
+      `const [role, parkedDir, startAt] = process.argv.slice(2);`,
+      // Hold every writer until one shared instant, so their loops genuinely overlap.
+      `while (Date.now() < Number(startAt));`,
+      `for (let i = 0; i < 100; i++) {`,
+      `  if (role === "stamp") setParkedMessageId(parkedDir, "708", 4242);`,
+      `  else if (!answerParked({ parkedDir } as never, "708", "use A")) throw new Error("answer found no record");`,
+      `}`,
+    ].join("\n"),
+  );
+  const startAt = String(Date.now() + 2000);
+  const run = (role: string) =>
+    new Promise<number | null>((resolve, reject) => {
+      const child = spawn(TSX, [script, role, parkedDir, startAt], { stdio: ["ignore", "ignore", "inherit"] });
+      child.on("error", reject);
+      child.on("exit", resolve);
+    });
+
+  const codes = await Promise.all(["stamp", "answer", "stamp", "answer", "stamp", "answer"].map(run));
+
+  assert.deepEqual(codes, [0, 0, 0, 0, 0, 0], "every writer exits zero");
+  const rec = JSON.parse(readFileSync(join(parkedDir, "708.json"), "utf8"));
+  assert.equal(rec.tgMessageId, 4242, "the stamp survived every answer");
+  assert.equal(rec.answer, "use A", "the answer survived every stamp");
+});

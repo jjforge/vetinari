@@ -1,12 +1,13 @@
 import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import {
   autoPruneNotice,
+  baseline,
   build,
   buildImageCommand,
   campaign,
@@ -26,6 +27,7 @@ import {
   resolveTitles,
   warnIfTelegramUnconfigured,
   campaignParkedNotice,
+  type BaselineDeps,
   type CampaignDeps,
   type RunSpawner,
 } from "./modes.ts";
@@ -3519,4 +3521,90 @@ test("a member changing only paths outside vetinari/ never has its issue fetched
   const { outcome, fetchedWhileIntegrating } = await vetinariPathsCampaign(dir, { body: "no marker" });
   assert.equal(outcome, "done");
   assert.deepEqual(fetchedWhileIntegrating, []);
+});
+
+/**
+ * A host repo for the baseline-branch tests (#681): `main` two commits ahead of a leftover
+ * `agent/baseline` cut at its first commit, as an earlier baseline would have left it.
+ */
+const staleBaselineRepo = (t: TestContext) => {
+  const root = mkdtempSync(join(tmpdir(), "vetinari-baseline-stale-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const git = (...args: string[]) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
+  git("init", "-q", "-b", "main");
+  git("config", "user.email", "t@example.com");
+  git("config", "user.name", "t");
+  git("commit", "-q", "--allow-empty", "-m", "first");
+  git("branch", "agent/baseline");
+  git("commit", "-q", "--allow-empty", "-m", "second");
+  const cfg = {
+    baseBranch: "main",
+    branchPrefix: "agent/",
+    stateDir: join(root, ".vetinari.local"),
+    gates: [{ cmd: "npm test" }],
+    log: memoryLogger(),
+  } as unknown as ResolvedConfig;
+  const hasBaselineBranch = () => git("branch", "--list", "agent/baseline") !== "";
+  return { root, git, cfg, hasBaselineBranch };
+};
+
+/** A stub sandbox whose every `exec` exits `exitCode`, or throws when `exitCode` is "throw". */
+const baselineSandbox = (exitCode: number | "throw") => ({
+  branch: "agent/baseline",
+  run: async () => ({ iterations: [] }),
+  exec: async () => {
+    if (exitCode === "throw") throw new Error("container vanished");
+    return { exitCode, stdout: "", stderr: "" };
+  },
+  close: async () => undefined,
+});
+
+test("baseline drops a leftover agent/baseline before creating its sandbox, so it is cut fresh from the base (#681)", async (t) => {
+  const { root, cfg, hasBaselineBranch } = staleBaselineRepo(t);
+  assert.equal(hasBaselineBranch(), true);
+  let existedAtCreate: boolean | undefined;
+  const deps: BaselineDeps = {
+    root,
+    makeSandbox: async () => {
+      existedAtCreate = hasBaselineBranch();
+      return baselineSandbox(0);
+    },
+  };
+  assert.equal(await baseline(cfg, deps), true);
+  assert.equal(existedAtCreate, false);
+});
+
+for (const [outcome, exitCode] of [
+  ["green", 0],
+  ["red", 1],
+  ["a throw from the gates", "throw"],
+] as const) {
+  test(`baseline leaves no agent/baseline behind after ${outcome} (#681)`, async (t) => {
+    const { root, git, cfg, hasBaselineBranch } = staleBaselineRepo(t);
+    const deps: BaselineDeps = {
+      root,
+      // As sandcastle does: cut the branch from the base for the sandbox.
+      makeSandbox: async () => (git("branch", "agent/baseline", "main"), baselineSandbox(exitCode)),
+    };
+    if (exitCode === "throw") await assert.rejects(baseline(cfg, deps), /container vanished/);
+    else assert.equal(await baseline(cfg, deps), exitCode === 0);
+    assert.equal(hasBaselineBranch(), false);
+  });
+}
+
+test("baseline removes a leftover worktree checked out on agent/baseline before creating its sandbox (#681)", async (t) => {
+  const { root, git, cfg, hasBaselineBranch } = staleBaselineRepo(t);
+  // A crash leaves sandcastle's worktree on the branch, where a plain `branch -D` refuses it.
+  const leftover = join(cfg.stateDir, "worktrees", "baseline");
+  git("worktree", "add", "-q", leftover, "agent/baseline");
+  let atCreate: { branch: boolean; worktree: boolean } | undefined;
+  const deps: BaselineDeps = {
+    root,
+    makeSandbox: async () => {
+      atCreate = { branch: hasBaselineBranch(), worktree: existsSync(leftover) };
+      return baselineSandbox(0);
+    },
+  };
+  assert.equal(await baseline(cfg, deps), true);
+  assert.deepEqual(atCreate, { branch: false, worktree: false });
 });

@@ -862,8 +862,8 @@ function repoWithVetinariGreen(change: (dir: string, git: (args: string[]) => st
 
 const editsConfig = (dir: string) => writeFileSync(join(dir, "vetinari", "config.mts"), "export default { evil: true };\n");
 
-/** Run `integrateGreens` over `["101"]` in `dir` with a green base gate and the given declared keys. */
-async function integrateWithDeclared(dir: string, declaredKeysOf?: (id: string) => Promise<string[]>) {
+/** Run `integrateGreens` over `greens` (default `["101"]`) in `dir` with a green base gate and the given declared keys. */
+async function integrateWithDeclared(dir: string, declaredKeysOf?: (id: string) => Promise<string[]>, greens = ["101"]) {
   const log = memoryLogger();
   const cfg = {
     branchPrefix: "agent/",
@@ -875,7 +875,7 @@ async function integrateWithDeclared(dir: string, declaredKeysOf?: (id: string) 
   const prevCwd = process.cwd();
   process.chdir(dir);
   try {
-    const result = await integrateGreens(cfg, ["101"], { gate: async () => ({ green: true, report: "" }) }, undefined, { declaredKeysOf });
+    const result = await integrateGreens(cfg, greens, { gate: async () => ({ green: true, report: "" }) }, undefined, { declaredKeysOf });
     return { result, log };
   } finally {
     process.chdir(prevCwd);
@@ -902,6 +902,39 @@ test("integrateGreens undoes a merge that changes an undeclared vetinari/ path a
     log.events.filter((e) => e.event === "merged"),
     [],
   );
+});
+
+test("integrateGreens undoes a vetinari/ merge whose issue cannot be read, then rethrows the read's error (#663)", async () => {
+  const { dir, git } = repoWithVetinariGreen(editsConfig);
+  const before = headSha(dir);
+  const networkDown = new Error("gh: network down");
+  await assert.rejects(
+    integrateWithDeclared(dir, async () => {
+      throw networkDown;
+    }),
+    (err) => err === networkDown,
+  );
+  assert.equal(headSha(dir), before, "the merge was undone");
+  assert.equal(readFileSync(join(dir, "vetinari", "config.mts"), "utf8"), "export default {};\n");
+  assert.equal(git(["status", "--porcelain"]), "", "the working tree is clean");
+});
+
+test("integrateGreens keeps an earlier green merged when a later vetinari/ merge's issue cannot be read (#663)", async () => {
+  const { dir, git } = repoWithVetinariGreen(editsConfig);
+  git(["checkout", "-q", "-b", "agent/100", "HEAD"]);
+  writeFileSync(join(dir, "src", "b.ts"), "from 100\n");
+  git(["add", "-A"]);
+  git(["commit", "-qm", "100"]);
+  git(["checkout", "-q", "main"]);
+  await assert.rejects(
+    integrateWithDeclared(dir, async () => {
+      throw new Error("gh: network down");
+    }, ["100", "101"]),
+    /gh: network down/,
+  );
+  assert.equal(readFileSync(join(dir, "src", "b.ts"), "utf8"), "from 100\n", "the earlier green is still merged");
+  assert.match(git(["log", "-1", "--format=%s"]), /merge agent\/100/, "the base sits on the earlier green's merge");
+  assert.equal(readFileSync(join(dir, "vetinari", "config.mts"), "utf8"), "export default {};\n");
 });
 
 for (const key of ["vetinari/config.mts", "*/config.mts"]) {

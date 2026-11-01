@@ -471,7 +471,7 @@ export async function queue(
   // the `finally`, so the lease lives on between waves at zero demand (no slot floor).
   registerProject(host.configDir, cfg.project, host.weight, "campaign", pending.length);
   try {
-    await new Promise<void>((done) => {
+    await new Promise<void>((done, fail) => {
       let poll: ReturnType<typeof setInterval> | undefined;
       const stopPoll = () => {
         if (poll) {
@@ -512,25 +512,33 @@ export async function queue(
           // A crash redrive passes the crashed session id so the child resumes on its existing
           // branch (design §7), and a merge-conflict retry its prompt (design §6); every other
           // spawn (fresh, answered re-admit) passes none.
-          spawnRun(next, resumeSessions[next], resumePrompts[next]).then(async (exit) => {
-            running--;
-            releaseSlot(host.configDir);
-            outcomes[next] =
+          spawnRun(next, resumeSessions[next], resumePrompts[next])
+            .then((exit) =>
               typeof exit === "string" && halted()
-                ? await stoppedRunOutcome(cfg, next, exit, resumeSessions[next])
+                ? stoppedRunOutcome(cfg, next, exit, resumeSessions[next])
                 : exit === 0
                   ? "green"
                   : exit === 2
                     ? "parked"
-                    : `error(${exit})`;
-            // A member the agent could not make green (a non-zero, non-park exit) is a terminal
-            // failure (design §2.1): record it so the reducer folds the wave to `failed` even
-            // though the run itself logged no verdict.
-            if (outcomes[next].startsWith("error")) cfg.log.log("failed", { taskId: next, detail: outcomes[next] });
-            // A park with a live record is re-admittable if that record is later answered.
-            if (outcomes[next] === "parked" && hasParked(cfg, next)) parkedWithRecord.add(next);
-            fill();
-          });
+                    : `error(${exit})`,
+            )
+            // A spawn or stop-handling that throws is that member's failure, not an unhandled
+            // rejection: one would leave its slot held and the drain never settling.
+            .catch((err: unknown) => `error(${err instanceof Error ? err.message : String(err)})`)
+            .then((outcome) => {
+              running--;
+              releaseSlot(host.configDir);
+              outcomes[next] = outcome;
+              // A member the agent could not make green (a non-zero, non-park exit) is a terminal
+              // failure (design §2.1): record it so the reducer folds the wave to `failed` even
+              // though the run itself logged no verdict.
+              if (outcomes[next].startsWith("error")) cfg.log.log("failed", { taskId: next, detail: outcomes[next] });
+              // A park with a live record is re-admittable if that record is later answered.
+              if (outcomes[next] === "parked" && hasParked(cfg, next)) parkedWithRecord.add(next);
+              fill();
+            })
+            // A throw in the bookkeeping itself fails the drain rather than going unhandled.
+            .catch(fail);
         }
         // Blocked by the ceiling or the fair share with work still queued: poll for
         // a slot another project frees (we have no event for that). Also poll while a

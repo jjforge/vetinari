@@ -128,13 +128,14 @@ test("vetinari's own config spreads the githubTracker preset rather than hand-wi
     assert.ok(!source.includes(factory), `vetinari's config still hand-wires ${factory}…)`);
 });
 
-test("vetinari's own config gates on format:check between typecheck and test, so a campaign cannot merge unformatted code", async () => {
+test("vetinari's own config gates on lint and format:check between typecheck and test, so a campaign cannot merge unlinted or unformatted code", async () => {
   const cfg = await loadConfig(new URL("../vetinari/config.mts", import.meta.url).pathname);
 
   assert.deepEqual(
     cfg.gates.map(({ cmd, label }) => ({ cmd, label })),
     [
       { cmd: "npm run typecheck", label: "typecheck" },
+      { cmd: "npm run lint", label: "lint" },
       { cmd: "npm run format:check", label: "format" },
       { cmd: "npx tsx --test src/*.test.ts", label: "test" },
     ],

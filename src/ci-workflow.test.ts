@@ -24,9 +24,9 @@ const jobText = (job: "gates" | "gates-macos") => {
   return job === "gates" ? text.slice(linux, macos) : text.slice(macos);
 };
 const runSteps = (jobBody: string) => [...jobBody.matchAll(/^\s+- run: (.+)$/gm)].map((m) => m[1]);
-const GATE_STEPS = ["npm ci", "npm run typecheck", "npm run format:check", "npm test"];
+const GATE_STEPS = ["npm ci", "npm run typecheck", "npm run lint", "npm run format:check", "npm test"];
 
-test("CI installs and then runs typecheck, format check and the suite, in that order (#530)", () => {
+test("CI installs and then runs typecheck, lint, format check and the suite, in that order (#530, #592)", () => {
   assert.deepEqual(runSteps(jobText("gates")), GATE_STEPS);
 });
 

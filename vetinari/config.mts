@@ -14,11 +14,12 @@ export default defineConfig({
   // are picked up by the glob.
   gates: [
     { cmd: "npm run typecheck", label: "typecheck" },
+    { cmd: "npm run lint", label: "lint" },
     { cmd: "npm run format:check", label: "format" },
     { cmd: "npx tsx --test src/*.test.ts", label: "test" },
   ],
 
-  // Install devDeps (tsx, typescript, prettier) into the worktree before the
+  // Install devDeps (tsx, typescript, eslint, prettier) into the worktree before the
   // agent runs, so every gate has its toolchain. Runs as an onSandboxReady hook.
   setup: ["npm ci"],
 

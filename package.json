@@ -23,7 +23,8 @@
     "gen-reference": "tsx ./scripts/gen-reference.ts",
     "check-contract": "tsx ./src/check-contract.mts",
     "format": "prettier --write \"**/*.{ts,mts,js,mjs}\"",
-    "format:check": "prettier --check \"**/*.{ts,mts,js,mjs}\""
+    "format:check": "prettier --check \"**/*.{ts,mts,js,mjs}\"",
+    "lint": "eslint ."
   },
   "dependencies": {
     "@ai-hero/sandcastle": "git+https://github.com/zachthieme/sandcastle.git#8da12d1e96d7c6510a59c3a9f7e68703d6bcf6a7",
@@ -31,8 +32,10 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "eslint": "10.14.0",
     "happy-dom": "21.0.4",
     "prettier": "3.9.9",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "typescript-eslint": "8.72.1"
   }
 }

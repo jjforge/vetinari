@@ -587,22 +587,38 @@ export async function queue(
  * (the seam's handler does), so this is a no-op when `onIssueMerged` is
  * unconfigured, keeping the core tracker-agnostic.
  *
- * Best-effort, like the outbox: the orchestrator runs locally and may be offline,
- * so a failing write is logged and swallowed per issue — it never throws, never
- * fails, and never rolls back the campaign, and one bad write never blocks the
- * rest. Only the green `merged` set is passed in, so parked/pruned/failed issues
- * are excluded by construction.
+ * Best-effort, like the outbox: the orchestrator runs locally and may be offline.
+ * A failing call is tried up to three times per issue, waiting `1000 · 2^(n-2)` ms
+ * scaled by a random factor in [0.5, 1.5) before attempt n — about 1 s, then 2 s —
+ * so one network blip no longer leaves a merged issue unmarked; the handler must
+ * therefore be idempotent. Only when all three attempts throw is the last error
+ * logged (`issue-merged-hook-failed`) and swallowed — it never throws, never fails,
+ * and never rolls back the campaign, and one bad issue never blocks the rest. Only
+ * the green `merged` set is passed in, so parked/pruned/failed issues are excluded
+ * by construction. `sleep` is injected only so the backoff can be tested without
+ * waiting.
  */
-export async function markMergedIssues(cfg: Pick<ResolvedConfig, "onIssueMerged" | "log">, merged: string[]): Promise<void> {
+export async function markMergedIssues(
+  cfg: Pick<ResolvedConfig, "onIssueMerged" | "log">,
+  merged: string[],
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+): Promise<void> {
   if (!cfg.onIssueMerged) return;
   for (const taskId of merged) {
-    try {
-      await cfg.onIssueMerged(taskId);
-    } catch (error) {
-      cfg.log.log("issue-merged-hook-failed", {
-        taskId,
-        error: String((error as any)?.message ?? error),
-      });
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await cfg.onIssueMerged(taskId);
+        break;
+      } catch (error) {
+        if (attempt >= 3) {
+          cfg.log.log("issue-merged-hook-failed", {
+            taskId,
+            error: String((error as any)?.message ?? error),
+          });
+          break;
+        }
+        await sleep(1000 * 2 ** (attempt - 1) * (0.5 + Math.random()));
+      }
     }
   }
 }

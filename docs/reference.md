@@ -86,7 +86,8 @@ refusal when it cannot); `findingLabels` defaults to `["needs-triage"]`. A field
 after the spread wins (`onIssueMerged: undefined` turns that hook off). Every `gh`
 call is capped at 60 s and 64 MB of output, and the four read seams (`fetchTask`,
 `blockedBy`, `listByLabel`, `findOpenIssue`) retry a failed call up to 3 times with
-backoff, while the write seams never retry. The
+backoff, while the write seams never retry — though the orchestrator itself retries
+a failing `onIssueMerged` call (see the table below). The
 individual factories named in the table below are the preset's building blocks,
 exported for custom wiring.
 
@@ -116,7 +117,7 @@ exported for custom wiring.
 | `findOpenIssue` | seam: the open issue whose title matches a harvested finding by word similarity — the Jaccard score of the two titles' words, stop words dropped, best match at 0.35 or above, so a reworded title still matches (`githubFindOpenIssue()` lists up to 200 open issues per call); a match — or a finding this campaign already filed — gets a "seen again" comment via `postComment` instead of a new issue, quoting the new finding's summary (and its location, if any); a failed search counts as no match (logged `finding-search-failed`), so the finding is still filed or digested |
 | `maxFindingsPerRun` | most new issues one run's harvest files, most severe first (default 2); the overflow goes into one digest comment on the run's issue via `postComment` — with no `postComment` wired the digest is not posted and the run logs `finding-digest-dropped` with its count and summaries; a digest comment that throws is logged `finding-digest-failed` with its count, summaries and error, and the harvest carries on (filed findings still get their FINDING notice) |
 | `findingSeverityFloor` | least severe agent rating (`P0`–`P3`) still filed (default `"P2"`; an unrated finding counts as P2); below it, a finding goes into the run's digest comment (logged `finding-digest-dropped` when no `postComment` is wired, `finding-digest-failed` when the comment throws) |
-| `onIssueMerged` | hook: advance a merged issue's label (`githubMarkPendingVerify()`); absent → no-op |
+| `onIssueMerged` | hook: advance a merged issue's label (`githubMarkPendingVerify()`); absent → no-op. A failing call is tried up to three times with backoff, then logged `issue-merged-hook-failed`, so a handler must be idempotent |
 | `postComment` | hook: post a comment to the tracker (`githubIssueComment()`, used to answer a non-resumable provider's park) |
 | `destinations` | named Telegram targets `{ chat, thread? }` on the project's one bot |
 | `notify` | routing rules mapping a `category` / `category:event` / `*` to a destination name |

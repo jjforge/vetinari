@@ -321,13 +321,65 @@ test("markMergedIssues isolates a throwing hook — it is logged and the rest st
       log,
     },
     ["101", "102", "103"],
+    async () => {},
   );
-  // 102 threw but 101 and 103 were still attempted, and the call itself did not throw.
-  assert.deepEqual(seen, ["101", "102", "103"]);
+  // 102 threw on all three attempts but 101 and 103 were still attempted, and the call itself did not throw.
+  assert.deepEqual(seen, ["101", "102", "102", "102", "103"]);
   // The failure surfaced on the injected event log, naming the offending id.
   const failed = log.events.filter((e) => (e as { event: string }).event === "issue-merged-hook-failed");
   assert.equal(failed.length, 1);
   assert.equal((failed[0] as any).taskId, "102");
+});
+
+test("markMergedIssues retries a transiently failing hook with backoff — it recovers, nothing is logged", async () => {
+  const seen: string[] = [];
+  const delays: number[] = [];
+  const log = memoryLogger();
+  let fails102 = 2;
+  await markMergedIssues(
+    {
+      onIssueMerged: (id) => {
+        seen.push(id);
+        if (id === "102" && fails102-- > 0) throw new Error("TLS handshake timeout");
+      },
+      log,
+    },
+    ["101", "102", "103"],
+    async (ms) => void delays.push(ms),
+  );
+  assert.deepEqual(seen, ["101", "102", "102", "102", "103"]);
+  assert.equal(log.events.filter((e) => (e as { event: string }).event === "issue-merged-hook-failed").length, 0);
+  assert.equal(delays.length, 2);
+  assert.ok(delays[0] >= 500 && delays[0] < 1500, `first delay ${delays[0]} in [500, 1500)`);
+  assert.ok(delays[1] >= 1000 && delays[1] < 3000, `second delay ${delays[1]} in [1000, 3000)`);
+});
+
+test("markMergedIssues logs a persistently failing hook once, with the third attempt's error", async () => {
+  const seen: string[] = [];
+  const log = memoryLogger();
+  let attempt102 = 0;
+  await markMergedIssues(
+    {
+      onIssueMerged: (id) => {
+        seen.push(id);
+        if (id === "102") throw new Error(`offline (attempt ${++attempt102})`);
+      },
+      log,
+    },
+    ["101", "102", "103"],
+    async () => {},
+  );
+  assert.deepEqual(seen, ["101", "102", "102", "102", "103"]);
+  const failed = log.events.filter((e) => (e as { event: string }).event === "issue-merged-hook-failed");
+  assert.equal(failed.length, 1);
+  assert.equal((failed[0] as any).taskId, "102");
+  assert.equal((failed[0] as any).error, "offline (attempt 3)");
+});
+
+test("markMergedIssues never waits when every hook succeeds first try", async () => {
+  const delays: number[] = [];
+  await markMergedIssues({ onIssueMerged: () => {}, log: memoryLogger() }, ["101", "102", "103"], async (ms) => void delays.push(ms));
+  assert.deepEqual(delays, []);
 });
 
 test("resolveTitles maps each id to its fetched title", async () => {

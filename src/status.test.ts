@@ -2268,3 +2268,66 @@ test("serveAllStatus completes a POST a route answers when the access log throws
     await new Promise<void>((r) => server.close(() => r()));
   }
 });
+
+// A request by node:http under a chosen Host header (`fetch` replaces a caller-set Host), resolved
+// with its status and body once the response ends.
+function requestUnderHost603(port: number, path: string, host: string, method = "GET"): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = request({ host: "127.0.0.1", port, path, method, headers: { host } }, (res) => {
+      let body = "";
+      res.setEncoding("utf8").on("data", (c: string) => (body += c));
+      res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+    });
+    req.on("error", reject).end();
+  });
+}
+
+test("serveAllStatus refuses a request from an agent containers' Docker subnet first — before the Host check — with a 403 and one dashboard-docker-peer-refused row (#603)", async () => {
+  const configDir = mkdtempSync(join(tmpdir(), "vetinari-docker-peer-"));
+  const logger = memoryLogger();
+  // The loopback test client stands in for a container: its address is inside the listed subnet.
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1", logger, dockerPeerSubnets: async () => ["127.0.0.0/8"] });
+  const { port } = server.address() as AddressInfo;
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/landing`);
+    assert.equal(res.status, 403);
+    assert.equal(await res.text(), "request from a Docker network refused (agent containers may not use the dashboard)");
+    // A DNS-name Host would fail the Host check; this check runs first, so the refusal is this one.
+    const named = await requestUnderHost603(port, "/answer?project=x", "dashboard.example", "POST");
+    assert.equal(named.status, 403);
+    assert.equal(named.body, "request from a Docker network refused (agent containers may not use the dashboard)");
+    const refused = logger.events
+      .filter((e) => (e.event as string) === "dashboard-docker-peer-refused")
+      .map((e) => {
+        const { method, path, remote } = e as unknown as Record<string, unknown>;
+        return { method, path, remote: String(remote).replace(/^::ffff:/, "") };
+      });
+    assert.deepEqual(refused, [
+      { method: "GET", path: "/api/landing", remote: "127.0.0.1" },
+      { method: "POST", path: "/answer", remote: "127.0.0.1" },
+    ]);
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});
+
+test("serveAllStatus admits every request when the Docker lister throws or hangs, and logs one dashboard-docker-peers-unavailable warning (#603)", async () => {
+  const listers: [string, () => Promise<string[]>][] = [
+    ["throws", async () => Promise.reject(new Error("docker: command not found"))],
+    ["hangs", () => new Promise<string[]>(() => {})],
+  ];
+  for (const [name, dockerPeerSubnets] of listers) {
+    const configDir = mkdtempSync(join(tmpdir(), "vetinari-docker-peer-unavailable-"));
+    const logger = memoryLogger();
+    const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1", logger, dockerPeerSubnets, dockerPeerTimeoutMs: 50 });
+    try {
+      const res = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/landing`);
+      assert.equal(res.status, 200, name);
+      await res.text();
+      const warned = logger.events.filter((e) => (e.event as string) === "dashboard-docker-peers-unavailable");
+      assert.equal(warned.length, 1, name);
+    } finally {
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  }
+});

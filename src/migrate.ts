@@ -269,8 +269,9 @@ export function resolveGatewayExecStart(launch: LaunchSelf): string {
  * project, not one), launching the `gateway` command (ADR 0003) via the resolved
  * absolute `execStart`. It sources no env file — the gateway holds no secrets of its
  * own (ADR 0002); it reads each project's credentials live from that project's base
- * location. Deterministic in `execStart`, so feeding a rewritten unit back in yields
- * the same text.
+ * location. `KillMode=process`, so a stop or restart signals only the gateway and the
+ * campaigns, answers and prunes it launched keep running. Deterministic in
+ * `execStart`, so feeding a rewritten unit back in yields the same text.
  */
 function gatewayUnit(execStart: string): string {
   return [
@@ -283,6 +284,7 @@ function gatewayUnit(execStart: string): string {
     execStart,
     "Restart=always",
     "RestartSec=5",
+    "KillMode=process",
     "",
     "[Install]",
     "WantedBy=default.target",

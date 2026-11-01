@@ -44,4 +44,5 @@ A campaign holds to these rules, and a redrive honours them:
 - The dashboard becomes the redrive surface — where the campaign is adjusted (prune, graft) and driven again — rather than a read-only view with two recovery buttons bolted on.
 - The domain model gains **redrive**, and the `failed` state gains "holds its wave" alongside the same property already recorded for `parked`.
 - A timeout, if one is adopted, is a **grace window at the wave boundary** — wait before declaring a drained wave parked, so a fast answer means the wave never parked at all. It is a bound on an optimization, never a mechanism of its own.
+- A gateway restart — the routine step after every upgrade — no longer ends the campaigns and answers the gateway launched, because its systemd unit uses `KillMode=process` and signals only the gateway. A reboot or crash still can, and the durable redrive stays the mechanism for recovering from that.
 - The accepted cost: a campaign can now be continued by an answer arriving from a surface the campaign process never saw, so the continue path must be idempotent against a human who answers twice, or answers a park that a prune has already removed.

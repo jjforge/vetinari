@@ -1248,12 +1248,20 @@ export async function gateway(configDir: string = gatewayConfigDir()): Promise<v
   // When each loop last completed a pass, served as `GET /healthz` so a hung loop is
   // visible from outside even while the process and dashboard stay up.
   const ticks = newGatewayTicks(Date.now());
-  await serveAllStatus(configDir, {
+  const server = await serveAllStatus(configDir, {
     port: gatewayStatusPort(process.env, log),
     host: STATUS_HOST,
     health: () => gatewayHealth(ticks, Date.now()),
     // Refuse the agent containers' Docker network (ADR 0021).
     dockerPeerSubnets: () => listDockerBridgeSubnets(),
+  });
+  // A service stop/restart signals only this process (the unit's KillMode=process), so
+  // exit cleanly and leave the campaigns, answers and prunes we launched running. The
+  // exit ends the loops below; a send in flight may repeat after restart (at-least-once).
+  process.once("SIGTERM", () => {
+    server.closeAllConnections();
+    server.close();
+    process.exit(0);
   });
 
   // Projects already reported as having no connection, for this daemon run only —

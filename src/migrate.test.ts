@@ -8,6 +8,7 @@ import {
   computeLayoutMigration,
   describeMigration,
   resolveGatewayExecStart,
+  resolvedGatewayUnit,
   scanLayout,
   systemdQuoteArg,
 } from "./migrate.ts";
@@ -157,6 +158,15 @@ test("resolveGatewayExecStart bakes an absolute node + tsx-loader + cli invocati
   assert.doesNotMatch(line, /\bbash\b/);
   assert.doesNotMatch(line, /\benv\b/);
   assert.doesNotMatch(line, /\bnpx\b/);
+});
+
+test("the gateway unit stops only the main process, so a restart leaves its launched campaigns running", () => {
+  const lines = resolvedGatewayUnit().split("\n");
+  const service = lines.indexOf("[Service]");
+  const install = lines.indexOf("[Install]");
+  const killMode = lines.indexOf("KillMode=process");
+  assert.ok(service >= 0 && install > service, "unit has [Service] before [Install]");
+  assert.ok(killMode > service && killMode < install, "KillMode=process sits inside [Service]");
 });
 
 test("resolveGatewayExecStart quotes a launch path that contains a space", () => {

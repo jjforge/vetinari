@@ -10,6 +10,7 @@ import { memoryLogger } from "./log.ts";
 import { TG_POLL_TIMEOUT_S, allowedSendersOf, type TgConn, type TgFailure } from "./telegram.ts";
 import {
   ANNOUNCE_INTERVAL_MS,
+  announceTick,
   drainOutbox,
   formatGatewayStatus,
   formatParkAnnouncement,
@@ -427,6 +428,30 @@ test("reconcileReplyIndex over a fully stamped set yields exactly what rebuildIn
   reconcileReplyIndex(index, projects);
 
   assert.deepStrictEqual(index, rebuildIndex(projects));
+});
+
+// The announce tick reconciles the index against the set it announced from, so the
+// daemon's running index stays bounded (#587, #666).
+test("announceTick evicts a question whose parked record is gone and keeps the one it just announced", async (t) => {
+  const saved = globalThis.fetch;
+  globalThis.fetch = (async () => ({ json: async () => ({ ok: true, result: { message_id: 200 } }) })) as unknown as typeof fetch;
+  t.after(() => {
+    globalThis.fetch = saved;
+  });
+  // A fake base location: `setParkedMessageId` is a no-op when the parked dir is missing.
+  const projects = [
+    alpha({
+      baseLocation: join(tmpdir(), `vetinari-announce-tick-${process.pid}-missing`),
+      parked: [parked({ taskId: "A1", parkedAt: "t1" })],
+    }),
+  ];
+  const index = newReplyIndex();
+  recordSend(index, "botA", 100, alphaRef({ task: "A9" })); // answered and gone
+
+  await announceTick(projects, index, memoryLogger());
+
+  assert.equal(resolveReply(index, "botA", 100), null, "the gone question is evicted");
+  assert.equal(resolveReply(index, "botA", 200)?.task, "A1", "the question announced this tick still resolves");
 });
 
 test("pendingAnnouncements routes a park to the chat/thread its question key resolves through notify", () => {

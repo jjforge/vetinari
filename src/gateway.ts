@@ -1087,6 +1087,16 @@ async function announcePending(projects: GatewayProject[], index: ReplyIndex, lo
 }
 
 /**
+ * One announce tick over one loaded set: announce what is pending, then reconcile
+ * the index against that same pre-announce set (see `reconcileReplyIndex`), so the
+ * running index never holds more than a restart would rebuild.
+ */
+export async function announceTick(projects: GatewayProject[], index: ReplyIndex, logger: Logger): Promise<void> {
+  await announcePending(projects, index, logger);
+  reconcileReplyIndex(index, projects);
+}
+
+/**
  * Drain every registered project's outbox once: route each not-yet-sent record
  * per that project's notify map and send it, marking it sent. Reads projects
  * fresh so records written since the last tick are picked up; idempotent, so a
@@ -1240,8 +1250,7 @@ export async function gateway(configDir: string = gatewayConfigDir()): Promise<v
         // reconcile must see the same pre-announce set (see `reconcileReplyIndex`).
         const projects = loadGatewayProjects(configDir);
         logNoConnectionSkips(projects, skippedNoConn, log);
-        await announcePending(projects, index, log);
-        reconcileReplyIndex(index, projects);
+        await announceTick(projects, index, log);
         await drainOutboxes(configDir, outboxBackoff, log);
         ticks.announce = Date.now();
       } catch (e) {

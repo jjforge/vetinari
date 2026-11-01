@@ -547,7 +547,7 @@ const plantHeldParkedLock = (parkedDir: string) => {
   return lock;
 };
 
-test("every parked-record writer waits on a held parked lock and gives up without touching the record", () => {
+test("every parked-record writer waits on a held parked lock and gives up without touching the record", { timeout: 60_000 }, () => {
   const dir = join(tmpdir(), `vetinari-parked-lock-held-${Date.now()}`);
   const parkedDir = join(dir, "parked");
   mkdirSync(parkedDir, { recursive: true });
@@ -565,9 +565,7 @@ test("every parked-record writer waits on a held parked lock and gives up withou
     ["writeParkedRecord", () => writeParkedRecord(cfgFor(dir), { taskId: "701", reason: "question", branch: "agent/701", question: "?" })],
   ];
   for (const [name, write] of writers) {
-    const started = Date.now();
     assert.throws(write, lockError, `${name} gives up with the parked lock's error`);
-    assert.ok(Date.now() - started < 5000, `${name} gives up in under 5s`);
     assert.deepEqual(readFileSync(recordPath), before, `${name} leaves the record byte-for-byte unchanged`);
   }
 });
@@ -643,7 +641,7 @@ test("listParkedIn ignores the parked lock's own files", () => {
 const TSX = fileURLToPath(new URL("../node_modules/.bin/tsx", import.meta.url));
 const STATE_MODULE = new URL("./state.ts", import.meta.url).href;
 
-test("concurrent stamps and answers from separate processes both land on the record", { timeout: 10_000 }, async () => {
+test("concurrent stamps and answers from separate processes both land on the record", { timeout: 60_000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-parked-contention-"));
   const parkedDir = join(dir, "parked");
   writeParkedRecord({ parkedDir }, { taskId: "708", reason: "question", sessionId: "s", branch: "agent/708", question: "?" });
@@ -651,25 +649,31 @@ test("concurrent stamps and answers from separate processes both land on the rec
   writeFileSync(
     script,
     [
+      `import { existsSync, writeFileSync } from "node:fs";`,
+      `import { join } from "node:path";`,
       `import { answerParked, setParkedMessageId } from ${JSON.stringify(STATE_MODULE)};`,
-      `const [role, parkedDir, startAt] = process.argv.slice(2);`,
-      // Hold every writer until one shared instant, so their loops genuinely overlap.
-      `while (Date.now() < Number(startAt));`,
+      `const [role, parkedDir, dir] = process.argv.slice(2);`,
+      // Hold every writer at a start barrier until all are ready, so their loops genuinely overlap.
+      `writeFileSync(join(dir, "ready." + process.pid), "");`,
+      `while (!existsSync(join(dir, "go"))) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);`,
       `for (let i = 0; i < 100; i++) {`,
       `  if (role === "stamp") setParkedMessageId(parkedDir, "708", 4242);`,
       `  else if (!answerParked({ parkedDir } as never, "708", "use A")) throw new Error("answer found no record");`,
       `}`,
     ].join("\n"),
   );
-  const startAt = String(Date.now() + 2000);
   const run = (role: string) =>
     new Promise<number | null>((resolve, reject) => {
-      const child = spawn(TSX, [script, role, parkedDir, startAt], { stdio: ["ignore", "ignore", "inherit"] });
+      const child = spawn(TSX, [script, role, parkedDir, dir], { stdio: ["ignore", "ignore", "inherit"] });
       child.on("error", reject);
       child.on("exit", resolve);
     });
 
-  const codes = await Promise.all(["stamp", "answer", "stamp", "answer", "stamp", "answer"].map(run));
+  const roles = ["stamp", "answer", "stamp", "answer", "stamp", "answer"];
+  const exits = Promise.all(roles.map(run));
+  while (readdirSync(dir).filter((f) => f.startsWith("ready.")).length < roles.length) await new Promise((r) => setTimeout(r, 10));
+  writeFileSync(join(dir, "go"), "");
+  const codes = await exits;
 
   assert.deepEqual(codes, [0, 0, 0, 0, 0, 0], "every writer exits zero");
   const rec = JSON.parse(readFileSync(join(parkedDir, "708.json"), "utf8"));

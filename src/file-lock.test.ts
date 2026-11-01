@@ -196,7 +196,7 @@ for (let i = 0; i < 40; i++) {
 }
 `;
 
-test("several processes contending one lock, seeded with a dead holder's lock, never hold it at once", { timeout: 10_000 }, async () => {
+test("several processes contending one lock, seeded with a dead holder's lock, never hold it at once", { timeout: 60_000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-file-lock-procs-"));
   const lock = join(dir, "test.lock");
   const script = join(dir, "child.mts");

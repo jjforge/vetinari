@@ -453,6 +453,10 @@ export async function queue(
   // parked-with-record, so a member that never wrote a record is never re-admitted — no
   // self-respawn loop; the re-admitted child consumes and clears the record when it starts.
   const parkedWithRecord = new Set<string>();
+  // Members `readmit` has re-queued: their next spawn is an answered re-admit, so it passes neither
+  // the crash session nor the conflict prompt the wave gave their first spawn — the child must take
+  // the answered-record path, not resume as before (#629). Tracked here, never in the caller's maps.
+  const readmitted = new Set<string>();
   let running = 0;
   // Only a standalone queue warns here; inside a campaign the caller passes `titles`
   // and has already warned once at campaign start, so we don't repeat it per wave.
@@ -488,6 +492,7 @@ export async function queue(
           if (isAnswered(cfg, id)) {
             parkedWithRecord.delete(id);
             delete outcomes[id];
+            readmitted.add(id);
             pending.push(id);
           }
         }
@@ -512,10 +517,12 @@ export async function queue(
           // A crash redrive passes the crashed session id so the child resumes on its existing
           // branch (design §7), and a merge-conflict retry its prompt (design §6); every other
           // spawn (fresh, answered re-admit) passes none.
-          spawnRun(next, resumeSessions[next], resumePrompts[next])
+          const resumeSession = readmitted.has(next) ? undefined : resumeSessions[next];
+          const resumePrompt = readmitted.has(next) ? undefined : resumePrompts[next];
+          spawnRun(next, resumeSession, resumePrompt)
             .then((exit) =>
               typeof exit === "string" && halted()
-                ? stoppedRunOutcome(cfg, next, exit, resumeSessions[next])
+                ? stoppedRunOutcome(cfg, next, exit, resumeSession)
                 : exit === 0
                   ? "green"
                   : exit === 2

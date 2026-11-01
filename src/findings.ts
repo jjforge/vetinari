@@ -1,5 +1,4 @@
-import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { withFileLockAsync } from "./file-lock.ts";
 import { hash } from "./issue-id.ts";
 
 /**
@@ -197,6 +196,9 @@ export interface FindingPolicy {
   lockFile: string;
 }
 
+/** Parallel runs serialize triage on the findings lock: 20ms waits, up to 6000 of them. */
+const FINDINGS_LOCK = { retryMs: 20, maxAttempts: 6000, label: "findings" };
+
 const rank = (s: Severity | undefined) => (s ? Number(s[1]) : 2);
 
 /**
@@ -214,47 +216,51 @@ const rank = (s: Severity | undefined) => (s ? Number(s[1]) : 2);
 export async function triageFindings(findings: Finding[], ctx: FindingContext, p: FindingPolicy): Promise<TriagedFinding[]> {
   const out: TriagedFinding[] = [];
   const digest: Finding[] = [];
-  await withFileLock(p.lockFile, async () => {
-    const filed = p.filedSoFar();
-    let fresh = 0;
-    const ordered = [...findings].sort((a, b) => rank(a.severity) - rank(b.severity));
-    for (const finding of ordered) {
-      const key = findingKey(finding.summary);
-      let r: TriagedFinding;
-      // A failed search is no match: the finding is triaged as fresh rather than lost.
-      let seen = bestFindingMatch(finding.summary, filed, ([k]) => k)?.[1];
-      let searchError: string | undefined;
-      if (!seen) {
+  await withFileLockAsync(
+    p.lockFile,
+    async () => {
+      const filed = p.filedSoFar();
+      let fresh = 0;
+      const ordered = [...findings].sort((a, b) => rank(a.severity) - rank(b.severity));
+      for (const finding of ordered) {
+        const key = findingKey(finding.summary);
+        let r: TriagedFinding;
+        // A failed search is no match: the finding is triaged as fresh rather than lost.
+        let seen = bestFindingMatch(finding.summary, filed, ([k]) => k)?.[1];
+        let searchError: string | undefined;
+        if (!seen) {
+          try {
+            seen = await p.findOpenIssue?.(finding.summary);
+          } catch (e: any) {
+            searchError = String(e?.message ?? e);
+          }
+        }
         try {
-          seen = await p.findOpenIssue?.(finding.summary);
+          if (seen) {
+            await p.postComment?.(
+              seen,
+              `Seen again while working on ${hash(ctx.taskId)}${ctx.source ? ` (unverified: ${ctx.source})` : ""}.`,
+            );
+            r = { finding, url: seen, action: "seen-again" };
+          } else if (rank(finding.severity) > rank(p.severityFloor) || fresh >= p.maxPerRun) {
+            digest.push(finding);
+            r = { finding, action: "digest" };
+          } else {
+            const url = await p.reporter(markForSource(finding, ctx.source), ctx);
+            fresh++;
+            r = { finding, url: typeof url === "string" ? url : undefined, action: "filed" };
+            if (r.url) filed.set(key, r.url);
+          }
         } catch (e: any) {
-          searchError = String(e?.message ?? e);
+          r = { finding, error: String(e?.message ?? e), action: "filed" };
         }
+        if (searchError) r.searchError = searchError;
+        p.record(r);
+        out.push(r);
       }
-      try {
-        if (seen) {
-          await p.postComment?.(
-            seen,
-            `Seen again while working on ${hash(ctx.taskId)}${ctx.source ? ` (unverified: ${ctx.source})` : ""}.`,
-          );
-          r = { finding, url: seen, action: "seen-again" };
-        } else if (rank(finding.severity) > rank(p.severityFloor) || fresh >= p.maxPerRun) {
-          digest.push(finding);
-          r = { finding, action: "digest" };
-        } else {
-          const url = await p.reporter(markForSource(finding, ctx.source), ctx);
-          fresh++;
-          r = { finding, url: typeof url === "string" ? url : undefined, action: "filed" };
-          if (r.url) filed.set(key, r.url);
-        }
-      } catch (e: any) {
-        r = { finding, error: String(e?.message ?? e), action: "filed" };
-      }
-      if (searchError) r.searchError = searchError;
-      p.record(r);
-      out.push(r);
-    }
-  });
+    },
+    FINDINGS_LOCK,
+  );
   if (digest.length && p.postComment) {
     const lines = digest.map((f) => `- ${f.severity ? `**${f.severity}** ` : ""}${f.summary}${f.location ? ` — \`${f.location}\`` : ""}`);
     try {
@@ -267,55 +273,4 @@ export async function triageFindings(findings: Finding[], ctx: FindingContext, p
     }
   }
   return out;
-}
-
-/** Is `pid` a live process? EPERM means it exists but we may not signal it. */
-const pidAlive = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e: any) {
-    return e?.code === "EPERM";
-  }
-};
-
-/**
- * Hold an exclusively-created lock file (`wx`) across an async `fn` — the async
- * twin of host-slots' lock. A lock whose recorded holder pid is dead is reclaimed.
- */
-async function withFileLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
-  mkdirSync(dirname(path), { recursive: true });
-  for (let attempt = 0; ; attempt++) {
-    try {
-      writeFileSync(path, String(process.pid), { flag: "wx" });
-      break;
-    } catch (e: any) {
-      if (e?.code !== "EEXIST") throw e;
-      let holder = NaN;
-      try {
-        holder = Number(readFileSync(path, "utf8").trim());
-      } catch {
-        // Released between our open and read — retry.
-      }
-      if (Number.isInteger(holder) && holder > 0 && !pidAlive(holder)) {
-        try {
-          unlinkSync(path);
-        } catch {
-          // Someone else reclaimed it first.
-        }
-        continue;
-      }
-      if (attempt > 6000) throw new Error(`findings: could not acquire lock ${path} (holder pid ${holder})`);
-      await new Promise((r) => setTimeout(r, 20));
-    }
-  }
-  try {
-    return await fn();
-  } finally {
-    try {
-      unlinkSync(path);
-    } catch {
-      // Best-effort.
-    }
-  }
 }

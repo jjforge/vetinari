@@ -498,3 +498,12 @@ test("a live standalone run's lease does not block a campaign registration for i
   registerProject(dir, "P", 1, "campaign", 0, { pid: 2, isAlive: alive });
   assert.equal(liveCampaignPid(dir, "P", { isAlive: alive }), 2);
 });
+
+test("an empty slots lock left by a holder killed mid-write is reclaimed, not a wedge", () => {
+  const dir = freshDir();
+  mkdirSync(slotsDir(dir), { recursive: true });
+  writeFileSync(join(slotsDir(dir), ".lock"), "");
+  // The default isAlive: today an empty lock reads as pid 0, which kill(0, 0) calls alive.
+  deregisterProject(dir, { pid: 1 });
+  assert.deepEqual(readLeases(dir), []);
+});

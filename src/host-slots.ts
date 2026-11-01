@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, openSync, closeSync, writeSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { cpus } from "node:os";
 import { join, resolve } from "node:path";
 import { writeFileAtomic } from "./atomic-write.ts";
+import { pidAlive, withFileLockSync } from "./file-lock.ts";
 import { Refusal } from "./refusal.ts";
 
 /**
@@ -114,62 +115,12 @@ export function resolveHostCeiling(configDir: string, warn: (message: string) =>
   return machineDefaultCeiling(cpus().length);
 }
 
-/** Is `pid` a live process? `kill(pid, 0)` throws ESRCH when it is gone. */
-function pidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    // EPERM means the process exists but we may not signal it — still alive.
-    return (e as NodeJS.ErrnoException).code === "EPERM";
-  }
-}
-
 /**
- * Run `fn` while holding a host-level exclusive lock, so the read-modify-write on
- * the shared lease directory is atomic across processes. The lock is an
- * exclusively-created file (`wx`); a crashed holder can't wedge it, because a lock
- * whose recorded pid is dead is reclaimed on the next contender's spin.
+ * Run `fn` while holding the host-level lock on the shared lease directory, so its
+ * read-modify-write is atomic across processes; a crashed holder's lock is reclaimed.
  */
 function withLock<T>(dir: string, isAlive: (pid: number) => boolean, fn: () => T): T {
-  mkdirSync(dir, { recursive: true });
-  const lock = join(dir, ".lock");
-  for (let attempt = 0; ; attempt++) {
-    try {
-      const fd = openSync(lock, "wx");
-      writeSync(fd, String(process.pid));
-      closeSync(fd);
-      break;
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-      // Reclaim a lock left by a dead holder; otherwise wait briefly and retry.
-      let holder = NaN;
-      try {
-        holder = Number(readFileSync(lock, "utf8").trim());
-      } catch {
-        // The holder released between our open and read — just retry.
-      }
-      if (Number.isInteger(holder) && !isAlive(holder)) {
-        try {
-          unlinkSync(lock);
-        } catch {
-          // Someone else reclaimed it first — retry.
-        }
-        continue;
-      }
-      if (attempt > 2000) throw new Error(`host-slots: could not acquire lock ${lock} (holder pid ${holder} still alive)`);
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
-    }
-  }
-  try {
-    return fn();
-  } finally {
-    try {
-      unlinkSync(lock);
-    } catch {
-      // Best-effort — a reclaim by another process already removed it.
-    }
-  }
+  return withFileLockSync(join(dir, ".lock"), fn, { retryMs: 5, maxAttempts: 2000, label: "host-slots", isAlive });
 }
 
 const leaseFile = (dir: string, pid: number) => join(slotsDir(dir), `${pid}.json`);

@@ -2311,6 +2311,29 @@ test("serveAllStatus refuses a request from an agent containers' Docker subnet f
   }
 });
 
+test("serveAllStatus writes one dashboard-request row with status 403 for a refused Docker-peer POST, and none for a refused GET (#666)", async () => {
+  const configDir = mkdtempSync(join(tmpdir(), "vetinari-docker-peer-access-"));
+  const logger = memoryLogger();
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1", logger, dockerPeerSubnets: async () => ["127.0.0.0/8"] });
+  const { port } = server.address() as AddressInfo;
+  const accessRows = () =>
+    (logger.events as unknown as Record<string, unknown>[])
+      .filter((e) => e.event === "dashboard-request")
+      .map(({ method, path, status }) => ({ method, path, status }));
+  try {
+    const get = await fetch(`http://127.0.0.1:${port}/api/landing`);
+    assert.equal(get.status, 403);
+    await get.text();
+    const post = await requestUnderHost603(port, "/answer?project=x", `127.0.0.1:${port}`, "POST");
+    assert.equal(post.status, 403);
+    // The row is written once the response closes, which can land a tick after the client reads it.
+    for (let i = 0; i < 100 && accessRows().length < 1; i++) await new Promise((r) => setTimeout(r, 10));
+    assert.deepEqual(accessRows(), [{ method: "POST", path: "/answer", status: 403 }]);
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});
+
 test("serveAllStatus admits every request when the Docker lister throws or hangs, and logs one dashboard-docker-peers-unavailable warning (#603)", async () => {
   const listers: [string, () => Promise<string[]>][] = [
     ["throws", async () => Promise.reject(new Error("docker: command not found"))],

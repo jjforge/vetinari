@@ -33,6 +33,7 @@ import {
   pollLoop,
   pollTargets,
   rebuildIndex,
+  reconcileReplyIndex,
   REDRIVE_ONLY_REASONS,
   reconcilePollTargets,
   recordSend,
@@ -272,6 +273,128 @@ test("rebuildIndex re-announces nothing but still routes a reply to a persisted 
   const routed = resolveReply(index, "botA", 100);
   assert.equal(routed?.project, "alpha");
   assert.equal(routed?.task, "A1");
+});
+
+// --- reconcileReplyIndex: the running index never holds more than a restart would rebuild (#587) ---
+
+const alphaRef = (over: Partial<SendRef> = {}): SendRef => ref({ project: "alpha", task: "A1", parkedAt: "t1", ...over });
+const alpha = (over: Partial<GatewayProject> = {}): GatewayProject =>
+  project({ project: "alpha", conn: { token: "botA", chat: "-1" }, ...over });
+
+test("reconcileReplyIndex evicts a question whose parked record is gone", () => {
+  const index = newReplyIndex();
+  recordSend(index, "botA", 100, alphaRef());
+
+  reconcileReplyIndex(index, [alpha({ parked: [] })]);
+
+  assert.equal(resolveReply(index, "botA", 100), null);
+  assert.equal(index.announced.size, 0);
+});
+
+test("reconcileReplyIndex evicts the old message and announced key of a re-parked record", () => {
+  const index = newReplyIndex();
+  recordSend(index, "botA", 100, alphaRef({ parkedAt: "t1" }));
+
+  reconcileReplyIndex(index, [alpha({ parked: [parked({ taskId: "A1", parkedAt: "t2" })] })]);
+
+  assert.equal(resolveReply(index, "botA", 100), null);
+  assert.equal(index.announced.has("alpha\0A1\0t1"), false);
+});
+
+test("reconcileReplyIndex keeps a live question whose record carries the matching message id", () => {
+  const index = newReplyIndex();
+  recordSend(index, "botA", 100, alphaRef());
+
+  reconcileReplyIndex(index, [alpha({ parked: [parked({ taskId: "A1", parkedAt: "t1", tgMessageId: 100 })] })]);
+
+  assert.deepEqual(resolveReply(index, "botA", 100), alphaRef());
+  assert.equal(index.announced.has("alpha\0A1\0t1"), true);
+});
+
+test("reconcileReplyIndex evicts an entry whose record is stamped with a different message id", () => {
+  const index = newReplyIndex();
+  recordSend(index, "botA", 100, alphaRef());
+
+  reconcileReplyIndex(index, [alpha({ parked: [parked({ taskId: "A1", parkedAt: "t1", tgMessageId: 200 })] })]);
+
+  assert.equal(resolveReply(index, "botA", 100), null);
+});
+
+test("reconcileReplyIndex keeps the question just announced against the set loaded before the announce", () => {
+  const loadedBeforeAnnounce = [alpha({ parked: [parked({ taskId: "A1", parkedAt: "t1" })] })];
+  const index = newReplyIndex();
+  recordSend(index, "botA", 100, alphaRef());
+
+  reconcileReplyIndex(index, loadedBeforeAnnounce);
+
+  assert.deepEqual(resolveReply(index, "botA", 100), alphaRef());
+  assert.equal(index.announced.has("alpha\0A1\0t1"), true);
+  assert.deepEqual(pendingAnnouncements(loadedBeforeAnnounce, index), [], "and is not re-announced next tick");
+});
+
+test("reconcileReplyIndex leaves every entry of a project absent from the loaded set", () => {
+  const index = newReplyIndex();
+  recordSend(index, "botA", 100, alphaRef());
+
+  reconcileReplyIndex(index, [project({ project: "beta", parked: [] })]);
+
+  assert.deepEqual(resolveReply(index, "botA", 100), alphaRef());
+  assert.equal(index.announced.has("alpha\0A1\0t1"), true);
+});
+
+test("reconcileReplyIndex evicts an entry under a token other than the project's current conn", () => {
+  const index = newReplyIndex();
+  recordSend(index, "botOld", 100, alphaRef());
+  const record = parked({ taskId: "A1", parkedAt: "t1", tgMessageId: 100 });
+
+  reconcileReplyIndex(index, [alpha({ conn: { token: "botNew", chat: "-1" }, parked: [record] })]);
+
+  assert.equal(resolveReply(index, "botOld", 100), null);
+});
+
+test("reconcileReplyIndex evicts every entry of a loaded project with no conn", () => {
+  const index = newReplyIndex();
+  recordSend(index, "botA", 100, alphaRef());
+
+  reconcileReplyIndex(index, [alpha({ conn: undefined, parked: [parked({ taskId: "A1", parkedAt: "t1", tgMessageId: 100 })] })]);
+
+  assert.equal(resolveReply(index, "botA", 100), null);
+  assert.equal(index.announced.size, 0);
+});
+
+test("reconcileReplyIndex drops an entry for a record whose reason is never asked, as rebuildIndex does", () => {
+  const index = newReplyIndex();
+  recordSend(index, "botA", 100, alphaRef());
+
+  reconcileReplyIndex(index, [alpha({ parked: [parked({ taskId: "A1", parkedAt: "t1", reason: "stopped", tgMessageId: 100 })] })]);
+
+  assert.equal(resolveReply(index, "botA", 100), null);
+});
+
+test("reconcileReplyIndex over a fully stamped set yields exactly what rebuildIndex builds", () => {
+  const projects = [
+    alpha({
+      parked: [
+        parked({ taskId: "A1", parkedAt: "t1", tgMessageId: 100 }),
+        parked({ taskId: "A2", parkedAt: "t3", tgMessageId: 102 }),
+        parked({ taskId: "A3", parkedAt: "t1", reason: "stopped", tgMessageId: 103 }),
+      ],
+    }),
+    project({ project: "beta", conn: { token: "botB", chat: "-2" }, parked: [parked({ taskId: "B1", parkedAt: "t1", tgMessageId: 100 })] }),
+    project({ project: "gamma", conn: undefined, parked: [parked({ taskId: "C1", parkedAt: "t1", tgMessageId: 300 })] }),
+  ];
+  const index = newReplyIndex();
+  recordSend(index, "botA", 100, alphaRef()); // live
+  recordSend(index, "botA", 101, alphaRef({ task: "A2", parkedAt: "t2" })); // re-parked since
+  recordSend(index, "botA", 102, alphaRef({ task: "A2", parkedAt: "t3" })); // live, re-announced
+  recordSend(index, "botA", 104, alphaRef({ task: "A9" })); // answered and gone
+  recordSend(index, "botB", 100, ref({ project: "beta", task: "B1", parkedAt: "t1" })); // live
+  recordSend(index, "botOld", 99, ref({ project: "beta", task: "B1", parkedAt: "t0" })); // old token, old park
+  recordSend(index, "botC", 300, ref({ project: "gamma", task: "C1", parkedAt: "t1" })); // conn removed
+
+  reconcileReplyIndex(index, projects);
+
+  assert.deepStrictEqual(index, rebuildIndex(projects));
 });
 
 test("pendingAnnouncements routes a park to the chat/thread its question key resolves through notify", () => {

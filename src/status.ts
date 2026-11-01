@@ -21,6 +21,7 @@ import { handleHostLog } from "./dashboard-route-host-log.ts";
 import { handleHealthz } from "./dashboard-route-healthz.ts";
 import { handlePage } from "./dashboard-route-page.ts";
 import { hostLogger, type Logger } from "./log.ts";
+import { dockerPeerDenial, watchDockerPeerSubnets, type DockerSubnetLister } from "./docker-peers.ts";
 
 // The dashboard is split into a reconstruction/model, presentation renders, prune
 // shelling, and one module per HTTP surface (ADR 0006). This file is the thin
@@ -113,6 +114,15 @@ export async function serveAllStatus(
     logger?: Logger;
     /** Replaces the built-in route list (tests); the denial guard still runs first. */
     routes?: RouteHandler[];
+    /**
+     * Lists the subnets of the Docker network agent containers run on, whose requests are refused
+     * (ADR 0021). Defaults to none — only the `status` and gateway entry points wire in Docker.
+     */
+    dockerPeerSubnets?: DockerSubnetLister;
+    /** How long one listing may take before it counts as failed; defaults to 5 s. */
+    dockerPeerTimeoutMs?: number;
+    /** How often the subnets are re-listed; defaults to 60 s. */
+    dockerPeerRefreshMs?: number;
   },
 ) {
   const deps: DashboardDeps = {
@@ -132,6 +142,13 @@ export async function serveAllStatus(
     .filter(Boolean);
   const logger = opts.logger ?? hostLogger();
   const handlers = opts.routes ?? routes;
+  const peers = opts.dockerPeerSubnets
+    ? await watchDockerPeerSubnets(opts.dockerPeerSubnets, {
+        intervalMs: opts.dockerPeerRefreshMs ?? 60_000,
+        timeoutMs: opts.dockerPeerTimeoutMs ?? 5_000,
+        logger,
+      })
+    : undefined;
   const server = createServer((req, res) => {
     const path = URL.parse(req.url ?? "/", "http://localhost")?.pathname ?? null;
     // One access row per POST — every one starts a process or reshapes a campaign — written once
@@ -158,6 +175,17 @@ export async function serveAllStatus(
     // Error bodies echo request input; type them as plain text. JSON, HTML and SSE routes set their own.
     res.setHeader("content-type", "text/plain; charset=utf-8");
     void (async () => {
+      // First, before the Host check: an agent container is a script that can forge Host and Origin,
+      // but not the address it connects from — and a forged DNS-name Host still gets this row (#603).
+      const remote = req.socket.remoteAddress;
+      const peerDenial = dockerPeerDenial(remote, peers?.subnets() ?? []);
+      if (peerDenial) {
+        try {
+          logger.log("dashboard-docker-peer-refused", { method: req.method, path, remote });
+        } catch {}
+        res.writeHead(403, { "content-type": "text/plain; charset=utf-8" }).end(peerDenial);
+        return;
+      }
       const denial = dashboardRequestDenial(req.headers.host, req.headers.origin, allowedHosts);
       if (denial) {
         res.writeHead(403, { "content-type": "text/plain; charset=utf-8" }).end(denial);
@@ -194,6 +222,7 @@ export async function serveAllStatus(
       } catch {}
     });
   });
+  if (peers) server.on("close", peers.stop);
   await new Promise<void>((resolve) => server.listen(opts.port, opts.host, resolve));
   const address = server.address() as AddressInfo;
   const shownHost = opts.host === "0.0.0.0" ? "<tailnet-or-host-ip>" : opts.host;

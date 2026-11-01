@@ -77,6 +77,7 @@ import {
 import { liveCampaignPid, projectHasLiveCampaign, resolveHostCeiling, type HostCeiling } from "./lease.ts";
 import { containerShareWeight } from "./config.ts";
 import { serveAllStatus } from "./status.ts";
+import { listDockerBridgeSubnets } from "./docker-peers.ts";
 import { runStatusLine } from "./statusline.ts";
 import {
   computeInstall,
@@ -452,7 +453,7 @@ if (mode === "status") {
   const host = hostIdx >= 0 ? rest[hostIdx + 1] : (process.env.VETINARI_STATUS_HOST ?? "127.0.0.1");
   if (!Number.isInteger(port) || port < 0) throw new Refusal("status --port needs a non-negative integer");
   if (!host) throw new Refusal("status --host needs a host, e.g. 127.0.0.1 or 0.0.0.0");
-  await serveAllStatus(gatewayConfigDir(), { port, host });
+  await serveAllStatus(gatewayConfigDir(), { port, host, dockerPeerSubnets: () => listDockerBridgeSubnets() });
   // serveAllStatus resolves once it is listening; the process must then stay up
   // to serve, so park here instead of exiting (an exit would kill the server the
   // instant it bound). We never fall through to the strict cwd config load.

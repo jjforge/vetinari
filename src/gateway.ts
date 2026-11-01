@@ -42,6 +42,7 @@ import {
   type CampaignStatus,
   type IssueStatus,
 } from "./status.ts";
+import { listDockerBridgeSubnets } from "./docker-peers.ts";
 import { TG_POLL_TIMEOUT_S, botId, newPollBackoff, tgPoll, tgSend, type TgConn, type TgFailure, type TgMsg } from "./telegram.ts";
 
 /**
@@ -1223,6 +1224,8 @@ export async function gateway(configDir: string = gatewayConfigDir()): Promise<v
     port: gatewayStatusPort(process.env, log),
     host: STATUS_HOST,
     health: () => gatewayHealth(ticks, Date.now()),
+    // Refuse the agent containers' Docker network (ADR 0021).
+    dockerPeerSubnets: () => listDockerBridgeSubnets(),
   });
 
   // Projects already reported as having no connection, for this daemon run only —

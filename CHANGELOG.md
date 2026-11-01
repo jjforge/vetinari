@@ -37,6 +37,8 @@ Within a milestone each bold section label appears at most once.
 - [ops] Harvested findings dedupe at a word-similarity score of 0.35 instead of 0.5, which catches rewordings the old threshold missed, and a "seen again" comment now quotes the new finding's wording (#673).
 - [ops] The gateway's systemd unit now sets `KillMode=process`, and the gateway exits cleanly on SIGTERM, so `vetinari gateway restart` no longer kills the campaigns, answers and prunes it launched. Re-run `vetinari gateway install` and `systemctl --user daemon-reload` to pick it up (#533).
 - [user] On native Windows, every `vetinari` command now refuses at once (exit 4) with a pointer to WSL2 + Docker Desktop, in place of failing later (#670).
+- [ops] `@ai-hero/sandcastle` is synced to current upstream `main` (the fork tag `v0.12.0-statedir.3`, replacing the `8da12d1` pin), bringing upstream fixes including keeping sandboxed agents from running code through host-side git. Fork pins are now sync tags, `v<upstream version>-statedir.<n>`, and `docs/operations.md` describes the sync procedure (#679).
+- [user] An agent turn that exits cleanly but reports an error in its output stream (an API error from Copilot, pi or opencode, or a Claude result marked as an error) now fails the run, naming the agent's error, where it used to read as a turn that ended without signalling completion (#679).
 
 **Bug fixes:**
 - [ops] A lock holder killed mid-write no longer wedges the host-slots or findings lock (a later run used to give up after about ten seconds), and two processes reclaiming a dead holder's lock can no longer both end up holding it; a lock's release now removes only its own lock (#569, #655).

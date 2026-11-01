@@ -5,7 +5,8 @@
  * (any wave that has had a `wave-start`) keeps its index; the in-flight wave is never touched.
  * It never adds or removes a member: adding stays `graft`'s job, removing stays `prune`'s.
  *
- * Placement reuses the planner's pieces (`layerWaves`, then `placeByCollisions`) rather than
+ * Placement reuses the planner's pieces (`layerWaves`, then — unless the project runs
+ * `fileOverlap: "allow"` — `placeByCollisions`) rather than
  * `planCampaign`, which drops unreachable and under-specified issues silently, words its
  * refusals for `campaign`, and skips the file-set check for one issue. A re-plan instead
  * refuses whole, naming every offender, and logs nothing.
@@ -112,7 +113,9 @@ export async function runReplan(
   ];
   if (offenders.length) throw new Refusal(`replan refused — nothing logged:\n  ${offenders.join("\n  ")}`);
 
-  const next = placeByCollisions(layered, unstarted, fileKeys).waves;
+  // Under `fileOverlap: "allow"` (ADR 0025) the remainder is the dependency layering alone;
+  // the file sets above still gate it (an under-specified issue refuses), but are not enforced.
+  const next = (cfg.fileOverlap === "allow" ? layered : placeByCollisions(layered, unstarted, fileKeys)).waves;
   const unchanged = JSON.stringify(next) === JSON.stringify(current);
   if (unchanged || opts.dryRun) return { started, current, next, unchanged, applied: false };
 

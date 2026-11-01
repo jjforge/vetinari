@@ -329,6 +329,12 @@ vetinari gateway stop
 vetinari gateway restart    # after the unit or the CLI changes
 ```
 
+The unit sets `KillMode=process`, so `gateway stop` and `gateway restart` stop only
+the gateway: a campaign, answer or prune launched from Telegram keeps running, and
+the restarted gateway picks up its parks and outbox. To stop a campaign itself, use
+`vetinari stop`. systemd may log a "left-over process" notice at the next start;
+that is expected.
+
 These wrap `systemctl --user … vetinari-gateway`; gateway detail goes to
 `journalctl --user -u vetinari-gateway`. Do not also run an inline `gateway &`,
 or the two consumers fight over the bot's updates.
@@ -632,6 +638,11 @@ without agent cost.
 Re-run [`vetinari install`](#putting-the-cli-on-path) only if the checkout moved,
 and [`vetinari gateway install`](#installing-the-gateway-as-a-service) after a node
 or tsx upgrade.
+
+When an upgrade changes the unit vetinari writes (as when it gained
+`KillMode=process`), re-run `vetinari gateway install` and
+`systemctl --user daemon-reload` before `vetinari gateway restart`, or the running
+service keeps the old unit.
 
 If a campaign exists in any project, read
 [During a campaign, and rolling back](#during-a-campaign-and-rolling-back) first.

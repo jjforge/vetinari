@@ -251,6 +251,32 @@ test("buildStatus after a replan keeps the started waves' numbers, numbers the n
   assert.deepEqual(status.inFlight, ["201"]);
 });
 
+test("buildStatus shows a member pruned and grafted back once, as grafted, with no pruned or empty wave left behind (#662)", () => {
+  const dir = join(tmpdir(), `vetinari-status-prune-regraft-${Date.now()}`);
+  seedState(dir, [
+    event("campaign-start", { ts: "2026-11-01T04:00:00.000Z", waves: [["1"], ["2"], ["3"]], slots: 2 }),
+    event("wave-start", { ts: "2026-11-01T04:01:00.000Z", index: 0, tasks: ["1"] }),
+    event("wave-done", { ts: "2026-11-01T04:02:00.000Z", index: 0, merged: ["1"] }),
+    event("wave-start", { ts: "2026-11-01T04:03:00.000Z", index: 1, tasks: ["2"] }),
+    event("parked", { ts: "2026-11-01T04:04:00.000Z", taskId: "2", reason: "question" }),
+    event("campaign-parked", { ts: "2026-11-01T04:05:00.000Z", reason: "question" }),
+    event("prune", { ts: "2026-11-01T04:06:00.000Z", target: "2", removed: ["2"], dropped: ["2"] }),
+    event("graft", { ts: "2026-11-01T04:07:00.000Z", ids: ["2"], blockedBy: {}, fileKeys: {} }),
+  ]);
+  const status = buildStatus(cfgFor(dir));
+  const chips = status.waves.flatMap((w) => w.issues).filter((i) => i.issueNumber === "2");
+  assert.equal(chips.length, 1);
+  assert.equal(chips[0].membership, "grafted");
+  assert.equal(
+    status.waves.some((w) => w.pruned),
+    false,
+  );
+  assert.equal(
+    status.waves.some((w) => w.issues.length === 0),
+    false,
+  );
+});
+
 test("buildStatus survives an unparseable parked record and still shows the valid park beside it", () => {
   // A writer killed mid-write leaves a torn record under `parked/`; it must not take the
   // project's dashboard down. `buildStatus` takes no logger, so the lister falls back to the

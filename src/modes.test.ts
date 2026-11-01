@@ -1,5 +1,6 @@
 import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,6 +29,7 @@ import {
   type CampaignDeps,
   type RunSpawner,
 } from "./modes.ts";
+import { integrateGreens, VETINARI_PATHS_GATE } from "./merge.ts";
 import { loggerForRun, memoryLogger, type MemoryLogger } from "./log.ts";
 import { answerParked, clearParked, hasParked, isAnswered, listOutbox, listParked, readParked, writeParkedRecord } from "./state.ts";
 import {
@@ -3247,4 +3249,140 @@ test("a redrive after a manual prune of a conflict-parked target neither spawns 
     "the redrive closed wave 0",
   );
   assert.ok(reduceCampaign(events).closedWaves.has(0));
+});
+
+// ── the vetinari-paths check through a campaign (#607) ──
+// The real `integrateGreens` runs in a scratch repo: member 101's branch edits `vetinari/config.mts`,
+// and the campaign resolves what its brief declares from the live issue on each integration pass.
+
+/** A scratch repo on `main` seeded with `vetinari/config.mts` and `src/a.ts`; `agent/101` commits `change`. */
+function repoWithVetinariMember(change: (dir: string) => void): string {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-paths-campaign-"));
+  const git = (args: string[]) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });
+  execFileSync("git", ["-C", dir, "-c", "init.defaultBranch=main", "init", "-q"]);
+  git(["config", "user.email", "test@example.com"]);
+  git(["config", "user.name", "test"]);
+  writeFileSync(join(dir, ".gitignore"), ".vetinari.local/\n");
+  mkdirSync(join(dir, "vetinari"));
+  mkdirSync(join(dir, "src"));
+  writeFileSync(join(dir, "vetinari", "config.mts"), "export default {};\n");
+  writeFileSync(join(dir, "src", "a.ts"), "base\n");
+  git(["add", "-A"]);
+  git(["commit", "-qm", "seed"]);
+  git(["checkout", "-q", "-b", "agent/101"]);
+  change(dir);
+  git(["add", "-A"]);
+  git(["commit", "-qm", "101"]);
+  git(["checkout", "-q", "main"]);
+  return dir;
+}
+
+/**
+ * Run a one-member campaign over `dir` with the real `integrateGreens` (base gate stubbed green).
+ * `issue` is the live tracker body; `onRetry` runs when the member is re-admitted. Returns the
+ * outcome, every spawn, and the `fetchTask` calls made while integrating.
+ */
+async function vetinariPathsCampaign(dir: string, issue: { body: string }, onRetry: () => void = () => {}) {
+  const cfg = harnessCfg(dir);
+  cfg.baseBranch = "main";
+  let integrating = false;
+  const fetchedWhileIntegrating: string[] = [];
+  cfg.fetchTask = async (id: string) => {
+    if (integrating) fetchedWhileIntegrating.push(id);
+    return JSON.stringify({ title: "member 101", body: issue.body, comments: [] });
+  };
+  const spawns: { taskId: string; prompt?: string }[] = [];
+  const deps: CampaignDeps = {
+    ...gitFreeDeps(cfg, async (taskId, _session, prompt) => {
+      spawns.push({ taskId, prompt });
+      if (prompt) onRetry();
+      return 0;
+    }),
+    integrate: async (c, greens, _deps, index, opts) => {
+      integrating = true;
+      try {
+        return await integrateGreens(c, greens, { gate: async () => ({ green: true, report: "" }) }, index, opts);
+      } finally {
+        integrating = false;
+      }
+    },
+  };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const prevCwd = process.cwd();
+  process.chdir(dir);
+  try {
+    const outcome = await silenceConsole(() => campaign(cfg, [["101"]], host, "paths", {}, deps));
+    return { cfg, outcome, spawns, fetchedWhileIntegrating };
+  } finally {
+    process.chdir(prevCwd);
+  }
+}
+
+const editsVetinariConfig = (d: string) => writeFileSync(join(d, "vetinari", "config.mts"), "export default { evil: true };\n");
+const showOnMain = (dir: string, path: string) => execFileSync("git", ["-C", dir, "show", `main:${path}`], { encoding: "utf8" });
+
+test("an undeclared vetinari/ change is re-admitted once with a drop-it prompt, then parks `conflict` with the gate's question — prose citing the path declares nothing (#607)", async () => {
+  const dir = repoWithVetinariMember(editsVetinariConfig);
+  // No marker line: the body only mentions the path in prose, which the resolver's whole-body
+  // fallback would cite — but only an explicit marker line declares.
+  const { cfg, outcome, spawns, fetchedWhileIntegrating } = await vetinariPathsCampaign(dir, {
+    body: "Tidy `vetinari/config.mts` while you are there.",
+  });
+
+  assert.equal(outcome, "parked");
+  assert.equal(showOnMain(dir, "vetinari/config.mts"), "export default {};\n", "the change never stayed on the base");
+  // Spawned once, re-admitted once with the vetinari-paths prompt.
+  assert.deepEqual(
+    spawns.map((s) => s.taskId),
+    ["101", "101"],
+  );
+  const retryPrompt = spawns[1].prompt ?? "";
+  assert.ok(retryPrompt.includes("vetinari/config.mts"), "the retry prompt names the path");
+  assert.match(retryPrompt, /Drop those changes from your branch/);
+  const events = readEventLog(cfg);
+  const readmits = events.filter((e) => e.event === "re-admit") as any[];
+  assert.deepEqual(
+    readmits.map((e) => [e.taskId, e.gate, e.paths]),
+    [["101", VETINARI_PATHS_GATE, ["vetinari/config.mts"]]],
+  );
+  assert.deepEqual(
+    events.filter((e) => e.event === "merged"),
+    [],
+  );
+  // The retry left the change in place, so its pass failed the check again and parked.
+  const rec = listParked(cfg).find((r) => r.taskId === "101");
+  assert.equal(rec?.reason, "conflict");
+  assert.equal(
+    rec?.question,
+    "Merge of agent/101 changes vetinari/config.mts, which #101's brief doesn't declare — declare them on the issue's marker line and `vetinari redrive`, or merge it by hand.",
+  );
+  // The live issue was read on each pass — never cached from the plan.
+  assert.deepEqual(fetchedWhileIntegrating, ["101", "101"]);
+});
+
+test("declaring the path on the live issue after a vetinari-paths failure merges it on the next pass (#607)", async () => {
+  const dir = repoWithVetinariMember(editsVetinariConfig);
+  const issue = { body: "Touches (existing files): `src/a.ts`" };
+  const { cfg, outcome, spawns } = await vetinariPathsCampaign(dir, issue, () => {
+    // A human declares the path on the issue's marker line while the member is re-admitted.
+    issue.body = "Touches (existing files): `src/a.ts`, `vetinari/config.mts`";
+  });
+
+  assert.equal(outcome, "done");
+  assert.equal(spawns.length, 2, "the first pass failed the check and re-admitted the member");
+  assert.equal(showOnMain(dir, "vetinari/config.mts"), "export default { evil: true };\n");
+  assert.deepEqual(
+    readEventLog(cfg)
+      .filter((e) => e.event === "merged")
+      .map((e: any) => e.taskId),
+    ["101"],
+  );
+  assert.equal(listParked(cfg).length, 0);
+});
+
+test("a member changing only paths outside vetinari/ never has its issue fetched at integration (#607)", async () => {
+  const dir = repoWithVetinariMember((d) => writeFileSync(join(d, "src", "b.ts"), "new\n"));
+  const { outcome, fetchedWhileIntegrating } = await vetinariPathsCampaign(dir, { body: "no marker" });
+  assert.equal(outcome, "done");
+  assert.deepEqual(fetchedWhileIntegrating, []);
 });

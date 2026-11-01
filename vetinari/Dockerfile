@@ -39,6 +39,8 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 # drop to the non-root agent user (Claude Code is installed below, as that user,
 # via its own installer). Any of the four can drive a run; `--agent` selects which
 # (ADR 0016).
+# Cursor (`cursor-agent`) and OpenCode (`opencode`) are not installed: if you select
+# either provider, add its CLI in the toolchain section below, then `vetinari build`.
 RUN npm install -g @mariozechner/pi-coding-agent @openai/codex @github/copilot
 
 # --- your toolchain goes here -------------------------------------------------

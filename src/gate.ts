@@ -67,7 +67,7 @@ export async function runGates(
   cfg: ResolvedConfig,
   sbx: Sandbox,
   opts: { all?: boolean; taskId?: string; stopped?: () => boolean; perMerge?: boolean } = {},
-): Promise<{ green: boolean; report: string; failed?: GateSpec }> {
+): Promise<{ green: boolean; report: string; failed?: GateSpec; exitCode?: number }> {
   const { taskId, stopped = () => false } = opts;
   let files = "";
   if (!opts.all) {
@@ -116,7 +116,12 @@ export async function runGates(
     if (res.exitCode !== 0) {
       const stdout = res.stdout ?? "";
       const evidence = tapFailures(stdout) ?? tail(stdout, 200);
-      return { green: false, report: `$ ${g.cmd}\n${evidence}\n${tail(res.stderr ?? "", 100)}`, failed: g };
+      return {
+        green: false,
+        report: `$ ${g.cmd}\n${evidence}\n${tail(res.stderr ?? "", 100)}`,
+        failed: g,
+        exitCode: res.exitCode,
+      };
     }
   }
   return { green: true, report: "" };

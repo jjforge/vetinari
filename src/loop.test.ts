@@ -57,6 +57,8 @@ const harnessCfg = (overrides: Partial<ResolvedConfig> = {}): ResolvedConfig => 
 interface TurnScript {
   run?: Partial<SandboxRunResult>;
   green?: boolean;
+  // The gate's exit code when red (default 1) â€” 127/126 script a command missing from the branch.
+  gateExit?: number;
   throwIdle?: boolean;
   throwIdleSession?: string;
   throwGeneric?: string;
@@ -96,7 +98,7 @@ const fakeSandbox = (script: TurnScript[], branch = "agent/T-1"): FakeSandbox =>
           ? { stdout: "", stderr: "fatal: not a git repository", exitCode: 128 }
           : { stdout: script[turn]?.status ?? "", stderr: "", exitCode: 0 };
       const green = script[turn]?.green ?? true;
-      return { stdout: "gate output", stderr: "gate errors", exitCode: green ? 0 : 1 };
+      return { stdout: "gate output", stderr: "gate errors", exitCode: green ? 0 : (script[turn]?.gateExit ?? 1) };
     },
     async close() {
       return undefined;
@@ -644,6 +646,40 @@ test("runLoop resumes a red gate on the same session and reaches green next turn
   assert.equal(sbx.runCalls[1].resumeSession, "sess-0");
 });
 
+// A gate the base gained after the member's branch was cut is not on that branch, so it exits
+// 127 (126 when not executable). The red stands, but the prompt says how to pick the command up (#501).
+const MISSING_GATE_HINT = /merge the base branch `base` into your branch/;
+
+test("a red gate that exited 127 tells a resumed member to merge the base in, not recreate the script (#501)", async () => {
+  const cfg = harnessCfg();
+  const sbx = fakeSandbox([
+    { run: { completionSignal: DONE }, green: false, gateExit: 127 },
+    { run: { completionSignal: DONE, commits: [{ sha: "def456" }] }, green: true },
+  ]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+
+  assert.equal(outcome, "green");
+  const prompt = sbx.runCalls[1].prompt ?? "";
+  assert.match(prompt, MISSING_GATE_HINT);
+  assert.match(prompt, /do not recreate/i);
+  assert.match(prompt, /gate output/); // the gate report still rides along
+});
+
+test("an ordinary red gate (exit 1) gets the resume prompt without the missing-command hint (#501)", async () => {
+  const cfg = harnessCfg();
+  const sbx = fakeSandbox([
+    { run: { completionSignal: DONE }, green: false },
+    { run: { completionSignal: DONE, commits: [{ sha: "def456" }] }, green: true },
+  ]);
+
+  await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+
+  const prompt = sbx.runCalls[1].prompt ?? "";
+  assert.match(prompt, /gate output/);
+  assert.doesNotMatch(prompt, /merge the base branch/);
+});
+
 // Capture console.warn for the preflight-warning assertions, silencing console.log too.
 const captureWarn = async <T>(fn: () => Promise<T>): Promise<{ result: T; warnings: string[] }> => {
   const realWarn = console.warn;
@@ -816,6 +852,23 @@ test("runLoop drives a non-resumable provider by a FRESH re-run each red turn â€
   assert.match(reentryTask, /task text/);
   assert.match(reentryTask, /gate output/); // the verification/gate report
   assert.match(reentryTask, /Wrote a failing test for the parser\./); // the prior turn summary
+});
+
+test("a red gate that exited 126 tells a non-resumable member's fresh re-run to merge the base in (#501)", async () => {
+  const cfg = harnessCfg({ agent: { provider: "cursor" }, promptFile: "/prompts/tdd.md" });
+  const sbx = fakeSandbox([
+    { run: { completionSignal: DONE }, green: false, gateExit: 126 },
+    { run: { completionSignal: DONE, commits: [{ sha: "def456" }] }, green: true },
+  ]);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx)));
+
+  assert.equal(outcome, "green");
+  const reentryTask = sbx.runCalls[1].promptArgs?.TASK ?? "";
+  assert.match(reentryTask, /merge the base branch `base` into your branch/);
+  assert.match(reentryTask, /do not recreate/i);
+  assert.match(reentryTask, /task text/);
+  assert.match(reentryTask, /gate output/);
 });
 
 test("runLoop's fresh re-run carries only the most-recent turn summary, not the full history", async () => {

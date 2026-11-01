@@ -119,6 +119,15 @@ test("a gate that fails its first check stops there — the failing result, not 
   assert.equal(last.exitCode, 1);
 });
 
+test("a red gate carries the failing check's exit code — 127 for a command not on the branch (#501)", async () => {
+  const gate = { cmd: "infra/scripts/check-new.sh" };
+  const cfg = gateCfg([{ cmd: "tsc --noEmit" }, gate]);
+  const result = await runGates(cfg, gateSandbox({ "infra/scripts/check-new.sh": 127 }), { all: true });
+  assert.equal(result.green, false);
+  assert.equal(result.exitCode, 127);
+  assert.equal(result.failed, gate);
+});
+
 test("the wave-merge gate (no taskId) writes no per-task activity — not even a gate-check", async () => {
   const cfg = gateCfg([{ cmd: "tsc --noEmit" }]);
   const sbx = gateSandbox({ "tsc --noEmit": 0 });

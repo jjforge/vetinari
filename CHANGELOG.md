@@ -19,6 +19,21 @@ and each entry opens with a tag saying who it reaches:
 `**Breaking changes:**` sorts first in a milestone and names the contract it broke.
 Within a milestone each bold section label appears at most once.
 
+### Collected changes — November 1, 2026
+
+**Improvements:**
+- [api] `campaign-start` now records each scheduled issue's resolved file keys (`fileKeys`), so a replay of an archived campaign reads the keys the planner used (#658).
+
+**Bug fixes:**
+- [ops] A lock holder killed mid-write no longer wedges the host-slots or findings lock (a later run used to give up after about ten seconds), and two processes reclaiming a dead holder's lock can no longer both end up holding it; a lock's release now removes only its own lock (#569, #655).
+- [ops] The gateway's in-memory reply index no longer grows without bound: each announce tick drops questions whose parked record is gone or was re-parked, as a restart would (#587).
+
+**Security:**
+- [ops] The dashboard's Content-Security-Policy no longer allows inline scripts or styles without a per-response nonce: every response carries a fresh nonce, every inline `<script>`/`<style>` the pages render carries it, and the no-JS project picker's dead inline `onchange` is gone — so an injected inline script can't run (#600).
+
+**Documentation:**
+- [user] The user guide, README and template Dockerfile now say that the `cursor-agent` and `opencode` CLIs are not in the shipped image: a project selecting `--agent cursor` or `--agent opencode` must add that CLI to its `vetinari/Dockerfile` and run `vetinari build` (#521).
+
 ### Collected changes — October 31, 2026
 
 **Breaking changes:**

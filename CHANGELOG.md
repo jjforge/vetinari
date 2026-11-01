@@ -22,13 +22,12 @@ Within a milestone each bold section label appears at most once.
 
 ### v0.3.0 — November 1, 2026
 
-Tags a known-good working version: typecheck and lint clean, the full suite
-green, and sandcastle synced to upstream (`v0.12.0-statedir.3`). It ships every
-milestone below, back to v0.2.0, including **Breaking changes** to the exported
-Telegram reply helpers (#660).
-
 **Improvements:**
 - [internal] `package.json` version bumped to `0.3.0` to match the tag.
+
+**Bug fixes:**
+- [ops] sandcastle's host git guard now protects vetinari's worktrees too. It refuses to run git on the host in a worktree whose `.git` no longer leads to its own repo, but it recognised only `.sandcastle/worktrees/`, so worktrees under `.vetinari.local/worktrees/` skipped that check. The fork is now at `v0.12.0-statedir.4`; upstream PR #961 carries the same fix (#680).
+- [ops] `vetinari baseline` (and `build`'s baseline) now gates the base branch's current tip. It used to reuse whatever `agent/baseline` the first baseline had cut (#681).
 
 ### Collected changes — November 1, 2026
 

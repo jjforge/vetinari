@@ -391,6 +391,10 @@ export interface GraftInputs {
   /** id -> its fileKeys, for the grafted ids and the still-unstarted members the
    *  placement checks disjointness against. */
   fileKeys: Record<string, string[]>;
+  /** `allow` when the graft was logged under `fileOverlap: "allow"` (ADR 0025): place by the
+   *  dependencies and the pinned-wave rule alone, with no file-collision check. Absent —
+   *  `strict`, and every graft logged before the setting — places file-disjointly. */
+  fileOverlap?: "allow";
 }
 
 /** The result of folding a graft into a running campaign's plan: the extended
@@ -407,7 +411,9 @@ export interface AppliedGraft {
  * `applyPrune` (ADR 0014). The in-flight and banked waves are pinned; each grafted
  * issue is **stable-inserted** into the earliest *later* wave that satisfies its
  * in-campaign `blockedBy` deps and stays fileKey-disjoint, appending a new wave
- * only when none fits. Existing wave assignments are never reordered.
+ * only when none fits. Existing wave assignments are never reordered. A graft carrying the
+ * `fileOverlap: "allow"` marker (ADR 0025) skips the file check: dependencies and the
+ * pinned waves alone place it.
  *
  * `firstFree` is the first wave grafted work may enter: past the in-flight wave
  * (`currentWave`) and past every wave that already banked a `completed` member, so
@@ -453,8 +459,10 @@ export function applyGraft(
       const bw = waveOf.get(b);
       if (bw !== undefined) earliest = Math.max(earliest, bw + 1);
     }
-    // `earliest` is at least `firstFree` (>= 0), so it never indexes a pinned wave.
-    waveOf.set(id, placeEarliestDisjoint(result, waveKeys, id, keysOf(id), earliest));
+    // `earliest` is at least `firstFree` (>= 0), so it never indexes a pinned wave. Under
+    // `allow` the graft collides with nothing, so it lands at `earliest` itself.
+    const keys = graft.fileOverlap === "allow" ? new Set<string>() : keysOf(id);
+    waveOf.set(id, placeEarliestDisjoint(result, waveKeys, id, keys, earliest));
     grafted.push(id);
   }
 

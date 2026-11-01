@@ -965,6 +965,17 @@ test("applyGraft packs file-disjoint grafts into the same later wave", () => {
   assert.deepEqual(res.remaining, [["101"], ["301", "302"]]);
 });
 
+test("applyGraft under the fileOverlap allow marker joins a later wave it shares a key with, still after its blockers (#623)", () => {
+  const campaign = { waves: [["101"], ["201"]], outcomes: graftOutcomes({}), currentWave: 0 };
+  const fileKeys = { "301": ["a.ts"], "302": ["a.ts"], "201": ["a.ts"] };
+  const res = applyGraft(campaign, { ids: ["301", "302"], blockedBy: { "302": ["201"] }, fileKeys, fileOverlap: "allow" });
+
+  // 301 shares a.ts with the unstarted 201 yet joins its wave; 302 still waits on 201.
+  assert.deepEqual(res.remaining, [["101"], ["201", "301"], ["302"]]);
+  // Without the marker the same graft spills 301 past 201, as it always has.
+  assert.deepEqual(applyGraft(campaign, { ids: ["301"], blockedBy: {}, fileKeys }).remaining, [["101"], ["201"], ["301"]]);
+});
+
 test("validateGraftTargets rejects unknown, closed and already-in-campaign ids, in input order (#166)", () => {
   const rejections = validateGraftTargets(["301", "302", "303", "101"], {
     inCampaign: new Set(["101"]),

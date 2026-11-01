@@ -205,6 +205,10 @@ export interface GraftEvent extends BaseEvent {
    * so the reducer's title-folding renders the grafted wave's header and rows with a
    * real title instead of a bare `Wave N` / `#num` (#197). */
   titles?: Record<string, string>;
+  /** `allow` when the graft was logged under `fileOverlap: "allow"` (ADR 0025): the fold places
+   *  it by dependencies and the pinned-wave rule alone. Absent — `strict`, and every graft
+   *  logged before the setting — replays file-disjointly, as it always has. */
+  fileOverlap?: "allow";
 }
 
 /** `replan` — the unstarted remainder of a running (or resumable) campaign was re-planned from the

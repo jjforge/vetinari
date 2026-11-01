@@ -21,14 +21,20 @@ Within a milestone each bold section label appears at most once.
 
 ### Collected changes — November 1, 2026
 
+**Breaking changes:**
+- [api] The exported `recordSend`, `resolveReply` and `PendingConfirms.record`/`resolve` take a `{ token, chat }` connection in place of a bare bot token, because a Telegram message id is unique only within a chat (#660).
+
 **New features:**
 - [ops] Projects can opt in with `fileOverlap: "allow"` to let tickets that share a file run in the same wave — `campaign`, `graft` and `replan` lay out waves by dependencies alone, `campaign --dry-run` lists each overlap it did not enforce (`overlap allowed: #<a> and #<b> share <file>`) and bounds the waves by dependency depth, and a collision is retried at merge; the default stays `"strict"`, unchanged, and any other value is refused at config load (#623).
 - [api] A new optional `sandbox` config field, a factory `(cfg, { mounts }) => SandboxProvider`, picks the sandcastle sandbox provider that agent turns, gates, `baseline` and integration gates run in. It defaults to Docker on `image`, which is now required only without it; with it set, `build` refuses (there is no image to build) and the stale-image and mount-parent checks are skipped (#491).
+- [api] A stable, documented read-only API under `/api/v1/` (`projects`, `campaign`, `events`) on the `status` and gateway dashboards, in the orchestrator's status vocabulary and additive-only within v1; see `docs/api.md` (#493).
 
 **Improvements:**
 - [api] `campaign-start` now records each scheduled issue's resolved file keys (`fileKeys`), so a replay of an archived campaign reads the keys the planner used (#658).
 - [ops] Gate, agent, activity and dashboard-action logs not written for 30 days are now deleted when a run is archived (not on `clear`), the `archived` row counts them in `sweptLogs`, and run archives are still kept forever (#536).
 - [ops] A stale registry pointer logs `registry-stale` once per process instead of on every gateway tick, and the dashboard stops re-reading unchanged run archives and the whole event log on each update (#669).
+- [user] The `outdated-agent` recovery advice now says to update the agent CLI in the project's sandbox, naming `vetinari build` for the default Docker image, so it holds for a non-Docker sandbox too (#672).
+- [ops] Harvested findings dedupe at a word-similarity score of 0.35 instead of 0.5, which catches rewordings the old threshold missed, and a "seen again" comment now quotes the new finding's wording (#673).
 
 **Bug fixes:**
 - [ops] A lock holder killed mid-write no longer wedges the host-slots or findings lock (a later run used to give up after about ten seconds), and two processes reclaiming a dead holder's lock can no longer both end up holding it; a lock's release now removes only its own lock (#569, #655).
@@ -44,6 +50,7 @@ Within a milestone each bold section label appears at most once.
 - [ops] A failed issue read during the vetinari-paths check no longer leaves the agent's `vetinari/` change merged on the base: the merge is undone before the error ends the campaign, so a redrive checks it again (#663).
 - [user] The dashboard's prune confirm no longer says "no dependents" while listing members it keeps: when the prune drops nothing besides its target it reads "drops nothing else" (#665).
 - [ops] The `/review-logs` config lens no longer suggests waiving a package directory: a waive candidate that is a directory (a `packageScopedFileSet` key) is listed under "Not waivable (package keys)" instead, since `waivedFiles` takes only single files (#667).
+- [user] The gateway now hears replies and commands from every chat a bot's projects use, including a separate `question` destination or a second project's chat on a shared bot, instead of silently dropping all but one chat's; it answers a command in the chat it came from. Replies are matched per chat (#660).
 
 **Security:**
 - [ops] The dashboard's Content-Security-Policy no longer allows inline scripts or styles without a per-response nonce: every response carries a fresh nonce, every inline `<script>`/`<style>` the pages render carries it, and the no-JS project picker's dead inline `onchange` is gone — so an injected inline script can't run (#600).

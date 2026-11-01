@@ -1079,8 +1079,12 @@ async function dispatchAnswer(cmd: Extract<Command, { kind: "answer" }>, deps: D
     );
 
   // Deliver: write the answer into the parked record and mark it answered. The record and its
-  // `tgMessageId` are kept so the gateway does not re-announce; the re-admit consumes it.
-  deps.answerParked(cfg, taskId, cmd.text.join(" "));
+  // `tgMessageId` are kept so the gateway does not re-announce; the re-admit consumes it. A record
+  // cleared since the `hasParked` check above delivers nothing — reported as not parked (#570).
+  if (!deps.answerParked(cfg, taskId, cmd.text.join(" "))) {
+    deps.log(`${taskId} is not parked — nothing to answer.`);
+    return;
+  }
   // Record the delivery so the dashboard can show the issue answered rather than still parked.
   const source = parseAnswerSource(process.env[ANSWER_SOURCE_ENV_VAR]);
   cfg.log.log("answered", { taskId, source });

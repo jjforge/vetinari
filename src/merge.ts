@@ -1,12 +1,12 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { GateSpec, ResolvedConfig } from "./config.ts";
 import type { Logger } from "./log.ts";
 import { runGates } from "./gate.ts";
 import { makeSandbox, removeCopilotDir } from "./sandbox.ts";
 import { applyCollect, foldFragments, formatMilestoneDate, FRAGMENT_DIR, type FragmentNearMiss } from "./changelog.ts";
-import { clearParked, listParkedIn, writeParkedRecord } from "./state.ts";
+import { clearParked, clearParkedIn, listParkedIn, writeParkedRecord } from "./state.ts";
 import { PARK_RECOVERY, recoverySentence } from "./park-recovery.ts";
 import { readEventLog } from "./event-log.ts";
 import { reduceCampaign } from "./dashboard-model.ts";
@@ -616,7 +616,7 @@ export function applyTidy(target: TidyTarget, plan: TidyPlan): FragmentNearMiss[
 
   purgeBranches(target, plan.deleteBranches);
 
-  for (const id of plan.clearParked) rmSync(join(target.parkedDir, `${id}.json`), { force: true });
+  clearParkedIn(target.parkedDir, plan.clearParked);
   return nearMisses;
 }
 

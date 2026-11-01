@@ -76,7 +76,7 @@ function makeDeps(overrides: Partial<DispatchDeps> = {}) {
     ) as unknown as DispatchDeps["runReplan"],
     listParked: spy([]) as unknown as DispatchDeps["listParked"],
     hasParked: spy(true) as unknown as DispatchDeps["hasParked"],
-    answerParked: spy() as unknown as DispatchDeps["answerParked"],
+    answerParked: spy(true) as unknown as DispatchDeps["answerParked"],
     enqueueOutbound: spy() as unknown as DispatchDeps["enqueueOutbound"],
     projectHasLiveCampaign: spy(false) as unknown as DispatchDeps["projectHasLiveCampaign"],
     readEventLog: spy([]) as unknown as DispatchDeps["readEventLog"],
@@ -1768,6 +1768,25 @@ test("dispatch answer appends no `answered` event for a not-parked no-op or a re
   (sessionless.cfg as any).postComment = undefined;
   await assert.rejects(() => dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, sessionless.deps));
   assert.deepEqual(answeredRows(sessionless.cfg), [], "a refused session-less answer logs nothing");
+});
+
+test("dispatch answer whose delivery finds the record gone reports it not parked — no `answered`, no ack, no re-admit (#570)", async () => {
+  // The record passed `hasParked`, then was cleared before `answerParked` took the parked lock.
+  const { deps, cfg, logged } = makeDeps({
+    answerParked: spy(false) as any,
+    listParked: spy([
+      { taskId: "436", reason: "question", branch: "agent/436", parkedAt: "t", question: "?", sessionId: "s", tgMessageId: 12 },
+    ]) as any,
+    readEventLog: spy(pausedCampaignAfterGreen()) as any,
+  });
+  await withEnv({ VETINARI_ANSWER_SOURCE: "telegram" }, async () => {
+    await dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps);
+  });
+  assert.ok(logged.includes("436 is not parked — nothing to answer."), "the not-parked line is logged");
+  assert.deepEqual(answeredRows(cfg), [], "no `answered` row for an answer that delivered nothing");
+  assert.equal((deps.runLoop as any).calls.length, 0, "nothing runs");
+  assert.equal((deps.campaign as any).calls.length, 0, "nothing redrives");
+  assert.equal((deps.enqueueOutbound as any).calls.length, 0, "no answer-ack is enqueued");
 });
 
 // Run `fn` with VETINARI_ANSWER_SOURCE set to `source` (unset when undefined), restoring it after.

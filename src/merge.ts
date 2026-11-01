@@ -234,7 +234,8 @@ const defaultIntegrateDeps: IntegrateDeps = { gate: gateMergedBase, perMergeGate
  * The **vetinari-paths check** (ADR 0026) runs first on each merge that succeeds: a merge that
  * changes a path under `vetinari/` that `opts.declaredKeysOf` does not declare is undone the same
  * way and returned in `conflicts` with gate {@link VETINARI_PATHS_GATE} and the undeclared paths;
- * the `perMerge` gates do not run on it.
+ * the `perMerge` gates do not run on it. If `declaredKeysOf` rejects, the merge is undone the
+ * same way and the original error is rethrown.
  *
  * A **red merged base** has no single culprit, so it is NOT rolled back either: the
  * greens stay merged, the branches are left intact, and the result carries `parked` so
@@ -307,7 +308,16 @@ export async function integrateGreens(
     // `vetinari/` still shows its `vetinari/` side. Undone like a red per-merge check, below.
     const changed = git(["diff", "--name-only", "--no-renames", preMerge, "HEAD"]).split("\n").filter(Boolean);
     if (changed.some((p) => p.startsWith("vetinari/"))) {
-      const undeclared = undeclaredVetinariPaths(changed, (await opts.declaredKeysOf?.(taskId)) ?? []);
+      // An issue that cannot be read undoes the merge before its error ends the campaign, so the
+      // base never keeps an unchecked `vetinari/` change and a redrive merges and checks it again.
+      let declared: string[];
+      try {
+        declared = (await opts.declaredKeysOf?.(taskId)) ?? [];
+      } catch (err) {
+        undoMerge(branch, preMerge);
+        throw err;
+      }
+      const undeclared = undeclaredVetinariPaths(changed, declared);
       if (undeclared.length) {
         undoMerge(branch, preMerge);
         const detail = `${branch} changes ${undeclared.join(", ")} under vetinari/, which #${taskId}'s brief does not declare.`;

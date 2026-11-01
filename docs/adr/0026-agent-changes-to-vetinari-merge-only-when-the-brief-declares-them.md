@@ -34,7 +34,8 @@ gates, the paths the merge changed are listed with
   resolved the planner's way (the project's `fileSet`, else the default resolver),
   without `waivedFiles` — those waive planning collisions, not this check. The plan's
   snapshot is never used, so a human who declares the path and redrives gets it
-  merged.
+  merged. If the issue can't be read, the merge is undone before the error ends the
+  campaign, so a redrive checks it again.
 - **Only an explicit marker line declares** — `Touches:`/`Files:`/`Creates:`. With
   none, the issue declares nothing, even where the resolver's whole-body fallback would
   read a cite out of its prose.

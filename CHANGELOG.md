@@ -40,6 +40,8 @@ Within a milestone each bold section label appears at most once.
 **Security:**
 - [ops] The dashboard's Content-Security-Policy no longer allows inline scripts or styles without a per-response nonce: every response carries a fresh nonce, every inline `<script>`/`<style>` the pages render carries it, and the no-JS project picker's dead inline `onchange` is gone — so an injected inline script can't run (#600).
 - [ops] In a Telegram group chat, the gateway now acts only on messages from `VETINARI_TELEGRAM_ALLOWED_SENDERS` (shared across projects on one bot) and logs the rest as `telegram-sender-refused`; private chats are unchanged (#606).
+- [ops] The dashboard (`vetinari status` and the gateway's) now refuses every request from the Docker network agent containers run on (the default `bridge`, its subnets read live from `docker network inspect`), so an agent cannot drive it whatever the bind address, while a reverse proxy or sidecar on its own Docker network still can; refusals log a `dashboard-docker-peer-refused` host-log row, and an unlistable Docker refuses nothing and logs one `dashboard-docker-peers-unavailable` warning per failure streak. The operations guide's tailnet-bind advice is corrected: binding the tailnet IP does not by itself keep containers out (#603).
+- [ops] Harvested findings are now scrubbed of the project's `.env`/`host.env` values and common token shapes before they're triaged or filed, and each redaction is logged as `finding-redacted` without the secret (#608).
 
 **Infrastructure:**
 - [internal] eslint now runs `no-floating-promises` and `no-misused-promises` in CI and the campaign gates, as `npm run lint` (#592).

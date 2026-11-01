@@ -618,6 +618,37 @@ Re-run [`vetinari install`](#putting-the-cli-on-path) only if the checkout moved
 and [`vetinari gateway install`](#installing-the-gateway-as-a-service) after a node
 or tsx upgrade.
 
+If a campaign exists in any project, read
+[During a campaign, and rolling back](#during-a-campaign-and-rolling-back) first.
+
+### During a campaign, and rolling back
+
+**Don't upgrade under a live campaign.** A running campaign keeps the code it
+already loaded, while each member `run` it spawns, and any `answer`, `redrive`,
+dashboard or Telegram action started meanwhile, loads the new code from disk, so
+one campaign ends up mixing two versions. Wait until no campaign is running in
+any project, or stop one gracefully with `vetinari stop`. Upgrading under a
+**parked** campaign is safe, since no process is running; its redrive simply runs
+on the new code.
+
+The sequence:
+
+1. `vetinari stop` in each project with a live campaign, then wait for the
+   campaign process to exit. A graceful stop lets the wave in flight finish and
+   integrate; the campaign then shows parked `stopped`.
+2. `git pull && npm ci` in the vetinari checkout.
+3. `vetinari gateway restart`.
+4. `vetinari baseline` in each project.
+5. `vetinari redrive` in each project where a campaign was stopped or parked.
+
+**Rolling back.** While no campaign is running, check out the earlier tag or sha
+in the checkout, then run `npm ci`, `vetinari gateway restart`, and
+`vetinari baseline` in each project. State a newer version wrote is read
+best-effort: an older version skips event kinds it doesn't know and ignores extra
+fields in parked records. A campaign **started** under the newer version should be
+finished, or ended with `vetinari clear`, before you roll back, because its log may
+depend on behaviour the older version lacks.
+
 ### The shims `migrate` no longer carries
 
 `migrate` moves a pre-layout project **once** and does not accumulate shims for

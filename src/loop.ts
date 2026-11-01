@@ -170,14 +170,25 @@ export const defaultLoopDeps: LoopDeps = { makeSandbox, commitsAhead, filesInCom
  * left off — its own prior work already committed on the branch, plus the report and
  * the most-recent turn summary (bounded: most-recent only, never the full history).
  */
-const redResumePrompt = (report: string) =>
-  `The orchestrator ran the verification suite and it is red. Fix the implementation — do not weaken the tests.\n\n${report}\n\nWhen you believe it is fixed, emit ${DONE} again, and end this turn with a <turn-summary> line as before.`;
+const redResumePrompt = (report: string, hint = "") =>
+  `The orchestrator ran the verification suite and it is red. Fix the implementation — do not weaken the tests.${hint}\n\n${report}\n\nWhen you believe it is fixed, emit ${DONE} again, and end this turn with a <turn-summary> line as before.`;
 
-const freshRedReentry = (report: string, priorSummary: string) =>
+const freshRedReentry = (report: string, priorSummary: string, hint = "") =>
   `---\n\n(Continuing earlier work on this task — a fresh run. Your prior turn's commits are already on this branch.)\n\n` +
-  `The orchestrator ran the verification suite and it is red. Fix the implementation — do not weaken the tests.` +
+  `The orchestrator ran the verification suite and it is red. Fix the implementation — do not weaken the tests.${hint}` +
   (priorSummary ? `\n\nYour most recent turn summary:\n${priorSummary}` : "") +
   `\n\nVerification report:\n${report}`;
+
+/**
+ * The red prompts' extra sentence for a gate that exited 126 or 127 (#501): `sh` could not find
+ * (or execute) the command — typically a gate the base gained after this member's branch was cut,
+ * so its script is not on the branch. The red stands; this only says how to pick the command up.
+ * Empty for any other exit code, leaving the prompts exactly as they were.
+ */
+const missingGateCommandHint = (exitCode: number | undefined, baseBranch: string) =>
+  exitCode === 126 || exitCode === 127
+    ? ` The failing gate's command isn't on your branch, or isn't executable there — merge the base branch \`${baseBranch}\` into your branch to pick it up; do not recreate the script yourself.`
+    : "";
 
 export const answerPromptFor = (text: string) =>
   `Answer from the human to your question:\n\n${text}\n\nContinue the work. The signal contract is unchanged: ${DONE} when done, ${BLOCKED} if blocked again — and end this turn with a <turn-summary> line as before.`;
@@ -768,14 +779,15 @@ async function driveTurns(s: RunState, sbx: Sandbox, turns: Turns, task: string)
 
     // Raced against the stop like a turn (#462): a stop mid-gate parks `stopped` at once rather
     // than waiting out the gate, and a gate that would have gone green never logs a verdict.
-    const { green, report } = await s.stoppable(runGates(cfg, sbx, { taskId, stopped: s.stopped }));
+    const { green, report, exitCode } = await s.stoppable(runGates(cfg, sbx, { taskId, stopped: s.stopped }));
     if (green) return await declareGreen(s, sbx, r, sessionId, turns.common);
 
     // Red: the next turn carries the gate report and, for a non-resumable provider, the
     // most-recent turn summary (#212). Don't spin a fresh run on the final turn: it would
     // never be gated. Fall through to the budget park.
     if (!turns.resumable && turn + 1 >= cfg.maxTurns) break;
-    r = await turns.next(sessionId, redResumePrompt(report), freshRedReentry(report, turnFields.summary));
+    const hint = missingGateCommandHint(exitCode, cfg.baseBranch);
+    r = await turns.next(sessionId, redResumePrompt(report, hint), freshRedReentry(report, turnFields.summary, hint));
   }
 
   return await parkBudget(s, sbx, r, turns.common);

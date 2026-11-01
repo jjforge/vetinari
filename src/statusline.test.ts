@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ResolvedConfig } from "./config.ts";
 import { event } from "./event-log.ts";
-import { registerProject } from "./host-slots.ts";
+import { registerProject } from "./lease.ts";
 import { campaignStatusLine, formatContextLine, formatStatusLine, trimModelName } from "./statusline.ts";
 
 test("formatStatusLine summarizes the running wave and status counts on one line", () => {

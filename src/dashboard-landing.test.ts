@@ -12,7 +12,7 @@ import { buildStatus, statusConfigFromPointer } from "./dashboard-status.ts";
 import { event } from "./event-log.ts";
 import { festiveWaveName } from "./festive-names.ts";
 import type { ProjectPointer } from "./registry.ts";
-import { slotsDir } from "./host-slots.ts";
+import { slotsDir } from "./lease.ts";
 import { withEnv } from "./test-support.ts";
 
 const writeJsonl = (path: string, events: unknown[]) => writeFileSync(path, events.map((e) => JSON.stringify(e)).join("\n") + "\n");

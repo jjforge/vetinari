@@ -3,7 +3,7 @@
 import { existsSync } from "node:fs";
 import { hostLogger, type Logger } from "./log.ts";
 import { type ProjectPointer } from "./registry.ts";
-import { projectHasLiveCampaign } from "./host-slots.ts";
+import { projectHasLiveCampaign } from "./lease.ts";
 import { readEventLog, type OrchestratorEvent } from "./event-log.ts";
 import { humanizeLogLine, localTime, type HumanizedRow } from "./log-view.ts";
 import { describeEvent, festiveFor, formatFeedEvent, lastEventText, titlesFromLog } from "./dashboard-event-text.ts";

@@ -4,7 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { dispatch, identityLine, parseArgs, type Command, type DispatchDeps } from "./cli-dispatch.ts";
-import { LiveCampaignRefusal, projectHasLiveCampaign, registerProject } from "./host-slots.ts";
+import { LiveCampaignRefusal, projectHasLiveCampaign, registerProject } from "./lease.ts";
 import { GraftRejectedError } from "./graft.ts";
 import { Refusal } from "./refusal.ts";
 import { withEnv } from "./test-support.ts";
@@ -262,7 +262,7 @@ test("parseArgs reads prune --json and keeps it out of the target", () => {
   });
 });
 
-test("parseArgs reads `prune` flags and ignores a retired batch tail — only the issue is the target", () => {
+test("parseArgs reads `prune` flags and ignores a retired wave tail — only the issue is the target", () => {
   assert.deepEqual(parseArgs(["prune", "436", "611 640", "623", "--dry-run", "--purge"]), {
     kind: "prune",
     project: undefined,

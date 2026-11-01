@@ -74,7 +74,7 @@ import {
   listProjects,
   removePointer,
 } from "./registry.ts";
-import { liveCampaignPid, projectHasLiveCampaign, resolveHostCeiling, type HostBudget } from "./host-slots.ts";
+import { liveCampaignPid, projectHasLiveCampaign, resolveHostCeiling, type HostCeiling } from "./lease.ts";
 import { containerShareWeight } from "./config.ts";
 import { serveAllStatus } from "./status.ts";
 import { runStatusLine } from "./statusline.ts";
@@ -461,7 +461,7 @@ if (mode === "status") {
 
 // `registry remove <name>` deletes one project's pointer from the host registry —
 // the explicit counterpart to the auto-register every run performs. It acts on the
-// host registry (not this project's slots — that is host-slots' `deregisterProject`),
+// host registry (not this project's slots — that is lease's `deregisterProject`),
 // so like status/gateway it runs BEFORE the strict cwd config load (no project config
 // in cwd is required to prune a stale pointer).
 if (mode === "registry") {
@@ -574,7 +574,7 @@ autoRegister(cfg, projectRoot, hostLog);
 // a machine-derived default. Every queue/campaign carries it and this project's
 // containerShare-derived weight into the cooperative filesystem lease; there is no
 // per-run cap.
-const hostBudget: HostBudget = {
+const hostBudget: HostCeiling = {
   configDir: gatewayConfigDir(),
   ceiling: resolveHostCeiling(gatewayConfigDir()),
   weight: containerShareWeight(cfg.containerShare),

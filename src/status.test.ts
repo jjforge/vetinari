@@ -11,7 +11,7 @@ import { memoryLogger } from "./log.ts";
 import type { AddressInfo } from "node:net";
 import { request } from "node:http";
 import { register } from "./registry.ts";
-import { registerProject } from "./host-slots.ts";
+import { registerProject } from "./lease.ts";
 import { issueMoves } from "./dashboard-visual-state.ts";
 import { withEnv } from "./test-support.ts";
 

@@ -18,7 +18,7 @@ import { resolve } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import { ANSWER_SOURCE_ENV_VAR, parseAgentFlags, parseAnswerSource } from "./config.ts";
 import { renderUsage } from "./help.ts";
-import { LiveCampaignRefusal, type HostBudget, type liveCampaignPid, type projectHasLiveCampaign } from "./host-slots.ts";
+import { LiveCampaignRefusal, type HostCeiling, type liveCampaignPid, type projectHasLiveCampaign } from "./lease.ts";
 import { DOCKERFILE, staleImageWarning } from "./modes.ts";
 import type { build, baseline, campaign, tgTest, requireTelegram, readImageFreshness, CampaignOutcome } from "./modes.ts";
 import type { runTgConnect } from "./tg-connect.ts";
@@ -300,10 +300,10 @@ export function parseArgs(argv: string[]): Command {
     }
     case "prune": {
       // `prune <issue>` prunes the RUNNING campaign at the next wave boundary; the
-      // fresh-reduced-launch batch form is retired (design §12). `prune <project> <issue>`
+      // fresh-reduced-launch wave form is retired (design §12). `prune <project> <issue>`
       // — a leading non-issue token followed by an issue — carries a project qualifier, the
       // spelling the gateway accepts; a leading issue token is the bare form and any tail is
-      // ignored (the retired batch args).
+      // ignored (the retired wave args).
       const positional = rest.filter((a) => a !== "--dry-run" && a !== "--purge" && a !== "--json");
       const qualified = positional.length >= 2 && !isIssueToken(positional[0]) && isIssueToken(positional[1]);
       return {
@@ -333,7 +333,7 @@ export function parseArgs(argv: string[]): Command {
  */
 export interface DispatchDeps {
   cfg: ResolvedConfig;
-  host: HostBudget;
+  host: HostCeiling;
   isTTY: boolean;
   log: (msg: string) => void;
   /** Write a line to stderr — the operator-language failure a command surfaces without a
@@ -758,7 +758,7 @@ async function dispatchCampaign(cmd: Extract<Command, { kind: "campaign" }>, dep
     reporter.line("note: `campaign --resume` is now `redrive` — run `vetinari redrive` instead (this alias is kept for one release).");
     // Under --resume, --override re-runs a failed member instead of stopping as failed
     // again (design §7); the literal-waves meaning of --override below never applies here
-    // (resume takes no batch args and returns before reaching it).
+    // (resume takes no wave args and returns before reaching it).
     const outcome = await resumeUnlessLive(() =>
       deps.campaign(cfg, [], host, cmd.name, {
         autoPrune: cmd.autoPrune,
@@ -797,20 +797,20 @@ async function dispatchCampaign(cmd: Extract<Command, { kind: "campaign" }>, dep
   if (cmd.override) {
     // Each positional is one explicit wave (split on whitespace/commas); the planner
     // is skipped entirely. A label token inside a wave still expands, joining that wave.
-    const batches: string[][] = [];
+    const waves: string[][] = [];
     for (const group of cmd.positional) {
       const tokens = group.split(/[\s,]+/).filter(Boolean);
       const ids = await deps.expandSelection(tokens, cfg.listByLabel);
-      if (ids.length) batches.push(ids);
+      if (ids.length) waves.push(ids);
     }
-    if (!batches.length) throw new Refusal("campaign --override: no issues to run — every wave expanded to nothing.");
+    if (!waves.length) throw new Refusal("campaign --override: no issues to run — every wave expanded to nothing.");
     if (cmd.dryRun) {
       // --dry-run runs nothing, even with the planner skipped: print the literal waves.
-      deps.log(batches.map((w) => `"${w.join(" ")}"`).join(" "));
+      deps.log(waves.map((w) => `"${w.join(" ")}"`).join(" "));
       return;
     }
     deps.archiveLeftoverRun();
-    const outcome = await deps.campaign(cfg, batches, host, cmd.name, { autoPrune: cmd.autoPrune });
+    const outcome = await deps.campaign(cfg, waves, host, cmd.name, { autoPrune: cmd.autoPrune });
     deps.archiveIfIdle();
     deps.setExitCode(exitCodeFor(outcome));
     return;
@@ -890,7 +890,7 @@ async function dispatchCampaign(cmd: Extract<Command, { kind: "campaign" }>, dep
 
 /**
  * The prune command: prune `<issue>` + everything blocked by it from the RUNNING campaign
- * (the from-scratch reduced-launch batch form is retired — design §12). The orchestration
+ * (the from-scratch reduced-launch wave form is retired — design §12). The orchestration
  * lives in `runPrune`; this only parses (done in `parseArgs`) and renders.
  */
 async function dispatchPrune(cmd: Extract<Command, { kind: "prune" }>, deps: DispatchDeps): Promise<void> {

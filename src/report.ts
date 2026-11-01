@@ -7,7 +7,7 @@
  *
  * The formatters are pure `format*` functions over the wave/outcome data the campaign loop
  * already holds, so the wording is unit-testable without running a campaign. They speak the
- * one vocabulary (CONTEXT.md): waves (never batches), parked/failed/merged, and the recovery
+ * one vocabulary (CONTEXT.md): waves, parked/failed/merged, and the recovery
  * verbs `redrive`/`answer`/`prune` — never the retired `campaign --resume`.
  */
 import type { OrchestratorEvent } from "./event-log.ts";
@@ -30,9 +30,9 @@ const waves = (n: number): string => `${n} ${n === 1 ? "wave" : "waves"}`;
 const named = (name?: string): string => (name ? ` “${name}”` : "");
 
 /** The plan: the waves with their ids and titles, headed by the campaign name when set. */
-export function formatPlan(batches: string[][], titles: Record<string, string>, name?: string): string {
-  const header = `plan${named(name)} · ${waves(batches.length)}`;
-  const rows = batches.map((wave, i) => `  wave ${i + 1} — ${issueList(wave, titles)}`);
+export function formatPlan(plan: string[][], titles: Record<string, string>, name?: string): string {
+  const header = `plan${named(name)} · ${waves(plan.length)}`;
+  const rows = plan.map((wave, i) => `  wave ${i + 1} — ${issueList(wave, titles)}`);
   return [header, ...rows].join("\n");
 }
 
@@ -210,8 +210,8 @@ export function formatOutcomes(taskIds: string[], outcomes: Record<string, strin
 }
 
 /** The whole campaign finished cleanly: the wave count and the base it landed on. */
-export function formatComplete(batches: number, baseBranch: string, name?: string): string {
-  return `🏆 campaign${named(name)} complete · ${waves(batches)} onto ${baseBranch}`;
+export function formatComplete(waveCount: number, baseBranch: string, name?: string): string {
+  return `🏆 campaign${named(name)} complete · ${waves(waveCount)} onto ${baseBranch}`;
 }
 
 /** A redrive re-entering an unfinished campaign at `index`. */

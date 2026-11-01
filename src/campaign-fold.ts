@@ -167,7 +167,7 @@ export interface ReducedCampaign {
    * orchestrator (which has `fetchTask`) so the dumb-router dashboard renders
    * names with no live lookup (ADR 0002). Empty when a run recorded no titles. */
   titles: Map<string, string>;
-  /** issue id → ISO timestamp it most recently reached "completed" (a batch merge,
+  /** issue id → ISO timestamp it most recently reached "completed" (a wave merge,
    * a bare green, or a queue-done green). The source the landing's merged-today
    * counter reads: an issue whose stamp falls on the current day merged today. */
   mergedAt: Map<string, string>;
@@ -619,7 +619,7 @@ export function campaignRunning(events: OrchestratorEvent[]): boolean {
 
 /**
  * Has a campaign ever been launched over this log? True iff any `campaign-start`
- * with wave batches is present — the "is there a campaign to adjust at all?" guard
+ * with a non-empty `waves` plan is present — the "is there a campaign to adjust at all?" guard
  * prune and graft check before `campaignSettled`, so an empty (or campaign-less)
  * log refuses with "nothing to adjust" rather than proceeding into an empty plan.
  * Unlike `campaignRunning` it ignores `campaign-done`: a settled campaign has still

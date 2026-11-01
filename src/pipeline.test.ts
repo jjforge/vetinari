@@ -11,7 +11,7 @@ import { BLOCKED, DONE, childRunEntry, defaultLoopDeps, runLoop, type LoopDeps }
 import { campaign, graceWaitForAnswer, type CampaignDeps, type RunSpawner } from "./modes.ts";
 import { collectWaveChangelog, currentBranch, integrateGreens } from "./merge.ts";
 import { runGates } from "./gate.ts";
-import type { HostBudget } from "./host-slots.ts";
+import type { HostCeiling } from "./lease.ts";
 import { makeLocalSandbox, type LocalAgentScript } from "./sandbox-local.ts";
 import { gitOut, seedConflictRepo, seedRepo } from "./test-support.ts";
 
@@ -197,7 +197,7 @@ test("a campaign wave of two issues spans agent → gate → merge → advance t
   // README.md exists on the base and every branch, so the gate is green for each green
   // alone and on the merged base — the red-gate path is pinned separately above.
   const cfg = repoCfg(dir, { gates: [{ cmd: "test -f README.md" }] });
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 2, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 2, weight: 1 };
 
   const ok = await inRepo(dir, () => campaign(cfg, [["101", "102"]], host, "span", {}, localCampaignDeps(cfg, dir)));
 
@@ -283,7 +283,7 @@ test("a merge conflict quarantines the losing green (work preserved) while the w
     // #103's dependent sits in a later, unstarted wave, so quarantining it strands work.
     blockedBy: (id: string) => (id.replace(/^#/, "") === "103" ? ["102"] : []),
   });
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 2, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 2, weight: 1 };
 
   const ok = await inRepo(dir, () =>
     campaign(cfg, [["101", "102"], ["103"]], host, "conflict", {}, localCampaignDeps(cfg, dir, conflictScript)),
@@ -343,7 +343,7 @@ test("a merge conflict under --auto-prune quarantines the loser and prunes the s
     gates: [{ cmd: "test -f README.md" }],
     blockedBy: (id: string) => (id.replace(/^#/, "") === "103" ? ["102"] : []),
   });
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 2, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 2, weight: 1 };
 
   const ok = await inRepo(dir, () =>
     campaign(cfg, [["101", "102"], ["103"]], host, "conflict", { autoPrune: true }, localCampaignDeps(cfg, dir, conflictScript)),
@@ -405,7 +405,7 @@ test("a per-issue BLOCKED park drains its wave's greens, then wave-parks — the
   // README exists everywhere, so 201's green passes its own gate and the merged base
   // (carrying only 201) gates green — the wave-park here is the parked issue, not a red base.
   const cfg = repoCfg(dir, { gates: [{ cmd: "test -f README.md" }] });
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 2, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 2, weight: 1 };
 
   const ok = await inRepo(dir, () =>
     campaign(cfg, [["201", "202"], ["203"]], host, "park", {}, localCampaignDeps(cfg, dir, parkOneScript("202"))),
@@ -463,7 +463,7 @@ test("each green passes its own gate but the merged base fails the combined gate
   // The gate is green with at most one impl-*.txt present (true in each single-issue
   // worktree) and RED once the merged base carries both — each passes alone, together red.
   const cfg = repoCfg(dir, { gates: [{ cmd: 'test "$(ls impl-*.txt 2>/dev/null | wc -l)" -le 1' }] });
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 2, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 2, weight: 1 };
 
   const ok = await inRepo(dir, () => campaign(cfg, [["301", "302"]], host, "red-base", {}, localCampaignDeps(cfg, dir)));
 

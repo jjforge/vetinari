@@ -8,7 +8,7 @@ import type { Sandbox, SandboxRunOptions, SandboxRunResult } from "./sandbox.ts"
 import { loggerForRun } from "./log.ts";
 import { readEventLog } from "./event-log.ts";
 import { answerParked, hasParked, listOutbox, listParked, park } from "./state.ts";
-import { projectHasLiveCampaign, readLeases, type HostBudget } from "./host-slots.ts";
+import { projectHasLiveCampaign, readLeases, type HostCeiling } from "./lease.ts";
 import {
   BLOCKED,
   DONE,
@@ -1484,7 +1484,7 @@ const leaseObservingSandbox = (configDir: string, project: string) => {
 
 test("a standalone run holds one host slot around the container's life, but is not a live campaign (design §3 step 1, §8)", async () => {
   const configDir = mkdtempSync(join(tmpdir(), "vetinari-loop-slots-"));
-  const host: HostBudget = { configDir, ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir, ceiling: 4, weight: 1 };
   const cfg = harnessCfg({ project: "solo" });
   const { sbx, observed } = leaseObservingSandbox(configDir, "solo");
 
@@ -1500,7 +1500,7 @@ test("a standalone run holds one host slot around the container's life, but is n
 
 test("a campaign child run takes no host slot — its parent already holds one for it (design §8)", async () => {
   const configDir = mkdtempSync(join(tmpdir(), "vetinari-loop-slots-"));
-  const host: HostBudget = { configDir, ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir, ceiling: 4, weight: 1 };
   const cfg = harnessCfg({ project: "solo" });
   const { sbx, observed } = leaseObservingSandbox(configDir, "solo");
 
@@ -1731,7 +1731,7 @@ test("a standalone run signalled while waiting first-come for a slot parks `stop
   // A blocker lease held by pid 1 (always alive) fills the ceiling, so this run can never acquire.
   mkdirSync(join(configDir, "slots"), { recursive: true });
   writeFileSync(join(configDir, "slots", "1.json"), JSON.stringify({ project: "solo", weight: 1, held: 1, want: 1, pid: 1, kind: "run" }));
-  const host: HostBudget = { configDir, ceiling: 1, weight: 1 };
+  const host: HostCeiling = { configDir, ceiling: 1, weight: 1 };
   const cfg = harnessCfg({ project: "solo" });
   const control = makeStopControl();
   let madeSandbox = false;

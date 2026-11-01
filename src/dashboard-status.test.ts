@@ -620,7 +620,7 @@ test("buildStatus marks completed waves as closed", () => {
   const status = buildStatus(cfgFor(dir));
 
   // The wave status is now a pure fold of its members' lifecycles (ADR 0019): wave 0's
-  // single merged issue → `closed`. Wave 1's batch was announced but no member has spawned
+  // single merged issue → `closed`. Wave 1 was announced but no member has spawned
   // (no queue-start), so it folds to `unstarted` — a wave is `running` only once a member is.
   assert.deepEqual(
     status.waves.map((w) => [w.index, w.status]),
@@ -711,7 +711,7 @@ test("buildStatus folds a red-base wave-park to a parked wave whose completed me
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
   // Both greens merged, but the combined base gated red: the wave wave-parks with no
-  // batch-done to close it (ADR 0013). Red-base is the wave's reason (design §2.3), not a
+  // wave-done to close it (ADR 0013). Red-base is the wave's reason (design §2.3), not a
   // rewrite of its members — so the members stay `completed` and the wave folds to `parked`
   // carrying reason `red-base`; wave 1 (unstarted) still reads as itself.
   const events = [
@@ -757,7 +757,7 @@ test("buildStatus renders a merge-conflict-quarantined issue as parked with reas
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
   // 640 passed its own gate (green) but hit a merge conflict on integration and was
-  // quarantined; 611 merged clean. The batch closes with 640 held out of `merged`.
+  // quarantined; 611 merged clean. The wave closes with 640 held out of `merged`.
   writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
     event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["611", "640"]], slots: 1 }),
     event("wave-start", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["611", "640"] }),
@@ -786,7 +786,7 @@ test("buildStatus clears the quarantine once the issue merges on resume", () => 
   const dir = join(tmpdir(), `vetinari-status-quarantine-cleared-${Date.now()}`);
   mkdirSync(join(dir, "logs"), { recursive: true });
   mkdirSync(join(dir, "parked"), { recursive: true });
-  // 640 was quarantined, then a resumed batch merged it clean: it reads completed, not quarantined.
+  // 640 was quarantined, then a resumed wave merged it clean: it reads completed, not quarantined.
   writeJsonl(join(dir, "logs", "orchestrator.jsonl"), [
     event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["640"]], slots: 1 }),
     event("wave-start", { ts: "2025-01-01T00:01:00.000Z", index: 0, tasks: ["640"] }),

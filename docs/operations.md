@@ -405,10 +405,19 @@ reminder, and under the gateway it lands in its stdout (the systemd journal), no
 
 ### What the server refuses
 
-Even on loopback, a page open in your browser could otherwise reach the dashboard.
-Every request passes two checks before any route runs; either failure is a `403`
+Even on loopback, a page open in your browser could otherwise reach the dashboard,
+and an agent container on the same host could reach it whatever the bind.
+Every request passes three checks before any route runs; any failure is a `403`
 with a one-line plain-text reason:
 
+- **Docker peer.** A request from inside a subnet of the Docker network agent
+  containers run on — the default `bridge` — is refused, first, on every route,
+  whatever its `Host` or `Origin`. An agent is a script that can forge those
+  headers, but not the address it connects from. The subnets are read from
+  `docker network inspect bridge` before the dashboard starts listening and
+  re-read about every minute. A reverse proxy or sidecar on its own Docker network
+  is not refused. If Docker cannot be listed (no `docker`, daemon down), nothing is
+  refused by this check and the dashboard keeps working.
 - **Host.** The `Host` header, port ignored, must be an IP address literal
   (`127.0.0.1`, `[::1]`, `100.64.1.2`), `localhost`, or a name listed in
   **`VETINARI_STATUS_ALLOWED_HOSTS`** — comma-separated, case-insensitive, read by
@@ -424,11 +433,28 @@ Every `POST` to the dashboard — refused, rejected or run — is recorded in
 string), the status it was sent, and the remote address, so `vetinari host log`
 shows who replied, pruned, grafted, redrove or stopped, and what they got back.
 
+A request the Docker-peer check refuses — any method — also writes one
+`dashboard-docker-peer-refused` row with its method, path (no query string) and
+remote address; a refused `POST` writes its `dashboard-request` row (status `403`)
+as well. When `docker network inspect` fails or times out, one
+`dashboard-docker-peers-unavailable` warning row is written, once per failure
+streak rather than per re-read. Seeing it means agent containers are not being
+refused: check Docker on the host.
+
 ### Over a tailnet
 
-Bind the dashboard to the host's tailnet IP. Every vetinari host runs Docker for
-its agent containers, so do not bind `0.0.0.0`: it also binds the Docker bridge
-(`docker0`), and every agent container on the host could reach the dashboard.
+Bind the dashboard to the host's tailnet IP, so it listens only where your
+tailnet devices reach it.
+
+The bind is **not** what keeps agent containers out. On Linux, a packet for any
+of the host's own addresses is accepted whichever interface it arrives on, so on
+a host with no firewall a container can probably reach the tailnet IP too. What
+keeps them out is the dashboard's Docker-peer check (see
+[What the server refuses](#what-the-server-refuses)), with a host firewall that
+denies incoming traffic (`ufw` with deny-incoming, say) as a second layer.
+Whether Docker Desktop, whose containers reach the host by a different route, is
+covered is still an open question; on Docker Desktop, do not rely on the check
+alone.
 
 ```bash
 vetinari status --host 100.x.y.z

@@ -112,11 +112,16 @@ export interface AppliedPrune {
  * unstarted members are kept, not dropped: the loop runs that wave as-is, so they will
  * run anyway, and emptying it would shift the plan under the loop's wave index. Its
  * parked members still drop.
+ *
+ * `opts.dropTarget` names a manual prune's target (ADR 0005): when that target is
+ * conflict-parked (`campaign.conflictParked`) — a pending green held off the base by a merge
+ * conflict — it is dropped like a parked member and its record cleared. Only the target: a
+ * conflict-parked dependent in the closure is kept. Auto-prune never passes it (ADR 0013).
  */
 export function applyPrune(
-  campaign: { waves: string[][]; outcomes: Map<string, string> },
+  campaign: { waves: string[][]; outcomes: Map<string, string>; conflictParked?: ReadonlySet<string> },
   removed: string[],
-  opts: { keepInFlight?: number } = {},
+  opts: { keepInFlight?: number; dropTarget?: string } = {},
 ): AppliedPrune {
   const dropped: string[] = [];
   const parkedToClear: string[] = [];
@@ -126,8 +131,14 @@ export function applyPrune(
   // in the campaign, so it must never default to `unstarted` and be reported as
   // dropped — that would manufacture a drop for a non-member (a lying confirmation).
   const inPlan = new Set(campaign.waves.flat().map(normalize));
+  const dropTarget = opts.dropTarget === undefined ? undefined : normalize(opts.dropTarget);
   for (const id of removed.map(normalize)) {
     if (!inPlan.has(id)) continue;
+    if (id === dropTarget && campaign.conflictParked?.has(id)) {
+      dropped.push(id);
+      parkedToClear.push(id);
+      continue;
+    }
     const status = campaign.outcomes.get(id) ?? "unstarted";
     if (status === "unstarted" && inFlight.has(id)) keptInFlight.push(id);
     else if (status === "unstarted" || status === "parked") {
@@ -430,11 +441,13 @@ export async function runPrune(
   // A live campaign's in-flight wave finishes as-is (ADR 0005): its unstarted members run
   // anyway, so they are kept, and the event is marked so the fold replays the same rule.
   const keepInFlight = opts.liveCampaign === true && reduced.inFlightWave >= 0;
-  const applied = applyPrune(reduced, removed, { keepInFlight: keepInFlight ? reduced.inFlightWave : -1 });
+  // A manual prune drops its own target even when it is conflict-parked (ADR 0005), and marks the
+  // event `dropTarget` so the fold replays it — an auto-prune's unmarked event never does.
+  const applied = applyPrune(reduced, removed, { keepInFlight: keepInFlight ? reduced.inFlightWave : -1, dropTarget: tgt });
   const { remaining, dropped, parkedToClear, keptInFlight } = applied;
   const kept = removed.filter((id) => !dropped.includes(id) && !keptInFlight.includes(id));
   const inFlightWave = keptInFlight.length ? reduced.inFlightWave : undefined;
-  const parkedDropped = dropped.filter((id) => reduced.outcomes.get(id) === "parked");
+  const parkedDropped = parkedToClear;
 
   // `--purge` is the rare true-drop of the dropped members' branches + worktrees
   // (ADR 0013). Disclose what it destroys per member — branch, unmerged commit count,
@@ -486,7 +499,7 @@ export async function runPrune(
   if (purgeTarget) deps.purgeBranches(purgeTarget, dropped);
   // Append the prune event — the running loop re-reads it at the next wave
   // boundary; `removed` is the closure so the fold replays the same rule.
-  cfg.log.log("prune", { target: tgt, removed, dropped, ...(keepInFlight ? { keepInFlight: true } : {}) });
+  cfg.log.log("prune", { target: tgt, removed, dropped, ...(keepInFlight ? { keepInFlight: true } : {}), dropTarget: true });
   deps.enqueueOutbound(cfg, pruneRunningNotice(cfg.project, tgt, dropped, kept, remaining, keptInFlight, inFlightWave));
   return {
     mode: "prune",

@@ -894,3 +894,38 @@ test("runPrune --dry-run on an explicit plan previews but launches nothing", asy
   assert.deepEqual(launched, []);
   assert.equal(listOutbox(cfg).length, 0);
 });
+
+// --- a manual prune of a conflict-parked target (#559) ---
+// X went green, then its merge conflicted: the reducer reads it a pending green held by the
+// `conflictParked` overlay, and a conflict park writes a parked record for it.
+const conflictParkedCfg = (overrides: Partial<ResolvedConfig> = {}) => {
+  const cfg = harnessCfg(overrides);
+  cfg.parkedDir = join(cfg.stateDir, "parked");
+  cfg.log.log("campaign-start", { waves: [["101", "701"]], slots: 4 });
+  cfg.log.log("wave-start", { index: 0, tasks: ["101", "701"] });
+  cfg.log.log("merged", { taskId: "101" });
+  cfg.log.log("green", { taskId: "701", branch: "agent/701", commits: ["c1"] });
+  cfg.log.log("parked", { taskId: "701", reason: "conflict" });
+  cfg.log.log("campaign-parked", { index: 0, reason: "conflict" });
+  writeParkedRecord(cfg, { taskId: "701", reason: "conflict", branch: "agent/701", question: "merge conflict" });
+  return cfg;
+};
+
+test("a manual prune drops its conflict-parked target, clears its record, and marks the event (#559)", async () => {
+  const cfg = conflictParkedCfg();
+
+  const result = await runPrune(cfg, "701");
+
+  assert.equal(result.mode, "prune");
+  assert.deepEqual(result.mode === "prune" && result.dropped, ["701"]);
+  assert.deepEqual(result.mode === "prune" && result.parkedDropped, ["701"]);
+  assert.equal(hasParked(cfg, "701"), false, "the conflict park's record is cleared as it leaves");
+  assert.equal(pruneEvent(cfg)?.dropTarget, true);
+
+  const reduced = reduceCampaign(readEventLog(cfg));
+  assert.ok(reduced.pruned.has("701"));
+  assert.deepEqual(reduced.waves, [["101"]]);
+  assert.equal(reduced.conflictParked.has("701"), false);
+  assert.equal(reduced.pendingGreen.has("701"), false);
+  assert.equal(reduced.outcomes.has("701"), false, "it reads like a pruned member that never started");
+});

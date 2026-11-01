@@ -182,6 +182,10 @@ export interface PruneEvent extends BaseEvent {
   /** set when the prune was issued against a live campaign's in-flight wave: the fold keeps that
    * wave's unstarted members (they run anyway, the wave finishes as-is), as the prune did. */
   keepInFlight?: boolean;
+  /** set on a manual `prune <issue>`: its target is dropped even when conflict-parked (a pending
+   * green), clearing its record (ADR 0005). Absent on every auto-prune and on older logs, whose
+   * conflict-parked target is kept and still holds its wave (ADR 0013). */
+  dropTarget?: boolean;
 }
 
 /** `graft` — issues were added to a running (or resumable) campaign: the added ids and the

@@ -422,10 +422,20 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       // in the wave they left, while `waves` stays the pruned loop-facing plan.
       // A prune issued against a live in-flight wave carries `keepInFlight`, so it kept that
       // wave's unstarted members (#651); replay it the same way, off the in-flight wave here.
-      const applied = applyPrune({ waves, outcomes }, e.removed.map(String), {
+      // A manual prune carries `dropTarget`: its conflict-parked target leaves too (ADR 0005). An
+      // auto-prune's or older log's unmarked event keeps it, still holding its wave (ADR 0013).
+      const applied = applyPrune({ waves, outcomes, conflictParked }, e.removed.map(String), {
         keepInFlight: e.keepInFlight === true ? inFlightWave() : -1,
+        dropTarget: e.dropTarget === true ? String(e.target) : undefined,
       });
       for (const id of applied.dropped) {
+        // A dropped conflict-parked target reads as a pruned member that never started: its pending
+        // green is gone, so a redrive neither re-integrates nor crash-folds it, and its conflict no
+        // longer holds the wave.
+        if (conflictParked.delete(id)) {
+          pendingGreen.delete(id);
+          outcomes.delete(id);
+        }
         pruned.add(id);
         answered.delete(id);
         // A pruned member is out of the plan; if it is grafted back, its new wave has had no

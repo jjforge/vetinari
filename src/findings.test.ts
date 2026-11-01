@@ -3,7 +3,17 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { findingKey, findingSimilarity, parseFindings, reportFindings, scrubFinding, triageFindings, type Finding } from "./findings.ts";
+import {
+  bestFindingMatch,
+  FINDING_MATCH_THRESHOLD,
+  findingKey,
+  findingSimilarity,
+  parseFindings,
+  reportFindings,
+  scrubFinding,
+  triageFindings,
+  type Finding,
+} from "./findings.ts";
 
 test("parseFindings extracts each finding block with its sub-fields", () => {
   const stdout = `working... here is what I noticed.
@@ -116,9 +126,22 @@ test("findingSimilarity scores two rewordings of one finding as a match, and unr
   const b = "make fmt fails: gofumpt sumdb verification error in container";
   // {make fmt agent container gofumpt sumdb check} vs {make fmt gofumpt sumdb verification error container}: 5 shared of 9.
   assert.equal(findingSimilarity(a, b), 5 / 9);
-  assert.ok(findingSimilarity(a, "README links to a removed flag") < 0.5);
+  assert.ok(findingSimilarity(a, "README links to a removed flag") < FINDING_MATCH_THRESHOLD);
   assert.equal(findingSimilarity(a, a), 1);
   assert.equal(findingSimilarity(`[unverified: idle] ${a}`, a), 1, "the unverified mark is not part of the finding");
+});
+
+test("bestFindingMatch matches a rewording scoring between 0.35 and 0.5", () => {
+  // Real filings of one defect, worded by two agents.
+  const title = "The gateway poll loop's error row writes the full bot token into the host log";
+  const candidate =
+    "The full Telegram bot token is written to the host log on a poll-loop error, and the unauthenticated dashboard serves that log as-is";
+  const score = findingSimilarity(title, candidate);
+  assert.ok(score >= 0.35 && score < 0.5, `scored ${score}`);
+  assert.equal(
+    bestFindingMatch(title, [candidate], (c) => c),
+    candidate,
+  );
 });
 
 test("triageFindings resolves with every finding's result when only the digest comment throws, handing the error to digestFailed", async () => {
@@ -153,6 +176,38 @@ test("triageFindings resolves with every finding's result when only the digest c
     ],
   );
   assert.deepEqual(failures, [{ error: "gh: comment rejected", digested: ["stale doc line"] }]);
+});
+
+test("triageFindings' 'seen again' comment quotes the finding, with its location backticked after a dash when it has one", async () => {
+  const comments: string[] = [];
+  const findings: Finding[] = [
+    { summary: "make fmt fails: gofumpt sumdb", location: "vendor/forgejo/Makefile", severity: "P1" },
+    { summary: "make lint fails: golangci timeout", severity: "P1" },
+  ];
+
+  await triageFindings(
+    findings,
+    { taskId: "T-7", project: "vetinari" },
+    {
+      reporter: () => assert.fail("a seen-again finding is not filed"),
+      postComment: (_ref, body) => void comments.push(body),
+      filedSoFar: () =>
+        new Map([
+          [findingKey("make fmt fails: gofumpt sumdb"), "https://example/issues/1"],
+          [findingKey("make lint fails: golangci timeout"), "https://example/issues/2"],
+        ]),
+      record: () => {},
+      digestFailed: () => {},
+      maxPerRun: 5,
+      severityFloor: "P2",
+      lockFile: join(mkdtempSync(join(tmpdir(), "vetinari-triage-")), "findings.lock"),
+    },
+  );
+
+  assert.deepEqual(comments, [
+    "Seen again while working on #T-7: make fmt fails: gofumpt sumdb — `vendor/forgejo/Makefile`",
+    "Seen again while working on #T-7: make lint fails: golangci timeout",
+  ]);
 });
 
 test("scrubFinding redacts a known secret's exact value in every text field, by its env key, and counts it", () => {

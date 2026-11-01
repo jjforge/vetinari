@@ -23,7 +23,7 @@ import {
   runLoop,
   type LoopDeps,
 } from "./loop.ts";
-import { HARVEST_PROMPT, type Finding, type FindingContext } from "./findings.ts";
+import { HARVEST_PROMPT, parseFindings, type Finding, type FindingContext } from "./findings.ts";
 import { Refusal } from "./refusal.ts";
 import { githubFindOpenIssue } from "./github.ts";
 import { withEnv } from "./test-support.ts";
@@ -1121,12 +1121,9 @@ test("three parallel runs harvesting the same finding — reworded or not — fi
   const tr = fakeTracker();
   const cfg = harnessCfg(tr);
 
+  const harvests = [ENV_FAILURE, ENV_FAILURE_REWORDED, ENV_FAILURE];
   await silence(() =>
-    Promise.all(
-      [ENV_FAILURE, ENV_FAILURE_REWORDED, ENV_FAILURE].map((harvest, i) =>
-        runLoop(cfg, `T-${i + 1}`, undefined, undefined, depsFor(greenThen(harvest))),
-      ),
-    ),
+    Promise.all(harvests.map((harvest, i) => runLoop(cfg, `T-${i + 1}`, undefined, undefined, depsFor(greenThen(harvest))))),
   );
 
   assert.equal(tr.filed.length, 1, "one issue for one environment failure");
@@ -1134,6 +1131,10 @@ test("three parallel runs harvesting the same finding — reworded or not — fi
   for (const c of tr.comments) {
     assert.equal(c.ref, "https://example/issues/101");
     assert.match(c.body, /seen again/i);
+    // Which run files first is not fixed, so find the commenting run by the task it names.
+    const run = Number(/#T-(\d+)\b/.exec(c.body)?.[1]) - 1;
+    assert.ok(harvests[run], `the comment names its run: ${c.body}`);
+    assert.ok(c.body.includes(parseFindings(harvests[run])[0].summary), `the comment quotes its own run's finding: ${c.body}`);
   }
   assert.equal(readEventLog(cfg).filter((e) => (e as { event: string }).event === "finding-seen-again").length, 2);
 });

@@ -1,8 +1,13 @@
-// Shared home for test fixtures, built up in stages: the git seeders and the env-restoring `withEnv`.
+// Shared home for test fixtures, built up in stages: the git seeders, the env-restoring `withEnv`,
+// and the dashboard route-test fixtures.
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
+import { register } from "./registry.ts";
+import type { ChildResult } from "./dashboard-child.ts";
+import type { DashboardDeps } from "./dashboard-http.ts";
 
 /** A fresh repo on `base` whose seed commits `README.md` + a `CHANGELOG.md`. */
 export function seedRepo(): string {
@@ -58,3 +63,74 @@ export function withEnv<T>(over: Record<string, string | undefined>, fn: () => T
   apply(prev);
   return result;
 }
+
+/**
+ * A POST request to `url` whose body is the given form-encoded string — a readable stream so
+ * `readBody` can drain it, carrying the method and pathname a route handler matches on.
+ */
+export const postReq = (url: string, body: string) => Object.assign(Readable.from([body]), { method: "POST", url, headers: {} });
+
+/** A response spy capturing the status line, headers, every streamed chunk, and the body it ends with. */
+export const resSpy = () => {
+  const chunks: string[] = [];
+  const res = {
+    writableEnded: false,
+    chunks,
+    statusCode: undefined as number | undefined,
+    headers: undefined as Record<string, string> | undefined,
+    body: undefined as string | undefined,
+    writeHead(statusCode: number, headers?: Record<string, string>) {
+      res.statusCode = statusCode;
+      res.headers = headers;
+      return res;
+    },
+    write(chunk: string) {
+      chunks.push(chunk);
+      return true;
+    },
+    end(body?: string) {
+      res.body = body;
+      res.writableEnded = true;
+    },
+  };
+  return res;
+};
+
+/**
+ * A fresh config dir with one registered project, `beta`, rooted at `<configDir>/root` with its
+ * state at `<configDir>/base` — a route only needs the pointer to reach the project (ADR 0002).
+ */
+export const seedProject = () => {
+  const configDir = mkdtempSync(join(tmpdir(), "vetinari-test-route-"));
+  const project = "beta";
+  const projectRoot = join(configDir, "root");
+  register(configDir, { project, projectRoot, baseLocation: join(configDir, "base") });
+  return { configDir, project, projectRoot };
+};
+
+/**
+ * Deps for a route that shells a CLI child: `runChild` returns the canned `outcome` and records
+ * how it was called. `graftClosure` counts its calls, so a test can assert no dry-run was spawned.
+ */
+export const childDeps = (configDir: string, outcome: ChildResult) => {
+  const calls: { projectRoot: string; args: string[]; timeoutMs: number }[] = [];
+  let graftClosureCalls = 0;
+  const deps: DashboardDeps = {
+    configDir,
+    prunePreview: async () => null,
+    pruneClosure: async () => null,
+    graftClosure: async () => (graftClosureCalls++, null),
+    runChild: async (projectRoot, args, opts) => {
+      calls.push({ projectRoot, args, timeoutMs: opts.timeoutMs });
+      return outcome;
+    },
+    graftTimeoutMs: 60_000,
+  };
+  return {
+    deps,
+    calls,
+    get graftClosureCalls() {
+      return graftClosureCalls;
+    },
+  };
+};

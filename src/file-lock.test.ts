@@ -49,6 +49,27 @@ test("release leaves alone a lock that another holder now owns — after fn retu
   assert.equal(readFileSync(lock2, "utf8"), other);
 });
 
+test("async release leaves alone a lock that another holder now owns — after fn resolves and after it rejects", async () => {
+  const other = "99999:someone-else";
+  const lock = freshLock();
+  await withFileLockAsync(lock, async () => writeFileSync(lock, other), opts);
+  assert.equal(readFileSync(lock, "utf8"), other);
+
+  const lock2 = freshLock();
+  await assert.rejects(
+    withFileLockAsync(
+      lock2,
+      async () => {
+        writeFileSync(lock2, other);
+        throw new Error("boom");
+      },
+      opts,
+    ),
+    /boom/,
+  );
+  assert.equal(readFileSync(lock2, "utf8"), other);
+});
+
 const DEAD = 424242;
 const LIVE = 434343;
 const isAlive = (pid: number) => pid === LIVE;

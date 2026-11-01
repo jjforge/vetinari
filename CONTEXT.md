@@ -124,11 +124,13 @@ _Avoid_: quarantined, interrupted (those were reasons masquerading as statuses).
 
 **Answerable park**:
 A [[parked]] hold a human resolves by answering it: `question` and `stalled`.
-The answer resumes the same session.
+The answer resumes the issue: in its same session where the agent keeps one,
+otherwise in a fresh run that carries the answer.
 
 **Redrive-only park**:
 A [[parked]] hold an answer cannot resolve: `conflict`, `red-base`, `crash`,
-`stopped` and `outdated-agent`. The human fixes the cause, then [[redrive]].
+`stopped` and `outdated-agent`. The human fixes the cause, then [[redrive]] (a
+standalone `stopped` or `outdated-agent` run continues with `vetinari run <id>`).
 _Avoid_: unanswerable.
 
 **question**:

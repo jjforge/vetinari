@@ -44,7 +44,17 @@ import {
   type WaveStartEvent,
 } from "./event-log.ts";
 import { archiveRun, shouldArchiveLeftover } from "./archive.ts";
-import { projectHasLiveCampaign, readLeases, type HostBudget, type SlotLease } from "./host-slots.ts";
+import {
+  acquireSlot,
+  deregisterProject,
+  projectHasLiveCampaign,
+  readLeases,
+  registerProject,
+  releaseSlot,
+  type HostBudget,
+  type SlotLease,
+} from "./host-slots.ts";
+import { defaultPruneDeps, runPrune } from "./prune.ts";
 import { withEnv } from "./test-support.ts";
 
 const cfgWith = (fetchTask: ResolvedConfig["fetchTask"]): ResolvedConfig => ({ fetchTask }) as ResolvedConfig;
@@ -3015,4 +3025,54 @@ test("a wave with a failed member still ends campaign-failed beside an `outdated
   const events = readEventLog(cfg);
   assert.ok(events.some((e) => e.event === "campaign-failed"));
   assert.ok(!events.some((e) => e.event === "campaign-parked"));
+});
+
+test("a live prune that would empty a slot-starved in-flight wave keeps its members, so the next wave still runs (#651)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-prune-starved-"));
+  // 102 is blocked by 101, so pruning 101 closes over the whole in-flight wave [101, 102].
+  const cfg = { ...harnessCfg(dir), blockedBy: async (id: string) => (id === "102" ? ["101"] : []) } as ResolvedConfig;
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 1, weight: 1 };
+  // Another project's live campaign holds the host's only slot, so wave 1 opens with every member unstarted.
+  const other = { pid: process.ppid };
+  registerProject(host.configDir, "other", 1, "campaign", 1, other);
+  assert.ok(acquireSlot(host.configDir, 1, "other", 1, other));
+
+  const spawned: string[] = [];
+  const spawnRun: CampaignDeps["spawnRun"] = async (id) => {
+    spawned.push(id);
+    return 0;
+  };
+  const run = silenceConsole(() => campaign(cfg, [["101", "102"], ["103"]], host, "starved", {}, gitFreeDeps(cfg, spawnRun)));
+
+  while (!readEventLog(cfg).some((e) => e.event === "wave-start")) await new Promise((r) => setTimeout(r, 10));
+  const pruned = await runPrune(cfg, "101", { liveCampaign: true }, { ...defaultPruneDeps, repoOf: () => undefined });
+  releaseSlot(host.configDir, other);
+  deregisterProject(host.configDir, other);
+
+  assert.equal(await run, "done");
+  assert.equal(pruned.mode, "prune");
+  assert.deepEqual(spawned.sort(), ["101", "102", "103"], "the wave after the in-flight one still runs");
+  const done = readEventLog(cfg).find((e): e is CampaignDoneEvent => e.event === "campaign-done");
+  assert.equal(done?.waves, 2, "campaign-done covers both waves");
+});
+
+test("a prune of a crashed campaign's in-flight wave (no live flag) drops its unstarted members, and a resume runs the next wave (#651)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-prune-crashed-"));
+  const cfg = { ...harnessCfg(dir), blockedBy: async (id: string) => (id === "102" ? ["101"] : []) } as ResolvedConfig;
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 1, weight: 1 };
+  // The campaign opened wave 1 and died before spawning anything.
+  cfg.log.log("campaign-start", { waves: [["101", "102"], ["103"]], slots: 1 });
+  cfg.log.log("wave-start", { index: 0, tasks: ["101", "102"] });
+
+  const pruned = await runPrune(cfg, "101", {}, { ...defaultPruneDeps, repoOf: () => undefined });
+  assert.deepEqual(pruned.mode === "prune" && pruned.dropped, ["101", "102"]);
+  assert.equal((readEventLog(cfg).find((e) => e.event === "prune") as { keepInFlight?: boolean }).keepInFlight, undefined);
+
+  const spawned: string[] = [];
+  const spawnRun: CampaignDeps["spawnRun"] = async (id) => {
+    spawned.push(id);
+    return 0;
+  };
+  assert.equal(await silenceConsole(() => campaign(cfg, [], host, undefined, { resume: true }, gitFreeDeps(cfg, spawnRun))), "done");
+  assert.deepEqual(spawned, ["103"]);
 });

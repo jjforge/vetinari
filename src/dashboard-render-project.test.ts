@@ -970,6 +970,9 @@ test("renderStatusPage's prune panel discloses kept-banked work and carries a st
   // mergeable) work that is kept — so a confirm never implies banked work leaves.
   assert.match(html, /also drops/);
   assert.match(html, /Keeps banked \(merged or mergeable\)/);
+  // A live in-flight wave's kept members are named apart, as still running — never banked (#651).
+  assert.match(html, /keptInFlight/);
+  assert.match(html, /Still running in the current wave/);
   // A standalone Prune (no Redrive beside it) carries a plain-words explainer of
   // what a prune does, keyed to show only when the issue is prunable and unparked.
   assert.match(html, /id="prune-explainer"/);

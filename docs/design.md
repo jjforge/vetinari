@@ -86,7 +86,7 @@ The event vocabulary after consolidation (§13.2) is small and uses the user's w
 | `campaign-parked` | `index?`, `reason?` (`red-base`, `question`, `stalled`, `conflict`, `stopped`, `outdated-agent` — the wave's reason, written by the code that stopped; `stopped` is an operator stop, §5; `outdated-agent` outranks every other member reason), `detail?` | campaign — a stop marker |
 | `campaign-failed` | `index?`, `detail?` | campaign — the other stop marker |
 | `campaign-done` | `waves`, `name?` | campaign |
-| `prune` | `target`, `removed`, `dropped` | the `prune` command; the campaign under `--auto-prune` |
+| `prune` | `target`, `removed`, `dropped`, `keepInFlight?` (set when issued against a live campaign's in-flight wave, whose not-yet-started members it kept) | the `prune` command; the campaign under `--auto-prune` |
 | `graft` | `ids`, `blockedBy`, `fileKeys`, `titles?` | graft |
 | `replan` | `waves` (the new waves for the unstarted remainder — the result, not the inputs), `was?` (how many unstarted waves it replaced, for narration) | replan (§5) |
 | `redrive` | `fromWave`, `landed?`, `skipped?` | campaign |

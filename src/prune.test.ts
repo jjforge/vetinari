@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import { loggerForRun } from "./log.ts";
-import { event, readEventLog } from "./event-log.ts";
+import { event, readEventLog, type PruneEvent } from "./event-log.ts";
 import { reduceCampaign } from "./dashboard-model.ts";
-import { listOutbox } from "./state.ts";
+import { hasParked, listOutbox, writeParkedRecord } from "./state.ts";
 import {
   applyPrune,
   pruneClosure,
@@ -165,6 +165,7 @@ test("pruneClosure names the target, dropped dependents, kept-banked work, and r
     target: "640",
     dropped: ["701"],
     keptBanked: ["640"],
+    keptInFlight: [],
     remaining: [["611", "640"]],
   });
 });
@@ -178,6 +179,7 @@ test("pruneClosure normalizes a leading # target and keeps closure order for kep
     target: "640",
     dropped: ["640", "701", "712"],
     keptBanked: [],
+    keptInFlight: [],
     remaining: [],
   });
 });
@@ -445,6 +447,7 @@ test("runPrune --dry-run previews the prune but appends no event and enqueues no
     target: "640",
     dropped: ["640"],
     keptBanked: [],
+    keptInFlight: [],
     remaining: [["101"]],
   });
   // Nothing was written: no prune event on the log, no outbound record.
@@ -530,6 +533,113 @@ test("runPrune drops an answered park like an unanswered one, clearing its recor
   assert.deepEqual(result.mode === "prune" && result.dropped, ["701"]);
   assert.deepEqual(result.mode === "prune" && result.parkedDropped, ["701"]);
   assert.deepEqual(cleared, [["701"]]);
+});
+
+// --- a live prune of an in-flight wave (#651) ---
+// 102 is blocked by 101, so pruning 101 closes over the whole slot-starved wave [101, 102].
+const inFlightCfg = () => harnessCfg({ blockedBy: async (id) => (String(id) === "102" ? ["101"] : []) });
+const pruneEvent = (cfg: ResolvedConfig) => readEventLog(cfg).find((e) => e.event === "prune") as PruneEvent | undefined;
+
+test("a live prune keeps the in-flight wave's unstarted members, reports them still running, and marks its event (#651)", async () => {
+  const cfg = inFlightCfg();
+  launch(cfg, [["101", "102"], ["103"]]);
+
+  const result = await runPrune(cfg, "101", { liveCampaign: true }, depsWithRepo(undefined));
+
+  assert.equal(result.mode, "prune");
+  if (result.mode !== "prune") return;
+  assert.deepEqual(result.dropped, []);
+  assert.deepEqual(result.keptInFlight, ["101", "102"]);
+  assert.deepEqual(result.kept, [], "still-running members are not banked");
+  assert.deepEqual(result.remaining, [["101", "102"], ["103"]]);
+  assert.equal(pruneEvent(cfg)?.keepInFlight, true);
+  assert.deepEqual(reduceCampaign(readEventLog(cfg)).waves, [["101", "102"], ["103"]]);
+  const [note] = listOutbox(cfg);
+  assert.match(note.text, /nothing to drop \(still running in wave 1: #101, #102\)/);
+  assert.doesNotMatch(note.text, /banked/);
+});
+
+test("a live prune still drops the in-flight wave's parked members and clears their records (#651)", async () => {
+  const cfg = inFlightCfg();
+  cfg.parkedDir = join(cfg.stateDir, "parked");
+  launch(cfg, [["101", "102"], ["103"]]);
+  cfg.log.log("spawn", { taskId: "102", running: 1, left: 1 });
+  cfg.log.log("parked", { taskId: "102", reason: "question" });
+  writeParkedRecord(cfg, { taskId: "102", reason: "question", branch: "agent/102", question: "which way?" });
+
+  const result = await runPrune(cfg, "101", { liveCampaign: true }, depsWithRepo(undefined));
+
+  assert.equal(result.mode, "prune");
+  if (result.mode !== "prune") return;
+  assert.deepEqual(result.dropped, ["102"]);
+  assert.deepEqual(result.keptInFlight, ["101"]);
+  assert.equal(hasParked(cfg, "102"), false, "the parked member's record is cleared as it leaves");
+});
+
+test("a prune without the live flag drops the in-flight wave's unstarted members as before, unmarked (#651)", async () => {
+  const cfg = inFlightCfg();
+  launch(cfg, [["101", "102"], ["103"]]);
+
+  const result = await runPrune(cfg, "101", {}, depsWithRepo(undefined));
+
+  assert.equal(result.mode, "prune");
+  if (result.mode !== "prune") return;
+  assert.deepEqual(result.dropped, ["101", "102"]);
+  assert.deepEqual(result.keptInFlight, []);
+  assert.equal(pruneEvent(cfg)?.keepInFlight, undefined);
+});
+
+test("a live prune of a parked campaign's wave drops its unstarted members — a parked wave is not in flight (#651)", async () => {
+  const cfg = inFlightCfg();
+  launch(cfg, [["101", "102"], ["103"]]);
+  cfg.log.log("campaign-parked", { index: 0, reason: "stopped" });
+
+  const result = await runPrune(cfg, "101", { liveCampaign: true }, depsWithRepo(undefined));
+
+  assert.equal(result.mode, "prune");
+  if (result.mode !== "prune") return;
+  assert.deepEqual(result.dropped, ["101", "102"]);
+  assert.deepEqual(result.keptInFlight, []);
+  assert.equal(pruneEvent(cfg)?.keepInFlight, undefined);
+});
+
+test("a live prune keeps the members of a parked wave a redrive re-entered — it is in flight again (#651)", async () => {
+  const cfg = inFlightCfg();
+  cfg.log.log("campaign-start", { waves: [["100"], ["101", "102"], ["103"]], slots: 1 });
+  cfg.log.log("wave-start", { index: 0, tasks: ["100"] });
+  cfg.log.log("wave-done", { index: 0, merged: ["100"] });
+  cfg.log.log("wave-start", { index: 1, tasks: ["101", "102"] });
+  cfg.log.log("campaign-parked", { index: 1, reason: "stopped" });
+  cfg.log.log("wave-start", { index: 1, tasks: ["101", "102"] });
+
+  const result = await runPrune(cfg, "101", { liveCampaign: true }, depsWithRepo(undefined));
+
+  assert.equal(result.mode, "prune");
+  if (result.mode !== "prune") return;
+  assert.deepEqual(result.dropped, []);
+  assert.deepEqual(result.keptInFlight, ["101", "102"]);
+  assert.equal(pruneEvent(cfg)?.keepInFlight, true);
+  assert.match(listOutbox(cfg)[0].text, /still running in wave 2: #101, #102/);
+});
+
+test("a live --dry-run names the kept in-flight members apart from banked work in its closure (#651)", async () => {
+  const cfg = inFlightCfg();
+  launch(cfg, [["101", "102"], ["103"]]);
+
+  const result = await runPrune(cfg, "101", { liveCampaign: true, dryRun: true }, depsWithRepo(undefined));
+
+  assert.equal(result.mode, "prune");
+  if (result.mode !== "prune") return;
+  assert.deepEqual(result.keptInFlight, ["101", "102"]);
+  assert.deepEqual(result.closure, {
+    project: "harness",
+    repo: undefined,
+    target: "101",
+    dropped: [],
+    keptBanked: [],
+    keptInFlight: ["101", "102"],
+    remaining: [["101", "102"], ["103"]],
+  });
 });
 
 test("runPrune --purge deletes each dropped member's branch + worktree after disclosing them", async () => {

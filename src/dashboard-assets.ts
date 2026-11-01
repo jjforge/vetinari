@@ -595,16 +595,20 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
           pruneConfirmText.textContent = (await res.text()).trim() || "Couldn't preview this prune — is a campaign still running?";
           pruneTaskId.value = "";
         } else {
-          // The structured closure (E2): the dependents that would leave (dropped)
-          // and the banked work kept (keptBanked). Name each so a confirm discloses
-          // the exact closure and never implies merged/mergeable work is discarded.
-          const { target, dropped, keptBanked } = await res.json();
+          // The structured closure (E2): the dependents that would leave (dropped),
+          // the banked work kept (keptBanked), and the live in-flight wave's unstarted
+          // members kept because that wave runs as-is (keptInFlight, #651). Name each so a
+          // confirm discloses the exact closure and never implies merged/mergeable work is
+          // discarded, nor calls still-running members banked.
+          const { target, dropped, keptBanked, keptInFlight } = await res.json();
           const drops = (dropped || []).filter((id) => id !== target);
           const kept = keptBanked || [];
+          const running = keptInFlight || [];
           pruneConfirmText.textContent =
             "Prune #" + target +
             (drops.length ? " — also drops " + drops.map((id) => "#" + id).join(", ") : " — no dependents") +
-            (kept.length ? ". Keeps banked (merged or mergeable) " + kept.map((id) => "#" + id).join(", ") : "");
+            (kept.length ? ". Keeps banked (merged or mergeable) " + kept.map((id) => "#" + id).join(", ") : "") +
+            (running.length ? ". Still running in the current wave " + running.map((id) => "#" + id).join(", ") : "");
           pruneTaskId.value = target;
           pruneProject.value = pruneProj;
         }

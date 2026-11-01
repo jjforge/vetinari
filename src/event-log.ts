@@ -179,6 +179,9 @@ export interface PruneEvent extends BaseEvent {
   target: string;
   removed: string[];
   dropped: string[];
+  /** set when the prune was issued against a live campaign's in-flight wave: the fold keeps that
+   * wave's unstarted members (they run anyway, the wave finishes as-is), as the prune did. */
+  keepInFlight?: boolean;
 }
 
 /** `graft` — issues were added to a running (or resumable) campaign: the added ids and the

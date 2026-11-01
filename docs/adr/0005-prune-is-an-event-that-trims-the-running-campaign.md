@@ -19,6 +19,16 @@ cleared). Notably a merged/green target still prunes its unfinished dependents â
 prune is a human's forward-looking "remove this subtree" decision, not a
 re-derivation of what the DAG has unblocked.
 
+"Only the parked or not-yet-started issues leave" applies to **future** waves.
+In a **live** campaign's in-flight wave, the not-yet-started members are kept:
+that wave finishes as-is, so they will run anyway, and dropping them could
+empty the wave and shift the plan under the loop's wave index. The in-flight
+wave's parked members still leave. The log cannot tell a live in-flight wave
+from a crashed one (both are a `wave-start` with no `wave-done`), so liveness is
+checked once, when the prune is issued, and recorded as `keepInFlight` on the
+prune event; the fold applies the in-flight rule only to an event carrying that
+marker, which is what keeps the replay deterministic.
+
 ## Considered Options
 
 - **A separate mutable plan file the loop re-reads** â€” rejected: it introduces a

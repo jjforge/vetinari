@@ -91,6 +91,9 @@ export interface AppliedPrune {
   dropped: string[];
   /** the dropped members that were parked — their records are cleared as they leave. */
   parkedToClear: string[];
+  /** the closure members kept because they are unstarted in a live campaign's in-flight wave —
+   * that wave finishes as-is, so they still run (ADR 0005). Empty unless `keepInFlight` is given. */
+  keptInFlight: string[];
 }
 
 /**
@@ -104,10 +107,21 @@ export interface AppliedPrune {
  * goes, so nothing on disk keeps reading it as a campaign member (its branch,
  * worktree and session survive the record's deletion, ADR 0013). The rarer true-drop
  * of the branch and worktree themselves is `prune --purge`, applied in `runPrune`.
+ *
+ * `opts.keepInFlight` names a live campaign's in-flight wave (-1 or absent: none). Its
+ * unstarted members are kept, not dropped: the loop runs that wave as-is, so they will
+ * run anyway, and emptying it would shift the plan under the loop's wave index. Its
+ * parked members still drop.
  */
-export function applyPrune(campaign: { waves: string[][]; outcomes: Map<string, string> }, removed: string[]): AppliedPrune {
+export function applyPrune(
+  campaign: { waves: string[][]; outcomes: Map<string, string> },
+  removed: string[],
+  opts: { keepInFlight?: number } = {},
+): AppliedPrune {
   const dropped: string[] = [];
   const parkedToClear: string[] = [];
+  const keptInFlight: string[] = [];
+  const inFlight = new Set((campaign.waves[opts.keepInFlight ?? -1] ?? []).map(normalize));
   // Only a genuine member can leave the plan: an id absent from every wave is not
   // in the campaign, so it must never default to `unstarted` and be reported as
   // dropped — that would manufacture a drop for a non-member (a lying confirmation).
@@ -115,14 +129,15 @@ export function applyPrune(campaign: { waves: string[][]; outcomes: Map<string, 
   for (const id of removed.map(normalize)) {
     if (!inPlan.has(id)) continue;
     const status = campaign.outcomes.get(id) ?? "unstarted";
-    if (status === "unstarted" || status === "parked") {
+    if (status === "unstarted" && inFlight.has(id)) keptInFlight.push(id);
+    else if (status === "unstarted" || status === "parked") {
       dropped.push(id);
       if (status === "parked") parkedToClear.push(id);
     }
   }
   const drop = new Set(dropped);
   const remaining = campaign.waves.map((wave) => wave.map(normalize).filter((id) => !drop.has(id))).filter((wave) => wave.length);
-  return { remaining, dropped, parkedToClear };
+  return { remaining, dropped, parkedToClear, keptInFlight };
 }
 
 /**
@@ -142,6 +157,8 @@ export interface StructuredPruneClosure {
   dropped: string[];
   /** the closure members kept because they are already merged or mergeable. */
   keptBanked: string[];
+  /** the closure members kept because they are unstarted in a live campaign's in-flight wave — still running. */
+  keptInFlight: string[];
   /** the waves with `dropped` stripped and emptied waves removed. */
   remaining: string[][];
 }
@@ -149,15 +166,16 @@ export interface StructuredPruneClosure {
 /**
  * Assemble the structured closure from `computePrune`'s `removed` closure and the
  * `applyPrune` result it was run through: kept-banked is the closure minus what
- * was dropped, in campaign order. Pure so the CLI's structured dry-run output is
+ * was dropped or kept in flight, in campaign order. Pure so the CLI's structured dry-run output is
  * unit-tested at the seam rather than by re-parsing its own prose.
  */
 export function pruneClosure(target: string, removed: string[], applied: AppliedPrune): Omit<StructuredPruneClosure, "project" | "repo"> {
-  const dropped = new Set(applied.dropped);
+  const notBanked = new Set([...applied.dropped, ...applied.keptInFlight]);
   return {
     target: normalize(target),
     dropped: applied.dropped,
-    keptBanked: removed.map(normalize).filter((id) => !dropped.has(id)),
+    keptBanked: removed.map(normalize).filter((id) => !notBanked.has(id)),
+    keptInFlight: applied.keptInFlight,
     remaining: applied.remaining,
   };
 }
@@ -277,6 +295,12 @@ export interface PruneOptions {
   plan?: string[][];
   /** host budget threaded to the fresh-launch path's `campaign()`. */
   host?: HostBudget;
+  /**
+   * Whether a live campaign holds this project (the CLI's lease probe). When it does and the
+   * plan has an in-flight wave, that wave's unstarted members are kept — the loop runs the
+   * wave as-is — and the event is marked `keepInFlight` so the fold replays it (#651).
+   */
+  liveCampaign?: boolean;
 }
 
 /** Pruning the running campaign: the closure met the current outcomes (ADR 0005). */
@@ -296,6 +320,10 @@ export interface RunningPruneResult {
   dropped: string[];
   /** the closure members kept because they are already merged or mergeable. */
   kept: string[];
+  /** the closure members kept because they are unstarted in the live in-flight wave — still running. */
+  keptInFlight: string[];
+  /** the in-flight wave's index (0-based) when `keptInFlight` is non-empty, for the "still running in wave N" line. */
+  inFlightWave?: number;
   /** the resulting loop-facing waves after the prune. */
   remaining: string[][];
   /** the dropped members that were parked (the ones the parked-message describes). */
@@ -399,9 +427,13 @@ export async function runPrune(
     );
   const reduced = reduceCampaign(events);
   const { removed } = await computePrune(reduced.waves, target, blockedBy);
-  const applied = applyPrune(reduced, removed);
-  const { remaining, dropped, parkedToClear } = applied;
-  const kept = removed.filter((id) => !dropped.includes(id));
+  // A live campaign's in-flight wave finishes as-is (ADR 0005): its unstarted members run
+  // anyway, so they are kept, and the event is marked so the fold replays the same rule.
+  const keepInFlight = opts.liveCampaign === true && reduced.inFlightWave >= 0;
+  const applied = applyPrune(reduced, removed, { keepInFlight: keepInFlight ? reduced.inFlightWave : -1 });
+  const { remaining, dropped, parkedToClear, keptInFlight } = applied;
+  const kept = removed.filter((id) => !dropped.includes(id) && !keptInFlight.includes(id));
+  const inFlightWave = keptInFlight.length ? reduced.inFlightWave : undefined;
   const parkedDropped = dropped.filter((id) => reduced.outcomes.get(id) === "parked");
 
   // `--purge` is the rare true-drop of the dropped members' branches + worktrees
@@ -433,6 +465,8 @@ export async function runPrune(
       removed,
       dropped,
       kept,
+      keptInFlight,
+      inFlightWave,
       remaining,
       parkedDropped,
       purge: !!opts.purge,
@@ -452,8 +486,8 @@ export async function runPrune(
   if (purgeTarget) deps.purgeBranches(purgeTarget, dropped);
   // Append the prune event — the running loop re-reads it at the next wave
   // boundary; `removed` is the closure so the fold replays the same rule.
-  cfg.log.log("prune", { target: tgt, removed, dropped });
-  deps.enqueueOutbound(cfg, pruneRunningNotice(cfg.project, tgt, dropped, kept, remaining));
+  cfg.log.log("prune", { target: tgt, removed, dropped, ...(keepInFlight ? { keepInFlight: true } : {}) });
+  deps.enqueueOutbound(cfg, pruneRunningNotice(cfg.project, tgt, dropped, kept, remaining, keptInFlight, inFlightWave));
   return {
     mode: "prune",
     project: cfg.project,
@@ -463,6 +497,8 @@ export async function runPrune(
     removed,
     dropped,
     kept,
+    keptInFlight,
+    inFlightWave,
     remaining,
     parkedDropped,
     purge: !!opts.purge,
@@ -487,12 +523,27 @@ export async function titleOf(cfg: ResolvedConfig, id: string): Promise<string |
 
 const renderWaves = (waves: string[][], empty: string) => (waves.length ? waves.map((w) => `"${w.join(" ")}"`).join(" ") : empty);
 
+/** "(still running in wave N: #a, #b)" for the members a live prune kept in the in-flight wave, or "". */
+export const stillRunningInWave = (keptInFlight: string[], inFlightWave?: number): string =>
+  keptInFlight.length && inFlightWave !== undefined
+    ? ` (still running in wave ${inFlightWave + 1}: ${keptInFlight.map((i) => `#${i}`).join(", ")})`
+    : "";
+
 /** The `progress:prune` notice for the running-campaign prune path (§10 skeleton). */
-function pruneRunningNotice(project: string, tgt: string, dropped: string[], kept: string[], remaining: string[][]): Notice {
+function pruneRunningNotice(
+  project: string,
+  tgt: string,
+  dropped: string[],
+  kept: string[],
+  remaining: string[][],
+  keptInFlight: string[],
+  inFlightWave?: number,
+): Notice {
   const signal =
     `pruned #${tgt} — ` +
     (dropped.length ? `dropped ${dropped.map((i) => `#${i}`).join(", ")}` : "nothing to drop") +
     (kept.length ? ` (kept banked ${kept.map((i) => `#${i}`).join(", ")})` : "") +
+    stillRunningInWave(keptInFlight, inFlightWave) +
     `. Remaining: ${renderWaves(remaining, "nothing left to run")}.`;
   return notice({
     emoji: "✂️",

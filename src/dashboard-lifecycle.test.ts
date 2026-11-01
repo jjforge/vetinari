@@ -717,6 +717,46 @@ test("reduceCampaign's prune fold clears an emptied future wave and reindexes", 
   assert.deepEqual([...reduced.closedWaves], [0]);
 });
 
+// A slot-starved in-flight wave: wave 0 has started but none of its members has spawned.
+const slotStarvedWave = (prune: Record<string, unknown>) => [
+  event("campaign-start", { ts: "t0", waves: [["101", "102"], ["103"]], slots: 1 }),
+  event("wave-start", { ts: "t1", index: 0, tasks: ["101", "102"] }),
+  event("prune", { ts: "t2", target: "101", removed: ["101", "102"], dropped: ["101", "102"], ...prune }),
+];
+
+test("a legacy prune event with no keepInFlight replays as before: an in-flight wave's unstarted members drop (#651)", () => {
+  const reduced = reduceCampaign(slotStarvedWave({}));
+  assert.deepEqual(reduced.waves, [["103"]]);
+  assert.deepEqual([...reduced.pruned], ["101", "102"]);
+});
+
+test("a keepInFlight prune replays keeping the in-flight wave's unstarted members, so the plan does not shift (#651)", () => {
+  const reduced = reduceCampaign(slotStarvedWave({ dropped: [], keepInFlight: true }));
+  assert.deepEqual(reduced.waves, [["101", "102"], ["103"]]);
+  assert.deepEqual([...reduced.pruned], []);
+  assert.equal(reduced.inFlightWave, 0);
+});
+
+test("a keepInFlight prune still drops later waves' unstarted members (#651)", () => {
+  const reduced = reduceCampaign([
+    event("campaign-start", { ts: "t0", waves: [["101"], ["102"]], slots: 1 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["101"] }),
+    event("prune", { ts: "t2", target: "101", removed: ["101", "102"], dropped: ["102"], keepInFlight: true }),
+  ]);
+  assert.deepEqual(reduced.waves, [["101"]]);
+  assert.deepEqual([...reduced.pruned], ["102"]);
+});
+
+test("a parked wave is not in flight until a redrive's wave-start re-enters it (#651)", () => {
+  const parked = [
+    event("campaign-start", { ts: "t0", waves: [["101", "102"]], slots: 1 }),
+    event("wave-start", { ts: "t1", index: 0, tasks: ["101", "102"] }),
+    event("campaign-parked", { ts: "t2", index: 0, reason: "stopped" }),
+  ];
+  assert.equal(reduceCampaign(parked).inFlightWave, -1);
+  assert.equal(reduceCampaign([...parked, event("wave-start", { ts: "t3", index: 0, tasks: ["101", "102"] })]).inFlightWave, 0);
+});
+
 test("reduceCampaign ignores an old archived `carve` event instead of crashing (#177)", () => {
   // Pre-rename archived runs logged the mutation as a `carve` event kind. The verb
   // is now `prune` and the reducer has no `carve` case, so an old log's `carve` reads

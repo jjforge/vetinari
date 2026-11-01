@@ -137,7 +137,7 @@ export const findingKey = (title: string): string =>
 const SIMILARITY_STOP_WORDS = new Set("a an the in of to for on is are fails failed with and or".split(" "));
 
 /** Two findings at or above this `findingSimilarity` score are the same finding. */
-export const FINDING_MATCH_THRESHOLD = 0.5;
+export const FINDING_MATCH_THRESHOLD = 0.35;
 
 /**
  * How alike two finding titles are, 0–1: the Jaccard score of their `findingKey` words,
@@ -239,7 +239,7 @@ export async function triageFindings(findings: Finding[], ctx: FindingContext, p
           if (seen) {
             await p.postComment?.(
               seen,
-              `Seen again while working on ${hash(ctx.taskId)}${ctx.source ? ` (unverified: ${ctx.source})` : ""}.`,
+              `Seen again while working on ${hash(ctx.taskId)}${ctx.source ? ` (unverified: ${ctx.source})` : ""}: ${finding.summary}${finding.location ? ` — \`${finding.location}\`` : ""}`,
             );
             r = { finding, url: seen, action: "seen-again" };
           } else if (rank(finding.severity) > rank(p.severityFloor) || fresh >= p.maxPerRun) {

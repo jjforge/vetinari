@@ -329,7 +329,7 @@ export const githubFindingReporter = (
 
 /**
  * A ready `findOpenIssue` handler: the URL of the open issue in `repo` whose title best matches
- * `title` by `findingSimilarity` (score >= 0.5), from one listing of up to 200 open issues per call —
+ * `title` by `findingSimilarity` (score >= `FINDING_MATCH_THRESHOLD`), from one listing of up to 200 open issues per call —
  * GitHub search requires every word, so it never finds a reworded title. The harvest also
  * dedupes against the campaign's own filings first, so a listing that misses an issue filed
  * moments ago loses nothing. The URL, not the bare number, so a match carries a link and its ref

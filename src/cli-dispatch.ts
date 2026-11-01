@@ -43,16 +43,9 @@ import type { runGraft } from "./graft.ts";
 import { GraftRejectedError, describeGraftRejections } from "./graft.ts";
 import { describeReplan, type runReplan } from "./replan.ts";
 import type { OrchestratorEvent, readEventLog } from "./event-log.ts";
-import {
-  campaignStarted,
-  campaignState,
-  extractParkedDetails,
-  issueLifecycle,
-  reduceCampaign,
-  stopPending,
-  waveState,
-  type ReducedCampaign,
-} from "./dashboard-model.ts";
+import { campaignStarted, campaignState, issueLifecycle, reduceCampaign, waveState, type ReducedCampaign } from "./campaign-fold.ts";
+import { extractParkedDetails } from "./dashboard-event-text.ts";
+import { stopPending } from "./dashboard-status.ts";
 import { campaignParkMove, REDRIVE_ONLY_REASONS } from "./gateway.ts";
 import { formatBaseGateEstimate, makeReporter } from "./report.ts";
 import { pastBaseGates } from "./slow-gates.ts";

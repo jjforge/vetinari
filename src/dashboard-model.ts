@@ -1,5 +1,5 @@
-// A permanent re-export barrel: the dashboard data model is defined across six modules —
-// `dashboard-event-text.ts`, `dashboard-lifecycle.ts`, `dashboard-archived-runs.ts`,
+// A permanent re-export barrel: the dashboard data model is defined across seven modules —
+// the domain's `campaign-fold.ts`, `dashboard-event-text.ts`, `dashboard-lifecycle.ts`, `dashboard-archived-runs.ts`,
 // `dashboard-status.ts`, `dashboard-live-tail.ts` and `dashboard-landing.ts` — and re-exported
 // here by name, so every importer (and `status.ts`'s `export *`) compiles unchanged.
 import { ownerRepoFromRemote, repoForProject } from "./config.ts";
@@ -26,8 +26,8 @@ export {
   parkedAnswerFor,
   extractParkedDetails,
 } from "./dashboard-event-text.ts";
-// Re-exported by name (not `export *`) so every importer of the lifecycle through this module
-// or `status.ts`'s `export *` compiles unchanged now it lives in `dashboard-lifecycle.ts`.
+// Re-exported by name (not `export *`) so every importer of the campaign fold through this module
+// or `status.ts`'s `export *` compiles unchanged now it lives in the domain's `campaign-fold.ts`.
 export {
   type IssueStatus,
   type DisplayStatus,
@@ -36,20 +36,24 @@ export {
   type WaveStatus,
   type CampaignState,
   type ReducedCampaign,
-  type IssuePhase,
-  type IssueTurn,
-  type IssueDetail,
   parkReasonFromEvent,
   reduceCampaign,
   issueLifecycle,
-  issueMembership,
-  issuePhase,
-  reconstructIssueDetail,
   waveState,
   campaignState,
   campaignRunning,
   campaignStarted,
   campaignSettled,
+} from "./campaign-fold.ts";
+// Re-exported by name (not `export *`) so every importer of the lifecycle through this module
+// or `status.ts`'s `export *` compiles unchanged now it lives in `dashboard-lifecycle.ts`.
+export {
+  type IssuePhase,
+  type IssueTurn,
+  type IssueDetail,
+  issueMembership,
+  issuePhase,
+  reconstructIssueDetail,
 } from "./dashboard-lifecycle.ts";
 // Re-exported by name (not `export *`) so every importer of the archived-run listing through
 // this module or `status.ts`'s `export *` compiles unchanged now it lives in

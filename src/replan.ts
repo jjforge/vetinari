@@ -18,7 +18,7 @@ import type { ResolvedConfig } from "./config.ts";
 import { Refusal } from "./refusal.ts";
 import { normalize } from "./issue-id.ts";
 import { layerWaves, placeByCollisions } from "./plan.ts";
-import { campaignRunning, reduceCampaign } from "./dashboard-model.ts";
+import { campaignRunning, reduceCampaign } from "./campaign-fold.ts";
 import { readEventLog } from "./event-log.ts";
 import { defaultFileSet, ticketProse, waiveFileSet } from "./fileset.ts";
 

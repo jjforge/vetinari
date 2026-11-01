@@ -14,7 +14,7 @@
  * know renders a readable generic summary (the kind + its salient fields in prose), never a
  * raw JSON dump and never a blank row (#221).
  */
-import { describeEvent } from "./dashboard-model.ts";
+import { describeEvent } from "./dashboard-event-text.ts";
 import { normalizeLegacyEvent, type OrchestratorEvent } from "./event-log.ts";
 import { hash } from "./issue-id.ts";
 

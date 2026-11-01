@@ -17,7 +17,8 @@ import { assertProjectQualifier, repoForProject, type ResolvedConfig } from "./c
 import { Refusal } from "./refusal.ts";
 import { isIssueToken, normalize } from "./issue-id.ts";
 import { applyGraft, validateGraftTargets, type GraftRejection } from "./plan.ts";
-import { campaignSettled, campaignStarted, issueNameFromTask, issueStateFromTask, reduceCampaign } from "./dashboard-model.ts";
+import { campaignSettled, campaignStarted, reduceCampaign } from "./campaign-fold.ts";
+import { issueNameFromTask, issueStateFromTask } from "./dashboard-event-text.ts";
 import { readEventLog } from "./event-log.ts";
 import { enqueueOutbound } from "./state.ts";
 import { notice, type Notice } from "./notice.ts";

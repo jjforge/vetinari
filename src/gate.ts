@@ -1,5 +1,5 @@
 import type { GateSpec, ResolvedConfig } from "./config.ts";
-import type { Sandbox } from "./sandbox.ts";
+import { shellQuote, type Sandbox } from "./sandbox.ts";
 import { tail, writeGateLog } from "./log.ts";
 import { appendActivity } from "./activity.ts";
 import { event } from "./event-log.ts";
@@ -22,6 +22,9 @@ import { event } from "./event-log.ts";
  */
 /** How many failing TAP tests a red gate's report shows before it summarises the rest as a count. */
 const MAX_TAP_FAILURES = 20;
+
+/** Seconds a gate may run before `timeout` kills it, when its `timeoutSeconds` is unset (#531). */
+export const DEFAULT_GATE_TIMEOUT_SECONDS = 3600;
 
 /**
  * Select the failures out of a TAP stream, or `null` when the stream is not TAP.
@@ -97,7 +100,10 @@ export async function runGates(
     // (#332). Live-only, per-task: the wave-merge gate has no `taskId` and skips it, as above.
     if (taskId) appendActivity(cfg.stateDir, taskId, event("gate-check", { taskId, cmd: g.cmd }));
     const t0 = Date.now();
-    const res = await sbx.exec(g.cmd);
+    // Run under the image's `timeout` (GNU coreutils), so a hung check is a red gate rather than a
+    // run that never ends (#531). Everything that names the command keeps the unwrapped `g.cmd`.
+    const limit = g.timeoutSeconds ?? DEFAULT_GATE_TIMEOUT_SECONDS;
+    const res = await sbx.exec(`timeout ${limit} sh -c ${shellQuote(g.cmd)}`);
     if (stopped()) return { green: false, report: "" };
     const outFile = writeGateLog(cfg.stateDir, g.cmd, res);
     const resultFields = {

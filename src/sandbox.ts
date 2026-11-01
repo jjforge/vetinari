@@ -356,7 +356,7 @@ export const removeCopilotDir = (stateDir: string, taskId: string): void =>
   rmSync(copilotDirFor(stateDir, taskId), { recursive: true, force: true });
 
 /** Single-quote `s` for a POSIX shell, as sandcastle quotes its own command arguments. */
-const shellQuote = (s: string): string => "'" + s.replace(/'/g, "'\\''") + "'";
+export const shellQuote = (s: string): string => "'" + s.replace(/'/g, "'\\''") + "'";
 
 /**
  * sandcastle's `copilot()` made resumable (ADR 0024). A session is a whole directory tree under

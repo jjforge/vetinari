@@ -64,6 +64,13 @@ const gateCfg = (gates: GateSpec[]): ResolvedConfig => {
   return { stateDir, logFile, baseBranch: "base", gates, log: loggerForRun({ logFile }) } as unknown as ResolvedConfig;
 };
 
+// runGates sends a gate as `timeout <n> sh -c '<cmd>'` (#531); fakes that answer by the gate's own
+// command unwrap it back to `<cmd>`. Anything else (the changed-files probe) passes through as is.
+const unwrapGate = (sent: string): string => {
+  const m = /^timeout \d+ sh -c '(.*)'$/s.exec(sent);
+  return m ? m[1].replace(/'\\''/g, "'") : sent;
+};
+
 // A fake sandbox whose `exec` answers each gate command with a scripted exit code. Under
 // `{ all: true }` the changed-files `git diff` probe is never reached; without it the probe is
 // answered like any other command (exit 0, `out`).
@@ -71,7 +78,7 @@ const gateSandbox = (exits: Record<string, number>): Sandbox =>
   ({
     branch: "agent/T",
     async exec(cmd: string) {
-      return { stdout: "out", stderr: "err", exitCode: exits[cmd] ?? 0 };
+      return { stdout: "out", stderr: "err", exitCode: exits[unwrapGate(cmd)] ?? 0 };
     },
     async run() {
       throw new Error("unused");
@@ -128,6 +135,30 @@ test("a red gate carries the failing check's exit code — 127 for a command not
   assert.equal(result.failed, gate);
 });
 
+// --- Gate time limit (#531) ---
+// A hung gate command used to block its run, its host slot and the whole wave forever. Each gate now
+// runs under the image's `timeout` binary with its `timeoutSeconds` (default 3600), and an expiry
+// (exit 124) is a red gate whose report says so.
+
+// A fake sandbox recording every string `exec` receives, answering each with `exitFor(cmd)`.
+const recordingSandbox = (exitFor: (cmd: string) => number = () => 0) => {
+  const calls: string[] = [];
+  const sbx = {
+    ...gateSandbox({}),
+    async exec(cmd: string) {
+      calls.push(cmd);
+      return { stdout: "out", stderr: "err", exitCode: exitFor(cmd) };
+    },
+  } as unknown as Sandbox;
+  return { sbx, calls };
+};
+
+test("a gate runs under timeout with the default limit of 3600 seconds (#531)", async () => {
+  const { sbx, calls } = recordingSandbox();
+  await runGates(gateCfg([{ cmd: "make test" }]), sbx, { all: true });
+  assert.deepEqual(calls, ["timeout 3600 sh -c 'make test'"]);
+});
+
 test("the wave-merge gate (no taskId) writes no per-task activity — not even a gate-check", async () => {
   const cfg = gateCfg([{ cmd: "tsc --noEmit" }]);
   const sbx = gateSandbox({ "tsc --noEmit": 0 });
@@ -179,7 +210,7 @@ test("a stop while a check runs: runGates resolves, runs no further check and re
   const sbx = {
     ...gateSandbox({}),
     async exec(cmd: string) {
-      execCalls.push(cmd);
+      execCalls.push(unwrapGate(cmd));
       stop = true; // the stop lands while this check is in flight
       return { stdout: "out", stderr: "err", exitCode: 0 };
     },
@@ -297,7 +328,7 @@ test("a red TAP gate's report names the failure instead of tailing passing lines
   const sbx = {
     branch: "agent/T",
     async exec(cmd: string) {
-      if (cmd === "run-tests") return { stdout: tapFailFirst, stderr: "", exitCode: 1 };
+      if (unwrapGate(cmd) === "run-tests") return { stdout: tapFailFirst, stderr: "", exitCode: 1 };
       return { stdout: "", stderr: "", exitCode: 0 };
     },
     async run() {

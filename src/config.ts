@@ -434,6 +434,12 @@ export interface GateSpec {
    */
   budgetSeconds?: number;
   /**
+   * Seconds this gate may run before it is killed and read as red, its report saying it timed out.
+   * Defaults to 3600. Runs under the image's `timeout` binary (GNU coreutils). Independent of
+   * `budgetSeconds`, which stays information only.
+   */
+  timeoutSeconds?: number;
+  /**
    * Also run this gate on the base after each wave member's merge, not only once the whole wave
    * has merged. A red check undoes just that member's merge and retries it as for a merge
    * collision, so a co-wave break is attributed to one member rather than parking the wave `red-base`.

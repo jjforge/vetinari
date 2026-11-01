@@ -29,6 +29,18 @@ checked once, when the prune is issued, and recorded as `keepInFlight` on the
 prune event; the fold applies the in-flight rule only to an event carrying that
 marker, which is what keeps the replay deterministic.
 
+One exception lets a **manual** prune's own target leave even though it is
+green: a target that a merge conflict parked (ADR 0013). Its green cannot land
+until the conflict is resolved, so the operator's `prune <issue>` — the conflict
+notice's own advice — drops it, clears its parked record, and folds it to a
+pruned member that never started; its work stays on the kept branch unless
+`--purge`. Only the target gets this: a conflict-parked *dependent* in the
+closure is kept until it is itself pruned. `campaign --auto-prune` never drops
+its conflict target — that target still holds its wave. The fold recomputes
+the drop on every replay, so `prune` records the exception as `dropTarget` on
+its event; an event without the marker (every auto-prune, every older log)
+replays the plain rule, keeping the target.
+
 ## Considered Options
 
 - **A separate mutable plan file the loop re-reads** — rejected: it introduces a

@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { register } from "./registry.ts";
 import { enqueueOutbound, listOutboxIn, outboxDirOf, type ParkedRecord } from "./state.ts";
 import { memoryLogger } from "./log.ts";
-import { TG_POLL_TIMEOUT_S, type TgConn, type TgFailure } from "./telegram.ts";
+import { TG_POLL_TIMEOUT_S, allowedSendersOf, type TgConn, type TgFailure } from "./telegram.ts";
 import {
   ANNOUNCE_INTERVAL_MS,
   drainOutbox,
@@ -32,6 +32,8 @@ import {
   pendingAnnouncements,
   pollLoop,
   pollTargets,
+  groupChatAllowlistWarnings,
+  liveAllowlistPoll,
   rebuildIndex,
   reconcileReplyIndex,
   REDRIVE_ONLY_REASONS,
@@ -118,6 +120,36 @@ test("pollTargets collapses projects sharing a bot to one connection per token",
     targets.map((t) => t.token),
     ["shared", "solo"],
   );
+});
+
+test("pollTargets gives a shared bot the union of its projects' allowed senders", () => {
+  const targets = pollTargets([
+    project({ project: "alpha", conn: { token: "shared", chat: "-1", ...allowedSendersOf("1,2") } }),
+    project({ project: "beta", conn: { token: "shared", chat: "-2", ...allowedSendersOf("2, 3") } }),
+    project({ project: "gamma", conn: { token: "solo", chat: "5" } }),
+  ]);
+
+  assert.deepEqual(targets[0].allowedSenders, new Set(["1", "2", "3"]));
+  assert.deepEqual(targets[1], { token: "solo", chat: "5" });
+});
+
+test("groupChatAllowlistWarnings names each project with a group chat and no allowlist on its bot", () => {
+  const warnings = groupChatAllowlistWarnings([
+    project({ project: "grouped", conn: { token: "botA", chat: "-1" } }),
+    project({ project: "routed", conn: { token: "botB", chat: "5" }, destinations: { ops: { chat: "-9" } } }),
+    project({ project: "private", conn: { token: "botC", chat: "7" }, destinations: { ops: { chat: "8" } } }),
+    project({ project: "allowed", conn: { token: "botD", chat: "-4" } }),
+    project({ project: "lister", conn: { token: "botD", chat: "6", ...allowedSendersOf("11") } }),
+    project({ project: "silent", conn: undefined }),
+  ]);
+
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[0], /grouped/);
+  assert.match(warnings[1], /routed/);
+  for (const w of warnings) {
+    assert.match(w, /VETINARI_TELEGRAM_ALLOWED_SENDERS/);
+    assert.match(w, /ignored/);
+  }
 });
 
 test("pollTargets skips a project that configures no Telegram connection", () => {
@@ -531,6 +563,20 @@ test("pollLoop drives exactly one resume of the right task from one fake reply",
   await pollLoop(conn, index, noPending(), { poll, resume: (ref, text) => resumes.push({ task: ref.task, text }) });
 
   assert.deepEqual(resumes, [{ task: "A1", text: "go with B" }]);
+});
+
+test("liveAllowlistPoll applies an edited allowlist on the next poll of a running loop", async () => {
+  let projects = [project({ conn: { token: "botA", chat: "-100", ...allowedSendersOf("1") } })];
+  const seen: Array<ReadonlySet<string> | undefined> = [];
+  const poll = async (c: TgConn, offset: number) => {
+    seen.push(c.allowedSenders);
+    if (seen.length === 1) projects = [project({ conn: { token: "botA", chat: "-100", ...allowedSendersOf("1,2") } })];
+    return seen.length < 2 ? { offset: offset + 1, messages: [] } : null;
+  };
+
+  await pollLoop(conn, newReplyIndex(), noPending(), { poll: liveAllowlistPoll(() => projects, poll), resume: () => {} });
+
+  assert.deepEqual(seen, [new Set(["1"]), new Set(["1", "2"])]);
 });
 
 test("pollLoop hands a /status message to the injected status handler, not resume", async () => {

@@ -4,7 +4,12 @@ import { TG_POLL_TIMEOUT_S, newPollBackoff, tgDrain, tgEnvConn, tgSend, tgPoll }
 import { memoryLogger } from "./log.ts";
 import { withEnv } from "./test-support.ts";
 
-const TG_ENV = ["VETINARI_TELEGRAM_BOT_TOKEN", "VETINARI_TELEGRAM_CHAT_ID", "VETINARI_TELEGRAM_THREAD_ID"];
+const TG_ENV = [
+  "VETINARI_TELEGRAM_BOT_TOKEN",
+  "VETINARI_TELEGRAM_CHAT_ID",
+  "VETINARI_TELEGRAM_THREAD_ID",
+  "VETINARI_TELEGRAM_ALLOWED_SENDERS",
+];
 
 /** Run `fn` with every Telegram key cleared, then `env` applied, restoring whatever was there before. */
 const withTgEnv = <T>(env: Record<string, string | undefined>, fn: () => T): T =>
@@ -19,6 +24,16 @@ test("tgEnvConn builds a connection from the orchestrator env", () => {
 test("tgEnvConn omits the thread when unset", () => {
   withTgEnv({ VETINARI_TELEGRAM_BOT_TOKEN: "tok", VETINARI_TELEGRAM_CHAT_ID: "chat" }, () => {
     assert.deepEqual(tgEnvConn(), { token: "tok", chat: "chat", thread: undefined });
+  });
+});
+
+test("tgEnvConn reads the allowed senders, trimmed with empty entries ignored, and omits the key when empty", () => {
+  const base = { VETINARI_TELEGRAM_BOT_TOKEN: "tok", VETINARI_TELEGRAM_CHAT_ID: "-1" };
+  withTgEnv({ ...base, VETINARI_TELEGRAM_ALLOWED_SENDERS: " 1, ,2 ," }, () => {
+    assert.deepEqual(tgEnvConn(), { token: "tok", chat: "-1", thread: undefined, allowedSenders: new Set(["1", "2"]) });
+  });
+  withTgEnv({ ...base, VETINARI_TELEGRAM_ALLOWED_SENDERS: " , " }, () => {
+    assert.deepEqual(tgEnvConn(), { token: "tok", chat: "-1", thread: undefined });
   });
 });
 
@@ -136,6 +151,60 @@ test("tgPoll keeps only messages from the connection's chat", async () => {
       assert.equal(r.offset, 12);
     },
   );
+});
+
+/** A `getUpdates` message update in `chat`, from sender `from` (omitted when undefined). */
+const msgUpdate = (update_id: number, chat: number, text: string, from?: number) => ({
+  update_id,
+  message: { text, chat: { id: chat }, ...(from != null && { from: { id: from } }) },
+});
+
+const refusedRows = (logger: ReturnType<typeof memoryLogger>) =>
+  logger.events.filter((e) => (e.event as string) === "telegram-sender-refused") as unknown as Array<Record<string, unknown>>;
+
+test("tgPoll in a group chat keeps only allowlisted senders and logs each refusal without its text", async () => {
+  const logger = memoryLogger();
+  await withFetch(
+    (async () =>
+      okResponse([msgUpdate(1, -222, "allowed", 333), msgUpdate(2, -222, "stranger", 444), msgUpdate(3, -222, "nobody")])) as typeof fetch,
+    async () => {
+      const r = await tgPoll({ token: "42:secret", chat: "-222", allowedSenders: new Set(["333"]) }, 0, logger);
+      assert.deepEqual(r.messages, [{ text: "allowed", replyToId: undefined, senderId: "333" }]);
+      assert.equal(r.offset, 4);
+    },
+  );
+  const rows = refusedRows(logger);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].bot, "42");
+  assert.equal(rows[0].chat, "-222");
+  assert.equal(rows[0].sender, "444");
+  for (const row of rows) {
+    assert.equal("text" in row, false);
+    assert.equal(JSON.stringify(row).includes("secret"), false);
+  }
+});
+
+test("tgPoll with no allowlist drops and logs every group-chat message", async () => {
+  const logger = memoryLogger();
+  await withFetch((async () => okResponse([msgUpdate(1, -222, "a", 333), msgUpdate(2, -222, "b", 444)])) as typeof fetch, async () => {
+    const r = await tgPoll({ token: "42:secret", chat: "-222" }, 0, logger);
+    assert.deepEqual(r.messages, []);
+  });
+  assert.deepEqual(
+    refusedRows(logger).map((r) => r.sender),
+    ["333", "444"],
+  );
+});
+
+test("tgPoll passes a private chat's message with or without an allowlist, carrying its sender", async () => {
+  for (const allowed of [{}, { allowedSenders: new Set(["999"]) }]) {
+    const logger = memoryLogger();
+    await withFetch((async () => okResponse([msgUpdate(1, 555, "hi", 555)])) as typeof fetch, async () => {
+      const r = await tgPoll({ token: "42:secret", chat: "555", ...allowed }, 0, logger);
+      assert.deepEqual(r.messages, [{ text: "hi", replyToId: undefined, senderId: "555" }]);
+    });
+    assert.equal(refusedRows(logger).length, 0);
+  }
 });
 
 /** Telegram's not-ok envelope at an HTTP `status`, with optional `description` / `retry_after`. */

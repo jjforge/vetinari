@@ -5,7 +5,7 @@ import { writeFileAtomic } from "./atomic-write.ts";
 import { hostLogger, type Logger } from "./log.ts";
 import { repoForProject } from "./config.ts";
 import type { Destination, NotifyMap, ResolvedConfig } from "./config.ts";
-import type { TgConn } from "./telegram.ts";
+import { allowedSendersOf, type TgConn } from "./telegram.ts";
 
 /**
  * A registration is a POINTER only: which project, where its root is, and its
@@ -354,7 +354,9 @@ function parseEnvFile(text: string): Record<string, string> {
 const tgConnFromEnv = (env: Record<string, string>): TgConn | undefined => {
   const token = env.VETINARI_TELEGRAM_BOT_TOKEN;
   const chat = env.VETINARI_TELEGRAM_CHAT_ID;
-  return token && chat ? { token, chat, thread: env.VETINARI_TELEGRAM_THREAD_ID } : undefined;
+  return token && chat
+    ? { token, chat, thread: env.VETINARI_TELEGRAM_THREAD_ID, ...allowedSendersOf(env.VETINARI_TELEGRAM_ALLOWED_SENDERS) }
+    : undefined;
 };
 
 /**

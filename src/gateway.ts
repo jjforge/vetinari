@@ -164,17 +164,41 @@ export function resolvePruneTarget(candidates: PruneCandidate[], conn: TgConn, p
  * The distinct bot connections to poll — one per token. Telegram allows exactly
  * one consumer per bot, so projects sharing a token collapse to a single poll
  * loop; a project with no connection is skipped. The first connection seen for a
- * token wins (any chat on that bot yields the same update stream).
+ * token wins (any chat on that bot yields the same update stream), carrying the
+ * union of every one of that token's projects' allowed senders — which project a
+ * message belongs to is only known after routing, so a shared bot shares its allowlist.
  */
 export function pollTargets(projects: GatewayProject[]): TgConn[] {
-  const seen = new Set<string>();
-  const targets: TgConn[] = [];
+  const targets = new Map<string, TgConn>();
   for (const p of projects) {
-    if (!p.conn || seen.has(p.conn.token)) continue;
-    seen.add(p.conn.token);
-    targets.push(p.conn);
+    if (!p.conn) continue;
+    const first = targets.get(p.conn.token);
+    if (!first) targets.set(p.conn.token, p.conn);
+    else if (p.conn.allowedSenders)
+      targets.set(p.conn.token, { ...first, allowedSenders: new Set([...(first.allowedSenders ?? []), ...p.conn.allowedSenders]) });
   }
-  return targets;
+  return [...targets.values()];
+}
+
+/**
+ * One startup line per project that has a group chat (a negative id — its default chat or a
+ * named destination's) on a bot whose union allowlist is empty: `tgPoll` refuses every message
+ * from such a chat, so its replies and commands would vanish without this warning. Pure; the
+ * gateway prints these once at start and still starts — outbound notices still go out.
+ */
+export function groupChatAllowlistWarnings(projects: GatewayProject[]): string[] {
+  const allowlisted = new Set(pollTargets(projects).flatMap((t) => (t.allowedSenders?.size ? [t.token] : [])));
+  const warnings: string[] = [];
+  for (const p of projects) {
+    if (!p.conn || allowlisted.has(p.conn.token)) continue;
+    const chats = [p.conn.chat, ...Object.values(p.destinations ?? {}).map((d) => d.chat)];
+    const groups = [...new Set(chats.filter((c) => Number(c) < 0))];
+    if (groups.length)
+      warnings.push(
+        `⚠ ${p.project}: group chat ${groups.join(", ")} has no VETINARI_TELEGRAM_ALLOWED_SENDERS on its bot — replies and commands from that chat will be ignored`,
+      );
+  }
+  return warnings;
 }
 
 /**
@@ -841,6 +865,19 @@ export async function pollLoop(conn: TgConn, index: ReplyIndex, pending: Pending
   }
 }
 
+/**
+ * Wrap a loop's `poll` so each poll gates senders on its token's allowlist as it stands *now*:
+ * the union across `projects()` (read fresh per poll, see `pollTargets`), not the one the loop
+ * started with — so an edit to `VETINARI_TELEGRAM_ALLOWED_SENDERS`, or a project joining the bot
+ * with its own list, applies on the next poll without restarting the loop.
+ */
+export function liveAllowlistPoll(projects: () => GatewayProject[], poll: PollDeps["poll"]): PollDeps["poll"] {
+  return (conn, offset) => {
+    const live = pollTargets(projects()).find((t) => t.token === conn.token);
+    return poll({ ...conn, allowedSenders: live?.allowedSenders }, offset);
+  };
+}
+
 /** Log a poll loop that died, naming its bot by id — never the token, since the host log is served by the dashboard. */
 export function logPollLoopError(log: Logger, conn: TgConn, e: unknown): void {
   log.log("gateway-poll-error", { bot: botId(conn), error: String(e) });
@@ -1170,6 +1207,7 @@ export async function gateway(configDir: string = gatewayConfigDir()): Promise<v
   // Just for the startup line — the supervisor below re-derives targets live.
   const startupBots = pollTargets(loadGatewayProjects(configDir)).length;
   log.log("gateway-start", { configDir, bots: startupBots });
+  for (const line of groupChatAllowlistWarnings(loadGatewayProjects(configDir))) console.error(line);
   // Once at start, never per tick (#563): warn, never refuse, on a group/world-readable credentials file.
   const exposed = credentialsExposureWarning(loadGatewayProjects(configDir).map((p) => p.baseLocation));
   if (exposed) console.error(exposed);
@@ -1222,7 +1260,15 @@ export async function gateway(configDir: string = gatewayConfigDir()): Promise<v
       index,
       pending,
       {
-        poll: trackPollTicks(ticks, conn, signal, (c, o) => tgPoll(c, o, log, backoff)),
+        poll: trackPollTicks(
+          ticks,
+          conn,
+          signal,
+          liveAllowlistPoll(
+            () => loadGatewayProjects(configDir),
+            (c, o) => tgPoll(c, o, log, backoff),
+          ),
+        ),
         resume: (ref, text) => spawnResume(ref, text, log),
         onStatus: async (c) => {
           // Reconstruct each served project's campaign from its base location (the same

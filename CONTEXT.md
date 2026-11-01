@@ -381,6 +381,13 @@ An optional human label for a run, passed as `campaign --name` and recorded on
 for. Absent, a run falls back to its timestamp.
 _Avoid_: run title.
 
+**Admission**:
+How a [[wave]] member enters its wave's drain, decided from the campaign's state:
+`fresh` (run from the start), `resumed` (continue its recorded session), `banked`
+(its green is already won, so it lands without running) or `held` (it stays
+[[parked]] on a human). A re-admit is a `held` member admitted again once answered.
+_Avoid_: move (the human's six moves), entry.
+
 ### Changelog
 
 **Fragment**:

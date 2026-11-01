@@ -36,6 +36,7 @@ Within a milestone each bold section label appears at most once.
 - [user] The `outdated-agent` recovery advice now says to update the agent CLI in the project's sandbox, naming `vetinari build` for the default Docker image, so it holds for a non-Docker sandbox too (#672).
 - [ops] Harvested findings dedupe at a word-similarity score of 0.35 instead of 0.5, which catches rewordings the old threshold missed, and a "seen again" comment now quotes the new finding's wording (#673).
 - [ops] The gateway's systemd unit now sets `KillMode=process`, and the gateway exits cleanly on SIGTERM, so `vetinari gateway restart` no longer kills the campaigns, answers and prunes it launched. Re-run `vetinari gateway install` and `systemctl --user daemon-reload` to pick it up (#533).
+- [user] On native Windows, every `vetinari` command now refuses at once (exit 4) with a pointer to WSL2 + Docker Desktop, in place of failing later (#670).
 
 **Bug fixes:**
 - [ops] A lock holder killed mid-write no longer wedges the host-slots or findings lock (a later run used to give up after about ten seconds), and two processes reclaiming a dead holder's lock can no longer both end up holding it; a lock's release now removes only its own lock (#569, #655).
@@ -55,6 +56,7 @@ Within a milestone each bold section label appears at most once.
 - [ops] A gate now times out after its `timeoutSeconds` (default 3600 s) and reads as a red gate whose report says it timed out, instead of hanging its run and the wave (#531).
 - [ops] The vetinari-paths check reads the brief's declared files with the default resolver, whatever the project's `fileSet`, so a project on `packageScopedFileSet` can declare a `vetinari/` change (#664).
 - [ops] A failed `pending-verify` relabel after a green merge is now retried up to three times, with backoff, before it is logged as `issue-merged-hook-failed` — so one network blip no longer leaves a merged issue on `ready-for-agent` (#604).
+- [ops] A dashboard or gateway no longer exits when a run is archived while a browser is tailing its log, and an archive removed by hand is skipped (with a `status-archive-skipped` row) instead of breaking the landing page (#674).
 
 **Security:**
 - [ops] The dashboard's Content-Security-Policy no longer allows inline scripts or styles without a per-response nonce: every response carries a fresh nonce, every inline `<script>`/`<style>` the pages render carries it, and the no-JS project picker's dead inline `onchange` is gone — so an injected inline script can't run (#600).

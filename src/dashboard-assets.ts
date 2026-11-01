@@ -606,7 +606,7 @@ export const ISSUE_DETAIL_SHEET_SCRIPT = `  const issueDetail = document.getElem
           const running = keptInFlight || [];
           pruneConfirmText.textContent =
             "Prune #" + target +
-            (drops.length ? " — also drops " + drops.map((id) => "#" + id).join(", ") : " — no dependents") +
+            (drops.length ? " — also drops " + drops.map((id) => "#" + id).join(", ") : " — drops nothing else") +
             (kept.length ? ". Keeps banked (merged or mergeable) " + kept.map((id) => "#" + id).join(", ") : "") +
             (running.length ? ". Still running in the current wave " + running.map((id) => "#" + id).join(", ") : "");
           pruneTaskId.value = target;

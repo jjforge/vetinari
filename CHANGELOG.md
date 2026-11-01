@@ -58,6 +58,7 @@ Within a milestone each bold section label appears at most once.
 - [user] The user guide, README and template Dockerfile now say that the `cursor-agent` and `opencode` CLIs are not in the shipped image: a project selecting `--agent cursor` or `--agent opencode` must add that CLI to its `vetinari/Dockerfile` and run `vetinari build` (#521).
 - [ops] `docs/operations.md` now says how to upgrade vetinari when a campaign exists — stop it and wait, or upgrade under a parked one — and how to roll back to an earlier version (#577).
 - [ops] The operations guide now says which vetinari state to back up, which is disposable, and how to restore it (#591).
+- [ops] `docs/operations.md` and `docs/design.md` now say that Telegram delivery is at-least-once by choice. A gateway that dies between a send and its stamp re-sends on restart, because a duplicate is preferred over a lost message (#605).
 
 ### Collected changes — October 31, 2026
 

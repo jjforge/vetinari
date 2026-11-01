@@ -231,6 +231,11 @@ const defaultIntegrateDeps: IntegrateDeps = { gate: gateMergedBase, perMergeGate
  * logged only after a green check. A green already on the base gets no check and no undo (its
  * merge may no longer be the newest commit); with a flagged gate it forces the merged-base gate.
  *
+ * The **vetinari-paths check** (ADR 0026) runs first on each merge that succeeds: a merge that
+ * changes a path under `vetinari/` that `opts.declaredKeysOf` does not declare is undone the same
+ * way and returned in `conflicts` with gate {@link VETINARI_PATHS_GATE} and the undeclared paths;
+ * the `perMerge` gates do not run on it.
+ *
  * A **red merged base** has no single culprit, so it is NOT rolled back either: the
  * greens stay merged, the branches are left intact, and the result carries `parked` so
  * the caller wave-parks — a resumable pause for a human to fix forward or prune a

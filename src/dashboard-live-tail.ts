@@ -1,7 +1,7 @@
 // The dashboard's live surfaces: the activity-log tail that follows the in-flight wave's agents,
 // and the pure helpers the live-update stream (ADR 0008) uses to read appended log lines and drop
 // machine noise.
-import { existsSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { type ResolvedConfig } from "./config.ts";
 import { type OrchestratorEvent, parseEventLogText } from "./event-log.ts";
 import { activityLogPath } from "./activity.ts";
@@ -29,6 +29,46 @@ export function appendedEvents(content: string, offset: number): { events: Orche
   const complete = tail.slice(0, lastNewline + 1);
   const events = parseEventLogText(complete);
   return { events, offset: from + complete.length };
+}
+
+/** Where a live-update stream last stopped in an event log: the byte offset it has
+ * consumed up to, and the inode of the file it was reading (0 when there was none). */
+export interface EventLogTailAt {
+  offset: number;
+  ino: number;
+}
+
+/**
+ * The events appended to a jsonl event log since `at`, reading only the new bytes —
+ * the live-update stream's (ADR 0008) per-write read, so its cost tracks what was
+ * appended, not the whole log. The log is read from its start when its inode differs
+ * from `at.ino` (replaced: `archiveRun` renames it aside and recreates it, so the
+ * moved inode stays alive and can't be reused) or it shrank below `at.offset`
+ * (truncated). A partial trailing line — even one cut mid-UTF-8 character — is left
+ * unconsumed for the next read. A missing log yields nothing and `{ 0, 0 }`.
+ */
+export function tailEventLog(logFile: string, at: EventLogTailAt): { events: OrchestratorEvent[]; at: EventLogTailAt } {
+  let stat;
+  try {
+    stat = statSync(logFile);
+  } catch {
+    return { events: [], at: { offset: 0, ino: 0 } };
+  }
+  const { size, ino } = stat;
+  const start = ino !== at.ino || size < at.offset ? 0 : at.offset;
+  const buf = Buffer.alloc(size - start);
+  let read = 0;
+  if (buf.length) {
+    const fd = openSync(logFile, "r");
+    try {
+      for (let n = -1; read < buf.length && n !== 0; read += n) n = readSync(fd, buf, read, buf.length - read, start + read);
+    } finally {
+      closeSync(fd);
+    }
+  }
+  const text = buf.subarray(0, read).toString("utf8");
+  const { events, offset: consumed } = appendedEvents(text, 0);
+  return { events, at: { offset: start + Buffer.byteLength(text.slice(0, consumed)), ino } };
 }
 
 /**

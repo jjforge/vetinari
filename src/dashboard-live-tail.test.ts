@@ -1,11 +1,12 @@
 // Tests for the dashboard's live surfaces — the live-update stream's appended-event reader and
 // machine-noise filter (dashboard-live-tail.ts). `buildLiveTail` is tested in live-tail.test.ts.
-import test from "node:test";
+import test, { mock } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import fs, { appendFileSync, mkdtempSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { appendedEvents, viewRelevantEvents } from "./dashboard-live-tail.ts";
+import { appendedEvents, tailEventLog, viewRelevantEvents } from "./dashboard-live-tail.ts";
 import { event, readEventLog, type OrchestratorEvent } from "./event-log.ts";
 
 // A raw orchestrator-log row of a kind the dashboard does not narrate — the machine
@@ -123,4 +124,114 @@ test("viewRelevantEvents drops known machine-noise the live view never shows, fa
   );
   // A batch of pure noise survives to nothing, so the SSE path can emit zero frames for it.
   assert.deepEqual(viewRelevantEvents([noise({ event: "telegram-send-failed" }), noise({ event: "outbound-enqueued" })]), []);
+});
+
+const row = (e: unknown) => JSON.stringify(e) + "\n";
+const tailLogFile = () => join(mkdtempSync(join(tmpdir(), "vetinari-tail-")), "orchestrator.jsonl");
+
+test("tailEventLog reads only the bytes appended past its byte offset", () => {
+  const file = tailLogFile();
+  writeFileSync(
+    file,
+    row(event("campaign-start", { waves: [["101"]], slots: 1 })) +
+      row(event("turn", { taskId: "101", turn: 0, summary: "é—✓" })) +
+      row(event("spawn", { taskId: "101" })),
+  );
+
+  const first = tailEventLog(file, { offset: 0, ino: 0 });
+  assert.deepEqual(
+    first.events.map((e) => e.event),
+    ["campaign-start", "turn", "spawn"],
+  );
+  assert.equal(first.at.offset, statSync(file).size);
+
+  appendFileSync(file, row(event("turn", { taskId: "101", turn: 1, summary: "next" })));
+  const reads: string[] = [];
+  const real = fs.readFileSync;
+  const spy = mock.method(fs, "readFileSync", ((path: fs.PathOrFileDescriptor, ...rest: unknown[]) => {
+    reads.push(String(path));
+    return (real as (...a: unknown[]) => unknown)(path, ...rest);
+  }) as typeof fs.readFileSync);
+  syncBuiltinESMExports();
+  let next: ReturnType<typeof tailEventLog>;
+  try {
+    next = tailEventLog(file, first.at);
+  } finally {
+    spy.mock.restore();
+    syncBuiltinESMExports();
+  }
+
+  assert.deepEqual(
+    next.events.map((e) => [e.event, (e as { summary?: string }).summary]),
+    [["turn", "next"]],
+  );
+  assert.equal(next.at.offset, statSync(file).size);
+  assert.deepEqual(
+    reads.filter((p) => p === file),
+    [],
+  );
+});
+
+test("tailEventLog leaves a partial trailing line for the next read", () => {
+  const file = tailLogFile();
+  writeFileSync(file, row(event("campaign-start", { waves: [["101"]], slots: 1 })));
+  const { at } = tailEventLog(file, { offset: 0, ino: 0 });
+  const line = row(event("turn", { taskId: "101", turn: 0, summary: "é—✓" }));
+  // Cut mid-way through the multi-byte summary, so the partial line ends mid-character.
+  const bytes = Buffer.from(line);
+  const cut = Buffer.byteLength(line.slice(0, line.indexOf("—"))) + 1;
+  appendFileSync(file, bytes.subarray(0, cut));
+
+  const partial = tailEventLog(file, at);
+  assert.deepEqual(partial.events, []);
+  assert.deepEqual(partial.at, at);
+
+  appendFileSync(file, bytes.subarray(cut));
+  const done = tailEventLog(file, partial.at);
+  assert.deepEqual(
+    done.events.map((e) => [e.event, (e as { summary?: string }).summary]),
+    [["turn", "é—✓"]],
+  );
+  assert.equal(done.at.offset, statSync(file).size);
+});
+
+test("tailEventLog reads a truncated or replaced log from its start", () => {
+  const file = tailLogFile();
+  writeFileSync(
+    file,
+    row(event("campaign-start", { waves: [["101"]], slots: 1 })) +
+      row(event("spawn", { taskId: "101" })) +
+      row(event("spawn", { taskId: "102" })),
+  );
+  const { at } = tailEventLog(file, { offset: 0, ino: 0 });
+
+  // Truncated to a shorter log, in place.
+  writeFileSync(file, row(event("campaign-start", { waves: [["201"]], slots: 1 })));
+  const truncated = tailEventLog(file, at);
+  assert.deepEqual(
+    truncated.events.map((e) => e.event),
+    ["campaign-start"],
+  );
+
+  // Moved aside (as `archiveRun` does) and recreated longer than the old file.
+  renameSync(file, file + ".archived");
+  writeFileSync(
+    file,
+    row(event("campaign-start", { waves: [["301"]], slots: 1 })) +
+      row(event("spawn", { taskId: "301" })) +
+      row(event("turn", { taskId: "301", turn: 0, summary: "a longer row than any before it" })),
+  );
+  const replaced = tailEventLog(file, truncated.at);
+  assert.deepEqual(
+    replaced.events.map((e) => e.event),
+    ["campaign-start", "spawn", "turn"],
+  );
+  assert.equal(replaced.at.offset, statSync(file).size);
+});
+
+test("tailEventLog yields nothing and a zero position for a missing log", () => {
+  assert.deepEqual(tailEventLog(join(tmpdir(), `vetinari-tail-none-${Date.now()}.jsonl`), { offset: 9, ino: 9 }), {
+    events: [],
+    at: { offset: 0, ino: 0 },
+  });
 });

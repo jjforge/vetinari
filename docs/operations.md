@@ -731,6 +731,8 @@ It acts on the host registry (not a project's container lease), so it runs from
 anywhere and needs no project config in the current directory. Removing a pointer
 whose project you have since deleted keeps a moved-or-gone project from lingering
 on the dashboard.
+Until then a stale pointer is skipped, and logs `registry-stale` in the host log
+once per process, not on every read.
 
 ## `host log` — the host-level diagnostics reader
 

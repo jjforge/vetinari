@@ -1,7 +1,8 @@
-import { existsSync, readFileSync, watch, type FSWatcher } from "node:fs";
+import { existsSync, readFileSync, statSync, watch, type FSWatcher } from "node:fs";
 import { dirname } from "node:path";
 import { listProjects } from "./registry.ts";
-import { appendedEvents, buildLiveTail, logFileOf, statusConfigFromPointer, viewRelevantEvents } from "./dashboard-model.ts";
+import { buildLiveTail, logFileOf, statusConfigFromPointer, viewRelevantEvents } from "./dashboard-model.ts";
+import { type EventLogTailAt, tailEventLog } from "./dashboard-live-tail.ts";
 import type { ProjectPointer } from "./registry.ts";
 import type { OrchestratorEvent } from "./event-log.ts";
 import { hostLogger, hostLogTarget } from "./log.ts";
@@ -38,7 +39,9 @@ let openEventConnections = 0;
  *
  * Each connection starts each project's read offset at its log's current end, so
  * only what lands *after* the client connected is pushed — the initial state came
- * from the page's own first fetch. A project whose base location has moved or been
+ * from the page's own first fetch. It tails each log from a byte offset
+ * (`tailEventLog`), reading only the appended bytes, and reads it from its start
+ * when it shrinks or is replaced (an archive). A project whose base location has moved or been
  * deleted is simply a watcher that never arms, tolerated the same way the gateway
  * tolerates a stale registration (ADR 0002); it never takes the stream down.
  *
@@ -60,8 +63,9 @@ export const handleEvents: RouteHandler = (req, res, url, deps) => {
   }
   openEventConnections++;
   const watchers: FSWatcher[] = [];
-  // Per-project character offset into its live log — where this connection last read.
-  const offsets = new Map<string, number>();
+  // Per-project byte position in its live log — where this connection last read, and the
+  // inode it read it from, so a replaced (archived) or truncated log is read from its start.
+  const tailAt = new Map<string, EventLogTailAt>();
   // The debounce buffers: the view-relevant events collected for a project since its last
   // flush, and the pending timer that will flush them as one frame.
   const pending = new Map<string, OrchestratorEvent[]>();
@@ -109,6 +113,16 @@ export const handleEvents: RouteHandler = (req, res, url, deps) => {
   // watching a live stream.
   res.write("retry: 3000\n: connected\n\n");
 
+  // A log's current end — its byte size and inode — or `{ 0, 0 }` when it doesn't exist yet.
+  const logEndOf = (logFile: string): EventLogTailAt => {
+    try {
+      const { size, ino } = statSync(logFile);
+      return { offset: size, ino };
+    } catch {
+      return { offset: 0, ino: 0 };
+    }
+  };
+
   const readLog = (logFile: string): string => {
     try {
       return existsSync(logFile) ? readFileSync(logFile, "utf8") : "";
@@ -131,8 +145,8 @@ export const handleEvents: RouteHandler = (req, res, url, deps) => {
     // A watch callback can fire in the gap between the client disconnecting and the
     // watchers closing; never write to an already-ended response.
     if (res.writableEnded) return;
-    const { events, offset } = appendedEvents(readLog(logFile), offsets.get(project) ?? 0);
-    offsets.set(project, offset);
+    const { events, at } = tailEventLog(logFile, tailAt.get(project) ?? { offset: 0, ino: 0 });
+    tailAt.set(project, at);
     const relevant = viewRelevantEvents(events);
     if (!relevant.length) return;
     // Buffer the survivors and arm a single debounce timer per project; a burst of
@@ -201,7 +215,7 @@ export const handleEvents: RouteHandler = (req, res, url, deps) => {
     const logFile = logFileOf(pointer.baseLocation);
     // Seed at the current end so the backlog isn't re-pushed on connect (the page
     // already loaded it); the append itself is the "something happened" signal.
-    offsets.set(pointer.project, readLog(logFile).length);
+    tailAt.set(pointer.project, logEndOf(logFile));
     // Watch the logs directory, not the file, so a not-yet-created log or a
     // rotation still registers. A missing base location is skipped, not fatal.
     const logsDir = dirname(logFile);
